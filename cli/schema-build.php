@@ -97,6 +97,7 @@ $db->exec("CREATE INDEX IF NOT EXISTS idx_prod_category ON products(category_id,
 $db->exec("CREATE INDEX IF NOT EXISTS idx_prod_status ON products(status)");
 $db->exec("CREATE INDEX IF NOT EXISTS idx_prod_price ON products(price)");
 $db->exec("CREATE INDEX IF NOT EXISTS idx_prod_updated ON products(updated_at)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_prod_created ON products(status, created_at DESC)");
 echo "  [OK] products\n";
 
 // FTS — different per driver

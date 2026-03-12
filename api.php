@@ -11,6 +11,15 @@ require_once __DIR__ . '/src/Products.php';
 require_once __DIR__ . '/src/Categories.php';
 require_once __DIR__ . '/src/Search.php';
 require_once __DIR__ . '/src/Cache.php';
+require_once __DIR__ . '/src/Orders.php';
+require_once __DIR__ . '/src/OrderWorkflow.php';
+require_once __DIR__ . '/src/AuditLog.php';
+require_once __DIR__ . '/src/Idempotency.php';
+require_once __DIR__ . '/src/JobQueue.php';
+require_once __DIR__ . '/src/Cart.php';
+require_once __DIR__ . '/src/Pricing.php';
+require_once __DIR__ . '/src/Shipping.php';
+require_once __DIR__ . '/src/Tax.php';
 
 // Security headers
 Security::headers();
@@ -46,8 +55,12 @@ try {
         'cart'       => apiCart(),
         'cart_add'   => apiCartAdd(),
         'cart_update'=> apiCartUpdate(),
-        'cart_restore' => apiCartRestore(),
-        default      => ['error' => 'Unknown action'],
+        'cart_restore'    => apiCartRestore(),
+        'cart_enriched'   => apiCartEnriched(),
+        'checkout'        => apiCheckout(),
+        'shipping_methods'=> apiShippingMethods(),
+        'webhook_stripe'  => apiWebhookStripe(),
+        default           => ['error' => 'Unknown action'],
     };
 
     echo json_encode($result, JSON_UNESCAPED_UNICODE);
@@ -296,4 +309,192 @@ function apiCartRestore(): array {
     }
 
     return ['success' => true, 'cart' => apiCart()];
+}
+
+function apiCartEnriched(): array {
+    return Cart::enriched();
+}
+
+function apiShippingMethods(): array {
+    $country = strtoupper(trim($_GET['country'] ?? 'SK'));
+    $subtotal = Security::int($_GET['subtotal'] ?? 0);
+    $methods = Shipping::availableMethods($country, $subtotal);
+    return ['methods' => $methods];
+}
+
+function apiCheckout(): array {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        return ['error' => 'Method not allowed'];
+    }
+
+    if (!Security::csrfValidate()) {
+        http_response_code(403);
+        return ['error' => 'Invalid CSRF token'];
+    }
+
+    if (!Security::rateLimit('checkout', 10)) {
+        return ['error' => 'Too many checkout attempts'];
+    }
+
+    $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+
+    $name = trim($input['name'] ?? '');
+    $email = Security::email($input['email'] ?? '');
+    $phone = trim($input['phone'] ?? '');
+    $country = strtoupper(trim($input['country'] ?? 'SK'));
+    $shippingMethod = $input['shipping_method'] ?? 'standard';
+    $paymentMethod = $input['payment_method'] ?? 'stripe';
+
+    if (!$name || !$email) {
+        return ['error' => 'Name and email are required'];
+    }
+
+    $cart = Cart::enriched();
+    if (empty($cart['items'])) {
+        return ['error' => 'Cart is empty'];
+    }
+
+    $totalWeight = 0;
+    foreach ($cart['items'] as $item) {
+        $product = Products::byId($item['product_id']);
+        $totalWeight += ($product['weight_g'] ?? 0) * $item['qty'];
+    }
+    $shippingCost = Shipping::calculate($shippingMethod, $country, $totalWeight, $cart['subtotal']);
+    if ($shippingCost < 0) $shippingCost = 0;
+
+    $autoRules = Pricing::autoCartRules($cart['subtotal']);
+    foreach ($autoRules as $rule) {
+        if ($rule['action'] === 'free_shipping') $shippingCost = 0;
+    }
+
+    $taxBreakdown = Tax::orderBreakdown($cart['items'], $country);
+
+    $customer = [
+        'name'          => $name,
+        'email'         => $email,
+        'phone'         => $phone,
+        'address'       => [
+            'street'  => trim($input['street'] ?? ''),
+            'city'    => trim($input['city'] ?? ''),
+            'zip'     => trim($input['zip'] ?? ''),
+            'country' => $country,
+        ],
+        'currency'      => $cart['items'][0]['currency'] ?? 'eur',
+        'shipping_cost' => $shippingCost,
+        'tax_amount'    => $taxBreakdown['total_tax'],
+    ];
+
+    try {
+        $orderId = Orders::create($cart['items'], $customer, $paymentMethod);
+        Cart::clear();
+
+        $order = Orders::byId($orderId);
+        JobQueue::push('email_send', ['template' => 'order-confirmation', 'to' => $email, 'order_id' => $orderId]);
+        JobQueue::push('email_send', ['template' => 'admin-notification', 'to' => 'admin', 'order_id' => $orderId]);
+
+        return [
+            'success'      => true,
+            'order_id'     => $orderId,
+            'order_number' => $order['order_number'],
+            'total'        => (int)$order['total'],
+        ];
+    } catch (\RuntimeException $e) {
+        return ['success' => false, 'error' => $e->getMessage()];
+    }
+}
+
+function apiWebhookStripe(): array {
+    $payload = file_get_contents('php://input');
+    $sigHeader = $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '';
+    $cfg = require __DIR__ . '/config.php';
+    $secret = $cfg['stripe_webhook_secret'] ?? '';
+
+    if ($secret && $sigHeader) {
+        if (!verifyStripeSignature($payload, $sigHeader, $secret)) {
+            http_response_code(400);
+            return ['error' => 'Invalid signature'];
+        }
+    }
+
+    $event = json_decode($payload, true);
+    if (!$event || empty($event['id']) || empty($event['type'])) {
+        http_response_code(400);
+        return ['error' => 'Invalid payload'];
+    }
+
+    if (Idempotency::webhookProcessed($event['id'])) {
+        return ['status' => 'already_processed'];
+    }
+
+    try {
+        match($event['type']) {
+            'checkout.session.completed' => onPaymentCompleted($event['data']['object'] ?? []),
+            'charge.refunded'            => onChargeRefunded($event['data']['object'] ?? []),
+            'charge.dispute.created'     => onDisputeCreated($event['data']['object'] ?? []),
+            default                      => null,
+        };
+    } catch (\Throwable $e) {
+        error_log("Webhook error [{$event['type']}]: {$e->getMessage()}");
+    }
+
+    return ['status' => 'ok'];
+}
+
+function onPaymentCompleted(array $session): void {
+    $orderId = (int)($session['metadata']['order_id'] ?? 0);
+    if (!$orderId) return;
+
+    $order = Orders::byId($orderId);
+    if (!$order || $order['status'] !== 'pending') return;
+
+    Orders::setPaymentId($orderId, $session['payment_intent'] ?? $session['id'] ?? '');
+    OrderWorkflow::transition($orderId, 'paid', 'Stripe webhook: ' . ($session['id'] ?? ''));
+
+    JobQueue::push('email_send', ['template' => 'order-confirmation', 'to' => $order['customer_email'], 'order_id' => $orderId]);
+}
+
+function onChargeRefunded(array $charge): void {
+    $paymentIntent = $charge['payment_intent'] ?? '';
+    if (!$paymentIntent) return;
+
+    $stmt = Db::get()->prepare("SELECT * FROM orders WHERE payment_id = :pid LIMIT 1");
+    $stmt->execute([':pid' => $paymentIntent]);
+    $order = $stmt->fetch();
+    if (!$order) return;
+
+    if (OrderWorkflow::canTransition($order['status'], 'refunded')) {
+        OrderWorkflow::transition((int)$order['id'], 'refunded', 'Stripe refund webhook');
+    }
+}
+
+function onDisputeCreated(array $dispute): void {
+    $paymentIntent = $dispute['payment_intent'] ?? '';
+    if (!$paymentIntent) return;
+
+    $stmt = Db::get()->prepare("SELECT * FROM orders WHERE payment_id = :pid LIMIT 1");
+    $stmt->execute([':pid' => $paymentIntent]);
+    $order = $stmt->fetch();
+    if (!$order) return;
+
+    AuditLog::log('order_dispute', (int)$order['id'], $order['status'], 'disputed', 'Stripe dispute: ' . ($dispute['id'] ?? ''));
+}
+
+function verifyStripeSignature(string $payload, string $sigHeader, string $secret): bool {
+    $parts = [];
+    foreach (explode(',', $sigHeader) as $part) {
+        [$key, $val] = explode('=', trim($part), 2) + [1 => ''];
+        $parts[$key] = $val;
+    }
+
+    $timestamp = $parts['t'] ?? '';
+    $signature = $parts['v1'] ?? '';
+    if (!$timestamp || !$signature) return false;
+
+    if (abs(time() - (int)$timestamp) > 300) return false;
+
+    $signedPayload = $timestamp . '.' . $payload;
+    $expected = hash_hmac('sha256', $signedPayload, $secret);
+
+    return hash_equals($expected, $signature);
 }

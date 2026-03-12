@@ -1,0 +1,59 @@
+{
+    "customer_groups": {
+        "guest":      {"name": "Guest", "discount": 0},
+        "registered": {"name": "Registered", "discount": 0},
+        "wholesale":  {"name": "Wholesale", "discount": 15},
+        "vip":        {"name": "VIP", "discount": 10}
+    },
+
+    "catalog_rules": [
+        {
+            "name": "Summer Sale",
+            "active": true,
+            "from": "2026-06-01",
+            "to": "2026-08-31",
+            "conditions": {"category": "oblecenie"},
+            "discount_type": "percent",
+            "discount_value": 20,
+            "priority": 1
+        },
+        {
+            "name": "Bulk Electronics",
+            "active": true,
+            "conditions": {"category": "elektronika", "min_qty": 5},
+            "discount_type": "percent",
+            "discount_value": 10,
+            "priority": 2
+        }
+    ],
+
+    "cart_rules": [
+        {
+            "name": "WELCOME10",
+            "type": "coupon",
+            "code": "WELCOME10",
+            "discount_type": "percent",
+            "discount_value": 10,
+            "min_subtotal": 5000,
+            "max_uses": 1000,
+            "per_customer": 1,
+            "active": true
+        },
+        {
+            "name": "Free Shipping over 50 EUR",
+            "type": "automatic",
+            "conditions": {"min_subtotal": 5000},
+            "action": "free_shipping",
+            "active": true
+        }
+    ],
+
+    "tier_pricing": {
+        "enabled": true,
+        "rules": [
+            {"min_qty": 10, "discount_percent": 5},
+            {"min_qty": 50, "discount_percent": 12},
+            {"min_qty": 100, "discount_percent": 20}
+        ]
+    }
+}

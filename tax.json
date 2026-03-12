@@ -1,0 +1,22 @@
+{
+    "default_rate": 20,
+    "prices_include_tax": true,
+
+    "rates": {
+        "SK": {"standard": 20, "reduced": 10, "zero": 0},
+        "CZ": {"standard": 21, "reduced": 15},
+        "DE": {"standard": 19, "reduced": 7},
+        "AT": {"standard": 20, "reduced": 10},
+        "PL": {"standard": 23, "reduced": 8},
+        "HU": {"standard": 27, "reduced": 18},
+        "US": {"standard": 0, "note": "varies by state"}
+    },
+
+    "product_tax_class": {
+        "default":  "standard",
+        "food":     "reduced",
+        "books":    "reduced",
+        "digital":  "standard",
+        "baby":     "reduced"
+    }
+}

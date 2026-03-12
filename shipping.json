@@ -1,0 +1,34 @@
+{
+    "methods": {
+        "pickup": {
+            "name": {"en": "In-store pickup", "sk": "Osobný odber", "de": "Abholung im Laden"},
+            "price": 0,
+            "available_zones": ["local"]
+        },
+        "standard": {
+            "name": {"en": "Standard Delivery", "sk": "Štandardné doručenie", "de": "Standardversand"},
+            "delivery_days": "5-7",
+            "rates": {
+                "domestic":      {"base": 399, "per_kg": 0},
+                "eu":            {"base": 799, "per_kg": 100},
+                "international": {"base": 1599, "per_kg": 200}
+            },
+            "free_above": 5000
+        },
+        "express": {
+            "name": {"en": "Express Delivery", "sk": "Expresné doručenie", "de": "Expressversand"},
+            "delivery_days": "1-2",
+            "rates": {
+                "domestic": {"base": 799, "per_kg": 0},
+                "eu":       {"base": 1499, "per_kg": 150}
+            }
+        }
+    },
+
+    "zones": {
+        "local":         {"countries": ["SK"]},
+        "domestic":      {"countries": ["SK"]},
+        "eu":            {"countries": ["CZ", "DE", "AT", "PL", "HU", "IT", "FR", "ES", "NL", "BE"]},
+        "international": {"countries": ["*"]}
+    }
+}

@@ -1,0 +1,176 @@
+<?php
+/**
+ * BareBones Shop — Pricing
+ * Catalog rules, customer group discounts, cart rules, tier pricing.
+ * Reads config from pricing.json.
+ */
+class Pricing {
+    private static ?array $config = null;
+
+    private static function config(): array {
+        if (!self::$config) {
+            $file = __DIR__ . '/../pricing.json';
+            self::$config = file_exists($file) ? json_decode(file_get_contents($file), true) : [];
+        }
+        return self::$config;
+    }
+
+    /** Override config (for testing) */
+    public static function setConfig(array $config): void {
+        self::$config = $config;
+    }
+
+    /**
+     * Apply catalog-level pricing to a product (pre-computable rules).
+     * Returns product with adjusted price + original as compare_price.
+     */
+    public static function apply(array $product, string $group = 'guest', ?string $date = null): array {
+        $cfg = self::config();
+        $date = $date ?? date('Y-m-d');
+        $originalPrice = $product['price'];
+        $bestDiscount = 0;
+
+        // 1. Customer group discount
+        $groupDiscount = $cfg['customer_groups'][$group]['discount'] ?? 0;
+        if ($groupDiscount > 0) {
+            $bestDiscount = $groupDiscount;
+        }
+
+        // 2. Catalog rules (find best matching)
+        foreach ($cfg['catalog_rules'] ?? [] as $rule) {
+            if (!($rule['active'] ?? false)) continue;
+            if (!empty($rule['from']) && $date < $rule['from']) continue;
+            if (!empty($rule['to']) && $date > $rule['to']) continue;
+
+            if (!self::matchesConditions($product, $rule['conditions'] ?? [])) continue;
+
+            if ($rule['discount_type'] === 'percent') {
+                $bestDiscount = max($bestDiscount, $rule['discount_value']);
+            } elseif ($rule['discount_type'] === 'fixed') {
+                $fixedPercent = ($rule['discount_value'] / $originalPrice) * 100;
+                $bestDiscount = max($bestDiscount, $fixedPercent);
+            }
+        }
+
+        // Apply best discount
+        if ($bestDiscount > 0) {
+            $discountedPrice = (int)round($originalPrice * (1 - $bestDiscount / 100));
+            if ($discountedPrice < $originalPrice) {
+                $product['price'] = $discountedPrice;
+                // Only set compare_price if there isn't already a higher one
+                if (empty($product['compare_price']) || $originalPrice > $product['compare_price']) {
+                    $product['compare_price'] = $originalPrice;
+                }
+                $product['discount_percent'] = (int)round($bestDiscount);
+            }
+        }
+
+        return $product;
+    }
+
+    /**
+     * Apply tier pricing to a line item (runtime, depends on qty).
+     * Returns discounted unit price in cents.
+     */
+    public static function tierPrice(int $unitPrice, int $qty): int {
+        $cfg = self::config();
+        if (!($cfg['tier_pricing']['enabled'] ?? false)) return $unitPrice;
+
+        $discount = 0;
+        foreach ($cfg['tier_pricing']['rules'] ?? [] as $tier) {
+            if ($qty >= $tier['min_qty']) {
+                $discount = $tier['discount_percent'];
+            }
+        }
+
+        if ($discount > 0) {
+            return (int)round($unitPrice * (1 - $discount / 100));
+        }
+        return $unitPrice;
+    }
+
+    /**
+     * Apply cart-level coupon code.
+     * Returns [discount_amount, rule_name] or [0, null].
+     */
+    public static function applyCoupon(string $code, int $subtotal): array {
+        $cfg = self::config();
+
+        foreach ($cfg['cart_rules'] ?? [] as $rule) {
+            if (!($rule['active'] ?? false)) continue;
+            if (($rule['type'] ?? '') !== 'coupon') continue;
+            if (strtoupper($rule['code'] ?? '') !== strtoupper($code)) continue;
+
+            // Check min subtotal
+            if (!empty($rule['min_subtotal']) && $subtotal < $rule['min_subtotal']) {
+                return [0, null, 'Minimum order not met'];
+            }
+
+            if ($rule['discount_type'] === 'percent') {
+                $discount = (int)round($subtotal * $rule['discount_value'] / 100);
+            } elseif ($rule['discount_type'] === 'fixed') {
+                $discount = min($rule['discount_value'], $subtotal);
+            } else {
+                continue;
+            }
+
+            return [$discount, $rule['name'], null];
+        }
+
+        return [0, null, 'Invalid coupon'];
+    }
+
+    /**
+     * Check automatic cart rules (free shipping etc.)
+     * Returns array of triggered actions.
+     */
+    public static function autoCartRules(int $subtotal): array {
+        $cfg = self::config();
+        $actions = [];
+
+        foreach ($cfg['cart_rules'] ?? [] as $rule) {
+            if (!($rule['active'] ?? false)) continue;
+            if (($rule['type'] ?? '') !== 'automatic') continue;
+
+            $conditions = $rule['conditions'] ?? [];
+            if (!empty($conditions['min_subtotal']) && $subtotal < $conditions['min_subtotal']) continue;
+
+            $actions[] = [
+                'name'   => $rule['name'],
+                'action' => $rule['action'] ?? 'discount',
+            ];
+        }
+
+        return $actions;
+    }
+
+    /**
+     * Check if product matches rule conditions
+     */
+    private static function matchesConditions(array $product, array $conditions): bool {
+        if (empty($conditions)) return true;
+
+        if (!empty($conditions['category'])) {
+            // Check by category path or slug
+            $catSlug = $conditions['category'];
+            if (!empty($product['category_path'])) {
+                if (strpos($product['category_path'], $catSlug) === false) return false;
+            } elseif (!empty($product['category_slug'])) {
+                if ($product['category_slug'] !== $catSlug) return false;
+            }
+        }
+
+        if (!empty($conditions['product_type'])) {
+            if (($product['product_type'] ?? 'simple') !== $conditions['product_type']) return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Get customer group info
+     */
+    public static function customerGroups(): array {
+        return self::config()['customer_groups'] ?? [];
+    }
+}
