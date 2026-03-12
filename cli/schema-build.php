@@ -32,6 +32,7 @@ if ($fresh) {
     echo "FRESH mode: dropping all tables...\n";
     $tables = [
         'processed_events', 'audit_log', 'order_items', 'orders',
+        'product_vehicles', 'product_oe_numbers', 'product_specifications',
         'slug_registry', 'variants', 'product_attrs', 'products',
         'categories',
     ];
@@ -247,6 +248,70 @@ $db->exec("CREATE TABLE IF NOT EXISTS processed_events (
     created_at TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . ")
 )");
 echo "  [OK] processed_events\n";
+
+// Product Specifications — parametric search (TecDoc-style)
+$db->exec("CREATE TABLE IF NOT EXISTS product_specifications (
+    id          INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
+    product_id  INTEGER NOT NULL,
+    lang        TEXT NOT NULL DEFAULT 'sk',
+    criteria_name  TEXT NOT NULL,
+    criteria_value TEXT NOT NULL,
+    numeric_val    REAL,
+    sort_order     INTEGER DEFAULT 0,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_spec_product ON product_specifications(product_id, lang)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_spec_criteria ON product_specifications(criteria_name, criteria_value, product_id)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_spec_numeric ON product_specifications(criteria_name, numeric_val)");
+echo "  [OK] product_specifications\n";
+
+// Product OE Numbers — cross-references
+$db->exec("CREATE TABLE IF NOT EXISTS product_oe_numbers (
+    id              INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
+    product_id      INTEGER NOT NULL,
+    oem_brand       TEXT NOT NULL,
+    oem_number      TEXT NOT NULL,
+    oem_number_norm TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_oe_product ON product_oe_numbers(product_id)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_oe_number ON product_oe_numbers(oem_number, oem_brand)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_oe_norm ON product_oe_numbers(oem_number_norm)");
+echo "  [OK] product_oe_numbers\n";
+
+// OE FTS for fast substring search
+if ($isSqlite) {
+    $oeFtsExists = $db->query("SELECT name FROM sqlite_master WHERE type='table' AND name='oe_fts'")->fetch();
+    if (!$oeFtsExists) {
+        $db->exec("CREATE VIRTUAL TABLE oe_fts USING fts5(oem_number_norm, content=product_oe_numbers, content_rowid=id, tokenize='unicode61')");
+        $db->exec("CREATE TRIGGER IF NOT EXISTS oe_ai AFTER INSERT ON product_oe_numbers BEGIN
+            INSERT INTO oe_fts(rowid, oem_number_norm) VALUES (new.id, new.oem_number_norm);
+        END");
+        $db->exec("CREATE TRIGGER IF NOT EXISTS oe_ad AFTER DELETE ON product_oe_numbers BEGIN
+            INSERT INTO oe_fts(oe_fts, rowid, oem_number_norm) VALUES ('delete', old.id, old.oem_number_norm);
+        END");
+        echo "  [OK] oe_fts (FTS5 for OE search)\n";
+    } else {
+        echo "  [OK] oe_fts (already exists)\n";
+    }
+}
+
+// Product Vehicles — compatibility
+$db->exec("CREATE TABLE IF NOT EXISTS product_vehicles (
+    id              INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
+    product_id      INTEGER NOT NULL,
+    ktype           INTEGER,
+    manufacturer    TEXT NOT NULL,
+    model           TEXT NOT NULL,
+    type_name       TEXT DEFAULT '',
+    year_from       INTEGER,
+    year_to         INTEGER,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_pv_product ON product_vehicles(product_id)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_pv_ktype ON product_vehicles(ktype)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_pv_mfr ON product_vehicles(manufacturer, model)");
+echo "  [OK] product_vehicles\n";
 
 echo "\nSchema build complete!\n";
 

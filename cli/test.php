@@ -23,6 +23,7 @@ require_once __DIR__ . '/../src/JobQueue.php';
 require_once __DIR__ . '/../src/Pricing.php';
 require_once __DIR__ . '/../src/Shipping.php';
 require_once __DIR__ . '/../src/Tax.php';
+require_once __DIR__ . '/../src/TecDoc.php';
 
 // Test framework
 $tests = 0;
@@ -192,6 +193,37 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS processed_events (
     event_id TEXT PRIMARY KEY, created_at TEXT DEFAULT (datetime('now'))
 )");
 
+// TecDoc tables
+$pdo->exec("CREATE TABLE IF NOT EXISTS product_specifications (
+    id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL, lang TEXT NOT NULL DEFAULT 'sk',
+    criteria_name TEXT NOT NULL, criteria_value TEXT NOT NULL, numeric_val REAL,
+    sort_order INTEGER DEFAULT 0,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+)");
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_spec_product ON product_specifications(product_id, lang)");
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_spec_criteria ON product_specifications(criteria_name, criteria_value, product_id)");
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_spec_numeric ON product_specifications(criteria_name, numeric_val)");
+
+$pdo->exec("CREATE TABLE IF NOT EXISTS product_oe_numbers (
+    id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL,
+    oem_brand TEXT NOT NULL, oem_number TEXT NOT NULL,
+    oem_number_norm TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+)");
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_oe_product ON product_oe_numbers(product_id)");
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_oe_number ON product_oe_numbers(oem_number, oem_brand)");
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_oe_norm ON product_oe_numbers(oem_number_norm)");
+
+$pdo->exec("CREATE TABLE IF NOT EXISTS product_vehicles (
+    id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL,
+    ktype INTEGER, manufacturer TEXT NOT NULL, model TEXT NOT NULL,
+    type_name TEXT DEFAULT '', year_from INTEGER, year_to INTEGER,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+)");
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_pv_product ON product_vehicles(product_id)");
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_pv_ktype ON product_vehicles(ktype)");
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_pv_mfr ON product_vehicles(manufacturer, model)");
+
 // Verify tables
 $tables = $pdo->query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
 assert_true(in_array('categories', $tables), 'categories table exists');
@@ -203,6 +235,9 @@ assert_true(in_array('slug_registry', $tables), 'slug_registry table exists');
 assert_true(in_array('orders', $tables), 'orders table exists');
 assert_true(in_array('order_items', $tables), 'order_items table exists');
 assert_true(in_array('audit_log', $tables), 'audit_log table exists');
+assert_true(in_array('product_specifications', $tables), 'product_specifications table exists');
+assert_true(in_array('product_oe_numbers', $tables), 'product_oe_numbers table exists');
+assert_true(in_array('product_vehicles', $tables), 'product_vehicles table exists');
 assert_true(in_array('processed_events', $tables), 'processed_events table exists');
 
 // ============================================================
@@ -1342,6 +1377,210 @@ assert_true(str_contains($rendered, '&lt;img'), 'Template escapes stored XSS');
 // Raw template output is opt-in only
 $rendered2 = Template::process('{{{name}}}', $xssData);
 assert_true(str_contains($rendered2, '<img'), 'Triple braces = raw (developer choice)');
+
+// ============================================================
+// TEST 29: TecDoc — Specifications CRUD & Parametric Search
+// ============================================================
+echo "\n--- Test 29: TecDoc — Specifications & Parametric Search ---\n";
+
+// Create a "Brake Disc" category for auto parts
+$pdo->exec("INSERT INTO categories (slug, name, parent_id, path, depth, sort_order, meta) VALUES ('brake-system', 'Brake System', NULL, 'brake-system', 0, 100, '{}')");
+$brakeSystemId = (int)$pdo->lastInsertId();
+$pdo->exec("INSERT INTO categories (slug, name, parent_id, path, depth, sort_order, meta) VALUES ('brake-disc', 'Brake Disc', {$brakeSystemId}, 'brake-system/brake-disc', 1, 101, '{\"genart_no\":192}')");
+$brakeDiscCatId = (int)$pdo->lastInsertId();
+
+// Insert 3 brake disc products with different specs
+$pdo->exec("INSERT INTO products (sku, slug, product_type, name, category_id, price, stock, status, summary, filter_tags)
+    VALUES ('BD-001', 'brake-disc-front-300mm', 'auto_part', 'Brake Disc Front 300mm', {$brakeDiscCatId}, 5500, 10, 'active', 'Front brake disc 300mm ventilated', 'attr_supplier_trw')");
+$bd1Id = (int)$pdo->lastInsertId();
+
+$pdo->exec("INSERT INTO products (sku, slug, product_type, name, category_id, price, stock, status, summary, filter_tags)
+    VALUES ('BD-002', 'brake-disc-front-280mm', 'auto_part', 'Brake Disc Front 280mm', {$brakeDiscCatId}, 4200, 5, 'active', 'Front brake disc 280mm solid', 'attr_supplier_febi')");
+$bd2Id = (int)$pdo->lastInsertId();
+
+$pdo->exec("INSERT INTO products (sku, slug, product_type, name, category_id, price, stock, status, summary, filter_tags)
+    VALUES ('BD-003', 'brake-disc-rear-260mm', 'auto_part', 'Brake Disc Rear 260mm', {$brakeDiscCatId}, 3800, 15, 'active', 'Rear brake disc 260mm solid', 'attr_supplier_trw')");
+$bd3Id = (int)$pdo->lastInsertId();
+
+// Add specifications for each disc
+$specStmt = $pdo->prepare("INSERT INTO product_specifications (product_id, lang, criteria_name, criteria_value, numeric_val, sort_order) VALUES (?, ?, ?, ?, ?, ?)");
+
+// BD-001: Front 300mm ventilated TRW
+$specStmt->execute([$bd1Id, 'sk', 'Priemer [mm]', '300', 300.0, 1]);
+$specStmt->execute([$bd1Id, 'sk', 'Hrúbka [mm]', '28', 28.0, 2]);
+$specStmt->execute([$bd1Id, 'sk', 'Strana montáže', 'Vpredu', null, 3]);
+$specStmt->execute([$bd1Id, 'sk', 'Typ', 'Vetraný', null, 4]);
+$specStmt->execute([$bd1Id, 'sk', 'Počet otvorov', '5', 5.0, 5]);
+
+// BD-002: Front 280mm solid FEBI
+$specStmt->execute([$bd2Id, 'sk', 'Priemer [mm]', '280', 280.0, 1]);
+$specStmt->execute([$bd2Id, 'sk', 'Hrúbka [mm]', '22', 22.0, 2]);
+$specStmt->execute([$bd2Id, 'sk', 'Strana montáže', 'Vpredu', null, 3]);
+$specStmt->execute([$bd2Id, 'sk', 'Typ', 'Plný', null, 4]);
+$specStmt->execute([$bd2Id, 'sk', 'Počet otvorov', '4', 4.0, 5]);
+
+// BD-003: Rear 260mm solid TRW
+$specStmt->execute([$bd3Id, 'sk', 'Priemer [mm]', '260', 260.0, 1]);
+$specStmt->execute([$bd3Id, 'sk', 'Hrúbka [mm]', '10', 10.0, 2]);
+$specStmt->execute([$bd3Id, 'sk', 'Strana montáže', 'Vzadu', null, 3]);
+$specStmt->execute([$bd3Id, 'sk', 'Typ', 'Plný', null, 4]);
+$specStmt->execute([$bd3Id, 'sk', 'Počet otvorov', '5', 5.0, 5]);
+
+// Get specifications for a product
+$specs = TecDoc::specifications($bd1Id, 'sk');
+assert_equals(5, count($specs), 'BD-001 has 5 specs');
+assert_equals('Priemer [mm]', $specs[0]['criteria_name'], 'First spec is Priemer');
+assert_equals('300', $specs[0]['criteria_value'], 'Priemer value = 300');
+assert_equals(300.0, $specs[0]['numeric_val'], 'Numeric value extracted');
+
+// Parametric search — no filters → all 3 products
+$result = TecDoc::parametricSearch($brakeDiscCatId, 1, 24, 'price_asc', [], null, null, 'sk');
+assert_equals(3, $result['total'], 'Parametric: no filter → 3 products');
+
+// Filter by mounting side = Vpredu → 2 products
+$result = TecDoc::parametricSearch($brakeDiscCatId, 1, 24, 'price_asc', ['Strana montáže' => ['Vpredu']], null, null, 'sk');
+assert_equals(2, $result['total'], 'Parametric: Vpredu → 2 products');
+
+// Filter by type = Plný → 2 products (BD-002, BD-003)
+$result = TecDoc::parametricSearch($brakeDiscCatId, 1, 24, 'price_asc', ['Typ' => ['Plný']], null, null, 'sk');
+assert_equals(2, $result['total'], 'Parametric: Plný → 2 products');
+
+// Combined filter: Vpredu + Plný → 1 product (BD-002)
+$result = TecDoc::parametricSearch($brakeDiscCatId, 1, 24, 'price_asc', [
+    'Strana montáže' => ['Vpredu'],
+    'Typ' => ['Plný'],
+], null, null, 'sk');
+assert_equals(1, $result['total'], 'Parametric: Vpredu + Plný → 1 product');
+assert_equals('BD-002', $result['products'][0]['sku'], 'Filtered product is BD-002');
+
+// Combined filter: Vpredu + Vetraný → 1 product (BD-001)
+$result = TecDoc::parametricSearch($brakeDiscCatId, 1, 24, 'price_asc', [
+    'Strana montáže' => ['Vpredu'],
+    'Typ' => ['Vetraný'],
+], null, null, 'sk');
+assert_equals(1, $result['total'], 'Parametric: Vpredu + Vetraný → 1 product');
+assert_equals('BD-001', $result['products'][0]['sku'], 'Filtered product is BD-001');
+
+// Price range filter within parametric search
+$result = TecDoc::parametricSearch($brakeDiscCatId, 1, 24, 'price_asc', [], 4000, 5000, 'sk');
+assert_equals(1, $result['total'], 'Price range 4000-5000 → 1 product');
+assert_equals('BD-002', $result['products'][0]['sku'], 'Price filtered product is BD-002');
+
+// Spec filter values — dynamic facets
+$filterValues = TecDoc::specFilterValues($brakeDiscCatId, 'sk');
+assert_true(isset($filterValues['Strana montáže']), 'Filter has Strana montáže');
+assert_true(isset($filterValues['Typ']), 'Filter has Typ');
+assert_true(isset($filterValues['Počet otvorov']), 'Filter has Počet otvorov');
+
+// Strana montáže should have Vpredu(2) and Vzadu(1)
+$mountValues = array_column($filterValues['Strana montáže'], 'value');
+assert_true(in_array('Vpredu', $mountValues), 'Strana montáže has Vpredu');
+assert_true(in_array('Vzadu', $mountValues), 'Strana montáže has Vzadu');
+
+// Dynamic filter narrowing: when Vpredu is selected, Typ should still show both options
+$filterValues2 = TecDoc::specFilterValues($brakeDiscCatId, 'sk', ['Strana montáže' => ['Vpredu']]);
+$typValues = array_column($filterValues2['Typ'], 'value');
+assert_true(in_array('Vetraný', $typValues), 'With Vpredu filter, Typ still shows Vetraný');
+assert_true(in_array('Plný', $typValues), 'With Vpredu filter, Typ still shows Plný');
+
+// ============================================================
+// TEST 30: TecDoc — OE Number Search
+// ============================================================
+echo "\n--- Test 30: TecDoc — OE Number Search ---\n";
+
+// Add OE numbers (with normalized form for fast search)
+$oeStmt = $pdo->prepare("INSERT INTO product_oe_numbers (product_id, oem_brand, oem_number, oem_number_norm) VALUES (?, ?, ?, ?)");
+$oeStmt->execute([$bd1Id, 'VOLKSWAGEN', '1K0 615 301 AD', '1K0615301AD']);
+$oeStmt->execute([$bd1Id, 'AUDI', '8J0 615 301 K', '8J0615301K']);
+$oeStmt->execute([$bd2Id, 'SKODA', '6R0 615 301 B', '6R0615301B']);
+$oeStmt->execute([$bd3Id, 'VOLKSWAGEN', '1K0 615 601 N', '1K0615601N']);
+
+// Search by exact OE
+$result = TecDoc::searchByOE('1K0 615 301 AD');
+assert_equals(1, $result['total'], 'OE search exact: 1 result');
+assert_equals('BD-001', $result['products'][0]['sku'], 'OE search finds correct product');
+
+// Search by partial OE (normalized — strips spaces/dashes)
+$result = TecDoc::searchByOE('1K0615301');
+assert_equals(1, $result['total'], 'OE search normalized: finds with spaces stripped');
+
+// Search by OE pattern across multiple products
+$result = TecDoc::searchByOE('615301');
+assert_equals(2, $result['total'], 'OE pattern 615301 → 2 products (BD-001, BD-003)');
+
+// Get OE numbers for a product
+$oeNums = TecDoc::oeNumbers($bd1Id);
+assert_equals(2, count($oeNums), 'BD-001 has 2 OE numbers');
+assert_equals('AUDI', $oeNums[0]['oem_brand'], 'First OE sorted alphabetically by brand');
+
+// ============================================================
+// TEST 31: TecDoc — Vehicle Compatibility
+// ============================================================
+echo "\n--- Test 31: TecDoc — Vehicle Compatibility ---\n";
+
+// Add vehicle compatibility
+$vehStmt = $pdo->prepare("INSERT INTO product_vehicles (product_id, ktype, manufacturer, model, type_name) VALUES (?, ?, ?, ?, ?)");
+$vehStmt->execute([$bd1Id, 35430, 'VOLKSWAGEN', 'GOLF V (1K1)', '2.0 TDI 140HP']);
+$vehStmt->execute([$bd1Id, 35431, 'VOLKSWAGEN', 'GOLF V (1K1)', '1.6 FSI 115HP']);
+$vehStmt->execute([$bd2Id, 35430, 'VOLKSWAGEN', 'GOLF V (1K1)', '2.0 TDI 140HP']);
+$vehStmt->execute([$bd3Id, 35430, 'VOLKSWAGEN', 'GOLF V (1K1)', '2.0 TDI 140HP']);
+$vehStmt->execute([$bd1Id, 48907, 'AUDI', 'A3 (8P)', '2.0 TDI 140HP']);
+
+// Parts by ktype
+$result = TecDoc::partsByKtype(35430);
+assert_equals(3, $result['total'], 'Ktype 35430 → 3 parts');
+
+// Parts by ktype with category filter
+$result = TecDoc::partsByKtype(35430, 1, 24, $brakeDiscCatId);
+assert_equals(3, $result['total'], 'Ktype 35430 + brake disc cat → 3 parts');
+
+// Categories for ktype
+$cats = TecDoc::categoriesForKtype(35430);
+assert_equals(1, count($cats), 'Ktype 35430 has 1 category');
+assert_equals('brake-disc', $cats[0]['slug'], 'Category is brake-disc');
+assert_equals(3, (int)$cats[0]['part_count'], 'Category has 3 parts for this ktype');
+
+// Vehicles for product
+$vehicles = TecDoc::vehiclesForProduct($bd1Id);
+assert_equals(3, count($vehicles), 'BD-001 fits 3 vehicles');
+
+// Enrich product with TecDoc data
+$product = Products::byId($bd1Id);
+$enriched = TecDoc::enrichProduct($product, 'sk');
+assert_equals(5, count($enriched['specifications']), 'Enriched product has 5 specs');
+assert_equals(2, count($enriched['oe_numbers']), 'Enriched product has 2 OE numbers');
+assert_equals(3, $enriched['vehicle_count'], 'Enriched product fits 3 vehicles');
+
+// ============================================================
+// TEST 32: TecDoc — Parametric Filter Edge Cases
+// ============================================================
+echo "\n--- Test 32: TecDoc — Parametric Filter Edge Cases ---\n";
+
+// OR within same criterion: holes = 4 OR 5 → all 3 products
+$result = TecDoc::parametricSearch($brakeDiscCatId, 1, 24, 'price_asc', [
+    'Počet otvorov' => ['4', '5'],
+], null, null, 'sk');
+assert_equals(3, $result['total'], 'OR within criterion: holes 4 OR 5 → 3 products');
+
+// Sorting works
+$result = TecDoc::parametricSearch($brakeDiscCatId, 1, 24, 'price_desc', [], null, null, 'sk');
+assert_equals('BD-001', $result['products'][0]['sku'], 'Price desc: BD-001 first (5500)');
+assert_equals('BD-003', $result['products'][2]['sku'], 'Price desc: BD-003 last (3800)');
+
+// Pagination
+$result = TecDoc::parametricSearch($brakeDiscCatId, 1, 2, 'price_asc', [], null, null, 'sk');
+assert_equals(3, $result['total'], 'Pagination: total still 3');
+assert_equals(2, count($result['products']), 'Pagination: page 1 has 2 items');
+assert_equals(2, $result['pages'], 'Pagination: 2 pages total');
+
+$result2 = TecDoc::parametricSearch($brakeDiscCatId, 2, 2, 'price_asc', [], null, null, 'sk');
+assert_equals(1, count($result2['products']), 'Pagination: page 2 has 1 item');
+
+// Empty category returns no filters
+$emptyCatId = $brakeSystemId; // parent with no direct products
+$result = TecDoc::parametricSearch($emptyCatId, 1, 24, 'price_asc', [], null, null, 'sk');
+assert_equals(0, $result['total'], 'Empty category → 0 products');
+assert_true(empty($result['filters']), 'Empty category → no filters');
 
 // ============================================================
 echo "\n========================================\n";

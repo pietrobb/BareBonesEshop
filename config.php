@@ -52,4 +52,7 @@ return [
 
     // Jobs
     'jobs_dir' => __DIR__ . '/jobs',
+
+    // TecDoc sidecar DB (read-only, for vehicle cascade lookups)
+    'tecdoc_db_path' => __DIR__ . '/demo/tecdoc_enriched.db',
 ];

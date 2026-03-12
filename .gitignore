@@ -39,5 +39,8 @@ uploads/full/*
 .DS_Store
 Thumbs.db
 
+# Large data files (TecDoc DB ~850MB)
+demo/*.db
+
 # Environment
 .env
