@@ -1,0 +1,43 @@
+# Database
+db/*.sqlite
+db/*.sqlite-wal
+db/*.sqlite-shm
+
+# Cache
+cache/
+!cache/.gitkeep
+
+# Rate limit DB
+rate_limit.sqlite*
+
+# Jobs
+jobs/pending/*
+jobs/processing/*
+jobs/completed/*
+jobs/failed/*
+!jobs/pending/.gitkeep
+!jobs/processing/.gitkeep
+!jobs/completed/.gitkeep
+!jobs/failed/.gitkeep
+
+# Uploads
+uploads/thumb/*
+uploads/medium/*
+uploads/full/*
+!uploads/thumb/.gitkeep
+!uploads/medium/.gitkeep
+!uploads/full/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env

@@ -1,0 +1,34 @@
+{
+    "default_locale": "sk",
+    "default_currency": "eur",
+
+    "stores": {
+        "sk": {
+            "name": "Slovenský obchod",
+            "locale": "sk",
+            "currency": "eur",
+            "url_prefix": "",
+            "languages": ["sk", "cs", "en"]
+        },
+        "de": {
+            "name": "Deutscher Shop",
+            "locale": "de",
+            "currency": "eur",
+            "url_prefix": "/de",
+            "languages": ["de", "en"]
+        },
+        "us": {
+            "name": "US Store",
+            "locale": "en",
+            "currency": "usd",
+            "url_prefix": "/en",
+            "languages": ["en", "es"]
+        }
+    },
+
+    "currencies": {
+        "eur": {"symbol": "€", "decimals": 2, "position": "after"},
+        "usd": {"symbol": "$", "decimals": 2, "position": "before"},
+        "czk": {"symbol": "Kč", "decimals": 0, "position": "after"}
+    }
+}

@@ -1,0 +1,113 @@
+{
+    "$schema": "catalog.schema.json",
+
+    "product_types": {
+        "simple": {
+            "name": {"en": "Simple Product", "sk": "Jednoduchý produkt"},
+            "has_variants": false,
+            "attributes": {}
+        },
+
+        "clothing": {
+            "name": {"en": "Clothing", "sk": "Oblečenie"},
+            "has_variants": true,
+            "variant_dimensions": ["size", "color"],
+            "attributes": {
+                "size": {
+                    "type": "select",
+                    "label": {"en": "Size", "sk": "Veľkosť", "de": "Größe", "cs": "Velikost"},
+                    "options": ["XS", "S", "M", "L", "XL", "XXL"],
+                    "filterable": true,
+                    "required": true
+                },
+                "color": {
+                    "type": "select",
+                    "label": {"en": "Color", "sk": "Farba", "de": "Farbe", "cs": "Barva"},
+                    "options_translatable": true,
+                    "options": {
+                        "black":  {"en": "Black", "sk": "Čierna", "de": "Schwarz"},
+                        "white":  {"en": "White", "sk": "Biela", "de": "Weiß"},
+                        "red":    {"en": "Red", "sk": "Červená", "de": "Rot"}
+                    },
+                    "filterable": true,
+                    "required": true
+                },
+                "material": {
+                    "type": "text",
+                    "label": {"en": "Material", "sk": "Materiál"},
+                    "translatable": true,
+                    "filterable": true
+                },
+                "care_instructions": {
+                    "type": "textarea",
+                    "label": {"en": "Care Instructions", "sk": "Údržba"},
+                    "translatable": true,
+                    "filterable": false
+                }
+            }
+        },
+
+        "electronics": {
+            "name": {"en": "Electronics", "sk": "Elektronika"},
+            "has_variants": true,
+            "variant_dimensions": ["storage", "color"],
+            "attributes": {
+                "brand": {
+                    "type": "select",
+                    "label": {"en": "Brand", "sk": "Značka"},
+                    "options": ["Apple", "Samsung", "Sony", "Xiaomi"],
+                    "filterable": true
+                },
+                "warranty_months": {
+                    "type": "number",
+                    "label": {"en": "Warranty (months)", "sk": "Záruka (mesiace)"},
+                    "filterable": true,
+                    "range_filter": true
+                },
+                "storage": {
+                    "type": "select",
+                    "label": {"en": "Storage", "sk": "Úložisko"},
+                    "options": ["64GB", "128GB", "256GB", "512GB", "1TB"],
+                    "filterable": true
+                },
+                "weight_g": {
+                    "type": "number",
+                    "label": {"en": "Weight (g)", "sk": "Hmotnosť (g)"},
+                    "filterable": true,
+                    "range_filter": true
+                }
+            }
+        },
+
+        "downloadable": {
+            "name": {"en": "Digital Download", "sk": "Digitálny produkt"},
+            "has_variants": false,
+            "physical": false,
+            "attributes": {
+                "file_format": {
+                    "type": "select",
+                    "label": {"en": "Format", "sk": "Formát"},
+                    "options": ["PDF", "EPUB", "MP3", "ZIP"],
+                    "filterable": true
+                },
+                "file_size_mb": {
+                    "type": "number",
+                    "label": {"en": "File Size (MB)", "sk": "Veľkosť súboru (MB)"}
+                },
+                "download_url": {
+                    "type": "text",
+                    "admin_only": true
+                }
+            }
+        }
+    },
+
+    "global_attributes": {
+        "brand": {
+            "type": "select",
+            "label": {"en": "Brand", "sk": "Značka"},
+            "filterable": true,
+            "options_from": "brands"
+        }
+    }
+}
