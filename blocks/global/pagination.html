@@ -1,0 +1,11 @@
+{{#if pages > 1}}
+<nav class="pagination" aria-label="pagination">
+    {{#if page > 1}}
+        <a href="?page={{prev_page}}" class="pagination__link pagination__prev">{{t.previous}}</a>
+    {{/if}}
+    <span class="pagination__info">{{t.page}} {{page}} / {{pages}}</span>
+    {{#if page < pages}}
+        <a href="?page={{next_page}}" class="pagination__link pagination__next">{{t.next}}</a>
+    {{/if}}
+</nav>
+{{/if}}

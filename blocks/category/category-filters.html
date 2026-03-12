@@ -1,0 +1,19 @@
+<aside class="filters" data-filters>
+    {{#each available_filters}}
+        <div class="filters__group">
+            <h4>{{label}}</h4>
+            <ul class="filter-options">
+                {{#each options}}
+                    <li>
+                        <label class="filter-option">
+                            <input type="checkbox" name="{{../attr_name}}" value="{{value}}"
+                                   {{#if active}}checked{{/if}}>
+                            <span>{{value}}</span>
+                            <span class="filter-count">({{count}})</span>
+                        </label>
+                    </li>
+                {{/each}}
+            </ul>
+        </div>
+    {{/each}}
+</aside>

@@ -1,0 +1,77 @@
+{
+    "layouts": {
+        "one-column":  {"slots": ["full"]},
+        "two-column":  {"slots": ["main", "sidebar"], "ratios": ["3fr", "1fr"]},
+        "two-column-left": {"slots": ["sidebar", "main"], "ratios": ["1fr", "3fr"]},
+        "three-column": {"slots": ["left", "main", "right"], "ratios": ["1fr", "3fr", "1fr"]}
+    },
+
+    "pages": {
+        "homepage": {
+            "layout": "one-column",
+            "sections": [
+                {"block": "homepage/hero-banner", "data": "banners"},
+                {"block": "homepage/featured-categories", "data": "categories.featured"},
+                {"block": "product/product-grid", "data": "products.new", "title": {"sk": "Novinky", "en": "New Arrivals", "de": "Neuheiten"}},
+                {"block": "product/product-grid", "data": "products.sale", "title": {"sk": "Výpredaj", "en": "Sale", "de": "Angebote"}},
+                {"block": "global/newsletter-signup"}
+            ]
+        },
+
+        "category": {
+            "layout": "two-column",
+            "sections": [
+                {"block": "global/breadcrumb", "slot": "full"},
+                {"block": "category/category-header", "slot": "full"},
+                {"block": "category/category-filters", "slot": "sidebar"},
+                {"block": "category/sort-bar", "slot": "main"},
+                {"block": "product/product-grid", "slot": "main"},
+                {"block": "global/pagination", "slot": "main"}
+            ]
+        },
+
+        "product": {
+            "layout": "one-column",
+            "sections": [
+                {"block": "global/breadcrumb"},
+                {"block": "product/product-detail"},
+                {"block": "product/related-products"}
+            ]
+        },
+
+        "cart": {
+            "layout": "two-column",
+            "sections": [
+                {"block": "global/breadcrumb", "slot": "full"},
+                {"block": "cart/cart-items", "slot": "main"},
+                {"block": "cart/cart-summary", "slot": "sidebar"}
+            ]
+        },
+
+        "checkout": {
+            "layout": "two-column",
+            "sections": [
+                {"block": "checkout/checkout-form", "slot": "main"},
+                {"block": "checkout/order-summary", "slot": "sidebar"}
+            ]
+        },
+
+        "search": {
+            "layout": "one-column",
+            "sections": [
+                {"block": "global/breadcrumb"},
+                {"block": "category/sort-bar"},
+                {"block": "product/product-grid"},
+                {"block": "global/pagination"}
+            ]
+        },
+
+        "cms": {
+            "layout": "one-column",
+            "sections": [
+                {"block": "global/breadcrumb"},
+                {"block": "cms/cms-content"}
+            ]
+        }
+    }
+}

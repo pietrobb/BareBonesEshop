@@ -1,0 +1,13 @@
+{{#if section_data}}
+<section class="featured-categories">
+    <h2>{{t.categories}}</h2>
+    <div class="featured-categories__grid">
+        {{#each section_data}}
+            <a href="/category/{{path}}" class="featured-category">
+                <span class="featured-category__name">{{name}}</span>
+                <span class="featured-category__count">{{product_count}} {{../t.products}}</span>
+            </a>
+        {{/each}}
+    </div>
+</section>
+{{/if}}

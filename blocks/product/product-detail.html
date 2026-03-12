@@ -1,0 +1,44 @@
+<div class="product-detail">
+    <div class="product-detail__gallery">
+        {{#if product.image}}
+            <img src="/uploads/full/{{product.image}}" alt="{{product.name}}" class="product-detail__hero">
+        {{/if}}
+        {{#if product.images.length > 1}}
+            <div class="product-detail__thumbs">
+                {{#each product.images}}
+                    <button class="product-detail__thumb" data-image="/uploads/full/{{this}}">
+                        <img src="/uploads/thumb/{{this}}" alt="{{../product.name}}" loading="lazy">
+                    </button>
+                {{/each}}
+            </div>
+        {{/if}}
+    </div>
+    <div class="product-detail__info">
+        <h1 class="product-detail__name">{{product.name}}</h1>
+        <div class="product-detail__price">
+            {{#if product.compare_price}}
+                <span class="price--old">{{product.compare_price_formatted}}</span>
+            {{/if}}
+            <span class="price--current">{{product.price_formatted}}</span>
+        </div>
+        {{#if product.summary}}
+            <p class="product-detail__summary">{{product.summary}}</p>
+        {{/if}}
+        {{#if product.stock > 0}}
+            <div class="product-detail__actions">
+                <input type="number" value="1" min="1" max="{{product.stock}}" class="qty-input" data-qty>
+                <button class="btn btn--primary" data-action="cart-add" data-product="{{product.id}}">
+                    {{t.add_to_cart}}
+                </button>
+            </div>
+            <p class="product-detail__stock">{{t.in_stock}} ({{product.stock}})</p>
+        {{else}}
+            <p class="product-detail__stock product-detail__stock--out">{{t.out_of_stock}}</p>
+        {{/if}}
+        {{#if product.description}}
+            <div class="product-detail__desc">
+                {{{product.description}}}
+            </div>
+        {{/if}}
+    </div>
+</div>

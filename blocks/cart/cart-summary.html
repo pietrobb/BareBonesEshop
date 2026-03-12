@@ -1,0 +1,15 @@
+<div class="cart-summary">
+    <h3>{{t.order_summary}}</h3>
+    <div class="cart-summary__row">
+        <span>{{t.subtotal}}</span>
+        <span>{{cart.subtotal_formatted}}</span>
+    </div>
+    <div class="cart-summary__row cart-summary__total">
+        <strong>{{t.total}}</strong>
+        <strong>{{cart.subtotal_formatted}}</strong>
+    </div>
+    {{#if cart.items}}
+        <a href="/checkout" class="btn btn--primary btn--full">{{t.checkout}}</a>
+    {{/if}}
+    <a href="/" class="btn btn--secondary btn--full">{{t.continue_shopping}}</a>
+</div>

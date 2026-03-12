@@ -1,0 +1,12 @@
+<div class="container">
+    {{> global/header}}
+    <main class="layout layout--two-column">
+        <div class="layout__main">
+            {{{slots.main}}}
+        </div>
+        <aside class="layout__sidebar">
+            {{{slots.sidebar}}}
+        </aside>
+    </main>
+    {{> global/footer}}
+</div>

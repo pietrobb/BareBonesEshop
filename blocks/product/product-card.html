@@ -1,0 +1,29 @@
+<article class="product-card" data-id="{{id}}">
+    <a href="{{url}}" class="product-card__link">
+        <div class="product-card__image">
+            {{#if image}}
+                <img src="/uploads/medium/{{image}}" alt="{{name}}" loading="lazy">
+            {{/if}}
+            {{#if compare_price}}
+                <span class="product-card__badge">-{{discount_percent}}%</span>
+            {{/if}}
+            {{#if stock == 0}}
+                <span class="product-card__badge product-card__badge--out">{{t.out_of_stock}}</span>
+            {{/if}}
+        </div>
+        <div class="product-card__body">
+            <h3 class="product-card__name">{{name}}</h3>
+            <div class="product-card__price">
+                {{#if compare_price}}
+                    <span class="price--old">{{compare_price_formatted}}</span>
+                {{/if}}
+                <span class="price--current">{{price_formatted}}</span>
+            </div>
+        </div>
+    </a>
+    {{#if stock > 0}}
+        <button class="product-card__cart" data-action="cart-add" data-product="{{id}}">
+            {{t.add_to_cart}}
+        </button>
+    {{/if}}
+</article>

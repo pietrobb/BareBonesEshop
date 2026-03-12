@@ -1,0 +1,11 @@
+{{#if section_title}}
+    <h2 class="product-grid__title">{{section_title}}</h2>
+{{/if}}
+<div class="product-grid">
+    {{#each products}}
+        {{> product/product-card}}
+    {{/each}}
+</div>
+{{#if no_products}}
+    <p class="product-grid__empty">{{t.no_products}}</p>
+{{/if}}

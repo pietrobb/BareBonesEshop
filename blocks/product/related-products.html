@@ -1,0 +1,10 @@
+{{#if related}}
+<section class="related-products">
+    <h2>{{t.related_products}}</h2>
+    <div class="product-grid">
+        {{#each related}}
+            {{> product/product-card}}
+        {{/each}}
+    </div>
+</section>
+{{/if}}

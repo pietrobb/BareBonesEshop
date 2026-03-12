@@ -1,0 +1,18 @@
+<div class="order-summary">
+    <h3>{{t.order_summary}}</h3>
+    {{#each cart.items}}
+        <div class="order-summary__item">
+            <span>{{name}} × {{qty}}</span>
+            <span>{{total_formatted}}</span>
+        </div>
+    {{/each}}
+    <hr>
+    <div class="order-summary__row">
+        <span>{{t.subtotal}}</span>
+        <span>{{cart.subtotal_formatted}}</span>
+    </div>
+    <div class="order-summary__row order-summary__total">
+        <strong>{{t.total}}</strong>
+        <strong>{{cart.subtotal_formatted}}</strong>
+    </div>
+</div>

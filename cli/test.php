@@ -9,6 +9,11 @@ require_once __DIR__ . '/../src/Db.php';
 require_once __DIR__ . '/../src/Security.php';
 require_once __DIR__ . '/../src/I18n.php';
 require_once __DIR__ . '/../src/Import.php';
+require_once __DIR__ . '/../src/Products.php';
+require_once __DIR__ . '/../src/Categories.php';
+require_once __DIR__ . '/../src/Search.php';
+require_once __DIR__ . '/../src/Template.php';
+require_once __DIR__ . '/../src/Cache.php';
 
 // Test framework
 $tests = 0;
@@ -434,6 +439,191 @@ assert_true($elapsed < 1000, "100x FTS5 search in " . round($elapsed, 1) . "ms")
 
 // ============================================================
 // RESULTS
+// ============================================================
+// TEST 11: Products.php queries
+// ============================================================
+echo "\n--- Test 11: Products Queries ---\n";
+
+$p = Products::bySlug('cierne-tricko-classic');
+assert_true($p !== null, 'Products::bySlug finds product');
+assert_equals('TSHIRT-BLK-M', $p['sku'], 'bySlug returns correct SKU');
+
+$p2 = Products::byId((int)$p['id']);
+assert_true($p2 !== null, 'Products::byId finds product');
+assert_equals('TSHIRT-BLK-M', $p2['sku'], 'byId returns correct SKU');
+
+$p3 = Products::bySku('PHONE-SAM-128');
+assert_true($p3 !== null, 'Products::bySku finds product');
+assert_equals('Samsung Galaxy A55', $p3['name'], 'bySku returns correct name');
+
+// byCategory with pagination
+$tricka = Categories::bySlug('tricka');
+$listing = Products::byCategory($tricka['id'], 1, 10, 'price_asc');
+assert_equals(3, $listing['total'], 'byCategory returns correct total');
+assert_equals(3, count($listing['products']), 'byCategory returns correct count');
+assert_true($listing['products'][0]['price'] <= $listing['products'][1]['price'], 'byCategory sorts by price ASC');
+
+// Filter values
+$filterVals = Products::filterValues($tricka['id']);
+assert_true(isset($filterVals['color']), 'filterValues has color attribute');
+assert_true(isset($filterVals['size']), 'filterValues has size attribute');
+
+// Enrich
+$enriched = Products::enrich($p);
+assert_true(is_array($enriched['images']), 'enrich() decodes images JSON');
+assert_true(!empty($enriched['price_formatted']), 'enrich() adds price_formatted');
+assert_true(!empty($enriched['url']), 'enrich() adds url');
+
+// Latest
+$latest = Products::latest(3);
+assert_equals(3, count($latest), 'latest() returns requested count');
+
+// ============================================================
+// TEST 12: Categories.php queries
+// ============================================================
+echo "\n--- Test 12: Categories Queries ---\n";
+
+$tree = Categories::tree();
+assert_greater(count($tree), 0, 'Categories::tree returns results');
+
+$roots = Categories::roots();
+assert_greater(count($roots), 0, 'Categories::roots returns root categories');
+
+$obl = Categories::bySlug('oblecenie');
+assert_true($obl !== null, 'Categories::bySlug finds category');
+
+$children = Categories::children($obl['id']);
+assert_greater(count($children), 0, 'Categories::children returns subcategories');
+
+$bread = Categories::breadcrumb($tricka['id']);
+assert_equals(2, count($bread), 'Breadcrumb has 2 levels (oblecenie > tricka)');
+assert_equals('oblecenie', $bread[0]['slug'], 'Breadcrumb first = oblecenie');
+assert_equals('tricka', $bread[1]['slug'], 'Breadcrumb second = tricka');
+
+$catByPath = Categories::byPath('oblecenie/tricka');
+assert_true($catByPath !== null, 'byPath finds category');
+assert_equals($tricka['id'], $catByPath['id'], 'byPath returns correct ID');
+
+$descIds = Categories::descendantIds($obl['id']);
+assert_greater(count($descIds), 1, 'descendantIds includes subcategories');
+
+// ============================================================
+// TEST 13: Search.php queries
+// ============================================================
+echo "\n--- Test 13: Search Queries ---\n";
+
+$sr = Search::query('tričko', 1, 10);
+assert_greater($sr['total'], 0, 'Search::query finds products');
+assert_true(count($sr['products']) > 0, 'Search returns product list');
+
+$sr2 = Search::query('samsung galaxy', 1, 10);
+assert_greater($sr2['total'], 0, 'Search finds Samsung products');
+
+$sr3 = Search::query('xyznonexistent', 1, 10);
+assert_equals(0, $sr3['total'], 'Search returns 0 for nonexistent query');
+
+// Suggest
+$sugg = Search::suggest('tri', 5);
+assert_greater(count($sugg), 0, 'suggest() returns results for "tri"');
+
+// Empty query
+$sr4 = Search::query('', 1, 10);
+assert_equals(0, count($sr4['products']), 'Empty query returns empty');
+
+// ============================================================
+// TEST 14: Template Engine
+// ============================================================
+echo "\n--- Test 14: Template Engine ---\n";
+
+// Variable substitution
+$html = Template::process('Hello {{name}}!', ['name' => 'World']);
+assert_equals('Hello World!', $html, 'Template variable substitution');
+
+// Escaping
+$html = Template::process('{{val}}', ['val' => '<script>alert(1)</script>']);
+assert_true(str_contains($html, '&lt;script&gt;'), 'Template escapes HTML');
+
+// Raw output
+$html = Template::process('{{{val}}}', ['val' => '<b>bold</b>']);
+assert_equals('<b>bold</b>', $html, 'Triple braces = raw output');
+
+// Dot notation
+$html = Template::process('{{a.b.c}}', ['a' => ['b' => ['c' => 'deep']]]);
+assert_equals('deep', $html, 'Dot notation works');
+
+// #if true
+$html = Template::process('{{#if show}}YES{{/if}}', ['show' => true]);
+assert_equals('YES', $html, '#if true renders content');
+
+// #if false
+$html = Template::process('{{#if show}}YES{{/if}}', ['show' => false]);
+assert_equals('', $html, '#if false renders nothing');
+
+// #if else
+$html = Template::process('{{#if show}}YES{{else}}NO{{/if}}', ['show' => false]);
+assert_equals('NO', $html, '#if else renders else branch');
+
+// #if comparison
+$html = Template::process('{{#if stock > 0}}in stock{{/if}}', ['stock' => 5]);
+assert_equals('in stock', $html, '#if comparison works');
+
+// #each
+$html = Template::process('{{#each items}}[{{name}}]{{/each}}', ['items' => [
+    ['name' => 'A'], ['name' => 'B'], ['name' => 'C']
+]]);
+assert_equals('[A][B][C]', $html, '#each loop works');
+
+// #each with @index, @first, @last
+$html = Template::process('{{#each items}}{{@index}}{{#if @first}}F{{/if}}{{#if @last}}L{{/if}} {{/each}}', [
+    'items' => [['x' => 1], ['x' => 2], ['x' => 3]]
+]);
+assert_true(str_contains($html, '0F'), '#each @first works');
+assert_true(str_contains($html, '2L'), '#each @last works');
+
+// .length
+$html = Template::process('{{#if items.length > 1}}many{{/if}}', ['items' => [1, 2, 3]]);
+assert_equals('many', $html, '.length property works');
+
+// Missing variable
+$html = Template::process('{{missing}}', []);
+assert_equals('', $html, 'Missing variable renders empty');
+
+// ============================================================
+// TEST 15: Cache
+// ============================================================
+echo "\n--- Test 15: Cache ---\n";
+
+$testCacheDir = __DIR__ . '/../cache/test_' . getmypid();
+Cache::setDir($testCacheDir);
+
+Cache::writeJson('test/data.json', ['foo' => 'bar']);
+$read = Cache::readJson('test/data.json');
+assert_equals('bar', $read['foo'], 'Cache write/read JSON works');
+
+Cache::write('test/text.txt', 'hello');
+assert_equals('hello', Cache::read('test/text.txt'), 'Cache write/read text works');
+
+// TTL check
+Cache::write('test/old.txt', 'old');
+// File is fresh (just written)
+assert_true(Cache::fresh('test/old.txt', 3600), 'Cache fresh check works');
+
+// Key-value
+Cache::set('mykey', 'myvalue');
+assert_equals('myvalue', Cache::get('mykey'), 'Cache key-value works');
+
+// Locale path helper
+assert_equals('sk/product/test.json', Cache::localePath('sk', 'product/test.json'), 'localePath works');
+
+// Cleanup test cache
+Cache::invalidatePrefix('test');
+@rmdir($testCacheDir . '/test');
+@rmdir($testCacheDir . '/kv');
+@rmdir($testCacheDir);
+
+// Reset cache dir
+Cache::setDir(__DIR__ . '/../cache');
+
 // ============================================================
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";

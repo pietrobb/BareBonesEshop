@@ -1,0 +1,13 @@
+<div class="sort-bar">
+    <label>{{t.sort_by}}:
+        <select class="sort-select" data-sort>
+            <option value="price_asc">{{t.sort_price_asc}}</option>
+            <option value="price_desc">{{t.sort_price_desc}}</option>
+            <option value="name_asc">{{t.sort_name_asc}}</option>
+            <option value="newest">{{t.sort_newest}}</option>
+        </select>
+    </label>
+    {{#if total}}
+        <span class="sort-bar__count">{{t.showing_results}} {{showing}} {{t.of_total}} {{total}} {{t.products}}</span>
+    {{/if}}
+</div>
