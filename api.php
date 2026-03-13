@@ -55,6 +55,7 @@ try {
         'product_specs'         => apiProductSpecs(),
         'product_oe'            => apiProductOE(),
         'product_vehicles'      => apiProductVehicles(),
+        'page'                  => apiPage(),
         default                 => ['error' => 'Unknown action'],
     };
 
@@ -718,4 +719,22 @@ function apiProductVehicles(): array {
     if (!$id) return ['error' => 'id required'];
     $limit = min(200, max(1, Security::int($_GET['limit'] ?? 50)));
     return ['vehicles' => TecDoc::vehiclesForProduct($id, $limit)];
+}
+
+function apiPage(): array {
+    $slug = Security::slug($_GET['slug'] ?? '');
+    if (!$slug) return ['error' => 'slug required'];
+    $stmt = Db::get()->prepare("SELECT * FROM pages WHERE slug = :slug AND status = 'active'");
+    $stmt->execute([':slug' => $slug]);
+    $page = $stmt->fetch();
+    if (!$page) { http_response_code(404); return ['error' => 'Page not found']; }
+    // Translate if non-default locale
+    $tr = json_decode($page['translations'] ?? '{}', true);
+    $locale = I18n::locale();
+    $cfg = require __DIR__ . '/config.php';
+    if ($locale !== ($cfg['default_locale'] ?? 'sk') && isset($tr[$locale])) {
+        if (!empty($tr[$locale]['title'])) $page['title'] = $tr[$locale]['title'];
+        if (!empty($tr[$locale]['body'])) $page['body'] = $tr[$locale]['body'];
+    }
+    return ['page' => ['slug' => $page['slug'], 'title' => $page['title'], 'body' => $page['body']]];
 }

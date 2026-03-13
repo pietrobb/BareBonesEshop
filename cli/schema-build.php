@@ -351,6 +351,20 @@ $db->exec("CREATE INDEX IF NOT EXISTS idx_pv_ktype ON product_vehicles(ktype)");
 $db->exec("CREATE INDEX IF NOT EXISTS idx_pv_mfr ON product_vehicles(manufacturer, model)");
 echo "  [OK] product_vehicles\n";
 
+// CMS Pages — static content pages
+$db->exec("CREATE TABLE IF NOT EXISTS pages (
+    id         INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
+    slug       TEXT NOT NULL UNIQUE,
+    title      TEXT NOT NULL,
+    body       TEXT NOT NULL DEFAULT '',
+    status     TEXT NOT NULL DEFAULT 'active',
+    translations TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . "),
+    updated_at TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . ")
+)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_pages_slug ON pages(slug)");
+echo "  [OK] pages\n";
+
 echo "\nSchema build complete!\n";
 
 // ============================================================

@@ -38,6 +38,8 @@ $pagePermissions = [
     'import'    => 'import',
     'cache'     => 'cache',
     'audit'     => 'reports.view',
+    'pages'     => 'products.edit',
+    'page_edit' => 'products.edit',
 ];
 $requiredPerm = $pagePermissions[$page] ?? 'reports.view';
 Security::adminRequire($requiredPerm);
@@ -57,6 +59,8 @@ $title = match($page) {
     'import'    => 'Import',
     'cache'     => 'Cache',
     'audit'     => 'Audit Log',
+    'pages'     => 'CMS Stránky',
+    'page_edit' => 'Upraviť stránku',
     default     => 'Admin',
 };
 
@@ -112,6 +116,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
     <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=orders" class="<?= $page==='orders'?'active':'' ?>">Objednávky</a><?php endif; ?>
     <?php if (Security::adminCan('import')): ?><a href="admin.php?p=import" class="<?= $page==='import'?'active':'' ?>">Import CSV</a><?php endif; ?>
     <?php if (Security::adminCan('cache')): ?><a href="admin.php?p=cache" class="<?= $page==='cache'?'active':'' ?>">Cache</a><?php endif; ?>
+    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=pages" class="<?= $page==='pages'?'active':'' ?>">CMS Stránky</a><?php endif; ?>
     <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=audit" class="<?= $page==='audit'?'active':'' ?>">Audit Log</a><?php endif; ?>
 </nav>
 <main>
@@ -126,6 +131,8 @@ match($page) {
     'import'    => pageImport(),
     'cache'     => pageCache(),
     'audit'     => pageAudit(),
+    'pages'     => pageCmsPages(),
+    'page_edit' => pageCmsEdit(),
     default     => pageDashboard(),
 };
 ?>
@@ -331,10 +338,13 @@ function pageProduct(): void {
             <div class="form-row"><label>Stock</label><input type="number" name="stock" value="<?= (int)($product['stock'] ?? 0) ?>"></div>
             <div class="form-row"><label>Typ</label>
                 <select name="product_type">
-                    <option value="simple" <?= ($product['product_type'] ?? '') === 'simple' ? 'selected' : '' ?>>Simple</option>
-                    <option value="clothing" <?= ($product['product_type'] ?? '') === 'clothing' ? 'selected' : '' ?>>Clothing</option>
-                    <option value="electronics" <?= ($product['product_type'] ?? '') === 'electronics' ? 'selected' : '' ?>>Electronics</option>
-                    <option value="downloadable" <?= ($product['product_type'] ?? '') === 'downloadable' ? 'selected' : '' ?>>Downloadable</option>
+                    <?php
+                    $catalogFile = __DIR__ . '/catalog.json';
+                    $ptypes = file_exists($catalogFile) ? array_keys(json_decode(file_get_contents($catalogFile), true)['product_types'] ?? []) : [];
+                    $ptypes = array_unique(array_merge(['simple'], $ptypes));
+                    foreach ($ptypes as $pt): ?>
+                    <option value="<?= esc($pt) ?>" <?= ($product['product_type'] ?? '') === $pt ? 'selected' : '' ?>><?= esc(ucfirst($pt)) ?></option>
+                    <?php endforeach; ?>
                 </select>
             </div>
             <div class="form-row"><label>Stav</label>
@@ -598,6 +608,103 @@ function pageAudit(): void {
 }
 
 // ============================================================
+// CMS Pages
+// ============================================================
+
+function pageCmsPages(): void {
+    $db = Db::get();
+    $pages = $db->query("SELECT * FROM pages ORDER BY created_at DESC")->fetchAll();
+    ?>
+    <h1>CMS Stránky</h1>
+    <p style="margin-bottom:1rem"><a href="admin.php?p=page_edit" class="btn btn-primary">Nová stránka</a></p>
+    <div class="card">
+        <table>
+            <tr><th>Slug</th><th>Názov</th><th>Stav</th><th>Vytvorené</th><th></th></tr>
+            <?php foreach ($pages as $pg): ?>
+            <tr>
+                <td><code><?= esc($pg['slug']) ?></code></td>
+                <td><?= esc($pg['title']) ?></td>
+                <td><span class="badge badge-<?= $pg['status'] === 'active' ? 'active' : 'draft' ?>"><?= esc($pg['status']) ?></span></td>
+                <td class="muted"><?= esc(substr($pg['created_at'], 0, 16)) ?></td>
+                <td><a href="admin.php?p=page_edit&id=<?= (int)$pg['id'] ?>" class="btn btn-sm">Upraviť</a></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+    </div>
+    <?php
+}
+
+function pageCmsEdit(): void {
+    $id = Security::int($_GET['id'] ?? 0);
+    $pg = $id ? Db::get()->prepare("SELECT * FROM pages WHERE id = :id")->execute([':id' => $id]) ? Db::get()->prepare("SELECT * FROM pages WHERE id = :id") : null : null;
+    if ($id) {
+        $stmt = Db::get()->prepare("SELECT * FROM pages WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        $pg = $stmt->fetch();
+    }
+    ?>
+    <h1><?= $id ? 'Upraviť stránku' : 'Nová stránka' ?></h1>
+    <div class="card">
+        <form method="post" action="admin.php?p=page_edit&id=<?= $id ?>&action=save">
+            <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+            <div class="form-row"><label>Slug</label><input type="text" name="slug" value="<?= esc($pg['slug'] ?? '') ?>" required style="width:100%"></div>
+            <div class="form-row"><label>Názov</label><input type="text" name="title" value="<?= esc($pg['title'] ?? '') ?>" required style="width:100%"></div>
+            <div class="form-row"><label>Obsah (HTML)</label><textarea name="body" rows="15" style="width:100%;font-family:monospace"><?= esc($pg['body'] ?? '') ?></textarea></div>
+            <div class="form-row"><label>Stav</label>
+                <select name="status">
+                    <option value="active" <?= ($pg['status'] ?? 'active') === 'active' ? 'selected' : '' ?>>Active</option>
+                    <option value="draft" <?= ($pg['status'] ?? '') === 'draft' ? 'selected' : '' ?>>Draft</option>
+                </select>
+            </div>
+            <button class="btn btn-primary" type="submit">Uložiť</button>
+            <?php if ($id): ?>
+            <a href="admin.php?p=pages" class="btn" style="margin-left:.5rem">Späť</a>
+            <?php endif; ?>
+        </form>
+    </div>
+    <?php
+}
+
+function handleCmsPageSave(): void {
+    $db = Db::get();
+    $id = Security::int($_GET['id'] ?? 0);
+    $now = Db::isSqlite() ? "datetime('now')" : 'NOW()';
+    $slug = Security::slug($_POST['slug'] ?? '');
+    $title = trim($_POST['title'] ?? '');
+    $body = $_POST['body'] ?? '';
+    $status = in_array($_POST['status'] ?? '', ['active', 'draft']) ? $_POST['status'] : 'active';
+
+    if (!$slug || !$title) {
+        setFlash('err', 'Slug a názov sú povinné.');
+        header("Location: admin.php?p=page_edit&id={$id}");
+        exit;
+    }
+
+    if ($id) {
+        $db->prepare("UPDATE pages SET slug = :slug, title = :title, body = :body, status = :status, updated_at = {$now} WHERE id = :id")
+           ->execute([':slug' => $slug, ':title' => $title, ':body' => $body, ':status' => $status, ':id' => $id]);
+        setFlash('ok', 'Stránka aktualizovaná.');
+    } else {
+        $db->prepare("INSERT INTO pages (slug, title, body, status) VALUES (:slug, :title, :body, :status)")
+           ->execute([':slug' => $slug, ':title' => $title, ':body' => $body, ':status' => $status]);
+        $id = (int)$db->lastInsertId();
+        setFlash('ok', 'Stránka vytvorená.');
+    }
+    header("Location: admin.php?p=page_edit&id={$id}");
+    exit;
+}
+
+function handleCmsPageDelete(): void {
+    $id = Security::int($_POST['page_id'] ?? 0);
+    if ($id) {
+        Db::get()->prepare("DELETE FROM pages WHERE id = :id")->execute([':id' => $id]);
+        setFlash('ok', 'Stránka zmazaná.');
+    }
+    header('Location: admin.php?p=pages');
+    exit;
+}
+
+// ============================================================
 // POST handlers
 // ============================================================
 
@@ -614,6 +721,8 @@ function handlePost(string $page, string $action): void {
         'import:upload'  => handleImportUpload(),
         'cache:flush'    => handleCacheFlush(),
         'cache:rebuild'  => handleCacheRebuild(),
+        'page_edit:save' => handleCmsPageSave(),
+        'pages:delete'   => handleCmsPageDelete(),
         default          => null,
     };
 }
@@ -624,7 +733,9 @@ function handleProductSave(): void {
     $now = Db::isSqlite() ? "datetime('now')" : 'NOW()';
 
     $allowedStatuses = ['active', 'draft', 'archived'];
-    $allowedTypes = ['simple', 'clothing', 'electronics', 'downloadable'];
+    $catalogFile = __DIR__ . '/catalog.json';
+    $catalogTypes = file_exists($catalogFile) ? array_keys(json_decode(file_get_contents($catalogFile), true)['product_types'] ?? []) : [];
+    $allowedTypes = array_unique(array_merge(['simple'], $catalogTypes));
     $status = in_array($_POST['status'] ?? '', $allowedStatuses) ? $_POST['status'] : 'active';
     $productType = in_array($_POST['product_type'] ?? '', $allowedTypes) ? $_POST['product_type'] : 'simple';
 

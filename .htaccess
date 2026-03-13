@@ -43,10 +43,12 @@ RewriteRule ^(.*)$ $1 [L,T=application/json]
 # ============================================================
 RewriteRule ^de/product/([a-z0-9-]+)/?$ product.php?slug=$1&store=de [QSA,L]
 RewriteRule ^de/category/([a-z0-9/-]+)/?$ index.php?category=$1&store=de [QSA,L]
+RewriteRule ^de/page/([a-z0-9-]+)/?$ page.php?slug=$1&store=de [QSA,L]
 RewriteRule ^de/?$ index.php?store=de [QSA,L]
 
 RewriteRule ^en/product/([a-z0-9-]+)/?$ product.php?slug=$1&store=us [QSA,L]
 RewriteRule ^en/category/([a-z0-9/-]+)/?$ index.php?category=$1&store=us [QSA,L]
+RewriteRule ^en/page/([a-z0-9-]+)/?$ page.php?slug=$1&store=us [QSA,L]
 RewriteRule ^en/?$ index.php?store=us [QSA,L]
 
 # Product detail: /product/brzdovy-kotuc-predny → product.php?slug=brzdovy-kotuc-predny
@@ -54,6 +56,9 @@ RewriteRule ^product/([a-z0-9-]+)/?$ product.php?slug=$1 [QSA,L]
 
 # Category: /category/brzdovy-system → index.php?category=brzdovy-system
 RewriteRule ^category/([a-z0-9/-]+)/?$ index.php?category=$1 [QSA,L]
+
+# CMS Page: /page/about → page.php?slug=about
+RewriteRule ^page/([a-z0-9-]+)/?$ page.php?slug=$1 [QSA,L]
 
 # API routing: /api/products → api.php?action=products
 RewriteRule ^api/(.*)$ api.php?action=$1 [QSA,L]
