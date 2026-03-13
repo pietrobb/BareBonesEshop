@@ -4,18 +4,7 @@
  * Minimal admin: dashboard, products CRUD, orders, import, cache.
  * HTTP Basic Auth with brute-force protection.
  */
-require_once __DIR__ . '/src/Db.php';
-require_once __DIR__ . '/src/Security.php';
-require_once __DIR__ . '/src/I18n.php';
-require_once __DIR__ . '/src/Products.php';
-require_once __DIR__ . '/src/Categories.php';
-require_once __DIR__ . '/src/Search.php';
-require_once __DIR__ . '/src/Cache.php';
-require_once __DIR__ . '/src/Orders.php';
-require_once __DIR__ . '/src/OrderWorkflow.php';
-require_once __DIR__ . '/src/AuditLog.php';
-require_once __DIR__ . '/src/Import.php';
-require_once __DIR__ . '/src/JobQueue.php';
+require_once __DIR__ . '/src/autoload.php';
 
 // Auth
 Security::adminAuth();
@@ -24,7 +13,7 @@ Security::adminAuth();
 header("X-Content-Type-Options: nosniff");
 header("X-Frame-Options: SAMEORIGIN");
 
-if (session_status() === PHP_SESSION_NONE) session_start();
+Security::sessionStart();
 
 I18n::setLocale('sk');
 
@@ -229,7 +218,6 @@ function pageProducts(): void {
         $params[':status'] = $statusFilter;
     }
 
-    $total = (int)$db->prepare("SELECT COUNT(*) FROM products WHERE {$where}")->execute($params) ? 0 : 0;
     $stmt = $db->prepare("SELECT COUNT(*) FROM products WHERE {$where}");
     $stmt->execute($params);
     $total = (int)$stmt->fetchColumn();
@@ -586,16 +574,21 @@ function handleProductSave(): void {
     $id = Security::int($_GET['id'] ?? 0);
     $now = Db::isSqlite() ? "datetime('now')" : 'NOW()';
 
+    $allowedStatuses = ['active', 'draft', 'archived'];
+    $allowedTypes = ['simple', 'clothing', 'electronics', 'downloadable'];
+    $status = in_array($_POST['status'] ?? '', $allowedStatuses) ? $_POST['status'] : 'active';
+    $productType = in_array($_POST['product_type'] ?? '', $allowedTypes) ? $_POST['product_type'] : 'simple';
+
     $data = [
         ':sku'           => trim($_POST['sku'] ?? ''),
         ':name'          => trim($_POST['name'] ?? ''),
         ':slug'          => Security::slug($_POST['slug'] ?? $_POST['name'] ?? ''),
-        ':product_type'  => $_POST['product_type'] ?? 'simple',
+        ':product_type'  => $productType,
         ':category_id'   => Security::int($_POST['category_id'] ?? 0),
         ':price'         => Security::int($_POST['price'] ?? 0),
         ':compare_price' => Security::int($_POST['compare_price'] ?? 0) ?: null,
         ':stock'         => Security::int($_POST['stock'] ?? 0),
-        ':status'        => $_POST['status'] ?? 'active',
+        ':status'        => $status,
         ':summary'       => trim($_POST['summary'] ?? ''),
         ':weight_g'      => Security::int($_POST['weight_g'] ?? 0),
     ];

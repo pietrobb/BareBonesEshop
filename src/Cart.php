@@ -31,63 +31,90 @@ class Cart {
     }
 
     /**
-     * Enriched cart — real-time prices and stock from DB
+     * Enriched cart — real-time prices and stock from DB (batch queries)
      */
     public static function enriched(): array {
         $cart = self::get();
         if (empty($cart)) return ['items' => [], 'subtotal' => 0, 'count' => 0];
 
         $db = Db::get();
+
+        // Collect IDs for batch queries
+        $productIds = [];
+        $variantIds = [];
+        foreach ($cart as $item) {
+            $productIds[] = $item['product_id'];
+            if (!empty($item['variant_id'])) {
+                $variantIds[] = $item['variant_id'];
+            }
+        }
+        $productIds = array_unique($productIds);
+
+        // Batch fetch products
+        $products = [];
+        if (!empty($productIds)) {
+            $ph = implode(',', array_fill(0, count($productIds), '?'));
+            $stmt = $db->prepare("SELECT id, name, slug, images, price, sku, stock, currency FROM products WHERE id IN ({$ph}) AND status = 'active'");
+            $stmt->execute(array_values($productIds));
+            while ($row = $stmt->fetch()) $products[(int)$row['id']] = $row;
+        }
+
+        // Batch fetch variants
+        $variants = [];
+        if (!empty($variantIds)) {
+            $ph = implode(',', array_fill(0, count($variantIds), '?'));
+            $stmt = $db->prepare("SELECT v.id, v.product_id, v.sku, v.name, v.stock, v.price_delta, v.price_absolute FROM variants v WHERE v.id IN ({$ph})");
+            $stmt->execute(array_values($variantIds));
+            while ($row = $stmt->fetch()) $variants[(int)$row['id']] = $row;
+        }
+
         $items = [];
         $subtotal = 0;
 
         foreach ($cart as $key => $item) {
+            $product = $products[$item['product_id']] ?? null;
+            if (!$product) { unset($_SESSION['cart'][$key]); continue; }
+
             if (!empty($item['variant_id'])) {
-                $stmt = $db->prepare("
-                    SELECT p.name, p.slug, p.images,
-                           COALESCE(v.price_absolute, p.price + v.price_delta) as price,
-                           v.sku, v.name as variant_name, v.stock, p.currency
-                    FROM variants v
-                    JOIN products p ON p.id = v.product_id
-                    WHERE v.id = :vid AND p.status = 'active'
-                ");
-                $stmt->execute([':vid' => $item['variant_id']]);
-                $row = $stmt->fetch();
+                $variant = $variants[$item['variant_id']] ?? null;
+                if (!$variant) { unset($_SESSION['cart'][$key]); continue; }
+                $price = $variant['price_absolute'] !== null
+                    ? (int)$variant['price_absolute']
+                    : (int)$product['price'] + (int)$variant['price_delta'];
+                $sku = $variant['sku'];
+                $variantName = $variant['name'];
+                $stock = (int)$variant['stock'];
             } else {
-                $stmt = $db->prepare("
-                    SELECT name, slug, images, price, sku, '' as variant_name, stock, currency
-                    FROM products
-                    WHERE id = :pid AND status = 'active'
-                ");
-                $stmt->execute([':pid' => $item['product_id']]);
-                $row = $stmt->fetch();
+                $price = (int)$product['price'];
+                $sku = $product['sku'];
+                $variantName = '';
+                $stock = (int)$product['stock'];
             }
 
-            if (!$row) { unset($_SESSION['cart'][$key]); continue; }
-
-            $qty = min($item['qty'], $row['stock']); // cap at stock
+            $qty = min($item['qty'], $stock);
             if ($qty <= 0) { unset($_SESSION['cart'][$key]); continue; }
 
-            $total = $row['price'] * $qty;
+            $total = $price * $qty;
             $subtotal += $total;
-            $images = json_decode($row['images'] ?? '[]', true);
+            $images = json_decode($product['images'] ?? '[]', true);
+            $currency = $product['currency'] ?? 'eur';
 
             $items[] = [
                 'key'          => $key,
                 'product_id'   => $item['product_id'],
                 'variant_id'   => $item['variant_id'],
-                'sku'          => $row['sku'],
-                'name'         => $row['name'],
-                'variant_name' => $row['variant_name'],
-                'slug'         => $row['slug'],
+                'sku'          => $sku,
+                'name'         => $product['name'],
+                'variant_name' => $variantName,
+                'slug'         => $product['slug'],
                 'image'        => $images[0] ?? null,
-                'price'        => (int)$row['price'],
-                'price_formatted' => I18n::price((int)$row['price'], $row['currency'] ?? 'eur'),
+                'price'        => $price,
+                'price_formatted' => I18n::price($price, $currency),
                 'qty'          => $qty,
                 'total'        => $total,
-                'total_formatted' => I18n::price($total, $row['currency'] ?? 'eur'),
-                'stock'        => (int)$row['stock'],
-                'currency'     => $row['currency'] ?? 'eur',
+                'total_formatted' => I18n::price($total, $currency),
+                'stock'        => $stock,
+                'currency'     => $currency,
             ];
         }
 

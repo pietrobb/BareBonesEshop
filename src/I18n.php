@@ -8,6 +8,14 @@ class I18n {
     private static ?array $lang = null;
     private static ?array $catalog = null;
     private static ?array $stores = null;
+    private static ?array $cfg = null;
+
+    private static function cfg(): array {
+        if (!self::$cfg) {
+            self::$cfg = require __DIR__ . '/../config.php';
+        }
+        return self::$cfg;
+    }
 
     public static function setLocale(string $locale): void {
         self::$locale = $locale;
@@ -36,7 +44,7 @@ class I18n {
 
     /** Translate product row — fallback to default locale */
     public static function product(array $row): array {
-        $cfg = require __DIR__ . '/../config.php';
+        $cfg = self::cfg();
         if (self::$locale === ($cfg['default_locale'] ?? 'sk')) {
             return $row; // base language, no translation needed
         }
@@ -59,7 +67,7 @@ class I18n {
 
     /** Translate category row */
     public static function category(array $row): array {
-        $cfg = require __DIR__ . '/../config.php';
+        $cfg = self::cfg();
         if (self::$locale === ($cfg['default_locale'] ?? 'sk')) {
             return $row;
         }

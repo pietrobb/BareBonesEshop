@@ -408,12 +408,19 @@ class Import {
         return (int)round($price * 100);
     }
 
-    /** Generate URL-safe slug */
+    /** Generate URL-safe slug with proper Central European transliteration */
     public static function slugify(string $text): string {
-        // Transliterate
-        if (function_exists('iconv')) {
-            $text = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $text);
-        }
+        // Manual transliteration for SK/CZ/DE/PL diacritics (iconv fails on Windows)
+        static $map = [
+            'á'=>'a','ä'=>'a','č'=>'c','ď'=>'d','é'=>'e','ě'=>'e','í'=>'i','ĺ'=>'l','ľ'=>'l',
+            'ň'=>'n','ó'=>'o','ô'=>'o','ö'=>'o','ŕ'=>'r','ř'=>'r','š'=>'s','ť'=>'t','ú'=>'u',
+            'ů'=>'u','ü'=>'u','ý'=>'y','ž'=>'z','Á'=>'a','Ä'=>'a','Č'=>'c','Ď'=>'d','É'=>'e',
+            'Ě'=>'e','Í'=>'i','Ĺ'=>'l','Ľ'=>'l','Ň'=>'n','Ó'=>'o','Ô'=>'o','Ö'=>'o','Ŕ'=>'r',
+            'Ř'=>'r','Š'=>'s','Ť'=>'t','Ú'=>'u','Ů'=>'u','Ü'=>'u','Ý'=>'y','Ž'=>'z',
+            'ß'=>'ss','à'=>'a','â'=>'a','è'=>'e','ê'=>'e','ë'=>'e','î'=>'i','ï'=>'i',
+            'ò'=>'o','ù'=>'u','û'=>'u','ç'=>'c','ñ'=>'n',
+        ];
+        $text = strtr($text, $map);
         $text = strtolower($text);
         $text = preg_replace('/[^a-z0-9]+/', '-', $text);
         return trim($text, '-');
@@ -422,9 +429,14 @@ class Import {
     /** Normalize string for FTS token */
     private static function normalizeToken(string $s): string {
         $s = mb_strtolower($s);
-        if (function_exists('iconv')) {
-            $s = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $s);
-        }
+        // Manual transliteration (iconv fails on Windows for SK/CZ/DE diacritics)
+        static $map = [
+            'á'=>'a','ä'=>'a','č'=>'c','ď'=>'d','é'=>'e','ě'=>'e','í'=>'i','ĺ'=>'l','ľ'=>'l',
+            'ň'=>'n','ó'=>'o','ô'=>'o','ö'=>'o','ŕ'=>'r','ř'=>'r','š'=>'s','ť'=>'t','ú'=>'u',
+            'ů'=>'u','ü'=>'u','ý'=>'y','ž'=>'z','ß'=>'ss','à'=>'a','â'=>'a','è'=>'e','ê'=>'e',
+            'ë'=>'e','î'=>'i','ï'=>'i','ò'=>'o','ù'=>'u','û'=>'u','ç'=>'c','ñ'=>'n',
+        ];
+        $s = strtr($s, $map);
         $s = preg_replace('/[^a-z0-9]/', '_', $s);
         return trim($s, '_');
     }

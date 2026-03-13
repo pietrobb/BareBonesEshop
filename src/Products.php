@@ -310,10 +310,11 @@ class Products {
         $product['images'] = json_decode($product['images'] ?? '[]', true);
         $product['attrs'] = json_decode($product['attrs'] ?? '{}', true);
         $product['tags'] = json_decode($product['tags'] ?? '[]', true);
-        $product['price_formatted'] = I18n::price($product['price'], $product['currency'] ?? 'eur');
+        $currency = $product['currency'] ?? null;
+        $product['price_formatted'] = I18n::price($product['price'], $currency);
 
         if (!empty($product['compare_price'])) {
-            $product['compare_price_formatted'] = I18n::price($product['compare_price'], $product['currency'] ?? 'eur');
+            $product['compare_price_formatted'] = I18n::price($product['compare_price'], $currency);
             $product['discount_percent'] = round(
                 (1 - $product['price'] / $product['compare_price']) * 100
             );
@@ -327,9 +328,14 @@ class Products {
 
     private static function normalizeToken(string $s): string {
         $s = mb_strtolower($s);
-        if (function_exists('iconv')) {
-            $s = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $s);
-        }
+        // Manual transliteration (iconv fails on Windows for SK/CZ/DE diacritics)
+        static $map = [
+            'á'=>'a','ä'=>'a','č'=>'c','ď'=>'d','é'=>'e','ě'=>'e','í'=>'i','ĺ'=>'l','ľ'=>'l',
+            'ň'=>'n','ó'=>'o','ô'=>'o','ö'=>'o','ŕ'=>'r','ř'=>'r','š'=>'s','ť'=>'t','ú'=>'u',
+            'ů'=>'u','ü'=>'u','ý'=>'y','ž'=>'z','ß'=>'ss','à'=>'a','â'=>'a','è'=>'e','ê'=>'e',
+            'ë'=>'e','î'=>'i','ï'=>'i','ò'=>'o','ù'=>'u','û'=>'u','ç'=>'c','ñ'=>'n',
+        ];
+        $s = strtr($s, $map);
         $s = preg_replace('/[^a-z0-9]/', '_', $s);
         return trim($s, '_');
     }

@@ -7,19 +7,7 @@
  * Run via cron: * * * * * php /path/to/cli/worker.php
  * Exclusive lock prevents multiple instances.
  */
-require_once __DIR__ . '/../src/Db.php';
-require_once __DIR__ . '/../src/Security.php';
-require_once __DIR__ . '/../src/I18n.php';
-require_once __DIR__ . '/../src/Products.php';
-require_once __DIR__ . '/../src/Categories.php';
-require_once __DIR__ . '/../src/Search.php';
-require_once __DIR__ . '/../src/Cache.php';
-require_once __DIR__ . '/../src/Orders.php';
-require_once __DIR__ . '/../src/OrderWorkflow.php';
-require_once __DIR__ . '/../src/AuditLog.php';
-require_once __DIR__ . '/../src/Idempotency.php';
-require_once __DIR__ . '/../src/JobQueue.php';
-require_once __DIR__ . '/../src/Import.php';
+require_once __DIR__ . '/../src/autoload.php';
 
 $once = in_array('--once', $argv ?? []);
 $verbose = in_array('--verbose', $argv ?? []);
@@ -71,6 +59,9 @@ do {
     }
 
     foreach ($jobs as $job) {
+        // Skip jobs waiting for exponential backoff
+        if (!JobQueue::isReady($job)) continue;
+
         $type = $job['type'] ?? 'unknown';
         $handler = $handlers[$type] ?? null;
 

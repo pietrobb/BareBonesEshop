@@ -191,11 +191,13 @@ class Orders {
     }
 
     /**
-     * Set refund ID
+     * Record refund ID (in notes, preserving original payment_id)
      */
     public static function setRefundId(int $orderId, string $refundId): void {
-        $stmt = Db::get()->prepare("UPDATE orders SET payment_id = :rid WHERE id = :id");
-        $stmt->execute([':rid' => 'refund:' . $refundId, ':id' => $orderId]);
+        $order = self::byId($orderId);
+        $notes = trim(($order['notes'] ?? '') . "\nRefund: " . $refundId);
+        $stmt = Db::get()->prepare("UPDATE orders SET notes = :notes WHERE id = :id");
+        $stmt->execute([':notes' => $notes, ':id' => $orderId]);
     }
 
     /**
@@ -219,7 +221,11 @@ class Orders {
     /**
      * Generate unique order number: ORD-YYYYMMDD-XXXX
      */
-    private static function generateOrderNumber(): string {
+    private static function generateOrderNumber(int $attempt = 0): string {
+        if ($attempt >= 10) {
+            throw new \RuntimeException('Failed to generate unique order number after 10 attempts');
+        }
+
         $date = date('Ymd');
         $rand = strtoupper(substr(bin2hex(random_bytes(2)), 0, 4));
         $number = "ORD-{$date}-{$rand}";
@@ -228,7 +234,7 @@ class Orders {
         $stmt = Db::get()->prepare("SELECT COUNT(*) FROM orders WHERE order_number = :num");
         $stmt->execute([':num' => $number]);
         if ((int)$stmt->fetchColumn() > 0) {
-            return self::generateOrderNumber(); // retry with new random
+            return self::generateOrderNumber($attempt + 1);
         }
 
         return $number;

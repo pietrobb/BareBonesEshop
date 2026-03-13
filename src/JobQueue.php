@@ -63,6 +63,14 @@ class JobQueue {
     }
 
     /**
+     * Check if job is ready to process (respects exponential backoff)
+     */
+    public static function isReady(array $job): bool {
+        if (empty($job['retry_after'])) return true;
+        return strtotime($job['retry_after']) <= time();
+    }
+
+    /**
      * Move job to processing
      */
     public static function markProcessing(array $job): string {
@@ -84,7 +92,7 @@ class JobQueue {
     }
 
     /**
-     * Mark job as failed or retry
+     * Mark job as failed or retry (with exponential backoff)
      */
     public static function fail(string $procFile, array $job, string $error): void {
         $job['attempts'] = ($job['attempts'] ?? 0) + 1;
@@ -96,7 +104,9 @@ class JobQueue {
             file_put_contents($failDir . '/' . basename($procFile), json_encode($job, JSON_PRETTY_PRINT));
             @unlink($procFile);
         } else {
-            // Retry — move back to pending
+            // Retry with exponential backoff: 4s, 16s, 64s...
+            $delaySec = (int)pow(4, $job['attempts']);
+            $job['retry_after'] = date('c', time() + $delaySec);
             $pendingDir = self::dir() . '/pending';
             file_put_contents($pendingDir . '/' . basename($procFile), json_encode($job, JSON_PRETTY_PRINT));
             @unlink($procFile);

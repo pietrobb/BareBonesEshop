@@ -7,10 +7,7 @@
  *   --fresh  Clear all existing data first
  *   --limit  Import only N articles (for testing)
  */
-require_once __DIR__ . '/../src/Db.php';
-require_once __DIR__ . '/../src/Security.php';
-require_once __DIR__ . '/../src/I18n.php';
-require_once __DIR__ . '/../src/Import.php';
+require_once __DIR__ . '/../src/autoload.php';
 
 $args = getopt('', ['fresh', 'limit:']);
 $fresh = isset($args['fresh']);

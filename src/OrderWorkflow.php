@@ -119,6 +119,9 @@ class OrderWorkflow {
      * Is terminal state?
      */
     public static function isTerminal(string $status): bool {
-        return empty(self::TRANSITIONS[$status] ?? ['placeholder']);
+        if (!array_key_exists($status, self::TRANSITIONS)) {
+            throw new \InvalidArgumentException("Unknown order status: '{$status}'");
+        }
+        return empty(self::TRANSITIONS[$status]);
     }
 }

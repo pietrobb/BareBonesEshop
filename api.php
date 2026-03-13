@@ -4,23 +4,7 @@
  * All dynamic operations: products, categories, search, cart.
  * Cache-first, JSON responses, CSRF for POST.
  */
-require_once __DIR__ . '/src/Db.php';
-require_once __DIR__ . '/src/Security.php';
-require_once __DIR__ . '/src/I18n.php';
-require_once __DIR__ . '/src/Products.php';
-require_once __DIR__ . '/src/Categories.php';
-require_once __DIR__ . '/src/Search.php';
-require_once __DIR__ . '/src/Cache.php';
-require_once __DIR__ . '/src/Orders.php';
-require_once __DIR__ . '/src/OrderWorkflow.php';
-require_once __DIR__ . '/src/AuditLog.php';
-require_once __DIR__ . '/src/Idempotency.php';
-require_once __DIR__ . '/src/JobQueue.php';
-require_once __DIR__ . '/src/Cart.php';
-require_once __DIR__ . '/src/Pricing.php';
-require_once __DIR__ . '/src/Shipping.php';
-require_once __DIR__ . '/src/Tax.php';
-require_once __DIR__ . '/src/TecDoc.php';
+require_once __DIR__ . '/src/autoload.php';
 
 // Security headers
 Security::headers();
@@ -28,10 +12,8 @@ Security::headers();
 // JSON response
 header('Content-Type: application/json; charset=utf-8');
 
-// Session
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+// Session (with secure cookie params)
+Security::sessionStart();
 
 // Detect locale
 $uri = $_SERVER['REQUEST_URI'] ?? '/';
@@ -256,15 +238,7 @@ function apiCartAdd(): array {
         return ['error' => 'Product not found'];
     }
 
-    $key = $variantId ? "v_{$variantId}" : "p_{$productId}";
-    if (!isset($_SESSION['cart'][$key])) {
-        $_SESSION['cart'][$key] = [
-            'product_id' => $productId,
-            'variant_id' => $variantId,
-            'qty'        => 0,
-        ];
-    }
-    $_SESSION['cart'][$key]['qty'] += $qty;
+    Cart::add($productId, $variantId, $qty);
 
     return ['success' => true, 'cart' => apiCart()];
 }
@@ -282,15 +256,9 @@ function apiCartUpdate(): array {
 
     $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
     $key = $input['key'] ?? '';
-    $qty = Security::int($input['qty'] ?? 0);
+    $qty = min(99, Security::int($input['qty'] ?? 0));
 
-    if ($qty <= 0) {
-        unset($_SESSION['cart'][$key]);
-    } else {
-        if (isset($_SESSION['cart'][$key])) {
-            $_SESSION['cart'][$key]['qty'] = min(99, $qty);
-        }
-    }
+    Cart::update($key, $qty);
 
     return ['success' => true, 'cart' => apiCart()];
 }
@@ -301,23 +269,15 @@ function apiCartRestore(): array {
         return ['error' => 'Method not allowed'];
     }
 
+    if (!Security::csrfValidate()) {
+        http_response_code(403);
+        return ['error' => 'Invalid CSRF token'];
+    }
+
     $input = json_decode(file_get_contents('php://input'), true) ?? [];
     if (!is_array($input)) return ['error' => 'Invalid data'];
 
-    foreach ($input as $item) {
-        $productId = Security::int($item['product_id'] ?? 0);
-        $variantId = isset($item['variant_id']) ? Security::int($item['variant_id']) : null;
-        $qty = max(1, Security::int($item['qty'] ?? 1));
-
-        if ($productId > 0) {
-            $key = $variantId ? "v_{$variantId}" : "p_{$productId}";
-            $_SESSION['cart'][$key] = [
-                'product_id' => $productId,
-                'variant_id' => $variantId,
-                'qty'        => $qty,
-            ];
-        }
-    }
+    Cart::restore($input);
 
     return ['success' => true, 'cart' => apiCart()];
 }
@@ -366,10 +326,18 @@ function apiCheckout(): array {
         return ['error' => 'Cart is empty'];
     }
 
+    // Batch weight query instead of N+1
+    $productIds = array_unique(array_column($cart['items'], 'product_id'));
     $totalWeight = 0;
-    foreach ($cart['items'] as $item) {
-        $product = Products::byId($item['product_id']);
-        $totalWeight += ($product['weight_g'] ?? 0) * $item['qty'];
+    if (!empty($productIds)) {
+        $ph = implode(',', array_fill(0, count($productIds), '?'));
+        $stmt = Db::get()->prepare("SELECT id, weight_g FROM products WHERE id IN ({$ph})");
+        $stmt->execute(array_values($productIds));
+        $weights = [];
+        while ($row = $stmt->fetch()) $weights[(int)$row['id']] = (int)$row['weight_g'];
+        foreach ($cart['items'] as $item) {
+            $totalWeight += ($weights[$item['product_id']] ?? 0) * $item['qty'];
+        }
     }
     $shippingCost = Shipping::calculate($shippingMethod, $country, $totalWeight, $cart['subtotal']);
     if ($shippingCost < 0) $shippingCost = 0;
@@ -401,7 +369,8 @@ function apiCheckout(): array {
         Cart::clear();
 
         $order = Orders::byId($orderId);
-        JobQueue::push('email_send', ['template' => 'order-confirmation', 'to' => $email, 'order_id' => $orderId]);
+        // Order confirmation email is sent via Stripe webhook (onPaymentCompleted)
+        // to avoid duplicate emails. Admin notification is sent immediately.
         JobQueue::push('email_send', ['template' => 'admin-notification', 'to' => 'admin', 'order_id' => $orderId]);
 
         return [
@@ -421,11 +390,14 @@ function apiWebhookStripe(): array {
     $cfg = require __DIR__ . '/config.php';
     $secret = $cfg['stripe_webhook_secret'] ?? '';
 
-    if ($secret && $sigHeader) {
-        if (!verifyStripeSignature($payload, $sigHeader, $secret)) {
-            http_response_code(400);
-            return ['error' => 'Invalid signature'];
-        }
+    if (!$secret) {
+        http_response_code(503);
+        return ['error' => 'Webhook not configured'];
+    }
+
+    if (!verifyStripeSignature($payload, $sigHeader, $secret)) {
+        http_response_code(400);
+        return ['error' => 'Invalid signature'];
     }
 
     $event = json_decode($payload, true);

@@ -35,17 +35,25 @@ class Shipping {
         // Pickup is always free
         if (($methodCfg['price'] ?? null) === 0) return 0;
 
-        // Determine zone for country
-        $zone = self::zoneForCountry($country);
-        if (!$zone) return 0;
+        // Determine zones for country (may belong to multiple: local + domestic)
+        $zones = self::zonesForCountry($country);
+        if (empty($zones)) return 0;
 
-        // Check if method is available for this zone
-        if (isset($methodCfg['available_zones'])) {
-            if (!in_array($zone, $methodCfg['available_zones'])) return -1; // unavailable
+        // Check zone availability and find matching rates
+        $rates = null;
+        foreach ($zones as $zone) {
+            // If method restricts zones, check if this zone is allowed
+            if (isset($methodCfg['available_zones']) && !in_array($zone, $methodCfg['available_zones'])) {
+                continue;
+            }
+            // Check if this zone has rates
+            if (isset($methodCfg['rates'][$zone])) {
+                $rates = $methodCfg['rates'][$zone];
+                break;
+            }
         }
 
-        $rates = $methodCfg['rates'][$zone] ?? null;
-        if (!$rates) return -1; // no rate for this zone
+        if (!$rates) return -1; // no rate for any matching zone
 
         // Free shipping threshold
         if (!empty($methodCfg['free_above']) && $subtotal >= $methodCfg['free_above']) {
@@ -64,18 +72,20 @@ class Shipping {
      */
     public static function availableMethods(string $country, int $subtotal = 0): array {
         $cfg = self::config();
-        $zone = self::zoneForCountry($country);
+        $zones = self::zonesForCountry($country);
         $locale = class_exists('I18n') ? I18n::locale() : 'en';
         $methods = [];
 
         foreach ($cfg['methods'] ?? [] as $key => $method) {
-            // Check zone availability
-            if (isset($method['available_zones'])) {
-                if (!in_array($zone, $method['available_zones'])) continue;
+            // Check if any zone matches for this method
+            $hasZone = false;
+            foreach ($zones as $zone) {
+                if (isset($method['available_zones']) && !in_array($zone, $method['available_zones'])) continue;
+                if (isset($method['rates']) && !isset($method['rates'][$zone])) continue;
+                $hasZone = true;
+                break;
             }
-
-            // Check if rates exist for this zone (skip if no rates)
-            if (isset($method['rates']) && !isset($method['rates'][$zone])) continue;
+            if (!$hasZone && !empty($zones)) continue;
 
             $price = self::calculate($key, $country, 0, $subtotal);
             if ($price < 0) continue; // unavailable
@@ -95,28 +105,36 @@ class Shipping {
     }
 
     /**
-     * Determine shipping zone for country code
+     * Determine shipping zone for country code (returns first match)
      */
     public static function zoneForCountry(string $country): ?string {
+        $zones = self::zonesForCountry($country);
+        return $zones[0] ?? null;
+    }
+
+    /**
+     * Get ALL matching zones for a country (for methods with overlapping zones)
+     */
+    public static function zonesForCountry(string $country): array {
         $cfg = self::config();
         $country = strtoupper($country);
+        $zones = [];
 
-        // Check specific zones first (most specific → least specific)
         foreach ($cfg['zones'] ?? [] as $zoneName => $zone) {
             $countries = $zone['countries'] ?? [];
             if (in_array($country, $countries)) {
-                return $zoneName;
+                $zones[] = $zoneName;
             }
         }
 
-        // Check wildcard zone
+        // Wildcard zone as fallback
         foreach ($cfg['zones'] ?? [] as $zoneName => $zone) {
-            if (in_array('*', $zone['countries'] ?? [])) {
-                return $zoneName;
+            if (in_array('*', $zone['countries'] ?? []) && !in_array($zoneName, $zones)) {
+                $zones[] = $zoneName;
             }
         }
 
-        return null;
+        return $zones;
     }
 
     /**

@@ -5,6 +5,32 @@
  */
 class Security {
     // ============================================================
+    // Config cache — avoid re-reading config.php on every call
+    // ============================================================
+    private static ?array $cfg = null;
+
+    private static function cfg(): array {
+        if (!self::$cfg) {
+            self::$cfg = require __DIR__ . '/../config.php';
+        }
+        return self::$cfg;
+    }
+
+    // ============================================================
+    // Session — secure cookie params + start
+    // ============================================================
+    public static function sessionStart(): void {
+        if (session_status() === PHP_SESSION_NONE) {
+            session_set_cookie_params([
+                'httponly' => true,
+                'secure'   => !empty($_SERVER['HTTPS']),
+                'samesite' => 'Lax',
+            ]);
+            session_start();
+        }
+    }
+
+    // ============================================================
     // HTTP headers — call once at the beginning of every request
     // ============================================================
     public static function headers(): void {
@@ -13,6 +39,9 @@ class Security {
         header("X-XSS-Protection: 1; mode=block");
         header("Referrer-Policy: strict-origin-when-cross-origin");
         header("Permissions-Policy: camera=(), microphone=(), geolocation=()");
+        if (!empty($_SERVER['HTTPS'])) {
+            header("Strict-Transport-Security: max-age=31536000; includeSubDomains");
+        }
         header("Content-Security-Policy: "
             . "default-src 'self'; "
             . "script-src 'self' https://js.stripe.com; "
@@ -44,10 +73,11 @@ class Security {
     // Rate limiting — dedicated SQLite DB
     // ============================================================
     private static ?PDO $rateDb = null;
+    private static int $rateDbLastCleanup = 0;
 
     private static function rateDb(): PDO {
         if (!self::$rateDb) {
-            $cfg = require __DIR__ . '/../config.php';
+            $cfg = self::cfg();
             $cacheDir = $cfg['cache_dir'] ?? __DIR__ . '/../cache';
             if (!is_dir($cacheDir)) mkdir($cacheDir, 0750, true);
 
@@ -58,6 +88,10 @@ class Security {
                 key TEXT NOT NULL, ts INTEGER NOT NULL
             )');
             self::$rateDb->exec('CREATE INDEX IF NOT EXISTS idx_hits ON hits(key, ts)');
+            self::$rateDbLastCleanup = time();
+            self::$rateDb->exec("DELETE FROM hits WHERE ts < " . (time() - 300));
+        } elseif (time() - self::$rateDbLastCleanup > 60) {
+            self::$rateDbLastCleanup = time();
             self::$rateDb->exec("DELETE FROM hits WHERE ts < " . (time() - 300));
         }
         return self::$rateDb;
@@ -88,6 +122,10 @@ class Security {
     // ============================================================
     // Input sanitization
     // ============================================================
+    public static function clean(string $input): string {
+        return trim(strip_tags($input));
+    }
+
     public static function slug(string $input): string {
         $s = strtolower($input);
         $s = preg_replace('/[^a-z0-9]+/', '-', $s);
@@ -108,7 +146,7 @@ class Security {
     // IP address — behind proxy/load balancer
     // ============================================================
     public static function clientIp(): string {
-        $cfg = require __DIR__ . '/../config.php';
+        $cfg = self::cfg();
         $trusted = $cfg['trusted_proxies'] ?? [];
 
         $remoteAddr = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
@@ -125,7 +163,13 @@ class Security {
     // Admin authentication — with brute-force protection
     // ============================================================
     public static function adminAuth(): bool {
-        $cfg = require __DIR__ . '/../config.php';
+        $cfg = self::cfg();
+
+        if (empty($cfg['admin_password'])) {
+            http_response_code(503);
+            exit('Admin not configured. Set admin_password in config.php (use password_hash()).');
+        }
+
         $user = $_SERVER['PHP_AUTH_USER'] ?? '';
         $pass = $_SERVER['PHP_AUTH_PW'] ?? '';
 
@@ -137,8 +181,8 @@ class Security {
         $lockFile = $rateDir . '/admin_' . md5($ip);
         $lockData = file_exists($lockFile) ? json_decode(file_get_contents($lockFile), true) : null;
 
-        if ($lockData && $lockData['failures'] >= 5) {
-            $lockoutSec = min(300, (int)pow(2, $lockData['failures'] - 3));
+        if ($lockData && $lockData['failures'] >= 3) {
+            $lockoutSec = min(300, (int)pow(2, $lockData['failures'] - 1));
             if (time() - $lockData['last_attempt'] < $lockoutSec) {
                 http_response_code(429);
                 header('Retry-After: ' . $lockoutSec);
@@ -149,6 +193,9 @@ class Security {
         if ($user === $cfg['admin_user'] && !empty($cfg['admin_password'])
             && password_verify($pass, $cfg['admin_password'])) {
             if (file_exists($lockFile)) unlink($lockFile);
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                session_regenerate_id(true);
+            }
             return true;
         }
 

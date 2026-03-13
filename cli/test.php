@@ -5,25 +5,7 @@
  * Usage: php cli/test.php
  */
 
-require_once __DIR__ . '/../src/Db.php';
-require_once __DIR__ . '/../src/Security.php';
-require_once __DIR__ . '/../src/I18n.php';
-require_once __DIR__ . '/../src/Import.php';
-require_once __DIR__ . '/../src/Products.php';
-require_once __DIR__ . '/../src/Categories.php';
-require_once __DIR__ . '/../src/Search.php';
-require_once __DIR__ . '/../src/Template.php';
-require_once __DIR__ . '/../src/Cache.php';
-require_once __DIR__ . '/../src/Cart.php';
-require_once __DIR__ . '/../src/Orders.php';
-require_once __DIR__ . '/../src/OrderWorkflow.php';
-require_once __DIR__ . '/../src/AuditLog.php';
-require_once __DIR__ . '/../src/Idempotency.php';
-require_once __DIR__ . '/../src/JobQueue.php';
-require_once __DIR__ . '/../src/Pricing.php';
-require_once __DIR__ . '/../src/Shipping.php';
-require_once __DIR__ . '/../src/Tax.php';
-require_once __DIR__ . '/../src/TecDoc.php';
+require_once __DIR__ . '/../src/autoload.php';
 
 // Test framework
 $tests = 0;

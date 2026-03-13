@@ -12,13 +12,7 @@
  *   Price range filter: 2-5ms
  *   From flat-file cache: <1ms
  */
-require_once __DIR__ . '/../src/Db.php';
-require_once __DIR__ . '/../src/Security.php';
-require_once __DIR__ . '/../src/I18n.php';
-require_once __DIR__ . '/../src/Products.php';
-require_once __DIR__ . '/../src/Categories.php';
-require_once __DIR__ . '/../src/Search.php';
-require_once __DIR__ . '/../src/Cache.php';
+require_once __DIR__ . '/../src/autoload.php';
 
 I18n::setLocale('sk');
 

@@ -5,10 +5,18 @@
  */
 class Cache {
     private static ?string $cacheDir = null;
+    private static ?array $cfg = null;
+
+    private static function cfg(): array {
+        if (!self::$cfg) {
+            self::$cfg = require __DIR__ . '/../config.php';
+        }
+        return self::$cfg;
+    }
 
     private static function dir(): string {
         if (!self::$cacheDir) {
-            $cfg = require __DIR__ . '/../config.php';
+            $cfg = self::cfg();
             self::$cacheDir = $cfg['cache_dir'] ?? __DIR__ . '/../cache';
         }
         return self::$cacheDir;
@@ -32,10 +40,12 @@ class Cache {
             if (filemtime($file) < $flushTime) return null;
         }
 
-        // Check TTL
+        // Check TTL (use config default when ttl=0 or not specified)
         if ($ttl !== null) {
-            $cfg = require __DIR__ . '/../config.php';
-            $ttl = $ttl ?: ($cfg['cache_ttl'] ?? 3600);
+            if ($ttl <= 0) {
+                $cfg = self::cfg();
+                $ttl = $cfg['cache_ttl'] ?? 3600;
+            }
             if ((time() - filemtime($file)) > $ttl) return null;
         }
 
@@ -78,22 +88,31 @@ class Cache {
     }
 
     /**
-     * Invalidate — schedule rebuild, don't delete existing file
+     * Invalidate — mark as stale, existing content serves until rebuilt
      */
     public static function invalidate(string $path): void {
-        // In a full system, this would push to JobQueue
-        // For now, just delete the cache file
         $file = self::path($path);
-        if (file_exists($file)) @unlink($file);
+        if (file_exists($file)) {
+            // Set mtime far in the past so TTL checks treat it as expired,
+            // but file still exists for stale-while-revalidate
+            touch($file, 1);
+        }
+        // Queue rebuild if JobQueue is available
+        if (class_exists('JobQueue')) {
+            JobQueue::push('cache_rebuild', ['path' => $path], 1);
+        }
     }
 
     /**
-     * Invalidate all files with a prefix
+     * Invalidate all files with a prefix (mark stale, don't delete)
      */
     public static function invalidatePrefix(string $prefix): void {
         $dir = self::path($prefix);
         if (is_dir($dir)) {
-            self::deleteDir($dir);
+            self::touchDirStale($dir);
+        }
+        if (class_exists('JobQueue')) {
+            JobQueue::push('cache_rebuild', ['prefix' => $prefix], 2);
         }
     }
 
@@ -129,6 +148,21 @@ class Cache {
         return self::dir() . '/' . $key;
     }
 
+    /** Mark all files in directory as stale (set mtime to past) */
+    private static function touchDirStale(string $dir): void {
+        if (!is_dir($dir)) return;
+        $files = array_diff(scandir($dir), ['.', '..']);
+        foreach ($files as $file) {
+            $path = $dir . '/' . $file;
+            if (is_dir($path)) {
+                self::touchDirStale($path);
+            } else {
+                touch($path, 1);
+            }
+        }
+    }
+
+    /** Delete directory recursively (used only by flush for cleanup) */
     private static function deleteDir(string $dir): void {
         if (!is_dir($dir)) return;
         $files = array_diff(scandir($dir), ['.', '..']);
