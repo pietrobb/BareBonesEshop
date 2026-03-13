@@ -166,7 +166,7 @@ function handleCacheRebuild(array $payload, array $job): void {
         }
 
         // Pre-computed price cache per customer group
-        $allProducts = $db->query("SELECT id, sku, price, category_id FROM products WHERE status = 'active'")->fetchAll();
+        $allProducts = Db::get()->query("SELECT id, sku, price, category_id FROM products WHERE status = 'active'")->fetchAll();
         $pricingGroups = array_keys(Pricing::config()['customer_groups'] ?? ['guest' => []]);
         if (!in_array('guest', $pricingGroups, true)) array_unshift($pricingGroups, 'guest');
         foreach ($pricingGroups as $group) {
@@ -568,6 +568,8 @@ function handleImportProcess(array $payload, array $job): void {
     $logEntry = date('c') . " | IMPORT: {$result['imported']} ok, {$errCount} errors | FILE: {$file}\n";
     file_put_contents($logDir . '/imports.log', $logEntry, FILE_APPEND | LOCK_EX);
 
-    // Clean up temp file
-    @unlink($file);
+    // Clean up temp file only on success
+    if (empty($result['errors'])) {
+        @unlink($file);
+    }
 }

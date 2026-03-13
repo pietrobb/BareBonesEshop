@@ -459,8 +459,14 @@ function apiCheckout(): array {
         ? ['code' => $couponCode, 'discount' => $couponDiscount]
         : null;
 
+    // Filter out unavailable items before order creation
+    $availableItems = array_filter($cart['items'], fn($item) => $item['available'] ?? true);
+    if (empty($availableItems)) {
+        return ['success' => false, 'error' => 'Žiadne dostupné produkty v košíku.'];
+    }
+
     try {
-        $orderId = Orders::create($cart['items'], $customer, $paymentMethod, $coupon);
+        $orderId = Orders::create($availableItems, $customer, $paymentMethod, $coupon);
 
         Cart::clear();
 

@@ -781,6 +781,7 @@ function handleExport(): void {
 }
 
 function handleOrderStatus(): void {
+    Security::adminRequire('orders.edit');
     $orderId = Security::int($_GET['id'] ?? 0);
     $newStatus = $_POST['new_status'] ?? '';
     $note = trim($_POST['note'] ?? '');

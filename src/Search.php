@@ -130,7 +130,14 @@ class Search {
         ");
         $stmt->execute([':q' => $ftsQuery, ':limit' => $perPage, ':offset' => $offset]);
 
-        return $stmt->fetchAll();
+        $results = $stmt->fetchAll();
+        // Sanitize name_hl: escape any HTML except <mark> tags from FTS5 highlight()
+        foreach ($results as &$r) {
+            if (isset($r['name_hl'])) {
+                $r['name_hl'] = strip_tags($r['name_hl'], '<mark>');
+            }
+        }
+        return $results;
     }
 
     /**

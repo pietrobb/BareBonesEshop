@@ -26,6 +26,9 @@ RewriteCond %{QUERY_STRING} !locale=
 RewriteCond %{DOCUMENT_ROOT}/cache/sk/categories.json -f
 RewriteRule ^api\.php$ cache/sk/categories.json [L,T=application/json]
 
+# Block sensitive cache files (customer-group pricing)
+RewriteRule ^cache/prices/ - [F,L]
+
 # Static cache files served directly
 RewriteCond %{REQUEST_URI} ^/cache/ [NC]
 RewriteCond %{REQUEST_FILENAME} -f

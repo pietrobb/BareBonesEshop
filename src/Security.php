@@ -170,7 +170,7 @@ class Security {
         'owner'       => ['*'],
         'manager'     => ['products.*', 'orders.*', 'customers.view', 'reports.view', 'import', 'cache'],
         'editor'      => ['products.edit', 'products.view', 'categories.edit', 'media.upload'],
-        'fulfillment' => ['orders.view', 'orders.ship', 'orders.print'],
+        'fulfillment' => ['orders.view', 'orders.edit', 'orders.ship', 'orders.print'],
         'viewer'      => ['products.view', 'orders.view', 'reports.view'],
     ];
 
@@ -264,18 +264,22 @@ class Security {
         return $_SESSION['admin_user'] ?? 'admin';
     }
 
+    private static ?array $cachedRolesData = null;
+
     /** Check if current admin has a permission */
     public static function adminCan(string $permission): bool {
         $role = self::adminRole();
         $perms = self::$rolePermissions[$role] ?? [];
 
-        // Load custom roles from admin-roles.json if present
-        $rolesFile = __DIR__ . '/../admin-roles.json';
-        if (file_exists($rolesFile)) {
-            $rolesData = json_decode(file_get_contents($rolesFile), true);
-            if (isset($rolesData['roles'][$role]['permissions'])) {
-                $perms = $rolesData['roles'][$role]['permissions'];
-            }
+        // Load custom roles from admin-roles.json (cached per request)
+        if (self::$cachedRolesData === null) {
+            $rolesFile = __DIR__ . '/../admin-roles.json';
+            self::$cachedRolesData = file_exists($rolesFile)
+                ? (json_decode(file_get_contents($rolesFile), true) ?: [])
+                : [];
+        }
+        if (isset(self::$cachedRolesData['roles'][$role]['permissions'])) {
+            $perms = self::$cachedRolesData['roles'][$role]['permissions'];
         }
 
         foreach ($perms as $perm) {

@@ -257,19 +257,18 @@ class Orders {
      */
     public static function restoreStock(int $orderId): void {
         $db = Db::get();
-
-        // Guard against double restore — check if already restored
-        $order = self::byId($orderId);
-        if ($order && str_contains($order['notes'] ?? '', 'stock_restored')) {
-            return;
-        }
-
         $items = self::items($orderId);
 
         $ownTransaction = !$db->inTransaction();
         if ($ownTransaction) $db->beginTransaction();
 
         try {
+            // Guard against double restore — check inside transaction for atomicity
+            $order = self::byId($orderId);
+            if ($order && str_contains($order['notes'] ?? '', 'stock_restored')) {
+                if ($ownTransaction) $db->rollBack();
+                return;
+            }
             foreach ($items as $item) {
                 if (!empty($item['variant_id'])) {
                     $stmt = $db->prepare("UPDATE variants SET stock = stock + :qty WHERE id = :id");
@@ -303,13 +302,15 @@ class Orders {
 
     /** Mark order as synced to ERP */
     public static function markSynced(int $orderId, string $externalId): void {
-        $stmt = Db::get()->prepare("UPDATE orders SET notes = COALESCE(notes, '') || :note, updated_at = " . Db::now() . " WHERE id = :id");
+        $concat = Db::isSqlite() ? "COALESCE(notes,'') || :note" : "CONCAT(COALESCE(notes,''), :note)";
+        $stmt = Db::get()->prepare("UPDATE orders SET notes = {$concat}, updated_at = " . Db::now() . " WHERE id = :id");
         $stmt->execute([':note' => "\nerp_synced:{$externalId}", ':id' => $orderId]);
     }
 
     /** Mark order ERP sync as failed */
     public static function markSyncFailed(int $orderId, string $error): void {
-        $stmt = Db::get()->prepare("UPDATE orders SET notes = COALESCE(notes, '') || :note, updated_at = " . Db::now() . " WHERE id = :id");
+        $concat = Db::isSqlite() ? "COALESCE(notes,'') || :note" : "CONCAT(COALESCE(notes,''), :note)";
+        $stmt = Db::get()->prepare("UPDATE orders SET notes = {$concat}, updated_at = " . Db::now() . " WHERE id = :id");
         $stmt->execute([':note' => "\nerp_fail:" . substr($error, 0, 200), ':id' => $orderId]);
     }
 
@@ -321,7 +322,8 @@ class Orders {
 
     /** Update ERP status on order */
     public static function updateErpStatus(int $orderId, string $erpStatus): void {
-        $stmt = Db::get()->prepare("UPDATE orders SET notes = COALESCE(notes, '') || :note, updated_at = " . Db::now() . " WHERE id = :id");
+        $concat = Db::isSqlite() ? "COALESCE(notes,'') || :note" : "CONCAT(COALESCE(notes,''), :note)";
+        $stmt = Db::get()->prepare("UPDATE orders SET notes = {$concat}, updated_at = " . Db::now() . " WHERE id = :id");
         $stmt->execute([':note' => "\nerp_status:{$erpStatus}", ':id' => $orderId]);
     }
 }

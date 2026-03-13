@@ -9,7 +9,7 @@ class Import {
      * CSV format: sku,name,category,price,stock,summary,image,attr:color,attr:size,...
      * Translations: name_en, name_de, summary_en, slug_en, etc.
      */
-    public static function csv(string $filePath): array {
+    public static function csv(string $filePath, ?string $productTypeOverride = null): array {
         if (!file_exists($filePath)) {
             return ['success' => false, 'error' => "File not found: {$filePath}"];
         }
@@ -48,6 +48,7 @@ class Import {
 
             try {
                 $db->exec('SAVEPOINT row_import');
+                if ($productTypeOverride) $data['product_type'] = $productTypeOverride;
                 self::importProduct($data, $db);
                 $db->exec('RELEASE SAVEPOINT row_import');
                 $imported++;
@@ -65,7 +66,7 @@ class Import {
             }
         }
 
-        $db->commit();
+        if ($db->inTransaction()) $db->commit();
         fclose($handle);
 
         // Recount category products
