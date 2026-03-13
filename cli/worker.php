@@ -42,6 +42,7 @@ $handlers = [
     'sitemap_build'     => 'handleSitemapBuild',
     'cart_abandonment'  => 'handleCartAbandonment',
     'cleanup'           => 'handleCleanup',
+    'image_resize'      => 'handleImageResize',
 ];
 
 // Process loop
@@ -176,18 +177,54 @@ function handleEmailSend(array $payload, array $job): void {
     $to = $payload['to'] ?? '';
     $orderId = $payload['order_id'] ?? null;
 
-    // In production this would use an email adapter.
-    // For now, log the email to a file.
-    $logDir = __DIR__ . '/../logs';
-    if (!is_dir($logDir)) mkdir($logDir, 0750, true);
+    if (!$to || !$template) return;
 
-    $logEntry = date('c') . " | TO: {$to} | TEMPLATE: {$template}";
+    $vars = $payload['vars'] ?? [];
     if ($orderId) {
         $order = Orders::byId((int)$orderId);
-        if ($order) $logEntry .= " | ORDER: {$order['order_number']}";
+        if ($order) {
+            $vars = array_merge($vars, [
+                'order_number' => $order['order_number'],
+                'order_status' => $order['status'],
+                'order_total' => I18n::price((int)$order['total']),
+                'customer_name' => $order['customer_name'],
+            ]);
+        }
     }
-    $logEntry .= "\n";
 
+    // Render template if it exists
+    $templateFile = __DIR__ . '/../templates/' . $template . '.html';
+    $body = '';
+    $subject = $template;
+    if (file_exists($templateFile)) {
+        $body = file_get_contents($templateFile);
+        // Simple variable substitution
+        foreach ($vars as $k => $v) {
+            $body = str_replace('{{' . $k . '}}', htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'), $body);
+        }
+        // Extract subject from <title> if present
+        if (preg_match('/<title>(.*?)<\/title>/i', $body, $m)) {
+            $subject = $m[1];
+        }
+    } else {
+        $body = "Template: {$template}\n" . json_encode($vars, JSON_PRETTY_PRINT);
+    }
+
+    // Attempt to send via mail() if available
+    $sent = false;
+    if (function_exists('mail')) {
+        $headers = "MIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n";
+        $headers .= "From: noreply@" . ($_SERVER['SERVER_NAME'] ?? 'localhost') . "\r\n";
+        $sent = @mail($to, $subject, $body, $headers);
+    }
+
+    // Always log
+    $logDir = __DIR__ . '/../logs';
+    if (!is_dir($logDir)) mkdir($logDir, 0750, true);
+    $status = $sent ? 'SENT' : 'LOGGED';
+    $logEntry = date('c') . " | {$status} | TO: {$to} | SUBJECT: {$subject}";
+    if ($orderId) $logEntry .= " | ORDER_ID: {$orderId}";
+    $logEntry .= "\n";
     file_put_contents($logDir . '/emails.log', $logEntry, FILE_APPEND | LOCK_EX);
 }
 
@@ -228,15 +265,25 @@ function handleSearchReindex(array $payload, array $job): void {
 }
 
 function handlePaymentRefund(array $payload, array $job): void {
-    // In production: call Stripe API to refund
     $orderId = $payload['order_id'] ?? 0;
     $amount = $payload['amount'] ?? 0;
     $paymentId = $payload['payment_id'] ?? '';
 
     $logDir = __DIR__ . '/../logs';
     if (!is_dir($logDir)) mkdir($logDir, 0750, true);
+
+    $result = ['status' => 'skipped'];
+    if ($paymentId) {
+        try {
+            $payment = Adapters::payment();
+            $result = $payment->refund($paymentId, $amount);
+        } catch (\Throwable $e) {
+            $result = ['status' => 'error', 'message' => $e->getMessage()];
+        }
+    }
+
     file_put_contents($logDir . '/refunds.log',
-        date('c') . " | ORDER: {$orderId} | AMOUNT: {$amount} | PAYMENT: {$paymentId}\n",
+        date('c') . " | ORDER: {$orderId} | AMOUNT: {$amount} | PAYMENT: {$paymentId} | RESULT: " . json_encode($result) . "\n",
         FILE_APPEND | LOCK_EX
     );
 }
@@ -299,4 +346,14 @@ function handleCleanup(array $payload, array $job): void {
             if (filemtime($file) < $cutoff) @unlink($file);
         }
     }
+}
+
+function handleImageResize(array $payload, array $job): void {
+    $path = $payload['path'] ?? '';
+    if (!$path) return;
+
+    require_once __DIR__ . '/../adapters/contrib/LocalStorage.php';
+    $cfg = require __DIR__ . '/../config.php';
+    $storage = new LocalStorage($cfg);
+    $storage->generateVariants($path);
 }

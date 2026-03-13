@@ -1869,6 +1869,83 @@ Pricing::setConfig([
 ]);
 
 // ============================================================
+// TEST 39: Adapters Facade
+// ============================================================
+echo "\n--- Test 39: Adapters Facade ---\n";
+
+// Test CashOnDelivery adapter via Adapters::set()
+require_once __DIR__ . '/../adapters/PaymentAdapter.php';
+require_once __DIR__ . '/../adapters/contrib/CashOnDelivery.php';
+$cod = new CashOnDelivery([]);
+Adapters::set('payment', $cod);
+
+$session = Adapters::payment()->createSession(['order_number' => 'TEST-001', 'success_url' => '/ok']);
+assert_true(!empty($session['session_id']), 'COD adapter returns session_id');
+assert_true(str_contains($session['session_id'], 'cod_'), 'COD session_id starts with cod_');
+assert_equals('/ok', $session['url'], 'COD redirects to success_url');
+
+$status = Adapters::payment()->getStatus('cod_TEST-001');
+assert_equals('pending_delivery', $status, 'COD status is pending_delivery');
+
+$refund = Adapters::payment()->refund('cod_TEST-001', 1000);
+assert_equals('manual', $refund['status'], 'COD refund is manual');
+
+// Test StorageAdapter interface
+require_once __DIR__ . '/../adapters/StorageAdapter.php';
+require_once __DIR__ . '/../adapters/contrib/LocalStorage.php';
+$tmpDir = sys_get_temp_dir() . '/bbshop_test_uploads_' . getmypid();
+$storage = new LocalStorage(['uploads_dir' => $tmpDir, 'uploads_url' => '/uploads']);
+Adapters::set('storage', $storage);
+
+$url = $storage->store('test/sample.txt', 'hello world');
+assert_equals('/uploads/test/sample.txt', $url, 'LocalStorage store returns URL');
+assert_true(file_exists($tmpDir . '/test/sample.txt'), 'File exists on disk');
+
+$medUrl = $storage->url('test/sample.txt', 'medium');
+assert_true(str_contains($medUrl, 'sample-medium'), 'URL contains variant name');
+
+$fullUrl = $storage->url('test/sample.txt', 'full');
+assert_equals('/uploads/test/sample.txt', $fullUrl, 'Full variant returns original URL');
+
+$storage->delete('test/sample.txt');
+assert_true(!file_exists($tmpDir . '/test/sample.txt'), 'File deleted from disk');
+
+// Cleanup
+@rmdir($tmpDir . '/test');
+@rmdir($tmpDir);
+
+// ============================================================
+// TEST 40: Enrich adds category_path for pricing
+// ============================================================
+echo "\n--- Test 40: Enrich Category Path for Pricing ---\n";
+
+$enrichedProduct = Products::enrich(Products::bySku('TSHIRT-BLK-M'));
+assert_true(!empty($enrichedProduct['category_slug']), 'Enriched product has category_slug');
+assert_true(!empty($enrichedProduct['category_path']), 'Enriched product has category_path');
+assert_true(str_contains($enrichedProduct['category_path'], 'tricka'), 'Category path contains tricka');
+
+// Test that pricing rules now match with category condition
+$enrichedForPricing = Products::enrich(Products::bySku('TSHIRT-BLK-M'));
+$priced = Pricing::apply($enrichedForPricing);
+assert_true($priced['price'] < $enrichedForPricing['price'] || !empty($priced['discount_percent']),
+    'Catalog rule with category condition applied via category_path');
+
+// ============================================================
+// TEST 41: Idempotency error handling
+// ============================================================
+echo "\n--- Test 41: Idempotency Selective Error Handling ---\n";
+
+// First insert should work (not duplicate)
+$isdup1 = Idempotency::webhookProcessed('test_idem_new_' . time());
+assert_equals(false, $isdup1, 'New event is not duplicate');
+
+// Second insert of same event should be duplicate
+$eventId = 'test_idem_dup_' . time();
+Idempotency::webhookProcessed($eventId);
+$isdup2 = Idempotency::webhookProcessed($eventId);
+assert_equals(true, $isdup2, 'Repeat event is duplicate');
+
+// ============================================================
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
 if ($failed > 0) {

@@ -453,14 +453,47 @@ function apiCheckout(): array {
         Cart::clear();
 
         $order = Orders::byId($orderId);
-        JobQueue::push('email_send', ['template' => 'admin-notification', 'to' => 'admin', 'order_id' => $orderId]);
+        $orderItems = Orders::items($orderId);
+        JobQueue::push('email_send', ['template' => 'confirm-order', 'to' => $email, 'order_id' => $orderId]);
 
-        return [
+        $result = [
             'success'      => true,
             'order_id'     => $orderId,
             'order_number' => $order['order_number'],
             'total'        => (int)$order['total'],
         ];
+
+        // For online payments, create a payment session
+        if ($paymentMethod !== 'cod' && $paymentMethod !== 'bank_transfer') {
+            try {
+                $payment = Adapters::payment();
+                $baseUrl = ((!empty($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost'));
+                $session = $payment->createSession([
+                    'order_id'       => $orderId,
+                    'order_number'   => $order['order_number'],
+                    'customer_email' => $email,
+                    'currency'       => $order['currency'] ?? 'eur',
+                    'items'          => $orderItems,
+                    'shipping_cost'  => (int)$order['shipping_cost'],
+                    'success_url'    => $baseUrl . '/checkout/success?order=' . $order['order_number'],
+                    'cancel_url'     => $baseUrl . '/checkout/cancel?order=' . $order['order_number'],
+                ]);
+                $result['payment_url'] = $session['url'];
+                $result['session_id'] = $session['session_id'];
+
+                // Store payment session ID on order
+                if (!empty($session['session_id'])) {
+                    Db::get()->prepare("UPDATE orders SET payment_id = :pid WHERE id = :id")
+                        ->execute([':pid' => $session['session_id'], ':id' => $orderId]);
+                }
+            } catch (\Throwable $e) {
+                // Payment adapter error — order still created, log and return
+                error_log("Payment session creation failed for order #{$orderId}: " . $e->getMessage());
+                $result['payment_error'] = 'Payment processing unavailable. Please try again.';
+            }
+        }
+
+        return $result;
     } catch (\RuntimeException $e) {
         Cart::removeUnavailable([]);
         return ['success' => false, 'error' => $e->getMessage()];

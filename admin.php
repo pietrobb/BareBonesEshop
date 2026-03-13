@@ -20,6 +20,11 @@ I18n::setLocale('sk');
 $page = $_GET['p'] ?? 'dashboard';
 $action = $_GET['action'] ?? '';
 
+// Handle GET actions
+if ($page === 'products' && $action === 'export') {
+    handleExport();
+}
+
 // Handle POST actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     handlePost($page, $action);
@@ -243,10 +248,23 @@ function pageProducts(): void {
             </select>
             <button class="btn" type="submit">Filtrovať</button>
         </form>
+        <form method="post" action="admin.php?p=products&action=bulk" id="bulk-form">
+            <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+            <div style="display:flex;gap:.5rem;margin-bottom:.5rem">
+                <select name="bulk_action">
+                    <option value="">— Hromadna akcia —</option>
+                    <option value="activate">Aktivovat</option>
+                    <option value="archive">Archivovat</option>
+                    <option value="delete">Zmazat</option>
+                </select>
+                <button type="submit" class="btn btn-sm" onclick="return confirm('Naozaj?')">Vykonat</button>
+                <a href="admin.php?p=products&action=export&q=<?= urlencode($search) ?>&status=<?= urlencode($statusFilter) ?>" class="btn btn-sm">Export CSV</a>
+            </div>
         <table>
-            <tr><th>SKU</th><th>Názov</th><th>Cena</th><th>Stock</th><th>Stav</th><th>Akcie</th></tr>
+            <tr><th><input type="checkbox" id="check-all"></th><th>SKU</th><th>Nazov</th><th>Cena</th><th>Stock</th><th>Stav</th><th>Akcie</th></tr>
             <?php foreach ($products as $p): ?>
             <tr>
+                <td><input type="checkbox" name="product_ids[]" value="<?= $p['id'] ?>" class="product-check"></td>
                 <td><?= esc($p['sku']) ?></td>
                 <td><a href="admin.php?p=product&id=<?= $p['id'] ?>"><?= esc($p['name']) ?></a></td>
                 <td><?= I18n::price((int)$p['price'], $p['currency']) ?></td>
@@ -258,6 +276,8 @@ function pageProducts(): void {
             </tr>
             <?php endforeach; ?>
         </table>
+        </form>
+        <script>document.getElementById('check-all')?.addEventListener('change',function(){document.querySelectorAll('.product-check').forEach(c=>c.checked=this.checked)});</script>
         <?php pagination($page, $pages, "admin.php?p=products&q=" . urlencode($search) . "&status=" . urlencode($statusFilter)); ?>
     </div>
     <?php
@@ -270,7 +290,7 @@ function pageProduct(): void {
     ?>
     <h1><?= $product ? 'Upraviť: ' . esc($product['name']) : 'Nový produkt' ?></h1>
     <div class="card">
-        <form method="post" action="admin.php?p=product&action=save<?= $product ? '&id='.$product['id'] : '' ?>">
+        <form method="post" enctype="multipart/form-data" action="admin.php?p=product&action=save<?= $product ? '&id='.$product['id'] : '' ?>">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
             <div class="form-row"><label>SKU</label><input name="sku" value="<?= esc($product['sku'] ?? '') ?>" required></div>
             <div class="form-row"><label>Názov</label><input name="name" value="<?= esc($product['name'] ?? '') ?>" required style="width:100%"></div>
@@ -300,7 +320,10 @@ function pageProduct(): void {
                     <option value="archived" <?= ($product['status'] ?? '') === 'archived' ? 'selected' : '' ?>>Archived</option>
                 </select>
             </div>
-            <div class="form-row"><label>Popis</label><textarea name="summary" rows="3" style="width:100%"><?= esc($product['summary'] ?? '') ?></textarea></div>
+            <div class="form-row"><label>Kratky popis</label><textarea name="summary" rows="3" style="width:100%"><?= esc($product['summary'] ?? '') ?></textarea></div>
+            <div class="form-row"><label>Popis (HTML)</label><textarea name="description" rows="6" style="width:100%"><?= esc($product['description'] ?? '') ?></textarea></div>
+            <div class="form-row"><label>Obrazky (URL, 1 na riadok)</label><textarea name="images" rows="4" style="width:100%"><?= esc(implode("\n", json_decode($product['images'] ?? '[]', true) ?: [])) ?></textarea></div>
+            <div class="form-row"><label>Nahrat obrazok</label><input type="file" name="image_upload" accept="image/*"></div>
             <div class="form-row"><label>Hmotnosť (g)</label><input type="number" name="weight_g" value="<?= (int)($product['weight_g'] ?? 0) ?>"></div>
             <button type="submit" class="btn btn-primary">Uložiť</button>
             <?php if ($product): ?>
@@ -562,6 +585,7 @@ function handlePost(string $page, string $action): void {
 
     match("{$page}:{$action}") {
         'product:save'   => handleProductSave(),
+        'products:bulk'  => handleBulkAction(),
         'order:status'   => handleOrderStatus(),
         'import:upload'  => handleImportUpload(),
         'cache:flush'    => handleCacheFlush(),
@@ -591,8 +615,35 @@ function handleProductSave(): void {
         ':stock'         => Security::int($_POST['stock'] ?? 0),
         ':status'        => $status,
         ':summary'       => trim($_POST['summary'] ?? ''),
+        ':description'   => trim($_POST['description'] ?? ''),
         ':weight_g'      => Security::int($_POST['weight_g'] ?? 0),
     ];
+
+    // Handle images
+    $images = [];
+    $imagesText = trim($_POST['images'] ?? '');
+    if ($imagesText) {
+        $images = array_filter(array_map('trim', explode("\n", $imagesText)));
+    }
+
+    // Handle file upload
+    if (!empty($_FILES['image_upload']['tmp_name']) && $_FILES['image_upload']['error'] === UPLOAD_ERR_OK) {
+        $ext = strtolower(pathinfo($_FILES['image_upload']['name'], PATHINFO_EXTENSION));
+        if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) {
+            $filename = 'products/' . ($data[':sku'] ?: uniqid()) . '-' . time() . '.' . $ext;
+            try {
+                $storage = Adapters::storage();
+                $url = $storage->store($filename, file_get_contents($_FILES['image_upload']['tmp_name']));
+                $images[] = $url;
+                // Queue resize job
+                JobQueue::push('image_resize', ['path' => $filename], 3);
+            } catch (\Throwable $e) {
+                // Storage not configured, save with URL only
+                $images[] = $filename;
+            }
+        }
+    }
+    $data[':images'] = json_encode($images);
 
     // Validate slug uniqueness
     $slug = $data[':slug'];
@@ -608,14 +659,14 @@ function handleProductSave(): void {
         $old = Products::byId($id);
         $stmt = $db->prepare("UPDATE products SET sku=:sku, name=:name, slug=:slug, product_type=:product_type,
             category_id=:category_id, price=:price, compare_price=:compare_price, stock=:stock,
-            status=:status, summary=:summary, weight_g=:weight_g, updated_at={$now} WHERE id=:id");
+            status=:status, summary=:summary, description=:description, images=:images, weight_g=:weight_g, updated_at={$now} WHERE id=:id");
         $data[':id'] = $id;
         $stmt->execute($data);
         AuditLog::log('product', $id, $old, $data, 'Admin edit');
         setFlash('ok', 'Produkt aktualizovaný.');
     } else {
-        $stmt = $db->prepare("INSERT INTO products (sku, name, slug, product_type, category_id, price, compare_price, stock, status, summary, weight_g)
-            VALUES (:sku, :name, :slug, :product_type, :category_id, :price, :compare_price, :stock, :status, :summary, :weight_g)");
+        $stmt = $db->prepare("INSERT INTO products (sku, name, slug, product_type, category_id, price, compare_price, stock, status, summary, description, images, weight_g)
+            VALUES (:sku, :name, :slug, :product_type, :category_id, :price, :compare_price, :stock, :status, :summary, :description, :images, :weight_g)");
         $stmt->execute($data);
         $id = (int)$db->lastInsertId();
         AuditLog::log('product', $id, null, $data, 'Admin create');
@@ -623,6 +674,58 @@ function handleProductSave(): void {
     }
 
     header("Location: admin.php?p=product&id={$id}");
+    exit;
+}
+
+function handleBulkAction(): void {
+    if (!Security::csrfValidate()) { setFlash('err', 'CSRF error.'); header('Location: admin.php?p=products'); exit; }
+
+    $ids = array_map('intval', $_POST['product_ids'] ?? []);
+    $action = $_POST['bulk_action'] ?? '';
+    if (empty($ids) || !$action) { header('Location: admin.php?p=products'); exit; }
+
+    $db = Db::get();
+    $ph = implode(',', array_fill(0, count($ids), '?'));
+
+    switch ($action) {
+        case 'activate':
+            $db->prepare("UPDATE products SET status = 'active' WHERE id IN ({$ph})")->execute($ids);
+            setFlash('ok', count($ids) . ' produktov aktivovanych.');
+            break;
+        case 'archive':
+            $db->prepare("UPDATE products SET status = 'archived' WHERE id IN ({$ph})")->execute($ids);
+            setFlash('ok', count($ids) . ' produktov archivovanych.');
+            break;
+        case 'delete':
+            $db->prepare("DELETE FROM products WHERE id IN ({$ph})")->execute($ids);
+            setFlash('ok', count($ids) . ' produktov zmazanych.');
+            break;
+    }
+    header('Location: admin.php?p=products');
+    exit;
+}
+
+function handleExport(): void {
+    $db = Db::get();
+    $search = $_GET['q'] ?? '';
+    $statusFilter = $_GET['status'] ?? '';
+
+    $where = "1=1";
+    $params = [];
+    if ($search) { $where .= " AND (name LIKE :q OR sku LIKE :q)"; $params[':q'] = "%{$search}%"; }
+    if ($statusFilter) { $where .= " AND status = :status"; $params[':status'] = $statusFilter; }
+
+    $stmt = $db->prepare("SELECT sku, name, slug, product_type, price, compare_price, stock, status, summary, weight_g FROM products WHERE {$where} ORDER BY id");
+    $stmt->execute($params);
+
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="products-' . date('Y-m-d') . '.csv"');
+    $out = fopen('php://output', 'w');
+    fputcsv($out, ['sku', 'name', 'slug', 'product_type', 'price', 'compare_price', 'stock', 'status', 'summary', 'weight_g']);
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        fputcsv($out, $row);
+    }
+    fclose($out);
     exit;
 }
 
