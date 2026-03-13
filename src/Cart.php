@@ -146,6 +146,35 @@ class Cart {
     }
 
     /**
+     * Remove or reduce unavailable items from cart (after OOS checkout failure)
+     */
+    public static function removeUnavailable(array $outOfStockNames): void {
+        $cart = self::get();
+        foreach ($cart as $key => $item) {
+            $product = Products::byId((int)($item['product_id'] ?? 0));
+            if (!$product || $product['status'] !== 'active') {
+                unset($_SESSION['cart'][$key]);
+                continue;
+            }
+            $stock = (int)$product['stock'];
+            if (!empty($item['variant_id'])) {
+                $variants = Products::variants((int)$item['product_id']);
+                foreach ($variants as $v) {
+                    if ((int)$v['id'] === (int)$item['variant_id']) {
+                        $stock = (int)$v['stock'];
+                        break;
+                    }
+                }
+            }
+            if ($stock <= 0) {
+                unset($_SESSION['cart'][$key]);
+            } elseif ($item['qty'] > $stock) {
+                $_SESSION['cart'][$key]['qty'] = $stock;
+            }
+        }
+    }
+
+    /**
      * Cart abandonment: save email at first checkout step
      */
     public static function setEmail(string $email): void {

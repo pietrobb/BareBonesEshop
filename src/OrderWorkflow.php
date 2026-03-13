@@ -58,6 +58,7 @@ class OrderWorkflow {
             match($to) {
                 'cancelled' => self::handleCancellation($order),
                 'shipped'   => self::handleShipped($order),
+                'returned'  => self::handleReturn($order),
                 'refunded'  => self::handleRefund($order),
                 default     => null,
             };
@@ -96,11 +97,16 @@ class OrderWorkflow {
     }
 
     /**
-     * Refund: restore stock (if from returned), queue refund email
+     * Returned: restore stock to inventory
+     */
+    private static function handleReturn(array $order): void {
+        Orders::restoreStock($order['id']);
+    }
+
+    /**
+     * Refund: queue refund email (stock already restored in handleReturn or handleCancellation)
      */
     private static function handleRefund(array $order): void {
-        // If returning from 'returned' status, stock was already restored on return
-        // If from 'cancelled', stock was already restored in handleCancellation
         JobQueue::push('email_send', [
             'template' => 'refund-confirmation',
             'to'       => $order['customer_email'],

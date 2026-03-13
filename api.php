@@ -194,12 +194,13 @@ function apiValidateCoupon(): array {
     $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
     $code = trim($input['code'] ?? '');
     $subtotal = Security::int($input['subtotal'] ?? 0);
+    $email = Security::email($input['email'] ?? '') ?? null;
 
     if (!$code) return ['valid' => false, 'error' => 'Coupon code is required'];
 
-    $result = Pricing::applyCoupon($code, $subtotal);
+    $result = Pricing::applyCoupon($code, $subtotal, $email);
     if ($result['discount'] <= 0) {
-        return ['valid' => false, 'error' => 'Invalid coupon or minimum order not met'];
+        return ['valid' => false, 'error' => $result['error'] ?? 'Invalid coupon'];
     }
 
     return [
@@ -461,6 +462,7 @@ function apiCheckout(): array {
             'total'        => (int)$order['total'],
         ];
     } catch (\RuntimeException $e) {
+        Cart::removeUnavailable([]);
         return ['success' => false, 'error' => $e->getMessage()];
     }
 }

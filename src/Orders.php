@@ -66,10 +66,10 @@ class Orders {
             $orderNumber = self::generateOrderNumber();
             $stmt = $db->prepare("
                 INSERT INTO orders (order_number, status, customer_name, customer_email, customer_phone,
-                    shipping_addr, payment_method, subtotal, shipping_cost, tax_amount, total, currency,
+                    shipping_addr, payment_method, subtotal, discount_amount, shipping_cost, tax_amount, total, currency,
                     notes, ip_address)
                 VALUES (:num, 'pending', :name, :email, :phone, :addr, :method,
-                    :subtotal, :shipping, :tax, :total, :currency, :notes, :ip)
+                    :subtotal, :discount, :shipping, :tax, :total, :currency, :notes, :ip)
             ");
             $stmt->execute([
                 ':num'      => $orderNumber,
@@ -79,6 +79,7 @@ class Orders {
                 ':addr'     => json_encode($customer['address'] ?? []),
                 ':method'   => $paymentMethod,
                 ':subtotal' => $subtotal,
+                ':discount' => $couponDiscount,
                 ':shipping' => $shippingCost,
                 ':tax'      => $taxAmount,
                 ':total'    => $total,

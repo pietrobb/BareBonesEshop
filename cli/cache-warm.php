@@ -43,8 +43,11 @@ foreach ($locales as $locale) {
     $tree = Categories::tree();
     $translatedTree = array_map(function($cat) {
         $cat = I18n::category($cat);
+        $cat = Categories::enrich($cat);
         if (!empty($cat['children'])) {
-            $cat['children'] = array_map(fn($c) => I18n::category($c), $cat['children']);
+            $cat['children'] = array_map(function($c) {
+                return Categories::enrich(I18n::category($c));
+            }, $cat['children']);
         }
         return $cat;
     }, $tree);

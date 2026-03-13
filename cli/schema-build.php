@@ -54,7 +54,7 @@ echo "Creating tables...\n";
 // Categories
 $db->exec("CREATE TABLE IF NOT EXISTS categories (
     id            INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
-    slug          TEXT UNIQUE NOT NULL,
+    slug          TEXT NOT NULL,
     name          TEXT NOT NULL,
     parent_id     INTEGER,
     path          TEXT NOT NULL DEFAULT '',
@@ -65,6 +65,13 @@ $db->exec("CREATE TABLE IF NOT EXISTS categories (
     meta          TEXT DEFAULT '{}',
     FOREIGN KEY (parent_id) REFERENCES categories(id)
 )");
+if ($isSqlite) {
+    $db->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_cat_slug_parent ON categories(slug, COALESCE(parent_id, 0))");
+} else {
+    // MySQL: use a generated column or composite unique; parent_id NULL → 0 for uniqueness
+    $db->exec("ALTER TABLE categories ADD COLUMN parent_id_uniq INT GENERATED ALWAYS AS (COALESCE(parent_id, 0)) STORED");
+    $db->exec("CREATE UNIQUE INDEX idx_cat_slug_parent ON categories(slug(191), parent_id_uniq)");
+}
 $db->exec("CREATE INDEX IF NOT EXISTS idx_cat_parent ON categories(parent_id)");
 $db->exec("CREATE INDEX IF NOT EXISTS idx_cat_path ON categories(path)");
 echo "  [OK] categories\n";
@@ -194,6 +201,7 @@ $db->exec("CREATE TABLE IF NOT EXISTS orders (
     payment_method TEXT NOT NULL,
     payment_id     TEXT DEFAULT '',
     subtotal       INTEGER NOT NULL,
+    discount_amount INTEGER NOT NULL DEFAULT 0,
     shipping_cost  INTEGER NOT NULL DEFAULT 0,
     tax_amount     INTEGER NOT NULL DEFAULT 0,
     total          INTEGER NOT NULL,

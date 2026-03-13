@@ -78,12 +78,13 @@ echo "\n--- Test 2: Schema Creation ---\n";
 
 // Inline schema creation (same as schema-build.php)
 $pdo->exec("CREATE TABLE IF NOT EXISTS categories (
-    id INTEGER PRIMARY KEY, slug TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+    id INTEGER PRIMARY KEY, slug TEXT NOT NULL, name TEXT NOT NULL,
     parent_id INTEGER, path TEXT NOT NULL DEFAULT '', depth INTEGER NOT NULL DEFAULT 0,
     sort_order INTEGER DEFAULT 0, product_count INTEGER DEFAULT 0,
     translations TEXT DEFAULT '{}', meta TEXT DEFAULT '{}',
     FOREIGN KEY (parent_id) REFERENCES categories(id)
 )");
+$pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_cat_slug_parent ON categories(slug, COALESCE(parent_id, 0))");
 $pdo->exec("CREATE INDEX IF NOT EXISTS idx_cat_parent ON categories(parent_id)");
 $pdo->exec("CREATE INDEX IF NOT EXISTS idx_cat_path ON categories(path)");
 
@@ -149,6 +150,7 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS orders (
     customer_email TEXT NOT NULL, customer_phone TEXT DEFAULT '',
     shipping_addr TEXT DEFAULT '{}', payment_method TEXT NOT NULL,
     payment_id TEXT DEFAULT '', subtotal INTEGER NOT NULL,
+    discount_amount INTEGER NOT NULL DEFAULT 0,
     shipping_cost INTEGER NOT NULL DEFAULT 0, tax_amount INTEGER NOT NULL DEFAULT 0,
     total INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'eur',
     notes TEXT DEFAULT '', ip_address TEXT DEFAULT '',
@@ -163,6 +165,15 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS order_items (
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(id)
 )");
+
+$pdo->exec("CREATE TABLE IF NOT EXISTS coupon_uses (
+    id INTEGER PRIMARY KEY, coupon_code TEXT NOT NULL, order_id INTEGER NOT NULL,
+    customer_email TEXT NOT NULL, discount INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (order_id) REFERENCES orders(id)
+)");
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_coupon_code ON coupon_uses(coupon_code)");
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_coupon_email ON coupon_uses(coupon_code, customer_email)");
 
 $pdo->exec("CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY, entity TEXT NOT NULL, entity_id INTEGER NOT NULL,
@@ -1563,6 +1574,299 @@ $emptyCatId = $brakeSystemId; // parent with no direct products
 $result = TecDoc::parametricSearch($emptyCatId, 1, 24, 'price_asc', [], null, null, 'sk');
 assert_equals(0, $result['total'], 'Empty category → 0 products');
 assert_true(empty($result['filters']), 'Empty category → no filters');
+
+// ============================================================
+// TEST 33: Order Workflow — returned restores stock
+// ============================================================
+echo "\n--- Test 33: Returned Order Restores Stock ---\n";
+
+$testJobsDir3 = __DIR__ . '/../jobs/test_ret_' . getmypid();
+JobQueue::setDir($testJobsDir3);
+
+// Create an order, pay it, ship it, then return it
+$retProduct = Products::bySku('TSHIRT-BLK-M');
+$retStockBefore = (int)$retProduct['stock'];
+$retCartItems = [
+    [
+        'product_id' => $retProduct['id'],
+        'variant_id' => null,
+        'qty' => 3,
+        'price' => $retProduct['price'],
+        'sku' => $retProduct['sku'],
+        'name' => $retProduct['name'],
+        'variant_name' => '',
+    ],
+];
+$retCustomer = [
+    'name' => 'Return Tester',
+    'email' => 'return@test.com',
+    'phone' => '',
+    'address' => ['street' => 'Return St', 'city' => 'BA', 'zip' => '00000', 'country' => 'SK'],
+    'currency' => 'eur',
+    'shipping_cost' => 0,
+    'tax_amount' => 0,
+];
+$retOrderId = Orders::create($retCartItems, $retCustomer, 'stripe');
+$retStockAfterCreate = (int)Products::bySku('TSHIRT-BLK-M')['stock'];
+assert_equals($retStockBefore - 3, $retStockAfterCreate, 'Stock decremented by 3 on order create');
+
+OrderWorkflow::transition($retOrderId, 'paid', 'Paid');
+OrderWorkflow::transition($retOrderId, 'shipped', 'Shipped');
+OrderWorkflow::transition($retOrderId, 'delivered', 'Delivered');
+
+// Return the order — should restore stock
+OrderWorkflow::transition($retOrderId, 'returned', 'Customer returned');
+$retStockAfterReturn = (int)Products::bySku('TSHIRT-BLK-M')['stock'];
+assert_equals($retStockAfterCreate + 3, $retStockAfterReturn, 'Stock restored on return (+3)');
+assert_equals('returned', Orders::byId($retOrderId)['status'], 'Order status is returned');
+
+// Transition to refunded — stock should NOT change again
+OrderWorkflow::transition($retOrderId, 'refunded', 'Refund processed');
+$retStockAfterRefund = (int)Products::bySku('TSHIRT-BLK-M')['stock'];
+assert_equals($retStockAfterReturn, $retStockAfterRefund, 'Stock unchanged on refund (already restored)');
+assert_equals('refunded', Orders::byId($retOrderId)['status'], 'Order status is refunded');
+
+// Cleanup
+foreach (['pending', 'processing', 'completed', 'failed'] as $sub) {
+    $d = $testJobsDir3 . '/' . $sub;
+    if (is_dir($d)) { array_map('unlink', glob($d . '/*.json') ?: []); @rmdir($d); }
+}
+@rmdir($testJobsDir3);
+
+// ============================================================
+// TEST 34: Coupon discount persisted in order
+// ============================================================
+echo "\n--- Test 34: Coupon Discount in Order ---\n";
+
+$couponProduct = Products::bySku('TSHIRT-BLK-M');
+$couponCartItems = [
+    [
+        'product_id' => $couponProduct['id'],
+        'variant_id' => null,
+        'qty' => 1,
+        'price' => $couponProduct['price'],
+        'sku' => $couponProduct['sku'],
+        'name' => $couponProduct['name'],
+        'variant_name' => '',
+    ],
+];
+$couponCustomer = [
+    'name' => 'Coupon Tester',
+    'email' => 'coupon@test.com',
+    'phone' => '',
+    'address' => ['street' => 'Test', 'city' => 'BA', 'zip' => '00000', 'country' => 'SK'],
+    'currency' => 'eur',
+    'shipping_cost' => 399,
+    'tax_amount' => 200,
+    'coupon_discount' => 500,
+];
+
+$couponOrderId = Orders::create($couponCartItems, $couponCustomer, 'cod');
+$couponOrder = Orders::byId($couponOrderId);
+$expectedSubtotal = $couponProduct['price'];
+$expectedTotal = max(0, $expectedSubtotal - 500) + 399 + 200;
+assert_equals($expectedSubtotal, (int)$couponOrder['subtotal'], 'Coupon order: subtotal correct');
+assert_equals(500, (int)$couponOrder['discount_amount'], 'Coupon discount persisted in order');
+assert_equals($expectedTotal, (int)$couponOrder['total'], 'Coupon order: total = subtotal - discount + shipping + tax');
+
+// ============================================================
+// TEST 35: Pricing edge cases — zero price, zero compare_price
+// ============================================================
+echo "\n--- Test 35: Pricing Edge Cases ---\n";
+
+Pricing::setConfig([
+    'customer_groups' => ['guest' => ['discount' => 0]],
+    'catalog_rules' => [
+        [
+            'active' => true,
+            'discount_type' => 'fixed',
+            'discount_value' => 500,
+            'conditions' => [],
+        ],
+    ],
+    'tier_pricing' => ['enabled' => false],
+    'cart_rules' => [],
+]);
+
+// Zero price product + fixed discount → should not divide by zero
+$zeroPriceProduct = ['id' => 999, 'price' => 0, 'status' => 'active'];
+$result = Pricing::apply($zeroPriceProduct);
+assert_equals(0, $result['price'], 'Zero price product stays at 0 (no div by zero)');
+assert_true(!isset($result['discount_percent']) || $result['discount_percent'] === 0,
+    'No discount percent set for zero-price product');
+
+// Product with compare_price = 0 should not crash enrich()
+$weirdProduct = [
+    'id' => 998, 'price' => 1000, 'compare_price' => 0, 'slug' => 'test',
+    'images' => '[]', 'attrs' => '{}', 'tags' => '[]', 'currency' => 'eur',
+];
+$enriched = Products::enrich($weirdProduct);
+assert_true(!isset($enriched['discount_percent']), 'compare_price=0 does not set discount_percent');
+assert_equals(1000, $enriched['price'], 'Price preserved with compare_price=0');
+
+// Restore default config
+Pricing::setConfig([
+    'customer_groups' => [
+        'guest' => ['discount' => 0],
+        'wholesale' => ['discount' => 15],
+        'vip' => ['discount' => 10],
+    ],
+    'catalog_rules' => [
+        [
+            'active' => true,
+            'discount_type' => 'percent',
+            'discount_value' => 20,
+            'conditions' => ['category' => 'tricka'],
+        ],
+    ],
+    'tier_pricing' => [
+        'enabled' => true,
+        'rules' => [
+            ['min_qty' => 10, 'discount_percent' => 5],
+            ['min_qty' => 50, 'discount_percent' => 12],
+        ],
+    ],
+    'cart_rules' => [
+        [
+            'active' => true,
+            'type' => 'coupon',
+            'code' => 'WELCOME10',
+            'name' => 'Welcome 10% off',
+            'discount_type' => 'percent',
+            'discount_value' => 10,
+            'min_subtotal' => 2000,
+        ],
+        [
+            'active' => true,
+            'type' => 'automatic',
+            'name' => 'Free shipping over 50',
+            'conditions' => ['min_subtotal' => 5000],
+            'action' => 'free_shipping',
+        ],
+    ],
+]);
+
+// ============================================================
+// TEST 36: Import category parent_id isolation
+// ============================================================
+echo "\n--- Test 36: Import Category Parent Isolation ---\n";
+
+// Create two different trees with a shared slug at leaf level
+Import::ensureCategory('electronics/cables', Db::get());
+Import::ensureCategory('accessories/cables', Db::get());
+
+// They should be different categories
+$elecCables = Db::get()->prepare("SELECT c.id FROM categories c WHERE c.slug = 'cables' AND c.parent_id = (SELECT id FROM categories WHERE slug = 'electronics')");
+$elecCables->execute();
+$elecId = (int)$elecCables->fetchColumn();
+
+$accCables = Db::get()->prepare("SELECT c.id FROM categories c WHERE c.slug = 'cables' AND c.parent_id = (SELECT id FROM categories WHERE slug = 'accessories')");
+$accCables->execute();
+$accId = (int)$accCables->fetchColumn();
+
+assert_true($elecId > 0, 'electronics/cables category exists');
+assert_true($accId > 0, 'accessories/cables category exists');
+assert_true($elecId !== $accId, 'Same-slug categories under different parents are distinct');
+
+// ============================================================
+// TEST 37: Cart::removeUnavailable
+// ============================================================
+echo "\n--- Test 37: Cart removeUnavailable ---\n";
+
+$_SESSION = ['cart' => []];
+$cartProd = Products::bySku('TSHIRT-BLK-M');
+Cart::add((int)$cartProd['id'], null, 5);
+// Also add a product with non-existent ID
+$_SESSION['cart']['p_999999'] = ['product_id' => 999999, 'variant_id' => null, 'qty' => 2];
+
+$cartBefore = Cart::get();
+assert_equals(2, count($cartBefore), 'Cart has 2 items before cleanup');
+
+Cart::removeUnavailable([]);
+$cartAfter = Cart::get();
+assert_true(!isset($cartAfter['p_999999']), 'Non-existent product removed from cart');
+assert_true(isset($cartAfter['p_' . $cartProd['id']]), 'Valid product still in cart');
+
+// ============================================================
+// TEST 38: Coupon per-customer limit
+// ============================================================
+echo "\n--- Test 38: Coupon Per-Customer Limit ---\n";
+
+Pricing::setConfig([
+    'customer_groups' => ['guest' => ['discount' => 0]],
+    'catalog_rules' => [],
+    'tier_pricing' => ['enabled' => false],
+    'cart_rules' => [
+        [
+            'active' => true,
+            'type' => 'coupon',
+            'code' => 'ONCE',
+            'name' => 'One-time coupon',
+            'discount_type' => 'percent',
+            'discount_value' => 15,
+            'per_customer' => 1,
+        ],
+    ],
+]);
+
+// First use should work
+$r1 = Pricing::applyCoupon('ONCE', 10000, 'repeat@test.com');
+assert_true($r1['discount'] > 0, 'First coupon use succeeds');
+
+// Record usage (use a real order ID from previous test)
+$existingOrder = $pdo->query("SELECT id FROM orders LIMIT 1")->fetchColumn();
+Pricing::recordCouponUse('ONCE', (int)$existingOrder, 'repeat@test.com', $r1['discount']);
+
+// Second use by same email should be rejected
+$r2 = Pricing::applyCoupon('ONCE', 10000, 'repeat@test.com');
+assert_equals(0, $r2['discount'], 'Second use by same customer rejected');
+assert_equals('Coupon already used', $r2['error'], 'Per-customer limit error message');
+
+// Different email should still work
+$r3 = Pricing::applyCoupon('ONCE', 10000, 'other@test.com');
+assert_true($r3['discount'] > 0, 'Different customer can still use coupon');
+
+// Restore default pricing config
+Pricing::setConfig([
+    'customer_groups' => [
+        'guest' => ['discount' => 0],
+        'wholesale' => ['discount' => 15],
+        'vip' => ['discount' => 10],
+    ],
+    'catalog_rules' => [
+        [
+            'active' => true,
+            'discount_type' => 'percent',
+            'discount_value' => 20,
+            'conditions' => ['category' => 'tricka'],
+        ],
+    ],
+    'tier_pricing' => [
+        'enabled' => true,
+        'rules' => [
+            ['min_qty' => 10, 'discount_percent' => 5],
+            ['min_qty' => 50, 'discount_percent' => 12],
+        ],
+    ],
+    'cart_rules' => [
+        [
+            'active' => true,
+            'type' => 'coupon',
+            'code' => 'WELCOME10',
+            'name' => 'Welcome 10% off',
+            'discount_type' => 'percent',
+            'discount_value' => 10,
+            'min_subtotal' => 2000,
+        ],
+        [
+            'active' => true,
+            'type' => 'automatic',
+            'name' => 'Free shipping over 50',
+            'conditions' => ['min_subtotal' => 5000],
+            'action' => 'free_shipping',
+        ],
+    ],
+]);
 
 // ============================================================
 echo "\n========================================\n";

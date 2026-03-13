@@ -48,7 +48,8 @@
             "sections": [
                 {"block": "global/breadcrumb", "slot": "full"},
                 {"block": "cart/cart-items", "slot": "main"},
-                {"block": "cart/cart-summary", "slot": "sidebar"}
+                {"block": "cart/cart-summary", "slot": "sidebar"},
+                {"block": "cart/cross-sell", "slot": "full"}
             ]
         },
 

@@ -122,7 +122,14 @@ function handleCacheRebuild(array $payload, array $job): void {
             // Categories tree
             $tree = Categories::tree();
             $translatedTree = array_map(function($cat) {
-                return I18n::category($cat);
+                $cat = I18n::category($cat);
+                $cat = Categories::enrich($cat);
+                if (!empty($cat['children'])) {
+                    $cat['children'] = array_map(function($child) {
+                        return Categories::enrich(I18n::category($child));
+                    }, $cat['children']);
+                }
+                return $cat;
             }, $tree);
             Cache::writeJson(Cache::localePath($locale, 'categories.json'), ['categories' => $translatedTree]);
 

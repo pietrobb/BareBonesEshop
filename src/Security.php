@@ -194,7 +194,10 @@ class Security {
             && password_verify($pass, $cfg['admin_password'])) {
             if (file_exists($lockFile)) unlink($lockFile);
             self::sessionStart();
-            session_regenerate_id(true);
+            if (empty($_SESSION['admin_authenticated'])) {
+                session_regenerate_id(true);
+                $_SESSION['admin_authenticated'] = true;
+            }
             return true;
         }
 

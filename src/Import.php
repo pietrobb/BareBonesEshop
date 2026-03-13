@@ -44,13 +44,9 @@ class Import {
             $data = array_combine($header, $row);
 
             try {
-                if (Db::isSqlite()) {
-                    $db->exec('SAVEPOINT row_import');
-                }
+                $db->exec('SAVEPOINT row_import');
                 self::importProduct($data, $db);
-                if (Db::isSqlite()) {
-                    $db->exec('RELEASE SAVEPOINT row_import');
-                }
+                $db->exec('RELEASE SAVEPOINT row_import');
                 $imported++;
                 $batch++;
 
@@ -61,9 +57,7 @@ class Import {
                     $batch = 0;
                 }
             } catch (\Throwable $e) {
-                if (Db::isSqlite()) {
-                    $db->exec('ROLLBACK TO SAVEPOINT row_import');
-                }
+                $db->exec('ROLLBACK TO SAVEPOINT row_import');
                 $errors[] = "Line " . ($imported + 2) . " (SKU: " . ($data['sku'] ?? '?') . "): " . $e->getMessage();
             }
         }
@@ -269,8 +263,13 @@ class Import {
             $slug = self::slugify($part);
             $fullPath = $fullPath ? $fullPath . '/' . $slug : $slug;
 
-            $stmt = $db->prepare("SELECT id FROM categories WHERE slug = :slug");
-            $stmt->execute([':slug' => $slug]);
+            if ($parentId === null) {
+                $stmt = $db->prepare("SELECT id FROM categories WHERE slug = :slug AND parent_id IS NULL");
+                $stmt->execute([':slug' => $slug]);
+            } else {
+                $stmt = $db->prepare("SELECT id FROM categories WHERE slug = :slug AND parent_id = :parent");
+                $stmt->execute([':slug' => $slug, ':parent' => $parentId]);
+            }
             $existing = $stmt->fetch();
 
             if ($existing) {
