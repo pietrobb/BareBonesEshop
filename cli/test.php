@@ -2108,6 +2108,60 @@ assert_true(!str_contains($tpl4, '<script>'), 'Template escapes HTML');
 assert_true(str_contains($tpl4, '&lt;script&gt;'), 'Template HTML-encodes special chars');
 
 // ============================================================
+// TEST: HTTP Smoke — hit main pages, check for PHP warnings/errors
+// ============================================================
+echo "\n--- Test: HTTP Smoke ---\n";
+
+$smokeBaseUrl = getenv('SMOKE_URL') ?: 'http://localhost:8080';
+$smokePages = [
+    '/'                          => 'Homepage',
+    '/?page=cart'                => 'Cart',
+    '/?page=checkout'            => 'Checkout',
+];
+
+// Add a real category and product if we have access to the live DB
+// Try to discover category/product slugs from homepage
+$ctx = stream_context_create(['http' => ['timeout' => 5, 'ignore_errors' => true]]);
+$homeHtml = @file_get_contents($smokeBaseUrl . '/', false, $ctx);
+$smokeAvailable = ($homeHtml !== false);
+
+if ($smokeAvailable) {
+    if (preg_match('/page=category&amp;slug=([a-z0-9-]+)/', $homeHtml, $cm)) {
+        $smokePages['/?page=category&slug=' . $cm[1]] = 'Category: ' . $cm[1];
+    }
+    if (preg_match('/page=product&amp;slug=([a-z0-9-]+)/', $homeHtml, $pm)) {
+        $smokePages['/?page=product&slug=' . $pm[1]] = 'Product: ' . $pm[1];
+    }
+    $smokePages['/?page=search&q=harvia'] = 'Search: harvia';
+
+    $phpErrorPattern = '/(Warning|Fatal|Parse error|Notice|Deprecated|Undefined variable|Uncaught).*?(on line \d+|in \/|in [A-Z]:\\\\)/i';
+
+    foreach ($smokePages as $path => $label) {
+        $html = @file_get_contents($smokeBaseUrl . $path, false, $ctx);
+        if ($html === false) {
+            assert_true(false, "Smoke {$label}: Failed to fetch");
+            continue;
+        }
+        // Check response headers for HTTP status
+        $status = 200;
+        if (isset($http_response_header)) {
+            foreach ($http_response_header as $h) {
+                if (preg_match('/HTTP\/\S+\s+(\d+)/', $h, $hm)) $status = (int)$hm[1];
+            }
+        }
+        if ($status >= 400) {
+            assert_true(false, "Smoke {$label}: HTTP {$status}");
+        } elseif (preg_match($phpErrorPattern, $html, $errMatch)) {
+            assert_true(false, "Smoke {$label}: PHP error — " . substr($errMatch[0], 0, 120));
+        } else {
+            assert_true(true, "Smoke {$label}: OK ({$status}, " . strlen($html) . " bytes)");
+        }
+    }
+} else {
+    echo "  [SKIP] No server running at {$smokeBaseUrl} — start with: php -S localhost:8080\n";
+}
+
+// ============================================================
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
 if ($failed > 0) {
