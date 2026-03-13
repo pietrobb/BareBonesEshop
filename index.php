@@ -412,6 +412,10 @@ $t = function(string $key) use ($ui, $lang): string {
 
 // Cart actions (POST) — handle before any output
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['cart_action'])) {
+    if (!Security::csrfValidate()) {
+        http_response_code(403);
+        exit('CSRF token mismatch');
+    }
     $pid = Security::int($_POST['product_id'] ?? 0);
     $qty = max(0, Security::int($_POST['quantity'] ?? 1));
     switch ($_POST['cart_action']) {
@@ -439,8 +443,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['cart_action'])) {
         echo json_encode(['count' => array_sum($_SESSION['cart']), 'cart' => $_SESSION['cart']]);
         exit;
     }
-    // Regular POST → redirect back
-    $redirect = $_POST['redirect'] ?? $_SERVER['HTTP_REFERER'] ?? '?';
+    // Regular POST → redirect back (validate: only relative URLs)
+    $redirect = $_POST['redirect'] ?? '?';
+    if (!str_starts_with($redirect, '?') && !str_starts_with($redirect, '/')) {
+        $redirect = '?';
+    }
     header('Location: ' . $redirect);
     exit;
 }
@@ -449,6 +456,7 @@ $cartCount = array_sum($_SESSION['cart']);
 $page = Security::clean($_GET['page'] ?? 'home');
 $e = fn(string $s) => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
 $price = fn(int $cents) => I18n::price($cents, 'eur');
+$csrfField = '<input type="hidden" name="csrf_token" value="' . Security::csrfToken() . '">';
 
 // ============================================================
 // Route & fetch data
@@ -756,7 +764,7 @@ function goVehicle(){
 }
 async function addToCart(pid,qty,btn){
  const orig=btn.textContent;btn.disabled=true;btn.textContent='<?= $lang==='en'?'Added ✓':($lang==='de'?'Hinzugefügt ✓':'Pridané ✓') ?>';
- const fd=new FormData();fd.append('cart_action','add');fd.append('product_id',pid);fd.append('quantity',qty||1);
+ const fd=new FormData();fd.append('cart_action','add');fd.append('product_id',pid);fd.append('quantity',qty||1);fd.append('csrf_token','<?= Security::csrfToken() ?>');
  const r=await fetch('',{method:'POST',body:fd,headers:{'X-Requested-With':'XMLHttpRequest'}});
  const d=await r.json();
  const b=document.querySelector('.cart-badge');
@@ -1199,13 +1207,14 @@ function renderCart(): string {
         echo '<div class="prod-sku">' . $e($p['sku']) . '</div></td>';
         echo '<td>' . $price($p['price']) . '</td>';
         echo '<td><form method="post" style="display:flex;gap:4px">';
+        echo $csrfField;
         echo '<input type="hidden" name="cart_action" value="update">';
         echo '<input type="hidden" name="product_id" value="' . $pid . '">';
         echo '<input type="hidden" name="redirect" value="?page=cart">';
         echo '<input type="number" name="quantity" value="' . $qty . '" min="1" max="99" class="qty-input" onchange="this.form.submit()">';
         echo '</form></td>';
         echo '<td style="font-weight:600">' . $price($lineTotal) . '</td>';
-        echo '<td><form method="post"><input type="hidden" name="cart_action" value="remove"><input type="hidden" name="product_id" value="' . $pid . '"><input type="hidden" name="redirect" value="?page=cart">';
+        echo '<td><form method="post">' . $csrfField . '<input type="hidden" name="cart_action" value="remove"><input type="hidden" name="product_id" value="' . $pid . '"><input type="hidden" name="redirect" value="?page=cart">';
         echo '<button type="submit" class="btn-remove" title="' . $t('remove') . '">✕</button></form></td>';
         echo '</tr>';
     }
@@ -1222,7 +1231,7 @@ function renderCart(): string {
     if ($shipping > 0) echo '<div style="font-size:.75em;color:#888">' . $t('free_over') . ' ' . $price(5000) . '</div>';
     echo '<div class="row total-row"><span>' . $t('total_price') . '</span><span>' . $price($total) . '</span></div>';
     echo '<a href="?page=checkout" class="btn-checkout">' . $t('to_checkout') . '</a>';
-    echo '<form method="post" style="margin-top:8px"><input type="hidden" name="cart_action" value="clear"><input type="hidden" name="redirect" value="?page=cart">';
+    echo '<form method="post" style="margin-top:8px">' . $csrfField . '<input type="hidden" name="cart_action" value="clear"><input type="hidden" name="redirect" value="?page=cart">';
     echo '<button type="submit" style="background:none;border:none;color:#888;cursor:pointer;font-size:.85em;width:100%;text-align:center">' . $t('clear_cart') . '</button></form>';
     echo '</div>';
 
@@ -1267,6 +1276,7 @@ function renderCheckout(): string {
 
     // Checkout form
     echo '<form method="post" class="checkout-form">';
+    echo $csrfField;
     echo '<input type="hidden" name="checkout" value="1">';
 
     echo '<h2 style="font-size:1.1em;margin-bottom:4px">' . $t('contact') . '</h2>';
@@ -1318,80 +1328,72 @@ function renderCheckout(): string {
 }
 
 function processCheckout(): string {
-    global $e, $price;
+    global $e, $price, $t;
+
+    if (!Security::csrfValidate()) {
+        return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">CSRF token mismatch.</p>';
+    }
+
     $cart = $_SESSION['cart'] ?? [];
+    if (empty($cart)) {
+        return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">Košík je prázdny.</p>';
+    }
+
     $db = Db::get();
 
     // Load products
     $ids = array_keys($cart);
     $ph = implode(',', array_fill(0, count($ids), '?'));
-    $stmt = $db->prepare("SELECT * FROM products WHERE id IN ({$ph})");
+    $stmt = $db->prepare("SELECT * FROM products WHERE id IN ({$ph}) AND status = 'active'");
     $stmt->execute($ids);
     $products = [];
     foreach ($stmt->fetchAll() as $p) $products[(int)$p['id']] = $p;
 
-    $subtotal = 0;
-    $items = [];
-    foreach ($cart as $pid => $qty) {
-        $p = $products[$pid] ?? null;
-        if (!$p) continue;
-        $lineTotal = $p['price'] * $qty;
-        $subtotal += $lineTotal;
-        $items[] = ['product_id' => $pid, 'sku' => $p['sku'], 'name' => $p['name'], 'quantity' => $qty, 'unit_price' => $p['price'], 'total' => $lineTotal];
-    }
-
     $payment = Security::clean($_POST['payment'] ?? 'cod');
-    $shipping = $subtotal >= 5000 ? 0 : 499;
-    $codFee = $payment === 'cod' ? 150 : 0;
-    $total = $subtotal + $shipping + $codFee;
-
-    $orderNum = 'AD-' . date('Ymd') . '-' . strtoupper(substr(bin2hex(random_bytes(3)), 0, 6));
-
     $addr = json_encode([
         'street' => Security::clean($_POST['street'] ?? ''),
         'city'   => Security::clean($_POST['city'] ?? ''),
         'zip'    => Security::clean($_POST['zip'] ?? ''),
     ]);
 
-    $db->beginTransaction();
+    // Convert index.php cart format to Orders::create format
+    $cartItems = [];
+    foreach ($cart as $pid => $qty) {
+        $p = $products[$pid] ?? null;
+        if (!$p) continue;
+        $cartItems[] = [
+            'product_id' => (int)$pid,
+            'variant_id' => null,
+            'qty'        => (int)$qty,
+            'price'      => (int)$p['price'],
+            'sku'        => $p['sku'],
+            'name'       => $p['name'],
+        ];
+    }
+
+    $subtotal = array_sum(array_map(fn($i) => $i['price'] * $i['qty'], $cartItems));
+    $shippingCost = $subtotal >= 5000 ? 0 : 499;
+
+    $customer = [
+        'name'  => Security::clean($_POST['name'] ?? ''),
+        'email' => Security::clean($_POST['email'] ?? ''),
+        'phone' => Security::clean($_POST['phone'] ?? ''),
+        'shipping_addr' => $addr,
+        'notes' => Security::clean($_POST['notes'] ?? ''),
+        'shipping_cost' => $shippingCost,
+    ];
+
     try {
-        $stmt = $db->prepare("INSERT INTO orders (order_number, status, customer_name, customer_email, customer_phone, shipping_addr, payment_method, subtotal, shipping_cost, total, currency, notes, ip_address)
-            VALUES (:num, 'pending', :name, :email, :phone, :addr, :pay, :sub, :ship, :total, 'eur', :notes, :ip)");
-        $stmt->execute([
-            ':num'   => $orderNum,
-            ':name'  => Security::clean($_POST['name'] ?? ''),
-            ':email' => Security::clean($_POST['email'] ?? ''),
-            ':phone' => Security::clean($_POST['phone'] ?? ''),
-            ':addr'  => $addr,
-            ':pay'   => $payment,
-            ':sub'   => $subtotal,
-            ':ship'  => $shipping,
-            ':total' => $total,
-            ':notes' => Security::clean($_POST['notes'] ?? ''),
-            ':ip'    => Security::clientIp(),
-        ]);
-        $orderId = (int)$db->lastInsertId();
-
-        $itemStmt = $db->prepare("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total)
-            VALUES (:oid, :pid, :sku, :name, :qty, :up, :total)");
-        foreach ($items as $item) {
-            $itemStmt->execute([
-                ':oid'   => $orderId,
-                ':pid'   => $item['product_id'],
-                ':sku'   => $item['sku'],
-                ':name'  => $item['name'],
-                ':qty'   => $item['quantity'],
-                ':up'    => $item['unit_price'],
-                ':total' => $item['total'],
-            ]);
-        }
-
-        $db->commit();
+        // Orders::create handles atomic stock reservation
+        $orderId = Orders::create($cartItems, $customer, $payment);
         $_SESSION['cart'] = [];
-        header('Location: ?page=order-done&order=' . urlencode($orderNum));
+        $order = Orders::byId($orderId);
+        header('Location: ?page=order-done&order=' . urlencode($order['order_number']));
         exit;
-    } catch (Exception $ex) {
-        $db->rollBack();
+    } catch (\RuntimeException $ex) {
+        // Out of stock
+        return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">' . esc($ex->getMessage()) . '</p>';
+    } catch (\Exception $ex) {
         return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">Chyba pri spracovaní objednávky. Skúste to znova.</p>';
     }
 }

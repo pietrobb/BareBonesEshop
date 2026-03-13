@@ -162,8 +162,12 @@ function handleCacheRebuild(array $payload, array $job): void {
             }
         }
     } elseif (!empty($payload['path'])) {
-        // Single path rebuild
-        Cache::invalidate($payload['path']);
+        // Single path rebuild — directly touch stale, do NOT call Cache::invalidate()
+        // which would re-queue another cache_rebuild job creating an infinite loop
+        $file = $cfg['cache_dir'] . '/' . $payload['path'];
+        if (file_exists($file)) {
+            touch($file, 1); // set mtime to epoch → stale on next read
+        }
     }
 }
 

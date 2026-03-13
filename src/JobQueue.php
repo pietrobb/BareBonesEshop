@@ -102,14 +102,18 @@ class JobQueue {
             $failDir = self::dir() . '/failed';
             if (!is_dir($failDir)) mkdir($failDir, 0750, true);
             file_put_contents($failDir . '/' . basename($procFile), json_encode($job, JSON_PRETTY_PRINT));
-            @unlink($procFile);
+            if (!@unlink($procFile)) {
+                error_log("JobQueue: failed to unlink processing file: {$procFile}");
+            }
         } else {
             // Retry with exponential backoff: 4s, 16s, 64s...
             $delaySec = (int)pow(4, $job['attempts']);
             $job['retry_after'] = date('c', time() + $delaySec);
             $pendingDir = self::dir() . '/pending';
             file_put_contents($pendingDir . '/' . basename($procFile), json_encode($job, JSON_PRETTY_PRINT));
-            @unlink($procFile);
+            if (!@unlink($procFile)) {
+                error_log("JobQueue: failed to unlink processing file: {$procFile}");
+            }
         }
     }
 

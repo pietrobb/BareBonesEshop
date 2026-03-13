@@ -324,6 +324,17 @@ class Products {
         $product['url'] = '/product/' . $product['slug'];
         $product['image'] = $product['images'][0] ?? null;
 
+        // Add category info for pricing rule matching
+        if (!empty($product['category_id']) && empty($product['category_path'])) {
+            $cat = Db::get()->prepare("SELECT slug, path FROM categories WHERE id = :id");
+            $cat->execute([':id' => $product['category_id']]);
+            $catRow = $cat->fetch();
+            if ($catRow) {
+                $product['category_slug'] = $catRow['slug'];
+                $product['category_path'] = $catRow['path'];
+            }
+        }
+
         return $product;
     }
 

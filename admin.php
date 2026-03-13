@@ -594,6 +594,16 @@ function handleProductSave(): void {
         ':weight_g'      => Security::int($_POST['weight_g'] ?? 0),
     ];
 
+    // Validate slug uniqueness
+    $slug = $data[':slug'];
+    $checkSlug = $db->prepare("SELECT id FROM products WHERE slug = :slug AND id != :id");
+    $checkSlug->execute([':slug' => $slug, ':id' => $id ?: -1]);
+    if ($checkSlug->fetch()) {
+        setFlash('err', 'Slug "' . esc($slug) . '" už existuje pre iný produkt.');
+        header("Location: admin.php?p=product&id={$id}");
+        exit;
+    }
+
     if ($id) {
         $old = Products::byId($id);
         $stmt = $db->prepare("UPDATE products SET sku=:sku, name=:name, slug=:slug, product_type=:product_type,

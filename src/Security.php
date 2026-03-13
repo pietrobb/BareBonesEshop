@@ -111,7 +111,7 @@ class Security {
         $stmt->execute([':key' => $key, ':window' => $window]);
         $count = (int) $stmt->fetchColumn();
 
-        if ($count > $maxPerMinute) {
+        if ($count >= $maxPerMinute) {
             http_response_code(429);
             header('Retry-After: 60');
             return false;
@@ -168,6 +168,12 @@ class Security {
         if (empty($cfg['admin_password'])) {
             http_response_code(503);
             exit('Service unavailable.');
+        }
+
+        // Session fast-path: already authenticated this session
+        self::sessionStart();
+        if (!empty($_SESSION['admin_authenticated'])) {
+            return true;
         }
 
         $user = $_SERVER['PHP_AUTH_USER'] ?? '';

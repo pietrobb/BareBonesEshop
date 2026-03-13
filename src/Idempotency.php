@@ -14,7 +14,11 @@ class Idempotency {
             $stmt->execute([':id' => $eventId]);
             return false; // new event, needs processing
         } catch (\PDOException $e) {
-            return true;  // duplicate, skip
+            // Only treat unique constraint violations as "already processed"
+            if (in_array($e->getCode(), ['23000', '23505'], true)) {
+                return true;  // duplicate, skip
+            }
+            throw $e; // Re-throw real DB errors (connection, disk, etc.)
         }
     }
 
