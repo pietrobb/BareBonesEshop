@@ -9,27 +9,16 @@ class Sync {
      * Run full sync cycle
      */
     public static function run(): array {
-        $cfg = require __DIR__ . '/../config.php';
-        $adapterClass = $cfg['adapters']['integration'] ?? null;
-
-        if (!$adapterClass) {
+        $adapter = Adapters::integration();
+        if (!$adapter) {
             return ['skipped' => true, 'reason' => 'No integration adapter configured'];
         }
 
-        $adapterFile = __DIR__ . '/../adapters/' . $adapterClass . '.php';
-        if (!file_exists($adapterFile)) {
-            return ['error' => "Adapter file not found: {$adapterClass}"];
-        }
-
-        require_once $adapterFile;
-        if (!class_exists($adapterClass)) {
-            return ['error' => "Adapter class not found: {$adapterClass}"];
-        }
-
-        $adapter = new $adapterClass($cfg);
         if (!$adapter->healthCheck()) {
             return ['error' => 'ERP health check failed'];
         }
+
+        $cfg = require __DIR__ . '/../config.php';
 
         $result = [
             'products_updated' => 0,

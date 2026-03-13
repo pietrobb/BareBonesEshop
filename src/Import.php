@@ -385,13 +385,27 @@ class Import {
     }
 
     /**
-     * Recount products per category
+     * Recount products per category (including subtree totals via materialized path)
      */
     public static function recountCategories(?PDO $db = null): void {
         $db = $db ?? Db::get();
-        $db->exec("UPDATE categories SET product_count = (
-            SELECT COUNT(*) FROM products WHERE products.category_id = categories.id AND products.status = 'active'
-        )");
+
+        // Count products in entire subtree using materialized path
+        $cats = $db->query("SELECT id, path FROM categories ORDER BY depth DESC")->fetchAll();
+        $stmt = $db->prepare("UPDATE categories SET product_count = (
+            SELECT COUNT(*) FROM products p
+            JOIN categories c2 ON p.category_id = c2.id
+            WHERE (c2.path = :path OR c2.path LIKE :pathPrefix)
+              AND p.status = 'active'
+        ) WHERE id = :id");
+
+        foreach ($cats as $cat) {
+            $stmt->execute([
+                ':path'       => $cat['path'],
+                ':pathPrefix' => $cat['path'] . '/%',
+                ':id'         => $cat['id'],
+            ]);
+        }
     }
 
     // ============================================================

@@ -30,6 +30,20 @@ if ($page === 'products' && $action === 'export') {
     handleExport();
 }
 
+// Role-based permission map
+$pagePermissions = [
+    'dashboard' => 'reports.view',
+    'products'  => 'products.view',
+    'product'   => 'products.edit',
+    'orders'    => 'orders.view',
+    'order'     => 'orders.view',
+    'import'    => 'import',
+    'cache'     => 'cache',
+    'audit'     => 'reports.view',
+];
+$requiredPerm = $pagePermissions[$page] ?? 'reports.view';
+Security::adminRequire($requiredPerm);
+
 // Handle POST actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     handlePost($page, $action);
@@ -94,12 +108,13 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
 <div class="wrap">
 <nav>
     <h2>BareBonesShop</h2>
-    <a href="admin.php?p=dashboard" class="<?= $page==='dashboard'?'active':'' ?>">Dashboard</a>
-    <a href="admin.php?p=products" class="<?= $page==='products'?'active':'' ?>">Produkty</a>
-    <a href="admin.php?p=orders" class="<?= $page==='orders'?'active':'' ?>">Objednávky</a>
-    <a href="admin.php?p=import" class="<?= $page==='import'?'active':'' ?>">Import CSV</a>
-    <a href="admin.php?p=cache" class="<?= $page==='cache'?'active':'' ?>">Cache</a>
-    <a href="admin.php?p=audit" class="<?= $page==='audit'?'active':'' ?>">Audit Log</a>
+    <div style="padding:0.3rem 1rem;font-size:0.75rem;color:#94a3b8;margin-bottom:0.5rem"><?= esc(Security::adminUser()) ?> (<?= esc(Security::adminRole()) ?>)</div>
+    <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=dashboard" class="<?= $page==='dashboard'?'active':'' ?>">Dashboard</a><?php endif; ?>
+    <?php if (Security::adminCan('products.view')): ?><a href="admin.php?p=products" class="<?= $page==='products'?'active':'' ?>">Produkty</a><?php endif; ?>
+    <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=orders" class="<?= $page==='orders'?'active':'' ?>">Objednávky</a><?php endif; ?>
+    <?php if (Security::adminCan('import')): ?><a href="admin.php?p=import" class="<?= $page==='import'?'active':'' ?>">Import CSV</a><?php endif; ?>
+    <?php if (Security::adminCan('cache')): ?><a href="admin.php?p=cache" class="<?= $page==='cache'?'active':'' ?>">Cache</a><?php endif; ?>
+    <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=audit" class="<?= $page==='audit'?'active':'' ?>">Audit Log</a><?php endif; ?>
 </nav>
 <main>
 <?php flash(); ?>
@@ -258,9 +273,15 @@ function pageProducts(): void {
             <div style="display:flex;gap:.5rem;margin-bottom:.5rem">
                 <select name="bulk_action">
                     <option value="">— Hromadna akcia —</option>
-                    <option value="activate">Aktivovat</option>
-                    <option value="archive">Archivovat</option>
-                    <option value="delete">Zmazat</option>
+                    <option value="activate">Aktivovať</option>
+                    <option value="archive">Archivovať</option>
+                    <option value="delete">Zmazať</option>
+                    <option value="price_up_5">Cena +5%</option>
+                    <option value="price_up_10">Cena +10%</option>
+                    <option value="price_up_20">Cena +20%</option>
+                    <option value="price_down_5">Cena -5%</option>
+                    <option value="price_down_10">Cena -10%</option>
+                    <option value="price_down_20">Cena -20%</option>
                 </select>
                 <button type="submit" class="btn btn-sm" onclick="return confirm('Naozaj?')">Vykonat</button>
                 <a href="admin.php?p=products&action=export&csrf_token=<?= Security::csrfToken() ?>&q=<?= urlencode($search) ?>&status=<?= urlencode($statusFilter) ?>" class="btn btn-sm">Export CSV</a>
@@ -697,18 +718,32 @@ function handleBulkAction(): void {
     $db = Db::get();
     $ph = implode(',', array_fill(0, count($ids), '?'));
 
+    $now = Db::now();
     switch ($action) {
         case 'activate':
-            $db->prepare("UPDATE products SET status = 'active' WHERE id IN ({$ph})")->execute($ids);
-            setFlash('ok', count($ids) . ' produktov aktivovanych.');
+            $db->prepare("UPDATE products SET status = 'active', updated_at = {$now} WHERE id IN ({$ph})")->execute($ids);
+            setFlash('ok', count($ids) . ' produktov aktivovaných.');
             break;
         case 'archive':
-            $db->prepare("UPDATE products SET status = 'archived' WHERE id IN ({$ph})")->execute($ids);
-            setFlash('ok', count($ids) . ' produktov archivovanych.');
+            $db->prepare("UPDATE products SET status = 'archived', updated_at = {$now} WHERE id IN ({$ph})")->execute($ids);
+            setFlash('ok', count($ids) . ' produktov archivovaných.');
             break;
         case 'delete':
             $db->prepare("DELETE FROM products WHERE id IN ({$ph})")->execute($ids);
-            setFlash('ok', count($ids) . ' produktov zmazanych.');
+            setFlash('ok', count($ids) . ' produktov zmazaných.');
+            break;
+        case 'price_up_5':
+        case 'price_up_10':
+        case 'price_up_20':
+        case 'price_down_5':
+        case 'price_down_10':
+        case 'price_down_20':
+            $percent = (int)filter_var($action, FILTER_SANITIZE_NUMBER_INT);
+            $direction = str_contains($action, 'up') ? 1 : -1;
+            $multiplier = round(1 + ($direction * abs($percent) / 100), 4);
+            $db->prepare("UPDATE products SET price = MAX(0, ROUND(price * {$multiplier})), updated_at = {$now} WHERE id IN ({$ph})")->execute($ids);
+            $sign = $direction > 0 ? '+' : '-';
+            setFlash('ok', count($ids) . " produktov: cena {$sign}" . abs($percent) . '%.');
             break;
     }
     header('Location: admin.php?p=products');

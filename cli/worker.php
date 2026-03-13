@@ -165,11 +165,52 @@ function handleCacheRebuild(array $payload, array $job): void {
             }
         }
     } elseif (!empty($payload['path'])) {
-        // Single path rebuild — directly touch stale, do NOT call Cache::invalidate()
-        // which would re-queue another cache_rebuild job creating an infinite loop
-        $file = $cfg['cache_dir'] . '/' . $payload['path'];
-        if (file_exists($file)) {
-            touch($file, 1); // set mtime to epoch → stale on next read
+        // Single path rebuild — proactively regenerate the cache file
+        $path = $payload['path'];
+
+        // Determine locale and content type from path pattern, then regenerate
+        if (preg_match('#^([a-z]{2})/cat/([a-z0-9-]+)/page-(\d+)\.json$#', $path, $m)) {
+            $locale = $m[1];
+            $catSlug = $m[2];
+            $pageNum = (int)$m[3];
+            I18n::setLocale($locale);
+            $cat = Categories::bySlug($catSlug);
+            if ($cat) {
+                $catMap = Products::categoryMap();
+                $data = Products::byCategory($cat['id'], $pageNum, $perPage, 'price_asc');
+                $data['products'] = array_map(fn($p) => Products::enrich(I18n::product($p), $catMap), $data['products']);
+                Cache::writeJson(Cache::localePath($locale, "cat/{$catSlug}/page-{$pageNum}.json"), $data);
+            }
+        } elseif (preg_match('#^([a-z]{2})/product/([a-z0-9-]+)\.json$#', $path, $m)) {
+            $locale = $m[1];
+            $prodSlug = $m[2];
+            I18n::setLocale($locale);
+            $product = Products::bySlug($prodSlug);
+            if ($product) {
+                $product = Products::enrich(I18n::product($product));
+                $product['variants'] = Products::variants($product['id']);
+                $product['attributes'] = Products::attrs($product['id']);
+                Cache::writeJson(Cache::localePath($locale, "product/{$prodSlug}.json"), ['product' => $product]);
+            }
+        } elseif (preg_match('#^([a-z]{2})/categories\.json$#', $path, $m)) {
+            $locale = $m[1];
+            I18n::setLocale($locale);
+            $tree = Categories::tree();
+            $translatedTree = array_map(function($cat) {
+                $cat = I18n::category($cat);
+                $cat = Categories::enrich($cat);
+                if (!empty($cat['children'])) {
+                    $cat['children'] = array_map(fn($c) => Categories::enrich(I18n::category($c)), $cat['children']);
+                }
+                return $cat;
+            }, $tree);
+            Cache::writeJson(Cache::localePath($locale, 'categories.json'), ['categories' => $translatedTree]);
+        } else {
+            // Unknown pattern — mark stale for on-demand regeneration
+            $file = $cfg['cache_dir'] . '/' . $path;
+            if (file_exists($file)) {
+                touch($file, 1);
+            }
         }
     }
 }
@@ -376,25 +417,42 @@ function handleSitemapBuild(array $payload, array $job): void {
         ?: 'https://example.com';
     $safeBase = htmlspecialchars(rtrim($baseUrl, '/'), ENT_XML1 | ENT_QUOTES, 'UTF-8');
 
+    // Load store prefixes for multi-locale URLs
+    $stores = json_decode(file_get_contents(__DIR__ . '/../stores.json'), true);
+    $prefixes = [''];  // default locale has no prefix
+    foreach ($stores['stores'] ?? [] as $store) {
+        $p = $store['url_prefix'] ?? '';
+        if ($p !== '' && !in_array($p, $prefixes, true)) $prefixes[] = $p;
+    }
+
     $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
     $xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
 
-    // Homepage
-    $xml .= "<url><loc>{$safeBase}/</loc><priority>1.0</priority></url>\n";
+    // Homepages per locale
+    foreach ($prefixes as $prefix) {
+        $safePrefix = htmlspecialchars($prefix, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+        $xml .= "<url><loc>{$safeBase}{$safePrefix}/</loc><priority>1.0</priority></url>\n";
+    }
 
-    // Categories
+    // Categories per locale
     $cats = $db->query("SELECT slug, path FROM categories ORDER BY path")->fetchAll();
     foreach ($cats as $cat) {
         $slug = htmlspecialchars($cat['slug'], ENT_XML1 | ENT_QUOTES, 'UTF-8');
-        $xml .= "<url><loc>{$safeBase}/category/{$slug}</loc><priority>0.8</priority></url>\n";
+        foreach ($prefixes as $prefix) {
+            $safePrefix = htmlspecialchars($prefix, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+            $xml .= "<url><loc>{$safeBase}{$safePrefix}/category/{$slug}</loc><priority>0.8</priority></url>\n";
+        }
     }
 
-    // Products
+    // Products per locale
     $stmt = $db->query("SELECT slug, updated_at FROM products WHERE status = 'active' ORDER BY updated_at DESC");
     while ($p = $stmt->fetch()) {
         $slug = htmlspecialchars($p['slug'], ENT_XML1 | ENT_QUOTES, 'UTF-8');
         $lastmod = substr($p['updated_at'], 0, 10);
-        $xml .= "<url><loc>{$safeBase}/product/{$slug}</loc><lastmod>{$lastmod}</lastmod><priority>0.6</priority></url>\n";
+        foreach ($prefixes as $prefix) {
+            $safePrefix = htmlspecialchars($prefix, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+            $xml .= "<url><loc>{$safeBase}{$safePrefix}/product/{$slug}</loc><lastmod>{$lastmod}</lastmod><priority>0.6</priority></url>\n";
+        }
     }
 
     $xml .= "</urlset>\n";
@@ -403,8 +461,48 @@ function handleSitemapBuild(array $payload, array $job): void {
 }
 
 function handleCartAbandonment(array $payload, array $job): void {
-    // Placeholder: would scan sessions/carts older than 24h with email set
-    error_log("Cart abandonment check triggered");
+    $db = Db::get();
+    $hoursThreshold = $payload['hours'] ?? 24;
+    $now = Db::isSqlite() ? "datetime('now')" : "NOW()";
+    $interval = Db::isSqlite()
+        ? "datetime('now', '-{$hoursThreshold} hours')"
+        : "DATE_SUB(NOW(), INTERVAL {$hoursThreshold} HOUR)";
+
+    $stmt = $db->prepare("
+        SELECT * FROM abandoned_carts
+        WHERE customer_email IS NOT NULL AND customer_email != ''
+          AND reminded_at IS NULL
+          AND created_at < {$interval}
+        LIMIT 50
+    ");
+    $stmt->execute();
+    $carts = $stmt->fetchAll();
+
+    $sent = 0;
+    foreach ($carts as $cart) {
+        // Skip if customer already placed an order with this email recently
+        $orderCheck = $db->prepare("SELECT id FROM orders WHERE customer_email = :email AND created_at > :since LIMIT 1");
+        $orderCheck->execute([':email' => $cart['customer_email'], ':since' => $cart['created_at']]);
+        if ($orderCheck->fetch()) {
+            // Customer completed order — remove abandoned cart
+            $db->prepare("DELETE FROM abandoned_carts WHERE id = :id")->execute([':id' => $cart['id']]);
+            continue;
+        }
+
+        JobQueue::push('email_send', [
+            'template' => 'cart-reminder',
+            'to'       => $cart['customer_email'],
+            'vars'     => ['cart_url' => '/'],
+        ], 8);
+
+        $db->prepare("UPDATE abandoned_carts SET reminded_at = {$now} WHERE id = :id")
+           ->execute([':id' => $cart['id']]);
+        $sent++;
+    }
+
+    if ($sent > 0) {
+        error_log("Cart abandonment: sent {$sent} reminder emails");
+    }
 }
 
 function handleCleanup(array $payload, array $job): void {

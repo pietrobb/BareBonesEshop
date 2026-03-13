@@ -4,11 +4,27 @@ RewriteEngine On
 # Level 0 Cache — serve cached JSON directly (bypass PHP)
 # ============================================================
 
-# Category listings: api.php?action=products&cat=tricka&page=1
-# Extract cat and page from query string, serve cache if file exists
+# Category listings with locale: api.php?action=products&cat=tricka&page=1&locale=de
+RewriteCond %{QUERY_STRING} action=products&cat=([a-z0-9-]+)&page=(\d+)&locale=([a-z]{2})
+RewriteCond %{DOCUMENT_ROOT}/cache/%3/cat/%1/page-%2.json -f
+RewriteRule ^api\.php$ cache/%3/cat/%1/page-%2.json [L,T=application/json]
+
+# Category listings (default locale): api.php?action=products&cat=tricka&page=1
 RewriteCond %{QUERY_STRING} action=products&cat=([a-z0-9-]+)&page=(\d+)
-RewriteCond %{DOCUMENT_ROOT}/cache/cat/%1/page-%2.json -f
-RewriteRule ^api\.php$ cache/cat/%1/page-%2.json [L,T=application/json]
+RewriteCond %{QUERY_STRING} !locale=
+RewriteCond %{DOCUMENT_ROOT}/cache/sk/cat/%1/page-%2.json -f
+RewriteRule ^api\.php$ cache/sk/cat/%1/page-%2.json [L,T=application/json]
+
+# Categories listing with locale
+RewriteCond %{QUERY_STRING} action=categories&locale=([a-z]{2})
+RewriteCond %{DOCUMENT_ROOT}/cache/%1/categories.json -f
+RewriteRule ^api\.php$ cache/%1/categories.json [L,T=application/json]
+
+# Categories listing (default locale)
+RewriteCond %{QUERY_STRING} action=categories
+RewriteCond %{QUERY_STRING} !locale=
+RewriteCond %{DOCUMENT_ROOT}/cache/sk/categories.json -f
+RewriteRule ^api\.php$ cache/sk/categories.json [L,T=application/json]
 
 # Static cache files served directly
 RewriteCond %{REQUEST_URI} ^/cache/ [NC]

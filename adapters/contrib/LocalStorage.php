@@ -123,6 +123,13 @@ class LocalStorage implements StorageAdapter {
             imagedestroy($dst);
             throw new \RuntimeException("Cannot write resized image for format: {$ext}");
         }
+
+        // Also generate WebP version alongside original format (if not already WebP)
+        if ($ext !== 'webp' && function_exists('imagewebp')) {
+            $webpFile = ($dir !== '.' ? $dir . '/' : '') . $base . '-' . $variantName . '.webp';
+            $webpPath = $this->uploadsDir . '/' . $webpFile;
+            @imagewebp($dst, $webpPath, 80);
+        }
         imagedestroy($dst);
 
         return $this->baseUrl . '/' . $outFile;

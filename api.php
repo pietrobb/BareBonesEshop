@@ -167,7 +167,7 @@ function apiSearch(): array {
         return ['products' => [], 'total' => 0, 'query' => $q];
     }
 
-    $data = Search::query($q, $page);
+    $data = Adapters::search()->search($q, ['page' => $page]);
     $catMap = Products::categoryMap();
     $data['products'] = array_map(function($p) use ($catMap) {
         return Products::enrich(I18n::product($p), $catMap);
@@ -179,7 +179,7 @@ function apiSearch(): array {
 function apiSearchSuggest(): array {
     $q = trim($_GET['q'] ?? '');
     if (strlen($q) < 2) return [];
-    return Search::suggest($q, 5);
+    return Adapters::search()->suggest($q, 5);
 }
 
 function apiValidateCoupon(): array {
@@ -468,6 +468,12 @@ function apiCheckout(): array {
         $orderItems = Orders::items($orderId);
         JobQueue::push('email_send', ['template' => 'confirm-order', 'to' => $email, 'order_id' => $orderId]);
 
+        // Admin notification
+        $adminEmail = $cfg['admin_email'] ?? '';
+        if ($adminEmail) {
+            JobQueue::push('email_send', ['template' => 'notify-order', 'to' => $adminEmail, 'order_id' => $orderId], 8);
+        }
+
         $result = [
             'success'      => true,
             'order_id'     => $orderId,
@@ -567,6 +573,13 @@ function onPaymentCompleted(array $session): void {
     OrderWorkflow::transition($orderId, 'paid', 'Stripe webhook: ' . ($session['id'] ?? ''));
 
     JobQueue::push('email_send', ['template' => 'order-confirmation', 'to' => $order['customer_email'], 'order_id' => $orderId]);
+
+    // Admin notification
+    $cfg = require __DIR__ . '/config.php';
+    $adminEmail = $cfg['admin_email'] ?? '';
+    if ($adminEmail) {
+        JobQueue::push('email_send', ['template' => 'notify-order', 'to' => $adminEmail, 'order_id' => $orderId], 8);
+    }
 }
 
 function onChargeRefunded(array $charge): void {

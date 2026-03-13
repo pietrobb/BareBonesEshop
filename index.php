@@ -1,7 +1,7 @@
 <?php
 /**
- * BareBones Shop — Auto Parts E-shop Frontend
- * Single-file server-rendered storefront.
+ * BareBones Shop — Storefront
+ * Generic catalog with conditional TecDoc auto-parts features.
  */
 require_once __DIR__ . '/src/autoload.php';
 
@@ -18,7 +18,8 @@ if (!empty($_GET['lang']) && in_array($_GET['lang'], ['sk','en','de'])) {
     header('Location: ' . $qs);
     exit;
 }
-$lang = $_SESSION['lang'] ?? 'sk';
+$uri = $_SERVER['REQUEST_URI'] ?? '';
+$lang = $_SESSION['lang'] ?? I18n::detectLocale($uri);
 I18n::setLocale($lang);
 
 // Slovak translations for TecDoc English category names
@@ -453,7 +454,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['cart_action'])) {
 }
 
 $cartCount = array_sum($_SESSION['cart']);
-$page = Security::clean($_GET['page'] ?? 'home');
+
+// Detect catalog type — conditionally enable TecDoc features
+$_catalog = json_decode(file_get_contents(__DIR__ . '/catalog.json'), true);
+$hasTecDoc = isset($_catalog['product_types']['auto_part']);
+
+// Route: support both ?page=X and URL-rewritten ?category=slug
+$page = Security::clean($_GET['page'] ?? '');
+if (!$page && !empty($_GET['category'])) $page = 'category';
+if (!$page) $page = 'home';
+
 $e = fn(string $s) => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
 $price = fn(int $cents) => I18n::price($cents, 'eur');
 $csrfField = '<input type="hidden" name="csrf_token" value="' . Security::csrfToken() . '">';
@@ -461,15 +471,15 @@ $csrfField = '<input type="hidden" name="csrf_token" value="' . Security::csrfTo
 // ============================================================
 // Route & fetch data
 // ============================================================
-$title = 'AutoDiely.sk';
+$title = 'BareBones Shop';
 $content = '';
 
 switch ($page) {
     case 'category':
-        $slug = Security::clean($_GET['slug'] ?? '');
+        $slug = Security::clean($_GET['slug'] ?? $_GET['category'] ?? '');
         $cat = Categories::bySlug($slug);
         if (!$cat) { $content = '<p>' . $t('cat_not_found') . '</p>'; break; }
-        $title = $e($catName($cat['name'])) . ' — AutoDiely.sk';
+        $title = $e($catName($cat['name'])) . ' — BareBones Shop';
         $content = renderCategory($cat);
         break;
 
@@ -477,51 +487,53 @@ switch ($page) {
         $slug = Security::clean($_GET['slug'] ?? '');
         $product = Products::bySlug($slug);
         if (!$product) { $content = '<p>' . $t('product_not_found') . '</p>'; break; }
-        $product = TecDoc::enrichProduct($product, $lang);
+        if ($hasTecDoc) $product = TecDoc::enrichProduct($product, $lang);
         $product = Products::enrich($product);
-        $title = $e($product['name']) . ' — AutoDiely.sk';
+        $title = $e($product['name']) . ' — BareBones Shop';
         $content = renderProduct($product);
         break;
 
     case 'vehicle':
+        if (!$hasTecDoc) { $content = '<p>Not available</p>'; break; }
         $ktype = Security::int($_GET['ktype'] ?? 0);
         $catId = !empty($_GET['cat']) ? Security::int($_GET['cat']) : null;
         $pg = max(1, Security::int($_GET['pg'] ?? 1));
         $result = TecDoc::partsByKtype($ktype, $pg, 24, $catId);
         $cats = TecDoc::categoriesForKtype($ktype);
-        $title = 'Diely pre vozidlo — AutoDiely.sk';
+        $title = $t('vehicle_parts') . ' — BareBones Shop';
         $content = renderVehicle($ktype, $result, $cats, $catId);
         break;
 
     case 'search':
         $q = Security::clean($_GET['q'] ?? '');
         $pg = max(1, Security::int($_GET['pg'] ?? 1));
-        $result = Search::query($q, $pg, 24);
-        $title = "Hľadanie: {$e($q)} — AutoDiely.sk";
+        $result = Adapters::search()->search($q, ['page' => $pg, 'per_page' => 24]);
+        $title = "{$t('search')}: {$e($q)} — BareBones Shop";
         $content = renderSearch($q, $result);
         break;
 
     case 'oe':
+        if (!$hasTecDoc) { $content = '<p>Not available</p>'; break; }
         $q = Security::clean($_GET['q'] ?? '');
         $pg = max(1, Security::int($_GET['pg'] ?? 1));
         $result = TecDoc::searchByOE($q, $pg, 24);
-        $title = "OE: {$e($q)} — AutoDiely.sk";
+        $title = "OE: {$e($q)} — BareBones Shop";
         $content = renderOE($q, $result);
         break;
 
     case 'cart':
-        $title = 'Košík — AutoDiely.sk';
+        $title = $t('cart') . ' — BareBones Shop';
         $content = renderCart();
         break;
 
     case 'checkout':
-        $title = 'Objednávka — AutoDiely.sk';
+        $title = $t('checkout') . ' — BareBones Shop';
         $content = renderCheckout();
         break;
 
     case 'order-done':
         $ordNum = Security::clean($_GET['order'] ?? '');
-        $title = 'Objednávka odoslaná — AutoDiely.sk';
+        $title = $t('order_placed') . ' — BareBones Shop';
         $content = renderOrderDone($ordNum);
         break;
 

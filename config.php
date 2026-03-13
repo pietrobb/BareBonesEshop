@@ -32,6 +32,7 @@ return [
     // Admin
     'admin_user'     => 'admin',
     'admin_password' => '', // password_hash() output — NEVER plaintext
+    'admin_email'    => '', // notification email for new orders
 
     // Security
     'trusted_proxies' => [],

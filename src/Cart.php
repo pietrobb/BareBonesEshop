@@ -175,10 +175,32 @@ class Cart {
     }
 
     /**
-     * Cart abandonment: save email at first checkout step
+     * Cart abandonment: save email and persist cart to DB for recovery
      */
     public static function setEmail(string $email): void {
         $_SESSION['cart_email'] = $email;
         $_SESSION['cart_email_at'] = time();
+
+        // Persist to abandoned_carts table for background worker scanning
+        $cart = self::get();
+        if (!empty($cart) && $email) {
+            try {
+                $db = Db::get();
+                $sid = session_id();
+                // Upsert: update existing or insert new
+                $stmt = $db->prepare("SELECT id FROM abandoned_carts WHERE session_id = :sid LIMIT 1");
+                $stmt->execute([':sid' => $sid]);
+                if ($stmt->fetch()) {
+                    $db->prepare("UPDATE abandoned_carts SET customer_email = :email, cart_data = :data, reminded_at = NULL WHERE session_id = :sid")
+                       ->execute([':email' => $email, ':data' => json_encode($cart), ':sid' => $sid]);
+                } else {
+                    $db->prepare("INSERT INTO abandoned_carts (session_id, customer_email, cart_data) VALUES (:sid, :email, :data)")
+                       ->execute([':sid' => $sid, ':email' => $email, ':data' => json_encode($cart)]);
+                }
+            } catch (\Throwable $e) {
+                // Silently fail — cart abandonment tracking is non-critical
+                error_log("Cart::setEmail persist failed: " . $e->getMessage());
+            }
+        }
     }
 }

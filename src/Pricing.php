@@ -24,7 +24,7 @@ class Pricing {
      * Apply catalog-level pricing to a product (pre-computable rules).
      * Returns product with adjusted price + original as compare_price.
      */
-    public static function apply(array $product, string $group = 'guest', ?string $date = null): array {
+    public static function apply(array $product, string $group = 'guest', ?string $date = null, int $qty = 1): array {
         $cfg = self::config();
         $date = $date ?? date('Y-m-d');
         $originalPrice = $product['price'];
@@ -42,7 +42,7 @@ class Pricing {
             if (!empty($rule['from']) && $date < $rule['from']) continue;
             if (!empty($rule['to']) && $date > $rule['to']) continue;
 
-            if (!self::matchesConditions($product, $rule['conditions'] ?? [])) continue;
+            if (!self::matchesConditions($product, $rule['conditions'] ?? [], $qty)) continue;
 
             if ($rule['discount_type'] === 'percent') {
                 $bestDiscount = max($bestDiscount, $rule['discount_value']);
@@ -183,7 +183,7 @@ class Pricing {
     /**
      * Check if product matches rule conditions
      */
-    private static function matchesConditions(array $product, array $conditions): bool {
+    private static function matchesConditions(array $product, array $conditions, int $qty = 1): bool {
         if (empty($conditions)) return true;
 
         if (!empty($conditions['category'])) {
@@ -198,6 +198,10 @@ class Pricing {
 
         if (!empty($conditions['product_type'])) {
             if (($product['product_type'] ?? 'simple') !== $conditions['product_type']) return false;
+        }
+
+        if (!empty($conditions['min_qty'])) {
+            if ($qty < (int)$conditions['min_qty']) return false;
         }
 
         return true;

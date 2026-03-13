@@ -19,6 +19,17 @@ class Adapters {
         return self::resolve('storage');
     }
 
+    public static function search(): object {
+        return self::resolve('search');
+    }
+
+    /** Returns null when no integration adapter is configured */
+    public static function integration(): ?object {
+        $cfg = self::cfg();
+        if (empty($cfg['adapters']['integration'])) return null;
+        return self::resolve('integration');
+    }
+
     public static function resolve(string $slot): object {
         if (isset(self::$instances[$slot])) return self::$instances[$slot];
 

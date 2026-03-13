@@ -162,15 +162,20 @@ class Security {
     }
 
     // ============================================================
-    // Admin authentication — with brute-force protection
+    // Admin authentication — with brute-force protection + roles
     // ============================================================
+
+    /** Role definitions: permissions for each role */
+    private static array $rolePermissions = [
+        'owner'       => ['*'],
+        'manager'     => ['products.*', 'orders.*', 'customers.view', 'reports.view', 'import', 'cache'],
+        'editor'      => ['products.edit', 'products.view', 'categories.edit', 'media.upload'],
+        'fulfillment' => ['orders.view', 'orders.ship', 'orders.print'],
+        'viewer'      => ['products.view', 'orders.view', 'reports.view'],
+    ];
+
     public static function adminAuth(): bool {
         $cfg = self::cfg();
-
-        if (empty($cfg['admin_password'])) {
-            http_response_code(503);
-            exit('Service unavailable.');
-        }
 
         // Session fast-path: already authenticated this session
         self::sessionStart();
@@ -198,15 +203,45 @@ class Security {
             }
         }
 
-        if ($user === $cfg['admin_user'] && !empty($cfg['admin_password'])
-            && password_verify($pass, $cfg['admin_password'])) {
-            if (file_exists($lockFile)) unlink($lockFile);
-            self::sessionStart();
-            if (empty($_SESSION['admin_authenticated'])) {
-                session_regenerate_id(true);
-                $_SESSION['admin_authenticated'] = true;
+        $authenticated = false;
+        $role = 'owner';
+
+        // Try multi-user auth from admin-roles.json first
+        $rolesFile = __DIR__ . '/../admin-roles.json';
+        if (file_exists($rolesFile)) {
+            $roles = json_decode(file_get_contents($rolesFile), true);
+            $users = $roles['users'] ?? [];
+            if (isset($users[$user]) && !empty($users[$user]['password'])
+                && password_verify($pass, $users[$user]['password'])) {
+                $authenticated = true;
+                $role = $users[$user]['role'] ?? 'viewer';
             }
+        }
+
+        // Fallback: single-user from config.php
+        if (!$authenticated && !empty($cfg['admin_password'])
+            && $user === ($cfg['admin_user'] ?? 'admin')
+            && password_verify($pass, $cfg['admin_password'])) {
+            $authenticated = true;
+            $role = 'owner';
+        }
+
+        if ($authenticated) {
+            if (file_exists($lockFile)) unlink($lockFile);
+            session_regenerate_id(true);
+            $_SESSION['admin_authenticated'] = true;
+            $_SESSION['admin_user'] = $user;
+            $_SESSION['admin_role'] = $role;
             return true;
+        }
+
+        if (empty($cfg['admin_password'])) {
+            // No password configured at all — check if roles file has users
+            $rolesFile = __DIR__ . '/../admin-roles.json';
+            if (!file_exists($rolesFile) || empty(json_decode(file_get_contents($rolesFile), true)['users'] ?? [])) {
+                http_response_code(503);
+                exit('Service unavailable.');
+            }
         }
 
         $lockData = $lockData ?? ['failures' => 0];
@@ -217,6 +252,50 @@ class Security {
         header('WWW-Authenticate: Basic realm="Shop Admin"');
         http_response_code(401);
         exit('Unauthorized');
+    }
+
+    /** Get the current admin user's role */
+    public static function adminRole(): string {
+        return $_SESSION['admin_role'] ?? 'owner';
+    }
+
+    /** Get the current admin username */
+    public static function adminUser(): string {
+        return $_SESSION['admin_user'] ?? 'admin';
+    }
+
+    /** Check if current admin has a permission */
+    public static function adminCan(string $permission): bool {
+        $role = self::adminRole();
+        $perms = self::$rolePermissions[$role] ?? [];
+
+        // Load custom roles from admin-roles.json if present
+        $rolesFile = __DIR__ . '/../admin-roles.json';
+        if (file_exists($rolesFile)) {
+            $rolesData = json_decode(file_get_contents($rolesFile), true);
+            if (isset($rolesData['roles'][$role]['permissions'])) {
+                $perms = $rolesData['roles'][$role]['permissions'];
+            }
+        }
+
+        foreach ($perms as $perm) {
+            if ($perm === '*') return true;
+            if ($perm === $permission) return true;
+            // Wildcard: products.* matches products.edit, products.view, etc.
+            if (str_ends_with($perm, '.*')) {
+                $prefix = substr($perm, 0, -2);
+                if (str_starts_with($permission, $prefix . '.') || $permission === $prefix) return true;
+            }
+        }
+        return false;
+    }
+
+    /** Require permission — return 403 if denied */
+    public static function adminRequire(string $permission): void {
+        if (!self::adminCan($permission)) {
+            http_response_code(403);
+            exit('Forbidden: insufficient permissions');
+        }
     }
 }
 

@@ -1,0 +1,20 @@
+{
+    "id": "checkout",
+    "fields": [
+        {"name": "name", "type": "text", "label": {"sk": "Meno a priezvisko", "en": "Full Name", "de": "Vollständiger Name"}, "required": true},
+        {"name": "email", "type": "email", "label": {"sk": "Email", "en": "Email", "de": "E-Mail"}, "required": true},
+        {"name": "phone", "type": "tel", "label": {"sk": "Telefón", "en": "Phone", "de": "Telefon"}, "required": true},
+        {"name": "street", "type": "text", "label": {"sk": "Ulica a číslo", "en": "Street", "de": "Straße"}, "required": true},
+        {"name": "city", "type": "text", "label": {"sk": "Mesto", "en": "City", "de": "Stadt"}, "required": true},
+        {"name": "zip", "type": "text", "label": {"sk": "PSČ", "en": "ZIP", "de": "PLZ"}, "required": true, "pattern": "[0-9]{3}\\s?[0-9]{2}"},
+        {"name": "country", "type": "select", "label": {"sk": "Krajina", "en": "Country", "de": "Land"}, "options": ["SK", "CZ", "DE", "AT", "HU", "PL"], "required": true},
+        {"name": "shipping_method", "type": "radio", "label": {"sk": "Doprava", "en": "Shipping", "de": "Versand"}, "options_from": "shipping_methods", "required": true},
+        {"name": "payment_method", "type": "radio", "label": {"sk": "Platba", "en": "Payment", "de": "Zahlung"}, "options": [
+            {"value": "stripe", "label": {"sk": "Kartou online", "en": "Card", "de": "Karte"}},
+            {"value": "cod", "label": {"sk": "Dobierka", "en": "Cash on delivery", "de": "Nachnahme"}},
+            {"value": "bank_transfer", "label": {"sk": "Bankový prevod", "en": "Bank transfer", "de": "Überweisung"}}
+        ], "required": true},
+        {"name": "coupon_code", "type": "text", "label": {"sk": "Kupón", "en": "Coupon", "de": "Gutschein"}, "required": false},
+        {"name": "notes", "type": "textarea", "label": {"sk": "Poznámka", "en": "Notes", "de": "Anmerkungen"}, "required": false}
+    ]
+}

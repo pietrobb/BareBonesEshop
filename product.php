@@ -9,7 +9,8 @@ require_once __DIR__ . '/src/autoload.php';
 Security::sessionStart();
 if (!isset($_SESSION['cart'])) $_SESSION['cart'] = [];
 
-$lang = $_SESSION['lang'] ?? 'sk';
+$uri = $_SERVER['REQUEST_URI'] ?? '';
+$lang = $_SESSION['lang'] ?? I18n::detectLocale($uri);
 I18n::setLocale($lang);
 
 $slug = preg_replace('/[^a-z0-9-]/', '', $_GET['slug'] ?? '');

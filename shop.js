@@ -83,7 +83,13 @@ const Shop = {
                 ? this.esc(p.image)
                 : `/uploads/medium/${this.esc(p.image)}`;
         }
-        const image = imgSrc ? `<img src="${imgSrc}" alt="${this.esc(p.name)}" loading="lazy">` : '';
+        const webpSrc = imgSrc ? imgSrc.replace(/\.(jpg|jpeg|png|gif)$/i, '.webp') : '';
+        const image = imgSrc
+            ? `<picture>
+                <source srcset="${webpSrc}" type="image/webp">
+                <img src="${imgSrc}" alt="${this.esc(p.name)}" loading="lazy">
+               </picture>`
+            : '';
         const badge = p.compare_price ? `<span class="product-card__badge">-${p.discount_percent}%</span>` : '';
         const oldPrice = p.compare_price ? `<span class="price--old">${this.esc(p.compare_price_formatted)}</span>` : '';
         const cartBtn = p.stock > 0
