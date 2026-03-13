@@ -309,9 +309,9 @@ $catName = function(string $name) use ($catTranslations, $lang): string {
 // UI strings — minimal set for multilingual frontend
 $ui = [
     'sk' => [
-        'home'=>'Domov','search_placeholder'=>'Hľadať produkty...','search'=>'Hľadať','cart'=>'Košík',
-        'categories'=>'Kategórie','latest'=>'Najnovšie produkty','add_to_cart'=>'Do košíka',
-        'vehicle_parts'=>'Produkty','parts_count'=>'produktov','results_for'=>'výsledkov pre',
+        'home'=>'Domov','search_placeholder'=>'Hľadať diely...','search'=>'Hľadať','cart'=>'Košík',
+        'categories'=>'Kategórie náhradných dielov','latest'=>'Najnovšie diely','add_to_cart'=>'Do košíka',
+        'vehicle_parts'=>'Diely pre vozidlo','parts_count'=>'dielov','results_for'=>'výsledkov pre',
         'search_results'=>'Výsledky hľadania','oe_search'=>'Hľadanie podľa OE čísla',
         'oe_placeholder'=>'Hľadať podľa OE čísla (napr. 1K0 615 301)','oe_search_btn'=>'OE Hľadať',
         'in_stock'=>'Skladom','out_of_stock'=>'Nedostupné','supplier'=>'Dodávateľ',
@@ -339,9 +339,9 @@ $ui = [
         'cat_not_found'=>'Kategória nenájdená.','product_not_found'=>'Produkt nenájdený.',
     ],
     'en' => [
-        'home'=>'Home','search_placeholder'=>'Search products...','search'=>'Search','cart'=>'Cart',
-        'categories'=>'Categories','latest'=>'Latest Products','add_to_cart'=>'Add to Cart',
-        'vehicle_parts'=>'Products','parts_count'=>'products','results_for'=>'results for',
+        'home'=>'Home','search_placeholder'=>'Search parts...','search'=>'Search','cart'=>'Cart',
+        'categories'=>'Spare Parts Categories','latest'=>'Latest Parts','add_to_cart'=>'Add to Cart',
+        'vehicle_parts'=>'Vehicle Parts','parts_count'=>'parts','results_for'=>'results for',
         'search_results'=>'Search Results','oe_search'=>'OE Number Search',
         'oe_placeholder'=>'Search by OE number (e.g. 1K0 615 301)','oe_search_btn'=>'OE Search',
         'in_stock'=>'In Stock','out_of_stock'=>'Out of Stock','supplier'=>'Supplier',
@@ -369,9 +369,9 @@ $ui = [
         'cat_not_found'=>'Category not found.','product_not_found'=>'Product not found.',
     ],
     'de' => [
-        'home'=>'Startseite','search_placeholder'=>'Produkte suchen...','search'=>'Suchen','cart'=>'Warenkorb',
-        'categories'=>'Kategorien','latest'=>'Neueste Produkte','add_to_cart'=>'In den Warenkorb',
-        'vehicle_parts'=>'Produkte','parts_count'=>'Produkte','results_for'=>'Ergebnisse für',
+        'home'=>'Startseite','search_placeholder'=>'Teile suchen...','search'=>'Suchen','cart'=>'Warenkorb',
+        'categories'=>'Ersatzteil-Kategorien','latest'=>'Neueste Teile','add_to_cart'=>'In den Warenkorb',
+        'vehicle_parts'=>'Fahrzeugteile','parts_count'=>'Teile','results_for'=>'Ergebnisse für',
         'search_results'=>'Suchergebnisse','oe_search'=>'OE-Nummernsuche',
         'oe_placeholder'=>'Nach OE-Nummer suchen (z.B. 1K0 615 301)','oe_search_btn'=>'OE Suchen',
         'in_stock'=>'Auf Lager','out_of_stock'=>'Nicht verfügbar','supplier'=>'Lieferant',
@@ -544,42 +544,26 @@ switch ($page) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= $title ?></title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f5f5f5;color:#333;line-height:1.5;font-size:14px}
-a{color:#333;text-decoration:none}a:hover{color:#cc3872}
-h1,h2,h3,h4,h5,.section-title{font-family:'Oswald',georgia,serif;font-weight:500}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f5f5f5;color:#222;line-height:1.5}
+a{color:#1a1a2e;text-decoration:none}a:hover{color:#f0a500}
 .wrap{max-width:1280px;margin:0 auto;padding:0 16px}
 
 /* Header */
-header{background:#333;color:#fff;padding:0}
-.header-top{background:#f5f5f5;padding:6px 0;font-size:.8em;color:#777;border-bottom:1px solid #e5e5e5}
-.header-top .wrap{display:flex;justify-content:flex-end;gap:16px;align-items:center}
-.header-top a{color:#777;font-size:.8em}.header-top a:hover{color:#cc3872}
-.header-main{background:#fff;padding:12px 0;border-bottom:1px solid #e5e5e5}
-.header-main .wrap{display:flex;align-items:center;gap:24px;flex-wrap:wrap}
-header .logo{white-space:nowrap}
-header .logo img{height:40px;display:block}
-header .logo a{display:block}
-.header-nav{background:#333;padding:0;position:relative;z-index:100}
-.header-nav .wrap{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
-.header-nav > .wrap > a,.nav-item > a{color:#fff;font-family:'Oswald',georgia,serif;font-size:15px;text-transform:uppercase;padding:14px 18px;display:block;transition:background .2s}
-.header-nav > .wrap > a:hover,.nav-item:hover > a{background:#cc3872;color:#fff}
-.nav-item{position:relative}
-.nav-dropdown{display:none;position:absolute;top:100%;left:0;background:#fff;min-width:260px;box-shadow:0 4px 16px rgba(0,0,0,.15);border-radius:0 0 4px 4px;z-index:200;padding:8px 0}
-.nav-item:hover .nav-dropdown{display:block}
-.nav-dropdown a{color:#333;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;text-transform:none;padding:7px 20px;display:block;transition:background .15s,color .15s}
-.nav-dropdown a:hover{background:#f5f5f5;color:#cc3872}
-.nav-dropdown .sub-heading{font-family:'Oswald',georgia,serif;font-size:13px;font-weight:600;color:#333;padding:10px 20px 4px;text-transform:uppercase;border-top:1px solid #eee;margin-top:4px}
-.nav-dropdown .sub-heading:first-child{border-top:none;margin-top:0}
-.search-bar{display:flex;gap:0;margin-left:auto}
-.search-bar input{padding:8px 14px;border:1px solid #e5e5e5;border-right:none;border-radius:4px 0 0 4px;font-size:.9em;width:220px;background:#fff;color:#333}
-.search-bar button{background:#cc3872;border:none;color:#fff;padding:8px 16px;border-radius:0 4px 4px 0;cursor:pointer;font-weight:600}
+header{background:#1a1a2e;color:#fff;padding:12px 0}
+header .wrap{display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+header .logo{font-size:1.4em;font-weight:700;color:#f0a500;white-space:nowrap}
+header .logo a{color:#f0a500}
+header nav{display:flex;gap:16px;flex-wrap:wrap}
+header nav a{color:#ccc;font-size:.9em}header nav a:hover{color:#f0a500}
+.search-bar{display:flex;gap:8px;margin-left:auto}
+.search-bar input{padding:6px 12px;border:none;border-radius:4px;font-size:.9em;width:200px}
+.search-bar button{background:#f0a500;border:none;color:#1a1a2e;padding:6px 14px;border-radius:4px;cursor:pointer;font-weight:600}
 
 /* Main */
 main{padding:24px 0;min-height:60vh}
 .breadcrumb{margin-bottom:16px;font-size:.85em;color:#666}
-.breadcrumb a{color:#555}.breadcrumb a:hover{color:#cc3872}
+.breadcrumb a{color:#555}.breadcrumb a:hover{color:#f0a500}
 
 /* Grid */
 .grid{display:grid;gap:16px}
@@ -590,7 +574,7 @@ main{padding:24px 0;min-height:60vh}
 .card{background:#fff;border-radius:8px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.08);transition:box-shadow .2s}
 .card:hover{box-shadow:0 4px 12px rgba(0,0,0,.12)}
 .card h3{font-size:1em;margin-bottom:6px}
-.card .price{font-size:1.2em;font-weight:700;color:#725be7}
+.card .price{font-size:1.2em;font-weight:700;color:#1a1a2e}
 .card .old-price{text-decoration:line-through;color:#999;font-size:.85em;margin-left:6px}
 .card .supplier{font-size:.8em;color:#888;margin-bottom:4px}
 .card .sku{font-size:.75em;color:#aaa}
@@ -599,7 +583,7 @@ main{padding:24px 0;min-height:60vh}
 /* Category cards */
 .cat-card{display:flex;align-items:center;gap:12px;background:#fff;border-radius:8px;padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
 .cat-card:hover{box-shadow:0 4px 12px rgba(0,0,0,.12)}
-.cat-card .count{background:#cc3872;color:#fff;border-radius:20px;padding:2px 10px;font-size:.8em;font-weight:600;white-space:nowrap}
+.cat-card .count{background:#f0a500;color:#1a1a2e;border-radius:20px;padding:2px 10px;font-size:.8em;font-weight:600;white-space:nowrap}
 
 /* Layout with sidebar */
 .layout-sidebar{display:grid;grid-template-columns:280px 1fr;gap:24px}
@@ -610,25 +594,27 @@ main{padding:24px 0;min-height:60vh}
 .sidebar h3{font-size:.9em;margin:12px 0 6px;color:#555;border-bottom:1px solid #eee;padding-bottom:4px}
 .sidebar h3:first-child{margin-top:0}
 .sidebar label{display:block;font-size:.85em;padding:2px 0;cursor:pointer}
-.sidebar label:hover{color:#cc3872}
+.sidebar label:hover{color:#f0a500}
 .sidebar input[type=checkbox]{margin-right:4px}
 .sidebar .cnt{color:#aaa;font-size:.8em}
 .sidebar .filter-actions{margin-top:12px;display:flex;gap:8px}
-.sidebar .btn-apply{background:#cc3872;color:#fff;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-weight:600;font-size:.85em;width:100%}
+.sidebar .btn-apply{background:#f0a500;color:#1a1a2e;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-weight:600;font-size:.85em;width:100%}
 .sidebar .btn-clear{background:#eee;color:#555;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:.85em}
 
-/* Hero / Slider */
-.hero{position:relative;border-radius:0;margin-bottom:24px;overflow:hidden;max-height:400px}
-.hero img{width:100%;display:block;object-fit:cover;max-height:400px}
-.hero-overlay{position:absolute;bottom:0;left:0;right:0;padding:30px 40px;background:linear-gradient(transparent,rgba(0,0,0,.6));color:#fff}
-.hero-overlay h1{font-size:2em;margin-bottom:8px;text-shadow:0 2px 4px rgba(0,0,0,.5)}
-.hero-overlay .btn-hero{display:inline-block;background:#cc3872;color:#fff;padding:10px 24px;border-radius:4px;font-weight:600;margin-top:8px;transition:background .2s}
-.hero-overlay .btn-hero:hover{background:#a82d5c;color:#fff}
+/* Hero */
+.hero{background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);color:#fff;padding:40px;border-radius:12px;margin-bottom:24px}
+.hero h1{font-size:1.8em;margin-bottom:8px}.hero p{color:#aab;margin-bottom:20px}
+.vehicle-select{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.vehicle-select select,.vehicle-select input{padding:10px;border:2px solid #333;border-radius:6px;font-size:.95em;background:#fff;min-width:180px}
+.vehicle-select button{background:#f0a500;color:#1a1a2e;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;font-weight:700;font-size:.95em}
+.oe-search{display:flex;gap:8px;margin-top:12px}
+.oe-search input{padding:10px;border:2px solid #333;border-radius:6px;font-size:.95em;width:280px}
+.oe-search button{background:#f0a500;color:#1a1a2e;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;font-weight:700}
 
 /* Tabs */
 .tabs{display:flex;gap:0;border-bottom:2px solid #eee;margin-bottom:16px}
 .tab{padding:10px 20px;cursor:pointer;font-size:.9em;border-bottom:2px solid transparent;margin-bottom:-2px;color:#666}
-.tab.active{color:#333;border-bottom-color:#cc3872;font-weight:600}
+.tab.active{color:#1a1a2e;border-bottom-color:#f0a500;font-weight:600}
 .tab-content{display:none}.tab-content.active{display:block}
 
 /* Tables */
@@ -640,8 +626,8 @@ main{padding:24px 0;min-height:60vh}
 /* Pagination */
 .pagination{display:flex;gap:4px;margin-top:20px;justify-content:center}
 .pagination a,.pagination span{padding:6px 12px;border-radius:4px;font-size:.9em}
-.pagination a{background:#fff;border:1px solid #ddd}.pagination a:hover{border-color:#cc3872}
-.pagination .current{background:#333;color:#fff}
+.pagination a{background:#fff;border:1px solid #ddd}.pagination a:hover{border-color:#f0a500}
+.pagination .current{background:#1a1a2e;color:#fff}
 
 /* Sort bar */
 .sort-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px}
@@ -650,12 +636,12 @@ main{padding:24px 0;min-height:60vh}
 
 /* Cart icon */
 .cart-icon{position:relative;font-size:1.4em;color:#fff;text-decoration:none;padding:4px 8px}
-.cart-icon:hover{color:#cc3872}
-.cart-badge{position:absolute;top:-4px;right:-4px;background:#cc3872;color:#fff;font-size:.5em;font-weight:700;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center}
+.cart-icon:hover{color:#f0a500}
+.cart-badge{position:absolute;top:-4px;right:-4px;background:#f0a500;color:#1a1a2e;font-size:.5em;font-weight:700;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center}
 
 /* Add to cart button */
-.btn-cart{background:#cc3872;color:#fff;border:none;padding:8px 14px;border-radius:4px;cursor:pointer;font-weight:600;font-size:.85em;width:100%;margin-top:8px;transition:background .2s}
-.btn-cart:hover{background:#a82d5c}
+.btn-cart{background:#f0a500;color:#1a1a2e;border:none;padding:8px 14px;border-radius:4px;cursor:pointer;font-weight:600;font-size:.85em;width:100%;margin-top:8px;transition:background .2s}
+.btn-cart:hover{background:#d4940a}
 .btn-cart-lg{font-size:1em;padding:12px 24px;width:auto}
 
 /* Cart page */
@@ -671,8 +657,8 @@ main{padding:24px 0;min-height:60vh}
 .cart-summary h3{margin-bottom:12px}
 .cart-summary .row{display:flex;justify-content:space-between;padding:6px 0;font-size:.95em}
 .cart-summary .total-row{font-size:1.2em;font-weight:700;border-top:2px solid #eee;padding-top:12px;margin-top:8px}
-.btn-checkout{display:block;background:#333;color:#fff;text-align:center;padding:14px;border-radius:6px;font-size:1em;font-weight:600;margin-top:16px;text-decoration:none;border:none;width:100%;cursor:pointer}
-.btn-checkout:hover{background:#cc3872;color:#fff}
+.btn-checkout{display:block;background:#1a1a2e;color:#fff;text-align:center;padding:14px;border-radius:6px;font-size:1em;font-weight:600;margin-top:16px;text-decoration:none;border:none;width:100%;cursor:pointer}
+.btn-checkout:hover{background:#2a2a4e;color:#fff}
 
 /* Checkout form */
 .checkout-form{background:#fff;border-radius:8px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
@@ -689,58 +675,18 @@ main{padding:24px 0;min-height:60vh}
 /* Language switcher */
 .lang-switch{display:flex;gap:4px;align-items:center}
 .lang-switch a{color:#888;font-size:.75em;padding:2px 6px;border-radius:3px;border:1px solid transparent}
-.lang-switch a:hover{color:#cc3872;border-color:#cc3872}
-.lang-switch a.active{color:#cc3872;border-color:#cc3872;font-weight:700}
-
-/* Product image in cards */
-.card-img{width:100%;aspect-ratio:1;object-fit:contain;background:#fff;border-radius:4px;margin-bottom:8px}
-.card-img-placeholder{width:100%;aspect-ratio:1;background:#f0f0f0;border-radius:4px;margin-bottom:8px;display:flex;align-items:center;justify-content:center;color:#ccc;font-size:2em}
-
-/* Sale / New stickers */
-.sticker{position:absolute;top:8px;right:8px;padding:3px 10px;border-radius:3px;font-size:.75em;font-weight:700;color:#fff;text-transform:uppercase}
-.sticker-new{background:#b2da24}
-.sticker-sale{background:#e95d0f}
+.lang-switch a:hover{color:#f0a500;border-color:#f0a500}
+.lang-switch a.active{color:#f0a500;border-color:#f0a500;font-weight:700}
 
 /* Footer */
-footer{background:#333;color:#bbb;padding:0;margin-top:40px;font-size:.85em}
-.footer-main{background:#333;padding:30px 0}
-.footer-main .wrap{display:flex;gap:40px;flex-wrap:wrap}
-.footer-col{flex:1;min-width:200px}
-.footer-col h4{color:#fff;font-family:'Oswald',georgia,serif;margin-bottom:12px;font-size:1em;text-transform:uppercase}
-.footer-col a{display:block;color:#999;padding:3px 0;font-size:.9em}.footer-col a:hover{color:#fff}
-.footer-bottom{background:#222;padding:16px 0;text-align:center;color:#999;font-size:.8em}
+footer{background:#1a1a2e;color:#888;padding:24px 0;margin-top:40px;text-align:center;font-size:.85em}
 </style>
 </head>
 <body>
 <header>
- <div class="header-top">
-  <div class="wrap">
-   <div class="lang-switch">
-    <?php
-    $langParams = $_GET;
-    foreach(['sk'=>'SK','en'=>'EN','de'=>'DE'] as $lc=>$lb):
-        $langParams['lang'] = $lc;
-    ?>
-    <a href="?<?= http_build_query($langParams) ?>" class="<?= $lang===$lc?'active':'' ?>"><?= $lb ?></a>
-    <?php endforeach; ?>
-   </div>
-   <a href="?page=cart" class="cart-icon" title="<?= $t('cart') ?>" style="color:#555;font-size:1.1em">
-    🛒<?php if ($cartCount > 0): ?><span class="cart-badge"><?= $cartCount ?></span><?php endif; ?>
-   </a>
-  </div>
- </div>
- <div class="header-main">
-  <div class="wrap">
-   <div class="logo"><a href="?"><img src="assets/img/logo.png" alt="woodle.sk"></a></div>
-   <form class="search-bar" method="get">
-    <input type="hidden" name="page" value="search">
-    <input type="text" name="q" placeholder="<?= $t('search_placeholder') ?>" value="<?= $e($_GET['q'] ?? '') ?>">
-    <button type="submit"><?= $t('search') ?></button>
-   </form>
-  </div>
- </div>
- <div class="header-nav">
-  <div class="wrap">
+ <div class="wrap">
+  <div class="logo"><a href="?">🔧 AutoDiely.sk</a></div>
+  <nav>
    <a href="?"><?= $t('home') ?></a>
    <?php
    $navCats = Categories::roots();
@@ -750,27 +696,27 @@ footer{background:#333;color:#bbb;padding:0;margin-top:40px;font-size:.85em}
    foreach ($navCats as $rc):
        if ($navShown >= 8) break;
        $navShown++;
-       $subCats = Categories::children((int)$rc['id']);
-       usort($subCats, fn($a,$b) => (int)$b['product_count'] - (int)$a['product_count']);
-       $subCats = array_filter($subCats, fn($c) => (int)$c['product_count'] > 0);
-       if (!empty($subCats)):
    ?>
-   <div class="nav-item">
-    <a href="?page=category&slug=<?= $e($rc['slug']) ?>"><?= $e($catName($rc['name'])) ?></a>
-    <div class="nav-dropdown">
-     <?php foreach (array_slice($subCats, 0, 12) as $sc): ?>
-     <a href="?page=category&slug=<?= $e($sc['slug']) ?>"><?= $e($catName($sc['name'])) ?></a>
-     <?php endforeach; ?>
-     <?php if (count($subCats) > 12): ?>
-     <a href="?page=category&slug=<?= $e($rc['slug']) ?>" style="font-weight:600;color:#cc3872"><?= $lang==='en'?'View all...':($lang==='de'?'Alle anzeigen...':'Zobraziť všetko...') ?></a>
-     <?php endif; ?>
-    </div>
-   </div>
-   <?php else: ?>
    <a href="?page=category&slug=<?= $e($rc['slug']) ?>"><?= $e($catName($rc['name'])) ?></a>
-   <?php endif; ?>
+   <?php endforeach; ?>
+  </nav>
+  <form class="search-bar" method="get">
+   <input type="hidden" name="page" value="search">
+   <input type="text" name="q" placeholder="<?= $t('search_placeholder') ?>" value="<?= $e($_GET['q'] ?? '') ?>">
+   <button type="submit"><?= $t('search') ?></button>
+  </form>
+  <div class="lang-switch">
+   <?php
+   $langParams = $_GET;
+   foreach(['sk'=>'SK','en'=>'EN','de'=>'DE'] as $lc=>$lb):
+       $langParams['lang'] = $lc;
+   ?>
+   <a href="?<?= http_build_query($langParams) ?>" class="<?= $lang===$lc?'active':'' ?>"><?= $lb ?></a>
    <?php endforeach; ?>
   </div>
+  <a href="?page=cart" class="cart-icon" title="<?= $t('cart') ?>">
+   🛒<?php if ($cartCount > 0): ?><span class="cart-badge"><?= $cartCount ?></span><?php endif; ?>
+  </a>
  </div>
 </header>
 
@@ -778,34 +724,7 @@ footer{background:#333;color:#bbb;padding:0;margin-top:40px;font-size:.85em}
 <?= $content ?>
 </div></main>
 
-<footer>
- <div class="footer-main"><div class="wrap">
-  <div class="footer-col">
-   <h4>woodle.sk</h4>
-   <p style="color:#999;font-size:.9em"><?= $lang==='en'?'Sauna & wooden products':($lang==='de'?'Sauna & Holzprodukte':'Sauna & drevené výrobky') ?></p>
-  </div>
-  <div class="footer-col">
-   <h4><?= $t('categories') ?></h4>
-   <?php
-   $fCats = Categories::roots();
-   usort($fCats, fn($a,$b) => (int)$b['product_count'] - (int)$a['product_count']);
-   $fCats = array_filter($fCats, fn($c) => (int)$c['product_count'] > 0 && $c['slug'] !== 'uncategorized');
-   $fShown = 0;
-   foreach ($fCats as $fc):
-       if ($fShown >= 6) break; $fShown++;
-   ?>
-   <a href="?page=category&slug=<?= $e($fc['slug']) ?>"><?= $e($catName($fc['name'])) ?></a>
-   <?php endforeach; ?>
-  </div>
-  <div class="footer-col">
-   <h4><?= $lang==='en'?'Information':($lang==='de'?'Informationen':'Informácie') ?></h4>
-   <a href="?"><?= $lang==='en'?'About us':($lang==='de'?'Über uns':'O nás') ?></a>
-   <a href="?"><?= $lang==='en'?'Contact':($lang==='de'?'Kontakt':'Kontakt') ?></a>
-   <a href="?"><?= $lang==='en'?'Terms & Conditions':($lang==='de'?'AGB':'Obchodné podmienky') ?></a>
-  </div>
- </div></div>
- <div class="footer-bottom"><div class="wrap">woodle.sk &copy; <?= date('Y') ?> — Powered by BareBones E-shop</div></div>
-</footer>
+<footer><div class="wrap">AutoDiely.sk — BareBones E-shop Engine &copy; <?= date('Y') ?></div></footer>
 
 <script>
 function setTab(id){
@@ -866,22 +785,40 @@ async function addToCart(pid,qty,btn){
 
 function renderHome(): string {
     global $e, $price, $catName, $t, $lang;
+    $manufacturers = TecDoc::manufacturers();
 
     ob_start(); ?>
     <div class="hero">
-     <img src="assets/img/slider1.jpg" alt="woodle.sk">
-     <div class="hero-overlay">
-      <h1><?= $lang==='en'?'Sauna & Wooden Products':($lang==='de'?'Sauna & Holzprodukte':'Sauna & Drevené výrobky') ?></h1>
-      <a href="?page=category&slug=<?= $e((Categories::roots()[0] ?? [])['slug'] ?? '') ?>" class="btn-hero"><?= $lang==='en'?'Shop Now':($lang==='de'?'Jetzt einkaufen':'Nakupovať') ?></a>
+     <h1><?= $lang==='en'?'Find Parts for Your Vehicle':($lang==='de'?'Finden Sie Teile für Ihr Fahrzeug':'Nájdite diely pre vaše vozidlo') ?></h1>
+     <p><?= $lang==='en'?'Select manufacturer, model and engine type — we\'ll show compatible parts.':($lang==='de'?'Wählen Sie Hersteller, Modell und Motortyp — wir zeigen kompatible Teile.':'Vyberte výrobcu, model a typ motora — zobrazíme kompatibilné diely.') ?></p>
+     <div class="vehicle-select">
+      <select onchange="loadModels(this.value)" id="sel-mfr">
+       <option value=""><?= $t('mfr') ?></option>
+       <?php foreach ($manufacturers as $m): ?>
+       <option value="<?= $e($m) ?>"><?= $e($m) ?></option>
+       <?php endforeach; ?>
+      </select>
+      <select id="sel-mdl" style="display:none" onchange="loadTypes(document.getElementById('sel-mfr').value,this.value)">
+       <option value=""><?= $t('model') ?></option>
+      </select>
+      <select id="sel-typ" style="display:none" onchange="showGo(this.value)">
+       <option value=""><?= $t('engine') ?></option>
+      </select>
+      <button id="btn-go" style="display:none" onclick="goVehicle()"><?= $t('show_parts') ?></button>
      </div>
+     <form class="oe-search" method="get">
+      <input type="hidden" name="page" value="oe">
+      <input type="text" name="q" placeholder="<?= $t('oe_placeholder') ?>">
+      <button type="submit"><?= $t('oe_search_btn') ?></button>
+     </form>
     </div>
 
-    <h2 class="section-title" style="margin-bottom:16px;font-size:1.4em"><?= $t('categories') ?></h2>
+    <h2 style="margin-bottom:16px"><?= $t('categories') ?></h2>
     <div class="grid grid-3">
     <?php
     $roots = Categories::roots();
     usort($roots, fn($a,$b) => (int)$b['product_count'] - (int)$a['product_count']);
-    $roots = array_filter($roots, fn($c) => (int)$c['product_count'] >= 5 && $c['slug'] !== 'uncategorized');
+    $roots = array_filter($roots, fn($c) => (int)$c['product_count'] >= 10 && $c['slug'] !== 'uncategorized');
     foreach ($roots as $rc):
     ?>
      <a href="?page=category&slug=<?= $e($rc['slug']) ?>" class="cat-card">
@@ -892,25 +829,17 @@ function renderHome(): string {
     </div>
 
     <?php
-    $latest = Products::latest(12);
+    $latest = Products::latest(8);
     if ($latest): ?>
-    <h2 class="section-title" style="margin:32px 0 16px;font-size:1.4em"><?= $t('latest') ?></h2>
+    <h2 style="margin:32px 0 16px"><?= $t('latest') ?></h2>
     <div class="grid grid-4">
     <?php foreach ($latest as $p): $p = Products::enrich($p); ?>
-     <div class="card" style="position:relative">
+     <div class="card">
       <a href="?page=product&slug=<?= $e($p['slug']) ?>">
-       <?php
-       $imgs = is_string($p['images'] ?? null) ? json_decode($p['images'], true) : ($p['images'] ?? []);
-       $firstImg = $imgs[0] ?? null;
-       if ($firstImg): ?>
-       <img class="card-img" src="<?= $e($firstImg) ?>" alt="<?= $e($p['name']) ?>" loading="lazy">
-       <?php else: ?>
-       <div class="card-img-placeholder">📷</div>
-       <?php endif; ?>
-       <?php if (!empty($p['compare_price']) && $p['compare_price'] > $p['price']): ?>
-       <span class="sticker sticker-sale">SALE</span>
-       <?php endif; ?>
+       <?php $attrs = is_array($p['attrs']) ? $p['attrs'] : json_decode($p['attrs'] ?? '{}', true); ?>
+       <div class="supplier"><?= $e($attrs['supplier'] ?? '') ?></div>
        <h3><?= $e($p['name']) ?></h3>
+       <div class="sku"><?= $e($p['sku']) ?></div>
        <div class="price"><?= $price($p['price']) ?>
         <?php if (!empty($p['compare_price'])): ?><span class="old-price"><?= $price($p['compare_price']) ?></span><?php endif; ?>
        </div>
@@ -969,8 +898,8 @@ function renderCategory(array $cat): string {
         }
     }
 
-    $priceMin = !empty($_GET['pmin']) ? Security::int($_GET['pmin']) * 100 : null;
-    $priceMax = !empty($_GET['pmax']) ? Security::int($_GET['pmax']) * 100 : null;
+    $priceMin = !empty($_GET['pmin']) ? Security::int($_GET['pmin']) : null;
+    $priceMax = !empty($_GET['pmax']) ? Security::int($_GET['pmax']) : null;
 
     $result = TecDoc::parametricSearch($catId, $pg, 24, $sort, $specFilters, $priceMin, $priceMax, $searchLang);
     $filters = $result['filters'];
@@ -1003,17 +932,15 @@ function renderCategory(array $cat): string {
     // Price range
     echo '<h3>' . $t('price') . '</h3>';
     echo '<div style="display:flex;gap:4px;align-items:center">';
-    $pminDisplay = $priceMin ? (int)($priceMin / 100) : '';
-    $pmaxDisplay = $priceMax ? (int)($priceMax / 100) : '';
-    echo '<input type="number" name="pmin" placeholder="od" value="' . $pminDisplay . '" style="width:80px;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:.85em">';
+    echo '<input type="number" name="pmin" placeholder="od" value="' . ($priceMin ?: '') . '" style="width:80px;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:.85em">';
     echo '<span>—</span>';
-    echo '<input type="number" name="pmax" placeholder="do" value="' . $pmaxDisplay . '" style="width:80px;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:.85em">';
-    echo '<span style="font-size:.85em;color:#888">€</span></div>';
+    echo '<input type="number" name="pmax" placeholder="do" value="' . ($priceMax ?: '') . '" style="width:80px;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:.85em">';
+    echo '<span style="font-size:.75em;color:#888">¢</span></div>';
 
     foreach ($filters as $critName => $values) {
         $activeVals = $specFilters[$critName] ?? [];
         echo '<h3>' . $e($critName);
-        if (!empty($activeVals)) echo ' <span style="color:#cc3872">●</span>';
+        if (!empty($activeVals)) echo ' <span style="color:#f0a500">●</span>';
         echo '</h3>';
         foreach ($values as $v) {
             $checked = in_array($v['value'], $activeVals) ? ' checked' : '';
@@ -1035,19 +962,12 @@ function renderCategory(array $cat): string {
         echo '<div class="grid grid-4">';
         foreach ($result['products'] as $p) {
             $p = Products::enrich($p);
-            $imgs = is_string($p['images'] ?? null) ? json_decode($p['images'], true) : ($p['images'] ?? []);
-            $firstImg = $imgs[0] ?? null;
-            echo '<div class="card" style="position:relative">';
+            $attrs = is_array($p['attrs']) ? $p['attrs'] : json_decode($p['attrs'] ?? '{}', true);
+            echo '<div class="card">';
             echo '<a href="?page=product&slug=' . $e($p['slug']) . '">';
-            if ($firstImg) {
-                echo '<img class="card-img" src="' . $e($firstImg) . '" alt="' . $e($p['name']) . '" loading="lazy">';
-            } else {
-                echo '<div class="card-img-placeholder">📷</div>';
-            }
-            if (!empty($p['compare_price']) && $p['compare_price'] > $p['price']) {
-                echo '<span class="sticker sticker-sale">SALE</span>';
-            }
+            echo '<div class="supplier">' . $e($attrs['supplier'] ?? '') . '</div>';
             echo '<h3>' . $e($p['name']) . '</h3>';
+            echo '<div class="sku">' . $e($p['sku']) . '</div>';
             echo '<div class="price">' . I18n::price($p['price'], 'eur');
             if (!empty($p['compare_price'])) echo '<span class="old-price">' . I18n::price($p['compare_price'], 'eur') . '</span>';
             echo '</div>';
@@ -1151,7 +1071,7 @@ function renderVehicle(int $ktype, array $result, array $cats, ?int $activeCatId
     if (!empty($cats)) {
         echo '<div class="grid grid-3" style="margin-bottom:24px">';
         foreach ($cats as $c) {
-            $active = $activeCatId === (int)$c['id'] ? 'border:2px solid #cc3872;' : '';
+            $active = $activeCatId === (int)$c['id'] ? 'border:2px solid #f0a500;' : '';
             echo '<a href="?page=vehicle&ktype=' . $ktype . '&cat=' . (int)$c['id'] . '" class="cat-card" style="' . $active . '">';
             echo '<span style="flex:1">' . $e($catName($c['name'])) . '</span><span class="count">' . (int)$c['part_count'] . '</span></a>';
         }
@@ -1162,16 +1082,11 @@ function renderVehicle(int $ktype, array $result, array $cats, ?int $activeCatId
     echo '<div class="grid grid-4">';
     foreach ($result['products'] as $p) {
         $p = Products::enrich($p);
-        $imgs = is_string($p['images'] ?? null) ? json_decode($p['images'], true) : ($p['images'] ?? []);
-        $firstImg = $imgs[0] ?? null;
-        echo '<div class="card" style="position:relative">';
+        $attrs = is_array($p['attrs']) ? $p['attrs'] : json_decode($p['attrs'] ?? '{}', true);
+        echo '<div class="card">';
         echo '<a href="?page=product&slug=' . $e($p['slug']) . '">';
-        if ($firstImg) {
-            echo '<img class="card-img" src="' . $e($firstImg) . '" alt="' . $e($p['name']) . '" loading="lazy">';
-        } else {
-            echo '<div class="card-img-placeholder">📷</div>';
-        }
-        echo '<h3>' . $e($p['name']) . '</h3>';
+        echo '<div class="supplier">' . $e($attrs['supplier'] ?? '') . '</div>';
+        echo '<h3>' . $e($p['name']) . '</h3><div class="sku">' . $e($p['sku']) . '</div>';
         echo '<div class="price">' . $price($p['price']) . '</div>';
         echo '</a>';
         echo '<button class="btn-cart" onclick="addToCart(' . (int)$p['id'] . ',1,this)">' . $t('add_to_cart') . '</button>';
@@ -1211,22 +1126,13 @@ function renderProductGrid(array $products): string {
     echo '<div class="grid grid-4">';
     foreach ($products as $p) {
         $p = Products::enrich($p);
-        $imgs = is_string($p['images'] ?? null) ? json_decode($p['images'], true) : ($p['images'] ?? []);
-        $firstImg = $imgs[0] ?? null;
-        echo '<div class="card" style="position:relative">';
+        $attrs = is_array($p['attrs']) ? $p['attrs'] : json_decode($p['attrs'] ?? '{}', true);
+        echo '<div class="card">';
         echo '<a href="?page=product&slug=' . $e($p['slug']) . '">';
-        if ($firstImg) {
-            echo '<img class="card-img" src="' . $e($firstImg) . '" alt="' . $e($p['name']) . '" loading="lazy">';
-        } else {
-            echo '<div class="card-img-placeholder">📷</div>';
-        }
-        if (!empty($p['compare_price']) && $p['compare_price'] > $p['price']) {
-            echo '<span class="sticker sticker-sale">SALE</span>';
-        }
+        echo '<div class="supplier">' . $e($attrs['supplier'] ?? '') . '</div>';
         echo '<h3>' . $e($p['name']) . '</h3>';
-        echo '<div class="price">' . $price($p['price']);
-        if (!empty($p['compare_price'])) echo '<span class="old-price">' . $price($p['compare_price']) . '</span>';
-        echo '</div>';
+        echo '<div class="sku">' . $e($p['sku']) . '</div>';
+        echo '<div class="price">' . $price($p['price']) . '</div>';
         echo '</a>';
         echo '<button class="btn-cart" onclick="addToCart(' . (int)$p['id'] . ',1,this)">' . $t('add_to_cart') . '</button>';
         echo '</div>';
@@ -1264,7 +1170,7 @@ function buildCategoryUrl(string $slug, string $sort, array $specFilters, ?int $
 }
 
 function renderCart(): string {
-    global $e, $price, $t, $csrfField;
+    global $e, $price, $t;
     $cart = $_SESSION['cart'] ?? [];
     ob_start();
 
@@ -1274,7 +1180,7 @@ function renderCart(): string {
     if (empty($cart)) {
         echo '<div style="text-align:center;padding:60px;background:#fff;border-radius:8px">';
         echo '<p style="font-size:1.2em;color:#888;margin-bottom:16px">' . $t('cart_empty') . '</p>';
-        echo '<a href="?" style="color:#cc3872;font-weight:600">' . $t('continue_shopping') . '</a>';
+        echo '<a href="?" style="color:#f0a500;font-weight:600">' . $t('continue_shopping') . '</a>';
         echo '</div>';
         return ob_get_clean();
     }
@@ -1338,12 +1244,12 @@ function renderCart(): string {
 }
 
 function renderCheckout(): string {
-    global $e, $price, $t, $csrfField;
+    global $e, $price, $t;
     $cart = $_SESSION['cart'] ?? [];
 
     if (empty($cart)) {
         return '<div class="breadcrumb"><a href="?">' . $t('home') . '</a> &rsaquo; ' . $t('checkout_title') . '</div>
-                <p>' . $t('cart_empty') . '. <a href="?" style="color:#cc3872">' . $t('continue_shopping') . '</a></p>';
+                <p>' . $t('cart_empty') . '. <a href="?" style="color:#f0a500">' . $t('continue_shopping') . '</a></p>';
     }
 
     // Handle form submission
@@ -1504,7 +1410,7 @@ function renderOrderDone(string $orderNum): string {
     echo '<h1>' . $t('order_sent') . '</h1>';
     echo '<p style="font-size:1.1em;color:#555;margin:12px 0">' . $t('order_num') . ': <strong>' . $e($orderNum) . '</strong></p>';
     echo '<p style="color:#888;margin-bottom:24px">' . $t('order_email') . '</p>';
-    echo '<a href="?" style="color:#cc3872;font-weight:600;font-size:1.1em">' . $t('continue_shopping') . '</a>';
+    echo '<a href="?" style="color:#f0a500;font-weight:600;font-size:1.1em">' . $t('continue_shopping') . '</a>';
     echo '</div>';
     return ob_get_clean();
 }
