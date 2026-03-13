@@ -24,6 +24,7 @@ jobs/failed/*
 uploads/thumb/*
 uploads/medium/*
 uploads/full/*
+uploads/magento/
 !uploads/thumb/.gitkeep
 !uploads/medium/.gitkeep
 !uploads/full/.gitkeep
