@@ -26,6 +26,11 @@ class Adapters {
         $class = $cfg['adapters'][$slot] ?? null;
         if (!$class) throw new \RuntimeException("No adapter configured for: {$slot}");
 
+        // Validate class name to prevent path traversal / code injection via config
+        if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $class)) {
+            throw new \RuntimeException("Invalid adapter class name: {$class}");
+        }
+
         $adapterFile = __DIR__ . '/../adapters/contrib/' . $class . '.php';
         if (file_exists($adapterFile)) require_once $adapterFile;
 

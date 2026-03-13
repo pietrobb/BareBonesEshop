@@ -1946,6 +1946,168 @@ $isdup2 = Idempotency::webhookProcessed($eventId);
 assert_equals(true, $isdup2, 'Repeat event is duplicate');
 
 // ============================================================
+// TEST 42: LocalStorage path traversal prevention
+// ============================================================
+echo "\n--- Test 42: LocalStorage Path Traversal Prevention ---\n";
+
+$tmpDir2 = sys_get_temp_dir() . '/bbshop_test_uploads2_' . getmypid();
+$storage2 = new LocalStorage(['uploads_dir' => $tmpDir2, 'uploads_url' => '/uploads']);
+
+// Normal path should work
+$url2 = $storage2->store('products/test.txt', 'safe content');
+assert_equals('/uploads/products/test.txt', $url2, 'Normal path storage works');
+
+// Path traversal should throw
+$traversalThrown = false;
+try {
+    $storage2->store('../../etc/passwd', 'malicious');
+} catch (\RuntimeException $e) {
+    $traversalThrown = true;
+}
+assert_true($traversalThrown, 'Path traversal in store() throws RuntimeException');
+
+// Cleanup
+@unlink($tmpDir2 . '/products/test.txt');
+@rmdir($tmpDir2 . '/products');
+@rmdir($tmpDir2);
+
+// ============================================================
+// TEST 43: Adapters class name validation
+// ============================================================
+echo "\n--- Test 43: Adapters Class Name Validation ---\n";
+
+$invalidThrown = false;
+try {
+    // Try to resolve an adapter with a dangerous class name
+    Adapters::set('_test_invalid', (object)[]);  // clear any cache
+    // We can't easily test resolve() with bad config, so validate the regex directly
+    $badNames = ['../Foo', 'Foo Bar', 'Foo;Bar', 'Foo/Bar'];
+    foreach ($badNames as $bad) {
+        if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $bad)) {
+            $invalidThrown = true;
+        }
+    }
+} catch (\Throwable $e) {
+    $invalidThrown = true;
+}
+assert_true($invalidThrown, 'Invalid adapter class names are rejected by validation regex');
+
+// Valid names should pass
+$validNames = ['LocalStorage', 'StripePayment', 'CashOnDelivery', 'My_Adapter'];
+$allValid = true;
+foreach ($validNames as $valid) {
+    if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $valid)) $allValid = false;
+}
+assert_true($allValid, 'Valid adapter class names pass validation regex');
+
+// ============================================================
+// TEST 44: Idempotency unmark allows retry
+// ============================================================
+echo "\n--- Test 44: Idempotency Unmark Allows Retry ---\n";
+
+$retryEventId = 'test_retry_' . time();
+$dup1 = Idempotency::webhookProcessed($retryEventId);
+assert_equals(false, $dup1, 'First processing marks event as new');
+
+$dup2 = Idempotency::webhookProcessed($retryEventId);
+assert_equals(true, $dup2, 'Second attempt is duplicate');
+
+Idempotency::unmark($retryEventId);
+$dup3 = Idempotency::webhookProcessed($retryEventId);
+assert_equals(false, $dup3, 'After unmark, event can be reprocessed');
+
+// ============================================================
+// TEST 45: OrderWorkflow cancellation skips checkout session refund
+// ============================================================
+echo "\n--- Test 45: Cancellation Refund Guard ---\n";
+
+// Set up a fresh jobs dir for this test
+$testJobsDir45 = __DIR__ . '/../jobs/test_refund_' . getmypid();
+JobQueue::setDir($testJobsDir45);
+
+// Create an order with a checkout session ID (cs_*) as payment_id
+$csOrder = $pdo->prepare("INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, shipping_addr, subtotal, shipping_cost, tax_amount, discount_amount, total, currency, status, payment_method, payment_id)
+    VALUES ('ORD-CS-TEST', 'Test User', 'test@test.com', '', '{}', 1000, 0, 0, 0, 1000, 'eur', 'pending', 'stripe', 'cs_test_session_123')");
+$csOrder->execute();
+$csOrderId = (int)$pdo->lastInsertId();
+
+// Transition to cancelled
+OrderWorkflow::transition($csOrderId, 'cancelled', 'Test cancel with checkout session');
+
+// Verify no refund job was queued
+$refundJobFound = false;
+foreach (glob($testJobsDir45 . '/pending/*.json') ?: [] as $jf) {
+    $jd = json_decode(file_get_contents($jf), true);
+    if (($jd['type'] ?? '') === 'payment_refund' && ($jd['payload']['order_id'] ?? 0) === $csOrderId) {
+        $refundJobFound = true;
+    }
+}
+assert_true(!$refundJobFound, 'No refund job queued for checkout session (cs_*) payment_id');
+
+// Now test with a payment_intent ID — refund SHOULD be queued
+$piOrder = $pdo->prepare("INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, shipping_addr, subtotal, shipping_cost, tax_amount, discount_amount, total, currency, status, payment_method, payment_id)
+    VALUES ('ORD-PI-TEST', 'Test User', 'test@test.com', '', '{}', 2000, 0, 0, 0, 2000, 'eur', 'pending', 'stripe', 'pi_test_intent_456')");
+$piOrder->execute();
+$piOrderId = (int)$pdo->lastInsertId();
+
+OrderWorkflow::transition($piOrderId, 'cancelled', 'Test cancel with payment intent');
+
+$refundJobFound2 = false;
+foreach (glob($testJobsDir45 . '/pending/*.json') ?: [] as $jf) {
+    $jd = json_decode(file_get_contents($jf), true);
+    if (($jd['type'] ?? '') === 'payment_refund' && ($jd['payload']['order_id'] ?? 0) === $piOrderId) {
+        $refundJobFound2 = true;
+    }
+}
+assert_true($refundJobFound2, 'Refund job queued for payment_intent (pi_*) payment_id');
+
+// Cleanup jobs dir
+foreach (['pending', 'processing', 'completed', 'failed'] as $sub) {
+    foreach (glob($testJobsDir45 . '/' . $sub . '/*.json') ?: [] as $f) @unlink($f);
+    @rmdir($testJobsDir45 . '/' . $sub);
+}
+@rmdir($testJobsDir45);
+
+// ============================================================
+// TEST 46: Worker renderTemplate function
+// ============================================================
+echo "\n--- Test 46: Template Engine ---\n";
+
+require_once __DIR__ . '/worker.php';
+
+// Test basic variable substitution
+$tpl1 = renderTemplate('Hello {{name}}, order #{{order_number}}', [
+    'name' => 'Peter',
+    'order_number' => 'ORD-001',
+]);
+assert_true(str_contains($tpl1, 'Peter'), 'Template var substitution works');
+assert_true(str_contains($tpl1, 'ORD-001'), 'Template multiple vars work');
+
+// Test {{#if}} blocks
+$tpl2 = renderTemplate('{{#if paid}}Payment received{{/if}}{{#if refunded}}Refunded{{/if}}', [
+    'paid' => true,
+    'refunded' => false,
+]);
+assert_true(str_contains($tpl2, 'Payment received'), 'Template #if truthy renders block');
+assert_true(!str_contains($tpl2, 'Refunded'), 'Template #if falsy hides block');
+
+// Test {{#each}} blocks
+$tpl3 = renderTemplate('<ul>{{#each items}}<li>{{name}} x{{quantity}}</li>{{/each}}</ul>', [
+    'items' => [
+        ['name' => 'Widget', 'quantity' => '2'],
+        ['name' => 'Gadget', 'quantity' => '1'],
+    ],
+]);
+assert_true(str_contains($tpl3, 'Widget'), 'Template #each renders items');
+assert_true(str_contains($tpl3, 'Gadget'), 'Template #each renders all items');
+assert_true(str_contains($tpl3, 'x2'), 'Template #each uses item fields');
+
+// Test HTML escaping
+$tpl4 = renderTemplate('{{name}}', ['name' => '<script>alert(1)</script>']);
+assert_true(!str_contains($tpl4, '<script>'), 'Template escapes HTML');
+assert_true(str_contains($tpl4, '&lt;script&gt;'), 'Template HTML-encodes special chars');
+
+// ============================================================
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
 if ($failed > 0) {

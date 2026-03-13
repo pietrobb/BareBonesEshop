@@ -534,6 +534,8 @@ function apiWebhookStripe(): array {
             default                      => null,
         };
     } catch (\Throwable $e) {
+        // Unmark so Stripe can retry the webhook
+        Idempotency::unmark($event['id']);
         error_log("Webhook error [{$event['type']}]: {$e->getMessage()}\n" . $e->getTraceAsString());
         http_response_code(500);
         return ['error' => 'Processing failed'];

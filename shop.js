@@ -35,6 +35,7 @@ const Shop = {
         this.bindTabActions();
         this.bindGalleryActions();
         this.bindSearchActions();
+        this.bindCheckoutForm();
     },
 
     // ============================================================
@@ -365,6 +366,67 @@ const Shop = {
         } catch (e) {
             console.error('Suggest failed:', e);
         }
+    },
+
+    // ============================================================
+    // Checkout
+    // ============================================================
+    async submitCheckout(formData) {
+        try {
+            const res = await fetch('api.php?action=checkout', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': this.csrfToken },
+                body: JSON.stringify(formData),
+            });
+            const data = await res.json();
+
+            if (data.error) {
+                this.showNotification(data.error);
+                return data;
+            }
+
+            if (data.success) {
+                CartStore.clear();
+                this.state.cart = { items: [], count: 0, subtotal: 0 };
+                this.updateCartBadge();
+
+                // Redirect to payment gateway if URL provided
+                if (data.payment_url) {
+                    window.location.href = data.payment_url;
+                    return data;
+                }
+
+                // COD / bank transfer — redirect to success page
+                if (data.order_number) {
+                    window.location.href = '/checkout/success?order=' + encodeURIComponent(data.order_number);
+                    return data;
+                }
+            }
+
+            return data;
+        } catch (e) {
+            console.error('Checkout failed:', e);
+            this.showNotification('Chyba pri odosielaní objednávky');
+            return { error: 'Network error' };
+        }
+    },
+
+    bindCheckoutForm() {
+        const form = document.querySelector('[data-checkout-form]');
+        if (!form) return;
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = form.querySelector('[type="submit"]');
+            if (btn) { btn.disabled = true; btn.textContent = 'Spracovávam...'; }
+
+            const fd = new FormData(form);
+            const data = {};
+            fd.forEach((val, key) => { data[key] = val; });
+
+            await this.submitCheckout(data);
+            if (btn) { btn.disabled = false; btn.textContent = 'Objednať'; }
+        });
     },
 
     // ============================================================

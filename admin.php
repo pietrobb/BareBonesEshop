@@ -629,8 +629,14 @@ function handleProductSave(): void {
     // Handle file upload
     if (!empty($_FILES['image_upload']['tmp_name']) && $_FILES['image_upload']['error'] === UPLOAD_ERR_OK) {
         $ext = strtolower(pathinfo($_FILES['image_upload']['name'], PATHINFO_EXTENSION));
-        if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) {
-            $filename = 'products/' . ($data[':sku'] ?: uniqid()) . '-' . time() . '.' . $ext;
+        // Verify actual MIME type via finfo (not just extension)
+        $allowedMime = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
+        $finfo = new finfo(FILEINFO_MIME_TYPE);
+        $mime = $finfo->file($_FILES['image_upload']['tmp_name']);
+        if (isset($allowedMime[$mime])) {
+            $ext = $allowedMime[$mime]; // use detected extension, not user-supplied
+            $safeSku = preg_replace('/[^a-zA-Z0-9_-]/', '_', $data[':sku'] ?: uniqid());
+            $filename = 'products/' . $safeSku . '-' . time() . '.' . $ext;
             try {
                 $storage = Adapters::storage();
                 $url = $storage->store($filename, file_get_contents($_FILES['image_upload']['tmp_name']));
@@ -641,7 +647,7 @@ function handleProductSave(): void {
                 // Storage not configured, save with URL only
                 $images[] = $filename;
             }
-        }
+        } // else: unsupported MIME type, silently skip
     }
     $data[':images'] = json_encode($images);
 
@@ -678,8 +684,7 @@ function handleProductSave(): void {
 }
 
 function handleBulkAction(): void {
-    if (!Security::csrfValidate()) { setFlash('err', 'CSRF error.'); header('Location: admin.php?p=products'); exit; }
-
+    // CSRF already validated by handlePost()
     $ids = array_map('intval', $_POST['product_ids'] ?? []);
     $action = $_POST['bulk_action'] ?? '';
     if (empty($ids) || !$action) { header('Location: admin.php?p=products'); exit; }
@@ -712,7 +717,12 @@ function handleExport(): void {
 
     $where = "1=1";
     $params = [];
-    if ($search) { $where .= " AND (name LIKE :q OR sku LIKE :q)"; $params[':q'] = "%{$search}%"; }
+    if ($search) {
+        $where .= " AND (name LIKE :q OR sku LIKE :q2)";
+        $escaped = str_replace(['%', '_'], ['\\%', '\\_'], $search);
+        $params[':q'] = "%{$escaped}%";
+        $params[':q2'] = "%{$escaped}%";
+    }
     if ($statusFilter) { $where .= " AND status = :status"; $params[':status'] = $statusFilter; }
 
     $stmt = $db->prepare("SELECT sku, name, slug, product_type, price, compare_price, stock, status, summary, weight_g FROM products WHERE {$where} ORDER BY id");

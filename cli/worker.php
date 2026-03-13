@@ -43,6 +43,7 @@ $handlers = [
     'cart_abandonment'  => 'handleCartAbandonment',
     'cleanup'           => 'handleCleanup',
     'image_resize'      => 'handleImageResize',
+    'import_process'    => 'handleImportProcess',
 ];
 
 // Process loop
@@ -188,7 +189,18 @@ function handleEmailSend(array $payload, array $job): void {
                 'order_status' => $order['status'],
                 'order_total' => I18n::price((int)$order['total']),
                 'customer_name' => $order['customer_name'],
+                'customer_email' => $order['customer_email'],
+                'payment_method' => $order['payment_method'] ?? '',
             ]);
+            // Include order items for {{#each items}} template blocks
+            $items = Orders::items((int)$orderId);
+            $vars['items'] = array_map(fn($it) => [
+                'name'       => $it['name'],
+                'sku'        => $it['sku'],
+                'quantity'   => $it['quantity'],
+                'unit_price' => I18n::price((int)$it['unit_price']),
+                'total'      => I18n::price((int)$it['total']),
+            ], $items);
         }
     }
 
@@ -198,10 +210,7 @@ function handleEmailSend(array $payload, array $job): void {
     $subject = $template;
     if (file_exists($templateFile)) {
         $body = file_get_contents($templateFile);
-        // Simple variable substitution
-        foreach ($vars as $k => $v) {
-            $body = str_replace('{{' . $k . '}}', htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'), $body);
-        }
+        $body = renderTemplate($body, $vars);
         // Extract subject from <title> if present
         if (preg_match('/<title>(.*?)<\/title>/i', $body, $m)) {
             $subject = $m[1];
@@ -228,6 +237,46 @@ function handleEmailSend(array $payload, array $job): void {
     file_put_contents($logDir . '/emails.log', $logEntry, FILE_APPEND | LOCK_EX);
 }
 
+/** Simple template engine: {{var}}, {{#if var}}...{{/if}}, {{#each items}}...{{/each}} */
+function renderTemplate(string $tpl, array $vars): string {
+    // Process {{#each key}}...{{/each}} blocks
+    $tpl = preg_replace_callback('/\{\{#each\s+(\w+)\}\}(.*?)\{\{\/each\}\}/s', function($m) use ($vars) {
+        $key = $m[1];
+        $inner = $m[2];
+        $items = $vars[$key] ?? [];
+        if (!is_array($items)) return '';
+        $out = '';
+        foreach ($items as $item) {
+            $row = $inner;
+            if (is_array($item)) {
+                foreach ($item as $k => $v) {
+                    $row = str_replace('{{' . $k . '}}', htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'), $row);
+                }
+            } else {
+                $row = str_replace('{{this}}', htmlspecialchars((string)$item, ENT_QUOTES, 'UTF-8'), $row);
+            }
+            $out .= $row;
+        }
+        return $out;
+    }, $tpl);
+
+    // Process {{#if key}}...{{/if}} blocks
+    $tpl = preg_replace_callback('/\{\{#if\s+(\w+)\}\}(.*?)\{\{\/if\}\}/s', function($m) use ($vars) {
+        return !empty($vars[$m[1]]) ? $m[2] : '';
+    }, $tpl);
+
+    // Simple variable substitution
+    foreach ($vars as $k => $v) {
+        if (is_scalar($v)) {
+            $tpl = str_replace('{{' . $k . '}}', htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'), $tpl);
+        }
+    }
+    // Clean up any remaining unresolved placeholders
+    $tpl = preg_replace('/\{\{[^}]+\}\}/', '', $tpl);
+
+    return $tpl;
+}
+
 function handleStockAlert(array $payload, array $job): void {
     $threshold = $payload['threshold'] ?? 10;
     $db = Db::get();
@@ -249,18 +298,25 @@ function handleStockAlert(array $payload, array $job): void {
 }
 
 function handleSearchReindex(array $payload, array $job): void {
-    if (!Db::isSqlite()) return; // FTS5 only
-
     $productId = $payload['product_id'] ?? null;
-    if ($productId) {
-        // Single product — FTS triggers handle this automatically on UPDATE
-        // Just touch the product to trigger the FTS update trigger
-        $now = Db::now();
-        Db::get()->prepare("UPDATE products SET updated_at = {$now} WHERE id = :id")
-            ->execute([':id' => $productId]);
+
+    if (Db::isSqlite()) {
+        if ($productId) {
+            // Single product — FTS triggers handle this automatically on UPDATE
+            $now = Db::now();
+            Db::get()->prepare("UPDATE products SET updated_at = {$now} WHERE id = :id")
+                ->execute([':id' => $productId]);
+        } else {
+            // Full reindex — rebuild FTS5
+            Db::get()->exec("INSERT INTO products_fts(products_fts) VALUES('rebuild')");
+        }
     } else {
-        // Full reindex — rebuild FTS
-        Db::get()->exec("INSERT INTO products_fts(products_fts) VALUES('rebuild')");
+        // MySQL — FULLTEXT indexes are maintained automatically, but we can
+        // OPTIMIZE TABLE to rebuild if full reindex is requested
+        if (!$productId) {
+            Db::get()->exec("OPTIMIZE TABLE products");
+        }
+        // Single product: no action needed — MySQL FULLTEXT auto-updates on change
     }
 }
 
@@ -352,8 +408,24 @@ function handleImageResize(array $payload, array $job): void {
     $path = $payload['path'] ?? '';
     if (!$path) return;
 
-    require_once __DIR__ . '/../adapters/contrib/LocalStorage.php';
-    $cfg = require __DIR__ . '/../config.php';
-    $storage = new LocalStorage($cfg);
+    $storage = Adapters::storage();
     $storage->generateVariants($path);
+}
+
+function handleImportProcess(array $payload, array $job): void {
+    $file = $payload['file'] ?? '';
+    if (!$file || !file_exists($file)) {
+        throw new \RuntimeException("Import file not found: {$file}");
+    }
+
+    $result = Import::csv($file);
+
+    $logDir = __DIR__ . '/../logs';
+    if (!is_dir($logDir)) mkdir($logDir, 0750, true);
+    $errCount = count($result['errors'] ?? []);
+    $logEntry = date('c') . " | IMPORT: {$result['imported']} ok, {$errCount} errors | FILE: {$file}\n";
+    file_put_contents($logDir . '/imports.log', $logEntry, FILE_APPEND | LOCK_EX);
+
+    // Clean up temp file
+    @unlink($file);
 }

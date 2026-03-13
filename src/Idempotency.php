@@ -23,6 +23,15 @@ class Idempotency {
     }
 
     /**
+     * Remove an event record so it can be retried (call on business logic failure)
+     */
+    public static function unmark(string $eventId): void {
+        $db = Db::get();
+        $stmt = $db->prepare("DELETE FROM processed_events WHERE event_id = :id");
+        $stmt->execute([':id' => $eventId]);
+    }
+
+    /**
      * Cleanup old events (call periodically)
      */
     public static function cleanup(int $olderThanDays = 7): int {

@@ -23,7 +23,7 @@ class LocalStorage implements StorageAdapter {
     }
 
     public function store(string $path, string $contents): string {
-        $fullPath = $this->uploadsDir . '/' . $path;
+        $fullPath = $this->safePath($path);
         $dir = dirname($fullPath);
         if (!is_dir($dir)) mkdir($dir, 0750, true);
         file_put_contents($fullPath, $contents, LOCK_EX);
@@ -37,7 +37,7 @@ class LocalStorage implements StorageAdapter {
             if (file_exists($file)) @unlink($file);
         }
         // Delete original
-        $fullPath = $this->uploadsDir . '/' . $path;
+        $fullPath = $this->safePath($path);
         if (file_exists($fullPath)) @unlink($fullPath);
     }
 
@@ -53,7 +53,7 @@ class LocalStorage implements StorageAdapter {
     }
 
     public function resize(string $path, int $width, int $height): string {
-        $srcPath = $this->uploadsDir . '/' . $path;
+        $srcPath = $this->safePath($path);
         if (!file_exists($srcPath)) {
             throw new \RuntimeException("Source file not found: {$path}");
         }
@@ -112,13 +112,17 @@ class LocalStorage implements StorageAdapter {
         $outDir = dirname($outPath);
         if (!is_dir($outDir)) mkdir($outDir, 0750, true);
 
-        match ($ext) {
+        $written = match ($ext) {
             'jpg', 'jpeg' => imagejpeg($dst, $outPath, 85),
             'png' => imagepng($dst, $outPath, 6),
             'gif' => imagegif($dst, $outPath),
             'webp' => imagewebp($dst, $outPath, 85),
-            default => null,
+            default => false,
         };
+        if (!$written) {
+            imagedestroy($dst);
+            throw new \RuntimeException("Cannot write resized image for format: {$ext}");
+        }
         imagedestroy($dst);
 
         return $this->baseUrl . '/' . $outFile;
@@ -139,6 +143,24 @@ class LocalStorage implements StorageAdapter {
             }
         }
         return $urls;
+    }
+
+    /** Validate path stays within uploads directory (prevent path traversal) */
+    private function safePath(string $path): string {
+        $full = $this->uploadsDir . '/' . $path;
+        $real = realpath(dirname($full));
+        if ($real === false) {
+            // Directory doesn't exist yet — validate no traversal in the path itself
+            if (str_contains($path, '..')) {
+                throw new \RuntimeException("Invalid path: directory traversal detected");
+            }
+            return $full;
+        }
+        $realUploads = realpath($this->uploadsDir);
+        if ($realUploads === false || !str_starts_with($real, $realUploads)) {
+            throw new \RuntimeException("Invalid path: outside uploads directory");
+        }
+        return $real . '/' . basename($full);
     }
 
     private function variantPath(string $path, string $variant): string {

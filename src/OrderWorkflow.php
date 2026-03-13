@@ -76,10 +76,12 @@ class OrderWorkflow {
     private static function handleCancellation(array $order): void {
         Orders::restoreStock($order['id']);
 
-        if (!empty($order['payment_id'])) {
+        // Only queue refund if payment_id is a payment_intent (pi_*), not a checkout session (cs_*)
+        $pid = $order['payment_id'] ?? '';
+        if ($pid && !str_starts_with($pid, 'cs_')) {
             JobQueue::push('payment_refund', [
                 'order_id'   => $order['id'],
-                'payment_id' => $order['payment_id'],
+                'payment_id' => $pid,
                 'amount'     => $order['total'],
             ], 1);
         }
@@ -93,6 +95,12 @@ class OrderWorkflow {
             'template' => 'shipping-notification',
             'to'       => $order['customer_email'],
             'order_id' => $order['id'],
+        ]);
+
+        // ERP sync — push shipment status
+        JobQueue::push('erp_order_update', [
+            'order_id' => $order['id'],
+            'status'   => 'shipped',
         ]);
     }
 
