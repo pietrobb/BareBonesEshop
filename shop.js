@@ -77,7 +77,13 @@ const Shop = {
     },
 
     productCardHTML(p) {
-        const image = p.image ? `<img src="/uploads/medium/${this.esc(p.image)}" alt="${this.esc(p.name)}" loading="lazy">` : '';
+        let imgSrc = '';
+        if (p.image) {
+            imgSrc = (p.image.startsWith('http') || p.image.startsWith('/'))
+                ? this.esc(p.image)
+                : `/uploads/medium/${this.esc(p.image)}`;
+        }
+        const image = imgSrc ? `<img src="${imgSrc}" alt="${this.esc(p.name)}" loading="lazy">` : '';
         const badge = p.compare_price ? `<span class="product-card__badge">-${p.discount_percent}%</span>` : '';
         const oldPrice = p.compare_price ? `<span class="price--old">${this.esc(p.compare_price_formatted)}</span>` : '';
         const cartBtn = p.stock > 0

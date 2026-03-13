@@ -22,8 +22,8 @@ I18n::setLocale(I18n::detectLocale($uri));
 $cfg = require __DIR__ . '/config.php';
 $action = $_GET['action'] ?? '';
 
-// Rate limiting for all API calls
-if (!Security::rateLimit('api_' . $action, 120)) {
+// Rate limiting (exempt webhooks — they rely on signature verification)
+if ($action !== 'webhook_stripe' && !Security::rateLimit('api_' . $action, 120)) {
     echo json_encode(['error' => 'Too many requests']);
     exit;
 }
@@ -120,9 +120,10 @@ function apiProducts(): array {
 
     $data = Products::byCategory($category['id'], $page, $perPage, $sort, $filters, $priceMin, $priceMax);
 
-    // Translate & enrich products
-    $data['products'] = array_map(function($p) {
-        return Products::enrich(I18n::product($p));
+    // Translate & enrich products (batch category map to avoid N+1)
+    $catMap = Products::categoryMap();
+    $data['products'] = array_map(function($p) use ($catMap) {
+        return Products::enrich(I18n::product($p), $catMap);
     }, $data['products']);
 
     $data['category'] = Categories::enrich(I18n::category($category));
@@ -167,8 +168,9 @@ function apiSearch(): array {
     }
 
     $data = Search::query($q, $page);
-    $data['products'] = array_map(function($p) {
-        return Products::enrich(I18n::product($p));
+    $catMap = Products::categoryMap();
+    $data['products'] = array_map(function($p) use ($catMap) {
+        return Products::enrich(I18n::product($p), $catMap);
     }, $data['products']);
 
     return $data;
@@ -245,12 +247,19 @@ function apiFilters(): array {
 
 function apiCart(): array {
     $items = $_SESSION['cart'] ?? [];
+    if (empty($items)) return ['items' => $items, 'count' => 0, 'subtotal' => 0];
+
+    // Batch price lookup instead of N+1
+    $ids = array_unique(array_column(array_values($items), 'product_id'));
+    $ph = implode(',', array_fill(0, count($ids), '?'));
+    $stmt = Db::get()->prepare("SELECT id, price FROM products WHERE id IN ({$ph})");
+    $stmt->execute(array_values($ids));
+    $prices = [];
+    while ($r = $stmt->fetch()) $prices[(int)$r['id']] = (int)$r['price'];
+
     $subtotal = 0;
     foreach ($items as $item) {
-        $product = Products::byId((int)($item['product_id'] ?? 0));
-        if ($product) {
-            $subtotal += (int)$product['price'] * (int)($item['qty'] ?? 0);
-        }
+        $subtotal += ($prices[$item['product_id']] ?? 0) * (int)($item['qty'] ?? 0);
     }
     return [
         'items'    => $items,
@@ -303,6 +312,9 @@ function apiCartUpdate(): array {
 
     $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
     $key = $input['key'] ?? '';
+    if (!preg_match('/^(p|v)_\d{1,10}$/', $key)) {
+        return ['error' => 'Invalid cart key'];
+    }
     $qty = min(99, Security::int($input['qty'] ?? 0));
 
     Cart::update($key, $qty);
@@ -442,13 +454,13 @@ function apiCheckout(): array {
         'coupon_discount'=> $couponDiscount,
     ];
 
-    try {
-        $orderId = Orders::create($cart['items'], $customer, $paymentMethod);
+    // Pass coupon info for atomic recording inside the order transaction
+    $coupon = ($couponCode && $couponDiscount > 0)
+        ? ['code' => $couponCode, 'discount' => $couponDiscount]
+        : null;
 
-        // Record coupon use after successful order
-        if ($couponCode && $couponDiscount > 0) {
-            Pricing::recordCouponUse($couponCode, $orderId, $email, $couponDiscount);
-        }
+    try {
+        $orderId = Orders::create($cart['items'], $customer, $paymentMethod, $coupon);
 
         Cart::clear();
 

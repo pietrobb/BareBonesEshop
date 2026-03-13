@@ -8,7 +8,7 @@ class Orders {
      * Create order from cart with atomic stock reservation.
      * Returns order ID on success, throws on failure.
      */
-    public static function create(array $cartItems, array $customer, string $paymentMethod = 'stripe'): int {
+    public static function create(array $cartItems, array $customer, string $paymentMethod = 'stripe', ?array $coupon = null): int {
         $db = Db::get();
         $db->beginTransaction();
 
@@ -62,17 +62,10 @@ class Orders {
             $couponDiscount = $customer['coupon_discount'] ?? 0;
             $total = max(0, $subtotal - $couponDiscount) + $shippingCost + $taxAmount;
 
-            // 3. Create order
-            $orderNumber = self::generateOrderNumber();
-            $stmt = $db->prepare("
-                INSERT INTO orders (order_number, status, customer_name, customer_email, customer_phone,
-                    shipping_addr, payment_method, subtotal, discount_amount, shipping_cost, tax_amount, total, currency,
-                    notes, ip_address)
-                VALUES (:num, 'pending', :name, :email, :phone, :addr, :method,
-                    :subtotal, :discount, :shipping, :tax, :total, :currency, :notes, :ip)
-            ");
-            $stmt->execute([
-                ':num'      => $orderNumber,
+            // 3. Create order (retry on unique constraint collision)
+            $orderNumber = null;
+            $orderId = null;
+            $orderParams = [
                 ':name'     => $customer['name'],
                 ':email'    => $customer['email'],
                 ':phone'    => $customer['phone'] ?? '',
@@ -86,8 +79,25 @@ class Orders {
                 ':currency' => $customer['currency'] ?? 'eur',
                 ':notes'    => $customer['notes'] ?? '',
                 ':ip'       => php_sapi_name() === 'cli' ? '127.0.0.1' : ($_SERVER['REMOTE_ADDR'] ?? ''),
-            ]);
-            $orderId = (int)$db->lastInsertId();
+            ];
+            $orderStmt = $db->prepare("
+                INSERT INTO orders (order_number, status, customer_name, customer_email, customer_phone,
+                    shipping_addr, payment_method, subtotal, discount_amount, shipping_cost, tax_amount, total, currency,
+                    notes, ip_address)
+                VALUES (:num, 'pending', :name, :email, :phone, :addr, :method,
+                    :subtotal, :discount, :shipping, :tax, :total, :currency, :notes, :ip)
+            ");
+            for ($attempt = 0; $attempt < 5; $attempt++) {
+                $orderNumber = self::generateOrderNumber();
+                try {
+                    $orderStmt->execute(array_merge([':num' => $orderNumber], $orderParams));
+                    $orderId = (int)$db->lastInsertId();
+                    break;
+                } catch (\PDOException $e) {
+                    // Retry only on unique constraint violation (SQLSTATE 23000)
+                    if ($e->getCode() !== '23000' || $attempt >= 4) throw $e;
+                }
+            }
 
             // 4. Insert order items
             $itemStmt = $db->prepare("
@@ -108,7 +118,15 @@ class Orders {
                 ]);
             }
 
-            // 5. Audit log
+            // 5. Record coupon use atomically within the order transaction
+            if ($coupon && !empty($coupon['code']) && ($coupon['discount'] ?? 0) > 0) {
+                Pricing::recordCouponUse(
+                    $coupon['code'], $orderId,
+                    $customer['email'], $coupon['discount']
+                );
+            }
+
+            // 6. Audit log
             AuditLog::log('order', $orderId, null, [
                 'order_number' => $orderNumber,
                 'total'        => $total,
@@ -207,53 +225,69 @@ class Orders {
      */
     public static function stats(): array {
         $db = Db::get();
-        $result = [];
-        foreach (['pending', 'paid', 'processing', 'shipped', 'delivered', 'cancelled', 'returned', 'refunded'] as $s) {
-            $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE status = :s");
-            $stmt->execute([':s' => $s]);
-            $result[$s] = (int)$stmt->fetchColumn();
+        $statuses = ['pending','paid','processing','shipped','delivered','cancelled','returned','refunded'];
+        $result = array_fill_keys($statuses, 0);
+
+        $rows = $db->query("SELECT status, COUNT(*) as cnt FROM orders GROUP BY status")->fetchAll();
+        foreach ($rows as $r) {
+            if (isset($result[$r['status']])) {
+                $result[$r['status']] = (int)$r['cnt'];
+            }
         }
 
-        $stmt = $db->query("SELECT COALESCE(SUM(total), 0) FROM orders WHERE status NOT IN ('cancelled', 'refunded')");
-        $result['revenue'] = (int)$stmt->fetchColumn();
+        $rev = $db->query("SELECT COALESCE(SUM(total), 0) FROM orders WHERE status NOT IN ('cancelled', 'refunded')");
+        $result['revenue'] = (int)$rev->fetchColumn();
 
         return $result;
     }
 
     /**
-     * Generate unique order number: ORD-YYYYMMDD-XXXX
+     * Generate unique order number: ORD-YYYYMMDD-XXXXXX
+     * Uses 6 hex chars (16M combinations/day) — collisions handled by
+     * UNIQUE constraint + retry in create().
      */
-    private static function generateOrderNumber(int $attempt = 0): string {
-        if ($attempt >= 10) {
-            throw new \RuntimeException('Failed to generate unique order number after 10 attempts');
-        }
-
+    private static function generateOrderNumber(): string {
         $date = date('Ymd');
-        $rand = strtoupper(substr(bin2hex(random_bytes(2)), 0, 4));
-        $number = "ORD-{$date}-{$rand}";
-
-        // Ensure uniqueness
-        $stmt = Db::get()->prepare("SELECT COUNT(*) FROM orders WHERE order_number = :num");
-        $stmt->execute([':num' => $number]);
-        if ((int)$stmt->fetchColumn() > 0) {
-            return self::generateOrderNumber($attempt + 1);
-        }
-
-        return $number;
+        $rand = strtoupper(substr(bin2hex(random_bytes(3)), 0, 6));
+        return "ORD-{$date}-{$rand}";
     }
 
     /**
      * Restore stock for order items (used by cancellation/refund)
      */
     public static function restoreStock(int $orderId): void {
+        $db = Db::get();
+
+        // Guard against double restore — check if already restored
+        $order = self::byId($orderId);
+        if ($order && str_contains($order['notes'] ?? '', 'stock_restored')) {
+            return;
+        }
+
         $items = self::items($orderId);
-        foreach ($items as $item) {
-            if (!empty($item['variant_id'])) {
-                $stmt = Db::get()->prepare("UPDATE variants SET stock = stock + :qty WHERE id = :id");
-                $stmt->execute([':qty' => $item['quantity'], ':id' => $item['variant_id']]);
-            } else {
-                Products::incrementStock($item['product_id'], $item['quantity']);
+
+        $ownTransaction = !$db->inTransaction();
+        if ($ownTransaction) $db->beginTransaction();
+
+        try {
+            foreach ($items as $item) {
+                if (!empty($item['variant_id'])) {
+                    $stmt = $db->prepare("UPDATE variants SET stock = stock + :qty WHERE id = :id");
+                    $stmt->execute([':qty' => $item['quantity'], ':id' => $item['variant_id']]);
+                } else {
+                    Products::incrementStock($item['product_id'], $item['quantity']);
+                }
             }
+
+            // Mark as restored inside the same transaction
+            $concat = Db::isSqlite() ? "COALESCE(notes,'') || :note" : "CONCAT(COALESCE(notes,''), :note)";
+            $db->prepare("UPDATE orders SET notes = {$concat} WHERE id = :id")
+               ->execute([':note' => "\nstock_restored", ':id' => $orderId]);
+
+            if ($ownTransaction) $db->commit();
+        } catch (\Throwable $e) {
+            if ($ownTransaction && $db->inTransaction()) $db->rollBack();
+            throw $e;
         }
     }
 

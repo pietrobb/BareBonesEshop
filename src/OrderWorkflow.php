@@ -45,6 +45,8 @@ class OrderWorkflow {
         }
 
         $db = Db::get();
+        $deferredJobs = [];
+
         $db->beginTransaction();
 
         try {
@@ -54,13 +56,13 @@ class OrderWorkflow {
             // Audit log
             AuditLog::log('order_status', $orderId, $from, $to, $note);
 
-            // Side effects
-            match($to) {
+            // Collect DB-side effects (stock restore) + deferred jobs
+            $deferredJobs = match($to) {
                 'cancelled' => self::handleCancellation($order),
                 'shipped'   => self::handleShipped($order),
                 'returned'  => self::handleReturn($order),
                 'refunded'  => self::handleRefund($order),
-                default     => null,
+                default     => [],
             };
 
             $db->commit();
@@ -68,58 +70,68 @@ class OrderWorkflow {
             if ($db->inTransaction()) $db->rollBack();
             throw $e;
         }
-    }
 
-    /**
-     * Cancellation: restore stock, queue refund if paid
-     */
-    private static function handleCancellation(array $order): void {
-        Orders::restoreStock($order['id']);
-
-        // Only queue refund if payment_id is a payment_intent (pi_*), not a checkout session (cs_*)
-        $pid = $order['payment_id'] ?? '';
-        if ($pid && !str_starts_with($pid, 'cs_')) {
-            JobQueue::push('payment_refund', [
-                'order_id'   => $order['id'],
-                'payment_id' => $pid,
-                'amount'     => $order['total'],
-            ], 1);
+        // Push jobs AFTER successful commit — filesystem writes are not transactional
+        foreach ($deferredJobs as [$type, $payload, $priority]) {
+            JobQueue::push($type, $payload, $priority);
         }
     }
 
     /**
-     * Shipped: queue email notification
+     * Cancellation: restore stock (in DB), return deferred jobs
      */
-    private static function handleShipped(array $order): void {
-        JobQueue::push('email_send', [
-            'template' => 'shipping-notification',
-            'to'       => $order['customer_email'],
-            'order_id' => $order['id'],
-        ]);
-
-        // ERP sync — push shipment status
-        JobQueue::push('erp_order_update', [
-            'order_id' => $order['id'],
-            'status'   => 'shipped',
-        ]);
-    }
-
-    /**
-     * Returned: restore stock to inventory
-     */
-    private static function handleReturn(array $order): void {
+    private static function handleCancellation(array $order): array {
         Orders::restoreStock($order['id']);
+
+        $jobs = [];
+        // Only queue refund if payment_id is a payment_intent (pi_*), not a checkout session (cs_*)
+        $pid = $order['payment_id'] ?? '';
+        if ($pid && !str_starts_with($pid, 'cs_')) {
+            $jobs[] = ['payment_refund', [
+                'order_id'   => $order['id'],
+                'payment_id' => $pid,
+                'amount'     => $order['total'],
+            ], 1];
+        }
+        return $jobs;
     }
 
     /**
-     * Refund: queue refund email (stock already restored in handleReturn or handleCancellation)
+     * Shipped: return deferred email + ERP jobs
      */
-    private static function handleRefund(array $order): void {
-        JobQueue::push('email_send', [
-            'template' => 'refund-confirmation',
-            'to'       => $order['customer_email'],
-            'order_id' => $order['id'],
-        ]);
+    private static function handleShipped(array $order): array {
+        return [
+            ['email_send', [
+                'template' => 'shipping-notification',
+                'to'       => $order['customer_email'],
+                'order_id' => $order['id'],
+            ], 5],
+            ['erp_order_update', [
+                'order_id' => $order['id'],
+                'status'   => 'shipped',
+            ], 5],
+        ];
+    }
+
+    /**
+     * Returned: restore stock (in DB), no jobs needed
+     */
+    private static function handleReturn(array $order): array {
+        Orders::restoreStock($order['id']);
+        return [];
+    }
+
+    /**
+     * Refund: return deferred email job
+     */
+    private static function handleRefund(array $order): array {
+        return [
+            ['email_send', [
+                'template' => 'refund-confirmation',
+                'to'       => $order['customer_email'],
+                'order_id' => $order['id'],
+            ], 5],
+        ];
     }
 
     /**

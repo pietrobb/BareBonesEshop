@@ -20,8 +20,13 @@ I18n::setLocale('sk');
 $page = $_GET['p'] ?? 'dashboard';
 $action = $_GET['action'] ?? '';
 
-// Handle GET actions
+// Handle GET actions (with CSRF token in URL)
 if ($page === 'products' && $action === 'export') {
+    $exportToken = $_GET['csrf_token'] ?? '';
+    if ($exportToken === '' || !hash_equals($_SESSION['csrf_token'] ?? '', $exportToken)) {
+        http_response_code(403);
+        exit('Forbidden');
+    }
     handleExport();
 }
 
@@ -258,7 +263,7 @@ function pageProducts(): void {
                     <option value="delete">Zmazat</option>
                 </select>
                 <button type="submit" class="btn btn-sm" onclick="return confirm('Naozaj?')">Vykonat</button>
-                <a href="admin.php?p=products&action=export&q=<?= urlencode($search) ?>&status=<?= urlencode($statusFilter) ?>" class="btn btn-sm">Export CSV</a>
+                <a href="admin.php?p=products&action=export&csrf_token=<?= Security::csrfToken() ?>&q=<?= urlencode($search) ?>&status=<?= urlencode($statusFilter) ?>" class="btn btn-sm">Export CSV</a>
             </div>
         <table>
             <tr><th><input type="checkbox" id="check-all"></th><th>SKU</th><th>Nazov</th><th>Cena</th><th>Stock</th><th>Stav</th><th>Akcie</th></tr>
@@ -768,6 +773,13 @@ function handleImportUpload(): void {
     if (empty($_FILES['csv_file']['tmp_name'])) {
         setFlash('err', 'Žiadny súbor.');
         return;
+    }
+
+    $maxBytes = 50 * 1024 * 1024; // 50 MB
+    if (($_FILES['csv_file']['size'] ?? 0) > $maxBytes) {
+        setFlash('err', 'Súbor je príliš veľký (max 50 MB).');
+        header("Location: admin.php?p=import");
+        exit;
     }
 
     $tmpFile = $_FILES['csv_file']['tmp_name'];

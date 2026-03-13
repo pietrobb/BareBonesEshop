@@ -65,8 +65,10 @@ class Security {
     }
 
     public static function csrfValidate(): bool {
-        $token = $_POST['csrf_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
-        return hash_equals($_SESSION['csrf_token'] ?? '', $token);
+        $sessionToken = $_SESSION['csrf_token'] ?? '';
+        if ($sessionToken === '') return false; // no token ever generated = reject
+        $submitted = $_POST['csrf_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+        return hash_equals($sessionToken, $submitted);
     }
 
     // ============================================================

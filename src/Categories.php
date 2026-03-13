@@ -72,20 +72,19 @@ class Categories {
         $path = $category['path'];
         if (!$path) return [$category];
 
-        // Split path and fetch each ancestor
-        $slugs = explode('/', $path);
-        $breadcrumb = [];
-        $currentPath = '';
-
-        foreach ($slugs as $slug) {
-            $currentPath = $currentPath ? $currentPath . '/' . $slug : $slug;
-            $stmt = Db::get()->prepare("SELECT * FROM categories WHERE path = :path");
-            $stmt->execute([':path' => $currentPath]);
-            $cat = $stmt->fetch();
-            if ($cat) $breadcrumb[] = $cat;
+        // Build all ancestor paths and fetch in one query
+        $segments = explode('/', $path);
+        $paths = [];
+        $current = '';
+        foreach ($segments as $seg) {
+            $current = $current ? $current . '/' . $seg : $seg;
+            $paths[] = $current;
         }
 
-        return $breadcrumb;
+        $ph = implode(',', array_fill(0, count($paths), '?'));
+        $stmt = Db::get()->prepare("SELECT * FROM categories WHERE path IN ({$ph}) ORDER BY depth, path");
+        $stmt->execute($paths);
+        return $stmt->fetchAll();
     }
 
     /**

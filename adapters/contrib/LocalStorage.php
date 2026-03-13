@@ -147,20 +147,28 @@ class LocalStorage implements StorageAdapter {
 
     /** Validate path stays within uploads directory (prevent path traversal) */
     private function safePath(string $path): string {
-        $full = $this->uploadsDir . '/' . $path;
-        $real = realpath(dirname($full));
-        if ($real === false) {
-            // Directory doesn't exist yet — validate no traversal in the path itself
-            if (str_contains($path, '..')) {
-                throw new \RuntimeException("Invalid path: directory traversal detected");
-            }
-            return $full;
+        // Reject absolute paths
+        if (str_starts_with($path, '/') || str_starts_with($path, '\\')) {
+            throw new \RuntimeException("Invalid path: must be relative");
         }
+        // Reject any segment that is . or .. (covers all traversal patterns)
+        foreach (explode('/', str_replace('\\', '/', $path)) as $segment) {
+            if ($segment === '..' || $segment === '.') {
+                throw new \RuntimeException("Invalid path: traversal detected");
+            }
+        }
+
+        $full = $this->uploadsDir . '/' . $path;
+
+        // After directory exists, verify canonical path stays inside uploads
+        $realDir = realpath(dirname($full));
         $realUploads = realpath($this->uploadsDir);
-        if ($realUploads === false || !str_starts_with($real, $realUploads)) {
+        if ($realDir !== false && $realUploads !== false
+            && !str_starts_with($realDir, $realUploads)) {
             throw new \RuntimeException("Invalid path: outside uploads directory");
         }
-        return $real . '/' . basename($full);
+
+        return $full;
     }
 
     private function variantPath(string $path, string $variant): string {

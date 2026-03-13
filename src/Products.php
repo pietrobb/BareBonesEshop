@@ -241,10 +241,11 @@ class Products {
         $product = self::byId($productId);
         if (!$product) return [];
 
+        $rand = Db::isSqlite() ? 'RANDOM()' : 'RAND()';
         $stmt = Db::get()->prepare("
             SELECT * FROM products
             WHERE category_id = :cat AND id != :id AND status = 'active'
-            ORDER BY RANDOM()
+            ORDER BY {$rand}
             LIMIT :limit
         ");
         $stmt->execute([':cat' => $product['category_id'], ':id' => $productId, ':limit' => $limit]);
@@ -305,9 +306,10 @@ class Products {
     }
 
     /**
-     * Enrich product with computed fields for display
+     * Enrich product with computed fields for display.
+     * Pass $categoryMap ([id => ['slug','path']]) to avoid N+1 category queries.
      */
-    public static function enrich(array $product): array {
+    public static function enrich(array $product, ?array $categoryMap = null): array {
         $product['images'] = json_decode($product['images'] ?? '[]', true);
         $product['attrs'] = json_decode($product['attrs'] ?? '{}', true);
         $product['tags'] = json_decode($product['tags'] ?? '[]', true);
@@ -326,9 +328,13 @@ class Products {
 
         // Add category info for pricing rule matching
         if (!empty($product['category_id']) && empty($product['category_path'])) {
-            $cat = Db::get()->prepare("SELECT slug, path FROM categories WHERE id = :id");
-            $cat->execute([':id' => $product['category_id']]);
-            $catRow = $cat->fetch();
+            if ($categoryMap !== null && isset($categoryMap[$product['category_id']])) {
+                $catRow = $categoryMap[$product['category_id']];
+            } else {
+                $cat = Db::get()->prepare("SELECT slug, path FROM categories WHERE id = :id");
+                $cat->execute([':id' => $product['category_id']]);
+                $catRow = $cat->fetch();
+            }
             if ($catRow) {
                 $product['category_slug'] = $catRow['slug'];
                 $product['category_path'] = $catRow['path'];
@@ -336,6 +342,18 @@ class Products {
         }
 
         return $product;
+    }
+
+    /**
+     * Pre-fetch category map for batch enrichment. Avoids N+1 in enrich().
+     */
+    public static function categoryMap(): array {
+        $rows = Db::get()->query("SELECT id, slug, path FROM categories")->fetchAll();
+        $map = [];
+        foreach ($rows as $r) {
+            $map[(int)$r['id']] = ['slug' => $r['slug'], 'path' => $r['path']];
+        }
+        return $map;
     }
 
     private static function normalizeToken(string $s): string {

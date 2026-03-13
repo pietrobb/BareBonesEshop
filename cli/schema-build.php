@@ -69,8 +69,12 @@ if ($isSqlite) {
     $db->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_cat_slug_parent ON categories(slug, COALESCE(parent_id, 0))");
 } else {
     // MySQL: use a generated column or composite unique; parent_id NULL → 0 for uniqueness
-    $db->exec("ALTER TABLE categories ADD COLUMN parent_id_uniq INT GENERATED ALWAYS AS (COALESCE(parent_id, 0)) STORED");
-    $db->exec("CREATE UNIQUE INDEX idx_cat_slug_parent ON categories(slug(191), parent_id_uniq)");
+    try {
+        $db->exec("ALTER TABLE categories ADD COLUMN parent_id_uniq INT GENERATED ALWAYS AS (COALESCE(parent_id, 0)) STORED");
+        $db->exec("CREATE UNIQUE INDEX idx_cat_slug_parent ON categories(slug(191), parent_id_uniq)");
+    } catch (\PDOException $e) {
+        // Already exists — safe to ignore on re-run
+    }
 }
 $db->exec("CREATE INDEX IF NOT EXISTS idx_cat_parent ON categories(parent_id)");
 $db->exec("CREATE INDEX IF NOT EXISTS idx_cat_path ON categories(path)");

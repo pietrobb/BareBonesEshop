@@ -40,9 +40,9 @@ class Idempotency {
             $stmt = $db->prepare("DELETE FROM processed_events WHERE created_at < datetime('now', :days)");
             $stmt->execute([':days' => "-{$olderThanDays} days"]);
         } else {
-            $stmt = $db->prepare("DELETE FROM processed_events WHERE created_at < DATE_SUB(NOW(), INTERVAL :days DAY)");
-            $stmt->execute([':days' => $olderThanDays]);
+            $days = (int)$olderThanDays;
+            $stmt = $db->query("DELETE FROM processed_events WHERE created_at < DATE_SUB(NOW(), INTERVAL {$days} DAY)");
         }
-        return $stmt->rowCount();
+        return (int)$stmt->rowCount();
     }
 }

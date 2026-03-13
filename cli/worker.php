@@ -139,10 +139,11 @@ function handleCacheRebuild(array $payload, array $job): void {
             $allCats = Db::get()->query("SELECT * FROM categories")->fetchAll();
             $perPage = $cfg['per_page'] ?? 24;
 
+            $catMap = Products::categoryMap();
             foreach ($allCats as $cat) {
                 $data = Products::byCategory($cat['id'], 1, $perPage, 'price_asc');
-                $data['products'] = array_map(function($p) {
-                    return Products::enrich(I18n::product($p));
+                $data['products'] = array_map(function($p) use ($catMap) {
+                    return Products::enrich(I18n::product($p), $catMap);
                 }, $data['products']);
                 Cache::writeJson(Cache::localePath($locale, "cat/{$cat['slug']}/page-1.json"), $data);
 
@@ -338,6 +339,19 @@ function handlePaymentRefund(array $payload, array $job): void {
         }
     }
 
+    // Update order after successful refund
+    if ($orderId && ($result['status'] ?? '') === 'succeeded') {
+        $refundId = $result['refund_id'] ?? $result['id'] ?? '';
+        if ($refundId) {
+            Orders::setRefundId($orderId, $refundId);
+        }
+        // Transition to refunded if workflow allows
+        $order = Orders::byId($orderId);
+        if ($order && OrderWorkflow::canTransition($order['status'], 'refunded')) {
+            OrderWorkflow::transition($orderId, 'refunded', "Payment refund completed: {$paymentId}");
+        }
+    }
+
     file_put_contents($logDir . '/refunds.log',
         date('c') . " | ORDER: {$orderId} | AMOUNT: {$amount} | PAYMENT: {$paymentId} | RESULT: " . json_encode($result) . "\n",
         FILE_APPEND | LOCK_EX
@@ -358,25 +372,29 @@ function handleErpOrderUpdate(array $payload, array $job): void {
 
 function handleSitemapBuild(array $payload, array $job): void {
     $db = Db::get();
-    $baseUrl = $payload['base_url'] ?? 'https://example.com';
+    $baseUrl = filter_var($payload['base_url'] ?? 'https://example.com', FILTER_VALIDATE_URL)
+        ?: 'https://example.com';
+    $safeBase = htmlspecialchars(rtrim($baseUrl, '/'), ENT_XML1 | ENT_QUOTES, 'UTF-8');
 
     $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
     $xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
 
     // Homepage
-    $xml .= "<url><loc>{$baseUrl}/</loc><priority>1.0</priority></url>\n";
+    $xml .= "<url><loc>{$safeBase}/</loc><priority>1.0</priority></url>\n";
 
     // Categories
     $cats = $db->query("SELECT slug, path FROM categories ORDER BY path")->fetchAll();
     foreach ($cats as $cat) {
-        $xml .= "<url><loc>{$baseUrl}/category/" . esc($cat['slug']) . "</loc><priority>0.8</priority></url>\n";
+        $slug = htmlspecialchars($cat['slug'], ENT_XML1 | ENT_QUOTES, 'UTF-8');
+        $xml .= "<url><loc>{$safeBase}/category/{$slug}</loc><priority>0.8</priority></url>\n";
     }
 
     // Products
     $stmt = $db->query("SELECT slug, updated_at FROM products WHERE status = 'active' ORDER BY updated_at DESC");
     while ($p = $stmt->fetch()) {
+        $slug = htmlspecialchars($p['slug'], ENT_XML1 | ENT_QUOTES, 'UTF-8');
         $lastmod = substr($p['updated_at'], 0, 10);
-        $xml .= "<url><loc>{$baseUrl}/product/" . esc($p['slug']) . "</loc><lastmod>{$lastmod}</lastmod><priority>0.6</priority></url>\n";
+        $xml .= "<url><loc>{$safeBase}/product/{$slug}</loc><lastmod>{$lastmod}</lastmod><priority>0.6</priority></url>\n";
     }
 
     $xml .= "</urlset>\n";

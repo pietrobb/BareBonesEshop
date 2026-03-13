@@ -34,10 +34,13 @@ class Import {
         $batch = 0;
 
         $db->beginTransaction();
+        $lineNum = 1; // header = line 1
 
         while (($row = fgetcsv($handle, 0, ',', '"', '')) !== false) {
+            $lineNum++;
+
             if (count($row) !== count($header)) {
-                $errors[] = "Line " . ($imported + 2) . ": column count mismatch";
+                $errors[] = "Line {$lineNum}: column count mismatch";
                 continue;
             }
 
@@ -58,7 +61,7 @@ class Import {
                 }
             } catch (\Throwable $e) {
                 $db->exec('ROLLBACK TO SAVEPOINT row_import');
-                $errors[] = "Line " . ($imported + 2) . " (SKU: " . ($data['sku'] ?? '?') . "): " . $e->getMessage();
+                $errors[] = "Line {$lineNum} (SKU: " . ($data['sku'] ?? '?') . "): " . $e->getMessage();
             }
         }
 
@@ -342,6 +345,14 @@ class Import {
     public static function registerSlug(string $slug, string $locale, string $entity, int $entityId, ?PDO $db = null): void {
         $db = $db ?? Db::get();
 
+        // Check for conflicts with a different entity
+        $check = $db->prepare("SELECT entity_id FROM slug_registry WHERE slug = :slug AND locale = :locale AND entity = :entity AND entity_id != :eid");
+        $check->execute([':slug' => $slug, ':locale' => $locale, ':entity' => $entity, ':eid' => $entityId]);
+        if ($check->fetch()) {
+            throw new \RuntimeException("Slug '{$slug}' ({$locale}) is already used by another {$entity}");
+        }
+
+        // Safe to upsert for the same entity_id (re-import of same product)
         if (Db::isSqlite()) {
             $stmt = $db->prepare("
                 INSERT OR REPLACE INTO slug_registry (slug, locale, entity, entity_id)
