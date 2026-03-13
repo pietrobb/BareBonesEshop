@@ -23,6 +23,7 @@
             "sections": [
                 {"block": "global/breadcrumb", "slot": "full"},
                 {"block": "category/category-header", "slot": "full"},
+                {"block": "category/active-filters", "slot": "full"},
                 {"block": "category/category-filters", "slot": "sidebar"},
                 {"block": "category/sort-bar", "slot": "main"},
                 {"block": "product/product-grid", "slot": "main"},
@@ -34,8 +35,11 @@
             "layout": "one-column",
             "sections": [
                 {"block": "global/breadcrumb"},
-                {"block": "product/product-detail"},
-                {"block": "product/related-products"}
+                {"block": "product/product-gallery"},
+                {"block": "product/product-info"},
+                {"block": "product/product-tabs"},
+                {"block": "product/related-products"},
+                {"block": "product/recently-viewed"}
             ]
         },
 

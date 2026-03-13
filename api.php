@@ -243,10 +243,18 @@ function apiFilters(): array {
 }
 
 function apiCart(): array {
+    $items = $_SESSION['cart'] ?? [];
+    $subtotal = 0;
+    foreach ($items as $item) {
+        $product = Products::byId((int)($item['product_id'] ?? 0));
+        if ($product) {
+            $subtotal += (int)$product['price'] * (int)($item['qty'] ?? 0);
+        }
+    }
     return [
-        'items'    => $_SESSION['cart'] ?? [],
-        'count'    => array_sum(array_column($_SESSION['cart'] ?? [], 'qty')),
-        'subtotal' => 0, // Will be enriched in Phase 3
+        'items'    => $items,
+        'count'    => array_sum(array_column($items, 'qty')),
+        'subtotal' => $subtotal,
     ];
 }
 
@@ -382,6 +390,18 @@ function apiCheckout(): array {
         return ['error' => 'Cart is empty'];
     }
 
+    // Apply coupon if provided
+    $couponCode = trim($input['coupon_code'] ?? '');
+    $couponDiscount = 0;
+    if ($couponCode) {
+        $couponResult = Pricing::applyCoupon($couponCode, $cart['subtotal'], $email);
+        if ($couponResult['discount'] > 0) {
+            $couponDiscount = $couponResult['discount'];
+        } else {
+            return ['error' => $couponResult['error'] ?? 'Invalid coupon'];
+        }
+    }
+
     // Batch weight query instead of N+1
     $productIds = array_unique(array_column($cart['items'], 'product_id'));
     $totalWeight = 0;
@@ -406,27 +426,32 @@ function apiCheckout(): array {
     $taxBreakdown = Tax::orderBreakdown($cart['items'], $country);
 
     $customer = [
-        'name'          => $name,
-        'email'         => $email,
-        'phone'         => $phone,
-        'address'       => [
+        'name'           => $name,
+        'email'          => $email,
+        'phone'          => $phone,
+        'address'        => [
             'street'  => trim($input['street'] ?? ''),
             'city'    => trim($input['city'] ?? ''),
             'zip'     => trim($input['zip'] ?? ''),
             'country' => $country,
         ],
-        'currency'      => $cart['items'][0]['currency'] ?? 'eur',
-        'shipping_cost' => $shippingCost,
-        'tax_amount'    => $taxBreakdown['total_tax'],
+        'currency'       => $cart['items'][0]['currency'] ?? 'eur',
+        'shipping_cost'  => $shippingCost,
+        'tax_amount'     => $taxBreakdown['total_tax'],
+        'coupon_discount'=> $couponDiscount,
     ];
 
     try {
         $orderId = Orders::create($cart['items'], $customer, $paymentMethod);
+
+        // Record coupon use after successful order
+        if ($couponCode && $couponDiscount > 0) {
+            Pricing::recordCouponUse($couponCode, $orderId, $email, $couponDiscount);
+        }
+
         Cart::clear();
 
         $order = Orders::byId($orderId);
-        // Order confirmation email is sent via Stripe webhook (onPaymentCompleted)
-        // to avoid duplicate emails. Admin notification is sent immediately.
         JobQueue::push('email_send', ['template' => 'admin-notification', 'to' => 'admin', 'order_id' => $orderId]);
 
         return [

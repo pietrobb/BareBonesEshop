@@ -396,7 +396,7 @@ function pageOrder(): void {
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                 <select name="new_status">
                     <?php foreach ($allowed as $s): ?>
-                    <option value="<?= $s ?>"><?= $s ?></option>
+                    <option value="<?= esc($s) ?>"><?= esc($s) ?></option>
                     <?php endforeach; ?>
                 </select>
                 <input name="note" placeholder="Poznámka...">
@@ -621,11 +621,20 @@ function handleOrderStatus(): void {
     $newStatus = $_POST['new_status'] ?? '';
     $note = trim($_POST['note'] ?? '');
 
+    if (!in_array($newStatus, OrderWorkflow::statuses(), true)) {
+        setFlash('err', 'Neplatný stav objednávky.');
+        header("Location: admin.php?p=order&id={$orderId}");
+        exit;
+    }
+
     try {
         OrderWorkflow::transition($orderId, $newStatus, $note ?: 'Admin status change');
-        setFlash('ok', "Stav objednávky zmenený na '{$newStatus}'.");
+        setFlash('ok', "Stav objednávky zmenený na '" . esc($newStatus) . "'.");
+    } catch (\LogicException $e) {
+        setFlash('err', 'Neplatný prechod stavu.');
     } catch (\Throwable $e) {
-        setFlash('err', 'Chyba: ' . $e->getMessage());
+        error_log("Order status change error [{$orderId}]: " . $e->getMessage());
+        setFlash('err', 'Chyba pri zmene stavu objednávky.');
     }
 
     header("Location: admin.php?p=order&id={$orderId}");

@@ -72,8 +72,20 @@ class Sync {
         $pendingSync = Orders::pendingStatusSync();
         foreach ($pendingSync as $order) {
             try {
-                $status = $adapter->pullOrderStatus($order['external_id']);
-                if ($status !== ($order['erp_status'] ?? '')) {
+                // Extract external ID from notes (format: erp_synced:{id})
+                $externalId = null;
+                if (preg_match('/erp_synced:(\S+)/', $order['notes'] ?? '', $m)) {
+                    $externalId = $m[1];
+                }
+                if (!$externalId) continue;
+
+                $status = $adapter->pullOrderStatus($externalId);
+                // Extract last known ERP status from notes
+                $lastErpStatus = null;
+                if (preg_match_all('/erp_status:(\S+)/', $order['notes'] ?? '', $m2)) {
+                    $lastErpStatus = end($m2[1]);
+                }
+                if ($status !== $lastErpStatus) {
                     Orders::updateErpStatus((int)$order['id'], $status);
                     $result['statuses_updated']++;
                 }

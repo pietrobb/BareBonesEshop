@@ -293,12 +293,13 @@ class Products {
         $stmt = $db->prepare("UPDATE products SET stock = :qty, updated_at = " . Db::now() . " WHERE sku = :sku");
         $updated = 0;
 
-        $db->beginTransaction();
+        $ownTransaction = !$db->inTransaction();
+        if ($ownTransaction) $db->beginTransaction();
         foreach ($stockData as $item) {
             $stmt->execute([':qty' => (int)$item['qty'], ':sku' => $item['sku']]);
             if ($stmt->rowCount() > 0) $updated++;
         }
-        $db->commit();
+        if ($ownTransaction) $db->commit();
 
         return $updated;
     }
@@ -313,7 +314,7 @@ class Products {
         $currency = $product['currency'] ?? null;
         $product['price_formatted'] = I18n::price($product['price'], $currency);
 
-        if (!empty($product['compare_price'])) {
+        if (!empty($product['compare_price']) && $product['compare_price'] > 0) {
             $product['compare_price_formatted'] = I18n::price($product['compare_price'], $currency);
             $product['discount_percent'] = round(
                 (1 - $product['price'] / $product['compare_price']) * 100

@@ -71,7 +71,7 @@ $availability = $product['stock'] > 0 ? 'https://schema.org/InStock' : 'https://
 $priceDecimal = number_format($product['price'] / 100, 2, '.', '');
 $image = $product['image'] ? '/uploads/full/' . $product['image'] : '';
 
-Security::httpHeaders();
+Security::headers();
 ?>
 <!DOCTYPE html>
 <html lang="<?= esc($lang) ?>">

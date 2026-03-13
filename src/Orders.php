@@ -56,10 +56,11 @@ class Orders {
                 throw new \RuntimeException('No items in order');
             }
 
-            // 2. Calculate shipping + tax
+            // 2. Calculate shipping + tax - coupon
             $shippingCost = $customer['shipping_cost'] ?? 0;
             $taxAmount = $customer['tax_amount'] ?? 0;
-            $total = $subtotal + $shippingCost + $taxAmount;
+            $couponDiscount = $customer['coupon_discount'] ?? 0;
+            $total = max(0, $subtotal - $couponDiscount) + $shippingCost + $taxAmount;
 
             // 3. Create order
             $orderNumber = self::generateOrderNumber();

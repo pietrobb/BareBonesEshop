@@ -190,12 +190,11 @@ class Security {
             }
         }
 
-        if (strcasecmp($user, $cfg['admin_user']) === 0 && !empty($cfg['admin_password'])
+        if ($user === $cfg['admin_user'] && !empty($cfg['admin_password'])
             && password_verify($pass, $cfg['admin_password'])) {
             if (file_exists($lockFile)) unlink($lockFile);
-            if (session_status() === PHP_SESSION_ACTIVE) {
-                session_regenerate_id(true);
-            }
+            self::sessionStart();
+            session_regenerate_id(true);
             return true;
         }
 

@@ -46,7 +46,7 @@ class Pricing {
 
             if ($rule['discount_type'] === 'percent') {
                 $bestDiscount = max($bestDiscount, $rule['discount_value']);
-            } elseif ($rule['discount_type'] === 'fixed') {
+            } elseif ($rule['discount_type'] === 'fixed' && $originalPrice > 0) {
                 $fixedPercent = ($rule['discount_value'] / $originalPrice) * 100;
                 $bestDiscount = max($bestDiscount, $fixedPercent);
             }

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 0; background: #f5f5f5; }
+        .email { max-width: 600px; margin: 0 auto; background: #fff; }
+        .email__header { background: #1a1a2e; color: #fff; padding: 24px; text-align: center; }
+        .email__body { padding: 24px; }
+        .email__footer { padding: 16px 24px; text-align: center; color: #888; font-size: 12px; border-top: 1px solid #eee; }
+        h1 { margin: 0; font-size: 20px; }
+        h2 { font-size: 16px; margin: 24px 0 12px; }
+        .highlight { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; margin: 16px 0; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
+        th { background: #f9f9f9; font-size: 13px; }
+    </style>
+</head>
+<body>
+<div class="email">
+    <div class="email__header">
+        <h1>Vasa objednavka bola odoslana</h1>
+    </div>
+    <div class="email__body">
+        <p>Dobry den, {{customer_name}},</p>
+        <p>vasa objednavka <strong>{{order_number}}</strong> bola odoslana.</p>
+
+        <div class="highlight">
+            <strong>Objednavka:</strong> {{order_number}}<br>
+            <strong>Datum odoslania:</strong> {{shipped_date}}
+        </div>
+
+        <h2>Polozky</h2>
+        <table>
+            <thead>
+                <tr><th>Produkt</th><th>Mnozstvo</th></tr>
+            </thead>
+            <tbody>
+                {{#each items}}
+                <tr><td>{{name}}</td><td>{{quantity}}</td></tr>
+                {{/each}}
+            </tbody>
+        </table>
+
+        <h2>Dorucovacia adresa</h2>
+        <p>
+            {{customer_name}}<br>
+            {{address.street}}<br>
+            {{address.zip}} {{address.city}}<br>
+            {{address.country}}
+        </p>
+    </div>
+    <div class="email__footer">
+        <p>Tento e-mail bol vygenerovany automaticky. Prosim, neodpovedajte nan.</p>
+    </div>
+</div>
+</body>
+</html>
