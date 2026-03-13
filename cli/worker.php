@@ -167,6 +167,7 @@ function handleCacheRebuild(array $payload, array $job): void {
     } elseif (!empty($payload['path'])) {
         // Single path rebuild — proactively regenerate the cache file
         $path = $payload['path'];
+        $perPage = $cfg['per_page'] ?? 24;
 
         // Determine locale and content type from path pattern, then regenerate
         if (preg_match('#^([a-z]{2})/cat/([a-z0-9-]+)/page-(\d+)\.json$#', $path, $m)) {
@@ -462,7 +463,7 @@ function handleSitemapBuild(array $payload, array $job): void {
 
 function handleCartAbandonment(array $payload, array $job): void {
     $db = Db::get();
-    $hoursThreshold = $payload['hours'] ?? 24;
+    $hoursThreshold = max(1, (int)($payload['hours'] ?? 24));
     $now = Db::isSqlite() ? "datetime('now')" : "NOW()";
     $interval = Db::isSqlite()
         ? "datetime('now', '-{$hoursThreshold} hours')"

@@ -278,7 +278,7 @@ echo "  [OK] coupon_uses\n";
 // Abandoned Carts — for recovery emails
 $db->exec("CREATE TABLE IF NOT EXISTS abandoned_carts (
     id             INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
-    session_id     TEXT NOT NULL,
+    session_id     TEXT NOT NULL UNIQUE,
     customer_email TEXT,
     cart_data      TEXT NOT NULL DEFAULT '{}',
     created_at     TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . "),

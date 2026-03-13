@@ -9,11 +9,9 @@ require_once __DIR__ . '/src/autoload.php';
 // Auth
 Security::adminAuth();
 
-// Security headers (relaxed CSP for admin inline scripts)
-header("X-Content-Type-Options: nosniff");
-header("X-Frame-Options: SAMEORIGIN");
-
-Security::sessionStart();
+// Security headers
+Security::headers();
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'");
 
 I18n::setLocale('sk');
 
@@ -711,6 +709,7 @@ function handleProductSave(): void {
 
 function handleBulkAction(): void {
     // CSRF already validated by handlePost()
+    Security::adminRequire('products.edit');
     $ids = array_map('intval', $_POST['product_ids'] ?? []);
     $action = $_POST['bulk_action'] ?? '';
     if (empty($ids) || !$action) { header('Location: admin.php?p=products'); exit; }
@@ -741,7 +740,9 @@ function handleBulkAction(): void {
             $percent = (int)filter_var($action, FILTER_SANITIZE_NUMBER_INT);
             $direction = str_contains($action, 'up') ? 1 : -1;
             $multiplier = round(1 + ($direction * abs($percent) / 100), 4);
-            $db->prepare("UPDATE products SET price = MAX(0, ROUND(price * {$multiplier})), updated_at = {$now} WHERE id IN ({$ph})")->execute($ids);
+            $stmt = $db->prepare("UPDATE products SET price = MAX(0, ROUND(price * :mult)), updated_at = {$now} WHERE id IN ({$ph})");
+            $stmt->bindValue(':mult', $multiplier);
+            $stmt->execute($ids);
             $sign = $direction > 0 ? '+' : '-';
             setFlash('ok', count($ids) . " produktov: cena {$sign}" . abs($percent) . '%.');
             break;

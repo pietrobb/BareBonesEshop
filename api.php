@@ -466,7 +466,11 @@ function apiCheckout(): array {
 
         $order = Orders::byId($orderId);
         $orderItems = Orders::items($orderId);
-        JobQueue::push('email_send', ['template' => 'confirm-order', 'to' => $email, 'order_id' => $orderId]);
+        // For COD/bank_transfer: send confirmation immediately (no webhook will fire)
+        // For Stripe: confirmation email is sent from the webhook after payment is confirmed
+        if (in_array($paymentMethod, ['cod', 'bank_transfer'], true)) {
+            JobQueue::push('email_send', ['template' => 'confirm-order', 'to' => $email, 'order_id' => $orderId]);
+        }
 
         // Admin notification
         $adminEmail = $cfg['admin_email'] ?? '';

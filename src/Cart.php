@@ -92,9 +92,10 @@ class Cart {
             }
 
             $qty = min($item['qty'], $stock);
-            if ($qty <= 0) { unset($_SESSION['cart'][$key]); continue; }
+            $available = $qty > 0;
+            if (!$available) $qty = $item['qty']; // preserve requested qty for display
 
-            $total = $price * $qty;
+            $total = $available ? $price * $qty : 0;
             $subtotal += $total;
             $images = json_decode($product['images'] ?? '[]', true);
             $currency = $product['currency'] ?? 'eur';
@@ -115,6 +116,7 @@ class Cart {
                 'total_formatted' => I18n::price($total, $currency),
                 'stock'        => $stock,
                 'currency'     => $currency,
+                'available'    => $available,
             ];
         }
 
@@ -187,14 +189,14 @@ class Cart {
             try {
                 $db = Db::get();
                 $sid = session_id();
-                // Upsert: update existing or insert new
-                $stmt = $db->prepare("SELECT id FROM abandoned_carts WHERE session_id = :sid LIMIT 1");
-                $stmt->execute([':sid' => $sid]);
-                if ($stmt->fetch()) {
-                    $db->prepare("UPDATE abandoned_carts SET customer_email = :email, cart_data = :data, reminded_at = NULL WHERE session_id = :sid")
-                       ->execute([':email' => $email, ':data' => json_encode($cart), ':sid' => $sid]);
+                // Atomic upsert — session_id has UNIQUE constraint
+                if (Db::isSqlite()) {
+                    $db->prepare("INSERT INTO abandoned_carts (session_id, customer_email, cart_data) VALUES (:sid, :email, :data)
+                        ON CONFLICT(session_id) DO UPDATE SET customer_email = :email2, cart_data = :data2, reminded_at = NULL")
+                       ->execute([':sid' => $sid, ':email' => $email, ':data' => json_encode($cart), ':email2' => $email, ':data2' => json_encode($cart)]);
                 } else {
-                    $db->prepare("INSERT INTO abandoned_carts (session_id, customer_email, cart_data) VALUES (:sid, :email, :data)")
+                    $db->prepare("INSERT INTO abandoned_carts (session_id, customer_email, cart_data) VALUES (:sid, :email, :data)
+                        ON DUPLICATE KEY UPDATE customer_email = VALUES(customer_email), cart_data = VALUES(cart_data), reminded_at = NULL")
                        ->execute([':sid' => $sid, ':email' => $email, ':data' => json_encode($cart)]);
                 }
             } catch (\Throwable $e) {
