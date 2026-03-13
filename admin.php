@@ -210,8 +210,9 @@ function pageProducts(): void {
     $params = [];
     if ($search) {
         $where .= " AND (name LIKE :q OR sku LIKE :q2)";
-        $params[':q'] = "%{$search}%";
-        $params[':q2'] = "%{$search}%";
+        $escaped = str_replace(['%', '_'], ['\\%', '\\_'], $search);
+        $params[':q'] = "%{$escaped}%";
+        $params[':q2'] = "%{$escaped}%";
     }
     if ($statusFilter) {
         $where .= " AND status = :status";

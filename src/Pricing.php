@@ -54,7 +54,7 @@ class Pricing {
 
         // Apply best discount
         if ($bestDiscount > 0) {
-            $discountedPrice = (int)round($originalPrice * (1 - $bestDiscount / 100));
+            $discountedPrice = max(0, (int)round($originalPrice * (1 - $bestDiscount / 100)));
             if ($discountedPrice < $originalPrice) {
                 $product['price'] = $discountedPrice;
                 // Only set compare_price if there isn't already a higher one
@@ -93,7 +93,7 @@ class Pricing {
      * Apply cart-level coupon code.
      * Returns [discount_amount, rule_name] or [0, null].
      */
-    public static function applyCoupon(string $code, int $subtotal): array {
+    public static function applyCoupon(string $code, int $subtotal, ?string $customerEmail = null): array {
         $cfg = self::config();
 
         foreach ($cfg['cart_rules'] ?? [] as $rule) {
@@ -103,7 +103,23 @@ class Pricing {
 
             // Check min subtotal
             if (!empty($rule['min_subtotal']) && $subtotal < $rule['min_subtotal']) {
-                return [0, null, 'Minimum order not met'];
+                return ['discount' => 0, 'name' => null, 'error' => 'Minimum order not met'];
+            }
+
+            // Check max_uses limit
+            if (!empty($rule['max_uses'])) {
+                $totalUses = self::couponUseCount($code);
+                if ($totalUses >= $rule['max_uses']) {
+                    return ['discount' => 0, 'name' => null, 'error' => 'Coupon expired'];
+                }
+            }
+
+            // Check per_customer limit
+            if (!empty($rule['per_customer']) && $customerEmail) {
+                $customerUses = self::couponUseCount($code, $customerEmail);
+                if ($customerUses >= $rule['per_customer']) {
+                    return ['discount' => 0, 'name' => null, 'error' => 'Coupon already used'];
+                }
             }
 
             if ($rule['discount_type'] === 'percent') {
@@ -114,10 +130,30 @@ class Pricing {
                 continue;
             }
 
-            return [$discount, $rule['name'], null];
+            return ['discount' => $discount, 'name' => $rule['name'], 'error' => null];
         }
 
-        return [0, null, 'Invalid coupon'];
+        return ['discount' => 0, 'name' => null, 'error' => 'Invalid coupon'];
+    }
+
+    /** Record a coupon use after successful order */
+    public static function recordCouponUse(string $code, int $orderId, string $email, int $discount): void {
+        $db = Db::get();
+        $stmt = $db->prepare("INSERT INTO coupon_uses (coupon_code, order_id, customer_email, discount) VALUES (:code, :oid, :email, :disc)");
+        $stmt->execute([':code' => strtoupper($code), ':oid' => $orderId, ':email' => $email, ':disc' => $discount]);
+    }
+
+    /** Count coupon uses (total or per customer) */
+    private static function couponUseCount(string $code, ?string $email = null): int {
+        $db = Db::get();
+        if ($email) {
+            $stmt = $db->prepare("SELECT COUNT(*) FROM coupon_uses WHERE coupon_code = :code AND customer_email = :email");
+            $stmt->execute([':code' => strtoupper($code), ':email' => $email]);
+        } else {
+            $stmt = $db->prepare("SELECT COUNT(*) FROM coupon_uses WHERE coupon_code = :code");
+            $stmt->execute([':code' => strtoupper($code)]);
+        }
+        return (int)$stmt->fetchColumn();
     }
 
     /**

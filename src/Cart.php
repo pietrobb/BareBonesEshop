@@ -138,8 +138,8 @@ class Cart {
             $productId = Security::int($item['product_id'] ?? 0);
             $variantId = isset($item['variant_id']) && $item['variant_id']
                 ? Security::int($item['variant_id']) : null;
-            $qty = max(1, Security::int($item['qty'] ?? 1));
-            if ($productId > 0) {
+            $qty = max(1, min(99, Security::int($item['qty'] ?? 1)));
+            if ($productId > 0 && Products::byId($productId)) {
                 self::add($productId, $variantId, $qty);
             }
         }

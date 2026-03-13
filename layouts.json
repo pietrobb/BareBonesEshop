@@ -72,6 +72,20 @@
                 {"block": "global/breadcrumb"},
                 {"block": "cms/cms-content"}
             ]
+        },
+
+        "404": {
+            "layout": "one-column",
+            "sections": [
+                {"block": "error/404"}
+            ]
+        },
+
+        "product-gone": {
+            "layout": "one-column",
+            "sections": [
+                {"block": "error/410"}
+            ]
         }
     }
 }

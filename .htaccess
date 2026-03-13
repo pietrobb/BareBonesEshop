@@ -4,9 +4,11 @@ RewriteEngine On
 # Level 0 Cache — serve cached JSON directly (bypass PHP)
 # ============================================================
 
-# Category listings: /api.php?action=products&cat=tricka&page=1
+# Category listings: api.php?action=products&cat=tricka&page=1
+# Extract cat and page from query string, serve cache if file exists
+RewriteCond %{QUERY_STRING} action=products&cat=([a-z0-9-]+)&page=(\d+)
 RewriteCond %{DOCUMENT_ROOT}/cache/cat/%1/page-%2.json -f
-RewriteRule ^api\.php$ cache/cat/%{QUERY_STRING_cat}/page-%{QUERY_STRING_page}.json [L,T=application/json]
+RewriteRule ^api\.php$ cache/cat/%1/page-%2.json [L,T=application/json]
 
 # Static cache files served directly
 RewriteCond %{REQUEST_URI} ^/cache/ [NC]
@@ -16,6 +18,17 @@ RewriteRule ^(.*)$ $1 [L,T=application/json]
 # ============================================================
 # SEO-friendly URLs
 # ============================================================
+
+# ============================================================
+# Multi-store URL prefixes: /de/..., /en/...
+# ============================================================
+RewriteRule ^de/product/([a-z0-9-]+)/?$ product.php?slug=$1&store=de [QSA,L]
+RewriteRule ^de/category/([a-z0-9/-]+)/?$ index.php?category=$1&store=de [QSA,L]
+RewriteRule ^de/?$ index.php?store=de [QSA,L]
+
+RewriteRule ^en/product/([a-z0-9-]+)/?$ product.php?slug=$1&store=us [QSA,L]
+RewriteRule ^en/category/([a-z0-9/-]+)/?$ index.php?category=$1&store=us [QSA,L]
+RewriteRule ^en/?$ index.php?store=us [QSA,L]
 
 # Product detail: /product/brzdovy-kotuc-predny → product.php?slug=brzdovy-kotuc-predny
 RewriteRule ^product/([a-z0-9-]+)/?$ product.php?slug=$1 [QSA,L]

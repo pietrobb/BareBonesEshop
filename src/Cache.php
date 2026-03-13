@@ -145,6 +145,9 @@ class Cache {
      * Full filesystem path for a cache key
      */
     public static function path(string $key): string {
+        if (str_contains($key, '..') || str_starts_with($key, '/')) {
+            throw new \InvalidArgumentException('Invalid cache key');
+        }
         return self::dir() . '/' . $key;
     }
 

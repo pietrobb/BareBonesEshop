@@ -31,7 +31,7 @@ echo "Database: " . ($isSqlite ? 'SQLite' : 'MySQL') . "\n";
 if ($fresh) {
     echo "FRESH mode: dropping all tables...\n";
     $tables = [
-        'processed_events', 'audit_log', 'order_items', 'orders',
+        'coupon_uses', 'processed_events', 'audit_log', 'order_items', 'orders',
         'product_vehicles', 'product_oe_numbers', 'product_specifications',
         'slug_registry', 'variants', 'product_attrs', 'products',
         'categories',
@@ -248,6 +248,20 @@ $db->exec("CREATE TABLE IF NOT EXISTS processed_events (
     created_at TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . ")
 )");
 echo "  [OK] processed_events\n";
+
+// Coupon Usage Tracking
+$db->exec("CREATE TABLE IF NOT EXISTS coupon_uses (
+    id             INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
+    coupon_code    TEXT NOT NULL,
+    order_id       INTEGER NOT NULL,
+    customer_email TEXT NOT NULL,
+    discount       INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . "),
+    FOREIGN KEY (order_id) REFERENCES orders(id)
+)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_coupon_code ON coupon_uses(coupon_code)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_coupon_email ON coupon_uses(coupon_code, customer_email)");
+echo "  [OK] coupon_uses\n";
 
 // Product Specifications — parametric search (TecDoc-style)
 $db->exec("CREATE TABLE IF NOT EXISTS product_specifications (

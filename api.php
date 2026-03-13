@@ -42,6 +42,8 @@ try {
         'cart_enriched'   => apiCartEnriched(),
         'checkout'        => apiCheckout(),
         'shipping_methods'=> apiShippingMethods(),
+        'search_suggest'  => apiSearchSuggest(),
+        'validate_coupon' => apiValidateCoupon(),
         'webhook_stripe'  => apiWebhookStripe(),
         // TecDoc / Auto Parts
         'vehicle_manufacturers' => apiVehicleManufacturers(),
@@ -170,6 +172,42 @@ function apiSearch(): array {
     }, $data['products']);
 
     return $data;
+}
+
+function apiSearchSuggest(): array {
+    $q = trim($_GET['q'] ?? '');
+    if (strlen($q) < 2) return [];
+    return Search::suggest($q, 5);
+}
+
+function apiValidateCoupon(): array {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        return ['error' => 'Method not allowed'];
+    }
+
+    if (!Security::csrfValidate()) {
+        http_response_code(403);
+        return ['error' => 'Invalid CSRF token'];
+    }
+
+    $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+    $code = trim($input['code'] ?? '');
+    $subtotal = Security::int($input['subtotal'] ?? 0);
+
+    if (!$code) return ['valid' => false, 'error' => 'Coupon code is required'];
+
+    $result = Pricing::applyCoupon($code, $subtotal);
+    if ($result['discount'] <= 0) {
+        return ['valid' => false, 'error' => 'Invalid coupon or minimum order not met'];
+    }
+
+    return [
+        'valid'    => true,
+        'code'     => $code,
+        'discount' => $result['discount'],
+        'name'     => $result['name'] ?? $code,
+    ];
 }
 
 function apiFilters(): array {
@@ -321,9 +359,16 @@ function apiCheckout(): array {
         return ['error' => 'Name and email are required'];
     }
 
-    // Validate shipping method exists for this country
+    // Capture email for abandoned cart recovery
+    Cart::setEmail($email);
+
+    // Validate shipping method exists and is available for this country
     if (!Shipping::methodConfig($shippingMethod)) {
         return ['error' => 'Invalid shipping method'];
+    }
+    $availableMethods = array_column(Shipping::availableMethods($country), 'key');
+    if (!in_array($shippingMethod, $availableMethods, true)) {
+        return ['error' => 'Shipping method not available for your country'];
     }
 
     // Validate payment method
@@ -459,8 +504,15 @@ function onChargeRefunded(array $charge): void {
     $order = $stmt->fetch();
     if (!$order) return;
 
-    if (OrderWorkflow::canTransition($order['status'], 'refunded')) {
-        OrderWorkflow::transition((int)$order['id'], 'refunded', 'Stripe refund webhook');
+    $refundedAmount = (int)($charge['amount_refunded'] ?? 0);
+    $orderTotal = (int)$order['total'];
+
+    AuditLog::log('order_refund', (int)$order['id'], '', (string)$refundedAmount,
+        "Stripe refund: {$refundedAmount}/{$orderTotal} cents");
+
+    // Only transition to refunded if fully refunded
+    if ($refundedAmount >= $orderTotal && OrderWorkflow::canTransition($order['status'], 'refunded')) {
+        OrderWorkflow::transition((int)$order['id'], 'refunded', "Stripe full refund: {$refundedAmount} cents");
     }
 }
 

@@ -40,7 +40,7 @@ class Security {
         header("Referrer-Policy: strict-origin-when-cross-origin");
         header("Permissions-Policy: camera=(), microphone=(), geolocation=()");
         if (!empty($_SERVER['HTTPS'])) {
-            header("Strict-Transport-Security: max-age=31536000; includeSubDomains");
+            header("Strict-Transport-Security: max-age=31536000; includeSubDomains; preload");
         }
         header("Content-Security-Policy: "
             . "default-src 'self'; "
@@ -167,7 +167,7 @@ class Security {
 
         if (empty($cfg['admin_password'])) {
             http_response_code(503);
-            exit('Admin not configured. Set admin_password in config.php (use password_hash()).');
+            exit('Service unavailable.');
         }
 
         $user = $_SERVER['PHP_AUTH_USER'] ?? '';
@@ -190,7 +190,7 @@ class Security {
             }
         }
 
-        if ($user === $cfg['admin_user'] && !empty($cfg['admin_password'])
+        if (strcasecmp($user, $cfg['admin_user']) === 0 && !empty($cfg['admin_password'])
             && password_verify($pass, $cfg['admin_password'])) {
             if (file_exists($lockFile)) unlink($lockFile);
             if (session_status() === PHP_SESSION_ACTIVE) {

@@ -861,17 +861,17 @@ assert_equals(1891, Pricing::tierPrice(1990, 10), 'Tier: qty 10 = 5% off');
 assert_equals(1751, Pricing::tierPrice(1990, 50), 'Tier: qty 50 = 12% off');
 
 // Coupon
-[$discount, $name, $error] = Pricing::applyCoupon('WELCOME10', 10000);
-assert_equals(1000, $discount, 'Coupon WELCOME10: 10% of 10000 = 1000');
-assert_equals('WELCOME10', $name, 'Coupon returns rule name');
+$couponResult = Pricing::applyCoupon('WELCOME10', 10000);
+assert_equals(1000, $couponResult['discount'], 'Coupon WELCOME10: 10% of 10000 = 1000');
+assert_equals('WELCOME10', $couponResult['name'], 'Coupon returns rule name');
 
 // Coupon min not met
-[$discount2, , $error2] = Pricing::applyCoupon('WELCOME10', 3000);
-assert_equals(0, $discount2, 'Coupon rejected when min subtotal not met');
+$couponResult2 = Pricing::applyCoupon('WELCOME10', 3000);
+assert_equals(0, $couponResult2['discount'], 'Coupon rejected when min subtotal not met');
 
 // Invalid coupon
-[$discount3, , $error3] = Pricing::applyCoupon('INVALID', 10000);
-assert_equals(0, $discount3, 'Invalid coupon returns 0');
+$couponResult3 = Pricing::applyCoupon('INVALID', 10000);
+assert_equals(0, $couponResult3['discount'], 'Invalid coupon returns 0');
 
 // Auto rules
 $actions = Pricing::autoCartRules(6000);
