@@ -2162,6 +2162,68 @@ if ($smokeAvailable) {
 }
 
 // ============================================================
+// \ TEST: Product Images — verify image files exist on disk
+// ============================================================
+echo "\n--- Test: Product Images ---\n";
+
+$liveDbPath = __DIR__ . '/../db/shop.sqlite';
+if (file_exists($liveDbPath)) {
+    $imgDb = new PDO('sqlite:' . $liveDbPath);
+    $imgDb->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $imgRows = $imgDb->query("SELECT id, slug, images FROM products WHERE images IS NOT NULL AND images != '[]' AND images != 'null'")->fetchAll(PDO::FETCH_ASSOC);
+
+    $totalImages = 0;
+    $missingImages = 0;
+    $missingExamples = [];
+    $baseDir = realpath(__DIR__ . '/..');
+
+    foreach ($imgRows as $row) {
+        $imgs = json_decode($row['images'], true);
+        if (!is_array($imgs)) continue;
+        foreach ($imgs as $imgPath) {
+            $totalImages++;
+            $fullPath = $baseDir . '/' . ltrim(str_replace('\\', '/', $imgPath), '/');
+            if (!file_exists($fullPath)) {
+                $missingImages++;
+                if (count($missingExamples) < 3) {
+                    $missingExamples[] = $row['slug'] . ' → ' . $imgPath;
+                }
+            }
+        }
+    }
+
+    assert_true($totalImages > 0, "Product images: {$totalImages} image references found in DB");
+    $missingPct = $totalImages > 0 ? round($missingImages / $totalImages * 100, 1) : 0;
+    assert_true($missingImages === 0, "Product images: {$missingImages}/{$totalImages} missing on disk ({$missingPct}%)");
+
+    if (!empty($missingExamples)) {
+        foreach ($missingExamples as $ex) {
+            echo "    Missing: {$ex}\n";
+        }
+    }
+
+    // Also verify via HTTP if server is running
+    if ($smokeAvailable && $totalImages > 0) {
+        // Pick a product with images and check img tags resolve
+        $sampleRow = $imgRows[0];
+        $sampleImgs = json_decode($sampleRow['images'], true);
+        if (!empty($sampleImgs[0])) {
+            $imgUrl = $smokeBaseUrl . '/' . ltrim($sampleImgs[0], '/');
+            $imgHeaders = @get_headers($imgUrl, true);
+            $imgStatus = 404;
+            if ($imgHeaders && preg_match('/\s(\d{3})/', $imgHeaders[0], $sm)) {
+                $imgStatus = (int)$sm[1];
+            }
+            assert_true($imgStatus === 200, "Product images HTTP: {$sampleRow['slug']} image returns {$imgStatus}");
+        }
+    }
+
+    $imgDb = null;
+} else {
+    echo "  [SKIP] No live database at {$liveDbPath}\n";
+}
+
+// ============================================================
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
 if ($failed > 0) {

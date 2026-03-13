@@ -30,16 +30,18 @@ if ($page === 'products' && $action === 'export') {
 
 // Role-based permission map
 $pagePermissions = [
-    'dashboard' => 'reports.view',
-    'products'  => 'products.view',
-    'product'   => 'products.edit',
-    'orders'    => 'orders.view',
-    'order'     => 'orders.view',
-    'import'    => 'import',
-    'cache'     => 'cache',
-    'audit'     => 'reports.view',
-    'pages'     => 'products.edit',
-    'page_edit' => 'products.edit',
+    'dashboard'  => 'reports.view',
+    'products'   => 'products.view',
+    'product'    => 'products.edit',
+    'orders'     => 'orders.view',
+    'order'      => 'orders.view',
+    'import'     => 'import',
+    'cache'      => 'cache',
+    'audit'      => 'reports.view',
+    'pages'      => 'products.edit',
+    'page_edit'  => 'products.edit',
+    'attributes' => 'products.edit',
+    'attribute'  => 'products.edit',
 ];
 $requiredPerm = $pagePermissions[$page] ?? 'reports.view';
 Security::adminRequire($requiredPerm);
@@ -51,17 +53,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Render page
 $title = match($page) {
-    'dashboard' => 'Dashboard',
-    'products'  => 'Produkty',
-    'product'   => isset($_GET['id']) ? 'Upraviť produkt' : 'Nový produkt',
-    'orders'    => 'Objednávky',
-    'order'     => 'Detail objednávky',
-    'import'    => 'Import',
-    'cache'     => 'Cache',
-    'audit'     => 'Audit Log',
-    'pages'     => 'CMS Stránky',
-    'page_edit' => 'Upraviť stránku',
-    default     => 'Admin',
+    'dashboard'  => 'Dashboard',
+    'products'   => 'Produkty',
+    'product'    => isset($_GET['id']) ? 'Upraviť produkt' : 'Nový produkt',
+    'orders'     => 'Objednávky',
+    'order'      => 'Detail objednávky',
+    'import'     => 'Import',
+    'cache'      => 'Cache',
+    'audit'      => 'Audit Log',
+    'pages'      => 'CMS Stránky',
+    'page_edit'  => 'Upraviť stránku',
+    'attributes' => 'Atribúty',
+    'attribute'  => isset($_GET['id']) ? 'Upraviť atribút' : 'Nový atribút',
+    default      => 'Admin',
 };
 
 ?><!DOCTYPE html>
@@ -116,6 +120,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
     <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=orders" class="<?= $page==='orders'?'active':'' ?>">Objednávky</a><?php endif; ?>
     <?php if (Security::adminCan('import')): ?><a href="admin.php?p=import" class="<?= $page==='import'?'active':'' ?>">Import CSV</a><?php endif; ?>
     <?php if (Security::adminCan('cache')): ?><a href="admin.php?p=cache" class="<?= $page==='cache'?'active':'' ?>">Cache</a><?php endif; ?>
+    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=attributes" class="<?= $page==='attributes'||$page==='attribute'?'active':'' ?>">Atribúty</a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=pages" class="<?= $page==='pages'?'active':'' ?>">CMS Stránky</a><?php endif; ?>
     <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=audit" class="<?= $page==='audit'?'active':'' ?>">Audit Log</a><?php endif; ?>
 </nav>
@@ -131,9 +136,11 @@ match($page) {
     'import'    => pageImport(),
     'cache'     => pageCache(),
     'audit'     => pageAudit(),
-    'pages'     => pageCmsPages(),
-    'page_edit' => pageCmsEdit(),
-    default     => pageDashboard(),
+    'pages'      => pageCmsPages(),
+    'page_edit'  => pageCmsEdit(),
+    'attributes' => pageAttributes(),
+    'attribute'  => pageAttribute(),
+    default      => pageDashboard(),
 };
 ?>
 </main>
@@ -315,9 +322,64 @@ function pageProducts(): void {
 }
 
 function pageProduct(): void {
+    $db = Db::get();
     $id = Security::int($_GET['id'] ?? 0);
     $product = $id ? Products::byId($id) : null;
-    $categories = Db::get()->query("SELECT id, name, path FROM categories ORDER BY path")->fetchAll();
+    $categories = $db->query("SELECT id, name, path FROM categories ORDER BY path")->fetchAll();
+
+    // Load attributes for product's category (+ all parent categories)
+    $catAttrs = [];
+    $existingSpecs = [];
+    $catId = (int)($product['category_id'] ?? 0);
+    if ($catId) {
+        $catAttrs = $db->prepare("
+            SELECT ad.id, ad.name, ad.slug, ad.type, ad.unit, ad.sort_order
+            FROM attribute_definitions ad
+            JOIN category_attributes ca ON ca.attribute_id = ad.id
+            WHERE ca.category_id = :cid
+            ORDER BY ad.sort_order, ad.name
+        ");
+        $catAttrs->execute([':cid' => $catId]);
+        $catAttrs = $catAttrs->fetchAll(PDO::FETCH_ASSOC);
+    }
+    // Load existing spec values for this product
+    if ($id) {
+        $specStmt = $db->prepare("SELECT criteria_name, criteria_value, numeric_val FROM product_specifications WHERE product_id = :pid AND lang = 'sk'");
+        $specStmt->execute([':pid' => $id]);
+        foreach ($specStmt->fetchAll(PDO::FETCH_ASSOC) as $sp) {
+            $existingSpecs[$sp['criteria_name']] = $sp;
+        }
+    }
+    // Load enum options for each attribute
+    $attrOptions = [];
+    foreach ($catAttrs as $a) {
+        if ($a['type'] === 'enum') {
+            $optStmt = $db->prepare("SELECT value FROM attribute_options WHERE attribute_id = :aid ORDER BY sort_order, value");
+            $optStmt->execute([':aid' => $a['id']]);
+            $attrOptions[$a['id']] = $optStmt->fetchAll(PDO::FETCH_COLUMN);
+        }
+    }
+    // Build JSON map: category_id => [{id, name, slug, type, unit, options}]
+    $allCatAttrs = $db->query("
+        SELECT ca.category_id, ad.id, ad.name, ad.slug, ad.type, ad.unit
+        FROM category_attributes ca
+        JOIN attribute_definitions ad ON ad.id = ca.attribute_id
+        ORDER BY ad.sort_order, ad.name
+    ")->fetchAll(PDO::FETCH_ASSOC);
+    $catAttrMap = [];
+    foreach ($allCatAttrs as $row) {
+        $entry = ['id' => (int)$row['id'], 'name' => $row['name'], 'slug' => $row['slug'], 'type' => $row['type'], 'unit' => $row['unit']];
+        if ($row['type'] === 'enum') {
+            $entry['options'] = $attrOptions[$row['id']] ?? [];
+            if (empty($entry['options'])) {
+                $optStmt = $db->prepare("SELECT value FROM attribute_options WHERE attribute_id = :aid ORDER BY sort_order, value");
+                $optStmt->execute([':aid' => $row['id']]);
+                $entry['options'] = $optStmt->fetchAll(PDO::FETCH_COLUMN);
+                $attrOptions[$row['id']] = $entry['options'];
+            }
+        }
+        $catAttrMap[$row['category_id']][] = $entry;
+    }
     ?>
     <h1><?= $product ? 'Upraviť: ' . esc($product['name']) : 'Nový produkt' ?></h1>
     <div class="card">
@@ -327,7 +389,7 @@ function pageProduct(): void {
             <div class="form-row"><label>Názov</label><input name="name" value="<?= esc($product['name'] ?? '') ?>" required style="width:100%"></div>
             <div class="form-row"><label>Slug</label><input name="slug" value="<?= esc($product['slug'] ?? '') ?>" required></div>
             <div class="form-row"><label>Kategória</label>
-                <select name="category_id" required>
+                <select name="category_id" id="category-select" required onchange="updateAttrFields()">
                     <?php foreach ($categories as $cat): ?>
                     <option value="<?= $cat['id'] ?>" <?= ($product['category_id'] ?? 0) == $cat['id'] ? 'selected' : '' ?>><?= esc($cat['path'] ?: $cat['name']) ?></option>
                     <?php endforeach; ?>
@@ -359,12 +421,85 @@ function pageProduct(): void {
             <div class="form-row"><label>Obrazky (URL, 1 na riadok)</label><textarea name="images" rows="4" style="width:100%"><?= esc(implode("\n", json_decode($product['images'] ?? '[]', true) ?: [])) ?></textarea></div>
             <div class="form-row"><label>Nahrat obrazok</label><input type="file" name="image_upload" accept="image/*"></div>
             <div class="form-row"><label>Hmotnosť (g)</label><input type="number" name="weight_g" value="<?= (int)($product['weight_g'] ?? 0) ?>"></div>
-            <button type="submit" class="btn btn-primary">Uložiť</button>
-            <?php if ($product): ?>
-                <a href="admin.php?p=products" class="btn">Späť</a>
-            <?php endif; ?>
+
+            <div id="attr-section" style="border-top:2px solid #e2e8f0;margin-top:1rem;padding-top:1rem">
+                <h3 style="margin-bottom:.75rem">Atribúty</h3>
+                <div id="attr-fields">
+                    <?php foreach ($catAttrs as $a):
+                        $specKey = $a['name'];
+                        $curVal = $existingSpecs[$specKey]['criteria_value'] ?? '';
+                        $curNum = $existingSpecs[$specKey]['numeric_val'] ?? '';
+                    ?>
+                    <div class="form-row">
+                        <label><?= esc($a['name']) ?><?= $a['unit'] ? ' (' . esc($a['unit']) . ')' : '' ?></label>
+                        <?php if ($a['type'] === 'enum'): ?>
+                        <select name="attr[<?= esc($a['name']) ?>]">
+                            <option value="">— nevybrané —</option>
+                            <?php foreach ($attrOptions[$a['id']] ?? [] as $opt): ?>
+                            <option value="<?= esc($opt) ?>" <?= $curVal === $opt ? 'selected' : '' ?>><?= esc($opt) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <?php elseif ($a['type'] === 'number'): ?>
+                        <input type="number" step="any" name="attr[<?= esc($a['name']) ?>]" value="<?= esc($curNum ?: $curVal) ?>" placeholder="<?= esc($a['unit'] ?: 'číslo') ?>">
+                        <?php elseif ($a['type'] === 'boolean'): ?>
+                        <select name="attr[<?= esc($a['name']) ?>]">
+                            <option value="">— nevybrané —</option>
+                            <option value="Áno" <?= $curVal === 'Áno' ? 'selected' : '' ?>>Áno</option>
+                            <option value="Nie" <?= $curVal === 'Nie' ? 'selected' : '' ?>>Nie</option>
+                        </select>
+                        <?php endif; ?>
+                    </div>
+                    <?php endforeach; ?>
+                    <?php if (empty($catAttrs)): ?>
+                    <p class="muted" style="color:#64748b;font-size:.85rem">Pre túto kategóriu nie sú definované atribúty. <a href="admin.php?p=attributes">Spravovať atribúty</a></p>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <div style="margin-top:1rem">
+                <button type="submit" class="btn btn-primary">Uložiť</button>
+                <?php if ($product): ?>
+                    <a href="admin.php?p=products" class="btn">Späť</a>
+                <?php endif; ?>
+            </div>
         </form>
     </div>
+    <script>
+    var catAttrMap = <?= json_encode($catAttrMap, JSON_UNESCAPED_UNICODE) ?>;
+    var existingSpecs = <?= json_encode($existingSpecs, JSON_UNESCAPED_UNICODE) ?>;
+    function updateAttrFields() {
+        var catId = document.getElementById('category-select').value;
+        var attrs = catAttrMap[catId] || [];
+        var container = document.getElementById('attr-fields');
+        if (!attrs.length) {
+            container.innerHTML = '<p class="muted" style="color:#64748b;font-size:.85rem">Pre túto kategóriu nie sú definované atribúty. <a href="admin.php?p=attributes">Spravovať atribúty</a></p>';
+            return;
+        }
+        var html = '';
+        attrs.forEach(function(a) {
+            var spec = existingSpecs[a.name] || {};
+            var curVal = spec.criteria_value || '';
+            var curNum = spec.numeric_val || '';
+            html += '<div class="form-row"><label>' + escHtml(a.name) + (a.unit ? ' (' + escHtml(a.unit) + ')' : '') + '</label>';
+            if (a.type === 'enum') {
+                html += '<select name="attr[' + escHtml(a.name) + ']"><option value="">— nevybrané —</option>';
+                (a.options || []).forEach(function(o) {
+                    html += '<option value="' + escHtml(o) + '"' + (curVal === o ? ' selected' : '') + '>' + escHtml(o) + '</option>';
+                });
+                html += '</select>';
+            } else if (a.type === 'number') {
+                html += '<input type="number" step="any" name="attr[' + escHtml(a.name) + ']" value="' + escHtml(curNum || curVal) + '" placeholder="' + escHtml(a.unit || 'číslo') + '">';
+            } else if (a.type === 'boolean') {
+                html += '<select name="attr[' + escHtml(a.name) + ']"><option value="">— nevybrané —</option>';
+                html += '<option value="Áno"' + (curVal === 'Áno' ? ' selected' : '') + '>Áno</option>';
+                html += '<option value="Nie"' + (curVal === 'Nie' ? ' selected' : '') + '>Nie</option></select>';
+            }
+            html += '</div>';
+        });
+        container.innerHTML = html;
+    }
+    function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    </script>
     <?php
 }
 
@@ -723,6 +858,8 @@ function handlePost(string $page, string $action): void {
         'cache:rebuild'  => handleCacheRebuild(),
         'page_edit:save' => handleCmsPageSave(),
         'pages:delete'   => handleCmsPageDelete(),
+        'attribute:save' => handleAttributeSave(),
+        'attributes:delete' => handleAttributeDelete(),
         default          => null,
     };
 }
@@ -812,6 +949,46 @@ function handleProductSave(): void {
         $id = (int)$db->lastInsertId();
         AuditLog::log('product', $id, null, $data, 'Admin create');
         setFlash('ok', 'Produkt vytvorený.');
+    }
+
+    // Save attribute values to product_specifications
+    $attrValues = $_POST['attr'] ?? [];
+    if (!empty($attrValues) && $id) {
+        // Get attribute definitions for mapping name → type/unit
+        $catId = Security::int($_POST['category_id'] ?? 0);
+        $defStmt = $db->prepare("
+            SELECT ad.name, ad.type, ad.unit
+            FROM attribute_definitions ad
+            JOIN category_attributes ca ON ca.attribute_id = ad.id
+            WHERE ca.category_id = :cid
+        ");
+        $defStmt->execute([':cid' => $catId]);
+        $attrDefs = [];
+        foreach ($defStmt->fetchAll(PDO::FETCH_ASSOC) as $d) {
+            $attrDefs[$d['name']] = $d;
+        }
+
+        // Delete old attribute-based specs for this product (only those matching defined attributes)
+        foreach ($attrDefs as $aName => $aDef) {
+            $db->prepare("DELETE FROM product_specifications WHERE product_id = :pid AND criteria_name = :name AND lang = 'sk'")
+               ->execute([':pid' => $id, ':name' => $aName]);
+        }
+
+        // Insert new values
+        $specIns = $db->prepare("INSERT INTO product_specifications (product_id, criteria_name, criteria_value, numeric_val, lang) VALUES (:pid, :name, :val, :num, 'sk')");
+        foreach ($attrValues as $name => $val) {
+            $val = trim($val);
+            if ($val === '' || !isset($attrDefs[$name])) continue;
+            $def = $attrDefs[$name];
+            $numericVal = null;
+            if ($def['type'] === 'number') {
+                $numericVal = (float)$val;
+                $displayVal = $val . ($def['unit'] ? ' ' . $def['unit'] : '');
+            } else {
+                $displayVal = $val;
+            }
+            $specIns->execute([':pid' => $id, ':name' => $name, ':val' => $displayVal, ':num' => $numericVal]);
+        }
     }
 
     header("Location: admin.php?p=product&id={$id}");
@@ -957,6 +1134,212 @@ function handleCacheRebuild(): void {
     JobQueue::push('cache_rebuild', ['scope' => 'full'], 1);
     setFlash('ok', 'Cache rebuild job naplánovaný.');
     header("Location: admin.php?p=cache");
+    exit;
+}
+
+// ============================================================
+// Attributes CRUD
+// ============================================================
+
+function pageAttributes(): void {
+    $db = Db::get();
+    $attrs = $db->query("
+        SELECT ad.*, GROUP_CONCAT(c.name, ', ') as category_names
+        FROM attribute_definitions ad
+        LEFT JOIN category_attributes ca ON ca.attribute_id = ad.id
+        LEFT JOIN categories c ON c.id = ca.category_id
+        GROUP BY ad.id
+        ORDER BY ad.sort_order, ad.name
+    ")->fetchAll(PDO::FETCH_ASSOC);
+    ?>
+    <h1>Atribúty</h1>
+    <p style="margin-bottom:1rem"><a href="admin.php?p=attribute" class="btn btn-primary">Nový atribút</a></p>
+    <div class="card">
+        <table>
+            <tr><th>Názov</th><th>Slug</th><th>Typ</th><th>Jednotka</th><th>Kategórie</th><th>Poradie</th><th></th></tr>
+            <?php foreach ($attrs as $a): ?>
+            <tr>
+                <td><a href="admin.php?p=attribute&id=<?= (int)$a['id'] ?>"><?= esc($a['name']) ?></a></td>
+                <td><code><?= esc($a['slug']) ?></code></td>
+                <td><?= esc($a['type']) ?></td>
+                <td><?= esc($a['unit'] ?: '—') ?></td>
+                <td class="muted"><?= esc($a['category_names'] ?: '—') ?></td>
+                <td><?= (int)$a['sort_order'] ?></td>
+                <td>
+                    <a href="admin.php?p=attribute&id=<?= (int)$a['id'] ?>" class="btn btn-sm">Upraviť</a>
+                    <form method="post" action="admin.php?p=attributes&action=delete" style="display:inline" onsubmit="return confirm('Naozaj zmazať?')">
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                        <input type="hidden" name="attr_id" value="<?= (int)$a['id'] ?>">
+                        <button class="btn btn-sm btn-danger" type="submit">Zmazať</button>
+                    </form>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+            <?php if (empty($attrs)): ?>
+            <tr><td colspan="7" style="text-align:center;color:#64748b">Zatiaľ žiadne atribúty.</td></tr>
+            <?php endif; ?>
+        </table>
+    </div>
+    <?php
+}
+
+function pageAttribute(): void {
+    $db = Db::get();
+    $id = Security::int($_GET['id'] ?? 0);
+    $attr = null;
+    $options = [];
+    $assignedCats = [];
+
+    if ($id) {
+        $stmt = $db->prepare("SELECT * FROM attribute_definitions WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        $attr = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        $opts = $db->prepare("SELECT * FROM attribute_options WHERE attribute_id = :aid ORDER BY sort_order, value");
+        $opts->execute([':aid' => $id]);
+        $options = $opts->fetchAll(PDO::FETCH_ASSOC);
+
+        $cats = $db->prepare("SELECT category_id FROM category_attributes WHERE attribute_id = :aid");
+        $cats->execute([':aid' => $id]);
+        $assignedCats = $cats->fetchAll(PDO::FETCH_COLUMN);
+    }
+
+    $categories = $db->query("SELECT id, name, path FROM categories ORDER BY path")->fetchAll(PDO::FETCH_ASSOC);
+    $types = ['enum' => 'Enum (zoznam hodnôt)', 'number' => 'Číslo', 'boolean' => 'Áno/Nie'];
+    ?>
+    <h1><?= $attr ? 'Upraviť: ' . esc($attr['name']) : 'Nový atribút' ?></h1>
+    <div class="card">
+        <form method="post" action="admin.php?p=attribute&action=save<?= $attr ? '&id=' . $attr['id'] : '' ?>">
+            <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+            <div class="form-row"><label>Názov</label><input name="name" value="<?= esc($attr['name'] ?? '') ?>" required style="width:100%"></div>
+            <div class="form-row"><label>Slug</label><input name="slug" value="<?= esc($attr['slug'] ?? '') ?>" required placeholder="napr. vykon-kw"></div>
+            <div class="form-row"><label>Typ</label>
+                <select name="type" id="attr-type" onchange="toggleOptions()">
+                    <?php foreach ($types as $val => $label): ?>
+                    <option value="<?= $val ?>" <?= ($attr['type'] ?? 'enum') === $val ? 'selected' : '' ?>><?= esc($label) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="form-row"><label>Jednotka</label><input name="unit" value="<?= esc($attr['unit'] ?? '') ?>" placeholder="napr. kW, kg, cm"></div>
+            <div class="form-row"><label>Poradie</label><input type="number" name="sort_order" value="<?= (int)($attr['sort_order'] ?? 0) ?>"></div>
+
+            <div id="options-section">
+                <h3 style="margin:1rem 0 .5rem">Hodnoty (pre enum)</h3>
+                <div id="options-list">
+                    <?php foreach ($options as $i => $opt): ?>
+                    <div class="form-row" style="display:flex;gap:.5rem;align-items:center">
+                        <input name="options[]" value="<?= esc($opt['value']) ?>" style="flex:1" placeholder="Hodnota">
+                        <input type="number" name="option_order[]" value="<?= (int)$opt['sort_order'] ?>" style="width:60px" placeholder="Poradie">
+                        <button type="button" onclick="this.parentElement.remove()" class="btn btn-sm btn-danger">×</button>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                <button type="button" onclick="addOption()" class="btn btn-sm" style="margin-top:.5rem">+ Pridať hodnotu</button>
+            </div>
+
+            <h3 style="margin:1rem 0 .5rem">Priradiť ku kategóriám</h3>
+            <div style="max-height:300px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:6px;padding:.5rem">
+                <?php foreach ($categories as $cat): ?>
+                <label style="display:block;padding:2px 4px;cursor:pointer">
+                    <input type="checkbox" name="category_ids[]" value="<?= (int)$cat['id'] ?>" <?= in_array($cat['id'], $assignedCats) ? 'checked' : '' ?>>
+                    <?= esc($cat['path'] ?: $cat['name']) ?>
+                </label>
+                <?php endforeach; ?>
+            </div>
+
+            <div style="margin-top:1rem">
+                <button type="submit" class="btn btn-primary">Uložiť</button>
+                <a href="admin.php?p=attributes" class="btn" style="margin-left:.5rem">Späť</a>
+            </div>
+        </form>
+    </div>
+    <script>
+    function toggleOptions() {
+        document.getElementById('options-section').style.display = document.getElementById('attr-type').value === 'enum' ? '' : 'none';
+    }
+    function addOption() {
+        var div = document.createElement('div');
+        div.className = 'form-row';
+        div.style.cssText = 'display:flex;gap:.5rem;align-items:center';
+        div.innerHTML = '<input name="options[]" style="flex:1" placeholder="Hodnota">' +
+            '<input type="number" name="option_order[]" style="width:60px" placeholder="Poradie" value="0">' +
+            '<button type="button" onclick="this.parentElement.remove()" class="btn btn-sm btn-danger">×</button>';
+        document.getElementById('options-list').appendChild(div);
+    }
+    toggleOptions();
+    </script>
+    <?php
+}
+
+function handleAttributeSave(): void {
+    $db = Db::get();
+    $id = Security::int($_GET['id'] ?? 0);
+    $name = trim($_POST['name'] ?? '');
+    $slug = Security::slug($_POST['slug'] ?? $name);
+    $type = in_array($_POST['type'] ?? '', ['enum', 'number', 'boolean']) ? $_POST['type'] : 'enum';
+    $unit = trim($_POST['unit'] ?? '');
+    $sortOrder = Security::int($_POST['sort_order'] ?? 0);
+
+    if (!$name || !$slug) {
+        setFlash('err', 'Názov a slug sú povinné.');
+        header("Location: admin.php?p=attribute" . ($id ? "&id={$id}" : ''));
+        exit;
+    }
+
+    // Check slug uniqueness
+    $check = $db->prepare("SELECT id FROM attribute_definitions WHERE slug = :slug AND id != :id");
+    $check->execute([':slug' => $slug, ':id' => $id ?: -1]);
+    if ($check->fetch()) {
+        setFlash('err', 'Slug "' . esc($slug) . '" už existuje.');
+        header("Location: admin.php?p=attribute" . ($id ? "&id={$id}" : ''));
+        exit;
+    }
+
+    if ($id) {
+        $db->prepare("UPDATE attribute_definitions SET name = :name, slug = :slug, type = :type, unit = :unit, sort_order = :sort WHERE id = :id")
+           ->execute([':name' => $name, ':slug' => $slug, ':type' => $type, ':unit' => $unit, ':sort' => $sortOrder, ':id' => $id]);
+    } else {
+        $db->prepare("INSERT INTO attribute_definitions (name, slug, type, unit, sort_order) VALUES (:name, :slug, :type, :unit, :sort)")
+           ->execute([':name' => $name, ':slug' => $slug, ':type' => $type, ':unit' => $unit, ':sort' => $sortOrder]);
+        $id = (int)$db->lastInsertId();
+    }
+
+    // Save enum options
+    $db->prepare("DELETE FROM attribute_options WHERE attribute_id = :aid")->execute([':aid' => $id]);
+    if ($type === 'enum') {
+        $optValues = $_POST['options'] ?? [];
+        $optOrders = $_POST['option_order'] ?? [];
+        $ins = $db->prepare("INSERT INTO attribute_options (attribute_id, value, sort_order) VALUES (:aid, :val, :sort)");
+        foreach ($optValues as $i => $val) {
+            $val = trim($val);
+            if ($val === '') continue;
+            $ins->execute([':aid' => $id, ':val' => $val, ':sort' => (int)($optOrders[$i] ?? 0)]);
+        }
+    }
+
+    // Save category assignments
+    $db->prepare("DELETE FROM category_attributes WHERE attribute_id = :aid")->execute([':aid' => $id]);
+    $catIds = array_map('intval', $_POST['category_ids'] ?? []);
+    $catIns = $db->prepare("INSERT INTO category_attributes (category_id, attribute_id) VALUES (:cid, :aid)");
+    foreach ($catIds as $cid) {
+        if ($cid > 0) $catIns->execute([':cid' => $cid, ':aid' => $id]);
+    }
+
+    setFlash('ok', 'Atribút uložený.');
+    header("Location: admin.php?p=attribute&id={$id}");
+    exit;
+}
+
+function handleAttributeDelete(): void {
+    $id = Security::int($_POST['attr_id'] ?? 0);
+    if ($id) {
+        $db = Db::get();
+        $db->prepare("DELETE FROM attribute_options WHERE attribute_id = :id")->execute([':id' => $id]);
+        $db->prepare("DELETE FROM category_attributes WHERE attribute_id = :id")->execute([':id' => $id]);
+        $db->prepare("DELETE FROM attribute_definitions WHERE id = :id")->execute([':id' => $id]);
+        setFlash('ok', 'Atribút zmazaný.');
+    }
+    header('Location: admin.php?p=attributes');
     exit;
 }
 

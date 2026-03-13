@@ -247,12 +247,19 @@ class TecDoc {
      * This is the KEY feature: each part type (genart/category) has different
      * relevant criteria. We discover them dynamically from the data.
      */
-    public static function specFilterValues(int $categoryId, string $lang = 'sk', array $activeFilters = [], ?int $priceMin = null, ?int $priceMax = null): array {
+    public static function specFilterValues(int|array $categoryId, string $lang = 'sk', array $activeFilters = [], ?int $priceMin = null, ?int $priceMax = null): array {
         $db = Db::get();
 
         // Build base product set (respecting active filters)
-        $baseWhere = "p.category_id = :cat AND p.status = 'active'";
-        $baseParams = [':cat' => $categoryId];
+        if (is_array($categoryId)) {
+            $catIds = array_map('intval', $categoryId);
+            $catIn = implode(',', $catIds);
+            $baseWhere = "p.category_id IN ({$catIn}) AND p.status = 'active'";
+            $baseParams = [];
+        } else {
+            $baseWhere = "p.category_id = :cat AND p.status = 'active'";
+            $baseParams = [':cat' => $categoryId];
+        }
 
         if ($priceMin !== null) {
             $baseWhere .= " AND p.price >= :pmin";
@@ -342,20 +349,28 @@ class TecDoc {
      * $specFilters = ['Strana montáže' => ['L', 'R'], 'Materiál' => ['bavlna']]
      */
     public static function parametricSearch(
-        int $categoryId,
+        int|array $categoryId,
         int $page = 1,
         int $perPage = 24,
         string $sort = 'price_asc',
         array $specFilters = [],
         ?int $priceMin = null,
         ?int $priceMax = null,
-        string $lang = 'sk'
+        string $lang = 'sk',
+        array $rangeFilters = []
     ): array {
         $db = Db::get();
         $offset = ($page - 1) * $perPage;
 
-        $where = "p.category_id = :cat AND p.status = 'active'";
-        $params = [':cat' => $categoryId];
+        if (is_array($categoryId)) {
+            $catIds = array_map('intval', $categoryId);
+            $catIn = implode(',', $catIds);
+            $where = "p.category_id IN ({$catIn}) AND p.status = 'active'";
+            $params = [];
+        } else {
+            $where = "p.category_id = :cat AND p.status = 'active'";
+            $params = [':cat' => $categoryId];
+        }
 
         if ($priceMin !== null) {
             $where .= " AND p.price >= :pmin";
@@ -389,6 +404,33 @@ class TecDoc {
                   AND ps.lang = {$langKey}
             )";
             $filterIdx++;
+        }
+
+        // Apply numeric range filters (e.g., kW 3-9)
+        $rangeIdx = 0;
+        foreach ($rangeFilters as $criterionName => $range) {
+            $cnKey = ":rcn_{$rangeIdx}";
+            $langKey = ":rlang_{$rangeIdx}";
+            $params[$cnKey] = $criterionName;
+            $params[$langKey] = $lang;
+            $rangeCond = "ps.criteria_name = {$cnKey} AND ps.lang = {$langKey}";
+
+            if (isset($range['min'])) {
+                $minKey = ":rmin_{$rangeIdx}";
+                $params[$minKey] = $range['min'];
+                $rangeCond .= " AND ps.numeric_val >= {$minKey}";
+            }
+            if (isset($range['max'])) {
+                $maxKey = ":rmax_{$rangeIdx}";
+                $params[$maxKey] = $range['max'];
+                $rangeCond .= " AND ps.numeric_val <= {$maxKey}";
+            }
+
+            $where .= " AND p.id IN (
+                SELECT ps.product_id FROM product_specifications ps
+                WHERE {$rangeCond}
+            )";
+            $rangeIdx++;
         }
 
         // Sort

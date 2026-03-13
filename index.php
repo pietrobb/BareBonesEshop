@@ -319,6 +319,7 @@ $ui = [
         'specs'=>'Špecifikácie','oe_numbers'=>'OE čísla','vehicles_tab'=>'Vozidlá',
         'no_specs'=>'Žiadne špecifikácie.','no_oe'=>'Žiadne OE čísla.','no_vehicles'=>'Žiadne vozidlá.',
         'no_results'=>'Žiadne výsledky.','no_parts_filter'=>'Žiadne diely pre zvolené filtre.',
+        'subcategories'=>'Podkategórie',
         'price'=>'Cena','sort'=>'Zoradiť:','filter'=>'Filtrovať','clear_filter'=>'Zrušiť',
         'price_asc'=>'Cena ↑','price_desc'=>'Cena ↓','name_asc'=>'Názov A-Z','name_desc'=>'Názov Z-A','newest'=>'Najnovšie',
         'cart_title'=>'Nákupný košík','cart_empty'=>'Váš košík je prázdny','continue_shopping'=>'Pokračovať v nákupe',
@@ -349,6 +350,7 @@ $ui = [
         'specs'=>'Specifications','oe_numbers'=>'OE Numbers','vehicles_tab'=>'Vehicles',
         'no_specs'=>'No specifications.','no_oe'=>'No OE numbers.','no_vehicles'=>'No vehicles.',
         'no_results'=>'No results.','no_parts_filter'=>'No parts for selected filters.',
+        'subcategories'=>'Subcategories',
         'price'=>'Price','sort'=>'Sort:','filter'=>'Filter','clear_filter'=>'Clear',
         'price_asc'=>'Price ↑','price_desc'=>'Price ↓','name_asc'=>'Name A-Z','name_desc'=>'Name Z-A','newest'=>'Newest',
         'cart_title'=>'Shopping Cart','cart_empty'=>'Your cart is empty','continue_shopping'=>'Continue Shopping',
@@ -379,6 +381,7 @@ $ui = [
         'specs'=>'Spezifikationen','oe_numbers'=>'OE-Nummern','vehicles_tab'=>'Fahrzeuge',
         'no_specs'=>'Keine Spezifikationen.','no_oe'=>'Keine OE-Nummern.','no_vehicles'=>'Keine Fahrzeuge.',
         'no_results'=>'Keine Ergebnisse.','no_parts_filter'=>'Keine Teile für gewählte Filter.',
+        'subcategories'=>'Unterkategorien',
         'price'=>'Preis','sort'=>'Sortieren:','filter'=>'Filtern','clear_filter'=>'Zurücksetzen',
         'price_asc'=>'Preis ↑','price_desc'=>'Preis ↓','name_asc'=>'Name A-Z','name_desc'=>'Name Z-A','newest'=>'Neueste',
         'cart_title'=>'Warenkorb','cart_empty'=>'Ihr Warenkorb ist leer','continue_shopping'=>'Weiter einkaufen',
@@ -935,28 +938,36 @@ function renderCategory(array $cat): string {
     foreach ($bc as $b) echo ' &rsaquo; <a href="?page=category&slug=' . $e($b['slug']) . '">' . $e($catName($b['name'])) . '</a>';
     echo '</div>';
 
-    // If root category (has children): show child categories
+    // Subcategories — used for sidebar filters on parent categories
     $children = Categories::children($catId);
-    if (!empty($children)) {
-        echo '<h1 style="margin-bottom:16px">' . $e($catName($cat['name'])) . '</h1>';
-        echo '<div class="grid grid-3">';
-        usort($children, fn($a,$b) => (int)$b['product_count'] - (int)$a['product_count']);
-        foreach ($children as $ch) {
-            if ((int)$ch['product_count'] === 0) continue;
-            echo '<a href="?page=category&slug=' . $e($ch['slug']) . '" class="cat-card">';
-            echo '<span style="flex:1">' . $e($catName($ch['name'])) . '</span>';
-            echo '<span class="count">' . (int)$ch['product_count'] . '</span></a>';
-        }
-        echo '</div>';
-        return ob_get_clean();
+    $hasChildren = !empty($children);
+
+    // Get all descendant category IDs for product search
+    $allCatIds = Categories::descendantIds($catId);
+
+    // Parse subcategory filter from URL
+    $selectedSubcats = [];
+    if ($hasChildren && !empty($_GET['subcat']) && is_array($_GET['subcat'])) {
+        $selectedSubcats = array_map('intval', $_GET['subcat']);
     }
 
-    // Leaf category: parametric search with filters
+    // If subcategories selected, narrow search to their descendants only
+    if (!empty($selectedSubcats)) {
+        $searchCatIds = [];
+        foreach ($selectedSubcats as $scId) {
+            $searchCatIds = array_merge($searchCatIds, Categories::descendantIds($scId));
+        }
+        $searchCatIds = array_unique($searchCatIds);
+    } else {
+        $searchCatIds = $allCatIds;
+    }
+
+    // Parametric search with filters (works for both parent and leaf categories)
     $pg = max(1, Security::int($_GET['pg'] ?? 1));
     $sort = Security::clean($_GET['sort'] ?? 'price_asc');
     $searchLang = $lang;
 
-    // Parse spec filters from URL: spec[CriteriaName]=value or spec[CriteriaName][]=val1&spec[CriteriaName][]=val2
+    // Parse spec filters from URL
     $specFilters = [];
     if (!empty($_GET['spec']) && is_array($_GET['spec'])) {
         foreach ($_GET['spec'] as $name => $val) {
@@ -972,19 +983,39 @@ function renderCategory(array $cat): string {
     $priceMin = !empty($_GET['pmin']) ? Security::int($_GET['pmin']) * 100 : null;
     $priceMax = !empty($_GET['pmax']) ? Security::int($_GET['pmax']) * 100 : null;
 
-    $result = TecDoc::parametricSearch($catId, $pg, 24, $sort, $specFilters, $priceMin, $priceMax, $searchLang);
+    // Parse numeric range filters: rmin[Výkon (kW)]=3&rmax[Výkon (kW)]=9
+    $rangeFilters = [];
+    if (!empty($_GET['rmin']) && is_array($_GET['rmin'])) {
+        foreach ($_GET['rmin'] as $name => $val) {
+            $name = Security::clean($name);
+            if ($val !== '') $rangeFilters[$name]['min'] = (float)$val;
+        }
+    }
+    if (!empty($_GET['rmax']) && is_array($_GET['rmax'])) {
+        foreach ($_GET['rmax'] as $name => $val) {
+            $name = Security::clean($name);
+            if ($val !== '') $rangeFilters[$name]['max'] = (float)$val;
+        }
+    }
+
+    $result = TecDoc::parametricSearch($searchCatIds, $pg, 24, $sort, $specFilters, $priceMin, $priceMax, $searchLang, $rangeFilters);
     $filters = $result['filters'];
 
     echo '<h1 style="margin-bottom:4px">' . $e($catName($cat['name'])) . '</h1>';
     echo '<div class="sort-bar"><span class="total">' . number_format($result['total']) . ' ' . $t('parts_count') . '</span>';
     echo '<form method="get" style="display:flex;gap:8px;align-items:center">';
     echo '<input type="hidden" name="page" value="category"><input type="hidden" name="slug" value="' . $e($cat['slug']) . '">';
-    // Preserve spec filters in sort form
+    // Preserve subcategory + spec filters in sort form
+    foreach ($selectedSubcats as $scId) echo '<input type="hidden" name="subcat[]" value="' . (int)$scId . '">';
     foreach ($specFilters as $fn => $fvs) {
         foreach ($fvs as $fv) echo '<input type="hidden" name="spec[' . $e($fn) . '][]" value="' . $e($fv) . '">';
     }
-    if ($priceMin) echo '<input type="hidden" name="pmin" value="' . $priceMin . '">';
-    if ($priceMax) echo '<input type="hidden" name="pmax" value="' . $priceMax . '">';
+    if ($priceMin) echo '<input type="hidden" name="pmin" value="' . (int)($priceMin / 100) . '">';
+    if ($priceMax) echo '<input type="hidden" name="pmax" value="' . (int)($priceMax / 100) . '">';
+    foreach ($rangeFilters as $fn => $rv) {
+        if (isset($rv['min'])) echo '<input type="hidden" name="rmin[' . $e($fn) . ']" value="' . $e((string)$rv['min']) . '">';
+        if (isset($rv['max'])) echo '<input type="hidden" name="rmax[' . $e($fn) . ']" value="' . $e((string)$rv['max']) . '">';
+    }
     echo '<label>' . $t('sort') . '</label><select name="sort" onchange="this.form.submit()">';
     foreach (['price_asc'=>$t('price_asc'),'price_desc'=>$t('price_desc'),'name_asc'=>$t('name_asc'),'name_desc'=>$t('name_desc'),'newest'=>$t('newest')] as $k=>$v) {
         echo '<option value="' . $k . '"' . ($sort===$k?' selected':'') . '>' . $v . '</option>';
@@ -998,7 +1029,23 @@ function renderCategory(array $cat): string {
     echo '<input type="hidden" name="page" value="category"><input type="hidden" name="slug" value="' . $e($cat['slug']) . '">';
     echo '<input type="hidden" name="sort" value="' . $e($sort) . '">';
 
-    $hasActiveFilters = !empty($specFilters) || $priceMin || $priceMax;
+    $hasActiveFilters = !empty($specFilters) || $priceMin || $priceMax || !empty($selectedSubcats) || !empty($rangeFilters);
+
+    // Subcategory filter (only for parent categories)
+    if ($hasChildren) {
+        $childrenWithProducts = array_filter($children, fn($ch) => (int)$ch['product_count'] > 0);
+        if (!empty($childrenWithProducts)) {
+            usort($childrenWithProducts, fn($a,$b) => (int)$b['product_count'] - (int)$a['product_count']);
+            echo '<h3>' . $t('subcategories');
+            if (!empty($selectedSubcats)) echo ' <span style="color:#cc3872">●</span>';
+            echo '</h3>';
+            foreach ($childrenWithProducts as $ch) {
+                $checked = in_array((int)$ch['id'], $selectedSubcats) ? ' checked' : '';
+                echo '<label><input type="checkbox" name="subcat[]" value="' . (int)$ch['id'] . '"' . $checked . '> ';
+                echo $e($catName($ch['name'])) . ' <span class="cnt">(' . (int)$ch['product_count'] . ')</span></label>';
+            }
+        }
+    }
 
     // Price range
     echo '<h3>' . $t('price') . '</h3>';
@@ -1012,13 +1059,40 @@ function renderCategory(array $cat): string {
 
     foreach ($filters as $critName => $values) {
         $activeVals = $specFilters[$critName] ?? [];
+        // Detect numeric filter: all values have numeric_val and there are many distinct values
+        $allNumeric = count($values) > 5 && !empty($values[0]['numeric']);
+        if ($allNumeric) {
+            foreach ($values as $v) { if ($v['numeric'] === null) { $allNumeric = false; break; } }
+        }
+
         echo '<h3>' . $e($critName);
-        if (!empty($activeVals)) echo ' <span style="color:#cc3872">●</span>';
+        $rangeKey = 'range_' . md5($critName);
+        $activeMin = $specFilters[$critName . '__min'] ?? ($_GET['rmin'][$critName] ?? '');
+        $activeMax = $specFilters[$critName . '__max'] ?? ($_GET['rmax'][$critName] ?? '');
+        if ($allNumeric && ($activeMin !== '' || $activeMax !== '')) echo ' <span style="color:#cc3872">●</span>';
+        elseif (!$allNumeric && !empty($activeVals)) echo ' <span style="color:#cc3872">●</span>';
         echo '</h3>';
-        foreach ($values as $v) {
-            $checked = in_array($v['value'], $activeVals) ? ' checked' : '';
-            echo '<label><input type="checkbox" name="spec[' . $e($critName) . '][]" value="' . $e($v['value']) . '"' . $checked . '> ';
-            echo $e($v['value']) . ' <span class="cnt">(' . $v['count'] . ')</span></label>';
+
+        if ($allNumeric) {
+            // Range filter (min-max inputs) for numeric specs like kW
+            $numVals = array_map(fn($v) => (float)$v['numeric'], $values);
+            $minVal = min($numVals);
+            $maxVal = max($numVals);
+            $unit = '';
+            if (preg_match('/\(([^)]+)\)/', $critName, $um)) $unit = $um[1];
+            echo '<div style="display:flex;gap:4px;align-items:center">';
+            echo '<input type="number" name="rmin[' . $e($critName) . ']" placeholder="' . $minVal . '" value="' . $e((string)$activeMin) . '" step="0.1" style="width:70px;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:.85em">';
+            echo '<span>—</span>';
+            echo '<input type="number" name="rmax[' . $e($critName) . ']" placeholder="' . $maxVal . '" value="' . $e((string)$activeMax) . '" step="0.1" style="width:70px;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:.85em">';
+            if ($unit) echo '<span style="font-size:.85em;color:#888">' . $e($unit) . '</span>';
+            echo '</div>';
+        } else {
+            // Checkbox filter for discrete values
+            foreach ($values as $v) {
+                $checked = in_array($v['value'], $activeVals) ? ' checked' : '';
+                echo '<label><input type="checkbox" name="spec[' . $e($critName) . '][]" value="' . $e($v['value']) . '"' . $checked . '> ';
+                echo $e($v['value']) . ' <span class="cnt">(' . $v['count'] . ')</span></label>';
+            }
         }
     }
 
@@ -1057,7 +1131,7 @@ function renderCategory(array $cat): string {
             echo '</div>';
         }
         echo '</div>';
-        echo renderPagination($result['page'], $result['pages'], buildCategoryUrl($cat['slug'], $sort, $specFilters, $priceMin, $priceMax));
+        echo renderPagination($result['page'], $result['pages'], buildCategoryUrl($cat['slug'], $sort, $specFilters, $priceMin, $priceMax, $selectedSubcats, $rangeFilters));
     }
     echo '</div></div>';
     return ob_get_clean();
@@ -1253,13 +1327,18 @@ function renderPagination(int $page, int $pages, string $baseUrl): string {
     return $html;
 }
 
-function buildCategoryUrl(string $slug, string $sort, array $specFilters, ?int $pmin, ?int $pmax): string {
+function buildCategoryUrl(string $slug, string $sort, array $specFilters, ?int $pmin, ?int $pmax, array $subcats = [], array $rangeFilters = []): string {
     $url = '?page=category&slug=' . urlencode($slug) . '&sort=' . urlencode($sort);
+    foreach ($subcats as $scId) $url .= '&subcat[]=' . (int)$scId;
     foreach ($specFilters as $fn => $fvs) {
         foreach ($fvs as $fv) $url .= '&spec[' . urlencode($fn) . '][]=' . urlencode($fv);
     }
-    if ($pmin) $url .= '&pmin=' . $pmin;
-    if ($pmax) $url .= '&pmax=' . $pmax;
+    if ($pmin) $url .= '&pmin=' . (int)($pmin / 100);
+    if ($pmax) $url .= '&pmax=' . (int)($pmax / 100);
+    foreach ($rangeFilters as $fn => $rv) {
+        if (isset($rv['min'])) $url .= '&rmin[' . urlencode($fn) . ']=' . urlencode((string)$rv['min']);
+        if (isset($rv['max'])) $url .= '&rmax[' . urlencode($fn) . ']=' . urlencode((string)$rv['max']);
+    }
     return $url;
 }
 

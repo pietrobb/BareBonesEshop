@@ -303,6 +303,38 @@ $db->exec("CREATE INDEX IF NOT EXISTS idx_spec_criteria ON product_specification
 $db->exec("CREATE INDEX IF NOT EXISTS idx_spec_numeric ON product_specifications(criteria_name, numeric_val)");
 echo "  [OK] product_specifications\n";
 
+// Attribute Definitions — configurable attribute types per category
+$db->exec("CREATE TABLE IF NOT EXISTS attribute_definitions (
+    id         INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
+    name       TEXT NOT NULL,
+    slug       TEXT NOT NULL UNIQUE,
+    type       TEXT NOT NULL DEFAULT 'enum',
+    unit       TEXT DEFAULT '',
+    sort_order INTEGER DEFAULT 0
+)");
+echo "  [OK] attribute_definitions\n";
+
+// Attribute Options — values for enum attributes
+$db->exec("CREATE TABLE IF NOT EXISTS attribute_options (
+    id           INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
+    attribute_id INTEGER NOT NULL,
+    value        TEXT NOT NULL,
+    sort_order   INTEGER DEFAULT 0,
+    FOREIGN KEY (attribute_id) REFERENCES attribute_definitions(id) ON DELETE CASCADE
+)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_attropt_attr ON attribute_options(attribute_id, sort_order)");
+echo "  [OK] attribute_options\n";
+
+// Category Attributes — which attributes apply to which categories
+$db->exec("CREATE TABLE IF NOT EXISTS category_attributes (
+    category_id  INTEGER NOT NULL,
+    attribute_id INTEGER NOT NULL,
+    PRIMARY KEY (category_id, attribute_id),
+    FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE,
+    FOREIGN KEY (attribute_id) REFERENCES attribute_definitions(id) ON DELETE CASCADE
+)");
+echo "  [OK] category_attributes\n";
+
 // Product OE Numbers — cross-references
 $db->exec("CREATE TABLE IF NOT EXISTS product_oe_numbers (
     id              INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
