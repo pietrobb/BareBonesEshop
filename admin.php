@@ -1238,11 +1238,21 @@ function pageAttribute(): void {
             </div>
 
             <h3 style="margin:1rem 0 .5rem">Priradiť ku kategóriám</h3>
-            <div style="max-height:300px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:6px;padding:.5rem">
-                <?php foreach ($categories as $cat): ?>
-                <label style="display:block;padding:2px 4px;cursor:pointer">
+            <input type="text" id="cat-filter" placeholder="Hľadať kategóriu..." style="width:100%;padding:.4rem .6rem;margin-bottom:.5rem;border:1px solid #d1d5db;border-radius:4px" oninput="filterCats()">
+            <div style="margin-bottom:.5rem;font-size:.8rem">
+                <a href="#" onclick="toggleAllCats(true);return false" style="margin-right:.5rem">Vybrať všetky viditeľné</a>
+                <a href="#" onclick="toggleAllCats(false);return false">Odznačiť všetky</a>
+                <span id="cat-count" style="float:right;color:#64748b"></span>
+            </div>
+            <div id="cat-list" style="max-height:350px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:6px;padding:.5rem">
+                <?php foreach ($categories as $cat):
+                    $depth = substr_count($cat['path'] ?: '', '/');
+                    $indent = $depth * 1.2;
+                ?>
+                <label class="cat-item" data-search="<?= esc(mb_strtolower($cat['name'] . ' ' . $cat['path'])) ?>" style="display:block;padding:2px 4px 2px <?= $indent + 0.4 ?>rem;cursor:pointer<?= $depth ? ';font-size:.9em' : ';font-weight:600' ?>">
                     <input type="checkbox" name="category_ids[]" value="<?= (int)$cat['id'] ?>" <?= in_array($cat['id'], $assignedCats) ? 'checked' : '' ?>>
-                    <?= esc($cat['path'] ?: $cat['name']) ?>
+                    <?= esc($cat['name']) ?>
+                    <?php if ($cat['path'] && $depth): ?><span style="color:#94a3b8;font-size:.8em;margin-left:.3rem"><?= esc($cat['path']) ?></span><?php endif; ?>
                 </label>
                 <?php endforeach; ?>
             </div>
@@ -1267,6 +1277,25 @@ function pageAttribute(): void {
         document.getElementById('options-list').appendChild(div);
     }
     toggleOptions();
+    function filterCats() {
+        var q = document.getElementById('cat-filter').value.toLowerCase();
+        var items = document.querySelectorAll('.cat-item');
+        var shown = 0, checked = 0;
+        items.forEach(function(el) {
+            var match = !q || el.getAttribute('data-search').indexOf(q) !== -1;
+            el.style.display = match ? '' : 'none';
+            if (match) shown++;
+            if (el.querySelector('input').checked) checked++;
+        });
+        document.getElementById('cat-count').textContent = checked + ' vybraných / ' + shown + ' zobrazených';
+    }
+    function toggleAllCats(state) {
+        document.querySelectorAll('.cat-item').forEach(function(el) {
+            if (el.style.display !== 'none') el.querySelector('input').checked = state;
+        });
+        filterCats();
+    }
+    filterCats();
     </script>
     <?php
 }
