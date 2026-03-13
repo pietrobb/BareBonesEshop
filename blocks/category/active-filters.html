@@ -1,0 +1,13 @@
+{{#if active_filters.length > 0}}
+<div class="filters__active">
+    <h4>{{t.active_filters}}</h4>
+    <div class="filter-tags">
+        {{#each active_filters}}
+            <button class="filter-tag" data-remove="{{attr}}:{{value}}">
+                {{label}}: {{value_label}} &times;
+            </button>
+        {{/each}}
+    </div>
+    <button class="filters__clear" data-clear-filters>{{t.clear_all}}</button>
+</div>
+{{/if}}

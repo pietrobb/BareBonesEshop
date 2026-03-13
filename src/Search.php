@@ -37,13 +37,15 @@ class Search {
             ");
             $stmt->execute([':q' => $ftsQuery, ':limit' => $perPage, ':offset' => $offset]);
         } else {
+            $safeQ = self::sanitizeMysqlQuery($q);
+
             // Count
             $stmt = $db->prepare("
                 SELECT COUNT(*) FROM products p
                 WHERE MATCH(p.name, p.sku, p.summary, p.tags) AGAINST(:q IN NATURAL LANGUAGE MODE)
                   AND p.status = 'active'
             ");
-            $stmt->execute([':q' => $q]);
+            $stmt->execute([':q' => $safeQ]);
             $total = (int)$stmt->fetchColumn();
 
             // Fetch
@@ -55,7 +57,7 @@ class Search {
                 ORDER BY relevance DESC
                 LIMIT :limit OFFSET :offset
             ");
-            $stmt->execute([':q' => $q, ':q2' => $q, ':limit' => $perPage, ':offset' => $offset]);
+            $stmt->execute([':q' => $safeQ, ':q2' => $safeQ, ':limit' => $perPage, ':offset' => $offset]);
         }
 
         $products = $stmt->fetchAll();
@@ -90,6 +92,7 @@ class Search {
             ");
             $stmt->execute([':q' => $ftsQuery, ':limit' => $limit]);
         } else {
+            $safePrefix = self::sanitizeMysqlQuery($prefix);
             $stmt = $db->prepare("
                 SELECT DISTINCT p.name, p.slug
                 FROM products p
@@ -97,7 +100,7 @@ class Search {
                   AND p.status = 'active'
                 LIMIT :limit
             ");
-            $stmt->execute([':q' => $prefix . '*', ':limit' => $limit]);
+            $stmt->execute([':q' => $safePrefix . '*', ':limit' => $limit]);
         }
 
         return $stmt->fetchAll();
@@ -149,5 +152,14 @@ class Search {
     /** Escape a single term for FTS */
     private static function escFts(string $s): string {
         return preg_replace('/["\*\(\)\{\}\[\]:^~]/', '', $s);
+    }
+
+    /**
+     * Sanitize MySQL FULLTEXT query — strip boolean operators
+     */
+    private static function sanitizeMysqlQuery(string $q): string {
+        // Remove MySQL boolean mode operators: + - > < ( ) ~ * " @
+        $q = preg_replace('/[+\-><()\~\*"@]/', ' ', $q);
+        return trim(preg_replace('/\s+/', ' ', $q));
     }
 }

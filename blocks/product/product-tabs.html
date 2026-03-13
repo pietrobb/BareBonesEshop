@@ -1,0 +1,16 @@
+<div class="product-tabs" data-tabs>
+    <div class="product-tabs__nav">
+        {{#each tabs}}
+            <button class="product-tabs__tab {{#if @first}}is-active{{/if}}" data-tab="{{id}}">
+                {{label}}
+            </button>
+        {{/each}}
+    </div>
+    <div class="product-tabs__panels">
+        {{#each tabs}}
+            <div class="product-tabs__panel {{#if @first}}is-active{{/if}}" data-panel="{{id}}">
+                {{{content}}}
+            </div>
+        {{/each}}
+    </div>
+</div>

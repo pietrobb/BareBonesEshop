@@ -1,0 +1,36 @@
+<div class="product-info">
+    <h1 class="product-info__name">{{product.name}}</h1>
+    <p class="product-info__sku">SKU: {{product.sku}}</p>
+    <div class="product-info__price">
+        {{#if product.compare_price}}
+            <span class="price--old">{{product.compare_price_formatted}}</span>
+            <span class="product-info__discount">-{{product.discount_percent}}%</span>
+        {{/if}}
+        <span class="price--current">{{product.price_formatted}}</span>
+    </div>
+    {{#if product.summary}}
+        <p class="product-info__summary">{{product.summary}}</p>
+    {{/if}}
+    {{#if product.variants.length > 0}}
+        <div class="product-info__variants" data-variants>
+            {{#each product.variants}}
+                <label class="variant-option">
+                    <input type="radio" name="variant" value="{{id}}" data-price-delta="{{price_delta}}"
+                           {{#if @first}}checked{{/if}}>
+                    <span>{{name}}</span>
+                </label>
+            {{/each}}
+        </div>
+    {{/if}}
+    {{#if product.stock > 0}}
+        <div class="product-info__actions">
+            <input type="number" value="1" min="1" max="{{product.stock}}" class="qty-input" data-qty>
+            <button class="btn btn--primary" data-action="cart-add" data-product="{{product.id}}">
+                {{t.add_to_cart}}
+            </button>
+        </div>
+        <p class="product-info__stock stock--in">{{t.in_stock}} ({{product.stock}})</p>
+    {{else}}
+        <p class="product-info__stock stock--out">{{t.out_of_stock}}</p>
+    {{/if}}
+</div>

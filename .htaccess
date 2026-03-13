@@ -1,0 +1,76 @@
+RewriteEngine On
+
+# ============================================================
+# Level 0 Cache — serve cached JSON directly (bypass PHP)
+# ============================================================
+
+# Category listings: /api.php?action=products&cat=tricka&page=1
+RewriteCond %{DOCUMENT_ROOT}/cache/cat/%1/page-%2.json -f
+RewriteRule ^api\.php$ cache/cat/%{QUERY_STRING_cat}/page-%{QUERY_STRING_page}.json [L,T=application/json]
+
+# Static cache files served directly
+RewriteCond %{REQUEST_URI} ^/cache/ [NC]
+RewriteCond %{REQUEST_FILENAME} -f
+RewriteRule ^(.*)$ $1 [L,T=application/json]
+
+# ============================================================
+# SEO-friendly URLs
+# ============================================================
+
+# Product detail: /product/brzdovy-kotuc-predny → product.php?slug=brzdovy-kotuc-predny
+RewriteRule ^product/([a-z0-9-]+)/?$ product.php?slug=$1 [QSA,L]
+
+# Category: /category/brzdovy-system → index.php?category=brzdovy-system
+RewriteRule ^category/([a-z0-9/-]+)/?$ index.php?category=$1 [QSA,L]
+
+# API routing: /api/products → api.php?action=products
+RewriteRule ^api/(.*)$ api.php?action=$1 [QSA,L]
+
+# ============================================================
+# Static assets — skip rewriting
+# ============================================================
+RewriteCond %{REQUEST_FILENAME} -f
+RewriteRule ^ - [L]
+
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# ============================================================
+# Security
+# ============================================================
+
+# Block access to sensitive files
+<FilesMatch "\.(php|json|sqlite|log|lock|md)$">
+    # Allow only specific public PHP files
+</FilesMatch>
+
+# Block access to internal directories
+RewriteRule ^(src|cli|jobs|db|logs|demo|lang|config|\.)/  - [F,L]
+RewriteRule ^config\.php$ - [F,L]
+RewriteRule ^stores\.json$ - [F,L]
+RewriteRule ^catalog\.json$ - [F,L]
+RewriteRule ^shipping\.json$ - [F,L]
+RewriteRule ^tax\.json$ - [F,L]
+
+# Block dotfiles
+RewriteRule (^\.) - [F,L]
+
+# ============================================================
+# Compression
+# ============================================================
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/css application/javascript application/json
+</IfModule>
+
+# ============================================================
+# Cache headers for static assets
+# ============================================================
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType text/css "access plus 1 year"
+    ExpiresByType application/javascript "access plus 1 year"
+    ExpiresByType image/jpeg "access plus 1 year"
+    ExpiresByType image/png "access plus 1 year"
+    ExpiresByType image/webp "access plus 1 year"
+    ExpiresByType image/svg+xml "access plus 1 year"
+</IfModule>

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 0; background: #f5f5f5; }
+        .email { max-width: 600px; margin: 0 auto; background: #fff; }
+        .email__header { background: #1a1a2e; color: #fff; padding: 24px; text-align: center; }
+        .email__body { padding: 24px; }
+        .email__footer { padding: 16px 24px; text-align: center; color: #888; font-size: 12px; border-top: 1px solid #eee; }
+        h1 { margin: 0; font-size: 20px; }
+        h2 { font-size: 16px; margin: 24px 0 12px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
+        th { background: #f9f9f9; font-size: 13px; }
+        .total-row td { font-weight: bold; border-top: 2px solid #333; }
+        .info-grid { display: flex; gap: 24px; }
+        .info-grid__col { flex: 1; }
+        .label { color: #666; font-size: 12px; text-transform: uppercase; margin-bottom: 4px; }
+    </style>
+</head>
+<body>
+<div class="email">
+    <div class="email__header">
+        <h1>Potvrdenie objednávky</h1>
+    </div>
+    <div class="email__body">
+        <p>Ďakujeme za vašu objednávku!</p>
+
+        <h2>Objednávka {{order_number}}</h2>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Produkt</th>
+                    <th>Množstvo</th>
+                    <th>Cena</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{#each items}}
+                <tr>
+                    <td>{{name}}</td>
+                    <td>{{quantity}}</td>
+                    <td>{{total_formatted}}</td>
+                </tr>
+                {{/each}}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="2">Medzisúčet</td>
+                    <td>{{subtotal_formatted}}</td>
+                </tr>
+                <tr>
+                    <td colspan="2">Doprava</td>
+                    <td>{{shipping_formatted}}</td>
+                </tr>
+                {{#if tax_amount}}
+                <tr>
+                    <td colspan="2">DPH</td>
+                    <td>{{tax_formatted}}</td>
+                </tr>
+                {{/if}}
+                <tr class="total-row">
+                    <td colspan="2">Celkom</td>
+                    <td>{{total_formatted}}</td>
+                </tr>
+            </tfoot>
+        </table>
+
+        <h2>Doručovacia adresa</h2>
+        <p>
+            {{customer_name}}<br>
+            {{address.street}}<br>
+            {{address.zip}} {{address.city}}<br>
+            {{address.country}}
+        </p>
+
+        <p>O stave vašej objednávky vás budeme informovať e-mailom.</p>
+    </div>
+    <div class="email__footer">
+        <p>Tento e-mail bol vygenerovaný automaticky. Prosím, neodpovedajte naň.</p>
+    </div>
+</div>
+</body>
+</html>

@@ -61,7 +61,7 @@ try {
 } catch (\Throwable $e) {
     http_response_code(500);
     echo json_encode(['error' => 'Internal error']);
-    error_log("API error [{$action}]: " . $e->getMessage());
+    error_log("API error [{$action}]: " . $e->getMessage() . "\n" . $e->getTraceAsString());
 }
 
 // ============================================================
@@ -321,6 +321,17 @@ function apiCheckout(): array {
         return ['error' => 'Name and email are required'];
     }
 
+    // Validate shipping method exists for this country
+    if (!Shipping::methodConfig($shippingMethod)) {
+        return ['error' => 'Invalid shipping method'];
+    }
+
+    // Validate payment method
+    $allowedPayments = ['stripe', 'cod', 'bank_transfer'];
+    if (!in_array($paymentMethod, $allowedPayments, true)) {
+        return ['error' => 'Invalid payment method'];
+    }
+
     $cart = Cart::enriched();
     if (empty($cart['items'])) {
         return ['error' => 'Cart is empty'];
@@ -418,7 +429,9 @@ function apiWebhookStripe(): array {
             default                      => null,
         };
     } catch (\Throwable $e) {
-        error_log("Webhook error [{$event['type']}]: {$e->getMessage()}");
+        error_log("Webhook error [{$event['type']}]: {$e->getMessage()}\n" . $e->getTraceAsString());
+        http_response_code(500);
+        return ['error' => 'Processing failed'];
     }
 
     return ['status' => 'ok'];

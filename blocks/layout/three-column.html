@@ -1,0 +1,15 @@
+<div class="container">
+    {{> global/header}}
+    <main class="layout layout--three-column">
+        <aside class="layout__sidebar layout__sidebar--left">
+            {{{slots.left}}}
+        </aside>
+        <div class="layout__main">
+            {{{slots.main}}}
+        </div>
+        <aside class="layout__sidebar layout__sidebar--right">
+            {{{slots.right}}}
+        </aside>
+    </main>
+    {{> global/footer}}
+</div>

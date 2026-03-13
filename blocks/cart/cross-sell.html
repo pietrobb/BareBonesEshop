@@ -1,0 +1,10 @@
+{{#if cross_sell.length > 0}}
+<section class="cross-sell">
+    <h3>Mohlo by vás zaujímať</h3>
+    <div class="product-grid product-grid--small">
+        {{#each cross_sell}}
+            {{> product/product-card}}
+        {{/each}}
+    </div>
+</section>
+{{/if}}

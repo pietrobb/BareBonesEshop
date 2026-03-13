@@ -1,0 +1,19 @@
+<div class="product-reviews">
+    <h2>{{t.reviews}}</h2>
+    {{#if reviews.length > 0}}
+        <div class="reviews-list">
+            {{#each reviews}}
+                <div class="review">
+                    <div class="review__header">
+                        <strong>{{author}}</strong>
+                        <span class="review__date">{{date}}</span>
+                        <span class="review__rating" data-rating="{{rating}}"></span>
+                    </div>
+                    <p class="review__text">{{text}}</p>
+                </div>
+            {{/each}}
+        </div>
+    {{else}}
+        <p class="reviews-empty">Zatiaľ žiadne hodnotenia.</p>
+    {{/if}}
+</div>

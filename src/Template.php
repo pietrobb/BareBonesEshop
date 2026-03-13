@@ -34,12 +34,21 @@ class Template {
         return self::render('layout/' . $page['layout'], array_merge($data, ['slots' => $slots]));
     }
 
+    private static int $depth = 0;
+    private const MAX_DEPTH = 20;
+
     /**
      * Render a block (template) with data
      */
     public static function render(string $block, array $data = []): string {
+        if (++self::$depth > self::MAX_DEPTH) {
+            self::$depth--;
+            return "<!-- max template depth reached: {$block} -->";
+        }
         $tpl = self::loadBlock($block);
-        return self::process($tpl, $data);
+        $result = self::process($tpl, $data);
+        self::$depth--;
+        return $result;
     }
 
     /**

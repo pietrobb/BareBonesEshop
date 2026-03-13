@@ -1,0 +1,10 @@
+{{#if recently_viewed.length > 0}}
+<section class="recently-viewed">
+    <h2>Naposledy prezerané</h2>
+    <div class="product-grid product-grid--small">
+        {{#each recently_viewed}}
+            {{> product/product-card}}
+        {{/each}}
+    </div>
+</section>
+{{/if}}

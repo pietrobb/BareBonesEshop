@@ -1,0 +1,15 @@
+{{#if attrs.length > 0}}
+<div class="product-attributes">
+    <h2>{{t.specifications}}</h2>
+    <table class="spec-table">
+        <tbody>
+            {{#each attrs}}
+                <tr>
+                    <th>{{attr_name}}</th>
+                    <td>{{attr_value}}</td>
+                </tr>
+            {{/each}}
+        </tbody>
+    </table>
+</div>
+{{/if}}

@@ -146,14 +146,6 @@ class Cart {
     }
 
     /**
-     * Remove unavailable items from cart
-     */
-    public static function removeUnavailable(array $unavailableNames): void {
-        // Re-enrich will automatically remove items with 0 stock
-        self::enriched();
-    }
-
-    /**
      * Cart abandonment: save email at first checkout step
      */
     public static function setEmail(string $email): void {

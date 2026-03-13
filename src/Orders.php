@@ -254,4 +254,38 @@ class Orders {
             }
         }
     }
+
+    // ============================================================
+    // ERP Sync support
+    // ============================================================
+
+    /** Get orders not yet synced to ERP */
+    public static function unsyncedForErp(): array {
+        $stmt = Db::get()->query("SELECT * FROM orders WHERE status != 'pending' AND (notes NOT LIKE '%erp_synced%') ORDER BY created_at ASC LIMIT 50");
+        return $stmt->fetchAll();
+    }
+
+    /** Mark order as synced to ERP */
+    public static function markSynced(int $orderId, string $externalId): void {
+        $stmt = Db::get()->prepare("UPDATE orders SET notes = COALESCE(notes, '') || :note, updated_at = " . Db::now() . " WHERE id = :id");
+        $stmt->execute([':note' => "\nerp_synced:{$externalId}", ':id' => $orderId]);
+    }
+
+    /** Mark order ERP sync as failed */
+    public static function markSyncFailed(int $orderId, string $error): void {
+        $stmt = Db::get()->prepare("UPDATE orders SET notes = COALESCE(notes, '') || :note, updated_at = " . Db::now() . " WHERE id = :id");
+        $stmt->execute([':note' => "\nerp_fail:" . substr($error, 0, 200), ':id' => $orderId]);
+    }
+
+    /** Get orders pending ERP status sync */
+    public static function pendingStatusSync(): array {
+        $stmt = Db::get()->query("SELECT * FROM orders WHERE notes LIKE '%erp_synced:%' AND status NOT IN ('delivered','cancelled','refunded') ORDER BY updated_at ASC LIMIT 50");
+        return $stmt->fetchAll();
+    }
+
+    /** Update ERP status on order */
+    public static function updateErpStatus(int $orderId, string $erpStatus): void {
+        $stmt = Db::get()->prepare("UPDATE orders SET notes = COALESCE(notes, '') || :note, updated_at = " . Db::now() . " WHERE id = :id");
+        $stmt->execute([':note' => "\nerp_status:{$erpStatus}", ':id' => $orderId]);
+    }
 }

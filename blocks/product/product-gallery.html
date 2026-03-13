@@ -1,0 +1,17 @@
+<div class="gallery" data-gallery>
+    <div class="gallery__main">
+        {{#if product.image}}
+            <img src="/uploads/full/{{product.image}}" alt="{{product.name}}" class="gallery__hero" data-zoom>
+        {{/if}}
+    </div>
+    {{#if product.images.length > 1}}
+        <div class="gallery__thumbs">
+            {{#each product.images}}
+                <button class="gallery__thumb {{#if @first}}is-active{{/if}}"
+                        data-image="/uploads/full/{{this}}">
+                    <img src="/uploads/thumb/{{this}}" alt="{{../product.name}}" loading="lazy">
+                </button>
+            {{/each}}
+        </div>
+    {{/if}}
+</div>
