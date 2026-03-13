@@ -80,6 +80,9 @@ RewriteRule ^stores\.json$ - [F,L]
 RewriteRule ^catalog\.json$ - [F,L]
 RewriteRule ^shipping\.json$ - [F,L]
 RewriteRule ^tax\.json$ - [F,L]
+RewriteRule ^pricing\.json$ - [F,L]
+RewriteRule ^layouts\.json$ - [F,L]
+RewriteRule ^admin-roles\.json$ - [F,L]
 
 # Block dotfiles
 RewriteRule (^\.) - [F,L]

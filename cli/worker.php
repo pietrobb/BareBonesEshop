@@ -164,6 +164,19 @@ function handleCacheRebuild(array $payload, array $job): void {
                 Cache::writeJson(Cache::localePath($locale, "cat/{$cat['slug']}/filters.json"), ['filters' => $filters]);
             }
         }
+
+        // Pre-computed price cache per customer group
+        $allProducts = $db->query("SELECT id, sku, price, category_id FROM products WHERE status = 'active'")->fetchAll();
+        $pricingGroups = array_keys(Pricing::config()['customer_groups'] ?? ['guest' => []]);
+        if (!in_array('guest', $pricingGroups, true)) array_unshift($pricingGroups, 'guest');
+        foreach ($pricingGroups as $group) {
+            $prices = [];
+            foreach ($allProducts as $p) {
+                $priced = Pricing::apply($p, $group);
+                $prices[$p['sku']] = $priced['price'];
+            }
+            Cache::writeJson("prices/{$group}.json", $prices);
+        }
     } elseif (!empty($payload['path'])) {
         // Single path rebuild — proactively regenerate the cache file
         $path = $payload['path'];
@@ -435,23 +448,35 @@ function handleSitemapBuild(array $payload, array $job): void {
         $xml .= "<url><loc>{$safeBase}{$safePrefix}/</loc><priority>1.0</priority></url>\n";
     }
 
-    // Categories per locale
-    $cats = $db->query("SELECT slug, path FROM categories ORDER BY path")->fetchAll();
+    // Build prefix→locale map for translated slugs
+    $prefixLocale = ['' => $stores['default_locale'] ?? 'sk'];
+    foreach ($stores['stores'] ?? [] as $store) {
+        $p = $store['url_prefix'] ?? '';
+        if ($p !== '') $prefixLocale[$p] = $store['locale'] ?? 'sk';
+    }
+
+    // Categories per locale (with translated slugs)
+    $cats = $db->query("SELECT * FROM categories ORDER BY path")->fetchAll();
     foreach ($cats as $cat) {
-        $slug = htmlspecialchars($cat['slug'], ENT_XML1 | ENT_QUOTES, 'UTF-8');
         foreach ($prefixes as $prefix) {
             $safePrefix = htmlspecialchars($prefix, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+            I18n::setLocale($prefixLocale[$prefix] ?? 'sk');
+            $trCat = I18n::category($cat);
+            $slug = htmlspecialchars($trCat['slug'], ENT_XML1 | ENT_QUOTES, 'UTF-8');
             $xml .= "<url><loc>{$safeBase}{$safePrefix}/category/{$slug}</loc><priority>0.8</priority></url>\n";
         }
     }
 
-    // Products per locale
-    $stmt = $db->query("SELECT slug, updated_at FROM products WHERE status = 'active' ORDER BY updated_at DESC");
-    while ($p = $stmt->fetch()) {
-        $slug = htmlspecialchars($p['slug'], ENT_XML1 | ENT_QUOTES, 'UTF-8');
+    // Products per locale (with translated slugs)
+    $stmt = $db->query("SELECT * FROM products WHERE status = 'active' ORDER BY updated_at DESC");
+    $allProducts = $stmt->fetchAll();
+    foreach ($allProducts as $p) {
         $lastmod = substr($p['updated_at'], 0, 10);
         foreach ($prefixes as $prefix) {
             $safePrefix = htmlspecialchars($prefix, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+            I18n::setLocale($prefixLocale[$prefix] ?? 'sk');
+            $trP = I18n::product($p);
+            $slug = htmlspecialchars($trP['slug'], ENT_XML1 | ENT_QUOTES, 'UTF-8');
             $xml .= "<url><loc>{$safeBase}{$safePrefix}/product/{$slug}</loc><lastmod>{$lastmod}</lastmod><priority>0.6</priority></url>\n";
         }
     }

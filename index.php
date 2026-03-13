@@ -5,21 +5,13 @@
  */
 require_once __DIR__ . '/src/autoload.php';
 
+Security::headers();
 Security::sessionStart();
 if (!isset($_SESSION['cart'])) $_SESSION['cart'] = [];
 
-// Language switching — preserve current page URL
-if (!empty($_GET['lang']) && in_array($_GET['lang'], ['sk','en','de'])) {
-    $_SESSION['lang'] = $_GET['lang'];
-    // Redirect back to same page without lang param
-    $params = $_GET;
-    unset($params['lang']);
-    $qs = $params ? '?' . http_build_query($params) : '?';
-    header('Location: ' . $qs);
-    exit;
-}
+// Locale from URL — canonical, no session override
 $uri = $_SERVER['REQUEST_URI'] ?? '';
-$lang = $_SESSION['lang'] ?? I18n::detectLocale($uri);
+$lang = I18n::detectLocale($uri);
 I18n::setLocale($lang);
 
 // Slovak translations for TecDoc English category names

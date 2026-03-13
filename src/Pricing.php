@@ -7,7 +7,7 @@
 class Pricing {
     private static ?array $config = null;
 
-    private static function config(): array {
+    public static function config(): array {
         if (!self::$config) {
             $file = __DIR__ . '/../pricing.json';
             self::$config = file_exists($file) ? json_decode(file_get_contents($file), true) : [];
