@@ -19,6 +19,10 @@ class Import {
             return ['success' => false, 'error' => "Cannot open file: {$filePath}"];
         }
 
+        // Strip UTF-8 BOM if present (Excel exports)
+        $bom = fread($handle, 3);
+        if ($bom !== "\xEF\xBB\xBF") rewind($handle);
+
         // Read header
         $header = fgetcsv($handle, 0, ',', '"', '');
         if (!$header) {
@@ -440,18 +444,7 @@ class Import {
 
     /** Generate URL-safe slug with proper Central European transliteration */
     public static function slugify(string $text): string {
-        // Manual transliteration for SK/CZ/DE/PL diacritics (iconv fails on Windows)
-        static $map = [
-            'á'=>'a','ä'=>'a','č'=>'c','ď'=>'d','é'=>'e','ě'=>'e','í'=>'i','ĺ'=>'l','ľ'=>'l',
-            'ň'=>'n','ó'=>'o','ô'=>'o','ö'=>'o','ŕ'=>'r','ř'=>'r','š'=>'s','ť'=>'t','ú'=>'u',
-            'ů'=>'u','ü'=>'u','ý'=>'y','ž'=>'z','Á'=>'a','Ä'=>'a','Č'=>'c','Ď'=>'d','É'=>'e',
-            'Ě'=>'e','Í'=>'i','Ĺ'=>'l','Ľ'=>'l','Ň'=>'n','Ó'=>'o','Ô'=>'o','Ö'=>'o','Ŕ'=>'r',
-            'Ř'=>'r','Š'=>'s','Ť'=>'t','Ú'=>'u','Ů'=>'u','Ü'=>'u','Ý'=>'y','Ž'=>'z',
-            'ß'=>'ss','à'=>'a','â'=>'a','è'=>'e','ê'=>'e','ë'=>'e','î'=>'i','ï'=>'i',
-            'ò'=>'o','ù'=>'u','û'=>'u','ç'=>'c','ñ'=>'n',
-        ];
-        $text = strtr($text, $map);
-        $text = strtolower($text);
+        $text = Str::removeDiacritics($text);
         $text = preg_replace('/[^a-z0-9]+/', '-', $text);
         return trim($text, '-');
     }

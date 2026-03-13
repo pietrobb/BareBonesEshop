@@ -34,8 +34,8 @@ class AuditLog {
     }
 
     private static function detectAction($old, $new): string {
-        if (empty($old) && !empty($new)) return 'create';
-        if (!empty($old) && empty($new)) return 'delete';
+        if ($old === null && $new !== null) return 'create';
+        if ($old !== null && $new === null) return 'delete';
         return 'update';
     }
 

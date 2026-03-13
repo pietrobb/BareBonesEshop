@@ -142,6 +142,17 @@ class Cart {
                 ? Security::int($item['variant_id']) : null;
             $qty = max(1, min(99, Security::int($item['qty'] ?? 1)));
             if ($productId > 0 && Products::byId($productId)) {
+                // Validate variant belongs to this product (if product has variants)
+                if ($variantId) {
+                    $variants = Products::variants($productId);
+                    if (!empty($variants)) {
+                        $valid = false;
+                        foreach ($variants as $v) {
+                            if ((int)$v['id'] === $variantId) { $valid = true; break; }
+                        }
+                        if (!$valid) $variantId = null;
+                    }
+                }
                 self::add($productId, $variantId, $qty);
             }
         }

@@ -246,26 +246,7 @@ function apiFilters(): array {
 }
 
 function apiCart(): array {
-    $items = $_SESSION['cart'] ?? [];
-    if (empty($items)) return ['items' => $items, 'count' => 0, 'subtotal' => 0];
-
-    // Batch price lookup instead of N+1
-    $ids = array_unique(array_column(array_values($items), 'product_id'));
-    $ph = implode(',', array_fill(0, count($ids), '?'));
-    $stmt = Db::get()->prepare("SELECT id, price FROM products WHERE id IN ({$ph})");
-    $stmt->execute(array_values($ids));
-    $prices = [];
-    while ($r = $stmt->fetch()) $prices[(int)$r['id']] = (int)$r['price'];
-
-    $subtotal = 0;
-    foreach ($items as $item) {
-        $subtotal += ($prices[$item['product_id']] ?? 0) * (int)($item['qty'] ?? 0);
-    }
-    return [
-        'items'    => $items,
-        'count'    => array_sum(array_column($items, 'qty')),
-        'subtotal' => $subtotal,
-    ];
+    return Cart::enriched();
 }
 
 function apiCartAdd(): array {
@@ -429,7 +410,9 @@ function apiCheckout(): array {
         }
     }
     $shippingCost = Shipping::calculate($shippingMethod, $country, $totalWeight, $cart['subtotal']);
-    if ($shippingCost < 0) $shippingCost = 0;
+    if ($shippingCost < 0) {
+        return ['success' => false, 'error' => 'Doručenie nie je dostupné do zvolenej krajiny.'];
+    }
 
     $autoRules = Pricing::autoCartRules($cart['subtotal']);
     foreach ($autoRules as $rule) {
