@@ -279,6 +279,112 @@ class Products {
     }
 
     /**
+     * Parametric search — filter products by category + spec attributes.
+     * Generic alternative to TecDoc::parametricSearch().
+     *
+     * @param array $categoryIds  Category IDs to search in
+     * @param int $page           Page number
+     * @param int $perPage        Products per page
+     * @param string $sort        Sort: price_asc, price_desc, name_asc, name_desc, newest
+     * @param array $specFilters  ['Napätie' => ['12V','24V'], 'Výrobca' => ['Victron']]
+     * @param ?int $priceMin      Min price in cents
+     * @param ?int $priceMax      Max price in cents
+     * @param array $rangeFilters ['Výkon (kW)' => ['min'=>3, 'max'=>10]]
+     * @return array ['products'=>[], 'total'=>int, 'pages'=>int, 'filters'=>[]]
+     */
+    public static function parametricSearch(
+        array $categoryIds, int $page = 1, int $perPage = 24, string $sort = 'price_asc',
+        array $specFilters = [], ?int $priceMin = null, ?int $priceMax = null, array $rangeFilters = []
+    ): array {
+        $db = Db::get();
+        if (empty($categoryIds)) return ['products' => [], 'total' => 0, 'pages' => 0, 'filters' => []];
+
+        $ph = implode(',', array_fill(0, count($categoryIds), '?'));
+        $params = $categoryIds;
+
+        // Base query: products in these categories
+        $where = "p.category_id IN ({$ph}) AND p.status = 'active'";
+
+        // Price filters
+        if ($priceMin !== null) { $where .= " AND p.price >= ?"; $params[] = $priceMin; }
+        if ($priceMax !== null) { $where .= " AND p.price <= ?"; $params[] = $priceMax; }
+
+        // Spec enum filters (inner join for each)
+        $joins = '';
+        $ji = 0;
+        foreach ($specFilters as $name => $values) {
+            if (empty($values)) continue;
+            $ji++;
+            $vph = implode(',', array_fill(0, count($values), '?'));
+            $joins .= " INNER JOIN product_specifications sf{$ji} ON sf{$ji}.product_id = p.id AND sf{$ji}.criteria_name = ? AND sf{$ji}.criteria_value IN ({$vph})";
+            $params[] = $name;
+            $params = array_merge($params, $values);
+        }
+
+        // Numeric range filters
+        foreach ($rangeFilters as $name => $range) {
+            $ji++;
+            $rangeCond = "sr{$ji}.product_id = p.id AND sr{$ji}.criteria_name = ?";
+            $params[] = $name;
+            if (isset($range['min'])) { $rangeCond .= " AND sr{$ji}.numeric_val >= ?"; $params[] = $range['min']; }
+            if (isset($range['max'])) { $rangeCond .= " AND sr{$ji}.numeric_val <= ?"; $params[] = $range['max']; }
+            $joins .= " INNER JOIN product_specifications sr{$ji} ON {$rangeCond}";
+        }
+
+        // Count total
+        $countSql = "SELECT COUNT(DISTINCT p.id) FROM products p {$joins} WHERE {$where}";
+        $stmt = $db->prepare($countSql);
+        $stmt->execute($params);
+        $total = (int)$stmt->fetchColumn();
+        $pages = max(1, (int)ceil($total / $perPage));
+
+        // Sort
+        $orderBy = match ($sort) {
+            'price_desc' => 'p.price DESC',
+            'name_asc' => 'p.name ASC',
+            'name_desc' => 'p.name DESC',
+            'newest' => 'p.created_at DESC',
+            default => 'p.price ASC',
+        };
+
+        // Fetch page
+        $offset = ($page - 1) * $perPage;
+        $sql = "SELECT DISTINCT p.* FROM products p {$joins} WHERE {$where} ORDER BY {$orderBy} LIMIT {$perPage} OFFSET {$offset}";
+        $stmt = $db->prepare($sql);
+        $stmt->execute($params);
+        $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Build available filters from all matching products (without current spec filters applied)
+        $filterSql = "SELECT DISTINCT ps.criteria_name, ps.criteria_value, ps.numeric_val
+            FROM product_specifications ps
+            INNER JOIN products p ON p.id = ps.product_id
+            WHERE p.category_id IN ({$ph}) AND p.status = 'active'
+            ORDER BY ps.criteria_name, ps.criteria_value";
+        $fStmt = $db->prepare($filterSql);
+        $fStmt->execute($categoryIds);
+
+        $filters = [];
+        foreach ($fStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $name = $row['criteria_name'];
+            if (!isset($filters[$name])) {
+                $filters[$name] = ['name' => $name, 'type' => 'enum', 'values' => [], 'min' => null, 'max' => null];
+            }
+            if ($row['numeric_val'] !== null) {
+                $filters[$name]['type'] = 'range';
+                $nv = (float)$row['numeric_val'];
+                if ($filters[$name]['min'] === null || $nv < $filters[$name]['min']) $filters[$name]['min'] = $nv;
+                if ($filters[$name]['max'] === null || $nv > $filters[$name]['max']) $filters[$name]['max'] = $nv;
+            }
+            $val = $row['criteria_value'];
+            if (!in_array($val, $filters[$name]['values'])) {
+                $filters[$name]['values'][] = $val;
+            }
+        }
+
+        return ['products' => $products, 'total' => $total, 'pages' => $pages, 'filters' => $filters];
+    }
+
+    /**
      * Increment stock (for order cancellation).
      * Routes through default warehouse if available.
      */
@@ -339,6 +445,12 @@ class Products {
         $product['images'] = json_decode($product['images'] ?? '[]', true);
         $product['attrs'] = json_decode($product['attrs'] ?? '{}', true);
         $product['tags'] = json_decode($product['tags'] ?? '[]', true);
+
+        // Apply DB promotions (before formatting)
+        if (class_exists('Promotions')) {
+            $product = Promotions::applyToProduct($product);
+        }
+
         $currency = $product['currency'] ?? null;
         $product['price_formatted'] = I18n::price($product['price'], $currency);
 
