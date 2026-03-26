@@ -300,36 +300,40 @@ class Products {
         if (empty($categoryIds)) return ['products' => [], 'total' => 0, 'pages' => 0, 'filters' => []];
 
         $ph = implode(',', array_fill(0, count($categoryIds), '?'));
-        $params = $categoryIds;
 
         // Base query: products in these categories
         $where = "p.category_id IN ({$ph}) AND p.status = 'active'";
+        $whereParams = $categoryIds;
 
         // Price filters
-        if ($priceMin !== null) { $where .= " AND p.price >= ?"; $params[] = $priceMin; }
-        if ($priceMax !== null) { $where .= " AND p.price <= ?"; $params[] = $priceMax; }
+        if ($priceMin !== null) { $where .= " AND p.price >= ?"; $whereParams[] = $priceMin; }
+        if ($priceMax !== null) { $where .= " AND p.price <= ?"; $whereParams[] = $priceMax; }
 
         // Spec enum filters (inner join for each)
         $joins = '';
+        $joinParams = [];
         $ji = 0;
         foreach ($specFilters as $name => $values) {
             if (empty($values)) continue;
             $ji++;
             $vph = implode(',', array_fill(0, count($values), '?'));
             $joins .= " INNER JOIN product_specifications sf{$ji} ON sf{$ji}.product_id = p.id AND sf{$ji}.criteria_name = ? AND sf{$ji}.criteria_value IN ({$vph})";
-            $params[] = $name;
-            $params = array_merge($params, $values);
+            $joinParams[] = $name;
+            $joinParams = array_merge($joinParams, $values);
         }
 
         // Numeric range filters
         foreach ($rangeFilters as $name => $range) {
             $ji++;
             $rangeCond = "sr{$ji}.product_id = p.id AND sr{$ji}.criteria_name = ?";
-            $params[] = $name;
-            if (isset($range['min'])) { $rangeCond .= " AND sr{$ji}.numeric_val >= ?"; $params[] = $range['min']; }
-            if (isset($range['max'])) { $rangeCond .= " AND sr{$ji}.numeric_val <= ?"; $params[] = $range['max']; }
+            $joinParams[] = $name;
+            if (isset($range['min'])) { $rangeCond .= " AND sr{$ji}.numeric_val >= ?"; $joinParams[] = $range['min']; }
+            if (isset($range['max'])) { $rangeCond .= " AND sr{$ji}.numeric_val <= ?"; $joinParams[] = $range['max']; }
             $joins .= " INNER JOIN product_specifications sr{$ji} ON {$rangeCond}";
         }
+
+        // Merge params: JOIN params first (appear before WHERE in SQL), then WHERE params
+        $params = array_merge($joinParams, $whereParams);
 
         // Count total
         $countSql = "SELECT COUNT(DISTINCT p.id) FROM products p {$joins} WHERE {$where}";
