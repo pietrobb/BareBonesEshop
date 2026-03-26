@@ -79,9 +79,40 @@ class FeedImport {
                     continue;
                 }
 
-                // Import product
-                Import::importProduct($mapped, $db);
-                $result['imported']++;
+                $importMode = $feed['import_mode'] ?? 'upsert';
+
+                if ($importMode === 'price_stock') {
+                    // Only update price + stock for existing products — never create or overwrite content
+                    $existing = $db->prepare("SELECT id, price FROM products WHERE sku = :sku");
+                    $existing->execute([':sku' => $mapped['sku']]);
+                    $row = $existing->fetch();
+                    if ($row) {
+                        $updates = [];
+                        $params = [':sku' => $mapped['sku']];
+                        if (isset($mapped['price'])) {
+                            $priceCents = Import::parsePriceToCents($mapped['price']);
+                            $updates[] = 'price = :price';
+                            $params[':price'] = $priceCents;
+                            // Set old price as compare_price if price dropped
+                            if ($priceCents < (int)$row['price'] && (int)$row['price'] > 0) {
+                                $updates[] = 'compare_price = :cprice';
+                                $params[':cprice'] = (int)$row['price'];
+                            }
+                        }
+                        if (!empty($updates)) {
+                            $updates[] = "updated_at = " . (Db::isSqlite() ? "datetime('now')" : "NOW()");
+                            $db->prepare("UPDATE products SET " . implode(', ', $updates) . " WHERE sku = :sku")
+                               ->execute($params);
+                        }
+                        $result['imported']++;
+                    } else {
+                        $result['skipped']++;
+                    }
+                } else {
+                    // Full upsert — create or update product with all fields
+                    Import::importProduct($mapped, $db);
+                    $result['imported']++;
+                }
 
                 // Collect stock for warehouse update
                 if (isset($mapped['stock'])) {
