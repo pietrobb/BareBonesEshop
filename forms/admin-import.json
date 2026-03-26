@@ -1,0 +1,25 @@
+{
+    "$schema": "../vendor/bbf/forms/form.schema.json",
+    "schema_version": 1,
+    "id": "admin-import",
+    "name": "Import CSV",
+    "submit_label": "Importovať",
+    "submitting_label": "Importujem...",
+    "success_message": "Import dokončený.",
+    "description": "Formát: sku, name, slug, product_type, category_path, price, compare_price, stock, images, summary, tags, weight_g, attr:*, name_en, name_de...",
+    "fields": [
+        {
+            "name": "csv_file",
+            "type": "file",
+            "label": "CSV súbor",
+            "required": true,
+            "accept": ".csv"
+        }
+    ],
+    "on_submit": {
+        "store": false,
+        "actions": [
+            {"type": "eshop-import-csv"}
+        ]
+    }
+}

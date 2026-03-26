@@ -1,0 +1,41 @@
+{
+    "$schema": "../vendor/bbf/forms/form.schema.json",
+    "schema_version": 1,
+    "id": "admin-page",
+    "name": "CMS Stránka",
+    "submit_label": "Uložiť",
+    "submitting_label": "Ukladám...",
+    "success_message": "Stránka uložená.",
+    "fields": [
+        {
+            "name": "slug",
+            "type": "text",
+            "label": "Slug",
+            "required": true
+        },
+        {
+            "name": "title",
+            "type": "text",
+            "label": "Názov",
+            "required": true
+        },
+        {
+            "name": "body",
+            "type": "textarea",
+            "label": "Obsah (HTML)",
+            "rows": 15
+        },
+        {
+            "name": "status",
+            "type": "select",
+            "label": "Stav",
+            "options_from": "/api.php?action=bbf_page_statuses"
+        }
+    ],
+    "on_submit": {
+        "store": false,
+        "actions": [
+            {"type": "eshop-page-save"}
+        ]
+    }
+}

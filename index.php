@@ -1451,41 +1451,22 @@ function renderCheckout(): string {
 
     echo '<div style="display:grid;grid-template-columns:1fr 340px;gap:24px">';
 
-    // Checkout form
-    echo '<form method="post" class="checkout-form">';
-    echo $csrfField;
-    echo '<input type="hidden" name="checkout" value="1">';
-
-    echo '<h2 style="font-size:1.1em;margin-bottom:4px">' . $t('contact') . '</h2>';
-    echo '<div class="form-row">';
-    echo '<div><label>' . $t('name') . ' *</label><input type="text" name="name" required></div>';
-    echo '<div><label>' . $t('email') . ' *</label><input type="email" name="email" required></div>';
-    echo '</div>';
-    echo '<div class="form-row">';
-    echo '<div><label>' . $t('phone') . ' *</label><input type="tel" name="phone" required></div>';
-    echo '<div></div>';
-    echo '</div>';
-
-    echo '<h2 style="font-size:1.1em;margin:20px 0 4px">' . $t('address') . '</h2>';
-    echo '<label>' . $t('street') . ' *</label><input type="text" name="street" required>';
-    echo '<div class="form-row">';
-    echo '<div><label>' . $t('city') . ' *</label><input type="text" name="city" required></div>';
-    echo '<div><label>' . $t('zip') . ' *</label><input type="text" name="zip" required pattern="[0-9 ]{5,6}"></div>';
-    echo '</div>';
-
-    echo '<h2 style="font-size:1.1em;margin:20px 0 4px">' . $t('payment') . '</h2>';
-    echo '<label>' . $t('payment_method') . '</label>';
-    echo '<select name="payment">';
-    echo '<option value="cod">' . $t('cod') . '</option>';
-    echo '<option value="transfer">' . $t('transfer') . '</option>';
-    echo '<option value="card">' . $t('card') . '</option>';
-    echo '</select>';
-
-    echo '<label>' . $t('notes') . '</label>';
-    echo '<textarea name="notes" placeholder="' . $t('notes_placeholder') . '"></textarea>';
-
-    echo '<button type="submit" class="btn-checkout" style="margin-top:20px">' . $t('submit_order') . '</button>';
-    echo '</form>';
+    // Checkout form — rendered by BareBonesForms
+    echo '<div id="bbf-checkout" data-form="checkout" data-lang="sk"></div>';
+    echo '<script>window.BBF && (BBF.baseUrl = "' . rtrim(dirname($_SERVER['SCRIPT_NAME']), '/') . '/vendor/bbf/");</script>';
+    echo '<script src="vendor/bbf/bbf.js"></script>';
+    echo '<script>';
+    echo 'document.addEventListener("DOMContentLoaded", function() {';
+    echo '  if (typeof BBF !== "undefined") {';
+    echo '    var orig = BBF.render;';
+    echo '    BBF.render("checkout", "#bbf-checkout", {';
+    echo '      onSuccess: function(resp) {';
+    echo '        if (resp.redirect) { window.location.href = resp.redirect; return false; }';
+    echo '      }';
+    echo '    });';
+    echo '  }';
+    echo '});';
+    echo '</script>';
 
     // Order summary sidebar
     echo '<div class="cart-summary">';

@@ -1,0 +1,3 @@
+[submodule "vendor/bbf"]
+	path = vendor/bbf
+	url = https://github.com/pietrobb/BareBonesForms.git

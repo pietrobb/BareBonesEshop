@@ -383,87 +383,88 @@ function pageProduct(): void {
     ?>
     <h1><?= $product ? 'Upraviť: ' . esc($product['name']) : 'Nový produkt' ?></h1>
     <div class="card">
-        <form method="post" enctype="multipart/form-data" action="admin.php?p=product&action=save<?= $product ? '&id='.$product['id'] : '' ?>">
-            <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-            <div class="form-row"><label>SKU</label><input name="sku" value="<?= esc($product['sku'] ?? '') ?>" required></div>
-            <div class="form-row"><label>Názov</label><input name="name" value="<?= esc($product['name'] ?? '') ?>" required style="width:100%"></div>
-            <div class="form-row"><label>Slug</label><input name="slug" value="<?= esc($product['slug'] ?? '') ?>" required></div>
-            <div class="form-row"><label>Kategória</label>
-                <select name="category_id" id="category-select" required onchange="updateAttrFields()">
-                    <?php foreach ($categories as $cat): ?>
-                    <option value="<?= $cat['id'] ?>" <?= ($product['category_id'] ?? 0) == $cat['id'] ? 'selected' : '' ?>><?= esc($cat['path'] ?: $cat['name']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            <div class="form-row"><label>Cena (centy)</label><input type="number" name="price" value="<?= (int)($product['price'] ?? 0) ?>" required></div>
-            <div class="form-row"><label>Pôvodná cena (centy)</label><input type="number" name="compare_price" value="<?= (int)($product['compare_price'] ?? 0) ?>"></div>
-            <div class="form-row"><label>Stock</label><input type="number" name="stock" value="<?= (int)($product['stock'] ?? 0) ?>"></div>
-            <div class="form-row"><label>Typ</label>
-                <select name="product_type">
-                    <?php
-                    $catalogFile = __DIR__ . '/catalog.json';
-                    $ptypes = file_exists($catalogFile) ? array_keys(json_decode(file_get_contents($catalogFile), true)['product_types'] ?? []) : [];
-                    $ptypes = array_unique(array_merge(['simple'], $ptypes));
-                    foreach ($ptypes as $pt): ?>
-                    <option value="<?= esc($pt) ?>" <?= ($product['product_type'] ?? '') === $pt ? 'selected' : '' ?>><?= esc(ucfirst($pt)) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            <div class="form-row"><label>Stav</label>
-                <select name="status">
-                    <option value="active" <?= ($product['status'] ?? '') === 'active' ? 'selected' : '' ?>>Active</option>
-                    <option value="draft" <?= ($product['status'] ?? '') === 'draft' ? 'selected' : '' ?>>Draft</option>
-                    <option value="archived" <?= ($product['status'] ?? '') === 'archived' ? 'selected' : '' ?>>Archived</option>
-                </select>
-            </div>
-            <div class="form-row"><label>Kratky popis</label><textarea name="summary" rows="3" style="width:100%"><?= esc($product['summary'] ?? '') ?></textarea></div>
-            <div class="form-row"><label>Popis (HTML)</label><textarea name="description" rows="6" style="width:100%"><?= esc($product['description'] ?? '') ?></textarea></div>
-            <div class="form-row"><label>Obrazky (URL, 1 na riadok)</label><textarea name="images" rows="4" style="width:100%"><?= esc(implode("\n", json_decode($product['images'] ?? '[]', true) ?: [])) ?></textarea></div>
-            <div class="form-row"><label>Nahrat obrazok</label><input type="file" name="image_upload" accept="image/*"></div>
-            <div class="form-row"><label>Hmotnosť (g)</label><input type="number" name="weight_g" value="<?= (int)($product['weight_g'] ?? 0) ?>"></div>
+        <?php
+        // Pre-fill data for BBF form
+        $bbfProductData = json_encode([
+            '_product_id'   => $product['id'] ?? 0,
+            'sku'           => $product['sku'] ?? '',
+            'name'          => $product['name'] ?? '',
+            'slug'          => $product['slug'] ?? '',
+            'category_id'   => (string)($product['category_id'] ?? ''),
+            'product_type'  => $product['product_type'] ?? 'simple',
+            'price'         => (string)(int)($product['price'] ?? 0),
+            'compare_price' => (string)(int)($product['compare_price'] ?? 0),
+            'stock'         => (string)(int)($product['stock'] ?? 0),
+            'status'        => $product['status'] ?? 'active',
+            'summary'       => $product['summary'] ?? '',
+            'description'   => $product['description'] ?? '',
+            'images'        => implode("\n", json_decode($product['images'] ?? '[]', true) ?: []),
+            'weight_g'      => (string)(int)($product['weight_g'] ?? 0),
+            'tags'          => $product['tags'] ?? '',
+        ], JSON_UNESCAPED_UNICODE);
+        ?>
+        <div id="bbf-product" data-form="admin-product" data-lang="sk"></div>
 
-            <div id="attr-section" style="border-top:2px solid #e2e8f0;margin-top:1rem;padding-top:1rem">
-                <h3 style="margin-bottom:.75rem">Atribúty</h3>
-                <div id="attr-fields">
-                    <?php foreach ($catAttrs as $a):
-                        $specKey = $a['name'];
-                        $curVal = $existingSpecs[$specKey]['criteria_value'] ?? '';
-                        $curNum = $existingSpecs[$specKey]['numeric_val'] ?? '';
-                    ?>
-                    <div class="form-row">
-                        <label><?= esc($a['name']) ?><?= $a['unit'] ? ' (' . esc($a['unit']) . ')' : '' ?></label>
-                        <?php if ($a['type'] === 'enum'): ?>
-                        <select name="attr[<?= esc($a['name']) ?>]">
-                            <option value="">— nevybrané —</option>
-                            <?php foreach ($attrOptions[$a['id']] ?? [] as $opt): ?>
-                            <option value="<?= esc($opt) ?>" <?= $curVal === $opt ? 'selected' : '' ?>><?= esc($opt) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <?php elseif ($a['type'] === 'number'): ?>
-                        <input type="number" step="any" name="attr[<?= esc($a['name']) ?>]" value="<?= esc($curNum ?: $curVal) ?>" placeholder="<?= esc($a['unit'] ?: 'číslo') ?>">
-                        <?php elseif ($a['type'] === 'boolean'): ?>
-                        <select name="attr[<?= esc($a['name']) ?>]">
-                            <option value="">— nevybrané —</option>
-                            <option value="Áno" <?= $curVal === 'Áno' ? 'selected' : '' ?>>Áno</option>
-                            <option value="Nie" <?= $curVal === 'Nie' ? 'selected' : '' ?>>Nie</option>
-                        </select>
-                        <?php endif; ?>
-                    </div>
-                    <?php endforeach; ?>
-                    <?php if (empty($catAttrs)): ?>
-                    <p class="muted" style="color:#64748b;font-size:.85rem">Pre túto kategóriu nie sú definované atribúty. <a href="admin.php?p=attributes">Spravovať atribúty</a></p>
+        <div id="attr-section" style="border-top:2px solid #e2e8f0;margin-top:1rem;padding-top:1rem">
+            <h3 style="margin-bottom:.75rem">Atribúty</h3>
+            <p class="muted" style="color:#64748b;font-size:.85rem">Atribúty sa načítajú podľa zvolenej kategórie po uložení produktu.</p>
+            <div id="attr-fields">
+                <?php foreach ($catAttrs as $a):
+                    $specKey = $a['name'];
+                    $curVal = $existingSpecs[$specKey]['criteria_value'] ?? '';
+                    $curNum = $existingSpecs[$specKey]['numeric_val'] ?? '';
+                ?>
+                <div class="form-row">
+                    <label><?= esc($a['name']) ?><?= $a['unit'] ? ' (' . esc($a['unit']) . ')' : '' ?></label>
+                    <?php if ($a['type'] === 'enum'): ?>
+                    <select name="attr_<?= esc($a['name']) ?>" data-bbf-inject="true">
+                        <option value="">— nevybrané —</option>
+                        <?php foreach ($attrOptions[$a['id']] ?? [] as $opt): ?>
+                        <option value="<?= esc($opt) ?>" <?= $curVal === $opt ? 'selected' : '' ?>><?= esc($opt) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <?php elseif ($a['type'] === 'number'): ?>
+                    <input type="number" step="any" name="attr_<?= esc($a['name']) ?>" value="<?= esc($curNum ?: $curVal) ?>" placeholder="<?= esc($a['unit'] ?: 'číslo') ?>" data-bbf-inject="true">
+                    <?php elseif ($a['type'] === 'boolean'): ?>
+                    <select name="attr_<?= esc($a['name']) ?>" data-bbf-inject="true">
+                        <option value="">— nevybrané —</option>
+                        <option value="Áno" <?= $curVal === 'Áno' ? 'selected' : '' ?>>Áno</option>
+                        <option value="Nie" <?= $curVal === 'Nie' ? 'selected' : '' ?>>Nie</option>
+                    </select>
                     <?php endif; ?>
                 </div>
-            </div>
-
-            <div style="margin-top:1rem">
-                <button type="submit" class="btn btn-primary">Uložiť</button>
-                <?php if ($product): ?>
-                    <a href="admin.php?p=products" class="btn">Späť</a>
+                <?php endforeach; ?>
+                <?php if (empty($catAttrs)): ?>
+                <p class="muted" style="color:#64748b;font-size:.85rem">Pre túto kategóriu nie sú definované atribúty. <a href="admin.php?p=attributes">Spravovať atribúty</a></p>
                 <?php endif; ?>
             </div>
-        </form>
+        </div>
+
+        <?php if ($product): ?>
+        <div style="margin-top:1rem"><a href="admin.php?p=products" class="btn">Späť na zoznam</a></div>
+        <?php endif; ?>
     </div>
+    <link rel="stylesheet" href="vendor/bbf/bbf.css">
+    <script src="vendor/bbf/bbf.js"></script>
+    <script>
+    (function() {
+        var prefill = <?= $bbfProductData ?>;
+        BBF.baseUrl = 'vendor/bbf/';
+        BBF.render('admin-product', '#bbf-product', {
+            prefill: prefill,
+            onSuccess: function(resp) {
+                if (resp.redirect) { window.location.href = resp.redirect; return false; }
+            },
+            onBeforeSubmit: function(data) {
+                // Inject attribute fields into submission data
+                document.querySelectorAll('[data-bbf-inject]').forEach(function(el) {
+                    if (el.name && el.value) data[el.name] = el.value;
+                });
+                return data;
+            }
+        });
+    })();
+    </script>
     <script>
     var catAttrMap = <?= json_encode($catAttrMap, JSON_UNESCAPED_UNICODE) ?>;
     var existingSpecs = <?= json_encode($existingSpecs, JSON_UNESCAPED_UNICODE) ?>;
@@ -652,20 +653,25 @@ function pageImport(): void {
     ?>
     <h1>Import CSV</h1>
     <div class="card">
-        <form method="post" enctype="multipart/form-data" action="admin.php?p=import&action=upload">
-            <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-            <div class="form-row">
-                <label>CSV súbor</label>
-                <input type="file" name="csv_file" accept=".csv" required>
-            </div>
-            <p class="muted" style="margin-bottom:1rem">Formát: sku, name, slug, product_type, category_path, price, compare_price, stock, images, summary, tags, weight_g, attr:*, name_en, name_de...</p>
-            <button class="btn btn-primary" type="submit">Importovať</button>
-        </form>
+        <div id="bbf-import" data-form="admin-import" data-lang="sk"></div>
     </div>
     <div class="card">
         <h3>Šablóny</h3>
         <p class="muted">Stiahnite si vzorový CSV z <code>import/test-products.csv</code></p>
     </div>
+    <link rel="stylesheet" href="vendor/bbf/bbf.css">
+    <script src="vendor/bbf/bbf.js"></script>
+    <script>
+    (function() {
+        BBF.baseUrl = 'vendor/bbf/';
+        BBF.render('admin-import', '#bbf-import', {
+            onSuccess: function(resp) {
+                if (resp.message) alert(resp.message);
+                if (resp.redirect) { window.location.href = resp.redirect; return false; }
+            }
+        });
+    })();
+    </script>
     <?php
 }
 
@@ -780,23 +786,33 @@ function pageCmsEdit(): void {
     ?>
     <h1><?= $id ? 'Upraviť stránku' : 'Nová stránka' ?></h1>
     <div class="card">
-        <form method="post" action="admin.php?p=page_edit&id=<?= $id ?>&action=save">
-            <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-            <div class="form-row"><label>Slug</label><input type="text" name="slug" value="<?= esc($pg['slug'] ?? '') ?>" required style="width:100%"></div>
-            <div class="form-row"><label>Názov</label><input type="text" name="title" value="<?= esc($pg['title'] ?? '') ?>" required style="width:100%"></div>
-            <div class="form-row"><label>Obsah (HTML)</label><textarea name="body" rows="15" style="width:100%;font-family:monospace"><?= esc($pg['body'] ?? '') ?></textarea></div>
-            <div class="form-row"><label>Stav</label>
-                <select name="status">
-                    <option value="active" <?= ($pg['status'] ?? 'active') === 'active' ? 'selected' : '' ?>>Active</option>
-                    <option value="draft" <?= ($pg['status'] ?? '') === 'draft' ? 'selected' : '' ?>>Draft</option>
-                </select>
-            </div>
-            <button class="btn btn-primary" type="submit">Uložiť</button>
-            <?php if ($id): ?>
-            <a href="admin.php?p=pages" class="btn" style="margin-left:.5rem">Späť</a>
-            <?php endif; ?>
-        </form>
+        <?php
+        $bbfPageData = json_encode([
+            '_page_id' => $id,
+            'slug'     => $pg['slug'] ?? '',
+            'title'    => $pg['title'] ?? '',
+            'body'     => $pg['body'] ?? '',
+            'status'   => $pg['status'] ?? 'active',
+        ], JSON_UNESCAPED_UNICODE);
+        ?>
+        <div id="bbf-page" data-form="admin-page" data-lang="sk"></div>
+        <?php if ($id): ?>
+        <div style="margin-top:1rem"><a href="admin.php?p=pages" class="btn">Späť</a></div>
+        <?php endif; ?>
     </div>
+    <link rel="stylesheet" href="vendor/bbf/bbf.css">
+    <script src="vendor/bbf/bbf.js"></script>
+    <script>
+    (function() {
+        BBF.baseUrl = 'vendor/bbf/';
+        BBF.render('admin-page', '#bbf-page', {
+            prefill: <?= $bbfPageData ?>,
+            onSuccess: function(resp) {
+                if (resp.redirect) { window.location.href = resp.redirect; return false; }
+            }
+        });
+    })();
+    </script>
     <?php
 }
 
@@ -1209,60 +1225,85 @@ function pageAttribute(): void {
     ?>
     <h1><?= $attr ? 'Upraviť: ' . esc($attr['name']) : 'Nový atribút' ?></h1>
     <div class="card">
-        <form method="post" action="admin.php?p=attribute&action=save<?= $attr ? '&id=' . $attr['id'] : '' ?>">
-            <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-            <div class="form-row"><label>Názov</label><input name="name" value="<?= esc($attr['name'] ?? '') ?>" required style="width:100%"></div>
-            <div class="form-row"><label>Slug</label><input name="slug" value="<?= esc($attr['slug'] ?? '') ?>" required placeholder="napr. vykon-kw"></div>
-            <div class="form-row"><label>Typ</label>
-                <select name="type" id="attr-type" onchange="toggleOptions()">
-                    <?php foreach ($types as $val => $label): ?>
-                    <option value="<?= $val ?>" <?= ($attr['type'] ?? 'enum') === $val ? 'selected' : '' ?>><?= esc($label) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            <div class="form-row"><label>Jednotka</label><input name="unit" value="<?= esc($attr['unit'] ?? '') ?>" placeholder="napr. kW, kg, cm"></div>
-            <div class="form-row"><label>Poradie</label><input type="number" name="sort_order" value="<?= (int)($attr['sort_order'] ?? 0) ?>"></div>
+        <?php
+        $bbfAttrData = json_encode([
+            '_attribute_id' => $id,
+            'name'          => $attr['name'] ?? '',
+            'slug'          => $attr['slug'] ?? '',
+            'type'          => $attr['type'] ?? 'enum',
+            'unit'          => $attr['unit'] ?? '',
+            'sort_order'    => (string)(int)($attr['sort_order'] ?? 0),
+        ], JSON_UNESCAPED_UNICODE);
+        ?>
+        <div id="bbf-attribute" data-form="admin-attribute" data-lang="sk"></div>
 
-            <div id="options-section">
-                <h3 style="margin:1rem 0 .5rem">Hodnoty (pre enum)</h3>
-                <div id="options-list">
-                    <?php foreach ($options as $i => $opt): ?>
-                    <div class="form-row" style="display:flex;gap:.5rem;align-items:center">
-                        <input name="options[]" value="<?= esc($opt['value']) ?>" style="flex:1" placeholder="Hodnota">
-                        <input type="number" name="option_order[]" value="<?= (int)$opt['sort_order'] ?>" style="width:60px" placeholder="Poradie">
-                        <button type="button" onclick="this.parentElement.remove()" class="btn btn-sm btn-danger">×</button>
-                    </div>
-                    <?php endforeach; ?>
+        <div id="options-section">
+            <h3 style="margin:1rem 0 .5rem">Hodnoty (pre enum)</h3>
+            <div id="options-list">
+                <?php foreach ($options as $i => $opt): ?>
+                <div class="form-row" style="display:flex;gap:.5rem;align-items:center">
+                    <input name="options[]" value="<?= esc($opt['value']) ?>" style="flex:1" placeholder="Hodnota" data-bbf-option>
+                    <input type="number" name="option_order[]" value="<?= (int)$opt['sort_order'] ?>" style="width:60px" placeholder="Poradie" data-bbf-option-order>
+                    <button type="button" onclick="this.parentElement.remove()" class="btn btn-sm btn-danger">x</button>
                 </div>
-                <button type="button" onclick="addOption()" class="btn btn-sm" style="margin-top:.5rem">+ Pridať hodnotu</button>
-            </div>
-
-            <h3 style="margin:1rem 0 .5rem">Priradiť ku kategóriám</h3>
-            <input type="text" id="cat-filter" placeholder="Hľadať kategóriu..." style="width:100%;padding:.4rem .6rem;margin-bottom:.5rem;border:1px solid #d1d5db;border-radius:4px" oninput="filterCats()">
-            <div style="margin-bottom:.5rem;font-size:.8rem">
-                <a href="#" onclick="toggleAllCats(true);return false" style="margin-right:.5rem">Vybrať všetky viditeľné</a>
-                <a href="#" onclick="toggleAllCats(false);return false">Odznačiť všetky</a>
-                <span id="cat-count" style="float:right;color:#64748b"></span>
-            </div>
-            <div id="cat-list" style="max-height:350px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:6px;padding:.5rem">
-                <?php foreach ($categories as $cat):
-                    $depth = substr_count($cat['path'] ?: '', '/');
-                    $indent = $depth * 1.2;
-                ?>
-                <label class="cat-item" data-search="<?= esc(mb_strtolower($cat['name'] . ' ' . $cat['path'])) ?>" style="display:block;padding:2px 4px 2px <?= $indent + 0.4 ?>rem;cursor:pointer<?= $depth ? ';font-size:.9em' : ';font-weight:600' ?>">
-                    <input type="checkbox" name="category_ids[]" value="<?= (int)$cat['id'] ?>" <?= in_array($cat['id'], $assignedCats) ? 'checked' : '' ?>>
-                    <?= esc($cat['name']) ?>
-                    <?php if ($cat['path'] && $depth): ?><span style="color:#94a3b8;font-size:.8em;margin-left:.3rem"><?= esc($cat['path']) ?></span><?php endif; ?>
-                </label>
                 <?php endforeach; ?>
             </div>
+            <button type="button" onclick="addOption()" class="btn btn-sm" style="margin-top:.5rem">+ Pridať hodnotu</button>
+        </div>
 
-            <div style="margin-top:1rem">
-                <button type="submit" class="btn btn-primary">Uložiť</button>
-                <a href="admin.php?p=attributes" class="btn" style="margin-left:.5rem">Späť</a>
-            </div>
-        </form>
+        <h3 style="margin:1rem 0 .5rem">Priradiť ku kategóriám</h3>
+        <input type="text" id="cat-filter" placeholder="Hľadať kategóriu..." style="width:100%;padding:.4rem .6rem;margin-bottom:.5rem;border:1px solid #d1d5db;border-radius:4px" oninput="filterCats()">
+        <div style="margin-bottom:.5rem;font-size:.8rem">
+            <a href="#" onclick="toggleAllCats(true);return false" style="margin-right:.5rem">Vybrať všetky viditeľné</a>
+            <a href="#" onclick="toggleAllCats(false);return false">Odznačiť všetky</a>
+            <span id="cat-count" style="float:right;color:#64748b"></span>
+        </div>
+        <div id="cat-list" style="max-height:350px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:6px;padding:.5rem">
+            <?php foreach ($categories as $cat):
+                $depth = substr_count($cat['path'] ?: '', '/');
+                $indent = $depth * 1.2;
+            ?>
+            <label class="cat-item" data-search="<?= esc(mb_strtolower($cat['name'] . ' ' . $cat['path'])) ?>" style="display:block;padding:2px 4px 2px <?= $indent + 0.4 ?>rem;cursor:pointer<?= $depth ? ';font-size:.9em' : ';font-weight:600' ?>">
+                <input type="checkbox" class="cat-checkbox" value="<?= (int)$cat['id'] ?>" <?= in_array($cat['id'], $assignedCats) ? 'checked' : '' ?>>
+                <?= esc($cat['name']) ?>
+                <?php if ($cat['path'] && $depth): ?><span style="color:#94a3b8;font-size:.8em;margin-left:.3rem"><?= esc($cat['path']) ?></span><?php endif; ?>
+            </label>
+            <?php endforeach; ?>
+        </div>
+
+        <div style="margin-top:1rem">
+            <a href="admin.php?p=attributes" class="btn">Späť</a>
+        </div>
     </div>
+    <link rel="stylesheet" href="vendor/bbf/bbf.css">
+    <script src="vendor/bbf/bbf.js"></script>
+    <script>
+    (function() {
+        BBF.baseUrl = 'vendor/bbf/';
+        BBF.render('admin-attribute', '#bbf-attribute', {
+            prefill: <?= $bbfAttrData ?>,
+            onSuccess: function(resp) {
+                if (resp.redirect) { window.location.href = resp.redirect; return false; }
+            },
+            onBeforeSubmit: function(data) {
+                // Inject enum options
+                var optEls = document.querySelectorAll('[data-bbf-option]');
+                var ordEls = document.querySelectorAll('[data-bbf-option-order]');
+                optEls.forEach(function(el, i) {
+                    data['option_val_' + i] = el.value;
+                });
+                ordEls.forEach(function(el, i) {
+                    data['option_ord_' + i] = el.value;
+                });
+                // Inject category checkboxes
+                document.querySelectorAll('.cat-checkbox:checked').forEach(function(el) {
+                    data['cat_id_' + el.value] = el.value;
+                });
+                return data;
+            }
+        });
+    })();
+    </script>
     <script>
     function toggleOptions() {
         document.getElementById('options-section').style.display = document.getElementById('attr-type').value === 'enum' ? '' : 'none';

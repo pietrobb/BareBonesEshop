@@ -56,6 +56,24 @@ try {
         'product_oe'            => apiProductOE(),
         'product_vehicles'      => apiProductVehicles(),
         'page'                  => apiPage(),
+        // BBF dynamic options
+        'bbf_categories'        => apiBbfCategories(),
+        'bbf_product_types'     => apiBbfProductTypes(),
+        'bbf_attr_types'        => apiBbfAttrTypes(),
+        'bbf_page_statuses'     => apiBbfStaticOptions([
+            ['value' => 'active', 'label' => 'Active'],
+            ['value' => 'draft', 'label' => 'Draft'],
+        ]),
+        'bbf_product_statuses'  => apiBbfStaticOptions([
+            ['value' => 'active', 'label' => 'Active'],
+            ['value' => 'draft', 'label' => 'Draft'],
+            ['value' => 'archived', 'label' => 'Archived'],
+        ]),
+        'bbf_payment_methods'   => apiBbfStaticOptions([
+            ['value' => 'cod', 'label' => 'Dobierka'],
+            ['value' => 'transfer', 'label' => 'Bankový prevod'],
+            ['value' => 'card', 'label' => 'Kartou online'],
+        ]),
         default                 => ['error' => 'Unknown action'],
     };
 
@@ -737,4 +755,44 @@ function apiPage(): array {
         if (!empty($tr[$locale]['body'])) $page['body'] = $tr[$locale]['body'];
     }
     return ['page' => ['slug' => $page['slug'], 'title' => $page['title'], 'body' => $page['body']]];
+}
+
+// ============================================================
+// BBF Dynamic Options API
+// ============================================================
+
+function apiBbfCategories(): array {
+    $db = Db::get();
+    $rows = $db->query("SELECT id, name, path FROM categories ORDER BY path, name")->fetchAll(PDO::FETCH_ASSOC);
+    $options = [];
+    foreach ($rows as $r) {
+        $label = $r['path'] ? $r['path'] : $r['name'];
+        $options[] = ['value' => (string)$r['id'], 'label' => $label];
+    }
+    return $options;
+}
+
+function apiBbfProductTypes(): array {
+    $catalogFile = __DIR__ . '/catalog.json';
+    $ptypes = file_exists($catalogFile)
+        ? array_keys(json_decode(file_get_contents($catalogFile), true)['product_types'] ?? [])
+        : ['simple'];
+    $ptypes = array_unique(array_merge(['simple'], $ptypes));
+    $options = [];
+    foreach ($ptypes as $pt) {
+        $options[] = ['value' => $pt, 'label' => ucfirst($pt)];
+    }
+    return $options;
+}
+
+function apiBbfAttrTypes(): array {
+    return [
+        ['value' => 'enum', 'label' => 'Enum (zoznam hodnôt)'],
+        ['value' => 'number', 'label' => 'Číslo'],
+        ['value' => 'boolean', 'label' => 'Áno/Nie'],
+    ];
+}
+
+function apiBbfStaticOptions(array $options): array {
+    return $options;
 }

@@ -1,0 +1,52 @@
+{
+    "$schema": "../vendor/bbf/forms/form.schema.json",
+    "schema_version": 1,
+    "id": "admin-attribute",
+    "name": "Atribút",
+    "submit_label": "Uložiť",
+    "submitting_label": "Ukladám...",
+    "success_message": "Atribút uložený.",
+    "fields": [
+        {
+            "name": "name",
+            "type": "text",
+            "label": "Názov",
+            "required": true
+        },
+        {
+            "name": "slug",
+            "type": "text",
+            "label": "Slug",
+            "required": true,
+            "placeholder": "napr. vykon-kw",
+            "size": "half"
+        },
+        {
+            "name": "type",
+            "type": "select",
+            "label": "Typ",
+            "options_from": "/api.php?action=bbf_attr_types",
+            "size": "half"
+        },
+        {
+            "name": "unit",
+            "type": "text",
+            "label": "Jednotka",
+            "placeholder": "napr. kW, kg, cm",
+            "size": "half"
+        },
+        {
+            "name": "sort_order",
+            "type": "number",
+            "label": "Poradie",
+            "min": 0,
+            "size": "half"
+        }
+    ],
+    "on_submit": {
+        "store": false,
+        "actions": [
+            {"type": "eshop-attribute-save"}
+        ]
+    }
+}

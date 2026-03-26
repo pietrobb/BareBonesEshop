@@ -1,0 +1,116 @@
+{
+    "$schema": "../vendor/bbf/forms/form.schema.json",
+    "schema_version": 1,
+    "id": "admin-product",
+    "name": "Produkt",
+    "submit_label": "Uložiť",
+    "submitting_label": "Ukladám...",
+    "success_message": "Produkt uložený.",
+    "fields": [
+        {
+            "name": "sku",
+            "type": "text",
+            "label": "SKU",
+            "required": true,
+            "size": "half"
+        },
+        {
+            "name": "name",
+            "type": "text",
+            "label": "Názov",
+            "required": true
+        },
+        {
+            "name": "slug",
+            "type": "text",
+            "label": "URL Slug",
+            "required": true,
+            "size": "half"
+        },
+        {
+            "name": "category_id",
+            "type": "select",
+            "label": "Kategória",
+            "required": true,
+            "options_from": "/api.php?action=bbf_categories"
+        },
+        {
+            "name": "product_type",
+            "type": "select",
+            "label": "Typ produktu",
+            "options_from": "/api.php?action=bbf_product_types",
+            "size": "half"
+        },
+        {
+            "name": "price",
+            "type": "number",
+            "label": "Cena (centy)",
+            "required": true,
+            "min": 0,
+            "size": "half"
+        },
+        {
+            "name": "compare_price",
+            "type": "number",
+            "label": "Pôvodná cena (centy)",
+            "min": 0,
+            "size": "half"
+        },
+        {
+            "name": "stock",
+            "type": "number",
+            "label": "Sklad",
+            "min": 0,
+            "size": "half"
+        },
+        {
+            "name": "status",
+            "type": "select",
+            "label": "Stav",
+            "options_from": "/api.php?action=bbf_product_statuses",
+            "size": "half"
+        },
+        {
+            "name": "summary",
+            "type": "textarea",
+            "label": "Krátky popis",
+            "rows": 3
+        },
+        {
+            "name": "description",
+            "type": "textarea",
+            "label": "Popis (HTML)",
+            "rows": 6
+        },
+        {
+            "name": "images",
+            "type": "textarea",
+            "label": "Obrázky (URL, 1 na riadok)",
+            "rows": 4
+        },
+        {
+            "name": "image_upload",
+            "type": "file",
+            "label": "Nahrať obrázok",
+            "accept": "image/*"
+        },
+        {
+            "name": "weight_g",
+            "type": "number",
+            "label": "Hmotnosť (g)",
+            "min": 0,
+            "size": "half"
+        },
+        {
+            "name": "tags",
+            "type": "text",
+            "label": "Tagy (čiarkou oddelené)"
+        }
+    ],
+    "on_submit": {
+        "store": false,
+        "actions": [
+            {"type": "eshop-product-save"}
+        ]
+    }
+}
