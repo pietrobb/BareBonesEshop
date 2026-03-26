@@ -279,21 +279,48 @@ class Products {
     }
 
     /**
-     * Increment stock (for order cancellation)
+     * Increment stock (for order cancellation).
+     * Routes through default warehouse if available.
      */
     public static function incrementStock(int $id, int $qty): void {
-        $stmt = Db::get()->prepare("UPDATE products SET stock = stock + :qty WHERE id = :id");
-        $stmt->execute([':qty' => $qty, ':id' => $id]);
+        $db = Db::get();
+        // Get SKU for warehouse update
+        $stmt = $db->prepare("SELECT sku FROM products WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        $sku = $stmt->fetchColumn();
+
+        if ($sku) {
+            $wh = Warehouse::defaultWarehouse();
+            if ($wh) {
+                $cur = Warehouse::totalAvailable($sku);
+                Warehouse::setStock((int)$wh['id'], $sku, $cur + $qty);
+            }
+            Warehouse::syncProductStock([$sku]);
+        } else {
+            // Fallback: direct update
+            $db->prepare("UPDATE products SET stock = stock + :qty WHERE id = :id")
+               ->execute([':qty' => $qty, ':id' => $id]);
+        }
     }
 
     /**
-     * Bulk update stock from ERP data [{sku, qty}, ...]
+     * Bulk update stock from ERP data [{sku, qty}, ...].
+     * Routes through default warehouse, recalculates product totals.
      */
     public static function bulkUpdateStock(array $stockData): int {
+        $wh = Warehouse::defaultWarehouse();
+        if ($wh) {
+            $stockMap = [];
+            foreach ($stockData as $item) {
+                $stockMap[$item['sku']] = (int)$item['qty'];
+            }
+            return Warehouse::bulkSetStock((int)$wh['id'], $stockMap);
+        }
+
+        // Fallback: direct update (no warehouses configured)
         $db = Db::get();
         $stmt = $db->prepare("UPDATE products SET stock = :qty, updated_at = " . Db::now() . " WHERE sku = :sku");
         $updated = 0;
-
         $ownTransaction = !$db->inTransaction();
         if ($ownTransaction) $db->beginTransaction();
         foreach ($stockData as $item) {
@@ -301,7 +328,6 @@ class Products {
             if ($stmt->rowCount() > 0) $updated++;
         }
         if ($ownTransaction) $db->commit();
-
         return $updated;
     }
 

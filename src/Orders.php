@@ -18,22 +18,37 @@ class Orders {
             $subtotal = 0;
 
             // 1. Atomically reserve stock for each item
+            $warehouseAllocations = []; // track per-SKU warehouse allocations for notes
             foreach ($cartItems as $item) {
                 if (!empty($item['variant_id'])) {
                     $stmt = $db->prepare("UPDATE variants SET stock = stock - :qty WHERE id = :id AND stock >= :qty");
                     $stmt->execute([':qty' => $item['qty'], ':id' => $item['variant_id']]);
+                    if ($stmt->rowCount() === 0) {
+                        $outOfStock[] = $item['name'] . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : '');
+                        continue;
+                    }
                 } else {
-                    $stmt = $db->prepare("UPDATE products SET stock = stock - :qty WHERE id = :id AND stock >= :qty");
-                    $stmt->execute([':qty' => $item['qty'], ':id' => $item['product_id']]);
+                    // Use warehouse-based reservation if warehouses exist
+                    try {
+                        $allocs = Warehouse::reserve($item['sku'], $item['qty']);
+                        $warehouseAllocations[$item['sku']] = $allocs;
+                        // Also decrement products.stock to keep it in sync
+                        $db->prepare("UPDATE products SET stock = stock - :qty WHERE id = :id")
+                           ->execute([':qty' => $item['qty'], ':id' => $item['product_id']]);
+                    } catch (\RuntimeException $e) {
+                        $outOfStock[] = $item['name'] . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : '');
+                        continue;
+                    }
                 }
-
-                if ($stmt->rowCount() === 0) {
-                    $outOfStock[] = $item['name'] . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : '');
-                    continue;
-                }
-
                 $total = $item['price'] * $item['qty'];
                 $subtotal += $total;
+
+                // Merge warehouse allocations into attrs for restore tracking
+                $itemAttrs = $item['attrs'] ?? [];
+                if (!empty($warehouseAllocations[$item['sku']])) {
+                    $itemAttrs['_warehouse_allocations'] = $warehouseAllocations[$item['sku']];
+                }
+
                 $orderItems[] = [
                     'product_id' => $item['product_id'],
                     'variant_id' => $item['variant_id'] ?? null,
@@ -42,7 +57,7 @@ class Orders {
                     'quantity'   => $item['qty'],
                     'unit_price' => $item['price'],
                     'total'      => $total,
-                    'attrs'      => json_encode($item['attrs'] ?? []),
+                    'attrs'      => json_encode($itemAttrs),
                 ];
             }
 
@@ -274,7 +289,17 @@ class Orders {
                     $stmt = $db->prepare("UPDATE variants SET stock = stock + :qty WHERE id = :id");
                     $stmt->execute([':qty' => $item['quantity'], ':id' => $item['variant_id']]);
                 } else {
-                    Products::incrementStock($item['product_id'], $item['quantity']);
+                    $attrs = json_decode($item['attrs'] ?? '{}', true);
+                    $allocs = $attrs['_warehouse_allocations'] ?? null;
+
+                    if ($allocs) {
+                        // Release back to exact warehouses where stock was reserved
+                        Warehouse::release($item['sku'], $allocs);
+                        Warehouse::syncProductStock([$item['sku']]);
+                    } else {
+                        // Fallback: no allocation info, add to default warehouse
+                        Products::incrementStock($item['product_id'], $item['quantity']);
+                    }
                 }
             }
 

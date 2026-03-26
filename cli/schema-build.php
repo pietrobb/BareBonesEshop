@@ -397,6 +397,62 @@ $db->exec("CREATE TABLE IF NOT EXISTS pages (
 $db->exec("CREATE INDEX IF NOT EXISTS idx_pages_slug ON pages(slug)");
 echo "  [OK] pages\n";
 
+// Warehouses
+$db->exec("CREATE TABLE IF NOT EXISTS warehouses (
+    id          INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
+    code        TEXT NOT NULL UNIQUE,
+    name        TEXT NOT NULL,
+    priority    INTEGER NOT NULL DEFAULT 0,
+    is_dropship INTEGER NOT NULL DEFAULT 0,
+    is_default  INTEGER NOT NULL DEFAULT 0,
+    contact     TEXT DEFAULT '',
+    notes       TEXT DEFAULT '',
+    created_at  TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . ")
+)");
+echo "  [OK] warehouses\n";
+
+// Warehouse stock — per-SKU stock in each warehouse
+$db->exec("CREATE TABLE IF NOT EXISTS warehouse_stock (
+    id           INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
+    warehouse_id INTEGER NOT NULL,
+    sku          TEXT NOT NULL,
+    qty          INTEGER NOT NULL DEFAULT 0,
+    reserved     INTEGER NOT NULL DEFAULT 0,
+    updated_at   TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . "),
+    FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE CASCADE,
+    UNIQUE(warehouse_id, sku)
+)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_wstock_sku ON warehouse_stock(sku)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_wstock_wh ON warehouse_stock(warehouse_id)");
+echo "  [OK] warehouse_stock\n";
+
+// Feeds — external data sources (XML/CSV) linked to a warehouse
+$db->exec("CREATE TABLE IF NOT EXISTS feeds (
+    id           INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
+    code         TEXT NOT NULL UNIQUE,
+    name         TEXT NOT NULL,
+    warehouse_id INTEGER NOT NULL,
+    url          TEXT NOT NULL,
+    format       TEXT NOT NULL DEFAULT 'xml',
+    field_map    TEXT NOT NULL DEFAULT '{}',
+    import_mode  TEXT NOT NULL DEFAULT 'upsert',
+    schedule     TEXT NOT NULL DEFAULT '0 */6 * * *',
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    last_sync    TEXT DEFAULT NULL,
+    last_status  TEXT DEFAULT NULL,
+    last_count   INTEGER DEFAULT 0,
+    created_at   TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . "),
+    FOREIGN KEY (warehouse_id) REFERENCES warehouses(id)
+)");
+echo "  [OK] feeds\n";
+
+// Insert default warehouse if none exists
+$wCount = (int)$db->query("SELECT COUNT(*) FROM warehouses")->fetchColumn();
+if ($wCount === 0) {
+    $db->exec("INSERT INTO warehouses (code, name, priority, is_default) VALUES ('main', 'Hlavný sklad', 10, 1)");
+    echo "  [OK] default warehouse 'main' created\n";
+}
+
 echo "\nSchema build complete!\n";
 
 // ============================================================

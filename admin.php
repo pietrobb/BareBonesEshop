@@ -42,6 +42,10 @@ $pagePermissions = [
     'page_edit'  => 'products.edit',
     'attributes' => 'products.edit',
     'attribute'  => 'products.edit',
+    'warehouses' => 'import',
+    'warehouse'  => 'import',
+    'feeds'      => 'import',
+    'feed'       => 'import',
 ];
 $requiredPerm = $pagePermissions[$page] ?? 'reports.view';
 Security::adminRequire($requiredPerm);
@@ -65,6 +69,10 @@ $title = match($page) {
     'page_edit'  => 'Upraviť stránku',
     'attributes' => 'Atribúty',
     'attribute'  => isset($_GET['id']) ? 'Upraviť atribút' : 'Nový atribút',
+    'warehouses' => 'Sklady',
+    'warehouse'  => isset($_GET['id']) ? 'Upraviť sklad' : 'Nový sklad',
+    'feeds'      => 'Feedy',
+    'feed'       => isset($_GET['id']) ? 'Upraviť feed' : 'Nový feed',
     default      => 'Admin',
 };
 
@@ -121,6 +129,8 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
     <?php if (Security::adminCan('import')): ?><a href="admin.php?p=import" class="<?= $page==='import'?'active':'' ?>">Import CSV</a><?php endif; ?>
     <?php if (Security::adminCan('cache')): ?><a href="admin.php?p=cache" class="<?= $page==='cache'?'active':'' ?>">Cache</a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=attributes" class="<?= $page==='attributes'||$page==='attribute'?'active':'' ?>">Atribúty</a><?php endif; ?>
+    <?php if (Security::adminCan('import')): ?><a href="admin.php?p=warehouses" class="<?= $page==='warehouses'||$page==='warehouse'?'active':'' ?>">Sklady</a><?php endif; ?>
+    <?php if (Security::adminCan('import')): ?><a href="admin.php?p=feeds" class="<?= $page==='feeds'||$page==='feed'?'active':'' ?>">Feedy</a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=pages" class="<?= $page==='pages'?'active':'' ?>">CMS Stránky</a><?php endif; ?>
     <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=audit" class="<?= $page==='audit'?'active':'' ?>">Audit Log</a><?php endif; ?>
 </nav>
@@ -140,6 +150,10 @@ match($page) {
     'page_edit'  => pageCmsEdit(),
     'attributes' => pageAttributes(),
     'attribute'  => pageAttribute(),
+    'warehouses' => pageWarehouses(),
+    'warehouse'  => pageWarehouse(),
+    'feeds'      => pageFeeds(),
+    'feed'       => pageFeed(),
     default      => pageDashboard(),
 };
 ?>
@@ -876,6 +890,11 @@ function handlePost(string $page, string $action): void {
         'pages:delete'   => handleCmsPageDelete(),
         'attribute:save' => handleAttributeSave(),
         'attributes:delete' => handleAttributeDelete(),
+        'warehouse:save'    => handleWarehouseSave(),
+        'warehouses:delete' => handleWarehouseDelete(),
+        'feed:save'         => handleFeedSave(),
+        'feeds:delete'      => handleFeedDelete(),
+        'feeds:sync'        => handleFeedSync(),
         default          => null,
     };
 }
@@ -1438,4 +1457,297 @@ function pagination(int $current, int $total, string $baseUrl): void {
         echo '<a href="' . esc($baseUrl . $sep . 'page=' . $i) . '" class="btn btn-sm' . $active . '">' . $i . '</a>';
     }
     echo '</div>';
+}
+
+// ============================================================
+// Warehouses
+// ============================================================
+
+function pageWarehouses(): void {
+    $warehouses = Warehouse::all();
+    ?>
+    <h1>Sklady</h1>
+    <p style="margin-bottom:1rem"><a href="admin.php?p=warehouse" class="btn btn-primary">Nový sklad</a></p>
+    <div class="card">
+        <table>
+            <thead><tr><th>Kód</th><th>Názov</th><th>Priorita</th><th>Dropship</th><th>Default</th><th>Feedov</th><th></th></tr></thead>
+            <tbody>
+            <?php foreach ($warehouses as $w):
+                $feedCount = count(Warehouse::feedsByWarehouse((int)$w['id']));
+            ?>
+            <tr>
+                <td><code><?= esc($w['code']) ?></code></td>
+                <td><a href="admin.php?p=warehouse&id=<?= $w['id'] ?>"><?= esc($w['name']) ?></a></td>
+                <td><?= (int)$w['priority'] ?></td>
+                <td><?= $w['is_dropship'] ? 'Ano' : '—' ?></td>
+                <td><?= $w['is_default'] ? 'Ano' : '—' ?></td>
+                <td><?= $feedCount ?></td>
+                <td>
+                    <form method="post" action="admin.php?p=warehouses&action=delete" style="display:inline" onsubmit="return confirm('Zmazat sklad?')">
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                        <input type="hidden" name="warehouse_id" value="<?= $w['id'] ?>">
+                        <button class="btn btn-sm btn-danger">Zmazat</button>
+                    </form>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php
+}
+
+function pageWarehouse(): void {
+    $id = Security::int($_GET['id'] ?? 0);
+    $w = $id ? Warehouse::byId($id) : null;
+    ?>
+    <h1><?= $w ? 'Upravit: ' . esc($w['name']) : 'Novy sklad' ?></h1>
+    <div class="card">
+        <form method="post" action="admin.php?p=warehouse&action=save<?= $w ? '&id='.$w['id'] : '' ?>">
+            <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+            <div class="form-row"><label>Kod (unikatny)</label><input name="code" value="<?= esc($w['code'] ?? '') ?>" required placeholder="napr. main, neosolar"></div>
+            <div class="form-row"><label>Nazov</label><input name="name" value="<?= esc($w['name'] ?? '') ?>" required style="width:100%"></div>
+            <div class="form-row"><label>Priorita (vyssia = prednost)</label><input type="number" name="priority" value="<?= (int)($w['priority'] ?? 0) ?>"></div>
+            <div class="form-row"><label>Typ</label>
+                <select name="is_dropship">
+                    <option value="0" <?= empty($w['is_dropship']) ? 'selected' : '' ?>>Vlastny sklad</option>
+                    <option value="1" <?= !empty($w['is_dropship']) ? 'selected' : '' ?>>Dropship (externy dodavatel)</option>
+                </select>
+            </div>
+            <div class="form-row"><label><input type="checkbox" name="is_default" value="1" <?= !empty($w['is_default']) ? 'checked' : '' ?>> Predvoleny sklad</label></div>
+            <div class="form-row"><label>Kontakt</label><input name="contact" value="<?= esc($w['contact'] ?? '') ?>" style="width:100%"></div>
+            <div class="form-row"><label>Poznamky</label><textarea name="notes" rows="3" style="width:100%"><?= esc($w['notes'] ?? '') ?></textarea></div>
+            <button class="btn btn-primary" type="submit">Ulozit</button>
+            <a href="admin.php?p=warehouses" class="btn" style="margin-left:.5rem">Spat</a>
+        </form>
+    </div>
+    <?php if ($w): ?>
+    <div class="card" style="margin-top:1rem">
+        <h3>Feedy pre tento sklad</h3>
+        <?php $feeds = Warehouse::feedsByWarehouse($id); ?>
+        <?php if (empty($feeds)): ?>
+            <p class="muted">Ziadne feedy. <a href="admin.php?p=feed&warehouse_id=<?= $id ?>">Pridat feed</a></p>
+        <?php else: ?>
+            <table>
+                <thead><tr><th>Kod</th><th>Nazov</th><th>Format</th><th>Posledny sync</th><th>Stav</th></tr></thead>
+                <tbody>
+                <?php foreach ($feeds as $f): ?>
+                <tr>
+                    <td><a href="admin.php?p=feed&id=<?= $f['id'] ?>"><?= esc($f['code']) ?></a></td>
+                    <td><?= esc($f['name']) ?></td>
+                    <td><?= esc($f['format']) ?></td>
+                    <td><?= $f['last_sync'] ? esc(substr($f['last_sync'], 0, 16)) : '<span class="muted">nikdy</span>' ?></td>
+                    <td><?= esc($f['last_status'] ?? '—') ?></td>
+                </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
+    <?php
+}
+
+function handleWarehouseSave(): void {
+    $id = Security::int($_GET['id'] ?? 0);
+    $data = [
+        'id' => $id,
+        'code' => Security::slug($_POST['code'] ?? ''),
+        'name' => trim($_POST['name'] ?? ''),
+        'priority' => Security::int($_POST['priority'] ?? 0),
+        'is_dropship' => (int)!empty($_POST['is_dropship']),
+        'is_default' => (int)!empty($_POST['is_default']),
+        'contact' => trim($_POST['contact'] ?? ''),
+        'notes' => trim($_POST['notes'] ?? ''),
+    ];
+    if (!$data['code'] || !$data['name']) {
+        setFlash('err', 'Kod a nazov su povinne.');
+        header("Location: admin.php?p=warehouse" . ($id ? "&id={$id}" : ''));
+        exit;
+    }
+    $id = Warehouse::save($data);
+    setFlash('ok', 'Sklad ulozeny.');
+    header("Location: admin.php?p=warehouse&id={$id}");
+    exit;
+}
+
+function handleWarehouseDelete(): void {
+    $id = Security::int($_POST['warehouse_id'] ?? 0);
+    if ($id) {
+        Warehouse::delete($id);
+        setFlash('ok', 'Sklad zmazany.');
+    }
+    header('Location: admin.php?p=warehouses');
+    exit;
+}
+
+// ============================================================
+// Feeds
+// ============================================================
+
+function pageFeeds(): void {
+    $feeds = Warehouse::allFeeds();
+    ?>
+    <h1>Feedy</h1>
+    <p style="margin-bottom:1rem"><a href="admin.php?p=feed" class="btn btn-primary">Novy feed</a></p>
+    <div class="card">
+        <table>
+            <thead><tr><th>Kod</th><th>Nazov</th><th>Sklad</th><th>Format</th><th>Posledny sync</th><th>Produktov</th><th>Stav</th><th></th></tr></thead>
+            <tbody>
+            <?php foreach ($feeds as $f): ?>
+            <tr>
+                <td><a href="admin.php?p=feed&id=<?= $f['id'] ?>"><?= esc($f['code']) ?></a></td>
+                <td><?= esc($f['name']) ?></td>
+                <td><?= esc($f['warehouse_name']) ?></td>
+                <td><?= esc($f['format']) ?></td>
+                <td><?= $f['last_sync'] ? esc(substr($f['last_sync'], 0, 16)) : '<span class="muted">nikdy</span>' ?></td>
+                <td><?= (int)$f['last_count'] ?></td>
+                <td><?= $f['enabled'] ? esc($f['last_status'] ?? '—') : '<span class="muted">Vypnuty</span>' ?></td>
+                <td>
+                    <form method="post" action="admin.php?p=feeds&action=sync" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                        <input type="hidden" name="feed_id" value="<?= $f['id'] ?>">
+                        <button class="btn btn-sm">Sync teraz</button>
+                    </form>
+                    <form method="post" action="admin.php?p=feeds&action=delete" style="display:inline" onsubmit="return confirm('Zmazat feed?')">
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                        <input type="hidden" name="feed_id" value="<?= $f['id'] ?>">
+                        <button class="btn btn-sm btn-danger">Zmazat</button>
+                    </form>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php
+}
+
+function pageFeed(): void {
+    $id = Security::int($_GET['id'] ?? 0);
+    $f = $id ? Warehouse::feedById($id) : null;
+    $warehouses = Warehouse::all();
+    $preselect = Security::int($_GET['warehouse_id'] ?? ($f['warehouse_id'] ?? 0));
+    ?>
+    <h1><?= $f ? 'Upravit: ' . esc($f['name']) : 'Novy feed' ?></h1>
+    <div class="card">
+        <form method="post" action="admin.php?p=feed&action=save<?= $f ? '&id='.$f['id'] : '' ?>">
+            <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+            <div class="form-row"><label>Kod (unikatny)</label><input name="code" value="<?= esc($f['code'] ?? '') ?>" required placeholder="napr. neosolar-victron"></div>
+            <div class="form-row"><label>Nazov</label><input name="name" value="<?= esc($f['name'] ?? '') ?>" required style="width:100%"></div>
+            <div class="form-row"><label>Sklad</label>
+                <select name="warehouse_id" required>
+                    <option value="">— Vyberte sklad —</option>
+                    <?php foreach ($warehouses as $w): ?>
+                    <option value="<?= $w['id'] ?>" <?= $preselect == $w['id'] ? 'selected' : '' ?>><?= esc($w['name']) ?> (<?= esc($w['code']) ?>)</option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="form-row"><label>URL feedu</label><input name="url" value="<?= esc($f['url'] ?? '') ?>" required style="width:100%" placeholder="https://..."></div>
+            <div class="form-row"><label>Format</label>
+                <select name="format">
+                    <option value="xml" <?= ($f['format'] ?? 'xml') === 'xml' ? 'selected' : '' ?>>XML (SHOP/SHOPITEM)</option>
+                    <option value="csv" <?= ($f['format'] ?? '') === 'csv' ? 'selected' : '' ?>>CSV</option>
+                </select>
+            </div>
+            <div class="form-row"><label>Import mod</label>
+                <select name="import_mode">
+                    <option value="upsert" <?= ($f['import_mode'] ?? 'upsert') === 'upsert' ? 'selected' : '' ?>>Upsert (aktualizuj existujuce, pridaj nove)</option>
+                    <option value="stock_only" <?= ($f['import_mode'] ?? '') === 'stock_only' ? 'selected' : '' ?>>Len stock (neaktualizuj produkty)</option>
+                </select>
+            </div>
+            <div class="form-row"><label>Mapovanie poli (JSON)</label>
+                <textarea name="field_map" rows="12" style="width:100%;font-family:monospace;font-size:.8rem"><?= esc($f['field_map'] ?? "{\n    \"ITEM_ID\": \"sku\",\n    \"PRODUCTNAME\": \"name\",\n    \"CATEGORY_TEXT\": {\"field\": \"category\", \"transform\": \"category_path\", \"separator\": \" | \"},\n    \"PRICE_VAT\": {\"field\": \"price\", \"transform\": \"price_to_cents\"},\n    \"STORE\": {\"field\": \"stock\", \"transform\": \"boolean_stock\", \"default_qty\": 10},\n    \"IMGURL\": \"image\",\n    \"IMGURL_ALTERNATIVE\": {\"field\": \"image\", \"append\": true},\n    \"DESCRIPTION\": \"description\",\n    \"DESCRIPTION_SHORT\": \"summary\",\n    \"WEIGHT\": {\"field\": \"weight_g\", \"transform\": \"weight_to_grams\"},\n    \"MANUFACTURER\": \"attr:manufacturer\",\n    \"EAN\": \"attr:ean\"\n}") ?></textarea>
+            </div>
+            <div class="form-row"><label>Opakovanie (cron vyraz)</label><input name="schedule" value="<?= esc($f['schedule'] ?? '0 */6 * * *') ?>" placeholder="0 */6 * * *"></div>
+            <div class="form-row"><label><input type="checkbox" name="enabled" value="1" <?= ($f['enabled'] ?? 1) ? 'checked' : '' ?>> Aktivny</label></div>
+            <button class="btn btn-primary" type="submit">Ulozit</button>
+            <a href="admin.php?p=feeds" class="btn" style="margin-left:.5rem">Spat</a>
+        </form>
+    </div>
+    <?php if ($f): ?>
+    <div class="card" style="margin-top:1rem">
+        <h3>Posledny sync</h3>
+        <p>Cas: <?= $f['last_sync'] ? esc($f['last_sync']) : 'nikdy' ?></p>
+        <p>Stav: <?= esc($f['last_status'] ?? '—') ?></p>
+        <p>Produktov: <?= (int)$f['last_count'] ?></p>
+        <form method="post" action="admin.php?p=feeds&action=sync" style="margin-top:.5rem">
+            <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+            <input type="hidden" name="feed_id" value="<?= $f['id'] ?>">
+            <button class="btn btn-primary">Spustit sync teraz</button>
+        </form>
+    </div>
+    <?php endif; ?>
+    <?php
+}
+
+function handleFeedSave(): void {
+    $id = Security::int($_GET['id'] ?? 0);
+
+    // Validate JSON field_map
+    $fieldMapRaw = trim($_POST['field_map'] ?? '{}');
+    $fieldMap = json_decode($fieldMapRaw, true);
+    if ($fieldMap === null && $fieldMapRaw !== '{}') {
+        setFlash('err', 'Neplatny JSON v mapovani poli: ' . json_last_error_msg());
+        header("Location: admin.php?p=feed" . ($id ? "&id={$id}" : ''));
+        exit;
+    }
+
+    $data = [
+        'id' => $id,
+        'code' => Security::slug($_POST['code'] ?? ''),
+        'name' => trim($_POST['name'] ?? ''),
+        'warehouse_id' => Security::int($_POST['warehouse_id'] ?? 0),
+        'url' => trim($_POST['url'] ?? ''),
+        'format' => in_array($_POST['format'] ?? '', ['xml', 'csv']) ? $_POST['format'] : 'xml',
+        'field_map' => json_encode($fieldMap, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT),
+        'import_mode' => in_array($_POST['import_mode'] ?? '', ['upsert', 'stock_only']) ? $_POST['import_mode'] : 'upsert',
+        'schedule' => trim($_POST['schedule'] ?? '0 */6 * * *'),
+        'enabled' => (int)!empty($_POST['enabled']),
+    ];
+
+    if (!$data['code'] || !$data['name'] || !$data['warehouse_id'] || !$data['url']) {
+        setFlash('err', 'Kod, nazov, sklad a URL su povinne.');
+        header("Location: admin.php?p=feed" . ($id ? "&id={$id}" : ''));
+        exit;
+    }
+
+    $id = Warehouse::saveFeed($data);
+    setFlash('ok', 'Feed ulozeny.');
+    header("Location: admin.php?p=feed&id={$id}");
+    exit;
+}
+
+function handleFeedDelete(): void {
+    $id = Security::int($_POST['feed_id'] ?? 0);
+    if ($id) {
+        Warehouse::deleteFeed($id);
+        setFlash('ok', 'Feed zmazany.');
+    }
+    header('Location: admin.php?p=feeds');
+    exit;
+}
+
+function handleFeedSync(): void {
+    $id = Security::int($_POST['feed_id'] ?? 0);
+    if (!$id) {
+        setFlash('err', 'Neplatny feed.');
+        header('Location: admin.php?p=feeds');
+        exit;
+    }
+
+    $result = FeedImport::sync($id);
+
+    if (!empty($result['error'])) {
+        setFlash('err', 'Feed sync chyba: ' . $result['error']);
+    } else {
+        $msg = "Sync dokonceny: {$result['imported']} produktov, {$result['stock_updated']} stock updates";
+        if (!empty($result['errors'])) {
+            $msg .= ', ' . count($result['errors']) . ' chyb';
+        }
+        setFlash('ok', $msg);
+    }
+
+    header("Location: admin.php?p=feed&id={$id}");
+    exit;
 }
