@@ -1,25 +1,46 @@
 {
-    "default_locale": "sk",
+    "default_locale": "en",
     "default_currency": "eur",
 
     "stores": {
         "sk": {
             "name": "Slovenský obchod",
-            "locale": "sk",
+            "default_locale": "sk",
             "currency": "eur",
             "url_prefix": "",
             "languages": ["sk", "cs", "en"]
         },
+        "cz": {
+            "name": "Český obchod",
+            "default_locale": "cs",
+            "currency": "czk",
+            "url_prefix": "/cs",
+            "languages": ["cs", "sk", "en"]
+        },
+        "pl": {
+            "name": "Sklep polski",
+            "default_locale": "pl",
+            "currency": "pln",
+            "url_prefix": "/pl",
+            "languages": ["pl", "en"]
+        },
+        "hu": {
+            "name": "Magyar üzlet",
+            "default_locale": "hu",
+            "currency": "huf",
+            "url_prefix": "/hu",
+            "languages": ["hu", "en"]
+        },
         "de": {
             "name": "Deutscher Shop",
-            "locale": "de",
+            "default_locale": "de",
             "currency": "eur",
             "url_prefix": "/de",
             "languages": ["de", "en"]
         },
         "us": {
             "name": "US Store",
-            "locale": "en",
+            "default_locale": "en",
             "currency": "usd",
             "url_prefix": "/en",
             "languages": ["en", "es"]
@@ -29,6 +50,8 @@
     "currencies": {
         "eur": {"symbol": "€", "decimals": 2, "position": "after"},
         "usd": {"symbol": "$", "decimals": 2, "position": "before"},
-        "czk": {"symbol": "Kč", "decimals": 0, "position": "after"}
+        "czk": {"symbol": "Kč", "decimals": 0, "position": "after"},
+        "pln": {"symbol": "zł", "decimals": 2, "position": "after"},
+        "huf": {"symbol": "Ft", "decimals": 0, "position": "after"}
     }
 }
