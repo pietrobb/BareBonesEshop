@@ -31,6 +31,7 @@ echo "Database: " . ($isSqlite ? 'SQLite' : 'MySQL') . "\n";
 if ($fresh) {
     echo "FRESH mode: dropping all tables...\n";
     $tables = [
+        'shipping_labels', 'shipping_rates',
         'abandoned_carts', 'coupon_uses', 'processed_events', 'payment_transactions', 'audit_log', 'order_items', 'orders',
         'product_vehicles', 'product_oe_numbers', 'product_specifications',
         'slug_registry', 'variants', 'product_attrs', 'products',
@@ -474,6 +475,41 @@ $db->exec("CREATE TABLE IF NOT EXISTS feeds (
     FOREIGN KEY (warehouse_id) REFERENCES warehouses(id)
 )");
 echo "  [OK] feeds\n";
+
+// Shipping Rates — tiered pricing per carrier/country/weight
+$db->exec("CREATE TABLE IF NOT EXISTS shipping_rates (
+    id             INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
+    carrier        TEXT NOT NULL,
+    country        TEXT NOT NULL,
+    weight_from_g  INTEGER NOT NULL DEFAULT 0,
+    weight_to_g    INTEGER NOT NULL DEFAULT 999999,
+    price          INTEGER NOT NULL,
+    cod_surcharge  INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . ")
+)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_srate_lookup ON shipping_rates(carrier, country, weight_from_g, weight_to_g)");
+echo "  [OK] shipping_rates\n";
+
+// Shipping Labels — AWB/tracking records
+$db->exec("CREATE TABLE IF NOT EXISTS shipping_labels (
+    id          INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
+    order_id    INTEGER NOT NULL,
+    carrier     TEXT NOT NULL,
+    awb         TEXT NOT NULL UNIQUE,
+    status      TEXT NOT NULL DEFAULT 'created',
+    label_data  TEXT NOT NULL DEFAULT '',
+    created_at  TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . "),
+    updated_at  TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . "),
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_slabel_order ON shipping_labels(order_id)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_slabel_awb   ON shipping_labels(awb)");
+echo "  [OK] shipping_labels\n";
+
+// Migration: add tracking_number and carrier to existing orders
+try { $db->exec("ALTER TABLE orders ADD COLUMN tracking_number TEXT DEFAULT NULL"); } catch (\PDOException $e) {}
+try { $db->exec("ALTER TABLE orders ADD COLUMN carrier TEXT DEFAULT NULL"); } catch (\PDOException $e) {}
+echo "  [OK] orders: tracking_number + carrier columns\n";
 
 // Insert default warehouse if none exists
 $wCount = (int)$db->query("SELECT COUNT(*) FROM warehouses")->fetchColumn();
