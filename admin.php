@@ -13,7 +13,9 @@ Security::adminAuth();
 Security::headers();
 header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'");
 
-I18n::setLocale('sk');
+// Admin UI strings are not translated in P0 (content is in SK/EN where hardcoded);
+// still initialize I18n to the system default so translation helpers return sane values.
+I18n::setLocale(I18n::detectLocale($_SERVER['REQUEST_URI'] ?? ''));
 
 $page = $_GET['p'] ?? 'dashboard';
 $action = $_GET['action'] ?? '';

@@ -869,8 +869,7 @@ function apiPage(): array {
     // Translate if non-default locale
     $tr = json_decode($page['translations'] ?? '{}', true);
     $locale = I18n::locale();
-    $cfg = require __DIR__ . '/config.php';
-    if ($locale !== ($cfg['default_locale'] ?? 'sk') && isset($tr[$locale])) {
+    if ($locale !== I18n::sysDefault() && isset($tr[$locale])) {
         if (!empty($tr[$locale]['title'])) $page['title'] = $tr[$locale]['title'];
         if (!empty($tr[$locale]['body'])) $page['body'] = $tr[$locale]['body'];
     }

@@ -30,7 +30,7 @@ if (!$page) {
 // Translate
 $tr = json_decode($page['translations'] ?? '{}', true);
 $cfg = require __DIR__ . '/config.php';
-if ($lang !== ($cfg['default_locale'] ?? 'sk') && isset($tr[$lang])) {
+if ($lang !== I18n::sysDefault() && isset($tr[$lang])) {
     if (!empty($tr[$lang]['title'])) $page['title'] = $tr[$lang]['title'];
     if (!empty($tr[$lang]['body'])) $page['body'] = $tr[$lang]['body'];
 }

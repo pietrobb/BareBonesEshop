@@ -23,7 +23,7 @@ foreach ($stores['stores'] ?? [] as $store) {
         $locales[$lang] = true;
     }
 }
-$locales = array_keys($locales) ?: ['sk'];
+$locales = array_keys($locales) ?: [$stores['default_locale'] ?? 'en'];
 echo "Locales: " . implode(', ', $locales) . "\n";
 
 // Get all data

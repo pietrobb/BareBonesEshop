@@ -114,7 +114,7 @@ function handleCacheRebuild(array $payload, array $job): void {
             $locales[$lang] = true;
         }
     }
-    $locales = array_keys($locales) ?: ['sk'];
+    $locales = array_keys($locales) ?: [$stores['default_locale'] ?? 'en'];
 
     if ($scope === 'full' || !empty($payload['prefix'])) {
         // Full rebuild — categories + all category listings
@@ -384,10 +384,11 @@ function handleSitemapBuild(array $payload, array $job): void {
     }
 
     // Build prefix→locale map for translated slugs
-    $prefixLocale = ['' => $stores['default_locale'] ?? 'sk'];
+    $sysDefault = $stores['default_locale'] ?? 'en';
+    $prefixLocale = ['' => $sysDefault];
     foreach ($stores['stores'] ?? [] as $store) {
         $p = $store['url_prefix'] ?? '';
-        if ($p !== '') $prefixLocale[$p] = $store['locale'] ?? 'sk';
+        if ($p !== '') $prefixLocale[$p] = $store['default_locale'] ?? $store['locale'] ?? $sysDefault;
     }
 
     // Categories per locale (with translated slugs)
@@ -395,7 +396,7 @@ function handleSitemapBuild(array $payload, array $job): void {
     foreach ($cats as $cat) {
         foreach ($prefixes as $prefix) {
             $safePrefix = htmlspecialchars($prefix, ENT_XML1 | ENT_QUOTES, 'UTF-8');
-            I18n::setLocale($prefixLocale[$prefix] ?? 'sk');
+            I18n::setLocale($prefixLocale[$prefix] ?? $sysDefault);
             $trCat = I18n::category($cat);
             $slug = htmlspecialchars($trCat['slug'], ENT_XML1 | ENT_QUOTES, 'UTF-8');
             $xml .= "<url><loc>{$safeBase}{$safePrefix}/category/{$slug}</loc><priority>0.8</priority></url>\n";
@@ -409,7 +410,7 @@ function handleSitemapBuild(array $payload, array $job): void {
         $lastmod = substr($p['updated_at'], 0, 10);
         foreach ($prefixes as $prefix) {
             $safePrefix = htmlspecialchars($prefix, ENT_XML1 | ENT_QUOTES, 'UTF-8');
-            I18n::setLocale($prefixLocale[$prefix] ?? 'sk');
+            I18n::setLocale($prefixLocale[$prefix] ?? $sysDefault);
             $trP = I18n::product($p);
             $slug = htmlspecialchars($trP['slug'], ENT_XML1 | ENT_QUOTES, 'UTF-8');
             $xml .= "<url><loc>{$safeBase}{$safePrefix}/product/{$slug}</loc><lastmod>{$lastmod}</lastmod><priority>0.6</priority></url>\n";
