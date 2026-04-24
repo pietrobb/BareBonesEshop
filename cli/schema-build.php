@@ -31,7 +31,7 @@ echo "Database: " . ($isSqlite ? 'SQLite' : 'MySQL') . "\n";
 if ($fresh) {
     echo "FRESH mode: dropping all tables...\n";
     $tables = [
-        'abandoned_carts', 'coupon_uses', 'processed_events', 'audit_log', 'order_items', 'orders',
+        'abandoned_carts', 'coupon_uses', 'processed_events', 'payment_transactions', 'audit_log', 'order_items', 'orders',
         'product_vehicles', 'product_oe_numbers', 'product_specifications',
         'slug_registry', 'variants', 'product_attrs', 'products',
         'categories',
@@ -198,6 +198,7 @@ $db->exec("CREATE TABLE IF NOT EXISTS orders (
     id             INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
     order_number   TEXT UNIQUE NOT NULL,
     status         TEXT NOT NULL DEFAULT 'pending',
+    payment_status TEXT NOT NULL DEFAULT 'pending',
     customer_name  TEXT NOT NULL,
     customer_email TEXT NOT NULL,
     customer_phone TEXT DEFAULT '',
@@ -221,7 +222,31 @@ $db->exec("CREATE TABLE IF NOT EXISTS orders (
 )");
 $db->exec("CREATE INDEX IF NOT EXISTS idx_ord_status ON orders(status, created_at)");
 $db->exec("CREATE INDEX IF NOT EXISTS idx_ord_email ON orders(customer_email)");
+// Migration: add payment_status to existing databases
+try {
+    $db->exec("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'pending'");
+} catch (\PDOException $e) { /* already exists */ }
 echo "  [OK] orders\n";
+
+// Payment Transactions — immutable log of every payment event
+$db->exec("CREATE TABLE IF NOT EXISTS payment_transactions (
+    id              INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
+    order_id        INTEGER NOT NULL,
+    provider        TEXT NOT NULL,
+    provider_ref    TEXT NOT NULL DEFAULT '',
+    status          TEXT NOT NULL,
+    amount          INTEGER NOT NULL,
+    currency        TEXT NOT NULL DEFAULT 'eur',
+    idempotency_key TEXT NOT NULL UNIQUE,
+    raw_response    TEXT NOT NULL DEFAULT '{}',
+    created_at      TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . "),
+    updated_at      TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . "),
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_ptx_order ON payment_transactions(order_id)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_ptx_ref ON payment_transactions(provider, provider_ref)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_ptx_status ON payment_transactions(provider, status)");
+echo "  [OK] payment_transactions\n";
 
 // Order Items
 $db->exec("CREATE TABLE IF NOT EXISTS order_items (

@@ -58,6 +58,7 @@ class OrderWorkflow {
 
             // Collect DB-side effects (stock restore) + deferred jobs
             $deferredJobs = match($to) {
+                'paid'      => self::handlePaid($order),
                 'cancelled' => self::handleCancellation($order),
                 'shipped'   => self::handleShipped($order),
                 'returned'  => self::handleReturn($order),
@@ -75,6 +76,23 @@ class OrderWorkflow {
         foreach ($deferredJobs as [$type, $payload, $priority]) {
             JobQueue::push($type, $payload, $priority);
         }
+    }
+
+    /**
+     * Paid: send confirmation email, notify ERP.
+     */
+    private static function handlePaid(array $order): array {
+        return [
+            ['email_send', [
+                'template' => 'order-confirmation',
+                'to'       => $order['customer_email'],
+                'order_id' => $order['id'],
+            ], 5],
+            ['erp_order_update', [
+                'order_id' => $order['id'],
+                'status'   => 'paid',
+            ], 5],
+        ];
     }
 
     /**
