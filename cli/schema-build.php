@@ -212,6 +212,10 @@ $db->exec("CREATE TABLE IF NOT EXISTS orders (
     currency       TEXT NOT NULL DEFAULT 'eur',
     notes          TEXT DEFAULT '',
     ip_address     TEXT DEFAULT '',
+    erp_id         TEXT DEFAULT NULL,
+    erp_status     TEXT DEFAULT NULL,
+    erp_synced_at  TEXT DEFAULT NULL,
+    erp_error      TEXT DEFAULT NULL,
     created_at     TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . "),
     updated_at     TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . ")
 )");

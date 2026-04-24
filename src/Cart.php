@@ -70,6 +70,7 @@ class Cart {
 
         $items = [];
         $subtotal = 0;
+        $cartCurrency = null; // enforced currency for entire cart
 
         foreach ($cart as $key => $item) {
             $product = $products[$item['product_id']] ?? null;
@@ -91,40 +92,54 @@ class Cart {
                 $stock = (int)$product['stock'];
             }
 
+            $currency = $product['currency'] ?? 'eur';
+
+            // Enforce single currency across the entire cart
+            if ($cartCurrency === null) {
+                $cartCurrency = $currency;
+            }
+            $currencyMismatch = ($currency !== $cartCurrency);
+
             $qty = min($item['qty'], $stock);
             $available = $qty > 0;
             if (!$available) $qty = $item['qty']; // preserve requested qty for display
 
             $total = $available ? $price * $qty : 0;
-            $subtotal += $total;
+            // Only add to subtotal when currency matches — prevents mixed-currency totals
+            if (!$currencyMismatch) {
+                $subtotal += $total;
+            }
+
             $images = json_decode($product['images'] ?? '[]', true);
-            $currency = $product['currency'] ?? 'eur';
 
             $items[] = [
-                'key'          => $key,
-                'product_id'   => $item['product_id'],
-                'variant_id'   => $item['variant_id'],
-                'sku'          => $sku,
-                'name'         => $product['name'],
-                'variant_name' => $variantName,
-                'slug'         => $product['slug'],
-                'image'        => $images[0] ?? null,
-                'price'        => $price,
-                'price_formatted' => I18n::price($price, $currency),
-                'qty'          => $qty,
-                'total'        => $total,
-                'total_formatted' => I18n::price($total, $currency),
-                'stock'        => $stock,
-                'currency'     => $currency,
-                'available'    => $available,
+                'key'              => $key,
+                'product_id'       => $item['product_id'],
+                'variant_id'       => $item['variant_id'],
+                'sku'              => $sku,
+                'name'             => $product['name'],
+                'variant_name'     => $variantName,
+                'slug'             => $product['slug'],
+                'image'            => $images[0] ?? null,
+                'price'            => $price,
+                'price_formatted'  => I18n::price($price, $currency),
+                'qty'              => $qty,
+                'total'            => $total,
+                'total_formatted'  => I18n::price($total, $currency),
+                'stock'            => $stock,
+                'currency'         => $currency,
+                'available'        => $available,
+                'currency_mismatch' => $currencyMismatch,
             ];
         }
 
+        $currency = $cartCurrency ?? 'eur';
         return [
-            'items'    => $items,
-            'subtotal' => $subtotal,
-            'subtotal_formatted' => I18n::price($subtotal),
-            'count'    => array_sum(array_column($items, 'qty')),
+            'items'              => $items,
+            'subtotal'           => $subtotal,
+            'subtotal_formatted' => I18n::price($subtotal, $currency),
+            'currency'           => $currency,
+            'count'              => array_sum(array_column($items, 'qty')),
         ];
     }
 
