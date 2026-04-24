@@ -1,0 +1,1 @@
+Fizetés beérkezett — rendelés {{order_number}}

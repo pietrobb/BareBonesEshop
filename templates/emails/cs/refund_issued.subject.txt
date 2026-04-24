@@ -1,0 +1,1 @@
+Vratka provedena — objednávka {{order_number}}

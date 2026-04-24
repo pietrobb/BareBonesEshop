@@ -1,0 +1,1 @@
+Płatność otrzymana — zamówienie {{order_number}}

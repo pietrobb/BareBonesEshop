@@ -1,0 +1,1 @@
+Visszatérítés teljesítve — rendelés {{order_number}}

@@ -2606,14 +2606,14 @@ $renderedEn = MailService::render('order_confirmation', 'en', [
 assert_true(str_contains($renderedEn['html'], 'Thanks for your order'), 'Email: EN template used when locale=en');
 
 echo "\n--- Test: Email — locale fallback to en then sk ---\n";
-$renderedCs = MailService::render('order_confirmation', 'cs', [
+$renderedXx = MailService::render('order_confirmation', 'fr', [
     'order_number' => 'TST-003',
-    'customer_name'=> 'Pavel',
+    'customer_name'=> 'Pierre',
     'items'        => [],
 ]);
-// cs has no templates → must fall back to en (first in fallback chain)
-assert_true(str_contains($renderedCs['html'], 'Thanks for your order'), 'Email: cs locale falls back to en');
-assert_true(str_contains($renderedCs['subject'], 'TST-003'), 'Email: fallback still renders variables');
+// fr has no templates → must fall back to en (first in fallback chain)
+assert_true(str_contains($renderedXx['html'], 'Thanks for your order'), 'Email: fr locale falls back to en');
+assert_true(str_contains($renderedXx['subject'], 'TST-003'), 'Email: fallback still renders variables');
 
 $renderedNone = MailService::render('__nope__', 'sk', ['x' => 'y']);
 assert_true(str_contains($renderedNone['html'], '__nope__'), 'Email: unknown template returns placeholder HTML');

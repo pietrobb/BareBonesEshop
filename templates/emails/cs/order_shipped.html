@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="cs"><body style="font-family:Arial,sans-serif">
+<h2>Vaše objednávka je na cestě</h2>
+<p>Objednávka <strong>{{order_number}}</strong> byla předána dopravci {{carrier}}.</p>
+{{#if tracking_number}}<p>Číslo zásilky: <strong>{{tracking_number}}</strong></p>{{/if}}
+{{#if tracking_url}}<p><a href="{{tracking_url}}">Sledovat zásilku</a></p>{{/if}}
+</body></html>

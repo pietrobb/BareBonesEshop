@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="pl"><body style="font-family:Arial,sans-serif">
+<h2>Twoje zamówienie jest w drodze</h2>
+<p>Zamówienie <strong>{{order_number}}</strong> zostało przekazane przewoźnikowi {{carrier}}.</p>
+{{#if tracking_number}}<p>Numer przesyłki: <strong>{{tracking_number}}</strong></p>{{/if}}
+{{#if tracking_url}}<p><a href="{{tracking_url}}">Śledź przesyłkę</a></p>{{/if}}
+</body></html>
