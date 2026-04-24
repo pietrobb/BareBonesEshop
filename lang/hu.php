@@ -250,6 +250,7 @@ return [
     'account.orders_view'         => 'Rendelések megtekintése',
     'account.no_orders'           => 'Még nincsenek rendelések.',
     'account.order_number'        => 'Rendelésszám',
+    'account.invoice'             => 'Számla',
     'account.status'              => 'Állapot',
     'account.total'               => 'Összesen',
     'account.date'                => 'Dátum',
