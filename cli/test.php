@@ -2273,6 +2273,43 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS payment_transactions (
 try { $pdo->exec("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'pending'"); }
 catch (\PDOException $e) { /* already exists */ }
 
+// Shipping tables
+$pdo->exec("CREATE TABLE IF NOT EXISTS shipping_rates (
+    id            INTEGER PRIMARY KEY,
+    carrier       TEXT NOT NULL,
+    country       TEXT NOT NULL,
+    weight_from_g INTEGER NOT NULL DEFAULT 0,
+    weight_to_g   INTEGER NOT NULL DEFAULT 999999,
+    price         INTEGER NOT NULL,
+    cod_surcharge INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT DEFAULT (datetime('now'))
+)");
+$pdo->exec("CREATE TABLE IF NOT EXISTS shipping_labels (
+    id         INTEGER PRIMARY KEY,
+    order_id   INTEGER NOT NULL,
+    carrier    TEXT NOT NULL,
+    awb        TEXT NOT NULL UNIQUE,
+    status     TEXT NOT NULL DEFAULT 'created',
+    label_data TEXT NOT NULL DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+)");
+try { $pdo->exec("ALTER TABLE orders ADD COLUMN tracking_number TEXT DEFAULT NULL"); } catch (\PDOException $e) {}
+try { $pdo->exec("ALTER TABLE orders ADD COLUMN carrier TEXT DEFAULT NULL"); } catch (\PDOException $e) {}
+
+// Insert shipping_rates test fixtures
+$pdo->exec("INSERT INTO shipping_rates (carrier, country, weight_from_g, weight_to_g, price, cod_surcharge) VALUES
+    ('packeta', 'SK', 0,    2000,  299, 100),
+    ('packeta', 'SK', 2001, 5000,  349, 100),
+    ('packeta', 'SK', 5001, 10000, 449, 100),
+    ('packeta', 'CZ', 0,    2000,  399, 100),
+    ('packeta', 'CZ', 2001, 5000,  449, 100),
+    ('gls',     'SK', 0,    2000,  399, 150),
+    ('gls',     'SK', 2001, 5000,  499, 150),
+    ('gls',     'DE', 0,    5000,  899, 150)
+");
+
 $mockGateway = new MockPayment(['mock_result' => 'success']);
 
 // Create a fresh pending order for payment tests
@@ -2408,6 +2445,120 @@ assert_true(!empty($failSession['session_id']), 'Payment: fail gateway still ret
 
 $failStatus = $failMock->getStatus($failSession['session_id']);
 assert_equals('failed', $failStatus, 'Payment: fail gateway getStatus returns failed');
+
+// ============================================================
+// SHIPPING TESTS
+// ============================================================
+
+echo "\n--- Test: Shipping — PersonalPickup always free ---\n";
+$pickup = new PersonalPickup();
+assert_equals('pickup', $pickup->carrierId(), 'Shipping: PersonalPickup carrierId');
+assert_true(!$pickup->supportsCOD(), 'Shipping: PersonalPickup does not support COD');
+$pickupRates = $pickup->getRates(['country' => 'SK', 'weight_g' => 5000, 'subtotal' => 100]);
+assert_true(!empty($pickupRates), 'Shipping: PersonalPickup returns rate');
+assert_equals(0, $pickupRates[0]['price'], 'Shipping: PersonalPickup price is 0');
+
+echo "\n--- Test: Shipping — Packeta tiered pricing (DB rates) ---\n";
+$packeta = new PacketaShipping();
+assert_equals('packeta', $packeta->carrierId(), 'Shipping: PacketaShipping carrierId');
+assert_true($packeta->supportsCOD(), 'Shipping: Packeta supports COD');
+
+// Weight tier 0-2000g: 299 cents
+$r1 = $packeta->getRates(['country' => 'SK', 'weight_g' => 1500, 'subtotal' => 2000, 'cod' => false]);
+assert_true(!empty($r1), 'Shipping: Packeta SK 1500g returns rate');
+assert_equals(299, $r1[0]['price'], 'Shipping: Packeta SK 1500g = 299 cents');
+
+// Weight tier 2001-5000g: 349 cents
+$r2 = $packeta->getRates(['country' => 'SK', 'weight_g' => 3000, 'subtotal' => 2000, 'cod' => false]);
+assert_equals(349, $r2[0]['price'], 'Shipping: Packeta SK 3000g = 349 cents');
+
+// COD surcharge
+$r3 = $packeta->getRates(['country' => 'SK', 'weight_g' => 1000, 'subtotal' => 2000, 'cod' => true]);
+assert_equals(100, $r3[0]['cod_surcharge'], 'Shipping: Packeta SK COD surcharge = 100 cents');
+
+echo "\n--- Test: Shipping — free_above threshold ---\n";
+// Packeta free threshold default = 5000 cents (50 EUR)
+$rFree = $packeta->getRates(['country' => 'SK', 'weight_g' => 2000, 'subtotal' => 5000, 'cod' => false]);
+assert_equals(0, $rFree[0]['price'], 'Shipping: Packeta free when subtotal >= 5000');
+assert_equals(0, $rFree[0]['cod_surcharge'], 'Shipping: Packeta free COD surcharge = 0 when free');
+
+echo "\n--- Test: Shipping — GLS EU pricing ---\n";
+$gls = new GlsShipping();
+assert_equals('gls', $gls->carrierId(), 'Shipping: GlsShipping carrierId');
+assert_true($gls->supportsCOD(), 'Shipping: GLS supports COD');
+
+$rGls = $gls->getRates(['country' => 'SK', 'weight_g' => 1000, 'subtotal' => 1000, 'cod' => false]);
+assert_true(!empty($rGls), 'Shipping: GLS SK returns rate');
+assert_equals(399, $rGls[0]['price'], 'Shipping: GLS SK 1000g = 399 cents');
+
+$rGlsDe = $gls->getRates(['country' => 'DE', 'weight_g' => 3000, 'subtotal' => 1000, 'cod' => false]);
+assert_true(!empty($rGlsDe), 'Shipping: GLS DE returns rate');
+assert_equals(899, $rGlsDe[0]['price'], 'Shipping: GLS DE 3000g = 899 cents');
+
+// GLS should not service unknown countries
+$rGlsUnknown = $gls->getRates(['country' => 'US', 'weight_g' => 1000, 'subtotal' => 1000]);
+assert_true(empty($rGlsUnknown), 'Shipping: GLS does not service US');
+
+echo "\n--- Test: Shipping — calculateRates aggregation ---\n";
+ShippingService::setAdapters([new PersonalPickup(), new PacketaShipping(), new GlsShipping()]);
+$allRates = ShippingService::calculateRates('SK', 2000, 2000);
+assert_true(count($allRates) >= 3, 'Shipping: calculateRates returns rates from all 3 carriers for SK');
+
+$carriers = array_column($allRates, 'carrier');
+assert_true(in_array('pickup', $carriers), 'Shipping: calculateRates includes pickup');
+assert_true(in_array('packeta', $carriers), 'Shipping: calculateRates includes packeta');
+assert_true(in_array('gls', $carriers), 'Shipping: calculateRates includes gls');
+
+echo "\n--- Test: Shipping — generateLabel + tracking ---\n";
+// Use existing order from earlier tests
+$shippingOrderId = $payOrderId; // reuse payment test order
+$labelResult = ShippingService::generateLabel($shippingOrderId, 'packeta');
+assert_true(!empty($labelResult['awb']), 'Shipping: generateLabel returns AWB');
+assert_true(str_starts_with($labelResult['awb'], 'PKT'), 'Shipping: Packeta AWB starts with PKT');
+assert_equals('packeta', $labelResult['carrier'], 'Shipping: label carrier is packeta');
+
+// Verify label persisted in DB
+$labelRow = $pdo->query("SELECT * FROM shipping_labels WHERE awb = '{$labelResult['awb']}'")->fetch();
+assert_true($labelRow !== false, 'Shipping: label saved in shipping_labels table');
+assert_equals('created', $labelRow['status'], 'Shipping: label status = created');
+
+// Verify order updated with tracking_number + carrier
+$updatedOrder = $pdo->query("SELECT tracking_number, carrier FROM orders WHERE id = {$shippingOrderId}")->fetch();
+assert_equals($labelResult['awb'], $updatedOrder['tracking_number'], 'Shipping: order tracking_number updated');
+assert_equals('packeta', $updatedOrder['carrier'], 'Shipping: order carrier updated');
+
+echo "\n--- Test: Shipping — tracking webhook → delivered ---\n";
+// Ship the order first (workflow: paid→shipped→delivered)
+OrderWorkflow::transition($shippingOrderId, 'shipped');
+
+$webhookPayload = [
+    'awb'    => $labelResult['awb'],
+    'status' => 'delivered',
+];
+$webhookResult = ShippingService::handleTrackingWebhook('packeta', $webhookPayload, '');
+assert_true($webhookResult['handled'], 'Shipping: tracking webhook handled=true');
+assert_equals('delivered', $webhookResult['status'], 'Shipping: webhook status=delivered');
+assert_equals($shippingOrderId, $webhookResult['order_id'], 'Shipping: webhook order_id matches');
+
+// Verify label status updated
+$deliveredLabel = $pdo->query("SELECT status FROM shipping_labels WHERE awb = '{$labelResult['awb']}'")->fetch();
+assert_equals('delivered', $deliveredLabel['status'], 'Shipping: label status updated to delivered after webhook');
+
+// Verify order transitioned to delivered
+$deliveredOrder = $pdo->query("SELECT status FROM orders WHERE id = {$shippingOrderId}")->fetch();
+assert_equals('delivered', $deliveredOrder['status'], 'Shipping: order status = delivered after webhook');
+
+echo "\n--- Test: Shipping — bad webhook signature rejected ---\n";
+$_ENV['SHIP_PACKETA_WEBHOOK_SECRET'] = 'testsecret';
+$badPayload = ['awb' => 'PKT-BAD', 'status' => 'in_transit'];
+$exceptionThrown = false;
+try {
+    ShippingService::handleTrackingWebhook('packeta', $badPayload, 'bad-sig');
+} catch (\RuntimeException $e) {
+    $exceptionThrown = str_contains($e->getMessage(), 'signature');
+}
+assert_true($exceptionThrown, 'Shipping: bad signature throws RuntimeException');
+unset($_ENV['SHIP_PACKETA_WEBHOOK_SECRET']);
 
 // ============================================================
 echo "\n========================================\n";
