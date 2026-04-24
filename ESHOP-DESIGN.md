@@ -275,11 +275,25 @@ V Shop: catalog JSON → SQL tabuľky + admin formuláre + filtre + import šabl
 
 Keď spustíš `php cli/schema-build.php`:
 
-1. **SQL tabuľky** — `product_attrs` s indexmi pre každý filterable atribút
+1. **SQL tabuľky** — vytvoria sa cez `Migrator` (forward-only migrácie v `migrations/`).
+   Schema-build interne volá `Migrator::apply()` — žiadne ďalšie ad-hoc ALTER.
 2. **Admin formuláre** — pre každý product type sa vygeneruje BBF JSON form na editáciu
 3. **Import šablóny** — CSV hlavičky pre každý product type
 4. **Filter konfigurácia** — `cache/filters/{category}.json` — aké filtre zobrazovať
 5. **Validačné pravidlá** — required, type checking, options whitelist
+
+### Migrations runtime
+
+- **Vývoj / fresh DB:** `php cli/schema-build.php` aplikuje všetky pending migrácie
+  od baseline po HEAD. Identické s `php cli/migrate.php`.
+- **Existujúca produkcia (v1.4.0):** raz spusti `php cli/migrate.php baseline` —
+  označí baseline migráciu ako aplikovanú **bez spustenia** (DB už má všetky tabuľky).
+  Následné `migrate` aplikujú iba nové migrácie.
+- **Nová migrácia:** `php cli/migrate.php create add_xyz_column` → vyrobí
+  `migrations/<TS>_add_xyz_column.php` so stub `up(PDO, bool isSqlite)`.
+- **Forward-only.** Žiadne `down()`. Rollback = nová migrácia.
+- **Bezpečnosť:** flock na `db/.migrations.lock` (10 s timeout), per-migration
+  `BEGIN/ROLLBACK`, hard fail pri checksum mismatch (file edited po apply).
 
 ```
 catalog.json
@@ -1545,11 +1559,15 @@ barebone-shop/
 │   └── stores/                   #   store-specific overrides (optional)
 │
 ├── cli/
-│   ├── schema-build.php          # catalog.json → SQL + admin forms + templates
+│   ├── schema-build.php          # init wrapper: runs migrations + (re)gens forms/templates
+│   ├── migrate.php               # apply / status / create / baseline (forward-only)
 │   ├── cache-rebuild.php         # Pregeneruj flat cache (all locales)
 │   ├── worker.php                # Job queue worker (cron)
 │   ├── import.php                # CLI import CSV/JSON
 │   └── seed.php                  # Testovací seed (generátor 1M produktov)
+│
+├── migrations/                   # Numbered <YYYYMMDDHHMMSS>_<name>.php files
+│   └── 20260424000000_baseline.php   # v1.4.0 schema baseline
 │
 ├── db/
 │   ├── shop.sqlite               # SQLite databáza (ak sa používa)
