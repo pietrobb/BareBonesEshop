@@ -1,0 +1,1 @@
+Üdvözöljük a {{shop_name}} oldalán
