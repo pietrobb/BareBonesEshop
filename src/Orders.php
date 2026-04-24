@@ -321,34 +321,31 @@ class Orders {
 
     /** Get orders not yet synced to ERP */
     public static function unsyncedForErp(): array {
-        $stmt = Db::get()->query("SELECT * FROM orders WHERE status != 'pending' AND (notes NOT LIKE '%erp_synced%') ORDER BY created_at ASC LIMIT 50");
+        $stmt = Db::get()->query("SELECT * FROM orders WHERE status != 'pending' AND erp_id IS NULL ORDER BY created_at ASC LIMIT 50");
         return $stmt->fetchAll();
     }
 
     /** Mark order as synced to ERP */
     public static function markSynced(int $orderId, string $externalId): void {
-        $concat = Db::isSqlite() ? "COALESCE(notes,'') || :note" : "CONCAT(COALESCE(notes,''), :note)";
-        $stmt = Db::get()->prepare("UPDATE orders SET notes = {$concat}, updated_at = " . Db::now() . " WHERE id = :id");
-        $stmt->execute([':note' => "\nerp_synced:{$externalId}", ':id' => $orderId]);
+        $stmt = Db::get()->prepare("UPDATE orders SET erp_id = :eid, erp_synced_at = " . Db::now() . ", erp_error = NULL, updated_at = " . Db::now() . " WHERE id = :id");
+        $stmt->execute([':eid' => $externalId, ':id' => $orderId]);
     }
 
     /** Mark order ERP sync as failed */
     public static function markSyncFailed(int $orderId, string $error): void {
-        $concat = Db::isSqlite() ? "COALESCE(notes,'') || :note" : "CONCAT(COALESCE(notes,''), :note)";
-        $stmt = Db::get()->prepare("UPDATE orders SET notes = {$concat}, updated_at = " . Db::now() . " WHERE id = :id");
-        $stmt->execute([':note' => "\nerp_fail:" . substr($error, 0, 200), ':id' => $orderId]);
+        $stmt = Db::get()->prepare("UPDATE orders SET erp_error = :err, updated_at = " . Db::now() . " WHERE id = :id");
+        $stmt->execute([':err' => substr($error, 0, 500), ':id' => $orderId]);
     }
 
     /** Get orders pending ERP status sync */
     public static function pendingStatusSync(): array {
-        $stmt = Db::get()->query("SELECT * FROM orders WHERE notes LIKE '%erp_synced:%' AND status NOT IN ('delivered','cancelled','refunded') ORDER BY updated_at ASC LIMIT 50");
+        $stmt = Db::get()->query("SELECT * FROM orders WHERE erp_id IS NOT NULL AND status NOT IN ('delivered','cancelled','refunded') ORDER BY updated_at ASC LIMIT 50");
         return $stmt->fetchAll();
     }
 
     /** Update ERP status on order */
     public static function updateErpStatus(int $orderId, string $erpStatus): void {
-        $concat = Db::isSqlite() ? "COALESCE(notes,'') || :note" : "CONCAT(COALESCE(notes,''), :note)";
-        $stmt = Db::get()->prepare("UPDATE orders SET notes = {$concat}, updated_at = " . Db::now() . " WHERE id = :id");
-        $stmt->execute([':note' => "\nerp_status:{$erpStatus}", ':id' => $orderId]);
+        $stmt = Db::get()->prepare("UPDATE orders SET erp_status = :status, updated_at = " . Db::now() . " WHERE id = :id");
+        $stmt->execute([':status' => $erpStatus, ':id' => $orderId]);
     }
 }

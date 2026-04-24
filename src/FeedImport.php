@@ -72,9 +72,11 @@ class FeedImport {
         $stockMap = [];
 
         foreach ($items as $i => $raw) {
+            $db->exec('SAVEPOINT row_import');
             try {
                 $mapped = self::mapFields($raw, $fieldMap);
                 if (empty($mapped['sku'])) {
+                    $db->exec('RELEASE SAVEPOINT row_import');
                     $result['skipped']++;
                     continue;
                 }
@@ -118,11 +120,12 @@ class FeedImport {
                 if (isset($mapped['stock'])) {
                     $stockMap[$mapped['sku']] = (int)$mapped['stock'];
                 }
+
+                $db->exec('RELEASE SAVEPOINT row_import');
             } catch (\Throwable $e) {
                 $result['errors'][] = "Item #{$i}: {$e->getMessage()}";
+                $db->exec('ROLLBACK TO SAVEPOINT row_import');
                 if (count($result['errors']) > 100) break;
-                // Continue with next item — don't fail entire feed
-                try { $db->exec('ROLLBACK TO row_import'); } catch (\Throwable $ignore) {}
             }
         }
 

@@ -97,9 +97,44 @@ class OrderWorkflow {
     }
 
     /**
-     * Shipped: return deferred email + ERP jobs
+     * Shipped: release warehouse reservations (goods physically left), return deferred jobs.
+     * Decrements warehouse_stock.reserved and warehouse_stock.qty for shipped items
+     * so available stock reflects reality without waiting for the next feed sync.
      */
     private static function handleShipped(array $order): array {
+        $items = Orders::items($order['id']);
+        $skusToSync = [];
+
+        foreach ($items as $item) {
+            if (!empty($item['variant_id'])) continue; // variants use products.stock directly
+
+            $attrs = json_decode($item['attrs'] ?? '{}', true);
+            $allocs = $attrs['_warehouse_allocations'] ?? null;
+
+            if ($allocs) {
+                $db = Db::get();
+                foreach ($allocs as $alloc) {
+                    // Goods shipped: clear reservation AND decrement physical qty
+                    $db->prepare("
+                        UPDATE warehouse_stock
+                        SET reserved = MAX(0, reserved - :qty),
+                            qty      = MAX(0, qty - :qty2)
+                        WHERE warehouse_id = :wh AND sku = :sku
+                    ")->execute([
+                        ':qty'  => $alloc['qty'],
+                        ':qty2' => $alloc['qty'],
+                        ':wh'   => $alloc['warehouse_id'],
+                        ':sku'  => $item['sku'],
+                    ]);
+                }
+                $skusToSync[] = $item['sku'];
+            }
+        }
+
+        if (!empty($skusToSync)) {
+            Warehouse::syncProductStock(array_unique($skusToSync));
+        }
+
         return [
             ['email_send', [
                 'template' => 'shipping-notification',

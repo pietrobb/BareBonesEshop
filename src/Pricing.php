@@ -136,11 +136,40 @@ class Pricing {
         return ['discount' => 0, 'name' => null, 'error' => 'Invalid coupon'];
     }
 
-    /** Record a coupon use after successful order */
+    /**
+     * Record a coupon use after successful order.
+     * Re-validates max_uses and per_customer limits inside the caller's transaction
+     * to prevent race conditions on high-traffic flash coupons.
+     * Throws \RuntimeException if limits exceeded (caller must rollback).
+     */
     public static function recordCouponUse(string $code, int $orderId, string $email, int $discount): void {
+        $cfg = self::config();
+        $upperCode = strtoupper($code);
+
+        // Re-check limits atomically inside the ongoing transaction
+        foreach ($cfg['cart_rules'] ?? [] as $rule) {
+            if (($rule['type'] ?? '') !== 'coupon') continue;
+            if (strtoupper($rule['code'] ?? '') !== $upperCode) continue;
+
+            if (!empty($rule['max_uses'])) {
+                $totalUses = self::couponUseCount($upperCode);
+                if ($totalUses >= $rule['max_uses']) {
+                    throw new \RuntimeException("Coupon {$upperCode} exceeded max_uses limit (race condition)");
+                }
+            }
+
+            if (!empty($rule['per_customer'])) {
+                $customerUses = self::couponUseCount($upperCode, $email);
+                if ($customerUses >= $rule['per_customer']) {
+                    throw new \RuntimeException("Coupon {$upperCode} already used by {$email}");
+                }
+            }
+            break;
+        }
+
         $db = Db::get();
         $stmt = $db->prepare("INSERT INTO coupon_uses (coupon_code, order_id, customer_email, discount) VALUES (:code, :oid, :email, :disc)");
-        $stmt->execute([':code' => strtoupper($code), ':oid' => $orderId, ':email' => $email, ':disc' => $discount]);
+        $stmt->execute([':code' => $upperCode, ':oid' => $orderId, ':email' => $email, ':disc' => $discount]);
     }
 
     /** Count coupon uses (total or per customer) */
