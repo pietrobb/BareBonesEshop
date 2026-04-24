@@ -2244,6 +2244,172 @@ if (file_exists($liveDbPath)) {
 }
 
 // ============================================================
+// TEST: Payment Gateways
+// ============================================================
+echo "\n--- Test: Payment — MockGateway initiate ---\n";
+
+// Setup MockPayment adapter
+require_once __DIR__ . '/../adapters/PaymentAdapter.php';
+require_once __DIR__ . '/../adapters/contrib/MockPayment.php';
+require_once __DIR__ . '/../src/PaymentService.php';
+
+// Add payment_transactions table to test DB
+$pdo->exec("CREATE TABLE IF NOT EXISTS payment_transactions (
+    id              INTEGER PRIMARY KEY,
+    order_id        INTEGER NOT NULL,
+    provider        TEXT NOT NULL,
+    provider_ref    TEXT NOT NULL DEFAULT '',
+    status          TEXT NOT NULL,
+    amount          INTEGER NOT NULL,
+    currency        TEXT NOT NULL DEFAULT 'eur',
+    idempotency_key TEXT NOT NULL UNIQUE,
+    raw_response    TEXT NOT NULL DEFAULT '{}',
+    created_at      TEXT DEFAULT (datetime('now')),
+    updated_at      TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+)");
+
+// Add payment_status column to orders
+try { $pdo->exec("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'pending'"); }
+catch (\PDOException $e) { /* already exists */ }
+
+$mockGateway = new MockPayment(['mock_result' => 'success']);
+
+// Create a fresh pending order for payment tests
+$payProduct = Products::bySku('TSHIRT-BLK-M');
+$payOrderId = Orders::create([
+    [
+        'product_id'   => $payProduct['id'],
+        'variant_id'   => null,
+        'qty'          => 1,
+        'price'        => (int)$payProduct['price'],
+        'sku'          => $payProduct['sku'],
+        'name'         => $payProduct['name'],
+        'variant_name' => '',
+    ],
+], [
+    'name'          => 'Pay Customer',
+    'email'         => 'pay@example.com',
+    'phone'         => '+421900000001',
+    'address'       => ['street' => 'Pay 1', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK'],
+    'currency'      => 'eur',
+    'shipping_cost' => 0,
+    'tax_amount'    => 0,
+], 'card');
+$payOrder = Orders::byId($payOrderId);
+
+// Test A: initiate payment session
+$session = PaymentService::initiate([
+    'order_id'       => $payOrder['id'],
+    'order_number'   => $payOrder['order_number'],
+    'total'          => (int)$payOrder['total'],
+    'currency'       => $payOrder['currency'],
+    'items'          => Orders::items($payOrder['id']),
+    'customer_email' => $payOrder['customer_email'],
+    'success_url'    => '/thank-you',
+    'cancel_url'     => '/cart',
+], $mockGateway);
+
+assert_true(!empty($session['url']), 'Payment: createSession returns URL');
+assert_true(!empty($session['session_id']), 'Payment: createSession returns session_id');
+assert_true(str_starts_with($session['session_id'], 'mock_'), 'Payment: Mock session_id starts with mock_');
+
+// Verify initiated transaction logged
+$txs = PaymentService::transactionsForOrder((int)$payOrder['id']);
+assert_true(count($txs) >= 1, 'Payment: initiate logs transaction');
+assert_equals('initiated', $txs[0]['status'], 'Payment: first transaction status is initiated');
+assert_equals('mock', $txs[0]['provider'], 'Payment: provider is mock');
+
+echo "\n--- Test: Payment — webhook paid flow ---\n";
+
+// Test B: simulate paid webhook
+$paidPayload = MockPayment::paidPayload((int)$payOrder['id'], (int)$payOrder['total'], $session['session_id']);
+$webhookResult = PaymentService::handleWebhook(
+    rawPayload:    json_encode($paidPayload),
+    sigHeader:     'mock_sig',
+    parsedPayload: $paidPayload,
+    gateway:       $mockGateway,
+    providerName:  'mock',
+);
+
+assert_true($webhookResult['handled'], 'Payment: webhook handled=true');
+assert_equals('payment.paid', $webhookResult['event_type'], 'Payment: webhook event_type is payment.paid');
+
+// Order should now be 'paid'
+$paidOrder = Orders::byId((int)$payOrder['id']);
+assert_equals('paid', $paidOrder['status'], 'Payment: order status is paid after webhook');
+assert_equals('paid', $paidOrder['payment_status'], 'Payment: order payment_status is paid');
+
+// Transaction log should have paid entry
+$txs2 = PaymentService::transactionsForOrder((int)$payOrder['id']);
+$statuses = array_column($txs2, 'status');
+assert_true(in_array('paid', $statuses), 'Payment: paid transaction logged');
+
+echo "\n--- Test: Payment — webhook idempotency ---\n";
+
+// Test C: replay same webhook — must be deduplicated
+$dupResult = PaymentService::handleWebhook(
+    rawPayload:    json_encode($paidPayload),
+    sigHeader:     'mock_sig',
+    parsedPayload: $paidPayload,
+    gateway:       $mockGateway,
+    providerName:  'mock',
+);
+assert_true($dupResult['duplicate'] ?? false, 'Payment: duplicate webhook is idempotent');
+assert_true(!$dupResult['handled'], 'Payment: duplicate webhook handled=false');
+
+echo "\n--- Test: Payment — bad signature rejection ---\n";
+
+// Test D: bad signature → exception
+$badSigThrown = false;
+try {
+    $failGateway = new MockPayment(['mock_result' => 'success']);
+    // Override verifySignature via anonymous class trick — use empty sig header
+    PaymentService::handleWebhook(
+        rawPayload:    json_encode($paidPayload),
+        sigHeader:     '',   // empty sig → MockPayment::verifySignature returns false
+        parsedPayload: $paidPayload,
+        gateway:       $failGateway,
+        providerName:  'mock',
+    );
+} catch (\RuntimeException $e) {
+    $badSigThrown = str_contains($e->getMessage(), 'signature');
+}
+assert_true($badSigThrown, 'Payment: empty signature throws RuntimeException');
+
+echo "\n--- Test: Payment — refund flow ---\n";
+
+// Test E: refund
+$refundResult = PaymentService::refund(
+    orderId:    (int)$payOrder['id'],
+    paymentId:  $session['session_id'],
+    amount:     (int)$payOrder['total'],
+    gateway:    $mockGateway,
+);
+assert_true(!empty($refundResult['refund_id']), 'Payment: refund returns refund_id');
+assert_equals('succeeded', $refundResult['status'], 'Payment: mock refund status is succeeded');
+
+$txs3 = PaymentService::transactionsForOrder((int)$payOrder['id']);
+$refundTx = array_filter($txs3, fn($t) => str_starts_with($t['status'], 'refund_'));
+assert_true(count($refundTx) >= 1, 'Payment: refund transaction logged');
+
+echo "\n--- Test: Payment — fail gateway ---\n";
+
+// Test F: fail gateway
+$failMock = new MockPayment(['mock_result' => 'fail']);
+$failSession = $failMock->createSession([
+    'order_number' => 'TEST-FAIL',
+    'total'        => 1000,
+    'currency'     => 'eur',
+    'items'        => [],
+    'success_url'  => '/',
+]);
+assert_true(!empty($failSession['session_id']), 'Payment: fail gateway still returns session_id');
+
+$failStatus = $failMock->getStatus($failSession['session_id']);
+assert_equals('failed', $failStatus, 'Payment: fail gateway getStatus returns failed');
+
+// ============================================================
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
 if ($failed > 0) {
