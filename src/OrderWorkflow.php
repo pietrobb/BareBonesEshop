@@ -149,9 +149,34 @@ class OrderWorkflow {
     }
 
     /**
-     * Returned: restore stock (in DB), no jobs needed
+     * Returned: restore stock (in DB), no jobs needed.
+     * Increments warehouse_stock.qty (goods physically back in warehouse).
      */
     private static function handleReturn(array $order): array {
+        $items = Orders::items($order['id']);
+        $db = Db::get();
+
+        foreach ($items as $item) {
+            if (!empty($item['variant_id'])) continue;
+
+            $attrs = json_decode($item['attrs'] ?? '{}', true);
+            $allocs = $attrs['_warehouse_allocations'] ?? null;
+
+            if ($allocs) {
+                foreach ($allocs as $alloc) {
+                    // Goods returned: add qty back to warehouse
+                    $db->prepare("
+                        UPDATE warehouse_stock SET qty = qty + :qty
+                        WHERE warehouse_id = :wh AND sku = :sku
+                    ")->execute([
+                        ':qty' => $alloc['qty'],
+                        ':wh'  => $alloc['warehouse_id'],
+                        ':sku' => $item['sku'],
+                    ]);
+                }
+            }
+        }
+
         Orders::restoreStock($order['id']);
         return [];
     }

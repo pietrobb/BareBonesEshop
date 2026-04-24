@@ -154,7 +154,21 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS orders (
     shipping_cost INTEGER NOT NULL DEFAULT 0, tax_amount INTEGER NOT NULL DEFAULT 0,
     total INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'eur',
     notes TEXT DEFAULT '', ip_address TEXT DEFAULT '',
+    erp_id TEXT DEFAULT NULL, erp_status TEXT DEFAULT NULL,
+    erp_synced_at TEXT DEFAULT NULL, erp_error TEXT DEFAULT NULL,
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+)");
+
+$pdo->exec("CREATE TABLE IF NOT EXISTS warehouses (
+    id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+    priority INTEGER DEFAULT 0, is_dropship INTEGER DEFAULT 0,
+    is_default INTEGER DEFAULT 0, contact TEXT DEFAULT '', notes TEXT DEFAULT ''
+)");
+$pdo->exec("CREATE TABLE IF NOT EXISTS warehouse_stock (
+    id INTEGER PRIMARY KEY, warehouse_id INTEGER NOT NULL, sku TEXT NOT NULL,
+    qty INTEGER NOT NULL DEFAULT 0, reserved INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(warehouse_id, sku), FOREIGN KEY (warehouse_id) REFERENCES warehouses(id)
 )");
 
 $pdo->exec("CREATE TABLE IF NOT EXISTS order_items (
@@ -1025,6 +1039,12 @@ echo "\n--- Test 23: Orders + Workflow ---\n";
 $_SESSION = [];
 $testProduct = Products::bySku('TSHIRT-BLK-M');
 assert_true($testProduct !== null, 'Test product exists for order');
+
+// Setup warehouse + stock so Orders::create() can reserve
+$pdo->exec("INSERT INTO warehouses (code, name, priority, is_dropship, is_default, contact, notes) VALUES ('main', 'Main', 10, 0, 1, '', '')");
+$whId = (int)$pdo->lastInsertId();
+$pdo->prepare("INSERT INTO warehouse_stock (warehouse_id, sku, qty, reserved) VALUES (:wh, :sku, :qty, 0)")
+    ->execute([':wh' => $whId, ':sku' => $testProduct['sku'], ':qty' => (int)$testProduct['stock']]);
 
 $originalStock = (int)$testProduct['stock'];
 
