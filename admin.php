@@ -659,6 +659,40 @@ function pageOrder(): void {
     </div>
     <?php endif; ?>
 
+    <?php
+    $emailStmt = Db::get()->prepare("SELECT id, template, locale, subject, adapter, status, error, sent_at, created_at
+                                     FROM email_log WHERE order_id = :oid ORDER BY id DESC LIMIT 20");
+    $emailStmt->execute([':oid' => $id]);
+    $emails = $emailStmt->fetchAll();
+    ?>
+    <?php if ($emails): ?>
+    <div class="card">
+        <h3>Emaily</h3>
+        <table>
+            <tr><th>Template</th><th>Locale</th><th>Subject</th><th>Adapter</th><th>Status</th><th>Odoslané</th><th></th></tr>
+            <?php foreach ($emails as $em): ?>
+            <tr>
+                <td><?= esc($em['template']) ?></td>
+                <td><?= esc($em['locale']) ?></td>
+                <td class="muted"><?= esc($em['subject']) ?></td>
+                <td><?= esc($em['adapter']) ?></td>
+                <td><span class="badge badge-<?= esc($em['status']) ?>"><?= esc($em['status']) ?></span>
+                    <?php if (!empty($em['error'])): ?><br><small class="muted"><?= esc($em['error']) ?></small><?php endif; ?>
+                </td>
+                <td class="muted"><?= esc($em['sent_at'] ? substr($em['sent_at'], 0, 16) : substr($em['created_at'], 0, 16)) ?></td>
+                <td>
+                    <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=email_resend" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                        <input type="hidden" name="log_id" value="<?= (int)$em['id'] ?>">
+                        <button class="btn btn-sm" type="submit">Poslať znova</button>
+                    </form>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+    </div>
+    <?php endif; ?>
+
     <a href="admin.php?p=orders" class="btn">← Späť na zoznam</a>
     <?php
 }
@@ -883,6 +917,7 @@ function handlePost(string $page, string $action): void {
         'product:save'   => handleProductSave(),
         'products:bulk'  => handleBulkAction(),
         'order:status'   => handleOrderStatus(),
+        'order:email_resend' => handleOrderEmailResend(),
         'import:upload'  => handleImportUpload(),
         'cache:flush'    => handleCacheFlush(),
         'cache:rebuild'  => handleCacheRebuild(),
@@ -1125,6 +1160,30 @@ function handleOrderStatus(): void {
         setFlash('err', 'Chyba pri zmene stavu objednávky.');
     }
 
+    header("Location: admin.php?p=order&id={$orderId}");
+    exit;
+}
+
+function handleOrderEmailResend(): void {
+    Security::adminRequire('orders.edit');
+    $orderId = Security::int($_GET['id'] ?? 0);
+    $logId   = Security::int($_POST['log_id'] ?? 0);
+    if ($logId <= 0) {
+        setFlash('err', 'Chýbajúci záznam emailu.');
+        header("Location: admin.php?p=order&id={$orderId}");
+        exit;
+    }
+    try {
+        $res = MailService::resend($logId);
+        if (($res['status'] ?? '') === 'sent') {
+            setFlash('ok', 'Email opätovne odoslaný (' . esc($res['adapter'] ?? '') . ').');
+        } else {
+            setFlash('err', 'Email sa nepodarilo odoslať: ' . esc($res['error'] ?? $res['status'] ?? 'neznáma chyba'));
+        }
+    } catch (\Throwable $e) {
+        error_log("Resend email #{$logId} failed: " . $e->getMessage());
+        setFlash('err', 'Chyba pri opätovnom odosielaní emailu.');
+    }
     header("Location: admin.php?p=order&id={$orderId}");
     exit;
 }

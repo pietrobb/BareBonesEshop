@@ -1,0 +1,1 @@
+Potvrdenie objednávky {{order_number}}
