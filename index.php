@@ -557,7 +557,6 @@ switch ($page) {
 // ============================================================
 // Layout
 // ============================================================
-<?php
 // Build hreflang alternates from stores.json — one per store url_prefix
 $storesCfg = @json_decode((string)file_get_contents(__DIR__ . '/stores.json'), true) ?: [];
 $hreflangs = [];
