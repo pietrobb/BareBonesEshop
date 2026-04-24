@@ -453,6 +453,7 @@ function apiCheckout(): array {
             'country' => $country,
         ],
         'currency'       => $cart['items'][0]['currency'] ?? 'eur',
+        'locale'         => I18n::locale(),
         'shipping_cost'  => $shippingCost,
         'tax_amount'     => $taxBreakdown['total_tax'],
         'coupon_discount'=> $couponDiscount,
@@ -479,7 +480,7 @@ function apiCheckout(): array {
         // For COD/bank_transfer: send confirmation immediately (no webhook will fire)
         // For Stripe: confirmation email is sent from the webhook after payment is confirmed
         if (in_array($paymentMethod, ['cod', 'bank_transfer'], true)) {
-            JobQueue::push('email_send', ['template' => 'confirm-order', 'to' => $email, 'order_id' => $orderId]);
+            JobQueue::push('email_send', ['template' => 'order_confirmation', 'to' => $email, 'order_id' => $orderId]);
         }
 
         // Admin notification
