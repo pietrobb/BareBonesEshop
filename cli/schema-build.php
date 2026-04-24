@@ -212,6 +212,7 @@ $db->exec("CREATE TABLE IF NOT EXISTS orders (
     tax_amount     INTEGER NOT NULL DEFAULT 0,
     total          INTEGER NOT NULL,
     currency       TEXT NOT NULL DEFAULT 'eur',
+    locale         TEXT NOT NULL DEFAULT 'en',
     notes          TEXT DEFAULT '',
     ip_address     TEXT DEFAULT '',
     erp_id         TEXT DEFAULT NULL,
@@ -228,8 +229,10 @@ try {
     $db->exec("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'pending'");
 } catch (\PDOException $e) { /* already exists */ }
 // Migration: add locale to existing databases (for email templates etc.)
+// Default 'en' matches stores.json.default_locale (system default). Per-store overrides
+// are resolved at request time (api.php sets customer.locale = I18n::locale()).
 try {
-    $db->exec("ALTER TABLE orders ADD COLUMN locale TEXT NOT NULL DEFAULT 'sk'");
+    $db->exec("ALTER TABLE orders ADD COLUMN locale TEXT NOT NULL DEFAULT 'en'");
 } catch (\PDOException $e) { /* already exists */ }
 echo "  [OK] orders\n";
 

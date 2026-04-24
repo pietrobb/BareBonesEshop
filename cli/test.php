@@ -153,6 +153,7 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS orders (
     discount_amount INTEGER NOT NULL DEFAULT 0,
     shipping_cost INTEGER NOT NULL DEFAULT 0, tax_amount INTEGER NOT NULL DEFAULT 0,
     total INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'eur',
+    locale TEXT NOT NULL DEFAULT 'en',
     notes TEXT DEFAULT '', ip_address TEXT DEFAULT '',
     erp_id TEXT DEFAULT NULL, erp_status TEXT DEFAULT NULL,
     erp_synced_at TEXT DEFAULT NULL, erp_error TEXT DEFAULT NULL,
@@ -2577,7 +2578,7 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS email_log (
     created_at TEXT DEFAULT (datetime('now'))
 )");
 // Add locale to orders if missing (test DB was set up without it)
-try { $pdo->exec("ALTER TABLE orders ADD COLUMN locale TEXT NOT NULL DEFAULT 'sk'"); }
+try { $pdo->exec("ALTER TABLE orders ADD COLUMN locale TEXT NOT NULL DEFAULT 'en'"); }
 catch (\PDOException $e) { /* already exists */ }
 
 $emailLogCount = (int)$pdo->query("SELECT COUNT(*) FROM email_log")->fetchColumn();

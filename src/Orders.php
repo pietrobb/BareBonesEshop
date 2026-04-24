@@ -80,6 +80,10 @@ class Orders {
             // 3. Create order (retry on unique constraint collision)
             $orderNumber = null;
             $orderId = null;
+            // Resolve locale: explicit customer arg wins; else current I18n locale; else system default.
+            $stores = json_decode(@file_get_contents(__DIR__ . '/../stores.json') ?: '{}', true) ?: [];
+            $sysDefaultLocale = $stores['default_locale'] ?? 'en';
+            $orderLocale = $customer['locale'] ?? (class_exists('I18n') ? I18n::locale() : $sysDefaultLocale);
             $orderParams = [
                 ':name'     => $customer['name'],
                 ':email'    => $customer['email'],
@@ -92,15 +96,16 @@ class Orders {
                 ':tax'      => $taxAmount,
                 ':total'    => $total,
                 ':currency' => $customer['currency'] ?? 'eur',
+                ':locale'   => $orderLocale,
                 ':notes'    => $customer['notes'] ?? '',
                 ':ip'       => php_sapi_name() === 'cli' ? '127.0.0.1' : ($_SERVER['REMOTE_ADDR'] ?? ''),
             ];
             $orderStmt = $db->prepare("
                 INSERT INTO orders (order_number, status, customer_name, customer_email, customer_phone,
                     shipping_addr, payment_method, subtotal, discount_amount, shipping_cost, tax_amount, total, currency,
-                    notes, ip_address)
+                    locale, notes, ip_address)
                 VALUES (:num, 'pending', :name, :email, :phone, :addr, :method,
-                    :subtotal, :discount, :shipping, :tax, :total, :currency, :notes, :ip)
+                    :subtotal, :discount, :shipping, :tax, :total, :currency, :locale, :notes, :ip)
             ");
             for ($attempt = 0; $attempt < 5; $attempt++) {
                 $orderNumber = self::generateOrderNumber();
