@@ -1,0 +1,1 @@
+Zahlung erhalten — Bestellung {{order_number}}
