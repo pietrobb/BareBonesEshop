@@ -2089,30 +2089,28 @@ foreach (['pending', 'processing', 'completed', 'failed'] as $sub) {
 @rmdir($testJobsDir45);
 
 // ============================================================
-// TEST 46: Worker renderTemplate function
+// TEST 46: Template engine (now owned by MailService)
 // ============================================================
 echo "\n--- Test 46: Template Engine ---\n";
 
-require_once __DIR__ . '/worker.php';
-
-// Test basic variable substitution
-$tpl1 = renderTemplate('Hello {{name}}, order #{{order_number}}', [
+// Basic variable substitution
+$tpl1 = MailService::renderString('Hello {{name}}, order #{{order_number}}', [
     'name' => 'Peter',
     'order_number' => 'ORD-001',
 ]);
 assert_true(str_contains($tpl1, 'Peter'), 'Template var substitution works');
 assert_true(str_contains($tpl1, 'ORD-001'), 'Template multiple vars work');
 
-// Test {{#if}} blocks
-$tpl2 = renderTemplate('{{#if paid}}Payment received{{/if}}{{#if refunded}}Refunded{{/if}}', [
+// {{#if}} blocks
+$tpl2 = MailService::renderString('{{#if paid}}Payment received{{/if}}{{#if refunded}}Refunded{{/if}}', [
     'paid' => true,
     'refunded' => false,
 ]);
 assert_true(str_contains($tpl2, 'Payment received'), 'Template #if truthy renders block');
 assert_true(!str_contains($tpl2, 'Refunded'), 'Template #if falsy hides block');
 
-// Test {{#each}} blocks
-$tpl3 = renderTemplate('<ul>{{#each items}}<li>{{name}} x{{quantity}}</li>{{/each}}</ul>', [
+// {{#each}} blocks
+$tpl3 = MailService::renderString('<ul>{{#each items}}<li>{{name}} x{{quantity}}</li>{{/each}}</ul>', [
     'items' => [
         ['name' => 'Widget', 'quantity' => '2'],
         ['name' => 'Gadget', 'quantity' => '1'],
@@ -2122,8 +2120,8 @@ assert_true(str_contains($tpl3, 'Widget'), 'Template #each renders items');
 assert_true(str_contains($tpl3, 'Gadget'), 'Template #each renders all items');
 assert_true(str_contains($tpl3, 'x2'), 'Template #each uses item fields');
 
-// Test HTML escaping
-$tpl4 = renderTemplate('{{name}}', ['name' => '<script>alert(1)</script>']);
+// HTML escaping
+$tpl4 = MailService::renderString('{{name}}', ['name' => '<script>alert(1)</script>']);
 assert_true(!str_contains($tpl4, '<script>'), 'Template escapes HTML');
 assert_true(str_contains($tpl4, '&lt;script&gt;'), 'Template HTML-encodes special chars');
 
@@ -2561,6 +2559,182 @@ assert_true($exceptionThrown, 'Shipping: bad signature throws RuntimeException')
 unset($_ENV['SHIP_PACKETA_WEBHOOK_SECRET']);
 
 // ============================================================
+// TESTS: Email Notifications (MailService + adapters + templates)
+// ============================================================
+echo "\n--- Test: Email — email_log table setup ---\n";
+$pdo->exec("CREATE TABLE IF NOT EXISTS email_log (
+    id         INTEGER PRIMARY KEY,
+    order_id   INTEGER DEFAULT NULL,
+    recipient  TEXT NOT NULL,
+    template   TEXT NOT NULL,
+    locale     TEXT NOT NULL DEFAULT 'sk',
+    subject    TEXT NOT NULL DEFAULT '',
+    adapter    TEXT NOT NULL DEFAULT '',
+    status     TEXT NOT NULL DEFAULT 'pending',
+    error      TEXT DEFAULT '',
+    payload    TEXT DEFAULT '{}',
+    sent_at    TEXT DEFAULT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+)");
+// Add locale to orders if missing (test DB was set up without it)
+try { $pdo->exec("ALTER TABLE orders ADD COLUMN locale TEXT NOT NULL DEFAULT 'sk'"); }
+catch (\PDOException $e) { /* already exists */ }
+
+$emailLogCount = (int)$pdo->query("SELECT COUNT(*) FROM email_log")->fetchColumn();
+assert_equals(0, $emailLogCount, 'Email: email_log table empty before tests');
+
+echo "\n--- Test: Email — render template with locale ---\n";
+$renderedSk = MailService::render('order_confirmation', 'sk', [
+    'order_number' => 'TST-001',
+    'order_status' => 'paid',
+    'order_total'  => '10,00 €',
+    'customer_name'=> 'Jožko',
+    'items'        => [['name' => 'Tričko', 'sku' => 'SH-1', 'quantity' => 2, 'total' => '10,00 €']],
+]);
+assert_true(str_contains($renderedSk['subject'], 'TST-001'), 'Email: SK subject contains order number');
+assert_true(str_contains($renderedSk['html'], 'Ďakujeme'), 'Email: SK HTML contains Ďakujeme');
+assert_true(str_contains($renderedSk['html'], 'Tričko'), 'Email: SK HTML expands {{#each items}}');
+assert_true(!str_contains($renderedSk['html'], '{{'), 'Email: SK HTML has no unresolved placeholders');
+
+$renderedEn = MailService::render('order_confirmation', 'en', [
+    'order_number' => 'TST-002',
+    'order_status' => 'paid',
+    'customer_name'=> 'John',
+    'items'        => [],
+]);
+assert_true(str_contains($renderedEn['html'], 'Thanks for your order'), 'Email: EN template used when locale=en');
+
+echo "\n--- Test: Email — locale fallback to en then sk ---\n";
+$renderedCs = MailService::render('order_confirmation', 'cs', [
+    'order_number' => 'TST-003',
+    'customer_name'=> 'Pavel',
+    'items'        => [],
+]);
+// cs has no templates → must fall back to en (first in fallback chain)
+assert_true(str_contains($renderedCs['html'], 'Thanks for your order'), 'Email: cs locale falls back to en');
+assert_true(str_contains($renderedCs['subject'], 'TST-003'), 'Email: fallback still renders variables');
+
+$renderedNone = MailService::render('__nope__', 'sk', ['x' => 'y']);
+assert_true(str_contains($renderedNone['html'], '__nope__'), 'Email: unknown template returns placeholder HTML');
+
+echo "\n--- Test: Email — renderString edge cases ---\n";
+$esc = MailService::renderString('{{a}}', ['a' => '<b>hi</b>']);
+assert_equals('&lt;b&gt;hi&lt;/b&gt;', $esc, 'Email: renderString HTML-escapes scalar values');
+$ifTpl = MailService::renderString('{{#if x}}YES{{/if}}{{#if y}}NO{{/if}}', ['x' => 1, 'y' => 0]);
+assert_equals('YES', $ifTpl, 'Email: {{#if}} includes truthy, excludes falsy');
+
+echo "\n--- Test: Email — LogMail adapter captures message ---\n";
+LogMail::clearCaptured();
+MailService::useAdapter(new LogMail(['log_file' => __DIR__ . '/../db/emails.test.log']));
+$res = MailService::send('order_paid', 'jozko@example.com', 'sk', [
+    'order_number' => 'LOG-1',
+    'customer_name'=> 'Jožko',
+    'order_total'  => '99,00 €',
+]);
+assert_equals('sent', $res['status'], 'Email: LogMail send returns status=sent');
+assert_equals('log', $res['adapter'], 'Email: LogMail reports adapter=log');
+$last = LogMail::lastCaptured();
+assert_true($last !== null, 'Email: LogMail captured message');
+assert_equals('jozko@example.com', $last['to'] ?? '', 'Email: LogMail captured recipient');
+assert_true(str_contains($last['html'] ?? '', 'LOG-1'), 'Email: LogMail rendered order_number into HTML');
+
+echo "\n--- Test: Email — email_log row persisted with status=sent ---\n";
+$logId = (int)$res['log_id'];
+assert_greater($logId, 0, 'Email: log_id returned');
+$row = $pdo->query("SELECT * FROM email_log WHERE id = {$logId}")->fetch();
+assert_equals('sent',         $row['status'],   'Email: email_log.status = sent');
+assert_equals('order_paid',   $row['template'], 'Email: email_log.template = order_paid');
+assert_equals('sk',           $row['locale'],   'Email: email_log.locale = sk');
+assert_equals('log',          $row['adapter'],  'Email: email_log.adapter = log');
+assert_true(!empty($row['sent_at']),            'Email: email_log.sent_at populated');
+
+echo "\n--- Test: Email — invalid recipient is skipped ---\n";
+$skip = MailService::send('order_paid', 'not-an-email', 'sk', ['order_number' => 'X']);
+assert_equals('skipped', $skip['status'], 'Email: invalid address returns status=skipped');
+assert_equals(0, $skip['log_id'], 'Email: invalid address does not create log row');
+
+echo "\n--- Test: Email — SmtpMail rejects bad addresses without connecting ---\n";
+$smtp = new SmtpMail(['smtp_host' => '127.0.0.1', 'smtp_port' => 1]);
+$smtpBad = $smtp->send(['to' => 'bad', 'from' => 'also-bad', 'subject' => 't', 'html' => 'h', 'text' => 'h']);
+assert_equals('failed',            $smtpBad['status'],  'Email: SmtpMail rejects invalid addresses');
+assert_equals('invalid recipient', $smtpBad['message'], 'Email: SmtpMail error message identifies recipient');
+
+echo "\n--- Test: Email — SesMail without credentials fails cleanly ---\n";
+putenv('MAIL_SES_KEY=');
+putenv('MAIL_SES_SECRET=');
+$ses = new SesMail();
+$sesRes = $ses->send(['to' => 'x@example.com', 'from' => 'y@example.com', 'subject' => 's', 'text' => 't']);
+assert_equals('failed', $sesRes['status'], 'Email: SesMail without credentials fails');
+assert_true(str_contains($sesRes['message'], 'credentials'), 'Email: SesMail error explains missing credentials');
+
+echo "\n--- Test: Email — MailService::resend creates new log row ---\n";
+$resend = MailService::resend($logId);
+assert_equals('sent', $resend['status'], 'Email: resend returns status=sent');
+assert_greater($resend['log_id'], $logId, 'Email: resend creates NEW log row (not amends original)');
+$orig = $pdo->query("SELECT status FROM email_log WHERE id = {$logId}")->fetch();
+assert_equals('sent', $orig['status'], 'Email: resend leaves original log row intact');
+
+$resendBad = MailService::resend(999999);
+assert_equals('skipped', $resendBad['status'], 'Email: resend on missing id returns skipped');
+
+echo "\n--- Test: Email — worker handleEmailSend end-to-end via OrderWorkflow ---\n";
+LogMail::clearCaptured();
+MailService::useAdapter(new LogMail(['log_file' => __DIR__ . '/../db/emails.test.log']));
+
+// Create an order ready to be paid → triggers order_paid email
+$emProduct = Products::bySku('TSHIRT-BLK-M');
+$emOrderId = Orders::create([
+    [
+        'product_id'   => $emProduct['id'],
+        'variant_id'   => null,
+        'qty'          => 1,
+        'price'        => (int)$emProduct['price'],
+        'sku'          => $emProduct['sku'],
+        'name'         => $emProduct['name'],
+        'variant_name' => '',
+    ],
+], [
+    'name'          => 'Email Customer',
+    'email'         => 'customer@example.com',
+    'phone'         => '+421900000099',
+    'address'       => ['street' => 'Email 1', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK'],
+    'currency'      => 'eur',
+    'shipping_cost' => 0,
+    'payment_method'=> 'transfer',
+]);
+// mark locale = en on this order
+$pdo->prepare("UPDATE orders SET locale = 'en' WHERE id = :id")->execute([':id' => $emOrderId]);
+
+OrderWorkflow::transition($emOrderId, 'paid', 'test email trigger');
+// The transition pushes a job; find the one matching our order
+$pending = JobQueue::pull(200);
+$emailJob = null;
+foreach ($pending as $j) {
+    if (($j['type'] ?? '') === 'email_send' && ($j['payload']['order_id'] ?? null) == $emOrderId) {
+        $emailJob = $j;
+        break;
+    }
+}
+assert_true($emailJob !== null, 'Email: OrderWorkflow enqueued email_send job on paid transition');
+
+// Inline-execute (worker handler code path)
+require_once __DIR__ . '/../cli/worker.php';
+handleEmailSend($emailJob['payload'], $emailJob);
+
+$lastMail = LogMail::lastCaptured();
+assert_true($lastMail !== null, 'Email: worker dispatch captured by LogMail');
+assert_equals('customer@example.com', $lastMail['to'] ?? '', 'Email: worker sent to order customer_email');
+assert_true(str_contains($lastMail['html'] ?? '', 'Payment received'), 'Email: worker rendered EN order_paid (locale from order row)');
+
+$orderEmailRow = $pdo->prepare("SELECT * FROM email_log WHERE order_id = :oid AND template = 'order_paid' ORDER BY id DESC LIMIT 1");
+$orderEmailRow->execute([':oid' => $emOrderId]);
+$orderEmail = $orderEmailRow->fetch();
+assert_true($orderEmail !== false, 'Email: email_log row linked to order_id');
+assert_equals('en', $orderEmail['locale'], 'Email: worker propagated order.locale to email_log');
+
+// Reset adapter override for downstream safety
+MailService::useAdapter(null);
+
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
 if ($failed > 0) {
