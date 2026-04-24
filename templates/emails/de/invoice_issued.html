@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="de">
+<body style="font-family:Arial,sans-serif;color:#222;max-width:640px;margin:0 auto;">
+<h2>Rechnung {{invoice_number}}</h2>
+<p>Sehr geehrte/r {{customer_name}},</p>
+<p>im Anhang finden Sie die Rechnung <strong>{{invoice_number}}</strong>
+zu Ihrer Bestellung <strong>{{order_number}}</strong>.</p>
+<table cellpadding="6" style="border-collapse:collapse;border:1px solid #ddd;">
+  <tr><td>Rechnungsdatum</td><td>{{issued_at}}</td></tr>
+  <tr><td>Fällig am</td><td>{{due_date}}</td></tr>
+  <tr><td>Zu zahlender Betrag</td><td><strong>{{total_gross_formatted}}</strong></td></tr>
+</table>
+<p>Die Rechnung ist als PDF angehängt. Online-Zugang:
+<a href="{{invoice_download_url}}">{{invoice_download_url}}</a></p>
+<p>Vielen Dank für Ihren Einkauf,<br/>{{seller_name}}</p>
+</body></html>

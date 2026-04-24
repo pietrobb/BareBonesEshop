@@ -61,7 +61,8 @@ class MailService {
         string $to,
         string $locale = '',
         array $vars = [],
-        ?int $orderId = null
+        ?int $orderId = null,
+        array $attachments = []
     ): array {
         if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
             return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => '', 'error' => 'invalid recipient'];
@@ -77,12 +78,13 @@ class MailService {
         $logId = self::logInsert($to, $template, $locale, $rendered['subject'], $adapter->adapterId(), $orderId, $vars);
 
         $msg = [
-            'to'       => $to,
-            'from'     => $from,
-            'subject'  => $rendered['subject'],
-            'html'     => $rendered['html'],
-            'text'     => $rendered['text'],
-            'reply_to' => (string)(getenv('MAIL_REPLY_TO') ?: ''),
+            'to'          => $to,
+            'from'        => $from,
+            'subject'     => $rendered['subject'],
+            'html'        => $rendered['html'],
+            'text'        => $rendered['text'],
+            'reply_to'    => (string)(getenv('MAIL_REPLY_TO') ?: ''),
+            'attachments' => self::normalizeAttachments($attachments),
             'headers'  => [
                 'X-Mailer'   => 'BareBonesShop',
                 'X-Template' => $template,
@@ -197,6 +199,56 @@ class MailService {
     private static function defaultLocale(): string {
         $stores = @json_decode((string)file_get_contents(__DIR__ . '/../stores.json'), true) ?: [];
         return (string)($stores['default_locale'] ?? 'en');
+    }
+
+    /**
+     * Normalize attachments into a uniform shape:
+     *   [{ 'filename' => 'X.pdf', 'content_type' => 'application/pdf', 'data' => <bytes> }, ...]
+     *
+     * Accepted input items:
+     *   - string  : absolute file path (loaded from disk)
+     *   - array   : { 'path' => '...' }  OR  { 'filename' => '...', 'data' => '...', 'content_type' => '...' }
+     */
+    private static function normalizeAttachments(array $attachments): array {
+        $out = [];
+        foreach ($attachments as $att) {
+            if (is_string($att)) {
+                $att = ['path' => $att];
+            }
+            if (!is_array($att)) continue;
+            if (!empty($att['path']) && is_file($att['path'])) {
+                $data = (string)file_get_contents($att['path']);
+                $out[] = [
+                    'filename'     => (string)($att['filename'] ?? basename($att['path'])),
+                    'content_type' => (string)($att['content_type'] ?? self::guessContentType($att['path'])),
+                    'data'         => $data,
+                ];
+                continue;
+            }
+            if (isset($att['data'])) {
+                $out[] = [
+                    'filename'     => (string)($att['filename'] ?? 'attachment.bin'),
+                    'content_type' => (string)($att['content_type'] ?? 'application/octet-stream'),
+                    'data'         => (string)$att['data'],
+                ];
+            }
+        }
+        return $out;
+    }
+
+    private static function guessContentType(string $path): string {
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        return match ($ext) {
+            'pdf'  => 'application/pdf',
+            'png'  => 'image/png',
+            'jpg', 'jpeg' => 'image/jpeg',
+            'txt'  => 'text/plain',
+            'html', 'htm' => 'text/html',
+            'csv'  => 'text/csv',
+            'xml'  => 'application/xml',
+            'zip'  => 'application/zip',
+            default => 'application/octet-stream',
+        };
     }
 
     private static function templateDir(): string {

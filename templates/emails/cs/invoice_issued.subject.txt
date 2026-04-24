@@ -1,0 +1,1 @@
+Faktura č. {{invoice_number}} k objednávce {{order_number}}

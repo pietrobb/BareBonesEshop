@@ -1,0 +1,1 @@
+Rechnung {{invoice_number}} zur Bestellung {{order_number}}
