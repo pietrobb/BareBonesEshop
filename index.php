@@ -766,6 +766,13 @@ footer{background:#333;color:#bbb;padding:0;margin-top:40px;font-size:.85em}
     <a href="<?= $e($pfx . $pathNoPrefix) ?>" class="<?= $lang===$lc?'active':'' ?>"><?= strtoupper($e($lc)) ?></a>
     <?php endforeach; ?>
    </div>
+   <?php
+   $loggedCust = !empty($_SESSION['customer_id']) ? (int)$_SESSION['customer_id'] : 0;
+   if ($loggedCust > 0): ?>
+   <a href="account.php" title="<?= $t('account.title') ?>" style="color:#555;font-size:.95em;margin-right:12px">👤 <?= $t('account.title') ?></a>
+   <?php else: ?>
+   <a href="account.php?p=login" title="<?= $t('account.login') ?>" style="color:#555;font-size:.95em;margin-right:12px"><?= $t('account.login') ?></a>
+   <?php endif; ?>
    <a href="?page=cart" class="cart-icon" title="<?= $t('cart') ?>" style="color:#555;font-size:1.1em">
     🛒<?php if ($cartCount > 0): ?><span class="cart-badge"><?= $cartCount ?></span><?php endif; ?>
    </a>
