@@ -148,6 +148,7 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY, order_number TEXT UNIQUE NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending', customer_name TEXT NOT NULL,
     customer_email TEXT NOT NULL, customer_phone TEXT DEFAULT '',
+    customer_id INTEGER DEFAULT NULL,
     shipping_addr TEXT DEFAULT '{}', payment_method TEXT NOT NULL,
     payment_id TEXT DEFAULT '', subtotal INTEGER NOT NULL,
     discount_amount INTEGER NOT NULL DEFAULT 0,
@@ -2784,6 +2785,164 @@ $row3 = $pdo->query("SELECT translations FROM categories WHERE id = {$testCatId}
 $tr3 = json_decode($row3['translations'] ?? '{}', true) ?: [];
 assert_equals('Custom SK', $tr3['sk']['name'] ?? '', 'CatI18n: existing DB-curated SK translation is preserved (no --force)');
 assert_equals('Karosserie', $tr3['de']['name'] ?? '', 'CatI18n: missing DE translation is still added by migration');
+
+// ============================================================
+// TEST: Customer Accounts (register, login, reset, addresses, orders)
+// ============================================================
+echo "\n--- Test: Customer Accounts ---\n";
+
+// Customer tables for test DB (mirror of schema-build.php)
+$pdo->exec("CREATE TABLE IF NOT EXISTS customers (
+    id INTEGER PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '', phone TEXT DEFAULT '', locale TEXT NOT NULL DEFAULT 'en',
+    status TEXT NOT NULL DEFAULT 'active', email_verified_at TEXT DEFAULT NULL,
+    last_login_at TEXT DEFAULT NULL,
+    created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+)");
+$pdo->exec("CREATE TABLE IF NOT EXISTS customer_addresses (
+    id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL,
+    type TEXT NOT NULL DEFAULT 'shipping', is_default INTEGER NOT NULL DEFAULT 0,
+    name TEXT NOT NULL DEFAULT '', company TEXT DEFAULT '', vat_id TEXT DEFAULT '',
+    street TEXT NOT NULL DEFAULT '', city TEXT NOT NULL DEFAULT '',
+    zip TEXT NOT NULL DEFAULT '', country TEXT NOT NULL DEFAULT '', phone TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+)");
+$pdo->exec("CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL,
+    token TEXT UNIQUE NOT NULL, expires_at TEXT NOT NULL, used_at TEXT DEFAULT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+)");
+try { $pdo->exec("ALTER TABLE orders ADD COLUMN customer_id INTEGER DEFAULT NULL"); } catch (\PDOException $e) {}
+
+// --- Register ---
+[$ok, $aliceId, $err] = Customers::register('alice@test.local', 'Passw0rd!', 'Alice', ['locale' => 'sk']);
+assert_true($ok === true && $aliceId > 0, 'Customer: register returns [true, id, null]');
+assert_true($err === null, 'Customer: register error is null on success');
+
+// Register duplicate email
+[$ok2, $id2, $err2] = Customers::register('alice@test.local', 'Another1!', 'Bob');
+assert_true($ok2 === false && $id2 === null && $err2 === 'email_taken', 'Customer: duplicate email rejected');
+
+// Register weak password
+[$ok3, , $err3] = Customers::register('weak@test.local', '123', 'Weak');
+assert_true($ok3 === false && $err3 === 'weak_password', 'Customer: weak password (<8 chars) rejected');
+
+// Register invalid email
+[$ok4, , $err4] = Customers::register('not-an-email', 'Passw0rd!', 'X');
+assert_true($ok4 === false && $err4 === 'invalid_email', 'Customer: invalid email rejected');
+
+// --- byId / byEmail ---
+$row = Customers::byId($aliceId);
+assert_true(is_array($row) && $row['email'] === 'alice@test.local', 'Customer: byId returns row');
+assert_true(!isset($row['password_hash']), 'Customer: byId does NOT expose password_hash');
+assert_equals('sk', $row['locale'], 'Customer: register stored locale from extras');
+
+// --- Login success ---
+[$lok, $lrow, $lerr] = Customers::login('alice@test.local', 'Passw0rd!');
+assert_true($lok === true && $lrow['id'] === $aliceId, 'Customer: login success returns row');
+assert_true(!isset($lrow['password_hash']), 'Customer: login return row strips password_hash');
+
+// Login wrong password
+[$lok2, , $lerr2] = Customers::login('alice@test.local', 'Wrong!Pw1');
+assert_true($lok2 === false && $lerr2 === 'invalid_credentials', 'Customer: wrong password rejected');
+
+// Login non-existent email
+[$lok3, , $lerr3] = Customers::login('ghost@test.local', 'Passw0rd!');
+assert_true($lok3 === false && $lerr3 === 'invalid_credentials', 'Customer: non-existent email rejected');
+
+// --- Addresses ---
+$addrId = Customers::addAddress($aliceId, [
+    'type' => 'shipping', 'is_default' => 1,
+    'name' => 'Alice Doe', 'street' => 'Main 1', 'city' => 'Bratislava',
+    'zip' => '81101', 'country' => 'sk', 'phone' => '+421900000000',
+]);
+assert_true($addrId > 0, 'Customer: addAddress returns new id');
+$addrs = Customers::addresses($aliceId);
+assert_equals(1, count($addrs), 'Customer: 1 address listed');
+assert_equals('SK', $addrs[0]['country'], 'Customer: country uppercased');
+assert_equals(1, (int)$addrs[0]['is_default'], 'Customer: first address is default');
+
+// Second shipping address with is_default=1 → previous unset
+$addrId2 = Customers::addAddress($aliceId, [
+    'type' => 'shipping', 'is_default' => 1,
+    'name' => 'Alice Doe', 'street' => 'Second 2', 'city' => 'Kosice',
+    'zip' => '04001', 'country' => 'SK',
+]);
+$shippingAddrs = Customers::addresses($aliceId, 'shipping');
+$defaults = array_filter($shippingAddrs, fn($a) => (int)$a['is_default'] === 1);
+assert_equals(1, count($defaults), 'Customer: only one default shipping address');
+assert_equals($addrId2, (int)array_values($defaults)[0]['id'], 'Customer: newest addr is default');
+
+// deleteAddress ownership
+$ok = Customers::deleteAddress($aliceId, $addrId);
+assert_true($ok === true, 'Customer: deleteAddress succeeds for owner');
+$after = Customers::addresses($aliceId);
+assert_equals(1, count($after), 'Customer: addresses reduced to 1 after delete');
+
+// deleteAddress foreign-owner fails
+$okForeign = Customers::deleteAddress(99999, $addrId2);
+assert_true($okForeign === false, 'Customer: deleteAddress fails for non-owner');
+
+// --- update profile ---
+$upd = Customers::update($aliceId, ['name' => 'Alice Renamed', 'phone' => '+421911111111']);
+assert_true($upd === true, 'Customer: update(name, phone) returns true');
+$reloaded = Customers::byId($aliceId);
+assert_equals('Alice Renamed', $reloaded['name'], 'Customer: name updated');
+
+// --- changePassword ---
+[$cok, $cerr] = Customers::changePassword($aliceId, 'Passw0rd!', 'NewPassw0rd!');
+assert_true($cok === true && $cerr === null, 'Customer: changePassword with correct old pw succeeds');
+[$lok4, , ] = Customers::login('alice@test.local', 'NewPassw0rd!');
+assert_true($lok4 === true, 'Customer: login works with new password');
+[$lok5, , ] = Customers::login('alice@test.local', 'Passw0rd!');
+assert_true($lok5 === false, 'Customer: old password no longer works');
+
+// changePassword wrong old pw
+[$cok2, $cerr2] = Customers::changePassword($aliceId, 'Wrong!Old1', 'Another1!');
+assert_true($cok2 === false && $cerr2 === 'invalid_current_password', 'Customer: wrong old pw rejected');
+
+// --- Password reset flow ---
+$tok = Customers::startPasswordReset('alice@test.local');
+assert_true(is_string($tok) && strlen($tok) >= 32, 'Customer: startPasswordReset returns 32+ char token');
+$noTok = Customers::startPasswordReset('ghost@test.local');
+assert_true($noTok === null, 'Customer: startPasswordReset for unknown email returns null');
+
+$vid = Customers::verifyResetToken($tok);
+assert_equals($aliceId, $vid, 'Customer: verifyResetToken returns customer id for valid token');
+$badId = Customers::verifyResetToken('invalid-token-123');
+assert_true($badId === null, 'Customer: verifyResetToken returns null for unknown token');
+
+[$rok, $rerr] = Customers::completePasswordReset($tok, 'FromReset1!');
+assert_true($rok === true && $rerr === null, 'Customer: completePasswordReset succeeds');
+[$lok6, , ] = Customers::login('alice@test.local', 'FromReset1!');
+assert_true($lok6 === true, 'Customer: login works with reset password');
+
+// Reuse token — marked used
+[$rok2, $rerr2] = Customers::completePasswordReset($tok, 'Another1!');
+assert_true($rok2 === false && $rerr2 === 'invalid_or_expired_token', 'Customer: reset token cannot be reused');
+
+// --- Orders scoping ---
+$pdo->exec("INSERT INTO orders (order_number, status, customer_name, customer_email, payment_method, subtotal, total, customer_id) VALUES ('C-100', 'paid', 'Alice Renamed', 'alice@test.local', 'cod', 1000, 1000, {$aliceId})");
+$pdo->exec("INSERT INTO orders (order_number, status, customer_name, customer_email, payment_method, subtotal, total, customer_id) VALUES ('C-101', 'pending', 'Alice Renamed', 'alice@test.local', 'cod', 500, 500, {$aliceId})");
+$pdo->exec("INSERT INTO orders (order_number, status, customer_name, customer_email, payment_method, subtotal, total, customer_id) VALUES ('GUEST-1', 'paid', 'Guest', 'guest@test.local', 'cod', 100, 100, NULL)");
+
+$myOrders = Customers::orders($aliceId);
+assert_equals(2, count($myOrders), 'Customer: orders() returns only own rows');
+$nums = array_column($myOrders, 'order_number');
+assert_true(in_array('C-100', $nums, true) && in_array('C-101', $nums, true), 'Customer: both owned orders listed');
+assert_true(!in_array('GUEST-1', $nums, true), 'Customer: guest order NOT leaked to customer');
+assert_equals(2, Customers::orderCount($aliceId), 'Customer: orderCount returns 2');
+
+// Fetch specific order by customer scope
+$o100 = Customers::order($aliceId, (int)$pdo->query("SELECT id FROM orders WHERE order_number='C-100'")->fetchColumn());
+assert_true(is_array($o100) && $o100['order_number'] === 'C-100', 'Customer: order() returns own order');
+
+// Scoped access to guest order returns null
+$guestOrderId = (int)$pdo->query("SELECT id FROM orders WHERE order_number='GUEST-1'")->fetchColumn();
+$blocked = Customers::order($aliceId, $guestOrderId);
+assert_true($blocked === null, 'Customer: order() blocks access to guest/other-customer order');
 
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";

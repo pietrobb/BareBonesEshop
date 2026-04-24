@@ -32,6 +32,7 @@ if ($fresh) {
     echo "FRESH mode: dropping all tables...\n";
     $tables = [
         'shipping_labels', 'shipping_rates',
+        'password_reset_tokens', 'customer_addresses', 'customers',
         'abandoned_carts', 'coupon_uses', 'processed_events', 'email_log', 'payment_transactions', 'audit_log', 'order_items', 'orders',
         'product_vehicles', 'product_oe_numbers', 'product_specifications',
         'slug_registry', 'variants', 'product_attrs', 'products',
@@ -537,6 +538,62 @@ echo "  [OK] shipping_labels\n";
 try { $db->exec("ALTER TABLE orders ADD COLUMN tracking_number TEXT DEFAULT NULL"); } catch (\PDOException $e) {}
 try { $db->exec("ALTER TABLE orders ADD COLUMN carrier TEXT DEFAULT NULL"); } catch (\PDOException $e) {}
 echo "  [OK] orders: tracking_number + carrier columns\n";
+
+// Customers — registered customer accounts
+$db->exec("CREATE TABLE IF NOT EXISTS customers (
+    id               INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
+    email            TEXT NOT NULL UNIQUE,
+    password_hash    TEXT NOT NULL,
+    name             TEXT NOT NULL DEFAULT '',
+    phone            TEXT DEFAULT '',
+    locale           TEXT NOT NULL DEFAULT 'en',
+    status           TEXT NOT NULL DEFAULT 'active',
+    email_verified_at TEXT DEFAULT NULL,
+    last_login_at    TEXT DEFAULT NULL,
+    created_at       TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . "),
+    updated_at       TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . ")
+)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_cust_email ON customers(email)");
+echo "  [OK] customers\n";
+
+// Customer addresses — shipping + billing
+$db->exec("CREATE TABLE IF NOT EXISTS customer_addresses (
+    id          INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
+    customer_id INTEGER NOT NULL,
+    type        TEXT NOT NULL DEFAULT 'shipping',
+    is_default  INTEGER NOT NULL DEFAULT 0,
+    name        TEXT NOT NULL DEFAULT '',
+    company     TEXT DEFAULT '',
+    vat_id      TEXT DEFAULT '',
+    street      TEXT NOT NULL DEFAULT '',
+    city        TEXT NOT NULL DEFAULT '',
+    zip         TEXT NOT NULL DEFAULT '',
+    country     TEXT NOT NULL DEFAULT '',
+    phone       TEXT DEFAULT '',
+    created_at  TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . "),
+    updated_at  TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . "),
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_addr_cust ON customer_addresses(customer_id, type)");
+echo "  [OK] customer_addresses\n";
+
+// Password reset tokens
+$db->exec("CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id          INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
+    customer_id INTEGER NOT NULL,
+    token       TEXT NOT NULL UNIQUE,
+    expires_at  TEXT NOT NULL,
+    used_at     TEXT DEFAULT NULL,
+    created_at  TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . "),
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_prt_token ON password_reset_tokens(token)");
+echo "  [OK] password_reset_tokens\n";
+
+// Migration: link orders to customers (nullable — guest checkout still OK)
+try { $db->exec("ALTER TABLE orders ADD COLUMN customer_id INTEGER DEFAULT NULL"); } catch (\PDOException $e) {}
+$db->exec("CREATE INDEX IF NOT EXISTS idx_ord_customer ON orders(customer_id)");
+echo "  [OK] orders: customer_id column\n";
 
 // Insert default warehouse if none exists
 $wCount = (int)$db->query("SELECT COUNT(*) FROM warehouses")->fetchColumn();

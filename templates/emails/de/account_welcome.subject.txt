@@ -1,0 +1,1 @@
+Willkommen bei {{shop_name}}

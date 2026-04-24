@@ -442,7 +442,12 @@ function apiCheckout(): array {
 
     $taxBreakdown = Tax::orderBreakdown($cart['items'], $country);
 
+    // Attach logged-in customer_id if a session is active (guest checkout keeps customer_id=null)
+    Security::sessionStart();
+    $loggedInCustomerId = !empty($_SESSION['customer_id']) ? (int)$_SESSION['customer_id'] : null;
+
     $customer = [
+        'customer_id'    => $loggedInCustomerId,
         'name'           => $name,
         'email'          => $email,
         'phone'          => $phone,

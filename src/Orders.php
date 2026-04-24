@@ -84,7 +84,9 @@ class Orders {
             $stores = json_decode(@file_get_contents(__DIR__ . '/../stores.json') ?: '{}', true) ?: [];
             $sysDefaultLocale = $stores['default_locale'] ?? 'en';
             $orderLocale = $customer['locale'] ?? (class_exists('I18n') ? I18n::locale() : $sysDefaultLocale);
+            $customerId = !empty($customer['customer_id']) ? (int)$customer['customer_id'] : null;
             $orderParams = [
+                ':cid'      => $customerId,
                 ':name'     => $customer['name'],
                 ':email'    => $customer['email'],
                 ':phone'    => $customer['phone'] ?? '',
@@ -101,10 +103,10 @@ class Orders {
                 ':ip'       => php_sapi_name() === 'cli' ? '127.0.0.1' : ($_SERVER['REMOTE_ADDR'] ?? ''),
             ];
             $orderStmt = $db->prepare("
-                INSERT INTO orders (order_number, status, customer_name, customer_email, customer_phone,
+                INSERT INTO orders (order_number, status, customer_id, customer_name, customer_email, customer_phone,
                     shipping_addr, payment_method, subtotal, discount_amount, shipping_cost, tax_amount, total, currency,
                     locale, notes, ip_address)
-                VALUES (:num, 'pending', :name, :email, :phone, :addr, :method,
+                VALUES (:num, 'pending', :cid, :name, :email, :phone, :addr, :method,
                     :subtotal, :discount, :shipping, :tax, :total, :currency, :locale, :notes, :ip)
             ");
             for ($attempt = 0; $attempt < 5; $attempt++) {
