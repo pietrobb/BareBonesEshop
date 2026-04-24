@@ -540,12 +540,34 @@ switch ($page) {
 // ============================================================
 // Layout
 // ============================================================
+<?php
+// Build hreflang alternates from stores.json — one per store url_prefix
+$storesCfg = @json_decode((string)file_get_contents(__DIR__ . '/stores.json'), true) ?: [];
+$hreflangs = [];
+foreach ($storesCfg['stores'] ?? [] as $store) {
+    $locale = $store['default_locale'] ?? 'en';
+    $prefix = $store['url_prefix'] ?? '';
+    $hreflangs[$locale] = $prefix;
+}
+$pathNoPrefix = $_SERVER['REQUEST_URI'] ?? '/';
+foreach ($hreflangs as $p) {
+    if ($p !== '' && str_starts_with($pathNoPrefix, $p . '/')) {
+        $pathNoPrefix = substr($pathNoPrefix, strlen($p));
+        break;
+    }
+    if ($p !== '' && $pathNoPrefix === $p) { $pathNoPrefix = '/'; break; }
+}
+if ($pathNoPrefix === '') $pathNoPrefix = '/';
 ?><!DOCTYPE html>
 <html lang="<?= $lang ?>">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= $title ?></title>
+<?php foreach ($hreflangs as $loc => $pfx): ?>
+<link rel="alternate" hreflang="<?= $e($loc) ?>" href="<?= $e($pfx . $pathNoPrefix) ?>">
+<?php endforeach; ?>
+<link rel="alternate" hreflang="x-default" href="<?= $e(($storesCfg['stores'][$storesCfg['default_store'] ?? ''] ?? ['url_prefix' => ''])['url_prefix'] . $pathNoPrefix) ?>">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
@@ -720,11 +742,12 @@ footer{background:#333;color:#bbb;padding:0;margin-top:40px;font-size:.85em}
   <div class="wrap">
    <div class="lang-switch">
     <?php
+    // Build switcher from stores.json — each store exposes default_locale + url_prefix
     $langParams = $_GET;
-    foreach(['sk'=>'SK','en'=>'EN','de'=>'DE'] as $lc=>$lb):
+    foreach ($hreflangs as $lc => $pfx):
         $langParams['lang'] = $lc;
     ?>
-    <a href="?<?= http_build_query($langParams) ?>" class="<?= $lang===$lc?'active':'' ?>"><?= $lb ?></a>
+    <a href="<?= $e($pfx . $pathNoPrefix) ?>" class="<?= $lang===$lc?'active':'' ?>"><?= strtoupper($e($lc)) ?></a>
     <?php endforeach; ?>
    </div>
    <a href="?page=cart" class="cart-icon" title="<?= $t('cart') ?>" style="color:#555;font-size:1.1em">
@@ -874,8 +897,8 @@ function renderHome(): string {
     <div class="hero">
      <img src="assets/img/slider1.jpg" alt="woodle.sk">
      <div class="hero-overlay">
-      <h1><?= $lang==='en'?'Sauna & Wooden Products':($lang==='de'?'Sauna & Holzprodukte':'Sauna & Drevené výrobky') ?></h1>
-      <a href="?page=category&slug=<?= $e((Categories::roots()[0] ?? [])['slug'] ?? '') ?>" class="btn-hero"><?= $lang==='en'?'Shop Now':($lang==='de'?'Jetzt einkaufen':'Nakupovať') ?></a>
+      <h1><?= $t('hero_title') ?></h1>
+      <a href="?page=category&slug=<?= $e((Categories::roots()[0] ?? [])['slug'] ?? '') ?>" class="btn-hero"><?= $t('shop_now') ?></a>
      </div>
     </div>
 
@@ -1052,9 +1075,9 @@ function renderCategory(array $cat): string {
     echo '<div style="display:flex;gap:4px;align-items:center">';
     $pminDisplay = $priceMin ? (int)($priceMin / 100) : '';
     $pmaxDisplay = $priceMax ? (int)($priceMax / 100) : '';
-    echo '<input type="number" name="pmin" placeholder="od" value="' . $pminDisplay . '" style="width:80px;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:.85em">';
+    echo '<input type="number" name="pmin" placeholder="' . $t('ph_from') . '" value="' . $pminDisplay . '" style="width:80px;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:.85em">';
     echo '<span>—</span>';
-    echo '<input type="number" name="pmax" placeholder="do" value="' . $pmaxDisplay . '" style="width:80px;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:.85em">';
+    echo '<input type="number" name="pmax" placeholder="' . $t('ph_to') . '" value="' . $pmaxDisplay . '" style="width:80px;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:.85em">';
     echo '<span style="font-size:.85em;color:#888">€</span></div>';
 
     foreach ($filters as $critName => $values) {
