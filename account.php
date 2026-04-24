@@ -57,8 +57,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             [$ok, $id, $err] = Customers::register($email, $password, $name, ['locale' => $locale]);
             if ($ok) {
-                // Send welcome email (fire-and-forget via queue)
-                MailService::send((int)$id, $email, 'account_welcome', $locale, [
+                // Send welcome email (fire-and-forget)
+                MailService::send('account_welcome', $email, $locale, [
                     'customer_name' => $name ?: $email,
                     'shop_name'     => 'BareBones Shop',
                 ], null);
@@ -111,11 +111,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $token = Customers::startPasswordReset($email);
             if ($token) {
-                $cid = (int)(Customers::byEmail($email)['id'] ?? 0);
                 $resetUrl = (!empty($_SERVER['HTTPS']) ? 'https' : 'http')
                     . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost')
                     . '/account.php?p=reset&token=' . urlencode($token);
-                MailService::send($cid, $email, 'account_password_reset', $locale, [
+                MailService::send('account_password_reset', $email, $locale, [
                     'customer_name' => $email,
                     'reset_url'     => $resetUrl,
                     'expires_in'    => '1',

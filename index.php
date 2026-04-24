@@ -1572,7 +1572,9 @@ function processCheckout(): string {
     $subtotal = array_sum(array_map(fn($i) => $i['price'] * $i['qty'], $cartItems));
     $shippingCost = $subtotal >= 5000 ? 0 : 499;
 
+    $loggedInCustomerId = !empty($_SESSION['customer_id']) ? (int)$_SESSION['customer_id'] : null;
     $customer = [
+        'customer_id' => $loggedInCustomerId,
         'name'  => Security::clean($_POST['name'] ?? ''),
         'email' => Security::clean($_POST['email'] ?? ''),
         'phone' => Security::clean($_POST['phone'] ?? ''),
