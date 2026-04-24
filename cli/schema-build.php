@@ -32,7 +32,7 @@ if ($fresh) {
     echo "FRESH mode: dropping all tables...\n";
     $tables = [
         'shipping_labels', 'shipping_rates',
-        'abandoned_carts', 'coupon_uses', 'processed_events', 'payment_transactions', 'audit_log', 'order_items', 'orders',
+        'abandoned_carts', 'coupon_uses', 'processed_events', 'email_log', 'payment_transactions', 'audit_log', 'order_items', 'orders',
         'product_vehicles', 'product_oe_numbers', 'product_specifications',
         'slug_registry', 'variants', 'product_attrs', 'products',
         'categories',
@@ -227,7 +227,31 @@ $db->exec("CREATE INDEX IF NOT EXISTS idx_ord_email ON orders(customer_email)");
 try {
     $db->exec("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'pending'");
 } catch (\PDOException $e) { /* already exists */ }
+// Migration: add locale to existing databases (for email templates etc.)
+try {
+    $db->exec("ALTER TABLE orders ADD COLUMN locale TEXT NOT NULL DEFAULT 'sk'");
+} catch (\PDOException $e) { /* already exists */ }
 echo "  [OK] orders\n";
+
+// Email Log — outbound email audit + resend source
+$db->exec("CREATE TABLE IF NOT EXISTS email_log (
+    id         INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
+    order_id   INTEGER DEFAULT NULL,
+    recipient  TEXT NOT NULL,
+    template   TEXT NOT NULL,
+    locale     TEXT NOT NULL DEFAULT 'sk',
+    subject    TEXT NOT NULL DEFAULT '',
+    adapter    TEXT NOT NULL DEFAULT '',
+    status     TEXT NOT NULL DEFAULT 'pending',
+    error      TEXT DEFAULT '',
+    payload    TEXT DEFAULT '{}',
+    sent_at    TEXT DEFAULT NULL,
+    created_at TEXT DEFAULT (" . ($isSqlite ? "datetime('now')" : "NOW()") . ")
+)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_eml_order ON email_log(order_id)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_eml_recipient ON email_log(recipient, created_at)");
+$db->exec("CREATE INDEX IF NOT EXISTS idx_eml_status ON email_log(status, created_at)");
+echo "  [OK] email_log\n";
 
 // Payment Transactions — immutable log of every payment event
 $db->exec("CREATE TABLE IF NOT EXISTS payment_transactions (
