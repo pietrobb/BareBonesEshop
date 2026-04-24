@@ -23,7 +23,7 @@ $cfg = require __DIR__ . '/config.php';
 $action = $_GET['action'] ?? '';
 
 // Rate limiting (exempt webhooks — they rely on signature verification)
-if (!in_array($action, ['webhook_stripe', 'webhook_payment'], true) && !Security::rateLimit('api_' . $action, 120)) {
+if (!in_array($action, ['webhook_stripe', 'webhook_payment', 'webhook_shipping'], true) && !Security::rateLimit('api_' . $action, 120)) {
     echo json_encode(['error' => 'Too many requests']);
     exit;
 }
@@ -45,7 +45,8 @@ try {
         'search_suggest'  => apiSearchSuggest(),
         'validate_coupon' => apiValidateCoupon(),
         'webhook_stripe'  => apiWebhookStripe(),
-        'webhook_payment' => apiWebhookPayment(),
+        'webhook_payment'  => apiWebhookPayment(),
+        'webhook_shipping' => apiWebhookShipping(),
         // TecDoc / Auto Parts
         'vehicle_manufacturers' => apiVehicleManufacturers(),
         'vehicle_models'        => apiVehicleModels(),
@@ -721,6 +722,47 @@ function apiWebhookPayment(): array {
     }
 
     return ['status' => $result['duplicate'] ?? false ? 'already_processed' : 'ok'];
+}
+
+function apiWebhookShipping(): array {
+    $carrier = Security::clean($_GET['carrier'] ?? '');
+    if (!$carrier || !preg_match('/^[a-z0-9_]+$/', $carrier)) {
+        http_response_code(400);
+        return ['error' => 'Invalid carrier'];
+    }
+
+    $rawPayload = file_get_contents('php://input');
+    if (!$rawPayload) {
+        http_response_code(400);
+        return ['error' => 'Empty payload'];
+    }
+
+    $parsed = json_decode($rawPayload, true);
+    if ($parsed === null) {
+        http_response_code(400);
+        return ['error' => 'Invalid JSON'];
+    }
+
+    // Signature header varies by carrier
+    $sigHeader = match($carrier) {
+        'packeta' => $_SERVER['HTTP_X_PACKETA_SIGNATURE'] ?? '',
+        'gls'     => $_SERVER['HTTP_X_GLS_SIGNATURE'] ?? '',
+        default   => $_SERVER['HTTP_X_SHIPPING_SIGNATURE'] ?? '',
+    };
+
+    try {
+        $result = ShippingService::handleTrackingWebhook($carrier, $parsed, $sigHeader);
+    } catch (\RuntimeException $e) {
+        if (str_contains($e->getMessage(), 'signature')) {
+            http_response_code(400);
+            return ['error' => 'Invalid signature'];
+        }
+        error_log("webhook_shipping [{$carrier}] error: " . $e->getMessage());
+        http_response_code(500);
+        return ['error' => 'Processing failed'];
+    }
+
+    return $result;
 }
 
 // ============================================================
