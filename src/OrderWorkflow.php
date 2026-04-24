@@ -84,8 +84,9 @@ class OrderWorkflow {
     private static function handlePaid(array $order): array {
         return [
             ['email_send', [
-                'template' => 'order-confirmation',
+                'template' => 'order_paid',
                 'to'       => $order['customer_email'],
+                'locale'   => $order['locale'] ?? '',
                 'order_id' => $order['id'],
             ], 5],
             ['erp_order_update', [
@@ -101,7 +102,14 @@ class OrderWorkflow {
     private static function handleCancellation(array $order): array {
         Orders::restoreStock($order['id']);
 
-        $jobs = [];
+        $jobs = [
+            ['email_send', [
+                'template' => 'order_cancelled',
+                'to'       => $order['customer_email'],
+                'locale'   => $order['locale'] ?? '',
+                'order_id' => $order['id'],
+            ], 5],
+        ];
         // Only queue refund if payment_id is a payment_intent (pi_*), not a checkout session (cs_*)
         $pid = $order['payment_id'] ?? '';
         if ($pid && !str_starts_with($pid, 'cs_')) {
@@ -155,8 +163,9 @@ class OrderWorkflow {
 
         return [
             ['email_send', [
-                'template' => 'shipping-notification',
+                'template' => 'order_shipped',
                 'to'       => $order['customer_email'],
+                'locale'   => $order['locale'] ?? '',
                 'order_id' => $order['id'],
             ], 5],
             ['erp_order_update', [
@@ -205,8 +214,9 @@ class OrderWorkflow {
     private static function handleRefund(array $order): array {
         return [
             ['email_send', [
-                'template' => 'refund-confirmation',
+                'template' => 'refund_issued',
                 'to'       => $order['customer_email'],
+                'locale'   => $order['locale'] ?? '',
                 'order_id' => $order['id'],
             ], 5],
         ];

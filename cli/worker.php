@@ -230,25 +230,29 @@ function handleCacheRebuild(array $payload, array $job): void {
 }
 
 function handleEmailSend(array $payload, array $job): void {
-    $template = $payload['template'] ?? '';
-    $to = $payload['to'] ?? '';
-    $orderId = $payload['order_id'] ?? null;
+    $template = (string)($payload['template'] ?? '');
+    $to       = (string)($payload['to'] ?? '');
+    $orderId  = $payload['order_id'] ?? null;
+    $locale   = (string)($payload['locale'] ?? '');
 
     if (!$to || !$template) return;
 
-    $vars = $payload['vars'] ?? [];
+    $vars = (array)($payload['vars'] ?? []);
     if ($orderId) {
         $order = Orders::byId((int)$orderId);
         if ($order) {
+            // Prefer locale from order row, then payload, then default.
+            if ($locale === '') $locale = (string)($order['locale'] ?? '');
             $vars = array_merge($vars, [
-                'order_number' => $order['order_number'],
-                'order_status' => $order['status'],
-                'order_total' => I18n::price((int)$order['total']),
-                'customer_name' => $order['customer_name'],
+                'order_number'   => $order['order_number'],
+                'order_status'   => $order['status'],
+                'order_total'    => I18n::price((int)$order['total'], $order['currency'] ?? null),
+                'customer_name'  => $order['customer_name'],
                 'customer_email' => $order['customer_email'],
                 'payment_method' => $order['payment_method'] ?? '',
+                'carrier'        => $order['carrier'] ?? '',
+                'tracking_number'=> $order['tracking_number'] ?? '',
             ]);
-            // Include order items for {{#each items}} template blocks
             $items = Orders::items((int)$orderId);
             $vars['items'] = array_map(fn($it) => [
                 'name'       => $it['name'],
@@ -260,77 +264,8 @@ function handleEmailSend(array $payload, array $job): void {
         }
     }
 
-    // Render template if it exists
-    $templateFile = __DIR__ . '/../templates/' . $template . '.html';
-    $body = '';
-    $subject = $template;
-    if (file_exists($templateFile)) {
-        $body = file_get_contents($templateFile);
-        $body = renderTemplate($body, $vars);
-        // Extract subject from <title> if present
-        if (preg_match('/<title>(.*?)<\/title>/i', $body, $m)) {
-            $subject = $m[1];
-        }
-    } else {
-        $body = "Template: {$template}\n" . json_encode($vars, JSON_PRETTY_PRINT);
-    }
-
-    // Attempt to send via mail() if available
-    $sent = false;
-    if (function_exists('mail')) {
-        $headers = "MIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n";
-        $headers .= "From: noreply@" . ($_SERVER['SERVER_NAME'] ?? 'localhost') . "\r\n";
-        $sent = @mail($to, $subject, $body, $headers);
-    }
-
-    // Always log
-    $logDir = __DIR__ . '/../logs';
-    if (!is_dir($logDir)) mkdir($logDir, 0750, true);
-    $status = $sent ? 'SENT' : 'LOGGED';
-    $logEntry = date('c') . " | {$status} | TO: {$to} | SUBJECT: {$subject}";
-    if ($orderId) $logEntry .= " | ORDER_ID: {$orderId}";
-    $logEntry .= "\n";
-    file_put_contents($logDir . '/emails.log', $logEntry, FILE_APPEND | LOCK_EX);
-}
-
-/** Simple template engine: {{var}}, {{#if var}}...{{/if}}, {{#each items}}...{{/each}} */
-function renderTemplate(string $tpl, array $vars): string {
-    // Process {{#each key}}...{{/each}} blocks
-    $tpl = preg_replace_callback('/\{\{#each\s+(\w+)\}\}(.*?)\{\{\/each\}\}/s', function($m) use ($vars) {
-        $key = $m[1];
-        $inner = $m[2];
-        $items = $vars[$key] ?? [];
-        if (!is_array($items)) return '';
-        $out = '';
-        foreach ($items as $item) {
-            $row = $inner;
-            if (is_array($item)) {
-                foreach ($item as $k => $v) {
-                    $row = str_replace('{{' . $k . '}}', htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'), $row);
-                }
-            } else {
-                $row = str_replace('{{this}}', htmlspecialchars((string)$item, ENT_QUOTES, 'UTF-8'), $row);
-            }
-            $out .= $row;
-        }
-        return $out;
-    }, $tpl);
-
-    // Process {{#if key}}...{{/if}} blocks
-    $tpl = preg_replace_callback('/\{\{#if\s+(\w+)\}\}(.*?)\{\{\/if\}\}/s', function($m) use ($vars) {
-        return !empty($vars[$m[1]]) ? $m[2] : '';
-    }, $tpl);
-
-    // Simple variable substitution
-    foreach ($vars as $k => $v) {
-        if (is_scalar($v)) {
-            $tpl = str_replace('{{' . $k . '}}', htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'), $tpl);
-        }
-    }
-    // Clean up any remaining unresolved placeholders
-    $tpl = preg_replace('/\{\{[^}]+\}\}/', '', $tpl);
-
-    return $tpl;
+    // Delegate to MailService — renders locale template, picks adapter, logs to email_log.
+    MailService::send($template, $to, $locale, $vars, $orderId !== null ? (int)$orderId : null);
 }
 
 function handleStockAlert(array $payload, array $job): void {
@@ -516,7 +451,7 @@ function handleCartAbandonment(array $payload, array $job): void {
         }
 
         JobQueue::push('email_send', [
-            'template' => 'cart-reminder',
+            'template' => 'cart_reminder',
             'to'       => $cart['customer_email'],
             'vars'     => ['cart_url' => '/'],
         ], 8);
