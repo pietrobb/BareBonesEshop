@@ -2944,6 +2944,144 @@ $guestOrderId = (int)$pdo->query("SELECT id FROM orders WHERE order_number='GUES
 $blocked = Customers::order($aliceId, $guestOrderId);
 assert_true($blocked === null, 'Customer: order() blocks access to guest/other-customer order');
 
+// ============================================================
+// TEST: Migrations Framework
+// ============================================================
+echo "\n--- Test: Migrations Framework ---\n";
+
+$migDir = __DIR__ . '/../db/_test_migrations';
+$migLock = __DIR__ . '/../db/.test-migrations.lock';
+if (is_dir($migDir)) {
+    foreach (glob($migDir . '/*') ?: [] as $f) @unlink($f);
+    @rmdir($migDir);
+}
+mkdir($migDir, 0750, true);
+
+// Use a separate in-memory DB so we can drop schema_migrations cleanly
+$migDb = new PDO('sqlite::memory:');
+$migDb->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$migDb->exec('PRAGMA foreign_keys = ON');
+
+$writeMig = function (string $name, string $body) use ($migDir): string {
+    $path = $migDir . '/' . $name . '.php';
+    $code = "<?php\nreturn new class {\n    public function up(PDO \$db, bool \$isSqlite): void {\n        {$body}\n    }\n};\n";
+    file_put_contents($path, $code);
+    return $path;
+};
+
+// Test 1: Apply pending migrations on a fresh DB
+$writeMig('20260101000001_create_widgets', "\$db->exec('CREATE TABLE widgets (id INTEGER PRIMARY KEY, name TEXT)');");
+$writeMig('20260101000002_create_gizmos',  "\$db->exec('CREATE TABLE gizmos (id INTEGER PRIMARY KEY, label TEXT)');");
+$mig = new Migrator($migDb, $migDir, $migLock);
+$applied = $mig->apply(static fn($m) => null);
+assert_equals(2, count($applied), 'Migrate: 2 pending migrations applied on fresh DB');
+$tables = $migDb->query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
+assert_true(in_array('widgets', $tables, true) && in_array('gizmos', $tables, true), 'Migrate: both tables created');
+assert_true(in_array('schema_migrations', $tables, true), 'Migrate: schema_migrations table auto-created');
+
+// Test 2: Re-apply is a no-op
+$applied2 = $mig->apply(static fn($m) => null);
+assert_equals(0, count($applied2), 'Migrate: re-run skips already-applied migrations');
+
+// Test 3: Status reports applied + pending + checksum_ok
+$writeMig('20260101000003_add_thingies', "\$db->exec('CREATE TABLE thingies (id INTEGER PRIMARY KEY)');");
+$status = $mig->status();
+assert_equals(2, count($status['applied']), 'Migrate: status applied=2');
+assert_equals(1, count($status['pending']), 'Migrate: status pending=1');
+assert_equals(0, count($status['missing']), 'Migrate: status missing=0');
+$firstApplied = array_keys($status['applied'])[0];
+assert_true($status['applied'][$firstApplied]['checksum_ok'] === true, 'Migrate: applied checksum_ok = true');
+
+// Test 4: Checksum mismatch is a hard error
+file_put_contents(
+    $migDir . '/20260101000001_create_widgets.php',
+    "<?php\nreturn new class {\n    public function up(PDO \$db, bool \$isSqlite): void {\n        // tampered\n    }\n};\n"
+);
+$thrown = false;
+try {
+    $mig->apply(static fn($m) => null);
+} catch (\Throwable $e) {
+    $thrown = (strpos($e->getMessage(), 'modified after being applied') !== false);
+}
+assert_true($thrown, 'Migrate: tampered migration triggers checksum hard fail');
+
+// Restore the original tampered file via baseline reset (for next tests)
+$writeMig('20260101000001_create_widgets', "\$db->exec('CREATE TABLE widgets (id INTEGER PRIMARY KEY, name TEXT)');");
+// Re-record correct checksum for the now-restored file
+$correct = $mig->fileChecksum($migDir . '/20260101000001_create_widgets.php');
+$migDb->prepare("UPDATE schema_migrations SET checksum = ? WHERE name = ?")
+      ->execute([$correct, '20260101000001_create_widgets']);
+
+// Test 5: Failure mid-migration rolls back, marker not inserted
+$writeMig('20260101000004_will_fail', "\$db->exec('CREATE TABLE temp_ok (id INTEGER PRIMARY KEY)'); \$db->exec('CREATE TABLE temp_ok (id INTEGER PRIMARY KEY)');");
+$migFailed = false;
+try {
+    $mig->apply(static fn($m) => null);
+} catch (\Throwable $e) {
+    $migFailed = true;
+}
+assert_true($migFailed, 'Migrate: failing migration throws');
+$marker = $migDb->prepare("SELECT 1 FROM schema_migrations WHERE name = ?");
+$marker->execute(['20260101000004_will_fail']);
+assert_true(!$marker->fetchColumn(), 'Migrate: failed migration not recorded in schema_migrations');
+@unlink($migDir . '/20260101000004_will_fail.php');
+
+// Test 6: Baseline marks files as applied without running them
+$migDb2 = new PDO('sqlite::memory:');
+$migDb2->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$mig2 = new Migrator($migDb2, $migDir, $migLock);
+$marked = $mig2->baseline(static fn($m) => null);
+assert_true(count($marked) >= 3, 'Migrate: baseline marked all existing files');
+$widgetTables = $migDb2->query("SELECT name FROM sqlite_master WHERE type='table' AND name='widgets'")->fetchAll();
+assert_equals(0, count($widgetTables), 'Migrate: baseline did NOT run migrations (no widgets table)');
+// Re-baseline is idempotent
+$marked2 = $mig2->baseline(static fn($m) => null);
+assert_equals(0, count($marked2), 'Migrate: re-baseline is idempotent');
+
+// Test 7: create() generates valid migration stub
+$stubPath = $mig->create('add example column');
+assert_true(file_exists($stubPath), 'Migrate: create() writes the stub file');
+assert_true(strpos(file_get_contents($stubPath), 'public function up(PDO $db, bool $isSqlite)') !== false,
+    'Migrate: stub contains expected up() signature');
+assert_true(preg_match('/\d{14}_add_example_column\.php$/', basename($stubPath)) === 1,
+    'Migrate: stub filename has timestamp prefix and slugified name');
+// PHP syntax check on the stub
+$rc = -1;
+$out = [];
+exec('"' . PHP_BINARY . '" -l ' . escapeshellarg($stubPath) . ' 2>&1', $out, $rc);
+assert_equals(0, $rc, 'Migrate: generated stub passes php -l');
+@unlink($stubPath);
+
+// Test 8: missing file detection in status
+$migDb3 = new PDO('sqlite::memory:');
+$migDb3->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$mig3 = new Migrator($migDb3, $migDir, $migLock);
+$mig3->ensureMigrationsTable();
+$migDb3->prepare("INSERT INTO schema_migrations (name, checksum, duration_ms) VALUES (?, ?, 0)")
+       ->execute(['99990101000000_ghost', 'deadbeef']);
+$status3 = $mig3->status();
+assert_equals(1, count($status3['missing']), 'Migrate: status detects missing file (in DB but no file)');
+assert_equals('99990101000000_ghost', $status3['missing'][0], 'Migrate: missing entry has correct name');
+
+// Test 9: Baseline migration produces full v1.4.0 schema
+$baselineDb = new PDO('sqlite::memory:');
+$baselineDb->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$baselineMig = new Migrator($baselineDb, __DIR__ . '/../migrations', $migLock);
+$baselineApplied = $baselineMig->apply(static fn($m) => null);
+assert_equals(1, count($baselineApplied), 'Migrate: baseline migration applied on fresh DB');
+$realTables = $baselineDb->query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%_fts%' ORDER BY name")
+                          ->fetchAll(PDO::FETCH_COLUMN);
+$expected = ['categories', 'customers', 'orders', 'products', 'warehouses', 'shipping_labels', 'payment_transactions', 'email_log'];
+foreach ($expected as $t) {
+    assert_true(in_array($t, $realTables, true), "Migrate: baseline created table '{$t}'");
+}
+
+// Cleanup migration test artifacts
+$migDb = $migDb2 = $migDb3 = $baselineDb = null;
+foreach (glob($migDir . '/*') ?: [] as $f) @unlink($f);
+@rmdir($migDir);
+@unlink($migLock);
+
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
 if ($failed > 0) {
