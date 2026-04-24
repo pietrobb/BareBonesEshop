@@ -2,6 +2,7 @@
 db/*.sqlite
 db/*.sqlite-wal
 db/*.sqlite-shm
+db/.migrations.lock
 
 # Cache
 cache/
