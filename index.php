@@ -14,7 +14,8 @@ $uri = $_SERVER['REQUEST_URI'] ?? '';
 $lang = I18n::detectLocale($uri);
 I18n::setLocale($lang);
 
-// Slovak translations for TecDoc English category names
+// Legacy fallback for category names not yet migrated to categories.translations JSON
+// (run `php cli/migrate-cat-translations.php` to persist these into the DB).
 $catTranslations = [
     'sk' => [
         'Body' => 'Karoséria', 'Brake System' => 'Brzdový systém', 'Cooling System' => 'Chladiaci systém',
@@ -302,8 +303,24 @@ $catTranslations = [
         'Crankcase' => 'Kurbelgehäuse',
     ],
 ];
-$catName = function(string $name) use ($catTranslations, $lang): string {
-    return $catTranslations[$lang][$name] ?? $name;
+// Build DB-backed name→locale→translated lookup from categories.translations JSON
+// (populated via `php cli/migrate-cat-translations.php`). Falls back to hardcoded
+// $catTranslations array for categories not yet migrated.
+$catTranslationsDb = [];
+try {
+    $catRows = Db::get()->query("SELECT name, translations FROM categories WHERE translations IS NOT NULL AND translations != '' AND translations != '{}'")->fetchAll();
+    foreach ($catRows as $cr) {
+        $tr = json_decode($cr['translations'] ?? '{}', true) ?: [];
+        foreach ($tr as $lc => $data) {
+            if (!empty($data['name'])) {
+                $catTranslationsDb[$lc][$cr['name']] = $data['name'];
+            }
+        }
+    }
+} catch (\Throwable $ignore) { /* table missing during install */ }
+
+$catName = function(string $name) use ($catTranslations, $catTranslationsDb, $lang): string {
+    return $catTranslationsDb[$lang][$name] ?? $catTranslations[$lang][$name] ?? $name;
 };
 
 // UI strings — minimal set for multilingual frontend

@@ -13,9 +13,18 @@ Security::adminAuth();
 Security::headers();
 header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'");
 
-// Admin UI strings are not translated in P0 (content is in SK/EN where hardcoded);
-// still initialize I18n to the system default so translation helpers return sane values.
-I18n::setLocale(I18n::detectLocale($_SERVER['REQUEST_URI'] ?? ''));
+// Admin locale: URL ?lang=xx (persisted in session) → session → system default.
+$storesCfg = json_decode(file_get_contents(__DIR__ . '/stores.json'), true) ?: [];
+$adminSupportedLocales = [];
+foreach ($storesCfg['stores'] ?? [] as $s) {
+    foreach ($s['languages'] ?? [] as $lc) $adminSupportedLocales[$lc] = true;
+}
+$adminSupportedLocales = array_keys($adminSupportedLocales) ?: [$storesCfg['default_locale'] ?? 'en'];
+if (!empty($_GET['lang']) && in_array($_GET['lang'], $adminSupportedLocales, true)) {
+    $_SESSION['admin_locale'] = $_GET['lang'];
+}
+$adminLocale = $_SESSION['admin_locale'] ?? ($storesCfg['default_locale'] ?? 'en');
+I18n::setLocale($adminLocale);
 
 $page = $_GET['p'] ?? 'dashboard';
 $action = $_GET['action'] ?? '';
@@ -59,31 +68,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Render page
 $title = match($page) {
-    'dashboard'  => 'Dashboard',
-    'products'   => 'Produkty',
-    'product'    => isset($_GET['id']) ? 'Upraviť produkt' : 'Nový produkt',
-    'orders'     => 'Objednávky',
-    'order'      => 'Detail objednávky',
-    'import'     => 'Import',
-    'cache'      => 'Cache',
-    'audit'      => 'Audit Log',
-    'pages'      => 'CMS Stránky',
-    'page_edit'  => 'Upraviť stránku',
-    'attributes' => 'Atribúty',
-    'attribute'  => isset($_GET['id']) ? 'Upraviť atribút' : 'Nový atribút',
-    'warehouses' => 'Sklady',
-    'warehouse'  => isset($_GET['id']) ? 'Upraviť sklad' : 'Nový sklad',
-    'feeds'      => 'Feedy',
-    'feed'       => isset($_GET['id']) ? 'Upraviť feed' : 'Nový feed',
-    default      => 'Admin',
+    'dashboard'  => I18n::t('admin.title.dashboard'),
+    'products'   => I18n::t('admin.title.products'),
+    'product'    => isset($_GET['id']) ? I18n::t('admin.title.product_edit') : I18n::t('admin.title.product_new'),
+    'orders'     => I18n::t('admin.title.orders'),
+    'order'      => I18n::t('admin.title.order_detail'),
+    'import'     => I18n::t('admin.title.import'),
+    'cache'      => I18n::t('admin.title.cache'),
+    'audit'      => I18n::t('admin.title.audit_log'),
+    'pages'      => I18n::t('admin.title.cms_pages'),
+    'page_edit'  => I18n::t('admin.title.cms_page_edit'),
+    'attributes' => I18n::t('admin.title.attributes'),
+    'attribute'  => isset($_GET['id']) ? I18n::t('admin.title.attribute_edit') : I18n::t('admin.title.attribute_new'),
+    'warehouses' => I18n::t('admin.title.warehouses'),
+    'warehouse'  => isset($_GET['id']) ? I18n::t('admin.title.warehouse_edit') : I18n::t('admin.title.warehouse_new'),
+    'feeds'      => I18n::t('admin.title.feeds'),
+    'feed'       => isset($_GET['id']) ? I18n::t('admin.title.feed_edit') : I18n::t('admin.title.feed_new'),
+    default      => I18n::t('admin.title.default'),
 };
 
 ?><!DOCTYPE html>
-<html lang="sk">
+<html lang="<?= esc($adminLocale) ?>">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title><?= esc($title) ?> — BareBonesShop Admin</title>
+<title><?= esc($title) ?> — <?= esc(I18n::t('admin.app_name')) ?></title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,sans-serif;background:#f5f5f5;color:#333;line-height:1.5}
@@ -123,18 +132,25 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
 <body>
 <div class="wrap">
 <nav>
-    <h2>BareBonesShop</h2>
+    <h2><?= esc(I18n::t('admin.app_name')) ?></h2>
     <div style="padding:0.3rem 1rem;font-size:0.75rem;color:#94a3b8;margin-bottom:0.5rem"><?= esc(Security::adminUser()) ?> (<?= esc(Security::adminRole()) ?>)</div>
-    <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=dashboard" class="<?= $page==='dashboard'?'active':'' ?>">Dashboard</a><?php endif; ?>
-    <?php if (Security::adminCan('products.view')): ?><a href="admin.php?p=products" class="<?= $page==='products'?'active':'' ?>">Produkty</a><?php endif; ?>
-    <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=orders" class="<?= $page==='orders'?'active':'' ?>">Objednávky</a><?php endif; ?>
-    <?php if (Security::adminCan('import')): ?><a href="admin.php?p=import" class="<?= $page==='import'?'active':'' ?>">Import CSV</a><?php endif; ?>
-    <?php if (Security::adminCan('cache')): ?><a href="admin.php?p=cache" class="<?= $page==='cache'?'active':'' ?>">Cache</a><?php endif; ?>
-    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=attributes" class="<?= $page==='attributes'||$page==='attribute'?'active':'' ?>">Atribúty</a><?php endif; ?>
-    <?php if (Security::adminCan('import')): ?><a href="admin.php?p=warehouses" class="<?= $page==='warehouses'||$page==='warehouse'?'active':'' ?>">Sklady</a><?php endif; ?>
-    <?php if (Security::adminCan('import')): ?><a href="admin.php?p=feeds" class="<?= $page==='feeds'||$page==='feed'?'active':'' ?>">Feedy</a><?php endif; ?>
-    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=pages" class="<?= $page==='pages'?'active':'' ?>">CMS Stránky</a><?php endif; ?>
-    <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=audit" class="<?= $page==='audit'?'active':'' ?>">Audit Log</a><?php endif; ?>
+    <div style="padding:0.3rem 1rem;font-size:0.75rem;color:#94a3b8;margin-bottom:0.5rem">
+        <?= esc(I18n::t('admin.language')) ?>:
+        <?php foreach ($adminSupportedLocales as $lc): ?>
+            <?php $qs = http_build_query(array_merge($_GET, ['lang' => $lc])); ?>
+            <a href="admin.php?<?= esc($qs) ?>" style="<?= $lc===$adminLocale?'color:#fff;font-weight:600':'color:#94a3b8' ?>"><?= strtoupper(esc($lc)) ?></a>
+        <?php endforeach; ?>
+    </div>
+    <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=dashboard" class="<?= $page==='dashboard'?'active':'' ?>"><?= esc(I18n::t('admin.nav.dashboard')) ?></a><?php endif; ?>
+    <?php if (Security::adminCan('products.view')): ?><a href="admin.php?p=products" class="<?= $page==='products'?'active':'' ?>"><?= esc(I18n::t('admin.nav.products')) ?></a><?php endif; ?>
+    <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=orders" class="<?= $page==='orders'?'active':'' ?>"><?= esc(I18n::t('admin.nav.orders')) ?></a><?php endif; ?>
+    <?php if (Security::adminCan('import')): ?><a href="admin.php?p=import" class="<?= $page==='import'?'active':'' ?>"><?= esc(I18n::t('admin.nav.import_csv')) ?></a><?php endif; ?>
+    <?php if (Security::adminCan('cache')): ?><a href="admin.php?p=cache" class="<?= $page==='cache'?'active':'' ?>"><?= esc(I18n::t('admin.nav.cache')) ?></a><?php endif; ?>
+    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=attributes" class="<?= $page==='attributes'||$page==='attribute'?'active':'' ?>"><?= esc(I18n::t('admin.nav.attributes')) ?></a><?php endif; ?>
+    <?php if (Security::adminCan('import')): ?><a href="admin.php?p=warehouses" class="<?= $page==='warehouses'||$page==='warehouse'?'active':'' ?>"><?= esc(I18n::t('admin.nav.warehouses')) ?></a><?php endif; ?>
+    <?php if (Security::adminCan('import')): ?><a href="admin.php?p=feeds" class="<?= $page==='feeds'||$page==='feed'?'active':'' ?>"><?= esc(I18n::t('admin.nav.feeds')) ?></a><?php endif; ?>
+    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=pages" class="<?= $page==='pages'?'active':'' ?>"><?= esc(I18n::t('admin.nav.cms_pages')) ?></a><?php endif; ?>
+    <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=audit" class="<?= $page==='audit'?'active':'' ?>"><?= esc(I18n::t('admin.nav.audit')) ?></a><?php endif; ?>
 </nav>
 <main>
 <?php flash(); ?>
@@ -197,25 +213,25 @@ function pageDashboard(): void {
     // Job queue stats
     $jobStats = JobQueue::stats();
     ?>
-    <h1>Dashboard</h1>
+    <h1><?= esc(I18n::t('admin.title.dashboard')) ?></h1>
     <div class="grid grid-4">
-        <div class="card stat"><div class="num"><?= $ordersToday ?></div><div class="label">Objednávky dnes</div></div>
-        <div class="card stat"><div class="num"><?= I18n::price($revenueToday) ?></div><div class="label">Tržby dnes</div></div>
-        <div class="card stat"><div class="num"><?= $pendingOrders ?></div><div class="label">Čakajúce</div></div>
-        <div class="card stat"><div class="num"><?= $lowStock ?></div><div class="label">Low stock</div></div>
+        <div class="card stat"><div class="num"><?= $ordersToday ?></div><div class="label"><?= esc(I18n::t('admin.stat.orders_today')) ?></div></div>
+        <div class="card stat"><div class="num"><?= I18n::price($revenueToday) ?></div><div class="label"><?= esc(I18n::t('admin.stat.revenue_today')) ?></div></div>
+        <div class="card stat"><div class="num"><?= $pendingOrders ?></div><div class="label"><?= esc(I18n::t('admin.stat.pending')) ?></div></div>
+        <div class="card stat"><div class="num"><?= $lowStock ?></div><div class="label"><?= esc(I18n::t('admin.stat.low_stock')) ?></div></div>
     </div>
 
     <div class="card">
-        <h3>Štatistiky</h3>
-        <p>Celkom produktov: <strong><?= $totalProducts ?></strong></p>
-        <p>Joby v rade: <strong><?= $jobStats['pending'] ?></strong> čakajúcich, <strong><?= $jobStats['failed'] ?></strong> zlyhaných</p>
+        <h3><?= esc(I18n::t('admin.dashboard.statistics')) ?></h3>
+        <p><?= esc(I18n::t('admin.dashboard.total_products')) ?>: <strong><?= $totalProducts ?></strong></p>
+        <p><?= esc(I18n::t('admin.dashboard.jobs_queue')) ?>: <strong><?= $jobStats['pending'] ?></strong> <?= esc(I18n::t('admin.dashboard.jobs_pending')) ?>, <strong><?= $jobStats['failed'] ?></strong> <?= esc(I18n::t('admin.dashboard.jobs_failed')) ?></p>
     </div>
 
     <?php if ($lowStock > 0): ?>
     <div class="card">
-        <h3>Low Stock Alert (< 10 ks)</h3>
+        <h3><?= esc(I18n::t('admin.dashboard.low_stock_alert')) ?></h3>
         <table>
-            <tr><th>SKU</th><th>Názov</th><th>Stock</th></tr>
+            <tr><th><?= esc(I18n::t('admin.th.sku')) ?></th><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.th.stock')) ?></th></tr>
             <?php
             $stmt = $db->query("SELECT sku, name, stock FROM products WHERE stock < 10 AND status = 'active' ORDER BY stock ASC LIMIT 20");
             while ($row = $stmt->fetch()):
@@ -231,9 +247,9 @@ function pageDashboard(): void {
     <?php endif; ?>
 
     <div class="card">
-        <h3>Posledné objednávky</h3>
+        <h3><?= esc(I18n::t('admin.dashboard.recent_orders')) ?></h3>
         <table>
-            <tr><th>#</th><th>Zákazník</th><th>Suma</th><th>Stav</th><th>Dátum</th></tr>
+            <tr><th><?= esc(I18n::t('admin.th.number')) ?></th><th><?= esc(I18n::t('admin.th.customer')) ?></th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.th.date')) ?></th></tr>
             <?php
             $stmt = $db->query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 10");
             while ($row = $stmt->fetch()):
@@ -283,39 +299,39 @@ function pageProducts(): void {
     $stmt->execute($params);
     $products = $stmt->fetchAll();
     ?>
-    <h1>Produkty <span class="muted">(<?= $total ?>)</span></h1>
+    <h1><?= esc(I18n::t('admin.title.products')) ?> <span class="muted">(<?= $total ?>)</span></h1>
     <div class="card">
         <form method="get" style="display:flex;gap:.5rem;margin-bottom:1rem">
             <input type="hidden" name="p" value="products">
-            <input name="q" value="<?= esc($search) ?>" placeholder="Hľadať (názov, SKU)...">
+            <input name="q" value="<?= esc($search) ?>" placeholder="<?= esc(I18n::t('admin.products.search_placeholder')) ?>">
             <select name="status">
-                <option value="">Všetky stavy</option>
-                <option value="active" <?= $statusFilter==='active'?'selected':'' ?>>Active</option>
-                <option value="draft" <?= $statusFilter==='draft'?'selected':'' ?>>Draft</option>
-                <option value="archived" <?= $statusFilter==='archived'?'selected':'' ?>>Archived</option>
+                <option value="">— <?= esc(I18n::t('admin.th.status')) ?> —</option>
+                <option value="active" <?= $statusFilter==='active'?'selected':'' ?>>active</option>
+                <option value="draft" <?= $statusFilter==='draft'?'selected':'' ?>>draft</option>
+                <option value="archived" <?= $statusFilter==='archived'?'selected':'' ?>>archived</option>
             </select>
-            <button class="btn" type="submit">Filtrovať</button>
+            <button class="btn" type="submit"><?= esc(I18n::t('admin.btn.apply')) ?></button>
         </form>
         <form method="post" action="admin.php?p=products&action=bulk" id="bulk-form">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
             <div style="display:flex;gap:.5rem;margin-bottom:.5rem">
                 <select name="bulk_action">
-                    <option value="">— Hromadna akcia —</option>
-                    <option value="activate">Aktivovať</option>
-                    <option value="archive">Archivovať</option>
-                    <option value="delete">Zmazať</option>
-                    <option value="price_up_5">Cena +5%</option>
-                    <option value="price_up_10">Cena +10%</option>
-                    <option value="price_up_20">Cena +20%</option>
-                    <option value="price_down_5">Cena -5%</option>
-                    <option value="price_down_10">Cena -10%</option>
-                    <option value="price_down_20">Cena -20%</option>
+                    <option value="">— <?= esc(I18n::t('admin.products.bulk_action')) ?> —</option>
+                    <option value="activate">activate</option>
+                    <option value="archive">archive</option>
+                    <option value="delete"><?= esc(I18n::t('admin.btn.delete')) ?></option>
+                    <option value="price_up_5">Price +5%</option>
+                    <option value="price_up_10">Price +10%</option>
+                    <option value="price_up_20">Price +20%</option>
+                    <option value="price_down_5">Price -5%</option>
+                    <option value="price_down_10">Price -10%</option>
+                    <option value="price_down_20">Price -20%</option>
                 </select>
-                <button type="submit" class="btn btn-sm" onclick="return confirm('Naozaj?')">Vykonat</button>
-                <a href="admin.php?p=products&action=export&csrf_token=<?= Security::csrfToken() ?>&q=<?= urlencode($search) ?>&status=<?= urlencode($statusFilter) ?>" class="btn btn-sm">Export CSV</a>
+                <button type="submit" class="btn btn-sm" onclick="return confirm('OK?')"><?= esc(I18n::t('admin.btn.apply')) ?></button>
+                <a href="admin.php?p=products&action=export&csrf_token=<?= Security::csrfToken() ?>&q=<?= urlencode($search) ?>&status=<?= urlencode($statusFilter) ?>" class="btn btn-sm"><?= esc(I18n::t('admin.btn.export_csv')) ?></a>
             </div>
         <table>
-            <tr><th><input type="checkbox" id="check-all"></th><th>SKU</th><th>Nazov</th><th>Cena</th><th>Stock</th><th>Stav</th><th>Akcie</th></tr>
+            <tr><th><input type="checkbox" id="check-all"></th><th><?= esc(I18n::t('admin.th.sku')) ?></th><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.th.price')) ?></th><th><?= esc(I18n::t('admin.th.stock')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.th.actions')) ?></th></tr>
             <?php foreach ($products as $p): ?>
             <tr>
                 <td><input type="checkbox" name="product_ids[]" value="<?= $p['id'] ?>" class="product-check"></td>
@@ -325,7 +341,7 @@ function pageProducts(): void {
                 <td class="<?= $p['stock'] < 10 ? 'stock-low' : '' ?>"><?= (int)$p['stock'] ?></td>
                 <td><span class="badge badge-<?= esc($p['status']) ?>"><?= esc($p['status']) ?></span></td>
                 <td>
-                    <a href="admin.php?p=product&id=<?= $p['id'] ?>" class="btn btn-sm">Upraviť</a>
+                    <a href="admin.php?p=product&id=<?= $p['id'] ?>" class="btn btn-sm"><?= esc(I18n::t('admin.btn.edit')) ?></a>
                 </td>
             </tr>
             <?php endforeach; ?>
@@ -545,20 +561,20 @@ function pageOrders(): void {
     $stmt->execute($params);
     $orders = $stmt->fetchAll();
     ?>
-    <h1>Objednávky <span class="muted">(<?= $total ?>)</span></h1>
+    <h1><?= esc(I18n::t('admin.title.orders')) ?> <span class="muted">(<?= $total ?>)</span></h1>
     <div class="card">
         <form method="get" style="display:flex;gap:.5rem;margin-bottom:1rem">
             <input type="hidden" name="p" value="orders">
             <select name="status">
-                <option value="">Všetky stavy</option>
+                <option value="">— <?= esc(I18n::t('admin.th.status')) ?> —</option>
                 <?php foreach (OrderWorkflow::statuses() as $s): ?>
                 <option value="<?= $s ?>" <?= $statusFilter===$s?'selected':'' ?>><?= $s ?></option>
                 <?php endforeach; ?>
             </select>
-            <button class="btn" type="submit">Filtrovať</button>
+            <button class="btn" type="submit"><?= esc(I18n::t('admin.btn.apply')) ?></button>
         </form>
         <table>
-            <tr><th>#</th><th>Zákazník</th><th>Email</th><th>Suma</th><th>Stav</th><th>Dátum</th><th></th></tr>
+            <tr><th><?= esc(I18n::t('admin.th.number')) ?></th><th><?= esc(I18n::t('admin.th.customer')) ?></th><th><?= esc(I18n::t('admin.th.email')) ?></th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.th.date')) ?></th><th></th></tr>
             <?php foreach ($orders as $o): ?>
             <tr>
                 <td><a href="admin.php?p=order&id=<?= $o['id'] ?>"><?= esc($o['order_number']) ?></a></td>
@@ -579,18 +595,18 @@ function pageOrders(): void {
 function pageOrder(): void {
     $id = Security::int($_GET['id'] ?? 0);
     $order = Orders::byId($id);
-    if (!$order) { echo '<p>Objednávka nenájdená.</p>'; return; }
+    if (!$order) { echo '<p>' . esc(I18n::t('admin.order.not_found')) . '</p>'; return; }
 
     $items = Orders::items($id);
     $allowed = OrderWorkflow::allowedTransitions($order['status']);
     $logs = AuditLog::forEntity('order_status', $id, 20);
     $addr = json_decode($order['shipping_addr'] ?? '{}', true);
     ?>
-    <h1>Objednávka <?= esc($order['order_number']) ?></h1>
+    <h1><?= esc(I18n::t('admin.order.label')) ?> <?= esc($order['order_number']) ?></h1>
 
     <div class="grid" style="grid-template-columns:1fr 1fr;gap:1rem">
         <div class="card">
-            <h3>Zákazník</h3>
+            <h3><?= esc(I18n::t('admin.th.customer')) ?></h3>
             <p><strong><?= esc($order['customer_name']) ?></strong></p>
             <p><?= esc($order['customer_email']) ?></p>
             <p><?= esc($order['customer_phone']) ?></p>
@@ -599,7 +615,7 @@ function pageOrder(): void {
             <?php endif; ?>
         </div>
         <div class="card">
-            <h3>Stav: <span class="badge badge-<?= esc($order['status']) ?>"><?= esc($order['status']) ?></span></h3>
+            <h3><?= esc(I18n::t('admin.order.status_prefix')) ?>: <span class="badge badge-<?= esc($order['status']) ?>"><?= esc($order['status']) ?></span></h3>
             <?php if (!empty($allowed)): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=status" style="margin-top:.5rem">
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -621,7 +637,7 @@ function pageOrder(): void {
     <div class="card">
         <h3>Položky</h3>
         <table>
-            <tr><th>SKU</th><th>Názov</th><th>Ks</th><th>Cena/ks</th><th>Spolu</th></tr>
+            <tr><th><?= esc(I18n::t('admin.th.sku')) ?></th><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.th.qty')) ?></th><th><?= esc(I18n::t('admin.th.price_per_unit')) ?></th><th><?= esc(I18n::t('admin.th.total')) ?></th></tr>
             <?php foreach ($items as $item): ?>
             <tr>
                 <td><?= esc($item['sku']) ?></td>
