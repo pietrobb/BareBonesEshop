@@ -12,9 +12,55 @@
  */
 require_once __DIR__ . '/../src/autoload.php';
 
-$force = in_array('--force', $argv ?? [], true);
+/**
+ * Run the migration. Returns [updated, skipped, noMatch].
+ * @param bool $force  Overwrite existing locale entries in translations JSON.
+ */
+function migrateCatTranslations(bool $force = false): array {
+    $translations = migrateCatTranslationsData();
+    $db = Db::get();
+    $cats = $db->query("SELECT id, name, translations FROM categories")->fetchAll();
+    $updated = 0; $skipped = 0; $noMatch = 0;
+    $updateStmt = $db->prepare("UPDATE categories SET translations = :tr WHERE id = :id");
 
-$translations = [
+    foreach ($cats as $cat) {
+        $existing = json_decode($cat['translations'] ?? '{}', true) ?: [];
+        $newTranslations = $existing;
+        $hasChanges = false;
+
+        foreach ($translations as $locale => $map) {
+            if (!isset($map[$cat['name']])) continue;
+            $translated = $map[$cat['name']];
+
+            if (!isset($newTranslations[$locale])) {
+                $newTranslations[$locale] = [];
+            }
+            if (!empty($newTranslations[$locale]['name']) && !$force) {
+                continue;
+            }
+            if (($newTranslations[$locale]['name'] ?? null) !== $translated) {
+                $newTranslations[$locale]['name'] = $translated;
+                $hasChanges = true;
+            }
+        }
+
+        if ($hasChanges) {
+            $updateStmt->execute([
+                ':tr' => json_encode($newTranslations, JSON_UNESCAPED_UNICODE),
+                ':id' => $cat['id'],
+            ]);
+            $updated++;
+        } elseif (isset($translations['sk'][$cat['name']]) || isset($translations['de'][$cat['name']])) {
+            $skipped++;
+        } else {
+            $noMatch++;
+        }
+    }
+    return [$updated, $skipped, $noMatch];
+}
+
+function migrateCatTranslationsData(): array {
+    return [
     'sk' => [
         'Body' => 'Karoséria', 'Brake System' => 'Brzdový systém', 'Cooling System' => 'Chladiaci systém',
         'Lights' => 'Osvetlenie', 'Wheel Suspension' => 'Zavesenie kolies', 'Air Supply' => 'Prívod vzduchu',
@@ -169,58 +215,17 @@ $translations = [
         'Crankcase' => 'Kurbelgehäuse',
     ],
 ];
-
-$db = Db::get();
-$isSqlite = ($db->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite');
-
-// Fetch all categories
-$cats = $db->query("SELECT id, name, translations FROM categories")->fetchAll();
-echo "Found " . count($cats) . " categories in DB.\n";
-
-$updated = 0;
-$skipped = 0;
-$noMatch = 0;
-
-$updateStmt = $db->prepare("UPDATE categories SET translations = :tr WHERE id = :id");
-
-foreach ($cats as $cat) {
-    $existing = json_decode($cat['translations'] ?? '{}', true) ?: [];
-    $newTranslations = $existing;
-    $hasChanges = false;
-
-    foreach ($translations as $locale => $map) {
-        if (!isset($map[$cat['name']])) continue;
-        $translated = $map[$cat['name']];
-
-        if (!isset($newTranslations[$locale])) {
-            $newTranslations[$locale] = [];
-        }
-
-        // Don't overwrite DB-curated translations unless --force
-        if (!empty($newTranslations[$locale]['name']) && !$force) {
-            continue;
-        }
-
-        if (($newTranslations[$locale]['name'] ?? null) !== $translated) {
-            $newTranslations[$locale]['name'] = $translated;
-            $hasChanges = true;
-        }
-    }
-
-    if ($hasChanges) {
-        $updateStmt->execute([
-            ':tr' => json_encode($newTranslations, JSON_UNESCAPED_UNICODE),
-            ':id' => $cat['id'],
-        ]);
-        $updated++;
-    } elseif (isset($translations['sk'][$cat['name']]) || isset($translations['de'][$cat['name']])) {
-        $skipped++;
-    } else {
-        $noMatch++;
-    }
 }
 
-echo "Updated:  {$updated}\n";
-echo "Skipped:  {$skipped} (already had translations; use --force to overwrite)\n";
-echo "No match: {$noMatch} (category name not in bundled defaults)\n";
-echo "Done.\n";
+// CLI entry point (only when invoked as script, not when required from tests)
+if (PHP_SAPI === 'cli' && isset($argv[0]) && realpath($argv[0]) === __FILE__) {
+    $force = in_array('--force', $argv, true);
+    $db = Db::get();
+    $total = (int)$db->query("SELECT COUNT(*) FROM categories")->fetchColumn();
+    echo "Found {$total} categories in DB.\n";
+    [$updated, $skipped, $noMatch] = migrateCatTranslations($force);
+    echo "Updated:  {$updated}\n";
+    echo "Skipped:  {$skipped} (already had translations; use --force to overwrite)\n";
+    echo "No match: {$noMatch} (category name not in bundled defaults)\n";
+    echo "Done.\n";
+}
