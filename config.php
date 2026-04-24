@@ -18,8 +18,8 @@ return [
     'db_password' => '',
     'db_charset'  => 'utf8mb4',
 
-    // Default locale & currency
-    'default_locale'   => 'sk',
+    // Default locale & currency (stores.json is the source of truth — these are fallbacks only)
+    'default_locale'   => 'en',
     'default_currency' => 'eur',
 
     // Catalog

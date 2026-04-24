@@ -242,7 +242,7 @@ $db->exec("CREATE TABLE IF NOT EXISTS email_log (
     order_id   INTEGER DEFAULT NULL,
     recipient  TEXT NOT NULL,
     template   TEXT NOT NULL,
-    locale     TEXT NOT NULL DEFAULT 'sk',
+    locale     TEXT NOT NULL DEFAULT 'en',
     subject    TEXT NOT NULL DEFAULT '',
     adapter    TEXT NOT NULL DEFAULT '',
     status     TEXT NOT NULL DEFAULT 'pending',
@@ -348,7 +348,7 @@ echo "  [OK] abandoned_carts\n";
 $db->exec("CREATE TABLE IF NOT EXISTS product_specifications (
     id          INTEGER PRIMARY KEY" . ($isSqlite ? "" : " AUTO_INCREMENT") . ",
     product_id  INTEGER NOT NULL,
-    lang        TEXT NOT NULL DEFAULT 'sk',
+    lang        TEXT NOT NULL DEFAULT 'en',
     criteria_name  TEXT NOT NULL,
     criteria_value TEXT NOT NULL,
     numeric_val    REAL,
@@ -615,7 +615,7 @@ $allLangs = [];
 foreach ($stores['stores'] ?? [] as $store) {
     foreach ($store['languages'] ?? [] as $l) $allLangs[$l] = true;
 }
-$defaultLocale = $stores['default_locale'] ?? 'sk';
+$defaultLocale = $stores['default_locale'] ?? 'en';
 
 foreach ($catalog['product_types'] as $typeName => $typeDef) {
     $headers = ['sku', 'name', 'slug', 'category', 'price', 'compare_price', 'stock', 'status', 'summary', 'description', 'image', 'weight_g', 'tags'];

@@ -4,7 +4,7 @@
  * Locale management, product/attribute translation, UI strings.
  */
 class I18n {
-    private static string $locale = 'sk';
+    private static ?string $locale = null;
     private static ?array $lang = null;
     private static ?array $catalog = null;
     private static ?array $stores = null;
@@ -17,71 +17,69 @@ class I18n {
         return self::$cfg;
     }
 
+    /** System default locale — from stores.json.default_locale, fallback 'en'. */
+    public static function sysDefault(): string {
+        $stores = self::stores();
+        return (string)($stores['default_locale'] ?? 'en');
+    }
+
+    /** Per-store default locale — supports new 'default_locale' or legacy 'locale' key. */
+    private static function storeDefault(array $store): string {
+        return (string)($store['default_locale'] ?? $store['locale'] ?? self::sysDefault());
+    }
+
     public static function setLocale(string $locale): void {
         self::$locale = $locale;
         self::$lang = null; // reset cached translations
     }
 
     public static function locale(): string {
+        if (self::$locale === null) {
+            self::$locale = self::sysDefault();
+        }
         return self::$locale;
     }
 
-    /** Detect locale from URL prefix or Accept-Language */
+    /** Detect locale from URL prefix; falls back to system default. */
     public static function detectLocale(string $uri = ''): string {
         $stores = self::stores();
         // Check URL prefix: /en/..., /de/...
-        foreach ($stores['stores'] as $code => $store) {
+        foreach ($stores['stores'] ?? [] as $code => $store) {
             $prefix = $store['url_prefix'] ?? '';
             if ($prefix && str_starts_with($uri, $prefix . '/')) {
-                return $store['locale'];
+                return self::storeDefault($store);
             }
             if ($prefix && $uri === $prefix) {
-                return $store['locale'];
+                return self::storeDefault($store);
             }
         }
-        return $stores['default_locale'] ?? 'sk';
+        return self::sysDefault();
     }
 
-    /** Translate product row — fallback to default locale */
+    /** Translate product row — prefer translations[locale] if present, else keep base row. */
     public static function product(array $row): array {
-        $cfg = self::cfg();
-        if (self::$locale === ($cfg['default_locale'] ?? 'sk')) {
-            return $row; // base language, no translation needed
+        $tr = json_decode($row['translations'] ?? '{}', true) ?: [];
+        $localeData = $tr[self::locale()] ?? [];
+        if (empty($localeData)) {
+            return $row; // no translation — return base row as-is
         }
-
-        $tr = json_decode($row['translations'] ?? '{}', true);
-        $localeData = $tr[self::$locale] ?? [];
-
-        foreach (['name', 'summary', 'description'] as $field) {
+        foreach (['name', 'summary', 'description', 'slug'] as $field) {
             if (!empty($localeData[$field])) {
                 $row[$field] = $localeData[$field];
             }
         }
-
-        if (!empty($localeData['slug'])) {
-            $row['slug'] = $localeData['slug'];
-        }
-
         return $row;
     }
 
-    /** Translate category row */
+    /** Translate category row — prefer translations[locale] if present, else keep base row. */
     public static function category(array $row): array {
-        $cfg = self::cfg();
-        if (self::$locale === ($cfg['default_locale'] ?? 'sk')) {
+        $tr = json_decode($row['translations'] ?? '{}', true) ?: [];
+        $localeData = $tr[self::locale()] ?? [];
+        if (empty($localeData)) {
             return $row;
         }
-
-        $tr = json_decode($row['translations'] ?? '{}', true);
-        $localeData = $tr[self::$locale] ?? [];
-
-        if (!empty($localeData['name'])) {
-            $row['name'] = $localeData['name'];
-        }
-        if (!empty($localeData['slug'])) {
-            $row['slug'] = $localeData['slug'];
-        }
-
+        if (!empty($localeData['name'])) $row['name'] = $localeData['name'];
+        if (!empty($localeData['slug'])) $row['slug'] = $localeData['slug'];
         return $row;
     }
 
@@ -96,7 +94,7 @@ class I18n {
                 if (!empty($attrDef['options_translatable']) && is_array($attrDef['options'] ?? null)) {
                     $optionTr = $attrDef['options'][$value] ?? null;
                     if (is_array($optionTr)) {
-                        return $optionTr[self::$locale] ?? $optionTr['en'] ?? $value;
+                        return $optionTr[self::locale()] ?? $optionTr['en'] ?? $value;
                     }
                 }
             }
@@ -113,7 +111,7 @@ class I18n {
             $attrs = $type['attributes'] ?? [];
             if (isset($attrs[$attrName]['label'])) {
                 $label = $attrs[$attrName]['label'];
-                return $label[self::$locale] ?? $label['en'] ?? $attrName;
+                return $label[self::locale()] ?? $label['en'] ?? $attrName;
             }
         }
 
@@ -121,7 +119,7 @@ class I18n {
         $globals = $catalog['global_attributes'] ?? [];
         if (isset($globals[$attrName]['label'])) {
             $label = $globals[$attrName]['label'];
-            return $label[self::$locale] ?? $label['en'] ?? $attrName;
+            return $label[self::locale()] ?? $label['en'] ?? $attrName;
         }
 
         return $attrName;
@@ -130,7 +128,7 @@ class I18n {
     /** UI translation — BBF lang system */
     public static function t(string $key): string {
         if (!self::$lang) {
-            $file = __DIR__ . '/../lang/' . self::$locale . '.php';
+            $file = __DIR__ . '/../lang/' . self::locale() . '.php';
             self::$lang = file_exists($file) ? require $file : require __DIR__ . '/../lang/en.php';
         }
         return self::$lang[$key] ?? $key;

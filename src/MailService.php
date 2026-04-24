@@ -16,11 +16,11 @@
  *   templates/emails/{locale}/{template}.html
  *   templates/emails/{locale}/{template}.txt          (optional; derived from HTML if missing)
  *
- * Fallback chain for missing template: {locale} -> en -> sk.
+ * Fallback chain for missing template: {locale} -> en.
  */
 class MailService {
     private static ?MailAdapter $adapterOverride = null;
-    private static array $fallbackLocales = ['en', 'sk'];
+    private static array $fallbackLocales = ['en'];
 
     /** For tests: inject a specific adapter (bypasses env). */
     public static function useAdapter(?MailAdapter $a): void {
@@ -196,7 +196,7 @@ class MailService {
     // ─── Internal helpers ────────────────────────────────────────
     private static function defaultLocale(): string {
         $stores = @json_decode((string)file_get_contents(__DIR__ . '/../stores.json'), true) ?: [];
-        return (string)($stores['default_locale'] ?? 'sk');
+        return (string)($stores['default_locale'] ?? 'en');
     }
 
     private static function templateDir(): string {

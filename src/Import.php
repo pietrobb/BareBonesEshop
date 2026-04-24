@@ -166,7 +166,8 @@ class Import {
         // Populate product_attrs table
         self::syncProductAttrs($productId, $attrs, $db);
 
-        // Register slug
+        // Register base slug under 'sk' — CSV import convention treats base columns as SK.
+        // Per-locale slugs from translations are registered below.
         self::registerSlug($slug, 'sk', 'product', $productId, $db);
         foreach ($translations as $locale => $tr) {
             if (!empty($tr['slug'])) {
