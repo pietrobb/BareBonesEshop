@@ -23,7 +23,7 @@ $cfg = require __DIR__ . '/config.php';
 $action = $_GET['action'] ?? '';
 
 // Rate limiting (exempt webhooks — they rely on signature verification)
-if ($action !== 'webhook_stripe' && !Security::rateLimit('api_' . $action, 120)) {
+if (!in_array($action, ['webhook_stripe', 'webhook_payment'], true) && !Security::rateLimit('api_' . $action, 120)) {
     echo json_encode(['error' => 'Too many requests']);
     exit;
 }
@@ -45,6 +45,7 @@ try {
         'search_suggest'  => apiSearchSuggest(),
         'validate_coupon' => apiValidateCoupon(),
         'webhook_stripe'  => apiWebhookStripe(),
+        'webhook_payment' => apiWebhookPayment(),
         // TecDoc / Auto Parts
         'vehicle_manufacturers' => apiVehicleManufacturers(),
         'vehicle_models'        => apiVehicleModels(),
@@ -644,6 +645,82 @@ function verifyStripeSignature(string $payload, string $sigHeader, string $secre
     $expected = hash_hmac('sha256', $signedPayload, $secret);
 
     return hash_equals($expected, $signature);
+}
+
+// ============================================================
+// Generic Payment Webhook Handler (Stripe, PayU, Mock)
+// Usage: POST /api.php?action=webhook_payment&provider=stripe|payu|mock
+// ============================================================
+
+function apiWebhookPayment(): array {
+    $provider = Security::clean($_GET['provider'] ?? '');
+    if (!$provider || !preg_match('/^[a-z0-9_]+$/', $provider)) {
+        http_response_code(400);
+        return ['error' => 'Invalid provider'];
+    }
+
+    $rawPayload = file_get_contents('php://input');
+    if (!$rawPayload) {
+        http_response_code(400);
+        return ['error' => 'Empty payload'];
+    }
+
+    $parsed = json_decode($rawPayload, true);
+    if ($parsed === null) {
+        http_response_code(400);
+        return ['error' => 'Invalid JSON'];
+    }
+
+    // Resolve gateway and signature header per provider
+    [$gateway, $sigHeader] = match($provider) {
+        'stripe' => [
+            new StripePayment(require __DIR__ . '/config.php'),
+            $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '',
+        ],
+        'payu' => [
+            new PayUPayment(require __DIR__ . '/config.php'),
+            $_SERVER['HTTP_OPENPAYU_SIGNATURE'] ?? '',
+        ],
+        'mock' => [
+            new MockPayment(['mock_result' => 'success']),
+            $_SERVER['HTTP_X_MOCK_SIGNATURE'] ?? 'mock_sig',
+        ],
+        default => [null, ''],
+    };
+
+    if (!$gateway) {
+        http_response_code(400);
+        return ['error' => "Unknown provider: {$provider}"];
+    }
+
+    // Load adapter classes
+    $adapterDir = __DIR__ . '/adapters/contrib/';
+    foreach (['StripePayment', 'PayUPayment', 'MockPayment'] as $cls) {
+        if (!class_exists($cls)) {
+            $f = $adapterDir . $cls . '.php';
+            if (file_exists($f)) require_once $f;
+        }
+    }
+
+    try {
+        $result = PaymentService::handleWebhook(
+            rawPayload:    $rawPayload,
+            sigHeader:     $sigHeader,
+            parsedPayload: $parsed,
+            gateway:       $gateway,
+            providerName:  $provider,
+        );
+    } catch (\RuntimeException $e) {
+        if (str_contains($e->getMessage(), 'signature')) {
+            http_response_code(400);
+            return ['error' => 'Invalid signature'];
+        }
+        error_log("webhook_payment [{$provider}] error: " . $e->getMessage());
+        http_response_code(500);
+        return ['error' => 'Processing failed'];
+    }
+
+    return ['status' => $result['duplicate'] ?? false ? 'already_processed' : 'ok'];
 }
 
 // ============================================================
