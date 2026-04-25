@@ -533,6 +533,14 @@ switch ($page) {
         $content = renderOE($q, $result);
         break;
 
+    case 'privacy':
+    case 'terms':
+    case 'cookies':
+        $legalTitles = ['privacy' => 'Privacy Policy', 'terms' => 'Terms & Conditions', 'cookies' => 'Cookie Policy'];
+        $title = $legalTitles[$page] . ' — BareBones Shop';
+        $content = renderLegalPage($page);
+        break;
+
     case 'cart':
         $title = $t('cart') . ' — BareBones Shop';
         $content = renderCart();
@@ -742,6 +750,9 @@ main{padding:24px 0;min-height:60vh}
 .sticker-new{background:#b2da24}
 .sticker-sale{background:#e95d0f}
 
+/* Legal pages */
+.legal-page{max-width:900px;margin:0 auto}.legal-page h1{margin-bottom:16px}.legal-page h2{margin:22px 0 8px}.legal-page p,.legal-page li{margin:8px 0}.legal-page ul{margin-left:22px}
+
 /* Footer */
 footer{background:#333;color:#bbb;padding:0;margin-top:40px;font-size:.85em}
 .footer-main{background:#333;padding:30px 0}
@@ -850,7 +861,9 @@ footer{background:#333;color:#bbb;padding:0;margin-top:40px;font-size:.85em}
    <h4><?= $lang==='en'?'Information':($lang==='de'?'Informationen':'Informácie') ?></h4>
    <a href="?"><?= $lang==='en'?'About us':($lang==='de'?'Über uns':'O nás') ?></a>
    <a href="?"><?= $lang==='en'?'Contact':($lang==='de'?'Kontakt':'Kontakt') ?></a>
-   <a href="?"><?= $lang==='en'?'Terms & Conditions':($lang==='de'?'AGB':'Obchodné podmienky') ?></a>
+   <a href="?page=privacy"><?= $lang==='en'?'Privacy Policy':($lang==='de'?'Datenschutz':'Ochrana osobných údajov') ?></a>
+   <a href="?page=terms"><?= $lang==='en'?'Terms & Conditions':($lang==='de'?'AGB':'Obchodné podmienky') ?></a>
+   <a href="?page=cookies"><?= $lang==='en'?'Cookie Policy':($lang==='de'?'Cookie-Richtlinie':'Pravidlá cookies') ?></a>
   </div>
  </div></div>
  <div class="footer-bottom"><div class="wrap">woodle.sk &copy; <?= date('Y') ?> — Powered by BareBones E-shop</div></div>
@@ -944,7 +957,7 @@ if ($ccCookie === ''):
 </style>
 <div id="cc-banner" role="dialog" aria-labelledby="cc-title" aria-describedby="cc-body">
   <h3 id="cc-title"><?= $ccTitle ?></h3>
-  <p id="cc-body"><?= $ccBody ?> <a href="account.php?p=privacy" class="cc-link"><?= $ccPolicy ?></a></p>
+  <p id="cc-body"><?= $ccBody ?> <a href="?page=privacy" class="cc-link"><?= $ccPolicy ?></a></p>
   <div id="cc-prefs">
     <label><input type="checkbox" checked disabled> <?= $ccNec ?></label>
     <label><input type="checkbox" id="cc-ana"> <?= $ccAna ?></label>
@@ -998,6 +1011,41 @@ if ($ccCookie === ''):
 // ============================================================
 // Render functions
 // ============================================================
+
+function renderLegalPage(string $page): string {
+    $allowed = ['privacy', 'terms', 'cookies'];
+    if (!in_array($page, $allowed, true)) {
+        return '<p>Not found.</p>';
+    }
+
+    $locale = I18n::locale();
+    $tpl = __DIR__ . '/templates/legal/' . $locale . '/' . $page . '.html';
+    if (!is_file($tpl)) {
+        $tpl = __DIR__ . '/templates/legal/en/' . $page . '.html';
+    }
+
+    $stores = json_decode((string)file_get_contents(__DIR__ . '/stores.json'), true) ?: [];
+    $legal = [];
+    foreach ($stores['stores'] ?? [] as $store) {
+        if (($store['default_locale'] ?? '') === $locale) {
+            $legal = $store['legal'] ?? [];
+            break;
+        }
+    }
+    if (!$legal) {
+        $defaultStore = $stores['default_store'] ?? 'sk';
+        $legal = $stores['stores'][$defaultStore]['legal'] ?? ($stores['stores']['sk']['legal'] ?? []);
+    }
+
+    $vars = [];
+    foreach ($legal as $k => $v) {
+        $vars['{{' . $k . '}}'] = htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+    }
+    $vars['{{updated_at}}'] = date('Y-m-d');
+
+    $html = (string)file_get_contents($tpl);
+    return '<div class="card legal-page">' . strtr($html, $vars) . '</div>';
+}
 
 function renderHome(): string {
     global $e, $price, $catName, $t, $lang;
