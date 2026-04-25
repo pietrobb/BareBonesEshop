@@ -73,6 +73,10 @@ class PaymentService {
         return in_array($to, self::PAYMENT_TRANSITIONS[$from] ?? [], true);
     }
 
+    public static function allowedPaymentTransitions(string $from): array {
+        return self::PAYMENT_TRANSITIONS[$from] ?? [];
+    }
+
     public static function recordEvent(int $orderId, string $eventType, string $status, int $amount, string $currency, string $idempotencyKey, array $payload = [], string $provider = '', string $providerRef = ''): bool {
         if ($idempotencyKey !== '' && self::transactionExists($idempotencyKey)) return false;
 

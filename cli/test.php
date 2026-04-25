@@ -2634,6 +2634,34 @@ $lifecycleStatuses = array_column($lifecycleEvents, 'status');
 assert_true(in_array('authorized', $lifecycleStatuses, true), 'Payment lifecycle: authorized event logged');
 assert_true(in_array('refund_pending', $lifecycleStatuses, true), 'Payment lifecycle: refund request event logged');
 assert_true(in_array('partially_refunded', $lifecycleStatuses, true), 'Payment lifecycle: partial refund event logged');
+assert_equals(['refund_pending', 'refunded', 'disputed'], PaymentService::allowedPaymentTransitions('partially_refunded'), 'Payment admin: exposes allowed transitions for current payment status');
+$adminTransitionOrderId = Orders::create([
+    [
+        'product_id'   => $payProduct['id'],
+        'variant_id'   => null,
+        'qty'          => 1,
+        'price'        => (int)$payProduct['price'],
+        'sku'          => $payProduct['sku'],
+        'name'         => $payProduct['name'],
+        'variant_name' => '',
+    ],
+], [
+    'name'          => 'Payment Admin Customer',
+    'email'         => 'payment-admin@example.com',
+    'phone'         => '+421900000006',
+    'address'       => ['street' => 'Payment Admin 1', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK'],
+    'currency'      => 'eur',
+    'shipping_cost' => 299,
+    'payment_fee'   => 0,
+    'payment_method_snapshot' => json_encode(['code' => 'bank_transfer', 'provider' => 'manual', 'label' => 'Bank transfer', 'fee' => 0], JSON_UNESCAPED_UNICODE),
+    'tax_amount'    => 0,
+], 'bank_transfer');
+PaymentService::transitionPayment($adminTransitionOrderId, 'paid', 'admin.paid', 0, 'pay_admin_mark_paid', ['actor' => 'test-admin', 'note' => 'Manual paid']);
+$adminTxs = PaymentService::transactionsForOrder($adminTransitionOrderId);
+$adminTxRaw = json_decode((string)end($adminTxs)['raw_response'], true) ?: [];
+assert_equals('paid', Orders::byId($adminTransitionOrderId)['payment_status'], 'Payment admin: manual transition updates payment status');
+assert_equals('admin.paid', (string)$adminTxRaw['event_type'], 'Payment admin: manual transition logs event type');
+assert_equals('Manual paid', (string)$adminTxRaw['note'], 'Payment admin: manual transition logs note');
 
 // ============================================================
 // SHIPPING TESTS

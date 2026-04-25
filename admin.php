@@ -612,6 +612,8 @@ function pageOrder(): void {
 
     $items = Orders::items($id);
     $allowed = OrderWorkflow::allowedTransitions($order['status']);
+    $paymentTransitions = PaymentService::allowedPaymentTransitions((string)($order['payment_status'] ?? 'pending'));
+    $paymentTxs = PaymentService::transactionsForOrder($id);
     $logs = AuditLog::forEntity('order_status', $id, 20);
     $addr = json_decode($order['shipping_addr'] ?? '{}', true);
     ?>
@@ -644,6 +646,20 @@ function pageOrder(): void {
             <p class="muted">Konečný stav — žiadne ďalšie prechody.</p>
             <?php endif; ?>
             <p class="muted" style="margin-top:.5rem">Platba: <?= esc($order['payment_method']) ?> <?= $order['payment_id'] ? '(' . esc($order['payment_id']) . ')' : '' ?></p>
+            <p class="muted">Payment status: <span class="badge badge-<?= esc($order['payment_status'] ?? 'pending') ?>"><?= esc($order['payment_status'] ?? 'pending') ?></span></p>
+            <?php if (!empty($paymentTransitions)): ?>
+            <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=payment_transition" style="margin-top:.5rem">
+                <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                <select name="new_payment_status">
+                    <?php foreach ($paymentTransitions as $s): ?>
+                    <option value="<?= esc($s) ?>"><?= esc($s) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <input name="amount" type="number" min="0" step="1" placeholder="Suma centy">
+                <input name="note" placeholder="Poznámka...">
+                <button class="btn btn-primary btn-sm" type="submit">Zmeniť platbu</button>
+            </form>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -664,11 +680,36 @@ function pageOrder(): void {
         <div style="text-align:right;margin-top:.5rem">
             <p>Medzisúčet: <strong><?= I18n::price((int)$order['subtotal'], $order['currency']) ?></strong></p>
             <p>Doprava: <?= I18n::price((int)$order['shipping_cost'], $order['currency']) ?></p>
+            <?php if ((int)($order['payment_fee'] ?? 0) > 0): ?>
+            <p>Poplatok za platbu: <?= I18n::price((int)$order['payment_fee'], $order['currency']) ?></p>
+            <?php endif; ?>
             <?php if ((int)$order['tax_amount'] > 0): ?>
             <p>DPH: <?= I18n::price((int)$order['tax_amount'], $order['currency']) ?></p>
             <?php endif; ?>
             <p style="font-size:1.2rem"><strong>Celkom: <?= I18n::price((int)$order['total'], $order['currency']) ?></strong></p>
         </div>
+    </div>
+
+    <div class="card">
+        <h3>Payment timeline</h3>
+        <?php if ($paymentTxs): ?>
+        <table>
+            <tr><th>Status</th><th>Provider</th><th>Ref</th><th>Suma</th><th>Event</th><th>Kedy</th></tr>
+            <?php foreach ($paymentTxs as $tx): ?>
+            <?php $raw = json_decode((string)($tx['raw_response'] ?? '{}'), true) ?: []; ?>
+            <tr>
+                <td><span class="badge badge-<?= esc($tx['status']) ?>"><?= esc($tx['status']) ?></span></td>
+                <td><?= esc($tx['provider']) ?></td>
+                <td class="muted"><?= esc($tx['provider_ref']) ?></td>
+                <td><?= I18n::price((int)$tx['amount'], $tx['currency']) ?></td>
+                <td class="muted"><?= esc($raw['event_type'] ?? '') ?></td>
+                <td class="muted"><?= esc(substr($tx['created_at'], 0, 16)) ?></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+        <?php else: ?>
+        <p class="muted">Žiadne payment eventy zatiaľ nie sú zaznamenané.</p>
+        <?php endif; ?>
     </div>
 
     <?php if ($logs): ?>
@@ -1073,6 +1114,7 @@ function handlePost(string $page, string $action): void {
         'product:save'   => handleProductSave(),
         'products:bulk'  => handleBulkAction(),
         'order:status'   => handleOrderStatus(),
+        'order:payment_transition' => handleOrderPaymentTransition(),
         'order:email_resend' => handleOrderEmailResend(),
         'order:invoice_issue' => handleOrderInvoiceIssue(),
         'order:invoice_resend' => handleOrderInvoiceResend(),
@@ -1357,6 +1399,43 @@ function handleOrderStatus(): void {
     } catch (\Throwable $e) {
         error_log("Order status change error [{$orderId}]: " . $e->getMessage());
         setFlash('err', 'Chyba pri zmene stavu objednávky.');
+    }
+
+    header("Location: admin.php?p=order&id={$orderId}");
+    exit;
+}
+
+function handleOrderPaymentTransition(): void {
+    Security::adminRequire('orders.edit');
+    $orderId = Security::int($_GET['id'] ?? 0);
+    $order = Orders::byId($orderId);
+    if (!$order) {
+        setFlash('err', 'Objednávka neexistuje.');
+        header('Location: admin.php?p=orders');
+        exit;
+    }
+
+    $newStatus = trim((string)($_POST['new_payment_status'] ?? ''));
+    $amount = max(0, Security::int($_POST['amount'] ?? 0));
+    $note = trim((string)($_POST['note'] ?? ''));
+    $from = (string)($order['payment_status'] ?? 'pending');
+
+    if (!PaymentService::canPaymentTransition($from, $newStatus)) {
+        setFlash('err', 'Neplatný prechod platby.');
+        header("Location: admin.php?p=order&id={$orderId}");
+        exit;
+    }
+
+    try {
+        $key = 'admin_payment_' . $orderId . '_' . $newStatus . '_' . time();
+        PaymentService::transitionPayment($orderId, $newStatus, 'admin.' . $newStatus, $amount, $key, [
+            'actor' => Security::adminUser(),
+            'note' => $note,
+        ]);
+        setFlash('ok', "Stav platby zmenený na '{$newStatus}'.");
+    } catch (\Throwable $e) {
+        error_log("Payment status change error [{$orderId}]: " . $e->getMessage());
+        setFlash('err', 'Chyba pri zmene stavu platby.');
     }
 
     header("Location: admin.php?p=order&id={$orderId}");
