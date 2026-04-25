@@ -2621,6 +2621,48 @@ assert_equals(120, (int)$paymentUxOrder['payment_fee'], 'Payment UX: order store
 assert_equals('cod', (string)$paymentUxSnapshot['code'], 'Payment UX: order snapshot stores selected code');
 assert_equals('manual', (string)$paymentUxSnapshot['provider'], 'Payment UX: order snapshot stores selected provider');
 
+if (!function_exists('renderOrderDone')) {
+    $_SERVER['REQUEST_URI'] = '/?page=order-done&order=' . urlencode((string)$paymentUxOrder['order_number']);
+    $_GET = ['page' => 'order-done', 'order' => (string)$paymentUxOrder['order_number']];
+    ob_start();
+    require_once __DIR__ . '/../index.php';
+    ob_end_clean();
+}
+$confirmationOrderId = Orders::create([
+    [
+        'product_id'   => $payProduct['id'],
+        'variant_id'   => null,
+        'qty'          => 1,
+        'price'        => (int)$payProduct['price'],
+        'sku'          => $payProduct['sku'],
+        'name'         => $payProduct['name'],
+        'variant_name' => '',
+    ],
+], [
+    'name'          => 'Payment Confirmation Customer',
+    'email'         => 'payment-confirmation@example.com',
+    'phone'         => '+421900000104',
+    'address'       => ['street' => 'Payment Confirmation 1', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK'],
+    'currency'      => 'eur',
+    'shipping_cost' => 299,
+    'payment_fee'   => 0,
+    'payment_method_snapshot' => json_encode(['code' => 'card', 'provider' => 'mock', 'label' => 'Card'], JSON_UNESCAPED_UNICODE),
+    'tax_amount'    => 0,
+], 'card');
+$confirmationOrder = Orders::byId($confirmationOrderId);
+PaymentService::initiate([
+    'order_id'       => $confirmationOrder['id'],
+    'order_number'   => $confirmationOrder['order_number'],
+    'total'          => (int)$confirmationOrder['total'],
+    'currency'       => $confirmationOrder['currency'],
+    'items'          => Orders::items($confirmationOrder['id']),
+], $mockGateway);
+$confirmationHtml = renderOrderDone((string)$confirmationOrder['order_number']);
+assert_true(str_contains($confirmationHtml, 'Payment'), 'Payment UX: confirmation renders payment summary');
+assert_true(str_contains($confirmationHtml, 'pending'), 'Payment UX: confirmation renders payment status');
+assert_true(str_contains($confirmationHtml, 'Card'), 'Payment UX: confirmation renders payment method label');
+assert_true(str_contains($confirmationHtml, 'mock_' . $confirmationOrder['order_number']), 'Payment UX: confirmation renders provider reference');
+
 $paymentLifecycleOrderId = Orders::create([
     [
         'product_id'   => $payProduct['id'],

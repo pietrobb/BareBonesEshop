@@ -1857,11 +1857,25 @@ function processCheckout(): string {
 
 function renderOrderDone(string $orderNum): string {
     global $e, $price, $t;
+    $order = $orderNum !== '' ? Orders::byNumber($orderNum) : null;
     ob_start();
     echo '<div class="order-done">';
     echo '<div style="font-size:3em;margin-bottom:16px">✓</div>';
     echo '<h1>' . $t('order_sent') . '</h1>';
     echo '<p style="font-size:1.1em;color:#555;margin:12px 0">' . $t('order_num') . ': <strong>' . $e($orderNum) . '</strong></p>';
+    if ($order) {
+        $paymentSnapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
+        $paymentLabel = (string)($paymentSnapshot['label'] ?? $paymentSnapshot['name'] ?? $order['payment_method'] ?? '');
+        $paymentStatus = (string)($order['payment_status'] ?? 'pending');
+        $paymentTxs = PaymentService::transactionsForOrder((int)$order['id']);
+        $lastTx = $paymentTxs ? end($paymentTxs) : null;
+        echo '<div class="payment-summary" style="margin:18px auto 24px;max-width:420px;text-align:left;background:#f8f8f8;border-radius:10px;padding:16px">';
+        echo '<strong>Payment</strong><br>';
+        echo 'Status: <span class="badge badge-' . $e($paymentStatus) . '">' . $e($paymentStatus) . '</span><br>';
+        if ($paymentLabel !== '') echo 'Method: ' . $e($paymentLabel) . '<br>';
+        if ($lastTx && !empty($lastTx['provider_ref'])) echo 'Reference: ' . $e((string)$lastTx['provider_ref']) . '<br>';
+        echo '</div>';
+    }
     echo '<p style="color:#888;margin-bottom:24px">' . $t('order_email') . '</p>';
     echo '<a href="?" style="color:#cc3872;font-weight:600;font-size:1.1em">' . $t('continue_shopping') . '</a>';
     echo '</div>';
