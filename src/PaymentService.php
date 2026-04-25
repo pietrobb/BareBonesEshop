@@ -6,6 +6,18 @@
  * Writes to payment_transactions for idempotent event log.
  */
 class PaymentService {
+    private const PAYMENT_TRANSITIONS = [
+        'pending' => ['authorized', 'paid', 'failed', 'cancelled'],
+        'authorized' => ['paid', 'failed', 'cancelled'],
+        'paid' => ['refund_pending', 'partially_refunded', 'refunded', 'disputed'],
+        'refund_pending' => ['paid', 'partially_refunded', 'refunded', 'failed'],
+        'partially_refunded' => ['refund_pending', 'refunded', 'disputed'],
+        'disputed' => ['paid', 'refund_pending', 'refunded'],
+        'failed' => [],
+        'cancelled' => [],
+        'refunded' => [],
+    ];
+
     /**
      * Return available checkout payment methods for country/cart/shipping context.
      */
@@ -55,6 +67,60 @@ class PaymentService {
             if (($method['code'] ?? '') === $methodCode) return $method;
         }
         return null;
+    }
+
+    public static function canPaymentTransition(string $from, string $to): bool {
+        return in_array($to, self::PAYMENT_TRANSITIONS[$from] ?? [], true);
+    }
+
+    public static function recordEvent(int $orderId, string $eventType, string $status, int $amount, string $currency, string $idempotencyKey, array $payload = [], string $provider = '', string $providerRef = ''): bool {
+        if ($idempotencyKey !== '' && self::transactionExists($idempotencyKey)) return false;
+
+        self::logTransaction(
+            orderId: $orderId,
+            provider: $provider,
+            providerRef: $providerRef,
+            status: $status,
+            amount: $amount,
+            currency: strtolower($currency ?: 'eur'),
+            idempotencyKey: $idempotencyKey ?: ('payment_event_' . $orderId . '_' . uniqid()),
+            rawResponse: array_merge(['event_type' => $eventType], $payload),
+        );
+        return true;
+    }
+
+    public static function transitionPayment(int $orderId, string $to, string $eventType, int $amount = 0, string $idempotencyKey = '', array $payload = []): bool {
+        $order = Orders::byId($orderId);
+        if (!$order) throw new \RuntimeException("Order #{$orderId} not found");
+
+        $from = (string)($order['payment_status'] ?? 'pending');
+        if ($from === $to) return false;
+        if (!self::canPaymentTransition($from, $to)) {
+            throw new \LogicException("Cannot transition payment for order #{$orderId} from '{$from}' to '{$to}'");
+        }
+
+        $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
+        $provider = (string)($snapshot['provider'] ?? $order['payment_method'] ?? '');
+        $providerRef = (string)($order['payment_id'] ?? '');
+        $currency = (string)($order['currency'] ?? 'eur');
+        if ($amount <= 0) $amount = (int)($order['total'] ?? 0);
+
+        $db = Db::get();
+        $db->beginTransaction();
+        try {
+            if ($idempotencyKey === '' || !self::transactionExists($idempotencyKey)) {
+                self::recordEvent($orderId, $eventType, $to, $amount, $currency, $idempotencyKey, $payload, $provider, $providerRef);
+                self::updatePaymentStatus($orderId, $to);
+                AuditLog::log('payment_status', $orderId, $from, $to, $eventType);
+                $db->commit();
+                return true;
+            }
+            $db->rollBack();
+            return false;
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
     }
 
     /**
@@ -183,6 +249,13 @@ class PaymentService {
     // =========================================================
     // Private helpers
     // =========================================================
+
+    private static function transactionExists(string $idempotencyKey): bool {
+        if ($idempotencyKey === '') return false;
+        $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE idempotency_key = :key LIMIT 1");
+        $stmt->execute([':key' => $idempotencyKey]);
+        return (bool)$stmt->fetchColumn();
+    }
 
     private static function logTransaction(
         int    $orderId,

@@ -2581,6 +2581,60 @@ assert_equals(120, (int)$paymentUxOrder['payment_fee'], 'Payment UX: order store
 assert_equals('cod', (string)$paymentUxSnapshot['code'], 'Payment UX: order snapshot stores selected code');
 assert_equals('manual', (string)$paymentUxSnapshot['provider'], 'Payment UX: order snapshot stores selected provider');
 
+$paymentLifecycleOrderId = Orders::create([
+    [
+        'product_id'   => $payProduct['id'],
+        'variant_id'   => null,
+        'qty'          => 1,
+        'price'        => (int)$payProduct['price'],
+        'sku'          => $payProduct['sku'],
+        'name'         => $payProduct['name'],
+        'variant_name' => '',
+    ],
+], [
+    'name'          => 'Payment Lifecycle Customer',
+    'email'         => 'payment-lifecycle@example.com',
+    'phone'         => '+421900000005',
+    'address'       => ['street' => 'Payment Lifecycle 1', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK'],
+    'currency'      => 'eur',
+    'shipping_cost' => 299,
+    'payment_fee'   => 0,
+    'payment_method_snapshot' => json_encode(['code' => 'card', 'provider' => 'stripe', 'label' => 'Card', 'fee' => 0], JSON_UNESCAPED_UNICODE),
+    'tax_amount'    => 0,
+], 'card');
+$paymentLifecycleBefore = Orders::byId($paymentLifecycleOrderId);
+$paymentLifecycleSnapshotBefore = (string)$paymentLifecycleBefore['payment_method_snapshot'];
+
+assert_true(PaymentService::canPaymentTransition('pending', 'authorized'), 'Payment lifecycle: pending can authorize');
+assert_true(!PaymentService::canPaymentTransition('pending', 'refunded'), 'Payment lifecycle: pending cannot refund');
+$authorized = PaymentService::transitionPayment($paymentLifecycleOrderId, 'authorized', 'payment.authorized', 0, 'pay_lifecycle_auth', ['provider_ref' => 'pi_lifecycle_1']);
+assert_true($authorized, 'Payment lifecycle: authorize transition applied');
+assert_equals('authorized', Orders::byId($paymentLifecycleOrderId)['payment_status'], 'Payment lifecycle: order payment_status is authorized');
+$duplicateAuthorize = PaymentService::transitionPayment($paymentLifecycleOrderId, 'authorized', 'payment.authorized', 0, 'pay_lifecycle_auth', ['provider_ref' => 'pi_lifecycle_1']);
+assert_true(!$duplicateAuthorize, 'Payment lifecycle: duplicate status transition is idempotent');
+$authEventCount = (int)$pdo->query("SELECT COUNT(*) FROM payment_transactions WHERE idempotency_key = 'pay_lifecycle_auth'")->fetchColumn();
+assert_equals(1, $authEventCount, 'Payment lifecycle: duplicate idempotency key logs once');
+
+PaymentService::transitionPayment($paymentLifecycleOrderId, 'paid', 'payment.captured', 0, 'pay_lifecycle_capture');
+assert_equals('paid', Orders::byId($paymentLifecycleOrderId)['payment_status'], 'Payment lifecycle: paid transition applied');
+PaymentService::transitionPayment($paymentLifecycleOrderId, 'refund_pending', 'refund.requested', 500, 'pay_lifecycle_refund_requested');
+assert_equals('refund_pending', Orders::byId($paymentLifecycleOrderId)['payment_status'], 'Payment lifecycle: refund_pending transition applied');
+PaymentService::transitionPayment($paymentLifecycleOrderId, 'partially_refunded', 'refund.partial_succeeded', 500, 'pay_lifecycle_refund_partial');
+assert_equals('partially_refunded', Orders::byId($paymentLifecycleOrderId)['payment_status'], 'Payment lifecycle: partial refund transition applied');
+$invalidPaymentTransitionThrown = false;
+try {
+    PaymentService::transitionPayment($paymentLifecycleOrderId, 'authorized', 'payment.reauthorized', 0, 'pay_lifecycle_invalid');
+} catch (\LogicException $e) {
+    $invalidPaymentTransitionThrown = true;
+}
+assert_true($invalidPaymentTransitionThrown, 'Payment lifecycle: invalid transition throws');
+assert_equals($paymentLifecycleSnapshotBefore, (string)Orders::byId($paymentLifecycleOrderId)['payment_method_snapshot'], 'Payment lifecycle: order payment snapshot remains unchanged');
+$lifecycleEvents = PaymentService::transactionsForOrder($paymentLifecycleOrderId);
+$lifecycleStatuses = array_column($lifecycleEvents, 'status');
+assert_true(in_array('authorized', $lifecycleStatuses, true), 'Payment lifecycle: authorized event logged');
+assert_true(in_array('refund_pending', $lifecycleStatuses, true), 'Payment lifecycle: refund request event logged');
+assert_true(in_array('partially_refunded', $lifecycleStatuses, true), 'Payment lifecycle: partial refund event logged');
+
 // ============================================================
 // SHIPPING TESTS
 // ============================================================
