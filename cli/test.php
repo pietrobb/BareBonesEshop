@@ -2494,6 +2494,24 @@ $disabledTransfer = PaymentService::selectMethod('bank_transfer', 'SK', 'eur', 2
 assert_true($disabledTransfer === null, 'Payment methods: disabled method is not selectable');
 $pdo->exec("UPDATE payment_methods SET active = 1 WHERE code = 'bank_transfer'");
 
+$pdo->exec("INSERT INTO payment_methods (code, provider, name, description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, requires_online, active, sort_order) VALUES ('admin_test', 'manual', 'Admin Test', '', 'offline', 500, 5000, 25, 100, 3000, 0, 1, 99)");
+$pdo->exec("INSERT INTO payment_method_countries (method_code, country) VALUES ('admin_test', 'SK')");
+$adminTestQuote = PaymentService::selectMethod('admin_test', 'SK', 'eur', 1000, 'pickup');
+assert_true($adminTestQuote !== null, 'Payment methods: admin-created method is selectable');
+assert_equals(35, (int)$adminTestQuote['fee'], 'Payment methods: fixed + percent fee applied');
+$adminTestFree = PaymentService::selectMethod('admin_test', 'SK', 'eur', 3000, 'pickup');
+assert_equals(0, (int)$adminTestFree['fee'], 'Payment methods: free_above removes fee');
+$adminTestTooHigh = PaymentService::selectMethod('admin_test', 'SK', 'eur', 6000, 'pickup');
+assert_true($adminTestTooHigh === null, 'Payment methods: admin max amount limit enforced');
+$pdo->exec("INSERT INTO payment_method_shipping (method_code, shipping_method_code) VALUES ('admin_test', 'gls')");
+$adminTestWrongShipping = PaymentService::selectMethod('admin_test', 'SK', 'eur', 1000, 'pickup');
+assert_true($adminTestWrongShipping === null, 'Payment methods: admin shipping constraint enforced');
+$adminTestGls = PaymentService::selectMethod('admin_test', 'SK', 'eur', 1000, 'gls');
+assert_true($adminTestGls !== null, 'Payment methods: admin shipping constraint allows configured method');
+$pdo->exec("DELETE FROM payment_method_shipping WHERE method_code = 'admin_test'");
+$pdo->exec("DELETE FROM payment_method_countries WHERE method_code = 'admin_test'");
+$pdo->exec("DELETE FROM payment_methods WHERE code = 'admin_test'");
+
 $paymentOrderId = Orders::create([
     [
         'product_id'   => $payProduct['id'],

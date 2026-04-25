@@ -59,6 +59,7 @@ $pagePermissions = [
     'feeds'      => 'import',
     'feed'       => 'import',
     'shipping'   => 'products.edit',
+    'payments'   => 'products.edit',
 ];
 $requiredPerm = $pagePermissions[$page] ?? 'reports.view';
 Security::adminRequire($requiredPerm);
@@ -88,6 +89,7 @@ $title = match($page) {
     'feeds'      => I18n::t('admin.title.feeds'),
     'feed'       => isset($_GET['id']) ? I18n::t('admin.title.feed_edit') : I18n::t('admin.title.feed_new'),
     'shipping'   => 'Doprava',
+    'payments'   => 'Platby',
     default      => I18n::t('admin.title.default'),
 };
 
@@ -155,6 +157,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
     <?php if (Security::adminCan('import')): ?><a href="admin.php?p=feeds" class="<?= $page==='feeds'||$page==='feed'?'active':'' ?>"><?= esc(I18n::t('admin.nav.feeds')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=pages" class="<?= $page==='pages'?'active':'' ?>"><?= esc(I18n::t('admin.nav.cms_pages')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=shipping" class="<?= $page==='shipping'?'active':'' ?>">Doprava</a><?php endif; ?>
+    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=payments" class="<?= $page==='payments'?'active':'' ?>">Platby</a><?php endif; ?>
     <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=audit" class="<?= $page==='audit'?'active':'' ?>"><?= esc(I18n::t('admin.nav.audit')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('gdpr.view')): ?><a href="admin.php?p=gdpr" class="<?= $page==='gdpr'?'active':'' ?>"><?= esc(I18n::t('admin.nav.gdpr')) ?></a><?php endif; ?>
 </nav>
@@ -181,6 +184,7 @@ match($page) {
     'feeds'      => pageFeeds(),
     'feed'       => pageFeed(),
     'shipping'   => pageShipping(),
+    'payments'   => pagePayments(),
     default      => pageDashboard(),
 };
 ?>
@@ -1093,6 +1097,12 @@ function handlePost(string $page, string $action): void {
         'shipping:country_delete' => handleShippingCountryDelete(),
         'shipping:rate_save' => handleShippingRateSave(),
         'shipping:rate_delete' => handleShippingRateDelete(),
+        'payments:method_save' => handlePaymentMethodSave(),
+        'payments:method_delete' => handlePaymentMethodDelete(),
+        'payments:country_save' => handlePaymentCountrySave(),
+        'payments:country_delete' => handlePaymentCountryDelete(),
+        'payments:shipping_save' => handlePaymentShippingSave(),
+        'payments:shipping_delete' => handlePaymentShippingDelete(),
         default          => null,
     };
 }
@@ -2157,6 +2167,75 @@ function handleShippingRateSave(): void {
 function handleShippingRateDelete(): void { $id = Security::int($_POST['id'] ?? 0); if ($id) { Db::get()->prepare("DELETE FROM shipping_rates WHERE id = :id")->execute([':id'=>$id]); setFlash('ok', 'Sadzba zmazana.'); } header('Location: admin.php?p=shipping'); exit; }
 
 function shippingNullableInt(string $key): ?int { $v = trim((string)($_POST[$key] ?? '')); return $v === '' ? null : max(0, Security::int($v)); }
+
+function pagePayments(): void {
+    $db = Db::get();
+    $methods = $db->query("SELECT * FROM payment_methods ORDER BY sort_order, code")->fetchAll(PDO::FETCH_ASSOC);
+    $countries = $db->query("SELECT * FROM payment_method_countries ORDER BY method_code, country")->fetchAll(PDO::FETCH_ASSOC);
+    $shippingLinks = $db->query("SELECT ps.*, sm.name AS shipping_name FROM payment_method_shipping ps LEFT JOIN shipping_methods sm ON sm.code = ps.shipping_method_code ORDER BY ps.method_code, ps.shipping_method_code")->fetchAll(PDO::FETCH_ASSOC);
+    $shippingMethods = $db->query("SELECT code, name FROM shipping_methods ORDER BY sort_order, code")->fetchAll(PDO::FETCH_ASSOC);
+    ?>
+    <h1>Platby</h1>
+    <div class="card">
+        <h3>Platobne metody</h3>
+        <table>
+            <thead><tr><th>Kod</th><th>Nazov</th><th>Provider/typ</th><th>Limity</th><th>Poplatok</th><th>Aktivna</th><th></th></tr></thead>
+            <tbody>
+            <?php foreach ($methods as $m): ?>
+            <tr><form method="post" action="admin.php?p=payments&action=method_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$m['id'] ?>"><td><input name="code" value="<?= esc($m['code']) ?>" required style="width:8rem"></td><td><input name="name" value="<?= esc($m['name']) ?>" required style="width:12rem"><br><input name="description" value="<?= esc($m['description'] ?? '') ?>" placeholder="popis" style="width:12rem"></td><td><input name="provider" value="<?= esc($m['provider']) ?>" required style="width:8rem"><br><select name="service_type"><option value="online_card" <?= ($m['service_type'] ?? '')==='online_card'?'selected':'' ?>>online_card</option><option value="bank_transfer" <?= ($m['service_type'] ?? '')==='bank_transfer'?'selected':'' ?>>bank_transfer</option><option value="cod" <?= ($m['service_type'] ?? '')==='cod'?'selected':'' ?>>cod</option><option value="offline" <?= ($m['service_type'] ?? '')==='offline'?'selected':'' ?>>offline</option></select></td><td><input type="number" name="min_amount" value="<?= (int)$m['min_amount'] ?>" style="width:6rem"><br><input type="number" name="max_amount" value="<?= esc($m['max_amount'] ?? '') ?>" placeholder="max" style="width:6rem"></td><td><input type="number" name="fixed_fee" value="<?= (int)$m['fixed_fee'] ?>" style="width:5rem"><br><input type="number" name="percent_fee_bps" value="<?= (int)$m['percent_fee_bps'] ?>" style="width:5rem"> bps<br><input type="number" name="free_above" value="<?= esc($m['free_above'] ?? '') ?>" placeholder="free above" style="width:6rem"></td><td><input type="number" name="sort_order" value="<?= (int)$m['sort_order'] ?>" style="width:4rem"><br><label><input type="checkbox" name="requires_online" value="1" <?= !empty($m['requires_online'])?'checked':'' ?>> online</label><br><label><input type="checkbox" name="active" value="1" <?= !empty($m['active'])?'checked':'' ?>> aktivna</label></td><td><button class="btn btn-sm btn-primary">Ulozit</button></form> <form method="post" action="admin.php?p=payments&action=method_delete" style="display:inline" onsubmit="return confirm('Zmazat platobnu metodu?')"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$m['id'] ?>"><button class="btn btn-sm btn-danger">Zmazat</button></form></td></tr>
+            <?php endforeach; ?>
+            <tr><form method="post" action="admin.php?p=payments&action=method_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><input name="code" required placeholder="card"></td><td><input name="name" required placeholder="Nazov"><br><input name="description" placeholder="popis"></td><td><input name="provider" required placeholder="stripe"><br><select name="service_type"><option value="online_card">online_card</option><option value="bank_transfer">bank_transfer</option><option value="cod">cod</option><option value="offline">offline</option></select></td><td><input type="number" name="min_amount" value="0" style="width:6rem"><br><input type="number" name="max_amount" placeholder="max" style="width:6rem"></td><td><input type="number" name="fixed_fee" value="0" style="width:5rem"><br><input type="number" name="percent_fee_bps" value="0" style="width:5rem"> bps<br><input type="number" name="free_above" placeholder="free above" style="width:6rem"></td><td><input type="number" name="sort_order" value="100" style="width:4rem"><br><label><input type="checkbox" name="requires_online" value="1"> online</label><br><label><input type="checkbox" name="active" value="1" checked> aktivna</label></td><td><button class="btn btn-sm btn-primary">Pridat</button></td></form></tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="card">
+        <h3>Krajiny a doprava</h3>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+            <div><h4>Krajiny</h4><table><thead><tr><th>Metoda</th><th>Krajina</th><th></th></tr></thead><tbody>
+            <?php foreach ($countries as $c): ?><tr><td><?= esc($c['method_code']) ?></td><td><?= esc($c['country']) ?></td><td><form method="post" action="admin.php?p=payments&action=country_delete" style="display:inline"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$c['id'] ?>"><button class="btn btn-sm btn-danger">Zmazat</button></form></td></tr><?php endforeach; ?>
+            <tr><form method="post" action="admin.php?p=payments&action=country_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><select name="method_code"><?php foreach ($methods as $m): ?><option value="<?= esc($m['code']) ?>"><?= esc($m['code']) ?></option><?php endforeach; ?></select></td><td><input name="country" maxlength="2" required placeholder="SK" style="width:4rem"></td><td><button class="btn btn-sm btn-primary">Pridat</button></td></form></tr>
+            </tbody></table></div>
+            <div><h4>Obmedzenia na dopravu</h4><p class="muted">Ak metoda nema ziadne obmedzenie, je dostupna pre kazdu dopravu.</p><table><thead><tr><th>Metoda</th><th>Doprava</th><th></th></tr></thead><tbody>
+            <?php foreach ($shippingLinks as $s): ?><tr><td><?= esc($s['method_code']) ?></td><td><?= esc($s['shipping_method_code']) ?> <?= $s['shipping_name'] ? '(' . esc($s['shipping_name']) . ')' : '' ?></td><td><form method="post" action="admin.php?p=payments&action=shipping_delete" style="display:inline"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$s['id'] ?>"><button class="btn btn-sm btn-danger">Zmazat</button></form></td></tr><?php endforeach; ?>
+            <tr><form method="post" action="admin.php?p=payments&action=shipping_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><select name="method_code"><?php foreach ($methods as $m): ?><option value="<?= esc($m['code']) ?>"><?= esc($m['code']) ?></option><?php endforeach; ?></select></td><td><select name="shipping_method_code"><?php foreach ($shippingMethods as $sm): ?><option value="<?= esc($sm['code']) ?>"><?= esc($sm['code']) ?> — <?= esc($sm['name']) ?></option><?php endforeach; ?></select></td><td><button class="btn btn-sm btn-primary">Pridat</button></td></form></tr>
+            </tbody></table></div>
+        </div>
+    </div>
+    <?php
+}
+
+function handlePaymentMethodSave(): void {
+    $db = Db::get(); $id = Security::int($_POST['id'] ?? 0); $code = Security::slug($_POST['code'] ?? ''); $provider = Security::slug($_POST['provider'] ?? ''); $name = trim($_POST['name'] ?? '');
+    $serviceType = in_array($_POST['service_type'] ?? '', ['online_card', 'bank_transfer', 'cod', 'offline'], true) ? $_POST['service_type'] : 'offline';
+    $min = max(0, Security::int($_POST['min_amount'] ?? 0)); $max = paymentNullableInt('max_amount');
+    if (!$code || !$provider || !$name || ($max !== null && $max < $min)) { setFlash('err', 'Kod, provider, nazov a platne limity su povinne.'); header('Location: admin.php?p=payments'); exit; }
+    $data = [':code'=>$code, ':provider'=>$provider, ':name'=>$name, ':description'=>trim($_POST['description'] ?? ''), ':service_type'=>$serviceType, ':min_amount'=>$min, ':max_amount'=>$max, ':fixed_fee'=>max(0, Security::int($_POST['fixed_fee'] ?? 0)), ':percent_fee_bps'=>max(0, Security::int($_POST['percent_fee_bps'] ?? 0)), ':free_above'=>paymentNullableInt('free_above'), ':requires_online'=>(int)!empty($_POST['requires_online']), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
+    if ($id) { $data[':id']=$id; $db->prepare("UPDATE payment_methods SET code=:code, provider=:provider, name=:name, description=:description, service_type=:service_type, min_amount=:min_amount, max_amount=:max_amount, fixed_fee=:fixed_fee, percent_fee_bps=:percent_fee_bps, free_above=:free_above, requires_online=:requires_online, active=:active, sort_order=:sort_order, updated_at=" . Db::now() . " WHERE id=:id")->execute($data); }
+    else { $db->prepare("INSERT INTO payment_methods (code, provider, name, description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, requires_online, active, sort_order) VALUES (:code, :provider, :name, :description, :service_type, :min_amount, :max_amount, :fixed_fee, :percent_fee_bps, :free_above, :requires_online, :active, :sort_order)")->execute($data); }
+    setFlash('ok', 'Platobna metoda ulozena.'); header('Location: admin.php?p=payments'); exit;
+}
+
+function handlePaymentMethodDelete(): void { $id = Security::int($_POST['id'] ?? 0); if ($id) { Db::get()->prepare("DELETE FROM payment_methods WHERE id = :id")->execute([':id'=>$id]); setFlash('ok', 'Platobna metoda zmazana.'); } header('Location: admin.php?p=payments'); exit; }
+
+function handlePaymentCountrySave(): void {
+    $methodCode = Security::slug($_POST['method_code'] ?? ''); $country = strtoupper(trim($_POST['country'] ?? ''));
+    if (!$methodCode || !preg_match('/^[A-Z]{2}$/', $country)) { setFlash('err', 'Metoda a ISO krajina su povinne.'); header('Location: admin.php?p=payments'); exit; }
+    Db::get()->prepare("INSERT OR IGNORE INTO payment_method_countries (method_code, country) VALUES (:method, :country)")->execute([':method'=>$methodCode, ':country'=>$country]);
+    setFlash('ok', 'Krajina pridana k platbe.'); header('Location: admin.php?p=payments'); exit;
+}
+
+function handlePaymentCountryDelete(): void { $id = Security::int($_POST['id'] ?? 0); if ($id) { Db::get()->prepare("DELETE FROM payment_method_countries WHERE id = :id")->execute([':id'=>$id]); setFlash('ok', 'Krajina zmazana.'); } header('Location: admin.php?p=payments'); exit; }
+
+function handlePaymentShippingSave(): void {
+    $methodCode = Security::slug($_POST['method_code'] ?? ''); $shippingCode = Security::slug($_POST['shipping_method_code'] ?? '');
+    if (!$methodCode || !$shippingCode) { setFlash('err', 'Metoda a doprava su povinne.'); header('Location: admin.php?p=payments'); exit; }
+    Db::get()->prepare("INSERT OR IGNORE INTO payment_method_shipping (method_code, shipping_method_code) VALUES (:method, :shipping)")->execute([':method'=>$methodCode, ':shipping'=>$shippingCode]);
+    setFlash('ok', 'Obmedzenie dopravy pridane.'); header('Location: admin.php?p=payments'); exit;
+}
+
+function handlePaymentShippingDelete(): void { $id = Security::int($_POST['id'] ?? 0); if ($id) { Db::get()->prepare("DELETE FROM payment_method_shipping WHERE id = :id")->execute([':id'=>$id]); setFlash('ok', 'Obmedzenie dopravy zmazane.'); } header('Location: admin.php?p=payments'); exit; }
+
+function paymentNullableInt(string $key): ?int { $v = trim((string)($_POST[$key] ?? '')); return $v === '' ? null : max(0, Security::int($v)); }
 
 function handleFeedSync(): void {
     $id = Security::int($_POST['feed_id'] ?? 0);
