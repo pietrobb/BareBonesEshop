@@ -3728,7 +3728,132 @@ Phase 5: Benchmark + hardening
 
 ---
 
-## Súhrn
+## Faktúry — InvoiceService (Roadmap 1.2)
+
+PDF faktúry pre paid objednávky, právne použiteľné v EÚ (SK/CZ/PL/HU/DE/EN), s atómovým číslovaním, snímkami údajov, podpísaným download tokenom.
+
+### Princíp
+
+- **Imutabilita** — vystavená faktúra sa nikdy nemení; oprava = `cancelled_at` + nová faktúra (stornovaný + nový doklad).
+- **Snapshots** — `customer_snapshot` aj `seller_snapshot` sú JSON kópie v čase vystavenia. Zmena adresy zákazníka neovplyvní historickú faktúru.
+- **Atómové číslovanie** — `invoice_counters(year, prefix, last_number)` s `UPDATE last_number=last_number+1` v transakcii. Backstop `UNIQUE` constraint na `invoices.number`.
+- **Forward-only** — žiadne automatické regenerovanie. Backfill `php cli/invoices-backfill.php --dry-run` pre legacy paid objednávky.
+
+### Schema
+
+```sql
+CREATE TABLE invoices (
+  id INTEGER PRIMARY KEY,
+  order_id INTEGER NOT NULL,
+  number TEXT NOT NULL UNIQUE,             -- "20260001" alebo "SK-20260001"
+  issued_at TEXT NOT NULL,
+  delivery_date TEXT NOT NULL,
+  due_date TEXT NOT NULL,
+  pdf_path TEXT NOT NULL,                  -- relative: storage/invoices/2026/04/20260001.pdf
+  total_net INTEGER NOT NULL,
+  total_vat INTEGER NOT NULL,
+  total_gross INTEGER NOT NULL,
+  currency TEXT NOT NULL,
+  vat_breakdown TEXT NOT NULL,             -- JSON {"25":{"net":8400,"vat":2100}}
+  customer_snapshot TEXT NOT NULL,         -- JSON frozen
+  seller_snapshot TEXT NOT NULL,           -- JSON frozen
+  payment_method TEXT,
+  locale TEXT,
+  status TEXT NOT NULL DEFAULT 'issued',
+  download_token TEXT NOT NULL UNIQUE,     -- 64 hex (32 bytes)
+  cancelled_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (order_id) REFERENCES orders(id)
+);
+CREATE TABLE invoice_counters (
+  year INTEGER NOT NULL,
+  prefix TEXT NOT NULL DEFAULT '',
+  last_number INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (year, prefix)
+);
+```
+
+### Konfigurácia per-store (`stores.json`)
+
+```json
+{
+  "stores": {
+    "sk": {
+      "seller": {
+        "name": "Woodle s.r.o.",
+        "street": "Hlavná 1", "city": "Bratislava", "zip": "811 01", "country": "SK",
+        "ico": "12345678", "dic": "1020304050", "ic_dph": "SK1020304050",
+        "iban": "SK00 1100 0000 0012 3456 7890", "bank": "Tatra banka",
+        "email": "info@example.sk", "phone": "+421 2 1234 5678",
+        "register_note": "OR OS BA, oddiel Sro, vložka 12345/B"
+      },
+      "legal": { "payment_terms_days": 14, "invoice_prefix": "" }
+    }
+  }
+}
+```
+
+### Tok generovania
+
+```
+OrderWorkflow::transition(orderId, 'paid')
+  └─ handlePaid(order) → push job invoice_issue priority=3 PO commit-e
+       └─ worker handleInvoiceIssue($payload)
+            ├─ InvoiceService::issue($orderId)              ← idempotentné
+            │    ├─ allocateNumber() v tx (counters → UPDATE)
+            │    ├─ snapshots customer + seller z stores.json
+            │    ├─ INSERT invoices
+            │    ├─ render PDF (MinimalPdf) PO commit-e
+            │    └─ return $invoice
+            └─ MailService::send('invoice_issued', email, locale, vars,
+                                 orderId, [['filename'=>{number}.pdf,
+                                            'content_type'=>'application/pdf',
+                                            'data'=>$pdfBytes]])
+```
+
+### Reverse-charge (B2B EU)
+
+`InvoiceService::isReverseCharge($seller, $customer)` vracia true iff:
+- seller.country a customer.country sú obidva v `EU_COUNTRIES`
+- ide o rôzne krajiny
+- customer má neprázdne `ic_dph`
+
+V1 vykresľuje len textový placeholder ("Daň odvádza zákazník" v správnom locale). Plnú DPH/OSS logiku rieši samostatná misia.
+
+### Customer download (signed token)
+
+```
+GET account.php?p=invoice&token=<64-hex>
+  ├─ validácia: strlen===64 && ctype_xdigit
+  ├─ InvoiceService::byToken(token) → DB lookup
+  ├─ ak null alebo cancelled_at !== null → 404
+  └─ readfile(pdfAbsolutePath); Content-Disposition: attachment
+```
+
+Endpoint je registrovaný **PRED** auth gate v `account.php` — token je credential, login nie je nutný.
+
+### Admin
+
+- `admin.php?p=order&id=N` — sekcia "Faktúry": zoznam, link "PDF", "Resend invoice email", "Vystaviť faktúru" (manuálny trigger ak job zlyhal).
+- `admin.php?p=invoice_pdf&id=N` — chránený `Security::adminCan('orders.view')`, streamuje PDF inline pre náhľad.
+
+### Backfill
+
+```
+php cli/invoices-backfill.php --dry-run                   # preview
+php cli/invoices-backfill.php                             # skutočne vystav
+php cli/invoices-backfill.php --status=paid --limit=100   # batch
+```
+
+Idempotentné cez `LEFT JOIN invoices i ON i.order_id = o.id WHERE i.id IS NULL`. Cancelled invoices sa rátajú ako "neexistujú" — order môže dostať ďalšiu novú.
+
+### Storage
+
+- `storage/invoices/{YYYY}/{MM}/{number}.pdf` — mimo webroot, gitignored okrem `.gitkeep`.
+- PDF write **PO** db commit — orphan súbory akceptovateľné, orphan DB rows nie.
+- Nginx/Apache musí blokovať priame požiadavky na `/storage/`.
+
+### Súhrn
 
 | Metrika | Hodnota |
 |---|---|
