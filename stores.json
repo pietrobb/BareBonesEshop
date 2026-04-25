@@ -9,6 +9,7 @@
             "currency": "eur",
             "url_prefix": "",
             "languages": ["sk", "cs", "en"],
+            "oss_enabled": false,
             "legal": {
                 "name": "Woodle s.r.o.",
                 "street": "Hlavná 1",
@@ -33,6 +34,7 @@
             "currency": "czk",
             "url_prefix": "/cs",
             "languages": ["cs", "sk", "en"],
+            "oss_enabled": false,
             "legal": {
                 "name": "Woodle CZ s.r.o.",
                 "street": "Vinohradská 1",
@@ -57,6 +59,7 @@
             "currency": "pln",
             "url_prefix": "/pl",
             "languages": ["pl", "en"],
+            "oss_enabled": false,
             "legal": {
                 "name": "Woodle PL Sp. z o.o.",
                 "street": "Marszałkowska 1",
@@ -81,6 +84,7 @@
             "currency": "huf",
             "url_prefix": "/hu",
             "languages": ["hu", "en"],
+            "oss_enabled": false,
             "legal": {
                 "name": "Woodle HU Kft.",
                 "street": "Kossuth Lajos utca 1",
@@ -105,6 +109,7 @@
             "currency": "eur",
             "url_prefix": "/de",
             "languages": ["de", "en"],
+            "oss_enabled": false,
             "legal": {
                 "name": "Woodle GmbH",
                 "street": "Hauptstrasse 1",
@@ -129,6 +134,7 @@
             "currency": "usd",
             "url_prefix": "/en",
             "languages": ["en", "es"],
+            "oss_enabled": false,
             "legal": {
                 "name": "Woodle Inc.",
                 "street": "1 Main St",
