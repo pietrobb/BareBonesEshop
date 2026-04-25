@@ -42,6 +42,7 @@ try {
         'cart_enriched'   => apiCartEnriched(),
         'checkout'        => apiCheckout(),
         'shipping_methods'=> apiShippingMethods(),
+        'shipping_rates'  => apiShippingRates(),
         'search_suggest'  => apiSearchSuggest(),
         'validate_coupon' => apiValidateCoupon(),
         'webhook_stripe'  => apiWebhookStripe(),
@@ -348,10 +349,36 @@ function apiCartEnriched(): array {
 }
 
 function apiShippingMethods(): array {
+    return apiShippingRates();
+}
+
+function apiShippingRates(): array {
+    if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+        http_response_code(405);
+        return ['error' => 'Method not allowed'];
+    }
+
     $country = strtoupper(trim($_GET['country'] ?? 'SK'));
     $subtotal = Security::int($_GET['subtotal'] ?? 0);
-    $methods = Shipping::availableMethods($country, $subtotal);
-    return ['methods' => $methods];
+    $weightG = Security::int($_GET['weight_g'] ?? 0);
+    $volumeCm3 = Security::int($_GET['volume_cm3'] ?? 0);
+    $cod = !empty($_GET['cod']) && $_GET['cod'] !== '0';
+
+    if ($weightG <= 0) {
+        $cart = Cart::enriched();
+        $metrics = shippingCartMetrics($cart['items'] ?? []);
+        $subtotal = $subtotal > 0 ? $subtotal : (int)($cart['subtotal'] ?? 0);
+        $weightG = $metrics['weight_g'];
+        $volumeCm3 = $metrics['volume_cm3'];
+    }
+
+    $methods = ShippingService::calculateRates($country, $weightG, $subtotal, $cod, $volumeCm3);
+    return [
+        'country' => $country,
+        'weight_g' => $weightG,
+        'volume_cm3' => $volumeCm3,
+        'methods' => $methods,
+    ];
 }
 
 function apiCheckout(): array {
@@ -375,7 +402,7 @@ function apiCheckout(): array {
     $email = Security::email($input['email'] ?? '');
     $phone = trim($input['phone'] ?? '');
     $country = strtoupper(trim($input['country'] ?? 'SK'));
-    $shippingMethod = $input['shipping_method'] ?? 'standard';
+    $shippingMethod = Security::slug($input['shipping_method'] ?? '');
     $paymentMethod = $input['payment_method'] ?? 'stripe';
 
     if (!$name || !$email) {
@@ -384,15 +411,6 @@ function apiCheckout(): array {
 
     // Capture email for abandoned cart recovery
     Cart::setEmail($email);
-
-    // Validate shipping method exists and is available for this country
-    if (!Shipping::methodConfig($shippingMethod)) {
-        return ['error' => 'Invalid shipping method'];
-    }
-    $availableMethods = array_column(Shipping::availableMethods($country), 'key');
-    if (!in_array($shippingMethod, $availableMethods, true)) {
-        return ['error' => 'Shipping method not available for your country'];
-    }
 
     // Validate payment method
     $allowedPayments = ['stripe', 'cod', 'bank_transfer'];
@@ -454,23 +472,14 @@ function apiCheckout(): array {
         }
     }
 
-    // Batch weight query instead of N+1
-    $productIds = array_unique(array_column($cart['items'], 'product_id'));
-    $totalWeight = 0;
-    if (!empty($productIds)) {
-        $ph = implode(',', array_fill(0, count($productIds), '?'));
-        $stmt = Db::get()->prepare("SELECT id, weight_g FROM products WHERE id IN ({$ph})");
-        $stmt->execute(array_values($productIds));
-        $weights = [];
-        while ($row = $stmt->fetch()) $weights[(int)$row['id']] = (int)$row['weight_g'];
-        foreach ($cart['items'] as $item) {
-            $totalWeight += ($weights[$item['product_id']] ?? 0) * $item['qty'];
-        }
-    }
-    $shippingCost = Shipping::calculate($shippingMethod, $country, $totalWeight, $cart['subtotal']);
-    if ($shippingCost < 0) {
+    $metrics = shippingCartMetrics($cart['items']);
+    $totalWeight = $metrics['weight_g'];
+    $totalVolume = $metrics['volume_cm3'];
+    $selectedRate = ShippingService::selectRate($shippingMethod, $country, $totalWeight, $cart['subtotal'], $paymentMethod === 'cod', $totalVolume);
+    if (!$selectedRate) {
         return ['success' => false, 'error' => 'Doručenie nie je dostupné do zvolenej krajiny.'];
     }
+    $shippingCost = (int)$selectedRate['price'];
 
     $autoRules = Pricing::autoCartRules($cart['subtotal']);
     foreach ($autoRules as $rule) {
@@ -497,6 +506,10 @@ function apiCheckout(): array {
         'currency'       => $cart['items'][0]['currency'] ?? 'eur',
         'locale'         => I18n::locale(),
         'shipping_cost'  => $shippingCost,
+        'shipping_method'=> $selectedRate['method_code'],
+        'shipping_zone'  => $selectedRate['zone_code'] ?? '',
+        'shipping_weight_g' => $totalWeight,
+        'shipping_rate_snapshot' => json_encode($selectedRate, JSON_UNESCAPED_UNICODE),
         'tax_amount'     => $taxBreakdown['total_tax'],
         'coupon_discount'=> $couponDiscount,
         'vat_id'         => $vatId,
@@ -577,6 +590,34 @@ function apiCheckout(): array {
         Cart::removeUnavailable([]);
         return ['success' => false, 'error' => $e->getMessage()];
     }
+}
+
+function shippingCartMetrics(array $items): array {
+    $productIds = array_unique(array_column($items, 'product_id'));
+    $weights = [];
+    $attrs = [];
+    if (!empty($productIds)) {
+        $ph = implode(',', array_fill(0, count($productIds), '?'));
+        $stmt = Db::get()->prepare("SELECT id, weight_g, attrs FROM products WHERE id IN ({$ph})");
+        $stmt->execute(array_values($productIds));
+        while ($row = $stmt->fetch()) {
+            $pid = (int)$row['id'];
+            $weights[$pid] = (int)($row['weight_g'] ?? 0);
+            $attrs[$pid] = json_decode($row['attrs'] ?? '{}', true) ?: [];
+        }
+    }
+
+    $weightG = 0;
+    $volumeCm3 = 0;
+    foreach ($items as $item) {
+        $pid = (int)$item['product_id'];
+        $qty = (int)$item['qty'];
+        $weightG += ($weights[$pid] ?? 0) * $qty;
+        $a = $attrs[$pid] ?? [];
+        $volumeCm3 += (int)($a['volume_cm3'] ?? 0) * $qty;
+    }
+
+    return ['weight_g' => $weightG, 'volume_cm3' => $volumeCm3];
 }
 
 function apiWebhookStripe(): array {
