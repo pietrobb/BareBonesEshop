@@ -484,31 +484,46 @@ class GdprService {
     private static function retentionHashEmail(PDO $db, string $key, array $p, string $mode, float $start): array {
         $table = $p['table'];
         $field = (string)($p['field'] ?? 'created_at');
+        // Resolve email column: explicit policy.scrub_fields[0] OR auto-detect (email | customer_email)
+        $emailCol = null;
+        $scrub = $p['scrub_fields'] ?? null;
+        if (is_array($scrub) && !empty($scrub)) {
+            $emailCol = (string)$scrub[0];
+        } else {
+            foreach ($db->query("PRAGMA table_info({$table})")->fetchAll() as $c) {
+                $n = strtolower((string)$c['name']);
+                if ($n === 'email' || $n === 'customer_email') { $emailCol = (string)$c['name']; break; }
+            }
+        }
+        if ($emailCol === null || !preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $emailCol)) {
+            throw new InvalidArgumentException("hash_email: cannot resolve email column for {$table}");
+        }
+
         $cutoff = self::computeCutoff($p);
         // count rows with email NOT already hashed AND older than cutoff
         $countStmt = $db->prepare("
             SELECT COUNT(*) AS c FROM {$table}
             WHERE {$field} <= :cutoff
-              AND email IS NOT NULL
-              AND email != ''
-              AND email NOT LIKE 'sha256:%'
-              AND length(email) != 64
+              AND {$emailCol} IS NOT NULL
+              AND {$emailCol} != ''
+              AND {$emailCol} NOT LIKE 'sha256:%'
+              AND length({$emailCol}) != 64
         ");
         $countStmt->execute([':cutoff' => $cutoff]);
         $affected = (int)$countStmt->fetch()['c'];
 
         if ($mode === 'apply' && $affected > 0) {
-            // Need to fetch + hash + update per row (salt is in PHP, not SQL)
+            // Fetch + hash + update per row (salt is in PHP, not SQL)
             $rows = $db->prepare("
-                SELECT id, email FROM {$table}
+                SELECT id, {$emailCol} AS email FROM {$table}
                 WHERE {$field} <= :cutoff
-                  AND email IS NOT NULL
-                  AND email != ''
-                  AND email NOT LIKE 'sha256:%'
-                  AND length(email) != 64
+                  AND {$emailCol} IS NOT NULL
+                  AND {$emailCol} != ''
+                  AND {$emailCol} NOT LIKE 'sha256:%'
+                  AND length({$emailCol}) != 64
             ");
             $rows->execute([':cutoff' => $cutoff]);
-            $upd = $db->prepare("UPDATE {$table} SET email = ? WHERE id = ?");
+            $upd = $db->prepare("UPDATE {$table} SET {$emailCol} = ? WHERE id = ?");
             $count = 0;
             foreach ($rows->fetchAll() as $r) {
                 $upd->execute([self::hashPii(strtolower((string)$r['email'])), (int)$r['id']]);
@@ -517,7 +532,7 @@ class GdprService {
             $affected = $count;
         }
 
-        return self::recordRun($db, $key, $mode, $affected, $start, ['cutoff' => $cutoff]);
+        return self::recordRun($db, $key, $mode, $affected, $start, ['cutoff' => $cutoff, 'column' => $emailCol]);
     }
 
     private static function computeCutoff(array $p): string {

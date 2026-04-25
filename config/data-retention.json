@@ -44,7 +44,7 @@
       "ttl_days": 730,
       "field": "created_at",
       "action": "hash_email",
-      "scrub_fields": ["email"],
+      "scrub_fields": ["customer_email"],
       "rationale": "Hash email after 24m — preserves dedup logic but de-identifies PII."
     },
     "orders_pii": {
