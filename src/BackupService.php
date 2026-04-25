@@ -296,12 +296,121 @@ class BackupService
         }
     }
 
-    // ---------- gc() (placeholder — implemented in next commit) ----------
+    // ---------- list() / gc() ----------
 
+    public static function list(): array
+    {
+        return self::$storage->list();
+    }
+
+    /**
+     * Garbage-collect old backups using grandfather-father-son retention.
+     *
+     * Rules:
+     *  - Keep last `daily` backups from the last `daily` distinct days.
+     *  - Keep last `weekly` Sunday backups (one per ISO week).
+     *  - Keep last `monthly` 1st-of-month backups (one per month).
+     *  - Always keep at least `minimum_kept` backups (newest first).
+     *  - Manual / pre-restore-snapshot / pre-migration backups are preserved unconditionally.
+     *
+     * Returns ['kept' => int, 'deleted' => string[] (remote paths)].
+     */
     public static function gc(): array
     {
-        // To be implemented in the next commit (retention).
-        return ['kept' => 0, 'deleted' => []];
+        if (self::$storage === null) {
+            throw new RuntimeException('BackupService not initialized');
+        }
+        $cfg = self::$cfg['retention'] ?? [];
+        $daily   = (int)($cfg['daily']         ?? 7);
+        $weekly  = (int)($cfg['weekly']        ?? 4);
+        $monthly = (int)($cfg['monthly']       ?? 6);
+        $minKept = (int)($cfg['minimum_kept']  ?? 3);
+
+        $all = self::$storage->list(); // newest first
+        if (count($all) <= $minKept) {
+            return ['kept' => count($all), 'deleted' => []];
+        }
+
+        // Always-keep set: paths preserved no matter what.
+        $keep = [];
+        // Floor: newest $minKept entries always kept
+        foreach (array_slice($all, 0, $minKept) as $row) {
+            $keep[$row['path']] = true;
+        }
+
+        // Group by day (YYYY-MM-DD) — keep newest per day, last $daily days
+        $byDay = [];
+        foreach ($all as $row) {
+            $when = self::rowWhen($row);
+            $dKey = $when->format('Y-m-d');
+            if (!isset($byDay[$dKey])) $byDay[$dKey] = $row['path']; // newest first → first wins
+        }
+        $dailyKept = 0;
+        foreach ($byDay as $path) {
+            if ($dailyKept >= $daily) break;
+            $keep[$path] = true;
+            $dailyKept++;
+        }
+
+        // Group by ISO week (YYYY-Www) — keep newest per week, last $weekly weeks
+        $byWeek = [];
+        foreach ($all as $row) {
+            $when = self::rowWhen($row);
+            $wKey = $when->format('o-W');
+            if (!isset($byWeek[$wKey])) $byWeek[$wKey] = $row['path'];
+        }
+        $weeklyKept = 0;
+        foreach ($byWeek as $path) {
+            if ($weeklyKept >= $weekly) break;
+            $keep[$path] = true;
+            $weeklyKept++;
+        }
+
+        // Group by month (YYYY-MM) — keep newest per month, last $monthly months
+        $byMonth = [];
+        foreach ($all as $row) {
+            $when = self::rowWhen($row);
+            $mKey = $when->format('Y-m');
+            if (!isset($byMonth[$mKey])) $byMonth[$mKey] = $row['path'];
+        }
+        $monthlyKept = 0;
+        foreach ($byMonth as $path) {
+            if ($monthlyKept >= $monthly) break;
+            $keep[$path] = true;
+            $monthlyKept++;
+        }
+
+        // Preserve manual / pre-migration / pre-restore-snapshot labels
+        foreach ($all as $row) {
+            $label = (string)($row['meta']['label'] ?? '');
+            if (in_array($label, ['pre-restore-snapshot', 'pre-migration', 'manual'], true)) {
+                $keep[$row['path']] = true;
+            }
+        }
+
+        // Delete the rest
+        $deleted = [];
+        foreach ($all as $row) {
+            if (isset($keep[$row['path']])) continue;
+            try {
+                self::$storage->delete($row['path']);
+                $deleted[] = $row['path'];
+            } catch (\Throwable $e) {
+                self::log('GC delete fail ' . $row['path'] . ' err=' . $e->getMessage());
+            }
+        }
+
+        return ['kept' => count($keep), 'deleted' => $deleted];
+    }
+
+    private static function rowWhen(array $row): \DateTimeImmutable
+    {
+        $ts = (string)($row['meta']['timestamp'] ?? '');
+        if ($ts !== '') {
+            try { return new \DateTimeImmutable($ts); } catch (\Throwable $e) { /* fallthrough */ }
+        }
+        return (new \DateTimeImmutable('@' . (int)($row['mtime'] ?? time())))
+            ->setTimezone(new \DateTimeZone(date_default_timezone_get()));
     }
 
     // ---------- locking ----------
