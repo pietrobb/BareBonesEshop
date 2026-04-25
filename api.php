@@ -715,7 +715,12 @@ function onPaymentCompleted(array $session): void {
     $order = Orders::byId($orderId);
     if (!$order || $order['status'] !== 'pending') return;
 
-    Orders::setPaymentId($orderId, $session['payment_intent'] ?? $session['id'] ?? '');
+    $paymentRef = (string)($session['payment_intent'] ?? $session['id'] ?? '');
+    Orders::setPaymentId($orderId, $paymentRef);
+    PaymentService::transitionPayment($orderId, 'paid', 'checkout.session.completed', (int)($session['amount_total'] ?? $order['total'] ?? 0), 'stripe_legacy_' . ($session['id'] ?? $paymentRef), [
+        'session_id' => $session['id'] ?? '',
+        'payment_id' => $paymentRef,
+    ]);
     OrderWorkflow::transition($orderId, 'paid', 'Stripe webhook: ' . ($session['id'] ?? ''));
 
     JobQueue::push('email_send', ['template' => 'order-confirmation', 'to' => $order['customer_email'], 'order_id' => $orderId]);

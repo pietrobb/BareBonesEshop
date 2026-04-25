@@ -2663,6 +2663,42 @@ assert_true(str_contains($confirmationHtml, 'pending'), 'Payment UX: confirmatio
 assert_true(str_contains($confirmationHtml, 'Card'), 'Payment UX: confirmation renders payment method label');
 assert_true(str_contains($confirmationHtml, 'mock_' . $confirmationOrder['order_number']), 'Payment UX: confirmation renders provider reference');
 
+$legacyStripeOrderId = Orders::create([
+    [
+        'product_id'   => $payProduct['id'],
+        'variant_id'   => null,
+        'qty'          => 1,
+        'price'        => (int)$payProduct['price'],
+        'sku'          => $payProduct['sku'],
+        'name'         => $payProduct['name'],
+        'variant_name' => '',
+    ],
+], [
+    'name'          => 'Legacy Stripe Customer',
+    'email'         => 'legacy-stripe@example.com',
+    'phone'         => '+421900000105',
+    'address'       => ['street' => 'Legacy Stripe 1', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK'],
+    'currency'      => 'eur',
+    'shipping_cost' => 299,
+    'payment_fee'   => 0,
+    'payment_method_snapshot' => json_encode(['code' => 'card', 'provider' => 'stripe', 'label' => 'Card'], JSON_UNESCAPED_UNICODE),
+    'tax_amount'    => 0,
+], 'card');
+onPaymentCompleted([
+    'id' => 'cs_legacy_paid_1',
+    'payment_intent' => 'pi_legacy_paid_1',
+    'amount_total' => (int)Orders::byId($legacyStripeOrderId)['total'],
+    'metadata' => ['order_id' => $legacyStripeOrderId],
+]);
+$legacyStripeOrder = Orders::byId($legacyStripeOrderId);
+$legacyStripeTxs = PaymentService::transactionsForOrder($legacyStripeOrderId);
+$legacyStripeRaw = json_decode((string)$legacyStripeTxs[0]['raw_response'], true) ?: [];
+assert_equals('paid', (string)$legacyStripeOrder['payment_status'], 'Payment webhook: legacy Stripe marks payment_status paid');
+assert_equals('paid', (string)$legacyStripeTxs[0]['status'], 'Payment webhook: legacy Stripe logs paid transaction');
+assert_equals('pi_legacy_paid_1', (string)$legacyStripeTxs[0]['provider_ref'], 'Payment webhook: legacy Stripe logs provider reference');
+assert_equals('checkout.session.completed', (string)$legacyStripeRaw['event_type'], 'Payment webhook: legacy Stripe logs event type');
+assert_equals('cs_legacy_paid_1', (string)$legacyStripeRaw['session_id'], 'Payment webhook: legacy Stripe logs session reference');
+
 $paymentLifecycleOrderId = Orders::create([
     [
         'product_id'   => $payProduct['id'],
