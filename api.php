@@ -359,6 +359,9 @@ function apiShippingRates(): array {
     }
 
     $country = strtoupper(trim($_GET['country'] ?? 'SK'));
+    if (!preg_match('/^[A-Z]{2}$/', $country)) {
+        return ['error' => 'Invalid country'];
+    }
     $subtotal = Security::int($_GET['subtotal'] ?? 0);
     $weightG = Security::int($_GET['weight_g'] ?? 0);
     $volumeCm3 = Security::int($_GET['volume_cm3'] ?? 0);
@@ -402,6 +405,9 @@ function apiCheckout(): array {
     $email = Security::email($input['email'] ?? '');
     $phone = trim($input['phone'] ?? '');
     $country = strtoupper(trim($input['country'] ?? 'SK'));
+    if (!preg_match('/^[A-Z]{2}$/', $country)) {
+        return ['error' => 'Invalid country'];
+    }
     $shippingMethod = Security::slug($input['shipping_method'] ?? '');
     $paymentMethod = $input['payment_method'] ?? 'stripe';
 

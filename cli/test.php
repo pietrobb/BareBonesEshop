@@ -101,6 +101,7 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS products (
     FOREIGN KEY (category_id) REFERENCES categories(id)
 )");
 $pdo->exec("CREATE INDEX IF NOT EXISTS idx_prod_category ON products(category_id, status, price)");
+try { $pdo->exec("ALTER TABLE products ADD COLUMN vat_class TEXT DEFAULT 'standard'"); } catch (\PDOException $e) {}
 
 $pdo->exec("CREATE VIRTUAL TABLE IF NOT EXISTS products_fts USING fts5(
     name, sku, summary, tags, filter_tags,
@@ -2536,6 +2537,15 @@ assert_equals(1599, (int)$glsEu['price'], 'Shipping: seeded EU fallback 5-20kg p
 $selectedSeedRate = ShippingService::selectRate('packeta', 'SK', 2000, 2000, false, 0);
 assert_true($selectedSeedRate !== null, 'Shipping: seeded Packeta rate selectable');
 
+$_SESSION = ['cart' => []];
+Cart::add((int)$payProduct['id'], null, 1);
+$shippingCart = Cart::enriched();
+$shippingMetrics = ['weight_g' => 2000, 'volume_cm3' => 0];
+$checkoutRates = ShippingService::calculateRates('SK', $shippingMetrics['weight_g'], (int)$shippingCart['subtotal'], false, $shippingMetrics['volume_cm3']);
+assert_true(count($checkoutRates) >= 3, 'Shipping UX: checkout SK quote returns available methods from cart metrics');
+$checkoutSelection = ShippingService::selectRate('packeta', 'SK', $shippingMetrics['weight_g'], (int)$shippingCart['subtotal'], false, $shippingMetrics['volume_cm3']);
+assert_true($checkoutSelection !== null, 'Shipping UX: checkout selected Packeta method resolves against current cart');
+
 $seedOrderId = Orders::create([
     [
         'product_id'   => $payProduct['id'],
@@ -2555,16 +2565,18 @@ $seedOrderId = Orders::create([
     'shipping_cost' => (int)$selectedSeedRate['price'],
     'shipping_method' => $selectedSeedRate['method_code'],
     'shipping_zone' => $selectedSeedRate['zone_code'],
-    'shipping_weight_g' => 2000,
+    'shipping_weight_g' => $shippingMetrics['weight_g'],
     'shipping_rate_snapshot' => json_encode($selectedSeedRate, JSON_UNESCAPED_UNICODE),
     'tax_amount'    => 0,
 ], 'card');
 $seedOrder = Orders::byId($seedOrderId);
 assert_equals('packeta', (string)$seedOrder['shipping_method'], 'Shipping: order snapshot stores method');
 assert_equals('domestic', (string)$seedOrder['shipping_zone'], 'Shipping: order snapshot stores zone');
-assert_equals(2000, (int)$seedOrder['shipping_weight_g'], 'Shipping: order snapshot stores weight');
+assert_equals((int)$shippingMetrics['weight_g'], (int)$seedOrder['shipping_weight_g'], 'Shipping: order snapshot stores weight');
 $seedSnapshot = json_decode((string)$seedOrder['shipping_rate_snapshot'], true) ?: [];
 assert_equals('packeta', (string)$seedSnapshot['method_code'], 'Shipping: order snapshot stores selected rate JSON');
+assert_equals((int)$checkoutSelection['price'], (int)$seedOrder['shipping_cost'], 'Shipping UX: order stores selected checkout shipping price');
+assert_equals((int)$shippingMetrics['weight_g'], (int)$seedOrder['shipping_weight_g'], 'Shipping UX: order snapshot weight matches checkout cart metrics');
 
 // Re-seed again after snapshot checks so later adapter DB lookups still use default carrier rows.
 $shippingMig->up($pdo, true);
