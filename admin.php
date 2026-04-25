@@ -49,6 +49,7 @@ $pagePermissions = [
     'import'     => 'import',
     'cache'      => 'cache',
     'audit'      => 'reports.view',
+    'gdpr'       => 'gdpr.view',
     'pages'      => 'products.edit',
     'page_edit'  => 'products.edit',
     'attributes' => 'products.edit',
@@ -76,6 +77,7 @@ $title = match($page) {
     'import'     => I18n::t('admin.title.import'),
     'cache'      => I18n::t('admin.title.cache'),
     'audit'      => I18n::t('admin.title.audit_log'),
+    'gdpr'       => I18n::t('admin.title.gdpr'),
     'pages'      => I18n::t('admin.title.cms_pages'),
     'page_edit'  => I18n::t('admin.title.cms_page_edit'),
     'attributes' => I18n::t('admin.title.attributes'),
@@ -151,6 +153,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
     <?php if (Security::adminCan('import')): ?><a href="admin.php?p=feeds" class="<?= $page==='feeds'||$page==='feed'?'active':'' ?>"><?= esc(I18n::t('admin.nav.feeds')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=pages" class="<?= $page==='pages'?'active':'' ?>"><?= esc(I18n::t('admin.nav.cms_pages')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=audit" class="<?= $page==='audit'?'active':'' ?>"><?= esc(I18n::t('admin.nav.audit')) ?></a><?php endif; ?>
+    <?php if (Security::adminCan('gdpr.view')): ?><a href="admin.php?p=gdpr" class="<?= $page==='gdpr'?'active':'' ?>"><?= esc(I18n::t('admin.nav.gdpr')) ?></a><?php endif; ?>
 </nav>
 <main>
 <?php flash(); ?>
@@ -165,6 +168,7 @@ match($page) {
     'import'    => pageImport(),
     'cache'     => pageCache(),
     'audit'     => pageAudit(),
+    'gdpr'      => pageGdpr(),
     'pages'      => pageCmsPages(),
     'page_edit'  => pageCmsEdit(),
     'attributes' => pageAttributes(),
@@ -877,6 +881,73 @@ function pageAudit(): void {
 // CMS Pages
 // ============================================================
 
+function pageGdpr(): void {
+    Security::adminRequire('gdpr.view');
+    $db = Db::get();
+    $email = strtolower(trim((string)($_GET['email'] ?? '')));
+    $customers = [];
+    if ($email !== '') {
+        $stmt = $db->prepare("SELECT id, email, name, status, created_at FROM customers WHERE LOWER(email) LIKE LOWER(:email) ORDER BY id DESC LIMIT 25");
+        $stmt->execute([':email' => '%' . $email . '%']);
+        $customers = $stmt->fetchAll();
+    }
+    $events = $db->query("SELECT * FROM gdpr_events ORDER BY created_at DESC LIMIT 50")->fetchAll();
+    ?>
+    <h1><?= esc(I18n::t('admin.title.gdpr')) ?></h1>
+    <div class="flash" style="background:#fff7ed;color:#9a3412;border:1px solid #fed7aa">
+        <?= esc(I18n::t('admin.gdpr.legal_disclaimer')) ?>
+    </div>
+    <div class="card">
+        <h3><?= esc(I18n::t('admin.gdpr.search_title')) ?></h3>
+        <form method="get" action="admin.php" style="display:flex;gap:.5rem;align-items:center;margin-bottom:1rem">
+            <input type="hidden" name="p" value="gdpr">
+            <input type="email" name="email" value="<?= esc($email) ?>" placeholder="<?= esc(I18n::t('admin.gdpr.email_placeholder')) ?>" style="min-width:280px">
+            <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.btn.search')) ?></button>
+        </form>
+        <?php if ($email !== ''): ?>
+        <table>
+            <tr><th>ID</th><th><?= esc(I18n::t('admin.th.email')) ?></th><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.th.actions')) ?></th></tr>
+            <?php foreach ($customers as $c): ?>
+            <tr>
+                <td><?= (int)$c['id'] ?></td>
+                <td><?= esc($c['email']) ?></td>
+                <td><?= esc($c['name'] ?? '') ?></td>
+                <td><span class="badge badge-<?= ($c['status'] ?? '') === 'active' ? 'active' : 'draft' ?>"><?= esc($c['status'] ?? '') ?></span></td>
+                <td>
+                    <a class="btn btn-sm" href="cli/gdpr-export.php?customer-id=<?= (int)$c['id'] ?>"><?= esc(I18n::t('admin.gdpr.export_hint')) ?></a>
+                    <?php if (Security::adminCan('gdpr.erase') && ($c['status'] ?? '') !== 'anonymized'): ?>
+                    <form method="post" action="admin.php?p=gdpr&action=anonymize&email=<?= urlencode($email) ?>" style="display:inline" onsubmit="return confirm('<?= esc(I18n::t('admin.gdpr.anonymize_confirm')) ?>')">
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                        <input type="hidden" name="customer_id" value="<?= (int)$c['id'] ?>">
+                        <button class="btn btn-danger btn-sm" type="submit"><?= esc(I18n::t('admin.gdpr.anonymize_btn')) ?></button>
+                    </form>
+                    <?php endif; ?>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+            <?php if (!$customers): ?><tr><td colspan="5" class="muted"><?= esc(I18n::t('admin.gdpr.no_results')) ?></td></tr><?php endif; ?>
+        </table>
+        <?php endif; ?>
+    </div>
+    <div class="card">
+        <h3><?= esc(I18n::t('admin.gdpr.events_title')) ?></h3>
+        <table>
+            <tr><th>ID</th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.th.customer')) ?></th><th><?= esc(I18n::t('admin.gdpr.actor')) ?></th><th><?= esc(I18n::t('admin.gdpr.note')) ?></th><th><?= esc(I18n::t('admin.th.date')) ?></th></tr>
+            <?php foreach ($events as $e): ?>
+            <tr>
+                <td><?= (int)$e['id'] ?></td>
+                <td><?= esc($e['action']) ?></td>
+                <td><?= $e['customer_id'] !== null ? (int)$e['customer_id'] : '' ?></td>
+                <td><?= esc($e['actor'] ?? '') ?></td>
+                <td class="muted" style="max-width:320px;overflow:hidden;text-overflow:ellipsis"><?= esc($e['note'] ?? '') ?></td>
+                <td class="muted"><?= esc(substr($e['created_at'], 0, 16)) ?></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+    </div>
+    <?php
+}
+
 function pageCmsPages(): void {
     $db = Db::get();
     $pages = $db->query("SELECT * FROM pages ORDER BY created_at DESC")->fetchAll();
@@ -1000,6 +1071,7 @@ function handlePost(string $page, string $action): void {
         'import:upload'  => handleImportUpload(),
         'cache:flush'    => handleCacheFlush(),
         'cache:rebuild'  => handleCacheRebuild(),
+        'gdpr:anonymize' => handleGdprAnonymize(),
         'page_edit:save' => handleCmsPageSave(),
         'pages:delete'   => handleCmsPageDelete(),
         'attribute:save' => handleAttributeSave(),
@@ -1011,6 +1083,32 @@ function handlePost(string $page, string $action): void {
         'feeds:sync'        => handleFeedSync(),
         default          => null,
     };
+}
+
+function handleGdprAnonymize(): void {
+    Security::adminRequire('gdpr.erase');
+    $customerId = Security::int($_POST['customer_id'] ?? 0);
+    if ($customerId <= 0) {
+        setFlash('err', I18n::t('admin.gdpr.invalid_customer'));
+        header('Location: admin.php?p=gdpr');
+        exit;
+    }
+    try {
+        $result = GdprService::anonymizeCustomer($customerId, Security::adminUser());
+        GdprService::logEvent([
+            'action' => 'admin_anonymize',
+            'customer_id' => $customerId,
+            'actor' => Security::adminUser(),
+            'payload' => $result,
+            'note' => 'Admin anonymized customer #' . $customerId,
+        ]);
+        setFlash('ok', I18n::t('admin.gdpr.anonymized_ok'));
+    } catch (Throwable $e) {
+        setFlash('err', I18n::t('admin.gdpr.anonymized_failed') . ': ' . $e->getMessage());
+    }
+    $email = trim((string)($_GET['email'] ?? ''));
+    header('Location: admin.php?p=gdpr' . ($email !== '' ? '&email=' . urlencode($email) : ''));
+    exit;
 }
 
 function handleProductSave(): void {
