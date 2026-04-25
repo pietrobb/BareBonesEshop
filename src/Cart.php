@@ -31,9 +31,21 @@ class Cart {
     }
 
     /**
-     * Enriched cart — real-time prices and stock from DB (batch queries)
+     * Enriched cart — real-time prices and stock from DB (batch queries).
+     *
+     * If $vatContext is provided, each line gets vat_class/vat_rate/vat_amount/net_amount,
+     * and the summary gets vat_scenario / vat_total / net_total / reverse_charge_note_key.
+     *
+     * $vatContext keys:
+     *   - seller_country (string, ISO2)        — required for VAT calc
+     *   - customer_country (string, ISO2)      — required
+     *   - customer_is_business (bool)          — defaults false
+     *   - customer_vat_id (string|null)        — required when reverse-charge expected
+     *   - customer_vat_validated (bool)        — VIES result; false ⇒ treat as B2C
+     *   - oss_enabled (bool)                   — defaults false (per-store)
+     *   - at_date (string|null)                — Y-m-d, defaults today
      */
-    public static function enriched(): array {
+    public static function enriched(?array $vatContext = null): array {
         $cart = self::get();
         if (empty($cart)) return ['items' => [], 'subtotal' => 0, 'count' => 0];
 
@@ -50,11 +62,11 @@ class Cart {
         }
         $productIds = array_unique($productIds);
 
-        // Batch fetch products
+        // Batch fetch products (incl. vat_class for per-line VAT calculation)
         $products = [];
         if (!empty($productIds)) {
             $ph = implode(',', array_fill(0, count($productIds), '?'));
-            $stmt = $db->prepare("SELECT id, name, slug, images, price, sku, stock, currency FROM products WHERE id IN ({$ph}) AND status = 'active'");
+            $stmt = $db->prepare("SELECT id, name, slug, images, price, sku, stock, currency, vat_class FROM products WHERE id IN ({$ph}) AND status = 'active'");
             $stmt->execute(array_values($productIds));
             while ($row = $stmt->fetch()) $products[(int)$row['id']] = $row;
         }
@@ -130,17 +142,95 @@ class Cart {
                 'currency'         => $currency,
                 'available'        => $available,
                 'currency_mismatch' => $currencyMismatch,
+                'vat_class'        => $product['vat_class'] ?? 'standard',
             ];
         }
 
         $currency = $cartCurrency ?? 'eur';
-        return [
+        $summary = [
             'items'              => $items,
             'subtotal'           => $subtotal,
             'subtotal_formatted' => I18n::price($subtotal, $currency),
             'currency'           => $currency,
             'count'              => array_sum(array_column($items, 'qty')),
         ];
+
+        // Optional VAT enrichment (per-line + per-cart totals)
+        if ($vatContext !== null) {
+            $summary = self::applyVat($summary, $vatContext);
+        }
+
+        return $summary;
+    }
+
+    /**
+     * Compute per-line VAT against an enriched cart summary using VatService.
+     * Returns the summary with vat fields added to each item AND to the summary itself.
+     * Pure function on top of enriched(); does not touch DB or session.
+     */
+    public static function applyVat(array $summary, array $vatContext): array {
+        if (!class_exists('VatService')) {
+            return $summary;
+        }
+
+        // Normalize context keys → VatService canonical
+        $vctx = [
+            'seller_country'        => $vatContext['seller_country']        ?? '',
+            'customer_country'      => $vatContext['customer_country']      ?? '',
+            'seller_oss_enabled'    => (bool)($vatContext['oss_enabled']           ?? $vatContext['seller_oss_enabled']    ?? false),
+            'customer_vat_id_valid' => (bool)($vatContext['customer_vat_validated'] ?? $vatContext['customer_vat_id_valid'] ?? false),
+            'is_b2b'                => (bool)($vatContext['customer_is_business']  ?? $vatContext['is_b2b']                ?? false),
+        ];
+        $scenario = VatService::resolveScenario($vctx);
+        $atDate   = $vatContext['at_date'] ?? null;
+        $rateCountry = $scenario['rate_country'];
+        $applies  = $scenario['applies_vat'];
+
+        $vatTotal = 0;
+        $netTotal = 0;
+        $newItems = [];
+
+        foreach ($summary['items'] as $item) {
+            // Currency-mismatch lines are excluded from totals (existing rule)
+            if (!empty($item['currency_mismatch']) || empty($item['available'])) {
+                $item['vat_rate']   = 0.0;
+                $item['vat_amount'] = 0;
+                $item['net_amount'] = $item['total'];
+                $newItems[] = $item;
+                continue;
+            }
+
+            $vatClass = $item['vat_class'] ?? 'standard';
+            $resolved = VatService::resolveClass($vatClass);
+            $rate     = $applies ? VatService::rate($rateCountry, $resolved, $atDate) : 0.0;
+
+            $line = VatService::computeLine(
+                (int)$item['price'],
+                (int)$item['qty'],
+                $rate,
+                !$applies
+            );
+
+            $item['vat_class']  = $resolved;
+            $item['vat_rate']   = $rate;
+            $item['vat_amount'] = $line['vat_amount'];
+            $item['net_amount'] = $line['net'];
+            $vatTotal += $line['vat_amount'];
+            $netTotal += $line['net'];
+            $newItems[] = $item;
+        }
+
+        $summary['items']                    = $newItems;
+        $summary['vat_scenario']             = $scenario['scenario'];
+        $summary['vat_rate_country']         = $rateCountry;
+        $summary['vat_applies']              = $applies;
+        $summary['vat_total']                = $vatTotal;
+        $summary['net_total']                = $netTotal;
+        $summary['reverse_charge_note_key']  = $scenario['note_key'];
+        $summary['vat_total_formatted']      = I18n::price($vatTotal, $summary['currency']);
+        $summary['net_total_formatted']      = I18n::price($netTotal, $summary['currency']);
+
+        return $summary;
     }
 
     public static function clear(): void {
