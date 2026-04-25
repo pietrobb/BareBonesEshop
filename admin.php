@@ -120,6 +120,7 @@ tr:hover{background:#f8fafc}
 .badge-shipped{background:#dbeafe;color:#1e40af}.badge-delivered{background:#d1fae5;color:#065f46}
 .badge-cancelled{background:#fee2e2;color:#991b1b}.badge-returned{background:#fce7f3;color:#9d174d}
 .badge-refunded{background:#e2e8f0;color:#475569}.badge-processing{background:#e0e7ff;color:#3730a3}
+.badge-refund_pending{background:#fef3c7;color:#92400e}.badge-authorized{background:#dbeafe;color:#1e40af}
 .badge-active{background:#d1fae5;color:#065f46}.badge-draft{background:#e2e8f0;color:#475569}
 .btn{display:inline-block;padding:.4rem .8rem;border-radius:4px;font-size:.85rem;cursor:pointer;border:1px solid #d1d5db;background:#fff}
 .btn:hover{background:#f8fafc;text-decoration:none}.btn-primary{background:#2563eb;color:#fff;border-color:#2563eb}
@@ -587,7 +588,7 @@ function pageOrders(): void {
             <button class="btn" type="submit"><?= esc(I18n::t('admin.btn.apply')) ?></button>
         </form>
         <table>
-            <tr><th><?= esc(I18n::t('admin.th.number')) ?></th><th><?= esc(I18n::t('admin.th.customer')) ?></th><th><?= esc(I18n::t('admin.th.email')) ?></th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.th.date')) ?></th><th></th></tr>
+            <tr><th><?= esc(I18n::t('admin.th.number')) ?></th><th><?= esc(I18n::t('admin.th.customer')) ?></th><th><?= esc(I18n::t('admin.th.email')) ?></th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th>Payment</th><th><?= esc(I18n::t('admin.th.date')) ?></th><th></th></tr>
             <?php foreach ($orders as $o): ?>
             <tr>
                 <td><a href="admin.php?p=order&id=<?= $o['id'] ?>"><?= esc($o['order_number']) ?></a></td>
@@ -595,6 +596,7 @@ function pageOrders(): void {
                 <td class="muted"><?= esc($o['customer_email']) ?></td>
                 <td><?= I18n::price((int)$o['total'], $o['currency']) ?></td>
                 <td><span class="badge badge-<?= esc($o['status']) ?>"><?= esc($o['status']) ?></span></td>
+                <td><span class="badge badge-<?= esc($o['payment_status'] ?? 'pending') ?>"><?= esc($o['payment_status'] ?? 'pending') ?></span><br><span class="muted"><?= esc($o['payment_method'] ?? '') ?></span></td>
                 <td class="muted"><?= esc(substr($o['created_at'], 0, 16)) ?></td>
                 <td><a href="admin.php?p=order&id=<?= $o['id'] ?>" class="btn btn-sm">Detail</a></td>
             </tr>

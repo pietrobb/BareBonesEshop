@@ -2715,6 +2715,11 @@ assert_equals(750, (int)$adminRefundRaw['amount'], 'Payment admin: refund reques
 assert_equals('Customer return', (string)$adminRefundRaw['reason'], 'Payment admin: refund request logs reason');
 assert_equals('test-admin', (string)$adminRefundRaw['actor'], 'Payment admin: refund request logs admin actor');
 
+$adminOrdersListSnippet = file_get_contents(__DIR__ . '/../admin.php') ?: '';
+assert_true(str_contains($adminOrdersListSnippet, '<th>Payment</th>'), 'Payment admin: orders list renders Payment column');
+assert_true(str_contains($adminOrdersListSnippet, 'badge-<?= esc($o[\'payment_status\'] ?? \'pending\') ?>'), 'Payment admin: orders list renders payment status badge');
+assert_true(str_contains($adminOrdersListSnippet, 'esc($o[\'payment_method\'] ?? \'\')'), 'Payment admin: orders list renders payment method');
+
 // ============================================================
 // SHIPPING TESTS
 // ============================================================
