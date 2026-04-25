@@ -267,6 +267,8 @@ return [
     'account.order_number'        => 'Order #',
     'account.invoice'             => 'Invoice',
     'account.status'              => 'Status',
+    'account.payment'             => 'Payment',
+    'account.payment_history'     => 'Payment history',
     'account.total'               => 'Total',
     'account.date'                => 'Date',
     'account.no_addresses'        => 'No addresses saved.',
