@@ -43,6 +43,7 @@ try {
         'checkout'        => apiCheckout(),
         'shipping_methods'=> apiShippingMethods(),
         'shipping_rates'  => apiShippingRates(),
+        'payment_methods' => apiPaymentMethods(),
         'search_suggest'  => apiSearchSuggest(),
         'validate_coupon' => apiValidateCoupon(),
         'webhook_stripe'  => apiWebhookStripe(),
@@ -385,6 +386,32 @@ function apiShippingRates(): array {
     ];
 }
 
+function apiPaymentMethods(): array {
+    if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+        http_response_code(405);
+        return ['error' => 'Method not allowed'];
+    }
+
+    $country = strtoupper(trim($_GET['country'] ?? 'SK'));
+    if (!preg_match('/^[A-Z]{2}$/', $country)) {
+        return ['error' => 'Invalid country'];
+    }
+    $currency = strtolower(trim($_GET['currency'] ?? 'eur'));
+    if (!preg_match('/^[a-z]{3}$/', $currency)) {
+        return ['error' => 'Invalid currency'];
+    }
+    $amount = Security::int($_GET['amount'] ?? 0);
+    $shippingMethod = Security::slug($_GET['shipping_method'] ?? '');
+
+    return [
+        'country' => $country,
+        'currency' => $currency,
+        'amount' => $amount,
+        'shipping_method' => $shippingMethod,
+        'methods' => PaymentService::availableMethods($country, $currency, $amount, $shippingMethod),
+    ];
+}
+
 function apiCheckout(): array {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         http_response_code(405);
@@ -419,9 +446,7 @@ function apiCheckout(): array {
     // Capture email for abandoned cart recovery
     Cart::setEmail($email);
 
-    // Validate payment method
-    $allowedPayments = ['stripe', 'cod', 'bank_transfer'];
-    if (!in_array($paymentMethod, $allowedPayments, true)) {
+    if (!preg_match('/^[a-z0-9_-]{2,40}$/', $paymentMethod)) {
         return ['error' => 'Invalid payment method'];
     }
 
@@ -487,6 +512,13 @@ function apiCheckout(): array {
         return ['success' => false, 'error' => 'Doručenie nie je dostupné do zvolenej krajiny.'];
     }
     $shippingCost = (int)$selectedRate['price'];
+    $currency = $cart['items'][0]['currency'] ?? 'eur';
+    $paymentBaseAmount = max(0, $cart['subtotal'] - $couponDiscount) + $shippingCost;
+    $selectedPayment = PaymentService::selectMethod($paymentMethod, $country, $currency, $paymentBaseAmount, $selectedRate['method_code']);
+    if (!$selectedPayment) {
+        return ['success' => false, 'error' => 'Platba nie je dostupná pre zvolenú krajinu alebo dopravu.'];
+    }
+    $paymentFee = (int)$selectedPayment['fee'];
 
     $autoRules = Pricing::autoCartRules($cart['subtotal']);
     foreach ($autoRules as $rule) {
@@ -510,9 +542,11 @@ function apiCheckout(): array {
             'zip'     => trim($input['zip'] ?? ''),
             'country' => $country,
         ],
-        'currency'       => $cart['items'][0]['currency'] ?? 'eur',
+        'currency'       => $currency,
         'locale'         => I18n::locale(),
         'shipping_cost'  => $shippingCost,
+        'payment_fee'    => $paymentFee,
+        'payment_method_snapshot' => json_encode($selectedPayment, JSON_UNESCAPED_UNICODE),
         'shipping_method'=> $selectedRate['method_code'],
         'shipping_zone'  => $selectedRate['zone_code'] ?? '',
         'shipping_weight_g' => $totalWeight,
@@ -545,7 +579,7 @@ function apiCheckout(): array {
         $orderItems = Orders::items($orderId);
         // For COD/bank_transfer: send confirmation immediately (no webhook will fire)
         // For Stripe: confirmation email is sent from the webhook after payment is confirmed
-        if (in_array($paymentMethod, ['cod', 'bank_transfer'], true)) {
+        if (empty($selectedPayment['requires_online'])) {
             JobQueue::push('email_send', ['template' => 'order_confirmation', 'to' => $email, 'order_id' => $orderId]);
         }
 
@@ -563,7 +597,7 @@ function apiCheckout(): array {
         ];
 
         // For online payments, create a payment session
-        if ($paymentMethod !== 'cod' && $paymentMethod !== 'bank_transfer') {
+        if (!empty($selectedPayment['requires_online'])) {
             try {
                 $payment = Adapters::payment();
                 $baseUrl = ((!empty($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost'));

@@ -79,7 +79,8 @@ class Orders {
             $shippingCost = $customer['shipping_cost'] ?? 0;
             $taxAmount = $customer['tax_amount'] ?? 0;
             $couponDiscount = $customer['coupon_discount'] ?? 0;
-            $total = max(0, $subtotal - $couponDiscount) + $shippingCost + $taxAmount;
+            $paymentFee = $customer['payment_fee'] ?? 0;
+            $total = max(0, $subtotal - $couponDiscount) + $shippingCost + $taxAmount + $paymentFee;
 
             // 2a. Per-order VAT snapshot (sum from items if any line has VAT data)
             $vatTotal = 0;
@@ -123,12 +124,22 @@ class Orders {
                 ':shipzone' => $customer['shipping_zone'] ?? null,
                 ':shipweight' => (int)($customer['shipping_weight_g'] ?? 0),
                 ':shipsnapshot' => $customer['shipping_rate_snapshot'] ?? null,
+                ':paymentfee' => (int)($customer['payment_fee'] ?? 0),
+                ':paymentsnapshot' => $customer['payment_method_snapshot'] ?? null,
             ];
+            $paymentColumns = self::hasColumn('orders', 'payment_method_snapshot');
             $shippingColumns = self::hasColumn('orders', 'shipping_method');
             $extraColumns = $shippingColumns ? ', shipping_method, shipping_zone, shipping_weight_g, shipping_rate_snapshot' : '';
             $extraValues = $shippingColumns ? ', :shipmethod, :shipzone, :shipweight, :shipsnapshot' : '';
+            if ($paymentColumns) {
+                $extraColumns .= ', payment_fee, payment_method_snapshot';
+                $extraValues .= ', :paymentfee, :paymentsnapshot';
+            }
             if (!$shippingColumns) {
                 unset($orderParams[':shipmethod'], $orderParams[':shipzone'], $orderParams[':shipweight'], $orderParams[':shipsnapshot']);
+            }
+            if (!$paymentColumns) {
+                unset($orderParams[':paymentfee'], $orderParams[':paymentsnapshot']);
             }
             $orderStmt = $db->prepare("
                 INSERT INTO orders (order_number, status, customer_id, customer_name, customer_email, customer_phone,

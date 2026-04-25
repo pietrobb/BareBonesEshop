@@ -2277,6 +2277,13 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS payment_transactions (
 try { $pdo->exec("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'pending'"); }
 catch (\PDOException $e) { /* already exists */ }
 
+// Payment method pricing tables
+$paymentMigFile = __DIR__ . '/../migrations/20260425071000_payment_methods_pricing_engine.php';
+if (file_exists($paymentMigFile)) {
+    $paymentMig = require $paymentMigFile;
+    $paymentMig->up($pdo, true);
+}
+
 // Shipping tables
 $shippingMigFile = __DIR__ . '/../migrations/20260425064000_shipping_methods_pricing_engine.php';
 if (file_exists($shippingMigFile)) {
@@ -2454,6 +2461,64 @@ assert_true(!empty($failSession['session_id']), 'Payment: fail gateway still ret
 
 $failStatus = $failMock->getStatus($failSession['session_id']);
 assert_equals('failed', $failStatus, 'Payment: fail gateway getStatus returns failed');
+
+// Payment methods pricing engine
+assert_true(isset($paymentMig), 'Payment methods: migration loaded');
+$payMethodCount = (int)$pdo->query("SELECT COUNT(*) FROM payment_methods WHERE code IN ('card', 'bank_transfer', 'cod')")->fetchColumn();
+assert_equals(3, $payMethodCount, 'Payment methods: default seed creates card, transfer and COD');
+$paymentMig->up($pdo, true);
+$payMethodCount2 = (int)$pdo->query("SELECT COUNT(*) FROM payment_methods WHERE code IN ('card', 'bank_transfer', 'cod')")->fetchColumn();
+assert_equals(3, $payMethodCount2, 'Payment methods: seed is idempotent');
+
+$pdo->exec("UPDATE payment_methods SET name = 'Admin custom card' WHERE code = 'card'");
+$paymentMig->up($pdo, true);
+$customCardName = (string)$pdo->query("SELECT name FROM payment_methods WHERE code = 'card'")->fetchColumn();
+assert_equals('Admin custom card', $customCardName, 'Payment methods: seed does not overwrite admin-edited method');
+
+$paymentMethodsSkPacketa = PaymentService::availableMethods('SK', 'eur', 2500, 'packeta');
+$paymentCodesSkPacketa = array_column($paymentMethodsSkPacketa, 'code');
+assert_true(in_array('card', $paymentCodesSkPacketa, true), 'Payment methods: card available for SK Packeta');
+assert_true(in_array('bank_transfer', $paymentCodesSkPacketa, true), 'Payment methods: bank transfer available for SK Packeta');
+assert_true(in_array('cod', $paymentCodesSkPacketa, true), 'Payment methods: COD available for SK Packeta');
+$codQuote = PaymentService::selectMethod('cod', 'SK', 'eur', 2500, 'packeta');
+assert_true($codQuote !== null, 'Payment methods: COD selectable for supported shipping method');
+assert_equals(120, (int)$codQuote['fee'], 'Payment methods: COD fixed fee applied');
+
+$codPickup = PaymentService::selectMethod('cod', 'SK', 'eur', 2500, 'pickup');
+assert_true($codPickup === null, 'Payment methods: COD blocked for pickup shipping method');
+$codGermany = PaymentService::selectMethod('cod', 'DE', 'eur', 2500, 'gls');
+assert_true($codGermany === null, 'Payment methods: COD blocked outside seeded SK/CZ countries');
+
+$pdo->exec("UPDATE payment_methods SET active = 0 WHERE code = 'bank_transfer'");
+$disabledTransfer = PaymentService::selectMethod('bank_transfer', 'SK', 'eur', 2500, 'packeta');
+assert_true($disabledTransfer === null, 'Payment methods: disabled method is not selectable');
+$pdo->exec("UPDATE payment_methods SET active = 1 WHERE code = 'bank_transfer'");
+
+$paymentOrderId = Orders::create([
+    [
+        'product_id'   => $payProduct['id'],
+        'variant_id'   => null,
+        'qty'          => 1,
+        'price'        => (int)$payProduct['price'],
+        'sku'          => $payProduct['sku'],
+        'name'         => $payProduct['name'],
+        'variant_name' => '',
+    ],
+], [
+    'name'          => 'Payment Method Customer',
+    'email'         => 'payment-method@example.com',
+    'phone'         => '+421900000003',
+    'address'       => ['street' => 'Payment 1', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK'],
+    'currency'      => 'eur',
+    'shipping_cost' => 299,
+    'payment_fee'   => (int)$codQuote['fee'],
+    'payment_method_snapshot' => json_encode($codQuote, JSON_UNESCAPED_UNICODE),
+    'tax_amount'    => 0,
+], 'cod');
+$paymentOrder = Orders::byId($paymentOrderId);
+assert_equals(120, (int)$paymentOrder['payment_fee'], 'Payment methods: order stores payment fee');
+$paymentSnapshot = json_decode((string)$paymentOrder['payment_method_snapshot'], true) ?: [];
+assert_equals('cod', (string)$paymentSnapshot['code'], 'Payment methods: order stores payment snapshot JSON');
 
 // ============================================================
 // SHIPPING TESTS

@@ -7,6 +7,57 @@
  */
 class PaymentService {
     /**
+     * Return available checkout payment methods for country/cart/shipping context.
+     */
+    public static function availableMethods(string $country, string $currency, int $amount, string $shippingMethod = ''): array {
+        $country = strtoupper(trim($country ?: 'SK'));
+        $currency = strtolower(trim($currency ?: 'eur'));
+        $amount = max(0, $amount);
+        $shippingMethod = trim($shippingMethod);
+
+        if (!self::hasMethodTables()) {
+            return self::fallbackMethods($amount, $shippingMethod);
+        }
+
+        $db = Db::get();
+        $params = [':country' => $country, ':amount' => $amount];
+        $shippingFilter = '';
+        if ($shippingMethod !== '') {
+            $shippingFilter = "
+                AND (
+                    NOT EXISTS (SELECT 1 FROM payment_method_shipping ps_any WHERE ps_any.method_code = m.code)
+                    OR EXISTS (SELECT 1 FROM payment_method_shipping ps WHERE ps.method_code = m.code AND ps.shipping_method_code = :shipping_method)
+                )";
+            $params[':shipping_method'] = $shippingMethod;
+        }
+
+        $stmt = $db->prepare("
+            SELECT m.*
+            FROM payment_methods m
+            WHERE m.active = 1
+              AND EXISTS (SELECT 1 FROM payment_method_countries pc WHERE pc.method_code = m.code AND pc.country = :country)
+              AND m.min_amount <= :amount
+              AND (m.max_amount IS NULL OR m.max_amount = 0 OR m.max_amount >= :amount)
+              {$shippingFilter}
+            ORDER BY m.sort_order, m.name
+        ");
+        $stmt->execute($params);
+
+        $methods = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $methods[] = self::methodRowToQuote($row, $amount, $currency);
+        }
+        return $methods;
+    }
+
+    public static function selectMethod(string $methodCode, string $country, string $currency, int $amount, string $shippingMethod = ''): ?array {
+        foreach (self::availableMethods($country, $currency, $amount, $shippingMethod) as $method) {
+            if (($method['code'] ?? '') === $methodCode) return $method;
+        }
+        return null;
+    }
+
+    /**
      * Initiate a payment session for a newly created order.
      * Returns ['url' => redirect_url, 'session_id' => provider_session_id]
      * Logs an 'initiated' transaction record.
@@ -248,6 +299,45 @@ class PaymentService {
             && OrderWorkflow::canTransition($order['status'], 'refunded')) {
             OrderWorkflow::transition((int)$order['id'], 'refunded', 'Refund confirmed via webhook');
         }
+    }
+
+    private static function hasMethodTables(): bool {
+        try {
+            Db::get()->query("SELECT 1 FROM payment_methods LIMIT 1");
+            Db::get()->query("SELECT 1 FROM payment_method_countries LIMIT 1");
+            return true;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    private static function fallbackMethods(int $amount, string $shippingMethod): array {
+        $rows = [
+            ['code' => 'card', 'provider' => 'stripe', 'name' => 'Kartou online', 'description' => '', 'service_type' => 'online_card', 'fixed_fee' => 0, 'percent_fee_bps' => 0, 'free_above' => null, 'requires_online' => 1],
+            ['code' => 'bank_transfer', 'provider' => 'manual', 'name' => 'Bankový prevod', 'description' => '', 'service_type' => 'bank_transfer', 'fixed_fee' => 0, 'percent_fee_bps' => 0, 'free_above' => null, 'requires_online' => 0],
+        ];
+        if (in_array($shippingMethod, ['packeta', 'gls'], true)) {
+            $rows[] = ['code' => 'cod', 'provider' => 'manual', 'name' => 'Dobierka', 'description' => '', 'service_type' => 'cod', 'fixed_fee' => 120, 'percent_fee_bps' => 0, 'free_above' => null, 'requires_online' => 0];
+        }
+        return array_map(fn($row) => self::methodRowToQuote($row, $amount, 'eur'), $rows);
+    }
+
+    private static function methodRowToQuote(array $row, int $amount, string $currency): array {
+        $fee = (int)($row['fixed_fee'] ?? 0);
+        $bps = (int)($row['percent_fee_bps'] ?? 0);
+        if ($bps > 0) $fee += (int)ceil($amount * $bps / 10000);
+        if (!empty($row['free_above']) && $amount >= (int)$row['free_above']) $fee = 0;
+
+        return [
+            'code' => (string)$row['code'],
+            'provider' => (string)($row['provider'] ?? ''),
+            'label' => (string)($row['name'] ?? $row['code']),
+            'description' => (string)($row['description'] ?? ''),
+            'service_type' => (string)($row['service_type'] ?? 'offline'),
+            'fee' => $fee,
+            'currency' => $currency,
+            'requires_online' => !empty($row['requires_online']),
+        ];
     }
 
     private static function eventTypeToTxStatus(string $eventType): string {
