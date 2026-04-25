@@ -2721,6 +2721,9 @@ assert_true(str_contains($adminOrdersListSnippet, 'badge-<?= esc($o[\'payment_st
 assert_true(str_contains($adminOrdersListSnippet, 'esc($o[\'payment_method\'] ?? \'\')'), 'Payment admin: orders list renders payment method');
 assert_true(str_contains($adminOrdersListSnippet, 'name="payment_status"'), 'Payment admin: orders list renders payment status filter');
 assert_true(str_contains($adminOrdersListSnippet, 'AND payment_status = :payment_status'), 'Payment admin: orders list filters by payment status');
+assert_true(str_contains($adminOrdersListSnippet, 'Payment method:'), 'Payment admin: order detail renders payment method snapshot');
+assert_true(str_contains($adminOrdersListSnippet, 'Payment reference:'), 'Payment admin: order detail renders payment reference');
+assert_true(str_contains($adminOrdersListSnippet, 'Last event:'), 'Payment admin: order detail renders latest payment event');
 assert_true(in_array('refund_pending', PaymentService::paymentStatuses(), true), 'Payment admin: payment status filter includes refund_pending');
 
 // ============================================================

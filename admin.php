@@ -627,6 +627,8 @@ function pageOrder(): void {
     $allowed = OrderWorkflow::allowedTransitions($order['status']);
     $paymentTransitions = PaymentService::allowedPaymentTransitions((string)($order['payment_status'] ?? 'pending'));
     $paymentTxs = PaymentService::transactionsForOrder($id);
+    $paymentSnapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
+    $latestPaymentTx = $paymentTxs ? $paymentTxs[count($paymentTxs) - 1] : null;
     $logs = AuditLog::forEntity('order_status', $id, 20);
     $addr = json_decode($order['shipping_addr'] ?? '{}', true);
     ?>
@@ -658,8 +660,9 @@ function pageOrder(): void {
             <?php else: ?>
             <p class="muted">Konečný stav — žiadne ďalšie prechody.</p>
             <?php endif; ?>
-            <p class="muted" style="margin-top:.5rem">Platba: <?= esc($order['payment_method']) ?> <?= $order['payment_id'] ? '(' . esc($order['payment_id']) . ')' : '' ?></p>
-            <p class="muted">Payment status: <span class="badge badge-<?= esc($order['payment_status'] ?? 'pending') ?>"><?= esc($order['payment_status'] ?? 'pending') ?></span></p>
+            <p class="muted" style="margin-top:.5rem">Payment method: <?= esc((string)($paymentSnapshot['label'] ?? $order['payment_method'])) ?> <span class="muted"><?= esc((string)($paymentSnapshot['code'] ?? $order['payment_method'])) ?><?= !empty($paymentSnapshot['provider']) ? ' · ' . esc((string)$paymentSnapshot['provider']) : '' ?></span></p>
+            <p class="muted">Payment reference: <?= $order['payment_id'] ? esc($order['payment_id']) : '—' ?></p>
+            <p class="muted">Payment status: <span class="badge badge-<?= esc($order['payment_status'] ?? 'pending') ?>"><?= esc($order['payment_status'] ?? 'pending') ?></span><?= $latestPaymentTx ? ' · Last event: ' . esc((string)$latestPaymentTx['status']) . ' @ ' . esc(substr((string)$latestPaymentTx['created_at'], 0, 16)) : '' ?></p>
             <?php if (!empty($paymentTransitions)): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=payment_transition" style="margin-top:.5rem">
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
