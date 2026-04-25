@@ -197,6 +197,88 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: account.php?p=addresses&ok=1');
         exit;
     }
+
+    elseif ($action === 'data_export' && Customers::isLoggedIn()) {
+        $cid = (int)$_SESSION['customer_id'];
+        $rlCustomer = Security::rateLimit('gdpr_export_c_' . $cid, 1, 86400);
+        $rlIp       = Security::rateLimit('gdpr_export_ip_' . md5($_SERVER['REMOTE_ADDR'] ?? 'cli'), 5, 86400);
+        if (!$rlCustomer || !$rlIp) {
+            $flash = $t('account.gdpr_export_rate_limit');
+            $flashType = 'error';
+            $p = 'privacy';
+        } else {
+            try {
+                $data = GdprService::exportCustomer($cid);
+                GdprService::logEvent([
+                    'action' => 'export', 'customer_id' => $cid,
+                    'email' => (string)($data['customer']['email'] ?? ''),
+                    'actor' => 'self', 'ip' => $_SERVER['REMOTE_ADDR'] ?? '',
+                    'note' => 'account.php data_export',
+                    'payload' => ['orders' => count($data['orders']), 'addresses' => count($data['addresses'])],
+                ]);
+                $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                header('Content-Type: application/json; charset=utf-8');
+                header('Content-Disposition: attachment; filename="my-data-' . $cid . '-' . gmdate('Ymd') . '.json"');
+                echo $json;
+                exit;
+            } catch (Throwable $ex) {
+                $flash = $t('account.gdpr_export_failed');
+                $flashType = 'error';
+                $p = 'privacy';
+            }
+        }
+    }
+
+    elseif ($action === 'erase_account' && Customers::isLoggedIn()) {
+        $cid = (int)$_SESSION['customer_id'];
+        $confirm = (string)($_POST['confirm'] ?? '');
+        if (strtoupper(trim($confirm)) !== 'DELETE') {
+            $flash = $t('account.gdpr_erase_confirm_required');
+            $flashType = 'error';
+            $p = 'privacy';
+        } else {
+            try {
+                GdprService::anonymizeCustomer($cid, 'self');
+                Customers::logout();
+                Security::sessionStart();
+                $_SESSION['gdpr_erased'] = 1;
+                header('Location: account.php?p=login&erased=1');
+                exit;
+            } catch (Throwable $ex) {
+                $flash = $t('account.gdpr_erase_failed') . ': ' . $ex->getMessage();
+                $flashType = 'error';
+                $p = 'privacy';
+            }
+        }
+    }
+
+    elseif ($action === 'cookie_consent') {
+        $cats = [
+            'necessary' => true,
+            'analytics' => !empty($_POST['analytics']),
+            'marketing' => !empty($_POST['marketing']),
+        ];
+        $method = (string)($_POST['method'] ?? 'preferences');
+        $cid = Customers::isLoggedIn() ? (int)$_SESSION['customer_id'] : null;
+        $consentId = GdprService::logCookieConsent([
+            'session_id'  => session_id() ?: null,
+            'customer_id' => $cid,
+            'categories'  => $cats,
+            'method'      => $method,
+            'ip'          => $_SERVER['REMOTE_ADDR'] ?? '',
+            'user_agent'  => substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255),
+        ]);
+        $cookieValue = json_encode($cats);
+        setcookie('cookie_consent', $cookieValue, [
+            'expires'  => time() + 31536000, // 12 months
+            'path'     => '/',
+            'secure'   => !empty($_SERVER['HTTPS']),
+            'httponly' => false,
+            'samesite' => 'Lax',
+        ]);
+        header('Location: ' . ($_POST['return_to'] ?? 'account.php?p=privacy'));
+        exit;
+    }
 }
 
 // ============================================================
@@ -322,6 +404,7 @@ if ($loggedIn) {
     echo $mk('addresses', $t('account.addresses'));
     echo $mk('profile',   $t('account.profile'));
     echo $mk('change-password', $t('account.change_password'));
+    echo $mk('privacy',   $t('account.privacy'));
     echo '</nav>';
 }
 
@@ -520,6 +603,50 @@ switch ($p) {
         echo '</select></div>';
         echo '<button class="btn">' . $e($t('account.save')) . '</button>';
         echo '</form></div>';
+        break;
+
+    case 'privacy':
+        echo '<div class="card"><h1>' . $e($t('account.privacy')) . '</h1>';
+        echo '<p style="color:#555">' . $e($t('account.privacy_intro')) . '</p>';
+
+        // Subject Access Request
+        echo '<h2 style="margin-top:24px">' . $e($t('account.gdpr_export_title')) . '</h2>';
+        echo '<p style="color:#555">' . $e($t('account.gdpr_export_desc')) . '</p>';
+        echo '<form method="post" action="account.php" style="margin:0">';
+        echo '<input type="hidden" name="csrf_token" value="' . $e($csrf) . '">';
+        echo '<input type="hidden" name="action" value="data_export">';
+        echo '<button class="btn">' . $e($t('account.gdpr_export_btn')) . '</button>';
+        echo '</form>';
+
+        // Cookie consent
+        $consentCookie = isset($_COOKIE['cookie_consent']) ? json_decode((string)$_COOKIE['cookie_consent'], true) : [];
+        $aOn = !empty($consentCookie['analytics']);
+        $mOn = !empty($consentCookie['marketing']);
+        echo '<h2 style="margin-top:24px">' . $e($t('account.gdpr_cookies_title')) . '</h2>';
+        echo '<form method="post" action="account.php" style="margin:0">';
+        echo '<input type="hidden" name="csrf_token" value="' . $e($csrf) . '">';
+        echo '<input type="hidden" name="action" value="cookie_consent">';
+        echo '<input type="hidden" name="method" value="preferences">';
+        echo '<input type="hidden" name="return_to" value="account.php?p=privacy&saved=1">';
+        echo '<div class="form-row"><label><input type="checkbox" checked disabled> ' . $e($t('account.gdpr_cookies_necessary')) . '</label></div>';
+        echo '<div class="form-row"><label><input type="checkbox" name="analytics" value="1"' . ($aOn ? ' checked' : '') . '> ' . $e($t('account.gdpr_cookies_analytics')) . '</label></div>';
+        echo '<div class="form-row"><label><input type="checkbox" name="marketing" value="1"' . ($mOn ? ' checked' : '') . '> ' . $e($t('account.gdpr_cookies_marketing')) . '</label></div>';
+        echo '<button class="btn">' . $e($t('account.save')) . '</button>';
+        echo '</form>';
+
+        // Right to erasure
+        echo '<h2 style="margin-top:24px;color:#b91c1c">' . $e($t('account.gdpr_erase_title')) . '</h2>';
+        echo '<p style="color:#555">' . $e($t('account.gdpr_erase_desc')) . '</p>';
+        echo '<p style="color:#777;font-size:0.9em">' . $e($t('account.gdpr_erase_legal_note')) . '</p>';
+        echo '<form method="post" action="account.php" style="margin:0">';
+        echo '<input type="hidden" name="csrf_token" value="' . $e($csrf) . '">';
+        echo '<input type="hidden" name="action" value="erase_account">';
+        echo '<div class="form-row"><label>' . $e($t('account.gdpr_erase_confirm_label')) . '</label>';
+        echo '<input type="text" name="confirm" placeholder="DELETE" required pattern="DELETE"></div>';
+        echo '<button class="btn" style="background:#b91c1c">' . $e($t('account.gdpr_erase_btn')) . '</button>';
+        echo '</form>';
+
+        echo '</div>';
         break;
 
     case 'change-password':

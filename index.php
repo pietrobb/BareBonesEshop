@@ -533,6 +533,14 @@ switch ($page) {
         $content = renderOE($q, $result);
         break;
 
+    case 'privacy':
+    case 'terms':
+    case 'cookies':
+        $legalTitles = ['privacy' => 'Privacy Policy', 'terms' => 'Terms & Conditions', 'cookies' => 'Cookie Policy'];
+        $title = $legalTitles[$page] . ' — BareBones Shop';
+        $content = renderLegalPage($page);
+        break;
+
     case 'cart':
         $title = $t('cart') . ' — BareBones Shop';
         $content = renderCart();
@@ -742,6 +750,9 @@ main{padding:24px 0;min-height:60vh}
 .sticker-new{background:#b2da24}
 .sticker-sale{background:#e95d0f}
 
+/* Legal pages */
+.legal-page{max-width:900px;margin:0 auto}.legal-page h1{margin-bottom:16px}.legal-page h2{margin:22px 0 8px}.legal-page p,.legal-page li{margin:8px 0}.legal-page ul{margin-left:22px}
+
 /* Footer */
 footer{background:#333;color:#bbb;padding:0;margin-top:40px;font-size:.85em}
 .footer-main{background:#333;padding:30px 0}
@@ -850,7 +861,9 @@ footer{background:#333;color:#bbb;padding:0;margin-top:40px;font-size:.85em}
    <h4><?= $lang==='en'?'Information':($lang==='de'?'Informationen':'Informácie') ?></h4>
    <a href="?"><?= $lang==='en'?'About us':($lang==='de'?'Über uns':'O nás') ?></a>
    <a href="?"><?= $lang==='en'?'Contact':($lang==='de'?'Kontakt':'Kontakt') ?></a>
-   <a href="?"><?= $lang==='en'?'Terms & Conditions':($lang==='de'?'AGB':'Obchodné podmienky') ?></a>
+   <a href="?page=privacy"><?= $lang==='en'?'Privacy Policy':($lang==='de'?'Datenschutz':'Ochrana osobných údajov') ?></a>
+   <a href="?page=terms"><?= $lang==='en'?'Terms & Conditions':($lang==='de'?'AGB':'Obchodné podmienky') ?></a>
+   <a href="?page=cookies"><?= $lang==='en'?'Cookie Policy':($lang==='de'?'Cookie-Richtlinie':'Pravidlá cookies') ?></a>
   </div>
  </div></div>
  <div class="footer-bottom"><div class="wrap">woodle.sk &copy; <?= date('Y') ?> — Powered by BareBones E-shop</div></div>
@@ -907,11 +920,132 @@ async function addToCart(pid,qty,btn){
  setTimeout(()=>{btn.disabled=false;btn.textContent=orig;},1200);
 }
 </script>
+
+<?php
+// ============================================================
+// GDPR Cookie consent banner (CSS-only, opt-in default OFF)
+// Hidden when consent cookie 'cc_v1' is set. Buttons set the cookie
+// (12-month expiry) and POST to /api.php?action=cookie_consent
+// ============================================================
+$ccCookie = (string)($_COOKIE['cc_v1'] ?? '');
+if ($ccCookie === ''):
+    $ccTitle = htmlspecialchars(I18n::t('cookie_banner.title'), ENT_QUOTES, 'UTF-8');
+    $ccBody  = htmlspecialchars(I18n::t('cookie_banner.body'),  ENT_QUOTES, 'UTF-8');
+    $ccAccept= htmlspecialchars(I18n::t('cookie_banner.accept_all'),       ENT_QUOTES, 'UTF-8');
+    $ccReject= htmlspecialchars(I18n::t('cookie_banner.reject_all'),       ENT_QUOTES, 'UTF-8');
+    $ccPrefs = htmlspecialchars(I18n::t('cookie_banner.preferences'),      ENT_QUOTES, 'UTF-8');
+    $ccSave  = htmlspecialchars(I18n::t('cookie_banner.save_preferences'), ENT_QUOTES, 'UTF-8');
+    $ccPolicy= htmlspecialchars(I18n::t('cookie_banner.policy_link'),      ENT_QUOTES, 'UTF-8');
+    $ccNec   = htmlspecialchars(I18n::t('account.gdpr_cookies_necessary'), ENT_QUOTES, 'UTF-8');
+    $ccAna   = htmlspecialchars(I18n::t('account.gdpr_cookies_analytics'), ENT_QUOTES, 'UTF-8');
+    $ccMkt   = htmlspecialchars(I18n::t('account.gdpr_cookies_marketing'), ENT_QUOTES, 'UTF-8');
+?>
+<style>
+#cc-banner{position:fixed;left:16px;right:16px;bottom:16px;max-width:680px;margin:0 auto;background:#fff;color:#222;border:1px solid #ddd;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:16px 18px;z-index:9999;font-size:14px;line-height:1.45}
+#cc-banner h3{margin:0 0 6px;font-size:15px}
+#cc-banner p{margin:0 0 12px}
+#cc-banner .cc-btns{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;align-items:center}
+#cc-banner button,#cc-banner .cc-link{font:inherit;padding:8px 14px;border-radius:6px;border:1px solid #999;background:#f7f7f7;cursor:pointer}
+#cc-banner button.primary{background:#222;color:#fff;border-color:#222}
+#cc-banner button.danger{background:#fff;color:#222}
+#cc-banner .cc-link{background:transparent;border:none;color:#06c;text-decoration:underline;padding:8px 4px}
+#cc-prefs{display:none;margin:8px 0 12px;border-top:1px solid #eee;padding-top:10px}
+#cc-banner.show-prefs #cc-prefs{display:block}
+#cc-prefs label{display:flex;align-items:flex-start;gap:8px;margin:6px 0;font-size:13px}
+#cc-prefs input[disabled]{cursor:not-allowed}
+@media(max-width:520px){#cc-banner{left:8px;right:8px;bottom:8px;padding:14px}#cc-banner .cc-btns{justify-content:stretch}#cc-banner button{flex:1 1 45%}}
+</style>
+<div id="cc-banner" role="dialog" aria-labelledby="cc-title" aria-describedby="cc-body">
+  <h3 id="cc-title"><?= $ccTitle ?></h3>
+  <p id="cc-body"><?= $ccBody ?> <a href="?page=privacy" class="cc-link"><?= $ccPolicy ?></a></p>
+  <div id="cc-prefs">
+    <label><input type="checkbox" checked disabled> <?= $ccNec ?></label>
+    <label><input type="checkbox" id="cc-ana"> <?= $ccAna ?></label>
+    <label><input type="checkbox" id="cc-mkt"> <?= $ccMkt ?></label>
+  </div>
+  <div class="cc-btns">
+    <button type="button" class="cc-link" id="cc-prefs-toggle"><?= $ccPrefs ?></button>
+    <button type="button" class="danger" id="cc-reject"><?= $ccReject ?></button>
+    <button type="button" class="primary" id="cc-accept"><?= $ccAccept ?></button>
+    <button type="button" class="primary" id="cc-save" style="display:none"><?= $ccSave ?></button>
+  </div>
+</div>
+<script>
+(function(){
+  var b=document.getElementById('cc-banner');
+  if(!b)return;
+  var oneYear=60*60*24*365;
+  function setCookie(v){
+    document.cookie='cc_v1='+encodeURIComponent(v)+';path=/;max-age='+oneYear+';SameSite=Lax';
+  }
+  function send(cats,method){
+    setCookie(JSON.stringify(cats));
+    var fd=new FormData();
+    fd.append('necessary',cats.necessary?1:0);
+    fd.append('analytics',cats.analytics?1:0);
+    fd.append('marketing',cats.marketing?1:0);
+    fd.append('method',method);
+    fetch('api.php?action=cookie_consent',{method:'POST',body:fd}).catch(function(){});
+    b.parentNode.removeChild(b);
+  }
+  document.getElementById('cc-accept').onclick=function(){send({necessary:true,analytics:true,marketing:true},'accept_all');};
+  document.getElementById('cc-reject').onclick=function(){send({necessary:true,analytics:false,marketing:false},'reject_all');};
+  document.getElementById('cc-prefs-toggle').onclick=function(){
+    b.classList.add('show-prefs');
+    document.getElementById('cc-accept').style.display='none';
+    document.getElementById('cc-reject').style.display='none';
+    document.getElementById('cc-save').style.display='';
+  };
+  document.getElementById('cc-save').onclick=function(){
+    send({
+      necessary:true,
+      analytics:document.getElementById('cc-ana').checked,
+      marketing:document.getElementById('cc-mkt').checked
+    },'preferences');
+  };
+})();
+</script>
+<?php endif; ?>
 </body></html>
 <?php
 // ============================================================
 // Render functions
 // ============================================================
+
+function renderLegalPage(string $page): string {
+    $allowed = ['privacy', 'terms', 'cookies'];
+    if (!in_array($page, $allowed, true)) {
+        return '<p>Not found.</p>';
+    }
+
+    $locale = I18n::locale();
+    $tpl = __DIR__ . '/templates/legal/' . $locale . '/' . $page . '.html';
+    if (!is_file($tpl)) {
+        $tpl = __DIR__ . '/templates/legal/en/' . $page . '.html';
+    }
+
+    $stores = json_decode((string)file_get_contents(__DIR__ . '/stores.json'), true) ?: [];
+    $legal = [];
+    foreach ($stores['stores'] ?? [] as $store) {
+        if (($store['default_locale'] ?? '') === $locale) {
+            $legal = $store['legal'] ?? [];
+            break;
+        }
+    }
+    if (!$legal) {
+        $defaultStore = $stores['default_store'] ?? 'sk';
+        $legal = $stores['stores'][$defaultStore]['legal'] ?? ($stores['stores']['sk']['legal'] ?? []);
+    }
+
+    $vars = [];
+    foreach ($legal as $k => $v) {
+        $vars['{{' . $k . '}}'] = htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+    }
+    $vars['{{updated_at}}'] = date('Y-m-d');
+
+    $html = (string)file_get_contents($tpl);
+    return '<div class="card legal-page">' . strtr($html, $vars) . '</div>';
+}
 
 function renderHome(): string {
     global $e, $price, $catName, $t, $lang;

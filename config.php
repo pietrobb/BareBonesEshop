@@ -56,4 +56,9 @@ return [
 
     // TecDoc sidecar DB (read-only, for vehicle cascade lookups)
     'tecdoc_db_path' => __DIR__ . '/demo/tecdoc_enriched.db',
+
+    // GDPR — secret salt for hashing PII (emails, IPs) in gdpr_events / cookie_consent.
+    // If left empty, GdprService::hashPii() autogenerates one on first call and persists
+    // it to config/.gdpr_salt. Hard-fail if persisted file exists but is empty (corruption).
+    'gdpr_hash_salt' => '',
 ];
