@@ -296,6 +296,230 @@ class BackupService
         }
     }
 
+    // ---------- restore() ----------
+
+    /**
+     * Restore the live SQLite DB from a stored backup.
+     *
+     * Steps:
+     *  1. Resolve & validate the source backup file (existence, sha256 match meta, integrity_check ok).
+     *  2. Snapshot the current live DB into a 'pre-restore-snapshot' backup (unless skip_snapshot=true).
+     *  3. Close the live PDO connection (Db::reset()) to release the file handle.
+     *  4. Atomically replace the live .db with the backup (with retry for Windows file locks).
+     *  5. Open a fresh PDO, integrity_check the live DB.
+     *  6. Compare schema_migrations vs migrations/ files — return mismatch flags.
+     *
+     * Options:
+     *   skip_snapshot => bool   default false
+     *   max_retries   => int    default 3
+     *   retry_delay   => int ms default 100
+     *
+     * Returns array: ['restored' => path, 'snapshot' => path|null, 'integrity' => 'ok'|err,
+     *                 'schema_warnings' => [...], 'applied_count' => int, 'pending_count' => int]
+     */
+    public static function restore(string $remotePath, array $opts = []): array
+    {
+        if (self::$db === null) {
+            throw new RuntimeException('BackupService::restore — not initialized');
+        }
+        if (self::$livePath === null) {
+            throw new RuntimeException('BackupService::restore — live SQLite path unknown');
+        }
+
+        $skipSnapshot = (bool)($opts['skip_snapshot'] ?? false);
+        $maxRetries   = (int)($opts['max_retries']   ?? 3);
+        $retryDelayMs = (int)($opts['retry_delay']   ?? 100);
+
+        $absSrc = self::$storage->localPath($remotePath);
+        if (!is_file($absSrc)) {
+            // Maybe the user passed a .gz path — try decompress to a temp and use that
+            $gz = $absSrc . '.gz';
+            if (is_file($gz)) {
+                $tmp = $absSrc . '.tmp.decompressed';
+                $in  = @gzopen($gz, 'rb');
+                $out = @fopen($tmp, 'wb');
+                if ($in === false || $out === false) {
+                    if ($in)  gzclose($in);
+                    if ($out) fclose($out);
+                    throw new RuntimeException("Restore: cannot decompress {$gz}");
+                }
+                while (!gzeof($in)) {
+                    $buf = gzread($in, 65536);
+                    if ($buf === false) break;
+                    fwrite($out, $buf);
+                }
+                gzclose($in);
+                fclose($out);
+                $absSrc = $tmp;
+            } else {
+                throw new RuntimeException("Restore: backup not found: {$remotePath}");
+            }
+        }
+
+        $metaPath = self::$storage->localPath($remotePath) . '.meta.json';
+        $meta = is_file($metaPath) ? (json_decode((string)file_get_contents($metaPath), true) ?: []) : [];
+
+        // 1a. sha256 verify
+        if (!empty($meta['sha256'])) {
+            $actual = hash_file('sha256', $absSrc);
+            if ($actual !== $meta['sha256']) {
+                throw new RuntimeException("Restore: sha256 mismatch (expected {$meta['sha256']}, got {$actual})");
+            }
+        }
+
+        // 1b. integrity_check on the BACKUP file before we touch the live DB
+        $verify = new PDO('sqlite:' . $absSrc, null, null, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ]);
+        $verifyRes = $verify->query('PRAGMA integrity_check')->fetchColumn();
+        $verify = null;
+        if ($verifyRes !== 'ok') {
+            throw new RuntimeException("Restore: backup integrity_check failed: {$verifyRes}");
+        }
+
+        // 2. pre-restore-snapshot (BEFORE acquiring restore lock — create() owns its own lock)
+        $snapshotPath = null;
+        if (!$skipSnapshot) {
+            try {
+                $snap = self::create(['label' => 'pre-restore-snapshot', 'trigger' => 'auto']);
+                $snapshotPath = $snap['remote_path'] ?? null;
+                self::pruneSnapshots(5); // keep at most 5 pre-restore-snapshot backups
+            } catch (\Throwable $e) {
+                self::log('Restore: pre-snapshot failed: ' . $e->getMessage());
+                throw new RuntimeException('Pre-restore snapshot failed: ' . $e->getMessage(), 0, $e);
+            }
+        }
+
+        $lockHandle = self::acquireLock();
+        try {
+
+            // 3. close live PDO
+            $livePath = self::$livePath;
+            self::$db = null;
+            // also clear shared singleton if it matches
+            if (class_exists('Db', false)) {
+                try {
+                    if (Db::isSqlite()) Db::reset();
+                } catch (\Throwable $e) { /* ignore */ }
+            }
+            // best-effort GC
+            gc_collect_cycles();
+
+            // 4. atomic replace with retry (Windows file-lock tolerance)
+            $err = null;
+            for ($i = 0; $i < $maxRetries; $i++) {
+                if (@copy($absSrc, $livePath)) {
+                    $err = null;
+                    break;
+                }
+                $err = error_get_last()['message'] ?? 'unknown';
+                usleep($retryDelayMs * 1000);
+            }
+            // also remove WAL/SHM siblings (they belong to the OLD db, would corrupt the restored copy)
+            @unlink($livePath . '-wal');
+            @unlink($livePath . '-shm');
+            if ($err !== null) {
+                self::log("RESTORE FAIL src={$remotePath} err={$err}");
+                throw new RuntimeException("Restore: copy failed after {$maxRetries} retries: {$err}. " .
+                    "Hint: close all open connections and stop the worker before restoring.");
+            }
+
+            // 5. open fresh PDO + integrity
+            $newDb = new PDO('sqlite:' . $livePath, null, null, [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            ]);
+            $newDb->exec('PRAGMA journal_mode = WAL');
+            $newDb->exec('PRAGMA foreign_keys = ON');
+            $integrity = (string)$newDb->query('PRAGMA integrity_check')->fetchColumn();
+
+            // re-init the global Db singleton with the fresh PDO so the rest of the process keeps working
+            if (class_exists('Db', false)) {
+                Db::init($newDb, 'sqlite');
+            }
+            self::$db = $newDb;
+
+            // 6. schema mismatch detection
+            $schemaWarnings = [];
+            $appliedCount = 0;
+            $pendingCount = 0;
+            try {
+                $row = $newDb->query("SELECT COUNT(*) FROM schema_migrations")->fetchColumn();
+                $appliedCount = (int)$row;
+            } catch (\Throwable $e) {
+                $schemaWarnings[] = 'schema_migrations table missing in restored DB';
+            }
+
+            $migDir = self::$rootDir . '/migrations';
+            $allMigs = [];
+            if (is_dir($migDir)) {
+                foreach (glob($migDir . '/*.php') as $f) {
+                    $allMigs[] = basename($f, '.php');
+                }
+            }
+            sort($allMigs);
+
+            try {
+                $rows = $newDb->query("SELECT name FROM schema_migrations")->fetchAll(PDO::FETCH_COLUMN);
+                $appliedSet = array_flip($rows);
+                foreach ($allMigs as $m) {
+                    if (!isset($appliedSet[$m])) $pendingCount++;
+                }
+                if ($pendingCount > 0) {
+                    $schemaWarnings[] = "Restored DB has older schema. Run: php cli/migrate.php ({$pendingCount} pending)";
+                }
+                $migSet = array_flip($allMigs);
+                $extra = 0;
+                foreach ($appliedSet as $name => $_) {
+                    if (!isset($migSet[$name])) $extra++;
+                }
+                if ($extra > 0) {
+                    $schemaWarnings[] = "Restored DB has {$extra} migrations not in current code. Check git history.";
+                }
+            } catch (\Throwable $e) { /* already warned */ }
+
+            self::log("RESTORE OK src={$remotePath} snapshot=" . ($snapshotPath ?: '-') .
+                " integrity={$integrity} applied={$appliedCount} pending={$pendingCount}");
+
+            // cleanup decompressed temp if any
+            if (str_ends_with($absSrc, '.tmp.decompressed')) {
+                @unlink($absSrc);
+            }
+
+            return [
+                'restored'        => $remotePath,
+                'snapshot'        => $snapshotPath,
+                'integrity'       => $integrity,
+                'schema_warnings' => $schemaWarnings,
+                'applied_count'   => $appliedCount,
+                'pending_count'   => $pendingCount,
+                'meta'            => $meta,
+            ];
+        } finally {
+            self::releaseLock($lockHandle);
+        }
+    }
+
+    /** Keep only the newest `$keep` backups labelled 'pre-restore-snapshot'; delete the rest. */
+    private static function pruneSnapshots(int $keep): void
+    {
+        $all = self::$storage->list();
+        $snaps = [];
+        foreach ($all as $row) {
+            if ((string)($row['meta']['label'] ?? '') === 'pre-restore-snapshot') {
+                $snaps[] = $row;
+            }
+        }
+        if (count($snaps) <= $keep) return;
+        // already newest-first
+        for ($i = $keep; $i < count($snaps); $i++) {
+            try {
+                self::$storage->delete($snaps[$i]['path']);
+            } catch (\Throwable $e) { /* ignore */ }
+        }
+    }
+
     // ---------- list() / gc() ----------
 
     public static function list(): array
