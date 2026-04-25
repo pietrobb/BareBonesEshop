@@ -38,11 +38,22 @@ class ShippingService
         string $country,
         int    $weightG,
         int    $subtotal = 0,
-        bool   $cod = false
+        bool   $cod = false,
+        int    $volumeCm3 = 0
     ): array {
+        $country = strtoupper(trim($country ?: 'SK'));
+        $weightG = max(0, $weightG);
+        $subtotal = max(0, $subtotal);
+        $volumeCm3 = max(0, $volumeCm3);
+
+        if (self::hasDatabasePricing()) {
+            return self::databaseRates($country, $weightG, $subtotal, $cod, $volumeCm3);
+        }
+
         $adapters = self::resolveAdapters();
         $params   = compact('country', 'weightG', 'subtotal', 'cod');
         $params['weight_g'] = $weightG;
+        $params['volume_cm3'] = $volumeCm3;
 
         $rates = [];
         $coveredCarriers = [];
@@ -50,7 +61,11 @@ class ShippingService
         foreach ($adapters as $adapter) {
             $adapterRates = $adapter->getRates($params);
             if (!empty($adapterRates)) {
-                $rates = array_merge($rates, $adapterRates);
+                foreach ($adapterRates as $rate) {
+                    $rate['method_code'] = $rate['method_code'] ?? $rate['carrier'] ?? $adapter->carrierId();
+                    $rate['key'] = $rate['key'] ?? $rate['method_code'];
+                    $rates[] = $rate;
+                }
                 $coveredCarriers[] = $adapter->carrierId();
             }
         }
@@ -65,6 +80,8 @@ class ShippingService
             if ($cost >= 0) { // -1 means "not available for zone"
                 $cfg = self::legacyMethodConfig($method);
                 $rates[] = [
+                    'key'           => $method,
+                    'method_code'   => $method,
                     'carrier'       => $method,
                     'label'         => $cfg['label'] ?? ucfirst($method),
                     'price'         => $cost,
@@ -76,6 +93,22 @@ class ShippingService
         }
 
         return $rates;
+    }
+
+    public static function selectRate(
+        string $methodCode,
+        string $country,
+        int $weightG,
+        int $subtotal = 0,
+        bool $cod = false,
+        int $volumeCm3 = 0
+    ): ?array {
+        foreach (self::calculateRates($country, $weightG, $subtotal, $cod, $volumeCm3) as $rate) {
+            if (($rate['method_code'] ?? $rate['key'] ?? '') === $methodCode) {
+                return $rate;
+            }
+        }
+        return null;
     }
 
     /**
@@ -184,6 +217,92 @@ class ShippingService
     }
 
     // ─── Private helpers ────────────────────────────────────────────────────────
+
+    private static function databaseRates(string $country, int $weightG, int $subtotal, bool $cod, int $volumeCm3): array
+    {
+        $db = Db::get();
+
+        $stmt = $db->prepare("SELECT zone_code FROM shipping_zone_countries WHERE country = :country ORDER BY id");
+        $stmt->execute([':country' => $country]);
+        $zones = array_values(array_unique(array_filter(array_column($stmt->fetchAll(\PDO::FETCH_ASSOC), 'zone_code'))));
+        if (empty($zones)) {
+            return [];
+        }
+
+        $zonePlaceholders = implode(',', array_fill(0, count($zones), '?'));
+        $params = array_merge([$country, $weightG, $weightG, $volumeCm3], $zones, [$weightG, $volumeCm3]);
+        $stmt = $db->prepare("
+            SELECT r.*, m.name AS method_name, m.description AS method_description, m.service_type,
+                   m.supports_cod, m.supports_pickup, m.free_above, m.max_weight_g, m.max_volume_cm3,
+                   m.active AS method_active, m.sort_order AS method_sort, z.name AS zone_name
+            FROM shipping_rates r
+            JOIN shipping_methods m ON m.code = r.method_code
+            JOIN shipping_zones z ON z.code = r.zone_code
+            WHERE m.active = 1 AND z.active = 1 AND COALESCE(r.active, 1) = 1
+              AND (r.country = ? OR r.country = '')
+              AND r.weight_from_g <= ? AND r.weight_to_g >= ?
+              AND (r.volume_to_cm3 IS NULL OR r.volume_to_cm3 = 0 OR r.volume_to_cm3 >= ?)
+              AND r.zone_code IN ({$zonePlaceholders})
+              AND (m.max_weight_g IS NULL OR m.max_weight_g = 0 OR m.max_weight_g >= r.weight_to_g OR m.max_weight_g >= ?)
+              AND (m.max_volume_cm3 IS NULL OR m.max_volume_cm3 = 0 OR m.max_volume_cm3 >= ?)
+            ORDER BY m.sort_order, r.sort_order, r.price
+        ");
+        $stmt->execute($params);
+
+        $rates = [];
+        $seen = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $methodCode = (string)$row['method_code'];
+            if (isset($seen[$methodCode])) continue;
+            if ($cod && empty($row['supports_cod'])) continue;
+
+            $price = (int)$row['price'];
+            if (!empty($row['free_above']) && $subtotal >= (int)$row['free_above']) {
+                $price = 0;
+            }
+            $codSurcharge = $cod ? (int)($row['cod_surcharge'] ?? 0) : 0;
+            $rates[] = [
+                'key'             => $methodCode,
+                'method_code'     => $methodCode,
+                'carrier'         => $row['carrier'],
+                'zone_code'       => $row['zone_code'],
+                'zone_name'       => $row['zone_name'],
+                'label'           => $row['method_name'],
+                'description'     => $row['method_description'] ?? '',
+                'service_type'    => $row['service_type'] ?? 'parcel',
+                'supports_cod'    => (bool)$row['supports_cod'],
+                'supports_pickup' => (bool)$row['supports_pickup'],
+                'price'           => $price + $codSurcharge,
+                'base_price'      => $price,
+                'cod_surcharge'   => $codSurcharge,
+                'delivery_days'   => $row['delivery_days'] ?? '',
+                'free_above'      => isset($row['free_above']) ? (int)$row['free_above'] : null,
+            ];
+            $seen[$methodCode] = true;
+        }
+
+        return $rates;
+    }
+
+    private static function hasDatabasePricing(): bool
+    {
+        $db = Db::get();
+        return self::tableExists($db, 'shipping_methods')
+            && self::tableExists($db, 'shipping_zones')
+            && self::tableExists($db, 'shipping_zone_countries')
+            && self::tableExists($db, 'shipping_rates');
+    }
+
+    private static function tableExists(\PDO $db, string $table): bool
+    {
+        try {
+            $stmt = $db->prepare("SELECT 1 FROM {$table} LIMIT 1");
+            $stmt->execute();
+            return true;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
 
     /** @return ShippingAdapter[] */
     private static function resolveAdapters(): array

@@ -101,6 +101,7 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS products (
     FOREIGN KEY (category_id) REFERENCES categories(id)
 )");
 $pdo->exec("CREATE INDEX IF NOT EXISTS idx_prod_category ON products(category_id, status, price)");
+try { $pdo->exec("ALTER TABLE products ADD COLUMN vat_class TEXT DEFAULT 'standard'"); } catch (\PDOException $e) {}
 
 $pdo->exec("CREATE VIRTUAL TABLE IF NOT EXISTS products_fts USING fts5(
     name, sku, summary, tags, filter_tags,
@@ -2277,6 +2278,11 @@ try { $pdo->exec("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEF
 catch (\PDOException $e) { /* already exists */ }
 
 // Shipping tables
+$shippingMigFile = __DIR__ . '/../migrations/20260425064000_shipping_methods_pricing_engine.php';
+if (file_exists($shippingMigFile)) {
+    $shippingMig = require $shippingMigFile;
+    $shippingMig->up($pdo, true);
+}
 $pdo->exec("CREATE TABLE IF NOT EXISTS shipping_rates (
     id            INTEGER PRIMARY KEY,
     carrier       TEXT NOT NULL,
@@ -2303,14 +2309,14 @@ try { $pdo->exec("ALTER TABLE orders ADD COLUMN carrier TEXT DEFAULT NULL"); } c
 
 // Insert shipping_rates test fixtures
 $pdo->exec("INSERT INTO shipping_rates (carrier, country, weight_from_g, weight_to_g, price, cod_surcharge) VALUES
-    ('packeta', 'SK', 0,    2000,  299, 100),
-    ('packeta', 'SK', 2001, 5000,  349, 100),
-    ('packeta', 'SK', 5001, 10000, 449, 100),
-    ('packeta', 'CZ', 0,    2000,  399, 100),
-    ('packeta', 'CZ', 2001, 5000,  449, 100),
-    ('gls',     'SK', 0,    2000,  399, 150),
-    ('gls',     'SK', 2001, 5000,  499, 150),
-    ('gls',     'DE', 0,    5000,  899, 150)
+    ('packeta_test', 'SK', 0,    2000,  299, 100),
+    ('packeta_test', 'SK', 2001, 5000,  349, 100),
+    ('packeta_test', 'SK', 5001, 10000, 449, 100),
+    ('packeta_test', 'CZ', 0,    2000,  399, 100),
+    ('packeta_test', 'CZ', 2001, 5000,  449, 100),
+    ('gls_test',     'SK', 0,    2000,  399, 150),
+    ('gls_test',     'SK', 2001, 5000,  499, 150),
+    ('gls_test',     'DE', 0,    5000,  899, 150)
 ");
 
 $mockGateway = new MockPayment(['mock_result' => 'success']);
@@ -2501,6 +2507,91 @@ assert_equals(899, $rGlsDe[0]['price'], 'Shipping: GLS DE 3000g = 899 cents');
 // GLS should not service unknown countries
 $rGlsUnknown = $gls->getRates(['country' => 'US', 'weight_g' => 1000, 'subtotal' => 1000]);
 assert_true(empty($rGlsUnknown), 'Shipping: GLS does not service US');
+
+echo "\n--- Test: Shipping — default seed pricing engine ---\n";
+$methodCount = (int)$pdo->query("SELECT COUNT(*) FROM shipping_methods WHERE code IN ('pickup', 'packeta', 'gls')")->fetchColumn();
+assert_equals(3, $methodCount, 'Shipping: default seed creates pickup, packeta and gls methods');
+$zoneCount = (int)$pdo->query("SELECT COUNT(*) FROM shipping_zones WHERE code IN ('domestic', 'cz', 'near_eu', 'eu')")->fetchColumn();
+assert_equals(4, $zoneCount, 'Shipping: default seed creates usable zones');
+
+$shippingMig->up($pdo, true);
+$methodCount2 = (int)$pdo->query("SELECT COUNT(*) FROM shipping_methods WHERE code IN ('pickup', 'packeta', 'gls')")->fetchColumn();
+assert_equals(3, $methodCount2, 'Shipping: seed is idempotent for methods');
+
+$pdo->exec("UPDATE shipping_methods SET name = 'Admin custom pickup' WHERE code = 'pickup'");
+$shippingMig->up($pdo, true);
+$customPickup = (string)$pdo->query("SELECT name FROM shipping_methods WHERE code = 'pickup'")->fetchColumn();
+assert_equals('Admin custom pickup', $customPickup, 'Shipping: seed does not overwrite admin-edited method');
+
+$pdo->exec("UPDATE shipping_methods SET active = 0 WHERE code = 'packeta'");
+$disabledPacketa = ShippingService::selectRate('packeta', 'SK', 2000, 2000, false, 0);
+assert_true($disabledPacketa === null, 'Shipping: disabled admin method is not selectable');
+$pdo->exec("UPDATE shipping_methods SET active = 1 WHERE code = 'packeta'");
+
+$dbRatesSk = ShippingService::calculateRates('SK', 2000, 2000);
+$dbCarriersSk = array_column($dbRatesSk, 'carrier');
+assert_true(count($dbRatesSk) >= 3, 'Shipping: seeded pricing returns rates for SK checkout');
+assert_true(in_array('pickup', $dbCarriersSk), 'Shipping: seeded pricing includes pickup');
+assert_true(in_array('packeta', $dbCarriersSk), 'Shipping: seeded pricing includes packeta');
+assert_true(in_array('gls', $dbCarriersSk), 'Shipping: seeded pricing includes gls');
+
+$glsEu = ShippingService::selectRate('gls', 'FR', 6000, 2000, false, 0);
+assert_true($glsEu !== null, 'Shipping: seeded EU fallback rate returns GLS for FR');
+assert_equals(1599, (int)$glsEu['price'], 'Shipping: seeded EU fallback 5-20kg price = 1599 cents');
+
+$invalidCountryRate = ShippingService::selectRate('packeta', 'US', 2000, 2000, false, 0);
+assert_true($invalidCountryRate === null, 'Shipping: invalid country/method combination returns no rate');
+
+$freePacketa = ShippingService::selectRate('packeta', 'SK', 2000, 5000, false, 0);
+assert_true($freePacketa !== null, 'Shipping: Packeta resolves at free shipping threshold');
+assert_equals(0, (int)$freePacketa['price'], 'Shipping: method free_above threshold zeroes price');
+
+$selectedSeedRate = ShippingService::selectRate('packeta', 'SK', 2000, 2000, false, 0);
+assert_true($selectedSeedRate !== null, 'Shipping: seeded Packeta rate selectable');
+
+$_SESSION = ['cart' => []];
+Cart::add((int)$payProduct['id'], null, 1);
+$shippingCart = Cart::enriched();
+$shippingMetrics = ['weight_g' => 2000, 'volume_cm3' => 0];
+$checkoutRates = ShippingService::calculateRates('SK', $shippingMetrics['weight_g'], (int)$shippingCart['subtotal'], false, $shippingMetrics['volume_cm3']);
+assert_true(count($checkoutRates) >= 3, 'Shipping UX: checkout SK quote returns available methods from cart metrics');
+$checkoutSelection = ShippingService::selectRate('packeta', 'SK', $shippingMetrics['weight_g'], (int)$shippingCart['subtotal'], false, $shippingMetrics['volume_cm3']);
+assert_true($checkoutSelection !== null, 'Shipping UX: checkout selected Packeta method resolves against current cart');
+
+$seedOrderId = Orders::create([
+    [
+        'product_id'   => $payProduct['id'],
+        'variant_id'   => null,
+        'qty'          => 1,
+        'price'        => (int)$payProduct['price'],
+        'sku'          => $payProduct['sku'],
+        'name'         => $payProduct['name'],
+        'variant_name' => '',
+    ],
+], [
+    'name'          => 'Ship Seed Customer',
+    'email'         => 'ship-seed@example.com',
+    'phone'         => '+421900000002',
+    'address'       => ['street' => 'Seed 1', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK'],
+    'currency'      => 'eur',
+    'shipping_cost' => (int)$selectedSeedRate['price'],
+    'shipping_method' => $selectedSeedRate['method_code'],
+    'shipping_zone' => $selectedSeedRate['zone_code'],
+    'shipping_weight_g' => $shippingMetrics['weight_g'],
+    'shipping_rate_snapshot' => json_encode($selectedSeedRate, JSON_UNESCAPED_UNICODE),
+    'tax_amount'    => 0,
+], 'card');
+$seedOrder = Orders::byId($seedOrderId);
+assert_equals('packeta', (string)$seedOrder['shipping_method'], 'Shipping: order snapshot stores method');
+assert_equals('domestic', (string)$seedOrder['shipping_zone'], 'Shipping: order snapshot stores zone');
+assert_equals((int)$shippingMetrics['weight_g'], (int)$seedOrder['shipping_weight_g'], 'Shipping: order snapshot stores weight');
+$seedSnapshot = json_decode((string)$seedOrder['shipping_rate_snapshot'], true) ?: [];
+assert_equals('packeta', (string)$seedSnapshot['method_code'], 'Shipping: order snapshot stores selected rate JSON');
+assert_equals((int)$checkoutSelection['price'], (int)$seedOrder['shipping_cost'], 'Shipping UX: order stores selected checkout shipping price');
+assert_equals((int)$shippingMetrics['weight_g'], (int)$seedOrder['shipping_weight_g'], 'Shipping UX: order snapshot weight matches checkout cart metrics');
+
+// Re-seed again after snapshot checks so later adapter DB lookups still use default carrier rows.
+$shippingMig->up($pdo, true);
 
 echo "\n--- Test: Shipping — calculateRates aggregation ---\n";
 ShippingService::setAdapters([new PersonalPickup(), new PacketaShipping(), new GlsShipping()]);

@@ -119,14 +119,24 @@ class Orders {
                 ':vatscen'  => $vatScenario,
                 ':vattotal' => $vatTotal,
                 ':nettotal' => $netTotal,
+                ':shipmethod' => $customer['shipping_method'] ?? null,
+                ':shipzone' => $customer['shipping_zone'] ?? null,
+                ':shipweight' => (int)($customer['shipping_weight_g'] ?? 0),
+                ':shipsnapshot' => $customer['shipping_rate_snapshot'] ?? null,
             ];
+            $shippingColumns = self::hasColumn('orders', 'shipping_method');
+            $extraColumns = $shippingColumns ? ', shipping_method, shipping_zone, shipping_weight_g, shipping_rate_snapshot' : '';
+            $extraValues = $shippingColumns ? ', :shipmethod, :shipzone, :shipweight, :shipsnapshot' : '';
+            if (!$shippingColumns) {
+                unset($orderParams[':shipmethod'], $orderParams[':shipzone'], $orderParams[':shipweight'], $orderParams[':shipsnapshot']);
+            }
             $orderStmt = $db->prepare("
                 INSERT INTO orders (order_number, status, customer_id, customer_name, customer_email, customer_phone,
                     shipping_addr, payment_method, subtotal, discount_amount, shipping_cost, tax_amount, total, currency,
-                    locale, notes, ip_address, vat_scenario, vat_total, net_total)
+                    locale, notes, ip_address, vat_scenario, vat_total, net_total{$extraColumns})
                 VALUES (:num, 'pending', :cid, :name, :email, :phone, :addr, :method,
                     :subtotal, :discount, :shipping, :tax, :total, :currency, :locale, :notes, :ip,
-                    :vatscen, :vattotal, :nettotal)
+                    :vatscen, :vattotal, :nettotal{$extraValues})
             ");
             for ($attempt = 0; $attempt < 5; $attempt++) {
                 $orderNumber = self::generateOrderNumber();
@@ -187,6 +197,22 @@ class Orders {
             if ($db->inTransaction()) $db->rollBack();
             throw $e;
         }
+    }
+
+    private static function hasColumn(string $table, string $column): bool {
+        try {
+            $stmt = Db::get()->query("PRAGMA table_info({$table})");
+            foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+                if (($row['name'] ?? '') === $column) return true;
+            }
+        } catch (\Throwable $e) {
+            try {
+                $stmt = Db::get()->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_NAME=? AND COLUMN_NAME=?");
+                $stmt->execute([$table, $column]);
+                return ((int)$stmt->fetchColumn()) > 0;
+            } catch (\Throwable $ignored) {}
+        }
+        return false;
     }
 
     /**

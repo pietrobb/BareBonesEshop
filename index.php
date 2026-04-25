@@ -730,6 +730,11 @@ main{padding:24px 0;min-height:60vh}
 .checkout-form input,.checkout-form textarea,.checkout-form select{width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:.95em}
 .checkout-form textarea{height:80px;resize:vertical}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.shipping-options{display:grid;gap:8px;margin:8px 0 16px}
+.shipping-option{display:flex;justify-content:space-between;gap:12px;padding:10px;border:1px solid #ddd;border-radius:6px;cursor:pointer}
+.shipping-option:has(input:checked){border-color:#cc3872;background:#fff7fb}
+.shipping-option small{display:block;color:#777;margin-top:2px}
+.shipping-loading,.shipping-empty{font-size:.9em;color:#777;padding:8px 0}
 
 /* Order done */
 .order-done{text-align:center;padding:60px 20px;background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
@@ -919,6 +924,43 @@ async function addToCart(pid,qty,btn){
  else{const i=document.querySelector('.cart-icon');if(i){const s=document.createElement('span');s.className='cart-badge';s.textContent=d.count;i.appendChild(s);}}
  setTimeout(()=>{btn.disabled=false;btn.textContent=orig;},1200);
 }
+async function refreshCheckoutShipping(){
+ const country=document.getElementById('checkout-country');
+ const payment=document.getElementById('checkout-payment');
+ const box=document.getElementById('shipping-options');
+ const summaryShip=document.getElementById('summary-shipping');
+ const summaryTotal=document.getElementById('summary-total');
+ const subtotalEl=document.getElementById('checkout-subtotal');
+ if(!country||!box||!summaryShip||!summaryTotal||!subtotalEl)return;
+ const subtotal=parseInt(subtotalEl.value||'0',10);
+ box.innerHTML='<div class="shipping-loading">Loading shipping rates…</div>';
+ const params=new URLSearchParams({action:'shipping_rates',country:country.value,subtotal:String(subtotal),cod:(payment&&payment.value==='cod')?'1':'0'});
+ const r=await fetch('api.php?'+params.toString());
+ const d=await r.json();
+ const methods=d.methods||[];
+ if(!methods.length){box.innerHTML='<div class="shipping-empty">Doručenie nie je dostupné.</div>';summaryShip.textContent='—';summaryTotal.textContent=formatCents(subtotal);return;}
+ box.innerHTML='';
+ methods.forEach((m,i)=>{
+  const label=document.createElement('label');label.className='shipping-option';
+  const price=parseInt(m.price||0,10);
+  label.innerHTML='<span><input type="radio" name="shipping_method" value="'+escapeHtml(m.method_code||m.key||'')+'" '+(i===0?'checked':'')+'> '+escapeHtml(m.label||m.method_code||'')+'<small>'+escapeHtml(m.delivery_days||'')+'</small></span><strong>'+formatCents(price)+'</strong>';
+  label.querySelector('input').addEventListener('change',()=>updateCheckoutTotal(price,subtotal));
+  box.appendChild(label);
+ });
+ updateCheckoutTotal(parseInt(methods[0].price||0,10),subtotal);
+}
+function updateCheckoutTotal(shipping,subtotal){
+ document.getElementById('summary-shipping').textContent=formatCents(shipping);
+ document.getElementById('summary-total').textContent=formatCents(subtotal+shipping);
+}
+function formatCents(cents){return (cents/100).toLocaleString('sk-SK',{style:'currency',currency:'EUR'});}
+function escapeHtml(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+document.addEventListener('DOMContentLoaded',()=>{
+ const country=document.getElementById('checkout-country');
+ const payment=document.getElementById('checkout-payment');
+ if(country)country.addEventListener('change',refreshCheckoutShipping);
+ if(payment)payment.addEventListener('change',refreshCheckoutShipping);
+});
 </script>
 
 <?php
@@ -1622,7 +1664,18 @@ function renderCheckout(): string {
     foreach ($cart as $pid => $qty) {
         if (isset($products[$pid])) $subtotal += $products[$pid]['price'] * $qty;
     }
-    $shipping = $subtotal >= 5000 ? 0 : 499;
+    $country = strtoupper($_POST['country'] ?? 'SK');
+    $weightG = 0;
+    foreach ($cart as $pid => $qty) {
+        if (isset($products[$pid])) $weightG += (int)($products[$pid]['weight_g'] ?? 0) * (int)$qty;
+    }
+    $shippingRates = ShippingService::calculateRates($country, $weightG, $subtotal, false, 0);
+    $selectedShipping = $_POST['shipping_method'] ?? ($shippingRates[0]['method_code'] ?? '');
+    $selectedRate = $shippingRates[0] ?? null;
+    foreach ($shippingRates as $rate) {
+        if (($rate['method_code'] ?? '') === $selectedShipping) { $selectedRate = $rate; break; }
+    }
+    $shipping = $selectedRate ? (int)$selectedRate['price'] : 0;
     $total = $subtotal + $shipping;
 
     ob_start();
@@ -1631,22 +1684,26 @@ function renderCheckout(): string {
 
     echo '<div style="display:grid;grid-template-columns:1fr 340px;gap:24px">';
 
-    // Checkout form — rendered by BareBonesForms
-    echo '<div id="bbf-checkout" data-form="checkout" data-lang="sk"></div>';
-    echo '<script>window.BBF && (BBF.baseUrl = "' . rtrim(dirname($_SERVER['SCRIPT_NAME']), '/') . '/vendor/bbf/");</script>';
-    echo '<script src="vendor/bbf/bbf.js"></script>';
-    echo '<script>';
-    echo 'document.addEventListener("DOMContentLoaded", function() {';
-    echo '  if (typeof BBF !== "undefined") {';
-    echo '    var orig = BBF.render;';
-    echo '    BBF.render("checkout", "#bbf-checkout", {';
-    echo '      onSuccess: function(resp) {';
-    echo '        if (resp.redirect) { window.location.href = resp.redirect; return false; }';
-    echo '      }';
-    echo '    });';
-    echo '  }';
-    echo '});';
-    echo '</script>';
+    echo '<form method="post" class="checkout-form">';
+    echo $csrfField . '<input type="hidden" name="checkout" value="1">';
+    echo '<h3>' . $t('contact') . '</h3>';
+    echo '<label>' . $t('name') . '</label><input name="name" required>';
+    echo '<div class="form-row"><div><label>' . $t('email') . '</label><input type="email" name="email" required></div><div><label>' . $t('phone') . '</label><input name="phone"></div></div>';
+    echo '<h3 style="margin-top:20px">' . $t('address') . '</h3>';
+    echo '<label>' . $t('street') . '</label><input name="street" required>';
+    echo '<div class="form-row"><div><label>' . $t('city') . '</label><input name="city" required></div><div><label>' . $t('zip') . '</label><input name="zip" required></div></div>';
+    echo '<label>Country</label><select name="country" id="checkout-country"><option value="SK">Slovensko</option><option value="CZ">Česko</option><option value="DE">Deutschland</option><option value="AT">Österreich</option><option value="HU">Magyarország</option><option value="PL">Polska</option></select>';
+    echo '<h3 style="margin-top:20px">' . $t('shipping') . '</h3><div class="shipping-options" id="shipping-options">';
+    foreach ($shippingRates as $i => $rate) {
+        $checked = (($rate['method_code'] ?? '') === $selectedShipping || ($i === 0 && $selectedShipping === '')) ? ' checked' : '';
+        echo '<label class="shipping-option"><span><input type="radio" name="shipping_method" value="' . $e($rate['method_code']) . '"' . $checked . '> ' . $e($rate['label']) . '<small>' . $e((string)($rate['delivery_days'] ?? '')) . '</small></span><strong>' . ($rate['price'] === 0 ? $t('free_shipping') : $price((int)$rate['price'])) . '</strong></label>';
+    }
+    if (empty($shippingRates)) echo '<p style="color:#c62828">Doručenie nie je dostupné.</p>';
+    echo '</div>';
+    echo '<h3 style="margin-top:20px">' . $t('payment') . '</h3><label>' . $t('payment_method') . '</label><select name="payment" id="checkout-payment"><option value="cod">' . $t('cod') . '</option><option value="bank_transfer">' . $t('transfer') . '</option><option value="stripe">' . $t('card') . '</option></select>';
+    echo '<label>' . $t('notes') . '</label><textarea name="notes" placeholder="' . $t('notes_placeholder') . '"></textarea>';
+    echo '<button class="btn-checkout" type="submit">' . $t('submit_order') . '</button>';
+    echo '</form>';
 
     // Order summary sidebar
     echo '<div class="cart-summary">';
@@ -1656,9 +1713,10 @@ function renderCheckout(): string {
         if (!$p) continue;
         echo '<div class="row" style="font-size:.85em"><span>' . $e($p['name']) . ' × ' . $qty . '</span><span>' . $price($p['price'] * $qty) . '</span></div>';
     }
+    echo '<input type="hidden" id="checkout-subtotal" value="' . (int)$subtotal . '">';
     echo '<div class="row" style="margin-top:8px"><span>' . $t('subtotal') . '</span><span>' . $price($subtotal) . '</span></div>';
-    echo '<div class="row"><span>' . $t('shipping') . '</span><span>' . ($shipping === 0 ? $t('free_shipping') : $price($shipping)) . '</span></div>';
-    echo '<div class="row total-row"><span>' . $t('total_price') . '</span><span>' . $price($total) . '</span></div>';
+    echo '<div class="row"><span>' . $t('shipping') . '</span><span id="summary-shipping">' . ($shipping === 0 ? $t('free_shipping') : $price($shipping)) . '</span></div>';
+    echo '<div class="row total-row"><span>' . $t('total_price') . '</span><span id="summary-total">' . $price($total) . '</span></div>';
     echo '</div>';
 
     echo '</div>';
@@ -1688,10 +1746,13 @@ function processCheckout(): string {
     foreach ($stmt->fetchAll() as $p) $products[(int)$p['id']] = $p;
 
     $payment = Security::clean($_POST['payment'] ?? 'cod');
+    $country = strtoupper(Security::clean($_POST['country'] ?? 'SK'));
+    $shippingMethod = Security::slug($_POST['shipping_method'] ?? '');
     $addr = json_encode([
         'street' => Security::clean($_POST['street'] ?? ''),
         'city'   => Security::clean($_POST['city'] ?? ''),
         'zip'    => Security::clean($_POST['zip'] ?? ''),
+        'country'=> $country,
     ]);
 
     // Convert index.php cart format to Orders::create format
@@ -1710,7 +1771,13 @@ function processCheckout(): string {
     }
 
     $subtotal = array_sum(array_map(fn($i) => $i['price'] * $i['qty'], $cartItems));
-    $shippingCost = $subtotal >= 5000 ? 0 : 499;
+    $weightG = 0;
+    foreach ($cartItems as $item) $weightG += (int)($products[$item['product_id']]['weight_g'] ?? 0) * (int)$item['qty'];
+    $selectedRate = ShippingService::selectRate($shippingMethod, $country, $weightG, $subtotal, $payment === 'cod', 0);
+    if (!$selectedRate) {
+        return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">Doručenie nie je dostupné do zvolenej krajiny.</p>';
+    }
+    $shippingCost = (int)$selectedRate['price'];
 
     $loggedInCustomerId = !empty($_SESSION['customer_id']) ? (int)$_SESSION['customer_id'] : null;
     $customer = [
@@ -1721,6 +1788,10 @@ function processCheckout(): string {
         'shipping_addr' => $addr,
         'notes' => Security::clean($_POST['notes'] ?? ''),
         'shipping_cost' => $shippingCost,
+        'shipping_method' => $selectedRate['method_code'],
+        'shipping_zone' => $selectedRate['zone_code'] ?? '',
+        'shipping_weight_g' => $weightG,
+        'shipping_rate_snapshot' => json_encode($selectedRate, JSON_UNESCAPED_UNICODE),
     ];
 
     try {
