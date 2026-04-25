@@ -81,12 +81,14 @@ final class InvoiceService
                     order_id, number, issued_at, delivery_date, due_date, pdf_path,
                     total_net, total_vat, total_gross, currency,
                     vat_breakdown, customer_snapshot, seller_snapshot,
-                    payment_method, locale, status, download_token
+                    payment_method, locale, status, download_token,
+                    vat_scenario, reverse_charge_note_key
                 ) VALUES (
                     :order_id, :number, :issued_at, :delivery_date, :due_date, :pdf_path,
                     :total_net, :total_vat, :total_gross, :currency,
                     :vat_breakdown, :customer_snapshot, :seller_snapshot,
-                    :payment_method, :locale, :status, :download_token
+                    :payment_method, :locale, :status, :download_token,
+                    :vat_scenario, :note_key
                 )
             ");
             $stmt->execute([
@@ -107,6 +109,8 @@ final class InvoiceService
                 ':locale'            => $locale,
                 ':status'            => self::STATUS_ISSUED,
                 ':download_token'    => $token,
+                ':vat_scenario'      => $vatBreakdown['scenario'] ?? null,
+                ':note_key'          => $vatBreakdown['note_key'] ?? null,
             ]);
             $invoiceId = (int)$db->lastInsertId();
 
@@ -311,25 +315,63 @@ final class InvoiceService
     }
 
     /**
-     * VAT breakdown: derived from items + order totals.
-     * Strategy: distribute order.tax_amount proportionally if items don't carry
-     * per-line VAT. Default rate detected from order ratio (tax_amount / net).
+     * VAT breakdown: derived from order_items per-line VAT data when available;
+     * falls back to ratio heuristic for legacy orders without per-line snapshot.
+     *
+     * Returns ['rates' => {rate_str => {net,vat}}, 'vat_total' => int,
+     *          'scenario' => string|null, 'note_key' => string|null].
      */
     private static function computeVatBreakdown(array $order, array $items): array
     {
+        // Preferred: aggregate per-line VAT snapshot from order_items
+        $hasLineVat = false;
+        foreach ($items as $it) {
+            if (isset($it['vat_amount']) && $it['vat_amount'] !== null) { $hasLineVat = true; break; }
+        }
+
+        if ($hasLineVat) {
+            $rates = [];
+            $vatTotal = 0;
+            foreach ($items as $it) {
+                $rate = (float)($it['vat_rate'] ?? 0);
+                $vat  = (int)($it['vat_amount'] ?? 0);
+                $net  = (int)($it['net_amount'] ?? 0);
+                $key  = rtrim(rtrim(number_format($rate, 2, '.', ''), '0'), '.');
+                if ($key === '') $key = '0';
+                if (!isset($rates[$key])) $rates[$key] = ['net' => 0, 'vat' => 0];
+                $rates[$key]['net'] += $net;
+                $rates[$key]['vat'] += $vat;
+                $vatTotal += $vat;
+            }
+            return [
+                'rates'     => $rates,
+                'vat_total' => $vatTotal,
+                'scenario'  => $order['vat_scenario'] ?? null,
+                'note_key'  => self::scenarioNoteKey((string)($order['vat_scenario'] ?? '')),
+            ];
+        }
+
+        // Legacy fallback (no per-line VAT) — keep existing ratio heuristic.
         $taxAmt = (int)($order['tax_amount'] ?? 0);
         $sub    = (int)($order['subtotal'] ?? 0) - (int)($order['discount_amount'] ?? 0) + (int)($order['shipping_cost'] ?? 0);
         $netForVat = max(0, $sub - $taxAmt);
-
-        // Determine effective rate from totals.
         $rate = $netForVat > 0 ? (int)round($taxAmt * 100 / $netForVat) : 0;
         if ($rate < 0 || $rate > 50) $rate = 0;
-
         $rates = [];
         if ($taxAmt > 0 || $netForVat > 0) {
             $rates[(string)$rate] = ['net' => $netForVat, 'vat' => $taxAmt];
         }
-        return ['rates' => $rates, 'vat_total' => $taxAmt];
+        return ['rates' => $rates, 'vat_total' => $taxAmt, 'scenario' => null, 'note_key' => null];
+    }
+
+    /** Map a VAT scenario to its on-invoice i18n note key. */
+    private static function scenarioNoteKey(string $scenario): ?string
+    {
+        switch ($scenario) {
+            case 'reverse_charge': return 'vat.reverse_charge_note';
+            case 'export':         return 'vat.export_note';
+            default:               return null;
+        }
     }
 
     private static function resolveStore(array $order, ?string $storeCode): array
