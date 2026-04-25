@@ -529,7 +529,8 @@ switch ($p) {
                 if ($paymentTxs) {
                     echo '<td><details><summary>' . count($paymentTxs) . '×</summary><ul class="muted">';
                     foreach ($paymentTxs as $tx) {
-                        echo '<li>' . $e(substr((string)$tx['created_at'], 0, 16) . ' — ' . (string)$tx['status']) . '</li>';
+                        $paymentRef = $tx['provider_ref'] ? ' · ' . (string)$tx['provider_ref'] : '';
+                        echo '<li>' . $e(substr((string)$tx['created_at'], 0, 16) . ' — ' . (string)$tx['status'] . $paymentRef) . '</li>';
                     }
                     echo '</ul></details></td>';
                 } else {
