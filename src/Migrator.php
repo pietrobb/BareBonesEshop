@@ -44,15 +44,24 @@ class Migrator {
     /**
      * Apply all pending migrations in timestamp order.
      * Returns array of applied names.
+     *
+     * Optional `$preApplyHook` is called once with the array of pending names
+     * BEFORE any migration runs (and only if there ARE pending). Throwing from
+     * the hook aborts the apply() call without modifying any state. Used by
+     * cli/migrate.php to take a pre-migration safety backup.
      */
-    public function apply(?callable $logger = null): array {
+    public function apply(?callable $logger = null, ?callable $preApplyHook = null): array {
         $logger = $logger ?? static fn(string $m) => null;
         $this->lock();
         try {
             $this->ensureMigrationsTable();
             $this->verifyChecksums();
+            $pending = $this->pendingFiles();
+            if ($pending && $preApplyHook) {
+                $preApplyHook(array_keys($pending), $logger);
+            }
             $applied = [];
-            foreach ($this->pendingFiles() as $name => $path) {
+            foreach ($pending as $name => $path) {
                 $start    = microtime(true);
                 $checksum = $this->fileChecksum($path);
                 $logger("  [..] {$name}");
