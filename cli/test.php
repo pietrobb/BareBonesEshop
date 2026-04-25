@@ -3185,6 +3185,183 @@ assert_equals('application/pdf', $captured['attachments'][0]['content_type'], 'M
 assert_equals(strlen($pdfBytes), strlen($captured['attachments'][0]['data']), 'MailService: attachment data length matches');
 MailService::useAdapter(null);
 
+// ============================================================
+// TEST: Backup & Restore (BackupService + cli/restore.php)
+// ============================================================
+echo "\n--- Test 50: Backup & Restore ---\n";
+
+// Use a private isolated SQLite + storage root for the backup tests
+$backupRoot = __DIR__ . '/../db/_backup_test';
+if (is_dir($backupRoot)) {
+    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($backupRoot, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST) as $f) {
+        $f->isDir() ? @rmdir($f->getPathname()) : @unlink($f->getPathname());
+    }
+    @rmdir($backupRoot);
+}
+mkdir($backupRoot, 0775, true);
+$liveBackupDb = $backupRoot . '/live.db';
+
+$backupPdo = new PDO('sqlite:' . $liveBackupDb);
+$backupPdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$backupPdo->exec('PRAGMA journal_mode=WAL');
+$backupPdo->exec('CREATE TABLE customers (id INTEGER PRIMARY KEY, email TEXT)');
+$backupPdo->exec("INSERT INTO customers (email) VALUES ('a@x.sk'), ('b@x.sk')");
+$backupPdo->exec('CREATE TABLE schema_migrations (name TEXT PRIMARY KEY, checksum TEXT NOT NULL DEFAULT \'\', applied_at TEXT, duration_ms INTEGER DEFAULT 0)');
+$backupPdo->exec("INSERT INTO schema_migrations (name, applied_at) VALUES ('20260101_first', datetime('now'))");
+
+$backupCfg = [
+    'enabled' => true, 'storage' => 'local', 'compression' => false,
+    'retention' => ['daily' => 7, 'weekly' => 4, 'monthly' => 6, 'minimum_kept' => 3],
+    'auto_pre_migration' => true, 'auto_gc_on_backup' => false,
+    'wal_checkpoint' => true,
+    'log_file' => 'backup.log', 'log_max_bytes' => 10485760, 'log_max_files' => 5,
+];
+BackupService::init($backupPdo, $backupCfg, $backupRoot);
+
+// 50.1 — config defaults loaded
+$cfgLoaded = BackupService::config();
+assert_true($cfgLoaded['enabled'] === true, 'Backup: config enabled flag honoured');
+assert_equals(false, $cfgLoaded['compression'], 'Backup: compression default OFF');
+assert_equals(7, (int)$cfgLoaded['retention']['daily'], 'Backup: daily retention=7');
+
+// 50.2 — create() produces a backup with sha256, size, schema_version
+$created = BackupService::create(['label' => 'manual']);
+assert_true(is_string($created['remote_path']) && str_ends_with($created['remote_path'], '.db'), 'Backup: create returned remote_path');
+assert_true($created['size_bytes'] > 0, 'Backup: file size > 0');
+assert_equals(64, strlen($created['sha256']), 'Backup: sha256 is 64 hex chars');
+assert_equals('20260101_first', $created['schema_version'], 'Backup: schema_version captured');
+assert_equals('manual', $created['label'], 'Backup: label persisted in meta');
+
+// 50.3 — meta JSON sidecar written
+$absBackup = $backupRoot . '/storage/backups/' . $created['remote_path'];
+assert_true(is_file($absBackup), 'Backup: .db file exists on disk');
+assert_true(is_file($absBackup . '.meta.json'), 'Backup: .meta.json sidecar exists');
+$metaOnDisk = json_decode((string)file_get_contents($absBackup . '.meta.json'), true);
+assert_equals($created['sha256'], (string)($metaOnDisk['sha256'] ?? ''), 'Backup: meta sha256 matches result');
+
+// 50.4 — sha256 verifies against actual file
+$actualSha = hash_file('sha256', $absBackup);
+assert_equals($created['sha256'], $actualSha, 'Backup: sha256 matches hash_file');
+
+// 50.5 — list() returns at least one row
+$listed = BackupService::list();
+assert_greater(count($listed), 0, 'Backup: list() includes the created backup');
+
+// 50.6 — second create() within same second gets a -1 suffix
+$created2 = BackupService::create(['label' => 'manual']);
+assert_true($created['remote_path'] !== $created2['remote_path'], 'Backup: second create() gets unique path');
+
+// 50.7 — gz compression opt-in produces a .gz sidecar
+$createdGz = BackupService::create(['label' => 'manual', 'compress' => true]);
+$gzPath = $backupRoot . '/storage/backups/' . $createdGz['remote_path'] . '.gz';
+assert_true(is_file($gzPath), 'Backup: --gz produces .db.gz sidecar');
+assert_true($createdGz['compressed'] === true, 'Backup: compressed=true in meta');
+
+// 50.8 — GC keeps minimum_kept newest backups
+$gcCfg = $backupCfg;
+$gcCfg['retention'] = ['daily' => 1, 'weekly' => 1, 'monthly' => 1, 'minimum_kept' => 2];
+$gcRoot = $backupRoot . '/_gc';
+mkdir($gcRoot . '/storage/backups/2026/03/01', 0775, true);
+mkdir($gcRoot . '/storage/backups/2026/03/15', 0775, true);
+mkdir($gcRoot . '/storage/backups/2026/04/01', 0775, true);
+mkdir($gcRoot . '/storage/backups/2026/04/25', 0775, true);
+$gcPdo = new PDO('sqlite:' . $gcRoot . '/live.db');
+$gcPdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$gcPdo->exec('CREATE TABLE x (id INTEGER PRIMARY KEY)');
+BackupService::init($gcPdo, $gcCfg, $gcRoot);
+foreach ([
+    ['2026/03/01/eshop-20260301-120000.db', '2026-03-01T12:00:00+00:00', 'auto'],
+    ['2026/03/15/eshop-20260315-120000.db', '2026-03-15T12:00:00+00:00', 'auto'],
+    ['2026/04/01/eshop-20260401-120000.db', '2026-04-01T12:00:00+00:00', 'auto'],
+    ['2026/04/25/eshop-20260425-120000.db', '2026-04-25T12:00:00+00:00', 'auto'],
+] as $tup) {
+    [$rp, $ts, $lbl] = $tup;
+    file_put_contents($gcRoot . '/storage/backups/' . $rp, str_repeat("\0", 32));
+    file_put_contents($gcRoot . '/storage/backups/' . $rp . '.meta.json', json_encode(['timestamp' => $ts, 'label' => $lbl, 'sha256' => '0', 'size_bytes' => 32]));
+    @touch($gcRoot . '/storage/backups/' . $rp, strtotime($ts));
+}
+$gcRes = BackupService::gc();
+assert_greater($gcRes['kept'], 1, 'Backup: GC kept at least minimum_kept');
+assert_true(count($gcRes['deleted']) >= 1, 'Backup: GC deleted at least one stale backup');
+
+// 50.9 — Re-init service back on the original backupPdo for restore tests
+BackupService::init($backupPdo, $backupCfg, $backupRoot);
+
+// Mutate live DB then restore — verify rollback
+$backupPdo->exec("INSERT INTO customers (email) VALUES ('c@x.sk'), ('d@x.sk')");
+$beforeRestore = (int)$backupPdo->query("SELECT COUNT(*) FROM customers")->fetchColumn();
+assert_equals(4, $beforeRestore, 'Backup: live mutated to 4 customers before restore');
+
+$backupPdo = null; // release file handle on Windows so restore can swap
+$res = BackupService::restore($created['remote_path']);
+assert_equals('ok', (string)$res['integrity'], 'Restore: integrity_check returns ok');
+assert_true(is_string($res['snapshot']) && str_ends_with($res['snapshot'], '.db'), 'Restore: pre-restore-snapshot taken');
+$verifyPdo = new PDO('sqlite:' . $liveBackupDb);
+$verifyPdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$afterRestore = (int)$verifyPdo->query("SELECT COUNT(*) FROM customers")->fetchColumn();
+assert_equals(2, $afterRestore, 'Restore: customers count rolled back from 4 to 2');
+$verifyPdo = null;
+
+// 50.10 — Tampered backup is rejected (sha256 mismatch)
+$absSrc = $backupRoot . '/storage/backups/' . $created2['remote_path'];
+file_put_contents($absSrc, str_repeat('X', 16), FILE_APPEND);
+$tampered = false;
+try {
+    BackupService::restore($created2['remote_path']);
+} catch (\Throwable $e) {
+    $tampered = (stripos($e->getMessage(), 'sha256 mismatch') !== false);
+}
+assert_true($tampered, 'Restore: tampered backup rejected with sha256 mismatch');
+
+// 50.11 — Migrator preApplyHook fires once before pending migrations
+$mTmp = $backupRoot . '/_mig';
+@mkdir($mTmp, 0775, true);
+$mDb = $mTmp . '/m.db';
+@unlink($mDb);
+$mPdo = new PDO('sqlite:' . $mDb);
+$mPdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$mDir = $mTmp . '/migrations';
+@mkdir($mDir);
+file_put_contents($mDir . '/20260101000000_a.php', "<?php\nreturn new class { public function up(PDO \$db, bool \$is): void { \$db->exec('CREATE TABLE a (id INTEGER PRIMARY KEY)'); } };\n");
+$migrator = new Migrator($mPdo, $mDir, $mTmp . '/m.lock');
+$hookFired = 0;
+$migrator->apply(static fn ($m) => null, function () use (&$hookFired) { $hookFired++; });
+assert_equals(1, $hookFired, 'Migrator: preApplyHook fired exactly once for pending migrations');
+
+// 50.12 — preApplyHook NOT called when nothing pending
+$hookFired2 = 0;
+$migrator->apply(static fn ($m) => null, function () use (&$hookFired2) { $hookFired2++; });
+assert_equals(0, $hookFired2, 'Migrator: preApplyHook skipped when no pending migrations');
+
+// 50.13 — preApplyHook throwing aborts the apply (no migration recorded)
+file_put_contents($mDir . '/20260102000000_b.php', "<?php\nreturn new class { public function up(PDO \$db, bool \$is): void { \$db->exec('CREATE TABLE b (id INTEGER PRIMARY KEY)'); } };\n");
+$throwCaught = false;
+try {
+    $migrator->apply(static fn ($m) => null, function () { throw new RuntimeException('hook says no'); });
+} catch (\Throwable $e) {
+    $throwCaught = true;
+}
+assert_true($throwCaught, 'Migrator: preApplyHook throw propagates');
+$bExists = (bool)$mPdo->query("SELECT name FROM sqlite_master WHERE name='b'")->fetchColumn();
+assert_true(!$bExists, 'Migrator: preApplyHook throw prevents the migration from running');
+
+// 50.14 — buildRemotePath uses Y/m/d/eshop-YmdHis.db
+$rp = BackupService::buildRemotePath(new DateTimeImmutable('2026-04-25T14:30:12+00:00'), 0);
+assert_equals('2026/04/25/eshop-20260425-143012.db', $rp, 'Backup: buildRemotePath layout');
+
+// Cleanup backup test artifacts (releases Windows locks)
+BackupService::reset();
+$mPdo = null;
+$gcPdo = null;
+usleep(100000);
+foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($backupRoot, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST) as $f) {
+    $f->isDir() ? @rmdir($f->getPathname()) : @unlink($f->getPathname());
+}
+@rmdir($backupRoot);
+
+// Re-init the global Db singleton on the main test DB so any later tests still work
+Db::init($pdo, 'sqlite');
+
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
 if ($failed > 0) {
