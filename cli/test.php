@@ -2523,6 +2523,11 @@ $shippingMig->up($pdo, true);
 $customPickup = (string)$pdo->query("SELECT name FROM shipping_methods WHERE code = 'pickup'")->fetchColumn();
 assert_equals('Admin custom pickup', $customPickup, 'Shipping: seed does not overwrite admin-edited method');
 
+$pdo->exec("UPDATE shipping_methods SET active = 0 WHERE code = 'packeta'");
+$disabledPacketa = ShippingService::selectRate('packeta', 'SK', 2000, 2000, false, 0);
+assert_true($disabledPacketa === null, 'Shipping: disabled admin method is not selectable');
+$pdo->exec("UPDATE shipping_methods SET active = 1 WHERE code = 'packeta'");
+
 $dbRatesSk = ShippingService::calculateRates('SK', 2000, 2000);
 $dbCarriersSk = array_column($dbRatesSk, 'carrier');
 assert_true(count($dbRatesSk) >= 3, 'Shipping: seeded pricing returns rates for SK checkout');
@@ -2533,6 +2538,13 @@ assert_true(in_array('gls', $dbCarriersSk), 'Shipping: seeded pricing includes g
 $glsEu = ShippingService::selectRate('gls', 'FR', 6000, 2000, false, 0);
 assert_true($glsEu !== null, 'Shipping: seeded EU fallback rate returns GLS for FR');
 assert_equals(1599, (int)$glsEu['price'], 'Shipping: seeded EU fallback 5-20kg price = 1599 cents');
+
+$invalidCountryRate = ShippingService::selectRate('packeta', 'US', 2000, 2000, false, 0);
+assert_true($invalidCountryRate === null, 'Shipping: invalid country/method combination returns no rate');
+
+$freePacketa = ShippingService::selectRate('packeta', 'SK', 2000, 5000, false, 0);
+assert_true($freePacketa !== null, 'Shipping: Packeta resolves at free shipping threshold');
+assert_equals(0, (int)$freePacketa['price'], 'Shipping: method free_above threshold zeroes price');
 
 $selectedSeedRate = ShippingService::selectRate('packeta', 'SK', 2000, 2000, false, 0);
 assert_true($selectedSeedRate !== null, 'Shipping: seeded Packeta rate selectable');

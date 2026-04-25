@@ -46,9 +46,8 @@ class ShippingService
         $subtotal = max(0, $subtotal);
         $volumeCm3 = max(0, $volumeCm3);
 
-        $dbRates = self::databaseRates($country, $weightG, $subtotal, $cod, $volumeCm3);
-        if (!empty($dbRates)) {
-            return $dbRates;
+        if (self::hasDatabasePricing()) {
+            return self::databaseRates($country, $weightG, $subtotal, $cod, $volumeCm3);
         }
 
         $adapters = self::resolveAdapters();
@@ -222,9 +221,6 @@ class ShippingService
     private static function databaseRates(string $country, int $weightG, int $subtotal, bool $cod, int $volumeCm3): array
     {
         $db = Db::get();
-        if (!self::tableExists($db, 'shipping_methods') || !self::tableExists($db, 'shipping_zones')) {
-            return [];
-        }
 
         $stmt = $db->prepare("SELECT zone_code FROM shipping_zone_countries WHERE country = :country ORDER BY id");
         $stmt->execute([':country' => $country]);
@@ -286,6 +282,15 @@ class ShippingService
         }
 
         return $rates;
+    }
+
+    private static function hasDatabasePricing(): bool
+    {
+        $db = Db::get();
+        return self::tableExists($db, 'shipping_methods')
+            && self::tableExists($db, 'shipping_zones')
+            && self::tableExists($db, 'shipping_zone_countries')
+            && self::tableExists($db, 'shipping_rates');
     }
 
     private static function tableExists(\PDO $db, string $table): bool
