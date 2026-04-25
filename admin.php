@@ -57,6 +57,7 @@ $pagePermissions = [
     'warehouse'  => 'import',
     'feeds'      => 'import',
     'feed'       => 'import',
+    'shipping'   => 'products.edit',
 ];
 $requiredPerm = $pagePermissions[$page] ?? 'reports.view';
 Security::adminRequire($requiredPerm);
@@ -84,6 +85,7 @@ $title = match($page) {
     'warehouse'  => isset($_GET['id']) ? I18n::t('admin.title.warehouse_edit') : I18n::t('admin.title.warehouse_new'),
     'feeds'      => I18n::t('admin.title.feeds'),
     'feed'       => isset($_GET['id']) ? I18n::t('admin.title.feed_edit') : I18n::t('admin.title.feed_new'),
+    'shipping'   => 'Doprava',
     default      => I18n::t('admin.title.default'),
 };
 
@@ -150,6 +152,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
     <?php if (Security::adminCan('import')): ?><a href="admin.php?p=warehouses" class="<?= $page==='warehouses'||$page==='warehouse'?'active':'' ?>"><?= esc(I18n::t('admin.nav.warehouses')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('import')): ?><a href="admin.php?p=feeds" class="<?= $page==='feeds'||$page==='feed'?'active':'' ?>"><?= esc(I18n::t('admin.nav.feeds')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=pages" class="<?= $page==='pages'?'active':'' ?>"><?= esc(I18n::t('admin.nav.cms_pages')) ?></a><?php endif; ?>
+    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=shipping" class="<?= $page==='shipping'?'active':'' ?>">Doprava</a><?php endif; ?>
     <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=audit" class="<?= $page==='audit'?'active':'' ?>"><?= esc(I18n::t('admin.nav.audit')) ?></a><?php endif; ?>
 </nav>
 <main>
@@ -173,6 +176,7 @@ match($page) {
     'warehouse'  => pageWarehouse(),
     'feeds'      => pageFeeds(),
     'feed'       => pageFeed(),
+    'shipping'   => pageShipping(),
     default      => pageDashboard(),
 };
 ?>
@@ -1009,6 +1013,14 @@ function handlePost(string $page, string $action): void {
         'feed:save'         => handleFeedSave(),
         'feeds:delete'      => handleFeedDelete(),
         'feeds:sync'        => handleFeedSync(),
+        'shipping:method_save' => handleShippingMethodSave(),
+        'shipping:method_delete' => handleShippingMethodDelete(),
+        'shipping:zone_save' => handleShippingZoneSave(),
+        'shipping:zone_delete' => handleShippingZoneDelete(),
+        'shipping:country_save' => handleShippingCountrySave(),
+        'shipping:country_delete' => handleShippingCountryDelete(),
+        'shipping:rate_save' => handleShippingRateSave(),
+        'shipping:rate_delete' => handleShippingRateDelete(),
         default          => null,
     };
 }
@@ -1933,6 +1945,120 @@ function handleFeedDelete(): void {
     header('Location: admin.php?p=feeds');
     exit;
 }
+
+function pageShipping(): void {
+    $db = Db::get();
+    $methods = $db->query("SELECT * FROM shipping_methods ORDER BY sort_order, code")->fetchAll(PDO::FETCH_ASSOC);
+    $zones = $db->query("SELECT * FROM shipping_zones ORDER BY sort_order, code")->fetchAll(PDO::FETCH_ASSOC);
+    $countries = $db->query("SELECT * FROM shipping_zone_countries ORDER BY zone_code, country, postal_min")->fetchAll(PDO::FETCH_ASSOC);
+    $rates = $db->query("SELECT r.*, m.name AS method_name, z.name AS zone_name FROM shipping_rates r LEFT JOIN shipping_methods m ON m.code = r.method_code LEFT JOIN shipping_zones z ON z.code = r.zone_code ORDER BY COALESCE(r.sort_order, 100), r.method_code, r.country, r.weight_to_g LIMIT 200")->fetchAll(PDO::FETCH_ASSOC);
+    ?>
+    <h1>Doprava</h1>
+    <div class="card">
+        <h3>Metody dopravy</h3>
+        <table>
+            <thead><tr><th>Kod</th><th>Nazov</th><th>Carrier</th><th>Typ</th><th>Limity</th><th>Aktivna</th><th></th></tr></thead>
+            <tbody>
+            <?php foreach ($methods as $m): ?>
+            <tr>
+                <form method="post" action="admin.php?p=shipping&action=method_save">
+                    <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                    <input type="hidden" name="id" value="<?= (int)$m['id'] ?>">
+                    <td><input name="code" value="<?= esc($m['code']) ?>" required style="width:7rem"></td>
+                    <td><input name="name" value="<?= esc($m['name']) ?>" required style="width:12rem"><br><input name="description" value="<?= esc($m['description'] ?? '') ?>" placeholder="popis" style="width:12rem"></td>
+                    <td><input name="carrier" value="<?= esc($m['carrier']) ?>" required style="width:7rem"><br><input name="adapter_class" value="<?= esc($m['adapter_class'] ?? '') ?>" placeholder="adapter" style="width:7rem"></td>
+                    <td><select name="service_type"><option value="parcel" <?= ($m['service_type'] ?? '')==='parcel'?'selected':'' ?>>parcel</option><option value="pickup" <?= ($m['service_type'] ?? '')==='pickup'?'selected':'' ?>>pickup</option></select><br><label><input type="checkbox" name="supports_cod" value="1" <?= !empty($m['supports_cod'])?'checked':'' ?>> COD</label> <label><input type="checkbox" name="supports_pickup" value="1" <?= !empty($m['supports_pickup'])?'checked':'' ?>> pickup</label></td>
+                    <td><input type="number" name="free_above" value="<?= esc($m['free_above'] ?? '') ?>" placeholder="free above" style="width:6rem"><br><input type="number" name="max_weight_g" value="<?= esc($m['max_weight_g'] ?? '') ?>" placeholder="max g" style="width:6rem"><input type="number" name="max_volume_cm3" value="<?= esc($m['max_volume_cm3'] ?? '') ?>" placeholder="max cm3" style="width:6rem"></td>
+                    <td><input type="number" name="sort_order" value="<?= (int)$m['sort_order'] ?>" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" <?= !empty($m['active'])?'checked':'' ?>> aktivna</label></td>
+                    <td><button class="btn btn-sm btn-primary">Ulozit</button>
+                </form>
+                <form method="post" action="admin.php?p=shipping&action=method_delete" style="display:inline" onsubmit="return confirm('Zmazat metodu?')"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$m['id'] ?>"><button class="btn btn-sm btn-danger">Zmazat</button></form></td>
+            </tr>
+            <?php endforeach; ?>
+            <tr><form method="post" action="admin.php?p=shipping&action=method_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><input name="code" required placeholder="packeta"></td><td><input name="name" required placeholder="Nazov"><br><input name="description" placeholder="popis"></td><td><input name="carrier" required placeholder="packeta"><br><input name="adapter_class" placeholder="PacketaShipping"></td><td><select name="service_type"><option value="parcel">parcel</option><option value="pickup">pickup</option></select><br><label><input type="checkbox" name="supports_cod" value="1"> COD</label> <label><input type="checkbox" name="supports_pickup" value="1"> pickup</label></td><td><input type="number" name="free_above" placeholder="free above" style="width:6rem"><br><input type="number" name="max_weight_g" placeholder="max g" style="width:6rem"><input type="number" name="max_volume_cm3" placeholder="max cm3" style="width:6rem"></td><td><input type="number" name="sort_order" value="100" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" checked> aktivna</label></td><td><button class="btn btn-sm btn-primary">Pridat</button></td></form></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h3>Zony a krajiny</h3>
+        <table><thead><tr><th>Kod</th><th>Nazov</th><th>Popis</th><th>Aktivna</th><th></th></tr></thead><tbody>
+        <?php foreach ($zones as $z): ?>
+        <tr><form method="post" action="admin.php?p=shipping&action=zone_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$z['id'] ?>"><td><input name="code" value="<?= esc($z['code']) ?>" required></td><td><input name="name" value="<?= esc($z['name']) ?>" required></td><td><input name="description" value="<?= esc($z['description'] ?? '') ?>" style="width:100%"></td><td><input type="number" name="sort_order" value="<?= (int)$z['sort_order'] ?>" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" <?= !empty($z['active'])?'checked':'' ?>> aktivna</label></td><td><button class="btn btn-sm btn-primary">Ulozit</button></form> <form method="post" action="admin.php?p=shipping&action=zone_delete" style="display:inline" onsubmit="return confirm('Zmazat zonu?')"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$z['id'] ?>"><button class="btn btn-sm btn-danger">Zmazat</button></form></td></tr>
+        <?php endforeach; ?>
+        <tr><form method="post" action="admin.php?p=shipping&action=zone_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><input name="code" required placeholder="sk"></td><td><input name="name" required placeholder="Slovensko"></td><td><input name="description" style="width:100%"></td><td><input type="number" name="sort_order" value="100" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" checked> aktivna</label></td><td><button class="btn btn-sm btn-primary">Pridat</button></td></form></tr>
+        </tbody></table>
+        <h4 style="margin-top:1rem">Krajiny v zonach</h4>
+        <table><thead><tr><th>Zona</th><th>Krajina</th><th>PSC od</th><th>PSC do</th><th></th></tr></thead><tbody>
+        <?php foreach ($countries as $c): ?>
+        <tr><td><?= esc($c['zone_code']) ?></td><td><?= esc($c['country']) ?></td><td><?= esc($c['postal_min'] ?? '') ?></td><td><?= esc($c['postal_max'] ?? '') ?></td><td><form method="post" action="admin.php?p=shipping&action=country_delete" style="display:inline"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$c['id'] ?>"><button class="btn btn-sm btn-danger">Zmazat</button></form></td></tr>
+        <?php endforeach; ?>
+        <tr><form method="post" action="admin.php?p=shipping&action=country_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><select name="zone_code"><?php foreach ($zones as $z): ?><option value="<?= esc($z['code']) ?>"><?= esc($z['code']) ?></option><?php endforeach; ?></select></td><td><input name="country" maxlength="2" required placeholder="SK" style="width:4rem"></td><td><input name="postal_min" style="width:6rem"></td><td><input name="postal_max" style="width:6rem"></td><td><button class="btn btn-sm btn-primary">Pridat</button></td></form></tr>
+        </tbody></table>
+    </div>
+
+    <div class="card">
+        <h3>Sadzby</h3>
+        <table><thead><tr><th>Metoda/zona</th><th>Krajina</th><th>Vaha g</th><th>Objem cm3</th><th>Cena</th><th>COD</th><th>Dni</th><th>Aktivna</th><th></th></tr></thead><tbody>
+        <?php foreach ($rates as $r): ?>
+        <tr><form method="post" action="admin.php?p=shipping&action=rate_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$r['id'] ?>"><td><select name="method_code"><?php foreach ($methods as $m): ?><option value="<?= esc($m['code']) ?>" <?= ($r['method_code'] ?? '')===$m['code']?'selected':'' ?>><?= esc($m['code']) ?></option><?php endforeach; ?></select><br><select name="zone_code"><?php foreach ($zones as $z): ?><option value="<?= esc($z['code']) ?>" <?= ($r['zone_code'] ?? '')===$z['code']?'selected':'' ?>><?= esc($z['code']) ?></option><?php endforeach; ?></select></td><td><input name="country" value="<?= esc($r['country']) ?>" maxlength="2" style="width:4rem"></td><td><input type="number" name="weight_from_g" value="<?= (int)$r['weight_from_g'] ?>" style="width:6rem"><br><input type="number" name="weight_to_g" value="<?= (int)$r['weight_to_g'] ?>" style="width:6rem"></td><td><input type="number" name="volume_to_cm3" value="<?= esc($r['volume_to_cm3'] ?? '') ?>" style="width:7rem"></td><td><input type="number" name="price" value="<?= (int)$r['price'] ?>" required style="width:6rem"></td><td><input type="number" name="cod_surcharge" value="<?= (int)$r['cod_surcharge'] ?>" style="width:5rem"></td><td><input name="delivery_days" value="<?= esc($r['delivery_days'] ?? '') ?>" style="width:4rem"></td><td><input type="number" name="sort_order" value="<?= (int)($r['sort_order'] ?? 100) ?>" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" <?= !isset($r['active']) || $r['active']?'checked':'' ?>> aktivna</label></td><td><button class="btn btn-sm btn-primary">Ulozit</button></form> <form method="post" action="admin.php?p=shipping&action=rate_delete" style="display:inline" onsubmit="return confirm('Zmazat sadzbu?')"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$r['id'] ?>"><button class="btn btn-sm btn-danger">Zmazat</button></form></td></tr>
+        <?php endforeach; ?>
+        <tr><form method="post" action="admin.php?p=shipping&action=rate_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><select name="method_code"><?php foreach ($methods as $m): ?><option value="<?= esc($m['code']) ?>"><?= esc($m['code']) ?></option><?php endforeach; ?></select><br><select name="zone_code"><?php foreach ($zones as $z): ?><option value="<?= esc($z['code']) ?>"><?= esc($z['code']) ?></option><?php endforeach; ?></select></td><td><input name="country" maxlength="2" placeholder="SK" style="width:4rem"></td><td><input type="number" name="weight_from_g" value="0" style="width:6rem"><br><input type="number" name="weight_to_g" value="5000" style="width:6rem"></td><td><input type="number" name="volume_to_cm3" style="width:7rem"></td><td><input type="number" name="price" value="0" required style="width:6rem"></td><td><input type="number" name="cod_surcharge" value="0" style="width:5rem"></td><td><input name="delivery_days" style="width:4rem"></td><td><input type="number" name="sort_order" value="100" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" checked> aktivna</label></td><td><button class="btn btn-sm btn-primary">Pridat</button></td></form></tr>
+        </tbody></table>
+    </div>
+    <?php
+}
+
+function handleShippingMethodSave(): void {
+    $db = Db::get();
+    $id = Security::int($_POST['id'] ?? 0);
+    $code = Security::slug($_POST['code'] ?? '');
+    $carrier = Security::slug($_POST['carrier'] ?? '');
+    $name = trim($_POST['name'] ?? '');
+    $serviceType = in_array($_POST['service_type'] ?? '', ['parcel', 'pickup'], true) ? $_POST['service_type'] : 'parcel';
+    if (!$code || !$carrier || !$name) { setFlash('err', 'Kod, carrier a nazov metody su povinne.'); header('Location: admin.php?p=shipping'); exit; }
+    $data = [':code'=>$code, ':carrier'=>$carrier, ':name'=>$name, ':description'=>trim($_POST['description'] ?? ''), ':adapter_class'=>trim($_POST['adapter_class'] ?? ''), ':service_type'=>$serviceType, ':supports_cod'=>(int)!empty($_POST['supports_cod']), ':supports_pickup'=>(int)!empty($_POST['supports_pickup']), ':free_above'=>shippingNullableInt('free_above'), ':max_weight_g'=>shippingNullableInt('max_weight_g'), ':max_volume_cm3'=>shippingNullableInt('max_volume_cm3'), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
+    if ($id) { $data[':id'] = $id; $db->prepare("UPDATE shipping_methods SET code=:code, carrier=:carrier, name=:name, description=:description, adapter_class=:adapter_class, service_type=:service_type, supports_cod=:supports_cod, supports_pickup=:supports_pickup, free_above=:free_above, max_weight_g=:max_weight_g, max_volume_cm3=:max_volume_cm3, active=:active, sort_order=:sort_order, updated_at=" . Db::now() . " WHERE id=:id")->execute($data); }
+    else { $db->prepare("INSERT INTO shipping_methods (code, carrier, name, description, adapter_class, service_type, supports_cod, supports_pickup, free_above, max_weight_g, max_volume_cm3, active, sort_order) VALUES (:code, :carrier, :name, :description, :adapter_class, :service_type, :supports_cod, :supports_pickup, :free_above, :max_weight_g, :max_volume_cm3, :active, :sort_order)")->execute($data); }
+    setFlash('ok', 'Metoda dopravy ulozena.'); header('Location: admin.php?p=shipping'); exit;
+}
+
+function handleShippingMethodDelete(): void { $id = Security::int($_POST['id'] ?? 0); if ($id) { Db::get()->prepare("DELETE FROM shipping_methods WHERE id = :id")->execute([':id'=>$id]); setFlash('ok', 'Metoda zmazana.'); } header('Location: admin.php?p=shipping'); exit; }
+
+function handleShippingZoneSave(): void {
+    $db = Db::get(); $id = Security::int($_POST['id'] ?? 0); $code = Security::slug($_POST['code'] ?? ''); $name = trim($_POST['name'] ?? '');
+    if (!$code || !$name) { setFlash('err', 'Kod a nazov zony su povinne.'); header('Location: admin.php?p=shipping'); exit; }
+    $data = [':code'=>$code, ':name'=>$name, ':description'=>trim($_POST['description'] ?? ''), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
+    if ($id) { $data[':id']=$id; $db->prepare("UPDATE shipping_zones SET code=:code, name=:name, description=:description, active=:active, sort_order=:sort_order, updated_at=" . Db::now() . " WHERE id=:id")->execute($data); }
+    else { $db->prepare("INSERT INTO shipping_zones (code, name, description, active, sort_order) VALUES (:code, :name, :description, :active, :sort_order)")->execute($data); }
+    setFlash('ok', 'Zona ulozena.'); header('Location: admin.php?p=shipping'); exit;
+}
+
+function handleShippingZoneDelete(): void { $id = Security::int($_POST['id'] ?? 0); if ($id) { Db::get()->prepare("DELETE FROM shipping_zones WHERE id = :id")->execute([':id'=>$id]); setFlash('ok', 'Zona zmazana.'); } header('Location: admin.php?p=shipping'); exit; }
+
+function handleShippingCountrySave(): void {
+    $db = Db::get(); $zoneCode = Security::slug($_POST['zone_code'] ?? ''); $country = strtoupper(trim($_POST['country'] ?? ''));
+    if (!$zoneCode || !preg_match('/^[A-Z]{2}$/', $country)) { setFlash('err', 'Zona a ISO krajina su povinne.'); header('Location: admin.php?p=shipping'); exit; }
+    $db->prepare("INSERT OR IGNORE INTO shipping_zone_countries (zone_code, country, postal_min, postal_max) VALUES (:zone, :country, :min, :max)")->execute([':zone'=>$zoneCode, ':country'=>$country, ':min'=>trim($_POST['postal_min'] ?? ''), ':max'=>trim($_POST['postal_max'] ?? '')]);
+    setFlash('ok', 'Krajina pridana do zony.'); header('Location: admin.php?p=shipping'); exit;
+}
+
+function handleShippingCountryDelete(): void { $id = Security::int($_POST['id'] ?? 0); if ($id) { Db::get()->prepare("DELETE FROM shipping_zone_countries WHERE id = :id")->execute([':id'=>$id]); setFlash('ok', 'Krajina zmazana.'); } header('Location: admin.php?p=shipping'); exit; }
+
+function handleShippingRateSave(): void {
+    $db = Db::get(); $id = Security::int($_POST['id'] ?? 0); $methodCode = Security::slug($_POST['method_code'] ?? ''); $zoneCode = Security::slug($_POST['zone_code'] ?? ''); $country = strtoupper(trim($_POST['country'] ?? ''));
+    $from = max(0, Security::int($_POST['weight_from_g'] ?? 0)); $to = max(0, Security::int($_POST['weight_to_g'] ?? 0));
+    if (!$methodCode || !$zoneCode || ($country !== '' && !preg_match('/^[A-Z]{2}$/', $country)) || $to < $from) { setFlash('err', 'Neplatna sadzba dopravy.'); header('Location: admin.php?p=shipping'); exit; }
+    $stmt = $db->prepare("SELECT carrier FROM shipping_methods WHERE code = :code"); $stmt->execute([':code'=>$methodCode]); $carrier = (string)($stmt->fetchColumn() ?: $methodCode);
+    $data = [':method_code'=>$methodCode, ':carrier'=>$carrier, ':country'=>$country, ':zone_code'=>$zoneCode, ':weight_from_g'=>$from, ':weight_to_g'=>$to, ':volume_to_cm3'=>shippingNullableInt('volume_to_cm3'), ':price'=>max(0, Security::int($_POST['price'] ?? 0)), ':cod_surcharge'=>max(0, Security::int($_POST['cod_surcharge'] ?? 0)), ':delivery_days'=>trim($_POST['delivery_days'] ?? ''), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
+    if ($id) { $data[':id']=$id; $db->prepare("UPDATE shipping_rates SET method_code=:method_code, carrier=:carrier, country=:country, zone_code=:zone_code, weight_from_g=:weight_from_g, weight_to_g=:weight_to_g, volume_to_cm3=:volume_to_cm3, price=:price, cod_surcharge=:cod_surcharge, delivery_days=:delivery_days, active=:active, sort_order=:sort_order, updated_at=" . Db::now() . " WHERE id=:id")->execute($data); }
+    else { $db->prepare("INSERT INTO shipping_rates (method_code, carrier, country, zone_code, weight_from_g, weight_to_g, volume_to_cm3, price, cod_surcharge, delivery_days, active, sort_order) VALUES (:method_code, :carrier, :country, :zone_code, :weight_from_g, :weight_to_g, :volume_to_cm3, :price, :cod_surcharge, :delivery_days, :active, :sort_order)")->execute($data); }
+    setFlash('ok', 'Sadzba ulozena.'); header('Location: admin.php?p=shipping'); exit;
+}
+
+function handleShippingRateDelete(): void { $id = Security::int($_POST['id'] ?? 0); if ($id) { Db::get()->prepare("DELETE FROM shipping_rates WHERE id = :id")->execute([':id'=>$id]); setFlash('ok', 'Sadzba zmazana.'); } header('Location: admin.php?p=shipping'); exit; }
+
+function shippingNullableInt(string $key): ?int { $v = trim((string)($_POST[$key] ?? '')); return $v === '' ? null : max(0, Security::int($v)); }
 
 function handleFeedSync(): void {
     $id = Security::int($_POST['feed_id'] ?? 0);
