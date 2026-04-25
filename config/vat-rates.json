@@ -1,0 +1,175 @@
+{
+    "_doc": "EU VAT rates per country and class. Primary record = currently valid rate. history[] holds prior rates with valid_from/valid_to. Resolver picks effective rate for a given date (typically invoice.issued_at).",
+    "_updated": "2026-04-25",
+
+    "default_rate": 0,
+    "fallback_class": "standard",
+
+    "eu_countries": [
+        "AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","HU",
+        "IE","IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE"
+    ],
+
+    "rates": {
+        "SK": {
+            "standard": 23, "reduced": 19, "reduced2": 5, "zero": 0,
+            "valid_from": "2025-01-01",
+            "history": [
+                {"standard": 20, "reduced": 10, "reduced2": 5, "zero": 0,
+                 "valid_from": "2020-01-01", "valid_to": "2024-12-31"}
+            ]
+        },
+        "CZ": {
+            "standard": 21, "reduced": 12, "reduced2": 12, "zero": 0,
+            "valid_from": "2024-01-01",
+            "history": [
+                {"standard": 21, "reduced": 15, "reduced2": 10, "zero": 0,
+                 "valid_from": "2020-01-01", "valid_to": "2023-12-31"}
+            ]
+        },
+        "PL": {
+            "standard": 23, "reduced": 8, "reduced2": 5, "zero": 0,
+            "valid_from": "2011-01-01",
+            "history": []
+        },
+        "HU": {
+            "standard": 27, "reduced": 18, "reduced2": 5, "zero": 0,
+            "valid_from": "2012-01-01",
+            "history": []
+        },
+        "DE": {
+            "standard": 19, "reduced": 7, "reduced2": 7, "zero": 0,
+            "valid_from": "2007-01-01",
+            "history": []
+        },
+        "AT": {
+            "standard": 20, "reduced": 10, "reduced2": 13, "zero": 0,
+            "valid_from": "2016-01-01",
+            "history": []
+        },
+        "FR": {
+            "standard": 20, "reduced": 10, "reduced2": 5.5, "zero": 0,
+            "valid_from": "2014-01-01",
+            "history": []
+        },
+        "IT": {
+            "standard": 22, "reduced": 10, "reduced2": 5, "zero": 0,
+            "valid_from": "2013-10-01",
+            "history": []
+        },
+        "ES": {
+            "standard": 21, "reduced": 10, "reduced2": 4, "zero": 0,
+            "valid_from": "2012-09-01",
+            "history": []
+        },
+        "NL": {
+            "standard": 21, "reduced": 9, "reduced2": 9, "zero": 0,
+            "valid_from": "2019-01-01",
+            "history": []
+        },
+        "BE": {
+            "standard": 21, "reduced": 12, "reduced2": 6, "zero": 0,
+            "valid_from": "1996-01-01",
+            "history": []
+        },
+        "RO": {
+            "standard": 19, "reduced": 9, "reduced2": 5, "zero": 0,
+            "valid_from": "2017-01-01",
+            "history": []
+        },
+        "SI": {
+            "standard": 22, "reduced": 9.5, "reduced2": 5, "zero": 0,
+            "valid_from": "2013-07-01",
+            "history": []
+        },
+        "HR": {
+            "standard": 25, "reduced": 13, "reduced2": 5, "zero": 0,
+            "valid_from": "2014-01-01",
+            "history": []
+        },
+        "BG": {
+            "standard": 20, "reduced": 9, "reduced2": 9, "zero": 0,
+            "valid_from": "2007-01-01",
+            "history": []
+        },
+        "DK": {
+            "standard": 25, "reduced": 25, "reduced2": 25, "zero": 0,
+            "valid_from": "1992-01-01",
+            "history": []
+        },
+        "SE": {
+            "standard": 25, "reduced": 12, "reduced2": 6, "zero": 0,
+            "valid_from": "1990-01-01",
+            "history": []
+        },
+        "FI": {
+            "standard": 25.5, "reduced": 14, "reduced2": 10, "zero": 0,
+            "valid_from": "2024-09-01",
+            "history": [
+                {"standard": 24, "reduced": 14, "reduced2": 10, "zero": 0,
+                 "valid_from": "2013-01-01", "valid_to": "2024-08-31"}
+            ]
+        },
+        "PT": {
+            "standard": 23, "reduced": 13, "reduced2": 6, "zero": 0,
+            "valid_from": "2011-01-01",
+            "history": []
+        },
+        "IE": {
+            "standard": 23, "reduced": 13.5, "reduced2": 9, "zero": 0,
+            "valid_from": "2012-01-01",
+            "history": []
+        },
+        "GR": {
+            "standard": 24, "reduced": 13, "reduced2": 6, "zero": 0,
+            "valid_from": "2016-06-01",
+            "history": []
+        },
+        "LU": {
+            "standard": 17, "reduced": 8, "reduced2": 3, "zero": 0,
+            "valid_from": "2024-01-01",
+            "history": [
+                {"standard": 16, "reduced": 7, "reduced2": 3, "zero": 0,
+                 "valid_from": "2023-01-01", "valid_to": "2023-12-31"}
+            ]
+        },
+        "MT": {
+            "standard": 18, "reduced": 7, "reduced2": 5, "zero": 0,
+            "valid_from": "2004-05-01",
+            "history": []
+        },
+        "CY": {
+            "standard": 19, "reduced": 9, "reduced2": 5, "zero": 0,
+            "valid_from": "2014-01-01",
+            "history": []
+        },
+        "EE": {
+            "standard": 22, "reduced": 9, "reduced2": 9, "zero": 0,
+            "valid_from": "2024-01-01",
+            "history": [
+                {"standard": 20, "reduced": 9, "reduced2": 9, "zero": 0,
+                 "valid_from": "2009-07-01", "valid_to": "2023-12-31"}
+            ]
+        },
+        "LV": {
+            "standard": 21, "reduced": 12, "reduced2": 5, "zero": 0,
+            "valid_from": "2018-01-01",
+            "history": []
+        },
+        "LT": {
+            "standard": 21, "reduced": 9, "reduced2": 5, "zero": 0,
+            "valid_from": "2009-09-01",
+            "history": []
+        }
+    },
+
+    "product_class_aliases": {
+        "default": "standard",
+        "food":    "reduced",
+        "books":   "reduced",
+        "digital": "standard",
+        "baby":    "reduced",
+        "medicines": "reduced",
+        "transport": "reduced"
+    }
+}
