@@ -2899,6 +2899,9 @@ assert_true(in_array('gls', $dbCarriersSk), 'Shipping: seeded pricing includes g
 $glsEu = ShippingService::selectRate('gls', 'FR', 6000, 2000, false, 0);
 assert_true($glsEu !== null, 'Shipping: seeded EU fallback rate returns GLS for FR');
 assert_equals(1599, (int)$glsEu['price'], 'Shipping: seeded EU fallback 5-20kg price = 1599 cents');
+$glsEuMissingSeedCountry = ShippingService::selectRate('gls', 'BG', 6000, 2000, false, 0);
+assert_true($glsEuMissingSeedCountry !== null, 'Shipping: seeded EU fallback covers all EU countries');
+assert_equals(1599, (int)$glsEuMissingSeedCountry['price'], 'Shipping: seeded EU fallback applies to BG 5-20kg');
 
 $invalidCountryRate = ShippingService::selectRate('packeta', 'US', 2000, 2000, false, 0);
 assert_true($invalidCountryRate === null, 'Shipping: invalid country/method combination returns no rate');

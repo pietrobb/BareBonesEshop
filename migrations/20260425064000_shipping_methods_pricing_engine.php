@@ -113,7 +113,8 @@ return new class {
             ['domestic', 'SK'], ['cz', 'CZ'],
             ['near_eu', 'AT'], ['near_eu', 'HU'], ['near_eu', 'PL'], ['near_eu', 'DE'],
             ['eu', 'FR'], ['eu', 'IT'], ['eu', 'ES'], ['eu', 'NL'], ['eu', 'BE'], ['eu', 'RO'], ['eu', 'HR'], ['eu', 'SI'],
-            ['eu', 'EE'], ['eu', 'LV'], ['eu', 'LT'], ['eu', 'DK'], ['eu', 'SE'], ['eu', 'FI'], ['eu', 'PT'], ['eu', 'GR'], ['eu', 'IE'],
+            ['eu', 'BG'], ['eu', 'CY'], ['eu', 'DK'], ['eu', 'EE'], ['eu', 'FI'], ['eu', 'GR'], ['eu', 'IE'], ['eu', 'LT'],
+            ['eu', 'LU'], ['eu', 'LV'], ['eu', 'MT'], ['eu', 'PT'], ['eu', 'SE'],
         ];
         $stmt = $db->prepare("INSERT OR IGNORE INTO shipping_zone_countries (zone_code, country) VALUES (?, ?)");
         foreach ($countries as $country) $stmt->execute($country);
