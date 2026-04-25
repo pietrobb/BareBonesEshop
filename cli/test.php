@@ -2896,6 +2896,9 @@ assert_equals(1599, (int)$glsEu['price'], 'Shipping: seeded EU fallback 5-20kg p
 
 $invalidCountryRate = ShippingService::selectRate('packeta', 'US', 2000, 2000, false, 0);
 assert_true($invalidCountryRate === null, 'Shipping: invalid country/method combination returns no rate');
+$legacyInternational = ShippingService::selectRate('standard', 'US', 2000, 2000, false, 0);
+assert_true($legacyInternational !== null, 'Shipping: country without DB zone falls back to legacy international rate');
+assert_equals(1999, (int)$legacyInternational['price'], 'Shipping: legacy international fallback computes standard price');
 
 $freePacketa = ShippingService::selectRate('packeta', 'SK', 2000, 5000, false, 0);
 assert_true($freePacketa !== null, 'Shipping: Packeta resolves at free shipping threshold');

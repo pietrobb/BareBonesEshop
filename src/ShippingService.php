@@ -47,7 +47,10 @@ class ShippingService
         $volumeCm3 = max(0, $volumeCm3);
 
         if (self::hasDatabasePricing()) {
-            return self::databaseRates($country, $weightG, $subtotal, $cod, $volumeCm3);
+            $dbRates = self::databaseRates($country, $weightG, $subtotal, $cod, $volumeCm3);
+            if (!empty($dbRates)) {
+                return $dbRates;
+            }
         }
 
         $adapters = self::resolveAdapters();
