@@ -2587,6 +2587,12 @@ assert_true(!empty($onlineCheckout['session_id']), 'Payment UX: online checkout 
 $onlineCheckoutTx = PaymentService::transactionsForOrder((int)$onlineCheckout['order_id']);
 assert_equals('initiated', (string)$onlineCheckoutTx[0]['status'], 'Payment UX: online checkout logs initiated transaction');
 assert_equals((string)$onlineCheckout['session_id'], (string)$onlineCheckoutTx[0]['provider_ref'], 'Payment UX: initiated transaction stores session_id');
+$onlineCheckoutOrder = Orders::byId((int)$onlineCheckout['order_id']);
+assert_equals('packeta', (string)$onlineCheckoutOrder['shipping_method'], 'Shipping UX: api checkout stores selected ShippingService method');
+assert_equals('domestic', (string)$onlineCheckoutOrder['shipping_zone'], 'Shipping UX: api checkout stores selected ShippingService zone');
+$onlineCheckoutShippingSnapshot = json_decode((string)$onlineCheckoutOrder['shipping_rate_snapshot'], true) ?: [];
+assert_equals('packeta', (string)$onlineCheckoutShippingSnapshot['method_code'], 'Shipping UX: api checkout stores selected ShippingService rate snapshot');
+assert_equals((int)$onlineCheckoutShippingSnapshot['price'], (int)$onlineCheckoutOrder['shipping_cost'], 'Shipping UX: api checkout shipping cost matches selected rate snapshot');
 $_POST = [];
 
 $pdo->exec("UPDATE payment_methods SET active = 0 WHERE code = 'cod'");

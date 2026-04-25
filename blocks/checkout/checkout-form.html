@@ -21,9 +21,9 @@
 
         <fieldset>
             <legend>{{t.shipping_method}}</legend>
-            <label><input type="radio" name="shipping" value="standard" checked> {{t.standard_delivery}}</label>
-            <label><input type="radio" name="shipping" value="express"> {{t.express_delivery}}</label>
-            <label><input type="radio" name="shipping" value="pickup"> {{t.pickup}}</label>
+            <label><input type="radio" name="shipping_method" value="packeta" checked> Packeta</label>
+            <label><input type="radio" name="shipping_method" value="gls"> GLS</label>
+            <label><input type="radio" name="shipping_method" value="pickup"> {{t.pickup}}</label>
         </fieldset>
 
         <button type="submit" class="btn btn--primary btn--full">{{t.place_order}}</button>
