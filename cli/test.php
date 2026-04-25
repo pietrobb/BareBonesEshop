@@ -2587,6 +2587,12 @@ assert_true(!empty($onlineCheckout['session_id']), 'Payment UX: online checkout 
 $onlineCheckoutTx = PaymentService::transactionsForOrder((int)$onlineCheckout['order_id']);
 assert_equals('initiated', (string)$onlineCheckoutTx[0]['status'], 'Payment UX: online checkout logs initiated transaction');
 assert_equals((string)$onlineCheckout['session_id'], (string)$onlineCheckoutTx[0]['provider_ref'], 'Payment UX: initiated transaction stores session_id');
+$onlineCheckoutOrder = Orders::byId((int)$onlineCheckout['order_id']);
+assert_equals('packeta', (string)$onlineCheckoutOrder['shipping_method'], 'Shipping UX: api checkout stores selected ShippingService method');
+assert_equals('domestic', (string)$onlineCheckoutOrder['shipping_zone'], 'Shipping UX: api checkout stores selected ShippingService zone');
+$onlineCheckoutShippingSnapshot = json_decode((string)$onlineCheckoutOrder['shipping_rate_snapshot'], true) ?: [];
+assert_equals('packeta', (string)$onlineCheckoutShippingSnapshot['method_code'], 'Shipping UX: api checkout stores selected ShippingService rate snapshot');
+assert_equals((int)$onlineCheckoutShippingSnapshot['price'], (int)$onlineCheckoutOrder['shipping_cost'], 'Shipping UX: api checkout shipping cost matches selected rate snapshot');
 $_POST = [];
 
 $pdo->exec("UPDATE payment_methods SET active = 0 WHERE code = 'cod'");
@@ -2893,9 +2899,15 @@ assert_true(in_array('gls', $dbCarriersSk), 'Shipping: seeded pricing includes g
 $glsEu = ShippingService::selectRate('gls', 'FR', 6000, 2000, false, 0);
 assert_true($glsEu !== null, 'Shipping: seeded EU fallback rate returns GLS for FR');
 assert_equals(1599, (int)$glsEu['price'], 'Shipping: seeded EU fallback 5-20kg price = 1599 cents');
+$glsEuMissingSeedCountry = ShippingService::selectRate('gls', 'BG', 6000, 2000, false, 0);
+assert_true($glsEuMissingSeedCountry !== null, 'Shipping: seeded EU fallback covers all EU countries');
+assert_equals(1599, (int)$glsEuMissingSeedCountry['price'], 'Shipping: seeded EU fallback applies to BG 5-20kg');
 
 $invalidCountryRate = ShippingService::selectRate('packeta', 'US', 2000, 2000, false, 0);
 assert_true($invalidCountryRate === null, 'Shipping: invalid country/method combination returns no rate');
+$legacyInternational = ShippingService::selectRate('standard', 'US', 2000, 2000, false, 0);
+assert_true($legacyInternational !== null, 'Shipping: country without DB zone falls back to legacy international rate');
+assert_equals(1999, (int)$legacyInternational['price'], 'Shipping: legacy international fallback computes standard price');
 
 $freePacketa = ShippingService::selectRate('packeta', 'SK', 2000, 5000, false, 0);
 assert_true($freePacketa !== null, 'Shipping: Packeta resolves at free shipping threshold');
