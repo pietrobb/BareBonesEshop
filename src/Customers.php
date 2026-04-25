@@ -141,7 +141,7 @@ class Customers {
     // ============================================================
 
     public static function update(int $id, array $data): bool {
-        $allowed = ['name', 'phone', 'locale'];
+        $allowed = ['name', 'phone', 'locale', 'vat_id', 'vat_country', 'vat_validated_at'];
         $set = [];
         $params = [];
         foreach ($allowed as $k) {
