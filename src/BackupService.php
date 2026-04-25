@@ -173,4 +173,170 @@ class BackupService
             return null;
         }
     }
+
+    // ---------- create() ----------
+
+    /**
+     * Create a backup of the live SQLite DB.
+     *
+     * Options:
+     *   label    => string  (e.g. 'manual', 'cron', 'pre-migration')  — default 'manual'
+     *   trigger  => string  ('manual'|'auto'|'migration')             — default = label
+     *   compress => bool    — default = config.compression
+     *
+     * Returns meta array on success.
+     */
+    public static function create(array $opts = []): array
+    {
+        if (self::$db === null) {
+            throw new RuntimeException('BackupService::create — not initialized');
+        }
+        if (self::$livePath === null) {
+            throw new RuntimeException('BackupService::create — live SQLite path unknown (in-memory or unsupported driver)');
+        }
+
+        $label    = (string)($opts['label']   ?? 'manual');
+        $trigger  = (string)($opts['trigger'] ?? $label);
+        $compress = (bool)($opts['compress']  ?? (self::$cfg['compression'] ?? false));
+
+        $lockHandle = self::acquireLock();
+        try {
+            // 1. WAL checkpoint (best-effort)
+            if (!empty(self::$cfg['wal_checkpoint'])) {
+                try { self::$db->exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (\Throwable $e) { /* non-fatal */ }
+            }
+
+            // 2. Reserve a unique remote path
+            $when = new DateTimeImmutable('now');
+            $remotePath = self::reserveUniquePath($when);
+            $absPath = self::$storage->localPath($remotePath);
+            $absDir  = dirname($absPath);
+            if (!is_dir($absDir)) mkdir($absDir, 0775, true);
+
+            // 3. VACUUM INTO — atomic, consistent snapshot
+            $sqlPath = str_replace("'", "''", $absPath);
+            try {
+                self::$db->exec("VACUUM INTO '{$sqlPath}'");
+            } catch (\Throwable $e) {
+                @unlink($absPath);
+                self::log("CREATE FAIL label={$label} err=" . $e->getMessage());
+                throw new RuntimeException('VACUUM INTO failed: ' . $e->getMessage(), 0, $e);
+            }
+            if (!is_file($absPath)) {
+                throw new RuntimeException("Backup file not created: {$absPath}");
+            }
+
+            // 4. sha256 + size
+            $size = filesize($absPath);
+            $sha  = hash_file('sha256', $absPath);
+
+            // 5. Optional gzip
+            $compressed = false;
+            if ($compress) {
+                $gzPath = $absPath . '.gz';
+                $in  = @fopen($absPath, 'rb');
+                $out = @gzopen($gzPath, 'wb6');
+                if ($in === false || $out === false) {
+                    if ($in)  fclose($in);
+                    if ($out) gzclose($out);
+                    @unlink($gzPath);
+                } else {
+                    while (!feof($in)) {
+                        $buf = fread($in, 65536);
+                        if ($buf === false) break;
+                        gzwrite($out, $buf);
+                    }
+                    fclose($in);
+                    gzclose($out);
+                    $compressed = is_file($gzPath);
+                }
+            }
+
+            // 6. Schema version
+            $schemaVersion = self::currentSchemaVersion(self::$db);
+
+            // 7. Meta JSON written by storage adapter
+            $meta = [
+                'filename'       => basename($remotePath),
+                'remote_path'    => $remotePath,
+                'timestamp'      => $when->format('c'),
+                'size_bytes'     => $size,
+                'sha256'         => $sha,
+                'schema_version' => $schemaVersion,
+                'label'          => $label,
+                'trigger'        => $trigger,
+                'compressed'     => $compressed,
+                'created_by'     => 'BackupService',
+            ];
+            $metaJson = json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            if ($metaJson === false) {
+                throw new RuntimeException('Meta encode failed');
+            }
+            if (file_put_contents($absPath . '.meta.json', $metaJson) === false) {
+                throw new RuntimeException("Meta write failed: {$absPath}.meta.json");
+            }
+
+            self::log("CREATE OK path={$remotePath} size={$size} sha256={$sha} label={$label}");
+
+            // 8. Optional GC
+            if (!empty(self::$cfg['auto_gc_on_backup'])) {
+                try {
+                    $gc = self::gc();
+                    if (!empty($gc['deleted'])) {
+                        self::log('GC kept=' . $gc['kept'] . ' deleted=' . count($gc['deleted']));
+                    }
+                } catch (\Throwable $e) {
+                    self::log('GC FAIL ' . $e->getMessage());
+                }
+            }
+
+            return $meta;
+        } finally {
+            self::releaseLock($lockHandle);
+        }
+    }
+
+    // ---------- gc() (placeholder — implemented in next commit) ----------
+
+    public static function gc(): array
+    {
+        // To be implemented in the next commit (retention).
+        return ['kept' => 0, 'deleted' => []];
+    }
+
+    // ---------- locking ----------
+
+    private static function acquireLock()
+    {
+        $lockPath = self::$storage instanceof LocalBackupStorage
+            ? self::$storage->root() . DIRECTORY_SEPARATOR . '.backup.lock'
+            : sys_get_temp_dir() . DIRECTORY_SEPARATOR . '.bbe-backup.lock';
+
+        $dir = dirname($lockPath);
+        if (!is_dir($dir)) @mkdir($dir, 0775, true);
+
+        $h = fopen($lockPath, 'c');
+        if ($h === false) {
+            throw new RuntimeException("BackupService: cannot open lock file {$lockPath}");
+        }
+        $deadline = microtime(true) + 10.0;
+        while (true) {
+            if (flock($h, LOCK_EX | LOCK_NB)) {
+                return $h;
+            }
+            if (microtime(true) > $deadline) {
+                fclose($h);
+                throw new RuntimeException('BackupService: lock acquisition timed out');
+            }
+            usleep(100000); // 100ms
+        }
+    }
+
+    private static function releaseLock($h): void
+    {
+        if (is_resource($h)) {
+            @flock($h, LOCK_UN);
+            @fclose($h);
+        }
+    }
 }

@@ -49,5 +49,10 @@ storage/invoices/*
 !storage/invoices/.gitkeep
 !storage/.gitkeep
 
+# Backups
+storage/backups/*
+!storage/backups/.gitkeep
+storage/backup.log*
+
 # Environment
 .env
