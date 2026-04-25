@@ -2537,6 +2537,49 @@ $paymentOrder = Orders::byId($paymentOrderId);
 assert_equals(120, (int)$paymentOrder['payment_fee'], 'Payment methods: order stores payment fee');
 $paymentSnapshot = json_decode((string)$paymentOrder['payment_method_snapshot'], true) ?: [];
 assert_equals('cod', (string)$paymentSnapshot['code'], 'Payment methods: order stores payment snapshot JSON');
+assert_equals('manual', (string)$paymentSnapshot['provider'], 'Payment methods: order snapshot stores provider');
+assert_equals('Dobierka', (string)$paymentSnapshot['label'], 'Payment methods: order snapshot stores label');
+
+$checkoutPaymentMethods = PaymentService::availableMethods('SK', 'eur', 2799, 'packeta');
+$checkoutPaymentCodes = array_column($checkoutPaymentMethods, 'code');
+assert_true(in_array('cod', $checkoutPaymentCodes, true), 'Payment UX: checkout exposes COD for Packeta');
+$checkoutPaymentCod = PaymentService::selectMethod('cod', 'SK', 'eur', 2799, 'packeta');
+assert_true($checkoutPaymentCod !== null, 'Payment UX: checkout selected COD resolves against shipping method');
+assert_equals(120, (int)$checkoutPaymentCod['fee'], 'Payment UX: checkout selected COD includes fee');
+$checkoutPaymentPickupCod = PaymentService::selectMethod('cod', 'SK', 'eur', 2500, 'pickup');
+assert_true($checkoutPaymentPickupCod === null, 'Payment UX: checkout blocks COD for pickup constraint');
+
+$pdo->exec("UPDATE payment_methods SET active = 0 WHERE code = 'cod'");
+$checkoutDisabledCod = PaymentService::selectMethod('cod', 'SK', 'eur', 2799, 'packeta');
+assert_true($checkoutDisabledCod === null, 'Payment UX: checkout rejects disabled selected payment');
+$pdo->exec("UPDATE payment_methods SET active = 1 WHERE code = 'cod'");
+
+$paymentUxOrderId = Orders::create([
+    [
+        'product_id'   => $payProduct['id'],
+        'variant_id'   => null,
+        'qty'          => 1,
+        'price'        => (int)$payProduct['price'],
+        'sku'          => $payProduct['sku'],
+        'name'         => $payProduct['name'],
+        'variant_name' => '',
+    ],
+], [
+    'name'          => 'Payment UX Customer',
+    'email'         => 'payment-ux@example.com',
+    'phone'         => '+421900000004',
+    'address'       => ['street' => 'Payment UX 1', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK'],
+    'currency'      => 'eur',
+    'shipping_cost' => 299,
+    'payment_fee'   => (int)$checkoutPaymentCod['fee'],
+    'payment_method_snapshot' => json_encode($checkoutPaymentCod, JSON_UNESCAPED_UNICODE),
+    'tax_amount'    => 0,
+], 'cod');
+$paymentUxOrder = Orders::byId($paymentUxOrderId);
+$paymentUxSnapshot = json_decode((string)$paymentUxOrder['payment_method_snapshot'], true) ?: [];
+assert_equals(120, (int)$paymentUxOrder['payment_fee'], 'Payment UX: order stores selected payment fee');
+assert_equals('cod', (string)$paymentUxSnapshot['code'], 'Payment UX: order snapshot stores selected code');
+assert_equals('manual', (string)$paymentUxSnapshot['provider'], 'Payment UX: order snapshot stores selected provider');
 
 // ============================================================
 // SHIPPING TESTS
