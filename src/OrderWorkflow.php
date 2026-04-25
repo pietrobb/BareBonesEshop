@@ -79,7 +79,7 @@ class OrderWorkflow {
     }
 
     /**
-     * Paid: send confirmation email, notify ERP.
+     * Paid: send confirmation email, issue invoice + email it, notify ERP.
      */
     private static function handlePaid(array $order): array {
         return [
@@ -89,6 +89,9 @@ class OrderWorkflow {
                 'locale'   => $order['locale'] ?? '',
                 'order_id' => $order['id'],
             ], 5],
+            ['invoice_issue', [
+                'order_id' => $order['id'],
+            ], 3],
             ['erp_order_update', [
                 'order_id' => $order['id'],
                 'status'   => 'paid',

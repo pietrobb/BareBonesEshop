@@ -44,6 +44,7 @@ $handlers = [
     'cleanup'           => 'handleCleanup',
     'image_resize'      => 'handleImageResize',
     'import_process'    => 'handleImportProcess',
+    'invoice_issue'     => 'handleInvoiceIssue',
 ];
 
 // Process loop
@@ -488,6 +489,48 @@ function handleImageResize(array $payload, array $job): void {
 
     $storage = Adapters::storage();
     $storage->generateVariants($path);
+}
+
+function handleInvoiceIssue(array $payload, array $job): void {
+    $orderId = (int)($payload['order_id'] ?? 0);
+    if (!$orderId) return;
+
+    // Issue invoice (idempotent — returns existing invoice if already issued)
+    $invoice = InvoiceService::issue($orderId);
+    if (!$invoice) return;
+
+    $order = Orders::byId($orderId);
+    if (!$order) return;
+
+    // Build PDF attachment from disk
+    $pdfPath = InvoiceService::pdfAbsolutePath($invoice);
+    $attachments = [];
+    if (is_file($pdfPath)) {
+        $attachments[] = [
+            'filename'     => $invoice['number'] . '.pdf',
+            'path'         => $pdfPath,
+            'content_type' => 'application/pdf',
+        ];
+    }
+
+    // Email the customer with the invoice
+    $locale = (string)($invoice['locale'] ?? $order['locale'] ?? '');
+    $vars = [
+        'order_number'   => $order['order_number'],
+        'invoice_number' => $invoice['number'],
+        'invoice_total'  => I18n::price((int)$invoice['total_gross'], $invoice['currency'] ?? null),
+        'due_date'       => $invoice['due_date'],
+        'customer_name'  => $order['customer_name'],
+    ];
+
+    MailService::send(
+        'invoice_issued',
+        (string)$order['customer_email'],
+        $locale,
+        $vars,
+        $orderId,
+        $attachments
+    );
 }
 
 function handleImportProcess(array $payload, array $job): void {

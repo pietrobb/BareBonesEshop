@@ -200,6 +200,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // ============================================================
+// Public signed-token invoice download (no login required)
+// ============================================================
+if ($p === 'invoice') {
+    $token = (string)($_GET['token'] ?? '');
+    if ($token === '' || strlen($token) !== 64 || !ctype_xdigit($token)) {
+        http_response_code(400);
+        exit('Invalid token.');
+    }
+    $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE download_token = :tok LIMIT 1");
+    $stmt->execute([':tok' => $token]);
+    $inv = $stmt->fetch();
+    if (!$inv || ($inv['status'] ?? '') === 'cancelled') {
+        http_response_code(404);
+        exit('Invoice not found.');
+    }
+    $abs = InvoiceService::pdfAbsolutePath($inv);
+    if (!is_file($abs)) {
+        http_response_code(404);
+        exit('PDF missing.');
+    }
+    header('Content-Type: application/pdf');
+    header('Content-Disposition: inline; filename="' . $inv['number'] . '.pdf"');
+    header('Content-Length: ' . filesize($abs));
+    header('Cache-Control: private, max-age=300');
+    readfile($abs);
+    exit;
+}
+
+// ============================================================
 // Auth gate for private pages
 // ============================================================
 $publicPages = ['login', 'register', 'forgot', 'reset'];
@@ -394,13 +423,30 @@ switch ($p) {
         if (!$orders) {
             echo '<p class="muted">' . $e($t('account.no_orders')) . '</p>';
         } else {
-            echo '<table><tr><th>' . $e($t('account.order_number')) . '</th><th>' . $e($t('account.status')) . '</th><th>' . $e($t('account.total')) . '</th><th>' . $e($t('account.date')) . '</th></tr>';
+            // Pre-fetch invoices for these orders
+            $orderIds = array_map(static fn($r) => (int)$r['id'], $orders);
+            $invByOrder = [];
+            if ($orderIds) {
+                $ph = implode(',', array_fill(0, count($orderIds), '?'));
+                $st = Db::get()->prepare("SELECT order_id, number, download_token FROM invoices WHERE order_id IN ({$ph}) AND status != 'cancelled' ORDER BY id DESC");
+                $st->execute($orderIds);
+                foreach ($st->fetchAll() as $r) {
+                    $invByOrder[(int)$r['order_id']] = $r;
+                }
+            }
+            echo '<table><tr><th>' . $e($t('account.order_number')) . '</th><th>' . $e($t('account.status')) . '</th><th>' . $e($t('account.total')) . '</th><th>' . $e($t('account.date')) . '</th><th>' . $e($t('account.invoice')) . '</th></tr>';
             foreach ($orders as $o) {
                 echo '<tr>';
                 echo '<td>' . $e($o['order_number']) . '</td>';
                 echo '<td><span class="badge badge-' . $e($o['status']) . '">' . $e($o['status']) . '</span></td>';
                 echo '<td>' . $e(I18n::price((int)$o['total'], $o['currency'])) . '</td>';
                 echo '<td class="muted">' . $e(substr((string)$o['created_at'], 0, 16)) . '</td>';
+                $inv = $invByOrder[(int)$o['id']] ?? null;
+                if ($inv) {
+                    echo '<td><a class="btn btn-sm" href="account.php?p=invoice&token=' . $e($inv['download_token']) . '" target="_blank">' . $e($inv['number']) . '</a></td>';
+                } else {
+                    echo '<td class="muted">—</td>';
+                }
                 echo '</tr>';
             }
             echo '</table>';

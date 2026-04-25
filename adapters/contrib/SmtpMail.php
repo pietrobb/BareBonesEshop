@@ -42,6 +42,7 @@ class SmtpMail implements MailAdapter {
         $text     = (string)($msg['text'] ?? strip_tags($html));
         $replyTo  = (string)($msg['reply_to'] ?? '');
         $headers  = (array)($msg['headers'] ?? []);
+        $attachments = (array)($msg['attachments'] ?? []);
 
         if (!filter_var($to, FILTER_VALIDATE_EMAIL))  return ['status' => 'failed', 'message' => 'invalid recipient', 'raw' => null];
         if (!filter_var($from, FILTER_VALIDATE_EMAIL)) return ['status' => 'failed', 'message' => 'invalid sender',    'raw' => null];
@@ -103,7 +104,8 @@ class SmtpMail implements MailAdapter {
             $cmd('DATA');
             if (!$expect(354)) throw new \RuntimeException('DATA not accepted');
 
-            $boundary = 'bbe-' . bin2hex(random_bytes(8));
+            $altBoundary = 'bbe-alt-' . bin2hex(random_bytes(8));
+            $mixBoundary = 'bbe-mix-' . bin2hex(random_bytes(8));
             $data = "From: {$from}\r\n"
                   . "To: {$to}\r\n"
                   . "Subject: =?UTF-8?B?" . base64_encode($subject) . "?=\r\n"
@@ -112,13 +114,33 @@ class SmtpMail implements MailAdapter {
             if ($replyTo) $data .= "Reply-To: {$replyTo}\r\n";
             foreach ($headers as $k => $v) $data .= "{$k}: {$v}\r\n";
 
+            // Build the message body part (text-only or multipart/alternative).
+            $bodyPart = '';
             if ($html !== '') {
-                $data .= "Content-Type: multipart/alternative; boundary=\"{$boundary}\"\r\n\r\n";
-                $data .= "--{$boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{$text}\r\n";
-                $data .= "--{$boundary}\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{$html}\r\n";
-                $data .= "--{$boundary}--\r\n";
+                $bodyPart .= "Content-Type: multipart/alternative; boundary=\"{$altBoundary}\"\r\n\r\n";
+                $bodyPart .= "--{$altBoundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{$text}\r\n";
+                $bodyPart .= "--{$altBoundary}\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{$html}\r\n";
+                $bodyPart .= "--{$altBoundary}--\r\n";
             } else {
-                $data .= "Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{$text}\r\n";
+                $bodyPart .= "Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{$text}\r\n";
+            }
+
+            if (!empty($attachments)) {
+                $data .= "Content-Type: multipart/mixed; boundary=\"{$mixBoundary}\"\r\n\r\n";
+                $data .= "--{$mixBoundary}\r\n" . $bodyPart;
+                foreach ($attachments as $att) {
+                    $fname = (string)($att['filename'] ?? 'attachment.bin');
+                    $ctype = (string)($att['content_type'] ?? 'application/octet-stream');
+                    $b64   = chunk_split(base64_encode((string)($att['data'] ?? '')));
+                    $data .= "--{$mixBoundary}\r\n"
+                           . "Content-Type: {$ctype}; name=\"{$fname}\"\r\n"
+                           . "Content-Transfer-Encoding: base64\r\n"
+                           . "Content-Disposition: attachment; filename=\"{$fname}\"\r\n\r\n"
+                           . $b64 . "\r\n";
+                }
+                $data .= "--{$mixBoundary}--\r\n";
+            } else {
+                $data .= $bodyPart;
             }
             // Dot-stuffing for lines starting with "."
             $data = preg_replace('/^\./m', '..', $data);

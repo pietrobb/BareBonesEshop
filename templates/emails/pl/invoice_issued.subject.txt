@@ -1,0 +1,1 @@
+Faktura {{invoice_number}} do zamówienia {{order_number}}

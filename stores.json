@@ -8,42 +8,144 @@
             "default_locale": "sk",
             "currency": "eur",
             "url_prefix": "",
-            "languages": ["sk", "cs", "en"]
+            "languages": ["sk", "cs", "en"],
+            "legal": {
+                "name": "Woodle s.r.o.",
+                "street": "Hlavná 1",
+                "city": "Bratislava",
+                "zip": "811 01",
+                "country": "SK",
+                "ico": "12345678",
+                "dic": "1020304050",
+                "ic_dph": "SK1020304050",
+                "iban": "SK00 1100 0000 0012 3456 7890",
+                "bank": "Tatra banka",
+                "email": "info@example.sk",
+                "phone": "+421 2 1234 5678",
+                "invoice_prefix": "",
+                "payment_terms_days": 14,
+                "register_note": "Zapísaná v OR OS BA, oddiel Sro, vložka 12345/B"
+            }
         },
         "cz": {
             "name": "Český obchod",
             "default_locale": "cs",
             "currency": "czk",
             "url_prefix": "/cs",
-            "languages": ["cs", "sk", "en"]
+            "languages": ["cs", "sk", "en"],
+            "legal": {
+                "name": "Woodle CZ s.r.o.",
+                "street": "Vinohradská 1",
+                "city": "Praha",
+                "zip": "120 00",
+                "country": "CZ",
+                "ico": "01234567",
+                "dic": "CZ01234567",
+                "ic_dph": "CZ01234567",
+                "iban": "CZ00 0100 0000 0012 3456 7890",
+                "bank": "KB",
+                "email": "info@example.cz",
+                "phone": "+420 2 1234 5678",
+                "invoice_prefix": "CZ-",
+                "payment_terms_days": 14,
+                "register_note": ""
+            }
         },
         "pl": {
             "name": "Sklep polski",
             "default_locale": "pl",
             "currency": "pln",
             "url_prefix": "/pl",
-            "languages": ["pl", "en"]
+            "languages": ["pl", "en"],
+            "legal": {
+                "name": "Woodle PL Sp. z o.o.",
+                "street": "Marszałkowska 1",
+                "city": "Warszawa",
+                "zip": "00-001",
+                "country": "PL",
+                "ico": "0123456789",
+                "dic": "PL0123456789",
+                "ic_dph": "PL0123456789",
+                "iban": "PL00 1020 0000 0000 0012 3456 7890",
+                "bank": "PKO",
+                "email": "info@example.pl",
+                "phone": "+48 22 123 45 67",
+                "invoice_prefix": "PL-",
+                "payment_terms_days": 14,
+                "register_note": ""
+            }
         },
         "hu": {
             "name": "Magyar üzlet",
             "default_locale": "hu",
             "currency": "huf",
             "url_prefix": "/hu",
-            "languages": ["hu", "en"]
+            "languages": ["hu", "en"],
+            "legal": {
+                "name": "Woodle HU Kft.",
+                "street": "Kossuth Lajos utca 1",
+                "city": "Budapest",
+                "zip": "1051",
+                "country": "HU",
+                "ico": "01234567",
+                "dic": "HU01234567",
+                "ic_dph": "HU01234567",
+                "iban": "HU00 1170 1234 5678 9012 3456 7890",
+                "bank": "OTP",
+                "email": "info@example.hu",
+                "phone": "+36 1 123 4567",
+                "invoice_prefix": "HU-",
+                "payment_terms_days": 14,
+                "register_note": ""
+            }
         },
         "de": {
             "name": "Deutscher Shop",
             "default_locale": "de",
             "currency": "eur",
             "url_prefix": "/de",
-            "languages": ["de", "en"]
+            "languages": ["de", "en"],
+            "legal": {
+                "name": "Woodle GmbH",
+                "street": "Hauptstrasse 1",
+                "city": "Berlin",
+                "zip": "10115",
+                "country": "DE",
+                "ico": "HRB 12345",
+                "dic": "DE123456789",
+                "ic_dph": "DE123456789",
+                "iban": "DE00 1000 0000 0012 3456 78",
+                "bank": "Deutsche Bank",
+                "email": "info@example.de",
+                "phone": "+49 30 12345678",
+                "invoice_prefix": "DE-",
+                "payment_terms_days": 14,
+                "register_note": "Eingetragen im Handelsregister Berlin, HRB 12345"
+            }
         },
         "us": {
             "name": "US Store",
             "default_locale": "en",
             "currency": "usd",
             "url_prefix": "/en",
-            "languages": ["en", "es"]
+            "languages": ["en", "es"],
+            "legal": {
+                "name": "Woodle Inc.",
+                "street": "1 Main St",
+                "city": "New York",
+                "zip": "10001",
+                "country": "US",
+                "ico": "EIN 12-3456789",
+                "dic": "",
+                "ic_dph": "",
+                "iban": "",
+                "bank": "Chase",
+                "email": "info@example.com",
+                "phone": "+1 212 555 0100",
+                "invoice_prefix": "US-",
+                "payment_terms_days": 14,
+                "register_note": ""
+            }
         }
     },
 

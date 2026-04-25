@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="hu">
+<body style="font-family:Arial,sans-serif;color:#222;max-width:640px;margin:0 auto;">
+<h2>Számla: {{invoice_number}}</h2>
+<p>Tisztelt {{customer_name}},</p>
+<p>mellékelten küldjük a(z) <strong>{{invoice_number}}</strong> sz. számlát
+a(z) <strong>{{order_number}}</strong> rendeléshez.</p>
+<table cellpadding="6" style="border-collapse:collapse;border:1px solid #ddd;">
+  <tr><td>Kiállítás dátuma</td><td>{{issued_at}}</td></tr>
+  <tr><td>Fizetési határidő</td><td>{{due_date}}</td></tr>
+  <tr><td>Fizetendő összeg</td><td><strong>{{total_gross_formatted}}</strong></td></tr>
+</table>
+<p>A PDF számlát mellékeltük. Online elérés:
+<a href="{{invoice_download_url}}">{{invoice_download_url}}</a></p>
+<p>Köszönjük a vásárlást,<br/>{{seller_name}}</p>
+</body></html>

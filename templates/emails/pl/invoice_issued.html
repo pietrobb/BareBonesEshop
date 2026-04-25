@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="pl">
+<body style="font-family:Arial,sans-serif;color:#222;max-width:640px;margin:0 auto;">
+<h2>Faktura {{invoice_number}}</h2>
+<p>Dzień dobry, {{customer_name}},</p>
+<p>w załączeniu przesyłamy fakturę <strong>{{invoice_number}}</strong>
+do zamówienia <strong>{{order_number}}</strong>.</p>
+<table cellpadding="6" style="border-collapse:collapse;border:1px solid #ddd;">
+  <tr><td>Data wystawienia</td><td>{{issued_at}}</td></tr>
+  <tr><td>Termin płatności</td><td>{{due_date}}</td></tr>
+  <tr><td>Kwota do zapłaty</td><td><strong>{{total_gross_formatted}}</strong></td></tr>
+</table>
+<p>Faktura PDF jest w załączeniu. Dostęp online:
+<a href="{{invoice_download_url}}">{{invoice_download_url}}</a></p>
+<p>Dziękujemy za zakup,<br/>{{seller_name}}</p>
+</body></html>

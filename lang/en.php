@@ -250,6 +250,7 @@ return [
     'account.orders_view'         => 'View orders',
     'account.no_orders'           => 'No orders yet.',
     'account.order_number'        => 'Order #',
+    'account.invoice'             => 'Invoice',
     'account.status'              => 'Status',
     'account.total'               => 'Total',
     'account.date'                => 'Date',

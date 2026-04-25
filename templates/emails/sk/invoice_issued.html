@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="sk">
+<body style="font-family:Arial,sans-serif;color:#222;max-width:640px;margin:0 auto;">
+<h2>Faktúra č. {{invoice_number}}</h2>
+<p>Dobrý deň, {{customer_name}},</p>
+<p>v prílohe Vám zasielame faktúru <strong>{{invoice_number}}</strong> k objednávke
+<strong>{{order_number}}</strong>.</p>
+<table cellpadding="6" style="border-collapse:collapse;border:1px solid #ddd;">
+  <tr><td>Dátum vystavenia</td><td>{{issued_at}}</td></tr>
+  <tr><td>Dátum splatnosti</td><td>{{due_date}}</td></tr>
+  <tr><td>Suma na úhradu</td><td><strong>{{total_gross_formatted}}</strong></td></tr>
+</table>
+<p>Faktúru nájdete priloženú ako PDF. Online prístup:
+<a href="{{invoice_download_url}}">{{invoice_download_url}}</a></p>
+<p>Ďakujeme za nákup,<br/>{{seller_name}}</p>
+</body></html>

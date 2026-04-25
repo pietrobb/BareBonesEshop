@@ -250,6 +250,7 @@ return [
     'account.orders_view'         => 'Zobrazit objednávky',
     'account.no_orders'           => 'Zatím žádné objednávky.',
     'account.order_number'        => 'Číslo objednávky',
+    'account.invoice'             => 'Faktura',
     'account.status'              => 'Stav',
     'account.total'               => 'Celkem',
     'account.date'                => 'Datum',

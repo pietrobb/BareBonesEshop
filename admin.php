@@ -161,6 +161,7 @@ match($page) {
     'product'   => pageProduct(),
     'orders'    => pageOrders(),
     'order'     => pageOrder(),
+    'invoice_pdf' => pageInvoicePdf(),
     'import'    => pageImport(),
     'cache'     => pageCache(),
     'audit'     => pageAudit(),
@@ -711,8 +712,64 @@ function pageOrder(): void {
     </div>
     <?php endif; ?>
 
+    <?php
+    $invStmt = Db::get()->prepare("SELECT id, number, issued_at, due_date, total_gross, currency, status, pdf_path, download_token, locale, created_at
+                                    FROM invoices WHERE order_id = :oid ORDER BY id DESC");
+    $invStmt->execute([':oid' => $id]);
+    $invoices = $invStmt->fetchAll();
+    ?>
+    <div class="card">
+        <h3>Faktúry</h3>
+        <?php if ($invoices): ?>
+        <table>
+            <tr><th>Číslo</th><th>Vystavená</th><th>Splatná</th><th>Celkom</th><th>Stav</th><th>Akcie</th></tr>
+            <?php foreach ($invoices as $inv): ?>
+            <tr>
+                <td><?= esc($inv['number']) ?></td>
+                <td><?= esc($inv['issued_at']) ?></td>
+                <td><?= esc($inv['due_date']) ?></td>
+                <td><?= I18n::price((int)$inv['total_gross'], $inv['currency']) ?></td>
+                <td><span class="badge badge-<?= esc($inv['status']) ?>"><?= esc($inv['status']) ?></span></td>
+                <td>
+                    <a class="btn btn-sm" href="admin.php?p=invoice_pdf&id=<?= (int)$inv['id'] ?>" target="_blank">PDF</a>
+                    <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=invoice_resend" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                        <input type="hidden" name="invoice_id" value="<?= (int)$inv['id'] ?>">
+                        <button class="btn btn-sm" type="submit">Poslať znova</button>
+                    </form>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+        <?php else: ?>
+        <p class="muted">Žiadna faktúra zatiaľ nebola vystavená.</p>
+        <?php endif; ?>
+        <?php if ($order['status'] === 'paid' || $order['status'] === 'shipped' || $order['status'] === 'delivered'): ?>
+        <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=invoice_issue" style="display:inline;margin-top:.5rem">
+            <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+            <button class="btn btn-primary btn-sm" type="submit">Vystaviť faktúru</button>
+        </form>
+        <?php endif; ?>
+    </div>
+
     <a href="admin.php?p=orders" class="btn">← Späť na zoznam</a>
     <?php
+}
+
+function pageInvoicePdf(): void {
+    Security::adminRequire('orders.view');
+    $id = Security::int($_GET['id'] ?? 0);
+    $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE id = :id");
+    $stmt->execute([':id' => $id]);
+    $inv = $stmt->fetch();
+    if (!$inv) { http_response_code(404); echo 'Faktúra neexistuje.'; return; }
+    $abs = InvoiceService::pdfAbsolutePath($inv);
+    if (!is_file($abs)) { http_response_code(404); echo 'PDF súbor chýba.'; return; }
+    header('Content-Type: application/pdf');
+    header('Content-Disposition: inline; filename="' . $inv['number'] . '.pdf"');
+    header('Content-Length: ' . filesize($abs));
+    readfile($abs);
+    exit;
 }
 
 function pageImport(): void {
@@ -936,6 +993,8 @@ function handlePost(string $page, string $action): void {
         'products:bulk'  => handleBulkAction(),
         'order:status'   => handleOrderStatus(),
         'order:email_resend' => handleOrderEmailResend(),
+        'order:invoice_issue' => handleOrderInvoiceIssue(),
+        'order:invoice_resend' => handleOrderInvoiceResend(),
         'import:upload'  => handleImportUpload(),
         'cache:flush'    => handleCacheFlush(),
         'cache:rebuild'  => handleCacheRebuild(),
@@ -1201,6 +1260,74 @@ function handleOrderEmailResend(): void {
     } catch (\Throwable $e) {
         error_log("Resend email #{$logId} failed: " . $e->getMessage());
         setFlash('err', 'Chyba pri opätovnom odosielaní emailu.');
+    }
+    header("Location: admin.php?p=order&id={$orderId}");
+    exit;
+}
+
+function handleOrderInvoiceIssue(): void {
+    Security::adminRequire('orders.edit');
+    $orderId = Security::int($_GET['id'] ?? 0);
+    try {
+        $inv = InvoiceService::issue($orderId);
+        // Re-issue: send invoice email immediately (sync)
+        $order = Orders::byId($orderId);
+        if ($order && filter_var($order['customer_email'] ?? '', FILTER_VALIDATE_EMAIL)) {
+            $abs = InvoiceService::pdfAbsolutePath($inv);
+            $vars = [
+                'order_number'  => $order['order_number'],
+                'invoice_number'=> $inv['number'],
+                'total_gross'   => I18n::price((int)$inv['total_gross'], $inv['currency']),
+                'due_date'      => $inv['due_date'],
+            ];
+            MailService::send('invoice_issued', $order['customer_email'], (string)($order['locale'] ?? ''), $vars, $orderId,
+                [['path' => $abs, 'filename' => $inv['number'] . '.pdf', 'content_type' => 'application/pdf']]);
+        }
+        setFlash('ok', 'Faktúra ' . esc($inv['number']) . ' vystavená.');
+    } catch (\Throwable $e) {
+        error_log("Invoice issue [{$orderId}]: " . $e->getMessage());
+        setFlash('err', 'Nepodarilo sa vystaviť faktúru: ' . esc($e->getMessage()));
+    }
+    header("Location: admin.php?p=order&id={$orderId}");
+    exit;
+}
+
+function handleOrderInvoiceResend(): void {
+    Security::adminRequire('orders.edit');
+    $orderId   = Security::int($_GET['id'] ?? 0);
+    $invoiceId = Security::int($_POST['invoice_id'] ?? 0);
+    $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE id = :id");
+    $stmt->execute([':id' => $invoiceId]);
+    $inv = $stmt->fetch();
+    if (!$inv) {
+        setFlash('err', 'Faktúra neexistuje.');
+        header("Location: admin.php?p=order&id={$orderId}");
+        exit;
+    }
+    try {
+        $order = Orders::byId((int)$inv['order_id']);
+        $abs = InvoiceService::pdfAbsolutePath($inv);
+        if (!is_file($abs)) {
+            setFlash('err', 'PDF súbor chýba.');
+            header("Location: admin.php?p=order&id={$orderId}");
+            exit;
+        }
+        $vars = [
+            'order_number'  => $order['order_number'] ?? '',
+            'invoice_number'=> $inv['number'],
+            'total_gross'   => I18n::price((int)$inv['total_gross'], $inv['currency']),
+            'due_date'      => $inv['due_date'],
+        ];
+        $res = MailService::send('invoice_issued', $order['customer_email'] ?? '', (string)($inv['locale'] ?? ''), $vars, (int)$inv['order_id'],
+            [['path' => $abs, 'filename' => $inv['number'] . '.pdf', 'content_type' => 'application/pdf']]);
+        if (($res['status'] ?? '') === 'sent') {
+            setFlash('ok', 'Faktúra opätovne odoslaná.');
+        } else {
+            setFlash('err', 'Email sa nepodarilo odoslať: ' . esc($res['error'] ?? $res['status'] ?? ''));
+        }
+    } catch (\Throwable $e) {
+        error_log("Invoice resend [{$invoiceId}]: " . $e->getMessage());
+        setFlash('err', 'Chyba pri odosielaní: ' . esc($e->getMessage()));
     }
     header("Location: admin.php?p=order&id={$orderId}");
     exit;

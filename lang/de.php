@@ -250,6 +250,7 @@ return [
     'account.orders_view'         => 'Bestellungen anzeigen',
     'account.no_orders'           => 'Noch keine Bestellungen.',
     'account.order_number'        => 'Bestellnummer',
+    'account.invoice'             => 'Rechnung',
     'account.status'              => 'Status',
     'account.total'               => 'Gesamt',
     'account.date'                => 'Datum',

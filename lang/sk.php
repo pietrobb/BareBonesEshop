@@ -259,6 +259,7 @@ return [
     'account.orders_view'         => 'Zobraziť objednávky',
     'account.no_orders'           => 'Zatiaľ žiadne objednávky.',
     'account.order_number'        => 'Číslo objednávky',
+    'account.invoice'             => 'Faktúra',
     'account.status'              => 'Stav',
     'account.total'               => 'Spolu',
     'account.date'                => 'Dátum',

@@ -44,5 +44,10 @@ Thumbs.db
 # Large data files (TecDoc DB ~850MB)
 demo/*.db
 
+# Storage (invoices PDFs, etc.)
+storage/invoices/*
+!storage/invoices/.gitkeep
+!storage/.gitkeep
+
 # Environment
 .env
