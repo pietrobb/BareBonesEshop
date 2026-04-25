@@ -241,4 +241,77 @@ class VatService
             'qty'        => $qty,
         ];
     }
+
+    /**
+     * Validate a VAT ID with caching.
+     *
+     * Cache lookup → validator if expired/missing → upsert with TTL.
+     * TTL: valid/invalid 24h, unverified 1h (retry-friendly when service down).
+     *
+     * @return array{status:string, country:string|null, trader_name:string|null, trader_addr:string|null, cached:bool, age_seconds:int}
+     */
+    public static function validateVatId(string $vatId, VatIdValidator $validator): array
+    {
+        $vatId = strtoupper(preg_replace('/\s+/', '', $vatId));
+        if ($vatId === '' || !preg_match('/^[A-Z]{2}[0-9A-Z]{6,14}$/', $vatId)) {
+            return ['status' => 'invalid', 'country' => null, 'trader_name' => null, 'trader_addr' => null, 'cached' => false, 'age_seconds' => 0];
+        }
+
+        $db = Db::get();
+        $row = $db->prepare('SELECT * FROM vat_id_cache WHERE vat_id = :v');
+        $row->execute([':v' => $vatId]);
+        $cached = $row->fetch(\PDO::FETCH_ASSOC);
+
+        $now = time();
+        if ($cached) {
+            $age = $now - (int)strtotime((string)$cached['checked_at']);
+            $ttl = (int)($cached['ttl_seconds'] ?? 0);
+            if ($age < $ttl) {
+                return [
+                    'status'      => (string)$cached['status'],
+                    'country'     => $cached['country'] !== null ? (string)$cached['country'] : null,
+                    'trader_name' => $cached['trader_name'] !== null ? (string)$cached['trader_name'] : null,
+                    'trader_addr' => $cached['trader_addr'] !== null ? (string)$cached['trader_addr'] : null,
+                    'cached'      => true,
+                    'age_seconds' => $age,
+                ];
+            }
+        }
+
+        $res = $validator->check($vatId);
+        $status = (string)($res['status'] ?? 'unverified');
+        $ttl = ($status === 'unverified') ? 3600 : 86400; // 1h vs 24h
+
+        $up = $db->prepare(
+            'INSERT INTO vat_id_cache (vat_id, country, status, trader_name, trader_addr, checked_at, ttl_seconds, raw_response)
+             VALUES (:v, :c, :s, :tn, :ta, :ck, :ttl, :raw)
+             ON CONFLICT(vat_id) DO UPDATE SET
+               country = excluded.country,
+               status  = excluded.status,
+               trader_name = excluded.trader_name,
+               trader_addr = excluded.trader_addr,
+               checked_at  = excluded.checked_at,
+               ttl_seconds = excluded.ttl_seconds,
+               raw_response = excluded.raw_response'
+        );
+        $up->execute([
+            ':v'   => $vatId,
+            ':c'   => $res['country'] ?? null,
+            ':s'   => $status,
+            ':tn'  => $res['trader_name'] ?? null,
+            ':ta'  => $res['trader_addr'] ?? null,
+            ':ck'  => date('Y-m-d H:i:s', $now),
+            ':ttl' => $ttl,
+            ':raw' => $res['raw'] ?? null,
+        ]);
+
+        return [
+            'status'      => $status,
+            'country'     => $res['country'] ?? null,
+            'trader_name' => $res['trader_name'] ?? null,
+            'trader_addr' => $res['trader_addr'] ?? null,
+            'cached'      => false,
+            'age_seconds' => 0,
+        ];
+    }
 }
