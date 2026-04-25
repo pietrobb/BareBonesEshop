@@ -683,6 +683,8 @@ function pageOrder(): void {
                 <input name="note" placeholder="Dôvod refundu..." required>
                 <button class="btn btn-danger btn-sm" type="submit">Požiadať refund</button>
             </form>
+            <?php else: ?>
+            <p class="muted" style="margin-top:.5rem">Refund unavailable for current payment status.</p>
             <?php endif; ?>
         </div>
     </div>

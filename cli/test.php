@@ -2724,6 +2724,7 @@ assert_true(str_contains($adminOrdersListSnippet, 'AND payment_status = :payment
 assert_true(str_contains($adminOrdersListSnippet, 'Payment method:'), 'Payment admin: order detail renders payment method snapshot');
 assert_true(str_contains($adminOrdersListSnippet, 'Payment reference:'), 'Payment admin: order detail renders payment reference');
 assert_true(str_contains($adminOrdersListSnippet, 'Last event:'), 'Payment admin: order detail renders latest payment event');
+assert_true(str_contains($adminOrdersListSnippet, 'Refund unavailable for current payment status.'), 'Payment admin: order detail explains refund ineligible state');
 assert_true(in_array('refund_pending', PaymentService::paymentStatuses(), true), 'Payment admin: payment status filter includes refund_pending');
 
 // ============================================================
