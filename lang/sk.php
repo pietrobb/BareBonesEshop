@@ -307,4 +307,13 @@ return [
     'account.gdpr_cookies_necessary'        => 'Nevyhnutné (vždy aktívne)',
     'account.gdpr_cookies_analytics'        => 'Analytické (meranie návštevnosti)',
     'account.gdpr_cookies_marketing'        => 'Marketingové (personalizovaná reklama)',
+
+    // Cookie banner
+    'cookie_banner.title'                   => 'Tento web používa súbory cookie',
+    'cookie_banner.body'                    => 'Nevyhnutné cookie sú potrebné pre fungovanie. Analytické a marketingové si môžete zapnúť dobrovoľne.',
+    'cookie_banner.accept_all'              => 'Prijať všetko',
+    'cookie_banner.reject_all'              => 'Odmietnuť všetko',
+    'cookie_banner.preferences'             => 'Nastaviť',
+    'cookie_banner.save_preferences'        => 'Uložiť výber',
+    'cookie_banner.policy_link'             => 'Viac o cookies',
 ];

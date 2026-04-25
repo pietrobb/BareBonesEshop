@@ -298,4 +298,13 @@ return [
     'account.gdpr_cookies_necessary'        => 'Nezbytné (vždy aktivní)',
     'account.gdpr_cookies_analytics'        => 'Analytické (měření návštěvnosti)',
     'account.gdpr_cookies_marketing'        => 'Marketingové (personalizovaná reklama)',
+
+    // Cookie banner
+    'cookie_banner.title'                   => 'Tento web používá soubory cookie',
+    'cookie_banner.body'                    => 'Nezbytné cookie jsou potřebné pro fungování. Analytické a marketingové si můžete zapnout dobrovolně.',
+    'cookie_banner.accept_all'              => 'Přijmout vše',
+    'cookie_banner.reject_all'              => 'Odmítnout vše',
+    'cookie_banner.preferences'             => 'Nastavit',
+    'cookie_banner.save_preferences'        => 'Uložit volbu',
+    'cookie_banner.policy_link'             => 'Více o cookies',
 ];

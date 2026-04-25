@@ -298,4 +298,13 @@ return [
     'account.gdpr_cookies_necessary'        => 'Niezbędne (zawsze aktywne)',
     'account.gdpr_cookies_analytics'        => 'Analityczne (pomiar ruchu)',
     'account.gdpr_cookies_marketing'        => 'Marketingowe (reklama spersonalizowana)',
+
+    // Cookie banner
+    'cookie_banner.title'                   => 'Ta strona używa plików cookie',
+    'cookie_banner.body'                    => 'Niezbędne pliki cookie są wymagane do działania strony. Analityczne i marketingowe są opcjonalne.',
+    'cookie_banner.accept_all'              => 'Akceptuj wszystkie',
+    'cookie_banner.reject_all'              => 'Odrzuć wszystkie',
+    'cookie_banner.preferences'             => 'Ustaw',
+    'cookie_banner.save_preferences'        => 'Zapisz wybór',
+    'cookie_banner.policy_link'             => 'Polityka cookies',
 ];

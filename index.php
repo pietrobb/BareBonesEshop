@@ -907,6 +907,92 @@ async function addToCart(pid,qty,btn){
  setTimeout(()=>{btn.disabled=false;btn.textContent=orig;},1200);
 }
 </script>
+
+<?php
+// ============================================================
+// GDPR Cookie consent banner (CSS-only, opt-in default OFF)
+// Hidden when consent cookie 'cc_v1' is set. Buttons set the cookie
+// (12-month expiry) and POST to /api.php?action=cookie_consent
+// ============================================================
+$ccCookie = (string)($_COOKIE['cc_v1'] ?? '');
+if ($ccCookie === ''):
+    $ccTitle = htmlspecialchars(I18n::t('cookie_banner.title'), ENT_QUOTES, 'UTF-8');
+    $ccBody  = htmlspecialchars(I18n::t('cookie_banner.body'),  ENT_QUOTES, 'UTF-8');
+    $ccAccept= htmlspecialchars(I18n::t('cookie_banner.accept_all'),       ENT_QUOTES, 'UTF-8');
+    $ccReject= htmlspecialchars(I18n::t('cookie_banner.reject_all'),       ENT_QUOTES, 'UTF-8');
+    $ccPrefs = htmlspecialchars(I18n::t('cookie_banner.preferences'),      ENT_QUOTES, 'UTF-8');
+    $ccSave  = htmlspecialchars(I18n::t('cookie_banner.save_preferences'), ENT_QUOTES, 'UTF-8');
+    $ccPolicy= htmlspecialchars(I18n::t('cookie_banner.policy_link'),      ENT_QUOTES, 'UTF-8');
+    $ccNec   = htmlspecialchars(I18n::t('account.gdpr_cookies_necessary'), ENT_QUOTES, 'UTF-8');
+    $ccAna   = htmlspecialchars(I18n::t('account.gdpr_cookies_analytics'), ENT_QUOTES, 'UTF-8');
+    $ccMkt   = htmlspecialchars(I18n::t('account.gdpr_cookies_marketing'), ENT_QUOTES, 'UTF-8');
+?>
+<style>
+#cc-banner{position:fixed;left:16px;right:16px;bottom:16px;max-width:680px;margin:0 auto;background:#fff;color:#222;border:1px solid #ddd;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:16px 18px;z-index:9999;font-size:14px;line-height:1.45}
+#cc-banner h3{margin:0 0 6px;font-size:15px}
+#cc-banner p{margin:0 0 12px}
+#cc-banner .cc-btns{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;align-items:center}
+#cc-banner button,#cc-banner .cc-link{font:inherit;padding:8px 14px;border-radius:6px;border:1px solid #999;background:#f7f7f7;cursor:pointer}
+#cc-banner button.primary{background:#222;color:#fff;border-color:#222}
+#cc-banner button.danger{background:#fff;color:#222}
+#cc-banner .cc-link{background:transparent;border:none;color:#06c;text-decoration:underline;padding:8px 4px}
+#cc-prefs{display:none;margin:8px 0 12px;border-top:1px solid #eee;padding-top:10px}
+#cc-banner.show-prefs #cc-prefs{display:block}
+#cc-prefs label{display:flex;align-items:flex-start;gap:8px;margin:6px 0;font-size:13px}
+#cc-prefs input[disabled]{cursor:not-allowed}
+@media(max-width:520px){#cc-banner{left:8px;right:8px;bottom:8px;padding:14px}#cc-banner .cc-btns{justify-content:stretch}#cc-banner button{flex:1 1 45%}}
+</style>
+<div id="cc-banner" role="dialog" aria-labelledby="cc-title" aria-describedby="cc-body">
+  <h3 id="cc-title"><?= $ccTitle ?></h3>
+  <p id="cc-body"><?= $ccBody ?> <a href="account.php?p=privacy" class="cc-link"><?= $ccPolicy ?></a></p>
+  <div id="cc-prefs">
+    <label><input type="checkbox" checked disabled> <?= $ccNec ?></label>
+    <label><input type="checkbox" id="cc-ana"> <?= $ccAna ?></label>
+    <label><input type="checkbox" id="cc-mkt"> <?= $ccMkt ?></label>
+  </div>
+  <div class="cc-btns">
+    <button type="button" class="cc-link" id="cc-prefs-toggle"><?= $ccPrefs ?></button>
+    <button type="button" class="danger" id="cc-reject"><?= $ccReject ?></button>
+    <button type="button" class="primary" id="cc-accept"><?= $ccAccept ?></button>
+    <button type="button" class="primary" id="cc-save" style="display:none"><?= $ccSave ?></button>
+  </div>
+</div>
+<script>
+(function(){
+  var b=document.getElementById('cc-banner');
+  if(!b)return;
+  var oneYear=60*60*24*365;
+  function setCookie(v){
+    document.cookie='cc_v1='+encodeURIComponent(v)+';path=/;max-age='+oneYear+';SameSite=Lax';
+  }
+  function send(cats,method){
+    setCookie(JSON.stringify(cats));
+    var fd=new FormData();
+    fd.append('necessary',cats.necessary?1:0);
+    fd.append('analytics',cats.analytics?1:0);
+    fd.append('marketing',cats.marketing?1:0);
+    fd.append('method',method);
+    fetch('api.php?action=cookie_consent',{method:'POST',body:fd}).catch(function(){});
+    b.parentNode.removeChild(b);
+  }
+  document.getElementById('cc-accept').onclick=function(){send({necessary:true,analytics:true,marketing:true},'accept_all');};
+  document.getElementById('cc-reject').onclick=function(){send({necessary:true,analytics:false,marketing:false},'reject_all');};
+  document.getElementById('cc-prefs-toggle').onclick=function(){
+    b.classList.add('show-prefs');
+    document.getElementById('cc-accept').style.display='none';
+    document.getElementById('cc-reject').style.display='none';
+    document.getElementById('cc-save').style.display='';
+  };
+  document.getElementById('cc-save').onclick=function(){
+    send({
+      necessary:true,
+      analytics:document.getElementById('cc-ana').checked,
+      marketing:document.getElementById('cc-mkt').checked
+    },'preferences');
+  };
+})();
+</script>
+<?php endif; ?>
 </body></html>
 <?php
 // ============================================================

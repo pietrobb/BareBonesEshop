@@ -47,6 +47,7 @@ try {
         'webhook_stripe'  => apiWebhookStripe(),
         'webhook_payment'  => apiWebhookPayment(),
         'webhook_shipping' => apiWebhookShipping(),
+        'cookie_consent'   => apiCookieConsent(),
         // TecDoc / Auto Parts
         'vehicle_manufacturers' => apiVehicleManufacturers(),
         'vehicle_models'        => apiVehicleModels(),
@@ -903,6 +904,32 @@ function apiProductVehicles(): array {
     if (!$id) return ['error' => 'id required'];
     $limit = min(200, max(1, Security::int($_GET['limit'] ?? 50)));
     return ['vehicles' => TecDoc::vehiclesForProduct($id, $limit)];
+}
+
+function apiCookieConsent(): array {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        return ['error' => 'POST required'];
+    }
+    $cats = [
+        'necessary' => true, // always
+        'analytics' => !empty($_POST['analytics']),
+        'marketing' => !empty($_POST['marketing']),
+    ];
+    $method = (string)($_POST['method'] ?? 'preferences');
+    if (!in_array($method, ['accept_all', 'reject_all', 'preferences'], true)) {
+        $method = 'preferences';
+    }
+    $cid = (int)($_SESSION['customer_id'] ?? 0);
+    GdprService::logCookieConsent([
+        'customer_id' => $cid > 0 ? $cid : null,
+        'session_id'  => session_id() ?: null,
+        'ip'          => $_SERVER['REMOTE_ADDR'] ?? null,
+        'user_agent'  => substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255),
+        'categories'  => $cats,
+        'method'      => $method,
+    ]);
+    return ['ok' => true, 'categories' => $cats, 'method' => $method];
 }
 
 function apiPage(): array {

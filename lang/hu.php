@@ -298,4 +298,13 @@ return [
     'account.gdpr_cookies_necessary'        => 'Szükséges (mindig aktív)',
     'account.gdpr_cookies_analytics'        => 'Elemzés (látogatottság-mérés)',
     'account.gdpr_cookies_marketing'        => 'Marketing (személyre szabott hirdetések)',
+
+    // Cookie banner
+    'cookie_banner.title'                   => 'Ez az oldal sütiket használ',
+    'cookie_banner.body'                    => 'A szükséges sütik a működéshez kellenek. Az elemzési és marketing sütik opcionálisak.',
+    'cookie_banner.accept_all'              => 'Mindent elfogadok',
+    'cookie_banner.reject_all'              => 'Mindent elutasítok',
+    'cookie_banner.preferences'             => 'Beállítás',
+    'cookie_banner.save_preferences'        => 'Mentés',
+    'cookie_banner.policy_link'             => 'Süti-szabályzat',
 ];
