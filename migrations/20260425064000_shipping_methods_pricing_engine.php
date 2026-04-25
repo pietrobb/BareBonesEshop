@@ -56,6 +56,17 @@ return new class {
         )");
         $db->exec("CREATE INDEX IF NOT EXISTS idx_shipping_zone_countries_lookup ON shipping_zone_countries(country, postal_min, postal_max)");
 
+        $db->exec("CREATE TABLE IF NOT EXISTS shipping_rates (
+            id            INTEGER PRIMARY KEY{$autoinc},
+            carrier       TEXT NOT NULL,
+            country       TEXT NOT NULL,
+            weight_from_g INTEGER NOT NULL DEFAULT 0,
+            weight_to_g   INTEGER NOT NULL DEFAULT 999999,
+            price         INTEGER NOT NULL,
+            cod_surcharge INTEGER NOT NULL DEFAULT 0,
+            created_at    TEXT DEFAULT ({$now})
+        )");
+
         $this->addColumnIfMissing($db, 'shipping_rates', 'method_code', "TEXT DEFAULT ''");
         $this->addColumnIfMissing($db, 'shipping_rates', 'zone_code', "TEXT DEFAULT ''");
         $this->addColumnIfMissing($db, 'shipping_rates', 'volume_to_cm3', "INTEGER DEFAULT NULL");
@@ -127,6 +138,8 @@ return new class {
             ['gls', 'gls', 'AT', 'near_eu', 0, 5000, 799, 150, '1-2', 61],
             ['gls', 'gls', 'HU', 'near_eu', 0, 5000, 799, 150, '1-2', 62],
             ['gls', 'gls', 'PL', 'near_eu', 0, 5000, 799, 150, '1-2', 63],
+            ['gls', 'gls', '', 'eu', 0, 5000, 1099, 150, '3-5', 70],
+            ['gls', 'gls', '', 'eu', 5001, 20000, 1599, 150, '3-5', 71],
         ];
         $stmt = $db->prepare("INSERT INTO shipping_rates
             (method_code, carrier, country, zone_code, weight_from_g, weight_to_g, price, cod_surcharge, delivery_days, sort_order)
