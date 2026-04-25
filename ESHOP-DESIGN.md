@@ -3881,6 +3881,80 @@ Idempotentné cez `LEFT JOIN invoices i ON i.order_id = o.id WHERE i.id IS NULL`
 - PDF write **PO** db commit — orphan súbory akceptovateľné, orphan DB rows nie.
 - Nginx/Apache musí blokovať priame požiadavky na `/storage/`.
 
+---
+
+## Tax / VAT compliance — VatService (Roadmap 1.3)
+
+EÚ-compliant VAT engine: per-line snapshot, history-aware sadzby, B2B reverse-charge,
+OSS pre cross-border B2C, VIES validácia, OSS report. Branch `feat/tax-vat`.
+
+### Komponenty
+
+| Súbor | Účel |
+|---|---|
+| `config/vat-rates.json` | 27 EU krajín × tried (standard/reduced/reduced2/zero) s `valid_from`+`history` (SK 23 % od 2025-01-01, history 20 %; CZ 12 %, history 15 %; FI 25.5 %, EE 22 %, LU 17 %, …) |
+| `src/VatService.php` | Engine: `rate()`, `resolveScenario()`, `computeLine()`, `validateVatId()`, `resolveClass()`, `isEuCountry()` |
+| `adapters/VatIdValidator.php` | Adapter interface (`check(vatId)`) |
+| `adapters/contrib/MockVatIdValidator.php` | Deterministický mock pre testy/dev |
+| `adapters/contrib/ViesVatIdValidator.php` | VIES SOAP klient (5 s timeout, graceful unverified) |
+| `cli/oss-report.php` | Kvartálny OSS report (`--quarter=2026-Q2 --format=text|csv|json`) |
+| `cli/vat-backfill.php` | Legacy order backfill (`--dry-run` default, `--apply` s auto pre-backup) |
+| `migrations/20260425013405_add_vat_columns.php` | Schema migration (17 stĺpcov + `vat_id_cache` table) |
+
+### Schema (migration `add_vat_columns`)
+
+| Tabuľka | Pridané |
+|---|---|
+| `products` | `vat_class TEXT NOT NULL DEFAULT 'standard'` |
+| `order_items` | `vat_class`, `vat_rate REAL`, `vat_amount INTEGER`, `net_amount INTEGER` |
+| `orders` | `vat_scenario TEXT`, `vat_total INTEGER`, `net_total INTEGER` |
+| `customers` | `vat_id TEXT`, `vat_country TEXT`, `vat_validated_at TEXT` |
+| `invoices` | `type` (`invoice`\|`credit_note`), `refers_to_invoice_id`, `vat_scenario`, `reverse_charge_note_key` |
+| `invoice_counters` | `type` (per-typ sequence) |
+| `vat_id_cache` (NEW) | `vat_id`, `country`, `status` (`valid`/`invalid`/`unverified`), `trader_name`, `checked_at`, `ttl_seconds` (24h valid/invalid, 1h unverified) |
+| `stores.json` | per-store `oss_enabled: false` (opt-in) |
+
+### Reverse-charge resolver (5 scenárov)
+
+`VatService::resolveScenario(ctx)` vracia `{scenario, vat_rate, applies_vat, note_key, rate_country}`:
+
+| Scenario | Podmienka | Rate country | applies_vat | note_key |
+|---|---|---|---|---|
+| `domestic` | seller_country == customer_country | seller | true | — |
+| `reverse_charge` | B2B intra-EU + valid VAT ID | customer | false | `vat.reverse_charge_note` |
+| `oss` | cross-border B2C, EU, store `oss_enabled=true` | customer | true | — |
+| `domestic_subthreshold` | cross-border B2C, EU, OSS off | seller | true | — |
+| `export` | customer mimo EU | customer | false | `vat.export_note` |
+
+### Per-line VAT (gross-inclusive)
+
+Cart `enriched($vatContext)` → každá položka dostane `vat_class`, `vat_rate`, `vat_amount`, `net_amount`.
+`Orders::create()` túto snapshot perzistuje atómicky (single source of truth pre InvoiceService).
+Faktúra ich groupuje per `(rate, currency)` namiesto heuristiky z totálov.
+
+### VIES cache (TTL-aware)
+
+`VatService::validateVatId(vatId, validator)`:
+1. Lookup `vat_id_cache` → ak `age < ttl_seconds`, vráť cached (`cached=true`)
+2. Inak volaj `validator->check()` → upsert do cache so správnym TTL (`valid`/`invalid`=86400, `unverified`=3600)
+3. Service down/timeout → `unverified` s krátkym TTL → retry-friendly
+
+### OSS report
+
+`php cli/oss-report.php --quarter=YYYY-Qn --format=text|csv|json` — group by `(consumption_country, vat_rate, currency)` len pre `vat_scenario=oss` faktúry. Domestic vylúčené. Deterministický ordering. Empty period → exit 1.
+
+### Backfill (legacy orders)
+
+`php cli/vat-backfill.php` (dry-run default) → `--apply` triggeruje pre-backup cez BackupService, recomputuje VAT z aktuálnych sadzieb a vyplní `orders.vat_scenario`/`vat_total`/`net_total` + `order_items.vat_*` na základe `customers.vat_id` + adresy.
+
+### Gotchas
+
+- **Rate je snapshot pri vytvorení objednávky** — neskoršia zmena `config/vat-rates.json` neovplyvňuje existujúce rows (legal compliance).
+- **VAT ID cache TTL**: 24 h pre `valid`/`invalid`, 1 h pre `unverified` — aby sa retry stíhol skôr.
+- **VIES timeout = unverified**, nie B2C fallback. Operator si v admin musí overiť manuálne.
+- **OSS opt-in per-store** — counter (€10 000 prah) je P1, v P0 si to operator sleduje sám.
+- **Reverse-charge potrebuje obe**: `is_b2b=true` AND `customer_vat_id_valid=true`. Single field nestačí (chráni pred lživým B2B).
+
 ### Súhrn
 
 | Metrika | Hodnota |
