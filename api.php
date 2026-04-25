@@ -400,7 +400,44 @@ function apiCheckout(): array {
         return ['error' => 'Invalid payment method'];
     }
 
-    $cart = Cart::enriched();
+    // VAT context — resolve scenario before enriching cart so per-line VAT is captured
+    $vatId = strtoupper(preg_replace('/\s+/', '', (string)($input['vat_id'] ?? '')));
+    $sellerCountry = strtoupper((string)(($cfg['store']['legal']['country'] ?? null) ?: 'SK'));
+    $sellerOss     = (bool)($cfg['store']['oss_enabled'] ?? false);
+    $vatIdValid    = false;
+    $vatIdStatus   = null;
+    if ($vatId !== '') {
+        try {
+            $vatRes = VatService::validateVatId($vatId);
+            $vatIdValid  = ($vatRes['status'] === 'valid');
+            $vatIdStatus = $vatRes['status'];
+        } catch (\Throwable $e) {
+            $vatIdStatus = 'unverified';
+        }
+        // Persist VAT ID on logged-in customer so future orders remember it
+        Security::sessionStart();
+        if (!empty($_SESSION['customer_id'])) {
+            Customers::update((int)$_SESSION['customer_id'], [
+                'vat_id'           => $vatId,
+                'vat_country'      => substr($vatId, 0, 2),
+                'vat_validated_at' => $vatIdValid ? date('Y-m-d H:i:s') : null,
+            ]);
+        }
+    }
+    $vatScenario = VatService::resolveScenario([
+        'seller_country'        => $sellerCountry,
+        'seller_oss_enabled'    => $sellerOss,
+        'customer_country'      => $country,
+        'customer_vat_id_valid' => $vatIdValid,
+        'is_b2b'                => $vatId !== '',
+    ]);
+
+    $cart = Cart::enriched([
+        'scenario'     => $vatScenario['scenario'],
+        'rate_country' => $vatScenario['rate_country'],
+        'applies_vat'  => $vatScenario['applies_vat'],
+        'note_key'     => $vatScenario['note_key'],
+    ]);
     if (empty($cart['items'])) {
         return ['error' => 'Cart is empty'];
     }
@@ -462,6 +499,10 @@ function apiCheckout(): array {
         'shipping_cost'  => $shippingCost,
         'tax_amount'     => $taxBreakdown['total_tax'],
         'coupon_discount'=> $couponDiscount,
+        'vat_id'         => $vatId,
+        'vat_country'    => $vatId !== '' ? substr($vatId, 0, 2) : '',
+        'vat_id_status'  => $vatIdStatus,
+        'vat_scenario'   => $vatScenario['scenario'],
     ];
 
     // Pass coupon info for atomic recording inside the order transaction

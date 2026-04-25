@@ -58,6 +58,10 @@ class Orders {
                     'unit_price' => $item['price'],
                     'total'      => $total,
                     'attrs'      => json_encode($itemAttrs),
+                    'vat_class'  => $item['vat_class']  ?? 'standard',
+                    'vat_rate'   => isset($item['vat_rate'])   ? (float)$item['vat_rate']   : null,
+                    'vat_amount' => isset($item['vat_amount']) ? (int)$item['vat_amount']   : null,
+                    'net_amount' => isset($item['net_amount']) ? (int)$item['net_amount']   : null,
                 ];
             }
 
@@ -76,6 +80,17 @@ class Orders {
             $taxAmount = $customer['tax_amount'] ?? 0;
             $couponDiscount = $customer['coupon_discount'] ?? 0;
             $total = max(0, $subtotal - $couponDiscount) + $shippingCost + $taxAmount;
+
+            // 2a. Per-order VAT snapshot (sum from items if any line has VAT data)
+            $vatTotal = 0;
+            $netTotal = 0;
+            $hasVat = false;
+            foreach ($orderItems as $oi) {
+                if ($oi['vat_amount'] !== null) { $hasVat = true; $vatTotal += (int)$oi['vat_amount']; }
+                if ($oi['net_amount'] !== null) { $netTotal += (int)$oi['net_amount']; }
+            }
+            $vatScenario = $customer['vat_scenario'] ?? null;
+            if (!$hasVat) { $vatTotal = null; $netTotal = null; }
 
             // 3. Create order (retry on unique constraint collision)
             $orderNumber = null;
@@ -101,13 +116,17 @@ class Orders {
                 ':locale'   => $orderLocale,
                 ':notes'    => $customer['notes'] ?? '',
                 ':ip'       => php_sapi_name() === 'cli' ? '127.0.0.1' : ($_SERVER['REMOTE_ADDR'] ?? ''),
+                ':vatscen'  => $vatScenario,
+                ':vattotal' => $vatTotal,
+                ':nettotal' => $netTotal,
             ];
             $orderStmt = $db->prepare("
                 INSERT INTO orders (order_number, status, customer_id, customer_name, customer_email, customer_phone,
                     shipping_addr, payment_method, subtotal, discount_amount, shipping_cost, tax_amount, total, currency,
-                    locale, notes, ip_address)
+                    locale, notes, ip_address, vat_scenario, vat_total, net_total)
                 VALUES (:num, 'pending', :cid, :name, :email, :phone, :addr, :method,
-                    :subtotal, :discount, :shipping, :tax, :total, :currency, :locale, :notes, :ip)
+                    :subtotal, :discount, :shipping, :tax, :total, :currency, :locale, :notes, :ip,
+                    :vatscen, :vattotal, :nettotal)
             ");
             for ($attempt = 0; $attempt < 5; $attempt++) {
                 $orderNumber = self::generateOrderNumber();
@@ -121,22 +140,28 @@ class Orders {
                 }
             }
 
-            // 4. Insert order items
+            // 4. Insert order items (with per-line VAT snapshot when available)
             $itemStmt = $db->prepare("
-                INSERT INTO order_items (order_id, product_id, variant_id, sku, name, quantity, unit_price, total, attrs)
-                VALUES (:oid, :pid, :vid, :sku, :name, :qty, :price, :total, :attrs)
+                INSERT INTO order_items (order_id, product_id, variant_id, sku, name, quantity, unit_price, total, attrs,
+                    vat_class, vat_rate, vat_amount, net_amount)
+                VALUES (:oid, :pid, :vid, :sku, :name, :qty, :price, :total, :attrs,
+                    :vclass, :vrate, :vamount, :namount)
             ");
             foreach ($orderItems as $oi) {
                 $itemStmt->execute([
-                    ':oid'   => $orderId,
-                    ':pid'   => $oi['product_id'],
-                    ':vid'   => $oi['variant_id'],
-                    ':sku'   => $oi['sku'],
-                    ':name'  => $oi['name'],
-                    ':qty'   => $oi['quantity'],
-                    ':price' => $oi['unit_price'],
-                    ':total' => $oi['total'],
-                    ':attrs' => $oi['attrs'],
+                    ':oid'    => $orderId,
+                    ':pid'    => $oi['product_id'],
+                    ':vid'    => $oi['variant_id'],
+                    ':sku'    => $oi['sku'],
+                    ':name'   => $oi['name'],
+                    ':qty'    => $oi['quantity'],
+                    ':price'  => $oi['unit_price'],
+                    ':total'  => $oi['total'],
+                    ':attrs'  => $oi['attrs'],
+                    ':vclass' => $oi['vat_class'],
+                    ':vrate'  => $oi['vat_rate'],
+                    ':vamount'=> $oi['vat_amount'],
+                    ':namount'=> $oi['net_amount'],
                 ]);
             }
 

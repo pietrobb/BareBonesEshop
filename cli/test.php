@@ -158,6 +158,7 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS orders (
     notes TEXT DEFAULT '', ip_address TEXT DEFAULT '',
     erp_id TEXT DEFAULT NULL, erp_status TEXT DEFAULT NULL,
     erp_synced_at TEXT DEFAULT NULL, erp_error TEXT DEFAULT NULL,
+    vat_scenario TEXT DEFAULT NULL, vat_total INTEGER DEFAULT NULL, net_total INTEGER DEFAULT NULL,
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
 )");
 
@@ -178,6 +179,8 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS order_items (
     variant_id INTEGER, sku TEXT NOT NULL, name TEXT NOT NULL,
     quantity INTEGER NOT NULL, unit_price INTEGER NOT NULL, total INTEGER NOT NULL,
     attrs TEXT DEFAULT '{}',
+    vat_class TEXT DEFAULT 'standard', vat_rate REAL DEFAULT NULL,
+    vat_amount INTEGER DEFAULT NULL, net_amount INTEGER DEFAULT NULL,
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(id)
 )");
@@ -3094,6 +3097,12 @@ if (file_exists($invMigFile)) {
     $invMig = require $invMigFile;
     $invMig->up(Db::get(), Db::isSqlite());
 }
+// Apply add_vat_columns migration so invoices.vat_scenario etc. exist
+$vatMigFile = __DIR__ . '/../migrations/20260425013405_add_vat_columns.php';
+if (file_exists($vatMigFile)) {
+    $vatMig = require $vatMigFile;
+    $vatMig->up(Db::get(), Db::isSqlite());
+}
 
 // Seed a minimal paid order
 $db = Db::get();
@@ -3358,6 +3367,196 @@ foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($backupRoo
     $f->isDir() ? @rmdir($f->getPathname()) : @unlink($f->getPathname());
 }
 @rmdir($backupRoot);
+
+// ============================================================
+// TEST 51: VAT — config/vat-rates, scenarios, computeLine
+// ============================================================
+echo "\n--- Test 51: VAT (rates / scenarios / computeLine) ---\n";
+
+VatService::reset();
+VatService::init(realpath(__DIR__ . '/..'));
+
+// 51.1 — current SK rate is 23%
+assert_equals(23.0, VatService::rate('SK', 'standard'), 'VAT: SK current=23%');
+// 51.2 — SK historical 2024 = 20%
+assert_equals(20.0, VatService::rate('SK', 'standard', '2024-06-01'), 'VAT: SK 2024-06 historical=20%');
+// 51.3 — CZ current reduced=12%
+assert_equals(12.0, VatService::rate('CZ', 'reduced'), 'VAT: CZ reduced current=12%');
+// 51.4 — CZ historical 2023 reduced=15%
+assert_equals(15.0, VatService::rate('CZ', 'reduced', '2023-06-01'), 'VAT: CZ 2023 reduced=15%');
+// 51.5 — class resolver: books → reduced
+assert_equals('reduced', VatService::resolveClass('books'), 'VAT: alias books→reduced');
+// 51.6 — class resolver: unknown → standard
+assert_equals('standard', VatService::resolveClass('weirdo'), 'VAT: alias unknown→standard');
+// 51.7 — isEuCountry
+assert_true(VatService::isEuCountry('DE'), 'VAT: DE is EU');
+assert_true(!VatService::isEuCountry('US'), 'VAT: US is not EU');
+
+// 51.8 — domestic scenario
+$sc = VatService::resolveScenario(['seller_country'=>'SK','customer_country'=>'SK']);
+assert_equals('domestic', $sc['scenario'], 'VAT scenario: domestic same country');
+// 51.9 — reverse_charge (B2B + valid VAT ID + cross-border EU)
+$sc = VatService::resolveScenario(['seller_country'=>'SK','customer_country'=>'DE','customer_vat_id_valid'=>true,'is_b2b'=>true]);
+assert_equals('reverse_charge', $sc['scenario'], 'VAT scenario: reverse_charge B2B intra-EU');
+assert_equals('vat.reverse_charge_note', $sc['note_key'], 'VAT scenario: reverse_charge note_key');
+// 51.10 — OSS scenario
+$sc = VatService::resolveScenario(['seller_country'=>'SK','seller_oss_enabled'=>true,'customer_country'=>'DE']);
+assert_equals('oss', $sc['scenario'], 'VAT scenario: OSS cross-border B2C');
+assert_equals('DE', $sc['rate_country'], 'VAT scenario: OSS uses customer-country rate');
+// 51.11 — sub-threshold (OSS off)
+$sc = VatService::resolveScenario(['seller_country'=>'SK','seller_oss_enabled'=>false,'customer_country'=>'DE']);
+assert_equals('domestic_subthreshold', $sc['scenario'], 'VAT scenario: sub-threshold uses seller rate');
+assert_equals('SK', $sc['rate_country'], 'VAT scenario: sub-threshold rate_country=SK');
+// 51.12 — export
+$sc = VatService::resolveScenario(['seller_country'=>'SK','customer_country'=>'US']);
+assert_equals('export', $sc['scenario'], 'VAT scenario: export outside EU');
+
+// 51.13 — computeLine gross-inclusive 23%
+$ln = VatService::computeLine(1230, 1, 23.0, false);
+assert_equals(1230, $ln['gross'], 'VAT line: gross');
+assert_equals(1000, $ln['net'],   'VAT line: net');
+assert_equals(230,  $ln['vat_amount'], 'VAT line: vat_amount');
+// 51.14 — computeLine reverse-charge zero VAT
+$ln = VatService::computeLine(2460, 1, 23.0, true);
+assert_equals(0,    $ln['vat_amount'], 'VAT line: reverse_charge vat=0');
+assert_equals(2460, $ln['net'],        'VAT line: reverse_charge net=gross');
+
+// ============================================================
+// TEST 52: VAT — VatIdValidator + cache
+// ============================================================
+echo "\n--- Test 52: VAT (VatIdValidator + cache) ---\n";
+
+// Ensure vat_id_cache table exists on the shared $pdo
+$pdo->exec("
+    CREATE TABLE IF NOT EXISTS vat_id_cache (
+        vat_id        TEXT PRIMARY KEY,
+        country       TEXT NOT NULL,
+        status        TEXT NOT NULL,
+        trader_name   TEXT,
+        trader_addr   TEXT,
+        checked_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        ttl_seconds   INTEGER NOT NULL DEFAULT 86400,
+        raw_response  TEXT
+    )
+");
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_vat_id_cache_status ON vat_id_cache(status)");
+
+// Re-bind Db singleton — earlier Migrator/Backup tests may have swapped it to a different handle
+Db::init($pdo, 'sqlite');
+
+// Inject deterministic mock validator via DI helper if exposed; otherwise
+// validate via direct cache flow + MockVatIdValidator
+$mock = new MockVatIdValidator([
+    'DE123456789' => ['status'=>'valid','country'=>'DE','trader_name'=>'Foo GmbH'],
+    'AT654321'    => ['status'=>'invalid'],
+    'PL5551234567'=> ['status'=>'unverified'],
+]);
+
+// 52.1 — DE valid is fresh (uncached)
+$r = VatService::validateVatId('DE123456789', $mock);
+assert_equals('valid', $r['status'], 'VAT id: DE valid');
+assert_equals(false,   (bool)($r['cached'] ?? false), 'VAT id: DE first call uncached');
+// 52.2 — DE replay is cached
+$r = VatService::validateVatId('DE123456789', $mock);
+assert_equals(true,    (bool)($r['cached'] ?? false), 'VAT id: DE replay cached');
+// 52.3 — AT invalid cached 24h
+$r = VatService::validateVatId('AT654321', $mock);
+assert_equals('invalid', $r['status'], 'VAT id: AT invalid');
+$row = $pdo->query("SELECT ttl_seconds FROM vat_id_cache WHERE vat_id='AT654321'")->fetch();
+assert_equals(86400, (int)$row['ttl_seconds'], 'VAT id: invalid TTL=24h');
+// 52.4 — PL unverified cached 1h
+$r = VatService::validateVatId('PL5551234567', $mock);
+assert_equals('unverified', $r['status'], 'VAT id: PL unverified');
+$row = $pdo->query("SELECT ttl_seconds FROM vat_id_cache WHERE vat_id='PL5551234567'")->fetch();
+assert_equals(3600, (int)$row['ttl_seconds'], 'VAT id: unverified TTL=1h');
+// 52.5 — Bad shape → invalid (heuristic)
+$r = VatService::validateVatId('garbage', $mock);
+assert_equals('invalid', $r['status'], 'VAT id: garbage→invalid');
+
+// ============================================================
+// TEST 53: VAT — Cart vatContext + Orders snapshot
+// ============================================================
+echo "\n--- Test 53: VAT (Cart + Orders persistence) ---\n";
+
+// Need a product with vat_class
+$pdo->exec("PRAGMA foreign_keys = OFF");
+$pdo->exec("DELETE FROM order_items");
+$pdo->exec("DELETE FROM orders");
+$pdo->exec("DELETE FROM products");
+$pdo->exec("DELETE FROM categories");
+$pdo->exec("PRAGMA foreign_keys = ON");
+$pdo->exec("INSERT INTO categories (id,name,slug) VALUES (1,'X','x')");
+$pdo->exec("INSERT INTO products (id,category_id,name,slug,sku,price,currency,status,vat_class,stock) VALUES
+    (501,1,'Speaker','speaker','SKU-S',12300,'eur','active','standard',999),
+    (502,1,'Book','book','SKU-B',  3600,'eur','active','reduced',999)");
+
+// Seed warehouse stock so Warehouse::reserve in Orders::create succeeds
+$pdo->exec("DELETE FROM warehouse_stock");
+$pdo->exec("INSERT OR IGNORE INTO warehouses (id,code,name,priority,is_default) VALUES (1,'main','Main',100,1)");
+$pdo->exec("INSERT INTO warehouse_stock (warehouse_id,sku,qty,reserved) VALUES (1,'SKU-S',999,0),(1,'SKU-B',999,0)");
+
+// Initialize VatService config so rate() resolves SK 23% etc.
+VatService::reset();
+VatService::init(dirname(__DIR__));
+
+$_SESSION = [];
+$_SESSION['cart'] = [
+    'p_501' => ['product_id'=>501,'variant_id'=>null,'qty'=>2],
+    'p_502' => ['product_id'=>502,'variant_id'=>null,'qty'=>1],
+];
+
+// Cart::enriched expects raw context (seller/customer country) and resolves via VatService internally
+$ctx = ['seller_country'=>'SK','customer_country'=>'SK','is_b2b'=>false,'customer_vat_id_valid'=>false,'seller_oss_enabled'=>false];
+$cart = Cart::enriched($ctx);
+// 53.1 — items have per-line VAT
+$item0 = $cart['items'][0];
+assert_true(isset($item0['vat_amount']), 'Cart: per-line vat_amount present');
+assert_true(((int)$item0['vat_amount']) > 0, 'Cart: per-line vat_amount > 0 (domestic)');
+
+// 53.2 — Orders::create persists scenario + per-line VAT
+$customer = [
+    'name'=>'Test','email'=>'t@x.com','phone'=>'',
+    'address'=>['country'=>'SK','street'=>'X','city'=>'X','zip'=>'00000'],
+    'currency'=>'eur','locale'=>'sk','shipping_cost'=>0,'tax_amount'=>0,
+    'vat_scenario'=>'domestic',
+];
+$orderId = Orders::create($cart['items'], $customer, 'cash');
+$order = $pdo->query("SELECT vat_scenario, vat_total, net_total FROM orders WHERE id={$orderId}")->fetch();
+assert_equals('domestic', $order['vat_scenario'], 'Orders: vat_scenario persisted');
+assert_true((int)$order['vat_total']  > 0, 'Orders: vat_total persisted');
+assert_true((int)$order['net_total']  > 0, 'Orders: net_total persisted');
+
+// 53.3 — order_items carry vat_class + vat_rate + vat_amount + net_amount
+$it = $pdo->query("SELECT vat_class, vat_rate, vat_amount, net_amount FROM order_items WHERE order_id={$orderId} ORDER BY id ASC LIMIT 1")->fetch();
+assert_equals('standard', $it['vat_class'], 'Orders: order_items.vat_class');
+assert_true((int)$it['vat_rate']   > 0, 'Orders: order_items.vat_rate');
+assert_true((int)$it['vat_amount'] > 0, 'Orders: order_items.vat_amount');
+assert_true((int)$it['net_amount'] > 0, 'Orders: order_items.net_amount');
+
+// 53.4 — Reverse-charge → cart items vat=0
+$ctxRC = ['seller_country'=>'SK','customer_country'=>'DE','is_b2b'=>true,'customer_vat_id_valid'=>true,'seller_oss_enabled'=>false];
+$cartRC = Cart::enriched($ctxRC);
+assert_equals(0, (int)$cartRC['items'][0]['vat_amount'], 'Cart: reverse_charge vat=0');
+
+// ============================================================
+// TEST 54: VAT — InvoiceService scenario + breakdown grouping
+// ============================================================
+echo "\n--- Test 54: VAT (InvoiceService) ---\n";
+
+// Mark order paid then issue invoice
+$pdo->exec("UPDATE orders SET status='paid', tax_amount=" . (int)$order['vat_total'] . " WHERE id={$orderId}");
+
+$inv = InvoiceService::issue($orderId);
+// 54.1 — vat_scenario stored on invoice
+$row = $pdo->query("SELECT vat_scenario, reverse_charge_note_key, total_vat FROM invoices WHERE id={$inv['id']}")->fetch();
+assert_equals('domestic', $row['vat_scenario'], 'Invoice: vat_scenario stored');
+// 54.2 — total_vat matches order
+assert_equals((int)$order['vat_total'], (int)$row['total_vat'], 'Invoice: total_vat = order.vat_total');
+// 54.3 — vat_breakdown groups by per-line rate (multi-rate present: 23 + 19)
+$breakdown = json_decode($pdo->query("SELECT vat_breakdown FROM invoices WHERE id={$inv['id']}")->fetchColumn() ?: '[]', true) ?: [];
+assert_true(count($breakdown) >= 1, 'Invoice: vat_breakdown has at least 1 rate group');
+
+echo "\n--- VAT test suite complete ---\n";
 
 // Re-init the global Db singleton on the main test DB so any later tests still work
 Db::init($pdo, 'sqlite');

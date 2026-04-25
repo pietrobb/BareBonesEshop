@@ -713,7 +713,7 @@ function pageOrder(): void {
     <?php endif; ?>
 
     <?php
-    $invStmt = Db::get()->prepare("SELECT id, number, issued_at, due_date, total_gross, currency, status, pdf_path, download_token, locale, created_at
+    $invStmt = Db::get()->prepare("SELECT id, number, issued_at, due_date, total_gross, currency, status, pdf_path, download_token, locale, vat_scenario, reverse_charge_note_key, type, created_at
                                     FROM invoices WHERE order_id = :oid ORDER BY id DESC");
     $invStmt->execute([':oid' => $id]);
     $invoices = $invStmt->fetchAll();
@@ -722,10 +722,12 @@ function pageOrder(): void {
         <h3>Faktúry</h3>
         <?php if ($invoices): ?>
         <table>
-            <tr><th>Číslo</th><th>Vystavená</th><th>Splatná</th><th>Celkom</th><th>Stav</th><th>Akcie</th></tr>
+            <tr><th>Číslo</th><th>Typ</th><th>VAT scenár</th><th>Vystavená</th><th>Splatná</th><th>Celkom</th><th>Stav</th><th>Akcie</th></tr>
             <?php foreach ($invoices as $inv): ?>
             <tr>
                 <td><?= esc($inv['number']) ?></td>
+                <td><?= esc($inv['type'] ?? 'invoice') ?></td>
+                <td><span class="badge badge-vat-<?= esc($inv['vat_scenario'] ?? '') ?>"><?= esc($inv['vat_scenario'] ?? '—') ?></span></td>
                 <td><?= esc($inv['issued_at']) ?></td>
                 <td><?= esc($inv['due_date']) ?></td>
                 <td><?= I18n::price((int)$inv['total_gross'], $inv['currency']) ?></td>
