@@ -54,5 +54,10 @@ storage/backups/*
 !storage/backups/.gitkeep
 storage/backup.log*
 
+# GDPR
+storage/gdpr-exports/
+storage/gdpr-purge-snapshots/
+config/.gdpr_salt
+
 # Environment
 .env
