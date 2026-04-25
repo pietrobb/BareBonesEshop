@@ -2719,6 +2719,9 @@ $adminOrdersListSnippet = file_get_contents(__DIR__ . '/../admin.php') ?: '';
 assert_true(str_contains($adminOrdersListSnippet, '<th>Payment</th>'), 'Payment admin: orders list renders Payment column');
 assert_true(str_contains($adminOrdersListSnippet, 'badge-<?= esc($o[\'payment_status\'] ?? \'pending\') ?>'), 'Payment admin: orders list renders payment status badge');
 assert_true(str_contains($adminOrdersListSnippet, 'esc($o[\'payment_method\'] ?? \'\')'), 'Payment admin: orders list renders payment method');
+assert_true(str_contains($adminOrdersListSnippet, 'name="payment_status"'), 'Payment admin: orders list renders payment status filter');
+assert_true(str_contains($adminOrdersListSnippet, 'AND payment_status = :payment_status'), 'Payment admin: orders list filters by payment status');
+assert_true(in_array('refund_pending', PaymentService::paymentStatuses(), true), 'Payment admin: payment status filter includes refund_pending');
 
 // ============================================================
 // SHIPPING TESTS

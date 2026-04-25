@@ -556,12 +556,17 @@ function pageOrders(): void {
     $perPage = 25;
     $offset = ($page - 1) * $perPage;
     $statusFilter = $_GET['status'] ?? '';
+    $paymentStatusFilter = $_GET['payment_status'] ?? '';
 
     $where = '1=1';
     $params = [];
     if ($statusFilter) {
         $where .= " AND status = :status";
         $params[':status'] = $statusFilter;
+    }
+    if ($paymentStatusFilter) {
+        $where .= " AND payment_status = :payment_status";
+        $params[':payment_status'] = $paymentStatusFilter;
     }
 
     $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE {$where}");
@@ -585,6 +590,12 @@ function pageOrders(): void {
                 <option value="<?= $s ?>" <?= $statusFilter===$s?'selected':'' ?>><?= $s ?></option>
                 <?php endforeach; ?>
             </select>
+            <select name="payment_status">
+                <option value="">— Payment —</option>
+                <?php foreach (PaymentService::paymentStatuses() as $s): ?>
+                <option value="<?= $s ?>" <?= $paymentStatusFilter===$s?'selected':'' ?>><?= $s ?></option>
+                <?php endforeach; ?>
+            </select>
             <button class="btn" type="submit"><?= esc(I18n::t('admin.btn.apply')) ?></button>
         </form>
         <table>
@@ -602,7 +613,7 @@ function pageOrders(): void {
             </tr>
             <?php endforeach; ?>
         </table>
-        <?php pagination($page, $pages, "admin.php?p=orders&status=" . urlencode($statusFilter)); ?>
+        <?php pagination($page, $pages, "admin.php?p=orders&status=" . urlencode($statusFilter) . "&payment_status=" . urlencode($paymentStatusFilter)); ?>
     </div>
     <?php
 }
