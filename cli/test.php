@@ -3985,6 +3985,19 @@ $cartRC = Cart::enriched($ctxRC);
 assert_equals(0, (int)$cartRC['items'][0]['vat_amount'], 'Cart: reverse_charge vat=0');
 
 // ============================================================
+// TEST: Staging deploy preflight
+// ============================================================
+echo "\n--- Test: Staging Deploy Preflight ---\n";
+
+require_once __DIR__ . '/staging-preflight.php';
+$preflight = runStagingPreflight(['cli/staging-preflight.php']);
+assert_true(is_array($preflight['checks'] ?? null), 'Staging preflight: returns checks');
+assert_true(count($preflight['checks']) > 0, 'Staging preflight: emits deploy checks');
+assert_true(in_array($preflight['status'] ?? '', ['GO', 'NO-GO'], true), 'Staging preflight: status is GO or NO-GO');
+assert_true(in_array('php cli/migrate.php', $preflight['recommended_commands'] ?? [], true), 'Staging preflight: recommends migrations');
+assert_true(in_array('php cli/cache-warm.php', $preflight['recommended_commands'] ?? [], true), 'Staging preflight: recommends cache warm');
+
+// ============================================================
 // TEST 54: VAT — InvoiceService scenario + breakdown grouping
 // ============================================================
 echo "\n--- Test 54: VAT (InvoiceService) ---\n";
