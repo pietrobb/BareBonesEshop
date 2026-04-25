@@ -1,0 +1,17 @@
+{
+    "enabled": true,
+    "storage": "local",
+    "compression": false,
+    "retention": {
+        "daily": 7,
+        "weekly": 4,
+        "monthly": 6,
+        "minimum_kept": 3
+    },
+    "auto_pre_migration": true,
+    "auto_gc_on_backup": true,
+    "wal_checkpoint": true,
+    "log_file": "storage/backup.log",
+    "log_max_bytes": 10485760,
+    "log_max_files": 5
+}

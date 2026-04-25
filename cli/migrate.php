@@ -8,12 +8,23 @@
  *   php cli/migrate.php create <name>   Generate stub migration file
  *   php cli/migrate.php baseline        Mark all current files as applied (no-run)
  *
+ * Flags:
+ *   --skip-backup   Disable the automatic pre-migration backup (DANGEROUS).
+ *                   By default, when there are pending migrations, a backup
+ *                   labelled 'pre-migration' is taken before any migration runs.
+ *
  * Forward-only. No down() / rollback — write a new migration to revert.
  */
 require_once __DIR__ . '/../src/autoload.php';
 
 $argvLocal = $argv ?? [];
-$cmd       = $argvLocal[1] ?? 'apply';
+$skipBackup = false;
+$args = [];
+foreach (array_slice($argvLocal, 1) as $a) {
+    if ($a === '--skip-backup') { $skipBackup = true; continue; }
+    $args[] = $a;
+}
+$cmd = $args[0] ?? 'apply';
 
 $migrator = new Migrator();
 
@@ -21,11 +32,42 @@ $logger = static function (string $msg): void {
     echo $msg . "\n";
 };
 
+// Pre-migration backup hook — only for `apply`, only when config.auto_pre_migration is on.
+$preApplyHook = null;
+if ($cmd === 'apply' && !$skipBackup) {
+    $preApplyHook = static function (array $pendingNames, callable $log): void {
+        try {
+            BackupService::init(Db::get());
+        } catch (\Throwable $e) {
+            $log("  [backup] init failed: " . $e->getMessage() . " — continuing without backup.");
+            return;
+        }
+        $cfg = BackupService::config();
+        if (empty($cfg['enabled']) || empty($cfg['auto_pre_migration'])) {
+            return; // explicitly disabled in config
+        }
+        $log("  [backup] taking pre-migration backup (" . count($pendingNames) . " pending)...");
+        try {
+            $meta = BackupService::create([
+                'label'   => 'pre-migration',
+                'trigger' => 'migration',
+            ]);
+            $log("  [backup] OK {$meta['remote_path']} sha=" . substr($meta['sha256'], 0, 12));
+        } catch (\Throwable $e) {
+            // Hard fail — better to abort than to migrate without safety net.
+            throw new \RuntimeException(
+                'Pre-migration backup failed: ' . $e->getMessage() .
+                ' — re-run with --skip-backup to override (NOT RECOMMENDED).'
+            );
+        }
+    };
+}
+
 try {
     switch ($cmd) {
         case 'apply':
             echo "Applying pending migrations...\n";
-            $applied = $migrator->apply($logger);
+            $applied = $migrator->apply($logger, $preApplyHook);
             $n = count($applied);
             echo $n === 0 ? "Nothing to apply.\n" : "Applied {$n} migration(s).\n";
             break;
@@ -81,6 +123,8 @@ try {
             echo "  php cli/migrate.php status          Show applied / pending / missing\n";
             echo "  php cli/migrate.php create <name>   Generate stub migration file\n";
             echo "  php cli/migrate.php baseline        Mark current files as applied (no run)\n";
+            echo "Flags:\n";
+            echo "  --skip-backup                       Skip pre-migration backup (DANGEROUS)\n";
             break;
 
         default:
