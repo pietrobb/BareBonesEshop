@@ -720,15 +720,22 @@ function pageOrder(): void {
         <h3>Payment timeline</h3>
         <?php if ($paymentTxs): ?>
         <table>
-            <tr><th>Status</th><th>Provider</th><th>Ref</th><th>Suma</th><th>Event</th><th>Kedy</th></tr>
+            <tr><th>Status</th><th>Provider</th><th>Ref</th><th>Suma</th><th>Event</th><th>Details</th><th>Kedy</th></tr>
             <?php foreach ($paymentTxs as $tx): ?>
-            <?php $raw = json_decode((string)($tx['raw_response'] ?? '{}'), true) ?: []; ?>
+            <?php
+                $raw = json_decode((string)($tx['raw_response'] ?? '{}'), true) ?: [];
+                $details = [];
+                foreach (['reason', 'actor', 'refund_id', 'session_id', 'payment_id'] as $key) {
+                    if (!empty($raw[$key])) $details[] = $key . ': ' . (string)$raw[$key];
+                }
+            ?>
             <tr>
                 <td><span class="badge badge-<?= esc($tx['status']) ?>"><?= esc($tx['status']) ?></span></td>
                 <td><?= esc($tx['provider']) ?></td>
                 <td class="muted"><?= esc($tx['provider_ref']) ?></td>
                 <td><?= I18n::price((int)$tx['amount'], $tx['currency']) ?></td>
                 <td class="muted"><?= esc($raw['event_type'] ?? '') ?></td>
+                <td class="muted"><?= esc(implode(' · ', $details)) ?></td>
                 <td class="muted"><?= esc(substr($tx['created_at'], 0, 16)) ?></td>
             </tr>
             <?php endforeach; ?>
