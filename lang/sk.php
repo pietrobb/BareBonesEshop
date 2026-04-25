@@ -276,6 +276,8 @@ return [
     'account.order_number'        => 'Číslo objednávky',
     'account.invoice'             => 'Faktúra',
     'account.status'              => 'Stav',
+    'account.payment'             => 'Platba',
+    'account.payment_history'     => 'História platby',
     'account.total'               => 'Spolu',
     'account.date'                => 'Dátum',
     'account.no_addresses'        => 'Žiadne uložené adresy.',

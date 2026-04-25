@@ -2277,6 +2277,13 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS payment_transactions (
 try { $pdo->exec("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'pending'"); }
 catch (\PDOException $e) { /* already exists */ }
 
+// Payment method pricing tables
+$paymentMigFile = __DIR__ . '/../migrations/20260425071000_payment_methods_pricing_engine.php';
+if (file_exists($paymentMigFile)) {
+    $paymentMig = require $paymentMigFile;
+    $paymentMig->up($pdo, true);
+}
+
 // Shipping tables
 $shippingMigFile = __DIR__ . '/../migrations/20260425064000_shipping_methods_pricing_engine.php';
 if (file_exists($shippingMigFile)) {
@@ -2454,6 +2461,354 @@ assert_true(!empty($failSession['session_id']), 'Payment: fail gateway still ret
 
 $failStatus = $failMock->getStatus($failSession['session_id']);
 assert_equals('failed', $failStatus, 'Payment: fail gateway getStatus returns failed');
+
+// Payment methods pricing engine
+assert_true(isset($paymentMig), 'Payment methods: migration loaded');
+$payMethodCount = (int)$pdo->query("SELECT COUNT(*) FROM payment_methods WHERE code IN ('card', 'bank_transfer', 'cod')")->fetchColumn();
+assert_equals(3, $payMethodCount, 'Payment methods: default seed creates card, transfer and COD');
+$paymentMig->up($pdo, true);
+$payMethodCount2 = (int)$pdo->query("SELECT COUNT(*) FROM payment_methods WHERE code IN ('card', 'bank_transfer', 'cod')")->fetchColumn();
+assert_equals(3, $payMethodCount2, 'Payment methods: seed is idempotent');
+
+$pdo->exec("UPDATE payment_methods SET name = 'Admin custom card' WHERE code = 'card'");
+$paymentMig->up($pdo, true);
+$customCardName = (string)$pdo->query("SELECT name FROM payment_methods WHERE code = 'card'")->fetchColumn();
+assert_equals('Admin custom card', $customCardName, 'Payment methods: seed does not overwrite admin-edited method');
+
+$paymentMethodsSkPacketa = PaymentService::availableMethods('SK', 'eur', 2500, 'packeta');
+$paymentCodesSkPacketa = array_column($paymentMethodsSkPacketa, 'code');
+assert_true(in_array('card', $paymentCodesSkPacketa, true), 'Payment methods: card available for SK Packeta');
+assert_true(in_array('bank_transfer', $paymentCodesSkPacketa, true), 'Payment methods: bank transfer available for SK Packeta');
+assert_true(in_array('cod', $paymentCodesSkPacketa, true), 'Payment methods: COD available for SK Packeta');
+$codQuote = PaymentService::selectMethod('cod', 'SK', 'eur', 2500, 'packeta');
+assert_true($codQuote !== null, 'Payment methods: COD selectable for supported shipping method');
+assert_equals(120, (int)$codQuote['fee'], 'Payment methods: COD fixed fee applied');
+
+$codPickup = PaymentService::selectMethod('cod', 'SK', 'eur', 2500, 'pickup');
+assert_true($codPickup === null, 'Payment methods: COD blocked for pickup shipping method');
+$codGermany = PaymentService::selectMethod('cod', 'DE', 'eur', 2500, 'gls');
+assert_true($codGermany === null, 'Payment methods: COD blocked outside seeded SK/CZ countries');
+
+$pdo->exec("UPDATE payment_methods SET active = 0 WHERE code = 'bank_transfer'");
+$disabledTransfer = PaymentService::selectMethod('bank_transfer', 'SK', 'eur', 2500, 'packeta');
+assert_true($disabledTransfer === null, 'Payment methods: disabled method is not selectable');
+$pdo->exec("UPDATE payment_methods SET active = 1 WHERE code = 'bank_transfer'");
+
+$pdo->exec("INSERT INTO payment_methods (code, provider, name, description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, requires_online, active, sort_order) VALUES ('admin_test', 'manual', 'Admin Test', '', 'offline', 500, 5000, 25, 100, 3000, 0, 1, 99)");
+$pdo->exec("INSERT INTO payment_method_countries (method_code, country) VALUES ('admin_test', 'SK')");
+$adminTestQuote = PaymentService::selectMethod('admin_test', 'SK', 'eur', 1000, 'pickup');
+assert_true($adminTestQuote !== null, 'Payment methods: admin-created method is selectable');
+assert_equals(35, (int)$adminTestQuote['fee'], 'Payment methods: fixed + percent fee applied');
+$adminTestFree = PaymentService::selectMethod('admin_test', 'SK', 'eur', 3000, 'pickup');
+assert_equals(0, (int)$adminTestFree['fee'], 'Payment methods: free_above removes fee');
+$adminTestTooHigh = PaymentService::selectMethod('admin_test', 'SK', 'eur', 6000, 'pickup');
+assert_true($adminTestTooHigh === null, 'Payment methods: admin max amount limit enforced');
+$pdo->exec("INSERT INTO payment_method_shipping (method_code, shipping_method_code) VALUES ('admin_test', 'gls')");
+$adminTestWrongShipping = PaymentService::selectMethod('admin_test', 'SK', 'eur', 1000, 'pickup');
+assert_true($adminTestWrongShipping === null, 'Payment methods: admin shipping constraint enforced');
+$adminTestGls = PaymentService::selectMethod('admin_test', 'SK', 'eur', 1000, 'gls');
+assert_true($adminTestGls !== null, 'Payment methods: admin shipping constraint allows configured method');
+$pdo->exec("UPDATE payment_methods SET code = 'admin_test_renamed' WHERE code = 'admin_test'");
+PaymentService::renameMethodCodeLinks('admin_test', 'admin_test_renamed');
+$renamedCountryLinks = (int)$pdo->query("SELECT COUNT(*) FROM payment_method_countries WHERE method_code = 'admin_test_renamed' AND country = 'SK'")->fetchColumn();
+$renamedShippingLinks = (int)$pdo->query("SELECT COUNT(*) FROM payment_method_shipping WHERE method_code = 'admin_test_renamed' AND shipping_method_code = 'gls'")->fetchColumn();
+$renamedOldCountryLinks = (int)$pdo->query("SELECT COUNT(*) FROM payment_method_countries WHERE method_code = 'admin_test'")->fetchColumn();
+$renamedOldShippingLinks = (int)$pdo->query("SELECT COUNT(*) FROM payment_method_shipping WHERE method_code = 'admin_test'")->fetchColumn();
+assert_equals(1, $renamedCountryLinks, 'Payment methods: admin code rename preserves country links');
+assert_equals(1, $renamedShippingLinks, 'Payment methods: admin code rename preserves shipping links');
+assert_equals(0, $renamedOldCountryLinks, 'Payment methods: admin code rename removes stale old country links');
+assert_equals(0, $renamedOldShippingLinks, 'Payment methods: admin code rename removes stale old shipping links');
+$adminTestRenamedGls = PaymentService::selectMethod('admin_test_renamed', 'SK', 'eur', 1000, 'gls');
+assert_true($adminTestRenamedGls !== null, 'Payment methods: renamed admin method remains selectable');
+$pdo->exec("DELETE FROM payment_method_shipping WHERE method_code = 'admin_test_renamed'");
+$pdo->exec("DELETE FROM payment_method_countries WHERE method_code = 'admin_test_renamed'");
+$pdo->exec("DELETE FROM payment_methods WHERE code = 'admin_test_renamed'");
+
+$paymentOrderId = Orders::create([
+    [
+        'product_id'   => $payProduct['id'],
+        'variant_id'   => null,
+        'qty'          => 1,
+        'price'        => (int)$payProduct['price'],
+        'sku'          => $payProduct['sku'],
+        'name'         => $payProduct['name'],
+        'variant_name' => '',
+    ],
+], [
+    'name'          => 'Payment Method Customer',
+    'email'         => 'payment-method@example.com',
+    'phone'         => '+421900000003',
+    'address'       => ['street' => 'Payment 1', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK'],
+    'currency'      => 'eur',
+    'shipping_cost' => 299,
+    'payment_fee'   => (int)$codQuote['fee'],
+    'payment_method_snapshot' => json_encode($codQuote, JSON_UNESCAPED_UNICODE),
+    'tax_amount'    => 0,
+], 'cod');
+$paymentOrder = Orders::byId($paymentOrderId);
+assert_equals(120, (int)$paymentOrder['payment_fee'], 'Payment methods: order stores payment fee');
+$paymentSnapshot = json_decode((string)$paymentOrder['payment_method_snapshot'], true) ?: [];
+assert_equals('cod', (string)$paymentSnapshot['code'], 'Payment methods: order stores payment snapshot JSON');
+assert_equals('manual', (string)$paymentSnapshot['provider'], 'Payment methods: order snapshot stores provider');
+assert_equals('Dobierka', (string)$paymentSnapshot['label'], 'Payment methods: order snapshot stores label');
+
+$checkoutPaymentMethods = PaymentService::availableMethods('SK', 'eur', 2799, 'packeta');
+$checkoutPaymentCodes = array_column($checkoutPaymentMethods, 'code');
+assert_true(in_array('cod', $checkoutPaymentCodes, true), 'Payment UX: checkout exposes COD for Packeta');
+$checkoutPaymentCod = PaymentService::selectMethod('cod', 'SK', 'eur', 2799, 'packeta');
+assert_true($checkoutPaymentCod !== null, 'Payment UX: checkout selected COD resolves against shipping method');
+assert_equals(120, (int)$checkoutPaymentCod['fee'], 'Payment UX: checkout selected COD includes fee');
+$checkoutPaymentPickupCod = PaymentService::selectMethod('cod', 'SK', 'eur', 2500, 'pickup');
+assert_true($checkoutPaymentPickupCod === null, 'Payment UX: checkout blocks COD for pickup constraint');
+
+if (!function_exists('apiCheckout')) {
+    define('BB_TEST_LOAD_API_ONLY', true);
+    require_once __DIR__ . '/../api.php';
+}
+Adapters::set('payment', $mockGateway);
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_SERVER['HTTP_HOST'] = 'localhost';
+$_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+$_SESSION = ['cart' => [], 'csrf_token' => 'checkout-initiate-test'];
+Cart::add((int)$payProduct['id'], null, 1);
+$_POST = [
+    'csrf_token' => 'checkout-initiate-test',
+    'name' => 'Online Checkout Customer',
+    'email' => 'checkout-initiate@example.com',
+    'phone' => '+421900000099',
+    'country' => 'SK',
+    'shipping_method' => 'packeta',
+    'payment_method' => 'card',
+];
+$onlineCheckout = apiCheckout();
+assert_true(!empty($onlineCheckout['success']), 'Payment UX: online checkout succeeds');
+assert_true(!empty($onlineCheckout['payment_url']), 'Payment UX: online checkout returns payment_url');
+assert_true(!empty($onlineCheckout['session_id']), 'Payment UX: online checkout keeps session_id contract');
+$onlineCheckoutTx = PaymentService::transactionsForOrder((int)$onlineCheckout['order_id']);
+assert_equals('initiated', (string)$onlineCheckoutTx[0]['status'], 'Payment UX: online checkout logs initiated transaction');
+assert_equals((string)$onlineCheckout['session_id'], (string)$onlineCheckoutTx[0]['provider_ref'], 'Payment UX: initiated transaction stores session_id');
+$_POST = [];
+
+$pdo->exec("UPDATE payment_methods SET active = 0 WHERE code = 'cod'");
+$checkoutDisabledCod = PaymentService::selectMethod('cod', 'SK', 'eur', 2799, 'packeta');
+assert_true($checkoutDisabledCod === null, 'Payment UX: checkout rejects disabled selected payment');
+$pdo->exec("UPDATE payment_methods SET active = 1 WHERE code = 'cod'");
+
+$paymentUxOrderId = Orders::create([
+    [
+        'product_id'   => $payProduct['id'],
+        'variant_id'   => null,
+        'qty'          => 1,
+        'price'        => (int)$payProduct['price'],
+        'sku'          => $payProduct['sku'],
+        'name'         => $payProduct['name'],
+        'variant_name' => '',
+    ],
+], [
+    'name'          => 'Payment UX Customer',
+    'email'         => 'payment-ux@example.com',
+    'phone'         => '+421900000004',
+    'address'       => ['street' => 'Payment UX 1', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK'],
+    'currency'      => 'eur',
+    'shipping_cost' => 299,
+    'payment_fee'   => (int)$checkoutPaymentCod['fee'],
+    'payment_method_snapshot' => json_encode($checkoutPaymentCod, JSON_UNESCAPED_UNICODE),
+    'tax_amount'    => 0,
+], 'cod');
+$paymentUxOrder = Orders::byId($paymentUxOrderId);
+$paymentUxSnapshot = json_decode((string)$paymentUxOrder['payment_method_snapshot'], true) ?: [];
+assert_equals(120, (int)$paymentUxOrder['payment_fee'], 'Payment UX: order stores selected payment fee');
+assert_equals('cod', (string)$paymentUxSnapshot['code'], 'Payment UX: order snapshot stores selected code');
+assert_equals('manual', (string)$paymentUxSnapshot['provider'], 'Payment UX: order snapshot stores selected provider');
+
+if (!function_exists('renderOrderDone')) {
+    $_SERVER['REQUEST_URI'] = '/?page=order-done&order=' . urlencode((string)$paymentUxOrder['order_number']);
+    $_GET = ['page' => 'order-done', 'order' => (string)$paymentUxOrder['order_number']];
+    ob_start();
+    require_once __DIR__ . '/../index.php';
+    ob_end_clean();
+}
+$confirmationOrderId = Orders::create([
+    [
+        'product_id'   => $payProduct['id'],
+        'variant_id'   => null,
+        'qty'          => 1,
+        'price'        => (int)$payProduct['price'],
+        'sku'          => $payProduct['sku'],
+        'name'         => $payProduct['name'],
+        'variant_name' => '',
+    ],
+], [
+    'name'          => 'Payment Confirmation Customer',
+    'email'         => 'payment-confirmation@example.com',
+    'phone'         => '+421900000104',
+    'address'       => ['street' => 'Payment Confirmation 1', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK'],
+    'currency'      => 'eur',
+    'shipping_cost' => 299,
+    'payment_fee'   => 0,
+    'payment_method_snapshot' => json_encode(['code' => 'card', 'provider' => 'mock', 'label' => 'Card'], JSON_UNESCAPED_UNICODE),
+    'tax_amount'    => 0,
+], 'card');
+$confirmationOrder = Orders::byId($confirmationOrderId);
+PaymentService::initiate([
+    'order_id'       => $confirmationOrder['id'],
+    'order_number'   => $confirmationOrder['order_number'],
+    'total'          => (int)$confirmationOrder['total'],
+    'currency'       => $confirmationOrder['currency'],
+    'items'          => Orders::items($confirmationOrder['id']),
+], $mockGateway);
+$confirmationHtml = renderOrderDone((string)$confirmationOrder['order_number']);
+assert_true(str_contains($confirmationHtml, 'Payment'), 'Payment UX: confirmation renders payment summary');
+assert_true(str_contains($confirmationHtml, 'pending'), 'Payment UX: confirmation renders payment status');
+assert_true(str_contains($confirmationHtml, 'Card'), 'Payment UX: confirmation renders payment method label');
+assert_true(str_contains($confirmationHtml, 'mock_' . $confirmationOrder['order_number']), 'Payment UX: confirmation renders provider reference');
+
+$legacyStripeOrderId = Orders::create([
+    [
+        'product_id'   => $payProduct['id'],
+        'variant_id'   => null,
+        'qty'          => 1,
+        'price'        => (int)$payProduct['price'],
+        'sku'          => $payProduct['sku'],
+        'name'         => $payProduct['name'],
+        'variant_name' => '',
+    ],
+], [
+    'name'          => 'Legacy Stripe Customer',
+    'email'         => 'legacy-stripe@example.com',
+    'phone'         => '+421900000105',
+    'address'       => ['street' => 'Legacy Stripe 1', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK'],
+    'currency'      => 'eur',
+    'shipping_cost' => 299,
+    'payment_fee'   => 0,
+    'payment_method_snapshot' => json_encode(['code' => 'card', 'provider' => 'stripe', 'label' => 'Card'], JSON_UNESCAPED_UNICODE),
+    'tax_amount'    => 0,
+], 'card');
+onPaymentCompleted([
+    'id' => 'cs_legacy_paid_1',
+    'payment_intent' => 'pi_legacy_paid_1',
+    'amount_total' => (int)Orders::byId($legacyStripeOrderId)['total'],
+    'metadata' => ['order_id' => $legacyStripeOrderId],
+]);
+$legacyStripeOrder = Orders::byId($legacyStripeOrderId);
+$legacyStripeTxs = PaymentService::transactionsForOrder($legacyStripeOrderId);
+$legacyStripeRaw = json_decode((string)$legacyStripeTxs[0]['raw_response'], true) ?: [];
+assert_equals('paid', (string)$legacyStripeOrder['payment_status'], 'Payment webhook: legacy Stripe marks payment_status paid');
+assert_equals('paid', (string)$legacyStripeTxs[0]['status'], 'Payment webhook: legacy Stripe logs paid transaction');
+assert_equals('pi_legacy_paid_1', (string)$legacyStripeTxs[0]['provider_ref'], 'Payment webhook: legacy Stripe logs provider reference');
+assert_equals('checkout.session.completed', (string)$legacyStripeRaw['event_type'], 'Payment webhook: legacy Stripe logs event type');
+assert_equals('cs_legacy_paid_1', (string)$legacyStripeRaw['session_id'], 'Payment webhook: legacy Stripe logs session reference');
+
+$paymentLifecycleOrderId = Orders::create([
+    [
+        'product_id'   => $payProduct['id'],
+        'variant_id'   => null,
+        'qty'          => 1,
+        'price'        => (int)$payProduct['price'],
+        'sku'          => $payProduct['sku'],
+        'name'         => $payProduct['name'],
+        'variant_name' => '',
+    ],
+], [
+    'name'          => 'Payment Lifecycle Customer',
+    'email'         => 'payment-lifecycle@example.com',
+    'phone'         => '+421900000005',
+    'address'       => ['street' => 'Payment Lifecycle 1', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK'],
+    'currency'      => 'eur',
+    'shipping_cost' => 299,
+    'payment_fee'   => 0,
+    'payment_method_snapshot' => json_encode(['code' => 'card', 'provider' => 'stripe', 'label' => 'Card', 'fee' => 0], JSON_UNESCAPED_UNICODE),
+    'tax_amount'    => 0,
+], 'card');
+$paymentLifecycleBefore = Orders::byId($paymentLifecycleOrderId);
+$paymentLifecycleSnapshotBefore = (string)$paymentLifecycleBefore['payment_method_snapshot'];
+
+assert_true(PaymentService::canPaymentTransition('pending', 'authorized'), 'Payment lifecycle: pending can authorize');
+assert_true(!PaymentService::canPaymentTransition('pending', 'refunded'), 'Payment lifecycle: pending cannot refund');
+$authorized = PaymentService::transitionPayment($paymentLifecycleOrderId, 'authorized', 'payment.authorized', 0, 'pay_lifecycle_auth', ['provider_ref' => 'pi_lifecycle_1']);
+assert_true($authorized, 'Payment lifecycle: authorize transition applied');
+assert_equals('authorized', Orders::byId($paymentLifecycleOrderId)['payment_status'], 'Payment lifecycle: order payment_status is authorized');
+$duplicateAuthorize = PaymentService::transitionPayment($paymentLifecycleOrderId, 'authorized', 'payment.authorized', 0, 'pay_lifecycle_auth', ['provider_ref' => 'pi_lifecycle_1']);
+assert_true(!$duplicateAuthorize, 'Payment lifecycle: duplicate status transition is idempotent');
+$authEventCount = (int)$pdo->query("SELECT COUNT(*) FROM payment_transactions WHERE idempotency_key = 'pay_lifecycle_auth'")->fetchColumn();
+assert_equals(1, $authEventCount, 'Payment lifecycle: duplicate idempotency key logs once');
+
+PaymentService::transitionPayment($paymentLifecycleOrderId, 'paid', 'payment.captured', 0, 'pay_lifecycle_capture');
+assert_equals('paid', Orders::byId($paymentLifecycleOrderId)['payment_status'], 'Payment lifecycle: paid transition applied');
+PaymentService::transitionPayment($paymentLifecycleOrderId, 'refund_pending', 'refund.requested', 500, 'pay_lifecycle_refund_requested');
+assert_equals('refund_pending', Orders::byId($paymentLifecycleOrderId)['payment_status'], 'Payment lifecycle: refund_pending transition applied');
+PaymentService::transitionPayment($paymentLifecycleOrderId, 'partially_refunded', 'refund.partial_succeeded', 500, 'pay_lifecycle_refund_partial');
+assert_equals('partially_refunded', Orders::byId($paymentLifecycleOrderId)['payment_status'], 'Payment lifecycle: partial refund transition applied');
+$invalidPaymentTransitionThrown = false;
+try {
+    PaymentService::transitionPayment($paymentLifecycleOrderId, 'authorized', 'payment.reauthorized', 0, 'pay_lifecycle_invalid');
+} catch (\LogicException $e) {
+    $invalidPaymentTransitionThrown = true;
+}
+assert_true($invalidPaymentTransitionThrown, 'Payment lifecycle: invalid transition throws');
+assert_equals($paymentLifecycleSnapshotBefore, (string)Orders::byId($paymentLifecycleOrderId)['payment_method_snapshot'], 'Payment lifecycle: order payment snapshot remains unchanged');
+$lifecycleEvents = PaymentService::transactionsForOrder($paymentLifecycleOrderId);
+$lifecycleStatuses = array_column($lifecycleEvents, 'status');
+assert_true(in_array('authorized', $lifecycleStatuses, true), 'Payment lifecycle: authorized event logged');
+assert_true(in_array('refund_pending', $lifecycleStatuses, true), 'Payment lifecycle: refund request event logged');
+assert_true(in_array('partially_refunded', $lifecycleStatuses, true), 'Payment lifecycle: partial refund event logged');
+assert_equals(['refund_pending', 'refunded', 'disputed'], PaymentService::allowedPaymentTransitions('partially_refunded'), 'Payment admin: exposes allowed transitions for current payment status');
+$adminTransitionOrderId = Orders::create([
+    [
+        'product_id'   => $payProduct['id'],
+        'variant_id'   => null,
+        'qty'          => 1,
+        'price'        => (int)$payProduct['price'],
+        'sku'          => $payProduct['sku'],
+        'name'         => $payProduct['name'],
+        'variant_name' => '',
+    ],
+], [
+    'name'          => 'Payment Admin Customer',
+    'email'         => 'payment-admin@example.com',
+    'phone'         => '+421900000006',
+    'address'       => ['street' => 'Payment Admin 1', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK'],
+    'currency'      => 'eur',
+    'shipping_cost' => 299,
+    'payment_fee'   => 0,
+    'payment_method_snapshot' => json_encode(['code' => 'bank_transfer', 'provider' => 'manual', 'label' => 'Bank transfer', 'fee' => 0], JSON_UNESCAPED_UNICODE),
+    'tax_amount'    => 0,
+], 'bank_transfer');
+PaymentService::transitionPayment($adminTransitionOrderId, 'paid', 'admin.paid', 0, 'pay_admin_mark_paid', ['actor' => 'test-admin', 'note' => 'Manual paid']);
+$adminTxs = PaymentService::transactionsForOrder($adminTransitionOrderId);
+$adminTxRaw = json_decode((string)end($adminTxs)['raw_response'], true) ?: [];
+assert_equals('paid', Orders::byId($adminTransitionOrderId)['payment_status'], 'Payment admin: manual transition updates payment status');
+assert_equals('admin.paid', (string)$adminTxRaw['event_type'], 'Payment admin: manual transition logs event type');
+assert_equals('Manual paid', (string)$adminTxRaw['note'], 'Payment admin: manual transition logs note');
+PaymentService::transitionPayment($adminTransitionOrderId, 'refund_pending', 'refund.requested', 750, 'pay_admin_refund_request', [
+    'actor' => 'test-admin',
+    'amount' => 750,
+    'reason' => 'Customer return',
+]);
+$adminRefundTxs = PaymentService::transactionsForOrder($adminTransitionOrderId);
+$adminRefundRaw = json_decode((string)end($adminRefundTxs)['raw_response'], true) ?: [];
+assert_equals('refund_pending', Orders::byId($adminTransitionOrderId)['payment_status'], 'Payment admin: refund request updates payment status');
+assert_equals('refund.requested', (string)$adminRefundRaw['event_type'], 'Payment admin: refund request logs event type');
+assert_equals(750, (int)$adminRefundRaw['amount'], 'Payment admin: refund request logs amount');
+assert_equals('Customer return', (string)$adminRefundRaw['reason'], 'Payment admin: refund request logs reason');
+assert_equals('test-admin', (string)$adminRefundRaw['actor'], 'Payment admin: refund request logs admin actor');
+
+$adminOrdersListSnippet = file_get_contents(__DIR__ . '/../admin.php') ?: '';
+assert_true(str_contains($adminOrdersListSnippet, '<th>Payment</th>'), 'Payment admin: orders list renders Payment column');
+assert_true(str_contains($adminOrdersListSnippet, 'badge-<?= esc($o[\'payment_status\'] ?? \'pending\') ?>'), 'Payment admin: orders list renders payment status badge');
+assert_true(str_contains($adminOrdersListSnippet, 'esc($o[\'payment_method\'] ?? \'\')'), 'Payment admin: orders list renders payment method');
+assert_true(str_contains($adminOrdersListSnippet, 'name="payment_status"'), 'Payment admin: orders list renders payment status filter');
+assert_true(str_contains($adminOrdersListSnippet, 'AND payment_status = :payment_status'), 'Payment admin: orders list filters by payment status');
+assert_true(str_contains($adminOrdersListSnippet, 'Payment method:'), 'Payment admin: order detail renders payment method snapshot');
+assert_true(str_contains($adminOrdersListSnippet, 'Payment reference:'), 'Payment admin: order detail renders payment reference');
+assert_true(str_contains($adminOrdersListSnippet, 'Last event:'), 'Payment admin: order detail renders latest payment event');
+assert_true(str_contains($adminOrdersListSnippet, '<th>Details</th>'), 'Payment admin: timeline renders transaction details column');
+assert_true(str_contains($adminOrdersListSnippet, "foreach (['reason', 'actor', 'refund_id', 'session_id', 'payment_id']"), 'Payment admin: timeline renders refund/session payload details');
+assert_true(str_contains($adminOrdersListSnippet, 'Refund unavailable for current payment status.'), 'Payment admin: order detail explains refund ineligible state');
+assert_true(in_array('refund_pending', PaymentService::paymentStatuses(), true), 'Payment admin: payment status filter includes refund_pending');
+
+$accountOrdersSnippet = file_get_contents(__DIR__ . '/../account.php') ?: '';
+assert_true(str_contains($accountOrdersSnippet, '$paymentRef = $tx[\'provider_ref\']'), 'Payment account: order payment history includes provider reference');
 
 // ============================================================
 // SHIPPING TESTS

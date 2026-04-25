@@ -517,11 +517,25 @@ switch ($p) {
                     $invByOrder[(int)$r['order_id']] = $r;
                 }
             }
-            echo '<table><tr><th>' . $e($t('account.order_number')) . '</th><th>' . $e($t('account.status')) . '</th><th>' . $e($t('account.total')) . '</th><th>' . $e($t('account.date')) . '</th><th>' . $e($t('account.invoice')) . '</th></tr>';
+            echo '<table><tr><th>' . $e($t('account.order_number')) . '</th><th>' . $e($t('account.status')) . '</th><th>' . $e($t('account.payment')) . '</th><th>' . $e($t('account.payment_history')) . '</th><th>' . $e($t('account.total')) . '</th><th>' . $e($t('account.date')) . '</th><th>' . $e($t('account.invoice')) . '</th></tr>';
             foreach ($orders as $o) {
+                $paymentSnapshot = json_decode((string)($o['payment_method_snapshot'] ?? '{}'), true) ?: [];
+                $paymentLabel = (string)($paymentSnapshot['label'] ?? $paymentSnapshot['name'] ?? $o['payment_method'] ?? '');
+                $paymentTxs = PaymentService::transactionsForOrder((int)$o['id']);
                 echo '<tr>';
                 echo '<td>' . $e($o['order_number']) . '</td>';
                 echo '<td><span class="badge badge-' . $e($o['status']) . '">' . $e($o['status']) . '</span></td>';
+                echo '<td><span class="badge badge-' . $e($o['payment_status'] ?? 'pending') . '">' . $e($o['payment_status'] ?? 'pending') . '</span><br><span class="muted">' . $e($paymentLabel) . '</span></td>';
+                if ($paymentTxs) {
+                    echo '<td><details><summary>' . count($paymentTxs) . '×</summary><ul class="muted">';
+                    foreach ($paymentTxs as $tx) {
+                        $paymentRef = $tx['provider_ref'] ? ' · ' . (string)$tx['provider_ref'] : '';
+                        echo '<li>' . $e(substr((string)$tx['created_at'], 0, 16) . ' — ' . (string)$tx['status'] . $paymentRef) . '</li>';
+                    }
+                    echo '</ul></details></td>';
+                } else {
+                    echo '<td class="muted">—</td>';
+                }
                 echo '<td>' . $e(I18n::price((int)$o['total'], $o['currency'])) . '</td>';
                 echo '<td class="muted">' . $e(substr((string)$o['created_at'], 0, 16)) . '</td>';
                 $inv = $invByOrder[(int)$o['id']] ?? null;

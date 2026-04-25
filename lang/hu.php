@@ -267,6 +267,8 @@ return [
     'account.order_number'        => 'Rendelésszám',
     'account.invoice'             => 'Számla',
     'account.status'              => 'Állapot',
+    'account.payment'             => 'Fizetés',
+    'account.payment_history'     => 'Fizetési előzmények',
     'account.total'               => 'Összesen',
     'account.date'                => 'Dátum',
     'account.no_addresses'        => 'Nincs mentett cím.',

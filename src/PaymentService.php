@@ -6,6 +6,131 @@
  * Writes to payment_transactions for idempotent event log.
  */
 class PaymentService {
+    private const PAYMENT_TRANSITIONS = [
+        'pending' => ['authorized', 'paid', 'failed', 'cancelled'],
+        'authorized' => ['paid', 'failed', 'cancelled'],
+        'paid' => ['refund_pending', 'partially_refunded', 'refunded', 'disputed'],
+        'refund_pending' => ['paid', 'partially_refunded', 'refunded', 'failed'],
+        'partially_refunded' => ['refund_pending', 'refunded', 'disputed'],
+        'disputed' => ['paid', 'refund_pending', 'refunded'],
+        'failed' => [],
+        'cancelled' => [],
+        'refunded' => [],
+    ];
+
+    /**
+     * Return available checkout payment methods for country/cart/shipping context.
+     */
+    public static function availableMethods(string $country, string $currency, int $amount, string $shippingMethod = ''): array {
+        $country = strtoupper(trim($country ?: 'SK'));
+        $currency = strtolower(trim($currency ?: 'eur'));
+        $amount = max(0, $amount);
+        $shippingMethod = trim($shippingMethod);
+
+        if (!self::hasMethodTables()) {
+            return self::fallbackMethods($amount, $shippingMethod);
+        }
+
+        $db = Db::get();
+        $params = [':country' => $country, ':amount' => $amount];
+        $shippingFilter = '';
+        if ($shippingMethod !== '') {
+            $shippingFilter = "
+                AND (
+                    NOT EXISTS (SELECT 1 FROM payment_method_shipping ps_any WHERE ps_any.method_code = m.code)
+                    OR EXISTS (SELECT 1 FROM payment_method_shipping ps WHERE ps.method_code = m.code AND ps.shipping_method_code = :shipping_method)
+                )";
+            $params[':shipping_method'] = $shippingMethod;
+        }
+
+        $stmt = $db->prepare("
+            SELECT m.*
+            FROM payment_methods m
+            WHERE m.active = 1
+              AND EXISTS (SELECT 1 FROM payment_method_countries pc WHERE pc.method_code = m.code AND pc.country = :country)
+              AND m.min_amount <= :amount
+              AND (m.max_amount IS NULL OR m.max_amount = 0 OR m.max_amount >= :amount)
+              {$shippingFilter}
+            ORDER BY m.sort_order, m.name
+        ");
+        $stmt->execute($params);
+
+        $methods = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $methods[] = self::methodRowToQuote($row, $amount, $currency);
+        }
+        return $methods;
+    }
+
+    public static function selectMethod(string $methodCode, string $country, string $currency, int $amount, string $shippingMethod = ''): ?array {
+        foreach (self::availableMethods($country, $currency, $amount, $shippingMethod) as $method) {
+            if (($method['code'] ?? '') === $methodCode) return $method;
+        }
+        return null;
+    }
+
+    public static function canPaymentTransition(string $from, string $to): bool {
+        return in_array($to, self::PAYMENT_TRANSITIONS[$from] ?? [], true);
+    }
+
+    public static function allowedPaymentTransitions(string $from): array {
+        return self::PAYMENT_TRANSITIONS[$from] ?? [];
+    }
+
+    public static function paymentStatuses(): array {
+        return array_keys(self::PAYMENT_TRANSITIONS);
+    }
+
+    public static function recordEvent(int $orderId, string $eventType, string $status, int $amount, string $currency, string $idempotencyKey, array $payload = [], string $provider = '', string $providerRef = ''): bool {
+        if ($idempotencyKey !== '' && self::transactionExists($idempotencyKey)) return false;
+
+        self::logTransaction(
+            orderId: $orderId,
+            provider: $provider,
+            providerRef: $providerRef,
+            status: $status,
+            amount: $amount,
+            currency: strtolower($currency ?: 'eur'),
+            idempotencyKey: $idempotencyKey ?: ('payment_event_' . $orderId . '_' . uniqid()),
+            rawResponse: array_merge(['event_type' => $eventType], $payload),
+        );
+        return true;
+    }
+
+    public static function transitionPayment(int $orderId, string $to, string $eventType, int $amount = 0, string $idempotencyKey = '', array $payload = []): bool {
+        $order = Orders::byId($orderId);
+        if (!$order) throw new \RuntimeException("Order #{$orderId} not found");
+
+        $from = (string)($order['payment_status'] ?? 'pending');
+        if ($from === $to) return false;
+        if (!self::canPaymentTransition($from, $to)) {
+            throw new \LogicException("Cannot transition payment for order #{$orderId} from '{$from}' to '{$to}'");
+        }
+
+        $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
+        $provider = (string)($snapshot['provider'] ?? $order['payment_method'] ?? '');
+        $providerRef = (string)($order['payment_id'] ?? '');
+        $currency = (string)($order['currency'] ?? 'eur');
+        if ($amount <= 0) $amount = (int)($order['total'] ?? 0);
+
+        $db = Db::get();
+        $db->beginTransaction();
+        try {
+            if ($idempotencyKey === '' || !self::transactionExists($idempotencyKey)) {
+                self::recordEvent($orderId, $eventType, $to, $amount, $currency, $idempotencyKey, $payload, $provider, $providerRef);
+                self::updatePaymentStatus($orderId, $to);
+                AuditLog::log('payment_status', $orderId, $from, $to, $eventType);
+                $db->commit();
+                return true;
+            }
+            $db->rollBack();
+            return false;
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+    }
+
     /**
      * Initiate a payment session for a newly created order.
      * Returns ['url' => redirect_url, 'session_id' => provider_session_id]
@@ -129,9 +254,23 @@ class PaymentService {
         )->execute([':s' => $status, ':id' => $orderId]);
     }
 
+    public static function renameMethodCodeLinks(string $oldCode, string $newCode): void {
+        if ($oldCode === '' || $oldCode === $newCode) return;
+        $db = Db::get();
+        $db->prepare("UPDATE payment_method_countries SET method_code = :new WHERE method_code = :old")->execute([':new' => $newCode, ':old' => $oldCode]);
+        $db->prepare("UPDATE payment_method_shipping SET method_code = :new WHERE method_code = :old")->execute([':new' => $newCode, ':old' => $oldCode]);
+    }
+
     // =========================================================
     // Private helpers
     // =========================================================
+
+    private static function transactionExists(string $idempotencyKey): bool {
+        if ($idempotencyKey === '') return false;
+        $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE idempotency_key = :key LIMIT 1");
+        $stmt->execute([':key' => $idempotencyKey]);
+        return (bool)$stmt->fetchColumn();
+    }
 
     private static function logTransaction(
         int    $orderId,
@@ -248,6 +387,45 @@ class PaymentService {
             && OrderWorkflow::canTransition($order['status'], 'refunded')) {
             OrderWorkflow::transition((int)$order['id'], 'refunded', 'Refund confirmed via webhook');
         }
+    }
+
+    private static function hasMethodTables(): bool {
+        try {
+            Db::get()->query("SELECT 1 FROM payment_methods LIMIT 1");
+            Db::get()->query("SELECT 1 FROM payment_method_countries LIMIT 1");
+            return true;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    private static function fallbackMethods(int $amount, string $shippingMethod): array {
+        $rows = [
+            ['code' => 'card', 'provider' => 'stripe', 'name' => 'Kartou online', 'description' => '', 'service_type' => 'online_card', 'fixed_fee' => 0, 'percent_fee_bps' => 0, 'free_above' => null, 'requires_online' => 1],
+            ['code' => 'bank_transfer', 'provider' => 'manual', 'name' => 'Bankový prevod', 'description' => '', 'service_type' => 'bank_transfer', 'fixed_fee' => 0, 'percent_fee_bps' => 0, 'free_above' => null, 'requires_online' => 0],
+        ];
+        if (in_array($shippingMethod, ['packeta', 'gls'], true)) {
+            $rows[] = ['code' => 'cod', 'provider' => 'manual', 'name' => 'Dobierka', 'description' => '', 'service_type' => 'cod', 'fixed_fee' => 120, 'percent_fee_bps' => 0, 'free_above' => null, 'requires_online' => 0];
+        }
+        return array_map(fn($row) => self::methodRowToQuote($row, $amount, 'eur'), $rows);
+    }
+
+    private static function methodRowToQuote(array $row, int $amount, string $currency): array {
+        $fee = (int)($row['fixed_fee'] ?? 0);
+        $bps = (int)($row['percent_fee_bps'] ?? 0);
+        if ($bps > 0) $fee += (int)ceil($amount * $bps / 10000);
+        if (!empty($row['free_above']) && $amount >= (int)$row['free_above']) $fee = 0;
+
+        return [
+            'code' => (string)$row['code'],
+            'provider' => (string)($row['provider'] ?? ''),
+            'label' => (string)($row['name'] ?? $row['code']),
+            'description' => (string)($row['description'] ?? ''),
+            'service_type' => (string)($row['service_type'] ?? 'offline'),
+            'fee' => $fee,
+            'currency' => $currency,
+            'requires_online' => !empty($row['requires_online']),
+        ];
     }
 
     private static function eventTypeToTxStatus(string $eventType): string {

@@ -730,10 +730,10 @@ main{padding:24px 0;min-height:60vh}
 .checkout-form input,.checkout-form textarea,.checkout-form select{width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:.95em}
 .checkout-form textarea{height:80px;resize:vertical}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.shipping-options{display:grid;gap:8px;margin:8px 0 16px}
-.shipping-option{display:flex;justify-content:space-between;gap:12px;padding:10px;border:1px solid #ddd;border-radius:6px;cursor:pointer}
-.shipping-option:has(input:checked){border-color:#cc3872;background:#fff7fb}
-.shipping-option small{display:block;color:#777;margin-top:2px}
+.shipping-options,.payment-options{display:grid;gap:8px;margin:8px 0 16px}
+.shipping-option,.payment-option{display:flex;justify-content:space-between;gap:12px;padding:10px;border:1px solid #ddd;border-radius:6px;cursor:pointer}
+.shipping-option:has(input:checked),.payment-option:has(input:checked){border-color:#cc3872;background:#fff7fb}
+.shipping-option small,.payment-option small{display:block;color:#777;margin-top:2px}
 .shipping-loading,.shipping-empty{font-size:.9em;color:#777;padding:8px 0}
 
 /* Order done */
@@ -926,40 +926,68 @@ async function addToCart(pid,qty,btn){
 }
 async function refreshCheckoutShipping(){
  const country=document.getElementById('checkout-country');
- const payment=document.getElementById('checkout-payment');
  const box=document.getElementById('shipping-options');
  const summaryShip=document.getElementById('summary-shipping');
- const summaryTotal=document.getElementById('summary-total');
  const subtotalEl=document.getElementById('checkout-subtotal');
- if(!country||!box||!summaryShip||!summaryTotal||!subtotalEl)return;
+ if(!country||!box||!summaryShip||!subtotalEl)return;
  const subtotal=parseInt(subtotalEl.value||'0',10);
  box.innerHTML='<div class="shipping-loading">Loading shipping rates…</div>';
- const params=new URLSearchParams({action:'shipping_rates',country:country.value,subtotal:String(subtotal),cod:(payment&&payment.value==='cod')?'1':'0'});
+ const params=new URLSearchParams({action:'shipping_rates',country:country.value,subtotal:String(subtotal)});
  const r=await fetch('api.php?'+params.toString());
  const d=await r.json();
  const methods=d.methods||[];
- if(!methods.length){box.innerHTML='<div class="shipping-empty">Doručenie nie je dostupné.</div>';summaryShip.textContent='—';summaryTotal.textContent=formatCents(subtotal);return;}
+ if(!methods.length){box.innerHTML='<div class="shipping-empty">Doručenie nie je dostupné.</div>';summaryShip.textContent='—';await refreshCheckoutPayments('');return;}
  box.innerHTML='';
  methods.forEach((m,i)=>{
   const label=document.createElement('label');label.className='shipping-option';
+  const methodCode=m.method_code||m.key||'';
   const price=parseInt(m.price||0,10);
-  label.innerHTML='<span><input type="radio" name="shipping_method" value="'+escapeHtml(m.method_code||m.key||'')+'" '+(i===0?'checked':'')+'> '+escapeHtml(m.label||m.method_code||'')+'<small>'+escapeHtml(m.delivery_days||'')+'</small></span><strong>'+formatCents(price)+'</strong>';
-  label.querySelector('input').addEventListener('change',()=>updateCheckoutTotal(price,subtotal));
+  label.innerHTML='<span><input type="radio" name="shipping_method" value="'+escapeHtml(methodCode)+'" '+(i===0?'checked':'')+'> '+escapeHtml(m.label||methodCode)+'<small>'+escapeHtml(m.delivery_days||'')+'</small></span><strong>'+formatCents(price)+'</strong>';
+  label.querySelector('input').addEventListener('change',()=>refreshCheckoutPayments(methodCode));
   box.appendChild(label);
  });
- updateCheckoutTotal(parseInt(methods[0].price||0,10),subtotal);
+ await refreshCheckoutPayments(methods[0].method_code||methods[0].key||'');
 }
-function updateCheckoutTotal(shipping,subtotal){
+async function refreshCheckoutPayments(shippingMethod){
+ const country=document.getElementById('checkout-country');
+ const box=document.getElementById('payment-options');
+ const subtotalEl=document.getElementById('checkout-subtotal');
+ if(!country||!box||!subtotalEl)return;
+ const subtotal=parseInt(subtotalEl.value||'0',10);
+ const checkedShipping=document.querySelector('input[name="shipping_method"]:checked');
+ const selectedShipping=shippingMethod||(checkedShipping?checkedShipping.value:'');
+ const shippingLabel=checkedShipping?checkedShipping.closest('label'):null;
+ const shippingPrice=shippingLabel?parseMoney(shippingLabel.querySelector('strong').textContent):0;
+ if(!selectedShipping){box.innerHTML='<div class="payment-empty">Najprv vyberte dopravu.</div>';updateCheckoutTotal(shippingPrice,0,subtotal);return;}
+ box.innerHTML='<div class="payment-loading">Loading payment methods…</div>';
+ const params=new URLSearchParams({action:'payment_methods',country:country.value,currency:'eur',amount:String(subtotal+shippingPrice),shipping_method:selectedShipping});
+ const r=await fetch('api.php?'+params.toString());
+ const d=await r.json();
+ const methods=d.methods||[];
+ if(!methods.length){box.innerHTML='<div class="payment-empty">Platba nie je dostupná.</div>';updateCheckoutTotal(shippingPrice,0,subtotal);return;}
+ box.innerHTML='';
+ methods.forEach((m,i)=>{
+  const label=document.createElement('label');label.className='payment-option';
+  const fee=parseInt(m.fee||0,10);
+  label.innerHTML='<span><input type="radio" name="payment" value="'+escapeHtml(m.code||'')+'" '+(i===0?'checked':'')+'> '+escapeHtml(m.label||m.code||'')+'<small>'+escapeHtml(m.description||m.provider||'')+'</small></span><strong>'+(fee===0?'<?= $t('free_shipping') ?>':formatCents(fee))+'</strong>';
+  label.querySelector('input').addEventListener('change',()=>updateCheckoutTotal(shippingPrice,fee,subtotal));
+  box.appendChild(label);
+ });
+ updateCheckoutTotal(shippingPrice,parseInt(methods[0].fee||0,10),subtotal);
+}
+function updateCheckoutTotal(shipping,paymentFee,subtotal){
  document.getElementById('summary-shipping').textContent=formatCents(shipping);
- document.getElementById('summary-total').textContent=formatCents(subtotal+shipping);
+ const pay=document.getElementById('summary-payment');
+ if(pay)pay.textContent=paymentFee===0?'<?= $t('free_shipping') ?>':formatCents(paymentFee);
+ document.getElementById('summary-total').textContent=formatCents(subtotal+shipping+paymentFee);
 }
+function parseMoney(text){if(String(text).indexOf('<?= $t('free_shipping') ?>')!==-1)return 0;const n=String(text).replace(/[^0-9,.-]/g,'').replace(',','.');return Math.round((parseFloat(n)||0)*100);}
 function formatCents(cents){return (cents/100).toLocaleString('sk-SK',{style:'currency',currency:'EUR'});}
 function escapeHtml(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 document.addEventListener('DOMContentLoaded',()=>{
  const country=document.getElementById('checkout-country');
- const payment=document.getElementById('checkout-payment');
  if(country)country.addEventListener('change',refreshCheckoutShipping);
- if(payment)payment.addEventListener('change',refreshCheckoutShipping);
+ if(document.getElementById('shipping-options'))refreshCheckoutShipping();
 });
 </script>
 
@@ -1676,7 +1704,11 @@ function renderCheckout(): string {
         if (($rate['method_code'] ?? '') === $selectedShipping) { $selectedRate = $rate; break; }
     }
     $shipping = $selectedRate ? (int)$selectedRate['price'] : 0;
-    $total = $subtotal + $shipping;
+    $currency = 'eur';
+    $paymentMethods = $selectedRate ? PaymentService::availableMethods($country, $currency, $subtotal + $shipping, (string)$selectedRate['method_code']) : [];
+    $selectedPayment = $paymentMethods[0] ?? null;
+    $paymentFee = $selectedPayment ? (int)$selectedPayment['fee'] : 0;
+    $total = $subtotal + $shipping + $paymentFee;
 
     ob_start();
     echo '<div class="breadcrumb"><a href="?">' . $t('home') . '</a> &rsaquo; <a href="?page=cart">' . $t('cart') . '</a> &rsaquo; ' . $t('checkout_title') . '</div>';
@@ -1700,7 +1732,12 @@ function renderCheckout(): string {
     }
     if (empty($shippingRates)) echo '<p style="color:#c62828">Doručenie nie je dostupné.</p>';
     echo '</div>';
-    echo '<h3 style="margin-top:20px">' . $t('payment') . '</h3><label>' . $t('payment_method') . '</label><select name="payment" id="checkout-payment"><option value="cod">' . $t('cod') . '</option><option value="bank_transfer">' . $t('transfer') . '</option><option value="stripe">' . $t('card') . '</option></select>';
+    echo '<h3 style="margin-top:20px">' . $t('payment') . '</h3><div class="payment-options" id="payment-options">';
+    foreach ($paymentMethods as $i => $method) {
+        echo '<label class="payment-option"><span><input type="radio" name="payment" value="' . $e($method['code']) . '"' . ($i === 0 ? ' checked' : '') . '> ' . $e($method['label']) . '<small>' . $e((string)($method['description'] ?: $method['provider'])) . '</small></span><strong>' . ((int)$method['fee'] === 0 ? $t('free_shipping') : $price((int)$method['fee'])) . '</strong></label>';
+    }
+    if (empty($paymentMethods)) echo '<p style="color:#c62828">Platba nie je dostupná.</p>';
+    echo '</div>';
     echo '<label>' . $t('notes') . '</label><textarea name="notes" placeholder="' . $t('notes_placeholder') . '"></textarea>';
     echo '<button class="btn-checkout" type="submit">' . $t('submit_order') . '</button>';
     echo '</form>';
@@ -1716,6 +1753,7 @@ function renderCheckout(): string {
     echo '<input type="hidden" id="checkout-subtotal" value="' . (int)$subtotal . '">';
     echo '<div class="row" style="margin-top:8px"><span>' . $t('subtotal') . '</span><span>' . $price($subtotal) . '</span></div>';
     echo '<div class="row"><span>' . $t('shipping') . '</span><span id="summary-shipping">' . ($shipping === 0 ? $t('free_shipping') : $price($shipping)) . '</span></div>';
+    echo '<div class="row"><span>' . $t('payment') . '</span><span id="summary-payment">' . ($paymentFee === 0 ? $t('free_shipping') : $price($paymentFee)) . '</span></div>';
     echo '<div class="row total-row"><span>' . $t('total_price') . '</span><span id="summary-total">' . $price($total) . '</span></div>';
     echo '</div>';
 
@@ -1773,11 +1811,17 @@ function processCheckout(): string {
     $subtotal = array_sum(array_map(fn($i) => $i['price'] * $i['qty'], $cartItems));
     $weightG = 0;
     foreach ($cartItems as $item) $weightG += (int)($products[$item['product_id']]['weight_g'] ?? 0) * (int)$item['qty'];
-    $selectedRate = ShippingService::selectRate($shippingMethod, $country, $weightG, $subtotal, $payment === 'cod', 0);
+    $selectedRate = ShippingService::selectRate($shippingMethod, $country, $weightG, $subtotal, false, 0);
     if (!$selectedRate) {
         return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">Doručenie nie je dostupné do zvolenej krajiny.</p>';
     }
     $shippingCost = (int)$selectedRate['price'];
+    $currency = 'eur';
+    $selectedPayment = PaymentService::selectMethod($payment, $country, $currency, $subtotal + $shippingCost, (string)$selectedRate['method_code']);
+    if (!$selectedPayment) {
+        return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">Platba nie je dostupná pre zvolenú krajinu alebo dopravu.</p>';
+    }
+    $paymentFee = (int)$selectedPayment['fee'];
 
     $loggedInCustomerId = !empty($_SESSION['customer_id']) ? (int)$_SESSION['customer_id'] : null;
     $customer = [
@@ -1792,6 +1836,8 @@ function processCheckout(): string {
         'shipping_zone' => $selectedRate['zone_code'] ?? '',
         'shipping_weight_g' => $weightG,
         'shipping_rate_snapshot' => json_encode($selectedRate, JSON_UNESCAPED_UNICODE),
+        'payment_fee' => $paymentFee,
+        'payment_method_snapshot' => json_encode($selectedPayment, JSON_UNESCAPED_UNICODE),
     ];
 
     try {
@@ -1811,11 +1857,25 @@ function processCheckout(): string {
 
 function renderOrderDone(string $orderNum): string {
     global $e, $price, $t;
+    $order = $orderNum !== '' ? Orders::byNumber($orderNum) : null;
     ob_start();
     echo '<div class="order-done">';
     echo '<div style="font-size:3em;margin-bottom:16px">✓</div>';
     echo '<h1>' . $t('order_sent') . '</h1>';
     echo '<p style="font-size:1.1em;color:#555;margin:12px 0">' . $t('order_num') . ': <strong>' . $e($orderNum) . '</strong></p>';
+    if ($order) {
+        $paymentSnapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
+        $paymentLabel = (string)($paymentSnapshot['label'] ?? $paymentSnapshot['name'] ?? $order['payment_method'] ?? '');
+        $paymentStatus = (string)($order['payment_status'] ?? 'pending');
+        $paymentTxs = PaymentService::transactionsForOrder((int)$order['id']);
+        $lastTx = $paymentTxs ? end($paymentTxs) : null;
+        echo '<div class="payment-summary" style="margin:18px auto 24px;max-width:420px;text-align:left;background:#f8f8f8;border-radius:10px;padding:16px">';
+        echo '<strong>Payment</strong><br>';
+        echo 'Status: <span class="badge badge-' . $e($paymentStatus) . '">' . $e($paymentStatus) . '</span><br>';
+        if ($paymentLabel !== '') echo 'Method: ' . $e($paymentLabel) . '<br>';
+        if ($lastTx && !empty($lastTx['provider_ref'])) echo 'Reference: ' . $e((string)$lastTx['provider_ref']) . '<br>';
+        echo '</div>';
+    }
     echo '<p style="color:#888;margin-bottom:24px">' . $t('order_email') . '</p>';
     echo '<a href="?" style="color:#cc3872;font-weight:600;font-size:1.1em">' . $t('continue_shopping') . '</a>';
     echo '</div>';

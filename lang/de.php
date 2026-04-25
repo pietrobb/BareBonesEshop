@@ -267,6 +267,8 @@ return [
     'account.order_number'        => 'Bestellnummer',
     'account.invoice'             => 'Rechnung',
     'account.status'              => 'Status',
+    'account.payment'             => 'Zahlung',
+    'account.payment_history'     => 'Zahlungsverlauf',
     'account.total'               => 'Gesamt',
     'account.date'                => 'Datum',
     'account.no_addresses'        => 'Keine Adressen gespeichert.',
