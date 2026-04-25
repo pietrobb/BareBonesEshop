@@ -3068,7 +3068,8 @@ $baselineDb = new PDO('sqlite::memory:');
 $baselineDb->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $baselineMig = new Migrator($baselineDb, __DIR__ . '/../migrations', $migLock);
 $baselineApplied = $baselineMig->apply(static fn($m) => null);
-assert_equals(1, count($baselineApplied), 'Migrate: baseline migration applied on fresh DB');
+assert_true(count($baselineApplied) >= 1, 'Migrate: baseline migration applied on fresh DB');
+assert_true(in_array('20260424000000_baseline', $baselineApplied, true), 'Migrate: baseline name in applied list');
 $realTables = $baselineDb->query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%_fts%' ORDER BY name")
                           ->fetchAll(PDO::FETCH_COLUMN);
 $expected = ['categories', 'customers', 'orders', 'products', 'warehouses', 'shipping_labels', 'payment_transactions', 'email_log'];
@@ -3081,6 +3082,108 @@ $migDb = $migDb2 = $migDb3 = $baselineDb = null;
 foreach (glob($migDir . '/*') ?: [] as $f) @unlink($f);
 @rmdir($migDir);
 @unlink($migLock);
+
+// ============================================================
+// TEST: Invoices (InvoiceService + MinimalPdf + backfill)
+// ============================================================
+echo "\n--- Test: Invoices ---\n";
+
+// Apply invoices migration into the test DB (baseline already created orders/customers)
+$invMigFile = __DIR__ . '/../migrations/20260424221721_create_invoices.php';
+if (file_exists($invMigFile)) {
+    $invMig = require $invMigFile;
+    $invMig->up(Db::get(), Db::isSqlite());
+}
+
+// Seed a minimal paid order
+$db = Db::get();
+$db->exec("DELETE FROM invoices WHERE 1=1");
+$db->exec("DELETE FROM invoice_counters WHERE 1=1");
+$db->exec("INSERT INTO orders (id, order_number, status, customer_name, customer_email, customer_phone, shipping_addr, payment_method, subtotal, discount_amount, shipping_cost, tax_amount, total, currency, locale, created_at) VALUES (5001, 'INV-5001', 'paid', 'Ján Test', 'jan@example.sk', '+421', '" . addslashes(json_encode(['street'=>'Hl. 1','city'=>'BA','zip'=>'811 01','country'=>'SK'])) . "', 'bank_transfer', 10000, 0, 500, 2100, 12600, 'eur', 'sk', datetime('now'))");
+$db->exec("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total) VALUES (5001, 1, 'SKU-T', 'Test produkt', 1, 10000, 10000)");
+
+// 1. Issue invoice
+$inv1 = InvoiceService::issue(5001);
+assert_true(!empty($inv1['number']), 'Invoice: issued and has number');
+assert_equals(8, strlen((string)$inv1['number']), 'Invoice: number is 8 chars (YYYYNNNN)');
+assert_equals(12600, (int)$inv1['total_gross'], 'Invoice: total_gross matches order.total');
+assert_equals('eur', (string)$inv1['currency'], 'Invoice: currency from order');
+assert_equals(64, strlen((string)$inv1['download_token']), 'Invoice: download_token is 64 hex chars');
+assert_true(ctype_xdigit((string)$inv1['download_token']), 'Invoice: download_token is hex');
+
+// 2. PDF written to disk
+$pdfPath = InvoiceService::pdfAbsolutePath($inv1);
+assert_true(file_exists($pdfPath), 'Invoice: PDF file written to disk');
+assert_true(filesize($pdfPath) > 500, 'Invoice: PDF size > 500 bytes');
+assert_equals('%PDF-1.4', substr((string)file_get_contents($pdfPath), 0, 8), 'Invoice: PDF has %PDF-1.4 magic header');
+
+// 3. Idempotency — issuing again returns same invoice
+$inv2 = InvoiceService::issue(5001);
+assert_equals((int)$inv1['id'], (int)$inv2['id'], 'Invoice: issue() is idempotent (same id on re-issue)');
+assert_equals($inv1['number'], $inv2['number'], 'Invoice: number stable on re-issue');
+
+// 4. Number monotonicity (per year+prefix)
+$db->exec("INSERT INTO orders (id, order_number, status, customer_name, customer_email, shipping_addr, payment_method, subtotal, discount_amount, shipping_cost, tax_amount, total, currency, locale, created_at) VALUES (5002, 'INV-5002', 'paid', 'X', 'x@y.com', '{}', 'bank_transfer', 1000, 0, 0, 0, 1000, 'eur', 'sk', datetime('now'))");
+$db->exec("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total) VALUES (5002, 1, 'X', 'X', 1, 1000, 1000)");
+$inv3 = InvoiceService::issue(5002);
+assert_true((int)$inv3['number'] > (int)$inv1['number'], 'Invoice: numbers are monotonic');
+
+// 5. Lookup by token
+$found = InvoiceService::byToken((string)$inv1['download_token']);
+assert_true($found !== null, 'Invoice: byToken returns row for valid token');
+assert_equals((int)$inv1['id'], (int)($found['id'] ?? 0), 'Invoice: lookup returns correct invoice');
+$bad = InvoiceService::byToken(str_repeat('0', 64));
+assert_true($bad === null, 'Invoice: byToken returns null for unknown token');
+
+// 6. Reverse-charge detection
+$rcOn = InvoiceService::isReverseCharge(
+    ['country' => 'SK'],
+    ['country' => 'DE', 'ic_dph' => 'DE123456789']
+);
+assert_true($rcOn, 'Invoice: reverse-charge ON for SK seller, DE customer with VAT ID');
+$rcOff = InvoiceService::isReverseCharge(
+    ['country' => 'SK'],
+    ['country' => 'DE', 'ic_dph' => '']
+);
+assert_true(!$rcOff, 'Invoice: reverse-charge OFF when customer has no VAT ID');
+$rcSame = InvoiceService::isReverseCharge(
+    ['country' => 'SK'],
+    ['country' => 'SK', 'ic_dph' => 'SK1234']
+);
+assert_true(!$rcSame, 'Invoice: reverse-charge OFF for same-country sale');
+
+// 7. Backfill CLI logic — re-runnable, idempotent (scoped to id >= 5003 to ignore pre-existing test orders)
+$db->exec("INSERT INTO orders (id, order_number, status, customer_name, customer_email, shipping_addr, payment_method, subtotal, discount_amount, shipping_cost, tax_amount, total, currency, locale, created_at) VALUES (5003, 'INV-5003', 'paid', 'Y', 'y@z.com', '{}', 'card', 5000, 0, 0, 0, 5000, 'eur', 'sk', datetime('now'))");
+$db->exec("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total) VALUES (5003, 1, 'Y', 'Y', 1, 5000, 5000)");
+$missingStmt = $db->query("SELECT o.id FROM orders o LEFT JOIN invoices i ON i.order_id = o.id WHERE o.status = 'paid' AND i.id IS NULL AND o.id >= 5003");
+$missing = $missingStmt->fetchAll(PDO::FETCH_COLUMN);
+assert_equals(1, count($missing), 'Backfill: detects 1 paid order without invoice');
+assert_equals(5003, (int)$missing[0], 'Backfill: correct order id detected');
+InvoiceService::issue(5003);
+$missing2 = $db->query("SELECT o.id FROM orders o LEFT JOIN invoices i ON i.order_id = o.id WHERE o.status = 'paid' AND i.id IS NULL AND o.id >= 5003")->fetchAll(PDO::FETCH_COLUMN);
+assert_equals(0, count($missing2), 'Backfill: 0 missing after issue (idempotent rerun = no-op)');
+
+// 8. Invoice rejects non-existent order
+$threw = false;
+try { InvoiceService::issue(99999); } catch (\Throwable $e) { $threw = true; }
+assert_true($threw, 'Invoice: throws on non-existent order');
+
+// 9. Invoice MailService attachment plumbing
+LogMail::clearCaptured();
+MailService::useAdapter(new LogMail());
+$pdfBytes = file_get_contents($pdfPath);
+$res = MailService::send('invoice_issued', 'jan@example.sk', 'sk', [
+    'order_number'   => 'INV-5001',
+    'invoice_number' => $inv1['number'],
+    'amount'         => '126,00 €',
+], 5001, [['filename' => $inv1['number'].'.pdf', 'data' => $pdfBytes, 'content_type' => 'application/pdf']]);
+assert_equals('sent', (string)$res['status'], 'MailService: invoice email sent via LogMail');
+$captured = LogMail::lastCaptured();
+assert_true(is_array($captured['attachments'] ?? null), 'MailService: attachments propagated to adapter');
+assert_equals(1, count($captured['attachments']), 'MailService: 1 attachment captured');
+assert_equals('application/pdf', $captured['attachments'][0]['content_type'], 'MailService: attachment content_type=application/pdf');
+assert_equals(strlen($pdfBytes), strlen($captured['attachments'][0]['data']), 'MailService: attachment data length matches');
+MailService::useAdapter(null);
 
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
