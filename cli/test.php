@@ -2662,6 +2662,18 @@ $adminTxRaw = json_decode((string)end($adminTxs)['raw_response'], true) ?: [];
 assert_equals('paid', Orders::byId($adminTransitionOrderId)['payment_status'], 'Payment admin: manual transition updates payment status');
 assert_equals('admin.paid', (string)$adminTxRaw['event_type'], 'Payment admin: manual transition logs event type');
 assert_equals('Manual paid', (string)$adminTxRaw['note'], 'Payment admin: manual transition logs note');
+PaymentService::transitionPayment($adminTransitionOrderId, 'refund_pending', 'refund.requested', 750, 'pay_admin_refund_request', [
+    'actor' => 'test-admin',
+    'amount' => 750,
+    'reason' => 'Customer return',
+]);
+$adminRefundTxs = PaymentService::transactionsForOrder($adminTransitionOrderId);
+$adminRefundRaw = json_decode((string)end($adminRefundTxs)['raw_response'], true) ?: [];
+assert_equals('refund_pending', Orders::byId($adminTransitionOrderId)['payment_status'], 'Payment admin: refund request updates payment status');
+assert_equals('refund.requested', (string)$adminRefundRaw['event_type'], 'Payment admin: refund request logs event type');
+assert_equals(750, (int)$adminRefundRaw['amount'], 'Payment admin: refund request logs amount');
+assert_equals('Customer return', (string)$adminRefundRaw['reason'], 'Payment admin: refund request logs reason');
+assert_equals('test-admin', (string)$adminRefundRaw['actor'], 'Payment admin: refund request logs admin actor');
 
 // ============================================================
 // SHIPPING TESTS

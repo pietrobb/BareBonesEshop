@@ -660,6 +660,14 @@ function pageOrder(): void {
                 <button class="btn btn-primary btn-sm" type="submit">Zmeniť platbu</button>
             </form>
             <?php endif; ?>
+            <?php if (PaymentService::canPaymentTransition((string)($order['payment_status'] ?? 'pending'), 'refund_pending')): ?>
+            <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_request" style="margin-top:.5rem">
+                <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                <input name="amount" type="number" min="1" max="<?= (int)$order['total'] ?>" step="1" value="<?= (int)$order['total'] ?>">
+                <input name="note" placeholder="Dôvod refundu..." required>
+                <button class="btn btn-danger btn-sm" type="submit">Požiadať refund</button>
+            </form>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -1115,6 +1123,7 @@ function handlePost(string $page, string $action): void {
         'products:bulk'  => handleBulkAction(),
         'order:status'   => handleOrderStatus(),
         'order:payment_transition' => handleOrderPaymentTransition(),
+        'order:refund_request' => handleOrderRefundRequest(),
         'order:email_resend' => handleOrderEmailResend(),
         'order:invoice_issue' => handleOrderInvoiceIssue(),
         'order:invoice_resend' => handleOrderInvoiceResend(),
@@ -1436,6 +1445,41 @@ function handleOrderPaymentTransition(): void {
     } catch (\Throwable $e) {
         error_log("Payment status change error [{$orderId}]: " . $e->getMessage());
         setFlash('err', 'Chyba pri zmene stavu platby.');
+    }
+
+    header("Location: admin.php?p=order&id={$orderId}");
+    exit;
+}
+
+function handleOrderRefundRequest(): void {
+    Security::adminRequire('orders.edit');
+    $orderId = Security::int($_GET['id'] ?? 0);
+    $order = Orders::byId($orderId);
+    if (!$order) {
+        setFlash('err', 'Objednávka neexistuje.');
+        header('Location: admin.php?p=orders');
+        exit;
+    }
+
+    $amount = Security::int($_POST['amount'] ?? 0);
+    $reason = trim((string)($_POST['reason'] ?? $_POST['note'] ?? ''));
+    if ($amount <= 0) {
+        setFlash('err', 'Suma refundu musí byť vyššia ako 0.');
+        header("Location: admin.php?p=order&id={$orderId}");
+        exit;
+    }
+
+    try {
+        $key = 'admin_refund_request_' . $orderId . '_' . time();
+        PaymentService::transitionPayment($orderId, 'refund_pending', 'refund.requested', $amount, $key, [
+            'actor' => Security::adminUser(),
+            'amount' => $amount,
+            'reason' => $reason,
+        ]);
+        setFlash('ok', 'Refund požiadavka bola vytvorená.');
+    } catch (\Throwable $e) {
+        error_log("Refund request error [{$orderId}]: " . $e->getMessage());
+        setFlash('err', 'Chyba pri vytváraní refund požiadavky.');
     }
 
     header("Location: admin.php?p=order&id={$orderId}");
