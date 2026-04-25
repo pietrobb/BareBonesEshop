@@ -6,6 +6,10 @@
  */
 require_once __DIR__ . '/src/autoload.php';
 
+$cfg = require __DIR__ . '/config.php';
+$action = $_GET['action'] ?? '';
+
+if (!defined('BB_TEST_LOAD_API_ONLY')) {
 // Security headers
 Security::headers();
 
@@ -18,9 +22,6 @@ Security::sessionStart();
 // Detect locale
 $uri = $_SERVER['REQUEST_URI'] ?? '/';
 I18n::setLocale(I18n::detectLocale($uri));
-
-$cfg = require __DIR__ . '/config.php';
-$action = $_GET['action'] ?? '';
 
 // Rate limiting (exempt webhooks — they rely on signature verification)
 if (!in_array($action, ['webhook_stripe', 'webhook_payment', 'webhook_shipping'], true) && !Security::rateLimit('api_' . $action, 120)) {
@@ -88,6 +89,7 @@ try {
     http_response_code(500);
     echo json_encode(['error' => 'Internal error']);
     error_log("API error [{$action}]: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+}
 }
 
 // ============================================================
@@ -601,16 +603,17 @@ function apiCheckout(): array {
             try {
                 $payment = Adapters::payment();
                 $baseUrl = ((!empty($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost'));
-                $session = $payment->createSession([
+                $session = PaymentService::initiate([
                     'order_id'       => $orderId,
                     'order_number'   => $order['order_number'],
+                    'total'          => (int)$order['total'],
                     'customer_email' => $email,
                     'currency'       => $order['currency'] ?? 'eur',
                     'items'          => $orderItems,
                     'shipping_cost'  => (int)$order['shipping_cost'],
                     'success_url'    => $baseUrl . '/checkout/success?order=' . $order['order_number'],
                     'cancel_url'     => $baseUrl . '/checkout/cancel?order=' . $order['order_number'],
-                ]);
+                ], $payment);
                 $result['payment_url'] = $session['url'];
                 $result['session_id'] = $session['session_id'];
 
@@ -758,6 +761,7 @@ function onDisputeCreated(array $dispute): void {
     AuditLog::log('order_dispute', (int)$order['id'], $order['status'], 'disputed', 'Stripe dispute: ' . ($dispute['id'] ?? ''));
 }
 
+if (!function_exists('verifyStripeSignature')) {
 function verifyStripeSignature(string $payload, string $sigHeader, string $secret): bool {
     $parts = [];
     foreach (explode(',', $sigHeader) as $part) {
@@ -775,6 +779,7 @@ function verifyStripeSignature(string $payload, string $sigHeader, string $secre
     $expected = hash_hmac('sha256', $signedPayload, $secret);
 
     return hash_equals($expected, $signature);
+}
 }
 
 // ============================================================

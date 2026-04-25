@@ -2561,6 +2561,34 @@ assert_equals(120, (int)$checkoutPaymentCod['fee'], 'Payment UX: checkout select
 $checkoutPaymentPickupCod = PaymentService::selectMethod('cod', 'SK', 'eur', 2500, 'pickup');
 assert_true($checkoutPaymentPickupCod === null, 'Payment UX: checkout blocks COD for pickup constraint');
 
+if (!function_exists('apiCheckout')) {
+    define('BB_TEST_LOAD_API_ONLY', true);
+    require_once __DIR__ . '/../api.php';
+}
+Adapters::set('payment', $mockGateway);
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_SERVER['HTTP_HOST'] = 'localhost';
+$_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+$_SESSION = ['cart' => [], 'csrf_token' => 'checkout-initiate-test'];
+Cart::add((int)$payProduct['id'], null, 1);
+$_POST = [
+    'csrf_token' => 'checkout-initiate-test',
+    'name' => 'Online Checkout Customer',
+    'email' => 'checkout-initiate@example.com',
+    'phone' => '+421900000099',
+    'country' => 'SK',
+    'shipping_method' => 'packeta',
+    'payment_method' => 'card',
+];
+$onlineCheckout = apiCheckout();
+assert_true(!empty($onlineCheckout['success']), 'Payment UX: online checkout succeeds');
+assert_true(!empty($onlineCheckout['payment_url']), 'Payment UX: online checkout returns payment_url');
+assert_true(!empty($onlineCheckout['session_id']), 'Payment UX: online checkout keeps session_id contract');
+$onlineCheckoutTx = PaymentService::transactionsForOrder((int)$onlineCheckout['order_id']);
+assert_equals('initiated', (string)$onlineCheckoutTx[0]['status'], 'Payment UX: online checkout logs initiated transaction');
+assert_equals((string)$onlineCheckout['session_id'], (string)$onlineCheckoutTx[0]['provider_ref'], 'Payment UX: initiated transaction stores session_id');
+$_POST = [];
+
 $pdo->exec("UPDATE payment_methods SET active = 0 WHERE code = 'cod'");
 $checkoutDisabledCod = PaymentService::selectMethod('cod', 'SK', 'eur', 2799, 'packeta');
 assert_true($checkoutDisabledCod === null, 'Payment UX: checkout rejects disabled selected payment');
