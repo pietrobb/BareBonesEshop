@@ -295,6 +295,34 @@ Keď spustíš `php cli/schema-build.php`:
 - **Bezpečnosť:** flock na `db/.migrations.lock` (10 s timeout), per-migration
   `BEGIN/ROLLBACK`, hard fail pri checksum mismatch (file edited po apply).
 
+### Backup & Restore (Roadmap 1.6)
+
+`BackupService` (online SQLite backup) + `cli/backup.php` + `cli/restore.php`.
+
+- **Mechanizmus:** `PRAGMA wal_checkpoint(TRUNCATE)` → `VACUUM INTO 'storage/backups/YYYY/MM/DD/eshop-YYYYMMDD-HHMMSS.db'`. Atomický, defragmentovaný, WAL-safe, bez externých nástrojov.
+- **Layout:** `storage/backups/YYYY/MM/DD/eshop-*.db` + sidecar `*.meta.json` (timestamp, size, sha256, schema_version, label, trigger, compressed). Audit log: `storage/backup.log` (10 MB × 5 rotations).
+- **Konfigurácia:** `config/backup.json` — `enabled`, `compression`, `retention {daily, weekly, monthly, minimum_kept}`, `auto_pre_migration`, `auto_gc_on_backup`, `wal_checkpoint`. Storage adapter: `LocalBackupStorage` (default), interface `BackupStorage` umožňuje S3 / off-site neskôr.
+- **Concurrency:** flock na `storage/backups/.backup.lock` (10 s timeout), rovnaké API ako Migrator.
+- **Idempotencia:** sub-sekundové kolízie filename → `-1`, `-2`, … suffix counter.
+- **Compression:** OFF default (`VACUUM INTO` už defragmentuje). Opt-in cez `--gz` flag alebo `compression: true` → `*.db.gz` sidecar.
+- **GC retention:** grandfather-father-son (7 daily / 4 weekly / 6 monthly), `minimum_kept: 3` chráni pred GC-vyprázdnením pri prvotnom rozbehu.
+- **Migrator pre-hook:** ak `auto_pre_migration: true`, `cli/migrate.php` pred apply pendingu zavolá `BackupService::create(['label' => 'pre-migration'])`. Override: `--skip-backup`. Hook throw → migrácia sa nespustí (table marker NOT inserted).
+- **Manual:** `php cli/backup.php [--gc] [--gz] [--label=<text>] [--quiet]`. Cron friendly.
+- **Restore:** `php cli/restore.php <remote_path> [--force] [--no-snapshot]`.
+  - **sha256 verify** proti meta JSON (tamper detection — hard fail).
+  - `PRAGMA integrity_check` pred swapom — hard fail pri corrupt backup.
+  - **Pre-restore snapshot** (`label=pre-restore-snapshot`) — safety net (max 5 retained); presne ten istý kód path ako manual backup, ale beží mimo restore lock-u (žiaden re-entrant deadlock).
+  - **Atomic swap** — copy → temp → `rename()` cez živý súbor. Windows: `Db::reset()` + 3× × 100 ms retry pri lock-u; po 3 retry abort s clear error message.
+  - **schema_migrations mismatch** po restore → warning (NIE hard fail). `count(applied) < count(files)` → "⚠️ Restored DB has older schema. Run: php cli/migrate.php (N pending)". Reverse situácia (DB má migrácie ktoré v kóde nie sú) → "⚠️ Restored DB has migrations not in current code."
+- **Backup commands typical flow:**
+  ```bash
+  php cli/backup.php --label=before-major-import   # manual snapshot
+  php cli/backup.php --gc                          # cron: daily backup + GC
+  php cli/migrate.php                              # auto-backup pred apply
+  php cli/restore.php 2026/04/25/eshop-20260425-143012.db
+  ```
+- **Gotcha:** SQLite live PDO drží file handle — pre restore najprv `Db::reset()`, inak Windows `rename()` zlyhá. `BackupService::restore()` tým prejde sám, ale **dlho-bežiace workery musia byť stopnuté** pred restore.
+
 ```
 catalog.json
     │
