@@ -250,6 +250,13 @@ class PaymentService {
         )->execute([':s' => $status, ':id' => $orderId]);
     }
 
+    public static function renameMethodCodeLinks(string $oldCode, string $newCode): void {
+        if ($oldCode === '' || $oldCode === $newCode) return;
+        $db = Db::get();
+        $db->prepare("UPDATE payment_method_countries SET method_code = :new WHERE method_code = :old")->execute([':new' => $newCode, ':old' => $oldCode]);
+        $db->prepare("UPDATE payment_method_shipping SET method_code = :new WHERE method_code = :old")->execute([':new' => $newCode, ':old' => $oldCode]);
+    }
+
     // =========================================================
     // Private helpers
     // =========================================================

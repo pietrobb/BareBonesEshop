@@ -2333,7 +2333,13 @@ function handlePaymentMethodSave(): void {
     $min = max(0, Security::int($_POST['min_amount'] ?? 0)); $max = paymentNullableInt('max_amount');
     if (!$code || !$provider || !$name || ($max !== null && $max < $min)) { setFlash('err', 'Kod, provider, nazov a platne limity su povinne.'); header('Location: admin.php?p=payments'); exit; }
     $data = [':code'=>$code, ':provider'=>$provider, ':name'=>$name, ':description'=>trim($_POST['description'] ?? ''), ':service_type'=>$serviceType, ':min_amount'=>$min, ':max_amount'=>$max, ':fixed_fee'=>max(0, Security::int($_POST['fixed_fee'] ?? 0)), ':percent_fee_bps'=>max(0, Security::int($_POST['percent_fee_bps'] ?? 0)), ':free_above'=>paymentNullableInt('free_above'), ':requires_online'=>(int)!empty($_POST['requires_online']), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
-    if ($id) { $data[':id']=$id; $db->prepare("UPDATE payment_methods SET code=:code, provider=:provider, name=:name, description=:description, service_type=:service_type, min_amount=:min_amount, max_amount=:max_amount, fixed_fee=:fixed_fee, percent_fee_bps=:percent_fee_bps, free_above=:free_above, requires_online=:requires_online, active=:active, sort_order=:sort_order, updated_at=" . Db::now() . " WHERE id=:id")->execute($data); }
+    if ($id) {
+        $stmt = $db->prepare("SELECT code FROM payment_methods WHERE id = :id");
+        $stmt->execute([':id'=>$id]);
+        $oldCode = (string)$stmt->fetchColumn();
+        $data[':id']=$id; $db->prepare("UPDATE payment_methods SET code=:code, provider=:provider, name=:name, description=:description, service_type=:service_type, min_amount=:min_amount, max_amount=:max_amount, fixed_fee=:fixed_fee, percent_fee_bps=:percent_fee_bps, free_above=:free_above, requires_online=:requires_online, active=:active, sort_order=:sort_order, updated_at=" . Db::now() . " WHERE id=:id")->execute($data);
+        PaymentService::renameMethodCodeLinks($oldCode, $code);
+    }
     else { $db->prepare("INSERT INTO payment_methods (code, provider, name, description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, requires_online, active, sort_order) VALUES (:code, :provider, :name, :description, :service_type, :min_amount, :max_amount, :fixed_fee, :percent_fee_bps, :free_above, :requires_online, :active, :sort_order)")->execute($data); }
     setFlash('ok', 'Platobna metoda ulozena.'); header('Location: admin.php?p=payments'); exit;
 }

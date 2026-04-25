@@ -2508,9 +2508,21 @@ $adminTestWrongShipping = PaymentService::selectMethod('admin_test', 'SK', 'eur'
 assert_true($adminTestWrongShipping === null, 'Payment methods: admin shipping constraint enforced');
 $adminTestGls = PaymentService::selectMethod('admin_test', 'SK', 'eur', 1000, 'gls');
 assert_true($adminTestGls !== null, 'Payment methods: admin shipping constraint allows configured method');
-$pdo->exec("DELETE FROM payment_method_shipping WHERE method_code = 'admin_test'");
-$pdo->exec("DELETE FROM payment_method_countries WHERE method_code = 'admin_test'");
-$pdo->exec("DELETE FROM payment_methods WHERE code = 'admin_test'");
+$pdo->exec("UPDATE payment_methods SET code = 'admin_test_renamed' WHERE code = 'admin_test'");
+PaymentService::renameMethodCodeLinks('admin_test', 'admin_test_renamed');
+$renamedCountryLinks = (int)$pdo->query("SELECT COUNT(*) FROM payment_method_countries WHERE method_code = 'admin_test_renamed' AND country = 'SK'")->fetchColumn();
+$renamedShippingLinks = (int)$pdo->query("SELECT COUNT(*) FROM payment_method_shipping WHERE method_code = 'admin_test_renamed' AND shipping_method_code = 'gls'")->fetchColumn();
+$renamedOldCountryLinks = (int)$pdo->query("SELECT COUNT(*) FROM payment_method_countries WHERE method_code = 'admin_test'")->fetchColumn();
+$renamedOldShippingLinks = (int)$pdo->query("SELECT COUNT(*) FROM payment_method_shipping WHERE method_code = 'admin_test'")->fetchColumn();
+assert_equals(1, $renamedCountryLinks, 'Payment methods: admin code rename preserves country links');
+assert_equals(1, $renamedShippingLinks, 'Payment methods: admin code rename preserves shipping links');
+assert_equals(0, $renamedOldCountryLinks, 'Payment methods: admin code rename removes stale old country links');
+assert_equals(0, $renamedOldShippingLinks, 'Payment methods: admin code rename removes stale old shipping links');
+$adminTestRenamedGls = PaymentService::selectMethod('admin_test_renamed', 'SK', 'eur', 1000, 'gls');
+assert_true($adminTestRenamedGls !== null, 'Payment methods: renamed admin method remains selectable');
+$pdo->exec("DELETE FROM payment_method_shipping WHERE method_code = 'admin_test_renamed'");
+$pdo->exec("DELETE FROM payment_method_countries WHERE method_code = 'admin_test_renamed'");
+$pdo->exec("DELETE FROM payment_methods WHERE code = 'admin_test_renamed'");
 
 $paymentOrderId = Orders::create([
     [
