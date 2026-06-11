@@ -484,11 +484,16 @@ function apiCheckout(): array {
         'is_b2b'                => $vatId !== '',
     ]);
 
+    // NOTE: Cart::applyVat() re-resolves the scenario itself — it expects the
+    // canonical resolveScenario() INPUTS, not the resolved output. Passing the
+    // output keys ('scenario', 'rate_country', …) made customer_country = ''
+    // → scenario 'export' → every line persisted with VAT 0.
     $cart = Cart::enriched([
-        'scenario'     => $vatScenario['scenario'],
-        'rate_country' => $vatScenario['rate_country'],
-        'applies_vat'  => $vatScenario['applies_vat'],
-        'note_key'     => $vatScenario['note_key'],
+        'seller_country'        => $sellerCountry,
+        'seller_oss_enabled'    => $sellerOss,
+        'customer_country'      => $country,
+        'customer_vat_id_valid' => $vatIdValid,
+        'is_b2b'                => $vatId !== '',
     ]);
     if (empty($cart['items'])) {
         return ['error' => 'Cart is empty'];
