@@ -10,9 +10,7 @@ Security::sessionStart();
 if (!isset($_SESSION['cart'])) $_SESSION['cart'] = [];
 
 // Locale from URL — canonical, no session override
-$uri = $_SERVER['REQUEST_URI'] ?? '';
-$lang = I18n::detectLocale($uri);
-I18n::setLocale($lang);
+$lang = Bootstrap::initLocale();
 
 // Legacy fallback for category names not yet migrated to categories.translations JSON
 // (run `php cli/migrate-cat-translations.php` to persist these into the DB).
@@ -566,7 +564,7 @@ switch ($page) {
 // Layout
 // ============================================================
 // Build hreflang alternates from stores.json — one per store url_prefix
-$storesCfg = @json_decode((string)file_get_contents(__DIR__ . '/stores.json'), true) ?: [];
+$storesCfg = Bootstrap::stores();
 $hreflangs = [];
 foreach ($storesCfg['stores'] ?? [] as $store) {
     $locale = $store['default_locale'] ?? 'en';
@@ -1094,7 +1092,7 @@ function renderLegalPage(string $page): string {
         $tpl = __DIR__ . '/templates/legal/en/' . $page . '.html';
     }
 
-    $stores = json_decode((string)file_get_contents(__DIR__ . '/stores.json'), true) ?: [];
+    $stores = Bootstrap::stores();
     $legal = [];
     foreach ($stores['stores'] ?? [] as $store) {
         if (($store['default_locale'] ?? '') === $locale) {
