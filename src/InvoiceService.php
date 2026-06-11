@@ -584,22 +584,27 @@ final class InvoiceService
         $pdf->line(20, $y, 190, $y);
         $y += 4;
 
-        $rate = (int)array_key_first($vatBreakdown['rates'] ?? []) ?: 0;
+        // Each line shows its OWN VAT rate (mixed-rate invoices: a 23% line and a
+        // 10% line coexist instead of all lines borrowing the first rate).
         foreach ($items as $item) {
             $name = (string)$item['name'];
             $qty  = (int)$item['quantity'];
             $unit = (int)$item['unit_price'];
             $tot  = (int)$item['total'];
+            $lineRate = self::rateKey((float)($item['vat_rate'] ?? 0));
             $pdf->text(20, $y, mb_substr($name, 0, 50), ['size' => 9]);
             $pdf->text(100, $y, (string)$qty, ['size' => 9, 'align' => 'right', 'width' => 15]);
             $pdf->text(120, $y, I18n::price($unit, $currency), ['size' => 9, 'align' => 'right', 'width' => 25]);
-            $pdf->text(150, $y, $rate . '%', ['size' => 9, 'align' => 'right', 'width' => 12]);
+            $pdf->text(150, $y, $lineRate . '%', ['size' => 9, 'align' => 'right', 'width' => 12]);
             $pdf->text(165, $y, I18n::price($tot, $currency), ['size' => 9, 'align' => 'right', 'width' => 25]);
             $y += 5;
         }
 
         if (!empty($order['shipping_cost']) && (int)$order['shipping_cost'] > 0) {
+            // Shipping carries the standard (highest) rate when VAT applies, 0% otherwise.
+            $shipRate = self::rateKey(self::maxRate($vatBreakdown['rates'] ?? []));
             $pdf->text(20, $y, $L['shipping'], ['size' => 9]);
+            $pdf->text(150, $y, $shipRate . '%', ['size' => 9, 'align' => 'right', 'width' => 12]);
             $pdf->text(165, $y, I18n::price((int)$order['shipping_cost'], $currency),
                 ['size' => 9, 'align' => 'right', 'width' => 25]);
             $y += 5;
