@@ -47,6 +47,11 @@ return [
         'integration' => null,
     ],
 
+    // Dev only: route api.php?action=webhook_payment&provider=mock even when the
+    // active payment adapter is not MockPayment. NEVER enable in production —
+    // the mock webhook marks orders as paid. Pair with 'mock_webhook_secret'.
+    'allow_mock_webhook' => false,
+
     // Stripe (when using StripePayment adapter)
     'stripe_secret_key'      => '',
     'stripe_publishable_key' => '',

@@ -818,19 +818,25 @@ function apiWebhookPayment(): array {
     }
 
     // Resolve gateway and signature header per provider
+    $cfg = require __DIR__ . '/config.php';
     [$gateway, $sigHeader] = match($provider) {
         'stripe' => [
-            new StripePayment(require __DIR__ . '/config.php'),
+            new StripePayment($cfg),
             $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '',
         ],
         'payu' => [
-            new PayUPayment(require __DIR__ . '/config.php'),
+            new PayUPayment($cfg),
             $_SERVER['HTTP_OPENPAYU_SIGNATURE'] ?? '',
         ],
-        'mock' => [
-            new MockPayment(['mock_result' => 'success']),
-            $_SERVER['HTTP_X_MOCK_SIGNATURE'] ?? 'mock_sig',
-        ],
+        // Mock gateway = payment bypass — only routable when config explicitly
+        // opts in (adapters.payment == MockPayment or allow_mock_webhook flag).
+        // No default signature header: missing header must fail verification.
+        'mock' => (($cfg['adapters']['payment'] ?? '') === 'MockPayment' || !empty($cfg['allow_mock_webhook']))
+            ? [
+                new MockPayment($cfg + ['mock_result' => 'success']),
+                $_SERVER['HTTP_X_MOCK_SIGNATURE'] ?? '',
+            ]
+            : [null, ''],
         default => [null, ''],
     };
 
