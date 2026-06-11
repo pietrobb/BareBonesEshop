@@ -1690,10 +1690,11 @@ $couponCustomer = [
 $couponOrderId = Orders::create($couponCartItems, $couponCustomer, 'cod');
 $couponOrder = Orders::byId($couponOrderId);
 $expectedSubtotal = $couponProduct['price'];
-$expectedTotal = max(0, $expectedSubtotal - 500) + 399 + 200;
+// prices_include_tax=true → extracted tax_amount is reporting-only, NOT added to total
+$expectedTotal = max(0, $expectedSubtotal - 500) + 399;
 assert_equals($expectedSubtotal, (int)$couponOrder['subtotal'], 'Coupon order: subtotal correct');
 assert_equals(500, (int)$couponOrder['discount_amount'], 'Coupon discount persisted in order');
-assert_equals($expectedTotal, (int)$couponOrder['total'], 'Coupon order: total = subtotal - discount + shipping + tax');
+assert_equals($expectedTotal, (int)$couponOrder['total'], 'Coupon order: total = subtotal - discount + shipping (tax included in gross)');
 
 // ============================================================
 // TEST 35: Pricing edge cases — zero price, zero compare_price

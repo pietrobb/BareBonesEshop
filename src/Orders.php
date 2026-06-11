@@ -80,7 +80,11 @@ class Orders {
             $taxAmount = $customer['tax_amount'] ?? 0;
             $couponDiscount = $customer['coupon_discount'] ?? 0;
             $paymentFee = $customer['payment_fee'] ?? 0;
-            $total = max(0, $subtotal - $couponDiscount) + $shippingCost + $taxAmount + $paymentFee;
+            // When catalog prices are gross (prices_include_tax, the default),
+            // tax_amount is EXTRACTED from $subtotal for reporting only —
+            // adding it on top would charge VAT twice (audit 2026-06-11 bug #2).
+            $taxInTotal = Tax::pricesIncludeTax() ? 0 : $taxAmount;
+            $total = max(0, $subtotal - $couponDiscount) + $shippingCost + $taxInTotal + $paymentFee;
 
             // 2a. Per-order VAT snapshot (sum from items if any line has VAT data)
             $vatTotal = 0;
