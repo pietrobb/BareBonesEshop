@@ -61,6 +61,7 @@ $pagePermissions = [
     'feed'       => 'import',
     'shipping'   => 'products.edit',
     'payments'   => 'products.edit',
+    'reviews'    => 'products.edit',
 ];
 $requiredPerm = $pagePermissions[$page] ?? 'reports.view';
 Security::adminRequire($requiredPerm);
@@ -162,6 +163,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=payments" class="<?= $page==='payments'?'active':'' ?>">Platby</a><?php endif; ?>
     <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=audit" class="<?= $page==='audit'?'active':'' ?>"><?= esc(I18n::t('admin.nav.audit')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('gdpr.view')): ?><a href="admin.php?p=gdpr" class="<?= $page==='gdpr'?'active':'' ?>"><?= esc(I18n::t('admin.nav.gdpr')) ?></a><?php endif; ?>
+    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=reviews" class="<?= $page==='reviews'?'active':'' ?>">Recenzie</a><?php endif; ?>
 </nav>
 <main>
 <?php flash(); ?>
@@ -187,6 +189,7 @@ match($page) {
     'feed'       => pageFeed(),
     'shipping'   => pageShipping(),
     'payments'   => pagePayments(),
+    'reviews'    => pageReviews(),
     default      => pageDashboard(),
 };
 ?>
@@ -965,6 +968,56 @@ function pageAudit(): void {
     <?php
 }
 
+function pageReviews(): void {
+    $db = Db::get();
+    $pending = Reviews::pending(200);
+    // Map product ids → names for display
+    $names = [];
+    if ($pending) {
+        $ids = implode(',', array_map(fn($r) => (int)$r['product_id'], $pending));
+        foreach ($db->query("SELECT id, name FROM products WHERE id IN ({$ids})") as $p) {
+            $names[(int)$p['id']] = $p['name'];
+        }
+    }
+    ?>
+    <h1>Recenzie — moderácia <span class="muted">(<?= count($pending) ?> čaká)</span></h1>
+    <div class="card">
+        <?php if (!$pending): ?>
+        <p class="muted">Žiadne recenzie nečakajú na schválenie.</p>
+        <?php else: ?>
+        <table>
+            <tr><th>ID</th><th>Produkt</th><th>Autor</th><th>Hodnotenie</th><th>Text</th><th>Kedy</th><th>Akcie</th></tr>
+            <?php foreach ($pending as $rv): ?>
+            <tr>
+                <td><?= (int)$rv['id'] ?></td>
+                <td><?= esc($names[(int)$rv['product_id']] ?? ('#' . $rv['product_id'])) ?></td>
+                <td><?= esc($rv['author_name']) ?></td>
+                <td><?= str_repeat('★', (int)$rv['rating']) ?></td>
+                <td style="max-width:320px">
+                    <?php if (!empty($rv['title'])): ?><strong><?= esc($rv['title']) ?></strong><br><?php endif; ?>
+                    <?= esc($rv['body']) ?>
+                </td>
+                <td class="muted"><?= esc(substr((string)$rv['created_at'], 0, 16)) ?></td>
+                <td style="white-space:nowrap">
+                    <form method="post" action="admin.php?p=reviews&action=approve" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                        <input type="hidden" name="review_id" value="<?= (int)$rv['id'] ?>">
+                        <button class="btn btn-primary" type="submit">Schváliť</button>
+                    </form>
+                    <form method="post" action="admin.php?p=reviews&action=reject" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                        <input type="hidden" name="review_id" value="<?= (int)$rv['id'] ?>">
+                        <button class="btn" type="submit">Zamietnuť</button>
+                    </form>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+        <?php endif; ?>
+    </div>
+    <?php
+}
+
 // ============================================================
 // CMS Pages
 // ============================================================
@@ -1185,8 +1238,22 @@ function handlePost(string $page, string $action): void {
         'payments:country_delete' => handlePaymentCountryDelete(),
         'payments:shipping_save' => handlePaymentShippingSave(),
         'payments:shipping_delete' => handlePaymentShippingDelete(),
+        'reviews:approve' => handleReviewModerate('approved'),
+        'reviews:reject'  => handleReviewModerate('rejected'),
         default          => null,
     };
+}
+
+function handleReviewModerate(string $status): void {
+    Security::adminRequire('products.edit');
+    $id = Security::int($_POST['review_id'] ?? 0);
+    if ($id > 0 && Reviews::setStatus($id, $status)) {
+        setFlash('ok', 'Recenzia #' . $id . ' → ' . $status);
+    } else {
+        setFlash('err', 'Recenziu sa nepodarilo upraviť.');
+    }
+    header('Location: admin.php?p=reviews');
+    exit;
 }
 
 function handleGdprAnonymize(): void {

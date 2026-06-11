@@ -36,6 +36,7 @@ const Shop = {
         this.bindGalleryActions();
         this.bindSearchActions();
         this.bindCheckoutForm();
+        this.bindReviewForm();
     },
 
     // ============================================================
@@ -438,6 +439,45 @@ const Shop = {
 
             await this.submitCheckout(data);
             if (btn) { btn.disabled = false; btn.textContent = 'Objednať'; }
+        });
+    },
+
+    // ============================================================
+    // Product reviews
+    // ============================================================
+    bindReviewForm() {
+        const form = document.querySelector('[data-review-form]');
+        if (!form) return;
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = form.querySelector('[type="submit"]');
+            const msg = form.querySelector('[data-review-msg]');
+            if (btn) btn.disabled = true;
+
+            const fd = new FormData(form);
+            const data = { product_id: Number(form.dataset.productId) };
+            fd.forEach((val, key) => { if (key !== 'csrf_token') data[key] = val; });
+
+            try {
+                const res = await fetch('api.php?action=review_submit', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': this.csrfToken },
+                    body: JSON.stringify(data),
+                });
+                const json = await res.json();
+                if (json.ok) {
+                    form.reset();
+                    if (msg) { msg.hidden = false; msg.textContent = 'Ďakujeme! Recenzia čaká na schválenie.'; }
+                } else if (msg) {
+                    msg.hidden = false;
+                    msg.textContent = 'Recenziu sa nepodarilo odoslať (' + this.esc(json.error || 'error') + ').';
+                }
+            } catch (err) {
+                if (msg) { msg.hidden = false; msg.textContent = 'Chyba siete.'; }
+            } finally {
+                if (btn) btn.disabled = false;
+            }
         });
     },
 

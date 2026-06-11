@@ -3591,6 +3591,67 @@ assert_true(Reviews::setStatus(999999, 'approved') === false, 'Reviews: setStatu
 // per-product isolation: product 2 has no reviews
 assert_equals(0, Reviews::aggregate(2)['count'], 'Reviews: aggregate isolated per product');
 
+// --- P7.2: api.php review_submit endpoint ---
+if (!defined('BB_TEST_LOAD_API_ONLY')) {
+    define('BB_TEST_LOAD_API_ONLY', true);
+    require_once __DIR__ . '/../api.php';
+}
+// A real product is needed (handler verifies Products::byId). Product 501/502 exist from earlier seed;
+// fall back to creating one if not present in this DB position.
+$apiProdId = (int)($pdo->query("SELECT id FROM products LIMIT 1")->fetchColumn() ?: 0);
+assert_true($apiProdId > 0, 'Reviews API: a product exists to attach a review to');
+
+$submitReview = function (array $body, ?int $customerId = null) use ($apiProdId) {
+    $_SERVER['REQUEST_METHOD'] = 'POST';
+    $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+    $_SESSION['csrf_token'] = 'rv-test-token';
+    if ($customerId !== null) { $_SESSION['customer_id'] = $customerId; }
+    else { unset($_SESSION['customer_id']); }
+    $_POST = array_merge(['csrf_token' => 'rv-test-token', 'product_id' => $apiProdId], $body);
+    $res = apiReviewSubmit();
+    $_POST = [];
+    unset($_SESSION['customer_id']);
+    return $res;
+};
+
+// Guest submit → ok, pending
+$ar = $submitReview(['rating' => 5, 'author_name' => 'API Guest', 'body' => 'Solid product']);
+assert_true(!empty($ar['ok']) && ($ar['status'] ?? '') === 'pending', 'Reviews API: guest submit returns ok + pending');
+$arRow = Reviews::byId((int)$ar['id']);
+assert_true($arRow['status'] === 'pending' && $arRow['customer_id'] === null, 'Reviews API: guest review stored pending, no customer_id');
+
+// Validation error bubbles up (rating out of range)
+$arBad = $submitReview(['rating' => 9, 'author_name' => 'X', 'body' => 'nope']);
+assert_true(($arBad['ok'] ?? null) === false && $arBad['error'] === 'invalid_rating', 'Reviews API: invalid rating rejected');
+
+// Missing author for guest
+$arNoAuthor = $submitReview(['rating' => 4, 'body' => 'no name given']);
+assert_true(($arNoAuthor['ok'] ?? null) === false && $arNoAuthor['error'] === 'author_required', 'Reviews API: guest without author rejected');
+
+// Invalid product id
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_SESSION['csrf_token'] = 'rv-test-token';
+$_POST = ['csrf_token' => 'rv-test-token', 'product_id' => 999999, 'rating' => 5, 'author_name' => 'Y', 'body' => 'ghost product'];
+$arGhost = apiReviewSubmit();
+$_POST = [];
+assert_true(($arGhost['ok'] ?? null) === false && $arGhost['error'] === 'invalid_product', 'Reviews API: non-existent product rejected');
+
+// Logged-in customer → review attributed + name taken from account
+$cust = Customers::byId($aliceId);
+$arCust = $submitReview(['rating' => 4, 'body' => 'as a registered customer'], $aliceId);
+assert_true(!empty($arCust['ok']), 'Reviews API: logged-in customer submit ok');
+$arCustRow = Reviews::byId((int)$arCust['id']);
+assert_equals($aliceId, (int)$arCustRow['customer_id'], 'Reviews API: review attributed to logged-in customer');
+assert_equals($cust['name'], $arCustRow['author_name'], 'Reviews API: author_name taken from customer account');
+
+// CSRF rejection
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_SESSION['csrf_token'] = 'rv-test-token';
+$_POST = ['csrf_token' => 'WRONG', 'product_id' => $apiProdId, 'rating' => 5, 'author_name' => 'Z', 'body' => 'csrf attempt'];
+$arCsrf = apiReviewSubmit();
+$_POST = [];
+assert_true(isset($arCsrf['error']), 'Reviews API: invalid CSRF token rejected');
+
 // ============================================================
 // TEST: Migrations Framework
 // ============================================================
