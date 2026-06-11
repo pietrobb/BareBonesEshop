@@ -4540,6 +4540,71 @@ assert_equals('/products', $hl['pathNoPrefix'], 'Bootstrap: hreflang strips matc
 $hlRoot = Bootstrap::hreflangAlternates('/');
 assert_equals('/', $hlRoot['pathNoPrefix'], 'Bootstrap: hreflang keeps / for unprefixed path');
 
+// ============================================================
+// TEST: SEO pack — sitemap.xml, robots.txt, JSON-LD (P6)
+// ============================================================
+echo "\n--- Test: SEO pack — sitemap / robots / JSON-LD (P6) ---\n";
+
+// Known active rows so the sitemap has concrete category + product paths
+$pdo->exec("INSERT INTO categories (slug, name, path, depth, sort_order, meta) VALUES ('seo-cat', 'SEO Cat', 'seo-cat', 0, 999, '{}')");
+$seoCatId = (int)$pdo->lastInsertId();
+$pdo->exec("INSERT INTO products (sku, slug, product_type, name, category_id, price, stock, status, summary, filter_tags)
+    VALUES ('SEO-1', 'seo-prod', 'simple', 'SEO Prod', {$seoCatId}, 1000, 3, 'active', '', '')");
+
+// --- Sitemap::paths() collects canonical prefix-less paths ---
+$smPaths = Sitemap::paths();
+assert_true(in_array('/', $smPaths, true), 'Sitemap: paths() always includes homepage');
+assert_true(in_array('/category/seo-cat', $smPaths, true), 'Sitemap: paths() includes category route');
+assert_true(in_array('/product/seo-prod', $smPaths, true), 'Sitemap: paths() includes active product route');
+
+// --- Sitemap::xml() is well-formed and locale-complete ---
+$smXml = Sitemap::xml('https://shop.example');
+$smDoc = new DOMDocument();
+assert_true($smDoc->loadXML($smXml) !== false, 'Sitemap: xml() is well-formed XML');
+assert_true(str_contains($smXml, '<loc>https://shop.example/</loc>'), 'Sitemap: xml() contains absolute homepage loc');
+assert_true(str_contains($smXml, 'hreflang="de"') && str_contains($smXml, 'hreflang="cs"'), 'Sitemap: xml() emits hreflang alternates');
+assert_true(str_contains($smXml, 'hreflang="x-default"'), 'Sitemap: xml() emits x-default alternate');
+assert_true(str_contains($smXml, 'https://shop.example/product/seo-prod'), 'Sitemap: xml() includes product URL');
+
+// --- Robots::txt() — Sitemap directive + private-path disallows ---
+$rb = Robots::txt('https://shop.example');
+assert_true(str_contains($rb, 'User-agent: *'), 'Robots: declares wildcard user-agent');
+assert_true(str_contains($rb, 'Sitemap: https://shop.example/sitemap.xml'), 'Robots: absolute Sitemap directive');
+assert_true(str_contains($rb, 'Disallow: /admin'), 'Robots: disallows admin');
+assert_true(str_contains($rb, 'Disallow: /checkout'), 'Robots: disallows checkout');
+assert_true(str_contains($rb, 'Allow: /'), 'Robots: allows public root');
+
+// --- JsonLd::organization() — default store identity ---
+$ldOrg = JsonLd::organization('https://shop.example', Bootstrap::stores());
+assert_equals('Organization', $ldOrg['@type'], 'JsonLd: organization @type');
+assert_equals('Woodle s.r.o.', $ldOrg['name'], 'JsonLd: organization name from default store legal');
+assert_equals('https://shop.example/', $ldOrg['url'], 'JsonLd: organization absolute url');
+
+// --- JsonLd::webSite() — SearchAction sitelinks searchbox ---
+$ldWs = JsonLd::webSite('https://shop.example', Bootstrap::stores());
+assert_equals('WebSite', $ldWs['@type'], 'JsonLd: webSite @type');
+assert_equals('SearchAction', $ldWs['potentialAction']['@type'], 'JsonLd: webSite has SearchAction');
+assert_true(str_contains($ldWs['potentialAction']['target']['urlTemplate'], '{search_term_string}'), 'JsonLd: SearchAction target carries search_term_string');
+
+// --- JsonLd::breadcrumbList() — ordered trail, leaf has no item ---
+$ldBc = JsonLd::breadcrumbList([
+    ['name' => 'Home', 'url' => '/'],
+    ['name' => 'Brakes', 'url' => '/category/brakes'],
+    ['name' => 'Front Disc'],
+], 'https://shop.example');
+assert_equals('BreadcrumbList', $ldBc['@type'], 'JsonLd: breadcrumb @type');
+assert_equals(3, count($ldBc['itemListElement']), 'JsonLd: breadcrumb has all items');
+assert_equals(1, $ldBc['itemListElement'][0]['position'], 'JsonLd: breadcrumb positions are 1-based');
+assert_equals('https://shop.example/category/brakes', $ldBc['itemListElement'][1]['item'], 'JsonLd: breadcrumb ancestor has absolute item URL');
+assert_true(!isset($ldBc['itemListElement'][2]['item']), 'JsonLd: breadcrumb leaf omits item (current page)');
+
+// --- JsonLd::render() — nonce'd script wrapper with valid JSON payload ---
+$ldHtml = JsonLd::render($ldOrg, 'nonce-xyz');
+assert_true(str_contains($ldHtml, 'type="application/ld+json"'), 'JsonLd: render emits ld+json script');
+assert_true(str_contains($ldHtml, 'nonce="nonce-xyz"'), 'JsonLd: render carries CSP nonce');
+$ldPayload = substr($ldHtml, strpos($ldHtml, '>') + 1, -strlen('</script>'));
+assert_true(json_decode($ldPayload) !== null, 'JsonLd: render payload is valid JSON');
+
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
 if ($failed > 0) {

@@ -110,6 +110,15 @@ Security::headers();
         ],
     ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
     </script>
+<?php
+    // BreadcrumbList: Home › ancestor categories › current product
+    $crumbItems = [['name' => $t['home'] ?? 'Home', 'url' => '/']];
+    foreach ($breadcrumb as $bc) {
+        $crumbItems[] = ['name' => $bc['name'], 'url' => '/category/' . $bc['slug']];
+    }
+    $crumbItems[] = ['name' => $product['name']];
+    echo "    " . JsonLd::render(JsonLd::breadcrumbList($crumbItems), Security::cspNonce()) . "\n";
+?>
 
     <link rel="stylesheet" href="/shop.css">
 </head>

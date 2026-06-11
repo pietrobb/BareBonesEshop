@@ -282,6 +282,23 @@ switch ($page) {
 $hreflangData = Bootstrap::hreflangAlternates();
 $hreflangs = $hreflangData['alternates'];
 $pathNoPrefix = $hreflangData['pathNoPrefix'];
+
+// Structured data (JSON-LD): Organization + WebSite searchbox on the homepage,
+// BreadcrumbList on category pages.
+$scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+$base = $scheme . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost');
+$jsonLd = '';
+$nonce = Security::cspNonce();
+if ($page === 'home') {
+    $jsonLd  = JsonLd::render(JsonLd::organization($base, Bootstrap::stores()), $nonce);
+    $jsonLd .= JsonLd::render(JsonLd::webSite($base, Bootstrap::stores()), $nonce);
+} elseif ($page === 'category' && !empty($cat)) {
+    $crumbItems = [['name' => $t('home'), 'url' => '/']];
+    foreach (Categories::breadcrumb((int)$cat['id']) as $crumbCat) {
+        $crumbItems[] = ['name' => $catName($crumbCat['name']), 'url' => '/category/' . $crumbCat['slug']];
+    }
+    $jsonLd = JsonLd::render(JsonLd::breadcrumbList($crumbItems, $base), $nonce);
+}
 ?><!DOCTYPE html>
 <html lang="<?= $lang ?>">
 <head>
@@ -292,6 +309,7 @@ $pathNoPrefix = $hreflangData['pathNoPrefix'];
 <link rel="alternate" hreflang="<?= $e($loc) ?>" href="<?= $e($pfx . $pathNoPrefix) ?>">
 <?php endforeach; ?>
 <link rel="alternate" hreflang="x-default" href="<?= $e($hreflangData['xDefaultPrefix'] . $pathNoPrefix) ?>">
+<?php if ($jsonLd) echo $jsonLd . "\n"; ?>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}

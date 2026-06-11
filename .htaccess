@@ -38,6 +38,10 @@ RewriteRule ^(.*)$ $1 [L,T=application/json]
 # SEO-friendly URLs
 # ============================================================
 
+# XML sitemap + robots.txt (dynamic, absolute-URL aware)
+RewriteRule ^sitemap\.xml$ sitemap.php [L]
+RewriteRule ^robots\.txt$ robots.php [L]
+
 # ============================================================
 # Multi-store URL prefixes: /de/..., /en/...
 # ============================================================
