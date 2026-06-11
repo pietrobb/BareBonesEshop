@@ -180,34 +180,16 @@ class OrderWorkflow {
 
     /**
      * Returned: restore stock (in DB), no jobs needed.
-     * Increments warehouse_stock.qty (goods physically back in warehouse).
+     * Goods physically came back AFTER shipping, i.e. this order's
+     * reservation was already consumed by handleShipped (reserved -= qty,
+     * qty -= qty). Restore mode 'return' increments warehouse_stock.qty
+     * only — it must NOT decrement 'reserved', which at this point
+     * belongs to other open orders (bug #7: eaten foreign reservations).
+     * The qty increment also runs under the stock_restored guard now,
+     * so it is idempotent.
      */
     private static function handleReturn(array $order): array {
-        $items = Orders::items($order['id']);
-        $db = Db::get();
-
-        foreach ($items as $item) {
-            if (!empty($item['variant_id'])) continue;
-
-            $attrs = json_decode($item['attrs'] ?? '{}', true);
-            $allocs = $attrs['_warehouse_allocations'] ?? null;
-
-            if ($allocs) {
-                foreach ($allocs as $alloc) {
-                    // Goods returned: add qty back to warehouse
-                    $db->prepare("
-                        UPDATE warehouse_stock SET qty = qty + :qty
-                        WHERE warehouse_id = :wh AND sku = :sku
-                    ")->execute([
-                        ':qty' => $alloc['qty'],
-                        ':wh'  => $alloc['warehouse_id'],
-                        ':sku' => $item['sku'],
-                    ]);
-                }
-            }
-        }
-
-        Orders::restoreStock($order['id']);
+        Orders::restoreStock($order['id'], 'return');
         return [];
     }
 

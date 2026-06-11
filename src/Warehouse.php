@@ -219,6 +219,19 @@ class Warehouse {
         }
     }
 
+    /** Physical return after shipping: goods come back as on-hand qty.
+     *  The order's reservation was already consumed at shipping time,
+     *  so 'reserved' must NOT be touched here (it belongs to other orders). */
+    public static function restock(string $sku, array $allocations): void {
+        $db = Db::get();
+        foreach ($allocations as $alloc) {
+            $db->prepare("
+                UPDATE warehouse_stock SET qty = qty + :qty
+                WHERE warehouse_id = :wh AND sku = :sku
+            ")->execute([':qty' => $alloc['qty'], ':wh' => $alloc['warehouse_id'], ':sku' => $sku]);
+        }
+    }
+
     /** Sync products.stock column from warehouse_stock totals */
     public static function syncProductStock(array $skus = []): void {
         $db = Db::get();

@@ -337,9 +337,18 @@ class Orders {
     }
 
     /**
-     * Restore stock for order items (used by cancellation/refund)
+     * Restore stock for order items.
+     *
+     * $mode:
+     *  - 'release' (cancellation): the order's reservation is still held
+     *    (order never shipped) — decrement warehouse_stock.reserved.
+     *  - 'return' (returned after shipping): the reservation was already
+     *    consumed at 'shipped' (reserved -= qty AND qty -= qty). Goods
+     *    physically came back, so ONLY increment warehouse_stock.qty.
+     *    Decrementing 'reserved' here would eat reservations belonging
+     *    to OTHER open orders and cause oversell.
      */
-    public static function restoreStock(int $orderId): void {
+    public static function restoreStock(int $orderId, string $mode = 'release'): void {
         $db = Db::get();
         $items = self::items($orderId);
 
@@ -362,8 +371,13 @@ class Orders {
                     $allocs = $attrs['_warehouse_allocations'] ?? null;
 
                     if ($allocs) {
-                        // Release back to exact warehouses where stock was reserved
-                        Warehouse::release($item['sku'], $allocs);
+                        if ($mode === 'return') {
+                            // Physical return: add qty back to the exact warehouses
+                            Warehouse::restock($item['sku'], $allocs);
+                        } else {
+                            // Release back to exact warehouses where stock was reserved
+                            Warehouse::release($item['sku'], $allocs);
+                        }
                         Warehouse::syncProductStock([$item['sku']]);
                     } else {
                         // Fallback: no allocation info, add to default warehouse

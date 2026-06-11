@@ -4085,6 +4085,66 @@ Warehouse::release('SKU-R', $reserveAllocs);
 $whSum = (int)$pdo->query("SELECT SUM(reserved) FROM warehouse_stock WHERE sku='SKU-R'")->fetchColumn();
 assert_equals(0, $whSum, 'Release: all reservations returned');
 
+// ============================================================
+// TEST 57: P1 regression — return flow must not eat foreign reservations
+// Bug #7: handleReturn restored stock via the release path, which
+// decremented warehouse_stock.reserved. But a returned order's own
+// reservation was already consumed at 'shipped' — whatever 'reserved'
+// remains belongs to OTHER open orders. A physical return must only
+// increment qty. Cancel (never shipped) must keep releasing 'reserved'.
+// ============================================================
+echo "\n--- Test 57: P1 regression (return flow vs foreign reservations) ---\n";
+
+$pdo->exec("INSERT INTO products (id,category_id,name,slug,sku,price,currency,status,vat_class,stock) VALUES
+    (503,1,'Returner','returner','SKU-RT',5000,'eur','active','standard',10)");
+$pdo->exec("DELETE FROM warehouse_stock WHERE sku='SKU-RT'");
+$pdo->exec("INSERT INTO warehouse_stock (warehouse_id,sku,qty,reserved) VALUES (1,'SKU-RT',10,0)");
+
+$rtItem = fn(int $qty) => [[
+    'product_id' => 503, 'variant_id' => null, 'qty' => $qty,
+    'price' => 5000, 'sku' => 'SKU-RT', 'name' => 'Returner', 'variant_name' => '',
+]];
+$rtCustomer = [
+    'name' => 'RT', 'email' => 'rt@test.com',
+    'address' => ['street' => 'X 1', 'city' => 'BA', 'zip' => '81101', 'country' => 'SK'],
+    'currency' => 'eur', 'shipping_cost' => 0, 'tax_amount' => 0,
+];
+
+$rtA = Orders::create($rtItem(2), $rtCustomer, 'stripe');   // order under test (will ship + return)
+$rtB = Orders::create($rtItem(3), $rtCustomer, 'stripe');   // foreign open order (holds reservation)
+$rtStock = fn() => $pdo->query("SELECT qty, reserved FROM warehouse_stock WHERE warehouse_id=1 AND sku='SKU-RT'")->fetch(PDO::FETCH_ASSOC);
+
+$s = $rtStock();
+assert_equals(5, (int)$s['reserved'], 'Return: A(2)+B(3) reserved=5');
+
+// Ship A: its reservation is consumed (reserved -2, qty -2)
+OrderWorkflow::transition($rtA, 'paid');
+OrderWorkflow::transition($rtA, 'shipped');
+$s = $rtStock();
+assert_equals(8, (int)$s['qty'], 'Return: shipped decrements qty (10→8)');
+assert_equals(3, (int)$s['reserved'], 'Return: shipped consumed own reservation (5→3)');
+
+// Return A: goods come back as qty; B's reservation must stay intact
+OrderWorkflow::transition($rtA, 'returned');
+$s = $rtStock();
+assert_equals(10, (int)$s['qty'], 'Return: qty restored (8→10)');
+assert_equals(3, (int)$s['reserved'], 'Return: foreign reservation NOT eaten (reserved stays 3)');
+assert_equals(7, (int)$pdo->query("SELECT stock FROM products WHERE id=503")->fetchColumn(), 'Return: products.stock = qty - foreign reserved = 7');
+
+// Idempotency: second restore is a no-op (stock_restored guard now also covers the qty increment)
+Orders::restoreStock($rtA, 'return');
+$s = $rtStock();
+assert_equals(10, (int)$s['qty'], 'Return: double restore idempotent (qty)');
+assert_equals(3, (int)$s['reserved'], 'Return: double restore idempotent (reserved)');
+
+// Cancel branch: B cancelled before shipping → releases its reservation, qty untouched
+OrderWorkflow::transition($rtB, 'paid');
+OrderWorkflow::transition($rtB, 'cancelled');
+$s = $rtStock();
+assert_equals(10, (int)$s['qty'], 'Cancel: qty untouched (still 10)');
+assert_equals(0, (int)$s['reserved'], 'Cancel: releases own reservation (3→0)');
+assert_equals(10, (int)$pdo->query("SELECT stock FROM products WHERE id=503")->fetchColumn(), 'Cancel: products.stock synced back to 10');
+
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
 if ($failed > 0) {
