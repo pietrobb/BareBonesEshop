@@ -86,4 +86,14 @@ class Db {
             ? "ON CONFLICT({$conflictTarget}) DO UPDATE SET {$updatesSqlite}"
             : 'ON DUPLICATE KEY UPDATE ' . ($updatesMysql ?? $updatesSqlite);
     }
+
+    /**
+     * Driver-aware "<field> + <seconds> seconds" datetime expression.
+     * $seconds may be a column name or a numeric SQL expression.
+     */
+    public static function dateAddSeconds(string $field, string $seconds): string {
+        return self::isSqlite()
+            ? "datetime({$field}, '+' || {$seconds} || ' seconds')"
+            : "DATE_ADD({$field}, INTERVAL {$seconds} SECOND)";
+    }
 }
