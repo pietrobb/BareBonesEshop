@@ -14,7 +14,7 @@ Security::headers();
 header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'");
 
 // Admin locale: URL ?lang=xx (persisted in session) → session → system default.
-$storesCfg = json_decode(file_get_contents(__DIR__ . '/stores.json'), true) ?: [];
+$storesCfg = Bootstrap::stores();
 $adminSupportedLocales = [];
 foreach ($storesCfg['stores'] ?? [] as $s) {
     foreach ($s['languages'] ?? [] as $lc) $adminSupportedLocales[$lc] = true;

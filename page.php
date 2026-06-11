@@ -10,9 +10,7 @@ Security::sessionStart();
 if (!isset($_SESSION['cart'])) $_SESSION['cart'] = [];
 
 // Locale from URL
-$uri = $_SERVER['REQUEST_URI'] ?? '';
-$lang = I18n::detectLocale($uri);
-I18n::setLocale($lang);
+$lang = Bootstrap::initLocale();
 
 $slug = Security::slug($_GET['slug'] ?? '');
 if (!$slug) { http_response_code(404); exit; }

@@ -12,7 +12,7 @@ Security::sessionStart();
 Security::headers();
 
 // Locale: URL ?lang= overrides session, session overrides auto-detect.
-$storesCfg = json_decode(file_get_contents(__DIR__ . '/stores.json'), true) ?: [];
+$storesCfg = Bootstrap::stores();
 $supported = [];
 foreach ($storesCfg['stores'] ?? [] as $s) {
     foreach ($s['languages'] ?? [] as $lc) $supported[$lc] = true;

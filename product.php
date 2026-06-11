@@ -10,9 +10,7 @@ Security::sessionStart();
 if (!isset($_SESSION['cart'])) $_SESSION['cart'] = [];
 
 // Locale from URL — canonical, no session override
-$uri = $_SERVER['REQUEST_URI'] ?? '';
-$lang = I18n::detectLocale($uri);
-I18n::setLocale($lang);
+$lang = Bootstrap::initLocale();
 
 $slug = preg_replace('/[^a-z0-9-]/', '', $_GET['slug'] ?? '');
 if (!$slug) { http_response_code(404); exit; }
@@ -57,7 +55,7 @@ if (!empty($product['category_id'])) {
 $cart = Cart::enriched();
 
 // Currency for JSON-LD
-$stores = json_decode(file_get_contents(__DIR__ . '/stores.json'), true);
+$stores = Bootstrap::stores();
 $currencyCode = strtoupper($product['currency'] ?? $stores['default_currency'] ?? 'eur');
 
 // Build canonical URL
