@@ -3562,6 +3562,13 @@ if (file_exists($vatMigFile)) {
     $vatMig = require $vatMigFile;
     $vatMig->up(Db::get(), Db::isSqlite());
 }
+// Apply invoices(order_id) unique-index migration (bug #9) so all invoice
+// tests below run with the production constraint active
+$uqMigFile = __DIR__ . '/../migrations/20260611220000_add_invoices_order_unique.php';
+if (file_exists($uqMigFile)) {
+    $uqMig = require $uqMigFile;
+    $uqMig->up(Db::get(), Db::isSqlite());
+}
 
 // Seed a minimal paid order
 $db = Db::get();
@@ -4177,6 +4184,75 @@ Orders::restoreStock($rtC);
 $s = $rtStock();
 assert_equals(0, (int)$s['reserved'], 'Flag: repeated restore is a no-op (reserved stays 0)');
 assert_equals(10, (int)$s['qty'], 'Flag: repeated restore is a no-op (qty stays 10)');
+
+// ============================================================
+// TEST 59: P1 regression — invoices(order_id) UNIQUE + race-safe issue
+// Bug #9: InvoiceService::issue had a check-then-insert race — two
+// concurrent issue() calls could both pass the byOrderId() null-check
+// and INSERT, creating two invoices (two numbers, two PDFs) for one
+// order. The DB now enforces one type='invoice' row per order via a
+// partial unique index; issue() catches the violation (SQLSTATE 23000)
+// and returns the winner's invoice instead of throwing.
+// ============================================================
+echo "\n--- Test 59: P1 regression (invoice UNIQUE order_id) ---\n";
+
+// Seed a fresh paid order (invoices table + unique index exist from the
+// Invoices test section; counters survive — numbers just keep growing)
+$pdo->exec("INSERT INTO orders (id, order_number, status, customer_name, customer_email, shipping_addr, payment_method, subtotal, discount_amount, shipping_cost, tax_amount, total, currency, locale, created_at) VALUES (5901, 'INV-5901', 'paid', 'Race Test', 'race@example.sk', '{}', 'card', 2000, 0, 0, 0, 2000, 'eur', 'sk', datetime('now'))");
+$pdo->exec("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total) VALUES (5901, 501, 'SKU-S', 'Race produkt', 1, 2000, 2000)");
+
+// 59.1 — idempotent issue (early-return path)
+$ri1 = InvoiceService::issue(5901);
+$ri2 = InvoiceService::issue(5901);
+assert_equals((int)$ri1['id'], (int)$ri2['id'], 'UQ: re-issue returns same invoice id');
+
+// 59.2 — the race's losing writer: raw duplicate INSERT for the same order
+// must be rejected by the unique index with SQLSTATE 23000
+$dupCode = null;
+try {
+    $pdo->exec("INSERT INTO invoices (order_id, number, issued_at, pdf_path, download_token, type) VALUES (5901, 'DUP-0001', '2026-06-11', 'x.pdf', '" . str_repeat('a', 64) . "', 'invoice')");
+} catch (\PDOException $e) { $dupCode = (string)$e->getCode(); }
+assert_equals('23000', $dupCode, 'UQ: duplicate invoice INSERT raises SQLSTATE 23000');
+assert_equals(1, (int)$pdo->query("SELECT COUNT(*) FROM invoices WHERE order_id=5901 AND type='invoice'")->fetchColumn(), 'UQ: still exactly 1 invoice for order');
+
+// 59.3 — credit note for the same order is NOT blocked (index is partial)
+$pdo->exec("INSERT INTO invoices (order_id, number, issued_at, pdf_path, download_token, type) VALUES (5901, 'CN-0001', '2026-06-11', 'cn.pdf', '" . str_repeat('b', 64) . "', 'credit_note')");
+assert_equals(2, (int)$pdo->query("SELECT COUNT(*) FROM invoices WHERE order_id=5901")->fetchColumn(), 'UQ: credit_note for same order allowed');
+
+// 59.4 — byOrderId prefers the live invoice over non-invoice rows
+$pref = InvoiceService::byOrderId(5901);
+assert_equals((int)$ri1['id'], (int)($pref['id'] ?? 0), 'UQ: byOrderId prefers type=invoice row');
+
+// 59.5 — migration dedupe: pre-existing duplicates (the bug's damage) are
+// voided (kept for audit as type='duplicate', status='cancelled'), lowest
+// id survives, index is created. Isolated scratch DB — DDL on the live
+// test DB trips SQLITE_LOCKED from open statement handles.
+$uqDb = new PDO('sqlite::memory:');
+$uqDb->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$uqDb->exec("CREATE TABLE invoices (
+    id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL,
+    number TEXT NOT NULL UNIQUE, type TEXT NOT NULL DEFAULT 'invoice',
+    status TEXT NOT NULL DEFAULT 'issued'
+)");
+$uqDb->exec("INSERT INTO invoices (order_id, number, type) VALUES
+    (7001, '20260001', 'invoice'),
+    (7001, '20260002', 'invoice'),
+    (7002, '20260003', 'invoice'),
+    (7001, '20260004', 'credit_note')");
+$uqMig->up($uqDb, true);
+assert_equals(1, (int)$uqDb->query("SELECT COUNT(*) FROM invoices WHERE order_id=7001 AND type='invoice'")->fetchColumn(), 'UQ: migration dedupe leaves 1 live invoice');
+assert_equals('20260001', (string)$uqDb->query("SELECT number FROM invoices WHERE order_id=7001 AND type='invoice'")->fetchColumn(), 'UQ: dedupe keeps lowest id (original invoice)');
+$voided = $uqDb->query("SELECT type, status FROM invoices WHERE number='20260002'")->fetch(PDO::FETCH_ASSOC);
+assert_equals('duplicate', (string)$voided['type'], 'UQ: dup row voided as type=duplicate');
+assert_equals('cancelled', (string)$voided['status'], 'UQ: dup row status=cancelled');
+assert_equals('credit_note', (string)$uqDb->query("SELECT type FROM invoices WHERE number='20260004'")->fetchColumn(), 'UQ: credit_note untouched by dedupe');
+$uqMig->up($uqDb, true); // idempotent re-run must not throw
+$dupCode2 = null;
+try {
+    $uqDb->exec("INSERT INTO invoices (order_id, number, type) VALUES (7001, '20260005', 'invoice')");
+} catch (\PDOException $e) { $dupCode2 = (string)$e->getCode(); }
+assert_equals('23000', $dupCode2, 'UQ: index active after migration (dup INSERT blocked)');
+$uqDb = null;
 
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
