@@ -252,6 +252,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    elseif ($action === 'rma_request' && Customers::isLoggedIn()) {
+        $cid = (int)$_SESSION['customer_id'];
+        $orderId = (int)($_POST['order_id'] ?? 0);
+        $reason = trim((string)($_POST['reason'] ?? ''));
+        $rawItems = $_POST['items'] ?? [];
+        $items = [];
+        if (is_array($rawItems)) {
+            foreach ($rawItems as $oiId => $qty) {
+                $q = (int)$qty;
+                if ($q > 0) $items[(int)$oiId] = $q;
+            }
+        }
+        [$ok, $rmaId, $err] = Rma::create($orderId, $cid, $reason, $items);
+        header('Location: account.php?p=returns&msg=' . urlencode($ok ? 'ok' : (string)$err));
+        exit;
+    }
+
     elseif ($action === 'cookie_consent') {
         $cats = [
             'necessary' => true,
@@ -401,6 +418,7 @@ if ($loggedIn) {
     echo '<nav>';
     echo $mk('dashboard', $t('account.dashboard'));
     echo $mk('orders',    $t('account.orders'));
+    echo $mk('returns',   $t('account.returns'));
     echo $mk('addresses', $t('account.addresses'));
     echo $mk('profile',   $t('account.profile'));
     echo $mk('change-password', $t('account.change_password'));
@@ -547,6 +565,65 @@ switch ($p) {
                 echo '</tr>';
             }
             echo '</table>';
+        }
+        echo '</div>';
+        break;
+
+    case 'returns':
+        $cid = (int)$customer['id'];
+        $msg = (string)($_GET['msg'] ?? '');
+        if ($msg === 'ok') {
+            echo '<div class="flash flash-ok">' . $e($t('account.return_submitted')) . '</div>';
+        } elseif ($msg !== '') {
+            echo '<div class="flash flash-error">' . $e($t('account.return_error') . ': ' . $msg) . '</div>';
+        }
+
+        // Existing returns
+        $rmas = Rma::forCustomer($cid);
+        echo '<div class="card"><h1>' . $e($t('account.returns')) . '</h1>';
+        if (!$rmas) {
+            echo '<p class="muted">' . $e($t('account.no_returns')) . '</p>';
+        } else {
+            echo '<table><tr><th>RMA</th><th>' . $e($t('account.order_number')) . '</th><th>' . $e($t('account.status')) . '</th><th>' . $e($t('account.date')) . '</th></tr>';
+            foreach ($rmas as $r) {
+                $ord = Customers::order($cid, (int)$r['order_id']);
+                echo '<tr>';
+                echo '<td>' . $e($r['rma_number']) . '</td>';
+                echo '<td>' . $e($ord['order_number'] ?? ('#' . $r['order_id'])) . '</td>';
+                echo '<td><span class="badge badge-' . $e($r['status']) . '">' . $e($r['status']) . '</span></td>';
+                echo '<td class="muted">' . $e(substr((string)$r['created_at'], 0, 16)) . '</td>';
+                echo '</tr>';
+            }
+            echo '</table>';
+        }
+        echo '</div>';
+
+        // Delivered orders eligible for a new return (no open RMA)
+        $delivered = array_filter(
+            Customers::orders($cid, 100),
+            static fn($o) => ($o['status'] ?? '') === 'delivered' && !Rma::openForOrder((int)$o['id'])
+        );
+        echo '<div class="card"><h2>' . $e($t('account.request_return')) . '</h2>';
+        if (!$delivered) {
+            echo '<p class="muted">' . $e($t('account.no_returnable_orders')) . '</p>';
+        }
+        foreach ($delivered as $o) {
+            $items = Orders::items((int)$o['id']);
+            echo '<form method="post" action="account.php" class="rma-form">';
+            echo '<input type="hidden" name="csrf_token" value="' . $e($csrf) . '">';
+            echo '<input type="hidden" name="action" value="rma_request">';
+            echo '<input type="hidden" name="order_id" value="' . (int)$o['id'] . '">';
+            echo '<h3>' . $e($o['order_number']) . ' <span class="muted">(' . $e(substr((string)$o['created_at'], 0, 10)) . ')</span></h3>';
+            foreach ($items as $it) {
+                $oid = (int)$it['id'];
+                echo '<label class="rma-item">';
+                echo '<input type="number" name="items[' . $oid . ']" value="0" min="0" max="' . (int)$it['quantity'] . '" style="width:64px"> ';
+                echo $e($it['name']) . ' <span class="muted">(' . (int)$it['quantity'] . '×)</span>';
+                echo '</label>';
+            }
+            echo '<div class="form-row"><label>' . $e($t('account.return_reason')) . '</label><textarea name="reason" rows="2" required></textarea></div>';
+            echo '<button class="btn">' . $e($t('account.submit_return')) . '</button>';
+            echo '</form><hr>';
         }
         echo '</div>';
         break;

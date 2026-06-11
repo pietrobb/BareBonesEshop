@@ -376,4 +376,55 @@ class Customers {
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row ?: null;
     }
+
+    // ============================================================
+    // Admin customer management
+    // ============================================================
+
+    /** Account statuses an admin may toggle between (terminal 'anonymized' excluded). */
+    public const ADMIN_STATUSES = ['active', 'blocked'];
+
+    /**
+     * List customers for the admin UI, optionally filtered by a free-text query
+     * matching email, name, or numeric id. Newest first.
+     */
+    public static function adminList(string $query = '', int $limit = 50): array {
+        $query = trim($query);
+        $sql = "SELECT id, email, name, status, created_at, last_login_at FROM customers";
+        $params = [];
+        if ($query !== '') {
+            $sql .= " WHERE LOWER(email) LIKE LOWER(?) OR LOWER(name) LIKE LOWER(?)";
+            $like = '%' . $query . '%';
+            $params[] = $like;
+            $params[] = $like;
+            if (ctype_digit($query)) {
+                $sql .= " OR id = ?";
+                $params[] = (int)$query;
+            }
+        }
+        $sql .= " ORDER BY id DESC LIMIT ?";
+        $params[] = $limit;
+        $stmt = Db::get()->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Set an account's status. Only 'active' / 'blocked' are permitted, and an
+     * already-anonymized (GDPR-erased) account can never be reactivated here.
+     * Returns true when a row was updated.
+     */
+    public static function setStatus(int $id, string $status): bool {
+        if ($id <= 0 || !in_array($status, self::ADMIN_STATUSES, true)) {
+            return false;
+        }
+        $current = self::byId($id);
+        if ($current === null || ($current['status'] ?? '') === 'anonymized') {
+            return false;
+        }
+        $now = Db::isSqlite() ? "datetime('now')" : 'NOW()';
+        $stmt = Db::get()->prepare("UPDATE customers SET status = ?, updated_at = {$now} WHERE id = ?");
+        $stmt->execute([$status, $id]);
+        return $stmt->rowCount() > 0;
+    }
 }

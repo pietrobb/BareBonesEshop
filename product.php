@@ -44,6 +44,13 @@ $product['variants'] = Products::variants((int)$product['id']);
 $related = Products::related((int)$product['id'], 4);
 $related = array_map(fn($p) => Products::enrich(I18n::product($p)), $related);
 
+// Approved reviews + aggregate rating (storefront display + JSON-LD AggregateRating)
+$reviews = Reviews::approved((int)$product['id']);
+$reviewAgg = Reviews::aggregate((int)$product['id']);
+
+// Wishlist state for the toggle button (customer- or session-scoped)
+$inWishlist = Wishlist::has((int)$product['id']);
+
 // Breadcrumb
 $breadcrumb = [];
 if (!empty($product['category_id'])) {
@@ -94,8 +101,8 @@ Security::headers();
     <meta property="product:price:currency" content="<?= esc($currencyCode) ?>">
 
     <!-- JSON-LD -->
-    <script type="application/ld+json" nonce="<?= Security::cspNonce() ?>">
-    <?= json_encode([
+<?php
+    $productLd = [
         '@context' => 'https://schema.org',
         '@type' => 'Product',
         'name' => $product['name'],
@@ -108,7 +115,19 @@ Security::headers();
             'priceCurrency' => $currencyCode,
             'availability' => $availability,
         ],
-    ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
+    ];
+    if ($reviewAgg['count'] > 0) {
+        $productLd['aggregateRating'] = [
+            '@type' => 'AggregateRating',
+            'ratingValue' => $reviewAgg['avg'],
+            'reviewCount' => $reviewAgg['count'],
+            'bestRating' => 5,
+            'worstRating' => 1,
+        ];
+    }
+?>
+    <script type="application/ld+json" nonce="<?= Security::cspNonce() ?>">
+    <?= json_encode($productLd, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
     </script>
 <?php
     // BreadcrumbList: Home › ancestor categories › current product
@@ -145,12 +164,90 @@ Security::headers();
         'csrf_token' => $csrfToken,
     ]) ?>
 
+    <form class="wishlist-toggle-form" method="post" action="/wishlist"
+          data-wishlist-toggle data-product-id="<?= (int)$product['id'] ?>">
+        <input type="hidden" name="csrf_token" value="<?= esc($csrfToken) ?>">
+        <input type="hidden" name="op" value="toggle">
+        <input type="hidden" name="return_to" value="/product/<?= esc($product['slug']) ?>">
+        <input type="hidden" name="product_id" value="<?= (int)$product['id'] ?>">
+        <button type="submit" class="btn btn-secondary"
+                data-wishlist-btn aria-pressed="<?= $inWishlist ? 'true' : 'false' ?>">
+            <?= $inWishlist
+                ? esc($t['wishlist.in'] ?? 'In wishlist ♥')
+                : esc($t['wishlist.add'] ?? 'Add to wishlist ♡') ?>
+        </button>
+    </form>
+
     <?php if (!empty($product['attrs_list'])): ?>
     <?= Template::render('product/product-attributes', [
         'attrs' => $product['attrs_list'],
         't' => $t,
     ]) ?>
     <?php endif; ?>
+
+    <?php
+        // ---- Product reviews ----
+        $loggedIn = !empty($_SESSION['customer_id']);
+        $stars = static function (float $value): string {
+            $full = (int)floor($value);
+            $out = '';
+            for ($i = 1; $i <= 5; $i++) { $out .= $i <= $full ? '★' : '☆'; }
+            return $out;
+        };
+    ?>
+    <section class="reviews" id="reviews">
+        <h2><?= esc($t['reviews.title'] ?? 'Reviews') ?></h2>
+        <?php if ($reviewAgg['count'] > 0): ?>
+        <p class="reviews-summary">
+            <span class="stars" aria-hidden="true"><?= $stars((float)$reviewAgg['avg']) ?></span>
+            <strong><?= esc(number_format((float)$reviewAgg['avg'], 1)) ?></strong>
+            / 5 (<?= (int)$reviewAgg['count'] ?>)
+        </p>
+        <?php else: ?>
+        <p class="reviews-empty"><?= esc($t['reviews.none'] ?? 'No reviews yet. Be the first!') ?></p>
+        <?php endif; ?>
+
+        <?php foreach ($reviews as $rv): ?>
+        <article class="review">
+            <header>
+                <span class="stars" aria-hidden="true"><?= $stars((float)$rv['rating']) ?></span>
+                <strong><?= esc($rv['author_name']) ?></strong>
+                <time class="muted"><?= esc(substr((string)$rv['created_at'], 0, 10)) ?></time>
+            </header>
+            <?php if (!empty($rv['title'])): ?><h3><?= esc($rv['title']) ?></h3><?php endif; ?>
+            <p><?= nl2br(esc($rv['body'])) ?></p>
+        </article>
+        <?php endforeach; ?>
+
+        <form class="review-form" data-review-form data-product-id="<?= (int)$product['id'] ?>">
+            <h3><?= esc($t['reviews.write'] ?? 'Write a review') ?></h3>
+            <input type="hidden" name="csrf_token" value="<?= esc($csrfToken) ?>">
+            <label>
+                <?= esc($t['reviews.rating'] ?? 'Rating') ?>
+                <select name="rating" required>
+                    <?php for ($i = 5; $i >= 1; $i--): ?>
+                    <option value="<?= $i ?>"><?= str_repeat('★', $i) ?> (<?= $i ?>)</option>
+                    <?php endfor; ?>
+                </select>
+            </label>
+            <?php if (!$loggedIn): ?>
+            <label>
+                <?= esc($t['reviews.author'] ?? 'Your name') ?>
+                <input type="text" name="author_name" maxlength="80" required>
+            </label>
+            <?php endif; ?>
+            <label>
+                <?= esc($t['reviews.review_title'] ?? 'Title') ?>
+                <input type="text" name="title" maxlength="150">
+            </label>
+            <label>
+                <?= esc($t['reviews.body'] ?? 'Your review') ?>
+                <textarea name="body" rows="4" minlength="3" maxlength="2000" required></textarea>
+            </label>
+            <button type="submit" class="btn btn-primary"><?= esc($t['reviews.submit'] ?? 'Submit review') ?></button>
+            <p class="review-form-msg" data-review-msg hidden></p>
+        </form>
+    </section>
 
     <?php if (!empty($related)): ?>
     <?= Template::render('product/related-products', [

@@ -47,6 +47,9 @@ try {
         'payment_methods' => apiPaymentMethods(),
         'search_suggest'  => apiSearchSuggest(),
         'validate_coupon' => apiValidateCoupon(),
+        'review_submit'   => apiReviewSubmit(),
+        'wishlist'         => apiWishlist(),
+        'wishlist_toggle'  => apiWishlistToggle(),
         'webhook_stripe'  => apiWebhookStripe(),
         'webhook_payment'  => apiWebhookPayment(),
         'webhook_shipping' => apiWebhookShipping(),
@@ -236,6 +239,88 @@ function apiValidateCoupon(): array {
         'code'     => $code,
         'discount' => $result['discount'],
         'name'     => $result['name'] ?? $code,
+    ];
+}
+
+function apiReviewSubmit(): array {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        return ['error' => 'Method not allowed'];
+    }
+    if (!Security::csrfValidate()) {
+        http_response_code(403);
+        return ['error' => 'Invalid CSRF token'];
+    }
+    // Stricter throttle than the generic api bucket — review POSTs are a spam target.
+    // Reviews are moderated (always land pending), so a modest per-minute/IP cap suffices.
+    if (!Security::rateLimit('review_submit', 20)) {
+        http_response_code(429);
+        return ['ok' => false, 'error' => 'rate_limited'];
+    }
+
+    $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+    $productId = Security::int($input['product_id'] ?? 0);
+    if ($productId <= 0 || !Products::byId($productId)) {
+        return ['ok' => false, 'error' => 'invalid_product'];
+    }
+
+    $data = [
+        'rating' => Security::int($input['rating'] ?? 0),
+        'title'  => (string)($input['title'] ?? ''),
+        'body'   => (string)($input['body'] ?? ''),
+    ];
+
+    // Logged-in customer: attribute the review and use the account name.
+    $customerId = (int)($_SESSION['customer_id'] ?? 0);
+    if ($customerId > 0) {
+        $data['customer_id'] = $customerId;
+        $c = Customers::byId($customerId);
+        $data['author_name'] = trim((string)($c['name'] ?? '')) !== ''
+            ? $c['name']
+            : (string)($input['author_name'] ?? '');
+    } else {
+        $data['author_name'] = (string)($input['author_name'] ?? '');
+    }
+
+    [$ok, $id, $err] = Reviews::submit($productId, $data);
+    if (!$ok) {
+        return ['ok' => false, 'error' => $err];
+    }
+    // Reviews always land as pending — never visible until an admin approves.
+    return ['ok' => true, 'id' => $id, 'status' => 'pending'];
+}
+
+function apiWishlist(): array {
+    // Read-only: current owner's saved product ids + count.
+    return [
+        'ok'    => true,
+        'ids'   => Wishlist::ids(),
+        'count' => Wishlist::count(),
+    ];
+}
+
+function apiWishlistToggle(): array {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        return ['error' => 'Method not allowed'];
+    }
+    if (!Security::csrfValidate()) {
+        http_response_code(403);
+        return ['error' => 'Invalid CSRF token'];
+    }
+
+    $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+    $productId = Security::int($input['product_id'] ?? 0);
+    if ($productId <= 0 || !Products::byId($productId)) {
+        return ['ok' => false, 'error' => 'invalid_product'];
+    }
+
+    $state = Wishlist::toggle($productId);
+    return [
+        'ok'      => true,
+        'state'   => $state,            // 'added' | 'removed'
+        'in_list' => $state === 'added',
+        'count'   => Wishlist::count(),
     ];
 }
 

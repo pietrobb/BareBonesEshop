@@ -3517,6 +3517,380 @@ $blocked = Customers::order($aliceId, $guestOrderId);
 assert_true($blocked === null, 'Customer: order() blocks access to guest/other-customer order');
 
 // ============================================================
+// TEST: Product Reviews (P7.1)
+// ============================================================
+echo "\n--- Test: Product Reviews ---\n";
+
+$pdo->exec("CREATE TABLE IF NOT EXISTS product_reviews (
+    id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL, customer_id INTEGER DEFAULT NULL,
+    author_name TEXT NOT NULL DEFAULT '', rating INTEGER NOT NULL,
+    title TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)");
+
+// --- submit validation ---
+[$rok, $rid, $rerr] = Reviews::submit(1, ['rating' => 5, 'author_name' => 'Alice', 'title' => 'Great', 'body' => 'Loved it']);
+assert_true($rok === true && $rid > 0 && $rerr === null, 'Reviews: valid submit returns [true, id, null]');
+
+[$rok2, , $rerr2] = Reviews::submit(1, ['rating' => 6, 'author_name' => 'A', 'body' => 'too high']);
+assert_true($rok2 === false && $rerr2 === 'invalid_rating', 'Reviews: rating > 5 rejected');
+
+[$rok3, , $rerr3] = Reviews::submit(1, ['rating' => 0, 'author_name' => 'A', 'body' => 'too low']);
+assert_true($rok3 === false && $rerr3 === 'invalid_rating', 'Reviews: rating < 1 rejected');
+
+[$rok4, , $rerr4] = Reviews::submit(1, ['rating' => 4, 'author_name' => 'A', 'body' => 'ab']);
+assert_true($rok4 === false && $rerr4 === 'body_too_short', 'Reviews: body < 3 chars rejected');
+
+[$rok5, , $rerr5] = Reviews::submit(1, ['rating' => 4, 'author_name' => '', 'body' => 'no author']);
+assert_true($rok5 === false && $rerr5 === 'author_required', 'Reviews: empty author rejected');
+
+[$rok6, , $rerr6] = Reviews::submit(0, ['rating' => 4, 'author_name' => 'A', 'body' => 'no product']);
+assert_true($rok6 === false && $rerr6 === 'invalid_product', 'Reviews: invalid product_id rejected');
+
+// --- pending / moderation ---
+$pendingBefore = Reviews::pending();
+assert_true(count($pendingBefore) >= 1, 'Reviews: submitted review appears in pending queue');
+
+$one = Reviews::byId($rid);
+assert_true(is_array($one) && $one['status'] === 'pending', 'Reviews: new review starts as pending');
+
+// approved() excludes pending
+assert_equals(0, count(Reviews::approved(1)), 'Reviews: approved() empty while review is pending');
+
+// aggregate over approved only — still 0
+$aggPending = Reviews::aggregate(1);
+assert_equals(0, $aggPending['count'], 'Reviews: aggregate count 0 while pending');
+assert_equals(0.0, $aggPending['avg'], 'Reviews: aggregate avg 0.0 while pending');
+
+// --- approve and verify visibility ---
+assert_true(Reviews::setStatus($rid, 'approved'), 'Reviews: setStatus approved returns true');
+$approved = Reviews::approved(1);
+assert_equals(1, count($approved), 'Reviews: approved() lists the approved review');
+assert_equals(5, (int)$approved[0]['rating'], 'Reviews: approved review keeps its rating');
+
+// add a second approved review (rating 3) → avg = 4.0
+[$r2ok, $r2id] = Reviews::submit(1, ['rating' => 3, 'author_name' => 'Bob', 'body' => 'It was ok']);
+Reviews::setStatus($r2id, 'approved');
+$agg = Reviews::aggregate(1);
+assert_equals(2, $agg['count'], 'Reviews: aggregate counts both approved');
+assert_equals(4.0, $agg['avg'], 'Reviews: aggregate avg = (5+3)/2 = 4.0');
+
+// rejected review is excluded from aggregate + approved
+[$r3ok, $r3id] = Reviews::submit(1, ['rating' => 1, 'author_name' => 'Troll', 'body' => 'spam spam']);
+Reviews::setStatus($r3id, 'rejected');
+$agg2 = Reviews::aggregate(1);
+assert_equals(2, $agg2['count'], 'Reviews: rejected review excluded from aggregate');
+assert_equals(0, count(array_filter(Reviews::approved(1), fn($r) => (int)$r['id'] === $r3id)), 'Reviews: rejected review not in approved()');
+
+// setStatus rejects unknown status + missing id
+assert_true(Reviews::setStatus($rid, 'bogus') === false, 'Reviews: unknown status rejected');
+assert_true(Reviews::setStatus(999999, 'approved') === false, 'Reviews: setStatus on missing id returns false');
+
+// per-product isolation: product 2 has no reviews
+assert_equals(0, Reviews::aggregate(2)['count'], 'Reviews: aggregate isolated per product');
+
+// --- P7.2: api.php review_submit endpoint ---
+if (!defined('BB_TEST_LOAD_API_ONLY')) {
+    define('BB_TEST_LOAD_API_ONLY', true);
+    require_once __DIR__ . '/../api.php';
+}
+// A real product is needed (handler verifies Products::byId). Product 501/502 exist from earlier seed;
+// fall back to creating one if not present in this DB position.
+$apiProdId = (int)($pdo->query("SELECT id FROM products LIMIT 1")->fetchColumn() ?: 0);
+assert_true($apiProdId > 0, 'Reviews API: a product exists to attach a review to');
+
+$submitReview = function (array $body, ?int $customerId = null) use ($apiProdId) {
+    $_SERVER['REQUEST_METHOD'] = 'POST';
+    $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+    $_SESSION['csrf_token'] = 'rv-test-token';
+    if ($customerId !== null) { $_SESSION['customer_id'] = $customerId; }
+    else { unset($_SESSION['customer_id']); }
+    $_POST = array_merge(['csrf_token' => 'rv-test-token', 'product_id' => $apiProdId], $body);
+    $res = apiReviewSubmit();
+    $_POST = [];
+    unset($_SESSION['customer_id']);
+    return $res;
+};
+
+// Guest submit → ok, pending
+$ar = $submitReview(['rating' => 5, 'author_name' => 'API Guest', 'body' => 'Solid product']);
+assert_true(!empty($ar['ok']) && ($ar['status'] ?? '') === 'pending', 'Reviews API: guest submit returns ok + pending');
+$arRow = Reviews::byId((int)$ar['id']);
+assert_true($arRow['status'] === 'pending' && $arRow['customer_id'] === null, 'Reviews API: guest review stored pending, no customer_id');
+
+// Validation error bubbles up (rating out of range)
+$arBad = $submitReview(['rating' => 9, 'author_name' => 'X', 'body' => 'nope']);
+assert_true(($arBad['ok'] ?? null) === false && $arBad['error'] === 'invalid_rating', 'Reviews API: invalid rating rejected');
+
+// Missing author for guest
+$arNoAuthor = $submitReview(['rating' => 4, 'body' => 'no name given']);
+assert_true(($arNoAuthor['ok'] ?? null) === false && $arNoAuthor['error'] === 'author_required', 'Reviews API: guest without author rejected');
+
+// Invalid product id
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_SESSION['csrf_token'] = 'rv-test-token';
+$_POST = ['csrf_token' => 'rv-test-token', 'product_id' => 999999, 'rating' => 5, 'author_name' => 'Y', 'body' => 'ghost product'];
+$arGhost = apiReviewSubmit();
+$_POST = [];
+assert_true(($arGhost['ok'] ?? null) === false && $arGhost['error'] === 'invalid_product', 'Reviews API: non-existent product rejected');
+
+// Logged-in customer → review attributed + name taken from account
+$cust = Customers::byId($aliceId);
+$arCust = $submitReview(['rating' => 4, 'body' => 'as a registered customer'], $aliceId);
+assert_true(!empty($arCust['ok']), 'Reviews API: logged-in customer submit ok');
+$arCustRow = Reviews::byId((int)$arCust['id']);
+assert_equals($aliceId, (int)$arCustRow['customer_id'], 'Reviews API: review attributed to logged-in customer');
+assert_equals($cust['name'], $arCustRow['author_name'], 'Reviews API: author_name taken from customer account');
+
+// CSRF rejection
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_SESSION['csrf_token'] = 'rv-test-token';
+$_POST = ['csrf_token' => 'WRONG', 'product_id' => $apiProdId, 'rating' => 5, 'author_name' => 'Z', 'body' => 'csrf attempt'];
+$arCsrf = apiReviewSubmit();
+$_POST = [];
+assert_true(isset($arCsrf['error']), 'Reviews API: invalid CSRF token rejected');
+
+// ============================================================
+// TEST: Wishlist (P7.3)
+// ============================================================
+echo "\n--- Test: Wishlist ---\n";
+
+$pdo->exec("CREATE TABLE IF NOT EXISTS wishlist_items (
+    id INTEGER PRIMARY KEY, owner_key TEXT NOT NULL, customer_id INTEGER DEFAULT NULL,
+    product_id INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(owner_key, product_id)
+)");
+
+// RMA tables (mirror of migrations/20260426100000_create_rma.php)
+$pdo->exec("CREATE TABLE IF NOT EXISTS rma_requests (
+    id INTEGER PRIMARY KEY, rma_number TEXT NOT NULL, order_id INTEGER NOT NULL,
+    customer_id INTEGER DEFAULT NULL, status TEXT NOT NULL DEFAULT 'requested',
+    reason TEXT NOT NULL DEFAULT '', admin_note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(rma_number)
+)");
+$pdo->exec("CREATE TABLE IF NOT EXISTS rma_items (
+    id INTEGER PRIMARY KEY, rma_id INTEGER NOT NULL, order_item_id INTEGER NOT NULL,
+    product_id INTEGER DEFAULT NULL, sku TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '',
+    quantity INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)");
+
+$wlProd = (int)($pdo->query("SELECT id FROM products LIMIT 1")->fetchColumn() ?: 0);
+$wlProd2 = (int)($pdo->query("SELECT id FROM products ORDER BY id LIMIT 1 OFFSET 1")->fetchColumn() ?: 0);
+assert_true($wlProd > 0, 'Wishlist: a product exists to save');
+
+$guest = 's:wltest';
+$cust  = 'c:7001';
+
+// add + has + count (explicit owner key, no session dependency)
+assert_true(Wishlist::add($wlProd, $guest), 'Wishlist: add returns true on new row');
+assert_true(Wishlist::has($wlProd, $guest), 'Wishlist: has true after add');
+assert_equals(1, Wishlist::count($guest), 'Wishlist: count 1 after add');
+
+// add is idempotent — second add for same product returns false, count unchanged
+assert_true(Wishlist::add($wlProd, $guest) === false, 'Wishlist: duplicate add returns false');
+assert_equals(1, Wishlist::count($guest), 'Wishlist: count still 1 after duplicate add');
+
+// invalid product id rejected
+assert_true(Wishlist::add(0, $guest) === false, 'Wishlist: add invalid product_id rejected');
+
+// per-owner isolation — customer owner does not see guest item
+assert_true(Wishlist::has($wlProd, $cust) === false, 'Wishlist: per-owner isolation');
+assert_equals(0, Wishlist::count($cust), 'Wishlist: other owner count 0');
+
+// toggle: present → removed, absent → added
+assert_equals('removed', Wishlist::toggle($wlProd, $guest), 'Wishlist: toggle removes when present');
+assert_equals(0, Wishlist::count($guest), 'Wishlist: count 0 after toggle-remove');
+assert_equals('added', Wishlist::toggle($wlProd, $guest), 'Wishlist: toggle adds when absent');
+assert_equals(1, Wishlist::count($guest), 'Wishlist: count 1 after toggle-add');
+
+// remove returns true when a row is deleted, false when nothing to delete
+assert_true(Wishlist::remove($wlProd, $guest), 'Wishlist: remove returns true when present');
+assert_true(Wishlist::remove($wlProd, $guest) === false, 'Wishlist: remove returns false when absent');
+
+// ids ordering — newest first
+Wishlist::add($wlProd, $guest);
+if ($wlProd2 > 0) { Wishlist::add($wlProd2, $guest); }
+$ids = Wishlist::ids($guest);
+if ($wlProd2 > 0) {
+    assert_equals($wlProd2, $ids[0] ?? 0, 'Wishlist: ids newest-first');
+    assert_equals(2, count($ids), 'Wishlist: ids returns both');
+}
+
+// list() returns enriched, active products only
+$listed = Wishlist::list($guest);
+assert_true(count($listed) >= 1 && isset($listed[0]['name']), 'Wishlist: list returns enriched product rows');
+
+// merge: fold guest session wishlist into a customer wishlist
+$mergeSess = 's:mergeme';
+$mergeCust = 8002;
+Wishlist::add($wlProd, $mergeSess);
+$moved = Wishlist::merge($mergeSess, $mergeCust);
+assert_equals(1, $moved, 'Wishlist: merge moved 1 row');
+assert_true(Wishlist::has($wlProd, 'c:' . $mergeCust), 'Wishlist: merged item now under customer key');
+assert_equals(0, Wishlist::count($mergeSess), 'Wishlist: session wishlist emptied after merge');
+
+// --- P7.3: api.php wishlist_toggle / wishlist endpoints ---
+// (api.php already loaded above for the reviews API tests)
+$wlToggle = function (int $pid) {
+    $_SERVER['REQUEST_METHOD'] = 'POST';
+    $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+    $_SESSION['csrf_token'] = 'wl-test-token';
+    unset($_SESSION['customer_id']);
+    $_POST = ['csrf_token' => 'wl-test-token', 'product_id' => $pid];
+    $res = apiWishlistToggle();
+    $_POST = [];
+    return $res;
+};
+
+$wa1 = $wlToggle($wlProd);
+assert_true(!empty($wa1['ok']) && $wa1['state'] === 'added' && $wa1['in_list'] === true, 'Wishlist API: toggle adds (state=added)');
+$wa2 = $wlToggle($wlProd);
+assert_true(!empty($wa2['ok']) && $wa2['state'] === 'removed' && $wa2['in_list'] === false, 'Wishlist API: toggle removes (state=removed)');
+
+// invalid product rejected
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_SESSION['csrf_token'] = 'wl-test-token';
+$_POST = ['csrf_token' => 'wl-test-token', 'product_id' => 999999];
+$waGhost = apiWishlistToggle();
+$_POST = [];
+assert_true(($waGhost['ok'] ?? null) === false && $waGhost['error'] === 'invalid_product', 'Wishlist API: invalid product rejected');
+
+// CSRF rejection
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_SESSION['csrf_token'] = 'wl-test-token';
+$_POST = ['csrf_token' => 'WRONG', 'product_id' => $wlProd];
+$waCsrf = apiWishlistToggle();
+$_POST = [];
+assert_true(isset($waCsrf['error']), 'Wishlist API: invalid CSRF token rejected');
+
+// read endpoint reflects current owner's list
+$wlToggle($wlProd); // add back
+$waList = apiWishlist();
+assert_true(!empty($waList['ok']) && in_array($wlProd, $waList['ids'], true), 'Wishlist API: wishlist read returns saved id');
+
+// ============================================================
+// TEST: RMA / Returns
+// ============================================================
+echo "\n--- Test: RMA / Returns ---\n";
+
+// Seed stock and create a delivered order owned by a customer (alice).
+$rmaProd = Products::bySku($testProduct['sku']) ?: $testProduct;
+$rmaHasStock = (int)$pdo->query("SELECT COUNT(*) FROM warehouse_stock WHERE sku = " . $pdo->quote($rmaProd['sku']))->fetchColumn();
+if ($rmaHasStock === 0) {
+    $pdo->prepare("INSERT INTO warehouse_stock (warehouse_id, sku, qty, reserved) VALUES (:wh,:sku,100,0)")
+        ->execute([':wh' => $whId, ':sku' => $rmaProd['sku']]);
+} else {
+    $pdo->prepare("UPDATE warehouse_stock SET qty = qty + 50 WHERE sku = :sku")->execute([':sku' => $rmaProd['sku']]);
+}
+$rmaCustomer = [
+    'name' => 'Alice', 'email' => 'alice@example.com', 'phone' => '',
+    'address' => ['street' => 'A 1', 'city' => 'BA', 'zip' => '81101', 'country' => 'SK'],
+    'currency' => 'eur', 'shipping_cost' => 0, 'tax_amount' => 0,
+    'customer_id' => $aliceId,
+];
+$rmaCart = [[
+    'product_id' => $rmaProd['id'], 'variant_id' => null, 'qty' => 2,
+    'price' => $rmaProd['price'], 'sku' => $rmaProd['sku'], 'name' => $rmaProd['name'], 'variant_name' => '',
+]];
+$rmaOrderId = Orders::create($rmaCart, $rmaCustomer, 'cod');
+Orders::updateStatus($rmaOrderId, 'delivered');
+$rmaItems = Orders::items($rmaOrderId);
+$rmaOi1 = (int)$rmaItems[0]['id'];
+assert_equals('delivered', Orders::byId($rmaOrderId)['status'], 'RMA: seed order is delivered');
+
+// A second, still-pending order (not returnable)
+$rmaPendingOrderId = Orders::create($rmaCart, $rmaCustomer, 'cod');
+
+// Guards: invalid order
+assert_equals('invalid_order', Rma::create(0, $aliceId, 'x', [$rmaOi1 => 1])[2], 'RMA: invalid order id rejected');
+assert_equals('invalid_order', Rma::create(999999, $aliceId, 'x', [$rmaOi1 => 1])[2], 'RMA: non-existent order rejected');
+
+// Guard: pending order not returnable
+assert_equals('order_not_returnable', Rma::create($rmaPendingOrderId, $aliceId, 'x', [$rmaOi1 => 1])[2], 'RMA: non-delivered order rejected');
+
+// Guard: ownership
+assert_equals('not_owner', Rma::create($rmaOrderId, $aliceId + 99999, 'x', [$rmaOi1 => 1])[2], 'RMA: order owned by another customer rejected');
+
+// Guard: reason required
+assert_equals('reason_required', Rma::create($rmaOrderId, $aliceId, '   ', [$rmaOi1 => 1])[2], 'RMA: empty reason rejected');
+
+// Guard: no items
+assert_equals('no_items', Rma::create($rmaOrderId, $aliceId, 'damaged', [])[2], 'RMA: empty item set rejected');
+assert_equals('no_items', Rma::create($rmaOrderId, $aliceId, 'damaged', [999999 => 1])[2], 'RMA: foreign order_item rejected → no_items');
+
+// Valid create (quantity over-asked → clamped to ordered qty 2)
+[$rOk, $rId, $rErr] = Rma::create($rmaOrderId, $aliceId, 'Box arrived crushed', [$rmaOi1 => 99]);
+assert_true($rOk === true && $rId > 0 && $rErr === null, 'RMA: valid create returns ok + id');
+$rmaRow = Rma::byId($rId);
+assert_equals('requested', $rmaRow['status'], 'RMA: new request lands as requested');
+assert_equals($aliceId, (int)$rmaRow['customer_id'], 'RMA: request attributed to customer');
+$rmaLineItems = Rma::items($rId);
+assert_equals(1, count($rmaLineItems), 'RMA: one line item stored');
+assert_equals(2, (int)$rmaLineItems[0]['quantity'], 'RMA: over-asked quantity clamped to ordered qty');
+
+// Guard: only one open RMA per order
+assert_equals('rma_exists', Rma::create($rmaOrderId, $aliceId, 'second try', [$rmaOi1 => 1])[2], 'RMA: duplicate open request rejected');
+
+// openForOrder finds the open request
+assert_true(Rma::openForOrder($rmaOrderId) !== null, 'RMA: openForOrder returns the open request');
+
+// forCustomer lists it
+$rmaCustList = Rma::forCustomer($aliceId);
+assert_true(count($rmaCustList) >= 1 && (int)$rmaCustList[0]['id'] === $rId, 'RMA: forCustomer returns newest request');
+
+// Transition guards
+assert_true(Rma::setStatus($rId, 'refunded') === false, 'RMA: requested → refunded blocked (illegal jump)');
+assert_true(Rma::setStatus($rId, 'approved') === true, 'RMA: requested → approved allowed');
+assert_equals('approved', Rma::byId($rId)['status'], 'RMA: status now approved');
+assert_true(Rma::setStatus($rId, 'received', 'parcel in') === true, 'RMA: approved → received allowed');
+assert_equals('parcel in', Rma::byId($rId)['admin_note'], 'RMA: admin note persisted');
+assert_true(Rma::setStatus($rId, 'refunded') === true, 'RMA: received → refunded allowed');
+assert_true(Rma::setStatus($rId, 'approved') === false, 'RMA: refunded is terminal');
+
+// Unknown id / status
+assert_true(Rma::setStatus(999999, 'approved') === false, 'RMA: setStatus on unknown id false');
+assert_true(Rma::setStatus($rId, 'bogus') === false, 'RMA: setStatus with unknown status false');
+
+// After refund the order has no open RMA again
+assert_true(Rma::openForOrder($rmaOrderId) === null, 'RMA: no open request after refund (terminal)');
+
+// ============================================================
+// TEST: Admin customer management (P7.5)
+// ============================================================
+echo "\n--- Test: Admin Customer Management ---\n";
+
+// adminList returns the seeded customer (alice) and supports search
+$allCust = Customers::adminList('', 100);
+assert_true(count($allCust) >= 1, 'AdminCustomers: list returns customers');
+$byEmail = Customers::adminList('alice@test.local', 50);
+assert_true(count($byEmail) >= 1 && (int)$byEmail[0]['id'] === $aliceId, 'AdminCustomers: search by email finds alice');
+$byName = Customers::adminList('Alice', 50);
+assert_true(count($byName) >= 1, 'AdminCustomers: search by name matches');
+$byId = Customers::adminList((string)$aliceId, 50);
+assert_true(count($byId) >= 1 && (int)$byId[0]['id'] === $aliceId, 'AdminCustomers: numeric query matches id');
+$noHit = Customers::adminList('no-such-person@nowhere.test', 50);
+assert_equals(0, count($noHit), 'AdminCustomers: non-matching search returns empty');
+
+// setStatus: block then reactivate
+assert_equals('active', Customers::byId($aliceId)['status'], 'AdminCustomers: alice starts active');
+assert_true(Customers::setStatus($aliceId, 'blocked') === true, 'AdminCustomers: block returns true');
+assert_equals('blocked', Customers::byId($aliceId)['status'], 'AdminCustomers: status now blocked');
+assert_true(Customers::setStatus($aliceId, 'active') === true, 'AdminCustomers: reactivate returns true');
+assert_equals('active', Customers::byId($aliceId)['status'], 'AdminCustomers: status back to active');
+
+// setStatus guards: invalid status, unknown id, anonymized terminal
+assert_true(Customers::setStatus($aliceId, 'bogus') === false, 'AdminCustomers: invalid status rejected');
+assert_true(Customers::setStatus(0, 'blocked') === false, 'AdminCustomers: invalid id rejected');
+assert_true(Customers::setStatus(999999, 'blocked') === false, 'AdminCustomers: unknown customer rejected');
+$pdo->prepare("UPDATE customers SET status = 'anonymized' WHERE id = ?")->execute([$aliceId]);
+assert_true(Customers::setStatus($aliceId, 'active') === false, 'AdminCustomers: anonymized account cannot be reactivated');
+$pdo->prepare("UPDATE customers SET status = 'active' WHERE id = ?")->execute([$aliceId]); // restore for later tests
+
+// ============================================================
 // TEST: Migrations Framework
 // ============================================================
 echo "\n--- Test: Migrations Framework ---\n";
