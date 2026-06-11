@@ -285,8 +285,8 @@ class PaymentService {
         try {
             $db   = Db::get();
             $now  = Db::now();
-            $stmt = $db->prepare("
-                INSERT OR IGNORE INTO payment_transactions
+            $stmt = $db->prepare(Db::insertIgnore() . "
+                INTO payment_transactions
                     (order_id, provider, provider_ref, status, amount, currency, idempotency_key, raw_response, created_at, updated_at)
                 VALUES
                     (:oid, :prov, :ref, :status, :amt, :cur, :ikey, :raw, {$now}, {$now})

@@ -82,31 +82,33 @@ return new class {
         $this->addColumnIfMissing($db, 'orders', 'shipping_weight_g', "INTEGER NOT NULL DEFAULT 0");
         $this->addColumnIfMissing($db, 'orders', 'shipping_rate_snapshot', "TEXT DEFAULT NULL");
 
-        $this->seedMethods($db);
-        $this->seedZones($db);
+        $this->seedMethods($db, $isSqlite);
+        $this->seedZones($db, $isSqlite);
         $this->seedRates($db);
     }
 
-    private function seedMethods(PDO $db): void {
+    private function seedMethods(PDO $db, bool $isSqlite): void {
         $rows = [
             ['pickup', 'pickup', 'Osobný odber', 'PersonalPickup', 'pickup', 0, 1, null, null, null, 10],
             ['packeta', 'packeta', 'Packeta / Zásielkovňa', 'PacketaShipping', 'parcel', 1, 1, 5000, 10000, 60000, 20],
             ['gls', 'gls', 'GLS kuriér', 'GlsShipping', 'parcel', 1, 0, 7500, 40000, 160000, 30],
         ];
-        $stmt = $db->prepare("INSERT OR IGNORE INTO shipping_methods
+        $ins = $isSqlite ? 'INSERT OR IGNORE' : 'INSERT IGNORE';
+        $stmt = $db->prepare("{$ins} INTO shipping_methods
             (code, carrier, name, adapter_class, service_type, supports_cod, supports_pickup, free_above, max_weight_g, max_volume_cm3, sort_order)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         foreach ($rows as $row) $stmt->execute($row);
     }
 
-    private function seedZones(PDO $db): void {
+    private function seedZones(PDO $db, bool $isSqlite): void {
+        $ins = $isSqlite ? 'INSERT OR IGNORE' : 'INSERT IGNORE';
         $zones = [
             ['domestic', 'Domestic SK', 'Slovakia domestic shipping', 10],
             ['cz', 'Czech Republic', 'CZ cross-border shipping', 20],
             ['near_eu', 'Nearby EU', 'AT/HU/PL/DE regional EU shipping', 30],
             ['eu', 'European Union', 'Fallback EU shipping zone', 40],
         ];
-        $stmt = $db->prepare("INSERT OR IGNORE INTO shipping_zones (code, name, description, sort_order) VALUES (?, ?, ?, ?)");
+        $stmt = $db->prepare("{$ins} INTO shipping_zones (code, name, description, sort_order) VALUES (?, ?, ?, ?)");
         foreach ($zones as $zone) $stmt->execute($zone);
 
         $countries = [
@@ -116,7 +118,7 @@ return new class {
             ['eu', 'BG'], ['eu', 'CY'], ['eu', 'DK'], ['eu', 'EE'], ['eu', 'FI'], ['eu', 'GR'], ['eu', 'IE'], ['eu', 'LT'],
             ['eu', 'LU'], ['eu', 'LV'], ['eu', 'MT'], ['eu', 'PT'], ['eu', 'SE'],
         ];
-        $stmt = $db->prepare("INSERT OR IGNORE INTO shipping_zone_countries (zone_code, country) VALUES (?, ?)");
+        $stmt = $db->prepare("{$ins} INTO shipping_zone_countries (zone_code, country) VALUES (?, ?)");
         foreach ($countries as $country) $stmt->execute($country);
     }
 

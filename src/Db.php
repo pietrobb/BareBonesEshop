@@ -62,4 +62,28 @@ class Db {
     public static function now(): string {
         return self::isSqlite() ? "datetime('now')" : 'NOW()';
     }
+
+    /**
+     * INSERT prefix that silently skips duplicate-key rows.
+     * SQLite: INSERT OR IGNORE / MySQL: INSERT IGNORE.
+     * MySQL caveat: INSERT IGNORE downgrades some non-dup errors to warnings —
+     * only use where the insert is a pure "create if missing" on a unique key.
+     */
+    public static function insertIgnore(): string {
+        return self::isSqlite() ? 'INSERT OR IGNORE' : 'INSERT IGNORE';
+    }
+
+    /**
+     * Driver-aware upsert clause appended after INSERT ... VALUES (...).
+     * SQLite emits ON CONFLICT(<target>) DO UPDATE SET <updatesSqlite>
+     * (use excluded.col to reference the rejected row); MySQL emits
+     * ON DUPLICATE KEY UPDATE <updatesMysql> (use VALUES(col)).
+     * MySQL ignores the conflict target — it matches on ANY unique key,
+     * so the table must have exactly one relevant unique constraint.
+     */
+    public static function upsertClause(string $conflictTarget, string $updatesSqlite, ?string $updatesMysql = null): string {
+        return self::isSqlite()
+            ? "ON CONFLICT({$conflictTarget}) DO UPDATE SET {$updatesSqlite}"
+            : 'ON DUPLICATE KEY UPDATE ' . ($updatesMysql ?? $updatesSqlite);
+    }
 }
