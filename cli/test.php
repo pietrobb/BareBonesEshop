@@ -4115,6 +4115,61 @@ $breakdown = json_decode($pdo->query("SELECT vat_breakdown FROM invoices WHERE i
 assert_true(count($breakdown) >= 1, 'Invoice: vat_breakdown has at least 1 rate group');
 
 // ============================================================
+// TEST 54b: P3 — invoice VAT correctness (coupon base, shipping VAT,
+// mixed-rate recap, net+VAT=gross invariant). Synthetic order with two
+// VAT rates (23% + 10%), a 10% coupon, and shipping at the standard rate.
+// ============================================================
+echo "\n--- Test 54b: P3 invoice VAT correctness ---\n";
+
+$db->exec("PRAGMA foreign_keys = OFF");
+$db->exec("DELETE FROM order_items WHERE order_id IN (5004, 5005)");
+$db->exec("DELETE FROM orders WHERE id IN (5004, 5005)");
+// subtotal 23300 (12300@23% + 11000@10%), coupon 2330, shipping 600
+// total = (23300 - 2330) + 600 = 21570
+$db->exec("INSERT INTO orders (id, order_number, status, customer_name, customer_email, shipping_addr, payment_method, subtotal, discount_amount, shipping_cost, tax_amount, total, currency, locale, vat_scenario, created_at) VALUES (5004, 'INV-5004', 'paid', 'Mix Rate', 'mix@test.sk', '" . addslashes(json_encode(['street'=>'A 1','city'=>'BA','zip'=>'81101','country'=>'SK'])) . "', 'bank_transfer', 23300, 2330, 600, 4200, 21570, 'eur', 'sk', 'domestic', datetime('now'))");
+$db->exec("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total, vat_class, vat_rate, vat_amount, net_amount) VALUES (5004, 501, 'SKU-A', 'Standard 23%', 1, 12300, 12300, 'standard', 23, 2300, 10000)");
+$db->exec("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total, vat_class, vat_rate, vat_amount, net_amount) VALUES (5004, 502, 'SKU-B', 'Reduced 10%', 1, 11000, 11000, 'reduced', 10, 1000, 10000)");
+$db->exec("PRAGMA foreign_keys = ON");
+
+$inv4 = InvoiceService::issue(5004);
+$bd4  = json_decode((string)$inv4['vat_breakdown'], true) ?: [];
+
+// (c) mixed-rate: two rate groups present
+assert_true(count($bd4) >= 2, 'P3: invoice has >1 VAT rate group (23% + 10%)');
+assert_true(isset($bd4['23']) && isset($bd4['10']), 'P3: rate groups keyed 23 and 10');
+
+// (a) coupon reduces the VAT BASE per rate: 10% line net drops 10000 -> 9000
+assert_equals(9000, (int)$bd4['10']['net'], 'P3: coupon proportionally lowers 10% net base');
+assert_equals(900,  (int)$bd4['10']['vat'], 'P3: 10% VAT recomputed on discounted base');
+
+// (b) shipping carries standard-rate VAT, folded into the 23% group
+//     products 23%: net 9000 / vat 2070; + shipping 600 -> net 488 / vat 112
+assert_equals(9488, (int)$bd4['23']['net'], 'P3: 23% net = discounted product + shipping net');
+assert_equals(2182, (int)$bd4['23']['vat'], 'P3: 23% VAT includes shipping VAT');
+
+// (d) net + VAT = gross == order.total (hard invariant)
+assert_equals(21570, (int)$inv4['total_gross'], 'P3: total_gross == order.total');
+assert_equals(3082,  (int)$inv4['total_vat'],   'P3: total_vat = sum of group VAT');
+assert_equals(18488, (int)$inv4['total_net'],   'P3: total_net = gross - VAT');
+assert_equals((int)$inv4['total_gross'], (int)$inv4['total_net'] + (int)$inv4['total_vat'],
+    'P3: net + VAT = gross invariant holds');
+// groups reconcile exactly to gross
+$sumGroup = 0;
+foreach ($bd4 as $g) { $sumGroup += (int)$g['net'] + (int)$g['vat']; }
+assert_equals(21570, $sumGroup, 'P3: sum(net+VAT) across rate groups == order.total');
+
+// reverse-charge: shipping and products all 0% VAT, net = gross
+$db->exec("PRAGMA foreign_keys = OFF");
+$db->exec("INSERT INTO orders (id, order_number, status, customer_name, customer_email, shipping_addr, payment_method, subtotal, discount_amount, shipping_cost, tax_amount, total, currency, locale, vat_scenario, created_at) VALUES (5005, 'INV-5005', 'paid', 'RC', 'rc@test.de', '" . addslashes(json_encode(['street'=>'B 2','city'=>'Berlin','zip'=>'10115','country'=>'DE','ic_dph'=>'DE811907980'])) . "', 'bank_transfer', 10000, 0, 500, 0, 10500, 'eur', 'de', 'reverse_charge', datetime('now'))");
+$db->exec("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total, vat_class, vat_rate, vat_amount, net_amount) VALUES (5005, 501, 'SKU-RC', 'RC item', 1, 10000, 10000, 'standard', 0, 0, 10000)");
+$db->exec("PRAGMA foreign_keys = ON");
+$inv5 = InvoiceService::issue(5005);
+assert_equals(0, (int)$inv5['total_vat'], 'P3: reverse-charge invoice has zero VAT');
+assert_equals(10500, (int)$inv5['total_net'], 'P3: reverse-charge net == gross (incl. shipping)');
+assert_equals((int)$inv5['total_gross'], (int)$inv5['total_net'] + (int)$inv5['total_vat'],
+    'P3: reverse-charge net + VAT = gross invariant');
+
+// ============================================================
 // TEST 55: P0 regression — HTTP checkout path (apiCheckout)
 // All five P0 bugs (#1 per-line VAT=0, #2 double VAT, #3 dead VIES,
 // #4 mock webhook bypass, #5 undefined $cfg) lived in api.php and
