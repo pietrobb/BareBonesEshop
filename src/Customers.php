@@ -192,10 +192,12 @@ class Customers {
         if ($cid <= 0) return null;
         $token = bin2hex(random_bytes(32));
         $expiresAt = gmdate('Y-m-d H:i:s', time() + self::RESET_TOKEN_TTL_SECONDS);
+        // Store only the SHA-256 hash; the plaintext token lives solely in the
+        // emailed reset URL. A DB leak then cannot be used to hijack resets.
         $db->prepare(
             "INSERT INTO password_reset_tokens (customer_id, token, expires_at)
              VALUES (?, ?, ?)"
-        )->execute([$cid, $token, $expiresAt]);
+        )->execute([$cid, hash('sha256', $token), $expiresAt]);
         return $token;
     }
 
@@ -204,7 +206,7 @@ class Customers {
             "SELECT customer_id, expires_at, used_at
              FROM password_reset_tokens WHERE token = ?"
         );
-        $stmt->execute([$token]);
+        $stmt->execute([hash('sha256', $token)]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$row) return null;
         if (!empty($row['used_at'])) return null;
@@ -229,7 +231,7 @@ class Customers {
             $db->prepare(
                 "UPDATE password_reset_tokens SET used_at = " .
                 (Db::isSqlite() ? "datetime('now')" : "NOW()") . " WHERE token = ?"
-            )->execute([$token]);
+            )->execute([hash('sha256', $token)]);
             $db->commit();
         } catch (\Throwable $e) {
             $db->rollBack();
