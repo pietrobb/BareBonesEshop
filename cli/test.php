@@ -72,6 +72,84 @@ assert_equals('sqlite', Db::driver(), 'Driver name is sqlite');
 assert_equals("datetime('now')", Db::now(), 'now() returns SQLite expression');
 
 // ============================================================
+// TEST 1b: Driver-aware SQL builders (MySQL parity, bug #8)
+// Asserts the emitted SQL of every Db builder for BOTH drivers
+// without needing a live MySQL server (driver flag flip only).
+// ============================================================
+echo "\n--- Test 1b: Driver-aware SQL builders (MySQL parity) ---\n";
+
+// SQLite branch (active driver)
+assert_equals('INSERT OR IGNORE', Db::insertIgnore(), 'Builder[sqlite]: insertIgnore');
+assert_equals('ON CONFLICT(sku) DO UPDATE SET name = excluded.name',
+    Db::upsertClause('sku', 'name = excluded.name', 'name = VALUES(name)'),
+    'Builder[sqlite]: upsertClause uses conflict target + excluded');
+assert_equals("datetime(checked_at, '+' || ttl_seconds || ' seconds')",
+    Db::dateAddSeconds('checked_at', 'ttl_seconds'),
+    'Builder[sqlite]: dateAddSeconds string-concat arithmetic');
+
+// MySQL branch — flip the driver flag only; builders emit strings, no server needed
+Db::init($pdo, 'mysql');
+assert_true(Db::isMysql(), 'Builder[mysql]: driver flag flipped for assertions');
+assert_equals('NOW()', Db::now(), 'Builder[mysql]: now() is NOW()');
+assert_equals('INSERT IGNORE', Db::insertIgnore(), 'Builder[mysql]: insertIgnore');
+assert_equals('ON DUPLICATE KEY UPDATE name = VALUES(name)',
+    Db::upsertClause('sku', 'name = excluded.name', 'name = VALUES(name)'),
+    'Builder[mysql]: upsertClause ignores conflict target');
+assert_equals('ON DUPLICATE KEY UPDATE x = 1',
+    Db::upsertClause('sku', 'x = 1'),
+    'Builder[mysql]: upsertClause falls back to sqlite updates when mysql variant omitted');
+assert_equals('DATE_ADD(checked_at, INTERVAL ttl_seconds SECOND)',
+    Db::dateAddSeconds('checked_at', 'ttl_seconds'),
+    'Builder[mysql]: dateAddSeconds uses DATE_ADD');
+assert_equals('DATE_ADD(checked_at, INTERVAL ttl_seconds SECOND) <= NOW()',
+    Db::dateAddSeconds('checked_at', 'ttl_seconds') . ' <= ' . Db::now(),
+    'Retention[mysql]: GDPR TTL expression is valid MySQL syntax');
+
+Db::init($pdo, 'sqlite');
+assert_true(Db::isSqlite(), 'Builder: driver restored to sqlite');
+
+// Functional regression (bug #8, GDPR retention): expired row matches, live row does not
+$pdo->exec("CREATE TABLE _ttl_probe (id INTEGER PRIMARY KEY, checked_at TEXT, ttl_seconds INTEGER)");
+$pdo->exec("INSERT INTO _ttl_probe (checked_at, ttl_seconds) VALUES (datetime('now', '-2 hours'), 3600)");
+$pdo->exec("INSERT INTO _ttl_probe (checked_at, ttl_seconds) VALUES (datetime('now'), 86400)");
+$ttlExpr = Db::dateAddSeconds('checked_at', 'ttl_seconds') . ' <= ' . Db::now();
+assert_equals(1, (int)$pdo->query("SELECT COUNT(*) FROM _ttl_probe WHERE {$ttlExpr}")->fetchColumn(),
+    'Retention[sqlite]: TTL expression selects only the expired row');
+$pdo->exec("DROP TABLE _ttl_probe");
+
+// Optional live MySQL parity run — enabled via env:
+//   TEST_MYSQL_DSN="mysql:host=127.0.0.1;dbname=test;charset=utf8mb4" [TEST_MYSQL_USER=...] [TEST_MYSQL_PASS=...]
+$mysqlDsn = getenv('TEST_MYSQL_DSN');
+if ($mysqlDsn) {
+    try {
+        $my = new PDO($mysqlDsn, getenv('TEST_MYSQL_USER') ?: 'root', getenv('TEST_MYSQL_PASS') ?: '', [
+            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ]);
+        $my->exec("DROP TABLE IF EXISTS _parity_probe");
+        $my->exec("CREATE TABLE _parity_probe (sku VARCHAR(32) PRIMARY KEY, qty INT NOT NULL, checked_at DATETIME NULL, ttl_seconds INT NULL)");
+        Db::init($my, 'mysql');
+        $my->exec(Db::insertIgnore() . " INTO _parity_probe (sku, qty) VALUES ('A', 1)");
+        $my->exec(Db::insertIgnore() . " INTO _parity_probe (sku, qty) VALUES ('A', 99)");
+        assert_equals(1, (int)$my->query("SELECT qty FROM _parity_probe WHERE sku='A'")->fetchColumn(),
+            'MySQL live: INSERT IGNORE skips duplicate');
+        $my->exec("INSERT INTO _parity_probe (sku, qty) VALUES ('A', 5) " . Db::upsertClause('sku', 'qty = excluded.qty', 'qty = VALUES(qty)'));
+        assert_equals(5, (int)$my->query("SELECT qty FROM _parity_probe WHERE sku='A'")->fetchColumn(),
+            'MySQL live: ON DUPLICATE KEY UPDATE applies');
+        $my->exec("UPDATE _parity_probe SET checked_at = DATE_SUB(NOW(), INTERVAL 2 HOUR), ttl_seconds = 3600 WHERE sku='A'");
+        assert_equals(1, (int)$my->query("SELECT COUNT(*) FROM _parity_probe WHERE " . Db::dateAddSeconds('checked_at', 'ttl_seconds') . " <= " . Db::now())->fetchColumn(),
+            'MySQL live: GDPR TTL retention expression selects expired row');
+        $my->exec("DROP TABLE _parity_probe");
+    } catch (\PDOException $e) {
+        echo "  [SKIP] TEST_MYSQL_DSN set but MySQL unavailable: " . $e->getMessage() . "\n";
+    } finally {
+        Db::init($pdo, 'sqlite');
+    }
+} else {
+    echo "  [SKIP] live MySQL parity probe (set TEST_MYSQL_DSN to enable)\n";
+}
+
+// ============================================================
 // TEST 2: Schema Build
 // ============================================================
 echo "\n--- Test 2: Schema Creation ---\n";
