@@ -98,7 +98,10 @@ final class InvoiceService
                 ':delivery_date'     => $deliveryDate,
                 ':due_date'          => $dueDate,
                 ':pdf_path'          => $relPath,
-                ':total_net'         => (int)($order['subtotal'] ?? 0) - (int)($order['discount_amount'] ?? 0) + (int)($order['shipping_cost'] ?? 0) - (int)$vatBreakdown['vat_total'],
+                // Invariant: net + VAT = gross, where gross is what the customer
+                // actually paid (order.total). net is the reconciled remainder so
+                // the three totals always tie out on the invoice.
+                ':total_net'         => (int)$order['total'] - (int)$vatBreakdown['vat_total'],
                 ':total_vat'         => (int)$vatBreakdown['vat_total'],
                 ':total_gross'       => (int)$order['total'],
                 ':currency'          => (string)($order['currency'] ?? 'eur'),
@@ -338,6 +341,14 @@ final class InvoiceService
      */
     private static function computeVatBreakdown(array $order, array $items): array
     {
+        $orderTotal = (int)($order['total'] ?? 0);
+        $discount   = (int)($order['discount_amount'] ?? 0);
+        $shipping   = (int)($order['shipping_cost'] ?? 0);
+        $paymentFee = (int)($order['payment_fee'] ?? 0);
+        $scenario   = (string)($order['vat_scenario'] ?? '');
+        // Reverse-charge and export carry no VAT on any component.
+        $vatApplies = !in_array($scenario, ['reverse_charge', 'export'], true);
+
         // Preferred: aggregate per-line VAT snapshot from order_items
         $hasLineVat = false;
         foreach ($items as $it) {
@@ -345,38 +356,127 @@ final class InvoiceService
         }
 
         if ($hasLineVat) {
+            // Total product gross (pre-discount) for proportional discount spread.
+            $productsGross = 0;
+            foreach ($items as $it) $productsGross += (int)($it['total'] ?? 0);
+
+            // 1. Products — spread the order-level coupon discount proportionally
+            //    across lines (by gross share), then re-extract VAT per line at its
+            //    own rate so the coupon reduces the VAT base, not just the gross.
             $rates = [];
-            $vatTotal = 0;
+            $distributed = 0;
+            $n = count($items);
+            $idx = 0;
             foreach ($items as $it) {
+                $idx++;
+                $lineGross = (int)($it['total'] ?? 0);
                 $rate = (float)($it['vat_rate'] ?? 0);
-                $vat  = (int)($it['vat_amount'] ?? 0);
-                $net  = (int)($it['net_amount'] ?? 0);
-                $key  = rtrim(rtrim(number_format($rate, 2, '.', ''), '0'), '.');
-                if ($key === '') $key = '0';
-                if (!isset($rates[$key])) $rates[$key] = ['net' => 0, 'vat' => 0];
-                $rates[$key]['net'] += $net;
-                $rates[$key]['vat'] += $vat;
-                $vatTotal += $vat;
+                // Last line absorbs the rounding residual of the discount spread.
+                if ($idx < $n) {
+                    $share = $productsGross > 0 ? (int)round($discount * $lineGross / $productsGross) : 0;
+                    $distributed += $share;
+                } else {
+                    $share = $discount - $distributed;
+                }
+                $grossAfter = max(0, $lineGross - $share);
+                [$net, $vat] = self::extractVat($grossAfter, $vatApplies ? $rate : 0.0);
+                self::addRate($rates, $vatApplies ? $rate : 0.0, $net, $vat);
             }
+
+            // 2. Shipping — its own VAT-bearing component. Follows the standard
+            //    (highest product) rate when VAT applies, else 0%. Merged into the
+            //    matching rate group for the VAT recap.
+            if ($shipping > 0) {
+                $shipRate = $vatApplies ? self::maxRate($rates) : 0.0;
+                [$sNet, $sVat] = self::extractVat($shipping, $shipRate);
+                self::addRate($rates, $shipRate, $sNet, $sVat);
+            }
+
+            // 3. Payment fee — VAT-exempt financial service → its own 0% line.
+            if ($paymentFee > 0) {
+                self::addRate($rates, 0.0, $paymentFee, 0);
+            }
+
+            // 4. Reconcile to order.total: fold any rounding residual into the
+            //    largest-net group so sum(net+vat) == gross exactly.
+            $vatTotal = self::reconcileRates($rates, $orderTotal);
+
             return [
                 'rates'     => $rates,
                 'vat_total' => $vatTotal,
-                'scenario'  => $order['vat_scenario'] ?? null,
-                'note_key'  => self::scenarioNoteKey((string)($order['vat_scenario'] ?? '')),
+                'scenario'  => $scenario ?: null,
+                'note_key'  => self::scenarioNoteKey($scenario),
             ];
         }
 
-        // Legacy fallback (no per-line VAT) — keep existing ratio heuristic.
+        // Legacy fallback (no per-line VAT) — single-rate ratio heuristic.
         $taxAmt = (int)($order['tax_amount'] ?? 0);
-        $sub    = (int)($order['subtotal'] ?? 0) - (int)($order['discount_amount'] ?? 0) + (int)($order['shipping_cost'] ?? 0);
+        $sub    = (int)($order['subtotal'] ?? 0) - $discount + $shipping;
         $netForVat = max(0, $sub - $taxAmt);
         $rate = $netForVat > 0 ? (int)round($taxAmt * 100 / $netForVat) : 0;
         if ($rate < 0 || $rate > 50) $rate = 0;
         $rates = [];
         if ($taxAmt > 0 || $netForVat > 0) {
-            $rates[(string)$rate] = ['net' => $netForVat, 'vat' => $taxAmt];
+            self::addRate($rates, (float)$rate, $netForVat, $taxAmt);
         }
-        return ['rates' => $rates, 'vat_total' => $taxAmt, 'scenario' => null, 'note_key' => null];
+        $vatTotal = self::reconcileRates($rates, $orderTotal);
+        return ['rates' => $rates, 'vat_total' => $vatTotal, 'scenario' => $scenario ?: null, 'note_key' => self::scenarioNoteKey($scenario)];
+    }
+
+    /** Extract net + VAT from a gross-inclusive amount at the given rate. */
+    private static function extractVat(int $gross, float $rate): array
+    {
+        if ($rate <= 0) return [$gross, 0];
+        $net = (int)round($gross / (1 + $rate / 100));
+        return [$net, $gross - $net];
+    }
+
+    /** Canonical rate-group key: "23", "10", "0" (trailing zeros trimmed). */
+    private static function rateKey(float $rate): string
+    {
+        $key = rtrim(rtrim(number_format($rate, 2, '.', ''), '0'), '.');
+        return $key === '' ? '0' : $key;
+    }
+
+    /** Accumulate net/vat into the rate group keyed by $rate. */
+    private static function addRate(array &$rates, float $rate, int $net, int $vat): void
+    {
+        $key = self::rateKey($rate);
+        if (!isset($rates[$key])) $rates[$key] = ['net' => 0, 'vat' => 0];
+        $rates[$key]['net'] += $net;
+        $rates[$key]['vat'] += $vat;
+    }
+
+    /** Highest positive rate currently present in the breakdown (0 if none). */
+    private static function maxRate(array $rates): float
+    {
+        $max = 0.0;
+        foreach (array_keys($rates) as $k) $max = max($max, (float)$k);
+        return $max;
+    }
+
+    /**
+     * Force sum(net+vat) across all rate groups to equal $orderTotal by folding
+     * the rounding residual into the largest-net group's net. Returns total VAT.
+     */
+    private static function reconcileRates(array &$rates, int $orderTotal): int
+    {
+        $vatTotal = 0;
+        $groupGross = 0;
+        $largestKey = null;
+        $largestNet = PHP_INT_MIN;
+        foreach ($rates as $key => $info) {
+            $vatTotal   += (int)$info['vat'];
+            $groupGross += (int)$info['net'] + (int)$info['vat'];
+            if ((int)$info['net'] > $largestNet) { $largestNet = (int)$info['net']; $largestKey = $key; }
+        }
+        $residual = $orderTotal - $groupGross;
+        if ($residual !== 0 && $largestKey !== null) {
+            $rates[$largestKey]['net'] += $residual;
+        } elseif ($residual !== 0) {
+            self::addRate($rates, 0.0, $residual, 0);
+        }
+        return $vatTotal;
     }
 
     /** Map a VAT scenario to its on-invoice i18n note key. */
