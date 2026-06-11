@@ -134,7 +134,17 @@ class Warehouse {
         return max(0, (int)$stmt->fetchColumn());
     }
 
-    /** Reserve stock for an order — takes from highest priority warehouse first */
+    /**
+     * Reserve stock for an order — takes from highest priority warehouse first.
+     *
+     * Concurrency-safe: the reservation itself is a conditional UPDATE guarded
+     * by `(qty - reserved) >= :take`, so two parallel checkouts can never both
+     * reserve the same last piece (the SELECT below is only a candidate
+     * snapshot — the UPDATE re-validates availability atomically).
+     *
+     * @throws \RuntimeException when the SKU cannot be fully reserved; any
+     *                           partial allocations are rolled back first.
+     */
     public static function reserve(string $sku, int $qty): array {
         $db = Db::get();
         $allocations = [];
@@ -149,23 +159,49 @@ class Warehouse {
         ");
         $rows->execute([':sku' => $sku]);
 
+        // NOTE: :take2 MUST be bound as PARAM_INT — execute(array) binds TEXT,
+        // and SQLite never coerces a TEXT param when compared against the
+        // affinity-less expression (qty - reserved), making the guard always
+        // false (integer < text in SQLite type ordering).
+        $upd = $db->prepare("
+            UPDATE warehouse_stock SET reserved = reserved + :take
+            WHERE id = :id AND (qty - reserved) >= :take2
+        ");
+        $cur = $db->prepare("SELECT qty - reserved FROM warehouse_stock WHERE id = :id");
+
         foreach ($rows->fetchAll(PDO::FETCH_ASSOC) as $row) {
             if ($remaining <= 0) break;
-            $available = $row['qty'] - $row['reserved'];
-            $take = min($remaining, $available);
+            $take = min($remaining, max(0, (int)$row['qty'] - (int)$row['reserved']));
 
-            $db->prepare("UPDATE warehouse_stock SET reserved = reserved + :take WHERE id = :id")
-               ->execute([':take' => $take, ':id' => $row['id']]);
-
-            $allocations[] = [
-                'warehouse_id'   => (int)$row['warehouse_id'],
-                'warehouse_code' => $row['code'],
-                'qty'            => $take,
-            ];
-            $remaining -= $take;
+            while ($take > 0) {
+                $upd->bindValue(':take',  $take, PDO::PARAM_INT);
+                $upd->bindValue(':take2', $take, PDO::PARAM_INT);
+                $upd->bindValue(':id',    (int)$row['id'], PDO::PARAM_INT);
+                $upd->execute();
+                if ($upd->rowCount() > 0) {
+                    $allocations[] = [
+                        'warehouse_id'   => (int)$row['warehouse_id'],
+                        'warehouse_code' => $row['code'],
+                        'qty'            => $take,
+                    ];
+                    $remaining -= $take;
+                    break;
+                }
+                // Lost a race — a concurrent reservation shrank availability.
+                // Re-read and retry with what is actually left (strictly less
+                // than $take when the guard failed, so the loop terminates).
+                $cur->execute([':id' => (int)$row['id']]);
+                $newTake = min($take, max(0, (int)$cur->fetchColumn()));
+                if ($newTake >= $take) break; // defensive: never spin
+                $take = $newTake;
+            }
         }
 
         if ($remaining > 0) {
+            // Roll back partial allocations so a failed reserve leaves no trace.
+            if ($allocations) {
+                self::release($sku, $allocations);
+            }
             throw new \RuntimeException("Nedostatok na sklade pre SKU: {$sku} (chýba {$remaining} ks)");
         }
 

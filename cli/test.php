@@ -4032,6 +4032,59 @@ echo "\n--- VAT test suite complete ---\n";
 // Re-init the global Db singleton on the main test DB so any later tests still work
 Db::init($pdo, 'sqlite');
 
+// ============================================================
+// TEST 56: P1 regression — Warehouse::reserve oversell guard
+// Bug #6: reserve() computed availability in PHP from a SELECT
+// snapshot, then unconditionally UPDATEd reserved — two parallel
+// checkouts could both grab the last piece. The UPDATE is now
+// guarded by (qty - reserved) >= take. Bonus: a failed reserve
+// used to leak partial allocations; it must release them.
+// ============================================================
+echo "\n--- Test 56: P1 regression (Warehouse::reserve) ---\n";
+
+$pdo->exec("DELETE FROM warehouse_stock");
+$pdo->exec("DELETE FROM warehouses WHERE id IN (91,92)");
+$pdo->exec("INSERT INTO warehouses (id,code,name,priority,is_default) VALUES (91,'p1main','P1 Main',900,0),(92,'p1aux','P1 Aux',800,0)");
+$pdo->exec("INSERT INTO warehouse_stock (warehouse_id,sku,qty,reserved) VALUES (91,'SKU-R',3,0),(92,'SKU-R',2,0)");
+
+// 56.1 — happy path: drains priority warehouse first, splits remainder
+$reserveAllocs = Warehouse::reserve('SKU-R', 4);
+assert_equals(2, count($reserveAllocs), 'Reserve: split across 2 warehouses');
+assert_equals(3, (int)$reserveAllocs[0]['qty'], 'Reserve: priority warehouse drained first');
+$whR1 = (int)$pdo->query("SELECT reserved FROM warehouse_stock WHERE warehouse_id=91 AND sku='SKU-R'")->fetchColumn();
+$whR2 = (int)$pdo->query("SELECT reserved FROM warehouse_stock WHERE warehouse_id=92 AND sku='SKU-R'")->fetchColumn();
+assert_equals(3, $whR1, 'Reserve: wh1 reserved=3');
+assert_equals(1, $whR2, 'Reserve: wh2 reserved=1');
+
+// 56.2 — oversell: only 1 piece left in total, asking for 2 must throw
+// AND must not leak the partial allocation it grabbed before failing
+$reserveThrew = false;
+try { Warehouse::reserve('SKU-R', 2); } catch (\RuntimeException $e) { $reserveThrew = true; }
+assert_true($reserveThrew, 'Reserve: oversell throws RuntimeException');
+$whR1 = (int)$pdo->query("SELECT reserved FROM warehouse_stock WHERE warehouse_id=91 AND sku='SKU-R'")->fetchColumn();
+$whR2 = (int)$pdo->query("SELECT reserved FROM warehouse_stock WHERE warehouse_id=92 AND sku='SKU-R'")->fetchColumn();
+assert_equals(3, $whR1, 'Reserve: failed reserve leaves wh1 untouched');
+assert_equals(1, $whR2, 'Reserve: failed reserve rolls back partial allocation on wh2');
+
+// 56.3 — the atomic guard itself: a stale-snapshot UPDATE asking for more
+// than is available must affect 0 rows (this is what closes the race)
+$guardStmt = $pdo->prepare("UPDATE warehouse_stock SET reserved = reserved + :take
+    WHERE warehouse_id = 92 AND sku = 'SKU-R' AND (qty - reserved) >= :take2");
+$guardStmt->bindValue(':take', 2, PDO::PARAM_INT);
+$guardStmt->bindValue(':take2', 2, PDO::PARAM_INT);
+$guardStmt->execute();
+assert_equals(0, $guardStmt->rowCount(), 'Reserve guard: conditional UPDATE refuses oversell (avail=1, take=2)');
+$guardStmt->bindValue(':take', 1, PDO::PARAM_INT);
+$guardStmt->bindValue(':take2', 1, PDO::PARAM_INT);
+$guardStmt->execute();
+assert_equals(1, $guardStmt->rowCount(), 'Reserve guard: conditional UPDATE allows take within availability');
+$pdo->exec("UPDATE warehouse_stock SET reserved = reserved - 1 WHERE warehouse_id = 92 AND sku = 'SKU-R'");
+
+// 56.4 — release returns reservations symmetrically
+Warehouse::release('SKU-R', $reserveAllocs);
+$whSum = (int)$pdo->query("SELECT SUM(reserved) FROM warehouse_stock WHERE sku='SKU-R'")->fetchColumn();
+assert_equals(0, $whSum, 'Release: all reservations returned');
+
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
 if ($failed > 0) {
