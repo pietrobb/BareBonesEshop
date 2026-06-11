@@ -63,6 +63,8 @@ $pagePermissions = [
     'payments'   => 'products.edit',
     'reviews'    => 'products.edit',
     'rma'        => 'products.edit',
+    'customers'  => 'customers.view',
+    'customer'   => 'customers.view',
 ];
 $requiredPerm = $pagePermissions[$page] ?? 'reports.view';
 Security::adminRequire($requiredPerm);
@@ -93,6 +95,8 @@ $title = match($page) {
     'feed'       => isset($_GET['id']) ? I18n::t('admin.title.feed_edit') : I18n::t('admin.title.feed_new'),
     'shipping'   => 'Doprava',
     'payments'   => 'Platby',
+    'customers'  => 'Zákazníci',
+    'customer'   => 'Zákazník',
     default      => I18n::t('admin.title.default'),
 };
 
@@ -166,6 +170,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
     <?php if (Security::adminCan('gdpr.view')): ?><a href="admin.php?p=gdpr" class="<?= $page==='gdpr'?'active':'' ?>"><?= esc(I18n::t('admin.nav.gdpr')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=reviews" class="<?= $page==='reviews'?'active':'' ?>">Recenzie</a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=rma" class="<?= $page==='rma'?'active':'' ?>">Reklamácie</a><?php endif; ?>
+    <?php if (Security::adminCan('customers.view')): ?><a href="admin.php?p=customers" class="<?= $page==='customers'||$page==='customer'?'active':'' ?>">Zákazníci</a><?php endif; ?>
 </nav>
 <main>
 <?php flash(); ?>
@@ -193,6 +198,8 @@ match($page) {
     'payments'   => pagePayments(),
     'reviews'    => pageReviews(),
     'rma'        => pageRma(),
+    'customers'  => pageCustomers(),
+    'customer'   => pageCustomerDetail(),
     default      => pageDashboard(),
 };
 ?>
@@ -1084,6 +1091,156 @@ function pageRma(): void {
     <?php
 }
 
+function pageCustomers(): void {
+    $q = trim((string)($_GET['q'] ?? ''));
+    $customers = Customers::adminList($q, 100);
+    // Pre-fetch order counts for the listed customers.
+    $counts = [];
+    $ids = array_map(static fn($c) => (int)$c['id'], $customers);
+    if ($ids) {
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $st = Db::get()->prepare("SELECT customer_id, COUNT(*) AS cnt FROM orders WHERE customer_id IN ({$ph}) GROUP BY customer_id");
+        $st->execute($ids);
+        foreach ($st->fetchAll() as $r) { $counts[(int)$r['customer_id']] = (int)$r['cnt']; }
+    }
+    ?>
+    <h1>Zákazníci <span class="muted">(<?= count($customers) ?>)</span></h1>
+    <div class="card">
+        <form method="get" action="admin.php" style="display:flex;gap:.5rem;align-items:center;margin-bottom:1rem">
+            <input type="hidden" name="p" value="customers">
+            <input type="text" name="q" value="<?= esc($q) ?>" placeholder="e-mail, meno alebo ID" style="min-width:280px">
+            <button class="btn btn-primary" type="submit">Hľadať</button>
+            <?php if ($q !== ''): ?><a class="btn btn-sm" href="admin.php?p=customers">Zrušiť filter</a><?php endif; ?>
+        </form>
+        <?php if (!$customers): ?>
+        <p class="muted">Žiadni zákazníci.</p>
+        <?php else: ?>
+        <table>
+            <tr><th>ID</th><th>E-mail</th><th>Meno</th><th>Stav</th><th>Objednávky</th><th>Registrácia</th><th></th></tr>
+            <?php foreach ($customers as $c): ?>
+            <tr>
+                <td><?= (int)$c['id'] ?></td>
+                <td><?= esc($c['email']) ?></td>
+                <td><?= esc($c['name'] ?? '') ?></td>
+                <td><span class="badge badge-<?= ($c['status'] ?? '')==='active'?'active':'draft' ?>"><?= esc($c['status'] ?? '') ?></span></td>
+                <td><?= (int)($counts[(int)$c['id']] ?? 0) ?></td>
+                <td class="muted"><?= esc(substr((string)$c['created_at'], 0, 16)) ?></td>
+                <td><a class="btn btn-sm" href="admin.php?p=customer&id=<?= (int)$c['id'] ?>">Detail</a></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+        <?php endif; ?>
+    </div>
+    <?php
+}
+
+function pageCustomerDetail(): void {
+    $id = Security::int($_GET['id'] ?? 0);
+    $c = $id > 0 ? Customers::byId($id) : null;
+    if (!$c) {
+        echo '<h1>Zákazník</h1><div class="card"><p class="muted">Zákazník nenájdený. <a href="admin.php?p=customers">Späť na zoznam</a></p></div>';
+        return;
+    }
+    $status   = (string)($c['status'] ?? '');
+    $addresses = Customers::addresses($id);
+    $orders    = Customers::orders($id, 100);
+    $rmas      = Rma::forCustomer($id);
+    $anon = $status === 'anonymized';
+    ?>
+    <h1>Zákazník #<?= (int)$c['id'] ?> <span class="muted"><?= esc($c['email']) ?></span></h1>
+    <p style="margin-bottom:1rem"><a class="btn btn-sm" href="admin.php?p=customers">← Zoznam</a></p>
+
+    <div class="card">
+        <h3>Profil</h3>
+        <table>
+            <tr><th>Meno</th><td><?= esc($c['name'] ?? '') ?></td></tr>
+            <tr><th>E-mail</th><td><?= esc($c['email']) ?></td></tr>
+            <tr><th>Telefón</th><td><?= esc($c['phone'] ?? '') ?></td></tr>
+            <tr><th>Stav</th><td><span class="badge badge-<?= $status==='active'?'active':'draft' ?>"><?= esc($status) ?></span></td></tr>
+            <tr><th>Registrácia</th><td class="muted"><?= esc(substr((string)($c['created_at'] ?? ''), 0, 16)) ?></td></tr>
+            <tr><th>Posledné prihlásenie</th><td class="muted"><?= esc(substr((string)($c['last_login_at'] ?? ''), 0, 16)) ?: '—' ?></td></tr>
+        </table>
+        <?php if (!$anon): ?>
+        <p style="margin-top:1rem">
+            <?php $toggleTo = $status === 'active' ? 'blocked' : 'active'; ?>
+            <form method="post" action="admin.php?p=customer&id=<?= (int)$c['id'] ?>&action=status" style="display:inline">
+                <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                <input type="hidden" name="customer_id" value="<?= (int)$c['id'] ?>">
+                <input type="hidden" name="status" value="<?= esc($toggleTo) ?>">
+                <button class="btn btn-sm<?= $toggleTo==='blocked'?' btn-danger':' btn-primary' ?>" type="submit">
+                    <?= $toggleTo === 'blocked' ? 'Zablokovať účet' : 'Odblokovať účet' ?>
+                </button>
+            </form>
+            <a class="btn btn-sm" href="cli/gdpr-export.php?customer-id=<?= (int)$c['id'] ?>">GDPR export</a>
+            <a class="btn btn-sm" href="admin.php?p=gdpr&email=<?= urlencode((string)$c['email']) ?>">GDPR vymazať…</a>
+        </p>
+        <?php else: ?>
+        <p class="muted" style="margin-top:1rem">Účet bol anonymizovaný (GDPR) — bez ďalších akcií.</p>
+        <?php endif; ?>
+    </div>
+
+    <div class="card">
+        <h3>Adresy (<?= count($addresses) ?>)</h3>
+        <?php if (!$addresses): ?>
+        <p class="muted">Žiadne adresy.</p>
+        <?php else: ?>
+        <table>
+            <tr><th>Typ</th><th>Meno</th><th>Adresa</th><th>Mesto</th><th>Krajina</th></tr>
+            <?php foreach ($addresses as $a): ?>
+            <tr>
+                <td><?= esc($a['type'] ?? '') ?><?= !empty($a['is_default']) ? ' <span class="muted">(predvolená)</span>' : '' ?></td>
+                <td><?= esc($a['name'] ?? '') ?></td>
+                <td><?= esc($a['street'] ?? '') ?></td>
+                <td><?= esc(trim(($a['zip'] ?? '') . ' ' . ($a['city'] ?? ''))) ?></td>
+                <td><?= esc($a['country'] ?? '') ?></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+        <?php endif; ?>
+    </div>
+
+    <div class="card">
+        <h3>Objednávky (<?= count($orders) ?>)</h3>
+        <?php if (!$orders): ?>
+        <p class="muted">Žiadne objednávky.</p>
+        <?php else: ?>
+        <table>
+            <tr><th>Číslo</th><th>Stav</th><th>Suma</th><th>Dátum</th><th></th></tr>
+            <?php foreach ($orders as $o): ?>
+            <tr>
+                <td><?= esc($o['order_number']) ?></td>
+                <td><span class="badge badge-<?= esc($o['status']) ?>"><?= esc($o['status']) ?></span></td>
+                <td><?= esc(I18n::price((int)$o['total'], $o['currency'])) ?></td>
+                <td class="muted"><?= esc(substr((string)$o['created_at'], 0, 16)) ?></td>
+                <td><a class="btn btn-sm" href="admin.php?p=order&id=<?= (int)$o['id'] ?>">Detail</a></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+        <?php endif; ?>
+    </div>
+
+    <div class="card">
+        <h3>Reklamácie (<?= count($rmas) ?>)</h3>
+        <?php if (!$rmas): ?>
+        <p class="muted">Žiadne reklamácie.</p>
+        <?php else: ?>
+        <table>
+            <tr><th>RMA</th><th>Objednávka</th><th>Stav</th><th>Dátum</th><th></th></tr>
+            <?php foreach ($rmas as $r): ?>
+            <tr>
+                <td><?= esc($r['rma_number']) ?></td>
+                <td>#<?= (int)$r['order_id'] ?></td>
+                <td><span class="badge badge-<?= esc($r['status']) ?>"><?= esc($r['status']) ?></span></td>
+                <td class="muted"><?= esc(substr((string)$r['created_at'], 0, 16)) ?></td>
+                <td><a class="btn btn-sm" href="admin.php?p=rma&status=<?= esc($r['status']) ?>">RMA fronta</a></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+        <?php endif; ?>
+    </div>
+    <?php
+}
+
 // ============================================================
 // CMS Pages
 // ============================================================
@@ -1307,6 +1464,7 @@ function handlePost(string $page, string $action): void {
         'reviews:approve' => handleReviewModerate('approved'),
         'reviews:reject'  => handleReviewModerate('rejected'),
         'rma:status'      => handleRmaStatus(),
+        'customer:status' => handleCustomerStatus(),
         default          => null,
     };
 }
@@ -1333,6 +1491,19 @@ function handleRmaStatus(): void {
         setFlash('err', 'Stav reklamácie sa nepodarilo zmeniť.');
     }
     header('Location: admin.php?p=rma');
+    exit;
+}
+
+function handleCustomerStatus(): void {
+    Security::adminRequire('customers.view');
+    $id = Security::int($_POST['customer_id'] ?? 0);
+    $status = Security::clean($_POST['status'] ?? '');
+    if ($id > 0 && Customers::setStatus($id, $status)) {
+        setFlash('ok', 'Zákazník #' . $id . ' → ' . $status);
+    } else {
+        setFlash('err', 'Stav zákazníka sa nepodarilo zmeniť.');
+    }
+    header('Location: admin.php?p=customer&id=' . $id);
     exit;
 }
 

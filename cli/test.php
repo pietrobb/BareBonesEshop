@@ -3859,6 +3859,38 @@ assert_true(Rma::setStatus($rId, 'bogus') === false, 'RMA: setStatus with unknow
 assert_true(Rma::openForOrder($rmaOrderId) === null, 'RMA: no open request after refund (terminal)');
 
 // ============================================================
+// TEST: Admin customer management (P7.5)
+// ============================================================
+echo "\n--- Test: Admin Customer Management ---\n";
+
+// adminList returns the seeded customer (alice) and supports search
+$allCust = Customers::adminList('', 100);
+assert_true(count($allCust) >= 1, 'AdminCustomers: list returns customers');
+$byEmail = Customers::adminList('alice@test.local', 50);
+assert_true(count($byEmail) >= 1 && (int)$byEmail[0]['id'] === $aliceId, 'AdminCustomers: search by email finds alice');
+$byName = Customers::adminList('Alice', 50);
+assert_true(count($byName) >= 1, 'AdminCustomers: search by name matches');
+$byId = Customers::adminList((string)$aliceId, 50);
+assert_true(count($byId) >= 1 && (int)$byId[0]['id'] === $aliceId, 'AdminCustomers: numeric query matches id');
+$noHit = Customers::adminList('no-such-person@nowhere.test', 50);
+assert_equals(0, count($noHit), 'AdminCustomers: non-matching search returns empty');
+
+// setStatus: block then reactivate
+assert_equals('active', Customers::byId($aliceId)['status'], 'AdminCustomers: alice starts active');
+assert_true(Customers::setStatus($aliceId, 'blocked') === true, 'AdminCustomers: block returns true');
+assert_equals('blocked', Customers::byId($aliceId)['status'], 'AdminCustomers: status now blocked');
+assert_true(Customers::setStatus($aliceId, 'active') === true, 'AdminCustomers: reactivate returns true');
+assert_equals('active', Customers::byId($aliceId)['status'], 'AdminCustomers: status back to active');
+
+// setStatus guards: invalid status, unknown id, anonymized terminal
+assert_true(Customers::setStatus($aliceId, 'bogus') === false, 'AdminCustomers: invalid status rejected');
+assert_true(Customers::setStatus(0, 'blocked') === false, 'AdminCustomers: invalid id rejected');
+assert_true(Customers::setStatus(999999, 'blocked') === false, 'AdminCustomers: unknown customer rejected');
+$pdo->prepare("UPDATE customers SET status = 'anonymized' WHERE id = ?")->execute([$aliceId]);
+assert_true(Customers::setStatus($aliceId, 'active') === false, 'AdminCustomers: anonymized account cannot be reactivated');
+$pdo->prepare("UPDATE customers SET status = 'active' WHERE id = ?")->execute([$aliceId]); // restore for later tests
+
+// ============================================================
 // TEST: Migrations Framework
 // ============================================================
 echo "\n--- Test: Migrations Framework ---\n";
