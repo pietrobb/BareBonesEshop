@@ -4506,6 +4506,40 @@ try {
 assert_equals('23000', $dupCode2, 'UQ: index active after migration (dup INSERT blocked)');
 $uqDb = null;
 
+// ============================================================
+// TEST: Bootstrap shared front-controller helpers (P5)
+// ============================================================
+echo "\n--- Test: Bootstrap shared helpers (P5) ---\n";
+
+// stores() returns the decoded stores.json, byte-for-byte parity with a direct decode
+$bsStoresDirect = json_decode((string)file_get_contents(__DIR__ . '/../stores.json'), true) ?: [];
+assert_equals($bsStoresDirect, Bootstrap::stores(), 'Bootstrap: stores() equals direct stores.json decode');
+assert_true(Bootstrap::stores() === Bootstrap::stores(), 'Bootstrap: stores() returns stable cached value across calls');
+
+// initLocale() parity with I18n::detectLocale + applies the locale
+$savedLocale = I18n::locale();
+assert_equals(I18n::detectLocale('/de/products'), Bootstrap::initLocale('/de/products'), 'Bootstrap: initLocale parity with I18n::detectLocale (/de)');
+assert_equals('de', I18n::locale(), 'Bootstrap: initLocale applied de locale');
+assert_equals(I18n::detectLocale('/'), Bootstrap::initLocale('/'), 'Bootstrap: initLocale parity for default (no prefix)');
+assert_equals('en', I18n::locale(), 'Bootstrap: initLocale fell back to system default en');
+I18n::setLocale($savedLocale); // restore for downstream tests
+
+// catTranslations() fallback parity — SK + DE legacy names intact after extraction to data file
+$bsCat = Bootstrap::catTranslations();
+assert_equals('Brzdový kotúč', $bsCat['sk']['Brake Disc'] ?? null, 'Bootstrap: catTranslations sk Brake Disc preserved');
+assert_equals('Brzdový systém', $bsCat['sk']['Brake System'] ?? null, 'Bootstrap: catTranslations sk Brake System preserved');
+assert_equals('Karosserie', $bsCat['de']['Body'] ?? null, 'Bootstrap: catTranslations de Body preserved');
+assert_true(($bsCat['sk']['Brake System'] ?? null) === (Bootstrap::catTranslations()['sk']['Brake System'] ?? null), 'Bootstrap: catTranslations stable across calls');
+
+// hreflangAlternates() — alternates keyed by locale, prefix stripping, x-default
+$hl = Bootstrap::hreflangAlternates('/de/products');
+assert_equals('/de', $hl['alternates']['de'] ?? null, 'Bootstrap: hreflang de alternate maps to /de prefix');
+assert_equals('/cs', $hl['alternates']['cs'] ?? null, 'Bootstrap: hreflang cs alternate maps to /cs prefix');
+assert_equals('', $hl['alternates']['sk'] ?? 'MISSING', 'Bootstrap: hreflang sk alternate maps to empty prefix');
+assert_equals('/products', $hl['pathNoPrefix'], 'Bootstrap: hreflang strips matched /de store prefix from path');
+$hlRoot = Bootstrap::hreflangAlternates('/');
+assert_equals('/', $hlRoot['pathNoPrefix'], 'Bootstrap: hreflang keeps / for unprefixed path');
+
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
 if ($failed > 0) {
