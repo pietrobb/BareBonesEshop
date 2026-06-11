@@ -10,6 +10,7 @@
  */
 class Bootstrap {
     private static ?array $stores = null;
+    private static ?array $catTranslations = null;
 
     /** Per-request cached stores.json decode. Always returns an array. */
     public static function stores(): array {
@@ -32,5 +33,18 @@ class Bootstrap {
         $lang = I18n::detectLocale($uri);
         I18n::setLocale($lang);
         return $lang;
+    }
+
+    /**
+     * Legacy category-name fallback (locale => [English name => translated]).
+     * Cached per request. Used for category names not yet migrated to the
+     * categories.translations JSON column.
+     */
+    public static function catTranslations(): array {
+        if (self::$catTranslations === null) {
+            $file = __DIR__ . '/../data/category-translations.php';
+            self::$catTranslations = is_file($file) ? (require $file) : [];
+        }
+        return self::$catTranslations;
     }
 }
