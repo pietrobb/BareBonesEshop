@@ -337,9 +337,18 @@ class Orders {
     }
 
     /**
-     * Restore stock for order items (used by cancellation/refund)
+     * Restore stock for order items.
+     *
+     * $mode:
+     *  - 'release' (cancellation): the order's reservation is still held
+     *    (order never shipped) — decrement warehouse_stock.reserved.
+     *  - 'return' (returned after shipping): the reservation was already
+     *    consumed at 'shipped' (reserved -= qty AND qty -= qty). Goods
+     *    physically came back, so ONLY increment warehouse_stock.qty.
+     *    Decrementing 'reserved' here would eat reservations belonging
+     *    to OTHER open orders and cause oversell.
      */
-    public static function restoreStock(int $orderId): void {
+    public static function restoreStock(int $orderId, string $mode = 'release'): void {
         $db = Db::get();
         $items = self::items($orderId);
 
@@ -347,11 +356,16 @@ class Orders {
         if ($ownTransaction) $db->beginTransaction();
 
         try {
-            // Guard against double restore — check inside transaction for atomicity
-            $order = self::byId($orderId);
-            if ($order && str_contains($order['notes'] ?? '', 'stock_restored')) {
+            // Guard against double restore — atomically claim the flag.
+            // Only one caller can flip 0 → 1; everyone else (including a
+            // parallel transaction blocked on the row lock) sees 0 rows
+            // affected and bails out. Replaces the fragile
+            // notes LIKE '%stock_restored%' substring heuristic (bug #11).
+            $claim = $db->prepare("UPDATE orders SET stock_restored = 1 WHERE id = :id AND stock_restored = 0");
+            $claim->execute([':id' => $orderId]);
+            if ($claim->rowCount() === 0) {
                 if ($ownTransaction) $db->rollBack();
-                return;
+                return; // already restored (or order does not exist)
             }
             foreach ($items as $item) {
                 if (!empty($item['variant_id'])) {
@@ -362,8 +376,13 @@ class Orders {
                     $allocs = $attrs['_warehouse_allocations'] ?? null;
 
                     if ($allocs) {
-                        // Release back to exact warehouses where stock was reserved
-                        Warehouse::release($item['sku'], $allocs);
+                        if ($mode === 'return') {
+                            // Physical return: add qty back to the exact warehouses
+                            Warehouse::restock($item['sku'], $allocs);
+                        } else {
+                            // Release back to exact warehouses where stock was reserved
+                            Warehouse::release($item['sku'], $allocs);
+                        }
                         Warehouse::syncProductStock([$item['sku']]);
                     } else {
                         // Fallback: no allocation info, add to default warehouse
@@ -371,11 +390,6 @@ class Orders {
                     }
                 }
             }
-
-            // Mark as restored inside the same transaction
-            $concat = Db::isSqlite() ? "COALESCE(notes,'') || :note" : "CONCAT(COALESCE(notes,''), :note)";
-            $db->prepare("UPDATE orders SET notes = {$concat} WHERE id = :id")
-               ->execute([':note' => "\nstock_restored", ':id' => $orderId]);
 
             if ($ownTransaction) $db->commit();
         } catch (\Throwable $e) {

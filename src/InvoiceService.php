@@ -115,6 +115,19 @@ final class InvoiceService
             $invoiceId = (int)$db->lastInsertId();
 
             $db->commit();
+        } catch (\PDOException $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            // Race lost: a concurrent issue() inserted the invoice between our
+            // byOrderId() check and the INSERT — the uq_invoices_order_invoice
+            // unique index fired (SQLSTATE 23000). Return the winner's invoice
+            // (idempotent semantics). Counter increment rolled back with the tx.
+            if ((string)$e->getCode() === '23000') {
+                $existing = self::byOrderId($orderId);
+                if ($existing !== null) {
+                    return $existing;
+                }
+            }
+            throw $e;
         } catch (\Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();
             throw $e;
@@ -174,7 +187,9 @@ final class InvoiceService
 
     public static function byOrderId(int $orderId): ?array
     {
-        $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE order_id = :oid LIMIT 1");
+        // Prefer the live invoice over voided 'duplicate'/'credit_note' rows.
+        $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE order_id = :oid
+            ORDER BY CASE WHEN type = 'invoice' THEN 0 ELSE 1 END, id LIMIT 1");
         $stmt->execute([':oid' => $orderId]);
         return $stmt->fetch() ?: null;
     }

@@ -160,6 +160,7 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS orders (
     erp_id TEXT DEFAULT NULL, erp_status TEXT DEFAULT NULL,
     erp_synced_at TEXT DEFAULT NULL, erp_error TEXT DEFAULT NULL,
     vat_scenario TEXT DEFAULT NULL, vat_total INTEGER DEFAULT NULL, net_total INTEGER DEFAULT NULL,
+    stock_restored INTEGER NOT NULL DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
 )");
 
@@ -3561,6 +3562,13 @@ if (file_exists($vatMigFile)) {
     $vatMig = require $vatMigFile;
     $vatMig->up(Db::get(), Db::isSqlite());
 }
+// Apply invoices(order_id) unique-index migration (bug #9) so all invoice
+// tests below run with the production constraint active
+$uqMigFile = __DIR__ . '/../migrations/20260611220000_add_invoices_order_unique.php';
+if (file_exists($uqMigFile)) {
+    $uqMig = require $uqMigFile;
+    $uqMig->up(Db::get(), Db::isSqlite());
+}
 
 // Seed a minimal paid order
 $db = Db::get();
@@ -4031,6 +4039,220 @@ echo "\n--- VAT test suite complete ---\n";
 
 // Re-init the global Db singleton on the main test DB so any later tests still work
 Db::init($pdo, 'sqlite');
+
+// ============================================================
+// TEST 56: P1 regression — Warehouse::reserve oversell guard
+// Bug #6: reserve() computed availability in PHP from a SELECT
+// snapshot, then unconditionally UPDATEd reserved — two parallel
+// checkouts could both grab the last piece. The UPDATE is now
+// guarded by (qty - reserved) >= take. Bonus: a failed reserve
+// used to leak partial allocations; it must release them.
+// ============================================================
+echo "\n--- Test 56: P1 regression (Warehouse::reserve) ---\n";
+
+$pdo->exec("DELETE FROM warehouse_stock");
+$pdo->exec("DELETE FROM warehouses WHERE id IN (91,92)");
+$pdo->exec("INSERT INTO warehouses (id,code,name,priority,is_default) VALUES (91,'p1main','P1 Main',900,0),(92,'p1aux','P1 Aux',800,0)");
+$pdo->exec("INSERT INTO warehouse_stock (warehouse_id,sku,qty,reserved) VALUES (91,'SKU-R',3,0),(92,'SKU-R',2,0)");
+
+// 56.1 — happy path: drains priority warehouse first, splits remainder
+$reserveAllocs = Warehouse::reserve('SKU-R', 4);
+assert_equals(2, count($reserveAllocs), 'Reserve: split across 2 warehouses');
+assert_equals(3, (int)$reserveAllocs[0]['qty'], 'Reserve: priority warehouse drained first');
+$whR1 = (int)$pdo->query("SELECT reserved FROM warehouse_stock WHERE warehouse_id=91 AND sku='SKU-R'")->fetchColumn();
+$whR2 = (int)$pdo->query("SELECT reserved FROM warehouse_stock WHERE warehouse_id=92 AND sku='SKU-R'")->fetchColumn();
+assert_equals(3, $whR1, 'Reserve: wh1 reserved=3');
+assert_equals(1, $whR2, 'Reserve: wh2 reserved=1');
+
+// 56.2 — oversell: only 1 piece left in total, asking for 2 must throw
+// AND must not leak the partial allocation it grabbed before failing
+$reserveThrew = false;
+try { Warehouse::reserve('SKU-R', 2); } catch (\RuntimeException $e) { $reserveThrew = true; }
+assert_true($reserveThrew, 'Reserve: oversell throws RuntimeException');
+$whR1 = (int)$pdo->query("SELECT reserved FROM warehouse_stock WHERE warehouse_id=91 AND sku='SKU-R'")->fetchColumn();
+$whR2 = (int)$pdo->query("SELECT reserved FROM warehouse_stock WHERE warehouse_id=92 AND sku='SKU-R'")->fetchColumn();
+assert_equals(3, $whR1, 'Reserve: failed reserve leaves wh1 untouched');
+assert_equals(1, $whR2, 'Reserve: failed reserve rolls back partial allocation on wh2');
+
+// 56.3 — the atomic guard itself: a stale-snapshot UPDATE asking for more
+// than is available must affect 0 rows (this is what closes the race)
+$guardStmt = $pdo->prepare("UPDATE warehouse_stock SET reserved = reserved + :take
+    WHERE warehouse_id = 92 AND sku = 'SKU-R' AND (qty - reserved) >= :take2");
+$guardStmt->bindValue(':take', 2, PDO::PARAM_INT);
+$guardStmt->bindValue(':take2', 2, PDO::PARAM_INT);
+$guardStmt->execute();
+assert_equals(0, $guardStmt->rowCount(), 'Reserve guard: conditional UPDATE refuses oversell (avail=1, take=2)');
+$guardStmt->bindValue(':take', 1, PDO::PARAM_INT);
+$guardStmt->bindValue(':take2', 1, PDO::PARAM_INT);
+$guardStmt->execute();
+assert_equals(1, $guardStmt->rowCount(), 'Reserve guard: conditional UPDATE allows take within availability');
+$pdo->exec("UPDATE warehouse_stock SET reserved = reserved - 1 WHERE warehouse_id = 92 AND sku = 'SKU-R'");
+
+// 56.4 — release returns reservations symmetrically
+Warehouse::release('SKU-R', $reserveAllocs);
+$whSum = (int)$pdo->query("SELECT SUM(reserved) FROM warehouse_stock WHERE sku='SKU-R'")->fetchColumn();
+assert_equals(0, $whSum, 'Release: all reservations returned');
+
+// ============================================================
+// TEST 57: P1 regression — return flow must not eat foreign reservations
+// Bug #7: handleReturn restored stock via the release path, which
+// decremented warehouse_stock.reserved. But a returned order's own
+// reservation was already consumed at 'shipped' — whatever 'reserved'
+// remains belongs to OTHER open orders. A physical return must only
+// increment qty. Cancel (never shipped) must keep releasing 'reserved'.
+// ============================================================
+echo "\n--- Test 57: P1 regression (return flow vs foreign reservations) ---\n";
+
+$pdo->exec("INSERT INTO products (id,category_id,name,slug,sku,price,currency,status,vat_class,stock) VALUES
+    (503,1,'Returner','returner','SKU-RT',5000,'eur','active','standard',10)");
+$pdo->exec("DELETE FROM warehouse_stock WHERE sku='SKU-RT'");
+$pdo->exec("INSERT INTO warehouse_stock (warehouse_id,sku,qty,reserved) VALUES (1,'SKU-RT',10,0)");
+
+$rtItem = fn(int $qty) => [[
+    'product_id' => 503, 'variant_id' => null, 'qty' => $qty,
+    'price' => 5000, 'sku' => 'SKU-RT', 'name' => 'Returner', 'variant_name' => '',
+]];
+$rtCustomer = [
+    'name' => 'RT', 'email' => 'rt@test.com',
+    'address' => ['street' => 'X 1', 'city' => 'BA', 'zip' => '81101', 'country' => 'SK'],
+    'currency' => 'eur', 'shipping_cost' => 0, 'tax_amount' => 0,
+];
+
+$rtA = Orders::create($rtItem(2), $rtCustomer, 'stripe');   // order under test (will ship + return)
+$rtB = Orders::create($rtItem(3), $rtCustomer, 'stripe');   // foreign open order (holds reservation)
+$rtStock = fn() => $pdo->query("SELECT qty, reserved FROM warehouse_stock WHERE warehouse_id=1 AND sku='SKU-RT'")->fetch(PDO::FETCH_ASSOC);
+
+$s = $rtStock();
+assert_equals(5, (int)$s['reserved'], 'Return: A(2)+B(3) reserved=5');
+
+// Ship A: its reservation is consumed (reserved -2, qty -2)
+OrderWorkflow::transition($rtA, 'paid');
+OrderWorkflow::transition($rtA, 'shipped');
+$s = $rtStock();
+assert_equals(8, (int)$s['qty'], 'Return: shipped decrements qty (10→8)');
+assert_equals(3, (int)$s['reserved'], 'Return: shipped consumed own reservation (5→3)');
+
+// Return A: goods come back as qty; B's reservation must stay intact
+OrderWorkflow::transition($rtA, 'returned');
+$s = $rtStock();
+assert_equals(10, (int)$s['qty'], 'Return: qty restored (8→10)');
+assert_equals(3, (int)$s['reserved'], 'Return: foreign reservation NOT eaten (reserved stays 3)');
+assert_equals(7, (int)$pdo->query("SELECT stock FROM products WHERE id=503")->fetchColumn(), 'Return: products.stock = qty - foreign reserved = 7');
+
+// Idempotency: second restore is a no-op (stock_restored guard now also covers the qty increment)
+Orders::restoreStock($rtA, 'return');
+$s = $rtStock();
+assert_equals(10, (int)$s['qty'], 'Return: double restore idempotent (qty)');
+assert_equals(3, (int)$s['reserved'], 'Return: double restore idempotent (reserved)');
+
+// Cancel branch: B cancelled before shipping → releases its reservation, qty untouched
+OrderWorkflow::transition($rtB, 'paid');
+OrderWorkflow::transition($rtB, 'cancelled');
+$s = $rtStock();
+assert_equals(10, (int)$s['qty'], 'Cancel: qty untouched (still 10)');
+assert_equals(0, (int)$s['reserved'], 'Cancel: releases own reservation (3→0)');
+assert_equals(10, (int)$pdo->query("SELECT stock FROM products WHERE id=503")->fetchColumn(), 'Cancel: products.stock synced back to 10');
+
+// ============================================================
+// TEST 58: P1 regression — stock_restored column replaces notes heuristic
+// Bug #11: the double-restore guard was notes LIKE '%stock_restored%' —
+// any order whose notes happened to contain that text (customer note,
+// admin comment) silently SKIPPED its stock restore. Now a dedicated
+// orders.stock_restored flag is claimed atomically (0 → 1).
+// ============================================================
+echo "\n--- Test 58: P1 regression (stock_restored flag) ---\n";
+
+// 58.1 — restored orders carry the flag, not a notes marker
+assert_equals(1, (int)$pdo->query("SELECT stock_restored FROM orders WHERE id={$rtA}")->fetchColumn(), 'Flag: returned order has stock_restored=1');
+assert_equals(1, (int)$pdo->query("SELECT stock_restored FROM orders WHERE id={$rtB}")->fetchColumn(), 'Flag: cancelled order has stock_restored=1');
+assert_true(!str_contains((string)$pdo->query("SELECT notes FROM orders WHERE id={$rtA}")->fetchColumn(), 'stock_restored'), 'Flag: notes no longer abused as marker');
+
+// 58.2 — red herring: customer note containing the literal marker text
+// must NOT block the restore (the old heuristic skipped it)
+$rtCustomerC = $rtCustomer;
+$rtCustomerC['notes'] = 'please gift-wrap; ref stock_restored ticket #42';
+$rtC = Orders::create($rtItem(2), $rtCustomerC, 'stripe');
+$s = $rtStock();
+assert_equals(2, (int)$s['reserved'], 'Flag: order C reserved 2');
+OrderWorkflow::transition($rtC, 'cancelled');
+$s = $rtStock();
+assert_equals(0, (int)$s['reserved'], 'Flag: restore runs despite marker text in notes (old heuristic would skip)');
+assert_equals(1, (int)$pdo->query("SELECT stock_restored FROM orders WHERE id={$rtC}")->fetchColumn(), 'Flag: order C stock_restored=1');
+
+// 58.3 — atomic claim: direct second restore is refused by the flag
+Orders::restoreStock($rtC);
+$s = $rtStock();
+assert_equals(0, (int)$s['reserved'], 'Flag: repeated restore is a no-op (reserved stays 0)');
+assert_equals(10, (int)$s['qty'], 'Flag: repeated restore is a no-op (qty stays 10)');
+
+// ============================================================
+// TEST 59: P1 regression — invoices(order_id) UNIQUE + race-safe issue
+// Bug #9: InvoiceService::issue had a check-then-insert race — two
+// concurrent issue() calls could both pass the byOrderId() null-check
+// and INSERT, creating two invoices (two numbers, two PDFs) for one
+// order. The DB now enforces one type='invoice' row per order via a
+// partial unique index; issue() catches the violation (SQLSTATE 23000)
+// and returns the winner's invoice instead of throwing.
+// ============================================================
+echo "\n--- Test 59: P1 regression (invoice UNIQUE order_id) ---\n";
+
+// Seed a fresh paid order (invoices table + unique index exist from the
+// Invoices test section; counters survive — numbers just keep growing)
+$pdo->exec("INSERT INTO orders (id, order_number, status, customer_name, customer_email, shipping_addr, payment_method, subtotal, discount_amount, shipping_cost, tax_amount, total, currency, locale, created_at) VALUES (5901, 'INV-5901', 'paid', 'Race Test', 'race@example.sk', '{}', 'card', 2000, 0, 0, 0, 2000, 'eur', 'sk', datetime('now'))");
+$pdo->exec("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total) VALUES (5901, 501, 'SKU-S', 'Race produkt', 1, 2000, 2000)");
+
+// 59.1 — idempotent issue (early-return path)
+$ri1 = InvoiceService::issue(5901);
+$ri2 = InvoiceService::issue(5901);
+assert_equals((int)$ri1['id'], (int)$ri2['id'], 'UQ: re-issue returns same invoice id');
+
+// 59.2 — the race's losing writer: raw duplicate INSERT for the same order
+// must be rejected by the unique index with SQLSTATE 23000
+$dupCode = null;
+try {
+    $pdo->exec("INSERT INTO invoices (order_id, number, issued_at, pdf_path, download_token, type) VALUES (5901, 'DUP-0001', '2026-06-11', 'x.pdf', '" . str_repeat('a', 64) . "', 'invoice')");
+} catch (\PDOException $e) { $dupCode = (string)$e->getCode(); }
+assert_equals('23000', $dupCode, 'UQ: duplicate invoice INSERT raises SQLSTATE 23000');
+assert_equals(1, (int)$pdo->query("SELECT COUNT(*) FROM invoices WHERE order_id=5901 AND type='invoice'")->fetchColumn(), 'UQ: still exactly 1 invoice for order');
+
+// 59.3 — credit note for the same order is NOT blocked (index is partial)
+$pdo->exec("INSERT INTO invoices (order_id, number, issued_at, pdf_path, download_token, type) VALUES (5901, 'CN-0001', '2026-06-11', 'cn.pdf', '" . str_repeat('b', 64) . "', 'credit_note')");
+assert_equals(2, (int)$pdo->query("SELECT COUNT(*) FROM invoices WHERE order_id=5901")->fetchColumn(), 'UQ: credit_note for same order allowed');
+
+// 59.4 — byOrderId prefers the live invoice over non-invoice rows
+$pref = InvoiceService::byOrderId(5901);
+assert_equals((int)$ri1['id'], (int)($pref['id'] ?? 0), 'UQ: byOrderId prefers type=invoice row');
+
+// 59.5 — migration dedupe: pre-existing duplicates (the bug's damage) are
+// voided (kept for audit as type='duplicate', status='cancelled'), lowest
+// id survives, index is created. Isolated scratch DB — DDL on the live
+// test DB trips SQLITE_LOCKED from open statement handles.
+$uqDb = new PDO('sqlite::memory:');
+$uqDb->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$uqDb->exec("CREATE TABLE invoices (
+    id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL,
+    number TEXT NOT NULL UNIQUE, type TEXT NOT NULL DEFAULT 'invoice',
+    status TEXT NOT NULL DEFAULT 'issued'
+)");
+$uqDb->exec("INSERT INTO invoices (order_id, number, type) VALUES
+    (7001, '20260001', 'invoice'),
+    (7001, '20260002', 'invoice'),
+    (7002, '20260003', 'invoice'),
+    (7001, '20260004', 'credit_note')");
+$uqMig->up($uqDb, true);
+assert_equals(1, (int)$uqDb->query("SELECT COUNT(*) FROM invoices WHERE order_id=7001 AND type='invoice'")->fetchColumn(), 'UQ: migration dedupe leaves 1 live invoice');
+assert_equals('20260001', (string)$uqDb->query("SELECT number FROM invoices WHERE order_id=7001 AND type='invoice'")->fetchColumn(), 'UQ: dedupe keeps lowest id (original invoice)');
+$voided = $uqDb->query("SELECT type, status FROM invoices WHERE number='20260002'")->fetch(PDO::FETCH_ASSOC);
+assert_equals('duplicate', (string)$voided['type'], 'UQ: dup row voided as type=duplicate');
+assert_equals('cancelled', (string)$voided['status'], 'UQ: dup row status=cancelled');
+assert_equals('credit_note', (string)$uqDb->query("SELECT type FROM invoices WHERE number='20260004'")->fetchColumn(), 'UQ: credit_note untouched by dedupe');
+$uqMig->up($uqDb, true); // idempotent re-run must not throw
+$dupCode2 = null;
+try {
+    $uqDb->exec("INSERT INTO invoices (order_id, number, type) VALUES (7001, '20260005', 'invoice')");
+} catch (\PDOException $e) { $dupCode2 = (string)$e->getCode(); }
+assert_equals('23000', $dupCode2, 'UQ: index active after migration (dup INSERT blocked)');
+$uqDb = null;
 
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
