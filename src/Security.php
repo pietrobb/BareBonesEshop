@@ -31,6 +31,19 @@ class Security {
     }
 
     // ============================================================
+    // CSP nonce — one random nonce per request, shared by headers()
+    // and every inline <script nonce="..."> in the templates.
+    // ============================================================
+    private static ?string $cspNonce = null;
+
+    public static function cspNonce(): string {
+        if (self::$cspNonce === null) {
+            self::$cspNonce = base64_encode(random_bytes(16));
+        }
+        return self::$cspNonce;
+    }
+
+    // ============================================================
     // HTTP headers — call once at the beginning of every request
     // ============================================================
     public static function headers(): void {
@@ -42,9 +55,10 @@ class Security {
         if (!empty($_SERVER['HTTPS'])) {
             header("Strict-Transport-Security: max-age=31536000; includeSubDomains; preload");
         }
+        $nonce = self::cspNonce();
         header("Content-Security-Policy: "
             . "default-src 'self'; "
-            . "script-src 'self' 'unsafe-inline' https://js.stripe.com; "
+            . "script-src 'self' 'nonce-$nonce' https://js.stripe.com; "
             . "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             . "font-src 'self' https://fonts.gstatic.com; "
             . "img-src 'self' data: https:; "
@@ -156,8 +170,18 @@ class Security {
 
         if (!empty($trusted) && in_array($remoteAddr, $trusted)) {
             $forwarded = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? '';
+            if ($forwarded === '') return $remoteAddr;
             $ips = array_map('trim', explode(',', $forwarded));
-            return $ips[0] ?: $remoteAddr;
+            // Walk right-to-left, skipping our own trusted proxies. The first
+            // address that is NOT a trusted proxy is the real client. Anything
+            // further left is appended by the client and therefore spoofable —
+            // taking the leftmost value let attackers forge their rate-limit IP.
+            for ($i = count($ips) - 1; $i >= 0; $i--) {
+                $candidate = $ips[$i];
+                if ($candidate === '' || in_array($candidate, $trusted)) continue;
+                return filter_var($candidate, FILTER_VALIDATE_IP) ? $candidate : $remoteAddr;
+            }
+            return $remoteAddr;
         }
         return $remoteAddr;
     }

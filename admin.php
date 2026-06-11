@@ -29,10 +29,11 @@ I18n::setLocale($adminLocale);
 $page = $_GET['p'] ?? 'dashboard';
 $action = $_GET['action'] ?? '';
 
-// Handle GET actions (with CSRF token in URL)
-if ($page === 'products' && $action === 'export') {
-    $exportToken = $_GET['csrf_token'] ?? '';
-    if ($exportToken === '' || !hash_equals($_SESSION['csrf_token'] ?? '', $exportToken)) {
+// CSV export — POST only, so the CSRF token travels in the request body
+// instead of the URL (URLs leak via Referer header, browser history and
+// access/proxy logs). Security::csrfValidate() accepts $_POST or X-CSRF-Token.
+if ($page === 'products' && $action === 'export' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+    if (!Security::csrfValidate()) {
         http_response_code(403);
         exit('Forbidden');
     }
@@ -342,7 +343,12 @@ function pageProducts(): void {
                     <option value="price_down_20">Price -20%</option>
                 </select>
                 <button type="submit" class="btn btn-sm" onclick="return confirm('OK?')"><?= esc(I18n::t('admin.btn.apply')) ?></button>
-                <a href="admin.php?p=products&action=export&csrf_token=<?= Security::csrfToken() ?>&q=<?= urlencode($search) ?>&status=<?= urlencode($statusFilter) ?>" class="btn btn-sm"><?= esc(I18n::t('admin.btn.export_csv')) ?></a>
+                <form method="post" action="admin.php?p=products&action=export" style="display:inline">
+                    <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                    <input type="hidden" name="q" value="<?= esc($search) ?>">
+                    <input type="hidden" name="status" value="<?= esc($statusFilter) ?>">
+                    <button type="submit" class="btn btn-sm"><?= esc(I18n::t('admin.btn.export_csv')) ?></button>
+                </form>
             </div>
         <table>
             <tr><th><input type="checkbox" id="check-all"></th><th><?= esc(I18n::t('admin.th.sku')) ?></th><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.th.price')) ?></th><th><?= esc(I18n::t('admin.th.stock')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.th.actions')) ?></th></tr>
@@ -361,7 +367,7 @@ function pageProducts(): void {
             <?php endforeach; ?>
         </table>
         </form>
-        <script>document.getElementById('check-all')?.addEventListener('change',function(){document.querySelectorAll('.product-check').forEach(c=>c.checked=this.checked)});</script>
+        <script nonce="<?= Security::cspNonce() ?>">document.getElementById('check-all')?.addEventListener('change',function(){document.querySelectorAll('.product-check').forEach(c=>c.checked=this.checked)});</script>
         <?php pagination($page, $pages, "admin.php?p=products&q=" . urlencode($search) . "&status=" . urlencode($statusFilter)); ?>
     </div>
     <?php
@@ -492,7 +498,7 @@ function pageProduct(): void {
     </div>
     <link rel="stylesheet" href="vendor/bbf/bbf.css">
     <script src="vendor/bbf/bbf.js"></script>
-    <script>
+    <script nonce="<?= Security::cspNonce() ?>">
     (function() {
         var prefill = <?= $bbfProductData ?>;
         BBF.baseUrl = 'vendor/bbf/';
@@ -511,7 +517,7 @@ function pageProduct(): void {
         });
     })();
     </script>
-    <script>
+    <script nonce="<?= Security::cspNonce() ?>">
     var catAttrMap = <?= json_encode($catAttrMap, JSON_UNESCAPED_UNICODE) ?>;
     var existingSpecs = <?= json_encode($existingSpecs, JSON_UNESCAPED_UNICODE) ?>;
     function updateAttrFields() {
@@ -872,7 +878,7 @@ function pageImport(): void {
     </div>
     <link rel="stylesheet" href="vendor/bbf/bbf.css">
     <script src="vendor/bbf/bbf.js"></script>
-    <script>
+    <script nonce="<?= Security::cspNonce() ?>">
     (function() {
         BBF.baseUrl = 'vendor/bbf/';
         BBF.render('admin-import', '#bbf-import', {
@@ -1080,7 +1086,7 @@ function pageCmsEdit(): void {
     </div>
     <link rel="stylesheet" href="vendor/bbf/bbf.css">
     <script src="vendor/bbf/bbf.js"></script>
-    <script>
+    <script nonce="<?= Security::cspNonce() ?>">
     (function() {
         BBF.baseUrl = 'vendor/bbf/';
         BBF.render('admin-page', '#bbf-page', {
@@ -1386,8 +1392,8 @@ function handleBulkAction(): void {
 
 function handleExport(): void {
     $db = Db::get();
-    $search = $_GET['q'] ?? '';
-    $statusFilter = $_GET['status'] ?? '';
+    $search = $_POST['q'] ?? '';
+    $statusFilter = $_POST['status'] ?? '';
 
     $where = "1=1";
     $params = [];
@@ -1770,7 +1776,7 @@ function pageAttribute(): void {
     </div>
     <link rel="stylesheet" href="vendor/bbf/bbf.css">
     <script src="vendor/bbf/bbf.js"></script>
-    <script>
+    <script nonce="<?= Security::cspNonce() ?>">
     (function() {
         BBF.baseUrl = 'vendor/bbf/';
         BBF.render('admin-attribute', '#bbf-attribute', {
@@ -1797,7 +1803,7 @@ function pageAttribute(): void {
         });
     })();
     </script>
-    <script>
+    <script nonce="<?= Security::cspNonce() ?>">
     function toggleOptions() {
         document.getElementById('options-section').style.display = document.getElementById('attr-type').value === 'enum' ? '' : 'none';
     }

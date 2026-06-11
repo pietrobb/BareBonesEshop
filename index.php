@@ -874,7 +874,7 @@ footer{background:#333;color:#bbb;padding:0;margin-top:40px;font-size:.85em}
  <div class="footer-bottom"><div class="wrap">woodle.sk &copy; <?= date('Y') ?> — Powered by BareBones E-shop</div></div>
 </footer>
 
-<script>
+<script nonce="<?= Security::cspNonce() ?>">
 function setTab(id){
  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===id));
  document.querySelectorAll('.tab-content').forEach(c=>c.classList.toggle('active',c.id==='tab-'+id));
@@ -1040,7 +1040,7 @@ if ($ccCookie === ''):
     <button type="button" class="primary" id="cc-save" style="display:none"><?= $ccSave ?></button>
   </div>
 </div>
-<script>
+<script nonce="<?= Security::cspNonce() ?>">
 (function(){
   var b=document.getElementById('cc-banner');
   if(!b)return;
