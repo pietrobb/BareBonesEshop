@@ -42,6 +42,7 @@ return [
         'search'      => 'FtsSearch',
         'queue'       => 'FileQueue',
         'payment'     => 'StripePayment',
+        'vat_validator' => 'ViesVatIdValidator', // MockVatIdValidator for dev/tests
         'storage'     => 'LocalStorage',
         'integration' => null,
     ],

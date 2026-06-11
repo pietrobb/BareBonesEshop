@@ -460,10 +460,11 @@ function apiCheckout(): array {
     $vatIdStatus   = null;
     if ($vatId !== '') {
         try {
-            $vatRes = VatService::validateVatId($vatId);
+            $vatRes = VatService::validateVatId($vatId, VatService::defaultValidator());
             $vatIdValid  = ($vatRes['status'] === 'valid');
             $vatIdStatus = $vatRes['status'];
         } catch (\Throwable $e) {
+            error_log("VAT ID validation failed [{$vatId}]: " . $e->getMessage());
             $vatIdStatus = 'unverified';
         }
         // Persist VAT ID on logged-in customer so future orders remember it

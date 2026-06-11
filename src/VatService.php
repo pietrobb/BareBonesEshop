@@ -314,4 +314,22 @@ class VatService
             'age_seconds' => 0,
         ];
     }
+
+    /**
+     * Build the configured VAT ID validator instance.
+     *
+     * Reads config.php adapters.vat_validator (default ViesVatIdValidator).
+     * Class is resolved by the autoloader (src/ → adapters/ → adapters/contrib/).
+     * Dev/test environments can set 'vat_validator' => 'MockVatIdValidator'.
+     */
+    public static function defaultValidator(): VatIdValidator
+    {
+        $cfgFile = (self::$rootDir ?: dirname(__DIR__)) . '/config.php';
+        $cfg = is_file($cfgFile) ? require $cfgFile : [];
+        $class = (string)(($cfg['adapters']['vat_validator'] ?? '') ?: 'ViesVatIdValidator');
+        if (!class_exists($class) || !is_subclass_of($class, VatIdValidator::class)) {
+            throw new \RuntimeException("VAT validator adapter invalid: {$class}");
+        }
+        return new $class();
+    }
 }
