@@ -3517,6 +3517,81 @@ $blocked = Customers::order($aliceId, $guestOrderId);
 assert_true($blocked === null, 'Customer: order() blocks access to guest/other-customer order');
 
 // ============================================================
+// TEST: Product Reviews (P7.1)
+// ============================================================
+echo "\n--- Test: Product Reviews ---\n";
+
+$pdo->exec("CREATE TABLE IF NOT EXISTS product_reviews (
+    id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL, customer_id INTEGER DEFAULT NULL,
+    author_name TEXT NOT NULL DEFAULT '', rating INTEGER NOT NULL,
+    title TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)");
+
+// --- submit validation ---
+[$rok, $rid, $rerr] = Reviews::submit(1, ['rating' => 5, 'author_name' => 'Alice', 'title' => 'Great', 'body' => 'Loved it']);
+assert_true($rok === true && $rid > 0 && $rerr === null, 'Reviews: valid submit returns [true, id, null]');
+
+[$rok2, , $rerr2] = Reviews::submit(1, ['rating' => 6, 'author_name' => 'A', 'body' => 'too high']);
+assert_true($rok2 === false && $rerr2 === 'invalid_rating', 'Reviews: rating > 5 rejected');
+
+[$rok3, , $rerr3] = Reviews::submit(1, ['rating' => 0, 'author_name' => 'A', 'body' => 'too low']);
+assert_true($rok3 === false && $rerr3 === 'invalid_rating', 'Reviews: rating < 1 rejected');
+
+[$rok4, , $rerr4] = Reviews::submit(1, ['rating' => 4, 'author_name' => 'A', 'body' => 'ab']);
+assert_true($rok4 === false && $rerr4 === 'body_too_short', 'Reviews: body < 3 chars rejected');
+
+[$rok5, , $rerr5] = Reviews::submit(1, ['rating' => 4, 'author_name' => '', 'body' => 'no author']);
+assert_true($rok5 === false && $rerr5 === 'author_required', 'Reviews: empty author rejected');
+
+[$rok6, , $rerr6] = Reviews::submit(0, ['rating' => 4, 'author_name' => 'A', 'body' => 'no product']);
+assert_true($rok6 === false && $rerr6 === 'invalid_product', 'Reviews: invalid product_id rejected');
+
+// --- pending / moderation ---
+$pendingBefore = Reviews::pending();
+assert_true(count($pendingBefore) >= 1, 'Reviews: submitted review appears in pending queue');
+
+$one = Reviews::byId($rid);
+assert_true(is_array($one) && $one['status'] === 'pending', 'Reviews: new review starts as pending');
+
+// approved() excludes pending
+assert_equals(0, count(Reviews::approved(1)), 'Reviews: approved() empty while review is pending');
+
+// aggregate over approved only — still 0
+$aggPending = Reviews::aggregate(1);
+assert_equals(0, $aggPending['count'], 'Reviews: aggregate count 0 while pending');
+assert_equals(0.0, $aggPending['avg'], 'Reviews: aggregate avg 0.0 while pending');
+
+// --- approve and verify visibility ---
+assert_true(Reviews::setStatus($rid, 'approved'), 'Reviews: setStatus approved returns true');
+$approved = Reviews::approved(1);
+assert_equals(1, count($approved), 'Reviews: approved() lists the approved review');
+assert_equals(5, (int)$approved[0]['rating'], 'Reviews: approved review keeps its rating');
+
+// add a second approved review (rating 3) → avg = 4.0
+[$r2ok, $r2id] = Reviews::submit(1, ['rating' => 3, 'author_name' => 'Bob', 'body' => 'It was ok']);
+Reviews::setStatus($r2id, 'approved');
+$agg = Reviews::aggregate(1);
+assert_equals(2, $agg['count'], 'Reviews: aggregate counts both approved');
+assert_equals(4.0, $agg['avg'], 'Reviews: aggregate avg = (5+3)/2 = 4.0');
+
+// rejected review is excluded from aggregate + approved
+[$r3ok, $r3id] = Reviews::submit(1, ['rating' => 1, 'author_name' => 'Troll', 'body' => 'spam spam']);
+Reviews::setStatus($r3id, 'rejected');
+$agg2 = Reviews::aggregate(1);
+assert_equals(2, $agg2['count'], 'Reviews: rejected review excluded from aggregate');
+assert_equals(0, count(array_filter(Reviews::approved(1), fn($r) => (int)$r['id'] === $r3id)), 'Reviews: rejected review not in approved()');
+
+// setStatus rejects unknown status + missing id
+assert_true(Reviews::setStatus($rid, 'bogus') === false, 'Reviews: unknown status rejected');
+assert_true(Reviews::setStatus(999999, 'approved') === false, 'Reviews: setStatus on missing id returns false');
+
+// per-product isolation: product 2 has no reviews
+assert_equals(0, Reviews::aggregate(2)['count'], 'Reviews: aggregate isolated per product');
+
+// ============================================================
 // TEST: Migrations Framework
 // ============================================================
 echo "\n--- Test: Migrations Framework ---\n";
