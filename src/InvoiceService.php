@@ -273,8 +273,8 @@ final class InvoiceService
 
     private static function allocateNumber(PDO $db, int $year, string $prefix): string
     {
-        // INSERT IF NOT EXISTS (SQLite: INSERT OR IGNORE).
-        $db->prepare("INSERT OR IGNORE INTO invoice_counters (year, prefix, last_number) VALUES (:y, :p, 0)")
+        // INSERT IF NOT EXISTS — driver-aware (INSERT OR IGNORE / INSERT IGNORE).
+        $db->prepare(Db::insertIgnore() . " INTO invoice_counters (year, prefix, last_number) VALUES (:y, :p, 0)")
            ->execute([':y' => $year, ':p' => $prefix]);
 
         // Update + read in same statement (SQLite 3.35+ supports RETURNING; fallback otherwise).

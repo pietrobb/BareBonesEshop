@@ -53,38 +53,41 @@ return new class {
         $this->addColumnIfMissing($db, 'orders', 'payment_fee', "INTEGER NOT NULL DEFAULT 0");
         $this->addColumnIfMissing($db, 'orders', 'payment_method_snapshot', "TEXT DEFAULT NULL");
 
-        $this->seedMethods($db);
-        $this->seedCountries($db);
-        $this->seedShippingRestrictions($db);
+        $this->seedMethods($db, $isSqlite);
+        $this->seedCountries($db, $isSqlite);
+        $this->seedShippingRestrictions($db, $isSqlite);
     }
 
-    private function seedMethods(PDO $db): void {
+    private function seedMethods(PDO $db, bool $isSqlite): void {
+        $ins = $isSqlite ? 'INSERT OR IGNORE' : 'INSERT IGNORE';
         $rows = [
             ['card', 'stripe', 'Kartou online', 'Online card payment via configured gateway.', 'online_card', 0, null, 0, 0, null, 1, 10],
             ['bank_transfer', 'manual', 'Bankový prevod', 'Manual bank transfer after order creation.', 'bank_transfer', 0, null, 0, 0, null, 0, 20],
             ['cod', 'manual', 'Dobierka', 'Cash on delivery where the selected carrier supports COD.', 'cod', 0, 100000, 120, 0, null, 0, 30],
         ];
-        $stmt = $db->prepare("INSERT OR IGNORE INTO payment_methods
+        $stmt = $db->prepare("{$ins} INTO payment_methods
             (code, provider, name, description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, requires_online, sort_order)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         foreach ($rows as $row) $stmt->execute($row);
     }
 
-    private function seedCountries(PDO $db): void {
+    private function seedCountries(PDO $db, bool $isSqlite): void {
+        $ins = $isSqlite ? 'INSERT OR IGNORE' : 'INSERT IGNORE';
         $countries = ['SK', 'CZ', 'AT', 'HU', 'PL', 'DE', 'FR', 'IT', 'ES', 'NL', 'BE', 'RO', 'HR', 'SI', 'EE', 'LV', 'LT', 'DK', 'SE', 'FI', 'PT', 'GR', 'IE'];
-        $stmt = $db->prepare("INSERT OR IGNORE INTO payment_method_countries (method_code, country) VALUES (?, ?)");
+        $stmt = $db->prepare("{$ins} INTO payment_method_countries (method_code, country) VALUES (?, ?)");
         foreach (['card', 'bank_transfer'] as $method) {
             foreach ($countries as $country) $stmt->execute([$method, $country]);
         }
         foreach (['SK', 'CZ'] as $country) $stmt->execute(['cod', $country]);
     }
 
-    private function seedShippingRestrictions(PDO $db): void {
+    private function seedShippingRestrictions(PDO $db, bool $isSqlite): void {
+        $ins = $isSqlite ? 'INSERT OR IGNORE' : 'INSERT IGNORE';
         $rows = [
             ['cod', 'packeta'],
             ['cod', 'gls'],
         ];
-        $stmt = $db->prepare("INSERT OR IGNORE INTO payment_method_shipping (method_code, shipping_method_code) VALUES (?, ?)");
+        $stmt = $db->prepare("{$ins} INTO payment_method_shipping (method_code, shipping_method_code) VALUES (?, ?)");
         foreach ($rows as $row) $stmt->execute($row);
     }
 

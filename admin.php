@@ -2295,7 +2295,7 @@ function handleShippingZoneDelete(): void { $id = Security::int($_POST['id'] ?? 
 function handleShippingCountrySave(): void {
     $db = Db::get(); $zoneCode = Security::slug($_POST['zone_code'] ?? ''); $country = strtoupper(trim($_POST['country'] ?? ''));
     if (!$zoneCode || !preg_match('/^[A-Z]{2}$/', $country)) { setFlash('err', 'Zona a ISO krajina su povinne.'); header('Location: admin.php?p=shipping'); exit; }
-    $db->prepare("INSERT OR IGNORE INTO shipping_zone_countries (zone_code, country, postal_min, postal_max) VALUES (:zone, :country, :min, :max)")->execute([':zone'=>$zoneCode, ':country'=>$country, ':min'=>trim($_POST['postal_min'] ?? ''), ':max'=>trim($_POST['postal_max'] ?? '')]);
+    $db->prepare(Db::insertIgnore() . " INTO shipping_zone_countries (zone_code, country, postal_min, postal_max) VALUES (:zone, :country, :min, :max)")->execute([':zone'=>$zoneCode, ':country'=>$country, ':min'=>trim($_POST['postal_min'] ?? ''), ':max'=>trim($_POST['postal_max'] ?? '')]);
     setFlash('ok', 'Krajina pridana do zony.'); header('Location: admin.php?p=shipping'); exit;
 }
 
@@ -2374,7 +2374,7 @@ function handlePaymentMethodDelete(): void { $id = Security::int($_POST['id'] ??
 function handlePaymentCountrySave(): void {
     $methodCode = Security::slug($_POST['method_code'] ?? ''); $country = strtoupper(trim($_POST['country'] ?? ''));
     if (!$methodCode || !preg_match('/^[A-Z]{2}$/', $country)) { setFlash('err', 'Metoda a ISO krajina su povinne.'); header('Location: admin.php?p=payments'); exit; }
-    Db::get()->prepare("INSERT OR IGNORE INTO payment_method_countries (method_code, country) VALUES (:method, :country)")->execute([':method'=>$methodCode, ':country'=>$country]);
+    Db::get()->prepare(Db::insertIgnore() . " INTO payment_method_countries (method_code, country) VALUES (:method, :country)")->execute([':method'=>$methodCode, ':country'=>$country]);
     setFlash('ok', 'Krajina pridana k platbe.'); header('Location: admin.php?p=payments'); exit;
 }
 
@@ -2383,7 +2383,7 @@ function handlePaymentCountryDelete(): void { $id = Security::int($_POST['id'] ?
 function handlePaymentShippingSave(): void {
     $methodCode = Security::slug($_POST['method_code'] ?? ''); $shippingCode = Security::slug($_POST['shipping_method_code'] ?? '');
     if (!$methodCode || !$shippingCode) { setFlash('err', 'Metoda a doprava su povinne.'); header('Location: admin.php?p=payments'); exit; }
-    Db::get()->prepare("INSERT OR IGNORE INTO payment_method_shipping (method_code, shipping_method_code) VALUES (:method, :shipping)")->execute([':method'=>$methodCode, ':shipping'=>$shippingCode]);
+    Db::get()->prepare(Db::insertIgnore() . " INTO payment_method_shipping (method_code, shipping_method_code) VALUES (:method, :shipping)")->execute([':method'=>$methodCode, ':shipping'=>$shippingCode]);
     setFlash('ok', 'Obmedzenie dopravy pridane.'); header('Location: admin.php?p=payments'); exit;
 }
 

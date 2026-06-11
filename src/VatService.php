@@ -284,15 +284,24 @@ class VatService
 
         $up = $db->prepare(
             'INSERT INTO vat_id_cache (vat_id, country, status, trader_name, trader_addr, checked_at, ttl_seconds, raw_response)
-             VALUES (:v, :c, :s, :tn, :ta, :ck, :ttl, :raw)
-             ON CONFLICT(vat_id) DO UPDATE SET
-               country = excluded.country,
-               status  = excluded.status,
-               trader_name = excluded.trader_name,
-               trader_addr = excluded.trader_addr,
-               checked_at  = excluded.checked_at,
-               ttl_seconds = excluded.ttl_seconds,
-               raw_response = excluded.raw_response'
+             VALUES (:v, :c, :s, :tn, :ta, :ck, :ttl, :raw) '
+            . Db::upsertClause(
+                'vat_id',
+                'country = excluded.country,
+                 status  = excluded.status,
+                 trader_name = excluded.trader_name,
+                 trader_addr = excluded.trader_addr,
+                 checked_at  = excluded.checked_at,
+                 ttl_seconds = excluded.ttl_seconds,
+                 raw_response = excluded.raw_response',
+                'country = VALUES(country),
+                 status  = VALUES(status),
+                 trader_name = VALUES(trader_name),
+                 trader_addr = VALUES(trader_addr),
+                 checked_at  = VALUES(checked_at),
+                 ttl_seconds = VALUES(ttl_seconds),
+                 raw_response = VALUES(raw_response)'
+            )
         );
         $up->execute([
             ':v'   => $vatId,

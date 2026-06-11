@@ -69,7 +69,7 @@ $genarts = $tdb->query("
 $catIds = [];      // slug => category_id
 $genartToCat = []; // genart_no => category_id
 
-$catStmt = $db->prepare("INSERT OR IGNORE INTO categories (slug, name, parent_id, path, depth, sort_order, translations, meta)
+$catStmt = $db->prepare(Db::insertIgnore() . " INTO categories (slug, name, parent_id, path, depth, sort_order, translations, meta)
     VALUES (:slug, :name, :pid, :path, :depth, :sort, :trans, :meta)");
 
 $db->beginTransaction();

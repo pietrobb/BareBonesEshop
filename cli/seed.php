@@ -44,7 +44,7 @@ $categoryTree = [
 ];
 
 $catIds = []; // slug => id
-$catStmt = $db->prepare("INSERT OR IGNORE INTO categories (slug, name, parent_id, path, depth, sort_order, translations) VALUES (:slug, :name, :pid, :path, :depth, :sort, :trans)");
+$catStmt = $db->prepare(Db::insertIgnore() . " INTO categories (slug, name, parent_id, path, depth, sort_order, translations) VALUES (:slug, :name, :pid, :path, :depth, :sort, :trans)");
 
 $translations = [
     'oblecenie' => ['en' => ['name' => 'Clothing'], 'de' => ['name' => 'Kleidung']],

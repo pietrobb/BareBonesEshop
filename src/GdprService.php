@@ -273,7 +273,7 @@ class GdprService {
                     password_hash = '!disabled!',
                     vat_id = NULL, vat_country = NULL, vat_validated_at = NULL,
                     status = 'anonymized',
-                    updated_at = datetime('now')
+                    updated_at = " . Db::now() . "
                 WHERE id = :id
             ");
             $stmt->execute([':email' => $placeholder, ':id' => $customerId]);
@@ -434,7 +434,8 @@ class GdprService {
         $table = $p['table'];
         $field = (string)($p['field'] ?? 'checked_at');
         $ttlField = (string)($p['ttl_field'] ?? 'ttl_seconds');
-        $sql = "datetime({$field}, '+' || {$ttlField} || ' seconds') <= datetime('now')";
+        // Driver-aware: row expires when field + ttl_seconds is in the past.
+        $sql = Db::dateAddSeconds($field, $ttlField) . " <= " . Db::now();
         $countStmt = $db->query("SELECT COUNT(*) AS c FROM {$table} WHERE {$sql}");
         $affected = (int)$countStmt->fetch()['c'];
 

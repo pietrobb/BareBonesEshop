@@ -143,7 +143,7 @@ class ShippingService
 
         // Update order with tracking info
         $db->prepare("
-            UPDATE orders SET tracking_number = :awb, carrier = :carrier, updated_at = datetime('now')
+            UPDATE orders SET tracking_number = :awb, carrier = :carrier, updated_at = " . Db::now() . "
             WHERE id = :id
         ")->execute([':awb' => $result['awb'], ':carrier' => $carrierId, ':id' => $orderId]);
 
@@ -191,7 +191,7 @@ class ShippingService
         }
 
         // Update label status
-        $db->prepare("UPDATE shipping_labels SET status = :status, updated_at = datetime('now') WHERE awb = :awb")
+        $db->prepare("UPDATE shipping_labels SET status = :status, updated_at = " . Db::now() . " WHERE awb = :awb")
            ->execute([':status' => $status, ':awb' => $awb]);
 
         $orderId = (int)$labelRow['order_id'];
