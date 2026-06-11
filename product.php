@@ -48,6 +48,9 @@ $related = array_map(fn($p) => Products::enrich(I18n::product($p)), $related);
 $reviews = Reviews::approved((int)$product['id']);
 $reviewAgg = Reviews::aggregate((int)$product['id']);
 
+// Wishlist state for the toggle button (customer- or session-scoped)
+$inWishlist = Wishlist::has((int)$product['id']);
+
 // Breadcrumb
 $breadcrumb = [];
 if (!empty($product['category_id'])) {
@@ -160,6 +163,20 @@ Security::headers();
         't' => $t,
         'csrf_token' => $csrfToken,
     ]) ?>
+
+    <form class="wishlist-toggle-form" method="post" action="/wishlist"
+          data-wishlist-toggle data-product-id="<?= (int)$product['id'] ?>">
+        <input type="hidden" name="csrf_token" value="<?= esc($csrfToken) ?>">
+        <input type="hidden" name="op" value="toggle">
+        <input type="hidden" name="return_to" value="/product/<?= esc($product['slug']) ?>">
+        <input type="hidden" name="product_id" value="<?= (int)$product['id'] ?>">
+        <button type="submit" class="btn btn-secondary"
+                data-wishlist-btn aria-pressed="<?= $inWishlist ? 'true' : 'false' ?>">
+            <?= $inWishlist
+                ? esc($t['wishlist.in'] ?? 'In wishlist ♥')
+                : esc($t['wishlist.add'] ?? 'Add to wishlist ♡') ?>
+        </button>
+    </form>
 
     <?php if (!empty($product['attrs_list'])): ?>
     <?= Template::render('product/product-attributes', [

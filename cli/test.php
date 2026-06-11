@@ -3653,6 +3653,111 @@ $_POST = [];
 assert_true(isset($arCsrf['error']), 'Reviews API: invalid CSRF token rejected');
 
 // ============================================================
+// TEST: Wishlist (P7.3)
+// ============================================================
+echo "\n--- Test: Wishlist ---\n";
+
+$pdo->exec("CREATE TABLE IF NOT EXISTS wishlist_items (
+    id INTEGER PRIMARY KEY, owner_key TEXT NOT NULL, customer_id INTEGER DEFAULT NULL,
+    product_id INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(owner_key, product_id)
+)");
+
+$wlProd = (int)($pdo->query("SELECT id FROM products LIMIT 1")->fetchColumn() ?: 0);
+$wlProd2 = (int)($pdo->query("SELECT id FROM products ORDER BY id LIMIT 1 OFFSET 1")->fetchColumn() ?: 0);
+assert_true($wlProd > 0, 'Wishlist: a product exists to save');
+
+$guest = 's:wltest';
+$cust  = 'c:7001';
+
+// add + has + count (explicit owner key, no session dependency)
+assert_true(Wishlist::add($wlProd, $guest), 'Wishlist: add returns true on new row');
+assert_true(Wishlist::has($wlProd, $guest), 'Wishlist: has true after add');
+assert_equals(1, Wishlist::count($guest), 'Wishlist: count 1 after add');
+
+// add is idempotent — second add for same product returns false, count unchanged
+assert_true(Wishlist::add($wlProd, $guest) === false, 'Wishlist: duplicate add returns false');
+assert_equals(1, Wishlist::count($guest), 'Wishlist: count still 1 after duplicate add');
+
+// invalid product id rejected
+assert_true(Wishlist::add(0, $guest) === false, 'Wishlist: add invalid product_id rejected');
+
+// per-owner isolation — customer owner does not see guest item
+assert_true(Wishlist::has($wlProd, $cust) === false, 'Wishlist: per-owner isolation');
+assert_equals(0, Wishlist::count($cust), 'Wishlist: other owner count 0');
+
+// toggle: present → removed, absent → added
+assert_equals('removed', Wishlist::toggle($wlProd, $guest), 'Wishlist: toggle removes when present');
+assert_equals(0, Wishlist::count($guest), 'Wishlist: count 0 after toggle-remove');
+assert_equals('added', Wishlist::toggle($wlProd, $guest), 'Wishlist: toggle adds when absent');
+assert_equals(1, Wishlist::count($guest), 'Wishlist: count 1 after toggle-add');
+
+// remove returns true when a row is deleted, false when nothing to delete
+assert_true(Wishlist::remove($wlProd, $guest), 'Wishlist: remove returns true when present');
+assert_true(Wishlist::remove($wlProd, $guest) === false, 'Wishlist: remove returns false when absent');
+
+// ids ordering — newest first
+Wishlist::add($wlProd, $guest);
+if ($wlProd2 > 0) { Wishlist::add($wlProd2, $guest); }
+$ids = Wishlist::ids($guest);
+if ($wlProd2 > 0) {
+    assert_equals($wlProd2, $ids[0] ?? 0, 'Wishlist: ids newest-first');
+    assert_equals(2, count($ids), 'Wishlist: ids returns both');
+}
+
+// list() returns enriched, active products only
+$listed = Wishlist::list($guest);
+assert_true(count($listed) >= 1 && isset($listed[0]['name']), 'Wishlist: list returns enriched product rows');
+
+// merge: fold guest session wishlist into a customer wishlist
+$mergeSess = 's:mergeme';
+$mergeCust = 8002;
+Wishlist::add($wlProd, $mergeSess);
+$moved = Wishlist::merge($mergeSess, $mergeCust);
+assert_equals(1, $moved, 'Wishlist: merge moved 1 row');
+assert_true(Wishlist::has($wlProd, 'c:' . $mergeCust), 'Wishlist: merged item now under customer key');
+assert_equals(0, Wishlist::count($mergeSess), 'Wishlist: session wishlist emptied after merge');
+
+// --- P7.3: api.php wishlist_toggle / wishlist endpoints ---
+// (api.php already loaded above for the reviews API tests)
+$wlToggle = function (int $pid) {
+    $_SERVER['REQUEST_METHOD'] = 'POST';
+    $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+    $_SESSION['csrf_token'] = 'wl-test-token';
+    unset($_SESSION['customer_id']);
+    $_POST = ['csrf_token' => 'wl-test-token', 'product_id' => $pid];
+    $res = apiWishlistToggle();
+    $_POST = [];
+    return $res;
+};
+
+$wa1 = $wlToggle($wlProd);
+assert_true(!empty($wa1['ok']) && $wa1['state'] === 'added' && $wa1['in_list'] === true, 'Wishlist API: toggle adds (state=added)');
+$wa2 = $wlToggle($wlProd);
+assert_true(!empty($wa2['ok']) && $wa2['state'] === 'removed' && $wa2['in_list'] === false, 'Wishlist API: toggle removes (state=removed)');
+
+// invalid product rejected
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_SESSION['csrf_token'] = 'wl-test-token';
+$_POST = ['csrf_token' => 'wl-test-token', 'product_id' => 999999];
+$waGhost = apiWishlistToggle();
+$_POST = [];
+assert_true(($waGhost['ok'] ?? null) === false && $waGhost['error'] === 'invalid_product', 'Wishlist API: invalid product rejected');
+
+// CSRF rejection
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_SESSION['csrf_token'] = 'wl-test-token';
+$_POST = ['csrf_token' => 'WRONG', 'product_id' => $wlProd];
+$waCsrf = apiWishlistToggle();
+$_POST = [];
+assert_true(isset($waCsrf['error']), 'Wishlist API: invalid CSRF token rejected');
+
+// read endpoint reflects current owner's list
+$wlToggle($wlProd); // add back
+$waList = apiWishlist();
+assert_true(!empty($waList['ok']) && in_array($wlProd, $waList['ids'], true), 'Wishlist API: wishlist read returns saved id');
+
+// ============================================================
 // TEST: Migrations Framework
 // ============================================================
 echo "\n--- Test: Migrations Framework ---\n";

@@ -37,6 +37,7 @@ const Shop = {
         this.bindSearchActions();
         this.bindCheckoutForm();
         this.bindReviewForm();
+        this.bindWishlist();
     },
 
     // ============================================================
@@ -479,6 +480,55 @@ const Shop = {
                 if (btn) btn.disabled = false;
             }
         });
+    },
+
+    // ============================================================
+    // Wishlist (progressive enhancement over the no-JS POST forms)
+    // ============================================================
+    bindWishlist() {
+        // Toggle button on the product page.
+        document.querySelectorAll('[data-wishlist-toggle]').forEach((form) => {
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const btn = form.querySelector('[data-wishlist-btn]') || form.querySelector('[type="submit"]');
+                const pid = Number(form.dataset.productId);
+                if (btn) btn.disabled = true;
+                const json = await this.wishlistToggle(pid);
+                if (json && json.ok && btn) {
+                    btn.setAttribute('aria-pressed', json.in_list ? 'true' : 'false');
+                    btn.textContent = json.in_list ? 'In wishlist ♥' : 'Add to wishlist ♡';
+                    this.showNotification(json.in_list ? 'Pridané do obľúbených' : 'Odobraté z obľúbených');
+                }
+                if (btn) btn.disabled = false;
+            });
+        });
+
+        // Remove forms on the wishlist page — drop the <li> on success.
+        document.querySelectorAll('[data-wishlist-remove]').forEach((form) => {
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const pid = Number(form.dataset.productId);
+                const json = await this.wishlistToggle(pid);
+                if (json && json.ok && !json.in_list) {
+                    const li = form.closest('[data-product-id]');
+                    if (li) li.remove();
+                }
+            });
+        });
+    },
+
+    async wishlistToggle(productId) {
+        try {
+            const res = await fetch('api.php?action=wishlist_toggle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': this.csrfToken },
+                body: JSON.stringify({ product_id: productId }),
+            });
+            return await res.json();
+        } catch (err) {
+            this.showNotification('Chyba siete.');
+            return null;
+        }
     },
 
     // ============================================================

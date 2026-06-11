@@ -64,6 +64,9 @@ RewriteRule ^category/([a-z0-9/-]+)/?$ index.php?category=$1 [QSA,L]
 # CMS Page: /page/about → page.php?slug=about
 RewriteRule ^page/([a-z0-9-]+)/?$ page.php?slug=$1 [QSA,L]
 
+# Wishlist: /wishlist → wishlist.php
+RewriteRule ^wishlist/?$ wishlist.php [QSA,L]
+
 # API routing: /api/products → api.php?action=products
 RewriteRule ^api/(.*)$ api.php?action=$1 [QSA,L]
 
