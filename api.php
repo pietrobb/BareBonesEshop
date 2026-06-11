@@ -414,6 +414,25 @@ function apiPaymentMethods(): array {
     ];
 }
 
+/**
+ * Resolve the active store from stores.json by current locale.
+ * Pass 1: store whose PRIMARY language (languages[0]) matches the locale.
+ * Pass 2: store whose languages list contains the locale.
+ * Fallback: first store.
+ */
+function apiActiveStore(): array {
+    $j = json_decode((string)@file_get_contents(__DIR__ . '/stores.json'), true) ?: [];
+    $stores = array_values($j['stores'] ?? []);
+    $locale = class_exists('I18n') ? I18n::locale() : '';
+    foreach ($stores as $store) {
+        if (($store['languages'][0] ?? '') === $locale) return $store;
+    }
+    foreach ($stores as $store) {
+        if (in_array($locale, $store['languages'] ?? [], true)) return $store;
+    }
+    return $stores[0] ?? [];
+}
+
 function apiCheckout(): array {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         http_response_code(405);
@@ -452,18 +471,24 @@ function apiCheckout(): array {
         return ['error' => 'Invalid payment method'];
     }
 
-    // VAT context — resolve scenario before enriching cart so per-line VAT is captured
+    // VAT context — resolve scenario before enriching cart so per-line VAT is captured.
+    // $cfg must be loaded here: apiCheckout is a function, the file-scope $cfg is not
+    // visible (it used to be silently undefined → seller always 'SK', OSS always off,
+    // admin notification never sent). Seller identity lives per-store in stores.json.
+    $cfg   = require __DIR__ . '/config.php';
+    $store = apiActiveStore();
     $vatId = strtoupper(preg_replace('/\s+/', '', (string)($input['vat_id'] ?? '')));
-    $sellerCountry = strtoupper((string)(($cfg['store']['legal']['country'] ?? null) ?: 'SK'));
-    $sellerOss     = (bool)($cfg['store']['oss_enabled'] ?? false);
+    $sellerCountry = strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
+    $sellerOss     = (bool)($store['oss_enabled'] ?? false);
     $vatIdValid    = false;
     $vatIdStatus   = null;
     if ($vatId !== '') {
         try {
-            $vatRes = VatService::validateVatId($vatId);
+            $vatRes = VatService::validateVatId($vatId, VatService::defaultValidator());
             $vatIdValid  = ($vatRes['status'] === 'valid');
             $vatIdStatus = $vatRes['status'];
         } catch (\Throwable $e) {
+            error_log("VAT ID validation failed [{$vatId}]: " . $e->getMessage());
             $vatIdStatus = 'unverified';
         }
         // Persist VAT ID on logged-in customer so future orders remember it
@@ -484,11 +509,16 @@ function apiCheckout(): array {
         'is_b2b'                => $vatId !== '',
     ]);
 
+    // NOTE: Cart::applyVat() re-resolves the scenario itself — it expects the
+    // canonical resolveScenario() INPUTS, not the resolved output. Passing the
+    // output keys ('scenario', 'rate_country', …) made customer_country = ''
+    // → scenario 'export' → every line persisted with VAT 0.
     $cart = Cart::enriched([
-        'scenario'     => $vatScenario['scenario'],
-        'rate_country' => $vatScenario['rate_country'],
-        'applies_vat'  => $vatScenario['applies_vat'],
-        'note_key'     => $vatScenario['note_key'],
+        'seller_country'        => $sellerCountry,
+        'seller_oss_enabled'    => $sellerOss,
+        'customer_country'      => $country,
+        'customer_vat_id_valid' => $vatIdValid,
+        'is_b2b'                => $vatId !== '',
     ]);
     if (empty($cart['items'])) {
         return ['error' => 'Cart is empty'];
@@ -812,19 +842,25 @@ function apiWebhookPayment(): array {
     }
 
     // Resolve gateway and signature header per provider
+    $cfg = require __DIR__ . '/config.php';
     [$gateway, $sigHeader] = match($provider) {
         'stripe' => [
-            new StripePayment(require __DIR__ . '/config.php'),
+            new StripePayment($cfg),
             $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '',
         ],
         'payu' => [
-            new PayUPayment(require __DIR__ . '/config.php'),
+            new PayUPayment($cfg),
             $_SERVER['HTTP_OPENPAYU_SIGNATURE'] ?? '',
         ],
-        'mock' => [
-            new MockPayment(['mock_result' => 'success']),
-            $_SERVER['HTTP_X_MOCK_SIGNATURE'] ?? 'mock_sig',
-        ],
+        // Mock gateway = payment bypass — only routable when config explicitly
+        // opts in (adapters.payment == MockPayment or allow_mock_webhook flag).
+        // No default signature header: missing header must fail verification.
+        'mock' => (($cfg['adapters']['payment'] ?? '') === 'MockPayment' || !empty($cfg['allow_mock_webhook']))
+            ? [
+                new MockPayment($cfg + ['mock_result' => 'success']),
+                $_SERVER['HTTP_X_MOCK_SIGNATURE'] ?? '',
+            ]
+            : [null, ''],
         default => [null, ''],
     };
 

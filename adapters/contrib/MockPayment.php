@@ -9,11 +9,13 @@
  */
 class MockPayment implements PaymentAdapter {
     private string $result;
+    private string $secret;
     /** @var array<string, string> session_id → order_number */
     private static array $sessions = [];
 
     public function __construct(array $cfg) {
         $this->result = $cfg['mock_result'] ?? 'success';
+        $this->secret = (string)($cfg['mock_webhook_secret'] ?? 'mock_sig');
     }
 
     public function createSession(array $order): array {
@@ -59,8 +61,9 @@ class MockPayment implements PaymentAdapter {
     }
 
     public function verifySignature(string $payload, string $sigHeader): bool {
-        // Mock always accepts 'mock_sig' or any non-empty header
-        return !empty($sigHeader);
+        // Constant-time compare against configured secret ($cfg['mock_webhook_secret'],
+        // default 'mock_sig' for unit tests). Never accepts an empty header.
+        return $sigHeader !== '' && hash_equals($this->secret, $sigHeader);
     }
 
     /** Simulate a paid webhook payload for a given order */

@@ -1691,10 +1691,11 @@ $couponCustomer = [
 $couponOrderId = Orders::create($couponCartItems, $couponCustomer, 'cod');
 $couponOrder = Orders::byId($couponOrderId);
 $expectedSubtotal = $couponProduct['price'];
-$expectedTotal = max(0, $expectedSubtotal - 500) + 399 + 200;
+// prices_include_tax=true → extracted tax_amount is reporting-only, NOT added to total
+$expectedTotal = max(0, $expectedSubtotal - 500) + 399;
 assert_equals($expectedSubtotal, (int)$couponOrder['subtotal'], 'Coupon order: subtotal correct');
 assert_equals(500, (int)$couponOrder['discount_amount'], 'Coupon discount persisted in order');
-assert_equals($expectedTotal, (int)$couponOrder['total'], 'Coupon order: total = subtotal - discount + shipping + tax');
+assert_equals($expectedTotal, (int)$couponOrder['total'], 'Coupon order: total = subtotal - discount + shipping (tax included in gross)');
 
 // ============================================================
 // TEST 35: Pricing edge cases — zero price, zero compare_price
@@ -4034,6 +4035,93 @@ assert_equals((int)$order['vat_total'], (int)$row['total_vat'], 'Invoice: total_
 // 54.3 — vat_breakdown groups by per-line rate (multi-rate present: 23 + 19)
 $breakdown = json_decode($pdo->query("SELECT vat_breakdown FROM invoices WHERE id={$inv['id']}")->fetchColumn() ?: '[]', true) ?: [];
 assert_true(count($breakdown) >= 1, 'Invoice: vat_breakdown has at least 1 rate group');
+
+// ============================================================
+// TEST 55: P0 regression — HTTP checkout path (apiCheckout)
+// All five P0 bugs (#1 per-line VAT=0, #2 double VAT, #3 dead VIES,
+// #4 mock webhook bypass, #5 undefined $cfg) lived in api.php and
+// slipped past tests that called VatService/Cart/Orders directly.
+// These tests exercise the exact apiCheckout() path end-to-end.
+// ============================================================
+echo "\n--- Test 55: P0 regression (HTTP checkout path) ---\n";
+
+if (!function_exists('apiCheckout')) {
+    define('BB_TEST_LOAD_API_ONLY', true);
+    require_once __DIR__ . '/../api.php';
+}
+
+// Deterministic offline payment method, zero fees, available for SK + DE
+$pdo->exec("INSERT OR IGNORE INTO payment_methods (code, provider, name, description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, requires_online, active, sort_order) VALUES ('p0pay','manual','P0 Pay','','offline',0,0,0,0,0,0,1,98)");
+$pdo->exec("INSERT OR IGNORE INTO payment_method_countries (method_code, country) VALUES ('p0pay','SK'),('p0pay','DE')");
+
+$p0Checkout = function (array $overrides) {
+    // apiActiveStore() resolves the seller store by locale (languages[0]).
+    // Default CLI locale 'en' would pick the US store → seller US, no EU VAT.
+    I18n::setLocale('sk');
+    $_SERVER['REQUEST_METHOD'] = 'POST';
+    $_SERVER['HTTP_HOST'] = 'localhost';
+    $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+    $_SESSION['csrf_token'] = 'p0-regression-test';
+    $_SESSION['cart'] = [
+        'p_501' => ['product_id' => 501, 'variant_id' => null, 'qty' => 2],
+        'p_502' => ['product_id' => 502, 'variant_id' => null, 'qty' => 1],
+    ];
+    $country = $overrides['country'] ?? 'SK';
+    // Pick whatever shipping method is actually offered for the country
+    // (DB-driven rates for SK, legacy JSON fallback for DE) — the test
+    // targets VAT correctness, not a specific carrier.
+    $rates = ShippingService::calculateRates($country, 0, 28200, false, 0);
+    $_POST = array_merge([
+        'csrf_token'      => 'p0-regression-test',
+        'name'            => 'P0 Regression',
+        'email'           => 'p0@test.com',
+        'phone'           => '',
+        'country'         => $country,
+        'shipping_method' => (string)($rates[0]['method_code'] ?? ''),
+        'payment_method'  => 'p0pay',
+    ], $overrides);
+    $res = apiCheckout();
+    $_POST = [];
+    return $res;
+};
+
+// 55.1 — Bug #1: domestic B2C via HTTP path persists per-line VAT > 0
+$r = $p0Checkout(['country' => 'SK']);
+assert_true(!empty($r['success']), 'P0 #1: domestic HTTP checkout succeeds (' . ($r['error'] ?? 'ok') . ')');
+$o = $pdo->query("SELECT * FROM orders WHERE id=" . (int)($r['order_id'] ?? 0))->fetch();
+assert_equals('domestic', (string)($o['vat_scenario'] ?? ''), 'P0 #1: HTTP checkout scenario=domestic');
+assert_true((int)($o['vat_total'] ?? 0) > 0, 'P0 #1: HTTP checkout vat_total > 0');
+$minLineVat = $pdo->query("SELECT MIN(vat_amount) AS v FROM order_items WHERE order_id=" . (int)($r['order_id'] ?? 0))->fetch();
+assert_true((int)($minLineVat['v'] ?? 0) > 0, 'P0 #1: every order_item has vat_amount > 0');
+
+// 55.2 — Bug #2: gross-inclusive prices — extracted tax must NOT inflate total
+assert_equals((int)$o['subtotal'] + (int)$o['shipping_cost'], (int)$o['total'],
+    'P0 #2: total == gross subtotal + shipping (extracted VAT not added on top)');
+assert_true((int)$o['tax_amount'] > 0, 'P0 #2: extracted tax still recorded for reporting');
+
+// 55.3 — Bug #3: B2B reverse charge via HTTP path (VIES served from cache, no network)
+$pdo->exec("DELETE FROM vat_id_cache");
+$pdo->exec("INSERT INTO vat_id_cache (vat_id, country, status, trader_name, trader_addr, checked_at, ttl_seconds, raw_response) VALUES ('DE811907980','DE','valid',NULL,NULL,datetime('now'),86400,NULL)");
+$r2 = $p0Checkout(['country' => 'DE', 'vat_id' => 'DE811907980']);
+assert_true(!empty($r2['success']), 'P0 #3: B2B DE HTTP checkout succeeds (' . ($r2['error'] ?? 'ok') . ')');
+$o2 = $pdo->query("SELECT * FROM orders WHERE id=" . (int)($r2['order_id'] ?? 0))->fetch();
+assert_equals('reverse_charge', (string)($o2['vat_scenario'] ?? ''), 'P0 #3: VIES-validated B2B → reverse_charge via HTTP path');
+assert_equals(0, (int)($o2['vat_total'] ?? -1), 'P0 #3: reverse charge vat_total == 0');
+assert_equals((int)$o2['subtotal'] + (int)$o2['shipping_cost'], (int)$o2['total'],
+    'P0 #3: reverse charge total has no VAT added');
+
+// 55.4 — Bug #4: mock webhook routing gate is closed with shipped config
+$prodCfg = require dirname(__DIR__) . '/config.php';
+assert_true(($prodCfg['allow_mock_webhook'] ?? true) === false, 'P0 #4: allow_mock_webhook ships as false');
+assert_true(($prodCfg['adapters']['payment'] ?? '') !== 'MockPayment', 'P0 #4: shipped payment adapter is not MockPayment');
+$mockRoutable = (($prodCfg['adapters']['payment'] ?? '') === 'MockPayment' || !empty($prodCfg['allow_mock_webhook']));
+assert_true(!$mockRoutable, 'P0 #4: webhook_payment provider=mock not routable in production config');
+
+// 55.5 — Bug #4: MockPayment signature is a real secret comparison
+$mpSig = new MockPayment(['mock_webhook_secret' => 's3cret']);
+assert_true($mpSig->verifySignature('payload', 's3cret'), 'P0 #4: correct webhook secret accepted');
+assert_true(!$mpSig->verifySignature('payload', 'wrong-sig'), 'P0 #4: wrong webhook secret rejected');
+assert_true(!$mpSig->verifySignature('payload', ''), 'P0 #4: empty webhook signature rejected');
 
 echo "\n--- VAT test suite complete ---\n";
 
