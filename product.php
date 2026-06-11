@@ -96,7 +96,7 @@ Security::headers();
     <meta property="product:price:currency" content="<?= esc($currencyCode) ?>">
 
     <!-- JSON-LD -->
-    <script type="application/ld+json">
+    <script type="application/ld+json" nonce="<?= Security::cspNonce() ?>">
     <?= json_encode([
         '@context' => 'https://schema.org',
         '@type' => 'Product',
@@ -155,7 +155,7 @@ Security::headers();
 
 <?= Template::render('global/footer', ['t' => $t]) ?>
 
-<script>
+<script nonce="<?= Security::cspNonce() ?>">
     window.BBS = {
         csrfToken: <?= json_encode($csrfToken) ?>,
         lang: <?= json_encode($lang) ?>,

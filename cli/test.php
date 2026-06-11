@@ -3202,6 +3202,30 @@ $smtpBad = $smtp->send(['to' => 'bad', 'from' => 'also-bad', 'subject' => 't', '
 assert_equals('failed',            $smtpBad['status'],  'Email: SmtpMail rejects invalid addresses');
 assert_equals('invalid recipient', $smtpBad['message'], 'Email: SmtpMail error message identifies recipient');
 
+echo "\n--- Test: Security hardening — SMTP CRLF strip + XFF rightmost-trusted (P4) ---\n";
+// #14 SMTP header injection: CR/LF stripped from header values
+$crlfM = new ReflectionMethod('SmtpMail', 'stripCrlf');
+$crlfM->setAccessible(true);
+assert_equals('evilHeader', $crlfM->invoke(null, "evil\r\nHeader"), 'Security: stripCrlf removes CRLF from header value');
+assert_equals('abc',        $crlfM->invoke(null, "a\rb\nc"),        'Security: stripCrlf removes bare CR and LF');
+
+// #13 clientIp XFF anti-spoof: rightmost non-trusted address wins
+$cfgProp = new ReflectionProperty('Security', 'cfg');
+$cfgProp->setAccessible(true);
+$origCfg = $cfgProp->getValue();
+$origServer = $_SERVER;
+$cfgProp->setValue(null, ['trusted_proxies' => ['10.0.0.1']]);
+$_SERVER['REMOTE_ADDR'] = '10.0.0.1';
+$_SERVER['HTTP_X_FORWARDED_FOR'] = '1.1.1.1, 203.0.113.9, 10.0.0.1';
+assert_equals('203.0.113.9', Security::clientIp(), 'Security: clientIp picks rightmost non-trusted XFF address');
+$_SERVER['HTTP_X_FORWARDED_FOR'] = '203.0.113.9';
+assert_equals('203.0.113.9', Security::clientIp(), 'Security: clientIp returns sole forwarded address');
+$_SERVER['REMOTE_ADDR'] = '8.8.8.8';
+$_SERVER['HTTP_X_FORWARDED_FOR'] = '1.1.1.1';
+assert_equals('8.8.8.8', Security::clientIp(), 'Security: clientIp ignores XFF when remote is not a trusted proxy');
+$_SERVER = $origServer;
+$cfgProp->setValue(null, $origCfg);
+
 echo "\n--- Test: Email — SesMail without credentials fails cleanly ---\n";
 putenv('MAIL_SES_KEY=');
 putenv('MAIL_SES_SECRET=');
@@ -3463,6 +3487,13 @@ assert_true($lok6 === true, 'Customer: login works with reset password');
 // Reuse token — marked used
 [$rok2, $rerr2] = Customers::completePasswordReset($tok, 'Another1!');
 assert_true($rok2 === false && $rerr2 === 'invalid_or_expired_token', 'Customer: reset token cannot be reused');
+
+// --- P4 security: reset token stored hashed (sha256), not plaintext (#12) ---
+$freshTok = Customers::startPasswordReset('alice@test.local');
+$storedTok = $pdo->query("SELECT token FROM password_reset_tokens ORDER BY id DESC LIMIT 1")->fetchColumn();
+assert_true($storedTok === hash('sha256', $freshTok), 'Security: reset token stored as sha256 hash in DB');
+assert_true($storedTok !== $freshTok, 'Security: plaintext reset token NOT stored in DB');
+assert_equals($aliceId, Customers::verifyResetToken($freshTok), 'Security: verifyResetToken accepts plaintext, matches stored hash');
 
 // --- Orders scoping ---
 $pdo->exec("INSERT INTO orders (order_number, status, customer_name, customer_email, payment_method, subtotal, total, customer_id) VALUES ('C-100', 'paid', 'Alice Renamed', 'alice@test.local', 'cod', 1000, 1000, {$aliceId})");
