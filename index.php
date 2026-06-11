@@ -279,22 +279,9 @@ switch ($page) {
 // Layout
 // ============================================================
 // Build hreflang alternates from stores.json — one per store url_prefix
-$storesCfg = Bootstrap::stores();
-$hreflangs = [];
-foreach ($storesCfg['stores'] ?? [] as $store) {
-    $locale = $store['default_locale'] ?? 'en';
-    $prefix = $store['url_prefix'] ?? '';
-    $hreflangs[$locale] = $prefix;
-}
-$pathNoPrefix = $_SERVER['REQUEST_URI'] ?? '/';
-foreach ($hreflangs as $p) {
-    if ($p !== '' && str_starts_with($pathNoPrefix, $p . '/')) {
-        $pathNoPrefix = substr($pathNoPrefix, strlen($p));
-        break;
-    }
-    if ($p !== '' && $pathNoPrefix === $p) { $pathNoPrefix = '/'; break; }
-}
-if ($pathNoPrefix === '') $pathNoPrefix = '/';
+$hreflangData = Bootstrap::hreflangAlternates();
+$hreflangs = $hreflangData['alternates'];
+$pathNoPrefix = $hreflangData['pathNoPrefix'];
 ?><!DOCTYPE html>
 <html lang="<?= $lang ?>">
 <head>
@@ -304,7 +291,7 @@ if ($pathNoPrefix === '') $pathNoPrefix = '/';
 <?php foreach ($hreflangs as $loc => $pfx): ?>
 <link rel="alternate" hreflang="<?= $e($loc) ?>" href="<?= $e($pfx . $pathNoPrefix) ?>">
 <?php endforeach; ?>
-<link rel="alternate" hreflang="x-default" href="<?= $e(($storesCfg['stores'][$storesCfg['default_store'] ?? ''] ?? ['url_prefix' => ''])['url_prefix'] . $pathNoPrefix) ?>">
+<link rel="alternate" hreflang="x-default" href="<?= $e($hreflangData['xDefaultPrefix'] . $pathNoPrefix) ?>">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}

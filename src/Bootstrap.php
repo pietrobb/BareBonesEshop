@@ -47,4 +47,40 @@ class Bootstrap {
         }
         return self::$catTranslations;
     }
+
+    /**
+     * Build hreflang alternates for the current request from stores.json.
+     * Returns:
+     *   'alternates'     => [locale => url_prefix, ...] (one per store)
+     *   'pathNoPrefix'   => request path with the matched store prefix stripped
+     *   'xDefaultPrefix' => url_prefix of the default_store (for hreflang=x-default)
+     * Pass an explicit $uri to override $_SERVER['REQUEST_URI'] (tests).
+     */
+    public static function hreflangAlternates(?string $uri = null): array {
+        $storesCfg = self::stores();
+        $alternates = [];
+        foreach ($storesCfg['stores'] ?? [] as $store) {
+            $locale = $store['default_locale'] ?? 'en';
+            $alternates[$locale] = $store['url_prefix'] ?? '';
+        }
+
+        $pathNoPrefix = $uri ?? ($_SERVER['REQUEST_URI'] ?? '/');
+        foreach ($alternates as $p) {
+            if ($p !== '' && str_starts_with($pathNoPrefix, $p . '/')) {
+                $pathNoPrefix = substr($pathNoPrefix, strlen($p));
+                break;
+            }
+            if ($p !== '' && $pathNoPrefix === $p) { $pathNoPrefix = '/'; break; }
+        }
+        if ($pathNoPrefix === '') $pathNoPrefix = '/';
+
+        $defaultStore = $storesCfg['default_store'] ?? '';
+        $xDefaultPrefix = ($storesCfg['stores'][$defaultStore] ?? ['url_prefix' => ''])['url_prefix'] ?? '';
+
+        return [
+            'alternates'     => $alternates,
+            'pathNoPrefix'   => $pathNoPrefix,
+            'xDefaultPrefix' => $xDefaultPrefix,
+        ];
+    }
 }
