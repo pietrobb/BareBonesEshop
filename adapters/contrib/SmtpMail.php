@@ -34,13 +34,22 @@ class SmtpMail implements MailAdapter {
 
     public function adapterId(): string { return 'smtp'; }
 
+    /**
+     * Strip CR/LF (and bare CR/LF) from a header value to prevent SMTP header
+     * injection. Any newline in a header field lets an attacker inject extra
+     * headers or a body. Header values must be a single line.
+     */
+    private static function stripCrlf(string $v): string {
+        return str_replace(["\r", "\n"], '', $v);
+    }
+
     public function send(array $msg): array {
-        $to       = trim((string)($msg['to'] ?? ''));
-        $from     = trim((string)($msg['from'] ?? ''));
-        $subject  = (string)($msg['subject'] ?? '');
+        $to       = self::stripCrlf(trim((string)($msg['to'] ?? '')));
+        $from     = self::stripCrlf(trim((string)($msg['from'] ?? '')));
+        $subject  = self::stripCrlf((string)($msg['subject'] ?? ''));
         $html     = (string)($msg['html'] ?? '');
         $text     = (string)($msg['text'] ?? strip_tags($html));
-        $replyTo  = (string)($msg['reply_to'] ?? '');
+        $replyTo  = self::stripCrlf((string)($msg['reply_to'] ?? ''));
         $headers  = (array)($msg['headers'] ?? []);
         $attachments = (array)($msg['attachments'] ?? []);
 
@@ -112,7 +121,9 @@ class SmtpMail implements MailAdapter {
                   . "Date: " . date('r') . "\r\n"
                   . "MIME-Version: 1.0\r\n";
             if ($replyTo) $data .= "Reply-To: {$replyTo}\r\n";
-            foreach ($headers as $k => $v) $data .= "{$k}: {$v}\r\n";
+            foreach ($headers as $k => $v) {
+                $data .= self::stripCrlf((string)$k) . ": " . self::stripCrlf((string)$v) . "\r\n";
+            }
 
             // Build the message body part (text-only or multipart/alternative).
             $bodyPart = '';
@@ -129,8 +140,8 @@ class SmtpMail implements MailAdapter {
                 $data .= "Content-Type: multipart/mixed; boundary=\"{$mixBoundary}\"\r\n\r\n";
                 $data .= "--{$mixBoundary}\r\n" . $bodyPart;
                 foreach ($attachments as $att) {
-                    $fname = (string)($att['filename'] ?? 'attachment.bin');
-                    $ctype = (string)($att['content_type'] ?? 'application/octet-stream');
+                    $fname = self::stripCrlf((string)($att['filename'] ?? 'attachment.bin'));
+                    $ctype = self::stripCrlf((string)($att['content_type'] ?? 'application/octet-stream'));
                     $b64   = chunk_split(base64_encode((string)($att['data'] ?? '')));
                     $data .= "--{$mixBoundary}\r\n"
                            . "Content-Type: {$ctype}; name=\"{$fname}\"\r\n"
