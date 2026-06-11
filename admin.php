@@ -62,6 +62,7 @@ $pagePermissions = [
     'shipping'   => 'products.edit',
     'payments'   => 'products.edit',
     'reviews'    => 'products.edit',
+    'rma'        => 'products.edit',
 ];
 $requiredPerm = $pagePermissions[$page] ?? 'reports.view';
 Security::adminRequire($requiredPerm);
@@ -164,6 +165,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
     <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=audit" class="<?= $page==='audit'?'active':'' ?>"><?= esc(I18n::t('admin.nav.audit')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('gdpr.view')): ?><a href="admin.php?p=gdpr" class="<?= $page==='gdpr'?'active':'' ?>"><?= esc(I18n::t('admin.nav.gdpr')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=reviews" class="<?= $page==='reviews'?'active':'' ?>">Recenzie</a><?php endif; ?>
+    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=rma" class="<?= $page==='rma'?'active':'' ?>">Reklamácie</a><?php endif; ?>
 </nav>
 <main>
 <?php flash(); ?>
@@ -190,6 +192,7 @@ match($page) {
     'shipping'   => pageShipping(),
     'payments'   => pagePayments(),
     'reviews'    => pageReviews(),
+    'rma'        => pageRma(),
     default      => pageDashboard(),
 };
 ?>
@@ -1018,6 +1021,69 @@ function pageReviews(): void {
     <?php
 }
 
+function pageRma(): void {
+    $filter = Security::clean($_GET['status'] ?? '');
+    $filter = in_array($filter, Rma::STATUSES, true) ? $filter : null;
+    $rmas = Rma::all(200, $filter);
+    // Map order ids → order numbers for display
+    $orderNos = [];
+    $orderIds = array_values(array_unique(array_map(static fn($r) => (int)$r['order_id'], $rmas)));
+    if ($orderIds) {
+        $ph = implode(',', array_fill(0, count($orderIds), '?'));
+        $st = Db::get()->prepare("SELECT id, order_number FROM orders WHERE id IN ({$ph})");
+        $st->execute($orderIds);
+        foreach ($st->fetchAll() as $r) { $orderNos[(int)$r['id']] = (string)$r['order_number']; }
+    }
+    // Allowed next-status buttons per current status.
+    $next = [
+        'requested' => ['approved' => 'Schváliť', 'rejected' => 'Zamietnuť'],
+        'approved'  => ['received' => 'Prijaté', 'rejected' => 'Zamietnuť'],
+        'received'  => ['refunded' => 'Refundované'],
+    ];
+    ?>
+    <h1>Reklamácie / vrátenia <span class="muted">(<?= count($rmas) ?>)</span></h1>
+    <div class="card">
+        <p>
+            <a class="btn btn-sm<?= $filter===null?' btn-primary':'' ?>" href="admin.php?p=rma">Všetky</a>
+            <?php foreach (Rma::STATUSES as $s): ?>
+            <a class="btn btn-sm<?= $filter===$s?' btn-primary':'' ?>" href="admin.php?p=rma&status=<?= esc($s) ?>"><?= esc($s) ?></a>
+            <?php endforeach; ?>
+        </p>
+        <?php if (!$rmas): ?>
+        <p class="muted">Žiadne reklamácie.</p>
+        <?php else: ?>
+        <table>
+            <tr><th>RMA</th><th>Objednávka</th><th>Položky</th><th>Dôvod</th><th>Stav</th><th>Akcia</th></tr>
+            <?php foreach ($rmas as $r): ?>
+            <?php $items = Rma::items((int)$r['id']); ?>
+            <tr>
+                <td><?= esc($r['rma_number']) ?><br><span class="muted"><?= esc(substr((string)$r['created_at'], 0, 16)) ?></span></td>
+                <td><?= esc($orderNos[(int)$r['order_id']] ?? ('#' . $r['order_id'])) ?></td>
+                <td><ul class="muted" style="margin:0;padding-left:16px">
+                    <?php foreach ($items as $it): ?>
+                    <li><?= esc($it['name']) ?> (<?= (int)$it['quantity'] ?>×)</li>
+                    <?php endforeach; ?>
+                </ul></td>
+                <td><?= esc($r['reason']) ?></td>
+                <td><span class="badge badge-<?= esc($r['status']) ?>"><?= esc($r['status']) ?></span></td>
+                <td style="white-space:nowrap">
+                    <?php foreach ($next[$r['status']] ?? [] as $to => $label): ?>
+                    <form method="post" action="admin.php?p=rma&action=status" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                        <input type="hidden" name="rma_id" value="<?= (int)$r['id'] ?>">
+                        <input type="hidden" name="status" value="<?= esc($to) ?>">
+                        <button class="btn btn-sm" type="submit"><?= esc($label) ?></button>
+                    </form>
+                    <?php endforeach; ?>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+        <?php endif; ?>
+    </div>
+    <?php
+}
+
 // ============================================================
 // CMS Pages
 // ============================================================
@@ -1240,6 +1306,7 @@ function handlePost(string $page, string $action): void {
         'payments:shipping_delete' => handlePaymentShippingDelete(),
         'reviews:approve' => handleReviewModerate('approved'),
         'reviews:reject'  => handleReviewModerate('rejected'),
+        'rma:status'      => handleRmaStatus(),
         default          => null,
     };
 }
@@ -1253,6 +1320,19 @@ function handleReviewModerate(string $status): void {
         setFlash('err', 'Recenziu sa nepodarilo upraviť.');
     }
     header('Location: admin.php?p=reviews');
+    exit;
+}
+
+function handleRmaStatus(): void {
+    Security::adminRequire('products.edit');
+    $id = Security::int($_POST['rma_id'] ?? 0);
+    $status = Security::clean($_POST['status'] ?? '');
+    if ($id > 0 && Rma::setStatus($id, $status)) {
+        setFlash('ok', 'Reklamácia #' . $id . ' → ' . $status);
+    } else {
+        setFlash('err', 'Stav reklamácie sa nepodarilo zmeniť.');
+    }
+    header('Location: admin.php?p=rma');
     exit;
 }
 

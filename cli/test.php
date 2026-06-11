@@ -3663,6 +3663,21 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS wishlist_items (
     UNIQUE(owner_key, product_id)
 )");
 
+// RMA tables (mirror of migrations/20260426100000_create_rma.php)
+$pdo->exec("CREATE TABLE IF NOT EXISTS rma_requests (
+    id INTEGER PRIMARY KEY, rma_number TEXT NOT NULL, order_id INTEGER NOT NULL,
+    customer_id INTEGER DEFAULT NULL, status TEXT NOT NULL DEFAULT 'requested',
+    reason TEXT NOT NULL DEFAULT '', admin_note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(rma_number)
+)");
+$pdo->exec("CREATE TABLE IF NOT EXISTS rma_items (
+    id INTEGER PRIMARY KEY, rma_id INTEGER NOT NULL, order_item_id INTEGER NOT NULL,
+    product_id INTEGER DEFAULT NULL, sku TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '',
+    quantity INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)");
+
 $wlProd = (int)($pdo->query("SELECT id FROM products LIMIT 1")->fetchColumn() ?: 0);
 $wlProd2 = (int)($pdo->query("SELECT id FROM products ORDER BY id LIMIT 1 OFFSET 1")->fetchColumn() ?: 0);
 assert_true($wlProd > 0, 'Wishlist: a product exists to save');
@@ -3756,6 +3771,92 @@ assert_true(isset($waCsrf['error']), 'Wishlist API: invalid CSRF token rejected'
 $wlToggle($wlProd); // add back
 $waList = apiWishlist();
 assert_true(!empty($waList['ok']) && in_array($wlProd, $waList['ids'], true), 'Wishlist API: wishlist read returns saved id');
+
+// ============================================================
+// TEST: RMA / Returns
+// ============================================================
+echo "\n--- Test: RMA / Returns ---\n";
+
+// Seed stock and create a delivered order owned by a customer (alice).
+$rmaProd = Products::bySku($testProduct['sku']) ?: $testProduct;
+$rmaHasStock = (int)$pdo->query("SELECT COUNT(*) FROM warehouse_stock WHERE sku = " . $pdo->quote($rmaProd['sku']))->fetchColumn();
+if ($rmaHasStock === 0) {
+    $pdo->prepare("INSERT INTO warehouse_stock (warehouse_id, sku, qty, reserved) VALUES (:wh,:sku,100,0)")
+        ->execute([':wh' => $whId, ':sku' => $rmaProd['sku']]);
+} else {
+    $pdo->prepare("UPDATE warehouse_stock SET qty = qty + 50 WHERE sku = :sku")->execute([':sku' => $rmaProd['sku']]);
+}
+$rmaCustomer = [
+    'name' => 'Alice', 'email' => 'alice@example.com', 'phone' => '',
+    'address' => ['street' => 'A 1', 'city' => 'BA', 'zip' => '81101', 'country' => 'SK'],
+    'currency' => 'eur', 'shipping_cost' => 0, 'tax_amount' => 0,
+    'customer_id' => $aliceId,
+];
+$rmaCart = [[
+    'product_id' => $rmaProd['id'], 'variant_id' => null, 'qty' => 2,
+    'price' => $rmaProd['price'], 'sku' => $rmaProd['sku'], 'name' => $rmaProd['name'], 'variant_name' => '',
+]];
+$rmaOrderId = Orders::create($rmaCart, $rmaCustomer, 'cod');
+Orders::updateStatus($rmaOrderId, 'delivered');
+$rmaItems = Orders::items($rmaOrderId);
+$rmaOi1 = (int)$rmaItems[0]['id'];
+assert_equals('delivered', Orders::byId($rmaOrderId)['status'], 'RMA: seed order is delivered');
+
+// A second, still-pending order (not returnable)
+$rmaPendingOrderId = Orders::create($rmaCart, $rmaCustomer, 'cod');
+
+// Guards: invalid order
+assert_equals('invalid_order', Rma::create(0, $aliceId, 'x', [$rmaOi1 => 1])[2], 'RMA: invalid order id rejected');
+assert_equals('invalid_order', Rma::create(999999, $aliceId, 'x', [$rmaOi1 => 1])[2], 'RMA: non-existent order rejected');
+
+// Guard: pending order not returnable
+assert_equals('order_not_returnable', Rma::create($rmaPendingOrderId, $aliceId, 'x', [$rmaOi1 => 1])[2], 'RMA: non-delivered order rejected');
+
+// Guard: ownership
+assert_equals('not_owner', Rma::create($rmaOrderId, $aliceId + 99999, 'x', [$rmaOi1 => 1])[2], 'RMA: order owned by another customer rejected');
+
+// Guard: reason required
+assert_equals('reason_required', Rma::create($rmaOrderId, $aliceId, '   ', [$rmaOi1 => 1])[2], 'RMA: empty reason rejected');
+
+// Guard: no items
+assert_equals('no_items', Rma::create($rmaOrderId, $aliceId, 'damaged', [])[2], 'RMA: empty item set rejected');
+assert_equals('no_items', Rma::create($rmaOrderId, $aliceId, 'damaged', [999999 => 1])[2], 'RMA: foreign order_item rejected → no_items');
+
+// Valid create (quantity over-asked → clamped to ordered qty 2)
+[$rOk, $rId, $rErr] = Rma::create($rmaOrderId, $aliceId, 'Box arrived crushed', [$rmaOi1 => 99]);
+assert_true($rOk === true && $rId > 0 && $rErr === null, 'RMA: valid create returns ok + id');
+$rmaRow = Rma::byId($rId);
+assert_equals('requested', $rmaRow['status'], 'RMA: new request lands as requested');
+assert_equals($aliceId, (int)$rmaRow['customer_id'], 'RMA: request attributed to customer');
+$rmaLineItems = Rma::items($rId);
+assert_equals(1, count($rmaLineItems), 'RMA: one line item stored');
+assert_equals(2, (int)$rmaLineItems[0]['quantity'], 'RMA: over-asked quantity clamped to ordered qty');
+
+// Guard: only one open RMA per order
+assert_equals('rma_exists', Rma::create($rmaOrderId, $aliceId, 'second try', [$rmaOi1 => 1])[2], 'RMA: duplicate open request rejected');
+
+// openForOrder finds the open request
+assert_true(Rma::openForOrder($rmaOrderId) !== null, 'RMA: openForOrder returns the open request');
+
+// forCustomer lists it
+$rmaCustList = Rma::forCustomer($aliceId);
+assert_true(count($rmaCustList) >= 1 && (int)$rmaCustList[0]['id'] === $rId, 'RMA: forCustomer returns newest request');
+
+// Transition guards
+assert_true(Rma::setStatus($rId, 'refunded') === false, 'RMA: requested → refunded blocked (illegal jump)');
+assert_true(Rma::setStatus($rId, 'approved') === true, 'RMA: requested → approved allowed');
+assert_equals('approved', Rma::byId($rId)['status'], 'RMA: status now approved');
+assert_true(Rma::setStatus($rId, 'received', 'parcel in') === true, 'RMA: approved → received allowed');
+assert_equals('parcel in', Rma::byId($rId)['admin_note'], 'RMA: admin note persisted');
+assert_true(Rma::setStatus($rId, 'refunded') === true, 'RMA: received → refunded allowed');
+assert_true(Rma::setStatus($rId, 'approved') === false, 'RMA: refunded is terminal');
+
+// Unknown id / status
+assert_true(Rma::setStatus(999999, 'approved') === false, 'RMA: setStatus on unknown id false');
+assert_true(Rma::setStatus($rId, 'bogus') === false, 'RMA: setStatus with unknown status false');
+
+// After refund the order has no open RMA again
+assert_true(Rma::openForOrder($rmaOrderId) === null, 'RMA: no open request after refund (terminal)');
 
 // ============================================================
 // TEST: Migrations Framework
