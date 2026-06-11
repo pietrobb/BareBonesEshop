@@ -414,6 +414,25 @@ function apiPaymentMethods(): array {
     ];
 }
 
+/**
+ * Resolve the active store from stores.json by current locale.
+ * Pass 1: store whose PRIMARY language (languages[0]) matches the locale.
+ * Pass 2: store whose languages list contains the locale.
+ * Fallback: first store.
+ */
+function apiActiveStore(): array {
+    $j = json_decode((string)@file_get_contents(__DIR__ . '/stores.json'), true) ?: [];
+    $stores = array_values($j['stores'] ?? []);
+    $locale = class_exists('I18n') ? I18n::locale() : '';
+    foreach ($stores as $store) {
+        if (($store['languages'][0] ?? '') === $locale) return $store;
+    }
+    foreach ($stores as $store) {
+        if (in_array($locale, $store['languages'] ?? [], true)) return $store;
+    }
+    return $stores[0] ?? [];
+}
+
 function apiCheckout(): array {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         http_response_code(405);
@@ -452,10 +471,15 @@ function apiCheckout(): array {
         return ['error' => 'Invalid payment method'];
     }
 
-    // VAT context — resolve scenario before enriching cart so per-line VAT is captured
+    // VAT context — resolve scenario before enriching cart so per-line VAT is captured.
+    // $cfg must be loaded here: apiCheckout is a function, the file-scope $cfg is not
+    // visible (it used to be silently undefined → seller always 'SK', OSS always off,
+    // admin notification never sent). Seller identity lives per-store in stores.json.
+    $cfg   = require __DIR__ . '/config.php';
+    $store = apiActiveStore();
     $vatId = strtoupper(preg_replace('/\s+/', '', (string)($input['vat_id'] ?? '')));
-    $sellerCountry = strtoupper((string)(($cfg['store']['legal']['country'] ?? null) ?: 'SK'));
-    $sellerOss     = (bool)($cfg['store']['oss_enabled'] ?? false);
+    $sellerCountry = strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
+    $sellerOss     = (bool)($store['oss_enabled'] ?? false);
     $vatIdValid    = false;
     $vatIdStatus   = null;
     if ($vatId !== '') {
