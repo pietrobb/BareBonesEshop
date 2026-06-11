@@ -160,6 +160,7 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS orders (
     erp_id TEXT DEFAULT NULL, erp_status TEXT DEFAULT NULL,
     erp_synced_at TEXT DEFAULT NULL, erp_error TEXT DEFAULT NULL,
     vat_scenario TEXT DEFAULT NULL, vat_total INTEGER DEFAULT NULL, net_total INTEGER DEFAULT NULL,
+    stock_restored INTEGER NOT NULL DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
 )");
 
@@ -4144,6 +4145,38 @@ $s = $rtStock();
 assert_equals(10, (int)$s['qty'], 'Cancel: qty untouched (still 10)');
 assert_equals(0, (int)$s['reserved'], 'Cancel: releases own reservation (3→0)');
 assert_equals(10, (int)$pdo->query("SELECT stock FROM products WHERE id=503")->fetchColumn(), 'Cancel: products.stock synced back to 10');
+
+// ============================================================
+// TEST 58: P1 regression — stock_restored column replaces notes heuristic
+// Bug #11: the double-restore guard was notes LIKE '%stock_restored%' —
+// any order whose notes happened to contain that text (customer note,
+// admin comment) silently SKIPPED its stock restore. Now a dedicated
+// orders.stock_restored flag is claimed atomically (0 → 1).
+// ============================================================
+echo "\n--- Test 58: P1 regression (stock_restored flag) ---\n";
+
+// 58.1 — restored orders carry the flag, not a notes marker
+assert_equals(1, (int)$pdo->query("SELECT stock_restored FROM orders WHERE id={$rtA}")->fetchColumn(), 'Flag: returned order has stock_restored=1');
+assert_equals(1, (int)$pdo->query("SELECT stock_restored FROM orders WHERE id={$rtB}")->fetchColumn(), 'Flag: cancelled order has stock_restored=1');
+assert_true(!str_contains((string)$pdo->query("SELECT notes FROM orders WHERE id={$rtA}")->fetchColumn(), 'stock_restored'), 'Flag: notes no longer abused as marker');
+
+// 58.2 — red herring: customer note containing the literal marker text
+// must NOT block the restore (the old heuristic skipped it)
+$rtCustomerC = $rtCustomer;
+$rtCustomerC['notes'] = 'please gift-wrap; ref stock_restored ticket #42';
+$rtC = Orders::create($rtItem(2), $rtCustomerC, 'stripe');
+$s = $rtStock();
+assert_equals(2, (int)$s['reserved'], 'Flag: order C reserved 2');
+OrderWorkflow::transition($rtC, 'cancelled');
+$s = $rtStock();
+assert_equals(0, (int)$s['reserved'], 'Flag: restore runs despite marker text in notes (old heuristic would skip)');
+assert_equals(1, (int)$pdo->query("SELECT stock_restored FROM orders WHERE id={$rtC}")->fetchColumn(), 'Flag: order C stock_restored=1');
+
+// 58.3 — atomic claim: direct second restore is refused by the flag
+Orders::restoreStock($rtC);
+$s = $rtStock();
+assert_equals(0, (int)$s['reserved'], 'Flag: repeated restore is a no-op (reserved stays 0)');
+assert_equals(10, (int)$s['qty'], 'Flag: repeated restore is a no-op (qty stays 10)');
 
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";

@@ -356,11 +356,16 @@ class Orders {
         if ($ownTransaction) $db->beginTransaction();
 
         try {
-            // Guard against double restore — check inside transaction for atomicity
-            $order = self::byId($orderId);
-            if ($order && str_contains($order['notes'] ?? '', 'stock_restored')) {
+            // Guard against double restore — atomically claim the flag.
+            // Only one caller can flip 0 → 1; everyone else (including a
+            // parallel transaction blocked on the row lock) sees 0 rows
+            // affected and bails out. Replaces the fragile
+            // notes LIKE '%stock_restored%' substring heuristic (bug #11).
+            $claim = $db->prepare("UPDATE orders SET stock_restored = 1 WHERE id = :id AND stock_restored = 0");
+            $claim->execute([':id' => $orderId]);
+            if ($claim->rowCount() === 0) {
                 if ($ownTransaction) $db->rollBack();
-                return;
+                return; // already restored (or order does not exist)
             }
             foreach ($items as $item) {
                 if (!empty($item['variant_id'])) {
@@ -385,11 +390,6 @@ class Orders {
                     }
                 }
             }
-
-            // Mark as restored inside the same transaction
-            $concat = Db::isSqlite() ? "COALESCE(notes,'') || :note" : "CONCAT(COALESCE(notes,''), :note)";
-            $db->prepare("UPDATE orders SET notes = {$concat} WHERE id = :id")
-               ->execute([':note' => "\nstock_restored", ':id' => $orderId]);
 
             if ($ownTransaction) $db->commit();
         } catch (\Throwable $e) {
