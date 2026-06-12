@@ -102,7 +102,19 @@ class Orders {
                 if ($oi['net_amount'] !== null) { $netTotal += (int)$oi['net_amount']; }
             }
             $vatScenario = $customer['vat_scenario'] ?? null;
-            if (!$hasVat) { $vatTotal = null; $netTotal = null; }
+            if (!$hasVat) {
+                $vatTotal = null; $netTotal = null;
+            } elseif ($couponDiscount > 0 && $subtotal > 0) {
+                // A coupon discounts the gross merchandise subtotal, so the VAT/net
+                // snapshot must be recomputed on the POST-coupon gross. Otherwise the
+                // recorded VAT is overstated and net+vat = pre-discount subtotal, i.e.
+                // the wrong tax base on the invoice/OSS report. (F2, audit v1.12)
+                // Integer-cents safe: scale VAT by the discount ratio, derive net as the
+                // remainder so the invariant net + vat == discounted gross holds exactly.
+                $discountedGross = max(0, $subtotal - $couponDiscount);
+                $vatTotal = (int) round($vatTotal * $discountedGross / $subtotal);
+                $netTotal = $discountedGross - $vatTotal;
+            }
 
             // 3. Create order (retry on unique constraint collision)
             $orderNumber = null;
