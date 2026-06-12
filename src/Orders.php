@@ -20,6 +20,13 @@ class Orders {
             // 1. Atomically reserve stock for each item
             $warehouseAllocations = []; // track per-SKU warehouse allocations for notes
             foreach ($cartItems as $item) {
+                // Reject non-positive quantity or negative price: a negative qty would
+                // INCREASE stock (stock - (-n)) and lower the subtotal (price * -n).
+                if ((int)($item['qty'] ?? 0) <= 0 || (int)($item['price'] ?? 0) < 0) {
+                    $outOfStock[] = ($item['name'] ?? ($item['sku'] ?? 'item'))
+                        . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : '');
+                    continue;
+                }
                 if (!empty($item['variant_id'])) {
                     $stmt = $db->prepare("UPDATE variants SET stock = stock - :qty WHERE id = :id AND stock >= :qty");
                     $stmt->execute([':qty' => $item['qty'], ':id' => $item['variant_id']]);
