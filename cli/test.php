@@ -4979,6 +4979,60 @@ assert_true(str_contains($ldHtml, 'nonce="nonce-xyz"'), 'JsonLd: render carries 
 $ldPayload = substr($ldHtml, strpos($ldHtml, '>') + 1, -strlen('</script>'));
 assert_true(json_decode($ldPayload) !== null, 'JsonLd: render payload is valid JSON');
 
+// --- S1.3: admin CSP nonce alignment (Idea #1) ---------------------------
+$adminSrc = file_get_contents(__DIR__ . '/../admin.php') ?: '';
+$securitySrc = file_get_contents(__DIR__ . '/../src/Security.php') ?: '';
+
+// (a) the admin.php unsafe-inline CSP override line must be gone — admin now
+//     inherits the nonce-based CSP from Security::headers().
+assert_true(
+    !str_contains($adminSrc, "script-src 'self' 'unsafe-inline'"),
+    'Admin CSP: no unsafe-inline script-src override in admin.php'
+);
+
+// (b) grep-guard — no inline event handlers (on*=) remain anywhere in admin.php;
+//     CSP nonce does not authorize inline handler attributes, so any survivor
+//     would silently break under the inherited policy.
+assert_true(
+    preg_match('/\son(click|submit|change|input|load|mouse\w+|key\w+)\s*=\s*["\']/i', $adminSrc) === 0,
+    'Admin CSP: no inline on*= event handlers in admin.php'
+);
+
+// (c) admin inline <script> blocks still carry the request nonce.
+assert_true(
+    str_contains($adminSrc, '<script nonce="<?= Security::cspNonce() ?>">'),
+    'Admin CSP: inline scripts carry Security::cspNonce()'
+);
+
+// (d) the delegated nonce'd listener layer + data-* hooks are present.
+assert_true(
+    str_contains($adminSrc, "document.addEventListener('submit'") &&
+    str_contains($adminSrc, 'form[data-confirm]'),
+    'Admin CSP: delegated data-confirm submit listener present'
+);
+assert_true(
+    str_contains($adminSrc, 'data-action="add-option"') &&
+    str_contains($adminSrc, 'data-action="filter-cats"') &&
+    str_contains($adminSrc, 'data-action="toggle-cats"'),
+    'Admin CSP: data-action hooks replace inline function-call handlers'
+);
+
+// (e) Security::headers() builds a nonce-based script-src with NO unsafe-inline.
+assert_true(
+    str_contains($securitySrc, "script-src 'self' 'nonce-\$nonce'"),
+    'Admin CSP: Security script-src is nonce-based'
+);
+assert_true(
+    preg_match('/script-src[^;"]*\'unsafe-inline\'/', $securitySrc) === 0,
+    'Admin CSP: Security script-src has no unsafe-inline'
+);
+
+// (f) runtime — cspNonce() yields a non-empty per-request token.
+assert_true(
+    Security::cspNonce() !== '' && Security::cspNonce() === Security::cspNonce(),
+    'Admin CSP: cspNonce() returns a stable non-empty per-request nonce'
+);
+
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
 if ($failed > 0) {
