@@ -205,6 +205,31 @@ match($page) {
 ?>
 </main>
 </div>
+<script nonce="<?= Security::cspNonce() ?>">
+// CSP-safe delegated handlers — replaces inline on*= attributes so the admin
+// CSP can drop 'unsafe-inline' from script-src (nonce-only). See data-confirm
+// and data-action hooks in the templates above.
+(function(){
+    document.addEventListener('submit', function(e){
+        var f = e.target;
+        if (f && f.matches && f.matches('form[data-confirm]')) {
+            if (!confirm(f.getAttribute('data-confirm'))) e.preventDefault();
+        }
+    });
+    document.addEventListener('click', function(e){
+        var t = e.target.closest ? e.target.closest('[data-action]') : null;
+        if (!t) return;
+        var a = t.getAttribute('data-action');
+        if (a === 'remove-parent') { e.preventDefault(); if (t.parentElement) t.parentElement.remove(); }
+        else if (a === 'add-option') { e.preventDefault(); if (window.addOption) window.addOption(); }
+        else if (a === 'toggle-cats') { e.preventDefault(); if (window.toggleAllCats) window.toggleAllCats(t.getAttribute('data-value') === '1'); }
+    });
+    document.addEventListener('input', function(e){
+        var t = e.target;
+        if (t && t.matches && t.matches('[data-action="filter-cats"]') && window.filterCats) window.filterCats();
+    });
+})();
+</script>
 </body>
 </html>
 <?php
@@ -340,7 +365,7 @@ function pageProducts(): void {
             </select>
             <button class="btn" type="submit"><?= esc(I18n::t('admin.btn.apply')) ?></button>
         </form>
-        <form method="post" action="admin.php?p=products&action=bulk" id="bulk-form">
+        <form method="post" action="admin.php?p=products&action=bulk" id="bulk-form" data-confirm="OK?">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
             <div style="display:flex;gap:.5rem;margin-bottom:.5rem">
                 <select name="bulk_action">
@@ -355,7 +380,7 @@ function pageProducts(): void {
                     <option value="price_down_10">Price -10%</option>
                     <option value="price_down_20">Price -20%</option>
                 </select>
-                <button type="submit" class="btn btn-sm" onclick="return confirm('OK?')"><?= esc(I18n::t('admin.btn.apply')) ?></button>
+                <button type="submit" class="btn btn-sm"><?= esc(I18n::t('admin.btn.apply')) ?></button>
                 <form method="post" action="admin.php?p=products&action=export" style="display:inline">
                     <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                     <input type="hidden" name="q" value="<?= esc($search) ?>">
@@ -931,9 +956,9 @@ function pageCache(): void {
     </div>
     <div class="card">
         <h3>Akcie</h3>
-        <form method="post" action="admin.php?p=cache&action=flush" style="display:inline">
+        <form method="post" action="admin.php?p=cache&action=flush" style="display:inline" data-confirm="Flush celú cache?">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-            <button class="btn btn-danger" type="submit" onclick="return confirm('Flush celú cache?')">Flush Cache</button>
+            <button class="btn btn-danger" type="submit">Flush Cache</button>
         </form>
         <form method="post" action="admin.php?p=cache&action=rebuild" style="display:inline;margin-left:.5rem">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -1280,7 +1305,7 @@ function pageGdpr(): void {
                 <td>
                     <a class="btn btn-sm" href="cli/gdpr-export.php?customer-id=<?= (int)$c['id'] ?>"><?= esc(I18n::t('admin.gdpr.export_hint')) ?></a>
                     <?php if (Security::adminCan('gdpr.erase') && ($c['status'] ?? '') !== 'anonymized'): ?>
-                    <form method="post" action="admin.php?p=gdpr&action=anonymize&email=<?= urlencode($email) ?>" style="display:inline" onsubmit="return confirm('<?= esc(I18n::t('admin.gdpr.anonymize_confirm')) ?>')">
+                    <form method="post" action="admin.php?p=gdpr&action=anonymize&email=<?= urlencode($email) ?>" style="display:inline" data-confirm="<?= esc(I18n::t('admin.gdpr.anonymize_confirm')) ?>">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                         <input type="hidden" name="customer_id" value="<?= (int)$c['id'] ?>">
                         <button class="btn btn-danger btn-sm" type="submit"><?= esc(I18n::t('admin.gdpr.anonymize_btn')) ?></button>
@@ -2000,7 +2025,7 @@ function pageAttributes(): void {
                 <td><?= (int)$a['sort_order'] ?></td>
                 <td>
                     <a href="admin.php?p=attribute&id=<?= (int)$a['id'] ?>" class="btn btn-sm">Upraviť</a>
-                    <form method="post" action="admin.php?p=attributes&action=delete" style="display:inline" onsubmit="return confirm('Naozaj zmazať?')">
+                    <form method="post" action="admin.php?p=attributes&action=delete" style="display:inline" data-confirm="Naozaj zmazať?">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                         <input type="hidden" name="attr_id" value="<?= (int)$a['id'] ?>">
                         <button class="btn btn-sm btn-danger" type="submit">Zmazať</button>
@@ -2061,18 +2086,18 @@ function pageAttribute(): void {
                 <div class="form-row" style="display:flex;gap:.5rem;align-items:center">
                     <input name="options[]" value="<?= esc($opt['value']) ?>" style="flex:1" placeholder="Hodnota" data-bbf-option>
                     <input type="number" name="option_order[]" value="<?= (int)$opt['sort_order'] ?>" style="width:60px" placeholder="Poradie" data-bbf-option-order>
-                    <button type="button" onclick="this.parentElement.remove()" class="btn btn-sm btn-danger">x</button>
+                    <button type="button" data-action="remove-parent" class="btn btn-sm btn-danger">x</button>
                 </div>
                 <?php endforeach; ?>
             </div>
-            <button type="button" onclick="addOption()" class="btn btn-sm" style="margin-top:.5rem">+ Pridať hodnotu</button>
+            <button type="button" data-action="add-option" class="btn btn-sm" style="margin-top:.5rem">+ Pridať hodnotu</button>
         </div>
 
         <h3 style="margin:1rem 0 .5rem">Priradiť ku kategóriám</h3>
-        <input type="text" id="cat-filter" placeholder="Hľadať kategóriu..." style="width:100%;padding:.4rem .6rem;margin-bottom:.5rem;border:1px solid #d1d5db;border-radius:4px" oninput="filterCats()">
+        <input type="text" id="cat-filter" placeholder="Hľadať kategóriu..." style="width:100%;padding:.4rem .6rem;margin-bottom:.5rem;border:1px solid #d1d5db;border-radius:4px" data-action="filter-cats">
         <div style="margin-bottom:.5rem;font-size:.8rem">
-            <a href="#" onclick="toggleAllCats(true);return false" style="margin-right:.5rem">Vybrať všetky viditeľné</a>
-            <a href="#" onclick="toggleAllCats(false);return false">Odznačiť všetky</a>
+            <a href="#" data-action="toggle-cats" data-value="1" style="margin-right:.5rem">Vybrať všetky viditeľné</a>
+            <a href="#" data-action="toggle-cats" data-value="0">Odznačiť všetky</a>
             <span id="cat-count" style="float:right;color:#64748b"></span>
         </div>
         <div id="cat-list" style="max-height:350px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:6px;padding:.5rem">
@@ -2131,7 +2156,7 @@ function pageAttribute(): void {
         div.style.cssText = 'display:flex;gap:.5rem;align-items:center';
         div.innerHTML = '<input name="options[]" style="flex:1" placeholder="Hodnota">' +
             '<input type="number" name="option_order[]" style="width:60px" placeholder="Poradie" value="0">' +
-            '<button type="button" onclick="this.parentElement.remove()" class="btn btn-sm btn-danger">×</button>';
+            '<button type="button" data-action="remove-parent" class="btn btn-sm btn-danger">×</button>';
         document.getElementById('options-list').appendChild(div);
     }
     toggleOptions();
@@ -2281,7 +2306,7 @@ function pageWarehouses(): void {
                 <td><?= $w['is_default'] ? 'Ano' : '—' ?></td>
                 <td><?= $feedCount ?></td>
                 <td>
-                    <form method="post" action="admin.php?p=warehouses&action=delete" style="display:inline" onsubmit="return confirm('Zmazat sklad?')">
+                    <form method="post" action="admin.php?p=warehouses&action=delete" style="display:inline" data-confirm="Zmazat sklad?">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                         <input type="hidden" name="warehouse_id" value="<?= $w['id'] ?>">
                         <button class="btn btn-sm btn-danger">Zmazat</button>
@@ -2407,7 +2432,7 @@ function pageFeeds(): void {
                         <input type="hidden" name="feed_id" value="<?= $f['id'] ?>">
                         <button class="btn btn-sm">Sync teraz</button>
                     </form>
-                    <form method="post" action="admin.php?p=feeds&action=delete" style="display:inline" onsubmit="return confirm('Zmazat feed?')">
+                    <form method="post" action="admin.php?p=feeds&action=delete" style="display:inline" data-confirm="Zmazat feed?">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                         <input type="hidden" name="feed_id" value="<?= $f['id'] ?>">
                         <button class="btn btn-sm btn-danger">Zmazat</button>
@@ -2552,7 +2577,7 @@ function pageShipping(): void {
                     <td><input type="number" name="sort_order" value="<?= (int)$m['sort_order'] ?>" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" <?= !empty($m['active'])?'checked':'' ?>> aktivna</label></td>
                     <td><button class="btn btn-sm btn-primary">Ulozit</button>
                 </form>
-                <form method="post" action="admin.php?p=shipping&action=method_delete" style="display:inline" onsubmit="return confirm('Zmazat metodu?')"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$m['id'] ?>"><button class="btn btn-sm btn-danger">Zmazat</button></form></td>
+                <form method="post" action="admin.php?p=shipping&action=method_delete" style="display:inline" data-confirm="Zmazat metodu?"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$m['id'] ?>"><button class="btn btn-sm btn-danger">Zmazat</button></form></td>
             </tr>
             <?php endforeach; ?>
             <tr><form method="post" action="admin.php?p=shipping&action=method_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><input name="code" required placeholder="packeta"></td><td><input name="name" required placeholder="Nazov"><br><input name="description" placeholder="popis"></td><td><input name="carrier" required placeholder="packeta"><br><input name="adapter_class" placeholder="PacketaShipping"></td><td><select name="service_type"><option value="parcel">parcel</option><option value="pickup">pickup</option></select><br><label><input type="checkbox" name="supports_cod" value="1"> COD</label> <label><input type="checkbox" name="supports_pickup" value="1"> pickup</label></td><td><input type="number" name="free_above" placeholder="free above" style="width:6rem"><br><input type="number" name="max_weight_g" placeholder="max g" style="width:6rem"><input type="number" name="max_volume_cm3" placeholder="max cm3" style="width:6rem"></td><td><input type="number" name="sort_order" value="100" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" checked> aktivna</label></td><td><button class="btn btn-sm btn-primary">Pridat</button></td></form></tr>
@@ -2564,7 +2589,7 @@ function pageShipping(): void {
         <h3>Zony a krajiny</h3>
         <table><thead><tr><th>Kod</th><th>Nazov</th><th>Popis</th><th>Aktivna</th><th></th></tr></thead><tbody>
         <?php foreach ($zones as $z): ?>
-        <tr><form method="post" action="admin.php?p=shipping&action=zone_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$z['id'] ?>"><td><input name="code" value="<?= esc($z['code']) ?>" required></td><td><input name="name" value="<?= esc($z['name']) ?>" required></td><td><input name="description" value="<?= esc($z['description'] ?? '') ?>" style="width:100%"></td><td><input type="number" name="sort_order" value="<?= (int)$z['sort_order'] ?>" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" <?= !empty($z['active'])?'checked':'' ?>> aktivna</label></td><td><button class="btn btn-sm btn-primary">Ulozit</button></form> <form method="post" action="admin.php?p=shipping&action=zone_delete" style="display:inline" onsubmit="return confirm('Zmazat zonu?')"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$z['id'] ?>"><button class="btn btn-sm btn-danger">Zmazat</button></form></td></tr>
+        <tr><form method="post" action="admin.php?p=shipping&action=zone_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$z['id'] ?>"><td><input name="code" value="<?= esc($z['code']) ?>" required></td><td><input name="name" value="<?= esc($z['name']) ?>" required></td><td><input name="description" value="<?= esc($z['description'] ?? '') ?>" style="width:100%"></td><td><input type="number" name="sort_order" value="<?= (int)$z['sort_order'] ?>" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" <?= !empty($z['active'])?'checked':'' ?>> aktivna</label></td><td><button class="btn btn-sm btn-primary">Ulozit</button></form> <form method="post" action="admin.php?p=shipping&action=zone_delete" style="display:inline" data-confirm="Zmazat zonu?"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$z['id'] ?>"><button class="btn btn-sm btn-danger">Zmazat</button></form></td></tr>
         <?php endforeach; ?>
         <tr><form method="post" action="admin.php?p=shipping&action=zone_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><input name="code" required placeholder="sk"></td><td><input name="name" required placeholder="Slovensko"></td><td><input name="description" style="width:100%"></td><td><input type="number" name="sort_order" value="100" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" checked> aktivna</label></td><td><button class="btn btn-sm btn-primary">Pridat</button></td></form></tr>
         </tbody></table>
@@ -2581,7 +2606,7 @@ function pageShipping(): void {
         <h3>Sadzby</h3>
         <table><thead><tr><th>Metoda/zona</th><th>Krajina</th><th>Vaha g</th><th>Objem cm3</th><th>Cena</th><th>COD</th><th>Dni</th><th>Aktivna</th><th></th></tr></thead><tbody>
         <?php foreach ($rates as $r): ?>
-        <tr><form method="post" action="admin.php?p=shipping&action=rate_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$r['id'] ?>"><td><select name="method_code"><?php foreach ($methods as $m): ?><option value="<?= esc($m['code']) ?>" <?= ($r['method_code'] ?? '')===$m['code']?'selected':'' ?>><?= esc($m['code']) ?></option><?php endforeach; ?></select><br><select name="zone_code"><?php foreach ($zones as $z): ?><option value="<?= esc($z['code']) ?>" <?= ($r['zone_code'] ?? '')===$z['code']?'selected':'' ?>><?= esc($z['code']) ?></option><?php endforeach; ?></select></td><td><input name="country" value="<?= esc($r['country']) ?>" maxlength="2" style="width:4rem"></td><td><input type="number" name="weight_from_g" value="<?= (int)$r['weight_from_g'] ?>" style="width:6rem"><br><input type="number" name="weight_to_g" value="<?= (int)$r['weight_to_g'] ?>" style="width:6rem"></td><td><input type="number" name="volume_to_cm3" value="<?= esc($r['volume_to_cm3'] ?? '') ?>" style="width:7rem"></td><td><input type="number" name="price" value="<?= (int)$r['price'] ?>" required style="width:6rem"></td><td><input type="number" name="cod_surcharge" value="<?= (int)$r['cod_surcharge'] ?>" style="width:5rem"></td><td><input name="delivery_days" value="<?= esc($r['delivery_days'] ?? '') ?>" style="width:4rem"></td><td><input type="number" name="sort_order" value="<?= (int)($r['sort_order'] ?? 100) ?>" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" <?= !isset($r['active']) || $r['active']?'checked':'' ?>> aktivna</label></td><td><button class="btn btn-sm btn-primary">Ulozit</button></form> <form method="post" action="admin.php?p=shipping&action=rate_delete" style="display:inline" onsubmit="return confirm('Zmazat sadzbu?')"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$r['id'] ?>"><button class="btn btn-sm btn-danger">Zmazat</button></form></td></tr>
+        <tr><form method="post" action="admin.php?p=shipping&action=rate_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$r['id'] ?>"><td><select name="method_code"><?php foreach ($methods as $m): ?><option value="<?= esc($m['code']) ?>" <?= ($r['method_code'] ?? '')===$m['code']?'selected':'' ?>><?= esc($m['code']) ?></option><?php endforeach; ?></select><br><select name="zone_code"><?php foreach ($zones as $z): ?><option value="<?= esc($z['code']) ?>" <?= ($r['zone_code'] ?? '')===$z['code']?'selected':'' ?>><?= esc($z['code']) ?></option><?php endforeach; ?></select></td><td><input name="country" value="<?= esc($r['country']) ?>" maxlength="2" style="width:4rem"></td><td><input type="number" name="weight_from_g" value="<?= (int)$r['weight_from_g'] ?>" style="width:6rem"><br><input type="number" name="weight_to_g" value="<?= (int)$r['weight_to_g'] ?>" style="width:6rem"></td><td><input type="number" name="volume_to_cm3" value="<?= esc($r['volume_to_cm3'] ?? '') ?>" style="width:7rem"></td><td><input type="number" name="price" value="<?= (int)$r['price'] ?>" required style="width:6rem"></td><td><input type="number" name="cod_surcharge" value="<?= (int)$r['cod_surcharge'] ?>" style="width:5rem"></td><td><input name="delivery_days" value="<?= esc($r['delivery_days'] ?? '') ?>" style="width:4rem"></td><td><input type="number" name="sort_order" value="<?= (int)($r['sort_order'] ?? 100) ?>" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" <?= !isset($r['active']) || $r['active']?'checked':'' ?>> aktivna</label></td><td><button class="btn btn-sm btn-primary">Ulozit</button></form> <form method="post" action="admin.php?p=shipping&action=rate_delete" style="display:inline" data-confirm="Zmazat sadzbu?"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$r['id'] ?>"><button class="btn btn-sm btn-danger">Zmazat</button></form></td></tr>
         <?php endforeach; ?>
         <tr><form method="post" action="admin.php?p=shipping&action=rate_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><select name="method_code"><?php foreach ($methods as $m): ?><option value="<?= esc($m['code']) ?>"><?= esc($m['code']) ?></option><?php endforeach; ?></select><br><select name="zone_code"><?php foreach ($zones as $z): ?><option value="<?= esc($z['code']) ?>"><?= esc($z['code']) ?></option><?php endforeach; ?></select></td><td><input name="country" maxlength="2" placeholder="SK" style="width:4rem"></td><td><input type="number" name="weight_from_g" value="0" style="width:6rem"><br><input type="number" name="weight_to_g" value="5000" style="width:6rem"></td><td><input type="number" name="volume_to_cm3" style="width:7rem"></td><td><input type="number" name="price" value="0" required style="width:6rem"></td><td><input type="number" name="cod_surcharge" value="0" style="width:5rem"></td><td><input name="delivery_days" style="width:4rem"></td><td><input type="number" name="sort_order" value="100" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" checked> aktivna</label></td><td><button class="btn btn-sm btn-primary">Pridat</button></td></form></tr>
         </tbody></table>
@@ -2654,7 +2679,7 @@ function pagePayments(): void {
             <thead><tr><th>Kod</th><th>Nazov</th><th>Provider/typ</th><th>Limity</th><th>Poplatok</th><th>Aktivna</th><th></th></tr></thead>
             <tbody>
             <?php foreach ($methods as $m): ?>
-            <tr><form method="post" action="admin.php?p=payments&action=method_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$m['id'] ?>"><td><input name="code" value="<?= esc($m['code']) ?>" required style="width:8rem"></td><td><input name="name" value="<?= esc($m['name']) ?>" required style="width:12rem"><br><input name="description" value="<?= esc($m['description'] ?? '') ?>" placeholder="popis" style="width:12rem"></td><td><input name="provider" value="<?= esc($m['provider']) ?>" required style="width:8rem"><br><select name="service_type"><option value="online_card" <?= ($m['service_type'] ?? '')==='online_card'?'selected':'' ?>>online_card</option><option value="bank_transfer" <?= ($m['service_type'] ?? '')==='bank_transfer'?'selected':'' ?>>bank_transfer</option><option value="cod" <?= ($m['service_type'] ?? '')==='cod'?'selected':'' ?>>cod</option><option value="offline" <?= ($m['service_type'] ?? '')==='offline'?'selected':'' ?>>offline</option></select></td><td><input type="number" name="min_amount" value="<?= (int)$m['min_amount'] ?>" style="width:6rem"><br><input type="number" name="max_amount" value="<?= esc($m['max_amount'] ?? '') ?>" placeholder="max" style="width:6rem"></td><td><input type="number" name="fixed_fee" value="<?= (int)$m['fixed_fee'] ?>" style="width:5rem"><br><input type="number" name="percent_fee_bps" value="<?= (int)$m['percent_fee_bps'] ?>" style="width:5rem"> bps<br><input type="number" name="free_above" value="<?= esc($m['free_above'] ?? '') ?>" placeholder="free above" style="width:6rem"></td><td><input type="number" name="sort_order" value="<?= (int)$m['sort_order'] ?>" style="width:4rem"><br><label><input type="checkbox" name="requires_online" value="1" <?= !empty($m['requires_online'])?'checked':'' ?>> online</label><br><label><input type="checkbox" name="active" value="1" <?= !empty($m['active'])?'checked':'' ?>> aktivna</label></td><td><button class="btn btn-sm btn-primary">Ulozit</button></form> <form method="post" action="admin.php?p=payments&action=method_delete" style="display:inline" onsubmit="return confirm('Zmazat platobnu metodu?')"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$m['id'] ?>"><button class="btn btn-sm btn-danger">Zmazat</button></form></td></tr>
+            <tr><form method="post" action="admin.php?p=payments&action=method_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$m['id'] ?>"><td><input name="code" value="<?= esc($m['code']) ?>" required style="width:8rem"></td><td><input name="name" value="<?= esc($m['name']) ?>" required style="width:12rem"><br><input name="description" value="<?= esc($m['description'] ?? '') ?>" placeholder="popis" style="width:12rem"></td><td><input name="provider" value="<?= esc($m['provider']) ?>" required style="width:8rem"><br><select name="service_type"><option value="online_card" <?= ($m['service_type'] ?? '')==='online_card'?'selected':'' ?>>online_card</option><option value="bank_transfer" <?= ($m['service_type'] ?? '')==='bank_transfer'?'selected':'' ?>>bank_transfer</option><option value="cod" <?= ($m['service_type'] ?? '')==='cod'?'selected':'' ?>>cod</option><option value="offline" <?= ($m['service_type'] ?? '')==='offline'?'selected':'' ?>>offline</option></select></td><td><input type="number" name="min_amount" value="<?= (int)$m['min_amount'] ?>" style="width:6rem"><br><input type="number" name="max_amount" value="<?= esc($m['max_amount'] ?? '') ?>" placeholder="max" style="width:6rem"></td><td><input type="number" name="fixed_fee" value="<?= (int)$m['fixed_fee'] ?>" style="width:5rem"><br><input type="number" name="percent_fee_bps" value="<?= (int)$m['percent_fee_bps'] ?>" style="width:5rem"> bps<br><input type="number" name="free_above" value="<?= esc($m['free_above'] ?? '') ?>" placeholder="free above" style="width:6rem"></td><td><input type="number" name="sort_order" value="<?= (int)$m['sort_order'] ?>" style="width:4rem"><br><label><input type="checkbox" name="requires_online" value="1" <?= !empty($m['requires_online'])?'checked':'' ?>> online</label><br><label><input type="checkbox" name="active" value="1" <?= !empty($m['active'])?'checked':'' ?>> aktivna</label></td><td><button class="btn btn-sm btn-primary">Ulozit</button></form> <form method="post" action="admin.php?p=payments&action=method_delete" style="display:inline" data-confirm="Zmazat platobnu metodu?"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$m['id'] ?>"><button class="btn btn-sm btn-danger">Zmazat</button></form></td></tr>
             <?php endforeach; ?>
             <tr><form method="post" action="admin.php?p=payments&action=method_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><input name="code" required placeholder="card"></td><td><input name="name" required placeholder="Nazov"><br><input name="description" placeholder="popis"></td><td><input name="provider" required placeholder="stripe"><br><select name="service_type"><option value="online_card">online_card</option><option value="bank_transfer">bank_transfer</option><option value="cod">cod</option><option value="offline">offline</option></select></td><td><input type="number" name="min_amount" value="0" style="width:6rem"><br><input type="number" name="max_amount" placeholder="max" style="width:6rem"></td><td><input type="number" name="fixed_fee" value="0" style="width:5rem"><br><input type="number" name="percent_fee_bps" value="0" style="width:5rem"> bps<br><input type="number" name="free_above" placeholder="free above" style="width:6rem"></td><td><input type="number" name="sort_order" value="100" style="width:4rem"><br><label><input type="checkbox" name="requires_online" value="1"> online</label><br><label><input type="checkbox" name="active" value="1" checked> aktivna</label></td><td><button class="btn btn-sm btn-primary">Pridat</button></td></form></tr>
             </tbody>
