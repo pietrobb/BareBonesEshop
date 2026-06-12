@@ -5095,6 +5095,86 @@ assert_equals('-500',        Security::csvCell('-500'),       'F9: legitimate ne
 assert_equals('1990',        Security::csvCell(1990),         'F9: numeric cell unchanged');
 assert_equals('Brake Disc',  Security::csvCell('Brake Disc'), 'F9: plain text unchanged');
 
+// ============================================================
+// TEST: Audit v1.12 remediation — Sprint B (F2, F5, F6, F7)
+// ============================================================
+echo "\n--- Audit v1.12 remediation (Sprint B) ---\n";
+
+// --- F2: coupon order VAT/net snapshot scaled to the POST-coupon gross.
+//     Seed a self-contained product+stock so we control the numbers exactly.
+$f2Cat = (int)$pdo->query("SELECT id FROM categories ORDER BY id LIMIT 1")->fetchColumn();
+$pdo->prepare("INSERT INTO products (sku, slug, product_type, name, category_id, price, stock, status, summary, filter_tags) VALUES ('F2-VAT-SKU','f2-vat-sku','simple','F2 VAT Test',:cat,1200,50,'active','','')")
+    ->execute([':cat' => $f2Cat]);
+$f2Pid = (int)$pdo->lastInsertId();
+$f2Wh  = (int)$pdo->query("SELECT id FROM warehouses WHERE is_default = 1")->fetchColumn();
+$pdo->prepare("INSERT INTO warehouse_stock (warehouse_id, sku, qty, reserved) VALUES (:wh,'F2-VAT-SKU',50,0)")
+    ->execute([':wh' => $f2Wh]);
+
+$f2Cart = [[
+    'product_id' => $f2Pid, 'variant_id' => null, 'qty' => 1, 'price' => 1200,
+    'sku' => 'F2-VAT-SKU', 'name' => 'F2 VAT Test', 'variant_name' => '',
+    'vat_amount' => 200, 'net_amount' => 1000, 'vat_rate' => 20.0, 'vat_class' => 'standard',
+]];
+$f2Customer = [
+    'name' => 'F2 Tester', 'email' => 'f2@test.com', 'phone' => '',
+    'address' => ['street' => 'x', 'city' => 'y', 'zip' => '00000', 'country' => 'SK'],
+    'currency' => 'eur', 'shipping_cost' => 0, 'tax_amount' => 0, 'coupon_discount' => 300,
+];
+// gross subtotal 1200, coupon 300 → discounted gross 900;
+// scaled VAT = round(200 * 900/1200) = 150; net = 900 - 150 = 750.
+$f2OrderId = Orders::create($f2Cart, $f2Customer, 'cod');
+$f2Order   = Orders::byId($f2OrderId);
+assert_equals(150, (int)$f2Order['vat_total'], 'F2: VAT_total scaled to post-coupon gross (200→150)');
+assert_equals(750, (int)$f2Order['net_total'], 'F2: net_total = discounted gross − scaled VAT');
+assert_equals(900, (int)$f2Order['vat_total'] + (int)$f2Order['net_total'], 'F2: invariant net+vat == discounted gross');
+
+// --- F5: syncAll wraps each feed's sync() in try/catch so one bad feed does
+//     not abort the whole run (structural guard — network-free).
+$f5Src = file_get_contents(__DIR__ . '/../src/FeedImport.php') ?: '';
+assert_true(
+    (bool)preg_match('/foreach\s*\(\$feeds as \$feed\).*?try\s*\{.*?self::sync\(.*?\}\s*catch\s*\(\\\\Throwable/s', $f5Src),
+    'F5: syncAll isolates per-feed sync() failures in try/catch'
+);
+
+// --- F6: isDue uses a real cron evaluator (cronField/cronMatches), not the
+//     old "*\/N"-only heuristic that ran fixed-time schedules hourly.
+$cf = new ReflectionMethod(FeedImport::class, 'cronField');
+$cf->setAccessible(true);
+assert_true($cf->invoke(null, '*', 5),       'F6: cronField "*" matches any value');
+assert_true($cf->invoke(null, '*/15', 30),   'F6: cronField "*/15" matches 30');
+assert_true(!$cf->invoke(null, '*/15', 7),   'F6: cronField "*/15" rejects 7');
+assert_true($cf->invoke(null, '1-5', 3),     'F6: cronField range "1-5" matches 3');
+assert_true(!$cf->invoke(null, '1-5', 6),    'F6: cronField range "1-5" rejects 6');
+assert_true($cf->invoke(null, '0,15,30,45', 30), 'F6: cronField list matches 30');
+assert_true($cf->invoke(null, '8-18/2', 10), 'F6: cronField step-range "8-18/2" matches 10');
+assert_true(!$cf->invoke(null, '8-18/2', 9), 'F6: cronField step-range "8-18/2" rejects 9');
+
+$cm = new ReflectionMethod(FeedImport::class, 'cronMatches');
+$cm->setAccessible(true);
+$f6Midnight = mktime(0, 0, 0, 6, 2, 2026); // 2026-06-02 00:00
+$f6Noon     = mktime(12, 0, 0, 6, 2, 2026);
+assert_true($cm->invoke(null, ['0', '0', '*', '*', '*'], $f6Midnight), 'F6: cronMatches "0 0 * * *" at midnight');
+assert_true(!$cm->invoke(null, ['0', '0', '*', '*', '*'], $f6Noon),    'F6: cronMatches "0 0 * * *" rejects noon');
+
+$isDue = new ReflectionMethod(FeedImport::class, 'isDue');
+$isDue->setAccessible(true);
+assert_true($isDue->invoke(null, '*/15 * * * *', date('Y-m-d H:i:s', time() - 3600)), 'F6: "*/15 * * * *" due after 1h');
+assert_true(!$isDue->invoke(null, '0 0 * * *', date('Y-m-d H:i:s')), 'F6: daily schedule not due when last_sync is now');
+
+// --- F7: JobQueue::markProcessing is an atomic claim — a second claim of the
+//     same file (already moved by another worker) returns '' instead of a path.
+$f7JobId = JobQueue::push('f7_claim_test', ['x' => 1], 1);
+$f7Pulled = null;
+foreach (JobQueue::pull(200) as $jb) {
+    if (($jb['type'] ?? '') === 'f7_claim_test') { $f7Pulled = $jb; break; }
+}
+assert_true($f7Pulled !== null, 'F7: test job pulled from queue');
+$f7First = JobQueue::markProcessing($f7Pulled);
+assert_true($f7First !== '' && file_exists($f7First), 'F7: first markProcessing claims the job (non-empty path)');
+$f7Second = JobQueue::markProcessing($f7Pulled);
+assert_equals('', $f7Second, 'F7: second markProcessing of an already-claimed job returns "" (no double-run)');
+JobQueue::complete($f7First);
+
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
 if ($failed > 0) {
