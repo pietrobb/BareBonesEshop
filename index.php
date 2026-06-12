@@ -773,6 +773,7 @@ if ($ccCookie === ''):
     fd.append('analytics',cats.analytics?1:0);
     fd.append('marketing',cats.marketing?1:0);
     fd.append('method',method);
+    fd.append('csrf_token','<?= Security::csrfToken() ?>');
     fetch('api.php?action=cookie_consent',{method:'POST',body:fd}).catch(function(){});
     b.parentNode.removeChild(b);
   }

@@ -1123,6 +1123,10 @@ function apiCookieConsent(): array {
         http_response_code(405);
         return ['error' => 'POST required'];
     }
+    if (!Security::csrfValidate()) {
+        http_response_code(403);
+        return ['error' => 'Invalid CSRF token'];
+    }
     $cats = [
         'necessary' => true, // always
         'analytics' => !empty($_POST['analytics']),
