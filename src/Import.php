@@ -437,7 +437,7 @@ class Import {
     }
 
     /** Convert price to cents: "19.90" → 1990. Always treats CSV values as euros. */
-    private static function parsePriceToCents($price): int {
+    public static function parsePriceToCents($price): int {
         if (is_int($price)) return $price; // Already in cents (from code)
         $price = (float)str_replace(',', '.', (string)$price);
         return (int)round($price * 100);

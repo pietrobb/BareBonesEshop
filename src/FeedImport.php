@@ -169,7 +169,23 @@ class FeedImport {
             }
 
             if ($verbose) echo "[{$feed['code']}] Syncing...\n";
-            $results[$feed['code']] = self::sync((int)$feed['id'], $verbose);
+            try {
+                $results[$feed['code']] = self::sync((int)$feed['id'], $verbose);
+            } catch (\Throwable $e) {
+                // F5: isolate per-feed failures (e.g. parseXml throw, network error)
+                // so one bad feed does NOT abort syncAll and skip the remaining feeds.
+                $results[$feed['code']] = [
+                    'feed_id'       => (int)$feed['id'],
+                    'feed_code'     => $feed['code'],
+                    'imported'      => 0,
+                    'stock_updated' => 0,
+                    'skipped'       => 0,
+                    'errors'        => [],
+                    'error'         => 'sync failed: ' . $e->getMessage(),
+                ];
+                Warehouse::updateFeedStatus((int)$feed['id'], 'error: ' . substr($e->getMessage(), 0, 100), 0);
+                if ($verbose) echo "[{$feed['code']}] FAILED: {$e->getMessage()}\n";
+            }
         }
 
         return $results;
@@ -369,7 +385,13 @@ class FeedImport {
 
     // ─── Schedule Check ──────────────────────────────────────
 
-    /** Check if a cron schedule is due based on last_sync time */
+    /**
+     * Check if a cron schedule is due based on last_sync time.
+     * F6: a real cron evaluator. The previous heuristic only understood "*\/N",
+     * so fixed-time schedules ("0 0 * * *", "30 8 * * 1") silently fell back to a
+     * 1-hour interval and ran hourly. We now answer the precise question: did a
+     * minute matching the cron expression occur in the window (last_sync, now]?
+     */
     private static function isDue(string $schedule, string $lastSync): bool {
         $last = strtotime($lastSync);
         if (!$last) return true;
@@ -378,22 +400,62 @@ class FeedImport {
         if (count($parts) !== 5) return true; // invalid schedule → always run
 
         $now = time();
-        $elapsed = $now - $last;
-
-        // Simple heuristic: extract minimum interval from schedule
-        // "0 */6 * * *" → every 6 hours → 21600 seconds
-        // "*/15 * * * *" → every 15 minutes → 900 seconds
-        $minute = $parts[0];
-        $hour = $parts[1];
-
-        if (str_starts_with($minute, '*/')) {
-            $interval = (int)substr($minute, 2) * 60;
-        } elseif (str_starts_with($hour, '*/')) {
-            $interval = (int)substr($hour, 2) * 3600;
-        } else {
-            $interval = 3600; // default: 1 hour
+        // Walk minute-by-minute backwards from now; if a scheduled minute exists
+        // after last_sync, the feed is due. Bounded to ~1 year of look-back so a
+        // rare schedule with no recent match terminates instead of spinning.
+        $cursor = $now - ($now % 60);
+        $limit  = 366 * 24 * 60;
+        for ($i = 0; $i <= $limit; $i++, $cursor -= 60) {
+            if ($cursor <= $last) return false;       // no match in (last, now]
+            if (self::cronMatches($parts, $cursor)) return true;
         }
+        return false;
+    }
 
-        return $elapsed >= $interval;
+    /** True if the 5 cron fields all match the given unix timestamp. */
+    private static function cronMatches(array $parts, int $ts): bool {
+        $domRestricted = ($parts[2] !== '*');
+        $dowRestricted = ($parts[4] !== '*');
+        $domMatch = self::cronField($parts[2], (int)date('j', $ts));
+        $dowMatch = self::cronField($parts[4], (int)date('w', $ts)); // 0=Sun..6=Sat
+        // Vixie-cron rule: when BOTH day-of-month and day-of-week are restricted,
+        // the day matches if EITHER matches; otherwise both must match.
+        $dayMatch = ($domRestricted && $dowRestricted) ? ($domMatch || $dowMatch) : ($domMatch && $dowMatch);
+
+        return self::cronField($parts[0], (int)date('i', $ts))   // minute 0-59
+            && self::cronField($parts[1], (int)date('G', $ts))   // hour 0-23
+            && $dayMatch
+            && self::cronField($parts[3], (int)date('n', $ts));  // month 1-12
+    }
+
+    /** Match a single cron field against a value. Supports *, a, a-b, a,b, *\/n, a-b/n. */
+    private static function cronField(string $field, int $value): bool {
+        foreach (explode(',', $field) as $part) {
+            $part = trim($part);
+            if ($part === '') continue;
+            $step  = 1;
+            $range = $part;
+            if (str_contains($part, '/')) {
+                [$range, $st] = explode('/', $part, 2);
+                $step = max(1, (int)$st);
+            }
+            if ($range === '*') {
+                if ($value % $step === 0) return true;
+                continue;
+            }
+            if (str_contains($range, '-')) {
+                [$lo, $hi] = explode('-', $range, 2);
+                $lo = (int)$lo; $hi = (int)$hi;
+                if ($value >= $lo && $value <= $hi && (($value - $lo) % $step) === 0) return true;
+                continue;
+            }
+            $num = (int)$range;
+            if ($step === 1) {
+                if ($value === $num) return true;
+            } elseif ($value >= $num && (($value - $num) % $step) === 0) {
+                return true;
+            }
+        }
+        return false;
     }
 }

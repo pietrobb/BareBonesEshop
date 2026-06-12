@@ -78,7 +78,13 @@ class JobQueue {
         if (!is_dir($procDir)) mkdir($procDir, 0750, true);
 
         $procFile = $procDir . '/' . basename($job['_file']);
-        rename($job['_file'], $procFile);
+        // Atomic claim: rename() is atomic on the same filesystem. If another
+        // worker already moved this file out of the queue, the source no longer
+        // exists and rename() fails — return '' so the caller skips the job
+        // instead of double-processing it (F7, audit v1.12).
+        if (!@rename($job['_file'], $procFile)) {
+            return '';
+        }
         return $procFile;
     }
 

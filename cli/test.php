@@ -5033,6 +5033,148 @@ assert_true(
     'Admin CSP: cspNonce() returns a stable non-empty per-request nonce'
 );
 
+// ============================================================
+// TEST: Audit v1.12 remediation — Sprint A (F1, F3, F4, F8, F9)
+// ============================================================
+echo "\n--- Audit v1.12 remediation (Sprint A) ---\n";
+
+// --- F1: Import::parsePriceToCents must be PUBLIC so FeedImport price_stock
+//     mode (FeedImport.php:95) can call it cross-class without a fatal Error.
+assert_true(
+    (new ReflectionMethod(Import::class, 'parsePriceToCents'))->isPublic(),
+    'F1: Import::parsePriceToCents is public (FeedImport cross-class call no longer fatals)'
+);
+assert_equals(1990, Import::parsePriceToCents('19,90'), 'F1: parsePriceToCents parses "19,90" → 1990');
+assert_equals(2500, Import::parsePriceToCents(2500), 'F1: parsePriceToCents passes int cents through unchanged');
+
+// --- F3: Security::safeLocalPath blocks open-redirect vectors.
+assert_equals('account.php', Security::safeLocalPath('//evil.com', 'account.php'), 'F3: protocol-relative //evil.com rejected');
+assert_equals('account.php', Security::safeLocalPath('http://evil.com', 'account.php'), 'F3: absolute http URL rejected');
+assert_equals('account.php', Security::safeLocalPath('javascript:alert(1)', 'account.php'), 'F3: javascript: scheme rejected');
+assert_equals('account.php', Security::safeLocalPath('/\\evil.com', 'account.php'), 'F3: backslash protocol-relative /\\ rejected');
+assert_equals('account.php', Security::safeLocalPath('\\\\evil.com', 'account.php'), 'F3: backslash host \\\\evil rejected');
+assert_equals('account.php', Security::safeLocalPath("acc\r\nSet-Cookie: x", 'account.php'), 'F3: CRLF header-injection rejected');
+assert_equals('account.php', Security::safeLocalPath('', 'account.php'), 'F3: empty value falls back');
+assert_equals('account.php?p=privacy', Security::safeLocalPath('account.php?p=privacy', 'fb'), 'F3: same-site relative path allowed');
+assert_equals('/account?x=1', Security::safeLocalPath('/account?x=1', 'fb'), 'F3: single-leading-slash local path allowed');
+
+// --- F4: Orders::create rejects qty<=0 / negative price; stock never inflates.
+$f4Before = (int)$pdo->query("SELECT stock FROM products WHERE id = " . (int)$testProduct['id'])->fetchColumn();
+$f4Rejected = false;
+try {
+    Orders::create([[
+        'product_id'   => $testProduct['id'], 'variant_id' => null,
+        'qty'          => -3, 'price' => $testProduct['price'],
+        'sku'          => $testProduct['sku'], 'name' => $testProduct['name'], 'variant_name' => '',
+    ]], $customer, 'stripe');
+} catch (\RuntimeException $e) {
+    $f4Rejected = true;
+}
+$f4After = (int)$pdo->query("SELECT stock FROM products WHERE id = " . (int)$testProduct['id'])->fetchColumn();
+assert_true($f4Rejected, 'F4: order with only a negative-qty item is rejected (RuntimeException)');
+assert_equals($f4Before, $f4After, 'F4: negative qty does NOT inflate product stock');
+
+// --- F8: apiCookieConsent must CSRF-validate, and the banner must send the token.
+$f8Api = file_get_contents(__DIR__ . '/../api.php') ?: '';
+assert_true(
+    (bool)preg_match('/function apiCookieConsent\(\).*?Security::csrfValidate\(\)/s', $f8Api),
+    'F8: apiCookieConsent() calls Security::csrfValidate()'
+);
+$f8Index = file_get_contents(__DIR__ . '/../index.php') ?: '';
+assert_true(
+    str_contains($f8Index, "fd.append('csrf_token'"),
+    'F8: cookie-consent banner JS sends the csrf_token field'
+);
+
+// --- F9: Security::csvCell neutralizes spreadsheet formula injection.
+assert_equals("'=1+1",       Security::csvCell('=1+1'),       'F9: leading = formula neutralized');
+assert_equals("'+cmd",       Security::csvCell('+cmd'),       'F9: leading + non-numeric neutralized');
+assert_equals("'@SUM(A1)",   Security::csvCell('@SUM(A1)'),   'F9: leading @ neutralized');
+assert_equals("'-cmd|calc",  Security::csvCell('-cmd|calc'),  'F9: leading-dash command neutralized');
+assert_equals('-500',        Security::csvCell('-500'),       'F9: legitimate negative number left intact');
+assert_equals('1990',        Security::csvCell(1990),         'F9: numeric cell unchanged');
+assert_equals('Brake Disc',  Security::csvCell('Brake Disc'), 'F9: plain text unchanged');
+
+// ============================================================
+// TEST: Audit v1.12 remediation — Sprint B (F2, F5, F6, F7)
+// ============================================================
+echo "\n--- Audit v1.12 remediation (Sprint B) ---\n";
+
+// --- F2: coupon order VAT/net snapshot scaled to the POST-coupon gross.
+//     Seed a self-contained product+stock so we control the numbers exactly.
+$f2Cat = (int)$pdo->query("SELECT id FROM categories ORDER BY id LIMIT 1")->fetchColumn();
+$pdo->prepare("INSERT INTO products (sku, slug, product_type, name, category_id, price, stock, status, summary, filter_tags) VALUES ('F2-VAT-SKU','f2-vat-sku','simple','F2 VAT Test',:cat,1200,50,'active','','')")
+    ->execute([':cat' => $f2Cat]);
+$f2Pid = (int)$pdo->lastInsertId();
+$f2Wh  = (int)$pdo->query("SELECT id FROM warehouses WHERE is_default = 1")->fetchColumn();
+$pdo->prepare("INSERT INTO warehouse_stock (warehouse_id, sku, qty, reserved) VALUES (:wh,'F2-VAT-SKU',50,0)")
+    ->execute([':wh' => $f2Wh]);
+
+$f2Cart = [[
+    'product_id' => $f2Pid, 'variant_id' => null, 'qty' => 1, 'price' => 1200,
+    'sku' => 'F2-VAT-SKU', 'name' => 'F2 VAT Test', 'variant_name' => '',
+    'vat_amount' => 200, 'net_amount' => 1000, 'vat_rate' => 20.0, 'vat_class' => 'standard',
+]];
+$f2Customer = [
+    'name' => 'F2 Tester', 'email' => 'f2@test.com', 'phone' => '',
+    'address' => ['street' => 'x', 'city' => 'y', 'zip' => '00000', 'country' => 'SK'],
+    'currency' => 'eur', 'shipping_cost' => 0, 'tax_amount' => 0, 'coupon_discount' => 300,
+];
+// gross subtotal 1200, coupon 300 → discounted gross 900;
+// scaled VAT = round(200 * 900/1200) = 150; net = 900 - 150 = 750.
+$f2OrderId = Orders::create($f2Cart, $f2Customer, 'cod');
+$f2Order   = Orders::byId($f2OrderId);
+assert_equals(150, (int)$f2Order['vat_total'], 'F2: VAT_total scaled to post-coupon gross (200→150)');
+assert_equals(750, (int)$f2Order['net_total'], 'F2: net_total = discounted gross − scaled VAT');
+assert_equals(900, (int)$f2Order['vat_total'] + (int)$f2Order['net_total'], 'F2: invariant net+vat == discounted gross');
+
+// --- F5: syncAll wraps each feed's sync() in try/catch so one bad feed does
+//     not abort the whole run (structural guard — network-free).
+$f5Src = file_get_contents(__DIR__ . '/../src/FeedImport.php') ?: '';
+assert_true(
+    (bool)preg_match('/foreach\s*\(\$feeds as \$feed\).*?try\s*\{.*?self::sync\(.*?\}\s*catch\s*\(\\\\Throwable/s', $f5Src),
+    'F5: syncAll isolates per-feed sync() failures in try/catch'
+);
+
+// --- F6: isDue uses a real cron evaluator (cronField/cronMatches), not the
+//     old "*\/N"-only heuristic that ran fixed-time schedules hourly.
+$cf = new ReflectionMethod(FeedImport::class, 'cronField');
+$cf->setAccessible(true);
+assert_true($cf->invoke(null, '*', 5),       'F6: cronField "*" matches any value');
+assert_true($cf->invoke(null, '*/15', 30),   'F6: cronField "*/15" matches 30');
+assert_true(!$cf->invoke(null, '*/15', 7),   'F6: cronField "*/15" rejects 7');
+assert_true($cf->invoke(null, '1-5', 3),     'F6: cronField range "1-5" matches 3');
+assert_true(!$cf->invoke(null, '1-5', 6),    'F6: cronField range "1-5" rejects 6');
+assert_true($cf->invoke(null, '0,15,30,45', 30), 'F6: cronField list matches 30');
+assert_true($cf->invoke(null, '8-18/2', 10), 'F6: cronField step-range "8-18/2" matches 10');
+assert_true(!$cf->invoke(null, '8-18/2', 9), 'F6: cronField step-range "8-18/2" rejects 9');
+
+$cm = new ReflectionMethod(FeedImport::class, 'cronMatches');
+$cm->setAccessible(true);
+$f6Midnight = mktime(0, 0, 0, 6, 2, 2026); // 2026-06-02 00:00
+$f6Noon     = mktime(12, 0, 0, 6, 2, 2026);
+assert_true($cm->invoke(null, ['0', '0', '*', '*', '*'], $f6Midnight), 'F6: cronMatches "0 0 * * *" at midnight');
+assert_true(!$cm->invoke(null, ['0', '0', '*', '*', '*'], $f6Noon),    'F6: cronMatches "0 0 * * *" rejects noon');
+
+$isDue = new ReflectionMethod(FeedImport::class, 'isDue');
+$isDue->setAccessible(true);
+assert_true($isDue->invoke(null, '*/15 * * * *', date('Y-m-d H:i:s', time() - 3600)), 'F6: "*/15 * * * *" due after 1h');
+assert_true(!$isDue->invoke(null, '0 0 * * *', date('Y-m-d H:i:s')), 'F6: daily schedule not due when last_sync is now');
+
+// --- F7: JobQueue::markProcessing is an atomic claim — a second claim of the
+//     same file (already moved by another worker) returns '' instead of a path.
+$f7JobId = JobQueue::push('f7_claim_test', ['x' => 1], 1);
+$f7Pulled = null;
+foreach (JobQueue::pull(200) as $jb) {
+    if (($jb['type'] ?? '') === 'f7_claim_test') { $f7Pulled = $jb; break; }
+}
+assert_true($f7Pulled !== null, 'F7: test job pulled from queue');
+$f7First = JobQueue::markProcessing($f7Pulled);
+assert_true($f7First !== '' && file_exists($f7First), 'F7: first markProcessing claims the job (non-empty path)');
+$f7Second = JobQueue::markProcessing($f7Pulled);
+assert_equals('', $f7Second, 'F7: second markProcessing of an already-claimed job returns "" (no double-run)');
+JobQueue::complete($f7First);
+
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
 if ($failed > 0) {
