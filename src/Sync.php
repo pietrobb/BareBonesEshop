@@ -2,7 +2,7 @@
 /**
  * BareBones Shop — ERP Sync Orchestration
  * Delta sync: products, stock, orders.
- * Usage: php cli/sync.php (cron: */15 * * * *)
+ * Usage: php cli/sync.php (cron: every 15 minutes)
  */
 class Sync {
     /**
