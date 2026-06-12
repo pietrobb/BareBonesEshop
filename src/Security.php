@@ -86,6 +86,39 @@ class Security {
         return hash_equals($sessionToken, $submitted);
     }
 
+    /**
+     * Sanitize a user-supplied redirect target to a safe same-site path.
+     * Blocks open-redirect vectors: absolute URLs (scheme://), protocol-relative
+     * (//host, /\host), backslash tricks, and header-injection chars. Returns the
+     * original value only if it is a plain local path, otherwise $fallback.
+     */
+    public static function safeLocalPath(?string $path, string $fallback = '/'): string {
+        $path = trim((string)$path);
+        if ($path === '') return $fallback;
+        // Any scheme prefix (http:, https:, javascript:, data:, …) → reject.
+        if (preg_match('~^[a-z][a-z0-9+.\-]*:~i', $path)) return $fallback;
+        // Protocol-relative or backslash-smuggled host → reject.
+        if ($path[0] === '\\') return $fallback;
+        if ($path[0] === '/' && isset($path[1]) && ($path[1] === '/' || $path[1] === '\\')) return $fallback;
+        // Whitelist of safe path chars (also blocks CR/LF header injection).
+        if (!preg_match('~^/?[A-Za-z0-9_\-./?=&%#]+$~', $path)) return $fallback;
+        return $path;
+    }
+
+    /**
+     * Neutralize CSV/spreadsheet formula injection. Prefixes a single quote to
+     * any cell that a spreadsheet would interpret as a formula (=, +, -, @, or a
+     * leading tab/CR), while leaving plain numbers (e.g. "-500") untouched.
+     */
+    public static function csvCell($value): string {
+        $s = (string)$value;
+        if ($s === '') return $s;
+        $first = $s[0];
+        $danger = ($first === '=' || $first === '@' || $first === "\t" || $first === "\r")
+               || (($first === '+' || $first === '-') && !is_numeric($s));
+        return $danger ? "'" . $s : $s;
+    }
+
     // ============================================================
     // Rate limiting — dedicated SQLite DB
     // ============================================================

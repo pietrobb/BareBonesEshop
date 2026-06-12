@@ -85,8 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             [$ok, $c, $err] = Customers::login($email, $password);
             if ($ok) {
-                $next = $_POST['next'] ?? 'account.php';
-                if (!preg_match('~^/?[a-zA-Z0-9_\-./?=&]+$~', $next)) $next = 'account.php';
+                $next = Security::safeLocalPath($_POST['next'] ?? null, 'account.php');
                 header('Location: ' . $next);
                 exit;
             }
@@ -293,7 +292,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'httponly' => false,
             'samesite' => 'Lax',
         ]);
-        header('Location: ' . ($_POST['return_to'] ?? 'account.php?p=privacy'));
+        header('Location: ' . Security::safeLocalPath($_POST['return_to'] ?? null, 'account.php?p=privacy'));
         exit;
     }
 }

@@ -1757,7 +1757,7 @@ function handleExport(): void {
     $out = fopen('php://output', 'w');
     fputcsv($out, ['sku', 'name', 'slug', 'product_type', 'price', 'compare_price', 'stock', 'status', 'summary', 'weight_g']);
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        fputcsv($out, $row);
+        fputcsv($out, array_map([Security::class, 'csvCell'], $row));
     }
     fclose($out);
     exit;
