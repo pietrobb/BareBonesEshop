@@ -5033,6 +5033,68 @@ assert_true(
     'Admin CSP: cspNonce() returns a stable non-empty per-request nonce'
 );
 
+// ============================================================
+// TEST: Audit v1.12 remediation — Sprint A (F1, F3, F4, F8, F9)
+// ============================================================
+echo "\n--- Audit v1.12 remediation (Sprint A) ---\n";
+
+// --- F1: Import::parsePriceToCents must be PUBLIC so FeedImport price_stock
+//     mode (FeedImport.php:95) can call it cross-class without a fatal Error.
+assert_true(
+    (new ReflectionMethod(Import::class, 'parsePriceToCents'))->isPublic(),
+    'F1: Import::parsePriceToCents is public (FeedImport cross-class call no longer fatals)'
+);
+assert_equals(1990, Import::parsePriceToCents('19,90'), 'F1: parsePriceToCents parses "19,90" → 1990');
+assert_equals(2500, Import::parsePriceToCents(2500), 'F1: parsePriceToCents passes int cents through unchanged');
+
+// --- F3: Security::safeLocalPath blocks open-redirect vectors.
+assert_equals('account.php', Security::safeLocalPath('//evil.com', 'account.php'), 'F3: protocol-relative //evil.com rejected');
+assert_equals('account.php', Security::safeLocalPath('http://evil.com', 'account.php'), 'F3: absolute http URL rejected');
+assert_equals('account.php', Security::safeLocalPath('javascript:alert(1)', 'account.php'), 'F3: javascript: scheme rejected');
+assert_equals('account.php', Security::safeLocalPath('/\\evil.com', 'account.php'), 'F3: backslash protocol-relative /\\ rejected');
+assert_equals('account.php', Security::safeLocalPath('\\\\evil.com', 'account.php'), 'F3: backslash host \\\\evil rejected');
+assert_equals('account.php', Security::safeLocalPath("acc\r\nSet-Cookie: x", 'account.php'), 'F3: CRLF header-injection rejected');
+assert_equals('account.php', Security::safeLocalPath('', 'account.php'), 'F3: empty value falls back');
+assert_equals('account.php?p=privacy', Security::safeLocalPath('account.php?p=privacy', 'fb'), 'F3: same-site relative path allowed');
+assert_equals('/account?x=1', Security::safeLocalPath('/account?x=1', 'fb'), 'F3: single-leading-slash local path allowed');
+
+// --- F4: Orders::create rejects qty<=0 / negative price; stock never inflates.
+$f4Before = (int)$pdo->query("SELECT stock FROM products WHERE id = " . (int)$testProduct['id'])->fetchColumn();
+$f4Rejected = false;
+try {
+    Orders::create([[
+        'product_id'   => $testProduct['id'], 'variant_id' => null,
+        'qty'          => -3, 'price' => $testProduct['price'],
+        'sku'          => $testProduct['sku'], 'name' => $testProduct['name'], 'variant_name' => '',
+    ]], $customer, 'stripe');
+} catch (\RuntimeException $e) {
+    $f4Rejected = true;
+}
+$f4After = (int)$pdo->query("SELECT stock FROM products WHERE id = " . (int)$testProduct['id'])->fetchColumn();
+assert_true($f4Rejected, 'F4: order with only a negative-qty item is rejected (RuntimeException)');
+assert_equals($f4Before, $f4After, 'F4: negative qty does NOT inflate product stock');
+
+// --- F8: apiCookieConsent must CSRF-validate, and the banner must send the token.
+$f8Api = file_get_contents(__DIR__ . '/../api.php') ?: '';
+assert_true(
+    (bool)preg_match('/function apiCookieConsent\(\).*?Security::csrfValidate\(\)/s', $f8Api),
+    'F8: apiCookieConsent() calls Security::csrfValidate()'
+);
+$f8Index = file_get_contents(__DIR__ . '/../index.php') ?: '';
+assert_true(
+    str_contains($f8Index, "fd.append('csrf_token'"),
+    'F8: cookie-consent banner JS sends the csrf_token field'
+);
+
+// --- F9: Security::csvCell neutralizes spreadsheet formula injection.
+assert_equals("'=1+1",       Security::csvCell('=1+1'),       'F9: leading = formula neutralized');
+assert_equals("'+cmd",       Security::csvCell('+cmd'),       'F9: leading + non-numeric neutralized');
+assert_equals("'@SUM(A1)",   Security::csvCell('@SUM(A1)'),   'F9: leading @ neutralized');
+assert_equals("'-cmd|calc",  Security::csvCell('-cmd|calc'),  'F9: leading-dash command neutralized');
+assert_equals('-500',        Security::csvCell('-500'),       'F9: legitimate negative number left intact');
+assert_equals('1990',        Security::csvCell(1990),         'F9: numeric cell unchanged');
+assert_equals('Brake Disc',  Security::csvCell('Brake Disc'), 'F9: plain text unchanged');
+
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
 if ($failed > 0) {
