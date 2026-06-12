@@ -69,6 +69,11 @@ do {
         $handler = $handlers[$type] ?? null;
 
         $procFile = JobQueue::markProcessing($job);
+        if ($procFile === '') {
+            // Lost the claim race to another worker — skip silently (F7).
+            if ($verbose) echo "  Skipped (already claimed): {$type} (ID: {$job['id']})\n";
+            continue;
+        }
 
         if ($verbose) echo "  Processing: {$type} (ID: {$job['id']})\n";
 
