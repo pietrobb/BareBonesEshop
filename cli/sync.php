@@ -2,7 +2,7 @@
 /**
  * BareBones Shop — ERP Sync Runner
  * Usage: php cli/sync.php [--verbose]
- * Cron: */15 * * * * php /path/to/cli/sync.php
+ * Cron: every 15 minutes — php /path/to/cli/sync.php
  */
 require_once __DIR__ . '/../src/autoload.php';
 
