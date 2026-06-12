@@ -9,9 +9,10 @@ require_once __DIR__ . '/src/autoload.php';
 // Auth
 Security::adminAuth();
 
-// Security headers
+// Security headers — admin inherits the nonce-based CSP from Security::headers()
+// (script-src 'self' 'nonce-…'); all admin inline <script> carry the request
+// nonce and inline on*= handlers were delegated, so no 'unsafe-inline' is needed.
 Security::headers();
-header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'");
 
 // Admin locale: URL ?lang=xx (persisted in session) → session → system default.
 $storesCfg = Bootstrap::stores();
