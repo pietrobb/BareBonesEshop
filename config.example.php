@@ -1,7 +1,10 @@
 <?php
 /**
- * BareBones Shop — Configuration
- * Single file, all settings.
+ * BareBones Shop — Configuration TEMPLATE
+ *
+ * Copy this file to `config.php` and fill in your own values.
+ * `config.php` is gitignored so your secrets never land in the repo.
+ *   cp config.example.php config.php
  */
 return [
     // Database: 'sqlite' or 'mysql'
