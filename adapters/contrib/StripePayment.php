@@ -18,47 +18,23 @@ class StripePayment implements PaymentAdapter {
      * Returns ['url' => redirect_url, 'session_id' => id]
      */
     public function createSession(array $order): array {
-        $lineItems = [];
-        foreach ($order['items'] ?? [] as $item) {
-            $lineItems[] = [
-                'price_data' => [
-                    'currency' => $order['currency'] ?? 'eur',
-                    'unit_amount' => (int)$item['unit_price'],
-                    'product_data' => [
-                        'name' => $item['name'],
-                    ],
-                ],
-                'quantity' => (int)$item['quantity'],
-            ];
-        }
-
-        // Add shipping as a line item if > 0
-        if (!empty($order['shipping_cost']) && $order['shipping_cost'] > 0) {
-            $lineItems[] = [
-                'price_data' => [
-                    'currency' => $order['currency'] ?? 'eur',
-                    'unit_amount' => (int)$order['shipping_cost'],
-                    'product_data' => ['name' => 'Shipping'],
-                ],
-                'quantity' => 1,
-            ];
-        }
+        $lineItems = $this->buildLineItems($order);
 
         $params = [
             'mode' => 'payment',
             'success_url' => $order['success_url'] ?? '',
             'cancel_url' => $order['cancel_url'] ?? '',
             'client_reference_id' => $order['order_number'] ?? '',
-            'customer_email' => $order['customer_email'] ?? '',
             'metadata' => ['order_id' => (string)($order['order_id'] ?? '')],
         ];
+        $email = (string)($order['customer_email'] ?? '');
+        if (filter_var($email, FILTER_VALIDATE_EMAIL)) $params['customer_email'] = $email;
 
-        // Build nested line_items params for form encoding
-        foreach ($lineItems as $i => $li) {
-            $params["line_items[{$i}][price_data][currency]"] = $li['price_data']['currency'];
-            $params["line_items[{$i}][price_data][unit_amount]"] = $li['price_data']['unit_amount'];
-            $params["line_items[{$i}][price_data][product_data][name]"] = $li['price_data']['product_data']['name'];
-            $params["line_items[{$i}][quantity]"] = $li['quantity'];
+        foreach ($lineItems as $i => $line) {
+            $params["line_items[{$i}][price_data][currency]"] = $line['price_data']['currency'];
+            $params["line_items[{$i}][price_data][unit_amount]"] = $line['price_data']['unit_amount'];
+            $params["line_items[{$i}][price_data][product_data][name]"] = $line['price_data']['product_data']['name'];
+            $params["line_items[{$i}][quantity]"] = $line['quantity'];
         }
 
         $response = $this->apiCall('POST', '/v1/checkout/sessions', $params);
@@ -67,6 +43,55 @@ class StripePayment implements PaymentAdapter {
             'url' => $response['url'] ?? '',
             'session_id' => $response['id'] ?? '',
         ];
+    }
+
+    private function buildLineItems(array $order): array {
+        $currency = strtolower((string)($order['currency'] ?? 'eur'));
+        $expectedTotal = (int)($order['total'] ?? 0);
+        if ($expectedTotal <= 0) {
+            throw new RuntimeException('Stripe Checkout requires a positive order total');
+        }
+
+        $lineItems = [];
+        $lineTotal = 0;
+        foreach ($order['items'] ?? [] as $item) {
+            $quantity = max(1, (int)($item['quantity'] ?? 1));
+            $unitAmount = (int)($item['unit_price'] ?? 0);
+            if ($unitAmount < 0) throw new RuntimeException('Stripe line item amount cannot be negative');
+            $lineItems[] = [
+                'price_data' => [
+                    'currency' => $currency,
+                    'unit_amount' => $unitAmount,
+                    'product_data' => ['name' => (string)($item['name'] ?? 'Item')],
+                ],
+                'quantity' => $quantity,
+            ];
+            $lineTotal += $unitAmount * $quantity;
+        }
+
+        $shippingCost = max(0, (int)($order['shipping_cost'] ?? 0));
+        if ($shippingCost > 0) {
+            $lineItems[] = [
+                'price_data' => [
+                    'currency' => $currency,
+                    'unit_amount' => $shippingCost,
+                    'product_data' => ['name' => 'Shipping'],
+                ],
+                'quantity' => 1,
+            ];
+            $lineTotal += $shippingCost;
+        }
+
+        if ($lineTotal === $expectedTotal && $lineItems) return $lineItems;
+
+        return [[
+            'price_data' => [
+                'currency' => $currency,
+                'unit_amount' => $expectedTotal,
+                'product_data' => ['name' => 'Order ' . (string)($order['order_number'] ?? '')],
+            ],
+            'quantity' => 1,
+        ]];
     }
 
     /**

@@ -1,0 +1,8 @@
+Your downloads are ready
+
+Hello {{customer_name}},
+Your payment for order {{order_number}} was confirmed.
+
+{{#each download_links}}{{label}}: {{url}} ({{validity}})
+{{/each}}
+Keep these private links secure.

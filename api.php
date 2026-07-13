@@ -42,6 +42,7 @@ try {
         'cart_restore'    => apiCartRestore(),
         'cart_enriched'   => apiCartEnriched(),
         'checkout'        => apiCheckout(),
+        'consent_definitions' => apiConsentDefinitions(),
         'shipping_methods'=> apiShippingMethods(),
         'shipping_rates'  => apiShippingRates(),
         'payment_methods' => apiPaymentMethods(),
@@ -385,6 +386,10 @@ function apiCartAdd(): array {
     if (!$product || $product['status'] !== 'active') {
         return ['error' => 'Product not found'];
     }
+    if (!VariantAvailability::isPurchasable($productId, $variantId)) {
+        http_response_code(409);
+        return ['error' => 'Product variant is not available'];
+    }
 
     Cart::add($productId, $variantId, $qty);
 
@@ -518,6 +523,20 @@ function apiActiveStore(): array {
     return $stores[0] ?? [];
 }
 
+function apiConsentDefinitions(): array {
+    if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+        http_response_code(405);
+        return ['error' => 'Method not allowed'];
+    }
+    $country = strtoupper(trim((string)($_GET['country'] ?? '')));
+    $cart = Cart::enriched();
+    $context = [
+        'country' => preg_match('/^[A-Z]{2}$/', $country) ? $country : '',
+        'product_types' => array_values(array_unique(array_column($cart['items'] ?? [], 'product_type'))),
+    ];
+    return ['consents' => array_values(ConsentService::definitions($context))];
+}
+
 function apiCheckout(): array {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         http_response_code(405);
@@ -609,6 +628,17 @@ function apiCheckout(): array {
         return ['error' => 'Cart is empty'];
     }
 
+    $consentContext = [
+        'country' => $country,
+        'product_types' => array_values(array_unique(array_column($cart['items'], 'product_type'))),
+    ];
+    $submittedConsents = is_array($input['consents'] ?? null) ? $input['consents'] : [];
+    $consentErrors = ConsentService::validate($submittedConsents, $consentContext);
+    if ($consentErrors) {
+        http_response_code(422);
+        return ['success' => false, 'error' => 'Required consent missing', 'consent_errors' => $consentErrors];
+    }
+
     // Apply coupon if provided
     $couponCode = trim($input['coupon_code'] ?? '');
     $couponDiscount = 0;
@@ -689,6 +719,13 @@ function apiCheckout(): array {
 
     try {
         $orderId = Orders::create($availableItems, $customer, $paymentMethod, $coupon);
+        ConsentService::record(
+            $orderId,
+            $submittedConsents,
+            $consentContext,
+            Security::clientIp(),
+            (string)($_SERVER['HTTP_USER_AGENT'] ?? '')
+        );
 
         Cart::clear();
 
@@ -698,12 +735,6 @@ function apiCheckout(): array {
         // For Stripe: confirmation email is sent from the webhook after payment is confirmed
         if (empty($selectedPayment['requires_online'])) {
             JobQueue::push('email_send', ['template' => 'order_confirmation', 'to' => $email, 'order_id' => $orderId]);
-        }
-
-        // Admin notification
-        $adminEmail = $cfg['admin_email'] ?? '';
-        if ($adminEmail) {
-            JobQueue::push('email_send', ['template' => 'notify-order', 'to' => $adminEmail, 'order_id' => $orderId], 8);
         }
 
         $result = [
@@ -726,14 +757,16 @@ function apiCheckout(): array {
                     'currency'       => $order['currency'] ?? 'eur',
                     'items'          => $orderItems,
                     'shipping_cost'  => (int)$order['shipping_cost'],
-                    'success_url'    => $baseUrl . '/checkout/success?order=' . $order['order_number'],
-                    'cancel_url'     => $baseUrl . '/checkout/cancel?order=' . $order['order_number'],
+                    'success_url'    => $baseUrl . '/?page=order-done&order=' . rawurlencode($order['order_number']) . '&session_id={CHECKOUT_SESSION_ID}',
+                    'cancel_url'     => $baseUrl . '/checkout/cancel?order=' . rawurlencode($order['order_number']),
                 ], $payment);
                 $result['payment_url'] = $session['url'];
                 $result['session_id'] = $session['session_id'];
 
-                // Store payment session ID on order
+                // Persist the provider session separately so payment_id may later
+                // be replaced by the payment intent without losing ownership proof.
                 if (!empty($session['session_id'])) {
+                    CheckoutSession::bind($orderId, (string)$session['session_id'], 'stripe', session_id());
                     Db::get()->prepare("UPDATE orders SET payment_id = :pid WHERE id = :id")
                         ->execute([':pid' => $session['session_id'], ':id' => $orderId]);
                 }
@@ -807,7 +840,8 @@ function apiWebhookStripe(): array {
 
     try {
         match($event['type']) {
-            'checkout.session.completed' => onPaymentCompleted($event['data']['object'] ?? []),
+            'checkout.session.completed',
+            'checkout.session.async_payment_succeeded' => onPaymentCompleted($event['data']['object'] ?? []),
             'charge.refunded'            => onChargeRefunded($event['data']['object'] ?? []),
             'charge.dispute.created'     => onDisputeCreated($event['data']['object'] ?? []),
             default                      => null,
@@ -824,27 +858,38 @@ function apiWebhookStripe(): array {
 }
 
 function onPaymentCompleted(array $session): void {
+    $sessionId = (string)($session['id'] ?? '');
     $orderId = (int)($session['metadata']['order_id'] ?? 0);
-    if (!$orderId) return;
+    if ($orderId <= 0 && $sessionId !== '') $orderId = CheckoutSession::resolveOrderId($sessionId, 'stripe') ?? 0;
+    if ($orderId <= 0) return;
 
     $order = Orders::byId($orderId);
-    if (!$order || $order['status'] !== 'pending') return;
+    if (!$order) return;
+    if (isset($session['payment_status']) && $session['payment_status'] !== 'paid') return;
+    if (isset($session['amount_total']) && (int)$session['amount_total'] !== (int)$order['total']) {
+        throw new RuntimeException("Stripe amount mismatch for order #{$orderId}");
+    }
+    if (isset($session['currency']) && strtolower((string)$session['currency']) !== strtolower((string)$order['currency'])) {
+        throw new RuntimeException("Stripe currency mismatch for order #{$orderId}");
+    }
 
-    $paymentRef = (string)($session['payment_intent'] ?? $session['id'] ?? '');
-    Orders::setPaymentId($orderId, $paymentRef);
-    PaymentService::transitionPayment($orderId, 'paid', 'checkout.session.completed', (int)($session['amount_total'] ?? $order['total'] ?? 0), 'stripe_legacy_' . ($session['id'] ?? $paymentRef), [
-        'session_id' => $session['id'] ?? '',
-        'payment_id' => $paymentRef,
-    ]);
-    OrderWorkflow::transition($orderId, 'paid', 'Stripe webhook: ' . ($session['id'] ?? ''));
+    $paymentRef = (string)($session['payment_intent'] ?? $sessionId);
+    if ($paymentRef !== '') Orders::setPaymentId($orderId, $paymentRef);
+    if ($sessionId !== '') CheckoutSession::markCompleted($sessionId, 'stripe');
 
-    JobQueue::push('email_send', ['template' => 'order-confirmation', 'to' => $order['customer_email'], 'order_id' => $orderId]);
-
-    // Admin notification
-    $cfg = require __DIR__ . '/config.php';
-    $adminEmail = $cfg['admin_email'] ?? '';
-    if ($adminEmail) {
-        JobQueue::push('email_send', ['template' => 'notify-order', 'to' => $adminEmail, 'order_id' => $orderId], 8);
+    if (($order['payment_status'] ?? 'pending') !== 'paid') {
+        PaymentService::transitionPayment(
+            $orderId,
+            'paid',
+            'checkout.session.completed',
+            (int)($session['amount_total'] ?? $order['total']),
+            'stripe_checkout_' . ($sessionId ?: $paymentRef),
+            ['session_id' => $sessionId, 'payment_id' => $paymentRef]
+        );
+    }
+    $order = Orders::byId($orderId);
+    if ($order && OrderWorkflow::canTransition((string)$order['status'], 'paid')) {
+        OrderWorkflow::transition($orderId, 'paid', 'Stripe webhook: ' . $sessionId);
     }
 }
 
@@ -863,9 +908,26 @@ function onChargeRefunded(array $charge): void {
     AuditLog::log('order_refund', (int)$order['id'], '', (string)$refundedAmount,
         "Stripe refund: {$refundedAmount}/{$orderTotal} cents");
 
-    // Only transition to refunded if fully refunded
-    if ($refundedAmount >= $orderTotal && OrderWorkflow::canTransition($order['status'], 'refunded')) {
-        OrderWorkflow::transition((int)$order['id'], 'refunded', "Stripe full refund: {$refundedAmount} cents");
+    $orderId = (int)$order['id'];
+    $fullRefund = $refundedAmount >= $orderTotal;
+    $targetPaymentStatus = $fullRefund ? 'refunded' : 'partially_refunded';
+    if (($order['payment_status'] ?? '') !== $targetPaymentStatus
+        && PaymentService::canPaymentTransition((string)($order['payment_status'] ?? 'pending'), $targetPaymentStatus)) {
+        PaymentService::transitionPayment(
+            $orderId,
+            $targetPaymentStatus,
+            'charge.refunded',
+            $refundedAmount,
+            'stripe_refund_' . (string)($charge['id'] ?? $paymentIntent) . '_' . $refundedAmount
+        );
+    }
+
+    if ($fullRefund) {
+        if (OrderWorkflow::canTransition((string)$order['status'], 'refunded')) {
+            OrderWorkflow::transition($orderId, 'refunded', "Stripe full refund: {$refundedAmount} cents");
+        } else {
+            FulfillmentDispatcher::queue('refunded', $order);
+        }
     }
 }
 
@@ -878,7 +940,19 @@ function onDisputeCreated(array $dispute): void {
     $order = $stmt->fetch();
     if (!$order) return;
 
-    AuditLog::log('order_dispute', (int)$order['id'], $order['status'], 'disputed', 'Stripe dispute: ' . ($dispute['id'] ?? ''));
+    $orderId = (int)$order['id'];
+    AuditLog::log('order_dispute', $orderId, $order['status'], 'disputed', 'Stripe dispute: ' . ($dispute['id'] ?? ''));
+    if (($order['payment_status'] ?? '') !== 'disputed'
+        && PaymentService::canPaymentTransition((string)($order['payment_status'] ?? 'pending'), 'disputed')) {
+        PaymentService::transitionPayment(
+            $orderId,
+            'disputed',
+            'charge.dispute.created',
+            (int)($dispute['amount'] ?? $order['total']),
+            'stripe_dispute_' . (string)($dispute['id'] ?? $paymentIntent)
+        );
+    }
+    FulfillmentDispatcher::queue('disputed', $order);
 }
 
 if (!function_exists('verifyStripeSignature')) {

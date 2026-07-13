@@ -7,7 +7,7 @@ class OrderWorkflow {
     /** Allowed state transitions */
     private const TRANSITIONS = [
         'pending'    => ['paid', 'cancelled'],
-        'paid'       => ['processing', 'shipped', 'cancelled'],
+        'paid'       => ['processing', 'shipped', 'cancelled', 'refunded'],
         'processing' => ['shipped', 'cancelled'],
         'shipped'    => ['delivered', 'returned'],
         'delivered'  => ['returned'],
@@ -65,6 +65,8 @@ class OrderWorkflow {
                 'refunded'  => self::handleRefund($order),
                 default     => [],
             };
+            $order['status'] = $to;
+            $deferredJobs = array_merge($deferredJobs, FulfillmentDispatcher::dispatch($to, $order));
 
             $db->commit();
         } catch (\Throwable $e) {
@@ -197,6 +199,7 @@ class OrderWorkflow {
      * Refund: return deferred email job
      */
     private static function handleRefund(array $order): array {
+        Orders::restoreStock((int)$order['id']);
         return [
             ['email_send', [
                 'template' => 'refund_issued',

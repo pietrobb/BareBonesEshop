@@ -24,6 +24,7 @@ return [
     // Default locale & currency (stores.json is the source of truth — these are fallbacks only)
     'default_locale'   => 'en',
     'default_currency' => 'eur',
+    'app_url'          => '', // public base URL, e.g. https://shop.example.com
 
     // Catalog
     'per_page' => 24,
@@ -35,7 +36,12 @@ return [
     // Admin
     'admin_user'     => 'admin',
     'admin_password' => '', // password_hash() output — NEVER plaintext
-    'admin_email'    => '', // notification email for new orders
+    'admin_email'    => '', // fallback recipient for paid-order notifications
+    'merchant_notifications' => [
+        'enabled' => true,
+        'recipients' => [], // falls back to admin_email
+        'templates' => ['paid' => 'merchant_order_paid'],
+    ],
 
     // Security
     'trusted_proxies' => [],
@@ -59,6 +65,20 @@ return [
     'stripe_secret_key'      => '',
     'stripe_publishable_key' => '',
     'stripe_webhook_secret'  => '',
+
+    // Digital files are stored below this directory; digital_assets.storage_path
+    // contains only a relative path such as ebooks/manual.pdf.
+    'digital_assets_base_dir' => dirname(__DIR__) . '/private_downloads',
+
+    // Deployments define the exact legal text and version they require. Optional
+    // product_types/countries arrays make a checkbox context-specific.
+    'checkout_consents' => [
+        // 'digital_delivery' => [
+        //     'version' => '2026-01-01', 'required' => true,
+        //     'text' => 'I request immediate delivery of the digital content and acknowledge the loss of my withdrawal right once delivery begins.',
+        //     'url' => '/terms', 'product_types' => ['downloadable'],
+        // ],
+    ],
 
     // Jobs
     'jobs_dir' => __DIR__ . '/jobs',

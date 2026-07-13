@@ -66,7 +66,7 @@ class Cart {
         $products = [];
         if (!empty($productIds)) {
             $ph = implode(',', array_fill(0, count($productIds), '?'));
-            $stmt = $db->prepare("SELECT id, name, slug, images, price, sku, stock, currency, vat_class FROM products WHERE id IN ({$ph}) AND status = 'active'");
+            $stmt = $db->prepare("SELECT id, name, slug, images, price, sku, stock, currency, vat_class, product_type FROM products WHERE id IN ({$ph}) AND status = 'active'");
             $stmt->execute(array_values($productIds));
             while ($row = $stmt->fetch()) $products[(int)$row['id']] = $row;
         }
@@ -75,7 +75,7 @@ class Cart {
         $variants = [];
         if (!empty($variantIds)) {
             $ph = implode(',', array_fill(0, count($variantIds), '?'));
-            $stmt = $db->prepare("SELECT v.id, v.product_id, v.sku, v.name, v.stock, v.price_delta, v.price_absolute FROM variants v WHERE v.id IN ({$ph})");
+            $stmt = $db->prepare("SELECT v.id, v.product_id, v.sku, v.name, v.stock, v.price_delta, v.price_absolute, v.availability FROM variants v WHERE v.id IN ({$ph})");
             $stmt->execute(array_values($variantIds));
             while ($row = $stmt->fetch()) $variants[(int)$row['id']] = $row;
         }
@@ -87,6 +87,8 @@ class Cart {
         foreach ($cart as $key => $item) {
             $product = $products[$item['product_id']] ?? null;
             if (!$product) { unset($_SESSION['cart'][$key]); continue; }
+            $isDigital = VariantAvailability::isDigitalType((string)($product['product_type'] ?? ''));
+            $availability = VariantAvailability::ACTIVE;
 
             if (!empty($item['variant_id'])) {
                 $variant = $variants[$item['variant_id']] ?? null;
@@ -97,6 +99,7 @@ class Cart {
                 $sku = $variant['sku'];
                 $variantName = $variant['name'];
                 $stock = (int)$variant['stock'];
+                $availability = (string)($variant['availability'] ?? VariantAvailability::ACTIVE);
             } else {
                 $price = (int)$product['price'];
                 $sku = $product['sku'];
@@ -112,9 +115,10 @@ class Cart {
             }
             $currencyMismatch = ($currency !== $cartCurrency);
 
-            $qty = min($item['qty'], $stock);
-            $available = $qty > 0;
-            if (!$available) $qty = $item['qty']; // preserve requested qty for display
+            $qty = $isDigital ? 1 : min((int)$item['qty'], $stock);
+            if ($isDigital && (int)$item['qty'] !== 1) $_SESSION['cart'][$key]['qty'] = 1;
+            $available = $availability === VariantAvailability::ACTIVE && ($isDigital || $qty > 0);
+            if (!$available) $qty = (int)$item['qty']; // preserve requested qty for display
 
             $total = $available ? $price * $qty : 0;
             // Only add to subtotal when currency matches — prevents mixed-currency totals
@@ -139,6 +143,8 @@ class Cart {
                 'total'            => $total,
                 'total_formatted'  => I18n::price($total, $currency),
                 'stock'            => $stock,
+                'product_type'     => $product['product_type'] ?? 'simple',
+                'availability'     => $availability,
                 'currency'         => $currency,
                 'available'        => $available,
                 'currency_mismatch' => $currencyMismatch,
@@ -246,18 +252,7 @@ class Cart {
             $variantId = isset($item['variant_id']) && $item['variant_id']
                 ? Security::int($item['variant_id']) : null;
             $qty = max(1, min(99, Security::int($item['qty'] ?? 1)));
-            if ($productId > 0 && Products::byId($productId)) {
-                // Validate variant belongs to this product (if product has variants)
-                if ($variantId) {
-                    $variants = Products::variants($productId);
-                    if (!empty($variants)) {
-                        $valid = false;
-                        foreach ($variants as $v) {
-                            if ((int)$v['id'] === $variantId) { $valid = true; break; }
-                        }
-                        if (!$valid) $variantId = null;
-                    }
-                }
+            if ($productId > 0 && VariantAvailability::isPurchasable($productId, $variantId)) {
                 self::add($productId, $variantId, $qty);
             }
         }

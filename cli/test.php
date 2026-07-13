@@ -215,6 +215,7 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS variants (
     name TEXT NOT NULL DEFAULT '', attrs TEXT NOT NULL DEFAULT '{}',
     price_delta INTEGER NOT NULL DEFAULT 0, price_absolute INTEGER,
     stock INTEGER NOT NULL DEFAULT 0, sort_order INTEGER DEFAULT 0,
+    availability TEXT NOT NULL DEFAULT 'active',
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
 )");
 
@@ -801,7 +802,7 @@ Cart::restore([
 ]);
 $cart = Cart::get();
 assert_true(isset($cart['p_2']), 'Cart::restore restores product');
-assert_true(isset($cart['v_5']), 'Cart::restore restores variant');
+assert_true(!isset($cart['v_5']), 'Cart::restore rejects unknown or mismatched variant');
 assert_equals(3, $cart['p_2']['qty'], 'Cart::restore correct qty');
 
 // Cart email
@@ -2362,6 +2363,13 @@ $paymentMigFile = __DIR__ . '/../migrations/20260425071000_payment_methods_prici
 if (file_exists($paymentMigFile)) {
     $paymentMig = require $paymentMigFile;
     $paymentMig->up($pdo, true);
+}
+
+// Digital commerce tables and variant availability
+$digitalCommerceMigFile = __DIR__ . '/../migrations/20260713093000_digital_commerce_core.php';
+if (file_exists($digitalCommerceMigFile)) {
+    $digitalCommerceMig = require $digitalCommerceMigFile;
+    $digitalCommerceMig->up($pdo, true);
 }
 
 // Shipping tables
@@ -5174,6 +5182,130 @@ assert_true($f7First !== '' && file_exists($f7First), 'F7: first markProcessing 
 $f7Second = JobQueue::markProcessing($f7Pulled);
 assert_equals('', $f7Second, 'F7: second markProcessing of an already-claimed job returns "" (no double-run)');
 JobQueue::complete($f7First);
+
+// ============================================================
+// TEST 60: Reusable digital commerce core
+// ============================================================
+echo "\n--- Test 60: Digital commerce core ---\n";
+
+$digitalDir = __DIR__ . '/../db/digital-test-assets';
+if (!is_dir($digitalDir)) mkdir($digitalDir, 0750, true);
+file_put_contents($digitalDir . '/guide.pdf', '%PDF-1.4 digital test');
+DigitalDelivery::setConfigForTesting([
+    'digital_assets_base_dir' => $digitalDir,
+    'app_url' => 'https://shop.example',
+]);
+
+$pdo->exec("INSERT INTO products (id, category_id, name, slug, sku, product_type, price, currency, status, stock)
+    VALUES (9001, 1, 'Digital Guide', 'digital-guide', 'DIGI-GUIDE', 'downloadable', 999, 'eur', 'active', 0)");
+$pdo->exec("INSERT INTO digital_assets
+    (sku, asset_key, label, storage_path, download_name, content_type, download_limit, expiry_seconds, active)
+    VALUES ('DIGI-GUIDE', 'pdf', 'PDF guide', 'guide.pdf', 'guide.pdf', 'application/pdf', 2, 3600, 1)");
+$_SESSION['cart'] = [];
+Cart::add(9001, null, 5);
+$digitalCart = Cart::enriched();
+assert_equals(1, (int)$digitalCart['items'][0]['qty'], 'Digital: cart normalizes quantity to one');
+assert_equals(1, (int)$_SESSION['cart']['p_9001']['qty'], 'Digital: normalized quantity persists in session');
+Cart::clear();
+
+$digitalOrderId = Orders::create([[
+    'product_id' => 9001, 'variant_id' => null, 'qty' => 5, 'price' => 999,
+    'sku' => 'DIGI-GUIDE', 'name' => 'Digital Guide', 'variant_name' => '',
+]], [
+    'name' => 'Digital Buyer', 'email' => 'digital@example.com', 'currency' => 'eur',
+    'shipping_cost' => 0, 'tax_amount' => 0,
+], 'card');
+$digitalOrderItem = Orders::items($digitalOrderId)[0];
+assert_equals(1, (int)$digitalOrderItem['quantity'], 'Digital: order boundary clamps quantity to one');
+assert_equals(999, (int)Orders::byId($digitalOrderId)['total'], 'Digital: customer is charged for one copy only');
+assert_equals(0, (int)$pdo->query("SELECT stock FROM products WHERE id=9001")->fetchColumn(), 'Digital: order does not decrement stock');
+
+$stripeAdapter = new StripePayment([]);
+$stripeLineItems = (new ReflectionMethod(StripePayment::class, 'buildLineItems'))->invoke($stripeAdapter, [
+    'order_number' => 'DISCOUNTED-1', 'currency' => 'eur', 'total' => 899,
+    'shipping_cost' => 0,
+    'items' => [['name' => 'Digital Guide', 'quantity' => 1, 'unit_price' => 999]],
+]);
+assert_equals(1, count($stripeLineItems), 'Stripe: adjusted order uses one authoritative total line');
+assert_equals(899, (int)$stripeLineItems[0]['price_data']['unit_amount'], 'Stripe: coupon/fee-adjusted line equals orders.total');
+
+PaymentService::updatePaymentStatus($digitalOrderId, 'paid');
+OrderWorkflow::transition($digitalOrderId, 'paid');
+$digitalJobs = array_column(FulfillmentDispatcher::dispatch('paid', Orders::byId($digitalOrderId)), 0);
+assert_true(in_array('digital_fulfill', $digitalJobs, true), 'Digital: paid event dispatches fulfillment job');
+$links = DigitalDelivery::grant($digitalOrderId);
+assert_equals(1, count($links), 'Digital: one entitlement issued for mapped asset');
+$token = (string)parse_url($links[0]['url'], PHP_URL_QUERY);
+parse_str($token, $tokenQuery);
+$rawToken = (string)($tokenQuery['token'] ?? '');
+assert_equals(64, strlen($rawToken), 'Digital: raw token is 64 hex characters');
+$storedHash = (string)$pdo->query("SELECT token_hash FROM digital_entitlements WHERE order_id={$digitalOrderId} ORDER BY id DESC LIMIT 1")->fetchColumn();
+assert_equals(hash('sha256', $rawToken), $storedHash, 'Digital: database stores only SHA-256 token hash');
+assert_true($storedHash !== $rawToken, 'Digital: raw token is not persisted');
+$resolved = DigitalDelivery::resolve($rawToken);
+assert_true($resolved !== null, 'Digital: valid paid token resolves');
+assert_equals(realpath($digitalDir . '/guide.pdf'), DigitalDelivery::resolvedPath($resolved), 'Digital: asset resolves only below configured base directory');
+assert_true(DigitalDelivery::consume((int)$resolved['id']), 'Digital: first download slot consumed atomically');
+assert_true(DigitalDelivery::consume((int)$resolved['id']), 'Digital: second download slot consumed atomically');
+assert_true(!DigitalDelivery::consume((int)$resolved['id']), 'Digital: configured download limit enforced');
+DigitalDelivery::revokeOrder($digitalOrderId, 'test_refund');
+assert_true(DigitalDelivery::resolve($rawToken) === null, 'Digital: revoked token no longer resolves');
+
+ConsentService::setDefinitionsForTesting([
+    'digital_delivery' => [
+        'version' => '2026-07-13', 'required' => true,
+        'text' => 'Immediate digital delivery consent', 'product_types' => ['downloadable'],
+    ],
+]);
+$consentContext = ['country' => 'SK', 'product_types' => ['downloadable']];
+assert_true(isset(ConsentService::validate([], $consentContext)['digital_delivery']), 'Consent: required digital consent is enforced');
+assert_equals([], ConsentService::validate(['digital_delivery' => true], $consentContext), 'Consent: explicit boolean acceptance passes');
+ConsentService::record($digitalOrderId, ['digital_delivery' => true], $consentContext, '127.0.0.1', 'Test Agent');
+$consentRows = ConsentService::forOrder($digitalOrderId);
+assert_equals('2026-07-13', (string)$consentRows[0]['version'], 'Consent: immutable version snapshot stored');
+assert_equals('Immediate digital delivery consent', (string)$consentRows[0]['consent_text'], 'Consent: immutable text snapshot stored');
+assert_true((string)$consentRows[0]['ip_hash'] !== '127.0.0.1', 'Consent: IP stored as privacy-preserving hash');
+ConsentService::setDefinitionsForTesting(null);
+
+CheckoutSession::bind($digitalOrderId, 'cs_test_digital_1', 'stripe', 'browser-session-a');
+assert_equals($digitalOrderId, CheckoutSession::resolveOrderId('cs_test_digital_1'), 'Checkout binding: session resolves order');
+assert_true(CheckoutSession::verifyOwnership($digitalOrderId, 'cs_test_digital_1', 'browser-session-a'), 'Checkout binding: ownership works before webhook race completes');
+CheckoutSession::markCompleted('cs_test_digital_1');
+assert_true(CheckoutSession::verifyOwnership($digitalOrderId, 'cs_test_digital_1', 'browser-session-a'), 'Checkout binding: correct browser session owns result');
+assert_true(!CheckoutSession::verifyOwnership($digitalOrderId, 'cs_test_digital_1', 'browser-session-b'), 'Checkout binding: foreign browser session rejected');
+$pdo->exec("INSERT INTO variants (id, product_id, sku, name, stock, availability) VALUES (9001, 9001, 'TEST-COMING-SOON', 'Future', 5, 'coming_soon')");
+assert_true(!VariantAvailability::isPurchasable(9001, 9001), 'Variants: coming_soon is rejected server-side');
+VariantAvailability::setStatus(9001, VariantAvailability::ACTIVE);
+assert_true(VariantAvailability::isPurchasable(9001, 9001), 'Variants: active digital variant is purchasable');
+$digitalCommerceMig->up($pdo, true);
+$variantIndexes = array_column($pdo->query("PRAGMA index_list(variants)")->fetchAll(PDO::FETCH_ASSOC), 'name');
+assert_true(in_array('idx_variants_availability', $variantIndexes, true), 'Migration: index creation is idempotent on SQLite');
+
+$digitalMail = MailService::render('digital_delivery', 'en', [
+    'order_number' => 'DIGI-1', 'customer_name' => 'Buyer',
+    'download_links' => [['label' => 'Guide', 'url' => 'https://shop.example/download', 'validity' => '7 days']],
+]);
+assert_true(str_contains($digitalMail['html'], 'https://shop.example/download'), 'Digital: delivery email renders secure link');
+
+$pdo->prepare("INSERT INTO merchant_notifications
+    (order_id, event_key, recipient, status, updated_at)
+    VALUES (?, 'stale_test', 'merchant@example.com', 'processing', datetime('now', '-901 seconds'))")
+    ->execute([$digitalOrderId]);
+$merchantClaim = new ReflectionMethod(MerchantNotifier::class, 'claim');
+assert_true($merchantClaim->invoke(null, $digitalOrderId, 'stale_test', 'merchant@example.com'), 'Merchant notification: stale processing claim is recovered');
+assert_true(!$merchantClaim->invoke(null, $digitalOrderId, 'stale_test', 'merchant@example.com'), 'Merchant notification: fresh processing claim is not duplicated');
+
+Orders::setPaymentId($digitalOrderId, 'pi_refund_progression');
+onChargeRefunded(['id' => 'ch_refund_progression', 'payment_intent' => 'pi_refund_progression', 'amount_refunded' => 400]);
+assert_equals('partially_refunded', (string)Orders::byId($digitalOrderId)['payment_status'], 'Stripe refund: first cumulative amount records partial refund');
+onChargeRefunded(['id' => 'ch_refund_progression', 'payment_intent' => 'pi_refund_progression', 'amount_refunded' => 999]);
+$fullyRefundedOrder = Orders::byId($digitalOrderId);
+assert_equals('refunded', (string)$fullyRefundedOrder['payment_status'], 'Stripe refund: later full amount uses a distinct idempotency key');
+assert_equals('refunded', (string)$fullyRefundedOrder['status'], 'Stripe refund: full cumulative refund closes the order');
+
+DigitalDelivery::setConfigForTesting(null);
+@unlink($digitalDir . '/guide.pdf');
+@rmdir($digitalDir);
 
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
