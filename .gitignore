@@ -2,6 +2,7 @@
 db/*.sqlite
 db/*.sqlite-wal
 db/*.sqlite-shm
+db/*.log
 db/.migrations.lock
 
 # Cache
@@ -20,6 +21,10 @@ jobs/failed/*
 !jobs/processing/.gitkeep
 !jobs/completed/.gitkeep
 !jobs/failed/.gitkeep
+jobs/test_*/
+
+# Logs
+logs/
 
 # Uploads
 uploads/thumb/*

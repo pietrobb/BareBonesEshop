@@ -45,6 +45,9 @@ $handlers = [
     'image_resize'      => 'handleImageResize',
     'import_process'    => 'handleImportProcess',
     'invoice_issue'     => 'handleInvoiceIssue',
+    'digital_fulfill'   => 'handleDigitalFulfill',
+    'digital_revoke'    => 'handleDigitalRevoke',
+    'merchant_notify'   => 'handleMerchantNotify',
 ];
 
 // Process loop
@@ -272,6 +275,46 @@ function handleEmailSend(array $payload, array $job): void {
 
     // Delegate to MailService — renders locale template, picks adapter, logs to email_log.
     MailService::send($template, $to, $locale, $vars, $orderId !== null ? (int)$orderId : null);
+}
+
+function handleDigitalFulfill(array $payload, array $job): void {
+    $orderId = (int)($payload['order_id'] ?? 0);
+    if ($orderId <= 0 || !DigitalDelivery::orderHasAssets($orderId)) return;
+
+    $links = DigitalDelivery::grant($orderId);
+    if (!$links) return;
+    $order = Orders::byId($orderId);
+    if (!$order) throw new RuntimeException("Order #{$orderId} not found");
+
+    $formatted = array_map(static function (array $link): array {
+        $validity = $link['expires_at'] === null
+            ? 'no expiry'
+            : date('Y-m-d H:i T', (int)$link['expires_at']);
+        if ($link['download_limit'] !== null) $validity .= ', max ' . (int)$link['download_limit'] . ' downloads';
+        return ['label' => $link['label'], 'url' => $link['url'], 'validity' => $validity];
+    }, $links);
+
+    $result = MailService::send('digital_delivery', (string)$order['customer_email'], (string)($order['locale'] ?? ''), [
+        'order_number' => $order['order_number'],
+        'customer_name' => $order['customer_name'],
+        'download_links' => $formatted,
+    ], $orderId);
+    $ids = array_column($links, 'id');
+    if (($result['status'] ?? '') !== 'sent') {
+        DigitalDelivery::revokeIssued($ids, 'delivery_email_failed');
+        throw new RuntimeException('Digital delivery email failed: ' . ($result['error'] ?? 'unknown error'));
+    }
+    DigitalDelivery::markDelivered($ids);
+}
+
+function handleDigitalRevoke(array $payload, array $job): void {
+    $orderId = (int)($payload['order_id'] ?? 0);
+    if ($orderId > 0) DigitalDelivery::revokeOrder($orderId, (string)($payload['reason'] ?? 'order_reversal'));
+}
+
+function handleMerchantNotify(array $payload, array $job): void {
+    $orderId = (int)($payload['order_id'] ?? 0);
+    if ($orderId > 0) MerchantNotifier::send($orderId, (string)($payload['event'] ?? 'paid'));
 }
 
 function handleStockAlert(array $payload, array $job): void {

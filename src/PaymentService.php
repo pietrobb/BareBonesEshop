@@ -318,15 +318,22 @@ class PaymentService {
             $orderId = $data['metadata']['order_id'] ?? null;
             if ($orderId) return (int)$orderId;
 
+            $sessionId = (string)($data['id'] ?? '');
+            if ($sessionId !== '') {
+                $mappedOrderId = CheckoutSession::resolveOrderId($sessionId, 'stripe');
+                if ($mappedOrderId !== null) return $mappedOrderId;
+            }
+
             $orderNumber = $data['client_reference_id'] ?? null;
             if ($orderNumber) {
-                $row = $db->prepare("SELECT id FROM orders WHERE order_number = :n")->execute([':n' => $orderNumber]);
-                $r   = $db->query("SELECT id FROM orders WHERE order_number = " . $db->quote($orderNumber))->fetch();
-                return $r ? (int)$r['id'] : null;
+                $stmt = $db->prepare("SELECT id FROM orders WHERE order_number = :n LIMIT 1");
+                $stmt->execute([':n' => $orderNumber]);
+                $id = $stmt->fetchColumn();
+                return $id === false ? null : (int)$id;
             }
 
             // Fall back to payment_id match
-            $paymentId = $data['payment_intent'] ?? $data['id'] ?? null;
+            $paymentId = $data['payment_intent'] ?? ($sessionId !== '' ? $sessionId : null);
             if ($paymentId) {
                 $r = $db->query("SELECT id FROM orders WHERE payment_id = " . $db->quote($paymentId) . " LIMIT 1")->fetch();
                 return $r ? (int)$r['id'] : null;

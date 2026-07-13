@@ -1577,6 +1577,12 @@ function processCheckout(): string {
 function renderOrderDone(string $orderNum): string {
     global $e, $price, $t;
     $order = $orderNum !== '' ? Orders::byNumber($orderNum) : null;
+    $checkoutSessionId = Security::clean($_GET['session_id'] ?? '');
+    $paymentSnapshot = $order ? (json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: []) : [];
+    if ($order && !empty($paymentSnapshot['requires_online'])
+        && ($checkoutSessionId === '' || !CheckoutSession::verifyOwnership((int)$order['id'], $checkoutSessionId, session_id()))) {
+        $order = null;
+    }
     ob_start();
     echo '<div class="order-done">';
     echo '<div style="font-size:3em;margin-bottom:16px">✓</div>';

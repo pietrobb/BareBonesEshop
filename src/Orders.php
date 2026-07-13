@@ -22,32 +22,35 @@ class Orders {
             foreach ($cartItems as $item) {
                 // Reject non-positive quantity or negative price: a negative qty would
                 // INCREASE stock (stock - (-n)) and lower the subtotal (price * -n).
-                if ((int)($item['qty'] ?? 0) <= 0 || (int)($item['price'] ?? 0) < 0) {
+                $requestedQty = (int)($item['qty'] ?? 0);
+                if ($requestedQty <= 0 || (int)($item['price'] ?? 0) < 0) {
                     $outOfStock[] = ($item['name'] ?? ($item['sku'] ?? 'item'))
                         . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : '');
                     continue;
                 }
-                if (!empty($item['variant_id'])) {
+                $isDigital = VariantAvailability::isDigitalProduct((int)$item['product_id']);
+                $qty = $isDigital ? 1 : $requestedQty;
+                if (!$isDigital && !empty($item['variant_id'])) {
                     $stmt = $db->prepare("UPDATE variants SET stock = stock - :qty WHERE id = :id AND stock >= :qty");
-                    $stmt->execute([':qty' => $item['qty'], ':id' => $item['variant_id']]);
+                    $stmt->execute([':qty' => $qty, ':id' => $item['variant_id']]);
                     if ($stmt->rowCount() === 0) {
                         $outOfStock[] = $item['name'] . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : '');
                         continue;
                     }
-                } else {
+                } elseif (!$isDigital) {
                     // Use warehouse-based reservation if warehouses exist
                     try {
-                        $allocs = Warehouse::reserve($item['sku'], $item['qty']);
+                        $allocs = Warehouse::reserve($item['sku'], $qty);
                         $warehouseAllocations[$item['sku']] = $allocs;
                         // Also decrement products.stock to keep it in sync
                         $db->prepare("UPDATE products SET stock = stock - :qty WHERE id = :id")
-                           ->execute([':qty' => $item['qty'], ':id' => $item['product_id']]);
+                           ->execute([':qty' => $qty, ':id' => $item['product_id']]);
                     } catch (\RuntimeException $e) {
                         $outOfStock[] = $item['name'] . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : '');
                         continue;
                     }
                 }
-                $total = $item['price'] * $item['qty'];
+                $total = $item['price'] * $qty;
                 $subtotal += $total;
 
                 // Merge warehouse allocations into attrs for restore tracking
@@ -61,7 +64,7 @@ class Orders {
                     'variant_id' => $item['variant_id'] ?? null,
                     'sku'        => $item['sku'],
                     'name'       => $item['name'] . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : ''),
-                    'quantity'   => $item['qty'],
+                    'quantity'   => $qty,
                     'unit_price' => $item['price'],
                     'total'      => $total,
                     'attrs'      => json_encode($itemAttrs),
@@ -391,6 +394,7 @@ class Orders {
                 return; // already restored (or order does not exist)
             }
             foreach ($items as $item) {
+                if (VariantAvailability::isDigitalProduct((int)$item['product_id'])) continue;
                 if (!empty($item['variant_id'])) {
                     $stmt = $db->prepare("UPDATE variants SET stock = stock + :qty WHERE id = :id");
                     $stmt->execute([':qty' => $item['quantity'], ':id' => $item['variant_id']]);

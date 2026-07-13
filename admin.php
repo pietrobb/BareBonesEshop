@@ -62,6 +62,7 @@ $pagePermissions = [
     'feed'       => 'import',
     'shipping'   => 'products.edit',
     'payments'   => 'products.edit',
+    'digital_assets' => 'products.edit',
     'reviews'    => 'products.edit',
     'rma'        => 'products.edit',
     'customers'  => 'customers.view',
@@ -96,6 +97,7 @@ $title = match($page) {
     'feed'       => isset($_GET['id']) ? I18n::t('admin.title.feed_edit') : I18n::t('admin.title.feed_new'),
     'shipping'   => 'Doprava',
     'payments'   => 'Platby',
+    'digital_assets' => 'Digitálne súbory',
     'customers'  => 'Zákazníci',
     'customer'   => 'Zákazník',
     default      => I18n::t('admin.title.default'),
@@ -167,6 +169,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=pages" class="<?= $page==='pages'?'active':'' ?>"><?= esc(I18n::t('admin.nav.cms_pages')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=shipping" class="<?= $page==='shipping'?'active':'' ?>">Doprava</a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=payments" class="<?= $page==='payments'?'active':'' ?>">Platby</a><?php endif; ?>
+    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=digital_assets" class="<?= $page==='digital_assets'?'active':'' ?>">Digitálne súbory</a><?php endif; ?>
     <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=audit" class="<?= $page==='audit'?'active':'' ?>"><?= esc(I18n::t('admin.nav.audit')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('gdpr.view')): ?><a href="admin.php?p=gdpr" class="<?= $page==='gdpr'?'active':'' ?>"><?= esc(I18n::t('admin.nav.gdpr')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=reviews" class="<?= $page==='reviews'?'active':'' ?>">Recenzie</a><?php endif; ?>
@@ -197,6 +200,7 @@ match($page) {
     'feed'       => pageFeed(),
     'shipping'   => pageShipping(),
     'payments'   => pagePayments(),
+    'digital_assets' => pageDigitalAssets(),
     'reviews'    => pageReviews(),
     'rma'        => pageRma(),
     'customers'  => pageCustomers(),
@@ -676,6 +680,8 @@ function pageOrder(): void {
     $latestPaymentTx = $paymentTxs ? $paymentTxs[count($paymentTxs) - 1] : null;
     $logs = AuditLog::forEntity('order_status', $id, 20);
     $addr = json_decode($order['shipping_addr'] ?? '{}', true);
+    $digitalEntitlements = DigitalDelivery::forOrder($id);
+    $orderConsents = ConsentService::forOrder($id);
     ?>
     <h1><?= esc(I18n::t('admin.order.label')) ?> <?= esc($order['order_number']) ?></h1>
 
@@ -760,6 +766,42 @@ function pageOrder(): void {
             <p style="font-size:1.2rem"><strong>Celkom: <?= I18n::price((int)$order['total'], $order['currency']) ?></strong></p>
         </div>
     </div>
+
+    <?php if ($digitalEntitlements): ?>
+    <div class="card">
+        <h3>Digitálne oprávnenia</h3>
+        <table>
+            <tr><th>SKU</th><th>Súbor</th><th>Stav</th><th>Stiahnutia</th><th>Expirácia</th><th>Doručené</th></tr>
+            <?php foreach ($digitalEntitlements as $entitlement): ?>
+            <tr>
+                <td><?= esc($entitlement['sku']) ?></td>
+                <td><?= esc($entitlement['label'] ?: $entitlement['download_name']) ?></td>
+                <td><span class="badge badge-<?= esc($entitlement['status']) ?>"><?= esc($entitlement['status']) ?></span></td>
+                <td><?= (int)$entitlement['download_count'] ?> / <?= $entitlement['download_limit'] === null ? '∞' : (int)$entitlement['download_limit'] ?></td>
+                <td><?= $entitlement['expires_at'] === null ? '—' : esc(date('Y-m-d H:i', (int)$entitlement['expires_at'])) ?></td>
+                <td><?= esc($entitlement['delivered_at'] ?? '—') ?></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+    </div>
+    <?php endif; ?>
+
+    <?php if ($orderConsents): ?>
+    <div class="card">
+        <h3>Súhlasy pri objednávke</h3>
+        <table>
+            <tr><th>Kľúč</th><th>Verzia</th><th>Znenie</th><th>Čas</th></tr>
+            <?php foreach ($orderConsents as $consent): ?>
+            <tr>
+                <td><?= esc($consent['consent_key']) ?></td>
+                <td><?= esc($consent['version']) ?></td>
+                <td><?= esc($consent['consent_text']) ?></td>
+                <td><?= esc($consent['created_at']) ?></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+    </div>
+    <?php endif; ?>
 
     <div class="card">
         <h3>Payment timeline</h3>
@@ -903,6 +945,66 @@ function pageInvoicePdf(): void {
     header('Content-Length: ' . filesize($abs));
     readfile($abs);
     exit;
+}
+
+function pageDigitalAssets(): void {
+    $cfg = require __DIR__ . '/config.php';
+    $baseDir = (string)($cfg['digital_assets_base_dir'] ?? '');
+    $assets = Db::get()->query("SELECT da.*,
+            (SELECT COUNT(*) FROM digital_entitlements de WHERE de.asset_id = da.id) AS entitlement_count
+        FROM digital_assets da ORDER BY da.sku, da.asset_key")->fetchAll();
+    ?>
+    <h1>Digitálne súbory</h1>
+    <div class="card">
+        <p>Súbory musia byť uložené mimo verejného webrootu pod:</p>
+        <p><code><?= esc($baseDir ?: 'NIE JE NASTAVENÉ') ?></code></p>
+        <p class="muted">Do poľa cesta zadajte iba relatívnu cestu, napríklad <code>ebooks/manual.pdf</code>.</p>
+    </div>
+    <div class="card">
+        <h3>Pridať alebo upraviť súbor</h3>
+        <form method="post" action="admin.php?p=digital_assets&action=save">
+            <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+            <input type="hidden" name="asset_id" value="0">
+            <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr))">
+                <div class="form-row"><label>SKU</label><input name="sku" required maxlength="191"></div>
+                <div class="form-row"><label>Kľúč súboru</label><input name="asset_key" value="default" required maxlength="80"></div>
+                <div class="form-row"><label>Názov</label><input name="label" maxlength="191"></div>
+                <div class="form-row"><label>Relatívna cesta</label><input name="storage_path" placeholder="ebooks/manual.pdf" required maxlength="500"></div>
+                <div class="form-row"><label>Názov pri stiahnutí</label><input name="download_name" placeholder="manual.pdf" required maxlength="180"></div>
+                <div class="form-row"><label>Content-Type</label><input name="content_type" value="application/octet-stream" required maxlength="100"></div>
+                <div class="form-row"><label>Limit stiahnutí (0 = bez limitu)</label><input name="download_limit" type="number" min="0" max="10000" value="5"></div>
+                <div class="form-row"><label>Platnosť v dňoch</label><input name="expiry_days" type="number" min="0" max="3650" value="7"></div>
+            </div>
+            <label><input type="checkbox" name="active" value="1" checked> Aktívny</label>
+            <button class="btn btn-primary" type="submit">Uložiť</button>
+        </form>
+    </div>
+    <div class="card">
+        <h3>Mapovania SKU</h3>
+        <?php if (!$assets): ?><p class="muted">Zatiaľ nie je pridaný žiadny digitálny súbor.</p><?php else: ?>
+        <table>
+            <tr><th>SKU</th><th>Kľúč</th><th>Cesta</th><th>Súbor</th><th>Limit / dni</th><th>Stav</th><th>Oprávnenia</th><th></th></tr>
+            <?php foreach ($assets as $asset): ?>
+            <tr>
+                <td><?= esc($asset['sku']) ?></td><td><?= esc($asset['asset_key']) ?></td>
+                <td class="muted"><?= esc($asset['storage_path']) ?></td><td><?= esc($asset['download_name']) ?></td>
+                <td><?= $asset['download_limit'] === null ? '∞' : (int)$asset['download_limit'] ?> / <?= $asset['expiry_seconds'] === null ? '∞' : round((int)$asset['expiry_seconds'] / 86400, 2) ?></td>
+                <td><span class="badge badge-<?= (int)$asset['active'] ? 'active' : 'draft' ?>"><?= (int)$asset['active'] ? 'active' : 'disabled' ?></span></td>
+                <td><?= (int)$asset['entitlement_count'] ?></td>
+                <td>
+                    <form method="post" action="admin.php?p=digital_assets&action=toggle" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                        <input type="hidden" name="asset_id" value="<?= (int)$asset['id'] ?>">
+                        <input type="hidden" name="active" value="<?= (int)$asset['active'] ? 0 : 1 ?>">
+                        <button class="btn btn-sm" type="submit"><?= (int)$asset['active'] ? 'Deaktivovať' : 'Aktivovať' ?></button>
+                    </form>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+        <?php endif; ?>
+    </div>
+    <?php
 }
 
 function pageImport(): void {
@@ -1487,12 +1589,79 @@ function handlePost(string $page, string $action): void {
         'payments:country_delete' => handlePaymentCountryDelete(),
         'payments:shipping_save' => handlePaymentShippingSave(),
         'payments:shipping_delete' => handlePaymentShippingDelete(),
+        'digital_assets:save' => handleDigitalAssetSave(),
+        'digital_assets:toggle' => handleDigitalAssetToggle(),
         'reviews:approve' => handleReviewModerate('approved'),
         'reviews:reject'  => handleReviewModerate('rejected'),
         'rma:status'      => handleRmaStatus(),
         'customer:status' => handleCustomerStatus(),
         default          => null,
     };
+}
+
+function handleDigitalAssetSave(): void {
+    Security::adminRequire('products.edit');
+    $sku = trim((string)($_POST['sku'] ?? ''));
+    $assetKey = trim((string)($_POST['asset_key'] ?? 'default'));
+    $label = trim((string)($_POST['label'] ?? ''));
+    $path = str_replace('\\', '/', trim((string)($_POST['storage_path'] ?? '')));
+    $downloadName = basename(str_replace('\\', '/', trim((string)($_POST['download_name'] ?? ''))));
+    $contentType = trim((string)($_POST['content_type'] ?? 'application/octet-stream'));
+    $submittedLimit = max(0, min(10000, Security::int($_POST['download_limit'] ?? 5)));
+    $downloadLimit = $submittedLimit > 0 ? $submittedLimit : null;
+    $expiryDays = max(0, min(3650, Security::int($_POST['expiry_days'] ?? 7)));
+    $active = !empty($_POST['active']) ? 1 : 0;
+
+    $invalidPath = $path === '' || str_starts_with($path, '/') || preg_match('/^[A-Za-z]:\//', $path)
+        || in_array('..', explode('/', $path), true) || str_contains($path, "\0");
+    if ($sku === '' || strlen($sku) > 191 || !preg_match('/^[A-Za-z0-9._-]{1,191}$/', $sku)
+        || !preg_match('/^[A-Za-z0-9._-]{1,80}$/', $assetKey) || $invalidPath
+        || $downloadName === '' || !preg_match('#^[a-z0-9.+-]+/[a-z0-9.+-]+$#i', $contentType)) {
+        setFlash('err', 'Neplatné údaje digitálneho súboru.');
+        header('Location: admin.php?p=digital_assets');
+        exit;
+    }
+
+    try {
+        $sql = "INSERT INTO digital_assets
+            (sku, asset_key, label, storage_path, download_name, content_type, download_limit, expiry_seconds, active)
+            VALUES (:sku, :asset_key, :label, :storage_path, :download_name, :content_type, :download_limit, :expiry_seconds, :active) "
+            . Db::upsertClause(
+                'sku, asset_key',
+                'label=excluded.label, storage_path=excluded.storage_path, download_name=excluded.download_name, content_type=excluded.content_type, download_limit=excluded.download_limit, expiry_seconds=excluded.expiry_seconds, active=excluded.active, updated_at=' . Db::now(),
+                'label=VALUES(label), storage_path=VALUES(storage_path), download_name=VALUES(download_name), content_type=VALUES(content_type), download_limit=VALUES(download_limit), expiry_seconds=VALUES(expiry_seconds), active=VALUES(active), updated_at=' . Db::now()
+            );
+        Db::get()->prepare($sql)->execute([
+            ':sku' => $sku,
+            ':asset_key' => $assetKey,
+            ':label' => $label,
+            ':storage_path' => $path,
+            ':download_name' => $downloadName,
+            ':content_type' => $contentType,
+            ':download_limit' => $downloadLimit,
+            ':expiry_seconds' => $expiryDays > 0 ? $expiryDays * 86400 : null,
+            ':active' => $active,
+        ]);
+        setFlash('ok', 'Digitálny súbor bol uložený.');
+    } catch (Throwable $e) {
+        error_log('Digital asset save failed: ' . $e->getMessage());
+        setFlash('err', 'Digitálny súbor sa nepodarilo uložiť.');
+    }
+    header('Location: admin.php?p=digital_assets');
+    exit;
+}
+
+function handleDigitalAssetToggle(): void {
+    Security::adminRequire('products.edit');
+    $id = Security::int($_POST['asset_id'] ?? 0);
+    $active = !empty($_POST['active']) ? 1 : 0;
+    if ($id > 0) {
+        Db::get()->prepare("UPDATE digital_assets SET active = :active, updated_at = " . Db::now() . " WHERE id = :id")
+            ->execute([':active' => $active, ':id' => $id]);
+        setFlash('ok', $active ? 'Digitálny súbor bol aktivovaný.' : 'Digitálny súbor bol deaktivovaný.');
+    }
+    header('Location: admin.php?p=digital_assets');
+    exit;
 }
 
 function handleReviewModerate(string $status): void {
@@ -1771,6 +1940,12 @@ function handleOrderStatus(): void {
 
     if (!in_array($newStatus, OrderWorkflow::statuses(), true)) {
         setFlash('err', 'Neplatný stav objednávky.');
+        header("Location: admin.php?p=order&id={$orderId}");
+        exit;
+    }
+    $order = Orders::byId($orderId);
+    if (!$order || ($newStatus === 'paid' && ($order['payment_status'] ?? 'pending') !== 'paid')) {
+        setFlash('err', $order ? 'Najprv potvrďte prijatie platby.' : 'Objednávka neexistuje.');
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }
