@@ -26,6 +26,8 @@ if (!empty($_GET['lang']) && in_array($_GET['lang'], $adminSupportedLocales, tru
 }
 $adminLocale = $_SESSION['admin_locale'] ?? ($storesCfg['default_locale'] ?? 'en');
 I18n::setLocale($adminLocale);
+$adminConfig = require __DIR__ . '/config.php';
+$adminAppName = trim((string)($adminConfig['admin_name'] ?? '')) ?: I18n::t('admin.app_name');
 
 $page = $_GET['p'] ?? 'dashboard';
 $action = $_GET['action'] ?? '';
@@ -44,6 +46,7 @@ if ($page === 'products' && $action === 'export' && ($_SERVER['REQUEST_METHOD'] 
 // Role-based permission map
 $pagePermissions = [
     'dashboard'  => 'reports.view',
+    'sales'      => 'orders.view',
     'products'   => 'products.view',
     'product'    => 'products.edit',
     'orders'     => 'orders.view',
@@ -79,6 +82,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // Render page
 $title = match($page) {
     'dashboard'  => I18n::t('admin.title.dashboard'),
+    'sales'      => I18n::t('admin.title.sales'),
     'products'   => I18n::t('admin.title.products'),
     'product'    => isset($_GET['id']) ? I18n::t('admin.title.product_edit') : I18n::t('admin.title.product_new'),
     'orders'     => I18n::t('admin.title.orders'),
@@ -108,7 +112,7 @@ $title = match($page) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title><?= esc($title) ?> — <?= esc(I18n::t('admin.app_name')) ?></title>
+<title><?= esc($title) ?> — <?= esc($adminAppName) ?></title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,sans-serif;background:#f5f5f5;color:#333;line-height:1.5}
@@ -144,12 +148,15 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
 .pagination{display:flex;gap:.5rem;margin-top:1rem}
 .stock-low{color:#dc2626;font-weight:600}
 .muted{color:#64748b;font-size:.85rem}
+.sales-toolbar{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap}.sales-toolbar .form-row{margin:0}.sales-toolbar input{min-width:220px}
+.table-scroll{overflow-x:auto}.status-ok{color:#047857}.status-warn{color:#b45309}.status-error{color:#b91c1c;font-weight:600}
+@media(max-width:760px){.wrap{display:block}nav{width:100%;display:flex;overflow-x:auto;padding:.5rem}nav h2,nav div{display:none}nav a{white-space:nowrap}main{padding:1rem}.sales-toolbar input{min-width:0;width:100%}.sales-toolbar .form-row{width:100%}}
 </style>
 </head>
 <body>
 <div class="wrap">
 <nav>
-    <h2><?= esc(I18n::t('admin.app_name')) ?></h2>
+    <h2><?= esc($adminAppName) ?></h2>
     <div style="padding:0.3rem 1rem;font-size:0.75rem;color:#94a3b8;margin-bottom:0.5rem"><?= esc(Security::adminUser()) ?> (<?= esc(Security::adminRole()) ?>)</div>
     <div style="padding:0.3rem 1rem;font-size:0.75rem;color:#94a3b8;margin-bottom:0.5rem">
         <?= esc(I18n::t('admin.language')) ?>:
@@ -159,6 +166,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
         <?php endforeach; ?>
     </div>
     <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=dashboard" class="<?= $page==='dashboard'?'active':'' ?>"><?= esc(I18n::t('admin.nav.dashboard')) ?></a><?php endif; ?>
+    <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=sales" class="<?= $page==='sales'?'active':'' ?>"><?= esc(I18n::t('admin.nav.sales')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.view')): ?><a href="admin.php?p=products" class="<?= $page==='products'?'active':'' ?>"><?= esc(I18n::t('admin.nav.products')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=orders" class="<?= $page==='orders'?'active':'' ?>"><?= esc(I18n::t('admin.nav.orders')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('import')): ?><a href="admin.php?p=import" class="<?= $page==='import'?'active':'' ?>"><?= esc(I18n::t('admin.nav.import_csv')) ?></a><?php endif; ?>
@@ -181,6 +189,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
 <?php
 match($page) {
     'dashboard' => pageDashboard(),
+    'sales'     => pageSalesOverview(),
     'products'  => pageProducts(),
     'product'   => pageProduct(),
     'orders'    => pageOrders(),
@@ -242,6 +251,153 @@ match($page) {
 // ============================================================
 // Pages
 // ============================================================
+
+function pageSalesOverview(): void {
+    $db = Db::get();
+    $today = date('Y-m-d 00:00:00');
+
+    $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE created_at >= :today");
+    $stmt->execute([':today' => $today]);
+    $ordersToday = (int)$stmt->fetchColumn();
+
+    $stmt = $db->prepare("SELECT COALESCE(SUM(total), 0) FROM orders WHERE created_at >= :today AND status NOT IN ('cancelled', 'refunded')");
+    $stmt->execute([':today' => $today]);
+    $revenueToday = (int)$stmt->fetchColumn();
+
+    $pendingPayments = (int)$db->query("SELECT COUNT(*) FROM orders WHERE payment_status IN ('pending', 'authorized')")->fetchColumn();
+    $downloadCount = (int)$db->query("SELECT COALESCE(SUM(download_count), 0) FROM digital_entitlements")->fetchColumn();
+    $failedEmails = (int)$db->query("SELECT COUNT(*) FROM email_log WHERE status = 'failed'")->fetchColumn();
+    $failedNotifications = (int)$db->query("SELECT COUNT(*) FROM merchant_notifications WHERE status = 'failed'")->fetchColumn();
+
+    $search = trim((string)($_GET['q'] ?? ''));
+    $period = (string)($_GET['period'] ?? '30');
+    $statusFilter = (string)($_GET['status'] ?? '');
+    $paymentStatusFilter = (string)($_GET['payment_status'] ?? '');
+    $allowedPeriods = ['today', '7', '30', 'all'];
+    if (!in_array($period, $allowedPeriods, true)) $period = '30';
+    if ($statusFilter !== '' && !in_array($statusFilter, OrderWorkflow::statuses(), true)) $statusFilter = '';
+    if ($paymentStatusFilter !== '' && !in_array($paymentStatusFilter, PaymentService::paymentStatuses(), true)) $paymentStatusFilter = '';
+
+    $where = ['1=1'];
+    $params = [];
+    if ($search !== '') {
+        $like = '%' . mb_strtolower($search) . '%';
+        $where[] = '(LOWER(o.order_number) LIKE :q_number OR LOWER(o.customer_name) LIKE :q_name OR LOWER(o.customer_email) LIKE :q_email)';
+        $params[':q_number'] = $like;
+        $params[':q_name'] = $like;
+        $params[':q_email'] = $like;
+    }
+    if ($period !== 'all') {
+        $since = $period === 'today' ? $today : date('Y-m-d H:i:s', strtotime('-' . (int)$period . ' days'));
+        $where[] = 'o.created_at >= :since';
+        $params[':since'] = $since;
+    }
+    if ($statusFilter !== '') {
+        $where[] = 'o.status = :status';
+        $params[':status'] = $statusFilter;
+    }
+    if ($paymentStatusFilter !== '') {
+        $where[] = 'o.payment_status = :payment_status';
+        $params[':payment_status'] = $paymentStatusFilter;
+    }
+    $whereSql = implode(' AND ', $where);
+
+    $pageNumber = max(1, Security::int($_GET['page'] ?? 1));
+    $perPage = 30;
+    $offset = ($pageNumber - 1) * $perPage;
+    $stmt = $db->prepare("SELECT COUNT(*) FROM orders o WHERE {$whereSql}");
+    $stmt->execute($params);
+    $total = (int)$stmt->fetchColumn();
+    $pages = max(1, (int)ceil($total / $perPage));
+
+    $stmt = $db->prepare("SELECT o.*,
+            (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count,
+            (SELECT COUNT(*) FROM digital_entitlements de WHERE de.order_id = o.id) AS entitlement_count,
+            (SELECT COALESCE(SUM(de.download_count), 0) FROM digital_entitlements de WHERE de.order_id = o.id) AS order_download_count,
+            (SELECT el.status FROM email_log el WHERE el.order_id = o.id ORDER BY el.id DESC LIMIT 1) AS email_status
+        FROM orders o
+        WHERE {$whereSql}
+        ORDER BY o.created_at DESC
+        LIMIT :limit OFFSET :offset");
+    foreach ($params as $key => $value) $stmt->bindValue($key, $value, PDO::PARAM_STR);
+    $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+    $stmt->execute();
+    $orders = $stmt->fetchAll();
+
+    $periodLabels = [
+        'today' => I18n::t('admin.sales.period.today'),
+        '7' => I18n::t('admin.sales.period.7_days'),
+        '30' => I18n::t('admin.sales.period.30_days'),
+        'all' => I18n::t('admin.sales.period.all'),
+    ];
+    ?>
+    <div style="display:flex;justify-content:space-between;align-items:start;gap:1rem;flex-wrap:wrap">
+        <div>
+            <h1 style="margin-bottom:.25rem"><?= esc(I18n::t('admin.title.sales')) ?></h1>
+            <p class="muted"><?= esc(I18n::t('admin.sales.live_data')) ?> · <?= esc(I18n::t('admin.sales.updated')) ?> <?= esc(date('Y-m-d H:i')) ?></p>
+        </div>
+        <a class="btn" href="admin.php?p=sales"><?= esc(I18n::t('admin.sales.refresh')) ?></a>
+    </div>
+
+    <div class="grid grid-4" style="margin-top:1rem">
+        <div class="card stat"><div class="num"><?= $ordersToday ?></div><div class="label"><?= esc(I18n::t('admin.stat.orders_today')) ?></div></div>
+        <div class="card stat"><div class="num"><?= I18n::price($revenueToday) ?></div><div class="label"><?= esc(I18n::t('admin.sales.order_value_today')) ?></div></div>
+        <div class="card stat"><div class="num"><?= $pendingPayments ?></div><div class="label"><?= esc(I18n::t('admin.sales.pending_payments')) ?></div></div>
+        <div class="card stat"><div class="num"><?= $downloadCount ?></div><div class="label"><?= esc(I18n::t('admin.sales.total_downloads')) ?></div></div>
+    </div>
+
+    <?php if ($failedEmails || $failedNotifications): ?>
+    <div class="flash flash-err">
+        <?= esc(I18n::t('admin.sales.attention')) ?>: <?= $failedEmails ?> <?= esc(I18n::t('admin.sales.failed_emails')) ?>, <?= $failedNotifications ?> <?= esc(I18n::t('admin.sales.failed_notifications')) ?>.
+    </div>
+    <?php endif; ?>
+
+    <div class="card">
+        <form method="get" class="sales-toolbar">
+            <input type="hidden" name="p" value="sales">
+            <div class="form-row"><label for="sales-q"><?= esc(I18n::t('admin.sales.order_or_customer')) ?></label><input id="sales-q" name="q" value="<?= esc($search) ?>" placeholder="<?= esc(I18n::t('admin.sales.search_placeholder')) ?>"></div>
+            <div class="form-row"><label for="sales-period"><?= esc(I18n::t('admin.sales.period')) ?></label><select id="sales-period" name="period">
+                <?php foreach ($periodLabels as $value => $label): ?><option value="<?= esc($value) ?>" <?= $period === $value ? 'selected' : '' ?>><?= esc($label) ?></option><?php endforeach; ?>
+            </select></div>
+            <div class="form-row"><label for="sales-status"><?= esc(I18n::t('admin.sales.order_status')) ?></label><select id="sales-status" name="status">
+                <option value=""><?= esc(I18n::t('admin.sales.all_statuses')) ?></option>
+                <?php foreach (OrderWorkflow::statuses() as $value): ?><option value="<?= esc($value) ?>" <?= $statusFilter === $value ? 'selected' : '' ?>><?= esc($value) ?></option><?php endforeach; ?>
+            </select></div>
+            <div class="form-row"><label for="sales-payment"><?= esc(I18n::t('admin.sales.payment_status')) ?></label><select id="sales-payment" name="payment_status">
+                <option value=""><?= esc(I18n::t('admin.sales.all_statuses')) ?></option>
+                <?php foreach (PaymentService::paymentStatuses() as $value): ?><option value="<?= esc($value) ?>" <?= $paymentStatusFilter === $value ? 'selected' : '' ?>><?= esc($value) ?></option><?php endforeach; ?>
+            </select></div>
+            <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.sales.show')) ?></button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h3 style="margin-bottom:.75rem"><?= esc(I18n::t('admin.title.orders')) ?> <span class="muted">(<?= $total ?>)</span></h3>
+        <div class="table-scroll"><table>
+            <tr><th><?= esc(I18n::t('admin.order.label')) ?></th><th><?= esc(I18n::t('admin.th.customer')) ?></th><th><?= esc(I18n::t('admin.sales.items')) ?></th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.sales.order_status')) ?></th><th><?= esc(I18n::t('admin.sales.payment_status')) ?></th><th><?= esc(I18n::t('admin.sales.digital')) ?></th><th><?= esc(I18n::t('admin.th.email')) ?></th><th></th></tr>
+            <?php foreach ($orders as $order): ?>
+            <tr>
+                <td><strong><?= esc($order['order_number']) ?></strong><br><span class="muted"><?= esc(substr((string)$order['created_at'], 0, 16)) ?></span></td>
+                <td><?= esc($order['customer_name']) ?><br><span class="muted"><?= esc($order['customer_email']) ?></span></td>
+                <td><?= (int)$order['item_count'] ?> <?= esc(I18n::t('admin.sales.items_short')) ?></td>
+                <td><strong><?= I18n::price((int)$order['total'], $order['currency']) ?></strong></td>
+                <td><span class="badge badge-<?= esc($order['status']) ?>"><?= esc($order['status']) ?></span></td>
+                <td><span class="badge badge-<?= esc($order['payment_status'] ?? 'pending') ?>"><?= esc($order['payment_status'] ?? 'pending') ?></span><br><span class="muted"><?= esc($order['payment_method'] ?? '') ?></span></td>
+                <td><?php if ((int)$order['entitlement_count'] > 0): ?><?= (int)$order['order_download_count'] ?> <?= esc(I18n::t('admin.sales.downloads')) ?><br><span class="muted"><?= (int)$order['entitlement_count'] ?> <?= esc(I18n::t('admin.sales.entitlements')) ?></span><?php else: ?>—<?php endif; ?></td>
+                <td><?php if ($order['email_status']): ?><span class="<?= $order['email_status'] === 'failed' ? 'status-error' : ($order['email_status'] === 'sent' ? 'status-ok' : 'status-warn') ?>"><?= esc($order['email_status']) ?></span><?php else: ?>—<?php endif; ?></td>
+                <td><a class="btn btn-sm" href="admin.php?p=order&id=<?= (int)$order['id'] ?>"><?= esc(I18n::t('admin.sales.detail')) ?></a></td>
+            </tr>
+            <?php endforeach; ?>
+            <?php if (!$orders): ?><tr><td colspan="9" class="muted" style="text-align:center;padding:2rem"><?= esc(I18n::t('admin.sales.no_orders')) ?></td></tr><?php endif; ?>
+        </table></div>
+        <?php
+        $baseQuery = http_build_query(['p' => 'sales', 'q' => $search, 'period' => $period, 'status' => $statusFilter, 'payment_status' => $paymentStatusFilter]);
+        pagination($pageNumber, $pages, 'admin.php?' . $baseQuery);
+        ?>
+    </div>
+    <?php
+}
 
 function pageDashboard(): void {
     $db = Db::get();

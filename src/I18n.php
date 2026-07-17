@@ -6,6 +6,7 @@
 class I18n {
     private static ?string $locale = null;
     private static ?array $lang = null;
+    private static ?array $fallbackLang = null;
     private static ?array $catalog = null;
     private static ?array $stores = null;
     private static ?array $cfg = null;
@@ -131,7 +132,9 @@ class I18n {
             $file = __DIR__ . '/../lang/' . self::locale() . '.php';
             self::$lang = file_exists($file) ? require $file : require __DIR__ . '/../lang/en.php';
         }
-        return self::$lang[$key] ?? $key;
+        if (isset(self::$lang[$key])) return self::$lang[$key];
+        if (self::$fallbackLang === null) self::$fallbackLang = require __DIR__ . '/../lang/en.php';
+        return self::$fallbackLang[$key] ?? $key;
     }
 
     /** All UI translations (for template rendering) */
