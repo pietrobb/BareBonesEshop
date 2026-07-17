@@ -34,6 +34,7 @@ return [
     'cache_ttl' => 3600,
 
     // Admin
+    'admin_name'     => '', // optional admin brand; defaults to the translated BareBonesShop name
     'admin_user'     => 'admin',
     'admin_password' => '', // password_hash() output — NEVER plaintext
     'admin_email'    => '', // fallback recipient for paid-order notifications
