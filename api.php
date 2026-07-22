@@ -457,6 +457,16 @@ function apiShippingRates(): array {
         return ['error' => 'Invalid country'];
     }
     $subtotal = Security::int($_GET['subtotal'] ?? 0);
+    $cart = Cart::enriched();
+    if (cartIsDigitalOnly($cart['items'] ?? [])) {
+        return [
+            'country' => $country,
+            'weight_g' => 0,
+            'volume_cm3' => 0,
+            'delivery_type' => 'digital',
+            'methods' => [digitalDeliveryRate()],
+        ];
+    }
     $weightG = Security::int($_GET['weight_g'] ?? 0);
     $volumeCm3 = Security::int($_GET['volume_cm3'] ?? 0);
     $cod = !empty($_GET['cod']) && $_GET['cod'] !== '0';
@@ -494,13 +504,25 @@ function apiPaymentMethods(): array {
     }
     $amount = Security::int($_GET['amount'] ?? 0);
     $shippingMethod = Security::slug($_GET['shipping_method'] ?? '');
+    $cart = Cart::enriched();
+    $digitalOnly = cartIsDigitalOnly($cart['items'] ?? []);
+    if ($digitalOnly) {
+        $shippingMethod = 'digital';
+        $amount = (int)($cart['subtotal'] ?? $amount);
+    }
+    $methods = $digitalOnly && $amount === 0
+        ? [freeDigitalPayment()]
+        : PaymentService::availableMethods($country, $currency, $amount, $shippingMethod);
+    if ($digitalOnly) {
+        $methods = array_values(array_filter($methods, static fn(array $method): bool => ($method['service_type'] ?? '') !== 'cod'));
+    }
 
     return [
         'country' => $country,
         'currency' => $currency,
         'amount' => $amount,
         'shipping_method' => $shippingMethod,
-        'methods' => PaymentService::availableMethods($country, $currency, $amount, $shippingMethod),
+        'methods' => $methods,
     ];
 }
 
@@ -627,6 +649,18 @@ function apiCheckout(): array {
     if (empty($cart['items'])) {
         return ['error' => 'Cart is empty'];
     }
+    $availableItems = array_values(array_filter($cart['items'], static fn(array $item): bool => $item['available'] ?? true));
+    if (empty($availableItems)) {
+        return ['success' => false, 'error' => 'Žiadne dostupné produkty v košíku.'];
+    }
+    $cart['items'] = $availableItems;
+    $cart['subtotal'] = array_sum(array_column($availableItems, 'total'));
+    $digitalOnly = cartIsDigitalOnly($availableItems);
+    if ($digitalOnly) {
+        $shippingMethod = 'digital';
+    } elseif (trim((string)($input['street'] ?? '')) === '' || trim((string)($input['city'] ?? '')) === '' || trim((string)($input['zip'] ?? '')) === '') {
+        return ['success' => false, 'error' => 'Doručovacia adresa je povinná pri fyzických produktoch.'];
+    }
 
     $consentContext = [
         'country' => $country,
@@ -652,18 +686,26 @@ function apiCheckout(): array {
     }
 
     $metrics = shippingCartMetrics($cart['items']);
-    $totalWeight = $metrics['weight_g'];
-    $totalVolume = $metrics['volume_cm3'];
-    $selectedRate = ShippingService::selectRate($shippingMethod, $country, $totalWeight, $cart['subtotal'], $paymentMethod === 'cod', $totalVolume);
+    $totalWeight = $digitalOnly ? 0 : $metrics['weight_g'];
+    $totalVolume = $digitalOnly ? 0 : $metrics['volume_cm3'];
+    $selectedRate = $digitalOnly
+        ? digitalDeliveryRate()
+        : ShippingService::selectRate($shippingMethod, $country, $totalWeight, $cart['subtotal'], $paymentMethod === 'cod', $totalVolume);
     if (!$selectedRate) {
         return ['success' => false, 'error' => 'Doručenie nie je dostupné do zvolenej krajiny.'];
     }
     $shippingCost = (int)$selectedRate['price'];
     $currency = $cart['items'][0]['currency'] ?? 'eur';
     $paymentBaseAmount = max(0, $cart['subtotal'] - $couponDiscount) + $shippingCost;
-    $selectedPayment = PaymentService::selectMethod($paymentMethod, $country, $currency, $paymentBaseAmount, $selectedRate['method_code']);
-    if (!$selectedPayment) {
-        return ['success' => false, 'error' => 'Platba nie je dostupná pre zvolenú krajinu alebo dopravu.'];
+    $freeDigitalOrder = $digitalOnly && $paymentBaseAmount === 0;
+    if ($freeDigitalOrder) {
+        $paymentMethod = 'free';
+        $selectedPayment = freeDigitalPayment();
+    } else {
+        $selectedPayment = PaymentService::selectMethod($paymentMethod, $country, $currency, $paymentBaseAmount, $selectedRate['method_code']);
+    }
+    if (!$selectedPayment || ($digitalOnly && ($selectedPayment['service_type'] ?? '') === 'cod')) {
+        return ['success' => false, 'error' => 'Platba nie je dostupná pre digitálne doručenie.'];
     }
     $paymentFee = (int)$selectedPayment['fee'];
 
@@ -684,9 +726,9 @@ function apiCheckout(): array {
         'email'          => $email,
         'phone'          => $phone,
         'address'        => [
-            'street'  => trim($input['street'] ?? ''),
-            'city'    => trim($input['city'] ?? ''),
-            'zip'     => trim($input['zip'] ?? ''),
+            'street'  => $digitalOnly ? '' : trim($input['street'] ?? ''),
+            'city'    => $digitalOnly ? '' : trim($input['city'] ?? ''),
+            'zip'     => $digitalOnly ? '' : trim($input['zip'] ?? ''),
             'country' => $country,
         ],
         'currency'       => $currency,
@@ -711,12 +753,6 @@ function apiCheckout(): array {
         ? ['code' => $couponCode, 'discount' => $couponDiscount]
         : null;
 
-    // Filter out unavailable items before order creation
-    $availableItems = array_filter($cart['items'], fn($item) => $item['available'] ?? true);
-    if (empty($availableItems)) {
-        return ['success' => false, 'error' => 'Žiadne dostupné produkty v košíku.'];
-    }
-
     try {
         $orderId = Orders::create($availableItems, $customer, $paymentMethod, $coupon);
         ConsentService::record(
@@ -726,6 +762,10 @@ function apiCheckout(): array {
             Security::clientIp(),
             (string)($_SERVER['HTTP_USER_AGENT'] ?? '')
         );
+        if ($freeDigitalOrder) {
+            PaymentService::updatePaymentStatus($orderId, 'paid');
+            OrderWorkflow::transition($orderId, 'paid', 'Bezplatná digitálna objednávka');
+        }
 
         Cart::clear();
 
@@ -733,7 +773,7 @@ function apiCheckout(): array {
         $orderItems = Orders::items($orderId);
         // For COD/bank_transfer: send confirmation immediately (no webhook will fire)
         // For Stripe: confirmation email is sent from the webhook after payment is confirmed
-        if (empty($selectedPayment['requires_online'])) {
+        if (!$freeDigitalOrder && empty($selectedPayment['requires_online'])) {
             JobQueue::push('email_send', ['template' => 'order_confirmation', 'to' => $email, 'order_id' => $orderId]);
         }
 
@@ -782,6 +822,41 @@ function apiCheckout(): array {
         Cart::removeUnavailable([]);
         return ['success' => false, 'error' => $e->getMessage()];
     }
+}
+
+function cartIsDigitalOnly(array $items): bool {
+    if (empty($items)) return false;
+    foreach ($items as $item) {
+        if (!VariantAvailability::isDigitalType((string)($item['product_type'] ?? ''))) return false;
+    }
+    return true;
+}
+
+function digitalDeliveryRate(): array {
+    return [
+        'method_code' => 'digital',
+        'carrier' => 'digital',
+        'label' => 'Elektronicky — odkaz na stiahnutie e-mailom',
+        'description' => 'Bez fyzickej dopravy',
+        'service_type' => 'digital',
+        'zone_code' => 'digital',
+        'price' => 0,
+        'cod_surcharge' => 0,
+        'delivery_days' => 'ihneď po úhrade',
+        'cod' => false,
+    ];
+}
+
+function freeDigitalPayment(): array {
+    return [
+        'code' => 'free',
+        'provider' => 'none',
+        'label' => 'Bez platby — objednávka je zdarma',
+        'description' => 'Bezplatná digitálna objednávka',
+        'service_type' => 'free',
+        'requires_online' => false,
+        'fee' => 0,
+    ];
 }
 
 function shippingCartMetrics(array $items): array {

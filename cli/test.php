@@ -2664,6 +2664,9 @@ $_POST = [
     'name' => 'Online Checkout Customer',
     'email' => 'checkout-initiate@example.com',
     'phone' => '+421900000099',
+    'street' => 'Testovacia 1',
+    'city' => 'Bratislava',
+    'zip' => '811 01',
     'country' => 'SK',
     'shipping_method' => 'packeta',
     'payment_method' => 'card',
@@ -4622,6 +4625,9 @@ $p0Checkout = function (array $overrides) {
         'name'            => 'P0 Regression',
         'email'           => 'p0@test.com',
         'phone'           => '',
+        'street'          => 'Test Street 1',
+        'city'            => 'Bratislava',
+        'zip'             => '811 01',
         'country'         => $country,
         'shipping_method' => (string)($rates[0]['method_code'] ?? ''),
         'payment_method'  => 'p0pay',
@@ -5206,6 +5212,59 @@ Cart::add(9001, null, 5);
 $digitalCart = Cart::enriched();
 assert_equals(1, (int)$digitalCart['items'][0]['qty'], 'Digital: cart normalizes quantity to one');
 assert_equals(1, (int)$_SESSION['cart']['p_9001']['qty'], 'Digital: normalized quantity persists in session');
+
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$_GET = ['country' => 'SK', 'subtotal' => '999'];
+$digitalRates = apiShippingRates();
+assert_equals(1, count($digitalRates['methods']), 'Digital checkout: exposes exactly one delivery method');
+assert_equals('digital', (string)$digitalRates['methods'][0]['method_code'], 'Digital checkout: uses electronic delivery');
+assert_equals(0, (int)$digitalRates['methods'][0]['price'], 'Digital checkout: electronic delivery is free');
+$_GET = ['country' => 'SK', 'currency' => 'eur', 'amount' => '999', 'shipping_method' => 'packeta'];
+$digitalPayments = apiPaymentMethods();
+$digitalPaymentCodes = array_column($digitalPayments['methods'], 'code');
+assert_true(!in_array('cod', $digitalPaymentCodes, true), 'Digital checkout: COD is never offered');
+assert_true(in_array('card', $digitalPaymentCodes, true), 'Digital checkout: card payment remains available');
+
+ConsentService::setDefinitionsForTesting([]);
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_SERVER['REMOTE_ADDR'] = '127.0.0.60';
+$_SESSION['csrf_token'] = 'digital-checkout-test';
+$_POST = [
+    'csrf_token' => 'digital-checkout-test',
+    'name' => 'Digital Buyer',
+    'email' => 'digital-checkout@example.com',
+    'country' => 'SK',
+    'shipping_method' => 'balik-adresa',
+    'payment_method' => 'cod',
+];
+$digitalCod = apiCheckout();
+assert_true(empty($digitalCod['success']), 'Digital checkout: server rejects forged COD and physical shipping');
+
+$pdo->exec("UPDATE products SET price = 0 WHERE id = 9001");
+Cart::clear();
+Cart::add(9001, null, 1);
+$_SERVER['REMOTE_ADDR'] = '127.0.0.61';
+$_SESSION['csrf_token'] = 'free-digital-checkout-test';
+$_POST = [
+    'csrf_token' => 'free-digital-checkout-test',
+    'name' => 'Free Digital Buyer',
+    'email' => 'free-digital@example.com',
+    'country' => 'SK',
+    'shipping_method' => 'digital',
+    'payment_method' => 'free',
+];
+$freeDigitalCheckout = apiCheckout();
+assert_true(!empty($freeDigitalCheckout['success']), 'Digital checkout: zero-total order succeeds without a payment gateway');
+$freeDigitalOrder = Orders::byId((int)($freeDigitalCheckout['order_id'] ?? 0));
+assert_equals(0, (int)($freeDigitalOrder['shipping_cost'] ?? -1), 'Digital checkout: zero-total order has no shipping charge');
+assert_equals('digital', (string)($freeDigitalOrder['shipping_method'] ?? ''), 'Digital checkout: order stores electronic delivery snapshot');
+assert_equals('free', (string)($freeDigitalOrder['payment_method'] ?? ''), 'Digital checkout: zero-total order stores no-payment method');
+assert_equals('paid', (string)($freeDigitalOrder['payment_status'] ?? ''), 'Digital checkout: zero-total order is immediately paid');
+assert_equals('paid', (string)($freeDigitalOrder['status'] ?? ''), 'Digital checkout: zero-total order triggers fulfillment');
+$pdo->exec("UPDATE products SET price = 999 WHERE id = 9001");
+ConsentService::setDefinitionsForTesting(null);
+$_GET = [];
+$_POST = [];
 Cart::clear();
 
 $digitalOrderId = Orders::create([[
