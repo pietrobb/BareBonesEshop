@@ -5229,6 +5229,105 @@ $stripeLineItems = (new ReflectionMethod(StripePayment::class, 'buildLineItems')
 assert_equals(1, count($stripeLineItems), 'Stripe: adjusted order uses one authoritative total line');
 assert_equals(899, (int)$stripeLineItems[0]['price_data']['unit_amount'], 'Stripe: coupon/fee-adjusted line equals orders.total');
 
+$stripeManagedConfig = [
+    'stripe_checkout' => [
+        'metadata_app' => 'barebones-test',
+        'managed_payments' => [
+            'enabled' => true,
+            'tax_behavior' => 'inclusive',
+            'excluded_billing_countries' => ['SK', 'CZ'],
+            'eligible_product_types' => ['downloadable'],
+        ],
+        'tax_codes' => [
+            'default' => '',
+            'by_sku' => [],
+            'by_product_type' => ['downloadable' => 'txcd_10103000'],
+            'shipping' => '',
+        ],
+    ],
+];
+$stripeCapture = new class($stripeManagedConfig) extends StripePayment {
+    public array $request = [];
+    protected function apiCall(string $method, string $endpoint, array $params = []): array {
+        $this->request = compact('method', 'endpoint', 'params');
+        return ['id' => 'cs_test_hybrid', 'url' => 'https://checkout.stripe.test/session'];
+    }
+    public function verifySignature(string $payload, string $sigHeader): bool {
+        return true;
+    }
+};
+$stripeOrder = [
+    'order_id' => 9001,
+    'order_number' => 'DIGITAL-DE-1',
+    'currency' => 'eur',
+    'total' => 999,
+    'shipping_cost' => 0,
+    'customer_email' => 'buyer@example.com',
+    'billing_country' => 'DE',
+    'is_all_digital' => true,
+    'success_url' => 'https://shop.example/success',
+    'cancel_url' => 'https://shop.example/cancel',
+    'items' => [[
+        'sku' => 'DIGI-GUIDE', 'name' => 'Digital Guide', 'quantity' => 1,
+        'unit_price' => 999, 'product_type' => 'downloadable',
+    ]],
+];
+$managedSession = $stripeCapture->createSession($stripeOrder);
+$managedParams = $stripeCapture->request['params'];
+assert_equals('managed_payments', $managedSession['checkout_mode'], 'Stripe hybrid: eligible foreign digital order uses Managed Payments');
+assert_equals('true', $managedParams['managed_payments']['enabled'], 'Stripe hybrid: Managed Payments is enabled per Checkout Session');
+assert_equals('required', $managedParams['billing_address_collection'], 'Stripe hybrid: Managed Payments requires billing address collection');
+assert_equals('barebones-test', $managedParams['metadata']['app'], 'Stripe hybrid: Checkout Session carries metadata app marker');
+assert_equals('managed_payments', $managedParams['metadata']['order_mode'], 'Stripe hybrid: Checkout Session carries order mode marker');
+assert_equals('barebones-test', $managedParams['payment_intent_data']['metadata']['app'], 'Stripe hybrid: PaymentIntent carries app marker for downstream webhooks');
+assert_equals('txcd_10103000', $managedParams['line_items[0][price_data][product_data][tax_code]'], 'Stripe hybrid: product tax code is sent inline');
+assert_equals('inclusive', $managedParams['line_items[0][price_data][tax_behavior]'], 'Stripe hybrid: configured inclusive tax behavior prevents tax being added twice');
+
+$stripeOrder['billing_country'] = 'SK';
+$standardSession = $stripeCapture->createSession($stripeOrder);
+$standardParams = $stripeCapture->request['params'];
+assert_equals('standard', $standardSession['checkout_mode'], 'Stripe hybrid: excluded billing country uses standard Checkout');
+assert_true(!isset($standardParams['managed_payments']), 'Stripe hybrid: standard Checkout omits Managed Payments parameter');
+assert_true(!isset($standardParams['line_items[0][price_data][tax_behavior]']), 'Stripe hybrid: standard Checkout omits Managed Payments tax behavior');
+assert_equals('standard', $standardParams['metadata']['order_mode'], 'Stripe hybrid: standard order mode is marked');
+
+$stripeOrder['billing_country'] = 'DE';
+$stripeOrder['is_all_digital'] = false;
+$stripeOrder['items'][] = [
+    'sku' => 'PHYSICAL-BOOK', 'name' => 'Physical Book', 'quantity' => 1,
+    'unit_price' => 1000, 'product_type' => 'simple',
+];
+$stripeOrder['total'] = 1999;
+$mixedSession = $stripeCapture->createSession($stripeOrder);
+assert_equals('standard', $mixedSession['checkout_mode'], 'Stripe hybrid: mixed cart uses standard Checkout');
+assert_true(!isset($stripeCapture->request['params']['managed_payments']), 'Stripe hybrid: mixed cart never enables Managed Payments');
+
+$stripeOrder['items'] = [[
+    'sku' => 'PHYSICAL-BOOK', 'name' => 'Physical Book', 'quantity' => 1,
+    'unit_price' => 1000, 'product_type' => 'simple',
+]];
+$stripeOrder['total'] = 1000;
+$physicalSession = $stripeCapture->createSession($stripeOrder);
+assert_equals('standard', $physicalSession['checkout_mode'], 'Stripe hybrid: physical cart uses standard Checkout');
+assert_true(!isset($stripeCapture->request['params']['managed_payments']), 'Stripe hybrid: physical cart never enables Managed Payments');
+
+$foreignWebhook = PaymentService::handleWebhook(
+    rawPayload: '{}',
+    sigHeader: 'test',
+    parsedPayload: [
+        'id' => 'evt_foreign_app', 'type' => 'checkout.session.completed',
+        'data' => ['object' => ['id' => 'cs_foreign', 'metadata' => ['app' => 'another-app']]],
+    ],
+    gateway: $stripeCapture,
+    providerName: 'stripe',
+);
+assert_true(!empty($foreignWebhook['ignored']) && empty($foreignWebhook['handled']), 'Stripe webhook: foreign app is filtered before processing');
+$matchingWebhook = $stripeCapture->handleWebhook([
+    'id' => 'evt_matching_app', 'type' => 'checkout.session.completed',
+    'data' => ['object' => ['metadata' => ['app' => 'barebones-test']]],
+]);
+assert_true(empty($matchingWebhook['ignored']), 'Stripe webhook: matching app is accepted');
+
 PaymentService::updatePaymentStatus($digitalOrderId, 'paid');
 OrderWorkflow::transition($digitalOrderId, 'paid');
 $digitalJobs = array_column(FulfillmentDispatcher::dispatch('paid', Orders::byId($digitalOrderId)), 0);

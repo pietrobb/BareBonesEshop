@@ -716,6 +716,16 @@ function apiCheckout(): array {
     if (empty($availableItems)) {
         return ['success' => false, 'error' => 'Žiadne dostupné produkty v košíku.'];
     }
+    $isAllDigital = true;
+    $paymentItemContext = [];
+    foreach ($availableItems as $item) {
+        $productType = (string)($item['product_type'] ?? '');
+        $isAllDigital = $isAllDigital && VariantAvailability::isDigitalType($productType);
+        $paymentItemContext[(int)$item['product_id']] = [
+            'product_type' => $productType,
+            'stripe_tax_code' => (string)($item['stripe_tax_code'] ?? ''),
+        ];
+    }
 
     try {
         $orderId = Orders::create($availableItems, $customer, $paymentMethod, $coupon);
@@ -731,6 +741,14 @@ function apiCheckout(): array {
 
         $order = Orders::byId($orderId);
         $orderItems = Orders::items($orderId);
+        foreach ($orderItems as &$orderItem) {
+            $context = $paymentItemContext[(int)$orderItem['product_id']] ?? [];
+            $orderItem['product_type'] = (string)($context['product_type'] ?? '');
+            if (!empty($context['stripe_tax_code'])) {
+                $orderItem['stripe_tax_code'] = (string)$context['stripe_tax_code'];
+            }
+        }
+        unset($orderItem);
         // For COD/bank_transfer: send confirmation immediately (no webhook will fire)
         // For Stripe: confirmation email is sent from the webhook after payment is confirmed
         if (empty($selectedPayment['requires_online'])) {
@@ -754,6 +772,8 @@ function apiCheckout(): array {
                     'order_number'   => $order['order_number'],
                     'total'          => (int)$order['total'],
                     'customer_email' => $email,
+                    'billing_country'=> $country,
+                    'is_all_digital' => $isAllDigital,
                     'currency'       => $order['currency'] ?? 'eur',
                     'items'          => $orderItems,
                     'shipping_cost'  => (int)$order['shipping_cost'],
@@ -762,6 +782,7 @@ function apiCheckout(): array {
                 ], $payment);
                 $result['payment_url'] = $session['url'];
                 $result['session_id'] = $session['session_id'];
+                $result['checkout_mode'] = $session['checkout_mode'] ?? 'standard';
 
                 // Persist the provider session separately so payment_id may later
                 // be replaced by the payment intent without losing ownership proof.
@@ -832,6 +853,11 @@ function apiWebhookStripe(): array {
     if (!$event || empty($event['id']) || empty($event['type'])) {
         http_response_code(400);
         return ['error' => 'Invalid payload'];
+    }
+
+    $stripeEvent = (new StripePayment($cfg))->handleWebhook($event);
+    if (!empty($stripeEvent['ignored'])) {
+        return ['status' => 'ignored'];
     }
 
     if (Idempotency::webhookProcessed($event['id'])) {
@@ -1055,7 +1081,9 @@ function apiWebhookPayment(): array {
         return ['error' => 'Processing failed'];
     }
 
-    return ['status' => $result['duplicate'] ?? false ? 'already_processed' : 'ok'];
+    return ['status' => !empty($result['ignored'])
+        ? 'ignored'
+        : (!empty($result['duplicate']) ? 'already_processed' : 'ok')];
 }
 
 function apiWebhookShipping(): array {

@@ -176,6 +176,9 @@ class PaymentService {
         $eventType = $event['event_type'] ?? '';
         $eventId   = (string)($event['event_id'] ?? '');
         $data      = $event['data'] ?? [];
+        if (!empty($event['ignored'])) {
+            return ['handled' => false, 'event_type' => $eventType, 'order_id' => null, 'ignored' => true];
+        }
 
         // 3. Idempotency — skip already-processed events
         // webhookProcessed() atomically INSERTs the event_id; returns true if duplicate

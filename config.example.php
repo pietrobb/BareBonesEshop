@@ -66,6 +66,27 @@ return [
     'stripe_secret_key'      => '',
     'stripe_publishable_key' => '',
     'stripe_webhook_secret'  => '',
+    'stripe_checkout' => [
+        // Included as metadata[app] on Checkout Sessions and PaymentIntents.
+        // When non-empty, Stripe webhooks without this exact value are ignored.
+        'metadata_app' => 'barebones', // customize when one Stripe account serves multiple applications
+        'managed_payments' => [
+            'enabled' => false,
+            'tax_behavior' => 'inclusive', // BareBones catalog prices include VAT by default
+            'excluded_billing_countries' => ['SK', 'CZ'],
+            'eligible_product_types' => ['downloadable', 'digital'],
+        ],
+        // Stripe Product tax codes. Resolution order: line item override, SKU,
+        // product type, default. Managed Payments requires every line to resolve.
+        'tax_codes' => [
+            'default' => '',
+            'by_sku' => [],
+            'by_product_type' => [
+                // 'downloadable' => 'txcd_10103000',
+            ],
+            'shipping' => '',
+        ],
+    ],
 
     // Digital files are stored below this directory; digital_assets.storage_path
     // contains only a relative path such as ebooks/manual.pdf.
