@@ -16,6 +16,7 @@
                 "city": "Bratislava",
                 "zip": "811 01",
                 "country": "SK",
+                "vat_registered": true,
                 "ico": "12345678",
                 "dic": "1020304050",
                 "ic_dph": "SK1020304050",

@@ -25,7 +25,7 @@ if (!$product) {
 // Archived products → 410 Gone with related alternatives
 if ($product['status'] === 'archived') {
     http_response_code(410);
-    $related = Products::related((int)$product['id'], 4);
+    $related = Products::curatedRelated((int)$product['id'], 4) ?: Products::related((int)$product['id'], 4);
     $related = array_map(fn($p) => Products::enrich(I18n::product($p)), $related);
     echo Template::page('product-gone', [
         'product' => $product,
@@ -41,7 +41,7 @@ $product['attrs_list'] = Products::attrs((int)$product['id']);
 $product['variants'] = Products::variants((int)$product['id']);
 
 // Related products
-$related = Products::related((int)$product['id'], 4);
+$related = Products::curatedRelated((int)$product['id'], 4) ?: Products::related((int)$product['id'], 4);
 $related = array_map(fn($p) => Products::enrich(I18n::product($p)), $related);
 
 // Approved reviews + aggregate rating (storefront display + JSON-LD AggregateRating)

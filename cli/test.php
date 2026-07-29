@@ -181,6 +181,16 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS products (
 $pdo->exec("CREATE INDEX IF NOT EXISTS idx_prod_category ON products(category_id, status, price)");
 try { $pdo->exec("ALTER TABLE products ADD COLUMN vat_class TEXT DEFAULT 'standard'"); } catch (\PDOException $e) {}
 
+$pdo->exec("CREATE TABLE IF NOT EXISTS product_related_products (
+    product_id INTEGER NOT NULL,
+    related_product_id INTEGER NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (product_id, related_product_id),
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+    FOREIGN KEY (related_product_id) REFERENCES products(id) ON DELETE CASCADE
+)");
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_product_related_sort ON product_related_products(product_id, sort_order)");
+
 $pdo->exec("CREATE VIRTUAL TABLE IF NOT EXISTS products_fts USING fts5(
     name, sku, summary, tags, filter_tags,
     content=products, content_rowid=id,
@@ -4389,6 +4399,11 @@ assert_equals('SK', $sc['rate_country'], 'VAT scenario: sub-threshold rate_count
 // 51.12 — export
 $sc = VatService::resolveScenario(['seller_country'=>'SK','customer_country'=>'US']);
 assert_equals('export', $sc['scenario'], 'VAT scenario: export outside EU');
+// 51.12b — non-VAT payer
+$sc = VatService::resolveScenario(['seller_country'=>'SK','seller_vat_registered'=>false,'customer_country'=>'SK']);
+assert_equals('non_vat_payer', $sc['scenario'], 'VAT scenario: non-VAT payer');
+assert_equals('vat.non_vat_payer_note', $sc['note_key'], 'VAT scenario: non-VAT payer note_key');
+assert_true(!$sc['applies_vat'], 'VAT scenario: non-VAT payer applies no VAT');
 
 // 51.13 — computeLine gross-inclusive 23%
 $ln = VatService::computeLine(1230, 1, 23.0, false);
@@ -4469,6 +4484,11 @@ $pdo->exec("INSERT INTO products (id,category_id,name,slug,sku,price,currency,st
     (501,1,'Speaker','speaker','SKU-S',12300,'eur','active','standard',999),
     (502,1,'Book','book','SKU-B',  3600,'eur','active','reduced',999)");
 
+$pdo->exec("INSERT INTO product_related_products (product_id, related_product_id, sort_order) VALUES (501, 502, 0)");
+$curatedRelated = Products::curatedRelated(501, 4);
+assert_equals(1, count($curatedRelated), 'Products: curated related returns selected products');
+assert_equals('SKU-B', $curatedRelated[0]['sku'], 'Products: curated related preserves configured product');
+
 // Seed warehouse stock so Warehouse::reserve in Orders::create succeeds
 $pdo->exec("DELETE FROM warehouse_stock");
 $pdo->exec("INSERT OR IGNORE INTO warehouses (id,code,name,priority,is_default) VALUES (1,'main','Main',100,1)");
@@ -4516,6 +4536,13 @@ assert_true((int)$it['net_amount'] > 0, 'Orders: order_items.net_amount');
 $ctxRC = ['seller_country'=>'SK','customer_country'=>'DE','is_b2b'=>true,'customer_vat_id_valid'=>true,'seller_oss_enabled'=>false];
 $cartRC = Cart::enriched($ctxRC);
 assert_equals(0, (int)$cartRC['items'][0]['vat_amount'], 'Cart: reverse_charge vat=0');
+
+// 53.5 — Non-VAT payer → cart items vat=0 and note key is carried
+$ctxNonVat = ['seller_country'=>'SK','seller_vat_registered'=>false,'customer_country'=>'SK','is_b2b'=>false,'customer_vat_id_valid'=>false,'seller_oss_enabled'=>false];
+$cartNonVat = Cart::enriched($ctxNonVat);
+assert_equals('non_vat_payer', $cartNonVat['vat_scenario'], 'Cart: non-VAT payer scenario');
+assert_equals(0, (int)$cartNonVat['vat_total'], 'Cart: non-VAT payer vat_total=0');
+assert_equals('vat.non_vat_payer_note', $cartNonVat['reverse_charge_note_key'], 'Cart: non-VAT payer note key');
 
 // ============================================================
 // TEST: Staging deploy preflight

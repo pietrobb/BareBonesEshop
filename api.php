@@ -605,6 +605,9 @@ function apiCheckout(): array {
     $store = apiActiveStore();
     $vatId = strtoupper(preg_replace('/\s+/', '', (string)($input['vat_id'] ?? '')));
     $sellerCountry = strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
+    $sellerVatRegistered = array_key_exists('vat_registered', $store['legal'] ?? [])
+        ? (bool)$store['legal']['vat_registered']
+        : true;
     $sellerOss     = (bool)($store['oss_enabled'] ?? false);
     $vatIdValid    = false;
     $vatIdStatus   = null;
@@ -629,6 +632,7 @@ function apiCheckout(): array {
     }
     $vatScenario = VatService::resolveScenario([
         'seller_country'        => $sellerCountry,
+        'seller_vat_registered' => $sellerVatRegistered,
         'seller_oss_enabled'    => $sellerOss,
         'customer_country'      => $country,
         'customer_vat_id_valid' => $vatIdValid,
@@ -641,6 +645,7 @@ function apiCheckout(): array {
     // → scenario 'export' → every line persisted with VAT 0.
     $cart = Cart::enriched([
         'seller_country'        => $sellerCountry,
+        'seller_vat_registered' => $sellerVatRegistered,
         'seller_oss_enabled'    => $sellerOss,
         'customer_country'      => $country,
         'customer_vat_id_valid' => $vatIdValid,

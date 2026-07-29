@@ -29,6 +29,7 @@ class VatService
     private static ?string $rootDir = null;
     private static bool $loaded = false;
 
+    public const SCENARIO_NON_VAT_PAYER     = 'non_vat_payer';
     public const SCENARIO_DOMESTIC          = 'domestic';
     public const SCENARIO_REVERSE_CHARGE    = 'reverse_charge';
     public const SCENARIO_OSS               = 'oss';
@@ -135,6 +136,7 @@ class VatService
      *
      * Inputs:
      *   seller_country        ISO-2 of seller (store)
+     *   seller_vat_registered bool (defaults true for existing deployments)
      *   seller_oss_enabled    bool
      *   customer_country      ISO-2 of customer
      *   customer_vat_id_valid bool (VIES result)
@@ -151,9 +153,22 @@ class VatService
     {
         $sc   = strtoupper(trim($ctx['seller_country']   ?? ''));
         $cc   = strtoupper(trim($ctx['customer_country'] ?? ''));
+        $sellerVatRegistered = array_key_exists('seller_vat_registered', $ctx)
+            ? (bool)$ctx['seller_vat_registered']
+            : true;
         $oss  = (bool)($ctx['seller_oss_enabled']        ?? false);
         $valid = (bool)($ctx['customer_vat_id_valid']    ?? false);
         $b2b   = (bool)($ctx['is_b2b']                   ?? false);
+
+        if (!$sellerVatRegistered) {
+            return [
+                'scenario'     => self::SCENARIO_NON_VAT_PAYER,
+                'vat_rate'     => 0.0,
+                'applies_vat'  => false,
+                'note_key'     => 'vat.non_vat_payer_note',
+                'rate_country' => $sc,
+            ];
+        }
 
         // Export — outside EU
         if (!self::isEuCountry($cc)) {

@@ -577,6 +577,17 @@ function pageProduct(): void {
     $id = Security::int($_GET['id'] ?? 0);
     $product = $id ? Products::byId($id) : null;
     $categories = $db->query("SELECT id, name, path FROM categories ORDER BY path")->fetchAll();
+    $relatedProductIds = [];
+    $relatedCandidates = [];
+    if ($id) {
+        $relatedStmt = $db->prepare("SELECT related_product_id FROM product_related_products WHERE product_id = :id ORDER BY sort_order");
+        $relatedStmt->execute([':id' => $id]);
+        $relatedProductIds = array_map('intval', $relatedStmt->fetchAll(PDO::FETCH_COLUMN));
+
+        $candidateStmt = $db->prepare("SELECT id, sku, name, product_type FROM products WHERE status = 'active' AND id != :id ORDER BY product_type, name");
+        $candidateStmt->execute([':id' => $id]);
+        $relatedCandidates = $candidateStmt->fetchAll(PDO::FETCH_ASSOC);
+    }
 
     // Load attributes for product's category (+ all parent categories)
     $catAttrs = [];
@@ -692,6 +703,24 @@ function pageProduct(): void {
         </div>
 
         <?php if ($product): ?>
+        <div class="card" style="margin-top:1rem">
+            <h3 style="margin-bottom:.75rem">Súvisiace produkty</h3>
+            <form method="post" action="admin.php?p=product&id=<?= (int)$product['id'] ?>&action=related_save">
+                <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                <div class="form-row">
+                    <label>Ručne vybrané odporúčania</label>
+                    <select name="related_product_ids[]" multiple size="8" style="width:100%">
+                        <?php foreach ($relatedCandidates as $candidate): ?>
+                        <option value="<?= (int)$candidate['id'] ?>" <?= in_array((int)$candidate['id'], $relatedProductIds, true) ? 'selected' : '' ?>>
+                            <?= esc($candidate['name']) ?> · <?= esc($candidate['sku']) ?> · <?= esc($candidate['product_type']) ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <p class="muted" style="margin-top:.35rem">Ak nič nevyberiete, produktová stránka použije automatický výber z rovnakej kategórie.</p>
+                </div>
+                <button class="btn btn-primary" type="submit">Uložiť súvisiace produkty</button>
+            </form>
+        </div>
         <div style="margin-top:1rem"><a href="admin.php?p=products" class="btn">Späť na zoznam</a></div>
         <?php endif; ?>
     </div>
@@ -1711,6 +1740,7 @@ function handlePost(string $page, string $action): void {
 
     match("{$page}:{$action}") {
         'product:save'   => handleProductSave(),
+        'product:related_save' => handleProductRelatedSave(),
         'products:bulk'  => handleBulkAction(),
         'order:status'   => handleOrderStatus(),
         'order:payment_transition' => handleOrderPaymentTransition(),
@@ -1881,6 +1911,41 @@ function handleGdprAnonymize(): void {
     }
     $email = trim((string)($_GET['email'] ?? ''));
     header('Location: admin.php?p=gdpr' . ($email !== '' ? '&email=' . urlencode($email) : ''));
+    exit;
+}
+
+function handleProductRelatedSave(): void {
+    $db = Db::get();
+    $id = Security::int($_GET['id'] ?? 0);
+    if ($id <= 0) {
+        header('Location: admin.php?p=products');
+        exit;
+    }
+
+    $submitted = $_POST['related_product_ids'] ?? [];
+    if (!is_array($submitted)) $submitted = [];
+    $selected = array_values(array_unique(array_filter(
+        array_map('intval', $submitted),
+        static fn(int $candidateId): bool => $candidateId > 0 && $candidateId !== $id
+    )));
+    $allowed = array_map('intval', $db->query("SELECT id FROM products WHERE status = 'active'")->fetchAll(PDO::FETCH_COLUMN));
+    $selected = array_values(array_intersect($selected, $allowed));
+
+    $db->beginTransaction();
+    try {
+        $db->prepare('DELETE FROM product_related_products WHERE product_id = :id')->execute([':id' => $id]);
+        $insert = $db->prepare('INSERT INTO product_related_products (product_id, related_product_id, sort_order) VALUES (:id, :related, :sort)');
+        foreach ($selected as $sort => $relatedId) {
+            $insert->execute([':id' => $id, ':related' => $relatedId, ':sort' => $sort]);
+        }
+        $db->commit();
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        throw $e;
+    }
+
+    setFlash('ok', 'Súvisiace produkty boli uložené.');
+    header("Location: admin.php?p=product&id={$id}");
     exit;
 }
 

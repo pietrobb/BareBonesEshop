@@ -308,7 +308,7 @@ final class InvoiceService
     private static function sellerSnapshot(array $legal): array
     {
         $keys = ['name', 'street', 'city', 'zip', 'country', 'ico', 'dic', 'ic_dph',
-                 'iban', 'bank', 'email', 'phone', 'register_note'];
+                 'iban', 'bank', 'email', 'phone', 'register_note', 'vat_registered'];
         $out = [];
         foreach ($keys as $k) $out[$k] = (string)($legal[$k] ?? '');
         return $out;
@@ -346,8 +346,8 @@ final class InvoiceService
         $shipping   = (int)($order['shipping_cost'] ?? 0);
         $paymentFee = (int)($order['payment_fee'] ?? 0);
         $scenario   = (string)($order['vat_scenario'] ?? '');
-        // Reverse-charge and export carry no VAT on any component.
-        $vatApplies = !in_array($scenario, ['reverse_charge', 'export'], true);
+        // Reverse-charge, export and non-VAT-payer invoices carry no VAT on any component.
+        $vatApplies = !in_array($scenario, ['reverse_charge', 'export', 'non_vat_payer'], true);
 
         // Preferred: aggregate per-line VAT snapshot from order_items
         $hasLineVat = false;
@@ -485,6 +485,7 @@ final class InvoiceService
         switch ($scenario) {
             case 'reverse_charge': return 'vat.reverse_charge_note';
             case 'export':         return 'vat.export_note';
+            case 'non_vat_payer':  return 'vat.non_vat_payer_note';
             default:               return null;
         }
     }
@@ -637,10 +638,14 @@ final class InvoiceService
             $y += 3;
         }
 
-        // Reverse-charge notice
-        if (self::isReverseCharge($sellerSnap, $customerSnap)) {
-            $pdf->text(20, $y, $L['reverse_charge_note'], ['size' => 9, 'bold' => true]);
-            $y += 5;
+        // VAT scenario notice
+        $noteKey = (string)($invoice['reverse_charge_note_key'] ?? $vatBreakdown['note_key'] ?? '');
+        if ($noteKey !== '') {
+            $labelKey = str_replace('vat.', '', $noteKey);
+            if (isset($L[$labelKey])) {
+                $pdf->text(20, $y, $L[$labelKey], ['size' => 9, 'bold' => true]);
+                $y += 5;
+            }
         }
 
         // Payment info
@@ -693,6 +698,7 @@ final class InvoiceService
                 'shipping' => 'Doprava',
                 'total_net' => 'Spolu bez DPH', 'total_vat' => 'DPH spolu', 'total_gross' => 'Spolu k úhrade',
                 'vat_recap' => 'Rekapitulácia DPH', 'col_net' => 'Základ', 'reverse_charge_note' => 'Daň odvádza zákazník',
+                'export_note' => 'Dodanie oslobodené od DPH pri vývoze mimo EÚ', 'non_vat_payer_note' => 'Predávajúci nie je platiteľom DPH',
                 'payment_method' => 'Spôsob úhrady', 'iban' => 'IBAN', 'variable_symbol' => 'Variabilný symbol',
                 'ico' => 'IČO', 'dic' => 'DIČ', 'ic_dph' => 'IČ DPH',
             ],
@@ -705,6 +711,7 @@ final class InvoiceService
                 'shipping' => 'Doprava',
                 'total_net' => 'Celkem bez DPH', 'total_vat' => 'DPH celkem', 'total_gross' => 'Celkem k úhradě',
                 'vat_recap' => 'Rekapitulace DPH', 'col_net' => 'Základ', 'reverse_charge_note' => 'Daň odvádí zákazník',
+                'export_note' => 'Dodání osvobozené od DPH při vývozu mimo EU', 'non_vat_payer_note' => 'Prodávající není plátcem DPH',
                 'payment_method' => 'Způsob úhrady', 'iban' => 'IBAN', 'variable_symbol' => 'Variabilní symbol',
                 'ico' => 'IČO', 'dic' => 'DIČ', 'ic_dph' => 'DIČ DPH',
             ],
@@ -717,6 +724,7 @@ final class InvoiceService
                 'shipping' => 'Wysyłka',
                 'total_net' => 'Razem netto', 'total_vat' => 'VAT razem', 'total_gross' => 'Do zapłaty',
                 'vat_recap' => 'Rekapitulacja VAT', 'col_net' => 'Netto', 'reverse_charge_note' => 'Odwrotne obciążenie',
+                'export_note' => 'Dostawa zwolniona z VAT przy eksporcie poza UE', 'non_vat_payer_note' => 'Sprzedawca nie jest płatnikiem VAT',
                 'payment_method' => 'Forma płatności', 'iban' => 'IBAN', 'variable_symbol' => 'Symbol var.',
                 'ico' => 'NIP/REGON', 'dic' => 'NIP', 'ic_dph' => 'NIP UE',
             ],
@@ -729,6 +737,7 @@ final class InvoiceService
                 'shipping' => 'Szállítás',
                 'total_net' => 'Nettó összesen', 'total_vat' => 'ÁFA összesen', 'total_gross' => 'Fizetendő összesen',
                 'vat_recap' => 'ÁFA összesítés', 'col_net' => 'Nettó', 'reverse_charge_note' => 'Fordított adózás',
+                'export_note' => 'EU-n kívüli exportra vonatkozó ÁFA-mentes értékesítés', 'non_vat_payer_note' => 'Az eladó nem ÁFA-alany',
                 'payment_method' => 'Fizetési mód', 'iban' => 'IBAN', 'variable_symbol' => 'Hivatkozási szám',
                 'ico' => 'Cégjegyzékszám', 'dic' => 'Adószám', 'ic_dph' => 'Közösségi adószám',
             ],
@@ -741,6 +750,7 @@ final class InvoiceService
                 'shipping' => 'Versand',
                 'total_net' => 'Netto gesamt', 'total_vat' => 'MwSt. gesamt', 'total_gross' => 'Gesamtbetrag',
                 'vat_recap' => 'MwSt.-Aufschlüsselung', 'col_net' => 'Netto', 'reverse_charge_note' => 'Reverse Charge — Steuerschuldnerschaft des Leistungsempfängers',
+                'export_note' => 'Steuerfreie Ausfuhrlieferung außerhalb der EU', 'non_vat_payer_note' => 'Der Verkäufer ist nicht umsatzsteuerpflichtig',
                 'payment_method' => 'Zahlungsart', 'iban' => 'IBAN', 'variable_symbol' => 'Verwendungszweck',
                 'ico' => 'HR-Nr.', 'dic' => 'Steuernr.', 'ic_dph' => 'USt-IdNr.',
             ],
@@ -753,6 +763,7 @@ final class InvoiceService
                 'shipping' => 'Shipping',
                 'total_net' => 'Total net', 'total_vat' => 'Total VAT', 'total_gross' => 'Total due',
                 'vat_recap' => 'VAT breakdown', 'col_net' => 'Net', 'reverse_charge_note' => 'Reverse charge — VAT to be accounted for by the recipient',
+                'export_note' => 'VAT-exempt export supply outside the EU', 'non_vat_payer_note' => 'The seller is not registered for VAT',
                 'payment_method' => 'Payment method', 'iban' => 'IBAN', 'variable_symbol' => 'Reference',
                 'ico' => 'Company ID', 'dic' => 'Tax ID', 'ic_dph' => 'VAT ID',
             ],

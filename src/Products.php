@@ -253,6 +253,22 @@ class Products {
     }
 
     /**
+     * Products selected by an administrator for this product.
+     */
+    public static function curatedRelated(int $productId, int $limit = 4): array {
+        $stmt = Db::get()->prepare("
+            SELECT p.*
+            FROM product_related_products pr
+            JOIN products p ON p.id = pr.related_product_id
+            WHERE pr.product_id = :id AND p.status = 'active'
+            ORDER BY pr.sort_order, pr.related_product_id
+            LIMIT :limit
+        ");
+        $stmt->execute([':id' => $productId, ':limit' => $limit]);
+        return $stmt->fetchAll();
+    }
+
+    /**
      * Latest products
      */
     public static function latest(int $limit = 8): array {

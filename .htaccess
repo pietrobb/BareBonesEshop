@@ -1,5 +1,10 @@
 RewriteEngine On
 
+# Block sensitive paths before the generic existing-file bypass below.
+RewriteRule ^(?:src|cli|jobs|db|logs|demo|lang|config)(?:/|$) - [F,L]
+RewriteRule ^(?:config\.php|stores\.json|catalog\.json|shipping\.json|tax\.json|pricing\.json|layouts\.json|admin-roles\.json)$ - [F,L]
+RewriteRule ^(?:\.env|\.git)(?:/|$) - [F,L]
+
 # ============================================================
 # Level 0 Cache — serve cached JSON directly (bypass PHP)
 # ============================================================
@@ -88,19 +93,7 @@ RewriteRule ^ - [L]
     # Allow only specific public PHP files
 </FilesMatch>
 
-# Block access to internal directories
-RewriteRule ^(src|cli|jobs|db|logs|demo|lang|config|\.)/  - [F,L]
-RewriteRule ^config\.php$ - [F,L]
-RewriteRule ^stores\.json$ - [F,L]
-RewriteRule ^catalog\.json$ - [F,L]
-RewriteRule ^shipping\.json$ - [F,L]
-RewriteRule ^tax\.json$ - [F,L]
-RewriteRule ^pricing\.json$ - [F,L]
-RewriteRule ^layouts\.json$ - [F,L]
-RewriteRule ^admin-roles\.json$ - [F,L]
-
-# Block dotfiles
-RewriteRule (^\.) - [F,L]
+# Sensitive paths are blocked before the generic existing-file bypass above.
 
 # ============================================================
 # Compression
