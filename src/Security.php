@@ -86,6 +86,27 @@ class Security {
         return hash_equals($sessionToken, $submitted);
     }
 
+    public static function formTrapToken(string $bucket, int $ttl = 3600): string {
+        $key = 'form_trap_tokens_' . md5($bucket);
+        $now = time();
+        $_SESSION[$key] = array_filter(
+            $_SESSION[$key] ?? [],
+            static fn($ts) => is_int($ts) && $ts >= $now - $ttl
+        );
+        $token = bin2hex(random_bytes(16));
+        $_SESSION[$key][$token] = $now;
+        return $token;
+    }
+
+    public static function formTrapValidate(string $bucket, string $token, string $honeypot = '', int $minAge = 4, int $ttl = 3600): bool {
+        $key = 'form_trap_tokens_' . md5($bucket);
+        $issuedAt = (int)($_SESSION[$key][$token] ?? 0);
+        unset($_SESSION[$key][$token]);
+        if (trim($honeypot) !== '' || $issuedAt <= 0) return false;
+        $age = time() - $issuedAt;
+        return $age >= $minAge && $age <= $ttl;
+    }
+
     /**
      * Sanitize a user-supplied redirect target to a safe same-site path.
      * Blocks open-redirect vectors: absolute URLs (scheme://), protocol-relative

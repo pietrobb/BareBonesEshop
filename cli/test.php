@@ -537,6 +537,24 @@ assert_equals(null, Security::email('not-an-email'), 'email() rejects invalid em
 assert_equals('&lt;script&gt;', esc('<script>'), 'esc() escapes HTML');
 assert_equals('&quot;hello&quot;', esc('"hello"'), 'esc() escapes quotes');
 
+$_SESSION = [];
+$formToken = Security::formTrapToken('test_register', 3600);
+$trapKey = 'form_trap_tokens_' . md5('test_register');
+$_SESSION[$trapKey][$formToken] = time() - 5;
+assert_true(Security::formTrapValidate('test_register', $formToken, '', 4, 3600), 'formTrapValidate accepts a human-paced one-time token');
+assert_true(!Security::formTrapValidate('test_register', $formToken, '', 4, 3600), 'formTrapValidate rejects token reuse');
+$fastToken = Security::formTrapToken('test_register', 3600);
+assert_true(!Security::formTrapValidate('test_register', $fastToken, '', 4, 3600), 'formTrapValidate rejects too-fast submits');
+$hpToken = Security::formTrapToken('test_register', 3600);
+$_SESSION[$trapKey][$hpToken] = time() - 5;
+assert_true(!Security::formTrapValidate('test_register', $hpToken, 'https://spam.example', 4, 3600), 'formTrapValidate rejects filled honeypot fields');
+$oldToken = Security::formTrapToken('test_register', 3600);
+$_SESSION[$trapKey][$oldToken] = time() - 3601;
+assert_true(!Security::formTrapValidate('test_register', $oldToken, '', 4, 3600), 'formTrapValidate rejects expired tokens');
+$accountSource = file_get_contents(__DIR__ . '/../account.php') ?: '';
+assert_true(str_contains($accountSource, 'name="register_token"'), 'Account register form includes form-trap token');
+assert_true(str_contains($accountSource, 'name="company_website"'), 'Account register form includes hidden honeypot field');
+
 // ============================================================
 // TEST 9: Category Tree
 // ============================================================

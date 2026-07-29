@@ -52,7 +52,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $password = $_POST['password'] ?? '';
         $name = Security::clean($_POST['name'] ?? '');
         $rlKey = 'account_register_' . md5($_SERVER['REMOTE_ADDR'] ?? 'cli');
-        if (!Security::rateLimit($rlKey, 10)) {
+        $looksHuman = Security::formTrapValidate(
+            'account_register',
+            (string)($_POST['register_token'] ?? ''),
+            (string)($_POST['company_website'] ?? '')
+        );
+        if (!Security::rateLimit($rlKey, 4) || !$looksHuman) {
             $flash = $t('account.rate_limited'); $flashType = 'error';
         } else {
             [$ok, $id, $err] = Customers::register($email, $password, $name, ['locale' => $locale]);
@@ -451,11 +456,14 @@ switch ($p) {
         break;
 
     case 'register':
+        $registerToken = Security::formTrapToken('account_register');
         echo '<div class="card" style="max-width:420px;margin:0 auto">';
         echo '<h1>' . $e($t('account.register')) . '</h1>';
         echo '<form method="post" action="account.php">';
         echo '<input type="hidden" name="csrf_token" value="' . $e($csrf) . '">';
         echo '<input type="hidden" name="action" value="register">';
+        echo '<input type="hidden" name="register_token" value="' . $e($registerToken) . '">';
+        echo '<div style="position:absolute;left:-9999px" aria-hidden="true"><label>Website</label><input type="text" name="company_website" tabindex="-1" autocomplete="off"></div>';
         echo '<div class="form-row"><label>' . $e($t('account.name')) . '</label><input type="text" name="name" value="' . $e($fieldValues['name'] ?? '') . '"></div>';
         echo '<div class="form-row"><label>' . $e($t('account.email')) . '</label><input type="email" name="email" required value="' . $e($fieldValues['email'] ?? '') . '"></div>';
         echo '<div class="form-row"><label>' . $e($t('account.password')) . ' <span class="muted">(min 8)</span></label><input type="password" name="password" required minlength="8"></div>';
