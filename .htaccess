@@ -1,9 +1,26 @@
 RewriteEngine On
 
-# Block sensitive paths before the generic existing-file bypass below.
-RewriteRule ^(?:src|cli|jobs|db|logs|demo|lang|config)(?:/|$) - [F,L]
-RewriteRule ^(?:config\.php|stores\.json|catalog\.json|shipping\.json|tax\.json|pricing\.json|layouts\.json|admin-roles\.json)$ - [F,L]
-RewriteRule ^(?:\.env|\.git)(?:/|$) - [F,L]
+# Deny private/runtime/source trees before the generic existing-file bypass.
+RewriteRule ^(?:storage|db|jobs|logs|config|cli|src|migrations|adapters|lang|demo|docs|forms|blocks|data|templates)(?:/|$) - [F,L,NC]
+
+# BBF's browser client and handler are public integration points; all other
+# vendor code stays private. Only the documented import example is public.
+RewriteRule ^vendor/(?!bbf/(?:bbf\.(?:css|js)|submit\.php)$) - [F,L,NC]
+RewriteRule ^import/(?!test-products\.csv$) - [F,L,NC]
+
+# Deny direct cache requests while allowing the explicit api.php rewrites below
+# to reach generated JSON internally (THE_REQUEST remains /api.php).
+RewriteCond %{THE_REQUEST} "\s/+(?:[^?\s]+/)?cache(?:[/\s?]|$)" [NC]
+RewriteRule ^cache(?:/|$) - [F,L,NC]
+
+# Keep ACME validation and security.txt available, deny all other dotfiles.
+RewriteRule ^\.well-known/(?:acme-challenge/[A-Za-z0-9_-]+|security\.txt)$ - [L,NC]
+RewriteRule (?:^|/)\. - [F,L,NC]
+RewriteRule ^(?:config(?:\.example)?\.php|stores\.json|catalog\.json|shipping\.json|tax\.json|pricing\.json|layouts\.json|admin-roles\.json|models\.yaml|composer\.(?:json|lock)|package(?:-lock)?\.json)$ - [F,L,NC]
+RewriteRule \.(?:(?:sqlite3?|db)(?:-(?:wal|shm))?|wal|shm|sql|dump|bak|backup|log|lock|ini|ya?ml|pem|key|md)$ - [F,L,NC]
+
+# Uploaded content must never be dispatched through a PHP handler.
+RewriteRule ^uploads/.*\.(?:php(?:[0-9]+|s)?|phtml?|phar)(?:[./]|$) - [F,L,NC]
 
 # ============================================================
 # Level 0 Cache — serve cached JSON directly (bypass PHP)
@@ -30,14 +47,6 @@ RewriteCond %{QUERY_STRING} action=categories
 RewriteCond %{QUERY_STRING} !locale=
 RewriteCond %{DOCUMENT_ROOT}/cache/sk/categories.json -f
 RewriteRule ^api\.php$ cache/sk/categories.json [L,T=application/json]
-
-# Block sensitive cache files (customer-group pricing)
-RewriteRule ^cache/prices/ - [F,L]
-
-# Static cache files served directly
-RewriteCond %{REQUEST_URI} ^/cache/ [NC]
-RewriteCond %{REQUEST_FILENAME} -f
-RewriteRule ^(.*)$ $1 [L,T=application/json]
 
 # ============================================================
 # SEO-friendly URLs
@@ -76,24 +85,13 @@ RewriteRule ^wishlist/?$ wishlist.php [QSA,L]
 RewriteRule ^api/(.*)$ api.php?action=$1 [QSA,L]
 
 # ============================================================
-# Static assets — skip rewriting
+# Static assets — skip rewriting; never expose directory listings
 # ============================================================
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^.+/?$ - [F,L]
+
 RewriteCond %{REQUEST_FILENAME} -f
 RewriteRule ^ - [L]
-
-RewriteCond %{REQUEST_FILENAME} -d
-RewriteRule ^ - [L]
-
-# ============================================================
-# Security
-# ============================================================
-
-# Block access to sensitive files
-<FilesMatch "\.(php|json|sqlite|log|lock|md)$">
-    # Allow only specific public PHP files
-</FilesMatch>
-
-# Sensitive paths are blocked before the generic existing-file bypass above.
 
 # ============================================================
 # Compression
