@@ -16,15 +16,17 @@ Security::headers();
 // JSON response
 header('Content-Type: application/json; charset=utf-8');
 
-// Session (with secure cookie params)
+// Session (with secure cookie params) and fail-closed customer validation.
 Security::sessionStart();
+Customers::isLoggedIn();
 
 // Detect locale
 $uri = $_SERVER['REQUEST_URI'] ?? '/';
 I18n::setLocale(I18n::detectLocale($uri));
 
-// Rate limiting (exempt webhooks — they rely on signature verification)
-if (!in_array($action, ['webhook_stripe', 'webhook_payment', 'webhook_shipping'], true) && !Security::rateLimit('api_' . $action, 120)) {
+// Rate-limit every endpoint, including signed webhooks. The generous webhook
+// budget preserves provider retries while bounding signature-verification work.
+if (!Security::rateLimit('api_' . $action, 120)) {
     echo json_encode(['error' => 'Too many requests']);
     exit;
 }
@@ -559,7 +561,7 @@ function apiConsentDefinitions(): array {
     return ['consents' => array_values(ConsentService::definitions($context))];
 }
 
-function apiCheckout(): array {
+function apiCheckout(?array $runtimeConfig = null): array {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         http_response_code(405);
         return ['error' => 'Method not allowed'];
@@ -570,7 +572,9 @@ function apiCheckout(): array {
         return ['error' => 'Invalid CSRF token'];
     }
 
-    if (!Security::rateLimit('checkout', 10)) {
+    if (!Security::rateLimit('checkout', 10)
+        || !Security::rateLimit('checkout_global', 200, 60, false)
+        || !Security::rateLimit('checkout_session_' . hash('sha256', session_id()), 5, 900, false)) {
         return ['error' => 'Too many checkout attempts'];
     }
 
@@ -589,6 +593,12 @@ function apiCheckout(): array {
     if (!$name || !$email) {
         return ['error' => 'Name and email are required'];
     }
+    $checkoutSubject = !empty($_SESSION['customer_id'])
+        ? 'customer_' . (int)$_SESSION['customer_id']
+        : 'email_' . hash('sha256', strtolower($email));
+    if (!Security::rateLimit('checkout_subject_' . $checkoutSubject, 3, 1800, false)) {
+        return ['error' => 'Too many checkout attempts'];
+    }
 
     // Capture email for abandoned cart recovery
     Cart::setEmail($email);
@@ -601,7 +611,7 @@ function apiCheckout(): array {
     // $cfg must be loaded here: apiCheckout is a function, the file-scope $cfg is not
     // visible (it used to be silently undefined → seller always 'SK', OSS always off,
     // admin notification never sent). Seller identity lives per-store in stores.json.
-    $cfg   = require __DIR__ . '/config.php';
+    $cfg   = $runtimeConfig ?? require __DIR__ . '/config.php';
     $store = apiActiveStore();
     $vatId = strtoupper(preg_replace('/\s+/', '', (string)($input['vat_id'] ?? '')));
     $sellerCountry = strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
@@ -773,6 +783,9 @@ function apiCheckout(): array {
         }
 
         Cart::clear();
+        // Invalidate the submitted CSRF value after the irreversible create so
+        // an exact browser/network replay cannot reserve stock a second time.
+        Security::rotateCsrfToken();
 
         $order = Orders::byId($orderId);
         $orderItems = Orders::items($orderId);
@@ -793,7 +806,7 @@ function apiCheckout(): array {
         if (!empty($selectedPayment['requires_online'])) {
             try {
                 $payment = Adapters::payment();
-                $baseUrl = ((!empty($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost'));
+                $baseUrl = Security::appUrl($cfg);
                 $session = PaymentService::initiate([
                     'order_id'       => $orderId,
                     'order_number'   => $order['order_number'],
@@ -898,7 +911,7 @@ function apiWebhookStripe(): array {
     $cfg = require __DIR__ . '/config.php';
     $secret = $cfg['stripe_webhook_secret'] ?? '';
 
-    if (!$secret) {
+    if (strlen((string)$secret) < 16 || trim((string)$secret) !== (string)$secret) {
         http_response_code(503);
         return ['error' => 'Webhook not configured'];
     }
@@ -914,7 +927,8 @@ function apiWebhookStripe(): array {
         return ['error' => 'Invalid payload'];
     }
 
-    if (Idempotency::webhookProcessed($event['id'])) {
+    $eventKey = 'payment_stripe_' . $event['id'];
+    if (Idempotency::webhookAlreadyProcessed($event['id']) || Idempotency::webhookProcessed($eventKey)) {
         return ['status' => 'already_processed'];
     }
 
@@ -928,7 +942,7 @@ function apiWebhookStripe(): array {
         };
     } catch (\Throwable $e) {
         // Unmark so Stripe can retry the webhook
-        Idempotency::unmark($event['id']);
+        Idempotency::unmark($eventKey);
         error_log("Webhook error [{$event['type']}]: {$e->getMessage()}\n" . $e->getTraceAsString());
         http_response_code(500);
         return ['error' => 'Processing failed'];
@@ -991,15 +1005,26 @@ function onChargeRefunded(array $charge): void {
     $orderId = (int)$order['id'];
     $fullRefund = $refundedAmount >= $orderTotal;
     $targetPaymentStatus = $fullRefund ? 'refunded' : 'partially_refunded';
-    if (($order['payment_status'] ?? '') !== $targetPaymentStatus
-        && PaymentService::canPaymentTransition((string)($order['payment_status'] ?? 'pending'), $targetPaymentStatus)) {
-        PaymentService::transitionPayment(
-            $orderId,
-            $targetPaymentStatus,
-            'charge.refunded',
-            $refundedAmount,
-            'stripe_refund_' . (string)($charge['id'] ?? $paymentIntent) . '_' . $refundedAmount
-        );
+    $refundDelta = max(0, $refundedAmount - PaymentService::refundedAmount($orderId));
+    if ($refundDelta > 0) {
+        $eventKey = 'stripe_refund_' . (string)($charge['id'] ?? $paymentIntent) . '_' . $refundedAmount;
+        $eventPayload = ['cumulative_amount' => $refundedAmount];
+        if (($order['payment_status'] ?? '') !== $targetPaymentStatus
+            && PaymentService::canPaymentTransition((string)($order['payment_status'] ?? 'pending'), $targetPaymentStatus)) {
+            PaymentService::transitionPayment($orderId, $targetPaymentStatus, 'charge.refunded', $refundDelta, $eventKey, $eventPayload);
+        } else {
+            PaymentService::recordEvent(
+                $orderId,
+                'charge.refunded',
+                $targetPaymentStatus,
+                $refundDelta,
+                (string)($order['currency'] ?? 'eur'),
+                $eventKey,
+                $eventPayload,
+                'stripe',
+                (string)$paymentIntent
+            );
+        }
     }
 
     if ($fullRefund) {
@@ -1037,22 +1062,27 @@ function onDisputeCreated(array $dispute): void {
 
 if (!function_exists('verifyStripeSignature')) {
 function verifyStripeSignature(string $payload, string $sigHeader, string $secret): bool {
-    $parts = [];
+    if (strlen($secret) < 16 || trim($secret) !== $secret) return false;
+
+    $timestamp = '';
+    $signatures = [];
     foreach (explode(',', $sigHeader) as $part) {
-        [$key, $val] = explode('=', trim($part), 2) + [1 => ''];
-        $parts[$key] = $val;
+        [$key, $value] = explode('=', trim($part), 2) + [1 => ''];
+        if ($key === 't') {
+            if ($timestamp !== '' && $timestamp !== $value) return false;
+            $timestamp = $value;
+        } elseif ($key === 'v1' && $value !== '') {
+            $signatures[] = strtolower($value);
+        }
     }
-
-    $timestamp = $parts['t'] ?? '';
-    $signature = $parts['v1'] ?? '';
-    if (!$timestamp || !$signature) return false;
-
+    if ($timestamp === '' || !ctype_digit($timestamp) || !$signatures) return false;
     if (abs(time() - (int)$timestamp) > 300) return false;
 
-    $signedPayload = $timestamp . '.' . $payload;
-    $expected = hash_hmac('sha256', $signedPayload, $secret);
-
-    return hash_equals($expected, $signature);
+    $expected = hash_hmac('sha256', $timestamp . '.' . $payload, $secret);
+    foreach ($signatures as $signature) {
+        if (hash_equals($expected, $signature)) return true;
+    }
+    return false;
 }
 }
 
@@ -1165,7 +1195,7 @@ function apiWebhookShipping(): array {
     };
 
     try {
-        $result = ShippingService::handleTrackingWebhook($carrier, $parsed, $sigHeader);
+        $result = ShippingService::handleTrackingWebhook($carrier, $parsed, $sigHeader, $rawPayload);
     } catch (\RuntimeException $e) {
         if (str_contains($e->getMessage(), 'signature')) {
             http_response_code(400);
@@ -1316,7 +1346,7 @@ function apiPage(): array {
         if (!empty($tr[$locale]['title'])) $page['title'] = $tr[$locale]['title'];
         if (!empty($tr[$locale]['body'])) $page['body'] = $tr[$locale]['body'];
     }
-    return ['page' => ['slug' => $page['slug'], 'title' => $page['title'], 'body' => $page['body']]];
+    return ['page' => ['slug' => $page['slug'], 'title' => $page['title'], 'body' => Security::sanitizeRichHtml((string)($page['body'] ?? ''))]];
 }
 
 // ============================================================

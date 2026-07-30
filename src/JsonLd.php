@@ -18,7 +18,7 @@ class JsonLd {
     public static function render(array $data, string $nonce = ''): string {
         $attr = $nonce !== '' ? ' nonce="' . htmlspecialchars($nonce, ENT_QUOTES, 'UTF-8') . '"' : '';
         return '<script type="application/ld+json"' . $attr . '>'
-             . json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+             . json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)
              . '</script>';
     }
 

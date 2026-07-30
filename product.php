@@ -7,6 +7,7 @@
 require_once __DIR__ . '/src/autoload.php';
 
 Security::sessionStart();
+Customers::isLoggedIn();
 if (!isset($_SESSION['cart'])) $_SESSION['cart'] = [];
 
 // Locale from URL — canonical, no session override
@@ -37,6 +38,7 @@ if ($product['status'] === 'archived') {
 
 // Enrich product
 $product = Products::enrich(I18n::product($product));
+$product['description'] = Security::sanitizeRichHtml((string)($product['description'] ?? ''));
 $product['attrs_list'] = Products::attrs((int)$product['id']);
 $product['variants'] = Products::variants((int)$product['id']);
 
@@ -127,7 +129,7 @@ Security::headers();
     }
 ?>
     <script type="application/ld+json" nonce="<?= Security::cspNonce() ?>">
-    <?= json_encode($productLd, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
+    <?= json_encode($productLd, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>
     </script>
 <?php
     // BreadcrumbList: Home › ancestor categories › current product

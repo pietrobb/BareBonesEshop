@@ -64,15 +64,27 @@ class MailService {
         ?int $orderId = null,
         array $attachments = []
     ): array {
+        $to = strtolower(trim($to));
         if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
             return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => '', 'error' => 'invalid recipient'];
+        }
+        if (!preg_match('/^[a-z0-9_-]{1,80}$/i', $template)) {
+            return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => '', 'error' => 'invalid template'];
+        }
+        if (!self::recipientAllowed($to, $template)) {
+            return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => '', 'error' => 'recipient rate limit'];
         }
         $locale = $locale !== '' ? $locale : self::defaultLocale();
 
         $rendered = self::render($template, $locale, $vars);
 
         $adapter = self::adapter();
-        $from    = (string)(getenv('MAIL_FROM') ?: ('noreply@' . (($_SERVER['SERVER_NAME'] ?? 'localhost'))));
+        $from = strtolower(trim((string)(getenv('MAIL_FROM') ?: 'noreply@localhost.invalid')));
+        if (!filter_var($from, FILTER_VALIDATE_EMAIL)) {
+            return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => $adapter->adapterId(), 'error' => 'invalid sender'];
+        }
+        $replyTo = strtolower(trim((string)(getenv('MAIL_REPLY_TO') ?: '')));
+        if ($replyTo !== '' && !filter_var($replyTo, FILTER_VALIDATE_EMAIL)) $replyTo = '';
 
         // Log row BEFORE send attempt (so failures are visible).
         $logId = self::logInsert($to, $template, $locale, $rendered['subject'], $adapter->adapterId(), $orderId, $vars);
@@ -83,7 +95,7 @@ class MailService {
             'subject'     => $rendered['subject'],
             'html'        => $rendered['html'],
             'text'        => $rendered['text'],
-            'reply_to'    => (string)(getenv('MAIL_REPLY_TO') ?: ''),
+            'reply_to'    => $replyTo,
             'attachments' => self::normalizeAttachments($attachments),
             'headers'  => [
                 'X-Mailer'   => 'BareBonesShop',
@@ -108,9 +120,15 @@ class MailService {
      * Re-send an existing email_log row (same template / recipient / vars).
      * Creates a NEW email_log entry — the original row stays immutable.
      */
-    public static function resend(int $logId): array {
-        $stmt = Db::get()->prepare("SELECT * FROM email_log WHERE id = :id");
-        $stmt->execute([':id' => $logId]);
+    public static function resend(int $logId, ?int $orderId = null): array {
+        $sql = "SELECT * FROM email_log WHERE id = :id";
+        $params = [':id' => $logId];
+        if ($orderId !== null) {
+            $sql .= " AND order_id = :order_id";
+            $params[':order_id'] = $orderId;
+        }
+        $stmt = Db::get()->prepare($sql);
+        $stmt->execute($params);
         $row = $stmt->fetch();
         if (!$row) {
             return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => '', 'error' => 'log entry not found'];
@@ -196,6 +214,22 @@ class MailService {
     }
 
     // ─── Internal helpers ────────────────────────────────────────
+    private static function recipientAllowed(string $recipient, string $template): bool {
+        $limits = [
+            'account_password_reset' => [3, 3600],
+            'account_welcome' => [2, 86400],
+            'cart_reminder' => [1, 86400],
+        ];
+        [$max, $window] = $limits[$template] ?? [10, 3600];
+        $since = gmdate('Y-m-d H:i:s', time() - $window);
+        $stmt = Db::get()->prepare(
+            "SELECT COUNT(*) FROM email_log
+             WHERE recipient = :recipient AND template = :template AND created_at >= :since"
+        );
+        $stmt->execute([':recipient' => $recipient, ':template' => $template, ':since' => $since]);
+        return (int)$stmt->fetchColumn() < $max;
+    }
+
     private static function defaultLocale(): string {
         $stores = @json_decode((string)file_get_contents(__DIR__ . '/../stores.json'), true) ?: [];
         return (string)($stores['default_locale'] ?? 'en');

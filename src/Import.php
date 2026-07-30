@@ -4,19 +4,34 @@
  * CSV/JSON import with UPSERT, auto-category creation, filter_tags generation.
  */
 class Import {
+    public const MAX_FILE_BYTES = 50 * 1024 * 1024;
+    public const MAX_ROW_BYTES = 1024 * 1024;
+    public const MAX_COLUMNS = 256;
+    public const MAX_ROWS = 100000;
+
     /**
      * Import products from CSV file
      * CSV format: sku,name,category,price,stock,summary,image,attr:color,attr:size,...
      * Translations: name_en, name_de, summary_en, slug_en, etc.
      */
     public static function csv(string $filePath, ?string $productTypeOverride = null): array {
-        if (!file_exists($filePath)) {
-            return ['success' => false, 'error' => "File not found: {$filePath}"];
+        if (!is_file($filePath) || is_link($filePath)) {
+            return ['success' => false, 'imported' => 0, 'errors' => ["File not found or unsafe: {$filePath}"]];
+        }
+        $fileSize = filesize($filePath);
+        if ($fileSize === false || $fileSize <= 0 || $fileSize > self::MAX_FILE_BYTES) {
+            return ['success' => false, 'imported' => 0, 'errors' => ['CSV size must be between 1 byte and 50 MB']];
         }
 
-        $handle = fopen($filePath, 'r');
+        $handle = fopen($filePath, 'rb');
         if (!$handle) {
-            return ['success' => false, 'error' => "Cannot open file: {$filePath}"];
+            return ['success' => false, 'imported' => 0, 'errors' => ["Cannot open file: {$filePath}"]];
+        }
+        $openedStat = fstat($handle);
+        if ($openedStat === false || ($openedStat['mode'] & 0170000) !== 0100000
+            || $openedStat['size'] <= 0 || $openedStat['size'] > self::MAX_FILE_BYTES) {
+            fclose($handle);
+            return ['success' => false, 'imported' => 0, 'errors' => ['CSV file changed or is not a safe regular file']];
         }
 
         // Strip UTF-8 BOM if present (Excel exports)
@@ -24,24 +39,37 @@ class Import {
         if ($bom !== "\xEF\xBB\xBF") rewind($handle);
 
         // Read header
-        $header = fgetcsv($handle, 0, ',', '"', '');
+        $header = fgetcsv($handle, self::MAX_ROW_BYTES, ',', '"', '');
         if (!$header) {
             fclose($handle);
-            return ['success' => false, 'error' => 'Empty CSV or invalid format'];
+            return ['success' => false, 'imported' => 0, 'errors' => ['Empty CSV or invalid format']];
         }
         $header = array_map('trim', $header);
+        $headerNamesValid = !array_filter($header, static fn($name) => strlen($name) > 128);
+        if (count($header) > self::MAX_COLUMNS || in_array('', $header, true)
+            || count(array_unique($header)) !== count($header) || !$headerNamesValid
+            || !in_array('sku', $header, true) || !in_array('name', $header, true)) {
+            fclose($handle);
+            return ['success' => false, 'imported' => 0, 'errors' => ['CSV header is invalid, duplicated, missing sku/name, or exceeds limits']];
+        }
 
         $db = Db::get();
         $imported = 0;
         $errors = [];
         $batchSize = 500;
         $batch = 0;
+        $limitExceeded = false;
 
         $db->beginTransaction();
         $lineNum = 1; // header = line 1
 
-        while (($row = fgetcsv($handle, 0, ',', '"', '')) !== false) {
+        while (($row = fgetcsv($handle, self::MAX_ROW_BYTES, ',', '"', '')) !== false) {
             $lineNum++;
+            if ($lineNum > self::MAX_ROWS + 1) {
+                $errors[] = 'CSV exceeds the 100000 row limit; earlier committed batches remain imported';
+                $limitExceeded = true;
+                break;
+            }
 
             if (count($row) !== count($header)) {
                 $errors[] = "Line {$lineNum}: column count mismatch";
@@ -77,7 +105,7 @@ class Import {
         self::recountCategories($db);
 
         return [
-            'success'  => true,
+            'success'  => !$limitExceeded,
             'imported' => $imported,
             'errors'   => $errors,
         ];
@@ -181,6 +209,12 @@ class Import {
      */
     public static function upsertProduct(array $data, ?PDO $db = null): void {
         $db = $db ?? Db::get();
+        $data['description'] = Security::sanitizeRichHtml((string)($data['description'] ?? ''));
+        foreach (($data['translations'] ?? []) as $locale => $translation) {
+            if (isset($translation['description'])) {
+                $data['translations'][$locale]['description'] = Security::sanitizeRichHtml((string)$translation['description']);
+            }
+        }
 
         if (Db::isSqlite()) {
             $stmt = $db->prepare("

@@ -663,7 +663,7 @@ function pageProduct(): void {
             'images'        => implode("\n", json_decode($product['images'] ?? '[]', true) ?: []),
             'weight_g'      => (string)(int)($product['weight_g'] ?? 0),
             'tags'          => $product['tags'] ?? '',
-        ], JSON_UNESCAPED_UNICODE);
+        ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
         ?>
         <div id="bbf-product" data-form="admin-product" data-lang="sk"></div>
 
@@ -746,8 +746,8 @@ function pageProduct(): void {
     })();
     </script>
     <script nonce="<?= Security::cspNonce() ?>">
-    var catAttrMap = <?= json_encode($catAttrMap, JSON_UNESCAPED_UNICODE) ?>;
-    var existingSpecs = <?= json_encode($existingSpecs, JSON_UNESCAPED_UNICODE) ?>;
+    var catAttrMap = <?= json_encode($catAttrMap, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+    var existingSpecs = <?= json_encode($existingSpecs, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
     function updateAttrFields() {
         var catId = document.getElementById('category-select').value;
         var attrs = catAttrMap[catId] || [];
@@ -859,8 +859,12 @@ function pageOrder(): void {
 
     $items = Orders::items($id);
     $allowed = OrderWorkflow::allowedTransitions($order['status']);
-    $paymentTransitions = PaymentService::allowedPaymentTransitions((string)($order['payment_status'] ?? 'pending'));
+    $paymentTransitions = array_values(array_diff(
+        PaymentService::allowedPaymentTransitions((string)($order['payment_status'] ?? 'pending')),
+        ['refund_pending', 'partially_refunded', 'refunded']
+    ));
     $paymentTxs = PaymentService::transactionsForOrder($id);
+    $refundableBalance = PaymentService::refundableBalance($id);
     $paymentSnapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
     $latestPaymentTx = $paymentTxs ? $paymentTxs[count($paymentTxs) - 1] : null;
     $logs = AuditLog::forEntity('order_status', $id, 20);
@@ -912,10 +916,10 @@ function pageOrder(): void {
                 <button class="btn btn-primary btn-sm" type="submit">Zmeniť platbu</button>
             </form>
             <?php endif; ?>
-            <?php if (PaymentService::canPaymentTransition((string)($order['payment_status'] ?? 'pending'), 'refund_pending')): ?>
+            <?php if ($refundableBalance > 0 && PaymentService::canPaymentTransition((string)($order['payment_status'] ?? 'pending'), 'refund_pending')): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_request" style="margin-top:.5rem">
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-                <input name="amount" type="number" min="1" max="<?= (int)$order['total'] ?>" step="1" value="<?= (int)$order['total'] ?>">
+                <input name="amount" type="number" min="1" max="<?= $refundableBalance ?>" step="1" value="<?= $refundableBalance ?>">
                 <input name="note" placeholder="Dôvod refundu..." required>
                 <button class="btn btn-danger btn-sm" type="submit">Požiadať refund</button>
             </form>
@@ -1475,6 +1479,7 @@ function pageCustomerDetail(): void {
         </table>
         <?php if (!$anon): ?>
         <p style="margin-top:1rem">
+            <?php if (Security::adminCan('customers.edit')): ?>
             <?php $toggleTo = $status === 'active' ? 'blocked' : 'active'; ?>
             <form method="post" action="admin.php?p=customer&id=<?= (int)$c['id'] ?>&action=status" style="display:inline">
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -1484,6 +1489,7 @@ function pageCustomerDetail(): void {
                     <?= $toggleTo === 'blocked' ? 'Zablokovať účet' : 'Odblokovať účet' ?>
                 </button>
             </form>
+            <?php endif; ?>
             <a class="btn btn-sm" href="cli/gdpr-export.php?customer-id=<?= (int)$c['id'] ?>">GDPR export</a>
             <a class="btn btn-sm" href="admin.php?p=gdpr&email=<?= urlencode((string)$c['email']) ?>">GDPR vymazať…</a>
         </p>
@@ -1666,7 +1672,7 @@ function pageCmsEdit(): void {
             'title'    => $pg['title'] ?? '',
             'body'     => $pg['body'] ?? '',
             'status'   => $pg['status'] ?? 'active',
-        ], JSON_UNESCAPED_UNICODE);
+        ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
         ?>
         <div id="bbf-page" data-form="admin-page" data-lang="sk"></div>
         <?php if ($id): ?>
@@ -1695,7 +1701,7 @@ function handleCmsPageSave(): void {
     $now = Db::isSqlite() ? "datetime('now')" : 'NOW()';
     $slug = Security::slug($_POST['slug'] ?? '');
     $title = trim($_POST['title'] ?? '');
-    $body = $_POST['body'] ?? '';
+    $body = Security::sanitizeRichHtml((string)($_POST['body'] ?? ''));
     $status = in_array($_POST['status'] ?? '', ['active', 'draft']) ? $_POST['status'] : 'active';
 
     if (!$slug || !$title) {
@@ -1876,7 +1882,7 @@ function handleRmaStatus(): void {
 }
 
 function handleCustomerStatus(): void {
-    Security::adminRequire('customers.view');
+    Security::adminRequire('customers.edit');
     $id = Security::int($_POST['customer_id'] ?? 0);
     $status = Security::clean($_POST['status'] ?? '');
     if ($id > 0 && Customers::setStatus($id, $status)) {
@@ -1972,7 +1978,7 @@ function handleProductSave(): void {
         ':stock'         => Security::int($_POST['stock'] ?? 0),
         ':status'        => $status,
         ':summary'       => trim($_POST['summary'] ?? ''),
-        ':description'   => trim($_POST['description'] ?? ''),
+        ':description'   => Security::sanitizeRichHtml((string)($_POST['description'] ?? '')),
         ':weight_g'      => Security::int($_POST['weight_g'] ?? 0),
     ];
 
@@ -1984,27 +1990,36 @@ function handleProductSave(): void {
     }
 
     // Handle file upload
-    if (!empty($_FILES['image_upload']['tmp_name']) && $_FILES['image_upload']['error'] === UPLOAD_ERR_OK) {
-        $ext = strtolower(pathinfo($_FILES['image_upload']['name'], PATHINFO_EXTENSION));
-        // Verify actual MIME type via finfo (not just extension)
+    if (isset($_FILES['image_upload']) && ($_FILES['image_upload']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+        $upload = $_FILES['image_upload'];
+        $tmpName = (string)($upload['tmp_name'] ?? '');
+        $actualSize = $tmpName !== '' && is_file($tmpName) ? filesize($tmpName) : false;
         $allowedMime = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
-        $finfo = new finfo(FILEINFO_MIME_TYPE);
-        $mime = $finfo->file($_FILES['image_upload']['tmp_name']);
-        if (isset($allowedMime[$mime])) {
-            $ext = $allowedMime[$mime]; // use detected extension, not user-supplied
-            $safeSku = preg_replace('/[^a-zA-Z0-9_-]/', '_', $data[':sku'] ?: uniqid());
-            $filename = 'products/' . $safeSku . '-' . time() . '.' . $ext;
-            try {
-                $storage = Adapters::storage();
-                $url = $storage->store($filename, file_get_contents($_FILES['image_upload']['tmp_name']));
-                $images[] = $url;
-                // Queue resize job
-                JobQueue::push('image_resize', ['path' => $filename], 3);
-            } catch (\Throwable $e) {
-                // Storage not configured, save with URL only
-                $images[] = $filename;
-            }
-        } // else: unsupported MIME type, silently skip
+        $basicValid = ($upload['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK
+            && is_uploaded_file($tmpName)
+            && $actualSize !== false && $actualSize > 0 && $actualSize <= 10 * 1024 * 1024;
+        $mime = $basicValid ? (new finfo(FILEINFO_MIME_TYPE))->file($tmpName) : false;
+        $dimensions = $basicValid && isset($allowedMime[$mime]) ? @getimagesize($tmpName) : false;
+        $validDimensions = is_array($dimensions)
+            && ($dimensions[0] ?? 0) > 0 && ($dimensions[1] ?? 0) > 0
+            && ($dimensions[0] ?? 0) <= 12000 && ($dimensions[1] ?? 0) <= 12000
+            && ($dimensions[0] * $dimensions[1]) <= 40000000;
+        if (!$basicValid || !isset($allowedMime[$mime]) || !$validDimensions) {
+            setFlash('err', 'Obrázok je neplatný, príliš veľký alebo má nepodporovaný formát.');
+            header("Location: admin.php?p=product&id={$id}");
+            exit;
+        }
+
+        $safeSku = preg_replace('/[^a-zA-Z0-9_-]/', '_', $data[':sku'] ?: bin2hex(random_bytes(6)));
+        $filename = 'products/' . $safeSku . '-' . time() . '.' . $allowedMime[$mime];
+        $imageBytes = file_get_contents($tmpName);
+        if ($imageBytes === false || strlen($imageBytes) !== $actualSize) {
+            throw new RuntimeException('Uploaded image could not be read completely');
+        }
+        $storage = Adapters::storage();
+        $url = $storage->store($filename, $imageBytes);
+        $images[] = $url;
+        JobQueue::push('image_resize', ['path' => $filename], 3);
     }
     $data[':images'] = json_encode($images);
 
@@ -2200,7 +2215,8 @@ function handleOrderPaymentTransition(): void {
     $note = trim((string)($_POST['note'] ?? ''));
     $from = (string)($order['payment_status'] ?? 'pending');
 
-    if (!PaymentService::canPaymentTransition($from, $newStatus)) {
+    if (in_array($newStatus, ['refund_pending', 'partially_refunded', 'refunded'], true)
+        || !PaymentService::canPaymentTransition($from, $newStatus)) {
         setFlash('err', 'Neplatný prechod platby.');
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
@@ -2234,15 +2250,16 @@ function handleOrderRefundRequest(): void {
 
     $amount = Security::int($_POST['amount'] ?? 0);
     $reason = trim((string)($_POST['reason'] ?? $_POST['note'] ?? ''));
-    if ($amount <= 0) {
-        setFlash('err', 'Suma refundu musí byť vyššia ako 0.');
+    $refundableBalance = PaymentService::refundableBalance($orderId);
+    if ($amount <= 0 || $amount > $refundableBalance || $reason === '') {
+        setFlash('err', 'Suma refundu musí byť v rozsahu dostupného zostatku.');
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }
 
     try {
-        $key = 'admin_refund_request_' . $orderId . '_' . time();
-        PaymentService::transitionPayment($orderId, 'refund_pending', 'refund.requested', $amount, $key, [
+        $key = 'admin_refund_request_' . $orderId . '_' . bin2hex(random_bytes(12));
+        PaymentService::requestRefund($orderId, $amount, $key, [
             'actor' => Security::adminUser(),
             'amount' => $amount,
             'reason' => $reason,
@@ -2261,13 +2278,13 @@ function handleOrderEmailResend(): void {
     Security::adminRequire('orders.edit');
     $orderId = Security::int($_GET['id'] ?? 0);
     $logId   = Security::int($_POST['log_id'] ?? 0);
-    if ($logId <= 0) {
-        setFlash('err', 'Chýbajúci záznam emailu.');
+    if ($logId <= 0 || !Security::rateLimit('admin_email_resend_' . $logId, 3, 3600, false)) {
+        setFlash('err', 'Email nemožno opätovne odoslať.');
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }
     try {
-        $res = MailService::resend($logId);
+        $res = MailService::resend($logId, $orderId);
         if (($res['status'] ?? '') === 'sent') {
             setFlash('ok', 'Email opätovne odoslaný (' . esc($res['adapter'] ?? '') . ').');
         } else {
@@ -2284,6 +2301,11 @@ function handleOrderEmailResend(): void {
 function handleOrderInvoiceIssue(): void {
     Security::adminRequire('orders.edit');
     $orderId = Security::int($_GET['id'] ?? 0);
+    if ($orderId <= 0 || !Security::rateLimit('admin_invoice_issue_' . $orderId, 3, 3600, false)) {
+        setFlash('err', 'Faktúru teraz nemožno vystaviť alebo znovu odoslať.');
+        header("Location: admin.php?p=order&id={$orderId}");
+        exit;
+    }
     try {
         $inv = InvoiceService::issue($orderId);
         // Re-issue: send invoice email immediately (sync)
@@ -2312,8 +2334,13 @@ function handleOrderInvoiceResend(): void {
     Security::adminRequire('orders.edit');
     $orderId   = Security::int($_GET['id'] ?? 0);
     $invoiceId = Security::int($_POST['invoice_id'] ?? 0);
-    $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE id = :id");
-    $stmt->execute([':id' => $invoiceId]);
+    if ($invoiceId <= 0 || !Security::rateLimit('admin_invoice_resend_' . $invoiceId, 3, 3600, false)) {
+        setFlash('err', 'Faktúru teraz nemožno opätovne odoslať.');
+        header("Location: admin.php?p=order&id={$orderId}");
+        exit;
+    }
+    $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE id = :id AND order_id = :order_id");
+    $stmt->execute([':id' => $invoiceId, ':order_id' => $orderId]);
     $inv = $stmt->fetch();
     if (!$inv) {
         setFlash('err', 'Faktúra neexistuje.');
@@ -2350,26 +2377,35 @@ function handleOrderInvoiceResend(): void {
 }
 
 function handleImportUpload(): void {
-    if (empty($_FILES['csv_file']['tmp_name'])) {
-        setFlash('err', 'Žiadny súbor.');
-        return;
-    }
-
-    $maxBytes = 50 * 1024 * 1024; // 50 MB
-    if (($_FILES['csv_file']['size'] ?? 0) > $maxBytes) {
-        setFlash('err', 'Súbor je príliš veľký (max 50 MB).');
+    $upload = $_FILES['csv_file'] ?? null;
+    $tmpFile = is_array($upload) ? (string)($upload['tmp_name'] ?? '') : '';
+    $actualSize = $tmpFile !== '' && is_file($tmpFile) ? filesize($tmpFile) : false;
+    $basicValid = is_array($upload)
+        && ($upload['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK
+        && is_uploaded_file($tmpFile)
+        && strtolower(pathinfo((string)($upload['name'] ?? ''), PATHINFO_EXTENSION)) === 'csv'
+        && $actualSize !== false && $actualSize > 0 && $actualSize <= Import::MAX_FILE_BYTES;
+    $mime = $basicValid ? (new finfo(FILEINFO_MIME_TYPE))->file($tmpFile) : false;
+    $allowedMime = ['text/plain', 'text/csv', 'application/csv', 'application/vnd.ms-excel'];
+    if (!$basicValid || !in_array($mime, $allowedMime, true)) {
+        setFlash('err', 'CSV upload je neplatný, príliš veľký alebo má nepodporovaný formát.');
         header("Location: admin.php?p=import");
         exit;
     }
 
-    $tmpFile = $_FILES['csv_file']['tmp_name'];
     $result = Import::csv($tmpFile);
 
-    if ($result['success']) {
-        AuditLog::log('import', 0, null, ['imported' => $result['imported']], 'CSV import');
+    $errCount = count($result['errors']);
+    if (($result['imported'] ?? 0) > 0) {
+        AuditLog::log('import', 0, null, [
+            'imported' => $result['imported'],
+            'errors' => $errCount,
+            'complete' => (bool)$result['success'],
+        ], 'CSV import');
+    }
+    if ($result['success'] && $errCount === 0) {
         setFlash('ok', "Import úspešný: {$result['imported']} produktov.");
     } else {
-        $errCount = count($result['errors']);
         setFlash('err', "Import: {$result['imported']} OK, {$errCount} chýb.");
     }
 

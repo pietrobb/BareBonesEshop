@@ -11,7 +11,10 @@ class Db {
         if (self::$pdo) return self::$pdo;
 
         $cfg = require __DIR__ . '/../config.php';
-        self::$driver = $cfg['db_driver'];
+        self::$driver = strtolower(trim((string)($cfg['db_driver'] ?? '')));
+        if (!in_array(self::$driver, ['sqlite', 'mysql'], true)) {
+            throw new RuntimeException('Unsupported db_driver; expected sqlite or mysql');
+        }
 
         if (self::$driver === 'mysql') {
             $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=%s',
@@ -23,7 +26,18 @@ class Db {
             ]);
             self::$pdo->exec("SET SESSION sql_mode='STRICT_ALL_TABLES,NO_ZERO_DATE'");
         } else {
-            self::$pdo = new PDO('sqlite:' . $cfg['db_sqlite_path'], null, null, [
+            $sqlitePath = (string)($cfg['db_sqlite_path'] ?? '');
+            $absolute = str_starts_with($sqlitePath, '/')
+                || str_starts_with($sqlitePath, '\\\\')
+                || preg_match('/^[A-Za-z]:[\\\\\/]/', $sqlitePath) === 1;
+            if (!$absolute || preg_match('/[\x00-\x1F\x7F]/', $sqlitePath) || str_contains($sqlitePath, ':memory:')) {
+                throw new RuntimeException('db_sqlite_path must be a safe absolute filesystem path');
+            }
+            $dbDir = dirname($sqlitePath);
+            if (!is_dir($dbDir) || !is_writable($dbDir)) {
+                throw new RuntimeException("SQLite directory must exist and be writable: {$dbDir}");
+            }
+            self::$pdo = new PDO('sqlite:' . $sqlitePath, null, null, [
                 PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             ]);

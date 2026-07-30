@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/cli-only.php';
+
 /**
  * BareBones Shop — Staging Deploy Preflight
  *
@@ -19,7 +21,7 @@ function preflightEnv(string $key): string {
 }
 
 function preflightSecretLooksFilled(string $value): bool {
-    if ($value === '') return false;
+    if (strlen($value) < 16 || trim($value) !== $value) return false;
     $lower = strtolower($value);
     foreach (['...', 'your_', 'example', 'changeme', 'placeholder'] as $needle) {
         if (str_contains($lower, $needle)) return false;
@@ -40,6 +42,32 @@ function runStagingPreflight(array $argvLocal = []): array {
     $add = static function (string $level, string $name, string $message, string $remediation = '') use (&$checks): void {
         $checks[] = compact('level', 'name', 'message', 'remediation');
     };
+    $privatePathOk = static function (string $path) use ($root): bool {
+        $absolute = str_starts_with($path, '/') || str_starts_with($path, '\\\\')
+            || preg_match('/^[A-Za-z]:[\\\\\/]/', $path) === 1;
+        if (!$absolute || preg_match('/[\x00-\x1F\x7F]/', $path)) return false;
+        $probe = $path;
+        $suffix = [];
+        while (!file_exists($probe) && !is_link($probe)) {
+            $parent = dirname($probe);
+            if ($parent === $probe) break;
+            array_unshift($suffix, basename($probe));
+            $probe = $parent;
+        }
+        $candidate = realpath($probe);
+        if ($candidate === false) return false;
+        foreach ($suffix as $segment) {
+            if ($segment === '.' || $segment === '') continue;
+            $candidate = $segment === '..' ? dirname($candidate) : $candidate . DIRECTORY_SEPARATOR . $segment;
+        }
+        $app = rtrim(str_replace('\\', '/', $root), '/');
+        $candidate = rtrim(str_replace('\\', '/', $candidate), '/');
+        if (DIRECTORY_SEPARATOR === '\\') {
+            $app = strtolower($app);
+            $candidate = strtolower($candidate);
+        }
+        return $candidate !== $app && !str_starts_with($candidate, $app . '/');
+    };
 
     $add('info', 'mode', 'Preflight only: no deploy, no upload, no destructive action.');
 
@@ -59,10 +87,18 @@ function runStagingPreflight(array $argvLocal = []): array {
 
     $add(!empty($cfg['admin_email']) ? 'ok' : 'warn', 'admin_email', !empty($cfg['admin_email']) ? 'Admin notification email is configured.' : 'Admin notification email is empty.', 'Set admin_email for staging order notifications.');
 
+    try {
+        $appUrl = Security::appUrl($cfg);
+        $add('ok', 'app_url', "Validated public app_url: {$appUrl}");
+    } catch (\RuntimeException $e) {
+        $add('fail', 'app_url', 'app_url is missing or invalid.', 'Set an absolute public HTTP(S) app_url; security-sensitive links never use the Host header.');
+    }
+
     if (($cfg['db_driver'] ?? '') === 'sqlite') {
         $dbPath = (string)($cfg['db_sqlite_path'] ?? '');
         $dbDir = dirname($dbPath);
-        $add(is_dir($dbDir) && is_writable($dbDir) ? 'ok' : 'fail', 'sqlite_path', "SQLite directory: {$dbDir}", 'Create writable db/ directory or switch staging to MySQL config.');
+        $sqliteOk = $privatePathOk($dbPath) && is_dir($dbDir) && is_writable($dbDir);
+        $add($sqliteOk ? 'ok' : 'fail', 'sqlite_path', "Private SQLite path: {$dbPath}", 'Use a writable absolute db_sqlite_path outside the application/document root.');
     } elseif (($cfg['db_driver'] ?? '') === 'mysql') {
         foreach (['db_host', 'db_name', 'db_user'] as $key) {
             $add(!empty($cfg[$key]) ? 'ok' : 'fail', $key, !empty($cfg[$key]) ? "{$key} configured." : "{$key} missing.");
@@ -71,9 +107,22 @@ function runStagingPreflight(array $argvLocal = []): array {
         $add('fail', 'db_driver', 'Unknown db_driver.', 'Use sqlite or mysql.');
     }
 
-    foreach (['jobs', 'cache', 'storage', 'uploads'] as $dir) {
+    foreach (['cache', 'storage', 'uploads'] as $dir) {
         $path = $root . '/' . $dir;
         $add(is_dir($path) && is_writable($path) ? 'ok' : 'fail', "dir:{$dir}", "{$dir}/ " . (is_dir($path) ? 'exists' : 'missing') . (is_writable($path) ? ' and writable' : ' or not writable'), "Create and make {$dir}/ writable by the web/PHP user.");
+    }
+
+    $privatePaths = [
+        'jobs_dir' => (string)($cfg['jobs_dir'] ?? ''),
+        'private_cache_dir' => (string)($cfg['private_cache_dir'] ?? ''),
+        'invoice_storage_dir' => (string)($cfg['invoice_storage_dir'] ?? ''),
+        'backup_storage_dir' => (string)($cfg['backup_storage_dir'] ?? ''),
+        'backup_log_file' => (string)($cfg['backup_log_file'] ?? ''),
+        'gdpr_salt_file' => (string)($cfg['gdpr_salt_file'] ?? ''),
+    ];
+    foreach ($privatePaths as $key => $path) {
+        $ok = $path !== '' && $privatePathOk($path);
+        $add($ok ? 'ok' : 'fail', $key, $ok ? "{$key} is outside the application root." : "{$key} is missing, relative, or inside the application root.", "Configure an absolute private {$key} path outside the document root.");
     }
 
     $paymentAdapter = (string)($cfg['adapters']['payment'] ?? '');
@@ -85,6 +134,12 @@ function runStagingPreflight(array $argvLocal = []): array {
         $add(preflightSecretLooksFilled($stripeSk) ? 'ok' : 'fail', 'stripe_secret_key', preflightSecretLooksFilled($stripeSk) ? 'Stripe secret key configured.' : 'Stripe secret key missing/placeholder.', 'Use Stripe test secret key for staging.');
         $add(preflightSecretLooksFilled($stripePk) ? 'ok' : 'warn', 'stripe_publishable_key', preflightSecretLooksFilled($stripePk) ? 'Stripe publishable key configured.' : 'Stripe publishable key missing/placeholder.', 'Set Stripe test publishable key if checkout UI needs it.');
         $add(preflightSecretLooksFilled($stripeWh) ? 'ok' : 'fail', 'stripe_webhook_secret', preflightSecretLooksFilled($stripeWh) ? 'Stripe webhook secret configured.' : 'Stripe webhook secret missing/placeholder.', 'Set webhook secret for /api.php?action=webhook_stripe or generic payment webhook.');
+    }
+    foreach (['packeta', 'gls'] as $carrier) {
+        $envKey = 'SHIP_' . strtoupper($carrier) . '_WEBHOOK_SECRET';
+        $secret = preflightEnv($envKey) ?: (string)($cfg['shipping_webhook_secrets'][$carrier] ?? '');
+        $filled = preflightSecretLooksFilled($secret);
+        $add($filled ? 'ok' : 'fail', "shipping_webhook_secret:{$carrier}", $filled ? ucfirst($carrier) . ' webhook secret configured.' : ucfirst($carrier) . ' webhook secret missing/placeholder.', "Set {$envKey} or shipping_webhook_secrets.{$carrier}.");
     }
 
     $mailAdapter = strtolower(preflightEnv('MAIL_ADAPTER') ?: 'log');

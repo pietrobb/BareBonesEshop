@@ -462,6 +462,7 @@ class Products {
      * Pass $categoryMap ([id => ['slug','path']]) to avoid N+1 category queries.
      */
     public static function enrich(array $product, ?array $categoryMap = null): array {
+        $product['description'] = Security::sanitizeRichHtml((string)($product['description'] ?? ''));
         $product['images'] = json_decode($product['images'] ?? '[]', true);
         $product['attrs'] = json_decode($product['attrs'] ?? '{}', true);
         $product['tags'] = json_decode($product['tags'] ?? '[]', true);

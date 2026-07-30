@@ -29,7 +29,18 @@ class BackupService
         self::$db = $db;
         self::$rootDir = $rootDir ?: dirname(__DIR__);
         self::$cfg = $config ?: self::loadConfig(self::$rootDir . '/config/backup.json');
-        $storageRoot = self::$rootDir . '/storage/backups';
+
+        if ($config !== null) {
+            $storageRoot = (string)($config['storage_dir'] ?? self::$rootDir . '/storage/backups');
+        } else {
+            $appCfg = require self::$rootDir . '/config.php';
+            $storageRoot = (string)($appCfg['backup_storage_dir'] ?? dirname(self::$rootDir) . '/bareboneseshop-private/backups');
+            self::$cfg['log_file'] = (string)($appCfg['backup_log_file'] ?? dirname(self::$rootDir) . '/bareboneseshop-private/logs/backup.log');
+        }
+        $logPath = (string)(self::$cfg['log_file'] ?? 'storage/backup.log');
+        if (!self::isAbsolutePath($logPath)) $logPath = self::$rootDir . '/' . $logPath;
+        self::assertPrivateAbsolutePath($storageRoot, 'backup_storage_dir');
+        self::assertPrivateAbsolutePath($logPath, 'backup_log_file');
         self::$storage = new LocalBackupStorage($storageRoot);
         self::$livePath = self::detectLivePath($db);
     }
@@ -114,13 +125,17 @@ class BackupService
     public static function log(string $message): void
     {
         $cfg = self::$cfg;
-        $rel = (string)($cfg['log_file'] ?? 'storage/backup.log');
-        $abs = self::$rootDir . '/' . $rel;
+        $configured = (string)($cfg['log_file'] ?? 'storage/backup.log');
+        $abs = self::isAbsolutePath($configured) ? $configured : self::$rootDir . '/' . $configured;
         $dir = dirname($abs);
-        if (!is_dir($dir)) @mkdir($dir, 0775, true);
+        if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) {
+            throw new RuntimeException("BackupService: cannot create log directory {$dir}");
+        }
         self::rotateLog($abs, (int)($cfg['log_max_bytes'] ?? 10485760), (int)($cfg['log_max_files'] ?? 5));
         $line = '[' . date('c') . '] ' . $message . "\n";
-        @file_put_contents($abs, $line, FILE_APPEND | LOCK_EX);
+        if (file_put_contents($abs, $line, FILE_APPEND | LOCK_EX) === false) {
+            throw new RuntimeException("BackupService: cannot write log {$abs}");
+        }
     }
 
     private static function rotateLog(string $abs, int $maxBytes, int $maxFiles): void
@@ -211,7 +226,9 @@ class BackupService
             $remotePath = self::reserveUniquePath($when);
             $absPath = self::$storage->localPath($remotePath);
             $absDir  = dirname($absPath);
-            if (!is_dir($absDir)) mkdir($absDir, 0775, true);
+            if (!is_dir($absDir) && !mkdir($absDir, 0750, true) && !is_dir($absDir)) {
+                throw new RuntimeException("BackupService: cannot create backup directory {$absDir}");
+            }
 
             // 3. VACUUM INTO — atomic, consistent snapshot
             $sqlPath = str_replace("'", "''", $absPath);
@@ -236,19 +253,22 @@ class BackupService
                 $gzPath = $absPath . '.gz';
                 $in  = @fopen($absPath, 'rb');
                 $out = @gzopen($gzPath, 'wb6');
-                if ($in === false || $out === false) {
-                    if ($in)  fclose($in);
-                    if ($out) gzclose($out);
-                    @unlink($gzPath);
-                } else {
+                $compressionOk = $in !== false && $out !== false;
+                if ($compressionOk) {
                     while (!feof($in)) {
                         $buf = fread($in, 65536);
-                        if ($buf === false) break;
-                        gzwrite($out, $buf);
+                        if ($buf === false || ($buf !== '' && gzwrite($out, $buf) !== strlen($buf))) {
+                            $compressionOk = false;
+                            break;
+                        }
                     }
-                    fclose($in);
-                    gzclose($out);
-                    $compressed = is_file($gzPath);
+                }
+                if (is_resource($in)) fclose($in);
+                if (is_resource($out)) gzclose($out);
+                if (!$compressionOk || !is_file($gzPath) || filesize($gzPath) === 0) {
+                    @unlink($gzPath);
+                } else {
+                    $compressed = true;
                 }
             }
 
@@ -327,47 +347,65 @@ class BackupService
         }
 
         $skipSnapshot = (bool)($opts['skip_snapshot'] ?? false);
-        $maxRetries   = (int)($opts['max_retries']   ?? 3);
-        $retryDelayMs = (int)($opts['retry_delay']   ?? 100);
+        $maxRetries   = max(1, (int)($opts['max_retries'] ?? 3));
+        $retryDelayMs = max(0, (int)($opts['retry_delay'] ?? 100));
+        $temporarySource = null;
+        $restoreTemp = null;
 
+        try {
         $absSrc = self::$storage->localPath($remotePath);
         if (!is_file($absSrc)) {
-            // Maybe the user passed a .gz path — try decompress to a temp and use that
             $gz = $absSrc . '.gz';
-            if (is_file($gz)) {
-                $tmp = $absSrc . '.tmp.decompressed';
-                $in  = @gzopen($gz, 'rb');
-                $out = @fopen($tmp, 'wb');
-                if ($in === false || $out === false) {
-                    if ($in)  gzclose($in);
-                    if ($out) fclose($out);
-                    throw new RuntimeException("Restore: cannot decompress {$gz}");
-                }
-                while (!gzeof($in)) {
-                    $buf = gzread($in, 65536);
-                    if ($buf === false) break;
-                    fwrite($out, $buf);
-                }
-                gzclose($in);
-                fclose($out);
-                $absSrc = $tmp;
-            } else {
+            if (!is_file($gz)) {
                 throw new RuntimeException("Restore: backup not found: {$remotePath}");
             }
+            $temporarySource = $absSrc . '.restore-' . bin2hex(random_bytes(6)) . '.tmp';
+            $in  = @gzopen($gz, 'rb');
+            $out = @fopen($temporarySource, 'xb');
+            $decompressionOk = $in !== false && $out !== false;
+            if ($decompressionOk) {
+                while (!gzeof($in)) {
+                    $buf = gzread($in, 65536);
+                    if ($buf === false || ($buf !== '' && fwrite($out, $buf) !== strlen($buf))) {
+                        $decompressionOk = false;
+                        break;
+                    }
+                }
+            }
+            if (is_resource($in)) gzclose($in);
+            if (is_resource($out)) fclose($out);
+            if (!$decompressionOk || !is_file($temporarySource)) {
+                @unlink($temporarySource);
+                throw new RuntimeException("Restore: cannot safely decompress {$gz}");
+            }
+            $absSrc = $temporarySource;
         }
 
         $metaPath = self::$storage->localPath($remotePath) . '.meta.json';
-        $meta = is_file($metaPath) ? (json_decode((string)file_get_contents($metaPath), true) ?: []) : [];
-
-        // 1a. sha256 verify
-        if (!empty($meta['sha256'])) {
-            $actual = hash_file('sha256', $absSrc);
-            if ($actual !== $meta['sha256']) {
-                throw new RuntimeException("Restore: sha256 mismatch (expected {$meta['sha256']}, got {$actual})");
-            }
+        $metaJson = is_file($metaPath) ? file_get_contents($metaPath) : false;
+        $meta = $metaJson !== false ? json_decode($metaJson, true) : null;
+        if (!is_array($meta)) {
+            throw new RuntimeException('Restore: valid backup metadata is required');
+        }
+        $expectedSha = strtolower((string)($meta['sha256'] ?? ''));
+        $expectedSize = filter_var($meta['size_bytes'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if (!preg_match('/^[0-9a-f]{64}$/', $expectedSha) || $expectedSize === false) {
+            throw new RuntimeException('Restore: metadata must contain a valid sha256 and positive size_bytes');
+        }
+        if ((string)($meta['remote_path'] ?? '') !== $remotePath || (string)($meta['filename'] ?? '') !== basename($remotePath)) {
+            throw new RuntimeException('Restore: metadata identity does not match the requested backup');
         }
 
-        // 1b. integrity_check on the BACKUP file before we touch the live DB
+        $actualSize = filesize($absSrc);
+        $actual = hash_file('sha256', $absSrc);
+        if ($actualSize !== $expectedSize) {
+            throw new RuntimeException("Restore: size mismatch (expected {$expectedSize}, got {$actualSize})");
+        }
+        if (!hash_equals($expectedSha, (string)$actual)) {
+            throw new RuntimeException("Restore: sha256 mismatch (expected {$expectedSha}, got {$actual})");
+        }
+
+        // integrity_check on the BACKUP file before we touch the live DB
         $verify = new PDO('sqlite:' . $absSrc, null, null, [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -391,50 +429,87 @@ class BackupService
             }
         }
 
+        $livePath = self::$livePath;
+        if (!is_file($livePath)) {
+            throw new RuntimeException("Restore: live database not found: {$livePath}");
+        }
+        $restoreTemp = $livePath . '.restore-' . bin2hex(random_bytes(6)) . '.tmp';
+        if (!copy($absSrc, $restoreTemp)
+            || filesize($restoreTemp) !== $expectedSize
+            || !hash_equals($expectedSha, (string)hash_file('sha256', $restoreTemp))) {
+            throw new RuntimeException('Restore: failed to stage a complete verified replacement database');
+        }
+        @chmod($restoreTemp, 0640);
+
         $lockHandle = self::acquireLock();
         try {
-
             // 3. close live PDO
-            $livePath = self::$livePath;
             self::$db = null;
-            // also clear shared singleton if it matches
             if (class_exists('Db', false)) {
                 try {
                     if (Db::isSqlite()) Db::reset();
                 } catch (\Throwable $e) { /* ignore */ }
             }
-            // best-effort GC
             gc_collect_cycles();
 
-            // 4. atomic replace with retry (Windows file-lock tolerance)
-            $err = null;
-            for ($i = 0; $i < $maxRetries; $i++) {
-                if (@copy($absSrc, $livePath)) {
-                    $err = null;
-                    break;
-                }
-                $err = error_get_last()['message'] ?? 'unknown';
-                usleep($retryDelayMs * 1000);
-            }
-            // also remove WAL/SHM siblings (they belong to the OLD db, would corrupt the restored copy)
+            // 4. rollback-safe same-filesystem replacement
             @unlink($livePath . '-wal');
             @unlink($livePath . '-shm');
-            if ($err !== null) {
-                self::log("RESTORE FAIL src={$remotePath} err={$err}");
-                throw new RuntimeException("Restore: copy failed after {$maxRetries} retries: {$err}. " .
-                    "Hint: close all open connections and stop the worker before restoring.");
+            $rollbackPath = $livePath . '.pre-restore-' . bin2hex(random_bytes(6)) . '.rollback';
+            $movedLive = false;
+            for ($i = 0; $i < $maxRetries; $i++) {
+                if (@rename($livePath, $rollbackPath)) {
+                    $movedLive = true;
+                    break;
+                }
+                usleep($retryDelayMs * 1000);
             }
+            if (!$movedLive) {
+                throw new RuntimeException('Restore: cannot move the live database aside; stop all workers and retry');
+            }
+            if (!@rename($restoreTemp, $livePath)) {
+                $restoreError = error_get_last()['message'] ?? 'unknown';
+                if (!@rename($rollbackPath, $livePath)) {
+                    throw new RuntimeException("Restore: replacement failed and automatic rollback failed; recovery copy: {$rollbackPath}");
+                }
+                throw new RuntimeException("Restore: atomic replacement failed: {$restoreError}");
+            }
+            $restoreTemp = null;
 
-            // 5. open fresh PDO + integrity
-            $newDb = new PDO('sqlite:' . $livePath, null, null, [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            ]);
-            $newDb->exec('PRAGMA journal_mode = WAL');
-            $newDb->exec('PRAGMA foreign_keys = ON');
-            $integrity = (string)$newDb->query('PRAGMA integrity_check')->fetchColumn();
+            // 5. open fresh PDO + integrity; restore the old DB if post-swap verification fails
+            try {
+                $newDb = new PDO('sqlite:' . $livePath, null, null, [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                ]);
+                $newDb->exec('PRAGMA journal_mode = WAL');
+                $newDb->exec('PRAGMA foreign_keys = ON');
+                $integrity = (string)$newDb->query('PRAGMA integrity_check')->fetchColumn();
+                if ($integrity !== 'ok') {
+                    throw new RuntimeException("restored database integrity_check failed: {$integrity}");
+                }
+            } catch (\Throwable $verificationError) {
+                $newDb = null;
+                @unlink($livePath . '-wal');
+                @unlink($livePath . '-shm');
+                @unlink($livePath);
+                if (!@rename($rollbackPath, $livePath)) {
+                    throw new RuntimeException(
+                        "Restore verification failed and automatic rollback failed; recovery copy: {$rollbackPath}",
+                        0,
+                        $verificationError
+                    );
+                }
+                $oldDb = new PDO('sqlite:' . $livePath, null, null, [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                ]);
+                if (class_exists('Db', false)) Db::init($oldDb, 'sqlite');
+                self::$db = $oldDb;
+                throw new RuntimeException('Restore verification failed; previous live database was restored', 0, $verificationError);
+            }
+            @unlink($rollbackPath);
 
-            // re-init the global Db singleton with the fresh PDO so the rest of the process keeps working
             if (class_exists('Db', false)) {
                 Db::init($newDb, 'sqlite');
             }
@@ -482,11 +557,6 @@ class BackupService
             self::log("RESTORE OK src={$remotePath} snapshot=" . ($snapshotPath ?: '-') .
                 " integrity={$integrity} applied={$appliedCount} pending={$pendingCount}");
 
-            // cleanup decompressed temp if any
-            if (str_ends_with($absSrc, '.tmp.decompressed')) {
-                @unlink($absSrc);
-            }
-
             return [
                 'restored'        => $remotePath,
                 'snapshot'        => $snapshotPath,
@@ -498,6 +568,10 @@ class BackupService
             ];
         } finally {
             self::releaseLock($lockHandle);
+        }
+        } finally {
+            if ($temporarySource !== null && is_file($temporarySource)) @unlink($temporarySource);
+            if ($restoreTemp !== null && is_file($restoreTemp)) @unlink($restoreTemp);
         }
     }
 
@@ -635,6 +709,47 @@ class BackupService
         }
         return (new \DateTimeImmutable('@' . (int)($row['mtime'] ?? time())))
             ->setTimezone(new \DateTimeZone(date_default_timezone_get()));
+    }
+
+    private static function assertPrivateAbsolutePath(string $path, string $name): void
+    {
+        if (!self::isAbsolutePath($path)) {
+            throw new RuntimeException("{$name} must be an absolute path outside the application root");
+        }
+        if (preg_match('/[\x00-\x1F\x7F]/', $path)) {
+            throw new RuntimeException("{$name} contains control characters");
+        }
+        $probe = $path;
+        $suffix = [];
+        while (!file_exists($probe) && !is_link($probe)) {
+            $parent = dirname($probe);
+            if ($parent === $probe) break;
+            array_unshift($suffix, basename($probe));
+            $probe = $parent;
+        }
+        $canonical = realpath($probe);
+        if ($canonical === false) {
+            throw new RuntimeException("{$name} parent cannot be resolved");
+        }
+        foreach ($suffix as $segment) {
+            if ($segment === '.' || $segment === '') continue;
+            $canonical = $segment === '..' ? dirname($canonical) : $canonical . DIRECTORY_SEPARATOR . $segment;
+        }
+        $normalized = rtrim(str_replace('\\', '/', $canonical), '/');
+        $appDir = dirname(__DIR__);
+        $root = rtrim(str_replace('\\', '/', realpath($appDir) ?: $appDir), '/');
+        if (DIRECTORY_SEPARATOR === '\\') {
+            $normalized = strtolower($normalized);
+            $root = strtolower($root);
+        }
+        if ($normalized === $root || str_starts_with($normalized, $root . '/')) {
+            throw new RuntimeException("{$name} must be outside the application root");
+        }
+    }
+
+    private static function isAbsolutePath(string $path): bool
+    {
+        return str_starts_with($path, '/') || str_starts_with($path, '\\\\') || preg_match('/^[A-Za-z]:[\\\\\/]/', $path) === 1;
     }
 
     // ---------- locking ----------

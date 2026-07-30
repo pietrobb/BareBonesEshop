@@ -40,7 +40,7 @@ $fieldErrors = [];
 $fieldValues = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!Security::csrfValidate($_POST['csrf_token'] ?? '')) {
+    if (!Security::csrfValidate()) {
         http_response_code(403);
         exit('Forbidden (CSRF)');
     }
@@ -83,21 +83,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $fieldValues = $_POST;
         $email = strtolower(trim($_POST['email'] ?? ''));
         $password = $_POST['password'] ?? '';
-        $rlKey = 'account_login_' . md5(($_SERVER['REMOTE_ADDR'] ?? 'cli') . '|' . $email);
-        if (!Security::rateLimit($rlKey, 10)) {
-            $flash = $t('account.rate_limited'); $flashType = 'error';
-            $p = 'login';
-        } else {
+        $emailKey = hash('sha256', $email);
+        $ipAllowed = Security::rateLimit('account_login_ip', 30, 900);
+        $accountAllowed = Security::rateLimit('account_login_account_' . $emailKey, 10, 900, false);
+        if ($ipAllowed && $accountAllowed) {
             [$ok, $c, $err] = Customers::login($email, $password);
             if ($ok) {
                 $next = Security::safeLocalPath($_POST['next'] ?? null, 'account.php');
                 header('Location: ' . $next);
                 exit;
             }
-            $flash = $t('account.err_' . $err) ?: $err;
-            $flashType = 'error';
-            $p = 'login';
         }
+        $flash = $t('account.err_invalid_credentials') ?: 'invalid_credentials';
+        $flashType = 'error';
+        $p = 'login';
     }
 
     elseif ($action === 'logout') {
@@ -109,14 +108,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif ($action === 'forgot') {
         $fieldValues = $_POST;
         $email = strtolower(trim($_POST['email'] ?? ''));
-        $rlKey = 'account_forgot_' . md5($_SERVER['REMOTE_ADDR'] ?? 'cli');
-        if (!Security::rateLimit($rlKey, 5)) {
-            $flash = $t('account.rate_limited'); $flashType = 'error';
-        } else {
+        $emailKey = hash('sha256', $email);
+        $ipAllowed = Security::rateLimit('account_forgot_ip', 5, 60);
+        $recipientAllowed = Security::rateLimit('account_forgot_recipient_' . $emailKey, 3, 3600, false);
+        if ($ipAllowed && $recipientAllowed) {
             $token = Customers::startPasswordReset($email);
             if ($token) {
-                $resetUrl = (!empty($_SERVER['HTTPS']) ? 'https' : 'http')
-                    . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost')
+                $accountCfg = require __DIR__ . '/config.php';
+                $resetUrl = Security::appUrl($accountCfg)
                     . '/account.php?p=reset&token=' . urlencode($token);
                 MailService::send('account_password_reset', $email, $locale, [
                     'customer_name' => $email,
@@ -124,17 +123,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'expires_in'    => '1',
                 ], null);
             }
-            // Generic success (avoid email enumeration)
-            $flash = $t('account.forgot_sent');
-            $flashType = 'ok';
         }
+        // Always generic, including throttled and unknown recipients.
+        $flash = $t('account.forgot_sent');
+        $flashType = 'ok';
         $p = 'forgot';
     }
 
     elseif ($action === 'reset') {
         $token = Security::clean($_POST['token'] ?? '');
         $newPassword = $_POST['password'] ?? '';
-        [$ok, $err] = Customers::completePasswordReset($token, $newPassword);
+        $ipAllowed = Security::rateLimit('account_reset_ip', 10, 3600);
+        $tokenAllowed = Security::rateLimit('account_reset_token_' . hash('sha256', $token), 5, 3600, false);
+        [$ok, $err] = ($ipAllowed && $tokenAllowed)
+            ? Customers::completePasswordReset($token, $newPassword)
+            : [false, 'invalid_or_expired_token'];
         if ($ok) {
             $flash = $t('account.reset_success');
             $flashType = 'ok';
@@ -149,7 +152,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     elseif ($action === 'change_password' && Customers::isLoggedIn()) {
         $cid = (int)$_SESSION['customer_id'];
-        [$ok, $err] = Customers::changePassword($cid, $_POST['current'] ?? '', $_POST['new'] ?? '');
+        $allowed = Security::rateLimit('account_change_password_' . $cid, 5, 900, false);
+        [$ok, $err] = $allowed
+            ? Customers::changePassword($cid, $_POST['current'] ?? '', $_POST['new'] ?? '')
+            : [false, 'invalid_current_password'];
         $flash = $ok ? $t('account.password_changed') : ($t('account.err_' . $err) ?: $err);
         $flashType = $ok ? 'ok' : 'error';
         $p = 'change-password';
@@ -249,7 +255,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 header('Location: account.php?p=login&erased=1');
                 exit;
             } catch (Throwable $ex) {
-                $flash = $t('account.gdpr_erase_failed') . ': ' . $ex->getMessage();
+                $errorId = bin2hex(random_bytes(6));
+                error_log("GDPR erase failed [{$errorId}] for customer #{$cid}: " . $ex->getMessage());
+                $flash = $t('account.gdpr_erase_failed') . " ({$errorId})";
                 $flashType = 'error';
                 $p = 'privacy';
             }

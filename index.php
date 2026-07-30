@@ -7,6 +7,7 @@ require_once __DIR__ . '/src/autoload.php';
 
 Security::headers();
 Security::sessionStart();
+Customers::isLoggedIn();
 if (!isset($_SESSION['cart'])) $_SESSION['cart'] = [];
 
 // Locale from URL — canonical, no session override
@@ -1491,6 +1492,21 @@ function processCheckout(): string {
     if (empty($cart)) {
         return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">Košík je prázdny.</p>';
     }
+    if (!Security::rateLimit('checkout', 10)
+        || !Security::rateLimit('checkout_global', 200, 60, false)
+        || !Security::rateLimit('checkout_session_' . hash('sha256', session_id()), 5, 900, false)) {
+        return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">Príliš veľa pokusov o objednávku. Skúste to neskôr.</p>';
+    }
+    $email = Security::email((string)($_POST['email'] ?? ''));
+    if ($email === null) {
+        return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">Zadajte platnú e-mailovú adresu.</p>';
+    }
+    $checkoutSubject = !empty($_SESSION['customer_id'])
+        ? 'customer_' . (int)$_SESSION['customer_id']
+        : 'email_' . hash('sha256', strtolower($email));
+    if (!Security::rateLimit('checkout_subject_' . $checkoutSubject, 3, 1800, false)) {
+        return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">Príliš veľa pokusov o objednávku. Skúste to neskôr.</p>';
+    }
 
     $db = Db::get();
 
@@ -1546,7 +1562,7 @@ function processCheckout(): string {
     $customer = [
         'customer_id' => $loggedInCustomerId,
         'name'  => Security::clean($_POST['name'] ?? ''),
-        'email' => Security::clean($_POST['email'] ?? ''),
+        'email' => $email,
         'phone' => Security::clean($_POST['phone'] ?? ''),
         'shipping_addr' => $addr,
         'notes' => Security::clean($_POST['notes'] ?? ''),
@@ -1563,6 +1579,7 @@ function processCheckout(): string {
         // Orders::create handles atomic stock reservation
         $orderId = Orders::create($cartItems, $customer, $payment);
         $_SESSION['cart'] = [];
+        Security::rotateCsrfToken();
         $order = Orders::byId($orderId);
         header('Location: ?page=order-done&order=' . urlencode($order['order_number']));
         exit;

@@ -48,7 +48,7 @@ $pageTitle = Security::esc($page['title']) . ' — ' . ($cfg['shop_name'] ?? 'Ba
 <main class="container" style="max-width:800px;margin:2rem auto;padding:0 1rem">
     <h1><?= Security::esc($page['title']) ?></h1>
     <div class="cms-content">
-        <?= $page['body'] ?>
+        <?= Security::sanitizeRichHtml((string)$page['body']) ?>
     </div>
 </main>
 <script src="/shop.js"></script>

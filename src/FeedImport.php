@@ -194,21 +194,96 @@ class FeedImport {
     // ─── Download ────────────────────────────────────────────
 
     private static function download(string $url): string|false {
-        $ctx = stream_context_create([
-            'http' => [
-                'timeout' => 120,
-                'user_agent' => 'BareBones Shop Feed Sync/1.0',
-                'follow_location' => 1,
-                'max_redirects' => 3,
-            ],
-            'ssl' => [
-                'verify_peer' => true,
-                'verify_peer_name' => true,
-            ],
+        $endpoint = self::publicFeedEndpoint($url);
+        if ($endpoint === null || !function_exists('curl_init')) return false;
+
+        $maxBytes = 10 * 1024 * 1024;
+        $data = '';
+        $ip = str_contains($endpoint['ip'], ':') ? '[' . $endpoint['ip'] . ']' : $endpoint['ip'];
+        $ch = curl_init($url);
+        if ($ch === false) return false;
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => false,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT => 30,
+            CURLOPT_NOSIGNAL => true,
+            CURLOPT_USERAGENT => 'BareBones Shop Feed Sync/1.0',
+            CURLOPT_PROXY => '',
+            CURLOPT_NOPROXY => '*',
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_MAXFILESIZE => $maxBytes,
+            CURLOPT_RESOLVE => ["{$endpoint['host']}:{$endpoint['port']}:{$ip}"],
+            CURLOPT_WRITEFUNCTION => static function ($curl, string $chunk) use (&$data, $maxBytes): int {
+                if (strlen($data) + strlen($chunk) > $maxBytes) return 0;
+                $data .= $chunk;
+                return strlen($chunk);
+            },
         ]);
 
-        $data = @file_get_contents($url, false, $ctx);
-        return $data !== false ? $data : false;
+        $ok = curl_exec($ch);
+        $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        curl_close($ch);
+        return $ok !== false && $status >= 200 && $status < 300 ? $data : false;
+    }
+
+    private static function publicFeedEndpoint(string $url): ?array {
+        if ($url === '' || preg_match('/[\\x00-\\x20\\x7F\\\\]/', $url)) return null;
+        $parts = parse_url($url);
+        if (!is_array($parts)) return null;
+
+        $scheme = strtolower((string)($parts['scheme'] ?? ''));
+        $host = strtolower(trim((string)($parts['host'] ?? ''), '[]'));
+        if (!in_array($scheme, ['http', 'https'], true) || $host === ''
+            || isset($parts['user']) || isset($parts['pass']) || str_contains($host, '%')) {
+            return null;
+        }
+
+        $port = isset($parts['port']) ? (int)$parts['port'] : ($scheme === 'https' ? 443 : 80);
+        if (($scheme === 'http' && $port !== 80) || ($scheme === 'https' && $port !== 443)) return null;
+
+        $ips = [];
+        if (filter_var($host, FILTER_VALIDATE_IP)) {
+            $ips[] = $host;
+        } else {
+            if (strlen($host) > 253 || preg_match('/^[0-9.]+$/', $host)
+                || !preg_match('/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/', $host)) {
+                return null;
+            }
+            foreach (dns_get_record($host, DNS_A | DNS_AAAA) ?: [] as $record) {
+                $ip = $record['ip'] ?? $record['ipv6'] ?? null;
+                if (is_string($ip)) $ips[] = $ip;
+            }
+            if (!$ips) $ips = gethostbynamel($host) ?: [];
+        }
+
+        $ips = array_values(array_unique($ips));
+        if (!$ips) return null;
+        foreach ($ips as $ip) {
+            if (!self::isPublicFeedIp($ip)) return null;
+        }
+
+        return ['host' => $host, 'port' => $port, 'ip' => $ips[0]];
+    }
+
+    private static function isPublicFeedIp(string $ip): bool {
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) return false;
+        $packed = inet_pton($ip);
+        if ($packed === false || strlen($packed) !== 16) return $packed !== false;
+
+        foreach ([
+            [hex2bin('0064ff9b0000000000000000'), 12], // RFC 6052 well-known NAT64 /96
+            [hex2bin('0064ff9b0001'), 6],                 // RFC 8215 local-use NAT64 /48
+            [hex2bin('000000000000000000000000'), 12], // IPv4-compatible /96
+            [hex2bin('00000000000000000000ffff'), 12], // IPv4-mapped /96
+            [hex2bin('2002'), 2],                       // 6to4 /16
+            [hex2bin('20010000'), 4],                   // Teredo /32
+        ] as [$prefix, $length]) {
+            if (substr($packed, 0, $length) === $prefix) return false;
+        }
+        return true;
     }
 
     // ─── XML Parser (<SHOP><SHOPITEM>) ───────────────────────

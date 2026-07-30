@@ -128,7 +128,11 @@ class StripePayment implements PaymentAdapter {
      * Get payment status for a payment intent.
      */
     public function getStatus(string $paymentId): string {
-        $response = $this->apiCall('GET', '/v1/payment_intents/' . $paymentId);
+        $endpoint = str_starts_with($paymentId, 'cs_')
+            ? '/v1/checkout/sessions/' . rawurlencode($paymentId)
+            : '/v1/payment_intents/' . rawurlencode($paymentId);
+        $response = $this->apiCall('GET', $endpoint);
+        if (($response['payment_status'] ?? '') === 'paid') return 'paid';
         return $response['status'] ?? 'unknown';
     }
 
@@ -136,23 +140,27 @@ class StripePayment implements PaymentAdapter {
      * Verify Stripe webhook signature.
      */
     public function verifySignature(string $payload, string $sigHeader): bool {
-        $parts = [];
+        if (strlen($this->webhookSecret) < 16 || trim($this->webhookSecret) !== $this->webhookSecret) return false;
+
+        $timestamp = '';
+        $signatures = [];
         foreach (explode(',', $sigHeader) as $pair) {
-            [$k, $v] = explode('=', $pair, 2);
-            $parts[$k] = $v;
+            [$key, $value] = explode('=', trim($pair), 2) + [1 => ''];
+            if ($key === 't') {
+                if ($timestamp !== '' && $timestamp !== $value) return false;
+                $timestamp = $value;
+            } elseif ($key === 'v1' && $value !== '') {
+                $signatures[] = strtolower($value);
+            }
         }
-
-        $timestamp = $parts['t'] ?? '';
-        $signature = $parts['v1'] ?? '';
-        if (!$timestamp || !$signature) return false;
-
-        // Reject signatures older than 5 minutes
+        if ($timestamp === '' || !ctype_digit($timestamp) || !$signatures) return false;
         if (abs(time() - (int)$timestamp) > 300) return false;
 
-        $signed = $timestamp . '.' . $payload;
-        $expected = hash_hmac('sha256', $signed, $this->webhookSecret);
-
-        return hash_equals($expected, $signature);
+        $expected = hash_hmac('sha256', $timestamp . '.' . $payload, $this->webhookSecret);
+        foreach ($signatures as $signature) {
+            if (hash_equals($expected, $signature)) return true;
+        }
+        return false;
     }
 
     /**

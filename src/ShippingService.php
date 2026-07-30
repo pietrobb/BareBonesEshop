@@ -155,22 +155,33 @@ class ShippingService
      * If status = 'delivered' → transitions order to 'delivered' via OrderWorkflow.
      *
      * @param string $carrierId
-     * @param array  $payload   Parsed webhook body
-     * @param string $signature Raw signature header for verification
+     * @param array  $payload    Parsed webhook body
+     * @param string $signature  Raw signature header for verification
+     * @param string $rawPayload Exact request body covered by the signature
      * @return array {handled, awb, status, order_id}
      */
     public static function handleTrackingWebhook(
         string $carrierId,
         array  $payload,
-        string $signature = ''
+        string $signature = '',
+        string $rawPayload = ''
     ): array {
-        // Verify signature if secret configured
-        $secret = $_ENV['SHIP_' . strtoupper($carrierId) . '_WEBHOOK_SECRET'] ?? '';
-        if ($secret !== '') {
-            $computed = hash_hmac('sha256', json_encode($payload), $secret);
-            if (!hash_equals($computed, $signature)) {
-                throw new \RuntimeException("Invalid webhook signature for carrier: {$carrierId}");
-            }
+        $envName = 'SHIP_' . strtoupper($carrierId) . '_WEBHOOK_SECRET';
+        $envSecret = getenv($envName);
+        $secret = is_string($envSecret) ? $envSecret : '';
+        if ($secret === '') {
+            $cfg = require __DIR__ . '/../config.php';
+            $secret = (string)($cfg['shipping_webhook_secrets'][$carrierId] ?? '');
+        }
+        if (strlen($secret) < 16 || trim($secret) !== $secret) {
+            throw new \RuntimeException("Webhook signature secret is not configured securely for carrier: {$carrierId}");
+        }
+        if ($rawPayload === '' || $signature === '') {
+            throw new \RuntimeException("Invalid webhook signature for carrier: {$carrierId}");
+        }
+        $computed = hash_hmac('sha256', $rawPayload, $secret);
+        if (!hash_equals($computed, $signature)) {
+            throw new \RuntimeException("Invalid webhook signature for carrier: {$carrierId}");
         }
 
         $awb    = $payload['awb'] ?? $payload['tracking_number'] ?? '';
@@ -190,21 +201,35 @@ class ShippingService
             return ['handled' => false, 'reason' => 'unknown_awb'];
         }
 
-        // Update label status
-        $db->prepare("UPDATE shipping_labels SET status = :status, updated_at = " . Db::now() . " WHERE awb = :awb")
-           ->execute([':status' => $status, ':awb' => $awb]);
+        $eventId = 'shipping_' . hash('sha256', $carrierId . "\0" . $rawPayload);
+        if (Idempotency::webhookProcessed($eventId)) {
+            return ['handled' => false, 'reason' => 'already_processed', 'duplicate' => true];
+        }
+
+        try {
+            $db->prepare("UPDATE shipping_labels SET status = :status, updated_at = " . Db::now() . " WHERE awb = :awb")
+               ->execute([':status' => $status, ':awb' => $awb]);
+        } catch (\Throwable $e) {
+            Idempotency::unmark($eventId);
+            throw $e;
+        }
 
         $orderId = (int)$labelRow['order_id'];
         $result  = ['handled' => true, 'awb' => $awb, 'status' => $status, 'order_id' => $orderId];
 
-        // Auto-transition order if delivered
+        // Auto-transition order if delivered. OrderWorkflow owns its deferred jobs.
         if ($status === 'delivered') {
             try {
-                $jobs = OrderWorkflow::transition($orderId, 'delivered');
-                JobQueue::dispatch($jobs);
+                OrderWorkflow::transition($orderId, 'delivered');
                 $result['transitioned'] = true;
             } catch (\Throwable $e) {
-                $result['transition_error'] = $e->getMessage();
+                $currentOrder = Orders::byId($orderId);
+                if (($currentOrder['status'] ?? '') === 'delivered') {
+                    $result['transitioned'] = true;
+                } else {
+                    Idempotency::unmark($eventId);
+                    throw $e;
+                }
             }
         }
 

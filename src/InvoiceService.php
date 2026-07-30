@@ -16,11 +16,13 @@
  * Numbering: per-(year, prefix) monotonic via invoice_counters table.
  * Format: {prefix}{YYYY}{NNNN}, e.g. "20260001", "DE-20260001".
  *
- * Storage: storage/invoices/{YYYY}/{MM}/{number}.pdf — out of webroot.
+ * Storage: configured private invoice_storage_dir, outside the webroot.
  * Customer access via signed token (invoices.download_token).
  */
 final class InvoiceService
 {
+    private static ?string $storageDir = null;
+
     public const STATUS_ISSUED    = 'issued';
     public const STATUS_CANCELLED = 'cancelled';
 
@@ -72,9 +74,9 @@ final class InvoiceService
 
             $token  = bin2hex(random_bytes(32));
 
-            $relPath = sprintf('storage/invoices/%d/%02d/%s.pdf',
-                $year, (int)date('m', strtotime($issuedAt)), $number);
-            $absPath = self::baseDir() . '/' . $relPath;
+            $relPath = sprintf('%d/%02d/%s.pdf',
+                $year, (int)date('m', strtotime($issuedAt)), rawurlencode($number));
+            $absPath = self::resolvePdfPath($relPath);
 
             $stmt = $db->prepare("
                 INSERT INTO invoices (
@@ -139,8 +141,7 @@ final class InvoiceService
         // Render PDF AFTER successful commit (filesystem is non-transactional).
         $invoice = self::byId($invoiceId);
         $pdfBin  = self::renderPdf($invoice, $order, $items, $sellerSnapshot, $customerSnapshot, $vatBreakdown);
-        @mkdir(dirname($absPath), 0750, true);
-        file_put_contents($absPath, $pdfBin);
+        self::writePdf($absPath, $pdfBin);
 
         return $invoice;
     }
@@ -159,9 +160,8 @@ final class InvoiceService
         $vatBreakdown = ['rates' => $vatRates, 'vat_total' => (int)$invoice['total_vat']];
 
         $pdfBin = self::renderPdf($invoice, $order ?: [], $items, $sellerSnap, $custSnap, $vatBreakdown);
-        $absPath = self::baseDir() . '/' . $invoice['pdf_path'];
-        @mkdir(dirname($absPath), 0750, true);
-        file_put_contents($absPath, $pdfBin);
+        $absPath = self::resolvePdfPath((string)$invoice['pdf_path']);
+        self::writePdf($absPath, $pdfBin);
         return $absPath;
     }
 
@@ -252,7 +252,7 @@ final class InvoiceService
 
     public static function pdfAbsolutePath(array $invoice): string
     {
-        return self::baseDir() . '/' . $invoice['pdf_path'];
+        return self::resolvePdfPath((string)($invoice['pdf_path'] ?? ''));
     }
 
     /**
@@ -516,6 +516,115 @@ final class InvoiceService
         $file = self::baseDir() . '/stores.json';
         $j = file_exists($file) ? json_decode((string)file_get_contents($file), true) : [];
         return $j ?: [];
+    }
+
+    private static function storageDir(): string
+    {
+        if (self::$storageDir !== null) return self::$storageDir;
+
+        $cfg = require __DIR__ . '/../config.php';
+        $dir = (string)($cfg['invoice_storage_dir'] ?? dirname(self::baseDir()) . '/bareboneseshop-private/invoices');
+        if (!self::isAbsolutePath($dir)) {
+            throw new \RuntimeException('invoice_storage_dir must be an absolute path outside the application root');
+        }
+        if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) {
+            throw new \RuntimeException("Cannot create invoice_storage_dir: {$dir}");
+        }
+
+        $realDir = realpath($dir);
+        if ($realDir === false) {
+            throw new \RuntimeException("Cannot resolve invoice_storage_dir: {$dir}");
+        }
+        $root = self::normalizePath($realDir);
+        $appRoot = self::normalizePath(self::baseDir());
+        if (self::pathIsWithin($root, $appRoot)) {
+            throw new \RuntimeException('invoice_storage_dir must be outside the application root');
+        }
+        self::$storageDir = str_replace('/', DIRECTORY_SEPARATOR, $root);
+        return self::$storageDir;
+    }
+
+    private static function resolvePdfPath(string $relativePath): string
+    {
+        $path = str_replace('\\', '/', trim($relativePath));
+        if (str_starts_with($path, 'storage/invoices/')) {
+            $path = substr($path, strlen('storage/invoices/'));
+        }
+        if ($path === '' || preg_match('/[\x00-\x1f\x7f]/', $path) || str_starts_with($path, '/') || preg_match('/^[A-Za-z]:/', $path)) {
+            throw new \RuntimeException('Invalid invoice PDF path');
+        }
+        $parts = explode('/', $path);
+        foreach ($parts as $part) {
+            if ($part === '' || $part === '.' || $part === '..' || str_contains($part, ':')) {
+                throw new \RuntimeException('Invalid invoice PDF path');
+            }
+        }
+        if (strtolower((string)pathinfo(end($parts), PATHINFO_EXTENSION)) !== 'pdf') {
+            throw new \RuntimeException('Invalid invoice PDF extension');
+        }
+
+        $root = self::storageDir();
+        return $root . DIRECTORY_SEPARATOR . implode(DIRECTORY_SEPARATOR, $parts);
+    }
+
+    private static function writePdf(string $path, string $contents): void
+    {
+        $dir = dirname($path);
+        if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) {
+            throw new \RuntimeException("Cannot create invoice directory: {$dir}");
+        }
+        $root = realpath(self::storageDir());
+        $realDir = realpath($dir);
+        if ($root === false || $realDir === false || !self::pathIsWithin(self::normalizePath($realDir), self::normalizePath($root))) {
+            throw new \RuntimeException('Invoice PDF path escapes invoice_storage_dir');
+        }
+
+        $tmp = tempnam($dir, '.invoice-');
+        if ($tmp === false) {
+            throw new \RuntimeException("Cannot create temporary invoice file in {$dir}");
+        }
+        try {
+            $written = file_put_contents($tmp, $contents, LOCK_EX);
+            if ($written !== strlen($contents)) {
+                throw new \RuntimeException("Cannot write complete invoice PDF: {$path}");
+            }
+            @chmod($tmp, 0640);
+            if (@rename($tmp, $path)) {
+                return;
+            }
+
+            if (DIRECTORY_SEPARATOR === '\\' && is_file($path)) {
+                $old = $path . '.old-' . bin2hex(random_bytes(4));
+                if (@rename($path, $old)) {
+                    if (@rename($tmp, $path)) {
+                        @unlink($old);
+                        return;
+                    }
+                    if (!@rename($old, $path)) {
+                        throw new \RuntimeException("Cannot restore previous invoice PDF; preserved copy: {$old}");
+                    }
+                }
+            }
+            throw new \RuntimeException("Cannot atomically replace invoice PDF: {$path}");
+        } finally {
+            if (is_file($tmp)) @unlink($tmp);
+        }
+    }
+
+    private static function isAbsolutePath(string $path): bool
+    {
+        return str_starts_with($path, '/') || str_starts_with($path, '\\\\') || preg_match('/^[A-Za-z]:[\\\\\/]/', $path) === 1;
+    }
+
+    private static function normalizePath(string $path): string
+    {
+        $normalized = rtrim(str_replace('\\', '/', $path), '/');
+        return DIRECTORY_SEPARATOR === '\\' ? strtolower($normalized) : $normalized;
+    }
+
+    private static function pathIsWithin(string $path, string $root): bool
+    {
+        return $path === $root || str_starts_with($path, $root . '/');
     }
 
     private static function baseDir(): string

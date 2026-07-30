@@ -11,7 +11,9 @@ class Customers {
 
     private const BCRYPT_COST = 12;
     private const RESET_TOKEN_TTL_SECONDS = 3600; // 1 hour
+    private const SESSION_IDLE_TTL_SECONDS = 1800;
     private const MIN_PASSWORD_LEN = 8;
+    private static ?string $dummyPasswordHash = null;
 
     // ============================================================
     // Registration
@@ -61,13 +63,11 @@ class Customers {
         $stmt = $db->prepare("SELECT * FROM customers WHERE email = ?");
         $stmt->execute([$email]);
         $c = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$c) {
-            return [false, null, 'invalid_credentials'];
+        if (self::$dummyPasswordHash === null) {
+            self::$dummyPasswordHash = password_hash(bin2hex(random_bytes(16)), PASSWORD_BCRYPT, ['cost' => self::BCRYPT_COST]);
         }
-        if (($c['status'] ?? 'active') !== 'active') {
-            return [false, null, 'account_blocked'];
-        }
-        if (!password_verify($password, $c['password_hash'])) {
+        $passwordValid = password_verify($password, (string)($c['password_hash'] ?? self::$dummyPasswordHash));
+        if (!$c || ($c['status'] ?? 'active') !== 'active' || !$passwordValid) {
             return [false, null, 'invalid_credentials'];
         }
         // Rehash if PHP bumped defaults
@@ -83,6 +83,8 @@ class Customers {
         }
         $_SESSION['customer_id'] = (int)$c['id'];
         $_SESSION['customer_email'] = $c['email'];
+        $_SESSION['customer_auth_hash'] = hash('sha256', (string)$c['password_hash']);
+        $_SESSION['customer_last_seen'] = time();
         $db->prepare("UPDATE customers SET last_login_at = " .
             (Db::isSqlite() ? "datetime('now')" : "NOW()") . " WHERE id = ?")
            ->execute([$c['id']]);
@@ -92,7 +94,7 @@ class Customers {
 
     public static function logout(): void {
         Security::sessionStart();
-        unset($_SESSION['customer_id'], $_SESSION['customer_email']);
+        unset($_SESSION['customer_id'], $_SESSION['customer_email'], $_SESSION['customer_auth_hash'], $_SESSION['customer_last_seen']);
         if (function_exists('session_regenerate_id')) {
             @session_regenerate_id(true);
         }
@@ -105,13 +107,26 @@ class Customers {
     public static function current(): ?array {
         Security::sessionStart();
         $id = (int)($_SESSION['customer_id'] ?? 0);
-        if ($id <= 0) return null;
+        $lastSeen = (int)($_SESSION['customer_last_seen'] ?? 0);
+        $sessionHash = (string)($_SESSION['customer_auth_hash'] ?? '');
+        if ($id <= 0 || $lastSeen < time() - self::SESSION_IDLE_TTL_SECONDS || $sessionHash === '') {
+            if ($id > 0) self::logout();
+            return null;
+        }
+        $stmt = Db::get()->prepare("SELECT status, password_hash FROM customers WHERE id = ?");
+        $stmt->execute([$id]);
+        $auth = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$auth || ($auth['status'] ?? '') !== 'active'
+            || !hash_equals(hash('sha256', (string)$auth['password_hash']), $sessionHash)) {
+            self::logout();
+            return null;
+        }
+        $_SESSION['customer_last_seen'] = time();
         return self::byId($id);
     }
 
     public static function isLoggedIn(): bool {
-        Security::sessionStart();
-        return !empty($_SESSION['customer_id']);
+        return self::current() !== null;
     }
 
     public static function byId(int $id): ?array {
@@ -170,6 +185,10 @@ class Customers {
         $newHash = password_hash($newPassword, PASSWORD_BCRYPT, ['cost' => self::BCRYPT_COST]);
         Db::get()->prepare("UPDATE customers SET password_hash = ? WHERE id = ?")
                  ->execute([$newHash, $id]);
+        Security::sessionStart();
+        if (session_status() === PHP_SESSION_ACTIVE) session_regenerate_id(true);
+        $_SESSION['customer_auth_hash'] = hash('sha256', $newHash);
+        $_SESSION['customer_last_seen'] = time();
         return [true, null];
     }
 
@@ -194,10 +213,20 @@ class Customers {
         $expiresAt = gmdate('Y-m-d H:i:s', time() + self::RESET_TOKEN_TTL_SECONDS);
         // Store only the SHA-256 hash; the plaintext token lives solely in the
         // emailed reset URL. A DB leak then cannot be used to hijack resets.
-        $db->prepare(
-            "INSERT INTO password_reset_tokens (customer_id, token, expires_at)
-             VALUES (?, ?, ?)"
-        )->execute([$cid, hash('sha256', $token), $expiresAt]);
+        $tokenHash = hash('sha256', $token);
+        $db->beginTransaction();
+        try {
+            $db->prepare("DELETE FROM password_reset_tokens WHERE customer_id = ? AND used_at IS NULL")
+               ->execute([$cid]);
+            $db->prepare(
+                "INSERT INTO password_reset_tokens (customer_id, token, expires_at)
+                 VALUES (?, ?, ?)"
+            )->execute([$cid, $tokenHash, $expiresAt]);
+            $db->commit();
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            return null;
+        }
         return $token;
     }
 
@@ -218,23 +247,37 @@ class Customers {
         if (strlen($newPassword) < self::MIN_PASSWORD_LEN) {
             return [false, 'weak_password'];
         }
-        $cid = self::verifyResetToken($token);
-        if (!$cid) {
-            return [false, 'invalid_or_expired_token'];
-        }
         $db = Db::get();
+        $tokenHash = hash('sha256', $token);
+        $now = gmdate('Y-m-d H:i:s');
         $hash = password_hash($newPassword, PASSWORD_BCRYPT, ['cost' => self::BCRYPT_COST]);
         $db->beginTransaction();
         try {
+            $find = $db->prepare(
+                "SELECT customer_id FROM password_reset_tokens
+                 WHERE token = ? AND used_at IS NULL AND expires_at >= ?"
+            );
+            $find->execute([$tokenHash, $now]);
+            $cid = (int)$find->fetchColumn();
+            if ($cid <= 0) {
+                $db->rollBack();
+                return [false, 'invalid_or_expired_token'];
+            }
+            $consume = $db->prepare(
+                "UPDATE password_reset_tokens SET used_at = " .
+                (Db::isSqlite() ? "datetime('now')" : "NOW()") .
+                " WHERE token = ? AND used_at IS NULL AND expires_at >= ?"
+            );
+            $consume->execute([$tokenHash, $now]);
+            if ($consume->rowCount() !== 1) {
+                $db->rollBack();
+                return [false, 'invalid_or_expired_token'];
+            }
             $db->prepare("UPDATE customers SET password_hash = ? WHERE id = ?")
                ->execute([$hash, $cid]);
-            $db->prepare(
-                "UPDATE password_reset_tokens SET used_at = " .
-                (Db::isSqlite() ? "datetime('now')" : "NOW()") . " WHERE token = ?"
-            )->execute([hash('sha256', $token)]);
             $db->commit();
         } catch (\Throwable $e) {
-            $db->rollBack();
+            if ($db->inTransaction()) $db->rollBack();
             return [false, 'internal_error'];
         }
         return [true, null];

@@ -10,8 +10,11 @@ return [
     // Database: 'sqlite' or 'mysql'
     'db_driver' => 'sqlite',
 
+    // Private runtime data must live outside the HTTP document root.
+    'private_runtime_dir' => dirname(__DIR__) . '/bareboneseshop-private',
+
     // SQLite
-    'db_sqlite_path' => __DIR__ . '/db/shop.sqlite',
+    'db_sqlite_path' => dirname(__DIR__) . '/bareboneseshop-private/db/shop.sqlite',
 
     // MySQL/MariaDB (when db_driver = 'mysql')
     'db_host'     => '127.0.0.1',
@@ -29,9 +32,16 @@ return [
     // Catalog
     'per_page' => 24,
 
-    // Cache
+    // Public catalog JSON cache used by the explicit .htaccess API rewrites.
     'cache_dir' => __DIR__ . '/cache',
     'cache_ttl' => 3600,
+    // Private abuse-control databases and lock files.
+    'private_cache_dir' => dirname(__DIR__) . '/bareboneseshop-private/cache',
+
+    // Unpaid online orders are released only after this age and provider
+    // confirmation of a terminal unpaid state. Keep above provider session TTL.
+    'pending_order_expiry_seconds' => 172800,
+    'pending_order_expiry_batch'   => 25,
 
     // Admin
     'admin_name'     => '', // optional admin brand; defaults to the translated BareBonesShop name
@@ -61,6 +71,14 @@ return [
     // active payment adapter is not MockPayment. NEVER enable in production —
     // the mock webhook marks orders as paid. Pair with 'mock_webhook_secret'.
     'allow_mock_webhook' => false,
+    'mock_webhook_secret' => '',
+
+    // Carrier webhook HMAC secrets, keyed by carrier ID. Environment variables
+    // such as SHIP_PACKETA_WEBHOOK_SECRET take precedence.
+    'shipping_webhook_secrets' => [
+        'packeta' => '',
+        'gls' => '',
+    ],
 
     // Stripe (when using StripePayment adapter)
     'stripe_secret_key'      => '',
@@ -81,14 +99,16 @@ return [
         // ],
     ],
 
-    // Jobs
-    'jobs_dir' => __DIR__ . '/jobs',
+    // Private runtime files
+    'jobs_dir'            => dirname(__DIR__) . '/bareboneseshop-private/jobs',
+    'invoice_storage_dir' => dirname(__DIR__) . '/bareboneseshop-private/invoices',
+    'backup_storage_dir'  => dirname(__DIR__) . '/bareboneseshop-private/backups',
+    'backup_log_file'     => dirname(__DIR__) . '/bareboneseshop-private/logs/backup.log',
+    'gdpr_salt_file'      => dirname(__DIR__) . '/bareboneseshop-private/secrets/gdpr_salt',
 
     // TecDoc sidecar DB (read-only, for vehicle cascade lookups)
     'tecdoc_db_path' => __DIR__ . '/demo/tecdoc_enriched.db',
 
-    // GDPR — secret salt for hashing PII (emails, IPs) in gdpr_events / cookie_consent.
-    // If left empty, GdprService::hashPii() autogenerates one on first call and persists
-    // it to config/.gdpr_salt. Hard-fail if persisted file exists but is empty (corruption).
+    // GDPR — prefer injecting this secret; otherwise it is generated in gdpr_salt_file.
     'gdpr_hash_salt' => '',
 ];

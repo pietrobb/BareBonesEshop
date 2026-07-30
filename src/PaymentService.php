@@ -177,36 +177,38 @@ class PaymentService {
         $eventId   = (string)($event['event_id'] ?? '');
         $data      = $event['data'] ?? [];
 
-        // 3. Idempotency — skip already-processed events
-        // webhookProcessed() atomically INSERTs the event_id; returns true if duplicate
-        if ($eventId && Idempotency::webhookProcessed($eventId)) {
+        // 3. Idempotency — every accepted event needs a stable provider ID.
+        if ($eventId === '' || $eventType === '') {
+            throw new \RuntimeException('Webhook event identity is missing');
+        }
+        $eventKey = 'payment_' . $providerName . '_' . $eventId;
+        if (Idempotency::webhookAlreadyProcessed($eventId) || Idempotency::webhookProcessed($eventKey)) {
             return ['handled' => false, 'event_type' => $eventType, 'order_id' => null, 'duplicate' => true];
         }
 
-        // 4. Resolve order
-        $orderId = self::resolveOrderId($data, $providerName);
+        try {
+            // 4. Resolve order
+            $orderId = self::resolveOrderId($data, $providerName);
 
-        // 5. Log transaction
-        $status = self::eventTypeToTxStatus($eventType);
-        if ($orderId) {
-            self::logTransaction(
-                orderId:        $orderId,
-                provider:       $providerName,
-                providerRef:    (string)($data['provider_ref'] ?? $data['orderId'] ?? $data['id'] ?? ''),
-                status:         $status,
-                amount:         (int)($data['amount'] ?? 0),
-                currency:       strtolower($data['currency'] ?? 'eur'),
-                idempotencyKey: $eventId ?: ('evt_' . $providerName . '_' . uniqid()),
-                rawResponse:    $data,
-            );
-        }
-
-        // 6. Event already marked processed by webhookProcessed() above (atomic INSERT).
-        //    On business logic failure, caller can call Idempotency::unmark($eventId) to allow retry.
-
-        // 7. Trigger order state transitions
-        if ($orderId) {
-            self::applyOrderTransition($orderId, $eventType, $status);
+            // 5. Log transaction
+            $status = self::eventTypeToTxStatus($eventType);
+            if ($orderId) {
+                self::logTransaction(
+                    orderId:        $orderId,
+                    provider:       $providerName,
+                    providerRef:    (string)($data['provider_ref'] ?? $data['orderId'] ?? $data['id'] ?? ''),
+                    status:         $status,
+                    amount:         (int)($data['amount'] ?? 0),
+                    currency:       strtolower($data['currency'] ?? 'eur'),
+                    idempotencyKey: $eventKey,
+                    rawResponse:    $data,
+                    failClosed:     true,
+                );
+                self::applyOrderTransition($orderId, $eventType, $status, true);
+            }
+        } catch (\Throwable $e) {
+            Idempotency::unmark($eventKey);
+            throw $e;
         }
 
         return ['handled' => true, 'event_type' => $eventType, 'order_id' => $orderId];
@@ -245,6 +247,60 @@ class PaymentService {
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
+    public static function refundedAmount(int $orderId): int {
+        $stmt = Db::get()->prepare("\n            SELECT COALESCE(SUM(amount), 0)\n            FROM payment_transactions\n            WHERE order_id = :order_id\n              AND status IN ('partially_refunded', 'refunded', 'refund_succeeded')\n        ");
+        $stmt->execute([':order_id' => $orderId]);
+        return max(0, (int)$stmt->fetchColumn());
+    }
+
+    public static function refundableBalance(int $orderId): int {
+        $order = Orders::byId($orderId);
+        if (!$order || !in_array((string)($order['payment_status'] ?? ''), ['paid', 'refund_pending', 'partially_refunded', 'disputed'], true)) {
+            return 0;
+        }
+        return max(0, (int)($order['total'] ?? 0) - self::refundedAmount($orderId));
+    }
+
+    public static function requestRefund(int $orderId, int $amount, string $idempotencyKey, array $payload = []): bool {
+        if ($amount <= 0 || $idempotencyKey === '') throw new \InvalidArgumentException('Invalid refund request');
+
+        $db = Db::get();
+        $db->beginTransaction();
+        try {
+            $order = Orders::byId($orderId);
+            if (!$order) throw new \RuntimeException("Order #{$orderId} not found");
+            $from = (string)($order['payment_status'] ?? 'pending');
+            if (!self::canPaymentTransition($from, 'refund_pending') || $amount > self::refundableBalance($orderId)) {
+                throw new \LogicException('Refund is not available for this amount');
+            }
+
+            $claim = $db->prepare("\n                UPDATE orders\n                SET payment_status = 'refund_pending', updated_at = " . Db::now() . "\n                WHERE id = :id AND payment_status = :from\n            ");
+            $claim->execute([':id' => $orderId, ':from' => $from]);
+            if ($claim->rowCount() !== 1 || self::transactionExists($idempotencyKey)) {
+                throw new \RuntimeException('Refund request state changed');
+            }
+
+            $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
+            self::logTransaction(
+                orderId: $orderId,
+                provider: (string)($snapshot['provider'] ?? $order['payment_method'] ?? ''),
+                providerRef: (string)($order['payment_id'] ?? ''),
+                status: 'refund_pending',
+                amount: $amount,
+                currency: (string)($order['currency'] ?? 'eur'),
+                idempotencyKey: $idempotencyKey,
+                rawResponse: array_merge(['event_type' => 'refund.requested'], $payload),
+                failClosed: true,
+            );
+            AuditLog::log('payment_status', $orderId, $from, 'refund_pending', 'refund.requested');
+            $db->commit();
+            return true;
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+    }
+
     /**
      * Update orders.payment_status.
      */
@@ -281,6 +337,7 @@ class PaymentService {
         string $currency,
         string $idempotencyKey,
         array  $rawResponse,
+        bool   $failClosed = false,
     ): void {
         try {
             $db   = Db::get();
@@ -302,7 +359,8 @@ class PaymentService {
                 ':raw'    => json_encode($rawResponse, JSON_UNESCAPED_UNICODE),
             ]);
         } catch (\Throwable $e) {
-            // Never let logging failure break the payment flow
+            if ($failClosed) throw $e;
+            // Never let logging failure break merchant-initiated payment operations.
             error_log("PaymentService: failed to log transaction for order #{$orderId}: " . $e->getMessage());
         }
     }
@@ -335,8 +393,10 @@ class PaymentService {
             // Fall back to payment_id match
             $paymentId = $data['payment_intent'] ?? ($sessionId !== '' ? $sessionId : null);
             if ($paymentId) {
-                $r = $db->query("SELECT id FROM orders WHERE payment_id = " . $db->quote($paymentId) . " LIMIT 1")->fetch();
-                return $r ? (int)$r['id'] : null;
+                $stmt = $db->prepare("SELECT id FROM orders WHERE payment_id = :payment_id LIMIT 1");
+                $stmt->execute([':payment_id' => $paymentId]);
+                $id = $stmt->fetchColumn();
+                return $id === false ? null : (int)$id;
             }
         }
 
@@ -344,14 +404,18 @@ class PaymentService {
         if ($provider === 'payu') {
             $extOrderId = $data['extOrderId'] ?? null;
             if ($extOrderId) {
-                $r = $db->query("SELECT id FROM orders WHERE order_number = " . $db->quote($extOrderId) . " LIMIT 1")->fetch();
-                return $r ? (int)$r['id'] : null;
+                $stmt = $db->prepare("SELECT id FROM orders WHERE order_number = :order_number LIMIT 1");
+                $stmt->execute([':order_number' => $extOrderId]);
+                $id = $stmt->fetchColumn();
+                return $id === false ? null : (int)$id;
             }
             // Fall back to payment_id
             $payuOrderId = $data['orderId'] ?? null;
             if ($payuOrderId) {
-                $r = $db->query("SELECT id FROM orders WHERE payment_id = " . $db->quote($payuOrderId) . " LIMIT 1")->fetch();
-                return $r ? (int)$r['id'] : null;
+                $stmt = $db->prepare("SELECT id FROM orders WHERE payment_id = :payment_id LIMIT 1");
+                $stmt->execute([':payment_id' => $payuOrderId]);
+                $id = $stmt->fetchColumn();
+                return $id === false ? null : (int)$id;
             }
         }
 
@@ -359,7 +423,7 @@ class PaymentService {
         return null;
     }
 
-    private static function applyOrderTransition(int $orderId, string $eventType, string $txStatus): void {
+    private static function applyOrderTransition(int $orderId, string $eventType, string $txStatus, bool $failClosed = false): void {
         $order = Orders::byId($orderId);
         if (!$order) return;
 
@@ -371,6 +435,7 @@ class PaymentService {
                 default => null,
             };
         } catch (\Throwable $e) {
+            if ($failClosed) throw $e;
             error_log("PaymentService: transition failed for order #{$orderId} event {$eventType}: " . $e->getMessage());
         }
     }

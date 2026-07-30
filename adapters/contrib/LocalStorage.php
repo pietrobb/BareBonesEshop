@@ -5,6 +5,7 @@
  */
 class LocalStorage implements StorageAdapter {
     private string $uploadsDir;
+    private string $uploadsPrefix;
     private string $baseUrl;
 
     private const VARIANTS = [
@@ -15,33 +16,53 @@ class LocalStorage implements StorageAdapter {
     ];
 
     public function __construct(array $cfg) {
-        $this->uploadsDir = ($cfg['uploads_dir'] ?? dirname(__DIR__) . '/uploads');
+        $uploadsDir = (string)($cfg['uploads_dir'] ?? dirname(__DIR__) . '/uploads');
         $this->baseUrl = $cfg['uploads_url'] ?? '/uploads';
-        if (!is_dir($this->uploadsDir)) {
-            mkdir($this->uploadsDir, 0750, true);
+        if (!is_dir($uploadsDir) && !@mkdir($uploadsDir, 0750, true) && !is_dir($uploadsDir)) {
+            throw new \RuntimeException("Cannot create uploads directory: {$uploadsDir}");
         }
+
+        $canonicalRoot = realpath($uploadsDir);
+        if ($canonicalRoot === false || !is_dir($canonicalRoot)) {
+            throw new \RuntimeException("Cannot resolve uploads directory: {$uploadsDir}");
+        }
+        $this->uploadsDir = $this->trimTrailingSeparators($canonicalRoot);
+        $this->uploadsPrefix = str_ends_with($this->uploadsDir, DIRECTORY_SEPARATOR)
+            ? $this->uploadsDir
+            : $this->uploadsDir . DIRECTORY_SEPARATOR;
     }
 
     public function store(string $path, string $contents): string {
+        $path = $this->validateRelativePath($path);
         $fullPath = $this->safePath($path);
-        $dir = dirname($fullPath);
-        if (!is_dir($dir)) mkdir($dir, 0750, true);
-        file_put_contents($fullPath, $contents, LOCK_EX);
+        $this->createDirectory(dirname($fullPath));
+        // Re-check after mkdir so a pre-existing or concurrently introduced symlink cannot escape the root.
+        $fullPath = $this->safePath($path);
+        if (file_put_contents($fullPath, $contents, LOCK_EX) === false) {
+            throw new \RuntimeException("Cannot write uploaded file: {$path}");
+        }
         return $this->baseUrl . '/' . $path;
     }
 
     public function delete(string $path): void {
-        // Delete all variants
+        $path = $this->validateRelativePath($path);
+        $fullPath = $this->safePath($path);
+
+        // Delete all variants only after the original path has passed validation.
         foreach (self::VARIANTS as $variant => $dims) {
             $file = $this->variantPath($path, $variant);
-            if (file_exists($file)) @unlink($file);
+            if ((file_exists($file) || is_link($file)) && !unlink($file)) {
+                throw new \RuntimeException("Cannot delete image variant: {$path} ({$variant})");
+            }
         }
-        // Delete original
-        $fullPath = $this->safePath($path);
-        if (file_exists($fullPath)) @unlink($fullPath);
+        if ((file_exists($fullPath) || is_link($fullPath)) && !unlink($fullPath)) {
+            throw new \RuntimeException("Cannot delete uploaded file: {$path}");
+        }
     }
 
     public function url(string $path, string $variant = 'medium'): string {
+        $path = $this->validateRelativePath($path);
+        $this->safePath($path);
         if ($variant === 'full' || !isset(self::VARIANTS[$variant])) {
             return $this->baseUrl . '/' . $path;
         }
@@ -49,10 +70,12 @@ class LocalStorage implements StorageAdapter {
         $base = pathinfo($path, PATHINFO_FILENAME);
         $dir = pathinfo($path, PATHINFO_DIRNAME);
         $variantFile = ($dir !== '.' ? $dir . '/' : '') . $base . '-' . $variant . '.' . $ext;
+        $this->safePath($variantFile);
         return $this->baseUrl . '/' . $variantFile;
     }
 
     public function resize(string $path, int $width, int $height): string {
+        $path = $this->validateRelativePath($path);
         $srcPath = $this->safePath($path);
         if (!file_exists($srcPath)) {
             throw new \RuntimeException("Source file not found: {$path}");
@@ -108,9 +131,9 @@ class LocalStorage implements StorageAdapter {
         $base = pathinfo($path, PATHINFO_FILENAME);
         $dir = pathinfo($path, PATHINFO_DIRNAME);
         $outFile = ($dir !== '.' ? $dir . '/' : '') . $base . '-' . $variantName . '.' . $ext;
-        $outPath = $this->uploadsDir . '/' . $outFile;
-        $outDir = dirname($outPath);
-        if (!is_dir($outDir)) mkdir($outDir, 0750, true);
+        $outPath = $this->safePath($outFile);
+        $this->createDirectory(dirname($outPath));
+        $outPath = $this->safePath($outFile);
 
         $written = match ($ext) {
             'jpg', 'jpeg' => imagejpeg($dst, $outPath, 85),
@@ -127,8 +150,11 @@ class LocalStorage implements StorageAdapter {
         // Also generate WebP version alongside original format (if not already WebP)
         if ($ext !== 'webp' && function_exists('imagewebp')) {
             $webpFile = ($dir !== '.' ? $dir . '/' : '') . $base . '-' . $variantName . '.webp';
-            $webpPath = $this->uploadsDir . '/' . $webpFile;
-            @imagewebp($dst, $webpPath, 80);
+            $webpPath = $this->safePath($webpFile);
+            if (!imagewebp($dst, $webpPath, 80)) {
+                imagedestroy($dst);
+                throw new \RuntimeException("Cannot write WebP image variant: {$webpFile}");
+            }
         }
         imagedestroy($dst);
 
@@ -152,37 +178,89 @@ class LocalStorage implements StorageAdapter {
         return $urls;
     }
 
-    /** Validate path stays within uploads directory (prevent path traversal) */
+    /** Validate path stays within uploads directory (prevent path traversal). */
     private function safePath(string $path): string {
-        // Reject absolute paths
-        if (str_starts_with($path, '/') || str_starts_with($path, '\\')) {
-            throw new \RuntimeException("Invalid path: must be relative");
-        }
-        // Reject any segment that is . or .. (covers all traversal patterns)
-        foreach (explode('/', str_replace('\\', '/', $path)) as $segment) {
-            if ($segment === '..' || $segment === '.') {
-                throw new \RuntimeException("Invalid path: traversal detected");
-            }
-        }
-
-        $full = $this->uploadsDir . '/' . $path;
-
-        // After directory exists, verify canonical path stays inside uploads
-        $realDir = realpath(dirname($full));
-        $realUploads = realpath($this->uploadsDir);
-        if ($realDir !== false && $realUploads !== false
-            && !str_starts_with($realDir, $realUploads)) {
-            throw new \RuntimeException("Invalid path: outside uploads directory");
-        }
-
+        $path = $this->validateRelativePath($path);
+        $full = $this->uploadsPrefix . str_replace('/', DIRECTORY_SEPARATOR, $path);
+        $this->assertCanonicalContainment($full);
         return $full;
     }
 
+    private function validateRelativePath(string $path): string {
+        if ($path === '' || preg_match('/[\x00-\x1F\x7F]/', $path)) {
+            throw new \RuntimeException("Invalid path: empty or control characters");
+        }
+        if (str_starts_with($path, '/') || str_starts_with($path, '\\')
+            || preg_match('/^[A-Za-z]:/', $path)) {
+            throw new \RuntimeException("Invalid path: must be relative");
+        }
+        if (str_contains($path, '/') && str_contains($path, '\\')) {
+            throw new \RuntimeException("Invalid path: mixed separators");
+        }
+
+        $path = str_replace('\\', '/', $path);
+        foreach (explode('/', $path) as $segment) {
+            if ($segment === '..' || $segment === '.' || str_contains($segment, ':')) {
+                throw new \RuntimeException("Invalid path: traversal or stream syntax detected");
+            }
+        }
+        return $path;
+    }
+
+    private function assertCanonicalContainment(string $path): void {
+        $probe = (file_exists($path) || is_link($path)) ? $path : dirname($path);
+        while (!file_exists($probe) && !is_link($probe)) {
+            $parent = dirname($probe);
+            if ($parent === $probe) {
+                throw new \RuntimeException("Invalid path: cannot resolve parent directory");
+            }
+            $probe = $parent;
+        }
+
+        $canonical = realpath($probe);
+        if ($canonical === false) {
+            throw new \RuntimeException("Invalid path: cannot resolve path");
+        }
+        $canonical = $this->trimTrailingSeparators($canonical);
+        if (!$this->samePath($canonical, $this->uploadsDir)
+            && !$this->pathStartsWith($canonical, $this->uploadsPrefix)) {
+            throw new \RuntimeException("Invalid path: outside uploads directory");
+        }
+    }
+
+    private function createDirectory(string $dir): void {
+        $this->assertCanonicalContainment($dir);
+        if (!is_dir($dir) && !@mkdir($dir, 0750, true) && !is_dir($dir)) {
+            throw new \RuntimeException("Cannot create uploads directory: {$dir}");
+        }
+        $this->assertCanonicalContainment($dir);
+    }
+
+    private function samePath(string $left, string $right): bool {
+        return DIRECTORY_SEPARATOR === '\\'
+            ? strcasecmp($left, $right) === 0
+            : $left === $right;
+    }
+
+    private function pathStartsWith(string $path, string $prefix): bool {
+        return DIRECTORY_SEPARATOR === '\\'
+            ? strncasecmp($path, $prefix, strlen($prefix)) === 0
+            : str_starts_with($path, $prefix);
+    }
+
+    private function trimTrailingSeparators(string $path): string {
+        if ($path === DIRECTORY_SEPARATOR || preg_match('/^[A-Za-z]:[\\\\\/]$/', $path)) {
+            return $path;
+        }
+        return rtrim($path, "/\\");
+    }
+
     private function variantPath(string $path, string $variant): string {
+        $path = $this->validateRelativePath($path);
         $ext = pathinfo($path, PATHINFO_EXTENSION);
         $base = pathinfo($path, PATHINFO_FILENAME);
         $dir = pathinfo($path, PATHINFO_DIRNAME);
         $variantFile = ($dir !== '.' ? $dir . '/' : '') . $base . '-' . $variant . '.' . $ext;
-        return $this->uploadsDir . '/' . $variantFile;
+        return $this->safePath($variantFile);
     }
 }

@@ -9,6 +9,7 @@
 require_once __DIR__ . '/src/autoload.php';
 
 Security::sessionStart();
+Customers::isLoggedIn();
 if (!isset($_SESSION['cart'])) $_SESSION['cart'] = [];
 
 $lang = Bootstrap::initLocale();

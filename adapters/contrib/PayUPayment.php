@@ -149,7 +149,7 @@ class PayUPayment implements PaymentAdapter {
      *   sender=checkout;signature=<SHA256>;algorithm=SHA-256;content=DOCUMENT
      */
     public function verifySignature(string $payload, string $sigHeader): bool {
-        if (empty($this->clientSecret)) return false;
+        if (strlen($this->clientSecret) < 16 || trim($this->clientSecret) !== $this->clientSecret) return false;
 
         // Parse signature header
         $parts = [];

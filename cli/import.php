@@ -1,14 +1,11 @@
 <?php
+require_once __DIR__ . '/cli-only.php';
+
 /**
  * BareBones Shop — CLI Import
  * Usage: php cli/import.php path/to/products.csv [--type clothing]
  */
 require_once __DIR__ . '/../src/autoload.php';
-
-if (php_sapi_name() !== 'cli') {
-    echo "CLI only.\n";
-    exit(1);
-}
 
 $file = $argv[1] ?? null;
 $type = null;

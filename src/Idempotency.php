@@ -22,6 +22,12 @@ class Idempotency {
         }
     }
 
+    public static function webhookAlreadyProcessed(string $eventId): bool {
+        $stmt = Db::get()->prepare("SELECT 1 FROM processed_events WHERE event_id = :id LIMIT 1");
+        $stmt->execute([':id' => $eventId]);
+        return (bool)$stmt->fetchColumn();
+    }
+
     /**
      * Remove an event record so it can be retried (call on business logic failure)
      */

@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/cli-only.php';
+
 /**
  * BareBones Shop — Job Worker
  * Processes pending jobs from the file-based queue.
@@ -14,7 +16,7 @@ $verbose = in_array('--verbose', $argv ?? []);
 
 // Exclusive lock
 $cfg = require __DIR__ . '/../config.php';
-$jobsDir = $cfg['jobs_dir'] ?? __DIR__ . '/../jobs';
+$jobsDir = $cfg['jobs_dir'] ?? dirname(__DIR__, 2) . '/bareboneseshop-private/jobs';
 if (!is_dir($jobsDir)) mkdir($jobsDir, 0750, true);
 
 $lockFile = $jobsDir . '/worker.lock';
@@ -49,6 +51,29 @@ $handlers = [
     'digital_revoke'    => 'handleDigitalRevoke',
     'merchant_notify'   => 'handleMerchantNotify',
 ];
+
+// Release abandoned online reservations on every cron worker run. Provider
+// errors and non-terminal payment states are skipped by Orders::expirePending.
+try {
+    $gateway = null;
+    $activeGatewayClass = strtolower((string)($cfg['adapters']['payment'] ?? ''));
+    $expiredOrders = Orders::expirePending(
+        (int)($cfg['pending_order_expiry_seconds'] ?? 172800),
+        (int)($cfg['pending_order_expiry_batch'] ?? 25),
+        static function (array $order) use (&$gateway, $activeGatewayClass): string {
+            $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true) ?: [];
+            $provider = strtolower((string)($snapshot['provider'] ?? ''));
+            if ($provider !== '' && !str_contains($activeGatewayClass, $provider)) {
+                throw new RuntimeException('Configured payment adapter does not match the order provider');
+            }
+            $gateway ??= Adapters::payment();
+            return $gateway->getStatus((string)$order['payment_id']);
+        }
+    );
+    if ($verbose && $expiredOrders > 0) echo "Expired pending orders: {$expiredOrders}\n";
+} catch (\Throwable $e) {
+    error_log('Pending order expiry failed: ' . $e->getMessage());
+}
 
 // Process loop
 $maxRuntime = 55; // seconds (cron runs every minute)
@@ -244,12 +269,19 @@ function handleEmailSend(array $payload, array $job): void {
     $orderId  = $payload['order_id'] ?? null;
     $locale   = (string)($payload['locale'] ?? '');
 
-    if (!$to || !$template) return;
+    $allowedTemplates = [
+        'order_confirmation', 'order_paid', 'order_cancelled', 'order_shipped',
+        'refund_issued', 'invoice_issued', 'cart_reminder',
+    ];
+    if (!$to || !in_array($template, $allowedTemplates, true)) return;
+    if ($orderId === null && $template !== 'cart_reminder') return;
 
     $vars = (array)($payload['vars'] ?? []);
     if ($orderId) {
         $order = Orders::byId((int)$orderId);
         if ($order) {
+            // Order-linked jobs cannot redirect mail to a payload-controlled recipient.
+            $to = (string)$order['customer_email'];
             // Prefer locale from order row, then payload, then default.
             if ($locale === '') $locale = (string)($order['locale'] ?? '');
             $vars = array_merge($vars, [
@@ -270,6 +302,8 @@ function handleEmailSend(array $payload, array $job): void {
                 'unit_price' => I18n::price((int)$it['unit_price']),
                 'total'      => I18n::price((int)$it['total']),
             ], $items);
+        } else {
+            return;
         }
     }
 
@@ -521,7 +555,7 @@ function handleCleanup(array $payload, array $job): void {
     Idempotency::cleanup(7);
 
     // Clean old completed jobs (older than 7 days)
-    $completedDir = (require __DIR__ . '/../config.php')['jobs_dir'] ?? __DIR__ . '/../jobs';
+    $completedDir = (require __DIR__ . '/../config.php')['jobs_dir'] ?? dirname(__DIR__, 2) . '/bareboneseshop-private/jobs';
     $completedDir .= '/completed';
     if (is_dir($completedDir)) {
         $cutoff = time() - (7 * 86400);
