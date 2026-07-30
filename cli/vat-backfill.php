@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/cli-only.php';
+
 /**
  * cli/vat-backfill.php — backfill VAT snapshot for legacy orders / order_items
  *

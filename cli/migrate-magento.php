@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/cli-only.php';
+
 /**
  * BareBones Shop — Magento 1.9 CE Migration
  *

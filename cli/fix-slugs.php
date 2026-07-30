@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/cli-only.php';
+
 /**
  * Fix product and category slugs — re-slugify with proper diacritics handling.
  */

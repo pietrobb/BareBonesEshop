@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/cli-only.php';
+
 /**
  * i18n Parity Check
  * Verifies that all lang/{locale}.php files have identical keys.

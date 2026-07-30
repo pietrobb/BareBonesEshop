@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/cli-only.php';
+
 /**
  * BareBones Shop — Restore SQLite DB from backup
  *

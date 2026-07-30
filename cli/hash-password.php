@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/cli-only.php';
+
 /**
  * BareBones Shop — Admin Password Hasher
  * Usage: php cli/hash-password.php "your-password"

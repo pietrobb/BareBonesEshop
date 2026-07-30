@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/cli-only.php';
+
 /**
  * BareBones Shop — TecDoc Import
  * Reads demo/tecdoc_enriched.db → creates categories, products, specs, OE numbers, vehicles.

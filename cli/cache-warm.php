@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/cli-only.php';
+
 /**
  * BareBones Shop — Cache Warmer
  * Pre-generates flat-file cache for all locales.

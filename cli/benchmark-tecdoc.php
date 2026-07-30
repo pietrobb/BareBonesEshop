@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/cli-only.php';
+
 /**
  * BareBones Shop — TecDoc Performance Benchmark
  * Tests parametric search, OE lookup, vehicle cascade on real data.

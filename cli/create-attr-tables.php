@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/cli-only.php';
+
 /** Create attribute tables in existing DB without dropping anything. */
 $db = new PDO('sqlite:' . __DIR__ . '/../db/shop.sqlite');
 $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
