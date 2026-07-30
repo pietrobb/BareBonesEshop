@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/cli-only.php';
+
 /**
  * BareBones Shop — Test Runner
  * Simple test infrastructure without PHPUnit.
@@ -50,6 +52,76 @@ echo "BareBones Shop — Test Suite\n";
 echo "========================================\n\n";
 
 // ============================================================
+// TEST 0: CLI and webroot security boundaries
+// ============================================================
+echo "--- Test 0: CLI and webroot security boundaries ---\n";
+
+$cliGuardPath = __DIR__ . '/cli-only.php';
+$cliGuardSource = file_get_contents($cliGuardPath);
+assert_true($cliGuardSource !== false, 'CLI guard: shared guard exists');
+assert_true(str_contains((string)$cliGuardSource, "['cli', 'phpdbg']"), 'CLI guard: command-line SAPIs are allowlisted');
+assert_true(str_contains((string)$cliGuardSource, 'http_response_code(403);'), 'CLI guard: HTTP rejection returns 403');
+assert_true(preg_match('/\bexit\s*\(1\)\s*;/', (string)$cliGuardSource) === 1, 'CLI guard: rejected invocation exits non-zero');
+
+$cliEntrypoints = glob(__DIR__ . '/*.php') ?: [];
+sort($cliEntrypoints);
+foreach ($cliEntrypoints as $cliEntrypoint) {
+    if (basename($cliEntrypoint) === basename($cliGuardPath)) continue;
+    $source = str_replace("\r\n", "\n", (string)file_get_contents($cliEntrypoint));
+    $guardPrefix = "<?php\nrequire_once __DIR__ . '/cli-only.php';";
+    assert_true(str_starts_with($source, $guardPrefix), 'CLI guard: ' . basename($cliEntrypoint) . ' includes guard first');
+}
+
+$htaccess = str_replace("\r\n", "\n", (string)file_get_contents(__DIR__ . '/../.htaccess'));
+assert_true(preg_match('/^RewriteRule \^\.\+\/\?\$ - \[F,L\]$/mi', $htaccess) === 1, '.htaccess: direct directory requests are denied');
+foreach (['storage', 'db', 'jobs', 'logs', 'config', 'cli', 'src', 'migrations', 'adapters', 'lang', 'demo', 'docs', 'forms', 'blocks'] as $privateTree) {
+    assert_true(
+        preg_match('/^RewriteRule[^\r\n]*\b' . preg_quote($privateTree, '/') . '\b[^\r\n]*\s-\s+\[F,L,NC\]$/mi', $htaccess) === 1,
+        ".htaccess: {$privateTree} tree is denied"
+    );
+}
+assert_true(str_contains($htaccess, 'RewriteRule ^vendor/(?!bbf/'), '.htaccess: vendor tree is denied except explicit BBF public integration files');
+assert_true(str_contains($htaccess, 'bbf\.(?:css|js)|submit\.php'), '.htaccess: required BBF assets and handler remain public');
+assert_true(str_contains($htaccess, 'RewriteRule ^import/(?!test-products\.csv$)'), '.htaccess: only the documented import example remains public');
+assert_true(str_contains($htaccess, '%{THE_REQUEST}'), '.htaccess: direct cache denial distinguishes original requests');
+assert_true(str_contains($htaccess, '(?:[^?\s]+/)?cache'), '.htaccess: direct cache denial covers subdirectory deployments');
+assert_true(preg_match('/^RewriteRule \^cache[^\r\n]*\s-\s+\[F,L,NC\]$/mi', $htaccess) === 1, '.htaccess: direct cache requests are denied');
+assert_equals(4, substr_count($htaccess, 'RewriteRule ^api\.php$ cache/'), '.htaccess: explicit internal API cache rewrites remain');
+assert_true(!str_contains($htaccess, 'RewriteCond %{REQUEST_URI} ^/cache/'), '.htaccess: broad direct cache serving condition is absent');
+assert_true(preg_match('/RewriteRule\s+\^\(\.\*\)\$\s+\$1\s+\[L,T=application\/json\]/i', $htaccess) !== 1, '.htaccess: broad direct cache serving rewrite is absent');
+assert_true(stripos($htaccess, '<FilesMatch') === false, '.htaccess: inert FilesMatch is removed');
+assert_true(str_contains($htaccess, 'RewriteRule ^\.well-known/'), '.htaccess: ACME and security.txt have a narrow dot-path exception');
+assert_true(str_contains($htaccess, 'RewriteRule (?:^|/)\. - [F,L,NC]'), '.htaccess: other dotfiles are denied');
+assert_true(preg_match('/^RewriteRule[^\r\n]*sqlite3\?[^\r\n]*\|log\|lock[^\r\n]*\s-\s+\[F,L,NC\]$/mi', $htaccess) === 1, '.htaccess: database, journal, log, lock, and backup extensions are denied');
+foreach ([
+    'config.php' => 'config(?:\.example)?\.php',
+    'stores.json' => 'stores\.json',
+    'catalog.json' => 'catalog\.json',
+    'shipping.json' => 'shipping\.json',
+    'tax.json' => 'tax\.json',
+    'pricing.json' => 'pricing\.json',
+    'layouts.json' => 'layouts\.json',
+    'admin-roles.json' => 'admin-roles\.json',
+] as $sensitiveName => $ruleFragment) {
+    assert_true(str_contains($htaccess, $ruleFragment), ".htaccess: {$sensitiveName} is denied");
+}
+assert_true(preg_match('/^RewriteRule \^uploads\/[^\r\n]*php[^\r\n]*\s-\s+\[F,L,NC\]$/mi', $htaccess) === 1, '.htaccess: PHP execution under uploads is denied');
+assert_true(str_contains($htaccess, 'RewriteCond %{REQUEST_FILENAME} -f'), '.htaccess: public static assets remain available');
+assert_true(str_contains($htaccess, 'bbf\.(?:css|js)|submit\.php'), '.htaccess: required BBF browser integration remains allowlisted');
+
+$configExampleSource = (string)file_get_contents(__DIR__ . '/../config.example.php');
+foreach (['db_sqlite_path', 'private_cache_dir', 'jobs_dir', 'invoice_storage_dir', 'backup_storage_dir', 'backup_log_file', 'gdpr_salt_file'] as $privateConfigKey) {
+    assert_true(
+        preg_match("/'" . preg_quote($privateConfigKey, '/') . "'\\s*=>\\s*dirname\\(__DIR__\\)/", $configExampleSource) === 1,
+        "Config: {$privateConfigKey} defaults outside the application root"
+    );
+}
+$securitySource = (string)file_get_contents(__DIR__ . '/../src/Security.php');
+assert_true(str_contains($securitySource, "['private_cache_dir']"), 'Security: private cache is configurable');
+assert_true(substr_count($securitySource, 'self::privateCacheDir($cfg)') >= 2, 'Security: rate-limit DB and admin locks use validated private cache');
+assert_true(!str_contains($securitySource, "['cache_dir'] ?? __DIR__ . '/../cache'"), 'Security: public catalog cache is not used for abuse-control state');
+
+// ============================================================
 // TEST 1: Database connection
 // ============================================================
 echo "--- Test 1: Database Connection ---\n";
@@ -65,6 +137,8 @@ $pdo = new PDO('sqlite:' . $testDbPath, null, null, [
 $pdo->exec('PRAGMA journal_mode = WAL');
 $pdo->exec('PRAGMA foreign_keys = ON');
 Db::init($pdo, 'sqlite');
+$testRateDb = new PDO('sqlite::memory:');
+Security::setRateDbForTesting($testRateDb);
 
 assert_true(Db::get() instanceof PDO, 'PDO connection established');
 assert_true(Db::isSqlite(), 'Driver is SQLite');
@@ -240,7 +314,9 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS orders (
     customer_email TEXT NOT NULL, customer_phone TEXT DEFAULT '',
     customer_id INTEGER DEFAULT NULL,
     shipping_addr TEXT DEFAULT '{}', payment_method TEXT NOT NULL,
-    payment_id TEXT DEFAULT '', subtotal INTEGER NOT NULL,
+    payment_id TEXT DEFAULT '', payment_status TEXT NOT NULL DEFAULT 'pending',
+    payment_fee INTEGER NOT NULL DEFAULT 0, payment_method_snapshot TEXT DEFAULT NULL,
+    subtotal INTEGER NOT NULL,
     discount_amount INTEGER NOT NULL DEFAULT 0,
     shipping_cost INTEGER NOT NULL DEFAULT 0, tax_amount INTEGER NOT NULL DEFAULT 0,
     total INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'eur',
@@ -251,6 +327,13 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS orders (
     vat_scenario TEXT DEFAULT NULL, vat_total INTEGER DEFAULT NULL, net_total INTEGER DEFAULT NULL,
     stock_restored INTEGER NOT NULL DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+)");
+
+$pdo->exec("CREATE TABLE IF NOT EXISTS checkout_sessions (
+    id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, provider TEXT NOT NULL,
+    session_id TEXT NOT NULL, browser_session_hash TEXT DEFAULT NULL,
+    status TEXT NOT NULL DEFAULT 'pending', created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')), UNIQUE(provider, session_id)
 )");
 
 $pdo->exec("CREATE TABLE IF NOT EXISTS warehouses (
@@ -354,6 +437,19 @@ $result = Import::csv($csvFile);
 assert_true($result['success'], 'CSV import succeeded');
 assert_equals(8, $result['imported'], 'Imported 8 products');
 assert_equals(0, count($result['errors']), 'No import errors');
+
+$badCsv = tempnam(sys_get_temp_dir(), 'bbe-csv-');
+file_put_contents($badCsv, "sku,sku,name\nA,A,Duplicate\n");
+$badCsvResult = Import::csv($badCsv);
+assert_true($badCsvResult['success'] === false, 'CSV import: duplicate headers are rejected');
+unlink($badCsv);
+$oversizedCsv = tempnam(sys_get_temp_dir(), 'bbe-csv-large-');
+$oversizedHandle = fopen($oversizedCsv, 'wb');
+ftruncate($oversizedHandle, Import::MAX_FILE_BYTES + 1);
+fclose($oversizedHandle);
+$oversizedCsvResult = Import::csv($oversizedCsv);
+assert_true($oversizedCsvResult['success'] === false, 'CSV import: oversized files are rejected before parsing');
+unlink($oversizedCsv);
 
 // Verify products in DB
 $count = (int)$pdo->query("SELECT COUNT(*) FROM products")->fetchColumn();
@@ -563,7 +659,46 @@ $_SESSION[$trapKey][$oldToken] = time() - 3601;
 assert_true(!Security::formTrapValidate('test_register', $oldToken, '', 4, 3600), 'formTrapValidate rejects expired tokens');
 $accountSource = file_get_contents(__DIR__ . '/../account.php') ?: '';
 assert_true(str_contains($accountSource, 'name="register_token"'), 'Account register form includes form-trap token');
+assert_true(!str_contains($accountSource, 'HTTP_HOST'), 'G3: password reset URL does not trust the Host header');
 assert_true(str_contains($accountSource, 'name="company_website"'), 'Account register form includes hidden honeypot field');
+assert_true(str_contains($accountSource, 'account_login_account_'), 'G4: login has a per-account throttle independent of IP');
+assert_true(str_contains($accountSource, 'account_forgot_recipient_'), 'G4: password reset has a per-recipient throttle independent of IP');
+assert_true(str_contains($accountSource, "account.err_invalid_credentials"), 'G4: login returns a generic credential error');
+$adminSourceG4 = file_get_contents(__DIR__ . '/../admin.php') ?: '';
+assert_true(str_contains($adminSourceG4, "adminRequire('customers.edit')"), 'G4: customer status mutation requires edit permission');
+assert_true(str_contains($adminSourceG4, 'AND order_id = :order_id'), 'G4: invoice resend is scoped to the displayed order');
+assert_true(str_contains($adminSourceG4, 'admin_email_resend_'), 'G4: admin email resend has a cooldown budget');
+$workerSourceG4 = file_get_contents(__DIR__ . '/worker.php') ?: '';
+assert_true(str_contains($workerSourceG4, '$to = (string)$order[\'customer_email\']'), 'G4: order mail recipient is loaded from the order record');
+assert_true(str_contains($workerSourceG4, '$allowedTemplates'), 'G4: worker mail templates are allowlisted');
+assert_true(str_contains($workerSourceG4, '$template !== \'cart_reminder\''), 'G4: payload-only mail jobs are limited to cart reminders');
+$mailSourceG4 = file_get_contents(__DIR__ . '/../src/MailService.php') ?: '';
+assert_true(!str_contains($mailSourceG4, "SERVER_NAME"), 'G4: mail sender does not trust the request host');
+assert_true(str_contains($mailSourceG4, "FILTER_VALIDATE_EMAIL"), 'G4: sender, recipient and reply-to are validated');
+foreach (['api.php', 'index.php', 'product.php', 'wishlist.php'] as $customerEntrypoint) {
+    $entrySource = file_get_contents(__DIR__ . '/../' . $customerEntrypoint) ?: '';
+    assert_true(str_contains($entrySource, 'Customers::isLoggedIn();'), "G4: {$customerEntrypoint} validates stale customer sessions");
+}
+$apiSourceG5 = file_get_contents(__DIR__ . '/../api.php') ?: '';
+$indexSourceG5 = file_get_contents(__DIR__ . '/../index.php') ?: '';
+foreach (['checkout_global', 'checkout_session_', 'checkout_subject_', 'Security::rotateCsrfToken()'] as $checkoutGuard) {
+    assert_true(str_contains($apiSourceG5, $checkoutGuard), "G5: API checkout uses {$checkoutGuard}");
+    assert_true(str_contains($indexSourceG5, $checkoutGuard), "G5: legacy checkout uses {$checkoutGuard}");
+}
+$_SESSION['csrf_token'] = 'g5-checkout-request-token';
+$_POST['csrf_token'] = 'g5-checkout-request-token';
+assert_true(Security::csrfValidate(), 'G5: original checkout CSRF token starts valid');
+$newCheckoutCsrf = Security::rotateCsrfToken();
+assert_true(!Security::csrfValidate(), 'G5: exact checkout replay token is invalid after successful-create rotation');
+$_POST['csrf_token'] = $newCheckoutCsrf;
+assert_true(Security::csrfValidate(), 'G5: newly issued CSRF token remains usable');
+$_POST = [];
+
+$rateKey = 'g4_global_' . bin2hex(random_bytes(8));
+$_SERVER['REMOTE_ADDR'] = '192.0.2.10';
+assert_true(Security::rateLimit($rateKey, 1, 3600, false), 'G4: first global subject hit is allowed');
+$_SERVER['REMOTE_ADDR'] = '192.0.2.11';
+assert_true(!Security::rateLimit($rateKey, 1, 3600, false), 'G4: global subject throttle cannot be bypassed by changing IP');
 
 // ============================================================
 // TEST 9: Category Tree
@@ -781,10 +916,20 @@ assert_equals('myvalue', Cache::get('mykey'), 'Cache key-value works');
 assert_equals('sk/product/test.json', Cache::localePath('sk', 'product/test.json'), 'localePath works');
 
 // Cleanup test cache
+$cacheJobsDir = sys_get_temp_dir() . '/bareboneseshop-jobs-cache-' . getmypid();
+JobQueue::setDir($cacheJobsDir);
 Cache::invalidatePrefix('test');
 @rmdir($testCacheDir . '/test');
 @rmdir($testCacheDir . '/kv');
 @rmdir($testCacheDir);
+foreach (['pending', 'processing', 'completed', 'failed'] as $sub) {
+    $subDir = $cacheJobsDir . '/' . $sub;
+    if (is_dir($subDir)) {
+        array_map('unlink', glob($subDir . '/*.json') ?: []);
+        @rmdir($subDir);
+    }
+}
+@rmdir($cacheJobsDir);
 
 // Reset cache dir
 Cache::setDir(__DIR__ . '/../cache');
@@ -872,7 +1017,7 @@ assert_true(!$isDup3, 'Different event is not duplicate');
 // ============================================================
 echo "\n--- Test 19: JobQueue ---\n";
 
-$testJobsDir = __DIR__ . '/../jobs/test_' . getmypid();
+$testJobsDir = sys_get_temp_dir() . '/bareboneseshop-jobs-test-' . getmypid();
 JobQueue::setDir($testJobsDir);
 
 $id1 = JobQueue::push('email_send', ['to' => 'a@b.com'], 5);
@@ -917,6 +1062,18 @@ for ($i = 0; $i < 3; $i++) {
 }
 $stats3 = JobQueue::stats();
 assert_equals(1, $stats3['failed'], 'Job moved to failed after max retries');
+
+$jobPathRejected = false;
+try { JobQueue::setDir(__DIR__ . '/../jobs/unsafe'); } catch (RuntimeException $e) { $jobPathRejected = true; }
+assert_true($jobPathRejected, 'JobQueue: jobs_dir inside application root is rejected');
+$forgedJobRejected = false;
+try { JobQueue::complete(__FILE__); } catch (RuntimeException $e) { $forgedJobRejected = true; }
+assert_true($forgedJobRejected, 'JobQueue: forged processing path is rejected');
+$badPayload = fopen('php://temp', 'rb');
+$badPayloadRejected = false;
+try { JobQueue::push('invalid_payload', ['resource' => $badPayload]); } catch (JsonException $e) { $badPayloadRejected = true; }
+fclose($badPayload);
+assert_true($badPayloadRejected, 'JobQueue: unencodable payload fails closed');
 
 // Cleanup jobs test dir
 foreach (['pending', 'processing', 'completed', 'failed'] as $sub) {
@@ -1235,7 +1392,7 @@ assert_true(OrderWorkflow::isTerminal('refunded'), 'refunded is terminal');
 assert_true(!OrderWorkflow::isTerminal('pending'), 'pending is not terminal');
 
 // Set up job queue for workflow side effects
-$testJobsDir2 = __DIR__ . '/../jobs/test_wf_' . getmypid();
+$testJobsDir2 = sys_get_temp_dir() . '/bareboneseshop-jobs-wf-' . getmypid();
 JobQueue::setDir($testJobsDir2);
 
 // Transition pending → paid
@@ -1284,6 +1441,45 @@ OrderWorkflow::transition($orderId2, 'cancelled', 'Customer requested');
 $stockAfter = (int)Products::bySku('TSHIRT-BLK-M')['stock'];
 assert_equals($stockBefore + 1, $stockAfter, 'Cancellation restores stock');
 
+// G5: expire only old, unpaid, terminal online checkouts and restore once.
+$onlineCustomer = $customer;
+$onlineCustomer['payment_method_snapshot'] = json_encode(['provider' => 'stripe', 'requires_online' => true]);
+$expiryOrderId = Orders::create($cartItems2, $onlineCustomer, 'stripe');
+CheckoutSession::bind($expiryOrderId, 'cs_expired_test', 'stripe', 'test-browser-session');
+$pdo->prepare("UPDATE orders SET created_at = datetime('now', '-3 hours'), payment_id = 'cs_expired_test' WHERE id = ?")
+    ->execute([$expiryOrderId]);
+$expiryStockBefore = (int)Products::bySku('TSHIRT-BLK-M')['stock'];
+assert_equals(1, Orders::expirePending(3600, 10, static fn(array $order): string => 'expired'), 'G5: one terminal unpaid online order expires');
+$expiredOrder = Orders::byId($expiryOrderId);
+assert_equals('cancelled', $expiredOrder['status'], 'G5: expired pending order is cancelled');
+assert_equals('cancelled', $expiredOrder['payment_status'], 'G5: expired pending payment is closed');
+$expiredCheckoutState = $pdo->query("SELECT status FROM checkout_sessions WHERE session_id = 'cs_expired_test'")->fetchColumn();
+assert_equals('expired', $expiredCheckoutState, 'G5: provider checkout binding is expired in the same transaction');
+$expiryStockAfter = (int)Products::bySku('TSHIRT-BLK-M')['stock'];
+assert_equals($expiryStockBefore + 1, $expiryStockAfter, 'G5: expiry releases reserved stock');
+assert_equals(0, Orders::expirePending(3600, 10, static fn(array $order): string => 'expired'), 'G5: repeated expiry cannot claim the order again');
+assert_equals($expiryStockAfter, (int)Products::bySku('TSHIRT-BLK-M')['stock'], 'G5: repeated expiry cannot double-restore stock');
+
+$offlineCustomer = $customer;
+$offlineCustomer['payment_method_snapshot'] = json_encode(['provider' => 'manual', 'requires_online' => false]);
+$offlineOrderId = Orders::create($cartItems2, $offlineCustomer, 'transfer');
+$pdo->prepare("UPDATE orders SET created_at = datetime('now', '-3 hours') WHERE id = ?")->execute([$offlineOrderId]);
+assert_equals(0, Orders::expirePending(3600, 10, static fn(array $order): string => 'expired'), 'G5: offline pending order is never auto-expired');
+assert_equals('pending', Orders::byId($offlineOrderId)['status'], 'G5: offline order remains pending');
+
+$paidOnlineOrderId = Orders::create($cartItems2, $onlineCustomer, 'stripe');
+$pdo->prepare("UPDATE orders SET created_at = datetime('now', '-3 hours'), payment_status = 'paid', payment_id = 'cs_paid_test' WHERE id = ?")
+    ->execute([$paidOnlineOrderId]);
+assert_equals(0, Orders::expirePending(3600, 10, static fn(array $order): string => 'expired'), 'G5: paid order is never auto-expired');
+assert_equals('pending', Orders::byId($paidOnlineOrderId)['status'], 'G5: paid order lifecycle remains untouched');
+
+$openOnlineOrderId = Orders::create($cartItems2, $onlineCustomer, 'stripe');
+$pdo->prepare("UPDATE orders SET created_at = datetime('now', '-3 hours'), payment_id = 'cs_open_test' WHERE id = ?")
+    ->execute([$openOnlineOrderId]);
+assert_equals(0, Orders::expirePending(3600, 10, static fn(array $order): string => 'open'), 'G5: non-terminal provider session fails closed');
+assert_equals('pending', Orders::byId($openOnlineOrderId)['status'], 'G5: open provider checkout remains pending');
+$pdo->prepare("UPDATE orders SET created_at = datetime('now') WHERE id = ?")->execute([$openOnlineOrderId]);
+
 // Order stats
 $stats = Orders::stats();
 assert_true(isset($stats['pending']), 'Stats has pending count');
@@ -1331,29 +1527,42 @@ echo "\n--- Test 25: Webhook Signature ---\n";
 
 // Inline the signature verification function for testing (api.php has side effects)
 function verifyStripeSignature(string $payload, string $sigHeader, string $secret): bool {
-    $parts = [];
+    if (strlen($secret) < 16 || trim($secret) !== $secret) return false;
+    $timestamp = '';
+    $signatures = [];
     foreach (explode(',', $sigHeader) as $part) {
-        [$key, $val] = explode('=', trim($part), 2) + [1 => ''];
-        $parts[$key] = $val;
+        [$key, $value] = explode('=', trim($part), 2) + [1 => ''];
+        if ($key === 't') {
+            if ($timestamp !== '' && $timestamp !== $value) return false;
+            $timestamp = $value;
+        } elseif ($key === 'v1' && $value !== '') {
+            $signatures[] = strtolower($value);
+        }
     }
-    $timestamp = $parts['t'] ?? '';
-    $signature = $parts['v1'] ?? '';
-    if (!$timestamp || !$signature) return false;
+    if ($timestamp === '' || !ctype_digit($timestamp) || !$signatures) return false;
     if (abs(time() - (int)$timestamp) > 300) return false;
-    $signedPayload = $timestamp . '.' . $payload;
-    $expected = hash_hmac('sha256', $signedPayload, $secret);
-    return hash_equals($expected, $signature);
+    $expected = hash_hmac('sha256', $timestamp . '.' . $payload, $secret);
+    foreach ($signatures as $signature) {
+        if (hash_equals($expected, $signature)) return true;
+    }
+    return false;
 }
 
-$testSecret = 'whsec_test123';
+$testSecret = 'test-stripe-webhook-secret';
 $testPayload = '{"id":"evt_1","type":"checkout.session.completed"}';
 $testTimestamp = (string)time();
 $testSig = hash_hmac('sha256', $testTimestamp . '.' . $testPayload, $testSecret);
 $testHeader = "t={$testTimestamp},v1={$testSig}";
 
 assert_true(verifyStripeSignature($testPayload, $testHeader, $testSecret), 'Valid Stripe signature accepted');
+assert_true(verifyStripeSignature($testPayload, "t={$testTimestamp},v1=deadbeef,v1={$testSig}", $testSecret), 'Any valid Stripe v1 signature is accepted during secret rotation');
+assert_true(!verifyStripeSignature($testPayload, $testHeader, ''), 'Empty Stripe webhook secret fails closed');
+$weakSecretHeader = "t={$testTimestamp},v1=" . hash_hmac('sha256', $testTimestamp . '.' . $testPayload, 'short');
+assert_true(!verifyStripeSignature($testPayload, $weakSecretHeader, 'short'), 'Weak Stripe webhook secret fails closed even with a matching HMAC');
 assert_true(!verifyStripeSignature($testPayload, $testHeader, 'wrong_secret'), 'Wrong secret rejected');
 assert_true(!verifyStripeSignature('tampered', $testHeader, $testSecret), 'Tampered payload rejected');
+assert_true(!verifyStripeSignature($testPayload, "t=1,t={$testTimestamp},v1={$testSig}", $testSecret), 'Conflicting Stripe timestamps rejected');
+assert_true(!verifyStripeSignature($testPayload, "t=not-a-time,v1={$testSig}", $testSecret), 'Malformed Stripe timestamp rejected');
 
 // Expired timestamp
 $oldTimestamp = (string)(time() - 600);
@@ -1414,7 +1623,7 @@ Cache::setDir(__DIR__ . '/../cache');
 // ============================================================
 echo "\n--- Test 27: Worker Job Dispatch ---\n";
 
-$testJobsDir3 = __DIR__ . '/../jobs/test_worker_' . getmypid();
+$testJobsDir3 = sys_get_temp_dir() . '/bareboneseshop-jobs-worker-' . getmypid();
 JobQueue::setDir($testJobsDir3);
 
 // Push various job types
@@ -1714,7 +1923,7 @@ assert_true(empty($result['filters']), 'Empty category → no filters');
 // ============================================================
 echo "\n--- Test 33: Returned Order Restores Stock ---\n";
 
-$testJobsDir3 = __DIR__ . '/../jobs/test_ret_' . getmypid();
+$testJobsDir3 = sys_get_temp_dir() . '/bareboneseshop-jobs-return-' . getmypid();
 JobQueue::setDir($testJobsDir3);
 
 // Create an order, pay it, ship it, then return it
@@ -2101,7 +2310,44 @@ try {
 }
 assert_true($traversalThrown, 'Path traversal in store() throws RuntimeException');
 
+foreach (['', "bad\0name", "bad\nname", '/etc/passwd', '\\server\\share\\file', 'C:\\Windows\\file', 'products/file.txt:payload', 'products/./file', 'products\\..\\file', 'products\\mixed/file'] as $badPath) {
+    foreach (['store', 'delete', 'url', 'resize'] as $method) {
+        $rejected = false;
+        try {
+            if ($method === 'store') $storage2->store($badPath, 'x');
+            elseif ($method === 'delete') $storage2->delete($badPath);
+            elseif ($method === 'url') $storage2->url($badPath);
+            else $storage2->resize($badPath, 10, 10);
+        } catch (\RuntimeException $e) {
+            $rejected = true;
+        }
+        assert_true($rejected, "LocalStorage {$method} rejects unsafe path " . json_encode($badPath));
+    }
+}
+
+file_put_contents($tmpDir2 . '/blocked', 'not a directory');
+$mkdirFailureThrown = false;
+try { $storage2->store('blocked/file.txt', 'x'); } catch (\RuntimeException $e) { $mkdirFailureThrown = true; }
+assert_true($mkdirFailureThrown, 'LocalStorage mkdir failure throws');
+
+$siblingDir2 = $tmpDir2 . '_sibling';
+@mkdir($siblingDir2);
+$linkDir2 = $tmpDir2 . '/escape-link';
+if (@symlink($siblingDir2, $linkDir2)) {
+    $symlinkRejected = $symlinkUrlRejected = false;
+    try { $storage2->store('escape-link/escaped.txt', 'x'); } catch (\RuntimeException $e) { $symlinkRejected = true; }
+    try { $storage2->url('escape-link/escaped.txt'); } catch (\RuntimeException $e) { $symlinkUrlRejected = true; }
+    assert_true($symlinkRejected, 'LocalStorage rejects sibling-prefix symlink escape');
+    assert_true($symlinkUrlRejected, 'LocalStorage refuses URL generation through an escaping symlink');
+    assert_true(!file_exists($siblingDir2 . '/escaped.txt'), 'LocalStorage symlink escape writes nothing outside root');
+    @unlink($linkDir2);
+} else {
+    echo "  [SKIP] LocalStorage symlink regression (symlink unavailable)\n";
+}
+@rmdir($siblingDir2);
+
 // Cleanup
+@unlink($tmpDir2 . '/blocked');
 @unlink($tmpDir2 . '/products/test.txt');
 @rmdir($tmpDir2 . '/products');
 @rmdir($tmpDir2);
@@ -2157,7 +2403,7 @@ assert_equals(false, $dup3, 'After unmark, event can be reprocessed');
 echo "\n--- Test 45: Cancellation Refund Guard ---\n";
 
 // Set up a fresh jobs dir for this test
-$testJobsDir45 = __DIR__ . '/../jobs/test_refund_' . getmypid();
+$testJobsDir45 = sys_get_temp_dir() . '/bareboneseshop-jobs-refund-' . getmypid();
 JobQueue::setDir($testJobsDir45);
 
 // Create an order with a checkout session ID (cs_*) as payment_id
@@ -2325,9 +2571,12 @@ if (file_exists($liveDbPath)) {
         }
     }
 
-    assert_true($totalImages > 0, "Product images: {$totalImages} image references found in DB");
-    $missingPct = $totalImages > 0 ? round($missingImages / $totalImages * 100, 1) : 0;
-    assert_true($missingImages === 0, "Product images: {$missingImages}/{$totalImages} missing on disk ({$missingPct}%)");
+    if ($totalImages === 0) {
+        echo "  [SKIP] No product image references in live database\n";
+    } else {
+        $missingPct = round($missingImages / $totalImages * 100, 1);
+        assert_true($missingImages === 0, "Product images: {$missingImages}/{$totalImages} missing on disk ({$missingPct}%)");
+    }
 
     if (!empty($missingExamples)) {
         foreach ($missingExamples as $ex) {
@@ -2442,7 +2691,7 @@ $pdo->exec("INSERT INTO shipping_rates (carrier, country, weight_from_g, weight_
     ('gls_test',     'DE', 0,    5000,  899, 150)
 ");
 
-$mockGateway = new MockPayment(['mock_result' => 'success']);
+$mockGateway = new MockPayment(['mock_result' => 'success', 'mock_webhook_secret' => 'test-mock-webhook-secret']);
 
 // Create a fresh pending order for payment tests
 $payProduct = Products::bySku('TSHIRT-BLK-M');
@@ -2493,9 +2742,11 @@ echo "\n--- Test: Payment — webhook paid flow ---\n";
 
 // Test B: simulate paid webhook
 $paidPayload = MockPayment::paidPayload((int)$payOrder['id'], (int)$payOrder['total'], $session['session_id']);
+$paidRawPayload = json_encode($paidPayload);
+$paidSignature = hash_hmac('sha256', $paidRawPayload, 'test-mock-webhook-secret');
 $webhookResult = PaymentService::handleWebhook(
-    rawPayload:    json_encode($paidPayload),
-    sigHeader:     'mock_sig',
+    rawPayload:    $paidRawPayload,
+    sigHeader:     $paidSignature,
     parsedPayload: $paidPayload,
     gateway:       $mockGateway,
     providerName:  'mock',
@@ -2518,8 +2769,8 @@ echo "\n--- Test: Payment — webhook idempotency ---\n";
 
 // Test C: replay same webhook — must be deduplicated
 $dupResult = PaymentService::handleWebhook(
-    rawPayload:    json_encode($paidPayload),
-    sigHeader:     'mock_sig',
+    rawPayload:    $paidRawPayload,
+    sigHeader:     $paidSignature,
     parsedPayload: $paidPayload,
     gateway:       $mockGateway,
     providerName:  'mock',
@@ -2699,9 +2950,14 @@ $_POST = [
     'shipping_method' => 'packeta',
     'payment_method' => 'card',
 ];
-$onlineCheckout = apiCheckout();
+$_SERVER['HTTP_HOST'] = 'attacker.example';
+$onlineCheckoutCfg = require __DIR__ . '/../config.php';
+$onlineCheckoutCfg['app_url'] = 'https://shop.example';
+$onlineCheckout = apiCheckout($onlineCheckoutCfg);
 assert_true(!empty($onlineCheckout['success']), 'Payment UX: online checkout succeeds');
 assert_true(!empty($onlineCheckout['payment_url']), 'Payment UX: online checkout returns payment_url');
+assert_true(str_starts_with((string)$onlineCheckout['payment_url'], 'https://shop.example/'), 'G3: checkout callback uses configured app_url');
+assert_true(!str_contains((string)$onlineCheckout['payment_url'], 'attacker.example'), 'G3: checkout callback ignores poisoned Host header');
 assert_true(!empty($onlineCheckout['session_id']), 'Payment UX: online checkout keeps session_id contract');
 $onlineCheckoutTx = PaymentService::transactionsForOrder((int)$onlineCheckout['order_id']);
 assert_equals('initiated', (string)$onlineCheckoutTx[0]['status'], 'Payment UX: online checkout logs initiated transaction');
@@ -3115,10 +3371,16 @@ $webhookPayload = [
     'awb'    => $labelResult['awb'],
     'status' => 'delivered',
 ];
-$webhookResult = ShippingService::handleTrackingWebhook('packeta', $webhookPayload, '');
+$shippingWebhookSecret = 'test-shipping-webhook-secret';
+putenv('SHIP_PACKETA_WEBHOOK_SECRET=' . $shippingWebhookSecret);
+$webhookRaw = json_encode($webhookPayload, JSON_UNESCAPED_SLASHES);
+$webhookSignature = hash_hmac('sha256', $webhookRaw, $shippingWebhookSecret);
+$webhookResult = ShippingService::handleTrackingWebhook('packeta', $webhookPayload, $webhookSignature, $webhookRaw);
 assert_true($webhookResult['handled'], 'Shipping: tracking webhook handled=true');
 assert_equals('delivered', $webhookResult['status'], 'Shipping: webhook status=delivered');
 assert_equals($shippingOrderId, $webhookResult['order_id'], 'Shipping: webhook order_id matches');
+$shippingReplay = ShippingService::handleTrackingWebhook('packeta', $webhookPayload, $webhookSignature, $webhookRaw);
+assert_true($shippingReplay['duplicate'] ?? false, 'G3: shipping webhook replay is idempotent');
 
 // Verify label status updated
 $deliveredLabel = $pdo->query("SELECT status FROM shipping_labels WHERE awb = '{$labelResult['awb']}'")->fetch();
@@ -3129,16 +3391,23 @@ $deliveredOrder = $pdo->query("SELECT status FROM orders WHERE id = {$shippingOr
 assert_equals('delivered', $deliveredOrder['status'], 'Shipping: order status = delivered after webhook');
 
 echo "\n--- Test: Shipping — bad webhook signature rejected ---\n";
-$_ENV['SHIP_PACKETA_WEBHOOK_SECRET'] = 'testsecret';
 $badPayload = ['awb' => 'PKT-BAD', 'status' => 'in_transit'];
+$badRaw = json_encode($badPayload, JSON_UNESCAPED_SLASHES);
 $exceptionThrown = false;
 try {
-    ShippingService::handleTrackingWebhook('packeta', $badPayload, 'bad-sig');
+    ShippingService::handleTrackingWebhook('packeta', $badPayload, 'bad-sig', $badRaw);
 } catch (\RuntimeException $e) {
     $exceptionThrown = str_contains($e->getMessage(), 'signature');
 }
 assert_true($exceptionThrown, 'Shipping: bad signature throws RuntimeException');
-unset($_ENV['SHIP_PACKETA_WEBHOOK_SECRET']);
+putenv('SHIP_PACKETA_WEBHOOK_SECRET');
+$exceptionThrown = false;
+try {
+    ShippingService::handleTrackingWebhook('packeta', $badPayload, hash_hmac('sha256', $badRaw, $shippingWebhookSecret), $badRaw);
+} catch (\RuntimeException $e) {
+    $exceptionThrown = str_contains($e->getMessage(), 'not configured');
+}
+assert_true($exceptionThrown, 'G3: shipping webhook without configured secret fails closed');
 
 // ============================================================
 // TESTS: Email Notifications (MailService + adapters + templates)
@@ -3208,6 +3477,10 @@ assert_equals('YES', $ifTpl, 'Email: {{#if}} includes truthy, excludes falsy');
 echo "\n--- Test: Email — LogMail adapter captures message ---\n";
 LogMail::clearCaptured();
 MailService::useAdapter(new LogMail(['log_file' => __DIR__ . '/../db/emails.test.log']));
+$originalMailFrom = getenv('MAIL_FROM');
+$originalServerName = $_SERVER['SERVER_NAME'] ?? null;
+putenv('MAIL_FROM=');
+$_SERVER['SERVER_NAME'] = "attacker.example\r\nBcc: victim@example.com";
 $res = MailService::send('order_paid', 'jozko@example.com', 'sk', [
     'order_number' => 'LOG-1',
     'customer_name'=> 'Jožko',
@@ -3218,7 +3491,14 @@ assert_equals('log', $res['adapter'], 'Email: LogMail reports adapter=log');
 $last = LogMail::lastCaptured();
 assert_true($last !== null, 'Email: LogMail captured message');
 assert_equals('jozko@example.com', $last['to'] ?? '', 'Email: LogMail captured recipient');
+assert_equals('noreply@localhost.invalid', $last['from'] ?? '', 'G4: mail sender ignores poisoned SERVER_NAME');
 assert_true(str_contains($last['html'] ?? '', 'LOG-1'), 'Email: LogMail rendered order_number into HTML');
+$originalMailFrom === false ? putenv('MAIL_FROM') : putenv('MAIL_FROM=' . $originalMailFrom);
+if ($originalServerName === null) {
+    unset($_SERVER['SERVER_NAME']);
+} else {
+    $_SERVER['SERVER_NAME'] = $originalServerName;
+}
 
 echo "\n--- Test: Email — email_log row persisted with status=sent ---\n";
 $logId = (int)$res['log_id'];
@@ -3234,6 +3514,15 @@ echo "\n--- Test: Email — invalid recipient is skipped ---\n";
 $skip = MailService::send('order_paid', 'not-an-email', 'sk', ['order_number' => 'X']);
 assert_equals('skipped', $skip['status'], 'Email: invalid address returns status=skipped');
 assert_equals(0, $skip['log_id'], 'Email: invalid address does not create log row');
+$badTemplate = MailService::send('../order_paid', 'safe@example.com', 'en');
+assert_equals('skipped', $badTemplate['status'], 'G4: unsafe mail template identifier is rejected');
+for ($i = 0; $i < 3; $i++) {
+    $resetMail = MailService::send('account_password_reset', 'flood-target@example.com', 'en', ['reset_url' => 'https://shop.example/reset']);
+    assert_equals('sent', $resetMail['status'], 'G4: reset mail within recipient budget is sent');
+}
+$blockedResetMail = MailService::send('account_password_reset', 'flood-target@example.com', 'en', ['reset_url' => 'https://shop.example/reset']);
+assert_equals('skipped', $blockedResetMail['status'], 'G4: fourth reset mail to one recipient is throttled');
+assert_equals('recipient rate limit', $blockedResetMail['error'], 'G4: recipient throttle returns a stable internal reason');
 
 echo "\n--- Test: Email — SmtpMail rejects bad addresses without connecting ---\n";
 $smtp = new SmtpMail(['smtp_host' => '127.0.0.1', 'smtp_port' => 1]);
@@ -3282,6 +3571,8 @@ assert_equals('sent', $orig['status'], 'Email: resend leaves original log row in
 
 $resendBad = MailService::resend(999999);
 assert_equals('skipped', $resendBad['status'], 'Email: resend on missing id returns skipped');
+$resendWrongOrder = MailService::resend($logId, 999999);
+assert_equals('skipped', $resendWrongOrder['status'], 'G4: resend cannot use an email log from another order');
 
 echo "\n--- Test: Email — worker handleEmailSend end-to-end via OrderWorkflow ---\n";
 LogMail::clearCaptured();
@@ -3323,13 +3614,17 @@ foreach ($pending as $j) {
 }
 assert_true($emailJob !== null, 'Email: OrderWorkflow enqueued email_send job on paid transition');
 
-// Inline-execute (worker handler code path)
+// Inline-execute (worker handler code path) with a forged payload recipient.
 require_once __DIR__ . '/../cli/worker.php';
+LogMail::clearCaptured();
+handleEmailSend(['template' => 'order_paid', 'to' => 'attacker@example.com'], []);
+assert_true(LogMail::lastCaptured() === null, 'G4: worker rejects non-cart mail jobs without an order');
+$emailJob['payload']['to'] = 'attacker@example.com';
 handleEmailSend($emailJob['payload'], $emailJob);
 
 $lastMail = LogMail::lastCaptured();
 assert_true($lastMail !== null, 'Email: worker dispatch captured by LogMail');
-assert_equals('customer@example.com', $lastMail['to'] ?? '', 'Email: worker sent to order customer_email');
+assert_equals('customer@example.com', $lastMail['to'] ?? '', 'G4: worker ignores forged recipient and uses order customer_email');
 assert_true(str_contains($lastMail['html'] ?? '', 'Payment received'), 'Email: worker rendered EN order_paid (locale from order row)');
 
 $orderEmailRow = $pdo->prepare("SELECT * FROM email_log WHERE order_id = :oid AND template = 'order_paid' ORDER BY id DESC LIMIT 1");
@@ -3447,6 +3742,11 @@ assert_equals('sk', $row['locale'], 'Customer: register stored locale from extra
 [$lok, $lrow, $lerr] = Customers::login('alice@test.local', 'Passw0rd!');
 assert_true($lok === true && $lrow['id'] === $aliceId, 'Customer: login success returns row');
 assert_true(!isset($lrow['password_hash']), 'Customer: login return row strips password_hash');
+assert_true(Customers::isLoggedIn(), 'G4: fresh customer session is accepted');
+$_SESSION['customer_last_seen'] = time() - 1801;
+assert_true(!Customers::isLoggedIn(), 'G4: idle customer session expires after 30 minutes');
+[$lok, $lrow, $lerr] = Customers::login('alice@test.local', 'Passw0rd!');
+assert_true($lok, 'G4: customer can log in again after idle expiry');
 
 // Login wrong password
 [$lok2, , $lerr2] = Customers::login('alice@test.local', 'Wrong!Pw1');
@@ -3455,6 +3755,13 @@ assert_true($lok2 === false && $lerr2 === 'invalid_credentials', 'Customer: wron
 // Login non-existent email
 [$lok3, , $lerr3] = Customers::login('ghost@test.local', 'Passw0rd!');
 assert_true($lok3 === false && $lerr3 === 'invalid_credentials', 'Customer: non-existent email rejected');
+$pdo->prepare("UPDATE customers SET status = 'blocked' WHERE id = ?")->execute([$aliceId]);
+assert_true(!Customers::isLoggedIn(), 'G4: blocking an account invalidates its existing session');
+[$blockedLogin, , $blockedErr] = Customers::login('alice@test.local', 'Passw0rd!');
+assert_true(!$blockedLogin && $blockedErr === 'invalid_credentials', 'G4: blocked account uses the generic login error');
+$pdo->prepare("UPDATE customers SET status = 'active' WHERE id = ?")->execute([$aliceId]);
+[$activeAgain] = Customers::login('alice@test.local', 'Passw0rd!');
+assert_true($activeAgain, 'G4: restored active account can authenticate again');
 
 // --- Addresses ---
 $addrId = Customers::addAddress($aliceId, [
@@ -3496,8 +3803,12 @@ $reloaded = Customers::byId($aliceId);
 assert_equals('Alice Renamed', $reloaded['name'], 'Customer: name updated');
 
 // --- changePassword ---
+$preChangeSessionHash = (string)($_SESSION['customer_auth_hash'] ?? '');
 [$cok, $cerr] = Customers::changePassword($aliceId, 'Passw0rd!', 'NewPassw0rd!');
 assert_true($cok === true && $cerr === null, 'Customer: changePassword with correct old pw succeeds');
+assert_true((string)($_SESSION['customer_auth_hash'] ?? '') !== $preChangeSessionHash, 'G4: password change rotates the session credential fingerprint');
+$_SESSION['customer_auth_hash'] = $preChangeSessionHash;
+assert_true(!Customers::isLoggedIn(), 'G4: a session bearing the previous password fingerprint is rejected');
 [$lok4, , ] = Customers::login('alice@test.local', 'NewPassw0rd!');
 assert_true($lok4 === true, 'Customer: login works with new password');
 [$lok5, , ] = Customers::login('alice@test.local', 'Passw0rd!');
@@ -3510,6 +3821,9 @@ assert_true($cok2 === false && $cerr2 === 'invalid_current_password', 'Customer:
 // --- Password reset flow ---
 $tok = Customers::startPasswordReset('alice@test.local');
 assert_true(is_string($tok) && strlen($tok) >= 32, 'Customer: startPasswordReset returns 32+ char token');
+$replacementTok = Customers::startPasswordReset('alice@test.local');
+assert_true(Customers::verifyResetToken($tok) === null, 'G4: issuing a new reset token invalidates the previous token');
+$tok = $replacementTok;
 $noTok = Customers::startPasswordReset('ghost@test.local');
 assert_true($noTok === null, 'Customer: startPasswordReset for unknown email returns null');
 
@@ -4114,6 +4428,16 @@ $pdfPath = InvoiceService::pdfAbsolutePath($inv1);
 assert_true(file_exists($pdfPath), 'Invoice: PDF file written to disk');
 assert_true(filesize($pdfPath) > 500, 'Invoice: PDF size > 500 bytes');
 assert_equals('%PDF-1.4', substr((string)file_get_contents($pdfPath), 0, 8), 'Invoice: PDF has %PDF-1.4 magic header');
+$appRootNormalized = strtolower(str_replace('\\', '/', realpath(__DIR__ . '/..') ?: dirname(__DIR__)));
+$pdfPathNormalized = strtolower(str_replace('\\', '/', realpath($pdfPath) ?: $pdfPath));
+assert_true(!str_starts_with($pdfPathNormalized, $appRootNormalized . '/'), 'Invoice: PDF is stored outside the application root');
+foreach (['../config.php', '/tmp/stolen.pdf', 'C:\\Windows\\stolen.pdf', '\\\\server\\share\\stolen.pdf', '2026/07/file.pdf:payload', '2026/07/not-a-pdf.txt', "2026/07/bad\0.pdf"] as $badInvoicePath) {
+    $invoicePathRejected = false;
+    try { InvoiceService::pdfAbsolutePath(['pdf_path' => $badInvoicePath]); } catch (RuntimeException $e) { $invoicePathRejected = true; }
+    assert_true($invoicePathRejected, "Invoice: unsafe PDF path rejected ({$badInvoicePath})");
+}
+$legacyInvoicePath = InvoiceService::pdfAbsolutePath(['pdf_path' => 'storage/invoices/2026/07/legacy.pdf']);
+assert_true(str_ends_with(str_replace('\\', '/', $legacyInvoicePath), '/2026/07/legacy.pdf'), 'Invoice: legacy DB path maps inside private invoice root');
 
 // 3. Idempotency — issuing again returns same invoice
 $inv2 = InvoiceService::issue(5001);
@@ -4189,7 +4513,7 @@ MailService::useAdapter(null);
 echo "\n--- Test 50: Backup & Restore ---\n";
 
 // Use a private isolated SQLite + storage root for the backup tests
-$backupRoot = __DIR__ . '/../db/_backup_test';
+$backupRoot = sys_get_temp_dir() . '/bareboneseshop-backup-test';
 if (is_dir($backupRoot)) {
     foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($backupRoot, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST) as $f) {
         $f->isDir() ? @rmdir($f->getPathname()) : @unlink($f->getPathname());
@@ -4244,6 +4568,43 @@ assert_equals($created['sha256'], $actualSha, 'Backup: sha256 matches hash_file'
 // 50.5 — list() returns at least one row
 $listed = BackupService::list();
 assert_greater(count($listed), 0, 'Backup: list() includes the created backup');
+
+$localBackup = new LocalBackupStorage($backupRoot . '/storage/backups');
+assert_true(str_ends_with(str_replace('\\', '/', $localBackup->localPath('2026/04/file.db')), '/2026/04/file.db'), 'LocalBackupStorage: valid relative path is preserved');
+foreach (['', "bad\0name", "bad\tname", '/tmp/file', '\\server\\share', 'D:\\backup.db', '2026/file.db:payload', '2026/../file', '2026\\mixed/file'] as $badPath) {
+    $localRejected = $listRejected = false;
+    try { $localBackup->localPath($badPath); } catch (RuntimeException $e) { $localRejected = true; }
+    if ($badPath !== '') {
+        try { $localBackup->list($badPath); } catch (RuntimeException $e) { $listRejected = true; }
+    } else {
+        $listRejected = is_array($localBackup->list());
+    }
+    assert_true($localRejected, 'LocalBackupStorage: localPath rejects ' . json_encode($badPath));
+    assert_true($listRejected, $badPath === '' ? 'LocalBackupStorage: empty list prefix remains valid' : 'LocalBackupStorage: list prefix rejects ' . json_encode($badPath));
+}
+
+file_put_contents($backupRoot . '/storage/backups/blocked', 'not a directory');
+$backupMkdirFailure = false;
+try { $localBackup->put($liveBackupDb, 'blocked/file.db', []); } catch (RuntimeException $e) { $backupMkdirFailure = true; }
+assert_true($backupMkdirFailure, 'LocalBackupStorage: mkdir failure throws');
+$backupCopyFailure = false;
+try { $localBackup->put($backupRoot . '/missing-source.db', 'copy/file.db', []); } catch (RuntimeException $e) { $backupCopyFailure = true; }
+assert_true($backupCopyFailure, 'LocalBackupStorage: copy failure throws');
+
+$backupSibling = $backupRoot . '/storage/backups-sibling';
+@mkdir($backupSibling);
+$backupLink = $backupRoot . '/storage/backups/escape-link';
+if (@symlink($backupSibling, $backupLink)) {
+    $backupSymlinkPathRejected = $backupSymlinkListRejected = false;
+    try { $localBackup->localPath('escape-link/escaped.db'); } catch (RuntimeException $e) { $backupSymlinkPathRejected = true; }
+    try { $localBackup->list('escape-link'); } catch (RuntimeException $e) { $backupSymlinkListRejected = true; }
+    assert_true($backupSymlinkPathRejected, 'LocalBackupStorage: localPath rejects sibling-prefix symlink escape');
+    assert_true($backupSymlinkListRejected, 'LocalBackupStorage: list rejects symlinked prefix escape');
+    @unlink($backupLink);
+} else {
+    echo "  [SKIP] LocalBackupStorage symlink regressions (symlink unavailable)\n";
+}
+@rmdir($backupSibling);
 
 // 50.6 — second create() within same second gets a -1 suffix
 $created2 = BackupService::create(['label' => 'manual']);
@@ -4307,9 +4668,30 @@ $tampered = false;
 try {
     BackupService::restore($created2['remote_path']);
 } catch (\Throwable $e) {
-    $tampered = (stripos($e->getMessage(), 'sha256 mismatch') !== false);
+    $tampered = preg_match('/(?:size|sha256) mismatch/i', $e->getMessage()) === 1;
 }
-assert_true($tampered, 'Restore: tampered backup rejected with sha256 mismatch');
+assert_true($tampered, 'Restore: tampered backup rejected by metadata verification');
+
+$missingMetaBackup = BackupService::create(['label' => 'manual']);
+$missingMetaPath = $backupRoot . '/storage/backups/' . $missingMetaBackup['remote_path'] . '.meta.json';
+unlink($missingMetaPath);
+$missingMetaRejected = false;
+try { BackupService::restore($missingMetaBackup['remote_path'], ['skip_snapshot' => true]); } catch (RuntimeException $e) {
+    $missingMetaRejected = str_contains($e->getMessage(), 'metadata is required');
+}
+assert_true($missingMetaRejected, 'Restore: backup without metadata is rejected');
+
+$wrongIdentityBackup = BackupService::create(['label' => 'manual']);
+$wrongIdentityPath = $backupRoot . '/storage/backups/' . $wrongIdentityBackup['remote_path'] . '.meta.json';
+$wrongIdentityMeta = json_decode((string)file_get_contents($wrongIdentityPath), true);
+$wrongIdentityMeta['remote_path'] = 'other/backup.db';
+file_put_contents($wrongIdentityPath, json_encode($wrongIdentityMeta));
+$wrongIdentityRejected = false;
+try { BackupService::restore($wrongIdentityBackup['remote_path'], ['skip_snapshot' => true]); } catch (RuntimeException $e) {
+    $wrongIdentityRejected = str_contains($e->getMessage(), 'identity does not match');
+}
+assert_true($wrongIdentityRejected, 'Restore: metadata from another backup is rejected');
+assert_equals(0, count(glob($liveBackupDb . '.restore-*.tmp') ?: []), 'Restore: failed validation leaves no staged temp files');
 
 // 50.11 — Migrator preApplyHook fires once before pending migrations
 $mTmp = $backupRoot . '/_mig';
@@ -4556,6 +4938,10 @@ assert_true(count($preflight['checks']) > 0, 'Staging preflight: emits deploy ch
 assert_true(in_array($preflight['status'] ?? '', ['GO', 'NO-GO'], true), 'Staging preflight: status is GO or NO-GO');
 assert_true(in_array('php cli/migrate.php', $preflight['recommended_commands'] ?? [], true), 'Staging preflight: recommends migrations');
 assert_true(in_array('php cli/cache-warm.php', $preflight['recommended_commands'] ?? [], true), 'Staging preflight: recommends cache warm');
+$preflightNames = array_column($preflight['checks'], 'name');
+foreach (['sqlite_path', 'jobs_dir', 'private_cache_dir', 'invoice_storage_dir', 'backup_storage_dir', 'backup_log_file', 'gdpr_salt_file'] as $privateCheck) {
+    assert_true(in_array($privateCheck, $preflightNames, true), "Staging preflight: checks {$privateCheck}");
+}
 
 // ============================================================
 // TEST 54: VAT — InvoiceService scenario + breakdown grouping
@@ -4715,9 +5101,13 @@ $mockRoutable = (($prodCfg['adapters']['payment'] ?? '') === 'MockPayment' || !e
 assert_true(!$mockRoutable, 'P0 #4: webhook_payment provider=mock not routable in production config');
 
 // 55.5 — Bug #4: MockPayment signature is a real secret comparison
-$mpSig = new MockPayment(['mock_webhook_secret' => 's3cret']);
-assert_true($mpSig->verifySignature('payload', 's3cret'), 'P0 #4: correct webhook secret accepted');
-assert_true(!$mpSig->verifySignature('payload', 'wrong-sig'), 'P0 #4: wrong webhook secret rejected');
+$mpSig = new MockPayment(['mock_webhook_secret' => 'test-mock-secret-123']);
+$mpPayloadSig = hash_hmac('sha256', 'payload', 'test-mock-secret-123');
+assert_true(!(new MockPayment([]))->verifySignature('payload', hash_hmac('sha256', 'payload', 'mock_sig')), 'G3: predictable default mock signature is rejected');
+assert_true(!(new MockPayment(['mock_webhook_secret' => 'short']))->verifySignature('payload', hash_hmac('sha256', 'payload', 'short')), 'G3: weak mock webhook secret fails closed');
+assert_true($mpSig->verifySignature('payload', $mpPayloadSig), 'P0 #4: correct raw-payload HMAC accepted');
+assert_true(!$mpSig->verifySignature('tampered', $mpPayloadSig), 'G3: mock signature is bound to the raw payload');
+assert_true(!$mpSig->verifySignature('payload', 'wrong-sig'), 'P0 #4: wrong webhook signature rejected');
 assert_true(!$mpSig->verifySignature('payload', ''), 'P0 #4: empty webhook signature rejected');
 
 echo "\n--- VAT test suite complete ---\n";
@@ -5116,6 +5506,16 @@ assert_equals('account.php', Security::safeLocalPath("acc\r\nSet-Cookie: x", 'ac
 assert_equals('account.php', Security::safeLocalPath('', 'account.php'), 'F3: empty value falls back');
 assert_equals('account.php?p=privacy', Security::safeLocalPath('account.php?p=privacy', 'fb'), 'F3: same-site relative path allowed');
 assert_equals('/account?x=1', Security::safeLocalPath('/account?x=1', 'fb'), 'F3: single-leading-slash local path allowed');
+assert_equals('https://shop.example/base', Security::appUrl(['app_url' => 'https://shop.example/base/']), 'G3: configured app_url is normalized');
+foreach (['', '//evil.example', 'javascript:alert(1)', 'https://user:pass@shop.example', 'https://shop.example/?next=evil', "https://shop.example\r\n.evil"] as $badAppUrl) {
+    $appUrlRejected = false;
+    try {
+        Security::appUrl(['app_url' => $badAppUrl]);
+    } catch (\RuntimeException $e) {
+        $appUrlRejected = true;
+    }
+    assert_true($appUrlRejected, 'G3: invalid app_url rejected: ' . json_encode($badAppUrl));
+}
 
 // --- F4: Orders::create rejects qty<=0 / negative price; stock never inflates.
 $f4Before = (int)$pdo->query("SELECT stock FROM products WHERE id = " . (int)$testProduct['id'])->fetchColumn();
@@ -5402,7 +5802,12 @@ assert_true(!$merchantClaim->invoke(null, $digitalOrderId, 'stale_test', 'mercha
 Orders::setPaymentId($digitalOrderId, 'pi_refund_progression');
 onChargeRefunded(['id' => 'ch_refund_progression', 'payment_intent' => 'pi_refund_progression', 'amount_refunded' => 400]);
 assert_equals('partially_refunded', (string)Orders::byId($digitalOrderId)['payment_status'], 'Stripe refund: first cumulative amount records partial refund');
+assert_equals(400, PaymentService::refundedAmount($digitalOrderId), 'Stripe refund: first cumulative event records its delta');
+onChargeRefunded(['id' => 'ch_refund_progression', 'payment_intent' => 'pi_refund_progression', 'amount_refunded' => 700]);
+assert_equals('partially_refunded', (string)Orders::byId($digitalOrderId)['payment_status'], 'Stripe refund: increasing partial cumulative amount preserves partial status');
+assert_equals(700, PaymentService::refundedAmount($digitalOrderId), 'Stripe refund: repeated partial event records only the cumulative delta');
 onChargeRefunded(['id' => 'ch_refund_progression', 'payment_intent' => 'pi_refund_progression', 'amount_refunded' => 999]);
+assert_equals(999, PaymentService::refundedAmount($digitalOrderId), 'Stripe refund: final cumulative event totals exactly the order refund');
 $fullyRefundedOrder = Orders::byId($digitalOrderId);
 assert_equals('refunded', (string)$fullyRefundedOrder['payment_status'], 'Stripe refund: later full amount uses a distinct idempotency key');
 assert_equals('refunded', (string)$fullyRefundedOrder['status'], 'Stripe refund: full cumulative refund closes the order');
@@ -5410,6 +5815,120 @@ assert_equals('refunded', (string)$fullyRefundedOrder['status'], 'Stripe refund:
 DigitalDelivery::setConfigForTesting(null);
 @unlink($digitalDir . '/guide.pdf');
 @rmdir($digitalDir);
+
+// ============================================================
+// TEST: G6 remaining security findings
+// ============================================================
+echo "\n--- G6: SSRF, rich HTML, refunds, RBAC, and error handling ---\n";
+
+$unsafeRichHtml = '<div class="layout"><p onclick="steal()">Hello <strong>world</strong>'
+    . '<script>alert(1)</script><img src="https://tracker.example/pixel">'
+    . '<a href="jav&#x61;script:alert(1)" style="color:red">bad</a>'
+    . '<a href="https://docs.example/path" title="Docs">safe</a></p>'
+    . '<form action="https://evil.example"><input name="secret"></form></div>';
+$safeRichHtml = Security::sanitizeRichHtml($unsafeRichHtml);
+assert_true(str_contains($safeRichHtml, '<p>') && str_contains($safeRichHtml, '<strong>world</strong>'), 'G6 rich HTML: allowed formatting survives');
+foreach (['<script', '<img', '<form', '<input', 'onclick', 'style=', 'javascript:'] as $blockedHtml) {
+    assert_true(!str_contains(strtolower($safeRichHtml), $blockedHtml), "G6 rich HTML: {$blockedHtml} is removed");
+}
+assert_true(str_contains($safeRichHtml, 'href="https://docs.example/path"'), 'G6 rich HTML: safe HTTPS links survive');
+assert_true(str_contains($securitySrc, "form-action 'self'"), 'G6 CSP: form submissions are restricted to self');
+assert_true(str_contains($securitySrc, "frame-ancestors 'none'"), 'G6 CSP: framing is denied in CSP');
+
+$feedEndpoint = new ReflectionMethod(FeedImport::class, 'publicFeedEndpoint');
+foreach ([
+    'file:///etc/passwd',
+    'gopher://127.0.0.1/',
+    'http://localhost/feed.xml',
+    'http://127.0.0.1/feed.xml',
+    'http://10.0.0.1/feed.xml',
+    'http://169.254.169.254/latest/meta-data/',
+    'http://[::1]/feed.xml',
+    'http://[fe80::1]/feed.xml',
+    'http://[64:ff9b::7f00:1]/feed.xml',
+    'http://[64:ff9b::a9fe:a9fe]/latest/meta-data/',
+    'http://[64:ff9b:1::7f00:1]/feed.xml',
+    'http://2130706433/feed.xml',
+    'http://127.0.0.1:8080/feed.xml',
+    'http://user:pass@93.184.216.34/feed.xml',
+] as $blockedFeedUrl) {
+    assert_true($feedEndpoint->invoke(null, $blockedFeedUrl) === null, "G6 feed SSRF: blocks {$blockedFeedUrl}");
+}
+$publicFeed = $feedEndpoint->invoke(null, 'https://93.184.216.34/feed.xml');
+assert_equals('93.184.216.34', (string)($publicFeed['ip'] ?? ''), 'G6 feed SSRF: accepts a literal public HTTPS endpoint');
+$feedSourceG6 = file_get_contents(__DIR__ . '/../src/FeedImport.php') ?: '';
+assert_true(str_contains($feedSourceG6, 'CURLOPT_RESOLVE'), 'G6 feed SSRF: verified DNS result is pinned for the connection');
+assert_true(str_contains($feedSourceG6, "CURLOPT_PROXY => ''") && str_contains($feedSourceG6, "CURLOPT_NOPROXY => '*'"), 'G6 feed SSRF: ambient proxies cannot bypass DNS pinning');
+assert_true(str_contains($feedSourceG6, 'CURLOPT_FOLLOWLOCATION => false'), 'G6 feed SSRF: redirects cannot pivot to a private target');
+assert_true(str_contains($feedSourceG6, '$maxBytes = 10 * 1024 * 1024'), 'G6 feed SSRF: response size is bounded');
+
+$g6RefundOrderId = Orders::create([[
+    'product_id' => 9001, 'variant_id' => null, 'qty' => 1, 'price' => 999,
+    'sku' => 'DIGI-GUIDE', 'name' => 'Digital Guide', 'variant_name' => '',
+]], [
+    'name' => 'G6 Refund Buyer', 'email' => 'g6-refund@example.com', 'currency' => 'eur',
+    'shipping_cost' => 0, 'tax_amount' => 0,
+], 'card');
+PaymentService::transitionPayment($g6RefundOrderId, 'paid', 'payment.captured', 999, 'g6_refund_paid');
+$g6RefundTotal = (int)Orders::byId($g6RefundOrderId)['total'];
+assert_equals($g6RefundTotal, PaymentService::refundableBalance($g6RefundOrderId), 'G6 refund: fully captured order exposes its server-side balance');
+$g6OverRefundRejected = false;
+try {
+    PaymentService::requestRefund($g6RefundOrderId, $g6RefundTotal + 1, 'g6_refund_over_limit');
+} catch (LogicException $e) {
+    $g6OverRefundRejected = true;
+}
+assert_true($g6OverRefundRejected, 'G6 refund: amount above balance is rejected inside the transaction');
+assert_equals('paid', (string)Orders::byId($g6RefundOrderId)['payment_status'], 'G6 refund: rejected amount leaves payment state unchanged');
+PaymentService::requestRefund($g6RefundOrderId, 400, 'g6_refund_pending', ['actor' => 'test-admin', 'amount' => 400]);
+assert_equals($g6RefundTotal, PaymentService::refundableBalance($g6RefundOrderId), 'G6 refund: pending request is not misreported as completed refund');
+$g6SecondClaimRejected = false;
+try {
+    PaymentService::requestRefund($g6RefundOrderId, 100, 'g6_refund_second_claim');
+} catch (LogicException $e) {
+    $g6SecondClaimRejected = true;
+}
+assert_true($g6SecondClaimRejected, 'G6 refund: a second request cannot claim an already-pending payment');
+assert_equals(1, (int)$pdo->query("SELECT COUNT(*) FROM payment_transactions WHERE order_id = {$g6RefundOrderId} AND status = 'refund_pending'")->fetchColumn(), 'G6 refund: failed second claim creates no extra refund event');
+PaymentService::transitionPayment($g6RefundOrderId, 'partially_refunded', 'refund.partial_succeeded', 400, 'g6_refund_partial');
+assert_equals($g6RefundTotal - 400, PaymentService::refundableBalance($g6RefundOrderId), 'G6 refund: successful partial refund reduces server-side balance');
+$adminSourceG6 = file_get_contents(__DIR__ . '/../admin.php') ?: '';
+assert_true(str_contains($adminSourceG6, '$amount > $refundableBalance'), 'G6 refund: handler rejects an amount above remaining balance');
+assert_true(str_contains($adminSourceG6, 'PaymentService::requestRefund'), 'G6 refund: admin uses the atomic refund claim');
+assert_true(str_contains($adminSourceG6, "['refund_pending', 'partially_refunded', 'refunded']"), 'G6 refund: generic payment transition blocks every refund status');
+assert_true(str_contains($adminSourceG6, "\$reason === ''"), 'G6 refund: server requires a non-empty audit reason');
+assert_true(str_contains($adminSourceG6, "adminCan('customers.edit')"), 'G6 RBAC: customer status control is hidden from view-only roles');
+assert_true(str_contains($adminSourceG6, "adminRequire('customers.edit')"), 'G6 RBAC: customer status mutation requires edit permission server-side');
+$paymentSourceG7 = file_get_contents(__DIR__ . '/../src/PaymentService.php') ?: '';
+assert_true(!str_contains($paymentSourceG7, '->quote('), 'G7 SQL: payment webhook order lookups never interpolate quoted values');
+assert_true(substr_count($paymentSourceG7, 'payment_id = :payment_id') >= 2 && str_contains($paymentSourceG7, 'order_number = :order_number'), 'G7 SQL: Stripe and PayU fallback identifiers use bound parameters');
+
+$accountSourceG6 = file_get_contents(__DIR__ . '/../account.php') ?: '';
+assert_true(str_contains($accountSourceG6, 'GDPR erase failed [{$errorId}]'), 'G6 errors: erase failure details are logged with a correlation ID');
+assert_true(!str_contains($accountSourceG6, "gdpr_erase_failed') . ': ' . \$ex->getMessage()"), 'G6 errors: erase exception detail is not rendered to the customer');
+$importSourceG6 = file_get_contents(__DIR__ . '/../src/Import.php') ?: '';
+$pageSourceG6 = file_get_contents(__DIR__ . '/../page.php') ?: '';
+$apiSourceG6 = file_get_contents(__DIR__ . '/../api.php') ?: '';
+assert_true(substr_count($adminSourceG6, 'Security::sanitizeRichHtml') >= 2, 'G6 rich HTML: CMS and admin product writes are sanitized');
+assert_true(str_contains($importSourceG6, "\$data['description'] = Security::sanitizeRichHtml"), 'G6 rich HTML: product imports sanitize descriptions');
+assert_true(str_contains($pageSourceG6, 'Security::sanitizeRichHtml'), 'G6 rich HTML: historical CMS content is sanitized on render');
+assert_true(str_contains($apiSourceG6, 'Security::sanitizeRichHtml'), 'G6 rich HTML: CMS API returns sanitized content');
+$scriptBreakout = JsonLd::render(['name' => '</script><img src=x onerror=alert(1)>'], 'g6-nonce');
+assert_equals(1, substr_count(strtolower($scriptBreakout), '</script>'), 'G6 JSON embed: attacker data cannot terminate the JSON-LD script');
+assert_true(!str_contains(strtolower($scriptBreakout), '<img'), 'G6 JSON embed: attacker HTML stays hex-escaped inside JSON');
+$productSourceG6 = file_get_contents(__DIR__ . '/../product.php') ?: '';
+$jsonLdSourceG6 = file_get_contents(__DIR__ . '/../src/JsonLd.php') ?: '';
+assert_true(substr_count($adminSourceG6, 'JSON_HEX_TAG') >= 4, 'G6 JSON embed: admin prefill and dynamic maps hex-escape tag delimiters');
+assert_true(str_contains($productSourceG6, 'JSON_HEX_TAG'), 'G6 JSON embed: product JSON-LD hex-escapes tag delimiters');
+assert_true(str_contains($jsonLdSourceG6, 'JSON_HEX_TAG'), 'G6 JSON embed: shared JSON-LD renderer hex-escapes tag delimiters');
+
+[$g6EraseRegistered, $g6EraseCustomerId] = Customers::register('g6-erase@example.com', 'StrongPass!123', 'G6 Erase');
+assert_true($g6EraseRegistered, 'G6 GDPR: audit-failure fixture customer is created');
+$g6EraseResult = GdprService::anonymizeCustomer((int)$g6EraseCustomerId, 'g6-test');
+assert_equals('anonymized', (string)($g6EraseResult['status'] ?? ''), 'G6 GDPR: post-commit audit failure does not report erasure as failed');
+assert_equals('anonymized', (string)(Customers::byId((int)$g6EraseCustomerId)['status'] ?? ''), 'G6 GDPR: customer remains anonymized after audit logging failure');
+$gdprSourceG6 = file_get_contents(__DIR__ . '/../src/GdprService.php') ?: '';
+assert_true(str_contains($gdprSourceG6, 'GDPR erase audit failed [{$errorId}]'), 'G6 GDPR: post-commit audit failure is logged with a correlation ID');
 
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
