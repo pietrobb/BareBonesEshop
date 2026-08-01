@@ -21,7 +21,7 @@ class PaymentService {
     /**
      * Return available checkout payment methods for country/cart/shipping context.
      */
-    public static function availableMethods(string $country, string $currency, int $amount, string $shippingMethod = ''): array {
+    public static function availableMethods(string $country, string $currency, int $amount, string $shippingMethod = '', ?int $customerId = null): array {
         $country = strtoupper(trim($country ?: 'SK'));
         $currency = strtolower(trim($currency ?: 'eur'));
         $amount = max(0, $amount);
@@ -61,13 +61,19 @@ class PaymentService {
 
         $methods = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            if (($row['service_type'] ?? '') === 'invoice') {
+                if ($customerId === null || !Customers::canInvoicePurchase($customerId, $amount)) continue;
+                $profile = Customers::commerceProfile($customerId);
+                $row['payment_terms_days'] = (int)($profile['payment_terms_days'] ?? 0);
+                $row['company_id'] = (int)($profile['company_id'] ?? 0);
+            }
             $methods[] = self::methodRowToQuote($row, $amount, $currency);
         }
         return $methods;
     }
 
-    public static function selectMethod(string $methodCode, string $country, string $currency, int $amount, string $shippingMethod = ''): ?array {
-        foreach (self::availableMethods($country, $currency, $amount, $shippingMethod) as $method) {
+    public static function selectMethod(string $methodCode, string $country, string $currency, int $amount, string $shippingMethod = '', ?int $customerId = null): ?array {
+        foreach (self::availableMethods($country, $currency, $amount, $shippingMethod, $customerId) as $method) {
             if (($method['code'] ?? '') === $methodCode) return $method;
         }
         return null;
@@ -548,6 +554,8 @@ class PaymentService {
             'fee' => $fee,
             'currency' => $currency,
             'requires_online' => !empty($row['requires_online']),
+            'payment_terms_days' => isset($row['payment_terms_days']) ? (int)$row['payment_terms_days'] : null,
+            'company_id' => isset($row['company_id']) ? (int)$row['company_id'] : null,
         ];
     }
 

@@ -118,6 +118,31 @@ eight attempts. Endpoint URLs and secrets live only in deployment configuration.
 
 ---
 
+## Catalog pricing, promotions, and B2B
+
+Migration `20260801190000_catalog_pricing_b2b` preserves each legacy
+`products.category_id` as the primary assignment and adds brands, additional
+categories, GTIN/MPN, integer-cent cost, variant media, dimensions, availability,
+store/currency/group price lists, and time-bounded promotions. Price-list and
+promotion choices are copied into each cart/order item's `_pricing` snapshot; the
+existing financial snapshot remains the authority for totals and tax.
+
+DB price lists take precedence over the legacy `pricing.json` group fallback.
+Promotion priority is deterministic; `exclusive` stops after the first applied
+rule and `stack` continues in priority order. Supported cart actions include fixed
+or basis-point discounts, free shipping, buy-X-get-Y, and explicit gift
+entitlements. Gift rules never silently decrement stock: fulfillment must turn the
+entitlement into a reviewed order line.
+
+B2B invoice purchase is fail-closed. The `invoice` method is offered only to a
+logged-in customer linked to an active, approved company with invoice purchase
+enabled, positive payment terms, and enough remaining integer-cent credit. Company,
+group, price-list, and customer resolution is always bound to the active store;
+company VAT validation remains an input to the canonical VAT snapshot rather than
+a substitute for legal review.
+
+---
+
 ## Migrations
 
 Schema changes are **forward-only**, file-based, and checksum-verified. There is

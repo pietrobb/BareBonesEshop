@@ -63,8 +63,10 @@ class Products {
         $offset = ($page - 1) * $perPage;
 
         // Base conditions
-        $where = "p.category_id = :cat AND p.store_id = :store AND p.status = 'active'";
-        $params = [':cat' => $categoryId, ':store' => StoreContext::current()->catalogId()];
+        $where = "(p.category_id = :cat OR EXISTS (
+            SELECT 1 FROM product_categories pc WHERE pc.product_id = p.id AND pc.category_id = :cat_link
+        )) AND p.store_id = :store AND p.status = 'active'";
+        $params = [':cat' => $categoryId, ':cat_link' => $categoryId, ':store' => StoreContext::current()->catalogId()];
 
         // Price range
         if ($priceMin !== null) {
@@ -172,14 +174,19 @@ class Products {
             default      => 'p.price ASC',
         };
 
+        $categoryWhere = "(p.category_id IN ({$placeholders}) OR EXISTS (
+            SELECT 1 FROM product_categories pc WHERE pc.product_id = p.id AND pc.category_id IN ({$placeholders})
+        ))";
+        $categoryParams = [...$catIds, ...$catIds];
+
         // Count
-        $stmt = $db->prepare("SELECT COUNT(*) FROM products p WHERE p.category_id IN ({$placeholders}) AND p.store_id = ? AND p.status = 'active'");
-        $stmt->execute([...$catIds, StoreContext::current()->catalogId()]);
+        $stmt = $db->prepare("SELECT COUNT(*) FROM products p WHERE {$categoryWhere} AND p.store_id = ? AND p.status = 'active'");
+        $stmt->execute([...$categoryParams, StoreContext::current()->catalogId()]);
         $total = (int)$stmt->fetchColumn();
 
         // Fetch
-        $stmt = $db->prepare("SELECT p.* FROM products p WHERE p.category_id IN ({$placeholders}) AND p.store_id = ? AND p.status = 'active' ORDER BY {$orderBy} LIMIT ? OFFSET ?");
-        $stmt->execute([...$catIds, StoreContext::current()->catalogId(), $perPage, $offset]);
+        $stmt = $db->prepare("SELECT p.* FROM products p WHERE {$categoryWhere} AND p.store_id = ? AND p.status = 'active' ORDER BY {$orderBy} LIMIT ? OFFSET ?");
+        $stmt->execute([...$categoryParams, StoreContext::current()->catalogId(), $perPage, $offset]);
         $products = $stmt->fetchAll();
 
         return [
@@ -198,6 +205,23 @@ class Products {
         $stmt = Db::get()->prepare("SELECT v.* FROM variants v JOIN products p ON p.id = v.product_id WHERE v.product_id = :pid AND p.store_id = :store ORDER BY v.sort_order, v.id");
         $stmt->execute([':pid' => $productId, ':store' => StoreContext::current()->catalogId()]);
         return $stmt->fetchAll();
+    }
+
+    /** All category assignments, with the legacy primary category included. */
+    public static function categoryIds(int $productId): array {
+        try {
+            $stmt = Db::get()->prepare("SELECT DISTINCT pc.category_id
+                FROM product_categories pc
+                JOIN products p ON p.id = pc.product_id
+                JOIN categories c ON c.id = pc.category_id AND c.store_id = p.store_id
+                WHERE pc.product_id = :product AND p.store_id = :store
+                ORDER BY pc.is_primary DESC, pc.sort_order, pc.category_id");
+            $stmt->execute([':product' => $productId, ':store' => StoreContext::current()->catalogId()]);
+            return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        } catch (PDOException $e) {
+            $product = self::byId($productId);
+            return $product && !empty($product['category_id']) ? [(int)$product['category_id']] : [];
+        }
     }
 
     /**
@@ -351,9 +375,11 @@ class Products {
 
         $ph = implode(',', array_fill(0, count($categoryIds), '?'));
 
-        // Base query: products in these categories
-        $where = "p.category_id IN ({$ph}) AND p.store_id = ? AND p.status = 'active'";
-        $whereParams = [...$categoryIds, StoreContext::current()->catalogId()];
+        // Base query: primary or additional category assignments
+        $where = "(p.category_id IN ({$ph}) OR EXISTS (
+            SELECT 1 FROM product_categories pc WHERE pc.product_id = p.id AND pc.category_id IN ({$ph})
+        )) AND p.store_id = ? AND p.status = 'active'";
+        $whereParams = [...$categoryIds, ...$categoryIds, StoreContext::current()->catalogId()];
 
         // Price filters
         if ($priceMin !== null) { $where .= " AND p.price >= ?"; $whereParams[] = $priceMin; }
@@ -412,10 +438,12 @@ class Products {
         $filterSql = "SELECT DISTINCT ps.criteria_name, ps.criteria_value, ps.numeric_val
             FROM product_specifications ps
             INNER JOIN products p ON p.id = ps.product_id
-            WHERE p.category_id IN ({$ph}) AND p.store_id = ? AND p.status = 'active'
+            WHERE (p.category_id IN ({$ph}) OR EXISTS (
+                SELECT 1 FROM product_categories pc WHERE pc.product_id = p.id AND pc.category_id IN ({$ph})
+            )) AND p.store_id = ? AND p.status = 'active'
             ORDER BY ps.criteria_name, ps.criteria_value";
         $fStmt = $db->prepare($filterSql);
-        $fStmt->execute([...$categoryIds, StoreContext::current()->catalogId()]);
+        $fStmt->execute([...$categoryIds, ...$categoryIds, StoreContext::current()->catalogId()]);
 
         $filters = [];
         foreach ($fStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
@@ -436,6 +464,17 @@ class Products {
         }
 
         return ['products' => $products, 'total' => $total, 'pages' => $pages, 'filters' => $filters];
+    }
+
+    /** Deterministic margin in integer cents and basis points. */
+    public static function margin(int $salePrice, int $costPrice): array {
+        $salePrice = max(0, $salePrice);
+        $costPrice = max(0, $costPrice);
+        $amount = $salePrice - $costPrice;
+        return [
+            'amount' => $amount,
+            'bps' => $salePrice === 0 ? 0 : intdiv($amount * 10000, $salePrice),
+        ];
     }
 
     /**
@@ -501,10 +540,14 @@ class Products {
         $product['attrs'] = json_decode($product['attrs'] ?? '{}', true);
         $product['tags'] = json_decode($product['tags'] ?? '[]', true);
 
-        // Apply DB promotions (before formatting)
-        if (class_exists('Promotions')) {
-            $product = Promotions::applyToProduct($product);
+        $product['category_ids'] = self::categoryIds((int)($product['id'] ?? 0));
+        if (class_exists('Pricing')) {
+            $product = Pricing::applyPriceList($product, null, 1, self::sessionCustomerId());
         }
+        if (class_exists('Promotions')) {
+            $product = Promotions::applyToProduct($product, 1, self::sessionCustomerId());
+        }
+        unset($product['cost_price']);
 
         $currency = $product['currency'] ?? null;
         $product['price_formatted'] = I18n::price($product['price'], $currency);
@@ -549,6 +592,11 @@ class Products {
             $map[(int)$r['id']] = ['slug' => $r['slug'], 'path' => $r['path']];
         }
         return $map;
+    }
+
+    private static function sessionCustomerId(): ?int {
+        $id = (int)($_SESSION['customer_id'] ?? 0);
+        return $id > 0 ? $id : null;
     }
 
     private static function normalizeToken(string $s): string {

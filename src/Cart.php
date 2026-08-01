@@ -66,8 +66,11 @@ class Cart {
         $products = [];
         if (!empty($productIds)) {
             $ph = implode(',', array_fill(0, count($productIds), '?'));
-            $stmt = $db->prepare("SELECT id, name, slug, images, price, sku, stock, currency, vat_class, product_type FROM products WHERE id IN ({$ph}) AND status = 'active'");
-            $stmt->execute(array_values($productIds));
+            $stmt = $db->prepare("SELECT id, name, slug, images, price, compare_price, sku, stock, currency,
+                    vat_class, product_type, category_id, brand_id, weight_g, length_mm, width_mm, height_mm,
+                    availability, available_from
+                FROM products WHERE id IN ({$ph}) AND store_id = ? AND status = 'active'");
+            $stmt->execute([...array_values($productIds), StoreContext::current()->catalogId()]);
             while ($row = $stmt->fetch()) $products[(int)$row['id']] = $row;
         }
 
@@ -75,8 +78,13 @@ class Cart {
         $variants = [];
         if (!empty($variantIds)) {
             $ph = implode(',', array_fill(0, count($variantIds), '?'));
-            $stmt = $db->prepare("SELECT v.id, v.product_id, v.sku, v.name, v.stock, v.price_delta, v.price_absolute, v.availability FROM variants v WHERE v.id IN ({$ph})");
-            $stmt->execute(array_values($variantIds));
+            $stmt = $db->prepare("SELECT v.id, v.product_id, v.sku, v.name, v.stock, v.price_delta,
+                    v.price_absolute, v.availability, v.available_from, v.media, v.weight_g,
+                    v.length_mm, v.width_mm, v.height_mm
+                FROM variants v
+                JOIN products p ON p.id = v.product_id AND p.store_id = ?
+                WHERE v.id IN ({$ph})");
+            $stmt->execute([StoreContext::current()->catalogId(), ...array_values($variantIds)]);
             while ($row = $stmt->fetch()) $variants[(int)$row['id']] = $row;
         }
 
@@ -88,7 +96,16 @@ class Cart {
             $product = $products[$item['product_id']] ?? null;
             if (!$product) { unset($_SESSION['cart'][$key]); continue; }
             $isDigital = VariantAvailability::isDigitalType((string)($product['product_type'] ?? ''));
-            $availability = VariantAvailability::ACTIVE;
+            $availability = (string)($product['availability'] ?? VariantAvailability::ACTIVE);
+            if ($availability === VariantAvailability::ACTIVE
+                && !empty($product['available_from'])
+                && strtotime((string)$product['available_from']) > time()) {
+                $availability = VariantAvailability::COMING_SOON;
+            }
+            $weightG = (int)($product['weight_g'] ?? 0);
+            $lengthMm = (int)($product['length_mm'] ?? 0);
+            $widthMm = (int)($product['width_mm'] ?? 0);
+            $heightMm = (int)($product['height_mm'] ?? 0);
 
             if (!empty($item['variant_id'])) {
                 $variant = $variants[$item['variant_id']] ?? null;
@@ -100,6 +117,15 @@ class Cart {
                 $variantName = $variant['name'];
                 $stock = (int)$variant['stock'];
                 $availability = (string)($variant['availability'] ?? VariantAvailability::ACTIVE);
+                if ($availability === VariantAvailability::ACTIVE
+                    && !empty($variant['available_from'])
+                    && strtotime((string)$variant['available_from']) > time()) {
+                    $availability = VariantAvailability::COMING_SOON;
+                }
+                $weightG = (int)($variant['weight_g'] ?? 0) > 0 ? (int)$variant['weight_g'] : $weightG;
+                $lengthMm = (int)($variant['length_mm'] ?? 0) > 0 ? (int)$variant['length_mm'] : $lengthMm;
+                $widthMm = (int)($variant['width_mm'] ?? 0) > 0 ? (int)$variant['width_mm'] : $widthMm;
+                $heightMm = (int)($variant['height_mm'] ?? 0) > 0 ? (int)$variant['height_mm'] : $heightMm;
             } else {
                 $price = (int)$product['price'];
                 $sku = $product['sku'];
@@ -119,6 +145,26 @@ class Cart {
             if ($isDigital && (int)$item['qty'] !== 1) $_SESSION['cart'][$key]['qty'] = 1;
             $available = $availability === VariantAvailability::ACTIVE && ($isDigital || $qty > 0);
             if (!$available) $qty = (int)$item['qty']; // preserve requested qty for display
+
+            $customerId = (int)($_SESSION['customer_id'] ?? 0);
+            $pricingProduct = $product;
+            $pricingProduct['price'] = $price;
+            $pricingProduct = Pricing::applyPriceList(
+                $pricingProduct,
+                !empty($item['variant_id']) ? (int)$item['variant_id'] : null,
+                max(1, $qty),
+                $customerId > 0 ? $customerId : null
+            );
+            $pricingProduct = Promotions::applyToProduct(
+                $pricingProduct,
+                max(1, $qty),
+                $customerId > 0 ? $customerId : null
+            );
+            $price = (int)$pricingProduct['price'];
+            $pricingSnapshot = array_filter([
+                'price_list' => $pricingProduct['price_list_snapshot'] ?? null,
+                'promotions' => $pricingProduct['promotion_snapshot'] ?? null,
+            ], static fn(mixed $value): bool => $value !== null);
 
             $total = $available ? $price * $qty : 0;
             // Only add to subtotal when currency matches — prevents mixed-currency totals
@@ -145,6 +191,11 @@ class Cart {
                 'stock'            => $stock,
                 'product_type'     => $product['product_type'] ?? 'simple',
                 'availability'     => $availability,
+                'weight_g'         => $weightG,
+                'length_mm'        => $lengthMm,
+                'width_mm'         => $widthMm,
+                'height_mm'        => $heightMm,
+                'attrs'            => $pricingSnapshot === [] ? [] : ['_pricing' => $pricingSnapshot],
                 'currency'         => $currency,
                 'available'        => $available,
                 'currency_mismatch' => $currencyMismatch,

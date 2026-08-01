@@ -32,8 +32,8 @@ class Customers {
             return [false, null, 'weak_password'];
         }
         $db = Db::get();
-        $stmt = $db->prepare("SELECT id FROM customers WHERE email = ?");
-        $stmt->execute([$email]);
+        $stmt = $db->prepare("SELECT id FROM customers WHERE email = ? AND store_id = ?");
+        $stmt->execute([$email, StoreContext::current()->id()]);
         if ($stmt->fetchColumn()) {
             return [false, null, 'email_taken'];
         }
@@ -41,12 +41,12 @@ class Customers {
         $locale = $extras['locale'] ?? I18n::locale();
         $phone = trim($extras['phone'] ?? '');
         $ins = $db->prepare(
-            "INSERT INTO customers (email, password_hash, name, phone, locale, status)
-             VALUES (?, ?, ?, ?, ?, 'active')"
+            "INSERT INTO customers (email, password_hash, name, phone, locale, status, store_id)
+             VALUES (?, ?, ?, ?, ?, 'active', ?)"
         );
         $db->beginTransaction();
         try {
-            $ins->execute([$email, $hash, trim($name), $phone, $locale]);
+            $ins->execute([$email, $hash, trim($name), $phone, $locale, StoreContext::current()->id()]);
             $id = (int)$db->lastInsertId();
             Outbox::record('customer.created', 'customer', $id, [
                 'customer_id' => $id,
@@ -77,8 +77,8 @@ class Customers {
     public static function login(string $email, string $password): array {
         $email = strtolower(trim($email));
         $db = Db::get();
-        $stmt = $db->prepare("SELECT * FROM customers WHERE email = ?");
-        $stmt->execute([$email]);
+        $stmt = $db->prepare("SELECT * FROM customers WHERE email = ? AND store_id = ?");
+        $stmt->execute([$email, StoreContext::current()->id()]);
         $c = $stmt->fetch(PDO::FETCH_ASSOC);
         if (self::$dummyPasswordHash === null) {
             self::$dummyPasswordHash = password_hash(bin2hex(random_bytes(16)), PASSWORD_BCRYPT, ['cost' => self::BCRYPT_COST]);
@@ -90,8 +90,8 @@ class Customers {
         // Rehash if PHP bumped defaults
         if (password_needs_rehash($c['password_hash'], PASSWORD_BCRYPT, ['cost' => self::BCRYPT_COST])) {
             $new = password_hash($password, PASSWORD_BCRYPT, ['cost' => self::BCRYPT_COST]);
-            $db->prepare("UPDATE customers SET password_hash = ? WHERE id = ?")
-               ->execute([$new, $c['id']]);
+            $db->prepare("UPDATE customers SET password_hash = ? WHERE id = ? AND store_id = ?")
+               ->execute([$new, $c['id'], StoreContext::current()->id()]);
         }
         // Session setup
         Security::sessionStart();
@@ -103,8 +103,8 @@ class Customers {
         $_SESSION['customer_auth_hash'] = hash('sha256', (string)$c['password_hash']);
         $_SESSION['customer_last_seen'] = time();
         $db->prepare("UPDATE customers SET last_login_at = " .
-            (Db::isSqlite() ? "datetime('now')" : "NOW()") . " WHERE id = ?")
-           ->execute([$c['id']]);
+            (Db::isSqlite() ? "datetime('now')" : "NOW()") . " WHERE id = ? AND store_id = ?")
+           ->execute([$c['id'], StoreContext::current()->id()]);
         unset($c['password_hash']);
         return [true, $c, null];
     }
@@ -130,8 +130,8 @@ class Customers {
             if ($id > 0) self::logout();
             return null;
         }
-        $stmt = Db::get()->prepare("SELECT status, password_hash FROM customers WHERE id = ?");
-        $stmt->execute([$id]);
+        $stmt = Db::get()->prepare("SELECT status, password_hash FROM customers WHERE id = ? AND store_id = ?");
+        $stmt->execute([$id, StoreContext::current()->id()]);
         $auth = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$auth || ($auth['status'] ?? '') !== 'active'
             || !hash_equals(hash('sha256', (string)$auth['password_hash']), $sessionHash)) {
@@ -150,9 +150,9 @@ class Customers {
         $stmt = Db::get()->prepare(
             "SELECT id, email, name, phone, locale, status, email_verified_at,
                     last_login_at, created_at, updated_at
-             FROM customers WHERE id = ?"
+             FROM customers WHERE id = ? AND store_id = ?"
         );
-        $stmt->execute([$id]);
+        $stmt->execute([$id, StoreContext::current()->id()]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row ?: null;
     }
@@ -161,9 +161,9 @@ class Customers {
         $stmt = Db::get()->prepare(
             "SELECT id, email, name, phone, locale, status, email_verified_at,
                     last_login_at, created_at, updated_at
-             FROM customers WHERE email = ?"
+             FROM customers WHERE email = ? AND store_id = ?"
         );
-        $stmt->execute([strtolower(trim($email))]);
+        $stmt->execute([strtolower(trim($email)), StoreContext::current()->id()]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row ?: null;
     }
@@ -185,7 +185,8 @@ class Customers {
         if (!$set) return false;
         $set[] = "updated_at = " . (Db::isSqlite() ? "datetime('now')" : "NOW()");
         $params[] = $id;
-        $sql = "UPDATE customers SET " . implode(', ', $set) . " WHERE id = ?";
+        $params[] = StoreContext::current()->id();
+        $sql = "UPDATE customers SET " . implode(', ', $set) . " WHERE id = ? AND store_id = ?";
         $db = Db::get();
         $db->beginTransaction();
         try {
@@ -208,15 +209,15 @@ class Customers {
         if (strlen($newPassword) < self::MIN_PASSWORD_LEN) {
             return [false, 'weak_password'];
         }
-        $stmt = Db::get()->prepare("SELECT password_hash FROM customers WHERE id = ?");
-        $stmt->execute([$id]);
+        $stmt = Db::get()->prepare("SELECT password_hash FROM customers WHERE id = ? AND store_id = ?");
+        $stmt->execute([$id, StoreContext::current()->id()]);
         $hash = $stmt->fetchColumn();
         if (!$hash || !password_verify($currentPassword, $hash)) {
             return [false, 'invalid_current_password'];
         }
         $newHash = password_hash($newPassword, PASSWORD_BCRYPT, ['cost' => self::BCRYPT_COST]);
-        Db::get()->prepare("UPDATE customers SET password_hash = ? WHERE id = ?")
-                 ->execute([$newHash, $id]);
+        Db::get()->prepare("UPDATE customers SET password_hash = ? WHERE id = ? AND store_id = ?")
+                 ->execute([$newHash, $id, StoreContext::current()->id()]);
         Security::sessionStart();
         if (session_status() === PHP_SESSION_ACTIVE) session_regenerate_id(true);
         $_SESSION['customer_auth_hash'] = hash('sha256', $newHash);
@@ -237,8 +238,8 @@ class Customers {
     public static function startPasswordReset(string $email): ?string {
         $email = strtolower(trim($email));
         $db = Db::get();
-        $stmt = $db->prepare("SELECT id FROM customers WHERE email = ? AND status = 'active'");
-        $stmt->execute([$email]);
+        $stmt = $db->prepare("SELECT id FROM customers WHERE email = ? AND store_id = ? AND status = 'active'");
+        $stmt->execute([$email, StoreContext::current()->id()]);
         $cid = (int)$stmt->fetchColumn();
         if ($cid <= 0) return null;
         $token = bin2hex(random_bytes(32));
@@ -264,10 +265,12 @@ class Customers {
 
     public static function verifyResetToken(string $token): ?int {
         $stmt = Db::get()->prepare(
-            "SELECT customer_id, expires_at, used_at
-             FROM password_reset_tokens WHERE token = ?"
+            "SELECT prt.customer_id, prt.expires_at, prt.used_at
+             FROM password_reset_tokens prt
+             JOIN customers c ON c.id = prt.customer_id
+             WHERE prt.token = ? AND c.store_id = ?"
         );
-        $stmt->execute([hash('sha256', $token)]);
+        $stmt->execute([hash('sha256', $token), StoreContext::current()->id()]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$row) return null;
         if (!empty($row['used_at'])) return null;
@@ -286,10 +289,11 @@ class Customers {
         $db->beginTransaction();
         try {
             $find = $db->prepare(
-                "SELECT customer_id FROM password_reset_tokens
-                 WHERE token = ? AND used_at IS NULL AND expires_at >= ?"
+                "SELECT prt.customer_id FROM password_reset_tokens prt
+                 JOIN customers c ON c.id = prt.customer_id
+                 WHERE prt.token = ? AND c.store_id = ? AND prt.used_at IS NULL AND prt.expires_at >= ?"
             );
-            $find->execute([$tokenHash, $now]);
+            $find->execute([$tokenHash, StoreContext::current()->id(), $now]);
             $cid = (int)$find->fetchColumn();
             if ($cid <= 0) {
                 $db->rollBack();
@@ -305,8 +309,8 @@ class Customers {
                 $db->rollBack();
                 return [false, 'invalid_or_expired_token'];
             }
-            $db->prepare("UPDATE customers SET password_hash = ? WHERE id = ?")
-               ->execute([$hash, $cid]);
+            $db->prepare("UPDATE customers SET password_hash = ? WHERE id = ? AND store_id = ?")
+               ->execute([$hash, $cid, StoreContext::current()->id()]);
             $db->commit();
         } catch (\Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();
@@ -453,6 +457,56 @@ class Customers {
     }
 
     // ============================================================
+    // B2B commercial profile
+    // ============================================================
+
+    public static function commerceProfile(?int $customerId): ?array {
+        if ($customerId === null || $customerId <= 0) return null;
+        try {
+            $stmt = Db::get()->prepare("SELECT
+                    c.id AS customer_id, c.customer_group_id, c.company_id,
+                    cg.code AS customer_group_code, cg.discount_bps,
+                    co.code AS company_code, co.legal_name, co.vat_id, co.vat_country,
+                    co.vat_validated_at, co.approval_status, co.credit_limit,
+                    co.payment_terms_days, co.invoice_purchase, co.active AS company_active
+                FROM customers c
+                LEFT JOIN customer_groups cg ON cg.id = c.customer_group_id AND cg.store_id = c.store_id AND cg.active = 1
+                LEFT JOIN companies co ON co.id = c.company_id AND co.store_id = c.store_id
+                WHERE c.id = :id AND c.store_id = :store");
+            $stmt->execute([':id' => $customerId, ':store' => StoreContext::current()->id()]);
+            return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        } catch (PDOException $e) {
+            return null;
+        }
+    }
+
+    public static function canInvoicePurchase(int $customerId, int $amount): bool {
+        if ($amount < 0) return false;
+        $profile = self::commerceProfile($customerId);
+        if (!$profile
+            || empty($profile['company_active'])
+            || ($profile['approval_status'] ?? '') !== 'approved'
+            || empty($profile['invoice_purchase'])
+            || (int)($profile['payment_terms_days'] ?? 0) <= 0) {
+            return false;
+        }
+
+        $creditLimit = max(0, (int)($profile['credit_limit'] ?? 0));
+        if ($creditLimit === 0) return true;
+        $stmt = Db::get()->prepare("SELECT COALESCE(SUM(o.total), 0)
+            FROM orders o
+            JOIN customers c ON c.id = o.customer_id AND c.store_id = o.store_id
+            WHERE o.store_id = :store AND c.company_id = :company
+              AND o.status <> 'cancelled'
+              AND COALESCE(o.payment_status, 'pending') NOT IN ('paid', 'refunded', 'cancelled', 'failed')");
+        $stmt->execute([
+            ':store' => StoreContext::current()->id(),
+            ':company' => (int)$profile['company_id'],
+        ]);
+        return (int)$stmt->fetchColumn() + $amount <= $creditLimit;
+    }
+
+    // ============================================================
     // Admin customer management
     // ============================================================
 
@@ -465,10 +519,10 @@ class Customers {
      */
     public static function adminList(string $query = '', int $limit = 50): array {
         $query = trim($query);
-        $sql = "SELECT id, email, name, status, created_at, last_login_at FROM customers";
-        $params = [];
+        $sql = "SELECT id, email, name, status, created_at, last_login_at FROM customers WHERE store_id = ?";
+        $params = [StoreContext::current()->id()];
         if ($query !== '') {
-            $sql .= " WHERE LOWER(email) LIKE LOWER(?) OR LOWER(name) LIKE LOWER(?)";
+            $sql .= " AND (LOWER(email) LIKE LOWER(?) OR LOWER(name) LIKE LOWER(?)";
             $like = '%' . $query . '%';
             $params[] = $like;
             $params[] = $like;
@@ -476,6 +530,7 @@ class Customers {
                 $sql .= " OR id = ?";
                 $params[] = (int)$query;
             }
+            $sql .= ')';
         }
         $sql .= " ORDER BY id DESC LIMIT ?";
         $params[] = $limit;
@@ -498,8 +553,8 @@ class Customers {
             return false;
         }
         $now = Db::isSqlite() ? "datetime('now')" : 'NOW()';
-        $stmt = Db::get()->prepare("UPDATE customers SET status = ?, updated_at = {$now} WHERE id = ?");
-        $stmt->execute([$status, $id]);
+        $stmt = Db::get()->prepare("UPDATE customers SET status = ?, updated_at = {$now} WHERE id = ? AND store_id = ?");
+        $stmt->execute([$status, $id, StoreContext::current()->id()]);
         return $stmt->rowCount() > 0;
     }
 }

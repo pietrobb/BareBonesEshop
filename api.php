@@ -512,9 +512,10 @@ function apiPaymentMethods(): array {
         $shippingMethod = 'digital';
         $amount = (int)($cart['subtotal'] ?? $amount);
     }
+    $customerId = (int)($_SESSION['customer_id'] ?? 0);
     $methods = $digitalOnly && $amount === 0
         ? [freeDigitalPayment()]
-        : PaymentService::availableMethods($country, $currency, $amount, $shippingMethod);
+        : PaymentService::availableMethods($country, $currency, $amount, $shippingMethod, $customerId > 0 ? $customerId : null);
     if ($digitalOnly) {
         $methods = array_values(array_filter($methods, static fn(array $method): bool => ($method['service_type'] ?? '') !== 'cod'));
     }
@@ -580,6 +581,7 @@ function apiCheckout(?array $runtimeConfig = null): array {
     }
     $shippingMethod = Security::slug($input['shipping_method'] ?? '');
     $paymentMethod = $input['payment_method'] ?? 'stripe';
+    $loggedInCustomerId = !empty($_SESSION['customer_id']) ? (int)$_SESSION['customer_id'] : null;
 
     if (!$name || !$email) {
         return ['error' => 'Name and email are required'];
@@ -697,19 +699,22 @@ function apiCheckout(?array $runtimeConfig = null): array {
         return ['success' => false, 'error' => 'Doručenie nie je dostupné do zvolenej krajiny.'];
     }
     $shippingCost = (int)$selectedRate['price'];
-    $autoRules = Pricing::autoCartRules($cart['subtotal']);
+    $autoRules = Pricing::autoCartRules($cart['subtotal'], $cart['items'], $loggedInCustomerId);
+    $promotionDiscount = 0;
     foreach ($autoRules as $rule) {
         if ($rule['action'] === 'free_shipping') $shippingCost = 0;
+        $promotionDiscount += max(0, (int)($rule['discount'] ?? 0));
     }
+    $totalDiscount = min($cart['subtotal'], $couponDiscount + $promotionDiscount);
 
     $currency = $cart['items'][0]['currency'] ?? 'eur';
-    $paymentBaseAmount = max(0, $cart['subtotal'] - $couponDiscount) + $shippingCost;
+    $paymentBaseAmount = max(0, $cart['subtotal'] - $totalDiscount) + $shippingCost;
     $freeDigitalOrder = $digitalOnly && $paymentBaseAmount === 0;
     if ($freeDigitalOrder) {
         $paymentMethod = 'free';
         $selectedPayment = freeDigitalPayment();
     } else {
-        $selectedPayment = PaymentService::selectMethod($paymentMethod, $country, $currency, $paymentBaseAmount, $selectedRate['method_code']);
+        $selectedPayment = PaymentService::selectMethod($paymentMethod, $country, $currency, $paymentBaseAmount, $selectedRate['method_code'], $loggedInCustomerId);
     }
     if (!$selectedPayment || ($digitalOnly && ($selectedPayment['service_type'] ?? '') === 'cod')) {
         return ['success' => false, 'error' => 'Platba nie je dostupná pre digitálne doručenie.'];
@@ -723,7 +728,7 @@ function apiCheckout(?array $runtimeConfig = null): array {
     ];
     if (Adapters::integration() !== null) $providerCodes['erp'] = Adapters::defaultProviderCode('erp');
     $financialSnapshot = $taxProvider::buildSnapshot($availableItems, $vatContext, [
-        'discount' => $couponDiscount,
+        'discount' => $totalDiscount,
         'shipping' => $shippingCost,
         'payment_fee' => $paymentFee,
         'currency' => $currency,
@@ -733,7 +738,6 @@ function apiCheckout(?array $runtimeConfig = null): array {
 
     // Attach logged-in customer_id if a session is active (guest checkout keeps customer_id=null)
     Security::sessionStart();
-    $loggedInCustomerId = !empty($_SESSION['customer_id']) ? (int)$_SESSION['customer_id'] : null;
 
     $customer = [
         'customer_id'    => $loggedInCustomerId,
@@ -756,7 +760,7 @@ function apiCheckout(?array $runtimeConfig = null): array {
         'shipping_weight_g' => $totalWeight,
         'shipping_rate_snapshot' => json_encode($selectedRate, JSON_UNESCAPED_UNICODE),
         'tax_amount'     => $financialSnapshot['totals']['vat'],
-        'coupon_discount'=> $couponDiscount,
+        'coupon_discount'=> $totalDiscount,
         'financial_snapshot' => $financialSnapshot,
         'vat_id'         => $vatId,
         'vat_country'    => $vatId !== '' ? substr($vatId, 0, 2) : '',
@@ -901,9 +905,16 @@ function shippingCartMetrics(array $items): array {
     foreach ($items as $item) {
         $pid = (int)$item['product_id'];
         $qty = (int)$item['qty'];
-        $weightG += ($weights[$pid] ?? 0) * $qty;
+        $itemWeight = array_key_exists('weight_g', $item) ? (int)$item['weight_g'] : ($weights[$pid] ?? 0);
+        $weightG += $itemWeight * $qty;
+        $length = (int)($item['length_mm'] ?? 0);
+        $width = (int)($item['width_mm'] ?? 0);
+        $height = (int)($item['height_mm'] ?? 0);
         $a = $attrs[$pid] ?? [];
-        $volumeCm3 += (int)($a['volume_cm3'] ?? 0) * $qty;
+        $itemVolume = $length > 0 && $width > 0 && $height > 0
+            ? intdiv($length * $width * $height, 1000)
+            : (int)($a['volume_cm3'] ?? 0);
+        $volumeCm3 += $itemVolume * $qty;
     }
 
     return ['weight_g' => $weightG, 'volume_cm3' => $volumeCm3];

@@ -134,6 +134,16 @@ Configure the scheduler entry declared by `operations.worker_cron`, start one wo
 
 For `http-carrier`, prove rates, pickup-point selection, label creation, retry returning the original AWB, cancellation, cancellation replay, and tracking against the carrier sandbox. For `http` ERP, prove order creation, external ID persistence, and a later status mutation against the same external ID. Fixture tests prove the repository contract only; they are not evidence that a live account works. Keep API keys solely in deployment secret configuration. On failure, disable the provider/default together without renaming a code frozen in existing order snapshots.
 
+## Catalog pricing and B2B rollout
+
+Migration `20260801190000_catalog_pricing_b2b` is additive. Keep writers stopped and, after apply, verify that every existing product has exactly one `product_categories.is_primary=1` row matching its unchanged `products.category_id`. Existing product prices, customer identities, orders, and financial snapshots must be byte-for-byte unchanged; the new price lists and promotions start empty. All legacy customers receive `store_id=default` and no group/company assignment.
+
+Configure one non-production customer group, company, and price list before enabling broad rules. Prove guest isolation, the intended store and currency, quantity tiers, validity boundaries, and the exact `_pricing` item snapshot. Add promotions in disabled form, then activate one at a time and prove priority, `exclusive` versus `stack`, cent rounding, subtotal cap, free shipping, and buy-X-get-Y. A gift result is an entitlement only; do not claim fulfillment until a reviewed order-line workflow consumes it.
+
+Before enabling invoice purchase, confirm company approval, VAT evidence, integer-cent credit limit, positive payment terms, and the current unpaid exposure. Verify the invoice method is absent for guests, unapproved companies, another store, and an amount above remaining credit. Enabling a price list or promotion changes new quotes immediately but never rewrites existing order/payment/invoice snapshots.
+
+Rollback restores the pre-migration database and code together. If orders were accepted after enabling new prices, stop and reconcile those externally visible orders before rollback; never recreate their totals from the old catalog or delete them to make the schema appear reversible.
+
 ## Rollback procedure
 
 Keep traffic and writers stopped. Review whether any package-managed file changed after the update, then run:

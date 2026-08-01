@@ -58,6 +58,8 @@ single-lang kód je vždy ťažšie než to navrhnúť správne od začiatku.
 
 `Setup::doctor()` vracia verziovaný machine-readable onboarding checklist a `apply` idempotentne vytvorí iba bezpečné private runtime cesty; deployment config má JSON Schema so secret anotáciami. `/healthz` je side-effect-free liveness, `/readyz` overuje DB/store/runtime závislosti bez úniku detailov a `Logger` zapisuje redigované JSON Lines s correlation/store/channel kontextom. Generický `HttpShipping` používa retry-safe rates/pickup/label/cancel/tracking kontrakt a `HttpErpAdapter` reálne vykonáva order create/status update, produkty, zákazníkov, sklad aj health cez HTTPS; fixture testy dokazujú kontrakt bez predstierania live credentials.
 
+Katalóg zachováva `products.category_id` ako spätne kompatibilnú primárnu kategóriu a `product_categories` pridáva ďalšie zaradenia. Brand/manufacturer, GTIN, MPN, integer-cent cost, rozmery, variantové médiá a časová dostupnosť sú normalizované polia. DB cenník sa resolvuje podľa store, currency, customer group, variantu, množstva, validity a priority; zvolený cenník a promotion kódy sa zmrazia v `_pricing` order-item snapshot-e pred kanonickým finančným snapshotom. Promotions sú prioritné `exclusive` alebo `stack` pravidlá a podporujú katalógovú cenu, free shipping, buy-X-get-Y a explicitné gift entitlement bez tichého stock pohybu. B2B `companies` a `customer_groups` sú store-scoped; invoice purchase je dostupný iba schválenej aktívnej firme v rámci credit limitu a quote zmrazí splatnosť aj company ID.
+
 ### V1 — kompletný commerce engine
 
 **Katalóg + storefront:**

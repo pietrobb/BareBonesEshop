@@ -17,24 +17,28 @@ class VariantAvailability {
     }
 
     public static function isDigitalProduct(int $productId): bool {
-        $stmt = Db::get()->prepare('SELECT product_type FROM products WHERE id = :id');
-        $stmt->execute([':id' => $productId]);
+        $stmt = Db::get()->prepare('SELECT product_type FROM products WHERE id = :id AND store_id = :store');
+        $stmt->execute([':id' => $productId, ':store' => StoreContext::current()->catalogId()]);
         return self::isDigitalType((string)$stmt->fetchColumn());
     }
 
     public static function isPurchasable(int $productId, ?int $variantId = null): bool {
-        $stmt = Db::get()->prepare("SELECT id, product_type, status, stock FROM products WHERE id = :id");
-        $stmt->execute([':id' => $productId]);
+        $stmt = Db::get()->prepare("SELECT id, product_type, status, stock, availability, available_from
+            FROM products WHERE id = :id AND store_id = :store");
+        $stmt->execute([':id' => $productId, ':store' => StoreContext::current()->catalogId()]);
         $product = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$product || $product['status'] !== 'active') return false;
+        if (!$product || $product['status'] !== 'active'
+            || ($product['availability'] ?? self::ACTIVE) !== self::ACTIVE
+            || (!empty($product['available_from']) && strtotime((string)$product['available_from']) > time())) return false;
         $digital = self::isDigitalType((string)$product['product_type']);
 
         if ($variantId !== null) {
-            $stmt = Db::get()->prepare('SELECT product_id, stock, availability FROM variants WHERE id = :id');
+            $stmt = Db::get()->prepare('SELECT product_id, stock, availability, available_from FROM variants WHERE id = :id');
             $stmt->execute([':id' => $variantId]);
             $variant = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$variant || (int)$variant['product_id'] !== $productId) return false;
-            if (($variant['availability'] ?? self::ACTIVE) !== self::ACTIVE) return false;
+            if (($variant['availability'] ?? self::ACTIVE) !== self::ACTIVE
+                || (!empty($variant['available_from']) && strtotime((string)$variant['available_from']) > time())) return false;
             return $digital || (int)$variant['stock'] > 0;
         }
 

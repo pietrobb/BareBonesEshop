@@ -217,6 +217,10 @@ if ($mysqlDsn) {
         $my->exec("DROP TABLE IF EXISTS orders");
         $my->exec("CREATE TABLE orders (id INT PRIMARY KEY) ENGINE=InnoDB");
         $my->exec("CREATE TABLE invoices (id INT PRIMARY KEY) ENGINE=InnoDB");
+        $my->exec("CREATE TABLE categories (id INT PRIMARY KEY) ENGINE=InnoDB");
+        $my->exec("CREATE TABLE products (id INT PRIMARY KEY, category_id INT NULL) ENGINE=InnoDB");
+        $my->exec("CREATE TABLE variants (id INT PRIMARY KEY, product_id INT NOT NULL) ENGINE=InnoDB");
+        $my->exec("CREATE TABLE customers (id INT PRIMARY KEY) ENGINE=InnoDB");
         $financialMigration = require __DIR__ . '/../migrations/20260801141000_financial_snapshots.php';
         $financialMigration->up($my, false);
         $financialMigration->up($my, false);
@@ -227,10 +231,20 @@ if ($mysqlDsn) {
         $eventApiMigrationMysql->up($my, false);
         $g4MysqlTables = (int)$my->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('event_outbox','webhook_deliveries','api_clients','api_idempotency')")->fetchColumn();
         assert_equals(4, $g4MysqlTables, 'MySQL live: G4 outbox/API migration is applied and idempotent');
+        $g6MigrationMysql = require __DIR__ . '/../migrations/20260801190000_catalog_pricing_b2b.php';
+        $g6MigrationMysql->up($my, false);
+        $g6MigrationMysql->up($my, false);
+        $g6MysqlTables = (int)$my->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('brands','product_categories','customer_groups','companies','price_lists','price_list_prices','promotions')")->fetchColumn();
+        assert_equals(7, $g6MysqlTables, 'MySQL live: G6 catalog/pricing/B2B migration is applied and idempotent');
+        foreach (['price_list_prices', 'price_lists', 'promotions', 'product_categories', 'companies', 'customer_groups', 'brands'] as $table) $my->exec("DROP TABLE {$table}");
         $my->exec("DROP TABLE api_idempotency");
         $my->exec("DROP TABLE api_clients");
         $my->exec("DROP TABLE webhook_deliveries");
         $my->exec("DROP TABLE event_outbox");
+        $my->exec("DROP TABLE variants");
+        $my->exec("DROP TABLE products");
+        $my->exec("DROP TABLE categories");
+        $my->exec("DROP TABLE customers");
         $my->exec("DROP TABLE invoices");
         $my->exec("DROP TABLE orders");
         $my->exec("DROP TABLE _parity_probe");
@@ -456,6 +470,13 @@ $eventApiMigration->up($pdo, true);
 $eventApiMigration->up($pdo, true);
 assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_outbox'")->fetchColumn(), 'G4 migration: transactional event outbox exists');
 assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='api_clients'")->fetchColumn(), 'G4 migration: API client credential table exists');
+$catalogPricingB2bMigration = require __DIR__ . '/../migrations/20260801190000_catalog_pricing_b2b.php';
+$catalogPricingB2bMigration->up($pdo, true);
+$catalogPricingB2bMigration->up($pdo, true);
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='price_lists'")->fetchColumn(), 'G6 migration: price lists exist and migration is idempotent');
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='customer_groups'")->fetchColumn(), 'G6 migration: customer groups exist');
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='companies'")->fetchColumn(), 'G6 migration: companies exist');
+assert_equals((int)$pdo->query('SELECT COUNT(*) FROM products')->fetchColumn(), (int)$pdo->query('SELECT COUNT(*) FROM product_categories WHERE is_primary = 1')->fetchColumn(), 'G6 migration: legacy primary categories are preserved');
 
 // ============================================================
 // TEST 3: CSV Import
@@ -3775,6 +3796,8 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS customers (
     last_login_at TEXT DEFAULT NULL,
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
 )");
+$catalogPricingB2bMigration->up($pdo, true);
+
 $pdo->exec("CREATE TABLE IF NOT EXISTS customer_addresses (
     id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL,
     type TEXT NOT NULL DEFAULT 'shipping', is_default INTEGER NOT NULL DEFAULT 0,
@@ -3945,6 +3968,112 @@ assert_true(is_array($o100) && $o100['order_number'] === 'C-100', 'Customer: ord
 $guestOrderId = (int)$pdo->query("SELECT id FROM orders WHERE order_number='GUEST-1'")->fetchColumn();
 $blocked = Customers::order($aliceId, $guestOrderId);
 assert_true($blocked === null, 'Customer: order() blocks access to guest/other-customer order');
+
+// ============================================================
+// TEST: G6 catalog, price lists, promotions and B2B rules
+// ============================================================
+echo "\n--- Test: G6 Catalog / Pricing / B2B ---\n";
+Bootstrap::initStoreContext('/', '', 'default');
+$g6Product = $pdo->query("SELECT * FROM products WHERE store_id = 'default' AND status = 'active' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+assert_true(is_array($g6Product), 'G6: active product fixture exists');
+$g6ProductId = (int)$g6Product['id'];
+$pdo->exec("INSERT INTO categories (slug, name, path, depth, store_id) VALUES ('g6-secondary', 'G6 Secondary', 'g6-secondary', 0, 'default')");
+$g6SecondaryCategory = (int)$pdo->lastInsertId();
+$pdo->prepare("INSERT INTO product_categories (product_id, category_id, is_primary, sort_order) VALUES (?, ?, 0, 10)")
+    ->execute([$g6ProductId, $g6SecondaryCategory]);
+$g6CategoryResult = Products::byCategory($g6SecondaryCategory);
+assert_true(in_array($g6ProductId, array_map('intval', array_column($g6CategoryResult['products'], 'id')), true), 'G6: additional category participates in catalog listings');
+assert_true(in_array($g6SecondaryCategory, Products::categoryIds($g6ProductId), true), 'G6: product exposes all category assignments');
+
+$pdo->exec("INSERT INTO brands (store_id, code, name, manufacturer_name) VALUES ('default', 'g6-brand', 'G6 Brand', 'G6 Manufacturing s.r.o.')");
+$g6BrandId = (int)$pdo->lastInsertId();
+$pdo->prepare("UPDATE products SET brand_id=?, gtin='8580000000001', mpn='G6-MPN', cost_price=700, length_mm=300, width_mm=200, height_mm=100 WHERE id=?")
+    ->execute([$g6BrandId, $g6ProductId]);
+$g6CatalogRow = Products::byId($g6ProductId);
+assert_equals('8580000000001', $g6CatalogRow['gtin'], 'G6: GTIN is a first-class catalog field');
+assert_equals('G6-MPN', $g6CatalogRow['mpn'], 'G6: manufacturer part number is persisted');
+assert_equals(700, (int)$g6CatalogRow['cost_price'], 'G6: cost basis remains integer cents');
+$g6Margin = Products::margin(1234, 700);
+assert_equals(534, $g6Margin['amount'], 'G6: margin amount remains deterministic integer cents');
+assert_equals(4327, $g6Margin['bps'], 'G6: margin ratio uses deterministic basis points');
+
+$pdo->exec("INSERT INTO customer_groups (store_id, code, name, discount_bps) VALUES ('default', 'trade', 'Trade', 500)");
+$g6GroupId = (int)$pdo->lastInsertId();
+$pdo->exec("INSERT INTO companies (store_id, code, legal_name, registration_number, vat_id, vat_country, vat_validated_at, approval_status, credit_limit, payment_terms_days, invoice_purchase)
+    VALUES ('default', 'acme', 'ACME Trade s.r.o.', '12345678', 'SK1234567890', 'SK', datetime('now'), 'approved', 5000, 30, 1)");
+$g6CompanyId = (int)$pdo->lastInsertId();
+$pdo->prepare("UPDATE customers SET customer_group_id=?, company_id=? WHERE id=?")
+    ->execute([$g6GroupId, $g6CompanyId, $aliceId]);
+$g6Profile = Customers::commerceProfile($aliceId);
+assert_equals('trade', $g6Profile['customer_group_code'], 'G6: customer resolves its store-scoped group');
+assert_equals('approved', $g6Profile['approval_status'], 'G6: company approval is explicit');
+assert_equals(30, (int)$g6Profile['payment_terms_days'], 'G6: payment terms are explicit days');
+StoreContext::activate($deContext);
+assert_true(Customers::commerceProfile($aliceId) === null, 'G6: company and customer-group profile cannot cross stores');
+[$g6IsolatedRegistered, $g6IsolatedCustomerId] = Customers::register('isolated-g6@test.local', 'Passw0rd!', 'Isolated G6');
+assert_true($g6IsolatedRegistered && $g6IsolatedCustomerId > 0, 'G6: customer registration succeeds in a non-default store');
+$g6RegisteredStore = $pdo->prepare('SELECT store_id FROM customers WHERE id = ?');
+$g6RegisteredStore->execute([$g6IsolatedCustomerId]);
+assert_equals('isolated', $g6RegisteredStore->fetchColumn(), 'G6: registration persists the active store identity');
+Bootstrap::initStoreContext('/', '', 'default');
+
+$pdo->prepare("INSERT INTO price_lists (store_id, code, name, currency, customer_group_id, priority) VALUES ('default', 'trade-eur', 'Trade EUR', 'eur', ?, 100)")
+    ->execute([$g6GroupId]);
+$g6PriceListId = (int)$pdo->lastInsertId();
+$pdo->prepare("INSERT INTO price_list_prices (price_list_id, product_id, min_qty, price, compare_price) VALUES (?, ?, 1, 1234, 1500)")
+    ->execute([$g6PriceListId, $g6ProductId]);
+$g6Priced = Pricing::applyPriceList($g6CatalogRow, null, 1, $aliceId, '2026-08-01 12:00:00');
+assert_equals(1234, (int)$g6Priced['price'], 'G6: store/currency/customer-group price list resolves integer cents');
+assert_equals('trade-eur', $g6Priced['price_list_snapshot']['code'], 'G6: selected price-list code is snapshotted');
+$g6GuestPrice = Pricing::applyPriceList($g6CatalogRow, null, 1, null, '2026-08-01 12:00:00');
+assert_equals((int)$g6CatalogRow['price'], (int)$g6GuestPrice['price'], 'G6: group price list does not leak to guests');
+
+$pdo->prepare("INSERT INTO promotions (store_id, code, name, scope, priority, stacking, conditions, actions)
+    VALUES ('default', 'trade-ten', 'Trade ten percent', 'catalog', 10, 'exclusive', ?, ?)")
+    ->execute([
+        json_encode(['product_ids' => [$g6ProductId], 'customer_group_ids' => [$g6GroupId]]),
+        json_encode(['type' => 'discount_percent', 'bps' => 1000]),
+    ]);
+$g6Promoted = Promotions::applyToProduct($g6Priced, 1, $aliceId, '2026-08-01 12:00:00');
+assert_equals(1111, (int)$g6Promoted['price'], 'G6: promotion basis points round deterministically in cents');
+assert_equals('trade-ten', $g6Promoted['promotion_snapshot']['applied'][0]['code'], 'G6: applied promotion is snapshotted');
+$pdo->prepare("INSERT INTO variants (product_id, sku, name, stock, price_delta, media, weight_g, length_mm, width_mm, height_mm, availability)
+    VALUES (?, 'G6-VARIANT', 'G6 Variant', 5, 0, '[\"/uploads/g6.webp\"]', 900, 400, 300, 200, 'active')")
+    ->execute([$g6ProductId]);
+$g6VariantId = (int)$pdo->lastInsertId();
+$previousCart = $_SESSION['cart'] ?? [];
+$_SESSION['customer_id'] = $aliceId;
+$_SESSION['cart'] = ['v_' . $g6VariantId => ['product_id' => $g6ProductId, 'variant_id' => $g6VariantId, 'qty' => 1]];
+$g6VariantCart = Cart::enriched();
+assert_equals(900, (int)$g6VariantCart['items'][0]['weight_g'], 'G6: variant weight overrides product logistics');
+assert_equals(400, (int)$g6VariantCart['items'][0]['length_mm'], 'G6: variant dimensions are resolved into checkout');
+assert_equals('trade-eur', $g6VariantCart['items'][0]['attrs']['_pricing']['price_list']['code'], 'G6: cart line carries its price-list snapshot');
+$_SESSION['cart'] = $previousCart;
+
+foreach ([
+    ['g6-free-shipping', 20, 'stack', ['min_subtotal' => 1000], ['type' => 'free_shipping']],
+    ['g6-buy-x-get-y', 30, 'stack', ['buy_product_id' => $g6ProductId, 'buy_qty' => 2], ['type' => 'buy_x_get_y', 'product_id' => $g6ProductId, 'qty' => 1]],
+    ['g6-gift', 40, 'stack', ['min_subtotal' => 1000], ['type' => 'gift', 'product_id' => $g6ProductId, 'qty' => 1]],
+] as [$code, $priority, $stacking, $conditions, $actions]) {
+    $stmt = $pdo->prepare("INSERT INTO promotions (store_id, code, name, scope, priority, stacking, conditions, actions) VALUES ('default', ?, ?, 'cart', ?, ?, ?, ?)");
+    $stmt->execute([$code, $code, $priority, $stacking, json_encode($conditions), json_encode($actions)]);
+}
+$g6CartItems = [['product_id' => $g6ProductId, 'variant_id' => null, 'qty' => 2, 'price' => 1111]];
+$g6CartActions = Promotions::cartActions($g6CartItems, 2222, $aliceId, '2026-08-01 12:00:00');
+assert_true(in_array('free_shipping', array_column($g6CartActions, 'action'), true), 'G6: automatic free-shipping promotion resolves');
+$g6Bxgy = array_values(array_filter($g6CartActions, static fn(array $rule): bool => $rule['action'] === 'buy_x_get_y'))[0] ?? [];
+assert_equals(1111, (int)($g6Bxgy['discount'] ?? 0), 'G6: buy-X-get-Y discounts only an eligible in-cart unit');
+$g6Gift = array_values(array_filter($g6CartActions, static fn(array $rule): bool => $rule['action'] === 'gift'))[0] ?? [];
+assert_equals($g6ProductId, (int)($g6Gift['gift']['product_id'] ?? 0), 'G6: gift entitlement is explicit without silently mutating stock');
+
+$invoiceQuote = PaymentService::selectMethod('invoice', 'SK', 'eur', 3000, 'gls', $aliceId);
+assert_true($invoiceQuote !== null, 'G6: approved company can purchase on invoice within credit limit');
+assert_equals(30, (int)$invoiceQuote['payment_terms_days'], 'G6: invoice quote freezes payment terms');
+assert_true(PaymentService::selectMethod('invoice', 'SK', 'eur', 4000, 'gls', $aliceId) === null, 'G6: outstanding exposure plus order amount enforces credit limit');
+$pdo->prepare("UPDATE companies SET approval_status='pending' WHERE id=?")->execute([$g6CompanyId]);
+assert_true(PaymentService::selectMethod('invoice', 'SK', 'eur', 100, 'gls', $aliceId) === null, 'G6: unapproved company cannot purchase on invoice');
+$pdo->prepare("UPDATE companies SET approval_status='approved' WHERE id=?")->execute([$g6CompanyId]);
+assert_true(PaymentService::selectMethod('invoice', 'SK', 'eur', 100, 'gls', null) === null, 'G6: guest cannot purchase on invoice');
 
 // ============================================================
 // TEST: Product Reviews (P7.1)

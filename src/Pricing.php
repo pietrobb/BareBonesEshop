@@ -23,6 +23,90 @@ class Pricing {
         self::$config = $config;
     }
 
+    /** Resolve a store/currency/customer price list without changing the base catalog row. */
+    public static function applyPriceList(
+        array $product,
+        ?int $variantId = null,
+        int $qty = 1,
+        ?int $customerId = null,
+        ?string $at = null
+    ): array {
+        if (empty($product['id'])) return $product;
+        $basePrice = max(0, (int)($product['price'] ?? 0));
+        $currency = strtolower((string)($product['currency'] ?? StoreContext::current()->currency()));
+        $profile = Customers::commerceProfile($customerId);
+        $groupId = (int)($profile['customer_group_id'] ?? 0);
+        $at = $at ?? gmdate('Y-m-d H:i:s');
+
+        try {
+            $variantCondition = $variantId === null
+                ? 'pp.variant_id IS NULL'
+                : '(pp.variant_id = :variant_id OR pp.variant_id IS NULL)';
+            $sql = "SELECT pp.price, pp.compare_price, pp.min_qty, pp.variant_id,
+                    pl.code AS price_list_code, pl.priority, pl.customer_group_id
+                FROM price_list_prices pp
+                JOIN price_lists pl ON pl.id = pp.price_list_id
+                WHERE pp.product_id = :product_id AND {$variantCondition}
+                  AND pp.min_qty <= :qty
+                  AND pl.store_id = :store AND LOWER(pl.currency) = :currency AND pl.active = 1
+                  AND (pl.customer_group_id IS NULL OR pl.customer_group_id = :group_id)
+                  AND (pl.valid_from IS NULL OR pl.valid_from <= :at_from)
+                  AND (pl.valid_to IS NULL OR pl.valid_to >= :at_to)
+                ORDER BY
+                  CASE WHEN pl.customer_group_id IS NULL THEN 0 ELSE 1 END DESC,
+                  CASE WHEN pp.variant_id IS NULL THEN 0 ELSE 1 END DESC,
+                  pp.min_qty DESC, pl.priority DESC, pp.id DESC
+                LIMIT 1";
+            $stmt = Db::get()->prepare($sql);
+            $params = [
+                ':product_id' => (int)$product['id'],
+                ':qty' => max(1, $qty),
+                ':store' => StoreContext::current()->id(),
+                ':currency' => $currency,
+                ':group_id' => $groupId,
+                ':at_from' => $at,
+                ':at_to' => $at,
+            ];
+            if ($variantId !== null) $params[':variant_id'] = $variantId;
+            $stmt->execute($params);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            $row = false;
+        }
+
+        if ($row) {
+            $product['price'] = max(0, (int)$row['price']);
+            $product['compare_price'] = $row['compare_price'] === null
+                ? max($basePrice, (int)($product['compare_price'] ?? 0))
+                : max(0, (int)$row['compare_price']);
+            $product['price_list_snapshot'] = [
+                'version' => 1,
+                'code' => (string)$row['price_list_code'],
+                'customer_group_id' => $row['customer_group_id'] === null ? null : (int)$row['customer_group_id'],
+                'currency' => $currency,
+                'min_qty' => (int)$row['min_qty'],
+                'price' => (int)$product['price'],
+            ];
+            return $product;
+        }
+
+        $groupBps = max(0, min(10000, (int)($profile['discount_bps'] ?? 0)));
+        if ($groupBps > 0) {
+            $discount = intdiv($basePrice * $groupBps + 5000, 10000);
+            $product['price'] = max(0, $basePrice - $discount);
+            $product['compare_price'] = max($basePrice, (int)($product['compare_price'] ?? 0));
+            $product['price_list_snapshot'] = [
+                'version' => 1,
+                'code' => 'customer_group',
+                'customer_group_id' => $groupId,
+                'currency' => $currency,
+                'min_qty' => 1,
+                'price' => (int)$product['price'],
+            ];
+        }
+        return $product;
+    }
+
     /**
      * Apply catalog-level pricing to a product (pre-computable rules).
      * Returns product with adjusted price + original as compare_price.
@@ -192,7 +276,7 @@ class Pricing {
      * Check automatic cart rules (free shipping etc.)
      * Returns array of triggered actions.
      */
-    public static function autoCartRules(int $subtotal): array {
+    public static function autoCartRules(int $subtotal, array $items = [], ?int $customerId = null): array {
         $cfg = self::config();
         $actions = [];
 
@@ -206,9 +290,13 @@ class Pricing {
             $actions[] = [
                 'name'   => $rule['name'],
                 'action' => $rule['action'] ?? 'discount',
+                'discount' => 0,
             ];
         }
 
+        if ($items !== [] && class_exists('Promotions')) {
+            $actions = array_merge($actions, Promotions::cartActions($items, $subtotal, $customerId));
+        }
         return $actions;
     }
 

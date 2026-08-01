@@ -1425,7 +1425,8 @@ function renderCheckout(): string {
     }
     $shipping = $selectedRate ? (int)$selectedRate['price'] : 0;
     $currency = 'eur';
-    $paymentMethods = $selectedRate ? PaymentService::availableMethods($country, $currency, $subtotal + $shipping, (string)$selectedRate['method_code']) : [];
+    $customerId = (int)($_SESSION['customer_id'] ?? 0);
+    $paymentMethods = $selectedRate ? PaymentService::availableMethods($country, $currency, $subtotal + $shipping, (string)$selectedRate['method_code'], $customerId > 0 ? $customerId : null) : [];
     $selectedPayment = $paymentMethods[0] ?? null;
     $paymentFee = $selectedPayment ? (int)$selectedPayment['fee'] : 0;
     $total = $subtotal + $shipping + $paymentFee;
@@ -1552,7 +1553,8 @@ function processCheckout(): string {
     }
     $shippingCost = (int)$selectedRate['price'];
     $currency = 'eur';
-    $selectedPayment = PaymentService::selectMethod($payment, $country, $currency, $subtotal + $shippingCost, (string)$selectedRate['method_code']);
+    $customerId = (int)($_SESSION['customer_id'] ?? 0);
+    $selectedPayment = PaymentService::selectMethod($payment, $country, $currency, $subtotal + $shippingCost, (string)$selectedRate['method_code'], $customerId > 0 ? $customerId : null);
     if (!$selectedPayment) {
         return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">Platba nie je dostupná pre zvolenú krajinu alebo dopravu.</p>';
     }
