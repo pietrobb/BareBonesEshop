@@ -1,0 +1,1 @@
+Zaplatená objednávka {{order_number}}

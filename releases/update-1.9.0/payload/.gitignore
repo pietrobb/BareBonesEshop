@@ -1,0 +1,71 @@
+# Database
+db/*.sqlite
+db/*.sqlite-wal
+db/*.sqlite-shm
+db/*.log
+db/.migrations.lock
+
+# Cache
+cache/
+!cache/.gitkeep
+
+# Rate limit DB
+rate_limit.sqlite*
+
+# Jobs
+jobs/pending/*
+jobs/processing/*
+jobs/completed/*
+jobs/failed/*
+!jobs/pending/.gitkeep
+!jobs/processing/.gitkeep
+!jobs/completed/.gitkeep
+!jobs/failed/.gitkeep
+jobs/test_*/
+
+# Logs
+logs/
+
+# Uploads
+uploads/thumb/*
+uploads/medium/*
+uploads/full/*
+uploads/magento/
+!uploads/thumb/.gitkeep
+!uploads/medium/.gitkeep
+!uploads/full/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large data files (TecDoc DB ~850MB)
+demo/*.db
+
+# Storage (invoices PDFs, etc.)
+storage/invoices/*
+!storage/invoices/.gitkeep
+!storage/.gitkeep
+
+# Backups
+storage/backups/*
+!storage/backups/.gitkeep
+storage/backup.log*
+
+# GDPR
+storage/gdpr-exports/
+storage/gdpr-purge-snapshots/
+config/.gdpr_salt
+
+# Environment
+.env
+
+# Local config with secrets (copy config.example.php -> config.php)
+config.php

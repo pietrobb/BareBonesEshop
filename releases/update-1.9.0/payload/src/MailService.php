@@ -1,0 +1,324 @@
+<?php
+/**
+ * BareBones Shop — MailService (orchestration)
+ *
+ * Responsibilities:
+ *   1. Pick the configured MailAdapter (LogMail / SmtpMail / SesMail).
+ *   2. Load a template for the requested locale (with fallback order).
+ *   3. Render placeholders (reusing worker.php template syntax:
+ *      {{var}}, {{#if var}}...{{/if}}, {{#each items}}...{{/each}}).
+ *   4. Build a final message (From, subject, html + text parts).
+ *   5. Write an email_log row BEFORE sending, then update status.
+ *   6. Return a structured result for worker / admin callers.
+ *
+ * Template layout on disk:
+ *   templates/emails/{locale}/{template}.subject.txt  (one line)
+ *   templates/emails/{locale}/{template}.html
+ *   templates/emails/{locale}/{template}.txt          (optional; derived from HTML if missing)
+ *
+ * Fallback chain for missing template: {locale} -> en.
+ */
+class MailService {
+    private static ?MailAdapter $adapterOverride = null;
+    private static array $fallbackLocales = ['en'];
+
+    /** For tests: inject a specific adapter (bypasses env). */
+    public static function useAdapter(?MailAdapter $a): void {
+        self::$adapterOverride = $a;
+    }
+
+    /** Resolve the active MailAdapter. Priority: override → MAIL_ADAPTER env → LogMail. */
+    public static function adapter(): MailAdapter {
+        if (self::$adapterOverride) return self::$adapterOverride;
+
+        $id = strtolower((string)(getenv('MAIL_ADAPTER') ?: 'log'));
+        return match ($id) {
+            'smtp' => new SmtpMail(),
+            'ses'  => new SesMail(),
+            default => new LogMail(),
+        };
+    }
+
+    /**
+     * Send an email identified by template + locale + vars.
+     *
+     * @param string   $template Template name (e.g. "order_confirmation")
+     * @param string   $to       Recipient address
+     * @param string   $locale   Preferred locale (sk/en/de/…)
+     * @param array    $vars     Template variables
+     * @param int|null $orderId  Optional order link (for audit + resend)
+     *
+     * @return array {
+     *   status:  'sent' | 'failed' | 'skipped',
+     *   log_id:  int,
+     *   subject: string,
+     *   adapter: string,
+     *   error:   string,
+     * }
+     */
+    public static function send(
+        string $template,
+        string $to,
+        string $locale = '',
+        array $vars = [],
+        ?int $orderId = null,
+        array $attachments = []
+    ): array {
+        $to = strtolower(trim($to));
+        if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
+            return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => '', 'error' => 'invalid recipient'];
+        }
+        if (!preg_match('/^[a-z0-9_-]{1,80}$/i', $template)) {
+            return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => '', 'error' => 'invalid template'];
+        }
+        if (!self::recipientAllowed($to, $template)) {
+            return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => '', 'error' => 'recipient rate limit'];
+        }
+        $locale = $locale !== '' ? $locale : self::defaultLocale();
+
+        $rendered = self::render($template, $locale, $vars);
+
+        $adapter = self::adapter();
+        $from = strtolower(trim((string)(getenv('MAIL_FROM') ?: 'noreply@localhost.invalid')));
+        if (!filter_var($from, FILTER_VALIDATE_EMAIL)) {
+            return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => $adapter->adapterId(), 'error' => 'invalid sender'];
+        }
+        $replyTo = strtolower(trim((string)(getenv('MAIL_REPLY_TO') ?: '')));
+        if ($replyTo !== '' && !filter_var($replyTo, FILTER_VALIDATE_EMAIL)) $replyTo = '';
+
+        // Log row BEFORE send attempt (so failures are visible).
+        $logId = self::logInsert($to, $template, $locale, $rendered['subject'], $adapter->adapterId(), $orderId, $vars);
+
+        $msg = [
+            'to'          => $to,
+            'from'        => $from,
+            'subject'     => $rendered['subject'],
+            'html'        => $rendered['html'],
+            'text'        => $rendered['text'],
+            'reply_to'    => $replyTo,
+            'attachments' => self::normalizeAttachments($attachments),
+            'headers'  => [
+                'X-Mailer'   => 'BareBonesShop',
+                'X-Template' => $template,
+                'X-Locale'   => $locale,
+            ],
+        ];
+
+        $result = $adapter->send($msg);
+        self::logUpdate($logId, $result['status'] ?? 'failed', $result['message'] ?? '');
+
+        return [
+            'status'  => $result['status'] ?? 'failed',
+            'log_id'  => $logId,
+            'subject' => $rendered['subject'],
+            'adapter' => $adapter->adapterId(),
+            'error'   => $result['message'] ?? '',
+        ];
+    }
+
+    /**
+     * Re-send an existing email_log row (same template / recipient / vars).
+     * Creates a NEW email_log entry — the original row stays immutable.
+     */
+    public static function resend(int $logId, ?int $orderId = null): array {
+        $sql = "SELECT * FROM email_log WHERE id = :id";
+        $params = [':id' => $logId];
+        if ($orderId !== null) {
+            $sql .= " AND order_id = :order_id";
+            $params[':order_id'] = $orderId;
+        }
+        $stmt = Db::get()->prepare($sql);
+        $stmt->execute($params);
+        $row = $stmt->fetch();
+        if (!$row) {
+            return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => '', 'error' => 'log entry not found'];
+        }
+        $vars = json_decode((string)($row['payload'] ?? '{}'), true) ?: [];
+        return self::send(
+            (string)$row['template'],
+            (string)$row['recipient'],
+            (string)$row['locale'],
+            $vars,
+            $row['order_id'] !== null ? (int)$row['order_id'] : null
+        );
+    }
+
+    /**
+     * Render a template for the given locale (with fallback).
+     * Returns ['subject' => ..., 'html' => ..., 'text' => ...].
+     */
+    public static function render(string $template, string $locale, array $vars): array {
+        $baseDir = self::templateDir();
+        $locales = array_unique(array_merge([$locale], self::$fallbackLocales));
+
+        $htmlFile = $subjectFile = $textFile = null;
+        foreach ($locales as $loc) {
+            $h = "{$baseDir}/{$loc}/{$template}.html";
+            if ($htmlFile === null && file_exists($h)) $htmlFile = $h;
+            $s = "{$baseDir}/{$loc}/{$template}.subject.txt";
+            if ($subjectFile === null && file_exists($s)) $subjectFile = $s;
+            $t = "{$baseDir}/{$loc}/{$template}.txt";
+            if ($textFile === null && file_exists($t)) $textFile = $t;
+        }
+
+        $html    = $htmlFile    ? (string)file_get_contents($htmlFile)    : "<p>{$template}</p>";
+        $subject = $subjectFile ? trim((string)file_get_contents($subjectFile)) : $template;
+        $text    = $textFile    ? (string)file_get_contents($textFile)    : '';
+
+        // Render in template-engine order used by worker.php: each → if → vars
+        $html    = self::renderString($html, $vars);
+        $subject = self::renderString($subject, $vars);
+        if ($text !== '') {
+            $text = self::renderString($text, $vars);
+        } else {
+            // Fallback plain text from HTML
+            $text = trim(preg_replace('/\s+\n/', "\n", strip_tags($html)));
+        }
+
+        return ['subject' => $subject, 'html' => $html, 'text' => $text];
+    }
+
+    /** Expand {{#each}} / {{#if}} / {{var}} — matches worker.php renderTemplate. */
+    public static function renderString(string $tpl, array $vars): string {
+        // {{#each key}}...{{/each}}
+        $tpl = preg_replace_callback('/\{\{#each\s+(\w+)\}\}(.*?)\{\{\/each\}\}/s', function ($m) use ($vars) {
+            $items = $vars[$m[1]] ?? [];
+            if (!is_array($items)) return '';
+            $out = '';
+            foreach ($items as $item) {
+                $row = $m[2];
+                if (is_array($item)) {
+                    foreach ($item as $k => $v) {
+                        $row = str_replace('{{' . $k . '}}', htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'), $row);
+                    }
+                } else {
+                    $row = str_replace('{{this}}', htmlspecialchars((string)$item, ENT_QUOTES, 'UTF-8'), $row);
+                }
+                $out .= $row;
+            }
+            return $out;
+        }, $tpl);
+
+        // {{#if key}}...{{/if}}
+        $tpl = preg_replace_callback('/\{\{#if\s+(\w+)\}\}(.*?)\{\{\/if\}\}/s', function ($m) use ($vars) {
+            return !empty($vars[$m[1]]) ? $m[2] : '';
+        }, $tpl);
+
+        // {{var}}
+        foreach ($vars as $k => $v) {
+            if (is_scalar($v)) {
+                $tpl = str_replace('{{' . $k . '}}', htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'), $tpl);
+            }
+        }
+        return preg_replace('/\{\{[^}]+\}\}/', '', $tpl);
+    }
+
+    // ─── Internal helpers ────────────────────────────────────────
+    private static function recipientAllowed(string $recipient, string $template): bool {
+        $limits = [
+            'account_password_reset' => [3, 3600],
+            'account_welcome' => [2, 86400],
+            'cart_reminder' => [1, 86400],
+        ];
+        [$max, $window] = $limits[$template] ?? [10, 3600];
+        $since = gmdate('Y-m-d H:i:s', time() - $window);
+        $stmt = Db::get()->prepare(
+            "SELECT COUNT(*) FROM email_log
+             WHERE recipient = :recipient AND template = :template AND created_at >= :since"
+        );
+        $stmt->execute([':recipient' => $recipient, ':template' => $template, ':since' => $since]);
+        return (int)$stmt->fetchColumn() < $max;
+    }
+
+    private static function defaultLocale(): string {
+        $stores = @json_decode((string)file_get_contents(__DIR__ . '/../stores.json'), true) ?: [];
+        return (string)($stores['default_locale'] ?? 'en');
+    }
+
+    /**
+     * Normalize attachments into a uniform shape:
+     *   [{ 'filename' => 'X.pdf', 'content_type' => 'application/pdf', 'data' => <bytes> }, ...]
+     *
+     * Accepted input items:
+     *   - string  : absolute file path (loaded from disk)
+     *   - array   : { 'path' => '...' }  OR  { 'filename' => '...', 'data' => '...', 'content_type' => '...' }
+     */
+    private static function normalizeAttachments(array $attachments): array {
+        $out = [];
+        foreach ($attachments as $att) {
+            if (is_string($att)) {
+                $att = ['path' => $att];
+            }
+            if (!is_array($att)) continue;
+            if (!empty($att['path']) && is_file($att['path'])) {
+                $data = (string)file_get_contents($att['path']);
+                $out[] = [
+                    'filename'     => (string)($att['filename'] ?? basename($att['path'])),
+                    'content_type' => (string)($att['content_type'] ?? self::guessContentType($att['path'])),
+                    'data'         => $data,
+                ];
+                continue;
+            }
+            if (isset($att['data'])) {
+                $out[] = [
+                    'filename'     => (string)($att['filename'] ?? 'attachment.bin'),
+                    'content_type' => (string)($att['content_type'] ?? 'application/octet-stream'),
+                    'data'         => (string)$att['data'],
+                ];
+            }
+        }
+        return $out;
+    }
+
+    private static function guessContentType(string $path): string {
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        return match ($ext) {
+            'pdf'  => 'application/pdf',
+            'png'  => 'image/png',
+            'jpg', 'jpeg' => 'image/jpeg',
+            'txt'  => 'text/plain',
+            'html', 'htm' => 'text/html',
+            'csv'  => 'text/csv',
+            'xml'  => 'application/xml',
+            'zip'  => 'application/zip',
+            default => 'application/octet-stream',
+        };
+    }
+
+    private static function templateDir(): string {
+        return realpath(__DIR__ . '/..') . '/templates/emails';
+    }
+
+    private static function logInsert(string $to, string $tpl, string $locale, string $subject, string $adapterId, ?int $orderId, array $vars): int {
+        $stmt = Db::get()->prepare("
+            INSERT INTO email_log (order_id, recipient, template, locale, subject, adapter, status, payload)
+            VALUES (:order_id, :recipient, :template, :locale, :subject, :adapter, 'pending', :payload)
+        ");
+        $stmt->execute([
+            ':order_id'  => $orderId,
+            ':recipient' => $to,
+            ':template'  => $tpl,
+            ':locale'    => $locale,
+            ':subject'   => $subject,
+            ':adapter'   => $adapterId,
+            ':payload'   => json_encode($vars, JSON_UNESCAPED_UNICODE),
+        ]);
+        return (int)Db::get()->lastInsertId();
+    }
+
+    private static function logUpdate(int $id, string $status, string $error): void {
+        $sentAt = $status === 'sent' ? (Db::isSqlite() ? "datetime('now')" : 'NOW()') : 'NULL';
+        $stmt = Db::get()->prepare("
+            UPDATE email_log
+               SET status = :status,
+                   error  = :error,
+                   sent_at = {$sentAt}
+             WHERE id = :id
+        ");
+        $stmt->execute([
+            ':status' => $status,
+            ':error'  => $error,
+            ':id'     => $id,
+        ]);
+    }
+}
