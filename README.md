@@ -141,6 +141,23 @@ group, price-list, and customer resolution is always bound to the active store;
 company VAT validation remains an input to the canonical VAT snapshot rather than
 a substitute for legal review.
 
+## Inventory ledger and split fulfillment
+
+Migration `20260801200000_inventory_ledger_fulfillment` adds store-scoped immutable
+`stock_movements`, supplier/PO receipts, explicit `deny`/`backorder`/`preorder`
+policies, bundle component snapshots, personalization requirements, and warehouse-
+split `shipments` with `shipment_items`. Every count, feed sync, reservation,
+release, receipt, shipment, and return records its delta and resulting on-hand and
+reserved balances. Exact guards reject oversell, double release, duplicate receipt,
+and duplicate shipment consumption.
+
+`Inventory::createPurchaseOrder()` enforces supplier minimum and pack size;
+`Inventory::receivePurchaseOrder()` requires an idempotency key. `Fulfillment::planOrder()`
+creates one shipment per frozen warehouse allocation, while `Fulfillment::ship()`
+can dispatch them independently. A final whole-order shipment fails closed while
+backordered units remain. Prices and taxes remain on the unchanged order-item and
+financial snapshots; bundles affect only the auditable physical allocation layer.
+
 ---
 
 ## Migrations

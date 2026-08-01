@@ -60,6 +60,8 @@ single-lang kód je vždy ťažšie než to navrhnúť správne od začiatku.
 
 Katalóg zachováva `products.category_id` ako spätne kompatibilnú primárnu kategóriu a `product_categories` pridáva ďalšie zaradenia. Brand/manufacturer, GTIN, MPN, integer-cent cost, rozmery, variantové médiá a časová dostupnosť sú normalizované polia. DB cenník sa resolvuje podľa store, currency, customer group, variantu, množstva, validity a priority; zvolený cenník a promotion kódy sa zmrazia v `_pricing` order-item snapshot-e pred kanonickým finančným snapshotom. Promotions sú prioritné `exclusive` alebo `stack` pravidlá a podporujú katalógovú cenu, free shipping, buy-X-get-Y a explicitné gift entitlement bez tichého stock pohybu. B2B `companies` a `customer_groups` sú store-scoped; invoice purchase je dostupný iba schválenej aktívnej firme v rámci credit limitu a quote zmrazí splatnosť aj company ID.
 
+`stock_movements` je append-only audit každej store-scoped fyzickej a rezervačnej zmeny s delta aj resulting balance. Produkty a varianty majú explicitnú `deny`/`backorder`/`preorder` politiku; bundle order line zmrazí komponenty, ich sklady a personalization údaje bez zmeny finančného riadku. Supplier products vynucujú minimum/pack size, PO receipt je idempotentný a `shipments` + `shipment_items` umožňujú čiastkové warehouse fulfillmenty. Exact reserve/release/ship guardy a shipment-aware cancellation bránia oversellu, dvojitému restore aj uvoľneniu už odoslaného tovaru.
+
 ### V1 — kompletný commerce engine
 
 **Katalóg + storefront:**

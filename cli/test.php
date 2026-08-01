@@ -236,6 +236,12 @@ if ($mysqlDsn) {
         $g6MigrationMysql->up($my, false);
         $g6MysqlTables = (int)$my->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('brands','product_categories','customer_groups','companies','price_lists','price_list_prices','promotions')")->fetchColumn();
         assert_equals(7, $g6MysqlTables, 'MySQL live: G6 catalog/pricing/B2B migration is applied and idempotent');
+        $g7MigrationMysql = require __DIR__ . '/../migrations/20260801200000_inventory_ledger_fulfillment.php';
+        $g7MigrationMysql->up($my, false);
+        $g7MigrationMysql->up($my, false);
+        $g7MysqlTables = (int)$my->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('stock_movements','suppliers','supplier_products','purchase_orders','purchase_order_items','inventory_receipts','bundle_components','shipments','shipment_items')")->fetchColumn();
+        assert_equals(9, $g7MysqlTables, 'MySQL live: G7 inventory/fulfillment migration is applied and idempotent');
+        foreach (['shipment_items', 'shipments', 'bundle_components', 'inventory_receipts', 'purchase_order_items', 'purchase_orders', 'supplier_products', 'suppliers', 'stock_movements'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['price_list_prices', 'price_lists', 'promotions', 'product_categories', 'companies', 'customer_groups', 'brands'] as $table) $my->exec("DROP TABLE {$table}");
         $my->exec("DROP TABLE api_idempotency");
         $my->exec("DROP TABLE api_clients");
@@ -477,6 +483,12 @@ assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AN
 assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='customer_groups'")->fetchColumn(), 'G6 migration: customer groups exist');
 assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='companies'")->fetchColumn(), 'G6 migration: companies exist');
 assert_equals((int)$pdo->query('SELECT COUNT(*) FROM products')->fetchColumn(), (int)$pdo->query('SELECT COUNT(*) FROM product_categories WHERE is_primary = 1')->fetchColumn(), 'G6 migration: legacy primary categories are preserved');
+$inventoryMigration = require __DIR__ . '/../migrations/20260801200000_inventory_ledger_fulfillment.php';
+$inventoryMigration->up($pdo, true);
+$inventoryMigration->up($pdo, true);
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='stock_movements'")->fetchColumn(), 'G7 migration: stock movement ledger exists and migration is idempotent');
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='shipments'")->fetchColumn(), 'G7 migration: split shipment tables exist');
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='purchase_orders'")->fetchColumn(), 'G7 migration: procurement minimum exists');
 
 // ============================================================
 // TEST 3: CSV Import
@@ -6527,6 +6539,145 @@ assert_equals('ok', (string)Health::liveness()['status'], 'G5 health: liveness h
 assert_true(str_contains($htaccess, 'healthz|readyz'), 'G5 health: public probe routes are explicit');
 assert_true(str_contains($workerProviderSource, 'updateOrderStatus'), 'G5 ERP: worker executes status mutation contract instead of logging a placeholder');
 assert_true(!str_contains($workerProviderSource, 'IntegrationAdapter has no outbound status mutation contract yet'), 'G5 ERP: worker placeholder is removed');
+
+// ============================================================
+// G7: auditable inventory, backorders, bundles and split fulfillment
+// ============================================================
+echo "\n--- G7: Inventory ledger and partial fulfillment ---\n";
+$g7CategoryId = (int)$pdo->query('SELECT id FROM categories ORDER BY id LIMIT 1')->fetchColumn();
+$pdo->exec("DELETE FROM shipment_items");
+$pdo->exec("DELETE FROM shipments");
+$pdo->exec("DELETE FROM inventory_receipts");
+$pdo->exec("DELETE FROM purchase_order_items");
+$pdo->exec("DELETE FROM purchase_orders");
+$pdo->exec("DELETE FROM supplier_products");
+$pdo->exec("DELETE FROM suppliers");
+$pdo->exec("DELETE FROM bundle_components");
+$pdo->exec("DELETE FROM warehouse_stock WHERE sku LIKE 'G7-%'");
+$pdo->exec("DELETE FROM warehouses WHERE code LIKE 'g7-%'");
+$pdo->exec("DELETE FROM products WHERE sku LIKE 'G7-%'");
+$pdo->exec("INSERT INTO warehouses (code, name, priority, is_default, store_id) VALUES ('g7-main','G7 Main',200,0,'default'),('g7-aux','G7 Aux',100,0,'default')");
+$g7Main = (int)$pdo->query("SELECT id FROM warehouses WHERE code='g7-main'")->fetchColumn();
+$g7Aux = (int)$pdo->query("SELECT id FROM warehouses WHERE code='g7-aux'")->fetchColumn();
+
+$g7ProductInsert = $pdo->prepare("INSERT INTO products
+    (store_id, category_id, sku, slug, product_type, name, price, stock, status, inventory_policy, preorder_at, personalization_schema)
+    VALUES ('default', :category, :sku, :slug, :type, :name, :price, :stock, 'active', :policy, :preorder, :personalization)");
+$g7Products = [
+    ['G7-COMP-A','g7-comp-a','simple','G7 Component A',500,3,'backorder',null,'{}'],
+    ['G7-COMP-B','g7-comp-b','simple','G7 Component B',300,10,'deny',null,'{}'],
+    ['G7-BUNDLE','g7-bundle','bundle','G7 Personalized Kit',1500,10,'deny',null,'{"required":["engraving"]}'],
+    ['G7-SPLIT','g7-split','simple','G7 Split Product',900,3,'deny',null,'{}'],
+    ['G7-CANCEL','g7-cancel','simple','G7 Partial Cancel Product',800,3,'deny',null,'{}'],
+    ['G7-PRE','g7-pre','simple','G7 Preorder Product',700,0,'preorder','2030-01-15 00:00:00','{}'],
+];
+foreach ($g7Products as [$sku,$slug,$type,$name,$price,$stock,$policy,$preorder,$personalization]) {
+    $g7ProductInsert->execute([
+        ':category' => $g7CategoryId, ':sku' => $sku, ':slug' => $slug, ':type' => $type,
+        ':name' => $name, ':price' => $price, ':stock' => $stock, ':policy' => $policy,
+        ':preorder' => $preorder, ':personalization' => $personalization,
+    ]);
+}
+$g7ProductIds = [];
+foreach ($pdo->query("SELECT id, sku FROM products WHERE sku LIKE 'G7-%'")->fetchAll(PDO::FETCH_ASSOC) as $row) $g7ProductIds[$row['sku']] = (int)$row['id'];
+$pdo->prepare('INSERT INTO bundle_components (bundle_product_id, component_product_id, quantity, sort_order) VALUES (:bundle,:a,2,1),(:bundle,:b,1,2)')
+    ->execute([':bundle' => $g7ProductIds['G7-BUNDLE'], ':a' => $g7ProductIds['G7-COMP-A'], ':b' => $g7ProductIds['G7-COMP-B']]);
+Warehouse::setStock($g7Main, 'G7-COMP-A', 3, 'count', 'test', 'g7-opening-a');
+Warehouse::setStock($g7Main, 'G7-COMP-B', 10, 'count', 'test', 'g7-opening-b');
+Warehouse::setStock($g7Main, 'G7-SPLIT', 1, 'count', 'test', 'g7-opening-split-main');
+Warehouse::setStock($g7Aux, 'G7-SPLIT', 2, 'count', 'test', 'g7-opening-split-aux');
+Warehouse::setStock($g7Main, 'G7-CANCEL', 1, 'count', 'test', 'g7-opening-cancel-main');
+Warehouse::setStock($g7Aux, 'G7-CANCEL', 2, 'count', 'test', 'g7-opening-cancel-aux');
+Warehouse::setStock($g7Main, 'G7-REL', 4, 'count', 'test', 'g7-opening-release');
+Warehouse::syncProductStock(['G7-COMP-A','G7-COMP-B','G7-SPLIT','G7-CANCEL']);
+StoreContext::activate($deContext);
+assert_equals(0, Warehouse::totalAvailable('G7-SPLIT'), 'G7 store isolation: another store cannot see default-store stock');
+$g7CrossStoreReserveBlocked = false;
+try { Warehouse::reserve('G7-SPLIT', 1); } catch (RuntimeException $e) { $g7CrossStoreReserveBlocked = true; }
+assert_true($g7CrossStoreReserveBlocked, 'G7 store isolation: another store cannot reserve default-store stock');
+Bootstrap::initStoreContext('/', '', 'default');
+
+$g7MissingPersonalization = false;
+try {
+    Inventory::reserveLine(['product_id' => $g7ProductIds['G7-BUNDLE'], 'variant_id' => null, 'sku' => 'G7-BUNDLE', 'attrs' => []], 1);
+} catch (InvalidArgumentException $e) {
+    $g7MissingPersonalization = true;
+}
+assert_true($g7MissingPersonalization, 'G7 personalization: required fields fail closed before reservation');
+assert_true(VariantAvailability::isPurchasable($g7ProductIds['G7-PRE']), 'G7 preorder: explicit preorder remains purchasable at zero stock');
+
+$g7Customer = [
+    'name' => 'G7 Customer', 'email' => 'g7@example.test', 'phone' => '', 'address' => [],
+    'shipping_cost' => 0, 'tax_amount' => 0, 'coupon_discount' => 0, 'currency' => 'eur',
+];
+$g7BundleOrder = Orders::create([[
+    'product_id' => $g7ProductIds['G7-BUNDLE'], 'variant_id' => null, 'sku' => 'G7-BUNDLE',
+    'name' => 'G7 Personalized Kit', 'qty' => 2, 'price' => 1500,
+    'attrs' => ['personalization' => ['engraving' => 'Audit me']],
+]], $g7Customer, 'bank_transfer');
+$g7BundleItem = Orders::items($g7BundleOrder)[0];
+$g7BundleAttrs = json_decode((string)$g7BundleItem['attrs'], true);
+assert_equals(1, (int)$g7BundleItem['backordered_qty'], 'G7 bundle: component shortage freezes one backordered kit');
+assert_equals(2, count($g7BundleAttrs['_bundle_components'] ?? []), 'G7 bundle: component allocation snapshot is frozen on the order line');
+$g7BackorderShipBlocked = false;
+try { Fulfillment::shipOrder($g7BundleOrder); } catch (RuntimeException $e) { $g7BackorderShipBlocked = true; }
+assert_true($g7BackorderShipBlocked, 'G7 backorder: final shipment fails closed until shortage is allocated');
+$g7BundleShipments = Fulfillment::planOrder($g7BundleOrder);
+assert_equals(1, count($g7BundleShipments), 'G7 bundle: available components are grouped into the source warehouse shipment');
+assert_true(Fulfillment::ship($g7BundleShipments[0]), 'G7 fulfillment: available bundle components ship partially');
+assert_true(!Fulfillment::ship($g7BundleShipments[0]), 'G7 fulfillment: repeated shipment cannot double-consume stock');
+assert_equals('partially_fulfilled', (string)Orders::items($g7BundleOrder)[0]['fulfillment_status'], 'G7 fulfillment: backordered bundle remains partially fulfilled');
+
+$g7SplitOrder = Orders::create([[
+    'product_id' => $g7ProductIds['G7-SPLIT'], 'variant_id' => null, 'sku' => 'G7-SPLIT',
+    'name' => 'G7 Split Product', 'qty' => 3, 'price' => 900, 'attrs' => [],
+]], $g7Customer, 'bank_transfer');
+$g7SplitShipments = Fulfillment::planOrder($g7SplitOrder);
+assert_equals(2, count($g7SplitShipments), 'G7 fulfillment: one order line splits across two warehouses');
+assert_true(Fulfillment::ship($g7SplitShipments[0]), 'G7 fulfillment: first partial warehouse shipment succeeds');
+assert_equals('partially_fulfilled', (string)Orders::items($g7SplitOrder)[0]['fulfillment_status'], 'G7 fulfillment: line reports partial state after first shipment');
+assert_true(Fulfillment::ship($g7SplitShipments[1]), 'G7 fulfillment: second warehouse shipment succeeds');
+assert_equals('fulfilled', (string)Orders::items($g7SplitOrder)[0]['fulfillment_status'], 'G7 fulfillment: line is fulfilled only after all warehouse shipments');
+assert_equals(0, Warehouse::totalAvailable('G7-SPLIT'), 'G7 fulfillment: shipment consumes exact reserved on-hand stock');
+
+$g7CancelOrder = Orders::create([[
+    'product_id' => $g7ProductIds['G7-CANCEL'], 'variant_id' => null, 'sku' => 'G7-CANCEL',
+    'name' => 'G7 Partial Cancel Product', 'qty' => 3, 'price' => 800, 'attrs' => [],
+]], $g7Customer, 'bank_transfer');
+OrderWorkflow::transition($g7CancelOrder, 'paid');
+OrderWorkflow::transition($g7CancelOrder, 'processing');
+$g7CancelShipments = Fulfillment::planOrder($g7CancelOrder);
+assert_true(Fulfillment::ship($g7CancelShipments[0]), 'G7 cancellation: first warehouse can ship before order cancellation');
+OrderWorkflow::transition($g7CancelOrder, 'cancelled');
+assert_equals(2, Warehouse::totalAvailable('G7-CANCEL'), 'G7 cancellation: only unshipped warehouse reservation is released');
+assert_equals(0, (int)$pdo->query("SELECT SUM(reserved) FROM warehouse_stock WHERE sku='G7-CANCEL'")->fetchColumn(), 'G7 cancellation: no reservation leaks after partial shipment cancellation');
+
+$g7Release = Warehouse::reserve('G7-REL', 2);
+Warehouse::release('G7-REL', $g7Release, 'test', 'g7-release');
+$g7DoubleReleaseBlocked = false;
+try { Warehouse::release('G7-REL', $g7Release, 'test', 'g7-release-again'); } catch (RuntimeException $e) { $g7DoubleReleaseBlocked = true; }
+assert_true($g7DoubleReleaseBlocked, 'G7 reservation: exact release guard rejects a double restore');
+assert_equals(0, (int)$pdo->query("SELECT reserved FROM warehouse_stock WHERE warehouse_id={$g7Main} AND sku='G7-REL'")->fetchColumn(), 'G7 reservation: failed double release leaves reservation unchanged');
+
+$pdo->exec("INSERT INTO suppliers (store_id, code, name) VALUES ('default','g7-supplier','G7 Supplier')");
+$g7Supplier = (int)$pdo->lastInsertId();
+$pdo->prepare("INSERT INTO supplier_products (supplier_id, sku, cost_price, min_order_qty, pack_size) VALUES (:supplier,'G7-COMP-A',250,4,2)")
+    ->execute([':supplier' => $g7Supplier]);
+$g7MinimumBlocked = false;
+try { Inventory::createPurchaseOrder($g7Supplier, $g7Main, 'G7-PO-BAD', [['sku' => 'G7-COMP-A', 'quantity' => 3]]); } catch (InvalidArgumentException $e) { $g7MinimumBlocked = true; }
+assert_true($g7MinimumBlocked, 'G7 procurement: supplier minimum and pack size fail closed');
+$g7Po = Inventory::createPurchaseOrder($g7Supplier, $g7Main, 'G7-PO-1', [['sku' => 'G7-COMP-A', 'quantity' => 4]]);
+assert_true(Inventory::receivePurchaseOrder($g7Po, 'G7-COMP-A', 2, 'g7-receipt-1'), 'G7 procurement: partial PO receipt posts stock');
+assert_true(!Inventory::receivePurchaseOrder($g7Po, 'G7-COMP-A', 2, 'g7-receipt-1'), 'G7 procurement: repeated receipt idempotency key is a no-op');
+assert_equals(2, (int)$pdo->query("SELECT received_qty FROM purchase_order_items WHERE purchase_order_id={$g7Po}")->fetchColumn(), 'G7 procurement: repeated receipt cannot overstate received quantity');
+assert_equals(2, (int)$pdo->query("SELECT qty FROM warehouse_stock WHERE warehouse_id={$g7Main} AND sku='G7-COMP-A'")->fetchColumn(), 'G7 procurement: physical stock matches the single accepted receipt');
+$g7MovementTypes = $pdo->query("SELECT DISTINCT movement_type FROM stock_movements WHERE sku LIKE 'G7-%'")->fetchAll(PDO::FETCH_COLUMN);
+foreach (['count','reserve','release','shipment','receipt','backorder'] as $g7MovementType) {
+    assert_true(in_array($g7MovementType, $g7MovementTypes, true), "G7 ledger: {$g7MovementType} movement is auditable");
+}
+$g7LedgerRows = $pdo->query("SELECT quantity_delta, reserved_delta, on_hand_after, reserved_after FROM stock_movements WHERE sku='G7-SPLIT' ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
+assert_true(count($g7LedgerRows) >= 6, 'G7 ledger: split stock keeps opening, reserve and shipment history per warehouse');
+assert_true(array_reduce($g7LedgerRows, static fn(bool $ok, array $row): bool => $ok && (int)$row['on_hand_after'] >= 0 && (int)$row['reserved_after'] >= 0, true), 'G7 ledger: every resulting stock snapshot preserves non-negative invariants');
 
 require __DIR__ . '/test-update.php';
 

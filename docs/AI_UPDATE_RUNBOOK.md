@@ -144,6 +144,14 @@ Before enabling invoice purchase, confirm company approval, VAT evidence, intege
 
 Rollback restores the pre-migration database and code together. If orders were accepted after enabling new prices, stop and reconcile those externally visible orders before rollback; never recreate their totals from the old catalog or delete them to make the schema appear reversible.
 
+## Inventory ledger and fulfillment rollout
+
+Migration `20260801200000_inventory_ledger_fulfillment` is additive but backfills one `opening_balance` movement per existing warehouse/SKU. Keep writers and workers stopped, apply the migration, then prove that each `warehouse_stock` row has exactly one matching opening key and unchanged `qty`/`reserved` values. Verify warehouses and stock remain owned by `default` for legacy data and that another store cannot read or reserve them.
+
+Before resuming traffic, run one controlled count, reserve/release, two-warehouse order, partial shipment, cancellation, and idempotent PO receipt. Reconcile every operation against `stock_movements.quantity_delta`, `reserved_delta`, `on_hand_after`, and `reserved_after`; no resulting balance may be negative. Enable `backorder` or `preorder` only per reviewed SKU. A backordered order cannot use the whole-order shipped transition until physical allocation exists. Bundle definitions and personalization schemas affect new orders only; existing financial snapshots and totals must remain byte-for-byte unchanged.
+
+Rollback must restore code and the pre-migration database snapshot together. If any receipt or shipment occurred after apply, stop and reconcile the physical warehouse and external carrier/ERP state before rollback; never replay a receipt key, shipment, or order mutation merely to recreate ledger rows.
+
 ## Rollback procedure
 
 Keep traffic and writers stopped. Review whether any package-managed file changed after the update, then run:

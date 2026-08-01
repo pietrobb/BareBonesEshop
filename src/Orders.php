@@ -22,11 +22,10 @@ class Orders {
             $orderItems = [];
             $subtotal = 0;
 
-            // 1. Atomically reserve stock for each item
-            $warehouseAllocations = []; // track per-SKU warehouse allocations for notes
+            // 1. Atomically reserve stock for each item and freeze its exact allocation.
             foreach ($cartItems as $item) {
                 // Reject non-positive quantity or negative price: a negative qty would
-                // INCREASE stock (stock - (-n)) and lower the subtotal (price * -n).
+                // increase stock and lower the subtotal.
                 $requestedQty = (int)($item['qty'] ?? 0);
                 if ($requestedQty <= 0 || (int)($item['price'] ?? 0) < 0) {
                     $outOfStock[] = ($item['name'] ?? ($item['sku'] ?? 'item'))
@@ -35,22 +34,14 @@ class Orders {
                 }
                 $isDigital = VariantAvailability::isDigitalProduct((int)$item['product_id']);
                 $qty = $isDigital ? 1 : $requestedQty;
-                if (!$isDigital && !empty($item['variant_id'])) {
-                    $stmt = $db->prepare("UPDATE variants SET stock = stock - :qty WHERE id = :id AND stock >= :qty");
-                    $stmt->execute([':qty' => $qty, ':id' => $item['variant_id']]);
-                    if ($stmt->rowCount() === 0) {
-                        $outOfStock[] = $item['name'] . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : '');
-                        continue;
-                    }
-                } elseif (!$isDigital) {
-                    // Use warehouse-based reservation if warehouses exist
+                $inventorySnapshot = [
+                    'allocations' => [], 'bundle_components' => [],
+                    'reserved_qty' => 0, 'backordered_qty' => 0, 'preorder_at' => null,
+                ];
+                if (!$isDigital) {
                     try {
-                        $allocs = Warehouse::reserve($item['sku'], $qty);
-                        $warehouseAllocations[$item['sku']] = $allocs;
-                        // Also decrement products.stock to keep it in sync
-                        $db->prepare("UPDATE products SET stock = stock - :qty WHERE id = :id")
-                           ->execute([':qty' => $qty, ':id' => $item['product_id']]);
-                    } catch (\RuntimeException $e) {
+                        $inventorySnapshot = Inventory::reserveLine($item, $qty);
+                    } catch (\RuntimeException | \InvalidArgumentException $e) {
                         $outOfStock[] = $item['name'] . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : '');
                         continue;
                     }
@@ -58,10 +49,13 @@ class Orders {
                 $total = $item['price'] * $qty;
                 $subtotal += $total;
 
-                // Merge warehouse allocations into attrs for restore tracking
+                // Freeze physical, bundle and personalization facts on the order line.
                 $itemAttrs = $item['attrs'] ?? [];
-                if (!empty($warehouseAllocations[$item['sku']])) {
-                    $itemAttrs['_warehouse_allocations'] = $warehouseAllocations[$item['sku']];
+                if (!empty($inventorySnapshot['allocations'])) {
+                    $itemAttrs['_inventory_allocations'] = $inventorySnapshot['allocations'];
+                }
+                if (!empty($inventorySnapshot['bundle_components'])) {
+                    $itemAttrs['_bundle_components'] = $inventorySnapshot['bundle_components'];
                 }
 
                 $orderItems[] = [
@@ -70,6 +64,10 @@ class Orders {
                     'sku'        => $item['sku'],
                     'name'       => $item['name'] . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : ''),
                     'quantity'   => $qty,
+                    'reserved_qty' => (int)$inventorySnapshot['reserved_qty'],
+                    'backordered_qty' => (int)$inventorySnapshot['backordered_qty'],
+                    'fulfillment_status' => (int)$inventorySnapshot['backordered_qty'] > 0 ? 'backordered' : 'unfulfilled',
+                    'preorder_at' => $inventorySnapshot['preorder_at'],
                     'unit_price' => $item['price'],
                     'total'      => $total,
                     'attrs'      => json_encode($itemAttrs),
@@ -227,10 +225,12 @@ class Orders {
 
             // 4. Insert order items (with per-line VAT snapshot when available)
             $itemStmt = $db->prepare("
-                INSERT INTO order_items (order_id, product_id, variant_id, sku, name, quantity, unit_price, total, attrs,
-                    vat_class, vat_rate, vat_amount, net_amount)
-                VALUES (:oid, :pid, :vid, :sku, :name, :qty, :price, :total, :attrs,
-                    :vclass, :vrate, :vamount, :namount)
+                INSERT INTO order_items (order_id, product_id, variant_id, sku, name, quantity,
+                    reserved_qty, backordered_qty, fulfillment_status, preorder_at,
+                    unit_price, total, attrs, vat_class, vat_rate, vat_amount, net_amount)
+                VALUES (:oid, :pid, :vid, :sku, :name, :qty,
+                    :reserved_qty, :backordered_qty, :fulfillment_status, :preorder_at,
+                    :price, :total, :attrs, :vclass, :vrate, :vamount, :namount)
             ");
             foreach ($orderItems as $oi) {
                 $itemStmt->execute([
@@ -240,6 +240,10 @@ class Orders {
                     ':sku'    => $oi['sku'],
                     ':name'   => $oi['name'],
                     ':qty'    => $oi['quantity'],
+                    ':reserved_qty' => $oi['reserved_qty'],
+                    ':backordered_qty' => $oi['backordered_qty'],
+                    ':fulfillment_status' => $oi['fulfillment_status'],
+                    ':preorder_at' => $oi['preorder_at'],
                     ':price'  => $oi['unit_price'],
                     ':total'  => $oi['total'],
                     ':attrs'  => $oi['attrs'],
@@ -476,26 +480,13 @@ class Orders {
             }
             foreach ($items as $item) {
                 if (VariantAvailability::isDigitalProduct((int)$item['product_id'])) continue;
-                if (!empty($item['variant_id'])) {
-                    $stmt = $db->prepare("UPDATE variants SET stock = stock + :qty WHERE id = :id");
-                    $stmt->execute([':qty' => $item['quantity'], ':id' => $item['variant_id']]);
+                if ($mode === 'return') {
+                    Inventory::returnOrderItem($item, $orderId);
                 } else {
-                    $attrs = json_decode($item['attrs'] ?? '{}', true);
-                    $allocs = $attrs['_warehouse_allocations'] ?? null;
-
-                    if ($allocs) {
-                        if ($mode === 'return') {
-                            // Physical return: add qty back to the exact warehouses
-                            Warehouse::restock($item['sku'], $allocs);
-                        } else {
-                            // Release back to exact warehouses where stock was reserved
-                            Warehouse::release($item['sku'], $allocs);
-                        }
-                        Warehouse::syncProductStock([$item['sku']]);
-                    } else {
-                        // Fallback: no allocation info, add to default warehouse
-                        Products::incrementStock($item['product_id'], $item['quantity']);
-                    }
+                    Inventory::releaseOrderItem($item, $orderId);
+                }
+                foreach (Inventory::reservationLines($item) as $line) {
+                    Warehouse::syncProductStock([(string)$line['sku']]);
                 }
             }
 

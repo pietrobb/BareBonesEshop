@@ -491,8 +491,15 @@ class Products {
         if ($sku) {
             $wh = Warehouse::defaultWarehouse();
             if ($wh) {
-                $cur = Warehouse::totalAvailable($sku);
-                Warehouse::setStock((int)$wh['id'], $sku, $cur + $qty);
+                $rows = Warehouse::stockBySku((string)$sku);
+                $currentOnHand = 0;
+                foreach ($rows as $row) {
+                    if ((int)$row['id'] === (int)$wh['id']) {
+                        $currentOnHand = (int)$row['qty'];
+                        break;
+                    }
+                }
+                Warehouse::setStock((int)$wh['id'], (string)$sku, $currentOnHand + $qty, 'legacy_restore');
             }
             Warehouse::syncProductStock([$sku]);
         } else {
