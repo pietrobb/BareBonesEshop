@@ -1,2 +1,2 @@
 # Signed release artifacts must retain their exact bytes on every platform.
-releases/** -text
+releases/** binary
