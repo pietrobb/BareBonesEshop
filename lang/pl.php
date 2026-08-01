@@ -1,5 +1,7 @@
 <?php
-return [
+return array_replace(require __DIR__ . '/en.php', [
+    'skip_to_content' => 'Przejdź do głównej treści',
+
     // Product
     'add_to_cart'      => 'Dodaj do koszyka',
     'out_of_stock'     => 'Wyprzedane',
@@ -332,4 +334,4 @@ return [
     'cookie_banner.preferences'             => 'Ustaw',
     'cookie_banner.save_preferences'        => 'Zapisz wybór',
     'cookie_banner.policy_link'             => 'Polityka cookies',
-];
+]);

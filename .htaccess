@@ -2,6 +2,7 @@ RewriteEngine On
 
 # Deny private/runtime/source trees before the generic existing-file bypass.
 RewriteRule ^(?:storage|db|jobs|logs|config|cli|src|migrations|adapters|lang|demo|docs|forms|blocks|data|templates)(?:/|$) - [F,L,NC]
+RewriteRule ^themes/[^/]+/(?:theme\.json|blocks(?:/|$)) - [F,L,NC]
 
 # BBF's browser client and handler are public integration points; all other
 # vendor code stays private. Only the documented import example is public.
@@ -52,9 +53,11 @@ RewriteRule ^api\.php$ cache/sk/categories.json [L,T=application/json]
 # SEO-friendly URLs
 # ============================================================
 
-# XML sitemap + robots.txt (dynamic, absolute-URL aware)
+# XML sitemap, robots.txt, and store-scoped commerce feeds
 RewriteRule ^sitemap\.xml$ sitemap.php [L]
 RewriteRule ^robots\.txt$ robots.php [L]
+RewriteRule ^feeds/google\.xml$ feed.php?channel=google [QSA,L]
+RewriteRule ^feeds/meta\.csv$ feed.php?channel=meta [QSA,L]
 
 # ============================================================
 # Multi-store URL prefixes: /de/..., /en/...
@@ -97,6 +100,9 @@ RewriteRule ^.+/?$ - [F,L]
 
 RewriteCond %{REQUEST_FILENAME} -f
 RewriteRule ^ - [L]
+
+# Exact-path redirects managed in admin; unmatched paths remain a real 404.
+RewriteRule ^(.+)$ redirect.php?path=/$1 [QSA,L]
 
 # ============================================================
 # Compression

@@ -1,5 +1,7 @@
 <?php
 return [
+    'skip_to_content' => 'Preskočiť na hlavný obsah',
+
     // Product
     'add_to_cart'      => 'Pridať do košíka',
     'out_of_stock'     => 'Vypredané',

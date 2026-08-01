@@ -1083,7 +1083,7 @@ echo Template::page('product', [
 ```php
 // index.php — homepage
 echo Template::page('homepage', [
-    'banners'    => CMS::banners(),
+    'banners'    => ContentService::banners('homepage'),
     'categories' => ['featured' => Categories::featured()],
     'products'   => [
         'new'  => Products::latest(8),
@@ -1092,6 +1092,23 @@ echo Template::page('homepage', [
     't' => I18n::all(),
 ]);
 ```
+
+### Produkčné theme balíky
+
+Store vyberá balík kľúčom `theme` v `stores.json`. Balík `themes/{code}/theme.json`
+deklaruje semver verziu, CSS/JS assety a byte budgety; `blocks/` obsahuje iba
+override bloky a `assets/` jediný verejný obsah balíka. `Template::activate()` sa
+volá spolu so `StoreContext`, validuje názov balíka a asset paths, invaliduje cache
+pri prepnutí store/theme a verziuje asset URL. Pri renderi sa hľadá store override,
+potom `themes/{theme}/blocks`, legacy theme override a napokon base block.
+
+`Template::document()` poskytuje jednotný SSR shell s header/main/footer landmarks,
+skip linkom, DB navigáciou, aktívnymi theme assetmi, SEO head a consent-aware hookom.
+`ContentService` viaže menu, časované bannery, landing pages a redirecty na aktívny
+store; admin mutácie sú CSRF-chránené, autorizované, sanitizované a auditované.
+`MarketingFeed` používa rovnaký store/catalog scope a integer-cent cenu pre Google
+Merchant XML aj Meta CSV. CI spúšťa parity a `cli/quality-gates.php`, ktorý kontroluje
+WCAG automatizovateľné invarianty a package performance budgety.
 
 ### Žonglovanie — prečo je to flexibilné
 

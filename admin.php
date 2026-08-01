@@ -58,6 +58,7 @@ $pagePermissions = [
     'gdpr'       => 'gdpr.view',
     'pages'      => 'products.edit',
     'page_edit'  => 'products.edit',
+    'content'    => 'products.edit',
     'attributes' => 'products.edit',
     'attribute'  => 'products.edit',
     'warehouses' => 'import',
@@ -94,6 +95,7 @@ $title = match($page) {
     'gdpr'       => I18n::t('admin.title.gdpr'),
     'pages'      => I18n::t('admin.title.cms_pages'),
     'page_edit'  => I18n::t('admin.title.cms_page_edit'),
+    'content'    => 'Content & Marketing',
     'attributes' => I18n::t('admin.title.attributes'),
     'attribute'  => isset($_GET['id']) ? I18n::t('admin.title.attribute_edit') : I18n::t('admin.title.attribute_new'),
     'warehouses' => I18n::t('admin.title.warehouses'),
@@ -180,6 +182,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
     <?php if (Security::adminCan('import')): ?><a href="admin.php?p=warehouses" class="<?= $page==='warehouses'||$page==='warehouse'?'active':'' ?>"><?= esc(I18n::t('admin.nav.warehouses')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('import')): ?><a href="admin.php?p=feeds" class="<?= $page==='feeds'||$page==='feed'?'active':'' ?>"><?= esc(I18n::t('admin.nav.feeds')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=pages" class="<?= $page==='pages'?'active':'' ?>"><?= esc(I18n::t('admin.nav.cms_pages')) ?></a><?php endif; ?>
+    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=content" class="<?= $page==='content'?'active':'' ?>">Content & Marketing</a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=shipping" class="<?= $page==='shipping'?'active':'' ?>">Doprava</a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=payments" class="<?= $page==='payments'?'active':'' ?>">Platby</a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=digital_assets" class="<?= $page==='digital_assets'?'active':'' ?>">Digitálne súbory</a><?php endif; ?>
@@ -206,6 +209,7 @@ match($page) {
     'gdpr'      => pageGdpr(),
     'pages'      => pageCmsPages(),
     'page_edit'  => pageCmsEdit(),
+    'content'    => pageContentMarketing(),
     'attributes' => pageAttributes(),
     'attribute'  => pageAttribute(),
     'warehouses' => pageWarehouses(),
@@ -1602,6 +1606,125 @@ function pageCustomerDetail(): void {
 }
 
 // ============================================================
+// Content & Marketing
+// ============================================================
+
+function pageContentMarketing(): void {
+    $menus = ContentService::all('menu');
+    $banners = ContentService::all('banner');
+    $redirects = ContentService::all('redirect');
+    $stmt = Db::get()->prepare("SELECT * FROM pages WHERE store_id=:store AND page_type='landing' ORDER BY updated_at DESC");
+    $stmt->execute([':store' => StoreContext::current()->id()]);
+    $landings = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $csrf = Security::csrfToken();
+    ?>
+    <h1>Content &amp; Marketing <span class="muted"><?= esc(StoreContext::current()->id()) ?></span></h1>
+    <p class="muted" style="margin-bottom:1rem">Theme: <code><?= esc((string)(StoreContext::current()->config()['theme'] ?? 'default')) ?></code> ·
+        <a href="/feeds/google.xml" target="_blank" rel="noopener">Google Merchant XML</a> ·
+        <a href="/feeds/meta.csv" target="_blank" rel="noopener">Meta CSV</a></p>
+    <div class="grid grid-4">
+        <section class="card">
+            <h2>Menu item</h2>
+            <form method="post" action="admin.php?p=content&amp;action=save">
+                <input type="hidden" name="csrf_token" value="<?= esc($csrf) ?>"><input type="hidden" name="content_type" value="menu">
+                <div class="form-row"><label>Menu code<input name="menu_code" value="primary" required pattern="[a-z0-9_-]+"></label></div>
+                <div class="form-row"><label>Locale<input name="locale" value="*" required></label></div>
+                <div class="form-row"><label>Label<input name="label" maxlength="191" required></label></div>
+                <div class="form-row"><label>Local URL<input name="url" value="/" required></label></div>
+                <div class="form-row"><label>Order<input name="sort_order" type="number" value="0"></label></div>
+                <label><input name="active" type="checkbox" value="1" checked> Active</label><br><button class="btn btn-primary">Save menu item</button>
+            </form>
+        </section>
+        <section class="card">
+            <h2>Banner</h2>
+            <form method="post" action="admin.php?p=content&amp;action=save">
+                <input type="hidden" name="csrf_token" value="<?= esc($csrf) ?>"><input type="hidden" name="content_type" value="banner">
+                <div class="form-row"><label>Slot<input name="slot" value="homepage" required pattern="[a-z0-9_-]+"></label></div>
+                <div class="form-row"><label>Locale<input name="locale" value="*" required></label></div>
+                <div class="form-row"><label>Title<input name="title" maxlength="191" required></label></div>
+                <div class="form-row"><label>Body<textarea name="body" rows="2"></textarea></label></div>
+                <div class="form-row"><label>Image URL<input name="image_url" placeholder="/assets/img/banner.jpg"></label></div>
+                <div class="form-row"><label>Link URL<input name="link_url" placeholder="/category/sale"></label></div>
+                <div class="form-row"><label>Link label<input name="link_label" maxlength="191"></label></div>
+                <div class="form-row"><label>Starts<input name="starts_at" type="datetime-local"></label></div>
+                <div class="form-row"><label>Ends<input name="ends_at" type="datetime-local"></label></div>
+                <label><input name="active" type="checkbox" value="1" checked> Active</label><br><button class="btn btn-primary">Save banner</button>
+            </form>
+        </section>
+        <section class="card">
+            <h2>Landing page</h2>
+            <form method="post" action="admin.php?p=content&amp;action=save">
+                <input type="hidden" name="csrf_token" value="<?= esc($csrf) ?>"><input type="hidden" name="content_type" value="landing">
+                <div class="form-row"><label>Slug<input name="slug" required pattern="[a-z0-9-]+"></label></div>
+                <div class="form-row"><label>Title<input name="title" maxlength="191" required></label></div>
+                <div class="form-row"><label>Body<textarea name="body" rows="4"></textarea></label></div>
+                <div class="form-row"><label>SEO title<input name="seo_title" maxlength="191"></label></div>
+                <div class="form-row"><label>Meta description<textarea name="meta_description" maxlength="320" rows="2"></textarea></label></div>
+                <div class="form-row"><label>Status<select name="status"><option value="draft">Draft</option><option value="active">Active</option></select></label></div>
+                <button class="btn btn-primary">Save landing page</button>
+            </form>
+        </section>
+        <section class="card">
+            <h2>Redirect</h2>
+            <form method="post" action="admin.php?p=content&amp;action=save">
+                <input type="hidden" name="csrf_token" value="<?= esc($csrf) ?>"><input type="hidden" name="content_type" value="redirect">
+                <div class="form-row"><label>Source path<input name="source_path" placeholder="/old-path" required></label></div>
+                <div class="form-row"><label>Target path<input name="target_url" placeholder="/new-path" required></label></div>
+                <div class="form-row"><label>Status<select name="http_status"><option>301</option><option>302</option><option>307</option><option>308</option></select></label></div>
+                <label><input name="active" type="checkbox" value="1" checked> Active</label><br><button class="btn btn-primary">Save redirect</button>
+            </form>
+        </section>
+    </div>
+    <?php foreach ([
+        'menu' => ['Menu items', $menus, ['menu_code','locale','label','url']],
+        'banner' => ['Banners', $banners, ['slot','locale','title','link_url']],
+        'landing' => ['Landing pages', $landings, ['slug','title','status','seo_title']],
+        'redirect' => ['Redirects', $redirects, ['source_path','target_url','http_status','active']],
+    ] as $type => [$heading, $rows, $columns]): ?>
+    <section class="card"><h2><?= esc($heading) ?></h2><div class="table-scroll"><table><tr>
+        <?php foreach ($columns as $column): ?><th><?= esc($column) ?></th><?php endforeach; ?><th>Actions</th></tr>
+        <?php foreach ($rows as $row): ?><tr><?php foreach ($columns as $column): ?><td><?= esc((string)($row[$column] ?? '')) ?></td><?php endforeach; ?><td>
+            <form method="post" action="admin.php?p=content&amp;action=delete" data-confirm="Delete this content record?">
+                <input type="hidden" name="csrf_token" value="<?= esc($csrf) ?>"><input type="hidden" name="content_type" value="<?= esc($type) ?>"><input type="hidden" name="id" value="<?= (int)$row['id'] ?>">
+                <button class="btn btn-danger btn-sm">Delete</button>
+            </form></td></tr><?php endforeach; ?>
+        <?php if (!$rows): ?><tr><td colspan="<?= count($columns) + 1 ?>" class="muted">No records.</td></tr><?php endif; ?>
+    </table></div></section>
+    <?php endforeach;
+}
+
+function handleContentSave(): void {
+    Security::adminRequire('products.edit');
+    try {
+        $type = (string)($_POST['content_type'] ?? '');
+        match($type) {
+            'menu' => ContentService::saveMenu($_POST),
+            'banner' => ContentService::saveBanner($_POST),
+            'landing' => ContentService::saveLanding($_POST),
+            'redirect' => ContentService::saveRedirect($_POST),
+            default => throw new InvalidArgumentException('Unknown content type'),
+        };
+        setFlash('ok', 'Content saved.');
+    } catch (Throwable $e) {
+        setFlash('err', $e->getMessage());
+    }
+    header('Location: admin.php?p=content');
+    exit;
+}
+
+function handleContentDelete(): void {
+    Security::adminRequire('products.edit');
+    try {
+        ContentService::delete((string)($_POST['content_type'] ?? ''), Security::int($_POST['id'] ?? 0));
+        setFlash('ok', 'Content deleted.');
+    } catch (Throwable $e) {
+        setFlash('err', $e->getMessage());
+    }
+    header('Location: admin.php?p=content');
+    exit;
+}
+
+// ============================================================
 // CMS Pages
 // ============================================================
 
@@ -1801,6 +1924,8 @@ function handlePost(string $page, string $action): void {
         'gdpr:anonymize' => handleGdprAnonymize(),
         'page_edit:save' => handleCmsPageSave(),
         'pages:delete'   => handleCmsPageDelete(),
+        'content:save'   => handleContentSave(),
+        'content:delete' => handleContentDelete(),
         'attribute:save' => handleAttributeSave(),
         'attributes:delete' => handleAttributeDelete(),
         'warehouse:save'    => handleWarehouseSave(),

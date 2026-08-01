@@ -32,6 +32,7 @@ class Bootstrap {
     ): StoreContext {
         $context = StoreContext::resolve(self::stores(), $uri, $host, $storeId, $channel);
         StoreContext::activate($context);
+        Template::activate($context);
         return $context;
     }
 
@@ -42,8 +43,13 @@ class Bootstrap {
      */
     public static function initLocale(?string $uri = null): string {
         $uri = $uri ?? ($_SERVER['REQUEST_URI'] ?? '');
-        self::initStoreContext($uri);
+        $context = self::initStoreContext($uri);
         $lang = I18n::detectLocale($uri);
+        $requested = strtolower((string)($_GET['lang'] ?? ''));
+        $languages = array_map('strtolower', (array)($context->config()['languages'] ?? []));
+        if ($requested !== '' && preg_match('/^[a-z]{2}(?:-[a-z]{2})?$/', $requested) && in_array($requested, $languages, true)) {
+            $lang = $requested;
+        }
         I18n::setLocale($lang);
         return $lang;
     }

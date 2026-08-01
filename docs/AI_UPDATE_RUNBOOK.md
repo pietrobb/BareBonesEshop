@@ -172,6 +172,16 @@ Start with `queue.backend=database` unless the deployment has an operated Redis 
 
 Rollback restores code and database together. Stop workers first; do not switch queue backends while jobs remain pending unless jobs are explicitly drained or reconciled, because backends do not mirror each other. Preserve externally completed mail, payment, and webhook facts during reconciliation.
 
+## Theme, content, feeds, i18n, and accessibility rollout
+
+Migration `20260801230000_theme_content_marketing` is additive. Keep writers stopped, apply it, and confirm `content_menu_items`, `content_banners`, and `content_redirects` exist and that existing `pages` rows retain their body, status, translations, and `store_id=default`. New page SEO/type/template columns have neutral defaults; menus, banners, and redirects start empty, so the storefront keeps its legacy navigation and hero until content is deliberately published.
+
+Set every store's reviewed `theme` code and verify its `theme.json` plus declared assets are present before traffic resumes. Manifests and block source must return HTTP 403 while declared `/themes/{theme}/assets/*` files remain available with long-lived caching. Configure an absolute trusted `app_url`, then fetch `/feeds/google.xml` and `/feeds/meta.csv`; reconcile one product ID, URL, availability, image, currency, and integer-cent-derived price against the active store catalog. Another store must not see those content rows or products.
+
+Run `php cli/i18n-parity.php` and `php cli/quality-gates.php` and retain their output. The latter proves declared CSS/JS/block byte budgets and automated WCAG 2.2 AA invariants, but the operator must still keyboard-test focus order, skip navigation, dialogs and checkout, inspect 200%/400% zoom and reflow, and test representative pages with a screen reader. Confirm analytics/marketing hooks are absent with no consent and after reject-all, and are emitted only for the opted-in category. Publish a draft landing page, scheduled banner, menu item, and redirect in one non-production store; review sanitized output, canonical/hreflang, audit rows, redirect status, and legacy fallback before broader publication.
+
+Rollback restores code and the pre-migration database snapshot together. If redirects or feed URLs were consumed externally, remove or update them in Google/Meta and caches before rollback; never preserve new content tables with old code or delete content solely to make rollback appear clean.
+
 ## Rollback procedure
 
 Keep traffic and writers stopped. Review whether any package-managed file changed after the update, then run:

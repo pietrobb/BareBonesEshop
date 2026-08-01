@@ -142,16 +142,20 @@ Security::headers();
 ?>
 
     <link rel="stylesheet" href="/shop.css">
+    <?php foreach (Template::assets()['css'] as $themeCss): ?><link rel="stylesheet" href="<?= esc($themeCss) ?>"><?php endforeach; ?>
 </head>
 <body>
+<a class="skip-link" href="#main-content"><?= esc(I18n::t('skip_to_content')) ?></a>
 <?= Template::render('global/header', [
     't' => $t,
-    'cart_count' => $cart['count'],
+    'shop_name' => StoreContext::current()->config()['name'] ?? 'BareBones Shop',
+    'navigation' => ContentService::menu('primary', $lang),
+    'cart' => ['count' => $cart['count']],
     'csrf_token' => $csrfToken,
     'lang' => $lang,
 ]) ?>
 
-<main class="container">
+<main id="main-content" class="container" tabindex="-1">
     <?php if (!empty($breadcrumb)): ?>
     <?= Template::render('global/breadcrumb', [
         'breadcrumb' => $breadcrumb,
@@ -268,5 +272,7 @@ Security::headers();
     };
 </script>
 <script src="/shop.js"></script>
+<?php foreach (Template::assets()['js'] as $themeJs): ?><script src="<?= esc($themeJs) ?>" defer></script><?php endforeach; ?>
+<?= MarketingConsent::hooks($_COOKIE, Security::cspNonce()) ?>
 </body>
 </html>

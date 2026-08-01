@@ -1,5 +1,7 @@
 <?php
-return [
+return array_replace(require __DIR__ . '/en.php', [
+    'skip_to_content' => 'Přejít na hlavní obsah',
+
     // Product
     'add_to_cart'      => 'Přidat do košíku',
     'out_of_stock'     => 'Vyprodáno',
@@ -332,4 +334,4 @@ return [
     'cookie_banner.preferences'             => 'Nastavit',
     'cookie_banner.save_preferences'        => 'Uložit volbu',
     'cookie_banner.policy_link'             => 'Více o cookies',
-];
+]);

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="{{locale}}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>{{title}}</title>
+    <link rel="stylesheet" href="/shop.css">
+    {{#each assets.css}}<link rel="stylesheet" href="{{this}}">{{/each}}
+    {{{seo_head}}}
+</head>
+<body>
+<a class="skip-link" href="#main-content">{{t.skip_to_content}}</a>
+{{> global/header}}
+<main id="main-content" class="container" tabindex="-1">
+    {{{content}}}
+</main>
+{{> global/footer}}
+{{#each assets.js}}<script src="{{this}}" defer></script>{{/each}}
+{{{marketing_hooks}}}
+<script src="/shop.js" defer></script>
+</body>
+</html>

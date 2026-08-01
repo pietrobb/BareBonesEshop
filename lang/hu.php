@@ -1,5 +1,7 @@
 <?php
-return [
+return array_replace(require __DIR__ . '/en.php', [
+    'skip_to_content' => 'Ugrás a fő tartalomhoz',
+
     // Product
     'add_to_cart'      => 'Kosárba',
     'out_of_stock'     => 'Elfogyott',
@@ -332,4 +334,4 @@ return [
     'cookie_banner.preferences'             => 'Beállítás',
     'cookie_banner.save_preferences'        => 'Mentés',
     'cookie_banner.policy_link'             => 'Süti-szabályzat',
-];
+]);

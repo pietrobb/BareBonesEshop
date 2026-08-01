@@ -6,13 +6,59 @@
  */
 class Template {
     private static string $blocksDir = __DIR__ . '/../blocks';
+    private static string $themesDir = __DIR__ . '/../themes';
     private static array $cache = [];
+    private static array $manifestCache = [];
     private static ?string $store = null;
     private static ?string $theme = null;
 
-    public static function setStore(?string $store): void { self::$store = $store; }
-    public static function setTheme(?string $theme): void { self::$theme = $theme; }
-    public static function setBlocksDir(string $dir): void { self::$blocksDir = $dir; }
+    public static function setStore(?string $store): void {
+        self::$store = self::safePackageName($store);
+        self::clearCache();
+    }
+    public static function setTheme(?string $theme): void {
+        self::$theme = self::safePackageName($theme);
+        self::clearCache();
+    }
+    public static function setBlocksDir(string $dir): void { self::$blocksDir = $dir; self::clearCache(); }
+    public static function setThemesDir(string $dir): void { self::$themesDir = $dir; self::$manifestCache = []; self::clearCache(); }
+
+    public static function activate(StoreContext $store): void {
+        self::setStore($store->id());
+        self::setTheme((string)($store->config()['theme'] ?? 'default'));
+    }
+
+    /** Validated theme package manifest (theme.json). */
+    public static function manifest(?string $theme = null): array {
+        $theme = self::safePackageName($theme ?? self::$theme ?? 'default') ?? 'default';
+        if (isset(self::$manifestCache[$theme])) return self::$manifestCache[$theme];
+        $path = self::$themesDir . '/' . $theme . '/theme.json';
+        if (!is_file($path)) throw new RuntimeException("Theme manifest not found: {$theme}");
+        $manifest = json_decode((string)file_get_contents($path), true, 32, JSON_THROW_ON_ERROR);
+        if (!is_array($manifest) || ($manifest['name'] ?? '') === '' || ($manifest['version'] ?? '') === '') {
+            throw new RuntimeException("Invalid theme manifest: {$theme}");
+        }
+        foreach ((array)($manifest['assets'] ?? []) as $kind => $assets) {
+            if (!in_array($kind, ['css', 'js'], true) || !is_array($assets)) throw new RuntimeException('Invalid theme asset group');
+            foreach ($assets as $asset) self::safeAssetPath((string)$asset);
+        }
+        return self::$manifestCache[$theme] = $manifest;
+    }
+
+    /** Public versioned asset URLs declared by the active theme manifest. */
+    public static function assets(): array {
+        $theme = self::$theme ?? 'default';
+        $manifest = self::manifest($theme);
+        $version = rawurlencode((string)$manifest['version']);
+        $result = ['css' => [], 'js' => []];
+        foreach ($result as $kind => $_) {
+            foreach ((array)($manifest['assets'][$kind] ?? []) as $asset) {
+                $asset = self::safeAssetPath((string)$asset);
+                $result[$kind][] = '/themes/' . rawurlencode($theme) . '/assets/' . $asset . '?v=' . $version;
+            }
+        }
+        return $result;
+    }
 
     /**
      * Render a full page from layouts.json definition
@@ -32,6 +78,24 @@ class Template {
         }
 
         return self::render('layout/' . $page['layout'], array_merge($data, ['slots' => $slots]));
+    }
+
+    /** Shared accessible storefront document shell for SSR entry points. */
+    public static function document(string $title, string $content, array $data = []): string {
+        $store = StoreContext::current();
+        $defaults = [
+            'title' => $title,
+            'content' => $content,
+            'locale' => I18n::locale(),
+            't' => I18n::all(),
+            'shop_name' => (string)($store->config()['name'] ?? 'BareBones Shop'),
+            'navigation' => ContentService::menu('primary'),
+            'cart' => ['count' => 0],
+            'assets' => self::assets(),
+            'seo_head' => '',
+            'marketing_hooks' => MarketingConsent::hooks($_COOKIE, Security::cspNonce()),
+        ];
+        return self::render('global/document', array_replace($defaults, $data));
     }
 
     private static int $depth = 0;
@@ -183,7 +247,11 @@ class Template {
                 if (file_exists($f)) $file = $f;
             }
 
-            // 2. Theme override
+            // 2. Theme package override, then legacy in-blocks override
+            if (!$file && self::$theme) {
+                $f = self::$themesDir . '/' . self::$theme . '/blocks/' . $name . '.html';
+                if (file_exists($f)) $file = $f;
+            }
             if (!$file && self::$theme) {
                 $f = self::$blocksDir . '/themes/' . self::$theme . '/' . $name . '.html';
                 if (file_exists($f)) $file = $f;
@@ -238,7 +306,22 @@ class Template {
         return self::render($block, $sectionData);
     }
 
-    /** Clear template cache (for testing) */
+    private static function safePackageName(?string $name): ?string {
+        if ($name === null || $name === '') return null;
+        if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,63}$/', $name)) throw new InvalidArgumentException('Invalid theme/store package name');
+        return $name;
+    }
+
+    private static function safeAssetPath(string $path): string {
+        $path = str_replace('\\', '/', trim($path));
+        if ($path === '' || str_starts_with($path, '/') || in_array('..', explode('/', $path), true)
+            || preg_match('/[\x00-\x1F\x7F]/', $path) || !preg_match('/^[a-zA-Z0-9._\/-]+$/', $path)) {
+            throw new RuntimeException('Invalid theme asset path');
+        }
+        return $path;
+    }
+
+    /** Clear template cache (for testing or package changes). */
     public static function clearCache(): void {
         self::$cache = [];
     }

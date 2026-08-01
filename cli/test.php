@@ -251,6 +251,12 @@ if ($mysqlDsn) {
         $g9MigrationMysql->up($my, false);
         $g9MysqlTables = (int)$my->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('admin_accounts','admin_recovery_codes','admin_store_permissions','admin_devices','admin_sessions','queue_jobs')")->fetchColumn();
         assert_equals(6, $g9MysqlTables, 'MySQL live: G9 admin identity and queue migration is applied and idempotent');
+        $g10MigrationMysql = require __DIR__ . '/../migrations/20260801230000_theme_content_marketing.php';
+        $g10MigrationMysql->up($my, false);
+        $g10MigrationMysql->up($my, false);
+        $g10MysqlTables = (int)$my->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('content_menu_items','content_banners','content_redirects')")->fetchColumn();
+        assert_equals(3, $g10MysqlTables, 'MySQL live: G10 content migration is applied and idempotent');
+        foreach (['content_redirects', 'content_banners', 'content_menu_items'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['credit_note_items', 'order_refunds', 'return_exchanges', 'return_receipts', 'return_labels'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['shipment_items', 'shipments', 'bundle_components', 'inventory_receipts', 'purchase_order_items', 'purchase_orders', 'supplier_products', 'suppliers', 'stock_movements'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['price_list_prices', 'price_lists', 'promotions', 'product_categories', 'companies', 'customer_groups', 'brands'] as $table) $my->exec("DROP TABLE {$table}");
@@ -290,6 +296,11 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS categories (
 $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_cat_slug_parent ON categories(slug, COALESCE(parent_id, 0))");
 $pdo->exec("CREATE INDEX IF NOT EXISTS idx_cat_parent ON categories(parent_id)");
 $pdo->exec("CREATE INDEX IF NOT EXISTS idx_cat_path ON categories(path)");
+$pdo->exec("CREATE TABLE IF NOT EXISTS pages (
+    id INTEGER PRIMARY KEY, slug TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', translations TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+)");
 
 $pdo->exec("CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY, sku TEXT UNIQUE NOT NULL, slug TEXT UNIQUE NOT NULL,
@@ -505,6 +516,12 @@ $adminQueueMigration->up($pdo, true);
 $adminQueueMigration->up($pdo, true);
 assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='admin_accounts'")->fetchColumn(), 'G9 migration: admin identities exist and migration is idempotent');
 assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='queue_jobs'")->fetchColumn(), 'G9 migration: durable database queue exists');
+$contentMarketingMigration = require __DIR__ . '/../migrations/20260801230000_theme_content_marketing.php';
+$contentMarketingMigration->up($pdo, true);
+$contentMarketingMigration->up($pdo, true);
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='content_menu_items'")->fetchColumn(), 'G10 migration: content menus exist and migration is idempotent');
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='content_banners'")->fetchColumn(), 'G10 migration: scheduled banners exist');
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='content_redirects'")->fetchColumn(), 'G10 migration: redirect manager exists');
 
 // ============================================================
 // TEST 3: CSV Import
@@ -6833,6 +6850,70 @@ foreach (['count','reserve','release','shipment','receipt','backorder'] as $g7Mo
 $g7LedgerRows = $pdo->query("SELECT quantity_delta, reserved_delta, on_hand_after, reserved_after FROM stock_movements WHERE sku='G7-SPLIT' ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
 assert_true(count($g7LedgerRows) >= 6, 'G7 ledger: split stock keeps opening, reserve and shipment history per warehouse');
 assert_true(array_reduce($g7LedgerRows, static fn(bool $ok, array $row): bool => $ok && (int)$row['on_hand_after'] >= 0 && (int)$row['reserved_after'] >= 0, true), 'G7 ledger: every resulting stock snapshot preserves non-negative invariants');
+
+// ============================================================
+// G10: theme/content/marketing/i18n quality layer
+// ============================================================
+echo "\n--- G10: Theme, content, feeds, consent, and quality gates ---\n";
+Bootstrap::initStoreContext('/', '', 'default');
+I18n::setLocale('en');
+$g10Manifest = Template::manifest('default');
+assert_equals('BareBones Default', (string)$g10Manifest['name'], 'G10 theme: package manifest loads');
+assert_true(in_array('accessibility.css', $g10Manifest['assets']['css'], true), 'G10 theme: manifest declares versioned CSS assets');
+assert_true(str_contains(Template::assets()['css'][0], '?v=2.0.0'), 'G10 theme: asset URL carries manifest version');
+$g10Document = Template::document('G10 document', '<h1>Content</h1>', ['marketing_hooks' => '']);
+assert_true(str_contains($g10Document, 'href="#main-content"') && str_contains($g10Document, '<main id="main-content"'), 'G10 WCAG: shared shell has a functional skip link');
+assert_true(str_contains($g10Document, '<header') && str_contains($g10Document, '<footer'), 'G10 theme: shared shell owns header and footer blocks');
+
+$g10MenuId = ContentService::saveMenu(['menu_code' => 'primary', 'locale' => 'en', 'label' => 'G10 Sale', 'url' => '/sale', 'active' => 1]);
+$g10BannerId = ContentService::saveBanner(['slot' => 'homepage', 'locale' => 'en', 'title' => 'G10 Banner', 'body' => 'Campaign', 'link_url' => '/sale', 'active' => 1]);
+$g10RedirectId = ContentService::saveRedirect(['source_path' => '/g10-old', 'target_url' => '/g10-new', 'http_status' => 308, 'active' => 1]);
+$g10LandingId = ContentService::saveLanding(['slug' => 'g10-landing', 'title' => 'G10 Landing', 'body' => '<p>Safe</p><script>bad()</script>', 'seo_title' => 'G10 SEO', 'meta_description' => 'G10 description', 'status' => 'active']);
+assert_equals('G10 Sale', (string)ContentService::menu('primary', 'en')[0]['label'], 'G10 content: localized store menu publishes');
+assert_equals('G10 Banner', (string)ContentService::banners('homepage', 'en')[0]['title'], 'G10 content: scheduled banner publishes');
+assert_equals('/g10-new', (string)ContentService::redirect('/g10-old')['target_url'], 'G10 content: exact-path redirect resolves');
+$g10Landing = ContentService::page('g10-landing', 'en');
+assert_equals('landing', (string)$g10Landing['page_type'], 'G10 content: landing page has explicit type');
+assert_true(!str_contains((string)$g10Landing['body'], '<script'), 'G10 content: landing rich HTML is sanitized at write boundary');
+assert_true((int)$pdo->query("SELECT COUNT(*) FROM audit_log WHERE entity LIKE 'content_%'")->fetchColumn() >= 4, 'G10 content: admin content mutations are audited');
+StoreContext::activate($deContext);
+assert_equals([], ContentService::menu('primary', 'en'), 'G10 content: another store cannot read default-store menu');
+assert_true(ContentService::redirect('/g10-old') === null, 'G10 content: another store cannot resolve default-store redirect');
+Bootstrap::initStoreContext('/', '', 'default');
+I18n::setLocale('en');
+
+$g10Category = (int)$pdo->query('SELECT id FROM categories ORDER BY id LIMIT 1')->fetchColumn();
+$pdo->prepare("INSERT INTO products (store_id, category_id, sku, slug, product_type, name, price, currency, stock, status, summary, images, gtin, mpn, availability)
+    VALUES ('default', :category, 'G10-FEED', 'g10-feed', 'simple', 'G10 Feed Product', 1234, 'eur', 5, 'active', 'Feed description', '[\"/assets/img/logo.png\"]', '1234567890123', 'G10-MPN', 'active')")
+    ->execute([':category' => $g10Category]);
+$g10Google = MarketingFeed::google('https://shop.example', 'en');
+assert_true(str_contains($g10Google, '<g:id>G10-FEED</g:id>') && str_contains($g10Google, '<g:price>12.34 EUR</g:price>'), 'G10 feeds: Google XML uses stable IDs and integer-cent price');
+assert_true(str_contains($g10Google, '<g:availability>in stock</g:availability>'), 'G10 feeds: Google availability is normalized');
+$g10Meta = MarketingFeed::meta('https://shop.example', 'en');
+assert_true(str_contains($g10Meta, 'G10-FEED') && str_contains($g10Meta, '12.34 EUR'), 'G10 feeds: Meta CSV exports the same product snapshot');
+
+assert_equals(['necessary' => true, 'analytics' => false, 'marketing' => false], MarketingConsent::categories([]), 'G10 consent: optional categories default off');
+assert_equals('', MarketingConsent::hooks([], 'nonce'), 'G10 consent: no analytics hook is emitted before opt-in');
+$g10Hooks = MarketingConsent::hooks(['cc_v1' => json_encode(['analytics' => true, 'marketing' => false])], 'g10-nonce');
+assert_true(str_contains($g10Hooks, 'barebones:consent-ready') && str_contains($g10Hooks, 'g10-nonce'), 'G10 consent: opted-in analytics emits a nonce-bound first-party hook');
+$g10Seo = Seo::head('Landing', 'Description', '/page/g10-landing');
+assert_true(str_contains($g10Seo, 'rel="canonical"') && str_contains($g10Seo, 'hreflang="x-default"'), 'G10 SEO: canonical and hreflang metadata share one helper');
+
+$g10En = require __DIR__ . '/../lang/en.php';
+$g10Es = require __DIR__ . '/../lang/es.php';
+assert_equals(array_keys($g10En), array_keys($g10Es), 'G10 i18n: Spanish has exact key parity with English');
+assert_equals('Añadir al carrito', $g10Es['add_to_cart'], 'G10 i18n: Spanish storefront text is translated');
+$g10Ci = (string)file_get_contents(__DIR__ . '/../.github/workflows/ci.yml');
+assert_true(str_contains($g10Ci, 'php cli/quality-gates.php'), 'G10 CI: WCAG and performance quality gate is mandatory');
+$g10Htaccess = (string)file_get_contents(__DIR__ . '/../.htaccess');
+assert_true(str_contains($g10Htaccess, 'feeds/google\\.xml') && str_contains($g10Htaccess, 'feeds/meta\\.csv'), 'G10 feeds: public routes are explicit');
+assert_true(str_contains($g10Htaccess, 'themes/[^/]+/(?:theme\\.json|blocks'), 'G10 theme: manifests and source blocks are denied over HTTP');
+
+ContentService::delete('menu', $g10MenuId);
+ContentService::delete('banner', $g10BannerId);
+ContentService::delete('redirect', $g10RedirectId);
+ContentService::delete('landing', $g10LandingId);
+$pdo->exec("DELETE FROM products WHERE sku='G10-FEED'");
 
 require __DIR__ . '/test-update.php';
 

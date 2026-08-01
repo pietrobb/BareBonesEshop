@@ -195,6 +195,36 @@ so multiple workers may run concurrently. Jobs, mail, audit records, and outgoin
 webhooks carry correlation IDs. The store-scoped admin dashboard shows bounded
 failed-job, mail, payment, and webhook incidents without exposing secrets.
 
+## Themes, content, marketing, and quality gates
+
+Migration `20260801230000_theme_content_marketing` adds store-scoped menus, scheduled
+banners, landing-page SEO fields, and exact-path redirects. Each store selects a
+package with `theme` in `stores.json`; every package has a private `theme.json`,
+optional block overrides under `blocks/`, public versioned assets under `assets/`,
+and explicit CSS/JS/block byte budgets. `Template::document()` is the shared
+accessible SSR shell; the fallback chain remains store → theme package → legacy
+theme block → base block.
+
+The **Content & Marketing** admin page publishes menus, banners, landing pages, and
+301/302/307/308 redirects with CSRF, store permissions, validation, sanitization,
+and audit records. `/feeds/google.xml` and `/feeds/meta.csv` export the active store
+catalog from integer-cent prices; set an absolute `app_url` before enabling them.
+Analytics integrations subscribe to the first-party `barebones:consent-ready` event,
+which is not emitted until analytics or marketing opt-in exists.
+
+Spanish (`es`) is included and every locale has exact key parity. Run the same gates
+as CI before deployment:
+
+```bash
+php cli/i18n-parity.php
+php cli/quality-gates.php
+```
+
+The quality gate verifies package paths, declared byte budgets, the WCAG 2.2 AA
+skip/focus/target-size/reduced-motion/forced-colors invariants, feed routes, and
+consent default-off behavior. Automated checks supplement, not replace, browser and
+assistive-technology review of merchant content.
+
 ---
 
 ## Migrations

@@ -283,6 +283,8 @@ switch ($page) {
 $hreflangData = Bootstrap::hreflangAlternates();
 $hreflangs = $hreflangData['alternates'];
 $pathNoPrefix = $hreflangData['pathNoPrefix'];
+$themeAssets = Template::assets();
+$managedNavigation = ContentService::menu('primary', $lang);
 
 // Structured data (JSON-LD): Organization + WebSite searchbox on the homepage,
 // BreadcrumbList on category pages.
@@ -306,6 +308,7 @@ if ($page === 'home') {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= $title ?></title>
+<?php foreach ($themeAssets['css'] as $themeCss): ?><link rel="stylesheet" href="<?= $e($themeCss) ?>"><?php endforeach; ?>
 <?php foreach ($hreflangs as $loc => $pfx): ?>
 <link rel="alternate" hreflang="<?= $e($loc) ?>" href="<?= $e($pfx . $pathNoPrefix) ?>">
 <?php endforeach; ?>
@@ -488,6 +491,7 @@ footer{background:#333;color:#bbb;padding:0;margin-top:40px;font-size:.85em}
 </style>
 </head>
 <body>
+<a class="skip-link" href="#main-content"><?= $t('skip_to_content') ?></a>
 <header>
  <div class="header-top">
   <div class="wrap">
@@ -526,6 +530,9 @@ footer{background:#333;color:#bbb;padding:0;margin-top:40px;font-size:.85em}
  <div class="header-nav">
   <div class="wrap">
    <a href="?"><?= $t('home') ?></a>
+   <?php if ($managedNavigation): ?>
+   <?php foreach ($managedNavigation as $item): ?><a href="<?= $e($item['url']) ?>"><?= $e($item['label']) ?></a><?php endforeach; ?>
+   <?php else: ?>
    <?php
    $navCats = Categories::roots();
    usort($navCats, fn($a,$b) => (int)$b['product_count'] - (int)$a['product_count']);
@@ -554,11 +561,12 @@ footer{background:#333;color:#bbb;padding:0;margin-top:40px;font-size:.85em}
    <a href="?page=category&slug=<?= $e($rc['slug']) ?>"><?= $e($catName($rc['name'])) ?></a>
    <?php endif; ?>
    <?php endforeach; ?>
+   <?php endif; ?>
   </div>
  </div>
 </header>
 
-<main><div class="wrap">
+<main id="main-content" tabindex="-1"><div class="wrap">
 <?= $content ?>
 </div></main>
 
@@ -796,6 +804,8 @@ if ($ccCookie === ''):
 })();
 </script>
 <?php endif; ?>
+<?php foreach ($themeAssets['js'] as $themeJs): ?><script src="<?= $e($themeJs) ?>" defer></script><?php endforeach; ?>
+<?= MarketingConsent::hooks($_COOKIE, Security::cspNonce()) ?>
 </body></html>
 <?php
 // ============================================================
@@ -840,12 +850,19 @@ function renderLegalPage(string $page): string {
 function renderHome(): string {
     global $e, $price, $catName, $t, $lang;
 
+    $managedBanners = ContentService::banners('homepage', $lang);
+    $banner = $managedBanners[0] ?? null;
+    $bannerImage = !empty($banner['image_url']) ? $banner['image_url'] : 'assets/img/slider1.jpg';
+    $bannerTitle = !empty($banner['title']) ? $banner['title'] : $t('hero_title');
+    $bannerLink = !empty($banner['link_url']) ? $banner['link_url'] : ('?page=category&slug=' . ((Categories::roots()[0] ?? [])['slug'] ?? ''));
+    $bannerLabel = !empty($banner['link_label']) ? $banner['link_label'] : $t('shop_now');
     ob_start(); ?>
     <div class="hero">
-     <img src="assets/img/slider1.jpg" alt="woodle.sk">
+     <img src="<?= $e($bannerImage) ?>" alt="<?= $e($bannerTitle) ?>">
      <div class="hero-overlay">
-      <h1><?= $t('hero_title') ?></h1>
-      <a href="?page=category&slug=<?= $e((Categories::roots()[0] ?? [])['slug'] ?? '') ?>" class="btn-hero"><?= $t('shop_now') ?></a>
+      <h1><?= $e($bannerTitle) ?></h1>
+      <?php if (!empty($banner['body'])): ?><p><?= $e($banner['body']) ?></p><?php endif; ?>
+      <a href="<?= $e($bannerLink) ?>" class="btn-hero"><?= $e($bannerLabel) ?></a>
      </div>
     </div>
 

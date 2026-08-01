@@ -49,6 +49,11 @@ jobs:
           BAREBONES_REQUIRE_UPDATE_SIGNATURE_TEST: '1'
         run: php cli/test.php
 
+      - name: G10 i18n, WCAG 2.2 AA, and performance quality gates
+        run: |
+          php cli/i18n-parity.php
+          php cli/quality-gates.php
+
   mysql-update:
     name: Updater dump/restore (${{ matrix.database }})
     runs-on: ubuntu-latest

@@ -1,5 +1,7 @@
 <?php
 return [
+    'skip_to_content' => 'Skip to main content',
+
     // Product
     'add_to_cart'      => 'Add to Cart',
     'out_of_stock'     => 'Out of Stock',
