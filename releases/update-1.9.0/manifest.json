@@ -2,7 +2,7 @@
     "format_version": 1,
     "version": "1.9.0",
     "base_version": "1.8.0",
-    "created_at": "2026-08-01T10:19:07+00:00",
+    "created_at": "2026-08-01T10:27:05+00:00",
     "php_min": "8.1.0",
     "run_migrations": true,
     "files": [
@@ -11,6 +11,12 @@
             "action": "write",
             "sha256": "278e3a2678dd89aa39fd69e2ac1aa5ae391abf50d6243dc09003d30c181e9715",
             "previous_sha256": "8bb29618eee20c7a0ad67514a4381949c560c04ebf59ea82bb7f5b67aa5db013"
+        },
+        {
+            "path": ".gitattributes",
+            "action": "write",
+            "sha256": "48f22953a324f96052df2787325ff1851e05842d1664d93967e796e6cc0cfd71",
+            "previous_sha256": null
         },
         {
             "path": ".github/workflows/ci.yml",
