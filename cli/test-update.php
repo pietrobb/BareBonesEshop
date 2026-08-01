@@ -27,6 +27,8 @@ file_put_contents($updateTarget . '/unchanged.txt', "same\n");
 file_put_contents($updateTarget . '/config.php', "release config must not ship\n");
 mkdir($updateTarget . '/DB', 0750, true);
 file_put_contents($updateTarget . '/DB/runtime.sqlite', "runtime data must not ship\n");
+mkdir($updateTarget . '/releases', 0750, true);
+file_put_contents($updateTarget . '/releases/update-1.1.0.zip', "published package must not ship inside future deltas\n");
 file_put_contents($updateInstalled . '/src/Core.php', "old core\n");
 file_put_contents($updateInstalled . '/unchanged.txt', "same\n");
 file_put_contents($updateInstalled . '/config.php', "customer production config\n");
