@@ -213,6 +213,17 @@ if ($mysqlDsn) {
         $my->exec("UPDATE _parity_probe SET checked_at = DATE_SUB(NOW(), INTERVAL 2 HOUR), ttl_seconds = 3600 WHERE sku='A'");
         assert_equals(1, (int)$my->query("SELECT COUNT(*) FROM _parity_probe WHERE " . Db::dateAddSeconds('checked_at', 'ttl_seconds') . " <= " . Db::now())->fetchColumn(),
             'MySQL live: GDPR TTL retention expression selects expired row');
+        $my->exec("DROP TABLE IF EXISTS invoices");
+        $my->exec("DROP TABLE IF EXISTS orders");
+        $my->exec("CREATE TABLE orders (id INT PRIMARY KEY) ENGINE=InnoDB");
+        $my->exec("CREATE TABLE invoices (id INT PRIMARY KEY) ENGINE=InnoDB");
+        $financialMigration = require __DIR__ . '/../migrations/20260801141000_financial_snapshots.php';
+        $financialMigration->up($my, false);
+        $financialMigration->up($my, false);
+        $financialColumns = (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_NAME = 'financial_snapshot' AND TABLE_NAME IN ('orders','invoices')")->fetchColumn();
+        assert_equals(2, $financialColumns, 'MySQL live: financial snapshot migration is applied and idempotent');
+        $my->exec("DROP TABLE invoices");
+        $my->exec("DROP TABLE orders");
         $my->exec("DROP TABLE _parity_probe");
     } catch (\PDOException $e) {
         echo "  [SKIP] TEST_MYSQL_DSN set but MySQL unavailable: " . $e->getMessage() . "\n";
@@ -325,6 +336,7 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS orders (
     erp_id TEXT DEFAULT NULL, erp_status TEXT DEFAULT NULL,
     erp_synced_at TEXT DEFAULT NULL, erp_error TEXT DEFAULT NULL,
     vat_scenario TEXT DEFAULT NULL, vat_total INTEGER DEFAULT NULL, net_total INTEGER DEFAULT NULL,
+    financial_snapshot TEXT DEFAULT NULL,
     stock_restored INTEGER NOT NULL DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
 )");
@@ -4406,6 +4418,11 @@ if (file_exists($uqMigFile)) {
     $uqMig = require $uqMigFile;
     $uqMig->up(Db::get(), Db::isSqlite());
 }
+$financialMigFile = __DIR__ . '/../migrations/20260801141000_financial_snapshots.php';
+if (file_exists($financialMigFile)) {
+    $financialMig = require $financialMigFile;
+    $financialMig->up(Db::get(), Db::isSqlite());
+}
 
 // Seed a minimal paid order
 $db = Db::get();
@@ -4797,6 +4814,38 @@ $ln = VatService::computeLine(2460, 1, 23.0, true);
 assert_equals(0,    $ln['vat_amount'], 'VAT line: reverse_charge vat=0');
 assert_equals(2460, $ln['net'],        'VAT line: reverse_charge net=gross');
 
+// 51.15 — one deterministic snapshot covers products, discount, shipping and fee
+$snapshotItems = [
+    ['product_id'=>1, 'sku'=>'STD', 'price'=>12300, 'qty'=>1, 'vat_class'=>'standard'],
+    ['product_id'=>2, 'sku'=>'RED', 'price'=>11000, 'qty'=>1, 'vat_class'=>'reduced'],
+];
+$snapshotContext = ['seller_country'=>'SK', 'customer_country'=>'SK'];
+$snapshotAmounts = ['discount'=>2330, 'shipping'=>600, 'payment_fee'=>120, 'currency'=>'eur', 'effective_date'=>'2026-08-01'];
+$financialSnapshot = VatService::buildSnapshot($snapshotItems, $snapshotContext, $snapshotAmounts);
+assert_equals(1, $financialSnapshot['version'], 'VAT snapshot: versioned contract');
+assert_equals(21690, $financialSnapshot['totals']['gross'], 'VAT snapshot: gross includes discounted products, shipping and fee');
+assert_equals(3763, $financialSnapshot['totals']['vat'], 'VAT snapshot: mixed-rate VAT is deterministic');
+assert_equals(17927, $financialSnapshot['totals']['net'], 'VAT snapshot: net + VAT = gross');
+assert_equals(2182, $financialSnapshot['breakdown']['23']['vat'], 'VAT snapshot: shipping follows standard product rate');
+assert_equals(1581, $financialSnapshot['breakdown']['19']['vat'], 'VAT snapshot: coupon lowers reduced-rate tax base');
+assert_equals(120, $financialSnapshot['breakdown']['0']['net'], 'VAT snapshot: payment fee remains exempt');
+assert_equals($financialSnapshot, VatService::buildSnapshot($snapshotItems, $snapshotContext, $snapshotAmounts), 'VAT snapshot: identical inputs produce identical snapshot and fingerprint');
+VatService::validateSnapshot($financialSnapshot);
+$tamperedSnapshot = $financialSnapshot;
+$tamperedSnapshot['totals']['gross']++;
+$tamperRejected = false;
+try { VatService::validateSnapshot($tamperedSnapshot); }
+catch (InvalidArgumentException $e) { $tamperRejected = true; }
+assert_true($tamperRejected, 'VAT snapshot: fingerprint rejects changed totals');
+
+// 51.16 — reverse charge freezes every component at zero VAT
+$reverseSnapshot = VatService::buildSnapshot($snapshotItems, [
+    'seller_country'=>'SK', 'customer_country'=>'DE', 'customer_vat_id_valid'=>true, 'is_b2b'=>true,
+], ['shipping'=>500, 'currency'=>'eur', 'effective_date'=>'2026-08-01']);
+assert_equals('reverse_charge', $reverseSnapshot['scenario'], 'VAT snapshot: reverse-charge scenario frozen');
+assert_equals(0, $reverseSnapshot['totals']['vat'], 'VAT snapshot: reverse-charge products and shipping have zero VAT');
+assert_equals($reverseSnapshot['totals']['gross'], $reverseSnapshot['totals']['net'], 'VAT snapshot: reverse-charge net equals gross');
+
 // ============================================================
 // TEST 52: VAT — VatIdValidator + cache
 // ============================================================
@@ -5081,6 +5130,20 @@ assert_true((int)($minLineVat['v'] ?? 0) > 0, 'P0 #1: every order_item has vat_a
 assert_equals((int)$o['subtotal'] + (int)$o['shipping_cost'], (int)$o['total'],
     'P0 #2: total == gross subtotal + shipping (extracted VAT not added on top)');
 assert_true((int)$o['tax_amount'] > 0, 'P0 #2: extracted tax still recorded for reporting');
+$checkoutSnapshot = json_decode((string)($o['financial_snapshot'] ?? ''), true);
+assert_true(is_array($checkoutSnapshot), 'G1: HTTP checkout persists canonical financial snapshot');
+VatService::validateSnapshot($checkoutSnapshot);
+assert_equals((int)$o['total'], (int)$checkoutSnapshot['totals']['gross'], 'G1: quote snapshot gross = order total');
+assert_equals((int)$o['tax_amount'], (int)$checkoutSnapshot['totals']['vat'], 'G1: quote snapshot VAT = order tax amount');
+assert_equals((int)$o['vat_total'], (int)$checkoutSnapshot['totals']['vat'], 'G1: quote snapshot VAT = order VAT total');
+assert_equals((int)$o['net_total'], (int)$checkoutSnapshot['totals']['net'], 'G1: quote snapshot net = order net total');
+
+$pdo->exec("UPDATE orders SET status='paid' WHERE id=" . (int)$o['id']);
+$snapshotInvoice = InvoiceService::issue((int)$o['id']);
+$invoiceSnapshot = json_decode((string)($snapshotInvoice['financial_snapshot'] ?? ''), true);
+assert_equals($checkoutSnapshot, $invoiceSnapshot, 'G1: invoice copies the exact order financial snapshot');
+assert_equals((int)$checkoutSnapshot['totals']['gross'], (int)$snapshotInvoice['total_gross'], 'G1: invoice gross = snapshot gross');
+assert_equals((int)$checkoutSnapshot['totals']['vat'], (int)$snapshotInvoice['total_vat'], 'G1: invoice VAT = snapshot VAT');
 
 // 55.3 — Bug #3: B2B reverse charge via HTTP path (VIES served from cache, no network)
 $pdo->exec("DELETE FROM vat_id_cache");
@@ -5109,6 +5172,46 @@ assert_true($mpSig->verifySignature('payload', $mpPayloadSig), 'P0 #4: correct r
 assert_true(!$mpSig->verifySignature('tampered', $mpPayloadSig), 'G3: mock signature is bound to the raw payload');
 assert_true(!$mpSig->verifySignature('payload', 'wrong-sig'), 'P0 #4: wrong webhook signature rejected');
 assert_true(!$mpSig->verifySignature('payload', ''), 'P0 #4: empty webhook signature rejected');
+
+// 55.6 — OSS consumes the issued invoice snapshot, including discount + shipping
+$ossContext = [
+    'seller_country'=>'SK', 'seller_oss_enabled'=>true, 'customer_country'=>'DE',
+    'customer_vat_id_valid'=>false, 'is_b2b'=>false,
+];
+$_SESSION['cart'] = [
+    'p_501' => ['product_id'=>501, 'variant_id'=>null, 'qty'=>1],
+    'p_502' => ['product_id'=>502, 'variant_id'=>null, 'qty'=>1],
+];
+$ossCart = Cart::enriched($ossContext);
+$ossSnapshot = VatService::buildSnapshot($ossCart['items'], $ossContext, [
+    'discount'=>2330, 'shipping'=>600, 'payment_fee'=>0, 'currency'=>'eur', 'effective_date'=>date('Y-m-d'),
+]);
+$ossOrderId = Orders::create($ossCart['items'], [
+    'name'=>'OSS Buyer', 'email'=>'oss@example.de', 'phone'=>'',
+    'address'=>['street'=>'A 1', 'city'=>'Berlin', 'zip'=>'10115', 'country'=>'DE'],
+    'currency'=>'eur', 'locale'=>'de', 'shipping_cost'=>600, 'payment_fee'=>0,
+    'tax_amount'=>$ossSnapshot['totals']['vat'], 'coupon_discount'=>2330,
+    'vat_scenario'=>'oss', 'financial_snapshot'=>$ossSnapshot,
+], 'p0pay');
+$pdo->exec("UPDATE orders SET status='paid' WHERE id={$ossOrderId}");
+$ossInvoice = InvoiceService::issue($ossOrderId);
+assert_equals($ossSnapshot, json_decode((string)$ossInvoice['financial_snapshot'], true), 'G1: OSS invoice preserves exact checkout snapshot');
+if (!function_exists('collect')) {
+    define('BB_TEST_LOAD_OSS_ONLY', true);
+    require_once __DIR__ . '/oss-report.php';
+}
+$ossRows = collect(date('Y-m-d'), date('Y-m-d'), null);
+$ossByRate = [];
+foreach ($ossRows as $ossRow) {
+    if (($ossRow['consumption_country'] ?? '') === 'DE') $ossByRate[(string)$ossRow['vat_rate']] = $ossRow;
+}
+foreach ($ossSnapshot['breakdown'] as $rate => $group) {
+    assert_true(isset($ossByRate[(string)(float)$rate]), "G1: OSS contains snapshot rate {$rate}");
+    $reported = $ossByRate[(string)(float)$rate] ?? [];
+    assert_equals((int)$group['net'], (int)($reported['net'] ?? -1), "G1: OSS net matches snapshot rate {$rate}");
+    assert_equals((int)$group['vat'], (int)($reported['vat'] ?? -1), "G1: OSS VAT matches snapshot rate {$rate}");
+    assert_equals((int)$group['gross'], (int)($reported['gross'] ?? -1), "G1: OSS gross matches snapshot rate {$rate}");
+}
 
 echo "\n--- VAT test suite complete ---\n";
 

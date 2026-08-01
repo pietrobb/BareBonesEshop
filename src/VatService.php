@@ -22,7 +22,7 @@
  *   VatService::isEuCountry(string $iso2): bool
  *   VatService::resolveClass(string $alias): string
  */
-class VatService
+class VatService implements TaxProvider
 {
     /** @var array */
     private static array $cfg = [];
@@ -235,26 +235,301 @@ class VatService
      */
     public static function computeLine(int $unitGrossCents, int $qty, float $rate, bool $reverse): array
     {
-        $gross = $unitGrossCents * $qty;
-        if ($reverse || $rate <= 0) {
-            return [
-                'gross'      => $gross,
-                'net'        => $gross,
-                'vat_amount' => 0,
-                'rate'       => 0.0,
-                'qty'        => $qty,
-            ];
-        }
-        // gross = net * (1 + rate/100)
-        $net = (int)round($gross / (1 + $rate / 100));
-        $vat = $gross - $net;
+        $rateBasisPoints = $reverse ? 0 : (int)round($rate * 100);
+        $line = self::computeGross($unitGrossCents * $qty, $rateBasisPoints);
         return [
-            'gross'      => $gross,
-            'net'        => $net,
-            'vat_amount' => $vat,
-            'rate'       => $rate,
+            'gross'      => $line['gross'],
+            'net'        => $line['net'],
+            'vat_amount' => $line['vat'],
+            'rate'       => $rateBasisPoints / 100,
             'qty'        => $qty,
         ];
+    }
+
+    /**
+     * Freeze the complete gross-inclusive checkout calculation into one
+     * deterministic, tamper-evident snapshot. All amounts are integer cents and
+     * rates are integer basis points (23% = 2300).
+     */
+    public static function buildSnapshot(array $items, array $context, array $amounts = []): array
+    {
+        $scenario = self::resolveScenario($context);
+        $effectiveDate = (string)($amounts['effective_date'] ?? date('Y-m-d'));
+        $currency = strtolower((string)($amounts['currency'] ?? 'eur'));
+        $appliesVat = (bool)$scenario['applies_vat'];
+        $rateCountry = (string)$scenario['rate_country'];
+
+        $products = [];
+        $subtotal = 0;
+        foreach ($items as $index => $item) {
+            $quantity = (int)($item['qty'] ?? $item['quantity'] ?? 0);
+            $unitGross = (int)($item['price'] ?? $item['unit_price'] ?? -1);
+            if ($quantity <= 0 || $unitGross < 0) {
+                throw new \InvalidArgumentException('Financial snapshot items require positive quantity and non-negative unit price');
+            }
+            $gross = $unitGross * $quantity;
+            $vatClass = self::resolveClass((string)($item['vat_class'] ?? 'standard'));
+            $rateBasisPoints = $appliesVat
+                ? (int)round(self::rate($rateCountry, $vatClass, $effectiveDate) * 100)
+                : 0;
+            $products[] = [
+                'index' => (int)$index,
+                'product_id' => (int)($item['product_id'] ?? 0),
+                'variant_id' => isset($item['variant_id']) ? (int)$item['variant_id'] : null,
+                'sku' => (string)($item['sku'] ?? ''),
+                'quantity' => $quantity,
+                'unit_gross' => $unitGross,
+                'gross_before_discount' => $gross,
+                'vat_class' => $vatClass,
+                'rate_basis_points' => $rateBasisPoints,
+            ];
+            $subtotal += $gross;
+        }
+        if ($products === []) {
+            throw new \InvalidArgumentException('Financial snapshot requires at least one item');
+        }
+
+        $discount = min($subtotal, max(0, (int)($amounts['discount'] ?? 0)));
+        $discounts = self::allocateDiscount($products, $subtotal, $discount);
+        $components = [];
+        $maxProductRate = 0;
+        foreach ($products as $position => $product) {
+            $gross = $product['gross_before_discount'] - $discounts[$position];
+            $calculated = self::computeGross($gross, $product['rate_basis_points']);
+            unset($product['index']);
+            $components[] = array_merge($product, [
+                'type' => 'product',
+                'discount' => $discounts[$position],
+                'gross' => $calculated['gross'],
+                'net' => $calculated['net'],
+                'vat' => $calculated['vat'],
+            ]);
+            $maxProductRate = max($maxProductRate, $product['rate_basis_points']);
+        }
+
+        $shipping = max(0, (int)($amounts['shipping'] ?? 0));
+        if ($shipping > 0) {
+            $shippingRate = $appliesVat ? $maxProductRate : 0;
+            $calculated = self::computeGross($shipping, $shippingRate);
+            $components[] = [
+                'type' => 'shipping',
+                'vat_class' => 'shipping',
+                'rate_basis_points' => $shippingRate,
+                'gross' => $calculated['gross'],
+                'net' => $calculated['net'],
+                'vat' => $calculated['vat'],
+            ];
+        }
+
+        $paymentFee = max(0, (int)($amounts['payment_fee'] ?? 0));
+        if ($paymentFee > 0) {
+            $components[] = [
+                'type' => 'payment_fee',
+                'vat_class' => 'exempt',
+                'rate_basis_points' => 0,
+                'gross' => $paymentFee,
+                'net' => $paymentFee,
+                'vat' => 0,
+            ];
+        }
+
+        $breakdown = [];
+        $netTotal = 0;
+        $vatTotal = 0;
+        foreach ($components as $component) {
+            $rateBasisPoints = (int)$component['rate_basis_points'];
+            $key = self::rateKey($rateBasisPoints);
+            if (!isset($breakdown[$key])) {
+                $breakdown[$key] = ['rate_basis_points' => $rateBasisPoints, 'net' => 0, 'vat' => 0, 'gross' => 0];
+            }
+            $breakdown[$key]['net'] += (int)$component['net'];
+            $breakdown[$key]['vat'] += (int)$component['vat'];
+            $breakdown[$key]['gross'] += (int)$component['gross'];
+            $netTotal += (int)$component['net'];
+            $vatTotal += (int)$component['vat'];
+        }
+        uksort($breakdown, static fn(string $a, string $b): int => (float)$a <=> (float)$b);
+
+        $snapshot = [
+            'version' => 1,
+            'currency' => $currency,
+            'effective_date' => $effectiveDate,
+            'scenario' => (string)$scenario['scenario'],
+            'rate_country' => $rateCountry,
+            'note_key' => (string)$scenario['note_key'],
+            'rounding' => 'gross_line_half_up_integer_basis_points',
+            'components' => $components,
+            'breakdown' => $breakdown,
+            'totals' => [
+                'subtotal' => $subtotal,
+                'discount' => $discount,
+                'shipping' => $shipping,
+                'payment_fee' => $paymentFee,
+                'net' => $netTotal,
+                'vat' => $vatTotal,
+                'gross' => $netTotal + $vatTotal,
+            ],
+        ];
+        $snapshot['fingerprint'] = self::snapshotFingerprint($snapshot);
+        self::validateSnapshot($snapshot);
+        return $snapshot;
+    }
+
+    public static function validateSnapshot(array $snapshot): void
+    {
+        if (($snapshot['version'] ?? null) !== 1 || !is_array($snapshot['components'] ?? null)
+            || !is_array($snapshot['breakdown'] ?? null) || !is_array($snapshot['totals'] ?? null)) {
+            throw new \InvalidArgumentException('Invalid financial snapshot structure');
+        }
+        $fingerprint = (string)($snapshot['fingerprint'] ?? '');
+        $unsigned = $snapshot;
+        unset($unsigned['fingerprint']);
+        if ($fingerprint === '' || !hash_equals(self::snapshotFingerprint($unsigned), $fingerprint)) {
+            throw new \InvalidArgumentException('Financial snapshot fingerprint mismatch');
+        }
+
+        if (($snapshot['rounding'] ?? '') !== 'gross_line_half_up_integer_basis_points'
+            || !in_array((string)($snapshot['scenario'] ?? ''), [
+                self::SCENARIO_NON_VAT_PAYER, self::SCENARIO_DOMESTIC, self::SCENARIO_REVERSE_CHARGE,
+                self::SCENARIO_OSS, self::SCENARIO_DOMESTIC_SUBTHRESH, self::SCENARIO_EXPORT,
+            ], true)) {
+            throw new \InvalidArgumentException('Financial snapshot calculation contract is invalid');
+        }
+
+        $net = 0;
+        $vat = 0;
+        $gross = 0;
+        $subtotal = 0;
+        $discount = 0;
+        $shipping = 0;
+        $paymentFee = 0;
+        $productComponents = 0;
+        $shippingComponents = 0;
+        $paymentComponents = 0;
+        $computedBreakdown = [];
+        foreach ($snapshot['components'] as $component) {
+            $type = (string)($component['type'] ?? '');
+            $rateBasisPoints = (int)($component['rate_basis_points'] ?? -1);
+            $componentNet = (int)($component['net'] ?? -1);
+            $componentVat = (int)($component['vat'] ?? -1);
+            $componentGross = (int)($component['gross'] ?? -1);
+            if (!in_array($type, ['product', 'shipping', 'payment_fee'], true)
+                || $rateBasisPoints < 0 || $rateBasisPoints > 10000
+                || $componentNet < 0 || $componentVat < 0 || $componentGross !== $componentNet + $componentVat
+                || self::computeGross($componentGross, $rateBasisPoints) !== [
+                    'gross' => $componentGross, 'net' => $componentNet, 'vat' => $componentVat,
+                ]) {
+                throw new \InvalidArgumentException('Financial snapshot component invariant failed');
+            }
+
+            if ($type === 'product') {
+                $productComponents++;
+                $quantity = (int)($component['quantity'] ?? 0);
+                $unitGross = (int)($component['unit_gross'] ?? -1);
+                $grossBefore = (int)($component['gross_before_discount'] ?? -1);
+                $componentDiscount = (int)($component['discount'] ?? -1);
+                if ($quantity <= 0 || $unitGross < 0 || $grossBefore !== $unitGross * $quantity
+                    || $componentDiscount < 0 || $componentDiscount > $grossBefore
+                    || $componentGross !== $grossBefore - $componentDiscount) {
+                    throw new \InvalidArgumentException('Financial snapshot product invariant failed');
+                }
+                $subtotal += $grossBefore;
+                $discount += $componentDiscount;
+            } elseif ($type === 'shipping') {
+                $shippingComponents++;
+                $shipping += $componentGross;
+            } else {
+                $paymentComponents++;
+                if ($rateBasisPoints !== 0 || $componentVat !== 0) {
+                    throw new \InvalidArgumentException('Financial snapshot payment fee must be exempt');
+                }
+                $paymentFee += $componentGross;
+            }
+
+            $rateKey = self::rateKey($rateBasisPoints);
+            if (!isset($computedBreakdown[$rateKey])) {
+                $computedBreakdown[$rateKey] = ['rate_basis_points' => $rateBasisPoints, 'net' => 0, 'vat' => 0, 'gross' => 0];
+            }
+            $computedBreakdown[$rateKey]['net'] += $componentNet;
+            $computedBreakdown[$rateKey]['vat'] += $componentVat;
+            $computedBreakdown[$rateKey]['gross'] += $componentGross;
+            $net += $componentNet;
+            $vat += $componentVat;
+            $gross += $componentGross;
+        }
+        if ($productComponents === 0 || $shippingComponents > 1 || $paymentComponents > 1) {
+            throw new \InvalidArgumentException('Financial snapshot component cardinality failed');
+        }
+        uksort($computedBreakdown, static fn(string $a, string $b): int => (float)$a <=> (float)$b);
+        if (self::canonicalize($computedBreakdown) !== self::canonicalize($snapshot['breakdown'])) {
+            throw new \InvalidArgumentException('Financial snapshot breakdown invariant failed');
+        }
+
+        $totals = $snapshot['totals'];
+        if ($net !== (int)($totals['net'] ?? -1) || $vat !== (int)($totals['vat'] ?? -1)
+            || $gross !== (int)($totals['gross'] ?? -1)
+            || $subtotal !== (int)($totals['subtotal'] ?? -1)
+            || $discount !== (int)($totals['discount'] ?? -1)
+            || $shipping !== (int)($totals['shipping'] ?? -1)
+            || $paymentFee !== (int)($totals['payment_fee'] ?? -1)
+            || $gross !== $subtotal - $discount + $shipping + $paymentFee) {
+            throw new \InvalidArgumentException('Financial snapshot totals invariant failed');
+        }
+    }
+
+    /** @return array{gross:int,net:int,vat:int} */
+    private static function computeGross(int $gross, int $rateBasisPoints): array
+    {
+        if ($gross < 0 || $rateBasisPoints < 0) {
+            throw new \InvalidArgumentException('Gross amount and VAT rate must be non-negative');
+        }
+        if ($rateBasisPoints === 0) return ['gross' => $gross, 'net' => $gross, 'vat' => 0];
+        $denominator = 10000 + $rateBasisPoints;
+        $net = intdiv($gross * 10000 + intdiv($denominator, 2), $denominator);
+        return ['gross' => $gross, 'net' => $net, 'vat' => $gross - $net];
+    }
+
+    private static function allocateDiscount(array $products, int $subtotal, int $discount): array
+    {
+        $allocations = array_fill(0, count($products), 0);
+        if ($discount === 0 || $subtotal === 0) return $allocations;
+
+        $rank = [];
+        $allocated = 0;
+        foreach ($products as $position => $product) {
+            $numerator = $discount * (int)$product['gross_before_discount'];
+            $share = intdiv($numerator, $subtotal);
+            $allocations[$position] = $share;
+            $allocated += $share;
+            $rank[] = ['position' => $position, 'remainder' => $numerator % $subtotal];
+        }
+        usort($rank, static fn(array $a, array $b): int => ($b['remainder'] <=> $a['remainder']) ?: ($a['position'] <=> $b['position']));
+        $remaining = $discount - $allocated;
+        for ($i = 0; $i < $remaining; $i++) {
+            $allocations[$rank[$i]['position']]++;
+        }
+        return $allocations;
+    }
+
+    private static function rateKey(int $rateBasisPoints): string
+    {
+        $key = rtrim(rtrim(number_format($rateBasisPoints / 100, 2, '.', ''), '0'), '.');
+        return $key === '' ? '0' : $key;
+    }
+
+    private static function snapshotFingerprint(array $snapshot): string
+    {
+        $canonical = self::canonicalize($snapshot);
+        return hash('sha256', (string)json_encode($canonical, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+    }
+
+    private static function canonicalize(array $value): array
+    {
+        if (!array_is_list($value)) ksort($value, SORT_STRING);
+        foreach ($value as $key => $item) {
+            if (is_array($item)) $value[$key] = self::canonicalize($item);
+        }
+        return $value;
     }
 
     /**

@@ -160,7 +160,7 @@ php cli/test.php
 
 **Storefront** — catalog with categories, parametric/full-text search, product
 detail with variants, cart, multi-step checkout, multi-language &
-multi-currency, VAT (incl. OSS), coupons, SEO pack (dynamic `sitemap.xml`,
+multi-currency, immutable quote→order→payment→invoice→OSS VAT snapshots, coupons, SEO pack (dynamic `sitemap.xml`,
 `robots.txt`, JSON-LD: Organization / WebSite searchbox / BreadcrumbList /
 Product / AggregateRating).
 

@@ -3893,13 +3893,15 @@ OSS pre cross-border B2C, VIES validácia, OSS report. Branch `feat/tax-vat`.
 | Súbor | Účel |
 |---|---|
 | `config/vat-rates.json` | 27 EU krajín × tried (standard/reduced/reduced2/zero) s `valid_from`+`history` (SK 23 % od 2025-01-01, history 20 %; CZ 12 %, history 15 %; FI 25.5 %, EE 22 %, LU 17 %, …) |
-| `src/VatService.php` | Engine: `rate()`, `resolveScenario()`, `computeLine()`, `validateVatId()`, `resolveClass()`, `isEuCountry()` |
+| `src/VatService.php` | Engine: `rate()`, `resolveScenario()`, `computeLine()`, `buildSnapshot()`, `validateSnapshot()`, `validateVatId()`, `resolveClass()`, `isEuCountry()` |
+| `adapters/TaxProvider.php` | Kanonický kontrakt pre sadzbu, scenár a immutable finančný snapshot |
 | `adapters/VatIdValidator.php` | Adapter interface (`check(vatId)`) |
 | `adapters/contrib/MockVatIdValidator.php` | Deterministický mock pre testy/dev |
 | `adapters/contrib/ViesVatIdValidator.php` | VIES SOAP klient (5 s timeout, graceful unverified) |
 | `cli/oss-report.php` | Kvartálny OSS report (`--quarter=2026-Q2 --format=text|csv|json`) |
 | `cli/vat-backfill.php` | Legacy order backfill (`--dry-run` default, `--apply` s auto pre-backup) |
 | `migrations/20260425013405_add_vat_columns.php` | Schema migration (17 stĺpcov + `vat_id_cache` table) |
+| `migrations/20260801141000_financial_snapshots.php` | Nullable `orders.financial_snapshot` a `invoices.financial_snapshot` pre nový kanonický tok |
 
 ### Schema (migration `add_vat_columns`)
 
@@ -3907,9 +3909,9 @@ OSS pre cross-border B2C, VIES validácia, OSS report. Branch `feat/tax-vat`.
 |---|---|
 | `products` | `vat_class TEXT NOT NULL DEFAULT 'standard'` |
 | `order_items` | `vat_class`, `vat_rate REAL`, `vat_amount INTEGER`, `net_amount INTEGER` |
-| `orders` | `vat_scenario TEXT`, `vat_total INTEGER`, `net_total INTEGER` |
+| `orders` | `vat_scenario TEXT`, `vat_total INTEGER`, `net_total INTEGER`, nullable `financial_snapshot TEXT` |
 | `customers` | `vat_id TEXT`, `vat_country TEXT`, `vat_validated_at TEXT` |
-| `invoices` | `type` (`invoice`\|`credit_note`), `refers_to_invoice_id`, `vat_scenario`, `reverse_charge_note_key` |
+| `invoices` | `type` (`invoice`\|`credit_note`), `refers_to_invoice_id`, `vat_scenario`, `reverse_charge_note_key`, nullable `financial_snapshot TEXT` |
 | `invoice_counters` | `type` (per-typ sequence) |
 | `vat_id_cache` (NEW) | `vat_id`, `country`, `status` (`valid`/`invalid`/`unverified`), `trader_name`, `checked_at`, `ttl_seconds` (24h valid/invalid, 1h unverified) |
 | `stores.json` | per-store `oss_enabled: false` (opt-in) |
@@ -3926,11 +3928,11 @@ OSS pre cross-border B2C, VIES validácia, OSS report. Branch `feat/tax-vat`.
 | `domestic_subthreshold` | cross-border B2C, EU, OSS off | seller | true | — |
 | `export` | customer mimo EU | customer | false | `vat.export_note` |
 
-### Per-line VAT (gross-inclusive)
+### Kanonický finančný snapshot (gross-inclusive)
 
-Cart `enriched($vatContext)` → každá položka dostane `vat_class`, `vat_rate`, `vat_amount`, `net_amount`.
-`Orders::create()` túto snapshot perzistuje atómicky (single source of truth pre InvoiceService).
-Faktúra ich groupuje per `(rate, currency)` namiesto heuristiky z totálov.
+`VatService::buildSnapshot()` po výbere kupónu, dopravy a platby zmrazí scenár, dátum sadzieb, menu, produkty, deterministicky alokovanú zľavu, dopravu, platobný poplatok, breakdown a totals. Sumy sú integer centy, sadzby integer basis points a rounding je `gross_line_half_up_integer_basis_points`; SHA-256 `fingerprint` chráni celý kanonicky zoradený obsah.
+
+`Orders::create()` overí fingerprint aj zhodu snapshotu s reálne rezervovaným subtotalom, menou, zľavou, dopravou a poplatkom. Faktúra kopíruje presne ten istý JSON a platobný request nesie jeho fingerprint. Nové objednávky sa už downstream neprepočítavajú; legacy riadky s `financial_snapshot IS NULL` zostávajú čitateľné cez pôvodný invoice fallback.
 
 ### VIES cache (TTL-aware)
 
@@ -3941,7 +3943,7 @@ Faktúra ich groupuje per `(rate, currency)` namiesto heuristiky z totálov.
 
 ### OSS report
 
-`php cli/oss-report.php --quarter=YYYY-Qn --format=text|csv|json` — group by `(consumption_country, vat_rate, currency)` len pre `vat_scenario=oss` faktúry. Domestic vylúčené. Deterministický ordering. Empty period → exit 1.
+`php cli/oss-report.php --quarter=YYYY-Qn --format=text|csv|json` — group by `(consumption_country, vat_rate, currency)` len pre `vat_scenario=oss` faktúry. Zdrojom je immutable `invoices.financial_snapshot.breakdown` (vrátane alokovanej zľavy a dopravy), pri historickom `NULL` uložený `invoices.vat_breakdown`; report nikdy nepočíta z aktuálnych sadzieb ani zo surových `order_items`. Domestic vylúčené. Deterministický ordering. Empty period → exit 1.
 
 ### Backfill (legacy orders)
 
@@ -3949,7 +3951,7 @@ Faktúra ich groupuje per `(rate, currency)` namiesto heuristiky z totálov.
 
 ### Gotchas
 
-- **Rate je snapshot pri vytvorení objednávky** — neskoršia zmena `config/vat-rates.json` neovplyvňuje existujúce rows (legal compliance).
+- **Celý finančný výpočet je snapshot pri vytvorení objednávky** — neskoršia zmena `config/vat-rates.json`, kupónov, dopravy alebo payment fees neovplyvňuje objednávku, platbu, faktúru ani OSS. Nezhoda fingerprintu je hard failure.
 - **VAT ID cache TTL**: 24 h pre `valid`/`invalid`, 1 h pre `unverified` — aby sa retry stíhol skôr.
 - **VIES timeout = unverified**, nie B2C fallback. Operator si v admin musí overiť manuálne.
 - **OSS opt-in per-store** — counter (€10 000 prah) je P1, v P0 si to operator sleduje sám.

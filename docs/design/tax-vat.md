@@ -219,12 +219,20 @@ Reverse-charge na faktúre:
 │ ─ aggregate(lines) → {breakdown[rate], total_net, total_vat}│
 └─────────────────────────────────────────────────────────────┘
                           │
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│ buildSnapshot(items, context, discount/shipping/payment)    │
+│ integer cents + basis points + deterministic rounding       │
+│ canonical SHA-256 fingerprint                               │
+└─────────────────────────────────────────────────────────────┘
+                          │
        ┌──────────────────┼──────────────────┐
        ▼                  ▼                  ▼
 ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐
-│ Cart::recalc │  │InvoiceService│  │ cli/oss-report   │
-│ (sets line   │  │ (reads from  │  │ (aggregates from │
-│  vat fields) │  │  order_items)│  │  invoices joins) │
+│ Orders       │  │InvoiceService│  │ cli/oss-report   │
+│ validates +  │  │ copies exact │  │ reads invoice    │
+│ persists     │  │ snapshot     │  │ snapshot         │
 └──────────────┘  └──────────────┘  └──────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
@@ -234,6 +242,12 @@ Reverse-charge na faktúre:
 │   CachedVatValidator (wraps any, vat_id_cache TTL 24h)      │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+### Finančný snapshot kontrakt
+
+`adapters/TaxProvider.php` definuje jediný kontrakt a `VatService::buildSnapshot()` je jeho produkčná implementácia. Snapshot verzie 1 obsahuje `effective_date`, `scenario`, `rate_country`, `components`, `breakdown`, `totals`, rounding identifikátor a SHA-256 `fingerprint`. Kupón sa rozdeľuje proporcionálne metódou largest remainder; doprava používa najvyššiu produktovú sadzbu a explicitne oslobodený payment fee zostáva v 0 % skupine.
+
+Nový tok je `checkout quote → Orders::create validation/persistence → payment fingerprint → InvoiceService exact copy → OSS invoice snapshot aggregation`. Iba historické riadky s `financial_snapshot IS NULL` používajú pôvodný invoice fallback; nikdy sa im spätne nemení význam.
 
 ### Reverse-charge resolver (rozhodovacia tabuľka)
 
@@ -286,10 +300,12 @@ ALTER TABLE orders ADD COLUMN vat_scenario   TEXT DEFAULT 'domestic';   -- 'dome
 ALTER TABLE orders ADD COLUMN vat_seller_country TEXT DEFAULT NULL;
 ALTER TABLE orders ADD COLUMN vat_customer_country TEXT DEFAULT NULL;
 ALTER TABLE orders ADD COLUMN vat_customer_id TEXT DEFAULT NULL;        -- snapshot z customer.vat_id
+ALTER TABLE orders ADD COLUMN financial_snapshot TEXT DEFAULT NULL;     -- versioned canonical JSON
 
 -- Invoices: credit note support
 ALTER TABLE invoices ADD COLUMN type TEXT DEFAULT 'invoice';            -- 'invoice'|'credit_note'
 ALTER TABLE invoices ADD COLUMN refers_to_invoice_id INTEGER DEFAULT NULL;
+ALTER TABLE invoices ADD COLUMN financial_snapshot TEXT DEFAULT NULL;   -- exact order snapshot copy
 ```
 
 `stores.json` patch (manual, nie migration):

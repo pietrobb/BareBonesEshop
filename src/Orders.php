@@ -85,38 +85,59 @@ class Orders {
                 throw new \RuntimeException('No items in order');
             }
 
-            // 2. Calculate shipping + tax - coupon
-            $shippingCost = $customer['shipping_cost'] ?? 0;
-            $taxAmount = $customer['tax_amount'] ?? 0;
-            $couponDiscount = $customer['coupon_discount'] ?? 0;
-            $paymentFee = $customer['payment_fee'] ?? 0;
-            // When catalog prices are gross (prices_include_tax, the default),
-            // tax_amount is EXTRACTED from $subtotal for reporting only —
-            // adding it on top would charge VAT twice (audit 2026-06-11 bug #2).
-            $taxInTotal = Tax::pricesIncludeTax() ? 0 : $taxAmount;
-            $total = max(0, $subtotal - $couponDiscount) + $shippingCost + $taxInTotal + $paymentFee;
-
-            // 2a. Per-order VAT snapshot (sum from items if any line has VAT data)
-            $vatTotal = 0;
-            $netTotal = 0;
-            $hasVat = false;
-            foreach ($orderItems as $oi) {
-                if ($oi['vat_amount'] !== null) { $hasVat = true; $vatTotal += (int)$oi['vat_amount']; }
-                if ($oi['net_amount'] !== null) { $netTotal += (int)$oi['net_amount']; }
+            // 2. Freeze the canonical checkout calculation. New checkout calls must
+            // provide this snapshot; direct/legacy callers retain the old path so
+            // existing integrations and historical imports remain readable.
+            $financialSnapshot = $customer['financial_snapshot'] ?? null;
+            if (is_string($financialSnapshot) && $financialSnapshot !== '') {
+                $financialSnapshot = json_decode($financialSnapshot, true, 512, JSON_THROW_ON_ERROR);
             }
-            $vatScenario = $customer['vat_scenario'] ?? null;
-            if (!$hasVat) {
-                $vatTotal = null; $netTotal = null;
-            } elseif ($couponDiscount > 0 && $subtotal > 0) {
-                // A coupon discounts the gross merchandise subtotal, so the VAT/net
-                // snapshot must be recomputed on the POST-coupon gross. Otherwise the
-                // recorded VAT is overstated and net+vat = pre-discount subtotal, i.e.
-                // the wrong tax base on the invoice/OSS report. (F2, audit v1.12)
-                // Integer-cents safe: scale VAT by the discount ratio, derive net as the
-                // remainder so the invariant net + vat == discounted gross holds exactly.
-                $discountedGross = max(0, $subtotal - $couponDiscount);
-                $vatTotal = (int) round($vatTotal * $discountedGross / $subtotal);
-                $netTotal = $discountedGross - $vatTotal;
+            $financialSnapshotJson = null;
+            if (is_array($financialSnapshot)) {
+                VatService::validateSnapshot($financialSnapshot);
+                self::assertSnapshotItems($financialSnapshot, $orderItems);
+                $snapshotTotals = $financialSnapshot['totals'];
+                $shippingCost = (int)$snapshotTotals['shipping'];
+                $taxAmount = (int)$snapshotTotals['vat'];
+                $couponDiscount = (int)$snapshotTotals['discount'];
+                $paymentFee = (int)$snapshotTotals['payment_fee'];
+                $total = (int)$snapshotTotals['gross'];
+                $vatTotal = $taxAmount;
+                $netTotal = (int)$snapshotTotals['net'];
+                $vatScenario = (string)$financialSnapshot['scenario'];
+                if ((int)$snapshotTotals['subtotal'] !== $subtotal
+                    || strtolower((string)$financialSnapshot['currency']) !== strtolower((string)($customer['currency'] ?? 'eur'))
+                    || $shippingCost !== (int)($customer['shipping_cost'] ?? 0)
+                    || $couponDiscount !== (int)($customer['coupon_discount'] ?? 0)
+                    || $paymentFee !== (int)($customer['payment_fee'] ?? 0)) {
+                    throw new \InvalidArgumentException('Financial snapshot does not match order inputs');
+                }
+                $financialSnapshotJson = json_encode($financialSnapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+            } else {
+                $shippingCost = $customer['shipping_cost'] ?? 0;
+                $taxAmount = $customer['tax_amount'] ?? 0;
+                $couponDiscount = $customer['coupon_discount'] ?? 0;
+                $paymentFee = $customer['payment_fee'] ?? 0;
+                // Legacy direct callers may still supply net prices. The storefront
+                // always uses the snapshot path and therefore never reads Tax here.
+                $taxInTotal = Tax::pricesIncludeTax() ? 0 : $taxAmount;
+                $total = max(0, $subtotal - $couponDiscount) + $shippingCost + $taxInTotal + $paymentFee;
+
+                $vatTotal = 0;
+                $netTotal = 0;
+                $hasVat = false;
+                foreach ($orderItems as $oi) {
+                    if ($oi['vat_amount'] !== null) { $hasVat = true; $vatTotal += (int)$oi['vat_amount']; }
+                    if ($oi['net_amount'] !== null) { $netTotal += (int)$oi['net_amount']; }
+                }
+                $vatScenario = $customer['vat_scenario'] ?? null;
+                if (!$hasVat) {
+                    $vatTotal = null; $netTotal = null;
+                } elseif ($couponDiscount > 0 && $subtotal > 0) {
+                    $discountedGross = max(0, $subtotal - $couponDiscount);
+                    $vatTotal = (int) round($vatTotal * $discountedGross / $subtotal);
+                    $netTotal = $discountedGross - $vatTotal;
+                }
             }
 
             // 3. Create order (retry on unique constraint collision)
@@ -152,20 +173,29 @@ class Orders {
                 ':shipsnapshot' => $customer['shipping_rate_snapshot'] ?? null,
                 ':paymentfee' => (int)($customer['payment_fee'] ?? 0),
                 ':paymentsnapshot' => $customer['payment_method_snapshot'] ?? null,
+                ':financialsnapshot' => $financialSnapshotJson,
             ];
             $paymentColumns = self::hasColumn('orders', 'payment_method_snapshot');
             $shippingColumns = self::hasColumn('orders', 'shipping_method');
+            $financialColumns = self::hasColumn('orders', 'financial_snapshot');
             $extraColumns = $shippingColumns ? ', shipping_method, shipping_zone, shipping_weight_g, shipping_rate_snapshot' : '';
             $extraValues = $shippingColumns ? ', :shipmethod, :shipzone, :shipweight, :shipsnapshot' : '';
             if ($paymentColumns) {
                 $extraColumns .= ', payment_fee, payment_method_snapshot';
                 $extraValues .= ', :paymentfee, :paymentsnapshot';
             }
+            if ($financialColumns) {
+                $extraColumns .= ', financial_snapshot';
+                $extraValues .= ', :financialsnapshot';
+            }
             if (!$shippingColumns) {
                 unset($orderParams[':shipmethod'], $orderParams[':shipzone'], $orderParams[':shipweight'], $orderParams[':shipsnapshot']);
             }
             if (!$paymentColumns) {
                 unset($orderParams[':paymentfee'], $orderParams[':paymentsnapshot']);
+            }
+            if (!$financialColumns) {
+                unset($orderParams[':financialsnapshot']);
             }
             $orderStmt = $db->prepare("
                 INSERT INTO orders (order_number, status, customer_id, customer_name, customer_email, customer_phone,
@@ -233,6 +263,29 @@ class Orders {
         } catch (\Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();
             throw $e;
+        }
+    }
+
+    private static function assertSnapshotItems(array $snapshot, array $orderItems): void {
+        $components = array_values(array_filter(
+            $snapshot['components'],
+            static fn(array $component): bool => ($component['type'] ?? '') === 'product'
+        ));
+        if (count($components) !== count($orderItems)) {
+            throw new \InvalidArgumentException('Financial snapshot item count does not match order');
+        }
+        foreach ($orderItems as $index => $item) {
+            $component = $components[$index];
+            $variantId = $item['variant_id'] === null ? null : (int)$item['variant_id'];
+            if ((int)$component['product_id'] !== (int)$item['product_id']
+                || ($component['variant_id'] === null ? null : (int)$component['variant_id']) !== $variantId
+                || (string)$component['sku'] !== (string)$item['sku']
+                || (int)$component['quantity'] !== (int)$item['quantity']
+                || (int)$component['unit_gross'] !== (int)$item['unit_price']
+                || (int)$component['gross_before_discount'] !== (int)$item['total']
+                || (string)$component['vat_class'] !== (string)$item['vat_class']) {
+                throw new \InvalidArgumentException('Financial snapshot item does not match reserved order item');
+            }
         }
     }
 

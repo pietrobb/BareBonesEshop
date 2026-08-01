@@ -57,7 +57,8 @@ final class InvoiceService
 
         $sellerSnapshot   = self::sellerSnapshot($legal);
         $customerSnapshot = self::customerSnapshot($order);
-        $vatBreakdown     = self::computeVatBreakdown($order, $items);
+        $financialSnapshot = self::financialSnapshot($order);
+        $vatBreakdown     = self::computeVatBreakdown($order, $items, $financialSnapshot);
         $locale           = self::resolveLocale($order, $store);
         $issuedAt         = date('Y-m-d');
         $deliveryDate     = $issuedAt;
@@ -84,13 +85,13 @@ final class InvoiceService
                     total_net, total_vat, total_gross, currency,
                     vat_breakdown, customer_snapshot, seller_snapshot,
                     payment_method, locale, status, download_token,
-                    vat_scenario, reverse_charge_note_key
+                    vat_scenario, reverse_charge_note_key, financial_snapshot
                 ) VALUES (
                     :order_id, :number, :issued_at, :delivery_date, :due_date, :pdf_path,
                     :total_net, :total_vat, :total_gross, :currency,
                     :vat_breakdown, :customer_snapshot, :seller_snapshot,
                     :payment_method, :locale, :status, :download_token,
-                    :vat_scenario, :note_key
+                    :vat_scenario, :note_key, :financial_snapshot
                 )
             ");
             $stmt->execute([
@@ -116,6 +117,7 @@ final class InvoiceService
                 ':download_token'    => $token,
                 ':vat_scenario'      => $vatBreakdown['scenario'] ?? null,
                 ':note_key'          => $vatBreakdown['note_key'] ?? null,
+                ':financial_snapshot'=> $financialSnapshot === null ? null : json_encode($financialSnapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             ]);
             $invoiceId = (int)$db->lastInsertId();
 
@@ -332,6 +334,20 @@ final class InvoiceService
         ];
     }
 
+    private static function financialSnapshot(array $order): ?array
+    {
+        $json = trim((string)($order['financial_snapshot'] ?? ''));
+        if ($json === '') return null;
+        $snapshot = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($snapshot)) throw new \RuntimeException('Order financial snapshot is invalid');
+        VatService::validateSnapshot($snapshot);
+        if ((int)$snapshot['totals']['gross'] !== (int)($order['total'] ?? 0)
+            || strtolower((string)$snapshot['currency']) !== strtolower((string)($order['currency'] ?? 'eur'))) {
+            throw new \RuntimeException('Order financial snapshot does not match persisted order');
+        }
+        return $snapshot;
+    }
+
     /**
      * VAT breakdown: derived from order_items per-line VAT data when available;
      * falls back to ratio heuristic for legacy orders without per-line snapshot.
@@ -339,8 +355,21 @@ final class InvoiceService
      * Returns ['rates' => {rate_str => {net,vat}}, 'vat_total' => int,
      *          'scenario' => string|null, 'note_key' => string|null].
      */
-    private static function computeVatBreakdown(array $order, array $items): array
+    private static function computeVatBreakdown(array $order, array $items, ?array $financialSnapshot = null): array
     {
+        if ($financialSnapshot !== null) {
+            $rates = [];
+            foreach ($financialSnapshot['breakdown'] as $rate => $group) {
+                $rates[(string)$rate] = ['net' => (int)$group['net'], 'vat' => (int)$group['vat']];
+            }
+            return [
+                'rates' => $rates,
+                'vat_total' => (int)$financialSnapshot['totals']['vat'],
+                'scenario' => (string)$financialSnapshot['scenario'],
+                'note_key' => (string)$financialSnapshot['note_key'] ?: null,
+            ];
+        }
+
         $orderTotal = (int)($order['total'] ?? 0);
         $discount   = (int)($order['discount_amount'] ?? 0);
         $shipping   = (int)($order['shipping_cost'] ?? 0);

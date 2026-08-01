@@ -7,9 +7,9 @@ require_once __DIR__ . '/cli-only.php';
  * Generates EU OSS quarterly report for cross-border B2C sales.
  * Aggregates per (consumption_country, vat_rate, currency) over a quarter.
  *
- * Source of truth: invoices with vat_scenario='oss', joined with order_items.
- * Why invoices, not orders: invoices snapshot the legally-binding VAT data
- * frozen at issuance time (per ESHOP-DESIGN immutability rule).
+ * Source of truth: invoices with vat_scenario='oss'. New invoices carry the
+ * exact checkout financial snapshot; historical invoices use their immutable
+ * vat_breakdown. Current rates and raw order items are never recomputed.
  *
  * Usage:
  *   php cli/oss-report.php --quarter=2026-Q2
@@ -30,6 +30,7 @@ require_once __DIR__ . '/cli-only.php';
 
 require __DIR__ . '/../src/autoload.php';
 
+if (!defined('BB_TEST_LOAD_OSS_ONLY')) {
 $opts = parseArgs($argv);
 if (!empty($opts['help'])) { printHelp(); exit(0); }
 
@@ -58,6 +59,7 @@ switch ($format) {
 
 if (empty($rows)) exit(1);
 exit(0);
+}
 
 // ---------------------------------------------------------------------------
 
@@ -129,40 +131,52 @@ function collect(string $from, string $to, ?string $storeCode): array
 
     $sql = "
         SELECT i.id, i.number, i.issued_at, i.currency, i.customer_snapshot,
-               oi.vat_rate, oi.vat_amount, oi.net_amount
+               i.vat_breakdown, i.financial_snapshot
         FROM invoices i
-        JOIN order_items oi ON oi.order_id = i.order_id
         $where
     ";
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
 
     $bucket = [];
-    $invoiceIds = [];
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $snap = json_decode((string)$row['customer_snapshot'], true) ?: [];
-        $cc   = strtoupper(trim((string)($snap['country'] ?? '')));
+        $customerSnapshot = json_decode((string)$row['customer_snapshot'], true) ?: [];
+        $cc = strtoupper(trim((string)($customerSnapshot['country'] ?? '')));
         if ($cc === '') continue;
 
-        $rate = (float)($row['vat_rate'] ?? 0);
-        $cur  = strtolower((string)($row['currency'] ?? 'eur'));
-        $key  = "{$cc}|{$rate}|{$cur}";
-
-        if (!isset($bucket[$key])) {
-            $bucket[$key] = [
-                'consumption_country' => $cc,
-                'vat_rate'            => $rate,
-                'currency'            => $cur,
-                'net'                 => 0,
-                'vat'                 => 0,
-                'gross'               => 0,
-                'invoice_ids'         => [],
-            ];
+        $financialJson = trim((string)($row['financial_snapshot'] ?? ''));
+        if ($financialJson !== '') {
+            $financialSnapshot = json_decode($financialJson, true, 512, JSON_THROW_ON_ERROR);
+            if (!is_array($financialSnapshot)) throw new RuntimeException('Invoice financial snapshot is invalid');
+            VatService::validateSnapshot($financialSnapshot);
+            $rates = $financialSnapshot['breakdown'];
+        } else {
+            // Historical invoices remain reportable from their immutable invoice
+            // breakdown; no current rate lookup or order-item recomputation occurs.
+            $rates = json_decode((string)($row['vat_breakdown'] ?? '{}'), true) ?: [];
         }
-        $bucket[$key]['net']   += (int)($row['net_amount'] ?? 0);
-        $bucket[$key]['vat']   += (int)($row['vat_amount'] ?? 0);
-        $bucket[$key]['gross'] += (int)($row['net_amount'] ?? 0) + (int)($row['vat_amount'] ?? 0);
-        $bucket[$key]['invoice_ids'][(int)$row['id']] = true;
+        $cur = strtolower((string)($row['currency'] ?? 'eur'));
+        foreach ($rates as $rateKey => $group) {
+            $rate = (float)$rateKey;
+            $key = "{$cc}|{$rate}|{$cur}";
+            if (!isset($bucket[$key])) {
+                $bucket[$key] = [
+                    'consumption_country' => $cc,
+                    'vat_rate' => $rate,
+                    'currency' => $cur,
+                    'net' => 0,
+                    'vat' => 0,
+                    'gross' => 0,
+                    'invoice_ids' => [],
+                ];
+            }
+            $net = (int)($group['net'] ?? 0);
+            $vat = (int)($group['vat'] ?? 0);
+            $bucket[$key]['net'] += $net;
+            $bucket[$key]['vat'] += $vat;
+            $bucket[$key]['gross'] += $net + $vat;
+            $bucket[$key]['invoice_ids'][(int)$row['id']] = true;
+        }
     }
 
     $rows = [];

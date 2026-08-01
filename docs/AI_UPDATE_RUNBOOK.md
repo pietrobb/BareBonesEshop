@@ -166,6 +166,8 @@ On rollback, the stored dump checksum and disposable restore are proved again be
 
 An older updater blocks MySQL migration packages before it installs package files. Therefore the release that first introduces `UpdateDatabaseBackup.php` and `MysqlUpdateDatabaseBackup.php` must be deployed as a **code-only signed update**. Only a later package may rely on that adapter for database migrations. Do not combine first adoption of the adapter with a MySQL migration.
 
+The financial-snapshot migration (`20260801141000_financial_snapshots`) belongs in that later migration-capable package. After apply, verify that both `orders.financial_snapshot` and `invoices.financial_snapshot` exist. Existing rows must remain `NULL`; only newly created orders receive versioned snapshot JSON, and each new invoice copies the same fingerprint. A rollout must not backfill historical snapshots from current rates.
+
 ### Additional operational requirement
 
 The database dump is transactionally consistent, but the application must still be quiesced through apply and verification. Otherwise writes accepted after the dump could be lost if rollback becomes necessary.

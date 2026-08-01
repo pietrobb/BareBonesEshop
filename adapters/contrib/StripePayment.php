@@ -25,7 +25,10 @@ class StripePayment implements PaymentAdapter {
             'success_url' => $order['success_url'] ?? '',
             'cancel_url' => $order['cancel_url'] ?? '',
             'client_reference_id' => $order['order_number'] ?? '',
-            'metadata' => ['order_id' => (string)($order['order_id'] ?? '')],
+            'metadata' => [
+                'order_id' => (string)($order['order_id'] ?? ''),
+                'financial_snapshot_id' => (string)($order['financial_snapshot_id'] ?? ''),
+            ],
         ];
         $email = (string)($order['customer_email'] ?? '');
         if (filter_var($email, FILTER_VALIDATE_EMAIL)) $params['customer_email'] = $email;

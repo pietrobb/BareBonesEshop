@@ -640,27 +640,19 @@ function apiCheckout(?array $runtimeConfig = null): array {
             ]);
         }
     }
-    $vatScenario = VatService::resolveScenario([
+    $vatContext = [
         'seller_country'        => $sellerCountry,
         'seller_vat_registered' => $sellerVatRegistered,
         'seller_oss_enabled'    => $sellerOss,
         'customer_country'      => $country,
         'customer_vat_id_valid' => $vatIdValid,
         'is_b2b'                => $vatId !== '',
-    ]);
+    ];
+    $vatScenario = VatService::resolveScenario($vatContext);
 
-    // NOTE: Cart::applyVat() re-resolves the scenario itself — it expects the
-    // canonical resolveScenario() INPUTS, not the resolved output. Passing the
-    // output keys ('scenario', 'rate_country', …) made customer_country = ''
-    // → scenario 'export' → every line persisted with VAT 0.
-    $cart = Cart::enriched([
-        'seller_country'        => $sellerCountry,
-        'seller_vat_registered' => $sellerVatRegistered,
-        'seller_oss_enabled'    => $sellerOss,
-        'customer_country'      => $country,
-        'customer_vat_id_valid' => $vatIdValid,
-        'is_b2b'                => $vatId !== '',
-    ]);
+    // Cart preview and the immutable order snapshot use the same canonical
+    // provider inputs. No downstream consumer resolves the scenario again.
+    $cart = Cart::enriched($vatContext);
     if (empty($cart['items'])) {
         return ['error' => 'Cart is empty'];
     }
@@ -710,6 +702,11 @@ function apiCheckout(?array $runtimeConfig = null): array {
         return ['success' => false, 'error' => 'Doručenie nie je dostupné do zvolenej krajiny.'];
     }
     $shippingCost = (int)$selectedRate['price'];
+    $autoRules = Pricing::autoCartRules($cart['subtotal']);
+    foreach ($autoRules as $rule) {
+        if ($rule['action'] === 'free_shipping') $shippingCost = 0;
+    }
+
     $currency = $cart['items'][0]['currency'] ?? 'eur';
     $paymentBaseAmount = max(0, $cart['subtotal'] - $couponDiscount) + $shippingCost;
     $freeDigitalOrder = $digitalOnly && $paymentBaseAmount === 0;
@@ -723,13 +720,13 @@ function apiCheckout(?array $runtimeConfig = null): array {
         return ['success' => false, 'error' => 'Platba nie je dostupná pre digitálne doručenie.'];
     }
     $paymentFee = (int)$selectedPayment['fee'];
-
-    $autoRules = Pricing::autoCartRules($cart['subtotal']);
-    foreach ($autoRules as $rule) {
-        if ($rule['action'] === 'free_shipping') $shippingCost = 0;
-    }
-
-    $taxBreakdown = Tax::orderBreakdown($cart['items'], $country);
+    $financialSnapshot = VatService::buildSnapshot($availableItems, $vatContext, [
+        'discount' => $couponDiscount,
+        'shipping' => $shippingCost,
+        'payment_fee' => $paymentFee,
+        'currency' => $currency,
+        'effective_date' => date('Y-m-d'),
+    ]);
 
     // Attach logged-in customer_id if a session is active (guest checkout keeps customer_id=null)
     Security::sessionStart();
@@ -755,8 +752,9 @@ function apiCheckout(?array $runtimeConfig = null): array {
         'shipping_zone'  => $selectedRate['zone_code'] ?? '',
         'shipping_weight_g' => $totalWeight,
         'shipping_rate_snapshot' => json_encode($selectedRate, JSON_UNESCAPED_UNICODE),
-        'tax_amount'     => $taxBreakdown['total_tax'],
+        'tax_amount'     => $financialSnapshot['totals']['vat'],
         'coupon_discount'=> $couponDiscount,
+        'financial_snapshot' => $financialSnapshot,
         'vat_id'         => $vatId,
         'vat_country'    => $vatId !== '' ? substr($vatId, 0, 2) : '',
         'vat_id_status'  => $vatIdStatus,
@@ -815,6 +813,7 @@ function apiCheckout(?array $runtimeConfig = null): array {
                     'currency'       => $order['currency'] ?? 'eur',
                     'items'          => $orderItems,
                     'shipping_cost'  => (int)$order['shipping_cost'],
+                    'financial_snapshot_id' => $financialSnapshot['fingerprint'],
                     'success_url'    => $baseUrl . '/?page=order-done&order=' . rawurlencode($order['order_number']) . '&session_id={CHECKOUT_SESSION_ID}',
                     'cancel_url'     => $baseUrl . '/checkout/cancel?order=' . rawurlencode($order['order_number']),
                 ], $payment);

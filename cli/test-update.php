@@ -1,9 +1,32 @@
 <?php
 require_once __DIR__ . '/cli-only.php';
 
-if (!function_exists('assert_true')) {
-    fwrite(STDERR, "Run updater tests through: php cli/test.php\n");
-    exit(2);
+$standaloneUpdateTest = !function_exists('assert_true');
+if ($standaloneUpdateTest) {
+    require_once __DIR__ . '/../src/autoload.php';
+    $tests = 0;
+    $passed = 0;
+    $failed = 0;
+    $errors = [];
+    function assert_true(bool $condition, string $message): void {
+        global $tests, $passed, $failed, $errors;
+        $tests++;
+        if ($condition) { $passed++; echo "  [PASS] {$message}\n"; return; }
+        $failed++;
+        $errors[] = $message;
+        echo "  [FAIL] {$message}\n";
+    }
+    function assert_equals($expected, $actual, string $message): void {
+        global $tests, $passed, $failed, $errors;
+        $tests++;
+        if ($expected === $actual) { $passed++; echo "  [PASS] {$message}\n"; return; }
+        $failed++;
+        $detail = $message . ' (expected: ' . var_export($expected, true) . ', got: ' . var_export($actual, true) . ')';
+        $errors[] = $detail;
+        echo "  [FAIL] {$detail}\n";
+    }
+    $pdo = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    Db::init($pdo, 'sqlite');
 }
 
 echo "\n--- Test 61: Safe versioned updater ---\n";
@@ -349,4 +372,12 @@ function updateTestRemoveTree(string $path): void
         }
     }
     @rmdir($path);
+}
+
+if ($standaloneUpdateTest) {
+    echo "\nResults: {$passed}/{$tests} passed" . ($failed > 0 ? ", {$failed} FAILED" : '') . "\n";
+    if ($failed > 0) {
+        foreach ($errors as $error) echo "  - {$error}\n";
+    }
+    exit($failed > 0 ? 1 : 0);
 }
