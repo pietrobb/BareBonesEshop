@@ -363,10 +363,6 @@ $csrf = Security::csrfToken();
 // Render
 // ============================================================
 ob_start();
-
-echo '<!DOCTYPE html><html lang="' . $e($locale) . '"><head>';
-echo '<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">';
-echo '<title>' . $e($t('account.title')) . ' — BareBones Shop</title>';
 echo '<style>
 *{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif;background:#f5f6f8;color:#222;margin:0}
 .wrap{max-width:960px;margin:0 auto;padding:24px}
@@ -407,7 +403,9 @@ th{background:#edf2f7;color:#4a5568;font-size:12px;text-transform:uppercase}
 .addr-default{border-color:#4299e1}
 .addr-actions{margin-top:8px}
 a.link{color:#4299e1;text-decoration:none}a.link:hover{text-decoration:underline}
-</style></head><body>';
+</style>';
+$accountHead = ob_get_clean();
+ob_start();
 
 echo '<header><div class="brand"><a href="/">BareBones Shop</a></div><div>';
 if ($loggedIn) {
@@ -772,6 +770,8 @@ switch ($p) {
 }
 
 echo '</div>';
+$bodyHtml = ob_get_clean();
+ob_start();
 ?>
 <script nonce="<?= Security::cspNonce() ?>">
 document.addEventListener('submit', function (event) {
@@ -782,6 +782,13 @@ document.addEventListener('submit', function (event) {
 });
 </script>
 <?php
-echo '</body></html>';
-
-echo ob_get_clean();
+$bodyEnd = ob_get_clean();
+echo Template::document($t('account.title') . ' — BareBones Shop', '', [
+    'seo_head' => $accountHead,
+    'body_html' => $bodyHtml,
+    'body_end' => $bodyEnd,
+    'assets' => ['css' => [], 'js' => []],
+    'base_css' => '',
+    'shop_js' => '',
+    'marketing_hooks' => '',
+]);

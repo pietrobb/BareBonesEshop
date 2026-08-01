@@ -81,81 +81,56 @@ $priceDecimal = number_format($product['price'] / 100, 2, '.', '');
 $image = $product['image'] ? '/uploads/full/' . $product['image'] : '';
 
 Security::headers();
-?>
-<!DOCTYPE html>
-<html lang="<?= esc($lang) ?>">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= esc($product['name']) ?> | BareBones Shop</title>
-    <meta name="description" content="<?= esc($product['summary'] ?? '') ?>">
-    <link rel="canonical" href="<?= esc($canonical) ?>">
 
-    <!-- Open Graph -->
-    <meta property="og:type" content="product">
-    <meta property="og:title" content="<?= esc($product['name']) ?>">
-    <meta property="og:description" content="<?= esc($product['summary'] ?? '') ?>">
-    <?php if ($image): ?>
-    <meta property="og:image" content="<?= esc($image) ?>">
-    <?php endif; ?>
-    <meta property="og:url" content="<?= esc($canonical) ?>">
-    <meta property="product:price:amount" content="<?= esc($priceDecimal) ?>">
-    <meta property="product:price:currency" content="<?= esc($currencyCode) ?>">
-
-    <!-- JSON-LD -->
-<?php
-    $productLd = [
-        '@context' => 'https://schema.org',
-        '@type' => 'Product',
-        'name' => $product['name'],
-        'description' => $product['summary'] ?? '',
-        'image' => $image,
-        'sku' => $product['sku'],
-        'offers' => [
-            '@type' => 'Offer',
-            'price' => $priceDecimal,
-            'priceCurrency' => $currencyCode,
-            'availability' => $availability,
-        ],
+$productLd = [
+    '@context' => 'https://schema.org',
+    '@type' => 'Product',
+    'name' => $product['name'],
+    'description' => $product['summary'] ?? '',
+    'image' => $image,
+    'sku' => $product['sku'],
+    'offers' => [
+        '@type' => 'Offer',
+        'price' => $priceDecimal,
+        'priceCurrency' => $currencyCode,
+        'availability' => $availability,
+    ],
+];
+if ($reviewAgg['count'] > 0) {
+    $productLd['aggregateRating'] = [
+        '@type' => 'AggregateRating',
+        'ratingValue' => $reviewAgg['avg'],
+        'reviewCount' => $reviewAgg['count'],
+        'bestRating' => 5,
+        'worstRating' => 1,
     ];
-    if ($reviewAgg['count'] > 0) {
-        $productLd['aggregateRating'] = [
-            '@type' => 'AggregateRating',
-            'ratingValue' => $reviewAgg['avg'],
-            'reviewCount' => $reviewAgg['count'],
-            'bestRating' => 5,
-            'worstRating' => 1,
-        ];
-    }
-?>
-    <script type="application/ld+json" nonce="<?= Security::cspNonce() ?>">
-    <?= json_encode($productLd, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>
-    </script>
-<?php
-    // BreadcrumbList: Home › ancestor categories › current product
-    $crumbItems = [['name' => $t['home'] ?? 'Home', 'url' => '/']];
-    foreach ($breadcrumb as $bc) {
-        $crumbItems[] = ['name' => $bc['name'], 'url' => '/category/' . $bc['slug']];
-    }
-    $crumbItems[] = ['name' => $product['name']];
-    echo "    " . JsonLd::render(JsonLd::breadcrumbList($crumbItems), Security::cspNonce()) . "\n";
-?>
+}
 
-    <link rel="stylesheet" href="/shop.css">
-    <?php foreach (Template::assets()['css'] as $themeCss): ?><link rel="stylesheet" href="<?= esc($themeCss) ?>"><?php endforeach; ?>
-</head>
-<body>
-<a class="skip-link" href="#main-content"><?= esc(I18n::t('skip_to_content')) ?></a>
-<?= Template::render('global/header', [
-    't' => $t,
-    'shop_name' => StoreContext::current()->config()['name'] ?? 'BareBones Shop',
-    'navigation' => ContentService::menu('primary', $lang),
-    'cart' => ['count' => $cart['count']],
-    'csrf_token' => $csrfToken,
-    'lang' => $lang,
-]) ?>
+$crumbItems = [['name' => $t['home'] ?? 'Home', 'url' => '/']];
+foreach ($breadcrumb as $bc) {
+    $crumbItems[] = ['name' => $bc['name'], 'url' => '/category/' . $bc['slug']];
+}
+$crumbItems[] = ['name' => $product['name']];
 
-<main id="main-content" class="container" tabindex="-1">
+$attribute = static fn(string $value): string => htmlspecialchars($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+$seoHead = '<meta name="description" content="' . $attribute((string)($product['summary'] ?? '')) . '">' . "\n"
+    . '<link rel="canonical" href="' . $attribute($canonical) . '">' . "\n"
+    . '<meta property="og:type" content="product">' . "\n"
+    . '<meta property="og:title" content="' . $attribute((string)$product['name']) . '">' . "\n"
+    . '<meta property="og:description" content="' . $attribute((string)($product['summary'] ?? '')) . '">' . "\n"
+    . ($image !== '' ? '<meta property="og:image" content="' . $attribute($image) . '">' . "\n" : '')
+    . '<meta property="og:url" content="' . $attribute($canonical) . '">' . "\n"
+    . '<meta property="product:price:amount" content="' . $attribute($priceDecimal) . '">' . "\n"
+    . '<meta property="product:price:currency" content="' . $attribute($currencyCode) . '">' . "\n"
+    . JsonLd::render($productLd, Security::cspNonce()) . "\n"
+    . JsonLd::render(JsonLd::breadcrumbList($crumbItems), Security::cspNonce());
+
+$bodyEnd = '<script nonce="' . $attribute(Security::cspNonce()) . '">window.BBS='
+    . json_encode(['csrfToken' => $csrfToken, 'lang' => $lang], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)
+    . ';</script>';
+
+ob_start();
+?>
     <?php if (!empty($breadcrumb)): ?>
     <?= Template::render('global/breadcrumb', [
         'breadcrumb' => $breadcrumb,
@@ -261,18 +236,11 @@ Security::headers();
         't' => $t,
     ]) ?>
     <?php endif; ?>
-</main>
-
-<?= Template::render('global/footer', ['t' => $t]) ?>
-
-<script nonce="<?= Security::cspNonce() ?>">
-    window.BBS = {
-        csrfToken: <?= json_encode($csrfToken) ?>,
-        lang: <?= json_encode($lang) ?>,
-    };
-</script>
-<script src="/shop.js"></script>
-<?php foreach (Template::assets()['js'] as $themeJs): ?><script src="<?= esc($themeJs) ?>" defer></script><?php endforeach; ?>
-<?= MarketingConsent::hooks($_COOKIE, Security::cspNonce()) ?>
-</body>
-</html>
+<?php
+$content = ob_get_clean();
+echo Template::document($product['name'] . ' | BareBones Shop', $content, [
+    'seo_head' => $seoHead,
+    'body_end' => $bodyEnd,
+    'cart' => ['count' => $cart['count']],
+]);
+?>

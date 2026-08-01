@@ -93,6 +93,10 @@ class Template {
             'cart' => ['count' => 0],
             'assets' => self::assets(),
             'seo_head' => '',
+            'body_html' => '',
+            'body_end' => '',
+            'base_css' => '<link rel="stylesheet" href="/shop.css">',
+            'shop_js' => '<script src="/shop.js" defer></script>',
             'marketing_hooks' => MarketingConsent::hooks($_COOKIE, Security::cspNonce()),
         ];
         return self::render('global/document', array_replace($defaults, $data));

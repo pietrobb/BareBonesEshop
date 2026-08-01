@@ -28,7 +28,7 @@ class AuditLog {
         $stmt = Db::get()->prepare("
             SELECT * FROM audit_log
             WHERE entity = :entity AND entity_id = :eid
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
             LIMIT :limit
         ");
         $stmt->execute([':entity' => $entity, ':eid' => $entityId, ':limit' => $limit]);

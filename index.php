@@ -302,13 +302,8 @@ if ($page === 'home') {
     }
     $jsonLd = JsonLd::render(JsonLd::breadcrumbList($crumbItems, $base), $nonce);
 }
-?><!DOCTYPE html>
-<html lang="<?= $lang ?>">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title><?= $title ?></title>
-<?php foreach ($themeAssets['css'] as $themeCss): ?><link rel="stylesheet" href="<?= $e($themeCss) ?>"><?php endforeach; ?>
+ob_start();
+?>
 <?php foreach ($hreflangs as $loc => $pfx): ?>
 <link rel="alternate" hreflang="<?= $e($loc) ?>" href="<?= $e($pfx . $pathNoPrefix) ?>">
 <?php endforeach; ?>
@@ -489,8 +484,10 @@ footer{background:#333;color:#bbb;padding:0;margin-top:40px;font-size:.85em}
 .footer-col a{display:block;color:#999;padding:3px 0;font-size:.9em}.footer-col a:hover{color:#fff}
 .footer-bottom{background:#222;padding:16px 0;text-align:center;color:#999;font-size:.8em}
 </style>
-</head>
-<body>
+<?php
+$seoHead = ob_get_clean();
+ob_start();
+?>
 <a class="skip-link" href="#main-content"><?= $t('skip_to_content') ?></a>
 <header>
  <div class="header-top">
@@ -600,7 +597,10 @@ footer{background:#333;color:#bbb;padding:0;margin-top:40px;font-size:.85em}
  </div></div>
  <div class="footer-bottom"><div class="wrap">woodle.sk &copy; <?= date('Y') ?> — Powered by BareBones E-shop</div></div>
 </footer>
-
+<?php
+$bodyHtml = ob_get_clean();
+ob_start();
+?>
 <script nonce="<?= Security::cspNonce() ?>">
 function setTab(id){
  document.querySelectorAll('[data-product-tab]').forEach(t=>{
@@ -822,10 +822,17 @@ if ($ccCookie === ''):
 })();
 </script>
 <?php endif; ?>
-<?php foreach ($themeAssets['js'] as $themeJs): ?><script src="<?= $e($themeJs) ?>" defer></script><?php endforeach; ?>
-<?= MarketingConsent::hooks($_COOKIE, Security::cspNonce()) ?>
-</body></html>
 <?php
+$bodyEnd = ob_get_clean();
+echo Template::document($title, '', [
+    'seo_head' => $seoHead,
+    'body_html' => $bodyHtml,
+    'body_end' => $bodyEnd,
+    'assets' => $themeAssets,
+    'base_css' => '',
+    'shop_js' => '',
+]);
+
 // ============================================================
 // Render functions
 // ============================================================

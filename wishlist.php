@@ -39,29 +39,13 @@ $t = I18n::all();
 $csrfToken = Security::csrfToken();
 
 Security::headers();
-?>
-<!DOCTYPE html>
-<html lang="<?= esc($lang) ?>">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= esc($t['wishlist.title'] ?? 'Wishlist') ?> | BareBones Shop</title>
-    <meta name="robots" content="noindex,follow">
-    <link rel="stylesheet" href="/shop.css">
-    <?php foreach (Template::assets()['css'] as $themeCss): ?><link rel="stylesheet" href="<?= esc($themeCss) ?>"><?php endforeach; ?>
-</head>
-<body>
-<a class="skip-link" href="#main-content"><?= esc(I18n::t('skip_to_content')) ?></a>
-<?= Template::render('global/header', [
-    't' => $t,
-    'shop_name' => StoreContext::current()->config()['name'] ?? 'BareBones Shop',
-    'navigation' => ContentService::menu('primary', $lang),
-    'cart' => ['count' => $cart['count']],
-    'csrf_token' => $csrfToken,
-    'lang' => $lang,
-]) ?>
 
-<main id="main-content" class="container" tabindex="-1">
+$bodyEnd = '<script nonce="' . esc(Security::cspNonce()) . '">window.BBS='
+    . json_encode(['csrfToken' => $csrfToken, 'lang' => $lang], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)
+    . ';</script>';
+
+ob_start();
+?>
     <h1><?= esc($t['wishlist.title'] ?? 'My Wishlist') ?></h1>
 
     <?php if (empty($items)): ?>
@@ -87,18 +71,11 @@ Security::headers();
         <?php endforeach; ?>
     </ul>
     <?php endif; ?>
-</main>
-
-<?= Template::render('global/footer', ['t' => $t]) ?>
-
-<script nonce="<?= Security::cspNonce() ?>">
-    window.BBS = {
-        csrfToken: <?= json_encode($csrfToken) ?>,
-        lang: <?= json_encode($lang) ?>,
-    };
-</script>
-<script src="/shop.js"></script>
-<?php foreach (Template::assets()['js'] as $themeJs): ?><script src="<?= esc($themeJs) ?>" defer></script><?php endforeach; ?>
-<?= MarketingConsent::hooks($_COOKIE, Security::cspNonce()) ?>
-</body>
-</html>
+<?php
+$content = ob_get_clean();
+echo Template::document(($t['wishlist.title'] ?? 'Wishlist') . ' | BareBones Shop', $content, [
+    'seo_head' => '<meta name="robots" content="noindex,follow">',
+    'body_end' => $bodyEnd,
+    'cart' => ['count' => $cart['count']],
+]);
+?>

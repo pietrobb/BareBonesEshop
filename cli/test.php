@@ -1092,8 +1092,8 @@ AuditLog::log('product', 1, null, ['name' => 'Test'], 'Product created');
 
 $logs = AuditLog::forEntity('product', 1);
 assert_equals(2, count($logs), 'AuditLog has 2 entries');
-assert_equals('update', $logs[0]['action'], 'First log action is update (latest first)');
-assert_equals('create', $logs[1]['action'] ?? $logs[0]['action'], 'Create action detected');
+assert_equals('create', $logs[0]['action'], 'Latest audit action is returned first');
+assert_equals('update', $logs[1]['action'] ?? $logs[0]['action'], 'Earlier audit action follows');
 
 // ============================================================
 // TEST 18: Idempotency
@@ -6891,9 +6891,26 @@ $g10Manifest = Template::manifest('default');
 assert_equals('BareBones Default', (string)$g10Manifest['name'], 'G10 theme: package manifest loads');
 assert_true(in_array('accessibility.css', $g10Manifest['assets']['css'], true), 'G10 theme: manifest declares versioned CSS assets');
 assert_true(str_contains(Template::assets()['css'][0], '?v=2.0.0'), 'G10 theme: asset URL carries manifest version');
-$g10Document = Template::document('G10 document', '<h1>Content</h1>', ['marketing_hooks' => '']);
+$g10Document = Template::document('G10 document', '<h1>Content</h1>', [
+    'body_end' => '<script nonce="test-nonce">window.BBS={};</script>',
+    'marketing_hooks' => '',
+]);
 assert_true(str_contains($g10Document, 'href="#main-content"') && str_contains($g10Document, '<main id="main-content"'), 'G10 WCAG: shared shell has a functional skip link');
 assert_true(str_contains($g10Document, '<header') && str_contains($g10Document, '<footer'), 'G10 theme: shared shell owns header and footer blocks');
+assert_true(str_contains($g10Document, 'nonce="test-nonce"'), 'G11 theme: shared shell renders a CSP-safe body_end bootstrap slot');
+$g11CustomBody = Template::document('G11 custom body', '', [
+    'body_html' => '<header id="legacy-header"></header><main id="main-content"></main>',
+    'base_css' => '',
+    'shop_js' => '',
+    'marketing_hooks' => '',
+]);
+assert_true(str_contains($g11CustomBody, 'id="legacy-header"'), 'G11 theme: shared shell preserves an entrypoint-specific body without escaping it');
+assert_equals(1, substr_count(strtolower($g11CustomBody), '<main'), 'G11 theme: custom body does not receive a duplicate main landmark');
+foreach (['index.php', 'product.php', 'wishlist.php', 'account.php', 'page.php'] as $sharedShellEntrypoint) {
+    $sharedShellSource = file_get_contents(__DIR__ . '/../' . $sharedShellEntrypoint) ?: '';
+    assert_true(str_contains($sharedShellSource, 'Template::document('), 'G11 theme: ' . $sharedShellEntrypoint . ' uses the shared document shell');
+    assert_true(!str_contains(strtolower($sharedShellSource), '<!doctype html>'), 'G11 theme: ' . $sharedShellEntrypoint . ' does not duplicate the document shell');
+}
 
 $g10MenuId = ContentService::saveMenu(['menu_code' => 'primary', 'locale' => 'en', 'label' => 'G10 Sale', 'url' => '/sale', 'active' => 1]);
 $g10BannerId = ContentService::saveBanner(['slot' => 'homepage', 'locale' => 'en', 'title' => 'G10 Banner', 'body' => 'Campaign', 'link_url' => '/sale', 'active' => 1]);
