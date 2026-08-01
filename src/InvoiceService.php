@@ -344,7 +344,8 @@ final class InvoiceService
         if ($json === '') return null;
         $snapshot = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
         if (!is_array($snapshot)) throw new \RuntimeException('Order financial snapshot is invalid');
-        VatService::validateSnapshot($snapshot);
+        $taxProvider = Adapters::tax((string)($snapshot['providers']['tax'] ?? Adapters::defaultProviderCode('tax')));
+        $taxProvider::validateSnapshot($snapshot);
         if ((int)$snapshot['totals']['gross'] !== (int)($order['total'] ?? 0)
             || strtolower((string)$snapshot['currency']) !== strtolower((string)($order['currency'] ?? 'eur'))) {
             throw new \RuntimeException('Order financial snapshot does not match persisted order');

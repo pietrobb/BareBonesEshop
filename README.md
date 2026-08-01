@@ -55,7 +55,9 @@ All settings live in **`config.php`** (a single returned array). Key entries:
 | `db_sqlite_path`   | Path to the SQLite file (default `db/shop.sqlite`)           |
 | `db_*`             | MySQL host/port/name/user/password (when `db_driver=mysql`)  |
 | `admin_user` / `admin_password` | Admin Basic-Auth user + **`password_hash()`** output |
-| `adapters`         | Pluggable search / queue / payment / VAT / storage backends   |
+| `adapters`         | Legacy single-default search / queue / payment / VAT / storage backends |
+| `provider_defaults` | Default stable codes for payment, mail, tax, and optional ERP |
+| `providers`        | Additive code→adapter registry for concurrent payment/shipping/mail/tax/ERP providers |
 
 Never commit real secrets (Stripe keys, admin password hash for production) —
 keep them in an untracked local override or environment-specific config.
@@ -174,10 +176,12 @@ review moderation, RMA processing, and **customer management** (search, status
 toggle, per-customer orders/addresses/RMA). Role-based access control.
 
 **JSON API** (`api.php`) — ~30 actions with rate limiting, CSRF on mutating
-requests, and a Stripe webhook endpoint.
+requests, and registry-routed payment/shipping webhook endpoints.
 
-**Operations** — pluggable adapters (search/queue/payment/VAT/storage), file
-queue + worker, backups, migrations, and a suite of CLI tools under `cli/`.
+**Operations** — store-scoped provider registry for concurrent payment, shipping,
+ERP, mail, and tax adapters; legacy single-adapter config remains supported. The
+file queue freezes provider codes in order snapshots so retries use the original
+provider. Backups, migrations, and CLI tools live under `cli/`.
 
 ---
 

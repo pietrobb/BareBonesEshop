@@ -61,10 +61,12 @@ class ShippingService
         $rates = [];
         $coveredCarriers = [];
 
-        foreach ($adapters as $adapter) {
+        foreach ($adapters as $providerCode => $adapter) {
+            if (is_int($providerCode)) $providerCode = $adapter->carrierId();
             $adapterRates = $adapter->getRates($params);
             if (!empty($adapterRates)) {
                 foreach ($adapterRates as $rate) {
+                    $rate['provider'] = (string)$providerCode;
                     $rate['method_code'] = $rate['method_code'] ?? $rate['carrier'] ?? $adapter->carrierId();
                     $rate['key'] = $rate['key'] ?? $rate['method_code'];
                     $rates[] = $rate;
@@ -86,6 +88,7 @@ class ShippingService
                     'key'           => $method,
                     'method_code'   => $method,
                     'carrier'       => $method,
+                    'provider'      => 'legacy',
                     'label'         => $cfg['label'] ?? ucfirst($method),
                     'price'         => $cost,
                     'cod_surcharge' => 0,
@@ -299,6 +302,7 @@ class ShippingService
                 'key'             => $methodCode,
                 'method_code'     => $methodCode,
                 'carrier'         => $row['carrier'],
+                'provider'        => $row['carrier'],
                 'zone_code'       => $row['zone_code'],
                 'zone_name'       => $row['zone_name'],
                 'label'           => $row['method_name'],
@@ -345,21 +349,7 @@ class ShippingService
             return self::$adapters;
         }
 
-        // Default adapters — auto-registered
-        $classes = [
-            'PersonalPickup',
-            'PacketaShipping',
-            'GlsShipping',
-        ];
-
-        $adapters = [];
-        foreach ($classes as $class) {
-            if (class_exists($class)) {
-                $adapters[] = new $class();
-            }
-        }
-
-        return $adapters;
+        return Adapters::providers('shipping');
     }
 
     private static function findAdapter(string $carrierId): ShippingAdapter

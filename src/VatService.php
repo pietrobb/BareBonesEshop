@@ -350,8 +350,18 @@ class VatService implements TaxProvider
         }
         uksort($breakdown, static fn(string $a, string $b): int => (float)$a <=> (float)$b);
 
+        $providers = (array)($amounts['providers'] ?? ['tax' => 'vat']);
+        ksort($providers, SORT_STRING);
+        foreach ($providers as $type => $code) {
+            if (!preg_match('/^[a-z][a-z0-9_]{1,39}$/', (string)$type)
+                || !preg_match('/^[a-z0-9][a-z0-9_-]{1,39}$/', (string)$code)) {
+                throw new \InvalidArgumentException('Financial snapshot provider code is invalid');
+            }
+        }
+
         $snapshot = [
             'version' => 1,
+            'providers' => $providers,
             'currency' => $currency,
             'effective_date' => $effectiveDate,
             'scenario' => (string)$scenario['scenario'],
@@ -386,6 +396,19 @@ class VatService implements TaxProvider
         unset($unsigned['fingerprint']);
         if ($fingerprint === '' || !hash_equals(self::snapshotFingerprint($unsigned), $fingerprint)) {
             throw new \InvalidArgumentException('Financial snapshot fingerprint mismatch');
+        }
+
+        $providers = $snapshot['providers'] ?? null;
+        if ($providers !== null) {
+            if (!is_array($providers) || ($providers['tax'] ?? '') === '') {
+                throw new \InvalidArgumentException('Financial snapshot provider map is invalid');
+            }
+            foreach ($providers as $type => $code) {
+                if (!preg_match('/^[a-z][a-z0-9_]{1,39}$/', (string)$type)
+                    || !preg_match('/^[a-z0-9][a-z0-9_-]{1,39}$/', (string)$code)) {
+                    throw new \InvalidArgumentException('Financial snapshot provider code is invalid');
+                }
+            }
         }
 
         if (($snapshot['rounding'] ?? '') !== 'gross_line_half_up_integer_basis_points'

@@ -640,7 +640,10 @@ function apiCheckout(?array $runtimeConfig = null): array {
         'customer_vat_id_valid' => $vatIdValid,
         'is_b2b'                => $vatId !== '',
     ];
-    $vatScenario = VatService::resolveScenario($vatContext);
+    $taxProviderCode = Adapters::defaultProviderCode('tax');
+    $taxProvider = Adapters::tax($taxProviderCode);
+    $vatContext['tax_provider'] = $taxProviderCode;
+    $vatScenario = $taxProvider::resolveScenario($vatContext);
 
     // Cart preview and the immutable order snapshot use the same canonical
     // provider inputs. No downstream consumer resolves the scenario again.
@@ -712,12 +715,20 @@ function apiCheckout(?array $runtimeConfig = null): array {
         return ['success' => false, 'error' => 'Platba nie je dostupná pre digitálne doručenie.'];
     }
     $paymentFee = (int)$selectedPayment['fee'];
-    $financialSnapshot = VatService::buildSnapshot($availableItems, $vatContext, [
+    $providerCodes = [
+        'tax' => $taxProviderCode,
+        'payment' => (string)$selectedPayment['provider'],
+        'shipping' => (string)($selectedRate['provider'] ?? $selectedRate['carrier'] ?? 'none'),
+        'mail' => Adapters::defaultProviderCode('mail'),
+    ];
+    if (Adapters::registry('erp') !== []) $providerCodes['erp'] = Adapters::defaultProviderCode('erp');
+    $financialSnapshot = $taxProvider::buildSnapshot($availableItems, $vatContext, [
         'discount' => $couponDiscount,
         'shipping' => $shippingCost,
         'payment_fee' => $paymentFee,
         'currency' => $currency,
         'effective_date' => date('Y-m-d'),
+        'providers' => $providerCodes,
     ]);
 
     // Attach logged-in customer_id if a session is active (guest checkout keeps customer_id=null)
@@ -795,7 +806,8 @@ function apiCheckout(?array $runtimeConfig = null): array {
         // For online payments, create a payment session
         if (!empty($selectedPayment['requires_online'])) {
             try {
-                $payment = Adapters::payment();
+                $paymentProvider = (string)$selectedPayment['provider'];
+                $payment = Adapters::payment($paymentProvider);
                 $baseUrl = Security::appUrl($cfg);
                 $session = PaymentService::initiate([
                     'order_id'       => $orderId,
@@ -808,14 +820,14 @@ function apiCheckout(?array $runtimeConfig = null): array {
                     'financial_snapshot_id' => $financialSnapshot['fingerprint'],
                     'success_url'    => $baseUrl . '/?page=order-done&order=' . rawurlencode($order['order_number']) . '&session_id={CHECKOUT_SESSION_ID}',
                     'cancel_url'     => $baseUrl . '/checkout/cancel?order=' . rawurlencode($order['order_number']),
-                ], $payment);
+                ], $payment, $paymentProvider);
                 $result['payment_url'] = $session['url'];
                 $result['session_id'] = $session['session_id'];
 
                 // Persist the provider session separately so payment_id may later
                 // be replaced by the payment intent without losing ownership proof.
                 if (!empty($session['session_id'])) {
-                    CheckoutSession::bind($orderId, (string)$session['session_id'], 'stripe', session_id());
+                    CheckoutSession::bind($orderId, (string)$session['session_id'], $paymentProvider, session_id());
                     Db::get()->prepare("UPDATE orders SET payment_id = :pid WHERE id = :id")
                         ->execute([':pid' => $session['session_id'], ':id' => $orderId]);
                 }
@@ -845,6 +857,7 @@ function digitalDeliveryRate(): array {
     return [
         'method_code' => 'digital',
         'carrier' => 'digital',
+        'provider' => 'none',
         'label' => 'Elektronicky — odkaz na stiahnutie e-mailom',
         'description' => 'Bez fyzickej dopravy',
         'service_type' => 'digital',
@@ -1101,41 +1114,26 @@ function apiWebhookPayment(): array {
         return ['error' => 'Invalid JSON'];
     }
 
-    // Resolve gateway and signature header per provider
+    // Resolve the exact registered provider. Mock remains an explicit dev-only bypass.
     $cfg = require __DIR__ . '/config.php';
-    [$gateway, $sigHeader] = match($provider) {
-        'stripe' => [
-            new StripePayment($cfg),
-            $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '',
-        ],
-        'payu' => [
-            new PayUPayment($cfg),
-            $_SERVER['HTTP_OPENPAYU_SIGNATURE'] ?? '',
-        ],
-        // Mock gateway = payment bypass — only routable when config explicitly
-        // opts in (adapters.payment == MockPayment or allow_mock_webhook flag).
-        // No default signature header: missing header must fail verification.
-        'mock' => (($cfg['adapters']['payment'] ?? '') === 'MockPayment' || !empty($cfg['allow_mock_webhook']))
-            ? [
-                new MockPayment($cfg + ['mock_result' => 'success']),
-                $_SERVER['HTTP_X_MOCK_SIGNATURE'] ?? '',
-            ]
-            : [null, ''],
-        default => [null, ''],
-    };
-
-    if (!$gateway) {
+    if ($provider === 'mock'
+        && ($cfg['adapters']['payment'] ?? '') !== 'MockPayment'
+        && empty($cfg['allow_mock_webhook'])) {
         http_response_code(400);
         return ['error' => "Unknown provider: {$provider}"];
     }
-
-    // Load adapter classes
-    $adapterDir = __DIR__ . '/adapters/contrib/';
-    foreach (['StripePayment', 'PayUPayment', 'MockPayment'] as $cls) {
-        if (!class_exists($cls)) {
-            $f = $adapterDir . $cls . '.php';
-            if (file_exists($f)) require_once $f;
+    try {
+        $definition = Adapters::registry('payment')[$provider] ?? null;
+        if (!$definition) throw new RuntimeException('Provider is not registered');
+        $headerName = (string)($definition['signature_header'] ?? '');
+        if (!preg_match('/^HTTP_[A-Z0-9_]+$/', $headerName)) {
+            throw new RuntimeException('Provider signature header is not configured');
         }
+        $gateway = Adapters::payment($provider);
+        $sigHeader = (string)($_SERVER[$headerName] ?? '');
+    } catch (\Throwable $e) {
+        http_response_code(400);
+        return ['error' => "Unknown provider: {$provider}"];
     }
 
     try {

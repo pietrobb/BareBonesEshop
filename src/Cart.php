@@ -188,7 +188,8 @@ class Cart {
             'customer_vat_id_valid' => (bool)($vatContext['customer_vat_validated'] ?? $vatContext['customer_vat_id_valid'] ?? false),
             'is_b2b'                => (bool)($vatContext['customer_is_business']  ?? $vatContext['is_b2b']                ?? false),
         ];
-        $scenario = VatService::resolveScenario($vctx);
+        $taxProvider = Adapters::tax((string)($vatContext['tax_provider'] ?? Adapters::defaultProviderCode('tax')));
+        $scenario = $taxProvider::resolveScenario($vctx);
         $atDate   = $vatContext['at_date'] ?? null;
         $rateCountry = $scenario['rate_country'];
         $applies  = $scenario['applies_vat'];
@@ -208,10 +209,10 @@ class Cart {
             }
 
             $vatClass = $item['vat_class'] ?? 'standard';
-            $resolved = VatService::resolveClass($vatClass);
-            $rate     = $applies ? VatService::rate($rateCountry, $resolved, $atDate) : 0.0;
+            $resolved = method_exists($taxProvider, 'resolveClass') ? $taxProvider::resolveClass($vatClass) : $vatClass;
+            $rate     = $applies ? $taxProvider::rate($rateCountry, $resolved, $atDate) : 0.0;
 
-            $line = VatService::computeLine(
+            $line = $taxProvider::computeLine(
                 (int)$item['price'],
                 (int)$item['qty'],
                 $rate,

@@ -148,7 +148,8 @@ function collect(string $from, string $to, ?string $storeCode): array
         if ($financialJson !== '') {
             $financialSnapshot = json_decode($financialJson, true, 512, JSON_THROW_ON_ERROR);
             if (!is_array($financialSnapshot)) throw new RuntimeException('Invoice financial snapshot is invalid');
-            VatService::validateSnapshot($financialSnapshot);
+            $taxProvider = Adapters::tax((string)($financialSnapshot['providers']['tax'] ?? Adapters::defaultProviderCode('tax')));
+            $taxProvider::validateSnapshot($financialSnapshot);
             $rates = $financialSnapshot['breakdown'];
         } else {
             // Historical invoices remain reportable from their immutable invoice

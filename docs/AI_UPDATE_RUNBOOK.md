@@ -110,6 +110,12 @@ Also run deployment-specific HTTP smoke tests, worker checks, payment-provider c
 
 7. **Resume** — only after all checks pass, restart workers and traffic. Monitor logs and key transactions.
 
+## Provider registry rollout
+
+Provider registry updates are code/config changes; they do not require a schema migration. Existing `adapters.payment` and `adapters.integration` entries remain valid defaults. To enable concurrent providers, add stable lowercase codes under `providers` and choose defaults under `provider_defaults`; never place credentials in these maps.
+
+Before resuming traffic, verify each configured code resolves to the expected class and capability set, then smoke-test one checkout/webhook or equivalent operation per active provider. Inspect a newly created order and confirm `financial_snapshot.providers` and the payment/shipping snapshots contain the selected codes. Restart workers only after this check: queued retries intentionally resolve the provider frozen on the original order, so removing or renaming an in-use code is a breaking operational change. Roll back the code/config together if a frozen code can no longer resolve.
+
 ## Rollback procedure
 
 Keep traffic and writers stopped. Review whether any package-managed file changed after the update, then run:

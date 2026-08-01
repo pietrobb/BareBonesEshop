@@ -27,16 +27,12 @@ class MailService {
         self::$adapterOverride = $a;
     }
 
-    /** Resolve the active MailAdapter. Priority: override → MAIL_ADAPTER env → LogMail. */
-    public static function adapter(): MailAdapter {
+    /** Resolve the active MailAdapter. Priority: override → stable registry code → log. */
+    public static function adapter(?string $providerCode = null): MailAdapter {
         if (self::$adapterOverride) return self::$adapterOverride;
 
-        $id = strtolower((string)(getenv('MAIL_ADAPTER') ?: 'log'));
-        return match ($id) {
-            'smtp' => new SmtpMail(),
-            'ses'  => new SesMail(),
-            default => new LogMail(),
-        };
+        $id = $providerCode ?? strtolower((string)(getenv('MAIL_ADAPTER') ?: Adapters::defaultProviderCode('mail')));
+        return Adapters::mail($id);
     }
 
     /**
@@ -62,7 +58,8 @@ class MailService {
         string $locale = '',
         array $vars = [],
         ?int $orderId = null,
-        array $attachments = []
+        array $attachments = [],
+        ?string $providerCode = null
     ): array {
         $to = strtolower(trim($to));
         if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
@@ -78,7 +75,7 @@ class MailService {
 
         $rendered = self::render($template, $locale, $vars);
 
-        $adapter = self::adapter();
+        $adapter = self::adapter($providerCode);
         $from = strtolower(trim((string)(getenv('MAIL_FROM') ?: 'noreply@localhost.invalid')));
         if (!filter_var($from, FILTER_VALIDATE_EMAIL)) {
             return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => $adapter->adapterId(), 'error' => 'invalid sender'];

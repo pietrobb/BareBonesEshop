@@ -61,10 +61,26 @@ return [
     'adapters' => [
         'search'      => 'FtsSearch',
         'queue'       => 'FileQueue',
-        'payment'     => 'StripePayment',
+        'payment'     => 'StripePayment', // legacy default, retained for compatibility
         'vat_validator' => 'ViesVatIdValidator', // MockVatIdValidator for dev/tests
         'storage'     => 'LocalStorage',
-        'integration' => null,
+        'integration' => null, // legacy single ERP adapter
+    ],
+
+    // Stable provider codes. Built-in payment/shipping/mail/tax providers are
+    // registered automatically; add or override deployment-specific adapters here.
+    'provider_defaults' => [
+        'payment' => 'stripe',
+        'mail' => 'log',
+        'tax' => 'vat',
+        // 'erp' => 'money',
+    ],
+    'providers' => [
+        'payment' => [], // e.g. 'gopay' => 'GoPayPayment'
+        'shipping' => [],
+        'mail' => [],
+        'tax' => [],
+        'erp' => [], // e.g. 'money' => ['class' => 'MoneyErpAdapter', 'capabilities' => ['orders', 'stock']]
     ],
 
     // Dev only: route api.php?action=webhook_payment&provider=mock even when the

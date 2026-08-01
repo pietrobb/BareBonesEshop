@@ -55,19 +55,16 @@ $handlers = [
 // Release abandoned online reservations on every cron worker run. Provider
 // errors and non-terminal payment states are skipped by Orders::expirePending.
 try {
-    $gateway = null;
-    $activeGatewayClass = strtolower((string)($cfg['adapters']['payment'] ?? ''));
+    $gateways = [];
     $expiredOrders = Orders::expirePending(
         (int)($cfg['pending_order_expiry_seconds'] ?? 172800),
         (int)($cfg['pending_order_expiry_batch'] ?? 25),
-        static function (array $order) use (&$gateway, $activeGatewayClass): string {
+        static function (array $order) use (&$gateways): string {
             $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true) ?: [];
-            $provider = strtolower((string)($snapshot['provider'] ?? ''));
-            if ($provider !== '' && !str_contains($activeGatewayClass, $provider)) {
-                throw new RuntimeException('Configured payment adapter does not match the order provider');
-            }
-            $gateway ??= Adapters::payment();
-            return $gateway->getStatus((string)$order['payment_id']);
+            $provider = strtolower((string)($snapshot['provider'] ?? orderProviderCode($order, 'payment')));
+            if ($provider === '') $provider = Adapters::defaultProviderCode('payment');
+            $gateways[$provider] ??= Adapters::payment($provider);
+            return $gateways[$provider]->getStatus((string)$order['payment_id']);
         }
     );
     if ($verbose && $expiredOrders > 0) echo "Expired pending orders: {$expiredOrders}\n";
@@ -144,6 +141,11 @@ if ($verbose) echo "Worker done. Processed: {$processed} jobs.\n";
 // ============================================================
 // Job Handlers
 // ============================================================
+
+function orderProviderCode(array $order, string $type): string {
+    $snapshot = json_decode((string)($order['financial_snapshot'] ?? ''), true) ?: [];
+    return strtolower((string)($snapshot['providers'][$type] ?? ''));
+}
 
 function handleCacheRebuild(array $payload, array $job): void {
     $scope = $payload['scope'] ?? 'partial';
@@ -275,6 +277,7 @@ function handleEmailSend(array $payload, array $job): void {
     $to       = (string)($payload['to'] ?? '');
     $orderId  = $payload['order_id'] ?? null;
     $locale   = (string)($payload['locale'] ?? '');
+    $order = null;
 
     $allowedTemplates = [
         'order_confirmation', 'order_paid', 'order_cancelled', 'order_shipped',
@@ -314,8 +317,10 @@ function handleEmailSend(array $payload, array $job): void {
         }
     }
 
-    // Delegate to MailService — renders locale template, picks adapter, logs to email_log.
-    MailService::send($template, $to, $locale, $vars, $orderId !== null ? (int)$orderId : null);
+    // Retry with the provider frozen on the order; legacy jobs use the current default.
+    $providerCode = (string)($payload['_provider_code'] ?? ($order ? orderProviderCode($order, 'mail') : ''));
+    if ($providerCode === '') $providerCode = Adapters::defaultProviderCode('mail');
+    MailService::send($template, $to, $locale, $vars, $orderId !== null ? (int)$orderId : null, [], $providerCode);
 }
 
 function handleDigitalFulfill(array $payload, array $job): void {
@@ -339,7 +344,7 @@ function handleDigitalFulfill(array $payload, array $job): void {
         'order_number' => $order['order_number'],
         'customer_name' => $order['customer_name'],
         'download_links' => $formatted,
-    ], $orderId);
+    ], $orderId, [], orderProviderCode($order, 'mail') ?: Adapters::defaultProviderCode('mail'));
     $ids = array_column($links, 'id');
     if (($result['status'] ?? '') !== 'sent') {
         DigitalDelivery::revokeIssued($ids, 'delivery_email_failed');
@@ -412,7 +417,11 @@ function handlePaymentRefund(array $payload, array $job): void {
     $result = ['status' => 'skipped'];
     if ($paymentId) {
         try {
-            $payment = Adapters::payment();
+            $order = $orderId ? Orders::byId((int)$orderId) : null;
+            $paymentSnapshot = $order ? (json_decode((string)($order['payment_method_snapshot'] ?? ''), true) ?: []) : [];
+            $providerCode = (string)($payload['_provider_code'] ?? ($paymentSnapshot['provider'] ?? ($order ? orderProviderCode($order, 'payment') : '')));
+            if ($providerCode === '') $providerCode = Adapters::defaultProviderCode('payment');
+            $payment = Adapters::payment($providerCode);
             $result = $payment->refund($paymentId, $amount);
         } catch (\Throwable $e) {
             $result = ['status' => 'error', 'message' => $e->getMessage()];
@@ -439,15 +448,24 @@ function handlePaymentRefund(array $payload, array $job): void {
 }
 
 function handleErpOrderPush(array $payload, array $job): void {
-    // Placeholder for ERP integration
-    $orderId = $payload['order_id'] ?? 0;
-    error_log("ERP push: order #{$orderId}");
+    $orderId = (int)($payload['order_id'] ?? 0);
+    $order = $orderId > 0 ? Orders::byId($orderId) : null;
+    if (!$order) return;
+    $providerCode = (string)($payload['_provider_code'] ?? orderProviderCode($order, 'erp'));
+    $adapter = $providerCode !== '' ? Adapters::integration($providerCode) : Adapters::integration();
+    if (!$adapter) return;
+    Orders::markSynced($orderId, $adapter->pushOrder($order));
 }
 
 function handleErpOrderUpdate(array $payload, array $job): void {
-    $orderId = $payload['order_id'] ?? 0;
-    $status = $payload['status'] ?? '';
-    error_log("ERP update: order #{$orderId} status={$status}");
+    $orderId = (int)($payload['order_id'] ?? 0);
+    $order = $orderId > 0 ? Orders::byId($orderId) : null;
+    if (!$order || empty($order['erp_id'])) return;
+    $providerCode = (string)($payload['_provider_code'] ?? orderProviderCode($order, 'erp'));
+    $adapter = $providerCode !== '' ? Adapters::integration($providerCode) : Adapters::integration();
+    if (!$adapter) return;
+    // IntegrationAdapter has no outbound status mutation contract yet; G5 adds it.
+    error_log("ERP update queued via {$providerCode}: order #{$orderId} status=" . (string)($payload['status'] ?? ''));
 }
 
 function handleSitemapBuild(array $payload, array $job): void {
@@ -618,7 +636,8 @@ function handleInvoiceIssue(array $payload, array $job): void {
         $locale,
         $vars,
         $orderId,
-        $attachments
+        $attachments,
+        orderProviderCode($order, 'mail') ?: Adapters::defaultProviderCode('mail')
     );
 }
 

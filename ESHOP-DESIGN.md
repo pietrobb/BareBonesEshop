@@ -52,6 +52,8 @@ single-lang kód je vždy ťažšie než to navrhnúť správne od začiatku.
 
 `StoreContext` sa rieši raz na request podľa explicitného key, domény alebo najdlhšieho URL prefixu; doména má prioritu. `id` vlastní objednávky, cache, platobné transakcie, shipping labely a faktúry. Voliteľné `catalog_scope` a `provider_scope` umožňujú viacerým marketom bezpečne zdieľať katalóg a payment/shipping konfiguráciu; bez overrideov je nový store izolovaný. Migrácia priraďuje všetky legacy dáta literálnemu `default` store a job queue prenáša store/channel do workerov. Rollback updatera obnoví predmigračný databázový snapshot.
 
+`Adapters::registry()` mapuje stabilné provider codes na súbežné payment, shipping, ERP, mail a tax adaptéry, ich capabilities a aktívny `provider_scope`. Checkout zmrazí zvolené kódy vo fingerprintovanom finančnom snapshot-e; payment session, webhook, refund, expiry, mail a ERP worker potom resolvujú pôvodný provider, nie aktuálny globálny default. Legacy `adapters.payment` a `adapters.integration` ostávajú fallbackom pre existujúce inštalácie.
+
 ### V1 — kompletný commerce engine
 
 **Katalóg + storefront:**

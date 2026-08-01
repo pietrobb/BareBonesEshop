@@ -140,7 +140,7 @@ class PaymentService {
      * Returns ['url' => redirect_url, 'session_id' => provider_session_id]
      * Logs an 'initiated' transaction record.
      */
-    public static function initiate(array $order, PaymentAdapter $gateway): array {
+    public static function initiate(array $order, PaymentAdapter $gateway, ?string $providerCode = null): array {
         StoreContext::current()->assertPermission('payment');
         if (empty($order['order_id']) || !Orders::byId((int)$order['order_id'])) {
             throw new \RuntimeException('Payment order does not belong to the active store');
@@ -150,7 +150,7 @@ class PaymentService {
         // Log initiated transaction
         self::logTransaction(
             orderId:        (int)$order['order_id'],
-            provider:       self::providerName($gateway),
+            provider:       $providerCode ?? self::providerName($gateway),
             providerRef:    $session['session_id'] ?? '',
             status:         'initiated',
             amount:         (int)$order['total'],
@@ -527,13 +527,17 @@ class PaymentService {
     }
 
     private static function providerName(PaymentAdapter $gateway): string {
-        $class = get_class($gateway);
-        return match(true) {
-            str_contains($class, 'Stripe')   => 'stripe',
-            str_contains($class, 'PayU')     => 'payu',
-            str_contains($class, 'Mock')     => 'mock',
-            str_contains($class, 'Cash')     => 'cod',
-            default                          => strtolower($class),
-        };
+        try {
+            return Adapters::providerCode('payment', $gateway);
+        } catch (\RuntimeException $e) {
+            $class = get_class($gateway);
+            return match(true) {
+                str_contains($class, 'Stripe') => 'stripe',
+                str_contains($class, 'PayU') => 'payu',
+                str_contains($class, 'Mock') => 'mock',
+                str_contains($class, 'Cash') => 'cod',
+                default => strtolower($class),
+            };
+        }
     }
 }

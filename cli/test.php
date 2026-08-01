@@ -6101,6 +6101,45 @@ assert_equals('anonymized', (string)(Customers::byId((int)$g6EraseCustomerId)['s
 $gdprSourceG6 = file_get_contents(__DIR__ . '/../src/GdprService.php') ?: '';
 assert_true(str_contains($gdprSourceG6, 'GDPR erase audit failed [{$errorId}]'), 'G6 GDPR: post-commit audit failure is logged with a correlation ID');
 
+// ============================================================
+// TEST 61: G3 stable multi-provider registry and frozen dispatch
+// ============================================================
+echo "\n--- Test 61: G3 provider registry ---\n";
+
+$providerRegistry = Adapters::registry();
+assert_equals('StripePayment', (string)$providerRegistry['payment']['stripe']['class'], 'G3 registry: stripe has a stable provider code');
+assert_equals('PayUPayment', (string)$providerRegistry['payment']['payu']['class'], 'G3 registry: PayU can coexist with Stripe');
+assert_equals('PacketaShipping', (string)$providerRegistry['shipping']['packeta']['class'], 'G3 registry: shipping provider is registered');
+assert_equals('SmtpMail', (string)$providerRegistry['mail']['smtp']['class'], 'G3 registry: mail provider is registered');
+assert_equals('VatService', (string)$providerRegistry['tax']['vat']['class'], 'G3 registry: tax provider is registered');
+assert_true(in_array('refund', $providerRegistry['payment']['stripe']['capabilities'], true), 'G3 registry: provider capabilities are declared');
+assert_equals(StoreContext::current()->providerId(), (string)$providerRegistry['payment']['stripe']['scope'], 'G3 registry: definitions declare active provider scope');
+assert_true(Adapters::provider('payment', 'stripe') instanceof StripePayment, 'G3 registry: resolves Stripe independently');
+assert_true(Adapters::provider('payment', 'payu') instanceof PayUPayment, 'G3 registry: resolves PayU independently');
+assert_true(Adapters::shipping('packeta') instanceof PacketaShipping, 'G3 registry: resolves shipping by stable code');
+assert_true(Adapters::mail('smtp') instanceof SmtpMail, 'G3 registry: resolves mail by stable code');
+assert_equals(VatService::class, Adapters::tax('vat'), 'G3 registry: resolves static tax provider contract');
+assert_equals('payu', Adapters::providerCode('payment', PayUPayment::class), 'G3 registry: maps adapter class back to stable code');
+$invalidProviderRejected = false;
+try { Adapters::provider('payment', '../stripe'); }
+catch (InvalidArgumentException $e) { $invalidProviderRejected = true; }
+assert_true($invalidProviderRejected, 'G3 registry: unsafe provider code is rejected before class loading');
+
+assert_equals('vat', (string)$financialSnapshot['providers']['tax'], 'G3 snapshot: direct financial snapshot freezes tax provider');
+$checkoutProviderSnapshot = json_decode((string)$onlineCheckoutOrder['financial_snapshot'], true) ?: [];
+assert_equals('stripe', (string)($checkoutProviderSnapshot['providers']['payment'] ?? ''), 'G3 snapshot: checkout freezes selected payment provider');
+assert_equals('packeta', (string)($checkoutProviderSnapshot['providers']['shipping'] ?? ''), 'G3 snapshot: checkout freezes selected shipping provider');
+assert_equals('log', (string)($checkoutProviderSnapshot['providers']['mail'] ?? ''), 'G3 snapshot: checkout freezes mail provider');
+assert_equals('packeta', (string)($onlineCheckoutShippingSnapshot['provider'] ?? ''), 'G3 snapshot: shipping rate stores provider code');
+
+$workerProviderSource = file_get_contents(__DIR__ . '/worker.php') ?: '';
+assert_true(!str_contains($workerProviderSource, 'Adapters::payment();'), 'G3 worker: no payment job depends on one global gateway');
+assert_true(str_contains($workerProviderSource, "Adapters::payment(\$providerCode)"), 'G3 worker: refund resolves frozen payment provider');
+assert_true(str_contains($workerProviderSource, "Adapters::payment(\$provider)"), 'G3 worker: expiry resolves each order provider independently');
+assert_true(str_contains($workerProviderSource, "Adapters::integration(\$providerCode)"), 'G3 worker: ERP jobs resolve the frozen provider');
+assert_true(str_contains($apiSourceG6, 'Adapters::payment($paymentProvider)'), 'G3 checkout: selected payment provider drives session creation');
+assert_true(!str_contains($apiSourceG6, 'new StripePayment($cfg)'), 'G3 webhook: no hardcoded Stripe construction remains');
+
 require __DIR__ . '/test-update.php';
 
 echo "\n========================================\n";

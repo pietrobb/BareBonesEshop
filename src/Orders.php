@@ -99,7 +99,8 @@ class Orders {
             }
             $financialSnapshotJson = null;
             if (is_array($financialSnapshot)) {
-                VatService::validateSnapshot($financialSnapshot);
+                $taxProvider = Adapters::tax((string)($financialSnapshot['providers']['tax'] ?? Adapters::defaultProviderCode('tax')));
+                $taxProvider::validateSnapshot($financialSnapshot);
                 self::assertSnapshotItems($financialSnapshot, $orderItems);
                 $snapshotTotals = $financialSnapshot['totals'];
                 $shippingCost = (int)$snapshotTotals['shipping'];
