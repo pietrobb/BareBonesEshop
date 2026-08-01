@@ -61,7 +61,35 @@ All settings live in **`config.php`** (a single returned array). Key entries:
 | `outbound_webhooks` | Config-only signed webhook endpoints, event filters, stores, and secrets |
 
 Never commit real secrets (Stripe keys, admin password hash for production) —
-keep them in an untracked local override or environment-specific config.
+keep them in an untracked local override or environment-specific config. The
+machine-readable deployment contract is `config/config.schema.json`; fields marked
+`x-secret` must be injected from deployment secret storage.
+
+### Merchant setup and operations
+
+```bash
+php cli/setup.php apply --json       # idempotently creates private runtime paths
+php cli/setup.php doctor --json      # versioned checklist; does not print secrets
+php cli/setup.php doctor --json --strict
+```
+
+The doctor checks runtime/extensions, config schema, store and DB readiness, private
+paths, payment/mail/webhook configuration, worker/cron, backup, and the shipping/ERP
+integration boundaries. Warnings identify operator staging work; failures include a
+concrete remediation. `apply` never edits merchant/legal data or credentials.
+
+Load balancers may use `GET /healthz` for process liveness and `GET /readyz` for DB,
+store-config, and writable runtime readiness. Both return bounded JSON with an
+`X-Request-ID`; no secret or exception detail is exposed. Application and worker
+operations write JSON Lines with correlation/store/channel context to
+`structured_log_file`, recursively redacting secret-shaped fields.
+
+The built-in `http-carrier` provider implements a versioned HTTPS rates → pickup
+points → label → cancel → tracking lifecycle. The `http` ERP provider implements
+product/customer/order export, status updates, stock pull, and health. Configure
+them under `integrations.http_shipping` / `integrations.http_erp`; fixture contract
+tests run without credentials, while a live sandbox smoke remains an explicit
+operator step before production.
 
 ---
 
@@ -207,7 +235,9 @@ requests, and registry-routed payment/shipping webhook endpoints.
 **Operations** — store-scoped provider registry for concurrent payment, shipping,
 ERP, mail, and tax adapters; legacy single-adapter config remains supported. The
 file queue freezes provider codes in order snapshots so retries use the original
-provider. Backups, migrations, and CLI tools live under `cli/`.
+provider. Merchant doctor/apply, config schema, liveness/readiness, structured JSON
+logs, and complete generic HTTPS shipping/ERP contracts provide an AI-first
+production path. Backups, migrations, and CLI tools live under `cli/`.
 
 ---
 

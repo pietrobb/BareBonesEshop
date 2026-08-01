@@ -6272,6 +6272,133 @@ $workerG4 = file_get_contents(__DIR__ . '/worker.php') ?: '';
 assert_true(str_contains($workerG4, 'processOutbox') && str_contains($workerG4, 'Outbox::markRetry'), 'G4 worker: committed events are delivered with durable retry handling');
 Bootstrap::initStoreContext('/', '', 'default', 'storefront');
 
+// ============================================================
+// TEST 63: G5 setup, health, structured logs, shipping and ERP
+// ============================================================
+echo "\n--- Test 63: G5 merchant operations and integration contracts ---\n";
+
+$g5Registry = Adapters::registry();
+assert_equals('HttpShipping', (string)$g5Registry['shipping']['http-carrier']['class'], 'G5 registry: generic HTTP carrier is available');
+assert_true(in_array('cancel', $g5Registry['shipping']['http-carrier']['capabilities'], true), 'G5 registry: carrier declares cancellation capability');
+assert_equals('HttpErpAdapter', (string)$g5Registry['erp']['http']['class'], 'G5 registry: generic HTTP ERP is available');
+assert_true(in_array('order_status', $g5Registry['erp']['http']['capabilities'], true), 'G5 registry: ERP declares status mutation capability');
+
+$g5Calls = [];
+JsonHttpClient::setFixtureTransport(static function (string $method, string $url, string $body, array $headers) use (&$g5Calls): array {
+    $g5Calls[] = compact('method', 'url', 'body', 'headers');
+    $path = (string)parse_url($url, PHP_URL_PATH);
+    if ($path === '/v1/rates') return ['status' => 200, 'body' => ['rates' => [[
+        'method_code' => 'fixture-pickup', 'label' => 'Fixture pickup', 'price' => 299,
+        'cod_surcharge' => 0, 'delivery_days' => '1-2', 'cod' => false, 'pickup_required' => true,
+    ]]]];
+    if ($path === '/v1/pickup-points') return ['status' => 200, 'body' => ['data' => [[
+        'id' => 'PP-1', 'name' => 'Fixture Point', 'address' => 'Test 1, Bratislava',
+    ]]]];
+    if ($path === '/v1/labels' && $method === 'POST') return ['status' => 201, 'body' => ['awb' => 'HTTP00000001', 'label_data' => 'fixture-label']];
+    if (str_ends_with($path, '/cancel')) return ['status' => 200, 'body' => ['status' => 'cancelled']];
+    if (str_starts_with($path, '/v1/shipments/')) return ['status' => 200, 'body' => ['status' => 'in_transit', 'events' => [['timestamp' => '2026-08-01T12:00:00Z', 'location' => 'Hub', 'description' => 'Accepted']]]];
+    if ($path === '/v1/orders' && $method === 'POST') return ['status' => 201, 'body' => ['id' => 'ERP-1001']];
+    if (str_ends_with($path, '/status')) return ['status' => 200, 'body' => ['status' => 'processing']];
+    if ($path === '/v1/orders/ERP-1001' && $method === 'PATCH') return ['status' => 200, 'body' => ['status' => 'shipped']];
+    if ($path === '/v1/stock') return ['status' => 200, 'body' => ['data' => [['sku' => 'TEST-001', 'qty' => 9]]]];
+    if ($path === '/v1/customers') return ['status' => 201, 'body' => ['id' => 'CUS-1']];
+    if ($path === '/v1/health') return ['status' => 200, 'body' => ['status' => 'ok']];
+    if (str_starts_with($path, '/v1/products/')) return ['status' => 200, 'body' => ['status' => 'ok']];
+    if ($path === '/v1/products') return ['status' => 200, 'body' => ['data' => [['sku' => 'TEST-001']]]];
+    return ['status' => 404, 'body' => ['error' => ['code' => 'fixture_not_found']]];
+});
+$g5Config = [
+    'integrations' => [
+        'http_shipping' => ['base_url' => 'https://carrier.test', 'api_key' => str_repeat('c', 24), 'carrier_code' => 'http-carrier'],
+        'http_erp' => ['base_url' => 'https://erp.test', 'api_key' => str_repeat('e', 24)],
+    ],
+];
+$g5Shipping = new HttpShipping($g5Config);
+$g5Rates = $g5Shipping->getRates(['country' => 'SK', 'weight_g' => 1000, 'subtotal' => 2000]);
+assert_equals(299, (int)$g5Rates[0]['price'], 'G5 shipping: fixture rate preserves integer cents');
+assert_true(!empty($g5Rates[0]['pickup_required']), 'G5 shipping: pickup requirement is explicit');
+assert_equals('PP-1', (string)$g5Shipping->pickupPoints('SK', '81101')[0]['id'], 'G5 shipping: pickup points contract resolves');
+$g5Label = $g5Shipping->generateLabel(['id' => 1, 'order_number' => 'G5-1', 'shipping_addr' => '{}', 'total' => 1000, 'currency' => 'eur']);
+assert_equals('HTTP00000001', (string)$g5Label['awb'], 'G5 shipping: label contract returns AWB');
+assert_equals('in_transit', (string)$g5Shipping->trackShipment('HTTP00000001')['status'], 'G5 shipping: tracking contract resolves');
+assert_equals('cancelled', (string)$g5Shipping->cancelLabel('HTTP00000001')['status'], 'G5 shipping: label cancellation contract resolves');
+
+ShippingService::setAdapters(['http-carrier' => $g5Shipping]);
+$g5LabelCallsBefore = count(array_filter($g5Calls, static fn(array $call): bool => parse_url($call['url'], PHP_URL_PATH) === '/v1/labels' && $call['method'] === 'POST'));
+$g5ServiceLabel = ShippingService::generateLabel((int)$digitalOrderId, 'http-carrier');
+$g5ServiceLabelReplay = ShippingService::generateLabel((int)$digitalOrderId, 'http-carrier');
+$g5LabelCallsAfter = count(array_filter($g5Calls, static fn(array $call): bool => parse_url($call['url'], PHP_URL_PATH) === '/v1/labels' && $call['method'] === 'POST'));
+assert_equals((string)$g5ServiceLabel['awb'], (string)$g5ServiceLabelReplay['awb'], 'G5 shipping: label retry returns the original AWB');
+assert_equals($g5LabelCallsBefore + 1, $g5LabelCallsAfter, 'G5 shipping: label retry performs one external mutation');
+$g5Cancel = ShippingService::cancelLabel((int)$digitalOrderId, 'http-carrier');
+$g5CancelReplay = ShippingService::cancelLabel((int)$digitalOrderId, 'http-carrier');
+assert_true(empty($g5Cancel['idempotent_replay']) && !empty($g5CancelReplay['idempotent_replay']), 'G5 shipping: cancel replay is served from durable label state');
+assert_equals('in_transit', (string)ShippingService::trackShipment('http-carrier', (string)$g5ServiceLabel['awb'])['status'], 'G5 shipping: service tracking uses frozen carrier');
+ShippingService::setAdapters([]);
+
+$g5Erp = new HttpErpAdapter($g5Config);
+assert_equals('ERP-1001', $g5Erp->pushOrder(['id' => 1001, 'order_number' => 'G5-1001', 'items' => []]), 'G5 ERP: order export returns external ID');
+$g5Erp->updateOrderStatus('ERP-1001', 'shipped', ['order_id' => 1001]);
+assert_equals('processing', $g5Erp->pullOrderStatus('ERP-1001'), 'G5 ERP: status pull contract resolves');
+assert_equals(9, (int)$g5Erp->pullStock()[0]['qty'], 'G5 ERP: stock contract resolves integer quantity');
+assert_true($g5Erp->healthCheck(), 'G5 ERP: health contract succeeds');
+assert_true(count(iterator_to_array($g5Erp->pullProducts())) === 1, 'G5 ERP: product delta contract is iterable');
+$g5Erp->pushProduct(['sku' => 'TEST-001']);
+assert_equals('CUS-1', $g5Erp->pushCustomer(['id' => 1, 'email' => 'fixture@example.test']), 'G5 ERP: customer export returns external ID');
+assert_true(str_starts_with((string)$g5Calls[0]['headers'][3], 'Authorization: Bearer '), 'G5 HTTP: credentials use authorization header, not URL or payload');
+foreach ($g5Calls as $call) {
+    assert_true(!str_contains($call['url'], str_repeat('c', 24)) && !str_contains($call['body'], str_repeat('c', 24)), 'G5 HTTP: carrier secret never enters URL or JSON body');
+    assert_true(!str_contains($call['url'], str_repeat('e', 24)) && !str_contains($call['body'], str_repeat('e', 24)), 'G5 HTTP: ERP secret never enters URL or JSON body');
+}
+JsonHttpClient::setFixtureTransport(null);
+
+$g5Redacted = Logger::redact(['api_key' => 'secret-value', 'nested' => ['password' => 'hidden'], 'order_id' => 42]);
+assert_equals('[REDACTED]', $g5Redacted['api_key'], 'G5 logging: top-level secret is redacted');
+assert_equals('[REDACTED]', $g5Redacted['nested']['password'], 'G5 logging: nested secret is redacted');
+assert_equals(42, $g5Redacted['order_id'], 'G5 logging: useful non-secret context remains');
+Logger::setCorrelationId('g5-test-correlation');
+assert_equals('g5-test-correlation', Logger::correlationId(), 'G5 logging: correlation ID is stable');
+Logger::setCorrelationId(null);
+
+$g5Schema = json_decode((string)file_get_contents(__DIR__ . '/../config/config.schema.json'), true);
+assert_true(is_array($g5Schema), 'G5 setup: machine-readable config schema is valid JSON');
+assert_true(!empty($g5Schema['properties']['db_password']['x-secret']), 'G5 setup: config schema marks secrets');
+$g5Doctor = Setup::doctor(require __DIR__ . '/../config.php', dirname(__DIR__), $pdo);
+assert_equals(1, (int)$g5Doctor['schema_version'], 'G5 setup: doctor output is explicitly versioned');
+assert_true(isset($g5Doctor['counts']['pass'], $g5Doctor['checks']), 'G5 setup: doctor output is machine-readable');
+$g5DoctorJson = json_encode($g5Doctor, JSON_THROW_ON_ERROR);
+assert_true(!str_contains($g5DoctorJson, 'db_password'), 'G5 setup: doctor output excludes database password fields');
+$g5SetupRoot = sys_get_temp_dir() . '/bbe-setup-' . bin2hex(random_bytes(4));
+$g5SetupConfig = [
+    'db_driver' => 'mysql',
+    'private_runtime_dir' => $g5SetupRoot . '/runtime',
+    'private_cache_dir' => $g5SetupRoot . '/cache',
+    'jobs_dir' => $g5SetupRoot . '/jobs',
+    'invoice_storage_dir' => $g5SetupRoot . '/invoices',
+    'backup_storage_dir' => $g5SetupRoot . '/backups',
+    'backup_log_file' => $g5SetupRoot . '/logs/backup.log',
+    'structured_log_file' => $g5SetupRoot . '/logs/application.jsonl',
+];
+$g5ApplyFirst = Setup::apply($g5SetupConfig, dirname(__DIR__));
+$g5SetupStateHash = hash_file('sha256', $g5ApplyFirst['state_file']);
+$g5ApplySecond = Setup::apply($g5SetupConfig, dirname(__DIR__));
+assert_equals('created', (string)$g5ApplyFirst['state_action'], 'G5 setup: first apply creates private version state');
+assert_equals('unchanged', (string)$g5ApplySecond['state_action'], 'G5 setup: repeated apply is idempotent');
+assert_equals($g5SetupStateHash, hash_file('sha256', $g5ApplySecond['state_file']), 'G5 setup: repeated apply does not rewrite state');
+@unlink($g5ApplyFirst['state_file']);
+foreach (['runtime', 'cache', 'jobs', 'invoices', 'backups', 'logs'] as $g5SetupDir) @rmdir($g5SetupRoot . '/' . $g5SetupDir);
+@rmdir($g5SetupRoot);
+
+$g5HealthConfig = (require __DIR__ . '/../config.php');
+$g5HealthConfig['jobs_dir'] = sys_get_temp_dir();
+$g5HealthConfig['private_cache_dir'] = sys_get_temp_dir();
+$g5Ready = Health::readiness($g5HealthConfig, dirname(__DIR__), $pdo);
+assert_equals('ready', (string)$g5Ready['status'], 'G5 health: readiness verifies DB, stores, and writable runtime paths');
+assert_equals('ok', (string)Health::liveness()['status'], 'G5 health: liveness has no dependency side effects');
+assert_true(str_contains($htaccess, 'healthz|readyz'), 'G5 health: public probe routes are explicit');
+assert_true(str_contains($workerProviderSource, 'updateOrderStatus'), 'G5 ERP: worker executes status mutation contract instead of logging a placeholder');
+assert_true(!str_contains($workerProviderSource, 'IntegrationAdapter has no outbound status mutation contract yet'), 'G5 ERP: worker placeholder is removed');
+
 require __DIR__ . '/test-update.php';
 
 echo "\n========================================\n";

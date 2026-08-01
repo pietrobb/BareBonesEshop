@@ -17,6 +17,7 @@ class Adapters {
             'pickup' => ['class' => 'PersonalPickup', 'capabilities' => ['rates', 'label', 'tracking']],
             'packeta' => ['class' => 'PacketaShipping', 'capabilities' => ['rates', 'label', 'tracking', 'cod']],
             'gls' => ['class' => 'GlsShipping', 'capabilities' => ['rates', 'label', 'tracking', 'cod']],
+            'http-carrier' => ['class' => 'HttpShipping', 'capabilities' => ['rates', 'pickup', 'label', 'cancel', 'tracking'], 'requires_config' => 'http_shipping'],
         ],
         'mail' => [
             'log' => ['class' => 'LogMail', 'capabilities' => ['send']],
@@ -26,7 +27,9 @@ class Adapters {
         'tax' => [
             'vat' => ['class' => 'VatService', 'capabilities' => ['scenario', 'rates', 'snapshot', 'validate']],
         ],
-        'erp' => [],
+        'erp' => [
+            'http' => ['class' => 'HttpErpAdapter', 'capabilities' => ['products', 'orders', 'order_status', 'stock', 'customers', 'health'], 'requires_config' => 'http_erp'],
+        ],
     ];
 
     private const PROVIDER_INTERFACES = [
@@ -71,7 +74,7 @@ class Adapters {
     /** @return array<string,object> */
     public static function providers(string $type): array {
         $providers = [];
-        foreach (array_keys(self::registry($type)) as $code) {
+        foreach (array_keys(self::availableRegistry($type)) as $code) {
             $providers[$code] = self::provider($type, $code);
         }
         return $providers;
@@ -143,7 +146,7 @@ class Adapters {
     public static function integration(?string $code = null): ?IntegrationAdapter {
         if ($code !== null) return self::provider('erp', $code);
         if (isset(self::$instances['integration'])) return self::$instances['integration'];
-        $definitions = self::registry('erp');
+        $definitions = self::availableRegistry('erp');
         if ($definitions !== []) return self::provider('erp', self::defaultProviderCode('erp'));
         $cfg = self::cfg();
         if (empty($cfg['adapters']['integration'])) return null;
@@ -200,9 +203,23 @@ class Adapters {
 
         $defaults = ['payment' => 'stripe', 'mail' => 'log', 'tax' => 'vat'];
         if (isset($defaults[$type])) return $defaults[$type];
-        $first = array_key_first(self::registry($type));
+        $first = array_key_first(self::availableRegistry($type));
         if ($first === null) throw new \RuntimeException("No {$type} provider configured");
         return (string)$first;
+    }
+
+    private static function availableRegistry(string $type): array {
+        $definitions = self::registry($type);
+        $cfg = self::cfg();
+        return array_filter($definitions, static function (array $definition) use ($cfg): bool {
+            $required = (string)($definition['requires_config'] ?? '');
+            if ($required === '') return true;
+            $integration = (array)($cfg['integrations'][$required] ?? []);
+            $url = (string)($integration['base_url'] ?? '');
+            return filter_var($url, FILTER_VALIDATE_URL)
+                && strtolower((string)parse_url($url, PHP_URL_SCHEME)) === 'https'
+                && strlen((string)($integration['api_key'] ?? '')) >= 16;
+        });
     }
 
     private static function assertProviderCode(string $code): void {

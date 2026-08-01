@@ -126,6 +126,14 @@ Configure `outbound_webhooks` only in the deployment's protected config. Each ac
 
 Before resuming all traffic, inspect for `retry` or `dead` outbox rows and verify one read plus one idempotent API mutation against a non-production product. Rollback restores the pre-migration database snapshot and code together. If rollback happens after external deliveries were accepted, event IDs already consumed by receivers remain consumed; never delete receiver deduplication records to simulate rollback.
 
+## Merchant setup, observability, shipping and ERP rollout
+
+Run `php cli/setup.php apply --json`, then archive `php cli/setup.php doctor --json --strict`. Apply may create only configured private runtime directories and private setup state; it does not fill credentials, legal data, cron, or provider accounts. Resolve every failure and review every warning. Validate config changes against `config/config.schema.json`, and never copy an `x-secret` value into evidence.
+
+Configure the scheduler entry declared by `operations.worker_cron`, start one worker, execute one controlled job, and correlate its JSON log with the job ID. Probe `/healthz` and `/readyz`; readiness must be `ready` before traffic resumes. Monitor `structured_log_file` permissions and rotation in the deployment platform.
+
+For `http-carrier`, prove rates, pickup-point selection, label creation, retry returning the original AWB, cancellation, cancellation replay, and tracking against the carrier sandbox. For `http` ERP, prove order creation, external ID persistence, and a later status mutation against the same external ID. Fixture tests prove the repository contract only; they are not evidence that a live account works. Keep API keys solely in deployment secret configuration. On failure, disable the provider/default together without renaming a code frozen in existing order snapshots.
+
 ## Rollback procedure
 
 Keep traffic and writers stopped. Review whether any package-managed file changed after the update, then run:

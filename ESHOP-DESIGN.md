@@ -56,6 +56,8 @@ single-lang kód je vždy ťažšie než to navrhnúť správne od začiatku.
 
 `Outbox::record()` zapisuje verziované order/payment/stock/customer/product udalosti iba v otvorenej doménovej transakcii. Worker ich doručuje cez config-only endpointy ako CloudEvents-compatible envelope, s HMAC podpisom viazaným na timestamp, event ID a presný raw body; úspešné endpointy sa pri retry neopakujú a vyčerpané udalosti končia v auditovateľnom dead-letter stave. Samostatné `/api/v1` nepoužíva browser session ani CSRF: bearer credential je store-bound, DB obsahuje iba jeho hash, scopes sú explicitné a mutácie vyžadujú per-client idempotency key. `docs/openapi.yaml` je verejný additive-first kontrakt DTO, cursor pagination a webhook delivery.
 
+`Setup::doctor()` vracia verziovaný machine-readable onboarding checklist a `apply` idempotentne vytvorí iba bezpečné private runtime cesty; deployment config má JSON Schema so secret anotáciami. `/healthz` je side-effect-free liveness, `/readyz` overuje DB/store/runtime závislosti bez úniku detailov a `Logger` zapisuje redigované JSON Lines s correlation/store/channel kontextom. Generický `HttpShipping` používa retry-safe rates/pickup/label/cancel/tracking kontrakt a `HttpErpAdapter` reálne vykonáva order create/status update, produkty, zákazníkov, sklad aj health cez HTTPS; fixture testy dokazujú kontrakt bez predstierania live credentials.
+
 ### V1 — kompletný commerce engine
 
 **Katalóg + storefront:**

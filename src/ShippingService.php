@@ -128,13 +128,17 @@ class ShippingService
     public static function generateLabel(int $orderId, string $carrierId): array
     {
         StoreContext::current()->assertPermission('shipping');
+        $db = Db::get();
+        $existing = $db->prepare("SELECT awb, label_data, carrier FROM shipping_labels WHERE order_id = :order_id AND carrier = :carrier AND store_id = :store AND status != 'cancelled' ORDER BY id DESC LIMIT 1");
+        $existing->execute([':order_id' => $orderId, ':carrier' => $carrierId, ':store' => StoreContext::current()->id()]);
+        $label = $existing->fetch(\PDO::FETCH_ASSOC);
+        if ($label) return $label;
+
         $adapter = self::findAdapter($carrierId);
         $order   = self::fetchOrder($orderId);
-
         $result = $adapter->generateLabel($order);
 
         // Persist label record
-        $db = Db::get();
         $db->prepare("
             INSERT INTO shipping_labels (order_id, store_id, carrier, awb, status, label_data)
             VALUES (:order_id, :store, :carrier, :awb, 'created', :label_data)
@@ -153,6 +157,39 @@ class ShippingService
         ")->execute([':awb' => $result['awb'], ':carrier' => $carrierId, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
 
         return $result;
+    }
+
+    /** Retrieve carrier pickup points through the optional full lifecycle contract. */
+    public static function pickupPoints(string $carrierId, string $country, string $postalCode = ''): array
+    {
+        StoreContext::current()->assertPermission('shipping');
+        $adapter = self::findAdapter($carrierId);
+        if (!$adapter instanceof ShippingLifecycleAdapter) {
+            throw new \RuntimeException("Shipping carrier does not support pickup points: {$carrierId}");
+        }
+        return $adapter->pickupPoints(strtoupper(trim($country)), trim($postalCode));
+    }
+
+    /** Cancel the latest active label exactly once and retain its audit row. */
+    public static function cancelLabel(int $orderId, string $carrierId): array
+    {
+        StoreContext::current()->assertPermission('shipping');
+        $db = Db::get();
+        $stmt = $db->prepare("SELECT * FROM shipping_labels WHERE order_id = :order_id AND carrier = :carrier AND store_id = :store ORDER BY id DESC LIMIT 1");
+        $stmt->execute([':order_id' => $orderId, ':carrier' => $carrierId, ':store' => StoreContext::current()->id()]);
+        $label = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if (!$label) throw new \RuntimeException("Shipping label not found for order: {$orderId}");
+        if (($label['status'] ?? '') === 'cancelled') {
+            return ['awb' => (string)$label['awb'], 'status' => 'cancelled', 'idempotent_replay' => true];
+        }
+        $adapter = self::findAdapter($carrierId);
+        if (!$adapter instanceof ShippingLifecycleAdapter) {
+            throw new \RuntimeException("Shipping carrier does not support label cancellation: {$carrierId}");
+        }
+        $result = $adapter->cancelLabel((string)$label['awb']);
+        $db->prepare("UPDATE shipping_labels SET status = 'cancelled', updated_at = " . Db::now() . " WHERE id = :id AND status != 'cancelled'")
+            ->execute([':id' => $label['id']]);
+        return $result + ['awb' => (string)$label['awb'], 'status' => 'cancelled', 'idempotent_replay' => false];
     }
 
     /**

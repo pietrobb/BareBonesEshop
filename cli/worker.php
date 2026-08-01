@@ -69,7 +69,7 @@ try {
     );
     if ($verbose && $expiredOrders > 0) echo "Expired pending orders: {$expiredOrders}\n";
 } catch (\Throwable $e) {
-    error_log('Pending order expiry failed: ' . $e->getMessage());
+    Logger::exception('worker.pending_expiry_failed', $e);
 }
 
 // Deliver committed outbox events before file jobs. Failed endpoints are retried
@@ -77,7 +77,7 @@ try {
 try {
     processOutbox($cfg, $verbose);
 } catch (\Throwable $e) {
-    error_log('Outbox delivery sweep failed: ' . $e->getMessage());
+    Logger::exception('worker.outbox_sweep_failed', $e);
 }
 
 // Process loop
@@ -100,6 +100,7 @@ do {
 
         $type = $job['type'] ?? 'unknown';
         $handler = $handlers[$type] ?? null;
+        Logger::setCorrelationId(substr(hash('sha256', (string)($job['id'] ?? $type)), 0, 24));
 
         $procFile = JobQueue::markProcessing($job);
         if ($procFile === '') {
@@ -126,12 +127,13 @@ do {
 
             JobQueue::complete($procFile);
             $processed++;
+            Logger::info('worker.job_completed', ['job_id' => $job['id'] ?? '', 'job_type' => $type]);
             if ($verbose) echo "    [OK]\n";
 
         } catch (\Throwable $e) {
             JobQueue::fail($procFile, $job, $e->getMessage());
             if ($verbose) echo "    [FAIL] {$e->getMessage()}\n";
-            error_log("Worker job failed [{$type}]: {$e->getMessage()}");
+            Logger::exception('worker.job_failed', $e, ['job_id' => $job['id'] ?? '', 'job_type' => $type]);
         }
     }
 
@@ -512,6 +514,7 @@ function handleErpOrderPush(array $payload, array $job): void {
     $providerCode = (string)($payload['_provider_code'] ?? orderProviderCode($order, 'erp'));
     $adapter = $providerCode !== '' ? Adapters::integration($providerCode) : Adapters::integration();
     if (!$adapter) return;
+    $order['items'] = Orders::items($orderId);
     Orders::markSynced($orderId, $adapter->pushOrder($order));
 }
 
@@ -522,8 +525,15 @@ function handleErpOrderUpdate(array $payload, array $job): void {
     $providerCode = (string)($payload['_provider_code'] ?? orderProviderCode($order, 'erp'));
     $adapter = $providerCode !== '' ? Adapters::integration($providerCode) : Adapters::integration();
     if (!$adapter) return;
-    // IntegrationAdapter has no outbound status mutation contract yet; G5 adds it.
-    error_log("ERP update queued via {$providerCode}: order #{$orderId} status=" . (string)($payload['status'] ?? ''));
+    if (!$adapter instanceof OrderStatusIntegrationAdapter) {
+        throw new RuntimeException("ERP provider does not support order status updates: {$providerCode}");
+    }
+    $status = strtolower((string)($payload['status'] ?? $order['status'] ?? ''));
+    $adapter->updateOrderStatus((string)$order['erp_id'], $status, [
+        'order_id' => $orderId,
+        'order_number' => (string)$order['order_number'],
+        'store_id' => StoreContext::current()->id(),
+    ]);
 }
 
 function handleSitemapBuild(array $payload, array $job): void {

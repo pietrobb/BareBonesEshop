@@ -82,6 +82,18 @@ return [
         'tax' => [],
         'erp' => [], // e.g. 'money' => ['class' => 'MoneyErpAdapter', 'capabilities' => ['orders', 'stock']]
     ],
+    // Generic versioned HTTPS contracts. Keep API keys in deployment secrets,
+    // never in the repository, logs, database, or setup output.
+    'integrations' => [
+        'http_shipping' => [
+            'base_url' => '', 'api_key' => '', 'carrier_code' => 'http-carrier',
+            'supports_cod' => false, 'timeout' => 15,
+        ],
+        'http_erp' => ['base_url' => '', 'api_key' => '', 'timeout' => 15],
+    ],
+    'operations' => [
+        'worker_cron' => '', // e.g. * * * * *; install it in the platform scheduler too
+    ],
 
     // Signed outgoing webhooks. Secrets remain in deployment config/environment;
     // event_outbox and delivery audit rows never contain them.
@@ -132,6 +144,7 @@ return [
     'invoice_storage_dir' => dirname(__DIR__) . '/bareboneseshop-private/invoices',
     'backup_storage_dir'  => dirname(__DIR__) . '/bareboneseshop-private/backups',
     'backup_log_file'     => dirname(__DIR__) . '/bareboneseshop-private/logs/backup.log',
+    'structured_log_file' => dirname(__DIR__) . '/bareboneseshop-private/logs/application.jsonl',
     'update_storage_dir'  => dirname(__DIR__) . '/bareboneseshop-private/updates',
     'update_public_key'   => '', // Ed25519 public key (base64/hex or absolute key-file path)
     // Required only for MySQL/MariaDB packages containing migrations. Reserve

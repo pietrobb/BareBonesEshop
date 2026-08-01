@@ -111,6 +111,8 @@ class StoreContext {
         self::$current = $context;
     }
 
+    public static function hasCurrent(): bool { return self::$current !== null; }
+
     public static function current(): self {
         if (self::$current === null) {
             self::$current = self::resolve(class_exists('Bootstrap') ? Bootstrap::stores() : []);

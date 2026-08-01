@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bareboneseshop:config:v1",
+  "title": "BareBonesEshop deployment configuration",
+  "type": "object",
+  "required": ["db_driver", "private_runtime_dir", "provider_defaults", "providers", "adapters"],
+  "properties": {
+    "db_driver": {"type": "string", "enum": ["sqlite", "mysql"]},
+    "private_runtime_dir": {"type": "string", "minLength": 1, "x-private-path": true},
+    "db_sqlite_path": {"type": "string", "minLength": 1, "x-private-path": true},
+    "db_host": {"type": "string"},
+    "db_port": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "db_name": {"type": "string"},
+    "db_user": {"type": "string"},
+    "db_password": {"type": "string", "x-secret": true},
+    "db_charset": {"type": "string", "const": "utf8mb4"},
+    "app_url": {"oneOf": [{"const": ""}, {"type": "string", "format": "uri"}]},
+    "admin_password": {"type": "string", "x-secret": true},
+    "private_cache_dir": {"type": "string", "x-private-path": true},
+    "jobs_dir": {"type": "string", "x-private-path": true},
+    "invoice_storage_dir": {"type": "string", "x-private-path": true},
+    "backup_storage_dir": {"type": "string", "x-private-path": true},
+    "backup_log_file": {"type": "string", "x-private-path": true},
+    "structured_log_file": {"type": "string", "x-private-path": true},
+    "adapters": {
+      "type": "object",
+      "properties": {
+        "search": {"type": "string"},
+        "queue": {"type": "string"},
+        "payment": {"type": "string"},
+        "vat_validator": {"type": "string"},
+        "storage": {"type": "string"},
+        "integration": {"type": ["string", "null"]}
+      },
+      "additionalProperties": true
+    },
+    "provider_defaults": {
+      "type": "object",
+      "properties": {
+        "payment": {"$ref": "#/$defs/providerCode"},
+        "mail": {"$ref": "#/$defs/providerCode"},
+        "tax": {"$ref": "#/$defs/providerCode"},
+        "shipping": {"$ref": "#/$defs/providerCode"},
+        "erp": {"$ref": "#/$defs/providerCode"}
+      },
+      "additionalProperties": false
+    },
+    "providers": {
+      "type": "object",
+      "properties": {
+        "payment": {"$ref": "#/$defs/providerMap"},
+        "shipping": {"$ref": "#/$defs/providerMap"},
+        "mail": {"$ref": "#/$defs/providerMap"},
+        "tax": {"$ref": "#/$defs/providerMap"},
+        "erp": {"$ref": "#/$defs/providerMap"}
+      },
+      "additionalProperties": false
+    },
+    "integrations": {
+      "type": "object",
+      "properties": {
+        "http_shipping": {"$ref": "#/$defs/httpIntegration"},
+        "http_erp": {"$ref": "#/$defs/httpIntegration"}
+      },
+      "additionalProperties": true
+    },
+    "outbound_webhooks": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["url", "secret", "events"],
+        "properties": {
+          "url": {"type": "string", "format": "uri"},
+          "secret": {"type": "string", "minLength": 32, "x-secret": true},
+          "events": {"type": "array", "items": {"type": "string"}},
+          "stores": {"type": "array", "items": {"$ref": "#/$defs/providerCode"}},
+          "active": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "operations": {
+      "type": "object",
+      "properties": {
+        "worker_cron": {"type": "string", "pattern": "^(?:\\S+\\s+){4}\\S+$"}
+      },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "providerCode": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,39}$"},
+    "providerMap": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/providerCode"},
+      "additionalProperties": {
+        "oneOf": [
+          {"type": "string"},
+          {
+            "type": "object",
+            "required": ["class"],
+            "properties": {
+              "class": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+              "capabilities": {"type": "array", "items": {"type": "string"}}
+            },
+            "additionalProperties": true
+          }
+        ]
+      }
+    },
+    "httpIntegration": {
+      "type": "object",
+      "required": ["base_url", "api_key"],
+      "properties": {
+        "base_url": {"oneOf": [{"const": ""}, {"type": "string", "format": "uri", "pattern": "^https://"}]},
+        "api_key": {"oneOf": [{"const": ""}, {"type": "string", "minLength": 16}], "x-secret": true},
+        "timeout": {"type": "integer", "minimum": 1, "maximum": 60},
+        "carrier_code": {"$ref": "#/$defs/providerCode"},
+        "supports_cod": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

@@ -721,7 +721,7 @@ function apiCheckout(?array $runtimeConfig = null): array {
         'shipping' => (string)($selectedRate['provider'] ?? $selectedRate['carrier'] ?? 'none'),
         'mail' => Adapters::defaultProviderCode('mail'),
     ];
-    if (Adapters::registry('erp') !== []) $providerCodes['erp'] = Adapters::defaultProviderCode('erp');
+    if (Adapters::integration() !== null) $providerCodes['erp'] = Adapters::defaultProviderCode('erp');
     $financialSnapshot = $taxProvider::buildSnapshot($availableItems, $vatContext, [
         'discount' => $couponDiscount,
         'shipping' => $shippingCost,
