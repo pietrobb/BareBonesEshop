@@ -246,6 +246,11 @@ if ($mysqlDsn) {
         $g8MigrationMysql->up($my, false);
         $g8MysqlTables = (int)$my->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('return_labels','return_receipts','return_exchanges','order_refunds','credit_note_items')")->fetchColumn();
         assert_equals(5, $g8MysqlTables, 'MySQL live: G8 returns/refunds migration is applied and idempotent');
+        $g9MigrationMysql = require __DIR__ . '/../migrations/20260801220000_admin_identity_queue_operations.php';
+        $g9MigrationMysql->up($my, false);
+        $g9MigrationMysql->up($my, false);
+        $g9MysqlTables = (int)$my->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('admin_accounts','admin_recovery_codes','admin_store_permissions','admin_devices','admin_sessions','queue_jobs')")->fetchColumn();
+        assert_equals(6, $g9MysqlTables, 'MySQL live: G9 admin identity and queue migration is applied and idempotent');
         foreach (['credit_note_items', 'order_refunds', 'return_exchanges', 'return_receipts', 'return_labels'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['shipment_items', 'shipments', 'bundle_components', 'inventory_receipts', 'purchase_order_items', 'purchase_orders', 'supplier_products', 'suppliers', 'stock_movements'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['price_list_prices', 'price_lists', 'promotions', 'product_categories', 'companies', 'customer_groups', 'brands'] as $table) $my->exec("DROP TABLE {$table}");
@@ -495,6 +500,11 @@ $inventoryMigration->up($pdo, true);
 assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='stock_movements'")->fetchColumn(), 'G7 migration: stock movement ledger exists and migration is idempotent');
 assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='shipments'")->fetchColumn(), 'G7 migration: split shipment tables exist');
 assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='purchase_orders'")->fetchColumn(), 'G7 migration: procurement minimum exists');
+$adminQueueMigration = require __DIR__ . '/../migrations/20260801220000_admin_identity_queue_operations.php';
+$adminQueueMigration->up($pdo, true);
+$adminQueueMigration->up($pdo, true);
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='admin_accounts'")->fetchColumn(), 'G9 migration: admin identities exist and migration is idempotent');
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='queue_jobs'")->fetchColumn(), 'G9 migration: durable database queue exists');
 
 // ============================================================
 // TEST 3: CSV Import
@@ -1144,6 +1154,69 @@ $badPayloadRejected = false;
 try { JobQueue::push('invalid_payload', ['resource' => $badPayload]); } catch (JsonException $e) { $badPayloadRejected = true; }
 fclose($badPayload);
 assert_true($badPayloadRejected, 'JobQueue: unencodable payload fails closed');
+
+// G9 database queue: priority order, atomic claim ownership, retry and failure visibility.
+$pdo->exec('DELETE FROM queue_jobs');
+JobQueue::useBackend(new DatabaseQueue($pdo, 30));
+assert_equals('database', JobQueue::backendName(), 'G9 queue: database backend is selected');
+$dbJobLow = JobQueue::push('g9_low', ['value' => 1], 8);
+$dbJobHigh = JobQueue::push('g9_high', ['value' => 2], 1);
+$dbJobs = JobQueue::pull(10);
+assert_equals($dbJobHigh, $dbJobs[0]['id'], 'G9 queue: database backend preserves priority ordering');
+assert_true(!empty($dbJobs[0]['correlation_id']), 'G9 queue: correlation ID is persisted with the job');
+$dbClaim = JobQueue::markProcessing($dbJobs[0]);
+assert_true(str_starts_with($dbClaim, 'db:'), 'G9 queue: first worker obtains an opaque database claim');
+assert_equals('', JobQueue::markProcessing($dbJobs[0]), 'G9 queue: a concurrent worker cannot claim the same job');
+JobQueue::complete($dbClaim);
+$dbRetryJob = null;
+foreach (JobQueue::pull(10) as $candidate) if ($candidate['id'] === $dbJobLow) $dbRetryJob = $candidate;
+assert_true($dbRetryJob !== null, 'G9 queue: second database job remains available');
+for ($attempt = 0; $attempt < 3; $attempt++) {
+    $claim = JobQueue::markProcessing($dbRetryJob);
+    JobQueue::fail($claim, $dbRetryJob, 'database queue test failure');
+    $pdo->prepare("UPDATE queue_jobs SET available_at=:now WHERE id=:id")->execute([':now' => gmdate('Y-m-d H:i:s'), ':id' => $dbJobLow]);
+    foreach (JobQueue::pull(10) as $candidate) if ($candidate['id'] === $dbJobLow) $dbRetryJob = $candidate;
+}
+assert_equals(1, JobQueue::stats()['failed'], 'G9 queue: exhausted database job moves to failed');
+assert_equals($dbJobLow, JobQueue::failures(5)[0]['id'], 'G9 queue: failed job is available to operations dashboard');
+
+// G9 identity: encrypted TOTP, one-time recovery, store grants and revocable sessions.
+putenv('BBE_ADMIN_IDENTITY_KEY=' . base64_encode(str_repeat('K', 32)));
+$adminId = AdminIdentity::create('g9-operator', 'Test-password-1234', 'manager', true);
+assert_equals(1, AdminIdentity::accountCount(), 'G9 identity: DB mode remains authoritative once an account exists');
+AdminIdentity::setStatus($adminId, 'disabled');
+assert_equals(0, AdminIdentity::activeCount(), 'G9 identity: disabled account leaves no active DB login');
+assert_equals(1, AdminIdentity::accountCount(), 'G9 identity: disabling the last account cannot restore legacy auth mode');
+AdminIdentity::setStatus($adminId, 'active');
+AdminIdentity::grantStore($adminId, 'default', ['orders.*', 'reports.view']);
+$enrollment = AdminIdentity::enrollTotp($adminId);
+$storedTotp = (string)$pdo->query("SELECT totp_secret_encrypted FROM admin_accounts WHERE id={$adminId}")->fetchColumn();
+$storedRecovery = (string)$pdo->query("SELECT code_hash FROM admin_recovery_codes WHERE account_id={$adminId} ORDER BY id LIMIT 1")->fetchColumn();
+assert_true(str_starts_with($storedTotp, 'v1:') && !str_contains($storedTotp, $enrollment['secret']), 'G9 identity: TOTP seed is encrypted at rest');
+assert_true($storedRecovery !== hash('sha256', str_replace('-', '', $enrollment['recovery_codes'][0])), 'G9 identity: recovery codes use a deployment-keyed hash at rest');
+assert_true(Totp::verify($enrollment['secret'], Totp::code($enrollment['secret'])), 'G9 identity: RFC 6238 code verifies');
+$login = AdminIdentity::authenticate('g9-operator', 'Test-password-1234', Totp::code($enrollment['secret']), '127.0.0.1', 'G9 Test Device');
+assert_true($login !== null, 'G9 identity: password and TOTP authenticate');
+assert_true(AdminIdentity::session($login['token']) !== null, 'G9 identity: server-side session validates');
+AdminIdentity::setPassword($adminId, 'Rotated-password-5678');
+assert_true(AdminIdentity::session($login['token']) === null, 'G9 identity: password rotation revokes existing sessions');
+assert_true(AdminIdentity::authenticate('g9-operator', 'Test-password-1234', Totp::code($enrollment['secret']), '127.0.0.1', 'G9 Test Device') === null, 'G9 identity: rotated password rejects the previous credential');
+$login = AdminIdentity::authenticate('g9-operator', 'Rotated-password-5678', Totp::code($enrollment['secret']), '127.0.0.1', 'G9 Test Device');
+assert_true($login !== null, 'G9 identity: rotated password authenticates with MFA');
+assert_true(AdminIdentity::storeAllows($login['store_permissions'], 'default', 'orders.ship'), 'G9 identity: wildcard permission allows the granted store action');
+assert_true(!AdminIdentity::storeAllows($login['store_permissions'], 'other', 'orders.ship'), 'G9 identity: another store fails closed');
+AdminIdentity::revokeSession($login['session_id']);
+assert_true(AdminIdentity::session($login['token']) === null, 'G9 identity: revoked session cannot be reused');
+$recoveryLogin = AdminIdentity::authenticate('g9-operator', 'Rotated-password-5678', $enrollment['recovery_codes'][0], '127.0.0.1', 'G9 Recovery Device');
+assert_true($recoveryLogin !== null, 'G9 identity: recovery code authenticates once');
+AdminIdentity::revokeSession($recoveryLogin['session_id']);
+assert_true(AdminIdentity::authenticate('g9-operator', 'Test-password-1234', $enrollment['recovery_codes'][0], '127.0.0.1', 'G9 Recovery Device') === null, 'G9 identity: used recovery code cannot replay');
+$pdo->prepare("UPDATE queue_jobs SET store_id='other', state='failed', last_error='other store' WHERE id=:id")->execute([':id' => $dbJobHigh]);
+$operationsG9 = OperationalDashboard::summary('default');
+assert_equals('database', $operationsG9['queue_backend'], 'G9 dashboard: reports active queue backend');
+assert_equals(1, $operationsG9['counts']['failed_jobs'], 'G9 dashboard: reports store-scoped failed jobs');
+putenv('BBE_ADMIN_IDENTITY_KEY');
+JobQueue::setDir($testJobsDir);
 
 // Cleanup jobs test dir
 foreach (['pending', 'processing', 'completed', 'failed'] as $sub) {
@@ -2702,6 +2775,9 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS payment_transactions (
     updated_at      TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
 )");
+// This fixture is created after the initial migration pass; reapply G9 so its
+// additive payment correlation column is tested against the same late table.
+$adminQueueMigration->up($pdo, true);
 
 // Add payment_status column to orders
 try { $pdo->exec("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'pending'"); }
@@ -2837,6 +2913,7 @@ assert_true(count($txs) >= 1, 'Payment: initiate logs transaction');
 assert_equals('initiated', $txs[0]['status'], 'Payment: first transaction status is initiated');
 assert_equals('mock', $txs[0]['provider'], 'Payment: provider is mock');
 assert_equals('default', $txs[0]['store_id'], 'Payment: transaction stores active store ownership');
+assert_true(!empty($txs[0]['correlation_id']), 'G9 payment: transaction stores the operational correlation ID');
 StoreContext::activate($deContext);
 assert_equals(0, count(PaymentService::transactionsForOrder((int)$payOrder['id'])), 'Store isolation: second store cannot read default payment transactions');
 $crossStorePaymentRejected = false;
@@ -3540,6 +3617,8 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS email_log (
     status     TEXT NOT NULL DEFAULT 'pending',
     error      TEXT DEFAULT '',
     payload    TEXT DEFAULT '{}',
+    store_id   TEXT NOT NULL DEFAULT 'default',
+    correlation_id TEXT DEFAULT NULL,
     sent_at    TEXT DEFAULT NULL,
     created_at TEXT DEFAULT (datetime('now'))
 )");

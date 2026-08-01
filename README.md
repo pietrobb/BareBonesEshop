@@ -173,6 +173,28 @@ quantity, and the worker marks partial payment refunds without closing the whole
 order. A restock follows the frozen shipment allocation and records a G7 ledger
 movement; discard and repair never change on-hand stock.
 
+## Admin identity, queues, and operations
+
+Migration `20260801220000_admin_identity_queue_operations` adds database-backed
+admin accounts, encrypted TOTP seeds, one-time recovery codes, store grants,
+tracked devices, revocable server-side sessions, and a durable database queue.
+Once any DB account exists, legacy config/JSON credentials no longer authenticate.
+Generate the deployment-only encryption key and first owner from the CLI; password
+input is accepted only through the process environment:
+
+```bash
+php cli/migrate.php
+php cli/admin-user.php keygen
+BBE_ADMIN_IDENTITY_KEY=<secret> BBE_ADMIN_PASSWORD=<secret> \
+  php cli/admin-user.php create --username=ops --role=owner --store=default
+```
+
+Set `queue.backend` to `file`, `database`, or `redis`. File mode retains the
+single-worker lock; database and Redis modes use opaque atomic claims and leases
+so multiple workers may run concurrently. Jobs, mail, audit records, and outgoing
+webhooks carry correlation IDs. The store-scoped admin dashboard shows bounded
+failed-job, mail, payment, and webhook incidents without exposing secrets.
+
 ---
 
 ## Migrations

@@ -34,9 +34,9 @@ class Outbox {
         $now = gmdate('Y-m-d H:i:s');
         $stmt = $db->prepare("INSERT INTO event_outbox
             (id, store_id, channel_id, event_type, aggregate_type, aggregate_id, event_version,
-             payload, status, attempts, available_at, occurred_at, updated_at)
+             payload, status, attempts, available_at, occurred_at, updated_at, correlation_id)
             VALUES (:id, :store, :channel, :event, :aggregate, :aggregate_id, :version,
-                    :payload, 'pending', 0, :available, :occurred, :updated)");
+                    :payload, 'pending', 0, :available, :occurred, :updated, :correlation)");
         $stmt->execute([
             ':id' => $eventId,
             ':store' => $context->id(),
@@ -49,6 +49,7 @@ class Outbox {
             ':available' => $now,
             ':occurred' => $now,
             ':updated' => $now,
+            ':correlation' => Logger::correlationId(),
         ]);
         return $eventId;
     }

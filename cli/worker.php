@@ -14,23 +14,25 @@ require_once __DIR__ . '/../src/autoload.php';
 $once = in_array('--once', $argv ?? []);
 $verbose = in_array('--verbose', $argv ?? []);
 
-// Exclusive lock
+// The file backend needs a process lock; durable backends use per-job atomic leases
+// and intentionally permit multiple workers.
 $cfg = require __DIR__ . '/../config.php';
-$jobsDir = $cfg['jobs_dir'] ?? dirname(__DIR__, 2) . '/bareboneseshop-private/jobs';
-if (!is_dir($jobsDir)) mkdir($jobsDir, 0750, true);
-
-$lockFile = $jobsDir . '/worker.lock';
-$lock = fopen($lockFile, 'w+');
-if (!flock($lock, LOCK_EX | LOCK_NB)) {
-    if ($verbose) echo "Worker is already running.\n";
-    exit(0);
+$lock = null;
+$lockFile = null;
+if (!JobQueue::supportsConcurrentWorkers()) {
+    $jobsDir = $cfg['jobs_dir'] ?? dirname(__DIR__, 2) . '/bareboneseshop-private/jobs';
+    if (!is_dir($jobsDir)) mkdir($jobsDir, 0750, true);
+    $lockFile = $jobsDir . '/worker.lock';
+    $lock = fopen($lockFile, 'w+');
+    if (!is_resource($lock) || !flock($lock, LOCK_EX | LOCK_NB)) {
+        if ($verbose) echo "Worker is already running.\n";
+        exit(0);
+    }
+    fwrite($lock, (string)getmypid());
+    fflush($lock);
 }
 
-// Write PID
-fwrite($lock, (string)getmypid());
-fflush($lock);
-
-if ($verbose) echo "Worker started (PID: " . getmypid() . ")\n";
+if ($verbose) echo "Worker started (PID: " . getmypid() . ", queue: " . JobQueue::backendName() . ")\n";
 
 // Job handlers registry
 $handlers = [
@@ -100,7 +102,10 @@ do {
 
         $type = $job['type'] ?? 'unknown';
         $handler = $handlers[$type] ?? null;
-        Logger::setCorrelationId(substr(hash('sha256', (string)($job['id'] ?? $type)), 0, 24));
+        $jobCorrelation = (string)($job['correlation_id'] ?? '');
+        Logger::setCorrelationId(preg_match('/^[A-Za-z0-9._-]{8,80}$/', $jobCorrelation)
+            ? $jobCorrelation
+            : substr(hash('sha256', (string)($job['id'] ?? $type)), 0, 24));
 
         $procFile = JobQueue::markProcessing($job);
         if ($procFile === '') {
@@ -141,10 +146,12 @@ do {
 
 } while (time() - $startTime < $maxRuntime);
 
-// Release lock
-flock($lock, LOCK_UN);
-fclose($lock);
-@unlink($lockFile);
+// Release the file-backend process lock, when one was acquired.
+if (is_resource($lock)) {
+    flock($lock, LOCK_UN);
+    fclose($lock);
+    if ($lockFile !== null) @unlink($lockFile);
+}
 
 if ($verbose) echo "Worker done. Processed: {$processed} jobs.\n";
 

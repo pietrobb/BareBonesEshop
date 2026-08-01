@@ -288,8 +288,8 @@ class MailService {
 
     private static function logInsert(string $to, string $tpl, string $locale, string $subject, string $adapterId, ?int $orderId, array $vars): int {
         $stmt = Db::get()->prepare("
-            INSERT INTO email_log (order_id, recipient, template, locale, subject, adapter, status, payload)
-            VALUES (:order_id, :recipient, :template, :locale, :subject, :adapter, 'pending', :payload)
+            INSERT INTO email_log (order_id, recipient, template, locale, subject, adapter, status, payload, store_id, correlation_id)
+            VALUES (:order_id, :recipient, :template, :locale, :subject, :adapter, 'pending', :payload, :store, :correlation)
         ");
         $stmt->execute([
             ':order_id'  => $orderId,
@@ -299,6 +299,8 @@ class MailService {
             ':subject'   => $subject,
             ':adapter'   => $adapterId,
             ':payload'   => json_encode($vars, JSON_UNESCAPED_UNICODE),
+            ':store'     => StoreContext::current()->id(),
+            ':correlation' => Logger::correlationId(),
         ]);
         return (int)Db::get()->lastInsertId();
     }

@@ -16,6 +16,9 @@
     "db_charset": {"type": "string", "const": "utf8mb4"},
     "app_url": {"oneOf": [{"const": ""}, {"type": "string", "format": "uri"}]},
     "admin_password": {"type": "string", "x-secret": true},
+    "admin_identity_key": {"type": "string", "x-secret": true},
+    "admin_session_idle_seconds": {"type": "integer", "minimum": 300, "maximum": 86400},
+    "admin_session_lifetime_seconds": {"type": "integer", "minimum": 1800, "maximum": 604800},
     "private_cache_dir": {"type": "string", "x-private-path": true},
     "jobs_dir": {"type": "string", "x-private-path": true},
     "invoice_storage_dir": {"type": "string", "x-private-path": true},
@@ -78,6 +81,26 @@
         },
         "additionalProperties": false
       }
+    },
+    "queue": {
+      "type": "object",
+      "properties": {
+        "backend": {"type": "string", "enum": ["file", "database", "redis"]},
+        "lease_seconds": {"type": "integer", "minimum": 30, "maximum": 3600},
+        "redis": {
+          "type": "object",
+          "properties": {
+            "host": {"type": "string"},
+            "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "database": {"type": "integer", "minimum": 0},
+            "password": {"type": "string", "x-secret": true},
+            "timeout": {"type": "number", "exclusiveMinimum": 0, "maximum": 60},
+            "prefix": {"type": "string", "pattern": "^[A-Za-z0-9:_-]{1,80}$"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     },
     "operations": {
       "type": "object",

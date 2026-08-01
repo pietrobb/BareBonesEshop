@@ -1199,7 +1199,7 @@ Template engine hľadá v poradí:
 
 Prvý nájdený sa použije. Rovnaký princíp ako Magento fallback, ale bez XML konfigu.
 
-### Princíp: jobs/ adresár = fronta
+### Princíp: konfigurovateľná fronta (file / database / Redis)
 
 ```
 jobs/
@@ -1326,10 +1326,17 @@ Magento:
   = Komplexná infraštruktúra, desiatky pohyblivých častí
 
 BareBones:
-  JSON súbor v jobs/pending/ → worker.php (1 cron job)
-  → handler funkcia → hotovo
-  = 0 externých závislostí, 1 PHP proces
+  file: JSON v jobs/pending/ → worker.php (1 proces, bez závislostí)
+  database: queue_jobs → atomický claim + lease (viac workerov)
+  Redis: sorted sets + Lua claim/complete/fail (viac workerov)
+  → rovnaký JobQueue kontrakt a handler funkcie
 ```
+
+File backend používa atomický `rename()` a procesný lock. Database a Redis backend
+ukladajú store/channel/correlation kontext, retry stav a dead jobs; lease token bráni
+dvomi workerom dokončiť rovnaký claim. Backend sa volí cez `queue.backend` bez zmeny
+producerov alebo handlerov. Prepnutie backendu vyžaduje najprv vyprázdniť alebo
+reconcileovať starú frontu — joby sa medzi backendmi automaticky nekopírujú.
 
 ---
 
@@ -2921,7 +2928,11 @@ Browser                      Server
 
 ## Admin panel
 
-Minimalistický, HTTP Basic auth, bez frameworku.
+Minimalistický, bez frameworku. Legacy HTTP Basic auth ostáva iba pre inštalácie bez
+DB identity. Po vytvorení prvého `admin_accounts` záznamu sa používa formulárové
+prihlásenie s password hashom, šifrovaným TOTP alebo jednorazovým recovery kódom,
+server-side session a revokovateľným device záznamom. Rola aj store permission grant
+musia povoliť akciu; účet bez grantu do aktuálneho store zlyhá closed.
 
 ### Funkcie
 

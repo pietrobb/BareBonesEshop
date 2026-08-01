@@ -394,14 +394,64 @@ class Security {
     public static function adminAuth(): bool {
         $cfg = self::cfg();
 
-        // Session fast-path: expire idle admin sessions instead of trusting them indefinitely.
+        // Session fast-path: DB identities use revocable server-side sessions;
+        // legacy config/JSON identities retain the existing idle timeout.
         self::sessionStart();
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_logout']) && self::csrfValidate()) {
+            if (!empty($_SESSION['admin_session_id'])) AdminIdentity::revokeSession((string)$_SESSION['admin_session_id']);
+            self::clearAdminSession();
+            session_regenerate_id(true);
+        }
+        if (!empty($_SESSION['admin_identity_token'])) {
+            $identity = AdminIdentity::session((string)$_SESSION['admin_identity_token']);
+            if ($identity !== null) {
+                $_SESSION['admin_authenticated'] = true;
+                $_SESSION['admin_identity_id'] = $identity['account_id'];
+                $_SESSION['admin_session_id'] = $identity['session_id'];
+                $_SESSION['admin_user'] = $identity['username'];
+                $_SESSION['admin_role'] = $identity['role'];
+                $_SESSION['admin_store_permissions'] = $identity['store_permissions'];
+                return true;
+            }
+        }
         $lastSeen = (int)($_SESSION['admin_last_seen'] ?? 0);
-        if (!empty($_SESSION['admin_authenticated']) && $lastSeen >= time() - 1800) {
+        if (empty($_SESSION['admin_identity_id']) && !empty($_SESSION['admin_authenticated']) && $lastSeen >= time() - 1800) {
             $_SESSION['admin_last_seen'] = time();
             return true;
         }
-        unset($_SESSION['admin_authenticated'], $_SESSION['admin_user'], $_SESSION['admin_role'], $_SESSION['admin_last_seen']);
+        self::clearAdminSession();
+
+        if (AdminIdentity::accountCount() > 0) {
+            if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_logout'])) {
+                self::renderAdminLogin();
+            }
+            $isFormLogin = $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_login']);
+            $user = (string)($isFormLogin ? ($_POST['admin_username'] ?? '') : ($_SERVER['PHP_AUTH_USER'] ?? ''));
+            $pass = (string)($isFormLogin ? ($_POST['admin_password'] ?? '') : ($_SERVER['PHP_AUTH_PW'] ?? ''));
+            $mfa = (string)($isFormLogin ? ($_POST['admin_mfa'] ?? '') : ($_SERVER['HTTP_X_ADMIN_MFA'] ?? ''));
+            if ($isFormLogin && !self::csrfValidate()) self::renderAdminLogin('Invalid or expired login form.');
+            if ($user !== '' && $pass !== ''
+                && self::rateLimit('admin_db_login_account_' . hash('sha256', strtolower($user)), 10, 900, false)) {
+                $identity = AdminIdentity::authenticate($user, $pass, $mfa, self::clientIp(), (string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
+                if ($identity !== null) {
+                    session_regenerate_id(true);
+                    $_SESSION['admin_authenticated'] = true;
+                    $_SESSION['admin_identity_token'] = $identity['token'];
+                    $_SESSION['admin_identity_id'] = $identity['account_id'];
+                    $_SESSION['admin_session_id'] = $identity['session_id'];
+                    $_SESSION['admin_user'] = $identity['username'];
+                    $_SESSION['admin_role'] = $identity['role'];
+                    $_SESSION['admin_store_permissions'] = $identity['store_permissions'];
+                    self::rotateCsrfToken();
+                    if ($isFormLogin) {
+                        header('Location: ' . self::safeLocalPath((string)($_POST['return_to'] ?? '/admin.php'), '/admin.php'));
+                        exit;
+                    }
+                    return true;
+                }
+            }
+            self::renderAdminLogin(($isFormLogin || $user !== '') ? 'Invalid credentials or verification code.' : null);
+        }
 
         $user = $_SERVER['PHP_AUTH_USER'] ?? '';
         $pass = $_SERVER['PHP_AUTH_PW'] ?? '';
@@ -480,6 +530,38 @@ class Security {
         exit('Unauthorized');
     }
 
+    private static function clearAdminSession(): void {
+        unset(
+            $_SESSION['admin_authenticated'], $_SESSION['admin_identity_token'],
+            $_SESSION['admin_identity_id'], $_SESSION['admin_session_id'],
+            $_SESSION['admin_store_permissions'], $_SESSION['admin_user'],
+            $_SESSION['admin_role'], $_SESSION['admin_last_seen']
+        );
+    }
+
+    private static function renderAdminLogin(?string $error = null): never {
+        self::headers();
+        http_response_code($error === null ? 401 : 403);
+        $returnTo = self::safeLocalPath((string)($_SERVER['REQUEST_URI'] ?? '/admin.php'), '/admin.php');
+        $csrf = self::csrfToken();
+        $nonce = self::cspNonce();
+        $errorHtml = $error === null ? '' : '<p class="error">' . htmlspecialchars($error, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '</p>';
+        $returnHtml = htmlspecialchars($returnTo, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $csrfHtml = htmlspecialchars($csrf, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+            . '<title>Admin sign in</title><style nonce="' . $nonce . '">body{font:16px system-ui;background:#f1f5f9;margin:0;display:grid;place-items:center;min-height:100vh}'
+            . 'form{background:#fff;padding:2rem;border-radius:.75rem;box-shadow:0 8px 30px #0002;width:min(24rem,calc(100% - 2rem))}'
+            . 'label{display:block;margin-top:1rem;font-weight:600}input{box-sizing:border-box;width:100%;padding:.7rem;margin-top:.3rem}'
+            . 'button{width:100%;margin-top:1.25rem;padding:.8rem;background:#0f172a;color:#fff;border:0;border-radius:.35rem}.error{color:#b91c1c}</style></head><body>'
+            . '<form method="post" action="admin.php" autocomplete="on"><h1>Admin sign in</h1>' . $errorHtml
+            . '<input type="hidden" name="admin_login" value="1"><input type="hidden" name="csrf_token" value="' . $csrfHtml . '">'
+            . '<input type="hidden" name="return_to" value="' . $returnHtml . '"><label>Username<input name="admin_username" required autocomplete="username"></label>'
+            . '<label>Password<input type="password" name="admin_password" required autocomplete="current-password"></label>'
+            . '<label>Authenticator or recovery code<input name="admin_mfa" inputmode="numeric" autocomplete="one-time-code"></label>'
+            . '<button type="submit">Sign in</button></form></body></html>';
+        exit;
+    }
+
     /** Get the current admin user's role */
     public static function adminRole(): string {
         return $_SESSION['admin_role'] ?? 'owner';
@@ -494,6 +576,11 @@ class Security {
 
     /** Check if current admin has a permission */
     public static function adminCan(string $permission): bool {
+        if (!empty($_SESSION['admin_identity_id'])) {
+            $storeId = StoreContext::current()->id();
+            $grants = is_array($_SESSION['admin_store_permissions'] ?? null) ? $_SESSION['admin_store_permissions'] : [];
+            if (!AdminIdentity::storeAllows($grants, $storeId, $permission)) return false;
+        }
         $role = self::adminRole();
         $perms = self::$rolePermissions[$role] ?? [];
 

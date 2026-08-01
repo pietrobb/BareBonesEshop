@@ -46,7 +46,12 @@ return [
     // Admin
     'admin_name'     => '', // optional admin brand; defaults to the translated BareBonesShop name
     'admin_user'     => 'admin',
-    'admin_password' => '', // password_hash() output — NEVER plaintext
+    'admin_password' => '', // legacy password_hash() fallback — NEVER plaintext
+    // DB admin identities take precedence once at least one active account exists.
+    // Inject a random 32-byte base64/hex key; it encrypts TOTP seeds and never belongs in DB exports.
+    'admin_identity_key' => '',
+    'admin_session_idle_seconds' => 1800,
+    'admin_session_lifetime_seconds' => 28800,
     'admin_email'    => '', // fallback recipient for paid-order notifications
     'merchant_notifications' => [
         'enabled' => true,
@@ -137,6 +142,16 @@ return [
         //     'text' => 'I request immediate delivery of the digital content and acknowledge the loss of my withdrawal right once delivery begins.',
         //     'url' => '/terms', 'product_types' => ['downloadable'],
         // ],
+    ],
+
+    // Queue backend: file (zero dependency), database (durable/concurrent), or redis.
+    'queue' => [
+        'backend' => 'file',
+        'lease_seconds' => 300,
+        'redis' => [
+            'host' => '127.0.0.1', 'port' => 6379, 'database' => 0,
+            'password' => '', 'timeout' => 2.0, 'prefix' => 'bbe:queue:',
+        ],
     ],
 
     // Private runtime files

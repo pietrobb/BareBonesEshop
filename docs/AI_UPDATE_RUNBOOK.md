@@ -162,6 +162,16 @@ Issue one partial credit and reconcile its line gross/net/VAT to the original in
 
 Rollback restores the pre-migration database and code together. If a label, warehouse receipt, provider refund, exchange or credit note became externally visible after apply, stop and reconcile that external fact before rollback; never delete or replay it to make the restored schema appear current.
 
+## Admin identity, queue, and operations rollout
+
+Migration `20260801220000_admin_identity_queue_operations` is additive. Keep traffic and workers stopped, apply it, and confirm the six `admin_*`/`queue_jobs` tables plus correlation columns and indexes exist. Generate `admin_identity_key` with `php cli/admin-user.php keygen`, store it only in deployment secret storage, and back it up separately from database exports. Losing or rotating it without a controlled TOTP re-enrollment makes existing MFA seeds unusable.
+
+Create the first owner with `BBE_ADMIN_PASSWORD` in the process environment and enroll TOTP before resuming admin traffic. Capture recovery codes once in the approved secret manager; only keyed hashes remain in the database. Grant the minimum store permissions, test an ungranted store fails closed, then remove or retain legacy config credentials according to the rollback plan. Once any DB account exists, the application intentionally refuses legacy admin authentication even if every DB account is disabled.
+
+Start with `queue.backend=database` unless the deployment has an operated Redis service. Run two workers against controlled jobs and prove only one claim completes each job, a failed job reaches the dashboard, and its correlation ID matches structured logs. For Redis, verify TLS/network isolation and secret injection at the platform boundary; never put the password in evidence. File mode remains the zero-dependency rollback option but intentionally permits one worker only. Before traffic resumes, inspect failed mail, payments, webhooks, and jobs per store and verify no incident payload or log contains credentials, TOTP seeds, session tokens, or recovery codes.
+
+Rollback restores code and database together. Stop workers first; do not switch queue backends while jobs remain pending unless jobs are explicitly drained or reconciled, because backends do not mirror each other. Preserve externally completed mail, payment, and webhook facts during reconciliation.
+
 ## Rollback procedure
 
 Keep traffic and writers stopped. Review whether any package-managed file changed after the update, then run:

@@ -159,6 +159,10 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
 <nav>
     <h2><?= esc($adminAppName) ?></h2>
     <div style="padding:0.3rem 1rem;font-size:0.75rem;color:#94a3b8;margin-bottom:0.5rem"><?= esc(Security::adminUser()) ?> (<?= esc(Security::adminRole()) ?>)</div>
+    <form method="post" action="admin.php" style="padding:0 1rem .5rem">
+        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+        <button class="btn btn-sm" type="submit" name="admin_logout" value="1">Sign out</button>
+    </form>
     <div style="padding:0.3rem 1rem;font-size:0.75rem;color:#94a3b8;margin-bottom:0.5rem">
         <?= esc(I18n::t('admin.language')) ?>:
         <?php foreach ($adminSupportedLocales as $lc): ?>
@@ -405,17 +409,19 @@ function pageDashboard(): void {
 
     // Today's orders
     $today = date('Y-m-d');
-    $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE created_at >= :today");
-    $stmt->execute([':today' => $today]);
+    $storeId = StoreContext::current()->id();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE store_id=:store AND created_at >= :today");
+    $stmt->execute([':store' => $storeId, ':today' => $today]);
     $ordersToday = (int)$stmt->fetchColumn();
 
     // Today's revenue
-    $stmt = $db->prepare("SELECT COALESCE(SUM(total),0) FROM orders WHERE created_at >= :today AND status NOT IN ('cancelled','refunded')");
-    $stmt->execute([':today' => $today]);
+    $stmt = $db->prepare("SELECT COALESCE(SUM(total),0) FROM orders WHERE store_id=:store AND created_at >= :today AND status NOT IN ('cancelled','refunded')");
+    $stmt->execute([':store' => $storeId, ':today' => $today]);
     $revenueToday = (int)$stmt->fetchColumn();
 
     // Pending orders
-    $stmt = $db->query("SELECT COUNT(*) FROM orders WHERE status = 'pending'");
+    $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE store_id=:store AND status='pending'");
+    $stmt->execute([':store' => $storeId]);
     $pendingOrders = (int)$stmt->fetchColumn();
 
     // Low stock applies only to physical products; digital products are not inventory-tracked.
@@ -423,10 +429,13 @@ function pageDashboard(): void {
     $lowStock = $lowStockSummary['count'];
 
     // Product count
-    $totalProducts = (int)$db->query("SELECT COUNT(*) FROM products")->fetchColumn();
+    $stmt = $db->prepare('SELECT COUNT(*) FROM products WHERE store_id=:store');
+    $stmt->execute([':store' => $storeId]);
+    $totalProducts = (int)$stmt->fetchColumn();
 
-    // Job queue stats
+    // Queue and store-scoped operational incidents.
     $jobStats = JobQueue::stats();
+    $operations = OperationalDashboard::summary();
     ?>
     <h1><?= esc(I18n::t('admin.title.dashboard')) ?></h1>
     <div class="grid grid-4">
@@ -439,7 +448,34 @@ function pageDashboard(): void {
     <div class="card">
         <h3><?= esc(I18n::t('admin.dashboard.statistics')) ?></h3>
         <p><?= esc(I18n::t('admin.dashboard.total_products')) ?>: <strong><?= $totalProducts ?></strong></p>
-        <p><?= esc(I18n::t('admin.dashboard.jobs_queue')) ?>: <strong><?= $jobStats['pending'] ?></strong> <?= esc(I18n::t('admin.dashboard.jobs_pending')) ?>, <strong><?= $jobStats['failed'] ?></strong> <?= esc(I18n::t('admin.dashboard.jobs_failed')) ?></p>
+        <p><?= esc(I18n::t('admin.dashboard.jobs_queue')) ?> (<?= esc($operations['queue_backend']) ?>): <strong><?= $jobStats['pending'] ?></strong> <?= esc(I18n::t('admin.dashboard.jobs_pending')) ?>, <strong><?= $jobStats['failed'] ?></strong> <?= esc(I18n::t('admin.dashboard.jobs_failed')) ?></p>
+        <p class="muted">Correlation: <?= esc($operations['correlation_id']) ?> · Store: <?= esc($operations['store_id']) ?></p>
+    </div>
+
+    <div class="card">
+        <h3>Operations</h3>
+        <div class="grid grid-4">
+            <div class="stat"><div class="num"><?= (int)$operations['counts']['failed_jobs'] ?></div><div class="label">Failed jobs</div></div>
+            <div class="stat"><div class="num"><?= (int)$operations['counts']['failed_mail'] ?></div><div class="label">Failed mail</div></div>
+            <div class="stat"><div class="num"><?= (int)$operations['counts']['payment_incidents'] ?></div><div class="label">Payment incidents</div></div>
+            <div class="stat"><div class="num"><?= (int)$operations['counts']['webhook_incidents'] ?></div><div class="label">Webhook incidents</div></div>
+        </div>
+        <?php if ($operations['failed_jobs']): ?>
+        <h4>Failed jobs</h4><div class="table-scroll"><table><tr><th>Type</th><th>Attempts</th><th>Error</th><th>Correlation</th><th>Updated</th></tr>
+            <?php foreach ($operations['failed_jobs'] as $incident): ?><tr><td><?= esc($incident['type']) ?></td><td><?= (int)$incident['attempts'] ?></td><td><?= esc($incident['last_error']) ?></td><td><code><?= esc($incident['correlation_id']) ?></code></td><td><?= esc($incident['updated_at']) ?></td></tr><?php endforeach; ?>
+        </table></div><?php endif; ?>
+        <?php if ($operations['failed_mail']): ?>
+        <h4>Failed mail</h4><div class="table-scroll"><table><tr><th>Template</th><th>Recipient</th><th>Error</th><th>Correlation</th><th>Created</th></tr>
+            <?php foreach ($operations['failed_mail'] as $incident): ?><tr><td><?= esc($incident['template']) ?></td><td><?= esc($incident['recipient']) ?></td><td><?= esc($incident['error']) ?></td><td><code><?= esc($incident['correlation_id'] ?? '') ?></code></td><td><?= esc($incident['created_at']) ?></td></tr><?php endforeach; ?>
+        </table></div><?php endif; ?>
+        <?php if ($operations['payment_incidents']): ?>
+        <h4>Payment incidents</h4><div class="table-scroll"><table><tr><th>Order</th><th>Status</th><th>Provider</th><th>Correlation</th><th>Created</th></tr>
+            <?php foreach ($operations['payment_incidents'] as $incident): ?><tr><td><a href="admin.php?p=order&id=<?= (int)$incident['id'] ?>"><?= esc($incident['order_number']) ?></a></td><td><?= esc($incident['payment_status']) ?></td><td><?= esc($incident['payment_method']) ?></td><td><code><?= esc($incident['correlation_id'] ?? '') ?></code></td><td><?= esc($incident['created_at']) ?></td></tr><?php endforeach; ?>
+        </table></div><?php endif; ?>
+        <?php if ($operations['webhook_incidents']): ?>
+        <h4>Webhook incidents</h4><div class="table-scroll"><table><tr><th>Event</th><th>Status</th><th>Attempts</th><th>Error</th><th>Correlation</th></tr>
+            <?php foreach ($operations['webhook_incidents'] as $incident): ?><tr><td><?= esc($incident['event_type']) ?></td><td><?= esc($incident['status']) ?></td><td><?= (int)$incident['attempts'] ?></td><td><?= esc($incident['last_error'] ?? '') ?></td><td><code><?= esc($incident['correlation_id'] ?? '') ?></code></td></tr><?php endforeach; ?>
+        </table></div><?php endif; ?>
     </div>
 
     <?php if ($lowStock > 0): ?>

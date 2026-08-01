@@ -1,10 +1,31 @@
 <?php
+require_once __DIR__ . '/Queue.php';
+
 /**
- * BareBones Shop — File-based Job Queue
+ * BareBones Shop — Configurable Job Queue
  * JSON files in jobs/ directory. Zero external dependencies.
  */
 class JobQueue {
     private static ?string $jobsDir = null;
+    private static ?QueueBackend $backendOverride = null;
+    private static ?QueueBackend $configuredBackend = null;
+    private static bool $forceFile = false;
+
+    private static function backend(): ?QueueBackend {
+        if (self::$forceFile) return null;
+        if (self::$backendOverride !== null) return self::$backendOverride;
+        if (self::$configuredBackend !== null) return self::$configuredBackend;
+        $cfg = require __DIR__ . '/../config.php';
+        $queue = is_array($cfg['queue'] ?? null) ? $cfg['queue'] : [];
+        $name = strtolower((string)($queue['backend'] ?? 'file'));
+        self::$configuredBackend = match ($name) {
+            'database', 'db' => new DatabaseQueue(Db::get(), (int)($queue['lease_seconds'] ?? 300)),
+            'redis' => new RedisQueue(is_array($queue['redis'] ?? null) ? $queue['redis'] + ['lease_seconds' => $queue['lease_seconds'] ?? 300] : []),
+            'file' => null,
+            default => throw new RuntimeException('Unknown queue backend: ' . $name),
+        };
+        return self::$configuredBackend;
+    }
 
     private static function dir(): string {
         if (!self::$jobsDir) {
@@ -14,12 +35,30 @@ class JobQueue {
         return self::$jobsDir;
     }
 
-    public static function setDir(string $dir): void { self::$jobsDir = self::validatePrivateDir($dir); }
+    public static function setDir(string $dir): void {
+        self::$jobsDir = self::validatePrivateDir($dir);
+        self::$forceFile = true;
+    }
+
+    public static function useBackend(?QueueBackend $backend): void {
+        self::$backendOverride = $backend;
+        self::$forceFile = $backend === null;
+    }
+
+    public static function resetBackend(): void {
+        self::$backendOverride = null;
+        self::$configuredBackend = null;
+        self::$forceFile = false;
+    }
+
+    public static function backendName(): string { return self::backend()?->name() ?? 'file'; }
+    public static function supportsConcurrentWorkers(): bool { return self::backend() !== null; }
 
     /**
      * Push a new job to the queue
      */
     public static function push(string $type, array $payload, int $priority = 5): string {
+        if ($backend = self::backend()) return $backend->push($type, $payload, $priority);
         if (class_exists('StoreContext')) {
             $payload['_store_id'] ??= StoreContext::current()->id();
             $payload['_channel_id'] ??= StoreContext::current()->channel();
@@ -33,6 +72,7 @@ class JobQueue {
             'created_at'   => date('c'),
             'attempts'     => 0,
             'max_attempts' => 3,
+            'correlation_id' => Logger::correlationId(),
         ];
 
         $dir = self::dir() . '/pending';
@@ -48,6 +88,7 @@ class JobQueue {
      * Pull pending jobs (sorted by priority + timestamp)
      */
     public static function pull(int $limit = 10): array {
+        if ($backend = self::backend()) return $backend->pull($limit);
         $dir = self::dir() . '/pending';
         if (!is_dir($dir)) return [];
 
@@ -80,6 +121,7 @@ class JobQueue {
      * Move job to processing
      */
     public static function markProcessing(array $job): string {
+        if ($backend = self::backend()) return $backend->markProcessing($job);
         $source = self::assertQueueFile((string)($job['_file'] ?? ''), 'pending', true);
         $procDir = self::dir() . '/processing';
         self::ensureDirectory($procDir);
@@ -99,6 +141,7 @@ class JobQueue {
      * Mark job as completed
      */
     public static function complete(string $procFile): void {
+        if ($backend = self::backend()) { $backend->complete($procFile); return; }
         $procFile = self::assertQueueFile($procFile, 'processing');
         $doneDir = self::dir() . '/completed';
         self::ensureDirectory($doneDir);
@@ -111,6 +154,7 @@ class JobQueue {
      * Mark job as failed or retry (with exponential backoff)
      */
     public static function fail(string $procFile, array $job, string $error): void {
+        if ($backend = self::backend()) { $backend->fail($procFile, $job, $error); return; }
         $procFile = self::assertQueueFile($procFile, 'processing');
         $job['attempts'] = ($job['attempts'] ?? 0) + 1;
         $job['last_error'] = $error;
@@ -134,6 +178,7 @@ class JobQueue {
      * Queue statistics
      */
     public static function stats(): array {
+        if ($backend = self::backend()) return $backend->stats();
         $dir = self::dir();
         return [
             'pending'    => count(glob($dir . '/pending/*.json') ?: []),
@@ -141,6 +186,28 @@ class JobQueue {
             'completed'  => count(glob($dir . '/completed/*.json') ?: []),
             'failed'     => count(glob($dir . '/failed/*.json') ?: []),
         ];
+    }
+
+    public static function failures(int $limit = 20): array {
+        if ($backend = self::backend()) return $backend->failures($limit);
+        $files = glob(self::dir() . '/failed/*.json') ?: [];
+        rsort($files);
+        $result = [];
+        foreach (array_slice($files, 0, max(1, min(100, $limit))) as $file) {
+            if (is_link($file) || !is_file($file)) continue;
+            $job = json_decode((string)file_get_contents($file), true);
+            if (!is_array($job)) continue;
+            $result[] = [
+                'id' => (string)($job['id'] ?? ''),
+                'store_id' => (string)($job['payload']['_store_id'] ?? 'default'),
+                'type' => (string)($job['type'] ?? 'unknown'),
+                'attempts' => (int)($job['attempts'] ?? 0),
+                'last_error' => substr((string)($job['last_error'] ?? ''), 0, 2000),
+                'correlation_id' => (string)($job['correlation_id'] ?? ''),
+                'updated_at' => (string)($job['retry_after'] ?? $job['created_at'] ?? ''),
+            ];
+        }
+        return $result;
     }
 
     private static function validatePrivateDir(string $dir): string {

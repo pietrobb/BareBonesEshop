@@ -408,9 +408,9 @@ class PaymentService {
             $now  = Db::now();
             $stmt = $db->prepare(Db::insertIgnore() . "
                 INTO payment_transactions
-                    (order_id, store_id, provider, provider_ref, status, amount, currency, idempotency_key, raw_response, created_at, updated_at)
+                    (order_id, store_id, provider, provider_ref, status, amount, currency, idempotency_key, raw_response, correlation_id, created_at, updated_at)
                 VALUES
-                    (:oid, :store, :prov, :ref, :status, :amt, :cur, :ikey, :raw, {$now}, {$now})
+                    (:oid, :store, :prov, :ref, :status, :amt, :cur, :ikey, :raw, :correlation, {$now}, {$now})
             ");
             $stmt->execute([
                 ':oid'    => $orderId,
@@ -422,6 +422,7 @@ class PaymentService {
                 ':cur'    => $currency,
                 ':ikey'   => $idempotencyKey,
                 ':raw'    => json_encode($rawResponse, JSON_UNESCAPED_UNICODE),
+                ':correlation' => Logger::correlationId(),
             ]);
         } catch (\Throwable $e) {
             if ($failClosed) throw $e;
