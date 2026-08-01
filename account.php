@@ -662,7 +662,7 @@ switch ($p) {
             echo $e($a['zip'] . ' ' . $a['city']) . ', ' . $e($a['country']) . '<br>';
             if ($a['phone']) echo '<span class="muted">' . $e($a['phone']) . '</span>';
             echo '<div class="addr-actions">';
-            echo '<form method="post" action="account.php" style="display:inline" onsubmit="return confirm(\'' . $e($t('account.confirm_delete')) . '\')">';
+            echo '<form method="post" action="account.php" style="display:inline" data-confirm="' . $e($t('account.confirm_delete')) . '">';
             echo '<input type="hidden" name="csrf_token" value="' . $e($csrf) . '">';
             echo '<input type="hidden" name="action" value="address_delete">';
             echo '<input type="hidden" name="id" value="' . (int)$a['id'] . '">';
@@ -771,6 +771,17 @@ switch ($p) {
         echo '<div class="card"><p>' . $e($t('account.page_not_found')) . '</p></div>';
 }
 
-echo '</div></body></html>';
+echo '</div>';
+?>
+<script nonce="<?= Security::cspNonce() ?>">
+document.addEventListener('submit', function (event) {
+    var form = event.target;
+    if (form && form.matches && form.matches('form[data-confirm]') && !confirm(form.dataset.confirm)) {
+        event.preventDefault();
+    }
+});
+</script>
+<?php
+echo '</body></html>';
 
 echo ob_get_clean();

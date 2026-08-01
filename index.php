@@ -398,7 +398,7 @@ main{padding:24px 0;min-height:60vh}
 
 /* Tabs */
 .tabs{display:flex;gap:0;border-bottom:2px solid #eee;margin-bottom:16px}
-.tab{padding:10px 20px;cursor:pointer;font-size:.9em;border-bottom:2px solid transparent;margin-bottom:-2px;color:#666}
+.tab{padding:10px 20px;cursor:pointer;font:inherit;font-size:.9em;border:0;border-bottom:2px solid transparent;background:none;margin-bottom:-2px;color:#666}
 .tab.active{color:#333;border-bottom-color:#cc3872;font-weight:600}
 .tab-content{display:none}.tab-content.active{display:block}
 
@@ -603,9 +603,27 @@ footer{background:#333;color:#bbb;padding:0;margin-top:40px;font-size:.85em}
 
 <script nonce="<?= Security::cspNonce() ?>">
 function setTab(id){
- document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===id));
+ document.querySelectorAll('[data-product-tab]').forEach(t=>{
+  const active=t.dataset.productTab===id;
+  t.classList.toggle('active',active);
+  t.setAttribute('aria-selected',active?'true':'false');
+ });
  document.querySelectorAll('.tab-content').forEach(c=>c.classList.toggle('active',c.id==='tab-'+id));
 }
+document.addEventListener('click',e=>{
+ const cartButton=e.target.closest('[data-storefront-action="cart-add"]');
+ if(cartButton){
+  const quantityInput=cartButton.dataset.quantityInput?document.getElementById(cartButton.dataset.quantityInput):null;
+  addToCart(cartButton.dataset.productId,quantityInput?quantityInput.value:cartButton.dataset.quantity,cartButton);
+  return;
+ }
+ const tab=e.target.closest('[data-product-tab]');
+ if(tab)setTab(tab.dataset.productTab);
+});
+document.addEventListener('change',e=>{
+ const control=e.target.closest('[data-submit-on-change]');
+ if(control&&control.form)control.form.requestSubmit();
+});
 // Vehicle cascade AJAX
 async function loadModels(mfr){
  const mdlSel=document.getElementById('sel-mdl');
@@ -905,7 +923,7 @@ function renderHome(): string {
         <?php if (!empty($p['compare_price'])): ?><span class="old-price"><?= $price($p['compare_price']) ?></span><?php endif; ?>
        </div>
       </a>
-      <button class="btn-cart" onclick="addToCart(<?= (int)$p['id'] ?>,1,this)"><?= $t('add_to_cart') ?></button>
+      <button class="btn-cart" type="button" data-storefront-action="cart-add" data-product-id="<?= (int)$p['id'] ?>" data-quantity="1"><?= $t('add_to_cart') ?></button>
      </div>
     <?php endforeach; ?>
     </div>
@@ -1003,7 +1021,7 @@ function renderCategory(array $cat): string {
         if (isset($rv['min'])) echo '<input type="hidden" name="rmin[' . $e($fn) . ']" value="' . $e((string)$rv['min']) . '">';
         if (isset($rv['max'])) echo '<input type="hidden" name="rmax[' . $e($fn) . ']" value="' . $e((string)$rv['max']) . '">';
     }
-    echo '<label>' . $t('sort') . '</label><select name="sort" onchange="this.form.submit()">';
+    echo '<label>' . $t('sort') . '</label><select name="sort" data-submit-on-change>';
     foreach (['price_asc'=>$t('price_asc'),'price_desc'=>$t('price_desc'),'name_asc'=>$t('name_asc'),'name_desc'=>$t('name_desc'),'newest'=>$t('newest')] as $k=>$v) {
         echo '<option value="' . $k . '"' . ($sort===$k?' selected':'') . '>' . $v . '</option>';
     }
@@ -1114,7 +1132,7 @@ function renderCategory(array $cat): string {
             echo '</div>';
             if ($p['stock'] > 0) echo '<div class="badge">' . $t('in_stock') . '</div>';
             echo '</a>';
-            echo '<button class="btn-cart" onclick="addToCart(' . (int)$p['id'] . ',1,this)">' . $t('add_to_cart') . '</button>';
+            echo '<button class="btn-cart" type="button" data-storefront-action="cart-add" data-product-id="' . (int)$p['id'] . '" data-quantity="1">' . $t('add_to_cart') . '</button>';
             echo '</div>';
         }
         echo '</div>';
@@ -1156,15 +1174,15 @@ function renderProduct(array $p): string {
     // Add to cart
     echo '<div style="margin-top:20px;display:flex;gap:8px;align-items:center">';
     echo '<input type="number" value="1" min="1" max="99" class="qty-input" id="qty-' . (int)$p['id'] . '">';
-    echo '<button class="btn-cart btn-cart-lg" onclick="addToCart(' . (int)$p['id'] . ',document.getElementById(\'qty-' . (int)$p['id'] . '\').value,this)">' . $t('add_to_cart') . '</button>';
+    echo '<button class="btn-cart btn-cart-lg" type="button" data-storefront-action="cart-add" data-product-id="' . (int)$p['id'] . '" data-quantity-input="qty-' . (int)$p['id'] . '">' . $t('add_to_cart') . '</button>';
     echo '</div>';
     echo '</div></div>';
 
     // Tabs
-    echo '<div class="tabs">';
-    echo '<div class="tab active" data-tab="specs" onclick="setTab(\'specs\')">' . $t('specs') . ' (' . count($p['specifications']) . ')</div>';
-    echo '<div class="tab" data-tab="oe" onclick="setTab(\'oe\')">' . $t('oe_numbers') . ' (' . count($p['oe_numbers']) . ')</div>';
-    echo '<div class="tab" data-tab="vehicles" onclick="setTab(\'vehicles\')">' . $t('vehicles_tab') . ' (' . $p['vehicle_count'] . ')</div>';
+    echo '<div class="tabs" role="tablist">';
+    echo '<button type="button" class="tab active" role="tab" aria-selected="true" data-product-tab="specs">' . $t('specs') . ' (' . count($p['specifications']) . ')</button>';
+    echo '<button type="button" class="tab" role="tab" aria-selected="false" data-product-tab="oe">' . $t('oe_numbers') . ' (' . count($p['oe_numbers']) . ')</button>';
+    echo '<button type="button" class="tab" role="tab" aria-selected="false" data-product-tab="vehicles">' . $t('vehicles_tab') . ' (' . $p['vehicle_count'] . ')</button>';
     echo '</div>';
 
     // Specs tab
@@ -1235,7 +1253,7 @@ function renderVehicle(int $ktype, array $result, array $cats, ?int $activeCatId
         echo '<h3>' . $e($p['name']) . '</h3>';
         echo '<div class="price">' . $price($p['price']) . '</div>';
         echo '</a>';
-        echo '<button class="btn-cart" onclick="addToCart(' . (int)$p['id'] . ',1,this)">' . $t('add_to_cart') . '</button>';
+        echo '<button class="btn-cart" type="button" data-storefront-action="cart-add" data-product-id="' . (int)$p['id'] . '" data-quantity="1">' . $t('add_to_cart') . '</button>';
         echo '</div>';
     }
     echo '</div>';
@@ -1289,7 +1307,7 @@ function renderProductGrid(array $products): string {
         if (!empty($p['compare_price'])) echo '<span class="old-price">' . $price($p['compare_price']) . '</span>';
         echo '</div>';
         echo '</a>';
-        echo '<button class="btn-cart" onclick="addToCart(' . (int)$p['id'] . ',1,this)">' . $t('add_to_cart') . '</button>';
+        echo '<button class="btn-cart" type="button" data-storefront-action="cart-add" data-product-id="' . (int)$p['id'] . '" data-quantity="1">' . $t('add_to_cart') . '</button>';
         echo '</div>';
     }
     if (empty($products)) echo '<p style="padding:40px;text-align:center;color:#888;grid-column:1/-1">' . $t('no_results') . '</p>';
@@ -1375,7 +1393,7 @@ function renderCart(): string {
         echo '<input type="hidden" name="cart_action" value="update">';
         echo '<input type="hidden" name="product_id" value="' . $pid . '">';
         echo '<input type="hidden" name="redirect" value="?page=cart">';
-        echo '<input type="number" name="quantity" value="' . $qty . '" min="1" max="99" class="qty-input" onchange="this.form.submit()">';
+        echo '<input type="number" name="quantity" value="' . $qty . '" min="1" max="99" class="qty-input" data-submit-on-change>';
         echo '</form></td>';
         echo '<td style="font-weight:600">' . $price($lineTotal) . '</td>';
         echo '<td><form method="post">' . $csrfField . '<input type="hidden" name="cart_action" value="remove"><input type="hidden" name="product_id" value="' . $pid . '"><input type="hidden" name="redirect" value="?page=cart">';

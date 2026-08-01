@@ -5934,6 +5934,21 @@ assert_true(
     'Admin CSP: no inline on*= event handlers in admin.php'
 );
 
+$renderSources = glob(__DIR__ . '/../*.php') ?: [];
+$renderSources = array_merge(
+    $renderSources,
+    glob(__DIR__ . '/../themes/*/blocks/*.html') ?: [],
+    glob(__DIR__ . '/../themes/*/blocks/*/*.html') ?: []
+);
+$inlineHandlerPattern = '/\son(click|submit|change|input|load|mouse\w+|key\w+)\s*=\s*["\']/i';
+foreach ($renderSources as $renderSource) {
+    $source = file_get_contents($renderSource) ?: '';
+    assert_true(
+        preg_match($inlineHandlerPattern, $source) === 0,
+        'Storefront CSP: no inline event handlers in ' . basename($renderSource)
+    );
+}
+
 // (c) admin inline <script> blocks still carry the request nonce.
 assert_true(
     str_contains($adminSrc, '<script nonce="<?= Security::cspNonce() ?>">'),
@@ -5951,6 +5966,21 @@ assert_true(
     str_contains($adminSrc, 'data-action="filter-cats"') &&
     str_contains($adminSrc, 'data-action="toggle-cats"'),
     'Admin CSP: data-action hooks replace inline function-call handlers'
+);
+
+$storefrontSrc = file_get_contents(__DIR__ . '/../index.php') ?: '';
+$accountSrc = file_get_contents(__DIR__ . '/../account.php') ?: '';
+assert_true(
+    str_contains($storefrontSrc, 'data-storefront-action="cart-add"') &&
+    str_contains($storefrontSrc, "e.target.closest('[data-storefront-action=\"cart-add\"]')") &&
+    str_contains($storefrontSrc, 'data-submit-on-change') &&
+    str_contains($storefrontSrc, 'data-product-tab'),
+    'Storefront CSP: delegated cart, form-change, and product-tab hooks are present'
+);
+assert_true(
+    str_contains($accountSrc, 'data-confirm="') &&
+    str_contains($accountSrc, "form.matches('form[data-confirm]')"),
+    'Account CSP: delegated data-confirm submit listener is present'
 );
 
 // (e) Security::headers() builds a nonce-based script-src with NO unsafe-inline.
