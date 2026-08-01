@@ -417,9 +417,9 @@ function pageDashboard(): void {
     $stmt = $db->query("SELECT COUNT(*) FROM orders WHERE status = 'pending'");
     $pendingOrders = (int)$stmt->fetchColumn();
 
-    // Low stock products (< 10)
-    $stmt = $db->query("SELECT COUNT(*) FROM products WHERE stock < 10 AND status = 'active'");
-    $lowStock = (int)$stmt->fetchColumn();
+    // Low stock applies only to physical products; digital products are not inventory-tracked.
+    $lowStockSummary = Products::lowStockSummary();
+    $lowStock = $lowStockSummary['count'];
 
     // Product count
     $totalProducts = (int)$db->query("SELECT COUNT(*) FROM products")->fetchColumn();
@@ -446,16 +446,13 @@ function pageDashboard(): void {
         <h3><?= esc(I18n::t('admin.dashboard.low_stock_alert')) ?></h3>
         <table>
             <tr><th><?= esc(I18n::t('admin.th.sku')) ?></th><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.th.stock')) ?></th></tr>
-            <?php
-            $stmt = $db->query("SELECT sku, name, stock FROM products WHERE stock < 10 AND status = 'active' ORDER BY stock ASC LIMIT 20");
-            while ($row = $stmt->fetch()):
-            ?>
+            <?php foreach ($lowStockSummary['products'] as $row): ?>
             <tr>
                 <td><?= esc($row['sku']) ?></td>
                 <td><?= esc($row['name']) ?></td>
                 <td class="stock-low"><?= (int)$row['stock'] ?></td>
             </tr>
-            <?php endwhile; ?>
+            <?php endforeach; ?>
         </table>
     </div>
     <?php endif; ?>

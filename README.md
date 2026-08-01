@@ -12,7 +12,7 @@ No Composer dependencies, no build step — plain PHP 8.1+ and PDO.
 ## Requirements
 
 - **PHP 8.1+** (CLI + a web SAPI) with `pdo`, `pdo_sqlite` (or `pdo_mysql`),
-  `mbstring`, `json`, `dom`, `libxml`
+  `mbstring`, `json`, `dom`, `libxml`; `sodium` is required for signed updates
 - A web server (Apache with the bundled `.htaccess`, nginx, or the PHP built-in
   server for development)
 - Optional: MySQL/MariaDB 10.4+ when `db_driver = 'mysql'`
@@ -79,6 +79,48 @@ migration runs (configurable via the backup service). Migration files live in
 `migrations/` and are named `YYYYMMDDHHMMSS_description.php`, each returning an
 anonymous class with an `up(PDO $db, bool $isSqlite)` method that keeps
 SQLite/MySQL parity.
+
+---
+
+## Production updates
+
+Updates are distributed as versioned delta directories. Every changed path has
+both its expected old hash and new hash, so a customer-modified core file is
+reported as a conflict and is never overwritten. `config.php`, `.env`, runtime
+data, uploads, databases, logs, and per-deployment version state cannot be part
+of a package.
+
+```bash
+# Release side: one-time key generation; keep the secret key offline
+php cli/build-update.php keygen --public=/secure/update-public.key \
+  --secret=/secure/update-secret.key
+
+# Compare two clean release trees and sign the manifest
+php cli/build-update.php --from=/releases/1.0.0 --to=/releases/1.1.0 \
+  --base-version=1.0.0 --version=1.1.0 --output=/releases/update-1.1.0 \
+  --secret-key=/secure/update-secret.key
+
+# Shop side: one-time adoption for a pre-updater install (only after identifying it)
+php cli/update.php baseline --version=1.0.0
+
+# Inspect first, then apply (apply always creates a snapshot)
+php cli/update.php check --package=/releases/update-1.1.0
+php cli/update.php apply --package=/releases/update-1.1.0
+php cli/update.php list
+php cli/update.php rollback --snapshot=20260801120000-abcdef123456
+```
+
+Set `update_public_key` and `update_storage_dir` in `config.php`; installed
+version metadata and rollback snapshots stay in that private directory. Existing
+pre-updater shops require one explicit `baseline` after their deployed release
+has been identified. Packages are Ed25519-verified and unsigned packages are refused unless the operator supplies
+`--allow-unsigned` explicitly. Rollback refuses to overwrite files changed
+after an update unless `--force` is supplied after manual review.
+
+Code-only packages support SQLite and MySQL. Packages containing migrations are
+applied automatically only on SQLite, where the updater creates and verifies a
+database snapshot before changing files. MySQL migration packages fail closed
+until an external, restorable database-backup workflow is provided.
 
 ---
 

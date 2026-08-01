@@ -104,6 +104,8 @@ return [
     'invoice_storage_dir' => dirname(__DIR__) . '/bareboneseshop-private/invoices',
     'backup_storage_dir'  => dirname(__DIR__) . '/bareboneseshop-private/backups',
     'backup_log_file'     => dirname(__DIR__) . '/bareboneseshop-private/logs/backup.log',
+    'update_storage_dir'  => dirname(__DIR__) . '/bareboneseshop-private/updates',
+    'update_public_key'   => '', // Ed25519 public key (base64/hex or absolute key-file path)
     'gdpr_salt_file'      => dirname(__DIR__) . '/bareboneseshop-private/secrets/gdpr_salt',
 
     // TecDoc sidecar DB (read-only, for vehicle cascade lookups)

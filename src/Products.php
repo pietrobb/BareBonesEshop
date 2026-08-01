@@ -269,6 +269,38 @@ class Products {
     }
 
     /**
+     * Active physical products below the stock alert threshold.
+     */
+    public static function lowStockSummary(int $threshold = 10, int $limit = 20): array {
+        $db = Db::get();
+        $typeParams = [];
+        $typePlaceholders = [];
+        foreach (VariantAvailability::DIGITAL_TYPES as $index => $type) {
+            $placeholder = ':digital_type_' . $index;
+            $typePlaceholders[] = $placeholder;
+            $typeParams[$placeholder] = $type;
+        }
+
+        $where = "stock < :threshold AND status = 'active' AND LOWER(COALESCE(product_type, '')) NOT IN (" . implode(', ', $typePlaceholders) . ')';
+        $params = [':threshold' => $threshold] + $typeParams;
+
+        $countStmt = $db->prepare("SELECT COUNT(*) FROM products WHERE {$where}");
+        $countStmt->execute($params);
+
+        $listStmt = $db->prepare("SELECT sku, name, stock FROM products WHERE {$where} ORDER BY stock ASC LIMIT :limit");
+        foreach ($params as $placeholder => $value) {
+            $listStmt->bindValue($placeholder, $value, $placeholder === ':threshold' ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
+        $listStmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $listStmt->execute();
+
+        return [
+            'count' => (int)$countStmt->fetchColumn(),
+            'products' => $listStmt->fetchAll(PDO::FETCH_ASSOC),
+        ];
+    }
+
+    /**
      * Latest products
      */
     public static function latest(int $limit = 8): array {

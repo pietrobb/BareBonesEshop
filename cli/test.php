@@ -110,7 +110,7 @@ assert_true(str_contains($htaccess, 'RewriteCond %{REQUEST_FILENAME} -f'), '.hta
 assert_true(str_contains($htaccess, 'bbf\.(?:css|js)|submit\.php'), '.htaccess: required BBF browser integration remains allowlisted');
 
 $configExampleSource = (string)file_get_contents(__DIR__ . '/../config.example.php');
-foreach (['db_sqlite_path', 'private_cache_dir', 'jobs_dir', 'invoice_storage_dir', 'backup_storage_dir', 'backup_log_file', 'gdpr_salt_file'] as $privateConfigKey) {
+foreach (['db_sqlite_path', 'private_cache_dir', 'jobs_dir', 'invoice_storage_dir', 'backup_storage_dir', 'backup_log_file', 'update_storage_dir', 'gdpr_salt_file'] as $privateConfigKey) {
     assert_true(
         preg_match("/'" . preg_quote($privateConfigKey, '/') . "'\\s*=>\\s*dirname\\(__DIR__\\)/", $configExampleSource) === 1,
         "Config: {$privateConfigKey} defaults outside the application root"
@@ -5649,6 +5649,17 @@ DigitalDelivery::setConfigForTesting([
 
 $pdo->exec("INSERT INTO products (id, category_id, name, slug, sku, product_type, price, currency, status, stock)
     VALUES (9001, 1, 'Digital Guide', 'digital-guide', 'DIGI-GUIDE', 'downloadable', 999, 'eur', 'active', 0)");
+$pdo->exec("INSERT INTO products (id, category_id, name, slug, sku, product_type, price, currency, status, stock)
+    VALUES (9002, 1, 'Physical Low Stock', 'physical-low-stock', 'PHYS-LOW', 'simple', 999, 'eur', 'active', 1)");
+$lowStockSummary = Products::lowStockSummary(10, 1000);
+$lowStockSkus = array_column($lowStockSummary['products'], 'sku');
+assert_true(in_array('PHYS-LOW', $lowStockSkus, true), 'Dashboard low stock: physical products remain included');
+assert_true(!in_array('DIGI-GUIDE', $lowStockSkus, true), 'Dashboard low stock: downloadable products are excluded');
+$pdo->exec("UPDATE products SET product_type = 'digital' WHERE id = 9001");
+$lowStockSkus = array_column(Products::lowStockSummary(10, 1000)['products'], 'sku');
+assert_true(!in_array('DIGI-GUIDE', $lowStockSkus, true), 'Dashboard low stock: digital alias products are excluded');
+$pdo->exec("UPDATE products SET product_type = 'downloadable' WHERE id = 9001");
+$pdo->exec("DELETE FROM products WHERE id = 9002");
 $pdo->exec("INSERT INTO digital_assets
     (sku, asset_key, label, storage_path, download_name, content_type, download_limit, expiry_seconds, active)
     VALUES ('DIGI-GUIDE', 'pdf', 'PDF guide', 'guide.pdf', 'guide.pdf', 'application/pdf', 2, 3600, 1)");
@@ -5929,6 +5940,8 @@ assert_equals('anonymized', (string)($g6EraseResult['status'] ?? ''), 'G6 GDPR: 
 assert_equals('anonymized', (string)(Customers::byId((int)$g6EraseCustomerId)['status'] ?? ''), 'G6 GDPR: customer remains anonymized after audit logging failure');
 $gdprSourceG6 = file_get_contents(__DIR__ . '/../src/GdprService.php') ?: '';
 assert_true(str_contains($gdprSourceG6, 'GDPR erase audit failed [{$errorId}]'), 'G6 GDPR: post-commit audit failure is logged with a correlation ID');
+
+require __DIR__ . '/test-update.php';
 
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";

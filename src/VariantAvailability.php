@@ -1,6 +1,7 @@
 <?php
 /** Canonical server-side purchasability rules for product variants. */
 class VariantAvailability {
+    public const DIGITAL_TYPES = ['downloadable', 'digital'];
     public const ACTIVE = 'active';
     public const COMING_SOON = 'coming_soon';
     public const OUT_OF_STOCK = 'out_of_stock';
@@ -12,7 +13,7 @@ class VariantAvailability {
     }
 
     public static function isDigitalType(string $productType): bool {
-        return in_array(strtolower($productType), ['downloadable', 'digital'], true);
+        return in_array(strtolower($productType), self::DIGITAL_TYPES, true);
     }
 
     public static function isDigitalProduct(int $productId): bool {
