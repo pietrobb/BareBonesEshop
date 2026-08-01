@@ -25,6 +25,8 @@ file_put_contents($updateTarget . '/src/Core.php', "new core\n");
 file_put_contents($updateTarget . '/src/NewFeature.php', "new feature\n");
 file_put_contents($updateTarget . '/unchanged.txt', "same\n");
 file_put_contents($updateTarget . '/config.php', "release config must not ship\n");
+mkdir($updateTarget . '/DB', 0750, true);
+file_put_contents($updateTarget . '/DB/runtime.sqlite', "runtime data must not ship\n");
 file_put_contents($updateInstalled . '/src/Core.php', "old core\n");
 file_put_contents($updateInstalled . '/unchanged.txt', "same\n");
 file_put_contents($updateInstalled . '/config.php', "customer production config\n");
@@ -38,6 +40,8 @@ try {
         '1.0.0'
     );
     assert_equals(2, $builtUpdate['files'], 'Updater builder: package contains only changed non-protected files');
+    assert_true(Updater::isProtectedPath('Config.php'), 'Updater paths: protected filenames cannot bypass policy with case changes');
+    assert_true(Updater::isProtectedPath('DB/runtime.sqlite'), 'Updater paths: protected directories cannot bypass policy with case changes');
     assert_true(!$builtUpdate['signed'], 'Updater builder: unsigned development package is labelled explicitly');
 
     $unsignedRefused = false;
@@ -142,6 +146,10 @@ try {
     }
     assert_true($tamperRefused, 'Updater package: payload tampering is rejected by SHA-256 verification');
 
+    $signatureTestRequired = getenv('BAREBONES_REQUIRE_UPDATE_SIGNATURE_TEST') === '1';
+    if ($signatureTestRequired) {
+        assert_true(function_exists('sodium_crypto_sign_keypair'), 'Updater signature: CI requires the sodium-backed Ed25519 test path');
+    }
     if (function_exists('sodium_crypto_sign_keypair')) {
         $signedPackageDir = $updateTestRoot . DIRECTORY_SEPARATOR . 'signed-package';
         $keypair = sodium_crypto_sign_keypair();
@@ -150,6 +158,19 @@ try {
         UpdatePackageBuilder::build($updateBase, $updateTarget, $signedPackageDir, '1.1.0', '1.0.0', $secret);
         $signedPackage = new UpdatePackage($signedPackageDir, $public);
         assert_equals('1.1.0', $signedPackage->version(), 'Updater signature: valid Ed25519 package is accepted');
+
+        $doctorDbPath = $updateTestRoot . DIRECTORY_SEPARATOR . 'doctor.sqlite';
+        $doctorPdo = new PDO('sqlite:' . $doctorDbPath, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $doctorPdo->exec('CREATE TABLE readiness_probe (id INTEGER PRIMARY KEY)');
+        $doctorUpdater = new Updater($updateInstalled, $updateState, $doctorPdo);
+        $doctorReport = $doctorUpdater->doctor($public, $signedPackage);
+        $doctorChecks = array_column($doctorReport['checks'], null, 'name');
+        assert_equals('READY', $doctorReport['status'], 'Updater doctor: signed compatible package and verified SQLite snapshot capability are production-ready');
+        assert_equals('ok', $doctorChecks['database_backup']['level'] ?? null, 'Updater doctor: real SQLite snapshot passes integrity verification');
+        assert_equals('ok', $doctorChecks['package']['level'] ?? null, 'Updater doctor: signed package preflight is included');
+        $skippedProbeReport = $doctorUpdater->doctor($public, $signedPackage, false);
+        assert_equals('NOT_READY', $skippedProbeReport['status'], 'Updater doctor: skipping the database backup proof cannot report production readiness');
+        $doctorPdo = null;
 
         $wrongPair = sodium_crypto_sign_keypair();
         $wrongPublic = 'base64:' . base64_encode(sodium_crypto_sign_publickey($wrongPair));
@@ -160,6 +181,15 @@ try {
             $wrongKeyRefused = str_contains($e->getMessage(), 'signature verification failed');
         }
         assert_true($wrongKeyRefused, 'Updater signature: package signed by another key is rejected');
+
+        file_put_contents($signedPackageDir . '/manifest.json', " \n", FILE_APPEND);
+        $signedManifestTamperRefused = false;
+        try {
+            new UpdatePackage($signedPackageDir, $public);
+        } catch (RuntimeException $e) {
+            $signedManifestTamperRefused = str_contains($e->getMessage(), 'signature verification failed');
+        }
+        assert_true($signedManifestTamperRefused, 'Updater signature: any signed manifest mutation is rejected');
     }
 } finally {
     updateTestRemoveTree($updateTestRoot);

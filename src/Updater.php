@@ -42,11 +42,12 @@ final class Updater
 
     public static function isProtectedPath(string $path): bool
     {
-        if (in_array($path, self::PROTECTED_FILES, true)) {
+        $comparable = strtolower(str_replace('\\', '/', $path));
+        if (in_array($comparable, self::PROTECTED_FILES, true)) {
             return true;
         }
         foreach (self::PROTECTED_PREFIXES as $prefix) {
-            if (str_starts_with($path, $prefix)) {
+            if (str_starts_with($comparable, $prefix)) {
                 return true;
             }
         }
@@ -266,6 +267,106 @@ final class Updater
         }
         usort($rows, static fn(array $a, array $b): int => strcmp((string)($b['created_at'] ?? ''), (string)($a['created_at'] ?? '')));
         return $rows;
+    }
+
+    public function doctor(?string $publicKey = null, ?UpdatePackage $package = null, bool $probeDatabaseBackup = true): array
+    {
+        $checks = [];
+        $add = static function (string $level, string $name, string $message) use (&$checks): void {
+            $checks[] = compact('level', 'name', 'message');
+        };
+
+        $add(PHP_VERSION_ID >= 80100 ? 'ok' : 'fail', 'php', 'PHP ' . PHP_VERSION . ' (8.1+ required)');
+        $add(PHP_SAPI === 'cli' ? 'ok' : 'fail', 'sapi', 'Update command is running under ' . PHP_SAPI);
+
+        $hasSodium = function_exists('sodium_crypto_sign_verify_detached');
+        $add($hasSodium ? 'ok' : 'fail', 'sodium', $hasSodium
+            ? 'Ed25519 signature verification is available'
+            : 'PHP sodium extension is missing; signed production updates cannot be verified');
+        if ($publicKey === null || trim($publicKey) === '') {
+            $add('fail', 'public_key', 'No production update public key is configured');
+        } elseif ($hasSodium) {
+            try {
+                UpdatePackage::decodeKey(trim($publicKey), SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES, 'update public key');
+                $add('ok', 'public_key', 'Configured Ed25519 public key is valid');
+            } catch (Throwable $e) {
+                $add('fail', 'public_key', $e->getMessage());
+            }
+        } else {
+            $add('fail', 'public_key', 'Public key cannot be validated without sodium');
+        }
+
+        $add(is_writable($this->stateDirectory) ? 'ok' : 'fail', 'state_directory',
+            is_writable($this->stateDirectory)
+                ? 'Private update state directory is writable'
+                : 'Private update state directory is not writable');
+        try {
+            $this->lock();
+            $add('ok', 'update_lock', 'Exclusive update lock can be acquired');
+        } catch (Throwable $e) {
+            $add('fail', 'update_lock', $e->getMessage());
+        } finally {
+            $this->unlock();
+        }
+
+        if ($this->database === null) {
+            $add('fail', 'database', 'No database connection is available for readiness verification');
+        } else {
+            try {
+                $this->database->query('SELECT 1')->fetchColumn();
+                $driver = (string)$this->database->getAttribute(PDO::ATTR_DRIVER_NAME);
+                $add(in_array($driver, ['sqlite', 'mysql'], true) ? 'ok' : 'fail', 'database',
+                    "Database connection is healthy ({$driver})");
+
+                if ($driver === 'sqlite' && $probeDatabaseBackup) {
+                    $probeDirectory = $this->stateDirectory . DIRECTORY_SEPARATOR . '.doctor-' . bin2hex(random_bytes(6));
+                    try {
+                        $this->ensureDirectory($probeDirectory, 0750);
+                        $metadata = $this->snapshotSqliteDatabase($probeDirectory);
+                        $backupPath = $probeDirectory . DIRECTORY_SEPARATOR . 'database.sqlite';
+                        $probe = new PDO('sqlite:' . $backupPath, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+                        $integrity = (string)$probe->query('PRAGMA integrity_check')->fetchColumn();
+                        $probe = null;
+                        if ($integrity !== 'ok' || !hash_equals((string)$metadata['sha256'], (string)hash_file('sha256', $backupPath))) {
+                            throw new RuntimeException("SQLite backup probe failed integrity verification: {$integrity}");
+                        }
+                        $add('ok', 'database_backup', 'SQLite snapshot creation, checksum, and integrity probe passed');
+                    } catch (Throwable $e) {
+                        $add('fail', 'database_backup', $e->getMessage());
+                    } finally {
+                        $this->removeTree($probeDirectory);
+                    }
+                } elseif ($driver === 'sqlite') {
+                    $add('fail', 'database_backup', 'SQLite backup capability was not verified because the probe was skipped');
+                } elseif ($driver === 'mysql') {
+                    $add('warn', 'database_backup', 'MySQL supports code-only updates; migration updates remain blocked without verified dump/restore');
+                }
+            } catch (Throwable $e) {
+                $add('fail', 'database', 'Database readiness check failed: ' . $e->getMessage());
+            }
+        }
+
+        $preflight = null;
+        if ($package === null) {
+            $add('warn', 'package', 'No package supplied; package signature and installed-file compatibility were not checked');
+        } else {
+            $preflight = $this->check($package);
+            $add($preflight['can_apply'] ? 'ok' : 'fail', 'package', $preflight['can_apply']
+                ? 'Package signature, payload, version, and installed-file preflight passed'
+                : 'Package preflight failed with ' . count($preflight['blockers']) . ' blocker(s) and '
+                    . count($preflight['conflicts']) . ' conflict(s)');
+        }
+
+        $counts = ['ok' => 0, 'warn' => 0, 'fail' => 0];
+        foreach ($checks as $check) {
+            $counts[$check['level']]++;
+        }
+        return [
+            'status' => $counts['fail'] === 0 ? 'READY' : 'NOT_READY',
+            'counts' => $counts,
+            'checks' => $checks,
+            'package_preflight' => $preflight,
+        ];
     }
 
     private function createSnapshot(UpdatePackage $package, array $report, string $reason): array

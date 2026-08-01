@@ -5,6 +5,7 @@ require_once __DIR__ . '/cli-only.php';
  * Safe production update CLI.
  *
  * Usage:
+ *   php cli/update.php doctor   [--package=/path/to/release] [--json]
  *   php cli/update.php check    --package=/path/to/release [--public-key=...]
  *   php cli/update.php backup   --package=/path/to/release [--public-key=...]
  *   php cli/update.php apply    --package=/path/to/release [--public-key=...]
@@ -20,7 +21,7 @@ $args = array_slice($argv ?? [], 1);
 $command = $args[0] ?? 'help';
 $options = [];
 foreach (array_slice($args, 1) as $argument) {
-    if ($argument === '--allow-unsigned' || $argument === '--force') {
+    if (in_array($argument, ['--allow-unsigned', '--force', '--json', '--skip-backup-probe'], true)) {
         $options[substr($argument, 2)] = true;
         continue;
     }
@@ -41,13 +42,35 @@ try {
     }
     $privateRoot = (string)($config['private_runtime_dir'] ?? dirname($root) . '/bareboneseshop-private');
     $stateDirectory = (string)($config['update_storage_dir'] ?? rtrim($privateRoot, '/\\') . '/updates');
+    $configuredPublicKey = trim((string)($config['update_public_key'] ?? ''));
+    $environmentPublicKey = trim((string)(getenv('BAREBONES_UPDATE_PUBLIC_KEY') ?: ''));
     $publicKey = isset($options['public-key'])
         ? (string)$options['public-key']
-        : (string)($config['update_public_key'] ?? getenv('BAREBONES_UPDATE_PUBLIC_KEY') ?: '');
+        : ($configuredPublicKey !== '' ? $configuredPublicKey : $environmentPublicKey);
 
     if ($command === 'help' || $command === '--help' || $command === '-h') {
         updateHelp();
         exit(0);
+    }
+
+    if ($command === 'doctor') {
+        $package = null;
+        $packageDirectory = (string)($options['package'] ?? '');
+        if ($packageDirectory !== '') {
+            $package = new UpdatePackage(
+                $packageDirectory,
+                $publicKey !== '' ? $publicKey : null,
+                !empty($options['allow-unsigned'])
+            );
+        }
+        $updater = new Updater($root, $stateDirectory, Db::get());
+        $report = $updater->doctor(
+            $publicKey !== '' ? $publicKey : null,
+            $package,
+            empty($options['skip-backup-probe'])
+        );
+        printUpdateDoctorReport($report, !empty($options['json']));
+        exit($report['status'] === 'READY' ? 0 : 1);
     }
 
     if ($command === 'baseline') {
@@ -141,6 +164,29 @@ try {
     exit(1);
 }
 
+function printUpdateDoctorReport(array $report, bool $json): void
+{
+    if ($json) {
+        echo json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
+        return;
+    }
+    echo "BareBones Shop — Update Readiness\n";
+    echo "=================================\n";
+    foreach ($report['checks'] as $check) {
+        echo '[' . strtoupper($check['level']) . '] ' . $check['name'] . ': ' . $check['message'] . "\n";
+    }
+    $preflight = $report['package_preflight'] ?? null;
+    if (is_array($preflight) && !$preflight['can_apply']) {
+        foreach ($preflight['blockers'] as $blocker) {
+            echo "  [BLOCK] {$blocker}\n";
+        }
+        foreach ($preflight['conflicts'] as $path => $reason) {
+            echo "  [CONFLICT] {$path}: {$reason}\n";
+        }
+    }
+    echo "Result: {$report['status']} ({$report['counts']['ok']} ok, {$report['counts']['warn']} warn, {$report['counts']['fail']} fail)\n";
+}
+
 function printUpdateReport(array $report): void
 {
     echo 'Package: ' . $report['version'] . ' (base ' . ($report['base_version'] ?? 'unversioned') . ")\n";
@@ -162,6 +208,7 @@ function printUpdateReport(array $report): void
 function updateHelp(): void
 {
     echo "Usage:\n";
+    echo "  php cli/update.php doctor [--package=DIR] [--json] [--skip-backup-probe]\n";
     echo "  php cli/update.php check --package=DIR [--public-key=KEY]\n";
     echo "  php cli/update.php backup --package=DIR [--public-key=KEY]\n";
     echo "  php cli/update.php apply --package=DIR [--public-key=KEY]\n";
@@ -172,4 +219,6 @@ function updateHelp(): void
     echo "  --allow-unsigned  Accept an unsigned package explicitly (development only)\n";
     echo "  --public-key=KEY  Ed25519 public key as base64, hex, or a file path\n";
     echo "  --force           Roll back even if an installed file changed after update\n";
+    echo "  --json            Emit machine-readable doctor output\n";
+    echo "  --skip-backup-probe  Skip the doctor's real SQLite snapshot/integrity probe\n";
 }

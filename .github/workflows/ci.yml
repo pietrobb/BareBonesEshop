@@ -27,7 +27,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: pdo, pdo_sqlite, mbstring, json, dom, libxml
+          extensions: pdo, pdo_sqlite, mbstring, json, dom, libxml, sodium
           coverage: none
           tools: none
 
@@ -45,4 +45,6 @@ jobs:
       - name: Run test suite
         # No HTTP server is started, so the HTTP-smoke block self-skips —
         # the suite runs the full unit/integration set headless.
+        env:
+          BAREBONES_REQUIRE_UPDATE_SIGNATURE_TEST: '1'
         run: php cli/test.php

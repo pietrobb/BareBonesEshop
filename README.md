@@ -100,8 +100,14 @@ php cli/build-update.php --from=/releases/1.0.0 --to=/releases/1.1.0 \
   --base-version=1.0.0 --version=1.1.0 --output=/releases/update-1.1.0 \
   --secret-key=/secure/update-secret.key
 
-# Shop side: one-time adoption for a pre-updater install (only after identifying it)
+# Shop side: verify server capabilities before changing anything
+php cli/update.php doctor
+
+# One-time adoption for a pre-updater install (only after identifying it)
 php cli/update.php baseline --version=1.0.0
+
+# Verify the signed package against the identified installation
+php cli/update.php doctor --package=/releases/update-1.1.0
 
 # Inspect first, then apply (apply always creates a snapshot)
 php cli/update.php check --package=/releases/update-1.1.0
@@ -113,8 +119,12 @@ php cli/update.php rollback --snapshot=20260801120000-abcdef123456
 Set `update_public_key` and `update_storage_dir` in `config.php`; installed
 version metadata and rollback snapshots stay in that private directory. Existing
 pre-updater shops require one explicit `baseline` after their deployed release
-has been identified. Packages are Ed25519-verified and unsigned packages are refused unless the operator supplies
-`--allow-unsigned` explicitly. Rollback refuses to overwrite files changed
+has been identified. Run `doctor` on each deployment before its first update; it
+checks PHP/sodium, the public key, private storage and locking, database health,
+a real SQLite snapshot with integrity verification, and (when supplied) the
+signed package's compatibility with installed files. `doctor --json` is suitable
+for deployment automation. Packages are Ed25519-verified and unsigned packages
+are refused unless the operator supplies `--allow-unsigned` explicitly. Rollback refuses to overwrite files changed
 after an update unless `--force` is supplied after manual review.
 
 Code-only packages support SQLite and MySQL. Packages containing migrations are

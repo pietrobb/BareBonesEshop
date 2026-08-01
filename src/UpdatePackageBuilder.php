@@ -157,11 +157,12 @@ final class UpdatePackageBuilder
 
     private static function excluded(string $path): bool
     {
-        if (in_array($path, self::EXCLUDED_FILES, true)) {
+        $comparable = strtolower(str_replace('\\', '/', $path));
+        if (in_array($comparable, self::EXCLUDED_FILES, true)) {
             return true;
         }
         foreach (self::EXCLUDED_PREFIXES as $prefix) {
-            if (str_starts_with($path, $prefix)) {
+            if (str_starts_with($comparable, $prefix)) {
                 return true;
             }
         }
