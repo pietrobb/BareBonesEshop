@@ -6,6 +6,7 @@ return new class {
         $short = $isSqlite ? 'TEXT' : 'VARCHAR(191)';
         $datetime = $isSqlite ? 'TEXT' : 'DATETIME';
         $created = $isSqlite ? "TEXT NOT NULL DEFAULT (datetime('now'))" : 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP';
+        $defaultEmpty = MigrationSql::defaultClause($isSqlite, '');
 
         $db->exec("CREATE TABLE IF NOT EXISTS content_menu_items (
             id INTEGER PRIMARY KEY{$autoinc}, store_id {$short} NOT NULL DEFAULT 'default',
@@ -19,8 +20,8 @@ return new class {
         $db->exec("CREATE TABLE IF NOT EXISTS content_banners (
             id INTEGER PRIMARY KEY{$autoinc}, store_id {$short} NOT NULL DEFAULT 'default',
             slot {$short} NOT NULL DEFAULT 'homepage', locale {$short} NOT NULL DEFAULT '*',
-            title {$short} NOT NULL, body TEXT NOT NULL DEFAULT '', image_url TEXT NOT NULL DEFAULT '',
-            link_url TEXT NOT NULL DEFAULT '', link_label {$short} NOT NULL DEFAULT '',
+            title {$short} NOT NULL, body TEXT NOT NULL {$defaultEmpty}, image_url TEXT NOT NULL {$defaultEmpty},
+            link_url TEXT NOT NULL {$defaultEmpty}, link_label {$short} NOT NULL DEFAULT '',
             starts_at {$datetime} DEFAULT NULL, ends_at {$datetime} DEFAULT NULL,
             sort_order INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1,
             created_at {$created}, updated_at {$created}
@@ -38,8 +39,8 @@ return new class {
         foreach ([
             ['page_type', "{$short} NOT NULL DEFAULT 'content'"],
             ['template', "{$short} NOT NULL DEFAULT 'cms'"],
-            ['seo_title', 'TEXT NOT NULL DEFAULT \'\''],
-            ['meta_description', 'TEXT NOT NULL DEFAULT \'\''],
+            ['seo_title', "TEXT NOT NULL {$defaultEmpty}"],
+            ['meta_description', "TEXT NOT NULL {$defaultEmpty}"],
         ] as [$column, $definition]) {
             $this->addColumnIfMissing($db, $isSqlite, 'pages', $column, $definition);
         }

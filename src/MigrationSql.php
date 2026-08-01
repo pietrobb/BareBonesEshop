@@ -17,6 +17,12 @@ final class MigrationSql
         return $isSqlite ? 'TEXT' : 'DATETIME';
     }
 
+    public static function defaultClause(bool $isSqlite, string $value): string
+    {
+        $literal = "'" . str_replace("'", "''", $value) . "'";
+        return 'DEFAULT ' . ($isSqlite ? $literal : "({$literal})");
+    }
+
     public static function index(
         PDO $db,
         bool $isSqlite,

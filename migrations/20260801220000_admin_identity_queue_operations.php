@@ -6,6 +6,8 @@ return new class {
         $short = $isSqlite ? 'TEXT' : 'VARCHAR(191)';
         $datetime = $isSqlite ? 'TEXT' : 'DATETIME';
         $created = $isSqlite ? "TEXT NOT NULL DEFAULT (datetime('now'))" : 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP';
+        $defaultEmpty = MigrationSql::defaultClause($isSqlite, '');
+        $defaultArray = MigrationSql::defaultClause($isSqlite, '[]');
 
         $db->exec("CREATE TABLE IF NOT EXISTS admin_accounts (
             id INTEGER PRIMARY KEY{$autoinc}, username {$short} NOT NULL UNIQUE,
@@ -25,14 +27,14 @@ return new class {
 
         $db->exec("CREATE TABLE IF NOT EXISTS admin_store_permissions (
             id INTEGER PRIMARY KEY{$autoinc}, account_id INTEGER NOT NULL,
-            store_id {$short} NOT NULL DEFAULT 'default', permissions TEXT NOT NULL DEFAULT '[]',
+            store_id {$short} NOT NULL DEFAULT 'default', permissions TEXT NOT NULL {$defaultArray},
             created_at {$created}, updated_at {$created}, UNIQUE(account_id, store_id)
         )");
         $this->index($db, $isSqlite, 'admin_store_permissions', 'idx_admin_store_permissions_store', 'store_id, account_id');
 
         $db->exec("CREATE TABLE IF NOT EXISTS admin_devices (
             id INTEGER PRIMARY KEY{$autoinc}, account_id INTEGER NOT NULL, fingerprint {$short} NOT NULL,
-            label {$short} NOT NULL DEFAULT '', user_agent TEXT NOT NULL DEFAULT '', last_ip {$short} NOT NULL DEFAULT '',
+            label {$short} NOT NULL DEFAULT '', user_agent TEXT NOT NULL {$defaultEmpty}, last_ip {$short} NOT NULL DEFAULT '',
             last_seen_at {$datetime} NOT NULL, revoked_at {$datetime} DEFAULT NULL, created_at {$created},
             UNIQUE(account_id, fingerprint)
         )");
@@ -41,7 +43,7 @@ return new class {
         $db->exec("CREATE TABLE IF NOT EXISTS admin_sessions (
             id {$short} PRIMARY KEY, account_id INTEGER NOT NULL, device_id INTEGER NOT NULL,
             token_hash {$short} NOT NULL UNIQUE, ip_address {$short} NOT NULL DEFAULT '',
-            user_agent TEXT NOT NULL DEFAULT '', last_seen_at {$datetime} NOT NULL,
+            user_agent TEXT NOT NULL {$defaultEmpty}, last_seen_at {$datetime} NOT NULL,
             expires_at {$datetime} NOT NULL, revoked_at {$datetime} DEFAULT NULL, created_at {$created}
         )");
         $this->index($db, $isSqlite, 'admin_sessions', 'idx_admin_sessions_account', 'account_id, revoked_at, expires_at');

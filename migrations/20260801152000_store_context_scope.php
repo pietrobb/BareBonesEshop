@@ -5,6 +5,8 @@
  */
 return new class {
     public function up(PDO $db, bool $isSqlite): void {
+        $short = MigrationSql::short($isSqlite);
+
         foreach ([
             'categories', 'products', 'slug_registry', 'orders', 'payment_transactions',
             'coupon_uses', 'invoices', 'payment_methods', 'payment_method_countries',
@@ -12,11 +14,11 @@ return new class {
             'shipping_zone_countries', 'shipping_rates', 'shipping_labels', 'pages',
         ] as $table) {
             if ($this->tableExists($db, $isSqlite, $table)) {
-                $this->addColumnIfMissing($db, $isSqlite, $table, 'store_id', "TEXT NOT NULL DEFAULT 'default'");
+                $this->addColumnIfMissing($db, $isSqlite, $table, 'store_id', "{$short} NOT NULL DEFAULT 'default'");
             }
         }
         if ($this->tableExists($db, $isSqlite, 'orders')) {
-            $this->addColumnIfMissing($db, $isSqlite, 'orders', 'channel_id', "TEXT NOT NULL DEFAULT 'storefront'");
+            $this->addColumnIfMissing($db, $isSqlite, 'orders', 'channel_id', "{$short} NOT NULL DEFAULT 'storefront'");
         }
 
         foreach ([

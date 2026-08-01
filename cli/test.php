@@ -4610,6 +4610,9 @@ $pdo->prepare("UPDATE customers SET status = 'active' WHERE id = ?")->execute([$
 // ============================================================
 echo "\n--- Test: Migrations Framework ---\n";
 
+assert_equals("DEFAULT ''", MigrationSql::defaultClause(true, ''), 'Migrate: SQLite text default keeps literal syntax');
+assert_equals("DEFAULT ('')", MigrationSql::defaultClause(false, ''), 'Migrate: MySQL text default uses expression syntax');
+
 $migDir = __DIR__ . '/../db/_test_migrations';
 $migLock = __DIR__ . '/../db/.test-migrations.lock';
 if (is_dir($migDir)) {
@@ -4688,6 +4691,9 @@ $legacyDb->prepare("INSERT INTO schema_migrations (name, checksum, duration_ms) 
 $legacyStatus = $legacyMig->status();
 assert_true($legacyStatus['applied'][$legacyName]['checksum_ok'] === true, 'Migrate: exact approved legacy checksum maps to driver-portable rewrite');
 assert_equals(0, count($legacyMig->apply(static fn($m) => null)), 'Migrate: approved legacy checksum passes apply verification');
+$legacyDb->prepare("UPDATE schema_migrations SET checksum = ? WHERE name = ?")
+         ->execute(['a3ca08f0ad32a92cfa750126363c55ff7b6504e0c0b2819d05c5e8be227e248e', $legacyName]);
+assert_equals(0, count($legacyMig->apply(static fn($m) => null)), 'Migrate: published intermediate checksum maps to final rewrite');
 file_put_contents($legacyPath, "\n// unapproved third version\n", FILE_APPEND);
 $legacyRejected = false;
 try {

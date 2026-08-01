@@ -12,6 +12,9 @@ return new class {
         $now     = $isSqlite ? "datetime('now')" : 'NOW()';
         $text = MigrationSql::short($isSqlite);
         $long = MigrationSql::text($isSqlite);
+        $defaultEmpty = MigrationSql::defaultClause($isSqlite, '');
+        $defaultObject = MigrationSql::defaultClause($isSqlite, '{}');
+        $defaultArray = MigrationSql::defaultClause($isSqlite, '[]');
 
         // Categories
         $db->exec("CREATE TABLE IF NOT EXISTS categories (
@@ -19,12 +22,12 @@ return new class {
             slug          {$text} NOT NULL,
             name          {$text} NOT NULL,
             parent_id     INTEGER,
-            path          {$text} NOT NULL DEFAULT '',
+            path          {$text} NOT NULL {$defaultEmpty},
             depth         INTEGER NOT NULL DEFAULT 0,
             sort_order    INTEGER DEFAULT 0,
             product_count INTEGER DEFAULT 0,
-            translations  {$long} DEFAULT '{}',
-            meta          {$long} DEFAULT '{}',
+            translations  {$long} {$defaultObject},
+            meta          {$long} {$defaultObject},
             FOREIGN KEY (parent_id) REFERENCES categories(id)
         )");
         if ($isSqlite) {
@@ -51,14 +54,14 @@ return new class {
             currency      {$text} NOT NULL DEFAULT 'eur',
             stock         INTEGER NOT NULL DEFAULT 0,
             status        {$text} NOT NULL DEFAULT 'active',
-            images        {$long} DEFAULT '[]',
-            summary       {$long} DEFAULT '',
-            description   {$long} DEFAULT '',
-            attrs         {$long} DEFAULT '{}',
-            tags          {$long} DEFAULT '[]',
-            filter_tags   {$long} DEFAULT '',
+            images        {$long} {$defaultArray},
+            summary       {$long} {$defaultEmpty},
+            description   {$long} {$defaultEmpty},
+            attrs         {$long} {$defaultObject},
+            tags          {$long} {$defaultArray},
+            filter_tags   {$long} {$defaultEmpty},
             weight_g      INTEGER DEFAULT 0,
-            translations  {$long} DEFAULT '{}',
+            translations  {$long} {$defaultObject},
             created_at    {$text} DEFAULT ({$now}),
             updated_at    {$text} DEFAULT ({$now}),
             FOREIGN KEY (category_id) REFERENCES categories(id)
@@ -116,8 +119,8 @@ return new class {
             id             INTEGER PRIMARY KEY{$autoinc},
             product_id     INTEGER NOT NULL,
             sku            {$text} UNIQUE NOT NULL,
-            name           {$text} NOT NULL DEFAULT '',
-            attrs          {$long} NOT NULL DEFAULT '{}',
+            name           {$text} NOT NULL {$defaultEmpty},
+            attrs          {$long} NOT NULL {$defaultObject},
             price_delta    INTEGER NOT NULL DEFAULT 0,
             price_absolute INTEGER,
             stock          INTEGER NOT NULL DEFAULT 0,
@@ -144,10 +147,10 @@ return new class {
             customer_id     INTEGER DEFAULT NULL,
             customer_name   {$text} NOT NULL,
             customer_email  {$text} NOT NULL,
-            customer_phone  {$text} DEFAULT '',
-            shipping_addr   {$long} DEFAULT '{}',
+            customer_phone  {$text} {$defaultEmpty},
+            shipping_addr   {$long} {$defaultObject},
             payment_method  {$text} NOT NULL,
-            payment_id      {$text} DEFAULT '',
+            payment_id      {$text} {$defaultEmpty},
             subtotal        INTEGER NOT NULL,
             discount_amount INTEGER NOT NULL DEFAULT 0,
             shipping_cost   INTEGER NOT NULL DEFAULT 0,
@@ -155,8 +158,8 @@ return new class {
             total           INTEGER NOT NULL,
             currency        {$text} NOT NULL DEFAULT 'eur',
             locale          {$text} NOT NULL DEFAULT 'en',
-            notes           {$long} DEFAULT '',
-            ip_address      {$text} DEFAULT '',
+            notes           {$long} {$defaultEmpty},
+            ip_address      {$text} {$defaultEmpty},
             tracking_number {$text} DEFAULT NULL,
             carrier         {$text} DEFAULT NULL,
             erp_id          {$text} DEFAULT NULL,
@@ -187,11 +190,11 @@ return new class {
             recipient  {$text} NOT NULL,
             template   {$text} NOT NULL,
             locale     {$text} NOT NULL DEFAULT 'en',
-            subject    {$text} NOT NULL DEFAULT '',
-            adapter    {$text} NOT NULL DEFAULT '',
+            subject    {$text} NOT NULL {$defaultEmpty},
+            adapter    {$text} NOT NULL {$defaultEmpty},
             status     {$text} NOT NULL DEFAULT 'pending',
-            error      {$long} DEFAULT '',
-            payload    {$long} DEFAULT '{}',
+            error      {$long} {$defaultEmpty},
+            payload    {$long} {$defaultObject},
             sent_at    {$text} DEFAULT NULL,
             created_at {$text} DEFAULT ({$now})
         )");
@@ -204,12 +207,12 @@ return new class {
             id              INTEGER PRIMARY KEY{$autoinc},
             order_id        INTEGER NOT NULL,
             provider        {$text} NOT NULL,
-            provider_ref    {$text} NOT NULL DEFAULT '',
+            provider_ref    {$text} NOT NULL {$defaultEmpty},
             status          {$text} NOT NULL,
             amount          INTEGER NOT NULL,
             currency        {$text} NOT NULL DEFAULT 'eur',
             idempotency_key {$text} NOT NULL UNIQUE,
-            raw_response    {$long} NOT NULL DEFAULT '{}',
+            raw_response    {$long} NOT NULL {$defaultObject},
             created_at      {$text} DEFAULT ({$now}),
             updated_at      {$text} DEFAULT ({$now}),
             FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
@@ -229,7 +232,7 @@ return new class {
             quantity    INTEGER NOT NULL,
             unit_price  INTEGER NOT NULL,
             total       INTEGER NOT NULL,
-            attrs       {$long} DEFAULT '{}',
+            attrs       {$long} {$defaultObject},
             FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
             FOREIGN KEY (product_id) REFERENCES products(id)
         )");
@@ -275,7 +278,7 @@ return new class {
             id             INTEGER PRIMARY KEY{$autoinc},
             session_id     {$text} NOT NULL UNIQUE,
             customer_email {$text},
-            cart_data      {$long} NOT NULL DEFAULT '{}',
+            cart_data      {$long} NOT NULL {$defaultObject},
             created_at     {$text} DEFAULT ({$now}),
             reminded_at    {$text}
         )");
@@ -302,7 +305,7 @@ return new class {
             name       {$text} NOT NULL,
             slug       {$text} NOT NULL UNIQUE,
             type       {$text} NOT NULL DEFAULT 'enum',
-            unit       {$text} DEFAULT '',
+            unit       {$text} {$defaultEmpty},
             sort_order INTEGER DEFAULT 0
         )");
         $db->exec("CREATE TABLE IF NOT EXISTS attribute_options (
@@ -327,7 +330,7 @@ return new class {
             product_id      INTEGER NOT NULL,
             oem_brand       {$text} NOT NULL,
             oem_number      {$text} NOT NULL,
-            oem_number_norm {$text} NOT NULL DEFAULT '',
+            oem_number_norm {$text} NOT NULL {$defaultEmpty},
             FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
         )");
         MigrationSql::index($db, $isSqlite, 'product_oe_numbers', 'idx_oe_product', 'product_id');
@@ -354,7 +357,7 @@ return new class {
             ktype           INTEGER,
             manufacturer    {$text} NOT NULL,
             model           {$text} NOT NULL,
-            type_name       {$text} DEFAULT '',
+            type_name       {$text} {$defaultEmpty},
             year_from       INTEGER,
             year_to         INTEGER,
             FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
@@ -368,9 +371,9 @@ return new class {
             id           INTEGER PRIMARY KEY{$autoinc},
             slug         {$text} NOT NULL UNIQUE,
             title        {$text} NOT NULL,
-            body         {$long} NOT NULL DEFAULT '',
+            body         {$long} NOT NULL {$defaultEmpty},
             status       {$text} NOT NULL DEFAULT 'active',
-            translations {$long} DEFAULT '{}',
+            translations {$long} {$defaultObject},
             created_at   {$text} DEFAULT ({$now}),
             updated_at   {$text} DEFAULT ({$now})
         )");
@@ -384,8 +387,8 @@ return new class {
             priority    INTEGER NOT NULL DEFAULT 0,
             is_dropship INTEGER NOT NULL DEFAULT 0,
             is_default  INTEGER NOT NULL DEFAULT 0,
-            contact     {$long} DEFAULT '',
-            notes       {$long} DEFAULT '',
+            contact     {$long} {$defaultEmpty},
+            notes       {$long} {$defaultEmpty},
             created_at  {$text} DEFAULT ({$now})
         )");
         $db->exec("CREATE TABLE IF NOT EXISTS warehouse_stock (
@@ -408,7 +411,7 @@ return new class {
             warehouse_id INTEGER NOT NULL,
             url          {$long} NOT NULL,
             format       {$text} NOT NULL DEFAULT 'xml',
-            field_map    {$long} NOT NULL DEFAULT '{}',
+            field_map    {$long} NOT NULL {$defaultObject},
             import_mode  {$text} NOT NULL DEFAULT 'upsert',
             schedule     {$text} NOT NULL DEFAULT '0 */6 * * *',
             enabled      INTEGER NOT NULL DEFAULT 1,
@@ -438,7 +441,7 @@ return new class {
             carrier     {$text} NOT NULL,
             awb         {$text} NOT NULL UNIQUE,
             status      {$text} NOT NULL DEFAULT 'created',
-            label_data  {$long} NOT NULL DEFAULT '',
+            label_data  {$long} NOT NULL {$defaultEmpty},
             created_at  {$text} DEFAULT ({$now}),
             updated_at  {$text} DEFAULT ({$now}),
             FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
@@ -451,8 +454,8 @@ return new class {
             id                INTEGER PRIMARY KEY{$autoinc},
             email             {$text} NOT NULL UNIQUE,
             password_hash     {$text} NOT NULL,
-            name              {$text} NOT NULL DEFAULT '',
-            phone             {$text} DEFAULT '',
+            name              {$text} NOT NULL {$defaultEmpty},
+            phone             {$text} {$defaultEmpty},
             locale            {$text} NOT NULL DEFAULT 'en',
             status            {$text} NOT NULL DEFAULT 'active',
             email_verified_at {$text} DEFAULT NULL,
@@ -467,14 +470,14 @@ return new class {
             customer_id INTEGER NOT NULL,
             type        {$text} NOT NULL DEFAULT 'shipping',
             is_default  INTEGER NOT NULL DEFAULT 0,
-            name        {$text} NOT NULL DEFAULT '',
-            company     {$text} DEFAULT '',
-            vat_id      {$text} DEFAULT '',
-            street      {$text} NOT NULL DEFAULT '',
-            city        {$text} NOT NULL DEFAULT '',
-            zip         {$text} NOT NULL DEFAULT '',
-            country     {$text} NOT NULL DEFAULT '',
-            phone       {$text} DEFAULT '',
+            name        {$text} NOT NULL {$defaultEmpty},
+            company     {$text} {$defaultEmpty},
+            vat_id      {$text} {$defaultEmpty},
+            street      {$text} NOT NULL {$defaultEmpty},
+            city        {$text} NOT NULL {$defaultEmpty},
+            zip         {$text} NOT NULL {$defaultEmpty},
+            country     {$text} NOT NULL {$defaultEmpty},
+            phone       {$text} {$defaultEmpty},
             created_at  {$text} DEFAULT ({$now}),
             updated_at  {$text} DEFAULT ({$now}),
             FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE

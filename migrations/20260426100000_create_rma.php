@@ -18,6 +18,7 @@ return new class {
         $short   = MigrationSql::short($isSqlite);
         $text    = MigrationSql::text($isSqlite);
         $date    = MigrationSql::datetime($isSqlite);
+        $defaultEmpty = MigrationSql::defaultClause($isSqlite, '');
 
         $db->exec("CREATE TABLE IF NOT EXISTS rma_requests (
             id          INTEGER PRIMARY KEY{$autoinc},
@@ -25,8 +26,8 @@ return new class {
             order_id    INTEGER NOT NULL,
             customer_id INTEGER DEFAULT NULL,
             status      {$short} NOT NULL DEFAULT 'requested',
-            reason      {$text} NOT NULL DEFAULT '',
-            admin_note  {$text} NOT NULL DEFAULT '',
+            reason      {$text} NOT NULL {$defaultEmpty},
+            admin_note  {$text} NOT NULL {$defaultEmpty},
             created_at  {$date} NOT NULL DEFAULT ({$now}),
             updated_at  {$date} NOT NULL DEFAULT ({$now}),
             UNIQUE(rma_number)
@@ -40,8 +41,8 @@ return new class {
             rma_id        INTEGER NOT NULL,
             order_item_id INTEGER NOT NULL,
             product_id    INTEGER DEFAULT NULL,
-            sku           {$short} NOT NULL DEFAULT '',
-            name          {$short} NOT NULL DEFAULT '',
+            sku           {$short} NOT NULL {$defaultEmpty},
+            name          {$short} NOT NULL {$defaultEmpty},
             quantity      INTEGER NOT NULL DEFAULT 1,
             created_at    {$date} NOT NULL DEFAULT ({$now})
         )");

@@ -14,14 +14,15 @@ return new class {
         $short = MigrationSql::short($isSqlite);
         $text = MigrationSql::text($isSqlite);
         $date = MigrationSql::datetime($isSqlite);
+        $defaultEmpty = MigrationSql::defaultClause($isSqlite, '');
 
         $db->exec("CREATE TABLE IF NOT EXISTS shipping_methods (
             id                 INTEGER PRIMARY KEY{$autoinc},
             code               {$short} NOT NULL UNIQUE,
             carrier            {$short} NOT NULL,
             name               {$short} NOT NULL,
-            description        {$text} DEFAULT '',
-            adapter_class      {$short} DEFAULT '',
+            description        {$text} {$defaultEmpty},
+            adapter_class      {$short} {$defaultEmpty},
             service_type       {$short} NOT NULL DEFAULT 'parcel',
             supports_cod       INTEGER NOT NULL DEFAULT 0,
             supports_pickup    INTEGER NOT NULL DEFAULT 0,
@@ -40,7 +41,7 @@ return new class {
             id          INTEGER PRIMARY KEY{$autoinc},
             code        {$short} NOT NULL UNIQUE,
             name        {$short} NOT NULL,
-            description {$text} DEFAULT '',
+            description {$text} {$defaultEmpty},
             active      INTEGER NOT NULL DEFAULT 1,
             sort_order  INTEGER NOT NULL DEFAULT 100,
             created_at  {$date} DEFAULT ({$now}),
@@ -52,8 +53,8 @@ return new class {
             id         INTEGER PRIMARY KEY{$autoinc},
             zone_code  {$short} NOT NULL,
             country    {$short} NOT NULL,
-            postal_min {$short} DEFAULT '',
-            postal_max {$short} DEFAULT '',
+            postal_min {$short} {$defaultEmpty},
+            postal_max {$short} {$defaultEmpty},
             created_at {$date} DEFAULT ({$now}),
             UNIQUE(zone_code, country, postal_min, postal_max)
         )");
@@ -70,10 +71,10 @@ return new class {
             created_at    {$date} DEFAULT ({$now})
         )");
 
-        $this->addColumnIfMissing($db, $isSqlite, 'shipping_rates', 'method_code', "{$short} DEFAULT ''");
-        $this->addColumnIfMissing($db, $isSqlite, 'shipping_rates', 'zone_code', "{$short} DEFAULT ''");
+        $this->addColumnIfMissing($db, $isSqlite, 'shipping_rates', 'method_code', "{$short} {$defaultEmpty}");
+        $this->addColumnIfMissing($db, $isSqlite, 'shipping_rates', 'zone_code', "{$short} {$defaultEmpty}");
         $this->addColumnIfMissing($db, $isSqlite, 'shipping_rates', 'volume_to_cm3', "INTEGER DEFAULT NULL");
-        $this->addColumnIfMissing($db, $isSqlite, 'shipping_rates', 'delivery_days', "{$short} DEFAULT ''");
+        $this->addColumnIfMissing($db, $isSqlite, 'shipping_rates', 'delivery_days', "{$short} {$defaultEmpty}");
         $this->addColumnIfMissing($db, $isSqlite, 'shipping_rates', 'active', "INTEGER NOT NULL DEFAULT 1");
         $this->addColumnIfMissing($db, $isSqlite, 'shipping_rates', 'sort_order', "INTEGER NOT NULL DEFAULT 100");
         $this->addColumnIfMissing($db, $isSqlite, 'shipping_rates', 'updated_at', "{$date} DEFAULT NULL");

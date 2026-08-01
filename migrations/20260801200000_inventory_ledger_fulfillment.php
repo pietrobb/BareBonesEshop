@@ -6,11 +6,13 @@ return new class {
         $short = $isSqlite ? 'TEXT' : 'VARCHAR(191)';
         $datetime = $isSqlite ? 'TEXT' : 'DATETIME';
         $created = $isSqlite ? "TEXT NOT NULL DEFAULT (datetime('now'))" : 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP';
+        $defaultObject = MigrationSql::defaultClause($isSqlite, '{}');
+        $defaultEmpty = MigrationSql::defaultClause($isSqlite, '');
 
         foreach ([
             ['inventory_policy', "{$short} NOT NULL DEFAULT 'deny'"],
             ['preorder_at', "{$datetime} DEFAULT NULL"],
-            ['personalization_schema', "TEXT NOT NULL DEFAULT '{}'"],
+            ['personalization_schema', "TEXT NOT NULL {$defaultObject}"],
         ] as [$column, $definition]) {
             $this->addColumnIfMissing($db, $isSqlite, 'products', $column, $definition);
         }
@@ -44,7 +46,7 @@ return new class {
             reference_type {$short} DEFAULT NULL,
             reference_id {$short} DEFAULT NULL,
             idempotency_key {$short} DEFAULT NULL,
-            metadata TEXT NOT NULL DEFAULT '{}',
+            metadata TEXT NOT NULL {$defaultObject},
             created_at {$created},
             UNIQUE(store_id, idempotency_key)
         )");
@@ -53,7 +55,7 @@ return new class {
 
         $db->exec("CREATE TABLE IF NOT EXISTS suppliers (
             id INTEGER PRIMARY KEY{$autoinc}, store_id {$short} NOT NULL DEFAULT 'default',
-            code {$short} NOT NULL, name {$short} NOT NULL, contact TEXT NOT NULL DEFAULT '{}',
+            code {$short} NOT NULL, name {$short} NOT NULL, contact TEXT NOT NULL {$defaultObject},
             active INTEGER NOT NULL DEFAULT 1, created_at {$created}, UNIQUE(store_id, code)
         )");
         $db->exec("CREATE TABLE IF NOT EXISTS supplier_products (
@@ -66,7 +68,7 @@ return new class {
             id INTEGER PRIMARY KEY{$autoinc}, store_id {$short} NOT NULL DEFAULT 'default',
             supplier_id INTEGER NOT NULL, warehouse_id INTEGER NOT NULL, number {$short} NOT NULL,
             status {$short} NOT NULL DEFAULT 'draft', currency {$short} NOT NULL DEFAULT 'eur',
-            expected_at {$datetime} DEFAULT NULL, notes TEXT NOT NULL DEFAULT '',
+            expected_at {$datetime} DEFAULT NULL, notes TEXT NOT NULL {$defaultEmpty},
             created_at {$created}, updated_at {$created}, UNIQUE(store_id, number)
         )");
         $db->exec("CREATE TABLE IF NOT EXISTS purchase_order_items (

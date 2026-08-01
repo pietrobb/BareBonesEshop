@@ -9,6 +9,8 @@ return new class {
         $short = $isSqlite ? 'TEXT' : 'VARCHAR(191)';
         $datetime = $isSqlite ? 'TEXT' : 'DATETIME';
         $created = $isSqlite ? "TEXT NOT NULL DEFAULT (datetime('now'))" : 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP';
+        $defaultObject = MigrationSql::defaultClause($isSqlite, '{}');
+        $defaultArray = MigrationSql::defaultClause($isSqlite, '[]');
 
         $db->exec("CREATE TABLE IF NOT EXISTS brands (
             id INTEGER PRIMARY KEY{$autoinc},
@@ -38,7 +40,7 @@ return new class {
         foreach ([
             ['gtin', "{$short} DEFAULT NULL"],
             ['mpn', "{$short} DEFAULT NULL"],
-            ['media', "TEXT NOT NULL DEFAULT '[]'"],
+            ['media', "TEXT NOT NULL {$defaultArray}"],
             ['weight_g', 'INTEGER NOT NULL DEFAULT 0'],
             ['length_mm', 'INTEGER NOT NULL DEFAULT 0'],
             ['width_mm', 'INTEGER NOT NULL DEFAULT 0'],
@@ -150,8 +152,8 @@ return new class {
             coupon_code {$short} DEFAULT NULL,
             priority INTEGER NOT NULL DEFAULT 100,
             stacking {$short} NOT NULL DEFAULT 'exclusive',
-            conditions TEXT NOT NULL DEFAULT '{}',
-            actions TEXT NOT NULL DEFAULT '{}',
+            conditions TEXT NOT NULL {$defaultObject},
+            actions TEXT NOT NULL {$defaultObject},
             valid_from {$datetime} DEFAULT NULL,
             valid_to {$datetime} DEFAULT NULL,
             active INTEGER NOT NULL DEFAULT 1,

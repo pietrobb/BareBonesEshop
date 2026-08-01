@@ -14,15 +14,16 @@ return new class {
         $short   = MigrationSql::short($isSqlite);
         $text    = MigrationSql::text($isSqlite);
         $date    = MigrationSql::datetime($isSqlite);
+        $defaultEmpty = MigrationSql::defaultClause($isSqlite, '');
 
         $db->exec("CREATE TABLE IF NOT EXISTS product_reviews (
             id           INTEGER PRIMARY KEY{$autoinc},
             product_id   INTEGER NOT NULL,
             customer_id  INTEGER DEFAULT NULL,
-            author_name  {$short} NOT NULL DEFAULT '',
+            author_name  {$short} NOT NULL {$defaultEmpty},
             rating       INTEGER NOT NULL,
-            title        {$short} NOT NULL DEFAULT '',
-            body         {$text} NOT NULL DEFAULT '',
+            title        {$short} NOT NULL {$defaultEmpty},
+            body         {$text} NOT NULL {$defaultEmpty},
             status       {$short} NOT NULL DEFAULT 'pending',
             created_at   {$date} NOT NULL DEFAULT ({$now}),
             updated_at   {$date} NOT NULL DEFAULT ({$now})

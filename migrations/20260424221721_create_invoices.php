@@ -13,6 +13,7 @@ return new class {
         $autoinc = $isSqlite ? '' : ' AUTO_INCREMENT';
         $short = MigrationSql::short($isSqlite);
         $text = MigrationSql::text($isSqlite);
+        $defaultObject = MigrationSql::defaultClause($isSqlite, '{}');
 
         $db->exec("
             CREATE TABLE IF NOT EXISTS invoices (
@@ -27,9 +28,9 @@ return new class {
                 total_vat INTEGER NOT NULL DEFAULT 0,
                 total_gross INTEGER NOT NULL DEFAULT 0,
                 currency {$short} NOT NULL DEFAULT 'eur',
-                vat_breakdown {$text} NOT NULL DEFAULT '{}',
-                customer_snapshot {$text} NOT NULL DEFAULT '{}',
-                seller_snapshot {$text} NOT NULL DEFAULT '{}',
+                vat_breakdown {$text} NOT NULL {$defaultObject},
+                customer_snapshot {$text} NOT NULL {$defaultObject},
+                seller_snapshot {$text} NOT NULL {$defaultObject},
                 payment_method {$short},
                 locale {$short} NOT NULL DEFAULT 'en',
                 status {$short} NOT NULL DEFAULT 'issued',

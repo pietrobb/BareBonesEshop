@@ -13,13 +13,14 @@ return new class {
         $short = MigrationSql::short($isSqlite);
         $text = MigrationSql::text($isSqlite);
         $date = MigrationSql::datetime($isSqlite);
+        $defaultEmpty = MigrationSql::defaultClause($isSqlite, '');
 
         $db->exec("CREATE TABLE IF NOT EXISTS payment_methods (
             id                    INTEGER PRIMARY KEY{$autoinc},
             code                  {$short} NOT NULL UNIQUE,
-            provider              {$short} NOT NULL DEFAULT '',
+            provider              {$short} NOT NULL {$defaultEmpty},
             name                  {$short} NOT NULL,
-            description           {$text} DEFAULT '',
+            description           {$text} {$defaultEmpty},
             service_type          {$short} NOT NULL DEFAULT 'offline',
             min_amount            INTEGER NOT NULL DEFAULT 0,
             max_amount            INTEGER DEFAULT NULL,

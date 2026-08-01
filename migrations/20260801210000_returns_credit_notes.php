@@ -6,6 +6,7 @@ return new class {
         $short = $isSqlite ? 'TEXT' : 'VARCHAR(191)';
         $datetime = $isSqlite ? 'TEXT' : 'DATETIME';
         $created = $isSqlite ? "TEXT NOT NULL DEFAULT (datetime('now'))" : 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP';
+        $defaultEmpty = MigrationSql::defaultClause($isSqlite, '');
 
         foreach ([
             ['store_id', "{$short} NOT NULL DEFAULT 'default'"],
@@ -34,7 +35,7 @@ return new class {
         $db->exec("CREATE TABLE IF NOT EXISTS return_receipts (
             id INTEGER PRIMARY KEY{$autoinc}, store_id {$short} NOT NULL DEFAULT 'default',
             rma_id INTEGER NOT NULL, rma_item_id INTEGER NOT NULL, quantity INTEGER NOT NULL,
-            disposition {$short} NOT NULL, note TEXT NOT NULL DEFAULT '', idempotency_key {$short} NOT NULL,
+            disposition {$short} NOT NULL, note TEXT NOT NULL {$defaultEmpty}, idempotency_key {$short} NOT NULL,
             created_at {$created}, UNIQUE(store_id, idempotency_key, rma_item_id)
         )");
         $this->index($db, $isSqlite, 'return_receipts', 'idx_return_receipts_item', 'store_id, rma_item_id, disposition');
