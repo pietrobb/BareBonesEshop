@@ -5,7 +5,19 @@
  */
 class Cart {
     public static function get(): array {
-        return $_SESSION['cart'] ?? [];
+        $cart = $_SESSION['cart'] ?? [];
+        $normalized = [];
+        foreach ($cart as $key => $item) {
+            if (is_int($item) && $item > 0 && (is_int($key) || ctype_digit((string)$key))) {
+                $productId = (int)$key;
+                if ($productId > 0) {
+                    $normalized["p_{$productId}"] = ['product_id' => $productId, 'variant_id' => null, 'qty' => $item];
+                }
+                continue;
+            }
+            if (is_array($item)) $normalized[(string)$key] = $item;
+        }
+        return $normalized;
     }
 
     public static function add(int $productId, ?int $variantId, int $qty): void {

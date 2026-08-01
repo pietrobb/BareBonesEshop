@@ -136,7 +136,7 @@ class Orders {
                 }
                 $vatScenario = $customer['vat_scenario'] ?? null;
                 if (!$hasVat) {
-                    $vatTotal = null; $netTotal = null;
+                    $vatTotal = 0; $netTotal = 0;
                 } elseif ($couponDiscount > 0 && $subtotal > 0) {
                     $discountedGross = max(0, $subtotal - $couponDiscount);
                     $vatTotal = (int) round($vatTotal * $discountedGross / $subtotal);
@@ -218,8 +218,11 @@ class Orders {
                     $orderId = (int)$db->lastInsertId();
                     break;
                 } catch (\PDOException $e) {
-                    // Retry only on unique constraint violation (SQLSTATE 23000)
-                    if ($e->getCode() !== '23000' || $attempt >= 4) throw $e;
+                    $message = strtolower($e->getMessage());
+                    $orderNumberCollision = $e->getCode() === '23000'
+                        && (str_contains($message, 'unique') || str_contains($message, 'duplicate'))
+                        && str_contains($message, 'order_number');
+                    if (!$orderNumberCollision || $attempt >= 4) throw $e;
                 }
             }
 
@@ -248,9 +251,9 @@ class Orders {
                     ':total'  => $oi['total'],
                     ':attrs'  => $oi['attrs'],
                     ':vclass' => $oi['vat_class'],
-                    ':vrate'  => $oi['vat_rate'],
-                    ':vamount'=> $oi['vat_amount'],
-                    ':namount'=> $oi['net_amount'],
+                    ':vrate'  => $oi['vat_rate'] ?? 0,
+                    ':vamount'=> $oi['vat_amount'] ?? 0,
+                    ':namount'=> $oi['net_amount'] ?? 0,
                 ]);
             }
 

@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup PHP ${{ matrix.php }}
         uses: shivammathur/setup-php@v2
@@ -34,7 +34,7 @@ jobs:
       - name: PHP syntax check (php -l) on all sources
         run: |
           set -e
-          find src cli migrations . -maxdepth 4 -name '*.php' -print0 \
+          find src cli migrations tests . -maxdepth 4 -name '*.php' -print0 \
             | xargs -0 -n1 -P4 php -l > /dev/null
 
       - name: Prepare runtime directories
@@ -43,19 +43,77 @@ jobs:
           cp config.example.php config.php
 
       - name: Run test suite
-        # No HTTP server is started, so the HTTP-smoke block self-skips —
-        # the suite runs the full unit/integration set headless.
         env:
           BAREBONES_REQUIRE_UPDATE_SIGNATURE_TEST: '1'
         run: php cli/test.php
 
-      - name: G10 i18n, WCAG 2.2 AA, and performance quality gates
+      - name: G10 i18n, WCAG 2.2 AA, and performance source gates
         run: |
           php cli/i18n-parity.php
           php cli/quality-gates.php
 
-  mysql-update:
-    name: Updater dump/restore (${{ matrix.database }})
+  browser-qualification:
+    name: Browser, axe & Lighthouse
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo, pdo_sqlite, mbstring, json, dom, libxml, sodium
+          coverage: none
+          tools: none
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install qualification tools and Chromium
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Prepare disposable SQLite application
+        env:
+          E2E_RUNTIME_DIR: /tmp/barebones-e2e-sqlite
+          E2E_STATE_PATH: /tmp/barebones-e2e-state.json
+          BBE_ADMIN_IDENTITY_KEY: RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU=
+        run: |
+          php tests/e2e/prepare.php
+          php cli/migrate.php
+          php cli/seed.php --count=30
+          php tests/e2e/seed.php
+
+      - name: Playwright commerce and WCAG 2.2 AA qualification
+        env:
+          CI: '1'
+          E2E_STATE_PATH: /tmp/barebones-e2e-state.json
+          BBE_ADMIN_IDENTITY_KEY: RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU=
+        run: npm run test:e2e
+
+      - name: Lighthouse rendered-page budgets
+        run: npm run test:lighthouse
+
+      - name: Upload browser evidence on failure
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: browser-qualification-evidence
+          path: |
+            playwright-report/
+            test-results/
+            .lighthouseci/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  database-qualification:
+    name: Application & updater (${{ matrix.database }})
     runs-on: ubuntu-latest
 
     strategy:
@@ -73,10 +131,10 @@ jobs:
         env:
           MYSQL_ROOT_PASSWORD: update-root
           MYSQL_ROOT_HOST: '%'
-          MYSQL_DATABASE: barebones_update_test
+          MYSQL_DATABASE: barebones_e2e_test
           MARIADB_ROOT_PASSWORD: update-root
           MARIADB_ROOT_HOST: '%'
-          MARIADB_DATABASE: barebones_update_test
+          MARIADB_DATABASE: barebones_e2e_test
         ports:
           - 3306:3306
         options: >-
@@ -87,7 +145,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup PHP 8.3
         uses: shivammathur/setup-php@v2
@@ -102,16 +160,29 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y mariadb-client
 
-      - name: Prepare runtime directories
+      - name: Prepare disposable native database application
+        env:
+          E2E_DB_DRIVER: mysql
+          E2E_DB_HOST: 127.0.0.1
+          E2E_DB_NAME: barebones_e2e_test
+          E2E_DB_USER: root
+          E2E_DB_PASSWORD: update-root
+          E2E_RUNTIME_DIR: /tmp/barebones-e2e-database
+          E2E_STATE_PATH: /tmp/barebones-e2e-db-state.json
+          BBE_ADMIN_IDENTITY_KEY: RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU=
         run: |
-          mkdir -p db cache logs jobs
-          cp config.example.php config.php
+          mariadb -h 127.0.0.1 -uroot -pupdate-root -e 'CREATE DATABASE barebones_parity_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+          php tests/e2e/prepare.php
+          php cli/migrate.php
+          php cli/seed.php --count=30
+          php tests/e2e/seed.php
 
-      - name: Run live updater dump/restore test
+      - name: Run native application HTTP, parity, and updater qualification
         env:
           BAREBONES_REQUIRE_UPDATE_SIGNATURE_TEST: '1'
           BAREBONES_REQUIRE_MYSQL_UPDATE_TEST: '1'
-          TEST_MYSQL_DSN: 'mysql:host=127.0.0.1;port=3306;dbname=barebones_update_test;charset=utf8mb4'
+          SMOKE_URL: http://127.0.0.1:8080
+          TEST_MYSQL_DSN: mysql:host=127.0.0.1;port=3306;dbname=barebones_parity_test;charset=utf8mb4
           TEST_MYSQL_USER: root
           TEST_MYSQL_PASS: update-root
           TEST_MYSQL_UPDATE_DATABASE: barebones_update_test
@@ -121,4 +192,14 @@ jobs:
           TEST_MYSQL_UPDATE_PASS: update-root
           TEST_MYSQL_DUMP_BINARY: mariadb-dump
           TEST_MYSQL_CLIENT_BINARY: mariadb
-        run: php cli/test.php
+          BBE_ADMIN_IDENTITY_KEY: RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU=
+        run: |
+          php -S 127.0.0.1:8080 -t . >/tmp/barebones-http.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8080/ >/dev/null; then break; fi
+            if [ "$attempt" -eq 30 ]; then cat /tmp/barebones-http.log; exit 1; fi
+            sleep 1
+          done
+          php cli/test.php

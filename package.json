@@ -1,0 +1,18 @@
+{
+  "name": "bareboneseshop-qualification",
+  "private": true,
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:accessibility": "playwright test accessibility.spec.js",
+    "test:lighthouse": "lhci autorun"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.10.2",
+    "@lhci/cli": "0.15.1",
+    "@playwright/test": "1.62.1"
+  },
+  "overrides": {
+    "tmp": "0.2.7",
+    "uuid": "11.1.1"
+  }
+}

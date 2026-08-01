@@ -379,10 +379,10 @@ h1{margin:0 0 16px}h2{margin:0 0 12px}
 .grid-2{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
 label{display:block;margin-bottom:4px;font-size:14px;color:#4a5568;font-weight:500}
 input,select,textarea{width:100%;padding:8px 10px;border:1px solid #cbd5e0;border-radius:4px;font-size:14px}
-input:focus,textarea:focus{outline:none;border-color:#4299e1}
+input:focus,textarea:focus{outline:none;border-color:#2563a8}
 .form-row{margin-bottom:12px}
-.btn{background:#4299e1;color:#fff;border:0;padding:10px 16px;border-radius:4px;cursor:pointer;font-size:14px;text-decoration:none;display:inline-block}
-.btn:hover{background:#3182ce}
+.btn{background:#2563a8;color:#fff;border:0;padding:10px 16px;border-radius:4px;cursor:pointer;font-size:14px;text-decoration:none;display:inline-block}
+.btn:hover{background:#1d4f8c}
 .btn-secondary{background:#a0aec0}.btn-secondary:hover{background:#718096}
 .btn-danger{background:#e53e3e}.btn-danger:hover{background:#c53030}
 .btn-sm{padding:6px 10px;font-size:13px}
@@ -400,9 +400,9 @@ th{background:#edf2f7;color:#4a5568;font-size:12px;text-transform:uppercase}
 .badge-delivered{background:#b2f5ea;color:#234e52}
 .badge-cancelled{background:#fed7d7;color:#742a2a}
 .addr-card{border:1px solid #e2e8f0;border-radius:4px;padding:12px;position:relative}
-.addr-default{border-color:#4299e1}
+.addr-default{border-color:#2563a8}
 .addr-actions{margin-top:8px}
-a.link{color:#4299e1;text-decoration:none}a.link:hover{text-decoration:underline}
+a.link{color:#2563a8;text-decoration:none}a.link:hover{text-decoration:underline}
 </style>';
 $accountHead = ob_get_clean();
 ob_start();
@@ -453,8 +453,8 @@ switch ($p) {
         echo '<input type="hidden" name="csrf_token" value="' . $e($csrf) . '">';
         echo '<input type="hidden" name="action" value="login">';
         echo '<input type="hidden" name="next" value="' . $next . '">';
-        echo '<div class="form-row"><label>' . $e($t('account.email')) . '</label><input type="email" name="email" required value="' . $e($fieldValues['email'] ?? '') . '"></div>';
-        echo '<div class="form-row"><label>' . $e($t('account.password')) . '</label><input type="password" name="password" required></div>';
+        echo '<div class="form-row"><label for="account-login-email">' . $e($t('account.email')) . '</label><input id="account-login-email" type="email" name="email" required value="' . $e($fieldValues['email'] ?? '') . '"></div>';
+        echo '<div class="form-row"><label for="account-login-password">' . $e($t('account.password')) . '</label><input id="account-login-password" type="password" name="password" required></div>';
         echo '<button class="btn">' . $e($t('account.login')) . '</button>';
         echo '</form>';
         echo '<p class="muted" style="margin-top:16px"><a class="link" href="account.php?p=forgot">' . $e($t('account.forgot_link')) . '</a></p>';

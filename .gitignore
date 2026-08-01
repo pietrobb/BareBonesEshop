@@ -66,6 +66,11 @@ config/.gdpr_salt
 
 # Environment
 .env
+node_modules/
+playwright-report/
+test-results/
+.lighthouseci/
+tests/e2e/.state.json
 
 # Local config with secrets (copy config.example.php -> config.php)
 config.php

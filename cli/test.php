@@ -1042,6 +1042,10 @@ Cart::add(1, null, 2);
 $cart = Cart::get();
 assert_true(isset($cart['p_1']), 'Cart::add creates entry with product key');
 assert_equals(2, $cart['p_1']['qty'], 'Cart qty is 2');
+$_SESSION['cart'] = [1 => 2];
+$legacyCart = Cart::get();
+assert_equals(['product_id' => 1, 'variant_id' => null, 'qty' => 2], $legacyCart['p_1'], 'Cart normalizes the legacy storefront session shape for API checkout');
+$_SESSION['cart'] = $cart;
 
 // Add same product again
 Cart::add(1, null, 3);
@@ -1513,6 +1517,8 @@ assert_equals('test@example.com', $order['customer_email'], 'Customer email corr
 assert_equals($testProduct['price'] * 2, (int)$order['subtotal'], 'Subtotal correct');
 assert_equals(399, (int)$order['shipping_cost'], 'Shipping cost correct');
 assert_equals($testProduct['price'] * 2 + 399, (int)$order['total'], 'Total = subtotal + shipping');
+assert_equals(0, (int)$order['vat_total'], 'Legacy order stores a non-null zero VAT aggregate');
+assert_equals('Test 1', (string)(json_decode((string)$order['shipping_addr'], true)['street'] ?? ''), 'Legacy order preserves the structured shipping address');
 
 // Check order number format
 assert_true(str_starts_with($order['order_number'], 'ORD-'), 'Order number starts with ORD-');
@@ -1522,6 +1528,7 @@ $items = Orders::items($orderId);
 assert_equals(1, count($items), 'Order has 1 line item');
 assert_equals(2, (int)$items[0]['quantity'], 'Item quantity is 2');
 assert_equals($testProduct['sku'], $items[0]['sku'], 'Item SKU correct');
+assert_equals(0, (int)$items[0]['vat_amount'], 'Legacy order item stores a non-null zero VAT snapshot');
 
 // Stock decremented
 $updatedProduct = Products::bySku('TSHIRT-BLK-M');

@@ -313,7 +313,7 @@ ob_start();
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f5f5f5;color:#333;line-height:1.5;font-size:14px}
-a{color:#333;text-decoration:none}a:hover{color:#cc3872}
+a{color:#333;text-decoration:none}a:hover{color:#a82d5c}
 h1,h2,h3,h4,h5,.section-title{font-family:'Oswald',georgia,serif;font-weight:500}
 .wrap{max-width:1280px;margin:0 auto;padding:0 16px}
 
@@ -321,7 +321,7 @@ h1,h2,h3,h4,h5,.section-title{font-family:'Oswald',georgia,serif;font-weight:500
 header{background:#333;color:#fff;padding:0}
 .header-top{background:#f5f5f5;padding:6px 0;font-size:.8em;color:#777;border-bottom:1px solid #e5e5e5}
 .header-top .wrap{display:flex;justify-content:flex-end;gap:16px;align-items:center}
-.header-top a{color:#777;font-size:.8em}.header-top a:hover{color:#cc3872}
+.header-top a{color:#777;font-size:.8em}.header-top a:hover{color:#a82d5c}
 .header-main{background:#fff;padding:12px 0;border-bottom:1px solid #e5e5e5}
 .header-main .wrap{display:flex;align-items:center;gap:24px;flex-wrap:wrap}
 header .logo{white-space:nowrap}
@@ -330,22 +330,22 @@ header .logo a{display:block}
 .header-nav{background:#333;padding:0;position:relative;z-index:100}
 .header-nav .wrap{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
 .header-nav > .wrap > a,.nav-item > a{color:#fff;font-family:'Oswald',georgia,serif;font-size:15px;text-transform:uppercase;padding:14px 18px;display:block;transition:background .2s}
-.header-nav > .wrap > a:hover,.nav-item:hover > a{background:#cc3872;color:#fff}
+.header-nav > .wrap > a:hover,.nav-item:hover > a{background:#a82d5c;color:#fff}
 .nav-item{position:relative}
 .nav-dropdown{display:none;position:absolute;top:100%;left:0;background:#fff;min-width:260px;box-shadow:0 4px 16px rgba(0,0,0,.15);border-radius:0 0 4px 4px;z-index:200;padding:8px 0}
 .nav-item:hover .nav-dropdown{display:block}
 .nav-dropdown a{color:#333;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;text-transform:none;padding:7px 20px;display:block;transition:background .15s,color .15s}
-.nav-dropdown a:hover{background:#f5f5f5;color:#cc3872}
+.nav-dropdown a:hover{background:#f5f5f5;color:#a82d5c}
 .nav-dropdown .sub-heading{font-family:'Oswald',georgia,serif;font-size:13px;font-weight:600;color:#333;padding:10px 20px 4px;text-transform:uppercase;border-top:1px solid #eee;margin-top:4px}
 .nav-dropdown .sub-heading:first-child{border-top:none;margin-top:0}
 .search-bar{display:flex;gap:0;margin-left:auto}
 .search-bar input{padding:8px 14px;border:1px solid #e5e5e5;border-right:none;border-radius:4px 0 0 4px;font-size:.9em;width:220px;background:#fff;color:#333}
-.search-bar button{background:#cc3872;border:none;color:#fff;padding:8px 16px;border-radius:0 4px 4px 0;cursor:pointer;font-weight:600}
+.search-bar button{background:#a82d5c;border:none;color:#fff;padding:8px 16px;border-radius:0 4px 4px 0;cursor:pointer;font-weight:600}
 
 /* Main */
 main{padding:24px 0;min-height:60vh}
 .breadcrumb{margin-bottom:16px;font-size:.85em;color:#666}
-.breadcrumb a{color:#555}.breadcrumb a:hover{color:#cc3872}
+.breadcrumb a{color:#333;text-decoration:underline}.breadcrumb a:hover{color:#a82d5c}
 
 /* Grid */
 .grid{display:grid;gap:16px}
@@ -357,7 +357,7 @@ main{padding:24px 0;min-height:60vh}
 .card:hover{box-shadow:0 4px 12px rgba(0,0,0,.12)}
 .card h3{font-size:1em;margin-bottom:6px}
 .card .price{font-size:1.2em;font-weight:700;color:#725be7}
-.card .old-price{text-decoration:line-through;color:#999;font-size:.85em;margin-left:6px}
+.card .old-price{text-decoration:line-through;color:#666;font-size:.85em;margin-left:6px}
 .card .supplier{font-size:.8em;color:#888;margin-bottom:4px}
 .card .sku{font-size:.75em;color:#aaa}
 .card .badge{display:inline-block;background:#e8f5e9;color:#2e7d32;padding:2px 8px;border-radius:10px;font-size:.75em}
@@ -365,7 +365,7 @@ main{padding:24px 0;min-height:60vh}
 /* Category cards */
 .cat-card{display:flex;align-items:center;gap:12px;background:#fff;border-radius:8px;padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
 .cat-card:hover{box-shadow:0 4px 12px rgba(0,0,0,.12)}
-.cat-card .count{background:#cc3872;color:#fff;border-radius:20px;padding:2px 10px;font-size:.8em;font-weight:600;white-space:nowrap}
+.cat-card .count{background:#a82d5c;color:#fff;border-radius:20px;padding:2px 10px;font-size:.8em;font-weight:600;white-space:nowrap}
 
 /* Layout with sidebar */
 .layout-sidebar{display:grid;grid-template-columns:280px 1fr;gap:24px}
@@ -376,11 +376,11 @@ main{padding:24px 0;min-height:60vh}
 .sidebar h3{font-size:.9em;margin:12px 0 6px;color:#555;border-bottom:1px solid #eee;padding-bottom:4px}
 .sidebar h3:first-child{margin-top:0}
 .sidebar label{display:block;font-size:.85em;padding:2px 0;cursor:pointer}
-.sidebar label:hover{color:#cc3872}
+.sidebar label:hover{color:#a82d5c}
 .sidebar input[type=checkbox]{margin-right:4px}
 .sidebar .cnt{color:#aaa;font-size:.8em}
 .sidebar .filter-actions{margin-top:12px;display:flex;gap:8px}
-.sidebar .btn-apply{background:#cc3872;color:#fff;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-weight:600;font-size:.85em;width:100%}
+.sidebar .btn-apply{background:#a82d5c;color:#fff;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-weight:600;font-size:.85em;width:100%}
 .sidebar .btn-clear{background:#eee;color:#555;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:.85em}
 
 /* Hero / Slider */
@@ -388,13 +388,13 @@ main{padding:24px 0;min-height:60vh}
 .hero img{width:100%;display:block;object-fit:cover;max-height:400px}
 .hero-overlay{position:absolute;bottom:0;left:0;right:0;padding:30px 40px;background:linear-gradient(transparent,rgba(0,0,0,.6));color:#fff}
 .hero-overlay h1{font-size:2em;margin-bottom:8px;text-shadow:0 2px 4px rgba(0,0,0,.5)}
-.hero-overlay .btn-hero{display:inline-block;background:#cc3872;color:#fff;padding:10px 24px;border-radius:4px;font-weight:600;margin-top:8px;transition:background .2s}
-.hero-overlay .btn-hero:hover{background:#a82d5c;color:#fff}
+.hero-overlay .btn-hero{display:inline-block;background:#a82d5c;color:#fff;padding:10px 24px;border-radius:4px;font-weight:600;margin-top:8px;transition:background .2s}
+.hero-overlay .btn-hero:hover{background:#852247;color:#fff}
 
 /* Tabs */
 .tabs{display:flex;gap:0;border-bottom:2px solid #eee;margin-bottom:16px}
 .tab{padding:10px 20px;cursor:pointer;font:inherit;font-size:.9em;border:0;border-bottom:2px solid transparent;background:none;margin-bottom:-2px;color:#666}
-.tab.active{color:#333;border-bottom-color:#cc3872;font-weight:600}
+.tab.active{color:#333;border-bottom-color:#a82d5c;font-weight:600}
 .tab-content{display:none}.tab-content.active{display:block}
 
 /* Tables */
@@ -406,7 +406,7 @@ main{padding:24px 0;min-height:60vh}
 /* Pagination */
 .pagination{display:flex;gap:4px;margin-top:20px;justify-content:center}
 .pagination a,.pagination span{padding:6px 12px;border-radius:4px;font-size:.9em}
-.pagination a{background:#fff;border:1px solid #ddd}.pagination a:hover{border-color:#cc3872}
+.pagination a{background:#fff;border:1px solid #ddd}.pagination a:hover{border-color:#a82d5c}
 .pagination .current{background:#333;color:#fff}
 
 /* Sort bar */
@@ -416,12 +416,12 @@ main{padding:24px 0;min-height:60vh}
 
 /* Cart icon */
 .cart-icon{position:relative;font-size:1.4em;color:#fff;text-decoration:none;padding:4px 8px}
-.cart-icon:hover{color:#cc3872}
-.cart-badge{position:absolute;top:-4px;right:-4px;background:#cc3872;color:#fff;font-size:.5em;font-weight:700;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center}
+.cart-icon:hover{color:#a82d5c}
+.cart-badge{position:absolute;top:-4px;right:-4px;background:#a82d5c;color:#fff;font-size:.5em;font-weight:700;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center}
 
 /* Add to cart button */
-.btn-cart{background:#cc3872;color:#fff;border:none;padding:8px 14px;border-radius:4px;cursor:pointer;font-weight:600;font-size:.85em;width:100%;margin-top:8px;transition:background .2s}
-.btn-cart:hover{background:#a82d5c}
+.btn-cart{background:#a82d5c;color:#fff;border:none;padding:8px 14px;border-radius:4px;cursor:pointer;font-weight:600;font-size:.85em;width:100%;margin-top:8px;transition:background .2s}
+.btn-cart:hover{background:#852247}
 .btn-cart-lg{font-size:1em;padding:12px 24px;width:auto}
 
 /* Cart page */
@@ -438,7 +438,7 @@ main{padding:24px 0;min-height:60vh}
 .cart-summary .row{display:flex;justify-content:space-between;padding:6px 0;font-size:.95em}
 .cart-summary .total-row{font-size:1.2em;font-weight:700;border-top:2px solid #eee;padding-top:12px;margin-top:8px}
 .btn-checkout{display:block;background:#333;color:#fff;text-align:center;padding:14px;border-radius:6px;font-size:1em;font-weight:600;margin-top:16px;text-decoration:none;border:none;width:100%;cursor:pointer}
-.btn-checkout:hover{background:#cc3872;color:#fff}
+.btn-checkout:hover{background:#a82d5c;color:#fff}
 
 /* Checkout form */
 .checkout-form{background:#fff;border-radius:8px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
@@ -449,7 +449,7 @@ main{padding:24px 0;min-height:60vh}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .shipping-options,.payment-options{display:grid;gap:8px;margin:8px 0 16px}
 .shipping-option,.payment-option{display:flex;justify-content:space-between;gap:12px;padding:10px;border:1px solid #ddd;border-radius:6px;cursor:pointer}
-.shipping-option:has(input:checked),.payment-option:has(input:checked){border-color:#cc3872;background:#fff7fb}
+.shipping-option:has(input:checked),.payment-option:has(input:checked){border-color:#a82d5c;background:#fff7fb}
 .shipping-option small,.payment-option small{display:block;color:#777;margin-top:2px}
 .shipping-loading,.shipping-empty{font-size:.9em;color:#777;padding:8px 0}
 
@@ -459,9 +459,9 @@ main{padding:24px 0;min-height:60vh}
 
 /* Language switcher */
 .lang-switch{display:flex;gap:4px;align-items:center}
-.lang-switch a{color:#888;font-size:.75em;padding:2px 6px;border-radius:3px;border:1px solid transparent}
-.lang-switch a:hover{color:#cc3872;border-color:#cc3872}
-.lang-switch a.active{color:#cc3872;border-color:#cc3872;font-weight:700}
+.lang-switch a{color:#555;font-size:.75em;padding:2px 6px;border-radius:3px;border:1px solid transparent}
+.lang-switch a:hover{color:#a82d5c;border-color:#a82d5c}
+.lang-switch a.active{color:#a82d5c;border-color:#a82d5c;font-weight:700}
 
 /* Product image in cards */
 .card-img{width:100%;aspect-ratio:1;object-fit:contain;background:#fff;border-radius:4px;margin-bottom:8px}
@@ -470,7 +470,7 @@ main{padding:24px 0;min-height:60vh}
 /* Sale / New stickers */
 .sticker{position:absolute;top:8px;right:8px;padding:3px 10px;border-radius:3px;font-size:.75em;font-weight:700;color:#fff;text-transform:uppercase}
 .sticker-new{background:#b2da24}
-.sticker-sale{background:#e95d0f}
+.sticker-sale{background:#a93d00}
 
 /* Legal pages */
 .legal-page{max-width:900px;margin:0 auto}.legal-page h1{margin-bottom:16px}.legal-page h2{margin:22px 0 8px}.legal-page p,.legal-page li{margin:8px 0}.legal-page ul{margin-left:22px}
@@ -481,7 +481,7 @@ footer{background:#333;color:#bbb;padding:0;margin-top:40px;font-size:.85em}
 .footer-main .wrap{display:flex;gap:40px;flex-wrap:wrap}
 .footer-col{flex:1;min-width:200px}
 .footer-col h4{color:#fff;font-family:'Oswald',georgia,serif;margin-bottom:12px;font-size:1em;text-transform:uppercase}
-.footer-col a{display:block;color:#999;padding:3px 0;font-size:.9em}.footer-col a:hover{color:#fff}
+.footer-col a{display:block;color:#bbb;padding:3px 0;font-size:.9em}.footer-col a:hover{color:#fff}
 .footer-bottom{background:#222;padding:16px 0;text-align:center;color:#999;font-size:.8em}
 </style>
 <?php
@@ -550,7 +550,7 @@ ob_start();
      <a href="?page=category&slug=<?= $e($sc['slug']) ?>"><?= $e($catName($sc['name'])) ?></a>
      <?php endforeach; ?>
      <?php if (count($subCats) > 12): ?>
-     <a href="?page=category&slug=<?= $e($rc['slug']) ?>" style="font-weight:600;color:#cc3872"><?= $lang==='en'?'View all...':($lang==='de'?'Alle anzeigen...':'Zobraziť všetko...') ?></a>
+     <a href="?page=category&slug=<?= $e($rc['slug']) ?>" style="font-weight:600;color:#a82d5c"><?= $lang==='en'?'View all...':($lang==='de'?'Alle anzeigen...':'Zobraziť všetko...') ?></a>
      <?php endif; ?>
     </div>
    </div>
@@ -571,7 +571,7 @@ ob_start();
  <div class="footer-main"><div class="wrap">
   <div class="footer-col">
    <h4>woodle.sk</h4>
-   <p style="color:#999;font-size:.9em"><?= $lang==='en'?'Sauna & wooden products':($lang==='de'?'Sauna & Holzprodukte':'Sauna & drevené výrobky') ?></p>
+   <p style="color:#bbb;font-size:.9em"><?= $lang==='en'?'Sauna & wooden products':($lang==='de'?'Sauna & Holzprodukte':'Sauna & drevené výrobky') ?></p>
   </div>
   <div class="footer-col">
    <h4><?= $t('categories') ?></h4>
@@ -804,8 +804,8 @@ if ($ccCookie === ''):
     fetch('api.php?action=cookie_consent',{method:'POST',body:fd}).catch(function(){});
     b.parentNode.removeChild(b);
   }
-  document.getElementById('cc-accept').onclick=function(){send({necessary:true,analytics:true,marketing:true},'accept_all');};
-  document.getElementById('cc-reject').onclick=function(){send({necessary:true,analytics:false,marketing:false},'reject_all');};
+  document.getElementById('cc-accept').onclick=function(){send({necessary:true,analytics:true,marketing:true},'banner_accept_all');};
+  document.getElementById('cc-reject').onclick=function(){send({necessary:true,analytics:false,marketing:false},'banner_reject_all');};
   document.getElementById('cc-prefs-toggle').onclick=function(){
     b.classList.add('show-prefs');
     document.getElementById('cc-accept').style.display='none';
@@ -1049,7 +1049,7 @@ function renderCategory(array $cat): string {
         if (!empty($childrenWithProducts)) {
             usort($childrenWithProducts, fn($a,$b) => (int)$b['product_count'] - (int)$a['product_count']);
             echo '<h3>' . $t('subcategories');
-            if (!empty($selectedSubcats)) echo ' <span style="color:#cc3872">●</span>';
+            if (!empty($selectedSubcats)) echo ' <span style="color:#a82d5c">●</span>';
             echo '</h3>';
             foreach ($childrenWithProducts as $ch) {
                 $checked = in_array((int)$ch['id'], $selectedSubcats) ? ' checked' : '';
@@ -1081,8 +1081,8 @@ function renderCategory(array $cat): string {
         $rangeKey = 'range_' . md5($critName);
         $activeMin = $specFilters[$critName . '__min'] ?? ($_GET['rmin'][$critName] ?? '');
         $activeMax = $specFilters[$critName . '__max'] ?? ($_GET['rmax'][$critName] ?? '');
-        if ($allNumeric && ($activeMin !== '' || $activeMax !== '')) echo ' <span style="color:#cc3872">●</span>';
-        elseif (!$allNumeric && !empty($activeVals)) echo ' <span style="color:#cc3872">●</span>';
+        if ($allNumeric && ($activeMin !== '' || $activeMax !== '')) echo ' <span style="color:#a82d5c">●</span>';
+        elseif (!$allNumeric && !empty($activeVals)) echo ' <span style="color:#a82d5c">●</span>';
         echo '</h3>';
 
         if ($allNumeric) {
@@ -1237,7 +1237,7 @@ function renderVehicle(int $ktype, array $result, array $cats, ?int $activeCatId
     if (!empty($cats)) {
         echo '<div class="grid grid-3" style="margin-bottom:24px">';
         foreach ($cats as $c) {
-            $active = $activeCatId === (int)$c['id'] ? 'border:2px solid #cc3872;' : '';
+            $active = $activeCatId === (int)$c['id'] ? 'border:2px solid #a82d5c;' : '';
             echo '<a href="?page=vehicle&ktype=' . $ktype . '&cat=' . (int)$c['id'] . '" class="cat-card" style="' . $active . '">';
             echo '<span style="flex:1">' . $e($catName($c['name'])) . '</span><span class="count">' . (int)$c['part_count'] . '</span></a>';
         }
@@ -1364,8 +1364,8 @@ function renderCart(): string {
 
     if (empty($cart)) {
         echo '<div style="text-align:center;padding:60px;background:#fff;border-radius:8px">';
-        echo '<p style="font-size:1.2em;color:#888;margin-bottom:16px">' . $t('cart_empty') . '</p>';
-        echo '<a href="?" style="color:#cc3872;font-weight:600">' . $t('continue_shopping') . '</a>';
+        echo '<p style="font-size:1.2em;color:#555;margin-bottom:16px">' . $t('cart_empty') . '</p>';
+        echo '<a href="?" style="color:#a82d5c;font-weight:600">' . $t('continue_shopping') . '</a>';
         echo '</div>';
         return ob_get_clean();
     }
@@ -1434,7 +1434,7 @@ function renderCheckout(): string {
 
     if (empty($cart)) {
         return '<div class="breadcrumb"><a href="?">' . $t('home') . '</a> &rsaquo; ' . $t('checkout_title') . '</div>
-                <p>' . $t('cart_empty') . '. <a href="?" style="color:#cc3872">' . $t('continue_shopping') . '</a></p>';
+                <p>' . $t('cart_empty') . '. <a href="?" style="color:#a82d5c">' . $t('continue_shopping') . '</a></p>';
     }
 
     // Handle form submission
@@ -1564,12 +1564,12 @@ function processCheckout(): string {
     $payment = Security::clean($_POST['payment'] ?? 'cod');
     $country = strtoupper(Security::clean($_POST['country'] ?? 'SK'));
     $shippingMethod = Security::slug($_POST['shipping_method'] ?? '');
-    $addr = json_encode([
+    $addr = [
         'street' => Security::clean($_POST['street'] ?? ''),
         'city'   => Security::clean($_POST['city'] ?? ''),
         'zip'    => Security::clean($_POST['zip'] ?? ''),
         'country'=> $country,
-    ]);
+    ];
 
     // Convert index.php cart format to Orders::create format
     $cartItems = [];
@@ -1608,7 +1608,7 @@ function processCheckout(): string {
         'name'  => Security::clean($_POST['name'] ?? ''),
         'email' => $email,
         'phone' => Security::clean($_POST['phone'] ?? ''),
-        'shipping_addr' => $addr,
+        'address' => $addr,
         'notes' => Security::clean($_POST['notes'] ?? ''),
         'shipping_cost' => $shippingCost,
         'shipping_method' => $selectedRate['method_code'],
@@ -1663,7 +1663,7 @@ function renderOrderDone(string $orderNum): string {
         echo '</div>';
     }
     echo '<p style="color:#888;margin-bottom:24px">' . $t('order_email') . '</p>';
-    echo '<a href="?" style="color:#cc3872;font-weight:600;font-size:1.1em">' . $t('continue_shopping') . '</a>';
+    echo '<a href="?" style="color:#a82d5c;font-weight:600;font-size:1.1em">' . $t('continue_shopping') . '</a>';
     echo '</div>';
     return ob_get_clean();
 }

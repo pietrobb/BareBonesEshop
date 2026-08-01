@@ -1,0 +1,156 @@
+const { test, expect } = require('@playwright/test');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+
+const statePath = process.env.E2E_STATE_PATH || path.join(process.cwd(), 'tests', 'e2e', '.state.json');
+const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, 'utf8')) : {};
+
+function totp(secret) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = '';
+  for (const char of secret.replace(/[=\s-]/g, '').toUpperCase()) bits += alphabet.indexOf(char).toString(2).padStart(5, '0');
+  const key = Buffer.alloc(Math.floor(bits.length / 8));
+  for (let i = 0; i < key.length; i++) key[i] = parseInt(bits.slice(i * 8, i * 8 + 8), 2);
+  const counter = BigInt(Math.floor(Date.now() / 1000 / 30));
+  const message = Buffer.alloc(8); message.writeBigUInt64BE(counter);
+  const digest = crypto.createHmac('sha1', key).update(message).digest();
+  const offset = digest[19] & 0x0f;
+  const value = (digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000;
+  return String(value).padStart(6, '0');
+}
+
+async function addFirstProduct(page) {
+  await page.goto('/');
+  const rejectConsent = page.locator('#cc-reject');
+  if (await rejectConsent.isVisible()) {
+    const consentResponse = page.waitForResponse(response => response.url().includes('action=cookie_consent'));
+    await rejectConsent.click();
+    expect((await consentResponse).status()).toBe(200);
+  }
+  const button = page.locator('[data-storefront-action="cart-add"]').first();
+  await expect(button).toBeVisible();
+  await button.click();
+  await expect(page.locator('.cart-badge')).toHaveText(/^[1-9]/);
+}
+
+async function adminSignIn(page) {
+  await page.goto('/admin.php');
+  await page.locator('input[name="admin_username"]').fill(state.admin.username);
+  await page.locator('input[name="admin_password"]').fill(state.admin.password);
+  await page.locator('input[name="admin_mfa"]').fill(totp(state.admin.secret));
+  await page.locator('button[type="submit"]').click();
+  await expect(page.locator('nav')).toContainText(state.admin.username);
+}
+
+async function checkout(page, email) {
+  await page.goto('/?page=checkout');
+  await page.locator('input[name="name"]').fill('G12 Browser Customer');
+  await page.locator('input[name="email"]').fill(email);
+  await page.locator('input[name="phone"]').fill('+421900000012');
+  await page.locator('input[name="street"]').fill('Qualification 12');
+  await page.locator('input[name="city"]').fill('Bratislava');
+  await page.locator('input[name="zip"]').fill('81101');
+  await expect(page.locator('input[name="shipping_method"]').first()).toBeVisible();
+  await expect(page.locator('input[name="payment"]').first()).toBeVisible();
+  await page.locator('form.checkout-form button[type="submit"]').click();
+  await expect(page).toHaveURL(/page=order-done/);
+  await expect(page.locator('.order-done strong')).not.toBeEmpty();
+}
+
+test('guest cart and checkout complete in a real browser', async ({ page }) => {
+  await addFirstProduct(page);
+  await checkout(page, 'guest-g12@example.test');
+});
+
+test('account login preserves authenticated checkout ownership', async ({ page }) => {
+  test.skip(!state.customer, 'Run tests/e2e/seed.php first');
+  await page.goto('/account.php?p=login');
+  await page.locator('input[name="email"]').fill(state.customer.email);
+  await page.locator('input[name="password"]').fill(state.customer.password);
+  await page.locator('form').filter({ has: page.locator('input[value="login"]') }).locator('button').click();
+  await expect(page).toHaveURL(/account\.php(?:$|\?)/);
+  await addFirstProduct(page);
+  await checkout(page, state.customer.email);
+});
+
+test('online payment redirect and signed webhook complete the bound checkout', async ({ page }) => {
+  test.skip(!state.mock_webhook_secret, 'Run tests/e2e/seed.php first');
+  await addFirstProduct(page);
+  await page.goto('/?page=checkout');
+  await expect(page.locator('input[name="payment"][value="card"]')).toBeVisible();
+  const csrf = await page.locator('input[name="csrf_token"]').inputValue();
+  const shippingMethod = await page.locator('input[name="shipping_method"]:checked').inputValue();
+  const result = await page.evaluate(async ({ csrf, shippingMethod }) => {
+    const response = await fetch('/api.php?action=checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+      body: JSON.stringify({
+        name: 'G12 Online Customer', email: 'online-g12@example.test', phone: '+421900000014',
+        street: 'Qualification 14', city: 'Bratislava', zip: '81101', country: 'SK',
+        shipping_method: shippingMethod, payment_method: 'card'
+      })
+    });
+    return response.json();
+  }, { csrf, shippingMethod });
+  expect(result.success).toBeTruthy();
+  expect(result.payment_url).toContain('page=order-done');
+  expect(result.session_id).toMatch(/^mock_/);
+
+  const payload = JSON.stringify({
+    event_id: `g12-paid-${result.order_id}`,
+    order_id: result.order_id,
+    session_id: result.session_id,
+    amount: result.total,
+    currency: 'eur'
+  });
+  const signature = crypto.createHmac('sha256', state.mock_webhook_secret).update(payload).digest('hex');
+  const webhook = await page.evaluate(async ({ payload, signature }) => {
+    const response = await fetch('/api.php?action=webhook_payment&provider=mock', {
+      method: 'POST', body: payload,
+      headers: { 'Content-Type': 'application/json', 'X-Mock-Signature': signature }
+    });
+    return response.json();
+  }, { payload, signature });
+  expect(webhook.status).toBe('ok');
+});
+
+test('admin identity requires password plus current TOTP', async ({ page }) => {
+  test.skip(!state.admin, 'Run tests/e2e/seed.php first');
+  await adminSignIn(page);
+});
+
+test('admin fulfillment ships a paid order through the warehouse ledger', async ({ page }) => {
+  test.skip(!state.fulfillment, 'Run tests/e2e/seed.php first');
+  await adminSignIn(page);
+  await page.goto(`/admin.php?p=order&id=${state.fulfillment.order_id}`);
+  const statusForm = page.locator('form[action*="action=status"]');
+  await statusForm.locator('select[name="new_status"]').selectOption('processing');
+  await statusForm.locator('button[type="submit"]').click();
+  await expect(page.locator('h3 .badge-processing')).toHaveText('processing');
+  await page.locator('form[action*="action=status"] select[name="new_status"]').selectOption('shipped');
+  await page.locator('form[action*="action=status"] button[type="submit"]').click();
+  await expect(page.locator('h3 .badge-shipped')).toHaveText('shipped');
+});
+
+test('admin completes a partial RMA receipt, credit note, and refund', async ({ page }) => {
+  test.skip(!state.rma, 'Run tests/e2e/seed.php first');
+  await adminSignIn(page);
+  await page.goto('/admin.php?p=rma');
+  const row = page.locator('tr').filter({ has: page.locator(`input[name="rma_id"][value="${state.rma.rma_id}"]`) });
+  await row.locator('form').filter({ has: page.locator('input[name="status"][value="approved"]') }).locator('button').click();
+  await expect(page.locator('tr').filter({ hasText: 'G12 partial browser return' }).locator('.badge-approved')).toHaveText('approved');
+  const approvedRow = page.locator('tr').filter({ hasText: 'G12 partial browser return' });
+  await approvedRow.locator('select[name="disposition"]').selectOption('restock');
+  await approvedRow.locator('form').filter({ has: page.locator('input[name="status"][value="received"]') }).locator('button').click();
+  await expect(page.locator('tr').filter({ hasText: 'G12 partial browser return' }).locator('.badge-received')).toHaveText('received');
+  await page.locator('tr').filter({ hasText: 'G12 partial browser return' }).locator('form').filter({ has: page.locator('input[name="status"][value="refunded"]') }).locator('button').click();
+  await expect(page.locator('tr').filter({ hasText: 'G12 partial browser return' }).locator('.badge-refunded')).toHaveText('refunded');
+});
+
+test('safe updater smoke remains executable from the qualification runner', async () => {
+  const output = execFileSync('php', ['cli/test-update.php'], { cwd: process.cwd(), encoding: 'utf8', env: { ...process.env, BAREBONES_REQUIRE_UPDATE_SIGNATURE_TEST: '1' } });
+  expect(output).toContain('Safe versioned updater');
+  expect(output).not.toContain('[FAIL]');
+});
