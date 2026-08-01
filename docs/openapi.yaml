@@ -1,0 +1,308 @@
+openapi: 3.1.0
+info:
+  title: BareBonesEshop External API
+  version: 1.0.0
+  description: |
+    Stable machine-to-machine API. Amounts are integer minor units. New fields may
+    be added, but existing v1 fields keep their meaning. Browser sessions and CSRF
+    are not authentication mechanisms for this API.
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+paths:
+  /products:
+    get:
+      operationId: listProducts
+      summary: List products in stable ID order
+      x-required-scope: products:read
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Product page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductPage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /products/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: getProduct
+      summary: Get one product
+      x-required-scope: products:read
+      responses:
+        '200':
+          description: Product
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/Product' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateProduct
+      summary: Idempotently update explicitly supported product fields
+      x-required-scope: products:write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductPatch'
+      responses:
+        '200':
+          description: Updated product; an identical retry returns the stored response
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: '#/components/schemas/Product' }
+                  meta:
+                    type: object
+                    required: [idempotent_replay]
+                    properties:
+                      idempotent_replay: { type: boolean }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: The Idempotency-Key was already used for a different request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /orders:
+    get:
+      operationId: listOrders
+      summary: List orders owned by the credential store
+      x-required-scope: orders:read
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Order page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderPage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /orders/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: getOrder
+      summary: Get one order owned by the credential store
+      x-required-scope: orders:read
+      responses:
+        '200':
+          description: Order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/Order' }
+        '404': { $ref: '#/components/responses/NotFound' }
+webhooks:
+  commerceEvent:
+    post:
+      security: []
+      summary: Signed retry-safe commerce event delivery
+      description: |
+        The body is a CloudEvents-compatible v1 envelope. Verify
+        `X-BBE-Signature` as `v1=hex(HMAC-SHA256(secret,
+        timestamp + "." + event_id + "." + raw_body))`, reject timestamps more
+        than 300 seconds from local time, and persist `X-BBE-Event-ID` after a
+        successful transaction to prevent replay. Return any 2xx status only after
+        committing. Non-2xx/network failures are retried with exponential backoff;
+        after eight attempts the event enters the dead-letter state. Retries keep
+        the same event ID and payload but use a fresh timestamp/signature.
+      parameters:
+        - name: X-BBE-Event-ID
+          in: header
+          required: true
+          schema: { type: string, pattern: '^[a-f0-9]{32}$' }
+        - name: X-BBE-Timestamp
+          in: header
+          required: true
+          schema: { type: string, pattern: '^\d{10}$' }
+        - name: X-BBE-Signature
+          in: header
+          required: true
+          schema: { type: string, pattern: '^v1=[a-f0-9]{64}$' }
+      requestBody:
+        required: true
+        content:
+          application/cloudevents+json:
+            schema: { $ref: '#/components/schemas/EventEnvelope' }
+      responses:
+        '204': { description: Event committed and event ID persisted }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: BBE API token
+      description: Tokens are shown once; only their SHA-256 hashes are stored.
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor returned as meta.next_cursor; clients must not decode it.
+      schema: { type: string, maxLength: 64 }
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Unique 8-191 character key. Reusing it with a different request returns 409.
+      schema: { type: string, minLength: 8, maxLength: 191 }
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing, invalid, inactive or expired bearer token
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Credential lacks the required scope or store permission
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource is absent from the credential store
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Money:
+      type: object
+      additionalProperties: false
+      required: [amount, currency]
+      properties:
+        amount: { type: integer, minimum: 0, description: Integer minor units (cents where applicable). }
+        currency: { type: string, pattern: '^[a-z]{3}$' }
+    Product:
+      type: object
+      additionalProperties: false
+      required: [id, sku, slug, name, type, price, compare_price, stock, status, weight_g, created_at, updated_at]
+      properties:
+        id: { type: integer }
+        sku: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        type: { type: string }
+        price: { $ref: '#/components/schemas/Money' }
+        compare_price: { type: [integer, 'null'], minimum: 0 }
+        stock: { type: integer, minimum: 0 }
+        status: { type: string, enum: [active, draft, archived] }
+        weight_g: { type: integer, minimum: 0 }
+        created_at: { type: string }
+        updated_at: { type: string }
+    ProductPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 1, maxLength: 191 }
+        status: { type: string, enum: [active, draft, archived] }
+        price: { type: integer, minimum: 0 }
+        compare_price: { type: [integer, 'null'], minimum: 0 }
+        stock: { type: integer, minimum: 0 }
+        weight_g: { type: integer, minimum: 0 }
+    Order:
+      type: object
+      additionalProperties: false
+      required: [id, number, status, payment_status, customer, totals, created_at, updated_at]
+      properties:
+        id: { type: integer }
+        number: { type: string }
+        status: { type: string }
+        payment_status: { type: string }
+        customer:
+          type: object
+          required: [id, name, email]
+          properties:
+            id: { type: [integer, 'null'] }
+            name: { type: string }
+            email: { type: string, format: email }
+        totals:
+          type: object
+          required: [subtotal, discount, shipping, tax, total, currency]
+          properties:
+            subtotal: { type: integer }
+            discount: { type: integer }
+            shipping: { type: integer }
+            tax: { type: integer }
+            total: { type: integer }
+            currency: { type: string, pattern: '^[a-z]{3}$' }
+        created_at: { type: string }
+        updated_at: { type: string }
+    PageMeta:
+      type: object
+      required: [limit, next_cursor]
+      properties:
+        limit: { type: integer }
+        next_cursor: { type: [string, 'null'] }
+    ProductPage:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Product' } }
+        meta: { $ref: '#/components/schemas/PageMeta' }
+    OrderPage:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/Order' } }
+        meta: { $ref: '#/components/schemas/PageMeta' }
+    EventEnvelope:
+      type: object
+      required: [specversion, id, type, source, time, datacontenttype, subject, bbeversion, store_id, channel_id, data]
+      properties:
+        specversion: { const: '1.0' }
+        id: { type: string, pattern: '^[a-f0-9]{32}$' }
+        type: { type: string }
+        source: { type: string }
+        time: { type: string, format: date-time }
+        datacontenttype: { const: application/json }
+        subject: { type: string }
+        bbeversion: { type: integer, minimum: 1 }
+        store_id: { type: string }
+        channel_id: { type: string }
+        data: { type: object }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }

@@ -58,9 +58,35 @@ All settings live in **`config.php`** (a single returned array). Key entries:
 | `adapters`         | Legacy single-default search / queue / payment / VAT / storage backends |
 | `provider_defaults` | Default stable codes for payment, mail, tax, and optional ERP |
 | `providers`        | Additive code→adapter registry for concurrent payment/shipping/mail/tax/ERP providers |
+| `outbound_webhooks` | Config-only signed webhook endpoints, event filters, stores, and secrets |
 
 Never commit real secrets (Stripe keys, admin password hash for production) —
 keep them in an untracked local override or environment-specific config.
+
+---
+
+## External API v1 and event webhooks
+
+The machine API is served below `/api/v1` and is separate from the browser-oriented
+`api.php`. It uses store-bound bearer credentials and scopes, opaque cursor
+pagination, stable DTOs, and a required `Idempotency-Key` on every mutation. The
+complete contract is [`docs/openapi.yaml`](docs/openapi.yaml).
+
+```bash
+php cli/migrate.php
+php cli/api-client.php create --name=ERP --store=default \
+  --scopes=products:read,products:write,orders:read
+php cli/api-client.php list
+php cli/api-client.php revoke --key=<12-hex-key-id>
+```
+
+The create command prints the token once; only its SHA-256 hash is stored. Never
+put a token in a URL, log, repository, database export, or webhook payload.
+Commerce mutations write CloudEvents-compatible records to `event_outbox` in the
+same database transaction. `cli/worker.php` signs each configured delivery with
+`X-BBE-Event-ID`, `X-BBE-Timestamp`, and `X-BBE-Signature`, retries non-2xx
+responses with exponential backoff, and moves exhausted events to `dead` after
+eight attempts. Endpoint URLs and secrets live only in deployment configuration.
 
 ---
 

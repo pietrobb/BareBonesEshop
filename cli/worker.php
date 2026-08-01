@@ -72,6 +72,14 @@ try {
     error_log('Pending order expiry failed: ' . $e->getMessage());
 }
 
+// Deliver committed outbox events before file jobs. Failed endpoints are retried
+// from the database without repeating the original commerce mutation.
+try {
+    processOutbox($cfg, $verbose);
+} catch (\Throwable $e) {
+    error_log('Outbox delivery sweep failed: ' . $e->getMessage());
+}
+
 // Process loop
 $maxRuntime = 55; // seconds (cron runs every minute)
 $startTime = time();
@@ -145,6 +153,56 @@ if ($verbose) echo "Worker done. Processed: {$processed} jobs.\n";
 function orderProviderCode(array $order, string $type): string {
     $snapshot = json_decode((string)($order['financial_snapshot'] ?? ''), true) ?: [];
     return strtolower((string)($snapshot['providers'][$type] ?? ''));
+}
+
+function processOutbox(array $cfg, bool $verbose = false): void {
+    $endpoints = is_array($cfg['outbound_webhooks'] ?? null) ? $cfg['outbound_webhooks'] : [];
+    foreach (Outbox::pending(25) as $pending) {
+        $event = Outbox::claim((string)$pending['id']);
+        if ($event === null) continue;
+        try {
+            Bootstrap::initStoreContext(
+                '/',
+                '',
+                (string)$event['store_id'],
+                (string)$event['channel_id']
+            );
+            $envelope = Outbox::envelope($event);
+            $matched = 0;
+            $failures = [];
+            foreach ($endpoints as $code => $endpoint) {
+                if (!is_array($endpoint)) continue;
+                $stores = $endpoint['stores'] ?? [];
+                if (is_array($stores) && $stores !== [] && !in_array((string)$event['store_id'], $stores, true)) continue;
+                if (!Webhook::endpointAccepts($endpoint, (string)$event['event_type'])) continue;
+                $matched++;
+                if (Outbox::endpointDelivered((string)$event['id'], (string)$code)) continue;
+
+                $result = Webhook::deliver($endpoint, $envelope);
+                Outbox::recordDelivery(
+                    (string)$event['id'],
+                    (string)$code,
+                    (int)$event['attempts'],
+                    $result['delivered'],
+                    $result['response_code'],
+                    $result['error']
+                );
+                if (!$result['delivered']) {
+                    $failures[] = (string)$code . ':' . ($result['response_code'] ?? 'network');
+                }
+            }
+            if ($failures === []) {
+                Outbox::markDelivered((string)$event['id']);
+                if ($verbose) echo "Delivered outbox event {$event['id']} to {$matched} endpoint(s)\n";
+            } else {
+                Outbox::markRetry((string)$event['id'], (int)$event['attempts'], implode(', ', $failures));
+                if ($verbose) echo "Deferred outbox event {$event['id']}: " . implode(', ', $failures) . "\n";
+            }
+        } catch (\Throwable $e) {
+            Outbox::markRetry((string)$event['id'], (int)$event['attempts'], $e->getMessage());
+            if ($verbose) echo "Deferred outbox event {$event['id']}: {$e->getMessage()}\n";
+        }
+    }
 }
 
 function handleCacheRebuild(array $payload, array $job): void {
@@ -576,8 +634,9 @@ function handleCartAbandonment(array $payload, array $job): void {
 }
 
 function handleCleanup(array $payload, array $job): void {
-    // Clean old processed events
+    // Clean old processed events and replayable machine-API responses.
     Idempotency::cleanup(7);
+    ApiAuth::cleanupIdempotency(30);
 
     // Clean old completed jobs (older than 7 days)
     $completedDir = (require __DIR__ . '/../config.php')['jobs_dir'] ?? dirname(__DIR__, 2) . '/bareboneseshop-private/jobs';

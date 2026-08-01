@@ -222,6 +222,15 @@ if ($mysqlDsn) {
         $financialMigration->up($my, false);
         $financialColumns = (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_NAME = 'financial_snapshot' AND TABLE_NAME IN ('orders','invoices')")->fetchColumn();
         assert_equals(2, $financialColumns, 'MySQL live: financial snapshot migration is applied and idempotent');
+        $eventApiMigrationMysql = require __DIR__ . '/../migrations/20260801163000_event_outbox_api_v1.php';
+        $eventApiMigrationMysql->up($my, false);
+        $eventApiMigrationMysql->up($my, false);
+        $g4MysqlTables = (int)$my->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('event_outbox','webhook_deliveries','api_clients','api_idempotency')")->fetchColumn();
+        assert_equals(4, $g4MysqlTables, 'MySQL live: G4 outbox/API migration is applied and idempotent');
+        $my->exec("DROP TABLE api_idempotency");
+        $my->exec("DROP TABLE api_clients");
+        $my->exec("DROP TABLE webhook_deliveries");
+        $my->exec("DROP TABLE event_outbox");
         $my->exec("DROP TABLE invoices");
         $my->exec("DROP TABLE orders");
         $my->exec("DROP TABLE _parity_probe");
@@ -442,6 +451,11 @@ $storeScopeMigration = require __DIR__ . '/../migrations/20260801152000_store_co
 $storeScopeMigration->up($pdo, true);
 $productStoreColumn = array_values(array_filter($pdo->query("PRAGMA table_info(products)")->fetchAll(PDO::FETCH_ASSOC), static fn(array $row): bool => $row['name'] === 'store_id'));
 assert_equals("'default'", (string)($productStoreColumn[0]['dflt_value'] ?? ''), 'Store migration: new catalog rows default to the default store');
+$eventApiMigration = require __DIR__ . '/../migrations/20260801163000_event_outbox_api_v1.php';
+$eventApiMigration->up($pdo, true);
+$eventApiMigration->up($pdo, true);
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_outbox'")->fetchColumn(), 'G4 migration: transactional event outbox exists');
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='api_clients'")->fetchColumn(), 'G4 migration: API client credential table exists');
 
 // ============================================================
 // TEST 3: CSV Import
@@ -6139,6 +6153,124 @@ assert_true(str_contains($workerProviderSource, "Adapters::payment(\$provider)")
 assert_true(str_contains($workerProviderSource, "Adapters::integration(\$providerCode)"), 'G3 worker: ERP jobs resolve the frozen provider');
 assert_true(str_contains($apiSourceG6, 'Adapters::payment($paymentProvider)'), 'G3 checkout: selected payment provider drives session creation');
 assert_true(!str_contains($apiSourceG6, 'new StripePayment($cfg)'), 'G3 webhook: no hardcoded Stripe construction remains');
+
+// ============================================================
+// TEST 62: G4 outbox, signed webhooks and external API v1
+// ============================================================
+echo "\n--- Test 62: G4 outbox, webhooks and API v1 ---\n";
+
+Bootstrap::initStoreContext('/', '', 'default', 'api');
+$outsideTransactionRejected = false;
+try { Outbox::record('test.invalid', 'test', 1, []); }
+catch (LogicException $e) { $outsideTransactionRejected = true; }
+assert_true($outsideTransactionRejected, 'G4 outbox: event writes are rejected outside a domain transaction');
+
+$rollbackEventId = str_repeat('b', 32);
+$pdo->beginTransaction();
+Outbox::record('test.rolled_back', 'test', 1, ['ok' => true], 1, $rollbackEventId);
+$pdo->rollBack();
+$rollbackProbe = $pdo->prepare('SELECT 1 FROM event_outbox WHERE id=?');
+$rollbackProbe->execute([$rollbackEventId]);
+assert_true(!$rollbackProbe->fetchColumn(), 'G4 outbox: domain rollback removes the event atomically');
+assert_true((int)$pdo->query("SELECT COUNT(*) FROM event_outbox WHERE event_type='order.created'")->fetchColumn() > 0, 'G4 outbox: order creation emits committed events');
+assert_true((int)$pdo->query("SELECT COUNT(*) FROM event_outbox WHERE event_type LIKE 'stock.%'")->fetchColumn() > 0, 'G4 outbox: stock mutations emit committed events');
+assert_true((int)$pdo->query("SELECT COUNT(*) FROM event_outbox WHERE event_type='payment.status_changed'")->fetchColumn() > 0, 'G4 outbox: payment transitions emit committed events');
+assert_true((int)$pdo->query("SELECT COUNT(*) FROM event_outbox WHERE event_type LIKE 'customer.%'")->fetchColumn() > 0, 'G4 outbox: customer mutations emit committed events');
+
+$deliveryEventId = str_repeat('a', 32);
+$pdo->beginTransaction();
+Outbox::record('test.delivery', 'test', 42, ['answer' => 42], 1, $deliveryEventId);
+$pdo->commit();
+$claimedDelivery = Outbox::claim($deliveryEventId);
+assert_equals(1, (int)($claimedDelivery['attempts'] ?? 0), 'G4 outbox: conditional claim increments delivery attempt once');
+$deliveryEnvelope = Outbox::envelope($claimedDelivery);
+assert_equals($deliveryEventId, (string)$deliveryEnvelope['id'], 'G4 outbox: stable v1 envelope preserves event ID');
+assert_equals('default', (string)$deliveryEnvelope['store_id'], 'G4 outbox: envelope carries explicit store scope');
+
+$webhookSecret = str_repeat('s', 32);
+$webhookBody = json_encode($deliveryEnvelope, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+$webhookTimestamp = (string)time();
+$webhookSignature = Webhook::signature($webhookBody, $webhookTimestamp, $deliveryEventId, $webhookSecret);
+assert_true(Webhook::verify($webhookBody, $webhookTimestamp, $deliveryEventId, $webhookSignature, $webhookSecret), 'G4 webhook: valid HMAC signature and fresh timestamp pass');
+assert_true(!Webhook::verify($webhookBody . 'x', $webhookTimestamp, $deliveryEventId, $webhookSignature, $webhookSecret), 'G4 webhook: tampered raw body fails signature verification');
+assert_true(!Webhook::verify($webhookBody, (string)(time() - 301), $deliveryEventId, Webhook::signature($webhookBody, (string)(time() - 301), $deliveryEventId, $webhookSecret), $webhookSecret), 'G4 webhook: stale timestamp is rejected');
+assert_true(!Webhook::verify($webhookBody, $webhookTimestamp, $deliveryEventId, $webhookSignature, $webhookSecret, static fn(string $id): bool => true), 'G4 webhook: consumer replay guard rejects a consumed event ID');
+$mockDelivery = Webhook::deliver([
+    'url' => 'https://integration.example/webhook', 'secret' => $webhookSecret,
+], $deliveryEnvelope, static fn(string $url, string $body, array $headers): array => ['response_code' => 204]);
+assert_true($mockDelivery['delivered'], 'G4 webhook: any 2xx transport response completes delivery');
+Outbox::recordDelivery($deliveryEventId, 'contract_test', 1, true, 204, null);
+Outbox::markDelivered($deliveryEventId);
+assert_true(Outbox::endpointDelivered($deliveryEventId, 'contract_test'), 'G4 webhook: successful endpoint attempt is auditably deduplicated');
+assert_equals('delivered', (string)$pdo->query("SELECT status FROM event_outbox WHERE id='{$deliveryEventId}'")->fetchColumn(), 'G4 outbox: delivered event reaches terminal state');
+$staleEventId = str_repeat('c', 32);
+$pdo->beginTransaction();
+Outbox::record('test.stale_claim', 'test', 43, [], 1, $staleEventId);
+$pdo->commit();
+Outbox::claim($staleEventId);
+$pdo->exec("UPDATE event_outbox SET updated_at=datetime('now', '-301 seconds') WHERE id='{$staleEventId}'");
+$staleClaim = Outbox::claim($staleEventId);
+assert_equals(2, (int)($staleClaim['attempts'] ?? 0), 'G4 outbox: worker crash claim is recoverable after the lease expires');
+Outbox::markDead($staleEventId, 'contract test cleanup');
+
+$issuedClient = ApiAuth::issueClient('G4 contract test', 'default', ['products:read', 'products:write', 'orders:read']);
+$storedTokenHash = (string)$pdo->query('SELECT token_hash FROM api_clients WHERE id=' . (int)$issuedClient['id'])->fetchColumn();
+assert_equals(hash('sha256', $issuedClient['token']), $storedTokenHash, 'G4 API auth: database stores only the bearer token hash');
+assert_true($storedTokenHash !== $issuedClient['token'], 'G4 API auth: plaintext bearer token is never persisted');
+$apiClient = ApiAuth::authenticate('Bearer ' . $issuedClient['token']);
+assert_equals('default', (string)$apiClient['store_id'], 'G4 API auth: credential resolves its immutable store scope');
+$wrongTokenRejected = false;
+$wrongToken = substr($issuedClient['token'], 0, -1) . (str_ends_with($issuedClient['token'], '0') ? '1' : '0');
+try { ApiAuth::authenticate('Bearer ' . $wrongToken); }
+catch (RuntimeException $e) { $wrongTokenRejected = true; }
+assert_true($wrongTokenRejected, 'G4 API auth: wrong secret fails closed');
+$scopeRejected = false;
+try { ApiAuth::requireScope($apiClient, 'orders:write'); }
+catch (DomainException $e) { $scopeRejected = true; }
+assert_true($scopeRejected, 'G4 API auth: missing mutation scope is rejected');
+
+$productPage = ApiV1::dispatch('GET', '/api/v1/products', ['limit' => 1], [], [], $apiClient);
+assert_equals(200, $productPage['status'], 'G4 API v1: scoped product list succeeds');
+assert_equals(1, count($productPage['body']['data']), 'G4 API v1: cursor page obeys limit');
+assert_true($productPage['body']['meta']['next_cursor'] !== null, 'G4 API v1: opaque next cursor is returned');
+$secondProductPage = ApiV1::dispatch('GET', '/api/v1/products', [
+    'limit' => 1, 'cursor' => $productPage['body']['meta']['next_cursor'],
+], [], [], $apiClient);
+assert_true((int)$secondProductPage['body']['data'][0]['id'] > (int)$productPage['body']['data'][0]['id'], 'G4 API v1: cursor advances in stable ID order');
+
+$apiProductId = (int)$productPage['body']['data'][0]['id'];
+$apiProductBefore = Products::byId($apiProductId);
+$patchBody = ['stock' => (int)$apiProductBefore['stock'] + 1];
+$idempotencyKey = 'g4-product-patch-0001';
+$patchedProduct = ApiV1::dispatch('PATCH', "/api/v1/products/{$apiProductId}", [], $patchBody, ['Idempotency-Key' => $idempotencyKey], $apiClient);
+assert_equals(200, $patchedProduct['status'], 'G4 API v1: scoped product mutation succeeds');
+assert_equals((int)$apiProductBefore['stock'] + 1, (int)$patchedProduct['body']['data']['stock'], 'G4 API v1: stock remains an integer quantity');
+$productOutboxCount = (int)$pdo->query("SELECT COUNT(*) FROM event_outbox WHERE event_type='product.updated' AND aggregate_id='{$apiProductId}'")->fetchColumn();
+$replayedPatch = ApiV1::dispatch('PATCH', "/api/v1/products/{$apiProductId}", [], $patchBody, ['Idempotency-Key' => $idempotencyKey], $apiClient);
+assert_true($replayedPatch['body']['meta']['idempotent_replay'], 'G4 API v1: identical retry returns the stored response');
+assert_equals($productOutboxCount, (int)$pdo->query("SELECT COUNT(*) FROM event_outbox WHERE event_type='product.updated' AND aggregate_id='{$apiProductId}'")->fetchColumn(), 'G4 API v1: retry does not repeat mutation or outbox event');
+$idempotencyConflict = false;
+try {
+    ApiV1::dispatch('PATCH', "/api/v1/products/{$apiProductId}", [], ['stock' => (int)$patchBody['stock'] + 1], ['Idempotency-Key' => $idempotencyKey], $apiClient);
+} catch (UnexpectedValueException $e) { $idempotencyConflict = true; }
+assert_true($idempotencyConflict, 'G4 API v1: same key with a different request returns conflict');
+$pdo->prepare("UPDATE api_idempotency SET created_at=datetime('now', '-31 days') WHERE client_id=? AND idempotency_key=?")
+    ->execute([$apiClient['id'], $idempotencyKey]);
+assert_equals(1, ApiAuth::cleanupIdempotency(30), 'G4 API v1: expired replay responses are cleaned by the worker lifecycle');
+
+$crossStoreRejected = false;
+$foreignClient = $apiClient;
+$foreignClient['store_id'] = 'cz';
+try { ApiV1::dispatch('GET', '/api/v1/orders', [], [], [], $foreignClient); }
+catch (DomainException $e) { $crossStoreRejected = true; }
+assert_true($crossStoreRejected, 'G4 API v1: client cannot cross the active StoreContext');
+$openApi = file_get_contents(__DIR__ . '/../docs/openapi.yaml') ?: '';
+assert_true(str_contains($openApi, 'openapi: 3.1.0'), 'G4 contract: versioned OpenAPI document exists');
+assert_true(str_contains($openApi, 'Idempotency-Key') && str_contains($openApi, 'products:write'), 'G4 contract: idempotency and scopes are documented');
+assert_true(str_contains($openApi, 'X-BBE-Signature') && str_contains($openApi, 'dead-letter'), 'G4 contract: HMAC, replay and retry/dead-letter semantics are documented');
+$workerG4 = file_get_contents(__DIR__ . '/worker.php') ?: '';
+assert_true(str_contains($workerG4, 'processOutbox') && str_contains($workerG4, 'Outbox::markRetry'), 'G4 worker: committed events are delivered with durable retry handling');
+Bootstrap::initStoreContext('/', '', 'default', 'storefront');
 
 require __DIR__ . '/test-update.php';
 

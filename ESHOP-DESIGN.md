@@ -54,6 +54,8 @@ single-lang kód je vždy ťažšie než to navrhnúť správne od začiatku.
 
 `Adapters::registry()` mapuje stabilné provider codes na súbežné payment, shipping, ERP, mail a tax adaptéry, ich capabilities a aktívny `provider_scope`. Checkout zmrazí zvolené kódy vo fingerprintovanom finančnom snapshot-e; payment session, webhook, refund, expiry, mail a ERP worker potom resolvujú pôvodný provider, nie aktuálny globálny default. Legacy `adapters.payment` a `adapters.integration` ostávajú fallbackom pre existujúce inštalácie.
 
+`Outbox::record()` zapisuje verziované order/payment/stock/customer/product udalosti iba v otvorenej doménovej transakcii. Worker ich doručuje cez config-only endpointy ako CloudEvents-compatible envelope, s HMAC podpisom viazaným na timestamp, event ID a presný raw body; úspešné endpointy sa pri retry neopakujú a vyčerpané udalosti končia v auditovateľnom dead-letter stave. Samostatné `/api/v1` nepoužíva browser session ani CSRF: bearer credential je store-bound, DB obsahuje iba jeho hash, scopes sú explicitné a mutácie vyžadujú per-client idempotency key. `docs/openapi.yaml` je verejný additive-first kontrakt DTO, cursor pagination a webhook delivery.
+
 ### V1 — kompletný commerce engine
 
 **Katalóg + storefront:**
@@ -90,7 +92,7 @@ single-lang kód je vždy ťažšie než to navrhnúť správne od začiatku.
 - ERP adapter (Money, Pohoda)
 - 2FA pre admin
 - Customer accounts
-- Webhook outbound
+- Webhook endpoint management UI nad existujúcim outboxom
 - DbQueue pre multi-node
 
 ---

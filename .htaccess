@@ -81,6 +81,8 @@ RewriteRule ^page/([a-z0-9-]+)/?$ page.php?slug=$1 [QSA,L]
 # Wishlist: /wishlist → wishlist.php
 RewriteRule ^wishlist/?$ wishlist.php [QSA,L]
 
+# Versioned machine API keeps path semantics; legacy browser API stays action-based.
+RewriteRule ^api/v1(?:/.*)?$ api/v1/index.php [QSA,L]
 # API routing: /api/products → api.php?action=products
 RewriteRule ^api/(.*)$ api.php?action=$1 [QSA,L]
 

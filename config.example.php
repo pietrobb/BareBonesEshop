@@ -83,6 +83,18 @@ return [
         'erp' => [], // e.g. 'money' => ['class' => 'MoneyErpAdapter', 'capabilities' => ['orders', 'stock']]
     ],
 
+    // Signed outgoing webhooks. Secrets remain in deployment config/environment;
+    // event_outbox and delivery audit rows never contain them.
+    'outbound_webhooks' => [
+        // 'erp_primary' => [
+        //     'url' => 'https://integration.example/webhooks/commerce',
+        //     'secret' => '', // minimum 32 bytes; inject outside version control
+        //     'events' => ['order.*', 'payment.*', 'stock.*'],
+        //     'stores' => ['default'],
+        //     'active' => false,
+        // ],
+    ],
+
     // Dev only: route api.php?action=webhook_payment&provider=mock even when the
     // active payment adapter is not MockPayment. NEVER enable in production —
     // the mock webhook marks orders as paid. Pair with 'mock_webhook_secret'.

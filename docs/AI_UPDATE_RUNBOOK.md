@@ -116,6 +116,16 @@ Provider registry updates are code/config changes; they do not require a schema 
 
 Before resuming traffic, verify each configured code resolves to the expected class and capability set, then smoke-test one checkout/webhook or equivalent operation per active provider. Inspect a newly created order and confirm `financial_snapshot.providers` and the payment/shipping snapshots contain the selected codes. Restart workers only after this check: queued retries intentionally resolve the provider frozen on the original order, so removing or renaming an in-use code is a breaking operational change. Roll back the code/config together if a frozen code can no longer resolve.
 
+## Event outbox and external API v1 rollout
+
+This release adds database tables, an `/api/v1` machine boundary, and signed outgoing webhooks. Keep all writers stopped while the migration runs. After apply, confirm `event_outbox`, `webhook_deliveries`, `api_clients`, and `api_idempotency` exist, then restart exactly one worker for the first delivery sweep.
+
+Do not pre-seed plaintext credentials or webhook secrets in SQL. Create API credentials only after migration with `php cli/api-client.php create`; capture the returned token once in the target secret manager and retain only the non-secret key ID in deployment evidence. Grant the minimum scopes and revoke the credential immediately if the one-time token output is exposed.
+
+Configure `outbound_webhooks` only in the deployment's protected config. Each active secret must contain at least 32 bytes. Start with one endpoint and one narrow event filter, submit a controlled commerce mutation, then verify the same event ID appears in `event_outbox` and a successful `webhook_deliveries` audit row. The receiver must verify the HMAC over the untouched raw body, reject timestamps outside 300 seconds, and persist event IDs in its own business transaction before returning 2xx. A non-2xx response is intentionally retried; do not manually replay the originating order/payment mutation.
+
+Before resuming all traffic, inspect for `retry` or `dead` outbox rows and verify one read plus one idempotent API mutation against a non-production product. Rollback restores the pre-migration database snapshot and code together. If rollback happens after external deliveries were accepted, event IDs already consumed by receivers remain consumed; never delete receiver deduplication records to simulate rollback.
+
 ## Rollback procedure
 
 Keep traffic and writers stopped. Review whether any package-managed file changed after the update, then run:

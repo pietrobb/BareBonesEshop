@@ -122,7 +122,12 @@ class PaymentService {
         try {
             if ($idempotencyKey === '' || !self::transactionExists($idempotencyKey)) {
                 self::recordEvent($orderId, $eventType, $to, $amount, $currency, $idempotencyKey, $payload, $provider, $providerRef);
-                self::updatePaymentStatus($orderId, $to);
+                self::updatePaymentStatus($orderId, $to, $eventType, [
+                    'amount' => $amount,
+                    'currency' => strtolower($currency),
+                    'provider' => $provider,
+                    'provider_ref' => $providerRef,
+                ]);
                 AuditLog::log('payment_status', $orderId, $from, $to, $eventType);
                 $db->commit();
                 return true;
@@ -301,6 +306,16 @@ class PaymentService {
                 failClosed: true,
             );
             AuditLog::log('payment_status', $orderId, $from, 'refund_pending', 'refund.requested');
+            Outbox::record('payment.status_changed', 'order', $orderId, [
+                'order_id' => $orderId,
+                'from' => $from,
+                'to' => 'refund_pending',
+                'event_type' => 'refund.requested',
+                'amount' => $amount,
+                'currency' => strtolower((string)($order['currency'] ?? 'eur')),
+                'provider' => (string)($snapshot['provider'] ?? $order['payment_method'] ?? ''),
+                'provider_ref' => (string)($order['payment_id'] ?? ''),
+            ]);
             $db->commit();
             return true;
         } catch (\Throwable $e) {
@@ -312,10 +327,30 @@ class PaymentService {
     /**
      * Update orders.payment_status.
      */
-    public static function updatePaymentStatus(int $orderId, string $status): void {
-        Db::get()->prepare(
-            "UPDATE orders SET payment_status = :s, updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store"
-        )->execute([':s' => $status, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
+    public static function updatePaymentStatus(int $orderId, string $status, string $eventType = 'payment.status_changed', array $details = []): void {
+        $order = Orders::byId($orderId);
+        if (!$order) throw new RuntimeException("Order #{$orderId} not found");
+        $from = (string)($order['payment_status'] ?? 'pending');
+        $db = Db::get();
+        $ownTransaction = !$db->inTransaction();
+        if ($ownTransaction) $db->beginTransaction();
+        try {
+            $db->prepare(
+                "UPDATE orders SET payment_status = :s, updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store"
+            )->execute([':s' => $status, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
+            if ($from !== $status) {
+                Outbox::record('payment.status_changed', 'order', $orderId, array_merge([
+                    'order_id' => $orderId,
+                    'from' => $from,
+                    'to' => $status,
+                    'event_type' => $eventType,
+                ], $details));
+            }
+            if ($ownTransaction) $db->commit();
+        } catch (Throwable $e) {
+            if ($ownTransaction && $db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
     }
 
     public static function renameMethodCodeLinks(string $oldCode, string $newCode): void {

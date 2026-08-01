@@ -67,6 +67,25 @@ class OrderWorkflow {
             };
             $order['status'] = $to;
             $deferredJobs = array_merge($deferredJobs, FulfillmentDispatcher::dispatch($to, $order));
+            Outbox::record('order.status_changed', 'order', $orderId, [
+                'order_id' => $orderId,
+                'order_number' => (string)$order['order_number'],
+                'from' => (string)$from,
+                'to' => $to,
+                'note' => $note,
+            ]);
+            if (in_array($to, ['cancelled', 'shipped', 'returned', 'refunded'], true)) {
+                Outbox::record('stock.changed', 'order', $orderId, [
+                    'order_id' => $orderId,
+                    'reason' => 'order.' . $to,
+                    'items' => array_map(static fn(array $item): array => [
+                        'product_id' => (int)$item['product_id'],
+                        'variant_id' => $item['variant_id'] === null ? null : (int)$item['variant_id'],
+                        'sku' => (string)$item['sku'],
+                        'quantity' => (int)$item['quantity'],
+                    ], Orders::items($orderId)),
+                ]);
+            }
 
             $db->commit();
         } catch (\Throwable $e) {

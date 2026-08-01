@@ -44,9 +44,26 @@ class Customers {
             "INSERT INTO customers (email, password_hash, name, phone, locale, status)
              VALUES (?, ?, ?, ?, ?, 'active')"
         );
-        $ins->execute([$email, $hash, trim($name), $phone, $locale]);
-        $id = (int)$db->lastInsertId();
-        return [true, $id, null];
+        $db->beginTransaction();
+        try {
+            $ins->execute([$email, $hash, trim($name), $phone, $locale]);
+            $id = (int)$db->lastInsertId();
+            Outbox::record('customer.created', 'customer', $id, [
+                'customer_id' => $id,
+                'email' => $email,
+                'name' => trim($name),
+                'locale' => (string)$locale,
+                'status' => 'active',
+            ]);
+            $db->commit();
+            return [true, $id, null];
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            if ($e instanceof PDOException && in_array($e->getCode(), ['23000', '23505'], true)) {
+                return [false, null, 'email_taken'];
+            }
+            return [false, null, 'internal_error'];
+        }
     }
 
     // ============================================================
@@ -169,7 +186,22 @@ class Customers {
         $set[] = "updated_at = " . (Db::isSqlite() ? "datetime('now')" : "NOW()");
         $params[] = $id;
         $sql = "UPDATE customers SET " . implode(', ', $set) . " WHERE id = ?";
-        return Db::get()->prepare($sql)->execute($params);
+        $db = Db::get();
+        $db->beginTransaction();
+        try {
+            $updated = $db->prepare($sql)->execute($params);
+            if ($updated) {
+                Outbox::record('customer.updated', 'customer', $id, [
+                    'customer_id' => $id,
+                    'changed_fields' => array_keys(array_intersect_key($data, array_flip($allowed))),
+                ]);
+            }
+            $db->commit();
+            return $updated;
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
     }
 
     public static function changePassword(int $id, string $currentPassword, string $newPassword): array {
