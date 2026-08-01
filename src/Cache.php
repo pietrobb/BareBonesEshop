@@ -148,7 +148,7 @@ class Cache {
         if (str_contains($key, '..') || str_starts_with($key, '/')) {
             throw new \InvalidArgumentException('Invalid cache key');
         }
-        return self::dir() . '/' . $key;
+        return self::dir() . '/' . StoreContext::current()->cacheNamespace() . '/' . $key;
     }
 
     /** Mark all files in directory as stale (set mtime to past) */

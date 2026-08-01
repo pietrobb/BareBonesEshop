@@ -81,13 +81,13 @@ final class InvoiceService
 
             $stmt = $db->prepare("
                 INSERT INTO invoices (
-                    order_id, number, issued_at, delivery_date, due_date, pdf_path,
+                    order_id, store_id, number, issued_at, delivery_date, due_date, pdf_path,
                     total_net, total_vat, total_gross, currency,
                     vat_breakdown, customer_snapshot, seller_snapshot,
                     payment_method, locale, status, download_token,
                     vat_scenario, reverse_charge_note_key, financial_snapshot
                 ) VALUES (
-                    :order_id, :number, :issued_at, :delivery_date, :due_date, :pdf_path,
+                    :order_id, :store, :number, :issued_at, :delivery_date, :due_date, :pdf_path,
                     :total_net, :total_vat, :total_gross, :currency,
                     :vat_breakdown, :customer_snapshot, :seller_snapshot,
                     :payment_method, :locale, :status, :download_token,
@@ -96,6 +96,7 @@ final class InvoiceService
             ");
             $stmt->execute([
                 ':order_id'          => $orderId,
+                ':store'             => StoreContext::current()->id(),
                 ':number'            => $number,
                 ':issued_at'         => $issuedAt,
                 ':delivery_date'     => $deliveryDate,
@@ -173,36 +174,37 @@ final class InvoiceService
         $stmt = Db::get()->prepare("
             UPDATE invoices
                SET status = :status, cancelled_at = {$now}
-             WHERE id = :id AND status = :issued
+             WHERE id = :id AND store_id = :store AND status = :issued
         ");
         $stmt->execute([
             ':status' => self::STATUS_CANCELLED,
             ':issued' => self::STATUS_ISSUED,
             ':id'     => $invoiceId,
+            ':store'  => StoreContext::current()->id(),
         ]);
         AuditLog::log('invoice_cancelled', $invoiceId, self::STATUS_ISSUED, self::STATUS_CANCELLED, $note);
     }
 
     public static function byId(int $id): ?array
     {
-        $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE id = :id");
-        $stmt->execute([':id' => $id]);
+        $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE id = :id AND store_id = :store");
+        $stmt->execute([':id' => $id, ':store' => StoreContext::current()->id()]);
         return $stmt->fetch() ?: null;
     }
 
     public static function byOrderId(int $orderId): ?array
     {
         // Prefer the live invoice over voided 'duplicate'/'credit_note' rows.
-        $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE order_id = :oid
+        $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE order_id = :oid AND store_id = :store
             ORDER BY CASE WHEN type = 'invoice' THEN 0 ELSE 1 END, id LIMIT 1");
-        $stmt->execute([':oid' => $orderId]);
+        $stmt->execute([':oid' => $orderId, ':store' => StoreContext::current()->id()]);
         return $stmt->fetch() ?: null;
     }
 
     public static function byNumber(string $number): ?array
     {
-        $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE number = :n");
-        $stmt->execute([':n' => $number]);
+        $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE number = :n AND store_id = :store");
+        $stmt->execute([':n' => $number, ':store' => StoreContext::current()->id()]);
         return $stmt->fetch() ?: null;
     }
 
@@ -211,8 +213,8 @@ final class InvoiceService
         if (strlen($token) !== 64 || !ctype_xdigit($token)) {
             return null;
         }
-        $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE download_token = :t");
-        $stmt->execute([':t' => $token]);
+        $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE download_token = :t AND store_id = :store");
+        $stmt->execute([':t' => $token, ':store' => StoreContext::current()->id()]);
         return $stmt->fetch() ?: null;
     }
 
@@ -222,10 +224,12 @@ final class InvoiceService
         $stmt = Db::get()->prepare("
             SELECT i.* FROM invoices i
             JOIN orders o ON o.id = i.order_id
-            WHERE o.customer_id = :cid
+            WHERE o.customer_id = :cid AND o.store_id = :order_store AND i.store_id = :invoice_store
             ORDER BY i.id DESC LIMIT :lim
         ");
         $stmt->bindValue(':cid', $customerId, PDO::PARAM_INT);
+        $stmt->bindValue(':order_store', StoreContext::current()->id());
+        $stmt->bindValue(':invoice_store', StoreContext::current()->id());
         $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
         $stmt->execute();
         return $stmt->fetchAll();
@@ -234,8 +238,8 @@ final class InvoiceService
     /** Admin paginated list. */
     public static function adminList(?int $year = null, int $offset = 0, int $limit = 50): array
     {
-        $where = [];
-        $params = [];
+        $where = ['store_id = :store'];
+        $params = [':store' => StoreContext::current()->id()];
         if ($year !== null) {
             $where[] = "substr(number, instr(number, '-')+1, 4) = :y_pref OR (instr(number, '-')=0 AND substr(number, 1, 4) = :y)";
             $params[':y'] = (string)$year;

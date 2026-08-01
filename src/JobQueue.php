@@ -20,6 +20,10 @@ class JobQueue {
      * Push a new job to the queue
      */
     public static function push(string $type, array $payload, int $priority = 5): string {
+        if (class_exists('StoreContext')) {
+            $payload['_store_id'] ??= StoreContext::current()->id();
+            $payload['_channel_id'] ??= StoreContext::current()->channel();
+        }
         $id = time() . '_' . substr(bin2hex(random_bytes(4)), 0, 8);
         $job = [
             'id'           => $id,

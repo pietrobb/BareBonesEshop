@@ -393,17 +393,17 @@ class Customers {
             "SELECT id, order_number, status, payment_status, total, currency,
                     tracking_number, carrier, created_at
              FROM orders
-             WHERE customer_id = ?
+             WHERE customer_id = ? AND store_id = ?
              ORDER BY id DESC
              LIMIT ? OFFSET ?"
         );
-        $stmt->execute([$customerId, $limit, $offset]);
+        $stmt->execute([$customerId, StoreContext::current()->id(), $limit, $offset]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     public static function orderCount(int $customerId): int {
-        $stmt = Db::get()->prepare("SELECT COUNT(*) FROM orders WHERE customer_id = ?");
-        $stmt->execute([$customerId]);
+        $stmt = Db::get()->prepare("SELECT COUNT(*) FROM orders WHERE customer_id = ? AND store_id = ?");
+        $stmt->execute([$customerId, StoreContext::current()->id()]);
         return (int)$stmt->fetchColumn();
     }
 
@@ -413,9 +413,9 @@ class Customers {
      */
     public static function order(int $customerId, int $orderId): ?array {
         $stmt = Db::get()->prepare(
-            "SELECT * FROM orders WHERE id = ? AND customer_id = ?"
+            "SELECT * FROM orders WHERE id = ? AND customer_id = ? AND store_id = ?"
         );
-        $stmt->execute([$orderId, $customerId]);
+        $stmt->execute([$orderId, $customerId, StoreContext::current()->id()]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row ?: null;
     }

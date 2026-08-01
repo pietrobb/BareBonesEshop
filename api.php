@@ -20,9 +20,9 @@ header('Content-Type: application/json; charset=utf-8');
 Security::sessionStart();
 Customers::isLoggedIn();
 
-// Detect locale
+// Resolve store/channel before any catalog, cache, tax, payment or shipping work.
 $uri = $_SERVER['REQUEST_URI'] ?? '/';
-I18n::setLocale(I18n::detectLocale($uri));
+Bootstrap::initLocale($uri);
 
 // Rate-limit every endpoint, including signed webhooks. The generous webhook
 // budget preserves provider retries while bounding signature-verification work.
@@ -535,16 +535,7 @@ function apiPaymentMethods(): array {
  * Fallback: first store.
  */
 function apiActiveStore(): array {
-    $j = json_decode((string)@file_get_contents(__DIR__ . '/stores.json'), true) ?: [];
-    $stores = array_values($j['stores'] ?? []);
-    $locale = class_exists('I18n') ? I18n::locale() : '';
-    foreach ($stores as $store) {
-        if (($store['languages'][0] ?? '') === $locale) return $store;
-    }
-    foreach ($stores as $store) {
-        if (in_array($locale, $store['languages'] ?? [], true)) return $store;
-    }
-    return $stores[0] ?? [];
+    return StoreContext::current()->config();
 }
 
 function apiConsentDefinitions(): array {
@@ -612,6 +603,7 @@ function apiCheckout(?array $runtimeConfig = null): array {
     // visible (it used to be silently undefined → seller always 'SK', OSS always off,
     // admin notification never sent). Seller identity lives per-store in stores.json.
     $cfg   = $runtimeConfig ?? require __DIR__ . '/config.php';
+    StoreContext::current()->assertPermission('tax');
     $store = apiActiveStore();
     $vatId = strtoupper(preg_replace('/\s+/', '', (string)($input['vat_id'] ?? '')));
     $sellerCountry = strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));

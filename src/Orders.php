@@ -10,6 +10,11 @@ class Orders {
      */
     public static function create(array $cartItems, array $customer, string $paymentMethod = 'stripe', ?array $coupon = null): int {
         $db = Db::get();
+        $storeContext = StoreContext::current();
+        $storeContext->assertPermission('checkout');
+        if (isset($customer['store_id']) && $customer['store_id'] !== $storeContext->id()) {
+            throw new InvalidArgumentException('Order store does not match the active StoreContext');
+        }
         $db->beginTransaction();
 
         try {
@@ -149,6 +154,8 @@ class Orders {
             $orderLocale = $customer['locale'] ?? (class_exists('I18n') ? I18n::locale() : $sysDefaultLocale);
             $customerId = !empty($customer['customer_id']) ? (int)$customer['customer_id'] : null;
             $orderParams = [
+                ':store'    => $storeContext->id(),
+                ':channel'  => $storeContext->channel(),
                 ':cid'      => $customerId,
                 ':name'     => $customer['name'],
                 ':email'    => $customer['email'],
@@ -198,10 +205,10 @@ class Orders {
                 unset($orderParams[':financialsnapshot']);
             }
             $orderStmt = $db->prepare("
-                INSERT INTO orders (order_number, status, customer_id, customer_name, customer_email, customer_phone,
+                INSERT INTO orders (order_number, store_id, channel_id, status, customer_id, customer_name, customer_email, customer_phone,
                     shipping_addr, payment_method, subtotal, discount_amount, shipping_cost, tax_amount, total, currency,
                     locale, notes, ip_address, vat_scenario, vat_total, net_total{$extraColumns})
-                VALUES (:num, 'pending', :cid, :name, :email, :phone, :addr, :method,
+                VALUES (:num, :store, :channel, 'pending', :cid, :name, :email, :phone, :addr, :method,
                     :subtotal, :discount, :shipping, :tax, :total, :currency, :locale, :notes, :ip,
                     :vatscen, :vattotal, :nettotal{$extraValues})
             ");
@@ -309,8 +316,8 @@ class Orders {
      * Get order by ID
      */
     public static function byId(int $id): ?array {
-        $stmt = Db::get()->prepare("SELECT * FROM orders WHERE id = :id");
-        $stmt->execute([':id' => $id]);
+        $stmt = Db::get()->prepare("SELECT * FROM orders WHERE id = :id AND store_id = :store");
+        $stmt->execute([':id' => $id, ':store' => StoreContext::current()->id()]);
         return $stmt->fetch() ?: null;
     }
 
@@ -318,8 +325,8 @@ class Orders {
      * Get order by order number
      */
     public static function byNumber(string $number): ?array {
-        $stmt = Db::get()->prepare("SELECT * FROM orders WHERE order_number = :num");
-        $stmt->execute([':num' => $number]);
+        $stmt = Db::get()->prepare("SELECT * FROM orders WHERE order_number = :num AND store_id = :store");
+        $stmt->execute([':num' => $number, ':store' => StoreContext::current()->id()]);
         return $stmt->fetch() ?: null;
     }
 
@@ -327,8 +334,8 @@ class Orders {
      * Get order items
      */
     public static function items(int $orderId): array {
-        $stmt = Db::get()->prepare("SELECT * FROM order_items WHERE order_id = :oid ORDER BY id");
-        $stmt->execute([':oid' => $orderId]);
+        $stmt = Db::get()->prepare("SELECT oi.* FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE oi.order_id = :oid AND o.store_id = :store ORDER BY oi.id");
+        $stmt->execute([':oid' => $orderId, ':store' => StoreContext::current()->id()]);
         return $stmt->fetchAll();
     }
 
@@ -337,10 +344,10 @@ class Orders {
      */
     public static function byEmail(string $email, int $limit = 20): array {
         $stmt = Db::get()->prepare("
-            SELECT * FROM orders WHERE customer_email = :email
+            SELECT * FROM orders WHERE customer_email = :email AND store_id = :store
             ORDER BY created_at DESC LIMIT :limit
         ");
-        $stmt->execute([':email' => $email, ':limit' => $limit]);
+        $stmt->execute([':email' => $email, ':store' => StoreContext::current()->id(), ':limit' => $limit]);
         return $stmt->fetchAll();
     }
 
@@ -349,10 +356,10 @@ class Orders {
      */
     public static function byStatus(string $status, int $limit = 50): array {
         $stmt = Db::get()->prepare("
-            SELECT * FROM orders WHERE status = :status
+            SELECT * FROM orders WHERE status = :status AND store_id = :store
             ORDER BY created_at DESC LIMIT :limit
         ");
-        $stmt->execute([':status' => $status, ':limit' => $limit]);
+        $stmt->execute([':status' => $status, ':store' => StoreContext::current()->id(), ':limit' => $limit]);
         return $stmt->fetchAll();
     }
 
@@ -361,16 +368,16 @@ class Orders {
      */
     public static function updateStatus(int $orderId, string $status): void {
         $now = Db::isSqlite() ? "datetime('now')" : 'NOW()';
-        $stmt = Db::get()->prepare("UPDATE orders SET status = :status, updated_at = {$now} WHERE id = :id");
-        $stmt->execute([':status' => $status, ':id' => $orderId]);
+        $stmt = Db::get()->prepare("UPDATE orders SET status = :status, updated_at = {$now} WHERE id = :id AND store_id = :store");
+        $stmt->execute([':status' => $status, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
     }
 
     /**
      * Set payment ID (after Stripe charge)
      */
     public static function setPaymentId(int $orderId, string $paymentId): void {
-        $stmt = Db::get()->prepare("UPDATE orders SET payment_id = :pid WHERE id = :id");
-        $stmt->execute([':pid' => $paymentId, ':id' => $orderId]);
+        $stmt = Db::get()->prepare("UPDATE orders SET payment_id = :pid WHERE id = :id AND store_id = :store");
+        $stmt->execute([':pid' => $paymentId, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
     }
 
     /**
@@ -379,8 +386,8 @@ class Orders {
     public static function setRefundId(int $orderId, string $refundId): void {
         $order = self::byId($orderId);
         $notes = trim(($order['notes'] ?? '') . "\nRefund: " . $refundId);
-        $stmt = Db::get()->prepare("UPDATE orders SET notes = :notes WHERE id = :id");
-        $stmt->execute([':notes' => $notes, ':id' => $orderId]);
+        $stmt = Db::get()->prepare("UPDATE orders SET notes = :notes WHERE id = :id AND store_id = :store");
+        $stmt->execute([':notes' => $notes, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
     }
 
     /**
@@ -391,14 +398,17 @@ class Orders {
         $statuses = ['pending','paid','processing','shipped','delivered','cancelled','returned','refunded'];
         $result = array_fill_keys($statuses, 0);
 
-        $rows = $db->query("SELECT status, COUNT(*) as cnt FROM orders GROUP BY status")->fetchAll();
+        $stmt = $db->prepare("SELECT status, COUNT(*) as cnt FROM orders WHERE store_id = :store GROUP BY status");
+        $stmt->execute([':store' => StoreContext::current()->id()]);
+        $rows = $stmt->fetchAll();
         foreach ($rows as $r) {
             if (isset($result[$r['status']])) {
                 $result[$r['status']] = (int)$r['cnt'];
             }
         }
 
-        $rev = $db->query("SELECT COALESCE(SUM(total), 0) FROM orders WHERE status NOT IN ('cancelled', 'refunded')");
+        $rev = $db->prepare("SELECT COALESCE(SUM(total), 0) FROM orders WHERE store_id = :store AND status NOT IN ('cancelled', 'refunded')");
+        $rev->execute([':store' => StoreContext::current()->id()]);
         $result['revenue'] = (int)$rev->fetchColumn();
 
         return $result;
@@ -440,8 +450,8 @@ class Orders {
             // parallel transaction blocked on the row lock) sees 0 rows
             // affected and bails out. Replaces the fragile
             // notes LIKE '%stock_restored%' substring heuristic (bug #11).
-            $claim = $db->prepare("UPDATE orders SET stock_restored = 1 WHERE id = :id AND stock_restored = 0");
-            $claim->execute([':id' => $orderId]);
+            $claim = $db->prepare("UPDATE orders SET stock_restored = 1 WHERE id = :id AND store_id = :store AND stock_restored = 0");
+            $claim->execute([':id' => $orderId, ':store' => StoreContext::current()->id()]);
             if ($claim->rowCount() === 0) {
                 if ($ownTransaction) $db->rollBack();
                 return; // already restored (or order does not exist)
@@ -490,9 +500,10 @@ class Orders {
         $cutoffSql = Db::isSqlite()
             ? "datetime('now', :age)"
             : "DATE_SUB(NOW(), INTERVAL {$olderThanSeconds} SECOND)";
-        $params = Db::isSqlite() ? [':age' => '-' . $olderThanSeconds . ' seconds'] : [];
+        $params = [':store' => StoreContext::current()->id()];
+        if (Db::isSqlite()) $params[':age'] = '-' . $olderThanSeconds . ' seconds';
         $stmt = $db->prepare("SELECT * FROM orders
-            WHERE status = 'pending' AND payment_status = 'pending'
+            WHERE store_id = :store AND status = 'pending' AND payment_status = 'pending'
               AND created_at <= {$cutoffSql}
             ORDER BY created_at ASC LIMIT {$limit}");
         $stmt->execute($params);
@@ -516,11 +527,11 @@ class Orders {
 
             $db->beginTransaction();
             try {
-                $claimParams = [':id' => (int)$order['id']];
+                $claimParams = [':id' => (int)$order['id'], ':store' => StoreContext::current()->id()];
                 if (Db::isSqlite()) $claimParams[':age'] = '-' . $olderThanSeconds . ' seconds';
                 $claim = $db->prepare("UPDATE orders
                     SET status = 'cancelled', payment_status = 'cancelled', updated_at = " . Db::now() . "
-                    WHERE id = :id AND status = 'pending' AND payment_status = 'pending'
+                    WHERE id = :id AND store_id = :store AND status = 'pending' AND payment_status = 'pending'
                       AND created_at <= {$cutoffSql}");
                 $claim->execute($claimParams);
                 if ($claim->rowCount() !== 1) {
@@ -548,31 +559,33 @@ class Orders {
 
     /** Get orders not yet synced to ERP */
     public static function unsyncedForErp(): array {
-        $stmt = Db::get()->query("SELECT * FROM orders WHERE status != 'pending' AND erp_id IS NULL ORDER BY created_at ASC LIMIT 50");
+        $stmt = Db::get()->prepare("SELECT * FROM orders WHERE store_id = :store AND status != 'pending' AND erp_id IS NULL ORDER BY created_at ASC LIMIT 50");
+        $stmt->execute([':store' => StoreContext::current()->id()]);
         return $stmt->fetchAll();
     }
 
     /** Mark order as synced to ERP */
     public static function markSynced(int $orderId, string $externalId): void {
-        $stmt = Db::get()->prepare("UPDATE orders SET erp_id = :eid, erp_synced_at = " . Db::now() . ", erp_error = NULL, updated_at = " . Db::now() . " WHERE id = :id");
-        $stmt->execute([':eid' => $externalId, ':id' => $orderId]);
+        $stmt = Db::get()->prepare("UPDATE orders SET erp_id = :eid, erp_synced_at = " . Db::now() . ", erp_error = NULL, updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store");
+        $stmt->execute([':eid' => $externalId, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
     }
 
     /** Mark order ERP sync as failed */
     public static function markSyncFailed(int $orderId, string $error): void {
-        $stmt = Db::get()->prepare("UPDATE orders SET erp_error = :err, updated_at = " . Db::now() . " WHERE id = :id");
-        $stmt->execute([':err' => substr($error, 0, 500), ':id' => $orderId]);
+        $stmt = Db::get()->prepare("UPDATE orders SET erp_error = :err, updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store");
+        $stmt->execute([':err' => substr($error, 0, 500), ':id' => $orderId, ':store' => StoreContext::current()->id()]);
     }
 
     /** Get orders pending ERP status sync */
     public static function pendingStatusSync(): array {
-        $stmt = Db::get()->query("SELECT * FROM orders WHERE erp_id IS NOT NULL AND status NOT IN ('delivered','cancelled','refunded') ORDER BY updated_at ASC LIMIT 50");
+        $stmt = Db::get()->prepare("SELECT * FROM orders WHERE store_id = :store AND erp_id IS NOT NULL AND status NOT IN ('delivered','cancelled','refunded') ORDER BY updated_at ASC LIMIT 50");
+        $stmt->execute([':store' => StoreContext::current()->id()]);
         return $stmt->fetchAll();
     }
 
     /** Update ERP status on order */
     public static function updateErpStatus(int $orderId, string $erpStatus): void {
-        $stmt = Db::get()->prepare("UPDATE orders SET erp_status = :status, updated_at = " . Db::now() . " WHERE id = :id");
-        $stmt->execute([':status' => $erpStatus, ':id' => $orderId]);
+        $stmt = Db::get()->prepare("UPDATE orders SET erp_status = :status, updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store");
+        $stmt->execute([':status' => $erpStatus, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
     }
 }

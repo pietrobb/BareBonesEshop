@@ -12,6 +12,7 @@ Security::sessionStart();
 Security::headers();
 
 // Locale: URL ?lang= overrides session, session overrides auto-detect.
+Bootstrap::initStoreContext();
 $storesCfg = Bootstrap::stores();
 $supported = [];
 foreach ($storesCfg['stores'] ?? [] as $s) {

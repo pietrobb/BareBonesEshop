@@ -8,9 +8,9 @@ class Categories {
      * Full category tree
      */
     public static function tree(): array {
-        $rows = Db::get()->query("
-            SELECT * FROM categories ORDER BY path, sort_order, name
-        ")->fetchAll();
+        $stmt = Db::get()->prepare("SELECT * FROM categories WHERE store_id = :store ORDER BY path, sort_order, name");
+        $stmt->execute([':store' => StoreContext::current()->catalogId()]);
+        $rows = $stmt->fetchAll();
 
         return self::buildTree($rows);
     }
@@ -19,8 +19,8 @@ class Categories {
      * Get category by slug
      */
     public static function bySlug(string $slug): ?array {
-        $stmt = Db::get()->prepare("SELECT * FROM categories WHERE slug = :slug");
-        $stmt->execute([':slug' => $slug]);
+        $stmt = Db::get()->prepare("SELECT * FROM categories WHERE slug = :slug AND store_id = :store");
+        $stmt->execute([':slug' => $slug, ':store' => StoreContext::current()->catalogId()]);
         return $stmt->fetch() ?: null;
     }
 
@@ -28,8 +28,8 @@ class Categories {
      * Get category by ID
      */
     public static function byId(int $id): ?array {
-        $stmt = Db::get()->prepare("SELECT * FROM categories WHERE id = :id");
-        $stmt->execute([':id' => $id]);
+        $stmt = Db::get()->prepare("SELECT * FROM categories WHERE id = :id AND store_id = :store");
+        $stmt->execute([':id' => $id, ':store' => StoreContext::current()->catalogId()]);
         return $stmt->fetch() ?: null;
     }
 
@@ -37,8 +37,8 @@ class Categories {
      * Get category by path (e.g., "oblecenie/tricka")
      */
     public static function byPath(string $path): ?array {
-        $stmt = Db::get()->prepare("SELECT * FROM categories WHERE path = :path");
-        $stmt->execute([':path' => $path]);
+        $stmt = Db::get()->prepare("SELECT * FROM categories WHERE path = :path AND store_id = :store");
+        $stmt->execute([':path' => $path, ':store' => StoreContext::current()->catalogId()]);
         return $stmt->fetch() ?: null;
     }
 
@@ -47,9 +47,9 @@ class Categories {
      */
     public static function children(int $parentId): array {
         $stmt = Db::get()->prepare("
-            SELECT * FROM categories WHERE parent_id = :pid ORDER BY sort_order, name
+            SELECT * FROM categories WHERE parent_id = :pid AND store_id = :store ORDER BY sort_order, name
         ");
-        $stmt->execute([':pid' => $parentId]);
+        $stmt->execute([':pid' => $parentId, ':store' => StoreContext::current()->catalogId()]);
         return $stmt->fetchAll();
     }
 
@@ -57,9 +57,9 @@ class Categories {
      * Root categories (no parent)
      */
     public static function roots(): array {
-        return Db::get()->query("
-            SELECT * FROM categories WHERE parent_id IS NULL ORDER BY sort_order, name
-        ")->fetchAll();
+        $stmt = Db::get()->prepare("SELECT * FROM categories WHERE parent_id IS NULL AND store_id = :store ORDER BY sort_order, name");
+        $stmt->execute([':store' => StoreContext::current()->catalogId()]);
+        return $stmt->fetchAll();
     }
 
     /**
@@ -82,8 +82,8 @@ class Categories {
         }
 
         $ph = implode(',', array_fill(0, count($paths), '?'));
-        $stmt = Db::get()->prepare("SELECT * FROM categories WHERE path IN ({$ph}) ORDER BY depth, path");
-        $stmt->execute($paths);
+        $stmt = Db::get()->prepare("SELECT * FROM categories WHERE path IN ({$ph}) AND store_id = ? ORDER BY depth, path");
+        $stmt->execute([...$paths, StoreContext::current()->catalogId()]);
         return $stmt->fetchAll();
     }
 
@@ -94,11 +94,11 @@ class Categories {
     public static function featured(int $limit = 6): array {
         $stmt = Db::get()->prepare("
             SELECT * FROM categories
-            WHERE parent_id IS NULL AND product_count > 0
+            WHERE parent_id IS NULL AND store_id = :store AND product_count > 0
             ORDER BY product_count DESC
             LIMIT :limit
         ");
-        $stmt->execute([':limit' => $limit]);
+        $stmt->execute([':store' => StoreContext::current()->catalogId(), ':limit' => $limit]);
         return $stmt->fetchAll();
     }
 
@@ -111,9 +111,10 @@ class Categories {
 
         $stmt = Db::get()->prepare("
             SELECT id FROM categories
-            WHERE path = :path OR path LIKE :pathPrefix
+            WHERE store_id = :store AND (path = :path OR path LIKE :pathPrefix)
         ");
         $stmt->execute([
+            ':store'      => StoreContext::current()->catalogId(),
             ':path'       => $category['path'],
             ':pathPrefix' => $category['path'] . '/%',
         ]);

@@ -21,9 +21,9 @@ class Search {
             $stmt = $db->prepare("
                 SELECT COUNT(*) FROM products_fts fts
                 JOIN products p ON p.id = fts.rowid
-                WHERE products_fts MATCH :q AND p.status = 'active'
+                WHERE products_fts MATCH :q AND p.store_id = :store AND p.status = 'active'
             ");
-            $stmt->execute([':q' => $ftsQuery]);
+            $stmt->execute([':q' => $ftsQuery, ':store' => StoreContext::current()->catalogId()]);
             $total = (int)$stmt->fetchColumn();
 
             // Fetch
@@ -31,11 +31,11 @@ class Search {
                 SELECT p.*, rank
                 FROM products_fts fts
                 JOIN products p ON p.id = fts.rowid
-                WHERE products_fts MATCH :q AND p.status = 'active'
+                WHERE products_fts MATCH :q AND p.store_id = :store AND p.status = 'active'
                 ORDER BY rank
                 LIMIT :limit OFFSET :offset
             ");
-            $stmt->execute([':q' => $ftsQuery, ':limit' => $perPage, ':offset' => $offset]);
+            $stmt->execute([':q' => $ftsQuery, ':store' => StoreContext::current()->catalogId(), ':limit' => $perPage, ':offset' => $offset]);
         } else {
             $safeQ = self::sanitizeMysqlQuery($q);
 
@@ -43,9 +43,9 @@ class Search {
             $stmt = $db->prepare("
                 SELECT COUNT(*) FROM products p
                 WHERE MATCH(p.name, p.sku, p.summary, p.tags) AGAINST(:q IN NATURAL LANGUAGE MODE)
-                  AND p.status = 'active'
+                  AND p.store_id = :store AND p.status = 'active'
             ");
-            $stmt->execute([':q' => $safeQ]);
+            $stmt->execute([':q' => $safeQ, ':store' => StoreContext::current()->catalogId()]);
             $total = (int)$stmt->fetchColumn();
 
             // Fetch
@@ -53,11 +53,11 @@ class Search {
                 SELECT p.*, MATCH(p.name, p.sku, p.summary, p.tags) AGAINST(:q) AS relevance
                 FROM products p
                 WHERE MATCH(p.name, p.sku, p.summary, p.tags) AGAINST(:q2 IN NATURAL LANGUAGE MODE)
-                  AND p.status = 'active'
+                  AND p.store_id = :store AND p.status = 'active'
                 ORDER BY relevance DESC
                 LIMIT :limit OFFSET :offset
             ");
-            $stmt->execute([':q' => $safeQ, ':q2' => $safeQ, ':limit' => $perPage, ':offset' => $offset]);
+            $stmt->execute([':q' => $safeQ, ':q2' => $safeQ, ':store' => StoreContext::current()->catalogId(), ':limit' => $perPage, ':offset' => $offset]);
         }
 
         $products = $stmt->fetchAll();
@@ -86,21 +86,21 @@ class Search {
                 SELECT DISTINCT p.name, p.slug
                 FROM products_fts fts
                 JOIN products p ON p.id = fts.rowid
-                WHERE products_fts MATCH :q AND p.status = 'active'
+                WHERE products_fts MATCH :q AND p.store_id = :store AND p.status = 'active'
                 ORDER BY rank
                 LIMIT :limit
             ");
-            $stmt->execute([':q' => $ftsQuery, ':limit' => $limit]);
+            $stmt->execute([':q' => $ftsQuery, ':store' => StoreContext::current()->catalogId(), ':limit' => $limit]);
         } else {
             $safePrefix = self::sanitizeMysqlQuery($prefix);
             $stmt = $db->prepare("
                 SELECT DISTINCT p.name, p.slug
                 FROM products p
                 WHERE MATCH(p.name, p.sku, p.summary, p.tags) AGAINST(:q IN BOOLEAN MODE)
-                  AND p.status = 'active'
+                  AND p.store_id = :store AND p.status = 'active'
                 LIMIT :limit
             ");
-            $stmt->execute([':q' => $safePrefix . '*', ':limit' => $limit]);
+            $stmt->execute([':q' => $safePrefix . '*', ':store' => StoreContext::current()->catalogId(), ':limit' => $limit]);
         }
 
         return $stmt->fetchAll();
@@ -124,11 +124,11 @@ class Search {
                 rank
             FROM products_fts fts
             JOIN products p ON p.id = fts.rowid
-            WHERE products_fts MATCH :q AND p.status = 'active'
+            WHERE products_fts MATCH :q AND p.store_id = :store AND p.status = 'active'
             ORDER BY rank
             LIMIT :limit OFFSET :offset
         ");
-        $stmt->execute([':q' => $ftsQuery, ':limit' => $perPage, ':offset' => $offset]);
+        $stmt->execute([':q' => $ftsQuery, ':store' => StoreContext::current()->catalogId(), ':limit' => $perPage, ':offset' => $offset]);
 
         $results = $stmt->fetchAll();
         // Sanitize name_hl: escape any HTML except <mark> tags from FTS5 highlight()

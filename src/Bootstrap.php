@@ -23,13 +23,26 @@ class Bootstrap {
         return self::$stores;
     }
 
+    /** Resolve and activate the request's explicit StoreContext. */
+    public static function initStoreContext(
+        ?string $uri = null,
+        ?string $host = null,
+        ?string $storeId = null,
+        string $channel = 'storefront'
+    ): StoreContext {
+        $context = StoreContext::resolve(self::stores(), $uri, $host, $storeId, $channel);
+        StoreContext::activate($context);
+        return $context;
+    }
+
     /**
-     * Detect the locale from the request URI and apply it once.
+     * Resolve the store and detect/apply the locale from the request URI.
      * Returns the resolved locale code. Pass an explicit $uri to override
      * $_SERVER['REQUEST_URI'] (useful in tests).
      */
     public static function initLocale(?string $uri = null): string {
         $uri = $uri ?? ($_SERVER['REQUEST_URI'] ?? '');
+        self::initStoreContext($uri);
         $lang = I18n::detectLocale($uri);
         I18n::setLocale($lang);
         return $lang;

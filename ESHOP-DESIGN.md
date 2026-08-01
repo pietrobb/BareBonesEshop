@@ -50,6 +50,8 @@ Multi-lang a multi-store sú v jadre od prvého dňa. Nie ako "V2 feature" — a
 BBF má 32 jazykov v základe. Shop bude mať rovnako. Lepiť jazyky a store na existujúci
 single-lang kód je vždy ťažšie než to navrhnúť správne od začiatku.
 
+`StoreContext` sa rieši raz na request podľa explicitného key, domény alebo najdlhšieho URL prefixu; doména má prioritu. `id` vlastní objednávky, cache, platobné transakcie, shipping labely a faktúry. Voliteľné `catalog_scope` a `provider_scope` umožňujú viacerým marketom bezpečne zdieľať katalóg a payment/shipping konfiguráciu; bez overrideov je nový store izolovaný. Migrácia priraďuje všetky legacy dáta literálnemu `default` store a job queue prenáša store/channel do workerov. Rollback updatera obnoví predmigračný databázový snapshot.
+
 ### V1 — kompletný commerce engine
 
 **Katalóg + storefront:**

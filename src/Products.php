@@ -11,8 +11,8 @@ class Products {
         $db = Db::get();
 
         // Direct slug match first
-        $stmt = $db->prepare("SELECT * FROM products WHERE slug = :slug AND status = 'active'");
-        $stmt->execute([':slug' => $slug]);
+        $stmt = $db->prepare("SELECT * FROM products WHERE slug = :slug AND store_id = :store AND status = 'active'");
+        $stmt->execute([':slug' => $slug, ':store' => StoreContext::current()->catalogId()]);
         $product = $stmt->fetch();
 
         if ($product) return $product;
@@ -21,10 +21,11 @@ class Products {
         $stmt = $db->prepare("
             SELECT p.* FROM slug_registry sr
             JOIN products p ON p.id = sr.entity_id
-            WHERE sr.slug = :slug AND sr.entity = 'product' AND p.status = 'active'
+            WHERE sr.slug = :slug AND sr.entity = 'product'
+              AND sr.store_id = :store AND p.store_id = :store AND p.status = 'active'
             LIMIT 1
         ");
-        $stmt->execute([':slug' => $slug]);
+        $stmt->execute([':slug' => $slug, ':store' => StoreContext::current()->catalogId()]);
         return $stmt->fetch() ?: null;
     }
 
@@ -32,8 +33,8 @@ class Products {
      * Get product by ID
      */
     public static function byId(int $id): ?array {
-        $stmt = Db::get()->prepare("SELECT * FROM products WHERE id = :id");
-        $stmt->execute([':id' => $id]);
+        $stmt = Db::get()->prepare("SELECT * FROM products WHERE id = :id AND store_id = :store");
+        $stmt->execute([':id' => $id, ':store' => StoreContext::current()->catalogId()]);
         return $stmt->fetch() ?: null;
     }
 
@@ -41,8 +42,8 @@ class Products {
      * Get product by SKU
      */
     public static function bySku(string $sku): ?array {
-        $stmt = Db::get()->prepare("SELECT * FROM products WHERE sku = :sku");
-        $stmt->execute([':sku' => $sku]);
+        $stmt = Db::get()->prepare("SELECT * FROM products WHERE sku = :sku AND store_id = :store");
+        $stmt->execute([':sku' => $sku, ':store' => StoreContext::current()->catalogId()]);
         return $stmt->fetch() ?: null;
     }
 
@@ -62,8 +63,8 @@ class Products {
         $offset = ($page - 1) * $perPage;
 
         // Base conditions
-        $where = "p.category_id = :cat AND p.status = 'active'";
-        $params = [':cat' => $categoryId];
+        $where = "p.category_id = :cat AND p.store_id = :store AND p.status = 'active'";
+        $params = [':cat' => $categoryId, ':store' => StoreContext::current()->catalogId()];
 
         // Price range
         if ($priceMin !== null) {
@@ -146,15 +147,15 @@ class Products {
         $db = Db::get();
 
         // Get category path for LIKE query
-        $stmt = $db->prepare("SELECT path FROM categories WHERE id = :id");
-        $stmt->execute([':id' => $categoryId]);
+        $stmt = $db->prepare("SELECT path FROM categories WHERE id = :id AND store_id = :store");
+        $stmt->execute([':id' => $categoryId, ':store' => StoreContext::current()->catalogId()]);
         $catPath = $stmt->fetchColumn();
 
         if (!$catPath) return ['products' => [], 'total' => 0, 'page' => 1, 'per_page' => $perPage, 'pages' => 0];
 
         // Get all category IDs in subtree
-        $stmt = $db->prepare("SELECT id FROM categories WHERE path = :path OR path LIKE :pathPrefix");
-        $stmt->execute([':path' => $catPath, ':pathPrefix' => $catPath . '/%']);
+        $stmt = $db->prepare("SELECT id FROM categories WHERE store_id = :store AND (path = :path OR path LIKE :pathPrefix)");
+        $stmt->execute([':store' => StoreContext::current()->catalogId(), ':path' => $catPath, ':pathPrefix' => $catPath . '/%']);
         $catIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
         if (empty($catIds)) $catIds = [$categoryId];
@@ -172,13 +173,13 @@ class Products {
         };
 
         // Count
-        $stmt = $db->prepare("SELECT COUNT(*) FROM products p WHERE p.category_id IN ({$placeholders}) AND p.status = 'active'");
-        $stmt->execute($catIds);
+        $stmt = $db->prepare("SELECT COUNT(*) FROM products p WHERE p.category_id IN ({$placeholders}) AND p.store_id = ? AND p.status = 'active'");
+        $stmt->execute([...$catIds, StoreContext::current()->catalogId()]);
         $total = (int)$stmt->fetchColumn();
 
         // Fetch
-        $stmt = $db->prepare("SELECT p.* FROM products p WHERE p.category_id IN ({$placeholders}) AND p.status = 'active' ORDER BY {$orderBy} LIMIT ? OFFSET ?");
-        $stmt->execute([...$catIds, $perPage, $offset]);
+        $stmt = $db->prepare("SELECT p.* FROM products p WHERE p.category_id IN ({$placeholders}) AND p.store_id = ? AND p.status = 'active' ORDER BY {$orderBy} LIMIT ? OFFSET ?");
+        $stmt->execute([...$catIds, StoreContext::current()->catalogId(), $perPage, $offset]);
         $products = $stmt->fetchAll();
 
         return [
@@ -194,8 +195,8 @@ class Products {
      * Get variants for a product
      */
     public static function variants(int $productId): array {
-        $stmt = Db::get()->prepare("SELECT * FROM variants WHERE product_id = :pid ORDER BY sort_order, id");
-        $stmt->execute([':pid' => $productId]);
+        $stmt = Db::get()->prepare("SELECT v.* FROM variants v JOIN products p ON p.id = v.product_id WHERE v.product_id = :pid AND p.store_id = :store ORDER BY v.sort_order, v.id");
+        $stmt->execute([':pid' => $productId, ':store' => StoreContext::current()->catalogId()]);
         return $stmt->fetchAll();
     }
 
@@ -203,8 +204,8 @@ class Products {
      * Get attributes for a product
      */
     public static function attrs(int $productId): array {
-        $stmt = Db::get()->prepare("SELECT attr_name, attr_value, numeric_val FROM product_attrs WHERE product_id = :pid ORDER BY attr_name");
-        $stmt->execute([':pid' => $productId]);
+        $stmt = Db::get()->prepare("SELECT pa.attr_name, pa.attr_value, pa.numeric_val FROM product_attrs pa JOIN products p ON p.id = pa.product_id WHERE pa.product_id = :pid AND p.store_id = :store ORDER BY pa.attr_name");
+        $stmt->execute([':pid' => $productId, ':store' => StoreContext::current()->catalogId()]);
         return $stmt->fetchAll();
     }
 
@@ -216,11 +217,11 @@ class Products {
             SELECT pa.attr_name, pa.attr_value, COUNT(*) as cnt
             FROM product_attrs pa
             JOIN products p ON p.id = pa.product_id
-            WHERE p.category_id = :cat AND p.status = 'active'
+            WHERE p.category_id = :cat AND p.store_id = :store AND p.status = 'active'
             GROUP BY pa.attr_name, pa.attr_value
             ORDER BY pa.attr_name, cnt DESC
         ");
-        $stmt->execute([':cat' => $categoryId]);
+        $stmt->execute([':cat' => $categoryId, ':store' => StoreContext::current()->catalogId()]);
         $rows = $stmt->fetchAll();
 
         // Group by attribute name
@@ -244,11 +245,11 @@ class Products {
         $rand = Db::isSqlite() ? 'RANDOM()' : 'RAND()';
         $stmt = Db::get()->prepare("
             SELECT * FROM products
-            WHERE category_id = :cat AND id != :id AND status = 'active'
+            WHERE category_id = :cat AND id != :id AND store_id = :store AND status = 'active'
             ORDER BY {$rand}
             LIMIT :limit
         ");
-        $stmt->execute([':cat' => $product['category_id'], ':id' => $productId, ':limit' => $limit]);
+        $stmt->execute([':cat' => $product['category_id'], ':id' => $productId, ':store' => StoreContext::current()->catalogId(), ':limit' => $limit]);
         return $stmt->fetchAll();
     }
 
@@ -260,11 +261,12 @@ class Products {
             SELECT p.*
             FROM product_related_products pr
             JOIN products p ON p.id = pr.related_product_id
-            WHERE pr.product_id = :id AND p.status = 'active'
+            WHERE pr.product_id = :id AND p.store_id = :store AND p.status = 'active'
+              AND EXISTS (SELECT 1 FROM products source WHERE source.id = pr.product_id AND source.store_id = :store)
             ORDER BY pr.sort_order, pr.related_product_id
             LIMIT :limit
         ");
-        $stmt->execute([':id' => $productId, ':limit' => $limit]);
+        $stmt->execute([':id' => $productId, ':store' => StoreContext::current()->catalogId(), ':limit' => $limit]);
         return $stmt->fetchAll();
     }
 
@@ -281,8 +283,8 @@ class Products {
             $typeParams[$placeholder] = $type;
         }
 
-        $where = "stock < :threshold AND status = 'active' AND LOWER(COALESCE(product_type, '')) NOT IN (" . implode(', ', $typePlaceholders) . ')';
-        $params = [':threshold' => $threshold] + $typeParams;
+        $where = "store_id = :store AND stock < :threshold AND status = 'active' AND LOWER(COALESCE(product_type, '')) NOT IN (" . implode(', ', $typePlaceholders) . ')';
+        $params = [':store' => StoreContext::current()->catalogId(), ':threshold' => $threshold] + $typeParams;
 
         $countStmt = $db->prepare("SELECT COUNT(*) FROM products WHERE {$where}");
         $countStmt->execute($params);
@@ -305,10 +307,10 @@ class Products {
      */
     public static function latest(int $limit = 8): array {
         $stmt = Db::get()->prepare("
-            SELECT * FROM products WHERE status = 'active'
+            SELECT * FROM products WHERE store_id = :store AND status = 'active'
             ORDER BY created_at DESC LIMIT :limit
         ");
-        $stmt->execute([':limit' => $limit]);
+        $stmt->execute([':store' => StoreContext::current()->catalogId(), ':limit' => $limit]);
         return $stmt->fetchAll();
     }
 
@@ -318,11 +320,11 @@ class Products {
     public static function onSale(int $limit = 8): array {
         $stmt = Db::get()->prepare("
             SELECT * FROM products
-            WHERE status = 'active' AND compare_price IS NOT NULL AND compare_price > price
+            WHERE store_id = :store AND status = 'active' AND compare_price IS NOT NULL AND compare_price > price
             ORDER BY (compare_price - price) DESC
             LIMIT :limit
         ");
-        $stmt->execute([':limit' => $limit]);
+        $stmt->execute([':store' => StoreContext::current()->catalogId(), ':limit' => $limit]);
         return $stmt->fetchAll();
     }
 
@@ -350,8 +352,8 @@ class Products {
         $ph = implode(',', array_fill(0, count($categoryIds), '?'));
 
         // Base query: products in these categories
-        $where = "p.category_id IN ({$ph}) AND p.status = 'active'";
-        $whereParams = $categoryIds;
+        $where = "p.category_id IN ({$ph}) AND p.store_id = ? AND p.status = 'active'";
+        $whereParams = [...$categoryIds, StoreContext::current()->catalogId()];
 
         // Price filters
         if ($priceMin !== null) { $where .= " AND p.price >= ?"; $whereParams[] = $priceMin; }
@@ -410,10 +412,10 @@ class Products {
         $filterSql = "SELECT DISTINCT ps.criteria_name, ps.criteria_value, ps.numeric_val
             FROM product_specifications ps
             INNER JOIN products p ON p.id = ps.product_id
-            WHERE p.category_id IN ({$ph}) AND p.status = 'active'
+            WHERE p.category_id IN ({$ph}) AND p.store_id = ? AND p.status = 'active'
             ORDER BY ps.criteria_name, ps.criteria_value";
         $fStmt = $db->prepare($filterSql);
-        $fStmt->execute($categoryIds);
+        $fStmt->execute([...$categoryIds, StoreContext::current()->catalogId()]);
 
         $filters = [];
         foreach ($fStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
@@ -443,8 +445,8 @@ class Products {
     public static function incrementStock(int $id, int $qty): void {
         $db = Db::get();
         // Get SKU for warehouse update
-        $stmt = $db->prepare("SELECT sku FROM products WHERE id = :id");
-        $stmt->execute([':id' => $id]);
+        $stmt = $db->prepare("SELECT sku FROM products WHERE id = :id AND store_id = :store");
+        $stmt->execute([':id' => $id, ':store' => StoreContext::current()->catalogId()]);
         $sku = $stmt->fetchColumn();
 
         if ($sku) {
@@ -456,8 +458,8 @@ class Products {
             Warehouse::syncProductStock([$sku]);
         } else {
             // Fallback: direct update
-            $db->prepare("UPDATE products SET stock = stock + :qty WHERE id = :id")
-               ->execute([':qty' => $qty, ':id' => $id]);
+            $db->prepare("UPDATE products SET stock = stock + :qty WHERE id = :id AND store_id = :store")
+               ->execute([':qty' => $qty, ':id' => $id, ':store' => StoreContext::current()->catalogId()]);
         }
     }
 
@@ -477,12 +479,12 @@ class Products {
 
         // Fallback: direct update (no warehouses configured)
         $db = Db::get();
-        $stmt = $db->prepare("UPDATE products SET stock = :qty, updated_at = " . Db::now() . " WHERE sku = :sku");
+        $stmt = $db->prepare("UPDATE products SET stock = :qty, updated_at = " . Db::now() . " WHERE sku = :sku AND store_id = :store");
         $updated = 0;
         $ownTransaction = !$db->inTransaction();
         if ($ownTransaction) $db->beginTransaction();
         foreach ($stockData as $item) {
-            $stmt->execute([':qty' => (int)$item['qty'], ':sku' => $item['sku']]);
+            $stmt->execute([':qty' => (int)$item['qty'], ':sku' => $item['sku'], ':store' => StoreContext::current()->catalogId()]);
             if ($stmt->rowCount() > 0) $updated++;
         }
         if ($ownTransaction) $db->commit();
@@ -522,8 +524,8 @@ class Products {
             if ($categoryMap !== null && isset($categoryMap[$product['category_id']])) {
                 $catRow = $categoryMap[$product['category_id']];
             } else {
-                $cat = Db::get()->prepare("SELECT slug, path FROM categories WHERE id = :id");
-                $cat->execute([':id' => $product['category_id']]);
+                $cat = Db::get()->prepare("SELECT slug, path FROM categories WHERE id = :id AND store_id = :store");
+                $cat->execute([':id' => $product['category_id'], ':store' => StoreContext::current()->catalogId()]);
                 $catRow = $cat->fetch();
             }
             if ($catRow) {
@@ -539,7 +541,9 @@ class Products {
      * Pre-fetch category map for batch enrichment. Avoids N+1 in enrich().
      */
     public static function categoryMap(): array {
-        $rows = Db::get()->query("SELECT id, slug, path FROM categories")->fetchAll();
+        $stmt = Db::get()->prepare("SELECT id, slug, path FROM categories WHERE store_id = :store");
+        $stmt->execute([':store' => StoreContext::current()->catalogId()]);
+        $rows = $stmt->fetchAll();
         $map = [];
         foreach ($rows as $r) {
             $map[(int)$r['id']] = ['slug' => $r['slug'], 'path' => $r['path']];

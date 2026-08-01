@@ -32,22 +32,26 @@ class PaymentService {
         }
 
         $db = Db::get();
-        $params = [':country' => $country, ':amount' => $amount];
+        $storeId = StoreContext::current()->providerId();
+        StoreContext::current()->assertPermission('payment');
+        $params = [':store_method' => $storeId, ':store_country' => $storeId, ':country' => $country, ':amount' => $amount];
         $shippingFilter = '';
         if ($shippingMethod !== '') {
             $shippingFilter = "
                 AND (
-                    NOT EXISTS (SELECT 1 FROM payment_method_shipping ps_any WHERE ps_any.method_code = m.code)
-                    OR EXISTS (SELECT 1 FROM payment_method_shipping ps WHERE ps.method_code = m.code AND ps.shipping_method_code = :shipping_method)
+                    NOT EXISTS (SELECT 1 FROM payment_method_shipping ps_any WHERE ps_any.store_id = :store_shipping_any AND ps_any.method_code = m.code)
+                    OR EXISTS (SELECT 1 FROM payment_method_shipping ps WHERE ps.store_id = :store_shipping_match AND ps.method_code = m.code AND ps.shipping_method_code = :shipping_method)
                 )";
+            $params[':store_shipping_any'] = $storeId;
+            $params[':store_shipping_match'] = $storeId;
             $params[':shipping_method'] = $shippingMethod;
         }
 
         $stmt = $db->prepare("
             SELECT m.*
             FROM payment_methods m
-            WHERE m.active = 1
-              AND EXISTS (SELECT 1 FROM payment_method_countries pc WHERE pc.method_code = m.code AND pc.country = :country)
+            WHERE m.store_id = :store_method AND m.active = 1
+              AND EXISTS (SELECT 1 FROM payment_method_countries pc WHERE pc.store_id = :store_country AND pc.method_code = m.code AND pc.country = :country)
               AND m.min_amount <= :amount
               AND (m.max_amount IS NULL OR m.max_amount = 0 OR m.max_amount >= :amount)
               {$shippingFilter}
@@ -137,6 +141,10 @@ class PaymentService {
      * Logs an 'initiated' transaction record.
      */
     public static function initiate(array $order, PaymentAdapter $gateway): array {
+        StoreContext::current()->assertPermission('payment');
+        if (empty($order['order_id']) || !Orders::byId((int)$order['order_id'])) {
+            throw new \RuntimeException('Payment order does not belong to the active store');
+        }
         $session = $gateway->createSession($order);
 
         // Log initiated transaction
@@ -241,15 +249,15 @@ class PaymentService {
      */
     public static function transactionsForOrder(int $orderId): array {
         $stmt = Db::get()->prepare(
-            "SELECT * FROM payment_transactions WHERE order_id = :oid ORDER BY created_at"
+            "SELECT * FROM payment_transactions WHERE order_id = :oid AND store_id = :store ORDER BY created_at"
         );
-        $stmt->execute([':oid' => $orderId]);
+        $stmt->execute([':oid' => $orderId, ':store' => StoreContext::current()->id()]);
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
     public static function refundedAmount(int $orderId): int {
-        $stmt = Db::get()->prepare("\n            SELECT COALESCE(SUM(amount), 0)\n            FROM payment_transactions\n            WHERE order_id = :order_id\n              AND status IN ('partially_refunded', 'refunded', 'refund_succeeded')\n        ");
-        $stmt->execute([':order_id' => $orderId]);
+        $stmt = Db::get()->prepare("\n            SELECT COALESCE(SUM(amount), 0)\n            FROM payment_transactions\n            WHERE order_id = :order_id AND store_id = :store\n              AND status IN ('partially_refunded', 'refunded', 'refund_succeeded')\n        ");
+        $stmt->execute([':order_id' => $orderId, ':store' => StoreContext::current()->id()]);
         return max(0, (int)$stmt->fetchColumn());
     }
 
@@ -274,8 +282,8 @@ class PaymentService {
                 throw new \LogicException('Refund is not available for this amount');
             }
 
-            $claim = $db->prepare("\n                UPDATE orders\n                SET payment_status = 'refund_pending', updated_at = " . Db::now() . "\n                WHERE id = :id AND payment_status = :from\n            ");
-            $claim->execute([':id' => $orderId, ':from' => $from]);
+            $claim = $db->prepare("\n                UPDATE orders\n                SET payment_status = 'refund_pending', updated_at = " . Db::now() . "\n                WHERE id = :id AND store_id = :store AND payment_status = :from\n            ");
+            $claim->execute([':id' => $orderId, ':store' => StoreContext::current()->id(), ':from' => $from]);
             if ($claim->rowCount() !== 1 || self::transactionExists($idempotencyKey)) {
                 throw new \RuntimeException('Refund request state changed');
             }
@@ -306,15 +314,16 @@ class PaymentService {
      */
     public static function updatePaymentStatus(int $orderId, string $status): void {
         Db::get()->prepare(
-            "UPDATE orders SET payment_status = :s, updated_at = " . Db::now() . " WHERE id = :id"
-        )->execute([':s' => $status, ':id' => $orderId]);
+            "UPDATE orders SET payment_status = :s, updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store"
+        )->execute([':s' => $status, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
     }
 
     public static function renameMethodCodeLinks(string $oldCode, string $newCode): void {
         if ($oldCode === '' || $oldCode === $newCode) return;
         $db = Db::get();
-        $db->prepare("UPDATE payment_method_countries SET method_code = :new WHERE method_code = :old")->execute([':new' => $newCode, ':old' => $oldCode]);
-        $db->prepare("UPDATE payment_method_shipping SET method_code = :new WHERE method_code = :old")->execute([':new' => $newCode, ':old' => $oldCode]);
+        $storeId = StoreContext::current()->providerId();
+        $db->prepare("UPDATE payment_method_countries SET method_code = :new WHERE method_code = :old AND store_id = :store")->execute([':new' => $newCode, ':old' => $oldCode, ':store' => $storeId]);
+        $db->prepare("UPDATE payment_method_shipping SET method_code = :new WHERE method_code = :old AND store_id = :store")->execute([':new' => $newCode, ':old' => $oldCode, ':store' => $storeId]);
     }
 
     // =========================================================
@@ -344,12 +353,13 @@ class PaymentService {
             $now  = Db::now();
             $stmt = $db->prepare(Db::insertIgnore() . "
                 INTO payment_transactions
-                    (order_id, provider, provider_ref, status, amount, currency, idempotency_key, raw_response, created_at, updated_at)
+                    (order_id, store_id, provider, provider_ref, status, amount, currency, idempotency_key, raw_response, created_at, updated_at)
                 VALUES
-                    (:oid, :prov, :ref, :status, :amt, :cur, :ikey, :raw, {$now}, {$now})
+                    (:oid, :store, :prov, :ref, :status, :amt, :cur, :ikey, :raw, {$now}, {$now})
             ");
             $stmt->execute([
                 ':oid'    => $orderId,
+                ':store'  => StoreContext::current()->id(),
                 ':prov'   => $provider,
                 ':ref'    => $providerRef,
                 ':status' => $status,
@@ -366,26 +376,32 @@ class PaymentService {
     }
 
     private static function resolveOrderId(array $data, string $provider): ?int {
-        // Try explicit order_id in data first
-        if (!empty($data['order_id'])) return (int)$data['order_id'];
+        // Try explicit order_id in data first, but never cross the active store boundary.
+        if (!empty($data['order_id'])) {
+            $orderId = (int)$data['order_id'];
+            return Orders::byId($orderId) ? $orderId : null;
+        }
 
         $db = Db::get();
 
         // Stripe: session object has metadata.order_id or client_reference_id
         if ($provider === 'stripe') {
             $orderId = $data['metadata']['order_id'] ?? null;
-            if ($orderId) return (int)$orderId;
+            if ($orderId) {
+                $orderId = (int)$orderId;
+                return Orders::byId($orderId) ? $orderId : null;
+            }
 
             $sessionId = (string)($data['id'] ?? '');
             if ($sessionId !== '') {
                 $mappedOrderId = CheckoutSession::resolveOrderId($sessionId, 'stripe');
-                if ($mappedOrderId !== null) return $mappedOrderId;
+                if ($mappedOrderId !== null && Orders::byId($mappedOrderId)) return $mappedOrderId;
             }
 
             $orderNumber = $data['client_reference_id'] ?? null;
             if ($orderNumber) {
-                $stmt = $db->prepare("SELECT id FROM orders WHERE order_number = :n LIMIT 1");
-                $stmt->execute([':n' => $orderNumber]);
+                $stmt = $db->prepare("SELECT id FROM orders WHERE order_number = :n AND store_id = :store LIMIT 1");
+                $stmt->execute([':n' => $orderNumber, ':store' => StoreContext::current()->id()]);
                 $id = $stmt->fetchColumn();
                 return $id === false ? null : (int)$id;
             }
@@ -393,8 +409,8 @@ class PaymentService {
             // Fall back to payment_id match
             $paymentId = $data['payment_intent'] ?? ($sessionId !== '' ? $sessionId : null);
             if ($paymentId) {
-                $stmt = $db->prepare("SELECT id FROM orders WHERE payment_id = :payment_id LIMIT 1");
-                $stmt->execute([':payment_id' => $paymentId]);
+                $stmt = $db->prepare("SELECT id FROM orders WHERE payment_id = :payment_id AND store_id = :store LIMIT 1");
+                $stmt->execute([':payment_id' => $paymentId, ':store' => StoreContext::current()->id()]);
                 $id = $stmt->fetchColumn();
                 return $id === false ? null : (int)$id;
             }
@@ -404,16 +420,16 @@ class PaymentService {
         if ($provider === 'payu') {
             $extOrderId = $data['extOrderId'] ?? null;
             if ($extOrderId) {
-                $stmt = $db->prepare("SELECT id FROM orders WHERE order_number = :order_number LIMIT 1");
-                $stmt->execute([':order_number' => $extOrderId]);
+                $stmt = $db->prepare("SELECT id FROM orders WHERE order_number = :order_number AND store_id = :store LIMIT 1");
+                $stmt->execute([':order_number' => $extOrderId, ':store' => StoreContext::current()->id()]);
                 $id = $stmt->fetchColumn();
                 return $id === false ? null : (int)$id;
             }
             // Fall back to payment_id
             $payuOrderId = $data['orderId'] ?? null;
             if ($payuOrderId) {
-                $stmt = $db->prepare("SELECT id FROM orders WHERE payment_id = :payment_id LIMIT 1");
-                $stmt->execute([':payment_id' => $payuOrderId]);
+                $stmt = $db->prepare("SELECT id FROM orders WHERE payment_id = :payment_id AND store_id = :store LIMIT 1");
+                $stmt->execute([':payment_id' => $payuOrderId, ':store' => StoreContext::current()->id()]);
                 $id = $stmt->fetchColumn();
                 return $id === false ? null : (int)$id;
             }

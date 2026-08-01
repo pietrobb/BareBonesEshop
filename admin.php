@@ -15,6 +15,7 @@ Security::adminAuth();
 Security::headers();
 
 // Admin locale: URL ?lang=xx (persisted in session) → session → system default.
+Bootstrap::initStoreContext();
 $storesCfg = Bootstrap::stores();
 $adminSupportedLocales = [];
 foreach ($storesCfg['stores'] ?? [] as $s) {

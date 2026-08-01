@@ -106,8 +106,15 @@ do {
         if ($verbose) echo "  Processing: {$type} (ID: {$job['id']})\n";
 
         try {
+            $payload = $job['payload'] ?? [];
+            Bootstrap::initStoreContext(
+                '/',
+                '',
+                (string)($payload['_store_id'] ?? 'default'),
+                (string)($payload['_channel_id'] ?? 'storefront')
+            );
             if ($handler && function_exists($handler)) {
-                $handler($job['payload'] ?? [], $job);
+                $handler($payload, $job);
             } else {
                 throw new \RuntimeException("Unknown job type: {$type}");
             }

@@ -124,6 +124,7 @@ class ShippingService
      */
     public static function generateLabel(int $orderId, string $carrierId): array
     {
+        StoreContext::current()->assertPermission('shipping');
         $adapter = self::findAdapter($carrierId);
         $order   = self::fetchOrder($orderId);
 
@@ -132,10 +133,11 @@ class ShippingService
         // Persist label record
         $db = Db::get();
         $db->prepare("
-            INSERT INTO shipping_labels (order_id, carrier, awb, status, label_data)
-            VALUES (:order_id, :carrier, :awb, 'created', :label_data)
+            INSERT INTO shipping_labels (order_id, store_id, carrier, awb, status, label_data)
+            VALUES (:order_id, :store, :carrier, :awb, 'created', :label_data)
         ")->execute([
             ':order_id'   => $orderId,
+            ':store'      => StoreContext::current()->id(),
             ':carrier'    => $carrierId,
             ':awb'        => $result['awb'],
             ':label_data' => $result['label_data'] ?? '',
@@ -144,8 +146,8 @@ class ShippingService
         // Update order with tracking info
         $db->prepare("
             UPDATE orders SET tracking_number = :awb, carrier = :carrier, updated_at = " . Db::now() . "
-            WHERE id = :id
-        ")->execute([':awb' => $result['awb'], ':carrier' => $carrierId, ':id' => $orderId]);
+            WHERE id = :id AND store_id = :store
+        ")->execute([':awb' => $result['awb'], ':carrier' => $carrierId, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
 
         return $result;
     }
@@ -166,6 +168,7 @@ class ShippingService
         string $signature = '',
         string $rawPayload = ''
     ): array {
+        StoreContext::current()->assertPermission('shipping');
         $envName = 'SHIP_' . strtoupper($carrierId) . '_WEBHOOK_SECRET';
         $envSecret = getenv($envName);
         $secret = is_string($envSecret) ? $envSecret : '';
@@ -193,8 +196,8 @@ class ShippingService
 
         // Resolve label record
         $db    = Db::get();
-        $label = $db->prepare("SELECT * FROM shipping_labels WHERE awb = :awb AND carrier = :carrier LIMIT 1");
-        $label->execute([':awb' => $awb, ':carrier' => $carrierId]);
+        $label = $db->prepare("SELECT * FROM shipping_labels WHERE awb = :awb AND carrier = :carrier AND store_id = :store LIMIT 1");
+        $label->execute([':awb' => $awb, ':carrier' => $carrierId, ':store' => StoreContext::current()->id()]);
         $labelRow = $label->fetch();
 
         if (!$labelRow) {
@@ -207,8 +210,8 @@ class ShippingService
         }
 
         try {
-            $db->prepare("UPDATE shipping_labels SET status = :status, updated_at = " . Db::now() . " WHERE awb = :awb")
-               ->execute([':status' => $status, ':awb' => $awb]);
+            $db->prepare("UPDATE shipping_labels SET status = :status, updated_at = " . Db::now() . " WHERE awb = :awb AND carrier = :carrier AND store_id = :store")
+               ->execute([':status' => $status, ':awb' => $awb, ':carrier' => $carrierId, ':store' => StoreContext::current()->id()]);
         } catch (\Throwable $e) {
             Idempotency::unmark($eventId);
             throw $e;
@@ -249,16 +252,18 @@ class ShippingService
     private static function databaseRates(string $country, int $weightG, int $subtotal, bool $cod, int $volumeCm3): array
     {
         $db = Db::get();
+        $storeId = StoreContext::current()->providerId();
+        StoreContext::current()->assertPermission('shipping');
 
-        $stmt = $db->prepare("SELECT zone_code FROM shipping_zone_countries WHERE country = :country ORDER BY id");
-        $stmt->execute([':country' => $country]);
+        $stmt = $db->prepare("SELECT zone_code FROM shipping_zone_countries WHERE store_id = :store AND country = :country ORDER BY id");
+        $stmt->execute([':store' => $storeId, ':country' => $country]);
         $zones = array_values(array_unique(array_filter(array_column($stmt->fetchAll(\PDO::FETCH_ASSOC), 'zone_code'))));
         if (empty($zones)) {
             return [];
         }
 
         $zonePlaceholders = implode(',', array_fill(0, count($zones), '?'));
-        $params = array_merge([$country, $weightG, $weightG, $volumeCm3], $zones, [$weightG, $volumeCm3]);
+        $params = array_merge([$storeId, $storeId, $storeId, $country, $weightG, $weightG, $volumeCm3], $zones, [$weightG, $volumeCm3]);
         $stmt = $db->prepare("
             SELECT r.*, m.name AS method_name, m.description AS method_description, m.service_type,
                    m.supports_cod, m.supports_pickup, m.free_above, m.max_weight_g, m.max_volume_cm3,
@@ -266,7 +271,8 @@ class ShippingService
             FROM shipping_rates r
             JOIN shipping_methods m ON m.code = r.method_code
             JOIN shipping_zones z ON z.code = r.zone_code
-            WHERE m.active = 1 AND z.active = 1 AND COALESCE(r.active, 1) = 1
+            WHERE r.store_id = ? AND m.store_id = ? AND z.store_id = ?
+              AND m.active = 1 AND z.active = 1 AND COALESCE(r.active, 1) = 1
               AND (r.country = ? OR r.country = '')
               AND r.weight_from_g <= ? AND r.weight_to_g >= ?
               AND (r.volume_to_cm3 IS NULL OR r.volume_to_cm3 = 0 OR r.volume_to_cm3 >= ?)
@@ -369,8 +375,8 @@ class ShippingService
     private static function fetchOrder(int $orderId): array
     {
         $db   = Db::get();
-        $stmt = $db->prepare("SELECT * FROM orders WHERE id = :id");
-        $stmt->execute([':id' => $orderId]);
+        $stmt = $db->prepare("SELECT * FROM orders WHERE id = :id AND store_id = :store");
+        $stmt->execute([':id' => $orderId, ':store' => StoreContext::current()->id()]);
         $order = $stmt->fetch(\PDO::FETCH_ASSOC);
         if (!$order) throw new \RuntimeException("Order not found: {$orderId}");
         return $order;

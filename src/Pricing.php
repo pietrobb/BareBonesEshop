@@ -12,7 +12,10 @@ class Pricing {
             $file = __DIR__ . '/../pricing.json';
             self::$config = file_exists($file) ? json_decode(file_get_contents($file), true) : [];
         }
-        return self::$config;
+        if (!class_exists('StoreContext')) return self::$config;
+        StoreContext::current()->assertPermission('pricing');
+        $override = StoreContext::current()->config()['pricing'] ?? [];
+        return is_array($override) ? array_replace_recursive(self::$config, $override) : self::$config;
     }
 
     /** Override config (for testing) */
@@ -168,19 +171,19 @@ class Pricing {
         }
 
         $db = Db::get();
-        $stmt = $db->prepare("INSERT INTO coupon_uses (coupon_code, order_id, customer_email, discount) VALUES (:code, :oid, :email, :disc)");
-        $stmt->execute([':code' => $upperCode, ':oid' => $orderId, ':email' => $email, ':disc' => $discount]);
+        $stmt = $db->prepare("INSERT INTO coupon_uses (coupon_code, order_id, customer_email, discount, store_id) VALUES (:code, :oid, :email, :disc, :store)");
+        $stmt->execute([':code' => $upperCode, ':oid' => $orderId, ':email' => $email, ':disc' => $discount, ':store' => StoreContext::current()->id()]);
     }
 
     /** Count coupon uses (total or per customer) */
     private static function couponUseCount(string $code, ?string $email = null): int {
         $db = Db::get();
         if ($email) {
-            $stmt = $db->prepare("SELECT COUNT(*) FROM coupon_uses WHERE coupon_code = :code AND customer_email = :email");
-            $stmt->execute([':code' => strtoupper($code), ':email' => $email]);
+            $stmt = $db->prepare("SELECT COUNT(*) FROM coupon_uses WHERE coupon_code = :code AND customer_email = :email AND store_id = :store");
+            $stmt->execute([':code' => strtoupper($code), ':email' => $email, ':store' => StoreContext::current()->id()]);
         } else {
-            $stmt = $db->prepare("SELECT COUNT(*) FROM coupon_uses WHERE coupon_code = :code");
-            $stmt->execute([':code' => strtoupper($code)]);
+            $stmt = $db->prepare("SELECT COUNT(*) FROM coupon_uses WHERE coupon_code = :code AND store_id = :store");
+            $stmt->execute([':code' => strtoupper($code), ':store' => StoreContext::current()->id()]);
         }
         return (int)$stmt->fetchColumn();
     }

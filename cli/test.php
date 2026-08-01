@@ -438,6 +438,11 @@ assert_true(in_array('product_oe_numbers', $tables), 'product_oe_numbers table e
 assert_true(in_array('product_vehicles', $tables), 'product_vehicles table exists');
 assert_true(in_array('processed_events', $tables), 'processed_events table exists');
 
+$storeScopeMigration = require __DIR__ . '/../migrations/20260801152000_store_context_scope.php';
+$storeScopeMigration->up($pdo, true);
+$productStoreColumn = array_values(array_filter($pdo->query("PRAGMA table_info(products)")->fetchAll(PDO::FETCH_ASSOC), static fn(array $row): bool => $row['name'] === 'store_id'));
+assert_equals("'default'", (string)($productStoreColumn[0]['dflt_value'] ?? ''), 'Store migration: new catalog rows default to the default store');
+
 // ============================================================
 // TEST 3: CSV Import
 // ============================================================
@@ -1649,6 +1654,8 @@ assert_equals(3, $stats['pending'], 'Worker: 3 jobs pending');
 // Pull in priority order
 $jobs = JobQueue::pull(10);
 assert_equals('cache_rebuild', $jobs[0]['type'], 'Worker: highest priority first (cache_rebuild)');
+assert_equals(StoreContext::current()->id(), $jobs[0]['payload']['_store_id'] ?? null, 'Worker: queued job carries active store context');
+assert_equals(StoreContext::current()->channel(), $jobs[0]['payload']['_channel_id'] ?? null, 'Worker: queued job carries active channel context');
 assert_equals('stock_alert', $jobs[1]['type'], 'Worker: second priority (stock_alert)');
 assert_equals('email_send', $jobs[2]['type'], 'Worker: third priority (email_send)');
 
@@ -2691,6 +2698,33 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS shipping_labels (
 try { $pdo->exec("ALTER TABLE orders ADD COLUMN tracking_number TEXT DEFAULT NULL"); } catch (\PDOException $e) {}
 try { $pdo->exec("ALTER TABLE orders ADD COLUMN carrier TEXT DEFAULT NULL"); } catch (\PDOException $e) {}
 
+// Later feature tables must receive the same idempotent store backfill.
+$storeScopeMigration->up($pdo, true);
+$domainStoreConfig = Bootstrap::stores();
+$domainStoreConfig['stores']['default']['domains'] = ['shop.test'];
+assert_equals('default', StoreContext::resolve($domainStoreConfig, '/de/products', 'shop.test')->id(), 'Store resolution: matched domain takes precedence over another store URL prefix');
+$deMarketContext = StoreContext::resolve(Bootstrap::stores(), '/de/products', '', 'de');
+StoreContext::activate($deMarketContext);
+assert_true(Products::bySku('TSHIRT-BLK-M') !== null, 'Store compatibility: existing market route shares the migrated default catalog');
+$isolatedConfig = Bootstrap::stores();
+$isolatedConfig['stores']['isolated'] = ['id' => 'isolated', 'name' => 'Isolated', 'default_locale' => 'en', 'languages' => ['en'], 'currency' => 'eur', 'url_prefix' => '/isolated', 'domains' => [], 'channels' => ['storefront'], 'permissions' => ['*'], 'legal' => []];
+$deContext = StoreContext::resolve($isolatedConfig, '/isolated/products', '', 'isolated');
+StoreContext::activate($deContext);
+$pdo->exec("INSERT INTO categories (slug, name, path, depth, store_id) VALUES ('de-isolation', 'DE Isolation', 'de-isolation', 0, 'isolated')");
+$deCategoryId = (int)$pdo->lastInsertId();
+$pdo->prepare("INSERT INTO products (sku, slug, name, category_id, price, currency, stock, store_id) VALUES ('DE-ONLY', 'de-only', 'DE only', ?, 1299, 'eur', 5, 'isolated')")->execute([$deCategoryId]);
+assert_equals('DE-ONLY', Products::bySku('DE-ONLY')['sku'] ?? null, 'Store isolation: second store sees its product');
+assert_true(Products::bySku('TSHIRT-BLK-M') === null, 'Store isolation: second store cannot read default catalog');
+assert_true(Orders::byId($orderId) === null, 'Store isolation: second store cannot read default order');
+Cache::write('isolation/key.txt', 'de');
+$deCachePath = Cache::path('isolation/key.txt');
+Bootstrap::initStoreContext('/', '', 'default');
+Cache::write('isolation/key.txt', 'default');
+assert_true($deCachePath !== Cache::path('isolation/key.txt'), 'Store isolation: identical cache keys have distinct paths');
+assert_equals('default', Cache::read('isolation/key.txt'), 'Store isolation: default cache value is not contaminated');
+assert_true(Products::bySku('DE-ONLY') === null, 'Store isolation: default store cannot read second-store catalog');
+assert_true(Orders::byId($orderId) !== null, 'Store isolation: default order remains accessible in its store');
+
 // Insert shipping_rates test fixtures
 $pdo->exec("INSERT INTO shipping_rates (carrier, country, weight_from_g, weight_to_g, price, cod_surcharge) VALUES
     ('packeta_test', 'SK', 0,    2000,  299, 100),
@@ -2749,6 +2783,13 @@ $txs = PaymentService::transactionsForOrder((int)$payOrder['id']);
 assert_true(count($txs) >= 1, 'Payment: initiate logs transaction');
 assert_equals('initiated', $txs[0]['status'], 'Payment: first transaction status is initiated');
 assert_equals('mock', $txs[0]['provider'], 'Payment: provider is mock');
+assert_equals('default', $txs[0]['store_id'], 'Payment: transaction stores active store ownership');
+StoreContext::activate($deContext);
+assert_equals(0, count(PaymentService::transactionsForOrder((int)$payOrder['id'])), 'Store isolation: second store cannot read default payment transactions');
+$crossStorePaymentRejected = false;
+try { PaymentService::initiate(['order_id' => $payOrder['id']], $mockGateway); } catch (\RuntimeException $e) { $crossStorePaymentRejected = true; }
+assert_true($crossStorePaymentRejected, 'Store isolation: second store cannot initiate payment for default order');
+Bootstrap::initStoreContext('/', '', 'default');
 
 echo "\n--- Test: Payment — webhook paid flow ---\n";
 
@@ -3369,6 +3410,12 @@ assert_equals('packeta', $labelResult['carrier'], 'Shipping: label carrier is pa
 $labelRow = $pdo->query("SELECT * FROM shipping_labels WHERE awb = '{$labelResult['awb']}'")->fetch();
 assert_true($labelRow !== false, 'Shipping: label saved in shipping_labels table');
 assert_equals('created', $labelRow['status'], 'Shipping: label status = created');
+assert_equals('default', $labelRow['store_id'], 'Shipping: label stores active store ownership');
+StoreContext::activate($deContext);
+$crossStoreLabelRejected = false;
+try { ShippingService::generateLabel($shippingOrderId, 'packeta'); } catch (\RuntimeException $e) { $crossStoreLabelRejected = true; }
+assert_true($crossStoreLabelRejected, 'Store isolation: second store cannot generate a label for default order');
+Bootstrap::initStoreContext('/', '', 'default');
 
 // Verify order updated with tracking_number + carrier
 $updatedOrder = $pdo->query("SELECT tracking_number, carrier FROM orders WHERE id = {$shippingOrderId}")->fetch();
@@ -3387,6 +3434,10 @@ $shippingWebhookSecret = 'test-shipping-webhook-secret';
 putenv('SHIP_PACKETA_WEBHOOK_SECRET=' . $shippingWebhookSecret);
 $webhookRaw = json_encode($webhookPayload, JSON_UNESCAPED_SLASHES);
 $webhookSignature = hash_hmac('sha256', $webhookRaw, $shippingWebhookSecret);
+StoreContext::activate($deContext);
+$crossStoreWebhook = ShippingService::handleTrackingWebhook('packeta', $webhookPayload, $webhookSignature, $webhookRaw);
+assert_equals('unknown_awb', $crossStoreWebhook['reason'] ?? null, 'Store isolation: second store webhook cannot resolve default shipping label');
+Bootstrap::initStoreContext('/', '', 'default');
 $webhookResult = ShippingService::handleTrackingWebhook('packeta', $webhookPayload, $webhookSignature, $webhookRaw);
 assert_true($webhookResult['handled'], 'Shipping: tracking webhook handled=true');
 assert_equals('delivered', $webhookResult['status'], 'Shipping: webhook status=delivered');
@@ -4423,6 +4474,7 @@ if (file_exists($financialMigFile)) {
     $financialMig = require $financialMigFile;
     $financialMig->up(Db::get(), Db::isSqlite());
 }
+$storeScopeMigration->up(Db::get(), true);
 
 // Seed a minimal paid order
 $db = Db::get();
@@ -4439,6 +4491,11 @@ assert_equals(12600, (int)$inv1['total_gross'], 'Invoice: total_gross matches or
 assert_equals('eur', (string)$inv1['currency'], 'Invoice: currency from order');
 assert_equals(64, strlen((string)$inv1['download_token']), 'Invoice: download_token is 64 hex chars');
 assert_true(ctype_xdigit((string)$inv1['download_token']), 'Invoice: download_token is hex');
+assert_equals('default', $inv1['store_id'], 'Invoice: issued invoice stores active store ownership');
+StoreContext::activate($deContext);
+assert_true(InvoiceService::byOrderId(5001) === null, 'Store isolation: second store cannot read default invoice by order');
+assert_true(InvoiceService::byToken((string)$inv1['download_token']) === null, 'Store isolation: second store cannot use default invoice token');
+Bootstrap::initStoreContext('/', '', 'default');
 
 // 2. PDF written to disk
 $pdfPath = InvoiceService::pdfAbsolutePath($inv1);
