@@ -15,33 +15,36 @@ return new class {
     public function up(PDO $db, bool $isSqlite): void {
         $autoinc = $isSqlite ? '' : ' AUTO_INCREMENT';
         $now     = $isSqlite ? "datetime('now')" : "NOW()";
+        $short   = MigrationSql::short($isSqlite);
+        $text    = MigrationSql::text($isSqlite);
+        $date    = MigrationSql::datetime($isSqlite);
 
         $db->exec("CREATE TABLE IF NOT EXISTS rma_requests (
             id          INTEGER PRIMARY KEY{$autoinc},
-            rma_number  TEXT NOT NULL,
+            rma_number  {$short} NOT NULL,
             order_id    INTEGER NOT NULL,
             customer_id INTEGER DEFAULT NULL,
-            status      TEXT NOT NULL DEFAULT 'requested',
-            reason      TEXT NOT NULL DEFAULT '',
-            admin_note  TEXT NOT NULL DEFAULT '',
-            created_at  TEXT NOT NULL DEFAULT ({$now}),
-            updated_at  TEXT NOT NULL DEFAULT ({$now}),
+            status      {$short} NOT NULL DEFAULT 'requested',
+            reason      {$text} NOT NULL DEFAULT '',
+            admin_note  {$text} NOT NULL DEFAULT '',
+            created_at  {$date} NOT NULL DEFAULT ({$now}),
+            updated_at  {$date} NOT NULL DEFAULT ({$now}),
             UNIQUE(rma_number)
         )");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_rma_order ON rma_requests(order_id)");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_rma_customer ON rma_requests(customer_id)");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_rma_status ON rma_requests(status)");
+        MigrationSql::index($db, $isSqlite, 'rma_requests', 'idx_rma_order', 'order_id');
+        MigrationSql::index($db, $isSqlite, 'rma_requests', 'idx_rma_customer', 'customer_id');
+        MigrationSql::index($db, $isSqlite, 'rma_requests', 'idx_rma_status', 'status');
 
         $db->exec("CREATE TABLE IF NOT EXISTS rma_items (
             id            INTEGER PRIMARY KEY{$autoinc},
             rma_id        INTEGER NOT NULL,
             order_item_id INTEGER NOT NULL,
             product_id    INTEGER DEFAULT NULL,
-            sku           TEXT NOT NULL DEFAULT '',
-            name          TEXT NOT NULL DEFAULT '',
+            sku           {$short} NOT NULL DEFAULT '',
+            name          {$short} NOT NULL DEFAULT '',
             quantity      INTEGER NOT NULL DEFAULT 1,
-            created_at    TEXT NOT NULL DEFAULT ({$now})
+            created_at    {$date} NOT NULL DEFAULT ({$now})
         )");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_rma_items_rma ON rma_items(rma_id)");
+        MigrationSql::index($db, $isSqlite, 'rma_items', 'idx_rma_items_rma', 'rma_id');
     }
 };

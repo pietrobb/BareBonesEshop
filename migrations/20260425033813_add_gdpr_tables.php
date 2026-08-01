@@ -13,6 +13,9 @@ return new class {
     public function up(PDO $db, bool $isSqlite): void {
         $autoinc = $isSqlite ? '' : ' AUTO_INCREMENT';
         $now     = $isSqlite ? "datetime('now')" : "NOW()";
+        $short   = MigrationSql::short($isSqlite);
+        $text    = MigrationSql::text($isSqlite);
+        $date    = MigrationSql::datetime($isSqlite);
 
         // 1) gdpr_events — append-only audit log
         // action ∈ {export, erase, consent_change, retention_apply, admin_anonymize, purge}
@@ -21,14 +24,14 @@ return new class {
         // ip_hash:      salted sha256(ip)    same salt
         $db->exec("CREATE TABLE gdpr_events (
             id INTEGER PRIMARY KEY{$autoinc},
-            action TEXT NOT NULL,
+            action {$short} NOT NULL,
             customer_id INTEGER NULL,
-            email_hash TEXT NULL,
-            ip_hash TEXT NULL,
-            actor TEXT NULL,
-            payload_hash TEXT NULL,
-            note TEXT NULL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            email_hash {$short} NULL,
+            ip_hash {$short} NULL,
+            actor {$short} NULL,
+            payload_hash {$short} NULL,
+            note {$text} NULL,
+            created_at {$date} NOT NULL DEFAULT ({$now})
         )");
         $db->exec("CREATE INDEX idx_gdpr_events_customer ON gdpr_events(customer_id)");
         $db->exec("CREATE INDEX idx_gdpr_events_action ON gdpr_events(action)");
@@ -38,11 +41,11 @@ return new class {
         // 2) data_retention_runs — history of GC/retention executions
         $db->exec("CREATE TABLE data_retention_runs (
             id INTEGER PRIMARY KEY{$autoinc},
-            run_at TEXT NOT NULL DEFAULT (datetime('now')),
-            mode TEXT NOT NULL,
-            policy_key TEXT NOT NULL,
+            run_at {$date} NOT NULL DEFAULT ({$now}),
+            mode {$short} NOT NULL,
+            policy_key {$short} NOT NULL,
             affected_rows INTEGER NOT NULL DEFAULT 0,
-            details TEXT NULL,
+            details {$text} NULL,
             duration_ms INTEGER NULL
         )");
         $db->exec("CREATE INDEX idx_retention_runs_run_at ON data_retention_runs(run_at)");
@@ -53,14 +56,14 @@ return new class {
         // method: "banner_accept_all" | "banner_reject_all" | "preferences" | "withdrawal"
         $db->exec("CREATE TABLE cookie_consent (
             id INTEGER PRIMARY KEY{$autoinc},
-            session_id TEXT NULL,
+            session_id {$short} NULL,
             customer_id INTEGER NULL,
-            ip_hash TEXT NULL,
-            user_agent TEXT NULL,
-            categories_json TEXT NOT NULL,
-            method TEXT NOT NULL,
+            ip_hash {$short} NULL,
+            user_agent {$text} NULL,
+            categories_json {$text} NOT NULL,
+            method {$short} NOT NULL,
             consent_version INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at {$date} NOT NULL DEFAULT ({$now})
         )");
         $db->exec("CREATE INDEX idx_cookie_consent_session ON cookie_consent(session_id)");
         $db->exec("CREATE INDEX idx_cookie_consent_customer ON cookie_consent(customer_id)");

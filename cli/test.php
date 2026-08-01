@@ -4673,6 +4673,34 @@ $correct = $mig->fileChecksum($migDir . '/20260101000001_create_widgets.php');
 $migDb->prepare("UPDATE schema_migrations SET checksum = ? WHERE name = ?")
       ->execute([$correct, '20260101000001_create_widgets']);
 
+// Test 4b: explicitly approved driver-portability rewrite accepts only its exact old→new checksum pair
+$legacyDir = $migDir . '/legacy';
+mkdir($legacyDir, 0750, true);
+$legacyName = '20260424000000_baseline';
+$legacyPath = $legacyDir . '/' . $legacyName . '.php';
+copy(__DIR__ . '/../migrations/' . $legacyName . '.php', $legacyPath);
+$legacyDb = new PDO('sqlite::memory:');
+$legacyDb->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$legacyMig = new Migrator($legacyDb, $legacyDir, $migLock . '.legacy');
+$legacyMig->ensureMigrationsTable();
+$legacyDb->prepare("INSERT INTO schema_migrations (name, checksum, duration_ms) VALUES (?, ?, 0)")
+         ->execute([$legacyName, '0733ee8ec1141fe01a63fc86ff0f8a0efff517b7873f847759bcfe0e63500b29']);
+$legacyStatus = $legacyMig->status();
+assert_true($legacyStatus['applied'][$legacyName]['checksum_ok'] === true, 'Migrate: exact approved legacy checksum maps to driver-portable rewrite');
+assert_equals(0, count($legacyMig->apply(static fn($m) => null)), 'Migrate: approved legacy checksum passes apply verification');
+file_put_contents($legacyPath, "\n// unapproved third version\n", FILE_APPEND);
+$legacyRejected = false;
+try {
+    $legacyMig->apply(static fn($m) => null);
+} catch (\Throwable $e) {
+    $legacyRejected = strpos($e->getMessage(), 'modified after being applied') !== false;
+}
+assert_true($legacyRejected, 'Migrate: legacy checksum does not allow an unapproved third version');
+$legacyDb = null;
+@unlink($legacyPath);
+@rmdir($legacyDir);
+@unlink($migLock . '.legacy');
+
 // Test 5: Failure mid-migration rolls back, marker not inserted
 $writeMig('20260101000004_will_fail', "\$db->exec('CREATE TABLE temp_ok (id INTEGER PRIMARY KEY)'); \$db->exec('CREATE TABLE temp_ok (id INTEGER PRIMARY KEY)');");
 $migFailed = false;

@@ -10,40 +10,43 @@
 return new class {
     public function up(PDO $db, bool $isSqlite): void {
         $now = $isSqlite ? "datetime('now')" : "NOW()";
+        $autoinc = $isSqlite ? '' : ' AUTO_INCREMENT';
+        $short = MigrationSql::short($isSqlite);
+        $text = MigrationSql::text($isSqlite);
 
         $db->exec("
             CREATE TABLE IF NOT EXISTS invoices (
-                id INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY{$autoinc},
                 order_id INTEGER NOT NULL,
-                number TEXT NOT NULL UNIQUE,
-                issued_at TEXT NOT NULL,
-                delivery_date TEXT,
-                due_date TEXT,
-                pdf_path TEXT NOT NULL,
+                number {$short} NOT NULL UNIQUE,
+                issued_at {$short} NOT NULL,
+                delivery_date {$short},
+                due_date {$short},
+                pdf_path {$text} NOT NULL,
                 total_net INTEGER NOT NULL DEFAULT 0,
                 total_vat INTEGER NOT NULL DEFAULT 0,
                 total_gross INTEGER NOT NULL DEFAULT 0,
-                currency TEXT NOT NULL DEFAULT 'eur',
-                vat_breakdown TEXT NOT NULL DEFAULT '{}',
-                customer_snapshot TEXT NOT NULL DEFAULT '{}',
-                seller_snapshot TEXT NOT NULL DEFAULT '{}',
-                payment_method TEXT,
-                locale TEXT NOT NULL DEFAULT 'en',
-                status TEXT NOT NULL DEFAULT 'issued',
-                download_token TEXT NOT NULL UNIQUE,
-                cancelled_at TEXT,
-                created_at TEXT DEFAULT ({$now}),
+                currency {$short} NOT NULL DEFAULT 'eur',
+                vat_breakdown {$text} NOT NULL DEFAULT '{}',
+                customer_snapshot {$text} NOT NULL DEFAULT '{}',
+                seller_snapshot {$text} NOT NULL DEFAULT '{}',
+                payment_method {$short},
+                locale {$short} NOT NULL DEFAULT 'en',
+                status {$short} NOT NULL DEFAULT 'issued',
+                download_token {$short} NOT NULL UNIQUE,
+                cancelled_at {$short},
+                created_at {$short} DEFAULT ({$now}),
                 FOREIGN KEY (order_id) REFERENCES orders(id)
             )
         ");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_invoices_order ON invoices(order_id)");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_invoices_issued_at ON invoices(issued_at)");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status)");
+        MigrationSql::index($db, $isSqlite, 'invoices', 'idx_invoices_order', 'order_id');
+        MigrationSql::index($db, $isSqlite, 'invoices', 'idx_invoices_issued_at', 'issued_at');
+        MigrationSql::index($db, $isSqlite, 'invoices', 'idx_invoices_status', 'status');
 
         $db->exec("
             CREATE TABLE IF NOT EXISTS invoice_counters (
                 year INTEGER NOT NULL,
-                prefix TEXT NOT NULL DEFAULT '',
+                prefix {$short} NOT NULL DEFAULT '',
                 last_number INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (year, prefix)
             )

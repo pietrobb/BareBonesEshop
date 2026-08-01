@@ -13,17 +13,19 @@ return new class {
     public function up(PDO $db, bool $isSqlite): void {
         $autoinc = $isSqlite ? '' : ' AUTO_INCREMENT';
         $now     = $isSqlite ? "datetime('now')" : "NOW()";
+        $short   = MigrationSql::short($isSqlite);
+        $date    = MigrationSql::datetime($isSqlite);
 
         $db->exec("CREATE TABLE IF NOT EXISTS wishlist_items (
             id          INTEGER PRIMARY KEY{$autoinc},
-            owner_key   TEXT NOT NULL,
+            owner_key   {$short} NOT NULL,
             customer_id INTEGER DEFAULT NULL,
             product_id  INTEGER NOT NULL,
-            created_at  TEXT NOT NULL DEFAULT ({$now}),
+            created_at  {$date} NOT NULL DEFAULT ({$now}),
             UNIQUE(owner_key, product_id)
         )");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_wishlist_owner ON wishlist_items(owner_key)");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_wishlist_product ON wishlist_items(product_id)");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_wishlist_customer ON wishlist_items(customer_id)");
+        MigrationSql::index($db, $isSqlite, 'wishlist_items', 'idx_wishlist_owner', 'owner_key');
+        MigrationSql::index($db, $isSqlite, 'wishlist_items', 'idx_wishlist_product', 'product_id');
+        MigrationSql::index($db, $isSqlite, 'wishlist_items', 'idx_wishlist_customer', 'customer_id');
     }
 };

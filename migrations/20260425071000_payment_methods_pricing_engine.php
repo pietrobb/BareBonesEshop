@@ -10,14 +10,17 @@ return new class {
     public function up(PDO $db, bool $isSqlite): void {
         $now = $isSqlite ? "datetime('now')" : "NOW()";
         $autoinc = $isSqlite ? '' : ' AUTO_INCREMENT';
+        $short = MigrationSql::short($isSqlite);
+        $text = MigrationSql::text($isSqlite);
+        $date = MigrationSql::datetime($isSqlite);
 
         $db->exec("CREATE TABLE IF NOT EXISTS payment_methods (
             id                    INTEGER PRIMARY KEY{$autoinc},
-            code                  TEXT NOT NULL UNIQUE,
-            provider              TEXT NOT NULL DEFAULT '',
-            name                  TEXT NOT NULL,
-            description           TEXT DEFAULT '',
-            service_type          TEXT NOT NULL DEFAULT 'offline',
+            code                  {$short} NOT NULL UNIQUE,
+            provider              {$short} NOT NULL DEFAULT '',
+            name                  {$short} NOT NULL,
+            description           {$text} DEFAULT '',
+            service_type          {$short} NOT NULL DEFAULT 'offline',
             min_amount            INTEGER NOT NULL DEFAULT 0,
             max_amount            INTEGER DEFAULT NULL,
             fixed_fee             INTEGER NOT NULL DEFAULT 0,
@@ -26,32 +29,32 @@ return new class {
             requires_online       INTEGER NOT NULL DEFAULT 0,
             active                INTEGER NOT NULL DEFAULT 1,
             sort_order            INTEGER NOT NULL DEFAULT 100,
-            created_at            TEXT DEFAULT ({$now}),
-            updated_at            TEXT DEFAULT ({$now})
+            created_at            {$date} DEFAULT ({$now}),
+            updated_at            {$date} DEFAULT ({$now})
         )");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_payment_methods_active_sort ON payment_methods(active, sort_order)");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_payment_methods_provider ON payment_methods(provider)");
+        MigrationSql::index($db, $isSqlite, 'payment_methods', 'idx_payment_methods_active_sort', 'active, sort_order');
+        MigrationSql::index($db, $isSqlite, 'payment_methods', 'idx_payment_methods_provider', 'provider');
 
         $db->exec("CREATE TABLE IF NOT EXISTS payment_method_countries (
             id           INTEGER PRIMARY KEY{$autoinc},
-            method_code  TEXT NOT NULL,
-            country      TEXT NOT NULL,
-            created_at   TEXT DEFAULT ({$now}),
+            method_code  {$short} NOT NULL,
+            country      {$short} NOT NULL,
+            created_at   {$date} DEFAULT ({$now}),
             UNIQUE(method_code, country)
         )");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_payment_method_countries_lookup ON payment_method_countries(country, method_code)");
+        MigrationSql::index($db, $isSqlite, 'payment_method_countries', 'idx_payment_method_countries_lookup', 'country, method_code');
 
         $db->exec("CREATE TABLE IF NOT EXISTS payment_method_shipping (
             id                   INTEGER PRIMARY KEY{$autoinc},
-            method_code          TEXT NOT NULL,
-            shipping_method_code TEXT NOT NULL,
-            created_at           TEXT DEFAULT ({$now}),
+            method_code          {$short} NOT NULL,
+            shipping_method_code {$short} NOT NULL,
+            created_at           {$date} DEFAULT ({$now}),
             UNIQUE(method_code, shipping_method_code)
         )");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_payment_method_shipping_lookup ON payment_method_shipping(shipping_method_code, method_code)");
+        MigrationSql::index($db, $isSqlite, 'payment_method_shipping', 'idx_payment_method_shipping_lookup', 'shipping_method_code, method_code');
 
-        $this->addColumnIfMissing($db, 'orders', 'payment_fee', "INTEGER NOT NULL DEFAULT 0");
-        $this->addColumnIfMissing($db, 'orders', 'payment_method_snapshot', "TEXT DEFAULT NULL");
+        $this->addColumnIfMissing($db, $isSqlite, 'orders', 'payment_fee', "INTEGER NOT NULL DEFAULT 0");
+        $this->addColumnIfMissing($db, $isSqlite, 'orders', 'payment_method_snapshot', "{$text} DEFAULT NULL");
 
         $this->seedMethods($db, $isSqlite);
         $this->seedCountries($db, $isSqlite);
@@ -91,18 +94,16 @@ return new class {
         foreach ($rows as $row) $stmt->execute($row);
     }
 
-    private function addColumnIfMissing(PDO $db, string $table, string $col, string $def): void {
-        $exists = false;
-        try {
-            $rows = $db->query("PRAGMA table_info({$table})")->fetchAll(PDO::FETCH_ASSOC);
-            foreach ($rows as $r) {
-                if (($r['name'] ?? '') === $col) { $exists = true; break; }
+    private function addColumnIfMissing(PDO $db, bool $isSqlite, string $table, string $col, string $def): void {
+        if ($isSqlite) {
+            foreach ($db->query("PRAGMA table_info({$table})")->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                if (($row['name'] ?? '') === $col) return;
             }
-        } catch (Throwable $e) {
-            $stmt = $db->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_NAME=? AND COLUMN_NAME=?");
+        } else {
+            $stmt = $db->prepare("SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?");
             $stmt->execute([$table, $col]);
-            $exists = ((int)$stmt->fetchColumn()) > 0;
+            if ($stmt->fetchColumn()) return;
         }
-        if (!$exists) $db->exec("ALTER TABLE {$table} ADD COLUMN {$col} {$def}");
+        $db->exec("ALTER TABLE {$table} ADD COLUMN {$col} {$def}");
     }
 };

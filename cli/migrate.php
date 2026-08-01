@@ -38,8 +38,17 @@ $logger = static function (string $msg): void {
 $preApplyHook = null;
 if ($cmd === 'apply' && !$skipBackup) {
     $preApplyHook = static function (array $pendingNames, callable $log): void {
+        $db = Db::get();
+        $driver = (string)$db->getAttribute(PDO::ATTR_DRIVER_NAME);
+        $applicationTables = $driver === 'sqlite'
+            ? (int)$db->query("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name <> 'schema_migrations'")->fetchColumn()
+            : (int)$db->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='BASE TABLE' AND TABLE_NAME <> 'schema_migrations'")->fetchColumn();
+        if ($applicationTables === 0) {
+            $log("  [backup] fresh schema has no application tables; no backup required.");
+            return;
+        }
         try {
-            BackupService::init(Db::get());
+            BackupService::init($db);
         } catch (\Throwable $e) {
             $log("  [backup] init failed: " . $e->getMessage() . " — continuing without backup.");
             return;

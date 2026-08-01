@@ -11,22 +11,25 @@ return new class {
     public function up(PDO $db, bool $isSqlite): void {
         $autoinc = $isSqlite ? '' : ' AUTO_INCREMENT';
         $now     = $isSqlite ? "datetime('now')" : "NOW()";
+        $short   = MigrationSql::short($isSqlite);
+        $text    = MigrationSql::text($isSqlite);
+        $date    = MigrationSql::datetime($isSqlite);
 
         $db->exec("CREATE TABLE IF NOT EXISTS product_reviews (
             id           INTEGER PRIMARY KEY{$autoinc},
             product_id   INTEGER NOT NULL,
             customer_id  INTEGER DEFAULT NULL,
-            author_name  TEXT NOT NULL DEFAULT '',
+            author_name  {$short} NOT NULL DEFAULT '',
             rating       INTEGER NOT NULL,
-            title        TEXT NOT NULL DEFAULT '',
-            body         TEXT NOT NULL DEFAULT '',
-            status       TEXT NOT NULL DEFAULT 'pending',
-            created_at   TEXT NOT NULL DEFAULT ({$now}),
-            updated_at   TEXT NOT NULL DEFAULT ({$now})
+            title        {$short} NOT NULL DEFAULT '',
+            body         {$text} NOT NULL DEFAULT '',
+            status       {$short} NOT NULL DEFAULT 'pending',
+            created_at   {$date} NOT NULL DEFAULT ({$now}),
+            updated_at   {$date} NOT NULL DEFAULT ({$now})
         )");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_product_reviews_product ON product_reviews(product_id, status)");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_product_reviews_status ON product_reviews(status)");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_product_reviews_customer ON product_reviews(customer_id)");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_product_reviews_created ON product_reviews(created_at)");
+        MigrationSql::index($db, $isSqlite, 'product_reviews', 'idx_product_reviews_product', 'product_id, status');
+        MigrationSql::index($db, $isSqlite, 'product_reviews', 'idx_product_reviews_status', 'status');
+        MigrationSql::index($db, $isSqlite, 'product_reviews', 'idx_product_reviews_customer', 'customer_id');
+        MigrationSql::index($db, $isSqlite, 'product_reviews', 'idx_product_reviews_created', 'created_at');
     }
 };

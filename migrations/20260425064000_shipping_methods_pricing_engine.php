@@ -11,15 +11,18 @@ return new class {
     public function up(PDO $db, bool $isSqlite): void {
         $now = $isSqlite ? "datetime('now')" : "NOW()";
         $autoinc = $isSqlite ? '' : ' AUTO_INCREMENT';
+        $short = MigrationSql::short($isSqlite);
+        $text = MigrationSql::text($isSqlite);
+        $date = MigrationSql::datetime($isSqlite);
 
         $db->exec("CREATE TABLE IF NOT EXISTS shipping_methods (
             id                 INTEGER PRIMARY KEY{$autoinc},
-            code               TEXT NOT NULL UNIQUE,
-            carrier            TEXT NOT NULL,
-            name               TEXT NOT NULL,
-            description        TEXT DEFAULT '',
-            adapter_class      TEXT DEFAULT '',
-            service_type       TEXT NOT NULL DEFAULT 'parcel',
+            code               {$short} NOT NULL UNIQUE,
+            carrier            {$short} NOT NULL,
+            name               {$short} NOT NULL,
+            description        {$text} DEFAULT '',
+            adapter_class      {$short} DEFAULT '',
+            service_type       {$short} NOT NULL DEFAULT 'parcel',
             supports_cod       INTEGER NOT NULL DEFAULT 0,
             supports_pickup    INTEGER NOT NULL DEFAULT 0,
             free_above         INTEGER DEFAULT NULL,
@@ -27,60 +30,60 @@ return new class {
             max_volume_cm3     INTEGER DEFAULT NULL,
             active             INTEGER NOT NULL DEFAULT 1,
             sort_order         INTEGER NOT NULL DEFAULT 100,
-            created_at         TEXT DEFAULT ({$now}),
-            updated_at         TEXT DEFAULT ({$now})
+            created_at         {$date} DEFAULT ({$now}),
+            updated_at         {$date} DEFAULT ({$now})
         )");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_shipping_methods_active_sort ON shipping_methods(active, sort_order)");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_shipping_methods_carrier ON shipping_methods(carrier)");
+        MigrationSql::index($db, $isSqlite, 'shipping_methods', 'idx_shipping_methods_active_sort', 'active, sort_order');
+        MigrationSql::index($db, $isSqlite, 'shipping_methods', 'idx_shipping_methods_carrier', 'carrier');
 
         $db->exec("CREATE TABLE IF NOT EXISTS shipping_zones (
             id          INTEGER PRIMARY KEY{$autoinc},
-            code        TEXT NOT NULL UNIQUE,
-            name        TEXT NOT NULL,
-            description TEXT DEFAULT '',
+            code        {$short} NOT NULL UNIQUE,
+            name        {$short} NOT NULL,
+            description {$text} DEFAULT '',
             active      INTEGER NOT NULL DEFAULT 1,
             sort_order  INTEGER NOT NULL DEFAULT 100,
-            created_at  TEXT DEFAULT ({$now}),
-            updated_at  TEXT DEFAULT ({$now})
+            created_at  {$date} DEFAULT ({$now}),
+            updated_at  {$date} DEFAULT ({$now})
         )");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_shipping_zones_active_sort ON shipping_zones(active, sort_order)");
+        MigrationSql::index($db, $isSqlite, 'shipping_zones', 'idx_shipping_zones_active_sort', 'active, sort_order');
 
         $db->exec("CREATE TABLE IF NOT EXISTS shipping_zone_countries (
             id         INTEGER PRIMARY KEY{$autoinc},
-            zone_code  TEXT NOT NULL,
-            country    TEXT NOT NULL,
-            postal_min TEXT DEFAULT '',
-            postal_max TEXT DEFAULT '',
-            created_at TEXT DEFAULT ({$now}),
+            zone_code  {$short} NOT NULL,
+            country    {$short} NOT NULL,
+            postal_min {$short} DEFAULT '',
+            postal_max {$short} DEFAULT '',
+            created_at {$date} DEFAULT ({$now}),
             UNIQUE(zone_code, country, postal_min, postal_max)
         )");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_shipping_zone_countries_lookup ON shipping_zone_countries(country, postal_min, postal_max)");
+        MigrationSql::index($db, $isSqlite, 'shipping_zone_countries', 'idx_shipping_zone_countries_lookup', 'country, postal_min, postal_max');
 
         $db->exec("CREATE TABLE IF NOT EXISTS shipping_rates (
             id            INTEGER PRIMARY KEY{$autoinc},
-            carrier       TEXT NOT NULL,
-            country       TEXT NOT NULL,
+            carrier       {$short} NOT NULL,
+            country       {$short} NOT NULL,
             weight_from_g INTEGER NOT NULL DEFAULT 0,
             weight_to_g   INTEGER NOT NULL DEFAULT 999999,
             price         INTEGER NOT NULL,
             cod_surcharge INTEGER NOT NULL DEFAULT 0,
-            created_at    TEXT DEFAULT ({$now})
+            created_at    {$date} DEFAULT ({$now})
         )");
 
-        $this->addColumnIfMissing($db, 'shipping_rates', 'method_code', "TEXT DEFAULT ''");
-        $this->addColumnIfMissing($db, 'shipping_rates', 'zone_code', "TEXT DEFAULT ''");
-        $this->addColumnIfMissing($db, 'shipping_rates', 'volume_to_cm3', "INTEGER DEFAULT NULL");
-        $this->addColumnIfMissing($db, 'shipping_rates', 'delivery_days', "TEXT DEFAULT ''");
-        $this->addColumnIfMissing($db, 'shipping_rates', 'active', "INTEGER NOT NULL DEFAULT 1");
-        $this->addColumnIfMissing($db, 'shipping_rates', 'sort_order', "INTEGER NOT NULL DEFAULT 100");
-        $this->addColumnIfMissing($db, 'shipping_rates', 'updated_at', "TEXT DEFAULT NULL");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_srate_method_zone ON shipping_rates(method_code, zone_code, active, weight_from_g, weight_to_g)");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_srate_country_active ON shipping_rates(country, active)");
+        $this->addColumnIfMissing($db, $isSqlite, 'shipping_rates', 'method_code', "{$short} DEFAULT ''");
+        $this->addColumnIfMissing($db, $isSqlite, 'shipping_rates', 'zone_code', "{$short} DEFAULT ''");
+        $this->addColumnIfMissing($db, $isSqlite, 'shipping_rates', 'volume_to_cm3', "INTEGER DEFAULT NULL");
+        $this->addColumnIfMissing($db, $isSqlite, 'shipping_rates', 'delivery_days', "{$short} DEFAULT ''");
+        $this->addColumnIfMissing($db, $isSqlite, 'shipping_rates', 'active', "INTEGER NOT NULL DEFAULT 1");
+        $this->addColumnIfMissing($db, $isSqlite, 'shipping_rates', 'sort_order', "INTEGER NOT NULL DEFAULT 100");
+        $this->addColumnIfMissing($db, $isSqlite, 'shipping_rates', 'updated_at', "{$date} DEFAULT NULL");
+        MigrationSql::index($db, $isSqlite, 'shipping_rates', 'idx_srate_method_zone', 'method_code, zone_code, active, weight_from_g, weight_to_g');
+        MigrationSql::index($db, $isSqlite, 'shipping_rates', 'idx_srate_country_active', 'country, active');
 
-        $this->addColumnIfMissing($db, 'orders', 'shipping_method', "TEXT DEFAULT NULL");
-        $this->addColumnIfMissing($db, 'orders', 'shipping_zone', "TEXT DEFAULT NULL");
-        $this->addColumnIfMissing($db, 'orders', 'shipping_weight_g', "INTEGER NOT NULL DEFAULT 0");
-        $this->addColumnIfMissing($db, 'orders', 'shipping_rate_snapshot', "TEXT DEFAULT NULL");
+        $this->addColumnIfMissing($db, $isSqlite, 'orders', 'shipping_method', "{$short} DEFAULT NULL");
+        $this->addColumnIfMissing($db, $isSqlite, 'orders', 'shipping_zone', "{$short} DEFAULT NULL");
+        $this->addColumnIfMissing($db, $isSqlite, 'orders', 'shipping_weight_g', "INTEGER NOT NULL DEFAULT 0");
+        $this->addColumnIfMissing($db, $isSqlite, 'orders', 'shipping_rate_snapshot', "{$text} DEFAULT NULL");
 
         $this->seedMethods($db, $isSqlite);
         $this->seedZones($db, $isSqlite);
@@ -156,18 +159,16 @@ return new class {
         }
     }
 
-    private function addColumnIfMissing(PDO $db, string $table, string $col, string $def): void {
-        $exists = false;
-        try {
-            $rows = $db->query("PRAGMA table_info({$table})")->fetchAll(PDO::FETCH_ASSOC);
-            foreach ($rows as $r) {
-                if (($r['name'] ?? '') === $col) { $exists = true; break; }
+    private function addColumnIfMissing(PDO $db, bool $isSqlite, string $table, string $col, string $def): void {
+        if ($isSqlite) {
+            foreach ($db->query("PRAGMA table_info({$table})")->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                if (($row['name'] ?? '') === $col) return;
             }
-        } catch (Throwable $e) {
-            $stmt = $db->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_NAME=? AND COLUMN_NAME=?");
+        } else {
+            $stmt = $db->prepare("SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?");
             $stmt->execute([$table, $col]);
-            $exists = ((int)$stmt->fetchColumn()) > 0;
+            if ($stmt->fetchColumn()) return;
         }
-        if (!$exists) $db->exec("ALTER TABLE {$table} ADD COLUMN {$col} {$def}");
+        $db->exec("ALTER TABLE {$table} ADD COLUMN {$col} {$def}");
     }
 };

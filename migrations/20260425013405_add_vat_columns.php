@@ -14,63 +14,61 @@
  */
 return new class {
     public function up(PDO $db, bool $isSqlite): void {
+        $short = MigrationSql::short($isSqlite);
+        $text = MigrationSql::text($isSqlite);
+        $date = MigrationSql::datetime($isSqlite);
+
         // ── products: vat_class ────────────────────────────────────────────
-        $this->addColumnIfMissing($db, 'products', 'vat_class', "TEXT NOT NULL DEFAULT 'standard'");
+        $this->addColumnIfMissing($db, $isSqlite, 'products', 'vat_class', "{$short} NOT NULL DEFAULT 'standard'");
 
         // ── order_items: per-line VAT snapshot ─────────────────────────────
-        $this->addColumnIfMissing($db, 'order_items', 'vat_class',  "TEXT NOT NULL DEFAULT 'standard'");
-        $this->addColumnIfMissing($db, 'order_items', 'vat_rate',   "REAL NOT NULL DEFAULT 0");
-        $this->addColumnIfMissing($db, 'order_items', 'vat_amount', "INTEGER NOT NULL DEFAULT 0");
-        $this->addColumnIfMissing($db, 'order_items', 'net_amount', "INTEGER NOT NULL DEFAULT 0");
+        $this->addColumnIfMissing($db, $isSqlite, 'order_items', 'vat_class',  "{$short} NOT NULL DEFAULT 'standard'");
+        $this->addColumnIfMissing($db, $isSqlite, 'order_items', 'vat_rate',   "REAL NOT NULL DEFAULT 0");
+        $this->addColumnIfMissing($db, $isSqlite, 'order_items', 'vat_amount', "INTEGER NOT NULL DEFAULT 0");
+        $this->addColumnIfMissing($db, $isSqlite, 'order_items', 'net_amount', "INTEGER NOT NULL DEFAULT 0");
 
         // ── orders: aggregated VAT for fast reads ──────────────────────────
-        $this->addColumnIfMissing($db, 'orders', 'vat_scenario', "TEXT");
-        $this->addColumnIfMissing($db, 'orders', 'vat_total',    "INTEGER NOT NULL DEFAULT 0");
-        $this->addColumnIfMissing($db, 'orders', 'net_total',    "INTEGER NOT NULL DEFAULT 0");
+        $this->addColumnIfMissing($db, $isSqlite, 'orders', 'vat_scenario', $short);
+        $this->addColumnIfMissing($db, $isSqlite, 'orders', 'vat_total',    "INTEGER NOT NULL DEFAULT 0");
+        $this->addColumnIfMissing($db, $isSqlite, 'orders', 'net_total',    "INTEGER NOT NULL DEFAULT 0");
 
         // ── customers: VAT ID for B2B reverse-charge ───────────────────────
-        $this->addColumnIfMissing($db, 'customers', 'vat_id',           "TEXT");
-        $this->addColumnIfMissing($db, 'customers', 'vat_country',      "TEXT");
-        $this->addColumnIfMissing($db, 'customers', 'vat_validated_at', "TEXT");
+        $this->addColumnIfMissing($db, $isSqlite, 'customers', 'vat_id',           $short);
+        $this->addColumnIfMissing($db, $isSqlite, 'customers', 'vat_country',      $short);
+        $this->addColumnIfMissing($db, $isSqlite, 'customers', 'vat_validated_at', $date);
 
         // ── invoices: type + credit_note linkage + VAT context ─────────────
-        $this->addColumnIfMissing($db, 'invoices', 'type',                    "TEXT NOT NULL DEFAULT 'invoice'");
-        $this->addColumnIfMissing($db, 'invoices', 'refers_to_invoice_id',    "INTEGER");
-        $this->addColumnIfMissing($db, 'invoices', 'vat_scenario',            "TEXT");
-        $this->addColumnIfMissing($db, 'invoices', 'reverse_charge_note_key', "TEXT");
+        $this->addColumnIfMissing($db, $isSqlite, 'invoices', 'type',                    "{$short} NOT NULL DEFAULT 'invoice'");
+        $this->addColumnIfMissing($db, $isSqlite, 'invoices', 'refers_to_invoice_id',    "INTEGER");
+        $this->addColumnIfMissing($db, $isSqlite, 'invoices', 'vat_scenario',            $short);
+        $this->addColumnIfMissing($db, $isSqlite, 'invoices', 'reverse_charge_note_key', $short);
 
         // ── invoice_counters: split sequence per type ──────────────────────
         // Old PK was (year, prefix). New PK is (year, prefix, type).
         // Forward-only: we add a `type` column with default 'invoice', then
         // create a new unique index. Old rows become 'invoice'.
-        $this->addColumnIfMissing($db, 'invoice_counters', 'type', "TEXT NOT NULL DEFAULT 'invoice'");
-        try {
-            $db->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_invoice_counters_year_prefix_type ON invoice_counters(year, prefix, type)");
-        } catch (\Throwable $e) { /* ignore if exists */ }
+        $this->addColumnIfMissing($db, $isSqlite, 'invoice_counters', 'type', "{$short} NOT NULL DEFAULT 'invoice'");
+        MigrationSql::index($db, $isSqlite, 'invoice_counters', 'idx_invoice_counters_year_prefix_type', 'year, prefix, type', true);
 
         // ── vat_id_cache: VIES results, shared across customers ────────────
         $now = $isSqlite ? "datetime('now')" : "NOW()";
         $db->exec("
             CREATE TABLE IF NOT EXISTS vat_id_cache (
-                vat_id        TEXT PRIMARY KEY,
-                country       TEXT NOT NULL,
-                status        TEXT NOT NULL,
-                trader_name   TEXT,
-                trader_addr   TEXT,
-                checked_at    TEXT NOT NULL DEFAULT ({$now}),
+                vat_id        {$short} PRIMARY KEY,
+                country       {$short} NOT NULL,
+                status        {$short} NOT NULL,
+                trader_name   {$text},
+                trader_addr   {$text},
+                checked_at    {$date} NOT NULL DEFAULT ({$now}),
                 ttl_seconds   INTEGER NOT NULL DEFAULT 86400,
-                raw_response  TEXT
+                raw_response  {$text}
             )
         ");
-        $db->exec("CREATE INDEX IF NOT EXISTS idx_vat_id_cache_status ON vat_id_cache(status)");
+        MigrationSql::index($db, $isSqlite, 'vat_id_cache', 'idx_vat_id_cache_status', 'status');
 
         // ── invoices.refers_to_invoice_id index for credit_note lookups ────
-        try {
-            $db->exec("CREATE INDEX IF NOT EXISTS idx_invoices_refers_to ON invoices(refers_to_invoice_id)");
-        } catch (\Throwable $e) { /* ignore */ }
-        try {
-            $db->exec("CREATE INDEX IF NOT EXISTS idx_invoices_type ON invoices(type)");
-        } catch (\Throwable $e) { /* ignore */ }
+        MigrationSql::index($db, $isSqlite, 'invoices', 'idx_invoices_refers_to', 'refers_to_invoice_id');
+        MigrationSql::index($db, $isSqlite, 'invoices', 'idx_invoices_type', 'type');
     }
 
     /**
@@ -79,21 +77,16 @@ return new class {
      * INFORMATION_SCHEMA fallback below covers it; in SQLite-only dev/test
      * runs the PRAGMA path is taken).
      */
-    private function addColumnIfMissing(PDO $db, string $table, string $col, string $def): void {
-        $exists = false;
-        try {
-            $rows = $db->query("PRAGMA table_info({$table})")->fetchAll(PDO::FETCH_ASSOC);
-            foreach ($rows as $r) {
-                if (($r['name'] ?? '') === $col) { $exists = true; break; }
+    private function addColumnIfMissing(PDO $db, bool $isSqlite, string $table, string $col, string $def): void {
+        if ($isSqlite) {
+            foreach ($db->query("PRAGMA table_info({$table})")->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                if (($row['name'] ?? '') === $col) return;
             }
-        } catch (\Throwable $e) {
-            // MySQL fallback
-            $stmt = $db->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_NAME=? AND COLUMN_NAME=?");
+        } else {
+            $stmt = $db->prepare("SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?");
             $stmt->execute([$table, $col]);
-            $exists = ((int)$stmt->fetchColumn()) > 0;
+            if ($stmt->fetchColumn()) return;
         }
-        if (!$exists) {
-            $db->exec("ALTER TABLE {$table} ADD COLUMN {$col} {$def}");
-        }
+        $db->exec("ALTER TABLE {$table} ADD COLUMN {$col} {$def}");
     }
 };
