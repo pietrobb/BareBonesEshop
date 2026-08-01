@@ -54,6 +54,7 @@ try {
     }
 
     if ($command === 'doctor') {
+        $databaseBackup = createUpdateDatabaseBackup($config);
         $package = null;
         $packageDirectory = (string)($options['package'] ?? '');
         if ($packageDirectory !== '') {
@@ -63,7 +64,7 @@ try {
                 !empty($options['allow-unsigned'])
             );
         }
-        $updater = new Updater($root, $stateDirectory, Db::get());
+        $updater = new Updater($root, $stateDirectory, Db::get(), null, $databaseBackup);
         $report = $updater->doctor(
             $publicKey !== '' ? $publicKey : null,
             $package,
@@ -101,11 +102,12 @@ try {
     }
 
     if ($command === 'rollback') {
+        $databaseBackup = createUpdateDatabaseBackup($config);
         $snapshotId = (string)($options['snapshot'] ?? '');
         if ($snapshotId === '') {
             throw new InvalidArgumentException('rollback requires --snapshot=ID');
         }
-        $updater = new Updater($root, $stateDirectory);
+        $updater = new Updater($root, $stateDirectory, null, null, $databaseBackup);
         $result = $updater->rollback($snapshotId, !empty($options['force']));
         echo "Rollback complete: {$result['snapshot']}, restored {$result['restored_files']} file(s).\n";
         exit(0);
@@ -126,8 +128,10 @@ try {
 
     $database = null;
     $migrationRunner = null;
+    $databaseBackup = null;
     if ($package->runsMigrations()) {
         $database = Db::get();
+        $databaseBackup = createUpdateDatabaseBackup($config);
         $migrationRunner = static function () use ($root): void {
             $migrator = new Migrator(Db::get(), $root . '/migrations');
             $applied = $migrator->apply(static function (string $message): void {
@@ -136,7 +140,7 @@ try {
             echo '  Applied ' . count($applied) . " migration(s).\n";
         };
     }
-    $updater = new Updater($root, $stateDirectory, $database, $migrationRunner);
+    $updater = new Updater($root, $stateDirectory, $database, $migrationRunner, $databaseBackup);
     $database = null; // Updater owns the only non-static reference; enables SQLite rollback on Windows.
 
     if ($command === 'check') {
@@ -162,6 +166,28 @@ try {
 } catch (Throwable $e) {
     fwrite(STDERR, 'ERROR: ' . $e->getMessage() . "\n");
     exit(1);
+}
+
+function createUpdateDatabaseBackup(array $config): ?UpdateDatabaseBackup
+{
+    if (strtolower(trim((string)($config['db_driver'] ?? ''))) !== 'mysql') {
+        return null;
+    }
+    $probeDatabase = trim((string)($config['update_mysql_probe_database'] ?? ''));
+    if ($probeDatabase === '') {
+        return null;
+    }
+    return new MysqlUpdateDatabaseBackup(
+        (string)($config['db_host'] ?? ''),
+        (int)($config['db_port'] ?? 3306),
+        (string)($config['db_name'] ?? ''),
+        (string)($config['db_user'] ?? ''),
+        (string)($config['db_password'] ?? ''),
+        (string)($config['db_charset'] ?? 'utf8mb4'),
+        $probeDatabase,
+        (string)($config['update_mysql_dump_binary'] ?? 'mysqldump'),
+        (string)($config['update_mysql_client_binary'] ?? 'mysql')
+    );
 }
 
 function printUpdateDoctorReport(array $report, bool $json): void
@@ -220,5 +246,5 @@ function updateHelp(): void
     echo "  --public-key=KEY  Ed25519 public key as base64, hex, or a file path\n";
     echo "  --force           Roll back even if an installed file changed after update\n";
     echo "  --json            Emit machine-readable doctor output\n";
-    echo "  --skip-backup-probe  Skip the doctor's real SQLite snapshot/integrity probe\n";
+    echo "  --skip-backup-probe  Skip the doctor's real database backup/restore probe\n";
 }

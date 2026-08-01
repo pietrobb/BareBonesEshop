@@ -139,6 +139,17 @@ try {
     $verifiedMigrationDb = null;
     Db::init($pdo, 'sqlite');
 
+    $invalidMysqlProbeRejected = false;
+    try {
+        new MysqlUpdateDatabaseBackup('127.0.0.1', 3306, 'shop', 'shop', 'secret', 'utf8mb4', 'unsafe_probe');
+    } catch (InvalidArgumentException $e) {
+        $invalidMysqlProbeRejected = str_contains($e->getMessage(), '_update_probe');
+    }
+    assert_true($invalidMysqlProbeRejected, 'Updater MySQL: disposable restore database requires the guarded _update_probe suffix');
+    $mysqlBackupSource = (string)file_get_contents(__DIR__ . '/../src/MysqlUpdateDatabaseBackup.php');
+    assert_true(str_contains($mysqlBackupSource, '--defaults-extra-file='), 'Updater MySQL: client credentials use a temporary defaults file');
+    assert_true(!str_contains($mysqlBackupSource, '--password='), 'Updater MySQL: password is never exposed in process arguments');
+
     file_put_contents($updatePackageDir . '/payload/src/Core.php', "tampered payload\n");
     $tamperRefused = false;
     try {
@@ -192,6 +203,129 @@ try {
             $signedManifestTamperRefused = str_contains($e->getMessage(), 'signature verification failed');
         }
         assert_true($signedManifestTamperRefused, 'Updater signature: any signed manifest mutation is rejected');
+    }
+
+    $mysqlUpdateDatabase = trim((string)(getenv('TEST_MYSQL_UPDATE_DATABASE') ?: ''));
+    if ($mysqlUpdateDatabase !== '') {
+        if (preg_match('/^[A-Za-z0-9_]+_update_test$/', $mysqlUpdateDatabase) !== 1) {
+            throw new RuntimeException('Destructive MySQL updater integration database must end with _update_test');
+        }
+        if (!function_exists('sodium_crypto_sign_keypair')) {
+            throw new RuntimeException('Live MySQL updater integration test requires Sodium');
+        }
+        assert_true(true, 'Updater MySQL live: destructive integration database has the guarded _update_test suffix');
+        $mysqlHost = (string)(getenv('TEST_MYSQL_UPDATE_HOST') ?: '127.0.0.1');
+        $mysqlPort = (int)(getenv('TEST_MYSQL_UPDATE_PORT') ?: 3306);
+        $mysqlUser = (string)(getenv('TEST_MYSQL_UPDATE_USER') ?: 'root');
+        $mysqlPassword = (string)(getenv('TEST_MYSQL_UPDATE_PASS') ?: '');
+        $mysqlDumpBinary = (string)(getenv('TEST_MYSQL_DUMP_BINARY') ?: 'mysqldump');
+        $mysqlClientBinary = (string)(getenv('TEST_MYSQL_CLIENT_BINARY') ?: 'mysql');
+        $mysqlServerDsn = "mysql:host={$mysqlHost};port={$mysqlPort};charset=utf8mb4";
+        $mysqlLiveDsn = $mysqlServerDsn . ';dbname=' . $mysqlUpdateDatabase;
+        $mysqlServer = new PDO($mysqlServerDsn, $mysqlUser, $mysqlPassword, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $quotedMysqlDatabase = '`' . str_replace('`', '``', $mysqlUpdateDatabase) . '`';
+        $mysqlServer->exec("DROP DATABASE IF EXISTS {$quotedMysqlDatabase}");
+        $mysqlServer->exec("CREATE DATABASE {$quotedMysqlDatabase} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+        $mysqlLive = new PDO($mysqlLiveDsn, $mysqlUser, $mysqlPassword, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $mysqlLive->exec('CREATE TABLE stable_data (id INT PRIMARY KEY, value_text VARCHAR(100) NOT NULL) ENGINE=InnoDB');
+        $mysqlLive->exec('CREATE TABLE stable_audit (id INT AUTO_INCREMENT PRIMARY KEY, stable_id INT NOT NULL) ENGINE=InnoDB');
+        $mysqlLive->exec('CREATE TRIGGER stable_insert AFTER INSERT ON stable_data FOR EACH ROW INSERT INTO stable_audit (stable_id) VALUES (NEW.id)');
+        $mysqlLive->exec("INSERT INTO stable_data (id, value_text) VALUES (1, 'before update'), (2, 'keep me')");
+
+        $mysqlBase = $updateTestRoot . '/mysql-base';
+        $mysqlTarget = $updateTestRoot . '/mysql-target';
+        $mysqlInstalled = $updateTestRoot . '/mysql-installed';
+        foreach ([$mysqlBase, $mysqlTarget, $mysqlInstalled] as $directory) {
+            mkdir($directory . '/src', 0750, true);
+        }
+        mkdir($mysqlTarget . '/migrations', 0750, true);
+        file_put_contents($mysqlBase . '/src/Core.php', "mysql old core\n");
+        file_put_contents($mysqlTarget . '/src/Core.php', "mysql new core\n");
+        file_put_contents($mysqlTarget . '/migrations/20990101000001_mysql.php', "<?php return new class {};\n");
+        file_put_contents($mysqlInstalled . '/src/Core.php', "mysql old core\n");
+        $mysqlPackageDirectory = $updateTestRoot . '/mysql-package';
+        $mysqlKeypair = sodium_crypto_sign_keypair();
+        $mysqlSecret = 'base64:' . base64_encode(sodium_crypto_sign_secretkey($mysqlKeypair));
+        $mysqlPublic = 'base64:' . base64_encode(sodium_crypto_sign_publickey($mysqlKeypair));
+        UpdatePackageBuilder::build($mysqlBase, $mysqlTarget, $mysqlPackageDirectory, '3.1.0', '3.0.0', $mysqlSecret);
+        $mysqlPackage = new UpdatePackage($mysqlPackageDirectory, $mysqlPublic);
+        $mysqlProbeDatabase = $mysqlUpdateDatabase . '_update_probe';
+        $mysqlBackup = new MysqlUpdateDatabaseBackup(
+            $mysqlHost,
+            $mysqlPort,
+            $mysqlUpdateDatabase,
+            $mysqlUser,
+            $mysqlPassword,
+            'utf8mb4',
+            $mysqlProbeDatabase,
+            $mysqlDumpBinary,
+            $mysqlClientBinary
+        );
+        $mysqlMigration = static function () use ($mysqlLiveDsn, $mysqlUser, $mysqlPassword): void {
+            $connection = new PDO($mysqlLiveDsn, $mysqlUser, $mysqlPassword, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+            $connection->exec('CREATE TABLE migration_added (id INT PRIMARY KEY) ENGINE=InnoDB');
+            $connection->exec("INSERT INTO stable_data (id, value_text) VALUES (3, 'during migration')");
+        };
+        $mysqlUpdater = new Updater(
+            $mysqlInstalled,
+            $updateTestRoot . '/mysql-private',
+            $mysqlLive,
+            $mysqlMigration,
+            $mysqlBackup
+        );
+        $mysqlUpdater->baseline('3.0.0');
+        $mysqlLive = null;
+
+        $mysqlDoctor = $mysqlUpdater->doctor($mysqlPublic, $mysqlPackage);
+        $mysqlDoctorChecks = array_column($mysqlDoctor['checks'], null, 'name');
+        assert_equals('READY', $mysqlDoctor['status'], 'Updater MySQL live: doctor proves signed package and real dump/restore readiness');
+        assert_equals('ok', $mysqlDoctorChecks['database_backup']['level'] ?? null, 'Updater MySQL live: doctor verifies disposable restore inventory');
+        $mysqlApplied = $mysqlUpdater->apply($mysqlPackage);
+        assert_equals("mysql new core\n", file_get_contents($mysqlInstalled . '/src/Core.php'), 'Updater MySQL live: code and migration apply after verified dump');
+        $mysqlAfterApply = new PDO($mysqlLiveDsn, $mysqlUser, $mysqlPassword, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        assert_equals(1, (int)$mysqlAfterApply->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'migration_added'")->fetchColumn(), 'Updater MySQL live: migration changed the database');
+        $mysqlAfterApply = null;
+        $probeCheck = $mysqlServer->prepare('SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = ?');
+        $probeCheck->execute([$mysqlProbeDatabase]);
+        assert_equals(0, (int)$probeCheck->fetchColumn(), 'Updater MySQL live: disposable probe database is removed after verification');
+
+        $mysqlUpdater->rollback($mysqlApplied['snapshot']);
+        $mysqlAfterRollback = new PDO($mysqlLiveDsn, $mysqlUser, $mysqlPassword, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        assert_equals(0, (int)$mysqlAfterRollback->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'migration_added'")->fetchColumn(), 'Updater MySQL live: manual rollback removes migration schema changes');
+        assert_equals(2, (int)$mysqlAfterRollback->query('SELECT COUNT(*) FROM stable_data')->fetchColumn(), 'Updater MySQL live: manual rollback restores pre-update data');
+        assert_equals(2, (int)$mysqlAfterRollback->query('SELECT COUNT(*) FROM stable_audit')->fetchColumn(), 'Updater MySQL live: dump restores triggers and their pre-update data');
+        assert_equals("mysql old core\n", file_get_contents($mysqlInstalled . '/src/Core.php'), 'Updater MySQL live: manual rollback restores code');
+        $mysqlAfterRollback = null;
+
+        $mysqlFailurePdo = new PDO($mysqlLiveDsn, $mysqlUser, $mysqlPassword, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $mysqlFailingUpdater = new Updater(
+            $mysqlInstalled,
+            $updateTestRoot . '/mysql-private',
+            $mysqlFailurePdo,
+            static function () use ($mysqlLiveDsn, $mysqlUser, $mysqlPassword): void {
+                $connection = new PDO($mysqlLiveDsn, $mysqlUser, $mysqlPassword, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+                $connection->exec('CREATE TABLE partial_mysql_migration (id INT PRIMARY KEY) ENGINE=InnoDB');
+                throw new RuntimeException('simulated MySQL migration failure');
+            },
+            $mysqlBackup
+        );
+        $mysqlFailurePdo = null;
+        $mysqlFailureSurfaced = false;
+        try {
+            $mysqlFailingUpdater->apply($mysqlPackage);
+        } catch (RuntimeException $e) {
+            $mysqlFailureSurfaced = str_contains($e->getMessage(), 'simulated MySQL migration failure');
+        }
+        assert_true($mysqlFailureSurfaced, 'Updater MySQL live: migration failure is surfaced after automatic rollback');
+        $mysqlAfterFailure = new PDO($mysqlLiveDsn, $mysqlUser, $mysqlPassword, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        assert_equals(0, (int)$mysqlAfterFailure->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'partial_mysql_migration'")->fetchColumn(), 'Updater MySQL live: automatic rollback removes partial migration schema');
+        assert_equals(2, (int)$mysqlAfterFailure->query('SELECT COUNT(*) FROM stable_data')->fetchColumn(), 'Updater MySQL live: automatic rollback restores pre-migration data');
+        assert_equals("mysql old core\n", file_get_contents($mysqlInstalled . '/src/Core.php'), 'Updater MySQL live: automatic rollback restores code');
+        Db::init($pdo, 'sqlite');
+    } elseif (getenv('BAREBONES_REQUIRE_MYSQL_UPDATE_TEST') === '1') {
+        assert_true(false, 'Updater MySQL live: CI requires TEST_MYSQL_UPDATE_DATABASE');
+    } else {
+        echo "  [SKIP] live MySQL/MariaDB updater dump/restore test (set TEST_MYSQL_UPDATE_DATABASE to a disposable *_update_test database)\n";
     }
 } finally {
     updateTestRemoveTree($updateTestRoot);

@@ -48,3 +48,72 @@ jobs:
         env:
           BAREBONES_REQUIRE_UPDATE_SIGNATURE_TEST: '1'
         run: php cli/test.php
+
+  mysql-update:
+    name: Updater dump/restore (${{ matrix.database }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - database: mysql:8.0
+            health_command: mysqladmin ping -h 127.0.0.1 -pupdate-root --silent
+          - database: mariadb:11.4
+            health_command: healthcheck.sh --connect --innodb_initialized
+
+    services:
+      database:
+        image: ${{ matrix.database }}
+        env:
+          MYSQL_ROOT_PASSWORD: update-root
+          MYSQL_ROOT_HOST: '%'
+          MYSQL_DATABASE: barebones_update_test
+          MARIADB_ROOT_PASSWORD: update-root
+          MARIADB_ROOT_HOST: '%'
+          MARIADB_DATABASE: barebones_update_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="${{ matrix.health_command }}"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo, pdo_sqlite, pdo_mysql, mbstring, json, dom, libxml, sodium
+          coverage: none
+          tools: none
+
+      - name: Install MySQL/MariaDB client tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mariadb-client
+
+      - name: Prepare runtime directories
+        run: |
+          mkdir -p db cache logs jobs
+          cp config.example.php config.php
+
+      - name: Run live updater dump/restore test
+        env:
+          BAREBONES_REQUIRE_UPDATE_SIGNATURE_TEST: '1'
+          BAREBONES_REQUIRE_MYSQL_UPDATE_TEST: '1'
+          TEST_MYSQL_DSN: 'mysql:host=127.0.0.1;port=3306;dbname=barebones_update_test;charset=utf8mb4'
+          TEST_MYSQL_USER: root
+          TEST_MYSQL_PASS: update-root
+          TEST_MYSQL_UPDATE_DATABASE: barebones_update_test
+          TEST_MYSQL_UPDATE_HOST: 127.0.0.1
+          TEST_MYSQL_UPDATE_PORT: '3306'
+          TEST_MYSQL_UPDATE_USER: root
+          TEST_MYSQL_UPDATE_PASS: update-root
+          TEST_MYSQL_DUMP_BINARY: mariadb-dump
+          TEST_MYSQL_CLIENT_BINARY: mariadb
+        run: php cli/test.php

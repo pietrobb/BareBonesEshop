@@ -121,16 +121,19 @@ version metadata and rollback snapshots stay in that private directory. Existing
 pre-updater shops require one explicit `baseline` after their deployed release
 has been identified. Run `doctor` on each deployment before its first update; it
 checks PHP/sodium, the public key, private storage and locking, database health,
-a real SQLite snapshot with integrity verification, and (when supplied) the
-signed package's compatibility with installed files. `doctor --json` is suitable
-for deployment automation. Packages are Ed25519-verified and unsigned packages
-are refused unless the operator supplies `--allow-unsigned` explicitly. Rollback refuses to overwrite files changed
-after an update unless `--force` is supplied after manual review.
+a real database backup/restore probe, and (when supplied) the signed package's
+compatibility with installed files. `doctor --json` is suitable for deployment
+automation. Packages are Ed25519-verified and unsigned packages are refused
+unless the operator supplies `--allow-unsigned` explicitly. Rollback refuses to
+overwrite files changed after an update unless `--force` is supplied after
+manual review.
 
-Code-only packages support SQLite and MySQL. Packages containing migrations are
-applied automatically only on SQLite, where the updater creates and verifies a
-database snapshot before changing files. MySQL migration packages fail closed
-until an external, restorable database-backup workflow is provided.
+Code-only packages support SQLite, MySQL, and MariaDB. Migration packages use a
+verified SQLite snapshot or, on MySQL/MariaDB, a transactional dump that must
+successfully restore into a guarded disposable `*_update_probe` database before
+any files change. See the standalone [AI update runbook](docs/AI_UPDATE_RUNBOOK.md)
+for the v1.8.0 bootstrap, production state machine, MySQL privileges, maintenance
+window, evidence, and rollback procedure.
 
 ---
 

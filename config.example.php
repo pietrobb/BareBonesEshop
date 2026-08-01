@@ -106,6 +106,12 @@ return [
     'backup_log_file'     => dirname(__DIR__) . '/bareboneseshop-private/logs/backup.log',
     'update_storage_dir'  => dirname(__DIR__) . '/bareboneseshop-private/updates',
     'update_public_key'   => '', // Ed25519 public key (base64/hex or absolute key-file path)
+    // Required only for MySQL/MariaDB packages containing migrations. Reserve
+    // this disposable schema name and grant db_user access, but do not create it;
+    // it must end with _update_probe. The updater refuses to overwrite an existing schema.
+    'update_mysql_probe_database' => '',
+    'update_mysql_dump_binary'    => 'mysqldump', // use mariadb-dump where appropriate
+    'update_mysql_client_binary'  => 'mysql',     // use mariadb where appropriate
     'gdpr_salt_file'      => dirname(__DIR__) . '/bareboneseshop-private/secrets/gdpr_salt',
 
     // TecDoc sidecar DB (read-only, for vehicle cascade lookups)

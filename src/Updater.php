@@ -13,13 +13,15 @@ final class Updater
     private string $stateDirectory;
     private ?PDO $database;
     private $migrationRunner;
+    private ?UpdateDatabaseBackup $databaseBackup;
     private $lockHandle = null;
 
     public function __construct(
         string $root,
         string $stateDirectory,
         ?PDO $database = null,
-        ?callable $migrationRunner = null
+        ?callable $migrationRunner = null,
+        ?UpdateDatabaseBackup $databaseBackup = null
     ) {
         $realRoot = realpath($root);
         if ($realRoot === false || !is_dir($realRoot) || is_link($realRoot)) {
@@ -38,6 +40,7 @@ final class Updater
         }
         $this->database = $database;
         $this->migrationRunner = $migrationRunner;
+        $this->databaseBackup = $databaseBackup;
     }
 
     public static function isProtectedPath(string $path): bool
@@ -99,8 +102,10 @@ final class Updater
                 $blockers[] = 'Package contains migrations but no database connection is available';
             } else {
                 $driver = (string)$this->database->getAttribute(PDO::ATTR_DRIVER_NAME);
-                if ($driver !== 'sqlite') {
-                    $blockers[] = 'Automatic rollback for migration packages currently requires SQLite; MySQL code-only packages remain supported';
+                if ($driver === 'mysql' && $this->databaseBackup === null) {
+                    $blockers[] = 'MySQL migration packages require a configured dump/restore adapter and disposable probe database';
+                } elseif (!in_array($driver, ['sqlite', 'mysql'], true)) {
+                    $blockers[] = "Migration packages do not support database driver {$driver}";
                 }
                 if ($this->migrationRunner === null) {
                     $blockers[] = 'Package contains migrations but no migration runner is configured';
@@ -318,19 +323,27 @@ final class Updater
                 $add(in_array($driver, ['sqlite', 'mysql'], true) ? 'ok' : 'fail', 'database',
                     "Database connection is healthy ({$driver})");
 
-                if ($driver === 'sqlite' && $probeDatabaseBackup) {
+                if ($probeDatabaseBackup && in_array($driver, ['sqlite', 'mysql'], true)) {
                     $probeDirectory = $this->stateDirectory . DIRECTORY_SEPARATOR . '.doctor-' . bin2hex(random_bytes(6));
                     try {
                         $this->ensureDirectory($probeDirectory, 0750);
-                        $metadata = $this->snapshotSqliteDatabase($probeDirectory);
-                        $backupPath = $probeDirectory . DIRECTORY_SEPARATOR . 'database.sqlite';
-                        $probe = new PDO('sqlite:' . $backupPath, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-                        $integrity = (string)$probe->query('PRAGMA integrity_check')->fetchColumn();
-                        $probe = null;
-                        if ($integrity !== 'ok' || !hash_equals((string)$metadata['sha256'], (string)hash_file('sha256', $backupPath))) {
-                            throw new RuntimeException("SQLite backup probe failed integrity verification: {$integrity}");
+                        if ($driver === 'sqlite') {
+                            $metadata = $this->snapshotSqliteDatabase($probeDirectory);
+                            $backupPath = $probeDirectory . DIRECTORY_SEPARATOR . 'database.sqlite';
+                            $probe = new PDO('sqlite:' . $backupPath, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+                            $integrity = (string)$probe->query('PRAGMA integrity_check')->fetchColumn();
+                            $probe = null;
+                            if ($integrity !== 'ok' || !hash_equals((string)$metadata['sha256'], (string)hash_file('sha256', $backupPath))) {
+                                throw new RuntimeException("SQLite backup probe failed integrity verification: {$integrity}");
+                            }
+                            $add('ok', 'database_backup', 'SQLite snapshot creation, checksum, and integrity probe passed');
+                        } elseif ($this->databaseBackup === null) {
+                            $level = $package !== null && $package->runsMigrations() ? 'fail' : 'warn';
+                            $add($level, 'database_backup', 'MySQL dump/restore adapter is not configured; it is required only for migration packages');
+                        } else {
+                            $this->databaseBackup->probe($probeDirectory);
+                            $add('ok', 'database_backup', 'MySQL dump, disposable restore, schema, row-count, and content-checksum comparison passed');
                         }
-                        $add('ok', 'database_backup', 'SQLite snapshot creation, checksum, and integrity probe passed');
                     } catch (Throwable $e) {
                         $add('fail', 'database_backup', $e->getMessage());
                     } finally {
@@ -339,7 +352,8 @@ final class Updater
                 } elseif ($driver === 'sqlite') {
                     $add('fail', 'database_backup', 'SQLite backup capability was not verified because the probe was skipped');
                 } elseif ($driver === 'mysql') {
-                    $add('warn', 'database_backup', 'MySQL supports code-only updates; migration updates remain blocked without verified dump/restore');
+                    $level = $package !== null && $package->runsMigrations() ? 'fail' : 'warn';
+                    $add($level, 'database_backup', 'MySQL backup capability was not verified because the probe was skipped');
                 }
             } catch (Throwable $e) {
                 $add('fail', 'database', 'Database readiness check failed: ' . $e->getMessage());
@@ -415,7 +429,13 @@ final class Updater
             }
 
             if ($package->runsMigrations()) {
-                $metadata['database'] = $this->snapshotSqliteDatabase($snapshotDirectory);
+                $driver = (string)$this->database?->getAttribute(PDO::ATTR_DRIVER_NAME);
+                $metadata['database'] = $driver === 'mysql'
+                    ? $this->databaseBackup?->create($snapshotDirectory)
+                    : $this->snapshotSqliteDatabase($snapshotDirectory);
+                if (!is_array($metadata['database'])) {
+                    throw new RuntimeException('Database migration snapshot was not created');
+                }
             }
             $this->writeJsonAtomic($snapshotDirectory . DIRECTORY_SEPARATOR . 'snapshot.json', $metadata);
             return $metadata;
@@ -499,7 +519,18 @@ final class Updater
         }
 
         if (is_array($metadata['database'] ?? null)) {
-            $this->restoreSqliteDatabase($directory, $metadata['database']);
+            if (($metadata['database']['driver'] ?? null) === 'mysql') {
+                if ($this->databaseBackup === null) {
+                    throw new RuntimeException('MySQL rollback requires the configured dump/restore adapter');
+                }
+                $this->database = null;
+                if (class_exists('Db', false)) {
+                    Db::reset();
+                }
+                $this->databaseBackup->restore($directory, $metadata['database']);
+            } else {
+                $this->restoreSqliteDatabase($directory, $metadata['database']);
+            }
         }
         return ['snapshot' => $snapshotId, 'restored_files' => count($metadata['files'])];
     }
