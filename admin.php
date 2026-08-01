@@ -1394,6 +1394,13 @@ function pageRma(): void {
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                         <input type="hidden" name="rma_id" value="<?= (int)$r['id'] ?>">
                         <input type="hidden" name="status" value="<?= esc($to) ?>">
+                        <?php if ($to === 'received'): ?>
+                        <select name="disposition" aria-label="Disposition">
+                            <option value="restock">Naskladniť</option>
+                            <option value="repair">Oprava</option>
+                            <option value="discard">Likvidácia</option>
+                        </select>
+                        <?php endif; ?>
                         <button class="btn btn-sm" type="submit"><?= esc($label) ?></button>
                     </form>
                     <?php endforeach; ?>
@@ -1870,10 +1877,40 @@ function handleRmaStatus(): void {
     Security::adminRequire('products.edit');
     $id = Security::int($_POST['rma_id'] ?? 0);
     $status = Security::clean($_POST['status'] ?? '');
-    if ($id > 0 && Rma::setStatus($id, $status)) {
+    try {
+        if ($id <= 0) throw new InvalidArgumentException('Neplatné RMA.');
+        if ($status === 'received') {
+            $disposition = Security::clean($_POST['disposition'] ?? '');
+            if (!in_array($disposition, ['restock', 'repair', 'discard'], true)) throw new InvalidArgumentException('Neplatná disposition.');
+            $decisions = [];
+            foreach (Rma::items($id) as $item) {
+                $remaining = (int)$item['quantity'] - (int)$item['received_quantity'];
+                if ($remaining > 0) $decisions[(int)$item['id']] = ['quantity' => $remaining, 'disposition' => $disposition];
+            }
+            if (!$decisions || !Rma::receive($id, $decisions, 'admin-receive-' . $id, 'Admin receipt')) {
+                throw new RuntimeException('Príjem už bol spracovaný.');
+            }
+        } elseif ($status === 'refunded') {
+            $rma = Rma::byId($id);
+            if (!$rma) throw new RuntimeException('RMA sa nenašlo.');
+            $source = InvoiceService::byOrderId((int)$rma['order_id']);
+            if (!$source) throw new RuntimeException('Objednávka nemá zdrojovú faktúru.');
+            $quantities = [];
+            foreach (Rma::items($id) as $item) {
+                $remaining = (int)$item['received_quantity'] - (int)$item['refunded_quantity'];
+                if ($remaining > 0) $quantities[(int)$item['id']] = $remaining;
+            }
+            $credit = InvoiceService::credit((int)$source['id'], $id, $quantities, 'admin-credit-' . $id);
+            $order = Orders::byId((int)$rma['order_id']);
+            if (trim((string)($order['payment_id'] ?? '')) === '') {
+                Rma::completeRefund((int)$credit['refund_id'], 'manual-admin');
+            }
+        } elseif (!Rma::setStatus($id, $status)) {
+            throw new LogicException('Nepovolená zmena stavu.');
+        }
         setFlash('ok', 'Reklamácia #' . $id . ' → ' . $status);
-    } else {
-        setFlash('err', 'Stav reklamácie sa nepodarilo zmeniť.');
+    } catch (Throwable $e) {
+        setFlash('err', 'Stav reklamácie sa nepodarilo zmeniť: ' . $e->getMessage());
     }
     header('Location: admin.php?p=rma');
     exit;

@@ -241,6 +241,12 @@ if ($mysqlDsn) {
         $g7MigrationMysql->up($my, false);
         $g7MysqlTables = (int)$my->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('stock_movements','suppliers','supplier_products','purchase_orders','purchase_order_items','inventory_receipts','bundle_components','shipments','shipment_items')")->fetchColumn();
         assert_equals(9, $g7MysqlTables, 'MySQL live: G7 inventory/fulfillment migration is applied and idempotent');
+        $g8MigrationMysql = require __DIR__ . '/../migrations/20260801210000_returns_credit_notes.php';
+        $g8MigrationMysql->up($my, false);
+        $g8MigrationMysql->up($my, false);
+        $g8MysqlTables = (int)$my->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('return_labels','return_receipts','return_exchanges','order_refunds','credit_note_items')")->fetchColumn();
+        assert_equals(5, $g8MysqlTables, 'MySQL live: G8 returns/refunds migration is applied and idempotent');
+        foreach (['credit_note_items', 'order_refunds', 'return_exchanges', 'return_receipts', 'return_labels'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['shipment_items', 'shipments', 'bundle_components', 'inventory_receipts', 'purchase_order_items', 'purchase_orders', 'supplier_products', 'suppliers', 'stock_movements'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['price_list_prices', 'price_lists', 'promotions', 'product_categories', 'companies', 'customer_groups', 'brands'] as $table) $my->exec("DROP TABLE {$table}");
         $my->exec("DROP TABLE api_idempotency");
@@ -4248,6 +4254,10 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS rma_items (
     product_id INTEGER DEFAULT NULL, sku TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '',
     quantity INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )");
+$returnsCreditMigration = require __DIR__ . '/../migrations/20260801210000_returns_credit_notes.php';
+$returnsCreditMigration->up($pdo, true);
+$returnsCreditMigration->up($pdo, true);
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='order_refunds'")->fetchColumn(), 'G8 migration: item refund ledger exists and migration is idempotent');
 
 $wlProd = (int)($pdo->query("SELECT id FROM products LIMIT 1")->fetchColumn() ?: 0);
 $wlProd2 = (int)($pdo->query("SELECT id FROM products ORDER BY id LIMIT 1 OFFSET 1")->fetchColumn() ?: 0);
@@ -4368,6 +4378,7 @@ $rmaCart = [[
     'price' => $rmaProd['price'], 'sku' => $rmaProd['sku'], 'name' => $rmaProd['name'], 'variant_name' => '',
 ]];
 $rmaOrderId = Orders::create($rmaCart, $rmaCustomer, 'cod');
+Fulfillment::shipOrder($rmaOrderId);
 Orders::updateStatus($rmaOrderId, 'delivered');
 $rmaItems = Orders::items($rmaOrderId);
 $rmaOi1 = (int)$rmaItems[0]['id'];
@@ -4393,32 +4404,49 @@ assert_equals('reason_required', Rma::create($rmaOrderId, $aliceId, '   ', [$rma
 assert_equals('no_items', Rma::create($rmaOrderId, $aliceId, 'damaged', [])[2], 'RMA: empty item set rejected');
 assert_equals('no_items', Rma::create($rmaOrderId, $aliceId, 'damaged', [999999 => 1])[2], 'RMA: foreign order_item rejected → no_items');
 
-// Valid create (quantity over-asked → clamped to ordered qty 2)
-[$rOk, $rId, $rErr] = Rma::create($rmaOrderId, $aliceId, 'Box arrived crushed', [$rmaOi1 => 99]);
+// Valid first partial request.
+[$rOk, $rId, $rErr] = Rma::create($rmaOrderId, $aliceId, 'Box arrived crushed', [$rmaOi1 => 1]);
 assert_true($rOk === true && $rId > 0 && $rErr === null, 'RMA: valid create returns ok + id');
 $rmaRow = Rma::byId($rId);
 assert_equals('requested', $rmaRow['status'], 'RMA: new request lands as requested');
 assert_equals($aliceId, (int)$rmaRow['customer_id'], 'RMA: request attributed to customer');
 $rmaLineItems = Rma::items($rId);
 assert_equals(1, count($rmaLineItems), 'RMA: one line item stored');
-assert_equals(2, (int)$rmaLineItems[0]['quantity'], 'RMA: over-asked quantity clamped to ordered qty');
+assert_equals(1, (int)$rmaLineItems[0]['quantity'], 'RMA: first partial quantity stored');
 
-// Guard: only one open RMA per order
-assert_equals('rma_exists', Rma::create($rmaOrderId, $aliceId, 'second try', [$rmaOi1 => 1])[2], 'RMA: duplicate open request rejected');
+// A second partial RMA can remain open for the unclaimed quantity.
+[$rOk2, $rId2, $rErr2] = Rma::create($rmaOrderId, $aliceId, 'second parcel', [$rmaOi1 => 99]);
+assert_true($rOk2 === true && $rId2 > 0 && $rErr2 === null, 'RMA: second partial request is allowed');
+assert_equals(1, (int)Rma::items($rId2)[0]['quantity'], 'RMA: second request is clamped to remaining quantity');
+assert_equals('no_items', Rma::create($rmaOrderId, $aliceId, 'over claim', [$rmaOi1 => 1])[2], 'RMA: claimed quantities cannot exceed ordered quantity');
 
 // openForOrder finds the open request
 assert_true(Rma::openForOrder($rmaOrderId) !== null, 'RMA: openForOrder returns the open request');
 
 // forCustomer lists it
 $rmaCustList = Rma::forCustomer($aliceId);
-assert_true(count($rmaCustList) >= 1 && (int)$rmaCustList[0]['id'] === $rId, 'RMA: forCustomer returns newest request');
+assert_true(count($rmaCustList) >= 2 && (int)$rmaCustList[0]['id'] === $rId2, 'RMA: forCustomer returns all partial requests newest first');
 
 // Transition guards
 assert_true(Rma::setStatus($rId, 'refunded') === false, 'RMA: requested → refunded blocked (illegal jump)');
 assert_true(Rma::setStatus($rId, 'approved') === true, 'RMA: requested → approved allowed');
 assert_equals('approved', Rma::byId($rId)['status'], 'RMA: status now approved');
-assert_true(Rma::setStatus($rId, 'received', 'parcel in') === true, 'RMA: approved → received allowed');
-assert_equals('parcel in', Rma::byId($rId)['admin_note'], 'RMA: admin note persisted');
+$label = Rma::recordLabel($rId, 'http-carrier', 'RET-001', 'label-rma-1', 'TRACK-RET-1', 'https://carrier.test/labels/RET-001.pdf');
+assert_equals('RET-001', (string)$label['label_reference'], 'RMA: return label reference is audited');
+assert_equals((int)$label['id'], (int)Rma::recordLabel($rId, 'http-carrier', 'RET-001', 'label-rma-1')['id'], 'RMA: return label creation is idempotent');
+$labelConflict = false;
+try { Rma::recordLabel($rId, 'http-carrier', 'RET-DIFFERENT', 'label-rma-1'); } catch (LogicException $e) { $labelConflict = true; }
+assert_true($labelConflict, 'RMA: label idempotency key rejects changed input');
+$rmaStockBeforeReceipt = (int)$pdo->query("SELECT SUM(qty) FROM warehouse_stock WHERE sku=" . $pdo->quote($rmaProd['sku']))->fetchColumn();
+assert_true(Rma::receive($rId, [$rmaLineItems[0]['id'] => ['quantity' => 1, 'disposition' => 'restock']], 'receipt-rma-1', 'parcel in'), 'RMA: partial receipt with restock succeeds');
+assert_true(Rma::receive($rId, [$rmaLineItems[0]['id'] => ['quantity' => 1, 'disposition' => 'restock']], 'receipt-rma-1', 'replay') === false, 'RMA: receipt replay is idempotent');
+$receiptConflict = false;
+try { Rma::receive($rId, [$rmaLineItems[0]['id'] => ['quantity' => 1, 'disposition' => 'discard']], 'receipt-rma-1'); }
+catch (LogicException $e) { $receiptConflict = true; }
+assert_true($receiptConflict, 'RMA: receipt idempotency key rejects changed input');
+assert_equals($rmaStockBeforeReceipt + 1, (int)$pdo->query("SELECT SUM(qty) FROM warehouse_stock WHERE sku=" . $pdo->quote($rmaProd['sku']))->fetchColumn(), 'RMA: accepted restock returns exactly one shipped unit');
+assert_equals('received', Rma::byId($rId)['status'], 'RMA: fully received partial request advances to received');
+assert_equals('parcel in', (string)$pdo->query("SELECT note FROM return_receipts WHERE rma_id={$rId}")->fetchColumn(), 'RMA: receipt note persisted');
 assert_true(Rma::setStatus($rId, 'refunded') === true, 'RMA: received → refunded allowed');
 assert_true(Rma::setStatus($rId, 'approved') === false, 'RMA: refunded is terminal');
 
@@ -4426,8 +4454,21 @@ assert_true(Rma::setStatus($rId, 'approved') === false, 'RMA: refunded is termin
 assert_true(Rma::setStatus(999999, 'approved') === false, 'RMA: setStatus on unknown id false');
 assert_true(Rma::setStatus($rId, 'bogus') === false, 'RMA: setStatus with unknown status false');
 
-// After refund the order has no open RMA again
-assert_true(Rma::openForOrder($rmaOrderId) === null, 'RMA: no open request after refund (terminal)');
+// The independent second partial request remains open and can choose a non-stock disposition plus exchange.
+assert_true(Rma::openForOrder($rmaOrderId) !== null, 'RMA: another partial request remains open');
+assert_true(Rma::setStatus($rId2, 'approved') === true, 'RMA: second partial request is approved independently');
+$rmaLine2 = Rma::items($rId2)[0];
+$rmaStockBeforeDiscard = (int)$pdo->query("SELECT SUM(qty) FROM warehouse_stock WHERE sku=" . $pdo->quote($rmaProd['sku']))->fetchColumn();
+assert_true(Rma::receive($rId2, [$rmaLine2['id'] => ['quantity' => 1, 'disposition' => 'discard']], 'receipt-rma-2'), 'RMA: discard receipt succeeds');
+assert_equals($rmaStockBeforeDiscard, (int)$pdo->query("SELECT SUM(qty) FROM warehouse_stock WHERE sku=" . $pdo->quote($rmaProd['sku']))->fetchColumn(), 'RMA: discard does not change on-hand stock');
+$exchangeId = Rma::createExchange($rId2, (int)$rmaLine2['id'], 1, (int)$rmaProd['id'], null, 'exchange-rma-2');
+assert_true($exchangeId > 0, 'RMA: received item can be reserved for an exchange');
+$exchangeOverClaim = false;
+try { Rma::createExchange($rId2, (int)$rmaLine2['id'], 1, (int)$rmaProd['id'], null, 'exchange-rma-2-over'); }
+catch (LogicException $e) { $exchangeOverClaim = true; }
+assert_true($exchangeOverClaim, 'RMA: exchange cannot reuse refunded or already exchanged quantity');
+assert_true(Rma::setStatus($rId2, 'refunded') === true, 'RMA: exchanged request can be closed');
+assert_true(Rma::openForOrder($rmaOrderId) === null, 'RMA: no open request after every partial request is terminal');
 
 // ============================================================
 // TEST: Admin customer management (P7.5)
@@ -4630,6 +4671,7 @@ if (file_exists($financialMigFile)) {
     $financialMig->up(Db::get(), Db::isSqlite());
 }
 $storeScopeMigration->up(Db::get(), true);
+$returnsCreditMigration->up(Db::get(), true);
 
 // Seed a minimal paid order
 $db = Db::get();
@@ -5356,6 +5398,40 @@ $invoiceSnapshot = json_decode((string)($snapshotInvoice['financial_snapshot'] ?
 assert_equals($checkoutSnapshot, $invoiceSnapshot, 'G1: invoice copies the exact order financial snapshot');
 assert_equals((int)$checkoutSnapshot['totals']['gross'], (int)$snapshotInvoice['total_gross'], 'G1: invoice gross = snapshot gross');
 assert_equals((int)$checkoutSnapshot['totals']['vat'], (int)$snapshotInvoice['total_vat'], 'G1: invoice VAT = snapshot VAT');
+
+// G8 — received item refund produces an immutable, tax-linked credit note.
+$creditOrderId = (int)$o['id'];
+$creditOrderItems = Orders::items($creditOrderId);
+$creditOrderItem = $creditOrderItems[0];
+$pdo->prepare("UPDATE orders SET status='delivered', payment_id='' WHERE id=:id")->execute([':id' => $creditOrderId]);
+[$creditRmaOk, $creditRmaId] = Rma::create($creditOrderId, null, 'Item return for credit', [(int)$creditOrderItem['id'] => 1]);
+assert_true($creditRmaOk && $creditRmaId > 0, 'G8 credit: partial RMA created');
+assert_true(Rma::setStatus($creditRmaId, 'approved'), 'G8 credit: RMA approved');
+$creditRmaItem = Rma::items($creditRmaId)[0];
+assert_true(Rma::receive($creditRmaId, [(int)$creditRmaItem['id'] => ['quantity' => 1, 'disposition' => 'repair']], 'credit-receipt-1'), 'G8 credit: received quantity recorded without stock mutation');
+$creditNote = InvoiceService::credit((int)$snapshotInvoice['id'], $creditRmaId, [(int)$creditRmaItem['id'] => 1], 'credit-note-1');
+assert_equals('credit_note', (string)$creditNote['type'], 'G8 credit: document type is credit_note');
+assert_equals((int)$snapshotInvoice['id'], (int)$creditNote['refers_to_invoice_id'], 'G8 credit: source invoice link is immutable');
+assert_true((int)$creditNote['total_gross'] < 0, 'G8 credit: credited gross is negative integer cents');
+assert_equals($checkoutSnapshot, json_decode((string)$creditNote['financial_snapshot'], true), 'G8 credit: source financial snapshot is preserved exactly');
+$creditAuditSnapshot = json_decode((string)$creditNote['credit_snapshot'], true);
+assert_equals((string)$checkoutSnapshot['fingerprint'], (string)$creditAuditSnapshot['source_fingerprint'], 'G8 credit: audit snapshot pins source fingerprint');
+assert_equals((int)$creditNote['id'], (int)InvoiceService::credit((int)$snapshotInvoice['id'], $creditRmaId, [(int)$creditRmaItem['id'] => 1], 'credit-note-1')['id'], 'G8 credit: idempotency returns original credit note');
+$creditReplayConflict = false;
+try { InvoiceService::credit((int)$snapshotInvoice['id'], $creditRmaId, [(int)$creditRmaItem['id'] => 2], 'credit-note-1'); }
+catch (LogicException $e) { $creditReplayConflict = true; }
+assert_true($creditReplayConflict, 'G8 credit: idempotency key rejects changed quantities');
+$creditLine = $pdo->query("SELECT * FROM credit_note_items WHERE credit_note_id=" . (int)$creditNote['id'])->fetch(PDO::FETCH_ASSOC);
+assert_equals(1, (int)$creditLine['quantity'], 'G8 credit: item quantity is persisted');
+assert_equals(-(int)$creditLine['gross'], (int)$creditNote['total_gross'], 'G8 credit: line gross reconciles exactly to document gross');
+Rma::completeRefund((int)$creditNote['refund_id'], 'manual-refund-1');
+assert_equals('succeeded', (string)Rma::refundById((int)$creditNote['refund_id'])['status'], 'G8 refund: manual payment completion is audited');
+assert_equals(1, (int)Rma::items($creditRmaId)[0]['refunded_quantity'], 'G8 refund: exact item quantity is marked refunded');
+assert_equals('refunded', (string)Rma::byId($creditRmaId)['status'], 'G8 refund: fully settled RMA closes');
+$creditOverClaim = false;
+try { InvoiceService::credit((int)$snapshotInvoice['id'], $creditRmaId, [(int)$creditRmaItem['id'] => 1], 'credit-note-over'); }
+catch (LogicException $e) { $creditOverClaim = true; }
+assert_true($creditOverClaim, 'G8 credit: an item cannot be credited twice');
 
 // 55.3 — Bug #3: B2B reverse charge via HTTP path (VIES served from cache, no network)
 $pdo->exec("DELETE FROM vat_id_cache");

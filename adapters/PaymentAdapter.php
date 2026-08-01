@@ -17,3 +17,8 @@ interface PaymentAdapter {
     /** Get current payment status */
     public function getStatus(string $paymentId): string;
 }
+
+/** Provider capability required for retry-safe external refund mutations. */
+interface IdempotentRefundAdapter extends PaymentAdapter {
+    public function refundWithIdempotency(string $paymentId, int $amount, string $idempotencyKey): array;
+}

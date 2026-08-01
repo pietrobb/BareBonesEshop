@@ -158,6 +158,21 @@ can dispatch them independently. A final whole-order shipment fails closed while
 backordered units remain. Prices and taxes remain on the unchanged order-item and
 financial snapshots; bundles affect only the auditable physical allocation layer.
 
+## Partial returns, exchanges and credit notes
+
+Migration `20260801210000_returns_credit_notes` adds store-scoped return labels,
+idempotent partial receipts, explicit `restock`/`discard`/`repair` decisions,
+exchange reservations, item refund batches, and immutable credit-note lines. Multiple
+RMAs may be open for one delivered order, but all non-rejected requests share an
+exact ordered-quantity cap. Only received quantities can be exchanged or credited.
+
+`InvoiceService::credit()` derives every integer-cent gross/net/VAT amount from the
+original invoice financial snapshot by deterministic prefix allocation. Replays
+return the original credit note, pending or completed refunds reserve their item
+quantity, and the worker marks partial payment refunds without closing the whole
+order. A restock follows the frozen shipment allocation and records a G7 ledger
+movement; discard and repair never change on-hand stock.
+
 ---
 
 ## Migrations

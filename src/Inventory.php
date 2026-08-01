@@ -157,6 +157,51 @@ class Inventory {
         }
     }
 
+    /** Restock only the accepted quantity of an order line, preserving allocation order. */
+    public static function returnOrderItemQuantity(
+        array $orderItem,
+        int $quantity,
+        string|int $referenceId,
+        int $alreadyRestocked = 0
+    ): void {
+        if ($quantity <= 0) throw new InvalidArgumentException('Return quantity must be positive');
+        $hasShipmentHistory = self::hasShipmentHistory((int)$orderItem['id']);
+        $lines = self::reservationLines($orderItem);
+        $hasAllocationSnapshot = false;
+        foreach ($lines as $line) {
+            $multiplier = max(1, (int)($line['quantity_per_bundle'] ?? 1));
+            $remaining = $quantity * $multiplier;
+            $skip = $alreadyRestocked * $multiplier;
+            foreach ($line['allocations'] ?? [] as $allocation) {
+                $hasAllocationSnapshot = true;
+                $status = (string)($allocation['status'] ?? 'reserved');
+                $warehouseId = empty($allocation['warehouse_id']) ? null : (int)$allocation['warehouse_id'];
+                $available = $hasShipmentHistory
+                    ? min((int)$allocation['qty'], self::shippedQuantity((int)$orderItem['id'], (string)$line['sku'], $warehouseId))
+                    : (int)$allocation['qty'];
+                if ($skip >= $available) { $skip -= $available; continue; }
+                $available -= $skip;
+                $skip = 0;
+                $take = min($remaining, $available);
+                if ($take <= 0) continue;
+                $allocation['qty'] = $take;
+                if ($status === 'reserved' && $warehouseId !== null) {
+                    Warehouse::restock((string)$line['sku'], [$allocation], 'rma', $referenceId);
+                } elseif ($status === 'legacy_variant') {
+                    self::restoreLegacyVariant($line, $take, 'return', $referenceId);
+                }
+                $remaining -= $take;
+                if ($remaining === 0) break;
+            }
+            if ($remaining > 0 && !$hasAllocationSnapshot && empty($orderItem['variant_id'])) {
+                Products::incrementStock((int)$orderItem['product_id'], $quantity);
+                $remaining = 0;
+            }
+            if ($remaining !== 0) throw new RuntimeException('Return quantity exceeds shipped allocation');
+            Warehouse::syncProductStock([(string)$line['sku']]);
+        }
+    }
+
     /** Supplier PO creation enforces configured minimum and pack size. */
     public static function createPurchaseOrder(
         int $supplierId,

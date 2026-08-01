@@ -4,7 +4,7 @@
  * Uses Stripe Checkout (hosted flow) via raw HTTP API.
  * Zero external dependencies — curl only.
  */
-class StripePayment implements PaymentAdapter {
+class StripePayment implements IdempotentRefundAdapter {
     private string $secretKey;
     private string $webhookSecret;
 
@@ -114,13 +114,18 @@ class StripePayment implements PaymentAdapter {
      * Returns ['refund_id' => id, 'status' => status]
      */
     public function refund(string $paymentId, int $amount): array {
+        return $this->performRefund($paymentId, $amount, null);
+    }
+
+    public function refundWithIdempotency(string $paymentId, int $amount, string $idempotencyKey): array {
+        return $this->performRefund($paymentId, $amount, $idempotencyKey);
+    }
+
+    private function performRefund(string $paymentId, int $amount, ?string $idempotencyKey): array {
         $params = ['payment_intent' => $paymentId];
-        if ($amount > 0) {
-            $params['amount'] = $amount;
-        }
-
-        $response = $this->apiCall('POST', '/v1/refunds', $params);
-
+        if ($amount > 0) $params['amount'] = $amount;
+        $headers = $idempotencyKey === null ? [] : ['Idempotency-Key: ' . hash('sha256', $idempotencyKey)];
+        $response = $this->apiCall('POST', '/v1/refunds', $params, $headers);
         return [
             'refund_id' => $response['id'] ?? '',
             'status' => $response['status'] ?? 'failed',
@@ -169,7 +174,7 @@ class StripePayment implements PaymentAdapter {
     /**
      * Raw Stripe API call using curl.
      */
-    private function apiCall(string $method, string $endpoint, array $params = []): array {
+    private function apiCall(string $method, string $endpoint, array $params = [], array $extraHeaders = []): array {
         if (empty($this->secretKey)) {
             throw new \RuntimeException('Stripe secret key not configured');
         }
@@ -177,9 +182,9 @@ class StripePayment implements PaymentAdapter {
         $url = 'https://api.stripe.com' . $endpoint;
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        curl_setopt($ch, CURLOPT_HTTPHEADER, array_merge([
             'Authorization: Bearer ' . $this->secretKey,
-        ]);
+        ], $extraHeaders));
         curl_setopt($ch, CURLOPT_TIMEOUT, 30);
 
         if ($method === 'POST') {

@@ -152,6 +152,16 @@ Before resuming traffic, run one controlled count, reserve/release, two-warehous
 
 Rollback must restore code and the pre-migration database snapshot together. If any receipt or shipment occurred after apply, stop and reconcile the physical warehouse and external carrier/ERP state before rollback; never replay a receipt key, shipment, or order mutation merely to recreate ledger rows.
 
+## Returns and credit-note rollout
+
+Migration `20260801210000_returns_credit_notes` is additive. Keep traffic, workers, refund jobs, and warehouse writers stopped while applying it. Existing RMA rows receive `store_id=default`; their status, requested quantities, orders, invoices, stock and payment records are not rewritten. Confirm `return_labels`, `return_receipts`, `return_exchanges`, `order_refunds`, and `credit_note_items` exist and that `invoices.credit_snapshot` is nullable.
+
+Before resuming traffic, use a non-production delivered order to prove two simultaneous partial RMAs without exceeding ordered quantity. Create and replay one return label and receipt key, then verify only `restock` creates exactly one matching `stock_movements` delta; `discard` and `repair` must leave on-hand unchanged. Prove an exchange and a credit cannot reserve the same received quantity.
+
+Issue one partial credit and reconcile its line gross/net/VAT to the original invoice financial snapshot, source fingerprint, negative credit-note totals, refund batch, and provider amount. Replay the same idempotency key and confirm no new document, refund or ledger movement appears. A partial provider success must leave the order lifecycle intact and set only `payment_status=partially_refunded`; manual refunds require an explicit audited completion reference.
+
+Rollback restores the pre-migration database and code together. If a label, warehouse receipt, provider refund, exchange or credit note became externally visible after apply, stop and reconcile that external fact before rollback; never delete or replay it to make the restored schema appear current.
+
 ## Rollback procedure
 
 Keep traffic and writers stopped. Review whether any package-managed file changed after the update, then run:

@@ -614,17 +614,17 @@ switch ($p) {
         }
         echo '</div>';
 
-        // Delivered orders eligible for a new return (no open RMA)
+        // Delivered orders remain eligible while any line has unclaimed quantity.
         $delivered = array_filter(
             Customers::orders($cid, 100),
-            static fn($o) => ($o['status'] ?? '') === 'delivered' && !Rma::openForOrder((int)$o['id'])
+            static fn($o) => ($o['status'] ?? '') === 'delivered' && Rma::returnableItems((int)$o['id']) !== []
         );
         echo '<div class="card"><h2>' . $e($t('account.request_return')) . '</h2>';
         if (!$delivered) {
             echo '<p class="muted">' . $e($t('account.no_returnable_orders')) . '</p>';
         }
         foreach ($delivered as $o) {
-            $items = Orders::items((int)$o['id']);
+            $items = Rma::returnableItems((int)$o['id']);
             echo '<form method="post" action="account.php" class="rma-form">';
             echo '<input type="hidden" name="csrf_token" value="' . $e($csrf) . '">';
             echo '<input type="hidden" name="action" value="rma_request">';
@@ -633,8 +633,8 @@ switch ($p) {
             foreach ($items as $it) {
                 $oid = (int)$it['id'];
                 echo '<label class="rma-item">';
-                echo '<input type="number" name="items[' . $oid . ']" value="0" min="0" max="' . (int)$it['quantity'] . '" style="width:64px"> ';
-                echo $e($it['name']) . ' <span class="muted">(' . (int)$it['quantity'] . '×)</span>';
+                echo '<input type="number" name="items[' . $oid . ']" value="0" min="0" max="' . (int)$it['returnable_quantity'] . '" style="width:64px"> ';
+                echo $e($it['name']) . ' <span class="muted">(' . (int)$it['returnable_quantity'] . '× dostupné)</span>';
                 echo '</label>';
             }
             echo '<div class="form-row"><label>' . $e($t('account.return_reason')) . '</label><textarea name="reason" rows="2" required></textarea></div>';

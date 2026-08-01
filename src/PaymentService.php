@@ -237,8 +237,22 @@ class PaymentService {
      * Refund a transaction (full or partial).
      * Logs a 'refund_initiated' transaction, queues refund job.
      */
-    public static function refund(int $orderId, string $paymentId, int $amount, PaymentAdapter $gateway): array {
-        $result = $gateway->refund($paymentId, $amount);
+    public static function refund(
+        int $orderId,
+        string $paymentId,
+        int $amount,
+        PaymentAdapter $gateway,
+        ?string $idempotencyKey = null,
+        ?string $currency = null
+    ): array {
+        if ($idempotencyKey !== null && $idempotencyKey !== '') {
+            if (!$gateway instanceof IdempotentRefundAdapter) {
+                throw new RuntimeException('Payment provider does not support idempotent refunds');
+            }
+            $result = $gateway->refundWithIdempotency($paymentId, $amount, $idempotencyKey);
+        } else {
+            $result = $gateway->refund($paymentId, $amount);
+        }
 
         $status = $result['status'] ?? 'failed';
         self::logTransaction(
@@ -247,8 +261,8 @@ class PaymentService {
             providerRef:    $result['refund_id'] ?? '',
             status:         'refund_' . $status,
             amount:         $amount,
-            currency:       'eur',
-            idempotencyKey: 'refund_' . $orderId . '_' . ($result['refund_id'] ?? uniqid()),
+            currency:       strtolower($currency ?: (string)(Orders::byId($orderId)['currency'] ?? 'eur')),
+            idempotencyKey: $idempotencyKey ?: ('refund_' . $orderId . '_' . ($result['refund_id'] ?? uniqid())),
             rawResponse:    $result,
         );
 

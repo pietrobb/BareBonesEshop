@@ -11,7 +11,7 @@
  *   PAY_PAYU_POS_ID          — POS identifier (same as client_id usually)
  *   PAY_PAYU_ENV             — 'production' | 'sandbox' (default: sandbox)
  */
-class PayUPayment implements PaymentAdapter {
+class PayUPayment implements IdempotentRefundAdapter {
     private string $clientId;
     private string $clientSecret;
     private string $posId;
@@ -114,19 +114,19 @@ class PayUPayment implements PaymentAdapter {
      * Returns ['refund_id' => id, 'status' => status]
      */
     public function refund(string $paymentId, int $amount): array {
+        return $this->performRefund($paymentId, $amount, null);
+    }
+
+    public function refundWithIdempotency(string $paymentId, int $amount, string $idempotencyKey): array {
+        return $this->performRefund($paymentId, $amount, $idempotencyKey);
+    }
+
+    private function performRefund(string $paymentId, int $amount, ?string $idempotencyKey): array {
         $token = $this->getAccessToken();
-
-        $body = [
-            'refund' => [
-                'description' => 'Refund',
-            ],
-        ];
-        if ($amount > 0) {
-            $body['refund']['amount'] = (string)$amount;
-        }
-
+        $body = ['refund' => ['description' => 'Refund']];
+        if ($amount > 0) $body['refund']['amount'] = (string)$amount;
+        if ($idempotencyKey !== null) $body['refund']['extRefundId'] = substr(hash('sha256', $idempotencyKey), 0, 64);
         $response = $this->apiCall('POST', "/api/v2_1/orders/{$paymentId}/refunds", $body, $token);
-
         return [
             'refund_id' => $response['refund']['refundId'] ?? '',
             'status'    => strtolower($response['refund']['status'] ?? 'failed'),

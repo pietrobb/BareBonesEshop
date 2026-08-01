@@ -149,6 +149,201 @@ final class InvoiceService
         return $invoice;
     }
 
+    /**
+     * Issue an immutable item-level credit note from received RMA quantities.
+     * Amounts are deterministic slices of the original financial snapshot.
+     */
+    public static function credit(
+        int $sourceInvoiceId,
+        int $rmaId,
+        array $quantities,
+        string $idempotencyKey
+    ): array {
+        if ($idempotencyKey === '' || !$quantities) throw new InvalidArgumentException('Credit quantities and idempotency key are required');
+        $requestedQuantities = [];
+        foreach ($quantities as $itemId => $quantity) $requestedQuantities[(int)$itemId] = (int)$quantity;
+        ksort($requestedQuantities, SORT_NUMERIC);
+        $quantities = $requestedQuantities;
+        $db = Db::get();
+        $existing = $db->prepare("SELECT i.*, r.id AS refund_id, r.rma_id FROM order_refunds r JOIN invoices i ON i.id=r.credit_note_id
+            WHERE r.store_id=:store AND r.idempotency_key=:key");
+        $existing->execute([':store' => StoreContext::current()->id(), ':key' => $idempotencyKey]);
+        if ($row = $existing->fetch(PDO::FETCH_ASSOC)) {
+            $priorStmt = $db->prepare('SELECT rma_item_id, quantity FROM credit_note_items WHERE refund_id=:refund ORDER BY rma_item_id');
+            $priorStmt->execute([':refund' => (int)$row['refund_id']]);
+            $priorQuantities = [];
+            foreach ($priorStmt->fetchAll(PDO::FETCH_ASSOC) as $line) $priorQuantities[(int)$line['rma_item_id']] = (int)$line['quantity'];
+            if ((int)$row['rma_id'] !== $rmaId || (int)$row['refers_to_invoice_id'] !== $sourceInvoiceId || $priorQuantities !== $requestedQuantities) {
+                throw new LogicException('Credit idempotency key was reused with different input');
+            }
+            return $row;
+        }
+
+        $source = self::byId($sourceInvoiceId);
+        if (!$source || (string)($source['type'] ?? 'invoice') !== 'invoice') throw new RuntimeException('Source invoice not found');
+        $rma = Rma::byId($rmaId);
+        if (!$rma || (int)$rma['order_id'] !== (int)$source['order_id']
+            || !in_array((string)$rma['status'], ['received', 'refunded'], true)) {
+            throw new LogicException('RMA is not eligible for a credit note');
+        }
+        $order = Orders::byId((int)$source['order_id']);
+        if (!$order) throw new RuntimeException('Credit note order not found');
+        $orderItems = Orders::items((int)$order['id']);
+        $rmaItems = [];
+        foreach (Rma::items($rmaId) as $item) $rmaItems[(int)$item['id']] = $item;
+
+        $snapshot = json_decode((string)($source['financial_snapshot'] ?? ''), true);
+        if (!is_array($snapshot)) throw new RuntimeException('Credit note requires the source financial snapshot');
+        $taxProvider = Adapters::tax((string)($snapshot['providers']['tax'] ?? Adapters::defaultProviderCode('tax')));
+        $taxProvider::validateSnapshot($snapshot);
+        $components = array_values(array_filter($snapshot['components'], static fn(array $component): bool => ($component['type'] ?? '') === 'product'));
+        if (count($components) !== count($orderItems)) throw new RuntimeException('Source snapshot does not match order items');
+        $componentByItem = [];
+        foreach ($orderItems as $position => $orderItem) $componentByItem[(int)$orderItem['id']] = $components[$position];
+
+        $lines = [];
+        $totals = ['gross' => 0, 'net' => 0, 'vat' => 0];
+        $breakdown = [];
+        foreach ($quantities as $rmaItemId => $quantity) {
+            $rmaItemId = (int)$rmaItemId;
+            $quantity = (int)$quantity;
+            $rmaItem = $rmaItems[$rmaItemId] ?? null;
+            if (!$rmaItem || $quantity <= 0) throw new InvalidArgumentException('Invalid credit note item');
+            $reservedStmt = $db->prepare("SELECT
+                    COALESCE((SELECT SUM(cni.quantity) FROM credit_note_items cni JOIN order_refunds r ON r.id=cni.refund_id WHERE cni.rma_item_id=:item AND r.status IN ('pending','succeeded')),0) AS credited,
+                    COALESCE((SELECT SUM(re.quantity) FROM return_exchanges re WHERE re.rma_item_id=:item2 AND re.store_id=:store AND re.status!='cancelled'),0) AS exchanged");
+            $reservedStmt->execute([':item' => $rmaItemId, ':item2' => $rmaItemId, ':store' => StoreContext::current()->id()]);
+            $reserved = $reservedStmt->fetch(PDO::FETCH_ASSOC);
+            if ($quantity > (int)$rmaItem['received_quantity'] - (int)$reserved['credited'] - (int)$reserved['exchanged']) {
+                throw new LogicException('Credit quantity exceeds received uncommitted quantity');
+            }
+            $orderItemId = (int)$rmaItem['order_item_id'];
+            $orderItem = null;
+            foreach ($orderItems as $candidate) if ((int)$candidate['id'] === $orderItemId) { $orderItem = $candidate; break; }
+            if (!$orderItem || !isset($componentByItem[$orderItemId])) throw new RuntimeException('Credit source item not found');
+            $priorStmt = $db->prepare("SELECT COALESCE(SUM(cni.quantity),0) FROM credit_note_items cni
+                JOIN order_refunds r ON r.id=cni.refund_id
+                WHERE cni.order_item_id=:item AND r.store_id=:store AND r.status IN ('pending','succeeded')");
+            $priorStmt->execute([':item' => $orderItemId, ':store' => StoreContext::current()->id()]);
+            $before = (int)$priorStmt->fetchColumn();
+            $ordered = (int)$orderItem['quantity'];
+            if ($before + $quantity > $ordered) throw new LogicException('Order item is already fully credited');
+            $component = $componentByItem[$orderItemId];
+            $gross = self::proportionalSegment((int)$component['gross'], $before, $quantity, $ordered);
+            $net = self::proportionalSegment((int)$component['net'], $before, $quantity, $ordered);
+            $vat = $gross - $net;
+            $rate = (int)$component['rate_basis_points'];
+            $line = [
+                'order_item_id' => $orderItemId, 'rma_item_id' => $rmaItemId,
+                'sku' => (string)$orderItem['sku'], 'name' => (string)$orderItem['name'],
+                'quantity' => $quantity, 'unit_gross' => (int)$component['unit_gross'],
+                'gross' => $gross, 'net' => $net, 'vat' => $vat, 'rate_basis_points' => $rate,
+            ];
+            $lines[] = $line;
+            foreach (['gross', 'net', 'vat'] as $key) $totals[$key] += $line[$key];
+            $rateKey = self::rateKey($rate / 100);
+            if (!isset($breakdown[$rateKey])) $breakdown[$rateKey] = ['net' => 0, 'vat' => 0];
+            $breakdown[$rateKey]['net'] -= $net;
+            $breakdown[$rateKey]['vat'] -= $vat;
+        }
+        if ($totals['gross'] <= 0 || $totals['gross'] > (int)$source['total_gross']) throw new LogicException('Credit total is invalid');
+
+        $creditData = [
+            'version' => 1, 'source_invoice_id' => $sourceInvoiceId,
+            'source_fingerprint' => (string)($snapshot['fingerprint'] ?? ''),
+            'rounding' => 'source_component_prefix_allocation', 'currency' => (string)$source['currency'],
+            'lines' => $lines, 'totals' => $totals,
+        ];
+        $creditData['fingerprint'] = hash('sha256', json_encode($creditData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+        $issuedAt = date('Y-m-d');
+        $store = self::resolveStore($order, null);
+        $legal = $store['legal'] ?? [];
+        $prefix = (string)($legal['credit_note_prefix'] ?? 'CN-');
+        $year = (int)date('Y');
+        $number = '';
+        $invoiceId = 0;
+        $refundId = 0;
+        $db->beginTransaction();
+        try {
+            $number = self::allocateNumber($db, $year, $prefix);
+            $relPath = sprintf('%d/%02d/%s.pdf', $year, (int)date('m'), rawurlencode($number));
+            $token = bin2hex(random_bytes(32));
+            $insert = $db->prepare("INSERT INTO invoices
+                (order_id, store_id, number, issued_at, delivery_date, due_date, pdf_path,
+                 total_net, total_vat, total_gross, currency, vat_breakdown,
+                 customer_snapshot, seller_snapshot, payment_method, locale, status, download_token,
+                 type, refers_to_invoice_id, vat_scenario, reverse_charge_note_key, financial_snapshot, credit_snapshot)
+                VALUES (:order, :store, :number, :issued, :delivery, :due, :path,
+                 :net, :vat, :gross, :currency, :breakdown, :customer, :seller, :payment, :locale, 'issued', :token,
+                 'credit_note', :source, :scenario, :note, :financial, :credit)");
+            $insert->execute([
+                ':order' => (int)$order['id'], ':store' => StoreContext::current()->id(), ':number' => $number,
+                ':issued' => $issuedAt, ':delivery' => $issuedAt, ':due' => $issuedAt, ':path' => $relPath,
+                ':net' => -$totals['net'], ':vat' => -$totals['vat'], ':gross' => -$totals['gross'],
+                ':currency' => (string)$source['currency'], ':breakdown' => json_encode($breakdown, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+                ':customer' => (string)$source['customer_snapshot'], ':seller' => (string)$source['seller_snapshot'],
+                ':payment' => (string)$source['payment_method'], ':locale' => (string)$source['locale'], ':token' => $token,
+                ':source' => $sourceInvoiceId, ':scenario' => $source['vat_scenario'] ?? null,
+                ':note' => $source['reverse_charge_note_key'] ?? null, ':financial' => (string)$source['financial_snapshot'],
+                ':credit' => json_encode($creditData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            ]);
+            $invoiceId = (int)$db->lastInsertId();
+            $refund = $db->prepare("INSERT INTO order_refunds
+                (store_id, order_id, rma_id, credit_note_id, amount, currency, status, idempotency_key)
+                VALUES (:store, :order, :rma, :credit, :amount, :currency, 'pending', :key)");
+            $refund->execute([
+                ':store' => StoreContext::current()->id(), ':order' => (int)$order['id'], ':rma' => $rmaId,
+                ':credit' => $invoiceId, ':amount' => $totals['gross'], ':currency' => (string)$source['currency'], ':key' => $idempotencyKey,
+            ]);
+            $refundId = (int)$db->lastInsertId();
+            $lineInsert = $db->prepare("INSERT INTO credit_note_items
+                (credit_note_id, refund_id, order_item_id, rma_item_id, sku, name, quantity, unit_gross, gross, net, vat, rate_basis_points)
+                VALUES (:credit, :refund, :order_item, :rma_item, :sku, :name, :quantity, :unit, :gross, :net, :vat, :rate)");
+            foreach ($lines as $line) {
+                $lineInsert->execute([
+                    ':credit' => $invoiceId, ':refund' => $refundId, ':order_item' => $line['order_item_id'], ':rma_item' => $line['rma_item_id'],
+                    ':sku' => $line['sku'], ':name' => $line['name'], ':quantity' => $line['quantity'], ':unit' => $line['unit_gross'],
+                    ':gross' => $line['gross'], ':net' => $line['net'], ':vat' => $line['vat'], ':rate' => $line['rate_basis_points'],
+                ]);
+            }
+            if (trim((string)($order['payment_id'] ?? '')) !== '') {
+                $db->prepare("UPDATE orders SET payment_status='refund_pending', updated_at=" . Db::now() . "
+                    WHERE id=:id AND store_id=:store AND payment_status IN ('paid','partially_refunded','disputed')")
+                    ->execute([':id' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
+            }
+            AuditLog::log('credit_note', $invoiceId, null, ['source_invoice_id' => $sourceInvoiceId, 'refund_id' => $refundId, 'gross' => $totals['gross']], 'Item credit issued');
+            Outbox::record('order.refund_requested', 'order', (int)$order['id'], [
+                'order_id' => (int)$order['id'], 'rma_id' => $rmaId, 'refund_id' => $refundId,
+                'credit_note_id' => $invoiceId, 'amount' => $totals['gross'], 'currency' => strtolower((string)$source['currency']),
+            ]);
+            $db->commit();
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+
+        $invoice = self::byId($invoiceId);
+        $pdfItems = array_map(static fn(array $line): array => [
+            'name' => $line['name'], 'quantity' => $line['quantity'],
+            'unit_price' => -$line['unit_gross'], 'total' => -$line['gross'],
+            'vat_rate' => $line['rate_basis_points'] / 100,
+        ], $lines);
+        $seller = json_decode((string)$source['seller_snapshot'], true) ?: [];
+        $customer = json_decode((string)$source['customer_snapshot'], true) ?: [];
+        $pdf = self::renderPdf($invoice, ['shipping_cost' => 0], $pdfItems, $seller, $customer, ['rates' => $breakdown, 'vat_total' => -$totals['vat']]);
+        self::writePdf(self::resolvePdfPath((string)$invoice['pdf_path']), $pdf);
+
+        if (trim((string)($order['payment_id'] ?? '')) !== '') {
+            JobQueue::push('payment_refund', [
+                'order_id' => (int)$order['id'], 'payment_id' => (string)$order['payment_id'],
+                'amount' => $totals['gross'], 'refund_id' => $refundId,
+                'idempotency_key' => $idempotencyKey,
+            ], 1);
+        }
+        $invoice['refund_id'] = $refundId;
+        return $invoice;
+    }
+
     /** Re-render PDF for an existing invoice (e.g. file accidentally deleted). */
     public static function regeneratePdf(int $invoiceId): string
     {
@@ -465,6 +660,15 @@ final class InvoiceService
         return [$net, $gross - $net];
     }
 
+    /** Deterministic prefix allocation; all partial credits sum exactly to the source component. */
+    private static function proportionalSegment(int $total, int $before, int $quantity, int $ordered): int
+    {
+        if ($total < 0 || $before < 0 || $quantity <= 0 || $ordered <= 0 || $before + $quantity > $ordered) {
+            throw new InvalidArgumentException('Invalid proportional credit allocation');
+        }
+        return intdiv($total * ($before + $quantity), $ordered) - intdiv($total * $before, $ordered);
+    }
+
     /** Canonical rate-group key: "23", "10", "0" (trailing zeros trimmed). */
     private static function rateKey(float $rate): string
     {
@@ -695,7 +899,8 @@ final class InvoiceService
 
         $y = 18.0;
         // Title
-        $pdf->text(20, $y, $L['title'] . ' ' . $invoice['number'], ['size' => 18, 'bold' => true]);
+        $documentTitle = (($invoice['type'] ?? 'invoice') === 'credit_note') ? ($L['credit_title'] ?? 'Credit note No.') : $L['title'];
+        $pdf->text(20, $y, $documentTitle . ' ' . $invoice['number'], ['size' => 18, 'bold' => true]);
 
         // Right-aligned dates
         $pdf->text(120, $y, $L['issued_at'] . ': ' . $invoice['issued_at'], ['size' => 9]);

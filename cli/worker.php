@@ -470,6 +470,7 @@ function handlePaymentRefund(array $payload, array $job): void {
     $orderId = $payload['order_id'] ?? 0;
     $amount = $payload['amount'] ?? 0;
     $paymentId = $payload['payment_id'] ?? '';
+    $itemRefundId = (int)($payload['refund_id'] ?? 0);
 
     $logDir = __DIR__ . '/../logs';
     if (!is_dir($logDir)) mkdir($logDir, 0750, true);
@@ -482,7 +483,14 @@ function handlePaymentRefund(array $payload, array $job): void {
             $providerCode = (string)($payload['_provider_code'] ?? ($paymentSnapshot['provider'] ?? ($order ? orderProviderCode($order, 'payment') : '')));
             if ($providerCode === '') $providerCode = Adapters::defaultProviderCode('payment');
             $payment = Adapters::payment($providerCode);
-            $result = $payment->refund($paymentId, $amount);
+            $result = PaymentService::refund(
+                (int)$orderId,
+                (string)$paymentId,
+                (int)$amount,
+                $payment,
+                (string)($payload['idempotency_key'] ?? ''),
+                (string)($order['currency'] ?? 'eur')
+            );
         } catch (\Throwable $e) {
             $result = ['status' => 'error', 'message' => $e->getMessage()];
         }
@@ -494,9 +502,18 @@ function handlePaymentRefund(array $payload, array $job): void {
         if ($refundId) {
             Orders::setRefundId($orderId, $refundId);
         }
-        // Transition to refunded if workflow allows
         $order = Orders::byId($orderId);
-        if ($order && OrderWorkflow::canTransition($order['status'], 'refunded')) {
+        if ($itemRefundId > 0) {
+            Rma::completeRefund($itemRefundId, (string)$refundId);
+            $refunded = PaymentService::refundedAmount((int)$orderId);
+            $paymentStatus = $order && $refunded >= (int)$order['total'] ? 'refunded' : 'partially_refunded';
+            PaymentService::updatePaymentStatus((int)$orderId, $paymentStatus, 'refund.succeeded', [
+                'refund_id' => $itemRefundId,
+                'amount' => (int)$amount,
+                'provider_ref' => (string)$refundId,
+            ]);
+        } elseif ($order && OrderWorkflow::canTransition($order['status'], 'refunded')) {
+            // Preserve the legacy whole-order cancellation refund path.
             OrderWorkflow::transition($orderId, 'refunded', "Payment refund completed: {$paymentId}");
         }
     }
@@ -505,6 +522,9 @@ function handlePaymentRefund(array $payload, array $job): void {
         date('c') . " | ORDER: {$orderId} | AMOUNT: {$amount} | PAYMENT: {$paymentId} | RESULT: " . json_encode($result) . "\n",
         FILE_APPEND | LOCK_EX
     );
+    if ($itemRefundId > 0 && ($result['status'] ?? '') !== 'succeeded') {
+        throw new RuntimeException('Item refund provider call did not succeed');
+    }
 }
 
 function handleErpOrderPush(array $payload, array $job): void {

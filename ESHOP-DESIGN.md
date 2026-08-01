@@ -62,6 +62,8 @@ Katalóg zachováva `products.category_id` ako spätne kompatibilnú primárnu k
 
 `stock_movements` je append-only audit každej store-scoped fyzickej a rezervačnej zmeny s delta aj resulting balance. Produkty a varianty majú explicitnú `deny`/`backorder`/`preorder` politiku; bundle order line zmrazí komponenty, ich sklady a personalization údaje bez zmeny finančného riadku. Supplier products vynucujú minimum/pack size, PO receipt je idempotentný a `shipments` + `shipment_items` umožňujú čiastkové warehouse fulfillmenty. Exact reserve/release/ship guardy a shipment-aware cancellation bránia oversellu, dvojitému restore aj uvoľneniu už odoslaného tovaru.
 
+Return operácie sú samostatná auditovateľná vrstva nad objednávkou: viac otvorených čiastkových RMA zdieľa quantity cap, return label a každý receipt majú idempotency identity a prijatý kus dostane explicitný `restock`/`discard`/`repair` výsledok. Exchange rezervuje iba prijatú, ešte necreditovanú quantity. `InvoiceService::credit()` nevypočítava historické ceny znova; gross/net/VAT segmentuje z pôvodného fingerprintovaného financial snapshotu po integer centoch, vytvorí immutable credit note + item refund batch a payment worker pri čiastke mení iba payment lifecycle, nie celú order lifecycle.
+
 ### V1 — kompletný commerce engine
 
 **Katalóg + storefront:**
