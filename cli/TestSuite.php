@@ -9,6 +9,35 @@ require_once __DIR__ . '/cli-only.php';
 
 require_once __DIR__ . '/../src/autoload.php';
 
+final class QueryCountingPDO extends PDO {
+    private int $queryCount = 0;
+
+    public function prepare(string $query, array $options = []): PDOStatement|false {
+        $this->queryCount++;
+        return parent::prepare($query, $options);
+    }
+
+    public function query(string $query, ?int $fetchMode = null, mixed ...$fetchModeArgs): PDOStatement|false {
+        $this->queryCount++;
+        return $fetchMode === null
+            ? parent::query($query)
+            : parent::query($query, $fetchMode, ...$fetchModeArgs);
+    }
+
+    public function exec(string $statement): int|false {
+        $this->queryCount++;
+        return parent::exec($statement);
+    }
+
+    public function resetQueryCount(): void {
+        $this->queryCount = 0;
+    }
+
+    public function queryCount(): int {
+        return $this->queryCount;
+    }
+}
+
 function entrypointSource(string $entrypoint): string {
     $root = dirname(__DIR__);
     $implementations = [
@@ -4443,6 +4472,74 @@ if ($wlProd2 > 0) {
 // list() returns enriched, active products only
 $listed = Wishlist::list($guest);
 assert_true(count($listed) >= 1 && isset($listed[0]['name']), 'Wishlist: list returns enriched product rows');
+
+// G3: listing enrichment preserves payloads with a constant query budget.
+$g3PreviousCustomerId = $_SESSION['customer_id'] ?? null;
+$g3Products = $pdo->query("SELECT * FROM products WHERE status = 'active' ORDER BY id LIMIT 8")->fetchAll(PDO::FETCH_ASSOC);
+$g3LocalizedProducts = array_map([I18n::class, 'product'], $g3Products);
+unset($_SESSION['customer_id']);
+Db::init($pdo, 'sqlite');
+$g3At = gmdate('Y-m-d H:i:s');
+$g3CategoryIds = Products::categoryIdsMany($g3LocalizedProducts);
+$g3Rules = Promotions::catalogRules($g3At);
+$g3CommerceParity = function (?int $customerId) use ($g3LocalizedProducts, $g3CategoryIds, $g3Rules, $g3At): array {
+    $profile = Customers::commerceProfile($customerId);
+    $rows = Pricing::priceListRows($g3LocalizedProducts, $profile, 1, $g3At);
+    $legacy = [];
+    $batch = [];
+    foreach ($g3LocalizedProducts as $product) {
+        $productId = (int)$product['id'];
+        $product['category_ids'] = Products::categoryIds($productId);
+        $legacy[] = Promotions::applyToProduct(Pricing::applyPriceList($product, null, 1, $customerId, $g3At), 1, $customerId, $g3At);
+        $product['category_ids'] = $g3CategoryIds[$productId] ?? [];
+        $batch[] = Promotions::applyCatalogRules(
+            Pricing::applyPriceListContext($product, $rows[$productId] ?? null, $profile),
+            $g3Rules,
+            $profile
+        );
+    }
+    return [$legacy, $batch];
+};
+[$g3GuestLegacyCommerce, $g3GuestBatchCommerce] = $g3CommerceParity(null);
+[$g3CustomerLegacyCommerce, $g3CustomerBatchCommerce] = $g3CommerceParity($aliceId);
+assert_equals($g3GuestLegacyCommerce, $g3GuestBatchCommerce, 'G3 batch enrichment: guest category, price-list and promotion resolution preserve canonical behavior');
+assert_equals($g3CustomerLegacyCommerce, $g3CustomerBatchCommerce, 'G3 batch enrichment: customer category, price-list and promotion resolution preserve canonical behavior');
+$g3ExpectedGuest = array_map(fn(array $product): array => Products::enrich($product), $g3LocalizedProducts);
+$_SESSION['customer_id'] = $aliceId;
+$g3ExpectedCustomer = array_map(fn(array $product): array => Products::enrich($product), $g3LocalizedProducts);
+unset($_SESSION['customer_id']);
+$g3ExpectedWishlist = Wishlist::list($guest);
+
+$g3Counter = new QueryCountingPDO('sqlite:' . $testDbPath, null, null, [
+    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+]);
+Db::init($g3Counter, 'sqlite');
+$g3Counter->resetQueryCount();
+$g3GuestBatch = Products::enrichMany($g3LocalizedProducts);
+$g3GuestQueries = $g3Counter->queryCount();
+assert_equals($g3ExpectedGuest, $g3GuestBatch, 'G3 batch enrichment: guest payload and order match one-by-one enrichment');
+assert_true($g3GuestQueries <= 4, "G3 query budget: guest listing uses at most 4 enrichment queries ({$g3GuestQueries})");
+
+$_SESSION['customer_id'] = $aliceId;
+$g3Counter->resetQueryCount();
+$g3CustomerBatch = Products::enrichMany($g3LocalizedProducts);
+$g3CustomerQueries = $g3Counter->queryCount();
+assert_equals($g3ExpectedCustomer, $g3CustomerBatch, 'G3 batch enrichment: logged-in payload and customer pricing match one-by-one enrichment');
+assert_true($g3CustomerQueries <= 5, "G3 query budget: logged-in listing uses at most 5 enrichment queries ({$g3CustomerQueries})");
+
+unset($_SESSION['customer_id']);
+$g3Counter->resetQueryCount();
+$g3Wishlist = Wishlist::list($guest);
+$g3WishlistQueries = $g3Counter->queryCount();
+assert_equals($g3ExpectedWishlist, $g3Wishlist, 'G3 wishlist batch: payload and newest-first order are preserved');
+assert_true($g3WishlistQueries <= 5, "G3 query budget: wishlist uses at most 5 queries ({$g3WishlistQueries})");
+Db::init($pdo, 'sqlite');
+if ($g3PreviousCustomerId === null) {
+    unset($_SESSION['customer_id']);
+} else {
+    $_SESSION['customer_id'] = $g3PreviousCustomerId;
+}
 
 // merge: fold guest session wishlist into a customer wishlist
 $mergeSess = 's:mergeme';

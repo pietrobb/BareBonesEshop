@@ -114,16 +114,15 @@ class Wishlist {
      * newest saved first. Missing/archived products are skipped silently.
      */
     public static function list(?string $ownerKey = null): array {
-        $ids = self::ids($ownerKey);
-        if (!$ids) return [];
-        $out = [];
-        foreach ($ids as $pid) {
-            $p = Products::byId($pid);
-            if ($p && ($p['status'] ?? 'active') === 'active') {
-                $out[] = Products::enrich(I18n::product($p));
-            }
-        }
-        return $out;
+        $owner = self::resolve($ownerKey);
+        $stmt = Db::get()->prepare("SELECT p.*
+            FROM wishlist_items wi
+            JOIN products p ON p.id = wi.product_id
+            WHERE wi.owner_key = :owner AND p.store_id = :store AND p.status = 'active'
+            ORDER BY wi.id DESC");
+        $stmt->execute([':owner' => $owner, ':store' => StoreContext::current()->catalogId()]);
+        $products = array_map([I18n::class, 'product'], $stmt->fetchAll(PDO::FETCH_ASSOC));
+        return Products::enrichMany($products);
     }
 
     /**

@@ -107,6 +107,102 @@ class Pricing {
         return $product;
     }
 
+    /** Resolve listing price-list rows in one query, keyed by product id. */
+    public static function priceListRows(array $products, ?array $profile, int $qty, string $at): array {
+        $productIds = [];
+        $currencies = [];
+        foreach ($products as $product) {
+            $productId = (int)($product['id'] ?? 0);
+            if ($productId <= 0) continue;
+            $productIds[$productId] = $productId;
+            $currencies[$productId] = strtolower((string)($product['currency'] ?? StoreContext::current()->currency()));
+        }
+        if ($productIds === []) return [];
+
+        $params = [
+            ':qty' => max(1, $qty),
+            ':store' => StoreContext::current()->id(),
+            ':group_id' => (int)($profile['customer_group_id'] ?? 0),
+            ':at_from' => $at,
+            ':at_to' => $at,
+        ];
+        $placeholders = [];
+        foreach (array_values($productIds) as $index => $productId) {
+            $placeholder = ':product_' . $index;
+            $placeholders[] = $placeholder;
+            $params[$placeholder] = $productId;
+        }
+
+        try {
+            $stmt = Db::get()->prepare("SELECT pp.product_id, pp.price, pp.compare_price, pp.min_qty,
+                    pl.code AS price_list_code, pl.priority, pl.customer_group_id,
+                    LOWER(pl.currency) AS price_list_currency
+                FROM price_list_prices pp
+                JOIN price_lists pl ON pl.id = pp.price_list_id
+                WHERE pp.product_id IN (" . implode(', ', $placeholders) . ")
+                  AND pp.variant_id IS NULL AND pp.min_qty <= :qty
+                  AND pl.store_id = :store AND pl.active = 1
+                  AND (pl.customer_group_id IS NULL OR pl.customer_group_id = :group_id)
+                  AND (pl.valid_from IS NULL OR pl.valid_from <= :at_from)
+                  AND (pl.valid_to IS NULL OR pl.valid_to >= :at_to)
+                ORDER BY pp.product_id,
+                  CASE WHEN pl.customer_group_id IS NULL THEN 0 ELSE 1 END DESC,
+                  pp.min_qty DESC, pl.priority DESC, pp.id DESC");
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            return [];
+        }
+
+        $result = [];
+        foreach ($rows as $row) {
+            $productId = (int)$row['product_id'];
+            if (isset($result[$productId]) || ($currencies[$productId] ?? '') !== $row['price_list_currency']) continue;
+            $result[$productId] = $row;
+        }
+        return $result;
+    }
+
+    /** Apply a pre-resolved listing price row without further database access. */
+    public static function applyPriceListContext(array $product, ?array $row, ?array $profile): array {
+        if (empty($product['id'])) return $product;
+        $basePrice = max(0, (int)($product['price'] ?? 0));
+        $currency = strtolower((string)($product['currency'] ?? StoreContext::current()->currency()));
+        $groupId = (int)($profile['customer_group_id'] ?? 0);
+
+        if ($row) {
+            $product['price'] = max(0, (int)$row['price']);
+            $product['compare_price'] = $row['compare_price'] === null
+                ? max($basePrice, (int)($product['compare_price'] ?? 0))
+                : max(0, (int)$row['compare_price']);
+            $product['price_list_snapshot'] = [
+                'version' => 1,
+                'code' => (string)$row['price_list_code'],
+                'customer_group_id' => $row['customer_group_id'] === null ? null : (int)$row['customer_group_id'],
+                'currency' => $currency,
+                'min_qty' => (int)$row['min_qty'],
+                'price' => (int)$product['price'],
+            ];
+            return $product;
+        }
+
+        $groupBps = max(0, min(10000, (int)($profile['discount_bps'] ?? 0)));
+        if ($groupBps > 0) {
+            $discount = intdiv($basePrice * $groupBps + 5000, 10000);
+            $product['price'] = max(0, $basePrice - $discount);
+            $product['compare_price'] = max($basePrice, (int)($product['compare_price'] ?? 0));
+            $product['price_list_snapshot'] = [
+                'version' => 1,
+                'code' => 'customer_group',
+                'customer_group_id' => $groupId,
+                'currency' => $currency,
+                'min_qty' => 1,
+                'price' => (int)$product['price'],
+            ];
+        }
+        return $product;
+    }
+
     /**
      * Apply catalog-level pricing to a product (pre-computable rules).
      * Returns product with adjusted price + original as compare_price.

@@ -537,53 +537,88 @@ class Products {
         return $updated;
     }
 
-    /**
-     * Enrich product with computed fields for display.
-     * Pass $categoryMap ([id => ['slug','path']]) to avoid N+1 category queries.
-     */
+    /** Enrich one product through the same request-scoped path as listings. */
     public static function enrich(array $product, ?array $categoryMap = null): array {
+        return self::enrichMany([$product], $categoryMap)[0];
+    }
+
+    /** Enrich a collection with a constant query budget while preserving keys and order. */
+    public static function enrichMany(array $products, ?array $categoryMap = null): array {
+        if ($products === []) return [];
+        $context = ProductEnrichmentContext::forProducts($products, $categoryMap, self::sessionCustomerId());
+        $result = [];
+        foreach ($products as $key => $product) {
+            $result[$key] = self::enrichWithContext($product, $context);
+        }
+        return $result;
+    }
+
+    /** Batch all category assignments, with a legacy primary-category fallback. */
+    public static function categoryIdsMany(array $products): array {
+        $result = [];
+        $productRows = [];
+        foreach ($products as $product) {
+            $productId = (int)($product['id'] ?? 0);
+            if ($productId <= 0) continue;
+            $result[$productId] = [];
+            $productRows[$productId] = $product;
+        }
+        if ($productRows === []) return $result;
+
+        $params = [':store' => StoreContext::current()->catalogId()];
+        $placeholders = [];
+        foreach (array_keys($productRows) as $index => $productId) {
+            $placeholder = ':product_' . $index;
+            $placeholders[] = $placeholder;
+            $params[$placeholder] = $productId;
+        }
+
+        try {
+            $stmt = Db::get()->prepare("SELECT pc.product_id, pc.category_id, pc.is_primary, pc.sort_order
+                FROM product_categories pc
+                JOIN products p ON p.id = pc.product_id
+                JOIN categories c ON c.id = pc.category_id AND c.store_id = p.store_id
+                WHERE pc.product_id IN (" . implode(', ', $placeholders) . ") AND p.store_id = :store
+                ORDER BY pc.product_id, pc.is_primary DESC, pc.sort_order, pc.category_id");
+            $stmt->execute($params);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $productId = (int)$row['product_id'];
+                $categoryId = (int)$row['category_id'];
+                if (!in_array($categoryId, $result[$productId], true)) $result[$productId][] = $categoryId;
+            }
+        } catch (PDOException $e) {
+            foreach ($productRows as $productId => $product) {
+                if (!empty($product['category_id'])) $result[$productId] = [(int)$product['category_id']];
+            }
+        }
+        return $result;
+    }
+
+    private static function enrichWithContext(array $product, ProductEnrichmentContext $context): array {
         $product['description'] = Security::sanitizeRichHtml((string)($product['description'] ?? ''));
         $product['images'] = json_decode($product['images'] ?? '[]', true);
         $product['attrs'] = json_decode($product['attrs'] ?? '{}', true);
         $product['tags'] = json_decode($product['tags'] ?? '[]', true);
-
-        $product['category_ids'] = self::categoryIds((int)($product['id'] ?? 0));
-        if (class_exists('Pricing')) {
-            $product = Pricing::applyPriceList($product, null, 1, self::sessionCustomerId());
-        }
-        if (class_exists('Promotions')) {
-            $product = Promotions::applyToProduct($product, 1, self::sessionCustomerId());
-        }
+        $product['category_ids'] = $context->categoryIds((int)($product['id'] ?? 0));
+        $product = $context->applyCommerce($product);
         unset($product['cost_price']);
 
         $currency = $product['currency'] ?? null;
         $product['price_formatted'] = I18n::price($product['price'], $currency);
-
         if (!empty($product['compare_price']) && $product['compare_price'] > 0) {
             $product['compare_price_formatted'] = I18n::price($product['compare_price'], $currency);
-            $product['discount_percent'] = round(
-                (1 - $product['price'] / $product['compare_price']) * 100
-            );
+            $product['discount_percent'] = round((1 - $product['price'] / $product['compare_price']) * 100);
         }
 
         $product['url'] = '/product/' . $product['slug'];
         $product['image'] = $product['images'][0] ?? null;
-
-        // Add category info for pricing rule matching
         if (!empty($product['category_id']) && empty($product['category_path'])) {
-            if ($categoryMap !== null && isset($categoryMap[$product['category_id']])) {
-                $catRow = $categoryMap[$product['category_id']];
-            } else {
-                $cat = Db::get()->prepare("SELECT slug, path FROM categories WHERE id = :id AND store_id = :store");
-                $cat->execute([':id' => $product['category_id'], ':store' => StoreContext::current()->catalogId()]);
-                $catRow = $cat->fetch();
-            }
+            $catRow = $context->category((int)$product['category_id']);
             if ($catRow) {
                 $product['category_slug'] = $catRow['slug'];
                 $product['category_path'] = $catRow['path'];
             }
         }
-
         return $product;
     }
 

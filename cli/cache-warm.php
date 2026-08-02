@@ -61,9 +61,7 @@ foreach ($locales as $locale) {
     foreach ($allCats as $cat) {
         // First page
         $data = Products::byCategory($cat['id'], 1, $perPage, 'price_asc');
-        $data['products'] = array_map(function($p) {
-            return Products::enrich(I18n::product($p));
-        }, $data['products']);
+        $data['products'] = Products::enrichMany(array_map([I18n::class, 'product'], $data['products']));
         $data['category'] = I18n::category($cat);
         Cache::writeJson(Cache::localePath($locale, "cat/{$cat['slug']}/page-1.json"), $data);
         $cached++;
@@ -72,9 +70,7 @@ foreach ($locales as $locale) {
         $totalPages = $data['pages'] ?? 1;
         for ($pg = 2; $pg <= min($totalPages, 10); $pg++) {
             $pageData = Products::byCategory($cat['id'], $pg, $perPage, 'price_asc');
-            $pageData['products'] = array_map(function($p) {
-                return Products::enrich(I18n::product($p));
-            }, $pageData['products']);
+            $pageData['products'] = Products::enrichMany(array_map([I18n::class, 'product'], $pageData['products']));
             $pageData['category'] = I18n::category($cat);
             Cache::writeJson(Cache::localePath($locale, "cat/{$cat['slug']}/page-{$pg}.json"), $pageData);
             $cached++;

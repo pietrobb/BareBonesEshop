@@ -249,12 +249,9 @@ function handleCacheRebuild(array $payload, array $job): void {
             $allCats = Db::get()->query("SELECT * FROM categories")->fetchAll();
             $perPage = $cfg['per_page'] ?? 24;
 
-            $catMap = Products::categoryMap();
             foreach ($allCats as $cat) {
                 $data = Products::byCategory($cat['id'], 1, $perPage, 'price_asc');
-                $data['products'] = array_map(function($p) use ($catMap) {
-                    return Products::enrich(I18n::product($p), $catMap);
-                }, $data['products']);
+                $data['products'] = Products::enrichMany(array_map([I18n::class, 'product'], $data['products']));
                 Cache::writeJson(Cache::localePath($locale, "cat/{$cat['slug']}/page-1.json"), $data);
 
                 // Filters
@@ -300,9 +297,8 @@ function handleCacheRebuild(array $payload, array $job): void {
             I18n::setLocale($locale);
             $cat = Categories::bySlug($catSlug);
             if ($cat) {
-                $catMap = Products::categoryMap();
                 $data = Products::byCategory($cat['id'], $pageNum, $perPage, 'price_asc');
-                $data['products'] = array_map(fn($p) => Products::enrich(I18n::product($p), $catMap), $data['products']);
+                $data['products'] = Products::enrichMany(array_map([I18n::class, 'product'], $data['products']));
                 Cache::writeJson(Cache::localePath($locale, "cat/{$catSlug}/page-{$pageNum}.json"), $data);
             }
         } elseif (preg_match('#^([a-z]{2})/product/([a-z0-9-]+)\.json$#', $path, $m)) {

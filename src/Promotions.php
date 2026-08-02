@@ -8,8 +8,21 @@ class Promotions {
         ?string $at = null
     ): array {
         $customerId ??= self::sessionCustomerId();
-        $profile = Customers::commerceProfile($customerId);
-        $rules = self::activeRules('catalog', $at);
+        return self::applyCatalogRules(
+            $product,
+            self::activeRules('catalog', $at),
+            Customers::commerceProfile($customerId),
+            $qty
+        );
+    }
+
+    /** Active catalog rules for one request-scoped enrichment context. */
+    public static function catalogRules(?string $at = null): array {
+        return self::activeRules('catalog', $at);
+    }
+
+    /** Apply already-loaded catalog rules without further database access. */
+    public static function applyCatalogRules(array $product, array $rules, ?array $profile, int $qty = 1): array {
         if ($rules === []) return $product;
 
         $basePrice = max(0, (int)($product['price'] ?? 0));

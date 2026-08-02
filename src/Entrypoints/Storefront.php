@@ -907,11 +907,11 @@ function renderHome(): string {
     </div>
 
     <?php
-    $latest = Products::latest(12);
+    $latest = Products::enrichMany(Products::latest(12));
     if ($latest): ?>
     <h2 class="section-title" style="margin:32px 0 16px;font-size:1.4em"><?= $t('latest') ?></h2>
     <div class="grid grid-4">
-    <?php foreach ($latest as $p): $p = Products::enrich($p); ?>
+    <?php foreach ($latest as $p): ?>
      <div class="card" style="position:relative">
       <a href="?page=product&slug=<?= $e($p['slug']) ?>">
        <?php
@@ -1119,8 +1119,7 @@ function renderCategory(array $cat): string {
         echo '<p style="padding:40px;text-align:center;color:#888">' . $t('no_parts_filter') . '</p>';
     } else {
         echo '<div class="grid grid-4">';
-        foreach ($result['products'] as $p) {
-            $p = Products::enrich($p);
+        foreach (Products::enrichMany($result['products']) as $p) {
             $imgs = is_string($p['images'] ?? null) ? json_decode($p['images'], true) : ($p['images'] ?? []);
             $firstImg = $imgs[0] ?? null;
             echo '<div class="card" style="position:relative">';
@@ -1246,8 +1245,7 @@ function renderVehicle(int $ktype, array $result, array $cats, ?int $activeCatId
 
     echo '<div class="sort-bar"><span class="total">' . number_format($result['total']) . ' ' . $t('parts_count') . '</span></div>';
     echo '<div class="grid grid-4">';
-    foreach ($result['products'] as $p) {
-        $p = Products::enrich($p);
+    foreach (Products::enrichMany($result['products']) as $p) {
         $imgs = is_string($p['images'] ?? null) ? json_decode($p['images'], true) : ($p['images'] ?? []);
         $firstImg = $imgs[0] ?? null;
         echo '<div class="card" style="position:relative">';
@@ -1293,10 +1291,10 @@ function renderOE(string $q, array $result): string {
 
 function renderProductGrid(array $products): string {
     global $e, $price, $t;
+    $products = Products::enrichMany($products);
     ob_start();
     echo '<div class="grid grid-4">';
     foreach ($products as $p) {
-        $p = Products::enrich($p);
         $imgs = is_string($p['images'] ?? null) ? json_decode($p['images'], true) : ($p['images'] ?? []);
         $firstImg = $imgs[0] ?? null;
         echo '<div class="card" style="position:relative">';

@@ -42,25 +42,22 @@ function apiProducts(): array {
         return ['error' => 'Category not found', 'products' => [], 'total' => 0];
     }
 
-    // Check cache (only for unfiltered first page)
+    // Personalized price lists and promotions must never share a guest cache entry.
     $locale = I18n::locale();
-    if (empty($filters) && $page === 1 && !$priceMin && !$priceMax && $sort === 'price_asc') {
+    $cacheable = empty($_SESSION['customer_id']) && empty($filters) && $page === 1
+        && !$priceMin && !$priceMax && $sort === 'price_asc';
+    if ($cacheable) {
         $cached = Cache::readJson(Cache::localePath($locale, "cat/{$catSlug}/page-1.json"), 3600);
         if ($cached) return $cached;
     }
 
     $data = Products::byCategory($category['id'], $page, $perPage, $sort, $filters, $priceMin, $priceMax);
 
-    // Translate & enrich products (batch category map to avoid N+1)
-    $catMap = Products::categoryMap();
-    $data['products'] = array_map(function($p) use ($catMap) {
-        return Products::enrich(I18n::product($p), $catMap);
-    }, $data['products']);
+    $data['products'] = Products::enrichMany(array_map([I18n::class, 'product'], $data['products']));
 
     $data['category'] = Categories::enrich(I18n::category($category));
 
-    // Cache first page of unfiltered results
-    if (empty($filters) && $page === 1 && !$priceMin && !$priceMax && $sort === 'price_asc') {
+    if ($cacheable) {
         Cache::writeJson(Cache::localePath($locale, "cat/{$catSlug}/page-1.json"), $data);
     }
 
@@ -99,10 +96,7 @@ function apiSearch(): array {
     }
 
     $data = Adapters::search()->search($q, ['page' => $page]);
-    $catMap = Products::categoryMap();
-    $data['products'] = array_map(function($p) use ($catMap) {
-        return Products::enrich(I18n::product($p), $catMap);
-    }, $data['products']);
+    $data['products'] = Products::enrichMany(array_map([I18n::class, 'product'], $data['products']));
 
     return $data;
 }
@@ -1143,7 +1137,7 @@ function apiVehicleParts(): array {
 
     $result = TecDoc::partsByKtype($ktype, $page, 24, $catId);
     $result['categories'] = TecDoc::categoriesForKtype($ktype);
-    $result['products'] = array_map(fn($p) => Products::enrich($p), $result['products']);
+    $result['products'] = Products::enrichMany($result['products']);
     return $result;
 }
 
@@ -1153,7 +1147,7 @@ function apiOESearch(): array {
 
     $page = max(1, Security::int($_GET['page'] ?? 1));
     $result = TecDoc::searchByOE($q, $page, 24);
-    $result['products'] = array_map(fn($p) => Products::enrich($p), $result['products']);
+    $result['products'] = Products::enrichMany($result['products']);
     return $result;
 }
 
@@ -1182,7 +1176,7 @@ function apiParametricSearch(): array {
     }
 
     $result = TecDoc::parametricSearch($catId, $page, 24, $sort, $specFilters, $priceMin, $priceMax, $lang);
-    $result['products'] = array_map(fn($p) => Products::enrich($p), $result['products']);
+    $result['products'] = Products::enrichMany($result['products']);
     return $result;
 }
 
