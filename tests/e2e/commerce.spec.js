@@ -137,6 +137,35 @@ test('admin identity requires password plus current TOTP', async ({ page }) => {
   await adminSignIn(page);
 });
 
+test('admin product export and bulk controls use one valid form', async ({ page }) => {
+  test.skip(!state.admin, 'Run tests/e2e/seed.php first');
+  await adminSignIn(page);
+  await page.goto('/admin.php?p=products');
+  await expect(page.locator('form form')).toHaveCount(0);
+  await expect(page.locator('#bulk-form')).toHaveAttribute('data-confirm', 'OK?');
+
+  const exportButton = page.locator('#bulk-form button[formaction*="action=export"]');
+  await expect(exportButton).toHaveAttribute('formmethod', 'post');
+  await expect(exportButton).toHaveAttribute('data-skip-confirm', '');
+  await expect(exportButton).not.toHaveAttribute('data-confirm', /.+/);
+  const [download] = await Promise.all([page.waitForEvent('download'), exportButton.click()]);
+  expect(download.suggestedFilename()).toMatch(/products.*\.csv$/);
+  const csv = fs.readFileSync(await download.path(), 'utf8');
+  expect(csv).toMatch(/^sku,name,slug,product_type,price,compare_price,stock,status,summary,weight_g\r?\n/);
+  expect(csv).not.toContain('Deprecated');
+
+  const firstProduct = page.locator('#bulk-form .product-check').first();
+  const productId = await firstProduct.getAttribute('value');
+  await firstProduct.check();
+  await page.locator('#bulk-form select[name="bulk_action"]').selectOption('activate');
+  const bulkButton = page.locator('#bulk-form button[type="submit"]:not([formaction])');
+  await expect(bulkButton).not.toHaveAttribute('data-skip-confirm', '');
+  page.once('dialog', dialog => dialog.accept());
+  await bulkButton.click();
+  const row = page.locator('tr').filter({ has: page.locator(`.product-check[value="${productId}"]`) });
+  await expect(row.locator('.badge-active')).toHaveText('active');
+});
+
 test('admin fulfillment ships a paid order through the warehouse ledger', async ({ page }) => {
   test.skip(!state.fulfillment, 'Run tests/e2e/seed.php first');
   await adminSignIn(page);

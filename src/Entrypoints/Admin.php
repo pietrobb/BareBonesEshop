@@ -235,9 +235,11 @@ match($page) {
 (function(){
     document.addEventListener('submit', function(e){
         var f = e.target;
-        if (f && f.matches && f.matches('form[data-confirm]')) {
-            if (!confirm(f.getAttribute('data-confirm'))) e.preventDefault();
-        }
+        var submitter = e.submitter;
+        var skipConfirm = submitter && submitter.hasAttribute && submitter.hasAttribute('data-skip-confirm');
+        var message = submitter && submitter.getAttribute ? submitter.getAttribute('data-confirm') : null;
+        if (!message && !skipConfirm && f && f.matches && f.matches('form[data-confirm]')) message = f.getAttribute('data-confirm');
+        if (message && !confirm(message)) e.preventDefault();
     });
     document.addEventListener('click', function(e){
         var t = e.target.closest ? e.target.closest('[data-action]') : null;
@@ -580,12 +582,9 @@ function pageProducts(): void {
                     <option value="price_down_20">Price -20%</option>
                 </select>
                 <button type="submit" class="btn btn-sm"><?= esc(I18n::t('admin.btn.apply')) ?></button>
-                <form method="post" action="admin.php?p=products&action=export" style="display:inline">
-                    <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-                    <input type="hidden" name="q" value="<?= esc($search) ?>">
-                    <input type="hidden" name="status" value="<?= esc($statusFilter) ?>">
-                    <button type="submit" class="btn btn-sm"><?= esc(I18n::t('admin.btn.export_csv')) ?></button>
-                </form>
+                <input type="hidden" name="q" value="<?= esc($search) ?>">
+                <input type="hidden" name="status" value="<?= esc($statusFilter) ?>">
+                <button type="submit" class="btn btn-sm" formaction="admin.php?p=products&amp;action=export" formmethod="post" data-skip-confirm><?= esc(I18n::t('admin.btn.export_csv')) ?></button>
             </div>
         <table>
             <tr><th><input type="checkbox" id="check-all"></th><th><?= esc(I18n::t('admin.th.sku')) ?></th><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.th.price')) ?></th><th><?= esc(I18n::t('admin.th.stock')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.th.actions')) ?></th></tr>
@@ -2356,9 +2355,9 @@ function handleExport(): void {
     header('Content-Type: text/csv; charset=UTF-8');
     header('Content-Disposition: attachment; filename="products-' . date('Y-m-d') . '.csv"');
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['sku', 'name', 'slug', 'product_type', 'price', 'compare_price', 'stock', 'status', 'summary', 'weight_g']);
+    fputcsv($out, ['sku', 'name', 'slug', 'product_type', 'price', 'compare_price', 'stock', 'status', 'summary', 'weight_g'], ',', '"', '\\');
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        fputcsv($out, array_map([Security::class, 'csvCell'], $row));
+        fputcsv($out, array_map([Security::class, 'csvCell'], $row), ',', '"', '\\');
     }
     fclose($out);
     exit;
