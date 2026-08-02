@@ -69,6 +69,7 @@ return [
         'payment'     => 'StripePayment', // legacy default, retained for compatibility
         'vat_validator' => 'ViesVatIdValidator', // MockVatIdValidator for dev/tests
         'storage'     => 'LocalStorage',
+        'metrics'     => null, // JsonlMetricAlert for optional metrics/alert export
         'integration' => null, // legacy single ERP adapter
     ],
 
@@ -98,6 +99,15 @@ return [
     ],
     'operations' => [
         'worker_cron' => '', // e.g. * * * * *; install it in the platform scheduler too
+        'monitor_cron' => '', // e.g. */5 * * * * php cli/monitor.php
+    ],
+    'monitoring' => [
+        'backup_rpo_seconds' => 86400,
+        'queue_pending_warning' => 100,
+        'failed_jobs_warning' => 1,
+        'failed_mail_warning' => 1,
+        'payment_incidents_critical' => 1,
+        'webhook_incidents_warning' => 1,
     ],
 
     // Signed outgoing webhooks. Secrets remain in deployment config/environment;
@@ -161,6 +171,7 @@ return [
     'backup_storage_adapter' => 'LocalBackupStorage', // MountedBackupStorage requires an operator-mounted off-site target + sentinel
     'backup_log_file'     => dirname(__DIR__) . '/bareboneseshop-private/logs/backup.log',
     'structured_log_file' => dirname(__DIR__) . '/bareboneseshop-private/logs/application.jsonl',
+    'metrics_log_file'    => dirname(__DIR__) . '/bareboneseshop-private/logs/metrics.jsonl',
     'update_storage_dir'  => dirname(__DIR__) . '/bareboneseshop-private/updates',
     'update_public_key'   => '', // Ed25519 public key (base64/hex or absolute key-file path)
     // Required only for MySQL/MariaDB packages containing migrations. Reserve

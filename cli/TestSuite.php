@@ -124,7 +124,7 @@ assert_true(str_contains($htaccess, 'RewriteCond %{REQUEST_FILENAME} -f'), '.hta
 assert_true(str_contains($htaccess, 'bbf\.(?:css|js)|submit\.php'), '.htaccess: required BBF browser integration remains allowlisted');
 
 $configExampleSource = (string)file_get_contents(__DIR__ . '/../config.example.php');
-foreach (['db_sqlite_path', 'private_cache_dir', 'jobs_dir', 'invoice_storage_dir', 'backup_storage_dir', 'backup_log_file', 'update_storage_dir', 'gdpr_salt_file'] as $privateConfigKey) {
+foreach (['db_sqlite_path', 'private_cache_dir', 'jobs_dir', 'invoice_storage_dir', 'backup_storage_dir', 'backup_log_file', 'metrics_log_file', 'update_storage_dir', 'gdpr_salt_file'] as $privateConfigKey) {
     assert_true(
         preg_match("/'" . preg_quote($privateConfigKey, '/') . "'\\s*=>\\s*dirname\\(__DIR__\\)/", $configExampleSource) === 1,
         "Config: {$privateConfigKey} defaults outside the application root"
@@ -5445,7 +5445,7 @@ assert_true(in_array('php cli/migrate.php', $preflight['recommended_commands'] ?
 assert_true(in_array('php cli/cache-warm.php', $preflight['recommended_commands'] ?? [], true), 'Staging preflight: recommends cache warm');
 $preflightNames = array_column($preflight['checks'], 'name');
 $preflightDbChecks = ($cfg['db_driver'] ?? 'sqlite') === 'mysql' ? ['db_host', 'db_name', 'db_user'] : ['sqlite_path'];
-foreach (array_merge($preflightDbChecks, ['jobs_dir', 'private_cache_dir', 'invoice_storage_dir', 'backup_storage_dir', 'backup_log_file', 'gdpr_salt_file']) as $privateCheck) {
+foreach (array_merge($preflightDbChecks, ['jobs_dir', 'private_cache_dir', 'invoice_storage_dir', 'backup_storage_dir', 'backup_log_file', 'metrics_log_file', 'gdpr_salt_file']) as $privateCheck) {
     assert_true(in_array($privateCheck, $preflightNames, true), "Staging preflight: checks {$privateCheck}");
 }
 
@@ -7068,6 +7068,58 @@ ContentService::delete('banner', $g10BannerId);
 ContentService::delete('redirect', $g10RedirectId);
 ContentService::delete('landing', $g10LandingId);
 $pdo->exec("DELETE FROM products WHERE sku='G10-FEED'");
+
+// ============================================================
+// G15: active health/SLO metrics and alerting adapter
+// ============================================================
+echo "\n--- G15: Operational metrics and alerting ---\n";
+$g15Now = strtotime('2026-08-02T09:00:30+00:00');
+$g15Config = require __DIR__ . '/../config.php';
+$g15Config['jobs_dir'] = sys_get_temp_dir();
+$g15Config['private_cache_dir'] = sys_get_temp_dir();
+$g15Config['monitoring'] = [
+    'backup_rpo_seconds' => 86400,
+    'queue_pending_warning' => 999999,
+    'failed_jobs_warning' => 999999,
+    'failed_mail_warning' => 999999,
+    'payment_incidents_critical' => 999999,
+    'webhook_incidents_warning' => 999999,
+];
+$g15Snapshot = OperationalMetrics::snapshot($g15Config, dirname(__DIR__), $pdo, 'default', [[
+    'meta' => ['timestamp' => '2026-08-02T09:00:00+00:00'],
+    'mtime' => $g15Now - 30,
+]], $g15Now);
+assert_equals('ok', $g15Snapshot['status'], 'G15 metrics: healthy bounded snapshot has no alert');
+assert_equals(1, $g15Snapshot['metrics']['service_ready'], 'G15 metrics: readiness is exported as a numeric signal');
+assert_equals(30, $g15Snapshot['metrics']['backup_age_seconds'], 'G15 metrics: newest backup age is exported');
+
+$g15BreachedConfig = $g15Config;
+$g15BreachedConfig['monitoring']['backup_rpo_seconds'] = 10;
+$g15Breach = OperationalMetrics::snapshot($g15BreachedConfig, dirname(__DIR__), $pdo, 'default', [[
+    'meta' => ['timestamp' => '2026-08-02T09:00:00+00:00'],
+]], $g15Now);
+assert_equals('critical', $g15Breach['status'], 'G15 metrics: RPO breach is critical');
+assert_true(in_array('backup_rpo_breached', array_column($g15Breach['alerts'], 'code'), true), 'G15 metrics: RPO breach emits a stable alert code');
+
+$g15MetricsPath = sys_get_temp_dir() . '/bbe-metrics-' . getmypid() . '.jsonl';
+@unlink($g15MetricsPath);
+$g15Adapter = new JsonlMetricAlert(['metrics_log_file' => $g15MetricsPath]);
+$g15Adapter->publish($g15Snapshot['metrics'], $g15Breach['alerts'], ['store_id' => 'default', 'api_key' => 'must-not-leak']);
+$g15Record = json_decode(trim((string)file_get_contents($g15MetricsPath)), true);
+assert_equals(30, $g15Record['metrics']['backup_age_seconds'], 'G15 adapter: JSONL preserves numeric metrics');
+assert_equals('[REDACTED]', $g15Record['context']['api_key'], 'G15 adapter: context secrets are redacted');
+@unlink($g15MetricsPath);
+$g15UnsafeMetricsPathRejected = false;
+try { new JsonlMetricAlert(['metrics_log_file' => __DIR__ . '/../metrics.jsonl']); }
+catch (RuntimeException $e) { $g15UnsafeMetricsPathRejected = true; }
+assert_true($g15UnsafeMetricsPathRejected, 'G15 adapter: public application-root path is rejected');
+assert_true(Adapters::metrics() === null, 'G15 adapter: metrics export is optional by default');
+$g15MonitorSource = (string)file_get_contents(__DIR__ . '/monitor.php');
+assert_true(str_contains($g15MonitorSource, 'OperationalMetrics::report()'), 'G15 monitoring: CLI publishes the active SLO snapshot');
+$g15Runbook = (string)file_get_contents(__DIR__ . '/../docs/OPERATIONS_RUNBOOK.md');
+foreach (['99.9%', 'RPO', 'RTO', 'Incident response', 'Required live operator checks'] as $g15RunbookProof) {
+    assert_true(str_contains($g15Runbook, $g15RunbookProof), "G15 runbook: documents {$g15RunbookProof}");
+}
 
 require __DIR__ . '/test-update.php';
 

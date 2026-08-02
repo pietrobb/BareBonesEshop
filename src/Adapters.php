@@ -173,6 +173,15 @@ class Adapters {
         return self::resolve('storage');
     }
 
+    public static function metrics(): ?MetricAlertAdapter {
+        if (empty(self::cfg()['adapters']['metrics'])) return null;
+        $adapter = self::resolve('metrics');
+        if (!$adapter instanceof MetricAlertAdapter) {
+            throw new RuntimeException('Metrics adapter must implement MetricAlertAdapter');
+        }
+        return $adapter;
+    }
+
     public static function search(): object {
         return self::resolve('search');
     }

@@ -118,6 +118,7 @@ function runStagingPreflight(array $argvLocal = []): array {
         'invoice_storage_dir' => (string)($cfg['invoice_storage_dir'] ?? ''),
         'backup_storage_dir' => (string)($cfg['backup_storage_dir'] ?? ''),
         'backup_log_file' => (string)($cfg['backup_log_file'] ?? ''),
+        'metrics_log_file' => (string)($cfg['metrics_log_file'] ?? ''),
         'gdpr_salt_file' => (string)($cfg['gdpr_salt_file'] ?? ''),
     ];
     foreach ($privatePaths as $key => $path) {
