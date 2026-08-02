@@ -7073,6 +7073,11 @@ $pdo->exec("DELETE FROM products WHERE sku='G10-FEED'");
 // G15: active health/SLO metrics and alerting adapter
 // ============================================================
 echo "\n--- G15: Operational metrics and alerting ---\n";
+$g15StorefrontSource = (string)file_get_contents(__DIR__ . '/../src/Entrypoints/Storefront.php');
+foreach (['checkout-name', 'checkout-email', 'checkout-phone', 'checkout-street', 'checkout-city', 'checkout-zip', 'checkout-country', 'checkout-notes'] as $g15CheckoutControl) {
+    assert_true(str_contains($g15StorefrontSource, 'for="' . $g15CheckoutControl . '"'), "G15 WCAG: checkout label targets {$g15CheckoutControl}");
+    assert_true(str_contains($g15StorefrontSource, 'id="' . $g15CheckoutControl . '"'), "G15 WCAG: checkout control exposes {$g15CheckoutControl}");
+}
 $g15Now = strtotime('2026-08-02T09:00:30+00:00');
 $g15Config = require __DIR__ . '/../config.php';
 $g15Config['jobs_dir'] = sys_get_temp_dir();

@@ -450,7 +450,7 @@ main{padding:24px 0;min-height:60vh}
 .shipping-options,.payment-options{display:grid;gap:8px;margin:8px 0 16px}
 .shipping-option,.payment-option{display:flex;justify-content:space-between;gap:12px;padding:10px;border:1px solid #ddd;border-radius:6px;cursor:pointer}
 .shipping-option:has(input:checked),.payment-option:has(input:checked){border-color:#a82d5c;background:#fff7fb}
-.shipping-option small,.payment-option small{display:block;color:#777;margin-top:2px}
+.shipping-option small,.payment-option small{display:block;color:#666;margin-top:2px}
 .shipping-loading,.shipping-empty{font-size:.9em;color:#777;padding:8px 0}
 
 /* Order done */
@@ -1482,12 +1482,12 @@ function renderCheckout(): string {
     echo '<form method="post" class="checkout-form">';
     echo $csrfField . '<input type="hidden" name="checkout" value="1">';
     echo '<h3>' . $t('contact') . '</h3>';
-    echo '<label>' . $t('name') . '</label><input name="name" required>';
-    echo '<div class="form-row"><div><label>' . $t('email') . '</label><input type="email" name="email" required></div><div><label>' . $t('phone') . '</label><input name="phone"></div></div>';
+    echo '<label for="checkout-name">' . $t('name') . '</label><input id="checkout-name" name="name" autocomplete="name" required>';
+    echo '<div class="form-row"><div><label for="checkout-email">' . $t('email') . '</label><input id="checkout-email" type="email" name="email" autocomplete="email" required></div><div><label for="checkout-phone">' . $t('phone') . '</label><input id="checkout-phone" name="phone" autocomplete="tel"></div></div>';
     echo '<h3 style="margin-top:20px">' . $t('address') . '</h3>';
-    echo '<label>' . $t('street') . '</label><input name="street" required>';
-    echo '<div class="form-row"><div><label>' . $t('city') . '</label><input name="city" required></div><div><label>' . $t('zip') . '</label><input name="zip" required></div></div>';
-    echo '<label>Country</label><select name="country" id="checkout-country"><option value="SK">Slovensko</option><option value="CZ">Česko</option><option value="DE">Deutschland</option><option value="AT">Österreich</option><option value="HU">Magyarország</option><option value="PL">Polska</option></select>';
+    echo '<label for="checkout-street">' . $t('street') . '</label><input id="checkout-street" name="street" autocomplete="street-address" required>';
+    echo '<div class="form-row"><div><label for="checkout-city">' . $t('city') . '</label><input id="checkout-city" name="city" autocomplete="address-level2" required></div><div><label for="checkout-zip">' . $t('zip') . '</label><input id="checkout-zip" name="zip" autocomplete="postal-code" required></div></div>';
+    echo '<label for="checkout-country">Country</label><select name="country" id="checkout-country" autocomplete="country"><option value="SK">Slovensko</option><option value="CZ">Česko</option><option value="DE">Deutschland</option><option value="AT">Österreich</option><option value="HU">Magyarország</option><option value="PL">Polska</option></select>';
     echo '<h3 style="margin-top:20px">' . $t('shipping') . '</h3><div class="shipping-options" id="shipping-options">';
     foreach ($shippingRates as $i => $rate) {
         $checked = (($rate['method_code'] ?? '') === $selectedShipping || ($i === 0 && $selectedShipping === '')) ? ' checked' : '';
@@ -1501,7 +1501,7 @@ function renderCheckout(): string {
     }
     if (empty($paymentMethods)) echo '<p style="color:#c62828">Platba nie je dostupná.</p>';
     echo '</div>';
-    echo '<label>' . $t('notes') . '</label><textarea name="notes" placeholder="' . $t('notes_placeholder') . '"></textarea>';
+    echo '<label for="checkout-notes">' . $t('notes') . '</label><textarea id="checkout-notes" name="notes" placeholder="' . $t('notes_placeholder') . '"></textarea>';
     echo '<button class="btn-checkout" type="submit">' . $t('submit_order') . '</button>';
     echo '</form>';
 

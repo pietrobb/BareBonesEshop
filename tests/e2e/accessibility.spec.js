@@ -21,6 +21,16 @@ test.describe('rendered WCAG 2.2 AA qualification', () => {
     });
   }
 
+  test('checkout fields have programmatic names and no serious axe violations', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('[data-storefront-action="cart-add"]').first().click();
+    await page.goto('/?page=checkout');
+    await assertNoSeriousViolations(page);
+    for (const name of ['Full Name', 'E-mail', 'Phone', 'Street', 'City', 'ZIP Code', 'Country', 'Order Notes']) {
+      await expect(page.getByLabel(name, { exact: true })).toBeVisible();
+    }
+  });
+
   test('keyboard bypass, focus visibility, and 200% zoom remain usable', async ({ page }) => {
     await page.goto('/');
     await page.keyboard.press('Tab');
