@@ -5038,6 +5038,21 @@ if (@symlink($backupSibling, $backupLink)) {
 }
 @rmdir($backupSibling);
 
+$mountedRoot = $backupRoot . '/mounted-offsite';
+mkdir($mountedRoot, 0775, true);
+$missingMountSentinelRejected = false;
+try { new MountedBackupStorage($mountedRoot); } catch (RuntimeException $e) { $missingMountSentinelRejected = true; }
+assert_true($missingMountSentinelRejected, 'MountedBackupStorage: missing mount sentinel fails closed');
+file_put_contents($mountedRoot . '/.bbe-offsite-backup-target', "operator-provisioned\n");
+$mountedStorage = new MountedBackupStorage($mountedRoot);
+unlink($mountedRoot . '/.bbe-offsite-backup-target');
+$disappearedMountRejected = false;
+try { $mountedStorage->list(); } catch (RuntimeException $e) { $disappearedMountRejected = true; }
+assert_true($disappearedMountRejected, 'MountedBackupStorage: disappearing mount sentinel fails closed');
+file_put_contents($mountedRoot . '/.bbe-offsite-backup-target', "operator-provisioned\n");
+$storageNeutralSource = (string)file_get_contents(__DIR__ . '/../src/BackupService.php');
+assert_true(!str_contains($storageNeutralSource, '->localPath('), 'BackupService: backup and restore are storage-neutral');
+
 // 50.6 — second create() within same second gets a -1 suffix
 $created2 = BackupService::create(['label' => 'manual']);
 assert_true($created['remote_path'] !== $created2['remote_path'], 'Backup: second create() gets unique path');
@@ -5047,6 +5062,9 @@ $createdGz = BackupService::create(['label' => 'manual', 'compress' => true]);
 $gzPath = $backupRoot . '/storage/backups/' . $createdGz['remote_path'] . '.gz';
 assert_true(is_file($gzPath), 'Backup: --gz produces .db.gz sidecar');
 assert_true($createdGz['compressed'] === true, 'Backup: compressed=true in meta');
+$gzMeta = json_decode((string)file_get_contents($gzPath . '.meta.json'), true);
+assert_equals(hash_file('sha256', $gzPath), (string)($gzMeta['sha256'] ?? ''), 'Backup: gzip sidecar has its own checksum metadata');
+assert_equals($createdGz['sha256'], (string)($gzMeta['source_sha256'] ?? ''), 'Backup: gzip metadata links to source snapshot checksum');
 
 // 50.8 — GC keeps minimum_kept newest backups
 $gcCfg = $backupCfg;
@@ -5124,6 +5142,29 @@ try { BackupService::restore($wrongIdentityBackup['remote_path'], ['skip_snapsho
 }
 assert_true($wrongIdentityRejected, 'Restore: metadata from another backup is rejected');
 assert_equals(0, count(glob($liveBackupDb . '.restore-*.tmp') ?: []), 'Restore: failed validation leaves no staged temp files');
+
+$storageNeutral = new class($mountedStorage) implements BackupStorage {
+    public function __construct(private BackupStorage $inner) { }
+    public function put(string $localPath, string $remotePath, array $meta): void { $this->inner->put($localPath, $remotePath, $meta); }
+    public function get(string $remotePath, string $localPath): void { $this->inner->get($remotePath, $localPath); }
+    public function delete(string $remotePath): void { $this->inner->delete($remotePath); }
+    public function list(string $prefix = ''): array { return $this->inner->list($prefix); }
+};
+$drillDbPath = $backupRoot . '/restore-drill.db';
+$drillPdo = new PDO('sqlite:' . $drillDbPath);
+$drillPdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$drillPdo->exec('CREATE TABLE restore_probe (value TEXT NOT NULL)');
+$drillPdo->exec("INSERT INTO restore_probe (value) VALUES ('backup-state')");
+$drillPdo->exec('CREATE TABLE schema_migrations (name TEXT PRIMARY KEY)');
+BackupService::init($drillPdo, $backupCfg, $backupRoot, $storageNeutral);
+$drillBackup = BackupService::create(['label' => 'restore-drill']);
+$drillPdo->exec("UPDATE restore_probe SET value = 'mutated-state'");
+$drillPdo = null;
+$drillResult = BackupService::restore($drillBackup['remote_path'], ['skip_snapshot' => true]);
+$drillVerify = new PDO('sqlite:' . $drillDbPath);
+assert_equals('backup-state', (string)$drillVerify->query('SELECT value FROM restore_probe')->fetchColumn(), 'Restore drill: downloaded off-site snapshot replaced disposable live DB');
+assert_equals('ok', (string)$drillResult['integrity'], 'Restore drill: downloaded snapshot passes integrity_check');
+$drillVerify = null;
 
 // 50.11 — Migrator preApplyHook fires once before pending migrations
 $mTmp = $backupRoot . '/_mig';

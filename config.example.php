@@ -158,6 +158,7 @@ return [
     'jobs_dir'            => dirname(__DIR__) . '/bareboneseshop-private/jobs',
     'invoice_storage_dir' => dirname(__DIR__) . '/bareboneseshop-private/invoices',
     'backup_storage_dir'  => dirname(__DIR__) . '/bareboneseshop-private/backups',
+    'backup_storage_adapter' => 'LocalBackupStorage', // MountedBackupStorage requires an operator-mounted off-site target + sentinel
     'backup_log_file'     => dirname(__DIR__) . '/bareboneseshop-private/logs/backup.log',
     'structured_log_file' => dirname(__DIR__) . '/bareboneseshop-private/logs/application.jsonl',
     'update_storage_dir'  => dirname(__DIR__) . '/bareboneseshop-private/updates',

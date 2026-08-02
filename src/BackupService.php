@@ -3,7 +3,7 @@
  * BackupService — vytvára/obnovuje SQLite zálohy cez VACUUM INTO.
  *
  * Public API:
- *   BackupService::init(PDO $db, ?array $config = null, ?string $rootDir = null);
+ *   BackupService::init(PDO $db, ?array $config = null, ?string $rootDir = null, ?BackupStorage $storage = null);
  *   BackupService::create(array $opts = []): array  // returns meta of created backup
  *   BackupService::restore(string $remotePath, array $opts = []): array
  *   BackupService::gc(): array                       // returns ['kept' => N, 'deleted' => [...]]
@@ -24,7 +24,7 @@ class BackupService
     /** Path to the live SQLite file backing the configured PDO; null if unknown / not local. */
     private static ?string $livePath = null;
 
-    public static function init(PDO $db, ?array $config = null, ?string $rootDir = null): void
+    public static function init(PDO $db, ?array $config = null, ?string $rootDir = null, ?BackupStorage $storage = null): void
     {
         self::$db = $db;
         self::$rootDir = $rootDir ?: dirname(__DIR__);
@@ -32,16 +32,29 @@ class BackupService
 
         if ($config !== null) {
             $storageRoot = (string)($config['storage_dir'] ?? self::$rootDir . '/storage/backups');
+            $storageClass = (string)($config['storage_adapter'] ?? 'LocalBackupStorage');
         } else {
             $appCfg = require self::$rootDir . '/config.php';
             $storageRoot = (string)($appCfg['backup_storage_dir'] ?? dirname(self::$rootDir) . '/bareboneseshop-private/backups');
+            $storageClass = (string)($appCfg['backup_storage_adapter'] ?? 'LocalBackupStorage');
             self::$cfg['log_file'] = (string)($appCfg['backup_log_file'] ?? dirname(self::$rootDir) . '/bareboneseshop-private/logs/backup.log');
         }
         $logPath = (string)(self::$cfg['log_file'] ?? 'storage/backup.log');
         if (!self::isAbsolutePath($logPath)) $logPath = self::$rootDir . '/' . $logPath;
-        self::assertPrivateAbsolutePath($storageRoot, 'backup_storage_dir');
         self::assertPrivateAbsolutePath($logPath, 'backup_log_file');
-        self::$storage = new LocalBackupStorage($storageRoot);
+        if ($storage !== null) {
+            self::$storage = $storage;
+        } else {
+            self::assertPrivateAbsolutePath($storageRoot, 'backup_storage_dir');
+            if (!class_exists($storageClass)) {
+                throw new RuntimeException("Backup storage adapter not found: {$storageClass}");
+            }
+            $candidate = new $storageClass($storageRoot);
+            if (!$candidate instanceof BackupStorage) {
+                throw new RuntimeException("Backup storage adapter must implement BackupStorage: {$storageClass}");
+            }
+            self::$storage = $candidate;
+        }
         self::$livePath = self::detectLivePath($db);
     }
 
@@ -165,7 +178,7 @@ class BackupService
     {
         $rp = self::buildRemotePath($when, 0);
         $i = 0;
-        while (is_file(self::$storage->localPath($rp))) {
+        while (self::storedRow($rp) !== null) {
             $i++;
             $rp = self::buildRemotePath($when, $i);
             if ($i > 999) {
@@ -173,6 +186,31 @@ class BackupService
             }
         }
         return $rp;
+    }
+
+    private static function storedRow(string $remotePath): ?array
+    {
+        $prefix = dirname($remotePath);
+        foreach (self::$storage->list($prefix === '.' ? '' : $prefix) as $row) {
+            if ((string)($row['path'] ?? '') === $remotePath) return $row;
+        }
+        return null;
+    }
+
+    private static function stagingPath(string $suffix): string
+    {
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'bbe-backup-' . bin2hex(random_bytes(16));
+            if (@mkdir($dir, 0700)) return $dir . DIRECTORY_SEPARATOR . 'snapshot' . $suffix;
+        }
+        throw new RuntimeException('BackupService: cannot create a private staging directory');
+    }
+
+    private static function removeStagedFile(?string $path): void
+    {
+        if ($path === null) return;
+        if (is_file($path)) @unlink($path);
+        @rmdir(dirname($path));
     }
 
     // ---------- Schema info ----------
@@ -214,6 +252,8 @@ class BackupService
         $trigger  = (string)($opts['trigger'] ?? $label);
         $compress = (bool)($opts['compress']  ?? (self::$cfg['compression'] ?? false));
 
+        $stagedDb = null;
+        $stagedGz = null;
         $lockHandle = self::acquireLock();
         try {
             // 1. WAL checkpoint (best-effort)
@@ -224,11 +264,7 @@ class BackupService
             // 2. Reserve a unique remote path
             $when = new DateTimeImmutable('now');
             $remotePath = self::reserveUniquePath($when);
-            $absPath = self::$storage->localPath($remotePath);
-            $absDir  = dirname($absPath);
-            if (!is_dir($absDir) && !mkdir($absDir, 0750, true) && !is_dir($absDir)) {
-                throw new RuntimeException("BackupService: cannot create backup directory {$absDir}");
-            }
+            $absPath = $stagedDb = self::stagingPath('.db');
 
             // 3. VACUUM INTO — atomic, consistent snapshot
             $sqlPath = str_replace("'", "''", $absPath);
@@ -250,7 +286,7 @@ class BackupService
             // 5. Optional gzip
             $compressed = false;
             if ($compress) {
-                $gzPath = $absPath . '.gz';
+                $gzPath = $stagedGz = $absPath . '.gz';
                 $in  = @fopen($absPath, 'rb');
                 $out = @gzopen($gzPath, 'wb6');
                 $compressionOk = $in !== false && $out !== false;
@@ -288,12 +324,25 @@ class BackupService
                 'compressed'     => $compressed,
                 'created_by'     => 'BackupService',
             ];
-            $metaJson = json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-            if ($metaJson === false) {
-                throw new RuntimeException('Meta encode failed');
-            }
-            if (file_put_contents($absPath . '.meta.json', $metaJson) === false) {
-                throw new RuntimeException("Meta write failed: {$absPath}.meta.json");
+            try {
+                self::$storage->put($absPath, $remotePath, $meta);
+                if ($compressed && $stagedGz !== null) {
+                    $compressedMeta = $meta;
+                    $compressedMeta['filename'] = basename($remotePath . '.gz');
+                    $compressedMeta['remote_path'] = $remotePath . '.gz';
+                    $compressedMeta['size_bytes'] = filesize($stagedGz);
+                    $compressedMeta['sha256'] = hash_file('sha256', $stagedGz);
+                    $compressedMeta['content_encoding'] = 'gzip';
+                    $compressedMeta['source_sha256'] = $sha;
+                    self::$storage->put($stagedGz, $remotePath . '.gz', $compressedMeta);
+                }
+            } catch (\Throwable $e) {
+                try { self::$storage->delete($remotePath); } catch (\Throwable $ignored) { }
+                if ($compressed) {
+                    try { self::$storage->delete($remotePath . '.gz'); } catch (\Throwable $ignored) { }
+                }
+                self::log("CREATE FAIL label={$label} err=" . $e->getMessage());
+                throw new RuntimeException('Backup upload failed: ' . $e->getMessage(), 0, $e);
             }
 
             self::log("CREATE OK path={$remotePath} size={$size} sha256={$sha} label={$label}");
@@ -312,6 +361,8 @@ class BackupService
 
             return $meta;
         } finally {
+            self::removeStagedFile($stagedGz);
+            self::removeStagedFile($stagedDb);
             self::releaseLock($lockHandle);
         }
     }
@@ -353,39 +404,22 @@ class BackupService
         $restoreTemp = null;
 
         try {
-        $absSrc = self::$storage->localPath($remotePath);
-        if (!is_file($absSrc)) {
-            $gz = $absSrc . '.gz';
-            if (!is_file($gz)) {
-                throw new RuntimeException("Restore: backup not found: {$remotePath}");
-            }
-            $temporarySource = $absSrc . '.restore-' . bin2hex(random_bytes(6)) . '.tmp';
-            $in  = @gzopen($gz, 'rb');
-            $out = @fopen($temporarySource, 'xb');
-            $decompressionOk = $in !== false && $out !== false;
-            if ($decompressionOk) {
-                while (!gzeof($in)) {
-                    $buf = gzread($in, 65536);
-                    if ($buf === false || ($buf !== '' && fwrite($out, $buf) !== strlen($buf))) {
-                        $decompressionOk = false;
-                        break;
-                    }
-                }
-            }
-            if (is_resource($in)) gzclose($in);
-            if (is_resource($out)) fclose($out);
-            if (!$decompressionOk || !is_file($temporarySource)) {
-                @unlink($temporarySource);
-                throw new RuntimeException("Restore: cannot safely decompress {$gz}");
-            }
-            $absSrc = $temporarySource;
+        $stored = self::storedRow($remotePath);
+        if ($stored === null) {
+            throw new RuntimeException("Restore: backup not found: {$remotePath}");
         }
-
-        $metaPath = self::$storage->localPath($remotePath) . '.meta.json';
-        $metaJson = is_file($metaPath) ? file_get_contents($metaPath) : false;
-        $meta = $metaJson !== false ? json_decode($metaJson, true) : null;
-        if (!is_array($meta)) {
+        $meta = $stored['meta'] ?? null;
+        if (!is_array($meta) || $meta === []) {
             throw new RuntimeException('Restore: valid backup metadata is required');
+        }
+        $absSrc = $temporarySource = self::stagingPath('.restore.db');
+        try {
+            self::$storage->get($remotePath, $absSrc);
+        } catch (\Throwable $e) {
+            throw new RuntimeException("Restore: cannot download backup: {$remotePath}", 0, $e);
+        }
+        if (!is_file($absSrc)) {
+            throw new RuntimeException("Restore: adapter did not create staged backup: {$remotePath}");
         }
         $expectedSha = strtolower((string)($meta['sha256'] ?? ''));
         $expectedSize = filter_var($meta['size_bytes'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
@@ -570,7 +604,7 @@ class BackupService
             self::releaseLock($lockHandle);
         }
         } finally {
-            if ($temporarySource !== null && is_file($temporarySource)) @unlink($temporarySource);
+            self::removeStagedFile($temporarySource);
             if ($restoreTemp !== null && is_file($restoreTemp)) @unlink($restoreTemp);
         }
     }
@@ -758,7 +792,7 @@ class BackupService
     {
         $lockPath = self::$storage instanceof LocalBackupStorage
             ? self::$storage->root() . DIRECTORY_SEPARATOR . '.backup.lock'
-            : sys_get_temp_dir() . DIRECTORY_SEPARATOR . '.bbe-backup.lock';
+            : sys_get_temp_dir() . DIRECTORY_SEPARATOR . '.bbe-backup-' . hash('sha256', (string)self::$rootDir) . '.lock';
 
         $dir = dirname($lockPath);
         if (!is_dir($dir)) @mkdir($dir, 0775, true);

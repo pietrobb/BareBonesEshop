@@ -21,6 +21,4 @@ interface BackupStorage
      */
     public function list(string $prefix = ''): array;
 
-    /** Absolútna lokálna cesta pre $remotePath, ak je adaptér local-disk based. */
-    public function localPath(string $remotePath): string;
 }
