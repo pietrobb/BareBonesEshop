@@ -35,25 +35,7 @@ class Orders {
         }
 
         try {
-            if (Db::isSqlite()) {
-                $deadline = microtime(true) + 5.0;
-                $db->exec('PRAGMA busy_timeout = 100');
-                try {
-                    while (true) {
-                        try {
-                            $db->exec('BEGIN IMMEDIATE');
-                            break;
-                        } catch (\PDOException $e) {
-                            if (!str_contains(strtolower($e->getMessage()), 'database is locked') || microtime(true) >= $deadline) throw $e;
-                            usleep(10000);
-                        }
-                    }
-                } finally {
-                    $db->exec('PRAGMA busy_timeout = 5000');
-                }
-            } else {
-                $db->beginTransaction();
-            }
+            $db->beginTransaction();
             $outOfStock = [];
             $orderItems = [];
             $subtotal = 0;
