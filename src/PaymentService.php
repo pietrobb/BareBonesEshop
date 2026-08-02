@@ -34,7 +34,7 @@ class PaymentService {
         $db = Db::get();
         $storeId = StoreContext::current()->providerId();
         StoreContext::current()->assertPermission('payment');
-        $params = [':store_method' => $storeId, ':store_country' => $storeId, ':country' => $country, ':amount' => $amount];
+        $params = [':store_method' => $storeId, ':store_country' => $storeId, ':country' => $country, ':min_amount' => $amount, ':max_amount' => $amount];
         $shippingFilter = '';
         if ($shippingMethod !== '') {
             $shippingFilter = "
@@ -52,8 +52,8 @@ class PaymentService {
             FROM payment_methods m
             WHERE m.store_id = :store_method AND m.active = 1
               AND EXISTS (SELECT 1 FROM payment_method_countries pc WHERE pc.store_id = :store_country AND pc.method_code = m.code AND pc.country = :country)
-              AND m.min_amount <= :amount
-              AND (m.max_amount IS NULL OR m.max_amount = 0 OR m.max_amount >= :amount)
+              AND m.min_amount <= :min_amount
+              AND (m.max_amount IS NULL OR m.max_amount = 0 OR m.max_amount >= :max_amount)
               {$shippingFilter}
             ORDER BY m.sort_order, m.name
         ");
