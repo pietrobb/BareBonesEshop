@@ -312,7 +312,7 @@ final class InvoiceService
                     ->execute([':id' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
             }
             AuditLog::log('credit_note', $invoiceId, null, ['source_invoice_id' => $sourceInvoiceId, 'refund_id' => $refundId, 'gross' => $totals['gross']], 'Item credit issued');
-            Outbox::record('order.refund_requested', 'order', (int)$order['id'], [
+            Outbox::record(DomainEvents::ORDER_REFUND_REQUESTED, 'order', (int)$order['id'], [
                 'order_id' => (int)$order['id'], 'rma_id' => $rmaId, 'refund_id' => $refundId,
                 'credit_note_id' => $invoiceId, 'amount' => $totals['gross'], 'currency' => strtolower((string)$source['currency']),
             ]);

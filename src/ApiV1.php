@@ -135,9 +135,9 @@ class ApiV1 {
             $stmt->execute($params);
             $updated = Products::byId($productId);
             AuditLog::log('product', $productId, $old, $updated, 'API v1 client ' . $client['key_id']);
-            Outbox::record('product.updated', 'product', $productId, self::productDto($updated));
+            Outbox::record(DomainEvents::PRODUCT_UPDATED, 'product', $productId, self::productDto($updated));
             if (array_key_exists('stock', $body) && (int)$old['stock'] !== (int)$updated['stock']) {
-                Outbox::record('stock.adjusted', 'product', $productId, [
+                Outbox::record(DomainEvents::STOCK_ADJUSTED, 'product', $productId, [
                     'product_id' => $productId,
                     'sku' => (string)$updated['sku'],
                     'before' => (int)$old['stock'],

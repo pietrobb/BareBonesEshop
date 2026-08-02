@@ -30,6 +30,8 @@ class Adapters {
         'erp' => [
             'http' => ['class' => 'HttpErpAdapter', 'capabilities' => ['products', 'orders', 'order_status', 'stock', 'customers', 'health'], 'requires_config' => 'http_erp'],
         ],
+        'pim' => [],
+        'wms' => [],
     ];
 
     private const PROVIDER_INTERFACES = [
@@ -38,6 +40,8 @@ class Adapters {
         'mail' => MailAdapter::class,
         'tax' => TaxProvider::class,
         'erp' => IntegrationAdapter::class,
+        'pim' => PimAdapter::class,
+        'wms' => WmsAdapter::class,
     ];
 
     private static function cfg(): array {
@@ -151,6 +155,18 @@ class Adapters {
         $cfg = self::cfg();
         if (empty($cfg['adapters']['integration'])) return null;
         return self::resolve('integration');
+    }
+
+    public static function pim(?string $code = null): ?PimAdapter {
+        if ($code !== null) return self::provider('pim', $code);
+        $definitions = self::availableRegistry('pim');
+        return $definitions === [] ? null : self::provider('pim', self::defaultProviderCode('pim'));
+    }
+
+    public static function wms(?string $code = null): ?WmsAdapter {
+        if ($code !== null) return self::provider('wms', $code);
+        $definitions = self::availableRegistry('wms');
+        return $definitions === [] ? null : self::provider('wms', self::defaultProviderCode('wms'));
     }
 
     public static function storage(): StorageAdapter {

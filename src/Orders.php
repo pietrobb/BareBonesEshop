@@ -290,7 +290,7 @@ class Orders {
                 'total'        => $total,
                 'items'        => count($orderItems),
             ], 'Order created');
-            Outbox::record('order.created', 'order', $orderId, [
+            Outbox::record(DomainEvents::ORDER_CREATED, 'order', $orderId, [
                 'order_id' => $orderId,
                 'order_number' => $orderNumber,
                 'status' => 'pending',
@@ -298,7 +298,7 @@ class Orders {
                 'currency' => strtolower((string)($customer['currency'] ?? 'eur')),
                 'customer_id' => $customerId,
             ]);
-            Outbox::record('stock.reserved', 'order', $orderId, [
+            Outbox::record(DomainEvents::STOCK_RESERVED, 'order', $orderId, [
                 'order_id' => $orderId,
                 'items' => array_map(static fn(array $item): array => [
                     'product_id' => (int)$item['product_id'],
@@ -579,14 +579,14 @@ class Orders {
                 $db->prepare("UPDATE checkout_sessions SET status = 'expired', updated_at = " . Db::now() . " WHERE order_id = :id AND status = 'pending'")
                    ->execute([':id' => (int)$order['id']]);
                 AuditLog::log('order_status', (int)$order['id'], 'pending', 'cancelled', 'Expired unpaid online checkout');
-                Outbox::record('order.status_changed', 'order', (int)$order['id'], [
+                Outbox::record(DomainEvents::ORDER_STATUS_CHANGED, 'order', (int)$order['id'], [
                     'order_id' => (int)$order['id'],
                     'order_number' => (string)$order['order_number'],
                     'from' => 'pending',
                     'to' => 'cancelled',
                     'note' => 'Expired unpaid online checkout',
                 ]);
-                Outbox::record('stock.changed', 'order', (int)$order['id'], [
+                Outbox::record(DomainEvents::STOCK_CHANGED, 'order', (int)$order['id'], [
                     'order_id' => (int)$order['id'],
                     'reason' => 'order.expired',
                 ]);

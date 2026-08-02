@@ -23,7 +23,7 @@ a custom business logikou. Nie je to "Magento, len menšie". Je to iný prístup
 | Filesystem job queue | Nulové závislosti, jednoduchosť | Single-node only. Business-critical operácie (order processing) idú synchronne v request, nie cez queue. |
 | Pre-computed cache | Bleskový TTFB na čítanie | Cache invalidácia pri viacerých store×jazyk×pricing group môže byť drahá. Treba presne vedieť čo precomputovať. |
 | Žiadny Elasticsearch | Žiadna extra útočná plocha | FTS5/FULLTEXT nemá synonymá, typo tolerance, merchandising rules. Stačí pre shopy bez pokročilého search UX. SearchAdapter umožňuje výmenu. |
-| ~6,000 LoC odhad | Malý codebase | Reálne s testami, edge-casmi a observability to bude viac. Toto číslo je ambícia, nie záväzok. |
+| 83 668 PHP LoC baseline | Malý runtime bez frameworku | Reprodukovateľný G14 baseline zahŕňa 299 versioned-candidate PHP súborov vrátane migrácií a rozsiahlej test suite; historický odhad ~6 000 LoC bol nepravdivý. |
 
 ### Performance tvrdenia
 
@@ -89,7 +89,7 @@ Return operácie sú samostatná auditovateľná vrstva nad objednávkou: viac o
 **Infraštruktúra:**
 - MySQL/MariaDB primárne, SQLite pre dev
 - Job queue (file-based) pre cache rebuild, emaily, image resize
-- 5 adapter interfaces (search, queue, payment, storage, integration)
+- Stabilné capability kontrakty pre search, queue, payment, shipping, mail, tax, storage, backup, ERP, PIM a WMS
 - Security: CSRF, CSP, rate limiting, idempotencia
 
 ### V2 — rozšírenia
@@ -157,6 +157,16 @@ Return operácie sú samostatná auditovateľná vrstva nad objednávkou: viac o
 │  - žiadny RabbitMQ, len flat files                      │
 └─────────────────────────────────────────────────────────┘
 ```
+
+### Entry point a extension boundaries (G14 baseline)
+
+Verejné `admin.php`, `index.php`, `api.php` a CLI `cli/test.php` sú iba 6/6/6/5-riadkové bootstrapy. HTTP implementácie sú pod webovo zakázaným `src/Entrypoints`; JSON API navyše oddeľuje 88-riadkový request lifecycle/router od `src/Http/ApiHandlers.php`. `cli/TestSuite.php` drží existujúcu sekvenčnú fixture suitu, zatiaľ čo `cli/test.php` ostáva stabilný príkaz. Source regresie skladajú celý bundle, takže presun kódu neoslabuje CSP, checkout ani permission guardy.
+
+Reprodukovateľný baseline príkaz `git ls-files --cached --others --exclude-standard "*.php"` má v tomto stave 299 PHP súborov a 83 668 riadkov vrátane migrácií a testov; samotná historická test suite má 7 058 riadkov. Čísla nie sú marketingovým odhadom a musia sa pri ďalšom delení aktualizovať.
+
+`Adapters::registry()` je additive-only provider boundary. `IntegrationAdapter` zachováva legacy ERP kompatibilitu, ale skladá menšie `ErpAdapter`, `PimAdapter` a `WmsAdapter`; samostatné PIM/WMS providery sú voliteľné a bez konfigurácie zostávajú vypnuté. Payment, shipping, mail a tax používajú existujúce úzke rozhrania. Verejné transakčné udalosti sú pomenované v `DomainEvents` a doručované iba cez `Outbox`, nie cez všeobecný plugin lifecycle.
+
+Dev-only `php cli/static-analysis.php` parsuje PHP zdroje natívnym parserom aktívnej PHP verzie, zakazuje `eval`, vynucuje entrypoint budgety a overuje module/event/adapter kontrakty. CI ho spúšťa na PHP 8.1, 8.2 a 8.3; produkčný runtime preto nezískava Composer, framework ani novú službu.
 
 ---
 

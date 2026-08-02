@@ -48,7 +48,7 @@ class Customers {
         try {
             $ins->execute([$email, $hash, trim($name), $phone, $locale, StoreContext::current()->id()]);
             $id = (int)$db->lastInsertId();
-            Outbox::record('customer.created', 'customer', $id, [
+            Outbox::record(DomainEvents::CUSTOMER_CREATED, 'customer', $id, [
                 'customer_id' => $id,
                 'email' => $email,
                 'name' => trim($name),
@@ -192,7 +192,7 @@ class Customers {
         try {
             $updated = $db->prepare($sql)->execute($params);
             if ($updated) {
-                Outbox::record('customer.updated', 'customer', $id, [
+                Outbox::record(DomainEvents::CUSTOMER_UPDATED, 'customer', $id, [
                     'customer_id' => $id,
                     'changed_fields' => array_keys(array_intersect_key($data, array_flip($allowed))),
                 ]);

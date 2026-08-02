@@ -67,7 +67,7 @@ class OrderWorkflow {
             };
             $order['status'] = $to;
             $deferredJobs = array_merge($deferredJobs, FulfillmentDispatcher::dispatch($to, $order));
-            Outbox::record('order.status_changed', 'order', $orderId, [
+            Outbox::record(DomainEvents::ORDER_STATUS_CHANGED, 'order', $orderId, [
                 'order_id' => $orderId,
                 'order_number' => (string)$order['order_number'],
                 'from' => (string)$from,
@@ -75,7 +75,7 @@ class OrderWorkflow {
                 'note' => $note,
             ]);
             if (in_array($to, ['cancelled', 'shipped', 'returned', 'refunded'], true)) {
-                Outbox::record('stock.changed', 'order', $orderId, [
+                Outbox::record(DomainEvents::STOCK_CHANGED, 'order', $orderId, [
                     'order_id' => $orderId,
                     'reason' => 'order.' . $to,
                     'items' => array_map(static fn(array $item): array => [

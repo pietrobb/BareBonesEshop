@@ -328,7 +328,7 @@ class Rma {
                         ->execute([':id' => $rmaId, ':store' => StoreContext::current()->id()]);
                 }
                 AuditLog::log('rma_receipt', $rmaId, null, ['idempotency_key' => $idempotencyKey], $note);
-                Outbox::record('stock.changed', 'rma', $rmaId, ['rma_id' => $rmaId, 'order_id' => (int)$rma['order_id'], 'reason' => 'return.received']);
+                Outbox::record(DomainEvents::STOCK_CHANGED, 'rma', $rmaId, ['rma_id' => $rmaId, 'order_id' => (int)$rma['order_id'], 'reason' => 'return.received']);
             }
             if ($own) $db->commit();
             return $changed;

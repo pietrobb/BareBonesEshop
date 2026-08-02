@@ -326,7 +326,7 @@ class PaymentService {
                 failClosed: true,
             );
             AuditLog::log('payment_status', $orderId, $from, 'refund_pending', 'refund.requested');
-            Outbox::record('payment.status_changed', 'order', $orderId, [
+            Outbox::record(DomainEvents::PAYMENT_STATUS_CHANGED, 'order', $orderId, [
                 'order_id' => $orderId,
                 'from' => $from,
                 'to' => 'refund_pending',
@@ -359,7 +359,7 @@ class PaymentService {
                 "UPDATE orders SET payment_status = :s, updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store"
             )->execute([':s' => $status, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
             if ($from !== $status) {
-                Outbox::record('payment.status_changed', 'order', $orderId, array_merge([
+                Outbox::record(DomainEvents::PAYMENT_STATUS_CHANGED, 'order', $orderId, array_merge([
                     'order_id' => $orderId,
                     'from' => $from,
                     'to' => $status,
