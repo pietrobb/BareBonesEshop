@@ -5379,7 +5379,8 @@ assert_true(in_array($preflight['status'] ?? '', ['GO', 'NO-GO'], true), 'Stagin
 assert_true(in_array('php cli/migrate.php', $preflight['recommended_commands'] ?? [], true), 'Staging preflight: recommends migrations');
 assert_true(in_array('php cli/cache-warm.php', $preflight['recommended_commands'] ?? [], true), 'Staging preflight: recommends cache warm');
 $preflightNames = array_column($preflight['checks'], 'name');
-foreach (['sqlite_path', 'jobs_dir', 'private_cache_dir', 'invoice_storage_dir', 'backup_storage_dir', 'backup_log_file', 'gdpr_salt_file'] as $privateCheck) {
+$preflightDbChecks = ($cfg['db_driver'] ?? 'sqlite') === 'mysql' ? ['db_host', 'db_name', 'db_user'] : ['sqlite_path'];
+foreach (array_merge($preflightDbChecks, ['jobs_dir', 'private_cache_dir', 'invoice_storage_dir', 'backup_storage_dir', 'backup_log_file', 'gdpr_salt_file']) as $privateCheck) {
     assert_true(in_array($privateCheck, $preflightNames, true), "Staging preflight: checks {$privateCheck}");
 }
 
@@ -5581,8 +5582,8 @@ assert_equals(0, (int)($o2['vat_total'] ?? -1), 'P0 #3: reverse charge vat_total
 assert_equals((int)$o2['subtotal'] + (int)$o2['shipping_cost'], (int)$o2['total'],
     'P0 #3: reverse charge total has no VAT added');
 
-// 55.4 — Bug #4: mock webhook routing gate is closed with shipped config
-$prodCfg = require dirname(__DIR__) . '/config.php';
+// 55.4 — Bug #4: mock webhook routing gate is closed in the shipped config template
+$prodCfg = require dirname(__DIR__) . '/config.example.php';
 assert_true(($prodCfg['allow_mock_webhook'] ?? true) === false, 'P0 #4: allow_mock_webhook ships as false');
 assert_true(($prodCfg['adapters']['payment'] ?? '') !== 'MockPayment', 'P0 #4: shipped payment adapter is not MockPayment');
 $mockRoutable = (($prodCfg['adapters']['payment'] ?? '') === 'MockPayment' || !empty($prodCfg['allow_mock_webhook']));
