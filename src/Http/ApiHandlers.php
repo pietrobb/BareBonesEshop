@@ -470,7 +470,10 @@ function apiCheckout(?array $runtimeConfig = null): array {
     }
 
     $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+    return CheckoutService::execute($input, $runtimeConfig);
+}
 
+function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     $name = trim($input['name'] ?? '');
     $email = Security::email($input['email'] ?? '');
     $phone = trim($input['phone'] ?? '');
@@ -693,6 +696,7 @@ function apiCheckout(?array $runtimeConfig = null): array {
 
         $order = Orders::byId($orderId);
         $orderItems = Orders::items($orderId);
+        $confirmationToken = CheckoutSession::createConfirmation($orderId, CheckoutSession::browserSessionId());
         // For COD/bank_transfer: send confirmation immediately (no webhook will fire)
         // For Stripe: confirmation email is sent from the webhook after payment is confirmed
         if (!$freeDigitalOrder && empty($selectedPayment['requires_online'])) {
@@ -704,6 +708,7 @@ function apiCheckout(?array $runtimeConfig = null): array {
             'order_id'     => $orderId,
             'order_number' => $order['order_number'],
             'total'        => (int)$order['total'],
+            'confirmation_token' => $confirmationToken,
         ];
 
         // For online payments, create a payment session
@@ -721,7 +726,7 @@ function apiCheckout(?array $runtimeConfig = null): array {
                     'items'          => $orderItems,
                     'shipping_cost'  => (int)$order['shipping_cost'],
                     'financial_snapshot_id' => $financialSnapshot['fingerprint'],
-                    'success_url'    => $baseUrl . '/?page=order-done&order=' . rawurlencode($order['order_number']) . '&session_id={CHECKOUT_SESSION_ID}',
+                    'success_url'    => $baseUrl . '/?page=order-done&order=' . rawurlencode($order['order_number']) . '&confirmation_token=' . rawurlencode($confirmationToken) . '&session_id={CHECKOUT_SESSION_ID}',
                     'cancel_url'     => $baseUrl . '/checkout/cancel?order=' . rawurlencode($order['order_number']),
                 ], $payment, $paymentProvider);
                 $result['payment_url'] = $session['url'];

@@ -1356,7 +1356,8 @@ function buildCategoryUrl(string $slug, string $sort, array $specFilters, ?int $
 
 function renderCart(): string {
     global $e, $price, $t, $csrfField;
-    $cart = $_SESSION['cart'] ?? [];
+    $cartData = Cart::enriched();
+    $cart = $cartData['items'];
     ob_start();
 
     echo '<div class="breadcrumb"><a href="?">' . $t('home') . '</a> &rsaquo; ' . $t('cart') . '</div>';
@@ -1370,27 +1371,16 @@ function renderCart(): string {
         return ob_get_clean();
     }
 
-    // Load products
-    $ids = array_keys($cart);
-    $ph = implode(',', array_fill(0, count($ids), '?'));
-    $stmt = Db::get()->prepare("SELECT * FROM products WHERE id IN ({$ph})");
-    $stmt->execute($ids);
-    $products = [];
-    foreach ($stmt->fetchAll() as $p) $products[(int)$p['id']] = $p;
-
-    $subtotal = 0;
+    $subtotal = (int)$cartData['subtotal'];
     echo '<div style="display:grid;grid-template-columns:1fr 320px;gap:24px">';
 
     // Cart table
     echo '<div><table class="cart-table">';
     echo '<tr><th>' . $t('product') . '</th><th>' . $t('price') . '</th><th>' . $t('quantity') . '</th><th>' . $t('total') . '</th><th></th></tr>';
-    foreach ($cart as $pid => $qty) {
-        $p = $products[$pid] ?? null;
-        if (!$p) continue;
-        $p = Products::enrich($p);
-        $lineTotal = $p['price'] * $qty;
-        $subtotal += $lineTotal;
-        $attrs = is_array($p['attrs']) ? $p['attrs'] : json_decode($p['attrs'] ?? '{}', true);
+    foreach ($cart as $p) {
+        $pid = (int)$p['product_id'];
+        $qty = (int)$p['qty'];
+        $lineTotal = (int)$p['total'];
         echo '<tr>';
         echo '<td><a href="?page=product&slug=' . $e($p['slug']) . '" class="prod-name">' . $e($p['name']) . '</a>';
         echo '<div class="prod-sku">' . $e($p['sku']) . '</div></td>';
@@ -1430,7 +1420,8 @@ function renderCart(): string {
 
 function renderCheckout(): string {
     global $e, $price, $t, $csrfField;
-    $cart = $_SESSION['cart'] ?? [];
+    $cartData = Cart::enriched();
+    $cart = $cartData['items'];
 
     if (empty($cart)) {
         return '<div class="breadcrumb"><a href="?">' . $t('home') . '</a> &rsaquo; ' . $t('checkout_title') . '</div>
@@ -1442,22 +1433,11 @@ function renderCheckout(): string {
         return processCheckout();
     }
 
-    // Load products
-    $ids = array_keys($cart);
-    $ph = implode(',', array_fill(0, count($ids), '?'));
-    $stmt = Db::get()->prepare("SELECT * FROM products WHERE id IN ({$ph})");
-    $stmt->execute($ids);
-    $products = [];
-    foreach ($stmt->fetchAll() as $p) $products[(int)$p['id']] = $p;
-
-    $subtotal = 0;
-    foreach ($cart as $pid => $qty) {
-        if (isset($products[$pid])) $subtotal += $products[$pid]['price'] * $qty;
-    }
+    $subtotal = (int)$cartData['subtotal'];
     $country = strtoupper($_POST['country'] ?? 'SK');
     $weightG = 0;
-    foreach ($cart as $pid => $qty) {
-        if (isset($products[$pid])) $weightG += (int)($products[$pid]['weight_g'] ?? 0) * (int)$qty;
+    foreach ($cart as $item) {
+        $weightG += (int)$item['weight_g'] * (int)$item['qty'];
     }
     $shippingRates = ShippingService::calculateRates($country, $weightG, $subtotal, false, 0);
     $selectedShipping = $_POST['shipping_method'] ?? ($shippingRates[0]['method_code'] ?? '');
@@ -1508,10 +1488,8 @@ function renderCheckout(): string {
     // Order summary sidebar
     echo '<div class="cart-summary">';
     echo '<h3>' . $t('your_order') . '</h3>';
-    foreach ($cart as $pid => $qty) {
-        $p = $products[$pid] ?? null;
-        if (!$p) continue;
-        echo '<div class="row" style="font-size:.85em"><span>' . $e($p['name']) . ' × ' . $qty . '</span><span>' . $price($p['price'] * $qty) . '</span></div>';
+    foreach ($cart as $item) {
+        echo '<div class="row" style="font-size:.85em"><span>' . $e((string)$item['name']) . ' × ' . (int)$item['qty'] . '</span><span>' . $price((int)$item['total']) . '</span></div>';
     }
     echo '<input type="hidden" id="checkout-subtotal" value="' . (int)$subtotal . '">';
     echo '<div class="row" style="margin-top:8px"><span>' . $t('subtotal') . '</span><span>' . $price($subtotal) . '</span></div>';
@@ -1525,123 +1503,37 @@ function renderCheckout(): string {
 }
 
 function processCheckout(): string {
-    global $e, $price, $t;
-
     if (!Security::csrfValidate()) {
         return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">CSRF token mismatch.</p>';
-    }
-
-    $cart = $_SESSION['cart'] ?? [];
-    if (empty($cart)) {
-        return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">Košík je prázdny.</p>';
     }
     if (!Security::rateLimit('checkout', 10)
         || !Security::rateLimit('checkout_global', 200, 60, false)
         || !Security::rateLimit('checkout_session_' . hash('sha256', session_id()), 5, 900, false)) {
         return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">Príliš veľa pokusov o objednávku. Skúste to neskôr.</p>';
     }
-    $email = Security::email((string)($_POST['email'] ?? ''));
-    if ($email === null) {
-        return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">Zadajte platnú e-mailovú adresu.</p>';
-    }
-    $checkoutSubject = !empty($_SESSION['customer_id'])
-        ? 'customer_' . (int)$_SESSION['customer_id']
-        : 'email_' . hash('sha256', strtolower($email));
-    if (!Security::rateLimit('checkout_subject_' . $checkoutSubject, 3, 1800, false)) {
-        return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">Príliš veľa pokusov o objednávku. Skúste to neskôr.</p>';
-    }
 
-    $db = Db::get();
-
-    // Load products
-    $ids = array_keys($cart);
-    $ph = implode(',', array_fill(0, count($ids), '?'));
-    $stmt = $db->prepare("SELECT * FROM products WHERE id IN ({$ph}) AND status = 'active'");
-    $stmt->execute($ids);
-    $products = [];
-    foreach ($stmt->fetchAll() as $p) $products[(int)$p['id']] = $p;
-
-    $payment = Security::clean($_POST['payment'] ?? 'cod');
-    $country = strtoupper(Security::clean($_POST['country'] ?? 'SK'));
-    $shippingMethod = Security::slug($_POST['shipping_method'] ?? '');
-    $addr = [
-        'street' => Security::clean($_POST['street'] ?? ''),
-        'city'   => Security::clean($_POST['city'] ?? ''),
-        'zip'    => Security::clean($_POST['zip'] ?? ''),
-        'country'=> $country,
-    ];
-
-    // Convert index.php cart format to Orders::create format
-    $cartItems = [];
-    foreach ($cart as $pid => $qty) {
-        $p = $products[$pid] ?? null;
-        if (!$p) continue;
-        $cartItems[] = [
-            'product_id' => (int)$pid,
-            'variant_id' => null,
-            'qty'        => (int)$qty,
-            'price'      => (int)$p['price'],
-            'sku'        => $p['sku'],
-            'name'       => $p['name'],
-        ];
-    }
-
-    $subtotal = array_sum(array_map(fn($i) => $i['price'] * $i['qty'], $cartItems));
-    $weightG = 0;
-    foreach ($cartItems as $item) $weightG += (int)($products[$item['product_id']]['weight_g'] ?? 0) * (int)$item['qty'];
-    $selectedRate = ShippingService::selectRate($shippingMethod, $country, $weightG, $subtotal, false, 0);
-    if (!$selectedRate) {
-        return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">Doručenie nie je dostupné do zvolenej krajiny.</p>';
-    }
-    $shippingCost = (int)$selectedRate['price'];
-    $currency = 'eur';
-    $customerId = (int)($_SESSION['customer_id'] ?? 0);
-    $selectedPayment = PaymentService::selectMethod($payment, $country, $currency, $subtotal + $shippingCost, (string)$selectedRate['method_code'], $customerId > 0 ? $customerId : null);
-    if (!$selectedPayment) {
-        return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">Platba nie je dostupná pre zvolenú krajinu alebo dopravu.</p>';
-    }
-    $paymentFee = (int)$selectedPayment['fee'];
-
-    $loggedInCustomerId = !empty($_SESSION['customer_id']) ? (int)$_SESSION['customer_id'] : null;
-    $customer = [
-        'customer_id' => $loggedInCustomerId,
-        'name'  => Security::clean($_POST['name'] ?? ''),
-        'email' => $email,
-        'phone' => Security::clean($_POST['phone'] ?? ''),
-        'address' => $addr,
-        'notes' => Security::clean($_POST['notes'] ?? ''),
-        'shipping_cost' => $shippingCost,
-        'shipping_method' => $selectedRate['method_code'],
-        'shipping_zone' => $selectedRate['zone_code'] ?? '',
-        'shipping_weight_g' => $weightG,
-        'shipping_rate_snapshot' => json_encode($selectedRate, JSON_UNESCAPED_UNICODE),
-        'payment_fee' => $paymentFee,
-        'payment_method_snapshot' => json_encode($selectedPayment, JSON_UNESCAPED_UNICODE),
-    ];
-
-    try {
-        // Orders::create handles atomic stock reservation
-        $orderId = Orders::create($cartItems, $customer, $payment);
-        $_SESSION['cart'] = [];
-        Security::rotateCsrfToken();
-        $order = Orders::byId($orderId);
-        header('Location: ?page=order-done&order=' . urlencode($order['order_number']));
+    $input = $_POST;
+    $input['payment_method'] = Security::clean($input['payment'] ?? 'cod');
+    $result = CheckoutService::execute($input, require dirname(__DIR__, 2) . '/config.php');
+    if (!empty($result['success'])) {
+        $target = !empty($result['payment_url'])
+            ? (string)$result['payment_url']
+            : '?page=order-done&order=' . rawurlencode((string)$result['order_number'])
+                . '&confirmation_token=' . rawurlencode((string)$result['confirmation_token']);
+        header('Location: ' . $target);
         exit;
-    } catch (\RuntimeException $ex) {
-        // Out of stock
-        return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">' . esc($ex->getMessage()) . '</p>';
-    } catch (\Exception $ex) {
-        return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">Chyba pri spracovaní objednávky. Skúste to znova.</p>';
     }
+
+    $message = (string)($result['error'] ?? 'Chyba pri spracovaní objednávky. Skúste to znova.');
+    return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">'
+        . htmlspecialchars($message, ENT_QUOTES, 'UTF-8') . '</p>';
 }
 
 function renderOrderDone(string $orderNum): string {
     global $e, $price, $t;
     $order = $orderNum !== '' ? Orders::byNumber($orderNum) : null;
-    $checkoutSessionId = Security::clean($_GET['session_id'] ?? '');
-    $paymentSnapshot = $order ? (json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: []) : [];
-    if ($order && !empty($paymentSnapshot['requires_online'])
-        && ($checkoutSessionId === '' || !CheckoutSession::verifyOwnership((int)$order['id'], $checkoutSessionId, session_id()))) {
+    $confirmationToken = Security::clean($_GET['confirmation_token'] ?? '');
+    if ($order && !CheckoutSession::verifyConfirmation((int)$order['id'], $confirmationToken, CheckoutSession::browserSessionId())) {
         $order = null;
     }
     ob_start();

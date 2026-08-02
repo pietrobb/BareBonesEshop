@@ -19,6 +19,28 @@ class CheckoutSession {
         ]);
     }
 
+    public static function browserSessionId(): string {
+        $id = session_id();
+        if ($id !== '') return $id;
+        if (empty($_SESSION['_checkout_browser_id'])) {
+            $_SESSION['_checkout_browser_id'] = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+        }
+        return (string)$_SESSION['_checkout_browser_id'];
+    }
+
+    public static function createConfirmation(int $orderId, string $browserSessionId): string {
+        if ($browserSessionId === '') {
+            throw new InvalidArgumentException('Browser session is required for checkout confirmation');
+        }
+        $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+        self::bind($orderId, $token, 'confirmation', $browserSessionId);
+        return $token;
+    }
+
+    public static function verifyConfirmation(int $orderId, string $token, string $browserSessionId): bool {
+        return self::verifyOwnership($orderId, $token, $browserSessionId, 'confirmation');
+    }
+
     public static function resolveOrderId(string $sessionId, string $provider = 'stripe'): ?int {
         $stmt = Db::get()->prepare("SELECT order_id FROM checkout_sessions
             WHERE provider = :provider AND session_id = :session_id LIMIT 1");

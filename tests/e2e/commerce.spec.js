@@ -56,7 +56,23 @@ async function checkout(page, email) {
   await expect(page.locator('input[name="payment"]').first()).toBeVisible();
   await page.locator('form.checkout-form button[type="submit"]').click();
   await expect(page).toHaveURL(/page=order-done/);
-  await expect(page.locator('.order-done strong')).not.toBeEmpty();
+  await expect(page.locator('.order-done > p strong')).not.toBeEmpty();
+  const successUrl = new URL(page.url());
+  expect(successUrl.searchParams.get('confirmation_token')).toMatch(/^[A-Za-z0-9_-]{40,}$/);
+  await expect(page.locator('.payment-summary')).toBeVisible();
+
+  const orderNumber = (await page.locator('.order-done > p strong').textContent()).trim();
+  const qualification = JSON.parse(execFileSync('php', ['tests/e2e/assert-checkout.php', orderNumber], {
+    cwd: process.cwd(), encoding: 'utf8'
+  }));
+  expect(qualification.snapshot_fingerprint).toMatch(/^[a-f0-9]{64}$/);
+  expect(qualification.vat).toBeGreaterThan(0);
+  expect(qualification.net).toBeGreaterThan(0);
+  expect(qualification.invoice_id).toBeGreaterThan(0);
+
+  successUrl.searchParams.delete('confirmation_token');
+  await page.goto(successUrl.toString());
+  await expect(page.locator('.payment-summary')).toHaveCount(0);
 }
 
 test('guest cart and checkout complete in a real browser', async ({ page }) => {

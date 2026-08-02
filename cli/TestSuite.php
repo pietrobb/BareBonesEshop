@@ -793,9 +793,14 @@ foreach (['api.php', 'index.php', 'product.php', 'wishlist.php'] as $customerEnt
 $apiSourceG5 = entrypointSource('api.php');
 $indexSourceG5 = entrypointSource('index.php');
 foreach (['checkout_global', 'checkout_session_', 'checkout_subject_', 'Security::rotateCsrfToken()'] as $checkoutGuard) {
-    assert_true(str_contains($apiSourceG5, $checkoutGuard), "G5: API checkout uses {$checkoutGuard}");
-    assert_true(str_contains($indexSourceG5, $checkoutGuard), "G5: legacy checkout uses {$checkoutGuard}");
+    assert_true(str_contains($apiSourceG5, $checkoutGuard), "G5: canonical checkout uses {$checkoutGuard}");
 }
+foreach (['checkout_global', 'checkout_session_'] as $transportGuard) {
+    assert_true(str_contains($indexSourceG5, $transportGuard), "G5: HTML transport uses {$transportGuard}");
+}
+assert_true(str_contains($indexSourceG5, 'CheckoutService::execute('), 'G1 convergence: HTML checkout delegates to application service');
+assert_true(!str_contains($indexSourceG5, 'apiCheckout('), 'G1 convergence: storefront does not depend on the JSON transport');
+assert_true(!str_contains($indexSourceG5, 'Orders::create('), 'G1 convergence: storefront has no independent order creation path');
 $_SESSION['csrf_token'] = 'g5-checkout-request-token';
 $_POST['csrf_token'] = 'g5-checkout-request-token';
 assert_true(Security::csrfValidate(), 'G5: original checkout CSRF token starts valid');
@@ -3190,6 +3195,8 @@ assert_true(!empty($onlineCheckout['payment_url']), 'Payment UX: online checkout
 assert_true(str_starts_with((string)$onlineCheckout['payment_url'], 'https://shop.example/'), 'G3: checkout callback uses configured app_url');
 assert_true(!str_contains((string)$onlineCheckout['payment_url'], 'attacker.example'), 'G3: checkout callback ignores poisoned Host header');
 assert_true(!empty($onlineCheckout['session_id']), 'Payment UX: online checkout keeps session_id contract');
+assert_true(!empty($onlineCheckout['confirmation_token']), 'Payment UX: checkout returns opaque browser confirmation token');
+assert_true(str_contains((string)$onlineCheckout['payment_url'], 'confirmation_token='), 'Payment UX: online success URL carries browser confirmation token');
 $onlineCheckoutTx = PaymentService::transactionsForOrder((int)$onlineCheckout['order_id']);
 assert_equals('initiated', (string)$onlineCheckoutTx[0]['status'], 'Payment UX: online checkout logs initiated transaction');
 assert_equals((string)$onlineCheckout['session_id'], (string)$onlineCheckoutTx[0]['provider_ref'], 'Payment UX: initiated transaction stores session_id');
@@ -3269,6 +3276,11 @@ PaymentService::initiate([
     'currency'       => $confirmationOrder['currency'],
     'items'          => Orders::items($confirmationOrder['id']),
 ], $mockGateway);
+$_GET = ['page' => 'order-done', 'order' => (string)$confirmationOrder['order_number']];
+$unownedConfirmationHtml = renderOrderDone((string)$confirmationOrder['order_number']);
+assert_true(!str_contains($unownedConfirmationHtml, 'payment-summary'), 'Payment UX: unowned confirmation hides payment details');
+$confirmationToken = CheckoutSession::createConfirmation($confirmationOrderId, CheckoutSession::browserSessionId());
+$_GET['confirmation_token'] = $confirmationToken;
 $confirmationHtml = renderOrderDone((string)$confirmationOrder['order_number']);
 assert_true(str_contains($confirmationHtml, 'Payment'), 'Payment UX: confirmation renders payment summary');
 assert_true(str_contains($confirmationHtml, 'pending'), 'Payment UX: confirmation renders payment status');
