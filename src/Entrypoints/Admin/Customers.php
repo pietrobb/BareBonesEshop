@@ -1,0 +1,260 @@
+<?php
+/** Customer and GDPR administration. */
+
+function pageCustomers(): void {
+    $q = trim((string)($_GET['q'] ?? ''));
+    $customers = Customers::adminList($q, 100);
+    // Pre-fetch order counts for the listed customers.
+    $counts = [];
+    $ids = array_map(static fn($c) => (int)$c['id'], $customers);
+    if ($ids) {
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $st = Db::get()->prepare("SELECT customer_id, COUNT(*) AS cnt FROM orders WHERE customer_id IN ({$ph}) GROUP BY customer_id");
+        $st->execute($ids);
+        foreach ($st->fetchAll() as $r) { $counts[(int)$r['customer_id']] = (int)$r['cnt']; }
+    }
+    ?>
+    <h1>Zákazníci <span class="muted">(<?= count($customers) ?>)</span></h1>
+    <div class="card">
+        <form method="get" action="admin.php" style="display:flex;gap:.5rem;align-items:center;margin-bottom:1rem">
+            <input type="hidden" name="p" value="customers">
+            <input type="text" name="q" value="<?= esc($q) ?>" placeholder="e-mail, meno alebo ID" style="min-width:280px">
+            <button class="btn btn-primary" type="submit">Hľadať</button>
+            <?php if ($q !== ''): ?><a class="btn btn-sm" href="admin.php?p=customers">Zrušiť filter</a><?php endif; ?>
+        </form>
+        <?php if (!$customers): ?>
+        <p class="muted">Žiadni zákazníci.</p>
+        <?php else: ?>
+        <table>
+            <tr><th>ID</th><th>E-mail</th><th>Meno</th><th>Stav</th><th>Objednávky</th><th>Registrácia</th><th></th></tr>
+            <?php foreach ($customers as $c): ?>
+            <tr>
+                <td><?= (int)$c['id'] ?></td>
+                <td><?= esc($c['email']) ?></td>
+                <td><?= esc($c['name'] ?? '') ?></td>
+                <td><span class="badge badge-<?= ($c['status'] ?? '')==='active'?'active':'draft' ?>"><?= esc($c['status'] ?? '') ?></span></td>
+                <td><?= (int)($counts[(int)$c['id']] ?? 0) ?></td>
+                <td class="muted"><?= esc(substr((string)$c['created_at'], 0, 16)) ?></td>
+                <td><a class="btn btn-sm" href="admin.php?p=customer&id=<?= (int)$c['id'] ?>">Detail</a></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+        <?php endif; ?>
+    </div>
+    <?php
+}
+function pageCustomerDetail(): void {
+    $id = Security::int($_GET['id'] ?? 0);
+    $c = $id > 0 ? Customers::byId($id) : null;
+    if (!$c) {
+        echo '<h1>Zákazník</h1><div class="card"><p class="muted">Zákazník nenájdený. <a href="admin.php?p=customers">Späť na zoznam</a></p></div>';
+        return;
+    }
+    $status   = (string)($c['status'] ?? '');
+    $addresses = Customers::addresses($id);
+    $orders    = Customers::orders($id, 100);
+    $rmas      = Rma::forCustomer($id);
+    $anon = $status === 'anonymized';
+    ?>
+    <h1>Zákazník #<?= (int)$c['id'] ?> <span class="muted"><?= esc($c['email']) ?></span></h1>
+    <p style="margin-bottom:1rem"><a class="btn btn-sm" href="admin.php?p=customers">← Zoznam</a></p>
+
+    <div class="card">
+        <h3>Profil</h3>
+        <table>
+            <tr><th>Meno</th><td><?= esc($c['name'] ?? '') ?></td></tr>
+            <tr><th>E-mail</th><td><?= esc($c['email']) ?></td></tr>
+            <tr><th>Telefón</th><td><?= esc($c['phone'] ?? '') ?></td></tr>
+            <tr><th>Stav</th><td><span class="badge badge-<?= $status==='active'?'active':'draft' ?>"><?= esc($status) ?></span></td></tr>
+            <tr><th>Registrácia</th><td class="muted"><?= esc(substr((string)($c['created_at'] ?? ''), 0, 16)) ?></td></tr>
+            <tr><th>Posledné prihlásenie</th><td class="muted"><?= esc(substr((string)($c['last_login_at'] ?? ''), 0, 16)) ?: '—' ?></td></tr>
+        </table>
+        <?php if (!$anon): ?>
+        <p style="margin-top:1rem">
+            <?php if (Security::adminCan('customers.edit')): ?>
+            <?php $toggleTo = $status === 'active' ? 'blocked' : 'active'; ?>
+            <form method="post" action="admin.php?p=customer&id=<?= (int)$c['id'] ?>&action=status" style="display:inline">
+                <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                <input type="hidden" name="customer_id" value="<?= (int)$c['id'] ?>">
+                <input type="hidden" name="status" value="<?= esc($toggleTo) ?>">
+                <button class="btn btn-sm<?= $toggleTo==='blocked'?' btn-danger':' btn-primary' ?>" type="submit">
+                    <?= $toggleTo === 'blocked' ? 'Zablokovať účet' : 'Odblokovať účet' ?>
+                </button>
+            </form>
+            <?php endif; ?>
+            <a class="btn btn-sm" href="cli/gdpr-export.php?customer-id=<?= (int)$c['id'] ?>">GDPR export</a>
+            <a class="btn btn-sm" href="admin.php?p=gdpr&email=<?= urlencode((string)$c['email']) ?>">GDPR vymazať…</a>
+        </p>
+        <?php else: ?>
+        <p class="muted" style="margin-top:1rem">Účet bol anonymizovaný (GDPR) — bez ďalších akcií.</p>
+        <?php endif; ?>
+    </div>
+
+    <div class="card">
+        <h3>Adresy (<?= count($addresses) ?>)</h3>
+        <?php if (!$addresses): ?>
+        <p class="muted">Žiadne adresy.</p>
+        <?php else: ?>
+        <table>
+            <tr><th>Typ</th><th>Meno</th><th>Adresa</th><th>Mesto</th><th>Krajina</th></tr>
+            <?php foreach ($addresses as $a): ?>
+            <tr>
+                <td><?= esc($a['type'] ?? '') ?><?= !empty($a['is_default']) ? ' <span class="muted">(predvolená)</span>' : '' ?></td>
+                <td><?= esc($a['name'] ?? '') ?></td>
+                <td><?= esc($a['street'] ?? '') ?></td>
+                <td><?= esc(trim(($a['zip'] ?? '') . ' ' . ($a['city'] ?? ''))) ?></td>
+                <td><?= esc($a['country'] ?? '') ?></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+        <?php endif; ?>
+    </div>
+
+    <div class="card">
+        <h3>Objednávky (<?= count($orders) ?>)</h3>
+        <?php if (!$orders): ?>
+        <p class="muted">Žiadne objednávky.</p>
+        <?php else: ?>
+        <table>
+            <tr><th>Číslo</th><th>Stav</th><th>Suma</th><th>Dátum</th><th></th></tr>
+            <?php foreach ($orders as $o): ?>
+            <tr>
+                <td><?= esc($o['order_number']) ?></td>
+                <td><span class="badge badge-<?= esc($o['status']) ?>"><?= esc($o['status']) ?></span></td>
+                <td><?= esc(I18n::price((int)$o['total'], $o['currency'])) ?></td>
+                <td class="muted"><?= esc(substr((string)$o['created_at'], 0, 16)) ?></td>
+                <td><a class="btn btn-sm" href="admin.php?p=order&id=<?= (int)$o['id'] ?>">Detail</a></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+        <?php endif; ?>
+    </div>
+
+    <div class="card">
+        <h3>Reklamácie (<?= count($rmas) ?>)</h3>
+        <?php if (!$rmas): ?>
+        <p class="muted">Žiadne reklamácie.</p>
+        <?php else: ?>
+        <table>
+            <tr><th>RMA</th><th>Objednávka</th><th>Stav</th><th>Dátum</th><th></th></tr>
+            <?php foreach ($rmas as $r): ?>
+            <tr>
+                <td><?= esc($r['rma_number']) ?></td>
+                <td>#<?= (int)$r['order_id'] ?></td>
+                <td><span class="badge badge-<?= esc($r['status']) ?>"><?= esc($r['status']) ?></span></td>
+                <td class="muted"><?= esc(substr((string)$r['created_at'], 0, 16)) ?></td>
+                <td><a class="btn btn-sm" href="admin.php?p=rma&status=<?= esc($r['status']) ?>">RMA fronta</a></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+        <?php endif; ?>
+    </div>
+    <?php
+}
+
+// ============================================================
+// Content & Marketing
+// ============================================================
+function pageGdpr(): void {
+    Security::adminRequire('gdpr.view');
+    $db = Db::get();
+    $email = strtolower(trim((string)($_GET['email'] ?? '')));
+    $customers = [];
+    if ($email !== '') {
+        $stmt = $db->prepare("SELECT id, email, name, status, created_at FROM customers WHERE LOWER(email) LIKE LOWER(:email) ORDER BY id DESC LIMIT 25");
+        $stmt->execute([':email' => '%' . $email . '%']);
+        $customers = $stmt->fetchAll();
+    }
+    $events = $db->query("SELECT * FROM gdpr_events ORDER BY created_at DESC LIMIT 50")->fetchAll();
+    ?>
+    <h1><?= esc(I18n::t('admin.title.gdpr')) ?></h1>
+    <div class="flash" style="background:#fff7ed;color:#9a3412;border:1px solid #fed7aa">
+        <?= esc(I18n::t('admin.gdpr.legal_disclaimer')) ?>
+    </div>
+    <div class="card">
+        <h3><?= esc(I18n::t('admin.gdpr.search_title')) ?></h3>
+        <form method="get" action="admin.php" style="display:flex;gap:.5rem;align-items:center;margin-bottom:1rem">
+            <input type="hidden" name="p" value="gdpr">
+            <input type="email" name="email" value="<?= esc($email) ?>" placeholder="<?= esc(I18n::t('admin.gdpr.email_placeholder')) ?>" style="min-width:280px">
+            <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.btn.search')) ?></button>
+        </form>
+        <?php if ($email !== ''): ?>
+        <table>
+            <tr><th>ID</th><th><?= esc(I18n::t('admin.th.email')) ?></th><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.th.actions')) ?></th></tr>
+            <?php foreach ($customers as $c): ?>
+            <tr>
+                <td><?= (int)$c['id'] ?></td>
+                <td><?= esc($c['email']) ?></td>
+                <td><?= esc($c['name'] ?? '') ?></td>
+                <td><span class="badge badge-<?= ($c['status'] ?? '') === 'active' ? 'active' : 'draft' ?>"><?= esc($c['status'] ?? '') ?></span></td>
+                <td>
+                    <a class="btn btn-sm" href="cli/gdpr-export.php?customer-id=<?= (int)$c['id'] ?>"><?= esc(I18n::t('admin.gdpr.export_hint')) ?></a>
+                    <?php if (Security::adminCan('gdpr.erase') && ($c['status'] ?? '') !== 'anonymized'): ?>
+                    <form method="post" action="admin.php?p=gdpr&action=anonymize&email=<?= urlencode($email) ?>" style="display:inline" data-confirm="<?= esc(I18n::t('admin.gdpr.anonymize_confirm')) ?>">
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                        <input type="hidden" name="customer_id" value="<?= (int)$c['id'] ?>">
+                        <button class="btn btn-danger btn-sm" type="submit"><?= esc(I18n::t('admin.gdpr.anonymize_btn')) ?></button>
+                    </form>
+                    <?php endif; ?>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+            <?php if (!$customers): ?><tr><td colspan="5" class="muted"><?= esc(I18n::t('admin.gdpr.no_results')) ?></td></tr><?php endif; ?>
+        </table>
+        <?php endif; ?>
+    </div>
+    <div class="card">
+        <h3><?= esc(I18n::t('admin.gdpr.events_title')) ?></h3>
+        <table>
+            <tr><th>ID</th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.th.customer')) ?></th><th><?= esc(I18n::t('admin.gdpr.actor')) ?></th><th><?= esc(I18n::t('admin.gdpr.note')) ?></th><th><?= esc(I18n::t('admin.th.date')) ?></th></tr>
+            <?php foreach ($events as $e): ?>
+            <tr>
+                <td><?= (int)$e['id'] ?></td>
+                <td><?= esc($e['action']) ?></td>
+                <td><?= $e['customer_id'] !== null ? (int)$e['customer_id'] : '' ?></td>
+                <td><?= esc($e['actor'] ?? '') ?></td>
+                <td class="muted" style="max-width:320px;overflow:hidden;text-overflow:ellipsis"><?= esc($e['note'] ?? '') ?></td>
+                <td class="muted"><?= esc(substr($e['created_at'], 0, 16)) ?></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+    </div>
+    <?php
+}
+function handleCustomerStatus(): void {
+    Security::adminRequire('customers.edit');
+    $id = Security::int($_POST['customer_id'] ?? 0);
+    $status = Security::clean($_POST['status'] ?? '');
+    if ($id > 0 && Customers::setStatus($id, $status)) {
+        setFlash('ok', 'Zákazník #' . $id . ' → ' . $status);
+    } else {
+        setFlash('err', 'Stav zákazníka sa nepodarilo zmeniť.');
+    }
+    header('Location: admin.php?p=customer&id=' . $id);
+    exit;
+}
+function handleGdprAnonymize(): void {
+    Security::adminRequire('gdpr.erase');
+    $customerId = Security::int($_POST['customer_id'] ?? 0);
+    if ($customerId <= 0) {
+        setFlash('err', I18n::t('admin.gdpr.invalid_customer'));
+        header('Location: admin.php?p=gdpr');
+        exit;
+    }
+    try {
+        $result = GdprService::anonymizeCustomer($customerId, Security::adminUser());
+        GdprService::logEvent([
+            'action' => 'admin_anonymize',
+            'customer_id' => $customerId,
+            'actor' => Security::adminUser(),
+            'payload' => $result,
+            'note' => 'Admin anonymized customer #' . $customerId,
+        ]);
+        setFlash('ok', I18n::t('admin.gdpr.anonymized_ok'));
+    } catch (Throwable $e) {
+        setFlash('err', I18n::t('admin.gdpr.anonymized_failed') . ': ' . $e->getMessage());
+    }
+    $email = trim((string)($_GET['email'] ?? ''));
+    header('Location: admin.php?p=gdpr' . ($email !== '' ? '&email=' . urlencode($email) : ''));
+    exit;
+}

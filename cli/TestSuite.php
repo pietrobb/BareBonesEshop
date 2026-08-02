@@ -41,9 +41,22 @@ final class QueryCountingPDO extends PDO {
 function entrypointSource(string $entrypoint): string {
     $root = dirname(__DIR__);
     $implementations = [
-        'admin.php' => ['src/Entrypoints/Admin.php'],
+        'admin.php' => [
+            'src/Entrypoints/Admin.php',
+            'src/Entrypoints/Admin/Shared.php',
+            'src/Entrypoints/Admin/Catalog.php',
+            'src/Entrypoints/Admin/Orders.php',
+            'src/Entrypoints/Admin/Customers.php',
+            'src/Entrypoints/Admin/Operations.php',
+            'src/Entrypoints/Admin/Request.php',
+        ],
         'api.php' => ['src/Entrypoints/Api.php', 'src/Http/ApiHandlers.php'],
-        'index.php' => ['src/Entrypoints/Storefront.php'],
+        'index.php' => [
+            'src/Entrypoints/Storefront.php',
+            'src/Entrypoints/Storefront/Layout.php',
+            'src/Entrypoints/Storefront/CatalogPages.php',
+            'src/Entrypoints/Storefront/CheckoutPages.php',
+        ],
     ];
     $source = (string)file_get_contents($root . '/' . $entrypoint);
     foreach ($implementations[$entrypoint] ?? [] as $implementation) {
@@ -830,6 +843,19 @@ foreach (['checkout_global', 'checkout_session_'] as $transportGuard) {
 assert_true(str_contains($indexSourceG5, 'CheckoutService::execute('), 'G1 convergence: HTML checkout delegates to application service');
 assert_true(!str_contains($indexSourceG5, 'apiCheckout('), 'G1 convergence: storefront does not depend on the JSON transport');
 assert_true(!str_contains($indexSourceG5, 'Orders::create('), 'G1 convergence: storefront has no independent order creation path');
+$entrypointRoot = __DIR__ . '/../src/Entrypoints';
+foreach ([
+    'Storefront/Layout.php', 'Storefront/CatalogPages.php', 'Storefront/CheckoutPages.php',
+    'Admin/Shared.php', 'Admin/Catalog.php', 'Admin/Orders.php', 'Admin/Customers.php', 'Admin/Operations.php', 'Admin/Request.php',
+] as $boundaryModule) {
+    assert_true(is_file($entrypointRoot . '/' . $boundaryModule), "G5 boundaries: {$boundaryModule} exists");
+}
+$storefrontOrchestrator = (string)file_get_contents($entrypointRoot . '/Storefront.php');
+$adminOrchestrator = (string)file_get_contents($entrypointRoot . '/Admin.php');
+assert_true(preg_match('/^function\s+/m', $storefrontOrchestrator) !== 1, 'G5 boundaries: storefront orchestrator defines no page or checkout functions');
+assert_true(preg_match('/^function\s+/m', $adminOrchestrator) !== 1, 'G5 boundaries: admin orchestrator defines no context handlers');
+assert_true(str_contains((string)file_get_contents($entrypointRoot . '/Storefront/CheckoutPages.php'), 'CheckoutService::execute('), 'G5 boundaries: HTML checkout transport owns canonical checkout delegation');
+assert_true(str_contains((string)file_get_contents($entrypointRoot . '/Admin/Request.php'), 'handlePost('), 'G5 boundaries: admin POST dispatch has an explicit request boundary');
 $_SESSION['csrf_token'] = 'g5-checkout-request-token';
 $_POST['csrf_token'] = 'g5-checkout-request-token';
 assert_true(Security::csrfValidate(), 'G5: original checkout CSRF token starts valid');
@@ -7182,7 +7208,7 @@ $pdo->exec("DELETE FROM products WHERE sku='G10-FEED'");
 // G15: active health/SLO metrics and alerting adapter
 // ============================================================
 echo "\n--- G15: Operational metrics and alerting ---\n";
-$g15StorefrontSource = (string)file_get_contents(__DIR__ . '/../src/Entrypoints/Storefront.php');
+$g15StorefrontSource = entrypointSource('index.php');
 foreach (['checkout-name', 'checkout-email', 'checkout-phone', 'checkout-street', 'checkout-city', 'checkout-zip', 'checkout-country', 'checkout-notes'] as $g15CheckoutControl) {
     assert_true(str_contains($g15StorefrontSource, 'for="' . $g15CheckoutControl . '"'), "G15 WCAG: checkout label targets {$g15CheckoutControl}");
     assert_true(str_contains($g15StorefrontSource, 'id="' . $g15CheckoutControl . '"'), "G15 WCAG: checkout control exposes {$g15CheckoutControl}");
