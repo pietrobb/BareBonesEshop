@@ -300,7 +300,10 @@ assert_true(str_contains($jsonLdSourceG6, 'JSON_HEX_TAG'), 'G6 JSON embed: share
 
 [$g6EraseRegistered, $g6EraseCustomerId] = Customers::register('g6-erase@example.com', 'StrongPass!123', 'G6 Erase');
 assert_true($g6EraseRegistered, 'G6 GDPR: audit-failure fixture customer is created');
-$g6EraseResult = GdprService::anonymizeCustomer((int)$g6EraseCustomerId, 'g6-test');
+$g6EraseResult = with_expected_error_log(
+    'GDPR erase audit failed',
+    static fn() => GdprService::anonymizeCustomer((int)$g6EraseCustomerId, 'g6-test')
+);
 assert_equals('anonymized', (string)($g6EraseResult['status'] ?? ''), 'G6 GDPR: post-commit audit failure does not report erasure as failed');
 assert_equals('anonymized', (string)(Customers::byId((int)$g6EraseCustomerId)['status'] ?? ''), 'G6 GDPR: customer remains anonymized after audit logging failure');
 $gdprSourceG6 = file_get_contents(TEST_CLI_DIR . '/../src/GdprService.php') ?: '';

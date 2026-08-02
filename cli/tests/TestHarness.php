@@ -109,8 +109,27 @@ function expect_php_error(int $severity, string $message, callable $callback): b
     return $captured;
 }
 
-function with_expected_log(string $event, callable $callback): mixed {
-    $path = test_fixture_path('expected-log') . '.log';
+function with_expected_structured_log(string $event, callable $callback): mixed {
+    $path = test_fixture_path('expected-log') . '.jsonl';
+    @unlink($path);
+    $config = new ReflectionProperty(Logger::class, 'config');
+    $previous = $config->getValue();
+    $config->setValue(null, ['structured_log_file' => $path]);
+    try {
+        $result = $callback();
+    } finally {
+        $config->setValue(null, $previous);
+    }
+    $log = is_file($path) ? (string)file_get_contents($path) : '';
+    @unlink($path);
+    if (!str_contains($log, '"event":"' . $event . '"')) {
+        throw new RuntimeException("Expected structured log event was not emitted: {$event}");
+    }
+    return $result;
+}
+
+function with_expected_error_log(string $message, callable $callback): mixed {
+    $path = test_fixture_path('expected-error') . '.log';
     @unlink($path);
     $previous = (string)ini_get('error_log');
     ini_set('error_log', $path);
@@ -121,8 +140,8 @@ function with_expected_log(string $event, callable $callback): mixed {
     }
     $log = is_file($path) ? (string)file_get_contents($path) : '';
     @unlink($path);
-    if (!str_contains($log, '"event":"' . $event . '"')) {
-        throw new RuntimeException("Expected log event was not emitted: {$event}");
+    if (!str_contains($log, $message)) {
+        throw new RuntimeException("Expected error log was not emitted: {$message}");
     }
     return $result;
 }

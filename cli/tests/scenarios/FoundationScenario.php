@@ -379,6 +379,13 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS coupon_uses (
 $pdo->exec("CREATE INDEX IF NOT EXISTS idx_coupon_code ON coupon_uses(coupon_code)");
 $pdo->exec("CREATE INDEX IF NOT EXISTS idx_coupon_email ON coupon_uses(coupon_code, customer_email)");
 
+$pdo->exec("CREATE TABLE IF NOT EXISTS abandoned_carts (
+    id INTEGER PRIMARY KEY, session_id TEXT NOT NULL UNIQUE,
+    customer_email TEXT, cart_data TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now')), reminded_at TEXT
+)");
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_ac_email ON abandoned_carts(customer_email, reminded_at)");
+
 $pdo->exec("CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY, entity TEXT NOT NULL, entity_id INTEGER NOT NULL,
     action TEXT NOT NULL, old_value TEXT, new_value TEXT, note TEXT,
@@ -1187,7 +1194,7 @@ assert_true($login !== null, 'G9 identity: password and TOTP authenticate');
 assert_true(AdminIdentity::session($login['token']) !== null, 'G9 identity: server-side session validates');
 AdminIdentity::setPassword($adminId, 'Rotated-password-5678');
 assert_true(AdminIdentity::session($login['token']) === null, 'G9 identity: password rotation revokes existing sessions');
-assert_true(with_expected_log('admin.login_failed', static fn() => AdminIdentity::authenticate('g9-operator', 'Test-password-1234', Totp::code($enrollment['secret']), '127.0.0.1', 'G9 Test Device')) === null, 'G9 identity: rotated password rejects the previous credential');
+assert_true(with_expected_structured_log('admin.login_failed', static fn() => AdminIdentity::authenticate('g9-operator', 'Test-password-1234', Totp::code($enrollment['secret']), '127.0.0.1', 'G9 Test Device')) === null, 'G9 identity: rotated password rejects the previous credential');
 $login = AdminIdentity::authenticate('g9-operator', 'Rotated-password-5678', Totp::code($enrollment['secret']), '127.0.0.1', 'G9 Test Device');
 assert_true($login !== null, 'G9 identity: rotated password authenticates with MFA');
 assert_true(AdminIdentity::storeAllows($login['store_permissions'], 'default', 'orders.ship'), 'G9 identity: wildcard permission allows the granted store action');
@@ -1197,7 +1204,7 @@ assert_true(AdminIdentity::session($login['token']) === null, 'G9 identity: revo
 $recoveryLogin = AdminIdentity::authenticate('g9-operator', 'Rotated-password-5678', $enrollment['recovery_codes'][0], '127.0.0.1', 'G9 Recovery Device');
 assert_true($recoveryLogin !== null, 'G9 identity: recovery code authenticates once');
 AdminIdentity::revokeSession($recoveryLogin['session_id']);
-assert_true(with_expected_log('admin.login_failed', static fn() => AdminIdentity::authenticate('g9-operator', 'Test-password-1234', $enrollment['recovery_codes'][0], '127.0.0.1', 'G9 Recovery Device')) === null, 'G9 identity: used recovery code cannot replay');
+assert_true(with_expected_structured_log('admin.login_failed', static fn() => AdminIdentity::authenticate('g9-operator', 'Test-password-1234', $enrollment['recovery_codes'][0], '127.0.0.1', 'G9 Recovery Device')) === null, 'G9 identity: used recovery code cannot replay');
 $pdo->prepare("UPDATE queue_jobs SET store_id='other', state='failed', last_error='other store' WHERE id=:id")->execute([':id' => $dbJobHigh]);
 $operationsG9 = OperationalDashboard::summary('default');
 assert_equals('database', $operationsG9['queue_backend'], 'G9 dashboard: reports active queue backend');
