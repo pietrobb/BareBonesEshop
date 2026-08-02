@@ -1,78 +1,103 @@
 # Production qualification evidence
 
-**Qualified source SHA:** `7849a49e038caa7a994a4b131002aaad7456f181`
+**Qualified source SHA:** `88160b8caa1479edce1db046fead275ea52d00cb`
 **Qualification date:** 2026-08-02 UTC
-**Scope:** repository code and disposable SQLite/MySQL/MariaDB/browser environments. Live merchant/provider/infrastructure checks remain operator-owned and are listed below.
+**Scope:** G1–G7 repository changes and disposable SQLite/MySQL/MariaDB/browser environments. Live merchant, provider, legal, and infrastructure acceptance remains operator-owned.
 
 ## Result
 
-The repository qualification is **PASS**. No confirmed open P0/P1 security or correctness finding remains in the reviewed scope. This is not a claim that live DNS, TLS, payment, mail, carrier, ERP/PIM/WMS, off-site mount, paging, legal identity, or accounting configuration has been validated.
+The repository qualification is **PASS**. No confirmed open P0/P1 security, financial-correctness, data-isolation, or performance-regression finding remains in the reviewed scope.
 
-## Release chain
+The adversarial pass found one process defect before sign-off: the completed G4 category benchmark diff had remained uncommitted in its retained worktree while the milestone was reported as shipped. G7 recovered that exact work, adapted its assertions to the split scenario harness, reran every local gate and the 100k qualification, committed it separately as `88160b8`, and verified the full remote CI matrix. No history was rewritten.
 
-| SHA | Evidence |
-|---|---|
-| `f2184b7f633c3da283e4908f6c870684f3c0fa2f` | Storage-neutral backup/restore, fail-closed mounted off-site adapter, disposable restore drill |
-| `d7865ae3253539372de7b27c827055d46f877384` | Optional metrics/alert contract, private JSONL sink, readiness/queue/incident/backup-age signals, SLO/RPO/RTO runbook |
-| `7849a49e038caa7a994a4b131002aaad7456f181` | Checkout programmatic labels/autocomplete, contrast correction, rendered checkout axe coverage |
+## G1–G7 release chain
 
-The final code SHA was fast-forward pushed to `origin/main`. Before this evidence record, local `HEAD` and `origin/main` both resolved to `7849a49e038caa7a994a4b131002aaad7456f181` and the tracked working tree was clean.
+| Goal | SHA | Evidence |
+|---|---|---|
+| G1 checkout convergence | `19d34900f25a60d55bfd43e801105bf82b3d2bc9` | HTML and JSON delegate to one checkout application path; persisted snapshot/VAT/net/invoice and opaque confirmation-token regressions |
+| G2 admin forms | `6586e5f3726053982cf2ede94c8116434fe9baf5` | Valid product form ownership plus real-browser export/bulk/CSRF coverage |
+| G3 batch enrichment | `18448a117113b395a0d90f2c597ac902b6970396` | Guest/customer/wishlist query counts reduced from 32/48/41 to 4/5/5 for eight cards with payload and pricing parity |
+| G4 category benchmark | `88160b8caa1479edce1db046fead275ea52d00cb` | Full category SSR/API guest/customer cold/warm profiles, query counter, facet batching, O(n) category tree, encoded budgets |
+| G5 entrypoint boundaries | `dd6940eed657e2d54aa4668be43e1f20e4e06c6c` | Storefront/Admin split into explicit bounded-context modules with size/function/coupling/forbidden-dependency gates |
+| G6 test scenarios | `7a40b1fe5e5a2d17df3f118ce67f93401fca6156`, `62dfa3d0f3ddcd5e1414c6bd9233a449ff8f93da` | Six scenario files, 60-line canonical runner, unique fixture DB, unexpected PHP signals fail, deterministic expected-log capture |
+| G7 final qualification | containing commit | This adversarial review and audit evidence |
+
+All production commits were integrated by fast-forward. G4 was recovered as a new commit rather than amending or rewriting published history.
 
 ## Automated evidence
 
-- Local PHP regression suite: **1904/1904 passed**.
-- PHP lint passed for every modified PHP file.
-- Dev static analysis: **192 PHP files**, **10 stable domain events**, **4 thin entrypoints**.
-- Source quality gates: WCAG 2.2 AA invariants, locale parity, consent defaults, feed routes, and asset budgets passed.
-- Rendered Playwright profile: **12/12 passed**; its axe/WCAG subset was **5/5 passed** for storefront, cart, account login, checkout, keyboard bypass/focus, and 200% zoom/reflow.
-- Final code CI run `30739164391`: all six jobs passed:
+- Canonical local PHP suite at the qualified source: **1929/1929 passed** with no unexpected warning, deprecation, notice, fatal, or uncaptured expected failure log.
+- Static analysis: **212 PHP files**, **10 stable domain events**, **4 thin entrypoints**, **11 bounded-context modules**; architecture budgets passed.
+- i18n parity: **335 keys across 7 locales**.
+- Source quality gates: WCAG 2.2 AA invariants, consent defaults, feed routes, and asset budgets passed.
+- Fresh disposable SQLite Playwright/axe qualification: **13/13 passed**, including HTML checkout, authenticated ownership, signed payment webhook, admin MFA, valid bulk/export controls, fulfillment, RMA/credit/refund, updater smoke, keyboard/focus/reflow, and serious/critical axe checks.
+- Remote CI run **30749548970** at `88160b8`: all six jobs passed:
   - Lint & Test — PHP 8.1
   - Lint & Test — PHP 8.2
   - Lint & Test — PHP 8.3
   - Browser, axe & Lighthouse
   - Application & updater — MySQL 8.0
   - Application & updater — MariaDB 11.4
-- Metrics/alert tests proved healthy and RPO-breached states, stable alert codes, secret redaction, private path enforcement, and optional-by-default behavior.
-- Restore tests proved remote-storage-neutral download, metadata identity, size/SHA-256 verification, tamper rejection, disposable database replacement, and SQLite integrity check.
-- Previously qualified performance evidence remains in `ESHOP-DESIGN.md` and `cli/benchmark.php`, including dataset, p50/p95/p99, concurrency, resource envelope, and failure injection.
+- Local Lighthouse 12.6 with host Chrome 150 stopped in its own Lantern implementation (`FCP/LCP All Frames not implemented`) before application assertions. The clean Linux CI browser job used its pinned environment and passed all rendered Lighthouse budgets; this is classified as a local-tool compatibility observation, not a product failure.
+
+## 100k performance qualification
+
+Fresh disposable command evidence used fixture-v2 with 100,000 products, 2,020 categories, 400,000 specifications, 20 measured iterations, four checkout workers, total response time plus TTFB, and per-request query counts. The raw report was written outside the repository under the marked disposable runtime.
+
+| Profile | p50 | p95 | p99 | Queries |
+|---|---:|---:|---:|---:|
+| Category SSR guest cold | 39.573 ms | 56.351 ms | 59.990 ms | 35 |
+| Category SSR guest warm | 39.456 ms | 41.278 ms | 50.049 ms | 35 |
+| Category SSR customer cold | 39.055 ms | 41.151 ms | 61.830 ms | 38 |
+| Category SSR customer warm | 39.032 ms | 39.788 ms | 39.832 ms | 38 |
+| Category API guest cold | 37.755 ms | 40.720 ms | 50.703 ms | 14 |
+| Category API guest warm | 37.648 ms | 40.422 ms | 54.344 ms | 14 |
+| Category API customer cold | 37.794 ms | 39.414 ms | 41.031 ms | 17 |
+| Category API customer warm | 36.156 ms | 39.640 ms | 47.572 ms | 17 |
+| Facets without active filter | 19.529 ms | 19.872 ms | 20.849 ms | 1 |
+| Facets with one active filter | 49.242 ms | 49.849 ms | 49.981 ms | 2 |
+| Category tree, 2,020 nodes | 3.760 ms | 4.656 ms | 4.657 ms | 1 |
+| Related from 5,000 products | 1.000 ms | 1.011 ms | 1.021 ms | 2 |
+
+All encoded latency and query budgets passed. Concurrent checkout qualification passed **4/4** and all **6/6** failure-injection invariants passed. `Products::related()` remains unchanged because the measured path was not a hotspot.
+
+Numbers describe this Windows/PHP 8.5 disposable SQLite environment and prove regression direction, payload validity, and query bounds; they are not universal production latency or throughput guarantees. The HTTP profile uses the single-process PHP development server.
 
 ## Final adversarial review
 
-Reviewed boundaries: public/CLI routing, session/authentication, CSRF/CSP/XSS, payment and shipping webhook signatures/replay, checkout idempotency and financial snapshots, SQL/path traversal, invoices, stock reservation/restore, backup/restore, updater signatures/rollback, metrics/log redaction, private runtime paths, and shipped mock-provider gates.
+Reviewed boundaries included:
 
-Evidence included the dedicated security audit block plus exact P0/P1 regressions for HTTP tax checkout, mock webhook fail-closed behavior, atomic warehouse reservation, return-vs-reservation isolation, stock double-restore prevention, invoice uniqueness, updater package signatures/tamper detection, and private file paths. Static review found no `script-src 'unsafe-inline'`, runtime `eval`/`unserialize`, or user-controlled process execution in public application paths; the existing `style-src 'unsafe-inline'` remains a documented CSS hardening opportunity. The fixed-command `shell_exec` calls are confined to the development-only benchmark metadata collector.
+- canonical HTML/JSON checkout mapping and the sole current public `Orders::create()` call site;
+- immutable financial snapshot fingerprint, integer-cent money, mixed VAT, coupon/shipping/payment-fee allocation, `net + VAT = gross`, invoice/OSS/credit-note copy semantics;
+- stock reservation atomicity, restore idempotency, payment/webhook idempotency and replay protection;
+- CSRF, session rotation, customer/admin auth, MFA, opaque browser confirmation ownership, CSP/XSS, host handling, and store scoping;
+- SQLite/MySQL/MariaDB SQL paths and native database CI;
+- listing/wishlist payload, pricing, promotions, ordering, customer-group, and query-count parity;
+- benchmark response-contract validation, fixture cardinality, cold/warm definitions, budgets, and failure injection;
+- Storefront/Admin bounded contexts, architecture gates, scenario isolation, warning/deprecation failure semantics, and expected-log capture;
+- diff hygiene and secret-pattern review of the recovered G4 files.
 
-**Conclusion:** no confirmed open P0/P1 finding. Two non-blocking hardening observations remain: the storefront's inline CSS requires `style-src 'unsafe-inline'`, and `robots.php`/`sitemap.php` construct public metadata URLs from `HTTP_HOST`. Neither crosses a script-execution, authentication, payment, secret, or data-integrity boundary; future hardening should externalize the CSS, constrain accepted hosts, and use the configured canonical `app_url`.
+The current HTML transport delegates to the same checkout application path as JSON, and the only live public `Orders::create()` call is in that canonical handler. Regressions validate persisted snapshot gross/VAT/net against the order, exact snapshot copy into invoice and OSS/credit documents, session-bound confirmation, store isolation, stock and idempotency boundaries, and real-browser behavior.
 
-## Manual browser/WCAG review
+**Conclusion:** no confirmed open P0/P1 finding.
 
-A disposable SQLite fixture at the qualified source was inspected in a visible browser.
+## Explicit non-blocking observations
 
-- Skip link was the first keyboard target and `Enter` moved navigation to `#main-content`.
-- At a 640 px viewport (representative of 200% desktop reflow), all interactive controls remained exposed with no occlusion and the catalog reflowed from four to two columns.
-- Storefront, checkout, account, header/main/footer landmarks, image names, buttons, radio groups, and order submission remained available through the accessibility tree.
-- The review found unnamed checkout fields and sub-threshold small-text contrast. They were fixed in `7849a49`; the final snapshot exposed exact names for Full Name, E-mail, Phone, Street, City, ZIP Code, Country, and Order Notes.
-- The rendered checkout axe test then passed with no critical/serious WCAG violation.
-
-## Tax and invoice invariant retest
-
-The final 1904-test run reconfirmed:
-
-- current and historical rates, domestic, OSS, sub-threshold, export, reverse-charge, and non-VAT scenarios;
-- deterministic mixed-rate integer-cent snapshot, shipping/coupon/fee allocation, fingerprint tamper rejection, and `net + VAT = gross`;
-- cart and order VAT persistence, per-line net/rate/amount, and zero-VAT reverse-charge behavior;
-- invoice gross equals order total, VAT/net breakdown reconciliation, immutable order snapshot copy, monotonic unique numbering, tokenized access, private PDF storage, idempotent issuance, and reverse-charge invoice output;
-- credit-note source snapshot immutability, quantity limits, exact negative-cent reconciliation, and refund audit.
+1. **P2 compatibility boundary — direct legacy order callers.** `Orders::create()` retains a snapshotless compatibility path for direct historical imports/integrations, while both current public checkout transports always provide and validate the canonical snapshot. Removing that branch requires an inventory and migration of external callers and is operator-owned for a breaking release; it is not reachable through the qualified HTML/JSON checkout routes.
+2. **P3 local qualification tooling.** Lighthouse 12.6 cannot complete against the host's Chrome 150 Lantern all-frames path. The pinned Linux CI job passed; update the local Chrome/Lighthouse pairing before relying on local Lighthouse evidence alone.
+3. **P3 CSP/metadata hardening.** Storefront inline CSS still requires `style-src 'unsafe-inline'`, and public metadata URL generation should ultimately prefer the configured canonical URL over request-host input. Existing controls prevent these observations from crossing a script-execution, authentication, payment, secret, or order-integrity boundary.
+4. **Historical release payloads.** Files under `releases/update-1.9.0/payload` are historical artifacts, not the qualified runtime source. A production rollout must build and sign a fresh release from the qualified SHA rather than reuse an older payload directory.
 
 ## Operator-owned live acceptance
 
-Before a real production release, the operator must record the items under **Required live operator checks** in `docs/OPERATIONS_RUNBOOK.md`, especially:
+Before a real production release, the operator must record the checks under **Required live operator checks** in `docs/OPERATIONS_RUNBOOK.md`, including:
 
 - production DNS/TLS/proxy host allowlist and private filesystem permissions;
-- real off-site mount retention/encryption and a timed restore within the declared 60-minute RTO;
-- external 30-day readiness SLO calculation and verified paging destination;
-- live-provider test facilities for payment/refund/signed webhook, mail/bounce, carrier, and configured ERP/PIM/WMS adapters;
-- manual production-browser keyboard/zoom/visible-focus pass;
-- merchant identity, registrations, rates, invoice wording/numbering, and accounting reconciliation.
+- real off-site retention/encryption and a timed restore within the declared RTO;
+- external SLO calculation and verified paging destination;
+- real payment/refund/signed-webhook, mail/bounce, carrier, ERP/PIM/WMS, and tax-provider test facilities;
+- merchant identity, registrations, tax rates, invoice wording/numbering, and accounting reconciliation;
+- manual production-browser keyboard, zoom/reflow, visible-focus, and provider redirect review;
+- a newly built and signed release package from the qualified source.
 
-Repository qualification must be repeated for any code change after the qualified SHA; live acceptance must be repeated when provider, tax, legal, infrastructure, or operational policy changes.
+Repository qualification must be repeated for code changes after the qualified source SHA. Live acceptance must be repeated when provider, tax, legal, infrastructure, or operational policy changes.
