@@ -41,7 +41,9 @@ class Db {
                 PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             ]);
-            self::$pdo->exec('PRAGMA journal_mode = WAL');
+            $journalMode = strtolower((string)self::$pdo->query('PRAGMA journal_mode')->fetchColumn());
+            if ($journalMode !== 'wal') self::$pdo->exec('PRAGMA journal_mode = WAL');
+            self::$pdo->exec('PRAGMA busy_timeout = 5000');
             self::$pdo->exec('PRAGMA synchronous = NORMAL');
             self::$pdo->exec('PRAGMA cache_size = -64000');
             self::$pdo->exec('PRAGMA temp_store = MEMORY');

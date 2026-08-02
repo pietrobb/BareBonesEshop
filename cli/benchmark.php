@@ -2,244 +2,584 @@
 require_once __DIR__ . '/cli-only.php';
 
 /**
- * BareBones Shop — Performance Benchmark
- * Validates performance against design targets.
- * Usage: php cli/benchmark.php
+ * Reproducible scale, concurrency, and failure benchmark.
  *
- * Targets (from ESHOP-DESIGN.md):
- *   Product by slug (indexed): <1ms
- *   Category listing (24 items): 2-5ms
- *   FTS5 search: 10-20ms
- *   Faceted filter: 5-15ms
- *   Price range filter: 2-5ms
- *   From flat-file cache: <1ms
+ * Run only from a disposable checkout without config.php:
+ *   php cli/benchmark.php --prepare --dataset=100000 --iterations=100 --concurrency=4
+ * Optional 1M profile:
+ *   php cli/benchmark.php --prepare --dataset=1000000 --iterations=100 --concurrency=8
  */
-require_once __DIR__ . '/../src/autoload.php';
 
-I18n::setLocale('sk');
+$options = getopt('', [
+    'prepare', 'reuse', 'runtime:', 'dataset:', 'iterations:', 'concurrency:', 'report:',
+    'worker:', 'worker-index:',
+]);
+$root = dirname(__DIR__);
+$configPath = $root . '/config.php';
+$dataset = max(100, (int)($options['dataset'] ?? 100000));
+$iterations = max(20, min(1000, (int)($options['iterations'] ?? 100)));
+$concurrency = max(1, min(32, (int)($options['concurrency'] ?? 4)));
+$runtime = (string)($options['runtime'] ?? (sys_get_temp_dir() . '/barebones-benchmark-' . substr(hash('sha256', $root), 0, 12)));
 
-echo "BareBones Shop — Performance Benchmark\n";
-echo "========================================\n\n";
+function benchmarkAbsolutePath(string $path): bool
+{
+    return str_starts_with($path, '/') || str_starts_with($path, '\\\\') || preg_match('/^[A-Za-z]:[\\\\\/]/', $path) === 1;
+}
 
-$db = Db::get();
-$totalProducts = (int)$db->query("SELECT COUNT(*) FROM products")->fetchColumn();
-$totalCats = (int)$db->query("SELECT COUNT(*) FROM categories")->fetchColumn();
+function benchmarkContainedPath(string $path, string $root): bool
+{
+    $path = rtrim(str_replace('\\', '/', $path), '/');
+    $root = rtrim(str_replace('\\', '/', $root), '/');
+    if (DIRECTORY_SEPARATOR === '\\') {
+        $path = strtolower($path);
+        $root = strtolower($root);
+    }
+    return $path === $root || str_starts_with($path, $root . '/');
+}
 
-echo "Dataset: {$totalProducts} products, {$totalCats} categories\n\n";
+function benchmarkEnsureDir(string $path): void
+{
+    if (!is_dir($path) && !mkdir($path, 0750, true) && !is_dir($path)) {
+        throw new RuntimeException("Cannot create benchmark directory: {$path}");
+    }
+}
 
-if ($totalProducts === 0) {
-    echo "ERROR: No products. Run 'php cli/seed.php' first.\n";
+function benchmarkPrepare(string $root, string $configPath, string $runtime): void
+{
+    if (is_file($configPath)) {
+        throw new RuntimeException('Refusing --prepare because config.php already exists; use a fresh disposable checkout');
+    }
+    if (!benchmarkAbsolutePath($runtime) || !str_contains(strtolower(str_replace('\\', '/', $runtime)), 'barebones-benchmark')) {
+        throw new RuntimeException('Benchmark runtime must be an absolute disposable path containing barebones-benchmark');
+    }
+    foreach (['db', 'cache', 'jobs', 'invoices', 'backups', 'logs', 'updates', 'secrets', 'reports'] as $directory) {
+        benchmarkEnsureDir($runtime . '/' . $directory);
+    }
+    $marker = [
+        'purpose' => 'barebones-benchmark',
+        'root' => realpath($root) ?: $root,
+        'created_at' => gmdate('c'),
+    ];
+    file_put_contents($runtime . '/.barebones-benchmark.json', json_encode($marker, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR), LOCK_EX);
+
+    $config = require $root . '/config.example.php';
+    $config['db_driver'] = 'sqlite';
+    $config['private_runtime_dir'] = $runtime;
+    $config['db_sqlite_path'] = $runtime . '/db/shop.sqlite';
+    $config['private_cache_dir'] = $runtime . '/cache';
+    $config['jobs_dir'] = $runtime . '/jobs';
+    $config['invoice_storage_dir'] = $runtime . '/invoices';
+    $config['backup_storage_dir'] = $runtime . '/backups';
+    $config['backup_log_file'] = $runtime . '/logs/backup.log';
+    $config['structured_log_file'] = $runtime . '/logs/application.jsonl';
+    $config['update_storage_dir'] = $runtime . '/updates';
+    $config['gdpr_salt_file'] = $runtime . '/secrets/gdpr_salt';
+    $config['app_url'] = 'http://127.0.0.1';
+    $config['admin_identity_key'] = base64_encode(str_repeat('B', 32));
+    $config['adapters']['payment'] = 'MockPayment';
+    $config['provider_defaults']['payment'] = 'mock';
+    $config['provider_defaults']['mail'] = 'log';
+    $config['allow_mock_webhook'] = true;
+    $config['mock_webhook_secret'] = 'barebones-benchmark-webhook-secret';
+    $config['mock_result'] = 'success';
+    $config['queue'] = ['backend' => 'database', 'lease_seconds' => 30];
+
+    $php = "<?php\n// Generated only for a disposable G13 benchmark checkout.\nreturn " . var_export($config, true) . ";\n";
+    if (file_put_contents($configPath, $php, LOCK_EX) === false) {
+        throw new RuntimeException('Cannot write disposable benchmark config.php');
+    }
+}
+
+if (isset($options['prepare'])) {
+    benchmarkPrepare($root, $configPath, $runtime);
+}
+if (!is_file($configPath)) {
+    fwrite(STDERR, "Missing config.php. Run this command with --prepare from a fresh disposable checkout.\n");
     exit(1);
 }
 
-$results = [];
+$config = require $configPath;
+$configRuntime = (string)($config['private_runtime_dir'] ?? '');
+$dbPath = (string)($config['db_sqlite_path'] ?? '');
+$markerPath = $configRuntime . '/.barebones-benchmark.json';
+if (($config['db_driver'] ?? '') !== 'sqlite'
+    || !benchmarkAbsolutePath($configRuntime)
+    || !str_contains(strtolower(str_replace('\\', '/', $configRuntime)), 'barebones-benchmark')
+    || !benchmarkContainedPath($dbPath, $configRuntime)
+    || !is_file($markerPath)) {
+    fwrite(STDERR, "Refusing to benchmark a non-disposable runtime. Use --prepare in a fresh checkout.\n");
+    exit(1);
+}
+$marker = json_decode((string)file_get_contents($markerPath), true);
+if (($marker['purpose'] ?? '') !== 'barebones-benchmark') {
+    fwrite(STDERR, "Invalid benchmark runtime marker.\n");
+    exit(1);
+}
+$runtime = $configRuntime;
 
-// Get a random product slug for testing
-$testProduct = $db->query("SELECT slug, sku FROM products WHERE status = 'active' ORDER BY RANDOM() LIMIT 1")->fetch();
-$testCat = $db->query("SELECT id, slug FROM categories WHERE product_count > 0 ORDER BY RANDOM() LIMIT 1")->fetch();
+require_once $root . '/src/autoload.php';
+require_once $root . '/src/Queue.php';
+I18n::setLocale('sk');
 
-echo "Test product: {$testProduct['sku']} ({$testProduct['slug']})\n";
-echo "Test category: {$testCat['slug']} (ID: {$testCat['id']})\n\n";
+function benchmarkPercentile(array $values, float $percentile): float
+{
+    if ($values === []) return 0.0;
+    sort($values, SORT_NUMERIC);
+    $index = (int)ceil($percentile * count($values)) - 1;
+    return (float)$values[max(0, min(count($values) - 1, $index))];
+}
 
-// ============================================================
-// Benchmark functions
-// ============================================================
-
-function bench(string $name, callable $fn, int $iterations = 100): array {
-    // Warmup
-    for ($i = 0; $i < 3; $i++) $fn();
-
-    $times = [];
+function benchmarkMeasure(string $name, callable $operation, int $iterations): array
+{
+    for ($i = 0; $i < 5; $i++) $operation();
+    $samples = [];
     for ($i = 0; $i < $iterations; $i++) {
         $start = hrtime(true);
-        $fn();
-        $times[] = (hrtime(true) - $start) / 1_000_000; // ms
+        $operation();
+        $samples[] = (hrtime(true) - $start) / 1_000_000;
+    }
+    return [
+        'name' => $name,
+        'iterations' => $iterations,
+        'unit' => 'ms',
+        'p50' => benchmarkPercentile($samples, 0.50),
+        'p95' => benchmarkPercentile($samples, 0.95),
+        'p99' => benchmarkPercentile($samples, 0.99),
+        'min' => min($samples),
+        'max' => max($samples),
+        'mean' => array_sum($samples) / count($samples),
+    ];
+}
+
+function benchmarkStartHttpServer(string $root, string $runtime): array
+{
+    if (!function_exists('curl_init')) {
+        throw new RuntimeException('The reproducible HTTP TTFB profile requires ext-curl');
+    }
+    $socket = stream_socket_server('tcp://127.0.0.1:0', $errorCode, $errorMessage);
+    if ($socket === false) throw new RuntimeException("Cannot reserve local benchmark port: {$errorMessage}");
+    $address = (string)stream_socket_get_name($socket, false);
+    fclose($socket);
+    $port = (int)substr(strrchr($address, ':'), 1);
+    if ($port <= 0) throw new RuntimeException('Cannot determine local benchmark port');
+
+    $stdout = $runtime . '/logs/http-server.out.log';
+    $stderr = $runtime . '/logs/http-server.err.log';
+    $process = proc_open([PHP_BINARY, '-S', "127.0.0.1:{$port}", '-t', $root], [
+        0 => ['pipe', 'r'], 1 => ['file', $stdout, 'ab'], 2 => ['file', $stderr, 'ab'],
+    ], $pipes, $root);
+    if (!is_resource($process)) throw new RuntimeException('Cannot start local PHP benchmark server');
+    fclose($pipes[0]);
+    $baseUrl = "http://127.0.0.1:{$port}";
+    $deadline = microtime(true) + 10.0;
+    do {
+        $curl = curl_init($baseUrl . '/index.php');
+        curl_setopt_array($curl, [CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT_MS => 500, CURLOPT_TIMEOUT_MS => 2000]);
+        curl_exec($curl);
+        $status = (int)curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+        unset($curl);
+        if ($status === 200) return [$process, $baseUrl];
+        usleep(100000);
+    } while (microtime(true) < $deadline);
+
+    proc_terminate($process);
+    proc_close($process);
+    $error = is_file($stderr) ? trim((string)file_get_contents($stderr)) : '';
+    throw new RuntimeException('Local benchmark server did not become ready: ' . substr($error, -2000));
+}
+
+function benchmarkHttpTtfb(string $name, string $url, int $iterations): array
+{
+    $request = static function () use ($url): float {
+        $curl = curl_init($url);
+        curl_setopt_array($curl, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_CONNECTTIMEOUT_MS => 1000,
+            CURLOPT_TIMEOUT_MS => 10000,
+            CURLOPT_HTTPHEADER => ['Accept: text/html'],
+        ]);
+        $body = curl_exec($curl);
+        $status = (int)curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+        $ttfb = (float)curl_getinfo($curl, CURLINFO_STARTTRANSFER_TIME) * 1000;
+        $error = curl_error($curl);
+        unset($curl);
+        if ($body === false || $status !== 200) {
+            throw new RuntimeException("HTTP benchmark request failed ({$status}): {$error}");
+        }
+        return $ttfb;
+    };
+    for ($i = 0; $i < 5; $i++) $request();
+    $samples = [];
+    for ($i = 0; $i < $iterations; $i++) $samples[] = $request();
+    return [
+        'name' => $name, 'iterations' => $iterations, 'unit' => 'ms',
+        'p50' => benchmarkPercentile($samples, 0.50),
+        'p95' => benchmarkPercentile($samples, 0.95),
+        'p99' => benchmarkPercentile($samples, 0.99),
+        'min' => min($samples), 'max' => max($samples),
+        'mean' => array_sum($samples) / count($samples),
+    ];
+}
+
+function benchmarkSeed(PDO $db, int $count, int $concurrency, bool $reuse): float
+{
+    $existing = (int)$db->query('SELECT COUNT(*) FROM products')->fetchColumn();
+    if ($existing !== 0) {
+        if ($reuse && $existing === $count) return 0.0;
+        throw new RuntimeException("Disposable dataset already contains {$existing} products; use a new runtime or explicit --reuse with the exact count");
     }
 
-    sort($times);
-    $avg = array_sum($times) / count($times);
-    $p50 = $times[(int)(count($times) * 0.5)];
-    $p95 = $times[(int)(count($times) * 0.95)];
-    $p99 = $times[(int)(count($times) * 0.99)];
-    $min = $times[0];
-    $max = end($times);
-
-    return compact('name', 'iterations', 'avg', 'p50', 'p95', 'p99', 'min', 'max');
-}
-
-function printResult(array $r, ?float $target = null): void {
-    $status = '  ';
-    if ($target !== null) {
-        $status = $r['p95'] <= $target ? '[OK]' : '[!!]';
+    $started = microtime(true);
+    $category = $db->prepare("INSERT INTO categories (slug, name, path, depth, sort_order, product_count, translations, meta) VALUES (?, ?, ?, 0, ?, 0, '{}', '{}')");
+    for ($i = 0; $i < 20; $i++) {
+        $category->execute(["benchmark-category-{$i}", "Benchmark Category {$i}", "benchmark-category-{$i}", $i]);
     }
-    printf("  %s %-40s avg: %6.2fms  p50: %6.2fms  p95: %6.2fms  p99: %6.2fms\n",
-        $status, $r['name'], $r['avg'], $r['p50'], $r['p95'], $r['p99']
-    );
-}
+    $categoryIds = array_map('intval', $db->query("SELECT id FROM categories WHERE slug LIKE 'benchmark-category-%' ORDER BY id")->fetchAll(PDO::FETCH_COLUMN));
 
-// ============================================================
-// Benchmarks
-// ============================================================
+    $product = $db->prepare("INSERT INTO products
+        (sku, slug, product_type, name, category_id, price, compare_price, currency, stock, status,
+         images, summary, description, attrs, tags, filter_tags, weight_g, translations, inventory_policy, store_id)
+        VALUES (?, ?, 'simple', ?, ?, ?, NULL, 'eur', 1000, 'active', '[]', ?, '', ?, ?, ?, ?, '{}', 'deny', 'default')");
+    $attribute = $db->prepare('INSERT INTO product_attrs (product_id, attr_name, attr_value, numeric_val) VALUES (?, ?, ?, NULL)');
 
-echo "--- Database Queries ---\n";
-
-// 1. Product by slug
-$slug = $testProduct['slug'];
-$r = bench('Product by slug', fn() => Products::bySlug($slug));
-printResult($r, 1.0);
-$results[] = $r;
-
-// 2. Product by ID
-$id = (int)$db->query("SELECT id FROM products LIMIT 1")->fetchColumn();
-$r = bench('Product by ID', fn() => Products::byId($id));
-printResult($r, 1.0);
-$results[] = $r;
-
-// 3. Product by SKU
-$sku = $testProduct['sku'];
-$r = bench('Product by SKU', fn() => Products::bySku($sku));
-printResult($r, 1.0);
-$results[] = $r;
-
-// 4. Category listing (24 items, sorted)
-$catId = (int)$testCat['id'];
-$r = bench('Category listing (24, price_asc)', fn() => Products::byCategory($catId, 1, 24, 'price_asc'));
-printResult($r, 5.0);
-$results[] = $r;
-
-// 5. Category listing sorted by name
-$r = bench('Category listing (24, name_asc)', fn() => Products::byCategory($catId, 1, 24, 'name_asc'));
-printResult($r, 5.0);
-$results[] = $r;
-
-// 6. FTS5 search
-$r = bench('FTS5 search "tricko"', fn() => Search::query('tricko', 1, 24));
-printResult($r, 20.0);
-$results[] = $r;
-
-// 7. FTS5 search broader term
-$r = bench('FTS5 search "premium"', fn() => Search::query('premium', 1, 24));
-printResult($r, 20.0);
-$results[] = $r;
-
-// 8. Faceted filter (single attribute)
-$r = bench('Filter: color=cierna', fn() => Products::byCategory($catId, 1, 24, 'price_asc', ['color' => ['cierna']]));
-printResult($r, 15.0);
-$results[] = $r;
-
-// 9. Faceted filter (two attributes)
-$r = bench('Filter: color+size', fn() => Products::byCategory($catId, 1, 24, 'price_asc', ['color' => ['cierna'], 'size' => ['M']]));
-printResult($r, 15.0);
-$results[] = $r;
-
-// 10. Price range filter
-$r = bench('Price range 1000-5000', fn() => Products::byCategory($catId, 1, 24, 'price_asc', [], 1000, 5000));
-printResult($r, 5.0);
-$results[] = $r;
-
-// 11. Filter values (facets)
-$r = bench('Filter values for category', fn() => Products::filterValues($catId));
-printResult($r, 10.0);
-$results[] = $r;
-
-// 12. FTS suggest (autocomplete)
-$r = bench('FTS suggest "pre"', fn() => Search::suggest('pre', 5));
-printResult($r, 10.0);
-$results[] = $r;
-
-// 13. Category tree
-$r = bench('Category tree', fn() => Categories::tree());
-printResult($r, 5.0);
-$results[] = $r;
-
-// 14. Breadcrumb
-$r = bench('Breadcrumb', fn() => Categories::breadcrumb($catId));
-printResult($r, 2.0);
-$results[] = $r;
-
-// 15. Latest products
-$r = bench('Latest 8 products', fn() => Products::latest(8));
-printResult($r, 5.0);
-$results[] = $r;
-
-echo "\n--- Cache Operations ---\n";
-
-$testCacheDir = __DIR__ . '/../cache/bench_' . getmypid();
-Cache::setDir($testCacheDir);
-
-// Write cache
-$testData = ['products' => array_fill(0, 24, ['id' => 1, 'name' => 'test', 'price' => 1990])];
-$r = bench('Cache write JSON', fn() => Cache::writeJson('bench/test.json', $testData));
-printResult($r, 2.0);
-$results[] = $r;
-
-// Read cache
-Cache::writeJson('bench/read.json', $testData);
-$r = bench('Cache read JSON', fn() => Cache::readJson('bench/read.json'));
-printResult($r, 1.0);
-$results[] = $r;
-
-// Key-value
-Cache::set('benchkey', 'benchvalue');
-$r = bench('Cache key-value get', fn() => Cache::get('benchkey'));
-printResult($r, 1.0);
-$results[] = $r;
-
-// Cleanup bench cache
-$iter = new RecursiveIteratorIterator(
-    new RecursiveDirectoryIterator($testCacheDir, RecursiveDirectoryIterator::SKIP_DOTS),
-    RecursiveIteratorIterator::CHILD_FIRST
-);
-foreach ($iter as $f) {
-    $f->isDir() ? @rmdir($f->getRealPath()) : @unlink($f->getRealPath());
-}
-@rmdir($testCacheDir);
-Cache::setDir(__DIR__ . '/../cache');
-
-// ============================================================
-// Summary
-// ============================================================
-echo "\n========================================\n";
-echo "SUMMARY\n";
-echo "========================================\n\n";
-
-$passed = 0;
-$failed = 0;
-$targets = [
-    'Product by slug' => 1.0,
-    'Product by ID' => 1.0,
-    'Product by SKU' => 1.0,
-    'Category listing (24, price_asc)' => 5.0,
-    'Category listing (24, name_asc)' => 5.0,
-    'FTS5 search "tricko"' => 20.0,
-    'FTS5 search "premium"' => 20.0,
-    'Filter: color=cierna' => 15.0,
-    'Filter: color+size' => 15.0,
-    'Price range 1000-5000' => 5.0,
-    'Filter values for category' => 10.0,
-    'FTS suggest "pre"' => 10.0,
-    'Category tree' => 5.0,
-    'Breadcrumb' => 2.0,
-    'Latest 8 products' => 5.0,
-    'Cache write JSON' => 2.0,
-    'Cache read JSON' => 1.0,
-    'Cache key-value get' => 1.0,
-];
-
-foreach ($results as $r) {
-    $target = $targets[$r['name']] ?? null;
-    if ($target !== null) {
-        if ($r['p95'] <= $target) {
-            $passed++;
-        } else {
-            $failed++;
-            printf("  [MISS] %-40s p95: %.2fms (target: %.1fms)\n", $r['name'], $r['p95'], $target);
+    $db->beginTransaction();
+    for ($i = 1; $i <= $count; $i++) {
+        $categoryId = $categoryIds[($i - 1) % count($categoryIds)];
+        $color = ['black', 'white', 'red', 'blue'][$i % 4];
+        $size = ['s', 'm', 'l', 'xl'][$i % 4];
+        $sku = 'BENCH-' . str_pad((string)$i, 8, '0', STR_PAD_LEFT);
+        $slug = 'benchmark-product-' . $i;
+        $name = 'Benchmark Product ' . $i . ' premium';
+        $attrs = json_encode(['color' => $color, 'size' => $size], JSON_THROW_ON_ERROR);
+        $tags = json_encode(['benchmark', 'premium'], JSON_THROW_ON_ERROR);
+        $product->execute([$sku, $slug, $name, $categoryId, 1000 + ($i % 90000), $name, $attrs, $tags, "attr_color_{$color} attr_size_{$size}", 100 + ($i % 5000)]);
+        $productId = (int)$db->lastInsertId();
+        $attribute->execute([$productId, 'color', $color]);
+        $attribute->execute([$productId, 'size', $size]);
+        if ($i % 1000 === 0) {
+            $db->commit();
+            $db->beginTransaction();
         }
     }
+    if ($db->inTransaction()) $db->commit();
+    $db->exec("UPDATE categories SET product_count = (SELECT COUNT(*) FROM products WHERE products.category_id = categories.id AND products.status = 'active')");
+
+    $warehouseCount = max(20, $concurrency * 4);
+    $db->prepare("INSERT INTO warehouses (code, name, priority, is_default, store_id) VALUES ('benchmark', 'Benchmark Warehouse', 1, 1, 'default')")->execute();
+    $warehouseId = (int)$db->lastInsertId();
+    $stock = $db->prepare("INSERT INTO warehouse_stock (warehouse_id, sku, qty, reserved, store_id) VALUES (?, ?, 1000, 0, 'default')");
+    for ($i = 1; $i <= $warehouseCount; $i++) {
+        $stock->execute([$warehouseId, 'BENCH-' . str_pad((string)$i, 8, '0', STR_PAD_LEFT)]);
+    }
+    return microtime(true) - $started;
 }
 
-echo "\n  Performance targets: {$passed}/" . ($passed + $failed) . " met\n";
-if ($failed === 0) {
-    echo "  All targets met!\n";
+function benchmarkWorkerCheckout(int $index): never
+{
+    $db = Db::get();
+    $stmt = $db->prepare("SELECT id, sku, name, price FROM products WHERE sku = :sku AND store_id = 'default'");
+    $stmt->execute([':sku' => 'BENCH-' . str_pad((string)($index + 1), 8, '0', STR_PAD_LEFT)]);
+    $product = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$product) throw new RuntimeException('Checkout worker product missing');
+    $orderId = Orders::create([[
+        'product_id' => (int)$product['id'], 'sku' => (string)$product['sku'],
+        'name' => (string)$product['name'], 'price' => (int)$product['price'], 'qty' => 1,
+        'attrs' => [], 'vat_class' => 'standard',
+    ]], [
+        'name' => 'Benchmark Customer', 'email' => "benchmark-{$index}@example.invalid",
+        'address' => ['country' => 'SK'], 'currency' => 'eur', 'locale' => 'sk',
+    ], 'cod');
+    fwrite(STDOUT, json_encode(['order_id' => $orderId], JSON_THROW_ON_ERROR));
+    exit(0);
 }
-echo "\n";
+
+if (($options['worker'] ?? '') === 'checkout') {
+    benchmarkWorkerCheckout(max(0, (int)($options['worker-index'] ?? 0)));
+}
+
+$db = Db::get();
+$migrator = new Migrator($db, $root . '/migrations', $runtime . '/.migrations.lock');
+$applied = $migrator->apply();
+$reusedDataset = isset($options['reuse']);
+$seedSeconds = benchmarkSeed($db, $dataset, $concurrency, $reusedDataset);
+
+function benchmarkConcurrentCheckouts(string $script, string $runtime, int $concurrency, int $workerOffset = 0): array
+{
+    $processes = [];
+    $started = hrtime(true);
+    for ($i = 0; $i < $concurrency; $i++) {
+        $workerIndex = $i + $workerOffset;
+        $token = getmypid() . '-' . $workerIndex;
+        $stdoutPath = $runtime . "/logs/checkout-worker-{$token}.out.log";
+        $stderrPath = $runtime . "/logs/checkout-worker-{$token}.err.log";
+        $pipes = [];
+        $process = proc_open([PHP_BINARY, $script, '--worker=checkout', "--worker-index={$workerIndex}"], [
+            0 => ['pipe', 'r'], 1 => ['file', $stdoutPath, 'wb'], 2 => ['file', $stderrPath, 'wb'],
+        ], $pipes);
+        if (!is_resource($process)) throw new RuntimeException('Cannot start checkout worker');
+        fclose($pipes[0]);
+        $processes[] = [$process, $workerIndex, $stdoutPath, $stderrPath];
+        if ($i + 1 < $concurrency) usleep(25000);
+    }
+    $exitCodes = [];
+    do {
+        $running = false;
+        foreach ($processes as [$process, $index]) {
+            if (isset($exitCodes[$index])) continue;
+            $status = proc_get_status($process);
+            if ($status['running']) {
+                $running = true;
+            } else {
+                $exitCodes[$index] = (int)$status['exitcode'];
+            }
+        }
+        if ($running) usleep(10000);
+    } while ($running);
+
+    $failures = [];
+    foreach ($processes as [$process, $index, $stdoutPath, $stderrPath]) {
+        $closed = proc_close($process);
+        $exit = $exitCodes[$index] >= 0 ? $exitCodes[$index] : $closed;
+        $stdout = is_file($stdoutPath) ? (string)file_get_contents($stdoutPath) : '';
+        $stderr = is_file($stderrPath) ? (string)file_get_contents($stderrPath) : '';
+        @unlink($stdoutPath);
+        @unlink($stderrPath);
+        if ($exit !== 0) $failures[] = ['worker' => $index, 'exit' => $exit, 'stdout' => $stdout, 'stderr' => $stderr];
+    }
+    return [
+        'workers' => $concurrency,
+        'elapsed_ms' => (hrtime(true) - $started) / 1_000_000,
+        'successful' => $concurrency - count($failures),
+        'failures' => $failures,
+    ];
+}
+
+function benchmarkFailureChecks(PDO $db, string $runtime): array
+{
+    $results = [];
+
+    $timeoutAdapter = new class implements PaymentAdapter {
+        public function createSession(array $order): array { throw new RuntimeException('injected payment timeout'); }
+        public function handleWebhook(array $payload): array { return []; }
+        public function refund(string $paymentId, int $amount): array { return []; }
+        public function getStatus(string $paymentId): string { return 'unknown'; }
+        public function verifySignature(string $payload, string $sigHeader): bool { return true; }
+    };
+    $order = $db->query("SELECT * FROM orders ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $beforeTransactions = (int)$db->query('SELECT COUNT(*) FROM payment_transactions')->fetchColumn();
+    try {
+        PaymentService::initiate([
+            'order_id' => (int)$order['id'], 'order_number' => (string)$order['order_number'],
+            'total' => (int)$order['total'], 'currency' => (string)$order['currency'],
+        ], $timeoutAdapter, 'timeout-fixture');
+        throw new RuntimeException('Payment timeout did not fail');
+    } catch (RuntimeException $e) {
+        $afterTransactions = (int)$db->query('SELECT COUNT(*) FROM payment_transactions')->fetchColumn();
+        $results['payment_timeout'] = [
+            'passed' => $e->getMessage() === 'injected payment timeout' && $afterTransactions === $beforeTransactions,
+            'invariant' => 'no initiated transaction is recorded when session creation times out',
+        ];
+    }
+
+    $gateway = new MockPayment(['mock_result' => 'success', 'mock_webhook_secret' => 'barebones-benchmark-webhook-secret']);
+    $payload = MockPayment::paidPayload((int)$order['id'], (int)$order['total'], 'benchmark-session');
+    $payload['event_id'] = 'benchmark-duplicate-event-' . $order['id'] . '-' . $beforeTransactions;
+    $raw = json_encode($payload, JSON_THROW_ON_ERROR);
+    $signature = hash_hmac('sha256', $raw, 'barebones-benchmark-webhook-secret');
+    $first = PaymentService::handleWebhook($raw, $signature, $payload, $gateway, 'mock');
+    $second = PaymentService::handleWebhook($raw, $signature, $payload, $gateway, 'mock');
+    $results['duplicate_webhook'] = [
+        'passed' => ($first['handled'] ?? false) === true && ($second['duplicate'] ?? false) === true,
+        'invariant' => 'the same provider event changes payment state at most once',
+    ];
+
+    $queue = new DatabaseQueue($db, 30);
+    $jobId = $queue->push('benchmark.expired_lease', ['fixture' => true]);
+    $job = null;
+    foreach ($queue->pull(100) as $candidate) {
+        if (($candidate['id'] ?? '') === $jobId) $job = $candidate;
+    }
+    $oldClaim = $job ? $queue->markProcessing($job) : '';
+    $db->prepare("UPDATE queue_jobs SET claimed_at = :stale WHERE id = :id")->execute([
+        ':stale' => gmdate('Y-m-d H:i:s', time() - 60), ':id' => $jobId,
+    ]);
+    $reclaimed = $queue->pull(10);
+    $reclaimedJob = null;
+    foreach ($reclaimed as $candidate) if (($candidate['id'] ?? '') === $jobId) $reclaimedJob = $candidate;
+    $newClaim = $reclaimedJob ? $queue->markProcessing($reclaimedJob) : '';
+    $oldRejected = false;
+    try { $queue->complete($oldClaim); } catch (RuntimeException $e) { $oldRejected = true; }
+    if ($newClaim !== '') $queue->complete($newClaim);
+    $results['expired_queue_lease'] = [
+        'passed' => $oldClaim !== '' && $newClaim !== '' && $oldClaim !== $newClaim && $oldRejected,
+        'invariant' => 'an expired job is reclaimable and the stale owner cannot complete it',
+        'diagnostic' => [
+            'old_claimed' => $oldClaim !== '', 'reappeared' => $reclaimedJob !== null,
+            'new_claimed' => $newClaim !== '', 'old_claim_rejected' => $oldRejected,
+        ],
+    ];
+
+    MailService::useAdapter(new class implements MailAdapter {
+        public function send(array $msg): array { return ['status' => 'failed', 'message' => 'injected mail outage', 'raw' => null]; }
+        public function adapterId(): string { return 'failure-fixture'; }
+    });
+    $mailFixture = (int)$db->query('SELECT COUNT(*) FROM email_log')->fetchColumn();
+    $mail = MailService::send('order_confirmation', "failure-benchmark-{$mailFixture}@example.invalid", 'en', ['order_number' => $order['order_number']], (int)$order['id']);
+    MailService::useAdapter(null);
+    $results['mail_outage'] = [
+        'passed' => ($mail['status'] ?? '') === 'failed' && ($mail['error'] ?? '') === 'injected mail outage',
+        'invariant' => 'mail outage is persisted as failed instead of reported as sent',
+    ];
+
+    ShippingService::setAdapters([new class implements ShippingAdapter {
+        public function getRates(array $params): array { throw new RuntimeException('injected carrier outage'); }
+        public function generateLabel(array $order): array { throw new RuntimeException('injected carrier outage'); }
+        public function trackShipment(string $awb): array { throw new RuntimeException('injected carrier outage'); }
+        public function supportsCOD(): bool { return false; }
+        public function carrierId(): string { return 'failure-fixture'; }
+    }]);
+    $labelsBefore = (int)$db->query('SELECT COUNT(*) FROM shipping_labels')->fetchColumn();
+    $carrierFailed = false;
+    try { ShippingService::generateLabel((int)$order['id'], 'failure-fixture'); } catch (RuntimeException $e) { $carrierFailed = $e->getMessage() === 'injected carrier outage'; }
+    $labelsAfter = (int)$db->query('SELECT COUNT(*) FROM shipping_labels')->fetchColumn();
+    ShippingService::setAdapters([]);
+    $results['carrier_outage'] = [
+        'passed' => $carrierFailed && $labelsAfter === $labelsBefore,
+        'invariant' => 'carrier outage creates no phantom shipping label',
+    ];
+
+    $failureRoot = $runtime . '/backup-failure-fixture';
+    benchmarkEnsureDir($failureRoot);
+    $yearBlocker = $failureRoot . '/' . gmdate('Y');
+    if (!file_exists($yearBlocker)) file_put_contents($yearBlocker, 'not-a-directory', LOCK_EX);
+    BackupService::reset();
+    $backupFailed = false;
+    set_error_handler(static function (int $severity, string $message, string $file, int $line): never {
+        throw new ErrorException($message, 0, $severity, $file, $line);
+    });
+    try {
+        BackupService::init($db, [
+            'enabled' => true, 'storage_dir' => $failureRoot,
+            'log_file' => $runtime . '/logs/backup-failure.log',
+            'wal_checkpoint' => false, 'auto_gc_on_backup' => false,
+        ], dirname(__DIR__));
+        BackupService::create(['label' => 'failure-injection']);
+    } catch (Throwable $e) {
+        $backupFailed = true;
+    } finally {
+        restore_error_handler();
+        BackupService::reset();
+    }
+    $partialBackups = glob($failureRoot . '/*/*/*/*.db') ?: [];
+    $results['backup_write_failure'] = [
+        'passed' => $backupFailed && $partialBackups === [],
+        'invariant' => 'unwritable backup destination fails closed without a partial backup',
+    ];
+
+    foreach ($results as $name => $result) {
+        if (!$result['passed']) throw new RuntimeException("Failure injection failed: {$name} " . json_encode($result, JSON_UNESCAPED_SLASHES));
+    }
+    return $results;
+}
+
+$categoryId = (int)$db->query("SELECT id FROM categories WHERE slug LIKE 'benchmark-category-%' ORDER BY id LIMIT 1")->fetchColumn();
+$productId = (int)$db->query("SELECT id FROM products WHERE sku = 'BENCH-00050000' OR sku = 'BENCH-00000001' ORDER BY id DESC LIMIT 1")->fetchColumn();
+$product = Products::byId($productId);
+$slug = (string)$product['slug'];
+$sku = (string)$product['sku'];
+$domain = [
+    benchmarkMeasure('product_by_slug', fn() => Products::bySlug($slug), $iterations),
+    benchmarkMeasure('category_listing_price_asc', fn() => Products::byCategory($categoryId, 1, 24, 'price_asc'), $iterations),
+    benchmarkMeasure('search_selective_sku', fn() => Search::query($sku, 1, 24), $iterations),
+    benchmarkMeasure('search_broad_term', fn() => Search::query('premium', 1, 24), $iterations),
+    benchmarkMeasure('faceted_filter', fn() => Products::byCategory($categoryId, 1, 24, 'price_asc', ['color' => ['black'], 'size' => ['m']]), $iterations),
+    benchmarkMeasure('price_range', fn() => Products::byCategory($categoryId, 1, 24, 'price_asc', [], 1000, 5000), $iterations),
+];
+[$httpServer, $baseUrl] = benchmarkStartHttpServer($root, $runtime);
+try {
+    $httpTtfb = [
+        benchmarkHttpTtfb('storefront_ttfb', $baseUrl . '/index.php', $iterations),
+        benchmarkHttpTtfb('product_ttfb', $baseUrl . '/product.php?slug=' . rawurlencode($slug), $iterations),
+    ];
+} finally {
+    proc_terminate($httpServer);
+    proc_close($httpServer);
+}
+$db = null;
+$migrator = null;
+Db::reset();
+$serialCheckout = benchmarkConcurrentCheckouts(__FILE__, $runtime, 1, $concurrency + 4);
+if ($serialCheckout['failures'] !== []) {
+    throw new RuntimeException('Serial checkout control failed: ' . json_encode($serialCheckout['failures']));
+}
+$concurrencyResult = benchmarkConcurrentCheckouts(__FILE__, $runtime, $concurrency);
+$concurrencyResult['passed'] = $concurrencyResult['failures'] === [];
+$concurrencyResult['safe_concurrency_observed'] = $concurrencyResult['passed'] ? $concurrency : $concurrencyResult['successful'];
+$concurrencyResult['serial_control'] = $serialCheckout;
+$db = Db::get();
+$failures = benchmarkFailureChecks($db, $runtime);
+
+clearstatcache(true, $dbPath);
+$report = [
+    'schema' => 'barebones-benchmark/v1',
+    'generated_at' => gmdate('c'),
+    'git_commit' => trim((string)@shell_exec('git rev-parse HEAD')),
+    'git_dirty' => trim((string)@shell_exec('git status --porcelain')) !== '',
+    'dataset' => [
+        'requested_products' => $dataset,
+        'actual_products' => (int)$db->query('SELECT COUNT(*) FROM products')->fetchColumn(),
+        'categories' => (int)$db->query('SELECT COUNT(*) FROM categories')->fetchColumn(),
+        'seed_seconds' => $seedSeconds,
+        'deterministic' => true,
+        'reused_after_interrupted_read_profile' => $reusedDataset,
+    ],
+    'resource_envelope' => [
+        'os' => PHP_OS_FAMILY . ' ' . php_uname('r'),
+        'machine' => php_uname('m'),
+        'logical_processors' => (int)(getenv('NUMBER_OF_PROCESSORS') ?: 0),
+        'php' => PHP_VERSION,
+        'pdo_driver' => Db::driver(),
+        'memory_limit' => ini_get('memory_limit'),
+        'peak_php_memory_bytes' => memory_get_peak_usage(true),
+        'database_bytes' => is_file($dbPath) ? filesize($dbPath) : null,
+    ],
+    'methodology' => [
+        'iterations' => $iterations,
+        'warmups_per_operation' => 5,
+        'percentile_method' => 'nearest-rank',
+        'checkout_workers' => $concurrency,
+        'checkout_worker_start_stagger_ms' => 25,
+        'runtime' => $runtime,
+    ],
+    'domain_operations' => $domain,
+    'http_ttfb' => $httpTtfb,
+    'checkout_concurrency' => $concurrencyResult,
+    'failure_injection' => $failures,
+    'limitations' => [
+        'Numbers describe this exact disposable SQLite runtime and resource envelope, not universal production guarantees.',
+        'The HTTP TTFB profile uses the single-process PHP development server and is not a production web-server throughput claim.',
+        'The backup failure uses a deterministic blocked destination path; it does not fill a real disk.',
+        'The percentile search uses a selective SKU. An all-document broad term is a separate saturation diagnostic, not a normal latency sample.',
+    ],
+];
+
+$reportPath = (string)($options['report'] ?? ($runtime . '/reports/benchmark-' . $dataset . '.json'));
+if (!benchmarkAbsolutePath($reportPath) || !benchmarkContainedPath($reportPath, $runtime)) {
+    throw new RuntimeException('Report path must be absolute and inside the disposable benchmark runtime');
+}
+benchmarkEnsureDir(dirname($reportPath));
+file_put_contents($reportPath, json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), LOCK_EX);
+
+echo "BareBones Shop reproducible qualification benchmark\n";
+echo "Dataset: {$report['dataset']['actual_products']} products; SQLite: " . number_format((int)$report['resource_envelope']['database_bytes']) . " bytes\n";
+foreach (array_merge($domain, $httpTtfb) as $result) {
+    printf("  %-34s p50=%8.3f ms  p95=%8.3f ms  p99=%8.3f ms\n", $result['name'], $result['p50'], $result['p95'], $result['p99']);
+}
+printf("  concurrent_checkouts (%d)          elapsed=%8.3f ms; successful=%d\n", $concurrency, $concurrencyResult['elapsed_ms'], $concurrencyResult['successful']);
+echo 'Failure injection: ' . count($failures) . '/' . count($failures) . " invariants passed\n";
+echo "Report: {$reportPath}\n";
+if (!$concurrencyResult['passed']) {
+    fwrite(STDERR, "Concurrent checkout qualification failed; see report diagnostics.\n");
+    exit(1);
+}

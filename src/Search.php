@@ -20,7 +20,7 @@ class Search {
             // Count
             $stmt = $db->prepare("
                 SELECT COUNT(*) FROM products_fts fts
-                JOIN products p ON p.id = fts.rowid
+                CROSS JOIN products p ON p.id = fts.rowid
                 WHERE products_fts MATCH :q AND p.store_id = :store AND p.status = 'active'
             ");
             $stmt->execute([':q' => $ftsQuery, ':store' => StoreContext::current()->catalogId()]);

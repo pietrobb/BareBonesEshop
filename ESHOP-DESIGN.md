@@ -27,8 +27,7 @@ a custom business logikou. Nie je to "Magento, len menšie". Je to iný prístup
 
 ### Performance tvrdenia
 
-Čísla v tomto dokumente (napr. <5ms, <20ms) sú **ciele na validáciu**, nie namerané výsledky.
-Phase 5 (scale test) ich musí potvrdiť alebo korigovať pred tým, než sa použijú v akejkoľvek komunikácii.
+Historické čísla v návrhových ukážkach (napr. <5 ms, <20 ms alebo 1M) sú **neoverené ciele, nie výsledky**. Autoritatívny nameraný stav je iba v sekcii „Nameraný performance a failure baseline“; 100k meranie viaceré staré ciele vyvrátilo a 1M profil zostáva nekvalifikovaný.
 
 ---
 
@@ -1892,7 +1891,7 @@ public static function upsertProduct(array $data): void {
 | Malý shop, shared hosting, <100k produktov | **SQLite** — nulová konfigurácia, 1 súbor, záloha = kópia |
 | Existujúci server s MariaDB/MySQL | **MySQL** — využi čo už beží |
 | >100k produktov, viacero concurrent writers | **MySQL** — lepší MVCC, connection pooling |
-| VPS/dedicated, chceš maximálnu jednoduchosť | **SQLite** — aj s 1M produktmi je rýchlejší na reads |
+| VPS/dedicated, chceš maximálnu jednoduchosť | **SQLite** — jednoduchý read-heavy profil; 1M výkon nie je kvalifikovaný |
 | Viac PHP procesov zapisuje naraz (high traffic admin) | **MySQL** — SQLite WAL zvláda 1 writera |
 
 ---
@@ -2673,29 +2672,70 @@ CSV/JSON súbor
 
 ### Výkonnosť importu
 
-```
-1,000 produktov:   ~2 sekundy
-10,000 produktov:  ~15 sekúnd
-100,000 produktov: ~2 minúty
-1,000,000 produktov: ~20 minút (s WAL mode, PRAGMA journal_mode=WAL)
-```
+Predchádzajúce seed a query čísla boli návrhové odhady, nie merania. Reprodukovateľný
+runner je `cli/benchmark.php`; vytvára iba označený disposable runtime mimo repozitára
+a odmietne bežnú konfiguráciu alebo neprázdny dataset.
 
-Trik: batch INSERT v transakciách po 1000 riadkov + dočasné vypnutie FTS triggerov, rebuild FTS na konci.
+```bash
+# Spustiť z čerstvého disposable checkoutu bez config.php:
+php cli/benchmark.php --prepare --runtime=/absolute/path/barebones-benchmark-run \
+  --dataset=100000 --iterations=100 --concurrency=4
+
+# Recovery iba po prerušenom read profile s presne rovnakým dokončeným datasetom:
+php cli/benchmark.php --reuse --runtime=/absolute/path/barebones-benchmark-run \
+  --dataset=100000 --iterations=20 --concurrency=4
+```
 
 ---
 
-## Performance benchmarky (SQLite, 1M produktov)
+## Nameraný performance a failure baseline (SQLite, 100k produktov)
 
-| Operácia | Čas | Poznámka |
-|---|---|---|
-| Product by slug (indexed) | <1ms | B-tree lookup |
-| Category listing (24 items, sorted) | 2-5ms | Composite index |
-| FTS5 search "tričko" | 10-20ms | BM25 ranking |
-| Faceted filter (2 atribúty) | 5-15ms | Index intersection |
-| Price range filter | 2-5ms | B-tree range scan |
-| Category product count | <1ms | Pre-computed |
-| From flat-file cache | <1ms | filesystem read |
-| **Apache direct serve (Level 0)** | **<0.5ms** | **PHP sa nespustí** |
+Meranie z 2026-08-02 na base committe `8a364e9` s G13 working-tree zmenami: Windows 10 AMD64, 24 logical CPU,
+PHP 8.5.1, SQLite WAL, PHP memory limit 128 MB, databáza 76 271 616 B. Dataset má
+100 000 deterministických produktov, 20 kategórií a dva atribúty na produkt; dáta ani
+JSON report sa necommitujú. Každá percentile operácia mala 5 warmupov a 20 meraní;
+p50/p95/p99 je nearest-rank. HTTP TTFB meria skutočný SSR response cez loopback
+`php -S`, nie produkčný webserver ani sieť.
+
+| Operácia | p50 | p95 | p99 | Interpretácia |
+|---|---:|---:|---:|---|
+| Product by slug (indexed) | 0,036 ms | 0,038 ms | 0,038 ms | B-tree lookup je pod 1 ms v tomto profile. |
+| Category listing, 24, price asc | 40,797 ms | 44,314 ms | 45,087 ms | Pôvodný cieľ 2–5 ms nebol potvrdený. |
+| Selektívny FTS5 lookup podľa SKU | 0,420 ms | 0,432 ms | 0,453 ms | FTS-first count plán odstránil 100k scan. |
+| Broad FTS5 term, 100k matches | 126,567 ms | 129,186 ms | 135,722 ms | Saturačný profil, nie bežný selektívny lookup. |
+| Faceted filter, 2 atribúty | 27,325 ms | 28,218 ms | 28,630 ms | Pôvodný cieľ 5–15 ms nebol potvrdený. |
+| Price range | 27,355 ms | 27,899 ms | 27,904 ms | Pôvodný cieľ 2–5 ms nebol potvrdený. |
+| Storefront SSR TTFB | 6,152 ms | 7,835 ms | 8,220 ms | Single-process PHP dev server, warm local cache. |
+| Product SSR TTFB | 6,521 ms | 7,341 ms | 7,425 ms | Single-process PHP dev server, warm local cache. |
+
+Pôvodný SQLite planner pri `COUNT(*)` začínal store/status indexom a spúšťal FTS
+probe pre všetkých 100 000 produktov. FTS-first `CROSS JOIN` plán znížil selektívny
+p95 z 4 091,096 ms na 0,432 ms; broad term, ktorý matchuje celý dataset, má p95
+129,186 ms. 1M profil nebol spustený, takže tvrdenia o 1M výkone zostávajú
+**neoverené**. Pre väčšie alebo search-heavy katalógy treba samostatnú kvalifikáciu
+alebo deklarovaný `SearchAdapter`.
+
+### Concurrency a poruchové invarianty
+
+Sériový `Orders::create()` control aj 4/4 SQLite checkout workers prešli. Workers
+štartovali s explicitným 25 ms rampom, stále sa časovo prekrývali, a dokončili za
+167,537 ms wall time na odlišných SKU. SQLite checkout používa file lock pri databáze,
+`BEGIN IMMEDIATE`, 5 s bounded wait a neprekladá `PDOException` na falošný out-of-stock.
+Je to bezpečná serializácia jedného SQLite writera, nie dôkaz paralelného write
+throughputu; pre vysoký počet concurrent writers zostáva odporúčanie MySQL/MariaDB.
+
+Na rovnakom disposable profile prešlo 6/6 fault invariantov:
+
+- payment timeout nevytvoril falošný initiated transaction,
+- duplicate payment webhook zmenil stav iba raz,
+- expired database-queue lease bol reclaimnutý a starý owner ho nemohol dokončiť,
+- mail outage zostal auditovaný ako `failed`, nie `sent`,
+- carrier outage nevytvoril phantom shipping label,
+- blokovaný backup cieľ zlyhal fail-closed bez čiastočného `.db` súboru.
+
+Resource envelope a všetky raw percentile/failure dáta zapisuje runner do
+`<runtime>/reports/benchmark-100000.json`. Simulácia backup failure používa blokovaný
+cieľový path; úmyselne nezapĺňa reálny disk.
 
 ### SQLite PRAGMA optimalizácie
 

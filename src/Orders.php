@@ -15,9 +15,45 @@ class Orders {
         if (isset($customer['store_id']) && $customer['store_id'] !== $storeContext->id()) {
             throw new InvalidArgumentException('Order store does not match the active StoreContext');
         }
-        $db->beginTransaction();
+        $sqliteLock = null;
+        if (Db::isSqlite()) {
+            $database = $db->query('PRAGMA database_list')->fetch(PDO::FETCH_ASSOC);
+            $databasePath = (string)($database['file'] ?? '');
+            $lockPath = $databasePath !== ''
+                ? $databasePath . '.checkout.lock'
+                : sys_get_temp_dir() . '/barebones-checkout-' . getmypid() . '.lock';
+            $sqliteLock = fopen($lockPath, 'c');
+            if ($sqliteLock === false) throw new RuntimeException('Cannot open SQLite checkout lock');
+            $deadline = microtime(true) + 5.0;
+            while (!flock($sqliteLock, LOCK_EX | LOCK_NB)) {
+                if (microtime(true) >= $deadline) {
+                    fclose($sqliteLock);
+                    throw new RuntimeException('Could not acquire SQLite checkout lock within 5 seconds');
+                }
+                usleep(10000);
+            }
+        }
 
         try {
+            if (Db::isSqlite()) {
+                $deadline = microtime(true) + 5.0;
+                $db->exec('PRAGMA busy_timeout = 100');
+                try {
+                    while (true) {
+                        try {
+                            $db->exec('BEGIN IMMEDIATE');
+                            break;
+                        } catch (\PDOException $e) {
+                            if (!str_contains(strtolower($e->getMessage()), 'database is locked') || microtime(true) >= $deadline) throw $e;
+                            usleep(10000);
+                        }
+                    }
+                } finally {
+                    $db->exec('PRAGMA busy_timeout = 5000');
+                }
+            } else {
+                $db->beginTransaction();
+            }
             $outOfStock = [];
             $orderItems = [];
             $subtotal = 0;
@@ -42,6 +78,7 @@ class Orders {
                     try {
                         $inventorySnapshot = Inventory::reserveLine($item, $qty);
                     } catch (\RuntimeException | \InvalidArgumentException $e) {
+                        if ($e instanceof \PDOException) throw $e;
                         $outOfStock[] = $item['name'] . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : '');
                         continue;
                     }
@@ -295,6 +332,11 @@ class Orders {
         } catch (\Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();
             throw $e;
+        } finally {
+            if (is_resource($sqliteLock)) {
+                flock($sqliteLock, LOCK_UN);
+                fclose($sqliteLock);
+            }
         }
     }
 
