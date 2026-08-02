@@ -2725,6 +2725,28 @@ p95 z 4 091,096 ms na 0,432 ms; broad term, ktorý matchuje celý dataset, má p
 **neoverené**. Pre väčšie alebo search-heavy katalógy treba samostatnú kvalifikáciu
 alebo deklarovaný `SearchAdapter`.
 
+### G4 full category a API profil
+
+G4 rozšíril rovnaký disposable 100k profil na 2 020 kategórií a 400 000
+`product_specifications`. Meria total response time aj TTFB pre skutočný category SSR
+a `parametric_search` API, vždy guest/customer a cold/warm; zároveň zapisuje query count.
+Cold profil pred každou požiadavkou vyčistí application cache, warm profil používa päť
+warmupov. Query budget je autoritatívnejší než prenositeľnosť lokálneho wall-clock času.
+
+| Meraná cesta | Pred p95 / queries | Po p95 / queries | Rozhodnutie |
+|---|---:|---:|---|
+| TecDoc facety bez filtra | 364,124 ms / 5 | 24,106 ms / 1 | Kritériá sa agregujú jedným batch dotazom. |
+| TecDoc facety, 1 aktívny filter | 372,684 ms / 5 | 56,891 ms / 2 | Jeden spoločný subset + jeden self-exclusion dotaz. |
+| Category tree, 2 020 uzlov | 91,556 ms / 1 | 4,733 ms / 1 | O(n) parent index nahradil opakovaný scan všetkých rows. |
+| Related, kategória s 5 000 produktmi | 1,032 ms / 2 | 1,059 ms / 2 | `RANDOM/RAND` sa nemenil: meranie nepotvrdilo hotspot. |
+
+Optimalizovaný full SSR mal p95 43,533–62,049 ms pri 35 guest a 38 customer
+dotazoch; API p95 38,388–48,660 ms pri 14 guest a 17 customer dotazoch. Runner
+failne nad query budgetmi 36/39 pre SSR a 15/18 pre API. Časové CI stropy sú
+zámerne konzervatívne (500 ms pre HTTP, 150/250 ms pre facety, 25 ms pre strom
+a related), aby zachytili rádovú regresiu bez predstierania univerzálnej latencie.
+Raw JSON sa zapisuje iba do označeného runtime a necommitne sa.
+
 ### Concurrency a poruchové invarianty
 
 Sériový `Orders::create()` control aj 4/4 SQLite checkout workers prešli. Workers

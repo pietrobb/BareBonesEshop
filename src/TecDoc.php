@@ -250,7 +250,6 @@ class TecDoc {
     public static function specFilterValues(int|array $categoryId, string $lang = 'sk', array $activeFilters = [], ?int $priceMin = null, ?int $priceMax = null): array {
         $db = Db::get();
 
-        // Build base product set (respecting active filters)
         if (is_array($categoryId)) {
             $catIds = array_map('intval', $categoryId);
             $catIn = implode(',', $catIds);
@@ -270,77 +269,72 @@ class TecDoc {
             $baseParams[':pmax'] = $priceMax;
         }
 
-        // For each criterion, we show values from products that match ALL OTHER active filters
-        // (not the current criterion being displayed — to avoid dead-end filters)
-        $allCriteria = $db->prepare("
-            SELECT DISTINCT ps.criteria_name
-            FROM product_specifications ps
-            JOIN products p ON p.id = ps.product_id
-            WHERE {$baseWhere} AND ps.lang = :lang
-            ORDER BY ps.criteria_name
-        ");
-        $allCriteria->execute(array_merge($baseParams, [':lang' => $lang]));
-        $criteriaNames = $allCriteria->fetchAll(PDO::FETCH_COLUMN);
-
-        // Skip non-useful criteria (too many unique values = not a good filter)
-        $skipCriteria = ['spárované čísla produktov', 'pre OE-číslo', 'pre číslo tovaru'];
-
-        $filters = [];
-        foreach ($criteriaNames as $criterion) {
-            if (in_array($criterion, $skipCriteria)) continue;
-
-            // Build product subset: match all OTHER active filters
-            $subWhere = $baseWhere;
-            $subParams = $baseParams;
-
-            $subIdx = 0;
+        $loadValues = static function (?string $criterion, ?string $excludedFilter) use ($db, $baseWhere, $baseParams, $activeFilters, $lang): array {
+            $where = $baseWhere;
+            $params = $baseParams;
+            $filterIndex = 0;
             foreach ($activeFilters as $filterName => $filterValues) {
-                if ($filterName === $criterion) continue; // Skip self
-                if (empty($filterValues)) continue;
-
+                if ($filterName === $excludedFilter || empty($filterValues)) continue;
                 $placeholders = [];
-                foreach ($filterValues as $i => $fv) {
-                    $key = ":fv_{$subIdx}_{$i}";
+                foreach ($filterValues as $valueIndex => $filterValue) {
+                    $key = ":fv_{$filterIndex}_{$valueIndex}";
                     $placeholders[] = $key;
-                    $subParams[$key] = $fv;
+                    $params[$key] = $filterValue;
                 }
-                $phStr = implode(',', $placeholders);
-                $fnKey = ":fn_{$subIdx}";
-                $flKey = ":fl_{$subIdx}";
-                $subParams[$fnKey] = $filterName;
-                $subParams[$flKey] = $lang;
-                $subWhere .= " AND p.id IN (
+                $nameKey = ":fn_{$filterIndex}";
+                $langKey = ":fl_{$filterIndex}";
+                $params[$nameKey] = $filterName;
+                $params[$langKey] = $lang;
+                $where .= " AND p.id IN (
                     SELECT ps2.product_id FROM product_specifications ps2
-                    WHERE ps2.criteria_name = {$fnKey} AND ps2.criteria_value IN ({$phStr}) AND ps2.lang = {$flKey}
+                    WHERE ps2.criteria_name = {$nameKey}
+                      AND ps2.criteria_value IN (" . implode(',', $placeholders) . ")
+                      AND ps2.lang = {$langKey}
                 )";
-                $subIdx++;
+                $filterIndex++;
             }
 
-            $mainLangKey = ":mlang_{$subIdx}";
-            $subParams[$mainLangKey] = $lang;
+            $params[':facet_lang'] = $lang;
+            $criterionWhere = '';
+            if ($criterion !== null) {
+                $criterionWhere = ' AND ps.criteria_name = :facet_criterion';
+                $params[':facet_criterion'] = $criterion;
+            }
             $stmt = $db->prepare("
-                SELECT ps.criteria_value, ps.numeric_val, COUNT(DISTINCT ps.product_id) as cnt
+                SELECT ps.criteria_name, ps.criteria_value, ps.numeric_val,
+                       COUNT(DISTINCT ps.product_id) AS cnt
                 FROM product_specifications ps
                 JOIN products p ON p.id = ps.product_id
-                WHERE {$subWhere} AND ps.criteria_name = :crit AND ps.lang = {$mainLangKey}
-                GROUP BY ps.criteria_value
+                WHERE {$where} AND ps.lang = :facet_lang{$criterionWhere}
+                GROUP BY ps.criteria_name, ps.criteria_value
                 HAVING cnt > 0
-                ORDER BY ps.numeric_val IS NULL, ps.numeric_val, ps.criteria_value
+                ORDER BY ps.criteria_name, ps.numeric_val IS NULL, ps.numeric_val, ps.criteria_value
             ");
-            $subParams[':crit'] = $criterion;
-            $stmt->execute($subParams);
-            $values = $stmt->fetchAll();
+            $stmt->execute($params);
+            return $stmt->fetchAll();
+        };
 
-            // Only include criteria with >1 value and reasonable count
-            if (count($values) > 1 && count($values) <= 50) {
-                $filters[$criterion] = array_map(fn($v) => [
-                    'value'   => $v['criteria_value'],
-                    'count'   => (int)$v['cnt'],
-                    'numeric' => $v['numeric_val'],
-                ], $values);
-            }
+        $rowsByCriterion = [];
+        foreach ($loadValues(null, null) as $row) {
+            $rowsByCriterion[$row['criteria_name']][] = $row;
         }
+        foreach ($activeFilters as $criterion => $values) {
+            if (empty($values)) continue;
+            $replacement = $loadValues($criterion, $criterion);
+            if ($replacement !== []) $rowsByCriterion[$criterion] = $replacement;
+        }
+        ksort($rowsByCriterion, SORT_STRING);
 
+        $skipCriteria = ['spárované čísla produktov', 'pre OE-číslo', 'pre číslo tovaru'];
+        $filters = [];
+        foreach ($rowsByCriterion as $criterion => $values) {
+            if (in_array($criterion, $skipCriteria, true) || count($values) <= 1 || count($values) > 50) continue;
+            $filters[$criterion] = array_map(static fn(array $value): array => [
+                'value' => $value['criteria_value'],
+                'count' => (int)$value['cnt'],
+                'numeric' => $value['numeric_val'],
+            ], $values);
+        }
         return $filters;
     }
 

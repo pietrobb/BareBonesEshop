@@ -16,10 +16,11 @@ class Db {
             throw new RuntimeException('Unsupported db_driver; expected sqlite or mysql');
         }
 
+        $pdoClass = !empty($cfg['benchmark_query_count']) ? QueryCountingPDO::class : PDO::class;
         if (self::$driver === 'mysql') {
             $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=%s',
                 $cfg['db_host'], $cfg['db_port'], $cfg['db_name'], $cfg['db_charset']);
-            self::$pdo = new PDO($dsn, $cfg['db_user'], $cfg['db_password'], [
+            self::$pdo = new $pdoClass($dsn, $cfg['db_user'], $cfg['db_password'], [
                 PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
                 PDO::ATTR_EMULATE_PREPARES   => false,
@@ -37,7 +38,7 @@ class Db {
             if (!is_dir($dbDir) || !is_writable($dbDir)) {
                 throw new RuntimeException("SQLite directory must exist and be writable: {$dbDir}");
             }
-            self::$pdo = new PDO('sqlite:' . $sqlitePath, null, null, [
+            self::$pdo = new $pdoClass('sqlite:' . $sqlitePath, null, null, [
                 PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             ]);
@@ -64,6 +65,14 @@ class Db {
     public static function reset(): void {
         self::$pdo = null;
         self::$driver = '';
+    }
+
+    public static function resetQueryCount(): void {
+        if (self::$pdo instanceof QueryCountingPDO) self::$pdo->resetQueryCount();
+    }
+
+    public static function queryCount(): ?int {
+        return self::$pdo instanceof QueryCountingPDO ? self::$pdo->queryCount() : null;
     }
 
     public static function driver(): string {

@@ -124,15 +124,24 @@ class Categories {
     /**
      * Build hierarchical tree from flat rows
      */
-    private static function buildTree(array $rows, ?int $parentId = null): array {
-        $tree = [];
+    private static function buildTree(array $rows): array {
+        $childrenByParent = [];
         foreach ($rows as $row) {
-            if ($row['parent_id'] == $parentId) {
-                $row['children'] = self::buildTree($rows, (int)$row['id']);
-                $tree[] = $row;
-            }
+            $parentKey = $row['parent_id'] === null ? 'root' : 'id:' . (int)$row['parent_id'];
+            $childrenByParent[$parentKey][] = $row;
         }
-        return $tree;
+
+        $attachChildren = function (?int $parentId) use (&$attachChildren, $childrenByParent): array {
+            $parentKey = $parentId === null ? 'root' : 'id:' . $parentId;
+            $children = $childrenByParent[$parentKey] ?? [];
+            foreach ($children as &$child) {
+                $child['children'] = $attachChildren((int)$child['id']);
+            }
+            unset($child);
+            return $children;
+        };
+
+        return $attachChildren(null);
     }
 
     /**

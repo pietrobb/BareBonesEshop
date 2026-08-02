@@ -738,6 +738,21 @@ $typValues = array_column($filterValues2['Typ'], 'value');
 assert_true(in_array('Vetraný', $typValues), 'With Vpredu filter, Typ still shows Vetraný');
 assert_true(in_array('Plný', $typValues), 'With Vpredu filter, Typ still shows Plný');
 
+$g4FacetCounter = new QueryCountingPDO('sqlite:' . $testDbPath, null, null, [
+    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+]);
+Db::init($g4FacetCounter, 'sqlite');
+$g4FacetCounter->resetQueryCount();
+$g4UnfilteredFacets = TecDoc::specFilterValues($brakeDiscCatId, 'sk');
+assert_equals($filterValues, $g4UnfilteredFacets, 'G4 facets: batched unfiltered payload preserves behavior');
+assert_true($g4FacetCounter->queryCount() <= 1, 'G4 facets: unfiltered values use one aggregate query');
+$g4FacetCounter->resetQueryCount();
+$g4ActiveFacets = TecDoc::specFilterValues($brakeDiscCatId, 'sk', ['Strana montáže' => ['Vpredu']]);
+assert_equals($filterValues2, $g4ActiveFacets, 'G4 facets: active self-exclusion payload preserves behavior');
+assert_true($g4FacetCounter->queryCount() <= 2, 'G4 facets: one active filter uses at most two aggregate queries');
+Db::init($pdo, 'sqlite');
+
 // ============================================================
 // TEST 30: TecDoc — OE Number Search
 // ============================================================
