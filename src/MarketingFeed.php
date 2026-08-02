@@ -30,14 +30,14 @@ class MarketingFeed {
         $stream = fopen('php://temp', 'w+');
         if ($stream === false) throw new RuntimeException('Unable to create feed stream');
         $headers = ['id', 'title', 'description', 'availability', 'condition', 'price', 'link', 'image_link', 'brand', 'gtin', 'mpn'];
-        fputcsv($stream, $headers);
+        fputcsv($stream, $headers, ',', '"', '\\');
         foreach (self::products($locale) as $product) {
             $google = self::googleFields($product, $baseUrl);
             fputcsv($stream, [
                 $google['id'], $google['title'], $google['description'], $google['availability'],
                 $google['condition'], $google['price'], $google['link'], $google['image_link'],
                 $google['brand'], $google['gtin'], $google['mpn'],
-            ]);
+            ], ',', '"', '\\');
         }
         rewind($stream);
         $csv = stream_get_contents($stream);

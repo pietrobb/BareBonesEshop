@@ -146,8 +146,18 @@ foreach ($architectureBudgets as $relative => $budget) {
         }
     }
 }
-foreach (['src/Entrypoints/Api.php', 'src/Http/ApiHandlers.php', 'cli/TestSuite.php'] as $relative) {
+foreach (['src/Entrypoints/Api.php', 'src/Http/ApiHandlers.php', 'cli/TestSuite.php', 'cli/tests/TestHarness.php'] as $relative) {
     if (!is_file($root . '/' . $relative)) $errors[] = "Missing architecture module: {$relative}";
+}
+$testRunnerLines = count(file($root . '/cli/TestSuite.php') ?: []);
+if ($testRunnerLines > 100) $errors[] = "cli/TestSuite.php lines {$testRunnerLines} exceeds budget 100";
+$scenarioFiles = glob($root . '/cli/tests/scenarios/*Scenario.php') ?: [];
+if (count($scenarioFiles) !== 6) $errors[] = 'Test suite must contain exactly 6 thematic scenario modules';
+foreach ($scenarioFiles as $scenarioFile) {
+    $scenarioLines = count(file($scenarioFile) ?: []);
+    if ($scenarioLines > 1800) {
+        $errors[] = basename($scenarioFile) . " lines {$scenarioLines} exceeds budget 1800";
+    }
 }
 
 require_once $root . '/src/autoload.php';
