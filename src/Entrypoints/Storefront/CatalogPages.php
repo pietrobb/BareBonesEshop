@@ -46,7 +46,7 @@ function renderHome(): string {
     $bannerLabel = !empty($banner['link_label']) ? $banner['link_label'] : $t('shop_now');
     ob_start(); ?>
     <div class="hero">
-     <img src="<?= $e($bannerImage) ?>" alt="<?= $e($bannerTitle) ?>">
+     <img src="<?= $e($bannerImage) ?>" alt="<?= $e($bannerTitle) ?>" width="1920" height="600">
      <div class="hero-overlay">
       <h1><?= $e($bannerTitle) ?></h1>
       <?php if (!empty($banner['body'])): ?><p><?= $e($banner['body']) ?></p><?php endif; ?>
