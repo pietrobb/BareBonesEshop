@@ -350,6 +350,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'view_all' => 'Zobrazit vše…', 'storefront_tagline' => 'Produkty vybrané pro vaše každodenní potřeby', 'information' => 'Informace',
     'about_us' => 'O nás', 'privacy_policy' => 'Ochrana osobních údajů', 'terms_conditions' => 'Obchodní podmínky', 'cookie_policy' => 'Pravidla cookies',
     'powered_by' => 'Pohání BareBones E-shop', 'added_to_cart' => 'Přidáno ✓',
+    'select_variant' => 'Vyberte variantu.', 'cart_error' => 'Položku se nepodařilo přidat.', 'variant_required' => 'Vyberte variantu.',
+    'variant_invalid' => 'Vybraná varianta není platná.', 'product_invalid' => 'Produkt není dostupný.', 'product_unavailable' => 'Tento výběr není dostupný.',
     'shipping_loading' => 'Načítám možnosti dopravy…', 'shipping_unavailable' => 'Doručení není dostupné.', 'select_shipping_first' => 'Nejprve vyberte dopravu.',
     'payment_loading' => 'Načítám způsoby platby…', 'payment_unavailable' => 'Platba není dostupná.',
     'vehicle_manufacturer_model' => 'Výrobce / Model', 'vehicle_engine_type' => 'Typ motoru',

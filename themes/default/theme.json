@@ -8,6 +8,9 @@
     "js": ["storefront.js"]
   },
   "sections": {
+    "product-page": "storefront/product-page",
+    "account-page": "storefront/account-page",
+    "wishlist-page": "storefront/wishlist-page",
     "hero": "storefront/section-hero",
     "category-list": "storefront/section-category-list",
     "product-list": "storefront/section-product-list",

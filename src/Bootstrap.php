@@ -11,6 +11,7 @@
 class Bootstrap {
     private static ?array $stores = null;
     private static ?array $catTranslations = null;
+    private static ?array $categoryNames = null;
 
     /** Per-request cached stores.json decode. Always returns an array. */
     public static function stores(): array {
@@ -33,6 +34,7 @@ class Bootstrap {
         $context = StoreContext::resolve(self::stores(), $uri, $host, $storeId, $channel);
         StoreContext::activate($context);
         Template::activate($context);
+        StorefrontComposition::boot();
         return $context;
     }
 
@@ -42,7 +44,7 @@ class Bootstrap {
      * $_SERVER['REQUEST_URI'] (useful in tests).
      */
     public static function initLocale(?string $uri = null): string {
-        $uri = $uri ?? ($_SERVER['REQUEST_URI'] ?? '');
+        $uri = self::storeRouteUri($uri ?? ($_SERVER['REQUEST_URI'] ?? ''));
         $context = self::initStoreContext($uri);
         $lang = I18n::detectLocale($uri);
         $requested = strtolower((string)($_GET['lang'] ?? ''));
@@ -52,6 +54,15 @@ class Bootstrap {
         }
         I18n::setLocale($lang);
         return $lang;
+    }
+
+    private static function storeRouteUri(string $uri): string {
+        $path = (string)(parse_url($uri, PHP_URL_PATH) ?: '/');
+        $base = Template::baseUrl();
+        if ($base !== '' && ($path === $base || str_starts_with($path, $base . '/'))) {
+            $path = substr($path, strlen($base)) ?: '/';
+        }
+        return $path;
     }
 
     /**
@@ -65,6 +76,29 @@ class Bootstrap {
             self::$catTranslations = is_file($file) ? (require $file) : [];
         }
         return self::$catTranslations;
+    }
+
+    /** Validate any persisted customer session before storefront rendering. */
+    public static function validateCustomerSession(): void {
+        Customers::isLoggedIn();
+    }
+
+    /** Localized category name with DB translations and the legacy fallback. */
+    public static function categoryName(string $name, string $locale): string {
+        if (self::$categoryNames === null) {
+            self::$categoryNames = [];
+            try {
+                $rows = Db::get()->query("SELECT name, translations FROM categories WHERE translations IS NOT NULL AND translations != '' AND translations != '{}'")->fetchAll();
+                foreach ($rows as $row) {
+                    foreach ((json_decode((string)($row['translations'] ?? '{}'), true) ?: []) as $code => $translation) {
+                        if (!empty($translation['name'])) self::$categoryNames[$code][$row['name']] = $translation['name'];
+                    }
+                }
+            } catch (Throwable) {
+                // Installation may not have the categories table yet.
+            }
+        }
+        return self::$categoryNames[$locale][$name] ?? self::catTranslations()[$locale][$name] ?? $name;
     }
 
     /**

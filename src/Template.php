@@ -29,6 +29,25 @@ class Template {
         self::setTheme((string)($store->config()['theme'] ?? 'default'));
     }
 
+    /** Normalized storefront identity from store config with theme defaults. */
+    public static function branding(): array {
+        $config = StoreContext::current()->config();
+        $theme = (array)(self::manifest()['branding'] ?? []);
+        $store = (array)($config['branding'] ?? []);
+        return array_replace([
+            'name' => (string)($config['name'] ?? 'Shop'),
+            'title_pattern' => '%page% — %store%',
+            'logo_url' => '',
+            'footer_text' => '',
+            'contact' => (array)($config['legal'] ?? []),
+        ], $theme, $store);
+    }
+
+    public static function pageTitle(string $pageTitle): string {
+        $brand = self::branding();
+        return strtr((string)$brand['title_pattern'], ['%page%' => $pageTitle, '%store%' => (string)$brand['name']]);
+    }
+
     /** Validated theme package manifest (theme.json). */
     public static function manifest(?string $theme = null): array {
         $theme = self::safePackageName($theme ?? self::$theme ?? 'default') ?? 'default';
@@ -108,7 +127,8 @@ class Template {
         $page = $layouts['pages'][$pageName] ?? null;
         if (!$page) return '<!-- unknown page: ' . esc($pageName) . ' -->';
 
-        $layout = $layouts['layouts'][$page['layout']] ?? $layouts['layouts']['one-column'] ?? null;
+        $layoutName = (string)($data['page']['layout'] ?? $page['layout'] ?? 'storefront');
+        if (!isset($layouts['layouts'][$layoutName])) $layoutName = isset($layouts['layouts']['storefront']) ? 'storefront' : 'one-column';
         $slots = [];
 
         $sections = !empty($data['page']['sections']) && is_array($data['page']['sections'])
@@ -120,7 +140,7 @@ class Template {
             $slots[$slot] = ($slots[$slot] ?? '') . $html;
         }
 
-        return self::render('layout/' . $page['layout'], array_merge($data, ['slots' => $slots]));
+        return self::render('layout/' . $layoutName, array_merge($data, ['slots' => $slots]));
     }
 
     /** Remove the deployment base path before joining a local URL to configured app_url. */
@@ -152,13 +172,14 @@ class Template {
 
     /** Shared accessible storefront document shell for SSR entry points. */
     public static function document(string $title, string $content, array $data = []): string {
-        $store = StoreContext::current();
+        $brand = self::branding();
         $defaults = [
             'title' => $title,
             'content' => $content,
             'locale' => I18n::locale(),
             't' => I18n::all(),
-            'shop_name' => (string)($store->config()['name'] ?? 'BareBones Shop'),
+            'shop_name' => (string)$brand['name'],
+            'brand' => $brand,
             'base_url' => self::baseUrl(),
             'navigation' => ContentService::menu('primary'),
             'cart' => ['count' => 0],
@@ -191,138 +212,174 @@ class Template {
     }
 
     /**
-     * Core processing — {{}} syntax
+     * Core processing — tokenized {{}} syntax with a real context stack.
      */
     public static function process(string $tpl, array $data): string {
-        // 1. Partials: {{> block-name}}
-        $tpl = preg_replace_callback('/\{\{>\s*([a-z0-9\/_-]+)\s*\}\}/', function($m) use ($data) {
-            return self::render($m[1], $data);
-        }, $tpl);
-
-        // 2. Blocks: {{#block "name"}}default{{/block}}
-        $tpl = preg_replace_callback(
-            '/\{\{#block\s+"([^"]+)"\}\}(.*?)\{\{\/block\}\}/s',
-            function($m) use ($data) {
-                $name = $m[1];
-                return $data['slots'][$name] ?? self::process($m[2], $data);
-            }, $tpl
-        );
-
-        // 3. Loops FIRST (paired recursively so nested collections keep parent context)
-        $tpl = self::processEach($tpl, $data);
-
-        // 4. Conditions: {{#if expr}}...{{else}}...{{/if}}
-        $tpl = preg_replace_callback(
-            '/\{\{#if\s+(.+?)\}\}(.*?)(?:\{\{else\}\}(.*?))?\{\{\/if\}\}/s',
-            function($m) use ($data) {
-                $condition = self::evaluate($m[1], $data);
-                return self::process($condition ? $m[2] : ($m[3] ?? ''), $data);
-            }, $tpl
-        );
-
-        // 5. Raw output: {{{variable}}} (no escaping)
-        $tpl = preg_replace_callback('/\{\{\{([@\w][\w.]*)\}\}\}/', function($m) use ($data) {
-            return (string)(self::resolve($m[1], $data) ?? '');
-        }, $tpl);
-
-        // 6. Escaped output: {{variable}}
-        $tpl = preg_replace_callback('/\{\{([@\w][\w.@]*)\}\}/', function($m) use ($data) {
-            $val = self::resolve($m[1], $data);
-            if ($val === null || $val === false) return '';
-            return str_replace(['{', '}'], ['&#123;', '&#125;'], esc((string)$val));
-        }, $tpl);
-
-        return $tpl;
+        $offset = 0;
+        [$nodes] = self::parseNodes($tpl, $offset);
+        return self::renderNodes($nodes, [$data]);
     }
 
-    private static function processEach(string $tpl, array $data): string {
-        if (!preg_match('/\{\{#each\s+([@\w][\w.]*)\}\}/', $tpl, $open, PREG_OFFSET_CAPTURE)) return $tpl;
-        $openText = $open[0][0];
-        $openOffset = $open[0][1];
-        $bodyOffset = $openOffset + strlen($openText);
-        preg_match_all('/\{\{#each\s+[@\w][\w.]*\}\}|\{\{\/each\}\}/', $tpl, $tokens, PREG_OFFSET_CAPTURE, $bodyOffset);
-        $depth = 1;
-        $closeOffset = null;
-        foreach ($tokens[0] as [$token, $offset]) {
-            if (str_starts_with($token, '{{#each')) $depth++;
-            else $depth--;
-            if ($depth === 0) { $closeOffset = $offset; break; }
-        }
-        if ($closeOffset === null) return $tpl;
+    private static function parseNodes(string $tpl, int &$offset, array $stops = []): array {
+        $nodes = [];
+        $length = strlen($tpl);
+        while ($offset < $length) {
+            $open = strpos($tpl, '{{', $offset);
+            if ($open === false) {
+                $nodes[] = ['type' => 'text', 'value' => substr($tpl, $offset)];
+                $offset = $length;
+                break;
+            }
+            if ($open > $offset) $nodes[] = ['type' => 'text', 'value' => substr($tpl, $offset, $open - $offset)];
+            $raw = substr($tpl, $open, 3) === '{{{';
+            $closeToken = $raw ? '}}}' : '}}';
+            $close = strpos($tpl, $closeToken, $open + ($raw ? 3 : 2));
+            if ($close === false) {
+                $offset = $length;
+                break;
+            }
+            $inner = trim(substr($tpl, $open + ($raw ? 3 : 2), $close - $open - ($raw ? 3 : 2)));
+            $offset = $close + strlen($closeToken);
+            if (!$raw && in_array($inner, $stops, true)) return [$nodes, $inner];
 
-        $body = substr($tpl, $bodyOffset, $closeOffset - $bodyOffset);
-        $items = self::resolve($open[1][0], $data);
+            if ($raw) {
+                $nodes[] = ['type' => 'raw', 'path' => $inner];
+                continue;
+            }
+            if (str_starts_with($inner, '#')) {
+                [$command, $argument] = array_pad(preg_split('/\s+/', substr($inner, 1), 2), 2, '');
+                if (!in_array($command, ['if', 'unless', 'each', 'block'], true)) continue;
+                [$body, $stop] = self::parseNodes($tpl, $offset, ['else', '/' . $command]);
+                $alternate = [];
+                if ($stop === 'else') [$alternate] = self::parseNodes($tpl, $offset, ['/' . $command]);
+                $nodes[] = [
+                    'type' => $command,
+                    'argument' => trim($argument, $command === 'block' ? " \t\n\r\0\x0B\"'" : " \t\n\r\0\x0B"),
+                    'body' => $body,
+                    'alternate' => $alternate,
+                ];
+                continue;
+            }
+            if ($inner === 'else' || str_starts_with($inner, '/')) continue;
+            if (str_starts_with($inner, '>')) {
+                $block = trim(substr($inner, 1));
+                if (preg_match('#^[a-z0-9][a-z0-9/_-]{0,159}$#', $block)) $nodes[] = ['type' => 'partial', 'block' => $block];
+                continue;
+            }
+            $nodes[] = ['type' => 'value', 'path' => $inner];
+        }
+        return [$nodes, null];
+    }
+
+    private static function renderNodes(array $nodes, array $contexts): string {
         $output = '';
-        if (is_array($items)) {
-            $values = array_values($items);
-            $count = count($values);
-            foreach ($values as $index => $item) {
-                $context = is_array($item) ? $item : ['this' => $item];
-                $context['@index'] = $index;
-                $context['@first'] = $index === 0;
-                $context['@last'] = $index === $count - 1;
-                $context['..'] = $data;
-                $output .= self::process($body, $context);
+        foreach ($nodes as $node) {
+            switch ($node['type']) {
+                case 'text':
+                    $output .= $node['value'];
+                    break;
+                case 'value':
+                    $value = self::resolve($node['path'], $contexts);
+                    if (is_scalar($value) && $value !== false) {
+                        $output .= str_replace(['{', '}'], ['&#123;', '&#125;'], esc((string)$value));
+                    }
+                    break;
+                case 'raw':
+                    $value = self::resolve($node['path'], $contexts);
+                    if (is_scalar($value) && $value !== false) $output .= (string)$value;
+                    break;
+                case 'partial':
+                    $output .= self::renderWithContexts($node['block'], $contexts);
+                    break;
+                case 'block':
+                    $slot = self::resolve('slots.' . $node['argument'], $contexts);
+                    $output .= is_string($slot) ? $slot : self::renderNodes($node['body'], $contexts);
+                    break;
+                case 'if':
+                case 'unless':
+                    $truthy = self::evaluate($node['argument'], $contexts);
+                    if ($node['type'] === 'unless') $truthy = !$truthy;
+                    $output .= self::renderNodes($truthy ? $node['body'] : $node['alternate'], $contexts);
+                    break;
+                case 'each':
+                    $items = self::resolve($node['argument'], $contexts);
+                    if (!is_array($items) || $items === []) {
+                        $output .= self::renderNodes($node['alternate'], $contexts);
+                        break;
+                    }
+                    $keys = array_keys($items);
+                    $count = count($items);
+                    foreach (array_values($items) as $index => $item) {
+                        $context = is_array($item) ? $item : ['this' => $item];
+                        $context['@index'] = $index;
+                        $context['@key'] = $keys[$index];
+                        $context['@first'] = $index === 0;
+                        $context['@last'] = $index === $count - 1;
+                        $output .= self::renderNodes($node['body'], [...$contexts, $context]);
+                    }
+                    break;
             }
         }
-        $after = $closeOffset + strlen('{{/each}}');
-        return substr($tpl, 0, $openOffset) . $output . self::processEach(substr($tpl, $after), $data);
+        return $output;
     }
 
-    /**
-     * Resolve dot-notation: "product.price" → $data['product']['price']
-     */
-    private static function resolve(string $path, array $data) {
-        // Special: ".." for parent context
-        if (str_starts_with($path, '..')) {
-            $rest = substr($path, 2);
-            if (str_starts_with($rest, '.')) $rest = substr($rest, 1);
-            if (isset($data['..'])) {
-                return $rest ? self::resolve($rest, $data['..']) : $data['..'];
-            }
-            return null;
+    private static function renderWithContexts(string $block, array $contexts): string {
+        if (++self::$depth > self::MAX_DEPTH) {
+            self::$depth--;
+            return '';
         }
-
-        $keys = explode('.', $path);
-        $val = $data;
-        foreach ($keys as $key) {
-            if ($key === 'length' && is_array($val)) {
-                return count($val);
-            }
-            if (is_array($val) && array_key_exists($key, $val)) {
-                $val = $val[$key];
-            } else {
-                return null;
-            }
-        }
-        return $val;
+        $offset = 0;
+        [$nodes] = self::parseNodes(self::loadBlock($block), $offset);
+        $result = self::renderNodes($nodes, $contexts);
+        self::$depth--;
+        return $result;
     }
 
-    /**
-     * Evaluate simple conditions: "stock > 0", "compare_price", "images.length > 1"
-     */
-    private static function evaluate(string $expr, array $data): bool {
+    /** Resolve dot notation and explicit ../ parent traversal. */
+    private static function resolve(string $path, array $contexts): mixed {
+        $path = trim($path);
+        $level = count($contexts) - 1;
+        while (str_starts_with($path, '../')) {
+            $level--;
+            $path = substr($path, 3);
+        }
+        if ($path === '..') {
+            $level--;
+            $path = '';
+        }
+        if ($level < 0) return null;
+        $value = $contexts[$level];
+        if ($path === '' || $path === 'this' || $path === '.') return $path === 'this' && array_key_exists('this', $value) ? $value['this'] : $value;
+        foreach (explode('.', $path) as $key) {
+            if ($key === 'length' && is_array($value)) return count($value);
+            if (!is_array($value) || !array_key_exists($key, $value)) return null;
+            $value = $value[$key];
+        }
+        return $value;
+    }
+
+    /** Evaluate safe comparisons and truthiness without executing expressions. */
+    private static function evaluate(string $expr, array $contexts): bool {
         $expr = trim($expr);
-
-        // Comparison: "field > value", "field == value"
-        if (preg_match('/^([@\w][\w.]*)\s*(==|!=|>|<|>=|<=)\s*(.+)$/', $expr, $m)) {
-            $left = self::resolve($m[1], $data);
-            $op = $m[2];
-            $right = trim($m[3], '"\'');
-            if (is_numeric($right)) $right = (float)$right;
-            return match($op) {
+        if (preg_match('/^((?:\.\.\/)*[@\w][\w.@-]*)\s*(==|!=|>=|<=|>|<)\s*(.+)$/', $expr, $match)) {
+            $left = self::resolve($match[1], $contexts);
+            $rightToken = trim($match[3]);
+            $right = match (strtolower($rightToken)) {
+                'true' => true,
+                'false' => false,
+                'null' => null,
+                default => is_numeric($rightToken) ? (float)$rightToken : trim($rightToken, "\"'"),
+            };
+            return match($match[2]) {
                 '==' => $left == $right,
                 '!=' => $left != $right,
-                '>'  => $left > $right,
-                '<'  => $left < $right,
                 '>=' => $left >= $right,
                 '<=' => $left <= $right,
+                '>' => $left > $right,
+                '<' => $left < $right,
             };
         }
-
-        // Truthy check: "compare_price", "variants", "@first"
-        $val = self::resolve($expr, $data);
-        return !empty($val);
+        return !empty(self::resolve($expr, $contexts));
     }
 
     /**
@@ -375,37 +432,10 @@ class Template {
     }
 
     private static function renderSection(array $section, array $data): string {
-        $block = (string)($section['block'] ?? '');
-        if (!empty($section['type'])) {
-            $type = (string)$section['type'];
-            $block = self::sectionBlocks()[$type] ?? '';
-        }
-        if ($block === '' || !preg_match('#^[a-z0-9][a-z0-9/_-]{0,159}$#', $block)) return '';
+        $alias = (string)($section['block'] ?? $section['type'] ?? '');
+        $block = self::sectionBlocks()[$alias] ?? '';
+        if ($block === '') return '';
         $sectionData = array_replace($data, $section, ['section' => $section]);
-
-        // Data source
-        if (!empty($section['data'])) {
-            $sectionData['section_data'] = self::resolve($section['data'], $data);
-        }
-        // Title per locale
-        if (!empty($section['title'])) {
-            $locale = I18n::locale();
-            $sectionData['section_title'] = $section['title'][$locale] ?? reset($section['title']);
-        }
-        // Tabs
-        if (!empty($section['tabs'])) {
-            $sectionData['tabs'] = $section['tabs'];
-        }
-        // Nested children
-        if (!empty($section['children'])) {
-            $childSlots = [];
-            foreach ($section['children'] as $child) {
-                $slot = $child['slot'] ?? 'full';
-                $childSlots[$slot] = ($childSlots[$slot] ?? '') . self::renderSection($child, $data);
-            }
-            $sectionData['slots'] = $childSlots;
-        }
-
         return self::render($block, $sectionData);
     }
 
@@ -435,7 +465,7 @@ class Template {
         if (!is_file($file)) return [];
         $value = json_decode((string)file_get_contents($file), true, 32, JSON_THROW_ON_ERROR);
         if (!is_array($value)) throw new RuntimeException("Invalid layouts file: {$file}");
-        return $value + ['layouts' => [], 'pages' => []];
+        return $value;
     }
 
     private static function mergeConfig(array $base, array $override): array {

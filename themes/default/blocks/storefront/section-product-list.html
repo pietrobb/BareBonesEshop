@@ -1,8 +1,8 @@
-<section id="{{id}}" class="section section--products section--{{variant}}">
-  {{#if heading}}<h2 class="section-title">{{heading}}</h2>{{/if}}
-  {{#if body_html}}<div>{{{body_html}}}</div>{{/if}}
+<section id="{{id}}" class="section section--products section--{{settings.variant}}">
+  <h2 class="section-title">{{#if content.heading}}{{content.heading}}{{else}}{{t.latest}}{{/if}}</h2>
+  {{#if content.body_html}}<div>{{{content.body_html}}}</div>{{/if}}
   <div class="grid grid-4">
-    {{#each items}}
+    {{#each data.items}}
     <article class="card">
       <a href="{{url}}">
         {{#if image.url}}<img class="card-img" src="{{image.thumbnail_url}}" alt="{{image.alt}}" loading="lazy">{{/if}}

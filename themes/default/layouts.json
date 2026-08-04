@@ -3,11 +3,20 @@
     "storefront": {"slots": ["full"]}
   },
   "pages": {
-    "homepage": {"layout": "storefront", "sections": []},
+    "homepage": {
+      "layout": "storefront",
+      "sections": [
+        {"id": "home-hero", "type": "hero", "data_source": {"provider": "core.banner", "parameters": {"slot": "homepage"}}},
+        {"id": "home-categories", "type": "category-list", "data_source": {"provider": "core.featured-categories", "parameters": {"limit": 6}}},
+        {"id": "home-latest", "type": "product-list", "data_source": {"provider": "core.latest-products", "parameters": {"limit": 12}}}
+      ]
+    },
     "product": {
       "layout": "storefront",
-      "sections": [{"block": "storefront/product-page"}]
+      "sections": [{"block": "product-page"}]
     },
-    "cms": {"layout": "storefront", "sections": []}
+    "cms": {"layout": "storefront", "sections": []},
+    "account": {"layout": "storefront", "sections": [{"block": "account-page"}]},
+    "wishlist": {"layout": "storefront", "sections": [{"block": "wishlist-page"}]}
   }
 }

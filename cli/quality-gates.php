@@ -46,6 +46,7 @@ $a11yCss = (string)file_get_contents($root . '/themes/default/assets/accessibili
 $storefrontCss = (string)file_get_contents($root . '/themes/default/assets/storefront.css');
 $storefrontJs = (string)file_get_contents($root . '/themes/default/assets/storefront.js');
 $storefrontLayout = (string)file_get_contents($root . '/src/Entrypoints/Storefront/Layout.php');
+$storefrontEntrypoint = (string)file_get_contents($root . '/src/Entrypoints/Storefront.php');
 $catalogPages = (string)file_get_contents($root . '/src/Entrypoints/Storefront/CatalogPages.php');
 $checkoutPages = (string)file_get_contents($root . '/src/Entrypoints/Storefront/CheckoutPages.php');
 $storefrontViewModel = (string)file_get_contents($root . '/src/StorefrontViewModel.php');
@@ -64,7 +65,7 @@ $check(!str_contains($storefrontLayout, 'woodle') && !str_contains($storefrontLa
 $check(!str_contains($storefrontJs, 'sk-SK') && !str_contains($storefrontJs, "'EUR'") && !str_contains($storefrontJs, '"EUR"'), 'i18n runtime: locale and currency come from StoreContext');
 $check(is_file($root . '/themes/default/blocks/storefront/header.html') && is_file($root . '/themes/default/blocks/storefront/footer.html'), 'Theme boundary: storefront header and footer are theme blocks');
 $check(is_file($root . '/themes/default/blocks/storefront/product-detail.html') && is_file($root . '/themes/default/blocks/storefront/cart.html') && is_file($root . '/themes/default/blocks/storefront/checkout.html'), 'Theme boundary: product, cart, and checkout markup are theme blocks');
-$check(!preg_match('/<(?:div|form|button|table|img)\b/i', $catalogPages . $checkoutPages), 'Theme boundary: catalog and checkout core presenters contain no structural HTML');
+$check(!preg_match('/<(?:p|div|form|button|table|img|nav|section|article)\b/i', $storefrontEntrypoint . $catalogPages . $checkoutPages), 'Theme boundary: storefront core presenters contain no structural HTML');
 $check(str_contains($cleanProductEntrypoint, "src/Entrypoints/Storefront.php") && !str_contains($cleanProductEntrypoint, 'ob_start'), 'Canonical product route: clean URL delegates without a parallel renderer');
 $check(substr_count($catalogPages, 'StorefrontViewModel::product(') === 1, 'Canonical product route: one view-model builder serves storefront routing');
 $check(!preg_match('/[\x27\x22](?:breadcrumb|latest|product_grid|automotive|navigation)_html[\x27\x22]/', $storefrontViewModel), 'View-model boundary: no structural HTML fragments are exposed');

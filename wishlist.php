@@ -27,55 +27,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Only honour a local /product/... return target to avoid open redirects.
     $return = (string)($_POST['return_to'] ?? '');
     $back = (($_POST['op'] ?? '') === 'toggle' && preg_match('~^/product/[a-z0-9-]+/?$~', $return))
-        ? $return
-        : '/wishlist';
+        ? Template::storeUrl($return)
+        : Template::storeUrl('/wishlist.php');
     header('Location: ' . $back);
     exit;
 }
 
-$items = Wishlist::list();
-$cart = Cart::enriched();
-$t = I18n::all();
+$translations = I18n::all();
 $csrfToken = Security::csrfToken();
-
-Security::headers();
-
-$bodyEnd = '<script nonce="' . esc(Security::cspNonce()) . '">window.BBS='
-    . json_encode(['csrfToken' => $csrfToken, 'lang' => $lang], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)
-    . ';</script>';
-
-ob_start();
-?>
-    <h1><?= esc($t['wishlist.title'] ?? 'My Wishlist') ?></h1>
-
-    <?php if (empty($items)): ?>
-    <p class="wishlist-empty"><?= esc($t['wishlist.empty'] ?? 'Your wishlist is empty.') ?></p>
-    <?php else: ?>
-    <ul class="wishlist-grid" data-wishlist>
-        <?php foreach ($items as $p): ?>
-        <li class="wishlist-item" data-product-id="<?= (int)$p['id'] ?>">
-            <a href="/product/<?= esc($p['slug']) ?>" class="wishlist-link">
-                <?php if (!empty($p['image'])): ?>
-                <img src="/uploads/thumb/<?= esc($p['image']) ?>" alt="<?= esc($p['name']) ?>" loading="lazy">
-                <?php endif; ?>
-                <span class="wishlist-name"><?= esc($p['name']) ?></span>
-            </a>
-            <span class="wishlist-price"><?= esc(I18n::price((int)$p['price'], $p['currency'] ?? null)) ?></span>
-            <form method="post" action="/wishlist" class="wishlist-remove-form" data-wishlist-remove data-product-id="<?= (int)$p['id'] ?>">
-                <input type="hidden" name="csrf_token" value="<?= esc($csrfToken) ?>">
-                <input type="hidden" name="op" value="remove">
-                <input type="hidden" name="product_id" value="<?= (int)$p['id'] ?>">
-                <button type="submit" class="btn btn-secondary btn-sm"><?= esc($t['wishlist.remove'] ?? 'Remove') ?></button>
-            </form>
-        </li>
-        <?php endforeach; ?>
-    </ul>
-    <?php endif; ?>
-<?php
-$content = ob_get_clean();
-echo Template::document(($t['wishlist.title'] ?? 'Wishlist') . ' | BareBones Shop', $content, [
-    'seo_head' => '<meta name="robots" content="noindex,follow">',
-    'body_end' => $bodyEnd,
-    'cart' => ['count' => $cart['count']],
+$cards = array_map([StorefrontViewModel::class, 'productCard'], Wishlist::list());
+$content = Template::page('wishlist', [
+    'wishlist' => [
+        'items' => $cards,
+        'action_url' => Template::storeUrl('/wishlist.php'),
+        'csrf_token' => $csrfToken,
+    ],
+    't' => $translations,
 ]);
-?>
+$title = Template::pageTitle((string)($translations['wishlist.title'] ?? 'Wishlist'));
+$cartCount = StorefrontCartAction::count();
+$t = static fn(string $key): string => I18n::t($key);
+$e = static fn(string $value): string => esc($value);
+$catName = static fn(string $name): string => Bootstrap::categoryName($name, $lang);
+$page = 'wishlist';
+require __DIR__ . '/src/Entrypoints/Storefront/Layout.php';

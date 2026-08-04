@@ -204,6 +204,13 @@ if ($mysqlDsn) {
         $g10MigrationMysql->up($my, false);
         $g10MysqlTables = (int)$my->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('content_menu_items','content_banners','content_redirects')")->fetchColumn();
         assert_equals(3, $g10MysqlTables, 'MySQL live: G10 content migration is applied and idempotent');
+        $my->exec("CREATE TABLE pages (id INT PRIMARY KEY, title VARCHAR(191) NOT NULL) ENGINE=InnoDB");
+        $my->exec("INSERT INTO pages (id, title) VALUES (1, 'Existing page')");
+        $pageLayoutMigrationMysql = require TEST_CLI_DIR . '/../migrations/20260804210000_storefront_page_layouts.php';
+        $pageLayoutMigrationMysql->up($my, false);
+        $pageLayoutMigrationMysql->up($my, false);
+        assert_equals('storefront', (string)$my->query('SELECT layout FROM pages WHERE id=1')->fetchColumn(), 'MySQL live: page layout migration preserves existing pages and is idempotent');
+        $my->exec('DROP TABLE pages');
         foreach (['content_redirects', 'content_banners', 'content_menu_items'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['credit_note_items', 'order_refunds', 'return_exchanges', 'return_receipts', 'return_labels'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['shipment_items', 'shipments', 'bundle_components', 'inventory_receipts', 'purchase_order_items', 'purchase_orders', 'supplier_products', 'suppliers', 'stock_movements'] as $table) $my->exec("DROP TABLE {$table}");
@@ -248,7 +255,7 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS pages (
     id INTEGER PRIMARY KEY, slug TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
     body TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', translations TEXT DEFAULT '{}',
     page_type TEXT NOT NULL DEFAULT 'content', template TEXT NOT NULL DEFAULT 'cms', sections TEXT NOT NULL DEFAULT '[]',
-    seo_title TEXT NOT NULL DEFAULT '', meta_description TEXT NOT NULL DEFAULT '',
+    layout TEXT NOT NULL DEFAULT 'storefront', seo_title TEXT NOT NULL DEFAULT '', meta_description TEXT NOT NULL DEFAULT '',
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
 )");
 
@@ -713,9 +720,10 @@ $oldToken = Security::formTrapToken('test_register', 3600);
 $_SESSION[$trapKey][$oldToken] = time() - 3601;
 assert_true(!Security::formTrapValidate('test_register', $oldToken, '', 4, 3600), 'formTrapValidate rejects expired tokens');
 $accountSource = file_get_contents(TEST_CLI_DIR . '/../account.php') ?: '';
-assert_true(str_contains($accountSource, 'name="register_token"'), 'Account register form includes form-trap token');
+$accountThemeSource = file_get_contents(TEST_CLI_DIR . '/../themes/default/blocks/storefront/account-page.html') ?: '';
+assert_true(str_contains($accountThemeSource, 'name="register_token"'), 'Account register form includes form-trap token');
 assert_true(!str_contains($accountSource, 'HTTP_HOST'), 'G3: password reset URL does not trust the Host header');
-assert_true(str_contains($accountSource, 'name="company_website"'), 'Account register form includes hidden honeypot field');
+assert_true(str_contains($accountThemeSource, 'name="company_website"'), 'Account register form includes hidden honeypot field');
 assert_true(str_contains($accountSource, 'account_login_account_'), 'G4: login has a per-account throttle independent of IP');
 assert_true(str_contains($accountSource, 'account_forgot_recipient_'), 'G4: password reset has a per-recipient throttle independent of IP');
 assert_true(str_contains($accountSource, "account.err_invalid_credentials"), 'G4: login returns a generic credential error');
@@ -732,7 +740,9 @@ assert_true(!str_contains($mailSourceG4, "SERVER_NAME"), 'G4: mail sender does n
 assert_true(str_contains($mailSourceG4, "FILTER_VALIDATE_EMAIL"), 'G4: sender, recipient and reply-to are validated');
 foreach (['api.php', 'index.php', 'wishlist.php'] as $customerEntrypoint) {
     $entrySource = entrypointSource($customerEntrypoint);
-    assert_true(str_contains($entrySource, 'Customers::isLoggedIn();'), "G4: {$customerEntrypoint} validates stale customer sessions");
+    $validatesCustomerSession = str_contains($entrySource, 'Customers::isLoggedIn();')
+        || str_contains($entrySource, 'Bootstrap::validateCustomerSession();');
+    assert_true($validatesCustomerSession, "G4: {$customerEntrypoint} validates stale customer sessions");
 }
 $productEntrypoint = entrypointSource('product.php');
 assert_true(str_contains($productEntrypoint, "src/Entrypoints/Storefront.php"), 'G4: product.php delegates session validation to the canonical storefront');
@@ -967,6 +977,20 @@ assert_equals('many', $html, '.length property works');
 // Missing variable
 $html = Template::process('{{missing}}', []);
 assert_equals('', $html, 'Missing variable renders empty');
+
+$html = Template::process('{{#if outer}}A{{#if inner}}B{{else}}C{{/if}}D{{/if}}', ['outer' => true, 'inner' => false]);
+assert_equals('ACD', $html, 'Nested if in if renders the correct branch');
+$html = Template::process('{{#if show}}{{#each items}}{{name}}{{/each}}{{else}}empty{{/if}}', ['show' => true, 'items' => [['name' => 'A'], ['name' => 'B']]]);
+assert_equals('AB', $html, 'Each in if renders all items');
+$html = Template::process('{{#each groups}}{{#if visible}}{{#each items}}{{../../title}}/{{../name}}/{{name}};{{/each}}{{/if}}{{/each}}', [
+    'title' => 'Root',
+    'groups' => [['name' => 'Group', 'visible' => true, 'items' => [['name' => 'Item']]]],
+]);
+assert_equals('Root/Group/Item;', $html, 'If in each and ../ ../../ context traversal work');
+$html = Template::process('{{#unless missing}}fallback{{/unless}}{{#each empty}}bad{{else}}empty{{/each}}', ['missing' => false, 'empty' => []]);
+assert_equals('fallbackempty', $html, 'Unless and empty each branches render deterministically');
+$html = Template::process('{{#if ok}}<b>{{value}}</b>{{/if}}{{#unknown x}}bad{{/unknown}}', ['ok' => true, 'value' => '<script>x</script>']);
+assert_true(str_contains($html, '&lt;script&gt;') && !str_contains($html, '{{'), 'Nested renderer escapes values and removes unsupported directives');
 
 // ============================================================
 // TEST 15: Cache

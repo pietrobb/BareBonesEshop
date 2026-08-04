@@ -72,17 +72,33 @@ class ContentService {
         foreach (array_values($value) as $index => $section) {
             if (!is_array($section)) throw new InvalidArgumentException('Invalid CMS section');
             $type = self::code((string)($section['type'] ?? ''), 'section type');
-            $sections[] = [
+            $content = self::safeSectionData((array)($section['content'] ?? []));
+            $content['heading'] = self::optionalText((string)($section['content']['heading'] ?? $section['heading'] ?? ''), 500);
+            $content['body_html'] = Security::sanitizeRichHtml((string)($section['content']['body_html'] ?? $section['body_html'] ?? ''));
+            $content['media'] = self::sectionData((array)($section['content']['media'] ?? $section['media'] ?? []));
+            $content['cta'] = self::sectionData((array)($section['content']['cta'] ?? $section['cta'] ?? []));
+            $source = $section['data_source'] ?? null;
+            if (is_string($source)) $source = ['provider' => $source, 'parameters' => []];
+            $provider = is_array($source) && !empty($source['provider']) ? self::provider((string)$source['provider']) : '';
+            $data = self::safeSectionData((array)($section['data'] ?? []));
+            if (!empty($section['items']) && !isset($data['items'])) $data['items'] = self::safeSectionData((array)$section['items']);
+            $settings = self::safeSectionData((array)($section['settings'] ?? $section['props'] ?? []));
+            $settings['variant'] = self::code((string)($section['settings']['variant'] ?? $section['variant'] ?? 'default'), 'section variant');
+            $block = strtolower(trim((string)($section['block'] ?? '')));
+            $clean = [
                 'id' => self::code((string)($section['id'] ?? 'section-' . $index), 'section id'),
                 'type' => $type,
-                'variant' => self::code((string)($section['variant'] ?? 'default'), 'section variant'),
-                'heading' => self::optionalText((string)($section['heading'] ?? ''), 500),
-                'body_html' => Security::sanitizeRichHtml((string)($section['body_html'] ?? '')),
-                'media' => self::sectionData((array)($section['media'] ?? [])),
-                'cta' => self::sectionData((array)($section['cta'] ?? [])),
-                'items' => self::safeSectionData((array)($section['items'] ?? [])),
-                'props' => self::safeSectionData((array)($section['props'] ?? [])),
+                'slot' => self::code((string)($section['slot'] ?? 'full'), 'section slot'),
+                'settings' => $settings,
+                'content' => $content,
+                'data_source' => $provider === '' ? null : [
+                    'provider' => $provider,
+                    'parameters' => self::safeSectionData((array)($source['parameters'] ?? [])),
+                ],
+                'data' => $data,
             ];
+            if (preg_match('/^[a-z0-9][a-z0-9_-]{0,79}$/', $block)) $clean['block'] = $block;
+            $sections[] = $clean;
         }
         return json_encode($sections, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     }
@@ -172,6 +188,7 @@ class ContentService {
             'translations' => '{}',
             'page_type' => 'landing',
             'template' => self::code((string)($input['template'] ?? 'cms'), 'page template'),
+            'layout' => self::code((string)($input['layout'] ?? 'storefront'), 'page layout'),
             'seo_title' => self::optionalText((string)($input['seo_title'] ?? ''), 191),
             'meta_description' => self::optionalText((string)($input['meta_description'] ?? ''), 320),
             'sections' => self::sanitizeSections($input['sections'] ?? []),
@@ -225,6 +242,14 @@ class ContentService {
     private static function code(string $value, string $label): string {
         $value = strtolower(trim($value));
         if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,79}$/', $value)) throw new InvalidArgumentException("Invalid {$label}");
+        return $value;
+    }
+
+    private static function provider(string $value): string {
+        $value = strtolower(trim($value));
+        if (!preg_match('/^[a-z][a-z0-9_-]{0,39}\.[a-z][a-z0-9_-]{0,39}$/', $value)) {
+            throw new InvalidArgumentException('Invalid section provider');
+        }
         return $value;
     }
 

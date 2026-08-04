@@ -34,31 +34,46 @@
     return Math.round((parseFloat(normalized) || 0) * 100);
   }
 
-  async function addToCart(productId, quantity, button) {
+  async function addToCart(productId, quantity, variantId, button) {
     const original = button.textContent;
+    if (button.dataset.variantPicker && !variantId) {
+      button.textContent = text.selectVariant;
+      setTimeout(() => { button.textContent = original; }, 1600);
+      return;
+    }
     button.disabled = true;
-    button.textContent = text.added;
     const form = new FormData();
     form.append('cart_action', 'add');
     form.append('product_id', productId);
     form.append('quantity', quantity || 1);
+    if (variantId) form.append('variant_id', variantId);
     form.append('csrf_token', config.csrfToken || '');
-    const response = await fetch(config.currentUrl || '', {
-      method: 'POST', body: form, headers: {'X-Requested-With': 'XMLHttpRequest'}
-    });
-    const result = await response.json();
-    const badge = document.querySelector('.cart-badge');
-    if (badge) badge.textContent = result.count;
-    else {
-      const icon = document.querySelector('.cart-icon');
-      if (icon) {
-        const nextBadge = document.createElement('span');
-        nextBadge.className = 'cart-badge';
-        nextBadge.textContent = result.count;
-        icon.appendChild(nextBadge);
+    try {
+      const response = await fetch(config.currentUrl || '', {
+        method: 'POST', body: form, headers: {'X-Requested-With': 'XMLHttpRequest'}
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) {
+        button.textContent = text[result.error] || text.cartError;
+        return;
       }
+      button.textContent = text.added;
+      const badge = document.querySelector('.cart-badge');
+      if (badge) badge.textContent = result.count;
+      else {
+        const icon = document.querySelector('.cart-icon');
+        if (icon) {
+          const nextBadge = document.createElement('span');
+          nextBadge.className = 'cart-badge';
+          nextBadge.textContent = result.count;
+          icon.appendChild(nextBadge);
+        }
+      }
+    } catch (error) {
+      button.textContent = text.cartError;
+    } finally {
+      setTimeout(() => { button.disabled = false; button.textContent = original; }, 1600);
     }
-    setTimeout(() => { button.disabled = false; button.textContent = original; }, 1200);
   }
 
   function bindReviewForm() {
@@ -197,7 +212,10 @@
     const cartButton = event.target.closest('[data-storefront-action="cart-add"]');
     if (cartButton) {
       const quantityInput = cartButton.dataset.quantityInput ? document.getElementById(cartButton.dataset.quantityInput) : null;
-      addToCart(cartButton.dataset.productId, quantityInput ? quantityInput.value : cartButton.dataset.quantity, cartButton);
+      const variant = cartButton.dataset.variantPicker
+        ? document.querySelector(`[name="variant-${cartButton.dataset.variantPicker}"]:checked`)
+        : null;
+      addToCart(cartButton.dataset.productId, quantityInput ? quantityInput.value : cartButton.dataset.quantity, variant ? variant.value : '', cartButton);
       return;
     }
     const tab = event.target.closest('[data-product-tab]');
@@ -205,8 +223,21 @@
   });
 
   document.addEventListener('change', (event) => {
+    const variant = event.target.closest('[data-variant-picker] input[type="radio"]');
+    if (variant) {
+      const detail = variant.closest('.product-detail');
+      const price = detail ? detail.querySelector('[data-product-price]') : null;
+      const availability = detail ? detail.querySelector('[data-product-availability]') : null;
+      if (price) price.textContent = variant.dataset.price || '';
+      if (availability) availability.textContent = variant.dataset.availability || '';
+    }
     const control = event.target.closest('[data-submit-on-change]');
     if (control && control.form) control.form.requestSubmit();
+  });
+
+  document.addEventListener('submit', (event) => {
+    const form = event.target.closest('form[data-confirm]');
+    if (form && !window.confirm(form.dataset.confirm)) event.preventDefault();
   });
 
   document.addEventListener('DOMContentLoaded', () => {

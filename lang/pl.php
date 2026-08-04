@@ -350,6 +350,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'view_all' => 'Pokaż wszystko…', 'storefront_tagline' => 'Produkty wybrane do codziennych potrzeb', 'information' => 'Informacje',
     'about_us' => 'O nas', 'privacy_policy' => 'Polityka prywatności', 'terms_conditions' => 'Regulamin', 'cookie_policy' => 'Polityka cookies',
     'powered_by' => 'Napędzane przez BareBones E-shop', 'added_to_cart' => 'Dodano ✓',
+    'select_variant' => 'Wybierz wariant.', 'cart_error' => 'Nie udało się dodać produktu.', 'variant_required' => 'Wybierz wariant.',
+    'variant_invalid' => 'Wybrany wariant jest nieprawidłowy.', 'product_invalid' => 'Produkt jest niedostępny.', 'product_unavailable' => 'Ten wybór jest niedostępny.',
     'shipping_loading' => 'Ładowanie metod dostawy…', 'shipping_unavailable' => 'Dostawa jest niedostępna.', 'select_shipping_first' => 'Najpierw wybierz dostawę.',
     'payment_loading' => 'Ładowanie metod płatności…', 'payment_unavailable' => 'Płatność jest niedostępna.',
     'vehicle_manufacturer_model' => 'Producent / Model', 'vehicle_engine_type' => 'Typ silnika',

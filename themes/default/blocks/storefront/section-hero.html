@@ -1,8 +1,8 @@
-<section class="hero hero--{{variant}}" id="{{id}}">
-  {{#if media.image_url}}<img src="{{media.image_url}}" alt="{{media.alt}}" width="1920" height="600">{{/if}}
+<section class="hero hero--{{settings.variant}}" id="{{id}}">
+  {{#if content.media.image_url}}<img src="{{content.media.image_url}}" alt="{{content.media.alt}}" width="1920" height="600">{{else}}{{#if data.item.image_url}}<img src="{{data.item.image_url}}" alt="{{data.item.title}}" width="1920" height="600">{{/if}}{{/if}}
   <div class="hero-overlay">
-    {{#if heading}}<h1>{{heading}}</h1>{{/if}}
-    {{#if body_html}}<div>{{{body_html}}}</div>{{/if}}
-    {{#if cta.url}}<a href="{{cta.url}}" class="btn-hero">{{cta.label}}</a>{{/if}}
+    {{#if content.heading}}<h1>{{content.heading}}</h1>{{else}}{{#if data.item.title}}<h1>{{data.item.title}}</h1>{{else}}<h1>{{t.hero_title}}</h1>{{/if}}{{/if}}
+    {{#if content.body_html}}<div>{{{content.body_html}}}</div>{{else}}{{#if data.item.body_html}}<div>{{{data.item.body_html}}}</div>{{/if}}{{/if}}
+    {{#if content.cta.url}}<a href="{{content.cta.url}}" class="btn-hero">{{content.cta.label}}</a>{{else}}{{#if data.item.link_url}}<a href="{{data.item.link_url}}" class="btn-hero">{{data.item.link_label}}</a>{{/if}}{{/if}}
   </div>
 </section>

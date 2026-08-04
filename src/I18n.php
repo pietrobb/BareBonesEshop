@@ -41,7 +41,7 @@ class I18n {
         return self::$locale;
     }
 
-    /** Detect locale from URL prefix; falls back to system default. */
+    /** Detect locale from URL prefix; falls back to the active store, then system default. */
     public static function detectLocale(string $uri = ''): string {
         $stores = self::stores();
         // Check URL prefix: /en/..., /de/...
@@ -54,7 +54,7 @@ class I18n {
                 return self::storeDefault($store);
             }
         }
-        return self::sysDefault();
+        return StoreContext::hasCurrent() ? StoreContext::current()->defaultLocale() : self::sysDefault();
     }
 
     /** Translate product row — prefer translations[locale] if present, else keep base row. */

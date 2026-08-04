@@ -32,6 +32,32 @@ class Cart {
         $_SESSION['cart'][$key]['qty'] += $qty;
     }
 
+    /** Validate a storefront cart command against canonical server data. */
+    public static function addValidated(int $productId, ?int $variantId, int $qty): array {
+        $product = $productId > 0 ? Products::byId($productId) : null;
+        if (!$product || ($product['status'] ?? '') !== 'active') return ['ok' => false, 'error' => 'product_invalid'];
+        $variants = Products::variants($productId);
+        if ($variants !== [] && $variantId === null) return ['ok' => false, 'error' => 'variant_required'];
+        if ($variantId !== null) {
+            $variant = null;
+            foreach ($variants as $candidate) {
+                if ((int)$candidate['id'] === $variantId) { $variant = $candidate; break; }
+            }
+            if ($variant === null) return ['ok' => false, 'error' => 'variant_invalid'];
+        }
+        if (!VariantAvailability::isPurchasable($productId, $variantId)) {
+            return ['ok' => false, 'error' => 'product_unavailable'];
+        }
+        self::add($productId, $variantId, max(1, min(99, $qty)));
+        $key = $variantId === null ? "p_{$productId}" : "v_{$variantId}";
+        $summary = self::enriched();
+        $item = null;
+        foreach ($summary['items'] as $candidate) {
+            if ($candidate['key'] === $key) { $item = $candidate; break; }
+        }
+        return ['ok' => true, 'error' => null, 'item' => $item, 'count' => (int)$summary['count']];
+    }
+
     public static function update(string $key, int $qty): void {
         if ($qty <= 0) {
             unset($_SESSION['cart'][$key]);

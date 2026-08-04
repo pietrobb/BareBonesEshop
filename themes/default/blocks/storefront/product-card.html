@@ -1,10 +1,9 @@
-<div class="card" style="position:relative">
+<article class="card">
   <a href="{{url}}">
-    {{#if image}}<img class="card-img" src="{{image}}" alt="{{name}}" loading="lazy">{{else}}<div class="card-img-placeholder">&#128247;</div>{{/if}}
-    {{#if on_sale}}<span class="sticker sticker-sale">SALE</span>{{/if}}
+    {{#if image.url}}<img class="card-img" src="{{image.thumbnail_url}}" alt="{{image.alt}}" loading="lazy">{{else}}<div class="card-img-placeholder" aria-hidden="true"></div>{{/if}}
     <h3>{{name}}</h3>
-    <div class="price">{{price}}{{#if compare_price}}<span class="old-price">{{compare_price}}</span>{{/if}}</div>
-    {{#if in_stock}}<div class="badge">{{in_stock_label}}</div>{{/if}}
+    <div class="price">{{price.formatted}}{{#if price.compare_formatted}}<span class="old-price">{{price.compare_formatted}}</span>{{/if}}</div>
+    <div class="badge">{{availability.label}}</div>
   </a>
-  <button class="btn-cart" type="button" data-storefront-action="cart-add" data-product-id="{{id}}" data-quantity="1">{{add_to_cart_label}}</button>
-</div>
+  {{#if availability.purchasable}}{{#unless requires_variant}}<button class="btn-cart" type="button" data-storefront-action="cart-add" data-product-id="{{id}}" data-quantity="1">{{../t.add_to_cart}}</button>{{/unless}}{{/if}}
+</article>

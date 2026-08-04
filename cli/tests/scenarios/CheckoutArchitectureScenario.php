@@ -505,8 +505,8 @@ assert_true(Bootstrap::stores() === Bootstrap::stores(), 'Bootstrap: stores() re
 $savedLocale = I18n::locale();
 assert_equals(I18n::detectLocale('/de/products'), Bootstrap::initLocale('/de/products'), 'Bootstrap: initLocale parity with I18n::detectLocale (/de)');
 assert_equals('de', I18n::locale(), 'Bootstrap: initLocale applied de locale');
-assert_equals(I18n::detectLocale('/'), Bootstrap::initLocale('/'), 'Bootstrap: initLocale parity for default (no prefix)');
-assert_equals('en', I18n::locale(), 'Bootstrap: initLocale fell back to system default en');
+assert_equals('sk', Bootstrap::initLocale('/'), 'Bootstrap: initLocale uses the active store default without a route prefix');
+assert_equals('sk', I18n::locale(), 'Bootstrap: initLocale applies the active store default before the system fallback');
 I18n::setLocale($savedLocale); // restore for downstream tests
 
 // catTranslations() fallback parity — SK + DE legacy names intact after extraction to data file
@@ -647,7 +647,9 @@ $storefrontSrc = entrypointSource('index.php');
 $storefrontThemeSrc = '';
 foreach (glob(TEST_CLI_DIR . '/../themes/default/blocks/storefront/*.html') ?: [] as $block) $storefrontThemeSrc .= file_get_contents($block) ?: '';
 $storefrontJsSrc = file_get_contents(TEST_CLI_DIR . '/../themes/default/assets/storefront.js') ?: '';
-$accountSrc = file_get_contents(TEST_CLI_DIR . '/../account.php') ?: '';
+$accountSrc = (file_get_contents(TEST_CLI_DIR . '/../account.php') ?: '')
+    . (file_get_contents(TEST_CLI_DIR . '/../themes/default/blocks/storefront/account-page.html') ?: '')
+    . $storefrontJsSrc;
 assert_true(
     str_contains($storefrontThemeSrc, 'data-storefront-action="cart-add"') &&
     str_contains($storefrontJsSrc, "event.target.closest('[data-storefront-action=\"cart-add\"]')") &&
@@ -657,7 +659,7 @@ assert_true(
 );
 assert_true(
     str_contains($accountSrc, 'data-confirm="') &&
-    str_contains($accountSrc, "form.matches('form[data-confirm]')"),
+    str_contains($accountSrc, "event.target.closest('form[data-confirm]')"),
     'Account CSP: delegated data-confirm submit listener is present'
 );
 
@@ -701,6 +703,7 @@ assert_equals('account.php', Security::safeLocalPath("acc\r\nSet-Cookie: x", 'ac
 assert_equals('account.php', Security::safeLocalPath('', 'account.php'), 'F3: empty value falls back');
 assert_equals('account.php?p=privacy', Security::safeLocalPath('account.php?p=privacy', 'fb'), 'F3: same-site relative path allowed');
 assert_equals('/account?x=1', Security::safeLocalPath('/account?x=1', 'fb'), 'F3: single-leading-slash local path allowed');
+assert_true(str_contains(entrypointSource('index.php'), 'Security::safeLocalPath('), 'F3: storefront cart redirect uses the same open-redirect boundary');
 assert_equals('https://shop.example/base', Security::appUrl(['app_url' => 'https://shop.example/base/']), 'G3: configured app_url is normalized');
 foreach (['', '//evil.example', 'javascript:alert(1)', 'https://user:pass@shop.example', 'https://shop.example/?next=evil', "https://shop.example\r\n.evil"] as $badAppUrl) {
     $appUrlRejected = false;

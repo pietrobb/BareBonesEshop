@@ -36,6 +36,11 @@
             "label": "Theme page template"
         },
         {
+            "name": "layout",
+            "type": "text",
+            "label": "Theme layout"
+        },
+        {
             "name": "sections",
             "type": "textarea",
             "label": "Sekcie (JSON; type sa mapuje cez theme manifest)",

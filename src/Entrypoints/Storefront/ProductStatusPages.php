@@ -4,7 +4,7 @@ function renderUnavailableProduct(string $slug): array {
     $product = Products::bySlugAnyStatus($slug);
     if (!$product || ($product['status'] ?? '') !== 'archived') {
         http_response_code(404);
-        return [Template::page('404', ['t' => I18n::all()]), I18n::t('product_not_found') . ' — BareBones Shop'];
+        return [Template::page('404', ['t' => I18n::all()]), Template::pageTitle(I18n::t('product_not_found'))];
     }
 
     http_response_code(410);
@@ -13,5 +13,5 @@ function renderUnavailableProduct(string $slug): array {
         'product' => I18n::product($product),
         'related' => array_map(static fn(array $item): array => Products::enrich(I18n::product($item)), $related),
         't' => I18n::all(),
-    ]), I18n::t('product_discontinued') . ' — BareBones Shop'];
+    ]), Template::pageTitle(I18n::t('product_discontinued'))];
 }

@@ -847,6 +847,7 @@ $vmInsert->execute([':id' => 9703, ':category' => $vmCategory, ':sku' => 'VM-FOR
 $pdo->exec("INSERT INTO product_attrs (product_id, attr_name, attr_value, numeric_val) VALUES (9701, 'Generic field', 'Generic value', NULL)");
 $pdo->exec("INSERT INTO product_specifications (product_id, lang, criteria_name, criteria_value, numeric_val, sort_order) VALUES (9701, 'en', 'Length', '42', 42, 0)");
 $pdo->exec("INSERT INTO variants (product_id, sku, name, attrs, price_delta, stock, availability) VALUES (9701, 'VM-DIGITAL-A', 'Variant A', '{\"channel\":\"standard\"}', 0, 0, 'active')");
+$pdo->exec("INSERT INTO variants (product_id, sku, name, attrs, price_absolute, stock, availability) VALUES (9703, 'VM-FORMAT-A', 'Format A', '{}', 1999, 4, 'active'), (9703, 'VM-FORMAT-OOS', 'Format OOS', '{}', 2499, 0, 'active')");
 $pdo->exec("INSERT INTO product_related_products (product_id, related_product_id, relation_type, sort_order) VALUES (9701, 9702, 'related', 0), (9701, 9703, 'format', 0)");
 
 $originalVmScriptName = $_SERVER['SCRIPT_NAME'] ?? null;
@@ -886,6 +887,37 @@ $catalogRouteSource = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoi
 assert_true(str_contains($productRouteSource, "src/Entrypoints/Storefront.php") && !str_contains($productRouteSource, 'ob_start'), 'G12 routes: clean product URL delegates without a parallel renderer');
 assert_equals(1, substr_count($catalogRouteSource, 'StorefrontViewModel::product('), 'G12 routes: query and clean product routes converge on one canonical builder');
 assert_equals('/de/product/vm-digital', Template::seoPath($vm['page']['seo']['canonical_url']), 'G12 SEO: deployment base path is not duplicated when joined to app_url');
+$renderedProduct = Template::page('product', $vm);
+assert_true(str_contains($renderedProduct, 'Canonical Product') && str_contains($renderedProduct, 'name="variant-9701"'), 'G12 renderer: complete default product block renders nested variant markup');
+assert_true(!str_contains($renderedProduct, '{{'), 'G12 renderer: complete product HTML contains no unresolved directives');
+$renderedProductList = Template::render('storefront/section-product-list', [
+    'id' => 'products', 'content' => ['heading' => 'Products', 'body_html' => ''],
+    'settings' => ['variant' => 'default'],
+    'data' => ['items' => [$vm['product']['relations']['related'][0]]], 't' => I18n::all(),
+]);
+assert_true(str_contains($renderedProductList, I18n::t('add_to_cart')) && !str_contains($renderedProductList, '{{'), 'G12 renderer: section product list resolves parent translations');
+$renderedAccount = Template::page('account', AccountViewModel::build('login', null, ['de', 'en'], [], null, null));
+assert_true(str_contains($renderedAccount, 'name="action" value="login"') && !str_contains($renderedAccount, '{{'), 'G12 renderer: account uses theme-owned markup without unresolved directives');
+$renderedWishlist = Template::page('wishlist', [
+    'wishlist' => ['items' => [$vm['product']['relations']['related'][0]], 'action_url' => Template::storeUrl('/wishlist.php'), 'csrf_token' => Security::csrfToken()],
+    't' => I18n::all(),
+]);
+assert_true(str_contains($renderedWishlist, 'name="op" value="remove"') && !str_contains($renderedWishlist, '{{'), 'G12 renderer: wishlist uses canonical product cards without unresolved directives');
+
+$_SESSION['cart'] = [];
+$plainAdd = Cart::addValidated(9702, null, 2);
+assert_true($plainAdd['ok'] && (int)$plainAdd['item']['price'] === 990, 'G12 cart: product without variants uses canonical server price');
+$formatVariantIds = $pdo->query("SELECT id FROM variants WHERE product_id=9703 ORDER BY id")->fetchAll(PDO::FETCH_COLUMN);
+$digitalVariantId = (int)$pdo->query("SELECT id FROM variants WHERE product_id=9701 LIMIT 1")->fetchColumn();
+assert_equals('variant_required', Cart::addValidated(9703, null, 1)['error'], 'G12 cart: variant product requires a selection');
+$validVariantAdd = Cart::addValidated(9703, (int)$formatVariantIds[0], 1);
+assert_true($validVariantAdd['ok'] && (int)$validVariantAdd['item']['price'] === 1999, 'G12 cart: valid variant uses server-side absolute price');
+assert_equals('variant_invalid', Cart::addValidated(9703, $digitalVariantId, 1)['error'], 'G12 cart: variant belonging to another product is rejected');
+assert_equals('variant_invalid', Cart::addValidated(9703, 999999, 1)['error'], 'G12 cart: unknown variant is rejected');
+assert_equals('product_unavailable', Cart::addValidated(9703, (int)$formatVariantIds[1], 1)['error'], 'G12 cart: unavailable variant is rejected');
+assert_true(Cart::addValidated(9701, $digitalVariantId, 1)['ok'], 'G12 cart: stockless digital variant remains purchasable');
+Cart::clear();
+
 $pdo->exec("UPDATE products SET status='archived' WHERE id=9703");
 assert_true(Products::bySlug('vm-format') === null && Products::bySlugAnyStatus('vm-format')['status'] === 'archived', 'G12 routes: inactive lookup preserves archived-product 410 handling');
 $productStatusRouteSource = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Storefront/ProductStatusPages.php');
@@ -896,7 +928,7 @@ assert_true(str_contains($productBlockSource, 'data-review-form'), 'G12 theme bo
 $safeSectionsJson = ContentService::sanitizeSections([['id' => 'campaign', 'type' => 'campaign', 'block' => '../../src/evil.php', 'body_html' => '<p>Safe</p><script>bad()</script>', 'props' => ['layout' => 'wide', 'payload_html' => '<script>bad()</script>']]]);
 $safeSections = json_decode($safeSectionsJson, true, 32, JSON_THROW_ON_ERROR);
 assert_true(!isset($safeSections[0]['block']) && !isset($safeSections[0]['props']['payload_html']), 'G12 CMS: stored sections cannot select files or smuggle raw HTML props');
-assert_true(str_contains($safeSections[0]['body_html'], '<p>Safe</p>') && !str_contains($safeSections[0]['body_html'], '<script'), 'G12 CMS: body_html is sanitized at write boundary');
+assert_true(str_contains($safeSections[0]['content']['body_html'], '<p>Safe</p>') && !str_contains($safeSections[0]['content']['body_html'], '<script'), 'G12 CMS: body_html is sanitized at write boundary');
 
 $vmMigrationDb = new PDO('sqlite::memory:');
 $vmMigrationDb->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -906,8 +938,13 @@ $vmMigrationDb->exec("INSERT INTO product_related_products VALUES (1, 2, 7)");
 $vmMigrationDb->exec('CREATE TABLE pages (id INTEGER PRIMARY KEY)');
 $vmMigration = require TEST_CLI_DIR . '/../migrations/20260804180000_storefront_view_models.php';
 $vmMigration->up($vmMigrationDb, true);
+$pageLayoutMigration = require TEST_CLI_DIR . '/../migrations/20260804210000_storefront_page_layouts.php';
+$pageLayoutMigration->up($vmMigrationDb, true);
+$pageLayoutMigration->up($vmMigrationDb, true);
 assert_equals('related', (string)$vmMigrationDb->query('SELECT relation_type FROM product_related_products')->fetchColumn(), 'G12 migration: legacy relations are backfilled as related');
-assert_true(in_array('sections', array_column($vmMigrationDb->query('PRAGMA table_info(pages)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true), 'G12 migration: CMS sections column is added');
+$pageColumns = array_column($vmMigrationDb->query('PRAGMA table_info(pages)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+assert_true(in_array('sections', $pageColumns, true), 'G12 migration: CMS sections column is added');
+assert_true(in_array('layout', $pageColumns, true), 'G12 migration: page layout column is added idempotently');
 
 $themeFixture = sys_get_temp_dir() . '/bbe-theme-inheritance-' . getmypid();
 $themeBlocksFixture = $themeFixture . '/base-blocks';
@@ -916,9 +953,9 @@ $themeBlocksFixture = $themeFixture . '/base-blocks';
 @mkdir($themeFixture . '/default/blocks/storefront', 0770, true);
 @mkdir($themeFixture . '/child/blocks/storefront', 0770, true);
 @mkdir($themeBlocksFixture, 0770, true);
-file_put_contents($themeFixture . '/default/theme.json', json_encode(['name' => 'Parent', 'version' => '1.0.0', 'assets' => ['css' => [], 'js' => []], 'sections' => ['campaign' => 'demo/campaign']], JSON_THROW_ON_ERROR));
+file_put_contents($themeFixture . '/default/theme.json', json_encode(['name' => 'Parent', 'version' => '1.0.0', 'assets' => ['css' => [], 'js' => []], 'sections' => ['product-page' => 'storefront/product-page', 'campaign' => 'demo/campaign']], JSON_THROW_ON_ERROR));
 file_put_contents($themeFixture . '/child/theme.json', json_encode(['name' => 'Child', 'version' => '1.0.0', 'parent' => 'default', 'assets' => ['css' => [], 'js' => []]], JSON_THROW_ON_ERROR));
-file_put_contents($themeFixture . '/default/layouts.json', json_encode(['layouts' => ['storefront' => ['slots' => ['full']]], 'pages' => ['product' => ['layout' => 'storefront', 'sections' => [['block' => 'storefront/product-page']]], 'campaign' => ['layout' => 'storefront', 'sections' => []]]], JSON_THROW_ON_ERROR));
+file_put_contents($themeFixture . '/default/layouts.json', json_encode(['layouts' => ['storefront' => ['slots' => ['full']]], 'pages' => ['product' => ['layout' => 'storefront', 'sections' => [['block' => 'product-page']]], 'campaign' => ['layout' => 'storefront', 'sections' => []]]], JSON_THROW_ON_ERROR));
 file_put_contents($themeFixture . '/child/layouts.json', json_encode(['pages' => ['campaign' => ['sections' => [['type' => 'campaign']]]]], JSON_THROW_ON_ERROR));
 file_put_contents($themeFixture . '/default/blocks/layout/storefront.html', '{{{slots.full}}}');
 file_put_contents($themeFixture . '/default/blocks/storefront/product-page.html', 'parent-product');

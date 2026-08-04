@@ -1,1 +1,1 @@
-{{#if children_html}}<div class="nav-item"><a href="{{url}}">{{label}}</a><div class="nav-dropdown">{{{children_html}}}</div></div>{{else}}<a href="{{url}}">{{label}}</a>{{/if}}
+{{#if children}}<div class="nav-item"><a href="{{url}}">{{label}}</a><div class="nav-dropdown">{{#each children}}<a href="{{url}}">{{label}}</a>{{/each}}</div></div>{{else}}<a href="{{url}}">{{label}}</a>{{/if}}

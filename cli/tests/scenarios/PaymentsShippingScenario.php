@@ -750,8 +750,8 @@ assert_true(str_contains($adminOrdersListSnippet, "foreach (['reason', 'actor', 
 assert_true(str_contains($adminOrdersListSnippet, 'Refund unavailable for current payment status.'), 'Payment admin: order detail explains refund ineligible state');
 assert_true(in_array('refund_pending', PaymentService::paymentStatuses(), true), 'Payment admin: payment status filter includes refund_pending');
 
-$accountOrdersSnippet = file_get_contents(TEST_CLI_DIR . '/../account.php') ?: '';
-assert_true(str_contains($accountOrdersSnippet, '$paymentRef = $tx[\'provider_ref\']'), 'Payment account: order payment history includes provider reference');
+$accountOrdersSnippet = file_get_contents(TEST_CLI_DIR . '/../src/AccountViewModel.php') ?: '';
+assert_true(str_contains($accountOrdersSnippet, "'reference' => (string)(\$transaction['provider_ref'] ?? '')"), 'Payment account: order payment history includes provider reference');
 
 // ============================================================
 // SHIPPING TESTS

@@ -1,1 +1,1 @@
-<div class="breadcrumb">{{#each items}}{{#if @first}}{{else}} &rsaquo; {{/if}}{{#if current}}{{label}}{{else}}<a href="{{url}}">{{label}}</a>{{/if}}{{/each}}</div>
+<nav class="breadcrumb" aria-label="Breadcrumb"><ol>{{#each breadcrumbs}}<li>{{#if current}}<span aria-current="page">{{label}}</span>{{else}}<a href="{{url}}">{{label}}</a>{{/if}}</li>{{/each}}</ol></nav>

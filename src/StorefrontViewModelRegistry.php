@@ -8,7 +8,7 @@ final class StorefrontViewModelRegistry
     public static function register(string $context, string $namespace, callable $provider): void
     {
         self::assertSlug($context, 'view-model context');
-        self::assertSlug($namespace, 'extension namespace');
+        self::assertNamespace($namespace);
         self::$providers[$context][$namespace] = $provider;
     }
 
@@ -21,7 +21,11 @@ final class StorefrontViewModelRegistry
             if (!is_array($value)) {
                 throw new UnexpectedValueException("Storefront extension {$namespace} must return an array");
             }
-            if ($value !== []) $extensions[$namespace] = $value;
+            if ($value === []) continue;
+            $target =& $extensions;
+            foreach (explode('.', $namespace) as $segment) $target =& $target[$segment];
+            $target = $value;
+            unset($target);
         }
         return $extensions;
     }
@@ -40,6 +44,13 @@ final class StorefrontViewModelRegistry
     {
         if (!preg_match('/^[a-z][a-z0-9_-]{0,79}$/', $value)) {
             throw new InvalidArgumentException("Invalid {$label}");
+        }
+    }
+
+    private static function assertNamespace(string $value): void
+    {
+        if (!preg_match('/^[a-z][a-z0-9_-]{0,39}(?:\.[a-z][a-z0-9_-]{0,39})*$/', $value)) {
+            throw new InvalidArgumentException('Invalid extension namespace');
         }
     }
 }

@@ -1,12 +1,12 @@
 <a class="skip-link" href="#main-content">{{t.skip_to_content}}</a>
 <header>
   <div class="header-top"><div class="wrap">
-    <div class="lang-switch">{{{language_links_html}}}</div>
+    <div class="lang-switch">{{#each language_links}}<a href="{{url}}"{{#if active}} class="active"{{/if}}>{{label}}</a>{{/each}}</div>
     <a href="{{account_url}}" title="{{account_label}}">{{account_label}}</a>
-    <a href="{{cart_url}}" class="cart-icon" title="{{t.cart}}">&#128722;{{{cart_badge_html}}}</a>
+    <a href="{{cart_url}}" class="cart-icon" title="{{t.cart}}">&#128722;{{#if cart_count}}<span class="cart-badge">{{cart_count}}</span>{{/if}}</a>
   </div></div>
   <div class="header-main"><div class="wrap">
-    <div class="logo"><a href="{{home_url}}">{{shop_name}}</a></div>
+    <div class="logo"><a href="{{home_url}}">{{#if brand.logo_url}}<img src="{{brand.logo_url}}" alt="{{brand.name}}">{{else}}{{brand.name}}{{/if}}</a></div>
     <form class="search-bar" method="get" action="{{home_url}}">
       <input type="hidden" name="page" value="search">
       <input type="search" name="q" placeholder="{{t.search_placeholder}}" value="{{search_query}}">
@@ -14,6 +14,6 @@
     </form>
   </div></div>
   <nav class="header-nav" aria-label="{{t.categories}}"><div class="wrap">
-    <a href="{{home_url}}">{{t.home}}</a>{{{navigation_html}}}
+    <a href="{{home_url}}">{{t.home}}</a>{{#each navigation}}{{> storefront/navigation-link}}{{/each}}
   </div></nav>
 </header>

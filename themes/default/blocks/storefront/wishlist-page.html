@@ -1,0 +1,22 @@
+<section class="wishlist-page">
+  <h1>{{t.wishlist.title}}</h1>
+  {{#if wishlist.items}}
+  <ul class="wishlist-grid" data-wishlist>
+    {{#each wishlist.items}}
+    <li class="wishlist-item" data-product-id="{{id}}">
+      <a href="{{url}}" class="wishlist-link">
+        {{#if image}}<img src="{{image.thumbnail_url}}" alt="{{image.alt}}" loading="lazy">{{/if}}
+        <span class="wishlist-name">{{name}}</span>
+      </a>
+      <span class="wishlist-price">{{price.formatted}}</span>
+      <form method="post" action="{{../wishlist.action_url}}" class="wishlist-remove-form" data-wishlist-remove data-product-id="{{id}}">
+        <input type="hidden" name="csrf_token" value="{{../wishlist.csrf_token}}">
+        <input type="hidden" name="op" value="remove">
+        <input type="hidden" name="product_id" value="{{id}}">
+        <button type="submit" class="btn btn-secondary btn-sm">{{../t.wishlist.remove}}</button>
+      </form>
+    </li>
+    {{/each}}
+  </ul>
+  {{else}}<p class="wishlist-empty">{{t.wishlist.empty}}</p>{{/if}}
+</section>
