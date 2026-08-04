@@ -60,6 +60,33 @@ class ContentService {
         return $page;
     }
 
+    /** Validate data-only CMS sections; file paths and executable content are never accepted. */
+    public static function sanitizeSections(mixed $value): string {
+        if (is_string($value)) {
+            $value = trim($value);
+            if ($value === '') return '[]';
+            $value = json_decode($value, true, 32, JSON_THROW_ON_ERROR);
+        }
+        if (!is_array($value) || count($value) > 100) throw new InvalidArgumentException('Invalid CMS sections');
+        $sections = [];
+        foreach (array_values($value) as $index => $section) {
+            if (!is_array($section)) throw new InvalidArgumentException('Invalid CMS section');
+            $type = self::code((string)($section['type'] ?? ''), 'section type');
+            $sections[] = [
+                'id' => self::code((string)($section['id'] ?? 'section-' . $index), 'section id'),
+                'type' => $type,
+                'variant' => self::code((string)($section['variant'] ?? 'default'), 'section variant'),
+                'heading' => self::optionalText((string)($section['heading'] ?? ''), 500),
+                'body_html' => Security::sanitizeRichHtml((string)($section['body_html'] ?? '')),
+                'media' => self::sectionData((array)($section['media'] ?? [])),
+                'cta' => self::sectionData((array)($section['cta'] ?? [])),
+                'items' => self::safeSectionData((array)($section['items'] ?? [])),
+                'props' => self::safeSectionData((array)($section['props'] ?? [])),
+            ];
+        }
+        return json_encode($sections, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    }
+
     public static function redirect(string $sourcePath): ?array {
         $sourcePath = self::path($sourcePath, 'source path');
         try {
@@ -147,6 +174,7 @@ class ContentService {
             'template' => self::code((string)($input['template'] ?? 'cms'), 'page template'),
             'seo_title' => self::optionalText((string)($input['seo_title'] ?? ''), 191),
             'meta_description' => self::optionalText((string)($input['meta_description'] ?? ''), 320),
+            'sections' => self::sanitizeSections($input['sections'] ?? []),
         ];
         return self::saveRow('pages', $id, $data, 'content_landing_page');
     }
@@ -232,6 +260,26 @@ class ContentService {
         if (str_starts_with($value, '/') && !str_starts_with($value, '//') && !preg_match('/[\x00-\x1F\x7F]/', $value)) return $value;
         if ($allowAbsolute && filter_var($value, FILTER_VALIDATE_URL) && strtolower((string)parse_url($value, PHP_URL_SCHEME)) === 'https') return $value;
         throw new InvalidArgumentException('URL must be a local path' . ($allowAbsolute ? ' or HTTPS URL' : ''));
+    }
+
+    private static function sectionData(array $data): array {
+        $result = self::safeSectionData($data);
+        foreach ($result as $key => $item) {
+            if (!is_string($item) || !str_ends_with((string)$key, 'url') || $item === '') continue;
+            $result[$key] = self::url($item, true, true);
+        }
+        return $result;
+    }
+
+    private static function safeSectionData(array $data): array {
+        $result = [];
+        foreach ($data as $key => $value) {
+            if (!is_int($key) && (!is_string($key) || !preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}$/', $key))) continue;
+            if (is_string($key) && str_ends_with($key, '_html')) continue;
+            if (is_array($value)) $result[$key] = self::safeSectionData($value);
+            elseif (is_scalar($value) || $value === null) $result[$key] = is_string($value) ? trim($value) : $value;
+        }
+        return $result;
     }
 
     private static function missingTable(PDOException $e): bool {

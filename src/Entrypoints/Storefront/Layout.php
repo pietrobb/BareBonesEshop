@@ -37,6 +37,11 @@ foreach ($hreflangs as $locale => $prefix) {
 echo '<link rel="alternate" hreflang="x-default" href="' . $e(Template::url($hreflangData['xDefaultPrefix'] . $pathNoPrefix)) . '">' . "\n";
 if ($jsonLd !== '') echo $jsonLd . "\n";
 $seoHead = ob_get_clean();
+$viewModel = $GLOBALS['storefront_view_model'] ?? null;
+if (is_array($viewModel) && is_array($viewModel['page']['seo'] ?? null)) {
+    $seoHead = Template::viewModelSeoHead($viewModel, $title);
+    if ($jsonLd !== '') $seoHead .= "\n" . $jsonLd;
+}
 
 $languageLinksHtml = '';
 foreach ($hreflangs as $locale => $prefix) {

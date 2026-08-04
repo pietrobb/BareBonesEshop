@@ -1,0 +1,39 @@
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <ol>{{#each page.breadcrumbs}}<li>{{#if current}}<span aria-current="page">{{label}}</span>{{else}}<a href="{{url}}">{{label}}</a>{{/if}}</li>{{/each}}</ol>
+</nav>
+<article class="product-detail">
+  <div class="product-detail__gallery">
+    {{#if product.images.0.url}}<img src="{{product.images.0.url}}" alt="{{product.images.0.alt}}" class="product-detail__hero">{{/if}}
+    {{#if product.images.length > 1}}<div class="product-detail__thumbs">{{#each product.images}}<button class="product-detail__thumb" type="button" data-image="{{url}}"><img src="{{thumbnail_url}}" alt="{{alt}}" loading="lazy"></button>{{/each}}</div>{{/if}}
+  </div>
+  <div class="product-detail__info">
+    <h1>{{product.name}}</h1>
+    <p class="muted">SKU: {{product.sku}}</p>
+    <div class="price">{{product.price.formatted}}{{#if product.price.compare_formatted}} <span class="old-price">{{product.price.compare_formatted}}</span>{{/if}}</div>
+    {{#if product.summary}}<p>{{product.summary}}</p>{{/if}}
+    <p class="product-detail__stock">{{product.availability.label}}{{#if product.availability.tracks_stock}} ({{product.availability.quantity}}){{/if}}</p>
+    {{#if product.availability.purchasable}}<div class="product-detail__actions"><input type="number" value="1" min="1" class="qty-input" id="qty-{{product.id}}"><button class="btn-cart btn-cart-lg" type="button" data-storefront-action="cart-add" data-product-id="{{product.id}}" data-quantity-input="qty-{{product.id}}">{{t.add_to_cart}}</button></div>{{/if}}
+    {{#if extensions.wishlist}}<form class="wishlist-toggle-form" method="post" action="{{extensions.wishlist.toggle_url}}"><input type="hidden" name="csrf_token" value="{{extensions.wishlist.csrf_token}}"><input type="hidden" name="op" value="toggle"><input type="hidden" name="return_to" value="{{extensions.wishlist.return_url}}"><input type="hidden" name="product_id" value="{{product.id}}"><button type="submit" class="btn btn-secondary" aria-pressed="{{extensions.wishlist.active}}">{{extensions.wishlist.label}}</button></form>{{/if}}
+  </div>
+</article>
+{{#if product.description_html}}<section class="product-description"><h2>{{t.description}}</h2>{{{product.description_html}}}</section>{{/if}}
+{{#if product.attributes}}<section class="product-attributes"><h2>{{t.specs}}</h2><table class="spec-table"><tbody>{{#each product.attributes}}<tr><th scope="row">{{label}}</th><td>{{value}}</td></tr>{{/each}}</tbody></table></section>{{/if}}
+{{#if product.variants}}<section class="product-variants"><h2>{{t.variants}}</h2>{{#each product.variants}}<label><input type="radio" name="variant" value="{{id}}" {{#if @first}}checked{{/if}} {{#if availability.purchasable}}{{else}}disabled{{/if}}> {{name}} — {{availability.label}}</label>{{/each}}</section>{{/if}}
+{{#if extensions.automotive}}<section class="product-automotive"><h2>{{t.compatible_with}}</h2>{{#if extensions.automotive.oe_numbers}}<h3>{{t.oe_numbers}}</h3><ul>{{#each extensions.automotive.oe_numbers}}<li><a href="{{url}}">{{brand}} {{number}}</a></li>{{/each}}</ul>{{/if}}{{#if extensions.automotive.vehicles}}<h3>{{t.vehicles_tab}}</h3><table><tbody>{{#each extensions.automotive.vehicles}}<tr><td>{{manufacturer}} {{model}}</td><td>{{type}}</td></tr>{{/each}}</tbody></table>{{/if}}</section>{{/if}}
+{{#if extensions.reviews}}<section class="reviews" id="reviews">
+  <h2>{{extensions.reviews.title}}</h2>
+  {{#if extensions.reviews.count}}<p><strong>{{extensions.reviews.average}}</strong> / 5 ({{extensions.reviews.count}})</p>{{else}}<p>{{extensions.reviews.empty_label}}</p>{{/if}}
+  {{#each extensions.reviews.items}}<article class="review"><header><strong>{{author_name}}</strong> <span>{{rating}} / 5</span></header>{{#if title}}<h3>{{title}}</h3>{{/if}}<p>{{body}}</p></article>{{/each}}
+  <form class="review-form" method="post" action="{{extensions.reviews.submit_url}}" data-review-form data-success-label="{{extensions.reviews.success_label}}" data-error-label="{{extensions.reviews.error_label}}">
+    <h3>{{extensions.reviews.form_title}}</h3>
+    <input type="hidden" name="csrf_token" value="{{extensions.reviews.csrf_token}}">
+    <input type="hidden" name="product_id" value="{{product.id}}">
+    <label>{{extensions.reviews.rating_label}}<select name="rating" required><option value="5">5</option><option value="4">4</option><option value="3">3</option><option value="2">2</option><option value="1">1</option></select></label>
+    {{#if extensions.reviews.requires_author}}<label>{{extensions.reviews.author_label}}<input type="text" name="author_name" maxlength="80" required></label>{{/if}}
+    <label>{{extensions.reviews.review_title_label}}<input type="text" name="title" maxlength="150"></label>
+    <label>{{extensions.reviews.body_label}}<textarea name="body" rows="4" minlength="3" maxlength="2000" required></textarea></label>
+    <button type="submit" class="btn btn-primary">{{extensions.reviews.submit_label}}</button>
+    <p class="review-form-msg" data-review-msg hidden></p>
+  </form>
+</section>{{/if}}
+{{#if product.relations.related}}<section class="related-products"><h2>{{t.related_products}}</h2><div class="grid grid-4">{{#each product.relations.related}}<article class="card"><a href="{{url}}">{{#if image.url}}<img class="card-img" src="{{image.thumbnail_url}}" alt="{{image.alt}}" loading="lazy">{{/if}}<h3>{{name}}</h3><div class="price">{{price.formatted}}</div><div class="badge">{{availability.label}}</div></a></article>{{/each}}</div></section>{{/if}}

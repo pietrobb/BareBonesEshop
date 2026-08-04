@@ -247,6 +247,8 @@ $pdo->exec("CREATE INDEX IF NOT EXISTS idx_cat_path ON categories(path)");
 $pdo->exec("CREATE TABLE IF NOT EXISTS pages (
     id INTEGER PRIMARY KEY, slug TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
     body TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', translations TEXT DEFAULT '{}',
+    page_type TEXT NOT NULL DEFAULT 'content', template TEXT NOT NULL DEFAULT 'cms', sections TEXT NOT NULL DEFAULT '[]',
+    seo_title TEXT NOT NULL DEFAULT '', meta_description TEXT NOT NULL DEFAULT '',
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
 )");
 
@@ -268,12 +270,13 @@ try { $pdo->exec("ALTER TABLE products ADD COLUMN vat_class TEXT DEFAULT 'standa
 $pdo->exec("CREATE TABLE IF NOT EXISTS product_related_products (
     product_id INTEGER NOT NULL,
     related_product_id INTEGER NOT NULL,
+    relation_type TEXT NOT NULL DEFAULT 'related',
     sort_order INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (product_id, related_product_id),
+    PRIMARY KEY (product_id, related_product_id, relation_type),
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
     FOREIGN KEY (related_product_id) REFERENCES products(id) ON DELETE CASCADE
 )");
-$pdo->exec("CREATE INDEX IF NOT EXISTS idx_product_related_sort ON product_related_products(product_id, sort_order)");
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_product_related_sort ON product_related_products(product_id, relation_type, sort_order)");
 
 $pdo->exec("CREATE VIRTUAL TABLE IF NOT EXISTS products_fts USING fts5(
     name, sku, summary, tags, filter_tags,
@@ -727,10 +730,12 @@ assert_true(str_contains($workerSourceG4, '$template !== \'cart_reminder\''), 'G
 $mailSourceG4 = file_get_contents(TEST_CLI_DIR . '/../src/MailService.php') ?: '';
 assert_true(!str_contains($mailSourceG4, "SERVER_NAME"), 'G4: mail sender does not trust the request host');
 assert_true(str_contains($mailSourceG4, "FILTER_VALIDATE_EMAIL"), 'G4: sender, recipient and reply-to are validated');
-foreach (['api.php', 'index.php', 'product.php', 'wishlist.php'] as $customerEntrypoint) {
+foreach (['api.php', 'index.php', 'wishlist.php'] as $customerEntrypoint) {
     $entrySource = entrypointSource($customerEntrypoint);
     assert_true(str_contains($entrySource, 'Customers::isLoggedIn();'), "G4: {$customerEntrypoint} validates stale customer sessions");
 }
+$productEntrypoint = entrypointSource('product.php');
+assert_true(str_contains($productEntrypoint, "src/Entrypoints/Storefront.php"), 'G4: product.php delegates session validation to the canonical storefront');
 $apiSourceG5 = entrypointSource('api.php');
 $indexSourceG5 = entrypointSource('index.php');
 foreach (['checkout_global', 'checkout_session_', 'checkout_subject_', 'Security::rotateCsrfToken()'] as $checkoutGuard) {

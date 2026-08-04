@@ -1,0 +1,7 @@
+<section id="{{id}}" class="section section--categories section--{{variant}}">
+  {{#if heading}}<h2 class="section-title">{{heading}}</h2>{{/if}}
+  {{#if body_html}}<div>{{{body_html}}}</div>{{/if}}
+  <div class="grid grid-3">
+    {{#each items}}<a href="{{url}}" class="cat-card"><span>{{name}}</span><span class="count">{{count}}</span></a>{{/each}}
+  </div>
+</section>

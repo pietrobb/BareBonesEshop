@@ -1,0 +1,17 @@
+<section id="{{id}}" class="section section--products section--{{variant}}">
+  {{#if heading}}<h2 class="section-title">{{heading}}</h2>{{/if}}
+  {{#if body_html}}<div>{{{body_html}}}</div>{{/if}}
+  <div class="grid grid-4">
+    {{#each items}}
+    <article class="card">
+      <a href="{{url}}">
+        {{#if image.url}}<img class="card-img" src="{{image.thumbnail_url}}" alt="{{image.alt}}" loading="lazy">{{/if}}
+        <h3>{{name}}</h3>
+        <div class="price">{{price.formatted}}{{#if price.compare_formatted}}<span class="old-price">{{price.compare_formatted}}</span>{{/if}}</div>
+        <div class="badge">{{availability.label}}</div>
+      </a>
+      {{#if availability.purchasable}}<button class="btn-cart" type="button" data-storefront-action="cart-add" data-product-id="{{id}}" data-quantity="1">{{../t.add_to_cart}}</button>{{/if}}
+    </article>
+    {{/each}}
+  </div>
+</section>

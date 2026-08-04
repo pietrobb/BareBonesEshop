@@ -7,6 +7,12 @@
     "css": ["accessibility.css", "storefront.css"],
     "js": ["storefront.js"]
   },
+  "sections": {
+    "hero": "storefront/section-hero",
+    "category-list": "storefront/section-category-list",
+    "product-list": "storefront/section-product-list",
+    "rich-text": "storefront/section-rich-text"
+  },
   "performance_budgets": {
     "css_bytes": 153600,
     "js_bytes": 102400,

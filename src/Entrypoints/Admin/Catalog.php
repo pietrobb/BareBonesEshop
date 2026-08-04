@@ -95,9 +95,10 @@ function pageProduct(): void {
     $categories = $db->query("SELECT id, name, path FROM categories ORDER BY path")->fetchAll();
     $relatedProductIds = [];
     $relatedCandidates = [];
+    $relationType = Security::slug((string)($_GET['relation_type'] ?? 'related')) ?: 'related';
     if ($id) {
-        $relatedStmt = $db->prepare("SELECT related_product_id FROM product_related_products WHERE product_id = :id ORDER BY sort_order");
-        $relatedStmt->execute([':id' => $id]);
+        $relatedStmt = $db->prepare("SELECT related_product_id FROM product_related_products WHERE product_id = :id AND relation_type = :type ORDER BY sort_order");
+        $relatedStmt->execute([':id' => $id, ':type' => $relationType]);
         $relatedProductIds = array_map('intval', $relatedStmt->fetchAll(PDO::FETCH_COLUMN));
 
         $candidateStmt = $db->prepare("SELECT id, sku, name, product_type FROM products WHERE status = 'active' AND id != :id ORDER BY product_type, name");
@@ -224,7 +225,11 @@ function pageProduct(): void {
             <form method="post" action="admin.php?p=product&id=<?= (int)$product['id'] ?>&action=related_save">
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                 <div class="form-row">
-                    <label>Ručne vybrané odporúčania</label>
+                    <label>Typ vzťahu</label>
+                    <input name="relation_type" value="<?= esc($relationType) ?>" pattern="[a-z][a-z0-9_-]{0,79}" required>
+                </div>
+                <div class="form-row">
+                    <label>Ručne vybrané produkty pre tento typ</label>
                     <select name="related_product_ids[]" multiple size="8" style="width:100%">
                         <?php foreach ($relatedCandidates as $candidate): ?>
                         <option value="<?= (int)$candidate['id'] ?>" <?= in_array((int)$candidate['id'], $relatedProductIds, true) ? 'selected' : '' ?>>
@@ -562,6 +567,9 @@ function pageCmsEdit(): void {
             'slug'     => $pg['slug'] ?? '',
             'title'    => $pg['title'] ?? '',
             'body'     => $pg['body'] ?? '',
+            'page_type' => $pg['page_type'] ?? 'content',
+            'template' => $pg['template'] ?? 'cms',
+            'sections' => $pg['sections'] ?? '[]',
             'status'   => $pg['status'] ?? 'active',
         ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
         ?>
@@ -592,6 +600,15 @@ function handleCmsPageSave(): void {
     $slug = Security::slug($_POST['slug'] ?? '');
     $title = trim($_POST['title'] ?? '');
     $body = Security::sanitizeRichHtml((string)($_POST['body'] ?? ''));
+    $pageType = Security::slug((string)($_POST['page_type'] ?? 'content')) ?: 'content';
+    $template = Security::slug((string)($_POST['template'] ?? 'cms')) ?: 'cms';
+    try {
+        $sections = ContentService::sanitizeSections($_POST['sections'] ?? '[]');
+    } catch (JsonException | InvalidArgumentException $e) {
+        setFlash('err', 'Sekcie musia byť platné bezpečné JSON pole.');
+        header("Location: admin.php?p=page_edit&id={$id}");
+        exit;
+    }
     $status = in_array($_POST['status'] ?? '', ['active', 'draft']) ? $_POST['status'] : 'active';
 
     if (!$slug || !$title) {
@@ -601,12 +618,12 @@ function handleCmsPageSave(): void {
     }
 
     if ($id) {
-        $db->prepare("UPDATE pages SET slug = :slug, title = :title, body = :body, status = :status, updated_at = {$now} WHERE id = :id")
-           ->execute([':slug' => $slug, ':title' => $title, ':body' => $body, ':status' => $status, ':id' => $id]);
+        $db->prepare("UPDATE pages SET slug = :slug, title = :title, body = :body, page_type = :page_type, template = :template, sections = :sections, status = :status, updated_at = {$now} WHERE id = :id")
+           ->execute([':slug' => $slug, ':title' => $title, ':body' => $body, ':page_type' => $pageType, ':template' => $template, ':sections' => $sections, ':status' => $status, ':id' => $id]);
         setFlash('ok', 'Stránka aktualizovaná.');
     } else {
-        $db->prepare("INSERT INTO pages (slug, title, body, status) VALUES (:slug, :title, :body, :status)")
-           ->execute([':slug' => $slug, ':title' => $title, ':body' => $body, ':status' => $status]);
+        $db->prepare("INSERT INTO pages (slug, title, body, page_type, template, sections, status) VALUES (:slug, :title, :body, :page_type, :template, :sections, :status)")
+           ->execute([':slug' => $slug, ':title' => $title, ':body' => $body, ':page_type' => $pageType, ':template' => $template, ':sections' => $sections, ':status' => $status]);
         $id = (int)$db->lastInsertId();
         setFlash('ok', 'Stránka vytvorená.');
     }
@@ -708,6 +725,8 @@ function handleProductRelatedSave(): void {
         exit;
     }
 
+    $relationType = strtolower(trim((string)($_POST['relation_type'] ?? 'related')));
+    if (!preg_match('/^[a-z][a-z0-9_-]{0,79}$/', $relationType)) throw new InvalidArgumentException('Invalid product relation type');
     $submitted = $_POST['related_product_ids'] ?? [];
     if (!is_array($submitted)) $submitted = [];
     $selected = array_values(array_unique(array_filter(
@@ -719,10 +738,10 @@ function handleProductRelatedSave(): void {
 
     $db->beginTransaction();
     try {
-        $db->prepare('DELETE FROM product_related_products WHERE product_id = :id')->execute([':id' => $id]);
-        $insert = $db->prepare('INSERT INTO product_related_products (product_id, related_product_id, sort_order) VALUES (:id, :related, :sort)');
+        $db->prepare('DELETE FROM product_related_products WHERE product_id = :id AND relation_type = :type')->execute([':id' => $id, ':type' => $relationType]);
+        $insert = $db->prepare('INSERT INTO product_related_products (product_id, related_product_id, relation_type, sort_order) VALUES (:id, :related, :type, :sort)');
         foreach ($selected as $sort => $relatedId) {
-            $insert->execute([':id' => $id, ':related' => $relatedId, ':sort' => $sort]);
+            $insert->execute([':id' => $id, ':related' => $relatedId, ':type' => $relationType, ':sort' => $sort]);
         }
         $db->commit();
     } catch (Throwable $e) {
@@ -730,8 +749,8 @@ function handleProductRelatedSave(): void {
         throw $e;
     }
 
-    setFlash('ok', 'Súvisiace produkty boli uložené.');
-    header("Location: admin.php?p=product&id={$id}");
+    setFlash('ok', 'Produktové vzťahy boli uložené.');
+    header("Location: admin.php?p=product&id={$id}&relation_type=" . rawurlencode($relationType));
     exit;
 }
 function handleProductSave(): void {

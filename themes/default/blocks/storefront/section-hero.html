@@ -1,0 +1,8 @@
+<section class="hero hero--{{variant}}" id="{{id}}">
+  {{#if media.image_url}}<img src="{{media.image_url}}" alt="{{media.alt}}" width="1920" height="600">{{/if}}
+  <div class="hero-overlay">
+    {{#if heading}}<h1>{{heading}}</h1>{{/if}}
+    {{#if body_html}}<div>{{{body_html}}}</div>{{/if}}
+    {{#if cta.url}}<a href="{{cta.url}}" class="btn-hero">{{cta.label}}</a>{{/if}}
+  </div>
+</section>

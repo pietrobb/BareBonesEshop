@@ -1,5 +1,5 @@
 <?php
-/** Store-scoped CMS/landing page rendered through the active theme package. */
+/** Store-scoped CMS page rendered from a canonical model by the active theme. */
 require_once __DIR__ . '/src/autoload.php';
 
 Security::headers();
@@ -15,20 +15,16 @@ if (!$page) {
     exit;
 }
 
-$cfg = require __DIR__ . '/config.php';
-$store = StoreContext::current();
-$title = trim((string)($page['seo_title'] ?? '')) ?: (string)$page['title'];
-$documentTitle = $title . ' — ' . ($cfg['shop_name'] ?? $store->config()['name'] ?? 'BareBones Shop');
-$body = Security::sanitizeRichHtml((string)($page['body'] ?? ''));
-$description = trim((string)($page['meta_description'] ?? '')) ?: mb_substr(trim(strip_tags($body)), 0, 320);
-$prefix = rtrim((string)($store->config()['url_prefix'] ?? ''), '/');
-$path = $prefix . '/page/' . rawurlencode((string)$page['slug']);
+$model = StorefrontViewModel::cmsPage($page);
+$template = (string)$model['page']['template'];
+if (!isset(Template::loadLayouts()['pages'][$template])) $template = 'cms';
+$content = Template::page($template, $model);
+$seo = $model['page']['seo'];
 $cartCount = 0;
 foreach ((array)$_SESSION['cart'] as $quantity) $cartCount += max(0, (int)$quantity);
+$shopName = (string)(StoreContext::current()->config()['name'] ?? 'BareBones Shop');
 
-$content = '<article class="cms-content cms-content--' . esc((string)($page['page_type'] ?? 'content')) . '">'
-    . '<h1>' . esc((string)$page['title']) . '</h1>' . $body . '</article>';
-echo Template::document($documentTitle, $content, [
-    'seo_head' => Seo::head($title, $description, $path, ($page['status'] ?? '') === 'active'),
+echo Template::document((string)$seo['title'] . ' — ' . $shopName, $content, [
+    'seo_head' => Template::viewModelSeoHead($model, (string)$seo['title']),
     'cart' => ['count' => $cartCount],
 ]);

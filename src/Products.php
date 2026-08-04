@@ -29,6 +29,24 @@ class Products {
         return $stmt->fetch() ?: null;
     }
 
+    /** Resolve an inactive product for canonical 404/410 handling. */
+    public static function bySlugAnyStatus(string $slug): ?array {
+        $db = Db::get();
+        $store = StoreContext::current()->catalogId();
+        $stmt = $db->prepare('SELECT * FROM products WHERE slug = :slug AND store_id = :store LIMIT 1');
+        $stmt->execute([':slug' => $slug, ':store' => $store]);
+        $product = $stmt->fetch();
+        if ($product) return $product;
+
+        $stmt = $db->prepare("SELECT p.* FROM slug_registry sr
+            JOIN products p ON p.id = sr.entity_id
+            WHERE sr.slug = :slug AND sr.entity = 'product'
+              AND sr.store_id = :store AND p.store_id = :store
+            LIMIT 1");
+        $stmt->execute([':slug' => $slug, ':store' => $store]);
+        return $stmt->fetch() ?: null;
+    }
+
     /**
      * Get product by ID
      */
@@ -217,7 +235,10 @@ class Products {
                 WHERE pc.product_id = :product AND p.store_id = :store
                 ORDER BY pc.is_primary DESC, pc.sort_order, pc.category_id");
             $stmt->execute([':product' => $productId, ':store' => StoreContext::current()->catalogId()]);
-            return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+            $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+            if ($ids !== []) return $ids;
+            $product = self::byId($productId);
+            return $product && !empty($product['category_id']) ? [(int)$product['category_id']] : [];
         } catch (PDOException $e) {
             $product = self::byId($productId);
             return $product && !empty($product['category_id']) ? [(int)$product['category_id']] : [];
@@ -277,21 +298,41 @@ class Products {
         return $stmt->fetchAll();
     }
 
-    /**
-     * Products selected by an administrator for this product.
-     */
+    /** Products selected by an administrator under the conventional related relation. */
     public static function curatedRelated(int $productId, int $limit = 4): array {
+        return self::relatedByType($productId, 'related', $limit);
+    }
+
+    /** Active target products for one safe, arbitrary relation type. */
+    public static function relatedByType(int $productId, string $relationType, int $limit = 100): array {
+        self::assertRelationType($relationType);
         $stmt = Db::get()->prepare("
             SELECT p.*
             FROM product_related_products pr
             JOIN products p ON p.id = pr.related_product_id
-            WHERE pr.product_id = :id AND p.store_id = :store AND p.status = 'active'
+            WHERE pr.product_id = :id AND pr.relation_type = :type
+              AND p.store_id = :store AND p.status = 'active'
               AND EXISTS (SELECT 1 FROM products source WHERE source.id = pr.product_id AND source.store_id = :store)
             ORDER BY pr.sort_order, pr.related_product_id
             LIMIT :limit
         ");
-        $stmt->execute([':id' => $productId, ':store' => StoreContext::current()->catalogId(), ':limit' => $limit]);
-        return $stmt->fetchAll();
+        $stmt->execute([':id' => $productId, ':type' => $relationType, ':store' => StoreContext::current()->catalogId(), ':limit' => max(1, min(500, $limit))]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** All typed relations, including metadata used to group canonical card models. */
+    public static function typedRelations(int $productId, int $limit = 500): array {
+        $stmt = Db::get()->prepare("
+            SELECT p.*, pr.relation_type, pr.sort_order AS relation_sort_order
+            FROM product_related_products pr
+            JOIN products p ON p.id = pr.related_product_id
+            WHERE pr.product_id = :id AND p.store_id = :store AND p.status = 'active'
+              AND EXISTS (SELECT 1 FROM products source WHERE source.id = pr.product_id AND source.store_id = :store)
+            ORDER BY pr.relation_type, pr.sort_order, pr.related_product_id
+            LIMIT :limit
+        ");
+        $stmt->execute([':id' => $productId, ':store' => StoreContext::current()->catalogId(), ':limit' => max(1, min(1000, $limit))]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /**
@@ -586,6 +627,9 @@ class Products {
                 $categoryId = (int)$row['category_id'];
                 if (!in_array($categoryId, $result[$productId], true)) $result[$productId][] = $categoryId;
             }
+            foreach ($productRows as $productId => $product) {
+                if ($result[$productId] === [] && !empty($product['category_id'])) $result[$productId] = [(int)$product['category_id']];
+            }
         } catch (PDOException $e) {
             foreach ($productRows as $productId => $product) {
                 if (!empty($product['category_id'])) $result[$productId] = [(int)$product['category_id']];
@@ -643,5 +687,11 @@ class Products {
 
     private static function normalizeToken(string $s): string {
         return Str::normalizeToken($s);
+    }
+
+    private static function assertRelationType(string $type): void {
+        if (!preg_match('/^[a-z][a-z0-9_-]{0,79}$/', $type)) {
+            throw new InvalidArgumentException('Invalid product relation type');
+        }
     }
 }

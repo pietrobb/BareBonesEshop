@@ -61,6 +61,42 @@
     setTimeout(() => { button.disabled = false; button.textContent = original; }, 1200);
   }
 
+  function bindReviewForm() {
+    const form = document.querySelector('[data-review-form]');
+    if (!form) return;
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const button = form.querySelector('[type="submit"]');
+      const message = form.querySelector('[data-review-msg]');
+      if (button) button.disabled = true;
+      const data = Object.fromEntries(new FormData(form));
+      const csrfToken = String(data.csrf_token || '');
+      delete data.csrf_token;
+      data.product_id = Number(data.product_id);
+      data.rating = Number(data.rating);
+      try {
+        const response = await fetch(form.action, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
+          body: JSON.stringify(data)
+        });
+        const result = await response.json();
+        if (result.ok) form.reset();
+        if (message) {
+          message.hidden = false;
+          message.textContent = result.ok ? form.dataset.successLabel : form.dataset.errorLabel;
+        }
+      } catch (error) {
+        if (message) {
+          message.hidden = false;
+          message.textContent = form.dataset.errorLabel;
+        }
+      } finally {
+        if (button) button.disabled = false;
+      }
+    });
+  }
+
   async function refreshCheckoutPayments(shippingMethod) {
     const country = document.getElementById('checkout-country');
     const box = document.getElementById('payment-options');
@@ -174,6 +210,7 @@
   });
 
   document.addEventListener('DOMContentLoaded', () => {
+    bindReviewForm();
     const country = document.getElementById('checkout-country');
     if (country) country.addEventListener('change', refreshCheckoutShipping);
     if (document.getElementById('shipping-options')) refreshCheckoutShipping();

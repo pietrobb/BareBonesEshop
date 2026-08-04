@@ -9,6 +9,7 @@ class Template {
     private static string $themesDir = __DIR__ . '/../themes';
     private static array $cache = [];
     private static array $manifestCache = [];
+    private static array $layoutsCache = [];
     private static ?string $store = null;
     private static ?string $theme = null;
 
@@ -42,6 +43,13 @@ class Template {
             if (!in_array($kind, ['css', 'js'], true) || !is_array($assets)) throw new RuntimeException('Invalid theme asset group');
             foreach ($assets as $asset) self::safeAssetPath((string)$asset);
         }
+        if (isset($manifest['parent'])) self::safePackageName((string)$manifest['parent']);
+        foreach ((array)($manifest['sections'] ?? []) as $type => $block) {
+            if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,79}$/', (string)$type)
+                || !preg_match('#^[a-z0-9][a-z0-9/_-]{0,159}$#', (string)$block)) {
+                throw new RuntimeException('Invalid theme section mapping');
+            }
+        }
         return self::$manifestCache[$theme] = $manifest;
     }
 
@@ -62,16 +70,31 @@ class Template {
         return self::baseUrl() . ($suffix === '/' ? '/' : $suffix);
     }
 
+    /** Store/locale-aware local URL, separate from public asset URLs. */
+    public static function storeUrl(string $path = ''): string {
+        if ($path !== '' && (preg_match('#^[a-z][a-z0-9+.-]*:#i', $path) || str_starts_with($path, '//'))) {
+            return $path;
+        }
+        $prefix = rtrim((string)(StoreContext::current()->config()['url_prefix'] ?? ''), '/');
+        if ($prefix !== '' && (!str_starts_with($prefix, '/') || str_contains($prefix, '..'))) {
+            throw new RuntimeException('Invalid store URL prefix');
+        }
+        $suffix = '/' . ltrim($path, '/');
+        return self::baseUrl() . $prefix . ($suffix === '/' ? '/' : $suffix);
+    }
+
     /** Public versioned asset URLs declared by the active theme manifest. */
     public static function assets(): array {
-        $theme = self::$theme ?? 'default';
-        $manifest = self::manifest($theme);
-        $version = rawurlencode((string)$manifest['version']);
         $result = ['css' => [], 'js' => []];
-        foreach ($result as $kind => $_) {
-            foreach ((array)($manifest['assets'][$kind] ?? []) as $asset) {
-                $asset = self::safeAssetPath((string)$asset);
-                $result[$kind][] = self::url('/themes/' . rawurlencode($theme) . '/assets/' . $asset) . '?v=' . $version;
+        foreach (array_reverse(self::themeChain()) as $theme) {
+            $manifest = self::manifest($theme);
+            $version = rawurlencode((string)$manifest['version']);
+            foreach ($result as $kind => $_) {
+                foreach ((array)($manifest['assets'][$kind] ?? []) as $asset) {
+                    $asset = self::safeAssetPath((string)$asset);
+                    $url = self::url('/themes/' . rawurlencode($theme) . '/assets/' . $asset) . '?v=' . $version;
+                    if (!in_array($url, $result[$kind], true)) $result[$kind][] = $url;
+                }
             }
         }
         return $result;
@@ -88,13 +111,43 @@ class Template {
         $layout = $layouts['layouts'][$page['layout']] ?? $layouts['layouts']['one-column'] ?? null;
         $slots = [];
 
-        foreach ($page['sections'] as $section) {
+        $sections = !empty($data['page']['sections']) && is_array($data['page']['sections'])
+            ? $data['page']['sections']
+            : (array)($page['sections'] ?? []);
+        foreach ($sections as $section) {
             $slot = $section['slot'] ?? 'full';
             $html = self::renderSection($section, $data);
             $slots[$slot] = ($slots[$slot] ?? '') . $html;
         }
 
         return self::render('layout/' . $page['layout'], array_merge($data, ['slots' => $slots]));
+    }
+
+    /** Remove the deployment base path before joining a local URL to configured app_url. */
+    public static function seoPath(string $url): string {
+        $base = self::baseUrl();
+        if ($base !== '' && ($url === $base || str_starts_with($url, $base . '/'))) {
+            $url = substr($url, strlen($base));
+        }
+        return $url === '' ? '/' : $url;
+    }
+
+    /** Serialize canonical page SEO data without putting markup in the view model. */
+    public static function viewModelSeoHead(array $model, string $fallbackTitle): string {
+        $seo = (array)($model['page']['seo'] ?? []);
+        $head = Seo::head(
+            (string)($seo['title'] ?? $model['page']['title'] ?? $fallbackTitle),
+            (string)($seo['description'] ?? ''),
+            self::seoPath((string)($seo['canonical_url'] ?? self::storeUrl('/'))),
+            true
+        );
+        if (!empty($seo['image_url'])) {
+            $head .= "\n<meta property=\"og:image\" content=\"" . esc((string)$seo['image_url']) . '">';
+        }
+        foreach ((array)($seo['json_ld'] ?? []) as $payload) {
+            if (is_array($payload)) $head .= "\n" . JsonLd::render($payload, Security::cspNonce());
+        }
+        return $head;
     }
 
     /** Shared accessible storefront document shell for SSR entry points. */
@@ -155,26 +208,8 @@ class Template {
             }, $tpl
         );
 
-        // 3. Loops FIRST (before #if, so nested #if inside #each get correct context)
-        $tpl = preg_replace_callback(
-            '/\{\{#each\s+(\w[\w.]*)\}\}(.*?)\{\{\/each\}\}/s',
-            function($m) use ($data) {
-                $items = self::resolve($m[1], $data);
-                if (!is_array($items)) return '';
-                $out = '';
-                $values = array_values($items);
-                $count = count($values);
-                foreach ($values as $i => $item) {
-                    $ctx = is_array($item) ? $item : ['this' => $item];
-                    $ctx['@index'] = $i;
-                    $ctx['@first'] = ($i === 0);
-                    $ctx['@last'] = ($i === $count - 1);
-                    $ctx['..'] = $data; // parent context
-                    $out .= self::process($m[2], $ctx);
-                }
-                return $out;
-            }, $tpl
-        );
+        // 3. Loops FIRST (paired recursively so nested collections keep parent context)
+        $tpl = self::processEach($tpl, $data);
 
         // 4. Conditions: {{#if expr}}...{{else}}...{{/if}}
         $tpl = preg_replace_callback(
@@ -198,6 +233,40 @@ class Template {
         }, $tpl);
 
         return $tpl;
+    }
+
+    private static function processEach(string $tpl, array $data): string {
+        if (!preg_match('/\{\{#each\s+([@\w][\w.]*)\}\}/', $tpl, $open, PREG_OFFSET_CAPTURE)) return $tpl;
+        $openText = $open[0][0];
+        $openOffset = $open[0][1];
+        $bodyOffset = $openOffset + strlen($openText);
+        preg_match_all('/\{\{#each\s+[@\w][\w.]*\}\}|\{\{\/each\}\}/', $tpl, $tokens, PREG_OFFSET_CAPTURE, $bodyOffset);
+        $depth = 1;
+        $closeOffset = null;
+        foreach ($tokens[0] as [$token, $offset]) {
+            if (str_starts_with($token, '{{#each')) $depth++;
+            else $depth--;
+            if ($depth === 0) { $closeOffset = $offset; break; }
+        }
+        if ($closeOffset === null) return $tpl;
+
+        $body = substr($tpl, $bodyOffset, $closeOffset - $bodyOffset);
+        $items = self::resolve($open[1][0], $data);
+        $output = '';
+        if (is_array($items)) {
+            $values = array_values($items);
+            $count = count($values);
+            foreach ($values as $index => $item) {
+                $context = is_array($item) ? $item : ['this' => $item];
+                $context['@index'] = $index;
+                $context['@first'] = $index === 0;
+                $context['@last'] = $index === $count - 1;
+                $context['..'] = $data;
+                $output .= self::process($body, $context);
+            }
+        }
+        $after = $closeOffset + strlen('{{/each}}');
+        return substr($tpl, 0, $openOffset) . $output . self::processEach(substr($tpl, $after), $data);
     }
 
     /**
@@ -269,13 +338,15 @@ class Template {
                 if (file_exists($f)) $file = $f;
             }
 
-            // 2. Theme package override, then legacy in-blocks override
-            if (!$file && self::$theme) {
-                $f = self::$themesDir . '/' . self::$theme . '/blocks/' . $name . '.html';
+            // 2. Active theme, its parents, then default theme
+            foreach (self::themeChain() as $theme) {
+                if ($file) break;
+                $f = self::$themesDir . '/' . $theme . '/blocks/' . $name . '.html';
                 if (file_exists($f)) $file = $f;
             }
-            if (!$file && self::$theme) {
-                $f = self::$blocksDir . '/themes/' . self::$theme . '/' . $name . '.html';
+            foreach (self::themeChain() as $theme) {
+                if ($file) break;
+                $f = self::$blocksDir . '/themes/' . $theme . '/' . $name . '.html';
                 if (file_exists($f)) $file = $f;
             }
 
@@ -289,18 +360,28 @@ class Template {
         return self::$cache[$name];
     }
 
-    private static function loadLayouts(): array {
-        static $layouts = null;
-        if (!$layouts) {
-            $file = dirname(self::$blocksDir) . '/layouts.json';
-            $layouts = file_exists($file) ? json_decode(file_get_contents($file), true) : ['layouts' => [], 'pages' => []];
+    public static function loadLayouts(): array {
+        $cacheKey = (self::$store ?? '') . ':' . (self::$theme ?? 'default');
+        if (isset(self::$layoutsCache[$cacheKey])) return self::$layoutsCache[$cacheKey];
+
+        $layouts = self::readLayoutFile(dirname(self::$blocksDir) . '/layouts.json');
+        foreach (array_reverse(self::themeChain()) as $theme) {
+            $layouts = self::mergeConfig($layouts, self::readLayoutFile(self::$themesDir . '/' . $theme . '/layouts.json'));
         }
-        return $layouts;
+        if (self::$store) {
+            $layouts = self::mergeConfig($layouts, self::readLayoutFile(self::$blocksDir . '/stores/' . self::$store . '/layouts.json'));
+        }
+        return self::$layoutsCache[$cacheKey] = $layouts;
     }
 
     private static function renderSection(array $section, array $data): string {
-        $block = $section['block'];
-        $sectionData = $data;
+        $block = (string)($section['block'] ?? '');
+        if (!empty($section['type'])) {
+            $type = (string)$section['type'];
+            $block = self::sectionBlocks()[$type] ?? '';
+        }
+        if ($block === '' || !preg_match('#^[a-z0-9][a-z0-9/_-]{0,159}$#', $block)) return '';
+        $sectionData = array_replace($data, $section, ['section' => $section]);
 
         // Data source
         if (!empty($section['data'])) {
@@ -328,6 +409,46 @@ class Template {
         return self::render($block, $sectionData);
     }
 
+    private static function themeChain(): array {
+        $chain = [];
+        $theme = self::$theme ?? 'default';
+        while ($theme !== '') {
+            if (in_array($theme, $chain, true)) throw new RuntimeException('Theme inheritance cycle');
+            $chain[] = $theme;
+            if (count($chain) > 10) throw new RuntimeException('Theme inheritance is too deep');
+            $parent = (string)(self::manifest($theme)['parent'] ?? '');
+            $theme = $parent === '' ? '' : (self::safePackageName($parent) ?? '');
+        }
+        if (!in_array('default', $chain, true) && is_file(self::$themesDir . '/default/theme.json')) $chain[] = 'default';
+        return $chain;
+    }
+
+    private static function sectionBlocks(): array {
+        $blocks = [];
+        foreach (array_reverse(self::themeChain()) as $theme) {
+            $blocks = array_replace($blocks, (array)(self::manifest($theme)['sections'] ?? []));
+        }
+        return $blocks;
+    }
+
+    private static function readLayoutFile(string $file): array {
+        if (!is_file($file)) return [];
+        $value = json_decode((string)file_get_contents($file), true, 32, JSON_THROW_ON_ERROR);
+        if (!is_array($value)) throw new RuntimeException("Invalid layouts file: {$file}");
+        return $value + ['layouts' => [], 'pages' => []];
+    }
+
+    private static function mergeConfig(array $base, array $override): array {
+        foreach ($override as $key => $value) {
+            if (is_array($value) && is_array($base[$key] ?? null) && !array_is_list($value) && !array_is_list($base[$key])) {
+                $base[$key] = self::mergeConfig($base[$key], $value);
+            } else {
+                $base[$key] = $value;
+            }
+        }
+        return $base;
+    }
+
     private static function safePackageName(?string $name): ?string {
         if ($name === null || $name === '') return null;
         if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,63}$/', $name)) throw new InvalidArgumentException('Invalid theme/store package name');
@@ -346,5 +467,6 @@ class Template {
     /** Clear template cache (for testing or package changes). */
     public static function clearCache(): void {
         self::$cache = [];
+        self::$layoutsCache = [];
     }
 }

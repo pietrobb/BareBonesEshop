@@ -26,6 +26,22 @@
             "rows": 15
         },
         {
+            "name": "page_type",
+            "type": "text",
+            "label": "Typ stránky"
+        },
+        {
+            "name": "template",
+            "type": "text",
+            "label": "Theme page template"
+        },
+        {
+            "name": "sections",
+            "type": "textarea",
+            "label": "Sekcie (JSON; type sa mapuje cez theme manifest)",
+            "rows": 12
+        },
+        {
             "name": "status",
             "type": "select",
             "label": "Stav",

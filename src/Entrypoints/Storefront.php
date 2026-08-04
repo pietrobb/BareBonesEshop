@@ -6,6 +6,7 @@
 require_once dirname(__DIR__, 2) . '/src/autoload.php';
 
 require_once __DIR__ . '/Storefront/CatalogPages.php';
+require_once __DIR__ . '/Storefront/ProductStatusPages.php';
 require_once __DIR__ . '/Storefront/CheckoutPages.php';
 Security::headers();
 Security::sessionStart();
@@ -118,11 +119,12 @@ switch ($page) {
     case 'product':
         $slug = Security::clean($_GET['slug'] ?? '');
         $product = Products::bySlug($slug);
-        if (!$product) { $content = '<p>' . $t('product_not_found') . '</p>'; break; }
-        if ($hasTecDoc) $product = TecDoc::enrichProduct($product, $lang);
-        $product = Products::enrich($product);
-        $title = $e($product['name']) . ' — BareBones Shop';
+        if (!$product) {
+            [$content, $title] = renderUnavailableProduct($slug);
+            break;
+        }
         $content = renderProduct($product);
+        $title = $e((string)($GLOBALS['storefront_view_model']['page']['title'] ?? $product['name'])) . ' — BareBones Shop';
         break;
 
     case 'vehicle':

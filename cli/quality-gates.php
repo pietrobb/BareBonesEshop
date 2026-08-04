@@ -48,6 +48,8 @@ $storefrontJs = (string)file_get_contents($root . '/themes/default/assets/storef
 $storefrontLayout = (string)file_get_contents($root . '/src/Entrypoints/Storefront/Layout.php');
 $catalogPages = (string)file_get_contents($root . '/src/Entrypoints/Storefront/CatalogPages.php');
 $checkoutPages = (string)file_get_contents($root . '/src/Entrypoints/Storefront/CheckoutPages.php');
+$storefrontViewModel = (string)file_get_contents($root . '/src/StorefrontViewModel.php');
+$cleanProductEntrypoint = (string)file_get_contents($root . '/product.php');
 $themeStorefrontBlocks = '';
 foreach (glob($root . '/themes/default/blocks/storefront/*.html') ?: [] as $block) $themeStorefrontBlocks .= (string)file_get_contents($block);
 $check(str_contains($document, 'href="#main-content"') && str_contains($document, '<main id="main-content"'), 'WCAG 2.2 AA: bypass block targets the main landmark');
@@ -63,6 +65,10 @@ $check(!str_contains($storefrontJs, 'sk-SK') && !str_contains($storefrontJs, "'E
 $check(is_file($root . '/themes/default/blocks/storefront/header.html') && is_file($root . '/themes/default/blocks/storefront/footer.html'), 'Theme boundary: storefront header and footer are theme blocks');
 $check(is_file($root . '/themes/default/blocks/storefront/product-detail.html') && is_file($root . '/themes/default/blocks/storefront/cart.html') && is_file($root . '/themes/default/blocks/storefront/checkout.html'), 'Theme boundary: product, cart, and checkout markup are theme blocks');
 $check(!preg_match('/<(?:div|form|button|table|img)\b/i', $catalogPages . $checkoutPages), 'Theme boundary: catalog and checkout core presenters contain no structural HTML');
+$check(str_contains($cleanProductEntrypoint, "src/Entrypoints/Storefront.php") && !str_contains($cleanProductEntrypoint, 'ob_start'), 'Canonical product route: clean URL delegates without a parallel renderer');
+$check(substr_count($catalogPages, 'StorefrontViewModel::product(') === 1, 'Canonical product route: one view-model builder serves storefront routing');
+$check(!preg_match('/[\x27\x22](?:breadcrumb|latest|product_grid|automotive|navigation)_html[\x27\x22]/', $storefrontViewModel), 'View-model boundary: no structural HTML fragments are exposed');
+$check(!preg_match('/\b(?:isbn|ebook_url|printed_book_url|AeonProductViewModel)\b/i', $storefrontViewModel), 'Universal engine: canonical model contains no vertical-specific product fields');
 
 $langFiles = glob($root . '/lang/*.php') ?: [];
 $catalogs = [];

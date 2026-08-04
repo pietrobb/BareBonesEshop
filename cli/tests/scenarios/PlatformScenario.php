@@ -284,10 +284,11 @@ assert_true(str_contains($accountSourceG6, 'GDPR erase failed [{$errorId}]'), 'G
 assert_true(!str_contains($accountSourceG6, "gdpr_erase_failed') . ': ' . \$ex->getMessage()"), 'G6 errors: erase exception detail is not rendered to the customer');
 $importSourceG6 = file_get_contents(TEST_CLI_DIR . '/../src/Import.php') ?: '';
 $pageSourceG6 = file_get_contents(TEST_CLI_DIR . '/../page.php') ?: '';
+$viewModelSourceG6 = file_get_contents(TEST_CLI_DIR . '/../src/StorefrontViewModel.php') ?: '';
 $apiSourceG6 = entrypointSource('api.php');
 assert_true(substr_count($adminSourceG6, 'Security::sanitizeRichHtml') >= 2, 'G6 rich HTML: CMS and admin product writes are sanitized');
 assert_true(str_contains($importSourceG6, "\$data['description'] = Security::sanitizeRichHtml"), 'G6 rich HTML: product imports sanitize descriptions');
-assert_true(str_contains($pageSourceG6, 'Security::sanitizeRichHtml'), 'G6 rich HTML: historical CMS content is sanitized on render');
+assert_true(str_contains($pageSourceG6, 'StorefrontViewModel::cmsPage') && str_contains($viewModelSourceG6, 'Security::sanitizeRichHtml'), 'G6 rich HTML: historical CMS content is sanitized at the canonical view-model boundary');
 assert_true(str_contains($apiSourceG6, 'Security::sanitizeRichHtml'), 'G6 rich HTML: CMS API returns sanitized content');
 $scriptBreakout = JsonLd::render(['name' => '</script><img src=x onerror=alert(1)>'], 'g6-nonce');
 assert_equals(1, substr_count(strtolower($scriptBreakout), '</script>'), 'G6 JSON embed: attacker data cannot terminate the JSON-LD script');
@@ -295,7 +296,7 @@ assert_true(!str_contains(strtolower($scriptBreakout), '<img'), 'G6 JSON embed: 
 $productSourceG6 = file_get_contents(TEST_CLI_DIR . '/../product.php') ?: '';
 $jsonLdSourceG6 = file_get_contents(TEST_CLI_DIR . '/../src/JsonLd.php') ?: '';
 assert_true(substr_count($adminSourceG6, 'JSON_HEX_TAG') >= 4, 'G6 JSON embed: admin prefill and dynamic maps hex-escape tag delimiters');
-assert_true(str_contains($productSourceG6, 'JSON_HEX_TAG'), 'G6 JSON embed: product JSON-LD hex-escapes tag delimiters');
+assert_true(str_contains($productSourceG6, "src/Entrypoints/Storefront.php"), 'G6 JSON embed: clean product route delegates JSON-LD rendering to the canonical storefront');
 assert_true(str_contains($jsonLdSourceG6, 'JSON_HEX_TAG'), 'G6 JSON embed: shared JSON-LD renderer hex-escapes tag delimiters');
 
 [$g6EraseRegistered, $g6EraseCustomerId] = Customers::register('g6-erase@example.com', 'StrongPass!123', 'G6 Erase');
@@ -771,11 +772,12 @@ $g11CustomBody = Template::document('G11 custom body', '', [
 ]);
 assert_true(str_contains($g11CustomBody, 'id="legacy-header"'), 'G11 theme: shared shell preserves an entrypoint-specific body without escaping it');
 assert_equals(1, substr_count(strtolower($g11CustomBody), '<main'), 'G11 theme: custom body does not receive a duplicate main landmark');
-foreach (['index.php', 'product.php', 'wishlist.php', 'account.php', 'page.php'] as $sharedShellEntrypoint) {
+foreach (['index.php', 'wishlist.php', 'account.php', 'page.php'] as $sharedShellEntrypoint) {
     $sharedShellSource = entrypointSource($sharedShellEntrypoint);
     assert_true(str_contains($sharedShellSource, 'Template::document('), 'G11 theme: ' . $sharedShellEntrypoint . ' uses the shared document shell');
     assert_true(!str_contains(strtolower($sharedShellSource), '<!doctype html>'), 'G11 theme: ' . $sharedShellEntrypoint . ' does not duplicate the document shell');
 }
+assert_true(str_contains(entrypointSource('product.php'), "src/Entrypoints/Storefront.php"), 'G11 theme: product.php delegates to the shared storefront document shell');
 
 $g10MenuId = ContentService::saveMenu(['menu_code' => 'primary', 'locale' => 'en', 'label' => 'G10 Sale', 'url' => '/sale', 'active' => 1]);
 $g10BannerId = ContentService::saveBanner(['slot' => 'homepage', 'locale' => 'en', 'title' => 'G10 Banner', 'body' => 'Campaign', 'link_url' => '/sale', 'active' => 1]);
@@ -826,6 +828,122 @@ ContentService::delete('banner', $g10BannerId);
 ContentService::delete('redirect', $g10RedirectId);
 ContentService::delete('landing', $g10LandingId);
 $pdo->exec("DELETE FROM products WHERE sku='G10-FEED'");
+
+// ============================================================
+// G12: canonical extensible storefront view models
+// ============================================================
+echo "\n--- G12: Canonical storefront view models ---\n";
+Bootstrap::initStoreContext('/', '', 'default');
+I18n::setLocale('en');
+$vmCategory = (int)$pdo->query('SELECT id FROM categories ORDER BY id LIMIT 1')->fetchColumn();
+$pdo->exec("DELETE FROM product_related_products WHERE product_id BETWEEN 9701 AND 9703 OR related_product_id BETWEEN 9701 AND 9703");
+$pdo->exec("DELETE FROM products WHERE id BETWEEN 9701 AND 9703");
+$vmInsert = $pdo->prepare("INSERT INTO products
+    (id, store_id, category_id, sku, slug, product_type, name, price, currency, stock, status, summary, description, images, attrs, availability, inventory_policy)
+    VALUES (:id, 'default', :category, :sku, :slug, :type, :name, :price, 'eur', :stock, 'active', :summary, :description, :images, :attrs, 'active', 'deny')");
+$vmInsert->execute([':id' => 9701, ':category' => $vmCategory, ':sku' => 'VM-DIGITAL', ':slug' => 'vm-digital', ':type' => 'downloadable', ':name' => 'Canonical Product', ':price' => 1299, ':stock' => 0, ':summary' => 'Canonical summary', ':description' => '<p>Editorial <strong>content</strong><script>bad()</script></p>', ':images' => '["one.jpg","two.jpg"]', ':attrs' => '{"creator":"Generic Creator","binding":"digital"}']);
+$vmInsert->execute([':id' => 9702, ':category' => $vmCategory, ':sku' => 'VM-CURATED', ':slug' => 'vm-curated', ':type' => 'simple', ':name' => 'Curated Target', ':price' => 990, ':stock' => 3, ':summary' => '', ':description' => '', ':images' => '[]', ':attrs' => '{}']);
+$vmInsert->execute([':id' => 9703, ':category' => $vmCategory, ':sku' => 'VM-FORMAT', ':slug' => 'vm-format', ':type' => 'simple', ':name' => 'Format Target', ':price' => 1590, ':stock' => 2, ':summary' => '', ':description' => '', ':images' => '[]', ':attrs' => '{}']);
+$pdo->exec("INSERT INTO product_attrs (product_id, attr_name, attr_value, numeric_val) VALUES (9701, 'Generic field', 'Generic value', NULL)");
+$pdo->exec("INSERT INTO product_specifications (product_id, lang, criteria_name, criteria_value, numeric_val, sort_order) VALUES (9701, 'en', 'Length', '42', 42, 0)");
+$pdo->exec("INSERT INTO variants (product_id, sku, name, attrs, price_delta, stock, availability) VALUES (9701, 'VM-DIGITAL-A', 'Variant A', '{\"channel\":\"standard\"}', 0, 0, 'active')");
+$pdo->exec("INSERT INTO product_related_products (product_id, related_product_id, relation_type, sort_order) VALUES (9701, 9702, 'related', 0), (9701, 9703, 'format', 0)");
+
+$originalVmScriptName = $_SERVER['SCRIPT_NAME'] ?? null;
+$_SERVER['SCRIPT_NAME'] = '/test/index.php';
+$deVmContext = StoreContext::resolve(Bootstrap::stores(), '/de/product/vm-digital');
+StoreContext::activate($deVmContext);
+Template::activate($deVmContext);
+I18n::setLocale('de');
+StorefrontViewModelRegistry::reset();
+StorefrontViewModelRegistry::register('product', 'contract_test', static fn(array $context): array => ['product_id' => (int)$context['model']['product']['id']]);
+$vm = StorefrontViewModel::product(Products::byId(9701));
+assert_equals('product', $vm['page']['type'], 'G12 view model: product has a stable page type');
+assert_equals(2, count($vm['product']['images']), 'G12 view model: all product images are exposed');
+assert_true(count($vm['product']['attributes']) >= 2, 'G12 view model: generic attributes and specifications are exposed');
+assert_equals(1, count($vm['product']['variants']), 'G12 view model: variants are exposed');
+assert_true(count($vm['product']['categories']) >= 1 && count($vm['page']['breadcrumbs']) >= 3, 'G12 view model: categories and breadcrumb include the legacy primary category');
+assert_equals('Generic Creator', $vm['product']['custom_fields']['creator'], 'G12 view model: unknown custom fields survive without core-specific names');
+assert_true(str_contains($vm['product']['description_html'], '<strong>content</strong>') && !str_contains($vm['product']['description_html'], '<script'), 'G12 view model: editorial HTML is sanitized but preserved');
+assert_true($vm['product']['availability']['purchasable'] && !$vm['product']['availability']['tracks_stock'] && $vm['product']['availability']['quantity'] === 0, 'G12 availability: stock-zero digital product remains purchasable without stock tracking');
+assert_equals('VM-CURATED', $vm['product']['relations']['related'][0]['sku'], 'G12 relations: curated related product wins over category fallback');
+assert_equals('VM-FORMAT', $vm['product']['relations']['format'][0]['sku'], 'G12 relations: arbitrary format relation uses the canonical card model');
+assert_true(!isset($vm['extensions']['automotive']), 'G12 extensions: product without automotive data has no automotive payload or UI signal');
+assert_equals(9701, $vm['extensions']['contract_test']['product_id'], 'G12 extensions: custom namespaced provider augments the product model');
+assert_true(str_starts_with($vm['product']['url'], '/test/de/product/') && str_starts_with($vm['product']['images'][0]['url'], '/test/uploads/full/'), 'G12 URLs: locale-aware product and subdirectory-aware image URLs are canonical');
+$forbiddenHtmlKeys = [];
+$walkVm = static function(array $data, string $path = '') use (&$walkVm, &$forbiddenHtmlKeys): void {
+    foreach ($data as $key => $value) {
+        $next = $path === '' ? (string)$key : $path . '.' . $key;
+        if (is_string($key) && str_ends_with($key, '_html') && !in_array($key, ['description_html', 'body_html'], true)) $forbiddenHtmlKeys[] = $next;
+        if (is_array($value)) $walkVm($value, $next);
+    }
+};
+$walkVm($vm);
+assert_equals([], $forbiddenHtmlKeys, 'G12 view model: no structural HTML fragments cross the engine/theme boundary');
+$productRouteSource = (string)file_get_contents(TEST_CLI_DIR . '/../product.php');
+$catalogRouteSource = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Storefront/CatalogPages.php');
+assert_true(str_contains($productRouteSource, "src/Entrypoints/Storefront.php") && !str_contains($productRouteSource, 'ob_start'), 'G12 routes: clean product URL delegates without a parallel renderer');
+assert_equals(1, substr_count($catalogRouteSource, 'StorefrontViewModel::product('), 'G12 routes: query and clean product routes converge on one canonical builder');
+assert_equals('/de/product/vm-digital', Template::seoPath($vm['page']['seo']['canonical_url']), 'G12 SEO: deployment base path is not duplicated when joined to app_url');
+$pdo->exec("UPDATE products SET status='archived' WHERE id=9703");
+assert_true(Products::bySlug('vm-format') === null && Products::bySlugAnyStatus('vm-format')['status'] === 'archived', 'G12 routes: inactive lookup preserves archived-product 410 handling');
+$productStatusRouteSource = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Storefront/ProductStatusPages.php');
+assert_true(str_contains($productStatusRouteSource, 'http_response_code(404)') && str_contains($productStatusRouteSource, 'http_response_code(410)'), 'G12 routes: missing and archived products retain real HTTP status codes');
+$productBlockSource = (string)file_get_contents(TEST_CLI_DIR . '/../themes/default/blocks/storefront/product-page.html');
+assert_true(str_contains($productBlockSource, 'data-review-form'), 'G12 theme boundary: review submission remains owned by the product theme block');
+
+$safeSectionsJson = ContentService::sanitizeSections([['id' => 'campaign', 'type' => 'campaign', 'block' => '../../src/evil.php', 'body_html' => '<p>Safe</p><script>bad()</script>', 'props' => ['layout' => 'wide', 'payload_html' => '<script>bad()</script>']]]);
+$safeSections = json_decode($safeSectionsJson, true, 32, JSON_THROW_ON_ERROR);
+assert_true(!isset($safeSections[0]['block']) && !isset($safeSections[0]['props']['payload_html']), 'G12 CMS: stored sections cannot select files or smuggle raw HTML props');
+assert_true(str_contains($safeSections[0]['body_html'], '<p>Safe</p>') && !str_contains($safeSections[0]['body_html'], '<script'), 'G12 CMS: body_html is sanitized at write boundary');
+
+$vmMigrationDb = new PDO('sqlite::memory:');
+$vmMigrationDb->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$vmMigrationDb->exec('CREATE TABLE products (id INTEGER PRIMARY KEY)');
+$vmMigrationDb->exec('CREATE TABLE product_related_products (product_id INTEGER NOT NULL, related_product_id INTEGER NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(product_id, related_product_id))');
+$vmMigrationDb->exec("INSERT INTO product_related_products VALUES (1, 2, 7)");
+$vmMigrationDb->exec('CREATE TABLE pages (id INTEGER PRIMARY KEY)');
+$vmMigration = require TEST_CLI_DIR . '/../migrations/20260804180000_storefront_view_models.php';
+$vmMigration->up($vmMigrationDb, true);
+assert_equals('related', (string)$vmMigrationDb->query('SELECT relation_type FROM product_related_products')->fetchColumn(), 'G12 migration: legacy relations are backfilled as related');
+assert_true(in_array('sections', array_column($vmMigrationDb->query('PRAGMA table_info(pages)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true), 'G12 migration: CMS sections column is added');
+
+$themeFixture = sys_get_temp_dir() . '/bbe-theme-inheritance-' . getmypid();
+$themeBlocksFixture = $themeFixture . '/base-blocks';
+@mkdir($themeFixture . '/default/blocks/layout', 0770, true);
+@mkdir($themeFixture . '/default/blocks/demo', 0770, true);
+@mkdir($themeFixture . '/default/blocks/storefront', 0770, true);
+@mkdir($themeFixture . '/child/blocks/storefront', 0770, true);
+@mkdir($themeBlocksFixture, 0770, true);
+file_put_contents($themeFixture . '/default/theme.json', json_encode(['name' => 'Parent', 'version' => '1.0.0', 'assets' => ['css' => [], 'js' => []], 'sections' => ['campaign' => 'demo/campaign']], JSON_THROW_ON_ERROR));
+file_put_contents($themeFixture . '/child/theme.json', json_encode(['name' => 'Child', 'version' => '1.0.0', 'parent' => 'default', 'assets' => ['css' => [], 'js' => []]], JSON_THROW_ON_ERROR));
+file_put_contents($themeFixture . '/default/layouts.json', json_encode(['layouts' => ['storefront' => ['slots' => ['full']]], 'pages' => ['product' => ['layout' => 'storefront', 'sections' => [['block' => 'storefront/product-page']]], 'campaign' => ['layout' => 'storefront', 'sections' => []]]], JSON_THROW_ON_ERROR));
+file_put_contents($themeFixture . '/child/layouts.json', json_encode(['pages' => ['campaign' => ['sections' => [['type' => 'campaign']]]]], JSON_THROW_ON_ERROR));
+file_put_contents($themeFixture . '/default/blocks/layout/storefront.html', '{{{slots.full}}}');
+file_put_contents($themeFixture . '/default/blocks/storefront/product-page.html', 'parent-product');
+file_put_contents($themeFixture . '/default/blocks/demo/campaign.html', 'campaign:{{heading}}');
+file_put_contents($themeFixture . '/child/blocks/storefront/product-page.html', 'child-product:{{product.sku}}');
+Template::setThemesDir($themeFixture);
+Template::setBlocksDir($themeBlocksFixture);
+Template::setStore('default');
+Template::setTheme('child');
+assert_equals('child-product:VM-DIGITAL', Template::page('product', $vm), 'G12 theme inheritance: child overrides one product block without copying the page');
+assert_equals('campaign:Theme Campaign', Template::page('campaign', ['page' => ['sections' => [['id' => 'x', 'type' => 'campaign', 'heading' => 'Theme Campaign']]]]), 'G12 CMS: child theme adds a custom section without src changes');
+assert_true(isset(Template::loadLayouts()['pages']['product']), 'G12 theme inheritance: parent page definitions remain available');
+Template::setThemesDir(TEST_CLI_DIR . '/../themes');
+Template::setBlocksDir(TEST_CLI_DIR . '/../blocks');
+Bootstrap::initStoreContext('/', '', 'default');
+I18n::setLocale('en');
+if ($originalVmScriptName === null) unset($_SERVER['SCRIPT_NAME']); else $_SERVER['SCRIPT_NAME'] = $originalVmScriptName;
+foreach ([$themeFixture . '/child/blocks/storefront/product-page.html', $themeFixture . '/default/blocks/demo/campaign.html', $themeFixture . '/default/blocks/storefront/product-page.html', $themeFixture . '/default/blocks/layout/storefront.html', $themeFixture . '/child/layouts.json', $themeFixture . '/default/layouts.json', $themeFixture . '/child/theme.json', $themeFixture . '/default/theme.json'] as $fixtureFile) @unlink($fixtureFile);
+foreach ([$themeFixture . '/child/blocks/storefront', $themeFixture . '/child/blocks', $themeFixture . '/child', $themeFixture . '/default/blocks/demo', $themeFixture . '/default/blocks/storefront', $themeFixture . '/default/blocks/layout', $themeFixture . '/default/blocks', $themeFixture . '/default', $themeBlocksFixture, $themeFixture] as $fixtureDir) @rmdir($fixtureDir);
+$pdo->exec("DELETE FROM product_related_products WHERE product_id BETWEEN 9701 AND 9703 OR related_product_id BETWEEN 9701 AND 9703");
+$pdo->exec("DELETE FROM product_attrs WHERE product_id BETWEEN 9701 AND 9703");
+$pdo->exec("DELETE FROM product_specifications WHERE product_id BETWEEN 9701 AND 9703");
+$pdo->exec("DELETE FROM variants WHERE product_id BETWEEN 9701 AND 9703");
+$pdo->exec("DELETE FROM products WHERE id BETWEEN 9701 AND 9703");
+StorefrontViewModelRegistry::reset();
 
 // ============================================================
 // G15: active health/SLO metrics and alerting adapter

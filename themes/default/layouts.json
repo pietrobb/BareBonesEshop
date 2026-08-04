@@ -1,0 +1,13 @@
+{
+  "layouts": {
+    "storefront": {"slots": ["full"]}
+  },
+  "pages": {
+    "homepage": {"layout": "storefront", "sections": []},
+    "product": {
+      "layout": "storefront",
+      "sections": [{"block": "storefront/product-page"}]
+    },
+    "cms": {"layout": "storefront", "sections": []}
+  }
+}

@@ -50,31 +50,9 @@ function storefrontProductCard(array $product, bool $showStock = false): string 
 }
 
 function renderHome(): string {
-    global $catName, $t, $lang;
-    $managedBanners = ContentService::banners('homepage', $lang);
-    $banner = $managedBanners[0] ?? null;
-    $roots = Categories::roots();
-    $bannerSlug = (string)(($roots[0] ?? [])['slug'] ?? '');
-    usort($roots, static fn(array $a, array $b): int => (int)$b['product_count'] <=> (int)$a['product_count']);
-    $roots = array_values(array_filter($roots, static fn(array $category): bool => (int)$category['product_count'] >= 5 && $category['slug'] !== 'uncategorized'));
-    $categories = array_map(static fn(array $category): array => [
-        'url' => '?page=category&slug=' . rawurlencode((string)$category['slug']),
-        'name' => $catName((string)$category['name']),
-        'count' => number_format((int)$category['product_count']),
-    ], $roots);
-    $latest = Products::latest(12);
-
-    return Template::render('storefront/home', [
-        'hero_image' => (string)($banner['image_url'] ?? '') ?: 'assets/img/slider1.jpg',
-        'hero_title' => (string)($banner['title'] ?? '') ?: $t('hero_title'),
-        'hero_body' => (string)($banner['body'] ?? ''),
-        'hero_url' => (string)($banner['link_url'] ?? '') ?: '?page=category&slug=' . rawurlencode($bannerSlug),
-        'hero_label' => (string)($banner['link_label'] ?? '') ?: $t('shop_now'),
-        'categories_label' => $t('categories'),
-        'categories' => $categories,
-        'latest_label' => $t('latest'),
-        'latest_html' => $latest ? renderProductGrid($latest, '') : '',
-    ]);
+    $model = StorefrontViewModel::home();
+    $GLOBALS['storefront_view_model'] = $model;
+    return Template::page((string)$model['page']['template'], $model);
 }
 
 function renderCategory(array $cat): string {
@@ -181,51 +159,9 @@ function renderCategory(array $cat): string {
 }
 
 function renderProduct(array $product): string {
-    global $catName, $t, $hasTecDoc, $price;
-    $specifications = is_array($product['specifications'] ?? null) ? $product['specifications'] : [];
-    $oeNumbers = is_array($product['oe_numbers'] ?? null) ? $product['oe_numbers'] : [];
-    $vehicleCount = (int)($product['vehicle_count'] ?? 0);
-    $showAutomotive = ($hasTecDoc && ($product['product_type'] ?? '') === 'auto_part') || $vehicleCount > 0 || $oeNumbers !== [];
-    $breadcrumb = [['url' => '?', 'label' => $t('home'), 'current' => false]];
-    foreach (Categories::breadcrumb((int)$product['category_id']) as $item) $breadcrumb[] = ['url' => '?page=category&slug=' . rawurlencode((string)$item['slug']), 'label' => $catName((string)$item['name']), 'current' => false];
-    $breadcrumb[] = ['url' => '', 'label' => (string)$product['name'], 'current' => true];
-
-    $attributes = is_array($product['attrs'] ?? null) ? $product['attrs'] : (json_decode((string)($product['attrs'] ?? '{}'), true) ?: []);
-    $images = is_array($product['images'] ?? null) ? $product['images'] : (json_decode((string)($product['images'] ?? '[]'), true) ?: []);
-    $image = !empty($images[0]) && $images[0] !== 'placeholder.jpg' ? (string)$images[0] : '';
-    $oeRows = '';
-    $lastBrand = null;
-    foreach ($oeNumbers as $oe) {
-        $brand = (string)$oe['oem_brand'];
-        $oeRows .= Template::render('storefront/product-oe-row', [
-            'brand_heading' => $brand !== $lastBrand, 'brand' => $brand, 'number' => (string)$oe['oem_number'],
-            'url' => '?page=oe&q=' . rawurlencode((string)$oe['oem_number']),
-        ]);
-        $lastBrand = $brand;
-    }
-    $vehicles = $showAutomotive ? TecDoc::vehiclesForProduct((int)$product['id'], 100) : [];
-    $vehicleRows = array_map(static fn(array $vehicle): array => [
-        'model' => $vehicle['manufacturer'] . ' ' . $vehicle['model'],
-        'type' => (string)$vehicle['type_name'],
-    ], $vehicles);
-    $automotiveHtml = $showAutomotive ? Template::render('storefront/product-automotive', [
-        'oe_rows_html' => $oeRows, 'no_oe' => $oeNumbers === [], 'no_oe_label' => $t('no_oe'),
-        'vehicle_model_label' => $t('vehicle_manufacturer_model'), 'vehicle_engine_label' => $t('vehicle_engine_type'),
-        'vehicles' => $vehicleRows, 'no_vehicles' => $vehicles === [], 'no_vehicles_label' => $t('no_vehicles'),
-    ]) : '';
-
-    return Template::render('storefront/product-detail', [
-        'breadcrumb_html' => storefrontBreadcrumb($breadcrumb), 'id' => (int)$product['id'], 'image' => $image,
-        'name' => (string)$product['name'], 'sku' => (string)$product['sku'], 'supplier' => (string)($attributes['supplier'] ?? ''),
-        'supplier_label' => $t('supplier'), 'price' => $price((int)$product['price']),
-        'compare_price' => !empty($product['compare_price']) ? $price((int)$product['compare_price']) : '',
-        'in_stock' => (int)$product['stock'] > 0, 'stock' => (int)$product['stock'], 'in_stock_label' => $t('in_stock'), 'out_of_stock_label' => $t('out_of_stock'),
-        'summary' => (string)($product['summary'] ?? ''), 'show_automotive' => $showAutomotive, 'compatible_with_label' => $t('compatible_with'),
-        'vehicle_count' => $vehicleCount, 'vehicles_label' => $t('vehicles'), 'add_to_cart_label' => $t('add_to_cart'),
-        'specs_label' => $t('specs'), 'spec_count' => count($specifications), 'oe_label' => $t('oe_numbers'), 'oe_count' => count($oeNumbers), 'vehicles_tab_label' => $t('vehicles_tab'),
-        'specifications' => array_map(static fn(array $spec): array => ['name' => (string)$spec['criteria_name'], 'value' => (string)$spec['criteria_value']], $specifications),
-        'no_specs' => $specifications === [], 'no_specs_label' => $t('no_specs'), 'automotive_html' => $automotiveHtml,
-    ]);
+    $model = StorefrontViewModel::product($product);
+    $GLOBALS['storefront_view_model'] = $model;
+    return Template::page((string)$model['page']['template'], $model);
 }
 
 function renderVehicle(int $ktype, array $result, array $categories, ?int $activeCatId): string {
