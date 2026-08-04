@@ -1,16 +1,12 @@
 <?php
-/** Catalog and discovery page renderers. */
+/** Catalog data presenters. Storefront markup is owned by the active theme. */
 function renderLegalPage(string $page): string {
     $allowed = ['privacy', 'terms', 'cookies'];
-    if (!in_array($page, $allowed, true)) {
-        return '<p>Not found.</p>';
-    }
+    if (!in_array($page, $allowed, true)) return Template::render('storefront/legal-page', ['content_html' => '<p>Not found.</p>']);
 
     $locale = I18n::locale();
     $tpl = dirname(__DIR__, 3) . '/templates/legal/' . $locale . '/' . $page . '.html';
-    if (!is_file($tpl)) {
-        $tpl = dirname(__DIR__, 3) . '/templates/legal/en/' . $page . '.html';
-    }
+    if (!is_file($tpl)) $tpl = dirname(__DIR__, 3) . '/templates/legal/en/' . $page . '.html';
 
     $stores = Bootstrap::stores();
     $legal = [];
@@ -26,496 +22,275 @@ function renderLegalPage(string $page): string {
     }
 
     $vars = [];
-    foreach ($legal as $k => $v) {
-        $vars['{{' . $k . '}}'] = htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
-    }
+    foreach ($legal as $key => $value) $vars['{{' . $key . '}}'] = htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
     $vars['{{updated_at}}'] = date('Y-m-d');
+    return Template::render('storefront/legal-page', ['content_html' => strtr((string)file_get_contents($tpl), $vars)]);
+}
 
-    $html = (string)file_get_contents($tpl);
-    return '<div class="card legal-page">' . strtr($html, $vars) . '</div>';
+function storefrontBreadcrumb(array $items): string {
+    return Template::render('storefront/breadcrumb', ['items' => $items]);
+}
+
+function storefrontProductCard(array $product, bool $showStock = false): string {
+    global $price;
+    $images = is_string($product['images'] ?? null) ? json_decode($product['images'], true) : ($product['images'] ?? []);
+    $image = is_array($images) ? (string)($images[0] ?? '') : '';
+    return Template::render('storefront/product-card', [
+        'id' => (int)$product['id'],
+        'url' => '?page=product&slug=' . rawurlencode((string)$product['slug']),
+        'name' => (string)$product['name'],
+        'image' => $image,
+        'on_sale' => !empty($product['compare_price']) && (int)$product['compare_price'] > (int)$product['price'],
+        'price' => $price((int)$product['price']),
+        'compare_price' => !empty($product['compare_price']) ? $price((int)$product['compare_price']) : '',
+        'in_stock' => $showStock && (int)($product['stock'] ?? 0) > 0,
+        'in_stock_label' => I18n::t('in_stock'),
+        'add_to_cart_label' => I18n::t('add_to_cart'),
+    ]);
 }
 
 function renderHome(): string {
-    global $e, $price, $catName, $t, $lang;
-
+    global $catName, $t, $lang;
     $managedBanners = ContentService::banners('homepage', $lang);
     $banner = $managedBanners[0] ?? null;
-    $bannerImage = !empty($banner['image_url']) ? $banner['image_url'] : 'assets/img/slider1.jpg';
-    $bannerTitle = !empty($banner['title']) ? $banner['title'] : $t('hero_title');
-    $bannerLink = !empty($banner['link_url']) ? $banner['link_url'] : ('?page=category&slug=' . ((Categories::roots()[0] ?? [])['slug'] ?? ''));
-    $bannerLabel = !empty($banner['link_label']) ? $banner['link_label'] : $t('shop_now');
-    ob_start(); ?>
-    <div class="hero">
-     <img src="<?= $e($bannerImage) ?>" alt="<?= $e($bannerTitle) ?>" width="1920" height="600">
-     <div class="hero-overlay">
-      <h1><?= $e($bannerTitle) ?></h1>
-      <?php if (!empty($banner['body'])): ?><p><?= $e($banner['body']) ?></p><?php endif; ?>
-      <a href="<?= $e($bannerLink) ?>" class="btn-hero"><?= $e($bannerLabel) ?></a>
-     </div>
-    </div>
-
-    <h2 class="section-title" style="margin-bottom:16px;font-size:1.4em"><?= $t('categories') ?></h2>
-    <div class="grid grid-3">
-    <?php
     $roots = Categories::roots();
-    usort($roots, fn($a,$b) => (int)$b['product_count'] - (int)$a['product_count']);
-    $roots = array_filter($roots, fn($c) => (int)$c['product_count'] >= 5 && $c['slug'] !== 'uncategorized');
-    foreach ($roots as $rc):
-    ?>
-     <a href="?page=category&slug=<?= $e($rc['slug']) ?>" class="cat-card">
-      <span style="flex:1;font-weight:600"><?= $e($catName($rc['name'])) ?></span>
-      <span class="count"><?= number_format((int)$rc['product_count']) ?></span>
-     </a>
-    <?php endforeach; ?>
-    </div>
+    $bannerSlug = (string)(($roots[0] ?? [])['slug'] ?? '');
+    usort($roots, static fn(array $a, array $b): int => (int)$b['product_count'] <=> (int)$a['product_count']);
+    $roots = array_values(array_filter($roots, static fn(array $category): bool => (int)$category['product_count'] >= 5 && $category['slug'] !== 'uncategorized'));
+    $categories = array_map(static fn(array $category): array => [
+        'url' => '?page=category&slug=' . rawurlencode((string)$category['slug']),
+        'name' => $catName((string)$category['name']),
+        'count' => number_format((int)$category['product_count']),
+    ], $roots);
+    $latest = Products::latest(12);
 
-    <?php
-    $latest = Products::enrichMany(Products::latest(12));
-    if ($latest): ?>
-    <h2 class="section-title" style="margin:32px 0 16px;font-size:1.4em"><?= $t('latest') ?></h2>
-    <div class="grid grid-4">
-    <?php foreach ($latest as $p): ?>
-     <div class="card" style="position:relative">
-      <a href="?page=product&slug=<?= $e($p['slug']) ?>">
-       <?php
-       $imgs = is_string($p['images'] ?? null) ? json_decode($p['images'], true) : ($p['images'] ?? []);
-       $firstImg = $imgs[0] ?? null;
-       if ($firstImg): ?>
-       <img class="card-img" src="<?= $e($firstImg) ?>" alt="<?= $e($p['name']) ?>" loading="lazy">
-       <?php else: ?>
-       <div class="card-img-placeholder">📷</div>
-       <?php endif; ?>
-       <?php if (!empty($p['compare_price']) && $p['compare_price'] > $p['price']): ?>
-       <span class="sticker sticker-sale">SALE</span>
-       <?php endif; ?>
-       <h3><?= $e($p['name']) ?></h3>
-       <div class="price"><?= $price($p['price']) ?>
-        <?php if (!empty($p['compare_price'])): ?><span class="old-price"><?= $price($p['compare_price']) ?></span><?php endif; ?>
-       </div>
-      </a>
-      <button class="btn-cart" type="button" data-storefront-action="cart-add" data-product-id="<?= (int)$p['id'] ?>" data-quantity="1"><?= $t('add_to_cart') ?></button>
-     </div>
-    <?php endforeach; ?>
-    </div>
-    <?php endif;
-
-    return ob_get_clean();
+    return Template::render('storefront/home', [
+        'hero_image' => (string)($banner['image_url'] ?? '') ?: 'assets/img/slider1.jpg',
+        'hero_title' => (string)($banner['title'] ?? '') ?: $t('hero_title'),
+        'hero_body' => (string)($banner['body'] ?? ''),
+        'hero_url' => (string)($banner['link_url'] ?? '') ?: '?page=category&slug=' . rawurlencode($bannerSlug),
+        'hero_label' => (string)($banner['link_label'] ?? '') ?: $t('shop_now'),
+        'categories_label' => $t('categories'),
+        'categories' => $categories,
+        'latest_label' => $t('latest'),
+        'latest_html' => $latest ? renderProductGrid($latest, '') : '',
+    ]);
 }
 
 function renderCategory(array $cat): string {
-    global $e, $price, $catName, $t, $lang;
+    global $catName, $t, $lang;
     $catId = (int)$cat['id'];
-
-    // Breadcrumb
-    $bc = Categories::breadcrumb($catId);
-    ob_start();
-    echo '<div class="breadcrumb"><a href="?">' . $t('home') . '</a>';
-    foreach ($bc as $b) echo ' &rsaquo; <a href="?page=category&slug=' . $e($b['slug']) . '">' . $e($catName($b['name'])) . '</a>';
-    echo '</div>';
-
-    // Subcategories — used for sidebar filters on parent categories
     $children = Categories::children($catId);
-    $hasChildren = !empty($children);
-
-    // Get all descendant category IDs for product search
-    $allCatIds = Categories::descendantIds($catId);
-
-    // Parse subcategory filter from URL
     $selectedSubcats = [];
-    if ($hasChildren && !empty($_GET['subcat']) && is_array($_GET['subcat'])) {
-        $selectedSubcats = array_map('intval', $_GET['subcat']);
-    }
+    if ($children && !empty($_GET['subcat']) && is_array($_GET['subcat'])) $selectedSubcats = array_map('intval', $_GET['subcat']);
 
-    // If subcategories selected, narrow search to their descendants only
-    if (!empty($selectedSubcats)) {
+    $searchCatIds = Categories::descendantIds($catId);
+    if ($selectedSubcats) {
         $searchCatIds = [];
-        foreach ($selectedSubcats as $scId) {
-            $searchCatIds = array_merge($searchCatIds, Categories::descendantIds($scId));
-        }
-        $searchCatIds = array_unique($searchCatIds);
-    } else {
-        $searchCatIds = $allCatIds;
+        foreach ($selectedSubcats as $subcatId) $searchCatIds = array_merge($searchCatIds, Categories::descendantIds($subcatId));
+        $searchCatIds = array_values(array_unique($searchCatIds));
     }
 
-    // Parametric search with filters (works for both parent and leaf categories)
-    $pg = max(1, Security::int($_GET['pg'] ?? 1));
+    $page = max(1, Security::int($_GET['pg'] ?? 1));
     $sort = Security::clean($_GET['sort'] ?? 'price_asc');
-    $searchLang = $lang;
-
-    // Parse spec filters from URL
     $specFilters = [];
     if (!empty($_GET['spec']) && is_array($_GET['spec'])) {
-        foreach ($_GET['spec'] as $name => $val) {
+        foreach ($_GET['spec'] as $name => $value) {
             $name = Security::clean($name);
-            if (is_array($val)) {
-                $specFilters[$name] = array_map([Security::class, 'clean'], $val);
-            } else {
-                $specFilters[$name] = [Security::clean($val)];
-            }
+            $specFilters[$name] = is_array($value) ? array_map([Security::class, 'clean'], $value) : [Security::clean($value)];
         }
     }
-
     $priceMin = !empty($_GET['pmin']) ? Security::int($_GET['pmin']) * 100 : null;
     $priceMax = !empty($_GET['pmax']) ? Security::int($_GET['pmax']) * 100 : null;
-
-    // Parse numeric range filters: rmin[Výkon (kW)]=3&rmax[Výkon (kW)]=9
     $rangeFilters = [];
     if (!empty($_GET['rmin']) && is_array($_GET['rmin'])) {
-        foreach ($_GET['rmin'] as $name => $val) {
-            $name = Security::clean($name);
-            if ($val !== '') $rangeFilters[$name]['min'] = (float)$val;
-        }
+        foreach ($_GET['rmin'] as $name => $value) if ($value !== '') $rangeFilters[Security::clean($name)]['min'] = (float)$value;
     }
     if (!empty($_GET['rmax']) && is_array($_GET['rmax'])) {
-        foreach ($_GET['rmax'] as $name => $val) {
-            $name = Security::clean($name);
-            if ($val !== '') $rangeFilters[$name]['max'] = (float)$val;
-        }
+        foreach ($_GET['rmax'] as $name => $value) if ($value !== '') $rangeFilters[Security::clean($name)]['max'] = (float)$value;
     }
 
-    $result = TecDoc::parametricSearch($searchCatIds, $pg, 24, $sort, $specFilters, $priceMin, $priceMax, $searchLang, $rangeFilters);
-    $filters = $result['filters'];
-
-    echo '<h1 style="margin-bottom:4px">' . $e($catName($cat['name'])) . '</h1>';
-    echo '<div class="sort-bar"><span class="total">' . number_format($result['total']) . ' ' . $t('parts_count') . '</span>';
-    echo '<form method="get" style="display:flex;gap:8px;align-items:center">';
-    echo '<input type="hidden" name="page" value="category"><input type="hidden" name="slug" value="' . $e($cat['slug']) . '">';
-    // Preserve subcategory + spec filters in sort form
-    foreach ($selectedSubcats as $scId) echo '<input type="hidden" name="subcat[]" value="' . (int)$scId . '">';
-    foreach ($specFilters as $fn => $fvs) {
-        foreach ($fvs as $fv) echo '<input type="hidden" name="spec[' . $e($fn) . '][]" value="' . $e($fv) . '">';
+    $result = TecDoc::parametricSearch($searchCatIds, $page, 24, $sort, $specFilters, $priceMin, $priceMax, $lang, $rangeFilters);
+    $sortHidden = '';
+    foreach ($selectedSubcats as $id) $sortHidden .= Template::render('storefront/hidden-input', ['name' => 'subcat[]', 'value' => $id]);
+    foreach ($specFilters as $name => $values) {
+        foreach ($values as $value) $sortHidden .= Template::render('storefront/hidden-input', ['name' => 'spec[' . $name . '][]', 'value' => $value]);
     }
-    if ($priceMin) echo '<input type="hidden" name="pmin" value="' . (int)($priceMin / 100) . '">';
-    if ($priceMax) echo '<input type="hidden" name="pmax" value="' . (int)($priceMax / 100) . '">';
-    foreach ($rangeFilters as $fn => $rv) {
-        if (isset($rv['min'])) echo '<input type="hidden" name="rmin[' . $e($fn) . ']" value="' . $e((string)$rv['min']) . '">';
-        if (isset($rv['max'])) echo '<input type="hidden" name="rmax[' . $e($fn) . ']" value="' . $e((string)$rv['max']) . '">';
-    }
-    echo '<label>' . $t('sort') . '</label><select name="sort" data-submit-on-change>';
-    foreach (['price_asc'=>$t('price_asc'),'price_desc'=>$t('price_desc'),'name_asc'=>$t('name_asc'),'name_desc'=>$t('name_desc'),'newest'=>$t('newest')] as $k=>$v) {
-        echo '<option value="' . $k . '"' . ($sort===$k?' selected':'') . '>' . $v . '</option>';
-    }
-    echo '</select></form></div>';
-
-    echo '<div class="layout-sidebar">';
-
-    // Sidebar filters
-    echo '<form class="sidebar" method="get">';
-    echo '<input type="hidden" name="page" value="category"><input type="hidden" name="slug" value="' . $e($cat['slug']) . '">';
-    echo '<input type="hidden" name="sort" value="' . $e($sort) . '">';
-
-    $hasActiveFilters = !empty($specFilters) || $priceMin || $priceMax || !empty($selectedSubcats) || !empty($rangeFilters);
-
-    // Subcategory filter (only for parent categories)
-    if ($hasChildren) {
-        $childrenWithProducts = array_filter($children, fn($ch) => (int)$ch['product_count'] > 0);
-        if (!empty($childrenWithProducts)) {
-            usort($childrenWithProducts, fn($a,$b) => (int)$b['product_count'] - (int)$a['product_count']);
-            echo '<h3>' . $t('subcategories');
-            if (!empty($selectedSubcats)) echo ' <span style="color:#a82d5c">●</span>';
-            echo '</h3>';
-            foreach ($childrenWithProducts as $ch) {
-                $checked = in_array((int)$ch['id'], $selectedSubcats) ? ' checked' : '';
-                echo '<label><input type="checkbox" name="subcat[]" value="' . (int)$ch['id'] . '"' . $checked . '> ';
-                echo $e($catName($ch['name'])) . ' <span class="cnt">(' . (int)$ch['product_count'] . ')</span></label>';
-            }
-        }
+    if ($priceMin) $sortHidden .= Template::render('storefront/hidden-input', ['name' => 'pmin', 'value' => (int)($priceMin / 100)]);
+    if ($priceMax) $sortHidden .= Template::render('storefront/hidden-input', ['name' => 'pmax', 'value' => (int)($priceMax / 100)]);
+    foreach ($rangeFilters as $name => $range) {
+        if (isset($range['min'])) $sortHidden .= Template::render('storefront/hidden-input', ['name' => 'rmin[' . $name . ']', 'value' => $range['min']]);
+        if (isset($range['max'])) $sortHidden .= Template::render('storefront/hidden-input', ['name' => 'rmax[' . $name . ']', 'value' => $range['max']]);
     }
 
-    // Price range
-    echo '<h3>' . $t('price') . '</h3>';
-    echo '<div style="display:flex;gap:4px;align-items:center">';
-    $pminDisplay = $priceMin ? (int)($priceMin / 100) : '';
-    $pmaxDisplay = $priceMax ? (int)($priceMax / 100) : '';
-    echo '<input type="number" name="pmin" placeholder="' . $t('ph_from') . '" value="' . $pminDisplay . '" style="width:80px;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:.85em">';
-    echo '<span>—</span>';
-    echo '<input type="number" name="pmax" placeholder="' . $t('ph_to') . '" value="' . $pmaxDisplay . '" style="width:80px;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:.85em">';
-    echo '<span style="font-size:.85em;color:#888">€</span></div>';
+    $children = array_values(array_filter($children, static fn(array $child): bool => (int)$child['product_count'] > 0));
+    usort($children, static fn(array $a, array $b): int => (int)$b['product_count'] <=> (int)$a['product_count']);
+    $subcategories = $children ? Template::render('storefront/category-subcategories', [
+        'label' => $t('subcategories'),
+        'active' => $selectedSubcats !== [],
+        'items' => array_map(static fn(array $child): array => [
+            'id' => (int)$child['id'], 'name' => $catName((string)$child['name']), 'count' => (int)$child['product_count'],
+            'checked' => in_array((int)$child['id'], $selectedSubcats, true) ? ' checked' : '',
+        ], $children),
+    ]) : '';
 
-    foreach ($filters as $critName => $values) {
-        $activeVals = $specFilters[$critName] ?? [];
-        // Detect numeric filter: all values have numeric_val and there are many distinct values
+    $filtersHtml = '';
+    foreach ($result['filters'] as $name => $values) {
         $allNumeric = count($values) > 5 && !empty($values[0]['numeric']);
-        if ($allNumeric) {
-            foreach ($values as $v) { if ($v['numeric'] === null) { $allNumeric = false; break; } }
-        }
-
-        echo '<h3>' . $e($critName);
-        $rangeKey = 'range_' . md5($critName);
-        $activeMin = $specFilters[$critName . '__min'] ?? ($_GET['rmin'][$critName] ?? '');
-        $activeMax = $specFilters[$critName . '__max'] ?? ($_GET['rmax'][$critName] ?? '');
-        if ($allNumeric && ($activeMin !== '' || $activeMax !== '')) echo ' <span style="color:#a82d5c">●</span>';
-        elseif (!$allNumeric && !empty($activeVals)) echo ' <span style="color:#a82d5c">●</span>';
-        echo '</h3>';
-
-        if ($allNumeric) {
-            // Range filter (min-max inputs) for numeric specs like kW
-            $numVals = array_map(fn($v) => (float)$v['numeric'], $values);
-            $minVal = min($numVals);
-            $maxVal = max($numVals);
-            $unit = '';
-            if (preg_match('/\(([^)]+)\)/', $critName, $um)) $unit = $um[1];
-            echo '<div style="display:flex;gap:4px;align-items:center">';
-            echo '<input type="number" name="rmin[' . $e($critName) . ']" placeholder="' . $minVal . '" value="' . $e((string)$activeMin) . '" step="0.1" style="width:70px;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:.85em">';
-            echo '<span>—</span>';
-            echo '<input type="number" name="rmax[' . $e($critName) . ']" placeholder="' . $maxVal . '" value="' . $e((string)$activeMax) . '" step="0.1" style="width:70px;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:.85em">';
-            if ($unit) echo '<span style="font-size:.85em;color:#888">' . $e($unit) . '</span>';
-            echo '</div>';
-        } else {
-            // Checkbox filter for discrete values
-            foreach ($values as $v) {
-                $checked = in_array($v['value'], $activeVals) ? ' checked' : '';
-                echo '<label><input type="checkbox" name="spec[' . $e($critName) . '][]" value="' . $e($v['value']) . '"' . $checked . '> ';
-                echo $e($v['value']) . ' <span class="cnt">(' . $v['count'] . ')</span></label>';
-            }
-        }
+        if ($allNumeric) foreach ($values as $value) if ($value['numeric'] === null) { $allNumeric = false; break; }
+        $activeValues = $specFilters[$name] ?? [];
+        $activeMin = $rangeFilters[$name]['min'] ?? '';
+        $activeMax = $rangeFilters[$name]['max'] ?? '';
+        $numericValues = $allNumeric ? array_map(static fn(array $value): float => (float)$value['numeric'], $values) : [];
+        $unit = '';
+        if ($allNumeric && preg_match('/\(([^)]+)\)/', $name, $unitMatch)) $unit = $unitMatch[1];
+        $filtersHtml .= Template::render('storefront/category-filter', [
+            'name' => $name,
+            'active' => $allNumeric ? ($activeMin !== '' || $activeMax !== '') : $activeValues !== [],
+            'range' => $allNumeric,
+            'min_placeholder' => $numericValues ? min($numericValues) : '',
+            'max_placeholder' => $numericValues ? max($numericValues) : '',
+            'active_min' => $activeMin,
+            'active_max' => $activeMax,
+            'unit' => $unit,
+            'values' => array_map(static fn(array $value): array => [
+                'filter_name' => $name, 'value' => $value['value'], 'count' => $value['count'],
+                'checked' => in_array($value['value'], $activeValues, true) ? ' checked' : '',
+            ], $values),
+        ]);
     }
 
-    echo '<div class="filter-actions">';
-    echo '<button type="submit" class="btn-apply">' . $t('filter') . '</button>';
-    if ($hasActiveFilters) echo '<a href="?page=category&slug=' . $e($cat['slug']) . '" class="btn-clear">' . $t('clear_filter') . '</a>';
-    echo '</div></form>';
+    $breadcrumb = [['url' => '?', 'label' => $t('home'), 'current' => false]];
+    foreach (Categories::breadcrumb($catId) as $item) $breadcrumb[] = ['url' => '?page=category&slug=' . rawurlencode((string)$item['slug']), 'label' => $catName((string)$item['name']), 'current' => false];
+    $sortLabels = ['price_asc' => 'price_asc', 'price_desc' => 'price_desc', 'name_asc' => 'name_asc', 'name_desc' => 'name_desc', 'newest' => 'newest'];
+    $sortOptions = [];
+    foreach ($sortLabels as $value => $labelKey) $sortOptions[] = ['value' => $value, 'label' => $t($labelKey), 'selected' => $sort === $value ? ' selected' : ''];
+    $hasActiveFilters = $specFilters !== [] || $priceMin || $priceMax || $selectedSubcats !== [] || $rangeFilters !== [];
 
-    // Product listing
-    echo '<div>';
-    if (empty($result['products'])) {
-        echo '<p style="padding:40px;text-align:center;color:#888">' . $t('no_parts_filter') . '</p>';
-    } else {
-        echo '<div class="grid grid-4">';
-        foreach (Products::enrichMany($result['products']) as $p) {
-            $imgs = is_string($p['images'] ?? null) ? json_decode($p['images'], true) : ($p['images'] ?? []);
-            $firstImg = $imgs[0] ?? null;
-            echo '<div class="card" style="position:relative">';
-            echo '<a href="?page=product&slug=' . $e($p['slug']) . '">';
-            if ($firstImg) {
-                echo '<img class="card-img" src="' . $e($firstImg) . '" alt="' . $e($p['name']) . '" loading="lazy">';
-            } else {
-                echo '<div class="card-img-placeholder">📷</div>';
-            }
-            if (!empty($p['compare_price']) && $p['compare_price'] > $p['price']) {
-                echo '<span class="sticker sticker-sale">SALE</span>';
-            }
-            echo '<h3>' . $e($p['name']) . '</h3>';
-            echo '<div class="price">' . I18n::price($p['price'], StoreContext::current()->currency());
-            if (!empty($p['compare_price'])) echo '<span class="old-price">' . I18n::price($p['compare_price'], StoreContext::current()->currency()) . '</span>';
-            echo '</div>';
-            if ($p['stock'] > 0) echo '<div class="badge">' . $t('in_stock') . '</div>';
-            echo '</a>';
-            echo '<button class="btn-cart" type="button" data-storefront-action="cart-add" data-product-id="' . (int)$p['id'] . '" data-quantity="1">' . $t('add_to_cart') . '</button>';
-            echo '</div>';
-        }
-        echo '</div>';
-        echo renderPagination($result['page'], $result['pages'], buildCategoryUrl($cat['slug'], $sort, $specFilters, $priceMin, $priceMax, $selectedSubcats, $rangeFilters));
-    }
-    echo '</div></div>';
-    return ob_get_clean();
+    return Template::render('storefront/category-page', [
+        'breadcrumb_html' => storefrontBreadcrumb($breadcrumb),
+        'name' => $catName((string)$cat['name']), 'slug' => (string)$cat['slug'], 'total' => number_format((int)$result['total']),
+        'parts_label' => $t('parts_count'), 'sort_label' => $t('sort'), 'sort' => $sort, 'sort_options' => $sortOptions, 'sort_hidden_html' => $sortHidden,
+        'subcategories_html' => $subcategories, 'price_label' => $t('price'), 'from_label' => $t('ph_from'), 'to_label' => $t('ph_to'),
+        'price_min' => $priceMin ? (int)($priceMin / 100) : '', 'price_max' => $priceMax ? (int)($priceMax / 100) : '',
+        'filters_html' => $filtersHtml, 'filter_label' => $t('filter'), 'has_active_filters' => (bool)$hasActiveFilters,
+        'clear_url' => '?page=category&slug=' . rawurlencode((string)$cat['slug']), 'clear_label' => $t('clear_filter'),
+        'product_grid_html' => renderProductGrid($result['products'], $t('no_parts_filter'), true),
+        'pagination_html' => renderPagination((int)$result['page'], (int)$result['pages'], buildCategoryUrl((string)$cat['slug'], $sort, $specFilters, $priceMin, $priceMax, $selectedSubcats, $rangeFilters)),
+    ]);
 }
 
-function renderProduct(array $p): string {
-    global $e, $price, $catName, $t, $hasTecDoc;
-    $catId = (int)$p['category_id'];
-    $bc = Categories::breadcrumb($catId);
-    $specifications = is_array($p['specifications'] ?? null) ? $p['specifications'] : [];
-    $oeNumbers = is_array($p['oe_numbers'] ?? null) ? $p['oe_numbers'] : [];
-    $vehicleCount = (int)($p['vehicle_count'] ?? 0);
-    $showAutomotive = ($hasTecDoc && ($p['product_type'] ?? '') === 'auto_part') || $vehicleCount > 0 || $oeNumbers !== [];
+function renderProduct(array $product): string {
+    global $catName, $t, $hasTecDoc, $price;
+    $specifications = is_array($product['specifications'] ?? null) ? $product['specifications'] : [];
+    $oeNumbers = is_array($product['oe_numbers'] ?? null) ? $product['oe_numbers'] : [];
+    $vehicleCount = (int)($product['vehicle_count'] ?? 0);
+    $showAutomotive = ($hasTecDoc && ($product['product_type'] ?? '') === 'auto_part') || $vehicleCount > 0 || $oeNumbers !== [];
+    $breadcrumb = [['url' => '?', 'label' => $t('home'), 'current' => false]];
+    foreach (Categories::breadcrumb((int)$product['category_id']) as $item) $breadcrumb[] = ['url' => '?page=category&slug=' . rawurlencode((string)$item['slug']), 'label' => $catName((string)$item['name']), 'current' => false];
+    $breadcrumb[] = ['url' => '', 'label' => (string)$product['name'], 'current' => true];
 
-    ob_start();
-    echo '<div class="breadcrumb"><a href="?">' . $t('home') . '</a>';
-    foreach ($bc as $b) echo ' &rsaquo; <a href="?page=category&slug=' . $e($b['slug']) . '">' . $e($catName($b['name'])) . '</a>';
-    echo ' &rsaquo; ' . $e($p['name']) . '</div>';
-
-    $attrs = is_array($p['attrs']) ? $p['attrs'] : json_decode($p['attrs'] ?? '{}', true);
-    echo '<div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-bottom:24px">';
-    echo '<div>';
-    if (!empty($p['images']) && !empty($p['images'][0]) && $p['images'][0] !== 'placeholder.jpg') {
-        echo '<img src="' . $e($p['images'][0]) . '" alt="" style="max-width:100%;border-radius:8px">';
-    } else {
-        echo '<div style="background:#eee;height:300px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:3em">📦</div>';
+    $attributes = is_array($product['attrs'] ?? null) ? $product['attrs'] : (json_decode((string)($product['attrs'] ?? '{}'), true) ?: []);
+    $images = is_array($product['images'] ?? null) ? $product['images'] : (json_decode((string)($product['images'] ?? '[]'), true) ?: []);
+    $image = !empty($images[0]) && $images[0] !== 'placeholder.jpg' ? (string)$images[0] : '';
+    $oeRows = '';
+    $lastBrand = null;
+    foreach ($oeNumbers as $oe) {
+        $brand = (string)$oe['oem_brand'];
+        $oeRows .= Template::render('storefront/product-oe-row', [
+            'brand_heading' => $brand !== $lastBrand, 'brand' => $brand, 'number' => (string)$oe['oem_number'],
+            'url' => '?page=oe&q=' . rawurlencode((string)$oe['oem_number']),
+        ]);
+        $lastBrand = $brand;
     }
-    echo '</div><div>';
-    echo '<h1 style="margin-bottom:8px">' . $e($p['name']) . '</h1>';
-    echo '<p style="color:#888;margin-bottom:4px">SKU: ' . $e($p['sku']) . '</p>';
-    if (!empty($attrs['supplier'])) echo '<p style="color:#888;margin-bottom:12px">' . $t('supplier') . ': <strong>' . $e($attrs['supplier']) . '</strong></p>';
-    echo '<div class="price" style="font-size:1.6em;margin-bottom:12px">' . $price($p['price']);
-    if (!empty($p['compare_price'])) echo '<span class="old-price" style="font-size:.6em">' . $price($p['compare_price']) . '</span>';
-    echo '</div>';
-    echo $p['stock'] > 0 ? '<div class="badge" style="font-size:.9em;margin-bottom:12px">✓ ' . $t('in_stock') . ' (' . $p['stock'] . ' ks)</div>'
-                         : '<div style="color:#c62828;font-size:.9em;margin-bottom:12px">✗ ' . $t('out_of_stock') . '</div>';
-    if (!empty($p['summary'])) echo '<p style="margin-top:12px;color:#555">' . $e($p['summary']) . '</p>';
-    if ($showAutomotive) echo '<p style="margin-top:8px;color:#888;font-size:.85em">' . $t('compatible_with') . ' ' . $vehicleCount . ' ' . $t('vehicles') . '</p>';
-    // Add to cart
-    echo '<div style="margin-top:20px;display:flex;gap:8px;align-items:center">';
-    echo '<input type="number" value="1" min="1" max="99" class="qty-input" id="qty-' . (int)$p['id'] . '">';
-    echo '<button class="btn-cart btn-cart-lg" type="button" data-storefront-action="cart-add" data-product-id="' . (int)$p['id'] . '" data-quantity-input="qty-' . (int)$p['id'] . '">' . $t('add_to_cart') . '</button>';
-    echo '</div>';
-    echo '</div></div>';
+    $vehicles = $showAutomotive ? TecDoc::vehiclesForProduct((int)$product['id'], 100) : [];
+    $vehicleRows = array_map(static fn(array $vehicle): array => [
+        'model' => $vehicle['manufacturer'] . ' ' . $vehicle['model'],
+        'type' => (string)$vehicle['type_name'],
+    ], $vehicles);
+    $automotiveHtml = $showAutomotive ? Template::render('storefront/product-automotive', [
+        'oe_rows_html' => $oeRows, 'no_oe' => $oeNumbers === [], 'no_oe_label' => $t('no_oe'),
+        'vehicle_model_label' => $t('vehicle_manufacturer_model'), 'vehicle_engine_label' => $t('vehicle_engine_type'),
+        'vehicles' => $vehicleRows, 'no_vehicles' => $vehicles === [], 'no_vehicles_label' => $t('no_vehicles'),
+    ]) : '';
 
-    // Tabs
-    echo '<div class="tabs" role="tablist">';
-    echo '<button type="button" class="tab active" role="tab" aria-selected="true" data-product-tab="specs">' . $t('specs') . ' (' . count($specifications) . ')</button>';
-    if ($showAutomotive) {
-        echo '<button type="button" class="tab" role="tab" aria-selected="false" data-product-tab="oe">' . $t('oe_numbers') . ' (' . count($oeNumbers) . ')</button>';
-        echo '<button type="button" class="tab" role="tab" aria-selected="false" data-product-tab="vehicles">' . $t('vehicles_tab') . ' (' . $vehicleCount . ')</button>';
-    }
-    echo '</div>';
-
-    // Specs tab
-    echo '<div class="tab-content active" id="tab-specs"><table class="spec-table">';
-    foreach ($specifications as $s) {
-        echo '<tr><td>' . $e($s['criteria_name']) . '</td><td><strong>' . $e($s['criteria_value']) . '</strong></td></tr>';
-    }
-    if ($specifications === []) echo '<tr><td colspan="2" style="color:#888">' . $t('no_specs') . '</td></tr>';
-    echo '</table></div>';
-
-    if ($showAutomotive) {
-        echo '<div class="tab-content" id="tab-oe"><table class="spec-table">';
-        $lastBrand = '';
-        foreach ($oeNumbers as $oe) {
-            if ($oe['oem_brand'] !== $lastBrand) {
-                $lastBrand = $oe['oem_brand'];
-                echo '<tr><td colspan="2" style="font-weight:700;background:#f0f0f0;padding:8px 12px">' . $e($lastBrand) . '</td></tr>';
-            }
-            echo '<tr><td></td><td><a href="?page=oe&q=' . urlencode($oe['oem_number']) . '">' . $e($oe['oem_number']) . '</a></td></tr>';
-        }
-        if ($oeNumbers === []) echo '<tr><td colspan="2" style="color:#888">' . $t('no_oe') . '</td></tr>';
-        echo '</table></div>';
-
-        $vehicles = TecDoc::vehiclesForProduct((int)$p['id'], 100);
-        echo '<div class="tab-content" id="tab-vehicles"><table class="spec-table">';
-        echo '<tr style="background:#f0f0f0;font-weight:600"><td>' . $t('vehicle_manufacturer_model') . '</td><td>' . $t('vehicle_engine_type') . '</td></tr>';
-        foreach ($vehicles as $vehicle) {
-            echo '<tr><td>' . $e($vehicle['manufacturer']) . ' ' . $e($vehicle['model']) . '</td><td>' . $e($vehicle['type_name']) . '</td></tr>';
-        }
-        if ($vehicles === []) echo '<tr><td colspan="2" style="color:#888">' . $t('no_vehicles') . '</td></tr>';
-        echo '</table></div>';
-    }
-
-    return ob_get_clean();
+    return Template::render('storefront/product-detail', [
+        'breadcrumb_html' => storefrontBreadcrumb($breadcrumb), 'id' => (int)$product['id'], 'image' => $image,
+        'name' => (string)$product['name'], 'sku' => (string)$product['sku'], 'supplier' => (string)($attributes['supplier'] ?? ''),
+        'supplier_label' => $t('supplier'), 'price' => $price((int)$product['price']),
+        'compare_price' => !empty($product['compare_price']) ? $price((int)$product['compare_price']) : '',
+        'in_stock' => (int)$product['stock'] > 0, 'stock' => (int)$product['stock'], 'in_stock_label' => $t('in_stock'), 'out_of_stock_label' => $t('out_of_stock'),
+        'summary' => (string)($product['summary'] ?? ''), 'show_automotive' => $showAutomotive, 'compatible_with_label' => $t('compatible_with'),
+        'vehicle_count' => $vehicleCount, 'vehicles_label' => $t('vehicles'), 'add_to_cart_label' => $t('add_to_cart'),
+        'specs_label' => $t('specs'), 'spec_count' => count($specifications), 'oe_label' => $t('oe_numbers'), 'oe_count' => count($oeNumbers), 'vehicles_tab_label' => $t('vehicles_tab'),
+        'specifications' => array_map(static fn(array $spec): array => ['name' => (string)$spec['criteria_name'], 'value' => (string)$spec['criteria_value']], $specifications),
+        'no_specs' => $specifications === [], 'no_specs_label' => $t('no_specs'), 'automotive_html' => $automotiveHtml,
+    ]);
 }
 
-function renderVehicle(int $ktype, array $result, array $cats, ?int $activeCatId): string {
-    global $e, $price, $catName, $t;
-    ob_start();
-    echo '<div class="breadcrumb"><a href="?">' . $t('home') . '</a> &rsaquo; ' . $t('vehicle_parts') . ' (ktype: ' . $ktype . ')</div>';
-    echo '<h1 style="margin-bottom:16px">' . $t('vehicle_parts') . '</h1>';
-
-    if (!empty($cats)) {
-        echo '<div class="grid grid-3" style="margin-bottom:24px">';
-        foreach ($cats as $c) {
-            $active = $activeCatId === (int)$c['id'] ? 'border:2px solid #a82d5c;' : '';
-            echo '<a href="?page=vehicle&ktype=' . $ktype . '&cat=' . (int)$c['id'] . '" class="cat-card" style="' . $active . '">';
-            echo '<span style="flex:1">' . $e($catName($c['name'])) . '</span><span class="count">' . (int)$c['part_count'] . '</span></a>';
-        }
-        echo '</div>';
+function renderVehicle(int $ktype, array $result, array $categories, ?int $activeCatId): string {
+    global $catName, $t;
+    $categoryHtml = '';
+    foreach ($categories as $category) {
+        $categoryHtml .= Template::render('storefront/vehicle-category', [
+            'url' => '?page=vehicle&ktype=' . $ktype . '&cat=' . (int)$category['id'], 'name' => $catName((string)$category['name']),
+            'count' => (int)$category['part_count'], 'active' => $activeCatId === (int)$category['id'],
+        ]);
     }
-
-    echo '<div class="sort-bar"><span class="total">' . number_format($result['total']) . ' ' . $t('parts_count') . '</span></div>';
-    echo '<div class="grid grid-4">';
-    foreach (Products::enrichMany($result['products']) as $p) {
-        $imgs = is_string($p['images'] ?? null) ? json_decode($p['images'], true) : ($p['images'] ?? []);
-        $firstImg = $imgs[0] ?? null;
-        echo '<div class="card" style="position:relative">';
-        echo '<a href="?page=product&slug=' . $e($p['slug']) . '">';
-        if ($firstImg) {
-            echo '<img class="card-img" src="' . $e($firstImg) . '" alt="' . $e($p['name']) . '" loading="lazy">';
-        } else {
-            echo '<div class="card-img-placeholder">📷</div>';
-        }
-        echo '<h3>' . $e($p['name']) . '</h3>';
-        echo '<div class="price">' . $price($p['price']) . '</div>';
-        echo '</a>';
-        echo '<button class="btn-cart" type="button" data-storefront-action="cart-add" data-product-id="' . (int)$p['id'] . '" data-quantity="1">' . $t('add_to_cart') . '</button>';
-        echo '</div>';
-    }
-    echo '</div>';
     $baseUrl = '?page=vehicle&ktype=' . $ktype . ($activeCatId ? '&cat=' . $activeCatId : '');
-    echo renderPagination($result['page'], $result['pages'], $baseUrl);
-    return ob_get_clean();
+    return Template::render('storefront/vehicle-page', [
+        'breadcrumb_html' => storefrontBreadcrumb([['url' => '?', 'label' => $t('home'), 'current' => false], ['url' => '', 'label' => $t('vehicle_parts') . ' (ktype: ' . $ktype . ')', 'current' => true]]),
+        'heading' => $t('vehicle_parts'), 'categories_html' => $categoryHtml, 'total' => number_format((int)$result['total']), 'parts_label' => $t('parts_count'),
+        'product_grid_html' => renderProductGrid($result['products']), 'pagination_html' => renderPagination((int)$result['page'], (int)$result['pages'], $baseUrl),
+    ]);
 }
 
-function renderSearch(string $q, array $result): string {
-    global $e, $price, $t;
-    ob_start();
-    echo '<div class="breadcrumb"><a href="?">' . $t('home') . '</a> &rsaquo; ' . $t('search') . ': <strong>' . $e($q) . '</strong></div>';
-    echo '<h1 style="margin-bottom:4px">' . $t('search_results') . '</h1>';
-    echo '<div class="sort-bar"><span class="total">' . number_format($result['total']) . ' ' . $t('results_for') . ' "' . $e($q) . '"</span></div>';
-    echo renderProductGrid($result['products']);
-    echo renderPagination($result['page'], $result['pages'], '?page=search&q=' . urlencode($q));
-    return ob_get_clean();
+function renderSearch(string $query, array $result): string {
+    global $t;
+    return Template::render('storefront/search-results', [
+        'breadcrumb_html' => storefrontBreadcrumb([['url' => '?', 'label' => $t('home'), 'current' => false], ['url' => '', 'label' => $t('search') . ': ' . $query, 'current' => true]]),
+        'heading' => $t('search_results'), 'total' => number_format((int)$result['total']), 'results_label' => $t('results_for'), 'query' => $query,
+        'product_grid_html' => renderProductGrid($result['products']), 'pagination_html' => renderPagination((int)$result['page'], (int)$result['pages'], '?page=search&q=' . rawurlencode($query)),
+    ]);
 }
 
-function renderOE(string $q, array $result): string {
-    global $e, $price, $t;
-    ob_start();
-    echo '<div class="breadcrumb"><a href="?">' . $t('home') . '</a> &rsaquo; OE: <strong>' . $e($q) . '</strong></div>';
-    echo '<h1 style="margin-bottom:4px">' . $t('oe_search') . '</h1>';
-    echo '<div class="sort-bar"><span class="total">' . number_format($result['total']) . ' ' . $t('results_for') . ' OE "' . $e($q) . '"</span></div>';
-    echo renderProductGrid($result['products']);
-    echo renderPagination($result['page'], $result['pages'], '?page=oe&q=' . urlencode($q));
-    return ob_get_clean();
+function renderOE(string $query, array $result): string {
+    global $t;
+    return Template::render('storefront/search-results', [
+        'breadcrumb_html' => storefrontBreadcrumb([['url' => '?', 'label' => $t('home'), 'current' => false], ['url' => '', 'label' => 'OE: ' . $query, 'current' => true]]),
+        'heading' => $t('oe_search'), 'total' => number_format((int)$result['total']), 'results_label' => $t('results_for') . ' OE', 'query' => $query,
+        'product_grid_html' => renderProductGrid($result['products']), 'pagination_html' => renderPagination((int)$result['page'], (int)$result['pages'], '?page=oe&q=' . rawurlencode($query)),
+    ]);
 }
 
-function renderProductGrid(array $products): string {
-    global $e, $price, $t;
+function renderProductGrid(array $products, ?string $emptyText = null, bool $showStock = false): string {
     $products = Products::enrichMany($products);
-    ob_start();
-    echo '<div class="grid grid-4">';
-    foreach ($products as $p) {
-        $imgs = is_string($p['images'] ?? null) ? json_decode($p['images'], true) : ($p['images'] ?? []);
-        $firstImg = $imgs[0] ?? null;
-        echo '<div class="card" style="position:relative">';
-        echo '<a href="?page=product&slug=' . $e($p['slug']) . '">';
-        if ($firstImg) {
-            echo '<img class="card-img" src="' . $e($firstImg) . '" alt="' . $e($p['name']) . '" loading="lazy">';
-        } else {
-            echo '<div class="card-img-placeholder">📷</div>';
-        }
-        if (!empty($p['compare_price']) && $p['compare_price'] > $p['price']) {
-            echo '<span class="sticker sticker-sale">SALE</span>';
-        }
-        echo '<h3>' . $e($p['name']) . '</h3>';
-        echo '<div class="price">' . $price($p['price']);
-        if (!empty($p['compare_price'])) echo '<span class="old-price">' . $price($p['compare_price']) . '</span>';
-        echo '</div>';
-        echo '</a>';
-        echo '<button class="btn-cart" type="button" data-storefront-action="cart-add" data-product-id="' . (int)$p['id'] . '" data-quantity="1">' . $t('add_to_cart') . '</button>';
-        echo '</div>';
-    }
-    if (empty($products)) echo '<p style="padding:40px;text-align:center;color:#888;grid-column:1/-1">' . $t('no_results') . '</p>';
-    echo '</div>';
-    return ob_get_clean();
+    $cards = '';
+    foreach ($products as $product) $cards .= storefrontProductCard($product, $showStock);
+    return Template::render('storefront/product-grid', ['cards_html' => $cards, 'empty_text' => $products ? '' : ($emptyText ?? I18n::t('no_results'))]);
 }
 
 function renderPagination(int $page, int $pages, string $baseUrl): string {
     if ($pages <= 1) return '';
-    $sep = str_contains($baseUrl, '?') ? '&' : '?';
-    $html = '<div class="pagination">';
-    if ($page > 1) $html .= '<a href="' . $baseUrl . $sep . 'pg=' . ($page-1) . '">&laquo;</a>';
-    $start = max(1, $page - 3);
-    $end = min($pages, $page + 3);
-    for ($i = $start; $i <= $end; $i++) {
-        $html .= $i === $page
-            ? '<span class="current">' . $i . '</span>'
-            : '<a href="' . $baseUrl . $sep . 'pg=' . $i . '">' . $i . '</a>';
+    $separator = str_contains($baseUrl, '?') ? '&' : '?';
+    $links = [];
+    if ($page > 1) $links[] = ['url' => $baseUrl . $separator . 'pg=' . ($page - 1), 'label' => '«', 'current' => false];
+    for ($number = max(1, $page - 3), $end = min($pages, $page + 3); $number <= $end; $number++) {
+        $links[] = ['url' => $baseUrl . $separator . 'pg=' . $number, 'label' => $number, 'current' => $number === $page];
     }
-    if ($page < $pages) $html .= '<a href="' . $baseUrl . $sep . 'pg=' . ($page+1) . '">&raquo;</a>';
-    $html .= '</div>';
-    return $html;
+    if ($page < $pages) $links[] = ['url' => $baseUrl . $separator . 'pg=' . ($page + 1), 'label' => '»', 'current' => false];
+    return Template::render('storefront/pagination', ['visible' => true, 'links' => $links]);
 }
 
 function buildCategoryUrl(string $slug, string $sort, array $specFilters, ?int $pmin, ?int $pmax, array $subcats = [], array $rangeFilters = []): string {
-    $url = '?page=category&slug=' . urlencode($slug) . '&sort=' . urlencode($sort);
-    foreach ($subcats as $scId) $url .= '&subcat[]=' . (int)$scId;
-    foreach ($specFilters as $fn => $fvs) {
-        foreach ($fvs as $fv) $url .= '&spec[' . urlencode($fn) . '][]=' . urlencode($fv);
-    }
+    $url = '?page=category&slug=' . rawurlencode($slug) . '&sort=' . rawurlencode($sort);
+    foreach ($subcats as $id) $url .= '&subcat[]=' . (int)$id;
+    foreach ($specFilters as $name => $values) foreach ($values as $value) $url .= '&spec[' . rawurlencode($name) . '][]=' . rawurlencode($value);
     if ($pmin) $url .= '&pmin=' . (int)($pmin / 100);
     if ($pmax) $url .= '&pmax=' . (int)($pmax / 100);
-    foreach ($rangeFilters as $fn => $rv) {
-        if (isset($rv['min'])) $url .= '&rmin[' . urlencode($fn) . ']=' . urlencode((string)$rv['min']);
-        if (isset($rv['max'])) $url .= '&rmax[' . urlencode($fn) . ']=' . urlencode((string)$rv['max']);
+    foreach ($rangeFilters as $name => $range) {
+        if (isset($range['min'])) $url .= '&rmin[' . rawurlencode($name) . ']=' . rawurlencode((string)$range['min']);
+        if (isset($range['max'])) $url .= '&rmax[' . rawurlencode($name) . ']=' . rawurlencode((string)$range['max']);
     }
     return $url;
 }
-

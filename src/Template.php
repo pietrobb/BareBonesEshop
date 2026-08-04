@@ -194,7 +194,7 @@ class Template {
         $tpl = preg_replace_callback('/\{\{([@\w][\w.@]*)\}\}/', function($m) use ($data) {
             $val = self::resolve($m[1], $data);
             if ($val === null || $val === false) return '';
-            return esc((string)$val);
+            return str_replace(['{', '}'], ['&#123;', '&#125;'], esc((string)$val));
         }, $tpl);
 
         return $tpl;

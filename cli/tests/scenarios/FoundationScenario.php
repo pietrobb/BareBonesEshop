@@ -942,6 +942,11 @@ $html = Template::process('{{#each items}}[{{name}}]{{/each}}', ['items' => [
     ['name' => 'A'], ['name' => 'B'], ['name' => 'C']
 ]]);
 assert_equals('[A][B][C]', $html, '#each loop works');
+$html = Template::process('{{#each items}}{{name}}{{/each}}', [
+    'items' => [['name' => '{{{secret}}}']],
+    'secret' => '<b>must not render</b>',
+]);
+assert_equals('&#123;&#123;&#123;secret&#125;&#125;&#125;', $html, '#each escaped values cannot become template directives');
 
 // #each with @index, @first, @last
 $html = Template::process('{{#each items}}{{@index}}{{#if @first}}F{{/if}}{{#if @last}}L{{/if}} {{/each}}', [

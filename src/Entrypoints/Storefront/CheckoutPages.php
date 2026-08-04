@@ -1,165 +1,109 @@
 <?php
-/** Cart rendering and HTML checkout transport. */
+/** Cart/checkout data presenters and checkout transport. Markup is theme-owned. */
 function renderCart(): string {
-    global $e, $price, $t, $csrfField;
+    global $price, $t, $csrfField;
     $cartData = Cart::enriched();
     $cart = $cartData['items'];
-    ob_start();
-
-    echo '<div class="breadcrumb"><a href="?">' . $t('home') . '</a> &rsaquo; ' . $t('cart') . '</div>';
-    echo '<h1 style="margin-bottom:20px">' . $t('cart_title') . '</h1>';
-
-    if (empty($cart)) {
-        echo '<div style="text-align:center;padding:60px;background:#fff;border-radius:8px">';
-        echo '<p style="font-size:1.2em;color:#555;margin-bottom:16px">' . $t('cart_empty') . '</p>';
-        echo '<a href="?" style="color:#a82d5c;font-weight:600">' . $t('continue_shopping') . '</a>';
-        echo '</div>';
-        return ob_get_clean();
+    $breadcrumb = storefrontBreadcrumb([
+        ['url' => '?', 'label' => $t('home'), 'current' => false],
+        ['url' => '', 'label' => $t('cart'), 'current' => true],
+    ]);
+    if (!$cart) {
+        return Template::render('storefront/cart-empty', [
+            'breadcrumb_html' => $breadcrumb, 'title' => $t('cart_title'), 'message' => $t('cart_empty'),
+            'home_url' => '?', 'continue_label' => $t('continue_shopping'),
+        ]);
     }
 
     $subtotal = (int)$cartData['subtotal'];
-    echo '<div style="display:grid;grid-template-columns:1fr 320px;gap:24px">';
+    $shipping = $subtotal >= 5000 ? 0 : 499;
+    $items = array_map(static fn(array $item): array => [
+        'id' => (int)$item['product_id'], 'url' => '?page=product&slug=' . rawurlencode((string)$item['slug']),
+        'name' => (string)$item['name'], 'sku' => (string)$item['sku'], 'price' => $price((int)$item['price']),
+        'quantity' => (int)$item['qty'], 'line_total' => $price((int)$item['total']),
+        'csrf_field_html' => $csrfField, 'remove_label' => $t('remove'),
+    ], $cart);
 
-    // Cart table
-    echo '<div><table class="cart-table">';
-    echo '<tr><th>' . $t('product') . '</th><th>' . $t('price') . '</th><th>' . $t('quantity') . '</th><th>' . $t('total') . '</th><th></th></tr>';
-    foreach ($cart as $p) {
-        $pid = (int)$p['product_id'];
-        $qty = (int)$p['qty'];
-        $lineTotal = (int)$p['total'];
-        echo '<tr>';
-        echo '<td><a href="?page=product&slug=' . $e($p['slug']) . '" class="prod-name">' . $e($p['name']) . '</a>';
-        echo '<div class="prod-sku">' . $e($p['sku']) . '</div></td>';
-        echo '<td>' . $price($p['price']) . '</td>';
-        echo '<td><form method="post" style="display:flex;gap:4px">';
-        echo $csrfField;
-        echo '<input type="hidden" name="cart_action" value="update">';
-        echo '<input type="hidden" name="product_id" value="' . $pid . '">';
-        echo '<input type="hidden" name="redirect" value="?page=cart">';
-        echo '<input type="number" name="quantity" value="' . $qty . '" min="1" max="99" class="qty-input" data-submit-on-change>';
-        echo '</form></td>';
-        echo '<td style="font-weight:600">' . $price($lineTotal) . '</td>';
-        echo '<td><form method="post">' . $csrfField . '<input type="hidden" name="cart_action" value="remove"><input type="hidden" name="product_id" value="' . $pid . '"><input type="hidden" name="redirect" value="?page=cart">';
-        echo '<button type="submit" class="btn-remove" title="' . $t('remove') . '">✕</button></form></td>';
-        echo '</tr>';
-    }
-    echo '</table></div>';
-
-    // Summary sidebar
-    $shipping = $subtotal >= 5000 ? 0 : 499; // Free shipping over 50€
-    $total = $subtotal + $shipping;
-
-    echo '<div class="cart-summary">';
-    echo '<h3>' . $t('order_summary') . '</h3>';
-    echo '<div class="row"><span>' . $t('subtotal') . '</span><span>' . $price($subtotal) . '</span></div>';
-    echo '<div class="row"><span>' . $t('shipping') . '</span><span>' . ($shipping === 0 ? '<span style="color:#2e7d32">' . $t('free_shipping') . '</span>' : $price($shipping)) . '</span></div>';
-    if ($shipping > 0) echo '<div style="font-size:.75em;color:#888">' . $t('free_over') . ' ' . $price(5000) . '</div>';
-    echo '<div class="row total-row"><span>' . $t('total_price') . '</span><span>' . $price($total) . '</span></div>';
-    echo '<a href="?page=checkout" class="btn-checkout">' . $t('to_checkout') . '</a>';
-    echo '<form method="post" style="margin-top:8px">' . $csrfField . '<input type="hidden" name="cart_action" value="clear"><input type="hidden" name="redirect" value="?page=cart">';
-    echo '<button type="submit" style="background:none;border:none;color:#888;cursor:pointer;font-size:.85em;width:100%;text-align:center">' . $t('clear_cart') . '</button></form>';
-    echo '</div>';
-
-    echo '</div>';
-    return ob_get_clean();
+    return Template::render('storefront/cart', [
+        'breadcrumb_html' => $breadcrumb, 'title' => $t('cart_title'), 'items' => $items,
+        'product_label' => $t('product'), 'price_label' => $t('price'), 'quantity_label' => $t('quantity'), 'total_label' => $t('total'),
+        'summary_label' => $t('order_summary'), 'subtotal_label' => $t('subtotal'), 'subtotal' => $price($subtotal), 'shipping_label' => $t('shipping'),
+        'shipping_html' => Template::render('storefront/cart-shipping', ['free' => $shipping === 0, 'free_label' => $t('free_shipping'), 'price' => $price($shipping)]),
+        'free_over_text' => $shipping > 0 ? $t('free_over') . ' ' . $price(5000) : '',
+        'total_price_label' => $t('total_price'), 'total' => $price($subtotal + $shipping), 'checkout_url' => '?page=checkout',
+        'checkout_label' => $t('to_checkout'), 'csrf_field_html' => $csrfField, 'clear_label' => $t('clear_cart'),
+    ]);
 }
 
 function renderCheckout(): string {
-    global $e, $price, $t, $csrfField;
+    global $price, $t, $csrfField, $storeCurrency;
     $cartData = Cart::enriched();
     $cart = $cartData['items'];
-
-    if (empty($cart)) {
-        return '<div class="breadcrumb"><a href="?">' . $t('home') . '</a> &rsaquo; ' . $t('checkout_title') . '</div>
-                <p>' . $t('cart_empty') . '. <a href="?" style="color:#a82d5c">' . $t('continue_shopping') . '</a></p>';
+    $breadcrumb = storefrontBreadcrumb([
+        ['url' => '?', 'label' => $t('home'), 'current' => false],
+        ['url' => '?page=cart', 'label' => $t('cart'), 'current' => false],
+        ['url' => '', 'label' => $t('checkout_title'), 'current' => true],
+    ]);
+    if (!$cart) {
+        return Template::render('storefront/checkout-empty', [
+            'breadcrumb_html' => $breadcrumb, 'message' => $t('cart_empty'), 'home_url' => '?', 'continue_label' => $t('continue_shopping'),
+        ]);
     }
-
-    // Handle form submission
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['checkout'])) {
-        return processCheckout();
-    }
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['checkout'])) return processCheckout();
 
     $subtotal = (int)$cartData['subtotal'];
-    $country = strtoupper($_POST['country'] ?? 'SK');
+    $countryInput = $_POST['country'] ?? 'SK';
+    $country = strtoupper(Security::clean(is_string($countryInput) ? $countryInput : 'SK'));
     $weightG = 0;
-    foreach ($cart as $item) {
-        $weightG += (int)$item['weight_g'] * (int)$item['qty'];
-    }
+    foreach ($cart as $item) $weightG += (int)$item['weight_g'] * (int)$item['qty'];
     $shippingRates = ShippingService::calculateRates($country, $weightG, $subtotal, false, 0);
-    $selectedShipping = $_POST['shipping_method'] ?? ($shippingRates[0]['method_code'] ?? '');
+    $shippingInput = $_POST['shipping_method'] ?? ($shippingRates[0]['method_code'] ?? '');
+    $selectedShipping = Security::clean(is_string($shippingInput) ? $shippingInput : (string)($shippingRates[0]['method_code'] ?? ''));
     $selectedRate = $shippingRates[0] ?? null;
-    foreach ($shippingRates as $rate) {
-        if (($rate['method_code'] ?? '') === $selectedShipping) { $selectedRate = $rate; break; }
-    }
+    foreach ($shippingRates as $rate) if (($rate['method_code'] ?? '') === $selectedShipping) { $selectedRate = $rate; break; }
     $shipping = $selectedRate ? (int)$selectedRate['price'] : 0;
-    $currency = StoreContext::current()->currency();
     $customerId = (int)($_SESSION['customer_id'] ?? 0);
-    $paymentMethods = $selectedRate ? PaymentService::availableMethods($country, $currency, $subtotal + $shipping, (string)$selectedRate['method_code'], $customerId > 0 ? $customerId : null) : [];
+    $paymentMethods = $selectedRate ? PaymentService::availableMethods($country, $storeCurrency, $subtotal + $shipping, (string)$selectedRate['method_code'], $customerId ?: null) : [];
     $selectedPayment = $paymentMethods[0] ?? null;
     $paymentFee = $selectedPayment ? (int)$selectedPayment['fee'] : 0;
-    $total = $subtotal + $shipping + $paymentFee;
+    $freeLabel = $t('free_shipping');
 
-    ob_start();
-    echo '<div class="breadcrumb"><a href="?">' . $t('home') . '</a> &rsaquo; <a href="?page=cart">' . $t('cart') . '</a> &rsaquo; ' . $t('checkout_title') . '</div>';
-    echo '<h1 style="margin-bottom:20px">' . $t('checkout_title') . '</h1>';
-
-    echo '<div style="display:grid;grid-template-columns:1fr 340px;gap:24px">';
-
-    echo '<form method="post" class="checkout-form">';
-    echo $csrfField . '<input type="hidden" name="checkout" value="1">';
-    echo '<h3>' . $t('contact') . '</h3>';
-    echo '<label for="checkout-name">' . $t('name') . '</label><input id="checkout-name" name="name" autocomplete="name" required>';
-    echo '<div class="form-row"><div><label for="checkout-email">' . $t('email') . '</label><input id="checkout-email" type="email" name="email" autocomplete="email" required></div><div><label for="checkout-phone">' . $t('phone') . '</label><input id="checkout-phone" name="phone" autocomplete="tel"></div></div>';
-    echo '<h3 style="margin-top:20px">' . $t('address') . '</h3>';
-    echo '<label for="checkout-street">' . $t('street') . '</label><input id="checkout-street" name="street" autocomplete="street-address" required>';
-    echo '<div class="form-row"><div><label for="checkout-city">' . $t('city') . '</label><input id="checkout-city" name="city" autocomplete="address-level2" required></div><div><label for="checkout-zip">' . $t('zip') . '</label><input id="checkout-zip" name="zip" autocomplete="postal-code" required></div></div>';
-    echo '<label for="checkout-country">Country</label><select name="country" id="checkout-country" autocomplete="country"><option value="SK">Slovensko</option><option value="CZ">Česko</option><option value="DE">Deutschland</option><option value="AT">Österreich</option><option value="HU">Magyarország</option><option value="PL">Polska</option></select>';
-    echo '<h3 style="margin-top:20px">' . $t('shipping') . '</h3><div class="shipping-options" id="shipping-options">';
-    foreach ($shippingRates as $i => $rate) {
-        $checked = (($rate['method_code'] ?? '') === $selectedShipping || ($i === 0 && $selectedShipping === '')) ? ' checked' : '';
-        echo '<label class="shipping-option"><span><input type="radio" name="shipping_method" value="' . $e($rate['method_code']) . '"' . $checked . '> ' . $e($rate['label']) . '<small>' . $e((string)($rate['delivery_days'] ?? '')) . '</small></span><strong>' . ($rate['price'] === 0 ? $t('free_shipping') : $price((int)$rate['price'])) . '</strong></label>';
-    }
-    if (empty($shippingRates)) echo '<p style="color:#c62828">' . $t('shipping_unavailable') . '</p>';
-    echo '</div>';
-    echo '<h3 style="margin-top:20px">' . $t('payment') . '</h3><div class="payment-options" id="payment-options">';
-    foreach ($paymentMethods as $i => $method) {
-        echo '<label class="payment-option"><span><input type="radio" name="payment" value="' . $e($method['code']) . '"' . ($i === 0 ? ' checked' : '') . '> ' . $e($method['label']) . '<small>' . $e((string)($method['description'] ?: $method['provider'])) . '</small></span><strong>' . ((int)$method['fee'] === 0 ? $t('free_shipping') : $price((int)$method['fee'])) . '</strong></label>';
-    }
-    if (empty($paymentMethods)) echo '<p style="color:#c62828">' . $t('payment_unavailable') . '</p>';
-    echo '</div>';
-    echo '<label for="checkout-notes">' . $t('notes') . '</label><textarea id="checkout-notes" name="notes" placeholder="' . $t('notes_placeholder') . '"></textarea>';
-    echo '<button class="btn-checkout" type="submit">' . $t('submit_order') . '</button>';
-    echo '</form>';
-
-    // Order summary sidebar
-    echo '<div class="cart-summary">';
-    echo '<h3>' . $t('your_order') . '</h3>';
-    foreach ($cart as $item) {
-        echo '<div class="row" style="font-size:.85em"><span>' . $e((string)$item['name']) . ' × ' . (int)$item['qty'] . '</span><span>' . $price((int)$item['total']) . '</span></div>';
-    }
-    echo '<input type="hidden" id="checkout-subtotal" value="' . (int)$subtotal . '">';
-    echo '<div class="row" style="margin-top:8px"><span>' . $t('subtotal') . '</span><span>' . $price($subtotal) . '</span></div>';
-    echo '<div class="row"><span>' . $t('shipping') . '</span><span id="summary-shipping">' . ($shipping === 0 ? $t('free_shipping') : $price($shipping)) . '</span></div>';
-    echo '<div class="row"><span>' . $t('payment') . '</span><span id="summary-payment">' . ($paymentFee === 0 ? $t('free_shipping') : $price($paymentFee)) . '</span></div>';
-    echo '<div class="row total-row"><span>' . $t('total_price') . '</span><span id="summary-total">' . $price($total) . '</span></div>';
-    echo '</div>';
-
-    echo '</div>';
-    return ob_get_clean();
+    return Template::render('storefront/checkout', [
+        'breadcrumb_html' => $breadcrumb, 'title' => $t('checkout_title'), 'csrf_field_html' => $csrfField,
+        'contact_label' => $t('contact'), 'name_label' => $t('name'), 'email_label' => $t('email'), 'phone_label' => $t('phone'),
+        'address_label' => $t('address'), 'street_label' => $t('street'), 'city_label' => $t('city'), 'zip_label' => $t('zip'),
+        'shipping_label' => $t('shipping'), 'shipping_options' => array_map(static fn(array $rate): array => [
+            'code' => (string)$rate['method_code'], 'label' => (string)$rate['label'], 'delivery_days' => (string)($rate['delivery_days'] ?? ''),
+            'price' => (int)$rate['price'] === 0 ? $freeLabel : $price((int)$rate['price']),
+            'checked' => (string)$rate['method_code'] === $selectedShipping ? ' checked' : '',
+        ], $shippingRates),
+        'shipping_unavailable' => $shippingRates ? '' : $t('shipping_unavailable'), 'payment_label' => $t('payment'),
+        'payment_options' => array_map(static fn(array $method, int $index): array => [
+            'code' => (string)$method['code'], 'label' => (string)$method['label'], 'description' => (string)($method['description'] ?: $method['provider']),
+            'fee' => (int)$method['fee'] === 0 ? $freeLabel : $price((int)$method['fee']), 'checked' => $index === 0 ? ' checked' : '',
+        ], $paymentMethods, array_keys($paymentMethods)),
+        'payment_unavailable' => $paymentMethods ? '' : $t('payment_unavailable'), 'notes_label' => $t('notes'), 'notes_placeholder' => $t('notes_placeholder'),
+        'submit_label' => $t('submit_order'), 'your_order_label' => $t('your_order'),
+        'items' => array_map(static fn(array $item): array => ['name' => (string)$item['name'], 'quantity' => (int)$item['qty'], 'total' => $price((int)$item['total'])], $cart),
+        'subtotal_cents' => $subtotal, 'subtotal_label' => $t('subtotal'), 'subtotal' => $price($subtotal),
+        'shipping' => $shipping === 0 ? $freeLabel : $price($shipping), 'payment_fee' => $paymentFee === 0 ? $freeLabel : $price($paymentFee),
+        'total_price_label' => $t('total_price'), 'total' => $price($subtotal + $shipping + $paymentFee),
+    ]);
 }
 
 function processCheckout(): string {
     if (!Security::csrfValidate()) {
-        return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">CSRF token mismatch.</p>';
+        return Template::render('storefront/checkout-error', ['home_url' => '?', 'home_label' => 'Domov', 'error_label' => 'Chyba', 'message' => 'CSRF token mismatch.']);
     }
     if (!Security::rateLimit('checkout', 10)
         || !Security::rateLimit('checkout_global', 200, 60, false)
         || !Security::rateLimit('checkout_session_' . hash('sha256', session_id()), 5, 900, false)) {
-        return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">Príliš veľa pokusov o objednávku. Skúste to neskôr.</p>';
+        return Template::render('storefront/checkout-error', ['home_url' => '?', 'home_label' => 'Domov', 'error_label' => 'Chyba', 'message' => 'Príliš veľa pokusov o objednávku. Skúste to neskôr.']);
     }
 
     $input = $_POST;
-    $input['payment_method'] = Security::clean($input['payment'] ?? 'cod');
+    $paymentInput = $input['payment'] ?? 'cod';
+    $input['payment_method'] = Security::clean(is_string($paymentInput) ? $paymentInput : 'cod');
     $result = CheckoutService::execute($input, require dirname(__DIR__, 3) . '/config.php');
     if (!empty($result['success'])) {
         $target = !empty($result['payment_url'])
@@ -170,38 +114,32 @@ function processCheckout(): string {
         exit;
     }
 
-    $message = (string)($result['error'] ?? 'Chyba pri spracovaní objednávky. Skúste to znova.');
-    return '<div class="breadcrumb"><a href="?">Domov</a> &rsaquo; Chyba</div><p style="color:#c62828">'
-        . htmlspecialchars($message, ENT_QUOTES, 'UTF-8') . '</p>';
+    return Template::render('storefront/checkout-error', [
+        'home_url' => '?', 'home_label' => 'Domov', 'error_label' => 'Chyba',
+        'message' => (string)($result['error'] ?? 'Chyba pri spracovaní objednávky. Skúste to znova.'),
+    ]);
 }
 
 function renderOrderDone(string $orderNum): string {
-    global $e, $price, $t;
+    global $t;
     $order = $orderNum !== '' ? Orders::byNumber($orderNum) : null;
-    $confirmationToken = Security::clean($_GET['confirmation_token'] ?? '');
-    if ($order && !CheckoutSession::verifyConfirmation((int)$order['id'], $confirmationToken, CheckoutSession::browserSessionId())) {
-        $order = null;
-    }
-    ob_start();
-    echo '<div class="order-done">';
-    echo '<div style="font-size:3em;margin-bottom:16px">✓</div>';
-    echo '<h1>' . $t('order_sent') . '</h1>';
-    echo '<p style="font-size:1.1em;color:#555;margin:12px 0">' . $t('order_num') . ': <strong>' . $e($orderNum) . '</strong></p>';
+    $confirmationInput = $_GET['confirmation_token'] ?? '';
+    $confirmationToken = Security::clean(is_string($confirmationInput) ? $confirmationInput : '');
+    if ($order && !CheckoutSession::verifyConfirmation((int)$order['id'], $confirmationToken, CheckoutSession::browserSessionId())) $order = null;
+    $paymentSummary = '';
     if ($order) {
-        $paymentSnapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
-        $paymentLabel = (string)($paymentSnapshot['label'] ?? $paymentSnapshot['name'] ?? $order['payment_method'] ?? '');
-        $paymentStatus = (string)($order['payment_status'] ?? 'pending');
-        $paymentTxs = PaymentService::transactionsForOrder((int)$order['id']);
-        $lastTx = $paymentTxs ? end($paymentTxs) : null;
-        echo '<div class="payment-summary" style="margin:18px auto 24px;max-width:420px;text-align:left;background:#f8f8f8;border-radius:10px;padding:16px">';
-        echo '<strong>Payment</strong><br>';
-        echo 'Status: <span class="badge badge-' . $e($paymentStatus) . '">' . $e($paymentStatus) . '</span><br>';
-        if ($paymentLabel !== '') echo 'Method: ' . $e($paymentLabel) . '<br>';
-        if ($lastTx && !empty($lastTx['provider_ref'])) echo 'Reference: ' . $e((string)$lastTx['provider_ref']) . '<br>';
-        echo '</div>';
+        $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
+        $status = (string)($order['payment_status'] ?? 'pending');
+        $transactions = PaymentService::transactionsForOrder((int)$order['id']);
+        $lastTransaction = $transactions ? end($transactions) : null;
+        $paymentSummary = Template::render('storefront/order-payment-summary', [
+            'status_class' => preg_replace('/[^a-z0-9_-]/i', '', $status), 'status' => $status,
+            'label' => (string)($snapshot['label'] ?? $snapshot['name'] ?? $order['payment_method'] ?? ''),
+            'reference' => $lastTransaction ? (string)($lastTransaction['provider_ref'] ?? '') : '',
+        ]);
     }
-    echo '<p style="color:#888;margin-bottom:24px">' . $t('order_email') . '</p>';
-    echo '<a href="?" style="color:#a82d5c;font-weight:600;font-size:1.1em">' . $t('continue_shopping') . '</a>';
-    echo '</div>';
-    return ob_get_clean();
+    return Template::render('storefront/order-done', [
+        'title' => $t('order_sent'), 'order_number_label' => $t('order_num'), 'order_number' => $orderNum,
+        'payment_summary_html' => $paymentSummary, 'email_message' => $t('order_email'), 'home_url' => '?', 'continue_label' => $t('continue_shopping'),
+    ]);
 }

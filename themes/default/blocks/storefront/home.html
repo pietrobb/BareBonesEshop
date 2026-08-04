@@ -1,0 +1,11 @@
+<div class="hero">
+  <img src="{{hero_image}}" alt="{{hero_title}}" width="1920" height="600">
+  <div class="hero-overlay">
+    <h1>{{hero_title}}</h1>
+    {{#if hero_body}}<p>{{hero_body}}</p>{{/if}}
+    <a href="{{hero_url}}" class="btn-hero">{{hero_label}}</a>
+  </div>
+</div>
+<h2 class="section-title" style="margin-bottom:16px;font-size:1.4em">{{categories_label}}</h2>
+<div class="grid grid-3">{{#each categories}}<a href="{{url}}" class="cat-card"><span style="flex:1;font-weight:600">{{name}}</span><span class="count">{{count}}</span></a>{{/each}}</div>
+{{#if latest_html}}<h2 class="section-title" style="margin:32px 0 16px;font-size:1.4em">{{latest_label}}</h2>{{{latest_html}}}{{/if}}

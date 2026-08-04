@@ -742,7 +742,7 @@ $g10Manifest = Template::manifest('default');
 assert_equals('BareBones Default', (string)$g10Manifest['name'], 'G10 theme: package manifest loads');
 assert_true(in_array('accessibility.css', $g10Manifest['assets']['css'], true) && in_array('storefront.css', $g10Manifest['assets']['css'], true), 'G10 theme: manifest declares versioned CSS assets');
 assert_true(in_array('storefront.js', $g10Manifest['assets']['js'], true), 'G10 theme: storefront behavior belongs to the theme package');
-assert_true(str_contains(Template::assets()['css'][0], '?v=2.1.0'), 'G10 theme: asset URL carries manifest version');
+assert_true(str_contains(Template::assets()['css'][0], '?v=' . $g10Manifest['version']), 'G10 theme: asset URL carries manifest version');
 $g10Document = Template::document('G10 document', '<h1>Content</h1>', [
     'body_end' => '<script nonce="test-nonce">window.BBS={};</script>',
     'marketing_hooks' => '',
@@ -831,10 +831,10 @@ $pdo->exec("DELETE FROM products WHERE sku='G10-FEED'");
 // G15: active health/SLO metrics and alerting adapter
 // ============================================================
 echo "\n--- G15: Operational metrics and alerting ---\n";
-$g15StorefrontSource = entrypointSource('index.php');
+$g15CheckoutBlock = (string)file_get_contents(TEST_CLI_DIR . '/../themes/default/blocks/storefront/checkout.html');
 foreach (['checkout-name', 'checkout-email', 'checkout-phone', 'checkout-street', 'checkout-city', 'checkout-zip', 'checkout-country', 'checkout-notes'] as $g15CheckoutControl) {
-    assert_true(str_contains($g15StorefrontSource, 'for="' . $g15CheckoutControl . '"'), "G15 WCAG: checkout label targets {$g15CheckoutControl}");
-    assert_true(str_contains($g15StorefrontSource, 'id="' . $g15CheckoutControl . '"'), "G15 WCAG: checkout control exposes {$g15CheckoutControl}");
+    assert_true(str_contains($g15CheckoutBlock, 'for="' . $g15CheckoutControl . '"'), "G15 WCAG: checkout label targets {$g15CheckoutControl}");
+    assert_true(str_contains($g15CheckoutBlock, 'id="' . $g15CheckoutControl . '"'), "G15 WCAG: checkout control exposes {$g15CheckoutControl}");
 }
 $g15Now = strtotime('2026-08-02T09:00:30+00:00');
 $g15Config = require TEST_CLI_DIR . '/../config.php';

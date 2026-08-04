@@ -1,0 +1,19 @@
+{{{breadcrumb_html}}}
+<h1 style="margin-bottom:4px">{{name}}</h1>
+<div class="sort-bar"><span class="total">{{total}} {{parts_label}}</span>
+  <form method="get" style="display:flex;gap:8px;align-items:center">
+    <input type="hidden" name="page" value="category"><input type="hidden" name="slug" value="{{slug}}">{{{sort_hidden_html}}}
+    <label for="category-sort">{{sort_label}}</label><select id="category-sort" name="sort" data-submit-on-change>{{#each sort_options}}<option value="{{value}}"{{{selected}}}>{{label}}</option>{{/each}}</select>
+  </form>
+</div>
+<div class="layout-sidebar">
+  <form class="sidebar" method="get">
+    <input type="hidden" name="page" value="category"><input type="hidden" name="slug" value="{{slug}}"><input type="hidden" name="sort" value="{{sort}}">
+    {{{subcategories_html}}}
+    <h3>{{price_label}}</h3>
+    <div style="display:flex;gap:4px;align-items:center"><input type="number" name="pmin" placeholder="{{from_label}}" value="{{price_min}}" style="width:80px;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:.85em"><span>&mdash;</span><input type="number" name="pmax" placeholder="{{to_label}}" value="{{price_max}}" style="width:80px;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:.85em"><span style="font-size:.85em;color:#888">&euro;</span></div>
+    {{{filters_html}}}
+    <div class="filter-actions"><button type="submit" class="btn-apply">{{filter_label}}</button>{{#if has_active_filters}}<a href="{{clear_url}}" class="btn-clear">{{clear_label}}</a>{{/if}}</div>
+  </form>
+  <div>{{{product_grid_html}}}{{{pagination_html}}}</div>
+</div>

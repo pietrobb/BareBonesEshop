@@ -96,7 +96,8 @@ if (!$page && !empty($_GET['category'])) $page = 'category';
 if (!$page) $page = 'home';
 
 $e = fn(string $s) => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
-$price = fn(int $cents) => I18n::price($cents, StoreContext::current()->currency());
+$storeCurrency = StoreContext::current()->currency();
+$price = fn(int $cents) => I18n::price($cents, $storeCurrency);
 $csrfField = '<input type="hidden" name="csrf_token" value="' . Security::csrfToken() . '">';
 
 // ============================================================

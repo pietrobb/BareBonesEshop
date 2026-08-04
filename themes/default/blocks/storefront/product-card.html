@@ -1,0 +1,10 @@
+<div class="card" style="position:relative">
+  <a href="{{url}}">
+    {{#if image}}<img class="card-img" src="{{image}}" alt="{{name}}" loading="lazy">{{else}}<div class="card-img-placeholder">&#128247;</div>{{/if}}
+    {{#if on_sale}}<span class="sticker sticker-sale">SALE</span>{{/if}}
+    <h3>{{name}}</h3>
+    <div class="price">{{price}}{{#if compare_price}}<span class="old-price">{{compare_price}}</span>{{/if}}</div>
+    {{#if in_stock}}<div class="badge">{{in_stock_label}}</div>{{/if}}
+  </a>
+  <button class="btn-cart" type="button" data-storefront-action="cart-add" data-product-id="{{id}}" data-quantity="1">{{add_to_cart_label}}</button>
+</div>
