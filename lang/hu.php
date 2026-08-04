@@ -334,4 +334,12 @@ return array_replace(require __DIR__ . '/en.php', [
     'cookie_banner.preferences'             => 'Beállítás',
     'cookie_banner.save_preferences'        => 'Mentés',
     'cookie_banner.policy_link'             => 'Süti-szabályzat',
+    'name' => 'Teljes név', 'address' => 'Szállítási cím', 'contact' => 'Kapcsolattartási adatok',
+    'payment' => 'Fizetés', 'notes' => 'Megjegyzés a rendeléshez', 'notes_placeholder' => 'Opcionális…', 'submit_order' => 'Rendelés elküldése',
+    'view_all' => 'Összes megtekintése…', 'storefront_tagline' => 'A mindennapi igényekhez válogatott termékek', 'information' => 'Információk',
+    'about_us' => 'Rólunk', 'privacy_policy' => 'Adatvédelmi szabályzat', 'terms_conditions' => 'Általános szerződési feltételek', 'cookie_policy' => 'Süti-szabályzat',
+    'powered_by' => 'A BareBones E-shop működteti', 'added_to_cart' => 'Hozzáadva ✓',
+    'shipping_loading' => 'Szállítási módok betöltése…', 'shipping_unavailable' => 'A szállítás nem érhető el.', 'select_shipping_first' => 'Először válasszon szállítást.',
+    'payment_loading' => 'Fizetési módok betöltése…', 'payment_unavailable' => 'A fizetés nem érhető el.',
+    'vehicle_manufacturer_model' => 'Gyártó / Modell', 'vehicle_engine_type' => 'Motortípus',
 ]);

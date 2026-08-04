@@ -1,0 +1,197 @@
+(() => {
+  'use strict';
+  const config = window.BareBonesStorefront || {};
+  const text = config.text || {};
+  const apiUrl = config.apiUrl || 'api.php';
+
+  function setTab(id) {
+    document.querySelectorAll('[data-product-tab]').forEach((tab) => {
+      const active = tab.dataset.productTab === id;
+      tab.classList.toggle('active', active);
+      tab.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    document.querySelectorAll('.tab-content').forEach((content) => {
+      content.classList.toggle('active', content.id === `tab-${id}`);
+    });
+  }
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"]/g, (character) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'
+    })[character]);
+  }
+
+  function formatCents(cents) {
+    return (cents / 100).toLocaleString(config.locale || document.documentElement.lang, {
+      style: 'currency',
+      currency: String(config.currency).toUpperCase()
+    });
+  }
+
+  function parseMoney(value) {
+    if (String(value).includes(text.free)) return 0;
+    const normalized = String(value).replace(/[^0-9,.-]/g, '').replace(',', '.');
+    return Math.round((parseFloat(normalized) || 0) * 100);
+  }
+
+  async function addToCart(productId, quantity, button) {
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = text.added;
+    const form = new FormData();
+    form.append('cart_action', 'add');
+    form.append('product_id', productId);
+    form.append('quantity', quantity || 1);
+    form.append('csrf_token', config.csrfToken || '');
+    const response = await fetch(config.currentUrl || '', {
+      method: 'POST', body: form, headers: {'X-Requested-With': 'XMLHttpRequest'}
+    });
+    const result = await response.json();
+    const badge = document.querySelector('.cart-badge');
+    if (badge) badge.textContent = result.count;
+    else {
+      const icon = document.querySelector('.cart-icon');
+      if (icon) {
+        const nextBadge = document.createElement('span');
+        nextBadge.className = 'cart-badge';
+        nextBadge.textContent = result.count;
+        icon.appendChild(nextBadge);
+      }
+    }
+    setTimeout(() => { button.disabled = false; button.textContent = original; }, 1200);
+  }
+
+  async function refreshCheckoutPayments(shippingMethod) {
+    const country = document.getElementById('checkout-country');
+    const box = document.getElementById('payment-options');
+    const subtotalElement = document.getElementById('checkout-subtotal');
+    if (!country || !box || !subtotalElement) return;
+    const subtotal = parseInt(subtotalElement.value || '0', 10);
+    const checkedShipping = document.querySelector('input[name="shipping_method"]:checked');
+    const selectedShipping = shippingMethod || (checkedShipping ? checkedShipping.value : '');
+    const shippingLabel = checkedShipping ? checkedShipping.closest('label') : null;
+    const shippingPrice = shippingLabel ? parseMoney(shippingLabel.querySelector('strong').textContent) : 0;
+    if (!selectedShipping) {
+      box.innerHTML = `<div class="payment-empty">${escapeHtml(text.selectShipping)}</div>`;
+      updateCheckoutTotal(shippingPrice, 0, subtotal);
+      return;
+    }
+    box.innerHTML = `<div class="payment-loading">${escapeHtml(text.paymentLoading)}</div>`;
+    const params = new URLSearchParams({
+      action: 'payment_methods', country: country.value, currency: config.currency,
+      amount: String(subtotal + shippingPrice), shipping_method: selectedShipping
+    });
+    const response = await fetch(`${apiUrl}?${params}`);
+    const result = await response.json();
+    const methods = result.methods || [];
+    if (!methods.length) {
+      box.innerHTML = `<div class="payment-empty">${escapeHtml(text.paymentUnavailable)}</div>`;
+      updateCheckoutTotal(shippingPrice, 0, subtotal);
+      return;
+    }
+    box.innerHTML = '';
+    methods.forEach((method, index) => {
+      const label = document.createElement('label');
+      label.className = 'payment-option';
+      const fee = parseInt(method.fee || 0, 10);
+      label.innerHTML = `<span><input type="radio" name="payment" value="${escapeHtml(method.code || '')}" ${index === 0 ? 'checked' : ''}> ${escapeHtml(method.label || method.code || '')}<small>${escapeHtml(method.description || method.provider || '')}</small></span><strong>${fee === 0 ? escapeHtml(text.free) : formatCents(fee)}</strong>`;
+      label.querySelector('input').addEventListener('change', () => updateCheckoutTotal(shippingPrice, fee, subtotal));
+      box.appendChild(label);
+    });
+    updateCheckoutTotal(shippingPrice, parseInt(methods[0].fee || 0, 10), subtotal);
+  }
+
+  async function refreshCheckoutShipping() {
+    const country = document.getElementById('checkout-country');
+    const box = document.getElementById('shipping-options');
+    const summaryShipping = document.getElementById('summary-shipping');
+    const subtotalElement = document.getElementById('checkout-subtotal');
+    if (!country || !box || !summaryShipping || !subtotalElement) return;
+    const subtotal = parseInt(subtotalElement.value || '0', 10);
+    box.innerHTML = `<div class="shipping-loading">${escapeHtml(text.shippingLoading)}</div>`;
+    const params = new URLSearchParams({action: 'shipping_rates', country: country.value, subtotal: String(subtotal)});
+    const response = await fetch(`${apiUrl}?${params}`);
+    const result = await response.json();
+    const methods = result.methods || [];
+    if (!methods.length) {
+      box.innerHTML = `<div class="shipping-empty">${escapeHtml(text.shippingUnavailable)}</div>`;
+      summaryShipping.textContent = '—';
+      await refreshCheckoutPayments('');
+      return;
+    }
+    box.innerHTML = '';
+    methods.forEach((method, index) => {
+      const label = document.createElement('label');
+      label.className = 'shipping-option';
+      const methodCode = method.method_code || method.key || '';
+      const price = parseInt(method.price || 0, 10);
+      label.innerHTML = `<span><input type="radio" name="shipping_method" value="${escapeHtml(methodCode)}" ${index === 0 ? 'checked' : ''}> ${escapeHtml(method.label || methodCode)}<small>${escapeHtml(method.delivery_days || '')}</small></span><strong>${formatCents(price)}</strong>`;
+      label.querySelector('input').addEventListener('change', () => refreshCheckoutPayments(methodCode));
+      box.appendChild(label);
+    });
+    await refreshCheckoutPayments(methods[0].method_code || methods[0].key || '');
+  }
+
+  function updateCheckoutTotal(shipping, paymentFee, subtotal) {
+    document.getElementById('summary-shipping').textContent = formatCents(shipping);
+    const payment = document.getElementById('summary-payment');
+    if (payment) payment.textContent = paymentFee === 0 ? text.free : formatCents(paymentFee);
+    document.getElementById('summary-total').textContent = formatCents(subtotal + shipping + paymentFee);
+  }
+
+  function setConsentCookie(categories) {
+    const base = config.baseUrl || '';
+    document.cookie = `cc_v1=${encodeURIComponent(JSON.stringify(categories))};path=${base || '/'};max-age=31536000;SameSite=Lax`;
+  }
+
+  function saveConsent(categories, method) {
+    const banner = document.getElementById('cc-banner');
+    setConsentCookie(categories);
+    const form = new FormData();
+    form.append('necessary', categories.necessary ? 1 : 0);
+    form.append('analytics', categories.analytics ? 1 : 0);
+    form.append('marketing', categories.marketing ? 1 : 0);
+    form.append('method', method);
+    form.append('csrf_token', config.csrfToken || '');
+    fetch(`${apiUrl}?action=cookie_consent`, {method: 'POST', body: form}).catch(() => {});
+    if (banner) banner.remove();
+  }
+
+  document.addEventListener('click', (event) => {
+    const cartButton = event.target.closest('[data-storefront-action="cart-add"]');
+    if (cartButton) {
+      const quantityInput = cartButton.dataset.quantityInput ? document.getElementById(cartButton.dataset.quantityInput) : null;
+      addToCart(cartButton.dataset.productId, quantityInput ? quantityInput.value : cartButton.dataset.quantity, cartButton);
+      return;
+    }
+    const tab = event.target.closest('[data-product-tab]');
+    if (tab) setTab(tab.dataset.productTab);
+  });
+
+  document.addEventListener('change', (event) => {
+    const control = event.target.closest('[data-submit-on-change]');
+    if (control && control.form) control.form.requestSubmit();
+  });
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const country = document.getElementById('checkout-country');
+    if (country) country.addEventListener('change', refreshCheckoutShipping);
+    if (document.getElementById('shipping-options')) refreshCheckoutShipping();
+
+    const banner = document.getElementById('cc-banner');
+    if (!banner) return;
+    document.getElementById('cc-accept').addEventListener('click', () => saveConsent({necessary:true,analytics:true,marketing:true}, 'banner_accept_all'));
+    document.getElementById('cc-reject').addEventListener('click', () => saveConsent({necessary:true,analytics:false,marketing:false}, 'banner_reject_all'));
+    document.getElementById('cc-prefs-toggle').addEventListener('click', () => {
+      banner.classList.add('show-prefs');
+      document.getElementById('cc-accept').hidden = true;
+      document.getElementById('cc-reject').hidden = true;
+      document.getElementById('cc-save').hidden = false;
+    });
+    document.getElementById('cc-save').addEventListener('click', () => saveConsent({
+      necessary: true,
+      analytics: document.getElementById('cc-ana').checked,
+      marketing: document.getElementById('cc-mkt').checked
+    }, 'preferences'));
+  });
+})();

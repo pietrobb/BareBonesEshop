@@ -1,16 +1,17 @@
 <header class="site-header">
     <div class="site-header__inner">
-        <a href="/" class="site-header__logo">BareBones Shop</a>
+        <a href="{{base_url}}/" class="site-header__logo">{{shop_name}}</a>
         <nav class="site-header__nav">
             {{#each categories}}
                 <a href="/category/{{path}}" class="nav-link">{{name}}</a>
             {{/each}}
         </nav>
         <div class="site-header__actions">
-            <form class="search-form" action="/search" method="get">
+            <form class="search-form" action="{{base_url}}/" method="get">
+                <input type="hidden" name="page" value="search">
                 <input type="search" name="q" placeholder="{{t.search_placeholder}}" class="search-input">
             </form>
-            <a href="/cart" class="cart-badge" data-cart-badge>
+            <a href="{{base_url}}/?page=cart" class="cart-badge" data-cart-badge>
                 {{t.cart}} (<span data-cart-count>{{cart.count}}</span>)
             </a>
         </div>

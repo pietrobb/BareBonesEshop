@@ -296,8 +296,8 @@ function renderCategory(array $cat): string {
                 echo '<span class="sticker sticker-sale">SALE</span>';
             }
             echo '<h3>' . $e($p['name']) . '</h3>';
-            echo '<div class="price">' . I18n::price($p['price'], 'eur');
-            if (!empty($p['compare_price'])) echo '<span class="old-price">' . I18n::price($p['compare_price'], 'eur') . '</span>';
+            echo '<div class="price">' . I18n::price($p['price'], StoreContext::current()->currency());
+            if (!empty($p['compare_price'])) echo '<span class="old-price">' . I18n::price($p['compare_price'], StoreContext::current()->currency()) . '</span>';
             echo '</div>';
             if ($p['stock'] > 0) echo '<div class="badge">' . $t('in_stock') . '</div>';
             echo '</a>';
@@ -312,9 +312,13 @@ function renderCategory(array $cat): string {
 }
 
 function renderProduct(array $p): string {
-    global $e, $price, $catName, $t, $lang;
+    global $e, $price, $catName, $t, $hasTecDoc;
     $catId = (int)$p['category_id'];
     $bc = Categories::breadcrumb($catId);
+    $specifications = is_array($p['specifications'] ?? null) ? $p['specifications'] : [];
+    $oeNumbers = is_array($p['oe_numbers'] ?? null) ? $p['oe_numbers'] : [];
+    $vehicleCount = (int)($p['vehicle_count'] ?? 0);
+    $showAutomotive = ($hasTecDoc && ($p['product_type'] ?? '') === 'auto_part') || $vehicleCount > 0 || $oeNumbers !== [];
 
     ob_start();
     echo '<div class="breadcrumb"><a href="?">' . $t('home') . '</a>';
@@ -339,7 +343,7 @@ function renderProduct(array $p): string {
     echo $p['stock'] > 0 ? '<div class="badge" style="font-size:.9em;margin-bottom:12px">✓ ' . $t('in_stock') . ' (' . $p['stock'] . ' ks)</div>'
                          : '<div style="color:#c62828;font-size:.9em;margin-bottom:12px">✗ ' . $t('out_of_stock') . '</div>';
     if (!empty($p['summary'])) echo '<p style="margin-top:12px;color:#555">' . $e($p['summary']) . '</p>';
-    echo '<p style="margin-top:8px;color:#888;font-size:.85em">' . $t('compatible_with') . ' ' . $p['vehicle_count'] . ' ' . $t('vehicles') . '</p>';
+    if ($showAutomotive) echo '<p style="margin-top:8px;color:#888;font-size:.85em">' . $t('compatible_with') . ' ' . $vehicleCount . ' ' . $t('vehicles') . '</p>';
     // Add to cart
     echo '<div style="margin-top:20px;display:flex;gap:8px;align-items:center">';
     echo '<input type="number" value="1" min="1" max="99" class="qty-input" id="qty-' . (int)$p['id'] . '">';
@@ -349,43 +353,43 @@ function renderProduct(array $p): string {
 
     // Tabs
     echo '<div class="tabs" role="tablist">';
-    echo '<button type="button" class="tab active" role="tab" aria-selected="true" data-product-tab="specs">' . $t('specs') . ' (' . count($p['specifications']) . ')</button>';
-    echo '<button type="button" class="tab" role="tab" aria-selected="false" data-product-tab="oe">' . $t('oe_numbers') . ' (' . count($p['oe_numbers']) . ')</button>';
-    echo '<button type="button" class="tab" role="tab" aria-selected="false" data-product-tab="vehicles">' . $t('vehicles_tab') . ' (' . $p['vehicle_count'] . ')</button>';
+    echo '<button type="button" class="tab active" role="tab" aria-selected="true" data-product-tab="specs">' . $t('specs') . ' (' . count($specifications) . ')</button>';
+    if ($showAutomotive) {
+        echo '<button type="button" class="tab" role="tab" aria-selected="false" data-product-tab="oe">' . $t('oe_numbers') . ' (' . count($oeNumbers) . ')</button>';
+        echo '<button type="button" class="tab" role="tab" aria-selected="false" data-product-tab="vehicles">' . $t('vehicles_tab') . ' (' . $vehicleCount . ')</button>';
+    }
     echo '</div>';
 
     // Specs tab
     echo '<div class="tab-content active" id="tab-specs"><table class="spec-table">';
-    foreach ($p['specifications'] as $s) {
+    foreach ($specifications as $s) {
         echo '<tr><td>' . $e($s['criteria_name']) . '</td><td><strong>' . $e($s['criteria_value']) . '</strong></td></tr>';
     }
-    if (empty($p['specifications'])) echo '<tr><td colspan="2" style="color:#888">' . $t('no_specs') . '</td></tr>';
+    if ($specifications === []) echo '<tr><td colspan="2" style="color:#888">' . $t('no_specs') . '</td></tr>';
     echo '</table></div>';
 
-    // OE tab
-    echo '<div class="tab-content" id="tab-oe"><table class="spec-table">';
-    $lastBrand = '';
-    foreach ($p['oe_numbers'] as $oe) {
-        if ($oe['oem_brand'] !== $lastBrand) {
-            $lastBrand = $oe['oem_brand'];
-            echo '<tr><td colspan="2" style="font-weight:700;background:#f0f0f0;padding:8px 12px">' . $e($lastBrand) . '</td></tr>';
+    if ($showAutomotive) {
+        echo '<div class="tab-content" id="tab-oe"><table class="spec-table">';
+        $lastBrand = '';
+        foreach ($oeNumbers as $oe) {
+            if ($oe['oem_brand'] !== $lastBrand) {
+                $lastBrand = $oe['oem_brand'];
+                echo '<tr><td colspan="2" style="font-weight:700;background:#f0f0f0;padding:8px 12px">' . $e($lastBrand) . '</td></tr>';
+            }
+            echo '<tr><td></td><td><a href="?page=oe&q=' . urlencode($oe['oem_number']) . '">' . $e($oe['oem_number']) . '</a></td></tr>';
         }
-        echo '<tr><td></td><td><a href="?page=oe&q=' . urlencode($oe['oem_number']) . '">' . $e($oe['oem_number']) . '</a></td></tr>';
-    }
-    if (empty($p['oe_numbers'])) echo '<tr><td colspan="2" style="color:#888">' . $t('no_oe') . '</td></tr>';
-    echo '</table></div>';
+        if ($oeNumbers === []) echo '<tr><td colspan="2" style="color:#888">' . $t('no_oe') . '</td></tr>';
+        echo '</table></div>';
 
-    // Vehicles tab
-    $vehicles = TecDoc::vehiclesForProduct((int)$p['id'], 100);
-    echo '<div class="tab-content" id="tab-vehicles"><table class="spec-table">';
-    $vehHeader = $lang === 'en' ? 'Manufacturer / Model' : ($lang === 'de' ? 'Hersteller / Modell' : 'Výrobca / Model');
-    $engHeader = $lang === 'en' ? 'Engine Type' : ($lang === 'de' ? 'Motortyp' : 'Typ motora');
-    echo '<tr style="background:#f0f0f0;font-weight:600"><td>' . $vehHeader . '</td><td>' . $engHeader . '</td></tr>';
-    foreach ($vehicles as $v) {
-        echo '<tr><td>' . $e($v['manufacturer']) . ' ' . $e($v['model']) . '</td><td>' . $e($v['type_name']) . '</td></tr>';
+        $vehicles = TecDoc::vehiclesForProduct((int)$p['id'], 100);
+        echo '<div class="tab-content" id="tab-vehicles"><table class="spec-table">';
+        echo '<tr style="background:#f0f0f0;font-weight:600"><td>' . $t('vehicle_manufacturer_model') . '</td><td>' . $t('vehicle_engine_type') . '</td></tr>';
+        foreach ($vehicles as $vehicle) {
+            echo '<tr><td>' . $e($vehicle['manufacturer']) . ' ' . $e($vehicle['model']) . '</td><td>' . $e($vehicle['type_name']) . '</td></tr>';
+        }
+        if ($vehicles === []) echo '<tr><td colspan="2" style="color:#888">' . $t('no_vehicles') . '</td></tr>';
+        echo '</table></div>';
     }
-    if (empty($vehicles)) echo '<tr><td colspan="2" style="color:#888">' . $t('no_vehicles') . '</td></tr>';
-    echo '</table></div>';
 
     return ob_get_clean();
 }

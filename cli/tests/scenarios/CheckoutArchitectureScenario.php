@@ -644,10 +644,11 @@ assert_true(
 );
 
 $storefrontSrc = entrypointSource('index.php');
+$storefrontJsSrc = file_get_contents(TEST_CLI_DIR . '/../themes/default/assets/storefront.js') ?: '';
 $accountSrc = file_get_contents(TEST_CLI_DIR . '/../account.php') ?: '';
 assert_true(
     str_contains($storefrontSrc, 'data-storefront-action="cart-add"') &&
-    str_contains($storefrontSrc, "e.target.closest('[data-storefront-action=\"cart-add\"]')") &&
+    str_contains($storefrontJsSrc, "event.target.closest('[data-storefront-action=\"cart-add\"]')") &&
     str_contains($storefrontSrc, 'data-submit-on-change') &&
     str_contains($storefrontSrc, 'data-product-tab'),
     'Storefront CSP: delegated cart, form-change, and product-tab hooks are present'
@@ -731,9 +732,8 @@ assert_true(
     (bool)preg_match('/function apiCookieConsent\(\).*?Security::csrfValidate\(\)/s', $f8Api),
     'F8: apiCookieConsent() calls Security::csrfValidate()'
 );
-$f8Index = entrypointSource('index.php');
 assert_true(
-    str_contains($f8Index, "fd.append('csrf_token'"),
+    str_contains($storefrontJsSrc, "form.append('csrf_token'"),
     'F8: cookie-consent banner JS sends the csrf_token field'
 );
 

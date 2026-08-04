@@ -740,8 +740,9 @@ Bootstrap::initStoreContext('/', '', 'default');
 I18n::setLocale('en');
 $g10Manifest = Template::manifest('default');
 assert_equals('BareBones Default', (string)$g10Manifest['name'], 'G10 theme: package manifest loads');
-assert_true(in_array('accessibility.css', $g10Manifest['assets']['css'], true), 'G10 theme: manifest declares versioned CSS assets');
-assert_true(str_contains(Template::assets()['css'][0], '?v=2.0.0'), 'G10 theme: asset URL carries manifest version');
+assert_true(in_array('accessibility.css', $g10Manifest['assets']['css'], true) && in_array('storefront.css', $g10Manifest['assets']['css'], true), 'G10 theme: manifest declares versioned CSS assets');
+assert_true(in_array('storefront.js', $g10Manifest['assets']['js'], true), 'G10 theme: storefront behavior belongs to the theme package');
+assert_true(str_contains(Template::assets()['css'][0], '?v=2.1.0'), 'G10 theme: asset URL carries manifest version');
 $g10Document = Template::document('G10 document', '<h1>Content</h1>', [
     'body_end' => '<script nonce="test-nonce">window.BBS={};</script>',
     'marketing_hooks' => '',
@@ -749,6 +750,19 @@ $g10Document = Template::document('G10 document', '<h1>Content</h1>', [
 assert_true(str_contains($g10Document, 'href="#main-content"') && str_contains($g10Document, '<main id="main-content"'), 'G10 WCAG: shared shell has a functional skip link');
 assert_true(str_contains($g10Document, '<header') && str_contains($g10Document, '<footer'), 'G10 theme: shared shell owns header and footer blocks');
 assert_true(str_contains($g10Document, 'nonce="test-nonce"'), 'G11 theme: shared shell renders a CSP-safe body_end bootstrap slot');
+foreach (['sk', 'cs', 'pl', 'hu', 'de', 'en', 'es'] as $renderLocale) {
+    I18n::setLocale($renderLocale);
+    $localizedShell = Template::document('Localized shell', '<p>Content</p>', ['marketing_hooks' => '']);
+    assert_true(str_contains($localizedShell, '<html lang="' . $renderLocale . '">'), "G10 i18n render: {$renderLocale} sets the document language");
+    assert_true(str_contains($localizedShell, I18n::t('search_placeholder')), "G10 i18n render: {$renderLocale} renders translated theme text");
+    assert_true(!str_contains($localizedShell, '{{'), "G10 i18n render: {$renderLocale} leaves no unresolved theme placeholders");
+}
+I18n::setLocale('en');
+$originalScriptName = $_SERVER['SCRIPT_NAME'] ?? null;
+$_SERVER['SCRIPT_NAME'] = '/test/index.php';
+assert_true(str_starts_with(Template::assets()['css'][0], '/test/themes/default/assets/'), 'G10 theme: assets inherit a subdirectory installation prefix');
+assert_true(str_contains(Template::document('Subdirectory', '<p>Content</p>', ['marketing_hooks' => '']), 'href="/test/shop.css"'), 'G10 theme: core assets inherit a subdirectory installation prefix');
+if ($originalScriptName === null) unset($_SERVER['SCRIPT_NAME']); else $_SERVER['SCRIPT_NAME'] = $originalScriptName;
 $g11CustomBody = Template::document('G11 custom body', '', [
     'body_html' => '<header id="legacy-header"></header><main id="main-content"></main>',
     'base_css' => '',

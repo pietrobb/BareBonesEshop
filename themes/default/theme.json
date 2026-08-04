@@ -1,11 +1,11 @@
 {
   "name": "BareBones Default",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Accessible, mobile-first default storefront package",
   "blocks": "blocks",
   "assets": {
-    "css": ["accessibility.css"],
-    "js": []
+    "css": ["accessibility.css", "storefront.css"],
+    "js": ["storefront.js"]
   },
   "performance_budgets": {
     "css_bytes": 153600,

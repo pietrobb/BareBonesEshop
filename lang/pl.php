@@ -334,4 +334,12 @@ return array_replace(require __DIR__ . '/en.php', [
     'cookie_banner.preferences'             => 'Ustaw',
     'cookie_banner.save_preferences'        => 'Zapisz wybór',
     'cookie_banner.policy_link'             => 'Polityka cookies',
+    'name' => 'Imię i nazwisko', 'address' => 'Adres dostawy', 'contact' => 'Dane kontaktowe',
+    'payment' => 'Płatność', 'notes' => 'Uwagi do zamówienia', 'notes_placeholder' => 'Opcjonalne…', 'submit_order' => 'Złóż zamówienie',
+    'view_all' => 'Pokaż wszystko…', 'storefront_tagline' => 'Produkty wybrane do codziennych potrzeb', 'information' => 'Informacje',
+    'about_us' => 'O nas', 'privacy_policy' => 'Polityka prywatności', 'terms_conditions' => 'Regulamin', 'cookie_policy' => 'Polityka cookies',
+    'powered_by' => 'Napędzane przez BareBones E-shop', 'added_to_cart' => 'Dodano ✓',
+    'shipping_loading' => 'Ładowanie metod dostawy…', 'shipping_unavailable' => 'Dostawa jest niedostępna.', 'select_shipping_first' => 'Najpierw wybierz dostawę.',
+    'payment_loading' => 'Ładowanie metod płatności…', 'payment_unavailable' => 'Płatność jest niedostępna.',
+    'vehicle_manufacturer_model' => 'Producent / Model', 'vehicle_engine_type' => 'Typ silnika',
 ]);

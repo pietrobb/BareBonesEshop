@@ -45,6 +45,23 @@ class Template {
         return self::$manifestCache[$theme] = $manifest;
     }
 
+    /** Installation base path, empty for a domain-root deployment. */
+    public static function baseUrl(): string {
+        $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
+        $directory = $script === '' ? '' : str_replace('\\', '/', dirname($script));
+        if ($directory === '' || $directory === '.' || $directory === '/') return '';
+        return '/' . trim($directory, '/');
+    }
+
+    /** Build a local URL that also works when the shop is installed in a subdirectory. */
+    public static function url(string $path = ''): string {
+        if ($path !== '' && (preg_match('#^[a-z][a-z0-9+.-]*:#i', $path) || str_starts_with($path, '//'))) {
+            return $path;
+        }
+        $suffix = '/' . ltrim($path, '/');
+        return self::baseUrl() . ($suffix === '/' ? '/' : $suffix);
+    }
+
     /** Public versioned asset URLs declared by the active theme manifest. */
     public static function assets(): array {
         $theme = self::$theme ?? 'default';
@@ -54,7 +71,7 @@ class Template {
         foreach ($result as $kind => $_) {
             foreach ((array)($manifest['assets'][$kind] ?? []) as $asset) {
                 $asset = self::safeAssetPath((string)$asset);
-                $result[$kind][] = '/themes/' . rawurlencode($theme) . '/assets/' . $asset . '?v=' . $version;
+                $result[$kind][] = self::url('/themes/' . rawurlencode($theme) . '/assets/' . $asset) . '?v=' . $version;
             }
         }
         return $result;
@@ -89,14 +106,15 @@ class Template {
             'locale' => I18n::locale(),
             't' => I18n::all(),
             'shop_name' => (string)($store->config()['name'] ?? 'BareBones Shop'),
+            'base_url' => self::baseUrl(),
             'navigation' => ContentService::menu('primary'),
             'cart' => ['count' => 0],
             'assets' => self::assets(),
             'seo_head' => '',
             'body_html' => '',
             'body_end' => '',
-            'base_css' => '<link rel="stylesheet" href="/shop.css">',
-            'shop_js' => '<script src="/shop.js" defer></script>',
+            'base_css' => '<link rel="stylesheet" href="' . esc(self::url('/shop.css')) . '">',
+            'shop_js' => '<script src="' . esc(self::url('/shop.js')) . '" defer></script>',
             'marketing_hooks' => MarketingConsent::hooks($_COOKIE, Security::cspNonce()),
         ];
         return self::render('global/document', array_replace($defaults, $data));

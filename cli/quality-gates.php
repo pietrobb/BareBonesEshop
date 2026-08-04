@@ -43,10 +43,18 @@ foreach ($themeDirs as $themeDir) {
 $document = (string)file_get_contents($root . '/themes/default/blocks/global/document.html');
 $header = (string)file_get_contents($root . '/themes/default/blocks/global/header.html');
 $a11yCss = (string)file_get_contents($root . '/themes/default/assets/accessibility.css');
+$storefrontCss = (string)file_get_contents($root . '/themes/default/assets/storefront.css');
+$storefrontJs = (string)file_get_contents($root . '/themes/default/assets/storefront.js');
+$storefrontLayout = (string)file_get_contents($root . '/src/Entrypoints/Storefront/Layout.php');
 $check(str_contains($document, 'href="#main-content"') && str_contains($document, '<main id="main-content"'), 'WCAG 2.2 AA: bypass block targets the main landmark');
 $check(str_contains($header, '<nav') && str_contains($header, 'aria-label=') && str_contains($header, '<label'), 'WCAG 2.2 AA: navigation and search have accessible names');
 $check(str_contains($a11yCss, ':focus-visible') && str_contains($a11yCss, 'prefers-reduced-motion') && str_contains($a11yCss, 'forced-colors:active'), 'WCAG 2.2 AA: focus, motion, and forced-colors safeguards exist');
 $check(str_contains($a11yCss, 'min-height:24px'), 'WCAG 2.2 AA: minimum target size safeguard exists');
+$check(str_contains($storefrontCss, '.grid-3{grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr))}'), 'Responsive storefront: 300px cards cannot overflow a 320px viewport');
+$check(!str_contains($storefrontLayout, '<style') && !str_contains($storefrontLayout, 'function setTab'), 'Theme boundary: storefront CSS and behavior are not embedded in core Layout.php');
+$check(!str_contains($storefrontLayout, 'woodle') && !str_contains($storefrontLayout, "\$lang==='"), 'Theme boundary: core Layout.php has no store branding or language ternaries');
+$check(!str_contains($storefrontJs, 'sk-SK') && !str_contains($storefrontJs, "'EUR'") && !str_contains($storefrontJs, '"EUR"'), 'i18n runtime: locale and currency come from StoreContext');
+$check(is_file($root . '/themes/default/blocks/storefront/header.html') && is_file($root . '/themes/default/blocks/storefront/footer.html'), 'Theme boundary: storefront header and footer are theme blocks');
 
 $langFiles = glob($root . '/lang/*.php') ?: [];
 $catalogs = [];

@@ -92,7 +92,7 @@ function renderCheckout(): string {
         if (($rate['method_code'] ?? '') === $selectedShipping) { $selectedRate = $rate; break; }
     }
     $shipping = $selectedRate ? (int)$selectedRate['price'] : 0;
-    $currency = 'eur';
+    $currency = StoreContext::current()->currency();
     $customerId = (int)($_SESSION['customer_id'] ?? 0);
     $paymentMethods = $selectedRate ? PaymentService::availableMethods($country, $currency, $subtotal + $shipping, (string)$selectedRate['method_code'], $customerId > 0 ? $customerId : null) : [];
     $selectedPayment = $paymentMethods[0] ?? null;
@@ -119,13 +119,13 @@ function renderCheckout(): string {
         $checked = (($rate['method_code'] ?? '') === $selectedShipping || ($i === 0 && $selectedShipping === '')) ? ' checked' : '';
         echo '<label class="shipping-option"><span><input type="radio" name="shipping_method" value="' . $e($rate['method_code']) . '"' . $checked . '> ' . $e($rate['label']) . '<small>' . $e((string)($rate['delivery_days'] ?? '')) . '</small></span><strong>' . ($rate['price'] === 0 ? $t('free_shipping') : $price((int)$rate['price'])) . '</strong></label>';
     }
-    if (empty($shippingRates)) echo '<p style="color:#c62828">Doručenie nie je dostupné.</p>';
+    if (empty($shippingRates)) echo '<p style="color:#c62828">' . $t('shipping_unavailable') . '</p>';
     echo '</div>';
     echo '<h3 style="margin-top:20px">' . $t('payment') . '</h3><div class="payment-options" id="payment-options">';
     foreach ($paymentMethods as $i => $method) {
         echo '<label class="payment-option"><span><input type="radio" name="payment" value="' . $e($method['code']) . '"' . ($i === 0 ? ' checked' : '') . '> ' . $e($method['label']) . '<small>' . $e((string)($method['description'] ?: $method['provider'])) . '</small></span><strong>' . ((int)$method['fee'] === 0 ? $t('free_shipping') : $price((int)$method['fee'])) . '</strong></label>';
     }
-    if (empty($paymentMethods)) echo '<p style="color:#c62828">Platba nie je dostupná.</p>';
+    if (empty($paymentMethods)) echo '<p style="color:#c62828">' . $t('payment_unavailable') . '</p>';
     echo '</div>';
     echo '<label for="checkout-notes">' . $t('notes') . '</label><textarea id="checkout-notes" name="notes" placeholder="' . $t('notes_placeholder') . '"></textarea>';
     echo '<button class="btn-checkout" type="submit">' . $t('submit_order') . '</button>';

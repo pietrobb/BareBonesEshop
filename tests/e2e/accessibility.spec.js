@@ -31,6 +31,18 @@ test.describe('rendered WCAG 2.2 AA qualification', () => {
     }
   });
 
+  test('320px storefront has no horizontal overflow and loads theme assets', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 800 });
+    const responses = [];
+    page.on('response', response => {
+      if (response.url().includes('/themes/default/assets/')) responses.push(response.status());
+    });
+    await page.goto('/');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy();
+    expect(responses.length).toBeGreaterThanOrEqual(3);
+    expect(responses.every(status => status === 200)).toBeTruthy();
+  });
+
   test('keyboard bypass, focus visibility, and 200% zoom remain usable', async ({ page }) => {
     await page.goto('/');
     await page.keyboard.press('Tab');

@@ -1,0 +1,19 @@
+<a class="skip-link" href="#main-content">{{t.skip_to_content}}</a>
+<header>
+  <div class="header-top"><div class="wrap">
+    <div class="lang-switch">{{{language_links_html}}}</div>
+    <a href="{{account_url}}" title="{{account_label}}">{{account_label}}</a>
+    <a href="{{cart_url}}" class="cart-icon" title="{{t.cart}}">&#128722;{{{cart_badge_html}}}</a>
+  </div></div>
+  <div class="header-main"><div class="wrap">
+    <div class="logo"><a href="{{home_url}}">{{shop_name}}</a></div>
+    <form class="search-bar" method="get" action="{{home_url}}">
+      <input type="hidden" name="page" value="search">
+      <input type="search" name="q" placeholder="{{t.search_placeholder}}" value="{{search_query}}">
+      <button type="submit">{{t.search}}</button>
+    </form>
+  </div></div>
+  <nav class="header-nav" aria-label="{{t.categories}}"><div class="wrap">
+    <a href="{{home_url}}">{{t.home}}</a>{{{navigation_html}}}
+  </div></nav>
+</header>
