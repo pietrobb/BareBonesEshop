@@ -26,8 +26,10 @@ test.describe('rendered WCAG 2.2 AA qualification', () => {
     await page.locator('[data-storefront-action="cart-add"]').first().click();
     await page.goto('/?page=checkout');
     await assertNoSeriousViolations(page);
-    for (const name of ['Full Name', 'E-mail', 'Phone', 'Street', 'City', 'ZIP Code', 'Country', 'Order Notes']) {
-      await expect(page.getByLabel(name, { exact: true })).toBeVisible();
+    for (const id of ['name', 'email', 'phone', 'street', 'city', 'zip', 'country', 'notes']) {
+      const field = page.locator(`#checkout-${id}`);
+      await expect(field).toBeVisible();
+      await expect(field).toHaveAccessibleName(/\S/);
     }
   });
 

@@ -350,10 +350,16 @@ class Template {
         if ($level < 0) return null;
         $value = $contexts[$level];
         if ($path === '' || $path === 'this' || $path === '.') return $path === 'this' && array_key_exists('this', $value) ? $value['this'] : $value;
-        foreach (explode('.', $path) as $key) {
+        $keys = explode('.', $path);
+        foreach ($keys as $index => $key) {
             if ($key === 'length' && is_array($value)) return count($value);
-            if (!is_array($value) || !array_key_exists($key, $value)) return null;
-            $value = $value[$key];
+            if (!is_array($value)) return null;
+            if (array_key_exists($key, $value)) {
+                $value = $value[$key];
+                continue;
+            }
+            $compoundKey = implode('.', array_slice($keys, $index));
+            return array_key_exists($compoundKey, $value) ? $value[$compoundKey] : null;
         }
         return $value;
     }

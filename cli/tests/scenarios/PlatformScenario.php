@@ -898,6 +898,8 @@ $renderedProductList = Template::render('storefront/section-product-list', [
 assert_true(str_contains($renderedProductList, I18n::t('add_to_cart')) && !str_contains($renderedProductList, '{{'), 'G12 renderer: section product list resolves parent translations');
 $renderedAccount = Template::page('account', AccountViewModel::build('login', null, ['de', 'en'], [], null, null));
 assert_true(str_contains($renderedAccount, 'name="action" value="login"') && !str_contains($renderedAccount, '{{'), 'G12 renderer: account uses theme-owned markup without unresolved directives');
+assert_true(str_contains($renderedAccount, '<label for="account-login-email">' . esc(I18n::t('account.email')) . '</label>'), 'G12 renderer: dotted translation keys produce accessible account labels');
+assert_true(str_contains($renderedAccount, '<button class="btn">' . esc(I18n::t('account.login')) . '</button>'), 'G12 renderer: dotted translation keys produce accessible account controls');
 $renderedWishlist = Template::page('wishlist', [
     'wishlist' => ['items' => [$vm['product']['relations']['related'][0]], 'action_url' => Template::storeUrl('/wishlist.php'), 'csrf_token' => Security::csrfToken()],
     't' => I18n::all(),
