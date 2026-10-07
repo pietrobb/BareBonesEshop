@@ -60,6 +60,9 @@ return [
         'events' => ['created' => true, 'paid' => true],
         'templates' => ['created' => 'merchant_order_created', 'paid' => 'merchant_order_paid'],
     ],
+    // One reminder per abandoned cart (worker cron). Needs app_url for the recovery/opt-out links.
+    // Carts older than max_age_hours are never reminded, so enabling it causes no mail burst.
+    'cart_reminder' => ['enabled' => true, 'delay_hours' => 24, 'max_age_hours' => 72],
 
     // Security
     'trusted_proxies' => [],

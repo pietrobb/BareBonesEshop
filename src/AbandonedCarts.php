@@ -1,0 +1,224 @@
+<?php
+/**
+ * Abandoned-cart capture, conversion tracking and the single recovery reminder.
+ *
+ * Invariants:
+ *  - a cart gets at most one reminder (claimed atomically before the mail job is queued),
+ *  - a cart that became an order is linked to it and never reminded,
+ *  - a cart whose e-mail ordered later, or opted out, is never reminded,
+ *  - carts older than max_age_hours are never reminded (no mail burst after enabling).
+ */
+class AbandonedCarts {
+    public const STATUS_SENT = 'sent';
+    public const STATUS_ORDERED = 'ordered';
+    public const STATUS_SUPPRESSED = 'suppressed';
+
+    /** Persist the current session cart with the shopper's e-mail. Never resets a sent reminder. */
+    public static function capture(string $email, ?string $sessionId = null): void {
+        $email = strtolower(trim($email));
+        $sessionId ??= session_id();
+        if ($sessionId === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) return;
+        $summary = Cart::enriched();
+        if (empty($summary['items'])) return;
+
+        $items = array_map(static fn(array $item): array => [
+            'product_id' => (int)$item['product_id'],
+            'variant_id' => $item['variant_id'] !== null ? (int)$item['variant_id'] : null,
+            'qty' => (int)$item['qty'],
+            'name' => trim((string)$item['name'] . ' ' . (string)($item['variant_name'] ?? '')),
+            'sku' => (string)$item['sku'],
+            'total' => (int)$item['total'],
+        ], $summary['items']);
+        $data = [
+            ':email' => $email,
+            ':data' => json_encode($items, JSON_UNESCAPED_UNICODE),
+            ':value' => (int)$summary['subtotal'],
+            ':count' => (int)$summary['count'],
+            ':currency' => (string)($summary['currency'] ?? 'eur'),
+            ':locale' => I18n::locale(),
+            ':sid' => $sessionId,
+        ];
+
+        $db = Db::get();
+        $now = Db::now();
+        $update = $db->prepare("UPDATE abandoned_carts SET customer_email = :email, cart_data = :data, cart_value = :value,
+            item_count = :count, currency = :currency, locale = :locale, updated_at = {$now}
+            WHERE session_id = :sid AND order_id IS NULL");
+        $update->execute($data);
+        if ($update->rowCount() > 0) return;
+        try {
+            $db->prepare("INSERT INTO abandoned_carts (session_id, customer_email, cart_data, cart_value, item_count, currency, locale,
+                    store_id, recovery_token, updated_at)
+                VALUES (:sid, :email, :data, :value, :count, :currency, :locale, :store, :token, {$now})")
+               ->execute($data + [':store' => StoreContext::current()->id(), ':token' => bin2hex(random_bytes(16))]);
+        } catch (\PDOException $e) {
+            // Concurrent capture for the same session already created the row.
+        }
+    }
+
+    /** Link the session's cart to the order created from it. */
+    public static function markConverted(int $orderId, ?string $sessionId = null): void {
+        $sessionId ??= session_id();
+        if ($sessionId === '' || $orderId <= 0) return;
+        $now = Db::now();
+        Db::get()->prepare("UPDATE abandoned_carts SET order_id = :order, converted_at = {$now},
+                reminder_status = COALESCE(reminder_status, :status), session_id = :archived
+            WHERE session_id = :sid AND order_id IS NULL")
+            ->execute([':order' => $orderId, ':status' => self::STATUS_ORDERED, ':archived' => 'order:' . $orderId, ':sid' => $sessionId]);
+    }
+
+    /** Queue the single reminder for every due cart. Returns the number of reminders queued. */
+    public static function sweep(array $options = []): int {
+        $hours = max(1, (int)($options['delay_hours'] ?? 24));
+        $maxAge = max($hours + 1, (int)($options['max_age_hours'] ?? 72));
+        $baseUrl = rtrim((string)($options['base_url'] ?? ''), '/');
+        if (!preg_match('#^https?://#i', $baseUrl)) {
+            throw new RuntimeException('Cart reminders need an absolute app_url for recovery and opt-out links');
+        }
+        $db = Db::get();
+        $sqlite = Db::isSqlite();
+        $ago = static fn(int $h): string => $sqlite ? "datetime('now', '-{$h} hours')" : "DATE_SUB(NOW(), INTERVAL {$h} HOUR)";
+        $activity = 'COALESCE(updated_at, created_at)';
+        $stmt = $db->prepare("SELECT * FROM abandoned_carts
+            WHERE order_id IS NULL AND reminded_at IS NULL AND reminder_status IS NULL
+              AND customer_email IS NOT NULL AND customer_email <> ''
+              AND {$activity} < {$ago($hours)} AND {$activity} >= {$ago($maxAge)}
+            ORDER BY id LIMIT 50");
+        $stmt->execute();
+
+        $sent = 0;
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $cart) {
+            $email = strtolower((string)$cart['customer_email']);
+            $orderId = self::orderPlacedSince($email, (string)$cart['created_at']);
+            if ($orderId !== null) {
+                self::close((int)$cart['id'], self::STATUS_ORDERED, $orderId);
+                continue;
+            }
+            if (self::isSuppressed($email)) {
+                self::close((int)$cart['id'], self::STATUS_SUPPRESSED);
+                continue;
+            }
+            $now = Db::now();
+            $claim = $db->prepare("UPDATE abandoned_carts SET reminded_at = {$now}, reminder_status = :status
+                WHERE id = :id AND reminded_at IS NULL AND reminder_status IS NULL AND order_id IS NULL");
+            $claim->execute([':status' => self::STATUS_SENT, ':id' => (int)$cart['id']]);
+            if ($claim->rowCount() !== 1) continue;
+            if (!preg_match('/^[a-f0-9]{32}$/', (string)($cart['recovery_token'] ?? ''))) {
+                $cart['recovery_token'] = bin2hex(random_bytes(16));
+                $db->prepare('UPDATE abandoned_carts SET recovery_token = :token WHERE id = :id')
+                   ->execute([':token' => $cart['recovery_token'], ':id' => (int)$cart['id']]);
+            }
+
+            JobQueue::push('email_send', [
+                'template' => 'cart_reminder',
+                'to' => $email,
+                'locale' => (string)($cart['locale'] ?? ''),
+                '_store_id' => (string)($cart['store_id'] ?? '') ?: 'default',
+                'vars' => self::mailVars($cart, $baseUrl),
+            ], 8);
+            $sent++;
+        }
+        return $sent;
+    }
+
+    /** @return array<int,array> newest first; filter = abandoned | converted | all */
+    public static function list(string $filter = 'abandoned', int $limit = 200): array {
+        $where = match ($filter) {
+            'converted' => 'order_id IS NOT NULL',
+            'all' => '1=1',
+            default => "order_id IS NULL AND customer_email IS NOT NULL AND customer_email <> ''",
+        };
+        $stmt = Db::get()->prepare("SELECT * FROM abandoned_carts WHERE {$where} ORDER BY id DESC LIMIT :limit");
+        $stmt->bindValue(':limit', max(1, $limit), PDO::PARAM_INT);
+        $stmt->execute();
+        return array_map(static function (array $row): array {
+            $row['items'] = self::items($row);
+            return $row;
+        }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /** Refill an empty session cart from a reminder link. */
+    public static function restore(string $token): bool {
+        $cart = self::byToken($token);
+        if (!$cart || $cart['order_id'] !== null) return false;
+        if (Cart::get() === []) Cart::restore(self::items($cart));
+        return true;
+    }
+
+    /** Opt the reminder's recipient out of all future reminders. */
+    public static function unsubscribe(string $token): bool {
+        $cart = self::byToken($token);
+        if (!$cart || trim((string)$cart['customer_email']) === '') return false;
+        self::suppress((string)$cart['customer_email'], 'cart_reminder_link');
+        return true;
+    }
+
+    public static function suppress(string $email, string $source): void {
+        $email = strtolower(trim($email));
+        if ($email === '' || self::isSuppressed($email)) return;
+        try {
+            Db::get()->prepare('INSERT INTO email_suppressions (email, scope, source) VALUES (:email, :scope, :source)')
+                ->execute([':email' => $email, ':scope' => 'marketing', ':source' => $source]);
+        } catch (\PDOException $e) {
+            // Already suppressed by a concurrent request.
+        }
+    }
+
+    public static function isSuppressed(string $email): bool {
+        $stmt = Db::get()->prepare('SELECT 1 FROM email_suppressions WHERE email = :email LIMIT 1');
+        $stmt->execute([':email' => strtolower(trim($email))]);
+        return (bool)$stmt->fetchColumn();
+    }
+
+    private static function byToken(string $token): ?array {
+        if (!preg_match('/^[a-f0-9]{32}$/', $token)) return null;
+        $stmt = Db::get()->prepare('SELECT * FROM abandoned_carts WHERE recovery_token = :token LIMIT 1');
+        $stmt->execute([':token' => $token]);
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    private static function orderPlacedSince(string $email, string $since): ?int {
+        $stmt = Db::get()->prepare('SELECT id FROM orders WHERE LOWER(customer_email) = :email AND created_at >= :since ORDER BY id LIMIT 1');
+        $stmt->execute([':email' => $email, ':since' => $since]);
+        $id = $stmt->fetchColumn();
+        return $id === false ? null : (int)$id;
+    }
+
+    private static function close(int $id, string $status, ?int $orderId = null): void {
+        $now = Db::now();
+        Db::get()->prepare("UPDATE abandoned_carts SET reminder_status = :status,
+                order_id = COALESCE(order_id, :order), converted_at = CASE WHEN :order2 IS NULL THEN converted_at ELSE {$now} END
+            WHERE id = :id")
+            ->execute([':status' => $status, ':order' => $orderId, ':order2' => $orderId, ':id' => $id]);
+    }
+
+    /** Items from the stored snapshot; legacy session-shaped rows get names from the catalog. */
+    private static function items(array $cart): array {
+        $raw = json_decode((string)($cart['cart_data'] ?? ''), true);
+        $items = [];
+        foreach (is_array($raw) ? $raw : [] as $item) {
+            if (!is_array($item) || (int)($item['product_id'] ?? 0) <= 0) continue;
+            if (!isset($item['name'])) {
+                $product = Products::byId((int)$item['product_id']);
+                $item['name'] = (string)($product['name'] ?? ('#' . (int)$item['product_id']));
+            }
+            $items[] = $item;
+        }
+        return $items;
+    }
+
+    private static function mailVars(array $cart, string $baseUrl): array {
+        $token = (string)$cart['recovery_token'];
+        $currency = (string)($cart['currency'] ?? '') ?: null;
+        return [
+            // Single-parameter URLs survive the mail engine's HTML escaping in the plain-text part.
+            'cart_url' => $baseUrl . '/?cart_recover=' . $token,
+            'unsubscribe_url' => $baseUrl . '/?cart_unsubscribe=' . $token,
+            'cart_total' => I18n::price((int)($cart['cart_value'] ?? 0), $currency),
+            'items' => array_map(static fn(array $item): array => [
+                'name' => (string)$item['name'],
+                'quantity' => (int)($item['qty'] ?? 1),
+            ], self::items($cart)),
+        ];
+    }
+}

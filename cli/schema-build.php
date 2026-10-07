@@ -40,7 +40,7 @@ if ($fresh) {
         'schema_migrations',
         'shipping_labels', 'shipping_rates',
         'password_reset_tokens', 'customer_addresses', 'customers',
-        'abandoned_carts', 'coupon_uses', 'processed_events', 'email_log', 'payment_transactions', 'audit_log',
+        'abandoned_carts', 'email_suppressions', 'coupon_uses', 'processed_events', 'email_log', 'payment_transactions', 'audit_log',
         'merchant_notifications', 'order_consents', 'checkout_sessions', 'digital_entitlements', 'digital_assets',
         'order_items', 'orders',
         'product_vehicles', 'product_oe_numbers', 'product_specifications',

@@ -140,6 +140,8 @@ return [
     'free_shipping_add_one' => 'Add 1 more item and shipping is free.',
     'free_shipping_add_few' => 'Add {count} more items and shipping is free.',
     'free_shipping_add_many' => 'Add {count} more items and shipping is free.',
+    'cart_reminder_unsubscribed' => 'Cart reminders are switched off. We will not send you any more.',
+    'cart_reminder_unsubscribe_invalid' => 'This unsubscribe link is not valid.',
     'total_price'      => 'Total',
     'to_checkout'      => 'Proceed to Checkout',
     'clear_cart'       => 'Clear Cart',

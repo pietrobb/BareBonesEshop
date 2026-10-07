@@ -1,0 +1,10 @@
+Czy zapomniałeś o czymś w koszyku?
+
+Te produkty wciąż czekają w Twoim koszyku:
+{{#each items}}- {{quantity}} × {{name}}
+{{/each}}
+Razem: {{cart_total}}
+
+Dokończ zakup: {{cart_url}}
+
+Jeśli nie chcesz więcej przypomnień o koszyku, wypisz się tutaj: {{unsubscribe_url}}

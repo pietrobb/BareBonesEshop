@@ -82,6 +82,18 @@ try {
     Logger::exception('worker.outbox_sweep_failed', $e);
 }
 
+// The single abandoned-cart reminder is due-date driven, so it is swept on every
+// cron run instead of depending on someone enqueueing a cart_abandonment job.
+try {
+    $reminderCfg = (array)($cfg['cart_reminder'] ?? []);
+    if (($reminderCfg['enabled'] ?? true) !== false) {
+        $reminders = AbandonedCarts::sweep($reminderCfg + ['base_url' => cartReminderBaseUrl($cfg)]);
+        if ($verbose && $reminders > 0) echo "Cart reminders queued: {$reminders}\n";
+    }
+} catch (\Throwable $e) {
+    Logger::exception('worker.cart_reminder_sweep_failed', $e);
+}
+
 // Process loop
 $maxRuntime = 55; // seconds (cron runs every minute)
 $startTime = time();
@@ -348,6 +360,7 @@ function handleEmailSend(array $payload, array $job): void {
     ];
     if (!$to || !in_array($template, $allowedTemplates, true)) return;
     if ($orderId === null && $template !== 'cart_reminder') return;
+    if ($template === 'cart_reminder' && AbandonedCarts::isSuppressed($to)) return;
 
     $vars = (array)($payload['vars'] ?? []);
     if ($orderId) {
@@ -622,47 +635,17 @@ function handleSitemapBuild(array $payload, array $job): void {
 }
 
 function handleCartAbandonment(array $payload, array $job): void {
-    $db = Db::get();
-    $hoursThreshold = max(1, (int)($payload['hours'] ?? 24));
-    $now = Db::isSqlite() ? "datetime('now')" : "NOW()";
-    $interval = Db::isSqlite()
-        ? "datetime('now', '-{$hoursThreshold} hours')"
-        : "DATE_SUB(NOW(), INTERVAL {$hoursThreshold} HOUR)";
+    $cfg = require __DIR__ . '/../config.php';
+    $options = (array)($cfg['cart_reminder'] ?? []);
+    if (isset($payload['hours'])) $options['delay_hours'] = (int)$payload['hours'];
+    AbandonedCarts::sweep($options + ['base_url' => cartReminderBaseUrl($cfg)]);
+}
 
-    $stmt = $db->prepare("
-        SELECT * FROM abandoned_carts
-        WHERE customer_email IS NOT NULL AND customer_email != ''
-          AND reminded_at IS NULL
-          AND created_at < {$interval}
-        LIMIT 50
-    ");
-    $stmt->execute();
-    $carts = $stmt->fetchAll();
-
-    $sent = 0;
-    foreach ($carts as $cart) {
-        // Skip if customer already placed an order with this email recently
-        $orderCheck = $db->prepare("SELECT id FROM orders WHERE customer_email = :email AND created_at > :since LIMIT 1");
-        $orderCheck->execute([':email' => $cart['customer_email'], ':since' => $cart['created_at']]);
-        if ($orderCheck->fetch()) {
-            // Customer completed order — remove abandoned cart
-            $db->prepare("DELETE FROM abandoned_carts WHERE id = :id")->execute([':id' => $cart['id']]);
-            continue;
-        }
-
-        JobQueue::push('email_send', [
-            'template' => 'cart_reminder',
-            'to'       => $cart['customer_email'],
-            'vars'     => ['cart_url' => '/'],
-        ], 8);
-
-        $db->prepare("UPDATE abandoned_carts SET reminded_at = {$now} WHERE id = :id")
-           ->execute([':id' => $cart['id']]);
-        $sent++;
-    }
-
-    if ($sent > 0) {
-        error_log("Cart abandonment: sent {$sent} reminder emails");
+function cartReminderBaseUrl(array $cfg): string {
+    try {
+        return Security::appUrl($cfg);
+    } catch (\RuntimeException $e) {
+        return '';
     }
 }
 

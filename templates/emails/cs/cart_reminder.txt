@@ -1,0 +1,10 @@
+Nezapomněli jste něco v košíku?
+
+Ve vašem košíku zůstaly tyto položky:
+{{#each items}}- {{quantity}} × {{name}}
+{{/each}}
+Celkem: {{cart_total}}
+
+Dokončit nákup: {{cart_url}}
+
+Pokud si již nepřejete dostávat připomínky košíku, odhlaste se zde: {{unsubscribe_url}}

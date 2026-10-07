@@ -1,0 +1,10 @@
+Did you forget something in your cart?
+
+These items are still waiting in your cart:
+{{#each items}}- {{quantity}} × {{name}}
+{{/each}}
+Total: {{cart_total}}
+
+Complete your order: {{cart_url}}
+
+If you no longer want cart reminders, unsubscribe here: {{unsubscribe_url}}

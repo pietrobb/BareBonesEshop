@@ -140,6 +140,8 @@ return [
     'free_shipping_add_one' => 'Pridajte ešte 1 kus a poštovné máte zadarmo.',
     'free_shipping_add_few' => 'Pridajte ešte {count} kusy a poštovné máte zadarmo.',
     'free_shipping_add_many' => 'Pridajte ešte {count} kusov a poštovné máte zadarmo.',
+    'cart_reminder_unsubscribed' => 'Pripomienky košíka sú odhlásené. Už vám ich nebudeme posielať.',
+    'cart_reminder_unsubscribe_invalid' => 'Odkaz na odhlásenie je neplatný.',
     'total_price'      => 'Celková cena',
     'to_checkout'      => 'K pokladni',
     'clear_cart'       => 'Vyprázdniť košík',

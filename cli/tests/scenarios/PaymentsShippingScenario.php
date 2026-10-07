@@ -9,6 +9,8 @@ $smokePages = [
     '/'                          => 'Homepage',
     '/?page=cart'                => 'Cart',
     '/?page=checkout'            => 'Checkout',
+    '/?cart_recover=0'           => 'Cart recovery link',
+    '/?cart_unsubscribe=0'       => 'Cart reminder opt-out link',
 ];
 
 // Add a real category and product if we have access to the live DB

@@ -140,6 +140,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'free_shipping_add_one' => 'Přidejte ještě 1 kus a poštovné máte zdarma.',
     'free_shipping_add_few' => 'Přidejte ještě {count} kusy a poštovné máte zdarma.',
     'free_shipping_add_many' => 'Přidejte ještě {count} kusů a poštovné máte zdarma.',
+    'cart_reminder_unsubscribed' => 'Připomínky košíku jsou odhlášeny. Již vám je nebudeme posílat.',
+    'cart_reminder_unsubscribe_invalid' => 'Odkaz pro odhlášení je neplatný.',
     'total_price'      => 'Celková cena',
     'to_checkout'      => 'K pokladně',
     'clear_cart'       => 'Vyprázdnit košík',

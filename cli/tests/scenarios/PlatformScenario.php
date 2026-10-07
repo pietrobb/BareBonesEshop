@@ -130,6 +130,92 @@ catch (LogicException $e) { $cardOrderRejected = true; }
 assert_true($cardOrderRejected, 'Awaiting payment: card orders cannot be confirmed as transfers');
 $recoverySource = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Recovery.php');
 assert_true(str_contains($recoverySource, "adminRequire('orders.edit')"), 'Awaiting payment: confirm action requires orders.edit');
+
+// Abandoned carts: capture, conversion, exactly one reminder, opt-out, restore.
+$acAge = static function (string $sid, int $hours) use ($pdo): void {
+    $pdo->prepare("UPDATE abandoned_carts SET created_at = datetime('now', ?), updated_at = datetime('now', ?) WHERE session_id = ?")
+        ->execute(["-{$hours} hours", "-{$hours} hours", $sid]);
+};
+$acRow = static fn(string $sid): array => $pdo->query("SELECT * FROM abandoned_carts WHERE session_id = " . $pdo->quote($sid))->fetch(PDO::FETCH_ASSOC) ?: [];
+$acReminders = static fn(): array => array_values(array_filter(JobQueue::pull(500), static fn(array $job): bool => ($job['type'] ?? '') === 'email_send'
+    && ($job['payload']['template'] ?? '') === 'cart_reminder'));
+$pdo->exec("DELETE FROM abandoned_carts");
+Cart::clear();
+Cart::add(9001, null, 1);
+AbandonedCarts::capture('Shopper@Example.com', 'ac-sess-1');
+AbandonedCarts::capture('shopper@example.com', 'ac-sess-1');
+$acFirst = $acRow('ac-sess-1');
+assert_equals(1, (int)$pdo->query("SELECT COUNT(*) FROM abandoned_carts WHERE session_id = 'ac-sess-1'")->fetchColumn(), 'Abandoned carts: one row per session');
+assert_equals('shopper@example.com', (string)($acFirst['customer_email'] ?? ''), 'Abandoned carts: e-mail is normalized');
+assert_equals(999, (int)($acFirst['cart_value'] ?? 0), 'Abandoned carts: cart value is snapshotted');
+assert_true((bool)preg_match('/^[a-f0-9]{32}$/', (string)($acFirst['recovery_token'] ?? '')), 'Abandoned carts: recovery token is issued');
+assert_equals('Digital Guide', trim((string)(AbandonedCarts::list()[0]['items'][0]['name'] ?? '')), 'Abandoned carts: list shows item names');
+$acAge('ac-sess-1', 30);
+$acNoUrl = false;
+try { AbandonedCarts::sweep([]); } catch (RuntimeException $e) { $acNoUrl = true; }
+assert_true($acNoUrl, 'Cart reminder: refuses to send without an absolute app_url');
+JobQueue::pull(500);
+assert_equals(1, AbandonedCarts::sweep(['base_url' => 'https://shop.example/']), 'Cart reminder: due cart gets a reminder');
+$acJobs = $acReminders();
+assert_equals(1, count($acJobs), 'Cart reminder: exactly one mail job is queued');
+assert_equals('shopper@example.com', (string)($acJobs[0]['payload']['to'] ?? ''), 'Cart reminder: goes to the cart e-mail');
+$acVars = (array)($acJobs[0]['payload']['vars'] ?? []);
+assert_equals('https://shop.example/?cart_recover=' . $acFirst['recovery_token'], (string)($acVars['cart_url'] ?? ''), 'Cart reminder: absolute recovery link');
+assert_equals('https://shop.example/?cart_unsubscribe=' . $acFirst['recovery_token'], (string)($acVars['unsubscribe_url'] ?? ''), 'Cart reminder: absolute opt-out link');
+assert_equals(0, AbandonedCarts::sweep(['base_url' => 'https://shop.example']), 'Cart reminder: second sweep sends nothing');
+AbandonedCarts::capture('shopper@example.com', 'ac-sess-1');
+$acAge('ac-sess-1', 30);
+assert_equals(0, AbandonedCarts::sweep(['base_url' => 'https://shop.example']), 'Cart reminder: cart activity never re-arms a sent reminder');
+assert_equals(AbandonedCarts::STATUS_SENT, (string)$acRow('ac-sess-1')['reminder_status'], 'Cart reminder: status records the sent reminder');
+
+AbandonedCarts::capture('converted@example.com', 'ac-sess-2');
+AbandonedCarts::markConverted($transferOrderId, 'ac-sess-2');
+$acAge('order:' . $transferOrderId, 30);
+$acAbandonedEmails = array_column(AbandonedCarts::list('abandoned'), 'customer_email');
+$acConverted = array_values(array_filter(AbandonedCarts::list('converted'), static fn(array $c): bool => $c['customer_email'] === 'converted@example.com'));
+assert_true(!in_array('converted@example.com', $acAbandonedEmails, true), 'Abandoned carts: converted cart is not listed as abandoned');
+assert_equals($transferOrderId, (int)($acConverted[0]['order_id'] ?? 0), 'Abandoned carts: converted cart links its order');
+AbandonedCarts::capture('converted@example.com', 'ac-sess-2');
+assert_equals(1, (int)$pdo->query("SELECT COUNT(*) FROM abandoned_carts WHERE session_id = 'ac-sess-2' AND order_id IS NULL")->fetchColumn(), 'Abandoned carts: a new cart after an order starts a fresh row');
+$pdo->exec("DELETE FROM abandoned_carts WHERE session_id = 'ac-sess-2'");
+
+AbandonedCarts::capture('transfer@example.com', 'ac-sess-3');
+$acAge('ac-sess-3', 30);
+AbandonedCarts::capture('optout@example.com', 'ac-sess-4');
+$acAge('ac-sess-4', 30);
+assert_true(AbandonedCarts::unsubscribe((string)$acRow('ac-sess-4')['recovery_token']), 'Cart reminder: opt-out link is accepted');
+assert_true(!AbandonedCarts::unsubscribe('not-a-token'), 'Cart reminder: invalid opt-out token is rejected');
+assert_true(AbandonedCarts::isSuppressed('OptOut@example.com'), 'Cart reminder: opt-out list is case-insensitive');
+AbandonedCarts::capture('stale@example.com', 'ac-sess-5');
+$acAge('ac-sess-5', 200);
+assert_equals(0, AbandonedCarts::sweep(['base_url' => 'https://shop.example']), 'Cart reminder: ordered, opted-out and stale carts get no mail');
+assert_equals(['shopper@example.com'], array_map(static fn(array $job): string => (string)$job['payload']['to'], $acReminders()), 'Cart reminder: no mail job for skipped carts');
+assert_equals(AbandonedCarts::STATUS_ORDERED, (string)$acRow('ac-sess-3')['reminder_status'], 'Cart reminder: later order by the same e-mail closes the cart');
+assert_equals($transferOrderId, (int)$acRow('ac-sess-3')['order_id'], 'Cart reminder: later order is linked to the cart');
+assert_equals(AbandonedCarts::STATUS_SUPPRESSED, (string)$acRow('ac-sess-4')['reminder_status'], 'Cart reminder: opted-out cart is closed');
+assert_true(($acRow('ac-sess-5')['reminder_status'] ?? null) === null, 'Cart reminder: carts older than max_age are never mailed');
+
+Cart::clear();
+assert_true(AbandonedCarts::restore((string)$acFirst['recovery_token']) && count(Cart::get()) === 1, 'Cart reminder: recovery link refills an empty cart');
+assert_true(!AbandonedCarts::restore('0123456789abcdef0123456789abcdef'), 'Cart reminder: unknown recovery token is rejected');
+Cart::clear();
+$acMail = MailService::render('cart_reminder', 'sk', $acVars + ['cart_total' => '9,99 €']);
+assert_true(str_contains($acMail['subject'], 'košíku') && str_contains($acMail['html'], $acVars['unsubscribe_url']) && str_contains($acMail['text'], $acVars['cart_url']), 'Cart reminder: sk mail carries recovery and opt-out links');
+foreach (['cs', 'de', 'en', 'hu', 'pl'] as $acLocale) {
+    assert_true(is_file(TEST_CLI_DIR . "/../templates/emails/{$acLocale}/cart_reminder.html"), "Cart reminder: {$acLocale} template exists");
+}
+require_once TEST_CLI_DIR . '/../src/Entrypoints/Admin/Recovery.php';
+$_GET = ['filter' => 'all'];
+ob_start();
+pageAbandonedCarts();
+$acAdminHtml = (string)ob_get_clean();
+$_GET = [];
+assert_true(str_contains($acAdminHtml, 'shopper@example.com') && str_contains($acAdminHtml, 'pripomienka odoslaná') && str_contains($acAdminHtml, 'admin.php?p=order&id=' . $transferOrderId), 'Abandoned carts: admin list shows e-mail, reminder state and order link');
+assert_true(str_contains((string)file_get_contents(TEST_CLI_DIR . '/../src/Http/ApiHandlers.php'), 'AbandonedCarts::markConverted($orderId)'), 'Abandoned carts: checkout marks the session cart converted');
+$acWorkerSource = (string)file_get_contents(TEST_CLI_DIR . '/worker.php');
+assert_true(str_contains($acWorkerSource, 'AbandonedCarts::sweep($reminderCfg') && str_contains($acWorkerSource, "AbandonedCarts::isSuppressed(\$to)"), 'Cart reminder: worker sweeps every run and re-checks opt-out before sending');
+$pdo->exec("DELETE FROM abandoned_carts");
+$pdo->exec("DELETE FROM email_suppressions");
 ConsentService::setDefinitionsForTesting(null);
 $_GET = [];
 $_POST = [];

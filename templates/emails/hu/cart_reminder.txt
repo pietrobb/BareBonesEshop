@@ -1,0 +1,10 @@
+Nem felejtett el valamit a kosarában?
+
+Ezek a termékek még a kosarában vannak:
+{{#each items}}- {{quantity}} × {{name}}
+{{/each}}
+Összesen: {{cart_total}}
+
+Vásárlás befejezése: {{cart_url}}
+
+Ha nem szeretne több kosáremlékeztetőt kapni, iratkozzon le itt: {{unsubscribe_url}}

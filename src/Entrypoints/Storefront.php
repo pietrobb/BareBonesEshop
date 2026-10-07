@@ -38,6 +38,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['cart_action'])) {
     exit;
 }
 
+if (isset($_GET['cart_recover'])) StorefrontCartAction::recover((string)$_GET['cart_recover']);
 $cartCount = StorefrontCartAction::count();
 
 // Detect catalog type — conditionally enable TecDoc features
@@ -47,6 +48,8 @@ $hasTecDoc = isset($_catalog['product_types']['auto_part']);
 // Route: support both ?page=X and URL-rewritten ?category=slug
 $page = Security::clean($_GET['page'] ?? '');
 if (!$page && !empty($_GET['category'])) $page = 'category';
+if (!$page && isset($_GET['cart_recover'])) $page = 'cart';
+if (!$page && isset($_GET['cart_unsubscribe'])) $page = 'cart-unsubscribe';
 if (!$page) $page = 'home';
 
 $e = fn(string $s) => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
@@ -117,6 +120,12 @@ switch ($page) {
     case 'cart':
         $title = Template::pageTitle($t('cart'));
         $content = renderCart();
+        break;
+
+    case 'cart-unsubscribe':
+        $unsubscribed = StorefrontCartAction::unsubscribeReminder((string)($_GET['cart_unsubscribe'] ?? ''));
+        $title = Template::pageTitle($t('cart'));
+        $content = Template::render('storefront/status-message', ['message' => $t($unsubscribed ? 'cart_reminder_unsubscribed' : 'cart_reminder_unsubscribe_invalid')]);
         break;
 
     case 'checkout':

@@ -140,6 +140,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'free_shipping_add_one' => 'Tegyen a kosárba még 1 terméket, és ingyenes a szállítás.',
     'free_shipping_add_few' => 'Tegyen a kosárba még {count} terméket, és ingyenes a szállítás.',
     'free_shipping_add_many' => 'Tegyen a kosárba még {count} terméket, és ingyenes a szállítás.',
+    'cart_reminder_unsubscribed' => 'A kosáremlékeztetőket lemondta. Többet nem küldünk.',
+    'cart_reminder_unsubscribe_invalid' => 'Ez a leiratkozási link érvénytelen.',
     'total_price'      => 'Végösszeg',
     'to_checkout'      => 'A pénztárhoz',
     'clear_cart'       => 'Kosár ürítése',

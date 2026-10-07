@@ -34,6 +34,17 @@ final class StorefrontCartAction
         return (int)Cart::enriched()['count'];
     }
 
+    /** Reminder-link commands: refill the cart or opt the recipient out. */
+    public static function recover(string $token): bool
+    {
+        return AbandonedCarts::restore($token);
+    }
+
+    public static function unsubscribeReminder(string $token): bool
+    {
+        return AbandonedCarts::unsubscribe($token);
+    }
+
     private static function key(array $input, int $productId, ?int $variantId): string
     {
         return (string)($input['cart_key'] ?? ($variantId ? "v_{$variantId}" : "p_{$productId}"));

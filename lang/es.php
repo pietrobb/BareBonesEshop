@@ -101,6 +101,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'free_shipping_add_one' => 'Añada 1 artículo más y el envío es gratuito.',
     'free_shipping_add_few' => 'Añada {count} artículos más y el envío es gratuito.',
     'free_shipping_add_many' => 'Añada {count} artículos más y el envío es gratuito.',
+    'cart_reminder_unsubscribed' => 'Los recordatorios del carrito están desactivados. No le enviaremos más.',
+    'cart_reminder_unsubscribe_invalid' => 'Este enlace para darse de baja no es válido.',
     'total_price' => 'Total',
     'to_checkout' => 'Ir a pagar',
     'clear_cart' => 'Vaciar carrito',

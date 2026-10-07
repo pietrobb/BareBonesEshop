@@ -1,5 +1,5 @@
 <?php
-/** Revenue recovery admin: bank transfers awaiting payment. */
+/** Revenue recovery admin: bank transfers awaiting payment and abandoned carts. */
 
 function pageAwaitingPayment(): void {
     $orders = OfflinePaymentQueue::awaiting();
@@ -31,6 +31,44 @@ function pageAwaitingPayment(): void {
                     </form>
                     <?php endif; ?>
                 </td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+        <?php endif; ?>
+    </div>
+    <?php
+}
+
+function pageAbandonedCarts(): void {
+    $filter = in_array($_GET['filter'] ?? '', ['converted', 'all'], true) ? $_GET['filter'] : 'abandoned';
+    $carts = AbandonedCarts::list($filter);
+    $statusLabels = [
+        AbandonedCarts::STATUS_SENT => 'pripomienka odoslaná',
+        AbandonedCarts::STATUS_ORDERED => 'objednal',
+        AbandonedCarts::STATUS_SUPPRESSED => 'odhlásený',
+    ];
+    ?>
+    <h1>Opustené košíky <span class="muted">(<?= count($carts) ?>)</span></h1>
+    <p style="margin-bottom:1rem">
+        <?php foreach (['abandoned' => 'Opustené', 'converted' => 'Konvertované', 'all' => 'Všetky'] as $key => $label): ?>
+        <a href="admin.php?p=abandoned_carts&filter=<?= $key ?>" class="btn btn-sm<?= $filter === $key ? ' btn-primary' : '' ?>"><?= $label ?></a>
+        <?php endforeach; ?>
+    </p>
+    <div class="card table-scroll">
+        <?php if (!$carts): ?>
+        <p class="muted">Žiadne košíky.</p>
+        <?php else: ?>
+        <table>
+            <tr><th>E-mail</th><th>Položky</th><th>Hodnota</th><th>Vytvorený</th><th>Posledná zmena</th><th>Pripomienka</th><th>Objednávka</th></tr>
+            <?php foreach ($carts as $c): ?>
+            <tr>
+                <td><?= esc((string)$c['customer_email']) ?></td>
+                <td><?php foreach ($c['items'] as $item): ?><?= (int)($item['qty'] ?? 1) ?> × <?= esc((string)$item['name']) ?><br><?php endforeach; ?></td>
+                <td><?= I18n::price((int)($c['cart_value'] ?? 0), (string)($c['currency'] ?? '') ?: null) ?></td>
+                <td class="muted"><?= esc(substr((string)$c['created_at'], 0, 16)) ?></td>
+                <td class="muted"><?= esc(substr((string)($c['updated_at'] ?? $c['created_at']), 0, 16)) ?></td>
+                <td><?= esc($statusLabels[(string)($c['reminder_status'] ?? '')] ?? 'čaká') ?><?php if (!empty($c['reminded_at'])): ?><br><span class="muted"><?= esc(substr((string)$c['reminded_at'], 0, 16)) ?></span><?php endif; ?></td>
+                <td><?php if (!empty($c['order_id'])): ?><a href="admin.php?p=order&id=<?= (int)$c['order_id'] ?>">#<?= (int)$c['order_id'] ?></a><?php else: ?><span class="muted">—</span><?php endif; ?></td>
             </tr>
             <?php endforeach; ?>
         </table>

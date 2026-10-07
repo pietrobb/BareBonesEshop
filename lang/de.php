@@ -140,6 +140,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'free_shipping_add_one' => 'Noch 1 Artikel hinzufügen und der Versand ist kostenlos.',
     'free_shipping_add_few' => 'Noch {count} Artikel hinzufügen und der Versand ist kostenlos.',
     'free_shipping_add_many' => 'Noch {count} Artikel hinzufügen und der Versand ist kostenlos.',
+    'cart_reminder_unsubscribed' => 'Warenkorb-Erinnerungen sind abbestellt. Wir senden Ihnen keine mehr.',
+    'cart_reminder_unsubscribe_invalid' => 'Dieser Abmeldelink ist ungültig.',
     'total_price'      => 'Gesamtpreis',
     'to_checkout'      => 'Zur Kasse',
     'clear_cart'       => 'Warenkorb leeren',

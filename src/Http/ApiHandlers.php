@@ -688,6 +688,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
             OrderWorkflow::transition($orderId, 'paid', 'Bezplatná digitálna objednávka');
         }
 
+        AbandonedCarts::markConverted($orderId);
         Cart::clear();
         // Invalidate the submitted CSRF value after the irreversible create so
         // an exact browser/network replay cannot reserve stock a second time.

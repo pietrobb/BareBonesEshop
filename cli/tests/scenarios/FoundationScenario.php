@@ -218,6 +218,17 @@ if ($mysqlDsn) {
         $freeQtyMigrationMysql->up($my, false);
         assert_equals(1, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='shipping_methods' AND COLUMN_NAME='free_from_qty'")->fetchColumn(), 'MySQL live: free-from-quantity shipping migration is applied and idempotent');
         $my->exec('DROP TABLE shipping_methods');
+        $my->exec('DROP TABLE IF EXISTS abandoned_carts');
+        $my->exec('DROP TABLE IF EXISTS email_suppressions');
+        $my->exec("CREATE TABLE abandoned_carts (id INT AUTO_INCREMENT PRIMARY KEY, session_id VARCHAR(191) NOT NULL UNIQUE, customer_email VARCHAR(191), cart_data LONGTEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, reminded_at DATETIME NULL) ENGINE=InnoDB");
+        $my->exec("INSERT INTO abandoned_carts (session_id, customer_email, cart_data) VALUES ('legacy', 'old@example.com', '{}')");
+        $cartRecoveryMigrationMysql = require TEST_CLI_DIR . '/../migrations/20261007110000_abandoned_cart_recovery.php';
+        $cartRecoveryMigrationMysql->up($my, false);
+        $cartRecoveryMigrationMysql->up($my, false);
+        assert_equals(10, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='abandoned_carts' AND COLUMN_NAME IN ('store_id','locale','currency','cart_value','item_count','updated_at','recovery_token','order_id','converted_at','reminder_status')")->fetchColumn(), 'MySQL live: cart recovery migration adds columns idempotently');
+        assert_equals('old@example.com', (string)$my->query("SELECT customer_email FROM abandoned_carts WHERE session_id='legacy'")->fetchColumn(), 'MySQL live: cart recovery migration preserves existing carts');
+        $my->exec('DROP TABLE abandoned_carts');
+        $my->exec('DROP TABLE email_suppressions');
         foreach (['content_redirects', 'content_banners', 'content_menu_items'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['credit_note_items', 'order_refunds', 'return_exchanges', 'return_receipts', 'return_labels'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['shipment_items', 'shipments', 'bundle_components', 'inventory_receipts', 'purchase_order_items', 'purchase_orders', 'supplier_products', 'suppliers', 'stock_movements'] as $table) $my->exec("DROP TABLE {$table}");
@@ -402,6 +413,12 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS abandoned_carts (
     created_at TEXT DEFAULT (datetime('now')), reminded_at TEXT
 )");
 $pdo->exec("CREATE INDEX IF NOT EXISTS idx_ac_email ON abandoned_carts(customer_email, reminded_at)");
+$cartRecoveryMigration = require TEST_CLI_DIR . '/../migrations/20261007110000_abandoned_cart_recovery.php';
+$cartRecoveryMigration->up($pdo, true);
+$cartRecoveryMigration->up($pdo, true);
+$cartRecoveryColumns = array_column($pdo->query('PRAGMA table_info(abandoned_carts)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+assert_true(!array_diff(['cart_value', 'item_count', 'recovery_token', 'order_id', 'converted_at', 'reminder_status', 'updated_at'], $cartRecoveryColumns), 'Cart recovery migration: adds recovery columns idempotently');
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='email_suppressions'")->fetchColumn(), 'Cart recovery migration: creates the e-mail opt-out list');
 
 $pdo->exec("CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY, entity TEXT NOT NULL, entity_id INTEGER NOT NULL,

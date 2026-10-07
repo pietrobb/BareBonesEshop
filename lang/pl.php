@@ -140,6 +140,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'free_shipping_add_one' => 'Dodaj jeszcze 1 sztukę, a dostawa będzie darmowa.',
     'free_shipping_add_few' => 'Dodaj jeszcze {count} sztuki, a dostawa będzie darmowa.',
     'free_shipping_add_many' => 'Dodaj jeszcze {count} sztuk, a dostawa będzie darmowa.',
+    'cart_reminder_unsubscribed' => 'Przypomnienia o koszyku są wyłączone. Nie będziemy ich już wysyłać.',
+    'cart_reminder_unsubscribe_invalid' => 'Ten link do wypisania jest nieprawidłowy.',
     'total_price'      => 'Cena całkowita',
     'to_checkout'      => 'Do kasy',
     'clear_cart'       => 'Wyczyść koszyk',

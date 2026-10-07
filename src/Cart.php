@@ -385,26 +385,11 @@ class Cart {
         $_SESSION['cart_email'] = $email;
         $_SESSION['cart_email_at'] = time();
 
-        // Persist to abandoned_carts table for background worker scanning
-        $cart = self::get();
-        if (!empty($cart) && $email) {
-            try {
-                $db = Db::get();
-                $sid = session_id();
-                // Atomic upsert — session_id has UNIQUE constraint
-                if (Db::isSqlite()) {
-                    $db->prepare("INSERT INTO abandoned_carts (session_id, customer_email, cart_data) VALUES (:sid, :email, :data)
-                        ON CONFLICT(session_id) DO UPDATE SET customer_email = :email2, cart_data = :data2, reminded_at = NULL")
-                       ->execute([':sid' => $sid, ':email' => $email, ':data' => json_encode($cart), ':email2' => $email, ':data2' => json_encode($cart)]);
-                } else {
-                    $db->prepare("INSERT INTO abandoned_carts (session_id, customer_email, cart_data) VALUES (:sid, :email, :data)
-                        ON DUPLICATE KEY UPDATE customer_email = VALUES(customer_email), cart_data = VALUES(cart_data), reminded_at = NULL")
-                       ->execute([':sid' => $sid, ':email' => $email, ':data' => json_encode($cart)]);
-                }
-            } catch (\Throwable $e) {
-                // Silently fail — cart abandonment tracking is non-critical
-                error_log("Cart::setEmail persist failed: " . $e->getMessage());
-            }
+        try {
+            AbandonedCarts::capture($email);
+        } catch (\Throwable $e) {
+            // Cart recovery tracking must never block checkout.
+            error_log("Cart::setEmail persist failed: " . $e->getMessage());
         }
     }
 }

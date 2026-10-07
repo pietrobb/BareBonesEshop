@@ -60,6 +60,7 @@ $pagePermissions = [
     'orders'     => 'orders.view',
     'order'      => 'orders.view',
     'awaiting_payment' => 'orders.view',
+    'abandoned_carts' => 'orders.view',
     'import'     => 'import',
     'cache'      => 'cache',
     'audit'      => 'reports.view',
@@ -98,6 +99,7 @@ $title = match($page) {
     'orders'     => I18n::t('admin.title.orders'),
     'order'      => I18n::t('admin.title.order_detail'),
     'awaiting_payment' => 'Čaká na platbu',
+    'abandoned_carts' => 'Opustené košíky',
     'import'     => I18n::t('admin.title.import'),
     'cache'      => I18n::t('admin.title.cache'),
     'audit'      => I18n::t('admin.title.audit_log'),
@@ -186,6 +188,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
     <?php if (Security::adminCan('products.view')): ?><a href="admin.php?p=products" class="<?= $page==='products'?'active':'' ?>"><?= esc(I18n::t('admin.nav.products')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=orders" class="<?= $page==='orders'?'active':'' ?>"><?= esc(I18n::t('admin.nav.orders')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=awaiting_payment" class="<?= $page==='awaiting_payment'?'active':'' ?>">Čaká na platbu</a><?php endif; ?>
+    <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=abandoned_carts" class="<?= $page==='abandoned_carts'?'active':'' ?>">Opustené košíky</a><?php endif; ?>
     <?php if (Security::adminCan('import')): ?><a href="admin.php?p=import" class="<?= $page==='import'?'active':'' ?>"><?= esc(I18n::t('admin.nav.import_csv')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('cache')): ?><a href="admin.php?p=cache" class="<?= $page==='cache'?'active':'' ?>"><?= esc(I18n::t('admin.nav.cache')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=attributes" class="<?= $page==='attributes'||$page==='attribute'?'active':'' ?>"><?= esc(I18n::t('admin.nav.attributes')) ?></a><?php endif; ?>
@@ -213,6 +216,7 @@ match($page) {
     'orders'    => pageOrders(),
     'order'     => pageOrder(),
     'awaiting_payment' => pageAwaitingPayment(),
+    'abandoned_carts' => pageAbandonedCarts(),
     'invoice_pdf' => pageInvoicePdf(),
     'import'    => pageImport(),
     'cache'     => pageCache(),

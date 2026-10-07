@@ -1,0 +1,10 @@
+Haben Sie etwas im Warenkorb vergessen?
+
+Diese Artikel liegen noch in Ihrem Warenkorb:
+{{#each items}}- {{quantity}} × {{name}}
+{{/each}}
+Summe: {{cart_total}}
+
+Bestellung abschließen: {{cart_url}}
+
+Wenn Sie keine Warenkorb-Erinnerungen mehr erhalten möchten, melden Sie sich hier ab: {{unsubscribe_url}}
