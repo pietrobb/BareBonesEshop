@@ -1,0 +1,7 @@
+BareBones core changed on {{host}}
+
+Core files on {{host}} changed outside an update ({{count}}).
+{{#each files}}- {{kind}}: {{path}}
+{{/each}}
+Baseline recorded: {{recorded_at}}
+Make the fix in BareBones first and ship it as an update, otherwise the next update overwrites it.

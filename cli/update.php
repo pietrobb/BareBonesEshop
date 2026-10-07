@@ -110,6 +110,7 @@ try {
         $updater = new Updater($root, $stateDirectory, null, null, $databaseBackup);
         $result = $updater->rollback($snapshotId, !empty($options['force']));
         echo "Rollback complete: {$result['snapshot']}, restored {$result['restored_files']} file(s).\n";
+        updateRecordCoreBaseline($root, $stateDirectory, $config, 'rollback ' . $snapshotId, null);
         exit(0);
     }
 
@@ -162,10 +163,22 @@ try {
     $result = $updater->apply($package);
     echo "Updated to {$result['version']}: {$result['changed']} changed, "
         . "{$result['already_current']} already current. Rollback snapshot: {$result['snapshot']}\n";
+    updateRecordCoreBaseline($root, $stateDirectory, $config, 'update ' . $result['version'], (string)$result['version']);
     exit(0);
 } catch (Throwable $e) {
     fwrite(STDERR, 'ERROR: ' . $e->getMessage() . "\n");
     exit(1);
+}
+
+/** The drift guard baseline follows every successful update or rollback; failure here never undoes the update. */
+function updateRecordCoreBaseline(string $root, string $stateDirectory, array $config, string $reason, ?string $version): void
+{
+    try {
+        $result = (new CoreIntegrity($root, $stateDirectory, (array)($config['drift_guard'] ?? [])))->record($reason, $version);
+        echo "Core drift baseline recorded: {$result['files']} file(s).\n";
+    } catch (Throwable $e) {
+        fwrite(STDERR, 'WARNING: core drift baseline not recorded: ' . $e->getMessage() . "\n");
+    }
 }
 
 function createUpdateDatabaseBackup(array $config): ?UpdateDatabaseBackup

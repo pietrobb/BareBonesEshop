@@ -1,0 +1,7 @@
+Zmena jadra BareBones na {{host}}
+
+Na serveri {{host}} sa zmenili súbory jadra mimo aktualizácie ({{count}}).
+{{#each files}}- {{kind}}: {{path}}
+{{/each}}
+Základ zaznamenaný: {{recorded_at}}
+Opravu treba najprv urobiť v BareBones a nasadiť aktualizáciou. Inak ju ďalšia aktualizácia prepíše.

@@ -63,6 +63,9 @@ return [
     // One reminder per abandoned cart (worker cron). Needs app_url for the recovery/opt-out links.
     // Carts older than max_age_hours are never reminded, so enabling it causes no mail burst.
     'cart_reminder' => ['enabled' => true, 'delay_hours' => 24, 'max_age_hours' => 72],
+    // Core drift guard (php cli/drift-guard.php check --notify, daily cron). Shop code lives in
+    // themes/<shop> or config, so only real core edits are reported. recipients fall back to admin_email.
+    'drift_guard' => ['recipients' => [], 'exclude' => []],
 
     // Security
     'trusted_proxies' => [],

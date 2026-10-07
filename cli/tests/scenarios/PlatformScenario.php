@@ -1173,3 +1173,53 @@ $g15Runbook = (string)file_get_contents(TEST_CLI_DIR . '/../docs/OPERATIONS_RUNB
 foreach (['99.9%', 'RPO', 'RTO', 'Incident response', 'Required live operator checks'] as $g15RunbookProof) {
     assert_true(str_contains($g15Runbook, $g15RunbookProof), "G15 runbook: documents {$g15RunbookProof}");
 }
+
+echo "\n--- Core drift guard ---\n";
+$dgRoot = sys_get_temp_dir() . '/bb_drift_' . bin2hex(random_bytes(4));
+$dgState = $dgRoot . '-state';
+foreach (['src', 'themes/default', 'themes/shop', 'templates/legal', 'cache'] as $dgDir) mkdir($dgRoot . '/' . $dgDir, 0777, true);
+file_put_contents($dgRoot . '/index.php', '<?php // core');
+file_put_contents($dgRoot . '/config.php', '<?php return [];');
+file_put_contents($dgRoot . '/src/Orders.php', '<?php // orders');
+file_put_contents($dgRoot . '/src/Cart.php', '<?php // cart');
+file_put_contents($dgRoot . '/themes/default/theme.css', 'a{}');
+file_put_contents($dgRoot . '/themes/shop/theme.css', 'b{}');
+file_put_contents($dgRoot . '/templates/legal/terms.html', 'terms');
+file_put_contents($dgRoot . '/cache/x.json', '{}');
+$dgGuard = new CoreIntegrity($dgRoot, $dgState);
+assert_equals('no_manifest', $dgGuard->check()['status'], 'Drift guard: reports a missing baseline');
+$dgRecorded = $dgGuard->record('test', '1.0.0');
+assert_equals(4, $dgRecorded['files'], 'Drift guard: baseline covers core files only');
+assert_equals('clean', $dgGuard->check()['status'], 'Drift guard: untouched core is clean');
+file_put_contents($dgRoot . '/config.php', '<?php return ["changed" => true];');
+file_put_contents($dgRoot . '/themes/shop/theme.css', 'b{color:red}');
+file_put_contents($dgRoot . '/templates/legal/terms.html', 'new terms');
+file_put_contents($dgRoot . '/cache/y.json', '{}');
+assert_equals('clean', $dgGuard->check()['status'], 'Drift guard: config, shop theme, legal texts and runtime dirs are not core');
+file_put_contents($dgRoot . '/src/Orders.php', '<?php // hand edit');
+file_put_contents($dgRoot . '/src/Hotfix.php', '<?php // new');
+unlink($dgRoot . '/src/Cart.php');
+$dgReport = $dgGuard->check();
+assert_equals('drift', $dgReport['status'], 'Drift guard: hand edit of core is detected');
+assert_equals(['src/Orders.php'], $dgReport['modified'], 'Drift guard: lists modified core file');
+assert_equals(['src/Hotfix.php'], $dgReport['added'], 'Drift guard: lists added core file');
+assert_equals(['src/Cart.php'], $dgReport['missing'], 'Drift guard: lists deleted core file');
+$dgGuard->record('update 1.0.1', '1.0.1');
+assert_equals('clean', $dgGuard->check()['status'], 'Drift guard: re-recording after an update accepts the new core');
+$dgCustom = new CoreIntegrity($dgRoot, $dgState, ['exclude' => ['src/Hotfix.php']]);
+file_put_contents($dgRoot . '/src/Hotfix.php', '<?php // allowed local file');
+assert_equals('drift', $dgGuard->check()['status'], 'Drift guard: default scope still sees the edit');
+$dgCustom->record('custom');
+file_put_contents($dgRoot . '/src/Hotfix.php', '<?php // edited again');
+assert_equals('clean', $dgCustom->check()['status'], 'Drift guard: configured excludes are honoured');
+$dgUpdateCli = (string)file_get_contents(TEST_CLI_DIR . '/update.php');
+assert_true(substr_count($dgUpdateCli, 'updateRecordCoreBaseline($root') === 2, 'Drift guard: update apply and rollback re-record the baseline');
+assert_true(is_file(TEST_CLI_DIR . '/../templates/emails/sk/core_drift_alert.html'), 'Drift guard: alert e-mail template exists');
+$dgMail = MailService::render('core_drift_alert', 'sk', ['host' => 'shop.example', 'count' => 1, 'recorded_at' => 'now', 'files' => [['kind' => 'modified', 'path' => 'src/Orders.php']]]);
+assert_true(str_contains($dgMail['subject'], 'shop.example') && str_contains($dgMail['html'], 'src/Orders.php'), 'Drift guard: alert names host and changed files');
+$dgCleanup = static function (string $path) use (&$dgCleanup): void {
+    if (is_dir($path)) { foreach (scandir($path) ?: [] as $n) if ($n !== '.' && $n !== '..') $dgCleanup($path . '/' . $n); @rmdir($path); }
+    elseif (is_file($path)) @unlink($path);
+};
+$dgCleanup($dgRoot);
+$dgCleanup($dgState);
