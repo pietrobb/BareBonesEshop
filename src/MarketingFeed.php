@@ -76,7 +76,7 @@ class MarketingFeed {
             'id' => (string)$product['sku'],
             'title' => (string)$product['name'],
             'description' => mb_substr($description, 0, 5000),
-            'link' => $baseUrl . '/product/' . rawurlencode((string)$product['slug']),
+            'link' => $baseUrl . UrlAliases::outbound('/product/' . rawurlencode((string)$product['slug'])),
             'image_link' => $image,
             'availability' => $availability,
             'availability_date' => $availability === 'preorder' ? self::isoDate((string)($product['available_from'] ?? '')) : '',

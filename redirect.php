@@ -11,6 +11,7 @@ if (!in_array($method, ['GET', 'HEAD'], true)) {
 }
 
 $path = (string)($_GET['path'] ?? parse_url((string)($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH));
+if (UrlAliases::dispatch($path, __DIR__)) exit;
 try {
     Bootstrap::initLocale($path);
     $redirect = ContentService::redirect($path);

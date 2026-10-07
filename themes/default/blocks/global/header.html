@@ -12,7 +12,7 @@
                 <label class="sr-only" for="site-search">{{t.search}}</label>
                 <input id="site-search" type="search" name="q" placeholder="{{t.search_placeholder}}" class="search-input">
             </form>
-            <a href="{{base_url}}/?page=cart" class="cart-badge" data-cart-badge aria-label="{{t.cart}}">
+            <a href="{{cart_url}}" class="cart-badge" data-cart-badge aria-label="{{t.cart}}">
                 {{t.cart}} (<span data-cart-count>{{cart.count}}</span>)
             </a>
         </div>

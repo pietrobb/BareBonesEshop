@@ -150,7 +150,7 @@ class Categories {
     public static function enrich(array $category): array {
         $category['translations'] = json_decode($category['translations'] ?? '{}', true);
         $category['meta'] = json_decode($category['meta'] ?? '{}', true);
-        $category['url'] = '/category/' . $category['path'];
+        $category['url'] = UrlAliases::outbound('/category/' . $category['path']);
         return $category;
     }
 }

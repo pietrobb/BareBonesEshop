@@ -52,7 +52,7 @@ class Sitemap {
             /* fresh install — tables may not exist yet; homepage alone is valid */
         }
 
-        return $paths;
+        return array_values(array_unique(array_map([UrlAliases::class, 'outbound'], $paths)));
     }
 
     /**

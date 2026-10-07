@@ -2,6 +2,7 @@
 /** Store-scoped CMS page rendered from a canonical model by the active theme. */
 require_once __DIR__ . '/src/autoload.php';
 
+UrlAliases::redirectInternal();
 Security::headers();
 Security::sessionStart();
 if (!isset($_SESSION['cart'])) $_SESSION['cart'] = [];

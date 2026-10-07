@@ -1406,3 +1406,42 @@ MailService::useAdapter(null);
 $pdo->exec("DELETE FROM warehouse_stock WHERE sku IN ('SA-BOOK', 'SA-BOOK2', 'SA-EBOOK')");
 $pdo->exec("DELETE FROM warehouses WHERE id = {$saWh}");
 foreach ($saPreviousDefault as $saDefaultId) $pdo->exec('UPDATE warehouses SET is_default = 1 WHERE id = ' . (int)$saDefaultId);
+
+echo "\n--- Test: URL aliases (shop-owned public URL scheme) ---\n";
+UrlAliases::setRules([
+    '/kniha/{slug}' => '/product/{slug}',
+    '/knihy' => '/category/knihy',
+    '/softver' => '/page/softver',
+    '/kosik' => '/?page=cart',
+    '/hladat' => '/?page=search',
+    '/dakujeme' => '/?page=order-done',
+]);
+assert_equals('/kniha/krvave-slnko', UrlAliases::outbound('/product/krvave-slnko'), 'URL aliases: product path uses the public pattern');
+assert_equals('/kniha/krvave-slnko', UrlAliases::outbound('/?page=product&slug=krvave-slnko'), 'URL aliases: ?page=product&slug is the same route');
+assert_equals('/knihy?sort=price', UrlAliases::outbound('/?page=category&slug=knihy&sort=price'), 'URL aliases: category alias keeps extra query');
+assert_equals('/category/e-knihy', UrlAliases::outbound('/?page=category&slug=e-knihy'), 'URL aliases: unaliased category normalizes to its path route');
+assert_equals('/kosik', UrlAliases::outbound('/?page=cart'), 'URL aliases: page route alias');
+assert_equals('/hladat?q=slnko', UrlAliases::outbound('/?page=search&q=slnko'), 'URL aliases: page alias keeps remaining query');
+assert_equals('/dakujeme?order=ORD-1#top', UrlAliases::outbound('/?page=order-done&order=ORD-1#top'), 'URL aliases: fragment preserved');
+assert_equals('/?page=checkout', UrlAliases::outbound('/?page=checkout'), 'URL aliases: unmatched route unchanged');
+assert_equals('/themes/aeon/assets/a.css', UrlAliases::outbound('/themes/aeon/assets/a.css'), 'URL aliases: assets unchanged');
+assert_equals(['path' => '/product/krvave-slnko', 'query' => []], UrlAliases::inbound('/kniha/krvave-slnko/'), 'URL aliases: inbound pattern resolves (trailing slash ok)');
+assert_equals(['path' => '/', 'query' => ['page' => 'cart']], UrlAliases::inbound('/kosik'), 'URL aliases: inbound page alias');
+assert_true(UrlAliases::inbound('/kniha/../admin') === null && UrlAliases::inbound('/kniha/a/b') === null, 'URL aliases: inbound placeholder is one safe segment');
+assert_equals(['product.php', ['slug' => 'x']], UrlAliases::entry(['path' => '/product/x', 'query' => []]), 'URL aliases: product entry');
+assert_equals(['index.php', ['category' => 'knihy']], UrlAliases::entry(['path' => '/category/knihy', 'query' => []]), 'URL aliases: category entry');
+assert_equals(['page.php', ['slug' => 'softver']], UrlAliases::entry(['path' => '/page/softver', 'query' => []]), 'URL aliases: CMS page entry');
+assert_equals(['index.php', ['page' => 'cart']], UrlAliases::entry(['path' => '/', 'query' => ['page' => 'cart']]), 'URL aliases: page entry');
+assert_true(UrlAliases::entry(['path' => '/admin.php', 'query' => []]) === null, 'URL aliases: no entry for non-storefront targets');
+$uaScript = $_SERVER['SCRIPT_NAME'] ?? null;
+$_SERVER['SCRIPT_NAME'] = '/test/index.php';
+assert_equals('/test/kniha/krvave-slnko', Template::url('/product/krvave-slnko'), 'URL aliases: Template::url applies alias under a base path');
+assert_equals('/test/kosik', Template::storeUrl('/?page=cart'), 'URL aliases: Template::storeUrl applies alias');
+if ($uaScript === null) unset($_SERVER['SCRIPT_NAME']); else $_SERVER['SCRIPT_NAME'] = $uaScript;
+$uaThrown = false;
+try { UrlAliases::setRules(['https://evil.example/x' => '/product/x']); } catch (RuntimeException $e) { $uaThrown = true; }
+assert_true($uaThrown, 'URL aliases: absolute public alias is rejected');
+UrlAliases::setRules([]);
+assert_equals('/product/krvave-slnko', UrlAliases::outbound('/product/krvave-slnko'), 'URL aliases: no config keeps core URLs');
+assert_equals('/?page=product&slug=x', UrlAliases::outbound('/?page=product&slug=x'), 'URL aliases: no config keeps query routes untouched');
+UrlAliases::setRules(null);

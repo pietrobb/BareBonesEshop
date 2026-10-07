@@ -85,7 +85,7 @@ class Template {
         if ($path !== '' && (preg_match('#^[a-z][a-z0-9+.-]*:#i', $path) || str_starts_with($path, '//'))) {
             return $path;
         }
-        $suffix = '/' . ltrim($path, '/');
+        $suffix = UrlAliases::outbound('/' . ltrim($path, '/'));
         return self::baseUrl() . ($suffix === '/' ? '/' : $suffix);
     }
 
@@ -98,7 +98,7 @@ class Template {
         if ($prefix !== '' && (!str_starts_with($prefix, '/') || str_contains($prefix, '..'))) {
             throw new RuntimeException('Invalid store URL prefix');
         }
-        $suffix = '/' . ltrim($path, '/');
+        $suffix = UrlAliases::outbound('/' . ltrim($path, '/'));
         return self::baseUrl() . $prefix . ($suffix === '/' ? '/' : $suffix);
     }
 

@@ -636,7 +636,7 @@ class Products {
             $product['discount_percent'] = round((1 - $product['price'] / $product['compare_price']) * 100);
         }
 
-        $product['url'] = '/product/' . $product['slug'];
+        $product['url'] = UrlAliases::outbound('/product/' . $product['slug']);
         $product['image'] = $product['images'][0] ?? null;
         if (!empty($product['category_id']) && empty($product['category_path'])) {
             $catRow = $context->category((int)$product['category_id']);
