@@ -4,7 +4,9 @@
   "scripts": {
     "test:e2e": "playwright test",
     "test:e2e:accessibility": "playwright test accessibility.spec.js",
-    "test:lighthouse": "lhci autorun"
+    "test:lighthouse": "lhci autorun",
+    "test:parity": "node tests/parity/parity.mjs",
+    "test:parity:selftest": "node tests/parity/selftest.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.10.2",

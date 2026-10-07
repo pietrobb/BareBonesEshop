@@ -74,3 +74,5 @@ tests/e2e/.state.json
 
 # Local config with secrets (copy config.example.php -> config.php)
 config.php
+parity-report/
+tests/parity/parity.config.json

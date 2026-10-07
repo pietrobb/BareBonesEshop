@@ -1,0 +1,32 @@
+{
+  "baseline": "https://www.example-shop.sk",
+  "candidate": "https://www.example-shop.sk/test",
+  "baselineAuth": null,
+  "candidateAuth": { "username": "preview", "password": "change-me" },
+  "sitemap": "auto",
+  "sitemapUrl": null,
+  "maxUrls": 1000,
+  "paths": ["/", "/?page=search&q=kniha", "/?page=cart", "/?page=checkout", "/account.php", "/?page=terms", "/?page=privacy", "/neexistujuca-stranka-404"],
+  "urlMap": [
+    { "from": "^/stara-adresa$", "to": "/nova-adresa" }
+  ],
+  "flows": [
+    { "name": "cart-with-item", "steps": [
+      { "goto": "/?page=product&slug=example-product" },
+      { "click": "form[data-cart-add] button[type=submit]" },
+      { "goto": "/?page=cart" }
+    ] }
+  ],
+  "viewports": [
+    { "name": "desktop", "width": 1440, "height": 900 },
+    { "name": "mobile", "width": 390, "height": 844, "mobile": true }
+  ],
+  "mask": ["[data-parity-mask]", ".cookie-banner", "time"],
+  "priceSelectors": ["[itemprop=price]", ".price"],
+  "availabilitySelectors": ["[itemprop=availability]", ".availability"],
+  "pixel": { "threshold": 0.1, "minor": 0.001, "major": 0.01 },
+  "fullPage": true,
+  "locale": "sk-SK",
+  "expectedDiffs": "expected-diffs.json",
+  "out": "../../parity-report"
+}
