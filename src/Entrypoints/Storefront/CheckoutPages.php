@@ -16,7 +16,8 @@ function renderCart(): string {
     }
 
     $subtotal = (int)$cartData['subtotal'];
-    $shipping = $subtotal >= 5000 ? 0 : 499;
+    $quote = ShippingService::cartQuote($cart, $subtotal, 'SK');
+    $shipping = $quote['delivery_price'];
     $items = array_map(static fn(array $item): array => [
         'id' => (int)$item['product_id'], 'cart_key' => (string)$item['key'],
         'url' => Template::storeUrl('/?page=product&slug=' . rawurlencode((string)$item['slug'])),
@@ -30,7 +31,8 @@ function renderCart(): string {
         'product_label' => $t('product'), 'price_label' => $t('price'), 'quantity_label' => $t('quantity'), 'total_label' => $t('total'),
         'summary_label' => $t('order_summary'), 'subtotal_label' => $t('subtotal'), 'subtotal' => $price($subtotal), 'shipping_label' => $t('shipping'),
         'shipping' => ['free' => $shipping === 0, 'free_label' => $t('free_shipping'), 'price' => $price($shipping)],
-        'free_over_text' => $shipping > 0 ? $t('free_over') . ' ' . $price(5000) : '',
+        'free_over_text' => $shipping > 0 && $quote['free_above'] ? $t('free_over') . ' ' . $price($quote['free_above']) : '',
+        'free_shipping_hint' => $quote['hint'],
         'total_price_label' => $t('total_price'), 'total' => $price($subtotal + $shipping), 'checkout_url' => Template::storeUrl('/?page=checkout'),
         'checkout_label' => $t('to_checkout'), 'csrf_token' => Security::csrfToken(), 'cart_url' => Template::storeUrl('/?page=cart'), 'clear_label' => $t('clear_cart'),
     ]);
@@ -55,14 +57,12 @@ function renderCheckout(): string {
     $subtotal = (int)$cartData['subtotal'];
     $countryInput = $_POST['country'] ?? 'SK';
     $country = strtoupper(Security::clean(is_string($countryInput) ? $countryInput : 'SK'));
-    $weightG = 0;
-    foreach ($cart as $item) $weightG += (int)$item['weight_g'] * (int)$item['qty'];
-    $shippingRates = ShippingService::calculateRates($country, $weightG, $subtotal, false, 0);
-    $shippingInput = $_POST['shipping_method'] ?? ($shippingRates[0]['method_code'] ?? '');
-    $selectedShipping = Security::clean(is_string($shippingInput) ? $shippingInput : (string)($shippingRates[0]['method_code'] ?? ''));
-    $selectedRate = $shippingRates[0] ?? null;
-    foreach ($shippingRates as $rate) if (($rate['method_code'] ?? '') === $selectedShipping) { $selectedRate = $rate; break; }
-    $shipping = $selectedRate ? (int)$selectedRate['price'] : 0;
+    $shippingInput = $_POST['shipping_method'] ?? '';
+    $quote = ShippingService::cartQuote($cart, $subtotal, $country, is_string($shippingInput) ? Security::clean($shippingInput) : '');
+    $shippingRates = $quote['rates'];
+    $selectedRate = $quote['selected'];
+    $selectedShipping = (string)($selectedRate['method_code'] ?? '');
+    $shipping = $quote['price'];
     $customerId = (int)($_SESSION['customer_id'] ?? 0);
     $paymentMethods = $selectedRate ? PaymentService::availableMethods($country, $storeCurrency, $subtotal + $shipping, (string)$selectedRate['method_code'], $customerId ?: null) : [];
     $selectedPayment = $paymentMethods[0] ?? null;
@@ -78,7 +78,7 @@ function renderCheckout(): string {
             'price' => (int)$rate['price'] === 0 ? $freeLabel : $price((int)$rate['price']),
             'checked' => (string)$rate['method_code'] === $selectedShipping,
         ], $shippingRates),
-        'shipping_unavailable' => $shippingRates ? '' : $t('shipping_unavailable'), 'payment_label' => $t('payment'),
+        'shipping_unavailable' => $shippingRates ? '' : $t('shipping_unavailable'), 'free_shipping_hint' => $quote['hint'], 'payment_label' => $t('payment'),
         'payment_options' => array_map(static fn(array $method, int $index): array => [
             'code' => (string)$method['code'], 'label' => (string)$method['label'], 'description' => (string)($method['description'] ?: $method['provider']),
             'fee' => (int)$method['fee'] === 0 ? $freeLabel : $price((int)$method['fee']), 'checked' => $index === 0,

@@ -137,6 +137,22 @@ class I18n {
         return self::$fallbackLang[$key] ?? $key;
     }
 
+    /**
+     * Count-aware translation: picks "{$key}_one", "{$key}_few" (Slavic 2–4)
+     * or "{$key}_many" and substitutes {count}.
+     */
+    public static function plural(string $key, int $count): string {
+        $form = 'many';
+        if ($count === 1) {
+            $form = 'one';
+        } elseif (in_array(self::locale(), ['sk', 'cs'], true) && $count >= 2 && $count <= 4) {
+            $form = 'few';
+        } elseif (self::locale() === 'pl' && in_array($count % 10, [2, 3, 4], true) && !in_array($count % 100, [12, 13, 14], true)) {
+            $form = 'few';
+        }
+        return str_replace('{count}', (string)$count, self::t($key . '_' . $form));
+    }
+
     /** All UI translations (for template rendering) */
     public static function all(): array {
         if (!self::$lang) {

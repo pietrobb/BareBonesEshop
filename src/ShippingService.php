@@ -39,17 +39,19 @@ class ShippingService
         int    $weightG,
         int    $subtotal = 0,
         bool   $cod = false,
-        int    $volumeCm3 = 0
+        int    $volumeCm3 = 0,
+        int    $physicalQty = 0
     ): array {
         $country = strtoupper(trim($country ?: 'SK'));
         $weightG = max(0, $weightG);
         $subtotal = max(0, $subtotal);
         $volumeCm3 = max(0, $volumeCm3);
+        $physicalQty = max(0, $physicalQty);
 
         if (self::hasDatabasePricing()) {
             $dbRates = self::databaseRates($country, $weightG, $subtotal, $cod, $volumeCm3);
             if (!empty($dbRates)) {
-                return $dbRates;
+                return self::applyFreeShippingRules($dbRates, $subtotal, $physicalQty);
             }
         }
 
@@ -84,6 +86,7 @@ class ShippingService
             $cost = Shipping::calculate($method, $country, $weightG, $subtotal);
             if ($cost >= 0) { // -1 means "not available for zone"
                 $cfg = self::legacyMethodConfig($method);
+                $jsonCfg = Shipping::methodConfig($method) ?? [];
                 $rates[] = [
                     'key'           => $method,
                     'method_code'   => $method,
@@ -94,11 +97,13 @@ class ShippingService
                     'cod_surcharge' => 0,
                     'delivery_days' => $cfg['delivery_days'] ?? '',
                     'cod'           => false,
+                    'free_above'    => isset($jsonCfg['free_above']) ? (int)$jsonCfg['free_above'] : null,
+                    'free_from_qty' => isset($jsonCfg['free_from_qty']) ? (int)$jsonCfg['free_from_qty'] : null,
                 ];
             }
         }
 
-        return $rates;
+        return self::applyFreeShippingRules($rates, $subtotal, $physicalQty);
     }
 
     public static function selectRate(
@@ -107,9 +112,10 @@ class ShippingService
         int $weightG,
         int $subtotal = 0,
         bool $cod = false,
-        int $volumeCm3 = 0
+        int $volumeCm3 = 0,
+        int $physicalQty = 0
     ): ?array {
-        foreach (self::calculateRates($country, $weightG, $subtotal, $cod, $volumeCm3) as $rate) {
+        foreach (self::calculateRates($country, $weightG, $subtotal, $cod, $volumeCm3, $physicalQty) as $rate) {
             if (($rate['method_code'] ?? $rate['key'] ?? '') === $methodCode) {
                 return $rate;
             }
@@ -306,7 +312,7 @@ class ShippingService
         $params = array_merge([$storeId, $storeId, $storeId, $country, $weightG, $weightG, $volumeCm3], $zones, [$weightG, $volumeCm3]);
         $stmt = $db->prepare("
             SELECT r.*, m.name AS method_name, m.description AS method_description, m.service_type,
-                   m.supports_cod, m.supports_pickup, m.free_above, m.max_weight_g, m.max_volume_cm3,
+                   m.supports_cod, m.supports_pickup, m.free_above, m.free_from_qty, m.max_weight_g, m.max_volume_cm3,
                    m.active AS method_active, m.sort_order AS method_sort, z.name AS zone_name
             FROM shipping_rates r
             JOIN shipping_methods m ON m.code = r.method_code
@@ -331,9 +337,6 @@ class ShippingService
             if ($cod && empty($row['supports_cod'])) continue;
 
             $price = (int)$row['price'];
-            if (!empty($row['free_above']) && $subtotal >= (int)$row['free_above']) {
-                $price = 0;
-            }
             $codSurcharge = $cod ? (int)($row['cod_surcharge'] ?? 0) : 0;
             $rates[] = [
                 'key'             => $methodCode,
@@ -352,11 +355,124 @@ class ShippingService
                 'cod_surcharge'   => $codSurcharge,
                 'delivery_days'   => $row['delivery_days'] ?? '',
                 'free_above'      => isset($row['free_above']) ? (int)$row['free_above'] : null,
+                'free_from_qty'   => isset($row['free_from_qty']) ? (int)$row['free_from_qty'] : null,
             ];
             $seen[$methodCode] = true;
         }
 
         return $rates;
+    }
+
+    /**
+     * Number of units that need physical delivery. Digital items never count,
+     * so "free from N items" cannot be reached with e-books alone.
+     */
+    public static function physicalQuantity(array $items): int
+    {
+        $qty = 0;
+        foreach ($items as $item) {
+            if (VariantAvailability::isDigitalType((string)($item['product_type'] ?? ''))) continue;
+            $qty += max(0, (int)($item['qty'] ?? 0));
+        }
+        return $qty;
+    }
+
+    /**
+     * How many more physical units unlock free shipping on the cheapest-to-reach
+     * method, or null when no quantity rule applies (no physical item in the
+     * cart, no method with free_from_qty, or shipping is already free by quantity).
+     */
+    public static function unitsToFreeShipping(array $rates, int $physicalQty): ?int
+    {
+        if ($physicalQty < 1) return null;
+        $missing = null;
+        foreach ($rates as $rate) {
+            if (($rate['free_reason'] ?? null) === 'quantity') return null;
+            $threshold = (int)($rate['free_from_qty'] ?? 0);
+            if ($threshold <= $physicalQty || ($rate['free_reason'] ?? null) !== null) continue;
+            $missing = $missing === null ? $threshold - $physicalQty : min($missing, $threshold - $physicalQty);
+        }
+        return $missing;
+    }
+
+    /** Localized "add N more items for free shipping" text; empty when no hint applies. */
+    public static function freeShippingHint(?int $unitsToFree): string
+    {
+        return $unitsToFree !== null && $unitsToFree > 0 ? I18n::plural('free_shipping_add', $unitsToFree) : '';
+    }
+
+    /**
+     * Shipping summary for cart/checkout pages: offered rates, the requested
+     * (or first) rate, its price, and the free-shipping hint for the cart items.
+     */
+    public static function cartQuote(array $items, int $subtotal, string $country, string $requestedMethod = ''): array
+    {
+        $physicalQty = self::physicalQuantity($items);
+        $weightG = 0;
+        foreach ($items as $item) $weightG += (int)($item['weight_g'] ?? 0) * (int)($item['qty'] ?? 0);
+        $rates = self::calculateRates($country, $weightG, $subtotal, false, 0, $physicalQty);
+        $selected = $rates[0] ?? null;
+        foreach ($rates as $rate) {
+            if ($requestedMethod !== '' && ($rate['method_code'] ?? '') === $requestedMethod) { $selected = $rate; break; }
+        }
+        // Cart summaries estimate a delivered parcel, not a free in-store pickup.
+        $delivery = $selected;
+        foreach ($rates as $rate) {
+            if (($rate['service_type'] ?? '') !== 'pickup' && ($rate['carrier'] ?? '') !== 'pickup') { $delivery = $rate; break; }
+        }
+        return [
+            'rates' => $rates,
+            'selected' => $selected,
+            'price' => $physicalQty > 0 && $selected ? (int)$selected['price'] : 0,
+            'delivery_price' => $physicalQty > 0 && $delivery ? (int)$delivery['price'] : 0,
+            'free_above' => $delivery && !empty($delivery['free_above']) ? (int)$delivery['free_above'] : null,
+            'hint' => self::freeShippingHint(self::unitsToFreeShipping($rates, $physicalQty)),
+        ];
+    }
+
+    /**
+     * Apply per-method free shipping (order amount or physical unit count) and
+     * record which rule fired so the order shipping snapshot keeps the reason.
+     */
+    private static function applyFreeShippingRules(array $rates, int $subtotal, int $physicalQty): array
+    {
+        $quantityRules = null;
+        foreach ($rates as &$rate) {
+            if (!array_key_exists('free_from_qty', $rate)) {
+                $quantityRules ??= self::methodQuantityRules();
+                $rate['free_from_qty'] = $quantityRules[(string)($rate['method_code'] ?? $rate['key'] ?? '')] ?? null;
+            }
+            $freeAbove = (int)($rate['free_above'] ?? 0);
+            $freeFromQty = (int)($rate['free_from_qty'] ?? 0);
+            $reason = null;
+            if ($freeAbove > 0 && $subtotal >= $freeAbove) $reason = 'amount';
+            elseif ($freeFromQty > 0 && $physicalQty >= $freeFromQty) $reason = 'quantity';
+
+            $rate['free_from_qty'] = $freeFromQty > 0 ? $freeFromQty : null;
+            $rate['physical_qty'] = $physicalQty;
+            $rate['free_reason'] = $reason;
+            if ($reason !== null) {
+                // Database rates carry COD inside price; adapter/legacy rates keep it separate.
+                $rate['price'] = array_key_exists('base_price', $rate) ? (int)($rate['cod_surcharge'] ?? 0) : 0;
+                if (array_key_exists('base_price', $rate)) $rate['base_price'] = 0;
+            }
+        }
+        unset($rate);
+        return $rates;
+    }
+
+    /** @return array<string,int> method_code => free_from_qty for adapter-priced methods */
+    private static function methodQuantityRules(): array
+    {
+        try {
+            $stmt = Db::get()->prepare("SELECT code, free_from_qty FROM shipping_methods WHERE store_id = :store AND free_from_qty > 0");
+            $stmt->execute([':store' => StoreContext::current()->providerId()]);
+            $rules = [];
+            foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) $rules[(string)$row['code']] = (int)$row['free_from_qty'];
+            return $rules;
+        } catch (\Throwable $e) {
+            return [];
+        }
     }
 
     private static function hasDatabasePricing(): bool

@@ -175,6 +175,9 @@ if (file_exists($shippingMigFile)) {
     $shippingMig = require $shippingMigFile;
     $shippingMig->up($pdo, true);
 }
+$freeFromQtyMig = require TEST_CLI_DIR . '/../migrations/20261007100000_shipping_free_from_qty.php';
+$freeFromQtyMig->up($pdo, true);
+$freeFromQtyMig->up($pdo, true);
 $pdo->exec("CREATE TABLE IF NOT EXISTS shipping_rates (
     id            INTEGER PRIMARY KEY,
     carrier       TEXT NOT NULL,
@@ -893,6 +896,70 @@ $seedSnapshot = json_decode((string)$seedOrder['shipping_rate_snapshot'], true) 
 assert_equals('packeta', (string)$seedSnapshot['method_code'], 'Shipping: order snapshot stores selected rate JSON');
 assert_equals((int)$checkoutSelection['price'], (int)$seedOrder['shipping_cost'], 'Shipping UX: order stores selected checkout shipping price');
 assert_equals((int)$shippingMetrics['weight_g'], (int)$seedOrder['shipping_weight_g'], 'Shipping UX: order snapshot weight matches checkout cart metrics');
+
+echo "\n--- Test: Shipping — free from N physical items ---\n";
+$freeQtyColumn = array_column($pdo->query("PRAGMA table_info(shipping_methods)")->fetchAll(PDO::FETCH_ASSOC), 'name');
+assert_true(in_array('free_from_qty', $freeQtyColumn, true), 'Free qty: migration adds shipping_methods.free_from_qty idempotently');
+$pdo->exec("UPDATE shipping_methods SET free_from_qty = 2");
+$physicalItems = [['product_type' => 'physical', 'qty' => 1]];
+$mixedItems = [['product_type' => 'physical', 'qty' => 1], ['product_type' => 'digital', 'qty' => 3]];
+$twoPhysical = [['product_type' => 'physical', 'qty' => 1], ['product_type' => '', 'qty' => 1], ['product_type' => 'digital', 'qty' => 1]];
+assert_equals(1, ShippingService::physicalQuantity($mixedItems), 'Free qty: digital items never count as physical units');
+assert_equals(2, ShippingService::physicalQuantity($twoPhysical), 'Free qty: untyped and physical items both count');
+$oneBook = ShippingService::selectRate('packeta', 'SK', 500, 1000, false, 0, ShippingService::physicalQuantity($physicalItems));
+assert_true((int)$oneBook['price'] > 0, 'Free qty: 1 physical item still pays shipping');
+assert_true($oneBook['free_reason'] === null, 'Free qty: paid rate records no free reason');
+$oneBookPlusEbooks = ShippingService::selectRate('packeta', 'SK', 500, 1000, false, 0, ShippingService::physicalQuantity($mixedItems));
+assert_true((int)$oneBookPlusEbooks['price'] > 0, 'Free qty: 1 physical + e-books still pays shipping');
+$twoBooks = ShippingService::selectRate('packeta', 'SK', 1000, 2000, false, 0, 2);
+assert_equals(0, (int)$twoBooks['price'], 'Free qty: 2 physical items ship free');
+assert_equals('quantity', (string)$twoBooks['free_reason'], 'Free qty: rate records quantity as the free reason');
+assert_equals(2, (int)$twoBooks['physical_qty'], 'Free qty: rate records counted physical units for the order snapshot');
+$twoBooksCod = ShippingService::selectRate('packeta', 'SK', 1000, 2000, true, 0, 2);
+assert_equals((int)$twoBooksCod['cod_surcharge'], (int)$twoBooksCod['price'], 'Free qty: free shipping keeps the COD surcharge');
+$freeByAmount = ShippingService::selectRate('packeta', 'SK', 1000, 5000, false, 0, 1);
+assert_equals('amount', (string)$freeByAmount['free_reason'], 'Free qty: amount threshold still applies and is recorded');
+foreach (ShippingService::calculateRates('SK', 1000, 2000, false, 0, 2) as $freeQtyRate) {
+    assert_equals(0, (int)$freeQtyRate['price'], 'Free qty: rule applies to every method ' . $freeQtyRate['method_code']);
+}
+$hintRates = ShippingService::calculateRates('SK', 500, 1000, false, 0, 1);
+assert_equals(1, ShippingService::unitsToFreeShipping($hintRates, 1), 'Free qty hint: one more physical item unlocks free shipping');
+assert_true(ShippingService::unitsToFreeShipping($hintRates, 0) === null, 'Free qty hint: hidden when cart has no physical item');
+assert_true(ShippingService::unitsToFreeShipping(ShippingService::calculateRates('SK', 1000, 2000, false, 0, 2), 2) === null, 'Free qty hint: hidden once shipping is free by quantity');
+$pdo->exec("UPDATE shipping_methods SET free_from_qty = NULL");
+assert_true(ShippingService::unitsToFreeShipping(ShippingService::calculateRates('SK', 500, 1000, false, 0, 1), 1) === null, 'Free qty hint: hidden when no method has a quantity rule');
+$freeQtySnapshotOrderId = Orders::create([[
+    'product_id' => $payProduct['id'], 'variant_id' => null, 'qty' => 2, 'price' => (int)$payProduct['price'],
+    'sku' => $payProduct['sku'], 'name' => $payProduct['name'], 'variant_name' => '',
+]], [
+    'name' => 'Free Qty Customer', 'email' => 'free-qty@example.com', 'phone' => '+421900000003',
+    'address' => ['street' => 'Qty 2', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK'], 'currency' => 'eur',
+    'shipping_cost' => (int)$twoBooks['price'], 'shipping_method' => $twoBooks['method_code'], 'shipping_zone' => $twoBooks['zone_code'],
+    'shipping_weight_g' => 1000, 'shipping_rate_snapshot' => json_encode($twoBooks, JSON_UNESCAPED_UNICODE), 'tax_amount' => 0,
+], 'card');
+$freeQtySnapshot = json_decode((string)Orders::byId($freeQtySnapshotOrderId)['shipping_rate_snapshot'], true) ?: [];
+assert_equals('quantity', (string)($freeQtySnapshot['free_reason'] ?? ''), 'Free qty: order shipping snapshot keeps the quantity rule result');
+assert_equals(2, (int)($freeQtySnapshot['free_from_qty'] ?? 0), 'Free qty: order shipping snapshot keeps the configured threshold');
+I18n::setLocale('sk');
+assert_equals('Pridajte ešte 1 kus a poštovné máte zadarmo.', I18n::plural('free_shipping_add', 1), 'Free qty hint: Slovak singular message');
+assert_equals('Pridajte ešte 3 kusy a poštovné máte zadarmo.', I18n::plural('free_shipping_add', 3), 'Free qty hint: Slovak few form');
+assert_equals('Pridajte ešte 5 kusov a poštovné máte zadarmo.', I18n::plural('free_shipping_add', 5), 'Free qty hint: Slovak many form');
+I18n::setLocale('en');
+assert_equals('Add 2 more items and shipping is free.', I18n::plural('free_shipping_add', 2), 'Free qty hint: English plural message');
+$pdo->exec("UPDATE shipping_methods SET free_from_qty = 2");
+$quoteOne = ShippingService::cartQuote([['product_type' => 'physical', 'qty' => 1, 'weight_g' => 500]], 1000, 'SK');
+assert_equals('Add 1 more item and shipping is free.', $quoteOne['hint'], 'Free qty quote: cart quote carries the localized hint');
+assert_true($quoteOne['delivery_price'] > 0, 'Free qty quote: cart summary estimates parcel delivery, not free pickup');
+$quoteTwo = ShippingService::cartQuote([['product_type' => 'physical', 'qty' => 2, 'weight_g' => 500]], 2000, 'SK');
+assert_equals(0, $quoteTwo['delivery_price'], 'Free qty quote: two physical items show free delivery in the cart summary');
+$quoteDigital = ShippingService::cartQuote([['product_type' => 'digital', 'qty' => 2, 'weight_g' => 0]], 1000, 'SK');
+assert_equals('', $quoteDigital['hint'], 'Free qty quote: digital-only cart shows no hint');
+assert_equals(0, $quoteDigital['price'], 'Free qty quote: digital-only cart has no shipping price');
+$pdo->exec("UPDATE shipping_methods SET free_from_qty = NULL");
+$cartHtml = Template::render('storefront/cart', ['items' => [], 'shipping' => ['free' => false, 'price' => '2,99 €'], 'free_shipping_hint' => 'Add 1 more item and shipping is free.']);
+assert_true(str_contains($cartHtml, 'class="free-shipping-hint" role="status">Add 1 more item'), 'Free qty hint: cart block renders the hint as a status message');
+$checkoutNoHint = Template::render('storefront/checkout', ['free_shipping_hint' => '']);
+assert_true(str_contains($checkoutNoHint, 'id="free-shipping-hint" role="status" hidden'), 'Free qty hint: checkout keeps a hidden live region for client refresh');
 
 // Re-seed again after snapshot checks so later adapter DB lookups still use default carrier rows.
 $shippingMig->up($pdo, true);

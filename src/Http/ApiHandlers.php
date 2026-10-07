@@ -374,11 +374,16 @@ function apiShippingRates(): array {
         $volumeCm3 = $metrics['volume_cm3'];
     }
 
-    $methods = ShippingService::calculateRates($country, $weightG, $subtotal, $cod, $volumeCm3);
+    $physicalQty = ShippingService::physicalQuantity($cart['items'] ?? []);
+    $methods = ShippingService::calculateRates($country, $weightG, $subtotal, $cod, $volumeCm3, $physicalQty);
+    $unitsToFree = ShippingService::unitsToFreeShipping($methods, $physicalQty);
     return [
         'country' => $country,
         'weight_g' => $weightG,
         'volume_cm3' => $volumeCm3,
+        'physical_qty' => $physicalQty,
+        'units_to_free_shipping' => $unitsToFree,
+        'free_shipping_hint' => ShippingService::freeShippingHint($unitsToFree),
         'methods' => $methods,
     ];
 }
@@ -590,7 +595,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     $totalVolume = $digitalOnly ? 0 : $metrics['volume_cm3'];
     $selectedRate = $digitalOnly
         ? digitalDeliveryRate()
-        : ShippingService::selectRate($shippingMethod, $country, $totalWeight, $cart['subtotal'], $paymentMethod === 'cod', $totalVolume);
+        : ShippingService::selectRate($shippingMethod, $country, $totalWeight, $cart['subtotal'], $paymentMethod === 'cod', $totalVolume, ShippingService::physicalQuantity($cart['items']));
     if (!$selectedRate) {
         return ['success' => false, 'error' => 'Doručenie nie je dostupné do zvolenej krajiny.'];
     }

@@ -164,6 +164,11 @@
     const response = await fetch(`${apiUrl}?${params}`);
     const result = await response.json();
     const methods = result.methods || [];
+    const freeHint = document.getElementById('free-shipping-hint');
+    if (freeHint) {
+      freeHint.textContent = result.free_shipping_hint || '';
+      freeHint.hidden = !result.free_shipping_hint;
+    }
     if (!methods.length) {
       box.innerHTML = `<div class="shipping-empty">${escapeHtml(text.shippingUnavailable)}</div>`;
       summaryShipping.textContent = '—';

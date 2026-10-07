@@ -211,6 +211,13 @@ if ($mysqlDsn) {
         $pageLayoutMigrationMysql->up($my, false);
         assert_equals('storefront', (string)$my->query('SELECT layout FROM pages WHERE id=1')->fetchColumn(), 'MySQL live: page layout migration preserves existing pages and is idempotent');
         $my->exec('DROP TABLE pages');
+        $my->exec('DROP TABLE IF EXISTS shipping_methods');
+        $my->exec("CREATE TABLE shipping_methods (id INT PRIMARY KEY, code VARCHAR(64) NOT NULL) ENGINE=InnoDB");
+        $freeQtyMigrationMysql = require TEST_CLI_DIR . '/../migrations/20261007100000_shipping_free_from_qty.php';
+        $freeQtyMigrationMysql->up($my, false);
+        $freeQtyMigrationMysql->up($my, false);
+        assert_equals(1, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='shipping_methods' AND COLUMN_NAME='free_from_qty'")->fetchColumn(), 'MySQL live: free-from-quantity shipping migration is applied and idempotent');
+        $my->exec('DROP TABLE shipping_methods');
         foreach (['content_redirects', 'content_banners', 'content_menu_items'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['credit_note_items', 'order_refunds', 'return_exchanges', 'return_receipts', 'return_labels'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['shipment_items', 'shipments', 'bundle_components', 'inventory_receipts', 'purchase_order_items', 'purchase_orders', 'supplier_products', 'suppliers', 'stock_movements'] as $table) $my->exec("DROP TABLE {$table}");
