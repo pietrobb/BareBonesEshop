@@ -7,12 +7,15 @@ class MerchantNotifier {
         $cfg = require __DIR__ . '/../config.php';
         $notificationCfg = (array)($cfg['merchant_notifications'] ?? []);
         if (array_key_exists('enabled', $notificationCfg) && !$notificationCfg['enabled']) return 0;
+        // Per-event switch, e.g. ['created' => true, 'paid' => false]; unlisted events stay on.
+        if (array_key_exists($event, (array)($notificationCfg['events'] ?? [])) && !$notificationCfg['events'][$event]) return 0;
         $recipients = (array)($notificationCfg['recipients'] ?? []);
         if (!$recipients && !empty($cfg['admin_email'])) $recipients = [(string)$cfg['admin_email']];
         $recipients = array_values(array_unique(array_filter($recipients, fn($email) => filter_var($email, FILTER_VALIDATE_EMAIL))));
         if (!$recipients) return 0;
 
-        $template = (string)($notificationCfg['templates'][$event] ?? 'merchant_order_paid');
+        $template = (string)($notificationCfg['templates'][$event] ?? ($event === 'created' ? 'merchant_order_created' : 'merchant_order_paid'));
+        $paymentSnapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true) ?: [];
         $sent = 0;
         foreach ($recipients as $recipient) {
             if (!self::claim($orderId, $event, $recipient)) continue;
@@ -26,6 +29,9 @@ class MerchantNotifier {
                     'customer_email' => (string)$order['customer_email'],
                     'payment_id' => (string)($order['payment_id'] ?? ''),
                     'payment_status' => (string)($order['payment_status'] ?? ''),
+                    'payment_method' => (string)($paymentSnapshot['label'] ?? $paymentSnapshot['name'] ?? $order['payment_method'] ?? ''),
+                    'awaiting_payment' => ($order['payment_status'] ?? '') !== 'paid',
+                    'admin_url' => self::adminOrderUrl($cfg, $orderId),
                     'items' => array_map(static fn(array $item): array => [
                         'name' => $item['name'],
                         'sku' => $item['sku'],
@@ -44,6 +50,14 @@ class MerchantNotifier {
             }
         }
         return $sent;
+    }
+
+    private static function adminOrderUrl(array $cfg, int $orderId): string {
+        try {
+            return Security::appUrl($cfg) . '/admin.php?p=order&id=' . $orderId;
+        } catch (RuntimeException $e) {
+            return '';
+        }
     }
 
     private static function claim(int $orderId, string $event, string $recipient): bool {

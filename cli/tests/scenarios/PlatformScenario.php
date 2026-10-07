@@ -82,6 +82,18 @@ assert_equals('digital', (string)($freeDigitalOrder['shipping_method'] ?? ''), '
 assert_equals('free', (string)($freeDigitalOrder['payment_method'] ?? ''), 'Digital checkout: zero-total order stores no-payment method');
 assert_equals('paid', (string)($freeDigitalOrder['payment_status'] ?? ''), 'Digital checkout: zero-total order is immediately paid');
 assert_equals('paid', (string)($freeDigitalOrder['status'] ?? ''), 'Digital checkout: zero-total order triggers fulfillment');
+$createdNotifyJobs = array_filter(JobQueue::pull(500), static fn(array $job): bool => ($job['type'] ?? '') === 'merchant_notify'
+    && (int)($job['payload']['order_id'] ?? 0) === (int)$freeDigitalOrder['id'] && ($job['payload']['event'] ?? '') === 'created');
+assert_equals(1, count($createdNotifyJobs), 'Merchant notification: every new checkout order queues exactly one created notification');
+$createdMail = MailService::render('merchant_order_created', 'sk', [
+    'order_number' => 'BB-NEW-1', 'customer_name' => 'Ján', 'customer_email' => 'jan@example.com', 'order_total' => '12,00 €',
+    'payment_method' => 'Bankový prevod', 'payment_status' => 'pending', 'awaiting_payment' => true,
+    'admin_url' => 'https://shop.example/admin.php?p=order&id=7', 'items' => [['quantity' => 1, 'name' => 'Kniha', 'sku' => 'K1', 'total' => '12,00 €']],
+]);
+assert_true(str_contains($createdMail['subject'], 'BB-NEW-1') && str_contains($createdMail['subject'], 'čaká na platbu'), 'Merchant notification: unpaid order subject says it awaits payment');
+assert_true(str_contains($createdMail['html'], 'Bankový prevod') && str_contains($createdMail['html'], 'admin.php?p=order&amp;id=7'), 'Merchant notification: created mail shows payment method and admin link');
+$paidCreatedMail = MailService::render('merchant_order_created', 'en', ['order_number' => 'BB-NEW-2', 'awaiting_payment' => false]);
+assert_true(!str_contains($paidCreatedMail['subject'], 'awaiting'), 'Merchant notification: paid order subject has no awaiting-payment marker');
 $pdo->exec("UPDATE products SET price = 999 WHERE id = 9001");
 ConsentService::setDefinitionsForTesting(null);
 $_GET = [];

@@ -52,11 +52,13 @@ return [
     'admin_identity_key' => '',
     'admin_session_idle_seconds' => 1800,
     'admin_session_lifetime_seconds' => 28800,
-    'admin_email'    => '', // fallback recipient for paid-order notifications
+    'admin_email'    => '', // fallback recipient for merchant order notifications
     'merchant_notifications' => [
         'enabled' => true,
         'recipients' => [], // falls back to admin_email
-        'templates' => ['paid' => 'merchant_order_paid'],
+        // created = every new order incl. unpaid bank transfer; paid = payment confirmed
+        'events' => ['created' => true, 'paid' => true],
+        'templates' => ['created' => 'merchant_order_created', 'paid' => 'merchant_order_paid'],
     ],
 
     // Security

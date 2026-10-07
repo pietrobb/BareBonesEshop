@@ -1,0 +1,1 @@
+Nová objednávka {{order_number}}{{#if awaiting_payment}} — čaká na platbu{{/if}}

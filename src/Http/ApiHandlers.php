@@ -701,6 +701,8 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         if (!$freeDigitalOrder && empty($selectedPayment['requires_online'])) {
             JobQueue::push('email_send', ['template' => 'order_confirmation', 'to' => $email, 'order_id' => $orderId]);
         }
+        // Merchant hears about every order at creation, including unpaid bank transfers.
+        JobQueue::push('merchant_notify', ['order_id' => $orderId, 'event' => 'created'], 6);
 
         $result = [
             'success'      => true,

@@ -216,6 +216,9 @@ class MailService {
             'account_password_reset' => [3, 3600],
             'account_welcome' => [2, 86400],
             'cart_reminder' => [1, 86400],
+            // Configured merchant inbox, deduplicated per order: a busy hour must not drop orders.
+            'merchant_order_created' => [1000, 3600],
+            'merchant_order_paid' => [1000, 3600],
         ];
         [$max, $window] = $limits[$template] ?? [10, 3600];
         $since = gmdate('Y-m-d H:i:s', time() - $window);
