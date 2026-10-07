@@ -100,17 +100,19 @@ final class UrlAliases {
         return null;
     }
 
-    /** Serve a public alias from the fallback front controller. Returns false when nothing matches. */
-    public static function dispatch(string $path, string $root): bool {
+    /**
+     * Prepare $_GET for a public alias and return the entry script to require, or null.
+     * The caller must require it at global scope (entrypoints rely on global variables).
+     */
+    public static function dispatch(string $path): ?string {
         $route = self::inbound($path);
         $entry = $route ? self::entry($route) : null;
-        if (!$entry) return false;
+        if (!$entry) return null;
         [$script, $get] = $entry;
         unset($_GET['path']);
         $_GET = $get + $_GET;
         self::$dispatched = true;
-        require $root . '/' . $script;
-        return true;
+        return $script;
     }
 
     /**

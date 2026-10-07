@@ -1433,6 +1433,12 @@ assert_equals(['index.php', ['category' => 'knihy']], UrlAliases::entry(['path' 
 assert_equals(['page.php', ['slug' => 'softver']], UrlAliases::entry(['path' => '/page/softver', 'query' => []]), 'URL aliases: CMS page entry');
 assert_equals(['index.php', ['page' => 'cart']], UrlAliases::entry(['path' => '/', 'query' => ['page' => 'cart']]), 'URL aliases: page entry');
 assert_true(UrlAliases::entry(['path' => '/admin.php', 'query' => []]) === null, 'URL aliases: no entry for non-storefront targets');
+$uaGet = $_GET;
+$_GET = ['path' => '/hladat', 'q' => 'slnko'];
+assert_equals('index.php', UrlAliases::dispatch('/hladat'), 'URL aliases: dispatch returns the entry script for global-scope require');
+assert_equals(['page' => 'search', 'q' => 'slnko'], $_GET, 'URL aliases: dispatch merges alias query and drops the fallback path param');
+assert_true(UrlAliases::dispatch('/nic-take') === null, 'URL aliases: unknown path is not dispatched');
+$_GET = $uaGet;
 $uaScript = $_SERVER['SCRIPT_NAME'] ?? null;
 $_SERVER['SCRIPT_NAME'] = '/test/index.php';
 assert_equals('/test/kniha/krvave-slnko', Template::url('/product/krvave-slnko'), 'URL aliases: Template::url applies alias under a base path');
