@@ -11,6 +11,7 @@ require_once __DIR__ . '/Admin/Catalog.php';
 require_once __DIR__ . '/Admin/Orders.php';
 require_once __DIR__ . '/Admin/Customers.php';
 require_once __DIR__ . '/Admin/Operations.php';
+require_once __DIR__ . '/Admin/Recovery.php';
 require_once __DIR__ . '/Admin/Request.php';
 // Auth
 Security::adminAuth();
@@ -58,6 +59,7 @@ $pagePermissions = [
     'product'    => 'products.edit',
     'orders'     => 'orders.view',
     'order'      => 'orders.view',
+    'awaiting_payment' => 'orders.view',
     'import'     => 'import',
     'cache'      => 'cache',
     'audit'      => 'reports.view',
@@ -95,6 +97,7 @@ $title = match($page) {
     'product'    => isset($_GET['id']) ? I18n::t('admin.title.product_edit') : I18n::t('admin.title.product_new'),
     'orders'     => I18n::t('admin.title.orders'),
     'order'      => I18n::t('admin.title.order_detail'),
+    'awaiting_payment' => 'Čaká na platbu',
     'import'     => I18n::t('admin.title.import'),
     'cache'      => I18n::t('admin.title.cache'),
     'audit'      => I18n::t('admin.title.audit_log'),
@@ -182,6 +185,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
     <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=sales" class="<?= $page==='sales'?'active':'' ?>"><?= esc(I18n::t('admin.nav.sales')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.view')): ?><a href="admin.php?p=products" class="<?= $page==='products'?'active':'' ?>"><?= esc(I18n::t('admin.nav.products')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=orders" class="<?= $page==='orders'?'active':'' ?>"><?= esc(I18n::t('admin.nav.orders')) ?></a><?php endif; ?>
+    <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=awaiting_payment" class="<?= $page==='awaiting_payment'?'active':'' ?>">Čaká na platbu</a><?php endif; ?>
     <?php if (Security::adminCan('import')): ?><a href="admin.php?p=import" class="<?= $page==='import'?'active':'' ?>"><?= esc(I18n::t('admin.nav.import_csv')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('cache')): ?><a href="admin.php?p=cache" class="<?= $page==='cache'?'active':'' ?>"><?= esc(I18n::t('admin.nav.cache')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=attributes" class="<?= $page==='attributes'||$page==='attribute'?'active':'' ?>"><?= esc(I18n::t('admin.nav.attributes')) ?></a><?php endif; ?>
@@ -208,6 +212,7 @@ match($page) {
     'product'   => pageProduct(),
     'orders'    => pageOrders(),
     'order'     => pageOrder(),
+    'awaiting_payment' => pageAwaitingPayment(),
     'invoice_pdf' => pageInvoicePdf(),
     'import'    => pageImport(),
     'cache'     => pageCache(),

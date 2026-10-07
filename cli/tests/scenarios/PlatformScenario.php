@@ -95,6 +95,41 @@ assert_true(str_contains($createdMail['html'], 'Bankový prevod') && str_contain
 $paidCreatedMail = MailService::render('merchant_order_created', 'en', ['order_number' => 'BB-NEW-2', 'awaiting_payment' => false]);
 assert_true(!str_contains($paidCreatedMail['subject'], 'awaiting'), 'Merchant notification: paid order subject has no awaiting-payment marker');
 $pdo->exec("UPDATE products SET price = 999 WHERE id = 9001");
+Cart::clear();
+Cart::add(9001, null, 1);
+$_SERVER['REMOTE_ADDR'] = '127.0.0.62';
+$_SESSION['csrf_token'] = 'transfer-digital-checkout-test';
+$_POST = [
+    'csrf_token' => 'transfer-digital-checkout-test', 'name' => 'Transfer Buyer', 'email' => 'transfer@example.com',
+    'country' => 'SK', 'shipping_method' => 'digital', 'payment_method' => 'bank_transfer',
+];
+$transferCheckout = apiCheckout();
+$transferOrderId = (int)($transferCheckout['order_id'] ?? 0);
+assert_true(!empty($transferCheckout['success']) && $transferOrderId > 0, 'Awaiting payment: digital bank-transfer checkout succeeds');
+assert_equals('pending', (string)Orders::byId($transferOrderId)['payment_status'], 'Awaiting payment: transfer order starts unpaid');
+$awaitingIds = array_map('intval', array_column(OfflinePaymentQueue::awaiting(), 'id'));
+assert_true(in_array($transferOrderId, $awaitingIds, true), 'Awaiting payment: unpaid transfer is listed');
+assert_true(!in_array((int)$freeDigitalOrder['id'], $awaitingIds, true), 'Awaiting payment: paid orders are not listed');
+$awaitingRow = array_values(array_filter(OfflinePaymentQueue::awaiting(), static fn(array $o): bool => (int)$o['id'] === $transferOrderId))[0] ?? [];
+assert_true(isset($awaitingRow['age_hours']) && (int)$awaitingRow['age_hours'] >= 0, 'Awaiting payment: row exposes order age');
+JobQueue::pull(500);
+assert_true(OfflinePaymentQueue::confirm($transferOrderId, 'tester', 'výpis 1'), 'Awaiting payment: confirm records the transfer');
+$confirmedTransfer = Orders::byId($transferOrderId);
+assert_equals('paid', (string)$confirmedTransfer['payment_status'], 'Awaiting payment: confirm marks payment paid');
+assert_equals('paid', (string)$confirmedTransfer['status'], 'Awaiting payment: confirm moves order to paid');
+$transferJobs = array_filter(JobQueue::pull(500), static fn(array $job): bool => ($job['type'] ?? '') === 'digital_fulfill'
+    && (int)($job['payload']['order_id'] ?? 0) === $transferOrderId);
+assert_equals(1, count($transferJobs), 'Awaiting payment: confirm releases digital delivery exactly once');
+assert_true(!OfflinePaymentQueue::confirm($transferOrderId, 'tester'), 'Awaiting payment: second confirm is a no-op');
+assert_true(!in_array($transferOrderId, array_map('intval', array_column(OfflinePaymentQueue::awaiting(), 'id')), true), 'Awaiting payment: confirmed order leaves the list');
+$cardOrderRejected = false;
+try { OfflinePaymentQueue::confirm($digitalOrderId ?? Orders::create([[
+    'product_id' => 9001, 'variant_id' => null, 'qty' => 1, 'price' => 999, 'sku' => 'DIGI-GUIDE', 'name' => 'Digital Guide', 'variant_name' => '',
+]], ['name' => 'Card Buyer', 'email' => 'card@example.com', 'currency' => 'eur', 'shipping_cost' => 0, 'tax_amount' => 0], 'card'), 'tester'); }
+catch (LogicException $e) { $cardOrderRejected = true; }
+assert_true($cardOrderRejected, 'Awaiting payment: card orders cannot be confirmed as transfers');
+$recoverySource = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Recovery.php');
+assert_true(str_contains($recoverySource, "adminRequire('orders.edit')"), 'Awaiting payment: confirm action requires orders.edit');
 ConsentService::setDefinitionsForTesting(null);
 $_GET = [];
 $_POST = [];

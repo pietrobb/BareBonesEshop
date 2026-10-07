@@ -17,6 +17,7 @@ function handlePost(string $page, string $action): void {
         'order:email_resend' => handleOrderEmailResend(),
         'order:invoice_issue' => handleOrderInvoiceIssue(),
         'order:invoice_resend' => handleOrderInvoiceResend(),
+        'awaiting_payment:confirm' => handleAwaitingPaymentConfirm(),
         'import:upload'  => handleImportUpload(),
         'cache:flush'    => handleCacheFlush(),
         'cache:rebuild'  => handleCacheRebuild(),
