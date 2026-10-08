@@ -7,6 +7,16 @@ RewriteRule ^themes/[^/]+/(?:theme\.json|blocks(?:/|$)) - [F,L,NC]
 # BBF's browser client and handler are public integration points; all other
 # vendor code stays private. Only the documented import example is public.
 RewriteRule ^vendor/(?!bbf/(?:bbf\.(?:css|js)|submit\.php)$) - [F,L,NC]
+# Admin forms (forms/admin-*.json) are rendered and saved only by admin.php, so
+# BBF's public handler must not serve, issue CSRF for, or accept them.
+# BBF reads the form id only from the query string and strips everything except
+# [A-Za-z0-9_-], so encoded, padded or junk-laden ids are refused as well.
+# Storefront BBF forms (e.g. statutory withdrawal) keep using submit.php.
+# <If>, not RewriteRule: vendor/bbf/.htaccess enables its own rewrite engine,
+# which replaces these root rewrite rules for everything under vendor/bbf/.
+<If "%{REQUEST_URI} =~ m#/vendor/bbf/submit\.php$#i && %{QUERY_STRING} =~ m#[%+]|(?:^|[&;])form=(?:[^&;]*[^A-Za-z0-9_&;-]|admin-)#i">
+    Require all denied
+</If>
 RewriteRule ^import/(?!test-products\.csv$) - [F,L,NC]
 
 # Deny direct cache requests while allowing the explicit api.php rewrites below

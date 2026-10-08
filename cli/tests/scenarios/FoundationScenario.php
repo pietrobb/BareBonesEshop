@@ -30,6 +30,27 @@ foreach (['storage', 'db', 'jobs', 'logs', 'config', 'cli', 'src', 'migrations',
 }
 assert_true(str_contains($htaccess, 'RewriteRule ^vendor/(?!bbf/'), '.htaccess: vendor tree is denied except explicit BBF public integration files');
 assert_true(str_contains($htaccess, 'bbf\.(?:css|js)|submit\.php'), '.htaccess: required BBF assets and handler remain public');
+
+// Admin forms must not be reachable through BBF's public submit.php. The guard is an
+// <If> authz block (vendor/bbf/.htaccess replaces root rewrite rules below it). Evaluate
+// its query-string regex (ap_expr uses PCRE) and prove every refused query really
+// resolves to an admin form in BBF.
+$bbfGuardFound = preg_match('/^<If "%\{REQUEST_URI\} =~ m#\/vendor\/bbf\/submit\\\\\.php\$#i && %\{QUERY_STRING\} =~ m#([^#]+)#i">\n\s+Require all denied\n<\/If>$/m', $htaccess, $bbfGuardMatch) === 1;
+assert_true($bbfGuardFound, '.htaccess: BBF submit.php has a query-string guard for admin forms');
+$bbfGuardRegex = '#' . ($bbfGuardMatch[1] ?? '(?!)') . '#i';
+$bbfGuardDenies = static fn (string $query): bool => preg_match($bbfGuardRegex, $query) === 1;
+foreach (['form=admin-page', 'form=admin-attribute', 'form=admin-product&action=definition', 'form=admin-import&action=csrf',
+          'form=ADMIN-page', 'form=%61dmin-page', '%66orm=admin-page', '+form=admin-page', '%20form=admin-page',
+          'form=a.dmin-page', 'form=a+dmin-page', 'x=1&form=odstupenie-od-zmluvy&form=admin-product'] as $adminQuery) {
+    parse_str($adminQuery, $parsedAdminQuery);
+    $bbfResolvedForm = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($parsedAdminQuery['form'] ?? ''));
+    assert_true(stripos($bbfResolvedForm, 'admin-') === 0 && $bbfGuardDenies($adminQuery), ".htaccess: BBF submit.php refuses admin form via ?{$adminQuery}");
+}
+assert_true($bbfGuardDenies('form=odstupenie-od-zmluvy;form=admin-page'), '.htaccess: BBF admin-form guard also covers ; query separators');
+foreach (['form=odstupenie-od-zmluvy', 'form=odstupenie-od-zmluvy&action=csrf', 'form=odstupenie-od-zmluvy&action=definition',
+          'form=odstupenie-od-zmluvy&sandbox', 'form=contact_us'] as $storefrontQuery) {
+    assert_true(!$bbfGuardDenies($storefrontQuery), ".htaccess: storefront BBF form stays public via ?{$storefrontQuery}");
+}
 assert_true(str_contains($htaccess, 'RewriteRule ^import/(?!test-products\.csv$)'), '.htaccess: only the documented import example remains public');
 assert_true(str_contains($htaccess, '%{THE_REQUEST}'), '.htaccess: direct cache denial distinguishes original requests');
 assert_true(str_contains($htaccess, '(?:[^?\s]+/)?cache'), '.htaccess: direct cache denial covers subdirectory deployments');
