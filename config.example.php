@@ -66,6 +66,17 @@ return [
     // Core drift guard (php cli/drift-guard.php check --notify, daily cron). Shop code lives in
     // themes/<shop> or config, so only real core edits are reported. recipients fall back to admin_email.
     'drift_guard' => ['recipients' => [], 'exclude' => []],
+    // Merchant low / critical stock e-mail (worker). Available = warehouse_stock qty - reserved.
+    // Thresholds are inclusive (5 left = low); 0 is always critical. Per-product overrides in admin/CSV.
+    // Mails only on a downward crossing (ok→low→critical→0), re-arms after restock above low.
+    'stock_alerts' => [
+        'enabled'     => true,
+        'low'         => 5,
+        'critical'    => 2,
+        'recipients'  => [],   // empty = merchant_notifications.recipients (then admin_email)
+        'digest_hour' => null, // e.g. 7 = daily summary of everything at/below low at 07:00; null = off
+        'locale'      => '',   // e-mail language; empty = stores.json default_locale
+    ],
 
     // Security
     'trusted_proxies' => [],

@@ -1,0 +1,1 @@
+{{#if digest}}Resumen diario de stock – {{/if}}Stock bajo: {{first_name}} ({{first_available}} uds.){{#if more_count}} y {{more_count}} más{{/if}}

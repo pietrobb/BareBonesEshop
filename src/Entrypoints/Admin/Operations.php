@@ -21,8 +21,8 @@ function pageDashboard(): void {
     $stmt->execute([':store' => $storeId]);
     $pendingOrders = (int)$stmt->fetchColumn();
 
-    // Low stock applies only to physical products; digital products are not inventory-tracked.
-    $lowStockSummary = Products::lowStockSummary();
+    // Same thresholds and warehouse availability as the merchant stock e-mails; physical products only.
+    $lowStockSummary = StockAlerts::summary();
     $lowStock = $lowStockSummary['count'];
 
     // Product count
@@ -77,14 +77,15 @@ function pageDashboard(): void {
 
     <?php if ($lowStock > 0): ?>
     <div class="card">
-        <h3><?= esc(I18n::t('admin.dashboard.low_stock_alert')) ?></h3>
+        <h3><?= esc(I18n::t('admin.dashboard.low_stock_alert')) ?> <a class="btn btn-sm" href="admin.php?p=products&amp;stock=low"><?= esc(I18n::t('admin.products.filter_low_stock')) ?></a></h3>
         <table>
-            <tr><th><?= esc(I18n::t('admin.th.sku')) ?></th><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.th.stock')) ?></th></tr>
+            <tr><th><?= esc(I18n::t('admin.th.sku')) ?></th><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.th.stock')) ?></th><th><?= esc(I18n::t('admin.dashboard.stock_threshold')) ?></th></tr>
             <?php foreach ($lowStockSummary['products'] as $row): ?>
             <tr>
                 <td><?= esc($row['sku']) ?></td>
-                <td><?= esc($row['name']) ?></td>
-                <td class="stock-low"><?= (int)$row['stock'] ?></td>
+                <td><a href="admin.php?p=product&amp;id=<?= (int)$row['product_id'] ?>"><?= esc($row['name']) ?></a></td>
+                <td class="stock-<?= $row['level'] === StockAlerts::LOW ? 'low' : 'critical' ?>"><?= (int)$row['available'] ?> <span class="muted">(<?= esc(I18n::t('admin.stock_level.' . $row['level'])) ?>)</span></td>
+                <td><?= (int)$row['low'] ?> / <?= (int)$row['critical'] ?></td>
             </tr>
             <?php endforeach; ?>
         </table>

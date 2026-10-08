@@ -94,6 +94,13 @@ try {
     Logger::exception('worker.cart_reminder_sweep_failed', $e);
 }
 
+// Optional daily low-stock digest (stock_alerts.digest_hour); claimed once per day.
+try {
+    StockAlerts::digest();
+} catch (\Throwable $e) {
+    Logger::exception('worker.stock_digest_failed', $e);
+}
+
 // Process loop
 $maxRuntime = 55; // seconds (cron runs every minute)
 $startTime = time();
@@ -440,23 +447,9 @@ function handleMerchantNotify(array $payload, array $job): void {
 }
 
 function handleStockAlert(array $payload, array $job): void {
-    $threshold = $payload['threshold'] ?? 10;
-    $db = Db::get();
-
-    $stmt = $db->prepare("SELECT sku, name, stock FROM products WHERE stock < :threshold AND status = 'active'");
-    $stmt->execute([':threshold' => $threshold]);
-    $lowStock = $stmt->fetchAll();
-
-    if (empty($lowStock)) return;
-
-    $logDir = __DIR__ . '/../logs';
-    if (!is_dir($logDir)) mkdir($logDir, 0750, true);
-
-    $msg = date('c') . " | LOW STOCK ALERT:\n";
-    foreach ($lowStock as $p) {
-        $msg .= "  {$p['sku']}: {$p['name']} — {$p['stock']} ks\n";
-    }
-    file_put_contents($logDir . '/stock-alerts.log', $msg, FILE_APPEND | LOCK_EX);
+    // Jobs without a SKU list (legacy {threshold} payloads) re-evaluate every tracked SKU.
+    $skus = isset($payload['skus']) && is_array($payload['skus']) ? $payload['skus'] : null;
+    StockAlerts::process($skus);
 }
 
 function handleSearchReindex(array $payload, array $job): void {

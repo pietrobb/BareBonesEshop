@@ -219,6 +219,8 @@ class MailService {
             // Configured merchant inbox, deduplicated per order: a busy hour must not drop orders.
             'merchant_order_created' => [1000, 3600],
             'merchant_order_paid' => [1000, 3600],
+            // Crossing-only alerts are already deduplicated per SKU; a busy hour must not drop them.
+            'merchant_stock_low' => [1000, 3600],
         ];
         [$max, $window] = $limits[$template] ?? [10, 3600];
         $since = gmdate('Y-m-d H:i:s', time() - $window);

@@ -9,9 +9,7 @@ class MerchantNotifier {
         if (array_key_exists('enabled', $notificationCfg) && !$notificationCfg['enabled']) return 0;
         // Per-event switch, e.g. ['created' => true, 'paid' => false]; unlisted events stay on.
         if (array_key_exists($event, (array)($notificationCfg['events'] ?? [])) && !$notificationCfg['events'][$event]) return 0;
-        $recipients = (array)($notificationCfg['recipients'] ?? []);
-        if (!$recipients && !empty($cfg['admin_email'])) $recipients = [(string)$cfg['admin_email']];
-        $recipients = array_values(array_unique(array_filter($recipients, fn($email) => filter_var($email, FILTER_VALIDATE_EMAIL))));
+        $recipients = self::recipients($cfg);
         if (!$recipients) return 0;
 
         $template = (string)($notificationCfg['templates'][$event] ?? ($event === 'created' ? 'merchant_order_created' : 'merchant_order_paid'));
@@ -50,6 +48,16 @@ class MerchantNotifier {
             }
         }
         return $sent;
+    }
+
+    /** Valid merchant inbox addresses: explicit override list, else merchant_notifications.recipients, else admin_email. */
+    public static function recipients(array $cfg, array $override = []): array {
+        $recipients = $override ?: (array)($cfg['merchant_notifications']['recipients'] ?? []);
+        if (!$recipients && !empty($cfg['admin_email'])) $recipients = [(string)$cfg['admin_email']];
+        return array_values(array_unique(array_filter(
+            array_map(static fn($email): string => trim((string)$email), $recipients),
+            static fn(string $email): bool => (bool)filter_var($email, FILTER_VALIDATE_EMAIL)
+        )));
     }
 
     private static function adminOrderUrl(array $cfg, int $orderId): string {

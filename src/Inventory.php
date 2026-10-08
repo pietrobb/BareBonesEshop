@@ -37,6 +37,8 @@ class Inventory {
             ':idempotency' => $idempotencyKey,
             ':metadata' => json_encode($metadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
         ]);
+        // Every ledger movement re-checks the SKU's alert level asynchronously (worker job).
+        StockAlerts::touch($sku);
         return $stmt->rowCount() === 1;
     }
 

@@ -191,6 +191,18 @@ class Import {
         $stmt->execute([':sku' => $sku]);
         $productId = (int)$stmt->fetchColumn();
 
+        // Optional per-product stock alert thresholds; an empty cell resets to the config default.
+        foreach (['stock_low_threshold', 'stock_critical_threshold'] as $column) {
+            if (!array_key_exists($column, $data)) continue;
+            $value = trim((string)$data[$column]);
+            $db->prepare("UPDATE products SET {$column} = :value WHERE id = :id")
+                ->execute([':value' => $value === '' ? null : max(0, (int)$value), ':id' => $productId]);
+        }
+        // The stock column is "available"; with warehouses it is booked in the ledger (source of truth).
+        if (array_key_exists('stock', $data) && trim((string)$data['stock']) !== '') {
+            Products::setAvailableStock($sku, $productType, (int)$data['stock'], 'import', 'csv_import');
+        }
+
         // Populate product_attrs table
         self::syncProductAttrs($productId, $attrs, $db);
 

@@ -347,6 +347,19 @@ class Warehouse {
         self::syncProductStock([$sku]);
     }
 
+    /**
+     * Manual/import stock edit expressed as "available" (what products.stock shows): the difference
+     * is booked as an adjustment on the default warehouse. Returns false without a default warehouse.
+     */
+    public static function setAvailable(string $sku, int $available, string $movementType = 'manual_adjustment', ?string $referenceType = null): bool {
+        if ($available < 0) throw new InvalidArgumentException('Stock count cannot be negative');
+        $warehouse = self::defaultWarehouse();
+        if (!$warehouse) return false;
+        $delta = $available - self::totalAvailable($sku);
+        if ($delta !== 0) self::adjustStock((int)$warehouse['id'], $sku, $delta, $movementType, $referenceType);
+        return true;
+    }
+
     /** Consume an exact reservation when shipment leaves a warehouse. */
     public static function ship(
         string $sku,

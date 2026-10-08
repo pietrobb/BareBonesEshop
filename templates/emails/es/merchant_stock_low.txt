@@ -1,0 +1,17 @@
+Stock bajo
+{{#if alert}}Estos productos acaban de alcanzar o bajar de su umbral:
+{{/if}}{{#if digest}}Resumen diario – todos los productos en su umbral o por debajo:
+{{/if}}{{#if out_items}}
+Agotado:
+{{#each out_items}}- {{name}} ({{sku}}): disponible {{available}} uds., reservado {{reserved}} uds., umbral {{threshold}} uds.
+  {{admin_url}}
+{{/each}}{{/if}}{{#if critical_items}}
+Crítico:
+{{#each critical_items}}- {{name}} ({{sku}}): disponible {{available}} uds., reservado {{reserved}} uds., umbral {{threshold}} uds.
+  {{admin_url}}
+{{/each}}{{/if}}{{#if low_items}}
+Bajo:
+{{#each low_items}}- {{name}} ({{sku}}): disponible {{available}} uds., reservado {{reserved}} uds., umbral {{threshold}} uds.
+  {{admin_url}}
+{{/each}}{{/if}}
+Lista de productos con stock bajo: {{admin_url}}

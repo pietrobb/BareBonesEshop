@@ -16,14 +16,18 @@ $pdo->exec("INSERT INTO products (id, category_id, name, slug, sku, product_type
     VALUES (9001, 1, 'Digital Guide', 'digital-guide', 'DIGI-GUIDE', 'downloadable', 999, 'eur', 'active', 0)");
 $pdo->exec("INSERT INTO products (id, category_id, name, slug, sku, product_type, price, currency, status, stock)
     VALUES (9002, 1, 'Physical Low Stock', 'physical-low-stock', 'PHYS-LOW', 'simple', 999, 'eur', 'active', 1)");
-$lowStockSummary = Products::lowStockSummary(10, 1000);
+$lowStockWarehouse = (int)$pdo->query("SELECT id FROM warehouses ORDER BY id LIMIT 1")->fetchColumn();
+$pdo->prepare("INSERT INTO warehouse_stock (store_id, warehouse_id, sku, qty, reserved) VALUES ('default', :wh, 'PHYS-LOW', 1, 0), ('default', :wh2, 'DIGI-GUIDE', 1, 0)")
+    ->execute([':wh' => $lowStockWarehouse, ':wh2' => $lowStockWarehouse]);
+$lowStockSummary = StockAlerts::summary(1000);
 $lowStockSkus = array_column($lowStockSummary['products'], 'sku');
 assert_true(in_array('PHYS-LOW', $lowStockSkus, true), 'Dashboard low stock: physical products remain included');
 assert_true(!in_array('DIGI-GUIDE', $lowStockSkus, true), 'Dashboard low stock: downloadable products are excluded');
 $pdo->exec("UPDATE products SET product_type = 'digital' WHERE id = 9001");
-$lowStockSkus = array_column(Products::lowStockSummary(10, 1000)['products'], 'sku');
+$lowStockSkus = array_column(StockAlerts::summary(1000)['products'], 'sku');
 assert_true(!in_array('DIGI-GUIDE', $lowStockSkus, true), 'Dashboard low stock: digital alias products are excluded');
 $pdo->exec("UPDATE products SET product_type = 'downloadable' WHERE id = 9001");
+$pdo->exec("DELETE FROM warehouse_stock WHERE sku IN ('PHYS-LOW', 'DIGI-GUIDE')");
 $pdo->exec("DELETE FROM products WHERE id = 9002");
 $pdo->exec("INSERT INTO digital_assets
     (sku, asset_key, label, storage_path, download_name, content_type, download_limit, expiry_seconds, active)
@@ -1223,3 +1227,182 @@ $dgCleanup = static function (string $path) use (&$dgCleanup): void {
 };
 $dgCleanup($dgRoot);
 $dgCleanup($dgState);
+
+// ============================================================
+// Merchant low / critical stock alerts (warehouse availability, crossing-only e-mail)
+// ============================================================
+echo "\n--- Stock alerts: low / critical merchant e-mail ---\n";
+
+require_once TEST_CLI_DIR . '/../src/Entrypoints/Admin/Shared.php';
+require_once TEST_CLI_DIR . '/../src/Entrypoints/Admin/Catalog.php';
+
+$saMail = new class implements MailAdapter {
+    public array $sent = [];
+    public bool $fail = false;
+    public function send(array $msg): array {
+        if ($this->fail) return ['status' => 'failed', 'message' => 'smtp down', 'raw' => null];
+        $this->sent[] = $msg;
+        return ['status' => 'sent', 'message' => '', 'raw' => null];
+    }
+    public function adapterId(): string { return 'stock-alert-test'; }
+};
+MailService::useAdapter($saMail);
+StockAlerts::setConfigForTesting([
+    'app_url' => 'https://shop.example',
+    'merchant_notifications' => ['recipients' => ['owner@shop.example']],
+    'stock_alerts' => ['low' => 5, 'critical' => 2, 'locale' => 'sk'],
+]);
+StockAlerts::flush();
+$pdo->exec("DELETE FROM stock_alert_state");
+$pdo->exec("DELETE FROM stock_alert_digests");
+$saPreviousDefault = $pdo->query("SELECT id FROM warehouses WHERE is_default = 1")->fetchAll(PDO::FETCH_COLUMN);
+$pdo->exec("UPDATE warehouses SET is_default = 0");
+$pdo->exec("INSERT INTO warehouses (code, name, priority, is_default, store_id) VALUES ('sa-main', 'SA Main', 900, 1, 'default')");
+$saWh = (int)$pdo->query("SELECT id FROM warehouses WHERE code = 'sa-main'")->fetchColumn();
+$pdo->exec("INSERT INTO products (id, category_id, name, slug, sku, product_type, price, currency, status, stock) VALUES
+    (9301, 1, 'Krvavé Slnko', 'sa-krvave-slnko', 'SA-BOOK', 'simple', 1500, 'eur', 'active', 0),
+    (9302, 1, 'Druhá kniha', 'sa-druha-kniha', 'SA-BOOK2', 'simple', 1200, 'eur', 'active', 0),
+    (9303, 1, 'E-kniha', 'sa-ebook', 'SA-EBOOK', 'downloadable', 500, 'eur', 'active', 0)");
+Warehouse::setStock($saWh, 'SA-BOOK', 7);
+Warehouse::setStock($saWh, 'SA-BOOK2', 10);
+Warehouse::setStock($saWh, 'SA-EBOOK', 1);
+Warehouse::syncProductStock(['SA-BOOK', 'SA-BOOK2', 'SA-EBOOK']);
+
+assert_equals(1, StockAlerts::flush(), 'Stock alerts: stock movements queue one job per store');
+$saJobs = array_values(array_filter(JobQueue::pull(1000), static fn(array $job): bool => ($job['type'] ?? '') === 'stock_alert'
+    && in_array('SA-BOOK2', (array)($job['payload']['skus'] ?? []), true)));
+assert_equals(1, count($saJobs), 'Stock alerts: the queued job carries every touched SKU');
+assert_true(!array_diff(['SA-BOOK', 'SA-BOOK2', 'SA-EBOOK'], (array)($saJobs[0]['payload']['skus'] ?? [])), 'Stock alerts: touched SKUs are batched into that one job');
+
+$saRun = static fn(array $skus = ['SA-BOOK', 'SA-BOOK2', 'SA-EBOOK']): array => StockAlerts::process($skus);
+$saOrder = static function (string $sku, int $qty) {
+    $product = Db::get()->query("SELECT id, name, price FROM products WHERE sku = " . Db::get()->quote($sku))->fetch(PDO::FETCH_ASSOC);
+    return Orders::create([[
+        'product_id' => (int)$product['id'], 'variant_id' => null, 'qty' => $qty, 'price' => (int)$product['price'],
+        'sku' => $sku, 'name' => $product['name'], 'variant_name' => '',
+    ]], ['name' => 'Stock Buyer', 'email' => 'stock-buyer@example.com', 'currency' => 'eur', 'shipping_cost' => 0, 'tax_amount' => 0], 'card');
+};
+
+assert_equals(0, $saRun()['alerts'], 'Stock alerts: products above low send nothing');
+assert_equals(0, count($saMail->sent), 'Stock alerts: no e-mail while stock is healthy');
+
+$saOrder('SA-BOOK', 2);
+assert_equals(5, Warehouse::totalAvailable('SA-BOOK'), 'Stock alerts: availability is warehouse qty minus reservations');
+$saRun();
+assert_equals(1, count($saMail->sent), 'Stock alerts: ok → low sends one e-mail');
+assert_true(str_contains($saMail->sent[0]['subject'], 'Krvavé Slnko') && str_contains($saMail->sent[0]['subject'], '(5 ks)'), 'Stock alerts: subject names the product and its available count');
+assert_true(str_contains($saMail->sent[0]['html'], 'SA-BOOK') && str_contains($saMail->sent[0]['html'], 'https://shop.example/admin.php?p=product&amp;id=9301')
+    && str_contains($saMail->sent[0]['html'], 'limit 5 ks'), 'Stock alerts: body lists SKU, threshold and admin product link');
+assert_equals('owner@shop.example', $saMail->sent[0]['to'], 'Stock alerts: default recipients are merchant_notifications.recipients');
+
+$saOrder('SA-BOOK', 1);
+$saRun();
+assert_equals(1, count($saMail->sent), 'Stock alerts: another order inside the same band sends nothing');
+
+$saOrder('SA-BOOK', 2);
+$saRun();
+assert_equals(2, count($saMail->sent), 'Stock alerts: low → critical sends a second e-mail');
+assert_true(str_contains($saMail->sent[1]['html'], 'Kritický stav'), 'Stock alerts: critical crossing is labelled critical');
+
+$saCancelOrder = $saOrder('SA-BOOK', 2);
+$saRun();
+assert_equals(3, count($saMail->sent), 'Stock alerts: critical → 0 sends a third e-mail (ok→low→critical→0 = 3)');
+assert_true(str_contains($saMail->sent[2]['html'], 'Vypredané'), 'Stock alerts: zero stock is reported as sold out');
+
+OrderWorkflow::transition($saCancelOrder, 'cancelled', 'stock alert test');
+assert_equals(2, Warehouse::totalAvailable('SA-BOOK'), 'Stock alerts: cancellation returns the reservation');
+$saRun();
+assert_equals(3, count($saMail->sent), 'Stock alerts: cancellation (stock going up) sends nothing');
+assert_equals('out', (string)$pdo->query("SELECT level FROM stock_alert_state WHERE sku = 'SA-BOOK'")->fetchColumn(), 'Stock alerts: partial recovery below low does not re-arm');
+
+Warehouse::adjustStock($saWh, 'SA-BOOK', 20, 'receipt');
+$saRun();
+assert_equals('ok', (string)$pdo->query("SELECT level FROM stock_alert_state WHERE sku = 'SA-BOOK'")->fetchColumn(), 'Stock alerts: restock above low re-arms the SKU');
+assert_equals(3, count($saMail->sent), 'Stock alerts: restock itself sends nothing');
+assert_true(Warehouse::setAvailable('SA-BOOK', 4, 'manual_adjustment', 'test'), 'Stock alerts: manual edit is booked on the default warehouse');
+assert_equals(4, (int)$pdo->query("SELECT stock FROM products WHERE sku = 'SA-BOOK'")->fetchColumn(), 'Stock alerts: manual edit keeps products.stock in sync');
+$saRun();
+assert_equals(4, count($saMail->sent), 'Stock alerts: a new drop after restock alerts again');
+
+Warehouse::setAvailable('SA-BOOK', 1);
+Warehouse::setAvailable('SA-BOOK2', 2);
+$saRun();
+assert_equals(5, count($saMail->sent), 'Stock alerts: two SKUs crossing in one run produce exactly one e-mail');
+assert_true(str_contains($saMail->sent[4]['html'], 'SA-BOOK2') && str_contains($saMail->sent[4]['html'], 'Krvavé Slnko'), 'Stock alerts: the batched e-mail lists both SKUs');
+assert_true(!array_filter($saMail->sent, static fn(array $m): bool => str_contains($m['html'], 'SA-EBOOK')), 'Stock alerts: e-books are never reported');
+assert_true(!in_array('SA-EBOOK', array_column(StockAlerts::belowLow(), 'sku'), true), 'Stock alerts: e-books are not tracked even with a warehouse row');
+
+// Delivery failure: state is rolled back so the retry alerts; checkout never touches the mailer.
+Warehouse::adjustStock($saWh, 'SA-BOOK2', 48, 'receipt');
+$saRun(['SA-BOOK2']);
+$saMail->fail = true;
+$saFailedCheckout = $saOrder('SA-BOOK2', 47);
+assert_true($saFailedCheckout > 0, 'Stock alerts: checkout succeeds while the mail adapter is down');
+assert_equals(5, count($saMail->sent), 'Stock alerts: checkout sends no stock e-mail synchronously');
+$saThrown = false;
+try { $saRun(['SA-BOOK2']); } catch (RuntimeException $e) { $saThrown = true; }
+assert_true($saThrown, 'Stock alerts: failed delivery fails the job so the queue retries');
+assert_equals('ok', (string)$pdo->query("SELECT level FROM stock_alert_state WHERE sku = 'SA-BOOK2'")->fetchColumn(), 'Stock alerts: failed delivery rolls the alert state back');
+$saMail->fail = false;
+$saRun(['SA-BOOK2']);
+assert_equals(6, count($saMail->sent), 'Stock alerts: retry after the outage delivers the alert');
+
+// Per-product override and shared dashboard thresholds.
+$pdo->exec("UPDATE products SET stock_low_threshold = 30, stock_critical_threshold = 10 WHERE sku = 'SA-BOOK2'");
+assert_equals([30, 10], StockAlerts::thresholds(['stock_low_threshold' => 30, 'stock_critical_threshold' => 10]), 'Stock alerts: product overrides replace the config default');
+assert_equals([5, 2], StockAlerts::thresholds(['stock_low_threshold' => null, 'stock_critical_threshold' => null]), 'Stock alerts: empty overrides fall back to config');
+assert_equals([3, 3], StockAlerts::thresholds(['stock_low_threshold' => 3, 'stock_critical_threshold' => 9]), 'Stock alerts: critical never exceeds low');
+assert_equals(StockAlerts::OUT, StockAlerts::level(0, 0, 0), 'Stock alerts: zero is always critical/out');
+$saSummary = StockAlerts::summary();
+$saBySku = array_column($saSummary['products'], null, 'sku');
+assert_equals(StockAlerts::CRITICAL, $saBySku['SA-BOOK']['level'] ?? '', 'Dashboard: uses the same thresholds as the e-mail');
+assert_equals(30, (int)($saBySku['SA-BOOK2']['low'] ?? 0), 'Dashboard: honours the per-product threshold');
+$_GET = ['p' => 'products', 'stock' => 'low'];
+ob_start();
+pageProducts();
+$saProductsHtml = (string)ob_get_clean();
+$_GET = [];
+assert_true(str_contains($saProductsHtml, 'SA-BOOK') && !str_contains($saProductsHtml, 'SA-EBOOK') && str_contains($saProductsHtml, 'stock-critical'), 'Admin products: low-stock filter lists only alerting physical products');
+
+// CSV import/export carry the thresholds; the import books stock in the ledger.
+$saCsv = TEST_CLI_DIR . '/../db/stock-alert-import.csv';
+file_put_contents($saCsv, "sku,name,category,price,stock,stock_low_threshold,stock_critical_threshold\nSA-BOOK,Krvavé Slnko,uncategorized,15,12,8,3\n");
+$saImport = Import::csv($saCsv);
+@unlink($saCsv);
+assert_true($saImport['success'] && !$saImport['errors'], 'CSV import: threshold columns are accepted');
+$saImported = $pdo->query("SELECT stock, stock_low_threshold, stock_critical_threshold FROM products WHERE sku = 'SA-BOOK'")->fetch(PDO::FETCH_ASSOC);
+assert_equals([12, 8, 3], [(int)$saImported['stock'], (int)$saImported['stock_low_threshold'], (int)$saImported['stock_critical_threshold']], 'CSV import: stock and thresholds are stored');
+assert_equals(12, Warehouse::totalAvailable('SA-BOOK'), 'CSV import: stock is booked in warehouse_stock');
+assert_true(str_contains((string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Catalog.php'), "'stock_low_threshold', 'stock_critical_threshold'], ',', '\"', '\\\\')"), 'CSV export: threshold columns are exported');
+
+// Optional daily digest: once per day after digest_hour.
+StockAlerts::setConfigForTesting([
+    'app_url' => 'https://shop.example',
+    'merchant_notifications' => ['recipients' => ['owner@shop.example']],
+    'stock_alerts' => ['low' => 5, 'critical' => 2, 'locale' => 'sk', 'digest_hour' => 7],
+]);
+$saSentBefore = count($saMail->sent);
+assert_equals(0, StockAlerts::digest(mktime(6, 0, 0)), 'Stock digest: nothing before digest_hour');
+assert_equals(1, StockAlerts::digest(mktime(8, 0, 0)), 'Stock digest: one summary after digest_hour');
+assert_equals(0, StockAlerts::digest(mktime(9, 0, 0)), 'Stock digest: only once per day');
+$saDigest = $saMail->sent[$saSentBefore] ?? ['subject' => '', 'html' => ''];
+assert_true(str_contains($saDigest['subject'], 'Denný súhrn') && str_contains($saDigest['html'], 'SA-BOOK2'), 'Stock digest: lists everything at or below low');
+
+// Templates, single code path, worker wiring.
+foreach (['sk', 'cs', 'en', 'de', 'hu', 'pl', 'es'] as $saLocale) {
+    $saRendered = MailService::render('merchant_stock_low', $saLocale, ['alert' => true, 'first_name' => 'Krvavé Slnko', 'first_available' => 2, 'more_count' => 0,
+        'low_items' => [['name' => 'Krvavé Slnko', 'sku' => 'SA-BOOK', 'available' => 2, 'reserved' => 1, 'threshold' => 5, 'admin_url' => 'https://shop.example/admin.php?p=product&id=1']]]);
+    assert_true(is_file(TEST_CLI_DIR . "/../templates/emails/{$saLocale}/merchant_stock_low.html") && str_contains($saRendered['subject'], 'Krvavé Slnko')
+        && str_contains($saRendered['text'], 'SA-BOOK'), "Stock alerts: {$saLocale} template renders");
+}
+$saWorker = (string)file_get_contents(TEST_CLI_DIR . '/worker.php');
+assert_true(str_contains($saWorker, 'StockAlerts::process($skus)') && str_contains($saWorker, 'StockAlerts::digest()') && !str_contains($saWorker, 'stock-alerts.log'), 'Stock alerts: worker uses the single StockAlerts path');
+assert_true(str_contains((string)file_get_contents(TEST_CLI_DIR . '/../src/Inventory.php'), 'StockAlerts::touch($sku)'), 'Stock alerts: every ledger movement triggers a re-check');
+assert_true(!method_exists(Products::class, 'lowStockSummary'), 'Stock alerts: legacy products.stock dashboard query is gone');
+
+StockAlerts::flush();
+StockAlerts::setConfigForTesting(null);
+MailService::useAdapter(null);
+$pdo->exec("DELETE FROM warehouse_stock WHERE sku IN ('SA-BOOK', 'SA-BOOK2', 'SA-EBOOK')");
+$pdo->exec("DELETE FROM warehouses WHERE id = {$saWh}");
+foreach ($saPreviousDefault as $saDefaultId) $pdo->exec('UPDATE warehouses SET is_default = 1 WHERE id = ' . (int)$saDefaultId);

@@ -160,7 +160,7 @@ input,select,textarea{padding:.4rem .6rem;border:1px solid #d1d5db;border-radius
 input[type=file]{padding:.3rem}textarea{resize:vertical}
 .form-row{margin-bottom:.75rem}.form-row label{display:block;font-weight:600;font-size:.85rem;margin-bottom:2px}
 .pagination{display:flex;gap:.5rem;margin-top:1rem}
-.stock-low{color:#dc2626;font-weight:600}
+.stock-low{color:#b45309;font-weight:600}.stock-critical{color:#dc2626;font-weight:700}
 .muted{color:#64748b;font-size:.85rem}
 .sales-toolbar{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap}.sales-toolbar .form-row{margin:0}.sales-toolbar input{min-width:220px}
 .table-scroll{overflow-x:auto}.status-ok{color:#047857}.status-warn{color:#b45309}.status-error{color:#b91c1c;font-weight:600}

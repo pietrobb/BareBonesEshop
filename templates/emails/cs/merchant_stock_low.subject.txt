@@ -1,0 +1,1 @@
+{{#if digest}}Denní souhrn skladu – {{/if}}Nízký stav: {{first_name}} ({{first_available}} ks){{#if more_count}} a další: {{more_count}}{{/if}}

@@ -336,38 +336,6 @@ class Products {
     }
 
     /**
-     * Active physical products below the stock alert threshold.
-     */
-    public static function lowStockSummary(int $threshold = 10, int $limit = 20): array {
-        $db = Db::get();
-        $typeParams = [];
-        $typePlaceholders = [];
-        foreach (VariantAvailability::DIGITAL_TYPES as $index => $type) {
-            $placeholder = ':digital_type_' . $index;
-            $typePlaceholders[] = $placeholder;
-            $typeParams[$placeholder] = $type;
-        }
-
-        $where = "store_id = :store AND stock < :threshold AND status = 'active' AND LOWER(COALESCE(product_type, '')) NOT IN (" . implode(', ', $typePlaceholders) . ')';
-        $params = [':store' => StoreContext::current()->catalogId(), ':threshold' => $threshold] + $typeParams;
-
-        $countStmt = $db->prepare("SELECT COUNT(*) FROM products WHERE {$where}");
-        $countStmt->execute($params);
-
-        $listStmt = $db->prepare("SELECT sku, name, stock FROM products WHERE {$where} ORDER BY stock ASC LIMIT :limit");
-        foreach ($params as $placeholder => $value) {
-            $listStmt->bindValue($placeholder, $value, $placeholder === ':threshold' ? PDO::PARAM_INT : PDO::PARAM_STR);
-        }
-        $listStmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-        $listStmt->execute();
-
-        return [
-            'count' => (int)$countStmt->fetchColumn(),
-            'products' => $listStmt->fetchAll(PDO::FETCH_ASSOC),
-        ];
-    }
-
-    /**
      * Latest products
      */
     public static function latest(int $limit = 8): array {
@@ -516,6 +484,20 @@ class Products {
             'amount' => $amount,
             'bps' => $salePrice === 0 ? 0 : intdiv($amount * 10000, $salePrice),
         ];
+    }
+
+    /**
+     * Admin/CSV stock edit expressed as "available": booked in the warehouse ledger for physical
+     * products (digital ones are not stock-tracked). On failure products.stock is re-synced.
+     */
+    public static function setAvailableStock(string $sku, string $productType, int $available, string $movementType, string $referenceType): bool {
+        if (in_array(strtolower($productType), VariantAvailability::DIGITAL_TYPES, true)) return false;
+        try {
+            return Warehouse::setAvailable($sku, max(0, $available), $movementType, $referenceType);
+        } catch (RuntimeException | InvalidArgumentException $e) {
+            Warehouse::syncProductStock([$sku]);
+            throw $e;
+        }
     }
 
     /**

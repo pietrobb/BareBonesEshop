@@ -1,0 +1,17 @@
+Niedriger Lagerbestand
+{{#if alert}}Diese Produkte haben gerade ihren Grenzwert erreicht oder unterschritten:
+{{/if}}{{#if digest}}Tägliche Übersicht – alle Produkte am oder unter dem Grenzwert:
+{{/if}}{{#if out_items}}
+Ausverkauft:
+{{#each out_items}}- {{name}} ({{sku}}): verfügbar {{available}} Stk., reserviert {{reserved}} Stk., Grenzwert {{threshold}} Stk.
+  {{admin_url}}
+{{/each}}{{/if}}{{#if critical_items}}
+Kritisch:
+{{#each critical_items}}- {{name}} ({{sku}}): verfügbar {{available}} Stk., reserviert {{reserved}} Stk., Grenzwert {{threshold}} Stk.
+  {{admin_url}}
+{{/each}}{{/if}}{{#if low_items}}
+Niedrig:
+{{#each low_items}}- {{name}} ({{sku}}): verfügbar {{available}} Stk., reserviert {{reserved}} Stk., Grenzwert {{threshold}} Stk.
+  {{admin_url}}
+{{/each}}{{/if}}
+Produkte mit niedrigem Bestand: {{admin_url}}

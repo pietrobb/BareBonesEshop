@@ -235,7 +235,12 @@ return [
     'admin.dashboard.jobs_queue'  => 'Joby v rade',
     'admin.dashboard.jobs_pending'=> 'čakajúcich',
     'admin.dashboard.jobs_failed' => 'zlyhaných',
-    'admin.dashboard.low_stock_alert' => 'Low Stock Alert (< 10 ks)',
+    'admin.dashboard.low_stock_alert' => 'Nízky stav skladu',
+    'admin.dashboard.stock_threshold' => 'Limit nízky / kritický',
+    'admin.products.filter_low_stock' => 'Nízky stav',
+    'admin.stock_level.low' => 'nízky',
+    'admin.stock_level.critical' => 'kritický',
+    'admin.stock_level.out' => 'vypredané',
     'admin.dashboard.recent_orders' => 'Posledné objednávky',
     // Common table headers
     'admin.th.sku'                => 'SKU',

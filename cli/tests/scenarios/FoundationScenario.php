@@ -229,6 +229,13 @@ if ($mysqlDsn) {
         assert_equals('old@example.com', (string)$my->query("SELECT customer_email FROM abandoned_carts WHERE session_id='legacy'")->fetchColumn(), 'MySQL live: cart recovery migration preserves existing carts');
         $my->exec('DROP TABLE abandoned_carts');
         $my->exec('DROP TABLE email_suppressions');
+        foreach (['stock_alert_state', 'stock_alert_digests'] as $table) $my->exec("DROP TABLE IF EXISTS {$table}");
+        $stockAlertMigrationMysql = require TEST_CLI_DIR . '/../migrations/20261008090000_stock_alerts.php';
+        $stockAlertMigrationMysql->up($my, false);
+        $stockAlertMigrationMysql->up($my, false);
+        assert_equals(2, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='products' AND COLUMN_NAME IN ('stock_low_threshold','stock_critical_threshold')")->fetchColumn(), 'MySQL live: stock alert migration adds threshold columns idempotently');
+        assert_equals(2, (int)$my->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('stock_alert_state','stock_alert_digests')")->fetchColumn(), 'MySQL live: stock alert state and digest tables exist');
+        foreach (['stock_alert_state', 'stock_alert_digests'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['content_redirects', 'content_banners', 'content_menu_items'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['credit_note_items', 'order_refunds', 'return_exchanges', 'return_receipts', 'return_labels'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['shipment_items', 'shipments', 'bundle_components', 'inventory_receipts', 'purchase_order_items', 'purchase_orders', 'supplier_products', 'suppliers', 'stock_movements'] as $table) $my->exec("DROP TABLE {$table}");
@@ -511,6 +518,13 @@ $contentMarketingMigration->up($pdo, true);
 assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='content_menu_items'")->fetchColumn(), 'G10 migration: content menus exist and migration is idempotent');
 assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='content_banners'")->fetchColumn(), 'G10 migration: scheduled banners exist');
 assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='content_redirects'")->fetchColumn(), 'G10 migration: redirect manager exists');
+$stockAlertMigration = require TEST_CLI_DIR . '/../migrations/20261008090000_stock_alerts.php';
+$stockAlertMigration->up($pdo, true);
+$stockAlertMigration->up($pdo, true);
+$stockAlertColumns = array_column($pdo->query('PRAGMA table_info(products)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+assert_true(!array_diff(['stock_low_threshold', 'stock_critical_threshold'], $stockAlertColumns), 'Stock alert migration: per-product thresholds are added idempotently');
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='stock_alert_state'")->fetchColumn()
+    && (bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='stock_alert_digests'")->fetchColumn(), 'Stock alert migration: alert state and digest tables exist');
 
 // ============================================================
 // TEST 3: CSV Import

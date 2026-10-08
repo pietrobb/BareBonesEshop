@@ -64,6 +64,20 @@
             "size": "half"
         },
         {
+            "name": "stock_low_threshold",
+            "type": "number",
+            "label": "Limit nízkeho stavu (prázdne = predvolený)",
+            "min": 0,
+            "size": "half"
+        },
+        {
+            "name": "stock_critical_threshold",
+            "type": "number",
+            "label": "Limit kritického stavu (prázdne = predvolený)",
+            "min": 0,
+            "size": "half"
+        },
+        {
             "name": "status",
             "type": "select",
             "label": "Stav",

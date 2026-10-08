@@ -1,0 +1,17 @@
+Low stock
+{{#if alert}}These products just reached or dropped below their threshold:
+{{/if}}{{#if digest}}Daily summary – all products at or below their threshold:
+{{/if}}{{#if out_items}}
+Out of stock:
+{{#each out_items}}- {{name}} ({{sku}}): available {{available}} pcs, reserved {{reserved}} pcs, threshold {{threshold}} pcs
+  {{admin_url}}
+{{/each}}{{/if}}{{#if critical_items}}
+Critical:
+{{#each critical_items}}- {{name}} ({{sku}}): available {{available}} pcs, reserved {{reserved}} pcs, threshold {{threshold}} pcs
+  {{admin_url}}
+{{/each}}{{/if}}{{#if low_items}}
+Low:
+{{#each low_items}}- {{name}} ({{sku}}): available {{available}} pcs, reserved {{reserved}} pcs, threshold {{threshold}} pcs
+  {{admin_url}}
+{{/each}}{{/if}}
+Low-stock product list: {{admin_url}}

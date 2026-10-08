@@ -1,0 +1,17 @@
+Niski stan magazynowy
+{{#if alert}}Te produkty właśnie osiągnęły próg lub spadły poniżej niego:
+{{/if}}{{#if digest}}Dzienne podsumowanie – wszystkie produkty na progu lub poniżej:
+{{/if}}{{#if out_items}}
+Wyprzedane:
+{{#each out_items}}- {{name}} ({{sku}}): dostępne {{available}} szt., zarezerwowane {{reserved}} szt., próg {{threshold}} szt.
+  {{admin_url}}
+{{/each}}{{/if}}{{#if critical_items}}
+Stan krytyczny:
+{{#each critical_items}}- {{name}} ({{sku}}): dostępne {{available}} szt., zarezerwowane {{reserved}} szt., próg {{threshold}} szt.
+  {{admin_url}}
+{{/each}}{{/if}}{{#if low_items}}
+Niski stan:
+{{#each low_items}}- {{name}} ({{sku}}): dostępne {{available}} szt., zarezerwowane {{reserved}} szt., próg {{threshold}} szt.
+  {{admin_url}}
+{{/each}}{{/if}}
+Lista produktów o niskim stanie: {{admin_url}}

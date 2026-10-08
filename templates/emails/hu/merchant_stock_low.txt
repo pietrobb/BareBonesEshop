@@ -1,0 +1,17 @@
+Alacsony készlet
+{{#if alert}}Ezek a termékek most érték el vagy lépték át lefelé a határértéket:
+{{/if}}{{#if digest}}Napi összesítő – minden termék a határértéken vagy alatta:
+{{/if}}{{#if out_items}}
+Elfogyott:
+{{#each out_items}}- {{name}} ({{sku}}): elérhető {{available}} db, foglalt {{reserved}} db, határérték {{threshold}} db
+  {{admin_url}}
+{{/each}}{{/if}}{{#if critical_items}}
+Kritikus:
+{{#each critical_items}}- {{name}} ({{sku}}): elérhető {{available}} db, foglalt {{reserved}} db, határérték {{threshold}} db
+  {{admin_url}}
+{{/each}}{{/if}}{{#if low_items}}
+Alacsony:
+{{#each low_items}}- {{name}} ({{sku}}): elérhető {{available}} db, foglalt {{reserved}} db, határérték {{threshold}} db
+  {{admin_url}}
+{{/each}}{{/if}}
+Alacsony készletű termékek: {{admin_url}}

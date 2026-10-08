@@ -8,6 +8,10 @@ function pageProducts(): void {
     $offset = ($page - 1) * $perPage;
     $search = trim($_GET['q'] ?? '');
     $statusFilter = $_GET['status'] ?? '';
+    $stockFilter = ($_GET['stock'] ?? '') === 'low' ? 'low' : '';
+    // Same thresholds and warehouse availability as the stock e-mails (worst level first).
+    $stockLevels = [];
+    foreach (StockAlerts::belowLow() as $row) $stockLevels[$row['product_id']] ??= $row['level'];
 
     $where = '1=1';
     $params = [];
@@ -21,6 +25,7 @@ function pageProducts(): void {
         $where .= " AND status = :status";
         $params[':status'] = $statusFilter;
     }
+    if ($stockFilter) $where .= $stockLevels ? ' AND id IN (' . implode(',', array_map('intval', array_keys($stockLevels))) . ')' : ' AND 1=0';
 
     $stmt = $db->prepare("SELECT COUNT(*) FROM products WHERE {$where}");
     $stmt->execute($params);
@@ -44,6 +49,7 @@ function pageProducts(): void {
                 <option value="draft" <?= $statusFilter==='draft'?'selected':'' ?>>draft</option>
                 <option value="archived" <?= $statusFilter==='archived'?'selected':'' ?>>archived</option>
             </select>
+            <select name="stock"><option value="">— <?= esc(I18n::t('admin.th.stock')) ?> —</option><option value="low" <?= $stockFilter==='low'?'selected':'' ?>><?= esc(I18n::t('admin.products.filter_low_stock')) ?></option></select>
             <button class="btn" type="submit"><?= esc(I18n::t('admin.btn.apply')) ?></button>
         </form>
         <form method="post" action="admin.php?p=products&action=bulk" id="bulk-form" data-confirm="OK?">
@@ -74,7 +80,7 @@ function pageProducts(): void {
                 <td><?= esc($p['sku']) ?></td>
                 <td><a href="admin.php?p=product&id=<?= $p['id'] ?>"><?= esc($p['name']) ?></a></td>
                 <td><?= I18n::price((int)$p['price'], $p['currency']) ?></td>
-                <td class="<?= $p['stock'] < 10 ? 'stock-low' : '' ?>"><?= (int)$p['stock'] ?></td>
+                <td class="<?= isset($stockLevels[(int)$p['id']]) ? 'stock-' . ($stockLevels[(int)$p['id']] === StockAlerts::LOW ? 'low' : 'critical') : '' ?>"><?= (int)$p['stock'] ?></td>
                 <td><span class="badge badge-<?= esc($p['status']) ?>"><?= esc($p['status']) ?></span></td>
                 <td>
                     <a href="admin.php?p=product&id=<?= $p['id'] ?>" class="btn btn-sm"><?= esc(I18n::t('admin.btn.edit')) ?></a>
@@ -84,7 +90,7 @@ function pageProducts(): void {
         </table>
         </form>
         <script nonce="<?= Security::cspNonce() ?>">document.getElementById('check-all')?.addEventListener('change',function(){document.querySelectorAll('.product-check').forEach(c=>c.checked=this.checked)});</script>
-        <?php pagination($page, $pages, "admin.php?p=products&q=" . urlencode($search) . "&status=" . urlencode($statusFilter)); ?>
+        <?php pagination($page, $pages, "admin.php?p=products&q=" . urlencode($search) . "&status=" . urlencode($statusFilter) . "&stock=" . urlencode($stockFilter)); ?>
     </div>
     <?php
 }
@@ -179,6 +185,8 @@ function pageProduct(): void {
             'description'   => $product['description'] ?? '',
             'images'        => implode("\n", json_decode($product['images'] ?? '[]', true) ?: []),
             'weight_g'      => (string)(int)($product['weight_g'] ?? 0),
+            'stock_low_threshold'      => isset($product['stock_low_threshold']) ? (string)(int)$product['stock_low_threshold'] : '',
+            'stock_critical_threshold' => isset($product['stock_critical_threshold']) ? (string)(int)$product['stock_critical_threshold'] : '',
             'tags'          => $product['tags'] ?? '',
         ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
         ?>
@@ -778,6 +786,9 @@ function handleProductSave(): void {
         ':summary'       => trim($_POST['summary'] ?? ''),
         ':description'   => Security::sanitizeRichHtml((string)($_POST['description'] ?? '')),
         ':weight_g'      => Security::int($_POST['weight_g'] ?? 0),
+        // Empty per-product alert threshold = use the stock_alerts config default.
+        ':stock_low_threshold'      => trim((string)($_POST['stock_low_threshold'] ?? '')) === '' ? null : max(0, Security::int($_POST['stock_low_threshold'])),
+        ':stock_critical_threshold' => trim((string)($_POST['stock_critical_threshold'] ?? '')) === '' ? null : max(0, Security::int($_POST['stock_critical_threshold'])),
     ];
 
     // Handle images
@@ -831,22 +842,31 @@ function handleProductSave(): void {
         exit;
     }
 
+    $old = null;
     if ($id) {
         $old = Products::byId($id);
         $stmt = $db->prepare("UPDATE products SET sku=:sku, name=:name, slug=:slug, product_type=:product_type,
             category_id=:category_id, price=:price, compare_price=:compare_price, stock=:stock,
-            status=:status, summary=:summary, description=:description, images=:images, weight_g=:weight_g, updated_at={$now} WHERE id=:id");
+            status=:status, summary=:summary, description=:description, images=:images, weight_g=:weight_g,
+            stock_low_threshold=:stock_low_threshold, stock_critical_threshold=:stock_critical_threshold, updated_at={$now} WHERE id=:id");
         $data[':id'] = $id;
         $stmt->execute($data);
         AuditLog::log('product', $id, $old, $data, 'Admin edit');
         setFlash('ok', 'Produkt aktualizovaný.');
     } else {
-        $stmt = $db->prepare("INSERT INTO products (sku, name, slug, product_type, category_id, price, compare_price, stock, status, summary, description, images, weight_g)
-            VALUES (:sku, :name, :slug, :product_type, :category_id, :price, :compare_price, :stock, :status, :summary, :description, :images, :weight_g)");
+        $stmt = $db->prepare("INSERT INTO products (sku, name, slug, product_type, category_id, price, compare_price, stock, status, summary, description, images, weight_g, stock_low_threshold, stock_critical_threshold)
+            VALUES (:sku, :name, :slug, :product_type, :category_id, :price, :compare_price, :stock, :status, :summary, :description, :images, :weight_g, :stock_low_threshold, :stock_critical_threshold)");
         $stmt->execute($data);
         $id = (int)$db->lastInsertId();
         AuditLog::log('product', $id, null, $data, 'Admin create');
         setFlash('ok', 'Produkt vytvorený.');
+    }
+
+    // The stock field is "available"; book the change in the warehouse ledger (the source of truth).
+    try {
+        if ((int)($old['stock'] ?? -1) !== $data[':stock']) Products::setAvailableStock($data[':sku'], $productType, $data[':stock'], 'manual_adjustment', 'admin_product');
+    } catch (RuntimeException | InvalidArgumentException $e) {
+        setFlash('err', 'Sklad nebol zmenený: ' . $e->getMessage());
     }
 
     // Save attribute values to product_specifications
@@ -950,13 +970,14 @@ function handleExport(): void {
     }
     if ($statusFilter) { $where .= " AND status = :status"; $params[':status'] = $statusFilter; }
 
-    $stmt = $db->prepare("SELECT sku, name, slug, product_type, price, compare_price, stock, status, summary, weight_g FROM products WHERE {$where} ORDER BY id");
+    $stmt = $db->prepare("SELECT sku, name, slug, product_type, price, compare_price, stock, status, summary, weight_g,
+        stock_low_threshold, stock_critical_threshold FROM products WHERE {$where} ORDER BY id");
     $stmt->execute($params);
 
     header('Content-Type: text/csv; charset=UTF-8');
     header('Content-Disposition: attachment; filename="products-' . date('Y-m-d') . '.csv"');
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['sku', 'name', 'slug', 'product_type', 'price', 'compare_price', 'stock', 'status', 'summary', 'weight_g'], ',', '"', '\\');
+    fputcsv($out, ['sku', 'name', 'slug', 'product_type', 'price', 'compare_price', 'stock', 'status', 'summary', 'weight_g', 'stock_low_threshold', 'stock_critical_threshold'], ',', '"', '\\');
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
         fputcsv($out, array_map([Security::class, 'csvCell'], $row), ',', '"', '\\');
     }

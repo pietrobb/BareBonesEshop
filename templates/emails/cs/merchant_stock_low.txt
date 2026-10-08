@@ -1,0 +1,17 @@
+Nízký stav skladu
+{{#if alert}}Tyto produkty právě klesly na limit nebo pod něj:
+{{/if}}{{#if digest}}Denní souhrn – všechny produkty na limitu nebo pod ním:
+{{/if}}{{#if out_items}}
+Vyprodáno:
+{{#each out_items}}- {{name}} ({{sku}}): dostupné {{available}} ks, rezervováno {{reserved}} ks, limit {{threshold}} ks
+  {{admin_url}}
+{{/each}}{{/if}}{{#if critical_items}}
+Kritický stav:
+{{#each critical_items}}- {{name}} ({{sku}}): dostupné {{available}} ks, rezervováno {{reserved}} ks, limit {{threshold}} ks
+  {{admin_url}}
+{{/each}}{{/if}}{{#if low_items}}
+Nízký stav:
+{{#each low_items}}- {{name}} ({{sku}}): dostupné {{available}} ks, rezervováno {{reserved}} ks, limit {{threshold}} ks
+  {{admin_url}}
+{{/each}}{{/if}}
+Seznam produktů s nízkým stavem: {{admin_url}}
