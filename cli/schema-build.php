@@ -112,7 +112,7 @@ foreach ($catalog['product_types'] as $typeName => $typeDef) {
     }
 
     $fp = fopen("{$importDir}/template-{$typeName}.csv", 'w');
-    fputcsv($fp, $headers);
+    fputcsv($fp, $headers, ',', '"', '');
     fclose($fp);
     echo "  [OK] import/template-{$typeName}.csv\n";
 }

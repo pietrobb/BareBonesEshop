@@ -335,14 +335,14 @@ class FeedImport {
             $lines[0] = substr($lines[0], 3);
         }
 
-        $header = str_getcsv(array_shift($lines));
+        $header = str_getcsv(array_shift($lines), ',', '"', '\\');
         $header = array_map('trim', $header);
         $items = [];
 
         foreach ($lines as $line) {
             $line = trim($line);
             if ($line === '') continue;
-            $row = str_getcsv($line);
+            $row = str_getcsv($line, ',', '"', '\\');
             if (count($row) === count($header)) {
                 $items[] = array_combine($header, $row);
             }
