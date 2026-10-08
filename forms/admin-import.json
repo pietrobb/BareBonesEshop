@@ -13,7 +13,7 @@
             "type": "file",
             "label": "CSV súbor",
             "required": true,
-            "accept": ".csv"
+            "accept": ["csv"]
         }
     ],
     "on_submit": {

@@ -106,7 +106,7 @@
             "name": "image_upload",
             "type": "file",
             "label": "Nahrať obrázok",
-            "accept": "image/*"
+            "accept": ["jpg", "jpeg", "png", "gif", "webp"]
         },
         {
             "name": "weight_g",

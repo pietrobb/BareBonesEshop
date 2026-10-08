@@ -9,8 +9,8 @@
     "fields": [
         {
             "name": "_section_contact",
-            "type": "heading",
-            "label": "Kontaktné údaje"
+            "type": "section",
+            "title": "Kontaktné údaje"
         },
         {
             "name": "name",
@@ -37,8 +37,8 @@
         },
         {
             "name": "_section_address",
-            "type": "heading",
-            "label": "Doručovacia adresa"
+            "type": "section",
+            "title": "Doručovacia adresa"
         },
         {
             "name": "street",
@@ -77,8 +77,8 @@
         },
         {
             "name": "_section_payment",
-            "type": "heading",
-            "label": "Doprava a platba"
+            "type": "section",
+            "title": "Doprava a platba"
         },
         {
             "name": "payment",

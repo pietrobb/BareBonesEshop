@@ -68,7 +68,9 @@ class AdminForm {
                 $control .= '</select>';
                 break;
             case 'file':
-                $control = '<input type="file"' . $attrs . (!empty($field['accept']) ? ' accept="' . esc((string)$field['accept']) . '"' : '') . '>';
+                // BBF 2.2 format: accept is a list of extensions (["csv"]) rendered as ".csv".
+                $accept = implode(',', array_map(static fn($ext): string => '.' . ltrim((string)$ext, '.'), (array)($field['accept'] ?? [])));
+                $control = '<input type="file"' . $attrs . ($accept !== '' ? ' accept="' . esc($accept) . '"' : '') . '>';
                 break;
             case 'number':
                 $control = '<input type="number"' . $attrs . (isset($field['min']) ? ' min="' . (int)$field['min'] . '"' : '') . ' value="' . esc($value) . '">';
