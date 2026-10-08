@@ -59,23 +59,8 @@ if (!defined('BB_TEST_LOAD_API_ONLY')) {
             'product_oe' => apiProductOE(),
             'product_vehicles' => apiProductVehicles(),
             'page' => apiPage(),
-            'bbf_categories' => apiBbfCategories(),
-            'bbf_product_types' => apiBbfProductTypes(),
-            'bbf_attr_types' => apiBbfAttrTypes(),
-            'bbf_page_statuses' => apiBbfStaticOptions([
-                ['value' => 'active', 'label' => 'Active'],
-                ['value' => 'draft', 'label' => 'Draft'],
-            ]),
-            'bbf_product_statuses' => apiBbfStaticOptions([
-                ['value' => 'active', 'label' => 'Active'],
-                ['value' => 'draft', 'label' => 'Draft'],
-                ['value' => 'archived', 'label' => 'Archived'],
-            ]),
-            'bbf_payment_methods' => apiBbfStaticOptions([
-                ['value' => 'cod', 'label' => 'Dobierka'],
-                ['value' => 'transfer', 'label' => 'Bankový prevod'],
-                ['value' => 'card', 'label' => 'Kartou online'],
-            ]),
+            'bbf_categories', 'bbf_product_types', 'bbf_attr_types', 'bbf_page_statuses',
+            'bbf_product_statuses', 'bbf_payment_methods' => BbfOptions::forAction($action),
             default => ['error' => 'Unknown action'],
         };
 

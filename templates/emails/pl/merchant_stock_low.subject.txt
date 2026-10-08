@@ -1,1 +1,1 @@
-{{#if digest}}Dzienne podsumowanie magazynu – {{/if}}Niski stan: {{first_name}} ({{first_available}} szt.){{#if more_count}} i {{more_count}} innych{{/if}}
+{{#if digest}}Dzienne podsumowanie magazynu – {{/if}}{{#if worst_out}}Wyprzedane{{/if}}{{#if worst_critical}}Stan krytyczny{{/if}}{{#if worst_low}}Niski stan{{/if}}: {{first_name}} ({{first_available}} szt.){{#if more_count}} i {{more_count}} innych{{/if}}

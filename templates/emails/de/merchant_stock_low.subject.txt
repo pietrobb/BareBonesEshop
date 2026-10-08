@@ -1,1 +1,1 @@
-{{#if digest}}Tägliche Lagerübersicht – {{/if}}Niedriger Bestand: {{first_name}} ({{first_available}} Stk.){{#if more_count}} und {{more_count}} weitere{{/if}}
+{{#if digest}}Tägliche Lagerübersicht – {{/if}}{{#if worst_out}}Ausverkauft{{/if}}{{#if worst_critical}}Kritischer Bestand{{/if}}{{#if worst_low}}Niedriger Bestand{{/if}}: {{first_name}} ({{first_available}} Stk.){{#if more_count}} und {{more_count}} weitere{{/if}}

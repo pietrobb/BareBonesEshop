@@ -1,1 +1,1 @@
-{{#if digest}}Resumen diario de stock – {{/if}}Stock bajo: {{first_name}} ({{first_available}} uds.){{#if more_count}} y {{more_count}} más{{/if}}
+{{#if digest}}Resumen diario de stock – {{/if}}{{#if worst_out}}Agotado{{/if}}{{#if worst_critical}}Stock crítico{{/if}}{{#if worst_low}}Stock bajo{{/if}}: {{first_name}} ({{first_available}} uds.){{#if more_count}} y {{more_count}} más{{/if}}

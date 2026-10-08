@@ -116,25 +116,14 @@ function pageImport(): void {
     ?>
     <h1>Import CSV</h1>
     <div class="card">
-        <div id="bbf-import" data-form="admin-import" data-lang="sk"></div>
+        <?= AdminForm::open('admin-import', 'admin.php?p=import&action=upload') ?>
+        <?= AdminForm::fields('admin-import', []) ?>
+        <?= AdminForm::close('admin-import') ?>
     </div>
     <div class="card">
         <h3>Šablóny</h3>
         <p class="muted">Stiahnite si vzorový CSV z <code>import/test-products.csv</code></p>
     </div>
-    <link rel="stylesheet" href="vendor/bbf/bbf.css">
-    <script src="vendor/bbf/bbf.js"></script>
-    <script nonce="<?= Security::cspNonce() ?>">
-    (function() {
-        BBF.baseUrl = 'vendor/bbf/';
-        BBF.render('admin-import', '#bbf-import', {
-            onSuccess: function(resp) {
-                if (resp.message) alert(resp.message);
-                if (resp.redirect) { window.location.href = resp.redirect; return false; }
-            }
-        });
-    })();
-    </script>
     <?php
 }
 function pageCache(): void {

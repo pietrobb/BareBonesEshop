@@ -240,10 +240,18 @@ class StockAlerts {
             'threshold' => $row['level'] === self::LOW ? $row['low'] : $row['critical'],
             'admin_url' => $baseUrl . 'admin.php?p=product&id=' . $row['product_id'],
         ], array_filter($rows, static fn(array $row): bool => in_array($row['level'], $level, true))));
-        $first = $rows[0];
+        // The subject names the most severe level in the e-mail and its first product.
+        $worst = self::LOW;
+        foreach ([self::OUT, self::CRITICAL] as $level) {
+            if (in_array($level, array_column($rows, 'level'), true)) { $worst = $level; break; }
+        }
+        $first = array_values(array_filter($rows, static fn(array $row): bool => $row['level'] === $worst))[0] ?? $rows[0];
         $vars = [
             'digest' => $digest,
             'alert' => !$digest,
+            'worst_out' => $worst === self::OUT,
+            'worst_critical' => $worst === self::CRITICAL,
+            'worst_low' => $worst === self::LOW,
             'count' => count($rows),
             'more_count' => count($rows) - 1,
             'first_name' => $first['name'],

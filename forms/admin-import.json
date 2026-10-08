@@ -6,7 +6,7 @@
     "submit_label": "Importovať",
     "submitting_label": "Importujem...",
     "success_message": "Import dokončený.",
-    "description": "Formát: sku, name, slug, product_type, category_path, price, compare_price, stock, images, summary, tags, weight_g, attr:*, name_en, name_de...",
+    "description": "Stĺpce: sku, name (povinné), slug, product_type, category (cesta a/b), price a compare_price v eurách (19.90), stock, status, summary, description, image a tags (oddelené |), weight_g, stock_low_threshold, stock_critical_threshold, attr:*, name_en, summary_de... Pri existujúcom SKU sa menia len stĺpce, ktoré súbor obsahuje; súbor z Export CSV sa dá upraviť a nahrať späť.",
     "fields": [
         {
             "name": "csv_file",

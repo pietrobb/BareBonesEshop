@@ -76,7 +76,7 @@ class Import {
                 continue;
             }
 
-            $data = array_combine($header, $row);
+            $data = array_combine($header, array_map([self::class, 'csvCellDecode'], $row));
 
             try {
                 $db->exec('SAVEPOINT row_import');
@@ -112,7 +112,10 @@ class Import {
     }
 
     /**
-     * Import a single product from associative array
+     * Import a single product from an associative array (CSV row or mapped feed item).
+     * A new SKU is created with defaults for absent columns. An existing SKU changes only the
+     * columns present in $data, so an edited "Export CSV" file (a subset of the columns) never
+     * wipes the description, images, tags, category or attributes it does not carry.
      */
     public static function importProduct(array $data, ?PDO $db = null): void {
         $db = $db ?? Db::get();
@@ -124,96 +127,146 @@ class Import {
             throw new \InvalidArgumentException("Missing required field: sku or name");
         }
 
-        // Category: auto-create from path (e.g., "oblecenie/tricka")
-        $categoryPath = trim($data['category'] ?? 'uncategorized');
-        $categoryId = self::ensureCategory($categoryPath, $db);
-
-        // Slug: generate from name if not provided
-        $slug = trim($data['slug'] ?? '') ?: self::slugify($name);
-
-        // Price in cents
-        $price = self::parsePriceToCents($data['price'] ?? 0);
-        $comparePrice = !empty($data['compare_price']) ? self::parsePriceToCents($data['compare_price']) : null;
-
-        // Gather translations from columns like name_en, name_de, summary_en, slug_en
-        $translations = self::gatherTranslations($data);
-
-        // Gather attrs from attr:* columns
-        $attrs = [];
-        foreach ($data as $key => $value) {
-            if (str_starts_with($key, 'attr:') && $value !== '') {
-                $attrName = substr($key, 5);
-                $attrs[$attrName] = $value;
-            }
-        }
-
-        // Tags
-        $tags = [];
-        if (!empty($data['tags'])) {
-            $tags = array_map('trim', explode('|', $data['tags']));
-        }
-
-        // Build filter_tags for FTS
-        $filterTags = self::buildFilterTagsFromAttrs($attrs);
-
-        // Product type
-        $productType = trim($data['product_type'] ?? 'simple');
-
-        // Images
-        $images = [];
-        if (!empty($data['image'])) {
-            $images = array_map('trim', explode('|', $data['image']));
-        }
-
-        // UPSERT
-        self::upsertProduct([
-            'sku'           => $sku,
-            'slug'          => $slug,
-            'product_type'  => $productType,
-            'name'          => $name,
-            'category_id'   => $categoryId,
-            'price'         => $price,
-            'compare_price' => $comparePrice,
-            'stock'         => (int)($data['stock'] ?? 0),
-            'status'        => trim($data['status'] ?? 'active'),
-            'summary'       => trim($data['summary'] ?? ''),
-            'description'   => trim($data['description'] ?? ''),
-            'images'        => $images,
-            'attrs'         => $attrs,
-            'tags'          => $tags,
-            'filter_tags'   => $filterTags,
-            'weight_g'      => (int)($data['weight_g'] ?? 0),
-            'translations'  => $translations,
-        ], $db);
-
-        // Get product ID for attrs table
-        $stmt = $db->prepare("SELECT id FROM products WHERE sku = :sku");
+        $stmt = $db->prepare("SELECT * FROM products WHERE sku = :sku");
         $stmt->execute([':sku' => $sku]);
-        $productId = (int)$stmt->fetchColumn();
+        $existing = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+
+        if ($existing) {
+            $productId = (int)$existing['id'];
+            $productType = self::updateProduct($existing, $data, $db);
+        } else {
+            $productType = trim($data['product_type'] ?? 'simple');
+            $productId = self::createProduct($data, $productType, $db);
+        }
 
         // Optional per-product stock alert thresholds; an empty cell resets to the config default.
         foreach (['stock_low_threshold', 'stock_critical_threshold'] as $column) {
             if (!array_key_exists($column, $data)) continue;
             $value = trim((string)$data[$column]);
+            $value = $value === '' ? null : max(0, (int)$value);
+            if ($existing && ($existing[$column] === null ? null : (int)$existing[$column]) === $value) continue;
             $db->prepare("UPDATE products SET {$column} = :value WHERE id = :id")
-                ->execute([':value' => $value === '' ? null : max(0, (int)$value), ':id' => $productId]);
+                ->execute([':value' => $value, ':id' => $productId]);
         }
-        // The stock column is "available"; with warehouses it is booked in the ledger (source of truth).
-        if (array_key_exists('stock', $data) && trim((string)$data['stock']) !== '') {
+        // The stock column is "available"; with warehouses a change is booked in the ledger (source of truth).
+        if (array_key_exists('stock', $data) && trim((string)$data['stock']) !== ''
+            && (!$existing || (int)$existing['stock'] !== (int)$data['stock'])) {
             Products::setAvailableStock($sku, $productType, (int)$data['stock'], 'import', 'csv_import');
         }
 
-        // Populate product_attrs table
-        self::syncProductAttrs($productId, $attrs, $db);
-
-        // Register base slug under 'sk' — CSV import convention treats base columns as SK.
-        // Per-locale slugs from translations are registered below.
-        self::registerSlug($slug, 'sk', 'product', $productId, $db);
-        foreach ($translations as $locale => $tr) {
+        // Base columns are SK by CSV import convention; per-locale slugs come from the translations.
+        if (!$existing || array_key_exists('slug', $data)) {
+            $stmt = $db->prepare("SELECT slug FROM products WHERE id = :id");
+            $stmt->execute([':id' => $productId]);
+            self::registerSlug((string)$stmt->fetchColumn(), 'sk', 'product', $productId, $db);
+        }
+        foreach (self::gatherTranslations($data) as $locale => $tr) {
             if (!empty($tr['slug'])) {
                 self::registerSlug($tr['slug'], $locale, 'product', $productId, $db);
             }
         }
+    }
+
+    private static function createProduct(array $data, string $productType, PDO $db): int {
+        $sku = trim($data['sku']);
+        $name = trim($data['name']);
+        $attrs = [];
+        foreach ($data as $key => $value) {
+            if (str_starts_with($key, 'attr:') && $value !== '') $attrs[substr($key, 5)] = $value;
+        }
+        self::upsertProduct([
+            'sku'           => $sku,
+            'slug'          => trim($data['slug'] ?? '') ?: self::slugify($name),
+            'product_type'  => $productType,
+            'name'          => $name,
+            'category_id'   => self::ensureCategory(trim($data['category'] ?? 'uncategorized'), $db),
+            'price'         => self::parsePriceToCents($data['price'] ?? 0),
+            'compare_price' => !empty($data['compare_price']) ? self::parsePriceToCents($data['compare_price']) : null,
+            'stock'         => (int)($data['stock'] ?? 0),
+            'status'        => trim($data['status'] ?? 'active'),
+            'summary'       => trim($data['summary'] ?? ''),
+            'description'   => trim($data['description'] ?? ''),
+            'images'        => self::pipeList($data['image'] ?? ''),
+            'attrs'         => $attrs,
+            'tags'          => self::pipeList($data['tags'] ?? ''),
+            'filter_tags'   => self::buildFilterTagsFromAttrs($attrs),
+            'weight_g'      => (int)($data['weight_g'] ?? 0),
+            'translations'  => self::gatherTranslations($data),
+        ], $db);
+
+        $stmt = $db->prepare("SELECT id FROM products WHERE sku = :sku");
+        $stmt->execute([':sku' => $sku]);
+        $productId = (int)$stmt->fetchColumn();
+        self::syncProductAttrs($productId, $attrs, $db);
+        return $productId;
+    }
+
+    /** Update only the columns present in $data that differ from the stored row; returns the product type. */
+    private static function updateProduct(array $existing, array $data, PDO $db): string {
+        $has = static fn(string $key): bool => array_key_exists($key, $data);
+        $json = static fn($stored): array => is_array($d = json_decode((string)$stored, true)) ? $d : [];
+        $name = trim($data['name']);
+        $set = ['name' => $name];
+        if ($has('slug')) $set['slug'] = trim((string)$data['slug']) ?: self::slugify($name);
+        if ($has('product_type')) $set['product_type'] = trim((string)$data['product_type']) ?: 'simple';
+        if ($has('category')) $set['category_id'] = self::ensureCategory(trim((string)$data['category']) ?: 'uncategorized', $db);
+        if ($has('price')) $set['price'] = self::parsePriceToCents($data['price']);
+        if ($has('compare_price')) $set['compare_price'] = !empty($data['compare_price']) ? self::parsePriceToCents($data['compare_price']) : null;
+        if ($has('stock') && trim((string)$data['stock']) !== '') $set['stock'] = (int)$data['stock'];
+        if ($has('status')) $set['status'] = trim((string)$data['status']) ?: 'active';
+        if ($has('summary')) $set['summary'] = trim((string)$data['summary']);
+        if ($has('description')) $set['description'] = Security::sanitizeRichHtml(trim((string)$data['description']));
+        if ($has('weight_g') && trim((string)$data['weight_g']) !== '') $set['weight_g'] = (int)$data['weight_g'];
+
+        $lists = [];
+        if ($has('image')) $lists['images'] = self::pipeList($data['image']);
+        if ($has('tags')) $lists['tags'] = self::pipeList($data['tags']);
+
+        // attr:* and name_xx/summary_xx/... columns: a value sets the entry, an empty cell removes it.
+        $attrs = $json($existing['attrs'] ?? null);
+        $attrsGiven = false;
+        $translations = $json($existing['translations'] ?? null);
+        $translationsGiven = false;
+        foreach ($data as $key => $value) {
+            $value = trim((string)$value);
+            if (str_starts_with($key, 'attr:')) {
+                $attrsGiven = true;
+                if ($value === '') unset($attrs[substr($key, 5)]);
+                else $attrs[substr($key, 5)] = $value;
+            } elseif (preg_match('/^(name|summary|description|slug)_([a-z]{2})$/', $key, $m)) {
+                $translationsGiven = true;
+                if ($value === '') unset($translations[$m[2]][$m[1]]);
+                else $translations[$m[2]][$m[1]] = $m[1] === 'description' ? Security::sanitizeRichHtml($value) : $value;
+                if (empty($translations[$m[2]])) unset($translations[$m[2]]);
+            }
+        }
+        if ($attrsGiven) $lists['attrs'] = $attrs;
+        if ($translationsGiven) $lists['translations'] = $translations;
+
+        $changes = [];
+        foreach ($set as $column => $value) {
+            $before = $existing[$column] ?? null;
+            if ($before === null ? $value !== null : (string)$before !== (string)$value) $changes[$column] = $value;
+        }
+        foreach ($lists as $column => $value) {
+            if ($json($existing[$column] ?? null) != $value) $changes[$column] = json_encode($value);
+        }
+        if (isset($changes['attrs'])) $changes['filter_tags'] = self::buildFilterTagsFromAttrs($attrs);
+
+        if ($changes) {
+            $assignments = implode(', ', array_map(static fn(string $c): string => "{$c} = :{$c}", array_keys($changes)));
+            $params = [':id' => (int)$existing['id']];
+            foreach ($changes as $column => $value) $params[":{$column}"] = $value;
+            $db->prepare("UPDATE products SET {$assignments}, updated_at = " . Db::now() . " WHERE id = :id")->execute($params);
+        }
+        if (isset($changes['attrs'])) self::syncProductAttrs((int)$existing['id'], $attrs, $db);
+
+        return (string)($set['product_type'] ?? $existing['product_type'] ?? 'simple');
+    }
+
+    /** "a.jpg|b.jpg" → ['a.jpg', 'b.jpg'] */
+    private static function pipeList($value): array {
+        return array_values(array_filter(array_map('trim', explode('|', (string)$value)), 'strlen'));
     }
 
     /**
@@ -480,6 +533,17 @@ class Import {
         }
 
         return $translations;
+    }
+
+    /** Undo Security::csvCell(): the export prefixes formula-like cells with an apostrophe. */
+    public static function csvCellDecode(string $value): string {
+        if (strlen($value) > 1 && $value[0] === "'" && Security::csvCell(substr($value, 1)) === $value) return substr($value, 1);
+        return $value;
+    }
+
+    /** Price in cents → the CSV format read by parsePriceToCents(): 2398 → "23.98". */
+    public static function formatCents(int $cents): string {
+        return number_format($cents / 100, 2, '.', '');
     }
 
     /** Convert price to cents: "19.90" → 1990. Always treats CSV values as euros. */

@@ -1,1 +1,1 @@
-{{#if digest}}Napi készletösszesítő – {{/if}}Alacsony készlet: {{first_name}} ({{first_available}} db){{#if more_count}} és további {{more_count}}{{/if}}
+{{#if digest}}Napi készletösszesítő – {{/if}}{{#if worst_out}}Elfogyott{{/if}}{{#if worst_critical}}Kritikus készlet{{/if}}{{#if worst_low}}Alacsony készlet{{/if}}: {{first_name}} ({{first_available}} db){{#if more_count}} és további {{more_count}}{{/if}}

@@ -1,1 +1,1 @@
-{{#if digest}}Denní souhrn skladu – {{/if}}Nízký stav: {{first_name}} ({{first_available}} ks){{#if more_count}} a další: {{more_count}}{{/if}}
+{{#if digest}}Denní souhrn skladu – {{/if}}{{#if worst_out}}Vyprodáno{{/if}}{{#if worst_critical}}Kritický stav{{/if}}{{#if worst_low}}Nízký stav{{/if}}: {{first_name}} ({{first_available}} ks){{#if more_count}} a další: {{more_count}}{{/if}}

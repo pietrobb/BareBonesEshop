@@ -1,1 +1,1 @@
-{{#if digest}}Daily stock summary – {{/if}}Low stock: {{first_name}} ({{first_available}} pcs){{#if more_count}} and {{more_count}} more{{/if}}
+{{#if digest}}Daily stock summary – {{/if}}{{#if worst_out}}Out of stock{{/if}}{{#if worst_critical}}Critical stock{{/if}}{{#if worst_low}}Low stock{{/if}}: {{first_name}} ({{first_available}} pcs){{#if more_count}} and {{more_count}} more{{/if}}

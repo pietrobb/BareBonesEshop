@@ -96,6 +96,9 @@ $createdMail = MailService::render('merchant_order_created', 'sk', [
 ]);
 assert_true(str_contains($createdMail['subject'], 'BB-NEW-1') && str_contains($createdMail['subject'], 'čaká na platbu'), 'Merchant notification: unpaid order subject says it awaits payment');
 assert_true(str_contains($createdMail['html'], 'Bankový prevod') && str_contains($createdMail['html'], 'admin.php?p=order&amp;id=7'), 'Merchant notification: created mail shows payment method and admin link');
+assert_true(str_contains($createdMail['text'], 'Detail: https://shop.example/admin.php?p=order&id=7') && !str_contains($createdMail['text'], '&amp;'), 'Merchant notification: plain-text admin link is not HTML-escaped');
+$subjectMail = MailService::render('merchant_order_created', 'sk', ['order_number' => "A&B <1>\r\nBcc: x@example.com"]);
+assert_true(str_contains($subjectMail['subject'], 'A&B <1>') && !preg_match('/[\r\n]/', $subjectMail['subject']), 'Mail: subject is plain text on one line');
 $paidCreatedMail = MailService::render('merchant_order_created', 'en', ['order_number' => 'BB-NEW-2', 'awaiting_payment' => false]);
 assert_true(!str_contains($paidCreatedMail['subject'], 'awaiting'), 'Merchant notification: paid order subject has no awaiting-payment marker');
 $pdo->exec("UPDATE products SET price = 999 WHERE id = 9001");
@@ -432,7 +435,8 @@ assert_equals(1, substr_count(strtolower($scriptBreakout), '</script>'), 'G6 JSO
 assert_true(!str_contains(strtolower($scriptBreakout), '<img'), 'G6 JSON embed: attacker HTML stays hex-escaped inside JSON');
 $productSourceG6 = file_get_contents(TEST_CLI_DIR . '/../product.php') ?: '';
 $jsonLdSourceG6 = file_get_contents(TEST_CLI_DIR . '/../src/JsonLd.php') ?: '';
-assert_true(substr_count($adminSourceG6, 'JSON_HEX_TAG') >= 4, 'G6 JSON embed: admin prefill and dynamic maps hex-escape tag delimiters');
+assert_true(substr_count($adminSourceG6, 'JSON_HEX_TAG') >= 2 && str_contains(AdminForm::fields('admin-attribute', ['name' => '"><script>x</script>']), 'value="&quot;&gt;&lt;script&gt;x&lt;/script&gt;"'),
+    'G6 JSON embed: admin dynamic maps hex-escape tag delimiters and server-rendered form values are HTML-escaped');
 assert_true(str_contains($productSourceG6, "src/Entrypoints/Storefront.php"), 'G6 JSON embed: clean product route delegates JSON-LD rendering to the canonical storefront');
 assert_true(str_contains($jsonLdSourceG6, 'JSON_HEX_TAG'), 'G6 JSON embed: shared JSON-LD renderer hex-escapes tag delimiters');
 
@@ -1294,6 +1298,9 @@ assert_true(str_contains($saMail->sent[0]['subject'], 'Krvavé Slnko') && str_co
 assert_true(str_contains($saMail->sent[0]['html'], 'SA-BOOK') && str_contains($saMail->sent[0]['html'], 'https://shop.example/admin.php?p=product&amp;id=9301')
     && str_contains($saMail->sent[0]['html'], 'limit 5 ks'), 'Stock alerts: body lists SKU, threshold and admin product link');
 assert_equals('owner@shop.example', $saMail->sent[0]['to'], 'Stock alerts: default recipients are merchant_notifications.recipients');
+assert_true(str_starts_with($saMail->sent[0]['subject'], 'Nízky stav: '), 'Stock alerts: a low-only e-mail is subjected "Nízky stav"');
+assert_true(str_contains($saMail->sent[0]['text'], 'https://shop.example/admin.php?p=product&id=9301') && !str_contains($saMail->sent[0]['text'], '&amp;'),
+    'Stock alerts: plain-text links are not HTML-escaped');
 
 $saOrder('SA-BOOK', 1);
 $saRun();
@@ -1303,11 +1310,13 @@ $saOrder('SA-BOOK', 2);
 $saRun();
 assert_equals(2, count($saMail->sent), 'Stock alerts: low → critical sends a second e-mail');
 assert_true(str_contains($saMail->sent[1]['html'], 'Kritický stav'), 'Stock alerts: critical crossing is labelled critical');
+assert_true(str_starts_with($saMail->sent[1]['subject'], 'Kritický stav: Krvavé Slnko'), 'Stock alerts: subject follows the worst level (critical)');
 
 $saCancelOrder = $saOrder('SA-BOOK', 2);
 $saRun();
 assert_equals(3, count($saMail->sent), 'Stock alerts: critical → 0 sends a third e-mail (ok→low→critical→0 = 3)');
 assert_true(str_contains($saMail->sent[2]['html'], 'Vypredané'), 'Stock alerts: zero stock is reported as sold out');
+assert_true(str_starts_with($saMail->sent[2]['subject'], 'Vypredané: Krvavé Slnko (0 ks)'), 'Stock alerts: subject follows the worst level (sold out)');
 
 OrderWorkflow::transition($saCancelOrder, 'cancelled', 'stock alert test');
 assert_equals(2, Warehouse::totalAvailable('SA-BOOK'), 'Stock alerts: cancellation returns the reservation');
@@ -1373,7 +1382,72 @@ assert_true($saImport['success'] && !$saImport['errors'], 'CSV import: threshold
 $saImported = $pdo->query("SELECT stock, stock_low_threshold, stock_critical_threshold FROM products WHERE sku = 'SA-BOOK'")->fetch(PDO::FETCH_ASSOC);
 assert_equals([12, 8, 3], [(int)$saImported['stock'], (int)$saImported['stock_low_threshold'], (int)$saImported['stock_critical_threshold']], 'CSV import: stock and thresholds are stored');
 assert_equals(12, Warehouse::totalAvailable('SA-BOOK'), 'CSV import: stock is booked in warehouse_stock');
-assert_true(str_contains((string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Catalog.php'), "'stock_low_threshold', 'stock_critical_threshold'], ',', '\"', '\\\\')"), 'CSV export: threshold columns are exported');
+// Admin "Export CSV" → "Import CSV" round trip: same price format, absent columns are never overwritten.
+$rtRow = static fn(string $sku): array => $pdo->query("SELECT * FROM products WHERE sku = " . $pdo->quote($sku))->fetch(PDO::FETCH_ASSOC);
+$rtMoves = static fn(): int => (int)$pdo->query("SELECT COUNT(*) FROM stock_movements WHERE sku = 'SA-BOOK'")->fetchColumn();
+$pdo->prepare("UPDATE products SET price = 2398, compare_price = 2999, summary = :summary, description = :description, images = :images,
+    tags = :tags, attrs = :attrs, filter_tags = 'attr_autor_x', translations = :translations, weight_g = NULL WHERE sku = 'SA-BOOK'")->execute([
+    ':summary' => '-20 % "dnes", a\\b', ':description' => '<p>Popis knihy</p>', ':images' => '["at2.jpg"]', ':tags' => '["novinka","sci-fi"]',
+    ':attrs' => '{"autor":"X"}', ':translations' => '{"en":{"name":"Bloody Sun"}}',
+]);
+$rtBefore = $rtRow('SA-BOOK');
+$rtBefore2 = $rtRow('SA-BOOK2');
+$rtMovesBefore = $rtMoves();
+$rtFile = TEST_CLI_DIR . '/../db/stock-alert-roundtrip.csv';
+$rtOut = fopen($rtFile, 'w');
+exportProductsCsv($rtOut, 'SA-BOOK');
+fclose($rtOut);
+$rtCsv = (string)file_get_contents($rtFile);
+assert_true(str_starts_with($rtCsv, "sku,name,slug,product_type,price,compare_price,stock,status,summary,weight_g,stock_low_threshold,stock_critical_threshold\n")
+    && str_contains($rtCsv, ',23.98,29.99,'), 'CSV export: thresholds are exported and prices use the import format (euros)');
+$rtResult = Import::csv($rtFile);
+assert_true($rtResult['success'] && !$rtResult['errors'] && $rtResult['imported'] === 2, 'CSV round trip: the unchanged export imports cleanly');
+assert_equals($rtBefore, $rtRow('SA-BOOK'), 'CSV round trip: unchanged export leaves the product byte-identical (price, description, images, tags, category, attrs)');
+assert_equals($rtBefore2, $rtRow('SA-BOOK2'), 'CSV round trip: every exported product stays identical');
+assert_equals($rtMovesBefore, $rtMoves(), 'CSV round trip: unchanged stock books nothing in the ledger');
+
+$rtIn = fopen($rtFile, 'r');
+$rtLines = [];
+while (($rtLine = fgetcsv($rtIn, 0, ',', '"', '')) !== false) $rtLines[] = $rtLine;
+fclose($rtIn);
+foreach ($rtLines as $i => $rtLine) {
+    if (($rtLine[0] ?? '') === 'SA-BOOK') { $rtLines[$i][6] = '9'; $rtLines[$i][10] = '10'; }
+}
+$rtOut = fopen($rtFile, 'w');
+foreach ($rtLines as $rtLine) fputcsv($rtOut, $rtLine, ',', '"', '');
+fclose($rtOut);
+$rtResult = Import::csv($rtFile);
+@unlink($rtFile);
+$rtAfter = $rtRow('SA-BOOK');
+$rtChanged = array_keys(array_diff_assoc(array_map('strval', $rtAfter), array_map('strval', $rtBefore)));
+assert_true($rtResult['success'] && !$rtResult['errors'], 'CSV round trip: the edited export imports cleanly');
+assert_true(!array_diff($rtChanged, ['stock', 'stock_low_threshold', 'updated_at']) && in_array('stock', $rtChanged, true) && in_array('stock_low_threshold', $rtChanged, true),
+    'CSV round trip: editing stock and a limit changes only those columns (changed: ' . implode(', ', $rtChanged) . ')');
+assert_equals([9, 10], [(int)$rtAfter['stock'], (int)$rtAfter['stock_low_threshold']], 'CSV round trip: the edited stock and limit are stored');
+assert_equals(9, Warehouse::totalAvailable('SA-BOOK'), 'CSV round trip: the stock change is booked in the warehouse ledger');
+assert_equals($rtMovesBefore + 1, $rtMoves(), 'CSV round trip: exactly one ledger movement for the stock change');
+assert_equals($rtBefore2, $rtRow('SA-BOOK2'), 'CSV round trip: untouched rows stay identical');
+assert_equals('-20 % "dnes", a\\b', Import::csvCellDecode("'-20 % \"dnes\", a\\b"), 'CSV import: the formula-guard apostrophe of the export is removed');
+assert_equals("'quoted", Import::csvCellDecode("'quoted"), 'CSV import: an ordinary leading apostrophe is kept');
+// Admin forms are rendered on the server from the BBF definitions, filled with the stored values.
+$afHtml = AdminForm::open('admin-product', 'admin.php?p=product&action=save&id=9301') . AdminForm::fields('admin-product', adminProductFormValues($rtRow('SA-BOOK'))) . AdminForm::close('admin-product');
+assert_true(str_contains($afHtml, 'action="admin.php?p=product&amp;action=save&amp;id=9301"') && str_contains($afHtml, 'enctype="multipart/form-data"')
+    && str_contains($afHtml, 'name="csrf_token"'), 'Admin product form: posts to the admin save handler with CSRF');
+assert_true(str_contains($afHtml, 'name="sku" required value="SA-BOOK"') && str_contains($afHtml, 'name="price" required min="0" value="2398"')
+    && str_contains($afHtml, 'name="stock" min="0" value="9"') && str_contains($afHtml, 'name="stock_low_threshold" min="0" value="10"')
+    && str_contains($afHtml, '&lt;p&gt;Popis knihy&lt;/p&gt;</textarea>') && str_contains($afHtml, 'value="novinka, sci-fi"'),
+    'Admin product form: opens with the stored values');
+$afAdminSource = entrypointSource('admin.php');
+assert_true(!str_contains($afAdminSource, 'bbf.js') && !str_contains($afAdminSource, 'BBF.render') && substr_count($afAdminSource, 'AdminForm::open(') === 4,
+    'Admin forms: product, page, attribute and import post to admin.php instead of vendor/bbf/submit.php');
+$afImport = AdminForm::open('admin-import', 'admin.php?p=import&action=upload') . AdminForm::fields('admin-import', []);
+assert_true(str_contains($afImport, 'action="admin.php?p=import&amp;action=upload"') && str_contains($afImport, 'enctype="multipart/form-data"')
+    && str_contains($afImport, 'type="file" id="field-csv_file" name="csv_file" required accept=".csv"'), 'Admin import form: a real multipart upload to the import handler');
+assert_true(str_contains((string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Operations.php'), "AdminForm::open('admin-import', 'admin.php?p=import&action=upload')"), 'Admin import page: uses the server-rendered upload form');
+foreach (['admin-product', 'admin-page', 'admin-attribute', 'admin-import'] as $afId) {
+    assert_true(count(AdminForm::definition($afId)['fields']) > 0, "Admin forms: {$afId} definition renders");
+}
+assert_equals(BbfOptions::forAction('bbf_product_statuses'), BbfOptions::fromSource('/api.php?action=bbf_product_statuses'), 'Admin forms: options_from resolves to the same lists as api.php');
 
 // Optional daily digest: once per day after digest_hour.
 StockAlerts::setConfigForTesting([

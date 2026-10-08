@@ -94,6 +94,28 @@ function pageProducts(): void {
     </div>
     <?php
 }
+/** Stored product → values of the admin-product form fields (prices in cents, lists one per line / comma-separated). */
+function adminProductFormValues(?array $product): array {
+    $productTags = json_decode((string)($product['tags'] ?? ''), true);
+    return [
+        'sku'           => $product['sku'] ?? '',
+        'name'          => $product['name'] ?? '',
+        'slug'          => $product['slug'] ?? '',
+        'category_id'   => (string)($product['category_id'] ?? ''),
+        'product_type'  => $product['product_type'] ?? 'simple',
+        'price'         => (string)(int)($product['price'] ?? 0),
+        'compare_price' => isset($product['compare_price']) ? (string)(int)$product['compare_price'] : '',
+        'stock'         => (string)(int)($product['stock'] ?? 0),
+        'status'        => $product['status'] ?? 'active',
+        'summary'       => $product['summary'] ?? '',
+        'description'   => $product['description'] ?? '',
+        'images'        => implode("\n", json_decode($product['images'] ?? '[]', true) ?: []),
+        'weight_g'      => (string)(int)($product['weight_g'] ?? 0),
+        'stock_low_threshold'      => isset($product['stock_low_threshold']) ? (string)(int)$product['stock_low_threshold'] : '',
+        'stock_critical_threshold' => isset($product['stock_critical_threshold']) ? (string)(int)$product['stock_critical_threshold'] : '',
+        'tags'          => is_array($productTags) ? implode(', ', $productTags) : (string)($product['tags'] ?? ''),
+    ];
+}
 function pageProduct(): void {
     $db = Db::get();
     $id = Security::int($_GET['id'] ?? 0);
@@ -169,28 +191,10 @@ function pageProduct(): void {
     <h1><?= $product ? 'Upraviť: ' . esc($product['name']) : 'Nový produkt' ?></h1>
     <div class="card">
         <?php
-        // Pre-fill data for BBF form
-        $bbfProductData = json_encode([
-            '_product_id'   => $product['id'] ?? 0,
-            'sku'           => $product['sku'] ?? '',
-            'name'          => $product['name'] ?? '',
-            'slug'          => $product['slug'] ?? '',
-            'category_id'   => (string)($product['category_id'] ?? ''),
-            'product_type'  => $product['product_type'] ?? 'simple',
-            'price'         => (string)(int)($product['price'] ?? 0),
-            'compare_price' => (string)(int)($product['compare_price'] ?? 0),
-            'stock'         => (string)(int)($product['stock'] ?? 0),
-            'status'        => $product['status'] ?? 'active',
-            'summary'       => $product['summary'] ?? '',
-            'description'   => $product['description'] ?? '',
-            'images'        => implode("\n", json_decode($product['images'] ?? '[]', true) ?: []),
-            'weight_g'      => (string)(int)($product['weight_g'] ?? 0),
-            'stock_low_threshold'      => isset($product['stock_low_threshold']) ? (string)(int)$product['stock_low_threshold'] : '',
-            'stock_critical_threshold' => isset($product['stock_critical_threshold']) ? (string)(int)$product['stock_critical_threshold'] : '',
-            'tags'          => $product['tags'] ?? '',
-        ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        $productValues = adminProductFormValues($product ?: null);
+        echo AdminForm::open('admin-product', 'admin.php?p=product&action=save' . ($product ? '&id=' . (int)$product['id'] : ''));
+        echo AdminForm::fields('admin-product', $productValues);
         ?>
-        <div id="bbf-product" data-form="admin-product" data-lang="sk"></div>
 
         <div id="attr-section" style="border-top:2px solid #e2e8f0;margin-top:1rem;padding-top:1rem">
             <h3 style="margin-bottom:.75rem">Atribúty</h3>
@@ -204,16 +208,16 @@ function pageProduct(): void {
                 <div class="form-row">
                     <label><?= esc($a['name']) ?><?= $a['unit'] ? ' (' . esc($a['unit']) . ')' : '' ?></label>
                     <?php if ($a['type'] === 'enum'): ?>
-                    <select name="attr_<?= esc($a['name']) ?>" data-bbf-inject="true">
+                    <select name="attr[<?= esc($a['name']) ?>]">
                         <option value="">— nevybrané —</option>
                         <?php foreach ($attrOptions[$a['id']] ?? [] as $opt): ?>
                         <option value="<?= esc($opt) ?>" <?= $curVal === $opt ? 'selected' : '' ?>><?= esc($opt) ?></option>
                         <?php endforeach; ?>
                     </select>
                     <?php elseif ($a['type'] === 'number'): ?>
-                    <input type="number" step="any" name="attr_<?= esc($a['name']) ?>" value="<?= esc($curNum ?: $curVal) ?>" placeholder="<?= esc($a['unit'] ?: 'číslo') ?>" data-bbf-inject="true">
+                    <input type="number" step="any" name="attr[<?= esc($a['name']) ?>]" value="<?= esc($curNum ?: $curVal) ?>" placeholder="<?= esc($a['unit'] ?: 'číslo') ?>">
                     <?php elseif ($a['type'] === 'boolean'): ?>
-                    <select name="attr_<?= esc($a['name']) ?>" data-bbf-inject="true">
+                    <select name="attr[<?= esc($a['name']) ?>]">
                         <option value="">— nevybrané —</option>
                         <option value="Áno" <?= $curVal === 'Áno' ? 'selected' : '' ?>>Áno</option>
                         <option value="Nie" <?= $curVal === 'Nie' ? 'selected' : '' ?>>Nie</option>
@@ -226,6 +230,7 @@ function pageProduct(): void {
                 <?php endif; ?>
             </div>
         </div>
+        <?= AdminForm::close('admin-product') ?>
 
         <?php if ($product): ?>
         <div class="card" style="margin-top:1rem">
@@ -253,32 +258,11 @@ function pageProduct(): void {
         <div style="margin-top:1rem"><a href="admin.php?p=products" class="btn">Späť na zoznam</a></div>
         <?php endif; ?>
     </div>
-    <link rel="stylesheet" href="vendor/bbf/bbf.css">
-    <script src="vendor/bbf/bbf.js"></script>
-    <script nonce="<?= Security::cspNonce() ?>">
-    (function() {
-        var prefill = <?= $bbfProductData ?>;
-        BBF.baseUrl = 'vendor/bbf/';
-        BBF.render('admin-product', '#bbf-product', {
-            prefill: prefill,
-            onSuccess: function(resp) {
-                if (resp.redirect) { window.location.href = resp.redirect; return false; }
-            },
-            onBeforeSubmit: function(data) {
-                // Inject attribute fields into submission data
-                document.querySelectorAll('[data-bbf-inject]').forEach(function(el) {
-                    if (el.name && el.value) data[el.name] = el.value;
-                });
-                return data;
-            }
-        });
-    })();
-    </script>
     <script nonce="<?= Security::cspNonce() ?>">
     var catAttrMap = <?= json_encode($catAttrMap, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
     var existingSpecs = <?= json_encode($existingSpecs, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
     function updateAttrFields() {
-        var catId = document.getElementById('category-select').value;
+        var catId = document.getElementById('field-category_id').value;
         var attrs = catAttrMap[catId] || [];
         var container = document.getElementById('attr-fields');
         if (!attrs.length) {
@@ -309,6 +293,7 @@ function pageProduct(): void {
         container.innerHTML = html;
     }
     function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    document.getElementById('field-category_id').addEventListener('change', updateAttrFields);
     </script>
     <?php
 }
@@ -570,35 +555,23 @@ function pageCmsEdit(): void {
     <h1><?= $id ? 'Upraviť stránku' : 'Nová stránka' ?></h1>
     <div class="card">
         <?php
-        $bbfPageData = json_encode([
-            '_page_id' => $id,
+        echo AdminForm::open('admin-page', 'admin.php?p=page_edit&action=save' . ($id ? '&id=' . $id : ''));
+        echo AdminForm::fields('admin-page', [
             'slug'     => $pg['slug'] ?? '',
             'title'    => $pg['title'] ?? '',
             'body'     => $pg['body'] ?? '',
             'page_type' => $pg['page_type'] ?? 'content',
             'template' => $pg['template'] ?? 'cms',
+            'layout'   => $pg['layout'] ?? 'storefront',
             'sections' => $pg['sections'] ?? '[]',
             'status'   => $pg['status'] ?? 'active',
-        ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        ]);
+        echo AdminForm::close('admin-page');
         ?>
-        <div id="bbf-page" data-form="admin-page" data-lang="sk"></div>
         <?php if ($id): ?>
         <div style="margin-top:1rem"><a href="admin.php?p=pages" class="btn">Späť</a></div>
         <?php endif; ?>
     </div>
-    <link rel="stylesheet" href="vendor/bbf/bbf.css">
-    <script src="vendor/bbf/bbf.js"></script>
-    <script nonce="<?= Security::cspNonce() ?>">
-    (function() {
-        BBF.baseUrl = 'vendor/bbf/';
-        BBF.render('admin-page', '#bbf-page', {
-            prefill: <?= $bbfPageData ?>,
-            onSuccess: function(resp) {
-                if (resp.redirect) { window.location.href = resp.redirect; return false; }
-            }
-        });
-    })();
-    </script>
     <?php
 }
 function handleCmsPageSave(): void {
@@ -608,8 +581,14 @@ function handleCmsPageSave(): void {
     $slug = Security::slug($_POST['slug'] ?? '');
     $title = trim($_POST['title'] ?? '');
     $body = Security::sanitizeRichHtml((string)($_POST['body'] ?? ''));
-    $pageType = Security::slug((string)($_POST['page_type'] ?? 'content')) ?: 'content';
-    $template = Security::slug((string)($_POST['template'] ?? 'cms')) ?: 'cms';
+    // Theme codes keep underscores (e.g. a "full_width" layout), so they are validated, not slugified.
+    $code = static function (string $field, string $default): string {
+        $value = strtolower(trim((string)($_POST[$field] ?? '')));
+        return preg_match('/^[a-z0-9][a-z0-9_-]{0,79}$/', $value) ? $value : $default;
+    };
+    $pageType = $code('page_type', 'content');
+    $template = $code('template', 'cms');
+    $layout = $code('layout', 'storefront');
     try {
         $sections = ContentService::sanitizeSections($_POST['sections'] ?? '[]');
     } catch (JsonException | InvalidArgumentException $e) {
@@ -626,12 +605,12 @@ function handleCmsPageSave(): void {
     }
 
     if ($id) {
-        $db->prepare("UPDATE pages SET slug = :slug, title = :title, body = :body, page_type = :page_type, template = :template, sections = :sections, status = :status, updated_at = {$now} WHERE id = :id")
-           ->execute([':slug' => $slug, ':title' => $title, ':body' => $body, ':page_type' => $pageType, ':template' => $template, ':sections' => $sections, ':status' => $status, ':id' => $id]);
+        $db->prepare("UPDATE pages SET slug = :slug, title = :title, body = :body, page_type = :page_type, template = :template, layout = :layout, sections = :sections, status = :status, updated_at = {$now} WHERE id = :id")
+           ->execute([':slug' => $slug, ':title' => $title, ':body' => $body, ':page_type' => $pageType, ':template' => $template, ':layout' => $layout, ':sections' => $sections, ':status' => $status, ':id' => $id]);
         setFlash('ok', 'Stránka aktualizovaná.');
     } else {
-        $db->prepare("INSERT INTO pages (slug, title, body, page_type, template, sections, status) VALUES (:slug, :title, :body, :page_type, :template, :sections, :status)")
-           ->execute([':slug' => $slug, ':title' => $title, ':body' => $body, ':page_type' => $pageType, ':template' => $template, ':sections' => $sections, ':status' => $status]);
+        $db->prepare("INSERT INTO pages (slug, title, body, page_type, template, layout, sections, status) VALUES (:slug, :title, :body, :page_type, :template, :layout, :sections, :status)")
+           ->execute([':slug' => $slug, ':title' => $title, ':body' => $body, ':page_type' => $pageType, ':template' => $template, ':layout' => $layout, ':sections' => $sections, ':status' => $status]);
         $id = (int)$db->lastInsertId();
         setFlash('ok', 'Stránka vytvorená.');
     }
@@ -765,13 +744,22 @@ function handleProductSave(): void {
     $db = Db::get();
     $id = Security::int($_GET['id'] ?? 0);
     $now = Db::isSqlite() ? "datetime('now')" : 'NOW()';
+    $old = $id ? Products::byId($id) : null;
+    if ($id && !$old) {
+        setFlash('err', 'Produkt neexistuje.');
+        header('Location: admin.php?p=products');
+        exit;
+    }
 
     $allowedStatuses = ['active', 'draft', 'archived'];
     $catalogFile = dirname(__DIR__, 3) . '/catalog.json';
     $catalogTypes = file_exists($catalogFile) ? array_keys(json_decode(file_get_contents($catalogFile), true)['product_types'] ?? []) : [];
     $allowedTypes = array_unique(array_merge(['simple'], $catalogTypes));
-    $status = in_array($_POST['status'] ?? '', $allowedStatuses) ? $_POST['status'] : 'active';
-    $productType = in_array($_POST['product_type'] ?? '', $allowedTypes) ? $_POST['product_type'] : 'simple';
+    // A stored value outside today's lists (e.g. a type no longer in catalog.json) survives an unchanged save.
+    $postedStatus = (string)($_POST['status'] ?? '');
+    $postedType = (string)($_POST['product_type'] ?? '');
+    $status = in_array($postedStatus, $allowedStatuses, true) || ($old && $postedStatus !== '' && $postedStatus === (string)$old['status']) ? $postedStatus : 'active';
+    $productType = in_array($postedType, $allowedTypes, true) || ($old && $postedType !== '' && $postedType === (string)$old['product_type']) ? $postedType : 'simple';
 
     $data = [
         ':sku'           => trim($_POST['sku'] ?? ''),
@@ -795,7 +783,7 @@ function handleProductSave(): void {
     $images = [];
     $imagesText = trim($_POST['images'] ?? '');
     if ($imagesText) {
-        $images = array_filter(array_map('trim', explode("\n", $imagesText)));
+        $images = array_values(array_filter(array_map('trim', explode("\n", $imagesText)), 'strlen'));
     }
 
     // Handle file upload
@@ -831,6 +819,7 @@ function handleProductSave(): void {
         JobQueue::push('image_resize', ['path' => $filename], 3);
     }
     $data[':images'] = json_encode($images);
+    $data[':tags'] = json_encode(array_values(array_filter(array_map('trim', explode(',', (string)($_POST['tags'] ?? ''))), 'strlen')));
 
     // Validate slug uniqueness
     $slug = $data[':slug'];
@@ -842,20 +831,37 @@ function handleProductSave(): void {
         exit;
     }
 
-    $old = null;
-    if ($id) {
-        $old = Products::byId($id);
-        $stmt = $db->prepare("UPDATE products SET sku=:sku, name=:name, slug=:slug, product_type=:product_type,
-            category_id=:category_id, price=:price, compare_price=:compare_price, stock=:stock,
-            status=:status, summary=:summary, description=:description, images=:images, weight_g=:weight_g,
-            stock_low_threshold=:stock_low_threshold, stock_critical_threshold=:stock_critical_threshold, updated_at={$now} WHERE id=:id");
-        $data[':id'] = $id;
-        $stmt->execute($data);
-        AuditLog::log('product', $id, $old, $data, 'Admin edit');
-        setFlash('ok', 'Produkt aktualizovaný.');
+    if ($old) {
+        // Saving the form unchanged must not rewrite the product (nor bump updated_at / the audit log).
+        $jsonList = static fn($v): array => is_array($d = json_decode((string)$v, true)) ? array_values($d) : [];
+        $nullableInt = static fn($v): ?int => $v === null || $v === '' ? null : (int)$v;
+        $changed = [];
+        foreach ($data as $param => $value) {
+            $column = substr($param, 1);
+            $before = $old[$column] ?? null;
+            $same = match ($column) {
+                'images', 'tags' => $jsonList($before) === $jsonList($value),
+                'price', 'stock', 'weight_g', 'category_id' => (int)$before === (int)$value,
+                'compare_price' => ($nullableInt($before) ?: null) === $value,
+                'stock_low_threshold', 'stock_critical_threshold' => $nullableInt($before) === $value,
+                default => (string)$before === (string)$value,
+            };
+            if (!$same) $changed[] = $column;
+        }
+        if ($changed) {
+            $stmt = $db->prepare("UPDATE products SET sku=:sku, name=:name, slug=:slug, product_type=:product_type,
+                category_id=:category_id, price=:price, compare_price=:compare_price, stock=:stock,
+                status=:status, summary=:summary, description=:description, images=:images, tags=:tags, weight_g=:weight_g,
+                stock_low_threshold=:stock_low_threshold, stock_critical_threshold=:stock_critical_threshold, updated_at={$now} WHERE id=:id");
+            $stmt->execute($data + [':id' => $id]);
+            AuditLog::log('product', $id, $old, $data, 'Admin edit: ' . implode(', ', $changed));
+            setFlash('ok', 'Produkt aktualizovaný.');
+        } else {
+            setFlash('ok', 'Bez zmien.');
+        }
     } else {
-        $stmt = $db->prepare("INSERT INTO products (sku, name, slug, product_type, category_id, price, compare_price, stock, status, summary, description, images, weight_g, stock_low_threshold, stock_critical_threshold)
-            VALUES (:sku, :name, :slug, :product_type, :category_id, :price, :compare_price, :stock, :status, :summary, :description, :images, :weight_g, :stock_low_threshold, :stock_critical_threshold)");
+        $stmt = $db->prepare("INSERT INTO products (sku, name, slug, product_type, category_id, price, compare_price, stock, status, summary, description, images, tags, weight_g, stock_low_threshold, stock_critical_threshold)
+            VALUES (:sku, :name, :slug, :product_type, :category_id, :price, :compare_price, :stock, :status, :summary, :description, :images, :tags, :weight_g, :stock_low_threshold, :stock_critical_threshold)");
         $stmt->execute($data);
         $id = (int)$db->lastInsertId();
         AuditLog::log('product', $id, null, $data, 'Admin create');
@@ -956,10 +962,15 @@ function handleBulkAction(): void {
     exit;
 }
 function handleExport(): void {
-    $db = Db::get();
-    $search = $_POST['q'] ?? '';
-    $statusFilter = $_POST['status'] ?? '';
-
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="products-' . date('Y-m-d') . '.csv"');
+    $out = fopen('php://output', 'w');
+    exportProductsCsv($out, (string)($_POST['q'] ?? ''), (string)($_POST['status'] ?? ''));
+    fclose($out);
+    exit;
+}
+/** Products CSV in the Import::csv() format (prices in euros), so an edited export can be imported back. */
+function exportProductsCsv($out, string $search = '', string $statusFilter = ''): void {
     $where = "1=1";
     $params = [];
     if ($search) {
@@ -970,19 +981,16 @@ function handleExport(): void {
     }
     if ($statusFilter) { $where .= " AND status = :status"; $params[':status'] = $statusFilter; }
 
-    $stmt = $db->prepare("SELECT sku, name, slug, product_type, price, compare_price, stock, status, summary, weight_g,
+    $stmt = Db::get()->prepare("SELECT sku, name, slug, product_type, price, compare_price, stock, status, summary, weight_g,
         stock_low_threshold, stock_critical_threshold FROM products WHERE {$where} ORDER BY id");
     $stmt->execute($params);
 
-    header('Content-Type: text/csv; charset=UTF-8');
-    header('Content-Disposition: attachment; filename="products-' . date('Y-m-d') . '.csv"');
-    $out = fopen('php://output', 'w');
-    fputcsv($out, ['sku', 'name', 'slug', 'product_type', 'price', 'compare_price', 'stock', 'status', 'summary', 'weight_g', 'stock_low_threshold', 'stock_critical_threshold'], ',', '"', '\\');
+    fputcsv($out, ['sku', 'name', 'slug', 'product_type', 'price', 'compare_price', 'stock', 'status', 'summary', 'weight_g', 'stock_low_threshold', 'stock_critical_threshold'], ',', '"', '');
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        fputcsv($out, array_map([Security::class, 'csvCell'], $row), ',', '"', '\\');
+        $row['price'] = Import::formatCents((int)$row['price']);
+        if ($row['compare_price'] !== null) $row['compare_price'] = Import::formatCents((int)$row['compare_price']);
+        fputcsv($out, array_map([Security::class, 'csvCell'], $row), ',', '"', '');
     }
-    fclose($out);
-    exit;
 }
 function pageAttributes(): void {
     $db = Db::get();
@@ -1052,24 +1060,23 @@ function pageAttribute(): void {
     <h1><?= $attr ? 'Upraviť: ' . esc($attr['name']) : 'Nový atribút' ?></h1>
     <div class="card">
         <?php
-        $bbfAttrData = json_encode([
-            '_attribute_id' => $id,
+        echo AdminForm::open('admin-attribute', 'admin.php?p=attribute&action=save' . ($id ? '&id=' . $id : ''));
+        echo AdminForm::fields('admin-attribute', [
             'name'          => $attr['name'] ?? '',
             'slug'          => $attr['slug'] ?? '',
             'type'          => $attr['type'] ?? 'enum',
             'unit'          => $attr['unit'] ?? '',
             'sort_order'    => (string)(int)($attr['sort_order'] ?? 0),
-        ], JSON_UNESCAPED_UNICODE);
+        ]);
         ?>
-        <div id="bbf-attribute" data-form="admin-attribute" data-lang="sk"></div>
 
         <div id="options-section">
             <h3 style="margin:1rem 0 .5rem">Hodnoty (pre enum)</h3>
             <div id="options-list">
                 <?php foreach ($options as $i => $opt): ?>
                 <div class="form-row" style="display:flex;gap:.5rem;align-items:center">
-                    <input name="options[]" value="<?= esc($opt['value']) ?>" style="flex:1" placeholder="Hodnota" data-bbf-option>
-                    <input type="number" name="option_order[]" value="<?= (int)$opt['sort_order'] ?>" style="width:60px" placeholder="Poradie" data-bbf-option-order>
+                    <input name="options[]" value="<?= esc($opt['value']) ?>" style="flex:1" placeholder="Hodnota">
+                    <input type="number" name="option_order[]" value="<?= (int)$opt['sort_order'] ?>" style="width:60px" placeholder="Poradie">
                     <button type="button" data-action="remove-parent" class="btn btn-sm btn-danger">x</button>
                 </div>
                 <?php endforeach; ?>
@@ -1090,50 +1097,24 @@ function pageAttribute(): void {
                 $indent = $depth * 1.2;
             ?>
             <label class="cat-item" data-search="<?= esc(mb_strtolower($cat['name'] . ' ' . $cat['path'])) ?>" style="display:block;padding:2px 4px 2px <?= $indent + 0.4 ?>rem;cursor:pointer<?= $depth ? ';font-size:.9em' : ';font-weight:600' ?>">
-                <input type="checkbox" class="cat-checkbox" value="<?= (int)$cat['id'] ?>" <?= in_array($cat['id'], $assignedCats) ? 'checked' : '' ?>>
+                <input type="checkbox" class="cat-checkbox" name="category_ids[]" value="<?= (int)$cat['id'] ?>" <?= in_array($cat['id'], $assignedCats) ? 'checked' : '' ?>>
                 <?= esc($cat['name']) ?>
                 <?php if ($cat['path'] && $depth): ?><span style="color:#94a3b8;font-size:.8em;margin-left:.3rem"><?= esc($cat['path']) ?></span><?php endif; ?>
             </label>
             <?php endforeach; ?>
         </div>
 
+        <?= AdminForm::close('admin-attribute') ?>
+
         <div style="margin-top:1rem">
             <a href="admin.php?p=attributes" class="btn">Späť</a>
         </div>
     </div>
-    <link rel="stylesheet" href="vendor/bbf/bbf.css">
-    <script src="vendor/bbf/bbf.js"></script>
-    <script nonce="<?= Security::cspNonce() ?>">
-    (function() {
-        BBF.baseUrl = 'vendor/bbf/';
-        BBF.render('admin-attribute', '#bbf-attribute', {
-            prefill: <?= $bbfAttrData ?>,
-            onSuccess: function(resp) {
-                if (resp.redirect) { window.location.href = resp.redirect; return false; }
-            },
-            onBeforeSubmit: function(data) {
-                // Inject enum options
-                var optEls = document.querySelectorAll('[data-bbf-option]');
-                var ordEls = document.querySelectorAll('[data-bbf-option-order]');
-                optEls.forEach(function(el, i) {
-                    data['option_val_' + i] = el.value;
-                });
-                ordEls.forEach(function(el, i) {
-                    data['option_ord_' + i] = el.value;
-                });
-                // Inject category checkboxes
-                document.querySelectorAll('.cat-checkbox:checked').forEach(function(el) {
-                    data['cat_id_' + el.value] = el.value;
-                });
-                return data;
-            }
-        });
-    })();
-    </script>
     <script nonce="<?= Security::cspNonce() ?>">
     function toggleOptions() {
-        document.getElementById('options-section').style.display = document.getElementById('attr-type').value === 'enum' ? '' : 'none';
+        document.getElementById('options-section').style.display = document.getElementById('field-type').value === 'enum' ? '' : 'none';
     }
+    document.getElementById('field-type').addEventListener('change', toggleOptions);
     function addOption() {
         var div = document.createElement('div');
         div.className = 'form-row';

@@ -164,9 +164,10 @@ class MailService {
 
         // Render in template-engine order used by worker.php: each → if → vars
         $html    = self::renderString($html, $vars);
-        $subject = self::renderString($subject, $vars);
+        // Subject and plain-text body are not HTML: values go in verbatim (no &amp; in links).
+        $subject = trim(str_replace(["\r", "\n"], ' ', self::renderString($subject, $vars, false)));
         if ($text !== '') {
-            $text = self::renderString($text, $vars);
+            $text = self::renderString($text, $vars, false);
         } else {
             // Fallback plain text from HTML
             $text = trim(preg_replace('/\s+\n/', "\n", strip_tags($html)));
@@ -176,9 +177,10 @@ class MailService {
     }
 
     /** Expand {{#each}} / {{#if}} / {{var}} — matches worker.php renderTemplate. */
-    public static function renderString(string $tpl, array $vars): string {
+    public static function renderString(string $tpl, array $vars, bool $html = true): string {
+        $value = static fn($v): string => $html ? htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8') : (string)$v;
         // {{#each key}}...{{/each}}
-        $tpl = preg_replace_callback('/\{\{#each\s+(\w+)\}\}(.*?)\{\{\/each\}\}/s', function ($m) use ($vars) {
+        $tpl = preg_replace_callback('/\{\{#each\s+(\w+)\}\}(.*?)\{\{\/each\}\}/s', function ($m) use ($vars, $value) {
             $items = $vars[$m[1]] ?? [];
             if (!is_array($items)) return '';
             $out = '';
@@ -186,10 +188,10 @@ class MailService {
                 $row = $m[2];
                 if (is_array($item)) {
                     foreach ($item as $k => $v) {
-                        $row = str_replace('{{' . $k . '}}', htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'), $row);
+                        $row = str_replace('{{' . $k . '}}', $value($v), $row);
                     }
                 } else {
-                    $row = str_replace('{{this}}', htmlspecialchars((string)$item, ENT_QUOTES, 'UTF-8'), $row);
+                    $row = str_replace('{{this}}', $value($item), $row);
                 }
                 $out .= $row;
             }
@@ -204,7 +206,7 @@ class MailService {
         // {{var}}
         foreach ($vars as $k => $v) {
             if (is_scalar($v)) {
-                $tpl = str_replace('{{' . $k . '}}', htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'), $tpl);
+                $tpl = str_replace('{{' . $k . '}}', $value($v), $tpl);
             }
         }
         return preg_replace('/\{\{[^}]+\}\}/', '', $tpl);
