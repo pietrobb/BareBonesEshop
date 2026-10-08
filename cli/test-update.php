@@ -226,6 +226,12 @@ try {
             $signedManifestTamperRefused = str_contains($e->getMessage(), 'signature verification failed');
         }
         assert_true($signedManifestTamperRefused, 'Updater signature: any signed manifest mutation is rejected');
+
+        // A key whose base64 starts with "//" makes "base64://..." — must decode, not hit a stream wrapper.
+        $slashKey = "\xFF\xFF\xFF" . str_repeat("\x01", SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES - 3);
+        $slashEncoded = 'base64:' . base64_encode($slashKey);
+        assert_true(str_starts_with($slashEncoded, 'base64://'), 'Updater keys: fixture key encodes as base64://');
+        assert_equals($slashKey, UpdatePackage::decodeKey($slashEncoded, SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES, 'update public key'), 'Updater keys: base64 key starting with // decodes inline, not as a stream wrapper');
     }
 
     $mysqlUpdateDatabase = trim((string)(getenv('TEST_MYSQL_UPDATE_DATABASE') ?: ''));

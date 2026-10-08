@@ -99,7 +99,10 @@ final class UpdatePackage
 
     public static function decodeKey(string $value, int $expectedBytes, string $label): string
     {
-        if (is_file($value) && !is_link($value)) {
+        // Inline keys never touch the filesystem: "base64:" + a key starting with "//"
+        // would otherwise be parsed by PHP as a base64:// stream wrapper URL.
+        $inline = str_starts_with($value, 'base64:') || str_contains($value, '://');
+        if (!$inline && is_file($value) && !is_link($value)) {
             $fileValue = file_get_contents($value);
             if ($fileValue === false) {
                 throw new RuntimeException("Cannot read {$label} file");
