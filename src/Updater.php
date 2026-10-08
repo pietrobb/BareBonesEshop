@@ -225,6 +225,7 @@ final class Updater
                 'snapshot' => $snapshot['id'],
                 'changed' => count($report['ready']),
                 'already_current' => count($report['current']),
+                'retired' => $this->retireObsoleteFiles($snapshot['id']),
             ];
         } catch (Throwable $e) {
             if (is_array($snapshot) && isset($snapshot['id'])) {
@@ -624,6 +625,30 @@ final class Updater
         if (!is_file($target) || is_link($target) || !unlink($target)) {
             throw new RuntimeException("Cannot delete update target: {$relativePath}");
         }
+    }
+
+    /**
+     * Moves generated files that no release tracks (so no package can delete them by hash) into
+     * the snapshot's "retired" directory. Best effort: a file that cannot be moved stays in place
+     * and does not fail an update that has already been applied.
+     */
+    private function retireObsoleteFiles(string $snapshotId): array
+    {
+        $retired = [];
+        foreach (ObsoleteAdminForms::find($this->root) as $relativePath) {
+            try {
+                $target = $this->targetPath($relativePath, true);
+                $destination = $this->snapshotDirectory($snapshotId) . DIRECTORY_SEPARATOR . 'retired'
+                    . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
+                $this->ensureDirectory(dirname($destination), 0750);
+                if (copy($target, $destination) && unlink($target)) {
+                    $retired[] = $relativePath;
+                }
+            } catch (Throwable) {
+                continue;
+            }
+        }
+        return $retired;
     }
 
     private function targetPath(string $relativePath, bool $allowMissingParent): string

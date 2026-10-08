@@ -163,6 +163,9 @@ try {
     $result = $updater->apply($package);
     echo "Updated to {$result['version']}: {$result['changed']} changed, "
         . "{$result['already_current']} already current. Rollback snapshot: {$result['snapshot']}\n";
+    foreach ($result['retired'] as $retiredPath) {
+        echo "Moved obsolete generated file {$retiredPath} into the snapshot (retired/)\n";
+    }
     updateRecordCoreBaseline($root, $stateDirectory, $config, 'update ' . $result['version'], (string)$result['version']);
     exit(0);
 } catch (Throwable $e) {

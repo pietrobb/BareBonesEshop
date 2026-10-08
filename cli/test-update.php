@@ -92,7 +92,17 @@ try {
     assert_equals("customer customization\n", file_get_contents($updateInstalled . '/src/Core.php'), 'Updater conflict: modified core remains untouched');
     file_put_contents($updateInstalled . '/src/Core.php', "old core\n");
 
+    mkdir($updateInstalled . '/forms', 0750, true);
+    file_put_contents($updateInstalled . '/forms/admin-simple.json', '{"id":"admin-simple","product_type":"simple","fields":[]}');
+    file_put_contents($updateInstalled . '/forms/admin-product.json', '{"id":"admin-product","fields":[]}');
+    file_put_contents($updateInstalled . '/forms/admin-page.json', '{"id":"admin-page","product_type":"simple","fields":[]}');
+    assert_equals(['forms/admin-simple.json'], ObsoleteAdminForms::find($updateInstalled), 'Obsolete admin forms: only a form whose product_type matches its file name counts as generated');
+
     $appliedUpdate = $updater->apply($updatePackage);
+    assert_equals(['forms/admin-simple.json'], $appliedUpdate['retired'], 'Updater apply: generated per-type admin form is retired');
+    assert_true(!file_exists($updateInstalled . '/forms/admin-simple.json'), 'Updater apply: retired form leaves the forms directory');
+    assert_true(is_file($updateState . '/snapshots/' . $appliedUpdate['snapshot'] . '/retired/forms/admin-simple.json'), 'Updater apply: retired form is kept in the update snapshot');
+    assert_true(is_file($updateInstalled . '/forms/admin-product.json') && is_file($updateInstalled . '/forms/admin-page.json'), 'Updater apply: hand-written admin forms stay');
     assert_equals('1.1.0', $appliedUpdate['version'], 'Updater apply: target version is recorded');
     assert_equals("new core\n", file_get_contents($updateInstalled . '/src/Core.php'), 'Updater apply: changed core file is installed');
     assert_equals("new feature\n", file_get_contents($updateInstalled . '/src/NewFeature.php'), 'Updater apply: new file is installed');
