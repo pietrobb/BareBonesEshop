@@ -190,12 +190,7 @@ function pageProduct(): void {
     ?>
     <h1><?= $product ? 'Upraviť: ' . esc($product['name']) : 'Nový produkt' ?></h1>
     <div class="card">
-        <?php
-        $productValues = adminProductFormValues($product ?: null);
-        echo AdminForm::open('admin-product', 'admin.php?p=product&action=save' . ($product ? '&id=' . (int)$product['id'] : ''));
-        echo AdminForm::fields('admin-product', $productValues);
-        ?>
-
+        <?php ob_start(); ?>
         <div id="attr-section" style="border-top:2px solid #e2e8f0;margin-top:1rem;padding-top:1rem">
             <h3 style="margin-bottom:.75rem">Atribúty</h3>
             <p class="muted" style="color:#64748b;font-size:.85rem">Atribúty sa načítajú podľa zvolenej kategórie po uložení produktu.</p>
@@ -230,7 +225,11 @@ function pageProduct(): void {
                 <?php endif; ?>
             </div>
         </div>
-        <?= AdminForm::close('admin-product') ?>
+        <?php
+        $attrSection = (string)ob_get_clean();
+        echo AdminForm::render('admin-product', 'admin.php?p=product&action=save' . ($product ? '&id=' . (int)$product['id'] : ''),
+            adminProductFormValues($product ?: null), $attrSection);
+        ?>
 
         <?php if ($product): ?>
         <div class="card" style="margin-top:1rem">
@@ -555,8 +554,7 @@ function pageCmsEdit(): void {
     <h1><?= $id ? 'Upraviť stránku' : 'Nová stránka' ?></h1>
     <div class="card">
         <?php
-        echo AdminForm::open('admin-page', 'admin.php?p=page_edit&action=save' . ($id ? '&id=' . $id : ''));
-        echo AdminForm::fields('admin-page', [
+        echo AdminForm::render('admin-page', 'admin.php?p=page_edit&action=save' . ($id ? '&id=' . $id : ''), [
             'slug'     => $pg['slug'] ?? '',
             'title'    => $pg['title'] ?? '',
             'body'     => $pg['body'] ?? '',
@@ -566,7 +564,6 @@ function pageCmsEdit(): void {
             'sections' => $pg['sections'] ?? '[]',
             'status'   => $pg['status'] ?? 'active',
         ]);
-        echo AdminForm::close('admin-page');
         ?>
         <?php if ($id): ?>
         <div style="margin-top:1rem"><a href="admin.php?p=pages" class="btn">Späť</a></div>
@@ -1059,17 +1056,7 @@ function pageAttribute(): void {
     ?>
     <h1><?= $attr ? 'Upraviť: ' . esc($attr['name']) : 'Nový atribút' ?></h1>
     <div class="card">
-        <?php
-        echo AdminForm::open('admin-attribute', 'admin.php?p=attribute&action=save' . ($id ? '&id=' . $id : ''));
-        echo AdminForm::fields('admin-attribute', [
-            'name'          => $attr['name'] ?? '',
-            'slug'          => $attr['slug'] ?? '',
-            'type'          => $attr['type'] ?? 'enum',
-            'unit'          => $attr['unit'] ?? '',
-            'sort_order'    => (string)(int)($attr['sort_order'] ?? 0),
-        ]);
-        ?>
-
+        <?php ob_start(); ?>
         <div id="options-section">
             <h3 style="margin:1rem 0 .5rem">Hodnoty (pre enum)</h3>
             <div id="options-list">
@@ -1104,7 +1091,16 @@ function pageAttribute(): void {
             <?php endforeach; ?>
         </div>
 
-        <?= AdminForm::close('admin-attribute') ?>
+        <?php
+        $extraSections = (string)ob_get_clean();
+        echo AdminForm::render('admin-attribute', 'admin.php?p=attribute&action=save' . ($id ? '&id=' . $id : ''), [
+            'name'          => $attr['name'] ?? '',
+            'slug'          => $attr['slug'] ?? '',
+            'type'          => $attr['type'] ?? 'enum',
+            'unit'          => $attr['unit'] ?? '',
+            'sort_order'    => (string)(int)($attr['sort_order'] ?? 0),
+        ], $extraSections);
+        ?>
 
         <div style="margin-top:1rem">
             <a href="admin.php?p=attributes" class="btn">Späť</a>

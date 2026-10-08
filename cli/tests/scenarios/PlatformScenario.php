@@ -435,7 +435,7 @@ assert_equals(1, substr_count(strtolower($scriptBreakout), '</script>'), 'G6 JSO
 assert_true(!str_contains(strtolower($scriptBreakout), '<img'), 'G6 JSON embed: attacker HTML stays hex-escaped inside JSON');
 $productSourceG6 = file_get_contents(TEST_CLI_DIR . '/../product.php') ?: '';
 $jsonLdSourceG6 = file_get_contents(TEST_CLI_DIR . '/../src/JsonLd.php') ?: '';
-assert_true(substr_count($adminSourceG6, 'JSON_HEX_TAG') >= 2 && str_contains(AdminForm::fields('admin-attribute', ['name' => '"><script>x</script>']), 'value="&quot;&gt;&lt;script&gt;x&lt;/script&gt;"'),
+assert_true(substr_count($adminSourceG6, 'JSON_HEX_TAG') >= 2 && str_contains(AdminForm::render('admin-attribute', 'admin.php', ['name' => '"><script>x</script>']), 'value="&quot;&gt;&lt;script&gt;x&lt;/script&gt;"'),
     'G6 JSON embed: admin dynamic maps hex-escape tag delimiters and server-rendered form values are HTML-escaped');
 assert_true(str_contains($productSourceG6, "src/Entrypoints/Storefront.php"), 'G6 JSON embed: clean product route delegates JSON-LD rendering to the canonical storefront');
 assert_true(str_contains($jsonLdSourceG6, 'JSON_HEX_TAG'), 'G6 JSON embed: shared JSON-LD renderer hex-escapes tag delimiters');
@@ -1430,20 +1430,27 @@ assert_equals($rtBefore2, $rtRow('SA-BOOK2'), 'CSV round trip: untouched rows st
 assert_equals('-20 % "dnes", a\\b', Import::csvCellDecode("'-20 % \"dnes\", a\\b"), 'CSV import: the formula-guard apostrophe of the export is removed');
 assert_equals("'quoted", Import::csvCellDecode("'quoted"), 'CSV import: an ordinary leading apostrophe is kept');
 // Admin forms are rendered on the server from the BBF definitions, filled with the stored values.
-$afHtml = AdminForm::open('admin-product', 'admin.php?p=product&action=save&id=9301') . AdminForm::fields('admin-product', adminProductFormValues($rtRow('SA-BOOK'))) . AdminForm::close('admin-product');
+$afHtml = AdminForm::render('admin-product', 'admin.php?p=product&action=save&id=9301', adminProductFormValues($rtRow('SA-BOOK')), '<div id="attr-section"></div>');
 assert_true(str_contains($afHtml, 'action="admin.php?p=product&amp;action=save&amp;id=9301"') && str_contains($afHtml, 'enctype="multipart/form-data"')
-    && str_contains($afHtml, 'name="csrf_token"'), 'Admin product form: posts to the admin save handler with CSRF');
-assert_true(str_contains($afHtml, 'name="sku" required value="SA-BOOK"') && str_contains($afHtml, 'name="price" required min="0" value="2398"')
-    && str_contains($afHtml, 'name="stock" min="0" value="9"') && str_contains($afHtml, 'name="stock_low_threshold" min="0" value="10"')
-    && str_contains($afHtml, '&lt;p&gt;Popis knihy&lt;/p&gt;</textarea>') && str_contains($afHtml, 'value="novinka, sci-fi"'),
+    && str_contains($afHtml, 'id="form-admin-product"') && str_contains($afHtml, 'name="csrf_token"'), 'Admin product form: posts to the admin save handler with CSRF');
+$afValue = static fn(string $html, string $name): ?string => preg_match('/<(?:input|textarea)\b[^>]*\bname="' . preg_quote($name, '/') . '"[^>]*>/', $html, $m)
+    ? (preg_match('/\bvalue="([^"]*)"/', $m[0], $v) ? html_entity_decode($v[1], ENT_QUOTES | ENT_HTML5) : '') : null;
+assert_equals(['SA-BOOK', '2398', '9', '10', 'novinka, sci-fi'], array_map(static fn(string $n) => $afValue($afHtml, $n), ['sku', 'price', 'stock', 'stock_low_threshold', 'tags']),
     'Admin product form: opens with the stored values');
+assert_true(str_contains($afHtml, '&lt;p&gt;Popis knihy&lt;/p&gt;</textarea>') && str_contains($afHtml, 'id="field-sku"') && str_contains($afHtml, 'for="field-sku"'),
+    'Admin product form: textarea filled and field ids match the admin e2e selectors');
+assert_true(strpos($afHtml, '<div id="attr-section"></div>') < strpos($afHtml, '<button type="submit"') && strpos($afHtml, 'name="tags"') < strpos($afHtml, '<div id="attr-section"></div>'),
+    'Admin product form: the attribute section sits inside the form, after the BBF fields and before the submit button');
 $afAdminSource = entrypointSource('admin.php');
-assert_true(!str_contains($afAdminSource, 'bbf.js') && !str_contains($afAdminSource, 'BBF.render') && substr_count($afAdminSource, 'AdminForm::open(') === 4,
+assert_true(!str_contains($afAdminSource, 'bbf.js') && !str_contains($afAdminSource, 'BBF.render') && substr_count($afAdminSource, 'AdminForm::render(') === 4,
     'Admin forms: product, page, attribute and import post to admin.php instead of vendor/bbf/submit.php');
-$afImport = AdminForm::open('admin-import', 'admin.php?p=import&action=upload') . AdminForm::fields('admin-import', []);
+$afImport = AdminForm::render('admin-import', 'admin.php?p=import&action=upload');
 assert_true(str_contains($afImport, 'action="admin.php?p=import&amp;action=upload"') && str_contains($afImport, 'enctype="multipart/form-data"')
-    && str_contains($afImport, 'type="file" id="field-csv_file" name="csv_file" required accept=".csv"'), 'Admin import form: a real multipart upload to the import handler');
-assert_true(str_contains((string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Operations.php'), "AdminForm::open('admin-import', 'admin.php?p=import&action=upload')"), 'Admin import page: uses the server-rendered upload form');
+    && (bool)preg_match('/<input type="file" name="csv_file" id="field-csv_file"[^>]*\baccept="\.csv"[^>]*\brequired\b/', $afImport), 'Admin import form: a real multipart upload to the import handler');
+assert_true(str_contains((string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Operations.php'), "AdminForm::render('admin-import', 'admin.php?p=import&action=upload')"), 'Admin import page: uses the server-rendered upload form');
+$afStatus = AdminForm::render('admin-product', 'admin.php', ['status' => 'retired', 'category_id' => '999999']);
+assert_true(str_contains($afStatus, '<option value="retired" selected data-bbf-stored>') && str_contains($afStatus, '<option value="999999" selected data-bbf-stored>'),
+    'Admin product form: a stored status or category no longer in the list stays selected, so saving does not change it');
 foreach (['admin-product', 'admin-page', 'admin-attribute', 'admin-import'] as $afId) {
     assert_true(count(AdminForm::definition($afId)['fields']) > 0, "Admin forms: {$afId} definition renders");
 }

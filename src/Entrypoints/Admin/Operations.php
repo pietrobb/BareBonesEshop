@@ -116,9 +116,7 @@ function pageImport(): void {
     ?>
     <h1>Import CSV</h1>
     <div class="card">
-        <?= AdminForm::open('admin-import', 'admin.php?p=import&action=upload') ?>
-        <?= AdminForm::fields('admin-import', []) ?>
-        <?= AdminForm::close('admin-import') ?>
+        <?= AdminForm::render('admin-import', 'admin.php?p=import&action=upload') ?>
     </div>
     <div class="card">
         <h3>Šablóny</h3>
