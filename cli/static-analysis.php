@@ -106,7 +106,8 @@ foreach ($entrypointBudgets as $relative => $budget) {
 
 $architectureBudgets = [
     'src/Entrypoints/Admin.php' => ['lines' => 300, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 5],
-    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1250, 'functions' => 24, 'max_function_lines' => 240, 'coupling' => 12],
+    // +2 coupling: AdminForm (server-rendered BBF forms replace inline bbf.js) and Import (shared CSV price format).
+    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1250, 'functions' => 24, 'max_function_lines' => 240, 'coupling' => 14],
     'src/Entrypoints/Admin/Customers.php' => ['lines' => 300, 'functions' => 6, 'max_function_lines' => 140, 'coupling' => 8],
     'src/Entrypoints/Admin/Operations.php' => ['lines' => 760, 'functions' => 36, 'max_function_lines' => 180, 'coupling' => 18],
     'src/Entrypoints/Admin/Orders.php' => ['lines' => 850, 'functions' => 14, 'max_function_lines' => 300, 'coupling' => 15],
