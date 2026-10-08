@@ -3,17 +3,19 @@
 require_once __DIR__ . '/src/autoload.php';
 
 Security::headers();
+$path = (string)($_GET['path'] ?? parse_url((string)($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH));
+// Public aliases (/kosik, /pokladna) are real pages: the entry script handles its own methods,
+// so cart/checkout form POSTs must reach it.
+$aliasEntry = UrlAliases::dispatch($path);
+if ($aliasEntry !== null) {
+    require __DIR__ . '/' . $aliasEntry;
+    exit;
+}
+
 $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 if (!in_array($method, ['GET', 'HEAD'], true)) {
     http_response_code(405);
     header('Allow: GET, HEAD');
-    exit;
-}
-
-$path = (string)($_GET['path'] ?? parse_url((string)($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH));
-$aliasEntry = UrlAliases::dispatch($path);
-if ($aliasEntry !== null) {
-    require __DIR__ . '/' . $aliasEntry;
     exit;
 }
 try {

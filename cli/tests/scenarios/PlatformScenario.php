@@ -1451,3 +1451,58 @@ UrlAliases::setRules([]);
 assert_equals('/product/krvave-slnko', UrlAliases::outbound('/product/krvave-slnko'), 'URL aliases: no config keeps core URLs');
 assert_equals('/?page=product&slug=x', UrlAliases::outbound('/?page=product&slug=x'), 'URL aliases: no config keeps query routes untouched');
 UrlAliases::setRules(null);
+
+// Real HTTP through the .htaccess fallback (redirect.php?path=…): theme forms POST cart actions to the alias.
+echo "\n--- Test: URL aliases accept storefront POSTs over HTTP ---\n";
+$pdo->exec("INSERT INTO products (id, category_id, name, slug, sku, product_type, price, currency, status, stock) VALUES (9401, 1, 'Alias POST', 'alias-post', 'UA-POST', 'simple', 900, 'eur', 'active', 50)");
+$uaRoot = dirname(TEST_CLI_DIR);
+$uaRouter = test_fixture_path('alias-router') . '.php';
+$uaSessions = test_fixture_path('alias-sessions');
+mkdir($uaSessions);
+file_put_contents($uaRouter, '<?php
+require ' . var_export($uaRoot . '/src/autoload.php', true) . ';
+Db::init(new PDO(' . var_export('sqlite:' . $testDbPath, true) . ', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]));
+UrlAliases::setRules(["/kosik" => "/?page=cart"]);
+$uri = (string)parse_url($_SERVER["REQUEST_URI"], PHP_URL_PATH);
+if ($uri === "/__seed" || $uri === "/__cart") {
+    session_start();
+    if ($uri === "/__seed") { $_SESSION["csrf_token"] = "alias-csrf"; $_SESSION["cart"] = ["p_9401" => ["product_id" => 9401, "variant_id" => null, "qty" => 1]]; }
+    echo $uri === "/__seed" ? session_id() : json_encode($_SESSION["cart"] ?? null);
+    exit;
+}
+$_GET["path"] = $uri;
+chdir(' . var_export($uaRoot, true) . ');
+require ' . var_export($uaRoot . '/redirect.php', true) . ';
+');
+$uaProbe = stream_socket_server('tcp://127.0.0.1:0');
+$uaPort = (int)substr(strrchr((string)stream_socket_get_name($uaProbe, false), ':'), 1);
+fclose($uaProbe);
+$uaServer = proc_open([PHP_BINARY, '-d', 'session.save_path=' . $uaSessions, '-S', "127.0.0.1:{$uaPort}", $uaRouter],
+    [0 => ['pipe', 'r'], 1 => ['file', $uaSessions . '/server.log', 'a'], 2 => ['file', $uaSessions . '/server.log', 'a']], $uaPipes, $uaRoot);
+$uaHttp = static function (string $method, string $path, array $post = [], string $sid = '') use ($uaPort): array {
+    $headers = "Content-Type: application/x-www-form-urlencoded\r\n" . ($sid !== '' ? "Cookie: PHPSESSID={$sid}\r\n" : '');
+    $context = stream_context_create(['http' => ['method' => $method, 'header' => $headers, 'content' => http_build_query($post),
+        'follow_location' => 0, 'ignore_errors' => true, 'timeout' => 10]]);
+    $body = @file_get_contents("http://127.0.0.1:{$uaPort}{$path}", false, $context);
+    $responseHeaders = $http_response_header ?? [];
+    $location = '';
+    foreach ($responseHeaders as $line) if (stripos($line, 'Location:') === 0) $location = trim(substr($line, 9));
+    return ['status' => (int)(explode(' ', (string)($responseHeaders[0] ?? ''))[1] ?? 0), 'location' => $location, 'body' => (string)$body];
+};
+$uaSid = '';
+for ($uaTry = 0; $uaTry < 50 && $uaSid === ''; $uaTry++) {
+    usleep(100000);
+    $uaSid = $uaHttp('GET', '/__seed')['body'];
+}
+assert_true($uaSid !== '', 'URL aliases HTTP: built-in server with the .htaccess fallback router is up');
+$uaUpdate = $uaHttp('POST', '/kosik', ['cart_action' => 'update', 'cart_key' => 'p_9401', 'quantity' => 3, 'csrf_token' => 'alias-csrf', 'redirect' => '/kosik'], $uaSid);
+assert_equals(302, $uaUpdate['status'], 'URL aliases HTTP: POST cart_action=update to the localized cart alias is served (not 405)');
+assert_true(str_ends_with($uaUpdate['location'], '/kosik'), 'URL aliases HTTP: cart form POST redirects back to the cart alias');
+assert_equals(3, (int)(json_decode($uaHttp('GET', '/__cart', [], $uaSid)['body'], true)['p_9401']['qty'] ?? 0), 'URL aliases HTTP: the cart quantity was changed');
+assert_equals(405, $uaHttp('POST', '/nic-take', ['x' => '1'], $uaSid)['status'], 'URL aliases HTTP: POST to an unknown path is still 405');
+proc_terminate($uaServer);
+proc_close($uaServer);
+@unlink($uaRouter);
+foreach ((array)glob($uaSessions . '/*') as $uaFile) @unlink($uaFile);
+@rmdir($uaSessions);
+$pdo->exec("DELETE FROM products WHERE id = 9401");

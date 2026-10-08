@@ -27,6 +27,17 @@
 - `cli/worker.php` `handleStockAlert` now delegates to `StockAlerts::process()`; the old
   `products.stock` scan that only wrote `logs/stock-alerts.log` is removed. `Products::lowStockSummary()`
   is replaced by `StockAlerts::summary()`.
+- Shop-owned URL aliases (config `url_aliases`, `UrlAliases`) brought over from `aeon/candidate`
+  (bb758f1, 7d2c940): inbound dispatch in `redirect.php`, outbound links, 301 from core routes.
+
+### Fixed
+- `redirect.php` answered **405** (`Allow: GET, HEAD`) to every POST on a public alias
+  (`/kosik`, `/pokladna`…), because the method check ran before `UrlAliases::dispatch()`. Themes
+  whose cart uses a plain `<form method="post" action="{{cart_url}}">` showed a bare 405 page.
+  Aliases are now dispatched first and the entry script handles its own methods; 405 stays only
+  for admin redirects and 404s. Regression test drives the fallback router over real HTTP
+  (`php -S`): POST `cart_action=update` with CSRF on `/kosik` → 302 back to the cart with the new
+  quantity; POST on an unknown path → 405.
 
 ### Migration
 - `20261008090000_stock_alerts` (idempotent): `products.stock_low_threshold`,
