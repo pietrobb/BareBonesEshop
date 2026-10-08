@@ -430,10 +430,18 @@ class Security {
             $pass = (string)($isFormLogin ? ($_POST['admin_password'] ?? '') : ($_SERVER['PHP_AUTH_PW'] ?? ''));
             $mfa = (string)($isFormLogin ? ($_POST['admin_mfa'] ?? '') : ($_SERVER['HTTP_X_ADMIN_MFA'] ?? ''));
             if ($isFormLogin && !self::csrfValidate()) self::renderAdminLogin('Invalid or expired login form.');
-            if ($user !== '' && $pass !== ''
-                && self::rateLimit('admin_db_login_account_' . hash('sha256', strtolower($user)), 10, 900, false)) {
-                $identity = AdminIdentity::authenticate($user, $pass, $mfa, self::clientIp(), (string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
+            if ($user !== '' && $pass !== '') {
+                $ip = self::clientIp();
+                $throttle = new AdminLoginThrottle(self::rateDb());
+                $retryAfter = $throttle->retryAfter($user, $ip);
+                if ($retryAfter > 0) {
+                    header('Retry-After: ' . $retryAfter);
+                    self::renderAdminLogin('Too many login attempts. Try again later.', 429);
+                }
+                $identity = AdminIdentity::authenticate($user, $pass, $mfa, $ip, (string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
+                if ($identity === null) $throttle->recordFailure($user, $ip);
                 if ($identity !== null) {
+                    $throttle->recordSuccess($user, $ip);
                     session_regenerate_id(true);
                     $_SESSION['admin_authenticated'] = true;
                     $_SESSION['admin_identity_token'] = $identity['token'];
@@ -455,27 +463,13 @@ class Security {
 
         $user = $_SERVER['PHP_AUTH_USER'] ?? '';
         $pass = $_SERVER['PHP_AUTH_PW'] ?? '';
-        if ($user !== '' && !self::rateLimit('admin_login_account_' . hash('sha256', strtolower($user)), 10, 900, false)) {
-            exit('Too many login attempts. Try again later.');
-        }
-
         $ip = self::clientIp();
-        $cacheDir = self::privateCacheDir($cfg);
-        $rateDir = $cacheDir . '/rate';
-        if (!is_dir($rateDir) && !mkdir($rateDir, 0750, true) && !is_dir($rateDir)) {
-            throw new RuntimeException("Cannot create private rate-limit directory: {$rateDir}");
-        }
-
-        $lockFile = $rateDir . '/admin_' . md5($ip);
-        $lockData = file_exists($lockFile) ? json_decode(file_get_contents($lockFile), true) : null;
-
-        if ($lockData && $lockData['failures'] >= 3) {
-            $lockoutSec = min(300, (int)pow(2, $lockData['failures'] - 1));
-            if (time() - $lockData['last_attempt'] < $lockoutSec) {
-                http_response_code(429);
-                header('Retry-After: ' . $lockoutSec);
-                exit('Too many login attempts. Try again later.');
-            }
+        $throttle = new AdminLoginThrottle(self::rateDb());
+        $retryAfter = $user !== '' ? $throttle->retryAfter($user, $ip) : 0;
+        if ($retryAfter > 0) {
+            http_response_code(429);
+            header('Retry-After: ' . $retryAfter);
+            exit('Too many login attempts. Try again later.');
         }
 
         $authenticated = false;
@@ -502,7 +496,7 @@ class Security {
         }
 
         if ($authenticated) {
-            if (file_exists($lockFile)) unlink($lockFile);
+            $throttle->recordSuccess($user, $ip);
             session_regenerate_id(true);
             $_SESSION['admin_authenticated'] = true;
             $_SESSION['admin_user'] = $user;
@@ -520,10 +514,7 @@ class Security {
             }
         }
 
-        $lockData = $lockData ?? ['failures' => 0];
-        $lockData['failures']++;
-        $lockData['last_attempt'] = time();
-        file_put_contents($lockFile, json_encode($lockData), LOCK_EX);
+        if ($user !== '') $throttle->recordFailure($user, $ip);
 
         header('WWW-Authenticate: Basic realm="Shop Admin"');
         http_response_code(401);
@@ -539,9 +530,9 @@ class Security {
         );
     }
 
-    private static function renderAdminLogin(?string $error = null): never {
+    private static function renderAdminLogin(?string $error = null, int $status = 0): never {
         self::headers();
-        http_response_code($error === null ? 401 : 403);
+        http_response_code($status ?: ($error === null ? 401 : 403));
         $returnTo = self::safeLocalPath((string)($_SERVER['REQUEST_URI'] ?? '/admin.php'), '/admin.php');
         $csrf = self::csrfToken();
         $nonce = self::cspNonce();

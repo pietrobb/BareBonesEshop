@@ -127,7 +127,10 @@ class AdminIdentity {
         $validPassword = password_verify($password, (string)($account['password_hash'] ?? $dummyHash));
         $locked = $account && $account['locked_until'] !== null && strtotime((string)$account['locked_until']) > time();
         if (!$account || $account['status'] !== 'active' || $locked || !$validPassword) {
-            if ($account && !$locked) self::recordFailure((int)$account['id']);
+            // Wrong passwords must not lock the account: anyone could lock the
+            // owner out. Password guessing is throttled per IP by AdminLoginThrottle;
+            // the account lock below only follows MFA failures with a valid password.
+            if ($account && !$locked) Logger::warning('admin.login_failed', ['account_id' => (int)$account['id'], 'locked_until' => null]);
             return null;
         }
 

@@ -87,7 +87,7 @@ foreach (['db_sqlite_path', 'private_cache_dir', 'jobs_dir', 'invoice_storage_di
 }
 $securitySource = (string)file_get_contents(TEST_CLI_DIR . '/../src/Security.php');
 assert_true(str_contains($securitySource, "['private_cache_dir']"), 'Security: private cache is configurable');
-assert_true(substr_count($securitySource, 'self::privateCacheDir($cfg)') >= 2, 'Security: rate-limit DB and admin locks use validated private cache');
+assert_true(str_contains($securitySource, 'self::privateCacheDir($cfg)') && substr_count($securitySource, 'new AdminLoginThrottle(self::rateDb())') === 2, 'Security: rate-limit DB and admin login throttle use validated private cache');
 assert_true(!str_contains($securitySource, "['cache_dir'] ?? __DIR__ . '/../cache'"), 'Security: public catalog cache is not used for abuse-control state');
 
 // ============================================================
@@ -844,6 +844,47 @@ assert_true(Security::rateLimit($rateKey, 1, 3600, false), 'G4: first global sub
 $_SERVER['REMOTE_ADDR'] = '192.0.2.11';
 assert_true(!Security::rateLimit($rateKey, 1, 3600, false), 'G4: global subject throttle cannot be bypassed by changing IP');
 
+// Admin login throttle: brute force is limited, but foreign attempts cannot lock out the owner.
+$throttleNow = 1_800_000_000;
+$throttle = new AdminLoginThrottle(new PDO('sqlite::memory:'), static function () use (&$throttleNow): int { return $throttleNow; });
+$attempt = static function (string $account, string $ip) use ($throttle): bool {
+    if ($throttle->retryAfter($account, $ip) > 0) return false;
+    $throttle->recordFailure($account, $ip);
+    return true;
+};
+$allowedFromA = 0;
+for ($i = 0; $i < 12; $i++) $allowedFromA += $attempt('Admin', '198.51.100.1') ? 1 : 0;
+assert_equals(AdminLoginThrottle::PAIR_LIMIT, $allowedFromA, 'Admin throttle (b): IP A gets only PAIR_LIMIT wrong guesses');
+assert_true($throttle->retryAfter('admin', '198.51.100.1') > 0, 'Admin throttle (b): IP A is blocked after exceeding the limit (username case-insensitive)');
+assert_equals(0, $throttle->retryAfter('admin', '198.51.100.2'), 'Admin throttle (a): 12 attempts from IP A do not block the owner on IP B');
+$throttle->recordSuccess('admin', '198.51.100.2');
+$throttleNow += 89;
+assert_true($throttle->retryAfter('admin', '198.51.100.1') > 0, 'Admin throttle (d): IP A still blocked after 89 s');
+for ($i = 0; $i < 10; $i++) {
+    $attempt('admin', '198.51.100.1');
+    $throttleNow += 90;
+}
+assert_equals(0, $throttle->retryAfter('admin', '198.51.100.1'), 'Admin throttle (d): rejected attempts every 90 s do not extend the block past the window');
+for ($i = 0; $i < 4; $i++) $attempt('admin', '198.51.100.3');
+$throttle->recordSuccess('admin', '198.51.100.3');
+$allowedAfterSuccess = 0;
+for ($i = 0; $i < 6; $i++) $allowedAfterSuccess += $attempt('admin', '198.51.100.3') ? 1 : 0;
+assert_equals(AdminLoginThrottle::PAIR_LIMIT, $allowedAfterSuccess, 'Admin throttle: a success resets the IP counter for that account');
+$sprayed = 0;
+for ($i = 0; $i < 30; $i++) $sprayed += $attempt('user' . $i, '198.51.100.4') ? 1 : 0;
+assert_equals(AdminLoginThrottle::IP_LIMIT, $sprayed, 'Admin throttle: one IP cannot spray more than IP_LIMIT usernames');
+$throttleNow += AdminLoginThrottle::WINDOW_SECONDS + 1;
+$distributed = 0;
+for ($i = 0; $i < 60; $i++) {
+    for ($j = 0; $j < AdminLoginThrottle::PAIR_LIMIT; $j++) $distributed += $attempt('admin', '10.66.' . $i . '.1') ? 1 : 0;
+}
+assert_equals(AdminLoginThrottle::ACCOUNT_LIMIT, $distributed, 'Admin throttle (c): distributed guessing from 60 IPs stops at ACCOUNT_LIMIT');
+assert_true($throttle->retryAfter('admin', '10.77.0.1') > 0, 'Admin throttle (c): a fresh untrusted IP is blocked during a distributed attack');
+assert_equals(0, $throttle->retryAfter('admin', '198.51.100.2'), 'Admin throttle (c): the owner IP that logged in before is not locked out');
+$throttleNow += AdminLoginThrottle::WINDOW_SECONDS + 1;
+assert_equals(0, $throttle->retryAfter('admin', '10.77.0.1'), 'Admin throttle (c): the account ceiling expires with the window');
+assert_true(!str_contains($securitySource, "rateLimit('admin_") && !str_contains($securitySource, "'/admin_' . md5("), 'Admin throttle: no per-account hard lock or separate file IP lock remains in Security');
+
 // ============================================================
 // TEST 9: Category Tree
 // ============================================================
@@ -1298,6 +1339,19 @@ $recoveryLogin = AdminIdentity::authenticate('g9-operator', 'Rotated-password-56
 assert_true($recoveryLogin !== null, 'G9 identity: recovery code authenticates once');
 AdminIdentity::revokeSession($recoveryLogin['session_id']);
 assert_true(with_expected_structured_log('admin.login_failed', static fn() => AdminIdentity::authenticate('g9-operator', 'Test-password-1234', $enrollment['recovery_codes'][0], '127.0.0.1', 'G9 Recovery Device')) === null, 'G9 identity: used recovery code cannot replay');
+for ($i = 0; $i < 8; $i++) {
+    with_expected_structured_log('admin.login_failed', static fn() => AdminIdentity::authenticate('g9-operator', 'Wrong-password-' . $i, '', '198.51.100.66', 'Attacker'));
+}
+$lockedUntil = $pdo->query("SELECT locked_until FROM admin_accounts WHERE id={$adminId}")->fetchColumn();
+assert_true($lockedUntil === null, 'Admin lockout DoS: wrong passwords do not lock the DB account');
+$login = AdminIdentity::authenticate('g9-operator', 'Rotated-password-5678', Totp::code($enrollment['secret']), '203.0.113.7', 'G9 Test Device');
+assert_true($login !== null, 'Admin lockout DoS: owner logs in after foreign wrong-password attempts');
+AdminIdentity::revokeSession($login['session_id']);
+for ($i = 0; $i < 5; $i++) {
+    with_expected_structured_log('admin.login_failed', static fn() => AdminIdentity::authenticate('g9-operator', 'Rotated-password-5678', '000000', '198.51.100.66', 'Attacker'));
+}
+$lockedUntil = $pdo->query("SELECT locked_until FROM admin_accounts WHERE id={$adminId}")->fetchColumn();
+assert_true($lockedUntil !== null, 'Admin lockout DoS: MFA failures with a valid password still lock the account');
 $pdo->prepare("UPDATE queue_jobs SET store_id='other', state='failed', last_error='other store' WHERE id=:id")->execute([':id' => $dbJobHigh]);
 $operationsG9 = OperationalDashboard::summary('default');
 assert_equals('database', $operationsG9['queue_backend'], 'G9 dashboard: reports active queue backend');
