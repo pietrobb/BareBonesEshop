@@ -350,8 +350,6 @@ Keď spustíš `php cli/schema-build.php`:
 catalog.json
     │
     ├──→ db/generated-schema.sql     (CREATE TABLE, CREATE INDEX)
-    ├──→ forms/admin-clothing.json   (BBF form pre admin editáciu)
-    ├──→ forms/admin-electronics.json
     ├──→ import/clothing-template.csv
     ├──→ import/electronics-template.csv
     └──→ cache/filter-config.json    (frontend filter definície)
@@ -1672,10 +1670,7 @@ barebone-shop/
 │
 ├── admin/
 │   ├── index.php                 # Admin panel
-│   ├── admin.js                  # Admin frontend
-│   └── forms/                    # Auto-generované BBF forms per product type
-│       ├── admin-clothing.json
-│       └── admin-electronics.json
+│   └── admin.js                  # Admin frontend
 │
 ├── lang/                         # UI preklady (BBF systém)
 │   ├── sk.php
