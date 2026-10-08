@@ -42,6 +42,20 @@ test('admin product form opens filled and saves stock and alert thresholds', asy
   expect(pick(unchanged.row, [...kept, 'stock', 'updated_at'])).toEqual(pick(before.row, [...kept, 'stock', 'updated_at']));
   expect(unchanged.movements.length).toBe(before.movements.length);
 
+  // BBF validates the save on the server: a status outside the list is refused and nothing is stored.
+  await form.locator('#field-name').fill('E2E neuložený názov');
+  await form.locator('#field-status').evaluate(select => {
+    select.add(new Option('forged', 'forged'));
+    select.value = 'forged';
+  });
+  await form.locator('button[type="submit"]').click();
+  await expect(page.locator('.flash-err')).toContainText('Produkt nebol uložený');
+  await expect(form.locator('#field-status-error')).not.toBeEmpty();
+  await expect(form.locator('#field-status')).toHaveValue(before.row.status);
+  await expect(form.locator('#field-name')).toHaveValue('E2E neuložený názov');
+  expect(pick(db('product', sku).row, [...kept, 'stock', 'updated_at'])).toEqual(pick(before.row, [...kept, 'stock', 'updated_at']));
+  await form.locator('#field-name').fill(before.row.name);
+
   const stock = Number(before.row.stock) + 3;
   await form.locator('#field-stock').fill(String(stock));
   await form.locator('#field-stock_low_threshold').fill('7');

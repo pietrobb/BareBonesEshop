@@ -94,27 +94,48 @@ function pageProducts(): void {
     </div>
     <?php
 }
-/** Stored product → values of the admin-product form fields (prices in cents, lists one per line / comma-separated). */
-function adminProductFormValues(?array $product): array {
-    $productTags = json_decode((string)($product['tags'] ?? ''), true);
-    return [
-        'sku'           => $product['sku'] ?? '',
-        'name'          => $product['name'] ?? '',
-        'slug'          => $product['slug'] ?? '',
-        'category_id'   => (string)($product['category_id'] ?? ''),
-        'product_type'  => $product['product_type'] ?? 'simple',
-        'price'         => (string)(int)($product['price'] ?? 0),
-        'compare_price' => isset($product['compare_price']) ? (string)(int)$product['compare_price'] : '',
-        'stock'         => (string)(int)($product['stock'] ?? 0),
-        'status'        => $product['status'] ?? 'active',
-        'summary'       => $product['summary'] ?? '',
-        'description'   => $product['description'] ?? '',
-        'images'        => implode("\n", json_decode($product['images'] ?? '[]', true) ?: []),
-        'weight_g'      => (string)(int)($product['weight_g'] ?? 0),
-        'stock_low_threshold'      => isset($product['stock_low_threshold']) ? (string)(int)$product['stock_low_threshold'] : '',
-        'stock_critical_threshold' => isset($product['stock_critical_threshold']) ? (string)(int)$product['stock_critical_threshold'] : '',
-        'tags'          => is_array($productTags) ? implode(', ', $productTags) : (string)($product['tags'] ?? ''),
-    ];
+/**
+ * Stored record (null = new) → values of the admin form's fields, shown on edit and given to the save's validation
+ * (prices in cents, product lists one per line / comma-separated).
+ */
+function adminFormValues(string $formId, ?array $row): array {
+    return match ($formId) {
+        'admin-product' => [
+            'sku'           => $row['sku'] ?? '',
+            'name'          => $row['name'] ?? '',
+            'slug'          => $row['slug'] ?? '',
+            'category_id'   => (string)($row['category_id'] ?? ''),
+            'product_type'  => $row['product_type'] ?? 'simple',
+            'price'         => (string)(int)($row['price'] ?? 0),
+            'compare_price' => isset($row['compare_price']) ? (string)(int)$row['compare_price'] : '',
+            'stock'         => (string)(int)($row['stock'] ?? 0),
+            'status'        => $row['status'] ?? 'active',
+            'summary'       => $row['summary'] ?? '',
+            'description'   => $row['description'] ?? '',
+            'images'        => implode("\n", json_decode($row['images'] ?? '[]', true) ?: []),
+            'weight_g'      => (string)(int)($row['weight_g'] ?? 0),
+            'stock_low_threshold'      => isset($row['stock_low_threshold']) ? (string)(int)$row['stock_low_threshold'] : '',
+            'stock_critical_threshold' => isset($row['stock_critical_threshold']) ? (string)(int)$row['stock_critical_threshold'] : '',
+            'tags'          => is_array($tags = json_decode((string)($row['tags'] ?? ''), true)) ? implode(', ', $tags) : (string)($row['tags'] ?? ''),
+        ],
+        'admin-page' => [
+            'slug'      => $row['slug'] ?? '',
+            'title'     => $row['title'] ?? '',
+            'body'      => $row['body'] ?? '',
+            'page_type' => $row['page_type'] ?? 'content',
+            'template'  => $row['template'] ?? 'cms',
+            'layout'    => $row['layout'] ?? 'storefront',
+            'sections'  => $row['sections'] ?? '[]',
+            'status'    => $row['status'] ?? 'active',
+        ],
+        'admin-attribute' => [
+            'name'       => $row['name'] ?? '',
+            'slug'       => $row['slug'] ?? '',
+            'type'       => $row['type'] ?? 'enum',
+            'unit'       => $row['unit'] ?? '',
+            'sort_order' => (string)(int)($row['sort_order'] ?? 0),
+        ],
+    };
 }
 function pageProduct(): void {
     $db = Db::get();
@@ -228,7 +249,7 @@ function pageProduct(): void {
         <?php
         $attrSection = (string)ob_get_clean();
         echo AdminForm::render('admin-product', 'admin.php?p=product&action=save' . ($product ? '&id=' . (int)$product['id'] : ''),
-            adminProductFormValues($product ?: null), $attrSection);
+            adminFormValues('admin-product', $product ?: null), $attrSection);
         ?>
 
         <?php if ($product): ?>
@@ -554,16 +575,7 @@ function pageCmsEdit(): void {
     <h1><?= $id ? 'Upraviť stránku' : 'Nová stránka' ?></h1>
     <div class="card">
         <?php
-        echo AdminForm::render('admin-page', 'admin.php?p=page_edit&action=save' . ($id ? '&id=' . $id : ''), [
-            'slug'     => $pg['slug'] ?? '',
-            'title'    => $pg['title'] ?? '',
-            'body'     => $pg['body'] ?? '',
-            'page_type' => $pg['page_type'] ?? 'content',
-            'template' => $pg['template'] ?? 'cms',
-            'layout'   => $pg['layout'] ?? 'storefront',
-            'sections' => $pg['sections'] ?? '[]',
-            'status'   => $pg['status'] ?? 'active',
-        ]);
+        echo AdminForm::render('admin-page', 'admin.php?p=page_edit&action=save' . ($id ? '&id=' . $id : ''), adminFormValues('admin-page', $pg ?: null));
         ?>
         <?php if ($id): ?>
         <div style="margin-top:1rem"><a href="admin.php?p=pages" class="btn">Späť</a></div>
@@ -575,27 +587,39 @@ function handleCmsPageSave(): void {
     $db = Db::get();
     $id = Security::int($_GET['id'] ?? 0);
     $now = Db::isSqlite() ? "datetime('now')" : 'NOW()';
-    $slug = Security::slug($_POST['slug'] ?? '');
-    $title = trim($_POST['title'] ?? '');
-    $body = Security::sanitizeRichHtml((string)($_POST['body'] ?? ''));
+    $old = null;
+    if ($id) {
+        $stmt = $db->prepare("SELECT * FROM pages WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        $old = $stmt->fetch() ?: null;
+    }
+    $form = AdminForm::validate('admin-page', $old ? adminFormValues('admin-page', $old) : []);
+    if ($form === null) {
+        setFlash('err', 'Stránka nebola uložená: ' . AdminForm::firstError());
+        header("Location: admin.php?p=page_edit&id={$id}");
+        exit;
+    }
+    $slug = Security::slug($form['slug']);
+    $title = $form['title'];
+    $body = Security::sanitizeRichHtml($form['body']);
     // Theme codes keep underscores (e.g. a "full_width" layout), so they are validated, not slugified.
-    $code = static function (string $field, string $default): string {
-        $value = strtolower(trim((string)($_POST[$field] ?? '')));
+    $code = static function (string $field, string $default) use ($form): string {
+        $value = strtolower($form[$field]);
         return preg_match('/^[a-z0-9][a-z0-9_-]{0,79}$/', $value) ? $value : $default;
     };
     $pageType = $code('page_type', 'content');
     $template = $code('template', 'cms');
     $layout = $code('layout', 'storefront');
     try {
-        $sections = ContentService::sanitizeSections($_POST['sections'] ?? '[]');
+        $sections = ContentService::sanitizeSections($form['sections'] !== '' ? $form['sections'] : '[]');
     } catch (JsonException | InvalidArgumentException $e) {
         setFlash('err', 'Sekcie musia byť platné bezpečné JSON pole.');
         header("Location: admin.php?p=page_edit&id={$id}");
         exit;
     }
-    $status = in_array($_POST['status'] ?? '', ['active', 'draft']) ? $_POST['status'] : 'active';
+    $status = $form['status'] !== '' ? $form['status'] : 'active';
 
-    if (!$slug || !$title) {
+    if (!$slug) {
         setFlash('err', 'Slug a názov sú povinné.');
         header("Location: admin.php?p=page_edit&id={$id}");
         exit;
@@ -748,66 +772,56 @@ function handleProductSave(): void {
         exit;
     }
 
-    $allowedStatuses = ['active', 'draft', 'archived'];
-    $catalogFile = dirname(__DIR__, 3) . '/catalog.json';
-    $catalogTypes = file_exists($catalogFile) ? array_keys(json_decode(file_get_contents($catalogFile), true)['product_types'] ?? []) : [];
-    $allowedTypes = array_unique(array_merge(['simple'], $catalogTypes));
-    // A stored value outside today's lists (e.g. a type no longer in catalog.json) survives an unchanged save.
-    $postedStatus = (string)($_POST['status'] ?? '');
-    $postedType = (string)($_POST['product_type'] ?? '');
-    $status = in_array($postedStatus, $allowedStatuses, true) || ($old && $postedStatus !== '' && $postedStatus === (string)$old['status']) ? $postedStatus : 'active';
-    $productType = in_array($postedType, $allowedTypes, true) || ($old && $postedType !== '' && $postedType === (string)$old['product_type']) ? $postedType : 'simple';
+    // BBF checks required fields, numbers, the select lists (a stored value outside today's lists survives an
+    // unchanged save) and the uploaded image's size, extension and content.
+    $form = AdminForm::validate('admin-product', $old ? adminFormValues('admin-product', $old) : []);
+    if ($form === null) {
+        setFlash('err', 'Produkt nebol uložený: ' . AdminForm::firstError());
+        header("Location: admin.php?p=product&id={$id}");
+        exit;
+    }
+    $nullableCount = static fn(string $v): ?int => $v === '' ? null : max(0, Security::int($v));
 
     $data = [
-        ':sku'           => trim($_POST['sku'] ?? ''),
-        ':name'          => trim($_POST['name'] ?? ''),
-        ':slug'          => Security::slug($_POST['slug'] ?? $_POST['name'] ?? ''),
-        ':product_type'  => $productType,
-        ':category_id'   => Security::int($_POST['category_id'] ?? 0),
-        ':price'         => Security::int($_POST['price'] ?? 0),
-        ':compare_price' => Security::int($_POST['compare_price'] ?? 0) ?: null,
-        ':stock'         => Security::int($_POST['stock'] ?? 0),
-        ':status'        => $status,
-        ':summary'       => trim($_POST['summary'] ?? ''),
-        ':description'   => Security::sanitizeRichHtml((string)($_POST['description'] ?? '')),
-        ':weight_g'      => Security::int($_POST['weight_g'] ?? 0),
+        ':sku'           => $form['sku'],
+        ':name'          => $form['name'],
+        ':slug'          => Security::slug($form['slug']),
+        ':product_type'  => $form['product_type'] !== '' ? $form['product_type'] : 'simple',
+        ':category_id'   => Security::int($form['category_id']),
+        ':price'         => Security::int($form['price']),
+        ':compare_price' => Security::int($form['compare_price']) ?: null,
+        ':stock'         => Security::int($form['stock']),
+        ':status'        => $form['status'] !== '' ? $form['status'] : 'active',
+        ':summary'       => $form['summary'],
+        ':description'   => Security::sanitizeRichHtml($form['description']),
+        ':weight_g'      => Security::int($form['weight_g']),
         // Empty per-product alert threshold = use the stock_alerts config default.
-        ':stock_low_threshold'      => trim((string)($_POST['stock_low_threshold'] ?? '')) === '' ? null : max(0, Security::int($_POST['stock_low_threshold'])),
-        ':stock_critical_threshold' => trim((string)($_POST['stock_critical_threshold'] ?? '')) === '' ? null : max(0, Security::int($_POST['stock_critical_threshold'])),
+        ':stock_low_threshold'      => $nullableCount($form['stock_low_threshold']),
+        ':stock_critical_threshold' => $nullableCount($form['stock_critical_threshold']),
     ];
+    $productType = $data[':product_type'];
 
-    // Handle images
-    $images = [];
-    $imagesText = trim($_POST['images'] ?? '');
-    if ($imagesText) {
-        $images = array_values(array_filter(array_map('trim', explode("\n", $imagesText)), 'strlen'));
-    }
+    $images = array_values(array_filter(array_map('trim', explode("\n", $form['images'])), 'strlen'));
 
-    // Handle file upload
-    if (isset($_FILES['image_upload']) && ($_FILES['image_upload']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
-        $upload = $_FILES['image_upload'];
-        $tmpName = (string)($upload['tmp_name'] ?? '');
-        $actualSize = $tmpName !== '' && is_file($tmpName) ? filesize($tmpName) : false;
-        $allowedMime = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
-        $basicValid = ($upload['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK
-            && is_uploaded_file($tmpName)
-            && $actualSize !== false && $actualSize > 0 && $actualSize <= 10 * 1024 * 1024;
-        $mime = $basicValid ? (new finfo(FILEINFO_MIME_TYPE))->file($tmpName) : false;
-        $dimensions = $basicValid && isset($allowedMime[$mime]) ? @getimagesize($tmpName) : false;
+    $upload = $form['image_upload']['action'] === 'replace' ? $form['image_upload']['files'][0] : null;
+    if ($upload) {
+        $tmpName = $upload['tmp_name'];
+        $dimensions = @getimagesize($tmpName);
         $validDimensions = is_array($dimensions)
             && ($dimensions[0] ?? 0) > 0 && ($dimensions[1] ?? 0) > 0
             && ($dimensions[0] ?? 0) <= 12000 && ($dimensions[1] ?? 0) <= 12000
             && ($dimensions[0] * $dimensions[1]) <= 40000000;
-        if (!$basicValid || !isset($allowedMime[$mime]) || !$validDimensions) {
-            setFlash('err', 'Obrázok je neplatný, príliš veľký alebo má nepodporovaný formát.');
+        if (!$validDimensions) {
+            setFlash('err', 'Obrázok je neplatný alebo má príliš veľké rozmery.');
             header("Location: admin.php?p=product&id={$id}");
             exit;
         }
 
+        $extension = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'][$upload['type']];
         $safeSku = preg_replace('/[^a-zA-Z0-9_-]/', '_', $data[':sku'] ?: bin2hex(random_bytes(6)));
-        $filename = 'products/' . $safeSku . '-' . time() . '.' . $allowedMime[$mime];
+        $filename = 'products/' . $safeSku . '-' . time() . '.' . $extension;
         $imageBytes = file_get_contents($tmpName);
-        if ($imageBytes === false || strlen($imageBytes) !== $actualSize) {
+        if ($imageBytes === false || strlen($imageBytes) !== $upload['size']) {
             throw new RuntimeException('Uploaded image could not be read completely');
         }
         $storage = Adapters::storage();
@@ -816,7 +830,7 @@ function handleProductSave(): void {
         JobQueue::push('image_resize', ['path' => $filename], 3);
     }
     $data[':images'] = json_encode($images);
-    $data[':tags'] = json_encode(array_values(array_filter(array_map('trim', explode(',', (string)($_POST['tags'] ?? ''))), 'strlen')));
+    $data[':tags'] = json_encode(array_values(array_filter(array_map('trim', explode(',', $form['tags'])), 'strlen')));
 
     // Validate slug uniqueness
     $slug = $data[':slug'];
@@ -876,7 +890,7 @@ function handleProductSave(): void {
     $attrValues = $_POST['attr'] ?? [];
     if (!empty($attrValues) && $id) {
         // Get attribute definitions for mapping name → type/unit
-        $catId = Security::int($_POST['category_id'] ?? 0);
+        $catId = $data[':category_id'];
         $defStmt = $db->prepare("
             SELECT ad.name, ad.type, ad.unit
             FROM attribute_definitions ad
@@ -1093,13 +1107,8 @@ function pageAttribute(): void {
 
         <?php
         $extraSections = (string)ob_get_clean();
-        echo AdminForm::render('admin-attribute', 'admin.php?p=attribute&action=save' . ($id ? '&id=' . $id : ''), [
-            'name'          => $attr['name'] ?? '',
-            'slug'          => $attr['slug'] ?? '',
-            'type'          => $attr['type'] ?? 'enum',
-            'unit'          => $attr['unit'] ?? '',
-            'sort_order'    => (string)(int)($attr['sort_order'] ?? 0),
-        ], $extraSections);
+        echo AdminForm::render('admin-attribute', 'admin.php?p=attribute&action=save' . ($id ? '&id=' . $id : ''),
+            adminFormValues('admin-attribute', $attr ?: null), $extraSections);
         ?>
 
         <div style="margin-top:1rem">
@@ -1146,13 +1155,25 @@ function pageAttribute(): void {
 function handleAttributeSave(): void {
     $db = Db::get();
     $id = Security::int($_GET['id'] ?? 0);
-    $name = trim($_POST['name'] ?? '');
-    $slug = Security::slug($_POST['slug'] ?? $name);
-    $type = in_array($_POST['type'] ?? '', ['enum', 'number', 'boolean']) ? $_POST['type'] : 'enum';
-    $unit = trim($_POST['unit'] ?? '');
-    $sortOrder = Security::int($_POST['sort_order'] ?? 0);
+    $old = null;
+    if ($id) {
+        $stmt = $db->prepare("SELECT * FROM attribute_definitions WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        $old = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+    $form = AdminForm::validate('admin-attribute', $old ? adminFormValues('admin-attribute', $old) : []);
+    if ($form === null) {
+        setFlash('err', 'Atribút nebol uložený: ' . AdminForm::firstError());
+        header("Location: admin.php?p=attribute" . ($id ? "&id={$id}" : ''));
+        exit;
+    }
+    $name = $form['name'];
+    $slug = Security::slug($form['slug']);
+    $type = $form['type'] !== '' ? $form['type'] : 'enum';
+    $unit = $form['unit'];
+    $sortOrder = Security::int($form['sort_order']);
 
-    if (!$name || !$slug) {
+    if (!$slug) {
         setFlash('err', 'Názov a slug sú povinné.');
         header("Location: admin.php?p=attribute" . ($id ? "&id={$id}" : ''));
         exit;

@@ -196,23 +196,15 @@ function pageAudit(): void {
     <?php
 }
 function handleImportUpload(): void {
-    $upload = $_FILES['csv_file'] ?? null;
-    $tmpFile = is_array($upload) ? (string)($upload['tmp_name'] ?? '') : '';
-    $actualSize = $tmpFile !== '' && is_file($tmpFile) ? filesize($tmpFile) : false;
-    $basicValid = is_array($upload)
-        && ($upload['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK
-        && is_uploaded_file($tmpFile)
-        && strtolower(pathinfo((string)($upload['name'] ?? ''), PATHINFO_EXTENSION)) === 'csv'
-        && $actualSize !== false && $actualSize > 0 && $actualSize <= Import::MAX_FILE_BYTES;
-    $mime = $basicValid ? (new finfo(FILEINFO_MIME_TYPE))->file($tmpFile) : false;
-    $allowedMime = ['text/plain', 'text/csv', 'application/csv', 'application/vnd.ms-excel'];
-    if (!$basicValid || !in_array($mime, $allowedMime, true)) {
-        setFlash('err', 'CSV upload je neplatný, príliš veľký alebo má nepodporovaný formát.');
+    // BBF checks that a file came, its .csv extension, size and content type.
+    $form = AdminForm::validate('admin-import', [], ['allowed_extensions' => ['csv'], 'max_file_size' => Import::MAX_FILE_BYTES]);
+    if ($form === null) {
+        setFlash('err', 'CSV súbor nebol prijatý: ' . AdminForm::firstError());
         header("Location: admin.php?p=import");
         exit;
     }
 
-    $result = Import::csv($tmpFile);
+    $result = Import::csv($form['csv_file']['files'][0]['tmp_name']);
 
     $errCount = count($result['errors']);
     if (($result['imported'] ?? 0) > 0) {

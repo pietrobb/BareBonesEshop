@@ -1430,7 +1430,7 @@ assert_equals($rtBefore2, $rtRow('SA-BOOK2'), 'CSV round trip: untouched rows st
 assert_equals('-20 % "dnes", a\\b', Import::csvCellDecode("'-20 % \"dnes\", a\\b"), 'CSV import: the formula-guard apostrophe of the export is removed');
 assert_equals("'quoted", Import::csvCellDecode("'quoted"), 'CSV import: an ordinary leading apostrophe is kept');
 // Admin forms are rendered on the server from the BBF definitions, filled with the stored values.
-$afHtml = AdminForm::render('admin-product', 'admin.php?p=product&action=save&id=9301', adminProductFormValues($rtRow('SA-BOOK')), '<div id="attr-section"></div>');
+$afHtml = AdminForm::render('admin-product', 'admin.php?p=product&action=save&id=9301', adminFormValues('admin-product', $rtRow('SA-BOOK')), '<div id="attr-section"></div>');
 assert_true(str_contains($afHtml, 'action="admin.php?p=product&amp;action=save&amp;id=9301"') && str_contains($afHtml, 'enctype="multipart/form-data"')
     && str_contains($afHtml, 'id="form-admin-product"') && str_contains($afHtml, 'name="csrf_token"'), 'Admin product form: posts to the admin save handler with CSRF');
 $afValue = static fn(string $html, string $name): ?string => preg_match('/<(?:input|textarea)\b[^>]*\bname="' . preg_quote($name, '/') . '"[^>]*>/', $html, $m)
@@ -1455,6 +1455,34 @@ foreach (['admin-product', 'admin-page', 'admin-attribute', 'admin-import'] as $
     assert_true(count(AdminForm::definition($afId)['fields']) > 0, "Admin forms: {$afId} definition renders");
 }
 assert_equals(BbfOptions::forAction('bbf_product_statuses'), BbfOptions::fromSource('/api.php?action=bbf_product_statuses'), 'Admin forms: options_from resolves to the same lists as api.php');
+// Admin saves are validated by BBF (bbf_validate) against the same definitions and lists.
+$afStored = adminFormValues('admin-product', $rtRow('SA-BOOK'));
+$afSaved = AdminForm::validate('admin-product', $afStored, [], $afStored + ['csrf_token' => 'x', 'attr' => ['Farba' => 'modrá']], []);
+$afSorted = static function (array $a): array { ksort($a); return $a; };
+assert_true(is_array($afSaved) && $afSorted(array_diff_key($afSaved, ['image_upload' => 1])) === $afSorted($afStored) && $afSaved['image_upload'] === ['action' => 'keep', 'files' => []],
+    'Admin product save: the untouched stored form validates to exactly the stored values, without extra posted keys');
+assert_true(AdminForm::validate('admin-product', $afStored, [], ['status' => 'retired'] + $afStored, []) === null && str_contains(AdminForm::firstError(), 'Stav'),
+    'Admin product save: a status outside the list is refused');
+assert_true(AdminForm::validate('admin-product', ['status' => 'retired', 'category_id' => '999999'] + $afStored, [], ['status' => 'retired', 'category_id' => '999999'] + $afStored, []) !== null,
+    'Admin product save: a stored status or category no longer in the list is still accepted unchanged');
+assert_true(AdminForm::validate('admin-product', [], [], ['sku' => '', 'price' => 'abc', 'category_id' => '999999'] + $afStored, []) === null,
+    'Admin product save: a missing SKU, a non-number price and an unknown category are refused for a new product');
+$afRejected = AdminForm::render('admin-product', 'admin.php', $afStored);
+$afFieldError = static fn(string $html, string $name): bool => (bool)preg_match('/id="field-' . $name . '-error" role="alert">[^<]+</', $html);
+assert_true($afFieldError($afRejected, 'sku') && $afFieldError($afRejected, 'price') && $afFieldError($afRejected, 'category_id') && !$afFieldError($afRejected, 'name') && $afValue($afRejected, 'name') === $afStored['name'] && $afValue($afRejected, 'price') === $afStored['price'],
+    'Admin product save: the reopened form shows the errors and keeps the valid input, invalid fields fall back to the stored value');
+assert_true(!$afFieldError(AdminForm::render('admin-product', 'admin.php', $afStored), 'sku'), 'Admin product save: the errors are shown only once');
+assert_true(AdminForm::validate('admin-import', [], ['allowed_extensions' => ['csv']], [], []) === null && AdminForm::firstError() !== '',
+    'Admin import: a post without a CSV file is refused');
+assert_true(AdminForm::validate('admin-attribute', [], [], ['name' => 'Farba', 'slug' => 'farba', 'type' => 'color', 'sort_order' => '1'], []) === null
+    && AdminForm::validate('admin-attribute', [], [], ['name' => 'Farba', 'slug' => 'farba', 'type' => 'enum', 'sort_order' => '1'], []) !== null,
+    'Admin attribute save: only the listed attribute types are accepted');
+unset($_SESSION['admin_form_state']);
+$afCatalogSource = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Catalog.php');
+assert_true(str_contains($afCatalogSource, "AdminForm::validate('admin-product'") && str_contains($afCatalogSource, "AdminForm::validate('admin-page'")
+    && str_contains($afCatalogSource, "AdminForm::validate('admin-attribute'")
+    && str_contains((string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Operations.php'), "AdminForm::validate('admin-import'"),
+    'Admin forms: product, page, attribute and import saves go through BBF validation');
 
 // Optional daily digest: once per day after digest_hour.
 StockAlerts::setConfigForTesting([
