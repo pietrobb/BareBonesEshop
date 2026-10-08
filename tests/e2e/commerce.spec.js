@@ -151,7 +151,7 @@ test('admin product export and bulk controls use one valid form', async ({ page 
   const [download] = await Promise.all([page.waitForEvent('download'), exportButton.click()]);
   expect(download.suggestedFilename()).toMatch(/products.*\.csv$/);
   const csv = fs.readFileSync(await download.path(), 'utf8');
-  expect(csv).toMatch(/^sku,name,slug,product_type,price,compare_price,stock,status,summary,weight_g\r?\n/);
+  expect(csv).toMatch(/^sku,name,slug,product_type,price,compare_price,stock,status,summary,weight_g,stock_low_threshold,stock_critical_threshold\r?\n/);
   expect(csv).not.toContain('Deprecated');
 
   const firstProduct = page.locator('#bulk-form .product-check').first();
