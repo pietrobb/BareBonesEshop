@@ -107,9 +107,9 @@ final class StorefrontViewModel
                     'canonical_url' => $url,
                     'image_url' => $images[0]['url'] ?? '',
                     'json_ld' => [$jsonLd, JsonLd::breadcrumbList(array_map(
-                        static fn(array $item): array => ['name' => $item['label'], 'url' => $item['url']],
+                        static fn(array $item): array => ['name' => $item['current'] ? $product['name'] : $item['label'], 'url' => $item['url'] !== '' ? Template::seoPath($item['url']) : ''],
                         $breadcrumbs
-                    ))],
+                    ), (string)((require __DIR__ . '/../config.php')['app_url'] ?? ''))],
                 ],
                 'breadcrumbs' => $breadcrumbs,
             ],

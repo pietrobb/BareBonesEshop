@@ -1028,6 +1028,73 @@ $catalogRouteSource = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoi
 assert_true(str_contains($productRouteSource, "src/Entrypoints/Storefront.php") && !str_contains($productRouteSource, 'ob_start'), 'G12 routes: clean product URL delegates without a parallel renderer');
 assert_equals(1, substr_count($catalogRouteSource, 'StorefrontViewModel::product('), 'G12 routes: query and clean product routes converge on one canonical builder');
 assert_equals('/de/product/vm-digital', Template::seoPath($vm['page']['seo']['canonical_url']), 'G12 SEO: deployment base path is not duplicated when joined to app_url');
+// Exercise the real SEO renderer with isolated config.php files, never the local installation config.
+$breadcrumbFixture = test_fixture_path('product-breadcrumb');
+mkdir($breadcrumbFixture . '/src', 0770, true);
+copy(TEST_CLI_DIR . '/../src/StorefrontViewModel.php', $breadcrumbFixture . '/src/StorefrontViewModel.php');
+copy(TEST_CLI_DIR . '/../src/Seo.php', $breadcrumbFixture . '/src/Seo.php');
+file_put_contents($breadcrumbFixture . '/config.php', '<?php return ["app_url" => $GLOBALS["argv"][3]];');
+file_put_contents($breadcrumbFixture . '/render.php', '<?php
+require ' . var_export(dirname(TEST_CLI_DIR) . '/src/autoload.php', true) . ';
+require __DIR__ . "/src/StorefrontViewModel.php";
+require __DIR__ . "/src/Seo.php";
+Db::init(new PDO("sqlite:" . $argv[1], null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]));
+$_SERVER["SCRIPT_NAME"] = $argv[2];
+$stores = Bootstrap::stores();
+$stores["stores"]["default"]["url_prefix"] = $argv[4];
+$context = StoreContext::resolve($stores, "/", "", "default");
+StoreContext::activate($context);
+Template::activate($context);
+I18n::setLocale($argv[4] === "/de" ? "de" : "en");
+$category = Categories::byId((int)$argv[5]);
+UrlAliases::setRules($argv[6] === "alias" ? ["/knihy" => "/category/" . $category["path"]] : []);
+$product = Products::byId(9701);
+$product["name"] = "Canonical Product & <Guide>";
+$model = StorefrontViewModel::product($product);
+echo json_encode(["head" => Template::viewModelSeoHead($model, "Product"), "breadcrumbs" => $model["page"]["breadcrumbs"], "categories" => $model["product"]["categories"]], JSON_THROW_ON_ERROR);
+');
+try {
+    foreach ([
+        ['root', '/index.php', 'https://shop.example/', '', '/'],
+        ['subdirectory', '/test/index.php', 'https://shop.example/test/', '', '/test/'],
+        ['localized', '/test/index.php', 'https://shop.example/test', '/de', '/test/de/'],
+    ] as [$deployment, $script, $appUrl, $localePrefix, $uiPrefix]) {
+        foreach (['core', 'alias'] as $urlScheme) {
+            $label = "G12 breadcrumb {$deployment}/{$urlScheme}";
+            $process = proc_open([PHP_BINARY, $breadcrumbFixture . '/render.php', $testDbPath, $script, $appUrl, $localePrefix, (string)$vmCategory, $urlScheme],
+                [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+            fclose($pipes[0]);
+            $output = stream_get_contents($pipes[1]);
+            $stderr = stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            assert_equals([0, ''], [proc_close($process), $stderr], "{$label}: renderer exits successfully without PHP errors");
+            $rendered = json_decode($output, true, 512, JSON_THROW_ON_ERROR);
+            preg_match_all('#<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>#s', $rendered['head'], $scripts);
+            $payloads = array_map(static fn(string $json): array => json_decode($json, true, 512, JSON_THROW_ON_ERROR), $scripts[1]);
+            $trails = array_values(array_filter($payloads, static fn(array $payload): bool => ($payload['@type'] ?? '') === 'BreadcrumbList'));
+            assert_equals(1, count($trails), "{$label}: SEO head renders one BreadcrumbList");
+            $trail = $trails[0]['itemListElement'];
+            $categoryPath = $urlScheme === 'alias' ? 'knihy' : 'category/' . rawurlencode((string)Categories::byId($vmCategory)['path']);
+            $absolutePrefix = 'https://shop.example' . $uiPrefix;
+            assert_equals([$absolutePrefix, $absolutePrefix . $categoryPath], array_column($trail, 'item'), "{$label}: home and category have exact absolute URLs without duplicated /test");
+            assert_equals([1, 2, 3], array_column($trail, 'position'), "{$label}: category order and positions are preserved");
+            assert_equals('Canonical Product & <Guide>', $trail[2]['name'], "{$label}: leaf retains the exact product name");
+            assert_true(!array_key_exists('item', $trail[2]), "{$label}: empty leaf URL omits item");
+            assert_equals([
+                ['label' => (require TEST_CLI_DIR . '/../lang/' . ($localePrefix === '/de' ? 'de' : 'en') . '.php')['home'], 'url' => $uiPrefix, 'current' => false],
+                ['label' => $rendered['categories'][0]['name'], 'url' => $uiPrefix . $categoryPath, 'current' => false],
+                ['label' => 'Canonical Product & <Guide>', 'url' => '', 'current' => true],
+            ], $rendered['breadcrumbs'], "{$label}: UI breadcrumbs remain relative and unchanged");
+            assert_equals($rendered['categories'][0]['name'], $trail[1]['name'], "{$label}: category name remains unchanged");
+            assert_equals($uiPrefix . $categoryPath, $rendered['categories'][0]['url'], "{$label}: category URL remains relative");
+        }
+    }
+} finally {
+    foreach (['src/StorefrontViewModel.php', 'src/Seo.php', 'config.php', 'render.php'] as $fixtureFile) unlink($breadcrumbFixture . '/' . $fixtureFile);
+    rmdir($breadcrumbFixture . '/src');
+    rmdir($breadcrumbFixture);
+}
 $renderedProduct = Template::page('product', $vm);
 assert_true(str_contains($renderedProduct, 'Canonical Product') && str_contains($renderedProduct, 'name="variant-9701"'), 'G12 renderer: complete default product block renders nested variant markup');
 assert_true(!str_contains($renderedProduct, '{{'), 'G12 renderer: complete product HTML contains no unresolved directives');
