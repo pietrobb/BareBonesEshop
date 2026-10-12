@@ -1683,5 +1683,65 @@ foreach ((array)glob($uaSessions . '/*') as $uaFile) @unlink($uaFile);
 @rmdir($uaSessions);
 $pdo->exec("DELETE FROM products WHERE id = 9401");
 
+// The handler redirects/exits, so exercise it in a child process with an isolated products table.
+echo "\n--- Audit A01: admin bulk price changes ---\n";
+$bulkFixture = test_fixture_path('bulk-prices') . '.php';
+file_put_contents($bulkFixture, '<?php
+require ' . var_export(dirname(TEST_CLI_DIR) . '/src/autoload.php', true) . ';
+require ' . var_export(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Shared.php', true) . ';
+require ' . var_export(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Catalog.php', true) . ';
+set_error_handler(static function(int $severity, string $message, string $file, int $line): bool {
+    throw new ErrorException($message, 0, $severity, $file, $line);
+});
+$driver = $argv[1];
+$db = $driver === "mysql"
+    ? new PDO(getenv("TEST_MYSQL_DSN"), getenv("TEST_MYSQL_USER") ?: "root", getenv("TEST_MYSQL_PASS") ?: "", [PDO::ATTR_EMULATE_PREPARES => false])
+    : new PDO("sqlite::memory:");
+$db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+Db::init($db, $driver);
+$db->exec("CREATE " . ($driver === "mysql" ? "TEMPORARY " : "") . "TABLE products (id INTEGER PRIMARY KEY, price INTEGER NOT NULL, updated_at DATETIME NULL)");
+$db->exec("INSERT INTO products (id, price) VALUES (5, 1001), (7, 1010), (9, 0), (11, 99), (13, -100)");
+$_SESSION = ["admin_role" => "owner"];
+$_POST = ["bulk_action" => $argv[2], "product_ids" => json_decode($argv[3], true, 512, JSON_THROW_ON_ERROR)];
+register_shutdown_function(static function() use ($db): void {
+    echo json_encode(["products" => $db->query("SELECT id, price, updated_at FROM products ORDER BY id")->fetchAll(), "flash" => $_SESSION["flash"] ?? null], JSON_THROW_ON_ERROR);
+});
+handleBulkAction();
+');
+try {
+    $bulkDrivers = ['sqlite'];
+    if (getenv('TEST_MYSQL_DSN')) $bulkDrivers[] = 'mysql';
+    else echo "  [SKIP] Audit A01 live MySQL/MariaDB bulk handler (set TEST_MYSQL_DSN to enable)\n";
+    foreach ($bulkDrivers as $bulkDriver) {
+        foreach ([
+            ['price_up_5', [5, 7, 9, 13], [1051, 1061, 0, 99, 0]],
+            ['price_up_10', [5, 7, 9, 13], [1101, 1111, 0, 99, 0]],
+            ['price_up_20', [5, 7, 9, 13], [1201, 1212, 0, 99, 0]],
+            ['price_down_5', [5, 7, 9, 13], [951, 960, 0, 99, 0]],
+            ['price_down_10', [5, 7, 9, 13], [901, 909, 0, 99, 0]],
+            ['price_down_20', [5, 7, 9, 13], [801, 808, 0, 99, 0]],
+            ['price_up_5', [7], [1001, 1061, 0, 99, -100]],
+            ['price_up_5', [], [1001, 1010, 0, 99, -100]],
+        ] as [$bulkAction, $bulkIds, $bulkExpected]) {
+            $bulkLabel = "Audit A01 {$bulkDriver}/{$bulkAction}/" . implode(',', $bulkIds);
+            $bulkProcess = proc_open([PHP_BINARY, $bulkFixture, $bulkDriver, $bulkAction, json_encode($bulkIds, JSON_THROW_ON_ERROR)],
+                [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $bulkPipes);
+            fclose($bulkPipes[0]);
+            $bulkOutput = stream_get_contents($bulkPipes[1]);
+            $bulkStderr = stream_get_contents($bulkPipes[2]);
+            fclose($bulkPipes[1]);
+            fclose($bulkPipes[2]);
+            assert_equals([0, ''], [proc_close($bulkProcess), $bulkStderr], "{$bulkLabel}: actual handler exits without PHP/SQL errors");
+            $bulkResult = json_decode($bulkOutput, true, 512, JSON_THROW_ON_ERROR);
+            assert_equals($bulkExpected, array_map('intval', array_column($bulkResult['products'], 'price')), "{$bulkLabel}: exact cent prices, clamp and unselected products");
+            $bulkUpdated = array_map('intval', array_column(array_filter($bulkResult['products'], static fn(array $row): bool => $row['updated_at'] !== null), 'id'));
+            assert_equals($bulkIds, $bulkUpdated, "{$bulkLabel}: only selected products receive updated_at");
+        }
+    }
+} finally {
+    unlink($bulkFixture);
+}
+
 require __DIR__ . '/AuditPaymentsRegression.php';
 require __DIR__ . '/AuditCustomerRegression.php';

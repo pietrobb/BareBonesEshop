@@ -962,9 +962,9 @@ function handleBulkAction(): void {
             $percent = (int)filter_var($action, FILTER_SANITIZE_NUMBER_INT);
             $direction = str_contains($action, 'up') ? 1 : -1;
             $multiplier = round(1 + ($direction * abs($percent) / 100), 4);
-            $stmt = $db->prepare("UPDATE products SET price = MAX(0, ROUND(price * :mult)), updated_at = {$now} WHERE id IN ({$ph})");
-            $stmt->bindValue(':mult', $multiplier);
-            $stmt->execute($ids);
+            $clamp = Db::isSqlite() ? 'MAX' : 'GREATEST';
+            $stmt = $db->prepare("UPDATE products SET price = {$clamp}(0, ROUND(price * CAST(? AS DECIMAL(10,4)))), updated_at = {$now} WHERE id IN ({$ph})");
+            $stmt->execute([$multiplier, ...$ids]);
             $sign = $direction > 0 ? '+' : '-';
             setFlash('ok', count($ids) . " produktov: cena {$sign}" . abs($percent) . '%.');
             break;
