@@ -1700,7 +1700,7 @@ $db = $driver === "mysql"
 $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 Db::init($db, $driver);
-$db->exec("CREATE " . ($driver === "mysql" ? "TEMPORARY " : "") . "TABLE products (id INTEGER PRIMARY KEY, price INTEGER NOT NULL, updated_at DATETIME NULL)");
+$db->exec("CREATE " . ($driver === "mysql" ? "TEMPORARY " : "") . "TABLE products (id INTEGER PRIMARY KEY, store_id VARCHAR(40) NOT NULL DEFAULT \'default\', price INTEGER NOT NULL, updated_at DATETIME NULL)");
 $db->exec("INSERT INTO products (id, price) VALUES (5, 1001), (7, 1010), (9, 0), (11, 99), (13, -100)");
 $_SESSION = ["admin_role" => "owner"];
 $_POST = ["bulk_action" => $argv[2], "product_ids" => json_decode($argv[3], true, 512, JSON_THROW_ON_ERROR)];
@@ -1746,3 +1746,5 @@ try {
 require __DIR__ . '/AuditPaymentsRegression.php';
 require __DIR__ . '/AuditCustomerRegression.php';
 require __DIR__ . '/AuditUtcRegression.php';
+require __DIR__ . '/AuditStoreAdminRegression.php';
+require __DIR__ . '/AuditOrderAdminRegression.php';

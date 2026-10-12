@@ -2,21 +2,31 @@
 /** Sales, orders, invoices, refunds and RMA administration. */
 
 function pageSalesOverview(): void {
+    Security::adminRequire('orders.view');
     $db = Db::get();
+    $storeId = StoreContext::current()->id();
     $today = date('Y-m-d 00:00:00');
 
-    $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE created_at >= :today");
-    $stmt->execute([':today' => $today]);
+    $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE created_at >= :today AND store_id = :store");
+    $stmt->execute([':today' => $today, ':store' => $storeId]);
     $ordersToday = (int)$stmt->fetchColumn();
 
-    $stmt = $db->prepare("SELECT COALESCE(SUM(total), 0) FROM orders WHERE created_at >= :today AND status NOT IN ('cancelled', 'refunded')");
-    $stmt->execute([':today' => $today]);
+    $stmt = $db->prepare("SELECT COALESCE(SUM(total), 0) FROM orders WHERE created_at >= :today AND store_id = :store AND status NOT IN ('cancelled', 'refunded')");
+    $stmt->execute([':today' => $today, ':store' => $storeId]);
     $revenueToday = (int)$stmt->fetchColumn();
 
-    $pendingPayments = (int)$db->query("SELECT COUNT(*) FROM orders WHERE payment_status IN ('pending', 'authorized')")->fetchColumn();
-    $downloadCount = (int)$db->query("SELECT COALESCE(SUM(download_count), 0) FROM digital_entitlements")->fetchColumn();
-    $failedEmails = (int)$db->query("SELECT COUNT(*) FROM email_log WHERE status = 'failed'")->fetchColumn();
-    $failedNotifications = (int)$db->query("SELECT COUNT(*) FROM merchant_notifications WHERE status = 'failed'")->fetchColumn();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE store_id = :store AND payment_status IN ('pending', 'authorized')");
+    $stmt->execute([':store' => $storeId]);
+    $pendingPayments = (int)$stmt->fetchColumn();
+    $stmt = $db->prepare("SELECT COALESCE(SUM(de.download_count), 0) FROM digital_entitlements de JOIN orders o ON o.id = de.order_id WHERE o.store_id = :store");
+    $stmt->execute([':store' => $storeId]);
+    $downloadCount = (int)$stmt->fetchColumn();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM email_log el JOIN orders o ON o.id = el.order_id WHERE o.store_id = :store AND el.status = 'failed'");
+    $stmt->execute([':store' => $storeId]);
+    $failedEmails = (int)$stmt->fetchColumn();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM merchant_notifications mn JOIN orders o ON o.id = mn.order_id WHERE o.store_id = :store AND mn.status = 'failed'");
+    $stmt->execute([':store' => $storeId]);
+    $failedNotifications = (int)$stmt->fetchColumn();
 
     $search = trim((string)($_GET['q'] ?? ''));
     $period = (string)($_GET['period'] ?? '30');
@@ -27,8 +37,8 @@ function pageSalesOverview(): void {
     if ($statusFilter !== '' && !in_array($statusFilter, OrderWorkflow::statuses(), true)) $statusFilter = '';
     if ($paymentStatusFilter !== '' && !in_array($paymentStatusFilter, PaymentService::paymentStatuses(), true)) $paymentStatusFilter = '';
 
-    $where = ['1=1'];
-    $params = [];
+    $where = ['o.store_id = :store'];
+    $params = [':store' => $storeId];
     if ($search !== '') {
         $like = '%' . mb_strtolower($search) . '%';
         $where[] = '(LOWER(o.order_number) LIKE :q_number OR LOWER(o.customer_name) LIKE :q_name OR LOWER(o.customer_email) LIKE :q_email)';
@@ -148,6 +158,7 @@ function pageSalesOverview(): void {
     <?php
 }
 function pageOrders(): void {
+    Security::adminRequire('orders.view');
     $db = Db::get();
     $page = max(1, Security::int($_GET['page'] ?? 1));
     $perPage = 25;
@@ -155,8 +166,8 @@ function pageOrders(): void {
     $statusFilter = $_GET['status'] ?? '';
     $paymentStatusFilter = $_GET['payment_status'] ?? '';
 
-    $where = '1=1';
-    $params = [];
+    $where = 'store_id = :store';
+    $params = [':store' => StoreContext::current()->id()];
     if ($statusFilter) {
         $where .= " AND status = :status";
         $params[':status'] = $statusFilter;
@@ -171,10 +182,11 @@ function pageOrders(): void {
     $total = (int)$stmt->fetchColumn();
     $pages = max(1, (int)ceil($total / $perPage));
 
-    $params[':limit'] = $perPage;
-    $params[':offset'] = $offset;
     $stmt = $db->prepare("SELECT * FROM orders WHERE {$where} ORDER BY created_at DESC LIMIT :limit OFFSET :offset");
-    $stmt->execute($params);
+    foreach ($params as $key => $value) $stmt->bindValue($key, $value, PDO::PARAM_STR);
+    $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+    $stmt->execute();
     $orders = $stmt->fetchAll();
     ?>
     <h1><?= esc(I18n::t('admin.title.orders')) ?> <span class="muted">(<?= $total ?>)</span></h1>
@@ -484,9 +496,7 @@ function pageOrder(): void {
 function pageInvoicePdf(): void {
     Security::adminRequire('orders.view');
     $id = Security::int($_GET['id'] ?? 0);
-    $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE id = :id");
-    $stmt->execute([':id' => $id]);
-    $inv = $stmt->fetch();
+    $inv = InvoiceService::byId($id);
     if (!$inv) { http_response_code(404); echo 'Faktúra neexistuje.'; return; }
     $abs = InvoiceService::pdfAbsolutePath($inv);
     if (!is_file($abs)) { http_response_code(404); echo 'PDF súbor chýba.'; return; }

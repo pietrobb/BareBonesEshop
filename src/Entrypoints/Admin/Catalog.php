@@ -938,20 +938,23 @@ function handleBulkAction(): void {
 
     $db = Db::get();
     $ph = implode(',', array_fill(0, count($ids), '?'));
-
+    $params = [...$ids, StoreContext::current()->catalogId()];
     $now = Db::now();
     switch ($action) {
         case 'activate':
-            $db->prepare("UPDATE products SET status = 'active', updated_at = {$now} WHERE id IN ({$ph})")->execute($ids);
-            setFlash('ok', count($ids) . ' produktov aktivovaných.');
+            $stmt = $db->prepare("UPDATE products SET status = 'active', updated_at = {$now} WHERE id IN ({$ph}) AND store_id = ?");
+            $stmt->execute($params);
+            setFlash('ok', $stmt->rowCount() . ' produktov aktivovaných.');
             break;
         case 'archive':
-            $db->prepare("UPDATE products SET status = 'archived', updated_at = {$now} WHERE id IN ({$ph})")->execute($ids);
-            setFlash('ok', count($ids) . ' produktov archivovaných.');
+            $stmt = $db->prepare("UPDATE products SET status = 'archived', updated_at = {$now} WHERE id IN ({$ph}) AND store_id = ?");
+            $stmt->execute($params);
+            setFlash('ok', $stmt->rowCount() . ' produktov archivovaných.');
             break;
         case 'delete':
-            $db->prepare("DELETE FROM products WHERE id IN ({$ph})")->execute($ids);
-            setFlash('ok', count($ids) . ' produktov zmazaných.');
+            $stmt = $db->prepare("DELETE FROM products WHERE id IN ({$ph}) AND store_id = ?");
+            $stmt->execute($params);
+            setFlash('ok', $stmt->rowCount() . ' produktov zmazaných.');
             break;
         case 'price_up_5':
         case 'price_up_10':
@@ -963,16 +966,17 @@ function handleBulkAction(): void {
             $direction = str_contains($action, 'up') ? 1 : -1;
             $multiplier = round(1 + ($direction * abs($percent) / 100), 4);
             $clamp = Db::isSqlite() ? 'MAX' : 'GREATEST';
-            $stmt = $db->prepare("UPDATE products SET price = {$clamp}(0, ROUND(price * CAST(? AS DECIMAL(10,4)))), updated_at = {$now} WHERE id IN ({$ph})");
-            $stmt->execute([$multiplier, ...$ids]);
+            $stmt = $db->prepare("UPDATE products SET price = {$clamp}(0, ROUND(price * CAST(? AS DECIMAL(10,4)))), updated_at = {$now} WHERE id IN ({$ph}) AND store_id = ?");
+            $stmt->execute([$multiplier, ...$params]);
             $sign = $direction > 0 ? '+' : '-';
-            setFlash('ok', count($ids) . " produktov: cena {$sign}" . abs($percent) . '%.');
+            setFlash('ok', $stmt->rowCount() . " produktov: cena {$sign}" . abs($percent) . '%.');
             break;
     }
     header('Location: admin.php?p=products');
     exit;
 }
 function handleExport(): void {
+    Security::adminRequire('products.view');
     header('Content-Type: text/csv; charset=UTF-8');
     header('Content-Disposition: attachment; filename="products-' . date('Y-m-d') . '.csv"');
     $out = fopen('php://output', 'w');
@@ -982,8 +986,8 @@ function handleExport(): void {
 }
 /** Products CSV in the Import::csv() format (prices in euros), so an edited export can be imported back. */
 function exportProductsCsv($out, string $search = '', string $statusFilter = ''): void {
-    $where = "1=1";
-    $params = [];
+    $where = "store_id = :store";
+    $params = [':store' => StoreContext::current()->catalogId()];
     if ($search) {
         $where .= " AND (name LIKE :q OR sku LIKE :q2)";
         $escaped = str_replace(['%', '_'], ['\\%', '\\_'], $search);
