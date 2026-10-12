@@ -1018,6 +1018,8 @@ function apiWebhookPayment(): array {
         http_response_code(400);
         return ['error' => 'Invalid provider'];
     }
+    // Both Stripe URLs must use the same verified processing and claim/retry path.
+    if ($provider === 'stripe') return apiWebhookStripe();
 
     $rawPayload = file_get_contents('php://input');
     if (!$rawPayload) {

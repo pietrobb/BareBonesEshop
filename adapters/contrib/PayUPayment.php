@@ -2,18 +2,20 @@
 /**
  * BareBones Shop — PayU Payment Adapter
  * PayU REST API v2.1 (Poland/CEE region)
- * OAuth2 client_credentials flow, SHA-256 notification verification.
+ * OAuth2 client_credentials flow, MD5 second-key notification verification.
  * Zero external dependencies — curl only.
  *
  * Required env vars:
  *   PAY_PAYU_CLIENT_ID       — OAuth2 client_id (merchant POS ID)
  *   PAY_PAYU_CLIENT_SECRET   — OAuth2 client_secret
+ *   PAY_PAYU_SECOND_KEY      — POS second key for notification signatures
  *   PAY_PAYU_POS_ID          — POS identifier (same as client_id usually)
  *   PAY_PAYU_ENV             — 'production' | 'sandbox' (default: sandbox)
  */
 class PayUPayment implements IdempotentRefundAdapter {
     private string $clientId;
     private string $clientSecret;
+    private string $secondKey;
     private string $posId;
     private string $baseUrl;
     private ?string $accessToken = null;
@@ -22,6 +24,7 @@ class PayUPayment implements IdempotentRefundAdapter {
     public function __construct(array $cfg) {
         $this->clientId     = getenv('PAY_PAYU_CLIENT_ID')     ?: ($cfg['payu_client_id']     ?? '');
         $this->clientSecret = getenv('PAY_PAYU_CLIENT_SECRET') ?: ($cfg['payu_client_secret'] ?? '');
+        $this->secondKey    = getenv('PAY_PAYU_SECOND_KEY')    ?: ($cfg['payu_second_key']    ?? '');
         $this->posId        = getenv('PAY_PAYU_POS_ID')        ?: ($cfg['payu_pos_id']        ?? '');
         $env                = getenv('PAY_PAYU_ENV')            ?: ($cfg['payu_env']            ?? 'sandbox');
         $this->baseUrl      = $env === 'production'
@@ -104,7 +107,7 @@ class PayUPayment implements IdempotentRefundAdapter {
 
         return [
             'event_type' => $eventType,
-            'event_id'   => $orderData['orderId'] ?? ($payload['localReceiptDateTime'] ?? uniqid('payu_')),
+            'event_id'   => !empty($orderData['orderId']) && $status !== '' ? $orderData['orderId'] . ':' . $status : '',
             'data'       => $orderData,
         ];
     }
@@ -146,25 +149,28 @@ class PayUPayment implements IdempotentRefundAdapter {
     /**
      * Verify PayU notification signature.
      * PayU sends OpenPayU-Signature header:
-     *   sender=checkout;signature=<SHA256>;algorithm=SHA-256;content=DOCUMENT
+     *   sender=checkout;signature=<MD5>;algorithm=MD5;content=DOCUMENT
      */
     public function verifySignature(string $payload, string $sigHeader): bool {
-        if (strlen($this->clientSecret) < 16 || trim($this->clientSecret) !== $this->clientSecret) return false;
+        if ($this->secondKey === '' || trim($this->secondKey) !== $this->secondKey) return false;
 
         // Parse signature header
         $parts = [];
         foreach (explode(';', $sigHeader) as $part) {
             if (str_contains($part, '=')) {
                 [$k, $v] = explode('=', $part, 2);
-                $parts[trim($k)] = trim($v);
+                $k = trim($k);
+                if (array_key_exists($k, $parts)) return false;
+                $parts[$k] = trim($v);
             }
         }
 
         $receivedSig = $parts['signature'] ?? '';
-        if (!$receivedSig) return false;
+        if (($parts['algorithm'] ?? '') !== 'MD5' || !preg_match('/^[a-fA-F0-9]{32}$/D', $receivedSig)) return false;
+        if (isset($parts['content']) && $parts['content'] !== 'DOCUMENT') return false;
 
-        // PayU: SHA-256(payload + clientSecret)
-        $expected = hash('sha256', $payload . $this->clientSecret);
+        // PayU Europe signs the exact raw notification body concatenated with the POS second key.
+        $expected = md5($payload . $this->secondKey);
 
         return hash_equals($expected, strtolower($receivedSig));
     }

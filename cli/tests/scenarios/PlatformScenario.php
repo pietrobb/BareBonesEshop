@@ -1682,3 +1682,5 @@ proc_close($uaServer);
 foreach ((array)glob($uaSessions . '/*') as $uaFile) @unlink($uaFile);
 @rmdir($uaSessions);
 $pdo->exec("DELETE FROM products WHERE id = 9401");
+
+require __DIR__ . '/AuditPaymentsRegression.php';
