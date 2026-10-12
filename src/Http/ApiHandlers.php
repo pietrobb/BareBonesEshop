@@ -70,9 +70,12 @@ function apiProduct(): array {
 
     $locale = I18n::locale();
 
-    // Check cache
-    $cached = Cache::readJson(Cache::localePath($locale, "product/{$slug}.json"), 3600);
-    if ($cached) return $cached;
+    // Personalized prices must neither read nor populate the shared guest cache.
+    $cacheable = empty($_SESSION['customer_id']);
+    if ($cacheable) {
+        $cached = Cache::readJson(Cache::localePath($locale, "product/{$slug}.json"), 3600);
+        if ($cached) return $cached;
+    }
 
     $product = Products::bySlug($slug);
     if (!$product) return ['error' => 'Product not found'];
@@ -83,7 +86,7 @@ function apiProduct(): array {
 
     $result = ['product' => $product];
 
-    Cache::writeJson(Cache::localePath($locale, "product/{$slug}.json"), $result);
+    if ($cacheable) Cache::writeJson(Cache::localePath($locale, "product/{$slug}.json"), $result);
     return $result;
 }
 

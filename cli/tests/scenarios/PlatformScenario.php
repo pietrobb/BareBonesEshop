@@ -1684,3 +1684,4 @@ foreach ((array)glob($uaSessions . '/*') as $uaFile) @unlink($uaFile);
 $pdo->exec("DELETE FROM products WHERE id = 9401");
 
 require __DIR__ . '/AuditPaymentsRegression.php';
+require __DIR__ . '/AuditCustomerRegression.php';

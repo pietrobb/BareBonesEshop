@@ -18,6 +18,9 @@
  * of those fields happens via cli/gdpr-gc.php after the 10-year window.
  */
 class GdprService {
+    private const CUSTOMER_ORDERS = "SELECT o.id FROM orders o
+        WHERE o.store_id = :order_store AND (o.customer_id = :customer_id
+            OR (:verified = '1' AND o.customer_id IS NULL AND LOWER(o.customer_email) = LOWER(:owner_email)))";
 
     /** @var ?string Cached salt (loaded once per request) */
     private static ?string $cachedSalt = null;
@@ -224,8 +227,8 @@ class GdprService {
     public static function exportCustomer(int $customerId): array {
         $db = Db::get();
 
-        $stmt = $db->prepare("SELECT * FROM customers WHERE id = ?");
-        $stmt->execute([$customerId]);
+        $stmt = $db->prepare("SELECT * FROM customers WHERE id = ? AND store_id = ?");
+        $stmt->execute([$customerId, StoreContext::current()->id()]);
         $customer = $stmt->fetch();
         if (!$customer) throw new RuntimeException("Customer #{$customerId} not found");
 
@@ -236,14 +239,11 @@ class GdprService {
         $stmt->execute([$customerId]);
         $addresses = $stmt->fetchAll();
 
-        // Orders + items + invoices (joined by customer_id OR by customer email match)
+        // Email ownership may link guest orders, never another registered customer's order.
         $email = (string)$customer['email'];
-        $stmt = $db->prepare("
-            SELECT * FROM orders
-            WHERE customer_id = :id OR LOWER(customer_email) = LOWER(:email)
-            ORDER BY id ASC
-        ");
-        $stmt->execute([':id' => $customerId, ':email' => $email]);
+        $ownership = self::ownershipParams($customer);
+        $stmt = $db->prepare("SELECT * FROM orders WHERE id IN (" . self::CUSTOMER_ORDERS . ") ORDER BY id ASC");
+        $stmt->execute($ownership);
         $orders = [];
         foreach ($stmt->fetchAll() as $o) {
             $orderId = (int)$o['id'];
@@ -251,15 +251,15 @@ class GdprService {
             $itemsStmt->execute([$orderId]);
             $invStmt = $db->prepare("
                 SELECT id, number, issued_at, due_date, total_net, total_vat, total_gross, currency, status, type
-                FROM invoices WHERE order_id = ? ORDER BY id
+                FROM invoices WHERE order_id = ? AND store_id = ? ORDER BY id
             ");
-            $invStmt->execute([$orderId]);
+            $invStmt->execute([$orderId, StoreContext::current()->id()]);
             // Redact payment_transactions raw_response
             $payStmt = $db->prepare("
                 SELECT id, provider, provider_ref, status, amount, currency, idempotency_key, created_at, updated_at
-                FROM payment_transactions WHERE order_id = ? ORDER BY id
+                FROM payment_transactions WHERE order_id = ? AND store_id = ? ORDER BY id
             ");
-            $payStmt->execute([$orderId]);
+            $payStmt->execute([$orderId, StoreContext::current()->id()]);
             $orders[] = [
                 'order'    => $o,
                 'items'    => $itemsStmt->fetchAll(),
@@ -268,12 +268,13 @@ class GdprService {
             ];
         }
 
-        // Email log — by recipient email match (case-insensitive)
+        // Unverified accounts may see only mail linked to their own orders.
         $stmt = $db->prepare("
             SELECT id, order_id, recipient, template, locale, subject, adapter, status, sent_at, created_at
-            FROM email_log WHERE LOWER(recipient) = LOWER(?) ORDER BY id ASC
+            FROM email_log WHERE store_id = :log_store AND LOWER(recipient) = LOWER(:recipient_email)
+              AND (order_id IN (" . self::CUSTOMER_ORDERS . ") OR (order_id IS NULL AND :unlinked_verified = '1')) ORDER BY id ASC
         ");
-        $stmt->execute([$email]);
+        $stmt->execute($ownership + [':log_store' => StoreContext::current()->id(), ':recipient_email' => $email, ':unlinked_verified' => $ownership[':verified']]);
         $emailLog = $stmt->fetchAll();
 
         // Cookie consent history by customer_id
@@ -309,8 +310,8 @@ class GdprService {
      */
     public static function anonymizeCustomer(int $customerId, string $actor = 'self'): array {
         $db = Db::get();
-        $stmt = $db->prepare("SELECT * FROM customers WHERE id = ?");
-        $stmt->execute([$customerId]);
+        $stmt = $db->prepare("SELECT * FROM customers WHERE id = ? AND store_id = ?");
+        $stmt->execute([$customerId, StoreContext::current()->id()]);
         $customer = $stmt->fetch();
         if (!$customer) throw new RuntimeException("Customer #{$customerId} not found");
         if (($customer['status'] ?? '') === 'anonymized') {
@@ -318,6 +319,7 @@ class GdprService {
         }
 
         $origEmail = (string)$customer['email'];
+        $ownership = self::ownershipParams($customer);
         $placeholder = "deleted-{$customerId}@anonymized.local";
         $erasureMarker = '[erased per GDPR Art.17 at ' . gmdate('Y-m-d') . ']';
 
@@ -347,48 +349,56 @@ class GdprService {
                 UPDATE email_log
                 SET recipient = :placeholder,
                     subject = :marker,
-                    payload = :marker
-                WHERE LOWER(recipient) = LOWER(:email)
+                    payload = :payload_marker
+                WHERE store_id = :log_store AND LOWER(recipient) = LOWER(:recipient_email)
+                  AND (order_id IN (" . self::CUSTOMER_ORDERS . ") OR (order_id IS NULL AND :unlinked_verified = '1'))
             ");
-            $stmt->execute([
+            $stmt->execute($ownership + [
                 ':placeholder' => $placeholder,
                 ':marker'      => $erasureMarker,
-                ':email'       => $origEmail,
+                ':payload_marker' => $erasureMarker,
+                ':log_store' => StoreContext::current()->id(),
+                ':recipient_email' => $origEmail,
+                ':unlinked_verified' => $ownership[':verified'],
             ]);
             $rowsEmail = $stmt->rowCount();
 
             // 4) audit_log → scrub old_value + new_value (typically JSON snapshots)
             //    when they contain the email substring. Keep entity/action/actor/timestamp.
-            $hasAudit = (bool)$db->query("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='audit_log'")->fetchColumn();
+            $hasAudit = self::tableColumns($db, 'audit_log') !== [];
             $rowsAudit = 0;
             if ($hasAudit) {
                 $stmt = $db->prepare("
                     UPDATE audit_log
-                    SET old_value = :marker, new_value = :marker
-                    WHERE (old_value LIKE :pattern OR new_value LIKE :pattern)
+                    SET old_value = :old_marker, new_value = :new_marker
+                    WHERE store_id = :store AND (INSTR(old_value, :old_email) > 0 OR INSTR(new_value, :new_email) > 0)
+                      AND (:verified = '1' OR (entity = 'customer' AND entity_id = :customer_id))
                 ");
                 $stmt->execute([
-                    ':marker'  => $erasureMarker,
-                    ':pattern' => '%' . $origEmail . '%',
+                    ':old_marker' => $erasureMarker, ':new_marker' => $erasureMarker,
+                    ':store' => StoreContext::current()->id(),
+                    ':old_email' => $origEmail, ':new_email' => $origEmail,
+                    ':verified' => $ownership[':verified'], ':customer_id' => $customerId,
                 ]);
                 $rowsAudit = $stmt->rowCount();
             }
 
             // 5) coupon_uses → hash email column (preserves dedup logic).
             //    Column name varies: 'customer_email' (current schema) or 'email' (legacy).
-            $hasCoupon = (bool)$db->query("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='coupon_uses'")->fetchColumn();
+            $couponColumns = self::tableColumns($db, 'coupon_uses');
+            $hasCoupon = $couponColumns !== [];
             $rowsCoupon = 0;
             if ($hasCoupon) {
                 $emailCol = null;
-                foreach ($db->query("PRAGMA table_info(coupon_uses)")->fetchAll() as $col) {
-                    $n = strtolower((string)$col['name']);
-                    if ($n === 'customer_email' || $n === 'email') { $emailCol = (string)$col['name']; break; }
+                foreach ($couponColumns as $col) {
+                    $n = strtolower($col);
+                    if ($n === 'customer_email' || $n === 'email') { $emailCol = $col; break; }
                 }
                 if ($emailCol !== null) {
                     $hashed = self::hashPii(strtolower($origEmail));
-                    $sql = "UPDATE coupon_uses SET {$emailCol} = ? WHERE LOWER({$emailCol}) = LOWER(?)";
+                    $sql = "UPDATE coupon_uses SET {$emailCol} = :hashed WHERE store_id = :coupon_store AND LOWER({$emailCol}) = LOWER(:coupon_email) AND order_id IN (" . self::CUSTOMER_ORDERS . ")";
                     $stmt = $db->prepare($sql);
-                    $stmt->execute([$hashed, $origEmail]);
+                    $stmt->execute($ownership + [':hashed' => $hashed, ':coupon_store' => StoreContext::current()->id(), ':coupon_email' => $origEmail]);
                     $rowsCoupon = $stmt->rowCount();
                 }
             }
@@ -554,9 +564,9 @@ class GdprService {
         if (is_array($scrub) && !empty($scrub)) {
             $emailCol = (string)$scrub[0];
         } else {
-            foreach ($db->query("PRAGMA table_info({$table})")->fetchAll() as $c) {
-                $n = strtolower((string)$c['name']);
-                if ($n === 'email' || $n === 'customer_email') { $emailCol = (string)$c['name']; break; }
+            foreach (self::tableColumns($db, $table) as $column) {
+                $n = strtolower($column);
+                if ($n === 'email' || $n === 'customer_email') { $emailCol = $column; break; }
             }
         }
         if ($emailCol === null || !preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $emailCol)) {
@@ -626,6 +636,23 @@ class GdprService {
             'duration_ms' => $duration,
             'details'  => $details,
         ];
+    }
+
+    private static function ownershipParams(array $customer): array {
+        return [
+            ':order_store' => StoreContext::current()->id(),
+            ':customer_id' => (int)$customer['id'],
+            ':verified' => !empty($customer['email_verified_at']) ? 1 : 0,
+            ':owner_email' => (string)$customer['email'],
+        ];
+    }
+
+    private static function tableColumns(PDO $db, string $table): array {
+        if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/D', $table)) throw new InvalidArgumentException('Invalid table name');
+        if (Db::isSqlite()) return array_column($db->query("PRAGMA table_info({$table})")->fetchAll(PDO::FETCH_ASSOC), 'name');
+        $stmt = $db->prepare('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION');
+        $stmt->execute([$table]);
+        return $stmt->fetchAll(PDO::FETCH_COLUMN);
     }
 
     /** Returns config array. Stored separately so tests can stub. */
