@@ -50,6 +50,9 @@ return [
     'update_cart'      => 'Aktualizovať košík',
 
     // Checkout
+    'checkout.consent_required' => 'Pred odoslaním objednávky prijmite povinné súhlasy.',
+    'checkout.failed' => 'Skontrolujte údaje objednávky a skúste to znova.',
+    'checkout.refresh' => 'Aktualizovať objednávku pre túto krajinu',
     'order_summary'    => 'Zhrnutie objednávky',
     'billing_address'  => 'Fakturačná adresa',
     'shipping_address' => 'Doručovacia adresa',

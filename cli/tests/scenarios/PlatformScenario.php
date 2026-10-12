@@ -1745,3 +1745,4 @@ try {
 
 require __DIR__ . '/AuditPaymentsRegression.php';
 require __DIR__ . '/AuditCustomerRegression.php';
+require __DIR__ . '/CheckoutConsentRegression.php';

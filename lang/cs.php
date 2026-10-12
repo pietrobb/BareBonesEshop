@@ -50,6 +50,9 @@ return array_replace(require __DIR__ . '/en.php', [
     'update_cart'      => 'Aktualizovat košík',
 
     // Checkout
+    'checkout.consent_required' => 'Před odesláním objednávky přijměte povinné souhlasy.',
+    'checkout.failed' => 'Zkontrolujte údaje objednávky a zkuste to znovu.',
+    'checkout.refresh' => 'Aktualizovat objednávku pro tuto zemi',
     'order_summary'    => 'Shrnutí objednávky',
     'billing_address'  => 'Fakturační adresa',
     'shipping_address' => 'Doručovací adresa',

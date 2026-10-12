@@ -50,6 +50,9 @@ return array_replace(require __DIR__ . '/en.php', [
     'update_cart'      => 'Warenkorb aktualisieren',
 
     // Checkout
+    'checkout.consent_required' => 'Bitte erteilen Sie die erforderlichen Einwilligungen vor der Bestellung.',
+    'checkout.failed' => 'Bitte überprüfen Sie Ihre Bestelldaten und versuchen Sie es erneut.',
+    'checkout.refresh' => 'Bestellung für dieses Land aktualisieren',
     'order_summary'    => 'Bestellübersicht',
     'billing_address'  => 'Rechnungsadresse',
     'shipping_address' => 'Lieferadresse',

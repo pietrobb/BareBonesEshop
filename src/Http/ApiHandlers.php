@@ -447,11 +447,7 @@ function apiConsentDefinitions(): array {
     }
     $country = strtoupper(trim((string)($_GET['country'] ?? '')));
     $cart = Cart::enriched();
-    $context = [
-        'country' => preg_match('/^[A-Z]{2}$/', $country) ? $country : '',
-        'product_types' => array_values(array_unique(array_column($cart['items'] ?? [], 'product_type'))),
-    ];
-    return ['consents' => array_values(ConsentService::definitions($context))];
+    return ['consents' => array_values(CheckoutService::consentDefinitions(preg_match('/^[A-Z]{2}$/', $country) ? $country : '', $cart['items'] ?? []))];
 }
 
 function apiCheckout(?array $runtimeConfig = null): array {
@@ -472,6 +468,10 @@ function apiCheckout(?array $runtimeConfig = null): array {
     }
 
     $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+    if (!is_array($input)) {
+        http_response_code(400);
+        return ['error' => 'Invalid request body'];
+    }
     return CheckoutService::execute($input, $runtimeConfig);
 }
 
@@ -645,6 +645,8 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
 
     $customer = [
         'customer_id'    => $loggedInCustomerId,
+        'consents' => $submittedConsents,
+        'consent_context' => $consentContext,
         'name'           => $name,
         'email'          => $email,
         'phone'          => $phone,
@@ -679,13 +681,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
 
     try {
         $orderId = Orders::create($availableItems, $customer, $paymentMethod, $coupon);
-        ConsentService::record(
-            $orderId,
-            $submittedConsents,
-            $consentContext,
-            Security::clientIp(),
-            (string)($_SERVER['HTTP_USER_AGENT'] ?? '')
-        );
+
         if ($freeDigitalOrder) {
             PaymentService::updatePaymentStatus($orderId, 'paid');
             OrderWorkflow::transition($orderId, 'paid', 'Bezplatná digitálna objednávka');

@@ -284,6 +284,10 @@ class Orders {
                 );
             }
 
+            if (isset($customer['consents'])) {
+                ConsentService::record($orderId, $customer['consents'], $customer['consent_context'], Security::clientIp(), (string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
+            }
+
             // 6. Audit log
             AuditLog::log('order', $orderId, null, [
                 'order_number' => $orderNumber,

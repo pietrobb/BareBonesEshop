@@ -50,6 +50,9 @@ return [
     'update_cart'      => 'Update Cart',
 
     // Checkout
+    'checkout.consent_required' => 'Please accept the required consents before placing your order.',
+    'checkout.failed' => 'Please check your checkout details and try again.',
+    'checkout.refresh' => 'Update checkout for this country',
     'order_summary'    => 'Order Summary',
     'billing_address'  => 'Billing Address',
     'shipping_address' => 'Shipping Address',

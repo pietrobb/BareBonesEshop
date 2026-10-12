@@ -38,7 +38,7 @@ function renderCart(): string {
     ]);
 }
 
-function renderCheckout(): string {
+function renderCheckout(?array $failure = null): string {
     global $price, $t, $storeCurrency;
     $cartData = Cart::enriched();
     $cart = $cartData['items'];
@@ -52,25 +52,39 @@ function renderCheckout(): string {
             'breadcrumbs' => $breadcrumbs, 'message' => $t('cart_empty'), 'home_url' => Template::storeUrl('/'), 'continue_label' => $t('continue_shopping'),
         ]);
     }
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['checkout'])) return processCheckout();
+    if ($failure === null && $_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['checkout']) && empty($_POST['checkout_refresh'])) return processCheckout();
 
     $subtotal = (int)$cartData['subtotal'];
     $countryInput = $_POST['country'] ?? 'SK';
     $country = strtoupper(Security::clean(is_string($countryInput) ? $countryInput : 'SK'));
     $shippingInput = $_POST['shipping_method'] ?? '';
-    $quote = ShippingService::cartQuote($cart, $subtotal, $country, is_string($shippingInput) ? Security::clean($shippingInput) : '');
+    $digitalOnly = CheckoutService::isDigitalOnly(array_values(array_filter($cart, static fn(array $item): bool => $item['available'] ?? true)));
+    $digitalRate = $digitalOnly ? CheckoutService::digitalRate() : null;
+    $quote = $digitalOnly
+        ? ['rates' => [$digitalRate], 'selected' => $digitalRate, 'price' => 0, 'hint' => '']
+        : ShippingService::cartQuote($cart, $subtotal, $country, is_string($shippingInput) ? Security::clean($shippingInput) : '');
     $shippingRates = $quote['rates'];
     $selectedRate = $quote['selected'];
     $selectedShipping = (string)($selectedRate['method_code'] ?? '');
     $shipping = $quote['price'];
     $customerId = (int)($_SESSION['customer_id'] ?? 0);
     $paymentMethods = $selectedRate ? PaymentService::availableMethods($country, $storeCurrency, $subtotal + $shipping, (string)$selectedRate['method_code'], $customerId ?: null) : [];
+    $paymentInput = $_POST['payment'] ?? '';
     $selectedPayment = $paymentMethods[0] ?? null;
+    foreach ($paymentMethods as $method) {
+        if (is_string($paymentInput) && $method['code'] === $paymentInput) $selectedPayment = $method;
+    }
     $paymentFee = $selectedPayment ? (int)$selectedPayment['fee'] : 0;
     $freeLabel = $t('free_shipping');
 
     return Template::render('storefront/checkout', [
         'breadcrumbs' => $breadcrumbs, 'title' => $t('checkout_title'), 'csrf_token' => Security::csrfToken(),
+        'error' => $failure ? $t(!empty($failure['consent_errors']) ? 'checkout.consent_required' : 'checkout.failed') : '',
+        'values' => array_combine(['name', 'email', 'phone', 'street', 'city', 'zip', 'notes'], array_map(static fn(string $key): string => is_string($_POST[$key] ?? null) ? $_POST[$key] : '', ['name', 'email', 'phone', 'street', 'city', 'zip', 'notes'])),
+        'address_required' => !$digitalOnly,
+        'country_label' => $t('country'), 'refresh_label' => $t('checkout.refresh'),
+        'country_options' => array_map(static fn(string $code): array => ['code' => $code, 'selected' => $code === $country], array_values(array_unique(['SK', 'CZ', 'DE', 'AT', 'HU', 'PL', $country]))),
+        'consents' => array_values(CheckoutService::consentDefinitions($country, $cart)),
         'contact_label' => $t('contact'), 'name_label' => $t('name'), 'email_label' => $t('email'), 'phone_label' => $t('phone'),
         'address_label' => $t('address'), 'street_label' => $t('street'), 'city_label' => $t('city'), 'zip_label' => $t('zip'),
         'shipping_label' => $t('shipping'), 'shipping_options' => array_map(static fn(array $rate): array => [
@@ -79,10 +93,10 @@ function renderCheckout(): string {
             'checked' => (string)$rate['method_code'] === $selectedShipping,
         ], $shippingRates),
         'shipping_unavailable' => $shippingRates ? '' : $t('shipping_unavailable'), 'free_shipping_hint' => $quote['hint'], 'payment_label' => $t('payment'),
-        'payment_options' => array_map(static fn(array $method, int $index): array => [
+        'payment_options' => array_map(static fn(array $method): array => [
             'code' => (string)$method['code'], 'label' => (string)$method['label'], 'description' => (string)($method['description'] ?: $method['provider']),
-            'fee' => (int)$method['fee'] === 0 ? $freeLabel : $price((int)$method['fee']), 'checked' => $index === 0,
-        ], $paymentMethods, array_keys($paymentMethods)),
+            'fee' => (int)$method['fee'] === 0 ? $freeLabel : $price((int)$method['fee']), 'checked' => $method['code'] === ($selectedPayment['code'] ?? ''),
+        ], $paymentMethods),
         'payment_unavailable' => $paymentMethods ? '' : $t('payment_unavailable'), 'notes_label' => $t('notes'), 'notes_placeholder' => $t('notes_placeholder'),
         'submit_label' => $t('submit_order'), 'your_order_label' => $t('your_order'),
         'items' => array_map(static fn(array $item): array => ['name' => (string)$item['name'], 'quantity' => (int)$item['qty'], 'total' => $price((int)$item['total'])], $cart),
@@ -93,16 +107,17 @@ function renderCheckout(): string {
 }
 
 function processCheckout(): string {
-    if (!Security::csrfValidate()) {
-        return Template::render('storefront/checkout-error', ['home_url' => Template::storeUrl('/'), 'home_label' => 'Domov', 'error_label' => 'Chyba', 'message' => 'CSRF token mismatch.']);
+    if (!is_string($_POST['csrf_token'] ?? null) || !Security::csrfValidate()) {
+        return renderCheckout(['error' => 'checkout.invalid_csrf']);
     }
     if (!Security::rateLimit('checkout', 10)
         || !Security::rateLimit('checkout_global', 200, 60, false)
         || !Security::rateLimit('checkout_session_' . hash('sha256', session_id()), 5, 900, false)) {
-        return Template::render('storefront/checkout-error', ['home_url' => Template::storeUrl('/'), 'home_label' => 'Domov', 'error_label' => 'Chyba', 'message' => 'Príliš veľa pokusov o objednávku. Skúste to neskôr.']);
+        return renderCheckout(['error' => 'checkout.rate_limited']);
     }
 
     $input = $_POST;
+    $input['consents'] = array_map(static fn($value): bool => $value === '1', is_array($input['consents'] ?? null) ? $input['consents'] : []);
     $paymentInput = $input['payment'] ?? 'cod';
     $input['payment_method'] = Security::clean(is_string($paymentInput) ? $paymentInput : 'cod');
     $result = CheckoutService::execute($input, require dirname(__DIR__, 3) . '/config.php');
@@ -115,10 +130,7 @@ function processCheckout(): string {
         exit;
     }
 
-    return Template::render('storefront/checkout-error', [
-        'home_url' => '?', 'home_label' => 'Domov', 'error_label' => 'Chyba',
-        'message' => (string)($result['error'] ?? 'Chyba pri spracovaní objednávky. Skúste to znova.'),
-    ]);
+    return renderCheckout($result);
 }
 
 function renderOrderDone(string $orderNum): string {

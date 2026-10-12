@@ -50,6 +50,9 @@ return array_replace(require __DIR__ . '/en.php', [
     'update_cart'      => 'Aktualizuj koszyk',
 
     // Checkout
+    'checkout.consent_required' => 'Przed złożeniem zamówienia zaakceptuj wymagane zgody.',
+    'checkout.failed' => 'Sprawdź dane zamówienia i spróbuj ponownie.',
+    'checkout.refresh' => 'Zaktualizuj zamówienie dla tego kraju',
     'order_summary'    => 'Podsumowanie zamówienia',
     'billing_address'  => 'Adres rozliczeniowy',
     'shipping_address' => 'Adres dostawy',

@@ -50,6 +50,9 @@ return array_replace(require __DIR__ . '/en.php', [
     'update_cart'      => 'Kosár frissítése',
 
     // Checkout
+    'checkout.consent_required' => 'A rendelés elküldése előtt adja meg a szükséges hozzájárulásokat.',
+    'checkout.failed' => 'Ellenőrizze a rendelési adatokat, és próbálja újra.',
+    'checkout.refresh' => 'Rendelés frissítése ehhez az országhoz',
     'order_summary'    => 'Rendelés összegzése',
     'billing_address'  => 'Számlázási cím',
     'shipping_address' => 'Szállítási cím',
