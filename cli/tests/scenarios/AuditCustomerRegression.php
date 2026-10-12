@@ -58,6 +58,27 @@ try {
     Bootstrap::initStoreContext('/', '', 'default');
     assert_equals(['error' => 'Product not found'], apiProduct(), 'Audit A03: default store cannot read second-store cached product');
 
+    $a03LegacyDir = $a03Root . '/legacy';
+    mkdir($a03LegacyDir, 0700);
+    $a03LegacyName = '20260611213000_add_stock_restored_column';
+    $a03LegacyPath = $a03LegacyDir . '/' . $a03LegacyName . '.php';
+    copy(dirname(TEST_CLI_DIR) . '/migrations/' . $a03LegacyName . '.php', $a03LegacyPath);
+    $a03LegacyDb = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $a03LegacyMigrator = new Migrator($a03LegacyDb, $a03LegacyDir, $a03Root . '/legacy.lock');
+    $a03LegacyMigrator->ensureMigrationsTable();
+    $a03LegacyDb->prepare('INSERT INTO schema_migrations (name, checksum, duration_ms) VALUES (?, ?, 0)')->execute([$a03LegacyName, 'a4803eb5d0df8cfaade336b4d7a3d6e32c08ab4b98f5978efd97847e257ff723']);
+    foreach (['a4803eb5d0df8cfaade336b4d7a3d6e32c08ab4b98f5978efd97847e257ff723', 'b6886c3132db22443fd82679686eae92bdd0d6254c9aacb888176bbd0fbaf76a'] as $a03LegacyChecksum) {
+        $a03LegacyDb->prepare('UPDATE schema_migrations SET checksum = ? WHERE name = ?')->execute([$a03LegacyChecksum, $a03LegacyName]);
+        assert_true($a03LegacyMigrator->status()['applied'][$a03LegacyName]['checksum_ok'], 'Audit A03: exact published stock migration checksum remains accepted');
+        assert_equals([], $a03LegacyMigrator->apply(), 'Audit A03: published stock migration is not rerun after scope repair');
+    }
+    file_put_contents($a03LegacyPath, "\n// unapproved migration version\n", FILE_APPEND);
+    $a03LegacyRejected = false;
+    try { $a03LegacyMigrator->apply(); } catch (RuntimeException $e) { $a03LegacyRejected = str_contains($e->getMessage(), 'modified after being applied'); }
+    assert_true($a03LegacyRejected, 'Audit A03: checksum compatibility still rejects unapproved migration changes');
+    $a03LegacyMigrator = null;
+    $a03LegacyDb = null;
+
     $a03GdprMigration = require dirname(TEST_CLI_DIR) . '/migrations/20260425033813_add_gdpr_tables.php';
     $a03GdprMigration->up($a03Db, true);
     $a03GdprChecks = static function(PDO $a03Db, int $a03Customer, bool $isSqlite): void {
@@ -137,15 +158,20 @@ try {
         $a03NativeDatabase = 'bbe_gdpr_' . bin2hex(random_bytes(6)) . '_test';
         $a03Native->exec("CREATE DATABASE {$a03NativeDatabase}");
         try {
+            $a03Native->exec("CREATE DATABASE {$a03NativeDatabase}_peer_test");
+            $a03Native->exec("CREATE TABLE {$a03NativeDatabase}_peer_test.orders (id INT PRIMARY KEY, stock_restored INT NOT NULL DEFAULT 0)");
             $a03Native->exec("USE {$a03NativeDatabase}");
             Db::init($a03Native, 'mysql');
             (new Migrator($a03Native, dirname(TEST_CLI_DIR) . '/migrations', $a03Root . '/native-migrations.lock'))->apply();
+            assert_equals(1, (int)$a03Native->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='orders' AND COLUMN_NAME='stock_restored'")->fetchColumn(), 'Audit A03: native stock migration ignores same-named columns in another schema');
+            assert_equals([], (new Migrator($a03Native, dirname(TEST_CLI_DIR) . '/migrations', $a03Root . '/native-migrations.lock'))->apply(), 'Audit A03: complete native migration set remains idempotent');
             $a03Native->exec("INSERT INTO customers (store_id, email, password_hash, name, status) VALUES ('default', 'a03-b2b@example.test', '!test!', 'A03 B2B', 'active')");
             $a03NativeCustomer = (int)$a03Native->lastInsertId();
             $a03Native->exec("INSERT INTO orders (order_number, customer_name, customer_email, payment_method, subtotal, total) VALUES ('A03-seed', 'Seed', 'seed@example.test', 'card', 1000, 1000)");
             $a03GdprChecks($a03Native, $a03NativeCustomer, false);
         } finally {
             Db::init($a03Db, 'sqlite');
+            $a03Native->exec("DROP DATABASE IF EXISTS {$a03NativeDatabase}_peer_test");
             $a03Native->exec("DROP DATABASE {$a03NativeDatabase}");
             $a03Native = null;
         }

@@ -29,7 +29,7 @@ return new class {
             }
         } catch (\Throwable $e) {
             // MySQL fallback
-            $stmt = $db->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_NAME=? AND COLUMN_NAME=?");
+            $stmt = $db->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?");
             $stmt->execute([$table, $col]);
             $exists = ((int)$stmt->fetchColumn()) > 0;
         }
