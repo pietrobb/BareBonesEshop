@@ -125,7 +125,7 @@ class AdminIdentity {
         $account = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
         $dummyHash = '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi.';
         $validPassword = password_verify($password, (string)($account['password_hash'] ?? $dummyHash));
-        $locked = $account && $account['locked_until'] !== null && strtotime((string)$account['locked_until']) > time();
+        $locked = $account && $account['locked_until'] !== null && strtotime((string)$account['locked_until'] . ' UTC') > time();
         if (!$account || $account['status'] !== 'active' || $locked || !$validPassword) {
             // Wrong passwords must not lock the account: anyone could lock the
             // owner out. Password guessing is throttled per IP by AdminLoginThrottle;
@@ -167,8 +167,8 @@ class AdminIdentity {
         $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
         $idleSeconds = self::configInt('admin_session_idle_seconds', 1800, 300, 86400);
         if (!$row || $row['account_status'] !== 'active' || $row['device_revoked'] !== null
-            || strtotime((string)$row['expires_at']) <= time()
-            || strtotime((string)$row['last_seen_at']) < time() - $idleSeconds) {
+            || strtotime((string)$row['expires_at'] . ' UTC') <= time()
+            || strtotime((string)$row['last_seen_at'] . ' UTC') < time() - $idleSeconds) {
             if ($row) self::revokeSession((string)$row['id']);
             return null;
         }

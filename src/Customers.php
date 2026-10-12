@@ -274,7 +274,7 @@ class Customers {
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$row) return null;
         if (!empty($row['used_at'])) return null;
-        if (strtotime($row['expires_at']) < time()) return null;
+        if (strtotime($row['expires_at'] . ' UTC') <= time()) return null;
         return (int)$row['customer_id'];
     }
 
@@ -291,7 +291,7 @@ class Customers {
             $find = $db->prepare(
                 "SELECT prt.customer_id FROM password_reset_tokens prt
                  JOIN customers c ON c.id = prt.customer_id
-                 WHERE prt.token = ? AND c.store_id = ? AND prt.used_at IS NULL AND prt.expires_at >= ?"
+                 WHERE prt.token = ? AND c.store_id = ? AND prt.used_at IS NULL AND prt.expires_at > ?"
             );
             $find->execute([$tokenHash, StoreContext::current()->id(), $now]);
             $cid = (int)$find->fetchColumn();
@@ -302,7 +302,7 @@ class Customers {
             $consume = $db->prepare(
                 "UPDATE password_reset_tokens SET used_at = " .
                 (Db::isSqlite() ? "datetime('now')" : "NOW()") .
-                " WHERE token = ? AND used_at IS NULL AND expires_at >= ?"
+                " WHERE token = ? AND used_at IS NULL AND expires_at > ?"
             );
             $consume->execute([$tokenHash, $now]);
             if ($consume->rowCount() !== 1) {

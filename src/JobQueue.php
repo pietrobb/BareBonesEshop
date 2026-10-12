@@ -114,7 +114,7 @@ class JobQueue {
      */
     public static function isReady(array $job): bool {
         if (empty($job['retry_after'])) return true;
-        return strtotime($job['retry_after']) <= time();
+        return strtotime($job['retry_after'] . ' UTC') <= time();
     }
 
     /**

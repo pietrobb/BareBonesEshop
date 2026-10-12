@@ -26,6 +26,7 @@ class Db {
                 PDO::ATTR_EMULATE_PREPARES   => false,
             ]);
             self::$pdo->exec("SET SESSION sql_mode='STRICT_ALL_TABLES,NO_ZERO_DATE'");
+            self::$pdo->exec("SET SESSION time_zone='+00:00'");
         } else {
             $sqlitePath = (string)($cfg['db_sqlite_path'] ?? '');
             $absolute = str_starts_with($sqlitePath, '/')
@@ -57,6 +58,7 @@ class Db {
 
     /** Initialize with an existing PDO (for testing) */
     public static function init(PDO $pdo, string $driver = 'sqlite'): void {
+        if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') $pdo->exec("SET SESSION time_zone='+00:00'");
         self::$pdo = $pdo;
         self::$driver = $driver;
     }
@@ -83,7 +85,7 @@ class Db {
     public static function isSqlite(): bool { return self::driver() === 'sqlite'; }
     public static function isMysql(): bool  { return self::driver() === 'mysql'; }
 
-    /** Current timestamp expression for the active driver */
+    /** Persisted machine timestamps are UTC; PHP's display timezone is unchanged. */
     public static function now(): string {
         return self::isSqlite() ? "datetime('now')" : 'NOW()';
     }

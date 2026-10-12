@@ -468,7 +468,7 @@ class FeedImport {
      * minute matching the cron expression occur in the window (last_sync, now]?
      */
     private static function isDue(string $schedule, string $lastSync): bool {
-        $last = strtotime($lastSync);
+        $last = strtotime($lastSync . ' UTC');
         if (!$last) return true;
 
         $parts = preg_split('/\s+/', trim($schedule));

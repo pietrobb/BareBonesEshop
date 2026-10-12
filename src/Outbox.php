@@ -94,7 +94,7 @@ class Outbox {
             'id' => (string)$event['id'],
             'type' => (string)$event['event_type'],
             'source' => 'bareboneseshop/' . (string)$event['store_id'],
-            'time' => gmdate('c', strtotime((string)$event['occurred_at'])),
+            'time' => gmdate('c', strtotime((string)$event['occurred_at'] . ' UTC')),
             'datacontenttype' => 'application/json',
             'subject' => (string)$event['aggregate_type'] . '/' . (string)$event['aggregate_id'],
             'bbeversion' => (int)$event['event_version'],

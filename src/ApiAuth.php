@@ -16,7 +16,11 @@ class ApiAuth {
         }
         $scopes = self::normalizeScopes($scopes);
         if ($scopes === []) throw new InvalidArgumentException('API client needs at least one scope');
-        if ($expiresAt !== null && strtotime($expiresAt) === false) throw new InvalidArgumentException('Invalid API client expiry');
+        if ($expiresAt !== null) {
+            $expiry = trim($expiresAt) === '' ? false : strtotime($expiresAt . ' UTC');
+            if ($expiry === false) throw new InvalidArgumentException('Invalid API client expiry');
+            $expiresAt = gmdate('Y-m-d H:i:s', $expiry);
+        }
 
         $keyId = bin2hex(random_bytes(6));
         $token = 'bbe_' . $keyId . '_' . bin2hex(random_bytes(32));
@@ -47,7 +51,7 @@ class ApiAuth {
         if (!$client || !hash_equals((string)$client['token_hash'], $actualHash)) {
             throw new ApiAuthException('Invalid bearer credential');
         }
-        if (!empty($client['expires_at']) && strtotime((string)$client['expires_at']) < time()) {
+        if (!empty($client['expires_at']) && strtotime((string)$client['expires_at'] . ' UTC') <= time()) {
             throw new ApiAuthException('Expired bearer credential');
         }
         $client['scopes'] = self::normalizeScopes(json_decode((string)$client['scopes'], true) ?: []);
