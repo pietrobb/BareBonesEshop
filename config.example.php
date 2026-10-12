@@ -123,6 +123,18 @@ return [
         'worker_cron' => '', // e.g. * * * * *; install it in the platform scheduler too
         'monitor_cron' => '', // e.g. */5 * * * * php cli/monitor.php
     ],
+    // Technical incidents only; normal checkout validation never sends mail.
+    // Run worker + monitor cron. Mail 'log' is simulation, not delivery evidence.
+    'incident_alerts' => [
+        'enabled' => false,
+        'recipients' => [], // merchant_notifications.recipients, then admin_email
+        'locale' => '',
+        'window_seconds' => 900,
+        'checkout_failures' => 3,
+        'cooldown_seconds' => 900,
+        'lease_seconds' => 300,
+        'heartbeat_max_age_seconds' => 300,
+    ],
     'monitoring' => [
         'backup_rpo_seconds' => 86400,
         'queue_pending_warning' => 100,

@@ -99,12 +99,12 @@ class Orders {
 
             if (!empty($outOfStock)) {
                 $db->rollBack();
-                throw new \RuntimeException('Out of stock: ' . implode(', ', $outOfStock));
+                throw new OrderRejectedException('Out of stock: ' . implode(', ', $outOfStock));
             }
 
             if (empty($orderItems)) {
                 $db->rollBack();
-                throw new \RuntimeException('No items in order');
+                throw new OrderRejectedException('No items in order');
             }
 
             // 2. Freeze the canonical checkout calculation. New checkout calls must

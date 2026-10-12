@@ -101,8 +101,15 @@ class MailService {
             ],
         ];
 
-        $result = $adapter->send($msg);
+        try {
+            $result = $adapter->send($msg);
+        } catch (Throwable $e) {
+            $result = ['status' => 'failed', 'message' => 'Mail adapter failed'];
+        }
         self::logUpdate($logId, $result['status'] ?? 'failed', $result['message'] ?? '');
+        if (($result['status'] ?? '') !== 'sent' && $template !== 'merchant_incident') {
+            IncidentMonitor::report('mail.delivery_failed', 'mail', 'critical', $orderId !== null ? ['order_id' => $orderId] : []);
+        }
 
         return [
             'status'  => $result['status'] ?? 'failed',

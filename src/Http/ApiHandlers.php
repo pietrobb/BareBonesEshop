@@ -525,7 +525,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
             $vatIdValid  = ($vatRes['status'] === 'valid');
             $vatIdStatus = $vatRes['status'];
         } catch (\Throwable $e) {
-            error_log("VAT ID validation failed [{$vatId}]: " . $e->getMessage());
+            IncidentMonitor::report('checkout.vat_verification_failed', 'tax', 'warning', ['exception' => $e]);
             $vatIdStatus = 'unverified';
         }
         // Persist VAT ID on logged-in customer so future orders remember it
@@ -698,11 +698,15 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         $confirmationToken = CheckoutSession::createConfirmation($orderId, CheckoutSession::browserSessionId());
         // For COD/bank_transfer: send confirmation immediately (no webhook will fire)
         // For Stripe: confirmation email is sent from the webhook after payment is confirmed
-        if (!$freeDigitalOrder && empty($selectedPayment['requires_online'])) {
-            JobQueue::push('email_send', ['template' => 'order_confirmation', 'to' => $email, 'order_id' => $orderId]);
+        try {
+            if (!$freeDigitalOrder && empty($selectedPayment['requires_online'])) {
+                JobQueue::push('email_send', ['template' => 'order_confirmation', 'to' => $email, 'order_id' => $orderId]);
+            }
+            // Merchant hears about every order at creation, including unpaid bank transfers.
+            JobQueue::push('merchant_notify', ['order_id' => $orderId, 'event' => 'created'], 6);
+        } catch (Throwable $e) {
+            IncidentMonitor::report('checkout.notification_failed', 'notification', 'critical', ['order_id' => $orderId, 'exception' => $e]);
         }
-        // Merchant hears about every order at creation, including unpaid bank transfers.
-        JobQueue::push('merchant_notify', ['order_id' => $orderId, 'event' => 'created'], 6);
 
         $result = [
             'success'      => true,
@@ -742,15 +746,15 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
                 }
             } catch (\Throwable $e) {
                 // Payment adapter error — order still created, log and return
-                error_log("Payment session creation failed for order #{$orderId}: " . $e->getMessage());
+                IncidentMonitor::report('payment.session_failed', 'payment', 'critical', ['order_id' => $orderId, 'exception' => $e]);
                 $result['payment_error'] = 'Payment processing unavailable. Please try again.';
             }
         }
 
         return $result;
-    } catch (\RuntimeException $e) {
+    } catch (OrderRejectedException $e) {
         Cart::removeUnavailable([]);
-        return ['success' => false, 'error' => $e->getMessage()];
+        return ['success' => false, 'error' => I18n::t('stock_changed')];
     }
 }
 
@@ -863,7 +867,7 @@ function apiWebhookStripe(): array {
     } catch (\Throwable $e) {
         // Unmark so Stripe can retry the webhook
         Idempotency::unmark($eventKey);
-        error_log("Webhook error [{$event['type']}]: {$e->getMessage()}\n" . $e->getTraceAsString());
+        IncidentMonitor::report('payment.webhook_failed', 'webhook', 'critical', ['exception' => $e]);
         http_response_code(500);
         return ['error' => 'Processing failed'];
     }
@@ -1067,7 +1071,7 @@ function apiWebhookPayment(): array {
             http_response_code(400);
             return ['error' => 'Invalid signature'];
         }
-        error_log("webhook_payment [{$provider}] error: " . $e->getMessage());
+        IncidentMonitor::report('payment.webhook_failed', 'webhook', 'critical', ['exception' => $e]);
         http_response_code(500);
         return ['error' => 'Processing failed'];
     }
@@ -1108,7 +1112,7 @@ function apiWebhookShipping(): array {
             http_response_code(400);
             return ['error' => 'Invalid signature'];
         }
-        error_log("webhook_shipping [{$carrier}] error: " . $e->getMessage());
+        IncidentMonitor::report('shipping.webhook_failed', 'webhook', 'critical', ['exception' => $e]);
         http_response_code(500);
         return ['error' => 'Processing failed'];
     }

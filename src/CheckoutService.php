@@ -26,6 +26,12 @@ class CheckoutService {
                 return ['success' => false, 'error' => I18n::t('checkout.failed'), 'error_code' => 'checkout.invalid_input'];
             }
         }
-        return checkoutExecute($input, $runtimeConfig);
+        try {
+            return checkoutExecute($input, $runtimeConfig);
+        } catch (Throwable $e) {
+            IncidentMonitor::report('checkout.failed', 'checkout', 'error', ['exception' => $e]);
+            http_response_code(503);
+            return ['success' => false, 'error' => I18n::t('checkout.failed'), 'error_code' => 'checkout.failed', 'correlation_id' => Logger::correlationId()];
+        }
     }
 }

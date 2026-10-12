@@ -8,10 +8,7 @@ class Logger
     public static function correlationId(): string
     {
         if (self::$correlationId !== null) return self::$correlationId;
-        $provided = (string)($_SERVER['HTTP_X_REQUEST_ID'] ?? '');
-        self::$correlationId = preg_match('/^[A-Za-z0-9._-]{8,80}$/', $provided)
-            ? $provided
-            : bin2hex(random_bytes(12));
+        self::$correlationId = bin2hex(random_bytes(12));
         return self::$correlationId;
     }
 
@@ -23,18 +20,18 @@ class Logger
         self::$correlationId = $id;
     }
 
-    public static function info(string $event, array $context = []): void { self::write('info', $event, $context); }
-    public static function warning(string $event, array $context = []): void { self::write('warning', $event, $context); }
-    public static function error(string $event, array $context = []): void { self::write('error', $event, $context); }
+    public static function info(string $event, array $context = []): void { self::safeWrite('info', $event, $context); }
+    public static function warning(string $event, array $context = []): void { self::safeWrite('warning', $event, $context); }
+    public static function error(string $event, array $context = []): void { self::safeWrite('error', $event, $context); }
 
     public static function exception(string $event, Throwable $exception, array $context = []): void
     {
-        $context['exception'] = get_class($exception);
-        $context['message'] = $exception->getMessage();
+        $context['exception'] = get_debug_type($exception);
+        // Exception messages may contain customer input, SQL values or provider secrets.
         self::error($event, $context);
     }
 
-    public static function write(string $level, string $event, array $context = []): void
+    public static function write(string $level, string $event, array $context = []): bool
     {
         if (!preg_match('/^[a-z][a-z0-9_.-]{1,79}$/', $event)) {
             throw new InvalidArgumentException('Invalid structured log event');
@@ -54,20 +51,35 @@ class Logger
         $path = trim((string)($cfg['structured_log_file'] ?? ($runtimeDir !== '' ? $runtimeDir . '/logs/application.jsonl' : '')));
         if ($path === '' || !self::isPrivateAbsolutePath($path)) {
             error_log(rtrim($line));
-            return;
+            return false;
         }
         $dir = dirname($path);
-        if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) {
+        if (!is_dir($dir) && !@mkdir($dir, 0750, true) && !is_dir($dir)) {
             error_log(rtrim($line));
-            return;
+            return false;
         }
-        if (file_put_contents($path, $line, FILE_APPEND | LOCK_EX) === false) error_log(rtrim($line));
+        if (@file_put_contents($path, $line, FILE_APPEND | LOCK_EX) !== strlen($line)) {
+            error_log(rtrim($line));
+            return false;
+        }
+        return true;
+    }
+
+    public static function safeWrite(string $level, string $event, array $context = []): bool
+    {
+        try {
+            return self::write($level, $event, $context);
+        } catch (Throwable $e) {
+            // Do not call the logger recursively when its own storage is unavailable.
+            try { @error_log('BareBones operational log unavailable'); } catch (Throwable $ignored) {}
+            return false;
+        }
     }
 
     public static function redact(array $value): array
     {
         foreach ($value as $key => &$item) {
-            if (preg_match('/(?:secret|token|password|authorization|api[_-]?key|credential|cookie)/i', (string)$key)) {
+            if (preg_match('/(?:secret|token|password|authorization|api[_-]?key|credential|cookie|payload|post|message|errors|(?:^|_)(?:name|email|address|ip|session|card|pan|cvv)(?:$|_))/i', (string)$key)) {
                 $item = '[REDACTED]';
             } elseif (is_array($item)) {
                 $item = self::redact($item);

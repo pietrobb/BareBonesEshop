@@ -52,6 +52,7 @@ class OperationalDashboard {
             'failed_mail' => $mail,
             'payment_incidents' => $payments,
             'webhook_incidents' => $webhooks,
+            'incident_monitor' => IncidentMonitor::snapshot($storeId),
         ];
     }
 

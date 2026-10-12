@@ -11,6 +11,13 @@ require_once __DIR__ . '/cli-only.php';
  */
 require_once __DIR__ . '/../src/autoload.php';
 
+set_exception_handler(static function (Throwable $e): void {
+    IncidentMonitor::heartbeat('worker', 'failed');
+    IncidentMonitor::report('worker.unhandled_failed', 'worker', 'critical', ['exception' => $e]);
+    fwrite(STDERR, "worker.unhandled_failed\n");
+    exit(1);
+});
+
 $once = in_array('--once', $argv ?? []);
 $verbose = in_array('--verbose', $argv ?? []);
 
@@ -52,6 +59,7 @@ $handlers = [
     'digital_fulfill'   => 'handleDigitalFulfill',
     'digital_revoke'    => 'handleDigitalRevoke',
     'merchant_notify'   => 'handleMerchantNotify',
+    'incident_notify'   => static fn(array $payload): int => IncidentMonitor::notify((string)($payload['fingerprint'] ?? '')),
 ];
 
 // Release abandoned online reservations on every cron worker run. Provider
@@ -101,6 +109,14 @@ try {
     Logger::exception('worker.stock_digest_failed', $e);
 }
 
+$monitorStore = StoreContext::current();
+foreach (Bootstrap::stores()['stores'] ?? [] as $monitorStoreCode => $_) {
+    Bootstrap::initStoreContext('/', '', (string)$monitorStoreCode);
+    IncidentMonitor::heartbeat('worker', 'running');
+    IncidentMonitor::sweep();
+}
+StoreContext::activate($monitorStore);
+
 // Process loop
 $maxRuntime = 55; // seconds (cron runs every minute)
 $startTime = time();
@@ -143,7 +159,7 @@ do {
                 (string)($payload['_store_id'] ?? 'default'),
                 (string)($payload['_channel_id'] ?? 'storefront')
             );
-            if ($handler && function_exists($handler)) {
+            if ($handler && is_callable($handler)) {
                 $handler($payload, $job);
             } else {
                 throw new \RuntimeException("Unknown job type: {$type}");
@@ -155,9 +171,14 @@ do {
             if ($verbose) echo "    [OK]\n";
 
         } catch (\Throwable $e) {
-            JobQueue::fail($procFile, $job, $e->getMessage());
-            if ($verbose) echo "    [FAIL] {$e->getMessage()}\n";
-            Logger::exception('worker.job_failed', $e, ['job_id' => $job['id'] ?? '', 'job_type' => $type]);
+            try {
+                JobQueue::fail($procFile, $job, 'worker.job_failed');
+            } catch (Throwable $retryError) {
+                if ($type !== 'incident_notify') IncidentMonitor::report('worker.retry_failed', 'worker', 'critical', ['exception' => $retryError]);
+            }
+            if ($verbose) echo "    [FAIL] worker.job_failed\n";
+            if ($type === 'incident_notify') Logger::safeWrite('error', 'monitoring.notification_failed', ['phase' => 'notification']);
+            else IncidentMonitor::report($type === 'digital_fulfill' ? 'digital.fulfillment_failed' : 'worker.job_failed', $type === 'digital_fulfill' ? 'digital' : 'worker', 'critical', ['exception' => $e, 'attempts' => (int)($job['attempts'] ?? 0)]);
         }
     }
 
@@ -403,7 +424,8 @@ function handleEmailSend(array $payload, array $job): void {
     // Retry with the provider frozen on the order; legacy jobs use the current default.
     $providerCode = (string)($payload['_provider_code'] ?? ($order ? orderProviderCode($order, 'mail') : ''));
     if ($providerCode === '') $providerCode = Adapters::defaultProviderCode('mail');
-    MailService::send($template, $to, $locale, $vars, $orderId !== null ? (int)$orderId : null, [], $providerCode);
+    $result = MailService::send($template, $to, $locale, $vars, $orderId !== null ? (int)$orderId : null, [], $providerCode);
+    if (($result['status'] ?? '') === 'failed') throw new RuntimeException('mail.delivery_failed');
 }
 
 function handleDigitalFulfill(array $payload, array $job): void {

@@ -51,6 +51,18 @@ function pageDashboard(): void {
 
     <div class="card">
         <h3>Operations</h3>
+        <?php $monitor = $operations['incident_monitor']; ?>
+        <p>Incident monitoring: <?= $monitor['enabled'] ? 'enabled' : 'disabled' ?> · Evidence storage: <?= $monitor['available'] ? 'available' : 'unavailable' ?></p>
+        <p>Worker cron (configured): <?= esc($monitor['worker_cron']) ?> · Monitor cron (configured): <?= esc($monitor['monitor_cron']) ?></p>
+        <div class="table-scroll"><table><tr><th>Probe</th><th>Observed status</th><th>Observed at (UTC)</th></tr>
+        <?php foreach ($monitor['probes'] as $probe): ?><tr><td><?= esc($probe['probe']) ?></td><td><?= esc($probe['status']) ?><?= $probe['stale'] ? ' (stale)' : '' ?></td><td><?= esc(gmdate('c', (int)$probe['checked_at'])) ?></td></tr><?php endforeach; ?>
+        </table></div>
+        <div class="table-scroll"><table><tr><th>Code</th><th>Phase</th><th>Severity</th><th>Correlation</th><th>Time (UTC)</th></tr>
+        <?php foreach ($monitor['incidents'] as $incident): ?><tr><td><?= esc($incident['code']) ?></td><td><?= esc($incident['phase']) ?></td><td><?= esc($incident['severity']) ?></td><td><code><?= esc($incident['correlation_id']) ?></code></td><td><?= esc(gmdate('c', (int)$incident['occurred_at'])) ?></td></tr><?php endforeach; ?>
+        </table></div>
+        <div class="table-scroll"><table><tr><th>Code</th><th>Count</th><th>Notification</th><th>Last adapter acceptance (UTC)</th></tr>
+        <?php foreach ($monitor['notifications'] as $notification): ?><tr><td><?= esc($notification['code']) ?></td><td><?= (int)$notification['occurrences'] ?></td><td><?= esc($notification['notification_status']) ?></td><td><?= $notification['last_notification_at'] ? esc(gmdate('c', (int)$notification['last_notification_at'])) : 'not observed' ?></td></tr><?php endforeach; ?>
+        </table></div>
         <div class="grid grid-4">
             <div class="stat"><div class="num"><?= (int)$operations['counts']['failed_jobs'] ?></div><div class="label">Failed jobs</div></div>
             <div class="stat"><div class="num"><?= (int)$operations['counts']['failed_mail'] ?></div><div class="label">Failed mail</div></div>

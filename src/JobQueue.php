@@ -251,7 +251,7 @@ class JobQueue {
     }
 
     private static function ensureDirectory(string $dir): void {
-        if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) {
+        if (!is_dir($dir) && !@mkdir($dir, 0750, true) && !is_dir($dir)) {
             throw new RuntimeException("JobQueue: cannot create directory {$dir}");
         }
         $canonical = realpath($dir);
@@ -273,7 +273,7 @@ class JobQueue {
     private static function writeJson(string $file, array $job, bool $exclusive = false): void {
         $json = json_encode($job, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         $target = $exclusive ? $file : $file . '.tmp-' . bin2hex(random_bytes(6));
-        $handle = fopen($target, 'x');
+        $handle = @fopen($target, 'x');
         if ($handle === false) {
             throw new RuntimeException("JobQueue: cannot open {$target}");
         }
