@@ -30,7 +30,7 @@ async function checkout(page, email) {
   await page.locator('input[name="zip"]').fill('81101');
   await expect(page.locator('input[name="shipping_method"]').first()).toBeVisible();
   await expect(page.locator('input[name="payment"]').first()).toBeVisible();
-  await page.locator('form.checkout-form button[type="submit"]').click();
+  await page.locator('form.checkout-form button.btn-checkout[type="submit"]').click();
   await expect(page).toHaveURL(/page=order-done/);
   await expect(page.locator('.order-done > p strong')).not.toBeEmpty();
   const successUrl = new URL(page.url());
