@@ -109,7 +109,7 @@ return [
         // 'erp' => 'money',
     ],
     'providers' => [
-        'payment' => [], // stripe/payu/mock are built in; register a custom gateway as code => ['class' => <your PaymentAdapter class>]
+        'payment' => [], // stripe/payu/gopay/mock are built in; register a custom gateway as code => ['class' => <your PaymentAdapter class>]
         'shipping' => [],
         'mail' => [],
         'tax' => [],
@@ -186,6 +186,13 @@ return [
     'stripe_secret_key'      => '',
     'stripe_publishable_key' => '',
     'stripe_webhook_secret'  => '',
+
+    // GoPay (provider code gopay). Notifications need no secret: each one is verified by an
+    // authenticated payment inquiry. Env PAY_GOPAY_* overrides these values.
+    'gopay_goid'          => '',
+    'gopay_client_id'     => '',
+    'gopay_client_secret' => '',
+    'gopay_env'           => 'sandbox', // 'production' uses gate.gopay.cz
 
     // Digital files are stored below this directory; digital_assets.storage_path
     // contains only a relative path such as ebooks/manual.pdf.

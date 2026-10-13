@@ -10,6 +10,8 @@ class Adapters {
         'payment' => [
             'stripe' => ['class' => 'StripePayment', 'capabilities' => ['checkout', 'status', 'webhook', 'refund'], 'signature_header' => 'HTTP_STRIPE_SIGNATURE'],
             'payu' => ['class' => 'PayUPayment', 'capabilities' => ['checkout', 'status', 'webhook', 'refund'], 'signature_header' => 'HTTP_OPENPAYU_SIGNATURE'],
+            // Unsigned GET notifications, each verified by an authenticated payment inquiry.
+            'gopay' => ['class' => 'GoPayPayment', 'capabilities' => ['checkout', 'status', 'webhook', 'refund'], 'notification' => 'pull'],
             'mock' => ['class' => 'MockPayment', 'capabilities' => ['checkout', 'status', 'webhook', 'refund'], 'signature_header' => 'HTTP_X_MOCK_SIGNATURE'],
             'cod' => ['class' => 'CashOnDelivery', 'capabilities' => ['checkout', 'status', 'refund']],
         ],

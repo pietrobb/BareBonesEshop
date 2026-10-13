@@ -90,4 +90,7 @@ foreach (array_unique($a112Names[1]) as $a112Name) {
 preg_match_all("/=>\s*'([A-Za-z]+Payment)'/", (string)file_get_contents($a112Root . '/config.example.php'), $a112ConfigNames);
 $a112Missing = array_values(array_filter(array_unique(array_merge($a112Named, $a112ConfigNames[1])), static fn(string $class): bool => !is_file($a112Root . '/adapters/contrib/' . $class . '.php')));
 assert_equals([], $a112Missing, 'A11.2 PaymentAdapter/config.example: no non-existent payment adapters advertised');
-assert_true(!preg_match('/PayPalPayment|GoPay|TatraPay/', $a112Design), 'A11.2 ESHOP-DESIGN: payment contract does not advertise non-existent adapters');
+preg_match_all('/\b([A-Z][A-Za-z]+Payment)\b/', $a112Design, $a112DesignNames);
+$a112DesignMissing = array_values(array_filter(array_unique($a112DesignNames[1]), static fn($name) => $name !== 'PaymentAdapter' && !is_file($a112Root . '/adapters/contrib/' . $name . '.php')));
+assert_equals([], $a112DesignMissing, 'A11.2 ESHOP-DESIGN: payment contract does not advertise non-existent adapters');
+assert_true(!preg_match('/PayPal|TatraPay/', $a112Design), 'A11.2 ESHOP-DESIGN: no PayPal/TatraPay adapter advertised');

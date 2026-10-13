@@ -195,7 +195,19 @@ class PaymentService {
         }
 
         // 2. Parse provider-specific event
-        $event     = $gateway->handleWebhook($parsedPayload);
+        return self::processEvent($gateway->handleWebhook($parsedPayload), $providerName);
+    }
+
+    /**
+     * Process an unsigned provider notification that only references a payment. The event is
+     * built from the provider's authenticated API (never from the request), then follows the
+     * same dedup, routing and state machine as signed webhooks.
+     */
+    public static function handlePulledNotification(array $notification, PullVerifiedNotificationAdapter $gateway, string $providerName): array {
+        return self::processEvent($gateway->verifiedEvent($notification), $providerName);
+    }
+
+    private static function processEvent(array $event, string $providerName): array {
         $eventType = $event['event_type'] ?? '';
         $eventId   = (string)($event['event_id'] ?? '');
         $data      = $event['data'] ?? [];
@@ -455,7 +467,11 @@ class PaymentService {
                 'order_number' => (string)($data['extOrderId'] ?? ''),
                 'payment_id' => (string)($data['orderId'] ?? ''),
             ]),
-            default => [],
+            // Other adapters report the shop's order number and their payment id under these keys.
+            default => array_filter([
+                'order_number' => (string)($data['order_number'] ?? ''),
+                'payment_id' => (string)($data['payment_id'] ?? ''),
+            ]),
         };
     }
 

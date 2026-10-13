@@ -767,6 +767,8 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
                     'financial_snapshot_id' => $financialSnapshot['fingerprint'],
                     'success_url'    => $baseUrl . '/?page=order-done&order=' . rawurlencode($order['order_number']) . '&confirmation_token=' . rawurlencode($confirmationToken) . '&session_id={CHECKOUT_SESSION_ID}',
                     'cancel_url'     => $baseUrl . '/?page=checkout-cancel&order=' . rawurlencode($order['order_number']),
+                    // Provider-specific notification endpoint (PayU notifyUrl, GoPay notification_url, ...).
+                    'notify_url'     => $baseUrl . '/api.php?action=webhook_payment&provider=' . rawurlencode($paymentProvider),
                 ], $payment, $paymentProvider);
                 $result['payment_url'] = $session['url'];
                 $result['session_id'] = $session['session_id'];
@@ -1086,6 +1088,8 @@ function apiWebhookPayment(): array {
     }
     // Both Stripe URLs must use the same verified processing and claim/retry path.
     if ($provider === 'stripe') return apiWebhookStripe();
+    $pulled = apiWebhookPulledNotification($provider);
+    if ($pulled !== null) return $pulled;
 
     $rawPayload = file_get_contents('php://input');
     if (!$rawPayload) {
@@ -1139,6 +1143,36 @@ function apiWebhookPayment(): array {
         return ['error' => 'Processing failed'];
     }
 
+    if (isset($result['parked'])) return paymentWebhookParkedResponse($result['parked']);
+    return ['status' => $result['duplicate'] ?? false ? 'already_processed' : 'ok'];
+}
+
+/**
+ * Unsigned reference notifications (GoPay GET ?id=…): answered only for providers that verify
+ * every notification through their authenticated API. Returns null for signed-webhook providers.
+ * 400 = the provider does not confirm the payment (nothing changes); 500 = retry later.
+ */
+function apiWebhookPulledNotification(string $provider): ?array {
+    try {
+        if (!isset(Adapters::registry('payment')[$provider])) return null;
+        $gateway = Adapters::payment($provider);
+    } catch (\Throwable $e) {
+        return null;
+    }
+    if (!$gateway instanceof PullVerifiedNotificationAdapter) return null;
+
+    $notification = array_diff_key($_GET, ['action' => true, 'provider' => true]) + array_diff_key($_POST, ['action' => true, 'provider' => true]);
+    try {
+        $result = PaymentService::handlePulledNotification($notification, $gateway, $provider);
+    } catch (PaymentNotificationUnverified $e) {
+        error_log("webhook_payment [{$provider}] unverified notification: " . $e->getMessage());
+        http_response_code(400);
+        return ['error' => 'Invalid notification'];
+    } catch (\Throwable $e) {
+        error_log("webhook_payment [{$provider}] error: " . $e->getMessage());
+        http_response_code(500);
+        return ['error' => 'Processing failed'];
+    }
     if (isset($result['parked'])) return paymentWebhookParkedResponse($result['parked']);
     return ['status' => $result['duplicate'] ?? false ? 'already_processed' : 'ok'];
 }
