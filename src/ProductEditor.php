@@ -4,8 +4,7 @@
  * translations. Everything is checked against the active store's catalog before anything is written.
  */
 final class ProductEditor {
-    public const TRANSLATION_FIELDS = ['name' => 'Názov', 'slug' => 'URL slug', 'summary' => 'Krátky popis', 'description' => 'Popis (HTML)',
-        'seo_title' => 'SEO titulok', 'meta_description' => 'Meta popis'];
+    public const TRANSLATION_FIELDS = ['name', 'slug', 'summary', 'description', 'seo_title', 'meta_description'];
     private const MAX_LENGTH = ['name' => 255, 'slug' => 255, 'summary' => 2000, 'description' => 65535, 'seo_title' => 255, 'meta_description' => 2000, 'mpn' => 70];
     private const MAX_IMAGES = 50;
     private const MAX_ALT = 255;
@@ -43,27 +42,27 @@ final class ProductEditor {
      */
     public static function validate(array $form, array $post, int $id, ?array $old): array|string {
         $slug = Security::slug($form['slug'] !== '' ? $form['slug'] : $form['name']);
-        if ($slug === '') return 'Slug sa nedá vytvoriť z názvu; zadajte ho ručne.';
+        if ($slug === '') return I18n::t('admin.msg.product.slug_from_name');
         $db = Db::get();
         foreach (['slug' => $slug, 'sku' => (string)$form['sku']] as $column => $value) {
             $taken = $db->prepare("SELECT 1 FROM products WHERE {$column} = :value AND id != :id");
             $taken->execute([':value' => $value, ':id' => $id ?: -1]);
-            if ($taken->fetchColumn()) return strtoupper($column) . " \"{$value}\" už používa iný produkt.";
+            if ($taken->fetchColumn()) return I18n::format('admin.msg.product.taken', ['column' => strtoupper($column), 'value' => $value]);
         }
         $images = self::parseImages((string)$form['images']);
         if (is_string($images)) return $images;
         [$imageUrls, $imageAlts] = $images;
         $gtin = self::gtin((string)$form['gtin']);
-        if ($gtin === null) return 'GTIN/EAN musí mať 8, 12, 13 alebo 14 číslic a platnú kontrolnú číslicu.';
+        if ($gtin === null) return I18n::t('admin.msg.product.gtin');
         foreach (['mpn' => 70, 'seo_title' => 255, 'meta_description' => 2000] as $field => $max) {
-            if (mb_strlen(trim((string)$form[$field])) > $max) return "Pole {$field} môže mať najviac {$max} znakov.";
+            if (mb_strlen(trim((string)$form[$field])) > $max) return I18n::format('admin.msg.product.field_long', ['field' => $field, 'max' => $max]);
         }
         $primary = Security::int($form['category_id']);
         $owned = array_map('intval', array_column(CatalogScope::categories(), 'id'));
         $submitted = $post['extra_category_ids'] ?? [];
-        if (!is_array($submitted) || array_filter($submitted, static fn($v): bool => !is_scalar($v))) return 'Neplatné ďalšie kategórie.';
+        if (!is_array($submitted) || array_filter($submitted, static fn($v): bool => !is_scalar($v))) return I18n::t('admin.msg.product.extra_invalid');
         $extra = array_values(array_diff(array_unique(array_map('intval', $submitted)), [$primary]));
-        if (array_diff($extra, $owned)) return 'Ďalšia kategória nepatrí do katalógu tohto obchodu.';
+        if (array_diff($extra, $owned)) return I18n::t('admin.msg.product.extra_foreign');
 
         $translations = self::translations($post['tr'] ?? [], json_decode((string)($old['translations'] ?? '{}'), true) ?: [], $imageUrls);
         if (is_string($translations)) return $translations;
@@ -73,7 +72,7 @@ final class ProductEditor {
         foreach (array_filter($slugs, 'strlen') as $locale => $localeSlug) {
             $registered->execute([':slug' => $localeSlug, ':locale' => $locale, ':id' => $id ?: -1]);
             $baseSlug->execute([':slug' => $localeSlug, ':id' => $id ?: -1]);
-            if ($registered->fetchColumn() || $baseSlug->fetchColumn()) return "Slug \"{$localeSlug}\" ({$locale}) už používa iný produkt.";
+            if ($registered->fetchColumn() || $baseSlug->fetchColumn()) return I18n::format('admin.msg.product.locale_slug_taken', ['slug' => $localeSlug, 'locale' => $locale]);
         }
         $optional = static fn($v): ?string => trim((string)$v) === '' ? null : trim((string)$v);
         return [
@@ -120,13 +119,13 @@ final class ProductEditor {
             $parts = array_map('trim', explode('|', $line, 2));
             [$url, $alt] = [$parts[0], $parts[1] ?? ''];
             if ($url === '') continue;
-            if (!self::validImageUrl($url)) return "Neplatná adresa obrázka: {$url}";
-            if (mb_strlen($alt) > self::MAX_ALT) return 'Alt text obrázka môže mať najviac ' . self::MAX_ALT . ' znakov.';
+            if (!self::validImageUrl($url)) return I18n::format('admin.msg.product.image_url', ['url' => $url]);
+            if (mb_strlen($alt) > self::MAX_ALT) return I18n::format('admin.msg.product.alt_long', ['max' => self::MAX_ALT]);
             if (in_array($url, $urls, true)) continue;
             $urls[] = $url;
             if ($alt !== '') $alts[$url] = $alt;
         }
-        if (count($urls) > self::MAX_IMAGES) return 'Produkt môže mať najviac ' . self::MAX_IMAGES . ' obrázkov.';
+        if (count($urls) > self::MAX_IMAGES) return I18n::format('admin.msg.product.images_max', ['max' => self::MAX_IMAGES]);
         return [$urls, $alts];
     }
 
@@ -135,7 +134,7 @@ final class ProductEditor {
         $dimensions = @getimagesize($upload['tmp_name']);
         $valid = is_array($dimensions) && $dimensions[0] > 0 && $dimensions[1] > 0
             && $dimensions[0] <= 12000 && $dimensions[1] <= 12000 && $dimensions[0] * $dimensions[1] <= 40000000;
-        if (!$valid) return 'Obrázok je neplatný alebo má príliš veľké rozmery.';
+        if (!$valid) return I18n::t('admin.msg.product.image_invalid');
         $extension = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'][$upload['type']];
         $path = self::uploadPath($sku, $extension);
         $bytes = file_get_contents($upload['tmp_name']);
@@ -227,29 +226,29 @@ final class ProductEditor {
      * tr[locale][image_alts] holds "URL | alt" lines for images of the product; alts of removed images are dropped in every locale.
      */
     private static function translations(mixed $posted, array $translations, array $imageUrls): array|string {
-        if (!is_array($posted)) return 'Neplatné preklady.';
+        if (!is_array($posted)) return I18n::t('admin.msg.translations_invalid');
         $locales = self::locales();
         $slugs = [];
         foreach ($posted as $locale => $fields) {
             $locale = (string)$locale;
-            if (!in_array($locale, $locales, true) || !is_array($fields)) return "Preklad pre jazyk \"{$locale}\" nie je v tomto obchode povolený.";
+            if (!in_array($locale, $locales, true) || !is_array($fields)) return I18n::format('admin.msg.locale_refused', ['locale' => $locale]);
             $entry = is_array($translations[$locale] ?? null) ? $translations[$locale] : [];
-            foreach (array_keys(self::TRANSLATION_FIELDS) as $field) {
+            foreach (self::TRANSLATION_FIELDS as $field) {
                 $value = $fields[$field] ?? '';
-                if (!is_scalar($value)) return 'Neplatný preklad.';
+                if (!is_scalar($value)) return I18n::t('admin.msg.product.tr_invalid');
                 $value = trim((string)$value);
                 if ($field === 'description' && $value !== '') $value = Security::sanitizeRichHtml($value);
                 if ($field === 'slug') {
                     $name = is_scalar($fields['name'] ?? null) ? trim((string)$fields['name']) : '';
                     $value = $value !== '' || $name !== '' ? Security::slug($value !== '' ? $value : $name) : '';
                 }
-                if (mb_strlen($value) > self::MAX_LENGTH[$field]) return "Preklad {$locale}/{$field} je príliš dlhý.";
+                if (mb_strlen($value) > self::MAX_LENGTH[$field]) return I18n::format('admin.msg.product.tr_long', ['locale' => $locale, 'field' => $field]);
                 if ($value === '') unset($entry[$field]); else $entry[$field] = $value;
             }
-            if (!is_scalar($fields['image_alts'] ?? '')) return 'Neplatný preklad.';
+            if (!is_scalar($fields['image_alts'] ?? '')) return I18n::t('admin.msg.product.tr_invalid');
             $alts = self::parseImages((string)($fields['image_alts'] ?? ''));
-            if (is_string($alts)) return "Preklad {$locale}/alt texty: {$alts}";
-            if (array_diff($alts[0], $imageUrls)) return "Preklad {$locale}/alt texty: obrázok nie je v zozname obrázkov produktu.";
+            if (is_string($alts)) return I18n::format('admin.msg.product.tr_alts', ['locale' => $locale, 'error' => $alts]);
+            if (array_diff($alts[0], $imageUrls)) return I18n::format('admin.msg.product.tr_alts', ['locale' => $locale, 'error' => I18n::t('admin.msg.product.tr_alts_foreign')]);
             $entry['image_alts'] = $alts[1];
             $translations[$locale] = $entry;
             $slugs[$locale] = (string)($entry['slug'] ?? '');

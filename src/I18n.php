@@ -141,6 +141,13 @@ class I18n {
         return self::$fallbackLang[$key] ?? $key;
     }
 
+    /** UI translation with {name} placeholders replaced by $vars['name']. */
+    public static function format(string $key, array $vars = []): string {
+        $pairs = [];
+        foreach ($vars as $name => $value) $pairs['{' . $name . '}'] = (string)$value;
+        return strtr(self::t($key), $pairs);
+    }
+
     /**
      * Count-aware translation: picks "{$key}_one", "{$key}_few" (Slavic 2–4)
      * or "{$key}_many" and substitutes {count}.

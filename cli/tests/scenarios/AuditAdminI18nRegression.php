@@ -223,6 +223,41 @@ try {
     $a155Check('A15.5 de: digital files page is German', $a154Run(['p' => 'digital_assets']),
         ['SKU-Zuordnungen', 'Noch keine digitale Datei hinzugefügt.', 'Dateischlüssel', 'Datei hinzufügen oder bearbeiten']);
     $a155Check('A15.5 de: reviews page is German', $a154Run(['p' => 'reviews']), ['Keine Bewertungen warten auf Freigabe.', 'Bewertungen — Moderation']);
+
+    // A15.5 step 2: messages of the core services (CatalogTaxonomy, ProductEditor, ProductVariants) follow the admin language.
+    $a155CoreLeftovers = ['Kategóri', 'Značk', 'už má iná', 'nemožno', 'neboli uložené', 'už používa', 'musí mať', 'Názov je povinný', 'presunuté'];
+    $a155Core = static function(string $label, array $r, array $expect) use ($a155Check, $a155CoreLeftovers): void {
+        $left = array_values(array_filter($a155CoreLeftovers, static fn(string $t): bool => str_contains($r['out'], $t)));
+        assert_true($left === [], "{$label}: no Slovak core message (leftovers=" . json_encode($left, JSON_UNESCAPED_UNICODE) . ')');
+        $a155Check($label, $r, $expect);
+    };
+    $a155Basis = (string)$a154Pdo->query("SELECT id FROM categories WHERE slug = 'a155-basis'")->fetchColumn();
+    $a154Run(['p' => 'categories', 'action' => 'save'], ['name' => 'A155 Kategorie', 'slug' => '', 'parent_id' => '', 'sort_order' => '0']);
+    $a155Core('A15.5 de: duplicate category slug flash is German', $a154Run(['p' => 'categories']),
+        ['Eine andere Kategorie auf dieser Ebene hat bereits den Slug "a155-kategorie".']);
+    $a154Run(['p' => 'categories', 'action' => 'delete'], ['category_id' => $a155Basis]);
+    $a155Core('A15.5 de: blocked category delete flash is German', $a154Run(['p' => 'categories']),
+        ['Kategorie A155 Basis kann nicht gelöscht werden: sie enthält Produkte; verschieben Sie diese zuerst.']);
+    $a154Run(['p' => 'categories', 'action' => 'save', 'id' => $a155Basis], ['name' => 'A155 Basis', 'slug' => 'a155-basis', 'parent_id' => '', 'sort_order' => 'x']);
+    $a155Core('A15.5 de: category validation flash is German', $a154Run(['p' => 'categories']), ['Die Reihenfolge muss eine ganze Zahl sein.']);
+    $a154Run(['p' => 'brands', 'action' => 'save'], ['name' => '', 'code' => '', 'manufacturer_name' => '']);
+    $a155Core('A15.5 de: brand validation flash is German', $a154Run(['p' => 'brands']),
+        ['Der Name ist erforderlich; Name und Hersteller dürfen höchstens 191 Zeichen haben.']);
+    $a154Run(['p' => 'brands', 'action' => 'save'], ['name' => 'A155 Marke', 'code' => '', 'manufacturer_name' => '', 'active' => '1']);
+    $a155Core('A15.5 de: brand created flash is German', $a154Run(['p' => 'brands']), ['Marke erstellt.']);
+    $a154Run(['p' => 'product', 'id' => (string)$a155Product, 'action' => 'variants_save'],
+        ['variants' => ['new' => ['sku' => 'A155-P', 'name' => '', 'attrs' => '', 'price_absolute' => '', 'price_delta' => '0', 'stock' => '0', 'sort_order' => '0']]]);
+    $a155Core('A15.5 de: variant validation flash is German', $a154Run(['p' => 'product', 'id' => (string)$a155Product]),
+        ['Die Varianten wurden nicht gespeichert: SKU A155-P wird bereits von einem anderen Produkt oder einer Variante verwendet.']);
+    $a154Run(['p' => 'product', 'id' => (string)$a155Product, 'action' => 'variants_save'],
+        ['variants' => ['new' => ['sku' => 'A155-V', 'name' => '', 'attrs' => 'farbe', 'price_absolute' => '', 'price_delta' => '0', 'stock' => '0', 'sort_order' => '0']]]);
+    $a155Core('A15.5 de: variant row flash is German', $a154Run(['p' => 'product', 'id' => (string)$a155Product]),
+        ['Variante A155-V: geben Sie die Attribute als Zeilen Schlüssel=Wert ein.']);
+    $a154Run(['p' => 'product', 'action' => 'save'], ['sku' => 'A155-N', 'name' => 'A155 Neu', 'slug' => '', 'category_id' => $a155Basis, 'product_type' => 'simple',
+        'price' => '100', 'compare_price' => '', 'stock' => '0', 'stock_low_threshold' => '', 'stock_critical_threshold' => '', 'status' => 'active', 'summary' => '',
+        'description' => '', 'images' => '', 'weight_g' => '0', 'tags' => '', 'brand_id' => '', 'gtin' => '4006381333932', 'mpn' => '', 'seo_title' => '', 'meta_description' => '']);
+    $a155Core('A15.5 de: product editor validation flash is German', $a154Run(['p' => 'product', 'id' => '0']),
+        ['GTIN/EAN muss 8, 12, 13 oder 14 Ziffern und eine gültige Prüfziffer haben.']);
     $a154Run(['p' => 'dashboard', 'lang' => 'en']);
     $a155Check('A15.5 en: new product editor is English', $a154Run(['p' => 'product']), ['New product', 'Main category', 'Additional categories', 'Translations', 'Save']);
     $a155Check('A15.5 en: categories page is English', $a154Run(['p' => 'categories']), ['New category', 'Parent category', 'Delete category?']);

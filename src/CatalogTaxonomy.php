@@ -23,30 +23,30 @@ final class CatalogTaxonomy {
 
     public static function saveCategory(int $id, mixed $post): array {
         $old = $id > 0 ? Categories::byId($id) : null;
-        if ($id > 0 && !$old) return self::result(false, 0, 'Kategória neexistuje v katalógu tohto obchodu.');
+        if ($id > 0 && !$old) return self::result(false, 0, I18n::t('admin.msg.category.missing'));
         $fields = self::scalars($post, ['name', 'slug', 'parent_id', 'sort_order']);
-        if ($fields === null) return self::result(false, $id, 'Neplatný formulár.');
+        if ($fields === null) return self::result(false, $id, I18n::t('admin.msg.invalid_form'));
         $name = trim($fields['name']);
-        if (!self::validText($name, true)) return self::result(false, $id, 'Názov je povinný (najviac ' . self::MAX_TEXT . ' znakov, bez riadiacich znakov).');
+        if (!self::validText($name, true)) return self::result(false, $id, I18n::format('admin.msg.category.name', ['max' => self::MAX_TEXT]));
         $slug = Str::slug(trim($fields['slug']) !== '' ? $fields['slug'] : $name);
-        if ($slug === '') return self::result(false, $id, 'Slug musí obsahovať aspoň jedno písmeno alebo číslicu.');
+        if ($slug === '') return self::result(false, $id, I18n::t('admin.msg.category.slug_empty'));
         $parent = null;
         $parentRaw = trim($fields['parent_id']);
         if ($parentRaw !== '' && $parentRaw !== '0') {
             $parent = ctype_digit($parentRaw) ? Categories::byId((int)$parentRaw) : null;
-            if (!$parent) return self::result(false, $id, 'Nadradená kategória nepatrí do katalógu tohto obchodu.');
-            if ($old && isset(self::subtree($id)[(int)$parent['id']])) return self::result(false, $id, 'Kategóriu nemožno presunúť pod seba ani pod vlastnú podkategóriu.');
+            if (!$parent) return self::result(false, $id, I18n::t('admin.msg.category.parent_foreign'));
+            if ($old && isset(self::subtree($id)[(int)$parent['id']])) return self::result(false, $id, I18n::t('admin.msg.category.parent_cycle'));
         }
         $sort = trim($fields['sort_order']) ?: '0';
-        if (!preg_match('/^-?\d{1,6}$/', $sort)) return self::result(false, $id, 'Poradie musí byť celé číslo.');
-        if (self::siblingSlugTaken($slug, $parent ? (int)$parent['id'] : null, $id)) return self::result(false, $id, "Slug \"{$slug}\" už má iná kategória na tejto úrovni.");
+        if (!preg_match('/^-?\d{1,6}$/', $sort)) return self::result(false, $id, I18n::t('admin.msg.category.sort_int'));
+        if (self::siblingSlugTaken($slug, $parent ? (int)$parent['id'] : null, $id)) return self::result(false, $id, I18n::format('admin.msg.category.slug_taken', ['slug' => $slug]));
         $translations = self::translations((string)($old['translations'] ?? '{}'), is_array($post) ? ($post['tr'] ?? []) : []);
         if (is_string($translations)) return self::result(false, $id, $translations);
         $path = ($parent ? $parent['path'] . '/' : '') . $slug;
         $depth = $parent ? (int)$parent['depth'] + 1 : 0;
         $moves = $old ? self::subtreeMoves($id, $path, $depth) : [];
         foreach ([$path, ...array_column($moves, 'path')] as $newPath) {
-            if (strlen($newPath) > self::MAX_TEXT) return self::result(false, $id, 'Cesta kategórie alebo jej podkategórie by bola dlhšia ako ' . self::MAX_TEXT . ' znakov.');
+            if (strlen($newPath) > self::MAX_TEXT) return self::result(false, $id, I18n::format('admin.msg.category.path_long', ['max' => self::MAX_TEXT]));
         }
         $row = ['slug' => $slug, 'name' => $name, 'parent_id' => $parent ? (int)$parent['id'] : null, 'path' => $path, 'depth' => $depth,
             'sort_order' => (int)$sort, 'translations' => $translations === [] ? '{}' : json_encode($translations, JSON_UNESCAPED_UNICODE)];
@@ -68,23 +68,23 @@ final class CatalogTaxonomy {
             $db->commit();
         } catch (Throwable $e) {
             $db->rollBack();
-            if ($e instanceof PDOException && str_starts_with((string)$e->getCode(), '23')) return self::result(false, $old ? $id : 0, "Slug \"{$slug}\" už má iná kategória na tejto úrovni.");
+            if ($e instanceof PDOException && str_starts_with((string)$e->getCode(), '23')) return self::result(false, $old ? $id : 0, I18n::format('admin.msg.category.slug_taken', ['slug' => $slug]));
             throw $e;
         }
         if ($old && ($old['path'] !== $path)) self::recount([...self::ancestors((string)$old['path']), ...self::ancestors($path)]);
         self::invalidateTree();
-        return self::result(true, $id, $old ? 'Kategória uložená' . ($moves ? ' (presunuté podkategórie: ' . count($moves) . ').' : '.') : 'Kategória vytvorená.');
+        return self::result(true, $id, $old ? ($moves ? I18n::format('admin.msg.category.saved_moved', ['count' => count($moves)]) : I18n::t('admin.msg.category.saved')) : I18n::t('admin.msg.category.created'));
     }
 
     public static function deleteCategory(int $id): array {
         $category = $id > 0 ? Categories::byId($id) : null;
-        if (!$category) return self::result(false, 0, 'Kategória neexistuje v katalógu tohto obchodu.');
+        if (!$category) return self::result(false, 0, I18n::t('admin.msg.category.missing'));
         $blocked = self::firstHit([
-            'má podkategórie; najprv ich presuňte alebo zmažte' => ['SELECT 1 FROM categories WHERE parent_id = :id', [':id' => $id]],
-            'obsahuje produkty; najprv ich presuňte' => ['SELECT 1 FROM products WHERE category_id = :id', [':id' => $id]],
-            'je doplnková kategória produktov; najprv ich odpojte' => ['SELECT 1 FROM product_categories WHERE category_id = :id', [':id' => $id]],
+            'admin.msg.category.has_children' => ['SELECT 1 FROM categories WHERE parent_id = :id', [':id' => $id]],
+            'admin.msg.category.has_products' => ['SELECT 1 FROM products WHERE category_id = :id', [':id' => $id]],
+            'admin.msg.category.extra_products' => ['SELECT 1 FROM product_categories WHERE category_id = :id', [':id' => $id]],
         ]) ?? self::promotionUses('category_ids', $id);
-        if ($blocked !== null) return self::result(false, $id, "Kategóriu {$category['name']} nemožno zmazať: {$blocked}.");
+        if ($blocked !== null) return self::result(false, $id, I18n::format('admin.msg.category.delete_blocked', ['name' => $category['name'], 'reason' => $blocked]));
         $db = Db::get();
         $db->beginTransaction();
         try {
@@ -97,7 +97,7 @@ final class CatalogTaxonomy {
             throw $e;
         }
         self::invalidateTree();
-        return self::result(true, 0, 'Kategória zmazaná.');
+        return self::result(true, 0, I18n::t('admin.msg.category.deleted'));
     }
 
     /** Brands of the active catalog with the number of products that use them. */
@@ -113,16 +113,16 @@ final class CatalogTaxonomy {
 
     public static function saveBrand(int $id, mixed $post): array {
         $old = $id > 0 ? self::brand($id) : null;
-        if ($id > 0 && !$old) return self::result(false, 0, 'Značka neexistuje v katalógu tohto obchodu.');
+        if ($id > 0 && !$old) return self::result(false, 0, I18n::t('admin.msg.brand.missing'));
         $fields = self::scalars($post, ['code', 'name', 'manufacturer_name', 'active']);
-        if ($fields === null) return self::result(false, $id, 'Neplatný formulár.');
+        if ($fields === null) return self::result(false, $id, I18n::t('admin.msg.invalid_form'));
         $name = trim($fields['name']);
         $manufacturer = trim($fields['manufacturer_name']);
-        if (!self::validText($name, true) || !self::validText($manufacturer, false)) return self::result(false, $id, 'Názov je povinný; názov a výrobca môžu mať najviac ' . self::MAX_TEXT . ' znakov.');
+        if (!self::validText($name, true) || !self::validText($manufacturer, false)) return self::result(false, $id, I18n::format('admin.msg.brand.name', ['max' => self::MAX_TEXT]));
         $code = Str::slug(trim($fields['code']) !== '' ? $fields['code'] : $name);
-        if ($code === '' || strlen($code) > self::MAX_TEXT) return self::result(false, $id, 'Kód musí obsahovať písmená alebo číslice (najviac ' . self::MAX_TEXT . ' znakov).');
+        if ($code === '' || strlen($code) > self::MAX_TEXT) return self::result(false, $id, I18n::format('admin.msg.brand.code', ['max' => self::MAX_TEXT]));
         if (CatalogScope::rows('SELECT 1 AS taken FROM brands WHERE store_id = :catalog AND code = :code AND id != :id', [':code' => $code, ':id' => $id ?: -1])) {
-            return self::result(false, $id, "Kód značky \"{$code}\" už v tomto katalógu existuje.");
+            return self::result(false, $id, I18n::format('admin.msg.brand.code_taken', ['code' => $code]));
         }
         $row = ['code' => $code, 'name' => $name, 'manufacturer_name' => $manufacturer === '' ? null : $manufacturer, 'active' => $fields['active'] !== '' && $fields['active'] !== '0' ? 1 : 0];
         $params = [':code' => $row['code'], ':name' => $row['name'], ':manufacturer' => $row['manufacturer_name'], ':active' => $row['active'], ':catalog' => StoreContext::current()->catalogId()];
@@ -139,18 +139,18 @@ final class CatalogTaxonomy {
             $db->commit();
         } catch (Throwable $e) {
             $db->rollBack();
-            if ($e instanceof PDOException && str_starts_with((string)$e->getCode(), '23')) return self::result(false, $old ? $id : 0, "Kód značky \"{$code}\" už v tomto katalógu existuje.");
+            if ($e instanceof PDOException && str_starts_with((string)$e->getCode(), '23')) return self::result(false, $old ? $id : 0, I18n::format('admin.msg.brand.code_taken', ['code' => $code]));
             throw $e;
         }
-        return self::result(true, $id, $old ? 'Značka uložená.' : 'Značka vytvorená.');
+        return self::result(true, $id, I18n::t($old ? 'admin.msg.brand.saved' : 'admin.msg.brand.created'));
     }
 
     public static function deleteBrand(int $id): array {
         $brand = $id > 0 ? self::brand($id) : null;
-        if (!$brand) return self::result(false, 0, 'Značka neexistuje v katalógu tohto obchodu.');
-        $blocked = self::firstHit(['ju používajú produkty; zmeňte im značku alebo ju deaktivujte' => ['SELECT 1 FROM products WHERE brand_id = :id', [':id' => $id]]])
+        if (!$brand) return self::result(false, 0, I18n::t('admin.msg.brand.missing'));
+        $blocked = self::firstHit(['admin.msg.brand.has_products' => ['SELECT 1 FROM products WHERE brand_id = :id', [':id' => $id]]])
             ?? self::promotionUses('brand_ids', $id);
-        if ($blocked !== null) return self::result(false, $id, "Značku {$brand['name']} nemožno zmazať: {$blocked}.");
+        if ($blocked !== null) return self::result(false, $id, I18n::format('admin.msg.brand.delete_blocked', ['name' => $brand['name'], 'reason' => $blocked]));
         $db = Db::get();
         $db->beginTransaction();
         try {
@@ -161,7 +161,7 @@ final class CatalogTaxonomy {
             $db->rollBack();
             throw $e;
         }
-        return self::result(true, 0, 'Značka zmazaná.');
+        return self::result(true, 0, I18n::t('admin.msg.brand.deleted'));
     }
 
     private static function result(bool $ok, int $id, string $message): array {
@@ -242,12 +242,12 @@ final class CatalogTaxonomy {
         if ($ids) Import::recountCategories(Db::get(), array_values(array_unique($ids)));
     }
 
-    /** Reason of the first query that finds a row, or null. */
+    /** Translated reason (an i18n key) of the first query that finds a row, or null. */
     private static function firstHit(array $checks): ?string {
         foreach ($checks as $reason => [$sql, $params]) {
             $stmt = Db::get()->prepare($sql . ' LIMIT 1');
             $stmt->execute($params);
-            if ($stmt->fetchColumn()) return $reason;
+            if ($stmt->fetchColumn()) return I18n::t($reason);
         }
         return null;
     }
@@ -259,20 +259,20 @@ final class CatalogTaxonomy {
             $conditions = json_decode((string)$promotion['conditions'], true);
             if (is_array($conditions[$key] ?? null) && in_array($id, array_map('intval', $conditions[$key]), true)) $codes[] = $promotion['code'];
         }
-        return $codes ? 'používajú ju podmienky promo akcií ' . implode(', ', $codes) : null;
+        return $codes ? I18n::format('admin.msg.promo_uses', ['codes' => implode(', ', $codes)]) : null;
     }
 
     /** Merge posted tr[locale][name] into the stored translations; locales outside the catalog are refused, other keys kept. */
     private static function translations(string $stored, mixed $posted): array|string {
         $translations = json_decode($stored, true);
         if (!is_array($translations)) $translations = [];
-        if (!is_array($posted)) return 'Neplatné preklady.';
+        if (!is_array($posted)) return I18n::t('admin.msg.translations_invalid');
         $locales = ProductEditor::locales();
         foreach ($posted as $locale => $fields) {
             $locale = (string)$locale;
-            if (!in_array($locale, $locales, true) || !is_array($fields) || !is_scalar($fields['name'] ?? '')) return "Preklad pre jazyk \"{$locale}\" nie je v tomto obchode povolený.";
+            if (!in_array($locale, $locales, true) || !is_array($fields) || !is_scalar($fields['name'] ?? '')) return I18n::format('admin.msg.locale_refused', ['locale' => $locale]);
             $name = trim((string)($fields['name'] ?? ''));
-            if (!self::validText($name, false)) return "Preklad {$locale}: názov môže mať najviac " . self::MAX_TEXT . ' znakov, bez riadiacich znakov.';
+            if (!self::validText($name, false)) return I18n::format('admin.msg.category.tr_name_long', ['locale' => $locale, 'max' => self::MAX_TEXT]);
             $entry = is_array($translations[$locale] ?? null) ? $translations[$locale] : [];
             if ($name === '') unset($entry['name']); else $entry['name'] = $name;
             if ($entry) $translations[$locale] = $entry; else unset($translations[$locale]);

@@ -21,7 +21,7 @@ function productEditorExtrasHtml(array $categories, ?array $product): string {
             <?php foreach (ProductEditor::locales() as $locale): $tr = (array)($translations[$locale] ?? []); ?>
             <details<?= $tr ? ' open' : '' ?>>
                 <summary><?= esc(strtoupper($locale)) ?></summary>
-                <?php foreach (array_keys(ProductEditor::TRANSLATION_FIELDS) as $field): $name = "tr[{$locale}][{$field}]"; $fieldId = "tr-{$locale}-{$field}"; ?>
+                <?php foreach (ProductEditor::TRANSLATION_FIELDS as $field): $name = "tr[{$locale}][{$field}]"; $fieldId = "tr-{$locale}-{$field}"; ?>
                 <div class="form-row">
                     <label for="<?= esc($fieldId) ?>"><?= esc(I18n::t('admin.product.field.' . $field)) ?> (<?= esc($locale) ?>)</label>
                     <?php if (in_array($field, ['summary', 'description', 'meta_description'], true)): ?>
