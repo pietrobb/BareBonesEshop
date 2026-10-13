@@ -62,7 +62,7 @@ if (str_starts_with($action, 'member')) {
     $_SESSION += ['customer_id' => (int)$member['id'], 'customer_last_seen' => time(), 'customer_auth_hash' => hash('sha256', (string)$member['password_hash'])];
 }
 $orders = static fn(): array => $db->query("SELECT id, order_number, shipping_addr, vat_scenario FROM orders ORDER BY id")->fetchAll();
-$result = static fn(array $payload): never => exit("\nA135RESULT" . json_encode($payload + ['code' => 200, 'new_orders' => []], JSON_INVALID_UTF8_SUBSTITUTE));
+$result = static function (array $payload): never { exit("\nA135RESULT" . json_encode($payload + ['code' => 200, 'new_orders' => []], JSON_INVALID_UTF8_SUBSTITUTE)); };
 if ($action === 'invoice') {
     $invoice = InvoiceService::issue((int)($orders()[0]['id'] ?? 0));
     $row = InvoiceService::byId((int)$invoice['id']);
