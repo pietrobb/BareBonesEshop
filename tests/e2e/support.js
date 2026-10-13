@@ -1,4 +1,4 @@
-const { expect } = require('@playwright/test');
+const { expect, test } = require('@playwright/test');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -6,13 +6,29 @@ const path = require('node:path');
 const statePath = process.env.E2E_STATE_PATH || path.join(process.cwd(), 'tests', 'e2e', '.state.json');
 const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, 'utf8')) : {};
 
-function totp(secret) {
+// The server accepts each TOTP time step once (replay protection), so every sign-in needs a step newer than
+// the last one used. The last step is kept on disk because Playwright restarts the worker after a failure.
+const totpStepPath = `${statePath}.totp-step`;
+
+async function freshTotpStep() {
+  const last = fs.existsSync(totpStepPath) ? Number(fs.readFileSync(totpStepPath, 'utf8')) : -1;
+  const waitMs = (last + 1) * 30_000 - Date.now();
+  if (waitMs > 0) {
+    test.info().setTimeout(test.info().timeout + waitMs + 1_000);
+    await new Promise((resolve) => setTimeout(resolve, waitMs + 250));
+  }
+  const step = Math.floor(Date.now() / 30_000);
+  fs.writeFileSync(totpStepPath, String(step));
+  return step;
+}
+
+function totp(secret, step) {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
   let bits = '';
   for (const char of secret.replace(/[=\s-]/g, '').toUpperCase()) bits += alphabet.indexOf(char).toString(2).padStart(5, '0');
   const key = Buffer.alloc(Math.floor(bits.length / 8));
   for (let i = 0; i < key.length; i++) key[i] = parseInt(bits.slice(i * 8, i * 8 + 8), 2);
-  const counter = BigInt(Math.floor(Date.now() / 1000 / 30));
+  const counter = BigInt(step);
   const message = Buffer.alloc(8); message.writeBigUInt64BE(counter);
   const digest = crypto.createHmac('sha1', key).update(message).digest();
   const offset = digest[19] & 0x0f;
@@ -24,7 +40,7 @@ async function adminSignIn(page) {
   await page.goto('/admin.php');
   await page.locator('input[name="admin_username"]').fill(state.admin.username);
   await page.locator('input[name="admin_password"]').fill(state.admin.password);
-  await page.locator('input[name="admin_mfa"]').fill(totp(state.admin.secret));
+  await page.locator('input[name="admin_mfa"]').fill(totp(state.admin.secret, await freshTotpStep()));
   await page.locator('button[type="submit"]').click();
   await expect(page.locator('nav')).toContainText(state.admin.username);
 }

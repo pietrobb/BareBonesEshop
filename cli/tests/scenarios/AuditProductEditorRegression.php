@@ -191,6 +191,13 @@ match ($action) {
     'edit_page' => [$_GET = ['id'=>$existing], pageProduct()],
     'edit_clear_translation' => [$_GET = ['id'=>$existing], $_POST = $post(['sku'=>"A121X-{$own}", 'name'=>"A121X-{$own}-NAME", 'slug'=>"a121x-{$own}", 'stock'=>'5', 'price'=>'1000',
         'summary'=>'Base summary', 'brand_id'=>(string)$brand($own), 'gtin'=>'96385074', 'mpn'=>"A121M-{$own}", 'extra_category_ids'=>[], 'tr'=>['en'=>['name'=>'', 'slug'=>'', 'seo_title'=>'', 'meta_description'=>'']]]), handleProductSave()],
+    // The untouched editor form as rendered for the seeded product (EN translation with its own slug).
+    'edit_unchanged' => [$_GET = ['id'=>$existing], $_POST = $edit(['tr'=>['en'=>['name'=>"EN-X-{$own}", 'slug'=>"taken-{$own}", 'seo_title'=>"EN-SEO-{$own}",
+        'meta_description'=>"EN-META-{$own}", 'image_alts'=>"/uploads/products/a122-own-{$own}.jpg | SEED-EN-ALT-{$own}"]]]), handleProductSave()],
+    // An imported/legacy product has only category_id and no product_categories rows.
+    'edit_unchanged_legacy' => [$db->prepare('DELETE FROM product_categories WHERE product_id = ?')->execute([$existing]), $_GET = ['id'=>$existing],
+        $_POST = $edit(['extra_category_ids'=>[], 'tr'=>['en'=>['name'=>"EN-X-{$own}", 'slug'=>"taken-{$own}", 'seo_title'=>"EN-SEO-{$own}",
+        'meta_description'=>"EN-META-{$own}", 'image_alts'=>"/uploads/products/a122-own-{$own}.jpg | SEED-EN-ALT-{$own}"]]]), handleProductSave()],
     'images_edit' => [$_GET = ['id'=>$existing], $extra = static function() use ($existing): array {
         $view = static function(string $locale) use ($existing): array {
             I18n::setLocale($locale);
@@ -226,7 +233,7 @@ $a121Run = static function(array $args) use ($a121Fixture): array {
 };
 $a121Rejected = ['create_foreign_brand', 'create_foreign_extra_category', 'create_bad_gtin', 'create_taken_translation_slug', 'create_translation_slug_is_base_slug', 'create_unknown_locale',
     'images_rejected', 'images_bad_url', 'images_alt_unknown', 'duplicate_sku'];
-$a121Actions = array_merge(['create_unicode', 'create_full', 'edit_page', 'edit_clear_translation', 'view_model', 'images_edit', 'images_delete'], $a121Rejected,
+$a121Actions = array_merge(['create_unicode', 'create_full', 'edit_page', 'edit_unchanged', 'edit_unchanged_legacy', 'edit_clear_translation', 'view_model', 'images_edit', 'images_delete'], $a121Rejected,
     ['variants_page', 'variants_edit', 'variants_delete', 'variants_delete_ordered', 'variants_rename_ordered', 'variants_rename_ledgered', 'variants_sku_product',
         'variants_sku_duplicate', 'variants_negative_stock', 'variants_foreign_row', 'variants_foreign_product']);
 $a122Paths = [ProductEditor::uploadPath('Košeľa/../x', 'jpg'), ProductEditor::uploadPath('Košeľa/../x', 'jpg')];
@@ -357,6 +364,14 @@ try {
                     }
                     assert_true((bool)preg_match('/<option value="\d+"[^>]*selected[^>]*>\s*A121B-' . $a121Store . '-NAME/', $a121Output), "{$a121Label}: stored brand preselected");
                     assert_true((bool)preg_match('/<option value="\d+" selected>A121C2-' . $a121Store . '-NAME/', $a121Output), "{$a121Label}: stored extra category preselected");
+                }
+                if ($a121Action === 'edit_unchanged' || $a121Action === 'edit_unchanged_legacy') {
+                    assert_equals(['ok', 'Bez zmien.'], [$a121Result['flash']['type'] ?? null, $a121Result['flash']['msg'] ?? null], "{$a121Label}: untouched form reports no change");
+                    assert_equals($a121Result['before']['products'] ?? [], $a121Result['after']['products'] ?? null, "{$a121Label}: product row (base slug, updated_at) not rewritten");
+                    assert_equals($a121Result['before']['slug_registry'] ?? [], $a121Result['after']['slug_registry'] ?? null, "{$a121Label}: slug registry unchanged");
+                    $a121ExistingId = (int)($a121Existing['id'] ?? 0);
+                    $a121Expected = $a121Action === 'edit_unchanged' ? $a121Links(['after' => $a121Result['before']], $a121ExistingId) : [];
+                    assert_equals($a121Expected, $a121Links($a121Result, $a121ExistingId), "{$a121Label}: category links not rewritten");
                 }
                 if ($a121Action === 'edit_clear_translation') {
                     $a121Tr = json_decode((string)($a121Existing['translations'] ?? '{}'), true) ?: [];

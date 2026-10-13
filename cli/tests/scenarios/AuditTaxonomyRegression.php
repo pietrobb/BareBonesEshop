@@ -8,8 +8,8 @@ foreach (['owner' => true, 'manager' => true, 'editor' => true, 'fulfillment' =>
     assert_equals($a124Allowed, Security::adminCan('categories.edit'), "A12.4 role: {$a124Role} " . ($a124Allowed ? 'may' : 'may not') . ' edit categories and brands');
     $_SESSION = $a124Session;
 }
-$a124AdminSource = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin.php');
-assert_true(str_contains($a124AdminSource, "'categories' => 'categories.edit'") && str_contains($a124AdminSource, "'brands'     => 'categories.edit'"),
+$a124Permissions = require dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Permissions.php';
+assert_equals(['categories.edit', 'categories.edit'], [$a124Permissions['categories'] ?? null, $a124Permissions['brands'] ?? null],
     'A12.4 role: category and brand pages require categories.edit');
 
 $a124Root = test_fixture_path('admin-taxonomy');

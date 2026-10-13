@@ -8,8 +8,8 @@ foreach (['owner' => true, 'manager' => true, 'editor' => false, 'fulfillment' =
     assert_equals($a125Allowed, Security::adminCan('pricing.manage'), "A12.5 role: {$a125Role} " . ($a125Allowed ? 'may' : 'may not') . ' manage promotions and price lists');
     $_SESSION = $a125Session;
 }
-$a125AdminSource = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin.php');
-assert_true(str_contains($a125AdminSource, "'promotions' => 'pricing.manage'") && str_contains($a125AdminSource, "'price_lists' => 'pricing.manage'"),
+$a125Permissions = require dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Permissions.php';
+assert_equals(['pricing.manage', 'pricing.manage'], [$a125Permissions['promotions'] ?? null, $a125Permissions['price_lists'] ?? null],
     'A12.5 role: promotion and price list pages require pricing.manage');
 
 $a125Root = test_fixture_path('admin-pricing');

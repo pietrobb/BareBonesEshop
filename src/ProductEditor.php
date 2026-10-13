@@ -70,10 +70,10 @@ final class ProductEditor {
         [$translations, $slugs] = $translations;
         $registered = $db->prepare("SELECT 1 FROM slug_registry WHERE slug = :slug AND locale = :locale AND entity = 'product' AND entity_id != :id");
         $baseSlug = $db->prepare('SELECT 1 FROM products WHERE slug = :slug AND id != :id');
-        foreach (array_filter($slugs, 'strlen') as $locale => $slug) {
-            $registered->execute([':slug' => $slug, ':locale' => $locale, ':id' => $id ?: -1]);
-            $baseSlug->execute([':slug' => $slug, ':id' => $id ?: -1]);
-            if ($registered->fetchColumn() || $baseSlug->fetchColumn()) return "Slug \"{$slug}\" ({$locale}) už používa iný produkt.";
+        foreach (array_filter($slugs, 'strlen') as $locale => $localeSlug) {
+            $registered->execute([':slug' => $localeSlug, ':locale' => $locale, ':id' => $id ?: -1]);
+            $baseSlug->execute([':slug' => $localeSlug, ':id' => $id ?: -1]);
+            if ($registered->fetchColumn() || $baseSlug->fetchColumn()) return "Slug \"{$localeSlug}\" ({$locale}) už používa iný produkt.";
         }
         $optional = static fn($v): ?string => trim((string)$v) === '' ? null : trim((string)$v);
         return [
@@ -212,7 +212,14 @@ final class ProductEditor {
     public static function categoriesChanged(int $productId, array $validated): bool {
         $linked = Db::get()->prepare('SELECT category_id FROM product_categories WHERE product_id = :id ORDER BY sort_order, category_id');
         $linked->execute([':id' => $productId]);
-        return array_map('intval', $linked->fetchAll(PDO::FETCH_COLUMN)) !== $validated['categories'];
+        $current = array_map('intval', $linked->fetchAll(PDO::FETCH_COLUMN));
+        if (!$current) {
+            // A product without links (legacy/imported) has only its primary category_id.
+            $primary = Db::get()->prepare('SELECT category_id FROM products WHERE id = :id');
+            $primary->execute([':id' => $productId]);
+            $current = [(int)$primary->fetchColumn()];
+        }
+        return $current !== $validated['categories'];
     }
 
     /**
