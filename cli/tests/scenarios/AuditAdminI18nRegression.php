@@ -27,7 +27,7 @@ function a154HardcodedStrings(string $source): array {
     return $found;
 }
 
-// Ratchet: budgets may only go down. Files finished in A15.4/A15.5 are at 0; the rest are converted in A15.6–A15.7.
+// Ratchet: budgets may only go down. Files finished in A15.4–A15.6 are at 0; the rest are converted in A15.7.
 $a154Budgets = [
     'src/Entrypoints/Admin.php' => 0,
     'src/Entrypoints/Admin/Operations.php' => 0,
@@ -41,11 +41,11 @@ $a154Budgets = [
     'src/Entrypoints/Admin/B2b.php' => 31,
     'src/Entrypoints/Admin/Catalog.php' => 0,
     'src/Entrypoints/Admin/CatalogEditor.php' => 0,
-    'src/Entrypoints/Admin/Customers.php' => 41,
-    'src/Entrypoints/Admin/Orders.php' => 92,
+    'src/Entrypoints/Admin/Customers.php' => 0,
+    'src/Entrypoints/Admin/Orders.php' => 0,
     'src/Entrypoints/Admin/PricingRules.php' => 45,
-    'src/Entrypoints/Admin/Recovery.php' => 18,
-    'src/Entrypoints/Admin/Request.php' => 1,
+    'src/Entrypoints/Admin/Recovery.php' => 0,
+    'src/Entrypoints/Admin/Request.php' => 0,
     'src/Entrypoints/Admin/Suppliers.php' => 39,
     'src/Entrypoints/Admin/Taxonomy.php' => 0,
 ];
@@ -81,6 +81,21 @@ try {
     AdminIdentity::grantStore($a154Admin, 'default', ['*']);
     $a154Pdo->exec("INSERT INTO categories (store_id, name, slug, path) VALUES ('default', 'A155 Basis', 'a155-basis', 'a155-basis')");
     $a154Pdo->exec("INSERT INTO products (store_id, category_id, sku, slug, name, price, stock, status) VALUES ('default', " . (int)$a154Pdo->lastInsertId() . ", 'A155-P', 'a155-produkt', 'A155 Produkt', 1000, 5, 'active')");
+    // A15.6: a customer, a pending bank-transfer order, a delivered order with a return request and an abandoned cart.
+    $a155ProductId = (int)$a154Pdo->lastInsertId();
+    $a154Pdo->exec("INSERT INTO customers (store_id, email, password_hash, name, status) VALUES ('default', 'a156@example.com', 'x', 'A156 Kunde', 'active')");
+    $a156Customer = (string)$a154Pdo->lastInsertId();
+    $a156Order = $a154Pdo->prepare('INSERT INTO orders (order_number, status, payment_status, customer_name, customer_email, payment_method, payment_method_snapshot, subtotal, total, currency, store_id, customer_id)
+        VALUES (:number, :status, :payment, :name, :email, :method, :snapshot, 1000, 1000, :currency, :store, :customer)');
+    $a156Order->execute([':number' => 'A156-1', ':status' => 'pending', ':payment' => 'pending', ':name' => 'A156 Kunde', ':email' => 'a156@example.com', ':method' => 'bank_transfer',
+        ':snapshot' => '{"code":"bank_transfer","service_type":"bank_transfer","label":"A156 Bank"}', ':currency' => 'EUR', ':store' => 'default', ':customer' => $a156Customer]);
+    $a156Pending = (string)$a154Pdo->lastInsertId();
+    $a156Order->execute([':number' => 'A156-2', ':status' => 'delivered', ':payment' => 'paid', ':name' => 'A156 Kunde', ':email' => 'a156@example.com', ':method' => 'card',
+        ':snapshot' => '{"code":"card","service_type":"card","label":"A156 Karte"}', ':currency' => 'EUR', ':store' => 'default', ':customer' => $a156Customer]);
+    $a156Delivered = (int)$a154Pdo->lastInsertId();
+    $a154Pdo->exec("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total) VALUES ({$a156Delivered}, {$a155ProductId}, 'A155-P', 'A155 Produkt', 1, 1000, 1000)");
+    $a156Rma = Rma::create($a156Delivered, null, 'A156 Grund', [(int)$a154Pdo->lastInsertId() => 1]);
+    $a154Pdo->exec("INSERT INTO abandoned_carts (session_id, customer_email, created_at) VALUES ('a156-session', 'a156cart@example.com', '2026-01-01 00:00:00')");
     $a154Token = (string)(AdminIdentity::authenticate('a154-owner', 'A154-password-owner', '', '127.0.15.40', 'A154')['token'] ?? '');
 } finally {
     Db::init($a154SuiteDb, $a154SuiteDriver);
@@ -262,6 +277,64 @@ try {
     $a155Check('A15.5 en: new product editor is English', $a154Run(['p' => 'product']), ['New product', 'Main category', 'Additional categories', 'Translations', 'Save']);
     $a155Check('A15.5 en: categories page is English', $a154Run(['p' => 'categories']), ['New category', 'Parent category', 'Delete category?']);
     $a155Check('A15.5 en: content page is English', $a154Run(['p' => 'content']), ['Menu item', 'Save menu item', 'Landing pages', 'Redirects'], ['Save menu item', 'No records.']);
+
+    // A15.6: orders, sales overview, order detail and its handlers, returns, customers, revenue recovery and the
+    // CSRF refusal in German (rows written through the real handlers), then the main pages in English.
+    assert_true(($a156Rma[0] ?? false) === true, 'A15.6 fixture: return request created (' . json_encode($a156Rma) . ')');
+    $a156English = ['Payment method', 'Payment reference', 'Payment timeline', 'Last event', '— Payment —', 'Refund unavailable', 'Payment status', 'Order status', 'Live data', 'Items'];
+    $a156Leftovers = array_merge($a155Leftovers, $a156English, ['Zmeniť', 'Požiadať', 'Medzisúčet', 'Faktúr', 'Súhlasy', 'História', 'Odoslané',
+        'Vystaviť', 'Poslať', 'Hľadať', 'Meno', 'Zablokovať', 'Odblokovať', 'Označiť', 'Opustené', 'Hodnota', 'Pripomienka', 'čaká', 'Neplatn',
+        'Variabilný', 'Objednávk', 'Zákazník', 'Platba', 'Schváliť', 'Zamietnuť', 'Dôvod', 'vrátenia', 'Adresy', 'fronta']);
+    $a156Check = static function(string $label, array $r, array $expect, array $allowed = []) use ($a156Leftovers): void {
+        $left = array_values(array_filter(array_diff($a156Leftovers, $allowed), static fn(string $t): bool => str_contains($r['out'], $t)));
+        $missing = array_values(array_filter($expect, static fn(string $t): bool => !str_contains(html_entity_decode($r['out'], ENT_QUOTES, 'UTF-8'), $t)));
+        assert_true($r['code'] === 200 && $left === [] && $missing === [],
+            "{$label} (code=" . var_export($r['code'], true) . ' leftovers=' . json_encode($left, JSON_UNESCAPED_UNICODE)
+            . ' missing=' . json_encode($missing, JSON_UNESCAPED_UNICODE) . ($r['code'] === null ? ' raw=' . $r['out'] : '') . ')');
+    };
+    $a156Order = ['p' => 'order', 'id' => $a156Pending];
+    $a154Run(['p' => 'dashboard', 'lang' => 'de']);
+    $a156Check('A15.6 de: orders list is German', $a154Run(['p' => 'orders']), ['— Zahlung —', 'A156-1', 'Details']);
+    $a156Check('A15.6 de: sales overview is German', $a154Run(['p' => 'sales']),
+        ['Verkaufsübersicht', 'Bestellstatus', 'Zahlungsstatus', 'Gesamter Zeitraum', 'Positionen', 'Nummer, Name oder E-Mail']);
+    $a154Run($a156Order + ['action' => 'status'], ['new_status' => 'a156-unknown', 'note' => '']);
+    $a156Check('A15.6 de: order detail and its invalid-status flash are German', $a154Run($a156Order),
+        ['Ungültiger Bestellstatus.', 'Zahlungsart: A156 Bank', 'Variabelsymbol der Überweisung: ', 'Zahlungsreferenz: ', 'Zahlungsstatus: ', 'Status ändern',
+            'Zahlung ändern', 'Betrag in Cent', 'Notiz...', 'Für den aktuellen Zahlungsstatus ist keine Erstattung möglich.', 'Positionen', 'Zwischensumme: ',
+            'Gesamt: ', 'Zahlungsverlauf', 'Noch keine Zahlungsereignisse erfasst.', 'Rechnungen', 'Noch keine Rechnung ausgestellt.', '← Zurück zur Liste']);
+    foreach ([
+        'payment_transition' => [['new_payment_status' => 'refunded'], 'Ungültiger Zahlungsübergang.'],
+        'refund_request' => [['amount' => '0', 'note' => 'A156'], 'Der Erstattungsbetrag muss im verfügbaren Restbetrag liegen.'],
+        'email_resend' => [['log_id' => '0'], 'Die E-Mail kann nicht erneut gesendet werden.'],
+        'invoice_resend' => [['invoice_id' => '0'], 'Die Rechnung kann jetzt nicht erneut gesendet werden.'],
+    ] as $a156Action => [$a156Post, $a156Flash]) {
+        $a154Run($a156Order + ['action' => $a156Action], $a156Post);
+        $a156Check("A15.6 de: order {$a156Action} flash is German", $a154Run($a156Order), [$a156Flash]);
+    }
+    $a156Check('A15.6 de: returns page is German', $a154Run(['p' => 'rma']), ['Reklamationen / Rücksendungen', 'Alle', 'Genehmigen', 'Ablehnen', 'Grund', 'A156 Grund']);
+    $a154Run(['p' => 'rma', 'action' => 'status'], ['rma_id' => '0', 'status' => 'approved']);
+    $a156Check('A15.6 de: return status flash is German', $a154Run(['p' => 'rma']), ['Der Reklamationsstatus konnte nicht geändert werden: Ungültige Reklamation.']);
+    $a156Check('A15.6 de: customers list is German', $a154Run(['p' => 'customers', 'q' => 'a156']),
+        ['E-Mail, Name oder ID', 'Filter zurücksetzen', 'Registriert', 'A156 Kunde', 'Details']);
+    $a154Run(['p' => 'customer', 'id' => $a156Customer, 'action' => 'status'], ['customer_id' => $a156Customer, 'status' => 'blocked']);
+    $a156Check('A15.6 de: customer detail and its status flash are German', $a154Run(['p' => 'customer', 'id' => $a156Customer]),
+        ["Kunde #{$a156Customer} → blocked", 'Profil', 'Letzte Anmeldung', 'Telefon', 'Konto entsperren', 'DSGVO-Löschung…', 'Adressen (0)', 'Keine Adressen.',
+            'Bestellungen (2)', 'Reklamationen (', '← Liste'], ['Uložiť']);
+    $a156Check('A15.6 de: unknown customer is German', $a154Run(['p' => 'customer', 'id' => '999999']), ['Kunde nicht gefunden.', 'Zurück zur Liste']);
+    $a156Check('A15.6 de: awaiting payment page is German', $a154Run(['p' => 'awaiting_payment']),
+        ['Variabelsymbol', 'Als bezahlt markieren', 'Bestellung A156-1 als bezahlt markieren?', 'Notiz (z. B. Kontoauszug)', 'A156 Bank', 'Alter']);
+    $a156Check('A15.6 de: abandoned carts page is German', $a154Run(['p' => 'abandoned_carts', 'filter' => 'all']),
+        ['Verlassen', 'Konvertiert', 'Alle', 'Erinnerung', 'Letzte Änderung', 'Wert', 'wartet', 'a156cart@example.com']);
+    $a156Check('A15.6 de: CSRF refusal flash is German', $a154Run(['p' => 'customers', 'action' => 'a156'], ['csrf_token' => 'a156-wrong']), ['Ungültiges CSRF-Token.']);
+    $a154Run(['p' => 'dashboard', 'lang' => 'en']);
+    $a156Check('A15.6 en: order detail is English', $a154Run($a156Order),
+        ['Payment method: A156 Bank', 'Bank transfer variable symbol: ', 'Payment reference: ', 'Change status', 'Subtotal: ', 'Payment timeline', 'No invoice issued yet.'], $a156English);
+    $a156Check('A15.6 en: customers and returns are English', $a154Run(['p' => 'customer', 'id' => $a156Customer]), ['Profile', 'Last sign-in', 'Unblock account', 'Addresses (0)'], ['Uložiť']);
+    $a156Check('A15.6 en: returns page is English', $a154Run(['p' => 'rma']), ['Returns and complaints', 'Approve', 'Reject', 'Reason'], $a156English);
+    $a154Run(['p' => 'dashboard', 'lang' => 'de']);
+    $a154Run(['p' => 'awaiting_payment', 'action' => 'confirm'], ['id' => $a156Pending, 'note' => 'A156']);
+    $a156Check('A15.6 de: confirmed bank transfer flash is German', $a154Run(['p' => 'awaiting_payment']),
+        ['Zahlung erfasst; die Bestellung ist bezahlt und die Zustellung wurde gestartet.', 'Keine unbezahlten Überweisungen.']);
 } finally {
     putenv('BBE_ADMIN_IDENTITY_KEY');
     $a154Pdo = null;

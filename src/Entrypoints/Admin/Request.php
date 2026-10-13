@@ -3,7 +3,7 @@
 
 function handlePost(string $page, string $action): void {
     if (!Security::csrfValidate()) {
-        setFlash('err', 'Neplatný CSRF token.');
+        setFlash('err', I18n::t('admin.msg.csrf_invalid'));
         return;
     }
 

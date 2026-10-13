@@ -109,7 +109,10 @@ try {
                         assert_true(!str_contains($a05OrderHtml, 'A05-') && !str_contains($a05OrderHtml, 'PRIVATE-PDF-'), "{$a05OrderLabel}: denied request discloses no orders");
                     } elseif ($a05OrderAction === 'pdf') {
                         assert_equals($a05OrderMode === 'own' ? false : 404, $a05OrderResult['http_status'], "{$a05OrderLabel}: foreign and missing invoice return 404");
-                        assert_equals($a05OrderMode === 'own' ? "%PDF-1.4\nPRIVATE-PDF-{$a05OrderStore}\n%%EOF" : 'Faktúra neexistuje.', $a05OrderHtml, "{$a05OrderLabel}: only owned PDF is served");
+                        // The refusal is the translated "invoice does not exist" message in whichever admin language the request resolved to.
+                        $a05MissingInvoice = array_map(static fn(string $l): string => (require dirname(TEST_CLI_DIR) . "/lang/{$l}.php")['admin.order.msg.invoice_missing'], ['sk', 'cs', 'en', 'de', 'hu', 'pl']);
+                        assert_true($a05OrderMode === 'own' ? $a05OrderHtml === "%PDF-1.4\nPRIVATE-PDF-{$a05OrderStore}\n%%EOF" : in_array($a05OrderHtml, $a05MissingInvoice, true),
+                            "{$a05OrderLabel}: only owned PDF is served (got: " . substr($a05OrderHtml, 0, 60) . ')');
                     } elseif (in_array($a05OrderAction, ['orders','sales'], true)) {
                         assert_equals(!in_array($a05OrderMode, ['search','second_page'], true), str_contains($a05OrderHtml, 'A05-' . $a05OrderStore . '-'), "{$a05OrderLabel}: own list and filters work");
                         assert_true(str_contains($a05OrderHtml, '(' . ($a05OrderMode === 'search' ? '0' : '2') . ')</span>'), "{$a05OrderLabel}: pagination count excludes foreign orders");
