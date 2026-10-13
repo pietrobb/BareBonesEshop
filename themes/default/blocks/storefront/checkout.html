@@ -1,5 +1,5 @@
 {{> storefront/breadcrumb}}<h1 style="margin-bottom:20px">{{title}}</h1>
-<div style="display:grid;grid-template-columns:1fr 340px;gap:24px">
+<div class="checkout-layout">
 <form method="post" class="checkout-form" data-checkout-form data-submitting-label="{{submitting_label}}" data-redirecting-label="{{redirecting_label}}"><input type="hidden" name="csrf_token" value="{{csrf_token}}"><input type="hidden" name="checkout" value="1">
   {{#if checkout_error}}<p id="checkout-error" class="flash flash-error" role="alert" style="color:#c62828">{{checkout_error}}</p>{{/if}}
   <h3>{{contact_label}}</h3><label for="checkout-name">{{name_label}}</label><input id="checkout-name" name="name" autocomplete="name" value="{{values.name}}" required>

@@ -1,7 +1,7 @@
 {{{breadcrumb_html}}}
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-bottom:24px">
-  <div>{{#if image}}<img src="{{image}}" alt="" style="max-width:100%;border-radius:8px">{{else}}<div style="background:#eee;height:300px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:3em">&#128230;</div>{{/if}}</div>
-  <div>
+<div class="product-layout">
+  <div class="product-media">{{#if image}}<img src="{{image}}" alt="" style="max-width:100%;border-radius:8px">{{else}}<div style="background:#eee;height:300px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:3em">&#128230;</div>{{/if}}</div>
+  <div class="product-buy">
     <h1 style="margin-bottom:8px">{{name}}</h1><p style="color:#888;margin-bottom:4px">SKU: {{sku}}</p>
     {{#if supplier}}<p style="color:#888;margin-bottom:12px">{{supplier_label}}: <strong>{{supplier}}</strong></p>{{/if}}
     <div class="price" style="font-size:1.6em;margin-bottom:12px">{{price}}{{#if compare_price}}<span class="old-price" style="font-size:.6em">{{compare_price}}</span>{{/if}}</div>

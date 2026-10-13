@@ -286,8 +286,46 @@
     });
   });
 
+  // Subcategory menus are <details> (tap/keyboard/no-JS). JS adds hover on mouse devices, one open menu,
+  // Escape to close back to the toggle and closing on an outside click.
+  function bindCategoryMenus() {
+    const menus = [...document.querySelectorAll('.header-nav .nav-sub')];
+    if (!menus.length) return;
+    const closeOthers = (keep) => menus.forEach((menu) => { if (menu !== keep) menu.open = false; });
+    const hover = window.matchMedia('(hover: hover) and (pointer: fine)');
+    menus.forEach((menu) => {
+      const item = menu.closest('.nav-item');
+      menu.addEventListener('toggle', () => { if (menu.open) closeOthers(menu); });
+      // A menu opened by hovering stays open when the caret is then clicked; it closes when the mouse leaves.
+      item.addEventListener('mouseenter', () => {
+        if (!hover.matches || menu.open) return;
+        menu.open = true;
+        menu.dataset.hoverOpen = '1';
+      });
+      item.addEventListener('mouseleave', () => {
+        if (menu.dataset.hoverOpen !== '1') return;
+        delete menu.dataset.hoverOpen;
+        if (!menu.contains(document.activeElement)) menu.open = false;
+      });
+      menu.querySelector('summary').addEventListener('click', (event) => {
+        if (menu.dataset.hoverOpen !== '1') return;
+        event.preventDefault();
+        delete menu.dataset.hoverOpen;
+      });
+      menu.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || !menu.open) return;
+        menu.open = false;
+        menu.querySelector('summary').focus();
+      });
+    });
+    document.addEventListener('click', (event) => {
+      if (!event.target.closest('.header-nav .nav-item')) closeOthers(null);
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     bindReviewForm();
+    bindCategoryMenus();
     const country = document.getElementById('checkout-country');
     if (country) country.addEventListener('change', refreshCheckoutShipping);
     if (document.getElementById('shipping-options')) refreshCheckoutShipping();
