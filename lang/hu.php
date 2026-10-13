@@ -197,6 +197,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.title.default'         => 'Admin',
     'admin.stat.orders_today'     => 'Mai rendelések',
     'admin.stat.revenue_today'    => 'Mai bevétel',
+    'admin.store_switcher.label' => 'Bolt',
+    'admin.store_switcher.submit' => 'Váltás',
     'admin.orders.export_csv' => 'CSV exportálása',
     'admin.orders.select' => 'Rendelés kijelölése',
     'admin.orders.bulk_status' => 'A kijelöltek új állapota',

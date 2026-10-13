@@ -204,6 +204,8 @@ return [
     // Dashboard
     'admin.stat.orders_today'     => 'Objednávky dnes',
     'admin.stat.revenue_today'    => 'Tržby dnes',
+    'admin.store_switcher.label' => 'Obchod',
+    'admin.store_switcher.submit' => 'Prepnúť',
     'admin.orders.export_csv' => 'Exportovať CSV',
     'admin.orders.select' => 'Vybrať objednávku',
     'admin.orders.bulk_status' => 'Nový stav vybraných',

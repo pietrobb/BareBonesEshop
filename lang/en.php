@@ -199,6 +199,8 @@ return [
     'admin.title.default'         => 'Admin',
     'admin.stat.orders_today'     => 'Orders today',
     'admin.stat.revenue_today'    => 'Revenue today',
+    'admin.store_switcher.label' => 'Store',
+    'admin.store_switcher.submit' => 'Switch',
     'admin.orders.export_csv' => 'Export CSV',
     'admin.orders.select' => 'Select order',
     'admin.orders.bulk_status' => 'New status for selected',

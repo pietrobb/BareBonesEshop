@@ -197,6 +197,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.title.default'         => 'Admin',
     'admin.stat.orders_today'     => 'Zamówienia dzisiaj',
     'admin.stat.revenue_today'    => 'Przychód dzisiaj',
+    'admin.store_switcher.label' => 'Sklep',
+    'admin.store_switcher.submit' => 'Przełącz',
     'admin.orders.export_csv' => 'Eksportuj CSV',
     'admin.orders.select' => 'Wybierz zamówienie',
     'admin.orders.bulk_status' => 'Nowy status zaznaczonych',

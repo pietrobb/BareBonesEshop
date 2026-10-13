@@ -47,6 +47,8 @@ $adminUsername = 'g12-operator';
 $adminPassword = 'G12-admin-password-2026';
 $adminId = AdminIdentity::create($adminUsername, $adminPassword, 'owner', true);
 AdminIdentity::grantStore($adminId, 'default', ['*']);
+// A second granted store makes the admin store switcher render (admin-store-switcher.spec.js).
+AdminIdentity::grantStore($adminId, 'cz', ['*']);
 $enrollment = AdminIdentity::enrollTotp($adminId);
 AdminIdentity::setStatus($adminId, 'active');
 

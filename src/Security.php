@@ -625,7 +625,7 @@ class Security {
             $_SESSION['admin_authenticated'], $_SESSION['admin_identity_token'],
             $_SESSION['admin_identity_id'], $_SESSION['admin_session_id'],
             $_SESSION['admin_store_permissions'], $_SESSION['admin_user'],
-            $_SESSION['admin_role'], $_SESSION['admin_last_seen']
+            $_SESSION['admin_role'], $_SESSION['admin_last_seen'], $_SESSION['admin_store']
         );
     }
 

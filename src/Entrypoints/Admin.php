@@ -14,6 +14,7 @@ require_once __DIR__ . '/Admin/Reports.php';
 require_once __DIR__ . '/Admin/Recovery.php';
 require_once __DIR__ . '/Admin/AdminUsers.php';
 require_once __DIR__ . '/Admin/Request.php';
+require_once __DIR__ . '/Admin/StoreScope.php';
 // Auth
 Security::adminAuth();
 
@@ -22,9 +23,13 @@ Security::adminAuth();
 // nonce and inline on*= handlers were delegated, so no 'unsafe-inline' is needed.
 Security::headers();
 
-// Admin locale: URL ?lang=xx (persisted in session) → session → system default.
-Bootstrap::initStoreContext();
+// Store scope: one granted store per request; a foreign ?store= / POST store is refused (Admin/StoreScope.php).
 $storesCfg = Bootstrap::stores();
+$adminStores = adminActivateStore($storesCfg);
+$pagePermissions = require __DIR__ . '/Admin/Permissions.php';
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && isset($_POST['admin_switch_store'])) handleStoreSwitch($pagePermissions);
+
+// Admin locale: URL ?lang=xx (persisted in session) → session → system default.
 $adminSupportedLocales = [];
 foreach ($storesCfg['stores'] ?? [] as $s) {
     foreach ($s['languages'] ?? [] as $lc) $adminSupportedLocales[$lc] = true;
@@ -54,7 +59,6 @@ if (in_array($page, ['products', 'orders'], true) && $action === 'export' && ($_
 }
 
 // Role-based permission map
-$pagePermissions = require __DIR__ . '/Admin/Permissions.php';
 $requiredPerm = $pagePermissions[$page] ?? 'reports.view';
 Security::adminRequire($requiredPerm);
 
@@ -157,6 +161,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
 .muted{color:#475569;font-size:.85rem}
 .sales-toolbar{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap}.sales-toolbar .form-row{margin:0}.sales-toolbar input{min-width:220px}
 .report-bar{margin-left:.5rem;width:8rem;vertical-align:middle}details>summary{cursor:pointer;font-weight:600;margin:.5rem 0}
+.store-switcher{display:flex;flex-wrap:wrap;gap:.25rem;align-items:center;padding:0 1rem .75rem;font-size:.75rem;color:#cbd5e1}.store-switcher select{flex:1;min-width:0}
 .table-scroll{overflow-x:auto}.status-ok{color:#047857}.status-warn{color:#b45309}.status-error{color:#b91c1c;font-weight:600}
 @media(max-width:760px){.wrap{display:block}nav{width:100%;display:flex;overflow-x:auto;padding:.5rem}nav h2,nav div{display:none}nav a{white-space:nowrap}main{padding:1rem}.sales-toolbar input{min-width:0;width:100%}.sales-toolbar .form-row{width:100%}}
 </style>
@@ -170,6 +175,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
         <button class="btn btn-sm" type="submit" name="admin_logout" value="1">Sign out</button>
     </form>
+    <?php renderStoreSwitcher($adminStores, $storesCfg, $page); ?>
     <div style="padding:0.3rem 1rem;font-size:0.75rem;color:#94a3b8;margin-bottom:0.5rem">
         <?= esc(I18n::t('admin.language')) ?>:
         <?php foreach ($adminSupportedLocales as $lc): ?>

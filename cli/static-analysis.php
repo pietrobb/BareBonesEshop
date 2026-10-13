@@ -123,6 +123,8 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/Recovery.php' => ['lines' => 300, 'functions' => 6, 'max_function_lines' => 90, 'coupling' => 8],
     'src/Entrypoints/Admin/Request.php' => ['lines' => 80, 'functions' => 1, 'max_function_lines' => 70, 'coupling' => 2],
     'src/Entrypoints/Admin/Shared.php' => ['lines' => 50, 'functions' => 3, 'max_function_lines' => 25, 'coupling' => 0],
+    // A15.3: store switcher and per-request store activation, limited to the admin's granted stores (AdminStoreScope).
+    'src/Entrypoints/Admin/StoreScope.php' => ['lines' => 70, 'functions' => 4, 'max_function_lines' => 25, 'coupling' => 5],
     // +1 coupling: Search::filtersFromQuery turns the search route's sort/price/category parameters into search options (A14.2).
     'src/Entrypoints/Storefront.php' => ['lines' => 320, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
     'src/Entrypoints/Storefront/CatalogPages.php' => ['lines' => 560, 'functions' => 12, 'max_function_lines' => 230, 'coupling' => 8],
