@@ -9,8 +9,46 @@ class CheckoutService {
     }
 
     /**
+     * What the checkout form shows. A posted form keeps the shopper's values (after any refusal);
+     * a fresh form starts from the signed-in customer's profile and default shipping address.
+     * Picking one of the customer's own saved addresses replaces the address fields; an id of
+     * another customer's address is ignored. Countries come from the store's shipping zones.
+     * @return array{values: array<string,string>, country: string, countries: array<string,string>, addresses: list<array{id:int,label:string,selected:bool}>}
+     */
+    public static function formState(array $post, bool $posted): array {
+        $values = [];
+        foreach (['name' => 255, 'email' => 255, 'phone' => 64, 'street' => 255, 'city' => 255, 'zip' => 32, 'notes' => 2000] as $key => $max) {
+            $values[$key] = $posted && is_string($post[$key] ?? null) ? mb_substr(trim($post[$key]), 0, $max) : '';
+        }
+        $country = $posted && is_string($post['country'] ?? null) ? strtoupper(trim($post['country'])) : '';
+        $customer = Customers::current();
+        $addresses = $customer ? Customers::addresses((int)$customer['id'], 'shipping') : [];
+        $pickedId = $posted && ($post['address_action'] ?? '') === 'use' && is_string($post['saved_address'] ?? null) ? (int)$post['saved_address'] : 0;
+        $picked = $posted ? null : ($addresses[0] ?? null);
+        foreach ($addresses as $address) if ((int)$address['id'] === $pickedId) $picked = $address;
+        if (!$posted && $customer) {
+            $values = array_merge($values, ['name' => (string)$customer['name'], 'email' => (string)$customer['email'], 'phone' => (string)($customer['phone'] ?? '')]);
+        }
+        if ($picked) {
+            foreach (['name', 'phone', 'street', 'city', 'zip'] as $key) {
+                if (trim((string)($picked[$key] ?? '')) !== '') $values[$key] = (string)$picked[$key];
+            }
+            $country = strtoupper((string)$picked['country']);
+        }
+        $countries = ShippingService::destinationCountries();
+        if (!isset($countries[$country])) {
+            $storeCountry = strtoupper((string)(StoreContext::current()->legal()['country'] ?? 'SK'));
+            $country = isset($countries[$storeCountry]) ? $storeCountry : (string)array_key_first($countries);
+        }
+        return ['values' => $values, 'country' => $country, 'countries' => $countries, 'addresses' => array_map(static fn(array $a): array => [
+            'id' => (int)$a['id'], 'selected' => $picked !== null && (int)$a['id'] === (int)$picked['id'],
+            'label' => implode(', ', array_filter([(string)$a['name'], (string)$a['street'], trim($a['zip'] . ' ' . $a['city']), strtoupper((string)$a['country'])], static fn(string $p): bool => $p !== '')),
+        ], $addresses)];
+    }
+
+    /**
      * Discount the checkout form shows before the order exists, with the same rules execute() applies:
-     * the coupon (refusal reason when it gives nothing) plus automatic promotions.
+     * the coupon (i18n key of the refusal reason when it gives nothing) plus automatic promotions.
      * @return array{coupon_discount: int, coupon_error: ?string, promotion_discount: int, free_shipping: bool}
      */
     public static function discountPreview(string $couponCode, int $subtotal, ?string $email, array $items, ?int $customerId): array {
@@ -19,7 +57,10 @@ class CheckoutService {
         if ($couponCode !== '') {
             $coupon = Pricing::applyCoupon($couponCode, $subtotal, $email);
             $couponDiscount = max(0, (int)$coupon['discount']);
-            if ($couponDiscount === 0) $couponError = (string)($coupon['error'] ?? '');
+            if ($couponDiscount === 0) $couponError = match ((string)($coupon['error'] ?? '')) {
+                'Minimum order not met' => 'coupon_min_subtotal', 'Coupon expired' => 'coupon_used_up',
+                'Coupon already used' => 'coupon_already_used', default => 'coupon_invalid',
+            };
         }
         $promotionDiscount = 0;
         $freeShipping = false;

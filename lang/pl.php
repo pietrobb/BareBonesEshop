@@ -398,6 +398,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'cookie_banner.policy_link'             => 'Polityka cookies',
     'name' => 'Imię i nazwisko', 'address' => 'Adres dostawy', 'contact' => 'Dane kontaktowe',
     'payment' => 'Płatność', 'notes' => 'Uwagi do zamówienia', 'notes_placeholder' => 'Opcjonalne…', 'submit_order' => 'Złóż zamówienie',
+    'checkout_saved_address' => 'Zapisany adres',
+    'checkout_saved_address_use' => 'Użyj adresu',
     'coupon_code' => 'Kupon rabatowy',
     'coupon_apply' => 'Zastosuj',
     'coupon_remove' => 'Usuń kupon',

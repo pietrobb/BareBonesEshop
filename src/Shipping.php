@@ -14,6 +14,17 @@ class Shipping {
         return self::$config;
     }
 
+    /** Explicit country codes of the shipping.json zones; the '*' wildcard names no country. */
+    public static function zoneCountries(): array {
+        $codes = [];
+        foreach (self::config()['zones'] ?? [] as $zone) {
+            foreach ((array)($zone['countries'] ?? []) as $code) {
+                if (is_string($code) && preg_match('/^[A-Za-z]{2}$/', $code)) $codes[] = strtoupper($code);
+            }
+        }
+        return array_values(array_unique($codes));
+    }
+
     /** Override config (for testing) */
     public static function setConfig(array $config): void {
         self::$config = $config;

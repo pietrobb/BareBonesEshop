@@ -70,7 +70,7 @@ $_SERVER['REMOTE_ADDR'] = '127.0.6.52';
 $_POST = ['checkout' => '1', 'csrf_token' => 'a064-html', 'name' => 'A064 Html', 'email' => 'a064-html@example.com', 'phone' => '',
     'street' => 'Form 4', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK', 'shipping_method' => 'packeta',
     'payment' => 'bank_transfer', 'notes' => "Nechajte pri dverách\r\nvďaka"];
-echo processCheckout();
+echo implode(' ', processCheckout());
 PHP);
 $a064Process = proc_open([PHP_BINARY, $a064Root . '/html.php', dirname(TEST_CLI_DIR), $testDbPath], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $a064Pipes);
 fclose($a064Pipes[0]);

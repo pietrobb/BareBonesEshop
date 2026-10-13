@@ -442,6 +442,8 @@ return [
     'payment' => 'Platba',
     'notes' => 'Poznámka k objednávke',
     'notes_placeholder' => 'Voliteľné…',
+    'checkout_saved_address' => 'Uložená adresa',
+    'checkout_saved_address_use' => 'Použiť adresu',
     'coupon_code' => 'Zľavový kupón',
     'coupon_apply' => 'Uplatniť',
     'coupon_remove' => 'Odstrániť kupón',

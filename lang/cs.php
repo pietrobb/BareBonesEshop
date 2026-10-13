@@ -398,6 +398,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'cookie_banner.policy_link'             => 'Více o cookies',
     'name' => 'Jméno a příjmení', 'address' => 'Doručovací adresa', 'contact' => 'Kontaktní údaje',
     'payment' => 'Platba', 'notes' => 'Poznámka k objednávce', 'notes_placeholder' => 'Volitelné…', 'submit_order' => 'Odeslat objednávku',
+    'checkout_saved_address' => 'Uložená adresa',
+    'checkout_saved_address_use' => 'Použít adresu',
     'coupon_code' => 'Slevový kupón',
     'coupon_apply' => 'Uplatnit',
     'coupon_remove' => 'Odebrat kupón',

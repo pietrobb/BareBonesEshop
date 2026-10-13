@@ -258,8 +258,8 @@
   document.addEventListener('submit', (event) => {
     const form = event.target.closest('form[data-checkout-form]');
     if (!form || event.defaultPrevented) return;
-    // Applying or removing a coupon only re-prices the form; it must not lock the order button.
-    if (event.submitter && event.submitter.name === 'coupon_action') return;
+    // Applying a coupon or a saved address only refills the form; it must not lock the order button.
+    if (event.submitter && (event.submitter.name === 'coupon_action' || event.submitter.name === 'address_action')) return;
     const button = form.querySelector('button.btn-checkout');
     if (!button) return;
     if (form.dataset.submitting === '1') {

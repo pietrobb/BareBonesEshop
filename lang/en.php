@@ -433,6 +433,8 @@ return [
     'payment' => 'Payment',
     'notes' => 'Order Notes',
     'notes_placeholder' => 'Optional…',
+    'checkout_saved_address' => 'Saved address',
+    'checkout_saved_address_use' => 'Use address',
     'coupon_code' => 'Discount coupon',
     'coupon_apply' => 'Apply',
     'coupon_remove' => 'Remove coupon',

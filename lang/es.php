@@ -210,6 +210,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'cookie_banner.policy_link' => 'Política de cookies',
     'name' => 'Nombre completo', 'address' => 'Dirección de entrega', 'contact' => 'Datos de contacto',
     'payment' => 'Pago', 'notes' => 'Notas del pedido', 'notes_placeholder' => 'Opcional…', 'submit_order' => 'Enviar pedido',
+    'checkout_saved_address' => 'Dirección guardada',
+    'checkout_saved_address_use' => 'Usar dirección',
     'coupon_code' => 'Cupón de descuento',
     'coupon_apply' => 'Aplicar',
     'coupon_remove' => 'Quitar cupón',

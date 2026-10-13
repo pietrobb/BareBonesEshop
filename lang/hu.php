@@ -398,6 +398,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'cookie_banner.policy_link'             => 'Süti-szabályzat',
     'name' => 'Teljes név', 'address' => 'Szállítási cím', 'contact' => 'Kapcsolattartási adatok',
     'payment' => 'Fizetés', 'notes' => 'Megjegyzés a rendeléshez', 'notes_placeholder' => 'Opcionális…', 'submit_order' => 'Rendelés elküldése',
+    'checkout_saved_address' => 'Mentett cím',
+    'checkout_saved_address_use' => 'Cím használata',
     'coupon_code' => 'Kedvezménykupon',
     'coupon_apply' => 'Beváltás',
     'coupon_remove' => 'Kupon eltávolítása',

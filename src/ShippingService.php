@@ -18,6 +18,40 @@ class ShippingService
     /** @var ShippingAdapter[] */
     private static array $adapters = [];
 
+    /** Country names in their own language, so the list reads the same in every storefront locale. */
+    private const COUNTRY_NAMES = [
+        'AT' => 'Österreich', 'BE' => 'België / Belgique', 'BG' => 'България', 'CH' => 'Schweiz / Suisse', 'CY' => 'Κύπρος',
+        'CZ' => 'Česko', 'DE' => 'Deutschland', 'DK' => 'Danmark', 'EE' => 'Eesti', 'ES' => 'España', 'FI' => 'Suomi',
+        'FR' => 'France', 'GB' => 'United Kingdom', 'GR' => 'Ελλάδα', 'HR' => 'Hrvatska', 'HU' => 'Magyarország',
+        'IE' => 'Ireland', 'IS' => 'Ísland', 'IT' => 'Italia', 'LI' => 'Liechtenstein', 'LT' => 'Lietuva',
+        'LU' => 'Luxembourg', 'LV' => 'Latvija', 'MT' => 'Malta', 'NL' => 'Nederland', 'NO' => 'Norge', 'PL' => 'Polska',
+        'PT' => 'Portugal', 'RO' => 'România', 'SE' => 'Sverige', 'SI' => 'Slovenija', 'SK' => 'Slovensko',
+        'UA' => 'Україна', 'US' => 'United States',
+    ];
+
+    /**
+     * Countries the checkout offers: the store's database shipping zones plus the shipping.json
+     * zones, as code => name sorted by code. Wildcard zones name no country; with nothing
+     * configured the historical default list is kept.
+     * @return array<string,string>
+     */
+    public static function destinationCountries(): array
+    {
+        $codes = Shipping::zoneCountries();
+        if (self::hasDatabasePricing()) {
+            $stmt = Db::get()->prepare("SELECT DISTINCT country FROM shipping_zone_countries WHERE store_id = :store");
+            $stmt->execute([':store' => StoreContext::current()->providerId()]);
+            foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $code) {
+                if (preg_match('/^[A-Za-z]{2}$/', (string)$code)) $codes[] = strtoupper((string)$code);
+            }
+        }
+        $codes = array_unique($codes) ?: ['SK', 'CZ', 'DE', 'AT', 'HU', 'PL'];
+        sort($codes);
+        $countries = [];
+        foreach ($codes as $code) $countries[$code] = self::COUNTRY_NAMES[$code] ?? $code;
+        return $countries;
+    }
+
     /** Override adapters for testing */
     public static function setAdapters(array $adapters): void
     {
