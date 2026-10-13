@@ -18,13 +18,8 @@ final class PricingAdmin {
         'cart' => ['discount_percent', 'discount_fixed', 'buy_x_get_y', 'gift'],
         'coupon' => ['discount_percent', 'discount_fixed'],
     ];
-    public const ACTION_LABELS = [
-        'discount_percent' => 'Zľava v %',
-        'discount_fixed' => 'Zľava o sumu (centy)',
-        'fixed_price' => 'Pevná cena (centy)',
-        'buy_x_get_y' => 'Kúp X, dostaneš Y zadarmo',
-        'gift' => 'Darček (nárok v objednávke, sklad sa nemení)',
-    ];
+    /** Every promotion action type; its label is the lang key admin.promo.action.<type>. */
+    public const ACTION_TYPES = ['discount_percent', 'discount_fixed', 'fixed_price', 'buy_x_get_y', 'gift'];
     private const PROMOTION_FIELDS = ['code', 'name', 'scope', 'coupon_code', 'priority', 'stacking', 'valid_from', 'valid_to', 'active',
         'action_type', 'action_value', 'action_sku', 'action_qty', 'cond_min_qty', 'cond_product_skus', 'cond_min_subtotal', 'cond_buy_sku',
         'cond_buy_qty', 'cond_max_uses', 'cond_per_customer'];
@@ -78,12 +73,12 @@ final class PricingAdmin {
     }
 
     public static function savePromotion(int $id, mixed $post): array {
-        if (!StoreContext::current()->allows('pricing')) return self::result(false, 0, 'Tento obchod nemá povolenú cenotvorbu.');
+        if (!StoreContext::current()->allows('pricing')) return self::result(false, 0, I18n::t('admin.msg.pricing.disabled'));
         $old = $id > 0 ? self::promotion($id) : null;
-        if ($id > 0 && !$old) return self::result(false, 0, 'Promo akcia neexistuje v tomto obchode.');
+        if ($id > 0 && !$old) return self::result(false, 0, I18n::t('admin.msg.promo.missing'));
         $fields = self::scalars($post, self::PROMOTION_FIELDS);
         $lists = self::idLists($post, self::PROMOTION_LISTS);
-        if ($fields === null || $lists === null) return self::result(false, $id, 'Neplatný formulár.');
+        if ($fields === null || $lists === null) return self::result(false, $id, I18n::t('admin.msg.invalid_form'));
         try {
             $row = self::promotionRow($fields, $lists, $id);
         } catch (DomainException $e) {
@@ -106,20 +101,20 @@ final class PricingAdmin {
             $db->commit();
         } catch (Throwable $e) {
             $db->rollBack();
-            if ($e instanceof PDOException && str_starts_with((string)$e->getCode(), '23')) return self::result(false, $old ? $id : 0, "Kód promo akcie \"{$row['code']}\" už v tomto obchode existuje.");
+            if ($e instanceof PDOException && str_starts_with((string)$e->getCode(), '23')) return self::result(false, $old ? $id : 0, I18n::format('admin.msg.promo.code_taken', ['code' => $row['code']]));
             throw $e;
         }
         self::invalidatePrices();
-        return self::result(true, $id, $old ? 'Promo akcia uložená.' : 'Promo akcia vytvorená.');
+        return self::result(true, $id, I18n::t($old ? 'admin.msg.promo.saved' : 'admin.msg.promo.created'));
     }
 
     public static function deletePromotion(int $id): array {
-        if (!StoreContext::current()->allows('pricing')) return self::result(false, 0, 'Tento obchod nemá povolenú cenotvorbu.');
+        if (!StoreContext::current()->allows('pricing')) return self::result(false, 0, I18n::t('admin.msg.pricing.disabled'));
         $promotion = $id > 0 ? self::promotion($id) : null;
-        if (!$promotion) return self::result(false, 0, 'Promo akcia neexistuje v tomto obchode.');
+        if (!$promotion) return self::result(false, 0, I18n::t('admin.msg.promo.missing'));
         $coupon = (string)($promotion['coupon_code'] ?? '');
         if ($coupon !== '' && self::storeRows('SELECT 1 AS used FROM coupon_uses WHERE store_id = :store AND coupon_code = :code', [':code' => $coupon])) {
-            return self::result(false, $id, "Promo akciu {$promotion['code']} nemožno zmazať: kupón {$coupon} už uplatnili objednávky (limity sa z nich počítajú); deaktivujte ju.");
+            return self::result(false, $id, I18n::format('admin.msg.promo.delete_used', ['code' => $promotion['code'], 'coupon' => $coupon]));
         }
         $db = Db::get();
         $db->beginTransaction();
@@ -132,7 +127,7 @@ final class PricingAdmin {
             throw $e;
         }
         self::invalidatePrices();
-        return self::result(true, 0, 'Promo akcia zmazaná.');
+        return self::result(true, 0, I18n::t('admin.msg.promo.deleted'));
     }
 
     /** Price lists of the store with the number of their prices. */
@@ -156,25 +151,25 @@ final class PricingAdmin {
     }
 
     public static function savePriceList(int $id, mixed $post): array {
-        if (!StoreContext::current()->allows('pricing')) return self::result(false, 0, 'Tento obchod nemá povolenú cenotvorbu.');
+        if (!StoreContext::current()->allows('pricing')) return self::result(false, 0, I18n::t('admin.msg.pricing.disabled'));
         $old = $id > 0 ? self::priceList($id) : null;
-        if ($id > 0 && !$old) return self::result(false, 0, 'Cenník neexistuje v tomto obchode.');
+        if ($id > 0 && !$old) return self::result(false, 0, I18n::t('admin.msg.pricelist.missing'));
         $fields = self::scalars($post, ['code', 'name', 'currency', 'customer_group_id', 'priority', 'valid_from', 'valid_to', 'active']);
-        if ($fields === null) return self::result(false, $id, 'Neplatný formulár.');
+        if ($fields === null) return self::result(false, $id, I18n::t('admin.msg.invalid_form'));
         try {
             $name = trim($fields['name']);
-            if (!self::validText($name, true)) self::fail('Názov je povinný (najviac ' . self::MAX_TEXT . ' znakov, bez riadiacich znakov).');
+            if (!self::validText($name, true)) self::fail(I18n::format('admin.msg.name_required', ['max' => self::MAX_TEXT]));
             $code = self::code($fields['code'], $name);
             if (self::storeRows('SELECT 1 AS taken FROM price_lists WHERE store_id = :store AND code = :code AND id != :id', [':code' => $code, ':id' => $id ?: -1])) {
-                self::fail("Kód cenníka \"{$code}\" už v tomto obchode existuje.");
+                self::fail(I18n::format('admin.msg.pricelist.code_taken', ['code' => $code]));
             }
             $currency = strtoupper(trim($fields['currency']));
-            if (!in_array($currency, self::currencies(), true)) self::fail('Mena musí byť ' . implode(' alebo ', self::currencies()) . ' (mena obchodu alebo jeho produktov).');
+            if (!in_array($currency, self::currencies(), true)) self::fail(I18n::format('admin.msg.pricelist.currency', ['currencies' => implode(I18n::t('admin.msg.or'), self::currencies())]));
             $group = trim($fields['customer_group_id']);
             $groupId = $group === '' || $group === '0' ? null : self::ownedGroups([$group])[0];
             [$from, $to] = self::validity($fields['valid_from'], $fields['valid_to']);
             $row = ['code' => $code, 'name' => $name, 'currency' => $currency, 'customer_group_id' => $groupId,
-                'priority' => self::int($fields['priority'] === '' ? '0' : $fields['priority'], -1000000, 1000000, 'Priorita musí byť celé číslo.'),
+                'priority' => self::int($fields['priority'] === '' ? '0' : $fields['priority'], -1000000, 1000000, I18n::t('admin.msg.promo.priority')),
                 'valid_from' => $from, 'valid_to' => $to, 'active' => self::flag($fields['active'])];
         } catch (DomainException $e) {
             return self::result(false, $id, $e->getMessage());
@@ -195,17 +190,17 @@ final class PricingAdmin {
             $db->commit();
         } catch (Throwable $e) {
             $db->rollBack();
-            if ($e instanceof PDOException && str_starts_with((string)$e->getCode(), '23')) return self::result(false, $old ? $id : 0, "Kód cenníka \"{$row['code']}\" už v tomto obchode existuje.");
+            if ($e instanceof PDOException && str_starts_with((string)$e->getCode(), '23')) return self::result(false, $old ? $id : 0, I18n::format('admin.msg.pricelist.code_taken', ['code' => $row['code']]));
             throw $e;
         }
         self::invalidatePrices();
-        return self::result(true, $id, $old ? 'Cenník uložený.' : 'Cenník vytvorený.');
+        return self::result(true, $id, I18n::t($old ? 'admin.msg.pricelist.saved' : 'admin.msg.pricelist.created'));
     }
 
     public static function deletePriceList(int $id): array {
-        if (!StoreContext::current()->allows('pricing')) return self::result(false, 0, 'Tento obchod nemá povolenú cenotvorbu.');
+        if (!StoreContext::current()->allows('pricing')) return self::result(false, 0, I18n::t('admin.msg.pricing.disabled'));
         $list = $id > 0 ? self::priceList($id) : null;
-        if (!$list) return self::result(false, 0, 'Cenník neexistuje v tomto obchode.');
+        if (!$list) return self::result(false, 0, I18n::t('admin.msg.pricelist.missing'));
         $db = Db::get();
         $db->beginTransaction();
         try {
@@ -220,10 +215,10 @@ final class PricingAdmin {
             throw $e;
         }
         self::invalidatePrices();
-        return self::result(true, 0, 'Cenník zmazaný (aj jeho ceny: ' . count($prices) . ').');
+        return self::result(true, 0, I18n::format('admin.msg.pricelist.deleted', ['count' => count($prices)]));
     }
 
-    /** The list's prices as editor lines "SKU | min. množstvo | cena | pôvodná cena". */
+    /** The list's prices as editor lines "SKU | min. quantity | price | original price". */
     public static function priceLines(int $listId): string {
         return implode("\n", array_map(static fn(array $r): string => implode(' | ', array_filter([$r['sku'], (string)$r['min_qty'], (string)$r['price'],
             $r['compare_price'] === null ? null : (string)$r['compare_price']], static fn(?string $v): bool => $v !== null)), self::priceRows($listId)));
@@ -231,25 +226,25 @@ final class PricingAdmin {
 
     /** Replace all prices of a list from the editor lines; every SKU must be a product or variant of the store's catalog. */
     public static function savePrices(int $listId, mixed $post): array {
-        if (!StoreContext::current()->allows('pricing')) return self::result(false, 0, 'Tento obchod nemá povolenú cenotvorbu.');
+        if (!StoreContext::current()->allows('pricing')) return self::result(false, 0, I18n::t('admin.msg.pricing.disabled'));
         $list = $listId > 0 ? self::priceList($listId) : null;
-        if (!$list) return self::result(false, 0, 'Cenník neexistuje v tomto obchode.');
+        if (!$list) return self::result(false, 0, I18n::t('admin.msg.pricelist.missing'));
         $fields = self::scalars($post, ['prices']);
-        if ($fields === null) return self::result(false, $listId, 'Neplatný formulár.');
+        if ($fields === null) return self::result(false, $listId, I18n::t('admin.msg.invalid_form'));
         $lines = array_values(array_filter(array_map('trim', preg_split('/\R/', $fields['prices'])), static fn(string $l): bool => $l !== ''));
-        if (count($lines) > self::MAX_PRICE_LINES) return self::result(false, $listId, 'Cenník môže mať najviac ' . self::MAX_PRICE_LINES . ' riadkov.');
+        if (count($lines) > self::MAX_PRICE_LINES) return self::result(false, $listId, I18n::format('admin.msg.pricelist.max_lines', ['max' => self::MAX_PRICE_LINES]));
         $rows = [];
         try {
             foreach ($lines as $n => $line) {
-                $label = 'Riadok ' . ($n + 1);
+                $label = I18n::format('admin.msg.line', ['n' => $n + 1]);
                 $parts = array_map('trim', explode('|', $line));
-                if (count($parts) < 3 || count($parts) > 4) self::fail("{$label}: zadajte SKU | min. množstvo | cena v centoch [| pôvodná cena].");
+                if (count($parts) < 3 || count($parts) > 4) self::fail(I18n::format('admin.msg.pricelist.line_format', ['line' => $label]));
                 $target = self::skuTarget($parts[0], true, $label);
-                $minQty = self::int($parts[1], 1, 1000000, "{$label}: minimálne množstvo musí byť 1 až 1000000.");
-                $price = self::int($parts[2], 0, self::MAX_INT, "{$label}: cena musí byť nezáporná suma v centoch.");
-                $compare = ($parts[3] ?? '') === '' ? null : self::int($parts[3], $price, self::MAX_INT, "{$label}: pôvodná cena musí byť suma v centoch, najmenej taká ako cena.");
+                $minQty = self::int($parts[1], 1, 1000000, I18n::format('admin.msg.min_qty_line', ['line' => $label]));
+                $price = self::int($parts[2], 0, self::MAX_INT, I18n::format('admin.msg.pricelist.price', ['line' => $label]));
+                $compare = ($parts[3] ?? '') === '' ? null : self::int($parts[3], $price, self::MAX_INT, I18n::format('admin.msg.pricelist.compare', ['line' => $label]));
                 $key = $target['product_id'] . ':' . ($target['variant_id'] ?? '-') . ':' . $minQty;
-                if (isset($rows[$key])) self::fail("{$label}: {$parts[0]} s minimálnym množstvom {$minQty} je v cenníku dvakrát.");
+                if (isset($rows[$key])) self::fail(I18n::format('admin.msg.pricelist.duplicate', ['line' => $label, 'sku' => $parts[0], 'qty' => $minQty]));
                 $rows[$key] = ['product_id' => $target['product_id'], 'variant_id' => $target['variant_id'] ?? null, 'min_qty' => $minQty, 'price' => $price, 'compare_price' => $compare];
             }
         } catch (DomainException $e) {
@@ -270,74 +265,75 @@ final class PricingAdmin {
             throw $e;
         }
         self::invalidatePrices();
-        return self::result(true, $listId, 'Ceny cenníka uložené (' . count($rows) . ').');
+        return self::result(true, $listId, I18n::format('admin.msg.pricelist.prices_saved', ['count' => count($rows)]));
     }
 
     /** @throws DomainException */
     private static function promotionRow(array $f, array $lists, int $id): array {
         $name = trim($f['name']);
-        if (!self::validText($name, true)) self::fail('Názov je povinný (najviac ' . self::MAX_TEXT . ' znakov, bez riadiacich znakov).');
+        if (!self::validText($name, true)) self::fail(I18n::format('admin.msg.name_required', ['max' => self::MAX_TEXT]));
         $code = self::code($f['code'], $name);
         if (self::storeRows('SELECT 1 AS taken FROM promotions WHERE store_id = :store AND code = :code AND id != :id', [':code' => $code, ':id' => $id ?: -1])) {
-            self::fail("Kód promo akcie \"{$code}\" už v tomto obchode existuje.");
+            self::fail(I18n::format('admin.msg.promo.code_taken', ['code' => $code]));
         }
         $scope = $f['scope'];
-        if (!in_array($scope, ['catalog', 'cart'], true)) self::fail('Rozsah musí byť katalóg alebo košík.');
+        if (!in_array($scope, ['catalog', 'cart'], true)) self::fail(I18n::t('admin.msg.promo.scope'));
         $coupon = strtoupper(trim($f['coupon_code']));
         if ($coupon !== '') {
-            if ($scope !== 'cart') self::fail('Kupónový kód môže mať len promo akcia košíka.');
-            if (!preg_match('/^[A-Z0-9][A-Z0-9_-]{1,63}$/', $coupon)) self::fail('Kupónový kód: 2 až 64 znakov A–Z, 0–9, pomlčka a podčiarkovník.');
+            if ($scope !== 'cart') self::fail(I18n::t('admin.msg.promo.coupon_cart_only'));
+            if (!preg_match('/^[A-Z0-9][A-Z0-9_-]{1,63}$/', $coupon)) self::fail(I18n::t('admin.msg.promo.coupon_format'));
             if (self::storeRows('SELECT 1 AS taken FROM promotions WHERE store_id = :store AND UPPER(coupon_code) = :coupon AND id != :id', [':coupon' => $coupon, ':id' => $id ?: -1])) {
-                self::fail("Kupón {$coupon} už má iná promo akcia tohto obchodu.");
+                self::fail(I18n::format('admin.msg.promo.coupon_taken', ['coupon' => $coupon]));
             }
-            if (in_array($coupon, Pricing::configCouponCodes(), true)) self::fail("Kupón {$coupon} je už definovaný v pricing.json; jeden kód nesmie znamenať dve rôzne zľavy.");
+            if (in_array($coupon, Pricing::configCouponCodes(), true)) self::fail(I18n::format('admin.msg.promo.coupon_config', ['coupon' => $coupon]));
         }
         $stacking = $f['stacking'] === '' ? 'exclusive' : $f['stacking'];
-        if (!in_array($stacking, ['exclusive', 'stack'], true)) self::fail('Kombinovanie musí byť exclusive alebo stack.');
+        if (!in_array($stacking, ['exclusive', 'stack'], true)) self::fail(I18n::t('admin.msg.promo.stacking'));
         [$from, $to] = self::validity($f['valid_from'], $f['valid_to']);
 
         $kind = $coupon !== '' ? 'coupon' : $scope;
         $type = $f['action_type'];
         if (!in_array($type, self::ACTIONS[$kind], true)) {
-            self::fail('Akcia ' . (self::ACTION_LABELS[$type] ?? $type) . ' nie je pre ' . ['catalog' => 'promo akciu katalógu', 'cart' => 'promo akciu košíka', 'coupon' => 'kupón'][$kind]
-                . ' povolená (povolené: ' . implode(', ', array_map(static fn(string $t): string => self::ACTION_LABELS[$t], self::ACTIONS[$kind])) . ').');
+            $label = static fn(string $t): string => in_array($t, self::ACTION_TYPES, true) ? I18n::t('admin.promo.action.' . $t) : $t;
+            self::fail(I18n::format('admin.msg.promo.action_refused', ['action' => $label($type), 'kind' => I18n::t('admin.msg.promo.kind_' . $kind),
+                'allowed' => implode(', ', array_map($label, self::ACTIONS[$kind]))]));
         }
         $actions = ['type' => $type] + match ($type) {
             'discount_percent' => ['bps' => self::percentBps($f['action_value'])],
-            'discount_fixed' => ['amount' => self::int($f['action_value'], 1, self::MAX_INT, 'Zľava musí byť kladná suma v centoch.')],
-            'fixed_price' => ['price' => self::int($f['action_value'], 0, self::MAX_INT, 'Pevná cena musí byť nezáporná suma v centoch.')],
-            'buy_x_get_y', 'gift' => self::skuTarget($f['action_sku'], $type === 'gift', $type === 'gift' ? 'Darček' : 'Produkt zadarmo')
-                + ['qty' => self::int($f['action_qty'] === '' ? '1' : $f['action_qty'], 1, 1000, 'Počet kusov zadarmo alebo darčekov musí byť 1 až 1000.')],
+            'discount_fixed' => ['amount' => self::int($f['action_value'], 1, self::MAX_INT, I18n::t('admin.msg.promo.discount_fixed'))],
+            'fixed_price' => ['price' => self::int($f['action_value'], 0, self::MAX_INT, I18n::t('admin.msg.promo.fixed_price'))],
+            'buy_x_get_y', 'gift' => self::skuTarget($f['action_sku'], $type === 'gift', I18n::t($type === 'gift' ? 'admin.msg.promo.label_gift' : 'admin.msg.promo.label_free_product'))
+                + ['qty' => self::int($f['action_qty'] === '' ? '1' : $f['action_qty'], 1, 1000, I18n::t('admin.msg.promo.free_qty'))],
         };
 
         $filled = static fn(string ...$keys): bool => array_filter($keys, static fn(string $k): bool => trim($f[$k]) !== '') !== [];
         $conditions = [];
         if ($scope === 'catalog') {
             if ($filled('cond_min_subtotal', 'cond_buy_sku', 'cond_buy_qty', 'cond_max_uses', 'cond_per_customer')) {
-                self::fail('Podmienky košíka (minimálna suma, kúpený produkt, limity kupónu) nemá promo akcia katalógu.');
+                self::fail(I18n::t('admin.msg.promo.catalog_cart_conditions'));
             }
-            if ($filled('cond_min_qty')) $conditions['min_qty'] = self::int($f['cond_min_qty'], 1, 1000000, 'Minimálne množstvo musí byť 1 až 1000000.');
+            if ($filled('cond_min_qty')) $conditions['min_qty'] = self::int($f['cond_min_qty'], 1, 1000000, I18n::t('admin.msg.promo.min_qty'));
             if ($filled('cond_product_skus')) $conditions['product_ids'] = self::productIds($f['cond_product_skus']);
-            if ($lists['cond_category_ids']) $conditions['category_ids'] = self::owned('categories', $lists['cond_category_ids'], 'Kategória');
-            if ($lists['cond_brand_ids']) $conditions['brand_ids'] = self::owned('brands', $lists['cond_brand_ids'], 'Značka');
+            if ($lists['cond_category_ids']) $conditions['category_ids'] = self::owned('categories', $lists['cond_category_ids'], I18n::t('admin.msg.promo.label_category'));
+            if ($lists['cond_brand_ids']) $conditions['brand_ids'] = self::owned('brands', $lists['cond_brand_ids'], I18n::t('admin.msg.promo.label_brand'));
             if ($type === 'fixed_price' && !array_intersect_key($conditions, ['product_ids' => 1, 'category_ids' => 1, 'brand_ids' => 1])) {
-                self::fail('Pevná cena musí byť obmedzená na produkty, kategórie alebo značky; inak by nastavila jednu cenu celému katalógu.');
+                self::fail(I18n::t('admin.msg.promo.fixed_price_scope'));
             }
         } else {
             if ($filled('cond_min_qty', 'cond_product_skus') || $lists['cond_category_ids'] || $lists['cond_brand_ids']) {
-                self::fail('Podmienky produktu (množstvo, produkty, kategórie, značky) vyhodnocuje len promo akcia katalógu, košík ich ignoruje.');
+                self::fail(I18n::t('admin.msg.promo.cart_product_conditions'));
             }
-            if ($filled('cond_min_subtotal')) $conditions['min_subtotal'] = self::int($f['cond_min_subtotal'], 1, self::MAX_INT, 'Minimálna suma košíka musí byť kladná suma v centoch.');
+            if ($filled('cond_min_subtotal')) $conditions['min_subtotal'] = self::int($f['cond_min_subtotal'], 1, self::MAX_INT, I18n::t('admin.msg.promo.min_subtotal'));
             if ($type === 'buy_x_get_y') {
-                $conditions['buy_product_id'] = self::skuTarget($f['cond_buy_sku'], false, 'Kúpený produkt')['product_id'];
-                $conditions['buy_qty'] = self::int($f['cond_buy_qty'] === '' ? '1' : $f['cond_buy_qty'], 1, 1000, 'Počet kúpených kusov musí byť 1 až 1000.');
+                $conditions['buy_product_id'] = self::skuTarget($f['cond_buy_sku'], false, I18n::t('admin.msg.promo.label_bought_product'))['product_id'];
+                $conditions['buy_qty'] = self::int($f['cond_buy_qty'] === '' ? '1' : $f['cond_buy_qty'], 1, 1000, I18n::t('admin.msg.promo.buy_qty'));
             } elseif ($filled('cond_buy_sku', 'cond_buy_qty')) {
-                self::fail('Kúpený produkt a jeho počet patria len k akcii Kúp X, dostaneš Y zadarmo.');
+                self::fail(I18n::t('admin.msg.promo.buy_only'));
             }
             foreach (['cond_max_uses' => 'max_uses', 'cond_per_customer' => 'per_customer'] as $field => $key) {
                 if (!$filled($field)) continue;
-                if ($coupon === '') self::fail('Limity použitia má len promo akcia s kupónovým kódom.');
-                $conditions[$key] = self::int($f[$field], 1, self::MAX_INT, 'Limit použitia musí byť kladné celé číslo.');
+                if ($coupon === '') self::fail(I18n::t('admin.msg.promo.limits_coupon_only'));
+                $conditions[$key] = self::int($f[$field], 1, self::MAX_INT, I18n::t('admin.msg.promo.limit_int'));
             }
         }
         if ($lists['cond_customer_group_ids']) $conditions['customer_group_ids'] = self::ownedGroups($lists['cond_customer_group_ids']);
@@ -347,7 +343,7 @@ final class PricingAdmin {
             'name' => $name,
             'scope' => $scope,
             'coupon_code' => $coupon === '' ? null : $coupon,
-            'priority' => self::int($f['priority'] === '' ? '100' : $f['priority'], -1000000, 1000000, 'Priorita musí byť celé číslo.'),
+            'priority' => self::int($f['priority'] === '' ? '100' : $f['priority'], -1000000, 1000000, I18n::t('admin.msg.promo.priority')),
             'stacking' => $stacking,
             'conditions' => $conditions === [] ? '{}' : json_encode($conditions, JSON_THROW_ON_ERROR),
             'actions' => json_encode($actions, JSON_THROW_ON_ERROR),
@@ -370,20 +366,20 @@ final class PricingAdmin {
     /** Product (or, when allowed, variant) of the store's catalog with this SKU. @throws DomainException */
     private static function skuTarget(string $sku, bool $variants, string $label): array {
         $sku = trim($sku);
-        if ($sku === '') self::fail("{$label}: zadajte SKU.");
+        if ($sku === '') self::fail(I18n::format('admin.msg.promo.sku_required', ['label' => $label]));
         $product = CatalogScope::rows('SELECT id FROM products WHERE sku = :sku AND store_id = :catalog', [':sku' => $sku])[0] ?? null;
         if ($product) return ['product_id' => (int)$product['id']];
         if ($variants) {
             $variant = CatalogScope::rows('SELECT v.id, v.product_id FROM variants v JOIN products p ON p.id = v.product_id WHERE v.sku = :sku AND p.store_id = :catalog', [':sku' => $sku])[0] ?? null;
             if ($variant) return ['product_id' => (int)$variant['product_id'], 'variant_id' => (int)$variant['id']];
         }
-        self::fail("{$label}: SKU \"{$sku}\" nie je " . ($variants ? 'produkt ani variant' : 'produkt') . ' katalógu tohto obchodu.');
+        self::fail(I18n::format($variants ? 'admin.msg.sku_not_item' : 'admin.msg.promo.sku_not_product', ['label' => $label, 'sku' => $sku]));
     }
 
     /** @throws DomainException */
     private static function productIds(string $skus): array {
         $ids = [];
-        foreach (preg_split('/[\s,;]+/', trim($skus)) as $sku) $ids[] = self::skuTarget($sku, false, 'Produkty')['product_id'];
+        foreach (preg_split('/[\s,;]+/', trim($skus)) as $sku) $ids[] = self::skuTarget($sku, false, I18n::t('admin.msg.promo.label_products'))['product_id'];
         return array_values(array_unique($ids));
     }
 
@@ -396,7 +392,7 @@ final class PricingAdmin {
     /** The ids, all of which must be rows of the store's catalog in $table. @throws DomainException */
     private static function owned(string $table, array $ids, string $label): array {
         $found = array_map('intval', array_column(self::inIds("SELECT id FROM {$table} WHERE store_id = :catalog", $ids, ':catalog', StoreContext::current()->catalogId()), 'id'));
-        foreach ($ids as $id) if (!in_array($id, $found, true)) self::fail("{$label} #{$id} nepatrí do katalógu tohto obchodu.");
+        foreach ($ids as $id) if (!in_array($id, $found, true)) self::fail(I18n::format('admin.msg.promo.catalog_foreign', ['label' => $label, 'id' => $id]));
         return $ids;
     }
 
@@ -404,7 +400,7 @@ final class PricingAdmin {
     private static function ownedGroups(array $ids): array {
         $ids = array_map(static fn(mixed $id): int => ctype_digit((string)$id) ? (int)$id : 0, $ids);
         $found = array_map('intval', array_column(self::inIds('SELECT id FROM customer_groups WHERE store_id = :store', $ids, ':store', StoreContext::current()->id()), 'id'));
-        foreach ($ids as $id) if (!in_array($id, $found, true)) self::fail("Zákaznícka skupina #{$id} nepatrí do tohto obchodu.");
+        foreach ($ids as $id) if (!in_array($id, $found, true)) self::fail(I18n::format('admin.msg.promo.group_foreign', ['id' => $id]));
         return $ids;
     }
 
@@ -433,11 +429,11 @@ final class PricingAdmin {
                 if ($date === false || $date->format($format) !== $value) continue;
                 return $format === 'Y-m-d' && $end ? $date->format('Y-m-d 23:59:59') : $date->format('Y-m-d H:i:s');
             }
-            self::fail("{$label}: neplatný dátum (RRRR-MM-DD HH:MM, UTC).");
+            self::fail(I18n::format('admin.msg.promo.date_invalid', ['label' => $label]));
         };
-        $start = $parse($from, false, 'Platnosť od');
-        $finish = $parse($to, true, 'Platnosť do');
-        if ($start !== null && $finish !== null && $finish < $start) self::fail('Platnosť do musí byť neskôr ako platnosť od.');
+        $start = $parse($from, false, I18n::t('admin.msg.promo.label_valid_from'));
+        $finish = $parse($to, true, I18n::t('admin.msg.promo.label_valid_to'));
+        if ($start !== null && $finish !== null && $finish < $start) self::fail(I18n::t('admin.msg.promo.validity_order'));
         return [$start, $finish];
     }
 
@@ -447,9 +443,9 @@ final class PricingAdmin {
 
     /** "12,5" or "12.5" percent → 1250 basis points (0.01 % to 100 %). @throws DomainException */
     private static function percentBps(string $value): int {
-        if (!preg_match('/^(\d{1,3})(?:[.,](\d{1,2}))?$/', trim($value), $m)) self::fail('Zľava v % musí byť číslo od 0,01 do 100 (najviac dve desatinné miesta).');
+        if (!preg_match('/^(\d{1,3})(?:[.,](\d{1,2}))?$/', trim($value), $m)) self::fail(I18n::t('admin.msg.promo.percent'));
         $bps = (int)$m[1] * 100 + (int)str_pad($m[2] ?? '', 2, '0');
-        if ($bps < 1 || $bps > 10000) self::fail('Zľava v % musí byť číslo od 0,01 do 100 (najviac dve desatinné miesta).');
+        if ($bps < 1 || $bps > 10000) self::fail(I18n::t('admin.msg.promo.percent'));
         return $bps;
     }
 
@@ -468,7 +464,7 @@ final class PricingAdmin {
     /** @throws DomainException */
     private static function code(string $code, string $name): string {
         $code = Str::slug(trim($code) !== '' ? $code : $name);
-        if ($code === '' || strlen($code) > self::MAX_TEXT) self::fail('Kód musí obsahovať písmená alebo číslice (najviac ' . self::MAX_TEXT . ' znakov).');
+        if ($code === '' || strlen($code) > self::MAX_TEXT) self::fail(I18n::format('admin.msg.code_invalid', ['max' => self::MAX_TEXT]));
         return $code;
     }
 

@@ -10,7 +10,8 @@
 final class B2bAdmin {
     private const MAX_TEXT = 191;
     private const MAX_INT = 2000000000;
-    public const APPROVAL = ['pending' => 'čaká na schválenie', 'approved' => 'schválená', 'rejected' => 'zamietnutá'];
+    /** Approval states of a company; their labels are the lang keys admin.b2b.approval.<state>. */
+    public const APPROVAL = ['pending', 'approved', 'rejected'];
 
     public static function groups(): array {
         return self::storeRows('SELECT cg.*, (SELECT COUNT(*) FROM customers c WHERE c.customer_group_id = cg.id AND c.store_id = cg.store_id) AS customer_count
@@ -23,38 +24,38 @@ final class B2bAdmin {
 
     public static function saveGroup(int $id, mixed $post): array {
         $old = $id > 0 ? self::group($id) : null;
-        if ($id > 0 && !$old) return self::result(false, 0, 'Zákaznícka skupina neexistuje v tomto obchode.');
+        if ($id > 0 && !$old) return self::result(false, 0, I18n::t('admin.msg.b2b.group_missing'));
         $fields = self::scalars($post, ['code', 'name', 'discount', 'active']);
-        if ($fields === null) return self::result(false, $id, 'Neplatný formulár.');
+        if ($fields === null) return self::result(false, $id, I18n::t('admin.msg.invalid_form'));
         try {
-            $name = self::text($fields['name'], true, 'Názov');
+            $name = self::text($fields['name'], true, I18n::t('admin.th.name'));
             $code = self::code($fields['code'], $name);
             if (self::storeRows('SELECT 1 AS taken FROM customer_groups WHERE store_id = :store AND code = :code AND id != :id', [':code' => $code, ':id' => $id ?: -1])) {
-                self::fail("Kód skupiny \"{$code}\" už v tomto obchode existuje.");
+                self::fail(I18n::format('admin.msg.b2b.group_code_taken', ['code' => $code]));
             }
             $row = ['code' => $code, 'name' => $name, 'discount_bps' => self::percentBps($fields['discount']), 'active' => self::flag($fields['active'])];
         } catch (DomainException $e) {
             return self::result(false, $id, $e->getMessage());
         }
-        $id = self::write('customer_groups', 'customer_group', $old, $id, $row, $old ? 'Skupina uložená.' : 'Skupina vytvorená.', "Kód skupiny \"{$row['code']}\" už v tomto obchode existuje.");
-        return is_array($id) ? $id : self::result(true, $id, $old ? 'Skupina uložená.' : 'Skupina vytvorená.');
+        $id = self::write('customer_groups', 'customer_group', $old, $id, $row, I18n::t($old ? 'admin.msg.b2b.group_saved' : 'admin.msg.b2b.group_created'), I18n::format('admin.msg.b2b.group_code_taken', ['code' => $row['code']]));
+        return is_array($id) ? $id : self::result(true, $id, I18n::t($old ? 'admin.msg.b2b.group_saved' : 'admin.msg.b2b.group_created'));
     }
 
     public static function deleteGroup(int $id): array {
         $group = $id > 0 ? self::group($id) : null;
-        if (!$group) return self::result(false, 0, 'Zákaznícka skupina neexistuje v tomto obchode.');
+        if (!$group) return self::result(false, 0, I18n::t('admin.msg.b2b.group_missing'));
         $blockers = [];
-        if ((int)(self::storeRows('SELECT COUNT(*) AS n FROM customers WHERE store_id = :store AND customer_group_id = :id', [':id' => $id])[0]['n'] ?? 0) > 0) $blockers[] = 'zákazníci';
+        if ((int)(self::storeRows('SELECT COUNT(*) AS n FROM customers WHERE store_id = :store AND customer_group_id = :id', [':id' => $id])[0]['n'] ?? 0) > 0) $blockers[] = I18n::t('admin.msg.b2b.blocker_customers');
         $lists = array_column(self::storeRows('SELECT code FROM price_lists WHERE store_id = :store AND customer_group_id = :id', [':id' => $id]), 'code');
-        if ($lists) $blockers[] = 'cenníky ' . implode(', ', $lists);
+        if ($lists) $blockers[] = I18n::format('admin.msg.b2b.blocker_price_lists', ['codes' => implode(', ', $lists)]);
         $promotions = [];
         foreach (self::storeRows('SELECT code, conditions FROM promotions WHERE store_id = :store') as $promotion) {
             $conditions = json_decode((string)$promotion['conditions'], true);
             if (is_array($conditions['customer_group_ids'] ?? null) && in_array($id, array_map('intval', $conditions['customer_group_ids']), true)) $promotions[] = $promotion['code'];
         }
-        if ($promotions) $blockers[] = 'promo akcie ' . implode(', ', $promotions);
-        if ($blockers) return self::result(false, $id, "Skupinu {$group['code']} nemožno zmazať, používajú ju: " . implode('; ', $blockers) . '. Deaktivujte ju.');
-        return self::remove('customer_groups', 'customer_group', $group, 'Skupina zmazaná.');
+        if ($promotions) $blockers[] = I18n::format('admin.msg.b2b.blocker_promotions', ['codes' => implode(', ', $promotions)]);
+        if ($blockers) return self::result(false, $id, I18n::format('admin.msg.b2b.group_delete_blocked', ['code' => $group['code'], 'blockers' => implode('; ', $blockers)]));
+        return self::remove('customer_groups', 'customer_group', $group, I18n::t('admin.msg.b2b.group_deleted'));
     }
 
     /** Companies of the store with the number of members and their unpaid (open) order total. */
@@ -70,48 +71,48 @@ final class B2bAdmin {
 
     public static function saveCompany(int $id, mixed $post): array {
         $old = $id > 0 ? self::company($id) : null;
-        if ($id > 0 && !$old) return self::result(false, 0, 'Firma neexistuje v tomto obchode.');
+        if ($id > 0 && !$old) return self::result(false, 0, I18n::t('admin.msg.b2b.company_missing'));
         $fields = self::scalars($post, ['code', 'legal_name', 'registration_number', 'vat_id', 'approval_status', 'credit_limit', 'payment_terms_days', 'invoice_purchase', 'active']);
-        if ($fields === null) return self::result(false, $id, 'Neplatný formulár.');
+        if ($fields === null) return self::result(false, $id, I18n::t('admin.msg.invalid_form'));
         try {
-            $name = self::text($fields['legal_name'], true, 'Obchodné meno');
+            $name = self::text($fields['legal_name'], true, I18n::t('admin.b2b.legal_name'));
             $code = self::code($fields['code'], $name);
             if (self::storeRows('SELECT 1 AS taken FROM companies WHERE store_id = :store AND code = :code AND id != :id', [':code' => $code, ':id' => $id ?: -1])) {
-                self::fail("Kód firmy \"{$code}\" už v tomto obchode existuje.");
+                self::fail(I18n::format('admin.msg.b2b.company_code_taken', ['code' => $code]));
             }
             $registration = trim($fields['registration_number']);
-            if ($registration !== '' && !preg_match('/^[A-Za-z0-9][A-Za-z0-9 .\/-]{1,31}$/', $registration)) self::fail('IČO / registračné číslo: 2 až 32 znakov (písmená, číslice, medzera, . / -).');
+            if ($registration !== '' && !preg_match('/^[A-Za-z0-9][A-Za-z0-9 .\/-]{1,31}$/', $registration)) self::fail(I18n::t('admin.msg.b2b.registration'));
             $vatId = strtoupper(preg_replace('/[\s.-]+/', '', $fields['vat_id']));
-            if ($vatId !== '' && !preg_match('/^[A-Z]{2}[A-Z0-9+*]{2,13}$/', $vatId)) self::fail('IČ DPH musí začínať kódom krajiny (napr. SK2020123456).');
+            if ($vatId !== '' && !preg_match('/^[A-Z]{2}[A-Z0-9+*]{2,13}$/', $vatId)) self::fail(I18n::t('admin.msg.b2b.vat_id'));
             $approval = $fields['approval_status'] === '' ? 'pending' : $fields['approval_status'];
-            if (!isset(self::APPROVAL[$approval])) self::fail('Stav schválenia musí byť ' . implode(', ', array_keys(self::APPROVAL)) . '.');
-            $terms = self::int($fields['payment_terms_days'] === '' ? '0' : $fields['payment_terms_days'], 0, 365, 'Splatnosť musí byť 0 až 365 dní.');
+            if (!in_array($approval, self::APPROVAL, true)) self::fail(I18n::format('admin.msg.b2b.approval_invalid', ['statuses' => implode(', ', self::APPROVAL)]));
+            $terms = self::int($fields['payment_terms_days'] === '' ? '0' : $fields['payment_terms_days'], 0, 365, I18n::t('admin.msg.b2b.terms'));
             $invoice = self::flag($fields['invoice_purchase']);
-            if ($invoice && $terms < 1) self::fail('Nákup na faktúru vyžaduje splatnosť aspoň 1 deň.');
+            if ($invoice && $terms < 1) self::fail(I18n::t('admin.msg.b2b.invoice_terms'));
             $row = [
                 'code' => $code, 'legal_name' => $name, 'registration_number' => $registration === '' ? null : $registration,
                 'vat_id' => $vatId === '' ? null : $vatId, 'vat_country' => $vatId === '' ? null : substr($vatId, 0, 2),
                 // A different VAT ID has not been validated yet.
                 'vat_validated_at' => $old && $vatId !== '' && $vatId === (string)$old['vat_id'] ? $old['vat_validated_at'] : null,
                 'approval_status' => $approval,
-                'credit_limit' => self::int($fields['credit_limit'] === '' ? '0' : $fields['credit_limit'], 0, self::MAX_INT, 'Kreditný limit musí byť nezáporná suma v centoch (0 = bez limitu).'),
+                'credit_limit' => self::int($fields['credit_limit'] === '' ? '0' : $fields['credit_limit'], 0, self::MAX_INT, I18n::t('admin.msg.b2b.credit_limit')),
                 'payment_terms_days' => $terms, 'invoice_purchase' => $invoice, 'active' => self::flag($fields['active']),
             ];
         } catch (DomainException $e) {
             return self::result(false, $id, $e->getMessage());
         }
-        $message = $old ? 'Firma uložená.' : 'Firma vytvorená.';
-        if ($invoice && $approval !== 'approved') $message .= ' Nákup na faktúru sa ponúkne až po schválení.';
-        $id = self::write('companies', 'company', $old, $id, $row, $message, "Kód firmy \"{$row['code']}\" už v tomto obchode existuje.");
+        $message = I18n::t($old ? 'admin.msg.b2b.company_saved' : 'admin.msg.b2b.company_created');
+        if ($invoice && $approval !== 'approved') $message .= ' ' . I18n::t('admin.msg.b2b.invoice_after_approval');
+        $id = self::write('companies', 'company', $old, $id, $row, $message, I18n::format('admin.msg.b2b.company_code_taken', ['code' => $row['code']]));
         return is_array($id) ? $id : self::result(true, $id, $message);
     }
 
     public static function deleteCompany(int $id): array {
         $company = $id > 0 ? self::company($id) : null;
-        if (!$company) return self::result(false, 0, 'Firma neexistuje v tomto obchode.');
+        if (!$company) return self::result(false, 0, I18n::t('admin.msg.b2b.company_missing'));
         $members = (int)(self::storeRows('SELECT COUNT(*) AS n FROM customers WHERE store_id = :store AND company_id = :id', [':id' => $id])[0]['n'] ?? 0);
-        if ($members > 0) return self::result(false, $id, "Firmu {$company['code']} nemožno zmazať: má priradených zákazníkov ({$members}). Najprv ich odpojte alebo firmu deaktivujte.");
-        return self::remove('companies', 'company', $company, 'Firma zmazaná.');
+        if ($members > 0) return self::result(false, $id, I18n::format('admin.msg.b2b.company_delete_blocked', ['code' => $company['code'], 'count' => $members]));
+        return self::remove('companies', 'company', $company, I18n::t('admin.msg.b2b.company_deleted'));
     }
 
     /** Current group and company of a customer of this store (null when the customer is foreign). */
@@ -123,18 +124,18 @@ final class B2bAdmin {
 
     public static function assignCustomer(int $customerId, mixed $post): array {
         $old = $customerId > 0 ? self::customerAssignment($customerId) : null;
-        if ($old === null) return self::result(false, 0, 'Zákazník neexistuje v tomto obchode.');
+        if ($old === null) return self::result(false, 0, I18n::t('admin.msg.b2b.customer_missing'));
         $fields = self::scalars($post, ['customer_group_id', 'company_id']);
-        if ($fields === null) return self::result(false, $customerId, 'Neplatný formulár.');
+        if ($fields === null) return self::result(false, $customerId, I18n::t('admin.msg.invalid_form'));
         $new = [];
-        foreach (['customer_group_id' => ['group', 'Zákaznícka skupina'], 'company_id' => ['company', 'Firma']] as $column => [$kind, $label]) {
+        foreach (['customer_group_id' => ['group', 'admin.b2b.customer_group'], 'company_id' => ['company', 'admin.b2b.company']] as $column => [$kind, $label]) {
             $value = trim($fields[$column]);
             if ($value === '' || $value === '0') { $new[$column] = null; continue; }
             $row = ctype_digit($value) ? ($kind === 'group' ? self::group((int)$value) : self::company((int)$value)) : null;
-            if ($row === null) return self::result(false, $customerId, "{$label} #{$value} nepatrí do tohto obchodu.");
+            if ($row === null) return self::result(false, $customerId, I18n::format('admin.msg.b2b.assignment_foreign', ['label' => I18n::t($label), 'id' => $value]));
             $new[$column] = (int)$row['id'];
         }
-        if ($new === $old) return self::result(true, $customerId, 'Bez zmeny.');
+        if ($new === $old) return self::result(true, $customerId, I18n::t('admin.msg.unchanged'));
         $db = Db::get();
         $db->beginTransaction();
         try {
@@ -146,7 +147,7 @@ final class B2bAdmin {
             $db->rollBack();
             throw $e;
         }
-        return self::result(true, $customerId, 'Priradenie k skupine a firme uložené.');
+        return self::result(true, $customerId, I18n::t('admin.msg.b2b.assignment_saved'));
     }
 
     /** Insert or update one store-owned row and audit it; returns the id, or a failed result on a unique-key race. */
@@ -196,9 +197,9 @@ final class B2bAdmin {
     private static function percentBps(string $value): int {
         $value = trim($value);
         if ($value === '') return 0;
-        if (!preg_match('/^(\d{1,3})(?:[.,](\d{1,2}))?$/', $value, $m)) self::fail('Zľava skupiny v % musí byť číslo od 0 do 100 (najviac dve desatinné miesta).');
+        if (!preg_match('/^(\d{1,3})(?:[.,](\d{1,2}))?$/', $value, $m)) self::fail(I18n::t('admin.msg.b2b.group_discount'));
         $bps = (int)$m[1] * 100 + (int)str_pad($m[2] ?? '', 2, '0');
-        if ($bps > 10000) self::fail('Zľava skupiny v % musí byť číslo od 0 do 100 (najviac dve desatinné miesta).');
+        if ($bps > 10000) self::fail(I18n::t('admin.msg.b2b.group_discount'));
         return $bps;
     }
 
@@ -218,7 +219,7 @@ final class B2bAdmin {
     private static function text(string $value, bool $required, string $label): string {
         $value = trim($value);
         if (($value === '' && $required) || mb_strlen($value) > self::MAX_TEXT || preg_match('/[\x00-\x1F\x7F]/', $value)) {
-            self::fail("{$label} je povinné (najviac " . self::MAX_TEXT . ' znakov, bez riadiacich znakov).');
+            self::fail(I18n::format('admin.msg.field_required', ['label' => $label, 'max' => self::MAX_TEXT]));
         }
         return $value;
     }
@@ -226,7 +227,7 @@ final class B2bAdmin {
     /** @throws DomainException */
     private static function code(string $code, string $name): string {
         $code = Str::slug(trim($code) !== '' ? $code : $name);
-        if ($code === '' || strlen($code) > self::MAX_TEXT) self::fail('Kód musí obsahovať písmená alebo číslice (najviac ' . self::MAX_TEXT . ' znakov).');
+        if ($code === '' || strlen($code) > self::MAX_TEXT) self::fail(I18n::format('admin.msg.code_invalid', ['max' => self::MAX_TEXT]));
         return $code;
     }
 

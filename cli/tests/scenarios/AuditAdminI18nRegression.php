@@ -400,6 +400,63 @@ try {
     $a157Check('A15.7 en: promotions page is English', $a154Run(['p' => 'promotions']), ['New promotion', 'Scope', 'Stacking', 'Conditions', 'Delete promotion?']);
     $a157Check('A15.7 en: purchase order detail is English', $a154Run(['p' => 'purchase_orders', 'id' => $a157Po]),
         ['Purchase order A157-PO', 'warehouse ', 'ordered', 'Receive now', 'Post the receipt to stock']);
+
+    // A15.7 step 2: messages of the core services (B2bAdmin, PricingAdmin, SupplierAdmin) follow the admin language.
+    $a157CoreLeftovers = ['nemožno', 'neexistuje', 'musí', 'zadajte', 'Riadok', 'uložen', 'vytvoren', 'zmazan', 'nepatrí', 'Prijaté', 'zaúčtovan',
+        'povolen', 'Bez zmeny', 'Kupón', 'Zľava', 'Splatnosť', 'Nákup na faktúru', 'ks)', ' ks.'];
+    $a157Flash = static function(string $label, array $get, array $post, array $page, array $expect) use ($a154Run, $a157Check, $a157CoreLeftovers): void {
+        $a154Run($get, $post);
+        $r = $a154Run($page);
+        $left = array_values(array_filter($a157CoreLeftovers, static fn(string $t): bool => str_contains($r['out'], $t)));
+        assert_true($left === [], "{$label}: no Slovak core message (leftovers=" . json_encode($left, JSON_UNESCAPED_UNICODE) . ')');
+        $a157Check($label, $r, $expect);
+    };
+    $a154Run(['p' => 'dashboard', 'lang' => 'de']);
+    $a157Groups = ['p' => 'customer_groups'];
+    $a157Flash('A15.7 de: group discount validation flash is German', $a157Groups + ['action' => 'save'], ['name' => 'A157 Zwei', 'code' => '', 'discount' => 'x', 'active' => '1'],
+        $a157Groups, ['Der Gruppenrabatt in % muss eine Zahl von 0 bis 100 sein (höchstens zwei Dezimalstellen).']);
+    $a157Flash('A15.7 de: group created flash is German', $a157Groups + ['action' => 'save'], ['name' => 'A157 Zwei', 'code' => '', 'discount' => '2,5', 'active' => '1'],
+        $a157Groups, ['Gruppe erstellt.']);
+    $a157Flash('A15.7 de: B2B assignment flash is German', ['p' => 'customer', 'action' => 'b2b', 'id' => $a156Customer], ['customer_group_id' => $a157Group, 'company_id' => ''],
+        ['p' => 'customer', 'id' => $a156Customer], ['Zuordnung zu Gruppe und Firma gespeichert.']);
+    $a157Flash('A15.7 de: blocked group delete flash is German', $a157Groups + ['action' => 'delete'], ['customer_group_id' => $a157Group],
+        $a157Groups, ['Gruppe a157-gruppe kann nicht gelöscht werden, sie wird verwendet von: Kunden. Deaktivieren Sie sie.']);
+    $a157CompanyPost = ['legal_name' => 'A157 AG', 'code' => '', 'registration_number' => '', 'vat_id' => '', 'approval_status' => 'pending', 'credit_limit' => '0',
+        'payment_terms_days' => '0', 'invoice_purchase' => '1', 'active' => '1'];
+    $a157Flash('A15.7 de: company invoice terms flash is German', ['p' => 'companies', 'action' => 'save'], $a157CompanyPost,
+        ['p' => 'companies'], ['Kauf auf Rechnung erfordert ein Zahlungsziel von mindestens 1 Tag.']);
+    $a157Flash('A15.7 de: company created flash is German', ['p' => 'companies', 'action' => 'save'], ['payment_terms_days' => '30'] + $a157CompanyPost,
+        ['p' => 'companies'], ['Firma erstellt. Kauf auf Rechnung wird erst nach der Freigabe angeboten.']);
+    $a157Promo = ['name' => 'A157 Korb', 'code' => '', 'scope' => 'catalog', 'coupon_code' => 'A157KORB', 'priority' => '0', 'stacking' => 'stack', 'valid_from' => '',
+        'valid_to' => '', 'action_type' => 'discount_percent', 'action_value' => '10', 'active' => '1'];
+    $a157Flash('A15.7 de: coupon on a catalog promotion flash is German', ['p' => 'promotions', 'action' => 'save'], $a157Promo,
+        ['p' => 'promotions'], ['Nur eine Warenkorbaktion kann einen Gutscheincode haben.']);
+    $a157Flash('A15.7 de: refused cart action flash is German', ['p' => 'promotions', 'action' => 'save'], ['scope' => 'cart', 'action_type' => 'fixed_price'] + $a157Promo,
+        ['p' => 'promotions'], ['Die Aktion Festpreis (Cent) ist für einen Gutschein nicht erlaubt (erlaubt: Rabatt in %, Rabatt um Betrag (Cent)).']);
+    $a157Flash('A15.7 de: promotion date flash is German', ['p' => 'promotions', 'action' => 'save'], ['coupon_code' => '', 'valid_from' => 'gestern'] + $a157Promo,
+        ['p' => 'promotions'], ['Gültig ab: ungültiges Datum (JJJJ-MM-TT HH:MM, UTC).']);
+    $a157Lists = ['p' => 'price_lists', 'id' => $a157List];
+    $a157Flash('A15.7 de: price line format flash is German', $a157Lists + ['action' => 'prices'], ['prices' => 'A155-P | 1'],
+        $a157Lists, ['Zeile 1: geben Sie SKU | Mindestmenge | Preis in Cent [| ursprünglicher Preis] ein.']);
+    $a157Flash('A15.7 de: prices saved flash is German', $a157Lists + ['action' => 'prices'], ['prices' => 'A155-P | 1 | 900'],
+        $a157Lists, ['Preise der Preisliste gespeichert (1).']);
+    $a157Suppliers = ['p' => 'suppliers', 'id' => $a157Supplier];
+    $a157Flash('A15.7 de: unknown offer SKU flash is German', $a157Suppliers + ['action' => 'products'], ['products' => 'A157-NONE | X | 100'],
+        $a157Suppliers, ['Zeile 1: SKU "A157-NONE" ist weder ein Produkt noch eine Variante des Katalogs dieses Shops.']);
+    $a157Flash('A15.7 de: blocked supplier delete flash is German', ['p' => 'suppliers', 'action' => 'delete'], ['supplier_id' => $a157Supplier],
+        ['p' => 'suppliers'], ['Lieferant a157-sup kann nicht gelöscht werden: er hat Bestellungen (1); deaktivieren Sie ihn.']);
+    $a157Orders = ['p' => 'purchase_orders'];
+    $a157Flash('A15.7 de: purchase order quantity flash is German', $a157Orders + ['action' => 'create'],
+        ['supplier_id' => $a157Supplier, 'warehouse_id' => $a157Warehouse, 'number' => '', 'expected_at' => '', 'items' => 'A155-P | 0'],
+        $a157Orders, ['Zeile 1: die Menge muss 1 bis 1000000 sein.']);
+    $a157Item = (string)$a154Pdo->query("SELECT id FROM purchase_order_items WHERE purchase_order_id = " . (int)$a157Po)->fetchColumn();
+    $a157Detail = ['p' => 'purchase_orders', 'id' => $a157Po];
+    $a157Flash('A15.7 de: receipt range flash is German', $a157Detail + ['action' => 'receive'], ['receipt_key' => str_repeat('a', 32), 'receive' => [$a157Item => '9']],
+        $a157Detail, ['A155-P: annehmbar sind 1 bis 3 Stk. (bestellt 3, erhalten 0).']);
+    $a157Flash('A15.7 de: receipt booked flash is German', $a157Detail + ['action' => 'receive'], ['receipt_key' => str_repeat('b', 32), 'receive' => [$a157Item => '1']],
+        $a157Detail, ['Erhalten: A155-P: 1 Stück.']);
+    $a157Flash('A15.7 de: repeated receipt flash is German', $a157Detail + ['action' => 'receive'], ['receipt_key' => str_repeat('b', 32), 'receive' => [$a157Item => '1']],
+        $a157Detail, ['Dieser Wareneingang wurde bereits gebucht; nichts wurde geändert.']);
 } finally {
     putenv('BBE_ADMIN_IDENTITY_KEY');
     $a154Pdo = null;

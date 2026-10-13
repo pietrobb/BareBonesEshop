@@ -61,7 +61,7 @@ function pageCompanies(): void {
                 <div class="form-row"><label for="co-vat"><?= esc(I18n::t('checkout_vat_id')) ?><?= !empty($edit['vat_validated_at']) ? ' ' . esc(I18n::format('admin.b2b.vat_verified', ['date' => substr((string)$edit['vat_validated_at'], 0, 10)])) : '' ?></label><input id="co-vat" name="vat_id" value="<?= $value('vat_id') ?>" maxlength="20"></div>
                 <div class="form-row"><label for="co-approval"><?= esc(I18n::t('admin.b2b.approval')) ?></label>
                     <select id="co-approval" name="approval_status">
-                        <?php foreach (array_keys(B2bAdmin::APPROVAL) as $status): ?>
+                        <?php foreach (B2bAdmin::APPROVAL as $status): ?>
                         <option value="<?= esc($status) ?>" <?= ($edit['approval_status'] ?? 'pending') === $status ? 'selected' : '' ?>><?= esc(I18n::t('admin.b2b.approval.' . $status)) ?></option>
                         <?php endforeach; ?>
                     </select>
@@ -84,7 +84,7 @@ function pageCompanies(): void {
                 <td><a href="admin.php?p=companies&id=<?= (int)$c['id'] ?>"><?= esc($c['legal_name']) ?></a></td>
                 <td><code><?= esc($c['code']) ?></code></td>
                 <td><?= esc((string)($c['registration_number'] ?? '')) ?> <?= esc((string)($c['vat_id'] ?? '')) ?></td>
-                <td><?= esc(isset(B2bAdmin::APPROVAL[$c['approval_status']]) ? I18n::t('admin.b2b.approval.' . $c['approval_status']) : (string)$c['approval_status']) ?></td>
+                <td><?= esc(in_array($c['approval_status'], B2bAdmin::APPROVAL, true) ? I18n::t('admin.b2b.approval.' . $c['approval_status']) : (string)$c['approval_status']) ?></td>
                 <td><?= esc($c['invoice_purchase'] ? I18n::format('admin.b2b.invoice_terms', ['days' => (int)$c['payment_terms_days']]) : I18n::t('admin.b2b.invoice_no')) ?></td>
                 <td><?= (int)$c['credit_limit'] > 0 ? esc(I18n::price((int)$c['credit_limit'], $currency)) : esc(I18n::t('admin.b2b.no_limit')) ?> / <?= esc(I18n::price((int)$c['open_total'], $currency)) ?></td>
                 <td><?= (int)$c['customer_count'] ?></td>

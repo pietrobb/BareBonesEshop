@@ -52,7 +52,7 @@ function pagePromotions(): void {
             <div class="grid grid-4">
                 <div class="form-row"><label for="promo-action_type"><?= esc(I18n::t('admin.common.type')) ?></label>
                     <select id="promo-action_type" name="action_type">
-                        <?php foreach (array_keys(PricingAdmin::ACTION_LABELS) as $type): ?>
+                        <?php foreach (PricingAdmin::ACTION_TYPES as $type): ?>
                         <option value="<?= esc($type) ?>" <?= $f['action_type'] === $type ? 'selected' : '' ?>><?= esc(I18n::t('admin.promo.action.' . $type)) ?></option>
                         <?php endforeach; ?>
                     </select>
@@ -89,7 +89,7 @@ function pagePromotions(): void {
                 <td><code><?= esc($p['code']) ?></code></td>
                 <td><?= esc(I18n::t($p['scope'] === 'cart' ? 'admin.promo.scope_cart_short' : 'admin.promo.scope_catalog_short')) ?></td>
                 <td><?= $p['coupon_code'] !== null && $p['coupon_code'] !== '' ? '<code>' . esc($p['coupon_code']) . '</code>' : '' ?></td>
-                <td><?= esc(isset(PricingAdmin::ACTION_LABELS[$action['type'] ?? '']) ? I18n::t('admin.promo.action.' . $action['type']) : (string)($action['type'] ?? '')) ?></td>
+                <td><?= esc(in_array($action['type'] ?? '', PricingAdmin::ACTION_TYPES, true) ? I18n::t('admin.promo.action.' . $action['type']) : (string)($action['type'] ?? '')) ?></td>
                 <td><?= (int)$p['priority'] ?></td>
                 <td><?= esc((string)($p['valid_from'] ?? '—')) ?> – <?= esc((string)($p['valid_to'] ?? '—')) ?></td>
                 <td><span class="badge badge-<?= $p['active'] ? 'active' : 'draft' ?>"><?= esc(I18n::t($p['active'] ? 'admin.common.status_active_f' : 'admin.common.status_inactive_f')) ?></span></td>

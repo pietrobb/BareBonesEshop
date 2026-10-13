@@ -135,7 +135,7 @@ function pagePurchaseOrders(): void {
 
 /** Purchase order status in the admin language; an unknown status is shown as stored. */
 function supplierOrderStatus(string $status): string {
-    return isset(SupplierAdmin::STATUSES[$status]) ? I18n::t('admin.po.status.' . $status) : $status;
+    return in_array($status, SupplierAdmin::STATUSES, true) ? I18n::t('admin.po.status.' . $status) : $status;
 }
 
 function handleSupplierSave(): void {

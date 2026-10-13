@@ -10,7 +10,8 @@ final class SupplierAdmin {
     private const MAX_TEXT = 191;
     private const MAX_INT = 2000000000;
     private const MAX_LINES = 2000;
-    public const STATUSES = ['ordered' => 'objednaná', 'partially_received' => 'čiastočne prijatá', 'received' => 'prijatá', 'draft' => 'koncept'];
+    /** Purchase order states; their labels are the lang keys admin.po.status.<state>. */
+    public const STATUSES = ['ordered', 'partially_received', 'received', 'draft'];
 
     public static function suppliers(): array {
         return self::storeRows('SELECT s.*, (SELECT COUNT(*) FROM supplier_products sp WHERE sp.supplier_id = s.id) AS product_count,
@@ -26,19 +27,19 @@ final class SupplierAdmin {
 
     public static function saveSupplier(int $id, mixed $post): array {
         $old = $id > 0 ? self::supplier($id) : null;
-        if ($id > 0 && !$old) return self::result(false, 0, 'Dodávateľ neexistuje v tomto obchode.');
+        if ($id > 0 && !$old) return self::result(false, 0, I18n::t('admin.msg.supplier.missing'));
         $fields = self::scalars($post, ['code', 'name', 'email', 'phone', 'note', 'active']);
-        if ($fields === null) return self::result(false, $id, 'Neplatný formulár.');
+        if ($fields === null) return self::result(false, $id, I18n::t('admin.msg.invalid_form'));
         try {
-            $name = self::text($fields['name'], true, 'Názov');
+            $name = self::text($fields['name'], true, I18n::t('admin.th.name'));
             $code = Str::slug(trim($fields['code']) !== '' ? $fields['code'] : $name);
-            if ($code === '' || strlen($code) > self::MAX_TEXT) self::fail('Kód musí obsahovať písmená alebo číslice (najviac ' . self::MAX_TEXT . ' znakov).');
+            if ($code === '' || strlen($code) > self::MAX_TEXT) self::fail(I18n::format('admin.msg.code_invalid', ['max' => self::MAX_TEXT]));
             if (self::storeRows('SELECT 1 AS taken FROM suppliers WHERE store_id = :store AND code = :code AND id != :id', [':code' => $code, ':id' => $id ?: -1])) {
-                self::fail("Kód dodávateľa \"{$code}\" už v tomto obchode existuje.");
+                self::fail(I18n::format('admin.msg.supplier.code_taken', ['code' => $code]));
             }
             $email = trim($fields['email']);
-            if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL) === false) self::fail('E-mail dodávateľa nie je platný.');
-            $contact = array_filter(['email' => $email, 'phone' => self::text($fields['phone'], false, 'Telefón'), 'note' => self::text($fields['note'], false, 'Poznámka')],
+            if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL) === false) self::fail(I18n::t('admin.msg.supplier.email'));
+            $contact = array_filter(['email' => $email, 'phone' => self::text($fields['phone'], false, I18n::t('admin.customers.phone')), 'note' => self::text($fields['note'], false, I18n::t('admin.common.note'))],
                 static fn(string $v): bool => $v !== '');
         } catch (DomainException $e) {
             return self::result(false, $id, $e->getMessage());
@@ -58,17 +59,17 @@ final class SupplierAdmin {
             $db->commit();
         } catch (Throwable $e) {
             $db->rollBack();
-            if ($e instanceof PDOException && str_starts_with((string)$e->getCode(), '23')) return self::result(false, $old ? $id : 0, "Kód dodávateľa \"{$row['code']}\" už v tomto obchode existuje.");
+            if ($e instanceof PDOException && str_starts_with((string)$e->getCode(), '23')) return self::result(false, $old ? $id : 0, I18n::format('admin.msg.supplier.code_taken', ['code' => $row['code']]));
             throw $e;
         }
-        return self::result(true, $id, $old ? 'Dodávateľ uložený.' : 'Dodávateľ vytvorený.');
+        return self::result(true, $id, I18n::t($old ? 'admin.msg.supplier.saved' : 'admin.msg.supplier.created'));
     }
 
     public static function deleteSupplier(int $id): array {
         $supplier = $id > 0 ? self::supplier($id) : null;
-        if (!$supplier) return self::result(false, 0, 'Dodávateľ neexistuje v tomto obchode.');
+        if (!$supplier) return self::result(false, 0, I18n::t('admin.msg.supplier.missing'));
         $orders = (int)(self::storeRows('SELECT COUNT(*) AS n FROM purchase_orders WHERE store_id = :store AND supplier_id = :id', [':id' => $id])[0]['n'] ?? 0);
-        if ($orders > 0) return self::result(false, $id, "Dodávateľa {$supplier['code']} nemožno zmazať: má nákupné objednávky ({$orders}); deaktivujte ho.");
+        if ($orders > 0) return self::result(false, $id, I18n::format('admin.msg.supplier.delete_blocked', ['code' => $supplier['code'], 'count' => $orders]));
         $db = Db::get();
         $db->beginTransaction();
         try {
@@ -81,10 +82,10 @@ final class SupplierAdmin {
             $db->rollBack();
             throw $e;
         }
-        return self::result(true, 0, 'Dodávateľ zmazaný.');
+        return self::result(true, 0, I18n::t('admin.msg.supplier.deleted'));
     }
 
-    /** Offer lines "SKU | kód dodávateľa | nákupná cena | min. množstvo | balenie | dodacia lehota". */
+    /** Offer lines "SKU | supplier code | purchase price | min. quantity | pack size | lead time". */
     public static function offerLines(int $supplierId): string {
         return implode("\n", array_map(static fn(array $r): string => implode(' | ', [$r['sku'], (string)($r['supplier_sku'] ?? ''), (string)$r['cost_price'],
             (string)$r['min_order_qty'], (string)$r['pack_size'], (string)$r['lead_time_days']]), self::offerRows($supplierId)));
@@ -93,25 +94,25 @@ final class SupplierAdmin {
     /** Replace the supplier's offers from editor lines; SKUs must be products or variants of the store's catalog. */
     public static function saveOffers(int $supplierId, mixed $post): array {
         $supplier = $supplierId > 0 ? self::supplier($supplierId) : null;
-        if (!$supplier) return self::result(false, 0, 'Dodávateľ neexistuje v tomto obchode.');
+        if (!$supplier) return self::result(false, 0, I18n::t('admin.msg.supplier.missing'));
         $fields = self::scalars($post, ['products']);
-        if ($fields === null) return self::result(false, $supplierId, 'Neplatný formulár.');
+        if ($fields === null) return self::result(false, $supplierId, I18n::t('admin.msg.invalid_form'));
         $lines = self::lines($fields['products']);
-        if (count($lines) > self::MAX_LINES) return self::result(false, $supplierId, 'Najviac ' . self::MAX_LINES . ' riadkov.');
+        if (count($lines) > self::MAX_LINES) return self::result(false, $supplierId, I18n::format('admin.msg.supplier.max_lines', ['max' => self::MAX_LINES]));
         $rows = [];
         try {
             foreach ($lines as $n => $line) {
-                $label = 'Riadok ' . ($n + 1);
+                $label = I18n::format('admin.msg.line', ['n' => $n + 1]);
                 $p = array_map('trim', explode('|', $line));
-                if (count($p) < 3 || count($p) > 6) self::fail("{$label}: zadajte SKU | kód dodávateľa | nákupná cena v centoch [| min. množstvo | balenie | dodacia lehota v dňoch].");
+                if (count($p) < 3 || count($p) > 6) self::fail(I18n::format('admin.msg.supplier.offer_format', ['line' => $label]));
                 $sku = self::catalogSku($p[0], $label);
-                if (isset($rows[$sku])) self::fail("{$label}: SKU {$sku} je uvedené dvakrát.");
+                if (isset($rows[$sku])) self::fail(I18n::format('admin.msg.supplier.offer_duplicate', ['line' => $label, 'sku' => $sku]));
                 $rows[$sku] = [
-                    'sku' => $sku, 'supplier_sku' => $p[1] === '' ? null : self::text($p[1], false, "{$label}: kód dodávateľa"),
-                    'cost_price' => self::int($p[2], 0, self::MAX_INT, "{$label}: nákupná cena musí byť nezáporná suma v centoch."),
-                    'min_order_qty' => self::int(($p[3] ?? '') === '' ? '1' : $p[3], 1, 1000000, "{$label}: minimálne množstvo musí byť 1 až 1000000."),
-                    'pack_size' => self::int(($p[4] ?? '') === '' ? '1' : $p[4], 1, 1000000, "{$label}: balenie musí byť 1 až 1000000."),
-                    'lead_time_days' => self::int(($p[5] ?? '') === '' ? '0' : $p[5], 0, 365, "{$label}: dodacia lehota musí byť 0 až 365 dní."),
+                    'sku' => $sku, 'supplier_sku' => $p[1] === '' ? null : self::text($p[1], false, I18n::format('admin.msg.supplier.code_label', ['line' => $label])),
+                    'cost_price' => self::int($p[2], 0, self::MAX_INT, I18n::format('admin.msg.supplier.cost', ['line' => $label])),
+                    'min_order_qty' => self::int(($p[3] ?? '') === '' ? '1' : $p[3], 1, 1000000, I18n::format('admin.msg.min_qty_line', ['line' => $label])),
+                    'pack_size' => self::int(($p[4] ?? '') === '' ? '1' : $p[4], 1, 1000000, I18n::format('admin.msg.supplier.pack', ['line' => $label])),
+                    'lead_time_days' => self::int(($p[5] ?? '') === '' ? '0' : $p[5], 0, 365, I18n::format('admin.msg.supplier.lead_time', ['line' => $label])),
                 ];
             }
         } catch (DomainException $e) {
@@ -131,7 +132,7 @@ final class SupplierAdmin {
             $db->rollBack();
             throw $e;
         }
-        return self::result(true, $supplierId, 'Ponuka dodávateľa uložená (' . count($rows) . ').');
+        return self::result(true, $supplierId, I18n::format('admin.msg.supplier.offer_saved', ['count' => count($rows)]));
     }
 
     public static function purchaseOrders(): array {
@@ -154,37 +155,37 @@ final class SupplierAdmin {
 
     public static function createOrder(mixed $post): array {
         $fields = self::scalars($post, ['supplier_id', 'warehouse_id', 'number', 'expected_at', 'items']);
-        if ($fields === null) return self::result(false, 0, 'Neplatný formulár.');
+        if ($fields === null) return self::result(false, 0, I18n::t('admin.msg.invalid_form'));
         $items = [];
         try {
             $supplier = ctype_digit($fields['supplier_id']) ? self::supplier((int)$fields['supplier_id']) : null;
-            if (!$supplier) self::fail('Dodávateľ nepatrí do tohto obchodu.');
-            if (!$supplier['active']) self::fail("Dodávateľ {$supplier['code']} je neaktívny.");
+            if (!$supplier) self::fail(I18n::t('admin.msg.po.supplier_foreign'));
+            if (!$supplier['active']) self::fail(I18n::format('admin.msg.po.supplier_inactive', ['code' => $supplier['code']]));
             $warehouse = ctype_digit($fields['warehouse_id']) ? Warehouse::byId((int)$fields['warehouse_id']) : null;
-            if (!$warehouse) self::fail('Sklad nepatrí do tohto obchodu.');
+            if (!$warehouse) self::fail(I18n::t('admin.msg.po.warehouse_foreign'));
             $number = trim($fields['number']) === '' ? 'PO-' . gmdate('Ymd-His') . '-' . strtoupper(bin2hex(random_bytes(2))) : trim($fields['number']);
-            if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9_.\/-]{0,63}$/', $number)) self::fail('Číslo objednávky: 1 až 64 znakov A–Z, 0–9, _ . / -.');
-            if (self::storeRows('SELECT 1 AS taken FROM purchase_orders WHERE store_id = :store AND number = :number', [':number' => $number])) self::fail("Objednávka {$number} už existuje.");
+            if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9_.\/-]{0,63}$/', $number)) self::fail(I18n::t('admin.msg.po.number'));
+            if (self::storeRows('SELECT 1 AS taken FROM purchase_orders WHERE store_id = :store AND number = :number', [':number' => $number])) self::fail(I18n::format('admin.msg.po.exists', ['number' => $number]));
             $expected = trim($fields['expected_at']);
             if ($expected !== '') {
                 $date = DateTimeImmutable::createFromFormat('!Y-m-d', $expected, new DateTimeZone('UTC'));
-                if ($date === false || $date->format('Y-m-d') !== $expected) self::fail('Očakávaný dátum musí byť RRRR-MM-DD.');
+                if ($date === false || $date->format('Y-m-d') !== $expected) self::fail(I18n::t('admin.msg.po.expected_date'));
                 $expected = $date->format('Y-m-d H:i:s');
             }
             $offers = array_column(self::offerRows((int)$supplier['id']), null, 'sku');
             foreach (self::lines($fields['items']) as $n => $line) {
-                $label = 'Riadok ' . ($n + 1);
+                $label = I18n::format('admin.msg.line', ['n' => $n + 1]);
                 $p = array_map('trim', explode('|', $line));
-                if (count($p) < 2 || count($p) > 3) self::fail("{$label}: zadajte SKU | množstvo [| nákupná cena v centoch].");
+                if (count($p) < 2 || count($p) > 3) self::fail(I18n::format('admin.msg.po.line_format', ['line' => $label]));
                 $offer = $offers[$p[0]] ?? null;
-                if ($offer === null) self::fail("{$label}: dodávateľ {$supplier['code']} nemá v ponuke SKU {$p[0]}.");
-                $qty = self::int($p[1], 1, 1000000, "{$label}: množstvo musí byť 1 až 1000000.");
+                if ($offer === null) self::fail(I18n::format('admin.msg.po.not_offered', ['line' => $label, 'code' => $supplier['code'], 'sku' => $p[0]]));
+                $qty = self::int($p[1], 1, 1000000, I18n::format('admin.msg.po.qty', ['line' => $label]));
                 if ($qty < (int)$offer['min_order_qty'] || $qty % max(1, (int)$offer['pack_size']) !== 0) {
-                    self::fail("{$label}: {$p[0]} sa objednáva najmenej po {$offer['min_order_qty']} ks v baleniach po {$offer['pack_size']} ks.");
+                    self::fail(I18n::format('admin.msg.po.pack_rule', ['line' => $label, 'sku' => $p[0], 'min' => $offer['min_order_qty'], 'pack' => $offer['pack_size']]));
                 }
-                $items[] = ['sku' => $p[0], 'quantity' => $qty] + (($p[2] ?? '') === '' ? [] : ['unit_cost' => self::int($p[2], 0, self::MAX_INT, "{$label}: nákupná cena musí byť nezáporná suma v centoch.")]);
+                $items[] = ['sku' => $p[0], 'quantity' => $qty] + (($p[2] ?? '') === '' ? [] : ['unit_cost' => self::int($p[2], 0, self::MAX_INT, I18n::format('admin.msg.supplier.cost', ['line' => $label]))]);
             }
-            if (!$items) self::fail('Objednávka musí mať aspoň jednu položku.');
+            if (!$items) self::fail(I18n::t('admin.msg.po.no_items'));
         } catch (DomainException $e) {
             return self::result(false, 0, $e->getMessage());
         }
@@ -196,12 +197,12 @@ final class SupplierAdmin {
             $db->commit();
         } catch (InvalidArgumentException $e) {
             $db->rollBack();
-            return self::result(false, 0, 'Objednávku nemožno vytvoriť: ' . $e->getMessage());
+            return self::result(false, 0, I18n::format('admin.msg.po.create_failed', ['error' => $e->getMessage()]));
         } catch (Throwable $e) {
             $db->rollBack();
             throw $e;
         }
-        return self::result(true, $id, "Nákupná objednávka {$number} vytvorená.");
+        return self::result(true, $id, I18n::format('admin.msg.po.created', ['number' => $number]));
     }
 
     /**
@@ -210,21 +211,21 @@ final class SupplierAdmin {
      */
     public static function receive(int $orderId, mixed $post): array {
         $order = $orderId > 0 ? self::purchaseOrder($orderId) : null;
-        if (!$order) return self::result(false, 0, 'Nákupná objednávka neexistuje v tomto obchode.');
+        if (!$order) return self::result(false, 0, I18n::t('admin.msg.po.missing'));
         $key = is_array($post) && is_scalar($post['receipt_key'] ?? null) ? trim((string)$post['receipt_key']) : '';
         $quantities = is_array($post) ? ($post['receive'] ?? []) : null;
-        if (!preg_match('/^[a-f0-9]{16,64}$/', $key) || !is_array($quantities)) return self::result(false, $orderId, 'Neplatný formulár.');
+        if (!preg_match('/^[a-f0-9]{16,64}$/', $key) || !is_array($quantities)) return self::result(false, $orderId, I18n::t('admin.msg.invalid_form'));
         $items = array_column($order['items'], null, 'id');
         $receipts = [];
         try {
             foreach ($quantities as $itemId => $value) {
-                if (!is_scalar($value) || !isset($items[(int)$itemId]) || (string)(int)$itemId !== (string)$itemId) self::fail('Neplatný formulár.');
+                if (!is_scalar($value) || !isset($items[(int)$itemId]) || (string)(int)$itemId !== (string)$itemId) self::fail(I18n::t('admin.msg.invalid_form'));
                 $item = $items[(int)$itemId];
                 if (trim((string)$value) === '' || trim((string)$value) === '0') continue;
                 $open = (int)$item['quantity'] - (int)$item['received_qty'];
-                $receipts[] = [$item, self::int((string)$value, 1, max(1, $open), "{$item['sku']}: prijať možno 1 až {$open} ks (objednané {$item['quantity']}, prijaté {$item['received_qty']}).")];
+                $receipts[] = [$item, self::int((string)$value, 1, max(1, $open), I18n::format('admin.msg.po.receive_range', ['sku' => $item['sku'], 'open' => $open, 'ordered' => $item['quantity'], 'received' => $item['received_qty']]))];
             }
-            if (!$receipts) self::fail('Zadajte prijímané množstvo aspoň pri jednej položke.');
+            if (!$receipts) self::fail(I18n::t('admin.msg.po.receive_none'));
         } catch (DomainException $e) {
             return self::result(false, $orderId, $e->getMessage());
         }
@@ -239,12 +240,12 @@ final class SupplierAdmin {
             $db->commit();
         } catch (Throwable $e) {
             $db->rollBack();
-            if ($e instanceof RuntimeException && !$e instanceof PDOException) return self::result(false, $orderId, 'Príjem nemožno zaúčtovať: ' . $e->getMessage());
+            if ($e instanceof RuntimeException && !$e instanceof PDOException) return self::result(false, $orderId, I18n::format('admin.msg.po.receive_failed', ['error' => $e->getMessage()]));
             throw $e;
         }
         return $booked
-            ? self::result(true, $orderId, 'Prijaté: ' . implode(', ', array_map(static fn(string $sku, int $q): string => "{$sku} {$q} ks", array_keys($booked), $booked)) . '.')
-            : self::result(true, $orderId, 'Tento príjem už bol zaúčtovaný; nič sa nezmenilo.');
+            ? self::result(true, $orderId, I18n::format('admin.msg.po.received', ['items' => implode(', ', array_map(static fn(string $sku, int $q): string => I18n::format('admin.msg.po.received_item', ['sku' => $sku, 'qty' => $q]), array_keys($booked), $booked))]))
+            : self::result(true, $orderId, I18n::t('admin.msg.po.receipt_repeat'));
     }
 
     private static function offerRows(int $supplierId): array {
@@ -260,7 +261,7 @@ final class SupplierAdmin {
                 [':sku' => $sku, ':variant_sku' => $sku, ':catalog_variant' => StoreContext::current()->catalogId()])) {
             return $sku;
         }
-        self::fail("{$label}: SKU \"{$sku}\" nie je produkt ani variant katalógu tohto obchodu.");
+        self::fail(I18n::format('admin.msg.sku_not_item', ['label' => $label, 'sku' => $sku]));
     }
 
     private static function lines(string $text): array {
@@ -284,7 +285,7 @@ final class SupplierAdmin {
     private static function text(string $value, bool $required, string $label): string {
         $value = trim($value);
         if (($value === '' && $required) || mb_strlen($value) > self::MAX_TEXT || preg_match('/[\x00-\x1F\x7F]/', $value)) {
-            self::fail("{$label}: " . ($required ? 'povinné, ' : '') . 'najviac ' . self::MAX_TEXT . ' znakov, bez riadiacich znakov.');
+            self::fail(I18n::format($required ? 'admin.msg.field_required_line' : 'admin.msg.field_long_line', ['label' => $label, 'max' => self::MAX_TEXT]));
         }
         return $value;
     }
