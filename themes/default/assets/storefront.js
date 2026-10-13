@@ -127,6 +127,8 @@
       updateCheckoutTotal(shippingPrice, 0, subtotal);
       return;
     }
+    const previous = box.querySelector('input[name="payment"]:checked');
+    const previousCode = previous ? previous.value : '';
     box.innerHTML = `<div class="payment-loading">${escapeHtml(text.paymentLoading)}</div>`;
     const params = new URLSearchParams({
       action: 'payment_methods', country: country.value, currency: config.currency,
@@ -141,15 +143,16 @@
       return;
     }
     box.innerHTML = '';
+    const selectedIndex = Math.max(0, methods.findIndex((method) => (method.code || '') === previousCode));
     methods.forEach((method, index) => {
       const label = document.createElement('label');
       label.className = 'payment-option';
       const fee = parseInt(method.fee || 0, 10);
-      label.innerHTML = `<span><input type="radio" name="payment" value="${escapeHtml(method.code || '')}" ${index === 0 ? 'checked' : ''}${method.requires_online ? ' data-online' : ''}> ${escapeHtml(method.label || method.code || '')}<small>${escapeHtml(method.description || method.provider || '')}</small></span><strong>${fee === 0 ? escapeHtml(text.free) : formatCents(fee)}</strong>`;
+      label.innerHTML = `<span><input type="radio" name="payment" value="${escapeHtml(method.code || '')}" ${index === selectedIndex ? 'checked' : ''}${method.requires_online ? ' data-online' : ''}> ${escapeHtml(method.label || method.code || '')}<small>${escapeHtml(method.description || method.provider || '')}</small></span><strong>${fee === 0 ? escapeHtml(text.free) : formatCents(fee)}</strong>`;
       label.querySelector('input').addEventListener('change', () => updateCheckoutTotal(shippingPrice, fee, subtotal));
       box.appendChild(label);
     });
-    updateCheckoutTotal(shippingPrice, parseInt(methods[0].fee || 0, 10), subtotal);
+    updateCheckoutTotal(shippingPrice, parseInt(methods[selectedIndex].fee || 0, 10), subtotal);
   }
 
   async function refreshCheckoutShipping() {
@@ -159,6 +162,8 @@
     const subtotalElement = document.getElementById('checkout-subtotal');
     if (!country || !box || !summaryShipping || !subtotalElement) return;
     const subtotal = parseInt(subtotalElement.value || '0', 10);
+    const previous = box.querySelector('input[name="shipping_method"]:checked');
+    const previousCode = previous ? previous.value : '';
     box.innerHTML = `<div class="shipping-loading">${escapeHtml(text.shippingLoading)}</div>`;
     const params = new URLSearchParams({action: 'shipping_rates', country: country.value, subtotal: String(subtotal)});
     const response = await fetch(`${apiUrl}?${params}`);
@@ -176,23 +181,27 @@
       return;
     }
     box.innerHTML = '';
+    // Keep the choice the server rendered (e.g. after applying a coupon); fall back to the first rate.
+    const selectedIndex = Math.max(0, methods.findIndex((method) => (method.method_code || method.key || '') === previousCode));
     methods.forEach((method, index) => {
       const label = document.createElement('label');
       label.className = 'shipping-option';
       const methodCode = method.method_code || method.key || '';
       const price = parseInt(method.price || 0, 10);
-      label.innerHTML = `<span><input type="radio" name="shipping_method" value="${escapeHtml(methodCode)}" ${index === 0 ? 'checked' : ''}> ${escapeHtml(method.label || methodCode)}<small>${escapeHtml(method.delivery_days || '')}</small></span><strong>${formatCents(price)}</strong>`;
+      label.innerHTML = `<span><input type="radio" name="shipping_method" value="${escapeHtml(methodCode)}" ${index === selectedIndex ? 'checked' : ''}> ${escapeHtml(method.label || methodCode)}<small>${escapeHtml(method.delivery_days || '')}</small></span><strong>${formatCents(price)}</strong>`;
       label.querySelector('input').addEventListener('change', () => refreshCheckoutPayments(methodCode));
       box.appendChild(label);
     });
-    await refreshCheckoutPayments(methods[0].method_code || methods[0].key || '');
+    await refreshCheckoutPayments(methods[selectedIndex].method_code || methods[selectedIndex].key || '');
   }
 
   function updateCheckoutTotal(shipping, paymentFee, subtotal) {
     document.getElementById('summary-shipping').textContent = formatCents(shipping);
     const payment = document.getElementById('summary-payment');
     if (payment) payment.textContent = paymentFee === 0 ? text.free : formatCents(paymentFee);
-    document.getElementById('summary-total').textContent = formatCents(subtotal + shipping + paymentFee);
+    const discountElement = document.getElementById('checkout-discount');
+    const discount = discountElement ? parseInt(discountElement.value || '0', 10) : 0;
+    document.getElementById('summary-total').textContent = formatCents(subtotal - discount + shipping + paymentFee);
   }
 
   function setConsentCookie(categories) {
@@ -249,7 +258,9 @@
   document.addEventListener('submit', (event) => {
     const form = event.target.closest('form[data-checkout-form]');
     if (!form || event.defaultPrevented) return;
-    const button = form.querySelector('button[type="submit"]');
+    // Applying or removing a coupon only re-prices the form; it must not lock the order button.
+    if (event.submitter && event.submitter.name === 'coupon_action') return;
+    const button = form.querySelector('button.btn-checkout');
     if (!button) return;
     if (form.dataset.submitting === '1') {
       event.preventDefault();
@@ -266,7 +277,7 @@
   // Back from the gateway restores the page from bfcache: unlock the button again.
   window.addEventListener('pageshow', () => {
     document.querySelectorAll('form[data-checkout-form]').forEach((form) => {
-      const button = form.querySelector('button[type="submit"]');
+      const button = form.querySelector('button.btn-checkout');
       delete form.dataset.submitting;
       if (!button) return;
       button.disabled = false;

@@ -62,7 +62,14 @@ function renderCheckout(): string {
             'breadcrumbs' => $breadcrumbs, 'message' => $t('cart_empty'), 'home_url' => Template::storeUrl('/'), 'continue_label' => $t('continue_shopping'),
         ]);
     }
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['checkout'])) return processCheckout();
+    // The coupon buttons submit the whole checkout form (no JS needed) to re-price it, not to place the order.
+    $couponAction = $_SERVER['REQUEST_METHOD'] === 'POST' && is_string($_POST['coupon_action'] ?? null) ? $_POST['coupon_action'] : '';
+    if ($couponAction !== '' && !Security::csrfValidate()) {
+        return Template::render('storefront/checkout-error', ['home_url' => Template::storeUrl('/'), 'home_label' => 'Domov', 'error_label' => 'Chyba', 'message' => 'CSRF token mismatch.']);
+    }
+    if ($couponAction === '' && $_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['checkout'])) return processCheckout();
+    $form = static fn(string $key, int $max = 255): string => $_SERVER['REQUEST_METHOD'] === 'POST' && is_string($_POST[$key] ?? null)
+        ? mb_substr(trim($_POST[$key]), 0, $max) : '';
 
     $subtotal = (int)$cartData['subtotal'];
     $countryInput = $_POST['country'] ?? 'SK';
@@ -75,9 +82,38 @@ function renderCheckout(): string {
     $shipping = $quote['price'];
     $customerId = (int)($_SESSION['customer_id'] ?? 0);
     $paymentMethods = $selectedRate ? PaymentService::availableMethods($country, $storeCurrency, $subtotal + $shipping, (string)$selectedRate['method_code'], $customerId ?: null) : [];
-    $selectedPayment = $paymentMethods[0] ?? null;
+    $postedPayment = $form('payment', 64);
+    $selectedPayment = null;
+    foreach ($paymentMethods as $method) if ((string)$method['code'] === $postedPayment) $selectedPayment = $method;
+    $selectedPayment ??= $paymentMethods[0] ?? null;
     $paymentFee = $selectedPayment ? (int)$selectedPayment['fee'] : 0;
     $freeLabel = $t('free_shipping');
+
+    // Same discount rules as CheckoutService::execute: coupon + automatic promotions, capped at the subtotal.
+    $couponCode = $couponAction === 'remove' ? '' : $form('coupon_code', 64);
+    $couponError = '';
+    $couponDiscount = 0;
+    if ($couponCode !== '') {
+        $coupon = Pricing::applyCoupon($couponCode, $subtotal, Security::email($form('email')) ?? null);
+        if ((int)$coupon['discount'] > 0) {
+            $couponDiscount = (int)$coupon['discount'];
+        } else {
+            $couponError = sprintf($t(match ((string)($coupon['error'] ?? '')) {
+                'Minimum order not met' => 'coupon_min_subtotal',
+                'Coupon expired' => 'coupon_used_up',
+                'Coupon already used' => 'coupon_already_used',
+                default => 'coupon_invalid',
+            }), $couponCode);
+            $couponCode = '';
+        }
+    }
+    $promotionDiscount = 0;
+    foreach (Pricing::autoCartRules($subtotal, $cart, $customerId ?: null) as $rule) {
+        if ($rule['action'] === 'free_shipping') $shipping = 0;
+        $promotionDiscount += max(0, (int)($rule['discount'] ?? 0));
+    }
+    $discount = min($subtotal, $couponDiscount + $promotionDiscount);
+    $countries = ['SK' => 'Slovensko', 'CZ' => 'Česko', 'DE' => 'Deutschland', 'AT' => 'Österreich', 'HU' => 'Magyarország', 'PL' => 'Polska'];
 
     return Template::render('storefront/checkout', [
         'breadcrumbs' => $breadcrumbs, 'title' => $t('checkout_title'), 'csrf_token' => Security::csrfToken(),
@@ -91,7 +127,7 @@ function renderCheckout(): string {
         'shipping_unavailable' => $shippingRates ? '' : $t('shipping_unavailable'), 'free_shipping_hint' => $quote['hint'], 'payment_label' => $t('payment'),
         'payment_options' => array_map(static fn(array $method, int $index): array => [
             'code' => (string)$method['code'], 'label' => (string)$method['label'], 'description' => (string)($method['description'] ?: $method['provider']),
-            'fee' => (int)$method['fee'] === 0 ? $freeLabel : $price((int)$method['fee']), 'checked' => $index === 0,
+            'fee' => (int)$method['fee'] === 0 ? $freeLabel : $price((int)$method['fee']), 'checked' => (string)$method['code'] === (string)($selectedPayment['code'] ?? ''),
             'online' => !empty($method['requires_online']),
         ], $paymentMethods, array_keys($paymentMethods)),
         'submitting_label' => $t('checkout_submitting'), 'redirecting_label' => $t('checkout_redirecting'),
@@ -100,7 +136,15 @@ function renderCheckout(): string {
         'items' => array_map(static fn(array $item): array => ['name' => (string)$item['name'], 'quantity' => (int)$item['qty'], 'total' => $price((int)$item['total'])], $cart),
         'subtotal_cents' => $subtotal, 'subtotal_label' => $t('subtotal'), 'subtotal' => $price($subtotal),
         'shipping' => $shipping === 0 ? $freeLabel : $price($shipping), 'payment_fee' => $paymentFee === 0 ? $freeLabel : $price($paymentFee),
-        'total_price_label' => $t('total_price'), 'total' => $price($subtotal + $shipping + $paymentFee),
+        'discount_cents' => $discount, 'discount_label' => $t('discount'), 'discount' => $discount > 0 ? $price(-$discount) : '',
+        'total_price_label' => $t('total_price'), 'total' => $price($subtotal - $discount + $shipping + $paymentFee),
+        'values' => ['name' => $form('name'), 'email' => $form('email'), 'phone' => $form('phone', 64), 'street' => $form('street'),
+            'city' => $form('city'), 'zip' => $form('zip', 32), 'notes' => $form('notes', 2000)],
+        'country_label' => $t('country'), 'country_options' => array_map(static fn(string $code, string $name): array => ['code' => $code, 'name' => $name, 'selected' => $code === $country],
+            array_keys($countries), $countries),
+        'coupon_label' => $t('coupon_code'), 'coupon_apply_label' => $t('coupon_apply'), 'coupon_remove_label' => $t('coupon_remove'),
+        'coupon_code' => $couponCode, 'coupon_error' => $couponError,
+        'coupon_applied' => $couponDiscount > 0 ? sprintf($t('coupon_applied'), $couponCode, $price($couponDiscount)) : '',
     ]);
 }
 

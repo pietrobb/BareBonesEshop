@@ -42,7 +42,7 @@ async function addFirstProduct(page) {
 
 async function checkout(page, email) {
   await fillCheckout(page, email);
-  await page.locator('form.checkout-form button[type="submit"]').click();
+  await page.locator('form.checkout-form button.btn-checkout').click();
   await page.waitForURL(url => url.origin === GATEWAY || url.searchParams.get('page') === 'order-done');
   if (new URL(page.url()).origin === GATEWAY) await page.locator('#gateway-pay').click();
   await expect(page).toHaveURL(/page=order-done/);
@@ -87,7 +87,7 @@ test('HTML card checkout reaches the hosted gateway and resumes after cancel', a
   await addFirstProduct(page);
   await fillCheckout(page, 'card-redirect@example.test');
   await page.locator('input[name="payment"][value="card"]').check();
-  const button = page.locator('form.checkout-form button[type="submit"]');
+  const button = page.locator('form.checkout-form button.btn-checkout');
   await Promise.all([page.waitForURL(url => url.origin === GATEWAY), button.click()]);
   expect(blocked).toEqual([]);
   const paymentUrl = page.url();
@@ -113,7 +113,7 @@ test('checkout button locks while submitting and unlocks when the page is shown 
   await addFirstProduct(page);
   await fillCheckout(page, 'card-lock@example.test');
   await page.locator('input[name="payment"][value="card"]').check();
-  const button = page.locator('form.checkout-form button[type="submit"]');
+  const button = page.locator('form.checkout-form button.btn-checkout');
   const label = await button.textContent();
   const redirecting = await page.locator('form[data-checkout-form]').getAttribute('data-redirecting-label');
   // A listener added after the storefront one keeps the document, so the locked state is observable.
@@ -140,7 +140,7 @@ test('online payment redirect and signed webhook complete the bound checkout', a
   await page.locator('input[name="payment"][value="card"]').check();
   await Promise.all([
     page.waitForURL(url => url.origin === GATEWAY),
-    page.locator('form.checkout-form button[type="submit"]').click(),
+    page.locator('form.checkout-form button.btn-checkout').click(),
   ]);
   const gatewayUrl = new URL(page.url());
   expect(gatewayUrl.searchParams.get('success')).toContain('page=order-done');
@@ -175,7 +175,7 @@ test('double click on the order button creates exactly one order and reaches the
   await page.locator('input[name="payment"][value="card"]').check();
   await Promise.all([
     page.waitForURL(url => url.origin === GATEWAY),
-    page.locator('form.checkout-form button[type="submit"]').dblclick(),
+    page.locator('form.checkout-form button.btn-checkout').dblclick(),
   ]);
   expect(orderFacts(`--email=${email}`).count).toBe(1);
 });

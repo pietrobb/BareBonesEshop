@@ -33,7 +33,7 @@ test('HTML card checkout opens a real Stripe test-mode Checkout session', async 
 
   await Promise.all([
     page.waitForURL(url => url.origin === STRIPE, { timeout: 30_000 }),
-    page.locator('form.checkout-form button[type="submit"]').click(),
+    page.locator('form.checkout-form button.btn-checkout').click(),
   ]);
   expect(new URL(page.url()).pathname).toMatch(/^\/c\/pay\/cs_test_/);
   // Stripe rendered its hosted page (amount and a pay button), not an error page.
