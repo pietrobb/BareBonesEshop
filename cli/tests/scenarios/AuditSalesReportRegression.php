@@ -37,6 +37,13 @@ if ($phase === 'setup') {
     $today = $utc($midnight->modify('+5 minutes'));
     $yesterday = $utc($midnight->modify('-30 minutes'));
     $old = $utc($midnight->modify('-40 days'));
+    // order_items.product_id is a real foreign key on MySQL/MariaDB.
+    $db->exec("INSERT INTO categories (store_id, name, slug, path) VALUES ('default', 'A151', 'a151', 'a151')");
+    $categoryId = (int)$db->lastInsertId();
+    foreach ([1 => 'A151-A', 2 => 'A151-B', 3 => 'A151-C'] as $productId => $sku) {
+        $db->prepare("INSERT INTO products (id, store_id, category_id, sku, name, slug, price, stock, status) VALUES (?, 'default', ?, ?, ?, ?, 100, 0, 'active')")
+            ->execute([$productId, $categoryId, $sku, 'Product ' . $sku, strtolower($sku)]);
+    }
     $order = $db->prepare("INSERT INTO orders (order_number, status, payment_status, customer_name, customer_email, payment_method, subtotal, total, currency, store_id, created_at, is_synthetic)
         VALUES (?, ?, 'paid', 'A151 Buyer', 'a151@example.test', 'bank', ?, ?, ?, ?, ?, ?)");
     $item = $db->prepare("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total) VALUES (?, ?, ?, ?, ?, ?, ?)");
