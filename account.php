@@ -261,6 +261,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    elseif ($action === 'reorder' && Customers::isLoggedIn()) {
+        $cid = (int)$_SESSION['customer_id'];
+        $orderId = Security::int($_POST['order_id'] ?? 0);
+        if (!Customers::order($cid, $orderId)) {
+            $flash = $t('account.order_not_found');
+            $flashType = 'error';
+            $p = 'orders';
+        } else {
+            $result = Cart::reorder(Customers::orderItems($cid, $orderId));
+            $message = $result['added'] ? sprintf($t('account.reorder_added'), count($result['added'])) : $t('account.reorder_none');
+            if ($result['skipped']) $message .= ' ' . $t('account.reorder_skipped') . ': ' . implode(', ', $result['skipped']);
+            $_SESSION['account_flash'] = ['message' => $message, 'type' => $result['added'] ? 'ok' : 'error'];
+            header('Location: ' . Template::storeUrl('/account.php?p=order&id=' . $orderId));
+            exit;
+        }
+    }
+
     elseif ($action === 'rma_request' && Customers::isLoggedIn()) {
         $cid = (int)$_SESSION['customer_id'];
         $orderId = (int)($_POST['order_id'] ?? 0);
@@ -365,11 +382,21 @@ if ($p === '') $p = 'dashboard';
 
 $customer = $loggedIn ? Customers::current() : null;
 $csrf = Security::csrfToken();
+if ($flash === null && isset($_SESSION['account_flash'])) {
+    ['message' => $flash, 'type' => $flashType] = $_SESSION['account_flash'];
+    unset($_SESSION['account_flash']);
+}
+// Only the customer's own order in this store; any other id is indistinguishable from a missing one.
+$order = $customer && $p === 'order' ? Customers::order((int)$customer['id'], Security::int($_GET['id'] ?? 0)) : null;
+if ($p === 'order' && $order === null) {
+    http_response_code(404);
+    $p = 'unknown';
+}
 
 // ============================================================
 // Render through the active theme and shared storefront shell
 // ============================================================
-$viewData = AccountViewModel::build($p, $customer, $supported, $fieldValues, $flash, $flashType);
+$viewData = AccountViewModel::build($p, $customer, $supported, $fieldValues, $flash, $flashType, $order);
 $content = Template::page('account', $viewData);
 $title = Template::pageTitle($t('account.title'));
 $cartCount = StorefrontCartAction::count();

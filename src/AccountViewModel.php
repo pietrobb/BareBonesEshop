@@ -8,10 +8,11 @@ final class AccountViewModel
         array $supportedLocales,
         array $fieldValues,
         ?string $flash,
-        ?string $flashType
+        ?string $flashType,
+        ?array $order = null
     ): array {
         $loggedIn = $customer !== null;
-        $knownPages = ['login', 'register', 'forgot', 'reset', 'dashboard', 'orders', 'returns', 'addresses', 'profile', 'privacy', 'change-password'];
+        $knownPages = ['login', 'register', 'forgot', 'reset', 'dashboard', 'orders', 'order', 'returns', 'addresses', 'profile', 'privacy', 'change-password'];
         if (!in_array($page, $knownPages, true)) $page = 'unknown';
         $model = [
             'page' => $page,
@@ -23,7 +24,7 @@ final class AccountViewModel
             'csrf_token' => Security::csrfToken(),
             'customer_email' => (string)($customer['email'] ?? ''),
             'flash' => $flash === null ? null : ['message' => $flash, 'ok' => $flashType === 'ok'],
-            'navigation' => $loggedIn ? self::navigation($page) : [],
+            'navigation' => $loggedIn ? self::navigation($page === 'order' ? 'orders' : $page) : [],
             'values' => $fieldValues,
         ];
         if ($page === 'login') {
@@ -40,6 +41,8 @@ final class AccountViewModel
             $model['default_address'] = Customers::defaultAddress($id, 'shipping');
         } elseif ($page === 'orders' && $customer) {
             $model['orders'] = self::orders((int)$customer['id']);
+        } elseif ($page === 'order' && $customer && $order) {
+            $model['order'] = self::orderDetail((int)$customer['id'], $order);
         } elseif ($page === 'returns' && $customer) {
             $model += self::returns((int)$customer['id']);
         } elseif ($page === 'addresses' && $customer) {
@@ -101,6 +104,7 @@ final class AccountViewModel
             $invoice = $invoices[(int)$order['id']] ?? null;
             return [
                 'number' => (string)$order['order_number'],
+                'url' => Template::storeUrl('/account.php?p=order&id=' . (int)$order['id']),
                 'status' => (string)$order['status'],
                 'payment_status' => (string)($order['payment_status'] ?? 'pending'),
                 'payment_label' => (string)($snapshot['label'] ?? $snapshot['name'] ?? $order['payment_method'] ?? ''),
@@ -117,6 +121,52 @@ final class AccountViewModel
                 ] : null,
             ];
         }, $orders);
+    }
+
+    /** $order is already owner- and store-checked by Customers::order(). Amounts stay in the order's own currency. */
+    private static function orderDetail(int $customerId, array $order): array
+    {
+        $id = (int)$order['id'];
+        $currency = (string)$order['currency'];
+        $money = static fn($cents): string => I18n::price((int)$cents, $currency);
+        $payment = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
+        $shipping = json_decode((string)($order['shipping_rate_snapshot'] ?? '{}'), true) ?: [];
+        $address = json_decode((string)($order['shipping_addr'] ?? '{}'), true) ?: [];
+        $invoice = Db::get()->prepare("SELECT number, download_token FROM invoices WHERE order_id = ? AND status != 'cancelled' ORDER BY id DESC LIMIT 1");
+        $invoice->execute([$id]);
+        $invoice = $invoice->fetch() ?: null;
+        $line = static fn(string $label, $cents): array => ['label' => I18n::t($label), 'amount' => $money($cents)];
+        $totals = [$line('subtotal', $order['subtotal'])];
+        if ((int)$order['discount_amount'] !== 0) $totals[] = $line('discount', -abs((int)$order['discount_amount']));
+        $totals[] = $line('shipping', $order['shipping_cost']);
+        if ((int)($order['payment_fee'] ?? 0) !== 0) $totals[] = $line('account.payment_fee', $order['payment_fee']);
+        if ((int)$order['tax_amount'] !== 0) $totals[] = $line('tax', $order['tax_amount']);
+        return [
+            'id' => $id,
+            'number' => (string)$order['order_number'],
+            'date' => substr((string)$order['created_at'], 0, 16),
+            'status' => (string)$order['status'],
+            'payment_status' => (string)($order['payment_status'] ?? 'pending'),
+            'payment_label' => (string)($payment['label'] ?? $payment['name'] ?? $order['payment_method'] ?? ''),
+            'shipping_label' => (string)($shipping['name'] ?? $shipping['label'] ?? $order['shipping_method'] ?? ''),
+            'tracking' => trim((string)($order['carrier'] ?? '') . ' ' . (string)($order['tracking_number'] ?? '')),
+            'address' => array_values(array_filter([
+                (string)($order['customer_name'] ?? ''), (string)($address['street'] ?? ''),
+                trim((string)($address['zip'] ?? '') . ' ' . (string)($address['city'] ?? '')), (string)($address['country'] ?? ''),
+            ], static fn(string $part): bool => trim($part) !== '')),
+            'items' => array_map(static fn(array $item): array => [
+                'name' => (string)$item['name'], 'sku' => (string)$item['sku'], 'quantity' => (int)$item['quantity'],
+                'unit_price' => $money($item['unit_price']), 'total' => $money($item['total']),
+            ], Customers::orderItems($customerId, $id)),
+            'totals' => $totals,
+            'total' => $money($order['total']),
+            'invoice' => $invoice ? [
+                'number' => (string)$invoice['number'],
+                'url' => Template::storeUrl('/account.php?p=invoice&token=' . rawurlencode((string)$invoice['download_token'])),
+            ] : null,
+            'orders_url' => Template::storeUrl('/account.php?p=orders'),
+            'cart_url' => Template::storeUrl('/?page=cart'),
+        ];
     }
 
     private static function returns(int $customerId): array

@@ -93,6 +93,8 @@ class Customers {
             $new = password_hash($password, PASSWORD_BCRYPT, ['cost' => self::BCRYPT_COST]);
             $db->prepare("UPDATE customers SET password_hash = ? WHERE id = ? AND store_id = ?")
                ->execute([$new, $c['id'], StoreContext::current()->id()]);
+            // The session is bound to the stored hash; binding it to the replaced one logs the customer out on the next request.
+            $c['password_hash'] = $new;
         }
         // Session setup
         Security::sessionStart();
@@ -567,6 +569,18 @@ class Customers {
         $stmt->execute([$orderId, $customerId, StoreContext::current()->id()]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row ?: null;
+    }
+
+    /** Line items of an order owned by this customer in the current store; [] for any other order. */
+    public static function orderItems(int $customerId, int $orderId): array {
+        $stmt = Db::get()->prepare(
+            "SELECT oi.id, oi.product_id, oi.variant_id, oi.sku, oi.name, oi.quantity, oi.unit_price, oi.total
+             FROM order_items oi JOIN orders o ON o.id = oi.order_id
+             WHERE oi.order_id = ? AND o.customer_id = ? AND o.store_id = ?
+             ORDER BY oi.id ASC"
+        );
+        $stmt->execute([$orderId, $customerId, StoreContext::current()->id()]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     // ============================================================

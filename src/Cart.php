@@ -58,6 +58,23 @@ class Cart {
         return ['ok' => true, 'error' => null, 'item' => $item, 'count' => (int)$summary['count']];
     }
 
+    /**
+     * Put the lines of a past order back into the cart. Every line goes through addValidated, so the
+     * current catalog decides: today's price (the cart never stores one), availability and variants.
+     * Lines that can no longer be bought are skipped and reported by name.
+     */
+    public static function reorder(array $orderItems): array {
+        $added = [];
+        $skipped = [];
+        foreach ($orderItems as $item) {
+            $variantId = (int)($item['variant_id'] ?? 0);
+            $result = self::addValidated((int)$item['product_id'], $variantId > 0 ? $variantId : null, (int)$item['quantity']);
+            if ($result['ok']) $added[] = (string)$item['name'];
+            else $skipped[] = (string)$item['name'];
+        }
+        return ['added' => $added, 'skipped' => $skipped];
+    }
+
     public static function update(string $key, int $qty): void {
         if ($qty <= 0) {
             unset($_SESSION['cart'][$key]);
