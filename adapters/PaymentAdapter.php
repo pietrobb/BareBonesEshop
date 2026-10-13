@@ -2,7 +2,7 @@
 /**
  * BareBones Shop — Payment Adapter Interface
  * Shipped adapters (adapters/contrib): StripePayment (Stripe Checkout — hosted flow), PayUPayment,
- * GoPayPayment, CashOnDelivery, MockPayment (tests). Bank transfer is a built-in offline method, not an adapter.
+ * GoPayPayment, ComgatePayment, CashOnDelivery, MockPayment (tests). Bank transfer is a built-in offline method, not an adapter.
  * Other gateways are added as new classes implementing this interface.
  */
 interface PaymentAdapter {
@@ -30,7 +30,8 @@ interface HostedCheckoutAdapter extends PaymentAdapter {
 }
 
 /**
- * Providers whose notification is only an unsigned reference (e.g. GoPayPayment: GET ?id=<payment>).
+ * Providers whose notification is only a reference to be confirmed with the provider
+ * (GoPayPayment: unsigned GET ?id=<payment>; ComgatePayment: push with merchant+secret).
  * The event is never taken from the request: verifiedEvent() asks the provider's authenticated
  * API for the payment and returns the same shape as handleWebhook() (event_type, event_id, data
  * with order_number/payment_id, amount, currency), so the payment state machine applies it.

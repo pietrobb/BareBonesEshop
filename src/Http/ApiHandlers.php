@@ -761,6 +761,8 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
                     'order_number'   => $order['order_number'],
                     'total'          => (int)$order['total'],
                     'customer_email' => $email,
+                    'customer_name'  => (string)($order['customer_name'] ?? ''),
+                    'locale'         => (string)($order['locale'] ?? ''),
                     'currency'       => $order['currency'] ?? 'eur',
                     'items'          => $orderItems,
                     'shipping_cost'  => (int)$order['shipping_cost'],
@@ -1148,7 +1150,7 @@ function apiWebhookPayment(): array {
 }
 
 /**
- * Unsigned reference notifications (GoPay GET ?id=…): answered only for providers that verify
+ * Reference notifications (GoPay GET ?id=…, Comgate push): answered only for providers that verify
  * every notification through their authenticated API. Returns null for signed-webhook providers.
  * 400 = the provider does not confirm the payment (nothing changes); 500 = retry later.
  */
@@ -1161,7 +1163,12 @@ function apiWebhookPulledNotification(string $provider): ?array {
     }
     if (!$gateway instanceof PullVerifiedNotificationAdapter) return null;
 
-    $notification = array_diff_key($_GET, ['action' => true, 'provider' => true]) + array_diff_key($_POST, ['action' => true, 'provider' => true]);
+    // Query string, form body or JSON body (Comgate REST push); only scalar values reach the adapter.
+    $json = json_decode((string)file_get_contents('php://input'), true);
+    $notification = array_filter(
+        array_diff_key($_GET + $_POST + (is_array($json) ? $json : []), ['action' => true, 'provider' => true]),
+        'is_scalar'
+    );
     try {
         $result = PaymentService::handlePulledNotification($notification, $gateway, $provider);
     } catch (PaymentNotificationUnverified $e) {

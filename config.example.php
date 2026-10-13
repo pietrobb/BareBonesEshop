@@ -109,7 +109,7 @@ return [
         // 'erp' => 'money',
     ],
     'providers' => [
-        'payment' => [], // stripe/payu/gopay/mock are built in; register a custom gateway as code => ['class' => <your PaymentAdapter class>]
+        'payment' => [], // stripe/payu/gopay/comgate/mock are built in; register a custom gateway as code => ['class' => <your PaymentAdapter class>]
         'shipping' => [],
         'mail' => [],
         'tax' => [],
@@ -193,6 +193,13 @@ return [
     'gopay_client_id'     => '',
     'gopay_client_secret' => '',
     'gopay_env'           => 'sandbox', // 'production' uses gate.gopay.cz
+
+    // Comgate (provider code comgate). Set the push notification URL in the Comgate client portal to
+    // <app_url>/api.php?action=webhook_payment&provider=comgate; every push is checked against the
+    // merchant/secret and confirmed by the status API. Env PAY_COMGATE_* overrides these values.
+    'comgate_merchant' => '',
+    'comgate_secret'   => '',
+    'comgate_test'     => true, // false creates real (production) payments
 
     // Digital files are stored below this directory; digital_assets.storage_path
     // contains only a relative path such as ebooks/manual.pdf.

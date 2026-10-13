@@ -12,6 +12,8 @@ class Adapters {
             'payu' => ['class' => 'PayUPayment', 'capabilities' => ['checkout', 'status', 'webhook', 'refund'], 'signature_header' => 'HTTP_OPENPAYU_SIGNATURE'],
             // Unsigned GET notifications, each verified by an authenticated payment inquiry.
             'gopay' => ['class' => 'GoPayPayment', 'capabilities' => ['checkout', 'status', 'webhook', 'refund'], 'notification' => 'pull'],
+            // Push with merchant+secret, always confirmed by the authenticated status call.
+            'comgate' => ['class' => 'ComgatePayment', 'capabilities' => ['checkout', 'status', 'webhook', 'refund'], 'notification' => 'pull'],
             'mock' => ['class' => 'MockPayment', 'capabilities' => ['checkout', 'status', 'webhook', 'refund'], 'signature_header' => 'HTTP_X_MOCK_SIGNATURE'],
             'cod' => ['class' => 'CashOnDelivery', 'capabilities' => ['checkout', 'status', 'refund']],
         ],
