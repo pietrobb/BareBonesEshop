@@ -114,6 +114,194 @@ paths:
                 properties:
                   data: { $ref: '#/components/schemas/Order' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /orders/{id}/status:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      operationId: changeOrderStatus
+      summary: Idempotently move an order through the order workflow (stock, events, audit and e-mails as in the admin)
+      description: "A move to paid requires a confirmed payment; a move to refunded additionally requires the refunds:write scope."
+      x-required-scope: orders:write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrderStatusChange' }
+      responses:
+        '200':
+          description: Changed order; an identical retry returns the stored response with idempotent_replay=true and the change is applied once
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: '#/components/schemas/Order' }
+                  meta: { $ref: '#/components/schemas/WriteMeta' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The Idempotency-Key was already used for a different request (idempotency_conflict), or the workflow refused the change while applying it, e.g. backordered items on shipped (order_conflict, nothing is stored and the key can be retried)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: The transition is not allowed from the current status (invalid_transition) or the payment is not confirmed (payment_not_confirmed); error.allowed lists the allowed next statuses. Stored under the Idempotency-Key.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /orders/{id}/shipments:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: listOrderShipments
+      summary: Shipments of an order with carrier, tracking number and items
+      x-required-scope: orders:read
+      responses:
+        '200':
+          description: Shipments in creation order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Shipment' } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /categories:
+    get:
+      operationId: listCategories
+      summary: List categories of the credential store catalog in stable ID order
+      x-required-scope: categories:read
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Category page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Category' } }
+                  meta: { $ref: '#/components/schemas/PageMeta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /categories/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: getCategory
+      summary: Get one category of the credential store catalog
+      x-required-scope: categories:read
+      responses:
+        '200':
+          description: Category
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/Category' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /customers:
+    get:
+      operationId: listCustomers
+      summary: List customer accounts of the credential store (no password hashes or tokens)
+      x-required-scope: customers:read
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Customer page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Customer' } }
+                  meta: { $ref: '#/components/schemas/PageMeta' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /customers/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: getCustomer
+      summary: Get one customer account of the credential store
+      x-required-scope: customers:read
+      responses:
+        '200':
+          description: Customer
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/Customer' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /inventory:
+    get:
+      operationId: getInventory
+      summary: Stock of one product or variant SKU per warehouse
+      x-required-scope: inventory:read
+      parameters:
+        - name: sku
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 191 }
+      responses:
+        '200':
+          description: Inventory of the SKU
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/Inventory' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /inventory/adjustments:
+    post:
+      operationId: adjustInventory
+      summary: Idempotently change the on-hand quantity of a SKU in one warehouse, booked in the stock ledger
+      x-required-scope: inventory:write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InventoryAdjustment' }
+      responses:
+        '200':
+          description: Inventory after the change; an identical retry returns the stored response with idempotent_replay=true and books nothing
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: '#/components/schemas/Inventory' }
+                  meta: { $ref: '#/components/schemas/WriteMeta' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The Idempotency-Key was already used for a different request (idempotency_conflict), or the change would go below reserved stock (stock_conflict, nothing is stored and the key can be retried)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 webhooks:
   commerceEvent:
     post:
@@ -263,6 +451,90 @@ components:
             currency: { type: string, pattern: '^[a-z]{3}$' }
         created_at: { type: string }
         updated_at: { type: string }
+    OrderStatusChange:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, enum: [pending, paid, processing, shipped, delivered, returned, cancelled, refunded] }
+        note: { type: [string, 'null'], maxLength: 500 }
+    Shipment:
+      type: object
+      required: [id, status, warehouse_id, carrier, tracking_number, shipped_at, created_at, items]
+      properties:
+        id: { type: integer }
+        status: { type: string }
+        warehouse_id: { type: [integer, 'null'] }
+        carrier: { type: [string, 'null'] }
+        tracking_number: { type: [string, 'null'] }
+        shipped_at: { type: [string, 'null'] }
+        created_at: { type: string }
+        items:
+          type: array
+          items:
+            type: object
+            required: [order_item_id, sku, quantity, status]
+            properties:
+              order_item_id: { type: integer }
+              sku: { type: string }
+              quantity: { type: integer }
+              status: { type: string }
+    Category:
+      type: object
+      required: [id, parent_id, slug, name, path, depth, sort_order]
+      properties:
+        id: { type: integer }
+        parent_id: { type: [integer, 'null'] }
+        slug: { type: string }
+        name: { type: string }
+        path: { type: string }
+        depth: { type: integer, minimum: 0 }
+        sort_order: { type: integer }
+    Customer:
+      type: object
+      required: [id, email, name, phone, locale, status, email_verified_at, last_login_at, created_at, updated_at]
+      properties:
+        id: { type: integer }
+        email: { type: string }
+        name: { type: string }
+        phone: { type: [string, 'null'] }
+        locale: { type: [string, 'null'] }
+        status: { type: string }
+        email_verified_at: { type: [string, 'null'] }
+        last_login_at: { type: [string, 'null'] }
+        created_at: { type: string }
+        updated_at: { type: string }
+    Inventory:
+      type: object
+      required: [sku, available, warehouses]
+      properties:
+        sku: { type: string }
+        available: { type: integer, minimum: 0, description: Sum of on-hand minus reserved over all warehouses of the store. }
+        warehouses:
+          type: array
+          items:
+            type: object
+            required: [code, name, qty, reserved, available]
+            properties:
+              code: { type: string }
+              name: { type: string }
+              qty: { type: integer }
+              reserved: { type: integer }
+              available: { type: integer, minimum: 0 }
+    InventoryAdjustment:
+      type: object
+      additionalProperties: false
+      required: [sku, delta]
+      properties:
+        sku: { type: string, minLength: 1, maxLength: 191 }
+        delta: { type: integer, not: { const: 0 }, minimum: -1000000, maximum: 1000000, description: Change of the on-hand quantity. }
+        warehouse: { type: string, maxLength: 64, description: Warehouse code; the default warehouse when omitted. }
+        reason: { type: [string, 'null'], maxLength: 191 }
+    WriteMeta:
+      type: object
+      required: [idempotent_replay]
+      properties:
+        idempotent_replay: { type: boolean }
     PageMeta:
       type: object
       required: [limit, next_cursor]

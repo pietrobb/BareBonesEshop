@@ -1767,6 +1767,7 @@ require __DIR__ . '/AuditSessionHardeningRegression.php';
 require __DIR__ . '/AuditAdminUsersRegression.php';
 require __DIR__ . '/AuditEmailVerificationRegression.php';
 require __DIR__ . '/AuditApiPatchRegression.php';
+require __DIR__ . '/AuditApiDomainsRegression.php';
 require __DIR__ . '/AuditQueuePoisonRegression.php';
 require __DIR__ . '/AuditUpdaterToctouRegression.php';
 require __DIR__ . '/AuditBackupMaintenanceRegression.php';

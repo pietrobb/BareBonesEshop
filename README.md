@@ -156,6 +156,12 @@ php cli/api-client.php list
 php cli/api-client.php revoke --key=<12-hex-key-id>
 ```
 
+Resources and scopes: products (`products:read`, `products:write`), orders
+(`orders:read`, status changes and shipments `orders:write`; a move to `refunded`
+also needs `refunds:write`), categories (`categories:read`), customers without
+credentials (`customers:read`) and per-warehouse stock with ledger adjustments
+(`inventory:read`, `inventory:write`). Every credential sees only its own store.
+
 The create command prints the token once; only its SHA-256 hash is stored. Never
 put a token in a URL, log, repository, database export, or webhook payload.
 Commerce mutations write CloudEvents-compatible records to `event_outbox` in the

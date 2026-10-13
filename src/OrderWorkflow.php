@@ -76,6 +76,28 @@ class OrderWorkflow {
      * Perform state transition with side effects
      */
     public static function transition(int $orderId, string $to, ?string $note = null): void {
+        $db = Db::get();
+        $db->beginTransaction();
+        try {
+            $deferredJobs = self::transitionWithin($orderId, $to, $note);
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+        self::pushDeferredJobs($deferredJobs);
+    }
+
+    /**
+     * The transition inside the caller's open transaction (e.g. together with an API idempotency
+     * claim). Returns the deferred jobs; the caller pushes them with pushDeferredJobs() after commit.
+     *
+     * @return list<array{0:string,1:array,2:int}>
+     */
+    public static function transitionWithin(int $orderId, string $to, ?string $note = null): array {
+        if (!Db::get()->inTransaction()) {
+            throw new \LogicException('OrderWorkflow::transitionWithin needs an open transaction');
+        }
         $order = Orders::byId($orderId);
         if (!$order) {
             throw new \RuntimeException("Order #{$orderId} not found");
@@ -86,56 +108,48 @@ class OrderWorkflow {
             throw new \LogicException("Cannot transition order #{$orderId} from '{$from}' to '{$to}'");
         }
 
-        $db = Db::get();
-        $deferredJobs = [];
+        // Update status
+        Orders::updateStatus($orderId, $to);
 
-        $db->beginTransaction();
+        // Audit log
+        AuditLog::log('order_status', $orderId, $from, $to, $note);
 
-        try {
-            // Update status
-            Orders::updateStatus($orderId, $to);
-
-            // Audit log
-            AuditLog::log('order_status', $orderId, $from, $to, $note);
-
-            // Collect DB-side effects (stock restore) + deferred jobs
-            $deferredJobs = match($to) {
-                'paid'      => self::handlePaid($order),
-                'cancelled' => self::handleCancellation($order),
-                'shipped'   => self::handleShipped($order),
-                'returned'  => self::handleReturn($order),
-                'refunded'  => self::handleRefund($order),
-                default     => [],
-            };
-            $order['status'] = $to;
-            $deferredJobs = array_merge($deferredJobs, FulfillmentDispatcher::dispatch($to, $order));
-            Outbox::record(DomainEvents::ORDER_STATUS_CHANGED, 'order', $orderId, [
+        // Collect DB-side effects (stock restore) + deferred jobs
+        $deferredJobs = match($to) {
+            'paid'      => self::handlePaid($order),
+            'cancelled' => self::handleCancellation($order),
+            'shipped'   => self::handleShipped($order),
+            'returned'  => self::handleReturn($order),
+            'refunded'  => self::handleRefund($order),
+            default     => [],
+        };
+        $order['status'] = $to;
+        $deferredJobs = array_merge($deferredJobs, FulfillmentDispatcher::dispatch($to, $order));
+        Outbox::record(DomainEvents::ORDER_STATUS_CHANGED, 'order', $orderId, [
+            'order_id' => $orderId,
+            'order_number' => (string)$order['order_number'],
+            'from' => (string)$from,
+            'to' => $to,
+            'note' => $note,
+        ]);
+        if (in_array($to, ['cancelled', 'shipped', 'returned', 'refunded'], true)) {
+            Outbox::record(DomainEvents::STOCK_CHANGED, 'order', $orderId, [
                 'order_id' => $orderId,
-                'order_number' => (string)$order['order_number'],
-                'from' => (string)$from,
-                'to' => $to,
-                'note' => $note,
+                'reason' => 'order.' . $to,
+                'items' => array_map(static fn(array $item): array => [
+                    'product_id' => (int)$item['product_id'],
+                    'variant_id' => $item['variant_id'] === null ? null : (int)$item['variant_id'],
+                    'sku' => (string)$item['sku'],
+                    'quantity' => (int)$item['quantity'],
+                ], Orders::items($orderId)),
             ]);
-            if (in_array($to, ['cancelled', 'shipped', 'returned', 'refunded'], true)) {
-                Outbox::record(DomainEvents::STOCK_CHANGED, 'order', $orderId, [
-                    'order_id' => $orderId,
-                    'reason' => 'order.' . $to,
-                    'items' => array_map(static fn(array $item): array => [
-                        'product_id' => (int)$item['product_id'],
-                        'variant_id' => $item['variant_id'] === null ? null : (int)$item['variant_id'],
-                        'sku' => (string)$item['sku'],
-                        'quantity' => (int)$item['quantity'],
-                    ], Orders::items($orderId)),
-                ]);
-            }
-
-            $db->commit();
-        } catch (\Throwable $e) {
-            if ($db->inTransaction()) $db->rollBack();
-            throw $e;
         }
 
-        // Push jobs AFTER successful commit — filesystem writes are not transactional
+        return $deferredJobs;
+    }
+
+    /** Push the deferred jobs of transitionWithin() AFTER commit: filesystem writes are not transactional. */
+    public static function pushDeferredJobs(array $deferredJobs): void {
         foreach ($deferredJobs as [$type, $payload, $priority]) {
             JobQueue::push($type, $payload, $priority);
         }

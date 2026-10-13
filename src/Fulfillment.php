@@ -170,6 +170,18 @@ class Fulfillment {
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /** Items of the given shipments (from shipments() of the active store), grouped by shipment id. */
+    public static function shipmentItems(array $shipmentIds): array {
+        $shipmentIds = array_values(array_unique(array_map('intval', $shipmentIds)));
+        if (!$shipmentIds) return [];
+        $stmt = Db::get()->prepare('SELECT shipment_id, order_item_id, sku, quantity, status FROM shipment_items
+            WHERE shipment_id IN (' . implode(',', array_fill(0, count($shipmentIds), '?')) . ') ORDER BY id');
+        $stmt->execute($shipmentIds);
+        $grouped = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $grouped[(int)$row['shipment_id']][] = $row;
+        return $grouped;
+    }
+
     private static function allocatedQuantity(array $orderItem, string $sku, ?int $warehouseId): int {
         $quantity = 0;
         foreach (Inventory::reservationLines($orderItem) as $line) {

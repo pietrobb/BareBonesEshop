@@ -51,6 +51,7 @@ try {
 
     fwrite(STDERR, "Usage:\n");
     fwrite(STDERR, "  php cli/api-client.php create --name=ERP --store=default --scopes=products:read,orders:read\n");
+    fwrite(STDERR, "  scopes: products|orders|categories|customers|inventory:read, products|orders|inventory|refunds:write\n");
     fwrite(STDERR, "  php cli/api-client.php list\n");
     fwrite(STDERR, "  php cli/api-client.php revoke --key=<12-hex-key-id>\n");
     exit(64);
