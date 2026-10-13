@@ -47,27 +47,27 @@ function pageProducts(): void {
             <input name="q" value="<?= esc($search) ?>" placeholder="<?= esc(I18n::t('admin.products.search_placeholder')) ?>">
             <select name="status">
                 <option value="">— <?= esc(I18n::t('admin.th.status')) ?> —</option>
-                <option value="active" <?= $statusFilter==='active'?'selected':'' ?>>active</option>
-                <option value="draft" <?= $statusFilter==='draft'?'selected':'' ?>>draft</option>
-                <option value="archived" <?= $statusFilter==='archived'?'selected':'' ?>>archived</option>
+                <option value="active" <?= $statusFilter==='active'?'selected':'' ?>><?= esc(I18n::t('admin.product.status.active')) ?></option>
+                <option value="draft" <?= $statusFilter==='draft'?'selected':'' ?>><?= esc(I18n::t('admin.product.status.draft')) ?></option>
+                <option value="archived" <?= $statusFilter==='archived'?'selected':'' ?>><?= esc(I18n::t('admin.product.status.archived')) ?></option>
             </select>
             <select name="stock"><option value="">— <?= esc(I18n::t('admin.th.stock')) ?> —</option><option value="low" <?= $stockFilter==='low'?'selected':'' ?>><?= esc(I18n::t('admin.products.filter_low_stock')) ?></option></select>
             <button class="btn" type="submit"><?= esc(I18n::t('admin.btn.apply')) ?></button>
         </form>
-        <form method="post" action="admin.php?p=products&action=bulk" id="bulk-form" data-confirm="OK?">
+        <form method="post" action="admin.php?p=products&action=bulk" id="bulk-form" data-confirm="<?= esc(I18n::t('admin.products.bulk.confirm')) ?>">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
             <div style="display:flex;gap:.5rem;margin-bottom:.5rem">
                 <select name="bulk_action">
                     <option value="">— <?= esc(I18n::t('admin.products.bulk_action')) ?> —</option>
-                    <option value="activate">activate</option>
-                    <option value="archive">archive</option>
+                    <option value="activate"><?= esc(I18n::t('admin.common.activate')) ?></option>
+                    <option value="archive"><?= esc(I18n::t('admin.products.bulk.archive')) ?></option>
                     <option value="delete"><?= esc(I18n::t('admin.btn.delete')) ?></option>
-                    <option value="price_up_5">Price +5%</option>
-                    <option value="price_up_10">Price +10%</option>
-                    <option value="price_up_20">Price +20%</option>
-                    <option value="price_down_5">Price -5%</option>
-                    <option value="price_down_10">Price -10%</option>
-                    <option value="price_down_20">Price -20%</option>
+                    <option value="price_up_5"><?= esc(strtr(I18n::t('admin.products.bulk.price'), ['{change}' => '+5%'])) ?></option>
+                    <option value="price_up_10"><?= esc(strtr(I18n::t('admin.products.bulk.price'), ['{change}' => '+10%'])) ?></option>
+                    <option value="price_up_20"><?= esc(strtr(I18n::t('admin.products.bulk.price'), ['{change}' => '+20%'])) ?></option>
+                    <option value="price_down_5"><?= esc(strtr(I18n::t('admin.products.bulk.price'), ['{change}' => '-5%'])) ?></option>
+                    <option value="price_down_10"><?= esc(strtr(I18n::t('admin.products.bulk.price'), ['{change}' => '-10%'])) ?></option>
+                    <option value="price_down_20"><?= esc(strtr(I18n::t('admin.products.bulk.price'), ['{change}' => '-20%'])) ?></option>
                 </select>
                 <button type="submit" class="btn btn-sm"><?= esc(I18n::t('admin.btn.apply')) ?></button>
                 <input type="hidden" name="q" value="<?= esc($search) ?>">
@@ -83,7 +83,7 @@ function pageProducts(): void {
                 <td><a href="admin.php?p=product&id=<?= $p['id'] ?>"><?= esc($p['name']) ?></a></td>
                 <td><?= I18n::price((int)$p['price'], $p['currency']) ?></td>
                 <td class="<?= isset($stockLevels[(int)$p['id']]) ? 'stock-' . ($stockLevels[(int)$p['id']] === StockAlerts::LOW ? 'low' : 'critical') : '' ?>"><?= (int)$p['stock'] ?></td>
-                <td><span class="badge badge-<?= esc($p['status']) ?>"><?= esc($p['status']) ?></span></td>
+                <td><span class="badge badge-<?= esc($p['status']) ?>"><?= esc(adminCodeLabel('admin.product.status.', (string)$p['status'])) ?></span></td>
                 <td>
                     <a href="admin.php?p=product&id=<?= $p['id'] ?>" class="btn btn-sm"><?= esc(I18n::t('admin.btn.edit')) ?></a>
                 </td>
@@ -148,7 +148,7 @@ function pageProduct(): void {
     $db = Db::get();
     $id = Security::int($_GET['id'] ?? 0);
     $product = $id ? Products::byId($id) : null;
-    if ($id && !$product) { echo '<h1>Produkt</h1><div class="card"><p class="muted">Produkt neexistuje. <a href="admin.php?p=products">Späť na zoznam</a></p></div>'; return; }
+    if ($id && !$product) { echo '<h1>' . esc(I18n::t('admin.product.label')) . '</h1><div class="card"><p class="muted">' . esc(I18n::t('admin.product.not_found')) . ' <a href="admin.php?p=products">' . esc(I18n::t('admin.common.back_to_list')) . '</a></p></div>'; return; }
     $categories = CatalogScope::categories();
     $relatedProductIds = [];
     $relatedCandidates = [];
@@ -215,13 +215,13 @@ function pageProduct(): void {
         $catAttrMap[$row['category_id']][] = $entry;
     }
     ?>
-    <h1><?= $product ? 'Upraviť: ' . esc($product['name']) : 'Nový produkt' ?></h1>
+    <h1><?= $product ? esc(strtr(I18n::t('admin.common.edit_named'), ['{name}' => $product['name']])) : esc(I18n::t('admin.title.product_new')) ?></h1>
     <div class="card">
         <?php ob_start(); ?>
         <?= productEditorExtrasHtml($categories, $product) ?>
         <div id="attr-section" style="border-top:2px solid #e2e8f0;margin-top:1rem;padding-top:1rem">
-            <h3 style="margin-bottom:.75rem">Atribúty</h3>
-            <p class="muted" style="color:#64748b;font-size:.85rem">Atribúty sa načítajú podľa zvolenej kategórie po uložení produktu.</p>
+            <h3 style="margin-bottom:.75rem"><?= esc(I18n::t('admin.title.attributes')) ?></h3>
+            <p class="muted" style="color:#64748b;font-size:.85rem"><?= esc(I18n::t('admin.product.attrs_hint')) ?></p>
             <div id="attr-fields">
                 <?php foreach ($catAttrs as $a):
                     $specKey = $a['name'];
@@ -232,24 +232,24 @@ function pageProduct(): void {
                     <label><?= esc($a['name']) ?><?= $a['unit'] ? ' (' . esc($a['unit']) . ')' : '' ?></label>
                     <?php if ($a['type'] === 'enum'): ?>
                     <select name="attr[<?= esc($a['name']) ?>]">
-                        <option value="">— nevybrané —</option>
+                        <option value="">— <?= esc(I18n::t('admin.common.not_selected')) ?> —</option>
                         <?php foreach ($attrOptions[$a['id']] ?? [] as $opt): ?>
                         <option value="<?= esc($opt) ?>" <?= $curVal === $opt ? 'selected' : '' ?>><?= esc($opt) ?></option>
                         <?php endforeach; ?>
                     </select>
                     <?php elseif ($a['type'] === 'number'): ?>
-                    <input type="number" step="any" name="attr[<?= esc($a['name']) ?>]" value="<?= esc($curNum ?: $curVal) ?>" placeholder="<?= esc($a['unit'] ?: 'číslo') ?>">
+                    <input type="number" step="any" name="attr[<?= esc($a['name']) ?>]" value="<?= esc($curNum ?: $curVal) ?>" placeholder="<?= esc($a['unit'] ?: I18n::t('admin.product.number')) ?>">
                     <?php elseif ($a['type'] === 'boolean'): ?>
                     <select name="attr[<?= esc($a['name']) ?>]">
-                        <option value="">— nevybrané —</option>
-                        <option value="Áno" <?= $curVal === 'Áno' ? 'selected' : '' ?>>Áno</option>
-                        <option value="Nie" <?= $curVal === 'Nie' ? 'selected' : '' ?>>Nie</option>
+                        <option value="">— <?= esc(I18n::t('admin.common.not_selected')) ?> —</option>
+                        <option value="Áno" <?= $curVal === 'Áno' ? 'selected' : '' ?>><?= esc(I18n::t('admin.common.yes')) ?></option>
+                        <option value="Nie" <?= $curVal === 'Nie' ? 'selected' : '' ?>><?= esc(I18n::t('admin.common.no')) ?></option>
                     </select>
                     <?php endif; ?>
                 </div>
                 <?php endforeach; ?>
                 <?php if (empty($catAttrs)): ?>
-                <p class="muted" style="color:#64748b;font-size:.85rem">Pre túto kategóriu nie sú definované atribúty. <a href="admin.php?p=attributes">Spravovať atribúty</a></p>
+                <p class="muted" style="color:#64748b;font-size:.85rem"><?= esc(I18n::t('admin.product.no_attrs')) ?> <a href="admin.php?p=attributes"><?= esc(I18n::t('admin.product.manage_attrs')) ?></a></p>
                 <?php endif; ?>
             </div>
         </div>
@@ -261,15 +261,15 @@ function pageProduct(): void {
 
         <?php if ($product): ?>
         <div class="card" style="margin-top:1rem">
-            <h3 style="margin-bottom:.75rem">Súvisiace produkty</h3>
+            <h3 style="margin-bottom:.75rem"><?= esc(I18n::t('admin.product.related')) ?></h3>
             <form method="post" action="admin.php?p=product&id=<?= (int)$product['id'] ?>&action=related_save">
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                 <div class="form-row">
-                    <label>Typ vzťahu</label>
+                    <label><?= esc(I18n::t('admin.product.relation_type')) ?></label>
                     <input name="relation_type" value="<?= esc($relationType) ?>" pattern="[a-z][a-z0-9_-]{0,79}" required>
                 </div>
                 <div class="form-row">
-                    <label>Ručne vybrané produkty pre tento typ</label>
+                    <label><?= esc(I18n::t('admin.product.related_manual')) ?></label>
                     <select name="related_product_ids[]" multiple size="8" style="width:100%">
                         <?php foreach ($relatedCandidates as $candidate): ?>
                         <option value="<?= (int)$candidate['id'] ?>" <?= in_array((int)$candidate['id'], $relatedProductIds, true) ? 'selected' : '' ?>>
@@ -277,16 +277,17 @@ function pageProduct(): void {
                         </option>
                         <?php endforeach; ?>
                     </select>
-                    <p class="muted" style="margin-top:.35rem">Ak nič nevyberiete, produktová stránka použije automatický výber z rovnakej kategórie.</p>
+                    <p class="muted" style="margin-top:.35rem"><?= esc(I18n::t('admin.product.related_hint')) ?></p>
                 </div>
-                <button class="btn btn-primary" type="submit">Uložiť súvisiace produkty</button>
+                <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.product.related_save')) ?></button>
             </form>
         </div>
         <?= productVariantsHtml($product) ?>
-        <div style="margin-top:1rem"><a href="admin.php?p=products" class="btn">Späť na zoznam</a></div>
+        <div style="margin-top:1rem"><a href="admin.php?p=products" class="btn"><?= esc(I18n::t('admin.common.back_to_list')) ?></a></div>
         <?php endif; ?>
     </div>
     <script nonce="<?= Security::cspNonce() ?>">
+    var adminText = <?= json_encode(['notSelected' => I18n::t('admin.common.not_selected'), 'number' => I18n::t('admin.product.number'), 'yes' => I18n::t('admin.common.yes'), 'no' => I18n::t('admin.common.no'), 'noAttrs' => I18n::t('admin.product.no_attrs'), 'manageAttrs' => I18n::t('admin.product.manage_attrs')], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
     var catAttrMap = <?= json_encode($catAttrMap, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
     var existingSpecs = <?= json_encode($existingSpecs, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
     function updateAttrFields() {
@@ -294,7 +295,7 @@ function pageProduct(): void {
         var attrs = catAttrMap[catId] || [];
         var container = document.getElementById('attr-fields');
         if (!attrs.length) {
-            container.innerHTML = '<p class="muted" style="color:#64748b;font-size:.85rem">Pre túto kategóriu nie sú definované atribúty. <a href="admin.php?p=attributes">Spravovať atribúty</a></p>';
+            container.innerHTML = '<p class="muted" style="color:#64748b;font-size:.85rem">' + escHtml(adminText.noAttrs) + ' <a href="admin.php?p=attributes">' + escHtml(adminText.manageAttrs) + '</a></p>';
             return;
         }
         var html = '';
@@ -304,17 +305,17 @@ function pageProduct(): void {
             var curNum = spec.numeric_val || '';
             html += '<div class="form-row"><label>' + escHtml(a.name) + (a.unit ? ' (' + escHtml(a.unit) + ')' : '') + '</label>';
             if (a.type === 'enum') {
-                html += '<select name="attr[' + escHtml(a.name) + ']"><option value="">— nevybrané —</option>';
+                html += '<select name="attr[' + escHtml(a.name) + ']"><option value="">— ' + escHtml(adminText.notSelected) + ' —</option>';
                 (a.options || []).forEach(function(o) {
                     html += '<option value="' + escHtml(o) + '"' + (curVal === o ? ' selected' : '') + '>' + escHtml(o) + '</option>';
                 });
                 html += '</select>';
             } else if (a.type === 'number') {
-                html += '<input type="number" step="any" name="attr[' + escHtml(a.name) + ']" value="' + escHtml(curNum || curVal) + '" placeholder="' + escHtml(a.unit || 'číslo') + '">';
+                html += '<input type="number" step="any" name="attr[' + escHtml(a.name) + ']" value="' + escHtml(curNum || curVal) + '" placeholder="' + escHtml(a.unit || adminText.number) + '">';
             } else if (a.type === 'boolean') {
-                html += '<select name="attr[' + escHtml(a.name) + ']"><option value="">— nevybrané —</option>';
-                html += '<option value="Áno"' + (curVal === 'Áno' ? ' selected' : '') + '>Áno</option>';
-                html += '<option value="Nie"' + (curVal === 'Nie' ? ' selected' : '') + '>Nie</option></select>';
+                html += '<select name="attr[' + escHtml(a.name) + ']"><option value="">— ' + escHtml(adminText.notSelected) + ' —</option>';
+                html += '<option value="Áno"' + (curVal === 'Áno' ? ' selected' : '') + '>' + escHtml(adminText.yes) + '</option>';
+                html += '<option value="Nie"' + (curVal === 'Nie' ? ' selected' : '') + '>' + escHtml(adminText.no) + '</option></select>';
             }
             html += '</div>';
         });
@@ -330,49 +331,49 @@ function pageDigitalAssets(): void {
     $baseDir = (string)($cfg['digital_assets_base_dir'] ?? '');
     $assets = CatalogScope::digitalAssets();
     ?>
-    <h1>Digitálne súbory</h1>
+    <h1><?= esc(I18n::t('admin.title.digital_assets')) ?></h1>
     <div class="card">
-        <p>Súbory musia byť uložené mimo verejného webrootu pod:</p>
-        <p><code><?= esc($baseDir ?: 'NIE JE NASTAVENÉ') ?></code></p>
-        <p class="muted">Do poľa cesta zadajte iba relatívnu cestu, napríklad <code>ebooks/manual.pdf</code>.</p>
+        <p><?= esc(I18n::t('admin.digital.location_hint')) ?></p>
+        <p><code><?= esc($baseDir ?: I18n::t('admin.digital.not_configured')) ?></code></p>
+        <p class="muted"><?= strtr(esc(I18n::t('admin.digital.path_hint')), ['{example}' => '<code>ebooks/manual.pdf</code>']) ?></p>
     </div>
     <div class="card">
-        <h3>Pridať alebo upraviť súbor</h3>
+        <h3><?= esc(I18n::t('admin.digital.add_edit')) ?></h3>
         <form method="post" action="admin.php?p=digital_assets&action=save">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
             <input type="hidden" name="asset_id" value="0">
             <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr))">
-                <div class="form-row"><label>SKU</label><input name="sku" required maxlength="191"></div>
-                <div class="form-row"><label>Kľúč súboru</label><input name="asset_key" value="default" required maxlength="80"></div>
-                <div class="form-row"><label>Názov</label><input name="label" maxlength="191"></div>
-                <div class="form-row"><label>Relatívna cesta</label><input name="storage_path" placeholder="ebooks/manual.pdf" required maxlength="500"></div>
-                <div class="form-row"><label>Názov pri stiahnutí</label><input name="download_name" placeholder="manual.pdf" required maxlength="180"></div>
-                <div class="form-row"><label>Content-Type</label><input name="content_type" value="application/octet-stream" required maxlength="100"></div>
-                <div class="form-row"><label>Limit stiahnutí (0 = bez limitu)</label><input name="download_limit" type="number" min="0" max="10000" value="5"></div>
-                <div class="form-row"><label>Platnosť v dňoch</label><input name="expiry_days" type="number" min="0" max="3650" value="7"></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.th.sku')) ?></label><input name="sku" required maxlength="191"></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.digital.asset_key')) ?></label><input name="asset_key" value="default" required maxlength="80"></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.th.name')) ?></label><input name="label" maxlength="191"></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.digital.relative_path')) ?></label><input name="storage_path" placeholder="ebooks/manual.pdf" required maxlength="500"></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.digital.download_name')) ?></label><input name="download_name" placeholder="manual.pdf" required maxlength="180"></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.digital.content_type')) ?></label><input name="content_type" value="application/octet-stream" required maxlength="100"></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.digital.download_limit')) ?></label><input name="download_limit" type="number" min="0" max="10000" value="5"></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.digital.expiry_days')) ?></label><input name="expiry_days" type="number" min="0" max="3650" value="7"></div>
             </div>
-            <label><input type="checkbox" name="active" value="1" checked> Aktívny</label>
-            <button class="btn btn-primary" type="submit">Uložiť</button>
+            <label><input type="checkbox" name="active" value="1" checked> <?= esc(I18n::t('admin.common.active')) ?></label>
+            <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.btn.save')) ?></button>
         </form>
     </div>
     <div class="card">
-        <h3>Mapovania SKU</h3>
-        <?php if (!$assets): ?><p class="muted">Zatiaľ nie je pridaný žiadny digitálny súbor.</p><?php else: ?>
+        <h3><?= esc(I18n::t('admin.digital.mappings')) ?></h3>
+        <?php if (!$assets): ?><p class="muted"><?= esc(I18n::t('admin.digital.empty')) ?></p><?php else: ?>
         <table>
-            <tr><th>SKU</th><th>Kľúč</th><th>Cesta</th><th>Súbor</th><th>Limit / dni</th><th>Stav</th><th>Oprávnenia</th><th></th></tr>
+            <tr><th><?= esc(I18n::t('admin.th.sku')) ?></th><th><?= esc(I18n::t('admin.digital.key')) ?></th><th><?= esc(I18n::t('admin.common.path')) ?></th><th><?= esc(I18n::t('admin.digital.file')) ?></th><th><?= esc(I18n::t('admin.digital.limit_days')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.digital.entitlements')) ?></th><th></th></tr>
             <?php foreach ($assets as $asset): ?>
             <tr>
                 <td><?= esc($asset['sku']) ?></td><td><?= esc($asset['asset_key']) ?></td>
                 <td class="muted"><?= esc($asset['storage_path']) ?></td><td><?= esc($asset['download_name']) ?></td>
                 <td><?= $asset['download_limit'] === null ? '∞' : (int)$asset['download_limit'] ?> / <?= $asset['expiry_seconds'] === null ? '∞' : round((int)$asset['expiry_seconds'] / 86400, 2) ?></td>
-                <td><span class="badge badge-<?= (int)$asset['active'] ? 'active' : 'draft' ?>"><?= (int)$asset['active'] ? 'active' : 'disabled' ?></span></td>
+                <td><span class="badge badge-<?= (int)$asset['active'] ? 'active' : 'draft' ?>"><?= esc(I18n::t((int)$asset['active'] ? 'admin.common.enabled' : 'admin.common.disabled')) ?></span></td>
                 <td><?= (int)$asset['entitlement_count'] ?></td>
                 <td>
                     <form method="post" action="admin.php?p=digital_assets&action=toggle" style="display:inline">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                         <input type="hidden" name="asset_id" value="<?= (int)$asset['id'] ?>">
                         <input type="hidden" name="active" value="<?= (int)$asset['active'] ? 0 : 1 ?>">
-                        <button class="btn btn-sm" type="submit"><?= (int)$asset['active'] ? 'Deaktivovať' : 'Aktivovať' ?></button>
+                        <button class="btn btn-sm" type="submit"><?= esc(I18n::t((int)$asset['active'] ? 'admin.common.deactivate' : 'admin.common.activate')) ?></button>
                     </form>
                 </td>
             </tr>
@@ -394,13 +395,13 @@ function pageReviews(): void {
         }
     }
     ?>
-    <h1>Recenzie — moderácia <span class="muted">(<?= count($pending) ?> čaká)</span></h1>
+    <h1><?= esc(I18n::t('admin.reviews.moderation')) ?> <span class="muted">(<?= esc(strtr(I18n::t('admin.reviews.pending_count'), ['{count}' => count($pending)])) ?>)</span></h1>
     <div class="card">
         <?php if (!$pending): ?>
-        <p class="muted">Žiadne recenzie nečakajú na schválenie.</p>
+        <p class="muted"><?= esc(I18n::t('admin.reviews.none')) ?></p>
         <?php else: ?>
         <table>
-            <tr><th>ID</th><th>Produkt</th><th>Autor</th><th>Hodnotenie</th><th>Text</th><th>Kedy</th><th>Akcie</th></tr>
+            <tr><th>ID</th><th><?= esc(I18n::t('admin.product.label')) ?></th><th><?= esc(I18n::t('admin.reviews.author')) ?></th><th><?= esc(I18n::t('admin.reviews.rating')) ?></th><th><?= esc(I18n::t('admin.reviews.text')) ?></th><th><?= esc(I18n::t('admin.common.when')) ?></th><th><?= esc(I18n::t('admin.th.actions')) ?></th></tr>
             <?php foreach ($pending as $rv): ?>
             <tr>
                 <td><?= (int)$rv['id'] ?></td>
@@ -416,12 +417,12 @@ function pageReviews(): void {
                     <form method="post" action="admin.php?p=reviews&action=approve" style="display:inline">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                         <input type="hidden" name="review_id" value="<?= (int)$rv['id'] ?>">
-                        <button class="btn btn-primary" type="submit">Schváliť</button>
+                        <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.reviews.approve')) ?></button>
                     </form>
                     <form method="post" action="admin.php?p=reviews&action=reject" style="display:inline">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                         <input type="hidden" name="review_id" value="<?= (int)$rv['id'] ?>">
-                        <button class="btn" type="submit">Zamietnuť</button>
+                        <button class="btn" type="submit"><?= esc(I18n::t('admin.reviews.reject')) ?></button>
                     </form>
                 </td>
             </tr>
@@ -440,77 +441,77 @@ function pageContentMarketing(): void {
     $landings = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $csrf = Security::csrfToken();
     ?>
-    <h1>Content &amp; Marketing <span class="muted"><?= esc(StoreContext::current()->id()) ?></span></h1>
-    <p class="muted" style="margin-bottom:1rem">Theme: <code><?= esc((string)(StoreContext::current()->config()['theme'] ?? 'default')) ?></code> ·
-        <a href="/feeds/google.xml" target="_blank" rel="noopener">Google Merchant XML</a> ·
-        <a href="/feeds/meta.csv" target="_blank" rel="noopener">Meta CSV</a></p>
+    <h1><?= esc(I18n::t('admin.title.content')) ?> <span class="muted"><?= esc(StoreContext::current()->id()) ?></span></h1>
+    <p class="muted" style="margin-bottom:1rem"><?= esc(I18n::t('admin.content.theme')) ?>: <code><?= esc((string)(StoreContext::current()->config()['theme'] ?? 'default')) ?></code> ·
+        <a href="/feeds/google.xml" target="_blank" rel="noopener"><?= esc(I18n::t('admin.content.feed_google')) ?></a> ·
+        <a href="/feeds/meta.csv" target="_blank" rel="noopener"><?= esc(I18n::t('admin.content.feed_meta')) ?></a></p>
     <div class="grid grid-4">
         <section class="card">
-            <h2>Menu item</h2>
+            <h2><?= esc(I18n::t('admin.content.menu_item')) ?></h2>
             <form method="post" action="admin.php?p=content&amp;action=save">
                 <input type="hidden" name="csrf_token" value="<?= esc($csrf) ?>"><input type="hidden" name="content_type" value="menu">
-                <div class="form-row"><label>Menu code<input name="menu_code" value="primary" required pattern="[a-z0-9_-]+"></label></div>
-                <div class="form-row"><label>Locale<input name="locale" value="*" required></label></div>
-                <div class="form-row"><label>Label<input name="label" maxlength="191" required></label></div>
-                <div class="form-row"><label>Local URL<input name="url" value="/" required></label></div>
-                <div class="form-row"><label>Order<input name="sort_order" type="number" value="0"></label></div>
-                <label><input name="active" type="checkbox" value="1" checked> Active</label><br><button class="btn btn-primary">Save menu item</button>
+                <div class="form-row"><label><?= esc(I18n::t('admin.content.menu_code')) ?><input name="menu_code" value="primary" required pattern="[a-z0-9_-]+"></label></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.content.locale')) ?><input name="locale" value="*" required></label></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.content.label')) ?><input name="label" maxlength="191" required></label></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.content.local_url')) ?><input name="url" value="/" required></label></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.common.sort_order')) ?><input name="sort_order" type="number" value="0"></label></div>
+                <label><input name="active" type="checkbox" value="1" checked> <?= esc(I18n::t('admin.common.active')) ?></label><br><button class="btn btn-primary"><?= esc(I18n::t('admin.content.save_menu')) ?></button>
             </form>
         </section>
         <section class="card">
-            <h2>Banner</h2>
+            <h2><?= esc(I18n::t('admin.content.banner')) ?></h2>
             <form method="post" action="admin.php?p=content&amp;action=save">
                 <input type="hidden" name="csrf_token" value="<?= esc($csrf) ?>"><input type="hidden" name="content_type" value="banner">
-                <div class="form-row"><label>Slot<input name="slot" value="homepage" required pattern="[a-z0-9_-]+"></label></div>
-                <div class="form-row"><label>Locale<input name="locale" value="*" required></label></div>
-                <div class="form-row"><label>Title<input name="title" maxlength="191" required></label></div>
-                <div class="form-row"><label>Body<textarea name="body" rows="2"></textarea></label></div>
-                <div class="form-row"><label>Image URL<input name="image_url" placeholder="/assets/img/banner.jpg"></label></div>
-                <div class="form-row"><label>Link URL<input name="link_url" placeholder="/category/sale"></label></div>
-                <div class="form-row"><label>Link label<input name="link_label" maxlength="191"></label></div>
-                <div class="form-row"><label>Starts<input name="starts_at" type="datetime-local"></label></div>
-                <div class="form-row"><label>Ends<input name="ends_at" type="datetime-local"></label></div>
-                <label><input name="active" type="checkbox" value="1" checked> Active</label><br><button class="btn btn-primary">Save banner</button>
+                <div class="form-row"><label><?= esc(I18n::t('admin.content.slot')) ?><input name="slot" value="homepage" required pattern="[a-z0-9_-]+"></label></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.content.locale')) ?><input name="locale" value="*" required></label></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.content.title')) ?><input name="title" maxlength="191" required></label></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.content.body')) ?><textarea name="body" rows="2"></textarea></label></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.content.image_url')) ?><input name="image_url" placeholder="/assets/img/banner.jpg"></label></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.content.link_url')) ?><input name="link_url" placeholder="/category/sale"></label></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.content.link_label')) ?><input name="link_label" maxlength="191"></label></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.content.starts')) ?><input name="starts_at" type="datetime-local"></label></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.content.ends')) ?><input name="ends_at" type="datetime-local"></label></div>
+                <label><input name="active" type="checkbox" value="1" checked> <?= esc(I18n::t('admin.common.active')) ?></label><br><button class="btn btn-primary"><?= esc(I18n::t('admin.content.save_banner')) ?></button>
             </form>
         </section>
         <section class="card">
-            <h2>Landing page</h2>
+            <h2><?= esc(I18n::t('admin.content.landing')) ?></h2>
             <form method="post" action="admin.php?p=content&amp;action=save">
                 <input type="hidden" name="csrf_token" value="<?= esc($csrf) ?>"><input type="hidden" name="content_type" value="landing">
-                <div class="form-row"><label>Slug<input name="slug" required pattern="[a-z0-9-]+"></label></div>
-                <div class="form-row"><label>Title<input name="title" maxlength="191" required></label></div>
-                <div class="form-row"><label>Body<textarea name="body" rows="4"></textarea></label></div>
-                <div class="form-row"><label>SEO title<input name="seo_title" maxlength="191"></label></div>
-                <div class="form-row"><label>Meta description<textarea name="meta_description" maxlength="320" rows="2"></textarea></label></div>
-                <div class="form-row"><label>Status<select name="status"><option value="draft">Draft</option><option value="active">Active</option></select></label></div>
-                <button class="btn btn-primary">Save landing page</button>
+                <div class="form-row"><label><?= esc(I18n::t('admin.common.slug')) ?><input name="slug" required pattern="[a-z0-9-]+"></label></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.content.title')) ?><input name="title" maxlength="191" required></label></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.content.body')) ?><textarea name="body" rows="4"></textarea></label></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.product.field.seo_title')) ?><input name="seo_title" maxlength="191"></label></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.product.field.meta_description')) ?><textarea name="meta_description" maxlength="320" rows="2"></textarea></label></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.th.status')) ?><select name="status"><option value="draft"><?= esc(I18n::t('admin.cms.status.draft')) ?></option><option value="active"><?= esc(I18n::t('admin.cms.status.active')) ?></option></select></label></div>
+                <button class="btn btn-primary"><?= esc(I18n::t('admin.content.save_landing')) ?></button>
             </form>
         </section>
         <section class="card">
-            <h2>Redirect</h2>
+            <h2><?= esc(I18n::t('admin.content.redirect')) ?></h2>
             <form method="post" action="admin.php?p=content&amp;action=save">
                 <input type="hidden" name="csrf_token" value="<?= esc($csrf) ?>"><input type="hidden" name="content_type" value="redirect">
-                <div class="form-row"><label>Source path<input name="source_path" placeholder="/old-path" required></label></div>
-                <div class="form-row"><label>Target path<input name="target_url" placeholder="/new-path" required></label></div>
-                <div class="form-row"><label>Status<select name="http_status"><option>301</option><option>302</option><option>307</option><option>308</option></select></label></div>
-                <label><input name="active" type="checkbox" value="1" checked> Active</label><br><button class="btn btn-primary">Save redirect</button>
+                <div class="form-row"><label><?= esc(I18n::t('admin.content.source_path')) ?><input name="source_path" placeholder="/old-path" required></label></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.content.target_path')) ?><input name="target_url" placeholder="/new-path" required></label></div>
+                <div class="form-row"><label><?= esc(I18n::t('admin.content.http_status')) ?><select name="http_status"><option>301</option><option>302</option><option>307</option><option>308</option></select></label></div>
+                <label><input name="active" type="checkbox" value="1" checked> <?= esc(I18n::t('admin.common.active')) ?></label><br><button class="btn btn-primary"><?= esc(I18n::t('admin.content.save_redirect')) ?></button>
             </form>
         </section>
     </div>
     <?php foreach ([
-        'menu' => ['Menu items', $menus, ['menu_code','locale','label','url']],
-        'banner' => ['Banners', $banners, ['slot','locale','title','link_url']],
-        'landing' => ['Landing pages', $landings, ['slug','title','status','seo_title']],
-        'redirect' => ['Redirects', $redirects, ['source_path','target_url','http_status','active']],
+        'menu' => ['admin.content.menu_items', $menus, ['menu_code' => 'admin.content.menu_code', 'locale' => 'admin.content.locale', 'label' => 'admin.content.label', 'url' => 'admin.content.local_url']],
+        'banner' => ['admin.content.banners', $banners, ['slot' => 'admin.content.slot', 'locale' => 'admin.content.locale', 'title' => 'admin.content.title', 'link_url' => 'admin.content.link_url']],
+        'landing' => ['admin.content.landings', $landings, ['slug' => 'admin.common.slug', 'title' => 'admin.content.title', 'status' => 'admin.th.status', 'seo_title' => 'admin.product.field.seo_title']],
+        'redirect' => ['admin.content.redirects', $redirects, ['source_path' => 'admin.content.source_path', 'target_url' => 'admin.content.target_path', 'http_status' => 'admin.content.http_status', 'active' => 'admin.common.active']],
     ] as $type => [$heading, $rows, $columns]): ?>
-    <section class="card"><h2><?= esc($heading) ?></h2><div class="table-scroll"><table><tr>
-        <?php foreach ($columns as $column): ?><th><?= esc($column) ?></th><?php endforeach; ?><th>Actions</th></tr>
-        <?php foreach ($rows as $row): ?><tr><?php foreach ($columns as $column): ?><td><?= esc((string)($row[$column] ?? '')) ?></td><?php endforeach; ?><td>
-            <form method="post" action="admin.php?p=content&amp;action=delete" data-confirm="Delete this content record?">
+    <section class="card"><h2><?= esc(I18n::t($heading)) ?></h2><div class="table-scroll"><table><tr>
+        <?php foreach ($columns as $columnLabel): ?><th><?= esc(I18n::t($columnLabel)) ?></th><?php endforeach; ?><th><?= esc(I18n::t('admin.th.actions')) ?></th></tr>
+        <?php foreach ($rows as $row): ?><tr><?php foreach (array_keys($columns) as $column): ?><td><?= esc((string)($row[$column] ?? '')) ?></td><?php endforeach; ?><td>
+            <form method="post" action="admin.php?p=content&amp;action=delete" data-confirm="<?= esc(I18n::t('admin.content.delete_confirm')) ?>">
                 <input type="hidden" name="csrf_token" value="<?= esc($csrf) ?>"><input type="hidden" name="content_type" value="<?= esc($type) ?>"><input type="hidden" name="id" value="<?= (int)$row['id'] ?>">
-                <button class="btn btn-danger btn-sm">Delete</button>
+                <button class="btn btn-danger btn-sm"><?= esc(I18n::t('admin.btn.delete')) ?></button>
             </form></td></tr><?php endforeach; ?>
-        <?php if (!$rows): ?><tr><td colspan="<?= count($columns) + 1 ?>" class="muted">No records.</td></tr><?php endif; ?>
+        <?php if (!$rows): ?><tr><td colspan="<?= count($columns) + 1 ?>" class="muted"><?= esc(I18n::t('admin.common.no_records')) ?></td></tr><?php endif; ?>
     </table></div></section>
     <?php endforeach;
 }
@@ -525,7 +526,7 @@ function handleContentSave(): void {
             'redirect' => ContentService::saveRedirect($_POST),
             default => throw new InvalidArgumentException('Unknown content type'),
         };
-        setFlash('ok', 'Content saved.');
+        setFlash('ok', I18n::t('admin.content.saved'));
     } catch (Throwable $e) {
         setFlash('err', $e->getMessage());
     }
@@ -536,7 +537,7 @@ function handleContentDelete(): void {
     Security::adminRequire('products.edit');
     try {
         ContentService::delete((string)($_POST['content_type'] ?? ''), Security::int($_POST['id'] ?? 0));
-        setFlash('ok', 'Content deleted.');
+        setFlash('ok', I18n::t('admin.content.deleted'));
     } catch (Throwable $e) {
         setFlash('err', $e->getMessage());
     }
@@ -553,18 +554,18 @@ function pageCmsPages(): void {
     $stmt->execute([':store' => StoreContext::current()->id()]);
     $pages = $stmt->fetchAll();
     ?>
-    <h1>CMS Stránky</h1>
-    <p style="margin-bottom:1rem"><a href="admin.php?p=page_edit" class="btn btn-primary">Nová stránka</a></p>
+    <h1><?= esc(I18n::t('admin.title.cms_pages')) ?></h1>
+    <p style="margin-bottom:1rem"><a href="admin.php?p=page_edit" class="btn btn-primary"><?= esc(I18n::t('admin.cms.new')) ?></a></p>
     <div class="card">
         <table>
-            <tr><th>Slug</th><th>Názov</th><th>Stav</th><th>Vytvorené</th><th></th></tr>
+            <tr><th><?= esc(I18n::t('admin.common.slug')) ?></th><th><?= esc(I18n::t('admin.content.title')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.common.created')) ?></th><th></th></tr>
             <?php foreach ($pages as $pg): ?>
             <tr>
                 <td><code><?= esc($pg['slug']) ?></code></td>
                 <td><?= esc($pg['title']) ?></td>
-                <td><span class="badge badge-<?= $pg['status'] === 'active' ? 'active' : 'draft' ?>"><?= esc($pg['status']) ?></span></td>
+                <td><span class="badge badge-<?= $pg['status'] === 'active' ? 'active' : 'draft' ?>"><?= esc(adminCodeLabel('admin.cms.status.', (string)$pg['status'])) ?></span></td>
                 <td class="muted"><?= esc(substr($pg['created_at'], 0, 16)) ?></td>
-                <td><a href="admin.php?p=page_edit&id=<?= (int)$pg['id'] ?>" class="btn btn-sm">Upraviť</a></td>
+                <td><a href="admin.php?p=page_edit&id=<?= (int)$pg['id'] ?>" class="btn btn-sm"><?= esc(I18n::t('admin.btn.edit')) ?></a></td>
             </tr>
             <?php endforeach; ?>
         </table>
@@ -574,15 +575,15 @@ function pageCmsPages(): void {
 function pageCmsEdit(): void {
     $id = Security::int($_GET['id'] ?? 0);
     $pg = $id ? ContentService::pageById($id) : null;
-    if ($id && !$pg) { echo '<p>Stránka neexistuje.</p>'; return; }
+    if ($id && !$pg) { echo '<p>' . esc(I18n::t('admin.cms.not_found')) . '</p>'; return; }
     ?>
-    <h1><?= $id ? 'Upraviť stránku' : 'Nová stránka' ?></h1>
+    <h1><?= esc(I18n::t($id ? 'admin.title.cms_page_edit' : 'admin.cms.new')) ?></h1>
     <div class="card">
         <?php
         echo AdminForm::render('admin-page', 'admin.php?p=page_edit&action=save' . ($id ? '&id=' . $id : ''), adminFormValues('admin-page', $pg ?: null));
         ?>
         <?php if ($id): ?>
-        <div style="margin-top:1rem"><a href="admin.php?p=pages" class="btn">Späť</a></div>
+        <div style="margin-top:1rem"><a href="admin.php?p=pages" class="btn"><?= esc(I18n::t('admin.btn.back')) ?></a></div>
         <?php endif; ?>
     </div>
     <?php
@@ -595,14 +596,14 @@ function handleCmsPageSave(): void {
     if ($id) {
         $old = ContentService::pageById($id);
         if (!$old) {
-            setFlash('err', 'Stránka neexistuje.');
+            setFlash('err', I18n::t('admin.cms.not_found'));
             header('Location: admin.php?p=pages');
             exit;
         }
     }
     $form = AdminForm::validate('admin-page', $old ? adminFormValues('admin-page', $old) : []);
     if ($form === null) {
-        setFlash('err', 'Stránka nebola uložená: ' . AdminForm::firstError());
+        setFlash('err', I18n::t('admin.cms.not_saved') . ' ' . AdminForm::firstError());
         header("Location: admin.php?p=page_edit&id={$id}");
         exit;
     }
@@ -620,7 +621,7 @@ function handleCmsPageSave(): void {
     try {
         $sections = ContentService::sanitizeSections($form['sections'] !== '' ? $form['sections'] : '[]');
     } catch (JsonException | InvalidArgumentException $e) {
-        setFlash('err', 'Sekcie musia byť platné bezpečné JSON pole.');
+        setFlash('err', I18n::t('admin.cms.sections_invalid'));
         header("Location: admin.php?p=page_edit&id={$id}");
         exit;
     }
@@ -628,7 +629,7 @@ function handleCmsPageSave(): void {
 
     $slugOwner = $slug ? ContentService::pageIdBySlug($slug) : null;
     if (!$slug || ($slugOwner !== null && $slugOwner !== $id)) {
-        setFlash('err', !$slug ? 'Slug a názov sú povinné.' : 'Stránka s týmto slugom už v obchode existuje.');
+        setFlash('err', I18n::t(!$slug ? 'admin.cms.slug_required' : 'admin.cms.slug_taken'));
         header("Location: admin.php?p=page_edit&id={$id}");
         exit;
     }
@@ -636,12 +637,12 @@ function handleCmsPageSave(): void {
     if ($id) {
         $db->prepare("UPDATE pages SET slug = :slug, title = :title, body = :body, page_type = :page_type, template = :template, layout = :layout, sections = :sections, status = :status, updated_at = {$now} WHERE id = :id AND store_id = :store")
            ->execute([':slug' => $slug, ':title' => $title, ':body' => $body, ':page_type' => $pageType, ':template' => $template, ':layout' => $layout, ':sections' => $sections, ':status' => $status, ':id' => $id, ':store' => StoreContext::current()->id()]);
-        setFlash('ok', 'Stránka aktualizovaná.');
+        setFlash('ok', I18n::t('admin.cms.updated'));
     } else {
         $db->prepare("INSERT INTO pages (store_id, slug, title, body, page_type, template, layout, sections, status) VALUES (:store, :slug, :title, :body, :page_type, :template, :layout, :sections, :status)")
            ->execute([':store' => StoreContext::current()->id(), ':slug' => $slug, ':title' => $title, ':body' => $body, ':page_type' => $pageType, ':template' => $template, ':layout' => $layout, ':sections' => $sections, ':status' => $status]);
         $id = (int)$db->lastInsertId();
-        setFlash('ok', 'Stránka vytvorená.');
+        setFlash('ok', I18n::t('admin.cms.created'));
     }
     header("Location: admin.php?p=page_edit&id={$id}");
     exit;
@@ -651,8 +652,8 @@ function handleCmsPageDelete(): void {
     if ($id) {
         $stmt = Db::get()->prepare("DELETE FROM pages WHERE id = :id AND store_id = :store");
         $stmt->execute([':id' => $id, ':store' => StoreContext::current()->id()]);
-        if ($stmt->rowCount()) setFlash('ok', 'Stránka zmazaná.');
-        else setFlash('err', 'Stránka neexistuje.');
+        if ($stmt->rowCount()) setFlash('ok', I18n::t('admin.cms.deleted'));
+        else setFlash('err', I18n::t('admin.cms.not_found'));
     }
     header('Location: admin.php?p=pages');
     exit;
@@ -680,7 +681,7 @@ function handleDigitalAssetSave(): void {
         || !preg_match('/^[A-Za-z0-9._-]{1,80}$/', $assetKey) || $invalidPath
         || $downloadName === '' || !preg_match('#^[a-z0-9.+-]+/[a-z0-9.+-]+$#i', $contentType)
         || !CatalogScope::ownsSku($sku)) {
-        setFlash('err', 'Neplatné údaje digitálneho súboru alebo SKU nepatrí produktu tohto katalógu.');
+        setFlash('err', I18n::t('admin.digital.invalid'));
         header('Location: admin.php?p=digital_assets');
         exit;
     }
@@ -705,10 +706,10 @@ function handleDigitalAssetSave(): void {
             ':expiry_seconds' => $expiryDays > 0 ? $expiryDays * 86400 : null,
             ':active' => $active,
         ]);
-        setFlash('ok', 'Digitálny súbor bol uložený.');
+        setFlash('ok', I18n::t('admin.digital.saved'));
     } catch (Throwable $e) {
         error_log('Digital asset save failed: ' . $e->getMessage());
-        setFlash('err', 'Digitálny súbor sa nepodarilo uložiť.');
+        setFlash('err', I18n::t('admin.digital.save_failed'));
     }
     header('Location: admin.php?p=digital_assets');
     exit;
@@ -719,7 +720,7 @@ function handleDigitalAssetToggle(): void {
     $active = !empty($_POST['active']) ? 1 : 0;
     if ($id > 0) {
         CatalogScope::setDigitalAssetActive($id, $active);
-        setFlash('ok', $active ? 'Digitálny súbor bol aktivovaný.' : 'Digitálny súbor bol deaktivovaný.');
+        setFlash('ok', I18n::t($active ? 'admin.digital.activated' : 'admin.digital.deactivated'));
     }
     header('Location: admin.php?p=digital_assets');
     exit;
@@ -728,9 +729,9 @@ function handleReviewModerate(string $status): void {
     Security::adminRequire('products.edit');
     $id = Security::int($_POST['review_id'] ?? 0);
     if ($id > 0 && Reviews::setStatus($id, $status)) {
-        setFlash('ok', 'Recenzia #' . $id . ' → ' . $status);
+        setFlash('ok', strtr(I18n::t('admin.reviews.moderated'), ['{id}' => $id, '{status}' => adminCodeLabel('admin.reviews.status.', $status)]));
     } else {
-        setFlash('err', 'Recenziu sa nepodarilo upraviť.');
+        setFlash('err', I18n::t('admin.reviews.failed'));
     }
     header('Location: admin.php?p=reviews');
     exit;
@@ -766,7 +767,7 @@ function handleProductRelatedSave(): void {
         throw $e;
     }
 
-    setFlash('ok', 'Produktové vzťahy boli uložené.');
+    setFlash('ok', I18n::t('admin.product.related_saved'));
     header("Location: admin.php?p=product&id={$id}&relation_type=" . rawurlencode($relationType));
     exit;
 }
@@ -776,7 +777,7 @@ function handleProductSave(): void {
     $now = Db::isSqlite() ? "datetime('now')" : 'NOW()';
     $old = $id ? Products::byId($id) : null;
     if ($id && !$old) {
-        setFlash('err', 'Produkt neexistuje.');
+        setFlash('err', I18n::t('admin.product.not_found'));
         header('Location: admin.php?p=products');
         exit;
     }
@@ -787,7 +788,7 @@ function handleProductSave(): void {
     // Brand, GTIN/MPN, SEO, extra categories and translations are checked against the active catalog first.
     $editor = $form === null ? AdminForm::firstError() : ProductEditor::validate($form, $_POST, $id, $old);
     if (is_string($editor)) {
-        setFlash('err', 'Produkt nebol uložený: ' . $editor);
+        setFlash('err', I18n::t('admin.product.not_saved') . ' ' . $editor);
         header("Location: admin.php?p=product&id={$id}");
         exit;
     }
@@ -853,9 +854,9 @@ function handleProductSave(): void {
                 ProductEditor::save($id, $editor);
                 AuditLog::log('product', $id, $old, $data, 'Admin edit: ' . implode(', ', $changed));
                 $db->commit();
-                setFlash('ok', 'Produkt aktualizovaný.');
+                setFlash('ok', I18n::t('admin.product.updated'));
             } else {
-                setFlash('ok', 'Bez zmien.');
+                setFlash('ok', I18n::t('admin.product.unchanged'));
             }
         } else {
             $stmt = $db->prepare("INSERT INTO products (sku, name, slug, product_type, category_id, brand_id, gtin, mpn, seo_title, meta_description, translations, price, compare_price, stock, status, summary, description, images, image_alts, tags, weight_g, stock_low_threshold, stock_critical_threshold, store_id)
@@ -866,7 +867,7 @@ function handleProductSave(): void {
             ProductEditor::save($id, $editor);
             AuditLog::log('product', $id, null, $data, 'Admin create');
             $db->commit();
-            setFlash('ok', 'Produkt vytvorený.');
+            setFlash('ok', I18n::t('admin.product.created'));
         }
     } catch (Throwable $e) {
         if ($upload) ProductEditor::discardUpload($upload[1]);
@@ -878,7 +879,7 @@ function handleProductSave(): void {
     try {
         if ((int)($old['stock'] ?? -1) !== $data[':stock']) Products::setAvailableStock($data[':sku'], $productType, $data[':stock'], 'manual_adjustment', 'admin_product');
     } catch (RuntimeException | InvalidArgumentException $e) {
-        setFlash('err', 'Sklad nebol zmenený: ' . $e->getMessage());
+        setFlash('err', I18n::t('admin.product.stock_not_changed') . ' ' . $e->getMessage());
     }
 
     // Save attribute values to product_specifications
@@ -939,17 +940,17 @@ function handleBulkAction(): void {
         case 'activate':
             $stmt = $db->prepare("UPDATE products SET status = 'active', updated_at = {$now} WHERE id IN ({$ph}) AND store_id = ?");
             $stmt->execute($params);
-            setFlash('ok', $stmt->rowCount() . ' produktov aktivovaných.');
+            setFlash('ok', strtr(I18n::t('admin.products.bulk.activated'), ['{count}' => $stmt->rowCount()]));
             break;
         case 'archive':
             $stmt = $db->prepare("UPDATE products SET status = 'archived', updated_at = {$now} WHERE id IN ({$ph}) AND store_id = ?");
             $stmt->execute($params);
-            setFlash('ok', $stmt->rowCount() . ' produktov archivovaných.');
+            setFlash('ok', strtr(I18n::t('admin.products.bulk.archived'), ['{count}' => $stmt->rowCount()]));
             break;
         case 'delete':
             $stmt = $db->prepare("DELETE FROM products WHERE id IN ({$ph}) AND store_id = ?");
             $stmt->execute($params);
-            setFlash('ok', $stmt->rowCount() . ' produktov zmazaných.');
+            setFlash('ok', strtr(I18n::t('admin.products.bulk.deleted'), ['{count}' => $stmt->rowCount()]));
             break;
         case 'price_up_5':
         case 'price_up_10':
@@ -964,7 +965,7 @@ function handleBulkAction(): void {
             $stmt = $db->prepare("UPDATE products SET price = {$clamp}(0, ROUND(price * CAST(? AS DECIMAL(10,4)))), updated_at = {$now} WHERE id IN ({$ph}) AND store_id = ?");
             $stmt->execute([$multiplier, ...$params]);
             $sign = $direction > 0 ? '+' : '-';
-            setFlash('ok', $stmt->rowCount() . " produktov: cena {$sign}" . abs($percent) . '%.');
+            setFlash('ok', strtr(I18n::t('admin.products.bulk.price_changed'), ['{count}' => $stmt->rowCount(), '{change}' => $sign . abs($percent) . '%']));
             break;
     }
     header('Location: admin.php?p=products');
@@ -1006,31 +1007,31 @@ function pageAttributes(): void {
     $db = Db::get();
     $attrs = CatalogScope::attributesWithCategories();
     ?>
-    <h1>Atribúty</h1>
-    <p style="margin-bottom:1rem"><a href="admin.php?p=attribute" class="btn btn-primary">Nový atribút</a></p>
+    <h1><?= esc(I18n::t('admin.title.attributes')) ?></h1>
+    <p style="margin-bottom:1rem"><a href="admin.php?p=attribute" class="btn btn-primary"><?= esc(I18n::t('admin.title.attribute_new')) ?></a></p>
     <div class="card">
         <table>
-            <tr><th>Názov</th><th>Slug</th><th>Typ</th><th>Jednotka</th><th>Kategórie</th><th>Poradie</th><th></th></tr>
+            <tr><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.common.slug')) ?></th><th><?= esc(I18n::t('admin.common.type')) ?></th><th><?= esc(I18n::t('admin.attr.unit')) ?></th><th><?= esc(I18n::t('admin.title.categories')) ?></th><th><?= esc(I18n::t('admin.common.sort_order')) ?></th><th></th></tr>
             <?php foreach ($attrs as $a): ?>
             <tr>
                 <td><a href="admin.php?p=attribute&id=<?= (int)$a['id'] ?>"><?= esc($a['name']) ?></a></td>
                 <td><code><?= esc($a['slug']) ?></code></td>
-                <td><?= esc($a['type']) ?></td>
+                <td><?= esc(adminCodeLabel('admin.attr.type.', (string)$a['type'])) ?></td>
                 <td><?= esc($a['unit'] ?: '—') ?></td>
                 <td class="muted"><?= esc($a['category_names'] ?: '—') ?></td>
                 <td><?= (int)$a['sort_order'] ?></td>
                 <td>
-                    <a href="admin.php?p=attribute&id=<?= (int)$a['id'] ?>" class="btn btn-sm">Upraviť</a>
-                    <form method="post" action="admin.php?p=attributes&action=delete" style="display:inline" data-confirm="Naozaj zmazať?">
+                    <a href="admin.php?p=attribute&id=<?= (int)$a['id'] ?>" class="btn btn-sm"><?= esc(I18n::t('admin.btn.edit')) ?></a>
+                    <form method="post" action="admin.php?p=attributes&action=delete" style="display:inline" data-confirm="<?= esc(I18n::t('admin.common.delete_confirm')) ?>">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                         <input type="hidden" name="attr_id" value="<?= (int)$a['id'] ?>">
-                        <button class="btn btn-sm btn-danger" type="submit">Zmazať</button>
+                        <button class="btn btn-sm btn-danger" type="submit"><?= esc(I18n::t('admin.btn.delete')) ?></button>
                     </form>
                 </td>
             </tr>
             <?php endforeach; ?>
             <?php if (empty($attrs)): ?>
-            <tr><td colspan="7" style="text-align:center;color:#64748b">Zatiaľ žiadne atribúty.</td></tr>
+            <tr><td colspan="7" style="text-align:center;color:#64748b"><?= esc(I18n::t('admin.attr.empty')) ?></td></tr>
             <?php endif; ?>
         </table>
     </div>
@@ -1056,30 +1057,29 @@ function pageAttribute(): void {
     }
 
     $categories = CatalogScope::categories();
-    $types = ['enum' => 'Enum (zoznam hodnôt)', 'number' => 'Číslo', 'boolean' => 'Áno/Nie'];
     ?>
-    <h1><?= $attr ? 'Upraviť: ' . esc($attr['name']) : 'Nový atribút' ?></h1>
+    <h1><?= $attr ? esc(strtr(I18n::t('admin.common.edit_named'), ['{name}' => $attr['name']])) : esc(I18n::t('admin.title.attribute_new')) ?></h1>
     <div class="card">
         <?php ob_start(); ?>
         <div id="options-section">
-            <h3 style="margin:1rem 0 .5rem">Hodnoty (pre enum)</h3>
+            <h3 style="margin:1rem 0 .5rem"><?= esc(I18n::t('admin.attr.values')) ?></h3>
             <div id="options-list">
                 <?php foreach ($options as $i => $opt): ?>
                 <div class="form-row" style="display:flex;gap:.5rem;align-items:center">
-                    <input name="options[]" value="<?= esc($opt['value']) ?>" style="flex:1" placeholder="Hodnota">
-                    <input type="number" name="option_order[]" value="<?= (int)$opt['sort_order'] ?>" style="width:60px" placeholder="Poradie">
+                    <input name="options[]" value="<?= esc($opt['value']) ?>" style="flex:1" placeholder="<?= esc(I18n::t('admin.attr.value')) ?>">
+                    <input type="number" name="option_order[]" value="<?= (int)$opt['sort_order'] ?>" style="width:60px" placeholder="<?= esc(I18n::t('admin.common.sort_order')) ?>">
                     <button type="button" data-action="remove-parent" class="btn btn-sm btn-danger">x</button>
                 </div>
                 <?php endforeach; ?>
             </div>
-            <button type="button" data-action="add-option" class="btn btn-sm" style="margin-top:.5rem">+ Pridať hodnotu</button>
+            <button type="button" data-action="add-option" class="btn btn-sm" style="margin-top:.5rem"><?= esc(I18n::t('admin.attr.add_value')) ?></button>
         </div>
 
-        <h3 style="margin:1rem 0 .5rem">Priradiť ku kategóriám</h3>
-        <input type="text" id="cat-filter" placeholder="Hľadať kategóriu..." style="width:100%;padding:.4rem .6rem;margin-bottom:.5rem;border:1px solid #d1d5db;border-radius:4px" data-action="filter-cats">
+        <h3 style="margin:1rem 0 .5rem"><?= esc(I18n::t('admin.attr.assign_categories')) ?></h3>
+        <input type="text" id="cat-filter" placeholder="<?= esc(I18n::t('admin.attr.filter_placeholder')) ?>" style="width:100%;padding:.4rem .6rem;margin-bottom:.5rem;border:1px solid #d1d5db;border-radius:4px" data-action="filter-cats">
         <div style="margin-bottom:.5rem;font-size:.8rem">
-            <a href="#" data-action="toggle-cats" data-value="1" style="margin-right:.5rem">Vybrať všetky viditeľné</a>
-            <a href="#" data-action="toggle-cats" data-value="0">Odznačiť všetky</a>
+            <a href="#" data-action="toggle-cats" data-value="1" style="margin-right:.5rem"><?= esc(I18n::t('admin.attr.select_visible')) ?></a>
+            <a href="#" data-action="toggle-cats" data-value="0"><?= esc(I18n::t('admin.attr.unselect_all')) ?></a>
             <span id="cat-count" style="float:right;color:#64748b"></span>
         </div>
         <div id="cat-list" style="max-height:350px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:6px;padding:.5rem">
@@ -1102,10 +1102,11 @@ function pageAttribute(): void {
         ?>
 
         <div style="margin-top:1rem">
-            <a href="admin.php?p=attributes" class="btn">Späť</a>
+            <a href="admin.php?p=attributes" class="btn"><?= esc(I18n::t('admin.btn.back')) ?></a>
         </div>
     </div>
     <script nonce="<?= Security::cspNonce() ?>">
+    var adminText = <?= json_encode(['value' => I18n::t('admin.attr.value'), 'order' => I18n::t('admin.common.sort_order'), 'count' => I18n::t('admin.attr.count')], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
     function toggleOptions() {
         document.getElementById('options-section').style.display = document.getElementById('field-type').value === 'enum' ? '' : 'none';
     }
@@ -1114,11 +1115,12 @@ function pageAttribute(): void {
         var div = document.createElement('div');
         div.className = 'form-row';
         div.style.cssText = 'display:flex;gap:.5rem;align-items:center';
-        div.innerHTML = '<input name="options[]" style="flex:1" placeholder="Hodnota">' +
-            '<input type="number" name="option_order[]" style="width:60px" placeholder="Poradie" value="0">' +
+        div.innerHTML = '<input name="options[]" style="flex:1" placeholder="' + escHtml(adminText.value) + '">' +
+            '<input type="number" name="option_order[]" style="width:60px" placeholder="' + escHtml(adminText.order) + '" value="0">' +
             '<button type="button" data-action="remove-parent" class="btn btn-sm btn-danger">×</button>';
         document.getElementById('options-list').appendChild(div);
     }
+    function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
     toggleOptions();
     function filterCats() {
         var q = document.getElementById('cat-filter').value.toLowerCase();
@@ -1130,7 +1132,7 @@ function pageAttribute(): void {
             if (match) shown++;
             if (el.querySelector('input').checked) checked++;
         });
-        document.getElementById('cat-count').textContent = checked + ' vybraných / ' + shown + ' zobrazených';
+        document.getElementById('cat-count').textContent = adminText.count.replace('{checked}', checked).replace('{shown}', shown);
     }
     function toggleAllCats(state) {
         document.querySelectorAll('.cat-item').forEach(function(el) {
@@ -1153,7 +1155,7 @@ function handleAttributeSave(): void {
     }
     $form = AdminForm::validate('admin-attribute', $old ? adminFormValues('admin-attribute', $old) : []);
     if ($form === null) {
-        setFlash('err', 'Atribút nebol uložený: ' . AdminForm::firstError());
+        setFlash('err', I18n::t('admin.attr.not_saved') . ' ' . AdminForm::firstError());
         header("Location: admin.php?p=attribute" . ($id ? "&id={$id}" : ''));
         exit;
     }
@@ -1164,7 +1166,7 @@ function handleAttributeSave(): void {
     $sortOrder = Security::int($form['sort_order']);
 
     if (!$slug) {
-        setFlash('err', 'Názov a slug sú povinné.');
+        setFlash('err', I18n::t('admin.attr.required'));
         header("Location: admin.php?p=attribute" . ($id ? "&id={$id}" : ''));
         exit;
     }
@@ -1173,7 +1175,7 @@ function handleAttributeSave(): void {
     $check = $db->prepare("SELECT id FROM attribute_definitions WHERE slug = :slug AND id != :id");
     $check->execute([':slug' => $slug, ':id' => $id ?: -1]);
     if ($check->fetch()) {
-        setFlash('err', 'Slug "' . esc($slug) . '" už existuje.');
+        setFlash('err', strtr(I18n::t('admin.attr.slug_taken'), ['{slug}' => $slug]));
         header("Location: admin.php?p=attribute" . ($id ? "&id={$id}" : ''));
         exit;
     }
@@ -1203,7 +1205,7 @@ function handleAttributeSave(): void {
     // Category assignments of the active catalog; other catalogs keep their links to this shared attribute.
     CatalogScope::replaceAttributeCategories($id, $_POST['category_ids'] ?? []);
 
-    setFlash('ok', 'Atribút uložený.');
+    setFlash('ok', I18n::t('admin.attr.saved'));
     header("Location: admin.php?p=attribute&id={$id}");
     exit;
 }
@@ -1211,12 +1213,12 @@ function handleAttributeDelete(): void {
     $id = Security::int($_POST['attr_id'] ?? 0);
     $db = Db::get();
     if ($id && CatalogScope::attributeUsedByOtherCatalog($id)) {
-        setFlash('err', 'Atribút používajú kategórie iného katalógu, nemožno ho zmazať.');
+        setFlash('err', I18n::t('admin.attr.used_elsewhere'));
     } elseif ($id) {
         $db->prepare("DELETE FROM attribute_options WHERE attribute_id = :id")->execute([':id' => $id]);
         $db->prepare("DELETE FROM category_attributes WHERE attribute_id = :id")->execute([':id' => $id]);
         $db->prepare("DELETE FROM attribute_definitions WHERE id = :id")->execute([':id' => $id]);
-        setFlash('ok', 'Atribút zmazaný.');
+        setFlash('ok', I18n::t('admin.attr.deleted'));
     }
     header('Location: admin.php?p=attributes');
     exit;

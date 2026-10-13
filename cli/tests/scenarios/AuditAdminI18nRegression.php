@@ -11,21 +11,23 @@ function a154HardcodedStrings(string $source): array {
     foreach ($m[2] as $text) $found[] = 'flash: ' . $text;
     preg_match_all('~>\s*([^<>{}\n?]*?)\s*</(?:h1|h2|h3|h4|th|label|button|a|p|option|span|td|legend|small|strong|summary|caption|div)>~u', $source, $m);
     foreach ($m[1] as $text) {
-        if (preg_match('/\p{Ll}{3,}/u', $text) && !str_contains($text, 'I18n::') && !str_contains($text, 'esc(')) $found[] = 'text: ' . $text;
+        // Inline-script concatenations such as "' + escHtml(a.name) + '" are markup built from translated values, not prose.
+        if (preg_match('/\p{Ll}{3,}/u', $text) && !str_contains($text, 'I18n::') && !str_contains($text, 'esc(') && !str_contains($text, 'escHtml(')) $found[] = 'text: ' . $text;
     }
     preg_match_all('~\bdata-confirm="([^"<]*)"~u', $source, $m);
     foreach ($m[1] as $text) {
         if (preg_match('/\p{Ll}{3,}/u', $text)) $found[] = 'confirm: ' . $text;
     }
-    // Placeholders and titles count as prose when they hold words or non-ASCII letters; codes such as "main" or "max g" do not.
+    // Placeholders and titles count as prose when they hold words or non-ASCII letters; codes such as "main" or "max g"
+    // and example paths such as "/assets/img/banner.jpg" do not.
     preg_match_all('~\b(?:placeholder|title)="([^"<]*)"~u', $source, $m);
     foreach ($m[1] as $text) {
-        if (preg_match('/\p{L}{3,}[\s,.]+\p{L}{3,}|[^\x00-\x7F]/u', $text)) $found[] = 'attr: ' . $text;
+        if (preg_match('/\p{L}{3,}[\s,]+\p{L}{3,}|[^\x00-\x7F]/u', $text)) $found[] = 'attr: ' . $text;
     }
     return $found;
 }
 
-// Ratchet: budgets may only go down. Files finished in A15.4 are at 0; the rest are converted in A15.5–A15.7.
+// Ratchet: budgets may only go down. Files finished in A15.4/A15.5 are at 0; the rest are converted in A15.6–A15.7.
 $a154Budgets = [
     'src/Entrypoints/Admin.php' => 0,
     'src/Entrypoints/Admin/Operations.php' => 0,
@@ -37,15 +39,15 @@ $a154Budgets = [
     'src/Entrypoints/Admin/Permissions.php' => 0,
     'src/Entrypoints/Admin/AdminUsers.php' => 0,
     'src/Entrypoints/Admin/B2b.php' => 31,
-    'src/Entrypoints/Admin/Catalog.php' => 135,
-    'src/Entrypoints/Admin/CatalogEditor.php' => 18,
+    'src/Entrypoints/Admin/Catalog.php' => 0,
+    'src/Entrypoints/Admin/CatalogEditor.php' => 0,
     'src/Entrypoints/Admin/Customers.php' => 41,
     'src/Entrypoints/Admin/Orders.php' => 92,
     'src/Entrypoints/Admin/PricingRules.php' => 45,
     'src/Entrypoints/Admin/Recovery.php' => 18,
     'src/Entrypoints/Admin/Request.php' => 1,
     'src/Entrypoints/Admin/Suppliers.php' => 39,
-    'src/Entrypoints/Admin/Taxonomy.php' => 28,
+    'src/Entrypoints/Admin/Taxonomy.php' => 0,
 ];
 $a154Root = dirname(TEST_CLI_DIR);
 $a154Files = array_merge(['src/Entrypoints/Admin.php'], array_map(
@@ -77,6 +79,8 @@ try {
     (new Migrator($a154Pdo, $a154Root . '/migrations', $a154Dir . '/migrate.lock'))->apply();
     $a154Admin = AdminIdentity::create('a154-owner', 'A154-password-owner', 'owner', false);
     AdminIdentity::grantStore($a154Admin, 'default', ['*']);
+    $a154Pdo->exec("INSERT INTO categories (store_id, name, slug, path) VALUES ('default', 'A155 Basis', 'a155-basis', 'a155-basis')");
+    $a154Pdo->exec("INSERT INTO products (store_id, category_id, sku, slug, name, price, stock, status) VALUES ('default', " . (int)$a154Pdo->lastInsertId() . ", 'A155-P', 'a155-produkt', 'A155 Produkt', 1000, 5, 'active')");
     $a154Token = (string)(AdminIdentity::authenticate('a154-owner', 'A154-password-owner', '', '127.0.15.40', 'A154')['token'] ?? '');
 } finally {
     Db::init($a154SuiteDb, $a154SuiteDriver);
@@ -180,6 +184,49 @@ try {
         $r = $a154Run(['p' => $a154Page]);
         assert_true($r['code'] === 200 && str_contains($r['out'], '<title>' . $a154Title . ' — '), "A15.4 en: {$a154Page} title is '{$a154Title}' (code=" . var_export($r['code'], true) . ')');
     }
+
+    // A15.5: catalog screens (products, product editor and its BBF form, variants, categories, brands, attributes, CMS,
+    // content & marketing, digital files, reviews) in German, written through the real handlers; then a few in English.
+    $a155Leftovers = array_merge($a154Leftovers, ['Uložiť', 'Zmazať', 'Nová kategória', 'Nadradená', 'Preklady', 'nevybrané',
+        'Súvisiace', 'Hodnoty', 'Spravovať', 'Hlavná kategória', 'Krátky popis', 'Save menu item', 'No records.', 'Recenzie',
+        'Žiadne', 'Mapovania', 'Názov', 'Výrobca', 'Ďalšie kategórie', 'Upraviť', 'Späť', 'Ukladám']);
+    $a155Check = static function(string $label, array $r, array $expect, array $allowed = []) use ($a155Leftovers): void {
+        $left = array_values(array_filter(array_diff($a155Leftovers, $allowed), static fn(string $t): bool => str_contains($r['out'], $t)));
+        $missing = array_values(array_filter($expect, static fn(string $t): bool => !str_contains(html_entity_decode($r['out'], ENT_QUOTES, 'UTF-8'), $t)));
+        assert_true($r['code'] === 200 && $left === [] && $missing === [],
+            "{$label} (code=" . var_export($r['code'], true) . ' leftovers=' . json_encode($left, JSON_UNESCAPED_UNICODE)
+            . ' missing=' . json_encode($missing, JSON_UNESCAPED_UNICODE) . ($r['code'] === null ? ' raw=' . $r['out'] : '') . ')');
+    };
+    $a154Run(['p' => 'dashboard', 'lang' => 'de']);
+    $a154Run(['p' => 'categories', 'action' => 'save'], ['name' => 'A155 Kategorie', 'slug' => '', 'parent_id' => '', 'sort_order' => '0']);
+    $a155Check('A15.5 de: categories page is German', $a154Run(['p' => 'categories']),
+        ['Neue Kategorie', 'Übergeordnete Kategorie', 'oberste Ebene', 'Unterkategorien', 'Kategorie löschen?', 'A155 Kategorie']);
+    $a155Check('A15.5 de: brands page is German', $a154Run(['p' => 'brands']), ['Neue Marke', 'Hersteller', 'Code (leer = aus dem Namen)']);
+    $a154Run(['p' => 'attribute', 'action' => 'save'], ['name' => 'A155 Leistung', 'slug' => 'a155-leistung', 'type' => 'number', 'unit' => 'kW', 'sort_order' => '0']);
+    $a155Check('A15.5 de: attributes list and its saved flash are German', $a154Run(['p' => 'attributes']),
+        ['Neues Attribut', 'Einheit', 'Wirklich löschen?', 'Attribut gespeichert.', 'Zahl']);
+    $a155Check('A15.5 de: attribute form (BBF labels, values, category picker) is German', $a154Run(['p' => 'attribute']),
+        ['Werte (für Enum)', 'Kategorien zuordnen', 'Alle sichtbaren auswählen', 'z. B. kW, kg, cm', 'Speichern']);
+    $a155Check('A15.5 de: new product editor (BBF form, extras, attributes) is German', $a154Run(['p' => 'product']),
+        ['Neues Produkt', 'Weitere Kategorien', 'Übersetzungen', 'Hauptkategorie', 'Kurzbeschreibung', 'Speichern', 'Für diese Kategorie sind keine Attribute definiert.']);
+    $a155Product = $a154Pdo->query("SELECT id FROM products WHERE sku = 'A155-P'")->fetchColumn();
+    $a155Check('A15.5 de: product edit (variants, related products) is German', $a154Run(['p' => 'product', 'id' => (string)$a155Product]),
+        ['Varianten', 'Varianten speichern', 'Ähnliche Produkte', 'neue Variante', 'Zurück zur Liste', 'Bearbeiten: A155 Produkt']);
+    $a154Run(['p' => 'products', 'action' => 'bulk'], ['product_ids' => [(string)$a155Product], 'bulk_action' => 'archive']);
+    $a155Check('A15.5 de: products list, bulk actions and bulk flash are German', $a154Run(['p' => 'products']),
+        ['Archivieren', 'Preis +5%', 'Entwurf', 'Archivierte Produkte: 1.', 'Massenaktion auf die ausgewählten Produkte anwenden?']);
+    $a155Check('A15.5 de: CMS pages list is German', $a154Run(['p' => 'pages']), ['Neue Seite']);
+    $a155Check('A15.5 de: CMS page form (BBF labels) is German', $a154Run(['p' => 'page_edit']), ['Neue Seite', 'Inhalt (HTML)', 'Seitentyp', 'Speichern']);
+    $a154Run(['p' => 'content', 'action' => 'save'], ['content_type' => 'menu', 'menu_code' => 'primary', 'locale' => '*', 'label' => 'A155 Menu', 'url' => '/', 'sort_order' => '0', 'active' => '1']);
+    $a155Check('A15.5 de: content & marketing page and its saved flash are German', $a154Run(['p' => 'content']),
+        ['Menüpunkt', 'Weiterleitung', 'Menüpunkte', 'Keine Einträge.', 'Inhalt gespeichert.', 'Diesen Inhaltseintrag löschen?', 'A155 Menu']);
+    $a155Check('A15.5 de: digital files page is German', $a154Run(['p' => 'digital_assets']),
+        ['SKU-Zuordnungen', 'Noch keine digitale Datei hinzugefügt.', 'Dateischlüssel', 'Datei hinzufügen oder bearbeiten']);
+    $a155Check('A15.5 de: reviews page is German', $a154Run(['p' => 'reviews']), ['Keine Bewertungen warten auf Freigabe.', 'Bewertungen — Moderation']);
+    $a154Run(['p' => 'dashboard', 'lang' => 'en']);
+    $a155Check('A15.5 en: new product editor is English', $a154Run(['p' => 'product']), ['New product', 'Main category', 'Additional categories', 'Translations', 'Save']);
+    $a155Check('A15.5 en: categories page is English', $a154Run(['p' => 'categories']), ['New category', 'Parent category', 'Delete category?']);
+    $a155Check('A15.5 en: content page is English', $a154Run(['p' => 'content']), ['Menu item', 'Save menu item', 'Landing pages', 'Redirects'], ['Save menu item', 'No records.']);
 } finally {
     putenv('BBE_ADMIN_IDENTITY_KEY');
     $a154Pdo = null;

@@ -111,7 +111,8 @@ $architectureBudgets = [
     // +1 coupling: ProductEditor validates and saves brand, GTIN/MPN, SEO, extra categories and translations outside the entrypoint.
     'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1250, 'functions' => 24, 'max_function_lines' => 240, 'coupling' => 16],
     // +1 coupling: ProductVariants owns variant validation, ledger stock booking and the delete/SKU-change guards.
-    'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 160, 'functions' => 4, 'max_function_lines' => 60, 'coupling' => 3],
+    // +1 coupling: I18n gives the editor's labels in the admin language (A15.5).
+    'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 160, 'functions' => 4, 'max_function_lines' => 60, 'coupling' => 4],
     'src/Entrypoints/Admin/Customers.php' => ['lines' => 300, 'functions' => 6, 'max_function_lines' => 140, 'coupling' => 8],
     'src/Entrypoints/Admin/Operations.php' => ['lines' => 760, 'functions' => 36, 'max_function_lines' => 180, 'coupling' => 18],
     // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
@@ -122,7 +123,8 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/Reports.php' => ['lines' => 120, 'functions' => 2, 'max_function_lines' => 75, 'coupling' => 4],
     'src/Entrypoints/Admin/Recovery.php' => ['lines' => 300, 'functions' => 6, 'max_function_lines' => 90, 'coupling' => 8],
     'src/Entrypoints/Admin/Request.php' => ['lines' => 80, 'functions' => 1, 'max_function_lines' => 70, 'coupling' => 2],
-    'src/Entrypoints/Admin/Shared.php' => ['lines' => 50, 'functions' => 3, 'max_function_lines' => 25, 'coupling' => 0],
+    // +1 function, +1 coupling: adminCodeLabel shows stored codes (product/page status, attribute type) in the admin language (A15.5).
+    'src/Entrypoints/Admin/Shared.php' => ['lines' => 50, 'functions' => 4, 'max_function_lines' => 25, 'coupling' => 1],
     // A15.3: store switcher and per-request store activation, limited to the admin's granted stores (AdminStoreScope).
     'src/Entrypoints/Admin/StoreScope.php' => ['lines' => 70, 'functions' => 4, 'max_function_lines' => 25, 'coupling' => 5],
     // +1 coupling: Search::filtersFromQuery turns the search route's sort/price/category parameters into search options (A14.2).

@@ -1530,7 +1530,7 @@ $afSaved = AdminForm::validate('admin-product', $afStored, [], $afStored + ['csr
 $afSorted = static function (array $a): array { ksort($a); return $a; };
 assert_true(is_array($afSaved) && $afSorted(array_diff_key($afSaved, ['image_upload' => 1])) === $afSorted($afStored) && $afSaved['image_upload'] === ['action' => 'keep', 'files' => []],
     'Admin product save: the untouched stored form validates to exactly the stored values, without extra posted keys');
-assert_true(AdminForm::validate('admin-product', $afStored, [], ['status' => 'retired'] + $afStored, []) === null && str_contains(AdminForm::firstError(), 'Stav'),
+assert_true(AdminForm::validate('admin-product', $afStored, [], ['status' => 'retired'] + $afStored, []) === null && str_contains(AdminForm::firstError(), I18n::t('admin.form.admin_product.status')),
     'Admin product save: a status outside the list is refused');
 assert_true(AdminForm::validate('admin-product', ['status' => 'retired', 'category_id' => '999999'] + $afStored, [], ['status' => 'retired', 'category_id' => '999999'] + $afStored, []) !== null,
     'Admin product save: a stored status or category no longer in the list is still accepted unchanged');
