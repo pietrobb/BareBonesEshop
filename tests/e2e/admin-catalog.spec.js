@@ -108,7 +108,7 @@ test('admin Export CSV imports back through the admin Import form without damage
   await expect(form).toHaveAttribute('enctype', 'multipart/form-data');
   await form.locator('#field-csv_file').setInputFiles(edited);
   await form.locator('button[type="submit"]').click();
-  await expect(page.locator('.flash-ok')).toHaveText(`Import úspešný: ${Object.keys(before.products).length} produktov.`);
+  await expect(page.locator('.flash-ok')).toHaveText(`Import finished: ${Object.keys(before.products).length} products.`);
 
   const after = db('catalog');
   expect(Object.keys(after.products).sort()).toEqual(Object.keys(before.products).sort());
