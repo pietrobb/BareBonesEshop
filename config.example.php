@@ -109,7 +109,7 @@ return [
         // 'erp' => 'money',
     ],
     'providers' => [
-        'payment' => [], // stripe/payu/gopay/comgate/mock are built in; register a custom gateway as code => ['class' => <your PaymentAdapter class>]
+        'payment' => [], // stripe/payu/gopay/comgate/thepay/mock are built in; register a custom gateway as code => ['class' => <your PaymentAdapter class>]
         'shipping' => [],
         'mail' => [],
         'tax' => [],
@@ -200,6 +200,14 @@ return [
     'comgate_merchant' => '',
     'comgate_secret'   => '',
     'comgate_test'     => true, // false creates real (production) payments
+
+    // ThePay (provider code thepay). Allow the shop server's IP in the ThePay administration
+    // (Implementation). Notifications need no secret: each one is confirmed by the signed payment
+    // detail call. Env PAY_THEPAY_* overrides these values.
+    'thepay_merchant_id' => '',
+    'thepay_project_id'  => '',
+    'thepay_password'    => '',
+    'thepay_env'         => 'demo', // 'production' uses api.thepay.cz / gate.thepay.cz
 
     // Digital files are stored below this directory; digital_assets.storage_path
     // contains only a relative path such as ebooks/manual.pdf.

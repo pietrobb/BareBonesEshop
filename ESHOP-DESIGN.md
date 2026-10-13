@@ -3216,9 +3216,10 @@ interface PaymentAdapter {
 }
 
 // Default: StripePayment (Stripe Checkout — hosted flow)
-// Shipped: PayUPayment, GoPayPayment, ComgatePayment, CashOnDelivery, MockPayment; bank transfer is a built-in offline method.
+// Shipped: PayUPayment, GoPayPayment, ComgatePayment, ThePayPayment, CashOnDelivery, MockPayment; bank transfer is a built-in offline method.
 // GoPay notifications are unsigned (GET ?id=): PullVerifiedNotificationAdapter rebuilds the event from an authenticated inquiry.
 // Comgate pushes (JSON or form) are checked against merchant+secret, then the event comes from the authenticated status call.
+// ThePay notifications are unsigned (GET ?project_id&payment_uid): the event comes from the signed payment detail call.
 // Further gateways = a new class implementing PaymentAdapter.
 ```
 

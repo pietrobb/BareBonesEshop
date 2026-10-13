@@ -14,6 +14,8 @@ class Adapters {
             'gopay' => ['class' => 'GoPayPayment', 'capabilities' => ['checkout', 'status', 'webhook', 'refund'], 'notification' => 'pull'],
             // Push with merchant+secret, always confirmed by the authenticated status call.
             'comgate' => ['class' => 'ComgatePayment', 'capabilities' => ['checkout', 'status', 'webhook', 'refund'], 'notification' => 'pull'],
+            // Unsigned GET notifications, each confirmed by the signed payment detail call.
+            'thepay' => ['class' => 'ThePayPayment', 'capabilities' => ['checkout', 'status', 'webhook', 'refund'], 'notification' => 'pull'],
             'mock' => ['class' => 'MockPayment', 'capabilities' => ['checkout', 'status', 'webhook', 'refund'], 'signature_header' => 'HTTP_X_MOCK_SIGNATURE'],
             'cod' => ['class' => 'CashOnDelivery', 'capabilities' => ['checkout', 'status', 'refund']],
         ],
