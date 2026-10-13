@@ -593,7 +593,7 @@ class Customers {
             $stmt = Db::get()->prepare("SELECT
                     c.id AS customer_id, c.customer_group_id, c.company_id,
                     cg.code AS customer_group_code, cg.discount_bps,
-                    co.code AS company_code, co.legal_name, co.vat_id, co.vat_country,
+                    co.code AS company_code, co.legal_name, co.registration_number, co.vat_id, co.vat_country,
                     co.vat_validated_at, co.approval_status, co.credit_limit,
                     co.payment_terms_days, co.invoice_purchase, co.active AS company_active
                 FROM customers c

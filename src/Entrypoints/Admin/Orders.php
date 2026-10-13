@@ -258,6 +258,7 @@ function pageOrder(): void {
             <p><?= esc($order['customer_phone']) ?></p>
             <?php if ($addr): ?>
             <p class="muted"><?= esc(($addr['street'] ?? '') . ', ' . ($addr['zip'] ?? '') . ' ' . ($addr['city'] ?? '') . ', ' . ($addr['country'] ?? '')) ?></p>
+            <?php foreach (CheckoutService::companyLines($addr) as $companyLine): ?><p class="order-company"><?= esc($companyLine) ?></p><?php endforeach; ?>
             <?php endif; ?>
             <?php if (trim((string)($order['notes'] ?? '')) !== ''): ?>
             <h4 style="margin-top:.75rem"><?= esc(I18n::t('admin.order.note')) ?></h4>

@@ -155,6 +155,7 @@ final class AccountViewModel
             'address' => array_values(array_filter([
                 (string)($order['customer_name'] ?? ''), (string)($address['street'] ?? ''),
                 trim((string)($address['zip'] ?? '') . ' ' . (string)($address['city'] ?? '')), (string)($address['country'] ?? ''),
+                ...CheckoutService::companyLines($address),
             ], static fn(string $part): bool => trim($part) !== '')),
             'items' => array_map(static fn(array $item): array => [
                 'name' => (string)$item['name'], 'sku' => (string)$item['sku'], 'quantity' => (int)$item['quantity'],

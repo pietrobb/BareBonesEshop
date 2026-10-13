@@ -9,6 +9,46 @@ class CheckoutService {
     }
 
     /**
+     * Buyer company details for the invoice, from the HTML form or the JSON body: company name,
+     * company ID (IČO), tax ID (DIČ) and EU VAT ID (IČ DPH). All optional, but any ID needs the name.
+     * Returns the address fields the invoice reads (company, ico, dic, ic_dph) or an i18n refusal.
+     * @return array{fields: array<string,string>, vat_id: string, error: ?string}
+     */
+    public static function buyerCompany(array $input): array {
+        $text = static fn(string $key, int $max): string => is_string($input[$key] ?? null) ? mb_substr(trim(Security::str($input[$key])), 0, $max) : '';
+        $company = $text('company', 255);
+        $ico = strtoupper((string)preg_replace('/\s+/', '', $text('ico', 40)));
+        $dic = strtoupper((string)preg_replace('/\s+/', '', $text('dic', 40)));
+        $vatId = strtoupper((string)preg_replace('/[\s.-]+/', '', $text('vat_id', 40)));
+        $invalid = match (true) {
+            $ico !== '' && !preg_match('/^[A-Z0-9][A-Z0-9\/-]{1,19}$/', $ico) => 'checkout_ico',
+            $dic !== '' && !preg_match('/^[A-Z0-9][A-Z0-9\/-]{1,19}$/', $dic) => 'checkout_dic',
+            $vatId !== '' && !preg_match('/^[A-Z]{2}[A-Z0-9+*]{6,14}$/', $vatId) => 'checkout_vat_id',
+            default => null,
+        };
+        $error = $invalid !== null ? sprintf(I18n::t('checkout_company_invalid'), I18n::t($invalid))
+            : ($company === '' && ($ico . $dic . $vatId) !== '' ? I18n::t('checkout_company_required') : null);
+        $fields = array_filter(['company' => $company, 'ico' => $ico, 'dic' => $dic, 'ic_dph' => $vatId], static fn(string $v): bool => $v !== '');
+        return ['fields' => $error === null ? $fields : [], 'vat_id' => $error === null ? $vatId : '', 'error' => $error];
+    }
+
+    /** Company name and labelled IDs stored on an order address, for order detail screens. */
+    public static function companyLines(array $address): array {
+        $lines = [];
+        foreach (['company' => null, 'ico' => 'checkout_ico', 'dic' => 'checkout_dic', 'ic_dph' => 'checkout_vat_id'] as $key => $label) {
+            $value = trim((string)($address[$key] ?? ''));
+            if ($value !== '') $lines[] = $label === null ? $value : I18n::t($label) . ': ' . $value;
+        }
+        return $lines;
+    }
+
+    /** Labels of the optional company part of the checkout form. */
+    public static function companyLabels(): array {
+        return ['company_heading' => I18n::t('checkout_company_heading'), 'company_label' => I18n::t('checkout_company'),
+            'ico_label' => I18n::t('checkout_ico'), 'dic_label' => I18n::t('checkout_dic'), 'vat_id_label' => I18n::t('checkout_vat_id')];
+    }
+
+    /**
      * What the checkout form shows. A posted form keeps the shopper's values (after any refusal);
      * a fresh form starts from the signed-in customer's profile and default shipping address.
      * Picking one of the customer's own saved addresses replaces the address fields; an id of
@@ -17,7 +57,8 @@ class CheckoutService {
      */
     public static function formState(array $post, bool $posted): array {
         $values = [];
-        foreach (['name' => 255, 'email' => 255, 'phone' => 64, 'street' => 255, 'city' => 255, 'zip' => 32, 'notes' => 2000] as $key => $max) {
+        foreach (['name' => 255, 'email' => 255, 'phone' => 64, 'street' => 255, 'city' => 255, 'zip' => 32, 'notes' => 2000,
+            'company' => 255, 'ico' => 40, 'dic' => 40, 'vat_id' => 40] as $key => $max) {
             $values[$key] = $posted && is_string($post[$key] ?? null) ? mb_substr(trim($post[$key]), 0, $max) : '';
         }
         $country = $posted && is_string($post['country'] ?? null) ? strtoupper(trim($post['country'])) : '';
@@ -27,10 +68,14 @@ class CheckoutService {
         $picked = $posted ? null : ($addresses[0] ?? null);
         foreach ($addresses as $address) if ((int)$address['id'] === $pickedId) $picked = $address;
         if (!$posted && $customer) {
-            $values = array_merge($values, ['name' => (string)$customer['name'], 'email' => (string)$customer['email'], 'phone' => (string)($customer['phone'] ?? '')]);
+            // A B2B member buys for their company: its legal name and VAT ID come first, then the customer's own VAT ID.
+            $profile = Customers::commerceProfile((int)$customer['id']) ?? [];
+            $values = array_merge($values, ['name' => (string)$customer['name'], 'email' => (string)$customer['email'], 'phone' => (string)($customer['phone'] ?? ''),
+                'company' => (string)($profile['legal_name'] ?? ''), 'ico' => (string)($profile['registration_number'] ?? ''),
+                'vat_id' => (string)(($profile['vat_id'] ?? '') ?: ($customer['vat_id'] ?? ''))]);
         }
         if ($picked) {
-            foreach (['name', 'phone', 'street', 'city', 'zip'] as $key) {
+            foreach (['name', 'phone', 'street', 'city', 'zip', 'company', 'vat_id'] as $key) {
                 if (trim((string)($picked[$key] ?? '')) !== '') $values[$key] = (string)$picked[$key];
             }
             $country = strtoupper((string)$picked['country']);

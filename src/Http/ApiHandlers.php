@@ -514,7 +514,13 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     // VAT context — resolve scenario before enriching cart so per-line VAT is captured.
     StoreContext::current()->assertPermission('tax');
     $store = apiActiveStore();
-    $vatId = strtoupper(preg_replace('/\s+/', '', (string)($input['vat_id'] ?? '')));
+    // Company buyer: name, IČO, DIČ and IČ DPH go onto the order address the invoice is issued to.
+    $buyerCompany = CheckoutService::buyerCompany($input);
+    if ($buyerCompany['error'] !== null) {
+        http_response_code(422);
+        return ['success' => false, 'error' => $buyerCompany['error']];
+    }
+    $vatId = $buyerCompany['vat_id'];
     $sellerCountry = strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
     $sellerVatRegistered = array_key_exists('vat_registered', $store['legal'] ?? [])
         ? (bool)$store['legal']['vat_registered']
@@ -673,7 +679,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
             'city'    => $digitalOnly ? '' : trim(Security::str($input['city'] ?? '')),
             'zip'     => $digitalOnly ? '' : trim(Security::str($input['zip'] ?? '')),
             'country' => $country,
-        ],
+        ] + $buyerCompany['fields'],
         'currency'       => $currency,
         'locale'         => I18n::locale(),
         'shipping_cost'  => $shippingCost,

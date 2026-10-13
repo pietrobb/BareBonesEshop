@@ -122,6 +122,13 @@ a day with `SHIP_PACKETA_API_KEY` set, e.g.
 `23 7,11,15,19 * * * php cli/packeta-pickup-points.php SK CZ`. Without a synced
 feed Packeta offers no points.
 
+A company buyer fills the optional `company`, `ico` (company ID), `dic` (tax ID)
+and `vat_id` (EU VAT ID) fields of the checkout form or JSON body. Any ID requires
+the company name; IDs of an invalid format are refused. They are stored on the
+order address and printed on the invoice; a VIES-valid VAT ID from another EU
+member state makes the order reverse charge. A B2B member's form starts with the
+company's legal name, registration number and VAT ID.
+
 ---
 
 ## External API v1 and event webhooks
