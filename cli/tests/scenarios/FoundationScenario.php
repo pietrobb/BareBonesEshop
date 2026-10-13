@@ -238,6 +238,11 @@ if ($mysqlDsn) {
             'MySQL live: A07.3 migration adds the TOTP counter and hashes stored session IDs idempotently');
         foreach (['wishlist_items', 'cookie_consent', 'abandoned_carts'] as $table) $my->exec("DROP TABLE {$table}");
         // A07.4: e-mail verification tokens on MySQL — single use, expiry, bound to the address.
+        // Production databases are often utf8mb4_unicode_ci, not the server's charset default:
+        // the new table must inherit the database collation or the e-mail JOIN fails with 1267.
+        $a074vDbCollation = (string)$my->query('SELECT DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = DATABASE()')->fetchColumn();
+        $my->exec('ALTER DATABASE CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
+        $my->exec('ALTER TABLE customers CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
         $a074vMigrationMysql = require TEST_CLI_DIR . '/../migrations/20261012210000_customer_email_verification.php';
         $a074vMigrationMysql->up($my, false);
         $a074vMigrationMysql->up($my, false);
@@ -257,6 +262,7 @@ if ($mysqlDsn) {
             'MySQL live: A07.4 e-mail verification migration is idempotent; tokens are single-use and superseded by re-send');
         $my->exec('DELETE FROM customers WHERE id = 97404');
         $my->exec('DROP TABLE customer_email_verifications');
+        if (preg_match('/^[A-Za-z0-9_]+$/', $a074vDbCollation)) $my->exec("ALTER DATABASE CHARACTER SET utf8mb4 COLLATE {$a074vDbCollation}");
         $g10MigrationMysql = require TEST_CLI_DIR . '/../migrations/20260801230000_theme_content_marketing.php';
         $g10MigrationMysql->up($my, false);
         $g10MigrationMysql->up($my, false);
@@ -878,6 +884,22 @@ foreach ([
 ] as $boundaryModule) {
     assert_true(is_file($entrypointRoot . '/' . $boundaryModule), "G5 boundaries: {$boundaryModule} exists");
 }
+// UTF-8 Slovak text re-read as Windows-1250 ("úspešný" -> "ĂşspeĹˇnĂ˝") must never reach the UI.
+$mojibakeFiles = [];
+$mojibakeRoots = ['src', 'themes', 'lang', 'admin.php', 'api.php', 'index.php'];
+foreach ($mojibakeRoots as $mojibakeRoot) {
+    $mojibakePath = TEST_CLI_DIR . '/../' . $mojibakeRoot;
+    $mojibakeList = is_dir($mojibakePath)
+        ? new RecursiveIteratorIterator(new RecursiveDirectoryIterator($mojibakePath, FilesystemIterator::SKIP_DOTS))
+        : (is_file($mojibakePath) ? [new SplFileInfo($mojibakePath)] : []);
+    foreach ($mojibakeList as $mojibakeFile) {
+        if (!in_array(strtolower($mojibakeFile->getExtension()), ['php', 'js', 'json', 'html', 'css'], true)) continue;
+        if (preg_match('/[ĂĹÄ][\x{00A0}-\x{02FF}]/u', (string)file_get_contents($mojibakeFile->getPathname())) === 1) {
+            $mojibakeFiles[] = str_replace('\\', '/', substr($mojibakeFile->getPathname(), strlen(TEST_CLI_DIR) + 4));
+        }
+    }
+}
+assert_equals([], $mojibakeFiles, 'Encoding: shipped UI sources contain no UTF-8-as-cp1250 mojibake');
 $storefrontOrchestrator = (string)file_get_contents($entrypointRoot . '/Storefront.php');
 $adminOrchestrator = (string)file_get_contents($entrypointRoot . '/Admin.php');
 assert_true(preg_match('/^function\s+/m', $storefrontOrchestrator) !== 1, 'G5 boundaries: storefront orchestrator defines no page or checkout functions');

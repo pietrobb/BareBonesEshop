@@ -19,6 +19,6 @@ return new class {
                 subject VARCHAR(80) NOT NULL DEFAULT '',
                 uses INT NOT NULL DEFAULT 0,
                 PRIMARY KEY (store_id, coupon_code, subject)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            ) ENGINE=InnoDB");
     }
 };

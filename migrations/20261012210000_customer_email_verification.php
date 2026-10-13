@@ -25,7 +25,7 @@ return new class {
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE KEY uniq_customer_email_verification_token (token_hash),
                 KEY idx_customer_email_verification_customer (customer_id)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            ) ENGINE=InnoDB");
         if ($isSqlite) {
             $db->exec('CREATE INDEX IF NOT EXISTS idx_customer_email_verification_customer ON customer_email_verifications (customer_id)');
         }

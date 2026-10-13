@@ -35,7 +35,7 @@ return new class {
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE KEY uniq_payment_webhook_inbox_event (provider, event_id),
                 KEY idx_payment_webhook_inbox_store_status (store_id, status)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            ) ENGINE=InnoDB");
         if ($isSqlite) {
             $db->exec('CREATE INDEX IF NOT EXISTS idx_payment_webhook_inbox_store_status ON payment_webhook_inbox (store_id, status)');
         }

@@ -120,8 +120,8 @@ function pageImport(): void {
         <?= AdminForm::render('admin-import', 'admin.php?p=import&action=upload') ?>
     </div>
     <div class="card">
-        <h3>Ĺ ablĂłny</h3>
-        <p class="muted">Stiahnite si vzorovĂ˝ CSV z <code>import/test-products.csv</code></p>
+        <h3>Šablóny</h3>
+        <p class="muted">Stiahnite si vzorový CSV z <code>import/test-products.csv</code></p>
     </div>
     <?php
 }
@@ -144,14 +144,14 @@ function pageCache(): void {
     ?>
     <h1>Cache Management</h1>
     <div class="grid grid-4">
-        <div class="card stat"><div class="num"><?= $stats['files'] ?></div><div class="label">Cache sĂşborov</div></div>
-        <div class="card stat"><div class="num"><?= round($stats['size']/1024, 1) ?>K</div><div class="label">VeÄľkosĹĄ</div></div>
-        <div class="card stat"><div class="num"><?= $jobStats['pending'] ?></div><div class="label">Joby ÄŤakajĂşce</div></div>
-        <div class="card stat"><div class="num"><?= $jobStats['failed'] ?></div><div class="label">Joby zlyhanĂ©</div></div>
+        <div class="card stat"><div class="num"><?= $stats['files'] ?></div><div class="label">Cache súborov</div></div>
+        <div class="card stat"><div class="num"><?= round($stats['size']/1024, 1) ?>K</div><div class="label">Veľkosť</div></div>
+        <div class="card stat"><div class="num"><?= $jobStats['pending'] ?></div><div class="label">Joby čakajúce</div></div>
+        <div class="card stat"><div class="num"><?= $jobStats['failed'] ?></div><div class="label">Joby zlyhané</div></div>
     </div>
     <div class="card">
         <h3>Akcie</h3>
-        <form method="post" action="admin.php?p=cache&action=flush" style="display:inline" data-confirm="Flush celĂş cache?">
+        <form method="post" action="admin.php?p=cache&action=flush" style="display:inline" data-confirm="Flush celú cache?">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
             <button class="btn btn-danger" type="submit">Flush Cache</button>
         </form>
@@ -181,7 +181,7 @@ function pageAudit(): void {
     <h1>Audit Log <span class="muted">(<?= $total ?>)</span></h1>
     <div class="card">
         <table>
-            <tr><th>Entita</th><th>ID</th><th>Akcia</th><th>StarĂ©</th><th>NovĂ©</th><th>PoznĂˇmka</th><th>Kto</th><th>Kedy</th></tr>
+            <tr><th>Entita</th><th>ID</th><th>Akcia</th><th>Staré</th><th>Nové</th><th>Poznámka</th><th>Kto</th><th>Kedy</th></tr>
             <?php foreach ($logs as $log): ?>
             <tr>
                 <td><?= esc($log['entity']) ?></td>
@@ -203,7 +203,7 @@ function handleImportUpload(): void {
     // BBF checks that a file came, its .csv extension, size and content type.
     $form = AdminForm::validate('admin-import', [], ['allowed_extensions' => ['csv'], 'max_file_size' => Import::MAX_FILE_BYTES]);
     if ($form === null) {
-        setFlash('err', 'CSV sĂşbor nebol prijatĂ˝: ' . AdminForm::firstError());
+        setFlash('err', 'CSV súbor nebol prijatý: ' . AdminForm::firstError());
         header("Location: admin.php?p=import");
         exit;
     }
@@ -219,9 +219,9 @@ function handleImportUpload(): void {
         ], 'CSV import');
     }
     if ($result['success'] && $errCount === 0) {
-        setFlash('ok', "Import ĂşspeĹˇnĂ˝: {$result['imported']} produktov.");
+        setFlash('ok', "Import úspešný: {$result['imported']} produktov.");
     } else {
-        setFlash('err', "Import: {$result['imported']} OK, {$errCount} chĂ˝b.");
+        setFlash('err', "Import: {$result['imported']} OK, {$errCount} chýb.");
     }
 
     header("Location: admin.php?p=import");
@@ -236,7 +236,7 @@ function handleCacheFlush(): void {
 }
 function handleCacheRebuild(): void {
     JobQueue::push('cache_rebuild', ['scope' => 'full'], 1);
-    setFlash('ok', 'Cache rebuild job naplĂˇnovanĂ˝.');
+    setFlash('ok', 'Cache rebuild job naplánovaný.');
     header("Location: admin.php?p=cache");
     exit;
 }
@@ -248,10 +248,10 @@ function pageWarehouses(): void {
     $warehouses = Warehouse::all();
     ?>
     <h1>Sklady</h1>
-    <p style="margin-bottom:1rem"><a href="admin.php?p=warehouse" class="btn btn-primary">NovĂ˝ sklad</a></p>
+    <p style="margin-bottom:1rem"><a href="admin.php?p=warehouse" class="btn btn-primary">Nový sklad</a></p>
     <div class="card">
         <table>
-            <thead><tr><th>KĂłd</th><th>NĂˇzov</th><th>Priorita</th><th>Dropship</th><th>Default</th><th>Feedov</th><th></th></tr></thead>
+            <thead><tr><th>Kód</th><th>Názov</th><th>Priorita</th><th>Dropship</th><th>Default</th><th>Feedov</th><th></th></tr></thead>
             <tbody>
             <?php foreach ($warehouses as $w):
                 $feedCount = count(Warehouse::feedsByWarehouse((int)$w['id']));
@@ -522,14 +522,14 @@ function pageShipping(): void {
                     <td><input name="name" value="<?= esc($m['name']) ?>" required style="width:12rem"><br><input name="description" value="<?= esc($m['description'] ?? '') ?>" placeholder="popis" style="width:12rem"></td>
                     <td><input name="carrier" value="<?= esc($m['carrier']) ?>" required style="width:7rem"><br><input name="adapter_class" value="<?= esc($m['adapter_class'] ?? '') ?>" placeholder="adapter" style="width:7rem"></td>
                     <td><select name="service_type"><option value="parcel" <?= ($m['service_type'] ?? '')==='parcel'?'selected':'' ?>>parcel</option><option value="pickup" <?= ($m['service_type'] ?? '')==='pickup'?'selected':'' ?>>pickup</option></select><br><label><input type="checkbox" name="supports_cod" value="1" <?= !empty($m['supports_cod'])?'checked':'' ?>> COD</label> <label><input type="checkbox" name="supports_pickup" value="1" <?= !empty($m['supports_pickup'])?'checked':'' ?>> pickup</label></td>
-                    <td><input type="number" name="free_above" value="<?= esc($m['free_above'] ?? '') ?>" placeholder="free above" style="width:6rem"><input type="number" name="free_from_qty" value="<?= esc($m['free_from_qty'] ?? '') ?>" placeholder="free from qty" title="Zdarma od N fyzickĂ˝ch kusov" style="width:6rem"><br><input type="number" name="max_weight_g" value="<?= esc($m['max_weight_g'] ?? '') ?>" placeholder="max g" style="width:6rem"><input type="number" name="max_volume_cm3" value="<?= esc($m['max_volume_cm3'] ?? '') ?>" placeholder="max cm3" style="width:6rem"></td>
+                    <td><input type="number" name="free_above" value="<?= esc($m['free_above'] ?? '') ?>" placeholder="free above" style="width:6rem"><input type="number" name="free_from_qty" value="<?= esc($m['free_from_qty'] ?? '') ?>" placeholder="free from qty" title="Zdarma od N fyzických kusov" style="width:6rem"><br><input type="number" name="max_weight_g" value="<?= esc($m['max_weight_g'] ?? '') ?>" placeholder="max g" style="width:6rem"><input type="number" name="max_volume_cm3" value="<?= esc($m['max_volume_cm3'] ?? '') ?>" placeholder="max cm3" style="width:6rem"></td>
                     <td><input type="number" name="sort_order" value="<?= (int)$m['sort_order'] ?>" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" <?= !empty($m['active'])?'checked':'' ?>> aktivna</label></td>
                     <td><button class="btn btn-sm btn-primary">Ulozit</button>
                 </form>
                 <form method="post" action="admin.php?p=shipping&action=method_delete" style="display:inline" data-confirm="Zmazat metodu?"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$m['id'] ?>"><button class="btn btn-sm btn-danger">Zmazat</button></form></td>
             </tr>
             <?php endforeach; ?>
-            <tr><form method="post" action="admin.php?p=shipping&action=method_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><input name="code" required placeholder="packeta"></td><td><input name="name" required placeholder="Nazov"><br><input name="description" placeholder="popis"></td><td><input name="carrier" required placeholder="packeta"><br><input name="adapter_class" placeholder="PacketaShipping"></td><td><select name="service_type"><option value="parcel">parcel</option><option value="pickup">pickup</option></select><br><label><input type="checkbox" name="supports_cod" value="1"> COD</label> <label><input type="checkbox" name="supports_pickup" value="1"> pickup</label></td><td><input type="number" name="free_above" placeholder="free above" style="width:6rem"><input type="number" name="free_from_qty" placeholder="free from qty" title="Zdarma od N fyzickĂ˝ch kusov" style="width:6rem"><br><input type="number" name="max_weight_g" placeholder="max g" style="width:6rem"><input type="number" name="max_volume_cm3" placeholder="max cm3" style="width:6rem"></td><td><input type="number" name="sort_order" value="100" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" checked> aktivna</label></td><td><button class="btn btn-sm btn-primary">Pridat</button></td></form></tr>
+            <tr><form method="post" action="admin.php?p=shipping&action=method_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><input name="code" required placeholder="packeta"></td><td><input name="name" required placeholder="Nazov"><br><input name="description" placeholder="popis"></td><td><input name="carrier" required placeholder="packeta"><br><input name="adapter_class" placeholder="PacketaShipping"></td><td><select name="service_type"><option value="parcel">parcel</option><option value="pickup">pickup</option></select><br><label><input type="checkbox" name="supports_cod" value="1"> COD</label> <label><input type="checkbox" name="supports_pickup" value="1"> pickup</label></td><td><input type="number" name="free_above" placeholder="free above" style="width:6rem"><input type="number" name="free_from_qty" placeholder="free from qty" title="Zdarma od N fyzických kusov" style="width:6rem"><br><input type="number" name="max_weight_g" placeholder="max g" style="width:6rem"><input type="number" name="max_volume_cm3" placeholder="max cm3" style="width:6rem"></td><td><input type="number" name="sort_order" value="100" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" checked> aktivna</label></td><td><button class="btn btn-sm btn-primary">Pridat</button></td></form></tr>
             </tbody>
         </table>
     </div>
