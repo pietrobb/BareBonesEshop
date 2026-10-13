@@ -112,6 +112,16 @@ them under `integrations.http_shipping` / `integrations.http_erp`; fixture contr
 tests run without credentials, while a live sandbox smoke remains an explicit
 operator step before production.
 
+Checkout offers a pick-up point list for every rate whose carrier implements that
+lifecycle (`ShippingLifecycleAdapter::pickupPoints`) and whose shipping method has
+`supports_pickup` (a point is optional) or service type `pickup` (a point is
+required). The chosen point is validated against the carrier's list, kept in the
+order's shipping snapshot and passed to the label as `pickup_point_id`. Packeta
+reads its points from the official v5 branch feed stored locally; refresh it 1–4×
+a day with `SHIP_PACKETA_API_KEY` set, e.g.
+`23 7,11,15,19 * * * php cli/packeta-pickup-points.php SK CZ`. Without a synced
+feed Packeta offers no points.
+
 ---
 
 ## External API v1 and event webhooks

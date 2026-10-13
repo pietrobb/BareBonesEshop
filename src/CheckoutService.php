@@ -47,6 +47,25 @@ class CheckoutService {
     }
 
     /**
+     * Pick-up point part of the checkout form for the selected rate, keeping the posted choice.
+     * The refresh button re-renders the list without JS after the shopper switches carrier or zip.
+     */
+    public static function pickupView(array $rates, ?array $selected, string $country, string $zip, string $postedPoint): array {
+        $capable = static fn(array $rate): bool => ShippingService::pickupAdapter($rate) !== null;
+        $options = $selected ? ShippingService::pickupOptions($selected, $country, $zip) : ['points' => [], 'required' => false];
+        $offerRefresh = !($selected && $capable($selected)) && array_filter($rates, $capable) !== [];
+        return [
+            'pickup_show' => $options['points'] || $options['required'] || $offerRefresh,
+            'pickup_points' => array_map(static fn(array $p): array => [
+                'id' => $p['id'], 'label' => $p['name'] . ($p['address'] !== '' ? ' — ' . $p['address'] : ''), 'selected' => $p['id'] === $postedPoint,
+            ], $options['points']),
+            'pickup_point_label' => I18n::t('pickup_point'), 'pickup_refresh_label' => I18n::t('pickup_point_refresh'),
+            'pickup_point_none' => I18n::t($options['required'] ? 'pickup_point_choose' : 'pickup_point_address'),
+            'pickup_unavailable' => $options['required'] && !$options['points'] ? I18n::t('pickup_point_unavailable') : '',
+        ];
+    }
+
+    /**
      * Discount the checkout form shows before the order exists, with the same rules execute() applies:
      * the coupon (i18n key of the refusal reason when it gives nothing) plus automatic promotions.
      * @return array{coupon_discount: int, coupon_error: ?string, promotion_discount: int, free_shipping: bool}

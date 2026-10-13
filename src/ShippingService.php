@@ -176,6 +176,8 @@ class ShippingService
 
         $adapter = self::findAdapter($carrierId);
         $order   = self::fetchOrder($orderId);
+        $snapshot = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true);
+        $order['pickup_point_id'] = (string)($snapshot['pickup_point']['id'] ?? '');
         $result = $adapter->generateLabel($order);
 
         // Persist label record
@@ -208,6 +210,53 @@ class ShippingService
             throw new \RuntimeException("Shipping carrier does not support pickup points: {$carrierId}");
         }
         return $adapter->pickupPoints(strtoupper(trim($country)), trim($postalCode));
+    }
+
+    /**
+     * Pick-up points the customer can choose for a selected rate, from its carrier adapter.
+     * required: the rate only delivers to a point (service_type pickup or pickup_required);
+     * a parcel rate that supports pick-up may also go to the address. Carriers without the
+     * lifecycle contract (in-store pickup) offer no list and need no choice.
+     * @return array{points: list<array{id:string,name:string,address:string}>, required: bool}
+     */
+    public static function pickupOptions(array $rate, string $country, string $postalCode): array
+    {
+        $adapter = self::pickupAdapter($rate);
+        if ($adapter === null) return ['points' => [], 'required' => false];
+        $required = ($rate['service_type'] ?? '') === 'pickup' || !empty($rate['pickup_required']);
+        try {
+            $points = $adapter->pickupPoints(strtoupper(trim($country)), trim($postalCode));
+        } catch (\Throwable $e) {
+            error_log('Pick-up points unavailable for ' . $adapter->carrierId() . ': ' . $e->getMessage());
+            $points = [];
+        }
+        return ['points' => array_values(array_filter($points, static fn(array $p): bool => ($p['id'] ?? '') !== '')), 'required' => $required];
+    }
+
+    /** Carrier adapter that lists pick-up points for this rate, or null when the rate has no point choice. */
+    public static function pickupAdapter(array $rate): ?ShippingLifecycleAdapter
+    {
+        if (($rate['service_type'] ?? '') !== 'pickup' && empty($rate['pickup_required']) && empty($rate['supports_pickup'])) return null;
+        foreach (self::resolveAdapters() as $adapter) {
+            if ($adapter->carrierId() === (string)($rate['carrier'] ?? '')) return $adapter instanceof ShippingLifecycleAdapter ? $adapter : null;
+        }
+        return null;
+    }
+
+    /**
+     * Validate the posted pick-up point against the carrier's own list for this address.
+     * @return array{point: ?array{id:string,name:string,address:string}, error: ?string} error is an i18n key
+     */
+    public static function choosePickupPoint(array $rate, string $country, string $postalCode, string $pointId): array
+    {
+        $options = self::pickupOptions($rate, $country, $postalCode);
+        $pointId = trim($pointId);
+        foreach ($options['points'] as $point) {
+            if ($pointId !== '' && $point['id'] === $pointId) return ['point' => $point, 'error' => null];
+        }
+        if ($pointId !== '' && ($options['points'] || $options['required'])) return ['point' => null, 'error' => 'pickup_point_invalid'];
+        if ($options['required']) return ['point' => null, 'error' => $options['points'] ? 'pickup_point_required' : 'pickup_point_unavailable'];
+        return ['point' => null, 'error' => null];
     }
 
     /** Cancel the latest active label exactly once and retain its audit row. */

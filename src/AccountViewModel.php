@@ -150,6 +150,8 @@ final class AccountViewModel
             'payment_label' => (string)($payment['label'] ?? $payment['name'] ?? $order['payment_method'] ?? ''),
             'shipping_label' => (string)($shipping['name'] ?? $shipping['label'] ?? $order['shipping_method'] ?? ''),
             'tracking' => trim((string)($order['carrier'] ?? '') . ' ' . (string)($order['tracking_number'] ?? '')),
+            'pickup_point' => is_array($shipping['pickup_point'] ?? null)
+                ? trim((string)($shipping['pickup_point']['name'] ?? '') . ' — ' . (string)($shipping['pickup_point']['address'] ?? ''), ' —') : '',
             'address' => array_values(array_filter([
                 (string)($order['customer_name'] ?? ''), (string)($address['street'] ?? ''),
                 trim((string)($address['zip'] ?? '') . ' ' . (string)($address['city'] ?? '')), (string)($address['country'] ?? ''),

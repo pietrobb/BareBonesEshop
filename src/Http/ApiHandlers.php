@@ -610,6 +610,13 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     if (!$selectedRate) {
         return ['success' => false, 'error' => 'Doručenie nie je dostupné do zvolenej krajiny.'];
     }
+    if (!$digitalOnly) {
+        // Point-delivery carriers: the chosen pick-up point must be on the carrier's list for this address.
+        $pickupInput = $input['pickup_point'] ?? '';
+        $pickup = ShippingService::choosePickupPoint($selectedRate, $country, trim(Security::str($input['zip'] ?? '')), is_string($pickupInput) ? $pickupInput : '');
+        if ($pickup['error'] !== null) return ['success' => false, 'error' => I18n::t($pickup['error'])];
+        if ($pickup['point'] !== null) $selectedRate['pickup_point'] = $pickup['point'];
+    }
     $shippingCost = (int)$selectedRate['price'];
     $autoRules = Pricing::autoCartRules($cart['subtotal'], $cart['items'], $loggedInCustomerId);
     $promotionDiscount = 0;

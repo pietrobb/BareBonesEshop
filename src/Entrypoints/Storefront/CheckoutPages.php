@@ -136,7 +136,7 @@ function renderCheckout(): string {
         'coupon_label' => $t('coupon_code'), 'coupon_apply_label' => $t('coupon_apply'), 'coupon_remove_label' => $t('coupon_remove'),
         'coupon_code' => $couponCode, 'coupon_error' => $couponError,
         'coupon_applied' => $couponDiscount > 0 ? sprintf($t('coupon_applied'), $couponCode, $price($couponDiscount)) : '',
-    ]);
+    ] + CheckoutService::pickupView($shippingRates, $selectedRate, $country, $state['values']['zip'], $form('pickup_point')));
 }
 
 /**

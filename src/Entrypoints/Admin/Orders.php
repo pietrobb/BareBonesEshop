@@ -326,6 +326,9 @@ function pageOrder(): void {
         <div style="text-align:right;margin-top:.5rem">
             <p>Medzisúčet: <strong><?= I18n::price((int)$order['subtotal'], $order['currency']) ?></strong></p>
             <p>Doprava: <?= I18n::price((int)$order['shipping_cost'], $order['currency']) ?></p>
+            <?php $pickupPoint = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true)['pickup_point'] ?? null; if (is_array($pickupPoint)): ?>
+            <p><?= esc(I18n::t('pickup_point')) ?>: <?= esc((string)($pickupPoint['name'] ?? '')) ?> (ID <?= esc((string)($pickupPoint['id'] ?? '')) ?>) — <?= esc((string)($pickupPoint['address'] ?? '')) ?></p>
+            <?php endif; ?>
             <?php if ((int)($order['payment_fee'] ?? 0) > 0): ?>
             <p>Poplatok za platbu: <?= I18n::price((int)$order['payment_fee'], $order['currency']) ?></p>
             <?php endif; ?>
