@@ -1,7 +1,7 @@
 RewriteEngine On
 
 # Deny private/runtime/source trees before the generic existing-file bypass.
-RewriteRule ^(?:storage|db|jobs|logs|config|cli|src|migrations|adapters|lang|demo|docs|forms|blocks|data|templates)(?:/|$) - [F,L,NC]
+RewriteRule ^(?:storage|db|jobs|logs|config|cli|src|migrations|adapters|lang|demo|docs|forms|blocks|data|templates|releases|tests|deploy)(?:/|$) - [F,L,NC]
 RewriteRule ^themes/[^/]+/(?:theme\.json|blocks(?:/|$)) - [F,L,NC]
 
 # BBF's browser client and handler are public integration points; all other
@@ -19,45 +19,22 @@ RewriteRule ^vendor/(?!bbf/(?:bbf\.(?:css|js)|submit\.php)$) - [F,L,NC]
 </If>
 RewriteRule ^import/(?!test-products\.csv$) - [F,L,NC]
 
-# Deny direct cache requests while allowing the explicit api.php rewrites below
-# to reach generated JSON internally (THE_REQUEST remains /api.php).
+# Deny direct cache requests (the file cache is read only through PHP).
 RewriteCond %{THE_REQUEST} "\s/+(?:[^?\s]+/)?cache(?:[/\s?]|$)" [NC]
 RewriteRule ^cache(?:/|$) - [F,L,NC]
 
 # Keep ACME validation and security.txt available, deny all other dotfiles.
 RewriteRule ^\.well-known/(?:acme-challenge/[A-Za-z0-9_-]+|security\.txt)$ - [L,NC]
 RewriteRule (?:^|/)\. - [F,L,NC]
-RewriteRule ^(?:config(?:\.example)?\.php|stores\.json|catalog\.json|shipping\.json|tax\.json|pricing\.json|layouts\.json|admin-roles\.json|models\.yaml|composer\.(?:json|lock)|package(?:-lock)?\.json)$ - [F,L,NC]
+RewriteRule ^(?:config(?:\.example)?\.php|router\.php|stores\.json|catalog\.json|shipping\.json|tax\.json|pricing\.json|layouts\.json|admin-roles\.json|models\.yaml|composer\.(?:json|lock)|package(?:-lock)?\.json)$ - [F,L,NC]
 RewriteRule \.(?:(?:sqlite3?|db)(?:-(?:wal|shm))?|wal|shm|sql|dump|bak|backup|log|lock|ini|ya?ml|pem|key|md)$ - [F,L,NC]
 
 # Uploaded content must never be dispatched through a PHP handler.
 RewriteRule ^uploads/.*\.(?:php(?:[0-9]+|s)?|phtml?|phar)(?:[./]|$) - [F,L,NC]
 
-# ============================================================
-# Level 0 Cache — serve cached JSON directly (bypass PHP)
-# ============================================================
-
-# Category listings with locale: api.php?action=products&cat=tricka&page=1&locale=de
-RewriteCond %{QUERY_STRING} action=products&cat=([a-z0-9-]+)&page=(\d+)&locale=([a-z]{2})
-RewriteCond %{DOCUMENT_ROOT}/cache/%3/cat/%1/page-%2.json -f
-RewriteRule ^api\.php$ cache/%3/cat/%1/page-%2.json [L,T=application/json]
-
-# Category listings (default locale): api.php?action=products&cat=tricka&page=1
-RewriteCond %{QUERY_STRING} action=products&cat=([a-z0-9-]+)&page=(\d+)
-RewriteCond %{QUERY_STRING} !locale=
-RewriteCond %{DOCUMENT_ROOT}/cache/sk/cat/%1/page-%2.json -f
-RewriteRule ^api\.php$ cache/sk/cat/%1/page-%2.json [L,T=application/json]
-
-# Categories listing with locale
-RewriteCond %{QUERY_STRING} action=categories&locale=([a-z]{2})
-RewriteCond %{DOCUMENT_ROOT}/cache/%1/categories.json -f
-RewriteRule ^api\.php$ cache/%1/categories.json [L,T=application/json]
-
-# Categories listing (default locale)
-RewriteCond %{QUERY_STRING} action=categories
-RewriteCond %{QUERY_STRING} !locale=
-RewriteCond %{DOCUMENT_ROOT}/cache/sk/categories.json -f
-RewriteRule ^api\.php$ cache/sk/categories.json [L,T=application/json]
+# No web-server cache shortcut: api.php serves its file cache itself, because entries live under
+# the resolved store namespace (cache/stores/<store>/<channel>/...) and are skipped for logged-in
+# customers with personal prices — neither is visible to Apache.
 
 # ============================================================
 # SEO-friendly URLs
@@ -69,18 +46,8 @@ RewriteRule ^robots\.txt$ robots.php [L]
 RewriteRule ^feeds/google\.xml$ feed.php?channel=google [QSA,L]
 RewriteRule ^feeds/meta\.csv$ feed.php?channel=meta [QSA,L]
 
-# ============================================================
-# Multi-store URL prefixes: /de/..., /en/...
-# ============================================================
-RewriteRule ^de/product/([a-z0-9-]+)/?$ product.php?slug=$1&store=de [QSA,L]
-RewriteRule ^de/category/([a-z0-9/-]+)/?$ index.php?category=$1&store=de [QSA,L]
-RewriteRule ^de/page/([a-z0-9-]+)/?$ page.php?slug=$1&store=de [QSA,L]
-RewriteRule ^de/?$ index.php?store=de [QSA,L]
-
-RewriteRule ^en/product/([a-z0-9-]+)/?$ product.php?slug=$1&store=us [QSA,L]
-RewriteRule ^en/category/([a-z0-9/-]+)/?$ index.php?category=$1&store=us [QSA,L]
-RewriteRule ^en/page/([a-z0-9-]+)/?$ page.php?slug=$1&store=us [QSA,L]
-RewriteRule ^en/?$ index.php?store=us [QSA,L]
+# Store URL prefixes (/cs/..., /de/..., any url_prefix in stores.json) are served by the
+# redirect.php fallback below (UrlAliases::storeRoute), so adding a store needs no rule here.
 
 # Product detail: /product/brzdovy-kotuc-predny → product.php?slug=brzdovy-kotuc-predny
 RewriteRule ^product/([a-z0-9-]+)/?$ product.php?slug=$1 [QSA,L]

@@ -28,8 +28,9 @@ function apiProducts(): array {
     $catSlug = Security::slug($_GET['cat'] ?? '');
     $page = max(1, Security::int($_GET['page'] ?? 1));
     $sort = Security::slug($_GET['sort'] ?? 'price_asc');
-    $filtersJson = $_GET['filters'] ?? '{}';
-    $filters = json_decode($filtersJson, true) ?: [];
+    $filtersJson = Security::str($_GET['filters'] ?? '{}', '{}');
+    $filters = json_decode($filtersJson, true);
+    if (!is_array($filters)) $filters = [];
     $priceMin = isset($_GET['price_min']) ? Security::int($_GET['price_min']) : null;
     $priceMax = isset($_GET['price_max']) ? Security::int($_GET['price_max']) : null;
 
@@ -91,7 +92,7 @@ function apiProduct(): array {
 }
 
 function apiSearch(): array {
-    $q = trim($_GET['q'] ?? '');
+    $q = trim(Security::str($_GET['q'] ?? ''));
     $page = max(1, Security::int($_GET['page'] ?? 1));
 
     if (strlen($q) < 2) {
@@ -105,7 +106,7 @@ function apiSearch(): array {
 }
 
 function apiSearchSuggest(): array {
-    $q = trim($_GET['q'] ?? '');
+    $q = trim(Security::str($_GET['q'] ?? ''));
     if (strlen($q) < 2) return [];
     return Adapters::search()->suggest($q, 5);
 }
@@ -122,7 +123,7 @@ function apiValidateCoupon(): array {
     }
 
     $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
-    $code = trim($input['code'] ?? '');
+    $code = trim(Security::str($input['code'] ?? ''));
     $subtotal = Security::int($input['subtotal'] ?? 0);
     $email = Security::email($input['email'] ?? '') ?? null;
 
@@ -350,7 +351,7 @@ function apiShippingRates(): array {
         return ['error' => 'Method not allowed'];
     }
 
-    $country = strtoupper(trim($_GET['country'] ?? 'SK'));
+    $country = strtoupper(trim(Security::str($_GET['country'] ?? 'SK')));
     if (!preg_match('/^[A-Z]{2}$/', $country)) {
         return ['error' => 'Invalid country'];
     }
@@ -397,11 +398,11 @@ function apiPaymentMethods(): array {
         return ['error' => 'Method not allowed'];
     }
 
-    $country = strtoupper(trim($_GET['country'] ?? 'SK'));
+    $country = strtoupper(trim(Security::str($_GET['country'] ?? 'SK')));
     if (!preg_match('/^[A-Z]{2}$/', $country)) {
         return ['error' => 'Invalid country'];
     }
-    $currency = strtolower(trim($_GET['currency'] ?? 'eur'));
+    $currency = strtolower(trim(Security::str($_GET['currency'] ?? 'eur')));
     if (!preg_match('/^[a-z]{3}$/', $currency)) {
         return ['error' => 'Invalid currency'];
     }
@@ -476,10 +477,10 @@ function apiCheckout(?array $runtimeConfig = null): array {
 }
 
 function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
-    $name = trim($input['name'] ?? '');
+    $name = trim(Security::str($input['name'] ?? ''));
     $email = Security::email($input['email'] ?? '');
-    $phone = trim($input['phone'] ?? '');
-    $country = strtoupper(trim($input['country'] ?? 'SK'));
+    $phone = trim(Security::str($input['phone'] ?? ''));
+    $country = strtoupper(trim(Security::str($input['country'] ?? 'SK')));
     if (!preg_match('/^[A-Z]{2}$/', $country)) {
         return ['error' => 'Invalid country'];
     }
@@ -561,6 +562,11 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     if (empty($availableItems)) {
         return ['success' => false, 'error' => 'Žiadne dostupné produkty v košíku.'];
     }
+    // One order is charged in one currency; a mixed cart is refused, never summed into the first line's currency.
+    if (count(array_unique(array_map(static fn(array $item): string => strtolower((string)($item['currency'] ?? 'eur')), $availableItems))) > 1) {
+        http_response_code(422);
+        return ['success' => false, 'error' => 'Košík obsahuje produkty v rôznych menách. Objednajte ich samostatne.'];
+    }
     $cart['items'] = $availableItems;
     $cart['subtotal'] = array_sum(array_column($availableItems, 'total'));
     $digitalOnly = cartIsDigitalOnly($availableItems);
@@ -582,7 +588,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     }
 
     // Apply coupon if provided
-    $couponCode = trim($input['coupon_code'] ?? '');
+    $couponCode = trim(Security::str($input['coupon_code'] ?? ''));
     $couponDiscount = 0;
     if ($couponCode) {
         $couponResult = Pricing::applyCoupon($couponCode, $cart['subtotal'], $email);
@@ -649,9 +655,9 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         'email'          => $email,
         'phone'          => $phone,
         'address'        => [
-            'street'  => $digitalOnly ? '' : trim($input['street'] ?? ''),
-            'city'    => $digitalOnly ? '' : trim($input['city'] ?? ''),
-            'zip'     => $digitalOnly ? '' : trim($input['zip'] ?? ''),
+            'street'  => $digitalOnly ? '' : trim(Security::str($input['street'] ?? '')),
+            'city'    => $digitalOnly ? '' : trim(Security::str($input['city'] ?? '')),
+            'zip'     => $digitalOnly ? '' : trim(Security::str($input['zip'] ?? '')),
             'country' => $country,
         ],
         'currency'       => $currency,
@@ -670,6 +676,10 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         'vat_country'    => $vatId !== '' ? substr($vatId, 0, 2) : '',
         'vat_id_status'  => $vatIdStatus,
         'vat_scenario'   => $vatScenario['scenario'],
+        // Buyer note from the HTML form and JSON API: plain text, control characters removed, bounded.
+        'notes'          => is_string($input['notes'] ?? null)
+            ? mb_substr(trim((string)preg_replace('/[^\P{C}\n\t]/u', '', $input['notes'])), 0, 2000)
+            : '',
     ];
 
     // Pass coupon info for atomic recording inside the order transaction
@@ -857,13 +867,17 @@ function apiWebhookStripe(): array {
     }
 
     try {
-        match($event['type']) {
+        $resolvedStore = match($event['type']) {
             'checkout.session.completed',
             'checkout.session.async_payment_succeeded' => onPaymentCompleted($event['data']['object'] ?? []),
             'charge.refunded'            => onChargeRefunded($event['data']['object'] ?? []),
             'charge.dispute.created'     => onDisputeCreated($event['data']['object'] ?? []),
             default                      => null,
         };
+        if ($resolvedStore !== null) PaymentWebhookRouting::resolved('stripe', (string)$event['id'], $resolvedStore);
+    } catch (PaymentWebhookUnresolved $e) {
+        Idempotency::unmark($eventKey);
+        return paymentWebhookParkedResponse(PaymentWebhookRouting::park('stripe', (string)$event['id'], (string)$event['type'], $e));
     } catch (\Throwable $e) {
         // Unmark so Stripe can retry the webhook
         Idempotency::unmark($eventKey);
@@ -875,15 +889,32 @@ function apiWebhookStripe(): array {
     return ['status' => 'ok'];
 }
 
-function onPaymentCompleted(array $session): void {
-    $sessionId = (string)($session['id'] ?? '');
-    $orderId = (int)($session['metadata']['order_id'] ?? 0);
-    if ($orderId <= 0 && $sessionId !== '') $orderId = CheckoutSession::resolveOrderId($sessionId, 'stripe') ?? 0;
-    if ($orderId <= 0) return;
+/** Unresolved retry → 503 so the provider redelivers; exhausted → 202, persisted as a webhook incident. */
+function paymentWebhookParkedResponse(array $parked): array {
+    if ($parked['status'] === 'dead') {
+        http_response_code(202);
+        return ['status' => 'parked'];
+    }
+    http_response_code(503);
+    return ['error' => 'Order not resolvable yet', 'retry' => true];
+}
 
+/** Stripe handlers return the store that owned the order, or null when the event needs no order. */
+function onPaymentCompleted(array $session): ?string {
+    if (isset($session['payment_status']) && $session['payment_status'] !== 'paid') return null;
+    $sessionId = (string)($session['id'] ?? '');
+    $target = PaymentWebhookRouting::locate(array_filter([
+        'order_id' => (int)($session['metadata']['order_id'] ?? 0),
+        'session_id' => $sessionId,
+        'order_number' => (string)($session['client_reference_id'] ?? ''),
+    ]), 'stripe');
+    PaymentWebhookRouting::within($target['store_id'], static fn() => applyStripePaymentCompleted($session, $sessionId, $target['id']));
+    return $target['store_id'];
+}
+
+function applyStripePaymentCompleted(array $session, string $sessionId, int $orderId): void {
     $order = Orders::byId($orderId);
-    if (!$order) return;
-    if (isset($session['payment_status']) && $session['payment_status'] !== 'paid') return;
+    if (!$order) throw new RuntimeException("Order #{$orderId} vanished during Stripe webhook");
     if (isset($session['amount_total']) && (int)$session['amount_total'] !== (int)$order['total']) {
         throw new RuntimeException("Stripe amount mismatch for order #{$orderId}");
     }
@@ -911,14 +942,17 @@ function onPaymentCompleted(array $session): void {
     }
 }
 
-function onChargeRefunded(array $charge): void {
-    $paymentIntent = $charge['payment_intent'] ?? '';
-    if (!$paymentIntent) return;
+function onChargeRefunded(array $charge): ?string {
+    $paymentIntent = (string)($charge['payment_intent'] ?? '');
+    if ($paymentIntent === '') return null;
+    $target = PaymentWebhookRouting::locate(['payment_id' => $paymentIntent], 'stripe');
+    PaymentWebhookRouting::within($target['store_id'], static fn() => applyStripeChargeRefunded($charge, $paymentIntent, $target['id']));
+    return $target['store_id'];
+}
 
-    $stmt = Db::get()->prepare("SELECT * FROM orders WHERE payment_id = :pid LIMIT 1");
-    $stmt->execute([':pid' => $paymentIntent]);
-    $order = $stmt->fetch();
-    if (!$order) return;
+function applyStripeChargeRefunded(array $charge, string $paymentIntent, int $orderId): void {
+    $order = Orders::byId($orderId);
+    if (!$order) throw new RuntimeException("Order #{$orderId} vanished during Stripe webhook");
 
     $refundedAmount = (int)($charge['amount_refunded'] ?? 0);
     $orderTotal = (int)$order['total'];
@@ -926,7 +960,6 @@ function onChargeRefunded(array $charge): void {
     AuditLog::log('order_refund', (int)$order['id'], '', (string)$refundedAmount,
         "Stripe refund: {$refundedAmount}/{$orderTotal} cents");
 
-    $orderId = (int)$order['id'];
     $fullRefund = $refundedAmount >= $orderTotal;
     $targetPaymentStatus = $fullRefund ? 'refunded' : 'partially_refunded';
     $refundDelta = max(0, $refundedAmount - PaymentService::refundedAmount($orderId));
@@ -960,16 +993,17 @@ function onChargeRefunded(array $charge): void {
     }
 }
 
-function onDisputeCreated(array $dispute): void {
-    $paymentIntent = $dispute['payment_intent'] ?? '';
-    if (!$paymentIntent) return;
+function onDisputeCreated(array $dispute): ?string {
+    $paymentIntent = (string)($dispute['payment_intent'] ?? '');
+    if ($paymentIntent === '') return null;
+    $target = PaymentWebhookRouting::locate(['payment_id' => $paymentIntent], 'stripe');
+    PaymentWebhookRouting::within($target['store_id'], static fn() => applyStripeDisputeCreated($dispute, $paymentIntent, $target['id']));
+    return $target['store_id'];
+}
 
-    $stmt = Db::get()->prepare("SELECT * FROM orders WHERE payment_id = :pid LIMIT 1");
-    $stmt->execute([':pid' => $paymentIntent]);
-    $order = $stmt->fetch();
-    if (!$order) return;
-
-    $orderId = (int)$order['id'];
+function applyStripeDisputeCreated(array $dispute, string $paymentIntent, int $orderId): void {
+    $order = Orders::byId($orderId);
+    if (!$order) throw new RuntimeException("Order #{$orderId} vanished during Stripe webhook");
     AuditLog::log('order_dispute', $orderId, $order['status'], 'disputed', 'Stripe dispute: ' . ($dispute['id'] ?? ''));
     if (($order['payment_status'] ?? '') !== 'disputed'
         && PaymentService::canPaymentTransition((string)($order['payment_status'] ?? 'pending'), 'disputed')) {
@@ -1076,6 +1110,7 @@ function apiWebhookPayment(): array {
         return ['error' => 'Processing failed'];
     }
 
+    if (isset($result['parked'])) return paymentWebhookParkedResponse($result['parked']);
     return ['status' => $result['duplicate'] ?? false ? 'already_processed' : 'ok'];
 }
 
@@ -1234,7 +1269,7 @@ function apiCookieConsent(): array {
     $cid = (int)($_SESSION['customer_id'] ?? 0);
     GdprService::logCookieConsent([
         'customer_id' => $cid > 0 ? $cid : null,
-        'session_id'  => session_id() ?: null,
+        'session_id'  => Security::sessionKey() ?: null,
         'ip'          => $_SERVER['REMOTE_ADDR'] ?? null,
         'user_agent'  => substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255),
         'categories'  => $cats,
@@ -1246,8 +1281,8 @@ function apiCookieConsent(): array {
 function apiPage(): array {
     $slug = Security::slug($_GET['slug'] ?? '');
     if (!$slug) return ['error' => 'slug required'];
-    $stmt = Db::get()->prepare("SELECT * FROM pages WHERE slug = :slug AND status = 'active'");
-    $stmt->execute([':slug' => $slug]);
+    $stmt = Db::get()->prepare("SELECT * FROM pages WHERE store_id = :store AND slug = :slug AND status = 'active'");
+    $stmt->execute([':store' => StoreContext::current()->id(), ':slug' => $slug]);
     $page = $stmt->fetch();
     if (!$page) { http_response_code(404); return ['error' => 'Page not found']; }
     // Translate if non-default locale

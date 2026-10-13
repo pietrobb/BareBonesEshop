@@ -188,6 +188,8 @@ final class Updater
     {
         $this->lock();
         $snapshot = null;
+        $staged = [];
+        $mutated = false;
         try {
             $report = $this->check($package);
             $this->assertApplicable($report);
@@ -195,13 +197,30 @@ final class Updater
             $report = $this->check($package);
             $this->assertApplicable($report);
 
-            foreach ($package->entries() as $entry) {
-                if (!in_array($entry['path'], $report['ready'], true)) {
-                    continue;
-                }
+            // The package was verified when it was opened, possibly minutes ago (the MySQL dump
+            // runs in between). Stage every write and re-hash the staged copy against the signed
+            // manifest before touching a single installed file.
+            $ready = array_values(array_filter(
+                $package->entries(),
+                static fn(array $entry): bool => in_array($entry['path'], $report['ready'], true)
+            ));
+            foreach ($ready as $entry) {
                 $this->assertEntryStillApplicable($entry);
                 if ($entry['action'] === 'write') {
-                    $this->installFile($package->payloadPath($entry['path']), $entry['path']);
+                    $staged[$entry['path']] = $this->stageVerifiedFile(
+                        $package->payloadPath($entry['path']),
+                        $this->targetPath($entry['path'], false),
+                        $entry['sha256'],
+                        $entry['path']
+                    );
+                }
+            }
+
+            $mutated = true;
+            foreach ($ready as $entry) {
+                if ($entry['action'] === 'write') {
+                    $this->commitStagedFile($staged[$entry['path']], $this->targetPath($entry['path'], false));
+                    unset($staged[$entry['path']]);
                 } else {
                     $this->deleteFile($entry['path']);
                 }
@@ -228,7 +247,14 @@ final class Updater
                 'retired' => $this->retireObsoleteFiles($snapshot['id']),
             ];
         } catch (Throwable $e) {
-            if (is_array($snapshot) && isset($snapshot['id'])) {
+            foreach ($staged as $temporary) {
+                @unlink($temporary);
+            }
+            if (is_array($snapshot) && isset($snapshot['id']) && !$mutated) {
+                // Nothing installed and no migration ran: restoring files or a database dump
+                // over an untouched installation would only add risk.
+                $this->setSnapshotStatus($snapshot['id'], 'aborted', $e->getMessage());
+            } elseif (is_array($snapshot) && isset($snapshot['id'])) {
                 try {
                     $this->restoreSnapshot($snapshot['id'], true);
                     $this->setSnapshotStatus($snapshot['id'], 'auto-rolled-back', $e->getMessage());
@@ -463,6 +489,7 @@ final class Updater
         if (!is_file($backupPath)) {
             throw new RuntimeException('SQLite update snapshot was not created');
         }
+        @chmod($backupPath, 0600);
         return [
             'driver' => 'sqlite',
             'live_path' => $livePath,
@@ -494,69 +521,82 @@ final class Updater
             }
         }
 
-        foreach ($metadata['files'] as $row) {
-            $path = (string)$row['path'];
-            if (!empty($row['existed'])) {
-                $source = $directory . DIRECTORY_SEPARATOR . 'files' . DIRECTORY_SEPARATOR
-                    . str_replace('/', DIRECTORY_SEPARATOR, $path);
-                if (!is_file($source) || is_link($source)) {
-                    throw new RuntimeException("Snapshot file missing: {$path}");
-                }
-                $this->installFile($source, $path);
-            } else {
-                $this->deleteFile($path);
-            }
+        $database = is_array($metadata['database'] ?? null) ? $metadata['database'] : null;
+        $isMysql = $database !== null && ($database['driver'] ?? null) === 'mysql';
+        if ($isMysql && $this->databaseBackup === null) {
+            throw new RuntimeException('MySQL rollback requires the configured dump/restore adapter');
         }
+        $sqliteSource = $database !== null && !$isMysql ? $this->verifiedSqliteSnapshot($directory, $database) : null;
 
-        $statePath = $this->statePath();
-        if (!empty($metadata['state_existed'])) {
-            $source = $directory . DIRECTORY_SEPARATOR . 'version-state.json';
-            if (!is_file($source)) {
-                throw new RuntimeException('Snapshot version state is missing');
-            }
-            $this->installAbsoluteFile($source, $statePath);
-        } elseif (is_file($statePath) && !unlink($statePath)) {
-            throw new RuntimeException('Cannot remove installed version state during rollback');
-        }
-
-        if (is_array($metadata['database'] ?? null)) {
-            if (($metadata['database']['driver'] ?? null) === 'mysql') {
-                if ($this->databaseBackup === null) {
-                    throw new RuntimeException('MySQL rollback requires the configured dump/restore adapter');
+        $restore = function () use ($metadata, $directory, $database, $isMysql, $sqliteSource): void {
+            foreach ($metadata['files'] as $row) {
+                $path = (string)$row['path'];
+                if (!empty($row['existed'])) {
+                    $source = $directory . DIRECTORY_SEPARATOR . 'files' . DIRECTORY_SEPARATOR
+                        . str_replace('/', DIRECTORY_SEPARATOR, $path);
+                    if (!is_file($source) || is_link($source)) {
+                        throw new RuntimeException("Snapshot file missing: {$path}");
+                    }
+                    $this->installFile($source, $path);
+                } else {
+                    $this->deleteFile($path);
                 }
+            }
+
+            $statePath = $this->statePath();
+            if (!empty($metadata['state_existed'])) {
+                $source = $directory . DIRECTORY_SEPARATOR . 'version-state.json';
+                if (!is_file($source)) {
+                    throw new RuntimeException('Snapshot version state is missing');
+                }
+                $this->installAbsoluteFile($source, $statePath);
+            } elseif (is_file($statePath) && !unlink($statePath)) {
+                throw new RuntimeException('Cannot remove installed version state during rollback');
+            }
+
+            if ($isMysql) {
                 $this->database = null;
                 if (class_exists('Db', false)) {
                     Db::reset();
                 }
-                $this->databaseBackup->restore($directory, $metadata['database']);
-            } else {
-                $this->restoreSqliteDatabase($directory, $metadata['database']);
+                $this->databaseBackup->restore($directory, $database);
+            } elseif ($sqliteSource !== null) {
+                $livePath = (string)$database['live_path'];
+                @unlink($livePath . '-wal');
+                @unlink($livePath . '-shm');
+                $this->installAbsoluteFile($sqliteSource, $livePath);
+                @unlink($livePath . '-wal');
+                @unlink($livePath . '-shm');
             }
+        };
+
+        if ($sqliteSource === null) {
+            $restore();
+        } else {
+            // Code and database roll back together, only once no other process holds the live file.
+            $livePath = (string)$database['live_path'];
+            $this->database = null;
+            if (class_exists('Db', false)) {
+                Db::releaseSqliteFile($livePath);
+            }
+            gc_collect_cycles();
+            SqliteMaintenance::exclusive($livePath, 'update rollback', $restore);
         }
         return ['snapshot' => $snapshotId, 'restored_files' => count($metadata['files'])];
     }
 
-    private function restoreSqliteDatabase(string $snapshotDirectory, array $database): void
+    private function verifiedSqliteSnapshot(string $snapshotDirectory, array $database): string
     {
         if (($database['driver'] ?? null) !== 'sqlite') {
             throw new RuntimeException('Unsupported database snapshot driver');
         }
         $source = $snapshotDirectory . DIRECTORY_SEPARATOR . 'database.sqlite';
-        $livePath = (string)($database['live_path'] ?? '');
         $expected = (string)($database['sha256'] ?? '');
-        if (!is_file($source) || !preg_match('/^[0-9a-f]{64}$/', $expected)
+        if ((string)($database['live_path'] ?? '') === '' || !is_file($source) || !preg_match('/^[0-9a-f]{64}$/', $expected)
             || !hash_equals($expected, (string)hash_file('sha256', $source))) {
             throw new RuntimeException('SQLite rollback snapshot failed integrity verification');
         }
-        $this->database = null;
-        if (class_exists('Db', false)) {
-            Db::reset();
-        }
-        @unlink($livePath . '-wal');
-        @unlink($livePath . '-shm');
-        $this->installAbsoluteFile($source, $livePath);
-        @unlink($livePath . '-wal');
-        @unlink($livePath . '-shm');
+        return $source;
     }
 
     private function assertEntryStillApplicable(array $entry): void
@@ -580,6 +620,11 @@ final class Updater
 
     private function installAbsoluteFile(string $source, string $target): void
     {
+        $this->commitStagedFile($this->stageFile($source, $target), $target);
+    }
+
+    private function stageFile(string $source, string $target): string
+    {
         if (!is_file($source) || is_link($source)) {
             throw new RuntimeException("Update source is not a regular file: {$source}");
         }
@@ -587,9 +632,27 @@ final class Updater
         $temporary = dirname($target) . DIRECTORY_SEPARATOR . '.' . basename($target)
             . '.update-' . bin2hex(random_bytes(6)) . '.tmp';
         if (!copy($source, $temporary)) {
+            @unlink($temporary);
             throw new RuntimeException("Cannot stage update file: {$target}");
         }
         @chmod($temporary, fileperms($source) & 0777);
+        return $temporary;
+    }
+
+    /** Stages a payload file and proves the staged bytes — the ones that will be installed — match the signed hash. */
+    private function stageVerifiedFile(string $source, string $target, string $expectedSha256, string $relativePath): string
+    {
+        $temporary = $this->stageFile($source, $target);
+        $actual = hash_file('sha256', $temporary);
+        if (!is_string($actual) || !hash_equals($expectedSha256, $actual)) {
+            @unlink($temporary);
+            throw new RuntimeException("Payload checksum mismatch at install time: {$relativePath}");
+        }
+        return $temporary;
+    }
+
+    private function commitStagedFile(string $temporary, string $target): void
+    {
         $old = null;
         try {
             if (file_exists($target)) {

@@ -28,17 +28,18 @@ class Robots {
     /**
      * Render the robots.txt body for the given absolute base
      * (scheme + host, no trailing slash), e.g. "https://shop.example".
+     * Without a base the Sitemap directive is omitted (it must be absolute).
      */
-    public static function txt(string $base): string {
-        $base = rtrim($base, '/');
-
+    public static function txt(?string $base): string {
         $lines = ['User-agent: *'];
         foreach (self::DISALLOW as $path) {
             $lines[] = 'Disallow: ' . $path;
         }
         $lines[] = 'Allow: /';
-        $lines[] = '';
-        $lines[] = 'Sitemap: ' . $base . '/sitemap.xml';
+        if ($base !== null) {
+            $lines[] = '';
+            $lines[] = 'Sitemap: ' . rtrim($base, '/') . '/sitemap.xml';
+        }
 
         return implode("\n", $lines) . "\n";
     }

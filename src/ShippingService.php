@@ -241,15 +241,23 @@ class ShippingService
         }
 
         // Resolve label record
-        $db    = Db::get();
-        $label = $db->prepare("SELECT * FROM shipping_labels WHERE awb = :awb AND carrier = :carrier AND store_id = :store LIMIT 1");
-        $label->execute([':awb' => $awb, ':carrier' => $carrierId, ':store' => StoreContext::current()->id()]);
-        $labelRow = $label->fetch();
-
-        if (!$labelRow) {
+        // The label may belong to any store sharing the endpoint's provider scope; process it in that store.
+        $stores = PaymentWebhookRouting::eligibleStoreIds();
+        $label = Db::get()->prepare("SELECT * FROM shipping_labels WHERE awb = ? AND carrier = ? AND store_id IN (" . implode(',', array_fill(0, count($stores), '?')) . ") LIMIT 2");
+        $label->execute([$awb, $carrierId, ...$stores]);
+        $labelRows = $label->fetchAll(\PDO::FETCH_ASSOC);
+        if (count($labelRows) !== 1) {
+            if ($labelRows) error_log("shipping webhook [{$carrierId}] AWB {$awb} is ambiguous across stores");
             return ['handled' => false, 'reason' => 'unknown_awb'];
         }
 
+        return PaymentWebhookRouting::within((string)$labelRows[0]['store_id'], static fn(): array => self::applyTrackingUpdate($labelRows[0], $carrierId, (string)$awb, (string)$status, $rawPayload));
+    }
+
+    private static function applyTrackingUpdate(array $labelRow, string $carrierId, string $awb, string $status, string $rawPayload): array
+    {
+        StoreContext::current()->assertPermission('shipping');
+        $db = Db::get();
         $eventId = 'shipping_' . hash('sha256', $carrierId . "\0" . $rawPayload);
         if (Idempotency::webhookProcessed($eventId)) {
             return ['handled' => false, 'reason' => 'already_processed', 'duplicate' => true];

@@ -16,12 +16,24 @@ class Security {
         return self::$cfg;
     }
 
+    public static function config(): array {
+        return self::cfg();
+    }
+
+    /** Non-reversible key for the current session; raw session IDs never go into the database. */
+    public static function sessionKey(): string {
+        $id = session_id();
+        return $id === '' ? '' : hash('sha256', $id);
+    }
+
     // ============================================================
     // Session — secure cookie params + start
     // ============================================================
     public static function sessionStart(): void {
         if (session_status() === PHP_SESSION_NONE) {
             $configuredHttps = strtolower((string)parse_url((string)(self::cfg()['app_url'] ?? ''), PHP_URL_SCHEME)) === 'https';
+            // Never adopt a client-chosen, uninitialized session ID (session fixation).
+            ini_set('session.use_strict_mode', '1');
             session_set_cookie_params([
                 'lifetime' => 0,
                 'path'     => '/',
@@ -86,9 +98,10 @@ class Security {
 
     public static function csrfValidate(): bool {
         $sessionToken = $_SESSION['csrf_token'] ?? '';
-        if ($sessionToken === '') return false; // no token ever generated = reject
+        if (!is_string($sessionToken) || $sessionToken === '') return false; // no token ever generated = reject
         $submitted = $_POST['csrf_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
-        return hash_equals($sessionToken, $submitted);
+        // csrf_token[]=… arrives as an array: reject it instead of a TypeError (HTTP 500).
+        return is_string($submitted) && hash_equals($sessionToken, $submitted);
     }
 
     public static function rotateCsrfToken(): string {
@@ -123,8 +136,8 @@ class Security {
      * (//host, /\host), backslash tricks, and header-injection chars. Returns the
      * original value only if it is a plain local path, otherwise $fallback.
      */
-    public static function safeLocalPath(?string $path, string $fallback = '/'): string {
-        $path = trim((string)$path);
+    public static function safeLocalPath(mixed $path, string $fallback = '/'): string {
+        $path = trim(self::str($path));
         if ($path === '') return $fallback;
         // Any scheme prefix (http:, https:, javascript:, data:, …) → reject.
         if (preg_match('~^[a-z][a-z0-9+.\-]*:~i', $path)) return $fallback;
@@ -157,6 +170,15 @@ class Security {
         }
 
         return $url;
+    }
+
+    /** Validated public base URL, or null when app_url is not configured. Never derived from the Host header. */
+    public static function configuredAppUrl(): ?string {
+        try {
+            return self::appUrl(self::cfg());
+        } catch (RuntimeException) {
+            return null;
+        }
     }
 
     /**
@@ -255,8 +277,18 @@ class Security {
     // ============================================================
     // Input sanitization
     // ============================================================
-    public static function clean(string $input): string {
-        return trim(strip_tags($input));
+    public static function clean(mixed $input): string {
+        return trim(strip_tags(self::str($input)));
+    }
+
+    /**
+     * Scalar request value as a string. PHP turns name[]=x into an array; string-typed code
+     * must see the default instead of crashing with a TypeError (HTTP 500).
+     */
+    public static function str(mixed $value, string $default = ''): string {
+        if (is_string($value)) return $value;
+        if (is_int($value) || is_float($value)) return (string)$value;
+        return $default;
     }
 
     public static function sanitizeRichHtml(string $html): string {
@@ -335,10 +367,8 @@ class Security {
         }
     }
 
-    public static function slug(string $input): string {
-        $s = strtolower($input);
-        $s = preg_replace('/[^a-z0-9]+/', '-', $s);
-        return trim($s, '-');
+    public static function slug(mixed $input): string {
+        return Str::slug(self::str($input));
     }
 
     public static function int($input, int $default = 0): int {
@@ -346,8 +376,8 @@ class Security {
             ? (int)$input : $default;
     }
 
-    public static function email(string $input): ?string {
-        $email = filter_var(trim($input), FILTER_VALIDATE_EMAIL);
+    public static function email(mixed $input): ?string {
+        $email = filter_var(trim(self::str($input)), FILTER_VALIDATE_EMAIL);
         return $email ?: null;
     }
 
@@ -382,10 +412,15 @@ class Security {
     // Admin authentication — with brute-force protection + roles
     // ============================================================
 
-    /** Role definitions: permissions for each role */
+    /**
+     * Role definitions: permissions for each role. Money-moving actions have their own
+     * permissions: orders.payments (confirm/change payment), orders.refund (refunds, RMA
+     * credit notes), payments.manage / shipping.manage (methods and fees), rma.manage.
+     */
     private static array $rolePermissions = [
         'owner'       => ['*'],
-        'manager'     => ['products.*', 'orders.*', 'customers.view', 'customers.edit', 'reports.view', 'gdpr.view', 'import', 'cache'],
+        'manager'     => ['products.*', 'categories.edit', 'orders.*', 'customers.view', 'customers.edit', 'reports.view', 'gdpr.view', 'import', 'cache',
+                          'payments.manage', 'shipping.manage', 'rma.manage', 'pricing.manage'],
         'editor'      => ['products.edit', 'products.view', 'categories.edit', 'media.upload'],
         'fulfillment' => ['orders.view', 'orders.edit', 'orders.ship', 'orders.print'],
         'viewer'      => ['products.view', 'orders.view', 'reports.view'],
@@ -564,6 +599,11 @@ class Security {
     }
 
     private static ?array $cachedRolesData = null;
+
+    /** Test hook: stands in for admin-roles.json (custom role permissions). */
+    public static function setRolesForTesting(?array $rolesData): void {
+        self::$cachedRolesData = $rolesData;
+    }
 
     /** Check if current admin has a permission */
     public static function adminCan(string $permission): bool {

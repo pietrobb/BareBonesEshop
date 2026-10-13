@@ -25,13 +25,19 @@ class Totp {
     }
 
     public static function verify(string $secret, string $candidate, int $window = 1, ?int $timestamp = null): bool {
+        return self::matchedCounter($secret, $candidate, $window, $timestamp) !== null;
+    }
+
+    /** Time step the candidate belongs to, or null. Callers enforce one use per step (replay). */
+    public static function matchedCounter(string $secret, string $candidate, int $window = 1, ?int $timestamp = null): ?int {
         $candidate = preg_replace('/\s+/', '', $candidate) ?? '';
-        if (!preg_match('/^[0-9]{6}$/', $candidate) || $window < 0 || $window > 5) return false;
+        if (!preg_match('/^[0-9]{6}$/', $candidate) || $window < 0 || $window > 5) return null;
         $timestamp ??= time();
         for ($offset = -$window; $offset <= $window; $offset++) {
-            if (hash_equals(self::code($secret, $timestamp + ($offset * 30)), $candidate)) return true;
+            $at = $timestamp + ($offset * 30);
+            if (hash_equals(self::code($secret, $at), $candidate)) return intdiv($at, 30);
         }
-        return false;
+        return null;
     }
 
     public static function provisioningUri(string $secret, string $account, string $issuer = 'BareBonesShop'): string {

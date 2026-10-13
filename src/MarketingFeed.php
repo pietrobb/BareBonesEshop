@@ -33,10 +33,12 @@ class MarketingFeed {
         fputcsv($stream, $headers, ',', '"', '\\');
         foreach (self::products($locale) as $product) {
             $google = self::googleFields($product, $baseUrl);
+            // Merchant-entered text must not become a spreadsheet formula when the CSV is opened.
+            $cell = [Security::class, 'csvCell'];
             fputcsv($stream, [
-                $google['id'], $google['title'], $google['description'], $google['availability'],
+                $cell($google['id']), $cell($google['title']), $cell($google['description']), $google['availability'],
                 $google['condition'], $google['price'], $google['link'], $google['image_link'],
-                $google['brand'], $google['gtin'], $google['mpn'],
+                $cell($google['brand']), $cell($google['gtin']), $cell($google['mpn']),
             ], ',', '"', '\\');
         }
         rewind($stream);

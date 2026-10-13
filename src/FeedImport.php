@@ -271,7 +271,20 @@ class FeedImport {
     private static function isPublicFeedIp(string $ip): bool {
         if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) return false;
         $packed = inet_pton($ip);
-        if ($packed === false || strlen($packed) !== 16) return $packed !== false;
+        if ($packed === false) return false;
+        if (strlen($packed) === 4) {
+            // Non-global IPv4 space that PHP's private/reserved flags do not cover.
+            $long = unpack('N', $packed)[1];
+            foreach ([
+                ['100.64.0.0', 10],  // RFC 6598 carrier-grade NAT (provider-internal hosts)
+                ['192.0.0.0', 24],   // RFC 6890 IETF protocol assignments
+                ['198.18.0.0', 15],  // RFC 2544 benchmarking
+            ] as [$network, $bits]) {
+                $mask = (-1 << (32 - $bits)) & 0xFFFFFFFF;
+                if (($long & $mask) === (ip2long($network) & $mask)) return false;
+            }
+            return true;
+        }
 
         foreach ([
             [hex2bin('0064ff9b0000000000000000'), 12], // RFC 6052 well-known NAT64 /96

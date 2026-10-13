@@ -8,6 +8,8 @@ class BbfOptions {
     public static function forAction(string $action): ?array {
         return match ($action) {
             'bbf_categories' => self::categories(),
+            'bbf_brands' => array_map(static fn(array $r): array => ['value' => (string)$r['id'], 'label' => $r['name']],
+                CatalogScope::rows('SELECT id, name FROM brands WHERE store_id = :catalog AND active = 1 ORDER BY name')),
             'bbf_product_types' => self::productTypes(),
             'bbf_attr_types' => [
                 ['value' => 'enum', 'label' => 'Enum (zoznam hodnôt)'],
@@ -39,8 +41,7 @@ class BbfOptions {
     }
 
     private static function categories(): array {
-        $rows = Db::get()->query("SELECT id, name, path FROM categories ORDER BY path, name")->fetchAll(PDO::FETCH_ASSOC);
-        return array_map(static fn(array $r): array => ['value' => (string)$r['id'], 'label' => $r['path'] ?: $r['name']], $rows);
+        return array_map(static fn(array $r): array => ['value' => (string)$r['id'], 'label' => $r['path'] ?: $r['name']], CatalogScope::categories());
     }
 
     private static function productTypes(): array {

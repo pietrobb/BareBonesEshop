@@ -22,7 +22,7 @@ foreach ($cliEntrypoints as $cliEntrypoint) {
 
 $htaccess = str_replace("\r\n", "\n", (string)file_get_contents(TEST_CLI_DIR . '/../.htaccess'));
 assert_true(preg_match('/^RewriteRule \^\.\+\/\?\$ - \[F,L\]$/mi', $htaccess) === 1, '.htaccess: direct directory requests are denied');
-foreach (['storage', 'db', 'jobs', 'logs', 'config', 'cli', 'src', 'migrations', 'adapters', 'lang', 'demo', 'docs', 'forms', 'blocks'] as $privateTree) {
+foreach (['storage', 'db', 'jobs', 'logs', 'config', 'cli', 'src', 'migrations', 'adapters', 'lang', 'demo', 'docs', 'forms', 'blocks', 'releases', 'tests'] as $privateTree) {
     assert_true(
         preg_match('/^RewriteRule[^\r\n]*\b' . preg_quote($privateTree, '/') . '\b[^\r\n]*\s-\s+\[F,L,NC\]$/mi', $htaccess) === 1,
         ".htaccess: {$privateTree} tree is denied"
@@ -55,7 +55,7 @@ assert_true(str_contains($htaccess, 'RewriteRule ^import/(?!test-products\.csv$)
 assert_true(str_contains($htaccess, '%{THE_REQUEST}'), '.htaccess: direct cache denial distinguishes original requests');
 assert_true(str_contains($htaccess, '(?:[^?\s]+/)?cache'), '.htaccess: direct cache denial covers subdirectory deployments');
 assert_true(preg_match('/^RewriteRule \^cache[^\r\n]*\s-\s+\[F,L,NC\]$/mi', $htaccess) === 1, '.htaccess: direct cache requests are denied');
-assert_equals(4, substr_count($htaccess, 'RewriteRule ^api\.php$ cache/'), '.htaccess: explicit internal API cache rewrites remain');
+assert_equals(0, substr_count($htaccess, 'RewriteRule ^api\.php$ cache/'), '.htaccess: no API cache rewrite bypasses the store-namespaced PHP cache');
 assert_true(!str_contains($htaccess, 'RewriteCond %{REQUEST_URI} ^/cache/'), '.htaccess: broad direct cache serving condition is absent');
 assert_true(preg_match('/RewriteRule\s+\^\(\.\*\)\$\s+\$1\s+\[L,T=application\/json\]/i', $htaccess) !== 1, '.htaccess: broad direct cache serving rewrite is absent');
 assert_true(stripos($htaccess, '<FilesMatch') === false, '.htaccess: inert FilesMatch is removed');
@@ -220,6 +220,43 @@ if ($mysqlDsn) {
         $g9MigrationMysql->up($my, false);
         $g9MysqlTables = (int)$my->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('admin_accounts','admin_recovery_codes','admin_store_permissions','admin_devices','admin_sessions','queue_jobs')")->fetchColumn();
         assert_equals(6, $g9MysqlTables, 'MySQL live: G9 admin identity and queue migration is applied and idempotent');
+        foreach (['wishlist_items', 'cookie_consent', 'abandoned_carts'] as $table) $my->exec("DROP TABLE IF EXISTS {$table}");
+        $my->exec("CREATE TABLE wishlist_items (id INT AUTO_INCREMENT PRIMARY KEY, owner_key VARCHAR(191) NOT NULL, product_id INT NOT NULL, UNIQUE(owner_key, product_id)) ENGINE=InnoDB");
+        $my->exec("CREATE TABLE cookie_consent (id INT AUTO_INCREMENT PRIMARY KEY, session_id VARCHAR(191) NULL) ENGINE=InnoDB");
+        $my->exec("CREATE TABLE abandoned_carts (id INT AUTO_INCREMENT PRIMARY KEY, session_id VARCHAR(191) NOT NULL UNIQUE) ENGINE=InnoDB");
+        $my->exec("INSERT INTO wishlist_items (owner_key, product_id) VALUES ('s:a073raw', 1), ('c:5', 1)");
+        $my->exec("INSERT INTO cookie_consent (session_id) VALUES ('a073raw')");
+        $my->exec("INSERT INTO abandoned_carts (session_id) VALUES ('a073raw'), ('order:7')");
+        $a073MigrationMysql = require TEST_CLI_DIR . '/../migrations/20261012200000_totp_counter_session_keys.php';
+        $a073MigrationMysql->up($my, false);
+        $a073MigrationMysql->up($my, false);
+        $a073Hash = hash('sha256', 'a073raw');
+        assert_true((int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='admin_accounts' AND COLUMN_NAME='totp_last_counter'")->fetchColumn() === 1
+            && $my->query("SELECT owner_key FROM wishlist_items ORDER BY id")->fetchAll(PDO::FETCH_COLUMN) === ['s:' . $a073Hash, 'c:5']
+            && (string)$my->query('SELECT session_id FROM cookie_consent')->fetchColumn() === $a073Hash
+            && $my->query('SELECT session_id FROM abandoned_carts ORDER BY id')->fetchAll(PDO::FETCH_COLUMN) === [$a073Hash, 'order:7'],
+            'MySQL live: A07.3 migration adds the TOTP counter and hashes stored session IDs idempotently');
+        foreach (['wishlist_items', 'cookie_consent', 'abandoned_carts'] as $table) $my->exec("DROP TABLE {$table}");
+        // A07.4: e-mail verification tokens on MySQL — single use, expiry, bound to the address.
+        $a074vMigrationMysql = require TEST_CLI_DIR . '/../migrations/20261012210000_customer_email_verification.php';
+        $a074vMigrationMysql->up($my, false);
+        $a074vMigrationMysql->up($my, false);
+        $a074vColumns = $my->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='customers'")->fetchAll(PDO::FETCH_COLUMN);
+        foreach (['email' => 'VARCHAR(191) NULL', 'name' => 'VARCHAR(191) NULL', 'status' => "VARCHAR(16) NOT NULL DEFAULT 'active'", 'store_id' => "VARCHAR(64) NOT NULL DEFAULT 'default'", 'email_verified_at' => 'DATETIME NULL'] as $a074vColumn => $a074vDef) {
+            if (!in_array($a074vColumn, $a074vColumns, true)) $my->exec("ALTER TABLE customers ADD COLUMN {$a074vColumn} {$a074vDef}");
+        }
+        $my->exec("INSERT INTO customers (id, email, status, store_id) VALUES (97404, 'a074-mysql@example.com', 'active', 'default')");
+        $a074vMysqlToken = Customers::startEmailVerification(97404);
+        $a074vMysqlStale = Customers::startEmailVerification(97404);
+        $a074vMysqlStaleRefused = $a074vMysqlToken !== null && Customers::verifyEmail($a074vMysqlToken) === null;
+        $a074vMysqlVerified = $a074vMysqlStale !== null && Customers::verifyEmail($a074vMysqlStale) === 97404;
+        $a074vMysqlReuse = $a074vMysqlStale !== null && Customers::verifyEmail($a074vMysqlStale) === null;
+        assert_true($a074vMysqlStaleRefused && $a074vMysqlVerified && $a074vMysqlReuse
+            && $my->query('SELECT email_verified_at FROM customers WHERE id = 97404')->fetchColumn() !== null
+            && (int)$my->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='customer_email_verifications'")->fetchColumn() === 1,
+            'MySQL live: A07.4 e-mail verification migration is idempotent; tokens are single-use and superseded by re-send');
+        $my->exec('DELETE FROM customers WHERE id = 97404');
+        $my->exec('DROP TABLE customer_email_verifications');
         $g10MigrationMysql = require TEST_CLI_DIR . '/../migrations/20260801230000_theme_content_marketing.php';
         $g10MigrationMysql->up($my, false);
         $g10MigrationMysql->up($my, false);
@@ -546,6 +583,24 @@ $stockAlertColumns = array_column($pdo->query('PRAGMA table_info(products)')->fe
 assert_true(!array_diff(['stock_low_threshold', 'stock_critical_threshold'], $stockAlertColumns), 'Stock alert migration: per-product thresholds are added idempotently');
 assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='stock_alert_state'")->fetchColumn()
     && (bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='stock_alert_digests'")->fetchColumn(), 'Stock alert migration: alert state and digest tables exist');
+$webhookInboxMigration = require TEST_CLI_DIR . '/../migrations/20261012170000_payment_webhook_inbox.php';
+$webhookInboxMigration->up($pdo, true);
+$webhookInboxMigration->up($pdo, true);
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='payment_webhook_inbox'")->fetchColumn(), 'A05.6 migration: unresolved payment webhook inbox exists and migration is idempotent');
+$couponCounterMigration = require TEST_CLI_DIR . '/../migrations/20261012190000_coupon_usage_counters.php';
+$couponCounterMigration->up($pdo, true);
+$couponCounterMigration->up($pdo, true);
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='coupon_usage_counters'")->fetchColumn(), 'A06.2 migration: atomic coupon usage counters exist and migration is idempotent');
+$a073WishlistExisted = (bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wishlist_items'")->fetchColumn();
+if (!$a073WishlistExisted) $pdo->exec("CREATE TABLE wishlist_items (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_key TEXT NOT NULL, customer_id INTEGER, product_id INTEGER NOT NULL, created_at TEXT DEFAULT (datetime('now')), UNIQUE(owner_key, product_id))");
+$pdo->exec("INSERT INTO wishlist_items (owner_key, product_id) VALUES ('s:a073rawsessionid', 1)");
+$a073Migration = require TEST_CLI_DIR . '/../migrations/20261012200000_totp_counter_session_keys.php';
+$a073Migration->up($pdo, true);
+$a073Migration->up($pdo, true);
+assert_true(in_array('totp_last_counter', array_column($pdo->query('PRAGMA table_info(admin_accounts)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true)
+    && (int)$pdo->query("SELECT COUNT(*) FROM wishlist_items WHERE owner_key = 's:" . hash('sha256', 'a073rawsessionid') . "'")->fetchColumn() === 1,
+    'A07.3 migration: TOTP counter column and hashed session keys, idempotent');
+$pdo->exec($a073WishlistExisted ? "DELETE FROM wishlist_items WHERE owner_key = 's:" . hash('sha256', 'a073rawsessionid') . "'" : 'DROP TABLE wishlist_items');
 
 // ============================================================
 // TEST 3: CSV Import
@@ -783,7 +838,7 @@ $accountThemeSource = file_get_contents(TEST_CLI_DIR . '/../themes/default/block
 assert_true(str_contains($accountThemeSource, 'name="register_token"'), 'Account register form includes form-trap token');
 assert_true(!str_contains($accountSource, 'HTTP_HOST'), 'G3: password reset URL does not trust the Host header');
 assert_true(str_contains($accountThemeSource, 'name="company_website"'), 'Account register form includes hidden honeypot field');
-assert_true(str_contains($accountSource, 'account_login_account_'), 'G4: login has a per-account throttle independent of IP');
+assert_true(str_contains($accountSource, "'account_login_account_' . \$emailKey, 10, 900)"), 'G4/A07.3: login throttles per account and client IP (no lockout DoS)');
 assert_true(str_contains($accountSource, 'account_forgot_recipient_'), 'G4: password reset has a per-recipient throttle independent of IP');
 assert_true(str_contains($accountSource, "account.err_invalid_credentials"), 'G4: login returns a generic credential error');
 $adminSourceG4 = entrypointSource('admin.php');
@@ -1323,7 +1378,8 @@ $storedRecovery = (string)$pdo->query("SELECT code_hash FROM admin_recovery_code
 assert_true(str_starts_with($storedTotp, 'v1:') && !str_contains($storedTotp, $enrollment['secret']), 'G9 identity: TOTP seed is encrypted at rest');
 assert_true($storedRecovery !== hash('sha256', str_replace('-', '', $enrollment['recovery_codes'][0])), 'G9 identity: recovery codes use a deployment-keyed hash at rest');
 assert_true(Totp::verify($enrollment['secret'], Totp::code($enrollment['secret'])), 'G9 identity: RFC 6238 code verifies');
-$login = AdminIdentity::authenticate('g9-operator', 'Test-password-1234', Totp::code($enrollment['secret']), '127.0.0.1', 'G9 Test Device');
+// TOTP codes are single-use (A07.3), so each successful login below uses a newer time step in the ±1 window.
+$login = AdminIdentity::authenticate('g9-operator', 'Test-password-1234', Totp::code($enrollment['secret'], time() - 30), '127.0.0.1', 'G9 Test Device');
 assert_true($login !== null, 'G9 identity: password and TOTP authenticate');
 assert_true(AdminIdentity::session($login['token']) !== null, 'G9 identity: server-side session validates');
 AdminIdentity::setPassword($adminId, 'Rotated-password-5678');
@@ -1344,7 +1400,7 @@ for ($i = 0; $i < 8; $i++) {
 }
 $lockedUntil = $pdo->query("SELECT locked_until FROM admin_accounts WHERE id={$adminId}")->fetchColumn();
 assert_true($lockedUntil === null, 'Admin lockout DoS: wrong passwords do not lock the DB account');
-$login = AdminIdentity::authenticate('g9-operator', 'Rotated-password-5678', Totp::code($enrollment['secret']), '203.0.113.7', 'G9 Test Device');
+$login = AdminIdentity::authenticate('g9-operator', 'Rotated-password-5678', Totp::code($enrollment['secret'], time() + 30), '203.0.113.7', 'G9 Test Device');
 assert_true($login !== null, 'Admin lockout DoS: owner logs in after foreign wrong-password attempts');
 AdminIdentity::revokeSession($login['session_id']);
 for ($i = 0; $i < 5; $i++) {

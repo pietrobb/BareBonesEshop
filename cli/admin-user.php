@@ -3,7 +3,7 @@ require_once __DIR__ . '/cli-only.php';
 require_once __DIR__ . '/../src/autoload.php';
 
 $command = strtolower((string)($argv[1] ?? ''));
-$options = getopt('', ['username:', 'role:', 'store:', 'permissions:', 'status:', 'device:', 'no-mfa']);
+$options = cli_long_options($argv, ['username:', 'role:', 'store:', 'permissions:', 'status:', 'device:', 'no-mfa']);
 
 try {
     if ($command === 'keygen') {

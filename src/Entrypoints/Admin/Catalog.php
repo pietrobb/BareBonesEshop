@@ -1,12 +1,14 @@
 <?php
 /** Catalog, content, attributes, assets and review administration. */
-
+require_once __DIR__ . '/CatalogEditor.php';
+require_once __DIR__ . '/Taxonomy.php';
+require_once __DIR__ . '/PricingRules.php';
 function pageProducts(): void {
     $db = Db::get();
     $page = max(1, Security::int($_GET['page'] ?? 1));
     $perPage = 25;
     $offset = ($page - 1) * $perPage;
-    $search = trim($_GET['q'] ?? '');
+    $search = trim(Security::str($_GET['q'] ?? ''));
     $statusFilter = $_GET['status'] ?? '';
     $stockFilter = ($_GET['stock'] ?? '') === 'low' ? 'low' : '';
     // Same thresholds and warehouse availability as the stock e-mails (worst level first).
@@ -16,8 +18,8 @@ function pageProducts(): void {
     $where = '1=1';
     $params = [];
     if ($search) {
-        $where .= " AND (name LIKE :q OR sku LIKE :q2)";
-        $escaped = str_replace(['%', '_'], ['\\%', '\\_'], $search);
+        $where .= " AND (name LIKE :q ESCAPE '!' OR sku LIKE :q2 ESCAPE '!')";
+        $escaped = Db::likeLiteral($search);
         $params[':q'] = "%{$escaped}%";
         $params[':q2'] = "%{$escaped}%";
     }
@@ -105,6 +107,11 @@ function adminFormValues(string $formId, ?array $row): array {
             'name'          => $row['name'] ?? '',
             'slug'          => $row['slug'] ?? '',
             'category_id'   => (string)($row['category_id'] ?? ''),
+            'brand_id'      => (string)($row['brand_id'] ?? ''),
+            'gtin'          => (string)($row['gtin'] ?? ''),
+            'mpn'           => (string)($row['mpn'] ?? ''),
+            'seo_title'     => (string)($row['seo_title'] ?? ''),
+            'meta_description' => (string)($row['meta_description'] ?? ''),
             'product_type'  => $row['product_type'] ?? 'simple',
             'price'         => (string)(int)($row['price'] ?? 0),
             'compare_price' => isset($row['compare_price']) ? (string)(int)$row['compare_price'] : '',
@@ -112,7 +119,7 @@ function adminFormValues(string $formId, ?array $row): array {
             'status'        => $row['status'] ?? 'active',
             'summary'       => $row['summary'] ?? '',
             'description'   => $row['description'] ?? '',
-            'images'        => implode("\n", json_decode($row['images'] ?? '[]', true) ?: []),
+            'images'        => ProductEditor::imagesText($row['images'] ?? '[]', $row['image_alts'] ?? null),
             'weight_g'      => (string)(int)($row['weight_g'] ?? 0),
             'stock_low_threshold'      => isset($row['stock_low_threshold']) ? (string)(int)$row['stock_low_threshold'] : '',
             'stock_critical_threshold' => isset($row['stock_critical_threshold']) ? (string)(int)$row['stock_critical_threshold'] : '',
@@ -141,7 +148,8 @@ function pageProduct(): void {
     $db = Db::get();
     $id = Security::int($_GET['id'] ?? 0);
     $product = $id ? Products::byId($id) : null;
-    $categories = $db->query("SELECT id, name, path FROM categories ORDER BY path")->fetchAll();
+    if ($id && !$product) { echo '<h1>Produkt</h1><div class="card"><p class="muted">Produkt neexistuje. <a href="admin.php?p=products">Späť na zoznam</a></p></div>'; return; }
+    $categories = CatalogScope::categories();
     $relatedProductIds = [];
     $relatedCandidates = [];
     $relationType = Security::slug((string)($_GET['relation_type'] ?? 'related')) ?: 'related';
@@ -150,9 +158,7 @@ function pageProduct(): void {
         $relatedStmt->execute([':id' => $id, ':type' => $relationType]);
         $relatedProductIds = array_map('intval', $relatedStmt->fetchAll(PDO::FETCH_COLUMN));
 
-        $candidateStmt = $db->prepare("SELECT id, sku, name, product_type FROM products WHERE status = 'active' AND id != :id ORDER BY product_type, name");
-        $candidateStmt->execute([':id' => $id]);
-        $relatedCandidates = $candidateStmt->fetchAll(PDO::FETCH_ASSOC);
+        $relatedCandidates = CatalogScope::rows("SELECT id, sku, name, product_type FROM products WHERE store_id = :catalog AND status = 'active' AND id != :id ORDER BY product_type, name", [':id' => $id]);
     }
 
     // Load attributes for product's category (+ all parent categories)
@@ -212,6 +218,7 @@ function pageProduct(): void {
     <h1><?= $product ? 'Upraviť: ' . esc($product['name']) : 'Nový produkt' ?></h1>
     <div class="card">
         <?php ob_start(); ?>
+        <?= productEditorExtrasHtml($categories, $product) ?>
         <div id="attr-section" style="border-top:2px solid #e2e8f0;margin-top:1rem;padding-top:1rem">
             <h3 style="margin-bottom:.75rem">Atribúty</h3>
             <p class="muted" style="color:#64748b;font-size:.85rem">Atribúty sa načítajú podľa zvolenej kategórie po uložení produktu.</p>
@@ -275,6 +282,7 @@ function pageProduct(): void {
                 <button class="btn btn-primary" type="submit">Uložiť súvisiace produkty</button>
             </form>
         </div>
+        <?= productVariantsHtml($product) ?>
         <div style="margin-top:1rem"><a href="admin.php?p=products" class="btn">Späť na zoznam</a></div>
         <?php endif; ?>
     </div>
@@ -320,9 +328,7 @@ function pageProduct(): void {
 function pageDigitalAssets(): void {
     $cfg = require dirname(__DIR__, 3) . '/config.php';
     $baseDir = (string)($cfg['digital_assets_base_dir'] ?? '');
-    $assets = Db::get()->query("SELECT da.*,
-            (SELECT COUNT(*) FROM digital_entitlements de WHERE de.asset_id = da.id) AS entitlement_count
-        FROM digital_assets da ORDER BY da.sku, da.asset_key")->fetchAll();
+    $assets = CatalogScope::digitalAssets();
     ?>
     <h1>Digitálne súbory</h1>
     <div class="card">
@@ -543,7 +549,9 @@ function handleContentDelete(): void {
 // ============================================================
 function pageCmsPages(): void {
     $db = Db::get();
-    $pages = $db->query("SELECT * FROM pages ORDER BY created_at DESC")->fetchAll();
+    $stmt = $db->prepare("SELECT * FROM pages WHERE store_id = :store ORDER BY created_at DESC");
+    $stmt->execute([':store' => StoreContext::current()->id()]);
+    $pages = $stmt->fetchAll();
     ?>
     <h1>CMS Stránky</h1>
     <p style="margin-bottom:1rem"><a href="admin.php?p=page_edit" class="btn btn-primary">Nová stránka</a></p>
@@ -565,12 +573,8 @@ function pageCmsPages(): void {
 }
 function pageCmsEdit(): void {
     $id = Security::int($_GET['id'] ?? 0);
-    $pg = $id ? Db::get()->prepare("SELECT * FROM pages WHERE id = :id")->execute([':id' => $id]) ? Db::get()->prepare("SELECT * FROM pages WHERE id = :id") : null : null;
-    if ($id) {
-        $stmt = Db::get()->prepare("SELECT * FROM pages WHERE id = :id");
-        $stmt->execute([':id' => $id]);
-        $pg = $stmt->fetch();
-    }
+    $pg = $id ? ContentService::pageById($id) : null;
+    if ($id && !$pg) { echo '<p>Stránka neexistuje.</p>'; return; }
     ?>
     <h1><?= $id ? 'Upraviť stránku' : 'Nová stránka' ?></h1>
     <div class="card">
@@ -589,9 +593,12 @@ function handleCmsPageSave(): void {
     $now = Db::isSqlite() ? "datetime('now')" : 'NOW()';
     $old = null;
     if ($id) {
-        $stmt = $db->prepare("SELECT * FROM pages WHERE id = :id");
-        $stmt->execute([':id' => $id]);
-        $old = $stmt->fetch() ?: null;
+        $old = ContentService::pageById($id);
+        if (!$old) {
+            setFlash('err', 'Stránka neexistuje.');
+            header('Location: admin.php?p=pages');
+            exit;
+        }
     }
     $form = AdminForm::validate('admin-page', $old ? adminFormValues('admin-page', $old) : []);
     if ($form === null) {
@@ -619,19 +626,20 @@ function handleCmsPageSave(): void {
     }
     $status = $form['status'] !== '' ? $form['status'] : 'active';
 
-    if (!$slug) {
-        setFlash('err', 'Slug a názov sú povinné.');
+    $slugOwner = $slug ? ContentService::pageIdBySlug($slug) : null;
+    if (!$slug || ($slugOwner !== null && $slugOwner !== $id)) {
+        setFlash('err', !$slug ? 'Slug a názov sú povinné.' : 'Stránka s týmto slugom už v obchode existuje.');
         header("Location: admin.php?p=page_edit&id={$id}");
         exit;
     }
 
     if ($id) {
-        $db->prepare("UPDATE pages SET slug = :slug, title = :title, body = :body, page_type = :page_type, template = :template, layout = :layout, sections = :sections, status = :status, updated_at = {$now} WHERE id = :id")
-           ->execute([':slug' => $slug, ':title' => $title, ':body' => $body, ':page_type' => $pageType, ':template' => $template, ':layout' => $layout, ':sections' => $sections, ':status' => $status, ':id' => $id]);
+        $db->prepare("UPDATE pages SET slug = :slug, title = :title, body = :body, page_type = :page_type, template = :template, layout = :layout, sections = :sections, status = :status, updated_at = {$now} WHERE id = :id AND store_id = :store")
+           ->execute([':slug' => $slug, ':title' => $title, ':body' => $body, ':page_type' => $pageType, ':template' => $template, ':layout' => $layout, ':sections' => $sections, ':status' => $status, ':id' => $id, ':store' => StoreContext::current()->id()]);
         setFlash('ok', 'Stránka aktualizovaná.');
     } else {
-        $db->prepare("INSERT INTO pages (slug, title, body, page_type, template, layout, sections, status) VALUES (:slug, :title, :body, :page_type, :template, :layout, :sections, :status)")
-           ->execute([':slug' => $slug, ':title' => $title, ':body' => $body, ':page_type' => $pageType, ':template' => $template, ':layout' => $layout, ':sections' => $sections, ':status' => $status]);
+        $db->prepare("INSERT INTO pages (store_id, slug, title, body, page_type, template, layout, sections, status) VALUES (:store, :slug, :title, :body, :page_type, :template, :layout, :sections, :status)")
+           ->execute([':store' => StoreContext::current()->id(), ':slug' => $slug, ':title' => $title, ':body' => $body, ':page_type' => $pageType, ':template' => $template, ':layout' => $layout, ':sections' => $sections, ':status' => $status]);
         $id = (int)$db->lastInsertId();
         setFlash('ok', 'Stránka vytvorená.');
     }
@@ -641,8 +649,10 @@ function handleCmsPageSave(): void {
 function handleCmsPageDelete(): void {
     $id = Security::int($_POST['page_id'] ?? 0);
     if ($id) {
-        Db::get()->prepare("DELETE FROM pages WHERE id = :id")->execute([':id' => $id]);
-        setFlash('ok', 'Stránka zmazaná.');
+        $stmt = Db::get()->prepare("DELETE FROM pages WHERE id = :id AND store_id = :store");
+        $stmt->execute([':id' => $id, ':store' => StoreContext::current()->id()]);
+        if ($stmt->rowCount()) setFlash('ok', 'Stránka zmazaná.');
+        else setFlash('err', 'Stránka neexistuje.');
     }
     header('Location: admin.php?p=pages');
     exit;
@@ -668,8 +678,9 @@ function handleDigitalAssetSave(): void {
         || in_array('..', explode('/', $path), true) || str_contains($path, "\0");
     if ($sku === '' || strlen($sku) > 191 || !preg_match('/^[A-Za-z0-9._-]{1,191}$/', $sku)
         || !preg_match('/^[A-Za-z0-9._-]{1,80}$/', $assetKey) || $invalidPath
-        || $downloadName === '' || !preg_match('#^[a-z0-9.+-]+/[a-z0-9.+-]+$#i', $contentType)) {
-        setFlash('err', 'Neplatné údaje digitálneho súboru.');
+        || $downloadName === '' || !preg_match('#^[a-z0-9.+-]+/[a-z0-9.+-]+$#i', $contentType)
+        || !CatalogScope::ownsSku($sku)) {
+        setFlash('err', 'Neplatné údaje digitálneho súboru alebo SKU nepatrí produktu tohto katalógu.');
         header('Location: admin.php?p=digital_assets');
         exit;
     }
@@ -707,8 +718,7 @@ function handleDigitalAssetToggle(): void {
     $id = Security::int($_POST['asset_id'] ?? 0);
     $active = !empty($_POST['active']) ? 1 : 0;
     if ($id > 0) {
-        Db::get()->prepare("UPDATE digital_assets SET active = :active, updated_at = " . Db::now() . " WHERE id = :id")
-            ->execute([':active' => $active, ':id' => $id]);
+        CatalogScope::setDigitalAssetActive($id, $active);
         setFlash('ok', $active ? 'Digitálny súbor bol aktivovaný.' : 'Digitálny súbor bol deaktivovaný.');
     }
     header('Location: admin.php?p=digital_assets');
@@ -728,7 +738,7 @@ function handleReviewModerate(string $status): void {
 function handleProductRelatedSave(): void {
     $db = Db::get();
     $id = Security::int($_GET['id'] ?? 0);
-    if ($id <= 0) {
+    if ($id <= 0 || !Products::byId($id)) {
         header('Location: admin.php?p=products');
         exit;
     }
@@ -741,8 +751,7 @@ function handleProductRelatedSave(): void {
         array_map('intval', $submitted),
         static fn(int $candidateId): bool => $candidateId > 0 && $candidateId !== $id
     )));
-    $allowed = array_map('intval', $db->query("SELECT id FROM products WHERE status = 'active'")->fetchAll(PDO::FETCH_COLUMN));
-    $selected = array_values(array_intersect($selected, $allowed));
+    $selected = array_values(array_intersect($selected, CatalogScope::activeProductIds()));
 
     $db->beginTransaction();
     try {
@@ -775,8 +784,10 @@ function handleProductSave(): void {
     // BBF checks required fields, numbers, the select lists (a stored value outside today's lists survives an
     // unchanged save) and the uploaded image's size, extension and content.
     $form = AdminForm::validate('admin-product', $old ? adminFormValues('admin-product', $old) : []);
-    if ($form === null) {
-        setFlash('err', 'Produkt nebol uložený: ' . AdminForm::firstError());
+    // Brand, GTIN/MPN, SEO, extra categories and translations are checked against the active catalog first.
+    $editor = $form === null ? AdminForm::firstError() : ProductEditor::validate($form, $_POST, $id, $old);
+    if (is_string($editor)) {
+        setFlash('err', 'Produkt nebol uložený: ' . $editor);
         header("Location: admin.php?p=product&id={$id}");
         exit;
     }
@@ -785,7 +796,6 @@ function handleProductSave(): void {
     $data = [
         ':sku'           => $form['sku'],
         ':name'          => $form['name'],
-        ':slug'          => Security::slug($form['slug']),
         ':product_type'  => $form['product_type'] !== '' ? $form['product_type'] : 'simple',
         ':category_id'   => Security::int($form['category_id']),
         ':price'         => Security::int($form['price']),
@@ -798,86 +808,71 @@ function handleProductSave(): void {
         // Empty per-product alert threshold = use the stock_alerts config default.
         ':stock_low_threshold'      => $nullableCount($form['stock_low_threshold']),
         ':stock_critical_threshold' => $nullableCount($form['stock_critical_threshold']),
-    ];
+    ] + $editor['columns'];
     $productType = $data[':product_type'];
 
-    $images = array_values(array_filter(array_map('trim', explode("\n", $form['images'])), 'strlen'));
-
-    $upload = $form['image_upload']['action'] === 'replace' ? $form['image_upload']['files'][0] : null;
-    if ($upload) {
-        $tmpName = $upload['tmp_name'];
-        $dimensions = @getimagesize($tmpName);
-        $validDimensions = is_array($dimensions)
-            && ($dimensions[0] ?? 0) > 0 && ($dimensions[1] ?? 0) > 0
-            && ($dimensions[0] ?? 0) <= 12000 && ($dimensions[1] ?? 0) <= 12000
-            && ($dimensions[0] * $dimensions[1]) <= 40000000;
-        if (!$validDimensions) {
-            setFlash('err', 'Obrázok je neplatný alebo má príliš veľké rozmery.');
-            header("Location: admin.php?p=product&id={$id}");
-            exit;
-        }
-
-        $extension = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'][$upload['type']];
-        $safeSku = preg_replace('/[^a-zA-Z0-9_-]/', '_', $data[':sku'] ?: bin2hex(random_bytes(6)));
-        $filename = 'products/' . $safeSku . '-' . time() . '.' . $extension;
-        $imageBytes = file_get_contents($tmpName);
-        if ($imageBytes === false || strlen($imageBytes) !== $upload['size']) {
-            throw new RuntimeException('Uploaded image could not be read completely');
-        }
-        $storage = Adapters::storage();
-        $url = $storage->store($filename, $imageBytes);
-        $images[] = $url;
-        JobQueue::push('image_resize', ['path' => $filename], 3);
-    }
-    $data[':images'] = json_encode($images);
-    $data[':tags'] = json_encode(array_values(array_filter(array_map('trim', explode(',', $form['tags'])), 'strlen')));
-
-    // Validate slug uniqueness
-    $slug = $data[':slug'];
-    $checkSlug = $db->prepare("SELECT id FROM products WHERE slug = :slug AND id != :id");
-    $checkSlug->execute([':slug' => $slug, ':id' => $id ?: -1]);
-    if ($checkSlug->fetch()) {
-        setFlash('err', 'Slug "' . esc($slug) . '" už existuje pre iný produkt.');
+    // Image order, alts and removals come from the editor; an upload is stored last, after every check passed.
+    $images = $editor['images'];
+    $upload = $form['image_upload']['action'] === 'replace' ? ProductEditor::storeUpload($form['image_upload']['files'][0], $data[':sku']) : null;
+    if (is_string($upload)) {
+        setFlash('err', $upload);
         header("Location: admin.php?p=product&id={$id}");
         exit;
     }
+    if ($upload) $images[] = $upload[0];
+    $data[':images'] = json_encode($images);
+    $data[':tags'] = json_encode(array_values(array_filter(array_map('trim', explode(',', $form['tags'])), 'strlen')));
 
-    if ($old) {
-        // Saving the form unchanged must not rewrite the product (nor bump updated_at / the audit log).
-        $jsonList = static fn($v): array => is_array($d = json_decode((string)$v, true)) ? array_values($d) : [];
-        $nullableInt = static fn($v): ?int => $v === null || $v === '' ? null : (int)$v;
-        $changed = [];
-        foreach ($data as $param => $value) {
-            $column = substr($param, 1);
-            $before = $old[$column] ?? null;
-            $same = match ($column) {
-                'images', 'tags' => $jsonList($before) === $jsonList($value),
-                'price', 'stock', 'weight_g', 'category_id' => (int)$before === (int)$value,
-                'compare_price' => ($nullableInt($before) ?: null) === $value,
-                'stock_low_threshold', 'stock_critical_threshold' => $nullableInt($before) === $value,
-                default => (string)$before === (string)$value,
-            };
-            if (!$same) $changed[] = $column;
-        }
-        if ($changed) {
-            $stmt = $db->prepare("UPDATE products SET sku=:sku, name=:name, slug=:slug, product_type=:product_type,
-                category_id=:category_id, price=:price, compare_price=:compare_price, stock=:stock,
-                status=:status, summary=:summary, description=:description, images=:images, tags=:tags, weight_g=:weight_g,
-                stock_low_threshold=:stock_low_threshold, stock_critical_threshold=:stock_critical_threshold, updated_at={$now} WHERE id=:id");
-            $stmt->execute($data + [':id' => $id]);
-            AuditLog::log('product', $id, $old, $data, 'Admin edit: ' . implode(', ', $changed));
-            setFlash('ok', 'Produkt aktualizovaný.');
+    try {
+        if ($old) {
+            // Saving the form unchanged must not rewrite the product (nor bump updated_at / the audit log).
+            $jsonList = static fn($v): array => is_array($d = json_decode((string)$v, true)) ? array_values($d) : [];
+            $nullableInt = static fn($v): ?int => $v === null || $v === '' ? null : (int)$v;
+            $changed = [];
+            foreach ($data as $param => $value) {
+                $column = substr($param, 1);
+                $before = $old[$column] ?? null;
+                $same = match ($column) {
+                    'images', 'tags' => $jsonList($before) === $jsonList($value),
+                    'translations' => (json_decode((string)$before, true) ?: []) == (json_decode((string)$value, true) ?: []),
+                    'price', 'stock', 'weight_g', 'category_id' => (int)$before === (int)$value,
+                    'compare_price', 'brand_id' => ($nullableInt($before) ?: null) === $value,
+                    'stock_low_threshold', 'stock_critical_threshold' => $nullableInt($before) === $value,
+                    default => (string)$before === (string)$value,
+                };
+                if (!$same) $changed[] = $column;
+            }
+            if (ProductEditor::categoriesChanged($id, $editor)) $changed[] = 'categories';
+            if ($changed) {
+                $stmt = $db->prepare("UPDATE products SET sku=:sku, name=:name, slug=:slug, product_type=:product_type,
+                    category_id=:category_id, brand_id=:brand_id, gtin=:gtin, mpn=:mpn, seo_title=:seo_title, meta_description=:meta_description, translations=:translations, price=:price, compare_price=:compare_price, stock=:stock,
+                    status=:status, summary=:summary, description=:description, images=:images, image_alts=:image_alts, tags=:tags, weight_g=:weight_g,
+                    stock_low_threshold=:stock_low_threshold, stock_critical_threshold=:stock_critical_threshold, updated_at={$now} WHERE id=:id AND store_id=:catalog");
+                $db->beginTransaction(); // an exception ends the request; the uncommitted transaction is rolled back
+                $stmt->execute($data + [':id' => $id, ':catalog' => StoreContext::current()->catalogId()]);
+                ProductEditor::save($id, $editor);
+                AuditLog::log('product', $id, $old, $data, 'Admin edit: ' . implode(', ', $changed));
+                $db->commit();
+                setFlash('ok', 'Produkt aktualizovaný.');
+            } else {
+                setFlash('ok', 'Bez zmien.');
+            }
         } else {
-            setFlash('ok', 'Bez zmien.');
+            $stmt = $db->prepare("INSERT INTO products (sku, name, slug, product_type, category_id, brand_id, gtin, mpn, seo_title, meta_description, translations, price, compare_price, stock, status, summary, description, images, image_alts, tags, weight_g, stock_low_threshold, stock_critical_threshold, store_id)
+                VALUES (:sku, :name, :slug, :product_type, :category_id, :brand_id, :gtin, :mpn, :seo_title, :meta_description, :translations, :price, :compare_price, :stock, :status, :summary, :description, :images, :image_alts, :tags, :weight_g, :stock_low_threshold, :stock_critical_threshold, :catalog)");
+            $db->beginTransaction();
+            $stmt->execute($data + [':catalog' => StoreContext::current()->catalogId()]);
+            $id = (int)$db->lastInsertId();
+            ProductEditor::save($id, $editor);
+            AuditLog::log('product', $id, null, $data, 'Admin create');
+            $db->commit();
+            setFlash('ok', 'Produkt vytvorený.');
         }
-    } else {
-        $stmt = $db->prepare("INSERT INTO products (sku, name, slug, product_type, category_id, price, compare_price, stock, status, summary, description, images, tags, weight_g, stock_low_threshold, stock_critical_threshold)
-            VALUES (:sku, :name, :slug, :product_type, :category_id, :price, :compare_price, :stock, :status, :summary, :description, :images, :tags, :weight_g, :stock_low_threshold, :stock_critical_threshold)");
-        $stmt->execute($data);
-        $id = (int)$db->lastInsertId();
-        AuditLog::log('product', $id, null, $data, 'Admin create');
-        setFlash('ok', 'Produkt vytvorený.');
+    } catch (Throwable $e) {
+        if ($upload) ProductEditor::discardUpload($upload[1]);
+        throw $e;
     }
+    ProductEditor::afterImagesSaved(json_decode((string)($old['images'] ?? '[]'), true) ?: [], $images, $upload[1] ?? null);
 
     // The stock field is "available"; book the change in the warehouse ledger (the source of truth).
     try {
@@ -989,8 +984,8 @@ function exportProductsCsv($out, string $search = '', string $statusFilter = '')
     $where = "store_id = :store";
     $params = [':store' => StoreContext::current()->catalogId()];
     if ($search) {
-        $where .= " AND (name LIKE :q OR sku LIKE :q2)";
-        $escaped = str_replace(['%', '_'], ['\\%', '\\_'], $search);
+        $where .= " AND (name LIKE :q ESCAPE '!' OR sku LIKE :q2 ESCAPE '!')";
+        $escaped = Db::likeLiteral($search);
         $params[':q'] = "%{$escaped}%";
         $params[':q2'] = "%{$escaped}%";
     }
@@ -1009,14 +1004,7 @@ function exportProductsCsv($out, string $search = '', string $statusFilter = '')
 }
 function pageAttributes(): void {
     $db = Db::get();
-    $attrs = $db->query("
-        SELECT ad.*, GROUP_CONCAT(c.name, ', ') as category_names
-        FROM attribute_definitions ad
-        LEFT JOIN category_attributes ca ON ca.attribute_id = ad.id
-        LEFT JOIN categories c ON c.id = ca.category_id
-        GROUP BY ad.id
-        ORDER BY ad.sort_order, ad.name
-    ")->fetchAll(PDO::FETCH_ASSOC);
+    $attrs = CatalogScope::attributesWithCategories();
     ?>
     <h1>Atribúty</h1>
     <p style="margin-bottom:1rem"><a href="admin.php?p=attribute" class="btn btn-primary">Nový atribút</a></p>
@@ -1064,12 +1052,10 @@ function pageAttribute(): void {
         $opts->execute([':aid' => $id]);
         $options = $opts->fetchAll(PDO::FETCH_ASSOC);
 
-        $cats = $db->prepare("SELECT category_id FROM category_attributes WHERE attribute_id = :aid");
-        $cats->execute([':aid' => $id]);
-        $assignedCats = $cats->fetchAll(PDO::FETCH_COLUMN);
+        $assignedCats = CatalogScope::attributeCategoryIds($id);
     }
 
-    $categories = $db->query("SELECT id, name, path FROM categories ORDER BY path")->fetchAll(PDO::FETCH_ASSOC);
+    $categories = CatalogScope::categories();
     $types = ['enum' => 'Enum (zoznam hodnôt)', 'number' => 'Číslo', 'boolean' => 'Áno/Nie'];
     ?>
     <h1><?= $attr ? 'Upraviť: ' . esc($attr['name']) : 'Nový atribút' ?></h1>
@@ -1214,13 +1200,8 @@ function handleAttributeSave(): void {
         }
     }
 
-    // Save category assignments
-    $db->prepare("DELETE FROM category_attributes WHERE attribute_id = :aid")->execute([':aid' => $id]);
-    $catIds = array_map('intval', $_POST['category_ids'] ?? []);
-    $catIns = $db->prepare("INSERT INTO category_attributes (category_id, attribute_id) VALUES (:cid, :aid)");
-    foreach ($catIds as $cid) {
-        if ($cid > 0) $catIns->execute([':cid' => $cid, ':aid' => $id]);
-    }
+    // Category assignments of the active catalog; other catalogs keep their links to this shared attribute.
+    CatalogScope::replaceAttributeCategories($id, $_POST['category_ids'] ?? []);
 
     setFlash('ok', 'Atribút uložený.');
     header("Location: admin.php?p=attribute&id={$id}");
@@ -1228,8 +1209,10 @@ function handleAttributeSave(): void {
 }
 function handleAttributeDelete(): void {
     $id = Security::int($_POST['attr_id'] ?? 0);
-    if ($id) {
-        $db = Db::get();
+    $db = Db::get();
+    if ($id && CatalogScope::attributeUsedByOtherCatalog($id)) {
+        setFlash('err', 'Atribút používajú kategórie iného katalógu, nemožno ho zmazať.');
+    } elseif ($id) {
         $db->prepare("DELETE FROM attribute_options WHERE attribute_id = :id")->execute([':id' => $id]);
         $db->prepare("DELETE FROM category_attributes WHERE attribute_id = :id")->execute([':id' => $id]);
         $db->prepare("DELETE FROM attribute_definitions WHERE id = :id")->execute([':id' => $id]);

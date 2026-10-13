@@ -35,6 +35,7 @@ final class AccountViewModel
         } elseif ($page === 'dashboard' && $customer) {
             $id = (int)$customer['id'];
             $model['welcome_name'] = (string)($customer['name'] ?: $customer['email']);
+            $model['email_unverified'] = empty($customer['email_verified_at']);
             $model['order_count'] = Customers::orderCount($id);
             $model['default_address'] = Customers::defaultAddress($id, 'shipping');
         } elseif ($page === 'orders' && $customer) {

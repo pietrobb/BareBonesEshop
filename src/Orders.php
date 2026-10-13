@@ -525,79 +525,120 @@ class Orders {
     }
 
     /**
-     * Cancel genuinely expired, unpaid online checkouts and release stock once.
-     * Provider-backed orders are eligible only after the provider confirms a
-     * terminal unpaid state. Unknown/error states fail closed and remain pending.
+     * Cancel genuinely expired, unpaid checkouts and release stock once.
+     * Online: eligible after $olderThanSeconds and, when a provider session exists,
+     * only after the provider confirms a terminal unpaid state (errors fail closed).
+     * Offline: eligible only for payment service types listed in $offlineExpirySeconds
+     * (service_type => seconds, e.g. bank_transfer); unlisted types (COD, invoice) never expire.
+     * Ineligible old orders are skipped by keyset scan, so they cannot starve the batch.
      */
-    public static function expirePending(int $olderThanSeconds = 172800, int $limit = 100, ?callable $paymentStatusResolver = null): int {
+    public static function expirePending(int $olderThanSeconds = 172800, int $limit = 100, ?callable $paymentStatusResolver = null, array $offlineExpirySeconds = []): int {
         $olderThanSeconds = max(3600, $olderThanSeconds);
         $limit = max(1, min(100, $limit));
+        $offlineTtls = [];
+        foreach ($offlineExpirySeconds as $type => $seconds) {
+            if ((int)$seconds > 0) $offlineTtls[(string)$type] = max(3600, (int)$seconds);
+        }
+        $minAge = $offlineTtls ? min($olderThanSeconds, ...array_values($offlineTtls)) : $olderThanSeconds;
+        $cutoff = static fn(int $seconds): string => Db::isSqlite()
+            ? "datetime('now', '-{$seconds} seconds')"
+            : "DATE_SUB(NOW(), INTERVAL {$seconds} SECOND)";
         $db = Db::get();
-        $cutoffSql = Db::isSqlite()
-            ? "datetime('now', :age)"
-            : "DATE_SUB(NOW(), INTERVAL {$olderThanSeconds} SECOND)";
-        $params = [':store' => StoreContext::current()->id()];
-        if (Db::isSqlite()) $params[':age'] = '-' . $olderThanSeconds . ' seconds';
-        $stmt = $db->prepare("SELECT * FROM orders
+        $storeId = StoreContext::current()->id();
+        $scan = $db->prepare("SELECT * FROM orders
             WHERE store_id = :store AND status = 'pending' AND payment_status = 'pending'
-              AND created_at <= {$cutoffSql}
-            ORDER BY created_at ASC LIMIT {$limit}");
-        $stmt->execute($params);
+              AND created_at <= {$cutoff($minAge)} AND id > :after
+            ORDER BY id ASC LIMIT 100");
 
         $expired = 0;
-        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $order) {
-            $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true);
-            if (!is_array($snapshot) || ($snapshot['requires_online'] ?? false) !== true) continue;
-
-            $paymentId = trim((string)($order['payment_id'] ?? ''));
-            if ($paymentId !== '') {
-                if ($paymentStatusResolver === null) continue;
-                try {
-                    $providerStatus = strtolower(trim((string)$paymentStatusResolver($order)));
-                } catch (\Throwable $e) {
-                    error_log("Pending order expiry skipped for #{$order['id']}: " . $e->getMessage());
-                    continue;
+        $afterId = 0;
+        $scanned = 0;
+        while ($expired < $limit && $scanned < $limit * 50) {
+            $scan->bindValue(':store', $storeId);
+            $scan->bindValue(':after', $afterId, PDO::PARAM_INT);
+            $scan->execute();
+            $rows = $scan->fetchAll(\PDO::FETCH_ASSOC);
+            if ($rows === []) break;
+            foreach ($rows as $order) {
+                $afterId = (int)$order['id'];
+                $scanned++;
+                $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true);
+                if (!is_array($snapshot)) continue;
+                $online = ($snapshot['requires_online'] ?? false) === true;
+                $paymentId = trim((string)($order['payment_id'] ?? ''));
+                if ($online) {
+                    $ttl = $olderThanSeconds;
+                } else {
+                    $type = (string)(($snapshot['service_type'] ?? '') ?: ($order['payment_method'] ?? ''));
+                    $ttl = $offlineTtls[$type] ?? 0;
+                    if ($ttl === 0 || $paymentId !== '') continue;
                 }
-                if (!in_array($providerStatus, ['expired', 'cancelled', 'canceled', 'failed'], true)) continue;
-            }
-
-            $db->beginTransaction();
-            try {
-                $claimParams = [':id' => (int)$order['id'], ':store' => StoreContext::current()->id()];
-                if (Db::isSqlite()) $claimParams[':age'] = '-' . $olderThanSeconds . ' seconds';
-                $claim = $db->prepare("UPDATE orders
-                    SET status = 'cancelled', payment_status = 'cancelled', updated_at = " . Db::now() . "
-                    WHERE id = :id AND store_id = :store AND status = 'pending' AND payment_status = 'pending'
-                      AND created_at <= {$cutoffSql}");
-                $claim->execute($claimParams);
-                if ($claim->rowCount() !== 1) {
-                    $db->rollBack();
-                    continue;
+                $created = strtotime((string)$order['created_at'] . ' UTC');
+                if ($created === false || $created > time() - $ttl) continue;
+                if ($online && $paymentId !== '') {
+                    if ($paymentStatusResolver === null) continue;
+                    try {
+                        $providerStatus = strtolower(trim((string)$paymentStatusResolver($order)));
+                    } catch (\Throwable $e) {
+                        error_log("Pending order expiry skipped for #{$order['id']}: " . $e->getMessage());
+                        continue;
+                    }
+                    if (!in_array($providerStatus, ['expired', 'cancelled', 'canceled', 'failed'], true)) continue;
                 }
-
-                self::restoreStock((int)$order['id'], 'release');
-                $db->prepare("UPDATE checkout_sessions SET status = 'expired', updated_at = " . Db::now() . " WHERE order_id = :id AND status = 'pending'")
-                   ->execute([':id' => (int)$order['id']]);
-                AuditLog::log('order_status', (int)$order['id'], 'pending', 'cancelled', 'Expired unpaid online checkout');
-                Outbox::record(DomainEvents::ORDER_STATUS_CHANGED, 'order', (int)$order['id'], [
-                    'order_id' => (int)$order['id'],
-                    'order_number' => (string)$order['order_number'],
-                    'from' => 'pending',
-                    'to' => 'cancelled',
-                    'note' => 'Expired unpaid online checkout',
-                ]);
-                Outbox::record(DomainEvents::STOCK_CHANGED, 'order', (int)$order['id'], [
-                    'order_id' => (int)$order['id'],
-                    'reason' => 'order.expired',
-                ]);
-                $db->commit();
-                $expired++;
-            } catch (\Throwable $e) {
-                if ($db->inTransaction()) $db->rollBack();
-                throw $e;
+                if (self::expireClaimed($order, $cutoff($ttl), $online)) $expired++;
+                if ($expired >= $limit) break 2;
             }
         }
         return $expired;
+    }
+
+    /** Atomically cancel one still-pending order older than $cutoffSql and release its stock. */
+    private static function expireClaimed(array $order, string $cutoffSql, bool $online): bool {
+        $db = Db::get();
+        $orderId = (int)$order['id'];
+        $note = $online ? 'Expired unpaid online checkout' : 'Expired unpaid offline order';
+        $db->beginTransaction();
+        try {
+            $claim = $db->prepare("UPDATE orders
+                SET status = 'cancelled', payment_status = 'cancelled', updated_at = " . Db::now() . "
+                WHERE id = :id AND store_id = :store AND status = 'pending' AND payment_status = 'pending'
+                  AND created_at <= {$cutoffSql}");
+            $claim->execute([':id' => $orderId, ':store' => StoreContext::current()->id()]);
+            if ($claim->rowCount() !== 1) {
+                $db->rollBack();
+                return false;
+            }
+
+            self::restoreStock($orderId, 'release');
+            $db->prepare("UPDATE checkout_sessions SET status = 'expired', updated_at = " . Db::now() . " WHERE order_id = :id AND status = 'pending'")
+               ->execute([':id' => $orderId]);
+            AuditLog::log('order_status', $orderId, 'pending', 'cancelled', $note);
+            Outbox::record(DomainEvents::ORDER_STATUS_CHANGED, 'order', $orderId, [
+                'order_id' => $orderId,
+                'order_number' => (string)$order['order_number'],
+                'from' => 'pending',
+                'to' => 'cancelled',
+                'note' => $note,
+            ]);
+            Outbox::record(DomainEvents::STOCK_CHANGED, 'order', $orderId, [
+                'order_id' => $orderId,
+                'reason' => 'order.expired',
+            ]);
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+        // An offline buyer may still be about to pay: tell them the order no longer exists.
+        if (!$online && trim((string)($order['customer_email'] ?? '')) !== '') {
+            JobQueue::push('email_send', [
+                'template' => 'order_cancelled',
+                'to' => (string)$order['customer_email'],
+                'locale' => (string)($order['locale'] ?? ''),
+                'order_id' => $orderId,
+            ], 5);
+        }
+        return true;
     }
 
     // ============================================================

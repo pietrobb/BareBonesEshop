@@ -98,10 +98,12 @@ class ApiV1 {
             && (!is_int($body['compare_price']) || $body['compare_price'] < 0)) {
             throw new InvalidArgumentException('compare_price must be null or a non-negative integer');
         }
-        if (isset($body['status']) && !in_array($body['status'], ['active', 'draft', 'archived'], true)) {
+        // array_key_exists, not isset: an explicit null must be rejected, not skip validation.
+        if (array_key_exists('status', $body) && !in_array($body['status'], ['active', 'draft', 'archived'], true)) {
             throw new InvalidArgumentException('Invalid product status');
         }
-        if (isset($body['name']) && (trim((string)$body['name']) === '' || strlen((string)$body['name']) > 191)) {
+        if (array_key_exists('name', $body)
+            && (!is_string($body['name']) || trim($body['name']) === '' || strlen($body['name']) > 191)) {
             throw new InvalidArgumentException('Invalid product name');
         }
 
@@ -109,9 +111,13 @@ class ApiV1 {
         $db = Db::get();
         $db->beginTransaction();
         try {
-            $replay = ApiAuth::replay($client, $key, $hash);
-            if ($replay !== null) {
+            if (!ApiAuth::claim($client, $key, $hash)) {
+                // Completed earlier or by a concurrent request that held the claim until its commit.
                 $db->rollBack();
+                $replay = ApiAuth::replay($client, $key, $hash);
+                if ($replay === null || $replay['status'] === 0) {
+                    throw new UnexpectedValueException('Idempotency key is still being processed');
+                }
                 $replay['body']['meta']['idempotent_replay'] = true;
                 return $replay;
             }
@@ -133,6 +139,15 @@ class ApiV1 {
             $set[] = 'updated_at=' . Db::now();
             $stmt = $db->prepare('UPDATE products SET ' . implode(', ', $set) . ' WHERE id=:id AND store_id=:store');
             $stmt->execute($params);
+            if (array_key_exists('stock', $body) && (int)$old['stock'] !== $body['stock']) {
+                // "stock" is available quantity; the warehouse ledger is the source of truth (as in admin/CSV).
+                try {
+                    Products::setAvailableStock((string)$old['sku'], (string)($old['product_type'] ?? 'simple'), $body['stock'], 'api_adjustment', 'api_v1');
+                } catch (RuntimeException $e) {
+                    $db->rollBack();
+                    return ['status' => 409, 'body' => ['error' => ['code' => 'stock_conflict', 'message' => $e->getMessage()]]];
+                }
+            }
             $updated = Products::byId($productId);
             AuditLog::log('product', $productId, $old, $updated, 'API v1 client ' . $client['key_id']);
             Outbox::record(DomainEvents::PRODUCT_UPDATED, 'product', $productId, self::productDto($updated));

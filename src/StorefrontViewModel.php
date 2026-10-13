@@ -95,6 +95,11 @@ final class StorefrontViewModel
         if ($images !== []) {
             $jsonLd['image'] = array_column($images, 'url');
         }
+        $brand = self::brandName((int)($source['brand_id'] ?? 0));
+        if ($brand !== '') $jsonLd['brand'] = ['@type' => 'Brand', 'name' => $brand];
+        $gtin = (string)($source['gtin'] ?? '');
+        if (preg_match('/^(\d{8}|\d{12,14})$/', $gtin)) $jsonLd['gtin' . strlen($gtin)] = $gtin;
+        if (trim((string)($source['mpn'] ?? '')) !== '') $jsonLd['mpn'] = trim((string)$source['mpn']);
 
         $model = [
             'page' => [
@@ -102,8 +107,8 @@ final class StorefrontViewModel
                 'template' => 'product',
                 'title' => $product['name'],
                 'seo' => [
-                    'title' => $product['name'],
-                    'description' => $product['summary'],
+                    'title' => trim((string)($source['seo_title'] ?? '')) ?: $product['name'],
+                    'description' => trim((string)($source['meta_description'] ?? '')) ?: $product['summary'],
                     'canonical_url' => $url,
                     'image_url' => $images[0]['url'] ?? '',
                     'json_ld' => [$jsonLd, JsonLd::breadcrumbList(array_map(
@@ -325,11 +330,20 @@ final class StorefrontViewModel
         return $result;
     }
 
+    private static function brandName(int $brandId): string
+    {
+        if ($brandId <= 0) return '';
+        $stmt = Db::get()->prepare('SELECT name FROM brands WHERE id = :id AND store_id = :catalog AND active = 1');
+        $stmt->execute([':id' => $brandId, ':catalog' => StoreContext::current()->catalogId()]);
+        return (string)($stmt->fetchColumn() ?: '');
+    }
+
     private static function images(array $product): array
     {
         $rows = is_array($product['images'] ?? null)
             ? $product['images']
             : (json_decode((string)($product['images'] ?? '[]'), true) ?: []);
+        $alts = is_array($product['image_alts'] ?? null) ? $product['image_alts'] : (json_decode((string)($product['image_alts'] ?? ''), true) ?: []);
         $result = [];
         foreach (array_values($rows) as $index => $image) {
             $data = is_array($image) ? $image : ['url' => (string)$image];
@@ -338,7 +352,7 @@ final class StorefrontViewModel
             $result[] = [
                 'url' => self::imageUrl($raw, 'full'),
                 'thumbnail_url' => self::imageUrl((string)($data['thumbnail_url'] ?? $raw), 'thumb'),
-                'alt' => (string)($data['alt'] ?? $product['name'] ?? ''),
+                'alt' => (string)($alts[$raw] ?? $data['alt'] ?? $product['name'] ?? ''),
                 'primary' => isset($data['primary']) ? (bool)$data['primary'] : $index === 0,
             ];
         }

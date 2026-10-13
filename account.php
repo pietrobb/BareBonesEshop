@@ -41,8 +41,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'register') {
         $fieldValues = $_POST;
-        $email = strtolower(trim($_POST['email'] ?? ''));
-        $password = $_POST['password'] ?? '';
+        $email = strtolower(trim(Security::str($_POST['email'] ?? '')));
+        $password = Security::str($_POST['password'] ?? '');
         $name = Security::clean($_POST['name'] ?? '');
         $rlKey = 'account_register_' . md5($_SERVER['REMOTE_ADDR'] ?? 'cli');
         $looksHuman = Security::formTrapValidate(
@@ -60,6 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'customer_name' => $name ?: $email,
                     'shop_name'     => (string)Template::branding()['name'],
                 ], null);
+                Customers::requestEmailVerification((int)$id, $locale, Security::config());
                 // Auto-login
                 Customers::login($email, $password);
                 header('Location: ' . Template::storeUrl('/account.php'));
@@ -74,11 +75,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     elseif ($action === 'login') {
         $fieldValues = $_POST;
-        $email = strtolower(trim($_POST['email'] ?? ''));
-        $password = $_POST['password'] ?? '';
+        $email = strtolower(trim(Security::str($_POST['email'] ?? '')));
+        $password = Security::str($_POST['password'] ?? '');
         $emailKey = hash('sha256', $email);
         $ipAllowed = Security::rateLimit('account_login_ip', 30, 900);
-        $accountAllowed = Security::rateLimit('account_login_account_' . $emailKey, 10, 900, false);
+        // Per account AND client IP: foreign failures must not lock the owner out (no lockout DoS).
+        $accountAllowed = Security::rateLimit('account_login_account_' . $emailKey, 10, 900);
         if ($ipAllowed && $accountAllowed) {
             [$ok, $c, $err] = Customers::login($email, $password);
             if ($ok) {
@@ -100,22 +102,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     elseif ($action === 'forgot') {
         $fieldValues = $_POST;
-        $email = strtolower(trim($_POST['email'] ?? ''));
+        $email = strtolower(trim(Security::str($_POST['email'] ?? '')));
         $emailKey = hash('sha256', $email);
         $ipAllowed = Security::rateLimit('account_forgot_ip', 5, 60);
         $recipientAllowed = Security::rateLimit('account_forgot_recipient_' . $emailKey, 3, 3600, false);
         if ($ipAllowed && $recipientAllowed) {
-            $token = Customers::startPasswordReset($email);
-            if ($token) {
-                $accountCfg = require __DIR__ . '/config.php';
-                $resetUrl = Security::appUrl($accountCfg)
-                    . '/account.php?p=reset&token=' . urlencode($token);
-                MailService::send('account_password_reset', $email, $locale, [
-                    'customer_name' => $email,
-                    'reset_url'     => $resetUrl,
-                    'expires_in'    => '1',
-                ], null);
-            }
+            Customers::requestPasswordReset($email, $locale, Security::config());
         }
         // Always generic, including throttled and unknown recipients.
         $flash = $t('account.forgot_sent');
@@ -125,7 +117,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     elseif ($action === 'reset') {
         $token = Security::clean($_POST['token'] ?? '');
-        $newPassword = $_POST['password'] ?? '';
+        $newPassword = Security::str($_POST['password'] ?? '');
         $ipAllowed = Security::rateLimit('account_reset_ip', 10, 3600);
         $tokenAllowed = Security::rateLimit('account_reset_token_' . hash('sha256', $token), 5, 3600, false);
         [$ok, $err] = ($ipAllowed && $tokenAllowed)
@@ -143,11 +135,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    elseif ($action === 'resend_verification' && Customers::isLoggedIn()) {
+        $outcome = Customers::requestEmailVerification((int)$_SESSION['customer_id'], $locale, Security::config());
+        $flash = $t(match ($outcome) {
+            'sent' => 'account.verify_email_sent',
+            'verified' => 'account.verify_email_done',
+            'throttled' => 'account.verify_email_throttled',
+            default => 'account.verify_email_failed',
+        });
+        $flashType = in_array($outcome, ['sent', 'verified'], true) ? 'ok' : 'error';
+        $p = 'dashboard';
+    }
+
     elseif ($action === 'change_password' && Customers::isLoggedIn()) {
         $cid = (int)$_SESSION['customer_id'];
         $allowed = Security::rateLimit('account_change_password_' . $cid, 5, 900, false);
         [$ok, $err] = $allowed
-            ? Customers::changePassword($cid, $_POST['current'] ?? '', $_POST['new'] ?? '')
+            ? Customers::changePassword($cid, Security::str($_POST['current'] ?? ''), Security::str($_POST['new'] ?? ''))
             : [false, 'invalid_current_password'];
         $flash = $ok ? $t('account.password_changed') : ($t('account.err_' . $err) ?: $err);
         $flashType = $ok ? 'ok' : 'error';
@@ -170,16 +174,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif ($action === 'address_add' && Customers::isLoggedIn()) {
         $cid = (int)$_SESSION['customer_id'];
         Customers::addAddress($cid, [
-            'type'       => $_POST['type'] ?? 'shipping',
+            'type'       => Security::str($_POST['type'] ?? 'shipping'),
             'is_default' => !empty($_POST['is_default']),
-            'name'       => $_POST['name'] ?? '',
-            'company'    => $_POST['company'] ?? '',
-            'vat_id'     => $_POST['vat_id'] ?? '',
-            'street'     => $_POST['street'] ?? '',
-            'city'       => $_POST['city'] ?? '',
-            'zip'        => $_POST['zip'] ?? '',
-            'country'    => $_POST['country'] ?? '',
-            'phone'      => $_POST['phone'] ?? '',
+            'name'       => Security::str($_POST['name'] ?? ''),
+            'company'    => Security::str($_POST['company'] ?? ''),
+            'vat_id'     => Security::str($_POST['vat_id'] ?? ''),
+            'street'     => Security::str($_POST['street'] ?? ''),
+            'city'       => Security::str($_POST['city'] ?? ''),
+            'zip'        => Security::str($_POST['zip'] ?? ''),
+            'country'    => Security::str($_POST['country'] ?? ''),
+            'phone'      => Security::str($_POST['phone'] ?? ''),
         ]);
         header('Location: ' . Template::storeUrl('/account.php?p=addresses&ok=1'));
         exit;
@@ -283,7 +287,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $method = (string)($_POST['method'] ?? 'preferences');
         $cid = Customers::isLoggedIn() ? (int)$_SESSION['customer_id'] : null;
         $consentId = GdprService::logCookieConsent([
-            'session_id'  => session_id() ?: null,
+            'session_id'  => Security::sessionKey() ?: null,
             'customer_id' => $cid,
             'categories'  => $cats,
             'method'      => $method,
@@ -333,10 +337,21 @@ if ($p === 'invoice') {
 }
 
 // ============================================================
+// E-mail verification link (works signed in or out; token is single-use)
+// ============================================================
+$loggedIn = Customers::isLoggedIn();
+if ($p === 'verify_email') {
+    $token = (string)($_GET['token'] ?? '');
+    $verified = Security::rateLimit('account_verify_email_ip', 20, 3600) && Customers::verifyEmail($token) !== null;
+    $flash = $t($verified ? 'account.verify_email_done' : 'account.verify_email_invalid');
+    $flashType = $verified ? 'ok' : 'error';
+    $p = $loggedIn ? 'dashboard' : 'login';
+}
+
+// ============================================================
 // Auth gate for private pages
 // ============================================================
 $publicPages = ['login', 'register', 'forgot', 'reset'];
-$loggedIn = Customers::isLoggedIn();
 if (!$loggedIn && !in_array($p, $publicPages, true)) {
     $next = $_SERVER['REQUEST_URI'] ?? 'account.php';
     header('Location: ' . Template::storeUrl('/account.php?p=login&next=' . urlencode($next)));

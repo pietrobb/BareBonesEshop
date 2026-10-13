@@ -48,11 +48,12 @@ class LocalStorage implements StorageAdapter {
         $path = $this->validateRelativePath($path);
         $fullPath = $this->safePath($path);
 
-        // Delete all variants only after the original path has passed validation.
+        // Delete all variants (and the WebP copies resize() writes next to them) only after the original path has passed validation.
         foreach (self::VARIANTS as $variant => $dims) {
-            $file = $this->variantPath($path, $variant);
-            if ((file_exists($file) || is_link($file)) && !unlink($file)) {
-                throw new \RuntimeException("Cannot delete image variant: {$path} ({$variant})");
+            foreach (array_unique([$this->variantPath($path, $variant), $this->variantPath($path, $variant, 'webp')]) as $file) {
+                if ((file_exists($file) || is_link($file)) && !unlink($file)) {
+                    throw new \RuntimeException("Cannot delete image variant: {$path} ({$variant})");
+                }
             }
         }
         if ((file_exists($fullPath) || is_link($fullPath)) && !unlink($fullPath)) {
@@ -255,9 +256,9 @@ class LocalStorage implements StorageAdapter {
         return rtrim($path, "/\\");
     }
 
-    private function variantPath(string $path, string $variant): string {
+    private function variantPath(string $path, string $variant, ?string $ext = null): string {
         $path = $this->validateRelativePath($path);
-        $ext = pathinfo($path, PATHINFO_EXTENSION);
+        $ext ??= pathinfo($path, PATHINFO_EXTENSION);
         $base = pathinfo($path, PATHINFO_FILENAME);
         $dir = pathinfo($path, PATHINFO_DIRNAME);
         $variantFile = ($dir !== '.' ? $dir . '/' : '') . $base . '-' . $variant . '.' . $ext;

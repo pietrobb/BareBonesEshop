@@ -110,7 +110,12 @@ class PaymentService {
     public static function transitionPayment(int $orderId, string $to, string $eventType, int $amount = 0, string $idempotencyKey = '', array $payload = []): bool {
         $order = Orders::byId($orderId);
         if (!$order) throw new \RuntimeException("Order #{$orderId} not found");
+        return self::applyTransition($order, $to, $eventType, $amount > 0 ? $amount : (int)($order['total'] ?? 0), $idempotencyKey, $payload);
+    }
 
+    /** Guarded state-machine transition; $amount is recorded exactly (0 = no money moved). */
+    private static function applyTransition(array $order, string $to, string $eventType, int $amount, string $idempotencyKey, array $payload, string $providerRef = ''): bool {
+        $orderId = (int)$order['id'];
         $from = (string)($order['payment_status'] ?? 'pending');
         if ($from === $to) return false;
         if (!self::canPaymentTransition($from, $to)) {
@@ -119,9 +124,8 @@ class PaymentService {
 
         $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
         $provider = (string)($snapshot['provider'] ?? $order['payment_method'] ?? '');
-        $providerRef = (string)($order['payment_id'] ?? '');
+        if ($providerRef === '') $providerRef = (string)($order['payment_id'] ?? '');
         $currency = (string)($order['currency'] ?? 'eur');
-        if ($amount <= 0) $amount = (int)($order['total'] ?? 0);
 
         $db = Db::get();
         $db->beginTransaction();
@@ -133,7 +137,7 @@ class PaymentService {
                     'currency' => strtolower($currency),
                     'provider' => $provider,
                     'provider_ref' => $providerRef,
-                ]);
+                ], $from);
                 AuditLog::log('payment_status', $orderId, $from, $to, $eventType);
                 $db->commit();
                 return true;
@@ -205,26 +209,24 @@ class PaymentService {
             return ['handled' => false, 'event_type' => $eventType, 'order_id' => null, 'duplicate' => true];
         }
 
+        $status = self::eventTypeToTxStatus($eventType);
         try {
-            // 4. Resolve order
-            $orderId = self::resolveOrderId($data, $providerName);
-
-            // 5. Log transaction
-            $status = self::eventTypeToTxStatus($eventType);
-            if ($orderId) {
-                self::logTransaction(
-                    orderId:        $orderId,
-                    provider:       $providerName,
-                    providerRef:    (string)($data['provider_ref'] ?? $data['orderId'] ?? $data['id'] ?? ''),
-                    status:         $status,
-                    amount:         (int)($data['amount'] ?? 0),
-                    currency:       strtolower($data['currency'] ?? 'eur'),
-                    idempotencyKey: $eventKey,
-                    rawResponse:    $data,
-                    failClosed:     true,
-                );
-                self::applyOrderTransition($orderId, $eventType, $status, true);
+            // 4. Resolve the order in every store sharing the verified provider scope.
+            try {
+                $target = PaymentWebhookRouting::locate(self::orderRefs($data, $providerName), $providerName);
+            } catch (PaymentWebhookUnresolved $e) {
+                if ($status === 'unknown') {
+                    return ['handled' => true, 'event_type' => $eventType, 'order_id' => null];
+                }
+                Idempotency::unmark($eventKey);
+                $parked = PaymentWebhookRouting::park($providerName, $eventId, $eventType, $e);
+                return ['handled' => false, 'event_type' => $eventType, 'order_id' => null, 'parked' => $parked];
             }
+            $orderId = $target['id'];
+
+            // 5. Apply through the payment state machine inside the order's own store.
+            PaymentWebhookRouting::within($target['store_id'], static fn() => self::applyWebhookEvent($orderId, $providerName, $eventType, $eventKey, $data));
+            PaymentWebhookRouting::resolved($providerName, $eventId, $target['store_id']);
         } catch (\Throwable $e) {
             Idempotency::unmark($eventKey);
             throw $e;
@@ -347,17 +349,25 @@ class PaymentService {
     /**
      * Update orders.payment_status.
      */
-    public static function updatePaymentStatus(int $orderId, string $status, string $eventType = 'payment.status_changed', array $details = []): void {
+    public static function updatePaymentStatus(int $orderId, string $status, string $eventType = 'payment.status_changed', array $details = [], ?string $expectedFrom = null): void {
         $order = Orders::byId($orderId);
         if (!$order) throw new RuntimeException("Order #{$orderId} not found");
-        $from = (string)($order['payment_status'] ?? 'pending');
+        $from = $expectedFrom ?? (string)($order['payment_status'] ?? 'pending');
         $db = Db::get();
         $ownTransaction = !$db->inTransaction();
         if ($ownTransaction) $db->beginTransaction();
         try {
-            $db->prepare(
+            $params = [':s' => $status, ':id' => $orderId, ':store' => StoreContext::current()->id()];
+            if ($expectedFrom !== null) $params[':from'] = $expectedFrom;
+            $update = $db->prepare(
                 "UPDATE orders SET payment_status = :s, updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store"
-            )->execute([':s' => $status, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
+                . ($expectedFrom !== null ? ' AND payment_status = :from' : '')
+            );
+            $update->execute($params);
+            // Compare-and-set: a concurrent provider event must not be overwritten blindly.
+            if ($expectedFrom !== null && $update->rowCount() !== 1) {
+                throw new RuntimeException("Payment status of order #{$orderId} changed concurrently");
+            }
             if ($from !== $status) {
                 Outbox::record(DomainEvents::PAYMENT_STATUS_CHANGED, 'order', $orderId, array_merge([
                     'order_id' => $orderId,
@@ -431,106 +441,79 @@ class PaymentService {
         }
     }
 
-    private static function resolveOrderId(array $data, string $provider): ?int {
-        // Try explicit order_id in data first, but never cross the active store boundary.
-        if (!empty($data['order_id'])) {
-            $orderId = (int)$data['order_id'];
-            return Orders::byId($orderId) ? $orderId : null;
-        }
-
-        $db = Db::get();
-
-        // Stripe: session object has metadata.order_id or client_reference_id
-        if ($provider === 'stripe') {
-            $orderId = $data['metadata']['order_id'] ?? null;
-            if ($orderId) {
-                $orderId = (int)$orderId;
-                return Orders::byId($orderId) ? $orderId : null;
-            }
-
-            $sessionId = (string)($data['id'] ?? '');
-            if ($sessionId !== '') {
-                $mappedOrderId = CheckoutSession::resolveOrderId($sessionId, 'stripe');
-                if ($mappedOrderId !== null && Orders::byId($mappedOrderId)) return $mappedOrderId;
-            }
-
-            $orderNumber = $data['client_reference_id'] ?? null;
-            if ($orderNumber) {
-                $stmt = $db->prepare("SELECT id FROM orders WHERE order_number = :n AND store_id = :store LIMIT 1");
-                $stmt->execute([':n' => $orderNumber, ':store' => StoreContext::current()->id()]);
-                $id = $stmt->fetchColumn();
-                return $id === false ? null : (int)$id;
-            }
-
-            // Fall back to payment_id match
-            $paymentId = $data['payment_intent'] ?? ($sessionId !== '' ? $sessionId : null);
-            if ($paymentId) {
-                $stmt = $db->prepare("SELECT id FROM orders WHERE payment_id = :payment_id AND store_id = :store LIMIT 1");
-                $stmt->execute([':payment_id' => $paymentId, ':store' => StoreContext::current()->id()]);
-                $id = $stmt->fetchColumn();
-                return $id === false ? null : (int)$id;
-            }
-        }
-
-        // PayU: extOrderId matches order_number
-        if ($provider === 'payu') {
-            $extOrderId = $data['extOrderId'] ?? null;
-            if ($extOrderId) {
-                $stmt = $db->prepare("SELECT id FROM orders WHERE order_number = :order_number AND store_id = :store LIMIT 1");
-                $stmt->execute([':order_number' => $extOrderId, ':store' => StoreContext::current()->id()]);
-                $id = $stmt->fetchColumn();
-                return $id === false ? null : (int)$id;
-            }
-            // Fall back to payment_id
-            $payuOrderId = $data['orderId'] ?? null;
-            if ($payuOrderId) {
-                $stmt = $db->prepare("SELECT id FROM orders WHERE payment_id = :payment_id AND store_id = :store LIMIT 1");
-                $stmt->execute([':payment_id' => $payuOrderId, ':store' => StoreContext::current()->id()]);
-                $id = $stmt->fetchColumn();
-                return $id === false ? null : (int)$id;
-            }
-        }
-
-        // Mock: explicit order_id in payload
-        return null;
+    /** Trusted (signed) order references, in resolution priority order. */
+    private static function orderRefs(array $data, string $provider): array {
+        if (!empty($data['order_id'])) return ['order_id' => (int)$data['order_id']];
+        return match ($provider) {
+            'stripe' => array_filter([
+                'order_id' => (int)($data['metadata']['order_id'] ?? 0),
+                'session_id' => (string)($data['id'] ?? ''),
+                'order_number' => (string)($data['client_reference_id'] ?? ''),
+                'payment_id' => (string)($data['payment_intent'] ?? $data['id'] ?? ''),
+            ]),
+            'payu' => array_filter([
+                'order_number' => (string)($data['extOrderId'] ?? ''),
+                'payment_id' => (string)($data['orderId'] ?? ''),
+            ]),
+            default => [],
+        };
     }
 
-    private static function applyOrderTransition(int $orderId, string $eventType, string $txStatus, bool $failClosed = false): void {
+    /**
+     * Provider events never bypass the payment state machine. Money events must match the order
+     * currency (and, for captures, the exact total); refunds accumulate per refund. Events that do
+     * not apply (late failure after capture, refund of an unpaid order, repeated capture) change
+     * nothing and stay in the payment log as 'ignored'.
+     */
+    private static function applyWebhookEvent(int $orderId, string $provider, string $eventType, string $eventKey, array $data): void {
         $order = Orders::byId($orderId);
-        if (!$order) return;
+        if (!$order) throw new RuntimeException("Order #{$orderId} vanished during payment webhook");
+        $from = (string)($order['payment_status'] ?? 'pending');
+        $total = (int)$order['total'];
+        $orderCurrency = strtolower((string)($order['currency'] ?? 'eur'));
+        $amount = (int)($data['amount'] ?? 0);
+        $currency = strtolower((string)($data['currency'] ?? ''));
+        if (in_array($eventType, ['payment.paid', 'refund.succeeded'], true)
+            && ($currency !== $orderCurrency || $amount <= 0 || ($eventType === 'payment.paid' && $amount !== $total))) {
+            throw new RuntimeException("Payment webhook {$eventType} amount/currency does not match order #{$orderId}");
+        }
+        // A refund the worker already executed and logged under the provider refund id moves no new money.
+        if ($eventType === 'refund.succeeded' && self::refundAlreadyRecorded($orderId, (string)($data['refund_id'] ?? ''))) $amount = 0;
 
-        try {
-            match($eventType) {
-                'payment.paid' => self::onPaymentPaid($order),
-                'payment.failed' => self::onPaymentFailed($order),
-                'refund.succeeded' => self::onRefundSucceeded($order),
-                default => null,
-            };
-        } catch (\Throwable $e) {
-            if ($failClosed) throw $e;
-            error_log("PaymentService: transition failed for order #{$orderId} event {$eventType}: " . $e->getMessage());
+        $to = match ($eventType) {
+            'payment.paid' => 'paid',
+            'payment.failed' => in_array($from, ['pending', 'authorized'], true) ? 'failed' : null,
+            'payment.disputed' => 'disputed',
+            'refund.succeeded' => self::refundedAmount($orderId) + $amount >= $total ? 'refunded' : 'partially_refunded',
+            default => null,
+        };
+        $payload = array_merge(['provider' => $provider], $data);
+        $providerRef = (string)($data['refund_id'] ?? $data['provider_ref'] ?? $data['orderId'] ?? $data['id'] ?? '');
+        if ($to !== null && $to !== $from && self::canPaymentTransition($from, $to)) {
+            self::applyTransition($order, $to, $eventType, $amount, $eventKey, $payload, (string)($data['refund_id'] ?? ''));
+        } elseif ($to === 'partially_refunded' && $from === $to && $amount > 0) {
+            self::recordEvent($orderId, $eventType, $to, $amount, $orderCurrency, $eventKey, $payload, $provider, $providerRef);
+        } else {
+            self::recordEvent($orderId, $eventType, 'ignored', $amount, $currency ?: $orderCurrency, $eventKey, $payload + ['payment_status' => $from], $provider, $providerRef);
+            if ($to !== null) AuditLog::log('payment_webhook_ignored', $orderId, $from, $from, "{$provider} {$eventType}");
+            return;
+        }
+
+        $order = Orders::byId($orderId) ?: $order;
+        if ($to === 'paid' && OrderWorkflow::canTransition((string)$order['status'], 'paid')) {
+            OrderWorkflow::transition($orderId, 'paid', 'Payment confirmed via webhook');
+        } elseif ($to === 'refunded' && in_array($order['status'], ['returned', 'cancelled'], true)
+            && OrderWorkflow::canTransition((string)$order['status'], 'refunded')) {
+            OrderWorkflow::transition($orderId, 'refunded', 'Refund confirmed via webhook');
         }
     }
 
-    private static function onPaymentPaid(array $order): void {
-        self::updatePaymentStatus((int)$order['id'], 'paid');
-        if (OrderWorkflow::canTransition($order['status'], 'paid')) {
-            OrderWorkflow::transition((int)$order['id'], 'paid', 'Payment confirmed via webhook');
-        }
-    }
-
-    private static function onPaymentFailed(array $order): void {
-        self::updatePaymentStatus((int)$order['id'], 'failed');
-        AuditLog::log('payment_failed', (int)$order['id'], $order['status'], $order['status'], 'Payment failed');
-    }
-
-    private static function onRefundSucceeded(array $order): void {
-        self::updatePaymentStatus((int)$order['id'], 'refunded');
-        // Only transition to refunded if order is in a terminal-but-not-refunded state
-        if (in_array($order['status'], ['returned', 'cancelled'], true)
-            && OrderWorkflow::canTransition($order['status'], 'refunded')) {
-            OrderWorkflow::transition((int)$order['id'], 'refunded', 'Refund confirmed via webhook');
-        }
+    private static function refundAlreadyRecorded(int $orderId, string $refundId): bool {
+        if ($refundId === '') return false;
+        $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store AND provider_ref = :ref
+            AND status IN ('partially_refunded', 'refunded', 'refund_succeeded') LIMIT 1");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':ref' => $refundId]);
+        return (bool)$stmt->fetchColumn();
     }
 
     private static function hasMethodTables(): bool {

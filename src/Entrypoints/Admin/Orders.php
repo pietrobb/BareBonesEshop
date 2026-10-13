@@ -40,8 +40,8 @@ function pageSalesOverview(): void {
     $where = ['o.store_id = :store'];
     $params = [':store' => $storeId];
     if ($search !== '') {
-        $like = '%' . mb_strtolower($search) . '%';
-        $where[] = '(LOWER(o.order_number) LIKE :q_number OR LOWER(o.customer_name) LIKE :q_name OR LOWER(o.customer_email) LIKE :q_email)';
+        $like = '%' . Db::likeLiteral(mb_strtolower($search)) . '%';
+        $where[] = "(LOWER(o.order_number) LIKE :q_number ESCAPE '!' OR LOWER(o.customer_name) LIKE :q_name ESCAPE '!' OR LOWER(o.customer_email) LIKE :q_email ESCAPE '!')";
         $params[':q_number'] = $like;
         $params[':q_name'] = $like;
         $params[':q_email'] = $like;
@@ -233,10 +233,12 @@ function pageOrder(): void {
 
     $items = Orders::items($id);
     $allowed = OrderWorkflow::allowedTransitions($order['status']);
-    $paymentTransitions = array_values(array_diff(
+    $canRefund = Security::adminCan('orders.refund');
+    if (!$canRefund) $allowed = array_values(array_diff($allowed, ['refunded']));
+    $paymentTransitions = Security::adminCan('orders.payments') ? array_values(array_diff(
         PaymentService::allowedPaymentTransitions((string)($order['payment_status'] ?? 'pending')),
         ['refund_pending', 'partially_refunded', 'refunded']
-    ));
+    )) : [];
     $paymentTxs = PaymentService::transactionsForOrder($id);
     $refundableBalance = PaymentService::refundableBalance($id);
     $paymentSnapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
@@ -256,6 +258,10 @@ function pageOrder(): void {
             <p><?= esc($order['customer_phone']) ?></p>
             <?php if ($addr): ?>
             <p class="muted"><?= esc(($addr['street'] ?? '') . ', ' . ($addr['zip'] ?? '') . ' ' . ($addr['city'] ?? '') . ', ' . ($addr['country'] ?? '')) ?></p>
+            <?php endif; ?>
+            <?php if (trim((string)($order['notes'] ?? '')) !== ''): ?>
+            <h4 style="margin-top:.75rem"><?= esc(I18n::t('admin.order.note')) ?></h4>
+            <p data-order-note style="white-space:pre-wrap"><?= esc((string)$order['notes']) ?></p>
             <?php endif; ?>
         </div>
         <div class="card">
@@ -290,7 +296,7 @@ function pageOrder(): void {
                 <button class="btn btn-primary btn-sm" type="submit">Zmeniť platbu</button>
             </form>
             <?php endif; ?>
-            <?php if ($refundableBalance > 0 && PaymentService::canPaymentTransition((string)($order['payment_status'] ?? 'pending'), 'refund_pending')): ?>
+            <?php if ($canRefund && $refundableBalance > 0 && PaymentService::canPaymentTransition((string)($order['payment_status'] ?? 'pending'), 'refund_pending')): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_request" style="margin-top:.5rem">
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                 <input name="amount" type="number" min="1" max="<?= $refundableBalance ?>" step="1" value="<?= $refundableBalance ?>">
@@ -523,7 +529,7 @@ function pageRma(): void {
     $next = [
         'requested' => ['approved' => 'Schváliť', 'rejected' => 'Zamietnuť'],
         'approved'  => ['received' => 'Prijaté', 'rejected' => 'Zamietnuť'],
-        'received'  => ['refunded' => 'Refundované'],
+        'received'  => Security::adminCan('orders.refund') ? ['refunded' => 'Refundované'] : [],
     ];
     ?>
     <h1>Reklamácie / vrátenia <span class="muted">(<?= count($rmas) ?>)</span></h1>
@@ -576,9 +582,11 @@ function pageRma(): void {
     <?php
 }
 function handleRmaStatus(): void {
-    Security::adminRequire('products.edit');
+    Security::adminRequire('rma.manage');
     $id = Security::int($_POST['rma_id'] ?? 0);
     $status = Security::clean($_POST['status'] ?? '');
+    // Refunding an RMA issues a credit note and a refund — a money decision, not catalogue or warehouse work.
+    if ($status === 'refunded') Security::adminRequire('orders.refund');
     try {
         if ($id <= 0) throw new InvalidArgumentException('Neplatné RMA.');
         if ($status === 'received') {
@@ -621,13 +629,14 @@ function handleOrderStatus(): void {
     Security::adminRequire('orders.edit');
     $orderId = Security::int($_GET['id'] ?? 0);
     $newStatus = $_POST['new_status'] ?? '';
-    $note = trim($_POST['note'] ?? '');
+    $note = trim(Security::str($_POST['note'] ?? ''));
 
     if (!in_array($newStatus, OrderWorkflow::statuses(), true)) {
         setFlash('err', 'Neplatný stav objednávky.');
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }
+    if ($newStatus === 'refunded') Security::adminRequire('orders.refund');
     $order = Orders::byId($orderId);
     if (!$order || ($newStatus === 'paid' && ($order['payment_status'] ?? 'pending') !== 'paid')) {
         setFlash('err', $order ? 'Najprv potvrďte prijatie platby.' : 'Objednávka neexistuje.');
@@ -649,7 +658,7 @@ function handleOrderStatus(): void {
     exit;
 }
 function handleOrderPaymentTransition(): void {
-    Security::adminRequire('orders.edit');
+    Security::adminRequire('orders.payments');
     $orderId = Security::int($_GET['id'] ?? 0);
     $order = Orders::byId($orderId);
     if (!$order) {
@@ -686,7 +695,7 @@ function handleOrderPaymentTransition(): void {
     exit;
 }
 function handleOrderRefundRequest(): void {
-    Security::adminRequire('orders.edit');
+    Security::adminRequire('orders.refund');
     $orderId = Security::int($_GET['id'] ?? 0);
     $order = Orders::byId($orderId);
     if (!$order) {
@@ -724,7 +733,7 @@ function handleOrderEmailResend(): void {
     Security::adminRequire('orders.edit');
     $orderId = Security::int($_GET['id'] ?? 0);
     $logId   = Security::int($_POST['log_id'] ?? 0);
-    if ($logId <= 0 || !Security::rateLimit('admin_email_resend_' . $logId, 3, 3600, false)) {
+    if ($logId <= 0 || !Orders::byId($orderId) || !Security::rateLimit('admin_email_resend_' . $logId, 3, 3600, false)) {
         setFlash('err', 'Email nemožno opätovne odoslať.');
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
@@ -783,10 +792,10 @@ function handleOrderInvoiceResend(): void {
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }
-    $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE id = :id AND order_id = :order_id");
-    $stmt->execute([':id' => $invoiceId, ':order_id' => $orderId]);
+    $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE id = :id AND order_id = :order_id AND store_id = :store");
+    $stmt->execute([':id' => $invoiceId, ':order_id' => $orderId, ':store' => StoreContext::current()->id()]);
     $inv = $stmt->fetch();
-    if (!$inv) {
+    if (!$inv || !Orders::byId($orderId)) {
         setFlash('err', 'Faktúra neexistuje.');
         header("Location: admin.php?p=order&id={$orderId}");
         exit;

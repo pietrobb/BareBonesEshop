@@ -1,8 +1,9 @@
 <?php
 /**
  * BareBones Shop — Payment Adapter Interface
- * Default: StripePayment (Stripe Checkout — hosted flow)
- * Optional: PayPalPayment, GoPay, TatraPay, BankTransfer, CashOnDelivery
+ * Shipped adapters (adapters/contrib): StripePayment (Stripe Checkout — hosted flow), PayUPayment,
+ * CashOnDelivery, MockPayment (tests). Bank transfer is a built-in offline method, not an adapter.
+ * Other gateways are added as new classes implementing this interface.
  */
 interface PaymentAdapter {
     /** Create a payment session, returns redirect URL or client secret */

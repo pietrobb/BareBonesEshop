@@ -60,7 +60,7 @@ paths:
               $ref: '#/components/schemas/ProductPatch'
       responses:
         '200':
-          description: Updated product; an identical retry returns the stored response
+          description: Updated product; an identical retry, also one sent concurrently, returns the stored response with idempotent_replay=true and the change is applied once
           content:
             application/json:
               schema:
@@ -75,7 +75,7 @@ paths:
                       idempotent_replay: { type: boolean }
         '400': { $ref: '#/components/responses/BadRequest' }
         '409':
-          description: The Idempotency-Key was already used for a different request
+          description: The Idempotency-Key was already used for a different request (idempotency_conflict), or the stock change would break existing warehouse reservations (stock_conflict, nothing is stored and the key can be retried)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -233,7 +233,7 @@ components:
         status: { type: string, enum: [active, draft, archived] }
         price: { type: integer, minimum: 0 }
         compare_price: { type: [integer, 'null'], minimum: 0 }
-        stock: { type: integer, minimum: 0 }
+        stock: { type: integer, minimum: 0, description: Available quantity; the difference is booked as an api_adjustment in the default warehouse ledger. }
         weight_g: { type: integer, minimum: 0 }
     Order:
       type: object

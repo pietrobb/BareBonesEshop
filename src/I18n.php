@@ -64,10 +64,14 @@ class I18n {
         if (empty($localeData)) {
             return $row; // no translation — return base row as-is
         }
-        foreach (['name', 'summary', 'description', 'slug'] as $field) {
+        foreach (['name', 'summary', 'description', 'slug', 'seo_title', 'meta_description'] as $field) {
             if (!empty($localeData[$field])) {
                 $row[$field] = $localeData[$field];
             }
+        }
+        if (!empty($localeData['image_alts']) && is_array($localeData['image_alts'])) {
+            $base = json_decode((string)($row['image_alts'] ?? ''), true);
+            $row['image_alts'] = json_encode(array_merge(is_array($base) ? $base : [], $localeData['image_alts']), JSON_UNESCAPED_UNICODE);
         }
         return $row;
     }

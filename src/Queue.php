@@ -47,14 +47,13 @@ class DatabaseQueue implements QueueBackend {
     }
 
     public function pull(int $limit = 10): array {
+        $this->releaseExpiredClaims();
         $limit = max(0, min(100, $limit));
         if ($limit === 0) return [];
         $stmt = $this->db->prepare("SELECT * FROM queue_jobs
-            WHERE ((state IN ('pending','retry') AND available_at <= :now)
-                OR (state='processing' AND claimed_at <= :stale))
+            WHERE state IN ('pending','retry') AND available_at <= :now
             ORDER BY priority, available_at, created_at, id LIMIT :limit");
         $stmt->bindValue(':now', gmdate('Y-m-d H:i:s'));
-        $stmt->bindValue(':stale', gmdate('Y-m-d H:i:s', time() - $this->leaseSeconds));
         $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->execute();
         return array_map([$this, 'hydrate'], $stmt->fetchAll(PDO::FETCH_ASSOC));
@@ -67,13 +66,29 @@ class DatabaseQueue implements QueueBackend {
         $now = gmdate('Y-m-d H:i:s');
         $stmt = $this->db->prepare("UPDATE queue_jobs SET state='processing', claim_token=:token,
             claimed_at=:claimed, updated_at=:updated
-            WHERE id=:id AND ((state IN ('pending','retry') AND available_at <= :available)
-                OR (state='processing' AND claimed_at <= :stale))");
-        $stmt->execute([
-            ':token' => $token, ':claimed' => $now, ':updated' => $now, ':id' => $id,
-            ':available' => $now, ':stale' => gmdate('Y-m-d H:i:s', time() - $this->leaseSeconds),
-        ]);
+            WHERE id=:id AND state IN ('pending','retry') AND available_at <= :available");
+        $stmt->execute([':token' => $token, ':claimed' => $now, ':updated' => $now, ':id' => $id, ':available' => $now]);
         return $stmt->rowCount() === 1 ? "db:{$id}:{$token}" : '';
+    }
+
+    /**
+     * An expired lease means the worker died mid-job (fatal error, OOM, kill). That run counts as
+     * a failed attempt, so a job that keeps killing workers is dead-lettered after max_attempts
+     * instead of being re-claimed forever. state is assigned before attempts: MySQL evaluates
+     * SET left to right with updated values, SQLite with the old ones.
+     */
+    private function releaseExpiredClaims(): void {
+        $now = gmdate('Y-m-d H:i:s');
+        $this->db->prepare("UPDATE queue_jobs
+            SET state = CASE WHEN attempts + 1 >= max_attempts THEN 'failed' ELSE 'retry' END,
+                attempts = attempts + 1, available_at = :available, claim_token = NULL, claimed_at = NULL,
+                last_error = :error, updated_at = :updated
+            WHERE state = 'processing' AND claimed_at <= :stale")
+            ->execute([
+                ':available' => $now, ':updated' => $now,
+                ':error' => 'Worker stopped while processing the job (lease expired)',
+                ':stale' => gmdate('Y-m-d H:i:s', time() - $this->leaseSeconds),
+            ]);
     }
 
     public function complete(string $claim): void {
@@ -270,19 +285,23 @@ class RedisQueue implements QueueBackend {
         return $failures;
     }
 
+    /** Expired lease = the worker died mid-job; count it as an attempt and dead-letter at max_attempts. */
     private function requeueStale(): void {
         $ids = $this->redis->zRangeByScore($this->key('processing'), '-inf', (string)time());
         foreach ($ids ?: [] as $id) {
             $row = $this->redis->hGetAll($this->jobKey((string)$id));
             if (!$row) continue;
             $script = "if redis.call('zrem', KEYS[1], ARGV[1]) == 0 then return 0 end "
-                . "redis.call('hmset', KEYS[2], 'state','retry','claim_token','','available_at',ARGV[2],'updated_at',ARGV[3]) "
-                . "redis.call('zadd', KEYS[3], ARGV[4], ARGV[1]) return 1";
+                . "local attempts = redis.call('hincrby', KEYS[2], 'attempts', 1) "
+                . "local dead = attempts >= tonumber(redis.call('hget', KEYS[2], 'max_attempts') or '3') "
+                . "redis.call('hmset', KEYS[2], 'state', dead and 'failed' or 'retry', 'claim_token','','available_at',ARGV[2],'updated_at',ARGV[3],'last_error',ARGV[6]) "
+                . "if dead then redis.call('zadd', KEYS[4], ARGV[5], ARGV[1]) else redis.call('zadd', KEYS[3], ARGV[4], ARGV[1]) end return 1";
             $priority = (int)($row['priority'] ?? 5);
             $this->redis->eval($script, [
-                $this->key('processing'), $this->jobKey((string)$id), $this->key('pending'),
-                (string)$id, (string)time(), gmdate('c'), (string)((time() * 100) + $priority),
-            ], 3);
+                $this->key('processing'), $this->jobKey((string)$id), $this->key('pending'), $this->key('failed'),
+                (string)$id, (string)time(), gmdate('c'), (string)((time() * 100) + $priority), (string)time(),
+                'Worker stopped while processing the job (lease expired)',
+            ], 4);
         }
     }
 

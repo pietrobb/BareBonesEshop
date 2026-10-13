@@ -3,7 +3,7 @@ require_once __DIR__ . '/cli-only.php';
 require_once __DIR__ . '/../src/autoload.php';
 
 $command = strtolower((string)($argv[1] ?? ''));
-$options = getopt('', ['name:', 'store:', 'scopes:', 'expires::', 'key:']);
+$options = cli_long_options($argv, ['name:', 'store:', 'scopes:', 'expires::', 'key:']);
 
 try {
     if ($command === 'create') {

@@ -330,7 +330,9 @@ Keď spustíš `php cli/schema-build.php`:
 - **Compression:** OFF default (`VACUUM INTO` už defragmentuje). Opt-in cez `--gz` flag alebo `compression: true` → `*.db.gz` sidecar.
 - **GC retention:** grandfather-father-son (7 daily / 4 weekly / 6 monthly), `minimum_kept: 3` chráni pred GC-vyprázdnením pri prvotnom rozbehu.
 - **Migrator pre-hook:** ak `auto_pre_migration: true`, `cli/migrate.php` pred apply pendingu zavolá `BackupService::create(['label' => 'pre-migration'])`. Override: `--skip-backup`. Hook throw → migrácia sa nespustí (table marker NOT inserted).
-- **Manual:** `php cli/backup.php [--gc] [--gz] [--label=<text>] [--quiet]`. Cron friendly.
+- **Manual:** `php cli/backup.php [--gc] [--gz] [--label=<text>] [--quiet]`. Cron friendly. Default label je `scheduled` (podlieha GC retencii); labely `manual`, `pre-migration` a `pre-restore-snapshot` GC nikdy nemaže — `--label=manual` len pre zálohy, ktoré sa majú držať natrvalo.
+- **Oprávnenia:** zálohy obsahujú osobné údaje — `LocalBackupStorage` zapisuje `.db`/`.meta.json` s `0600` a adresáre s `0700` (umask-nezávisle; na Windows sa POSIX bity neuplatňujú, test ich vynecháva explicitným SKIP). Update SQLite snapshot je tiež `0600`.
+- **GDPR GC:** `php cli/gdpr-gc.php --apply` najprv inicializuje `BackupService` a uloží `pre-retention-gc` snapshot; ak snapshot nejde (zálohy vypnuté, MySQL), odmietne s exit 3. Po externej zálohe (napr. mysqldump) `--apply --skip-backup`.
 - **Restore:** `php cli/restore.php <remote_path> [--force] [--no-snapshot]`.
   - **sha256 verify** proti meta JSON (tamper detection — hard fail).
   - `PRAGMA integrity_check` pred swapom — hard fail pri corrupt backup.
@@ -344,7 +346,7 @@ Keď spustíš `php cli/schema-build.php`:
   php cli/migrate.php                              # auto-backup pred apply
   php cli/restore.php 2026/04/25/eshop-20260425-143012.db
   ```
-- **Gotcha:** SQLite live PDO drží file handle — pre restore najprv `Db::reset()`, inak Windows `rename()` zlyhá. `BackupService::restore()` tým prejde sám, ale **dlho-bežiace workery musia byť stopnuté** pred restore.
+- **Gotcha:** výmena živého SQLite súboru pod otvoreným spojením na POSIX potichu stratí ďalšie commity toho procesu (píše do odlinkovaného inode). `BackupService::restore()` aj `Updater::rollback()` (SQLite snapshot) preto bežia cez `SqliteMaintenance::exclusive()`: vytvorí `<db>.maintenance` (kým existuje, `Db::get()` hodí `DatabaseMaintenanceException`), zavrie vlastné spojenia na ten súbor a prepnutím WAL→DELETE dokáže, že DB nedrží žiadny iný proces. Ak je DB do 15 s stále otvorená (worker, web request), restore/rollback sa **odmietne bez zmeny** súborov aj kódu — **dlho-bežiace workery treba stopnúť** a zopakovať. Obmedzenie: spojenie otvorené mimo `Db` v režime DELETE sa detegovať nedá.
 
 ```
 catalog.json
@@ -1362,6 +1364,12 @@ dvomi workerom dokončiť rovnaký claim. Backend sa volí cez `queue.backend` b
 producerov alebo handlerov. Prepnutie backendu vyžaduje najprv vyprázdniť alebo
 reconcileovať starú frontu — joby sa medzi backendmi automaticky nekopírujú.
 
+Worker, ktorý počas jobu zomrie (fatal error, OOM, kill), nezavolá `fail()`. Po vypršaní
+lease (database/Redis `lease_seconds`, file backend 300 s od claimu v `processing/`) sa
+taký beh počíta ako neúspešný pokus: job ide späť na retry, a po `max_attempts` (3) do
+`failed` (dead letter) s chybou „lease expired“. Job, ktorý opakovane zhadzuje workera,
+sa tak neopakuje donekonečna a file backend neuviazne v `processing/`.
+
 ---
 
 ## Cenové pravidlá, zľavy, B2B — pricing.json
@@ -1534,7 +1542,7 @@ Toto zabraňuje cache explózii pri raste pravidiel.
 | Multi-currency | Áno | Áno | stores.json, pre-computed ceny | Manuálne exchange rates |
 | Product types | 6 built-in | Vlastné | catalog.json | Treba definovať sám |
 | Varianty | Áno | Áno | variant_dimensions | — |
-| Grouped/Bundle | Áno | V2 | — | Nie v prvej verzii |
+| Bundle | Áno | Áno | bundle_components, Inventory | Bez Magento grouped (výber podproduktov) |
 | Digital/downloadable | Áno | Áno | physical: false | Bez DRM |
 | Faceted filtering | Elasticsearch | DB-based | product_attrs + filter_tags | Bez synonymov, typo tolerance |
 | Full-text search | Elasticsearch | FTS5/FULLTEXT | Built-in v DB | Bez merchandising rules |
@@ -1542,8 +1550,13 @@ Toto zabraňuje cache explózii pri raste pravidiel.
 | Kupóny | Áno | Áno | pricing.json cart_rules | Základné (%, absolútna) |
 | B2B tier pricing | Áno | Áno | pricing.json | — |
 | Tax per country | Áno | Áno | tax.json | Bez per-state (US) v V1 |
-| Shipping | Áno | Áno | shipping.json | Bez live carrier rates |
-| Order management | Áno (komplex) | Áno | Status workflow + audit log | Bez partial shipments v V1 |
+| Shipping | Áno | Áno | shipping.json + carrier adaptéry (HttpShipping, Packeta, GLS) | Live rates len cez adaptér s getRates |
+| Order management | Áno (komplex) | Áno | Status workflow + audit log, Fulfillment (čiastočné zásielky), Rma (vratky/refundy) | — |
+| Customer accounts | Áno | Áno | account.php, Customers | — |
+| Reviews / Wishlist | Áno | Áno | Reviews, Wishlist | Moderácia recenzií v admine |
+| 2FA pre admin | Áno | Áno | AdminIdentity + TOTP | — |
+| Webhooky (outbound) | Áno | Áno | Outbox + worker | — |
+| Multi-warehouse | Áno (MSI) | Áno | Warehouse, inventory ledger | — |
 | Email templates | Áno | Áno | BBF template systém | — |
 | SEO (SSR, JSON-LD) | Plugin | Built-in | product.php SSR | — |
 | Import/Export CSV | Áno | Áno | Auto-generated | — |
@@ -1554,15 +1567,11 @@ Toto zabraňuje cache explózii pri raste pravidiel.
 
 | Feature | Prečo | V2 plán |
 |---|---|---|
-| Customer accounts | Komplexita (login, reset, session mgmt) | Áno, s proper auth |
-| Reviews/hodnotenia | Moderácia, spam | Áno |
-| Wishlist | Nice-to-have | localStorage modul |
-| Live carrier rates (UPS, DHL) | API integrácia | Adapter |
-| Partial shipments/refunds | Order workflow komplexita | Rozšírenie OrderWorkflow |
-| 2FA pre admin | Security | Áno, prioritné pre V2 |
-| Webhooky (outbound) | Integračná feature | Event → HTTP POST adapter |
 | A/B testing, personalization | Enterprise feature | Mimo scope |
-| Multi-warehouse stock | Komplexita | Možný adapter |
+| Magento grouped products | Bundle pokrýva bežné prípady | Podľa dopytu |
+| Konkrétne UPS/DHL integrácie | Generický HttpShipping kontrakt stačí | Adapter |
+
+Pôvodne sem patrili aj zákaznícke účty, recenzie, wishlist, live carrier rates, čiastočné zásielky/refundy, 2FA pre admin, outbound webhooky a multi-warehouse — všetko je dnes implementované (viď tabuľka V1).
 
 ---
 
@@ -3017,6 +3026,25 @@ DB identity. Po vytvorení prvého `admin_accounts` záznamu sa používa formul
 prihlásenie s password hashom, šifrovaným TOTP alebo jednorazovým recovery kódom,
 server-side session a revokovateľným device záznamom. Rola aj store permission grant
 musia povoliť akciu; účet bez grantu do aktuálneho store zlyhá closed.
+TOTP kód platí len raz: `admin_accounts.totp_last_counter` atomicky prijme iba novší
+časový krok, takže replay v ±30 s okne zlyhá.
+
+Storefront session beží so `session.use_strict_mode`, prihlásenie zákazníka rotuje
+CSRF token a throttling prihlásenia je per účet + IP (cudzie pokusy nezamknú vlastníka).
+Session ID sa do DB (wishlist `s:<…>`, abandoned carts, cookie consent) ukladá iba ako
+`Security::sessionKey()` = SHA-256; migrácia `20261012200000` prehashuje staré hodnoty.
+
+Stránka **Admin users** (`admin.php?p=admin_users`, oprávnenie `admins.manage`, owner ho má
+cez `*`) nahrádza CLI pre bežnú správu: vytvorenie účtu, blokovanie/odblokovanie, nové heslo,
+TOTP enroll/reset (secret a recovery kódy sa zobrazia raz; reset cudzieho účtu zruší jeho
+sessions), odhlásenie všade a store granty pre aktívny obchod. Ne-owner s delegovaným
+`admins.manage` nesmie vytvoriť ani meniť owner účet; nikto nezablokuje sám seba ani
+posledného aktívneho ownera. Každá zmena ide do `audit_log` (entity `admin_account`).
+
+Overenie e-mailu zákazníka: registrácia pošle odkaz `account.php?p=verify_email&token=…`
+(tabuľka `customer_email_verifications`, uložený iba SHA-256, platnosť 24 h, jednorazový,
+viazaný na adresu a obchod). Dashboard ponúka opätovné odoslanie, max. 3 za hodinu na účet;
+nový odkaz zneplatní starý. `verify_url` sa do `email_log` neukladá.
 
 ### Funkcie
 
@@ -3182,7 +3210,8 @@ interface PaymentAdapter {
 }
 
 // Default: StripePayment (Stripe Checkout — hosted flow)
-// Voliteľné: PayPalPayment, GoPay, TatraPay, BankTransfer, CashOnDelivery
+// Dodané: PayUPayment, CashOnDelivery, MockPayment; bankový prevod je vstavaná offline metóda.
+// Ďalšie brány = nová trieda implementujúca PaymentAdapter.
 ```
 
 **Prečo:** Platby sú najcitlivejšia časť. Provider-hosted flow (redirect na Stripe/PayPal) je najľahší na implementáciu a najťažší na pokašľanie. Webhooky idú cez rovnaké rozhranie.
@@ -3619,13 +3648,14 @@ private static function onPaymentCompleted(array $session): void {
             "permissions": ["*"]
         },
         "manager": {
-            "permissions": ["products.*", "orders.*", "customers.view", "reports.view", "import"]
+            "permissions": ["products.*", "categories.edit", "orders.*", "customers.view", "customers.edit", "reports.view", "gdpr.view", "import", "cache",
+                            "payments.manage", "shipping.manage", "rma.manage"]
         },
         "editor": {
             "permissions": ["products.edit", "products.view", "categories.edit", "media.upload"]
         },
         "fulfillment": {
-            "permissions": ["orders.view", "orders.ship", "orders.print"]
+            "permissions": ["orders.view", "orders.edit", "orders.ship", "orders.print"]
         },
         "viewer": {
             "permissions": ["products.view", "orders.view", "reports.view"]
@@ -3639,6 +3669,11 @@ private static function onPaymentCompleted(array $session): void {
     }
 }
 ```
+
+Peniaze majú vlastné oprávnenia, ktoré `products.edit` ani `orders.edit` nezahŕňajú:
+`orders.payments` (ručná zmena/potvrdenie platby), `orders.refund` (refund, stav `refunded`, RMA → dobropis),
+`payments.manage` a `shipping.manage` (metódy a poplatky), `rma.manage` (reklamácie). `orders.*` zahŕňa
+`orders.payments` aj `orders.refund`; vlastné roly v `admin-roles.json` ich musia uviesť výslovne.
 
 ---
 
@@ -3972,7 +4007,8 @@ Endpoint je registrovaný **PRED** auth gate v `account.php` — token je creden
 ### Admin
 
 - `admin.php?p=order&id=N` — sekcia "Faktúry": zoznam, link "PDF", "Resend invoice email", "Vystaviť faktúru" (manuálny trigger ak job zlyhal).
-- `admin.php?p=invoice_pdf&id=N` — chránený `Security::adminCan('orders.view')`, streamuje PDF inline pre náhľad.
+- `admin.php?p=invoice_pdf&id=N` — chránený `orders.view` (aj rola fulfillment), obsluhuje sa pred HTML layoutom adminu, takže odpoveď obsahuje iba PDF bajty; streamuje PDF inline pre náhľad.
+- MinimalPdf kóduje text do CP1252 cez iconv (vrátane `€` = 0x80); faktúra s dlhým zoznamom položiek pokračuje na ďalšej strane s opakovanou hlavičkou tabuľky (telo končí na 278 mm, pätička 285 mm).
 
 ### Backfill
 

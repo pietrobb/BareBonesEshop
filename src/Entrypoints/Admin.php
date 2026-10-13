@@ -1,9 +1,5 @@
 <?php
-/**
- * BareBones Shop — Admin Panel
- * Minimal admin: dashboard, products CRUD, orders, import, cache.
- * HTTP Basic Auth with brute-force protection.
- */
+/** BareBones Shop admin panel: session/MFA auth (Security::adminAuth), permission map, POST dispatch and page layout. */
 require_once dirname(__DIR__, 2) . '/src/autoload.php';
 
 require_once __DIR__ . '/Admin/Shared.php';
@@ -12,6 +8,7 @@ require_once __DIR__ . '/Admin/Orders.php';
 require_once __DIR__ . '/Admin/Customers.php';
 require_once __DIR__ . '/Admin/Operations.php';
 require_once __DIR__ . '/Admin/Recovery.php';
+require_once __DIR__ . '/Admin/AdminUsers.php';
 require_once __DIR__ . '/Admin/Request.php';
 // Auth
 Security::adminAuth();
@@ -37,8 +34,9 @@ I18n::setLocale($adminLocale);
 $adminConfig = require dirname(__DIR__, 2) . '/config.php';
 $adminAppName = trim((string)($adminConfig['admin_name'] ?? '')) ?: I18n::t('admin.app_name');
 
-$page = $_GET['p'] ?? 'dashboard';
-$action = $_GET['action'] ?? '';
+// p[]=… / action[]=… arrive as arrays; treat them like unknown pages instead of an array-key TypeError.
+$page = Security::str($_GET['p'] ?? 'dashboard', 'dashboard');
+$action = Security::str($_GET['action'] ?? '');
 
 // CSV export — POST only, so the CSRF token travels in the request body
 // instead of the URL (URLs leak via Referer header, browser history and
@@ -61,6 +59,7 @@ $pagePermissions = [
     'order'      => 'orders.view',
     'awaiting_payment' => 'orders.view',
     'abandoned_carts' => 'orders.view',
+    'invoice_pdf' => 'orders.view',
     'import'     => 'import',
     'cache'      => 'cache',
     'audit'      => 'reports.view',
@@ -70,17 +69,21 @@ $pagePermissions = [
     'content'    => 'products.edit',
     'attributes' => 'products.edit',
     'attribute'  => 'products.edit',
+    'categories' => 'categories.edit',
+    'brands'     => 'categories.edit',
+    'promotions' => 'pricing.manage', 'price_lists' => 'pricing.manage',
     'warehouses' => 'import',
     'warehouse'  => 'import',
     'feeds'      => 'import',
     'feed'       => 'import',
-    'shipping'   => 'products.edit',
-    'payments'   => 'products.edit',
+    'shipping'   => 'shipping.manage',
+    'payments'   => 'payments.manage',
     'digital_assets' => 'products.edit',
     'reviews'    => 'products.edit',
-    'rma'        => 'products.edit',
+    'rma'        => 'rma.manage',
     'customers'  => 'customers.view',
     'customer'   => 'customers.view',
+    'admin_users' => 'admins.manage',
 ];
 $requiredPerm = $pagePermissions[$page] ?? 'reports.view';
 Security::adminRequire($requiredPerm);
@@ -88,6 +91,12 @@ Security::adminRequire($requiredPerm);
 // Handle POST actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     handlePost($page, $action);
+}
+
+// Binary downloads leave before the HTML layout starts, otherwise the PDF is wrapped in admin markup.
+if ($page === 'invoice_pdf') {
+    pageInvoicePdf();
+    exit;
 }
 
 // Render page
@@ -109,6 +118,10 @@ $title = match($page) {
     'content'    => 'Content & Marketing',
     'attributes' => I18n::t('admin.title.attributes'),
     'attribute'  => isset($_GET['id']) ? I18n::t('admin.title.attribute_edit') : I18n::t('admin.title.attribute_new'),
+    'categories' => 'Kategórie',
+    'brands'     => 'Značky',
+    'promotions' => 'Promo akcie a kupóny',
+    'price_lists' => 'Cenníky',
     'warehouses' => I18n::t('admin.title.warehouses'),
     'warehouse'  => isset($_GET['id']) ? I18n::t('admin.title.warehouse_edit') : I18n::t('admin.title.warehouse_new'),
     'feeds'      => I18n::t('admin.title.feeds'),
@@ -118,6 +131,7 @@ $title = match($page) {
     'digital_assets' => 'Digitálne súbory',
     'customers'  => 'Zákazníci',
     'customer'   => 'Zákazník',
+    'admin_users' => I18n::t('admin.title.admin_users'),
     default      => I18n::t('admin.title.default'),
 };
 
@@ -196,18 +210,21 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
     <?php if (Security::adminCan('import')): ?><a href="admin.php?p=import" class="<?= $page==='import'?'active':'' ?>"><?= esc(I18n::t('admin.nav.import_csv')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('cache')): ?><a href="admin.php?p=cache" class="<?= $page==='cache'?'active':'' ?>"><?= esc(I18n::t('admin.nav.cache')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=attributes" class="<?= $page==='attributes'||$page==='attribute'?'active':'' ?>"><?= esc(I18n::t('admin.nav.attributes')) ?></a><?php endif; ?>
+    <?php if (Security::adminCan('categories.edit')): ?><a href="admin.php?p=categories" class="<?= $page==='categories'?'active':'' ?>">Kategórie</a><a href="admin.php?p=brands" class="<?= $page==='brands'?'active':'' ?>">Značky</a><?php endif; ?>
+    <?php if (Security::adminCan('pricing.manage')): ?><a href="admin.php?p=promotions" class="<?= $page==='promotions'?'active':'' ?>">Promo akcie</a><a href="admin.php?p=price_lists" class="<?= $page==='price_lists'?'active':'' ?>">Cenníky</a><?php endif; ?>
     <?php if (Security::adminCan('import')): ?><a href="admin.php?p=warehouses" class="<?= $page==='warehouses'||$page==='warehouse'?'active':'' ?>"><?= esc(I18n::t('admin.nav.warehouses')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('import')): ?><a href="admin.php?p=feeds" class="<?= $page==='feeds'||$page==='feed'?'active':'' ?>"><?= esc(I18n::t('admin.nav.feeds')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=pages" class="<?= $page==='pages'?'active':'' ?>"><?= esc(I18n::t('admin.nav.cms_pages')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=content" class="<?= $page==='content'?'active':'' ?>">Content & Marketing</a><?php endif; ?>
-    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=shipping" class="<?= $page==='shipping'?'active':'' ?>">Doprava</a><?php endif; ?>
-    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=payments" class="<?= $page==='payments'?'active':'' ?>">Platby</a><?php endif; ?>
+    <?php if (Security::adminCan('shipping.manage')): ?><a href="admin.php?p=shipping" class="<?= $page==='shipping'?'active':'' ?>">Doprava</a><?php endif; ?>
+    <?php if (Security::adminCan('payments.manage')): ?><a href="admin.php?p=payments" class="<?= $page==='payments'?'active':'' ?>">Platby</a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=digital_assets" class="<?= $page==='digital_assets'?'active':'' ?>">Digitálne súbory</a><?php endif; ?>
     <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=audit" class="<?= $page==='audit'?'active':'' ?>"><?= esc(I18n::t('admin.nav.audit')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('gdpr.view')): ?><a href="admin.php?p=gdpr" class="<?= $page==='gdpr'?'active':'' ?>"><?= esc(I18n::t('admin.nav.gdpr')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=reviews" class="<?= $page==='reviews'?'active':'' ?>">Recenzie</a><?php endif; ?>
-    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=rma" class="<?= $page==='rma'?'active':'' ?>">Reklamácie</a><?php endif; ?>
+    <?php if (Security::adminCan('rma.manage')): ?><a href="admin.php?p=rma" class="<?= $page==='rma'?'active':'' ?>">Reklamácie</a><?php endif; ?>
     <?php if (Security::adminCan('customers.view')): ?><a href="admin.php?p=customers" class="<?= $page==='customers'||$page==='customer'?'active':'' ?>">Zákazníci</a><?php endif; ?>
+    <?php if (Security::adminCan('admins.manage')): ?><a href="admin.php?p=admin_users" class="<?= $page==='admin_users'?'active':'' ?>"><?= esc(I18n::t('admin.title.admin_users')) ?></a><?php endif; ?>
 </nav>
 <main>
 <?php flash(); ?>
@@ -221,7 +238,6 @@ match($page) {
     'order'     => pageOrder(),
     'awaiting_payment' => pageAwaitingPayment(),
     'abandoned_carts' => pageAbandonedCarts(),
-    'invoice_pdf' => pageInvoicePdf(),
     'import'    => pageImport(),
     'cache'     => pageCache(),
     'audit'     => pageAudit(),
@@ -231,6 +247,9 @@ match($page) {
     'content'    => pageContentMarketing(),
     'attributes' => pageAttributes(),
     'attribute'  => pageAttribute(),
+    'categories' => pageCategories(),
+    'brands'     => pageBrands(),
+    'promotions' => pagePromotions(), 'price_lists' => pagePriceLists(),
     'warehouses' => pageWarehouses(),
     'warehouse'  => pageWarehouse(),
     'feeds'      => pageFeeds(),
@@ -242,6 +261,7 @@ match($page) {
     'rma'        => pageRma(),
     'customers'  => pageCustomers(),
     'customer'   => pageCustomerDetail(),
+    'admin_users' => pageAdminUsers(),
     default      => pageDashboard(),
 };
 ?>

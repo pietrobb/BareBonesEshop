@@ -3,7 +3,7 @@
  * BareBones Shop — Wishlist / Saved Products
  *
  * Per-owner list of saved products. The owner is either a logged-in customer
- * ("c:<id>") or an anonymous session ("s:<session_id>"). All public methods
+ * ("c:<id>") or an anonymous session ("s:<sha256(session_id)>"). All public methods
  * accept an optional explicit $ownerKey (used by tests); when omitted the
  * owner is resolved from the current session via ownerKey().
  *
@@ -21,7 +21,7 @@ class Wishlist {
         if ($cid > 0) {
             return 'c:' . $cid;
         }
-        $sid = session_id();
+        $sid = Security::sessionKey();
         return 's:' . ($sid !== '' ? $sid : 'anon');
     }
 

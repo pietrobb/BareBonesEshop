@@ -3,7 +3,7 @@
 
 function pageAwaitingPayment(): void {
     $orders = OfflinePaymentQueue::awaiting();
-    $canEdit = Security::adminCan('orders.edit');
+    $canEdit = Security::adminCan('orders.payments');
     ?>
     <h1>Čaká na platbu <span class="muted">(<?= count($orders) ?>)</span></h1>
     <div class="card table-scroll">
@@ -78,7 +78,7 @@ function pageAbandonedCarts(): void {
 }
 
 function handleAwaitingPaymentConfirm(): void {
-    Security::adminRequire('orders.edit');
+    Security::adminRequire('orders.payments');
     $orderId = Security::int($_POST['id'] ?? 0);
     $note = mb_substr(trim((string)($_POST['note'] ?? '')), 0, 200);
     try {

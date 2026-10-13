@@ -17,7 +17,7 @@ class LocalBackupStorage implements BackupStorage
         if ($root === '' || preg_match('/[\x00-\x1F\x7F]/', $root)) {
             throw new RuntimeException('LocalBackupStorage: invalid root');
         }
-        if (!is_dir($root) && !@mkdir($root, 0775, true) && !is_dir($root)) {
+        if (!is_dir($root) && !@mkdir($root, 0700, true) && !is_dir($root)) {
             throw new RuntimeException("LocalBackupStorage: mkdir failed: {$root}");
         }
 
@@ -38,16 +38,24 @@ class LocalBackupStorage implements BackupStorage
         $this->createDirectory($dir);
         // Re-resolve after mkdir to catch symlinked parents before copying.
         $abs = $this->localPath($remotePath);
-        if (!@copy($localPath, $abs)) {
-            throw new RuntimeException("LocalBackupStorage: copy failed: {$localPath} -> {$abs}");
-        }
-        $metaJson = json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-        if ($metaJson === false) {
-            throw new RuntimeException('LocalBackupStorage: meta json_encode failed');
-        }
-        $metaPath = $this->containedDerivedPath($abs . '.meta.json');
-        if (file_put_contents($metaPath, $metaJson) === false) {
-            throw new RuntimeException("LocalBackupStorage: meta write failed: {$metaPath}");
+        // Backups hold personal data: owner-only from the first byte (umask-independent).
+        $oldUmask = umask(0077);
+        try {
+            if (!@copy($localPath, $abs)) {
+                throw new RuntimeException("LocalBackupStorage: copy failed: {$localPath} -> {$abs}");
+            }
+            @chmod($abs, 0600);
+            $metaJson = json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            if ($metaJson === false) {
+                throw new RuntimeException('LocalBackupStorage: meta json_encode failed');
+            }
+            $metaPath = $this->containedDerivedPath($abs . '.meta.json');
+            if (file_put_contents($metaPath, $metaJson) === false) {
+                throw new RuntimeException("LocalBackupStorage: meta write failed: {$metaPath}");
+            }
+            @chmod($metaPath, 0600);
+        } finally {
+            umask($oldUmask);
         }
     }
 
@@ -165,8 +173,15 @@ class LocalBackupStorage implements BackupStorage
     private function createDirectory(string $dir): void
     {
         $this->assertCanonicalContainment($dir);
-        if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
-            throw new RuntimeException("LocalBackupStorage: mkdir failed: {$dir}");
+        if (!is_dir($dir)) {
+            $oldUmask = umask(0077);
+            try {
+                if (!@mkdir($dir, 0700, true) && !is_dir($dir)) {
+                    throw new RuntimeException("LocalBackupStorage: mkdir failed: {$dir}");
+                }
+            } finally {
+                umask($oldUmask);
+            }
         }
         $this->assertCanonicalContainment($dir);
     }

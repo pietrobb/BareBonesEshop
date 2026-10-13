@@ -5,6 +5,7 @@
  * Copy this file to `config.php` and fill in your own values.
  * `config.php` is gitignored so your secrets never land in the repo.
  *   cp config.example.php config.php
+ * or let `php cli/setup.php install` create it with a generated admin_identity_key.
  */
 return [
     // Database: 'sqlite' or 'mysql'
@@ -42,6 +43,10 @@ return [
     // confirmation of a terminal unpaid state. Keep above provider session TTL.
     'pending_order_expiry_seconds' => 172800,
     'pending_order_expiry_batch'   => 25,
+    // Unpaid offline orders (payment service_type => seconds) are cancelled and their stock
+    // released after this age; the buyer gets the order_cancelled e-mail. Types not listed
+    // (cod, invoice, offline) never auto-expire. Omitted key = bank_transfer after 14 days.
+    'offline_order_expiry_seconds' => ['bank_transfer' => 1209600],
 
     // Admin
     'admin_name'     => '', // optional admin brand; defaults to the translated BareBonesShop name
@@ -104,7 +109,7 @@ return [
         // 'erp' => 'money',
     ],
     'providers' => [
-        'payment' => [], // e.g. 'gopay' => 'GoPayPayment'
+        'payment' => [], // stripe/payu/mock are built in; register a custom gateway as code => ['class' => <your PaymentAdapter class>]
         'shipping' => [],
         'mail' => [],
         'tax' => [],

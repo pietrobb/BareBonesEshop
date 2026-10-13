@@ -46,7 +46,7 @@ class AdminIdentity {
         $db = Db::get();
         $db->beginTransaction();
         try {
-            $db->prepare('UPDATE admin_accounts SET totp_secret_encrypted=:secret, mfa_required=1, updated_at=:updated WHERE id=:id')
+            $db->prepare('UPDATE admin_accounts SET totp_secret_encrypted=:secret, totp_last_counter=NULL, mfa_required=1, updated_at=:updated WHERE id=:id')
                 ->execute([':secret' => self::encrypt($secret), ':updated' => gmdate('Y-m-d H:i:s'), ':id' => $accountId]);
             $db->prepare('DELETE FROM admin_recovery_codes WHERE account_id=:id')->execute([':id' => $accountId]);
             $codes = [];
@@ -137,7 +137,10 @@ class AdminIdentity {
         if ((int)$account['mfa_required'] === 1) {
             $encrypted = (string)($account['totp_secret_encrypted'] ?? '');
             if ($encrypted === '') return null;
-            $validMfa = Totp::verify(self::decrypt($encrypted), $mfaCode) || self::consumeRecoveryCode((int)$account['id'], $mfaCode);
+            $counter = Totp::matchedCounter(self::decrypt($encrypted), $mfaCode);
+            $validMfa = $counter !== null
+                ? self::claimTotpCounter((int)$account['id'], $counter)
+                : self::consumeRecoveryCode((int)$account['id'], $mfaCode);
             if (!$validMfa) {
                 self::recordFailure((int)$account['id']);
                 return null;
@@ -225,6 +228,24 @@ class AdminIdentity {
             ->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    public static function roles(): array {
+        return self::ROLES;
+    }
+
+    /** MFA enrollment needs the deployment key; check before creating state that would depend on it. */
+    public static function mfaKeyConfigured(): bool {
+        try {
+            self::secretKey();
+            return true;
+        } catch (RuntimeException $e) {
+            return false;
+        }
+    }
+
+    public static function accountById(int $id): ?array {
+        return self::available() ? self::account($id) : null;
+    }
+
     public static function accountByUsername(string $username): ?array {
         if (!self::available()) return null;
         $stmt = Db::get()->prepare('SELECT * FROM admin_accounts WHERE username=:username LIMIT 1');
@@ -270,6 +291,14 @@ class AdminIdentity {
         Db::get()->prepare('INSERT INTO admin_devices (account_id, fingerprint, label, user_agent, last_ip, last_seen_at, created_at) VALUES (:account, :fingerprint, :label, :agent, :ip, :seen, :created)')
             ->execute([':account' => $accountId, ':fingerprint' => $fingerprint, ':label' => substr($userAgent, 0, 80), ':agent' => $userAgent, ':ip' => $ip, ':seen' => $now, ':created' => $now]);
         return (int)Db::get()->lastInsertId();
+    }
+
+    /** A TOTP code is single-use: only a time step newer than the last accepted one wins (atomic). */
+    private static function claimTotpCounter(int $accountId, int $counter): bool {
+        $stmt = Db::get()->prepare('UPDATE admin_accounts SET totp_last_counter=:counter
+            WHERE id=:id AND (totp_last_counter IS NULL OR totp_last_counter < :counter_floor)');
+        $stmt->execute([':counter' => $counter, ':id' => $accountId, ':counter_floor' => $counter]);
+        return $stmt->rowCount() === 1;
     }
 
     private static function consumeRecoveryCode(int $accountId, string $code): bool {

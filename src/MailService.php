@@ -21,6 +21,7 @@
 class MailService {
     private static ?MailAdapter $adapterOverride = null;
     private static array $fallbackLocales = ['en'];
+    private const SECRET_LINK_VARS = ['reset_url', 'verify_url', 'cart_url', 'unsubscribe_url', 'download_links'];
 
     /** For tests: inject a specific adapter (bypasses env). */
     public static function useAdapter(?MailAdapter $a): void {
@@ -118,8 +119,8 @@ class MailService {
      * Creates a NEW email_log entry — the original row stays immutable.
      */
     public static function resend(int $logId, ?int $orderId = null): array {
-        $sql = "SELECT * FROM email_log WHERE id = :id";
-        $params = [':id' => $logId];
+        $sql = "SELECT * FROM email_log WHERE id = :id AND store_id = :store";
+        $params = [':id' => $logId, ':store' => StoreContext::current()->id()];
         if ($orderId !== null) {
             $sql .= " AND order_id = :order_id";
             $params[':order_id'] = $orderId;
@@ -131,6 +132,9 @@ class MailService {
             return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => '', 'error' => 'log entry not found'];
         }
         $vars = json_decode((string)($row['payload'] ?? '{}'), true) ?: [];
+        if (!empty($vars['_redacted'])) {
+            return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => '', 'error' => 'one-time links are not stored; trigger a fresh email instead'];
+        }
         return self::send(
             (string)$row['template'],
             (string)$row['recipient'],
@@ -170,7 +174,8 @@ class MailService {
             $text = self::renderString($text, $vars, false);
         } else {
             // Fallback plain text from HTML
-            $text = trim(preg_replace('/\s+\n/', "\n", strip_tags($html)));
+            // Decode the HTML escaping so links survive (p=reset&token=..., not &amp;token=).
+            $text = trim(preg_replace('/\s+\n/', "\n", html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8')));
         }
 
         return ['subject' => $subject, 'html' => $html, 'text' => $text];
@@ -216,6 +221,7 @@ class MailService {
     private static function recipientAllowed(string $recipient, string $template): bool {
         $limits = [
             'account_password_reset' => [3, 3600],
+            'account_email_verification' => [3, 3600],
             'account_welcome' => [2, 86400],
             'cart_reminder' => [1, 86400],
             // Configured merchant inbox, deduplicated per order: a busy hour must not drop orders.
@@ -305,11 +311,28 @@ class MailService {
             ':locale'    => $locale,
             ':subject'   => $subject,
             ':adapter'   => $adapterId,
-            ':payload'   => json_encode($vars, JSON_UNESCAPED_UNICODE),
+            ':payload'   => json_encode(self::loggableVars($vars), JSON_UNESCAPED_UNICODE),
             ':store'     => StoreContext::current()->id(),
             ':correlation' => Logger::correlationId(),
         ]);
         return (int)Db::get()->lastInsertId();
+    }
+
+    /**
+     * Bearer links (password reset, cart recovery/opt-out, downloads) must not outlive the
+     * mail: their tokens are stored hashed, so the log keeps only a redaction marker.
+     */
+    private static function loggableVars(array $vars): array {
+        $redacted = false;
+        foreach (self::SECRET_LINK_VARS as $key) {
+            if (!array_key_exists($key, $vars)) continue;
+            $redacted = true;
+            $vars[$key] = is_array($vars[$key])
+                ? array_map(static fn($item) => is_array($item) && array_key_exists('url', $item) ? ['url' => '[redacted]'] + $item : '[redacted]', $vars[$key])
+                : '[redacted]';
+        }
+        if ($redacted) $vars['_redacted'] = true;
+        return $vars;
     }
 
     private static function logUpdate(int $id, string $status, string $error): void {

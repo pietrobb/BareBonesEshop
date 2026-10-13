@@ -93,6 +93,7 @@ class PayUPayment implements IdempotentRefundAdapter {
      * Returns ['event_type' => type, 'event_id' => id, 'data' => data]
      */
     public function handleWebhook(array $payload): array {
+        if (isset($payload['refund']) && is_array($payload['refund'])) return $this->refundNotification($payload);
         $orderData = $payload['order'] ?? [];
         $status    = strtolower($orderData['status'] ?? '');
 
@@ -101,14 +102,37 @@ class PayUPayment implements IdempotentRefundAdapter {
             'completed'  => 'payment.paid',
             'canceled'   => 'payment.failed',
             'rejected'   => 'payment.failed',
-            'refund'     => 'refund.succeeded',
             default      => 'payment.unknown',
         };
 
         return [
             'event_type' => $eventType,
             'event_id'   => !empty($orderData['orderId']) && $status !== '' ? $orderData['orderId'] . ':' . $status : '',
-            'data'       => $orderData,
+            'data'       => array_merge($orderData, [
+                'amount'   => (int)($orderData['totalAmount'] ?? 0),
+                'currency' => strtolower((string)($orderData['currencyCode'] ?? '')),
+            ]),
+        ];
+    }
+
+    /**
+     * Official PayU refund notification: {orderId, extOrderId, refund: {refundId, amount, currencyCode, status}}.
+     * FINALIZED moves money; CANCELED does not.
+     */
+    private function refundNotification(array $payload): array {
+        $refund = $payload['refund'];
+        $status = strtolower((string)($refund['status'] ?? ''));
+        $refundId = (string)($refund['refundId'] ?? '');
+        return [
+            'event_type' => $status === 'finalized' ? 'refund.succeeded' : 'refund.' . ($status ?: 'unknown'),
+            'event_id'   => !empty($payload['orderId']) && $refundId !== '' && $status !== '' ? $payload['orderId'] . ':refund:' . $refundId . ':' . $status : '',
+            'data'       => [
+                'orderId'    => (string)($payload['orderId'] ?? ''),
+                'extOrderId' => (string)($payload['extOrderId'] ?? ''),
+                'refund_id'  => $refundId,
+                'amount'     => (int)($refund['amount'] ?? 0),
+                'currency'   => strtolower((string)($refund['currencyCode'] ?? '')),
+            ],
         ];
     }
 

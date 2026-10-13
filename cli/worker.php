@@ -54,19 +54,20 @@ $handlers = [
     'merchant_notify'   => 'handleMerchantNotify',
 ];
 
-// Release abandoned online reservations on every cron worker run. Provider
+// Release abandoned unpaid reservations in every store on every cron worker run. Provider
 // errors and non-terminal payment states are skipped by Orders::expirePending.
 try {
     $gateways = [];
-    $expiredOrders = Orders::expirePending(
-        (int)($cfg['pending_order_expiry_seconds'] ?? 172800),
-        (int)($cfg['pending_order_expiry_batch'] ?? 25),
+    $expiredOrders = PendingOrderExpiry::sweep(
+        $cfg,
         static function (array $order) use (&$gateways): string {
             $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true) ?: [];
             $provider = strtolower((string)($snapshot['provider'] ?? orderProviderCode($order, 'payment')));
             if ($provider === '') $provider = Adapters::defaultProviderCode('payment');
-            $gateways[$provider] ??= Adapters::payment($provider);
-            return $gateways[$provider]->getStatus((string)$order['payment_id']);
+            // Stores may hold different provider credentials, so gateways are cached per provider scope.
+            $gatewayKey = StoreContext::current()->providerId() . ':' . $provider;
+            $gateways[$gatewayKey] ??= Adapters::payment($provider);
+            return $gateways[$gatewayKey]->getStatus((string)$order['payment_id']);
         }
     );
     if ($verbose && $expiredOrders > 0) echo "Expired pending orders: {$expiredOrders}\n";

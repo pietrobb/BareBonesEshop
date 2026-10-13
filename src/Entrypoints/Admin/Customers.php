@@ -9,8 +9,8 @@ function pageCustomers(): void {
     $ids = array_map(static fn($c) => (int)$c['id'], $customers);
     if ($ids) {
         $ph = implode(',', array_fill(0, count($ids), '?'));
-        $st = Db::get()->prepare("SELECT customer_id, COUNT(*) AS cnt FROM orders WHERE customer_id IN ({$ph}) GROUP BY customer_id");
-        $st->execute($ids);
+        $st = Db::get()->prepare("SELECT customer_id, COUNT(*) AS cnt FROM orders WHERE store_id = ? AND customer_id IN ({$ph}) GROUP BY customer_id");
+        $st->execute([StoreContext::current()->id(), ...$ids]);
         foreach ($st->fetchAll() as $r) { $counts[(int)$r['customer_id']] = (int)$r['cnt']; }
     }
     ?>
@@ -82,7 +82,13 @@ function pageCustomerDetail(): void {
                 </button>
             </form>
             <?php endif; ?>
-            <a class="btn btn-sm" href="cli/gdpr-export.php?customer-id=<?= (int)$c['id'] ?>">GDPR export</a>
+            <?php if (Security::adminCan('gdpr.view')): ?>
+            <form method="post" action="admin.php?p=gdpr&action=export" style="display:inline">
+                <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                <input type="hidden" name="customer_id" value="<?= (int)$c['id'] ?>">
+                <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.gdpr.export_hint')) ?></button>
+            </form>
+            <?php endif; ?>
             <a class="btn btn-sm" href="admin.php?p=gdpr&email=<?= urlencode((string)$c['email']) ?>">GDPR vymazať…</a>
         </p>
         <?php else: ?>
@@ -161,11 +167,13 @@ function pageGdpr(): void {
     $email = strtolower(trim((string)($_GET['email'] ?? '')));
     $customers = [];
     if ($email !== '') {
-        $stmt = $db->prepare("SELECT id, email, name, status, created_at FROM customers WHERE LOWER(email) LIKE LOWER(:email) ORDER BY id DESC LIMIT 25");
-        $stmt->execute([':email' => '%' . $email . '%']);
+        $stmt = $db->prepare("SELECT id, email, name, status, created_at FROM customers WHERE store_id = :store AND LOWER(email) LIKE LOWER(:email) ESCAPE '!' ORDER BY id DESC LIMIT 25");
+        $stmt->execute([':store' => StoreContext::current()->id(), ':email' => '%' . Db::likeLiteral($email) . '%']);
         $customers = $stmt->fetchAll();
     }
-    $events = $db->query("SELECT * FROM gdpr_events ORDER BY created_at DESC LIMIT 50")->fetchAll();
+    $events = $db->prepare("SELECT * FROM gdpr_events WHERE store_id = :store ORDER BY created_at DESC, id DESC LIMIT 50");
+    $events->execute([':store' => StoreContext::current()->id()]);
+    $events = $events->fetchAll();
     ?>
     <h1><?= esc(I18n::t('admin.title.gdpr')) ?></h1>
     <div class="flash" style="background:#fff7ed;color:#9a3412;border:1px solid #fed7aa">
@@ -188,7 +196,11 @@ function pageGdpr(): void {
                 <td><?= esc($c['name'] ?? '') ?></td>
                 <td><span class="badge badge-<?= ($c['status'] ?? '') === 'active' ? 'active' : 'draft' ?>"><?= esc($c['status'] ?? '') ?></span></td>
                 <td>
-                    <a class="btn btn-sm" href="cli/gdpr-export.php?customer-id=<?= (int)$c['id'] ?>"><?= esc(I18n::t('admin.gdpr.export_hint')) ?></a>
+                    <form method="post" action="admin.php?p=gdpr&action=export" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                        <input type="hidden" name="customer_id" value="<?= (int)$c['id'] ?>">
+                        <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.gdpr.export_hint')) ?></button>
+                    </form>
                     <?php if (Security::adminCan('gdpr.erase') && ($c['status'] ?? '') !== 'anonymized'): ?>
                     <form method="post" action="admin.php?p=gdpr&action=anonymize&email=<?= urlencode($email) ?>" style="display:inline" data-confirm="<?= esc(I18n::t('admin.gdpr.anonymize_confirm')) ?>">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -220,6 +232,33 @@ function pageGdpr(): void {
         </table>
     </div>
     <?php
+}
+/** GDPR access-request export as an admin POST action (CSRF, gdpr.view, active store) — not a link to the CLI script. */
+function handleGdprExport(): void {
+    Security::adminRequire('gdpr.view');
+    $customerId = Security::int($_POST['customer_id'] ?? 0);
+    try {
+        $data = GdprService::exportCustomer($customerId);
+    } catch (RuntimeException $e) {
+        // Unknown id or a customer of another store: nothing is disclosed.
+        setFlash('err', I18n::t('admin.gdpr.invalid_customer'));
+        header('Location: admin.php?p=gdpr');
+        exit;
+    }
+    $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    GdprService::logEvent([
+        'action'      => 'export',
+        'customer_id' => $customerId,
+        'email'       => (string)($data['customer']['email'] ?? ''),
+        'actor'       => Security::adminUser(),
+        'note'        => 'Admin GDPR export of customer #' . $customerId,
+        'payload'     => ['orders' => count($data['orders']), 'addresses' => count($data['addresses'])],
+    ]);
+    header('Content-Type: application/json; charset=utf-8');
+    header('Content-Disposition: attachment; filename="gdpr-export-customer-' . $customerId . '.json"');
+    header('Cache-Control: no-store, private');
+    echo $json;
+    exit;
 }
 function handleCustomerStatus(): void {
     Security::adminRequire('customers.edit');

@@ -371,11 +371,13 @@ class Import {
             $slug = self::slugify($part);
             $fullPath = $fullPath ? $fullPath . '/' . $slug : $slug;
 
+            // Imported products land in the 'default' catalog (products.store_id default), so their categories must too:
+            // other catalogs may own a category with the same slug and parent level.
             if ($parentId === null) {
-                $stmt = $db->prepare("SELECT id FROM categories WHERE slug = :slug AND parent_id IS NULL");
+                $stmt = $db->prepare("SELECT id FROM categories WHERE slug = :slug AND parent_id IS NULL AND store_id = 'default'");
                 $stmt->execute([':slug' => $slug]);
             } else {
-                $stmt = $db->prepare("SELECT id FROM categories WHERE slug = :slug AND parent_id = :parent");
+                $stmt = $db->prepare("SELECT id FROM categories WHERE slug = :slug AND parent_id = :parent AND store_id = 'default'");
                 $stmt->execute([':slug' => $slug, ':parent' => $parentId]);
             }
             $existing = $stmt->fetch();
@@ -384,8 +386,8 @@ class Import {
                 $categoryId = (int)$existing['id'];
             } else {
                 $stmt = $db->prepare("
-                    INSERT INTO categories (slug, name, parent_id, path, depth, sort_order)
-                    VALUES (:slug, :name, :parent, :path, :depth, 0)
+                    INSERT INTO categories (store_id, slug, name, parent_id, path, depth, sort_order)
+                    VALUES ('default', :slug, :name, :parent, :path, :depth, 0)
                 ");
                 $stmt->execute([
                     ':slug'   => $slug,
@@ -490,26 +492,37 @@ class Import {
     }
 
     /**
-     * Recount products per category (including subtree totals via materialized path)
+     * Recount products per category (including subtree totals via materialized path), all or only $ids.
+     * Paths are unique only within a catalog, so the subtree is matched in the category's own store.
      */
-    public static function recountCategories(?PDO $db = null): void {
+    public static function recountCategories(?PDO $db = null, ?array $ids = null): void {
         $db = $db ?? Db::get();
 
         // Count products in entire subtree using materialized path
-        $cats = $db->query("SELECT id, path FROM categories ORDER BY depth DESC")->fetchAll();
-        $stmt = $db->prepare("UPDATE categories SET product_count = (
-            SELECT COUNT(*) FROM products p
+        if ($ids === null) {
+            $cats = $db->query("SELECT id, path, store_id FROM categories ORDER BY depth DESC")->fetchAll();
+        } else {
+            $one = $db->prepare("SELECT id, path, store_id FROM categories WHERE id = :id");
+            $cats = [];
+            foreach ($ids as $id) {
+                $one->execute([':id' => (int)$id]);
+                if ($row = $one->fetch()) $cats[] = $row;
+            }
+        }
+        // Count and update separately: MySQL 8 rejects an UPDATE whose subquery reads the updated table (error 1093).
+        $count = $db->prepare("SELECT COUNT(*) FROM products p
             JOIN categories c2 ON p.category_id = c2.id
-            WHERE (c2.path = :path OR c2.path LIKE :pathPrefix)
-              AND p.status = 'active'
-        ) WHERE id = :id");
+            WHERE c2.store_id = :store AND (c2.path = :path OR c2.path LIKE :pathPrefix ESCAPE '!')
+              AND p.status = 'active'");
+        $update = $db->prepare("UPDATE categories SET product_count = :n WHERE id = :id");
 
         foreach ($cats as $cat) {
-            $stmt->execute([
+            $count->execute([
+                ':store'      => $cat['store_id'],
                 ':path'       => $cat['path'],
-                ':pathPrefix' => $cat['path'] . '/%',
-                ':id'         => $cat['id'],
+                ':pathPrefix' => Db::likeLiteral((string)$cat['path']) . '/%',
             ]);
+            $update->execute([':n' => (int)$count->fetchColumn(), ':id' => $cat['id']]);
         }
     }
 
@@ -555,9 +568,7 @@ class Import {
 
     /** Generate URL-safe slug with proper Central European transliteration */
     public static function slugify(string $text): string {
-        $text = Str::removeDiacritics($text);
-        $text = preg_replace('/[^a-z0-9]+/', '-', $text);
-        return trim($text, '-');
+        return Str::slug($text);
     }
 
     /** Normalize string for FTS token */

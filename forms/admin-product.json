@@ -23,16 +23,34 @@
         {
             "name": "slug",
             "type": "text",
-            "label": "URL Slug",
-            "required": true,
+            "label": "URL Slug (prázdne = z názvu)",
             "size": "half"
         },
         {
             "name": "category_id",
             "type": "select",
-            "label": "Kategória",
+            "label": "Hlavná kategória",
             "required": true,
             "options_from": "/api.php?action=bbf_categories"
+        },
+        {
+            "name": "brand_id",
+            "type": "select",
+            "label": "Značka",
+            "options_from": "/api.php?action=bbf_brands",
+            "size": "half"
+        },
+        {
+            "name": "gtin",
+            "type": "text",
+            "label": "GTIN / EAN",
+            "size": "half"
+        },
+        {
+            "name": "mpn",
+            "type": "text",
+            "label": "Kód výrobcu (MPN)",
+            "size": "half"
         },
         {
             "name": "product_type",
@@ -99,7 +117,7 @@
         {
             "name": "images",
             "type": "textarea",
-            "label": "Obrázky (URL, 1 na riadok)",
+            "label": "Obrázky (1 na riadok: URL | alt text; poradie = poradie v obchode, prvý je hlavný; zmazaním riadku sa obrázok odstráni)",
             "rows": 4
         },
         {
@@ -119,6 +137,17 @@
             "name": "tags",
             "type": "text",
             "label": "Tagy (čiarkou oddelené)"
+        },
+        {
+            "name": "seo_title",
+            "type": "text",
+            "label": "SEO titulok (prázdne = názov)"
+        },
+        {
+            "name": "meta_description",
+            "type": "textarea",
+            "label": "Meta popis (prázdne = krátky popis)",
+            "rows": 2
         }
     ],
     "on_submit": {

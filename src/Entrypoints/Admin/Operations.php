@@ -46,7 +46,7 @@ function pageDashboard(): void {
         <h3><?= esc(I18n::t('admin.dashboard.statistics')) ?></h3>
         <p><?= esc(I18n::t('admin.dashboard.total_products')) ?>: <strong><?= $totalProducts ?></strong></p>
         <p><?= esc(I18n::t('admin.dashboard.jobs_queue')) ?> (<?= esc($operations['queue_backend']) ?>): <strong><?= $jobStats['pending'] ?></strong> <?= esc(I18n::t('admin.dashboard.jobs_pending')) ?>, <strong><?= $jobStats['failed'] ?></strong> <?= esc(I18n::t('admin.dashboard.jobs_failed')) ?></p>
-        <p class="muted">Correlation: <?= esc($operations['correlation_id']) ?> · Store: <?= esc($operations['store_id']) ?></p>
+        <p class="muted">Correlation: <?= esc($operations['correlation_id']) ?> Â· Store: <?= esc($operations['store_id']) ?></p>
     </div>
 
     <div class="card">
@@ -97,7 +97,8 @@ function pageDashboard(): void {
         <table>
             <tr><th><?= esc(I18n::t('admin.th.number')) ?></th><th><?= esc(I18n::t('admin.th.customer')) ?></th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.th.date')) ?></th></tr>
             <?php
-            $stmt = $db->query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 10");
+            $stmt = $db->prepare("SELECT * FROM orders WHERE store_id = :store ORDER BY created_at DESC, id DESC LIMIT 10");
+            $stmt->execute([':store' => StoreContext::current()->id()]);
             while ($row = $stmt->fetch()):
             ?>
             <tr>
@@ -119,8 +120,8 @@ function pageImport(): void {
         <?= AdminForm::render('admin-import', 'admin.php?p=import&action=upload') ?>
     </div>
     <div class="card">
-        <h3>Šablóny</h3>
-        <p class="muted">Stiahnite si vzorový CSV z <code>import/test-products.csv</code></p>
+        <h3>Ĺ ablĂłny</h3>
+        <p class="muted">Stiahnite si vzorovĂ˝ CSV z <code>import/test-products.csv</code></p>
     </div>
     <?php
 }
@@ -143,14 +144,14 @@ function pageCache(): void {
     ?>
     <h1>Cache Management</h1>
     <div class="grid grid-4">
-        <div class="card stat"><div class="num"><?= $stats['files'] ?></div><div class="label">Cache súborov</div></div>
-        <div class="card stat"><div class="num"><?= round($stats['size']/1024, 1) ?>K</div><div class="label">Veľkosť</div></div>
-        <div class="card stat"><div class="num"><?= $jobStats['pending'] ?></div><div class="label">Joby čakajúce</div></div>
-        <div class="card stat"><div class="num"><?= $jobStats['failed'] ?></div><div class="label">Joby zlyhané</div></div>
+        <div class="card stat"><div class="num"><?= $stats['files'] ?></div><div class="label">Cache sĂşborov</div></div>
+        <div class="card stat"><div class="num"><?= round($stats['size']/1024, 1) ?>K</div><div class="label">VeÄľkosĹĄ</div></div>
+        <div class="card stat"><div class="num"><?= $jobStats['pending'] ?></div><div class="label">Joby ÄŤakajĂşce</div></div>
+        <div class="card stat"><div class="num"><?= $jobStats['failed'] ?></div><div class="label">Joby zlyhanĂ©</div></div>
     </div>
     <div class="card">
         <h3>Akcie</h3>
-        <form method="post" action="admin.php?p=cache&action=flush" style="display:inline" data-confirm="Flush celú cache?">
+        <form method="post" action="admin.php?p=cache&action=flush" style="display:inline" data-confirm="Flush celĂş cache?">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
             <button class="btn btn-danger" type="submit">Flush Cache</button>
         </form>
@@ -167,17 +168,20 @@ function pageAudit(): void {
     $perPage = 50;
     $offset = ($page - 1) * $perPage;
 
-    $total = (int)$db->query("SELECT COUNT(*) FROM audit_log")->fetchColumn();
+    $store = StoreContext::current()->id();
+    $count = $db->prepare("SELECT COUNT(*) FROM audit_log WHERE store_id = :store");
+    $count->execute([':store' => $store]);
+    $total = (int)$count->fetchColumn();
     $pages = max(1, (int)ceil($total / $perPage));
 
-    $stmt = $db->prepare("SELECT * FROM audit_log ORDER BY created_at DESC LIMIT :limit OFFSET :offset");
-    $stmt->execute([':limit' => $perPage, ':offset' => $offset]);
+    $stmt = $db->prepare("SELECT * FROM audit_log WHERE store_id = :store ORDER BY created_at DESC, id DESC LIMIT :limit OFFSET :offset");
+    $stmt->execute([':store' => $store, ':limit' => $perPage, ':offset' => $offset]);
     $logs = $stmt->fetchAll();
     ?>
     <h1>Audit Log <span class="muted">(<?= $total ?>)</span></h1>
     <div class="card">
         <table>
-            <tr><th>Entita</th><th>ID</th><th>Akcia</th><th>Staré</th><th>Nové</th><th>Poznámka</th><th>Kto</th><th>Kedy</th></tr>
+            <tr><th>Entita</th><th>ID</th><th>Akcia</th><th>StarĂ©</th><th>NovĂ©</th><th>PoznĂˇmka</th><th>Kto</th><th>Kedy</th></tr>
             <?php foreach ($logs as $log): ?>
             <tr>
                 <td><?= esc($log['entity']) ?></td>
@@ -199,7 +203,7 @@ function handleImportUpload(): void {
     // BBF checks that a file came, its .csv extension, size and content type.
     $form = AdminForm::validate('admin-import', [], ['allowed_extensions' => ['csv'], 'max_file_size' => Import::MAX_FILE_BYTES]);
     if ($form === null) {
-        setFlash('err', 'CSV súbor nebol prijatý: ' . AdminForm::firstError());
+        setFlash('err', 'CSV sĂşbor nebol prijatĂ˝: ' . AdminForm::firstError());
         header("Location: admin.php?p=import");
         exit;
     }
@@ -215,9 +219,9 @@ function handleImportUpload(): void {
         ], 'CSV import');
     }
     if ($result['success'] && $errCount === 0) {
-        setFlash('ok', "Import úspešný: {$result['imported']} produktov.");
+        setFlash('ok', "Import ĂşspeĹˇnĂ˝: {$result['imported']} produktov.");
     } else {
-        setFlash('err', "Import: {$result['imported']} OK, {$errCount} chýb.");
+        setFlash('err', "Import: {$result['imported']} OK, {$errCount} chĂ˝b.");
     }
 
     header("Location: admin.php?p=import");
@@ -232,7 +236,7 @@ function handleCacheFlush(): void {
 }
 function handleCacheRebuild(): void {
     JobQueue::push('cache_rebuild', ['scope' => 'full'], 1);
-    setFlash('ok', 'Cache rebuild job naplánovaný.');
+    setFlash('ok', 'Cache rebuild job naplĂˇnovanĂ˝.');
     header("Location: admin.php?p=cache");
     exit;
 }
@@ -244,10 +248,10 @@ function pageWarehouses(): void {
     $warehouses = Warehouse::all();
     ?>
     <h1>Sklady</h1>
-    <p style="margin-bottom:1rem"><a href="admin.php?p=warehouse" class="btn btn-primary">Nový sklad</a></p>
+    <p style="margin-bottom:1rem"><a href="admin.php?p=warehouse" class="btn btn-primary">NovĂ˝ sklad</a></p>
     <div class="card">
         <table>
-            <thead><tr><th>Kód</th><th>Názov</th><th>Priorita</th><th>Dropship</th><th>Default</th><th>Feedov</th><th></th></tr></thead>
+            <thead><tr><th>KĂłd</th><th>NĂˇzov</th><th>Priorita</th><th>Dropship</th><th>Default</th><th>Feedov</th><th></th></tr></thead>
             <tbody>
             <?php foreach ($warehouses as $w):
                 $feedCount = count(Warehouse::feedsByWarehouse((int)$w['id']));
@@ -256,8 +260,8 @@ function pageWarehouses(): void {
                 <td><code><?= esc($w['code']) ?></code></td>
                 <td><a href="admin.php?p=warehouse&id=<?= $w['id'] ?>"><?= esc($w['name']) ?></a></td>
                 <td><?= (int)$w['priority'] ?></td>
-                <td><?= $w['is_dropship'] ? 'Ano' : '—' ?></td>
-                <td><?= $w['is_default'] ? 'Ano' : '—' ?></td>
+                <td><?= $w['is_dropship'] ? 'Ano' : 'â€”' ?></td>
+                <td><?= $w['is_default'] ? 'Ano' : 'â€”' ?></td>
                 <td><?= $feedCount ?></td>
                 <td>
                     <form method="post" action="admin.php?p=warehouses&action=delete" style="display:inline" data-confirm="Zmazat sklad?">
@@ -313,7 +317,7 @@ function pageWarehouse(): void {
                     <td><?= esc($f['name']) ?></td>
                     <td><?= esc($f['format']) ?></td>
                     <td><?= $f['last_sync'] ? esc(substr($f['last_sync'], 0, 16)) : '<span class="muted">nikdy</span>' ?></td>
-                    <td><?= esc($f['last_status'] ?? '—') ?></td>
+                    <td><?= esc($f['last_status'] ?? 'â€”') ?></td>
                 </tr>
                 <?php endforeach; ?>
                 </tbody>
@@ -328,12 +332,12 @@ function handleWarehouseSave(): void {
     $data = [
         'id' => $id,
         'code' => Security::slug($_POST['code'] ?? ''),
-        'name' => trim($_POST['name'] ?? ''),
+        'name' => trim(Security::str($_POST['name'] ?? '')),
         'priority' => Security::int($_POST['priority'] ?? 0),
         'is_dropship' => (int)!empty($_POST['is_dropship']),
         'is_default' => (int)!empty($_POST['is_default']),
-        'contact' => trim($_POST['contact'] ?? ''),
-        'notes' => trim($_POST['notes'] ?? ''),
+        'contact' => trim(Security::str($_POST['contact'] ?? '')),
+        'notes' => trim(Security::str($_POST['notes'] ?? '')),
     ];
     if (!$data['code'] || !$data['name']) {
         setFlash('err', 'Kod a nazov su povinne.');
@@ -375,7 +379,7 @@ function pageFeeds(): void {
                 <td><?= esc($f['format']) ?></td>
                 <td><?= $f['last_sync'] ? esc(substr($f['last_sync'], 0, 16)) : '<span class="muted">nikdy</span>' ?></td>
                 <td><?= (int)$f['last_count'] ?></td>
-                <td><?= $f['enabled'] ? esc($f['last_status'] ?? '—') : '<span class="muted">Vypnuty</span>' ?></td>
+                <td><?= $f['enabled'] ? esc($f['last_status'] ?? 'â€”') : '<span class="muted">Vypnuty</span>' ?></td>
                 <td>
                     <form method="post" action="admin.php?p=feeds&action=sync" style="display:inline">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -409,7 +413,7 @@ function pageFeed(): void {
             <div class="form-row"><label>Nazov</label><input name="name" value="<?= esc($f['name'] ?? '') ?>" required style="width:100%"></div>
             <div class="form-row"><label>Sklad</label>
                 <select name="warehouse_id" required>
-                    <option value="">— Vyberte sklad —</option>
+                    <option value="">â€” Vyberte sklad â€”</option>
                     <?php foreach ($warehouses as $w): ?>
                     <option value="<?= $w['id'] ?>" <?= $preselect == $w['id'] ? 'selected' : '' ?>><?= esc($w['name']) ?> (<?= esc($w['code']) ?>)</option>
                     <?php endforeach; ?>
@@ -441,7 +445,7 @@ function pageFeed(): void {
     <div class="card" style="margin-top:1rem">
         <h3>Posledny sync</h3>
         <p>Cas: <?= $f['last_sync'] ? esc($f['last_sync']) : 'nikdy' ?></p>
-        <p>Stav: <?= esc($f['last_status'] ?? '—') ?></p>
+        <p>Stav: <?= esc($f['last_status'] ?? 'â€”') ?></p>
         <p>Produktov: <?= (int)$f['last_count'] ?></p>
         <form method="post" action="admin.php?p=feeds&action=sync" style="margin-top:.5rem">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -456,7 +460,7 @@ function handleFeedSave(): void {
     $id = Security::int($_GET['id'] ?? 0);
 
     // Validate JSON field_map
-    $fieldMapRaw = trim($_POST['field_map'] ?? '{}');
+    $fieldMapRaw = trim(Security::str($_POST['field_map'] ?? '{}'));
     $fieldMap = json_decode($fieldMapRaw, true);
     if ($fieldMap === null && $fieldMapRaw !== '{}') {
         setFlash('err', 'Neplatny JSON v mapovani poli: ' . json_last_error_msg());
@@ -467,13 +471,13 @@ function handleFeedSave(): void {
     $data = [
         'id' => $id,
         'code' => Security::slug($_POST['code'] ?? ''),
-        'name' => trim($_POST['name'] ?? ''),
+        'name' => trim(Security::str($_POST['name'] ?? '')),
         'warehouse_id' => Security::int($_POST['warehouse_id'] ?? 0),
-        'url' => trim($_POST['url'] ?? ''),
+        'url' => trim(Security::str($_POST['url'] ?? '')),
         'format' => in_array($_POST['format'] ?? '', ['xml', 'csv']) ? $_POST['format'] : 'xml',
         'field_map' => json_encode($fieldMap, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT),
         'import_mode' => in_array($_POST['import_mode'] ?? '', ['upsert', 'stock_only']) ? $_POST['import_mode'] : 'upsert',
-        'schedule' => trim($_POST['schedule'] ?? '0 */6 * * *'),
+        'schedule' => trim(Security::str($_POST['schedule'] ?? '0 */6 * * *')),
         'enabled' => (int)!empty($_POST['enabled']),
     ];
 
@@ -498,11 +502,10 @@ function handleFeedDelete(): void {
     exit;
 }
 function pageShipping(): void {
-    $db = Db::get();
-    $methods = $db->query("SELECT * FROM shipping_methods ORDER BY sort_order, code")->fetchAll(PDO::FETCH_ASSOC);
-    $zones = $db->query("SELECT * FROM shipping_zones ORDER BY sort_order, code")->fetchAll(PDO::FETCH_ASSOC);
-    $countries = $db->query("SELECT * FROM shipping_zone_countries ORDER BY zone_code, country, postal_min")->fetchAll(PDO::FETCH_ASSOC);
-    $rates = $db->query("SELECT r.*, m.name AS method_name, z.name AS zone_name FROM shipping_rates r LEFT JOIN shipping_methods m ON m.code = r.method_code LEFT JOIN shipping_zones z ON z.code = r.zone_code ORDER BY COALESCE(r.sort_order, 100), r.method_code, r.country, r.weight_to_g LIMIT 200")->fetchAll(PDO::FETCH_ASSOC);
+    $methods = StoreConfig::rows("SELECT * FROM shipping_methods WHERE store_id = :store ORDER BY sort_order, code");
+    $zones = StoreConfig::rows("SELECT * FROM shipping_zones WHERE store_id = :store ORDER BY sort_order, code");
+    $countries = StoreConfig::rows("SELECT * FROM shipping_zone_countries WHERE store_id = :store ORDER BY zone_code, country, postal_min");
+    $rates = StoreConfig::rows("SELECT r.*, m.name AS method_name, z.name AS zone_name FROM shipping_rates r LEFT JOIN shipping_methods m ON m.code = r.method_code AND m.store_id = r.store_id LEFT JOIN shipping_zones z ON z.code = r.zone_code AND z.store_id = r.store_id WHERE r.store_id = :store ORDER BY COALESCE(r.sort_order, 100), r.method_code, r.country, r.weight_to_g LIMIT 200");
     ?>
     <h1>Doprava</h1>
     <div class="card">
@@ -519,14 +522,14 @@ function pageShipping(): void {
                     <td><input name="name" value="<?= esc($m['name']) ?>" required style="width:12rem"><br><input name="description" value="<?= esc($m['description'] ?? '') ?>" placeholder="popis" style="width:12rem"></td>
                     <td><input name="carrier" value="<?= esc($m['carrier']) ?>" required style="width:7rem"><br><input name="adapter_class" value="<?= esc($m['adapter_class'] ?? '') ?>" placeholder="adapter" style="width:7rem"></td>
                     <td><select name="service_type"><option value="parcel" <?= ($m['service_type'] ?? '')==='parcel'?'selected':'' ?>>parcel</option><option value="pickup" <?= ($m['service_type'] ?? '')==='pickup'?'selected':'' ?>>pickup</option></select><br><label><input type="checkbox" name="supports_cod" value="1" <?= !empty($m['supports_cod'])?'checked':'' ?>> COD</label> <label><input type="checkbox" name="supports_pickup" value="1" <?= !empty($m['supports_pickup'])?'checked':'' ?>> pickup</label></td>
-                    <td><input type="number" name="free_above" value="<?= esc($m['free_above'] ?? '') ?>" placeholder="free above" style="width:6rem"><input type="number" name="free_from_qty" value="<?= esc($m['free_from_qty'] ?? '') ?>" placeholder="free from qty" title="Zdarma od N fyzických kusov" style="width:6rem"><br><input type="number" name="max_weight_g" value="<?= esc($m['max_weight_g'] ?? '') ?>" placeholder="max g" style="width:6rem"><input type="number" name="max_volume_cm3" value="<?= esc($m['max_volume_cm3'] ?? '') ?>" placeholder="max cm3" style="width:6rem"></td>
+                    <td><input type="number" name="free_above" value="<?= esc($m['free_above'] ?? '') ?>" placeholder="free above" style="width:6rem"><input type="number" name="free_from_qty" value="<?= esc($m['free_from_qty'] ?? '') ?>" placeholder="free from qty" title="Zdarma od N fyzickĂ˝ch kusov" style="width:6rem"><br><input type="number" name="max_weight_g" value="<?= esc($m['max_weight_g'] ?? '') ?>" placeholder="max g" style="width:6rem"><input type="number" name="max_volume_cm3" value="<?= esc($m['max_volume_cm3'] ?? '') ?>" placeholder="max cm3" style="width:6rem"></td>
                     <td><input type="number" name="sort_order" value="<?= (int)$m['sort_order'] ?>" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" <?= !empty($m['active'])?'checked':'' ?>> aktivna</label></td>
                     <td><button class="btn btn-sm btn-primary">Ulozit</button>
                 </form>
                 <form method="post" action="admin.php?p=shipping&action=method_delete" style="display:inline" data-confirm="Zmazat metodu?"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$m['id'] ?>"><button class="btn btn-sm btn-danger">Zmazat</button></form></td>
             </tr>
             <?php endforeach; ?>
-            <tr><form method="post" action="admin.php?p=shipping&action=method_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><input name="code" required placeholder="packeta"></td><td><input name="name" required placeholder="Nazov"><br><input name="description" placeholder="popis"></td><td><input name="carrier" required placeholder="packeta"><br><input name="adapter_class" placeholder="PacketaShipping"></td><td><select name="service_type"><option value="parcel">parcel</option><option value="pickup">pickup</option></select><br><label><input type="checkbox" name="supports_cod" value="1"> COD</label> <label><input type="checkbox" name="supports_pickup" value="1"> pickup</label></td><td><input type="number" name="free_above" placeholder="free above" style="width:6rem"><input type="number" name="free_from_qty" placeholder="free from qty" title="Zdarma od N fyzických kusov" style="width:6rem"><br><input type="number" name="max_weight_g" placeholder="max g" style="width:6rem"><input type="number" name="max_volume_cm3" placeholder="max cm3" style="width:6rem"></td><td><input type="number" name="sort_order" value="100" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" checked> aktivna</label></td><td><button class="btn btn-sm btn-primary">Pridat</button></td></form></tr>
+            <tr><form method="post" action="admin.php?p=shipping&action=method_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><input name="code" required placeholder="packeta"></td><td><input name="name" required placeholder="Nazov"><br><input name="description" placeholder="popis"></td><td><input name="carrier" required placeholder="packeta"><br><input name="adapter_class" placeholder="PacketaShipping"></td><td><select name="service_type"><option value="parcel">parcel</option><option value="pickup">pickup</option></select><br><label><input type="checkbox" name="supports_cod" value="1"> COD</label> <label><input type="checkbox" name="supports_pickup" value="1"> pickup</label></td><td><input type="number" name="free_above" placeholder="free above" style="width:6rem"><input type="number" name="free_from_qty" placeholder="free from qty" title="Zdarma od N fyzickĂ˝ch kusov" style="width:6rem"><br><input type="number" name="max_weight_g" placeholder="max g" style="width:6rem"><input type="number" name="max_volume_cm3" placeholder="max cm3" style="width:6rem"></td><td><input type="number" name="sort_order" value="100" style="width:4rem"><br><label><input type="checkbox" name="active" value="1" checked> aktivna</label></td><td><button class="btn btn-sm btn-primary">Pridat</button></td></form></tr>
             </tbody>
         </table>
     </div>
@@ -560,53 +563,64 @@ function pageShipping(): void {
     <?php
 }
 function handleShippingMethodSave(): void {
+    Security::adminRequire('shipping.manage');
     $db = Db::get();
     $id = Security::int($_POST['id'] ?? 0);
     $code = Security::slug($_POST['code'] ?? '');
     $carrier = Security::slug($_POST['carrier'] ?? '');
-    $name = trim($_POST['name'] ?? '');
+    $name = trim(Security::str($_POST['name'] ?? ''));
     $serviceType = in_array($_POST['service_type'] ?? '', ['parcel', 'pickup'], true) ? $_POST['service_type'] : 'parcel';
     if (!$code || !$carrier || !$name) { setFlash('err', 'Kod, carrier a nazov metody su povinne.'); header('Location: admin.php?p=shipping'); exit; }
-    $data = [':code'=>$code, ':carrier'=>$carrier, ':name'=>$name, ':description'=>trim($_POST['description'] ?? ''), ':adapter_class'=>trim($_POST['adapter_class'] ?? ''), ':service_type'=>$serviceType, ':supports_cod'=>(int)!empty($_POST['supports_cod']), ':supports_pickup'=>(int)!empty($_POST['supports_pickup']), ':free_above'=>shippingNullableInt('free_above'), ':free_from_qty'=>shippingNullableInt('free_from_qty'), ':max_weight_g'=>shippingNullableInt('max_weight_g'), ':max_volume_cm3'=>shippingNullableInt('max_volume_cm3'), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
-    if ($id) { $data[':id'] = $id; $db->prepare("UPDATE shipping_methods SET code=:code, carrier=:carrier, name=:name, description=:description, adapter_class=:adapter_class, service_type=:service_type, supports_cod=:supports_cod, supports_pickup=:supports_pickup, free_above=:free_above, free_from_qty=:free_from_qty, max_weight_g=:max_weight_g, max_volume_cm3=:max_volume_cm3, active=:active, sort_order=:sort_order, updated_at=" . Db::now() . " WHERE id=:id")->execute($data); }
-    else { $db->prepare("INSERT INTO shipping_methods (code, carrier, name, description, adapter_class, service_type, supports_cod, supports_pickup, free_above, free_from_qty, max_weight_g, max_volume_cm3, active, sort_order) VALUES (:code, :carrier, :name, :description, :adapter_class, :service_type, :supports_cod, :supports_pickup, :free_above, :free_from_qty, :max_weight_g, :max_volume_cm3, :active, :sort_order)")->execute($data); }
-    setFlash('ok', 'Metoda dopravy ulozena.'); header('Location: admin.php?p=shipping'); exit;
+    $data = [':code'=>$code, ':carrier'=>$carrier, ':name'=>$name, ':description'=>trim(Security::str($_POST['description'] ?? '')), ':adapter_class'=>trim(Security::str($_POST['adapter_class'] ?? '')), ':service_type'=>$serviceType, ':supports_cod'=>(int)!empty($_POST['supports_cod']), ':supports_pickup'=>(int)!empty($_POST['supports_pickup']), ':free_above'=>shippingNullableInt('free_above'), ':free_from_qty'=>shippingNullableInt('free_from_qty'), ':max_weight_g'=>shippingNullableInt('max_weight_g'), ':max_volume_cm3'=>shippingNullableInt('max_volume_cm3'), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
+    $data[':store'] = StoreContext::current()->providerId();
+    if ($id && StoreConfig::value('shipping_methods', 'id', (string)$id) === null) { setFlash('err', 'Zaznam neexistuje.'); header('Location: admin.php?p=shipping'); exit; }
+    if (!in_array(StoreConfig::value('shipping_methods', 'code', $code), [null, (string)$id], true)) { setFlash('err', 'Metoda s tymto kodom uz existuje.'); header('Location: admin.php?p=shipping'); exit; }
+    if ($id) { $data[':id'] = $id; $stmt = $db->prepare("UPDATE shipping_methods SET code=:code, carrier=:carrier, name=:name, description=:description, adapter_class=:adapter_class, service_type=:service_type, supports_cod=:supports_cod, supports_pickup=:supports_pickup, free_above=:free_above, free_from_qty=:free_from_qty, max_weight_g=:max_weight_g, max_volume_cm3=:max_volume_cm3, active=:active, sort_order=:sort_order, updated_at=" . Db::now() . " WHERE id=:id AND store_id=:store"); $stmt->execute($data); setFlash('ok', 'Metoda dopravy ulozena.'); }
+    else { $db->prepare("INSERT INTO shipping_methods (store_id, code, carrier, name, description, adapter_class, service_type, supports_cod, supports_pickup, free_above, free_from_qty, max_weight_g, max_volume_cm3, active, sort_order) VALUES (:store, :code, :carrier, :name, :description, :adapter_class, :service_type, :supports_cod, :supports_pickup, :free_above, :free_from_qty, :max_weight_g, :max_volume_cm3, :active, :sort_order)")->execute($data); setFlash('ok', 'Metoda dopravy ulozena.'); }
+    header('Location: admin.php?p=shipping'); exit;
 }
-function handleShippingMethodDelete(): void { $id = Security::int($_POST['id'] ?? 0); if ($id) { Db::get()->prepare("DELETE FROM shipping_methods WHERE id = :id")->execute([':id'=>$id]); setFlash('ok', 'Metoda zmazana.'); } header('Location: admin.php?p=shipping'); exit; }
+function handleShippingMethodDelete(): void { Security::adminRequire('shipping.manage'); storeConfigDelete('shipping_methods', 'Metoda zmazana.'); header('Location: admin.php?p=shipping'); exit; }
 function handleShippingZoneSave(): void {
-    $db = Db::get(); $id = Security::int($_POST['id'] ?? 0); $code = Security::slug($_POST['code'] ?? ''); $name = trim($_POST['name'] ?? '');
+    Security::adminRequire('shipping.manage');
+    $db = Db::get(); $id = Security::int($_POST['id'] ?? 0); $code = Security::slug($_POST['code'] ?? ''); $name = trim(Security::str($_POST['name'] ?? ''));
     if (!$code || !$name) { setFlash('err', 'Kod a nazov zony su povinne.'); header('Location: admin.php?p=shipping'); exit; }
-    $data = [':code'=>$code, ':name'=>$name, ':description'=>trim($_POST['description'] ?? ''), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
-    if ($id) { $data[':id']=$id; $db->prepare("UPDATE shipping_zones SET code=:code, name=:name, description=:description, active=:active, sort_order=:sort_order, updated_at=" . Db::now() . " WHERE id=:id")->execute($data); }
-    else { $db->prepare("INSERT INTO shipping_zones (code, name, description, active, sort_order) VALUES (:code, :name, :description, :active, :sort_order)")->execute($data); }
-    setFlash('ok', 'Zona ulozena.'); header('Location: admin.php?p=shipping'); exit;
+    $data = [':code'=>$code, ':name'=>$name, ':description'=>trim(Security::str($_POST['description'] ?? '')), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
+    $data[':store'] = StoreContext::current()->providerId();
+    if ($id && StoreConfig::value('shipping_zones', 'id', (string)$id) === null) { setFlash('err', 'Zaznam neexistuje.'); header('Location: admin.php?p=shipping'); exit; }
+    if (!in_array(StoreConfig::value('shipping_zones', 'code', $code), [null, (string)$id], true)) { setFlash('err', 'Zona s tymto kodom uz existuje.'); header('Location: admin.php?p=shipping'); exit; }
+    if ($id) { $data[':id']=$id; $stmt = $db->prepare("UPDATE shipping_zones SET code=:code, name=:name, description=:description, active=:active, sort_order=:sort_order, updated_at=" . Db::now() . " WHERE id=:id AND store_id=:store"); $stmt->execute($data); setFlash('ok', 'Zona ulozena.'); }
+    else { $db->prepare("INSERT INTO shipping_zones (store_id, code, name, description, active, sort_order) VALUES (:store, :code, :name, :description, :active, :sort_order)")->execute($data); setFlash('ok', 'Zona ulozena.'); }
+    header('Location: admin.php?p=shipping'); exit;
 }
-function handleShippingZoneDelete(): void { $id = Security::int($_POST['id'] ?? 0); if ($id) { Db::get()->prepare("DELETE FROM shipping_zones WHERE id = :id")->execute([':id'=>$id]); setFlash('ok', 'Zona zmazana.'); } header('Location: admin.php?p=shipping'); exit; }
+function handleShippingZoneDelete(): void { Security::adminRequire('shipping.manage'); storeConfigDelete('shipping_zones', 'Zona zmazana.'); header('Location: admin.php?p=shipping'); exit; }
 function handleShippingCountrySave(): void {
-    $db = Db::get(); $zoneCode = Security::slug($_POST['zone_code'] ?? ''); $country = strtoupper(trim($_POST['country'] ?? ''));
-    if (!$zoneCode || !preg_match('/^[A-Z]{2}$/', $country)) { setFlash('err', 'Zona a ISO krajina su povinne.'); header('Location: admin.php?p=shipping'); exit; }
-    $db->prepare(Db::insertIgnore() . " INTO shipping_zone_countries (zone_code, country, postal_min, postal_max) VALUES (:zone, :country, :min, :max)")->execute([':zone'=>$zoneCode, ':country'=>$country, ':min'=>trim($_POST['postal_min'] ?? ''), ':max'=>trim($_POST['postal_max'] ?? '')]);
+    Security::adminRequire('shipping.manage');
+    $db = Db::get(); $zoneCode = Security::slug($_POST['zone_code'] ?? ''); $country = strtoupper(trim(Security::str($_POST['country'] ?? '')));
+    if (!$zoneCode || !preg_match('/^[A-Z]{2}$/', $country) || StoreConfig::value('shipping_zones', 'code', $zoneCode) === null) { setFlash('err', 'Zona a ISO krajina su povinne.'); header('Location: admin.php?p=shipping'); exit; }
+    $db->prepare(Db::insertIgnore() . " INTO shipping_zone_countries (store_id, zone_code, country, postal_min, postal_max) VALUES (:store, :zone, :country, :min, :max)")->execute([':store'=>StoreContext::current()->providerId(), ':zone'=>$zoneCode, ':country'=>$country, ':min'=>trim(Security::str($_POST['postal_min'] ?? '')), ':max'=>trim(Security::str($_POST['postal_max'] ?? ''))]);
     setFlash('ok', 'Krajina pridana do zony.'); header('Location: admin.php?p=shipping'); exit;
 }
-function handleShippingCountryDelete(): void { $id = Security::int($_POST['id'] ?? 0); if ($id) { Db::get()->prepare("DELETE FROM shipping_zone_countries WHERE id = :id")->execute([':id'=>$id]); setFlash('ok', 'Krajina zmazana.'); } header('Location: admin.php?p=shipping'); exit; }
+function handleShippingCountryDelete(): void { Security::adminRequire('shipping.manage'); storeConfigDelete('shipping_zone_countries', 'Krajina zmazana.'); header('Location: admin.php?p=shipping'); exit; }
 function handleShippingRateSave(): void {
-    $db = Db::get(); $id = Security::int($_POST['id'] ?? 0); $methodCode = Security::slug($_POST['method_code'] ?? ''); $zoneCode = Security::slug($_POST['zone_code'] ?? ''); $country = strtoupper(trim($_POST['country'] ?? ''));
+    Security::adminRequire('shipping.manage');
+    $db = Db::get(); $id = Security::int($_POST['id'] ?? 0); $methodCode = Security::slug($_POST['method_code'] ?? ''); $zoneCode = Security::slug($_POST['zone_code'] ?? ''); $country = strtoupper(trim(Security::str($_POST['country'] ?? '')));
     $from = max(0, Security::int($_POST['weight_from_g'] ?? 0)); $to = max(0, Security::int($_POST['weight_to_g'] ?? 0));
-    if (!$methodCode || !$zoneCode || ($country !== '' && !preg_match('/^[A-Z]{2}$/', $country)) || $to < $from) { setFlash('err', 'Neplatna sadzba dopravy.'); header('Location: admin.php?p=shipping'); exit; }
-    $stmt = $db->prepare("SELECT carrier FROM shipping_methods WHERE code = :code"); $stmt->execute([':code'=>$methodCode]); $carrier = (string)($stmt->fetchColumn() ?: $methodCode);
-    $data = [':method_code'=>$methodCode, ':carrier'=>$carrier, ':country'=>$country, ':zone_code'=>$zoneCode, ':weight_from_g'=>$from, ':weight_to_g'=>$to, ':volume_to_cm3'=>shippingNullableInt('volume_to_cm3'), ':price'=>max(0, Security::int($_POST['price'] ?? 0)), ':cod_surcharge'=>max(0, Security::int($_POST['cod_surcharge'] ?? 0)), ':delivery_days'=>trim($_POST['delivery_days'] ?? ''), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
-    if ($id) { $data[':id']=$id; $db->prepare("UPDATE shipping_rates SET method_code=:method_code, carrier=:carrier, country=:country, zone_code=:zone_code, weight_from_g=:weight_from_g, weight_to_g=:weight_to_g, volume_to_cm3=:volume_to_cm3, price=:price, cod_surcharge=:cod_surcharge, delivery_days=:delivery_days, active=:active, sort_order=:sort_order, updated_at=" . Db::now() . " WHERE id=:id")->execute($data); }
-    else { $db->prepare("INSERT INTO shipping_rates (method_code, carrier, country, zone_code, weight_from_g, weight_to_g, volume_to_cm3, price, cod_surcharge, delivery_days, active, sort_order) VALUES (:method_code, :carrier, :country, :zone_code, :weight_from_g, :weight_to_g, :volume_to_cm3, :price, :cod_surcharge, :delivery_days, :active, :sort_order)")->execute($data); }
-    setFlash('ok', 'Sadzba ulozena.'); header('Location: admin.php?p=shipping'); exit;
+    $carrier = $methodCode ? StoreConfig::value('shipping_methods', 'code', $methodCode, 'carrier') : null;
+    if ($carrier === null || !$zoneCode || StoreConfig::value('shipping_zones', 'code', $zoneCode) === null || ($country !== '' && !preg_match('/^[A-Z]{2}$/', $country)) || $to < $from) { setFlash('err', 'Neplatna sadzba dopravy.'); header('Location: admin.php?p=shipping'); exit; }
+    $data = [':method_code'=>$methodCode, ':carrier'=>$carrier, ':country'=>$country, ':zone_code'=>$zoneCode, ':weight_from_g'=>$from, ':weight_to_g'=>$to, ':volume_to_cm3'=>shippingNullableInt('volume_to_cm3'), ':price'=>max(0, Security::int($_POST['price'] ?? 0)), ':cod_surcharge'=>max(0, Security::int($_POST['cod_surcharge'] ?? 0)), ':delivery_days'=>trim(Security::str($_POST['delivery_days'] ?? '')), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
+    $data[':store'] = StoreContext::current()->providerId();
+    if ($id && StoreConfig::value('shipping_rates', 'id', (string)$id) === null) { setFlash('err', 'Zaznam neexistuje.'); header('Location: admin.php?p=shipping'); exit; }
+    if ($id) { $data[':id']=$id; $stmt = $db->prepare("UPDATE shipping_rates SET method_code=:method_code, carrier=:carrier, country=:country, zone_code=:zone_code, weight_from_g=:weight_from_g, weight_to_g=:weight_to_g, volume_to_cm3=:volume_to_cm3, price=:price, cod_surcharge=:cod_surcharge, delivery_days=:delivery_days, active=:active, sort_order=:sort_order, updated_at=" . Db::now() . " WHERE id=:id AND store_id=:store"); $stmt->execute($data); setFlash('ok', 'Sadzba ulozena.'); }
+    else { $db->prepare("INSERT INTO shipping_rates (store_id, method_code, carrier, country, zone_code, weight_from_g, weight_to_g, volume_to_cm3, price, cod_surcharge, delivery_days, active, sort_order) VALUES (:store, :method_code, :carrier, :country, :zone_code, :weight_from_g, :weight_to_g, :volume_to_cm3, :price, :cod_surcharge, :delivery_days, :active, :sort_order)")->execute($data); setFlash('ok', 'Sadzba ulozena.'); }
+    header('Location: admin.php?p=shipping'); exit;
 }
-function handleShippingRateDelete(): void { $id = Security::int($_POST['id'] ?? 0); if ($id) { Db::get()->prepare("DELETE FROM shipping_rates WHERE id = :id")->execute([':id'=>$id]); setFlash('ok', 'Sadzba zmazana.'); } header('Location: admin.php?p=shipping'); exit; }
+function handleShippingRateDelete(): void { Security::adminRequire('shipping.manage'); storeConfigDelete('shipping_rates', 'Sadzba zmazana.'); header('Location: admin.php?p=shipping'); exit; }
 function shippingNullableInt(string $key): ?int { $v = trim((string)($_POST[$key] ?? '')); return $v === '' ? null : max(0, Security::int($v)); }
 function pagePayments(): void {
-    $db = Db::get();
-    $methods = $db->query("SELECT * FROM payment_methods ORDER BY sort_order, code")->fetchAll(PDO::FETCH_ASSOC);
-    $countries = $db->query("SELECT * FROM payment_method_countries ORDER BY method_code, country")->fetchAll(PDO::FETCH_ASSOC);
-    $shippingLinks = $db->query("SELECT ps.*, sm.name AS shipping_name FROM payment_method_shipping ps LEFT JOIN shipping_methods sm ON sm.code = ps.shipping_method_code ORDER BY ps.method_code, ps.shipping_method_code")->fetchAll(PDO::FETCH_ASSOC);
-    $shippingMethods = $db->query("SELECT code, name FROM shipping_methods ORDER BY sort_order, code")->fetchAll(PDO::FETCH_ASSOC);
+    $methods = StoreConfig::rows("SELECT * FROM payment_methods WHERE store_id = :store ORDER BY sort_order, code");
+    $countries = StoreConfig::rows("SELECT * FROM payment_method_countries WHERE store_id = :store ORDER BY method_code, country");
+    $shippingLinks = StoreConfig::rows("SELECT ps.*, sm.name AS shipping_name FROM payment_method_shipping ps LEFT JOIN shipping_methods sm ON sm.code = ps.shipping_method_code AND sm.store_id = ps.store_id WHERE ps.store_id = :store ORDER BY ps.method_code, ps.shipping_method_code");
+    $shippingMethods = StoreConfig::rows("SELECT code, name FROM shipping_methods WHERE store_id = :store ORDER BY sort_order, code");
     ?>
     <h1>Platby</h1>
     <div class="card">
@@ -630,44 +644,55 @@ function pagePayments(): void {
             </tbody></table></div>
             <div><h4>Obmedzenia na dopravu</h4><p class="muted">Ak metoda nema ziadne obmedzenie, je dostupna pre kazdu dopravu.</p><table><thead><tr><th>Metoda</th><th>Doprava</th><th></th></tr></thead><tbody>
             <?php foreach ($shippingLinks as $s): ?><tr><td><?= esc($s['method_code']) ?></td><td><?= esc($s['shipping_method_code']) ?> <?= $s['shipping_name'] ? '(' . esc($s['shipping_name']) . ')' : '' ?></td><td><form method="post" action="admin.php?p=payments&action=shipping_delete" style="display:inline"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$s['id'] ?>"><button class="btn btn-sm btn-danger">Zmazat</button></form></td></tr><?php endforeach; ?>
-            <tr><form method="post" action="admin.php?p=payments&action=shipping_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><select name="method_code"><?php foreach ($methods as $m): ?><option value="<?= esc($m['code']) ?>"><?= esc($m['code']) ?></option><?php endforeach; ?></select></td><td><select name="shipping_method_code"><?php foreach ($shippingMethods as $sm): ?><option value="<?= esc($sm['code']) ?>"><?= esc($sm['code']) ?> — <?= esc($sm['name']) ?></option><?php endforeach; ?></select></td><td><button class="btn btn-sm btn-primary">Pridat</button></td></form></tr>
+            <tr><form method="post" action="admin.php?p=payments&action=shipping_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><select name="method_code"><?php foreach ($methods as $m): ?><option value="<?= esc($m['code']) ?>"><?= esc($m['code']) ?></option><?php endforeach; ?></select></td><td><select name="shipping_method_code"><?php foreach ($shippingMethods as $sm): ?><option value="<?= esc($sm['code']) ?>"><?= esc($sm['code']) ?> â€” <?= esc($sm['name']) ?></option><?php endforeach; ?></select></td><td><button class="btn btn-sm btn-primary">Pridat</button></td></form></tr>
             </tbody></table></div>
         </div>
     </div>
     <?php
 }
 function handlePaymentMethodSave(): void {
-    $db = Db::get(); $id = Security::int($_POST['id'] ?? 0); $code = Security::slug($_POST['code'] ?? ''); $provider = Security::slug($_POST['provider'] ?? ''); $name = trim($_POST['name'] ?? '');
+    Security::adminRequire('payments.manage');
+    $db = Db::get(); $id = Security::int($_POST['id'] ?? 0); $code = Security::slug($_POST['code'] ?? ''); $provider = Security::slug($_POST['provider'] ?? ''); $name = trim(Security::str($_POST['name'] ?? ''));
     $serviceType = in_array($_POST['service_type'] ?? '', ['online_card', 'bank_transfer', 'cod', 'offline'], true) ? $_POST['service_type'] : 'offline';
     $min = max(0, Security::int($_POST['min_amount'] ?? 0)); $max = paymentNullableInt('max_amount');
     if (!$code || !$provider || !$name || ($max !== null && $max < $min)) { setFlash('err', 'Kod, provider, nazov a platne limity su povinne.'); header('Location: admin.php?p=payments'); exit; }
-    $data = [':code'=>$code, ':provider'=>$provider, ':name'=>$name, ':description'=>trim($_POST['description'] ?? ''), ':service_type'=>$serviceType, ':min_amount'=>$min, ':max_amount'=>$max, ':fixed_fee'=>max(0, Security::int($_POST['fixed_fee'] ?? 0)), ':percent_fee_bps'=>max(0, Security::int($_POST['percent_fee_bps'] ?? 0)), ':free_above'=>paymentNullableInt('free_above'), ':requires_online'=>(int)!empty($_POST['requires_online']), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
+    $data = [':code'=>$code, ':provider'=>$provider, ':name'=>$name, ':description'=>trim(Security::str($_POST['description'] ?? '')), ':service_type'=>$serviceType, ':min_amount'=>$min, ':max_amount'=>$max, ':fixed_fee'=>max(0, Security::int($_POST['fixed_fee'] ?? 0)), ':percent_fee_bps'=>max(0, Security::int($_POST['percent_fee_bps'] ?? 0)), ':free_above'=>paymentNullableInt('free_above'), ':requires_online'=>(int)!empty($_POST['requires_online']), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
+    $data[':store'] = StoreContext::current()->providerId();
+    if (!in_array(StoreConfig::value('payment_methods', 'code', $code), [null, (string)$id], true)) { setFlash('err', 'Platobna metoda s tymto kodom uz existuje.'); header('Location: admin.php?p=payments'); exit; }
     if ($id) {
-        $stmt = $db->prepare("SELECT code FROM payment_methods WHERE id = :id");
-        $stmt->execute([':id'=>$id]);
-        $oldCode = (string)$stmt->fetchColumn();
-        $data[':id']=$id; $db->prepare("UPDATE payment_methods SET code=:code, provider=:provider, name=:name, description=:description, service_type=:service_type, min_amount=:min_amount, max_amount=:max_amount, fixed_fee=:fixed_fee, percent_fee_bps=:percent_fee_bps, free_above=:free_above, requires_online=:requires_online, active=:active, sort_order=:sort_order, updated_at=" . Db::now() . " WHERE id=:id")->execute($data);
+        $oldCode = StoreConfig::value('payment_methods', 'id', (string)$id, 'code');
+        if ($oldCode === null) { setFlash('err', 'Zaznam neexistuje.'); header('Location: admin.php?p=payments'); exit; }
+        $data[':id']=$id; $db->prepare("UPDATE payment_methods SET code=:code, provider=:provider, name=:name, description=:description, service_type=:service_type, min_amount=:min_amount, max_amount=:max_amount, fixed_fee=:fixed_fee, percent_fee_bps=:percent_fee_bps, free_above=:free_above, requires_online=:requires_online, active=:active, sort_order=:sort_order, updated_at=" . Db::now() . " WHERE id=:id AND store_id=:store")->execute($data);
         PaymentService::renameMethodCodeLinks($oldCode, $code);
     }
-    else { $db->prepare("INSERT INTO payment_methods (code, provider, name, description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, requires_online, active, sort_order) VALUES (:code, :provider, :name, :description, :service_type, :min_amount, :max_amount, :fixed_fee, :percent_fee_bps, :free_above, :requires_online, :active, :sort_order)")->execute($data); }
+    else { $db->prepare("INSERT INTO payment_methods (store_id, code, provider, name, description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, requires_online, active, sort_order) VALUES (:store, :code, :provider, :name, :description, :service_type, :min_amount, :max_amount, :fixed_fee, :percent_fee_bps, :free_above, :requires_online, :active, :sort_order)")->execute($data); }
     setFlash('ok', 'Platobna metoda ulozena.'); header('Location: admin.php?p=payments'); exit;
 }
-function handlePaymentMethodDelete(): void { $id = Security::int($_POST['id'] ?? 0); if ($id) { Db::get()->prepare("DELETE FROM payment_methods WHERE id = :id")->execute([':id'=>$id]); setFlash('ok', 'Platobna metoda zmazana.'); } header('Location: admin.php?p=payments'); exit; }
+function handlePaymentMethodDelete(): void { Security::adminRequire('payments.manage'); storeConfigDelete('payment_methods', 'Platobna metoda zmazana.'); header('Location: admin.php?p=payments'); exit; }
 function handlePaymentCountrySave(): void {
-    $methodCode = Security::slug($_POST['method_code'] ?? ''); $country = strtoupper(trim($_POST['country'] ?? ''));
-    if (!$methodCode || !preg_match('/^[A-Z]{2}$/', $country)) { setFlash('err', 'Metoda a ISO krajina su povinne.'); header('Location: admin.php?p=payments'); exit; }
-    Db::get()->prepare(Db::insertIgnore() . " INTO payment_method_countries (method_code, country) VALUES (:method, :country)")->execute([':method'=>$methodCode, ':country'=>$country]);
+    Security::adminRequire('payments.manage');
+    $methodCode = Security::slug($_POST['method_code'] ?? ''); $country = strtoupper(trim(Security::str($_POST['country'] ?? '')));
+    if (!$methodCode || !preg_match('/^[A-Z]{2}$/', $country) || StoreConfig::value('payment_methods', 'code', $methodCode) === null) { setFlash('err', 'Metoda a ISO krajina su povinne.'); header('Location: admin.php?p=payments'); exit; }
+    Db::get()->prepare(Db::insertIgnore() . " INTO payment_method_countries (store_id, method_code, country) VALUES (:store, :method, :country)")->execute([':store'=>StoreContext::current()->providerId(), ':method'=>$methodCode, ':country'=>$country]);
     setFlash('ok', 'Krajina pridana k platbe.'); header('Location: admin.php?p=payments'); exit;
 }
-function handlePaymentCountryDelete(): void { $id = Security::int($_POST['id'] ?? 0); if ($id) { Db::get()->prepare("DELETE FROM payment_method_countries WHERE id = :id")->execute([':id'=>$id]); setFlash('ok', 'Krajina zmazana.'); } header('Location: admin.php?p=payments'); exit; }
+function handlePaymentCountryDelete(): void { Security::adminRequire('payments.manage'); storeConfigDelete('payment_method_countries', 'Krajina zmazana.'); header('Location: admin.php?p=payments'); exit; }
 function handlePaymentShippingSave(): void {
+    Security::adminRequire('payments.manage');
     $methodCode = Security::slug($_POST['method_code'] ?? ''); $shippingCode = Security::slug($_POST['shipping_method_code'] ?? '');
-    if (!$methodCode || !$shippingCode) { setFlash('err', 'Metoda a doprava su povinne.'); header('Location: admin.php?p=payments'); exit; }
-    Db::get()->prepare(Db::insertIgnore() . " INTO payment_method_shipping (method_code, shipping_method_code) VALUES (:method, :shipping)")->execute([':method'=>$methodCode, ':shipping'=>$shippingCode]);
+    if (!$methodCode || !$shippingCode || StoreConfig::value('payment_methods', 'code', $methodCode) === null || StoreConfig::value('shipping_methods', 'code', $shippingCode) === null) { setFlash('err', 'Metoda a doprava su povinne.'); header('Location: admin.php?p=payments'); exit; }
+    Db::get()->prepare(Db::insertIgnore() . " INTO payment_method_shipping (store_id, method_code, shipping_method_code) VALUES (:store, :method, :shipping)")->execute([':store'=>StoreContext::current()->providerId(), ':method'=>$methodCode, ':shipping'=>$shippingCode]);
     setFlash('ok', 'Obmedzenie dopravy pridane.'); header('Location: admin.php?p=payments'); exit;
 }
-function handlePaymentShippingDelete(): void { $id = Security::int($_POST['id'] ?? 0); if ($id) { Db::get()->prepare("DELETE FROM payment_method_shipping WHERE id = :id")->execute([':id'=>$id]); setFlash('ok', 'Obmedzenie dopravy zmazane.'); } header('Location: admin.php?p=payments'); exit; }
+function handlePaymentShippingDelete(): void { Security::adminRequire('payments.manage'); storeConfigDelete('payment_method_shipping', 'Obmedzenie dopravy zmazane.'); header('Location: admin.php?p=payments'); exit; }
 function paymentNullableInt(string $key): ?int { $v = trim((string)($_POST[$key] ?? '')); return $v === '' ? null : max(0, Security::int($v)); }
+
+function storeConfigDelete(string $table, string $message): void {
+    $id = Security::int($_POST['id'] ?? 0);
+    if (!$id) return;
+    if (StoreConfig::delete($table, $id)) setFlash('ok', $message);
+    else setFlash('err', 'Zaznam neexistuje.');
+}
 function handleFeedSync(): void {
     $id = Security::int($_POST['feed_id'] ?? 0);
     if (!$id) {
