@@ -190,7 +190,7 @@ test('admin product export and bulk controls use one valid form', async ({ page 
   await adminSignIn(page);
   await page.goto('/admin.php?p=products');
   await expect(page.locator('form form')).toHaveCount(0);
-  await expect(page.locator('#bulk-form')).toHaveAttribute('data-confirm', 'OK?');
+  await expect(page.locator('#bulk-form')).toHaveAttribute('data-confirm', 'Apply the bulk action to the selected products?');
 
   const exportButton = page.locator('#bulk-form button[formaction*="action=export"]');
   await expect(exportButton).toHaveAttribute('formmethod', 'post');
