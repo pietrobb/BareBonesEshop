@@ -79,6 +79,7 @@ creates it from the tracked template `config.example.php`). Key entries:
 | `provider_defaults` | Default stable codes for payment, mail, tax, and optional ERP |
 | `providers`        | Additive code→adapter registry for concurrent payment/shipping/mail/tax/ERP providers |
 | `outbound_webhooks` | Config-only signed webhook endpoints, event filters, stores, and secrets |
+| `extensions` | Extensions loaded from `extensions/<code>/` without editing core files ([docs/EXTENSIONS.md](docs/EXTENSIONS.md)) |
 
 Never commit real secrets (Stripe keys, admin password hash for production) —
 keep them in an untracked local override or environment-specific config. The

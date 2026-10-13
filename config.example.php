@@ -162,6 +162,13 @@ return [
         // ],
     ],
 
+    // Extensions to load from extensions/<code>/extension.php (docs/EXTENSIONS.md). They add
+    // providers, domain event listeners and storefront data without editing core files;
+    // updates never overwrite extensions/ and the drift guard does not report it.
+    'extensions' => [
+        // 'acme-loyalty',
+    ],
+
     // Dev only: route api.php?action=webhook_payment&provider=mock even when the
     // active payment adapter is not MockPayment. NEVER enable in production —
     // the mock webhook marks orders as paid. Pair with 'mock_webhook_secret'.

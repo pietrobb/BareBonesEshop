@@ -6,7 +6,7 @@ final class Updater
     private const PROTECTED_FILES = ['.env', 'config.php', '.barebones-version.json'];
     private const PROTECTED_PREFIXES = [
         '.git/', '.worktrees/', '.claude/', '.playwright-mcp/',
-        'cache/', 'db/', 'jobs/', 'logs/', 'storage/', 'uploads/',
+        'cache/', 'db/', 'extensions/', 'jobs/', 'logs/', 'storage/', 'uploads/',
     ];
 
     private string $root;

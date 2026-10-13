@@ -151,6 +151,12 @@ class Setup
         $add($mail === 'log' ? 'warn' : 'pass', 'provider.mail', "Mail provider selected: {$mail}", $mail === 'log' ? 'Configure smtp or ses and send a staging message before launch.' : '');
         $webhooks = array_filter((array)($config['outbound_webhooks'] ?? []), static fn($endpoint): bool => is_array($endpoint) && ($endpoint['active'] ?? true));
         $add($webhooks === [] ? 'warn' : 'pass', 'provider.webhook', $webhooks === [] ? 'No active outbound webhook configured.' : count($webhooks) . ' active outbound webhook endpoint(s).', 'Configure one signed staging endpoint and verify a delivery audit row.');
+        Extensions::boot($config);
+        $extensionErrors = Extensions::errors();
+        $add($extensionErrors === [] ? 'pass' : 'fail', 'extensions', $extensionErrors === []
+            ? count(Extensions::loaded()) . ' extension(s) loaded.'
+            : 'Extensions not loaded: ' . implode('; ', array_map(static fn($code, string $error): string => "{$code}: {$error}", array_keys($extensionErrors), $extensionErrors)),
+            'Fix or disable the listed extensions (config "extensions", directory extensions/<code>/).');
 
         $shipping = (array)($config['integrations']['http_shipping'] ?? []);
         $shippingReady = self::integrationReady($shipping);

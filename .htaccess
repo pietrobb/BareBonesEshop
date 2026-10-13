@@ -1,7 +1,7 @@
 RewriteEngine On
 
 # Deny private/runtime/source trees before the generic existing-file bypass.
-RewriteRule ^(?:storage|db|jobs|logs|config|cli|src|migrations|adapters|lang|demo|docs|forms|blocks|data|templates|releases|tests|deploy)(?:/|$) - [F,L,NC]
+RewriteRule ^(?:storage|db|jobs|logs|config|cli|src|migrations|adapters|extensions|lang|demo|docs|forms|blocks|data|templates|releases|tests|deploy)(?:/|$) - [F,L,NC]
 RewriteRule ^themes/[^/]+/(?:theme\.json|blocks(?:/|$)) - [F,L,NC]
 
 # BBF's browser client and handler are public integration points; all other

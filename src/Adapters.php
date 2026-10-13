@@ -65,6 +65,10 @@ class Adapters {
                 $registry[$providerType][$code] = $definition + ($registry[$providerType][$code] ?? ['capabilities' => []]);
             }
         }
+        // Extension providers never replace a core or configured code (ExtensionApi::provider refuses it).
+        foreach (Extensions::providers() as $providerType => $definitions) {
+            foreach ($definitions as $code => $definition) $registry[$providerType][$code] ??= $definition;
+        }
         $scope = class_exists('StoreContext') ? StoreContext::current()->providerId() : 'default';
         foreach ($registry as &$definitions) {
             foreach ($definitions as &$definition) $definition['scope'] = $scope;
@@ -73,6 +77,12 @@ class Adapters {
         if ($type === null) return $registry;
         if (!array_key_exists($type, $registry)) throw new \InvalidArgumentException("Unknown provider type: {$type}");
         return $registry[$type];
+    }
+
+    /** @return class-string the interface every provider of $type implements */
+    public static function providerInterface(string $type): string {
+        if (!isset(self::PROVIDER_INTERFACES[$type])) throw new \InvalidArgumentException("Unknown provider type: {$type}");
+        return self::PROVIDER_INTERFACES[$type];
     }
 
     /** @return array<string,object> */

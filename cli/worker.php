@@ -220,6 +220,10 @@ function processOutbox(array $cfg, bool $verbose = false): void {
                     $failures[] = (string)$code . ':' . ($result['response_code'] ?? 'network');
                 }
             }
+            // In-process listeners of enabled extensions, with the same per-endpoint retry/dedup.
+            $extensionDelivery = Extensions::deliver($event, $envelope);
+            $matched += $extensionDelivery['matched'];
+            array_push($failures, ...$extensionDelivery['failures']);
             if ($failures === []) {
                 Outbox::markDelivered((string)$event['id']);
                 if ($verbose) echo "Delivered outbox event {$event['id']} to {$matched} endpoint(s)\n";
