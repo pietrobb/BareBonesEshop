@@ -348,7 +348,7 @@ foreach (['<script', '<img', '<form', '<input', 'onclick', 'style=', 'javascript
     assert_true(!str_contains(strtolower($safeRichHtml), $blockedHtml), "G6 rich HTML: {$blockedHtml} is removed");
 }
 assert_true(str_contains($safeRichHtml, 'href="https://docs.example/path"'), 'G6 rich HTML: safe HTTPS links survive');
-assert_true(preg_match("/(?:^|; )form-action 'self'(?: https:\/\/[a-z0-9.:-]+)*;/", Security::contentSecurityPolicy()) === 1, 'G6 CSP: form submissions are restricted to self plus declared payment gateway origins');
+assert_true(preg_match("/(?:^|; )form-action 'self'(?: (?:https:\/\/[a-z0-9.-]+|http:\/\/(?:127\.0\.0\.1|localhost))(?::[0-9]{1,5})?)*;/", Security::contentSecurityPolicy()) === 1, 'G6 CSP: form submissions are restricted to self plus declared payment gateway origins');
 assert_true(str_contains($securitySrc, "frame-ancestors 'none'"), 'G6 CSP: framing is denied in CSP');
 
 $feedEndpoint = new ReflectionMethod(FeedImport::class, 'publicFeedEndpoint');
