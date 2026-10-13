@@ -612,6 +612,10 @@ $paymentMonitoringMigration->up($pdo, true);
 $paymentMonitoringMigration->up($pdo, true);
 assert_true(in_array('is_synthetic', array_column($pdo->query('PRAGMA table_info(orders)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true)
     && (bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='csp_violations'")->fetchColumn(), 'Payment monitoring migration: synthetic order flag and CSP report table exist idempotently');
+$emailOverrideMigration = require TEST_CLI_DIR . '/../migrations/20261013130000_email_template_overrides.php';
+$emailOverrideMigration->up($pdo, true);
+$emailOverrideMigration->up($pdo, true);
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='email_template_overrides'")->fetchColumn(), 'A15.8 migration: e-mail template overrides table exists idempotently');
 
 // ============================================================
 // TEST 3: CSV Import

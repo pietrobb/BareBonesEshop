@@ -484,7 +484,7 @@ class Security {
     private static array $rolePermissions = [
         'owner'       => ['*'],
         'manager'     => ['products.*', 'categories.edit', 'orders.*', 'customers.view', 'customers.edit', 'reports.view', 'gdpr.view', 'import', 'cache',
-                          'payments.manage', 'shipping.manage', 'rma.manage', 'pricing.manage'],
+                          'payments.manage', 'shipping.manage', 'rma.manage', 'pricing.manage', 'emails.manage'],
         'editor'      => ['products.edit', 'products.view', 'categories.edit', 'media.upload'],
         'fulfillment' => ['orders.view', 'orders.edit', 'orders.ship', 'orders.print'],
         'viewer'      => ['products.view', 'orders.view', 'reports.view'],

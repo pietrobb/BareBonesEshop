@@ -65,8 +65,7 @@ function handlePost(string $page, string $action): void {
         'payments:shipping_delete' => handlePaymentShippingDelete(),
         'digital_assets:save' => handleDigitalAssetSave(),
         'digital_assets:toggle' => handleDigitalAssetToggle(),
-        'reviews:approve' => handleReviewModerate('approved'),
-        'reviews:reject'  => handleReviewModerate('rejected'),
+        'reviews:approve' => handleReviewModerate('approved'), 'reviews:reject' => handleReviewModerate('rejected'),
         'rma:status'      => handleRmaStatus(),
         'customer:status' => handleCustomerStatus(),
         'admin_users:create' => handleAdminUserCreate(),
@@ -75,6 +74,7 @@ function handlePost(string $page, string $action): void {
         'admin_users:mfa' => handleAdminUserMfa(),
         'admin_users:revoke_sessions' => handleAdminUserRevokeSessions(),
         'admin_users:grant' => handleAdminUserGrant(),
+        'email_templates:save' => handleEmailTemplateSave(), 'email_templates:preview' => handleEmailTemplatePreview(), 'email_templates:reset' => handleEmailTemplateReset(),
         default          => null,
     };
 }

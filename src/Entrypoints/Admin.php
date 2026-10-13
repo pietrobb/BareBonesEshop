@@ -13,6 +13,7 @@ require_once __DIR__ . '/Admin/Operations.php';
 require_once __DIR__ . '/Admin/Reports.php';
 require_once __DIR__ . '/Admin/Recovery.php';
 require_once __DIR__ . '/Admin/AdminUsers.php';
+require_once __DIR__ . '/Admin/EmailTemplates.php';
 require_once __DIR__ . '/Admin/Request.php';
 require_once __DIR__ . '/Admin/StoreScope.php';
 // Auth
@@ -111,6 +112,7 @@ $title = match($page) {
     'customers'  => I18n::t('admin.title.customers'),
     'customer'   => I18n::t('admin.title.customer'),
     'admin_users' => I18n::t('admin.title.admin_users'),
+    'email_templates' => I18n::t('admin.title.email_templates'),
     'reviews'    => I18n::t('admin.title.reviews'),
     'rma'        => I18n::t('admin.title.rma'),
     default      => I18n::t('admin.title.default'),
@@ -228,6 +230,7 @@ match($page) {
     'customers'  => pageCustomers(),
     'customer'   => pageCustomerDetail(),
     'admin_users' => pageAdminUsers(),
+    'email_templates' => pageEmailTemplates(),
     default      => pageDashboard(),
 };
 ?>

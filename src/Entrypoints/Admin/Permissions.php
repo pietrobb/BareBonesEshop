@@ -40,4 +40,5 @@ return [
     'companies'  => 'customers.edit',
     'customer_groups' => 'customers.edit',
     'admin_users' => 'admins.manage',
+    'email_templates' => 'emails.manage',
 ];

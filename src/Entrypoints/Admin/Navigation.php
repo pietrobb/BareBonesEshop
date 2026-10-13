@@ -31,5 +31,6 @@ return [
     ['reviews', 'products.edit', 'admin.nav.reviews', []],
     ['rma', 'rma.manage', 'admin.nav.rma', []],
     ['customers', 'customers.view', 'admin.nav.customers', ['customer']],
+    ['email_templates', 'emails.manage', 'admin.nav.email_templates', []],
     ['admin_users', 'admins.manage', 'admin.title.admin_users', []],
 ];

@@ -20,7 +20,6 @@
  */
 class MailService {
     private static ?MailAdapter $adapterOverride = null;
-    private static array $fallbackLocales = ['en'];
     private const SECRET_LINK_VARS = ['reset_url', 'verify_url', 'cart_url', 'unsubscribe_url', 'download_links'];
 
     /** For tests: inject a specific adapter (bypasses env). */
@@ -149,22 +148,11 @@ class MailService {
      * Returns ['subject' => ..., 'html' => ..., 'text' => ...].
      */
     public static function render(string $template, string $locale, array $vars): array {
-        $baseDir = self::templateDir();
-        $locales = array_unique(array_merge([$locale], self::$fallbackLocales));
-
-        $htmlFile = $subjectFile = $textFile = null;
-        foreach ($locales as $loc) {
-            $h = "{$baseDir}/{$loc}/{$template}.html";
-            if ($htmlFile === null && file_exists($h)) $htmlFile = $h;
-            $s = "{$baseDir}/{$loc}/{$template}.subject.txt";
-            if ($subjectFile === null && file_exists($s)) $subjectFile = $s;
-            $t = "{$baseDir}/{$loc}/{$template}.txt";
-            if ($textFile === null && file_exists($t)) $textFile = $t;
-        }
-
-        $html    = $htmlFile    ? (string)file_get_contents($htmlFile)    : "<p>{$template}</p>";
-        $subject = $subjectFile ? trim((string)file_get_contents($subjectFile)) : $template;
-        $text    = $textFile    ? (string)file_get_contents($textFile)    : '';
+        // The active store's admin override for this exact locale wins; otherwise the files with their locale fallback.
+        $source  = EmailTemplates::source($template, $locale);
+        $html    = $source['html'] ?? "<p>{$template}</p>";
+        $subject = $source['subject'] ?? $template;
+        $text    = $source['text'] ?? '';
 
         // Render in template-engine order used by worker.php: each → if → vars
         $html    = self::renderString($html, $vars);
@@ -173,12 +161,15 @@ class MailService {
         if ($text !== '') {
             $text = self::renderString($text, $vars, false);
         } else {
-            // Fallback plain text from HTML
-            // Decode the HTML escaping so links survive (p=reset&token=..., not &amp;token=).
-            $text = trim(preg_replace('/\s+\n/', "\n", html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8')));
+            $text = self::textFromHtml($html);
         }
 
         return ['subject' => $subject, 'html' => $html, 'text' => $text];
+    }
+
+    /** Plain-text part derived from rendered HTML; the HTML escaping is decoded so links survive (p=reset&token=..., not &amp;token=). */
+    public static function textFromHtml(string $html): string {
+        return trim(preg_replace('/\s+\n/', "\n", html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8')));
     }
 
     /** Expand {{#each}} / {{#if}} / {{var}} — matches worker.php renderTemplate. */
@@ -293,10 +284,6 @@ class MailService {
             'zip'  => 'application/zip',
             default => 'application/octet-stream',
         };
-    }
-
-    private static function templateDir(): string {
-        return realpath(__DIR__ . '/..') . '/templates/emails';
     }
 
     private static function logInsert(string $to, string $tpl, string $locale, string $subject, string $adapterId, ?int $orderId, array $vars): int {
