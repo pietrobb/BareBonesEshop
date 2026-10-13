@@ -41,7 +41,8 @@ if ($phase === 'setup') {
     $db->prepare('INSERT INTO warehouse_stock (warehouse_id, sku, qty, reserved) VALUES (?, ?, 50, 0)')->execute([$warehouse, 'A132-SKU']);
     // A132ONCE is used up by an earlier order.
     $db->beginTransaction();
-    Pricing::recordCouponUse('A132ONCE', 990001, 'earlier@example.test', 300);
+    $db->prepare("INSERT INTO orders (order_number, status, payment_status, customer_name, customer_email, payment_method, subtotal, total, currency, store_id) VALUES (?, 'pending', 'pending', 'A132', 'earlier@example.test', 'card', 2000, 1700, 'eur', 'default')")->execute(['A132-EARLIER']);
+    Pricing::recordCouponUse('A132ONCE', (int)$db->lastInsertId(), 'earlier@example.test', 300);
     $db->commit();
     exit(0);
 }

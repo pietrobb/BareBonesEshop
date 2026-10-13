@@ -91,28 +91,15 @@ function renderCheckout(): string {
 
     // Same discount rules as CheckoutService::execute: coupon + automatic promotions, capped at the subtotal.
     $couponCode = $couponAction === 'remove' ? '' : $form('coupon_code', 64);
-    $couponError = '';
-    $couponDiscount = 0;
-    if ($couponCode !== '') {
-        $coupon = Pricing::applyCoupon($couponCode, $subtotal, Security::email($form('email')) ?? null);
-        if ((int)$coupon['discount'] > 0) {
-            $couponDiscount = (int)$coupon['discount'];
-        } else {
-            $couponError = sprintf($t(match ((string)($coupon['error'] ?? '')) {
-                'Minimum order not met' => 'coupon_min_subtotal',
-                'Coupon expired' => 'coupon_used_up',
-                'Coupon already used' => 'coupon_already_used',
-                default => 'coupon_invalid',
-            }), $couponCode);
-            $couponCode = '';
-        }
-    }
-    $promotionDiscount = 0;
-    foreach (Pricing::autoCartRules($subtotal, $cart, $customerId ?: null) as $rule) {
-        if ($rule['action'] === 'free_shipping') $shipping = 0;
-        $promotionDiscount += max(0, (int)($rule['discount'] ?? 0));
-    }
-    $discount = min($subtotal, $couponDiscount + $promotionDiscount);
+    $preview = CheckoutService::discountPreview($couponCode, $subtotal, Security::email($form('email')) ?? null, $cart, $customerId ?: null);
+    $couponDiscount = $preview['coupon_discount'];
+    $couponError = $preview['coupon_error'] === null ? '' : sprintf($t(match ($preview['coupon_error']) {
+        'Minimum order not met' => 'coupon_min_subtotal', 'Coupon expired' => 'coupon_used_up',
+        'Coupon already used' => 'coupon_already_used', default => 'coupon_invalid',
+    }), $couponCode);
+    if ($couponError !== '') $couponCode = '';
+    if ($preview['free_shipping']) $shipping = 0;
+    $discount = min($subtotal, $couponDiscount + $preview['promotion_discount']);
     $countries = ['SK' => 'Slovensko', 'CZ' => 'Česko', 'DE' => 'Deutschland', 'AT' => 'Österreich', 'HU' => 'Magyarország', 'PL' => 'Polska'];
 
     return Template::render('storefront/checkout', [
