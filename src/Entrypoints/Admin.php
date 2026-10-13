@@ -5,6 +5,7 @@ require_once dirname(__DIR__, 2) . '/src/autoload.php';
 require_once __DIR__ . '/Admin/Shared.php';
 require_once __DIR__ . '/Admin/Catalog.php';
 require_once __DIR__ . '/Admin/Orders.php';
+require_once __DIR__ . '/Admin/OrderOperations.php';
 require_once __DIR__ . '/Admin/Customers.php';
 require_once __DIR__ . '/Admin/B2b.php';
 require_once __DIR__ . '/Admin/Suppliers.php';
@@ -44,12 +45,12 @@ $action = Security::str($_GET['action'] ?? '');
 // CSV export — POST only, so the CSRF token travels in the request body
 // instead of the URL (URLs leak via Referer header, browser history and
 // access/proxy logs). Security::csrfValidate() accepts $_POST or X-CSRF-Token.
-if ($page === 'products' && $action === 'export' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+if (in_array($page, ['products', 'orders'], true) && $action === 'export' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     if (!Security::csrfValidate()) {
         http_response_code(403);
         exit('Forbidden');
     }
-    handleExport();
+    $page === 'orders' ? handleOrdersExport() : handleExport();
 }
 
 // Role-based permission map
@@ -63,8 +64,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Binary downloads leave before the HTML layout starts, otherwise the PDF is wrapped in admin markup.
-if ($page === 'invoice_pdf') {
-    pageInvoicePdf();
+if ($page === 'invoice_pdf' || $page === 'delivery_note') {
+    $page === 'invoice_pdf' ? pageInvoicePdf() : pageDeliveryNotes();
     exit;
 }
 
@@ -153,7 +154,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
 .bbf-submit{display:inline-block;padding:.4rem .8rem;border-radius:4px;font-size:.85rem;cursor:pointer;background:#2563eb;color:#fff;border:1px solid #2563eb}
 .pagination{display:flex;gap:.5rem;margin-top:1rem}
 .stock-low{color:#b45309;font-weight:600}.stock-critical{color:#dc2626;font-weight:700}
-.muted{color:#64748b;font-size:.85rem}
+.muted{color:#475569;font-size:.85rem}
 .sales-toolbar{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap}.sales-toolbar .form-row{margin:0}.sales-toolbar input{min-width:220px}
 .report-bar{margin-left:.5rem;width:8rem;vertical-align:middle}details>summary{cursor:pointer;font-weight:600;margin:.5rem 0}
 .table-scroll{overflow-x:auto}.status-ok{color:#047857}.status-warn{color:#b45309}.status-error{color:#b91c1c;font-weight:600}

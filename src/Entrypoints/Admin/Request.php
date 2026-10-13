@@ -26,6 +26,7 @@ function handlePost(string $page, string $action): void {
         'suppliers:save' => handleSupplierSave(), 'suppliers:delete' => handleSupplierDelete(), 'suppliers:products' => handleSupplierProducts(),
         'purchase_orders:create' => handlePurchaseOrderCreate(), 'purchase_orders:receive' => handlePurchaseOrderReceive(),
         'order:status'   => handleOrderStatus(),
+        'orders:bulk_status' => handleOrdersBulkStatus(),
         'order:payment_transition' => handleOrderPaymentTransition(),
         'order:refund_request' => handleOrderRefundRequest(),
         'order:email_resend' => handleOrderEmailResend(),

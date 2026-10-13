@@ -116,7 +116,9 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/Operations.php' => ['lines' => 760, 'functions' => 36, 'max_function_lines' => 180, 'coupling' => 18],
     // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
     // +1 coupling: SalesReport gives the sales overview shop-local day boundaries (A15.1).
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 850, 'functions' => 14, 'max_function_lines' => 300, 'coupling' => 17],
+    // +1 coupling: OrderExport owns the order list filters shared by the sales overview and the CSV export (A15.2).
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 850, 'functions' => 14, 'max_function_lines' => 300, 'coupling' => 18],
+    'src/Entrypoints/Admin/OrderOperations.php' => ['lines' => 100, 'functions' => 4, 'max_function_lines' => 35, 'coupling' => 8],
     'src/Entrypoints/Admin/Reports.php' => ['lines' => 120, 'functions' => 2, 'max_function_lines' => 75, 'coupling' => 4],
     'src/Entrypoints/Admin/Recovery.php' => ['lines' => 300, 'functions' => 6, 'max_function_lines' => 90, 'coupling' => 8],
     'src/Entrypoints/Admin/Request.php' => ['lines' => 80, 'functions' => 1, 'max_function_lines' => 70, 'coupling' => 2],

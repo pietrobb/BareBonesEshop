@@ -25,38 +25,9 @@ function pageSalesOverview(): void {
     $stmt->execute([':store' => $storeId]);
     $failedNotifications = (int)$stmt->fetchColumn();
 
-    $search = trim((string)($_GET['q'] ?? ''));
-    $period = (string)($_GET['period'] ?? '30');
-    $statusFilter = (string)($_GET['status'] ?? '');
-    $paymentStatusFilter = (string)($_GET['payment_status'] ?? '');
-    $allowedPeriods = ['today', '7', '30', 'all'];
-    if (!in_array($period, $allowedPeriods, true)) $period = '30';
-    if ($statusFilter !== '' && !in_array($statusFilter, OrderWorkflow::statuses(), true)) $statusFilter = '';
-    if ($paymentStatusFilter !== '' && !in_array($paymentStatusFilter, PaymentService::paymentStatuses(), true)) $paymentStatusFilter = '';
-
-    $where = ['o.store_id = :store'];
-    $params = [':store' => $storeId];
-    if ($search !== '') {
-        $like = '%' . Db::likeLiteral(mb_strtolower($search)) . '%';
-        $where[] = "(LOWER(o.order_number) LIKE :q_number ESCAPE '!' OR LOWER(o.customer_name) LIKE :q_name ESCAPE '!' OR LOWER(o.customer_email) LIKE :q_email ESCAPE '!')";
-        $params[':q_number'] = $like;
-        $params[':q_name'] = $like;
-        $params[':q_email'] = $like;
-    }
-    if ($period !== 'all') {
-        $since = SalesReport::sinceUtc($period === 'today' ? 1 : (int)$period);
-        $where[] = 'o.created_at >= :since';
-        $params[':since'] = $since;
-    }
-    if ($statusFilter !== '') {
-        $where[] = 'o.status = :status';
-        $params[':status'] = $statusFilter;
-    }
-    if ($paymentStatusFilter !== '') {
-        $where[] = 'o.payment_status = :payment_status';
-        $params[':payment_status'] = $paymentStatusFilter;
-    }
-    $whereSql = implode(' AND ', $where);
+    $filters = OrderExport::filters($_GET);
+    [$search, $period, $statusFilter, $paymentStatusFilter] = [$filters['q'], $filters['period'], $filters['status'], $filters['payment_status']];
+    [$whereSql, $params] = [$filters['where'], $filters['params']];
 
     $pageNumber = max(1, Security::int($_GET['page'] ?? 1));
     $perPage = 30;
@@ -190,13 +161,13 @@ function pageOrders(): void {
     <div class="card">
         <form method="get" style="display:flex;gap:.5rem;margin-bottom:1rem">
             <input type="hidden" name="p" value="orders">
-            <select name="status">
+            <select name="status" aria-label="<?= esc(I18n::t('admin.sales.order_status')) ?>">
                 <option value="">— <?= esc(I18n::t('admin.th.status')) ?> —</option>
                 <?php foreach (OrderWorkflow::statuses() as $s): ?>
                 <option value="<?= $s ?>" <?= $statusFilter===$s?'selected':'' ?>><?= $s ?></option>
                 <?php endforeach; ?>
             </select>
-            <select name="payment_status">
+            <select name="payment_status" aria-label="<?= esc(I18n::t('admin.sales.payment_status')) ?>">
                 <option value="">— Payment —</option>
                 <?php foreach (PaymentService::paymentStatuses() as $s): ?>
                 <option value="<?= $s ?>" <?= $paymentStatusFilter===$s?'selected':'' ?>><?= $s ?></option>
@@ -204,10 +175,22 @@ function pageOrders(): void {
             </select>
             <button class="btn" type="submit"><?= esc(I18n::t('admin.btn.apply')) ?></button>
         </form>
+        <?php $filterFields = '<input type="hidden" name="csrf_token" value="' . esc(Security::csrfToken()) . '"><input type="hidden" name="status" value="' . esc(Security::str($statusFilter)) . '"><input type="hidden" name="payment_status" value="' . esc(Security::str($paymentStatusFilter)) . '">'; ?>
+        <form method="post" action="admin.php?p=orders&amp;action=export" style="margin-bottom:1rem"><?= $filterFields ?><button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.orders.export_csv')) ?></button></form>
+        <form method="post" action="admin.php?p=orders&amp;action=bulk_status" id="orders-bulk">
+        <?= $filterFields ?>
+        <div class="sales-toolbar" style="margin-bottom:1rem">
+            <div class="form-row"><label for="bulk-status"><?= esc(I18n::t('admin.orders.bulk_status')) ?></label><select id="bulk-status" name="new_status"><?php foreach (OrderWorkflow::statuses() as $s): ?><option value="<?= esc($s) ?>"><?= esc($s) ?></option><?php endforeach; ?></select></div>
+            <div class="form-row"><label for="bulk-note"><?= esc(I18n::t('admin.order.note')) ?></label><input id="bulk-note" name="note"></div>
+            <button class="btn btn-primary btn-sm" type="submit"><?= esc(I18n::t('admin.orders.bulk_apply')) ?></button>
+            <button class="btn btn-sm" type="submit" formaction="admin.php?p=delivery_note" formtarget="_blank" name="format" value="html"><?= esc(I18n::t('admin.delivery_note.html')) ?></button>
+            <button class="btn btn-sm" type="submit" formaction="admin.php?p=delivery_note" formtarget="_blank" name="format" value="pdf"><?= esc(I18n::t('admin.delivery_note.pdf')) ?></button>
+        </div>
         <table>
-            <tr><th><?= esc(I18n::t('admin.th.number')) ?></th><th><?= esc(I18n::t('admin.th.customer')) ?></th><th><?= esc(I18n::t('admin.th.email')) ?></th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th>Payment</th><th><?= esc(I18n::t('admin.th.date')) ?></th><th></th></tr>
+            <tr><th><span class="sr-only"><?= esc(I18n::t('admin.orders.select')) ?></span></th><th><?= esc(I18n::t('admin.th.number')) ?></th><th><?= esc(I18n::t('admin.th.customer')) ?></th><th><?= esc(I18n::t('admin.th.email')) ?></th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th>Payment</th><th><?= esc(I18n::t('admin.th.date')) ?></th><th></th></tr>
             <?php foreach ($orders as $o): ?>
             <tr>
+                <td><input type="checkbox" name="order_ids[]" value="<?= (int)$o['id'] ?>" aria-label="<?= esc(I18n::t('admin.orders.select') . ' ' . $o['order_number']) ?>"></td>
                 <td><a href="admin.php?p=order&id=<?= $o['id'] ?>"><?= esc($o['order_number']) ?></a></td>
                 <td><?= esc($o['customer_name']) ?></td>
                 <td class="muted"><?= esc($o['customer_email']) ?></td>
@@ -219,6 +202,7 @@ function pageOrders(): void {
             </tr>
             <?php endforeach; ?>
         </table>
+        </form>
         <?php pagination($page, $pages, "admin.php?p=orders&status=" . urlencode($statusFilter) . "&payment_status=" . urlencode($paymentStatusFilter)); ?>
     </div>
     <?php
@@ -246,6 +230,7 @@ function pageOrder(): void {
     $orderConsents = ConsentService::forOrder($id);
     ?>
     <h1><?= esc(I18n::t('admin.order.label')) ?> <?= esc($order['order_number']) ?></h1>
+    <?php if (Security::adminCan('orders.print')): ?><p><a class="btn btn-sm" href="admin.php?p=delivery_note&amp;id=<?= $id ?>" target="_blank"><?= esc(I18n::t('admin.delivery_note.html')) ?></a> <a class="btn btn-sm" href="admin.php?p=delivery_note&amp;id=<?= $id ?>&amp;format=pdf" target="_blank"><?= esc(I18n::t('admin.delivery_note.pdf')) ?></a></p><?php endif; ?>
 
     <div class="grid" style="grid-template-columns:1fr 1fr;gap:1rem">
         <div class="card">
@@ -635,15 +620,15 @@ function handleOrderStatus(): void {
     $newStatus = $_POST['new_status'] ?? '';
     $note = trim(Security::str($_POST['note'] ?? ''));
 
-    if (!in_array($newStatus, OrderWorkflow::statuses(), true)) {
+    if (!is_string($newStatus) || !in_array($newStatus, OrderWorkflow::statuses(), true)) {
         setFlash('err', 'Neplatný stav objednávky.');
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }
     if ($newStatus === 'refunded') Security::adminRequire('orders.refund');
-    $order = Orders::byId($orderId);
-    if (!$order || ($newStatus === 'paid' && ($order['payment_status'] ?? 'pending') !== 'paid')) {
-        setFlash('err', $order ? 'Najprv potvrďte prijatie platby.' : 'Objednávka neexistuje.');
+    $rejection = OrderWorkflow::adminRejection(Orders::byId($orderId), $newStatus, true);
+    if (in_array($rejection, ['not_found', 'payment_not_confirmed'], true)) {
+        setFlash('err', $rejection === 'payment_not_confirmed' ? 'Najprv potvrďte prijatie platby.' : 'Objednávka neexistuje.');
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }

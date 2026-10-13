@@ -1791,3 +1791,4 @@ require __DIR__ . '/AuditCheckoutBankTransferRegression.php';
 require __DIR__ . '/AuditStorefrontResponsiveRegression.php';
 require __DIR__ . '/AuditStorefrontA11yRegression.php';
 require __DIR__ . '/AuditSalesReportRegression.php';
+require __DIR__ . '/AuditOrderBulkRegression.php';

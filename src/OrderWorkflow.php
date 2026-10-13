@@ -31,6 +31,48 @@ class OrderWorkflow {
     }
 
     /**
+     * Why an admin may not move this order to $to (null = allowed). Shared by the order
+     * detail and bulk actions: 'paid' needs a confirmed payment, 'refunded' the refund right.
+     */
+    public static function adminRejection(?array $order, string $to, bool $mayRefund): ?string {
+        if (!$order) return 'not_found';
+        if (!in_array($to, self::statuses(), true)) return 'invalid_status';
+        if ($to === 'refunded' && !$mayRefund) return 'forbidden';
+        if (!self::canTransition((string)$order['status'], $to)) return 'invalid_transition';
+        if ($to === 'paid' && ($order['payment_status'] ?? 'pending') !== 'paid') return 'payment_not_confirmed';
+        return null;
+    }
+
+    /**
+     * Move several orders of the current store to $to, each through transition() with its
+     * own transaction, stock and events. Refused orders are reported, never half-changed.
+     *
+     * @param int[] $orderIds
+     * @return array{changed: array<int,string>, rejected: array<int,string>} order id => number / reason
+     */
+    public static function bulkTransition(array $orderIds, string $to, ?string $note, bool $mayRefund): array {
+        $result = ['changed' => [], 'rejected' => []];
+        foreach (array_unique(array_filter(array_map('intval', $orderIds), static fn(int $id): bool => $id > 0)) as $orderId) {
+            $order = Orders::byId($orderId);
+            $reason = self::adminRejection($order, $to, $mayRefund);
+            if ($reason === null) {
+                try {
+                    self::transition($orderId, $to, $note);
+                    $result['changed'][$orderId] = (string)$order['order_number'];
+                    continue;
+                } catch (\LogicException) {
+                    $reason = 'invalid_transition';
+                } catch (\Throwable $e) {
+                    error_log("Bulk order status error [{$orderId}]: " . $e->getMessage());
+                    $reason = 'error';
+                }
+            }
+            $result['rejected'][$orderId] = $reason;
+        }
+        return $result;
+    }
+
+    /**
      * Perform state transition with side effects
      */
     public static function transition(int $orderId, string $to, ?string $note = null): void {

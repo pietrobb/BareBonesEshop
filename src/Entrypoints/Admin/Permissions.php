@@ -11,6 +11,7 @@ return [
     'awaiting_payment' => 'orders.view',
     'abandoned_carts' => 'orders.view',
     'invoice_pdf' => 'orders.view',
+    'delivery_note' => 'orders.print',
     'import'     => 'import',
     'cache'      => 'cache',
     'audit'      => 'reports.view',
