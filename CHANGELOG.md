@@ -22,6 +22,21 @@
     availability (no hardcoded `< 10`), coloured low / critical.
 - Admin product stock edits and CSV `stock` are booked on the default warehouse as ledger
   adjustments (`Warehouse::setAvailable`), keeping `products.stock` in sync.
+- **Checkout critical-path monitoring** (after the 1.9.0 card-payment outage; nothing changes for
+  customers). Migration `20261013120000_payment_monitoring`.
+  - `cli/smoke-checkout.php`: post-deploy smoke that walks the HTML checkout to the gateway redirect
+    and requires its origin in the checkout page's CSP `form-action`, the return pages to exist and
+    the gateway to answer. Its request carries `X-BareBones-Synthetic` (`monitoring.synthetic_token`,
+    ≥ 32 chars): the order is flagged `orders.is_synthetic`, sends no mail, emits no ERP/webhook events,
+    refuses offline payment, and is cancelled with stock released right after the gateway session.
+  - CSP `report-uri` + `report-to` (`Reporting-Endpoints`) → `api.php?action=csp_report` → table
+    `csp_violations` (directive, blocked origin, document path; 14 days; rate limited).
+  - `OperationalMetrics` / `cli/monitor.php`: payment funnel (`payment_online_started/redirected/paid`)
+    with critical `payment_session_failing` / `payment_funnel_stalled`, and CSP metrics with critical
+    `csp_form_action_violation`.
+  - Real Stripe test-mode browser checkout (`tests/e2e/stripe-test.spec.js`, `E2E_STRIPE_TEST_SECRET_KEY`)
+    and workflow `payment-gateway.yml` (nightly + on critical-path file changes).
+  - Release gate in `docs/PRODUCTION_QUALIFICATION.md`, smoke and alarms in `docs/OPERATIONS_RUNBOOK.md`.
 
 ### Changed
 - `cli/worker.php` `handleStockAlert` now delegates to `StockAlerts::process()`; the old

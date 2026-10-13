@@ -75,6 +75,8 @@ $p0Config = require dirname(TEST_CLI_DIR) . '/config.php';
 $p0Config['app_url'] = "http://127.0.0.1:{$p0Port}";
 // Own limiter store: earlier scenarios already checked out from 127.0.0.1.
 $p0Config['private_cache_dir'] = $p0Root . '/private-cache';
+$p0SyntheticToken = 'p0-synthetic-smoke-token-0123456789abcdef';
+$p0Config['monitoring']['synthetic_token'] = $p0SyntheticToken;
 file_put_contents($p0AppRoot . '/config.php', '<?php return ' . var_export($p0Config, true) . ';');
 file_put_contents($p0Root . '/router.php', '<?php
 require ' . var_export($p0AppRoot . '/src/autoload.php', true) . ';
@@ -102,6 +104,7 @@ if ($uri === "/__seed") {
 }
 chdir(' . var_export($p0AppRoot, true) . ');
 if ($uri === "/" || $uri === "/index.php") { require ' . var_export($p0AppRoot . '/index.php', true) . '; exit; }
+if ($uri === "/api.php") { require ' . var_export($p0AppRoot . '/api.php', true) . '; exit; }
 $_GET["path"] = $uri;
 require ' . var_export($p0AppRoot . '/redirect.php', true) . ';
 ');
@@ -112,9 +115,10 @@ $p0Http = static function (string $method, string $path, array $post, string &$s
     $context = stream_context_create(['http' => ['method' => $method, 'header' => $headers, 'content' => http_build_query($post),
         'follow_location' => 0, 'ignore_errors' => true, 'timeout' => 15]]);
     $body = @file_get_contents("http://127.0.0.1:{$p0Port}{$path}", false, $context);
-    $result = ['status' => 0, 'location' => '', 'csp' => '', 'body' => (string)$body];
+    $result = ['status' => 0, 'location' => '', 'csp' => '', 'reporting' => '', 'body' => (string)$body];
     foreach ($http_response_header ?? [] as $index => $line) {
         if ($index === 0) $result['status'] = (int)(explode(' ', $line)[1] ?? 0);
+        if (stripos($line, 'Reporting-Endpoints:') === 0) $result['reporting'] = trim(substr($line, 20));
         if (stripos($line, 'Location:') === 0) $result['location'] = trim(substr($line, 9));
         if (stripos($line, 'Content-Security-Policy:') === 0) $result['csp'] = trim(substr($line, 24));
         if (preg_match('/^Set-Cookie:\s*PHPSESSID=([^;]+)/i', $line, $cookie)) $sid = $cookie[1];
@@ -194,6 +198,71 @@ try {
     $p0Guard = $p0Http('POST', '/?page=checkout', $p0Form('p0-guard@example.test'), $p0Sid2);
     assert_equals(200, $p0Guard['status'], 'P0 HTTP: undeclared gateway origin is not answered with a silently blocked redirect');
     assert_true(str_contains($p0Guard['body'], 'href="https://undeclared-gateway.example/pay/cs_test_p0_'), 'P0 HTTP: undeclared gateway gets a clickable payment link');
+
+    // Layer 4b: the browser tells the shop about every CSP violation.
+    $p0ReportUrl = "http://127.0.0.1:{$p0Port}/api.php?action=csp_report";
+    assert_true(str_contains($p0Page['csp'], "report-uri {$p0ReportUrl};") && str_contains($p0Page['csp'], 'report-to csp-endpoint;'), 'P0 layer 4: checkout CSP reports violations to the shop');
+    assert_equals('csp-endpoint="' . $p0ReportUrl . '"', $p0Page['reporting'], 'P0 layer 4: Reporting-Endpoints names the CSP report endpoint');
+    $p0Report = static function (string $method, string $body, string $type) use ($p0Port): int {
+        $context = stream_context_create(['http' => ['method' => $method, 'header' => "Content-Type: {$type}\r\n", 'content' => $body, 'ignore_errors' => true, 'timeout' => 15]]);
+        @file_get_contents("http://127.0.0.1:{$p0Port}/api.php?action=csp_report", false, $context);
+        return (int)(explode(' ', $http_response_header[0] ?? '')[1] ?? 0);
+    };
+    $p0Db->exec('DELETE FROM csp_violations');
+    assert_equals(405, $p0Report('GET', '', 'text/plain'), 'P0 layer 4: CSP report endpoint is POST only');
+    assert_equals(202, $p0Report('POST', json_encode(['csp-report' => [
+        'document-uri' => 'http://127.0.0.1/?page=checkout&email=customer@example.test', 'effective-directive' => 'form-action',
+        'blocked-uri' => 'https://checkout.stripe.com/c/pay/cs_live_secret#fid=x', 'disposition' => 'enforce',
+    ]]), 'application/csp-report'), 'P0 layer 4: report-uri payload is accepted');
+    assert_equals(202, $p0Report('POST', json_encode([
+        ['type' => 'csp-violation', 'url' => 'http://127.0.0.1/pokladna', 'body' => ['documentURL' => 'http://127.0.0.1/pokladna?x=1', 'effectiveDirective' => 'script-src-elem', 'blockedURL' => 'inline', 'disposition' => 'enforce']],
+        ['type' => 'csp-violation', 'body' => ['documentURL' => 'http://127.0.0.1/', 'effectiveDirective' => 'script-src-elem', 'blockedURL' => 'chrome-extension://abc/inject.js', 'disposition' => 'enforce']],
+        ['type' => 'deprecation', 'body' => ['id' => 'x']],
+    ]), 'application/reports+json'), 'P0 layer 4: Reporting API batch is accepted');
+    assert_equals(202, $p0Report('POST', str_repeat('x', CspReports::MAX_BODY_BYTES + 10), 'application/csp-report'), 'P0 layer 4: oversized report is answered without storing it');
+    assert_equals([
+        ['directive' => 'form-action', 'blocked' => 'https://checkout.stripe.com', 'document_path' => '/'],
+        ['directive' => 'script-src-elem', 'blocked' => 'inline', 'document_path' => '/pokladna'],
+    ], $p0Db->query('SELECT directive, blocked, document_path FROM csp_violations ORDER BY id')->fetchAll(),
+        'P0 layer 4: stored report keeps directive, blocked origin and path only (no session id, query or e-mail); extension noise and other report types dropped');
+
+    // Layer 4a: the post-deploy smoke walks the HTML checkout to the gateway as a synthetic order.
+    $p0Smoke = static function (string $email) use ($p0Port, $p0SyntheticToken, $payProduct): array {
+        $proc = proc_open([PHP_BINARY, TEST_CLI_DIR . '/smoke-checkout.php', "--base-url=http://127.0.0.1:{$p0Port}", '--product=' . (int)$payProduct['id'],
+            '--token=' . $p0SyntheticToken, '--email=' . $email, '--expect-gateway=https://checkout.stripe.com', '--no-fetch-gateway'],
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        fclose($pipes[0]);
+        $output = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        return [proc_close($proc), $output];
+    };
+    [$p0SmokeCode, $p0SmokeOut] = $p0Smoke('p0-smoke-blocked@example.test'); // gateway.txt still names the undeclared origin
+    assert_equals(1, $p0SmokeCode, "P0 smoke: fails when the gateway origin is missing from CSP form-action\n{$p0SmokeOut}");
+    // The synthetic order is already closed, so the shop answers with the raw 302 and the smoke judges it.
+    assert_true(str_contains($p0SmokeOut, 'FAIL csp form-action: BLOCKS https://undeclared-gateway.example'), 'P0 smoke: names the CSP form-action cause');
+    unlink($p0Root . '/gateway.txt');
+    $p0Reserved = static fn(): int => (int)$p0Db->query('SELECT COALESCE(SUM(reserved), 0) FROM warehouse_stock WHERE sku = ' . $p0Db->quote((string)$payProduct['sku']))->fetchColumn();
+    $p0ReservedBefore = $p0Reserved();
+    [$p0SmokeCode, $p0SmokeOut] = $p0Smoke('p0-smoke@example.test');
+    assert_equals(0, $p0SmokeCode, "P0 smoke: passes against the fixed storefront\n{$p0SmokeOut}");
+    foreach (['OK   csp form-action: allows https://checkout.stripe.com', 'OK   expected gateway', 'OK   return page: GET /?page=checkout-cancel', 'OK   return page: GET /checkout/cancel'] as $p0SmokeLine) {
+        assert_true(str_contains($p0SmokeOut, $p0SmokeLine), "P0 smoke: reports '{$p0SmokeLine}'");
+    }
+    $p0SmokeOrder = $p0Db->query("SELECT id, is_synthetic, status, payment_status, stock_restored FROM orders WHERE customer_email = 'p0-smoke@example.test'")->fetch();
+    assert_true(is_array($p0SmokeOrder) && (int)$p0SmokeOrder['is_synthetic'] === 1, 'P0 synthetic: smoke order is flagged synthetic');
+    assert_true(is_array($p0SmokeOrder) && $p0SmokeOrder['status'] === 'cancelled' && $p0SmokeOrder['payment_status'] === 'cancelled' && (int)$p0SmokeOrder['stock_restored'] === 1, 'P0 synthetic: smoke order is closed right after the gateway redirect');
+    assert_equals($p0ReservedBefore, $p0Reserved(), 'P0 synthetic: smoke order leaves no stock reservation');
+    $p0SmokeId = (int)($p0SmokeOrder['id'] ?? 0);
+    assert_equals(0, (int)$p0Db->query("SELECT COUNT(*) FROM event_outbox WHERE aggregate_type = 'order' AND aggregate_id = " . $p0Db->quote((string)$p0SmokeId))->fetchColumn(), 'P0 synthetic: no ERP/webhook integration events');
+    $p0SmokeJobs = 0;
+    if (is_dir($p0Root . '/jobs')) {
+        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($p0Root . '/jobs', FilesystemIterator::SKIP_DOTS)) as $p0JobFile) {
+            if (preg_match('/"order_id":\s*' . $p0SmokeId . '\b/', (string)file_get_contents($p0JobFile->getPathname()))) $p0SmokeJobs++;
+        }
+    }
+    assert_equals(0, $p0SmokeJobs, 'P0 synthetic: no customer or merchant notification is queued');
+    assert_equals(0, (int)$p0Db->query("SELECT COUNT(*) FROM orders WHERE customer_email = 'p0-card@example.test' AND is_synthetic = 1")->fetchColumn(), 'P0 synthetic: a customer checkout without the token stays a real order');
 } finally {
     proc_terminate($p0Server);
     proc_close($p0Server);

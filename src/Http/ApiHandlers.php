@@ -497,18 +497,20 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         return ['error' => 'Too many checkout attempts'];
     }
 
+    // $cfg must be loaded here: apiCheckout is a function, the file-scope $cfg is not
+    // visible (it used to be silently undefined → seller always 'SK', OSS always off,
+    // admin notification never sent). Seller identity lives per-store in stores.json.
+    $cfg = $runtimeConfig ?? require dirname(__DIR__, 2) . '/config.php';
+    $synthetic = SyntheticCheckout::isRequest($cfg);
+
     // Capture email for abandoned cart recovery
-    Cart::setEmail($email);
+    if (!$synthetic) Cart::setEmail($email);
 
     if (!preg_match('/^[a-z0-9_-]{2,40}$/', $paymentMethod)) {
         return ['error' => 'Invalid payment method'];
     }
 
     // VAT context — resolve scenario before enriching cart so per-line VAT is captured.
-    // $cfg must be loaded here: apiCheckout is a function, the file-scope $cfg is not
-    // visible (it used to be silently undefined → seller always 'SK', OSS always off,
-    // admin notification never sent). Seller identity lives per-store in stores.json.
-    $cfg   = $runtimeConfig ?? require dirname(__DIR__, 2) . '/config.php';
     StoreContext::current()->assertPermission('tax');
     $store = apiActiveStore();
     $vatId = strtoupper(preg_replace('/\s+/', '', (string)($input['vat_id'] ?? '')));
@@ -623,6 +625,11 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     if (!$selectedPayment || ($digitalOnly && ($selectedPayment['service_type'] ?? '') === 'cod')) {
         return ['success' => false, 'error' => 'Platba nie je dostupná pre digitálne doručenie.'];
     }
+    if ($synthetic && empty($selectedPayment['requires_online'])) {
+        // The smoke test exists to prove the gateway redirect; anything else would be a real order.
+        http_response_code(422);
+        return ['success' => false, 'error' => 'Synthetic checkout requires an online payment method'];
+    }
     $paymentFee = (int)$selectedPayment['fee'];
     $providerCodes = [
         'tax' => $taxProviderCode,
@@ -670,6 +677,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         'vat_country'    => $vatId !== '' ? substr($vatId, 0, 2) : '',
         'vat_id_status'  => $vatIdStatus,
         'vat_scenario'   => $vatScenario['scenario'],
+        'is_synthetic'   => $synthetic,
     ];
 
     // Pass coupon info for atomic recording inside the order transaction
@@ -706,7 +714,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
             JobQueue::push('email_send', ['template' => 'order_confirmation', 'to' => $email, 'order_id' => $orderId]);
         }
         // Merchant hears about every order at creation, including unpaid bank transfers.
-        JobQueue::push('merchant_notify', ['order_id' => $orderId, 'event' => 'created'], 6);
+        if (!$synthetic) JobQueue::push('merchant_notify', ['order_id' => $orderId, 'event' => 'created'], 6);
 
         $result = [
             'success'      => true,
@@ -750,6 +758,10 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
                 error_log("Payment session creation failed for order #{$orderId}: " . $e->getMessage());
                 $result['payment_error'] = 'Payment processing unavailable. Please try again.';
             }
+        }
+        if ($synthetic) {
+            SyntheticCheckout::close($orderId);
+            $result['synthetic'] = true;
         }
 
         return $result;
@@ -1212,6 +1224,22 @@ function apiProductVehicles(): array {
     if (!$id) return ['error' => 'id required'];
     $limit = min(200, max(1, Security::int($_GET['limit'] ?? 50)));
     return ['vehicles' => TecDoc::vehiclesForProduct($id, $limit)];
+}
+
+/** Browser CSP violation reports; no CSRF (browsers send them without page context). */
+function apiCspReport(): array {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        return ['error' => 'POST required'];
+    }
+    if (!Security::rateLimit('csp_report', 30) || !Security::rateLimit('csp_report_global', 600, 60, false)) {
+        http_response_code(429);
+        return ['error' => 'Too many requests'];
+    }
+    $body = (string)file_get_contents('php://input', false, null, 0, CspReports::MAX_BODY_BYTES + 1);
+    CspReports::ingest($body);
+    http_response_code(202);
+    return ['ok' => true];
 }
 
 function apiCookieConsent(): array {

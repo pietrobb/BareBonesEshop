@@ -222,6 +222,12 @@ class Orders {
             if (!$financialColumns) {
                 unset($orderParams[':financialsnapshot']);
             }
+            $synthetic = !empty($customer['is_synthetic']);
+            if ($synthetic) {
+                if (!self::hasColumn('orders', 'is_synthetic')) throw new \RuntimeException('Synthetic orders need the payment monitoring migration');
+                $extraColumns .= ', is_synthetic';
+                $extraValues .= ', 1';
+            }
             $orderStmt = $db->prepare("
                 INSERT INTO orders (order_number, store_id, channel_id, status, customer_id, customer_name, customer_email, customer_phone,
                     shipping_addr, payment_method, subtotal, discount_amount, shipping_cost, tax_amount, total, currency,
@@ -289,24 +295,27 @@ class Orders {
                 'order_number' => $orderNumber,
                 'total'        => $total,
                 'items'        => count($orderItems),
-            ], 'Order created');
-            Outbox::record(DomainEvents::ORDER_CREATED, 'order', $orderId, [
-                'order_id' => $orderId,
-                'order_number' => $orderNumber,
-                'status' => 'pending',
-                'total' => $total,
-                'currency' => strtolower((string)($customer['currency'] ?? 'eur')),
-                'customer_id' => $customerId,
-            ]);
-            Outbox::record(DomainEvents::STOCK_RESERVED, 'order', $orderId, [
-                'order_id' => $orderId,
-                'items' => array_map(static fn(array $item): array => [
-                    'product_id' => (int)$item['product_id'],
-                    'variant_id' => $item['variant_id'] === null ? null : (int)$item['variant_id'],
-                    'sku' => (string)$item['sku'],
-                    'quantity' => (int)$item['quantity'],
-                ], $orderItems),
-            ]);
+            ], $synthetic ? 'Synthetic smoke order created' : 'Order created');
+            // A synthetic smoke order never leaves the shop: no ERP/webhook/stock integration events.
+            if (!$synthetic) {
+                Outbox::record(DomainEvents::ORDER_CREATED, 'order', $orderId, [
+                    'order_id' => $orderId,
+                    'order_number' => $orderNumber,
+                    'status' => 'pending',
+                    'total' => $total,
+                    'currency' => strtolower((string)($customer['currency'] ?? 'eur')),
+                    'customer_id' => $customerId,
+                ]);
+                Outbox::record(DomainEvents::STOCK_RESERVED, 'order', $orderId, [
+                    'order_id' => $orderId,
+                    'items' => array_map(static fn(array $item): array => [
+                        'product_id' => (int)$item['product_id'],
+                        'variant_id' => $item['variant_id'] === null ? null : (int)$item['variant_id'],
+                        'sku' => (string)$item['sku'],
+                        'quantity' => (int)$item['quantity'],
+                    ], $orderItems),
+                ]);
+            }
 
             $db->commit();
             return $orderId;

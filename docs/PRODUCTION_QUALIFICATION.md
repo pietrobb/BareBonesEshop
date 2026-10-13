@@ -10,6 +10,21 @@ The repository qualification is **PASS**. No confirmed open P0/P1 security, fina
 
 The adversarial pass found one process defect before sign-off: the completed G4 category benchmark diff had remained uncommitted in its retained worktree while the milestone was reported as shipped. G7 recovered that exact work, adapted its assertions to the split scenario harness, reran every local gate and the 100k qualification, committed it separately as `88160b8`, and verified the full remote CI matrix. No history was rewritten.
 
+## Checkout critical-path release gate (since 2026-10-13)
+
+From 1.9.0 (2026-10-08) card checkout was dead in production for five days while every PHP and browser test was green: the CSP `form-action 'self'` made browsers drop the 302 to `checkout.stripe.com`, and the only browser payment test called the API with a same-origin mock gateway. Green tests do not prove that customers can pay.
+
+A release that touches the checkout critical path — `src/Security.php` (CSP/headers), `src/UrlAliases.php`, `redirect.php`, `index.php`, `.htaccess`, the storefront checkout entrypoints and templates, `src/CheckoutService.php`, `src/CheckoutSession.php`, `src/PaymentService.php`, `src/Http/ApiHandlers.php`, payment adapters, or `src/Updater.php` — is qualified only when **all four layers** are green:
+
+| Layer | Proof | Where |
+|---|---|---|
+| 1. Contract | every hosted-checkout adapter declares its redirect origins and the CSP `form-action` allows each; gateway `success_url`/`cancel_url` are real pages; resubmit continues the pending payment | `cli/tests/scenarios/CheckoutPaymentRedirectRegression.php` |
+| 2. Browser | a real click on the order button follows the redirect to a gateway on **another origin** in Chromium, WebKit (iPhone) and Firefox and fails on any CSP violation; the same specs fail on the 1.9.0 code | `tests/e2e/commerce.spec.js`, CI job *Browser, axe & Lighthouse* |
+| 3. Real gateway | a real Stripe **test-mode** Checkout session opened by the browser on `checkout.stripe.com` | `tests/e2e/stripe-test.spec.js`, workflow *Payment gateway (Stripe test mode)* (nightly and on critical-path changes; needs secret `STRIPE_TEST_SECRET_KEY`) |
+| 4. Production | `php cli/smoke-checkout.php` right after deploy (synthetic order, closed immediately), CSP violation reports, and the payment funnel alarm in `php cli/monitor.php` | `docs/OPERATIONS_RUNBOOK.md` → *Post-deploy checkout smoke* |
+
+A missing layer is a release blocker, not an observation. Record the smoke output and the first `monitor.php` snapshot after deploy with the release evidence.
+
 ## G1–G7 release chain
 
 | Goal | SHA | Evidence |

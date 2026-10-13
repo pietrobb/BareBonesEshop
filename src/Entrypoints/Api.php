@@ -49,6 +49,7 @@ if (!defined('BB_TEST_LOAD_API_ONLY')) {
             'webhook_payment' => apiWebhookPayment(),
             'webhook_shipping' => apiWebhookShipping(),
             'cookie_consent' => apiCookieConsent(),
+            'csp_report' => apiCspReport(),
             'vehicle_manufacturers' => apiVehicleManufacturers(),
             'vehicle_models' => apiVehicleModels(),
             'vehicle_types' => apiVehicleTypes(),

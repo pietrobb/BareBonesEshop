@@ -130,6 +130,19 @@ return [
         'failed_mail_warning' => 1,
         'payment_incidents_critical' => 1,
         'webhook_incidents_warning' => 1,
+        // Payment funnel alarm: >= min_started real online-payment orders (older than the
+        // grace period, inside the window) with no gateway session or no payment is critical.
+        'payment_funnel_window_seconds' => 86400,
+        'payment_funnel_grace_seconds' => 1800,
+        'payment_funnel_min_started' => 3,
+        // Browser CSP reports (api.php?action=csp_report); any blocked form-action is critical.
+        'csp_window_seconds' => 86400,
+        'csp_form_action_critical' => 1,
+        'csp_violations_warning' => 20,
+        // Post-deploy smoke (cli/smoke-checkout.php) sends this in X-BareBones-Synthetic; its order is
+        // flagged synthetic, sends no mail and is closed right after the gateway redirect.
+        // At least 32 random characters; keep it in deployment secrets. Empty = disabled.
+        'synthetic_token' => '',
     ],
 
     // Signed outgoing webhooks. Secrets remain in deployment config/environment;

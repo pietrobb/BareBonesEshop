@@ -546,6 +546,11 @@ $stockAlertColumns = array_column($pdo->query('PRAGMA table_info(products)')->fe
 assert_true(!array_diff(['stock_low_threshold', 'stock_critical_threshold'], $stockAlertColumns), 'Stock alert migration: per-product thresholds are added idempotently');
 assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='stock_alert_state'")->fetchColumn()
     && (bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='stock_alert_digests'")->fetchColumn(), 'Stock alert migration: alert state and digest tables exist');
+$paymentMonitoringMigration = require TEST_CLI_DIR . '/../migrations/20261013120000_payment_monitoring.php';
+$paymentMonitoringMigration->up($pdo, true);
+$paymentMonitoringMigration->up($pdo, true);
+assert_true(in_array('is_synthetic', array_column($pdo->query('PRAGMA table_info(orders)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true)
+    && (bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='csp_violations'")->fetchColumn(), 'Payment monitoring migration: synthetic order flag and CSP report table exist idempotently');
 
 // ============================================================
 // TEST 3: CSV Import

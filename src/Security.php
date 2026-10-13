@@ -58,7 +58,19 @@ class Security {
         if (!empty($_SERVER['HTTPS'])) {
             header("Strict-Transport-Security: max-age=31536000; includeSubDomains; preload");
         }
+        $reportUrl = self::cspReportUrl();
+        if ($reportUrl !== null) header('Reporting-Endpoints: csp-endpoint="' . $reportUrl . '"');
         header('Content-Security-Policy: ' . self::contentSecurityPolicy());
+    }
+
+    /** Absolute CSP report endpoint; null without a valid configured app_url. */
+    public static function cspReportUrl(): ?string {
+        if (!is_file(dirname(__DIR__) . '/config.php')) return null;
+        try {
+            return self::appUrl(self::cfg()) . '/api.php?action=csp_report';
+        } catch (\RuntimeException $e) {
+            return null;
+        }
     }
 
     public static function contentSecurityPolicy(): string {
@@ -73,7 +85,9 @@ class Security {
             . "object-src 'none'; "
             . "base-uri 'self'; "
             . "form-action " . implode(' ', array_merge(["'self'"], self::paymentRedirectOrigins())) . "; "
-            . "frame-ancestors 'none';";
+            . "frame-ancestors 'none';"
+            // Violations (a blocked gateway redirect above all) reach OperationalMetrics.
+            . (($reportUrl = self::cspReportUrl()) !== null ? " report-uri {$reportUrl}; report-to csp-endpoint;" : '');
     }
 
     /**
