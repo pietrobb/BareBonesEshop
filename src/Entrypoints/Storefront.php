@@ -133,6 +133,11 @@ switch ($page) {
         $content = renderCheckout();
         break;
 
+    case 'checkout-cancel':
+        $title = Template::pageTitle($t('checkout'));
+        $content = renderCheckoutCancel();
+        break;
+
     case 'order-done':
         $ordNum = Security::clean($_GET['order'] ?? '');
         $title = Template::pageTitle($t('order_placed'));

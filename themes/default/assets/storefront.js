@@ -145,7 +145,7 @@
       const label = document.createElement('label');
       label.className = 'payment-option';
       const fee = parseInt(method.fee || 0, 10);
-      label.innerHTML = `<span><input type="radio" name="payment" value="${escapeHtml(method.code || '')}" ${index === 0 ? 'checked' : ''}> ${escapeHtml(method.label || method.code || '')}<small>${escapeHtml(method.description || method.provider || '')}</small></span><strong>${fee === 0 ? escapeHtml(text.free) : formatCents(fee)}</strong>`;
+      label.innerHTML = `<span><input type="radio" name="payment" value="${escapeHtml(method.code || '')}" ${index === 0 ? 'checked' : ''}${method.requires_online ? ' data-online' : ''}> ${escapeHtml(method.label || method.code || '')}<small>${escapeHtml(method.description || method.provider || '')}</small></span><strong>${fee === 0 ? escapeHtml(text.free) : formatCents(fee)}</strong>`;
       label.querySelector('input').addEventListener('change', () => updateCheckoutTotal(shippingPrice, fee, subtotal));
       box.appendChild(label);
     });
@@ -243,6 +243,36 @@
   document.addEventListener('submit', (event) => {
     const form = event.target.closest('form[data-confirm]');
     if (form && !window.confirm(form.dataset.confirm)) event.preventDefault();
+  });
+
+  // One order per click: lock the checkout button while the POST (and the gateway redirect) runs.
+  document.addEventListener('submit', (event) => {
+    const form = event.target.closest('form[data-checkout-form]');
+    if (!form || event.defaultPrevented) return;
+    const button = form.querySelector('button[type="submit"]');
+    if (!button) return;
+    if (form.dataset.submitting === '1') {
+      event.preventDefault();
+      return;
+    }
+    form.dataset.submitting = '1';
+    if (!button.dataset.label) button.dataset.label = button.textContent;
+    const online = form.querySelector('input[name="payment"]:checked[data-online]');
+    button.textContent = (online ? form.dataset.redirectingLabel : form.dataset.submittingLabel) || button.textContent;
+    button.setAttribute('aria-busy', 'true');
+    setTimeout(() => { button.disabled = true; }, 0);
+  });
+
+  // Back from the gateway restores the page from bfcache: unlock the button again.
+  window.addEventListener('pageshow', () => {
+    document.querySelectorAll('form[data-checkout-form]').forEach((form) => {
+      const button = form.querySelector('button[type="submit"]');
+      delete form.dataset.submitting;
+      if (!button) return;
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+      if (button.dataset.label) button.textContent = button.dataset.label;
+    });
   });
 
   document.addEventListener('DOMContentLoaded', () => {

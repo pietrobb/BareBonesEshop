@@ -19,6 +19,16 @@ interface PaymentAdapter {
     public function getStatus(string $paymentId): string;
 }
 
+/**
+ * Hosted-checkout providers whose createSession() URL sends the browser to another origin.
+ * The checkout form POST answers with a redirect there, and browsers apply the page's CSP
+ * form-action to that redirect, so every such origin must be declared here.
+ */
+interface HostedCheckoutAdapter extends PaymentAdapter {
+    /** @return list<string> https origins (scheme://host[:port]) createSession() may redirect to */
+    public function redirectOrigins(): array;
+}
+
 /** Provider capability required for retry-safe external refund mutations. */
 interface IdempotentRefundAdapter extends PaymentAdapter {
     public function refundWithIdempotency(string $paymentId, int $amount, string $idempotencyKey): array;

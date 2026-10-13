@@ -8,6 +8,12 @@ spl_autoload_register(function (string $class) {
     $file = __DIR__ . '/' . $class . '.php';
     if (file_exists($file)) { require_once $file; return; }
 
+    // Payment capability interfaces are declared next to PaymentAdapter.
+    if ($class === 'IdempotentRefundAdapter' || $class === 'HostedCheckoutAdapter') {
+        require_once __DIR__ . '/../adapters/PaymentAdapter.php';
+        return;
+    }
+
     // Adapter interfaces (PaymentAdapter, StorageAdapter, etc.)
     $file = __DIR__ . '/../adapters/' . $class . '.php';
     if (file_exists($file)) { require_once $file; return; }

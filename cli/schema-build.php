@@ -45,7 +45,7 @@ if ($fresh) {
         'order_items', 'orders',
         'product_vehicles', 'product_oe_numbers', 'product_specifications',
         'category_attributes', 'attribute_options', 'attribute_definitions',
-        'pages', 'feeds', 'stock_alert_state', 'stock_alert_digests', 'warehouse_stock', 'warehouses',
+        'pages', 'feeds', 'stock_alert_state', 'stock_alert_digests', 'csp_violations', 'warehouse_stock', 'warehouses',
         'slug_registry', 'variants', 'product_attrs', 'products',
         'categories',
     ];

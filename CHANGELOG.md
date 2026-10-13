@@ -22,6 +22,21 @@
     availability (no hardcoded `< 10`), coloured low / critical.
 - Admin product stock edits and CSV `stock` are booked on the default warehouse as ledger
   adjustments (`Warehouse::setAvailable`), keeping `products.stock` in sync.
+- **Checkout critical-path monitoring** (after the 1.9.0 card-payment outage; nothing changes for
+  customers). Migration `20261013120000_payment_monitoring`.
+  - `cli/smoke-checkout.php`: post-deploy smoke that walks the HTML checkout to the gateway redirect
+    and requires its origin in the checkout page's CSP `form-action`, the return pages to exist and
+    the gateway to answer. Its request carries `X-BareBones-Synthetic` (`monitoring.synthetic_token`,
+    ≥ 32 chars): the order is flagged `orders.is_synthetic`, sends no mail, emits no ERP/webhook events,
+    refuses offline payment, and is cancelled with stock released right after the gateway session.
+  - CSP `report-uri` + `report-to` (`Reporting-Endpoints`) → `api.php?action=csp_report` → table
+    `csp_violations` (directive, blocked origin, document path; 14 days; rate limited).
+  - `OperationalMetrics` / `cli/monitor.php`: payment funnel (`payment_online_started/redirected/paid`)
+    with critical `payment_session_failing` / `payment_funnel_stalled`, and CSP metrics with critical
+    `csp_form_action_violation`.
+  - Real Stripe test-mode browser checkout (`tests/e2e/stripe-test.spec.js`, `E2E_STRIPE_TEST_SECRET_KEY`)
+    and workflow `payment-gateway.yml` (nightly + on critical-path file changes).
+  - Release gate in `docs/PRODUCTION_QUALIFICATION.md`, smoke and alarms in `docs/OPERATIONS_RUNBOOK.md`.
 
 ### Changed
 - `cli/worker.php` `handleStockAlert` now delegates to `StockAlerts::process()`; the old
@@ -31,6 +46,26 @@
   (bb758f1, 7d2c940): inbound dispatch in `redirect.php`, outbound links, 301 from core routes.
 
 ### Fixed
+- **P0: card payment from the HTML checkout was dead since 1.9.0.** CSP `form-action 'self'`
+  also applies to the redirect after a form submit, so the browser silently dropped the 302 to
+  `checkout.stripe.com` ("nothing happens", second click → "cart is empty", pending orders, no payment).
+  - Payment adapters that redirect off-site implement `HostedCheckoutAdapter::redirectOrigins()`
+    (Stripe, PayU sandbox/production, Mock with `mock_checkout_url`); `Security` builds `form-action`
+    from the configured adapters, never hard-coded. A gateway URL outside `form-action` is answered
+    with a clickable payment link instead of a redirect the browser would drop (and logged).
+  - The created-but-unpaid order is remembered in the session (`CheckoutSession::rememberPendingPayment`,
+    23 h): a resubmit continues the same payment (no second order), the empty checkout and the
+    gateway cancel page show "order X awaits payment" + "Pay now" (`storefront/checkout-pending`),
+    never "cart is empty". A declined payment can be retried from `order-done`.
+  - Gateway `cancel_url` is now `/?page=checkout-cancel&order=…`; the old `/checkout/cancel` (in sessions
+    created by earlier versions) is routed to the same page instead of 404.
+  - The submit button is disabled after the first click with "Redirecting to payment…" and re-enabled
+    on `pageshow` (back/forward cache).
+  - Tests: `CheckoutPaymentRedirectRegression` (every hosted adapter origin ∈ form-action; real HTTP
+    checkout → 302 allowed by the page CSP; resubmit/back/cancel/success pages over the fallback router).
+    Browser E2E now clicks the real form and the mock gateway runs on a second origin
+    (`tests/e2e/mock-gateway.php`); a global fixture (`tests/e2e/support.js`) fails any spec on a CSP
+    violation; projects Chromium, WebKit iPhone 13 and Firefox.
 - `redirect.php` answered **405** (`Allow: GET, HEAD`) to every POST on a public alias
   (`/kosik`, `/pokladna`…), because the method check ran before `UrlAliases::dispatch()`. Themes
   whose cart uses a plain `<form method="post" action="{{cart_url}}">` showed a bare 405 page.

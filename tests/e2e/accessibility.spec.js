@@ -1,4 +1,4 @@
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('./support');
 const AxeBuilder = require('@axe-core/playwright').default;
 
 async function assertNoSeriousViolations(page) {

@@ -79,10 +79,10 @@ jobs:
           node-version: '24'
           cache: npm
 
-      - name: Install qualification tools and Chromium
+      - name: Install qualification tools and browsers (Chromium, WebKit, Firefox)
         run: |
           npm ci
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps chromium webkit firefox
 
       - name: Prepare disposable SQLite application
         env:

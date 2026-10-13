@@ -607,6 +607,11 @@ assert_true(in_array('totp_last_counter', array_column($pdo->query('PRAGMA table
     && (int)$pdo->query("SELECT COUNT(*) FROM wishlist_items WHERE owner_key = 's:" . hash('sha256', 'a073rawsessionid') . "'")->fetchColumn() === 1,
     'A07.3 migration: TOTP counter column and hashed session keys, idempotent');
 $pdo->exec($a073WishlistExisted ? "DELETE FROM wishlist_items WHERE owner_key = 's:" . hash('sha256', 'a073rawsessionid') . "'" : 'DROP TABLE wishlist_items');
+$paymentMonitoringMigration = require TEST_CLI_DIR . '/../migrations/20261013120000_payment_monitoring.php';
+$paymentMonitoringMigration->up($pdo, true);
+$paymentMonitoringMigration->up($pdo, true);
+assert_true(in_array('is_synthetic', array_column($pdo->query('PRAGMA table_info(orders)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true)
+    && (bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='csp_violations'")->fetchColumn(), 'Payment monitoring migration: synthetic order flag and CSP report table exist idempotently');
 
 // ============================================================
 // TEST 3: CSV Import

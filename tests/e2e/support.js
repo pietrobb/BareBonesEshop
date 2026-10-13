@@ -1,4 +1,26 @@
-const { expect, test } = require('@playwright/test');
+const base = require('@playwright/test');
+const { expect } = base;
+
+// Global CSP guard (P0 2026-10-13): any Content-Security-Policy violation in any spec fails the test.
+// CSP is enforced by the browser, not PHP — a blocked form-action redirect is otherwise silent.
+// Violations are reported out of the page immediately, so a document that navigates away still counts.
+const CSP_CONSOLE = /content[- ]security[- ]policy|form-action|refused to (send form|load|execute|apply|connect|frame)/i;
+const test = base.test.extend({
+  page: async ({ page }, use, testInfo) => {
+    const violations = [];
+    await page.exposeBinding('__bbeCspViolation', (_source, text) => { violations.push(text); });
+    await page.addInitScript(() => {
+      document.addEventListener('securitypolicyviolation', (event) => {
+        window.__bbeCspViolation(`${event.violatedDirective} blocked ${event.blockedURI} on ${event.documentURI}`);
+      });
+    });
+    page.on('console', (message) => { if (CSP_CONSOLE.test(message.text())) violations.push(message.text()); });
+    await use(page);
+    if (!testInfo.annotations.some(a => a.type === 'csp-violation-expected')) {
+      expect(violations, 'Content-Security-Policy violations').toEqual([]);
+    }
+  },
+});
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -45,4 +67,4 @@ async function adminSignIn(page) {
   await expect(page.locator('nav')).toContainText(state.admin.username);
 }
 
-module.exports = { state, adminSignIn };
+module.exports = { test, expect, state, adminSignIn };

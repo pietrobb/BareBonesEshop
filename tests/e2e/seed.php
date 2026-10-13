@@ -51,6 +51,15 @@ $enrollment = AdminIdentity::enrollTotp($adminId);
 AdminIdentity::setStatus($adminId, 'active');
 
 $db->exec("UPDATE payment_methods SET provider='mock' WHERE code='card'");
+// With a Stripe test key, a second card method creates real Stripe test-mode Checkout sessions.
+$stripeTest = str_starts_with((string)($config['stripe_secret_key'] ?? ''), 'sk_test_');
+if ($stripeTest) {
+    $db->exec("INSERT INTO payment_methods (code, provider, name, description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, requires_online, active, sort_order)
+        SELECT 'card_stripe_test', 'stripe', 'Card (Stripe test mode)', description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, 1, 1, sort_order + 1
+        FROM payment_methods WHERE code = 'card'");
+    $db->exec("INSERT INTO payment_method_countries (method_code, country) SELECT 'card_stripe_test', country FROM payment_method_countries WHERE method_code = 'card'");
+    $db->exec("INSERT INTO payment_method_shipping (method_code, shipping_method_code) SELECT 'card_stripe_test', shipping_method_code FROM payment_method_shipping WHERE method_code = 'card'");
+}
 
 if (!defined('BB_TEST_LOAD_API_ONLY')) define('BB_TEST_LOAD_API_ONLY', true);
 require_once dirname(__DIR__, 2) . '/api.php';
@@ -106,6 +115,7 @@ $state = [
     'fulfillment' => ['order_id' => $fulfillmentOrderId],
     'rma' => ['order_id' => $rmaOrderId, 'rma_id' => (int)$rmaId, 'source_invoice_id' => (int)$sourceInvoice['id']],
     'mock_webhook_secret' => (string)$config['mock_webhook_secret'],
+    'stripe_test' => $stripeTest,
 ];
 $statePath = (string)(getenv('E2E_STATE_PATH') ?: (__DIR__ . '/.state.json'));
 if (file_put_contents($statePath, json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), LOCK_EX) === false) {

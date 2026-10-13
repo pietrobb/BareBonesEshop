@@ -4,13 +4,17 @@
  * Uses Stripe Checkout (hosted flow) via raw HTTP API.
  * Zero external dependencies — curl only.
  */
-class StripePayment implements IdempotentRefundAdapter {
+class StripePayment implements IdempotentRefundAdapter, HostedCheckoutAdapter {
     private string $secretKey;
     private string $webhookSecret;
 
     public function __construct(array $cfg) {
         $this->secretKey = $cfg['stripe_secret_key'] ?? '';
         $this->webhookSecret = $cfg['stripe_webhook_secret'] ?? '';
+    }
+
+    public function redirectOrigins(): array {
+        return ['https://checkout.stripe.com'];
     }
 
     /**

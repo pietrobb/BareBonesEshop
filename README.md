@@ -365,8 +365,8 @@ stock, shipping/payment pricing engines, feeds/import, CMS pages, GDPR tools,
 review moderation, RMA processing, and **customer management** (search, status
 toggle, per-customer orders/addresses/RMA). Role-based access control.
 
-**JSON API** (`api.php`) — 42 actions with rate limiting, CSRF on mutating
-requests, and registry-routed payment/shipping webhook endpoints.
+**JSON API** (`api.php`) — 43 actions with rate limiting, CSRF on mutating
+requests, registry-routed payment/shipping webhook endpoints, and a CSP violation report endpoint.
 
 **Operations** — store-scoped provider registry for concurrent payment, shipping,
 ERP, mail, and tax adapters; legacy single-adapter config remains supported. The
