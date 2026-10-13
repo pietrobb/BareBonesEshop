@@ -7,68 +7,88 @@ class Search {
     /**
      * Search products
      */
-    public static function query(string $q, int $page = 1, int $perPage = 24): array {
+    public const SORTS = ['relevance', 'price_asc', 'price_desc', 'name_asc', 'name_desc', 'newest'];
+
+    /** Search-page sort and filters from a query string: whole-currency price inputs become cents, unknown sorts fall back to relevance. */
+    public static function filtersFromQuery(array $get): array {
+        $sort = in_array($get['sort'] ?? '', self::SORTS, true) ? (string)$get['sort'] : 'relevance';
+        $number = static fn(string $key): ?int => isset($get[$key]) && is_scalar($get[$key]) && trim((string)$get[$key]) !== '' ? max(0, Security::int($get[$key])) : null;
+        $pmin = $number('pmin');
+        $pmax = $number('pmax');
+        $cat = (int)($number('cat') ?? 0);
+        return [
+            'sort' => $sort, 'sorts' => self::SORTS, 'pmin' => $pmin, 'pmax' => $pmax, 'cat' => $cat,
+            'opts' => ['sort' => $sort, 'price_min' => $pmin === null ? null : $pmin * 100, 'price_max' => $pmax === null ? null : $pmax * 100, 'category_ids' => $cat > 0 ? [$cat] : []],
+        ];
+    }
+
+    /**
+     * Search products.
+     * $opts: sort (one of SORTS, default relevance), price_min/price_max (cents), category_ids (int[]; empty = all).
+     * The result carries a 'categories' facet (id, name, slug, count) of the matches before the category filter.
+     */
+    public static function query(string $q, int $page = 1, int $perPage = 24, array $opts = []): array {
         $db = Db::get();
         $q = trim($q);
-        if ($q === '') return ['products' => [], 'total' => 0, 'page' => 1, 'per_page' => $perPage, 'pages' => 0];
+        if ($q === '') return ['products' => [], 'total' => 0, 'page' => 1, 'per_page' => $perPage, 'pages' => 0, 'categories' => []];
 
         $offset = ($page - 1) * $perPage;
-
+        $sort = in_array($opts['sort'] ?? '', self::SORTS, true) ? (string)$opts['sort'] : 'relevance';
+        $params = [':store' => StoreContext::current()->catalogId()];
         if (Db::isSqlite()) {
-            $ftsQuery = self::sanitizeFtsQuery($q);
-
-            // Count
-            $stmt = $db->prepare("
-                SELECT COUNT(*) FROM products_fts fts
-                CROSS JOIN products p ON p.id = fts.rowid
-                WHERE products_fts MATCH :q AND p.store_id = :store AND p.status = 'active'
-            ");
-            $stmt->execute([':q' => $ftsQuery, ':store' => StoreContext::current()->catalogId()]);
-            $total = (int)$stmt->fetchColumn();
-
-            // Fetch
-            $stmt = $db->prepare("
-                SELECT p.*, rank
-                FROM products_fts fts
-                JOIN products p ON p.id = fts.rowid
-                WHERE products_fts MATCH :q AND p.store_id = :store AND p.status = 'active'
-                ORDER BY rank
-                LIMIT :limit OFFSET :offset
-            ");
-            $stmt->execute([':q' => $ftsQuery, ':store' => StoreContext::current()->catalogId(), ':limit' => $perPage, ':offset' => $offset]);
+            $from = "FROM products_fts fts JOIN products p ON p.id = fts.rowid";
+            $where = "products_fts MATCH :q AND p.store_id = :store AND p.status = 'active'";
+            $params[':q'] = self::sanitizeFtsQuery($q);
+            $select = 'p.*, rank';
+            $relevance = 'rank';
         } else {
-            $safeQ = self::sanitizeMysqlQuery($q);
+            $from = 'FROM products p';
+            $where = "MATCH(p.name, p.sku, p.summary, p.tags) AGAINST(:q IN NATURAL LANGUAGE MODE) AND p.store_id = :store AND p.status = 'active'";
+            $params[':q'] = self::sanitizeMysqlQuery($q);
+            $select = 'p.*, MATCH(p.name, p.sku, p.summary, p.tags) AGAINST(:q_rel) AS relevance';
+            $relevance = 'relevance DESC';
+        }
+        if (isset($opts['price_min']) && $opts['price_min'] !== null) { $where .= ' AND p.price >= :pmin'; $params[':pmin'] = (int)$opts['price_min']; }
+        if (isset($opts['price_max']) && $opts['price_max'] !== null) { $where .= ' AND p.price <= :pmax'; $params[':pmax'] = (int)$opts['price_max']; }
 
-            // Count
-            $stmt = $db->prepare("
-                SELECT COUNT(*) FROM products p
-                WHERE MATCH(p.name, p.sku, p.summary, p.tags) AGAINST(:q IN NATURAL LANGUAGE MODE)
-                  AND p.store_id = :store AND p.status = 'active'
-            ");
-            $stmt->execute([':q' => $safeQ, ':store' => StoreContext::current()->catalogId()]);
-            $total = (int)$stmt->fetchColumn();
+        $facet = $db->prepare("SELECT c.id, c.name, c.slug, COUNT(*) AS cnt {$from} JOIN categories c ON c.id = p.category_id WHERE {$where} GROUP BY c.id, c.name, c.slug ORDER BY cnt DESC, c.name");
+        $facet->execute($params);
+        $categories = array_map(static fn(array $row): array => ['id' => (int)$row['id'], 'name' => (string)$row['name'], 'slug' => (string)$row['slug'], 'count' => (int)$row['cnt']], $facet->fetchAll());
 
-            // Fetch
-            $stmt = $db->prepare("
-                SELECT p.*, MATCH(p.name, p.sku, p.summary, p.tags) AGAINST(:q) AS relevance
-                FROM products p
-                WHERE MATCH(p.name, p.sku, p.summary, p.tags) AGAINST(:q2 IN NATURAL LANGUAGE MODE)
-                  AND p.store_id = :store AND p.status = 'active'
-                ORDER BY relevance DESC
-                LIMIT :limit OFFSET :offset
-            ");
-            $stmt->execute([':q' => $safeQ, ':q2' => $safeQ, ':store' => StoreContext::current()->catalogId(), ':limit' => $perPage, ':offset' => $offset]);
+        $categoryIds = array_values(array_unique(array_filter(array_map('intval', (array)($opts['category_ids'] ?? [])), static fn(int $id): bool => $id > 0)));
+        if ($categoryIds) {
+            $marks = [];
+            foreach ($categoryIds as $i => $id) { $marks[] = ':cat' . $i; $params[':cat' . $i] = $id; }
+            $where .= ' AND p.category_id IN (' . implode(', ', $marks) . ')';
         }
 
+        $stmt = $db->prepare("SELECT COUNT(*) {$from} WHERE {$where}");
+        $stmt->execute($params);
+        $total = (int)$stmt->fetchColumn();
+
+        $orderBy = match ($sort) {
+            'price_asc' => 'p.price ASC, p.id ASC',
+            'price_desc' => 'p.price DESC, p.id ASC',
+            'name_asc' => 'p.name ASC, p.id ASC',
+            'name_desc' => 'p.name DESC, p.id ASC',
+            'newest' => 'p.created_at DESC, p.id DESC',
+            default => $relevance,
+        };
+        $stmt = $db->prepare("SELECT {$select} {$from} WHERE {$where} ORDER BY {$orderBy} LIMIT :limit OFFSET :offset");
+        $fetch = $params + [':limit' => $perPage, ':offset' => $offset];
+        if (!Db::isSqlite()) $fetch[':q_rel'] = $params[':q'];
+        foreach ($fetch as $name => $value) $stmt->bindValue($name, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        $stmt->execute();
         $products = $stmt->fetchAll();
 
         return [
-            'products' => $products,
-            'total'    => $total,
-            'page'     => $page,
-            'per_page' => $perPage,
-            'pages'    => (int)ceil($total / $perPage),
-            'query'    => $q,
+            'products'   => $products,
+            'total'      => $total,
+            'page'       => $page,
+            'per_page'   => $perPage,
+            'pages'      => (int)ceil($total / $perPage),
+            'query'      => $q,
+            'categories' => $categories,
         ];
     }
 

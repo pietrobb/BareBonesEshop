@@ -108,7 +108,8 @@ function apiSearch(): array {
 function apiSearchSuggest(): array {
     $q = trim(Security::str($_GET['q'] ?? ''));
     if (strlen($q) < 2) return [];
-    return Adapters::search()->suggest($q, 5);
+    // url: the store-aware product link, so the theme never builds paths itself.
+    return array_map(static fn(array $row): array => $row + ['url' => StorefrontViewModel::productUrl((string)($row['slug'] ?? ''))], Adapters::search()->suggest($q, 5));
 }
 
 function apiValidateCoupon(): array {

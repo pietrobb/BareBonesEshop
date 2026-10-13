@@ -110,14 +110,24 @@ if (!$rmaOrderItem) throw new RuntimeException('RMA fixture order has no item');
 if (!$rmaCreated || !$rmaId) throw new RuntimeException('Cannot create E2E RMA: ' . (string)$rmaError);
 
 // A14.1: the oldest product (not on the home page) gets two 1920px photos for the responsive product-page check.
-$wideProduct = $db->query("SELECT id, slug FROM products WHERE status='active' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+$wideProduct = $db->query("SELECT id, slug, name, category_id FROM products WHERE status='active' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
 if (!$wideProduct) throw new RuntimeException('Disposable E2E catalog has no active product');
+// A14.2: the first photo carries alt:"" as feeds do — the storefront must still name it.
 $db->prepare('UPDATE products SET images = ? WHERE id = ?')
-    ->execute([json_encode(['/assets/img/slider1.jpg', '/assets/img/slider2.jpg']), (int)$wideProduct['id']]);
+    ->execute([json_encode([['url' => '/assets/img/slider1.jpg', 'alt' => ''], '/assets/img/slider2.jpg']), (int)$wideProduct['id']]);
+$a11yCategory = $db->prepare('SELECT slug FROM categories WHERE id = ?');
+$a11yCategory->execute([(int)$wideProduct['category_id']]);
+$a11yCategorySlug = (string)$a11yCategory->fetchColumn();
+if ($a11yCategorySlug === '') throw new RuntimeException('Disposable E2E product has no category');
+$a11ySearchTerm = (string)(preg_split('~\s+~u', trim((string)$wideProduct['name']))[0] ?? '');
 
 $state = [
     // product.php directly: the e2e server is `php -S` without the .htaccess /product/<slug> rewrite.
     'responsive' => ['product_path' => '/product.php?slug=' . rawurlencode((string)$wideProduct['slug'])],
+    'a11y' => [
+        'category_path' => '/?page=category&slug=' . rawurlencode($a11yCategorySlug),
+        'search_path' => '/?page=search&q=' . rawurlencode($a11ySearchTerm),
+    ],
     'customer' => ['id' => (int)$customerId, 'email' => $customerEmail, 'password' => $customerPassword],
     'admin' => ['id' => $adminId, 'username' => $adminUsername, 'password' => $adminPassword, 'secret' => $enrollment['secret']],
     'fulfillment' => ['order_id' => $fulfillmentOrderId],

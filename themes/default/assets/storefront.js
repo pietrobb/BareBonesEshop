@@ -323,9 +323,104 @@
     });
   }
 
+  // Search suggestions as an ARIA combobox: arrows move through the list, Enter opens the highlighted product,
+  // Escape closes. Built with textContent and same-origin links only; without JS the form submits as before.
+  function bindSearchSuggest(input, index) {
+    const form = input.form;
+    if (!form) return;
+    const list = document.createElement('ul');
+    list.id = `search-suggest-${index}`;
+    list.className = 'search-suggestions';
+    list.setAttribute('role', 'listbox');
+    list.setAttribute('aria-label', input.dataset.searchSuggest || '');
+    list.hidden = true;
+    form.classList.add('search-suggest-host');
+    input.insertAdjacentElement('afterend', list);
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-autocomplete', 'list');
+    input.setAttribute('aria-controls', list.id);
+    input.setAttribute('aria-expanded', 'false');
+    input.setAttribute('autocomplete', 'off');
+    let timer = 0;
+    let request = 0;
+    let active = -1;
+    const options = () => [...list.querySelectorAll('[role="option"]')];
+    const close = () => {
+      list.hidden = true;
+      list.replaceChildren();
+      active = -1;
+      input.setAttribute('aria-expanded', 'false');
+      input.removeAttribute('aria-activedescendant');
+    };
+    const highlight = (next) => {
+      const items = options();
+      if (!items.length) return;
+      active = (next + items.length) % items.length;
+      items.forEach((item, position) => item.setAttribute('aria-selected', position === active ? 'true' : 'false'));
+      input.setAttribute('aria-activedescendant', items[active].id);
+    };
+    const show = (suggestions) => {
+      list.replaceChildren();
+      active = -1;
+      suggestions.forEach((suggestion) => {
+        let url;
+        try { url = new URL(String(suggestion.url || ''), window.location.href); } catch (error) { return; }
+        if (url.origin !== window.location.origin || !suggestion.name) return;
+        // An option must not contain a link (nested-interactive); it carries its target instead.
+        const option = document.createElement('li');
+        option.id = `${list.id}-${list.children.length}`;
+        option.className = 'search-suggestion';
+        option.setAttribute('role', 'option');
+        option.setAttribute('aria-selected', 'false');
+        option.dataset.href = url.href;
+        option.textContent = String(suggestion.name);
+        list.appendChild(option);
+      });
+      list.hidden = list.children.length === 0;
+      input.setAttribute('aria-expanded', list.hidden ? 'false' : 'true');
+      input.removeAttribute('aria-activedescendant');
+    };
+    input.addEventListener('input', () => {
+      clearTimeout(timer);
+      const query = input.value.trim();
+      if (query.length < 2) { request++; close(); return; }
+      timer = setTimeout(async () => {
+        const mine = ++request;
+        try {
+          const response = await fetch(`${apiUrl}?${new URLSearchParams({action: 'search_suggest', q: query})}`, {headers: {Accept: 'application/json'}});
+          const result = response.ok ? await response.json() : [];
+          if (mine === request) show(Array.isArray(result) ? result : []);
+        } catch (error) {
+          if (mine === request) close();
+        }
+      }, 250);
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        if (list.hidden) return;
+        event.preventDefault();
+        highlight(active + (event.key === 'ArrowDown' ? 1 : -1));
+      } else if (event.key === 'Enter' && !list.hidden && active >= 0) {
+        event.preventDefault();
+        window.location.assign(options()[active].dataset.href);
+      } else if (event.key === 'Escape' && !list.hidden) {
+        event.preventDefault();
+        close();
+      }
+    });
+    // Close after focus leaves; mousedown on an option keeps focus so its click still lands.
+    list.addEventListener('mousedown', (event) => event.preventDefault());
+    list.addEventListener('click', (event) => {
+      const option = event.target.closest('[role="option"]');
+      if (option) window.location.assign(option.dataset.href);
+    });
+    input.addEventListener('blur', close);
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     bindReviewForm();
     bindCategoryMenus();
+    document.querySelectorAll('input[data-search-suggest]').forEach(bindSearchSuggest);
     const country = document.getElementById('checkout-country');
     if (country) country.addEventListener('change', refreshCheckoutShipping);
     if (document.getElementById('shipping-options')) refreshCheckoutShipping();

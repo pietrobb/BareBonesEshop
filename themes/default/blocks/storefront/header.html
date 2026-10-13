@@ -9,7 +9,8 @@
     <div class="logo"><a href="{{home_url}}">{{#if brand.logo_url}}<img src="{{brand.logo_url}}" alt="{{brand.name}}">{{else}}{{brand.name}}{{/if}}</a></div>
     <form class="search-bar" method="get" action="{{home_url}}">
       <input type="hidden" name="page" value="search">
-      <input type="search" name="q" placeholder="{{t.search_placeholder}}" value="{{search_query}}">
+      <label class="sr-only" for="storefront-search">{{t.search}}</label>
+      <input id="storefront-search" type="search" name="q" placeholder="{{t.search_placeholder}}" value="{{search_query}}" data-search-suggest="{{t.search_suggestions}}">
       <button type="submit">{{t.search}}</button>
     </form>
   </div></div>

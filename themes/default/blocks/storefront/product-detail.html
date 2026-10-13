@@ -1,16 +1,16 @@
 {{{breadcrumb_html}}}
 <div class="product-layout">
-  <div class="product-media">{{#if image}}<img src="{{image}}" alt="" style="max-width:100%;border-radius:8px">{{else}}<div style="background:#eee;height:300px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:3em">&#128230;</div>{{/if}}</div>
+  <div class="product-media">{{#if image}}<img src="{{image}}" alt="{{name}}" style="max-width:100%;border-radius:8px">{{else}}<div style="background:#eee;height:300px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:3em">&#128230;</div>{{/if}}</div>
   <div class="product-buy">
-    <h1 style="margin-bottom:8px">{{name}}</h1><p style="color:#888;margin-bottom:4px">SKU: {{sku}}</p>
-    {{#if supplier}}<p style="color:#888;margin-bottom:12px">{{supplier_label}}: <strong>{{supplier}}</strong></p>{{/if}}
+    <h1 style="margin-bottom:8px">{{name}}</h1><p style="color:#666;margin-bottom:4px">SKU: {{sku}}</p>
+    {{#if supplier}}<p style="color:#666;margin-bottom:12px">{{supplier_label}}: <strong>{{supplier}}</strong></p>{{/if}}
     <div class="price" style="font-size:1.6em;margin-bottom:12px">{{price}}{{#if compare_price}}<span class="old-price" style="font-size:.6em">{{compare_price}}</span>{{/if}}</div>
     {{#if in_stock}}<div class="badge" style="font-size:.9em;margin-bottom:12px">&#10003; {{in_stock_label}} ({{stock}} ks)</div>{{else}}<div style="color:#c62828;font-size:.9em;margin-bottom:12px">&#10007; {{out_of_stock_label}}</div>{{/if}}
     {{#if summary}}<p style="margin-top:12px;color:#555">{{summary}}</p>{{/if}}
-    {{#if show_automotive}}<p style="margin-top:8px;color:#888;font-size:.85em">{{compatible_with_label}} {{vehicle_count}} {{vehicles_label}}</p>{{/if}}
+    {{#if show_automotive}}<p style="margin-top:8px;color:#666;font-size:.85em">{{compatible_with_label}} {{vehicle_count}} {{vehicles_label}}</p>{{/if}}
     <div style="margin-top:20px;display:flex;gap:8px;align-items:center"><input type="number" value="1" min="1" max="99" class="qty-input" id="qty-{{id}}"><button class="btn-cart btn-cart-lg" type="button" data-storefront-action="cart-add" data-product-id="{{id}}" data-quantity-input="qty-{{id}}">{{add_to_cart_label}}</button></div>
   </div>
 </div>
 <div class="tabs" role="tablist"><button type="button" class="tab active" role="tab" aria-selected="true" data-product-tab="specs">{{specs_label}} ({{spec_count}})</button>{{#if show_automotive}}<button type="button" class="tab" role="tab" aria-selected="false" data-product-tab="oe">{{oe_label}} ({{oe_count}})</button><button type="button" class="tab" role="tab" aria-selected="false" data-product-tab="vehicles">{{vehicles_tab_label}} ({{vehicle_count}})</button>{{/if}}</div>
-<div class="tab-content active" id="tab-specs"><table class="spec-table">{{#each specifications}}<tr><td>{{name}}</td><td><strong>{{value}}</strong></td></tr>{{/each}}{{#if no_specs}}<tr><td colspan="2" style="color:#888">{{no_specs_label}}</td></tr>{{/if}}</table></div>
+<div class="tab-content active" id="tab-specs"><table class="spec-table">{{#each specifications}}<tr><td>{{name}}</td><td><strong>{{value}}</strong></td></tr>{{/each}}{{#if no_specs}}<tr><td colspan="2" style="color:#666">{{no_specs_label}}</td></tr>{{/if}}</table></div>
 {{{automotive_html}}}

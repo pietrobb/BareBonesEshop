@@ -349,10 +349,14 @@ final class StorefrontViewModel
             $data = is_array($image) ? $image : ['url' => (string)$image];
             $raw = trim((string)($data['url'] ?? ''));
             if ($raw === '' || $raw === 'placeholder.jpg') continue;
+            $alt = trim((string)($alts[$raw] ?? ''));
+            if ($alt === '') $alt = trim((string)($data['alt'] ?? ''));
+            // Feeds often carry alt:"" — fall back to the product name so the image is never announced as nameless.
+            if ($alt === '') $alt = trim((string)($product['name'] ?? ''));
             $result[] = [
                 'url' => self::imageUrl($raw, 'full'),
                 'thumbnail_url' => self::imageUrl((string)($data['thumbnail_url'] ?? $raw), 'thumb'),
-                'alt' => (string)($alts[$raw] ?? $data['alt'] ?? $product['name'] ?? ''),
+                'alt' => $alt,
                 'primary' => isset($data['primary']) ? (bool)$data['primary'] : $index === 0,
             ];
         }
@@ -409,7 +413,7 @@ final class StorefrontViewModel
         return $result;
     }
 
-    private static function productUrl(string $slug): string
+    public static function productUrl(string $slug): string
     {
         return Template::storeUrl('/product/' . rawurlencode($slug));
     }

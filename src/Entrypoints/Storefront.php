@@ -95,9 +95,10 @@ switch ($page) {
     case 'search':
         $q = Security::clean($_GET['q'] ?? '');
         $pg = max(1, Security::int($_GET['pg'] ?? 1));
-        $result = Adapters::search()->search($q, ['page' => $pg, 'per_page' => 24]);
+        $searchFilters = Search::filtersFromQuery($_GET);
+        $result = Adapters::search()->search($q, ['page' => $pg, 'per_page' => 24] + $searchFilters['opts']);
         $title = Template::pageTitle($t('search') . ': ' . $q);
-        $content = renderSearch($q, $result);
+        $content = renderSearch($q, $result, $searchFilters);
         break;
 
     case 'oe':

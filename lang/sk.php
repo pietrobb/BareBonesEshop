@@ -73,6 +73,9 @@ return [
     // Search
     'search'           => 'Hľadať',
     'search_placeholder' => 'Hľadať produkty...',
+    'relevance' => 'Najrelevantnejšie',
+    'all_categories' => 'Všetky kategórie',
+    'search_suggestions' => 'Návrhy vyhľadávania',
     'search_no_results'  => 'Neboli nájdené žiadne výsledky.',
 
     // General

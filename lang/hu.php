@@ -73,6 +73,9 @@ return array_replace(require __DIR__ . '/en.php', [
     // Search
     'search'           => 'Keresés',
     'search_placeholder' => 'Termékek keresése...',
+    'relevance' => 'Legrelevánsabb',
+    'all_categories' => 'Minden kategória',
+    'search_suggestions' => 'Keresési javaslatok',
     'search_no_results'  => 'Nincs találat.',
 
     // General

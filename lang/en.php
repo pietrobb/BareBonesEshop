@@ -73,6 +73,9 @@ return [
     // Search
     'search'           => 'Search',
     'search_placeholder' => 'Search products...',
+    'relevance' => 'Most relevant',
+    'all_categories' => 'All categories',
+    'search_suggestions' => 'Search suggestions',
     'search_no_results'  => 'No results found.',
 
     // General

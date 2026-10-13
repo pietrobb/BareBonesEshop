@@ -119,7 +119,8 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/Recovery.php' => ['lines' => 300, 'functions' => 6, 'max_function_lines' => 90, 'coupling' => 8],
     'src/Entrypoints/Admin/Request.php' => ['lines' => 80, 'functions' => 1, 'max_function_lines' => 70, 'coupling' => 2],
     'src/Entrypoints/Admin/Shared.php' => ['lines' => 50, 'functions' => 3, 'max_function_lines' => 25, 'coupling' => 0],
-    'src/Entrypoints/Storefront.php' => ['lines' => 320, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 10],
+    // +1 coupling: Search::filtersFromQuery turns the search route's sort/price/category parameters into search options (A14.2).
+    'src/Entrypoints/Storefront.php' => ['lines' => 320, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
     'src/Entrypoints/Storefront/CatalogPages.php' => ['lines' => 560, 'functions' => 12, 'max_function_lines' => 230, 'coupling' => 8],
     // +2 functions: pending-payment page and the gateway cancel page (P0 2026-10-13 checkout redirect).
     // +1 coupling: BankTransferInstructions renders the IBAN / variable symbol / PAY by square block on order-done (A13.6).

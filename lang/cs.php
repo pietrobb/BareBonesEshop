@@ -73,6 +73,9 @@ return array_replace(require __DIR__ . '/en.php', [
     // Search
     'search'           => 'Hledat',
     'search_placeholder' => 'Hledat produkty...',
+    'relevance' => 'Nejrelevantnější',
+    'all_categories' => 'Všechny kategorie',
+    'search_suggestions' => 'Návrhy hledání',
     'search_no_results'  => 'Nebyly nalezeny žádné výsledky.',
 
     // General

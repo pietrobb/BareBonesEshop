@@ -73,6 +73,9 @@ return array_replace(require __DIR__ . '/en.php', [
     // Search
     'search'           => 'Szukaj',
     'search_placeholder' => 'Szukaj produktów...',
+    'relevance' => 'Najtrafniejsze',
+    'all_categories' => 'Wszystkie kategorie',
+    'search_suggestions' => 'Podpowiedzi wyszukiwania',
     'search_no_results'  => 'Brak wyników.',
 
     // General
