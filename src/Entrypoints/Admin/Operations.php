@@ -4,17 +4,11 @@
 function pageDashboard(): void {
     $db = Db::get();
 
-    // Today's orders
-    $today = date('Y-m-d');
+    // Today's orders since the shop's local midnight (created_at is UTC).
     $storeId = StoreContext::current()->id();
-    $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE store_id=:store AND created_at >= :today");
-    $stmt->execute([':store' => $storeId, ':today' => $today]);
+    $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE store_id=:store AND created_at >= :today AND is_synthetic = 0");
+    $stmt->execute([':store' => $storeId, ':today' => SalesReport::sinceUtc(1)]);
     $ordersToday = (int)$stmt->fetchColumn();
-
-    // Today's revenue
-    $stmt = $db->prepare("SELECT COALESCE(SUM(total),0) FROM orders WHERE store_id=:store AND created_at >= :today AND status NOT IN ('cancelled','refunded')");
-    $stmt->execute([':store' => $storeId, ':today' => $today]);
-    $revenueToday = (int)$stmt->fetchColumn();
 
     // Pending orders
     $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE store_id=:store AND status='pending'");
@@ -37,7 +31,7 @@ function pageDashboard(): void {
     <h1><?= esc(I18n::t('admin.title.dashboard')) ?></h1>
     <div class="grid grid-4">
         <div class="card stat"><div class="num"><?= $ordersToday ?></div><div class="label"><?= esc(I18n::t('admin.stat.orders_today')) ?></div></div>
-        <div class="card stat"><div class="num"><?= I18n::price($revenueToday) ?></div><div class="label"><?= esc(I18n::t('admin.stat.revenue_today')) ?></div></div>
+        <div class="card stat"><div class="num"><?= adminRevenueToday() ?></div><div class="label"><?= esc(I18n::t('admin.stat.revenue_today')) ?></div></div>
         <div class="card stat"><div class="num"><?= $pendingOrders ?></div><div class="label"><?= esc(I18n::t('admin.stat.pending')) ?></div></div>
         <div class="card stat"><div class="num"><?= $lowStock ?></div><div class="label"><?= esc(I18n::t('admin.stat.low_stock')) ?></div></div>
     </div>

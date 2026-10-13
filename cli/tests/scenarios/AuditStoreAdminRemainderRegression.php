@@ -13,6 +13,7 @@ require $root . '/src/Entrypoints/Admin/Catalog.php';
 require $root . '/src/Entrypoints/Admin/Customers.php';
 require $root . '/src/Entrypoints/Admin/Operations.php';
 require $root . '/src/Entrypoints/Admin/Orders.php';
+require $root . '/src/Entrypoints/Admin/Reports.php';
 class_exists(Security::class);
 // Resend handlers are rate limited per log/invoice id; each request gets a private limiter so reruns stay deterministic.
 $a057Rate = new PDO('sqlite::memory:');

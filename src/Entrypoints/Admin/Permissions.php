@@ -3,6 +3,7 @@
 return [
     'dashboard'  => 'reports.view',
     'sales'      => 'orders.view',
+    'reports'    => 'reports.view',
     'products'   => 'products.view',
     'product'    => 'products.edit',
     'orders'     => 'orders.view',

@@ -5,15 +5,12 @@ function pageSalesOverview(): void {
     Security::adminRequire('orders.view');
     $db = Db::get();
     $storeId = StoreContext::current()->id();
-    $today = date('Y-m-d 00:00:00');
+    // Shop-local midnight as UTC, the zone created_at is stored in.
+    $today = SalesReport::sinceUtc(1);
 
-    $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE created_at >= :today AND store_id = :store");
+    $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE created_at >= :today AND store_id = :store AND is_synthetic = 0");
     $stmt->execute([':today' => $today, ':store' => $storeId]);
     $ordersToday = (int)$stmt->fetchColumn();
-
-    $stmt = $db->prepare("SELECT COALESCE(SUM(total), 0) FROM orders WHERE created_at >= :today AND store_id = :store AND status NOT IN ('cancelled', 'refunded')");
-    $stmt->execute([':today' => $today, ':store' => $storeId]);
-    $revenueToday = (int)$stmt->fetchColumn();
 
     $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE store_id = :store AND payment_status IN ('pending', 'authorized')");
     $stmt->execute([':store' => $storeId]);
@@ -47,7 +44,7 @@ function pageSalesOverview(): void {
         $params[':q_email'] = $like;
     }
     if ($period !== 'all') {
-        $since = $period === 'today' ? $today : date('Y-m-d H:i:s', strtotime('-' . (int)$period . ' days'));
+        $since = SalesReport::sinceUtc($period === 'today' ? 1 : (int)$period);
         $where[] = 'o.created_at >= :since';
         $params[':since'] = $since;
     }
@@ -101,7 +98,7 @@ function pageSalesOverview(): void {
 
     <div class="grid grid-4" style="margin-top:1rem">
         <div class="card stat"><div class="num"><?= $ordersToday ?></div><div class="label"><?= esc(I18n::t('admin.stat.orders_today')) ?></div></div>
-        <div class="card stat"><div class="num"><?= I18n::price($revenueToday) ?></div><div class="label"><?= esc(I18n::t('admin.sales.order_value_today')) ?></div></div>
+        <div class="card stat"><div class="num"><?= adminRevenueToday() ?></div><div class="label"><?= esc(I18n::t('admin.sales.order_value_today')) ?></div></div>
         <div class="card stat"><div class="num"><?= $pendingPayments ?></div><div class="label"><?= esc(I18n::t('admin.sales.pending_payments')) ?></div></div>
         <div class="card stat"><div class="num"><?= $downloadCount ?></div><div class="label"><?= esc(I18n::t('admin.sales.total_downloads')) ?></div></div>
     </div>

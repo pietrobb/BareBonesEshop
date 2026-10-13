@@ -9,6 +9,7 @@ require_once __DIR__ . '/Admin/Customers.php';
 require_once __DIR__ . '/Admin/B2b.php';
 require_once __DIR__ . '/Admin/Suppliers.php';
 require_once __DIR__ . '/Admin/Operations.php';
+require_once __DIR__ . '/Admin/Reports.php';
 require_once __DIR__ . '/Admin/Recovery.php';
 require_once __DIR__ . '/Admin/AdminUsers.php';
 require_once __DIR__ . '/Admin/Request.php';
@@ -71,6 +72,7 @@ if ($page === 'invoice_pdf') {
 $title = match($page) {
     'dashboard'  => I18n::t('admin.title.dashboard'),
     'sales'      => I18n::t('admin.title.sales'),
+    'reports'    => I18n::t('admin.title.reports'),
     'products'   => I18n::t('admin.title.products'),
     'product'    => isset($_GET['id']) ? I18n::t('admin.title.product_edit') : I18n::t('admin.title.product_new'),
     'orders'     => I18n::t('admin.title.orders'),
@@ -153,6 +155,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
 .stock-low{color:#b45309;font-weight:600}.stock-critical{color:#dc2626;font-weight:700}
 .muted{color:#64748b;font-size:.85rem}
 .sales-toolbar{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap}.sales-toolbar .form-row{margin:0}.sales-toolbar input{min-width:220px}
+.report-bar{margin-left:.5rem;width:8rem;vertical-align:middle}details>summary{cursor:pointer;font-weight:600;margin:.5rem 0}
 .table-scroll{overflow-x:auto}.status-ok{color:#047857}.status-warn{color:#b45309}.status-error{color:#b91c1c;font-weight:600}
 @media(max-width:760px){.wrap{display:block}nav{width:100%;display:flex;overflow-x:auto;padding:.5rem}nav h2,nav div{display:none}nav a{white-space:nowrap}main{padding:1rem}.sales-toolbar input{min-width:0;width:100%}.sales-toolbar .form-row{width:100%}}
 </style>
@@ -175,6 +178,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
     </div>
     <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=dashboard" class="<?= $page==='dashboard'?'active':'' ?>"><?= esc(I18n::t('admin.nav.dashboard')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=sales" class="<?= $page==='sales'?'active':'' ?>"><?= esc(I18n::t('admin.nav.sales')) ?></a><?php endif; ?>
+    <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=reports" class="<?= $page==='reports'?'active':'' ?>"><?= esc(I18n::t('admin.nav.reports')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.view')): ?><a href="admin.php?p=products" class="<?= $page==='products'?'active':'' ?>"><?= esc(I18n::t('admin.nav.products')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=orders" class="<?= $page==='orders'?'active':'' ?>"><?= esc(I18n::t('admin.nav.orders')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=awaiting_payment" class="<?= $page==='awaiting_payment'?'active':'' ?>">Čaká na platbu</a><?php endif; ?>
@@ -206,6 +210,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
 match($page) {
     'dashboard' => pageDashboard(),
     'sales'     => pageSalesOverview(),
+    'reports'   => pageReports(),
     'products'  => pageProducts(),
     'product'   => pageProduct(),
     'orders'    => pageOrders(),
