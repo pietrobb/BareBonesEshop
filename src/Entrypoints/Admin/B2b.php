@@ -6,25 +6,25 @@ function pageCustomerGroups(): void {
     $id = Security::int($_GET['id'] ?? 0);
     $edit = $id ? B2bAdmin::group($id) : null;
     ?>
-    <h1>Zákaznícke skupiny</h1>
+    <h1><?= esc(I18n::t('admin.title.customer_groups')) ?></h1>
     <div class="card">
-        <h3><?= $edit ? 'Upraviť: ' . esc($edit['name']) : 'Nová skupina' ?></h3>
-        <p class="muted">Zľava skupiny platí na produkty, pre ktoré skupina nemá cenník. Skupinu môžu použiť aj cenníky a promo akcie.</p>
+        <h3><?= esc($edit ? I18n::format('admin.common.edit_named', ['name' => (string)$edit['name']]) : I18n::t('admin.b2b.group_new')) ?></h3>
+        <p class="muted"><?= esc(I18n::t('admin.b2b.group_hint')) ?></p>
         <form method="post" action="admin.php?p=customer_groups&action=save<?= $edit ? '&id=' . (int)$edit['id'] : '' ?>">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
             <div class="grid grid-4">
-                <div class="form-row"><label for="cg-name">Názov</label><input id="cg-name" name="name" value="<?= esc((string)($edit['name'] ?? '')) ?>" required maxlength="191"></div>
-                <div class="form-row"><label for="cg-code">Kód (prázdny = z názvu)</label><input id="cg-code" name="code" value="<?= esc((string)($edit['code'] ?? '')) ?>" maxlength="191"></div>
-                <div class="form-row"><label for="cg-discount">Zľava v % (napr. 7,5)</label><input id="cg-discount" name="discount" value="<?= esc(B2bAdmin::bpsToPercent((int)($edit['discount_bps'] ?? 0))) ?>" inputmode="decimal"></div>
-                <div class="form-row"><label><input type="checkbox" name="active" value="1" <?= !$edit || !empty($edit['active']) ? 'checked' : '' ?>> Aktívna</label></div>
+                <div class="form-row"><label for="cg-name"><?= esc(I18n::t('admin.th.name')) ?></label><input id="cg-name" name="name" value="<?= esc((string)($edit['name'] ?? '')) ?>" required maxlength="191"></div>
+                <div class="form-row"><label for="cg-code"><?= esc(I18n::t('admin.taxonomy.code_hint')) ?></label><input id="cg-code" name="code" value="<?= esc((string)($edit['code'] ?? '')) ?>" maxlength="191"></div>
+                <div class="form-row"><label for="cg-discount"><?= esc(I18n::t('admin.b2b.discount_hint')) ?></label><input id="cg-discount" name="discount" value="<?= esc(B2bAdmin::bpsToPercent((int)($edit['discount_bps'] ?? 0))) ?>" inputmode="decimal"></div>
+                <div class="form-row"><label><input type="checkbox" name="active" value="1" <?= !$edit || !empty($edit['active']) ? 'checked' : '' ?>> <?= esc(I18n::t('admin.common.active_f')) ?></label></div>
             </div>
-            <button class="btn btn-primary" type="submit">Uložiť</button>
-            <?php if ($edit): ?><a href="admin.php?p=customer_groups" class="btn" style="margin-left:.5rem">Nová skupina</a><?php endif; ?>
+            <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.btn.save')) ?></button>
+            <?php if ($edit): ?><a href="admin.php?p=customer_groups" class="btn" style="margin-left:.5rem"><?= esc(I18n::t('admin.b2b.group_new')) ?></a><?php endif; ?>
         </form>
     </div>
     <div class="card table-scroll">
         <table>
-            <thead><tr><th>Názov</th><th>Kód</th><th>Zľava</th><th>Zákazníci</th><th>Stav</th><th></th></tr></thead>
+            <thead><tr><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.common.code')) ?></th><th><?= esc(I18n::t('admin.b2b.discount')) ?></th><th><?= esc(I18n::t('admin.title.customers')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th></th></tr></thead>
             <tbody>
             <?php foreach ($groups as $g): ?>
             <tr>
@@ -32,8 +32,8 @@ function pageCustomerGroups(): void {
                 <td><code><?= esc($g['code']) ?></code></td>
                 <td><?= esc(B2bAdmin::bpsToPercent((int)$g['discount_bps'])) ?> %</td>
                 <td><?= (int)$g['customer_count'] ?></td>
-                <td><span class="badge badge-<?= $g['active'] ? 'active' : 'draft' ?>"><?= $g['active'] ? 'aktívna' : 'neaktívna' ?></span></td>
-                <td><?php b2bDeleteButton('customer_groups', 'customer_group_id', (int)$g['id'], 'Zmazať skupinu?'); ?></td>
+                <td><span class="badge badge-<?= $g['active'] ? 'active' : 'draft' ?>"><?= esc(I18n::t($g['active'] ? 'admin.common.status_active_f' : 'admin.common.status_inactive_f')) ?></span></td>
+                <td><?php b2bDeleteButton('customer_groups', 'customer_group_id', (int)$g['id'], I18n::t('admin.b2b.group_delete_confirm')); ?></td>
             </tr>
             <?php endforeach; ?>
             </tbody>
@@ -48,49 +48,48 @@ function pageCompanies(): void {
     $edit = $id ? B2bAdmin::company($id) : null;
     $value = static fn(string $key, string $default = ''): string => esc((string)($edit[$key] ?? $default));
     ?>
-    <h1>B2B firmy</h1>
+    <h1><?= esc(I18n::t('admin.title.companies')) ?></h1>
     <div class="card">
-        <h3><?= $edit ? 'Upraviť: ' . esc($edit['legal_name']) : 'Nová firma' ?></h3>
-        <p class="muted">Nákup na faktúru sa ponúkne len aktívnej schválenej firme so splatnosťou; kreditný limit (centy) obmedzuje nezaplatené objednávky jej zákazníkov, 0 = bez limitu.
-            Zmena IČ DPH zruší jeho overenie.</p>
+        <h3><?= esc($edit ? I18n::format('admin.common.edit_named', ['name' => (string)$edit['legal_name']]) : I18n::t('admin.b2b.company_new')) ?></h3>
+        <p class="muted"><?= esc(I18n::t('admin.b2b.company_hint')) ?></p>
         <form method="post" action="admin.php?p=companies&action=save<?= $edit ? '&id=' . (int)$edit['id'] : '' ?>">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
             <div class="grid grid-4">
-                <div class="form-row"><label for="co-name">Obchodné meno</label><input id="co-name" name="legal_name" value="<?= $value('legal_name') ?>" required maxlength="191"></div>
-                <div class="form-row"><label for="co-code">Kód (prázdny = z mena)</label><input id="co-code" name="code" value="<?= $value('code') ?>" maxlength="191"></div>
-                <div class="form-row"><label for="co-reg">IČO</label><input id="co-reg" name="registration_number" value="<?= $value('registration_number') ?>" maxlength="32"></div>
-                <div class="form-row"><label for="co-vat">IČ DPH<?= !empty($edit['vat_validated_at']) ? ' (overené ' . esc(substr((string)$edit['vat_validated_at'], 0, 10)) . ')' : '' ?></label><input id="co-vat" name="vat_id" value="<?= $value('vat_id') ?>" maxlength="20"></div>
-                <div class="form-row"><label for="co-approval">Schválenie</label>
+                <div class="form-row"><label for="co-name"><?= esc(I18n::t('admin.b2b.legal_name')) ?></label><input id="co-name" name="legal_name" value="<?= $value('legal_name') ?>" required maxlength="191"></div>
+                <div class="form-row"><label for="co-code"><?= esc(I18n::t('admin.b2b.code_hint_legal')) ?></label><input id="co-code" name="code" value="<?= $value('code') ?>" maxlength="191"></div>
+                <div class="form-row"><label for="co-reg"><?= esc(I18n::t('checkout_ico')) ?></label><input id="co-reg" name="registration_number" value="<?= $value('registration_number') ?>" maxlength="32"></div>
+                <div class="form-row"><label for="co-vat"><?= esc(I18n::t('checkout_vat_id')) ?><?= !empty($edit['vat_validated_at']) ? ' ' . esc(I18n::format('admin.b2b.vat_verified', ['date' => substr((string)$edit['vat_validated_at'], 0, 10)])) : '' ?></label><input id="co-vat" name="vat_id" value="<?= $value('vat_id') ?>" maxlength="20"></div>
+                <div class="form-row"><label for="co-approval"><?= esc(I18n::t('admin.b2b.approval')) ?></label>
                     <select id="co-approval" name="approval_status">
-                        <?php foreach (B2bAdmin::APPROVAL as $status => $label): ?>
-                        <option value="<?= esc($status) ?>" <?= ($edit['approval_status'] ?? 'pending') === $status ? 'selected' : '' ?>><?= esc($label) ?></option>
+                        <?php foreach (array_keys(B2bAdmin::APPROVAL) as $status): ?>
+                        <option value="<?= esc($status) ?>" <?= ($edit['approval_status'] ?? 'pending') === $status ? 'selected' : '' ?>><?= esc(I18n::t('admin.b2b.approval.' . $status)) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <div class="form-row"><label for="co-credit">Kreditný limit (centy, 0 = bez limitu)</label><input id="co-credit" type="number" min="0" name="credit_limit" value="<?= $value('credit_limit', '0') ?>"></div>
-                <div class="form-row"><label for="co-terms">Splatnosť (dni)</label><input id="co-terms" type="number" min="0" max="365" name="payment_terms_days" value="<?= $value('payment_terms_days', '0') ?>"></div>
-                <div class="form-row"><label><input type="checkbox" name="invoice_purchase" value="1" <?= !empty($edit['invoice_purchase']) ? 'checked' : '' ?>> Nákup na faktúru</label>
-                    <label><input type="checkbox" name="active" value="1" <?= !$edit || !empty($edit['active']) ? 'checked' : '' ?>> Aktívna</label></div>
+                <div class="form-row"><label for="co-credit"><?= esc(I18n::t('admin.b2b.credit_limit_hint')) ?></label><input id="co-credit" type="number" min="0" name="credit_limit" value="<?= $value('credit_limit', '0') ?>"></div>
+                <div class="form-row"><label for="co-terms"><?= esc(I18n::t('admin.b2b.payment_terms')) ?></label><input id="co-terms" type="number" min="0" max="365" name="payment_terms_days" value="<?= $value('payment_terms_days', '0') ?>"></div>
+                <div class="form-row"><label><input type="checkbox" name="invoice_purchase" value="1" <?= !empty($edit['invoice_purchase']) ? 'checked' : '' ?>> <?= esc(I18n::t('admin.b2b.invoice_purchase')) ?></label>
+                    <label><input type="checkbox" name="active" value="1" <?= !$edit || !empty($edit['active']) ? 'checked' : '' ?>> <?= esc(I18n::t('admin.common.active_f')) ?></label></div>
             </div>
-            <button class="btn btn-primary" type="submit">Uložiť</button>
-            <?php if ($edit): ?><a href="admin.php?p=companies" class="btn" style="margin-left:.5rem">Nová firma</a><?php endif; ?>
+            <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.btn.save')) ?></button>
+            <?php if ($edit): ?><a href="admin.php?p=companies" class="btn" style="margin-left:.5rem"><?= esc(I18n::t('admin.b2b.company_new')) ?></a><?php endif; ?>
         </form>
     </div>
     <div class="card table-scroll">
         <table>
-            <thead><tr><th>Firma</th><th>Kód</th><th>IČO / IČ DPH</th><th>Schválenie</th><th>Faktúra</th><th>Limit / nezaplatené</th><th>Zákazníci</th><th>Stav</th><th></th></tr></thead>
+            <thead><tr><th><?= esc(I18n::t('admin.b2b.company')) ?></th><th><?= esc(I18n::t('admin.common.code')) ?></th><th><?= esc(I18n::t('checkout_ico')) ?> / <?= esc(I18n::t('checkout_vat_id')) ?></th><th><?= esc(I18n::t('admin.b2b.approval')) ?></th><th><?= esc(I18n::t('admin.b2b.invoice')) ?></th><th><?= esc(I18n::t('admin.b2b.limit_open')) ?></th><th><?= esc(I18n::t('admin.title.customers')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th></th></tr></thead>
             <tbody>
             <?php foreach ($companies as $c): $currency = StoreContext::current()->currency(); ?>
             <tr>
                 <td><a href="admin.php?p=companies&id=<?= (int)$c['id'] ?>"><?= esc($c['legal_name']) ?></a></td>
                 <td><code><?= esc($c['code']) ?></code></td>
                 <td><?= esc((string)($c['registration_number'] ?? '')) ?> <?= esc((string)($c['vat_id'] ?? '')) ?></td>
-                <td><?= esc(B2bAdmin::APPROVAL[$c['approval_status']] ?? (string)$c['approval_status']) ?></td>
-                <td><?= $c['invoice_purchase'] ? 'áno, ' . (int)$c['payment_terms_days'] . ' dní' : 'nie' ?></td>
-                <td><?= (int)$c['credit_limit'] > 0 ? esc(I18n::price((int)$c['credit_limit'], $currency)) : 'bez limitu' ?> / <?= esc(I18n::price((int)$c['open_total'], $currency)) ?></td>
+                <td><?= esc(isset(B2bAdmin::APPROVAL[$c['approval_status']]) ? I18n::t('admin.b2b.approval.' . $c['approval_status']) : (string)$c['approval_status']) ?></td>
+                <td><?= esc($c['invoice_purchase'] ? I18n::format('admin.b2b.invoice_terms', ['days' => (int)$c['payment_terms_days']]) : I18n::t('admin.b2b.invoice_no')) ?></td>
+                <td><?= (int)$c['credit_limit'] > 0 ? esc(I18n::price((int)$c['credit_limit'], $currency)) : esc(I18n::t('admin.b2b.no_limit')) ?> / <?= esc(I18n::price((int)$c['open_total'], $currency)) ?></td>
                 <td><?= (int)$c['customer_count'] ?></td>
-                <td><span class="badge badge-<?= $c['active'] ? 'active' : 'draft' ?>"><?= $c['active'] ? 'aktívna' : 'neaktívna' ?></span></td>
-                <td><?php b2bDeleteButton('companies', 'company_id', (int)$c['id'], 'Zmazať firmu?'); ?></td>
+                <td><span class="badge badge-<?= $c['active'] ? 'active' : 'draft' ?>"><?= esc(I18n::t($c['active'] ? 'admin.common.status_active_f' : 'admin.common.status_inactive_f')) ?></span></td>
+                <td><?php b2bDeleteButton('companies', 'company_id', (int)$c['id'], I18n::t('admin.b2b.company_delete_confirm')); ?></td>
             </tr>
             <?php endforeach; ?>
             </tbody>
@@ -106,9 +105,9 @@ function b2bCustomerCard(int $customerId): void {
     $select = static function(string $name, string $label, array $rows, string $text, ?int $selected): void { ?>
         <div class="form-row"><label for="b2b-<?= esc($name) ?>"><?= esc($label) ?></label>
             <select id="b2b-<?= esc($name) ?>" name="<?= esc($name) ?>">
-                <option value="">— žiadna —</option>
+                <option value=""><?= esc(I18n::t('admin.b2b.none')) ?></option>
                 <?php foreach ($rows as $row): ?>
-                <option value="<?= (int)$row['id'] ?>" <?= $selected === (int)$row['id'] ? 'selected' : '' ?>><?= esc((string)$row[$text]) ?><?= empty($row['active']) ? ' (neaktívna)' : '' ?></option>
+                <option value="<?= (int)$row['id'] ?>" <?= $selected === (int)$row['id'] ? 'selected' : '' ?>><?= esc((string)$row[$text]) ?><?= empty($row['active']) ? ' ' . esc(I18n::t('admin.b2b.inactive_suffix')) : '' ?></option>
                 <?php endforeach; ?>
             </select>
         </div>
@@ -119,10 +118,10 @@ function b2bCustomerCard(int $customerId): void {
         <form method="post" action="admin.php?p=customer&action=b2b&id=<?= $customerId ?>">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
             <div class="grid grid-4">
-                <?php $select('customer_group_id', 'Zákaznícka skupina', B2bAdmin::groups(), 'name', $assignment['customer_group_id']); ?>
-                <?php $select('company_id', 'Firma', B2bAdmin::companies(), 'legal_name', $assignment['company_id']); ?>
+                <?php $select('customer_group_id', I18n::t('admin.b2b.customer_group'), B2bAdmin::groups(), 'name', $assignment['customer_group_id']); ?>
+                <?php $select('company_id', I18n::t('admin.b2b.company'), B2bAdmin::companies(), 'legal_name', $assignment['company_id']); ?>
             </div>
-            <button class="btn btn-primary" type="submit">Uložiť priradenie</button>
+            <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.b2b.save_assignment')) ?></button>
         </form>
     </div>
     <?php
@@ -132,7 +131,7 @@ function b2bDeleteButton(string $page, string $field, int $id, string $confirm):
     <form method="post" action="admin.php?p=<?= esc($page) ?>&action=delete" style="display:inline" data-confirm="<?= esc($confirm) ?>">
         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
         <input type="hidden" name="<?= esc($field) ?>" value="<?= $id ?>">
-        <button class="btn btn-sm btn-danger">Zmazať</button>
+        <button class="btn btn-sm btn-danger"><?= esc(I18n::t('admin.btn.delete')) ?></button>
     </form>
 <?php }
 

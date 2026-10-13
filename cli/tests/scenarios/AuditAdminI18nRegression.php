@@ -27,7 +27,7 @@ function a154HardcodedStrings(string $source): array {
     return $found;
 }
 
-// Ratchet: budgets may only go down. Files finished in A15.4–A15.6 are at 0; the rest are converted in A15.7.
+// Ratchet: budgets may only go down. Every admin file is at 0 since A15.7.
 $a154Budgets = [
     'src/Entrypoints/Admin.php' => 0,
     'src/Entrypoints/Admin/Operations.php' => 0,
@@ -38,15 +38,15 @@ $a154Budgets = [
     'src/Entrypoints/Admin/OrderOperations.php' => 0,
     'src/Entrypoints/Admin/Permissions.php' => 0,
     'src/Entrypoints/Admin/AdminUsers.php' => 0,
-    'src/Entrypoints/Admin/B2b.php' => 31,
+    'src/Entrypoints/Admin/B2b.php' => 0,
     'src/Entrypoints/Admin/Catalog.php' => 0,
     'src/Entrypoints/Admin/CatalogEditor.php' => 0,
     'src/Entrypoints/Admin/Customers.php' => 0,
     'src/Entrypoints/Admin/Orders.php' => 0,
-    'src/Entrypoints/Admin/PricingRules.php' => 45,
+    'src/Entrypoints/Admin/PricingRules.php' => 0,
     'src/Entrypoints/Admin/Recovery.php' => 0,
     'src/Entrypoints/Admin/Request.php' => 0,
-    'src/Entrypoints/Admin/Suppliers.php' => 39,
+    'src/Entrypoints/Admin/Suppliers.php' => 0,
     'src/Entrypoints/Admin/Taxonomy.php' => 0,
 ];
 $a154Root = dirname(TEST_CLI_DIR);
@@ -335,6 +335,71 @@ try {
     $a154Run(['p' => 'awaiting_payment', 'action' => 'confirm'], ['id' => $a156Pending, 'note' => 'A156']);
     $a156Check('A15.6 de: confirmed bank transfer flash is German', $a154Run(['p' => 'awaiting_payment']),
         ['Zahlung erfasst; die Bestellung ist bezahlt und die Zustellung wurde gestartet.', 'Keine unbezahlten Überweisungen.']);
+
+    // A15.7: customer groups, B2B companies (and the B2B card on the customer detail), promotions, price lists,
+    // suppliers and purchase orders in German, rows written through the real handlers; then a few in English.
+    $a157Leftovers = array_merge($a156Leftovers, ['Zľava', 'Obchodné', 'Schválenie', 'Kreditný', 'Splatnosť', 'faktúr', 'Rozsah', 'Kombinov',
+        'Podmienky', 'Kupón', 'Platí ', 'Platnosť', 'Cenník', 'cenník', 'všetci', 'Dodávateľ', 'Ponuka', 'Nákupn', 'Prijať', 'Prijaté', 'Zaúčtovať',
+        'aktívn', 'žiadna', 'schválen', 'objednan', 'Darček', 'Katalóg', 'Košík', 'Skupina', 'Priorita', 'Telefón', 'Poznámka', 'očakávané', 'sklad ']);
+    $a157Check = static function(string $label, array $r, array $expect, array $allowed = []) use ($a157Leftovers): void {
+        $left = array_values(array_filter(array_diff($a157Leftovers, $allowed), static fn(string $t): bool => str_contains($r['out'], $t)));
+        $missing = array_values(array_filter($expect, static fn(string $t): bool => !str_contains(html_entity_decode($r['out'], ENT_QUOTES, 'UTF-8'), $t)));
+        assert_true($r['code'] === 200 && $left === [] && $missing === [],
+            "{$label} (code=" . var_export($r['code'], true) . ' leftovers=' . json_encode($left, JSON_UNESCAPED_UNICODE)
+            . ' missing=' . json_encode($missing, JSON_UNESCAPED_UNICODE) . ($r['code'] === null ? ' raw=' . $r['out'] : '') . ')');
+    };
+    // Each write is followed by one page view that consumes its flash; core flash messages are checked separately.
+    $a157Write = static function(array $get, array $post) use ($a154Run): void {
+        $a154Run($get, $post);
+        $a154Run(['p' => 'dashboard']);
+    };
+    $a154Run(['p' => 'dashboard', 'lang' => 'de']);
+    $a157Write(['p' => 'customer_groups', 'action' => 'save'], ['name' => 'A157 Gruppe', 'code' => '', 'discount' => '5', 'active' => '1']);
+    $a157Group = (string)$a154Pdo->query("SELECT id FROM customer_groups WHERE name = 'A157 Gruppe'")->fetchColumn();
+    $a157Write(['p' => 'companies', 'action' => 'save'], ['legal_name' => 'A157 GmbH', 'code' => '', 'registration_number' => '', 'vat_id' => '',
+        'approval_status' => 'pending', 'credit_limit' => '0', 'payment_terms_days' => '14', 'invoice_purchase' => '1', 'active' => '1']);
+    $a157Company = (string)$a154Pdo->query("SELECT id FROM companies WHERE legal_name = 'A157 GmbH'")->fetchColumn();
+    $a157Write(['p' => 'promotions', 'action' => 'save'], ['name' => 'A157 Aktion', 'code' => '', 'scope' => 'catalog', 'coupon_code' => '', 'priority' => '0',
+        'stacking' => 'stack', 'valid_from' => '', 'valid_to' => '', 'action_type' => 'discount_percent', 'action_value' => '10', 'active' => '1']);
+    $a157Write(['p' => 'price_lists', 'action' => 'save'], ['name' => 'A157 Liste', 'code' => 'a157-liste', 'currency' => 'EUR', 'customer_group_id' => '',
+        'priority' => '0', 'valid_from' => '', 'valid_to' => '', 'active' => '1']);
+    $a157List = (string)$a154Pdo->query("SELECT id FROM price_lists WHERE code = 'a157-liste'")->fetchColumn();
+    $a157Write(['p' => 'suppliers', 'action' => 'save'], ['name' => 'A157 Lieferant', 'code' => 'a157-sup', 'email' => '', 'phone' => '', 'note' => '', 'active' => '1']);
+    $a157Supplier = (string)$a154Pdo->query("SELECT id FROM suppliers WHERE code = 'a157-sup'")->fetchColumn();
+    $a157Write(['p' => 'suppliers', 'action' => 'products', 'id' => $a157Supplier], ['products' => 'A155-P | A157-X | 400 | 1 | 1 | 5']);
+    $a157Warehouse = (string)$a154Pdo->query("SELECT id FROM warehouses WHERE code = 'a154-wh'")->fetchColumn();
+    $a157Write(['p' => 'purchase_orders', 'action' => 'create'], ['supplier_id' => $a157Supplier, 'warehouse_id' => $a157Warehouse, 'number' => 'A157-PO',
+        'expected_at' => '2030-01-15', 'items' => 'A155-P | 3 | 500']);
+    $a157Po = (string)$a154Pdo->query("SELECT id FROM purchase_orders WHERE number = 'A157-PO'")->fetchColumn();
+    assert_true($a157Group !== '' && $a157Company !== '' && $a157List !== '' && $a157Supplier !== '' && $a157Po !== '',
+        "A15.7 fixture: group/company/price list/supplier/purchase order created ({$a157Group}/{$a157Company}/{$a157List}/{$a157Supplier}/{$a157Po})");
+    $a157Check('A15.7 de: customer groups page is German', $a154Run(['p' => 'customer_groups']),
+        ['Neue Gruppe', 'Rabatt in % (z. B. 7,5)', 'Code (leer = aus dem Namen)', 'Gruppe löschen?', 'Rabatt', 'aktiv', 'A157 Gruppe', 'Speichern']);
+    $a157Check('A15.7 de: customer group edit is German', $a154Run(['p' => 'customer_groups', 'id' => $a157Group]), ['Bearbeiten: A157 Gruppe', 'Neue Gruppe']);
+    $a157Check('A15.7 de: companies page is German', $a154Run(['p' => 'companies']),
+        ['Neue Firma', 'Firmenname', 'Freigabe', 'wartet auf Freigabe', 'Kreditlimit (Cent, 0 = ohne Limit)', 'Zahlungsziel (Tage)', 'Kauf auf Rechnung',
+            'ja, 14 Tage', 'ohne Limit', 'Limit / unbezahlt', 'Firma löschen?', 'A157 GmbH']);
+    $a157Check('A15.7 de: promotions page is German', $a154Run(['p' => 'promotions']),
+        ['Neue Aktion', 'Bereich', 'Katalog (Produktpreis)', 'Warenkorb (Bestellrabatt)', 'Kombinierbarkeit', 'Exklusiv (keine weiteren gelten)',
+            'Bedingungen', 'Rabatt in %', 'Kaufe X, erhalte Y gratis', 'Gültig ab (UTC)', 'Nur für Kundengruppen', 'Gutscheincode (nur Warenkorb)', 'Aktion löschen?', 'A157 Aktion', 'Katalog']);
+    $a157Check('A15.7 de: price lists page is German', $a154Run(['p' => 'price_lists']),
+        ['Neue Preisliste', '— alle Kunden —', 'Priorität (höhere gewinnt)', 'Gültig bis (UTC)', 'Gültigkeit (UTC)', 'Preisliste samt Preisen löschen?', 'A157 Liste', 'alle']);
+    $a157Check('A15.7 de: price list edit is German', $a154Run(['p' => 'price_lists', 'id' => $a157List]),
+        ['Bearbeiten: A157 Liste', 'Preise der Preisliste a157-liste', 'Eine Zeile pro Preis', 'Preise speichern']);
+    $a157Check('A15.7 de: suppliers page is German', $a154Run(['p' => 'suppliers', 'id' => $a157Supplier]),
+        ['Bearbeiten: A157 Lieferant', 'Neuer Lieferant', 'Telefon', 'Angebot des Lieferanten a157-sup', 'Lieferzeit (Tage)', 'Angebot speichern',
+            'Lieferanten samt Angebot löschen?', 'Kontakt']);
+    $a157Check('A15.7 de: purchase orders page is German', $a154Run(['p' => 'purchase_orders']),
+        ['Neue Lieferantenbestellung', 'Lieferant', 'Erwartete Lieferung', 'Nummer (leer = automatisch)', 'Bestellung anlegen', 'Erhalten / bestellt', 'A157-PO', 'bestellt']);
+    $a157Check('A15.7 de: purchase order detail is German', $a154Run(['p' => 'purchase_orders', 'id' => $a157Po]),
+        ['Bestellung beim Lieferanten A157-PO', '→ Lager A154 Warehouse', 'erwartet 2030-01-15', 'Jetzt annehmen', 'Einkaufspreis', 'A155-P annehmen', 'Wareneingang buchen', '← Liste']);
+    $a157Check('A15.7 de: B2B card on the customer detail is German', $a154Run(['p' => 'customer', 'id' => $a156Customer]),
+        ['Kundengruppe', '— keine —', 'Zuordnung speichern', 'A157 Gruppe', 'A157 GmbH']);
+    $a154Run(['p' => 'dashboard', 'lang' => 'en']);
+    $a157Check('A15.7 en: companies page is English', $a154Run(['p' => 'companies']), ['New company', 'Legal name', 'awaiting approval', 'yes, 14 days', 'no limit', 'Delete company?']);
+    $a157Check('A15.7 en: promotions page is English', $a154Run(['p' => 'promotions']), ['New promotion', 'Scope', 'Stacking', 'Conditions', 'Delete promotion?']);
+    $a157Check('A15.7 en: purchase order detail is English', $a154Run(['p' => 'purchase_orders', 'id' => $a157Po]),
+        ['Purchase order A157-PO', 'warehouse ', 'ordered', 'Receive now', 'Post the receipt to stock']);
 } finally {
     putenv('BBE_ADMIN_IDENTITY_KEY');
     $a154Pdo = null;
