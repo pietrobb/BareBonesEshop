@@ -24,6 +24,8 @@ return [
     'promotions' => 'pricing.manage', 'price_lists' => 'pricing.manage',
     'warehouses' => 'import',
     'warehouse'  => 'import',
+    'suppliers'  => 'import',
+    'purchase_orders' => 'import',
     'feeds'      => 'import',
     'feed'       => 'import',
     'shipping'   => 'shipping.manage',

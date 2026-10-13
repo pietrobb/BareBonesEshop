@@ -1781,3 +1781,4 @@ require __DIR__ . '/AuditProductEditorRegression.php';
 require __DIR__ . '/AuditTaxonomyRegression.php';
 require __DIR__ . '/AuditPricingAdminRegression.php';
 require __DIR__ . '/AuditB2bAdminRegression.php';
+require __DIR__ . '/AuditSupplierAdminRegression.php';

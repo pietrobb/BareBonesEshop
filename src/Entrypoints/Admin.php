@@ -7,6 +7,7 @@ require_once __DIR__ . '/Admin/Catalog.php';
 require_once __DIR__ . '/Admin/Orders.php';
 require_once __DIR__ . '/Admin/Customers.php';
 require_once __DIR__ . '/Admin/B2b.php';
+require_once __DIR__ . '/Admin/Suppliers.php';
 require_once __DIR__ . '/Admin/Operations.php';
 require_once __DIR__ . '/Admin/Recovery.php';
 require_once __DIR__ . '/Admin/AdminUsers.php';
@@ -91,6 +92,8 @@ $title = match($page) {
     'price_lists' => 'Cenníky',
     'companies'  => 'B2B firmy',
     'customer_groups' => 'Zákaznícke skupiny',
+    'suppliers'  => 'Dodávatelia',
+    'purchase_orders' => 'Nákupné objednávky',
     'warehouses' => I18n::t('admin.title.warehouses'),
     'warehouse'  => isset($_GET['id']) ? I18n::t('admin.title.warehouse_edit') : I18n::t('admin.title.warehouse_new'),
     'feeds'      => I18n::t('admin.title.feeds'),
@@ -182,6 +185,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
     <?php if (Security::adminCan('categories.edit')): ?><a href="admin.php?p=categories" class="<?= $page==='categories'?'active':'' ?>">Kategórie</a><a href="admin.php?p=brands" class="<?= $page==='brands'?'active':'' ?>">Značky</a><?php endif; ?>
     <?php if (Security::adminCan('pricing.manage')): ?><a href="admin.php?p=promotions" class="<?= $page==='promotions'?'active':'' ?>">Promo akcie</a><a href="admin.php?p=price_lists" class="<?= $page==='price_lists'?'active':'' ?>">Cenníky</a><?php endif; ?>
     <?php if (Security::adminCan('customers.edit')): ?><a href="admin.php?p=companies" class="<?= $page==='companies'?'active':'' ?>">B2B firmy</a><a href="admin.php?p=customer_groups" class="<?= $page==='customer_groups'?'active':'' ?>">Zákaznícke skupiny</a><?php endif; ?>
+    <?php if (Security::adminCan('import')): ?><a href="admin.php?p=suppliers" class="<?= $page==='suppliers'?'active':'' ?>">Dodávatelia</a><a href="admin.php?p=purchase_orders" class="<?= $page==='purchase_orders'?'active':'' ?>">Nákupné objednávky</a><?php endif; ?>
     <?php if (Security::adminCan('import')): ?><a href="admin.php?p=warehouses" class="<?= $page==='warehouses'||$page==='warehouse'?'active':'' ?>"><?= esc(I18n::t('admin.nav.warehouses')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('import')): ?><a href="admin.php?p=feeds" class="<?= $page==='feeds'||$page==='feed'?'active':'' ?>"><?= esc(I18n::t('admin.nav.feeds')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=pages" class="<?= $page==='pages'?'active':'' ?>"><?= esc(I18n::t('admin.nav.cms_pages')) ?></a><?php endif; ?>
@@ -221,6 +225,7 @@ match($page) {
     'brands'     => pageBrands(),
     'promotions' => pagePromotions(), 'price_lists' => pagePriceLists(),
     'companies'  => pageCompanies(), 'customer_groups' => pageCustomerGroups(),
+    'suppliers'  => pageSuppliers(), 'purchase_orders' => pagePurchaseOrders(),
     'warehouses' => pageWarehouses(),
     'warehouse'  => pageWarehouse(),
     'feeds'      => pageFeeds(),
