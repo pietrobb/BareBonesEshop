@@ -116,7 +116,8 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/Shared.php' => ['lines' => 50, 'functions' => 3, 'max_function_lines' => 25, 'coupling' => 0],
     'src/Entrypoints/Storefront.php' => ['lines' => 320, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 10],
     'src/Entrypoints/Storefront/CatalogPages.php' => ['lines' => 560, 'functions' => 12, 'max_function_lines' => 230, 'coupling' => 8],
-    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 240, 'functions' => 4, 'max_function_lines' => 100, 'coupling' => 8],
+    // +2 functions: pending-payment page and the gateway cancel page (P0 2026-10-13 checkout redirect).
+    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 240, 'functions' => 6, 'max_function_lines' => 100, 'coupling' => 8],
     'src/Entrypoints/Storefront/Layout.php' => ['lines' => 620, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 8],
 ];
 $forbiddenDependencies = [

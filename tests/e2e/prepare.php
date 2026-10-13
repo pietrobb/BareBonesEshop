@@ -37,6 +37,8 @@ $config['provider_defaults']['payment'] = 'mock';
 $config['allow_mock_webhook'] = true;
 $config['mock_webhook_secret'] = (string)(getenv('E2E_MOCK_WEBHOOK_SECRET') ?: 'barebones-e2e-webhook-secret-2026');
 $config['mock_result'] = 'success';
+// Card payments leave the shop origin like Stripe Checkout (tests/e2e/mock-gateway.php).
+$config['mock_checkout_url'] = rtrim((string)(getenv('E2E_GATEWAY_URL') ?: 'http://127.0.0.1:8099'), '/') . '/checkout';
 
 if ($driver === 'mysql') {
     $database = (string)(getenv('E2E_DB_NAME') ?: 'barebones_e2e_test');

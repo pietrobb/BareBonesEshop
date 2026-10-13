@@ -531,6 +531,7 @@ $onlineCheckoutShippingSnapshot = json_decode((string)$onlineCheckoutOrder['ship
 assert_equals('packeta', (string)$onlineCheckoutShippingSnapshot['method_code'], 'Shipping UX: api checkout stores selected ShippingService rate snapshot');
 assert_equals((int)$onlineCheckoutShippingSnapshot['price'], (int)$onlineCheckoutOrder['shipping_cost'], 'Shipping UX: api checkout shipping cost matches selected rate snapshot');
 $_POST = [];
+require __DIR__ . '/CheckoutPaymentRedirectRegression.php';
 
 $pdo->exec("UPDATE payment_methods SET active = 0 WHERE code = 'cod'");
 $checkoutDisabledCod = PaymentService::selectMethod('cod', 'SK', 'eur', 2799, 'packeta');

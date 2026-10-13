@@ -12,7 +12,7 @@
  *   PAY_PAYU_POS_ID          — POS identifier (same as client_id usually)
  *   PAY_PAYU_ENV             — 'production' | 'sandbox' (default: sandbox)
  */
-class PayUPayment implements IdempotentRefundAdapter {
+class PayUPayment implements IdempotentRefundAdapter, HostedCheckoutAdapter {
     private string $clientId;
     private string $clientSecret;
     private string $secondKey;
@@ -30,6 +30,13 @@ class PayUPayment implements IdempotentRefundAdapter {
         $this->baseUrl      = $env === 'production'
             ? 'https://secure.payu.com'
             : 'https://secure.snd.payu.com';
+    }
+
+    /** redirectUri is served by the API host; the sandbox pay page lives on merch-prod.snd. */
+    public function redirectOrigins(): array {
+        return $this->baseUrl === 'https://secure.payu.com'
+            ? ['https://secure.payu.com']
+            : ['https://secure.snd.payu.com', 'https://merch-prod.snd.payu.com'];
     }
 
     /**

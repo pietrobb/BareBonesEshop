@@ -31,6 +31,26 @@
   (bb758f1, 7d2c940): inbound dispatch in `redirect.php`, outbound links, 301 from core routes.
 
 ### Fixed
+- **P0: card payment from the HTML checkout was dead since 1.9.0.** CSP `form-action 'self'`
+  also applies to the redirect after a form submit, so the browser silently dropped the 302 to
+  `checkout.stripe.com` ("nothing happens", second click → "cart is empty", pending orders, no payment).
+  - Payment adapters that redirect off-site implement `HostedCheckoutAdapter::redirectOrigins()`
+    (Stripe, PayU sandbox/production, Mock with `mock_checkout_url`); `Security` builds `form-action`
+    from the configured adapters, never hard-coded. A gateway URL outside `form-action` is answered
+    with a clickable payment link instead of a redirect the browser would drop (and logged).
+  - The created-but-unpaid order is remembered in the session (`CheckoutSession::rememberPendingPayment`,
+    23 h): a resubmit continues the same payment (no second order), the empty checkout and the
+    gateway cancel page show "order X awaits payment" + "Pay now" (`storefront/checkout-pending`),
+    never "cart is empty". A declined payment can be retried from `order-done`.
+  - Gateway `cancel_url` is now `/?page=checkout-cancel&order=…`; the old `/checkout/cancel` (in sessions
+    created by earlier versions) is routed to the same page instead of 404.
+  - The submit button is disabled after the first click with "Redirecting to payment…" and re-enabled
+    on `pageshow` (back/forward cache).
+  - Tests: `CheckoutPaymentRedirectRegression` (every hosted adapter origin ∈ form-action; real HTTP
+    checkout → 302 allowed by the page CSP; resubmit/back/cancel/success pages over the fallback router).
+    Browser E2E now clicks the real form and the mock gateway runs on a second origin
+    (`tests/e2e/mock-gateway.php`); a global fixture (`tests/e2e/support.js`) fails any spec on a CSP
+    violation; projects Chromium, WebKit iPhone 13 and Firefox.
 - `redirect.php` answered **405** (`Allow: GET, HEAD`) to every POST on a public alias
   (`/kosik`, `/pokladna`…), because the method check ran before `UrlAliases::dispatch()`. Themes
   whose cart uses a plain `<form method="post" action="{{cart_url}}">` showed a bare 405 page.

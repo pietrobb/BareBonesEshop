@@ -58,9 +58,12 @@ class Security {
         if (!empty($_SERVER['HTTPS'])) {
             header("Strict-Transport-Security: max-age=31536000; includeSubDomains; preload");
         }
+        header('Content-Security-Policy: ' . self::contentSecurityPolicy());
+    }
+
+    public static function contentSecurityPolicy(): string {
         $nonce = self::cspNonce();
-        header("Content-Security-Policy: "
-            . "default-src 'self'; "
+        return "default-src 'self'; "
             . "script-src 'self' 'nonce-$nonce' https://js.stripe.com; "
             . "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             . "font-src 'self' https://fonts.gstatic.com; "
@@ -69,9 +72,56 @@ class Security {
             . "frame-src https://js.stripe.com; "
             . "object-src 'none'; "
             . "base-uri 'self'; "
-            . "form-action 'self'; "
-            . "frame-ancestors 'none';"
-        );
+            . "form-action " . implode(' ', array_merge(["'self'"], self::paymentRedirectOrigins())) . "; "
+            . "frame-ancestors 'none';";
+    }
+
+    /**
+     * Origins the checkout form POST may redirect to, declared by every registered
+     * hosted-checkout payment adapter. Browsers apply form-action to the redirect that
+     * follows a form submission, so a missing origin silently blocks payment
+     * (P0 2026-10-13: card checkout dead since 1.9.0). Any CSP change needs the
+     * browser E2E payment-redirect test in tests/e2e/commerce.spec.js.
+     * @return list<string>
+     */
+    public static function paymentRedirectOrigins(): array {
+        if (!is_file(dirname(__DIR__) . '/config.php')) return [];
+        try {
+            $codes = array_keys(Adapters::registry('payment'));
+        } catch (\Throwable $e) {
+            error_log('CSP payment origins unavailable: ' . $e->getMessage());
+            return [];
+        }
+        $origins = [];
+        foreach ($codes as $code) {
+            try {
+                $adapter = Adapters::provider('payment', (string)$code);
+            } catch (\RuntimeException $e) {
+                continue; // disabled mock provider or a provider whose class is not installed
+            } catch (\Throwable $e) {
+                error_log("CSP payment origins: provider {$code} failed to load: " . $e->getMessage());
+                continue;
+            }
+            if (!$adapter instanceof HostedCheckoutAdapter) continue;
+            foreach ($adapter->redirectOrigins() as $origin) {
+                // https only; plain http just for a loopback test gateway.
+                if (is_string($origin) && preg_match('#^(?:https://[a-z0-9.-]+|http://(?:127\.0\.0\.1|localhost))(?::[0-9]{1,5})?$#i', $origin)) {
+                    $origins[] = strtolower($origin);
+                }
+            }
+        }
+        return array_values(array_unique($origins));
+    }
+
+    /** Whether a redirect answering a same-origin form POST passes this request's form-action. */
+    public static function formActionAllows(string $url): bool {
+        $parts = parse_url($url);
+        if (!is_array($parts)) return false;
+        if (!isset($parts['host'])) return !isset($parts['scheme']) && !str_starts_with($url, '//');
+        $scheme = strtolower((string)($parts['scheme'] ?? ''));
+        $origin = $scheme . '://' . strtolower((string)$parts['host']) . (isset($parts['port']) ? ':' . $parts['port'] : '');
+        $self = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+        return $origin === $self || in_array($origin, self::paymentRedirectOrigins(), true);
     }
 
     // ============================================================

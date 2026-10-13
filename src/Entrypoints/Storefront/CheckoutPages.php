@@ -48,6 +48,16 @@ function renderCheckout(): string {
         ['url' => '', 'label' => $t('checkout_title'), 'current' => true],
     ];
     if (!$cart) {
+        // The order was already created (cart cleared): a resubmit or a return from the
+        // gateway continues that payment instead of reporting an empty cart.
+        $pending = CheckoutSession::pendingPayment();
+        if ($pending) {
+            if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['checkout']) && Security::formActionAllows((string)$pending['url'])) {
+                header('Location: ' . $pending['url']);
+                exit;
+            }
+            return renderPendingPayment($pending, false);
+        }
         return Template::render('storefront/checkout-empty', [
             'breadcrumbs' => $breadcrumbs, 'message' => $t('cart_empty'), 'home_url' => Template::storeUrl('/'), 'continue_label' => $t('continue_shopping'),
         ]);
@@ -82,7 +92,9 @@ function renderCheckout(): string {
         'payment_options' => array_map(static fn(array $method, int $index): array => [
             'code' => (string)$method['code'], 'label' => (string)$method['label'], 'description' => (string)($method['description'] ?: $method['provider']),
             'fee' => (int)$method['fee'] === 0 ? $freeLabel : $price((int)$method['fee']), 'checked' => $index === 0,
+            'online' => !empty($method['requires_online']),
         ], $paymentMethods, array_keys($paymentMethods)),
+        'submitting_label' => $t('checkout_submitting'), 'redirecting_label' => $t('checkout_redirecting'),
         'payment_unavailable' => $paymentMethods ? '' : $t('payment_unavailable'), 'notes_label' => $t('notes'), 'notes_placeholder' => $t('notes_placeholder'),
         'submit_label' => $t('submit_order'), 'your_order_label' => $t('your_order'),
         'items' => array_map(static fn(array $item): array => ['name' => (string)$item['name'], 'quantity' => (int)$item['qty'], 'total' => $price((int)$item['total'])], $cart),
@@ -107,6 +119,13 @@ function processCheckout(): string {
     $input['payment_method'] = Security::clean(is_string($paymentInput) ? $paymentInput : 'cod');
     $result = CheckoutService::execute($input, require dirname(__DIR__, 3) . '/config.php');
     if (!empty($result['success'])) {
+        // A redirect outside form-action is dropped silently by the browser; offer a link instead.
+        $pending = !empty($result['payment_url']) && !Security::formActionAllows((string)$result['payment_url'])
+            ? CheckoutSession::pendingPayment() : null;
+        if ($pending) {
+            error_log('Checkout payment origin missing from CSP form-action: ' . (string)parse_url((string)$result['payment_url'], PHP_URL_HOST));
+            return renderPendingPayment($pending, false);
+        }
         $target = !empty($result['payment_url'])
             ? (string)$result['payment_url']
             : Template::storeUrl('/?page=order-done&order=' . rawurlencode((string)$result['order_number'])
@@ -128,9 +147,18 @@ function renderOrderDone(string $orderNum): string {
     $confirmationToken = Security::clean(is_string($confirmationInput) ? $confirmationInput : '');
     if ($order && !CheckoutSession::verifyConfirmation((int)$order['id'], $confirmationToken, CheckoutSession::browserSessionId())) $order = null;
     $payment = null;
+    $payUrl = '';
     if ($order) {
         $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
         $status = (string)($order['payment_status'] ?? 'pending');
+        // Back from the gateway: a declined payment can be retried; otherwise the payment is
+        // done or being confirmed by the webhook and must not be offered again.
+        $pending = CheckoutSession::pendingPayment();
+        if ($pending && (int)$pending['order_id'] === (int)$order['id'] && $status === 'failed') {
+            $payUrl = (string)$pending['url'];
+        } else {
+            CheckoutSession::forgetPendingPayment((int)$order['id']);
+        }
         $transactions = PaymentService::transactionsForOrder((int)$order['id']);
         $lastTransaction = $transactions ? end($transactions) : null;
         $payment = [
@@ -141,6 +169,30 @@ function renderOrderDone(string $orderNum): string {
     }
     return Template::render('storefront/order-done', [
         'title' => $t('order_sent'), 'order_number_label' => $t('order_num'), 'order_number' => $orderNum,
-        'payment' => $payment, 'email_message' => $t('order_email'), 'home_url' => Template::storeUrl('/'), 'continue_label' => $t('continue_shopping'),
+        'payment' => $payment, 'pay_url' => $payUrl, 'pay_label' => $t('checkout_pay_now'),
+        'email_message' => $t('order_email'), 'home_url' => Template::storeUrl('/'), 'continue_label' => $t('continue_shopping'),
     ]);
+}
+
+/** Created but unpaid order of this browser, with a link back to its hosted payment page. */
+function renderPendingPayment(array $pending, bool $cancelled): string {
+    global $t;
+    return Template::render('storefront/checkout-pending', [
+        'breadcrumbs' => [
+            ['url' => Template::storeUrl('/'), 'label' => $t('home'), 'current' => false],
+            ['url' => '', 'label' => $t('checkout_title'), 'current' => true],
+        ],
+        'cancelled_message' => $cancelled ? $t('checkout_payment_cancelled') : '',
+        'message' => str_replace('{order}', (string)$pending['order_number'], $t('checkout_pending_payment')),
+        'order_number' => (string)$pending['order_number'], 'pay_url' => (string)$pending['url'], 'pay_label' => $t('checkout_pay_now'),
+        'home_url' => Template::storeUrl('/'), 'continue_label' => $t('continue_shopping'),
+    ]);
+}
+
+/** Gateway cancel_url (also served at /checkout/cancel): the order stays and can still be paid. */
+function renderCheckoutCancel(): string {
+    global $t;
+    $pending = CheckoutSession::pendingPayment();
+    if ($pending) return renderPendingPayment($pending, true);
+    return Template::render('storefront/status-message', ['message' => $t('checkout_payment_cancelled')]);
 }

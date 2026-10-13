@@ -1,9 +1,8 @@
-const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { state, adminSignIn } = require('./support');
+const { test, expect, state, adminSignIn } = require('./support');
 
 // The admin catalog forms must open with the stored values and save through admin.php,
 // and an edited "Export CSV" file must import back without touching what it does not change.

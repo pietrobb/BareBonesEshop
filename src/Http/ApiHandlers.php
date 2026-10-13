@@ -732,10 +732,11 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
                     'shipping_cost'  => (int)$order['shipping_cost'],
                     'financial_snapshot_id' => $financialSnapshot['fingerprint'],
                     'success_url'    => $baseUrl . '/?page=order-done&order=' . rawurlencode($order['order_number']) . '&confirmation_token=' . rawurlencode($confirmationToken) . '&session_id={CHECKOUT_SESSION_ID}',
-                    'cancel_url'     => $baseUrl . '/checkout/cancel?order=' . rawurlencode($order['order_number']),
+                    'cancel_url'     => $baseUrl . '/?page=checkout-cancel&order=' . rawurlencode($order['order_number']),
                 ], $payment, $paymentProvider);
                 $result['payment_url'] = $session['url'];
                 $result['session_id'] = $session['session_id'];
+                CheckoutSession::rememberPendingPayment($orderId, (string)$order['order_number'], (string)$session['url'], $confirmationToken);
 
                 // Persist the provider session separately so payment_id may later
                 // be replaced by the payment intent without losing ownership proof.

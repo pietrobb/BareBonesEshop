@@ -1,0 +1,3 @@
+{{> storefront/breadcrumb}}<div class="checkout-pending" role="status" data-pending-order="{{order_number}}">{{#if cancelled_message}}<p>{{cancelled_message}}</p>{{/if}}<p>{{message}}</p>
+<p><a class="btn-checkout" href="{{pay_url}}" data-pending-payment-link>{{pay_label}}</a></p>
+<p><a href="{{home_url}}" style="color:#a82d5c">{{continue_label}}</a></p></div>
