@@ -47,24 +47,39 @@ assert_true(!preg_match('/^#\s*Copy to \.env\b/mi', $a112Env) && str_contains($a
 
 // ESHOP-DESIGN: features that exist are not listed as out of scope.
 $a112Design = str_replace("\r\n", "\n", (string)file_get_contents($a112Root . '/ESHOP-DESIGN.md'));
-assert_true(str_contains($a112Design, "### Vedome MIMO scope V1\n") && str_contains($a112Design, "### V1 (jadro)\n"), 'A11.2 ESHOP-DESIGN: feature matrix sections are present');
+assert_true(str_contains($a112Design, "### Deliberately out of scope for V1\n") && str_contains($a112Design, "### V1 (core)\n"), 'A11.2 ESHOP-DESIGN: feature matrix sections are present');
 $a112OutOfScope = '';
-if (preg_match('/### Vedome MIMO scope V1\n(.*?)\n---/s', $a112Design, $a112Section)) $a112OutOfScope = $a112Section[1];
+if (preg_match('/### Deliberately out of scope for V1\n(.*?)\n---/s', $a112Design, $a112Section)) $a112OutOfScope = $a112Section[1];
 foreach ([
     'Customer accounts' => 'account.php',
     'Reviews' => 'src/Reviews.php',
     'Wishlist' => 'src/Wishlist.php',
     'Live carrier rates' => 'adapters/contrib/HttpShipping.php',
     'Partial shipments' => 'migrations/20260801200000_inventory_ledger_fulfillment.php',
-    '2FA pre admin' => 'src/AdminIdentity.php',
-    'Webhooky (outbound)' => 'src/Outbox.php',
+    '2FA for admin' => 'src/AdminIdentity.php',
+    'Webhooks (outbound)' => 'src/Outbox.php',
     'Multi-warehouse' => 'src/Warehouse.php',
 ] as $a112Feature => $a112Evidence) {
     assert_true(is_file($a112Root . '/' . $a112Evidence), "A11.2 evidence for {$a112Feature} exists ({$a112Evidence})");
     assert_true(!str_contains($a112OutOfScope, '| ' . $a112Feature), "A11.2 ESHOP-DESIGN: shipped feature '{$a112Feature}' is not listed as out of scope");
 }
-$a112Matrix = preg_match('/### V1 \(jadro\)\n(.*?)\n### /s', $a112Design, $a112M) ? $a112M[1] : '';
-assert_true(!str_contains($a112Matrix, '| Grouped/Bundle | Áno | V2 |') && !str_contains($a112Matrix, 'Bez partial shipments') && !str_contains($a112Matrix, 'Bez live carrier rates'), 'A11.2 ESHOP-DESIGN: V1 matrix does not deny bundles, partial shipments or carrier rates');
+$a112Matrix = preg_match('/### V1 \(core\)\n(.*?)\n### /s', $a112Design, $a112M) ? $a112M[1] : '';
+assert_true(!str_contains($a112Matrix, '| Grouped/Bundle | Yes | V2 |') && !str_contains($a112Matrix, 'No partial shipments') && !str_contains($a112Matrix, 'No live carrier rates'), 'A11.2 ESHOP-DESIGN: V1 matrix does not deny bundles, partial shipments or carrier rates');
+
+// A16.3 / usability 10: the design documentation is in English. Slovak may appear only as data inside code
+// (fenced blocks, inline code), e.g. a translated product name in a JSON example.
+$a163Slovak = [];
+foreach (array_merge(['ESHOP-DESIGN.md', 'README.md'], array_map(static fn(string $p): string => substr($p, strlen($a112Root) + 1),
+    array_merge(glob($a112Root . '/docs/*.md') ?: [], glob($a112Root . '/docs/design/*.md') ?: []))) as $a163Doc) {
+    $a163Fenced = false;
+    foreach (explode("\n", str_replace("\r\n", "\n", (string)file_get_contents($a112Root . '/' . $a163Doc))) as $a163No => $a163Line) {
+        if (preg_match('/^\s*(```|~~~)/', $a163Line)) { $a163Fenced = !$a163Fenced; continue; }
+        if ($a163Fenced) continue;
+        $a163Prose = preg_replace('/`[^`]*`/', '', $a163Line);
+        if (preg_match('/[áäčďéíĺľňóôŕšťúýžěřů]/iu', $a163Prose)) $a163Slovak[] = $a163Doc . ':' . ($a163No + 1);
+    }
+}
+assert_equals([], array_slice($a163Slovak, 0, 10), 'A16.3 design docs: no Slovak prose outside code (' . count($a163Slovak) . ' lines)');
 
 // PaymentAdapter: every adapter named in its contract or in the config examples exists.
 $a112Named = [];

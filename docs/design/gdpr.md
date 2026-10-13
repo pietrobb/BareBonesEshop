@@ -76,7 +76,7 @@ CREATE TABLE cookie_consent (
 
 ### Customer-facing
 - `account.php?p=data-export` — logged-in only.
-- Button "Stiahnuť moje údaje" → POST → server runs `GdprService::exportCustomer($customerId)` → returns JSON download (`gdpr-export-{customerId}-{date}.json`).
+- Button "Download my data" (Slovak UI: `Stiahnuť moje údaje`) → POST → server runs `GdprService::exportCustomer($customerId)` → returns JSON download (`gdpr-export-{customerId}-{date}.json`).
 - Rate limit: 1 export per 24 h (per Art. 12(5) — "manifestly excessive").
 - Audit row in `gdpr_events` (action=`export`).
 
@@ -105,7 +105,7 @@ Payment data: only provider+ref+amount+status (no `raw_response` — may leak ga
 Two-tier strategy because of Art. 17(3)(b) (legal retention overrides erasure):
 
 ### Tier A — soft anonymization (DEFAULT)
-Triggered by `account.php` "Zmazať môj účet" or `admin.php` "Anonymize". Effect:
+Triggered by `account.php` "Delete my account" (Slovak UI: `Zmazať môj účet`) or `admin.php` "Anonymize". Effect:
 
 | Table | Action |
 |---|---|
@@ -124,7 +124,7 @@ Triggered by `account.php` "Zmazať môj účet" or `admin.php` "Anonymize". Eff
 Only via admin CLI `cli/gdpr-purge.php --customer-id=N --confirm` after legal retention expires (10y for orders/invoices). Logs to `gdpr_events`. Confirmation required + `--confirm` flag.
 
 ### Invoice-PDF question (operator's open Q)
-**Decision:** PDF files **kept as-is** for legal retention. Tax authorities require original-form invoice (SK Act 431/2002). Customer name in PDF is mandatory for invoice validity. **Anonymisation of PDF would void it as accounting evidence**. Privacy policy will explicitly state "Faktúry obsahujúce vaše meno a adresu uchovávame 10 rokov podľa zákona o účtovníctve, aj po žiadosti o vymazanie".
+**Decision:** PDF files **kept as-is** for legal retention. Tax authorities require original-form invoice (SK Act 431/2002). Customer name in PDF is mandatory for invoice validity. **Anonymisation of PDF would void it as accounting evidence**. Privacy policy will explicitly state "We keep invoices containing your name and address for 10 years under the Accounting Act, even after an erasure request".
 
 ---
 
@@ -219,7 +219,7 @@ Footer link block in `index.php` layout.
 }
 ```
 
-Privacy template renders this list under "Príjemcovia / sub-processors".
+Privacy template renders this list under "Recipients / sub-processors".
 
 ---
 
@@ -240,9 +240,9 @@ Action items:
 - SQLite file lives behind `/storage/` (already mimo webroot, blocked by web server).
 - App-level AES on `phone`/`address` would break order search/filtering and admin UX significantly.
 - Threat model: attacker with FS access → app secrets are also on disk (`config.php`, `.env`) → encryption key is compromised → no real protection.
-- Real protection = disk encryption (LUKS / BitLocker) at infra layer. Document this in `docs/deploy/runbook.md` (separate misión).
+- Real protection = disk encryption (LUKS / BitLocker) at infra layer. Document this in `docs/deploy/runbook.md` (separate mission).
 
-Privacy policy will state: *"Údaje sú uchovávané v relačnej databáze chránenej prístupovými právami operačného systému a šifrovaním na úrovni úložiska poskytovateľa hostingu."*
+Privacy policy will state: *"Data is kept in a relational database protected by operating system access rights and by storage-level encryption of the hosting provider."*
 
 ---
 
@@ -281,5 +281,5 @@ Granular commits in this order:
 - DPIA (Data Protection Impact Assessment) document — needed only when high-risk processing introduced.
 - DPO appointment — only required when ≥250 employees or core activities = systematic monitoring. Probably not needed; doc this.
 - Cross-border transfer SCCs — implicit when using AWS/Stripe; processors.json links cover it.
-- Encryption-at-rest with SQLCipher — separate misión if hosting tier requires it.
+- Encryption-at-rest with SQLCipher — separate mission if hosting tier requires it.
 - Automated breach notification workflow (Art. 33) — manual procedure documented in deploy runbook is enough for v1.
