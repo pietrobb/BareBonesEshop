@@ -95,7 +95,7 @@ function pageCustomerDetail(): void {
         <p class="muted" style="margin-top:1rem">Účet bol anonymizovaný (GDPR) — bez ďalších akcií.</p>
         <?php endif; ?>
     </div>
-
+    <?php b2bCustomerCard((int)$c['id']); ?>
     <div class="card">
         <h3>Adresy (<?= count($addresses) ?>)</h3>
         <?php if (!$addresses): ?>

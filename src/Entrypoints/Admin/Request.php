@@ -21,6 +21,8 @@ function handlePost(string $page, string $action): void {
         'price_lists:save' => handlePriceListSave(),
         'price_lists:prices' => handlePriceListPrices(),
         'price_lists:delete' => handlePriceListDelete(),
+        'customer_groups:save' => handleCustomerGroupSave(), 'customer_groups:delete' => handleCustomerGroupDelete(),
+        'companies:save' => handleCompanySave(), 'companies:delete' => handleCompanyDelete(), 'customer:b2b' => handleCustomerB2b(),
         'order:status'   => handleOrderStatus(),
         'order:payment_transition' => handleOrderPaymentTransition(),
         'order:refund_request' => handleOrderRefundRequest(),

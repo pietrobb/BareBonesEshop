@@ -6,6 +6,7 @@ require_once __DIR__ . '/Admin/Shared.php';
 require_once __DIR__ . '/Admin/Catalog.php';
 require_once __DIR__ . '/Admin/Orders.php';
 require_once __DIR__ . '/Admin/Customers.php';
+require_once __DIR__ . '/Admin/B2b.php';
 require_once __DIR__ . '/Admin/Operations.php';
 require_once __DIR__ . '/Admin/Recovery.php';
 require_once __DIR__ . '/Admin/AdminUsers.php';
@@ -50,41 +51,7 @@ if ($page === 'products' && $action === 'export' && ($_SERVER['REQUEST_METHOD'] 
 }
 
 // Role-based permission map
-$pagePermissions = [
-    'dashboard'  => 'reports.view',
-    'sales'      => 'orders.view',
-    'products'   => 'products.view',
-    'product'    => 'products.edit',
-    'orders'     => 'orders.view',
-    'order'      => 'orders.view',
-    'awaiting_payment' => 'orders.view',
-    'abandoned_carts' => 'orders.view',
-    'invoice_pdf' => 'orders.view',
-    'import'     => 'import',
-    'cache'      => 'cache',
-    'audit'      => 'reports.view',
-    'gdpr'       => 'gdpr.view',
-    'pages'      => 'products.edit',
-    'page_edit'  => 'products.edit',
-    'content'    => 'products.edit',
-    'attributes' => 'products.edit',
-    'attribute'  => 'products.edit',
-    'categories' => 'categories.edit',
-    'brands'     => 'categories.edit',
-    'promotions' => 'pricing.manage', 'price_lists' => 'pricing.manage',
-    'warehouses' => 'import',
-    'warehouse'  => 'import',
-    'feeds'      => 'import',
-    'feed'       => 'import',
-    'shipping'   => 'shipping.manage',
-    'payments'   => 'payments.manage',
-    'digital_assets' => 'products.edit',
-    'reviews'    => 'products.edit',
-    'rma'        => 'rma.manage',
-    'customers'  => 'customers.view',
-    'customer'   => 'customers.view',
-    'admin_users' => 'admins.manage',
-];
+$pagePermissions = require __DIR__ . '/Admin/Permissions.php';
 $requiredPerm = $pagePermissions[$page] ?? 'reports.view';
 Security::adminRequire($requiredPerm);
 
@@ -122,6 +89,8 @@ $title = match($page) {
     'brands'     => 'Značky',
     'promotions' => 'Promo akcie a kupóny',
     'price_lists' => 'Cenníky',
+    'companies'  => 'B2B firmy',
+    'customer_groups' => 'Zákaznícke skupiny',
     'warehouses' => I18n::t('admin.title.warehouses'),
     'warehouse'  => isset($_GET['id']) ? I18n::t('admin.title.warehouse_edit') : I18n::t('admin.title.warehouse_new'),
     'feeds'      => I18n::t('admin.title.feeds'),
@@ -212,6 +181,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=attributes" class="<?= $page==='attributes'||$page==='attribute'?'active':'' ?>"><?= esc(I18n::t('admin.nav.attributes')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('categories.edit')): ?><a href="admin.php?p=categories" class="<?= $page==='categories'?'active':'' ?>">Kategórie</a><a href="admin.php?p=brands" class="<?= $page==='brands'?'active':'' ?>">Značky</a><?php endif; ?>
     <?php if (Security::adminCan('pricing.manage')): ?><a href="admin.php?p=promotions" class="<?= $page==='promotions'?'active':'' ?>">Promo akcie</a><a href="admin.php?p=price_lists" class="<?= $page==='price_lists'?'active':'' ?>">Cenníky</a><?php endif; ?>
+    <?php if (Security::adminCan('customers.edit')): ?><a href="admin.php?p=companies" class="<?= $page==='companies'?'active':'' ?>">B2B firmy</a><a href="admin.php?p=customer_groups" class="<?= $page==='customer_groups'?'active':'' ?>">Zákaznícke skupiny</a><?php endif; ?>
     <?php if (Security::adminCan('import')): ?><a href="admin.php?p=warehouses" class="<?= $page==='warehouses'||$page==='warehouse'?'active':'' ?>"><?= esc(I18n::t('admin.nav.warehouses')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('import')): ?><a href="admin.php?p=feeds" class="<?= $page==='feeds'||$page==='feed'?'active':'' ?>"><?= esc(I18n::t('admin.nav.feeds')) ?></a><?php endif; ?>
     <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=pages" class="<?= $page==='pages'?'active':'' ?>"><?= esc(I18n::t('admin.nav.cms_pages')) ?></a><?php endif; ?>
@@ -250,6 +220,7 @@ match($page) {
     'categories' => pageCategories(),
     'brands'     => pageBrands(),
     'promotions' => pagePromotions(), 'price_lists' => pagePriceLists(),
+    'companies'  => pageCompanies(), 'customer_groups' => pageCustomerGroups(),
     'warehouses' => pageWarehouses(),
     'warehouse'  => pageWarehouse(),
     'feeds'      => pageFeeds(),

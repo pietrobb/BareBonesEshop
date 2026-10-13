@@ -606,6 +606,11 @@ class Customers {
 
         $creditLimit = max(0, (int)($profile['credit_limit'] ?? 0));
         if ($creditLimit === 0) return true;
+        return self::companyOpenTotal((int)$profile['company_id']) + $amount <= $creditLimit;
+    }
+
+    /** Total of the company members' orders in this store that are neither cancelled nor settled (credit exposure). */
+    public static function companyOpenTotal(int $companyId): int {
         $stmt = Db::get()->prepare("SELECT COALESCE(SUM(o.total), 0)
             FROM orders o
             JOIN customers c ON c.id = o.customer_id AND c.store_id = o.store_id
@@ -614,9 +619,9 @@ class Customers {
               AND COALESCE(o.payment_status, 'pending') NOT IN ('paid', 'refunded', 'cancelled', 'failed')");
         $stmt->execute([
             ':store' => StoreContext::current()->id(),
-            ':company' => (int)$profile['company_id'],
+            ':company' => $companyId,
         ]);
-        return (int)$stmt->fetchColumn() + $amount <= $creditLimit;
+        return (int)$stmt->fetchColumn();
     }
 
     // ============================================================
