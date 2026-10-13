@@ -82,35 +82,37 @@ $title = match($page) {
     'product'    => isset($_GET['id']) ? I18n::t('admin.title.product_edit') : I18n::t('admin.title.product_new'),
     'orders'     => I18n::t('admin.title.orders'),
     'order'      => I18n::t('admin.title.order_detail'),
-    'awaiting_payment' => 'Čaká na platbu',
-    'abandoned_carts' => 'Opustené košíky',
+    'awaiting_payment' => I18n::t('admin.title.awaiting_payment'),
+    'abandoned_carts' => I18n::t('admin.title.abandoned_carts'),
     'import'     => I18n::t('admin.title.import'),
     'cache'      => I18n::t('admin.title.cache'),
     'audit'      => I18n::t('admin.title.audit_log'),
     'gdpr'       => I18n::t('admin.title.gdpr'),
     'pages'      => I18n::t('admin.title.cms_pages'),
     'page_edit'  => I18n::t('admin.title.cms_page_edit'),
-    'content'    => 'Content & Marketing',
+    'content'    => I18n::t('admin.title.content'),
     'attributes' => I18n::t('admin.title.attributes'),
     'attribute'  => isset($_GET['id']) ? I18n::t('admin.title.attribute_edit') : I18n::t('admin.title.attribute_new'),
-    'categories' => 'Kategórie',
-    'brands'     => 'Značky',
-    'promotions' => 'Promo akcie a kupóny',
-    'price_lists' => 'Cenníky',
-    'companies'  => 'B2B firmy',
-    'customer_groups' => 'Zákaznícke skupiny',
-    'suppliers'  => 'Dodávatelia',
-    'purchase_orders' => 'Nákupné objednávky',
+    'categories' => I18n::t('admin.title.categories'),
+    'brands'     => I18n::t('admin.title.brands'),
+    'promotions' => I18n::t('admin.title.promotions'),
+    'price_lists' => I18n::t('admin.title.price_lists'),
+    'companies'  => I18n::t('admin.title.companies'),
+    'customer_groups' => I18n::t('admin.title.customer_groups'),
+    'suppliers'  => I18n::t('admin.title.suppliers'),
+    'purchase_orders' => I18n::t('admin.title.purchase_orders'),
     'warehouses' => I18n::t('admin.title.warehouses'),
     'warehouse'  => isset($_GET['id']) ? I18n::t('admin.title.warehouse_edit') : I18n::t('admin.title.warehouse_new'),
     'feeds'      => I18n::t('admin.title.feeds'),
     'feed'       => isset($_GET['id']) ? I18n::t('admin.title.feed_edit') : I18n::t('admin.title.feed_new'),
-    'shipping'   => 'Doprava',
-    'payments'   => 'Platby',
-    'digital_assets' => 'Digitálne súbory',
-    'customers'  => 'Zákazníci',
-    'customer'   => 'Zákazník',
+    'shipping'   => I18n::t('admin.title.shipping'),
+    'payments'   => I18n::t('admin.title.payments'),
+    'digital_assets' => I18n::t('admin.title.digital_assets'),
+    'customers'  => I18n::t('admin.title.customers'),
+    'customer'   => I18n::t('admin.title.customer'),
     'admin_users' => I18n::t('admin.title.admin_users'),
+    'reviews'    => I18n::t('admin.title.reviews'),
+    'rma'        => I18n::t('admin.title.rma'),
     default      => I18n::t('admin.title.default'),
 };
 
@@ -173,7 +175,7 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
     <div style="padding:0.3rem 1rem;font-size:0.75rem;color:#94a3b8;margin-bottom:0.5rem"><?= esc(Security::adminUser()) ?> (<?= esc(Security::adminRole()) ?>)</div>
     <form method="post" action="admin.php" style="padding:0 1rem .5rem">
         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-        <button class="btn btn-sm" type="submit" name="admin_logout" value="1">Sign out</button>
+        <button class="btn btn-sm" type="submit" name="admin_logout" value="1"><?= esc(I18n::t('admin.sign_out')) ?></button>
     </form>
     <?php renderStoreSwitcher($adminStores, $storesCfg, $page); ?>
     <div style="padding:0.3rem 1rem;font-size:0.75rem;color:#94a3b8;margin-bottom:0.5rem">
@@ -183,33 +185,9 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
             <a href="admin.php?<?= esc($qs) ?>" style="<?= $lc===$adminLocale?'color:#fff;font-weight:600':'color:#94a3b8' ?>"><?= strtoupper(esc($lc)) ?></a>
         <?php endforeach; ?>
     </div>
-    <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=dashboard" class="<?= $page==='dashboard'?'active':'' ?>"><?= esc(I18n::t('admin.nav.dashboard')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=sales" class="<?= $page==='sales'?'active':'' ?>"><?= esc(I18n::t('admin.nav.sales')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=reports" class="<?= $page==='reports'?'active':'' ?>"><?= esc(I18n::t('admin.nav.reports')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('products.view')): ?><a href="admin.php?p=products" class="<?= $page==='products'?'active':'' ?>"><?= esc(I18n::t('admin.nav.products')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=orders" class="<?= $page==='orders'?'active':'' ?>"><?= esc(I18n::t('admin.nav.orders')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=awaiting_payment" class="<?= $page==='awaiting_payment'?'active':'' ?>">Čaká na platbu</a><?php endif; ?>
-    <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=abandoned_carts" class="<?= $page==='abandoned_carts'?'active':'' ?>">Opustené košíky</a><?php endif; ?>
-    <?php if (Security::adminCan('import')): ?><a href="admin.php?p=import" class="<?= $page==='import'?'active':'' ?>"><?= esc(I18n::t('admin.nav.import_csv')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('cache')): ?><a href="admin.php?p=cache" class="<?= $page==='cache'?'active':'' ?>"><?= esc(I18n::t('admin.nav.cache')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=attributes" class="<?= $page==='attributes'||$page==='attribute'?'active':'' ?>"><?= esc(I18n::t('admin.nav.attributes')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('categories.edit')): ?><a href="admin.php?p=categories" class="<?= $page==='categories'?'active':'' ?>">Kategórie</a><a href="admin.php?p=brands" class="<?= $page==='brands'?'active':'' ?>">Značky</a><?php endif; ?>
-    <?php if (Security::adminCan('pricing.manage')): ?><a href="admin.php?p=promotions" class="<?= $page==='promotions'?'active':'' ?>">Promo akcie</a><a href="admin.php?p=price_lists" class="<?= $page==='price_lists'?'active':'' ?>">Cenníky</a><?php endif; ?>
-    <?php if (Security::adminCan('customers.edit')): ?><a href="admin.php?p=companies" class="<?= $page==='companies'?'active':'' ?>">B2B firmy</a><a href="admin.php?p=customer_groups" class="<?= $page==='customer_groups'?'active':'' ?>">Zákaznícke skupiny</a><?php endif; ?>
-    <?php if (Security::adminCan('import')): ?><a href="admin.php?p=suppliers" class="<?= $page==='suppliers'?'active':'' ?>">Dodávatelia</a><a href="admin.php?p=purchase_orders" class="<?= $page==='purchase_orders'?'active':'' ?>">Nákupné objednávky</a><?php endif; ?>
-    <?php if (Security::adminCan('import')): ?><a href="admin.php?p=warehouses" class="<?= $page==='warehouses'||$page==='warehouse'?'active':'' ?>"><?= esc(I18n::t('admin.nav.warehouses')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('import')): ?><a href="admin.php?p=feeds" class="<?= $page==='feeds'||$page==='feed'?'active':'' ?>"><?= esc(I18n::t('admin.nav.feeds')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=pages" class="<?= $page==='pages'?'active':'' ?>"><?= esc(I18n::t('admin.nav.cms_pages')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=content" class="<?= $page==='content'?'active':'' ?>">Content & Marketing</a><?php endif; ?>
-    <?php if (Security::adminCan('shipping.manage')): ?><a href="admin.php?p=shipping" class="<?= $page==='shipping'?'active':'' ?>">Doprava</a><?php endif; ?>
-    <?php if (Security::adminCan('payments.manage')): ?><a href="admin.php?p=payments" class="<?= $page==='payments'?'active':'' ?>">Platby</a><?php endif; ?>
-    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=digital_assets" class="<?= $page==='digital_assets'?'active':'' ?>">Digitálne súbory</a><?php endif; ?>
-    <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=audit" class="<?= $page==='audit'?'active':'' ?>"><?= esc(I18n::t('admin.nav.audit')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('gdpr.view')): ?><a href="admin.php?p=gdpr" class="<?= $page==='gdpr'?'active':'' ?>"><?= esc(I18n::t('admin.nav.gdpr')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=reviews" class="<?= $page==='reviews'?'active':'' ?>">Recenzie</a><?php endif; ?>
-    <?php if (Security::adminCan('rma.manage')): ?><a href="admin.php?p=rma" class="<?= $page==='rma'?'active':'' ?>">Reklamácie</a><?php endif; ?>
-    <?php if (Security::adminCan('customers.view')): ?><a href="admin.php?p=customers" class="<?= $page==='customers'||$page==='customer'?'active':'' ?>">Zákazníci</a><?php endif; ?>
-    <?php if (Security::adminCan('admins.manage')): ?><a href="admin.php?p=admin_users" class="<?= $page==='admin_users'?'active':'' ?>"><?= esc(I18n::t('admin.title.admin_users')) ?></a><?php endif; ?>
+    <?php foreach (require __DIR__ . '/Admin/Navigation.php' as [$navPage, $navPerm, $navKey, $navAlso]): if (!Security::adminCan($navPerm)) continue; ?>
+    <a href="admin.php?p=<?= esc($navPage) ?>" class="<?= $page === $navPage || in_array($page, $navAlso, true) ? 'active' : '' ?>"><?= esc(I18n::t($navKey)) ?></a>
+    <?php endforeach; ?>
 </nav>
 <main>
 <?php flash(); ?>
