@@ -10,4 +10,14 @@
 {{/each}}
 </table>
 <p><strong>Gesamt: {{order_total}}</strong></p>
+{{#if bank_transfer}}<h3>Zahlung per Banküberweisung</h3>
+<p>Wir versenden die Bestellung nach Zahlungseingang. Verwenden Sie genau diesen Betrag und dieses Zahlungssymbol.</p>
+<table style="border-collapse:collapse">
+<tr><td style="padding:2px 12px 2px 0;color:#555">Empfänger</td><td>{{bank_beneficiary}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">IBAN</td><td><strong>{{bank_iban}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Betrag</td><td><strong>{{bank_amount}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Variables Symbol</td><td><strong>{{bank_vs}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Verwendungszweck</td><td>{{bank_message}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Fällig am</td><td>{{bank_due_date}}</td></tr>
+</table>{{/if}}
 </body></html>

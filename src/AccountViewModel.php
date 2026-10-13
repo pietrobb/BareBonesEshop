@@ -167,6 +167,7 @@ final class AccountViewModel
                 'number' => (string)$invoice['number'],
                 'url' => Template::storeUrl('/account.php?p=invoice&token=' . rawurlencode((string)$invoice['download_token'])),
             ] : null,
+            'bank_transfer_html' => BankTransferInstructions::html($order),
             'orders_url' => Template::storeUrl('/account.php?p=orders'),
             'cart_url' => Template::storeUrl('/?page=cart'),
         ];

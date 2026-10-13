@@ -129,6 +129,15 @@ order address and printed on the invoice; a VIES-valid VAT ID from another EU
 member state makes the order reverse charge. A B2B member's form starts with the
 company's legal name, registration number and VAT ID.
 
+An unpaid bank-transfer order shows payment instructions on the order-done page, in
+the customer's order detail and in the order confirmation e-mail, and returns them as
+`bank_transfer` in the JSON checkout response: beneficiary, IBAN, BIC, exact amount,
+variable symbol (the order ID, also shown in admin *Awaiting payment*), message and
+due date. The account comes from `legal.name`, `legal.iban`, `legal.bic` and the
+optional `legal.bank` of the store in `stores.json`; without a valid IBAN no
+instructions are shown. EUR orders also get a PAY by square QR code, generated
+locally as an inline SVG.
+
 ---
 
 ## External API v1 and event webhooks

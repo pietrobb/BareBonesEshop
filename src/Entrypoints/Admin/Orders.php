@@ -282,6 +282,9 @@ function pageOrder(): void {
             <p class="muted">Konečný stav — žiadne ďalšie prechody.</p>
             <?php endif; ?>
             <p class="muted" style="margin-top:.5rem">Payment method: <?= esc((string)($paymentSnapshot['label'] ?? $order['payment_method'])) ?> <span class="muted"><?= esc((string)($paymentSnapshot['code'] ?? $order['payment_method'])) ?><?= !empty($paymentSnapshot['provider']) ? ' · ' . esc((string)$paymentSnapshot['provider']) : '' ?></span></p>
+            <?php if ((string)($paymentSnapshot['service_type'] ?? $order['payment_method']) === 'bank_transfer'): ?>
+            <p class="muted">Variabilný symbol prevodu: <strong data-variable-symbol><?= esc(BankTransferInstructions::variableSymbol($order)) ?></strong></p>
+            <?php endif; ?>
             <p class="muted">Payment reference: <?= $order['payment_id'] ? esc($order['payment_id']) : '—' ?></p>
             <p class="muted">Payment status: <span class="badge badge-<?= esc($order['payment_status'] ?? 'pending') ?>"><?= esc($order['payment_status'] ?? 'pending') ?></span><?= $latestPaymentTx ? ' · Last event: ' . esc((string)$latestPaymentTx['status']) . ' @ ' . esc(substr((string)$latestPaymentTx['created_at'], 0, 16)) : '' ?></p>
             <?php if (!empty($paymentTransitions)): ?>

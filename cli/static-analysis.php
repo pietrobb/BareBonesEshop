@@ -114,14 +114,16 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 160, 'functions' => 4, 'max_function_lines' => 60, 'coupling' => 3],
     'src/Entrypoints/Admin/Customers.php' => ['lines' => 300, 'functions' => 6, 'max_function_lines' => 140, 'coupling' => 8],
     'src/Entrypoints/Admin/Operations.php' => ['lines' => 760, 'functions' => 36, 'max_function_lines' => 180, 'coupling' => 18],
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 850, 'functions' => 14, 'max_function_lines' => 300, 'coupling' => 15],
+    // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 850, 'functions' => 14, 'max_function_lines' => 300, 'coupling' => 16],
     'src/Entrypoints/Admin/Recovery.php' => ['lines' => 300, 'functions' => 6, 'max_function_lines' => 90, 'coupling' => 8],
     'src/Entrypoints/Admin/Request.php' => ['lines' => 80, 'functions' => 1, 'max_function_lines' => 70, 'coupling' => 2],
     'src/Entrypoints/Admin/Shared.php' => ['lines' => 50, 'functions' => 3, 'max_function_lines' => 25, 'coupling' => 0],
     'src/Entrypoints/Storefront.php' => ['lines' => 320, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 10],
     'src/Entrypoints/Storefront/CatalogPages.php' => ['lines' => 560, 'functions' => 12, 'max_function_lines' => 230, 'coupling' => 8],
     // +2 functions: pending-payment page and the gateway cancel page (P0 2026-10-13 checkout redirect).
-    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 240, 'functions' => 6, 'max_function_lines' => 100, 'coupling' => 8],
+    // +1 coupling: BankTransferInstructions renders the IBAN / variable symbol / PAY by square block on order-done (A13.6).
+    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 240, 'functions' => 6, 'max_function_lines' => 100, 'coupling' => 9],
     'src/Entrypoints/Storefront/Layout.php' => ['lines' => 620, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 8],
 ];
 $forbiddenDependencies = [

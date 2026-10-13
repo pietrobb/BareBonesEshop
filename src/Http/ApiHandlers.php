@@ -746,6 +746,8 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
             'total'        => (int)$order['total'],
             'confirmation_token' => $confirmationToken,
         ];
+        $bankTransfer = BankTransferInstructions::forApi($order);
+        if ($bankTransfer !== null) $result['bank_transfer'] = $bankTransfer;
 
         // For online payments, create a payment session
         if (!empty($selectedPayment['requires_online'])) {

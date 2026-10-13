@@ -388,6 +388,7 @@ function handleEmailSend(array $payload, array $job): void {
                 'carrier'        => $order['carrier'] ?? '',
                 'tracking_number'=> $order['tracking_number'] ?? '',
             ]);
+            if ($template === 'order_confirmation') $vars = array_merge($vars, BankTransferInstructions::mailVars($order));
             $items = Orders::items((int)$orderId);
             $vars['items'] = array_map(fn($it) => [
                 'name'       => $it['name'],

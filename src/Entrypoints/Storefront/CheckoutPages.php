@@ -205,6 +205,7 @@ function renderOrderDone(string $orderNum): string {
     return Template::render('storefront/order-done', [
         'title' => $t('order_sent'), 'order_number_label' => $t('order_num'), 'order_number' => $orderNum,
         'payment' => $payment, 'pay_url' => $payUrl, 'pay_label' => $t('checkout_pay_now'),
+        'bank_transfer_html' => $order ? BankTransferInstructions::html($order) : '',
         'email_message' => $t('order_email'), 'home_url' => Template::storeUrl('/'), 'continue_label' => $t('continue_shopping'),
     ]);
 }

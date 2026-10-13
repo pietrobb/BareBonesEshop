@@ -10,5 +10,15 @@
 {{/each}}
 </table>
 <p><strong>Celkem: {{order_total}}</strong></p>
+{{#if bank_transfer}}<h3>Platba bankovním převodem</h3>
+<p>Objednávku vyřídíme po připsání platby. Zadejte přesně tuto částku a variabilní symbol.</p>
+<table style="border-collapse:collapse">
+<tr><td style="padding:2px 12px 2px 0;color:#555">Příjemce</td><td>{{bank_beneficiary}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">IBAN</td><td><strong>{{bank_iban}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Částka</td><td><strong>{{bank_amount}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Variabilní symbol</td><td><strong>{{bank_vs}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Zpráva pro příjemce</td><td>{{bank_message}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Splatnost</td><td>{{bank_due_date}}</td></tr>
+</table>{{/if}}
 {{#if tracking_url}}<p>Sledovat zásilku: <a href="{{tracking_url}}">{{tracking_url}}</a></p>{{/if}}
 </body></html>

@@ -11,11 +11,12 @@ function pageAwaitingPayment(): void {
         <p class="muted">Žiadne nezaplatené prevody.</p>
         <?php else: ?>
         <table>
-            <tr><th>Objednávka</th><th>Zákazník</th><th>Suma</th><th>Platba</th><th>Vytvorená</th><th>Vek</th><th></th></tr>
+            <tr><th>Objednávka</th><th>Variabilný symbol</th><th>Zákazník</th><th>Suma</th><th>Platba</th><th>Vytvorená</th><th>Vek</th><th></th></tr>
             <?php foreach ($orders as $o): ?>
             <?php $age = (int)$o['age_hours']; ?>
             <tr>
                 <td><a href="admin.php?p=order&id=<?= (int)$o['id'] ?>"><?= esc($o['order_number']) ?></a></td>
+                <td data-variable-symbol><?= esc(BankTransferInstructions::variableSymbol($o)) ?></td>
                 <td><?= esc($o['customer_name']) ?><br><span class="muted"><?= esc($o['customer_email']) ?></span></td>
                 <td><?= I18n::price((int)$o['total'], $o['currency']) ?></td>
                 <td class="muted"><?= esc($o['payment_label']) ?></td>
