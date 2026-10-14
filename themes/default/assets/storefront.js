@@ -127,6 +127,8 @@
       updateCheckoutTotal(shippingPrice, 0, subtotal);
       return;
     }
+    const previous = box.querySelector('input[name="payment"]:checked');
+    const previousCode = previous ? previous.value : '';
     box.innerHTML = `<div class="payment-loading">${escapeHtml(text.paymentLoading)}</div>`;
     const params = new URLSearchParams({
       action: 'payment_methods', country: country.value, currency: config.currency,
@@ -141,15 +143,16 @@
       return;
     }
     box.innerHTML = '';
+    const selectedIndex = Math.max(0, methods.findIndex((method) => (method.code || '') === previousCode));
     methods.forEach((method, index) => {
       const label = document.createElement('label');
       label.className = 'payment-option';
       const fee = parseInt(method.fee || 0, 10);
-      label.innerHTML = `<span><input type="radio" name="payment" value="${escapeHtml(method.code || '')}" ${index === 0 ? 'checked' : ''}> ${escapeHtml(method.label || method.code || '')}<small>${escapeHtml(method.description || method.provider || '')}</small></span><strong>${fee === 0 ? escapeHtml(text.free) : formatCents(fee)}</strong>`;
+      label.innerHTML = `<span><input type="radio" name="payment" value="${escapeHtml(method.code || '')}" ${index === selectedIndex ? 'checked' : ''}${method.requires_online ? ' data-online' : ''}> ${escapeHtml(method.label || method.code || '')}<small>${escapeHtml(method.description || method.provider || '')}</small></span><strong>${fee === 0 ? escapeHtml(text.free) : formatCents(fee)}</strong>`;
       label.querySelector('input').addEventListener('change', () => updateCheckoutTotal(shippingPrice, fee, subtotal));
       box.appendChild(label);
     });
-    updateCheckoutTotal(shippingPrice, parseInt(methods[0].fee || 0, 10), subtotal);
+    updateCheckoutTotal(shippingPrice, parseInt(methods[selectedIndex].fee || 0, 10), subtotal);
   }
 
   async function refreshCheckoutShipping() {
@@ -159,6 +162,8 @@
     const subtotalElement = document.getElementById('checkout-subtotal');
     if (!country || !box || !summaryShipping || !subtotalElement) return;
     const subtotal = parseInt(subtotalElement.value || '0', 10);
+    const previous = box.querySelector('input[name="shipping_method"]:checked');
+    const previousCode = previous ? previous.value : '';
     box.innerHTML = `<div class="shipping-loading">${escapeHtml(text.shippingLoading)}</div>`;
     const params = new URLSearchParams({action: 'shipping_rates', country: country.value, subtotal: String(subtotal)});
     const response = await fetch(`${apiUrl}?${params}`);
@@ -176,23 +181,27 @@
       return;
     }
     box.innerHTML = '';
+    // Keep the choice the server rendered (e.g. after applying a coupon); fall back to the first rate.
+    const selectedIndex = Math.max(0, methods.findIndex((method) => (method.method_code || method.key || '') === previousCode));
     methods.forEach((method, index) => {
       const label = document.createElement('label');
       label.className = 'shipping-option';
       const methodCode = method.method_code || method.key || '';
       const price = parseInt(method.price || 0, 10);
-      label.innerHTML = `<span><input type="radio" name="shipping_method" value="${escapeHtml(methodCode)}" ${index === 0 ? 'checked' : ''}> ${escapeHtml(method.label || methodCode)}<small>${escapeHtml(method.delivery_days || '')}</small></span><strong>${formatCents(price)}</strong>`;
+      label.innerHTML = `<span><input type="radio" name="shipping_method" value="${escapeHtml(methodCode)}" ${index === selectedIndex ? 'checked' : ''}> ${escapeHtml(method.label || methodCode)}<small>${escapeHtml(method.delivery_days || '')}</small></span><strong>${formatCents(price)}</strong>`;
       label.querySelector('input').addEventListener('change', () => refreshCheckoutPayments(methodCode));
       box.appendChild(label);
     });
-    await refreshCheckoutPayments(methods[0].method_code || methods[0].key || '');
+    await refreshCheckoutPayments(methods[selectedIndex].method_code || methods[selectedIndex].key || '');
   }
 
   function updateCheckoutTotal(shipping, paymentFee, subtotal) {
     document.getElementById('summary-shipping').textContent = formatCents(shipping);
     const payment = document.getElementById('summary-payment');
     if (payment) payment.textContent = paymentFee === 0 ? text.free : formatCents(paymentFee);
-    document.getElementById('summary-total').textContent = formatCents(subtotal + shipping + paymentFee);
+    const discountElement = document.getElementById('checkout-discount');
+    const discount = discountElement ? parseInt(discountElement.value || '0', 10) : 0;
+    document.getElementById('summary-total').textContent = formatCents(subtotal - discount + shipping + paymentFee);
   }
 
   function setConsentCookie(categories) {
@@ -245,8 +254,173 @@
     if (form && !window.confirm(form.dataset.confirm)) event.preventDefault();
   });
 
+  // One order per click: lock the checkout button while the POST (and the gateway redirect) runs.
+  document.addEventListener('submit', (event) => {
+    const form = event.target.closest('form[data-checkout-form]');
+    if (!form || event.defaultPrevented) return;
+    // Applying a coupon or a saved address only refills the form; it must not lock the order button.
+    if (event.submitter && (event.submitter.name === 'coupon_action' || event.submitter.name === 'address_action')) return;
+    const button = form.querySelector('button.btn-checkout');
+    if (!button) return;
+    if (form.dataset.submitting === '1') {
+      event.preventDefault();
+      return;
+    }
+    form.dataset.submitting = '1';
+    if (!button.dataset.label) button.dataset.label = button.textContent;
+    const online = form.querySelector('input[name="payment"]:checked[data-online]');
+    button.textContent = (online ? form.dataset.redirectingLabel : form.dataset.submittingLabel) || button.textContent;
+    button.setAttribute('aria-busy', 'true');
+    setTimeout(() => { button.disabled = true; }, 0);
+  });
+
+  // Back from the gateway restores the page from bfcache: unlock the button again.
+  window.addEventListener('pageshow', () => {
+    document.querySelectorAll('form[data-checkout-form]').forEach((form) => {
+      const button = form.querySelector('button.btn-checkout');
+      delete form.dataset.submitting;
+      if (!button) return;
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+      if (button.dataset.label) button.textContent = button.dataset.label;
+    });
+  });
+
+  // Subcategory menus are <details> (tap/keyboard/no-JS). JS adds hover on mouse devices, one open menu,
+  // Escape to close back to the toggle and closing on an outside click.
+  function bindCategoryMenus() {
+    const menus = [...document.querySelectorAll('.header-nav .nav-sub')];
+    if (!menus.length) return;
+    const closeOthers = (keep) => menus.forEach((menu) => { if (menu !== keep) menu.open = false; });
+    const hover = window.matchMedia('(hover: hover) and (pointer: fine)');
+    menus.forEach((menu) => {
+      const item = menu.closest('.nav-item');
+      menu.addEventListener('toggle', () => { if (menu.open) closeOthers(menu); });
+      // A menu opened by hovering stays open when the caret is then clicked; it closes when the mouse leaves.
+      item.addEventListener('mouseenter', () => {
+        if (!hover.matches || menu.open) return;
+        menu.open = true;
+        menu.dataset.hoverOpen = '1';
+      });
+      item.addEventListener('mouseleave', () => {
+        if (menu.dataset.hoverOpen !== '1') return;
+        delete menu.dataset.hoverOpen;
+        if (!menu.contains(document.activeElement)) menu.open = false;
+      });
+      menu.querySelector('summary').addEventListener('click', (event) => {
+        if (menu.dataset.hoverOpen !== '1') return;
+        event.preventDefault();
+        delete menu.dataset.hoverOpen;
+      });
+      menu.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || !menu.open) return;
+        menu.open = false;
+        menu.querySelector('summary').focus();
+      });
+    });
+    document.addEventListener('click', (event) => {
+      if (!event.target.closest('.header-nav .nav-item')) closeOthers(null);
+    });
+  }
+
+  // Search suggestions as an ARIA combobox: arrows move through the list, Enter opens the highlighted product,
+  // Escape closes. Built with textContent and same-origin links only; without JS the form submits as before.
+  function bindSearchSuggest(input, index) {
+    const form = input.form;
+    if (!form) return;
+    const list = document.createElement('ul');
+    list.id = `search-suggest-${index}`;
+    list.className = 'search-suggestions';
+    list.setAttribute('role', 'listbox');
+    list.setAttribute('aria-label', input.dataset.searchSuggest || '');
+    list.hidden = true;
+    form.classList.add('search-suggest-host');
+    input.insertAdjacentElement('afterend', list);
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-autocomplete', 'list');
+    input.setAttribute('aria-controls', list.id);
+    input.setAttribute('aria-expanded', 'false');
+    input.setAttribute('autocomplete', 'off');
+    let timer = 0;
+    let request = 0;
+    let active = -1;
+    const options = () => [...list.querySelectorAll('[role="option"]')];
+    const close = () => {
+      list.hidden = true;
+      list.replaceChildren();
+      active = -1;
+      input.setAttribute('aria-expanded', 'false');
+      input.removeAttribute('aria-activedescendant');
+    };
+    const highlight = (next) => {
+      const items = options();
+      if (!items.length) return;
+      active = (next + items.length) % items.length;
+      items.forEach((item, position) => item.setAttribute('aria-selected', position === active ? 'true' : 'false'));
+      input.setAttribute('aria-activedescendant', items[active].id);
+    };
+    const show = (suggestions) => {
+      list.replaceChildren();
+      active = -1;
+      suggestions.forEach((suggestion) => {
+        let url;
+        try { url = new URL(String(suggestion.url || ''), window.location.href); } catch (error) { return; }
+        if (url.origin !== window.location.origin || !suggestion.name) return;
+        // An option must not contain a link (nested-interactive); it carries its target instead.
+        const option = document.createElement('li');
+        option.id = `${list.id}-${list.children.length}`;
+        option.className = 'search-suggestion';
+        option.setAttribute('role', 'option');
+        option.setAttribute('aria-selected', 'false');
+        option.dataset.href = url.href;
+        option.textContent = String(suggestion.name);
+        list.appendChild(option);
+      });
+      list.hidden = list.children.length === 0;
+      input.setAttribute('aria-expanded', list.hidden ? 'false' : 'true');
+      input.removeAttribute('aria-activedescendant');
+    };
+    input.addEventListener('input', () => {
+      clearTimeout(timer);
+      const query = input.value.trim();
+      if (query.length < 2) { request++; close(); return; }
+      timer = setTimeout(async () => {
+        const mine = ++request;
+        try {
+          const response = await fetch(`${apiUrl}?${new URLSearchParams({action: 'search_suggest', q: query})}`, {headers: {Accept: 'application/json'}});
+          const result = response.ok ? await response.json() : [];
+          if (mine === request) show(Array.isArray(result) ? result : []);
+        } catch (error) {
+          if (mine === request) close();
+        }
+      }, 250);
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        if (list.hidden) return;
+        event.preventDefault();
+        highlight(active + (event.key === 'ArrowDown' ? 1 : -1));
+      } else if (event.key === 'Enter' && !list.hidden && active >= 0) {
+        event.preventDefault();
+        window.location.assign(options()[active].dataset.href);
+      } else if (event.key === 'Escape' && !list.hidden) {
+        event.preventDefault();
+        close();
+      }
+    });
+    // Close after focus leaves; mousedown on an option keeps focus so its click still lands.
+    list.addEventListener('mousedown', (event) => event.preventDefault());
+    list.addEventListener('click', (event) => {
+      const option = event.target.closest('[role="option"]');
+      if (option) window.location.assign(option.dataset.href);
+    });
+    input.addEventListener('blur', close);
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     bindReviewForm();
+    bindCategoryMenus();
+    document.querySelectorAll('input[data-search-suggest]').forEach(bindSearchSuggest);
     const country = document.getElementById('checkout-country');
     if (country) country.addEventListener('change', refreshCheckoutShipping);
     if (document.getElementById('shipping-options')) refreshCheckoutShipping();

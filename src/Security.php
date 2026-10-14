@@ -16,12 +16,24 @@ class Security {
         return self::$cfg;
     }
 
+    public static function config(): array {
+        return self::cfg();
+    }
+
+    /** Non-reversible key for the current session; raw session IDs never go into the database. */
+    public static function sessionKey(): string {
+        $id = session_id();
+        return $id === '' ? '' : hash('sha256', $id);
+    }
+
     // ============================================================
     // Session — secure cookie params + start
     // ============================================================
     public static function sessionStart(): void {
         if (session_status() === PHP_SESSION_NONE) {
             $configuredHttps = strtolower((string)parse_url((string)(self::cfg()['app_url'] ?? ''), PHP_URL_SCHEME)) === 'https';
+            // Never adopt a client-chosen, uninitialized session ID (session fixation).
+            ini_set('session.use_strict_mode', '1');
             session_set_cookie_params([
                 'lifetime' => 0,
                 'path'     => '/',
@@ -58,9 +70,24 @@ class Security {
         if (!empty($_SERVER['HTTPS'])) {
             header("Strict-Transport-Security: max-age=31536000; includeSubDomains; preload");
         }
+        $reportUrl = self::cspReportUrl();
+        if ($reportUrl !== null) header('Reporting-Endpoints: csp-endpoint="' . $reportUrl . '"');
+        header('Content-Security-Policy: ' . self::contentSecurityPolicy());
+    }
+
+    /** Absolute CSP report endpoint; null without a valid configured app_url. */
+    public static function cspReportUrl(): ?string {
+        if (!is_file(dirname(__DIR__) . '/config.php')) return null;
+        try {
+            return self::appUrl(self::cfg()) . '/api.php?action=csp_report';
+        } catch (\RuntimeException $e) {
+            return null;
+        }
+    }
+
+    public static function contentSecurityPolicy(): string {
         $nonce = self::cspNonce();
-        header("Content-Security-Policy: "
-            . "default-src 'self'; "
+        return "default-src 'self'; "
             . "script-src 'self' 'nonce-$nonce' https://js.stripe.com; "
             . "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             . "font-src 'self' https://fonts.gstatic.com; "
@@ -69,9 +96,58 @@ class Security {
             . "frame-src https://js.stripe.com; "
             . "object-src 'none'; "
             . "base-uri 'self'; "
-            . "form-action 'self'; "
+            . "form-action " . implode(' ', array_merge(["'self'"], self::paymentRedirectOrigins())) . "; "
             . "frame-ancestors 'none';"
-        );
+            // Violations (a blocked gateway redirect above all) reach OperationalMetrics.
+            . (($reportUrl = self::cspReportUrl()) !== null ? " report-uri {$reportUrl}; report-to csp-endpoint;" : '');
+    }
+
+    /**
+     * Origins the checkout form POST may redirect to, declared by every registered
+     * hosted-checkout payment adapter. Browsers apply form-action to the redirect that
+     * follows a form submission, so a missing origin silently blocks payment
+     * (P0 2026-10-13: card checkout dead since 1.9.0). Any CSP change needs the
+     * browser E2E payment-redirect test in tests/e2e/commerce.spec.js.
+     * @return list<string>
+     */
+    public static function paymentRedirectOrigins(): array {
+        if (!is_file(dirname(__DIR__) . '/config.php')) return [];
+        try {
+            $codes = array_keys(Adapters::registry('payment'));
+        } catch (\Throwable $e) {
+            error_log('CSP payment origins unavailable: ' . $e->getMessage());
+            return [];
+        }
+        $origins = [];
+        foreach ($codes as $code) {
+            try {
+                $adapter = Adapters::provider('payment', (string)$code);
+            } catch (\RuntimeException $e) {
+                continue; // disabled mock provider or a provider whose class is not installed
+            } catch (\Throwable $e) {
+                error_log("CSP payment origins: provider {$code} failed to load: " . $e->getMessage());
+                continue;
+            }
+            if (!$adapter instanceof HostedCheckoutAdapter) continue;
+            foreach ($adapter->redirectOrigins() as $origin) {
+                // https only; plain http just for a loopback test gateway.
+                if (is_string($origin) && preg_match('#^(?:https://[a-z0-9.-]+|http://(?:127\.0\.0\.1|localhost))(?::[0-9]{1,5})?$#i', $origin)) {
+                    $origins[] = strtolower($origin);
+                }
+            }
+        }
+        return array_values(array_unique($origins));
+    }
+
+    /** Whether a redirect answering a same-origin form POST passes this request's form-action. */
+    public static function formActionAllows(string $url): bool {
+        $parts = parse_url($url);
+        if (!is_array($parts)) return false;
+        if (!isset($parts['host'])) return !isset($parts['scheme']) && !str_starts_with($url, '//');
+        $scheme = strtolower((string)($parts['scheme'] ?? ''));
+        $origin = $scheme . '://' . strtolower((string)$parts['host']) . (isset($parts['port']) ? ':' . $parts['port'] : '');
+        $self = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+        return $origin === $self || in_array($origin, self::paymentRedirectOrigins(), true);
     }
 
     // ============================================================
@@ -86,9 +162,10 @@ class Security {
 
     public static function csrfValidate(): bool {
         $sessionToken = $_SESSION['csrf_token'] ?? '';
-        if ($sessionToken === '') return false; // no token ever generated = reject
+        if (!is_string($sessionToken) || $sessionToken === '') return false; // no token ever generated = reject
         $submitted = $_POST['csrf_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
-        return hash_equals($sessionToken, $submitted);
+        // csrf_token[]=… arrives as an array: reject it instead of a TypeError (HTTP 500).
+        return is_string($submitted) && hash_equals($sessionToken, $submitted);
     }
 
     public static function rotateCsrfToken(): string {
@@ -123,8 +200,8 @@ class Security {
      * (//host, /\host), backslash tricks, and header-injection chars. Returns the
      * original value only if it is a plain local path, otherwise $fallback.
      */
-    public static function safeLocalPath(?string $path, string $fallback = '/'): string {
-        $path = trim((string)$path);
+    public static function safeLocalPath(mixed $path, string $fallback = '/'): string {
+        $path = trim(self::str($path));
         if ($path === '') return $fallback;
         // Any scheme prefix (http:, https:, javascript:, data:, …) → reject.
         if (preg_match('~^[a-z][a-z0-9+.\-]*:~i', $path)) return $fallback;
@@ -157,6 +234,15 @@ class Security {
         }
 
         return $url;
+    }
+
+    /** Validated public base URL, or null when app_url is not configured. Never derived from the Host header. */
+    public static function configuredAppUrl(): ?string {
+        try {
+            return self::appUrl(self::cfg());
+        } catch (RuntimeException) {
+            return null;
+        }
     }
 
     /**
@@ -255,8 +341,18 @@ class Security {
     // ============================================================
     // Input sanitization
     // ============================================================
-    public static function clean(string $input): string {
-        return trim(strip_tags($input));
+    public static function clean(mixed $input): string {
+        return trim(strip_tags(self::str($input)));
+    }
+
+    /**
+     * Scalar request value as a string. PHP turns name[]=x into an array; string-typed code
+     * must see the default instead of crashing with a TypeError (HTTP 500).
+     */
+    public static function str(mixed $value, string $default = ''): string {
+        if (is_string($value)) return $value;
+        if (is_int($value) || is_float($value)) return (string)$value;
+        return $default;
     }
 
     public static function sanitizeRichHtml(string $html): string {
@@ -335,10 +431,8 @@ class Security {
         }
     }
 
-    public static function slug(string $input): string {
-        $s = strtolower($input);
-        $s = preg_replace('/[^a-z0-9]+/', '-', $s);
-        return trim($s, '-');
+    public static function slug(mixed $input): string {
+        return Str::slug(self::str($input));
     }
 
     public static function int($input, int $default = 0): int {
@@ -346,8 +440,8 @@ class Security {
             ? (int)$input : $default;
     }
 
-    public static function email(string $input): ?string {
-        $email = filter_var(trim($input), FILTER_VALIDATE_EMAIL);
+    public static function email(mixed $input): ?string {
+        $email = filter_var(trim(self::str($input)), FILTER_VALIDATE_EMAIL);
         return $email ?: null;
     }
 
@@ -382,10 +476,15 @@ class Security {
     // Admin authentication — with brute-force protection + roles
     // ============================================================
 
-    /** Role definitions: permissions for each role */
+    /**
+     * Role definitions: permissions for each role. Money-moving actions have their own
+     * permissions: orders.payments (confirm/change payment), orders.refund (refunds, RMA
+     * credit notes), payments.manage / shipping.manage (methods and fees), rma.manage.
+     */
     private static array $rolePermissions = [
         'owner'       => ['*'],
-        'manager'     => ['products.*', 'orders.*', 'customers.view', 'customers.edit', 'reports.view', 'gdpr.view', 'import', 'cache'],
+        'manager'     => ['products.*', 'categories.edit', 'orders.*', 'customers.view', 'customers.edit', 'reports.view', 'gdpr.view', 'import', 'cache',
+                          'payments.manage', 'shipping.manage', 'rma.manage', 'pricing.manage', 'emails.manage'],
         'editor'      => ['products.edit', 'products.view', 'categories.edit', 'media.upload'],
         'fulfillment' => ['orders.view', 'orders.edit', 'orders.ship', 'orders.print'],
         'viewer'      => ['products.view', 'orders.view', 'reports.view'],
@@ -526,7 +625,7 @@ class Security {
             $_SESSION['admin_authenticated'], $_SESSION['admin_identity_token'],
             $_SESSION['admin_identity_id'], $_SESSION['admin_session_id'],
             $_SESSION['admin_store_permissions'], $_SESSION['admin_user'],
-            $_SESSION['admin_role'], $_SESSION['admin_last_seen']
+            $_SESSION['admin_role'], $_SESSION['admin_last_seen'], $_SESSION['admin_store']
         );
     }
 
@@ -564,6 +663,11 @@ class Security {
     }
 
     private static ?array $cachedRolesData = null;
+
+    /** Test hook: stands in for admin-roles.json (custom role permissions). */
+    public static function setRolesForTesting(?array $rolesData): void {
+        self::$cachedRolesData = $rolesData;
+    }
 
     /** Check if current admin has a permission */
     public static function adminCan(string $permission): bool {

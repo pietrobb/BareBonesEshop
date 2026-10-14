@@ -10,5 +10,15 @@
 {{/each}}
 </table>
 <p><strong>Összesen: {{order_total}}</strong></p>
+{{#if bank_transfer}}<h3>Fizetés banki átutalással</h3>
+<p>A rendelést a fizetés beérkezése után teljesítjük. Pontosan ezt az összeget és változó szimbólumot adja meg.</p>
+<table style="border-collapse:collapse">
+<tr><td style="padding:2px 12px 2px 0;color:#555">Kedvezményezett</td><td>{{bank_beneficiary}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">IBAN</td><td><strong>{{bank_iban}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Összeg</td><td><strong>{{bank_amount}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Változó szimbólum</td><td><strong>{{bank_vs}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Közlemény</td><td>{{bank_message}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Fizetési határidő</td><td>{{bank_due_date}}</td></tr>
+</table>{{/if}}
 {{#if tracking_url}}<p>Csomag követése: <a href="{{tracking_url}}">{{tracking_url}}</a></p>{{/if}}
 </body></html>

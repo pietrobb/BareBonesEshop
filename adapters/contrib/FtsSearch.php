@@ -9,7 +9,7 @@ class FtsSearch {
     public function search(string $query, array $opts = []): array {
         $page    = $opts['page'] ?? 1;
         $perPage = $opts['per_page'] ?? 24;
-        return Search::query($query, $page, $perPage);
+        return Search::query($query, $page, $perPage, array_intersect_key($opts, array_flip(['sort', 'price_min', 'price_max', 'category_ids'])));
     }
 
     public function suggest(string $prefix, int $limit = 5): array {

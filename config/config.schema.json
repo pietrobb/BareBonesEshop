@@ -108,6 +108,11 @@
         "worker_cron": {"type": "string", "pattern": "^(?:\\S+\\s+){4}\\S+$"}
       },
       "additionalProperties": true
+    },
+    "extensions": {
+      "type": "array",
+      "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,30}$"},
+      "uniqueItems": true
     }
   },
   "$defs": {

@@ -1,11 +1,10 @@
-const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { state, adminSignIn } = require('./support');
+const { test, expect, state, adminSignIn } = require('./support');
 
-// The admin catalog forms must open with the stored values and save through admin.php,
+// The admin catalog forms must open with the stored values and save through admin.php (the e2e admin runs in English),
 // and an edited "Export CSV" file must import back without touching what it does not change.
 test.describe.configure({ mode: 'serial' });
 
@@ -37,7 +36,7 @@ test('admin product form opens filled and saves stock and alert thresholds', asy
 
   // Saving the untouched form keeps the product exactly as stored.
   await form.locator('button[type="submit"]').click();
-  await expect(page.locator('.flash-ok')).toHaveText('Bez zmien.');
+  await expect(page.locator('.flash-ok')).toHaveText('No changes.');
   const unchanged = db('product', sku);
   expect(pick(unchanged.row, [...kept, 'stock', 'updated_at'])).toEqual(pick(before.row, [...kept, 'stock', 'updated_at']));
   expect(unchanged.movements.length).toBe(before.movements.length);
@@ -49,7 +48,7 @@ test('admin product form opens filled and saves stock and alert thresholds', asy
     select.value = 'forged';
   });
   await form.locator('button[type="submit"]').click();
-  await expect(page.locator('.flash-err')).toContainText('Produkt nebol uložený');
+  await expect(page.locator('.flash-err')).toContainText('The product was not saved');
   await expect(form.locator('#field-status-error')).not.toBeEmpty();
   await expect(form.locator('#field-status')).toHaveValue(before.row.status);
   await expect(form.locator('#field-name')).toHaveValue('E2E neuložený názov');
@@ -64,7 +63,7 @@ test('admin product form opens filled and saves stock and alert thresholds', asy
   await form.locator('#field-images').fill('/images/e2e-a.jpg\n/images/e2e-b.jpg');
   await form.locator('#field-tags').fill('e2e-a, e2e-b');
   await form.locator('button[type="submit"]').click();
-  await expect(page.locator('.flash-ok')).toHaveText('Produkt aktualizovaný.');
+  await expect(page.locator('.flash-ok')).toHaveText('Product updated.');
 
   const after = db('product', sku);
   expect(Number(after.row.stock)).toBe(stock);
@@ -109,7 +108,7 @@ test('admin Export CSV imports back through the admin Import form without damage
   await expect(form).toHaveAttribute('enctype', 'multipart/form-data');
   await form.locator('#field-csv_file').setInputFiles(edited);
   await form.locator('button[type="submit"]').click();
-  await expect(page.locator('.flash-ok')).toHaveText(`Import úspešný: ${Object.keys(before.products).length} produktov.`);
+  await expect(page.locator('.flash-ok')).toHaveText(`Import finished: ${Object.keys(before.products).length} products.`);
 
   const after = db('catalog');
   expect(Object.keys(after.products).sort()).toEqual(Object.keys(before.products).sort());
@@ -133,7 +132,7 @@ test('admin CMS page form saves through admin.php and reopens filled', async ({ 
   await form.locator('#field-title').fill('E2E stránka');
   await form.locator('#field-body').fill('<p>Obsah stránky</p>');
   await form.locator('button[type="submit"]').click();
-  await expect(page.locator('.flash-ok')).toHaveText('Stránka vytvorená.');
+  await expect(page.locator('.flash-ok')).toHaveText('Page created.');
   const created = db('page', slug).row;
   expect(created).toMatchObject({ title: 'E2E stránka', body: '<p>Obsah stránky</p>', status: 'active' });
 
@@ -143,7 +142,7 @@ test('admin CMS page form saves through admin.php and reopens filled', async ({ 
   await expect(form.locator('#field-body')).toHaveValue('<p>Obsah stránky</p>');
   await form.locator('#field-title').fill('E2E stránka 2');
   await form.locator('button[type="submit"]').click();
-  await expect(page.locator('.flash-ok')).toHaveText('Stránka aktualizovaná.');
+  await expect(page.locator('.flash-ok')).toHaveText('Page updated.');
   const updated = db('page', slug).row;
   expect(updated).toMatchObject({ id: created.id, title: 'E2E stránka 2', body: '<p>Obsah stránky</p>', layout: created.layout });
 });
@@ -162,7 +161,7 @@ test('admin attribute form saves options and categories and reopens filled', asy
   const category = form.locator('.cat-checkbox').first();
   await category.check();
   await form.locator('button[type="submit"]').click();
-  await expect(page.locator('.flash-ok')).toHaveText('Atribút uložený.');
+  await expect(page.locator('.flash-ok')).toHaveText('Attribute saved.');
   const saved = db('attribute', slug);
   expect(saved.row).toMatchObject({ name: 'E2E farba', type: 'enum' });
   expect(saved.options.map(o => o.value)).toEqual(['modrá']);
@@ -173,7 +172,7 @@ test('admin attribute form saves options and categories and reopens filled', asy
   await expect(form.locator('#field-slug')).toHaveValue(slug);
   await expect(form.locator('#field-type')).toHaveValue('enum');
   await form.locator('button[type="submit"]').click();
-  await expect(page.locator('.flash-ok')).toHaveText('Atribút uložený.');
+  await expect(page.locator('.flash-ok')).toHaveText('Attribute saved.');
   const again = db('attribute', slug);
   expect(again.options).toEqual(saved.options);
   expect(again.categories).toEqual(saved.categories);

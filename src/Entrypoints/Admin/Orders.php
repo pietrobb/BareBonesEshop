@@ -2,54 +2,32 @@
 /** Sales, orders, invoices, refunds and RMA administration. */
 
 function pageSalesOverview(): void {
+    Security::adminRequire('orders.view');
     $db = Db::get();
-    $today = date('Y-m-d 00:00:00');
+    $storeId = StoreContext::current()->id();
+    // Shop-local midnight as UTC, the zone created_at is stored in.
+    $today = SalesReport::sinceUtc(1);
 
-    $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE created_at >= :today");
-    $stmt->execute([':today' => $today]);
+    $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE created_at >= :today AND store_id = :store AND is_synthetic = 0");
+    $stmt->execute([':today' => $today, ':store' => $storeId]);
     $ordersToday = (int)$stmt->fetchColumn();
 
-    $stmt = $db->prepare("SELECT COALESCE(SUM(total), 0) FROM orders WHERE created_at >= :today AND status NOT IN ('cancelled', 'refunded')");
-    $stmt->execute([':today' => $today]);
-    $revenueToday = (int)$stmt->fetchColumn();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE store_id = :store AND payment_status IN ('pending', 'authorized')");
+    $stmt->execute([':store' => $storeId]);
+    $pendingPayments = (int)$stmt->fetchColumn();
+    $stmt = $db->prepare("SELECT COALESCE(SUM(de.download_count), 0) FROM digital_entitlements de JOIN orders o ON o.id = de.order_id WHERE o.store_id = :store");
+    $stmt->execute([':store' => $storeId]);
+    $downloadCount = (int)$stmt->fetchColumn();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM email_log el JOIN orders o ON o.id = el.order_id WHERE o.store_id = :store AND el.status = 'failed'");
+    $stmt->execute([':store' => $storeId]);
+    $failedEmails = (int)$stmt->fetchColumn();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM merchant_notifications mn JOIN orders o ON o.id = mn.order_id WHERE o.store_id = :store AND mn.status = 'failed'");
+    $stmt->execute([':store' => $storeId]);
+    $failedNotifications = (int)$stmt->fetchColumn();
 
-    $pendingPayments = (int)$db->query("SELECT COUNT(*) FROM orders WHERE payment_status IN ('pending', 'authorized')")->fetchColumn();
-    $downloadCount = (int)$db->query("SELECT COALESCE(SUM(download_count), 0) FROM digital_entitlements")->fetchColumn();
-    $failedEmails = (int)$db->query("SELECT COUNT(*) FROM email_log WHERE status = 'failed'")->fetchColumn();
-    $failedNotifications = (int)$db->query("SELECT COUNT(*) FROM merchant_notifications WHERE status = 'failed'")->fetchColumn();
-
-    $search = trim((string)($_GET['q'] ?? ''));
-    $period = (string)($_GET['period'] ?? '30');
-    $statusFilter = (string)($_GET['status'] ?? '');
-    $paymentStatusFilter = (string)($_GET['payment_status'] ?? '');
-    $allowedPeriods = ['today', '7', '30', 'all'];
-    if (!in_array($period, $allowedPeriods, true)) $period = '30';
-    if ($statusFilter !== '' && !in_array($statusFilter, OrderWorkflow::statuses(), true)) $statusFilter = '';
-    if ($paymentStatusFilter !== '' && !in_array($paymentStatusFilter, PaymentService::paymentStatuses(), true)) $paymentStatusFilter = '';
-
-    $where = ['1=1'];
-    $params = [];
-    if ($search !== '') {
-        $like = '%' . mb_strtolower($search) . '%';
-        $where[] = '(LOWER(o.order_number) LIKE :q_number OR LOWER(o.customer_name) LIKE :q_name OR LOWER(o.customer_email) LIKE :q_email)';
-        $params[':q_number'] = $like;
-        $params[':q_name'] = $like;
-        $params[':q_email'] = $like;
-    }
-    if ($period !== 'all') {
-        $since = $period === 'today' ? $today : date('Y-m-d H:i:s', strtotime('-' . (int)$period . ' days'));
-        $where[] = 'o.created_at >= :since';
-        $params[':since'] = $since;
-    }
-    if ($statusFilter !== '') {
-        $where[] = 'o.status = :status';
-        $params[':status'] = $statusFilter;
-    }
-    if ($paymentStatusFilter !== '') {
-        $where[] = 'o.payment_status = :payment_status';
-        $params[':payment_status'] = $paymentStatusFilter;
-    }
-    $whereSql = implode(' AND ', $where);
+    $filters = OrderExport::filters($_GET);
+    [$search, $period, $statusFilter, $paymentStatusFilter] = [$filters['q'], $filters['period'], $filters['status'], $filters['payment_status']];
+    [$whereSql, $params] = [$filters['where'], $filters['params']];
 
     $pageNumber = max(1, Security::int($_GET['page'] ?? 1));
     $perPage = 30;
@@ -91,7 +69,7 @@ function pageSalesOverview(): void {
 
     <div class="grid grid-4" style="margin-top:1rem">
         <div class="card stat"><div class="num"><?= $ordersToday ?></div><div class="label"><?= esc(I18n::t('admin.stat.orders_today')) ?></div></div>
-        <div class="card stat"><div class="num"><?= I18n::price($revenueToday) ?></div><div class="label"><?= esc(I18n::t('admin.sales.order_value_today')) ?></div></div>
+        <div class="card stat"><div class="num"><?= adminRevenueToday() ?></div><div class="label"><?= esc(I18n::t('admin.sales.order_value_today')) ?></div></div>
         <div class="card stat"><div class="num"><?= $pendingPayments ?></div><div class="label"><?= esc(I18n::t('admin.sales.pending_payments')) ?></div></div>
         <div class="card stat"><div class="num"><?= $downloadCount ?></div><div class="label"><?= esc(I18n::t('admin.sales.total_downloads')) ?></div></div>
     </div>
@@ -148,6 +126,7 @@ function pageSalesOverview(): void {
     <?php
 }
 function pageOrders(): void {
+    Security::adminRequire('orders.view');
     $db = Db::get();
     $page = max(1, Security::int($_GET['page'] ?? 1));
     $perPage = 25;
@@ -155,8 +134,8 @@ function pageOrders(): void {
     $statusFilter = $_GET['status'] ?? '';
     $paymentStatusFilter = $_GET['payment_status'] ?? '';
 
-    $where = '1=1';
-    $params = [];
+    $where = 'store_id = :store';
+    $params = [':store' => StoreContext::current()->id()];
     if ($statusFilter) {
         $where .= " AND status = :status";
         $params[':status'] = $statusFilter;
@@ -171,34 +150,47 @@ function pageOrders(): void {
     $total = (int)$stmt->fetchColumn();
     $pages = max(1, (int)ceil($total / $perPage));
 
-    $params[':limit'] = $perPage;
-    $params[':offset'] = $offset;
     $stmt = $db->prepare("SELECT * FROM orders WHERE {$where} ORDER BY created_at DESC LIMIT :limit OFFSET :offset");
-    $stmt->execute($params);
+    foreach ($params as $key => $value) $stmt->bindValue($key, $value, PDO::PARAM_STR);
+    $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+    $stmt->execute();
     $orders = $stmt->fetchAll();
     ?>
     <h1><?= esc(I18n::t('admin.title.orders')) ?> <span class="muted">(<?= $total ?>)</span></h1>
     <div class="card">
         <form method="get" style="display:flex;gap:.5rem;margin-bottom:1rem">
             <input type="hidden" name="p" value="orders">
-            <select name="status">
+            <select name="status" aria-label="<?= esc(I18n::t('admin.sales.order_status')) ?>">
                 <option value="">— <?= esc(I18n::t('admin.th.status')) ?> —</option>
                 <?php foreach (OrderWorkflow::statuses() as $s): ?>
                 <option value="<?= $s ?>" <?= $statusFilter===$s?'selected':'' ?>><?= $s ?></option>
                 <?php endforeach; ?>
             </select>
-            <select name="payment_status">
-                <option value="">— Payment —</option>
+            <select name="payment_status" aria-label="<?= esc(I18n::t('admin.sales.payment_status')) ?>">
+                <option value="">— <?= esc(I18n::t('admin.order.payment')) ?> —</option>
                 <?php foreach (PaymentService::paymentStatuses() as $s): ?>
                 <option value="<?= $s ?>" <?= $paymentStatusFilter===$s?'selected':'' ?>><?= $s ?></option>
                 <?php endforeach; ?>
             </select>
             <button class="btn" type="submit"><?= esc(I18n::t('admin.btn.apply')) ?></button>
         </form>
+        <?php $filterFields = '<input type="hidden" name="csrf_token" value="' . esc(Security::csrfToken()) . '"><input type="hidden" name="status" value="' . esc(Security::str($statusFilter)) . '"><input type="hidden" name="payment_status" value="' . esc(Security::str($paymentStatusFilter)) . '">'; ?>
+        <form method="post" action="admin.php?p=orders&amp;action=export" style="margin-bottom:1rem"><?= $filterFields ?><button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.orders.export_csv')) ?></button></form>
+        <form method="post" action="admin.php?p=orders&amp;action=bulk_status" id="orders-bulk">
+        <?= $filterFields ?>
+        <div class="sales-toolbar" style="margin-bottom:1rem">
+            <div class="form-row"><label for="bulk-status"><?= esc(I18n::t('admin.orders.bulk_status')) ?></label><select id="bulk-status" name="new_status"><?php foreach (OrderWorkflow::statuses() as $s): ?><option value="<?= esc($s) ?>"><?= esc($s) ?></option><?php endforeach; ?></select></div>
+            <div class="form-row"><label for="bulk-note"><?= esc(I18n::t('admin.order.note')) ?></label><input id="bulk-note" name="note"></div>
+            <button class="btn btn-primary btn-sm" type="submit"><?= esc(I18n::t('admin.orders.bulk_apply')) ?></button>
+            <button class="btn btn-sm" type="submit" formaction="admin.php?p=delivery_note" formtarget="_blank" name="format" value="html"><?= esc(I18n::t('admin.delivery_note.html')) ?></button>
+            <button class="btn btn-sm" type="submit" formaction="admin.php?p=delivery_note" formtarget="_blank" name="format" value="pdf"><?= esc(I18n::t('admin.delivery_note.pdf')) ?></button>
+        </div>
         <table>
-            <tr><th><?= esc(I18n::t('admin.th.number')) ?></th><th><?= esc(I18n::t('admin.th.customer')) ?></th><th><?= esc(I18n::t('admin.th.email')) ?></th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th>Payment</th><th><?= esc(I18n::t('admin.th.date')) ?></th><th></th></tr>
+            <tr><th><span class="sr-only"><?= esc(I18n::t('admin.orders.select')) ?></span></th><th><?= esc(I18n::t('admin.th.number')) ?></th><th><?= esc(I18n::t('admin.th.customer')) ?></th><th><?= esc(I18n::t('admin.th.email')) ?></th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.order.payment')) ?></th><th><?= esc(I18n::t('admin.th.date')) ?></th><th></th></tr>
             <?php foreach ($orders as $o): ?>
             <tr>
+                <td><input type="checkbox" name="order_ids[]" value="<?= (int)$o['id'] ?>" aria-label="<?= esc(I18n::t('admin.orders.select') . ' ' . $o['order_number']) ?>"></td>
                 <td><a href="admin.php?p=order&id=<?= $o['id'] ?>"><?= esc($o['order_number']) ?></a></td>
                 <td><?= esc($o['customer_name']) ?></td>
                 <td class="muted"><?= esc($o['customer_email']) ?></td>
@@ -206,10 +198,11 @@ function pageOrders(): void {
                 <td><span class="badge badge-<?= esc($o['status']) ?>"><?= esc($o['status']) ?></span></td>
                 <td><span class="badge badge-<?= esc($o['payment_status'] ?? 'pending') ?>"><?= esc($o['payment_status'] ?? 'pending') ?></span><br><span class="muted"><?= esc($o['payment_method'] ?? '') ?></span></td>
                 <td class="muted"><?= esc(substr($o['created_at'], 0, 16)) ?></td>
-                <td><a href="admin.php?p=order&id=<?= $o['id'] ?>" class="btn btn-sm">Detail</a></td>
+                <td><a href="admin.php?p=order&id=<?= $o['id'] ?>" class="btn btn-sm"><?= esc(I18n::t('admin.sales.detail')) ?></a></td>
             </tr>
             <?php endforeach; ?>
         </table>
+        </form>
         <?php pagination($page, $pages, "admin.php?p=orders&status=" . urlencode($statusFilter) . "&payment_status=" . urlencode($paymentStatusFilter)); ?>
     </div>
     <?php
@@ -221,10 +214,12 @@ function pageOrder(): void {
 
     $items = Orders::items($id);
     $allowed = OrderWorkflow::allowedTransitions($order['status']);
-    $paymentTransitions = array_values(array_diff(
+    $canRefund = Security::adminCan('orders.refund');
+    if (!$canRefund) $allowed = array_values(array_diff($allowed, ['refunded']));
+    $paymentTransitions = Security::adminCan('orders.payments') ? array_values(array_diff(
         PaymentService::allowedPaymentTransitions((string)($order['payment_status'] ?? 'pending')),
         ['refund_pending', 'partially_refunded', 'refunded']
-    ));
+    )) : [];
     $paymentTxs = PaymentService::transactionsForOrder($id);
     $refundableBalance = PaymentService::refundableBalance($id);
     $paymentSnapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
@@ -235,6 +230,7 @@ function pageOrder(): void {
     $orderConsents = ConsentService::forOrder($id);
     ?>
     <h1><?= esc(I18n::t('admin.order.label')) ?> <?= esc($order['order_number']) ?></h1>
+    <?php if (Security::adminCan('orders.print')): ?><p><a class="btn btn-sm" href="admin.php?p=delivery_note&amp;id=<?= $id ?>" target="_blank"><?= esc(I18n::t('admin.delivery_note.html')) ?></a> <a class="btn btn-sm" href="admin.php?p=delivery_note&amp;id=<?= $id ?>&amp;format=pdf" target="_blank"><?= esc(I18n::t('admin.delivery_note.pdf')) ?></a></p><?php endif; ?>
 
     <div class="grid" style="grid-template-columns:1fr 1fr;gap:1rem">
         <div class="card">
@@ -244,6 +240,11 @@ function pageOrder(): void {
             <p><?= esc($order['customer_phone']) ?></p>
             <?php if ($addr): ?>
             <p class="muted"><?= esc(($addr['street'] ?? '') . ', ' . ($addr['zip'] ?? '') . ' ' . ($addr['city'] ?? '') . ', ' . ($addr['country'] ?? '')) ?></p>
+            <?php foreach (CheckoutService::companyLines($addr) as $companyLine): ?><p class="order-company"><?= esc($companyLine) ?></p><?php endforeach; ?>
+            <?php endif; ?>
+            <?php if (trim((string)($order['notes'] ?? '')) !== ''): ?>
+            <h4 style="margin-top:.75rem"><?= esc(I18n::t('admin.order.note')) ?></h4>
+            <p data-order-note style="white-space:pre-wrap"><?= esc((string)$order['notes']) ?></p>
             <?php endif; ?>
         </div>
         <div class="card">
@@ -256,15 +257,18 @@ function pageOrder(): void {
                     <option value="<?= esc($s) ?>"><?= esc($s) ?></option>
                     <?php endforeach; ?>
                 </select>
-                <input name="note" placeholder="Poznámka...">
-                <button class="btn btn-primary btn-sm" type="submit">Zmeniť stav</button>
+                <input name="note" placeholder="<?= esc(I18n::t('admin.order.note_placeholder')) ?>">
+                <button class="btn btn-primary btn-sm" type="submit"><?= esc(I18n::t('admin.order.change_status')) ?></button>
             </form>
             <?php else: ?>
-            <p class="muted">Konečný stav — žiadne ďalšie prechody.</p>
+            <p class="muted"><?= esc(I18n::t('admin.order.final_status')) ?></p>
             <?php endif; ?>
-            <p class="muted" style="margin-top:.5rem">Payment method: <?= esc((string)($paymentSnapshot['label'] ?? $order['payment_method'])) ?> <span class="muted"><?= esc((string)($paymentSnapshot['code'] ?? $order['payment_method'])) ?><?= !empty($paymentSnapshot['provider']) ? ' · ' . esc((string)$paymentSnapshot['provider']) : '' ?></span></p>
-            <p class="muted">Payment reference: <?= $order['payment_id'] ? esc($order['payment_id']) : '—' ?></p>
-            <p class="muted">Payment status: <span class="badge badge-<?= esc($order['payment_status'] ?? 'pending') ?>"><?= esc($order['payment_status'] ?? 'pending') ?></span><?= $latestPaymentTx ? ' · Last event: ' . esc((string)$latestPaymentTx['status']) . ' @ ' . esc(substr((string)$latestPaymentTx['created_at'], 0, 16)) : '' ?></p>
+            <p class="muted" style="margin-top:.5rem"><?= esc(I18n::t('admin.order.payment_method')) ?>: <?= esc((string)($paymentSnapshot['label'] ?? $order['payment_method'])) ?> <span class="muted"><?= esc((string)($paymentSnapshot['code'] ?? $order['payment_method'])) ?><?= !empty($paymentSnapshot['provider']) ? ' · ' . esc((string)$paymentSnapshot['provider']) : '' ?></span></p>
+            <?php if ((string)($paymentSnapshot['service_type'] ?? $order['payment_method']) === 'bank_transfer'): ?>
+            <p class="muted"><?= esc(I18n::t('admin.order.variable_symbol')) ?>: <strong data-variable-symbol><?= esc(BankTransferInstructions::variableSymbol($order)) ?></strong></p>
+            <?php endif; ?>
+            <p class="muted"><?= esc(I18n::t('admin.order.payment_reference')) ?>: <?= $order['payment_id'] ? esc($order['payment_id']) : '—' ?></p>
+            <p class="muted"><?= esc(I18n::t('admin.sales.payment_status')) ?>: <span class="badge badge-<?= esc($order['payment_status'] ?? 'pending') ?>"><?= esc($order['payment_status'] ?? 'pending') ?></span><?= $latestPaymentTx ? ' · ' . esc(I18n::t('admin.order.last_event')) . ': ' . esc((string)$latestPaymentTx['status']) . ' @ ' . esc(substr((string)$latestPaymentTx['created_at'], 0, 16)) : '' ?></p>
             <?php if (!empty($paymentTransitions)): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=payment_transition" style="margin-top:.5rem">
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -273,26 +277,26 @@ function pageOrder(): void {
                     <option value="<?= esc($s) ?>"><?= esc($s) ?></option>
                     <?php endforeach; ?>
                 </select>
-                <input name="amount" type="number" min="0" step="1" placeholder="Suma centy">
-                <input name="note" placeholder="Poznámka...">
-                <button class="btn btn-primary btn-sm" type="submit">Zmeniť platbu</button>
+                <input name="amount" type="number" min="0" step="1" placeholder="<?= esc(I18n::t('admin.order.amount_cents')) ?>">
+                <input name="note" placeholder="<?= esc(I18n::t('admin.order.note_placeholder')) ?>">
+                <button class="btn btn-primary btn-sm" type="submit"><?= esc(I18n::t('admin.order.change_payment')) ?></button>
             </form>
             <?php endif; ?>
-            <?php if ($refundableBalance > 0 && PaymentService::canPaymentTransition((string)($order['payment_status'] ?? 'pending'), 'refund_pending')): ?>
+            <?php if ($canRefund && $refundableBalance > 0 && PaymentService::canPaymentTransition((string)($order['payment_status'] ?? 'pending'), 'refund_pending')): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_request" style="margin-top:.5rem">
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                 <input name="amount" type="number" min="1" max="<?= $refundableBalance ?>" step="1" value="<?= $refundableBalance ?>">
-                <input name="note" placeholder="Dôvod refundu..." required>
-                <button class="btn btn-danger btn-sm" type="submit">Požiadať refund</button>
+                <input name="note" placeholder="<?= esc(I18n::t('admin.order.refund_reason')) ?>" required>
+                <button class="btn btn-danger btn-sm" type="submit"><?= esc(I18n::t('admin.order.request_refund')) ?></button>
             </form>
             <?php else: ?>
-            <p class="muted" style="margin-top:.5rem">Refund unavailable for current payment status.</p>
+            <p class="muted" style="margin-top:.5rem"><?= esc(I18n::t('admin.order.refund_unavailable')) ?></p>
             <?php endif; ?>
         </div>
     </div>
 
     <div class="card">
-        <h3>Položky</h3>
+        <h3><?= esc(I18n::t('admin.sales.items')) ?></h3>
         <table>
             <tr><th><?= esc(I18n::t('admin.th.sku')) ?></th><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.th.qty')) ?></th><th><?= esc(I18n::t('admin.th.price_per_unit')) ?></th><th><?= esc(I18n::t('admin.th.total')) ?></th></tr>
             <?php foreach ($items as $item): ?>
@@ -306,23 +310,26 @@ function pageOrder(): void {
             <?php endforeach; ?>
         </table>
         <div style="text-align:right;margin-top:.5rem">
-            <p>Medzisúčet: <strong><?= I18n::price((int)$order['subtotal'], $order['currency']) ?></strong></p>
-            <p>Doprava: <?= I18n::price((int)$order['shipping_cost'], $order['currency']) ?></p>
+            <p><?= esc(I18n::t('admin.order.subtotal')) ?>: <strong><?= I18n::price((int)$order['subtotal'], $order['currency']) ?></strong></p>
+            <p><?= esc(I18n::t('admin.order.shipping')) ?>: <?= I18n::price((int)$order['shipping_cost'], $order['currency']) ?></p>
+            <?php $pickupPoint = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true)['pickup_point'] ?? null; if (is_array($pickupPoint)): ?>
+            <p><?= esc(I18n::t('pickup_point')) ?>: <?= esc((string)($pickupPoint['name'] ?? '')) ?> (ID <?= esc((string)($pickupPoint['id'] ?? '')) ?>) — <?= esc((string)($pickupPoint['address'] ?? '')) ?></p>
+            <?php endif; ?>
             <?php if ((int)($order['payment_fee'] ?? 0) > 0): ?>
-            <p>Poplatok za platbu: <?= I18n::price((int)$order['payment_fee'], $order['currency']) ?></p>
+            <p><?= esc(I18n::t('admin.order.payment_fee')) ?>: <?= I18n::price((int)$order['payment_fee'], $order['currency']) ?></p>
             <?php endif; ?>
             <?php if ((int)$order['tax_amount'] > 0): ?>
-            <p>DPH: <?= I18n::price((int)$order['tax_amount'], $order['currency']) ?></p>
+            <p><?= esc(I18n::t('admin.order.vat')) ?>: <?= I18n::price((int)$order['tax_amount'], $order['currency']) ?></p>
             <?php endif; ?>
-            <p style="font-size:1.2rem"><strong>Celkom: <?= I18n::price((int)$order['total'], $order['currency']) ?></strong></p>
+            <p style="font-size:1.2rem"><strong><?= esc(I18n::t('admin.order.grand_total')) ?>: <?= I18n::price((int)$order['total'], $order['currency']) ?></strong></p>
         </div>
     </div>
 
     <?php if ($digitalEntitlements): ?>
     <div class="card">
-        <h3>Digitálne oprávnenia</h3>
+        <h3><?= esc(I18n::t('admin.order.entitlements')) ?></h3>
         <table>
-            <tr><th>SKU</th><th>Súbor</th><th>Stav</th><th>Stiahnutia</th><th>Expirácia</th><th>Doručené</th></tr>
+            <tr><th><?= esc(I18n::t('admin.th.sku')) ?></th><th><?= esc(I18n::t('admin.order.file')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.order.downloads')) ?></th><th><?= esc(I18n::t('admin.order.expires')) ?></th><th><?= esc(I18n::t('admin.order.delivered')) ?></th></tr>
             <?php foreach ($digitalEntitlements as $entitlement): ?>
             <tr>
                 <td><?= esc($entitlement['sku']) ?></td>
@@ -339,9 +346,9 @@ function pageOrder(): void {
 
     <?php if ($orderConsents): ?>
     <div class="card">
-        <h3>Súhlasy pri objednávke</h3>
+        <h3><?= esc(I18n::t('admin.order.consents')) ?></h3>
         <table>
-            <tr><th>Kľúč</th><th>Verzia</th><th>Znenie</th><th>Čas</th></tr>
+            <tr><th><?= esc(I18n::t('admin.order.consent_key')) ?></th><th><?= esc(I18n::t('admin.order.version')) ?></th><th><?= esc(I18n::t('admin.order.wording')) ?></th><th><?= esc(I18n::t('admin.order.time')) ?></th></tr>
             <?php foreach ($orderConsents as $consent): ?>
             <tr>
                 <td><?= esc($consent['consent_key']) ?></td>
@@ -355,10 +362,10 @@ function pageOrder(): void {
     <?php endif; ?>
 
     <div class="card">
-        <h3>Payment timeline</h3>
+        <h3><?= esc(I18n::t('admin.order.payment_timeline')) ?></h3>
         <?php if ($paymentTxs): ?>
         <table>
-            <tr><th>Status</th><th>Provider</th><th>Ref</th><th>Suma</th><th>Event</th><th>Details</th><th>Kedy</th></tr>
+            <tr><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.common.provider')) ?></th><th>Ref</th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.common.event')) ?></th><th><?= esc(I18n::t('admin.order.details')) ?></th><th><?= esc(I18n::t('admin.common.when')) ?></th></tr>
             <?php foreach ($paymentTxs as $tx): ?>
             <?php
                 $raw = json_decode((string)($tx['raw_response'] ?? '{}'), true) ?: [];
@@ -379,15 +386,15 @@ function pageOrder(): void {
             <?php endforeach; ?>
         </table>
         <?php else: ?>
-        <p class="muted">Žiadne payment eventy zatiaľ nie sú zaznamenané.</p>
+        <p class="muted"><?= esc(I18n::t('admin.order.no_payment_events')) ?></p>
         <?php endif; ?>
     </div>
 
     <?php if ($logs): ?>
     <div class="card">
-        <h3>História</h3>
+        <h3><?= esc(I18n::t('admin.order.history')) ?></h3>
         <table>
-            <tr><th>Akcia</th><th>Z</th><th>Na</th><th>Poznámka</th><th>Kto</th><th>Kedy</th></tr>
+            <tr><th><?= esc(I18n::t('admin.common.action')) ?></th><th><?= esc(I18n::t('admin.order.from')) ?></th><th><?= esc(I18n::t('admin.order.to')) ?></th><th><?= esc(I18n::t('admin.common.note')) ?></th><th><?= esc(I18n::t('admin.common.who')) ?></th><th><?= esc(I18n::t('admin.common.when')) ?></th></tr>
             <?php foreach ($logs as $log): ?>
             <tr>
                 <td><?= esc($log['action']) ?></td>
@@ -410,9 +417,9 @@ function pageOrder(): void {
     ?>
     <?php if ($emails): ?>
     <div class="card">
-        <h3>Emaily</h3>
+        <h3><?= esc(I18n::t('admin.order.emails')) ?></h3>
         <table>
-            <tr><th>Template</th><th>Locale</th><th>Subject</th><th>Adapter</th><th>Status</th><th>Odoslané</th><th></th></tr>
+            <tr><th><?= esc(I18n::t('admin.common.template')) ?></th><th><?= esc(I18n::t('admin.order.locale')) ?></th><th><?= esc(I18n::t('admin.order.subject')) ?></th><th><?= esc(I18n::t('admin.order.adapter')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.order.sent')) ?></th><th></th></tr>
             <?php foreach ($emails as $em): ?>
             <tr>
                 <td><?= esc($em['template']) ?></td>
@@ -427,7 +434,7 @@ function pageOrder(): void {
                     <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=email_resend" style="display:inline">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                         <input type="hidden" name="log_id" value="<?= (int)$em['id'] ?>">
-                        <button class="btn btn-sm" type="submit">Poslať znova</button>
+                        <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.order.resend')) ?></button>
                     </form>
                 </td>
             </tr>
@@ -443,10 +450,10 @@ function pageOrder(): void {
     $invoices = $invStmt->fetchAll();
     ?>
     <div class="card">
-        <h3>Faktúry</h3>
+        <h3><?= esc(I18n::t('admin.order.invoices')) ?></h3>
         <?php if ($invoices): ?>
         <table>
-            <tr><th>Číslo</th><th>Typ</th><th>VAT scenár</th><th>Vystavená</th><th>Splatná</th><th>Celkom</th><th>Stav</th><th>Akcie</th></tr>
+            <tr><th><?= esc(I18n::t('admin.common.number')) ?></th><th><?= esc(I18n::t('admin.common.type')) ?></th><th><?= esc(I18n::t('admin.order.vat_scenario')) ?></th><th><?= esc(I18n::t('admin.order.issued')) ?></th><th><?= esc(I18n::t('admin.order.due')) ?></th><th><?= esc(I18n::t('admin.order.grand_total')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.th.actions')) ?></th></tr>
             <?php foreach ($invoices as $inv): ?>
             <tr>
                 <td><?= esc($inv['number']) ?></td>
@@ -461,35 +468,33 @@ function pageOrder(): void {
                     <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=invoice_resend" style="display:inline">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                         <input type="hidden" name="invoice_id" value="<?= (int)$inv['id'] ?>">
-                        <button class="btn btn-sm" type="submit">Poslať znova</button>
+                        <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.order.resend')) ?></button>
                     </form>
                 </td>
             </tr>
             <?php endforeach; ?>
         </table>
         <?php else: ?>
-        <p class="muted">Žiadna faktúra zatiaľ nebola vystavená.</p>
+        <p class="muted"><?= esc(I18n::t('admin.order.no_invoices')) ?></p>
         <?php endif; ?>
         <?php if ($order['status'] === 'paid' || $order['status'] === 'shipped' || $order['status'] === 'delivered'): ?>
         <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=invoice_issue" style="display:inline;margin-top:.5rem">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-            <button class="btn btn-primary btn-sm" type="submit">Vystaviť faktúru</button>
+            <button class="btn btn-primary btn-sm" type="submit"><?= esc(I18n::t('admin.order.issue_invoice')) ?></button>
         </form>
         <?php endif; ?>
     </div>
 
-    <a href="admin.php?p=orders" class="btn">← Späť na zoznam</a>
+    <a href="admin.php?p=orders" class="btn">← <?= esc(I18n::t('admin.common.back_to_list')) ?></a>
     <?php
 }
 function pageInvoicePdf(): void {
     Security::adminRequire('orders.view');
     $id = Security::int($_GET['id'] ?? 0);
-    $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE id = :id");
-    $stmt->execute([':id' => $id]);
-    $inv = $stmt->fetch();
-    if (!$inv) { http_response_code(404); echo 'Faktúra neexistuje.'; return; }
+    $inv = InvoiceService::byId($id);
+    if (!$inv) { http_response_code(404); echo esc(I18n::t('admin.order.msg.invoice_missing')); return; }
     $abs = InvoiceService::pdfAbsolutePath($inv);
-    if (!is_file($abs)) { http_response_code(404); echo 'PDF súbor chýba.'; return; }
+    if (!is_file($abs)) { http_response_code(404); echo esc(I18n::t('admin.order.msg.pdf_missing')); return; }
     header('Content-Type: application/pdf');
     header('Content-Disposition: inline; filename="' . $inv['number'] . '.pdf"');
     header('Content-Length: ' . filesize($abs));
@@ -511,24 +516,24 @@ function pageRma(): void {
     }
     // Allowed next-status buttons per current status.
     $next = [
-        'requested' => ['approved' => 'Schváliť', 'rejected' => 'Zamietnuť'],
-        'approved'  => ['received' => 'Prijaté', 'rejected' => 'Zamietnuť'],
-        'received'  => ['refunded' => 'Refundované'],
+        'requested' => ['approved' => I18n::t('admin.rma.approve'), 'rejected' => I18n::t('admin.rma.reject')],
+        'approved'  => ['received' => I18n::t('admin.rma.receive'), 'rejected' => I18n::t('admin.rma.reject')],
+        'received'  => Security::adminCan('orders.refund') ? ['refunded' => I18n::t('admin.rma.refund')] : [],
     ];
     ?>
-    <h1>Reklamácie / vrátenia <span class="muted">(<?= count($rmas) ?>)</span></h1>
+    <h1><?= esc(I18n::t('admin.rma.heading')) ?> <span class="muted">(<?= count($rmas) ?>)</span></h1>
     <div class="card">
         <p>
-            <a class="btn btn-sm<?= $filter===null?' btn-primary':'' ?>" href="admin.php?p=rma">Všetky</a>
+            <a class="btn btn-sm<?= $filter===null?' btn-primary':'' ?>" href="admin.php?p=rma"><?= esc(I18n::t('admin.common.all')) ?></a>
             <?php foreach (Rma::STATUSES as $s): ?>
             <a class="btn btn-sm<?= $filter===$s?' btn-primary':'' ?>" href="admin.php?p=rma&status=<?= esc($s) ?>"><?= esc($s) ?></a>
             <?php endforeach; ?>
         </p>
         <?php if (!$rmas): ?>
-        <p class="muted">Žiadne reklamácie.</p>
+        <p class="muted"><?= esc(I18n::t('admin.rma.none')) ?></p>
         <?php else: ?>
         <table>
-            <tr><th>RMA</th><th>Objednávka</th><th>Položky</th><th>Dôvod</th><th>Stav</th><th>Akcia</th></tr>
+            <tr><th>RMA</th><th><?= esc(I18n::t('admin.order.label')) ?></th><th><?= esc(I18n::t('admin.sales.items')) ?></th><th><?= esc(I18n::t('admin.rma.reason')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.common.action')) ?></th></tr>
             <?php foreach ($rmas as $r): ?>
             <?php $items = Rma::items((int)$r['id']); ?>
             <tr>
@@ -548,10 +553,10 @@ function pageRma(): void {
                         <input type="hidden" name="rma_id" value="<?= (int)$r['id'] ?>">
                         <input type="hidden" name="status" value="<?= esc($to) ?>">
                         <?php if ($to === 'received'): ?>
-                        <select name="disposition" aria-label="Disposition">
-                            <option value="restock">Naskladniť</option>
-                            <option value="repair">Oprava</option>
-                            <option value="discard">Likvidácia</option>
+                        <select name="disposition" aria-label="<?= esc(I18n::t('admin.rma.disposition')) ?>">
+                            <option value="restock"><?= esc(I18n::t('admin.rma.restock')) ?></option>
+                            <option value="repair"><?= esc(I18n::t('admin.rma.repair')) ?></option>
+                            <option value="discard"><?= esc(I18n::t('admin.rma.discard')) ?></option>
                         </select>
                         <?php endif; ?>
                         <button class="btn btn-sm" type="submit"><?= esc($label) ?></button>
@@ -566,27 +571,29 @@ function pageRma(): void {
     <?php
 }
 function handleRmaStatus(): void {
-    Security::adminRequire('products.edit');
+    Security::adminRequire('rma.manage');
     $id = Security::int($_POST['rma_id'] ?? 0);
     $status = Security::clean($_POST['status'] ?? '');
+    // Refunding an RMA issues a credit note and a refund — a money decision, not catalogue or warehouse work.
+    if ($status === 'refunded') Security::adminRequire('orders.refund');
     try {
-        if ($id <= 0) throw new InvalidArgumentException('Neplatné RMA.');
+        if ($id <= 0) throw new InvalidArgumentException(I18n::t('admin.rma.invalid'));
         if ($status === 'received') {
             $disposition = Security::clean($_POST['disposition'] ?? '');
-            if (!in_array($disposition, ['restock', 'repair', 'discard'], true)) throw new InvalidArgumentException('Neplatná disposition.');
+            if (!in_array($disposition, ['restock', 'repair', 'discard'], true)) throw new InvalidArgumentException(I18n::t('admin.rma.invalid_disposition'));
             $decisions = [];
             foreach (Rma::items($id) as $item) {
                 $remaining = (int)$item['quantity'] - (int)$item['received_quantity'];
                 if ($remaining > 0) $decisions[(int)$item['id']] = ['quantity' => $remaining, 'disposition' => $disposition];
             }
             if (!$decisions || !Rma::receive($id, $decisions, 'admin-receive-' . $id, 'Admin receipt')) {
-                throw new RuntimeException('Príjem už bol spracovaný.');
+                throw new RuntimeException(I18n::t('admin.rma.already_received'));
             }
         } elseif ($status === 'refunded') {
             $rma = Rma::byId($id);
-            if (!$rma) throw new RuntimeException('RMA sa nenašlo.');
+            if (!$rma) throw new RuntimeException(I18n::t('admin.rma.not_found'));
             $source = InvoiceService::byOrderId((int)$rma['order_id']);
-            if (!$source) throw new RuntimeException('Objednávka nemá zdrojovú faktúru.');
+            if (!$source) throw new RuntimeException(I18n::t('admin.rma.no_source_invoice'));
             $quantities = [];
             foreach (Rma::items($id) as $item) {
                 $remaining = (int)$item['received_quantity'] - (int)$item['refunded_quantity'];
@@ -598,11 +605,11 @@ function handleRmaStatus(): void {
                 Rma::completeRefund((int)$credit['refund_id'], 'manual-admin');
             }
         } elseif (!Rma::setStatus($id, $status)) {
-            throw new LogicException('Nepovolená zmena stavu.');
+            throw new LogicException(I18n::t('admin.rma.transition_refused'));
         }
-        setFlash('ok', 'Reklamácia #' . $id . ' → ' . $status);
+        setFlash('ok', I18n::format('admin.rma.status_changed', ['id' => $id, 'status' => $status]));
     } catch (Throwable $e) {
-        setFlash('err', 'Stav reklamácie sa nepodarilo zmeniť: ' . $e->getMessage());
+        setFlash('err', I18n::format('admin.rma.status_failed', ['error' => $e->getMessage()]));
     }
     header('Location: admin.php?p=rma');
     exit;
@@ -611,39 +618,40 @@ function handleOrderStatus(): void {
     Security::adminRequire('orders.edit');
     $orderId = Security::int($_GET['id'] ?? 0);
     $newStatus = $_POST['new_status'] ?? '';
-    $note = trim($_POST['note'] ?? '');
+    $note = trim(Security::str($_POST['note'] ?? ''));
 
-    if (!in_array($newStatus, OrderWorkflow::statuses(), true)) {
-        setFlash('err', 'Neplatný stav objednávky.');
+    if (!is_string($newStatus) || !in_array($newStatus, OrderWorkflow::statuses(), true)) {
+        setFlash('err', I18n::t('admin.order.msg.invalid_status'));
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }
-    $order = Orders::byId($orderId);
-    if (!$order || ($newStatus === 'paid' && ($order['payment_status'] ?? 'pending') !== 'paid')) {
-        setFlash('err', $order ? 'Najprv potvrďte prijatie platby.' : 'Objednávka neexistuje.');
+    if ($newStatus === 'refunded') Security::adminRequire('orders.refund');
+    $rejection = OrderWorkflow::adminRejection(Orders::byId($orderId), $newStatus, true);
+    if (in_array($rejection, ['not_found', 'payment_not_confirmed'], true)) {
+        setFlash('err', I18n::t($rejection === 'payment_not_confirmed' ? 'admin.order.msg.confirm_payment_first' : 'admin.order.msg.not_found'));
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }
 
     try {
         OrderWorkflow::transition($orderId, $newStatus, $note ?: 'Admin status change');
-        setFlash('ok', "Stav objednávky zmenený na '" . esc($newStatus) . "'.");
+        setFlash('ok', I18n::format('admin.order.msg.status_changed', ['status' => $newStatus]));
     } catch (\LogicException $e) {
-        setFlash('err', 'Neplatný prechod stavu.');
+        setFlash('err', I18n::t('admin.order.msg.invalid_transition'));
     } catch (\Throwable $e) {
         error_log("Order status change error [{$orderId}]: " . $e->getMessage());
-        setFlash('err', 'Chyba pri zmene stavu objednávky.');
+        setFlash('err', I18n::t('admin.order.msg.status_error'));
     }
 
     header("Location: admin.php?p=order&id={$orderId}");
     exit;
 }
 function handleOrderPaymentTransition(): void {
-    Security::adminRequire('orders.edit');
+    Security::adminRequire('orders.payments');
     $orderId = Security::int($_GET['id'] ?? 0);
     $order = Orders::byId($orderId);
     if (!$order) {
-        setFlash('err', 'Objednávka neexistuje.');
+        setFlash('err', I18n::t('admin.order.msg.not_found'));
         header('Location: admin.php?p=orders');
         exit;
     }
@@ -655,7 +663,7 @@ function handleOrderPaymentTransition(): void {
 
     if (in_array($newStatus, ['refund_pending', 'partially_refunded', 'refunded'], true)
         || !PaymentService::canPaymentTransition($from, $newStatus)) {
-        setFlash('err', 'Neplatný prechod platby.');
+        setFlash('err', I18n::t('admin.order.msg.invalid_payment_transition'));
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }
@@ -666,21 +674,21 @@ function handleOrderPaymentTransition(): void {
             'actor' => Security::adminUser(),
             'note' => $note,
         ]);
-        setFlash('ok', "Stav platby zmenený na '{$newStatus}'.");
+        setFlash('ok', I18n::format('admin.order.msg.payment_changed', ['status' => $newStatus]));
     } catch (\Throwable $e) {
         error_log("Payment status change error [{$orderId}]: " . $e->getMessage());
-        setFlash('err', 'Chyba pri zmene stavu platby.');
+        setFlash('err', I18n::t('admin.order.msg.payment_error'));
     }
 
     header("Location: admin.php?p=order&id={$orderId}");
     exit;
 }
 function handleOrderRefundRequest(): void {
-    Security::adminRequire('orders.edit');
+    Security::adminRequire('orders.refund');
     $orderId = Security::int($_GET['id'] ?? 0);
     $order = Orders::byId($orderId);
     if (!$order) {
-        setFlash('err', 'Objednávka neexistuje.');
+        setFlash('err', I18n::t('admin.order.msg.not_found'));
         header('Location: admin.php?p=orders');
         exit;
     }
@@ -689,7 +697,7 @@ function handleOrderRefundRequest(): void {
     $reason = trim((string)($_POST['reason'] ?? $_POST['note'] ?? ''));
     $refundableBalance = PaymentService::refundableBalance($orderId);
     if ($amount <= 0 || $amount > $refundableBalance || $reason === '') {
-        setFlash('err', 'Suma refundu musí byť v rozsahu dostupného zostatku.');
+        setFlash('err', I18n::t('admin.order.msg.refund_amount'));
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }
@@ -701,10 +709,10 @@ function handleOrderRefundRequest(): void {
             'amount' => $amount,
             'reason' => $reason,
         ]);
-        setFlash('ok', 'Refund požiadavka bola vytvorená.');
+        setFlash('ok', I18n::t('admin.order.msg.refund_requested'));
     } catch (\Throwable $e) {
         error_log("Refund request error [{$orderId}]: " . $e->getMessage());
-        setFlash('err', 'Chyba pri vytváraní refund požiadavky.');
+        setFlash('err', I18n::t('admin.order.msg.refund_error'));
     }
 
     header("Location: admin.php?p=order&id={$orderId}");
@@ -714,21 +722,21 @@ function handleOrderEmailResend(): void {
     Security::adminRequire('orders.edit');
     $orderId = Security::int($_GET['id'] ?? 0);
     $logId   = Security::int($_POST['log_id'] ?? 0);
-    if ($logId <= 0 || !Security::rateLimit('admin_email_resend_' . $logId, 3, 3600, false)) {
-        setFlash('err', 'Email nemožno opätovne odoslať.');
+    if ($logId <= 0 || !Orders::byId($orderId) || !Security::rateLimit('admin_email_resend_' . $logId, 3, 3600, false)) {
+        setFlash('err', I18n::t('admin.order.msg.email_resend_refused'));
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }
     try {
         $res = MailService::resend($logId, $orderId);
         if (($res['status'] ?? '') === 'sent') {
-            setFlash('ok', 'Email opätovne odoslaný (' . esc($res['adapter'] ?? '') . ').');
+            setFlash('ok', I18n::format('admin.order.msg.email_resent', ['adapter' => $res['adapter'] ?? '']));
         } else {
-            setFlash('err', 'Email sa nepodarilo odoslať: ' . esc($res['error'] ?? $res['status'] ?? 'neznáma chyba'));
+            setFlash('err', I18n::format('admin.order.msg.email_failed', ['error' => $res['error'] ?? $res['status'] ?? I18n::t('admin.order.msg.unknown_error')]));
         }
     } catch (\Throwable $e) {
         error_log("Resend email #{$logId} failed: " . $e->getMessage());
-        setFlash('err', 'Chyba pri opätovnom odosielaní emailu.');
+        setFlash('err', I18n::t('admin.order.msg.email_resend_error'));
     }
     header("Location: admin.php?p=order&id={$orderId}");
     exit;
@@ -737,7 +745,7 @@ function handleOrderInvoiceIssue(): void {
     Security::adminRequire('orders.edit');
     $orderId = Security::int($_GET['id'] ?? 0);
     if ($orderId <= 0 || !Security::rateLimit('admin_invoice_issue_' . $orderId, 3, 3600, false)) {
-        setFlash('err', 'Faktúru teraz nemožno vystaviť alebo znovu odoslať.');
+        setFlash('err', I18n::t('admin.order.msg.invoice_issue_refused'));
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }
@@ -756,10 +764,10 @@ function handleOrderInvoiceIssue(): void {
             MailService::send('invoice_issued', $order['customer_email'], (string)($order['locale'] ?? ''), $vars, $orderId,
                 [['path' => $abs, 'filename' => $inv['number'] . '.pdf', 'content_type' => 'application/pdf']]);
         }
-        setFlash('ok', 'Faktúra ' . esc($inv['number']) . ' vystavená.');
+        setFlash('ok', I18n::format('admin.order.msg.invoice_issued', ['number' => $inv['number']]));
     } catch (\Throwable $e) {
         error_log("Invoice issue [{$orderId}]: " . $e->getMessage());
-        setFlash('err', 'Nepodarilo sa vystaviť faktúru: ' . esc($e->getMessage()));
+        setFlash('err', I18n::format('admin.order.msg.invoice_issue_failed', ['error' => $e->getMessage()]));
     }
     header("Location: admin.php?p=order&id={$orderId}");
     exit;
@@ -769,15 +777,15 @@ function handleOrderInvoiceResend(): void {
     $orderId   = Security::int($_GET['id'] ?? 0);
     $invoiceId = Security::int($_POST['invoice_id'] ?? 0);
     if ($invoiceId <= 0 || !Security::rateLimit('admin_invoice_resend_' . $invoiceId, 3, 3600, false)) {
-        setFlash('err', 'Faktúru teraz nemožno opätovne odoslať.');
+        setFlash('err', I18n::t('admin.order.msg.invoice_resend_refused'));
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }
-    $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE id = :id AND order_id = :order_id");
-    $stmt->execute([':id' => $invoiceId, ':order_id' => $orderId]);
+    $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE id = :id AND order_id = :order_id AND store_id = :store");
+    $stmt->execute([':id' => $invoiceId, ':order_id' => $orderId, ':store' => StoreContext::current()->id()]);
     $inv = $stmt->fetch();
-    if (!$inv) {
-        setFlash('err', 'Faktúra neexistuje.');
+    if (!$inv || !Orders::byId($orderId)) {
+        setFlash('err', I18n::t('admin.order.msg.invoice_missing'));
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }
@@ -785,7 +793,7 @@ function handleOrderInvoiceResend(): void {
         $order = Orders::byId((int)$inv['order_id']);
         $abs = InvoiceService::pdfAbsolutePath($inv);
         if (!is_file($abs)) {
-            setFlash('err', 'PDF súbor chýba.');
+            setFlash('err', I18n::t('admin.order.msg.pdf_missing'));
             header("Location: admin.php?p=order&id={$orderId}");
             exit;
         }
@@ -798,13 +806,13 @@ function handleOrderInvoiceResend(): void {
         $res = MailService::send('invoice_issued', $order['customer_email'] ?? '', (string)($inv['locale'] ?? ''), $vars, (int)$inv['order_id'],
             [['path' => $abs, 'filename' => $inv['number'] . '.pdf', 'content_type' => 'application/pdf']]);
         if (($res['status'] ?? '') === 'sent') {
-            setFlash('ok', 'Faktúra opätovne odoslaná.');
+            setFlash('ok', I18n::t('admin.order.msg.invoice_resent'));
         } else {
-            setFlash('err', 'Email sa nepodarilo odoslať: ' . esc($res['error'] ?? $res['status'] ?? ''));
+            setFlash('err', I18n::format('admin.order.msg.email_failed', ['error' => $res['error'] ?? $res['status'] ?? I18n::t('admin.order.msg.unknown_error')]));
         }
     } catch (\Throwable $e) {
         error_log("Invoice resend [{$invoiceId}]: " . $e->getMessage());
-        setFlash('err', 'Chyba pri odosielaní: ' . esc($e->getMessage()));
+        setFlash('err', I18n::format('admin.order.msg.send_error', ['error' => $e->getMessage()]));
     }
     header("Location: admin.php?p=order&id={$orderId}");
     exit;

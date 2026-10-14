@@ -89,6 +89,24 @@ final class UrlAliases {
         return null;
     }
 
+    /**
+     * Path under a configured store url_prefix (/cs/product/x) → its store-relative route. The entry
+     * script resolves the store itself from REQUEST_URI (longest prefix, as StoreContext does).
+     */
+    public static function storeRoute(string $path): ?array {
+        $path = '/' . trim($path, '/');
+        $best = '';
+        foreach ((array)(Bootstrap::stores()['stores'] ?? []) as $store) {
+            $prefix = rtrim((string)($store['url_prefix'] ?? ''), '/');
+            if ($prefix === '' || !str_starts_with($prefix, '/') || strlen($prefix) <= strlen($best)) continue;
+            if ($path === $prefix || str_starts_with($path, $prefix . '/')) $best = $prefix;
+        }
+        if ($best === '') return null;
+        $rest = substr($path, strlen($best));
+        $rest = $rest === '' ? '/' : $rest;
+        return self::inbound($rest) ?? ['path' => $rest, 'query' => []];
+    }
+
     /** Entry script and $_GET for an internal route, or null if the route has no entrypoint. */
     public static function entry(array $route): ?array {
         $path = $route['path'];
@@ -105,7 +123,7 @@ final class UrlAliases {
      * The caller must require it at global scope (entrypoints rely on global variables).
      */
     public static function dispatch(string $path): ?string {
-        $route = self::inbound($path);
+        $route = self::inbound($path) ?? self::storeRoute($path);
         $entry = $route ? self::entry($route) : null;
         if (!$entry) return null;
         [$script, $get] = $entry;

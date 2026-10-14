@@ -4,7 +4,7 @@ final class UpdatePackageBuilder
 {
     private const EXCLUDED_PREFIXES = [
         '.git/', '.worktrees/', '.claude/', '.playwright-mcp/',
-        'cache/', 'db/', 'jobs/', 'logs/', 'releases/', 'storage/', 'uploads/',
+        'cache/', 'db/', 'extensions/', 'jobs/', 'logs/', 'releases/', 'storage/', 'uploads/',
     ];
 
     private const EXCLUDED_FILES = [

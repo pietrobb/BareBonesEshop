@@ -204,7 +204,10 @@ class Inventory {
         }
     }
 
-    /** Supplier PO creation enforces configured minimum and pack size. */
+    /**
+     * Supplier PO creation enforces configured minimum and pack size. Supplier and warehouse must be the active store's
+     * (receipts book stock into that warehouse) and every SKU a product or variant of its catalog.
+     */
     public static function createPurchaseOrder(
         int $supplierId,
         int $warehouseId,
@@ -215,6 +218,25 @@ class Inventory {
     ): int {
         if (!$items) throw new InvalidArgumentException('Purchase order requires items');
         $db = Db::get();
+        $store = StoreContext::current();
+        $supplier = $db->prepare('SELECT active FROM suppliers WHERE id = :id AND store_id = :store');
+        $supplier->execute([':id' => $supplierId, ':store' => $store->id()]);
+        $active = $supplier->fetchColumn();
+        if ($active === false) throw new InvalidArgumentException("Supplier {$supplierId} does not belong to store {$store->id()}");
+        if (!(int)$active) throw new InvalidArgumentException("Supplier {$supplierId} is inactive");
+        if (Warehouse::byId($warehouseId) === null) throw new InvalidArgumentException("Warehouse {$warehouseId} does not belong to store {$store->id()}");
+        $catalogSku = $db->prepare('SELECT 1 FROM products WHERE sku = :sku AND store_id = :catalog
+            UNION SELECT 1 FROM variants v JOIN products p ON p.id = v.product_id WHERE v.sku = :variant_sku AND p.store_id = :variant_catalog');
+        $seen = [];
+        foreach ($items as $item) {
+            $sku = trim((string)($item['sku'] ?? ''));
+            if (isset($seen[$sku])) throw new InvalidArgumentException("SKU {$sku} is listed twice");
+            $seen[$sku] = true;
+            $catalogSku->execute([':sku' => $sku, ':catalog' => $store->catalogId(), ':variant_sku' => $sku, ':variant_catalog' => $store->catalogId()]);
+            if ($catalogSku->fetchColumn() === false) throw new InvalidArgumentException("SKU {$sku} is not in the catalog of store {$store->id()}");
+            $catalogSku->closeCursor();
+            if (isset($item['unit_cost']) && (int)$item['unit_cost'] < 0) throw new InvalidArgumentException("SKU {$sku} has a negative unit cost");
+        }
         $own = !$db->inTransaction();
         if ($own) $db->beginTransaction();
         try {

@@ -170,7 +170,7 @@ Create the first owner with `BBE_ADMIN_PASSWORD` in the process environment and 
 
 Start with `queue.backend=database` unless the deployment has an operated Redis service. Run two workers against controlled jobs and prove only one claim completes each job, a failed job reaches the dashboard, and its correlation ID matches structured logs. For Redis, verify TLS/network isolation and secret injection at the platform boundary; never put the password in evidence. File mode remains the zero-dependency rollback option but intentionally permits one worker only. Before traffic resumes, inspect failed mail, payments, webhooks, and jobs per store and verify no incident payload or log contains credentials, TOTP seeds, session tokens, or recovery codes.
 
-Rollback restores code and database together. Stop workers first; do not switch queue backends while jobs remain pending unless jobs are explicitly drained or reconciled, because backends do not mirror each other. Preserve externally completed mail, payment, and webhook facts during reconciliation.
+Rollback restores code and database together. Stop workers first: for SQLite, rollback (and `cli/restore.php`) raises a `<db>.maintenance` gate that refuses new connections and refuses the whole rollback without touching code or data while any other process still holds the database. Do not switch queue backends while jobs remain pending unless jobs are explicitly drained or reconciled, because backends do not mirror each other. Preserve externally completed mail, payment, and webhook facts during reconciliation.
 
 ## Theme, content, feeds, i18n, and accessibility rollout
 

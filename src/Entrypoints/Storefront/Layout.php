@@ -13,19 +13,20 @@ $localUrl = static function(string $url): string {
     return $url[0] === '/' ? Template::url($url) : $url;
 };
 
-$scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-$base = $scheme . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . Template::baseUrl();
+// Absolute structured-data URLs come from app_url only (never the Host header); unset → base-relative URLs.
+$base = Security::configuredAppUrl() ?? Template::baseUrl();
 $jsonLd = '';
 $nonce = Security::cspNonce();
 if ($page === 'home') {
     $jsonLd  = JsonLd::render(JsonLd::organization($base, Bootstrap::stores()), $nonce);
     $jsonLd .= JsonLd::render(JsonLd::webSite($base, Bootstrap::stores()), $nonce);
 } elseif ($page === 'category' && !empty($cat)) {
-    $crumbItems = [['name' => $t('home'), 'url' => Template::url('/')]];
+    // $base already contains the deployment base path, so join it with base-less paths.
+    $crumbItems = [['name' => $t('home'), 'url' => Template::seoPath(Template::url('/'))]];
     foreach (Categories::breadcrumb((int)$cat['id']) as $crumbCat) {
         $crumbItems[] = [
             'name' => $catName($crumbCat['name']),
-            'url' => Template::url('/?page=category&slug=' . rawurlencode((string)$crumbCat['slug'])),
+            'url' => Template::seoPath(Template::url('/?page=category&slug=' . rawurlencode((string)$crumbCat['slug']))),
         ];
     }
     $jsonLd = JsonLd::render(JsonLd::breadcrumbList($crumbItems, $base), $nonce);

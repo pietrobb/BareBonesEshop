@@ -62,19 +62,20 @@ $handlers = [
     'incident_notify'   => static fn(array $payload): int => IncidentMonitor::notify((string)($payload['fingerprint'] ?? '')),
 ];
 
-// Release abandoned online reservations on every cron worker run. Provider
+// Release abandoned unpaid reservations in every store on every cron worker run. Provider
 // errors and non-terminal payment states are skipped by Orders::expirePending.
 try {
     $gateways = [];
-    $expiredOrders = Orders::expirePending(
-        (int)($cfg['pending_order_expiry_seconds'] ?? 172800),
-        (int)($cfg['pending_order_expiry_batch'] ?? 25),
+    $expiredOrders = PendingOrderExpiry::sweep(
+        $cfg,
         static function (array $order) use (&$gateways): string {
             $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true) ?: [];
             $provider = strtolower((string)($snapshot['provider'] ?? orderProviderCode($order, 'payment')));
             if ($provider === '') $provider = Adapters::defaultProviderCode('payment');
-            $gateways[$provider] ??= Adapters::payment($provider);
-            return $gateways[$provider]->getStatus((string)$order['payment_id']);
+            // Stores may hold different provider credentials, so gateways are cached per provider scope.
+            $gatewayKey = StoreContext::current()->providerId() . ':' . $provider;
+            $gateways[$gatewayKey] ??= Adapters::payment($provider);
+            return $gateways[$gatewayKey]->getStatus((string)$order['payment_id']);
         }
     );
     if ($verbose && $expiredOrders > 0) echo "Expired pending orders: {$expiredOrders}\n";
@@ -240,6 +241,10 @@ function processOutbox(array $cfg, bool $verbose = false): void {
                     $failures[] = (string)$code . ':' . ($result['response_code'] ?? 'network');
                 }
             }
+            // In-process listeners of enabled extensions, with the same per-endpoint retry/dedup.
+            $extensionDelivery = Extensions::deliver($event, $envelope);
+            $matched += $extensionDelivery['matched'];
+            array_push($failures, ...$extensionDelivery['failures']);
             if ($failures === []) {
                 Outbox::markDelivered((string)$event['id']);
                 if ($verbose) echo "Delivered outbox event {$event['id']} to {$matched} endpoint(s)\n";
@@ -408,6 +413,7 @@ function handleEmailSend(array $payload, array $job): void {
                 'carrier'        => $order['carrier'] ?? '',
                 'tracking_number'=> $order['tracking_number'] ?? '',
             ]);
+            if ($template === 'order_confirmation') $vars = array_merge($vars, BankTransferInstructions::mailVars($order));
             $items = Orders::items((int)$orderId);
             $vars['items'] = array_map(fn($it) => [
                 'name'       => $it['name'],

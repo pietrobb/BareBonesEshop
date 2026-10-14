@@ -9,24 +9,24 @@ function pageCustomers(): void {
     $ids = array_map(static fn($c) => (int)$c['id'], $customers);
     if ($ids) {
         $ph = implode(',', array_fill(0, count($ids), '?'));
-        $st = Db::get()->prepare("SELECT customer_id, COUNT(*) AS cnt FROM orders WHERE customer_id IN ({$ph}) GROUP BY customer_id");
-        $st->execute($ids);
+        $st = Db::get()->prepare("SELECT customer_id, COUNT(*) AS cnt FROM orders WHERE store_id = ? AND customer_id IN ({$ph}) GROUP BY customer_id");
+        $st->execute([StoreContext::current()->id(), ...$ids]);
         foreach ($st->fetchAll() as $r) { $counts[(int)$r['customer_id']] = (int)$r['cnt']; }
     }
     ?>
-    <h1>Zákazníci <span class="muted">(<?= count($customers) ?>)</span></h1>
+    <h1><?= esc(I18n::t('admin.title.customers')) ?> <span class="muted">(<?= count($customers) ?>)</span></h1>
     <div class="card">
         <form method="get" action="admin.php" style="display:flex;gap:.5rem;align-items:center;margin-bottom:1rem">
             <input type="hidden" name="p" value="customers">
-            <input type="text" name="q" value="<?= esc($q) ?>" placeholder="e-mail, meno alebo ID" style="min-width:280px">
-            <button class="btn btn-primary" type="submit">Hľadať</button>
-            <?php if ($q !== ''): ?><a class="btn btn-sm" href="admin.php?p=customers">Zrušiť filter</a><?php endif; ?>
+            <input type="text" name="q" value="<?= esc($q) ?>" placeholder="<?= esc(I18n::t('admin.customers.search_placeholder')) ?>" style="min-width:280px">
+            <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.btn.search')) ?></button>
+            <?php if ($q !== ''): ?><a class="btn btn-sm" href="admin.php?p=customers"><?= esc(I18n::t('admin.customers.clear_filter')) ?></a><?php endif; ?>
         </form>
         <?php if (!$customers): ?>
-        <p class="muted">Žiadni zákazníci.</p>
+        <p class="muted"><?= esc(I18n::t('admin.customers.none')) ?></p>
         <?php else: ?>
         <table>
-            <tr><th>ID</th><th>E-mail</th><th>Meno</th><th>Stav</th><th>Objednávky</th><th>Registrácia</th><th></th></tr>
+            <tr><th>ID</th><th><?= esc(I18n::t('admin.common.email')) ?></th><th><?= esc(I18n::t('admin.customers.name')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.title.orders')) ?></th><th><?= esc(I18n::t('admin.customers.registered')) ?></th><th></th></tr>
             <?php foreach ($customers as $c): ?>
             <tr>
                 <td><?= (int)$c['id'] ?></td>
@@ -35,7 +35,7 @@ function pageCustomers(): void {
                 <td><span class="badge badge-<?= ($c['status'] ?? '')==='active'?'active':'draft' ?>"><?= esc($c['status'] ?? '') ?></span></td>
                 <td><?= (int)($counts[(int)$c['id']] ?? 0) ?></td>
                 <td class="muted"><?= esc(substr((string)$c['created_at'], 0, 16)) ?></td>
-                <td><a class="btn btn-sm" href="admin.php?p=customer&id=<?= (int)$c['id'] ?>">Detail</a></td>
+                <td><a class="btn btn-sm" href="admin.php?p=customer&id=<?= (int)$c['id'] ?>"><?= esc(I18n::t('admin.sales.detail')) ?></a></td>
             </tr>
             <?php endforeach; ?>
         </table>
@@ -47,7 +47,8 @@ function pageCustomerDetail(): void {
     $id = Security::int($_GET['id'] ?? 0);
     $c = $id > 0 ? Customers::byId($id) : null;
     if (!$c) {
-        echo '<h1>Zákazník</h1><div class="card"><p class="muted">Zákazník nenájdený. <a href="admin.php?p=customers">Späť na zoznam</a></p></div>';
+        echo '<h1>' . esc(I18n::t('admin.title.customer')) . '</h1><div class="card"><p class="muted">' . esc(I18n::t('admin.customers.not_found'))
+            . ' <a href="admin.php?p=customers">' . esc(I18n::t('admin.common.back_to_list')) . '</a></p></div>';
         return;
     }
     $status   = (string)($c['status'] ?? '');
@@ -56,18 +57,18 @@ function pageCustomerDetail(): void {
     $rmas      = Rma::forCustomer($id);
     $anon = $status === 'anonymized';
     ?>
-    <h1>Zákazník #<?= (int)$c['id'] ?> <span class="muted"><?= esc($c['email']) ?></span></h1>
-    <p style="margin-bottom:1rem"><a class="btn btn-sm" href="admin.php?p=customers">← Zoznam</a></p>
+    <h1><?= esc(I18n::t('admin.title.customer')) ?> #<?= (int)$c['id'] ?> <span class="muted"><?= esc($c['email']) ?></span></h1>
+    <p style="margin-bottom:1rem"><a class="btn btn-sm" href="admin.php?p=customers">← <?= esc(I18n::t('admin.customers.list')) ?></a></p>
 
     <div class="card">
-        <h3>Profil</h3>
+        <h3><?= esc(I18n::t('admin.customers.profile')) ?></h3>
         <table>
-            <tr><th>Meno</th><td><?= esc($c['name'] ?? '') ?></td></tr>
-            <tr><th>E-mail</th><td><?= esc($c['email']) ?></td></tr>
-            <tr><th>Telefón</th><td><?= esc($c['phone'] ?? '') ?></td></tr>
-            <tr><th>Stav</th><td><span class="badge badge-<?= $status==='active'?'active':'draft' ?>"><?= esc($status) ?></span></td></tr>
-            <tr><th>Registrácia</th><td class="muted"><?= esc(substr((string)($c['created_at'] ?? ''), 0, 16)) ?></td></tr>
-            <tr><th>Posledné prihlásenie</th><td class="muted"><?= esc(substr((string)($c['last_login_at'] ?? ''), 0, 16)) ?: '—' ?></td></tr>
+            <tr><th><?= esc(I18n::t('admin.customers.name')) ?></th><td><?= esc($c['name'] ?? '') ?></td></tr>
+            <tr><th><?= esc(I18n::t('admin.common.email')) ?></th><td><?= esc($c['email']) ?></td></tr>
+            <tr><th><?= esc(I18n::t('admin.customers.phone')) ?></th><td><?= esc($c['phone'] ?? '') ?></td></tr>
+            <tr><th><?= esc(I18n::t('admin.th.status')) ?></th><td><span class="badge badge-<?= $status==='active'?'active':'draft' ?>"><?= esc($status) ?></span></td></tr>
+            <tr><th><?= esc(I18n::t('admin.customers.registered')) ?></th><td class="muted"><?= esc(substr((string)($c['created_at'] ?? ''), 0, 16)) ?></td></tr>
+            <tr><th><?= esc(I18n::t('admin.customers.last_login')) ?></th><td class="muted"><?= esc(substr((string)($c['last_login_at'] ?? ''), 0, 16)) ?: '—' ?></td></tr>
         </table>
         <?php if (!$anon): ?>
         <p style="margin-top:1rem">
@@ -78,28 +79,34 @@ function pageCustomerDetail(): void {
                 <input type="hidden" name="customer_id" value="<?= (int)$c['id'] ?>">
                 <input type="hidden" name="status" value="<?= esc($toggleTo) ?>">
                 <button class="btn btn-sm<?= $toggleTo==='blocked'?' btn-danger':' btn-primary' ?>" type="submit">
-                    <?= $toggleTo === 'blocked' ? 'Zablokovať účet' : 'Odblokovať účet' ?>
+                    <?= esc(I18n::t($toggleTo === 'blocked' ? 'admin.customers.block' : 'admin.customers.unblock')) ?>
                 </button>
             </form>
             <?php endif; ?>
-            <a class="btn btn-sm" href="cli/gdpr-export.php?customer-id=<?= (int)$c['id'] ?>">GDPR export</a>
-            <a class="btn btn-sm" href="admin.php?p=gdpr&email=<?= urlencode((string)$c['email']) ?>">GDPR vymazať…</a>
+            <?php if (Security::adminCan('gdpr.view')): ?>
+            <form method="post" action="admin.php?p=gdpr&action=export" style="display:inline">
+                <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                <input type="hidden" name="customer_id" value="<?= (int)$c['id'] ?>">
+                <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.gdpr.export_hint')) ?></button>
+            </form>
+            <?php endif; ?>
+            <a class="btn btn-sm" href="admin.php?p=gdpr&email=<?= urlencode((string)$c['email']) ?>"><?= esc(I18n::t('admin.customers.gdpr_erase')) ?></a>
         </p>
         <?php else: ?>
-        <p class="muted" style="margin-top:1rem">Účet bol anonymizovaný (GDPR) — bez ďalších akcií.</p>
+        <p class="muted" style="margin-top:1rem"><?= esc(I18n::t('admin.customers.anonymized')) ?></p>
         <?php endif; ?>
     </div>
-
+    <?php b2bCustomerCard((int)$c['id']); ?>
     <div class="card">
-        <h3>Adresy (<?= count($addresses) ?>)</h3>
+        <h3><?= esc(I18n::t('admin.customers.addresses')) ?> (<?= count($addresses) ?>)</h3>
         <?php if (!$addresses): ?>
-        <p class="muted">Žiadne adresy.</p>
+        <p class="muted"><?= esc(I18n::t('admin.customers.no_addresses')) ?></p>
         <?php else: ?>
         <table>
-            <tr><th>Typ</th><th>Meno</th><th>Adresa</th><th>Mesto</th><th>Krajina</th></tr>
+            <tr><th><?= esc(I18n::t('admin.common.type')) ?></th><th><?= esc(I18n::t('admin.customers.name')) ?></th><th><?= esc(I18n::t('admin.customers.address')) ?></th><th><?= esc(I18n::t('admin.customers.city')) ?></th><th><?= esc(I18n::t('admin.common.country')) ?></th></tr>
             <?php foreach ($addresses as $a): ?>
             <tr>
-                <td><?= esc($a['type'] ?? '') ?><?= !empty($a['is_default']) ? ' <span class="muted">(predvolená)</span>' : '' ?></td>
+                <td><?= esc($a['type'] ?? '') ?><?= !empty($a['is_default']) ? ' <span class="muted">' . esc(I18n::t('admin.customers.default')) . '</span>' : '' ?></td>
                 <td><?= esc($a['name'] ?? '') ?></td>
                 <td><?= esc($a['street'] ?? '') ?></td>
                 <td><?= esc(trim(($a['zip'] ?? '') . ' ' . ($a['city'] ?? ''))) ?></td>
@@ -111,19 +118,19 @@ function pageCustomerDetail(): void {
     </div>
 
     <div class="card">
-        <h3>Objednávky (<?= count($orders) ?>)</h3>
+        <h3><?= esc(I18n::t('admin.title.orders')) ?> (<?= count($orders) ?>)</h3>
         <?php if (!$orders): ?>
-        <p class="muted">Žiadne objednávky.</p>
+        <p class="muted"><?= esc(I18n::t('admin.customers.no_orders')) ?></p>
         <?php else: ?>
         <table>
-            <tr><th>Číslo</th><th>Stav</th><th>Suma</th><th>Dátum</th><th></th></tr>
+            <tr><th><?= esc(I18n::t('admin.common.number')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.th.date')) ?></th><th></th></tr>
             <?php foreach ($orders as $o): ?>
             <tr>
                 <td><?= esc($o['order_number']) ?></td>
                 <td><span class="badge badge-<?= esc($o['status']) ?>"><?= esc($o['status']) ?></span></td>
                 <td><?= esc(I18n::price((int)$o['total'], $o['currency'])) ?></td>
                 <td class="muted"><?= esc(substr((string)$o['created_at'], 0, 16)) ?></td>
-                <td><a class="btn btn-sm" href="admin.php?p=order&id=<?= (int)$o['id'] ?>">Detail</a></td>
+                <td><a class="btn btn-sm" href="admin.php?p=order&id=<?= (int)$o['id'] ?>"><?= esc(I18n::t('admin.sales.detail')) ?></a></td>
             </tr>
             <?php endforeach; ?>
         </table>
@@ -131,19 +138,19 @@ function pageCustomerDetail(): void {
     </div>
 
     <div class="card">
-        <h3>Reklamácie (<?= count($rmas) ?>)</h3>
+        <h3><?= esc(I18n::t('admin.customers.returns')) ?> (<?= count($rmas) ?>)</h3>
         <?php if (!$rmas): ?>
-        <p class="muted">Žiadne reklamácie.</p>
+        <p class="muted"><?= esc(I18n::t('admin.rma.none')) ?></p>
         <?php else: ?>
         <table>
-            <tr><th>RMA</th><th>Objednávka</th><th>Stav</th><th>Dátum</th><th></th></tr>
+            <tr><th>RMA</th><th><?= esc(I18n::t('admin.order.label')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.th.date')) ?></th><th></th></tr>
             <?php foreach ($rmas as $r): ?>
             <tr>
                 <td><?= esc($r['rma_number']) ?></td>
                 <td>#<?= (int)$r['order_id'] ?></td>
                 <td><span class="badge badge-<?= esc($r['status']) ?>"><?= esc($r['status']) ?></span></td>
                 <td class="muted"><?= esc(substr((string)$r['created_at'], 0, 16)) ?></td>
-                <td><a class="btn btn-sm" href="admin.php?p=rma&status=<?= esc($r['status']) ?>">RMA fronta</a></td>
+                <td><a class="btn btn-sm" href="admin.php?p=rma&status=<?= esc($r['status']) ?>"><?= esc(I18n::t('admin.customers.rma_queue')) ?></a></td>
             </tr>
             <?php endforeach; ?>
         </table>
@@ -161,11 +168,13 @@ function pageGdpr(): void {
     $email = strtolower(trim((string)($_GET['email'] ?? '')));
     $customers = [];
     if ($email !== '') {
-        $stmt = $db->prepare("SELECT id, email, name, status, created_at FROM customers WHERE LOWER(email) LIKE LOWER(:email) ORDER BY id DESC LIMIT 25");
-        $stmt->execute([':email' => '%' . $email . '%']);
+        $stmt = $db->prepare("SELECT id, email, name, status, created_at FROM customers WHERE store_id = :store AND LOWER(email) LIKE LOWER(:email) ESCAPE '!' ORDER BY id DESC LIMIT 25");
+        $stmt->execute([':store' => StoreContext::current()->id(), ':email' => '%' . Db::likeLiteral($email) . '%']);
         $customers = $stmt->fetchAll();
     }
-    $events = $db->query("SELECT * FROM gdpr_events ORDER BY created_at DESC LIMIT 50")->fetchAll();
+    $events = $db->prepare("SELECT * FROM gdpr_events WHERE store_id = :store ORDER BY created_at DESC, id DESC LIMIT 50");
+    $events->execute([':store' => StoreContext::current()->id()]);
+    $events = $events->fetchAll();
     ?>
     <h1><?= esc(I18n::t('admin.title.gdpr')) ?></h1>
     <div class="flash" style="background:#fff7ed;color:#9a3412;border:1px solid #fed7aa">
@@ -188,7 +197,11 @@ function pageGdpr(): void {
                 <td><?= esc($c['name'] ?? '') ?></td>
                 <td><span class="badge badge-<?= ($c['status'] ?? '') === 'active' ? 'active' : 'draft' ?>"><?= esc($c['status'] ?? '') ?></span></td>
                 <td>
-                    <a class="btn btn-sm" href="cli/gdpr-export.php?customer-id=<?= (int)$c['id'] ?>"><?= esc(I18n::t('admin.gdpr.export_hint')) ?></a>
+                    <form method="post" action="admin.php?p=gdpr&action=export" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                        <input type="hidden" name="customer_id" value="<?= (int)$c['id'] ?>">
+                        <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.gdpr.export_hint')) ?></button>
+                    </form>
                     <?php if (Security::adminCan('gdpr.erase') && ($c['status'] ?? '') !== 'anonymized'): ?>
                     <form method="post" action="admin.php?p=gdpr&action=anonymize&email=<?= urlencode($email) ?>" style="display:inline" data-confirm="<?= esc(I18n::t('admin.gdpr.anonymize_confirm')) ?>">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -221,14 +234,41 @@ function pageGdpr(): void {
     </div>
     <?php
 }
+/** GDPR access-request export as an admin POST action (CSRF, gdpr.view, active store) — not a link to the CLI script. */
+function handleGdprExport(): void {
+    Security::adminRequire('gdpr.view');
+    $customerId = Security::int($_POST['customer_id'] ?? 0);
+    try {
+        $data = GdprService::exportCustomer($customerId);
+    } catch (RuntimeException $e) {
+        // Unknown id or a customer of another store: nothing is disclosed.
+        setFlash('err', I18n::t('admin.gdpr.invalid_customer'));
+        header('Location: admin.php?p=gdpr');
+        exit;
+    }
+    $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    GdprService::logEvent([
+        'action'      => 'export',
+        'customer_id' => $customerId,
+        'email'       => (string)($data['customer']['email'] ?? ''),
+        'actor'       => Security::adminUser(),
+        'note'        => 'Admin GDPR export of customer #' . $customerId,
+        'payload'     => ['orders' => count($data['orders']), 'addresses' => count($data['addresses'])],
+    ]);
+    header('Content-Type: application/json; charset=utf-8');
+    header('Content-Disposition: attachment; filename="gdpr-export-customer-' . $customerId . '.json"');
+    header('Cache-Control: no-store, private');
+    echo $json;
+    exit;
+}
 function handleCustomerStatus(): void {
     Security::adminRequire('customers.edit');
     $id = Security::int($_POST['customer_id'] ?? 0);
     $status = Security::clean($_POST['status'] ?? '');
     if ($id > 0 && Customers::setStatus($id, $status)) {
-        setFlash('ok', 'Zákazník #' . $id . ' → ' . $status);
+        setFlash('ok', I18n::format('admin.customers.status_changed', ['id' => $id, 'status' => $status]));
     } else {
-        setFlash('err', 'Stav zákazníka sa nepodarilo zmeniť.');
+        setFlash('err', I18n::t('admin.customers.status_failed'));
     }
     header('Location: admin.php?p=customer&id=' . $id);
     exit;

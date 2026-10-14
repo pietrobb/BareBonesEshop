@@ -12,5 +12,6 @@ final class StorefrontComposition
         ] as $provider) {
             if (class_exists($provider)) $provider::register();
         }
+        Extensions::registerStorefront();
     }
 }

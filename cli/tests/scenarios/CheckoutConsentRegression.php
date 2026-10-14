@@ -57,7 +57,11 @@ if (($_GET["transport"] ?? "html") === "json") {
     header("Content-Type: application/json");
     echo json_encode(apiConsentDefinitions(), JSON_THROW_ON_ERROR);
 } else {
-    if ($_SERVER["REQUEST_METHOD"] === "GET" && isset($_GET["country"])) $_POST["country"] = $_GET["country"];
+    // A fresh checkout starts in the store country (SK); another country is reached through the no-JS country refresh.
+    if ($_SERVER["REQUEST_METHOD"] === "GET" && ($_GET["country"] ?? "SK") !== "SK") {
+        $_SERVER["REQUEST_METHOD"] = "POST";
+        $_POST = ["checkout" => "1", "checkout_refresh" => "1", "csrf_token" => "checkout-consent-test", "country" => $_GET["country"]];
+    }
     echo ($_GET["page"] ?? "") === "order-done" ? renderOrderDone((string)($_GET["order"] ?? "")) : renderCheckout();
 }
 ');

@@ -42,6 +42,21 @@ class ContentService {
         }
     }
 
+    /** Raw CMS page row owned by the active store (admin editing), regardless of status. */
+    public static function pageById(int $id): ?array {
+        $stmt = Db::get()->prepare("SELECT * FROM pages WHERE id=:id AND store_id=:store");
+        $stmt->execute([':id' => $id, ':store' => StoreContext::current()->id()]);
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    /** Id of the active store's page with this slug (any status), or null. */
+    public static function pageIdBySlug(string $slug): ?int {
+        $stmt = Db::get()->prepare("SELECT id FROM pages WHERE slug=:slug AND store_id=:store");
+        $stmt->execute([':slug' => $slug, ':store' => StoreContext::current()->id()]);
+        $id = $stmt->fetchColumn();
+        return $id === false ? null : (int)$id;
+    }
+
     public static function page(string $slug, ?string $locale = null): ?array {
         $slug = Security::slug($slug);
         if ($slug === '') return null;
@@ -111,6 +126,12 @@ class ContentService {
             $stmt->execute([':store' => StoreContext::current()->id(), ':source' => $sourcePath]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$row || $row['target_url'] === $sourcePath) return null;
+            // Fail closed for rows stored before validation was tightened or written outside the admin.
+            try {
+                self::url((string)$row['target_url'], false);
+            } catch (InvalidArgumentException) {
+                return null;
+            }
             return $row;
         } catch (PDOException $e) {
             if (self::missingTable($e)) return null;
@@ -272,7 +293,7 @@ class ContentService {
     }
 
     private static function path(string $value, string $label): string {
-        $path = parse_url(trim($value), PHP_URL_PATH);
+        $path = str_contains($value, '\\') ? null : parse_url(trim($value), PHP_URL_PATH);
         if (!is_string($path) || !str_starts_with($path, '/') || str_starts_with($path, '//') || preg_match('/[\x00-\x1F\x7F]/', $path)) {
             throw new InvalidArgumentException("Invalid {$label}");
         }
@@ -282,6 +303,8 @@ class ContentService {
     private static function url(string $value, bool $allowEmpty, bool $allowAbsolute = false): string {
         $value = trim($value);
         if ($value === '' && $allowEmpty) return '';
+        // Browsers treat "\" like "/", so "/\evil.com" would be a protocol-relative off-site URL.
+        if (str_contains($value, '\\')) throw new InvalidArgumentException('URL must not contain a backslash');
         if (str_starts_with($value, '/') && !str_starts_with($value, '//') && !preg_match('/[\x00-\x1F\x7F]/', $value)) return $value;
         if ($allowAbsolute && filter_var($value, FILTER_VALIDATE_URL) && strtolower((string)parse_url($value, PHP_URL_SCHEME)) === 'https') return $value;
         throw new InvalidArgumentException('URL must be a local path' . ($allowAbsolute ? ' or HTTPS URL' : ''));

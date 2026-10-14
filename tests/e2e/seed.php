@@ -47,10 +47,21 @@ $adminUsername = 'g12-operator';
 $adminPassword = 'G12-admin-password-2026';
 $adminId = AdminIdentity::create($adminUsername, $adminPassword, 'owner', true);
 AdminIdentity::grantStore($adminId, 'default', ['*']);
+// A second granted store makes the admin store switcher render (admin-store-switcher.spec.js).
+AdminIdentity::grantStore($adminId, 'cz', ['*']);
 $enrollment = AdminIdentity::enrollTotp($adminId);
 AdminIdentity::setStatus($adminId, 'active');
 
 $db->exec("UPDATE payment_methods SET provider='mock' WHERE code='card'");
+// With a Stripe test key, a second card method creates real Stripe test-mode Checkout sessions.
+$stripeTest = str_starts_with((string)($config['stripe_secret_key'] ?? ''), 'sk_test_');
+if ($stripeTest) {
+    $db->exec("INSERT INTO payment_methods (code, provider, name, description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, requires_online, active, sort_order)
+        SELECT 'card_stripe_test', 'stripe', 'Card (Stripe test mode)', description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, 1, 1, sort_order + 1
+        FROM payment_methods WHERE code = 'card'");
+    $db->exec("INSERT INTO payment_method_countries (method_code, country) SELECT 'card_stripe_test', country FROM payment_method_countries WHERE method_code = 'card'");
+    $db->exec("INSERT INTO payment_method_shipping (method_code, shipping_method_code) SELECT 'card_stripe_test', shipping_method_code FROM payment_method_shipping WHERE method_code = 'card'");
+}
 
 if (!defined('BB_TEST_LOAD_API_ONLY')) define('BB_TEST_LOAD_API_ONLY', true);
 require_once dirname(__DIR__, 2) . '/api.php';
@@ -100,12 +111,31 @@ if (!$rmaOrderItem) throw new RuntimeException('RMA fixture order has no item');
 [$rmaCreated, $rmaId, $rmaError] = Rma::create($rmaOrderId, null, 'G12 partial browser return', [(int)$rmaOrderItem['id'] => 1]);
 if (!$rmaCreated || !$rmaId) throw new RuntimeException('Cannot create E2E RMA: ' . (string)$rmaError);
 
+// A14.1: the oldest product (not on the home page) gets two 1920px photos for the responsive product-page check.
+$wideProduct = $db->query("SELECT id, slug, name, category_id FROM products WHERE status='active' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+if (!$wideProduct) throw new RuntimeException('Disposable E2E catalog has no active product');
+// A14.2: the first photo carries alt:"" as feeds do — the storefront must still name it.
+$db->prepare('UPDATE products SET images = ? WHERE id = ?')
+    ->execute([json_encode([['url' => '/assets/img/slider1.jpg', 'alt' => ''], '/assets/img/slider2.jpg']), (int)$wideProduct['id']]);
+$a11yCategory = $db->prepare('SELECT slug FROM categories WHERE id = ?');
+$a11yCategory->execute([(int)$wideProduct['category_id']]);
+$a11yCategorySlug = (string)$a11yCategory->fetchColumn();
+if ($a11yCategorySlug === '') throw new RuntimeException('Disposable E2E product has no category');
+$a11ySearchTerm = (string)(preg_split('~\s+~u', trim((string)$wideProduct['name']))[0] ?? '');
+
 $state = [
+    // product.php directly: the e2e server is `php -S` without the .htaccess /product/<slug> rewrite.
+    'responsive' => ['product_path' => '/product.php?slug=' . rawurlencode((string)$wideProduct['slug'])],
+    'a11y' => [
+        'category_path' => '/?page=category&slug=' . rawurlencode($a11yCategorySlug),
+        'search_path' => '/?page=search&q=' . rawurlencode($a11ySearchTerm),
+    ],
     'customer' => ['id' => (int)$customerId, 'email' => $customerEmail, 'password' => $customerPassword],
     'admin' => ['id' => $adminId, 'username' => $adminUsername, 'password' => $adminPassword, 'secret' => $enrollment['secret']],
     'fulfillment' => ['order_id' => $fulfillmentOrderId],
     'rma' => ['order_id' => $rmaOrderId, 'rma_id' => (int)$rmaId, 'source_invoice_id' => (int)$sourceInvoice['id']],
     'mock_webhook_secret' => (string)$config['mock_webhook_secret'],
+    'stripe_test' => $stripeTest,
 ];
 $statePath = (string)(getenv('E2E_STATE_PATH') ?: (__DIR__ . '/.state.json'));
 if (file_put_contents($statePath, json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), LOCK_EX) === false) {

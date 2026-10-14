@@ -1,1 +1,1 @@
-{{#if children}}<div class="nav-item"><a href="{{url}}">{{label}}</a><div class="nav-dropdown">{{#each children}}<a href="{{url}}">{{label}}</a>{{/each}}</div></div>{{else}}<a href="{{url}}">{{label}}</a>{{/if}}
+{{#if children}}<div class="nav-item"><a href="{{url}}">{{label}}</a><details class="nav-sub"><summary aria-label="{{label}}: {{../t.subcategories}}"></summary><div class="nav-dropdown">{{#each children}}<a href="{{url}}">{{label}}</a>{{/each}}</div></details></div>{{else}}<a href="{{url}}">{{label}}</a>{{/if}}

@@ -3,6 +3,47 @@
 class Setup
 {
     public const SCHEMA_VERSION = 1;
+    public const SUBMODULE_ACTION = 'Run git submodule update --init (or clone with --recurse-submodules).';
+
+    public static function bundledFormsPresent(string $root): bool
+    {
+        return is_file($root . '/vendor/bbf/bbf_render.php');
+    }
+
+    /**
+     * Creates config.php from config.example.php with a fresh admin_identity_key.
+     * An existing config.php is never touched.
+     */
+    public static function createConfig(?string $root = null, string $appUrl = ''): array
+    {
+        $root ??= dirname(__DIR__);
+        $target = $root . '/config.php';
+        if (is_file($target)) return ['path' => 'config.php', 'action' => 'unchanged'];
+        if ($appUrl !== '' && (!filter_var($appUrl, FILTER_VALIDATE_URL) || !in_array(strtolower((string)parse_url($appUrl, PHP_URL_SCHEME)), ['http', 'https'], true))) {
+            throw new InvalidArgumentException('--app-url must be an absolute http(s) URL');
+        }
+        $template = @file_get_contents($root . '/config.example.php');
+        if (!is_string($template)) throw new RuntimeException('config.example.php is missing');
+        $config = $template;
+        foreach (['admin_identity_key' => base64_encode(random_bytes(32)), 'app_url' => rtrim($appUrl, '/')] as $key => $value) {
+            if ($value === '') continue;
+            $count = 0;
+            $config = preg_replace("/('" . $key . "'\s*=>\s*)''/", '${1}' . var_export($value, true), (string)$config, 1, $count);
+            if (!is_string($config) || $count !== 1) throw new RuntimeException("config.example.php has no {$key} entry");
+        }
+        $tmp = $target . '.' . bin2hex(random_bytes(4)) . '.tmp';
+        if (file_put_contents($tmp, $config, LOCK_EX) === false) throw new RuntimeException('Cannot write config.php');
+        @chmod($tmp, 0640);
+        if (!is_array(require $tmp)) {
+            @unlink($tmp);
+            throw new RuntimeException('Generated config.php does not return an array');
+        }
+        if (!@rename($tmp, $target)) {
+            @unlink($tmp);
+            throw new RuntimeException('Cannot write config.php');
+        }
+        return ['path' => 'config.php', 'action' => 'created', 'generated' => ['admin_identity_key'], 'app_url' => rtrim($appUrl, '/')];
+    }
 
     public static function doctor(?array $config = null, ?string $root = null, ?PDO $db = null): array
     {
@@ -14,6 +55,8 @@ class Setup
         };
 
         $add(version_compare(PHP_VERSION, '8.1.0', '>=') ? 'pass' : 'fail', 'runtime.php', 'PHP ' . PHP_VERSION, 'Install PHP 8.1 or newer.');
+        $bbf = self::bundledFormsPresent($root);
+        $add($bbf ? 'pass' : 'fail', 'runtime.vendor_bbf', 'BareBonesForms submodule ' . ($bbf ? 'present' : 'missing'), self::SUBMODULE_ACTION);
         foreach (['pdo', 'json'] as $extension) {
             $add(extension_loaded($extension) ? 'pass' : 'fail', 'runtime.extension.' . $extension, $extension . (extension_loaded($extension) ? ' loaded' : ' missing'), "Enable PHP extension {$extension}.");
         }
@@ -23,6 +66,8 @@ class Setup
         $add(is_array($schema) && ($schema['properties']['db_driver']['enum'] ?? null) === ['sqlite', 'mysql'] ? 'pass' : 'fail', 'config.schema', 'Machine-readable config schema ' . (is_array($schema) ? 'loaded' : 'missing or invalid'), 'Restore config/config.schema.json from the release.');
         $driver = strtolower((string)($config['db_driver'] ?? ''));
         $add(in_array($driver, ['sqlite', 'mysql'], true) ? 'pass' : 'fail', 'config.db_driver', $driver !== '' ? "Database driver: {$driver}" : 'Database driver missing', 'Set db_driver to sqlite or mysql.');
+        $appUrl = (string)($config['app_url'] ?? '');
+        $add($appUrl !== '' ? 'pass' : 'warn', 'config.app_url', $appUrl !== '' ? 'Public base URL configured.' : 'app_url is empty: sitemap, password reset and e-mail links are unavailable.', $appUrl !== '' ? '' : "Set app_url in config.php (php cli/setup.php install --app-url=URL sets it on a new install).");
 
         $storesPath = $root . '/stores.json';
         $stores = is_file($storesPath) ? json_decode((string)file_get_contents($storesPath), true) : null;
@@ -106,6 +151,12 @@ class Setup
         $add($mail === 'log' ? 'warn' : 'pass', 'provider.mail', "Mail provider selected: {$mail}", $mail === 'log' ? 'Configure smtp or ses and send a staging message before launch.' : '');
         $webhooks = array_filter((array)($config['outbound_webhooks'] ?? []), static fn($endpoint): bool => is_array($endpoint) && ($endpoint['active'] ?? true));
         $add($webhooks === [] ? 'warn' : 'pass', 'provider.webhook', $webhooks === [] ? 'No active outbound webhook configured.' : count($webhooks) . ' active outbound webhook endpoint(s).', 'Configure one signed staging endpoint and verify a delivery audit row.');
+        Extensions::boot($config);
+        $extensionErrors = Extensions::errors();
+        $add($extensionErrors === [] ? 'pass' : 'fail', 'extensions', $extensionErrors === []
+            ? count(Extensions::loaded()) . ' extension(s) loaded.'
+            : 'Extensions not loaded: ' . implode('; ', array_map(static fn($code, string $error): string => "{$code}: {$error}", array_keys($extensionErrors), $extensionErrors)),
+            'Fix or disable the listed extensions (config "extensions", directory extensions/<code>/).');
 
         $shipping = (array)($config['integrations']['http_shipping'] ?? []);
         $shippingReady = self::integrationReady($shipping);

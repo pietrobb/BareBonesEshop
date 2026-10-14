@@ -50,7 +50,7 @@ class OfflinePaymentQueue {
         return $recorded;
     }
 
-    private static function isOfflineTransfer(array $order, array $snapshot): bool {
+    public static function isOfflineTransfer(array $order, array $snapshot): bool {
         $type = (string)($snapshot['service_type'] ?? '');
         if ($type !== '') return $type === 'bank_transfer';
         return (string)($order['payment_method'] ?? '') === 'bank_transfer';

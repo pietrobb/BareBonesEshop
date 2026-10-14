@@ -48,7 +48,8 @@ final class MinimalPdf
         'ś' => 's',  'Ś' => 'S',
         'ź' => 'z',  'Ź' => 'Z',
         'ż' => 'z',  'Ż' => 'Z',
-        '€' => "\x80",
+        // "€" is in CP1252 (0x80): iconv converts it. Pre-mapping it to a raw 0x80 byte made the
+        // string invalid UTF-8, so iconv //IGNORE silently dropped the euro sign.
     ];
 
     public function addPage(): void

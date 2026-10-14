@@ -1,0 +1,125 @@
+name: Payment gateway (Stripe test mode)
+
+# Checkout critical path, layer 3 (P0 2026-10-13): a real Stripe test-mode Checkout session
+# opened by a real browser click. Runs nightly and whenever a file on the checkout critical
+# path changes. Needs the repository secret STRIPE_TEST_SECRET_KEY (sk_test_...); without it
+# the spec reports a skip and this job fails, because a critical-path change must not ship unproven.
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/Security.php'
+      - 'src/UrlAliases.php'
+      - 'src/Updater.php'
+      - 'src/CheckoutService.php'
+      - 'src/CheckoutSession.php'
+      - 'src/PaymentService.php'
+      - 'src/Http/ApiHandlers.php'
+      - 'src/Entrypoints/Storefront.php'
+      - 'src/Entrypoints/Storefront/CheckoutPages.php'
+      - 'index.php'
+      - 'redirect.php'
+      - '.htaccess'
+      - 'adapters/PaymentAdapter.php'
+      - 'adapters/contrib/*Payment.php'
+      - 'themes/*/blocks/storefront/checkout*.html'
+      - 'themes/*/assets/storefront.js'
+      - 'tests/e2e/**'
+      - 'playwright.config.js'
+      - '.github/workflows/payment-gateway.yml'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'src/Security.php'
+      - 'src/UrlAliases.php'
+      - 'src/Updater.php'
+      - 'src/CheckoutService.php'
+      - 'src/CheckoutSession.php'
+      - 'src/PaymentService.php'
+      - 'src/Http/ApiHandlers.php'
+      - 'src/Entrypoints/Storefront.php'
+      - 'src/Entrypoints/Storefront/CheckoutPages.php'
+      - 'index.php'
+      - 'redirect.php'
+      - '.htaccess'
+      - 'adapters/PaymentAdapter.php'
+      - 'adapters/contrib/*Payment.php'
+      - 'themes/*/blocks/storefront/checkout*.html'
+      - 'themes/*/assets/storefront.js'
+      - 'tests/e2e/**'
+      - 'playwright.config.js'
+      - '.github/workflows/payment-gateway.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  stripe-test-checkout:
+    name: Stripe test-mode checkout (Chromium, WebKit iPhone, Firefox)
+    runs-on: ubuntu-latest
+    env:
+      E2E_STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+
+    steps:
+      - name: Require the Stripe test key
+        run: |
+          if [ -z "$E2E_STRIPE_TEST_SECRET_KEY" ]; then
+            echo "::error::Repository secret STRIPE_TEST_SECRET_KEY (sk_test_...) is missing; the real gateway path is unproven."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo, pdo_sqlite, mbstring, json, dom, libxml, sodium, curl
+          coverage: none
+          tools: none
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install Playwright browsers
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium webkit firefox
+
+      - name: Prepare disposable SQLite application with the Stripe test key
+        env:
+          E2E_RUNTIME_DIR: /tmp/barebones-e2e-stripe
+          E2E_STATE_PATH: /tmp/barebones-e2e-stripe-state.json
+          BBE_ADMIN_IDENTITY_KEY: RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU=
+        run: |
+          php tests/e2e/prepare.php
+          php cli/migrate.php
+          php cli/seed.php --count=30
+          php tests/e2e/seed.php
+
+      - name: Real Stripe Checkout redirect
+        env:
+          CI: '1'
+          E2E_STATE_PATH: /tmp/barebones-e2e-stripe-state.json
+          BBE_ADMIN_IDENTITY_KEY: RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU=
+        run: npx playwright test stripe-test.spec.js commerce.spec.js --grep "Stripe|card checkout|online payment|double click"
+
+      - name: Upload browser evidence on failure
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: stripe-test-evidence
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7

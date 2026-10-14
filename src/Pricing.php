@@ -278,6 +278,8 @@ class Pricing {
      */
     public static function applyCoupon(string $code, int $subtotal, ?string $customerEmail = null): array {
         $cfg = self::config();
+        $code = trim($code);
+        $customerEmail = $customerEmail === null ? null : self::normalizeEmail($customerEmail);
 
         foreach ($cfg['cart_rules'] ?? [] as $rule) {
             if (!($rule['active'] ?? false)) continue;
@@ -316,38 +318,55 @@ class Pricing {
             return ['discount' => $discount, 'name' => $rule['name'], 'error' => null];
         }
 
-        return ['discount' => 0, 'name' => null, 'error' => 'Invalid coupon'];
+        // Coupon promotions from the admin (promotions.coupon_code); pricing.json keeps precedence and the admin refuses its codes.
+        $promotion = class_exists('Promotions') ? Promotions::couponRule($code) : null;
+        if ($promotion === null) return ['discount' => 0, 'name' => null, 'error' => 'Invalid coupon'];
+        $limits = Promotions::couponLimits($promotion);
+        if ($limits['max_uses'] > 0 && self::couponUseCount($code) >= $limits['max_uses']) {
+            return ['discount' => 0, 'name' => null, 'error' => 'Coupon expired'];
+        }
+        if ($limits['per_customer'] > 0 && $customerEmail && self::couponUseCount($code, $customerEmail) >= $limits['per_customer']) {
+            return ['discount' => 0, 'name' => null, 'error' => 'Coupon already used'];
+        }
+        return Promotions::couponDiscount($promotion, $subtotal);
+    }
+
+    /** Upper-case coupon codes that pricing.json defines for the active store. */
+    public static function configCouponCodes(): array {
+        $codes = [];
+        foreach (self::config()['cart_rules'] ?? [] as $rule) {
+            if (is_array($rule) && ($rule['type'] ?? '') === 'coupon' && trim((string)($rule['code'] ?? '')) !== '') $codes[] = strtoupper(trim((string)$rule['code']));
+        }
+        return array_values(array_unique($codes));
     }
 
     /**
-     * Record a coupon use after successful order.
-     * Re-validates max_uses and per_customer limits inside the caller's transaction
-     * to prevent race conditions on high-traffic flash coupons.
-     * Throws \RuntimeException if limits exceeded (caller must rollback).
+     * Record a coupon use after successful order, inside the caller's order transaction.
+     * max_uses and per_customer are claimed with a conditional counter UPDATE, so concurrent
+     * redemptions serialize on the counter row instead of racing a COUNT + INSERT.
+     * Throws \RuntimeException if a limit is exhausted (caller must rollback).
      */
     public static function recordCouponUse(string $code, int $orderId, string $email, int $discount): void {
         $cfg = self::config();
-        $upperCode = strtoupper($code);
+        $upperCode = strtoupper(trim($code));
+        $email = self::normalizeEmail($email);
 
-        // Re-check limits atomically inside the ongoing transaction
+        $limits = null;
         foreach ($cfg['cart_rules'] ?? [] as $rule) {
             if (($rule['type'] ?? '') !== 'coupon') continue;
             if (strtoupper($rule['code'] ?? '') !== $upperCode) continue;
-
-            if (!empty($rule['max_uses'])) {
-                $totalUses = self::couponUseCount($upperCode);
-                if ($totalUses >= $rule['max_uses']) {
-                    throw new \RuntimeException("Coupon {$upperCode} exceeded max_uses limit (race condition)");
-                }
-            }
-
-            if (!empty($rule['per_customer'])) {
-                $customerUses = self::couponUseCount($upperCode, $email);
-                if ($customerUses >= $rule['per_customer']) {
-                    throw new \RuntimeException("Coupon {$upperCode} already used by {$email}");
-                }
-            }
+            $limits = ['max_uses' => (int)($rule['max_uses'] ?? 0), 'per_customer' => (int)($rule['per_customer'] ?? 0)];
             break;
+        }
+        if ($limits === null && class_exists('Promotions')) {
+            $promotion = Promotions::couponRule($upperCode, false);
+            if ($promotion !== null) $limits = Promotions::couponLimits($promotion);
+        }
+        if (!empty($limits['max_uses']) && !self::claimCouponUse($upperCode, null, (int)$limits['max_uses'])) {
+            throw new \RuntimeException("Coupon {$upperCode} exceeded max_uses limit");
+        }
+        if (!empty($limits['per_customer']) && !self::claimCouponUse($upperCode, $email, (int)$limits['per_customer'])) {
+            throw new \RuntimeException("Coupon {$upperCode} already used by this customer");
         }
 
         $db = Db::get();
@@ -355,15 +374,47 @@ class Pricing {
         $stmt->execute([':code' => $upperCode, ':oid' => $orderId, ':email' => $email, ':disc' => $discount, ':store' => StoreContext::current()->id()]);
     }
 
-    /** Count coupon uses (total or per customer) */
+    public static function normalizeEmail(string $email): string {
+        return mb_strtolower(trim($email), 'UTF-8');
+    }
+
+    /** Counter subject: '' for all uses, a hash for one customer (no plain e-mail outside coupon_uses). */
+    private static function couponSubject(?string $email): string {
+        return $email === null ? '' : 'customer:' . hash('sha256', $email);
+    }
+
+    /** Seed the counter from historic uses once, then claim one use only while below the limit. */
+    private static function claimCouponUse(string $code, ?string $email, int $limit): bool {
+        $db = Db::get();
+        $store = StoreContext::current()->id();
+        $subject = self::couponSubject($email);
+        $seed = $db->prepare(Db::insertIgnore() . " INTO coupon_usage_counters (store_id, coupon_code, subject, uses)
+            SELECT :store, :code, :subject, COUNT(*) FROM coupon_uses WHERE store_id = :use_store AND coupon_code = :use_code"
+            . ($email === null ? '' : ' AND LOWER(TRIM(customer_email)) = :email'));
+        $params = [':store' => $store, ':code' => $code, ':subject' => $subject, ':use_store' => $store, ':use_code' => $code];
+        if ($email !== null) $params[':email'] = $email;
+        $seed->execute($params);
+        $claim = $db->prepare("UPDATE coupon_usage_counters SET uses = uses + 1
+            WHERE store_id = :store AND coupon_code = :code AND subject = :subject AND uses < :limit");
+        $claim->execute([':store' => $store, ':code' => $code, ':subject' => $subject, ':limit' => $limit]);
+        return $claim->rowCount() === 1;
+    }
+
+    /** Count coupon uses (total or per normalized customer e-mail) for the checkout preview. */
     private static function couponUseCount(string $code, ?string $email = null): int {
         $db = Db::get();
-        if ($email) {
-            $stmt = $db->prepare("SELECT COUNT(*) FROM coupon_uses WHERE coupon_code = :code AND customer_email = :email AND store_id = :store");
-            $stmt->execute([':code' => strtoupper($code), ':email' => $email, ':store' => StoreContext::current()->id()]);
+        $code = strtoupper($code);
+        $store = StoreContext::current()->id();
+        $counter = $db->prepare("SELECT uses FROM coupon_usage_counters WHERE store_id = :store AND coupon_code = :code AND subject = :subject");
+        $counter->execute([':store' => $store, ':code' => $code, ':subject' => self::couponSubject($email)]);
+        $claimed = $counter->fetchColumn();
+        if ($claimed !== false) return (int)$claimed;
+        if ($email !== null) {
+            $stmt = $db->prepare("SELECT COUNT(*) FROM coupon_uses WHERE coupon_code = :code AND LOWER(TRIM(customer_email)) = :email AND store_id = :store");
+            $stmt->execute([':code' => $code, ':email' => $email, ':store' => $store]);
         } else {
             $stmt = $db->prepare("SELECT COUNT(*) FROM coupon_uses WHERE coupon_code = :code AND store_id = :store");
-            $stmt->execute([':code' => strtoupper($code), ':store' => StoreContext::current()->id()]);
+            $stmt->execute([':code' => $code, ':store' => $store]);
         }
         return (int)$stmt->fetchColumn();
     }

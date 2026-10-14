@@ -1,9 +1,29 @@
-const { test, expect } = require('@playwright/test');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { state, adminSignIn } = require('./support');
+const { test, expect, state, adminSignIn } = require('./support');
+
+// Hosted payment page on its own origin (tests/e2e/mock-gateway.php, prepare.php mock_checkout_url).
+// The browser must be allowed to follow the checkout POST redirect there: CSP form-action
+// applies to it, and page.route() cannot stand in because it does not see redirect hops (P0 2026-10-13).
+const GATEWAY = new URL(process.env.E2E_GATEWAY_URL || 'http://127.0.0.1:8099').origin;
+
+test.beforeEach(() => {
+  execFileSync('php', ['tests/e2e/reset-rate-limits.php'], { cwd: process.cwd(), encoding: 'utf8' });
+});
+
+async function fillCheckout(page, email) {
+  await page.goto('/?page=checkout');
+  await page.locator('input[name="name"]').fill('G12 Browser Customer');
+  await page.locator('input[name="email"]').fill(email);
+  await page.locator('input[name="phone"]').fill('+421900000012');
+  await page.locator('input[name="street"]').fill('Qualification 12');
+  await page.locator('input[name="city"]').fill('Bratislava');
+  await page.locator('input[name="zip"]').fill('81101');
+  await expect(page.locator('input[name="shipping_method"]').first()).toBeVisible();
+  await expect(page.locator('input[name="payment"]').first()).toBeVisible();
+}
 
 
 async function addFirstProduct(page) {
@@ -21,16 +41,10 @@ async function addFirstProduct(page) {
 }
 
 async function checkout(page, email) {
-  await page.goto('/?page=checkout');
-  await page.locator('input[name="name"]').fill('G12 Browser Customer');
-  await page.locator('input[name="email"]').fill(email);
-  await page.locator('input[name="phone"]').fill('+421900000012');
-  await page.locator('input[name="street"]').fill('Qualification 12');
-  await page.locator('input[name="city"]').fill('Bratislava');
-  await page.locator('input[name="zip"]').fill('81101');
-  await expect(page.locator('input[name="shipping_method"]').first()).toBeVisible();
-  await expect(page.locator('input[name="payment"]').first()).toBeVisible();
-  await page.locator('form.checkout-form button.btn-checkout[type="submit"]').click();
+  await fillCheckout(page, email);
+  await page.locator('form.checkout-form button.btn-checkout').click();
+  await page.waitForURL(url => url.origin === GATEWAY || url.searchParams.get('page') === 'order-done');
+  if (new URL(page.url()).origin === GATEWAY) await page.locator('#gateway-pay').click();
   await expect(page).toHaveURL(/page=order-done/);
   await expect(page.locator('.order-done > p strong')).not.toBeEmpty();
   const successUrl = new URL(page.url());
@@ -67,45 +81,103 @@ test('account login preserves authenticated checkout ownership', async ({ page }
   await checkout(page, state.customer.email);
 });
 
-test('online payment redirect and signed webhook complete the bound checkout', async ({ page }) => {
+test('HTML card checkout reaches the hosted gateway and resumes after cancel', async ({ page }) => {
+  const blocked = [];
+  page.on('console', (message) => { if (/form-action/i.test(message.text())) blocked.push(message.text()); });
+  await addFirstProduct(page);
+  await fillCheckout(page, 'card-redirect@example.test');
+  await page.locator('input[name="payment"][value="card"]').check();
+  const button = page.locator('form.checkout-form button.btn-checkout');
+  await Promise.all([page.waitForURL(url => url.origin === GATEWAY), button.click()]);
+  expect(blocked).toEqual([]);
+  const paymentUrl = page.url();
+  expect(new URL(paymentUrl).searchParams.get('cancel')).toContain('page=checkout-cancel');
+
+  // Gateway "back": the order is kept and can be paid, never "your cart is empty".
+  await page.locator('#gateway-back').click();
+  await expect(page).toHaveURL(/page=checkout-cancel/);
+  const payLink = page.locator('[data-pending-payment-link]');
+  await expect(payLink).toHaveAttribute('href', paymentUrl);
+  await page.goto('/?page=checkout');
+  await expect(page.locator('[data-pending-payment-link]')).toHaveAttribute('href', paymentUrl);
+  await Promise.all([page.waitForURL(url => url.origin === GATEWAY), page.locator('[data-pending-payment-link]').click()]);
+
+  // Paying ends the pending state.
+  await page.locator('#gateway-pay').click();
+  await expect(page).toHaveURL(/page=order-done/);
+  await page.goto('/?page=checkout');
+  await expect(page.locator('[data-pending-payment-link]')).toHaveCount(0);
+});
+
+test('checkout button locks while submitting and unlocks when the page is shown again', async ({ page }) => {
+  await addFirstProduct(page);
+  await fillCheckout(page, 'card-lock@example.test');
+  await page.locator('input[name="payment"][value="card"]').check();
+  const button = page.locator('form.checkout-form button.btn-checkout');
+  const label = await button.textContent();
+  const redirecting = await page.locator('form[data-checkout-form]').getAttribute('data-redirecting-label');
+  // A listener added after the storefront one keeps the document, so the locked state is observable.
+  await page.evaluate(() => document.addEventListener('submit', event => event.preventDefault()));
+  await button.click();
+  await expect(button).toBeDisabled();
+  await expect(button).toHaveText(redirecting);
+  await expect(button).toHaveAttribute('aria-busy', 'true');
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+  await expect(button).toBeEnabled();
+  await expect(button).toHaveText(label);
+});
+
+function orderFacts(arg) {
+  return JSON.parse(execFileSync('php', ['tests/e2e/order-facts.php', arg], { cwd: process.cwd(), encoding: 'utf8' }));
+}
+
+// Real customer path: click "submit" in the HTML form, follow the cross-origin redirect to the
+// hosted gateway, gateway calls the signed webhook server-to-server, customer returns paid.
+test('online payment redirect and signed webhook complete the bound checkout', async ({ page, request }) => {
   test.skip(!state.mock_webhook_secret, 'Run tests/e2e/seed.php first');
   await addFirstProduct(page);
-  await page.goto('/?page=checkout');
-  await expect(page.locator('input[name="payment"][value="card"]')).toBeVisible();
-  const csrf = await page.locator('input[name="csrf_token"]').inputValue();
-  const shippingMethod = await page.locator('input[name="shipping_method"]:checked').inputValue();
-  const result = await page.evaluate(async ({ csrf, shippingMethod }) => {
-    const response = await fetch('/api.php?action=checkout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
-      body: JSON.stringify({
-        name: 'G12 Online Customer', email: 'online-g12@example.test', phone: '+421900000014',
-        street: 'Qualification 14', city: 'Bratislava', zip: '81101', country: 'SK',
-        shipping_method: shippingMethod, payment_method: 'card'
-      })
-    });
-    return response.json();
-  }, { csrf, shippingMethod });
-  expect(result.success).toBeTruthy();
-  expect(result.payment_url).toContain('page=order-done');
-  expect(result.session_id).toMatch(/^mock_/);
+  await fillCheckout(page, 'online-g12@example.test');
+  await page.locator('input[name="payment"][value="card"]').check();
+  await Promise.all([
+    page.waitForURL(url => url.origin === GATEWAY),
+    page.locator('form.checkout-form button.btn-checkout').click(),
+  ]);
+  const gatewayUrl = new URL(page.url());
+  expect(gatewayUrl.searchParams.get('success')).toContain('page=order-done');
+  const sessionId = gatewayUrl.searchParams.get('session');
+  expect(sessionId).toMatch(/^mock_ORD-/);
+  const facts = orderFacts(sessionId.slice('mock_'.length));
+  expect(facts.payment_status).not.toBe('paid');
 
   const payload = JSON.stringify({
-    event_id: `g12-paid-${result.order_id}`,
-    order_id: result.order_id,
-    session_id: result.session_id,
-    amount: result.total,
+    event_id: `g12-paid-${facts.order_id}`,
+    order_id: facts.order_id,
+    session_id: sessionId,
+    amount: facts.total,
     currency: 'eur'
   });
   const signature = crypto.createHmac('sha256', state.mock_webhook_secret).update(payload).digest('hex');
-  const webhook = await page.evaluate(async ({ payload, signature }) => {
-    const response = await fetch('/api.php?action=webhook_payment&provider=mock', {
-      method: 'POST', body: payload,
-      headers: { 'Content-Type': 'application/json', 'X-Mock-Signature': signature }
-    });
-    return response.json();
-  }, { payload, signature });
-  expect(webhook.status).toBe('ok');
+  const webhook = await request.post('/api.php?action=webhook_payment&provider=mock', {
+    data: payload, headers: { 'Content-Type': 'application/json', 'X-Mock-Signature': signature }
+  });
+  expect((await webhook.json()).status).toBe('ok');
+
+  await page.locator('#gateway-pay').click();
+  await expect(page).toHaveURL(/page=order-done/);
+  await expect(page.locator('.payment-summary')).toBeVisible();
+  expect(orderFacts(sessionId.slice('mock_'.length)).payment_status).toBe('paid');
+});
+
+test('double click on the order button creates exactly one order and reaches the gateway', async ({ page }, testInfo) => {
+  const email = `card-double-${testInfo.project.name}@example.test`;
+  await addFirstProduct(page);
+  await fillCheckout(page, email);
+  await page.locator('input[name="payment"][value="card"]').check();
+  await Promise.all([
+    page.waitForURL(url => url.origin === GATEWAY),
+    page.locator('form.checkout-form button.btn-checkout').dblclick(),
+  ]);
+  expect(orderFacts(`--email=${email}`).count).toBe(1);
 });
 
 test('admin identity requires password plus current TOTP', async ({ page }) => {
@@ -118,7 +190,7 @@ test('admin product export and bulk controls use one valid form', async ({ page 
   await adminSignIn(page);
   await page.goto('/admin.php?p=products');
   await expect(page.locator('form form')).toHaveCount(0);
-  await expect(page.locator('#bulk-form')).toHaveAttribute('data-confirm', 'OK?');
+  await expect(page.locator('#bulk-form')).toHaveAttribute('data-confirm', 'Apply the bulk action to the selected products?');
 
   const exportButton = page.locator('#bulk-form button[formaction*="action=export"]');
   await expect(exportButton).toHaveAttribute('formmethod', 'post');

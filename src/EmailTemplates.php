@@ -1,0 +1,254 @@
+<?php
+/**
+ * A15.8: e-mail templates — the file defaults in templates/emails/<locale>/ plus per store + locale overrides
+ * edited in the admin. An override may use only the variables the template's default files use, and its HTML
+ * may not carry scripts, event handlers, javascript: links, forms or embedded frames.
+ * Write methods return ['ok' => bool, 'id' => 0, 'message' => flash text] in the admin language.
+ */
+class EmailTemplates {
+    public const FALLBACK_LOCALE = 'en';
+    public const MAX_SUBJECT = 500;
+    public const MAX_BODY = 100000;
+
+    /** Sample order data for the admin preview: every variable any default template uses. */
+    public const SAMPLE = [
+        'customer_name' => 'Jana Nováková', 'customer_email' => 'jana.novakova@example.com', 'shop_name' => 'BareBones Shop',
+        'order_number' => 'SK-2026-000123', 'order_status' => 'pending', 'order_total' => '59,90 €',
+        'items' => [
+            ['name' => 'Tričko Basic', 'sku' => 'TS-001', 'quantity' => 2, 'total' => '39,80 €'],
+            ['name' => 'Šiltovka Classic', 'sku' => 'CAP-002', 'quantity' => 1, 'total' => '20,10 €'],
+        ],
+        'bank_transfer' => true, 'bank_beneficiary' => 'BareBones s.r.o.', 'bank_iban' => 'SK31 1200 0000 1987 4263 7541',
+        'bank_amount' => '59,90 €', 'bank_vs' => '2026000123', 'bank_message' => 'SK-2026-000123', 'bank_due_date' => '2026-10-27',
+        'carrier' => 'Packeta', 'tracking_number' => 'Z 123 4567 890', 'tracking_url' => 'https://tracking.example.com/Z1234567890',
+        'invoice_number' => '2026000045', 'issued_at' => '2026-10-13', 'due_date' => '2026-10-27', 'total_gross_formatted' => '59,90 €',
+        'invoice_download_url' => 'https://shop.example.com/account.php?p=invoice&id=45', 'seller_name' => 'BareBones s.r.o.',
+        'verify_url' => 'https://shop.example.com/account.php?p=verify&token=sample', 'reset_url' => 'https://shop.example.com/account.php?p=reset&token=sample',
+        'expires_in' => '60', 'cart_total' => '59,90 €', 'cart_url' => 'https://shop.example.com/cart.php?restore=sample',
+        'unsubscribe_url' => 'https://shop.example.com/account.php?p=unsubscribe&token=sample',
+        'download_links' => [['url' => 'https://shop.example.com/download.php?token=sample', 'label' => 'E-kniha (PDF)', 'validity' => '2026-11-12']],
+        'payment_method' => 'Bankový prevod', 'payment_status' => 'pending', 'payment_id' => 'pi_sample_123', 'awaiting_payment' => true,
+        'admin_url' => 'https://shop.example.com/admin.php?p=order&id=123',
+        'host' => 'shop.example.com', 'count' => 1, 'files' => [['kind' => 'modified', 'path' => 'src/Cart.php']], 'recorded_at' => '2026-10-13 08:00:00',
+        'alert' => false, 'digest' => true,
+        'out_items' => [['name' => 'Tričko Basic', 'sku' => 'TS-001', 'available' => 0, 'reserved' => 2, 'threshold' => 3, 'admin_url' => 'https://shop.example.com/admin.php?p=product&id=1']],
+        'critical_items' => [['name' => 'Šiltovka Classic', 'sku' => 'CAP-002', 'available' => 1, 'reserved' => 0, 'threshold' => 2, 'admin_url' => 'https://shop.example.com/admin.php?p=product&id=2']],
+        'low_items' => [], 'worst_out' => true, 'worst_critical' => false, 'worst_low' => false,
+        'first_name' => 'Tričko Basic', 'first_available' => 0, 'more_count' => 1,
+    ];
+
+    /** Template names that have a default HTML file in any locale. */
+    public static function templates(): array {
+        $names = [];
+        foreach (glob(self::dir() . '/*/*.html') ?: [] as $file) $names[basename($file, '.html')] = true;
+        $names = array_keys($names);
+        sort($names);
+        return $names;
+    }
+
+    /** Locales an override can be written for: the active store's languages. */
+    public static function locales(): array {
+        $context = StoreContext::current();
+        $languages = $context->config()['languages'] ?? [];
+        $languages = is_array($languages) ? array_values(array_filter($languages, 'is_string')) : [];
+        return $languages ?: [$context->defaultLocale()];
+    }
+
+    /** Variable names allowed in a template: every name its default files use, in any locale and part (incl. {{#each}} row fields). */
+    public static function allowedVariables(string $template): array {
+        $names = [];
+        foreach (glob(self::dir() . '/*/' . $template . '.{html,subject.txt,txt}', GLOB_BRACE) ?: [] as $file) {
+            foreach (self::tokens((string)file_get_contents($file)) as $token) {
+                if (preg_match('~^(?:#(?:if|each) )?(\w+)$~', $token, $m)) $names[$m[1]] = true;
+            }
+        }
+        $names = array_keys($names);
+        sort($names);
+        return $names;
+    }
+
+    /** The template parts from the files (locale, then the fallback locale, per part); null for a missing part. */
+    public static function fileSource(string $template, string $locale): array {
+        $parts = ['subject' => null, 'html' => null, 'text' => null];
+        if (!self::validName($template)) return $parts;
+        foreach (array_unique([$locale, self::FALLBACK_LOCALE]) as $loc) {
+            if (!preg_match('/^[a-z]{2}(?:[_-][A-Za-z]{2})?$/', $loc)) continue;
+            foreach (['subject' => '.subject.txt', 'html' => '.html', 'text' => '.txt'] as $part => $suffix) {
+                $file = self::dir() . "/{$loc}/{$template}{$suffix}";
+                if ($parts[$part] === null && is_file($file)) $parts[$part] = (string)file_get_contents($file);
+            }
+        }
+        if ($parts['subject'] !== null) $parts['subject'] = trim($parts['subject']);
+        return $parts;
+    }
+
+    /** The active store's override for exactly this template + locale, or null. */
+    public static function override(string $template, string $locale): ?array {
+        if (!StoreContext::hasCurrent()) return null;
+        $stmt = Db::get()->prepare('SELECT subject, html, body_text, updated_by, updated_at FROM email_template_overrides
+            WHERE store_id = :store AND template = :template AND locale = :locale');
+        $stmt->execute([':store' => StoreContext::current()->id(), ':template' => $template, ':locale' => $locale]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ? ['subject' => (string)$row['subject'], 'html' => (string)$row['html'], 'text' => (string)$row['body_text'],
+            'updated_by' => (string)$row['updated_by'], 'updated_at' => (string)$row['updated_at']] : null;
+    }
+
+    /** What MailService renders: the store override (an empty text part is derived from its HTML), else the files. */
+    public static function source(string $template, string $locale): array {
+        $override = self::override($template, $locale);
+        if ($override !== null) return ['subject' => $override['subject'], 'html' => $override['html'], 'text' => $override['text'] === '' ? null : $override['text']];
+        return self::fileSource($template, $locale);
+    }
+
+    /** Problems of a draft (empty = valid), in the admin language. */
+    public static function validate(string $template, string $subject, string $html, string $text): array {
+        $errors = [];
+        $subject = trim($subject);
+        if ($subject === '' || mb_strlen($subject) > self::MAX_SUBJECT || preg_match('/[\x00-\x1F\x7F]/', $subject)) {
+            $errors[] = I18n::format('admin.email.msg.subject', ['max' => self::MAX_SUBJECT]);
+        }
+        if (trim($html) === '' || strlen($html) > self::MAX_BODY || preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $html)) {
+            $errors[] = I18n::format('admin.email.msg.html', ['max' => self::MAX_BODY]);
+        }
+        if (strlen($text) > self::MAX_BODY || preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $text)) {
+            $errors[] = I18n::format('admin.email.msg.text', ['max' => self::MAX_BODY]);
+        }
+        $allowed = array_flip(self::allowedVariables($template));
+        $unknown = $malformed = [];
+        foreach (['subject' => $subject, 'html' => $html, 'text' => $text] as $part) {
+            $depth = ['if' => 0, 'each' => 0];
+            foreach (self::tokens($part) as $token) {
+                if (preg_match('~^/(if|each)$~', $token, $m)) {
+                    if (--$depth[$m[1]] < 0) $malformed['{{' . $token . '}}'] = true;
+                } elseif (preg_match('~^(?:#(if|each) )?(\w+)$~', $token, $m)) {
+                    if ($m[1] !== '') $depth[$m[1]]++;
+                    if (!isset($allowed[$m[2]])) $unknown[$m[2]] = true;
+                } else {
+                    $malformed['{{' . $token . '}}'] = true;
+                }
+            }
+            if ($depth['if'] > 0 || $depth['each'] > 0) $errors[] = I18n::t('admin.email.msg.unbalanced');
+        }
+        if ($unknown) $errors[] = I18n::format('admin.email.msg.unknown_vars', ['vars' => implode(', ', array_keys($unknown)), 'allowed' => implode(', ', array_keys($allowed))]);
+        if ($malformed) $errors[] = I18n::format('admin.email.msg.malformed', ['tags' => implode(' ', array_keys($malformed))]);
+        $unsafe = self::unsafeHtml($html);
+        if ($unsafe) $errors[] = I18n::format('admin.email.msg.unsafe', ['what' => implode(', ', $unsafe)]);
+        return array_values(array_unique($errors));
+    }
+
+    public static function save(string $template, string $locale, mixed $post): array {
+        if (!self::editable($template, $locale)) return self::result(false, I18n::t('admin.email.msg.unknown'));
+        $fields = self::scalars($post, ['subject', 'html', 'text']);
+        if ($fields === null) return self::result(false, I18n::t('admin.msg.invalid_form'));
+        $fields = array_map(static fn(string $v): string => str_replace("\r\n", "\n", $v), $fields);
+        $errors = self::validate($template, $fields['subject'], $fields['html'], $fields['text']);
+        if ($errors) return self::result(false, implode(' ', $errors));
+        $old = self::override($template, $locale);
+        $row = [':store' => StoreContext::current()->id(), ':template' => $template, ':locale' => $locale, ':subject' => trim($fields['subject']),
+            ':html' => $fields['html'], ':text' => trim($fields['text']) === '' ? '' : $fields['text'],
+            ':by' => mb_substr(Security::adminUser(), 0, 191), ':at' => gmdate('Y-m-d H:i:s')];
+        $db = Db::get();
+        $db->beginTransaction();
+        try {
+            $update = $db->prepare('UPDATE email_template_overrides SET subject = :subject, html = :html, body_text = :text, updated_by = :by, updated_at = :at
+                WHERE store_id = :store AND template = :template AND locale = :locale');
+            $update->execute($row);
+            if ($update->rowCount() === 0 && $old === null) {
+                $db->prepare('INSERT INTO email_template_overrides (store_id, template, locale, subject, html, body_text, updated_by, updated_at)
+                    VALUES (:store, :template, :locale, :subject, :html, :text, :by, :at)')->execute($row);
+            }
+            AuditLog::log('email_template', 0, $old === null ? null : self::auditRow($template, $locale, $old),
+                self::auditRow($template, $locale, ['subject' => $row[':subject'], 'html' => $row[':html'], 'text' => $row[':text']]), 'Admin e-mail template override');
+            $db->commit();
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            Logger::error('email template save failed', ['template' => $template, 'locale' => $locale, 'error' => $e->getMessage()]);
+            return self::result(false, I18n::t('admin.email.msg.save_failed'));
+        }
+        return self::result(true, I18n::format('admin.email.msg.saved', ['template' => $template, 'locale' => $locale]));
+    }
+
+    /** Drop the active store's override: the file default applies again. */
+    public static function reset(string $template, string $locale): array {
+        if (!self::editable($template, $locale)) return self::result(false, I18n::t('admin.email.msg.unknown'));
+        $old = self::override($template, $locale);
+        if ($old === null) return self::result(true, I18n::format('admin.email.msg.reset', ['template' => $template, 'locale' => $locale]));
+        $db = Db::get();
+        $db->beginTransaction();
+        try {
+            $db->prepare('DELETE FROM email_template_overrides WHERE store_id = :store AND template = :template AND locale = :locale')
+                ->execute([':store' => StoreContext::current()->id(), ':template' => $template, ':locale' => $locale]);
+            AuditLog::log('email_template', 0, self::auditRow($template, $locale, $old), null, 'Admin e-mail template reset');
+            $db->commit();
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            Logger::error('email template reset failed', ['template' => $template, 'locale' => $locale, 'error' => $e->getMessage()]);
+            return self::result(false, I18n::t('admin.email.msg.save_failed'));
+        }
+        return self::result(true, I18n::format('admin.email.msg.reset', ['template' => $template, 'locale' => $locale]));
+    }
+
+    /** Rendered sample message for the preview; null parts take the stored template (override or file). */
+    public static function preview(string $template, string $locale, ?array $draft = null): array {
+        $source = $draft ?? self::source($template, $locale);
+        $html = MailService::renderString((string)($source['html'] ?? "<p>{$template}</p>"), self::SAMPLE);
+        $subject = trim(str_replace(["\r", "\n"], ' ', MailService::renderString((string)($source['subject'] ?? $template), self::SAMPLE, false)));
+        $text = (string)($source['text'] ?? '') !== '' ? MailService::renderString((string)$source['text'], self::SAMPLE, false) : MailService::textFromHtml($html);
+        return ['subject' => $subject, 'html' => $html, 'text' => $text];
+    }
+
+    public static function editable(string $template, string $locale): bool {
+        return in_array($template, self::templates(), true) && in_array($locale, self::locales(), true);
+    }
+
+    /** Names of HTML constructs that may not appear in a template override (empty = safe). */
+    public static function unsafeHtml(string $html): array {
+        $found = [];
+        if (preg_match_all('~<\s*/?\s*(script|iframe|frame|frameset|object|embed|applet|form|input|button|textarea|select|meta|link|base|svg|math|template|portal)\b~i', $html, $m)) {
+            foreach ($m[1] as $tag) $found['<' . strtolower($tag) . '>'] = true;
+        }
+        if (preg_match('~<[^>]*?[\s/"\']on[a-z]+\s*=~i', $html)) $found['on*='] = true;
+        if (preg_match('~<[^>]*?\ssrcdoc\s*=~i', $html)) $found['srcdoc'] = true;
+        // Entity-encoded or whitespace-split schemes ("jav&#x61;script:", "java\tscript:") count as well.
+        $decoded = preg_replace('/[\x00-\x20]+/', '', html_entity_decode($html, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        foreach (['javascript:', 'vbscript:', 'data:text/html', 'expression(', '@import'] as $needle) {
+            if (stripos((string)$decoded, $needle) !== false) $found[$needle] = true;
+        }
+        return array_keys($found);
+    }
+
+    /** Contents of every {{…}} placeholder. */
+    private static function tokens(string $source): array {
+        preg_match_all('~\{\{(.*?)\}\}~s', $source, $m);
+        return $m[1];
+    }
+
+    private static function auditRow(string $template, string $locale, array $parts): array {
+        return ['template' => $template, 'locale' => $locale, 'subject' => $parts['subject'], 'html_sha256' => hash('sha256', $parts['html']),
+            'text_sha256' => hash('sha256', $parts['text'])];
+    }
+
+    private static function validName(string $template): bool {
+        return preg_match('/^[a-z0-9_-]{1,80}$/i', $template) === 1;
+    }
+
+    private static function dir(): string {
+        return dirname(__DIR__) . '/templates/emails';
+    }
+
+    private static function result(bool $ok, string $message): array {
+        return ['ok' => $ok, 'id' => 0, 'message' => $message];
+    }
+
+    /** The posted fields as strings (missing = ''), or null when the post or a field is not scalar. */
+    private static function scalars(mixed $post, array $names): ?array {
+        if (!is_array($post)) return null;
+        $fields = [];
+        foreach ($names as $name) {
+            $value = $post[$name] ?? '';
+            if (!is_scalar($value)) return null;
+            $fields[$name] = (string)$value;
+        }
+        return $fields;
+    }
+}

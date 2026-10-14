@@ -41,20 +41,8 @@ try {
         $status = $result['status'];
         $body = $result['body'];
     }
-} catch (JsonException|InvalidArgumentException $e) {
-    $status = 400;
-    $body = ['error' => ['code' => 'invalid_request', 'message' => $e->getMessage()]];
-} catch (UnexpectedValueException $e) {
-    $status = 409;
-    $body = ['error' => ['code' => 'idempotency_conflict', 'message' => $e->getMessage()]];
-} catch (DomainException $e) {
-    $status = 403;
-    $body = ['error' => ['code' => 'forbidden', 'message' => 'Insufficient scope or store permission']];
-} catch (ApiAuthException $e) {
-    $status = 401;
-    $body = ['error' => ['code' => 'unauthorized', 'message' => 'Invalid API credential']];
 } catch (Throwable $e) {
-    error_log('API v1 error: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
+    ['status' => $status, 'body' => $body] = ApiV1::errorResponse($e);
 }
 
 http_response_code($status);

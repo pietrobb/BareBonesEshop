@@ -58,6 +58,23 @@ class Cart {
         return ['ok' => true, 'error' => null, 'item' => $item, 'count' => (int)$summary['count']];
     }
 
+    /**
+     * Put the lines of a past order back into the cart. Every line goes through addValidated, so the
+     * current catalog decides: today's price (the cart never stores one), availability and variants.
+     * Lines that can no longer be bought are skipped and reported by name.
+     */
+    public static function reorder(array $orderItems): array {
+        $added = [];
+        $skipped = [];
+        foreach ($orderItems as $item) {
+            $variantId = (int)($item['variant_id'] ?? 0);
+            $result = self::addValidated((int)$item['product_id'], $variantId > 0 ? $variantId : null, (int)$item['quantity']);
+            if ($result['ok']) $added[] = (string)$item['name'];
+            else $skipped[] = (string)$item['name'];
+        }
+        return ['added' => $added, 'skipped' => $skipped];
+    }
+
     public static function update(string $key, int $qty): void {
         if ($qty <= 0) {
             unset($_SESSION['cart'][$key]);
@@ -106,7 +123,7 @@ class Cart {
             $ph = implode(',', array_fill(0, count($productIds), '?'));
             $stmt = $db->prepare("SELECT id, name, slug, images, price, compare_price, sku, stock, currency,
                     vat_class, product_type, category_id, brand_id, weight_g, length_mm, width_mm, height_mm,
-                    availability, available_from
+                    availability, available_from, inventory_policy
                 FROM products WHERE id IN ({$ph}) AND store_id = ? AND status = 'active'");
             $stmt->execute([...array_values($productIds), StoreContext::current()->catalogId()]);
             while ($row = $stmt->fetch()) $products[(int)$row['id']] = $row;
@@ -118,7 +135,7 @@ class Cart {
             $ph = implode(',', array_fill(0, count($variantIds), '?'));
             $stmt = $db->prepare("SELECT v.id, v.product_id, v.sku, v.name, v.stock, v.price_delta,
                     v.price_absolute, v.availability, v.available_from, v.media, v.weight_g,
-                    v.length_mm, v.width_mm, v.height_mm
+                    v.length_mm, v.width_mm, v.height_mm, v.inventory_policy
                 FROM variants v
                 JOIN products p ON p.id = v.product_id AND p.store_id = ?
                 WHERE v.id IN ({$ph})");
@@ -135,7 +152,9 @@ class Cart {
             if (!$product) { unset($_SESSION['cart'][$key]); continue; }
             $isDigital = VariantAvailability::isDigitalType((string)($product['product_type'] ?? ''));
             $availability = (string)($product['availability'] ?? VariantAvailability::ACTIVE);
-            if ($availability === VariantAvailability::ACTIVE
+            // Same policy resolution as VariantAvailability::isPurchasable and Inventory::reserveSku.
+            $policy = (string)($product['inventory_policy'] ?? '') ?: Inventory::DENY;
+            if ($availability === VariantAvailability::ACTIVE && $policy !== Inventory::PREORDER
                 && !empty($product['available_from'])
                 && strtotime((string)$product['available_from']) > time()) {
                 $availability = VariantAvailability::COMING_SOON;
@@ -155,7 +174,9 @@ class Cart {
                 $variantName = $variant['name'];
                 $stock = (int)$variant['stock'];
                 $availability = (string)($variant['availability'] ?? VariantAvailability::ACTIVE);
-                if ($availability === VariantAvailability::ACTIVE
+                $variantPolicy = (string)($variant['inventory_policy'] ?? '');
+                if ($variantPolicy !== '' && $variantPolicy !== 'inherit') $policy = $variantPolicy;
+                if ($availability === VariantAvailability::ACTIVE && $policy !== Inventory::PREORDER
                     && !empty($variant['available_from'])
                     && strtotime((string)$variant['available_from']) > time()) {
                     $availability = VariantAvailability::COMING_SOON;
@@ -179,7 +200,9 @@ class Cart {
             }
             $currencyMismatch = ($currency !== $cartCurrency);
 
-            $qty = $isDigital ? 1 : min((int)$item['qty'], $stock);
+            // Backorder/preorder lines keep the requested quantity; the shortfall is frozen at reservation.
+            $allowsShortfall = in_array($policy, [Inventory::BACKORDER, Inventory::PREORDER], true);
+            $qty = $isDigital ? 1 : ($allowsShortfall ? (int)$item['qty'] : min((int)$item['qty'], $stock));
             if ($isDigital && (int)$item['qty'] !== 1) $_SESSION['cart'][$key]['qty'] = 1;
             $available = $availability === VariantAvailability::ACTIVE && ($isDigital || $qty > 0);
             if (!$available) $qty = (int)$item['qty']; // preserve requested qty for display
@@ -229,6 +252,7 @@ class Cart {
                 'stock'            => $stock,
                 'product_type'     => $product['product_type'] ?? 'simple',
                 'availability'     => $availability,
+                'inventory_policy' => $policy,
                 'weight_g'         => $weightG,
                 'length_mm'        => $lengthMm,
                 'width_mm'         => $widthMm,

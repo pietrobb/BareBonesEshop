@@ -111,12 +111,12 @@ class Categories {
 
         $stmt = Db::get()->prepare("
             SELECT id FROM categories
-            WHERE store_id = :store AND (path = :path OR path LIKE :pathPrefix)
+            WHERE store_id = :store AND (path = :path OR path LIKE :pathPrefix ESCAPE '!')
         ");
         $stmt->execute([
             ':store'      => StoreContext::current()->catalogId(),
             ':path'       => $category['path'],
-            ':pathPrefix' => $category['path'] . '/%',
+            ':pathPrefix' => Db::likeLiteral((string)$category['path']) . '/%',
         ]);
         return $stmt->fetchAll(PDO::FETCH_COLUMN);
     }

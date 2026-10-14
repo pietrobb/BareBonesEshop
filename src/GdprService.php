@@ -164,8 +164,8 @@ class GdprService {
 
         $db = Db::get();
         $stmt = $db->prepare("
-            INSERT INTO gdpr_events (action, customer_id, email_hash, ip_hash, actor, payload_hash, note)
-            VALUES (:action, :customer_id, :email_hash, :ip_hash, :actor, :payload_hash, :note)
+            INSERT INTO gdpr_events (action, customer_id, email_hash, ip_hash, actor, payload_hash, note, store_id)
+            VALUES (:action, :customer_id, :email_hash, :ip_hash, :actor, :payload_hash, :note, :store)
         ");
         $stmt->execute([
             ':action'       => $action,
@@ -175,6 +175,7 @@ class GdprService {
             ':actor'        => $params['actor'] ?? null,
             ':payload_hash' => $payloadHash,
             ':note'         => $params['note'] ?? null,
+            ':store'        => StoreContext::current()->id(),
         ]);
         return (int)$db->lastInsertId();
     }

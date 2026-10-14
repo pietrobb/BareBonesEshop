@@ -207,7 +207,7 @@ assert_true($creditOverClaim, 'G8 credit: an item cannot be credited twice');
 // 55.3 — Bug #3: B2B reverse charge via HTTP path (VIES served from cache, no network)
 $pdo->exec("DELETE FROM vat_id_cache");
 $pdo->exec("INSERT INTO vat_id_cache (vat_id, country, status, trader_name, trader_addr, checked_at, ttl_seconds, raw_response) VALUES ('DE811907980','DE','valid',NULL,NULL,datetime('now'),86400,NULL)");
-$r2 = $p0Checkout(['country' => 'DE', 'vat_id' => 'DE811907980']);
+$r2 = $p0Checkout(['country' => 'DE', 'company' => 'P0 Kunde GmbH', 'vat_id' => 'DE811907980']);
 assert_true(!empty($r2['success']), 'P0 #3: B2B DE HTTP checkout succeeds (' . ($r2['error'] ?? 'ok') . ')');
 $o2 = $pdo->query("SELECT * FROM orders WHERE id=" . (int)($r2['order_id'] ?? 0))->fetch();
 assert_equals('reverse_charge', (string)($o2['vat_scenario'] ?? ''), 'P0 #3: VIES-validated B2B → reverse_charge via HTTP path');

@@ -577,7 +577,7 @@ class VatService implements TaxProvider
 
         $now = time();
         if ($cached) {
-            $age = $now - (int)strtotime((string)$cached['checked_at']);
+            $age = $now - (int)strtotime((string)$cached['checked_at'] . ' UTC');
             $ttl = (int)($cached['ttl_seconds'] ?? 0);
             if ($age < $ttl) {
                 return [
@@ -622,7 +622,7 @@ class VatService implements TaxProvider
             ':s'   => $status,
             ':tn'  => $res['trader_name'] ?? null,
             ':ta'  => $res['trader_addr'] ?? null,
-            ':ck'  => date('Y-m-d H:i:s', $now),
+            ':ck'  => gmdate('Y-m-d H:i:s', $now),
             ':ttl' => $ttl,
             ':raw' => $res['raw'] ?? null,
         ]);

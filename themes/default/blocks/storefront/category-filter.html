@@ -4,7 +4,7 @@
   <input type="number" name="rmin[{{name}}]" placeholder="{{min_placeholder}}" value="{{active_min}}" step="0.1" style="width:70px;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:.85em">
   <span>&mdash;</span>
   <input type="number" name="rmax[{{name}}]" placeholder="{{max_placeholder}}" value="{{active_max}}" step="0.1" style="width:70px;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:.85em">
-  <span style="font-size:.85em;color:#888">{{unit}}</span>
+  <span style="font-size:.85em;color:#666">{{unit}}</span>
 </div>
 {{else}}
 {{#each values}}<label><input type="checkbox" name="spec[{{filter_name}}][]" value="{{value}}"{{{checked}}}> {{value}} <span class="cnt">({{count}})</span></label>{{/each}}

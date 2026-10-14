@@ -3,15 +3,30 @@
 
 function handlePost(string $page, string $action): void {
     if (!Security::csrfValidate()) {
-        setFlash('err', 'Neplatný CSRF token.');
+        setFlash('err', I18n::t('admin.msg.csrf_invalid'));
         return;
     }
 
     match("{$page}:{$action}") {
         'product:save'   => handleProductSave(),
         'product:related_save' => handleProductRelatedSave(),
+        'product:variants_save' => handleProductVariantsSave(),
         'products:bulk'  => handleBulkAction(),
+        'categories:save' => handleCategorySave(),
+        'categories:delete' => handleCategoryDelete(),
+        'brands:save'    => handleBrandSave(),
+        'brands:delete'  => handleBrandDelete(),
+        'promotions:save' => handlePromotionSave(),
+        'promotions:delete' => handlePromotionDelete(),
+        'price_lists:save' => handlePriceListSave(),
+        'price_lists:prices' => handlePriceListPrices(),
+        'price_lists:delete' => handlePriceListDelete(),
+        'customer_groups:save' => handleCustomerGroupSave(), 'customer_groups:delete' => handleCustomerGroupDelete(),
+        'companies:save' => handleCompanySave(), 'companies:delete' => handleCompanyDelete(), 'customer:b2b' => handleCustomerB2b(),
+        'suppliers:save' => handleSupplierSave(), 'suppliers:delete' => handleSupplierDelete(), 'suppliers:products' => handleSupplierProducts(),
+        'purchase_orders:create' => handlePurchaseOrderCreate(), 'purchase_orders:receive' => handlePurchaseOrderReceive(),
         'order:status'   => handleOrderStatus(),
+        'orders:bulk_status' => handleOrdersBulkStatus(),
         'order:payment_transition' => handleOrderPaymentTransition(),
         'order:refund_request' => handleOrderRefundRequest(),
         'order:email_resend' => handleOrderEmailResend(),
@@ -22,6 +37,7 @@ function handlePost(string $page, string $action): void {
         'cache:flush'    => handleCacheFlush(),
         'cache:rebuild'  => handleCacheRebuild(),
         'gdpr:anonymize' => handleGdprAnonymize(),
+        'gdpr:export'    => handleGdprExport(),
         'page_edit:save' => handleCmsPageSave(),
         'pages:delete'   => handleCmsPageDelete(),
         'content:save'   => handleContentSave(),
@@ -49,10 +65,16 @@ function handlePost(string $page, string $action): void {
         'payments:shipping_delete' => handlePaymentShippingDelete(),
         'digital_assets:save' => handleDigitalAssetSave(),
         'digital_assets:toggle' => handleDigitalAssetToggle(),
-        'reviews:approve' => handleReviewModerate('approved'),
-        'reviews:reject'  => handleReviewModerate('rejected'),
+        'reviews:approve' => handleReviewModerate('approved'), 'reviews:reject' => handleReviewModerate('rejected'),
         'rma:status'      => handleRmaStatus(),
         'customer:status' => handleCustomerStatus(),
+        'admin_users:create' => handleAdminUserCreate(),
+        'admin_users:status' => handleAdminUserStatus(),
+        'admin_users:password' => handleAdminUserPassword(),
+        'admin_users:mfa' => handleAdminUserMfa(),
+        'admin_users:revoke_sessions' => handleAdminUserRevokeSessions(),
+        'admin_users:grant' => handleAdminUserGrant(),
+        'email_templates:save' => handleEmailTemplateSave(), 'email_templates:preview' => handleEmailTemplatePreview(), 'email_templates:reset' => handleEmailTemplateReset(),
         default          => null,
     };
 }

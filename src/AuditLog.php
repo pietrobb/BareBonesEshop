@@ -27,11 +27,11 @@ class AuditLog {
     public static function forEntity(string $entity, int $entityId, int $limit = 50): array {
         $stmt = Db::get()->prepare("
             SELECT * FROM audit_log
-            WHERE entity = :entity AND entity_id = :eid
+            WHERE store_id = :store AND entity = :entity AND entity_id = :eid
             ORDER BY created_at DESC, id DESC
             LIMIT :limit
         ");
-        $stmt->execute([':entity' => $entity, ':eid' => $entityId, ':limit' => $limit]);
+        $stmt->execute([':store' => StoreContext::current()->id(), ':entity' => $entity, ':eid' => $entityId, ':limit' => $limit]);
         return $stmt->fetchAll();
     }
 
