@@ -159,7 +159,7 @@ function runStagingPreflight(array $argvLocal = []): array {
     $migrationDir = $root . '/migrations';
     $migrationCount = is_dir($migrationDir) ? count(glob($migrationDir . '/*.php') ?: []) : 0;
     $add($migrationCount > 0 ? 'ok' : 'fail', 'migrations', "Migration files found: {$migrationCount}", 'Run php cli/migrate.php status/apply on staging.');
-
+    require_once __DIR__ . '/theme-check.php'; $themeContract = runThemeCompatibility(); $add($themeContract['status'] === 'GO' ? 'ok' : 'fail', 'theme_checkout_contract', $themeContract['checks'] . ' checks; ' . implode("\n", $themeContract['failures']), 'Run php cli/theme-check.php on the candidate tree with the installed themes and store block overrides before deploying.');
     $recommended = [
         'php cli/migrate.php status',
         'php cli/migrate.php',

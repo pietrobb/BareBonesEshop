@@ -278,10 +278,10 @@ php cli/i18n-parity.php
 php cli/quality-gates.php
 ```
 
-The quality gate verifies package paths, declared byte budgets, the WCAG 2.2 AA
-skip/focus/target-size/reduced-motion/forced-colors invariants, feed routes, and
-consent default-off behavior. Automated checks supplement, not replace, browser and
-assistive-technology review of merchant content.
+The quality gate verifies package paths, declared byte budgets, WCAG 2.2 AA skip/focus/target-size/reduced-motion/forced-colors invariants, feed routes, consent defaults, and runs `php cli/theme-check.php`.
+Before deployment, assemble the **candidate core with the installed themes, stores.json and store block overrides**, then run `php cli/theme-check.php` (nonzero exit on incompatibility) and `php cli/staging-preflight.php --strict`. Testing the bundled default theme alone does not qualify a custom theme; do not update production first to run this check.
+The theme probe uses the candidate's real checkout presenter and renderer with an in-memory fixture database: physical/digital/mixed carts, redisplay, required fields, country options, escaping, shipping/payment choices, consents and errors. It does not place orders, send mail or call payment gateways. `php cli/test-theme-contract.php` verifies the legacy Aeon regression and deliberately broken templates; it also runs in the canonical test suite.
+This is a checkout contract gate, not a full theme certification: it does not prove browser JavaScript, visual/accessibility parity, actual payment/webhook delivery, production configuration or migration/rollback safety. Browser, payment and assistive-technology checks still complement it; direct file-copy deployments and the updater are not automatically intercepted.
 
 ---
 
