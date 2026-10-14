@@ -36,6 +36,8 @@ foreach ($scenarioFiles as $scenarioFile) {
 }
 require __DIR__ . '/test-update.php';
 require __DIR__ . '/test-theme-contract.php';
+require __DIR__ . '/test-theme-upgrade-gate.php';
+
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
 if ($failed > 0) echo ", {$failed} FAILED";

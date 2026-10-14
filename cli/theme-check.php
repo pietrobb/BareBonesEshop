@@ -22,8 +22,29 @@ function runThemeCompatibility(array $arguments = []): array {
     return $report;
 }
 
+/**
+ * The updater's own gate, runnable from a trusted NEW release tree: installed site + signed package,
+ * assembled privately, nothing installed. Needed when the installed updater predates the gate.
+ */
+function runPackageThemeGate(array $arguments): array {
+    require_once dirname(__DIR__) . '/src/autoload.php';
+    $options = [];
+    foreach ($arguments as $argument) {
+        if (preg_match('/^--(installed|package|public-key)=(.+)$/s', $argument, $match)) $options[$match[1]] = $match[2];
+    }
+    $publicKey = trim((string)($options['public-key'] ?? getenv('BAREBONES_UPDATE_PUBLIC_KEY') ?: ''));
+    try {
+        $package = new UpdatePackage((string)$options['package'], $publicKey !== '' ? $publicKey : null, in_array('--allow-unsigned', $arguments, true));
+    } catch (Throwable $e) {
+        return ['status' => 'NO-GO', 'checks' => 0, 'targets' => [], 'failures' => ['Update package rejected: ' . $e->getMessage()]];
+    }
+    return (new ThemeUpgradeGate(sys_get_temp_dir()))->evaluate((string)($options['installed'] ?? dirname(__DIR__)), $package);
+}
+
 if (realpath((string)($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__) {
-    $result = runThemeCompatibility(array_slice($argv, 1));
+    $arguments = array_slice($argv, 1);
+    $packageMode = (bool)preg_grep('/^--package=/', $arguments);
+    $result = $packageMode ? runPackageThemeGate($arguments) : runThemeCompatibility($arguments);
     if (in_array('--json', $argv, true)) echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
     else {
         echo "Theme checkout compatibility: {$result['status']} ({$result['checks']} checks)\n";

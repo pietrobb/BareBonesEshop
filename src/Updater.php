@@ -14,6 +14,7 @@ final class Updater
     private ?PDO $database;
     private $migrationRunner;
     private ?UpdateDatabaseBackup $databaseBackup;
+    private ?ThemeUpgradeGate $themeGate;
     private $lockHandle = null;
 
     public function __construct(
@@ -21,7 +22,8 @@ final class Updater
         string $stateDirectory,
         ?PDO $database = null,
         ?callable $migrationRunner = null,
-        ?UpdateDatabaseBackup $databaseBackup = null
+        ?UpdateDatabaseBackup $databaseBackup = null,
+        ?ThemeUpgradeGate $themeGate = null
     ) {
         $realRoot = realpath($root);
         if ($realRoot === false || !is_dir($realRoot) || is_link($realRoot)) {
@@ -41,6 +43,7 @@ final class Updater
         $this->database = $database;
         $this->migrationRunner = $migrationRunner;
         $this->databaseBackup = $databaseBackup;
+        $this->themeGate = $themeGate;
     }
 
     public static function isProtectedPath(string $path): bool
@@ -113,6 +116,21 @@ final class Updater
             }
         }
 
+        // New core + installed themes/stores.json/store overrides, rendered before anything changes.
+        $themeContract = null;
+        if ($this->themeGate === null) {
+            $warnings[] = 'Theme checkout contract was not verified: this updater instance has no theme gate';
+        } else {
+            $themeContract = $this->themeGate->evaluate($this->root, $package);
+            if ($themeContract['status'] !== 'GO') {
+                foreach ($themeContract['failures'] as $failure) {
+                    $blockers[] = 'Theme checkout contract: ' . $failure;
+                }
+                $blockers[] = 'Theme checkout contract NO-GO: the installed theme/store blocks named above would break checkout with '
+                    . $package->version() . '. Update them in the installation (or ship the fix in the package), then rerun check';
+            }
+        }
+
         foreach ($package->entries() as $entry) {
             $path = $entry['path'];
             if (self::isProtectedPath($path)) {
@@ -168,6 +186,7 @@ final class Updater
             'conflicts' => $conflicts,
             'blockers' => $blockers,
             'warnings' => $warnings,
+            'theme_contract' => $themeContract,
             'can_apply' => !$conflicts && !$blockers,
         ];
     }
