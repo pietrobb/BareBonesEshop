@@ -278,10 +278,10 @@ php cli/i18n-parity.php
 php cli/quality-gates.php
 ```
 
-The quality gate verifies package paths, declared byte budgets, the WCAG 2.2 AA
-skip/focus/target-size/reduced-motion/forced-colors invariants, feed routes, and
-consent default-off behavior. Automated checks supplement, not replace, browser and
-assistive-technology review of merchant content.
+The quality gate verifies package paths, declared byte budgets, WCAG 2.2 AA skip/focus/target-size/reduced-motion/forced-colors invariants, feed routes, consent defaults, and runs `php cli/theme-check.php`.
+`php cli/update.php check|backup|apply` and `doctor --package` run the same theme gate automatically before anything changes: the **new core from the package with the installed themes, stores.json and store block overrides** (see [Production updates](#production-updates)). Testing the bundled default theme alone does not qualify a custom theme; do not update production first to run this check. For a manually assembled tree, run `php cli/theme-check.php` (nonzero exit on incompatibility) and `php cli/staging-preflight.php --strict` in it.
+The theme probe uses the candidate's real checkout presenter and renderer with an in-memory fixture database: physical/digital/mixed carts, redisplay, required fields, country options, escaping, shipping/payment choices, consents and errors. It does not place orders, send mail or call payment gateways. `php cli/test-theme-contract.php` verifies the legacy Aeon regression and deliberately broken templates; `php cli/test-theme-upgrade-gate.php` proves an incompatible upgrade is refused with files and database unchanged. Both run in the canonical test suite.
+This is a checkout contract gate, not a full theme certification: it does not prove browser JavaScript, visual/accessibility parity, other pages than checkout, store-specific configuration (currency, shipping zones, payment providers), actual payment/webhook delivery or migration/rollback safety. Browser, payment and assistive-technology checks still complement it. Deployments that copy files directly instead of using `cli/update.php` are not intercepted.
 
 ---
 
@@ -350,6 +350,18 @@ automation. Packages are Ed25519-verified and unsigned packages are refused
 unless the operator supplies `--allow-unsigned` explicitly. Rollback refuses to
 overwrite files changed after an update unless `--force` is supplied after
 manual review.
+
+Before any file, snapshot or migration changes, the updater assembles a private
+candidate in `update_storage_dir` (installed code, themes, `blocks/`,
+`stores.json`, overlaid with the package; never `config.php`, databases, uploads
+or storage) and renders checkout with the new core for every installed theme and
+store. An incompatible theme or store block override is a `[BLOCK]` naming the
+theme/store, block, scenario and the field to fix, e.g.
+`aeon / store default / storefront/checkout / physical [countries]: ... Render
+country_options ...`. There is no bypass flag: fix the installed template (or
+ship the fix) and rerun `check`. An updater older than this gate cannot run it, so
+for that first hop run the gate from the trusted new release tree:
+`php /releases/X.Y.Z/cli/theme-check.php --installed=/var/www/shop --package=/releases/update-X.Y.Z`.
 
 Code-only packages support SQLite, MySQL, and MariaDB. Migration packages use a
 verified SQLite snapshot or, on MySQL/MariaDB, a transactional dump that must

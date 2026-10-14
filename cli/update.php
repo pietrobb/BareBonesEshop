@@ -64,7 +64,7 @@ try {
                 !empty($options['allow-unsigned'])
             );
         }
-        $updater = new Updater($root, $stateDirectory, Db::get(), null, $databaseBackup);
+        $updater = new Updater($root, $stateDirectory, Db::get(), null, $databaseBackup, new ThemeUpgradeGate($stateDirectory));
         $report = $updater->doctor(
             $publicKey !== '' ? $publicKey : null,
             $package,
@@ -141,7 +141,7 @@ try {
             echo '  Applied ' . count($applied) . " migration(s).\n";
         };
     }
-    $updater = new Updater($root, $stateDirectory, $database, $migrationRunner, $databaseBackup);
+    $updater = new Updater($root, $stateDirectory, $database, $migrationRunner, $databaseBackup, new ThemeUpgradeGate($stateDirectory));
     $database = null; // Updater owns the only non-static reference; enables SQLite rollback on Windows.
 
     if ($command === 'check') {

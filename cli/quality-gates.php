@@ -87,7 +87,7 @@ $check(substr_count($esSource, '=>') >= 100, 'Spanish locale provides substantia
 $htaccess = (string)file_get_contents($root . '/.htaccess');
 $check(str_contains($htaccess, 'feeds/google\\.xml') && str_contains($htaccess, 'feeds/meta\\.csv'), 'Google Merchant and Meta feed routes are published');
 $check(str_contains((string)file_get_contents($root . '/src/MarketingConsent.php'), "'analytics' => false"), 'Consent hooks default analytics and marketing to off');
-
+require_once __DIR__ . '/theme-check.php'; $themeContract = runThemeCompatibility(); $check($themeContract['status'] === 'GO', 'Theme checkout contract: ' . $themeContract['checks'] . ' checks; ' . implode("\n", $themeContract['failures']));
 if ($failures) {
     echo "\nQuality gates FAILED (" . count($failures) . ")\n";
     foreach ($failures as $failure) echo " - {$failure}\n";

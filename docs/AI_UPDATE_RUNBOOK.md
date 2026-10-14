@@ -91,6 +91,8 @@ php cli/update.php check --package="$PACKAGE"
 
 The result must say `Preflight passed`. Any locally modified package path is a hard stop.
 
+`doctor --package`, `check` and `apply` also render checkout with the package's new core and the installed themes, `stores.json` and `blocks/stores/*` overrides (in a private copy under `update_storage_dir`, with an in-memory database). Every `[BLOCK] Theme checkout contract: <theme> / store <id> / storefront/checkout / <scenario> [<code>]` line is a hard stop: hand the named template and field to the theme owner, fix it in the installation (or in a new package), and rerun `check`. Never delete or rename a theme just to pass the gate unless no store uses it. The gate covers the checkout data/HTML contract only; keep the deployment-specific HTTP, browser and payment smoke tests in step 6.
+
 5. **Apply**:
 
 ```bash
@@ -109,6 +111,17 @@ php cli/migrate.php status
 Also run deployment-specific HTTP smoke tests, worker checks, payment-provider checks, and database health checks. Confirm the reported installed version and retain the rollback snapshot ID.
 
 7. **Resume** — only after all checks pass, restart workers and traffic. Monitor logs and key transactions.
+
+### First adoption of the theme gate
+
+The installed updater runs the check, so an installation whose `src/Updater.php` predates `src/ThemeUpgradeGate.php` cannot run the gate for the package that introduces it. For that one hop, before `doctor`/`check`/`apply`, run the gate from the trusted, unpacked new release tree against the installation and the same signed package:
+
+```bash
+BAREBONES_UPDATE_PUBLIC_KEY=/secure/path/update-public.key \
+  php /trusted/releases/X.Y.Z/cli/theme-check.php --installed=/path/to/shop --package="$PACKAGE"
+```
+
+It must print `GO` (exit 0). It reads the installation and writes only a temporary private copy, removed after the verdict. Later updates run the gate inside `cli/update.php` automatically.
 
 ## Provider registry rollout
 
