@@ -54,7 +54,8 @@ AdminIdentity::setStatus($adminId, 'active');
 
 $db->exec("UPDATE payment_methods SET provider='mock' WHERE code='card'");
 // With a Stripe test key, a second card method creates real Stripe test-mode Checkout sessions.
-$stripeTest = str_starts_with((string)($config['stripe_secret_key'] ?? ''), 'sk_test_');
+$stripeKey = (string)($config['stripe_secret_key'] ?? '');
+$stripeTest = str_starts_with($stripeKey, 'sk_test_') || str_starts_with($stripeKey, 'rk_test_');
 if ($stripeTest) {
     $db->exec("INSERT INTO payment_methods (code, provider, name, description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, requires_online, active, sort_order)
         SELECT 'card_stripe_test', 'stripe', 'Card (Stripe test mode)', description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, 1, 1, sort_order + 1
