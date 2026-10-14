@@ -50,19 +50,12 @@ if (!defined('BB_TEST_LOAD_API_ONLY')) {
             'webhook_shipping' => apiWebhookShipping(),
             'cookie_consent' => apiCookieConsent(),
             'csp_report' => apiCspReport(),
-            'vehicle_manufacturers' => apiVehicleManufacturers(),
-            'vehicle_models' => apiVehicleModels(),
-            'vehicle_types' => apiVehicleTypes(),
-            'vehicle_parts' => apiVehicleParts(),
-            'oe_search' => apiOESearch(),
             'parametric_search' => apiParametricSearch(),
             'product_specs' => apiProductSpecs(),
-            'product_oe' => apiProductOE(),
-            'product_vehicles' => apiProductVehicles(),
             'page' => apiPage(),
             'bbf_categories', 'bbf_brands', 'bbf_product_types', 'bbf_attr_types', 'bbf_page_statuses',
             'bbf_product_statuses', 'bbf_payment_methods' => BbfOptions::forAction($action),
-            default => ['error' => 'Unknown action'],
+            default => (is_string($action) ? Extensions::api($action) : null) ?? ['error' => 'Unknown action'],
         };
 
         echo json_encode($result, JSON_UNESCAPED_UNICODE);

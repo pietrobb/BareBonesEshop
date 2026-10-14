@@ -64,7 +64,7 @@ $a102Fatal = static fn(array $response): bool => $response['status'] === 500 || 
     || preg_match('/TypeError|Fatal error|Uncaught|Internal error/', $response['body']) === 1;
 
 $a102GetNames = ['action', 'amount', 'carrier', 'cart_recover', 'cart_unsubscribe', 'cat', 'category', 'category_id', 'cod', 'confirmation_token',
-    'country', 'currency', 'email', 'filter', 'filters', 'channel', 'id', 'ktype', 'lang', 'limit', 'manufacturer', 'model', 'msg', 'next', 'ok',
+    'country', 'currency', 'email', 'filter', 'filters', 'channel', 'id', 'lang', 'limit', 'msg', 'next', 'ok',
     'order', 'p', 'page', 'path', 'payment_status', 'period', 'pg', 'pmax', 'pmin', 'price_max', 'price_min', 'provider', 'q', 'relation_type',
     'shipping_method', 'slug', 'sort', 'spec', 'status', 'stock', 'subcat', 'subtotal', 'token', 'volume_cm3', 'weight_g'];
 $a102PostNames = ['account_id', 'action', 'amount', 'analytics', 'carrier', 'cart_action', 'city', 'code', 'company', 'company_website', 'confirm',
@@ -80,11 +80,10 @@ $a102Arrays = static function (array $names, array $fixed = []): array {
 };
 $a102ApiActions = ['categories', 'products', 'product', 'search', 'filters', 'cart', 'cart_add', 'cart_update', 'cart_restore', 'cart_enriched',
     'checkout', 'consent_definitions', 'shipping_methods', 'shipping_rates', 'payment_methods', 'search_suggest', 'validate_coupon',
-    'review_submit', 'wishlist', 'wishlist_toggle', 'cookie_consent', 'vehicle_manufacturers', 'vehicle_models', 'vehicle_types',
-    'vehicle_parts', 'oe_search', 'parametric_search', 'product_specs', 'product_oe', 'product_vehicles', 'page', 'bbf_categories'];
+    'review_submit', 'wishlist', 'wishlist_toggle', 'cookie_consent', 'parametric_search', 'product_specs', 'page', 'bbf_categories'];
 
 $a102Cases = [];
-foreach (['home', 'category', 'product', 'vehicle', 'search', 'oe', 'privacy', 'cart', 'cart-unsubscribe', 'checkout', 'order-done'] as $a102Page) {
+foreach (['home', 'category', 'product', 'search', 'privacy', 'cart', 'cart-unsubscribe', 'checkout', 'order-done'] as $a102Page) {
     $a102Cases[] = ["GET /?page={$a102Page} with array query values", 'GET', '/?' . http_build_query($a102Arrays($a102GetNames, ['page' => $a102Page])), []];
 }
 $a102Cases[] = ['GET / with page[]', 'GET', '/?page[]=cart', []];

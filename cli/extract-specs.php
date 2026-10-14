@@ -5,7 +5,7 @@ require_once __DIR__ . '/cli-only.php';
  * Extract product specifications from names/descriptions into product_specifications.
  * Run: php cli/extract-specs.php
  *
- * Discovered specs become sidebar filters automatically via TecDoc::specFilterValues().
+ * Discovered specs become sidebar filters automatically via Products::specFilterValues().
  */
 
 require __DIR__ . '/../src/Db.php';

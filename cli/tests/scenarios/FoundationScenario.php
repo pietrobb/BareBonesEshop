@@ -502,7 +502,7 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS processed_events (
     event_id TEXT PRIMARY KEY, created_at TEXT DEFAULT (datetime('now'))
 )");
 
-// TecDoc tables
+// Product specifications
 $pdo->exec("CREATE TABLE IF NOT EXISTS product_specifications (
     id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL, lang TEXT NOT NULL DEFAULT 'sk',
     criteria_name TEXT NOT NULL, criteria_value TEXT NOT NULL, numeric_val REAL,
@@ -512,26 +512,6 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS product_specifications (
 $pdo->exec("CREATE INDEX IF NOT EXISTS idx_spec_product ON product_specifications(product_id, lang)");
 $pdo->exec("CREATE INDEX IF NOT EXISTS idx_spec_criteria ON product_specifications(criteria_name, criteria_value, product_id)");
 $pdo->exec("CREATE INDEX IF NOT EXISTS idx_spec_numeric ON product_specifications(criteria_name, numeric_val)");
-
-$pdo->exec("CREATE TABLE IF NOT EXISTS product_oe_numbers (
-    id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL,
-    oem_brand TEXT NOT NULL, oem_number TEXT NOT NULL,
-    oem_number_norm TEXT NOT NULL DEFAULT '',
-    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
-)");
-$pdo->exec("CREATE INDEX IF NOT EXISTS idx_oe_product ON product_oe_numbers(product_id)");
-$pdo->exec("CREATE INDEX IF NOT EXISTS idx_oe_number ON product_oe_numbers(oem_number, oem_brand)");
-$pdo->exec("CREATE INDEX IF NOT EXISTS idx_oe_norm ON product_oe_numbers(oem_number_norm)");
-
-$pdo->exec("CREATE TABLE IF NOT EXISTS product_vehicles (
-    id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL,
-    ktype INTEGER, manufacturer TEXT NOT NULL, model TEXT NOT NULL,
-    type_name TEXT DEFAULT '', year_from INTEGER, year_to INTEGER,
-    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
-)");
-$pdo->exec("CREATE INDEX IF NOT EXISTS idx_pv_product ON product_vehicles(product_id)");
-$pdo->exec("CREATE INDEX IF NOT EXISTS idx_pv_ktype ON product_vehicles(ktype)");
-$pdo->exec("CREATE INDEX IF NOT EXISTS idx_pv_mfr ON product_vehicles(manufacturer, model)");
 
 // Verify tables
 $tables = $pdo->query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
@@ -545,8 +525,6 @@ assert_true(in_array('orders', $tables), 'orders table exists');
 assert_true(in_array('order_items', $tables), 'order_items table exists');
 assert_true(in_array('audit_log', $tables), 'audit_log table exists');
 assert_true(in_array('product_specifications', $tables), 'product_specifications table exists');
-assert_true(in_array('product_oe_numbers', $tables), 'product_oe_numbers table exists');
-assert_true(in_array('product_vehicles', $tables), 'product_vehicles table exists');
 assert_true(in_array('processed_events', $tables), 'processed_events table exists');
 
 $storeScopeMigration = require TEST_CLI_DIR . '/../migrations/20260801152000_store_context_scope.php';

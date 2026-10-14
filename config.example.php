@@ -263,9 +263,6 @@ return [
     'update_mysql_client_binary'  => 'mysql',     // use mariadb where appropriate
     'gdpr_salt_file'      => dirname(__DIR__) . '/bareboneseshop-private/secrets/gdpr_salt',
 
-    // TecDoc sidecar DB (read-only, for vehicle cascade lookups)
-    'tecdoc_db_path' => __DIR__ . '/demo/tecdoc_enriched.db',
-
     // GDPR — prefer injecting this secret; otherwise it is generated in gdpr_salt_file.
     'gdpr_hash_salt' => '',
 ];

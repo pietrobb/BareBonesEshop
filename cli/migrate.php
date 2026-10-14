@@ -5,7 +5,7 @@ require_once __DIR__ . '/cli-only.php';
  * BareBones Shop — Database Migration CLI
  *
  * Usage:
- *   php cli/migrate.php                 Apply all pending migrations
+ *   php cli/migrate.php                 Apply all pending migrations (core, then enabled extensions)
  *   php cli/migrate.php status          Show applied / pending / missing
  *   php cli/migrate.php create <name>   Generate stub migration file
  *   php cli/migrate.php baseline        Mark all current files as applied (no-run)
@@ -78,13 +78,29 @@ try {
     switch ($cmd) {
         case 'apply':
             echo "Applying pending migrations...\n";
-            $applied = $migrator->apply($logger, $preApplyHook);
+            // Core first, then each enabled extension's migrations; at most one pre-migration backup.
+            $backupTaken = false;
+            $backupOnce = $preApplyHook === null ? null : static function (array $names, callable $log) use (&$backupTaken, $preApplyHook): void {
+                if ($backupTaken) return;
+                $preApplyHook($names, $log);
+                $backupTaken = true;
+            };
+            $applied = $migrator->apply($logger, $backupOnce);
+            foreach (Extensions::migrators() as $code => $extensionMigrator) {
+                $applied = array_merge($applied, $extensionMigrator->apply($logger, $backupOnce));
+            }
             $n = count($applied);
             echo $n === 0 ? "Nothing to apply.\n" : "Applied {$n} migration(s).\n";
             break;
 
         case 'status':
             $s = $migrator->status();
+            foreach (Extensions::migrators() as $extensionMigrator) {
+                $extensionStatus = $extensionMigrator->status();
+                $s['applied'] += $extensionStatus['applied'];
+                $s['pending'] = array_merge($s['pending'], $extensionStatus['pending']);
+                $s['missing'] = array_merge($s['missing'], $extensionStatus['missing']);
+            }
             echo "Applied:\n";
             if (!$s['applied']) {
                 echo "  (none)\n";

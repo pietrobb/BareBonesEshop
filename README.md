@@ -2,8 +2,8 @@
 
 A dependency-free PHP e-commerce framework: server-side rendered storefront,
 JSON API, and admin back-office. Runs on **SQLite** out of the box or **MySQL/
-MariaDB** for production. Multi-language, multi-currency, with optional TecDoc
-auto-parts catalog support.
+MariaDB** for production. Multi-language, multi-currency, extensible through
+`extensions/` without editing core files.
 
 No Composer dependencies, no build step — plain PHP 8.1+ and PDO.
 

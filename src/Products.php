@@ -365,117 +365,239 @@ class Products {
     }
 
     /**
-     * Parametric search — filter products by category + spec attributes.
-     * Generic alternative to TecDoc::parametricSearch().
-     *
-     * @param array $categoryIds  Category IDs to search in
-     * @param int $page           Page number
-     * @param int $perPage        Products per page
-     * @param string $sort        Sort: price_asc, price_desc, name_asc, name_desc, newest
-     * @param array $specFilters  ['Napätie' => ['12V','24V'], 'Výrobca' => ['Victron']]
-     * @param ?int $priceMin      Min price in cents
-     * @param ?int $priceMax      Max price in cents
-     * @param array $rangeFilters ['Výkon (kW)' => ['min'=>3, 'max'=>10]]
-     * @return array ['products'=>[], 'total'=>int, 'pages'=>int, 'filters'=>[]]
+     * Get specifications for a product in a given language
      */
-    public static function parametricSearch(
-        array $categoryIds, int $page = 1, int $perPage = 24, string $sort = 'price_asc',
-        array $specFilters = [], ?int $priceMin = null, ?int $priceMax = null, array $rangeFilters = []
-    ): array {
+    public static function specifications(int $productId, string $lang = 'sk'): array {
+        $stmt = Db::get()->prepare("
+            SELECT ps.criteria_name, ps.criteria_value, ps.numeric_val
+            FROM product_specifications ps
+            JOIN products p ON p.id = ps.product_id AND p.store_id = :store
+            WHERE ps.product_id = :pid AND ps.lang = :lang
+            ORDER BY ps.sort_order, ps.criteria_name
+        ");
+        $stmt->execute([':pid' => $productId, ':lang' => $lang, ':store' => StoreContext::current()->catalogId()]);
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Get available specification criteria + values for a category (for filter UI)
+     * Returns: ['Priemer [mm]' => [{value: '300', count: 15, numeric: 300.0}, ...], ...]
+     * Criteria are discovered from the data, so every category gets its own filters.
+     */
+    public static function specFilterValues(int|array $categoryId, string $lang = 'sk', array $activeFilters = [], ?int $priceMin = null, ?int $priceMax = null): array {
         $db = Db::get();
-        if (empty($categoryIds)) return ['products' => [], 'total' => 0, 'pages' => 0, 'filters' => []];
 
-        $ph = implode(',', array_fill(0, count($categoryIds), '?'));
+        if (is_array($categoryId)) {
+            $catIds = array_map('intval', $categoryId);
+            $catIn = implode(',', $catIds);
+            $baseWhere = "p.category_id IN ({$catIn}) AND p.status = 'active'";
+            $baseParams = [];
+        } else {
+            $baseWhere = "p.category_id = :cat AND p.status = 'active'";
+            $baseParams = [':cat' => $categoryId];
+        }
+        $baseWhere .= ' AND p.store_id = :store';
+        $baseParams[':store'] = StoreContext::current()->catalogId();
 
-        // Base query: primary or additional category assignments
-        $where = "(p.category_id IN ({$ph}) OR EXISTS (
-            SELECT 1 FROM product_categories pc WHERE pc.product_id = p.id AND pc.category_id IN ({$ph})
-        )) AND p.store_id = ? AND p.status = 'active'";
-        $whereParams = [...$categoryIds, ...$categoryIds, StoreContext::current()->catalogId()];
-
-        // Price filters
-        if ($priceMin !== null) { $where .= " AND p.price >= ?"; $whereParams[] = $priceMin; }
-        if ($priceMax !== null) { $where .= " AND p.price <= ?"; $whereParams[] = $priceMax; }
-
-        // Spec enum filters (inner join for each)
-        $joins = '';
-        $joinParams = [];
-        $ji = 0;
-        foreach ($specFilters as $name => $values) {
-            if (empty($values)) continue;
-            $ji++;
-            $vph = implode(',', array_fill(0, count($values), '?'));
-            $joins .= " INNER JOIN product_specifications sf{$ji} ON sf{$ji}.product_id = p.id AND sf{$ji}.criteria_name = ? AND sf{$ji}.criteria_value IN ({$vph})";
-            $joinParams[] = $name;
-            $joinParams = array_merge($joinParams, $values);
+        if ($priceMin !== null) {
+            $baseWhere .= " AND p.price >= :pmin";
+            $baseParams[':pmin'] = $priceMin;
+        }
+        if ($priceMax !== null) {
+            $baseWhere .= " AND p.price <= :pmax";
+            $baseParams[':pmax'] = $priceMax;
         }
 
-        // Numeric range filters
-        foreach ($rangeFilters as $name => $range) {
-            $ji++;
-            $rangeCond = "sr{$ji}.product_id = p.id AND sr{$ji}.criteria_name = ?";
-            $joinParams[] = $name;
-            if (isset($range['min'])) { $rangeCond .= " AND sr{$ji}.numeric_val >= ?"; $joinParams[] = $range['min']; }
-            if (isset($range['max'])) { $rangeCond .= " AND sr{$ji}.numeric_val <= ?"; $joinParams[] = $range['max']; }
-            $joins .= " INNER JOIN product_specifications sr{$ji} ON {$rangeCond}";
-        }
+        $loadValues = static function (?string $criterion, ?string $excludedFilter) use ($db, $baseWhere, $baseParams, $activeFilters, $lang): array {
+            $where = $baseWhere;
+            $params = $baseParams;
+            $filterIndex = 0;
+            foreach ($activeFilters as $filterName => $filterValues) {
+                if ($filterName === $excludedFilter || empty($filterValues)) continue;
+                $placeholders = [];
+                foreach ($filterValues as $valueIndex => $filterValue) {
+                    $key = ":fv_{$filterIndex}_{$valueIndex}";
+                    $placeholders[] = $key;
+                    $params[$key] = $filterValue;
+                }
+                $nameKey = ":fn_{$filterIndex}";
+                $langKey = ":fl_{$filterIndex}";
+                $params[$nameKey] = $filterName;
+                $params[$langKey] = $lang;
+                $where .= " AND p.id IN (
+                    SELECT ps2.product_id FROM product_specifications ps2
+                    WHERE ps2.criteria_name = {$nameKey}
+                      AND ps2.criteria_value IN (" . implode(',', $placeholders) . ")
+                      AND ps2.lang = {$langKey}
+                )";
+                $filterIndex++;
+            }
 
-        // Merge params: JOIN params first (appear before WHERE in SQL), then WHERE params
-        $params = array_merge($joinParams, $whereParams);
-
-        // Count total
-        $countSql = "SELECT COUNT(DISTINCT p.id) FROM products p {$joins} WHERE {$where}";
-        $stmt = $db->prepare($countSql);
-        $stmt->execute($params);
-        $total = (int)$stmt->fetchColumn();
-        $pages = max(1, (int)ceil($total / $perPage));
-
-        // Sort
-        $orderBy = match ($sort) {
-            'price_desc' => 'p.price DESC',
-            'name_asc' => 'p.name ASC',
-            'name_desc' => 'p.name DESC',
-            'newest' => 'p.created_at DESC',
-            default => 'p.price ASC',
+            $params[':facet_lang'] = $lang;
+            $criterionWhere = '';
+            if ($criterion !== null) {
+                $criterionWhere = ' AND ps.criteria_name = :facet_criterion';
+                $params[':facet_criterion'] = $criterion;
+            }
+            $stmt = $db->prepare("
+                SELECT ps.criteria_name, ps.criteria_value, MIN(ps.numeric_val) AS numeric_val,
+                       COUNT(DISTINCT ps.product_id) AS cnt
+                FROM product_specifications ps
+                JOIN products p ON p.id = ps.product_id
+                WHERE {$where} AND ps.lang = :facet_lang{$criterionWhere}
+                GROUP BY ps.criteria_name, ps.criteria_value
+                HAVING COUNT(DISTINCT ps.product_id) > 0
+                ORDER BY ps.criteria_name, MIN(ps.numeric_val) IS NULL, MIN(ps.numeric_val), ps.criteria_value
+            ");
+            $stmt->execute($params);
+            return $stmt->fetchAll();
         };
 
-        // Fetch page
-        $offset = ($page - 1) * $perPage;
-        $sql = "SELECT DISTINCT p.* FROM products p {$joins} WHERE {$where} ORDER BY {$orderBy} LIMIT {$perPage} OFFSET {$offset}";
-        $stmt = $db->prepare($sql);
-        $stmt->execute($params);
-        $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        // Build available filters from all matching products (without current spec filters applied)
-        $filterSql = "SELECT DISTINCT ps.criteria_name, ps.criteria_value, ps.numeric_val
-            FROM product_specifications ps
-            INNER JOIN products p ON p.id = ps.product_id
-            WHERE (p.category_id IN ({$ph}) OR EXISTS (
-                SELECT 1 FROM product_categories pc WHERE pc.product_id = p.id AND pc.category_id IN ({$ph})
-            )) AND p.store_id = ? AND p.status = 'active'
-            ORDER BY ps.criteria_name, ps.criteria_value";
-        $fStmt = $db->prepare($filterSql);
-        $fStmt->execute([...$categoryIds, ...$categoryIds, StoreContext::current()->catalogId()]);
+        $rowsByCriterion = [];
+        foreach ($loadValues(null, null) as $row) {
+            $rowsByCriterion[$row['criteria_name']][] = $row;
+        }
+        foreach ($activeFilters as $criterion => $values) {
+            if (empty($values)) continue;
+            $replacement = $loadValues($criterion, $criterion);
+            if ($replacement !== []) $rowsByCriterion[$criterion] = $replacement;
+        }
+        ksort($rowsByCriterion, SORT_STRING);
 
         $filters = [];
-        foreach ($fStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $name = $row['criteria_name'];
-            if (!isset($filters[$name])) {
-                $filters[$name] = ['name' => $name, 'type' => 'enum', 'values' => [], 'min' => null, 'max' => null];
-            }
-            if ($row['numeric_val'] !== null) {
-                $filters[$name]['type'] = 'range';
-                $nv = (float)$row['numeric_val'];
-                if ($filters[$name]['min'] === null || $nv < $filters[$name]['min']) $filters[$name]['min'] = $nv;
-                if ($filters[$name]['max'] === null || $nv > $filters[$name]['max']) $filters[$name]['max'] = $nv;
-            }
-            $val = $row['criteria_value'];
-            if (!in_array($val, $filters[$name]['values'])) {
-                $filters[$name]['values'][] = $val;
-            }
+        foreach ($rowsByCriterion as $criterion => $values) {
+            if (count($values) <= 1 || count($values) > 50) continue;
+            $filters[$criterion] = array_map(static fn(array $value): array => [
+                'value' => $value['criteria_value'],
+                'count' => (int)$value['cnt'],
+                'numeric' => $value['numeric_val'],
+            ], $values);
+        }
+        return $filters;
+    }
+
+    /**
+     * Search products within categories using parametric spec filters.
+     * $specFilters = ['Material' => ['cotton', 'wool']] (AND across criteria, OR within one);
+     * $rangeFilters = ['Power (kW)' => ['min' => 3, 'max' => 10]]
+     */
+    public static function parametricSearch(
+        int|array $categoryId,
+        int $page = 1,
+        int $perPage = 24,
+        string $sort = 'price_asc',
+        array $specFilters = [],
+        ?int $priceMin = null,
+        ?int $priceMax = null,
+        string $lang = 'sk',
+        array $rangeFilters = []
+    ): array {
+        $db = Db::get();
+        $offset = ($page - 1) * $perPage;
+
+        if (is_array($categoryId)) {
+            $catIds = array_map('intval', $categoryId);
+            $catIn = implode(',', $catIds);
+            $where = "p.category_id IN ({$catIn}) AND p.status = 'active'";
+            $params = [];
+        } else {
+            $where = "p.category_id = :cat AND p.status = 'active'";
+            $params = [':cat' => $categoryId];
+        }
+        $where .= ' AND p.store_id = :store';
+        $params[':store'] = StoreContext::current()->catalogId();
+
+        if ($priceMin !== null) {
+            $where .= " AND p.price >= :pmin";
+            $params[':pmin'] = $priceMin;
+        }
+        if ($priceMax !== null) {
+            $where .= " AND p.price <= :pmax";
+            $params[':pmax'] = $priceMax;
         }
 
-        return ['products' => $products, 'total' => $total, 'pages' => $pages, 'filters' => $filters];
+        // Apply spec filters — each criterion is AND, values within a criterion are OR
+        $filterIdx = 0;
+        foreach ($specFilters as $criterionName => $values) {
+            if (empty($values)) continue;
+            $placeholders = [];
+            foreach ($values as $i => $v) {
+                $key = ":sv_{$filterIdx}_{$i}";
+                $placeholders[] = $key;
+                $params[$key] = $v;
+            }
+            $phStr = implode(',', $placeholders);
+            $cnKey = ":cn_{$filterIdx}";
+            $langKey = ":lang_{$filterIdx}";
+            $params[$cnKey] = $criterionName;
+            $params[$langKey] = $lang;
+
+            $where .= " AND p.id IN (
+                SELECT ps.product_id FROM product_specifications ps
+                WHERE ps.criteria_name = {$cnKey}
+                  AND ps.criteria_value IN ({$phStr})
+                  AND ps.lang = {$langKey}
+            )";
+            $filterIdx++;
+        }
+
+        // Apply numeric range filters (e.g., kW 3-9)
+        $rangeIdx = 0;
+        foreach ($rangeFilters as $criterionName => $range) {
+            $cnKey = ":rcn_{$rangeIdx}";
+            $langKey = ":rlang_{$rangeIdx}";
+            $params[$cnKey] = $criterionName;
+            $params[$langKey] = $lang;
+            $rangeCond = "ps.criteria_name = {$cnKey} AND ps.lang = {$langKey}";
+
+            if (isset($range['min'])) {
+                $minKey = ":rmin_{$rangeIdx}";
+                $params[$minKey] = $range['min'];
+                $rangeCond .= " AND ps.numeric_val >= {$minKey}";
+            }
+            if (isset($range['max'])) {
+                $maxKey = ":rmax_{$rangeIdx}";
+                $params[$maxKey] = $range['max'];
+                $rangeCond .= " AND ps.numeric_val <= {$maxKey}";
+            }
+
+            $where .= " AND p.id IN (
+                SELECT ps.product_id FROM product_specifications ps
+                WHERE {$rangeCond}
+            )";
+            $rangeIdx++;
+        }
+
+        // Sort
+        $orderBy = match($sort) {
+            'price_asc'  => 'p.price ASC',
+            'price_desc' => 'p.price DESC',
+            'name_asc'   => 'p.name ASC',
+            'name_desc'  => 'p.name DESC',
+            'newest'     => 'p.created_at DESC',
+            default      => 'p.price ASC',
+        };
+
+        // Count
+        $stmt = $db->prepare("SELECT COUNT(*) FROM products p WHERE {$where}");
+        $stmt->execute($params);
+        $total = (int)$stmt->fetchColumn();
+
+        // Fetch
+        $params[':limit'] = $perPage;
+        $params[':offset'] = $offset;
+        $stmt = $db->prepare("SELECT p.* FROM products p WHERE {$where} ORDER BY {$orderBy} LIMIT :limit OFFSET :offset");
+        $stmt->execute($params);
+        $products = $stmt->fetchAll();
+
+        return [
+            'products'   => $products,
+            'total'      => $total,
+            'page'       => $page,
+            'per_page'   => $perPage,
+            'pages'      => (int)ceil($total / $perPage),
+            'filters'    => self::specFilterValues($categoryId, $lang, $specFilters, $priceMin, $priceMax),
+        ];
     }
 
     /** Deterministic margin in integer cents and basis points. */

@@ -1226,48 +1226,8 @@ function apiWebhookShipping(): array {
 }
 
 // ============================================================
-// TecDoc / Auto Parts API Handlers
+// Product specification (parametric) API handlers
 // ============================================================
-
-function apiVehicleManufacturers(): array {
-    return ['manufacturers' => TecDoc::manufacturers()];
-}
-
-function apiVehicleModels(): array {
-    $mfr = Security::clean($_GET['manufacturer'] ?? '');
-    if (!$mfr) return ['error' => 'manufacturer required'];
-    return ['models' => TecDoc::models($mfr)];
-}
-
-function apiVehicleTypes(): array {
-    $mfr = Security::clean($_GET['manufacturer'] ?? '');
-    $mdl = Security::clean($_GET['model'] ?? '');
-    if (!$mfr || !$mdl) return ['error' => 'manufacturer and model required'];
-    return ['types' => TecDoc::types($mfr, $mdl)];
-}
-
-function apiVehicleParts(): array {
-    $ktype = Security::int($_GET['ktype'] ?? 0);
-    if (!$ktype) return ['error' => 'ktype required'];
-
-    $page = max(1, Security::int($_GET['page'] ?? 1));
-    $catId = !empty($_GET['category_id']) ? Security::int($_GET['category_id']) : null;
-
-    $result = TecDoc::partsByKtype($ktype, $page, 24, $catId);
-    $result['categories'] = TecDoc::categoriesForKtype($ktype);
-    $result['products'] = Products::enrichMany($result['products']);
-    return $result;
-}
-
-function apiOESearch(): array {
-    $q = Security::clean($_GET['q'] ?? '');
-    if (strlen($q) < 3) return ['error' => 'Minimum 3 characters'];
-
-    $page = max(1, Security::int($_GET['page'] ?? 1));
-    $result = TecDoc::searchByOE($q, $page, 24);
-    $result['products'] = Products::enrichMany($result['products']);
-    return $result;
-}
 
 function apiParametricSearch(): array {
     $catId = Security::int($_GET['category_id'] ?? 0);
@@ -1280,7 +1240,7 @@ function apiParametricSearch(): array {
     $priceMin = !empty($_GET['price_min']) ? Security::int($_GET['price_min']) : null;
     $priceMax = !empty($_GET['price_max']) ? Security::int($_GET['price_max']) : null;
 
-    // Parse spec filters from query params: spec[Strana montáže]=L&spec[Materiál]=bavlna
+    // Parse spec filters from query params: spec[Material]=cotton&spec[Size][]=M
     $specFilters = [];
     if (!empty($_GET['spec']) && is_array($_GET['spec'])) {
         foreach ($_GET['spec'] as $name => $val) {
@@ -1293,7 +1253,7 @@ function apiParametricSearch(): array {
         }
     }
 
-    $result = TecDoc::parametricSearch($catId, $page, 24, $sort, $specFilters, $priceMin, $priceMax, $lang);
+    $result = Products::parametricSearch($catId, $page, 24, $sort, $specFilters, $priceMin, $priceMax, $lang);
     $result['products'] = Products::enrichMany($result['products']);
     return $result;
 }
@@ -1302,20 +1262,7 @@ function apiProductSpecs(): array {
     $id = Security::int($_GET['id'] ?? 0);
     if (!$id) return ['error' => 'id required'];
     $lang = I18n::locale();
-    return ['specifications' => TecDoc::specifications($id, $lang)];
-}
-
-function apiProductOE(): array {
-    $id = Security::int($_GET['id'] ?? 0);
-    if (!$id) return ['error' => 'id required'];
-    return ['oe_numbers' => TecDoc::oeNumbers($id)];
-}
-
-function apiProductVehicles(): array {
-    $id = Security::int($_GET['id'] ?? 0);
-    if (!$id) return ['error' => 'id required'];
-    $limit = min(200, max(1, Security::int($_GET['limit'] ?? 50)));
-    return ['vehicles' => TecDoc::vehiclesForProduct($id, $limit)];
+    return ['specifications' => Products::specifications($id, $lang)];
 }
 
 /** Browser CSP violation reports; no CSRF (browsers send them without page context). */

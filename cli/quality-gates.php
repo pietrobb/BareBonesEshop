@@ -68,8 +68,20 @@ $check(is_file($root . '/themes/default/blocks/storefront/product-detail.html') 
 $check(!preg_match('/<(?:p|div|form|button|table|img|nav|section|article)\b/i', $storefrontEntrypoint . $catalogPages . $checkoutPages), 'Theme boundary: storefront core presenters contain no structural HTML');
 $check(str_contains($cleanProductEntrypoint, "src/Entrypoints/Storefront.php") && !str_contains($cleanProductEntrypoint, 'ob_start'), 'Canonical product route: clean URL delegates without a parallel renderer');
 $check(substr_count($catalogPages, 'StorefrontViewModel::product(') === 1, 'Canonical product route: one view-model builder serves storefront routing');
-$check(!preg_match('/[\x27\x22](?:breadcrumb|latest|product_grid|automotive|navigation)_html[\x27\x22]/', $storefrontViewModel), 'View-model boundary: no structural HTML fragments are exposed');
+$check(!preg_match('/[\x27\x22](?:breadcrumb|latest|product_grid|navigation)_html[\x27\x22]/', $storefrontViewModel), 'View-model boundary: no structural HTML fragments are exposed');
 $check(!preg_match('/\b(?:isbn|ebook_url|printed_book_url|AeonProductViewModel)\b/i', $storefrontViewModel), 'Universal engine: canonical model contains no vertical-specific product fields');
+$verticalHits = [];
+$verticalFiles = array_merge(
+    glob($root . '/src/*.php') ?: [], glob($root . '/src/*/*.php') ?: [], glob($root . '/src/*/*/*.php') ?: [], glob($root . '/cli/*.php') ?: [],
+    glob($root . '/lang/*.php') ?: [], glob($root . '/themes/default/blocks/*/*.html') ?: [], glob($root . '/migrations/*.php') ?: [],
+    [$root . '/catalog.json', $root . '/config.example.php']
+);
+foreach ($verticalFiles as $file) {
+    // Applied migrations are immutable history (checksummed); the removal migration names what it drops.
+    if (in_array(basename($file), ['20260424000000_baseline.php', '20261014120000_remove_auto_parts_tables.php', 'quality-gates.php'], true)) continue;
+    if (preg_match('/tecdoc|ktype|product_vehicles|product_oe_numbers|oe_fts|auto_part|automotive/i', (string)file_get_contents($file))) $verticalHits[] = substr($file, strlen($root) + 1);
+}
+$check($verticalHits === [], 'Universal engine: no auto-parts vertical in core (belongs in an extension)' . ($verticalHits ? ': ' . implode(', ', $verticalHits) : ''));
 
 $langFiles = glob($root . '/lang/*.php') ?: [];
 $catalogs = [];

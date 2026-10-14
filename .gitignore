@@ -46,7 +46,7 @@ uploads/magento/
 .DS_Store
 Thumbs.db
 
-# Large data files (TecDoc DB ~850MB)
+# Large local data files
 demo/*.db
 
 # Storage (invoices PDFs, etc.)

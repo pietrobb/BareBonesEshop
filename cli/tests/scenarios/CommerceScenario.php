@@ -634,30 +634,30 @@ $rendered2 = Template::process('{{{name}}}', $xssData);
 assert_true(str_contains($rendered2, '<img'), 'Triple braces = raw (developer choice)');
 
 // ============================================================
-// TEST 29: TecDoc — Specifications CRUD & Parametric Search
+// TEST 29: Product specifications & parametric search
 // ============================================================
-echo "\n--- Test 29: TecDoc — Specifications & Parametric Search ---\n";
+echo "\n--- Test 29: Product specifications & parametric search ---\n";
 
-// Create a "Brake Disc" category for auto parts
-$pdo->exec("INSERT INTO categories (slug, name, parent_id, path, depth, sort_order, meta) VALUES ('brake-system', 'Brake System', NULL, 'brake-system', 0, 100, '{}')");
-$brakeSystemId = (int)$pdo->lastInsertId();
-$pdo->exec("INSERT INTO categories (slug, name, parent_id, path, depth, sort_order, meta) VALUES ('brake-disc', 'Brake Disc', {$brakeSystemId}, 'brake-system/brake-disc', 1, 101, '{\"genart_no\":192}')");
-$brakeDiscCatId = (int)$pdo->lastInsertId();
+// A category whose products carry specifications
+$pdo->exec("INSERT INTO categories (slug, name, parent_id, path, depth, sort_order, meta) VALUES ('furniture', 'Furniture', NULL, 'furniture', 0, 100, '{}')");
+$specParentCatId = (int)$pdo->lastInsertId();
+$pdo->exec("INSERT INTO categories (slug, name, parent_id, path, depth, sort_order, meta) VALUES ('table-tops', 'Table Tops', {$specParentCatId}, 'furniture/table-tops', 1, 101, '{}')");
+$specCatId = (int)$pdo->lastInsertId();
 
-// Insert 3 brake disc products with different specs
+// Insert 3 products with different specs
 $pdo->exec("INSERT INTO products (sku, slug, product_type, name, category_id, price, stock, status, summary, filter_tags)
-    VALUES ('BD-001', 'brake-disc-front-300mm', 'auto_part', 'Brake Disc Front 300mm', {$brakeDiscCatId}, 5500, 10, 'active', 'Front brake disc 300mm ventilated', 'attr_supplier_trw')");
+    VALUES ('BD-001', 'table-top-front-300mm', 'simple', 'Table Top Front 300mm', {$specCatId}, 5500, 10, 'active', 'Front table top 300mm ventilated', 'attr_supplier_trw')");
 $bd1Id = (int)$pdo->lastInsertId();
 
 $pdo->exec("INSERT INTO products (sku, slug, product_type, name, category_id, price, stock, status, summary, filter_tags)
-    VALUES ('BD-002', 'brake-disc-front-280mm', 'auto_part', 'Brake Disc Front 280mm', {$brakeDiscCatId}, 4200, 5, 'active', 'Front brake disc 280mm solid', 'attr_supplier_febi')");
+    VALUES ('BD-002', 'table-top-front-280mm', 'simple', 'Table Top Front 280mm', {$specCatId}, 4200, 5, 'active', 'Front table top 280mm solid', 'attr_supplier_febi')");
 $bd2Id = (int)$pdo->lastInsertId();
 
 $pdo->exec("INSERT INTO products (sku, slug, product_type, name, category_id, price, stock, status, summary, filter_tags)
-    VALUES ('BD-003', 'brake-disc-rear-260mm', 'auto_part', 'Brake Disc Rear 260mm', {$brakeDiscCatId}, 3800, 15, 'active', 'Rear brake disc 260mm solid', 'attr_supplier_trw')");
+    VALUES ('BD-003', 'table-top-rear-260mm', 'simple', 'Table Top Rear 260mm', {$specCatId}, 3800, 15, 'active', 'Rear table top 260mm solid', 'attr_supplier_trw')");
 $bd3Id = (int)$pdo->lastInsertId();
 
-// Add specifications for each disc
+// Add specifications for each product
 $specStmt = $pdo->prepare("INSERT INTO product_specifications (product_id, lang, criteria_name, criteria_value, numeric_val, sort_order) VALUES (?, ?, ?, ?, ?, ?)");
 
 // BD-001: Front 300mm ventilated TRW
@@ -682,26 +682,26 @@ $specStmt->execute([$bd3Id, 'sk', 'Typ', 'Plný', null, 4]);
 $specStmt->execute([$bd3Id, 'sk', 'Počet otvorov', '5', 5.0, 5]);
 
 // Get specifications for a product
-$specs = TecDoc::specifications($bd1Id, 'sk');
+$specs = Products::specifications($bd1Id, 'sk');
 assert_equals(5, count($specs), 'BD-001 has 5 specs');
 assert_equals('Priemer [mm]', $specs[0]['criteria_name'], 'First spec is Priemer');
 assert_equals('300', $specs[0]['criteria_value'], 'Priemer value = 300');
 assert_equals(300.0, $specs[0]['numeric_val'], 'Numeric value extracted');
 
 // Parametric search — no filters → all 3 products
-$result = TecDoc::parametricSearch($brakeDiscCatId, 1, 24, 'price_asc', [], null, null, 'sk');
+$result = Products::parametricSearch($specCatId, 1, 24, 'price_asc', [], null, null, 'sk');
 assert_equals(3, $result['total'], 'Parametric: no filter → 3 products');
 
 // Filter by mounting side = Vpredu → 2 products
-$result = TecDoc::parametricSearch($brakeDiscCatId, 1, 24, 'price_asc', ['Strana montáže' => ['Vpredu']], null, null, 'sk');
+$result = Products::parametricSearch($specCatId, 1, 24, 'price_asc', ['Strana montáže' => ['Vpredu']], null, null, 'sk');
 assert_equals(2, $result['total'], 'Parametric: Vpredu → 2 products');
 
 // Filter by type = Plný → 2 products (BD-002, BD-003)
-$result = TecDoc::parametricSearch($brakeDiscCatId, 1, 24, 'price_asc', ['Typ' => ['Plný']], null, null, 'sk');
+$result = Products::parametricSearch($specCatId, 1, 24, 'price_asc', ['Typ' => ['Plný']], null, null, 'sk');
 assert_equals(2, $result['total'], 'Parametric: Plný → 2 products');
 
 // Combined filter: Vpredu + Plný → 1 product (BD-002)
-$result = TecDoc::parametricSearch($brakeDiscCatId, 1, 24, 'price_asc', [
+$result = Products::parametricSearch($specCatId, 1, 24, 'price_asc', [
     'Strana montáže' => ['Vpredu'],
     'Typ' => ['Plný'],
 ], null, null, 'sk');
@@ -709,7 +709,7 @@ assert_equals(1, $result['total'], 'Parametric: Vpredu + Plný → 1 product');
 assert_equals('BD-002', $result['products'][0]['sku'], 'Filtered product is BD-002');
 
 // Combined filter: Vpredu + Vetraný → 1 product (BD-001)
-$result = TecDoc::parametricSearch($brakeDiscCatId, 1, 24, 'price_asc', [
+$result = Products::parametricSearch($specCatId, 1, 24, 'price_asc', [
     'Strana montáže' => ['Vpredu'],
     'Typ' => ['Vetraný'],
 ], null, null, 'sk');
@@ -717,12 +717,12 @@ assert_equals(1, $result['total'], 'Parametric: Vpredu + Vetraný → 1 product'
 assert_equals('BD-001', $result['products'][0]['sku'], 'Filtered product is BD-001');
 
 // Price range filter within parametric search
-$result = TecDoc::parametricSearch($brakeDiscCatId, 1, 24, 'price_asc', [], 4000, 5000, 'sk');
+$result = Products::parametricSearch($specCatId, 1, 24, 'price_asc', [], 4000, 5000, 'sk');
 assert_equals(1, $result['total'], 'Price range 4000-5000 → 1 product');
 assert_equals('BD-002', $result['products'][0]['sku'], 'Price filtered product is BD-002');
 
 // Spec filter values — dynamic facets
-$filterValues = TecDoc::specFilterValues($brakeDiscCatId, 'sk');
+$filterValues = Products::specFilterValues($specCatId, 'sk');
 assert_true(isset($filterValues['Strana montáže']), 'Filter has Strana montáže');
 assert_true(isset($filterValues['Typ']), 'Filter has Typ');
 assert_true(isset($filterValues['Počet otvorov']), 'Filter has Počet otvorov');
@@ -733,7 +733,7 @@ assert_true(in_array('Vpredu', $mountValues), 'Strana montáže has Vpredu');
 assert_true(in_array('Vzadu', $mountValues), 'Strana montáže has Vzadu');
 
 // Dynamic filter narrowing: when Vpredu is selected, Typ should still show both options
-$filterValues2 = TecDoc::specFilterValues($brakeDiscCatId, 'sk', ['Strana montáže' => ['Vpredu']]);
+$filterValues2 = Products::specFilterValues($specCatId, 'sk', ['Strana montáže' => ['Vpredu']]);
 $typValues = array_column($filterValues2['Typ'], 'value');
 assert_true(in_array('Vetraný', $typValues), 'With Vpredu filter, Typ still shows Vetraný');
 assert_true(in_array('Plný', $typValues), 'With Vpredu filter, Typ still shows Plný');
@@ -744,111 +744,43 @@ $g4FacetCounter = new QueryCountingPDO('sqlite:' . $testDbPath, null, null, [
 ]);
 Db::init($g4FacetCounter, 'sqlite');
 $g4FacetCounter->resetQueryCount();
-$g4UnfilteredFacets = TecDoc::specFilterValues($brakeDiscCatId, 'sk');
+$g4UnfilteredFacets = Products::specFilterValues($specCatId, 'sk');
 assert_equals($filterValues, $g4UnfilteredFacets, 'G4 facets: batched unfiltered payload preserves behavior');
 assert_true($g4FacetCounter->queryCount() <= 1, 'G4 facets: unfiltered values use one aggregate query');
 $g4FacetCounter->resetQueryCount();
-$g4ActiveFacets = TecDoc::specFilterValues($brakeDiscCatId, 'sk', ['Strana montáže' => ['Vpredu']]);
+$g4ActiveFacets = Products::specFilterValues($specCatId, 'sk', ['Strana montáže' => ['Vpredu']]);
 assert_equals($filterValues2, $g4ActiveFacets, 'G4 facets: active self-exclusion payload preserves behavior');
 assert_true($g4FacetCounter->queryCount() <= 2, 'G4 facets: one active filter uses at most two aggregate queries');
 Db::init($pdo, 'sqlite');
 
 // ============================================================
-// TEST 30: TecDoc — OE Number Search
+// TEST 32: Parametric filter edge cases
 // ============================================================
-echo "\n--- Test 30: TecDoc — OE Number Search ---\n";
-
-// Add OE numbers (with normalized form for fast search)
-$oeStmt = $pdo->prepare("INSERT INTO product_oe_numbers (product_id, oem_brand, oem_number, oem_number_norm) VALUES (?, ?, ?, ?)");
-$oeStmt->execute([$bd1Id, 'VOLKSWAGEN', '1K0 615 301 AD', '1K0615301AD']);
-$oeStmt->execute([$bd1Id, 'AUDI', '8J0 615 301 K', '8J0615301K']);
-$oeStmt->execute([$bd2Id, 'SKODA', '6R0 615 301 B', '6R0615301B']);
-$oeStmt->execute([$bd3Id, 'VOLKSWAGEN', '1K0 615 601 N', '1K0615601N']);
-
-// Search by exact OE
-$result = TecDoc::searchByOE('1K0 615 301 AD');
-assert_equals(1, $result['total'], 'OE search exact: 1 result');
-assert_equals('BD-001', $result['products'][0]['sku'], 'OE search finds correct product');
-
-// Search by partial OE (normalized — strips spaces/dashes)
-$result = TecDoc::searchByOE('1K0615301');
-assert_equals(1, $result['total'], 'OE search normalized: finds with spaces stripped');
-
-// Search by OE pattern across multiple products
-$result = TecDoc::searchByOE('615301');
-assert_equals(2, $result['total'], 'OE pattern 615301 → 2 products (BD-001, BD-003)');
-
-// Get OE numbers for a product
-$oeNums = TecDoc::oeNumbers($bd1Id);
-assert_equals(2, count($oeNums), 'BD-001 has 2 OE numbers');
-assert_equals('AUDI', $oeNums[0]['oem_brand'], 'First OE sorted alphabetically by brand');
-
-// ============================================================
-// TEST 31: TecDoc — Vehicle Compatibility
-// ============================================================
-echo "\n--- Test 31: TecDoc — Vehicle Compatibility ---\n";
-
-// Add vehicle compatibility
-$vehStmt = $pdo->prepare("INSERT INTO product_vehicles (product_id, ktype, manufacturer, model, type_name) VALUES (?, ?, ?, ?, ?)");
-$vehStmt->execute([$bd1Id, 35430, 'VOLKSWAGEN', 'GOLF V (1K1)', '2.0 TDI 140HP']);
-$vehStmt->execute([$bd1Id, 35431, 'VOLKSWAGEN', 'GOLF V (1K1)', '1.6 FSI 115HP']);
-$vehStmt->execute([$bd2Id, 35430, 'VOLKSWAGEN', 'GOLF V (1K1)', '2.0 TDI 140HP']);
-$vehStmt->execute([$bd3Id, 35430, 'VOLKSWAGEN', 'GOLF V (1K1)', '2.0 TDI 140HP']);
-$vehStmt->execute([$bd1Id, 48907, 'AUDI', 'A3 (8P)', '2.0 TDI 140HP']);
-
-// Parts by ktype
-$result = TecDoc::partsByKtype(35430);
-assert_equals(3, $result['total'], 'Ktype 35430 → 3 parts');
-
-// Parts by ktype with category filter
-$result = TecDoc::partsByKtype(35430, 1, 24, $brakeDiscCatId);
-assert_equals(3, $result['total'], 'Ktype 35430 + brake disc cat → 3 parts');
-
-// Categories for ktype
-$cats = TecDoc::categoriesForKtype(35430);
-assert_equals(1, count($cats), 'Ktype 35430 has 1 category');
-assert_equals('brake-disc', $cats[0]['slug'], 'Category is brake-disc');
-assert_equals(3, (int)$cats[0]['part_count'], 'Category has 3 parts for this ktype');
-
-// Vehicles for product
-$vehicles = TecDoc::vehiclesForProduct($bd1Id);
-assert_equals(3, count($vehicles), 'BD-001 fits 3 vehicles');
-
-// Enrich product with TecDoc data
-$product = Products::byId($bd1Id);
-$enriched = TecDoc::enrichProduct($product, 'sk');
-assert_equals(5, count($enriched['specifications']), 'Enriched product has 5 specs');
-assert_equals(2, count($enriched['oe_numbers']), 'Enriched product has 2 OE numbers');
-assert_equals(3, $enriched['vehicle_count'], 'Enriched product fits 3 vehicles');
-
-// ============================================================
-// TEST 32: TecDoc — Parametric Filter Edge Cases
-// ============================================================
-echo "\n--- Test 32: TecDoc — Parametric Filter Edge Cases ---\n";
+echo "\n--- Test 32: Parametric filter edge cases ---\n";
 
 // OR within same criterion: holes = 4 OR 5 → all 3 products
-$result = TecDoc::parametricSearch($brakeDiscCatId, 1, 24, 'price_asc', [
+$result = Products::parametricSearch($specCatId, 1, 24, 'price_asc', [
     'Počet otvorov' => ['4', '5'],
 ], null, null, 'sk');
 assert_equals(3, $result['total'], 'OR within criterion: holes 4 OR 5 → 3 products');
 
 // Sorting works
-$result = TecDoc::parametricSearch($brakeDiscCatId, 1, 24, 'price_desc', [], null, null, 'sk');
+$result = Products::parametricSearch($specCatId, 1, 24, 'price_desc', [], null, null, 'sk');
 assert_equals('BD-001', $result['products'][0]['sku'], 'Price desc: BD-001 first (5500)');
 assert_equals('BD-003', $result['products'][2]['sku'], 'Price desc: BD-003 last (3800)');
 
 // Pagination
-$result = TecDoc::parametricSearch($brakeDiscCatId, 1, 2, 'price_asc', [], null, null, 'sk');
+$result = Products::parametricSearch($specCatId, 1, 2, 'price_asc', [], null, null, 'sk');
 assert_equals(3, $result['total'], 'Pagination: total still 3');
 assert_equals(2, count($result['products']), 'Pagination: page 1 has 2 items');
 assert_equals(2, $result['pages'], 'Pagination: 2 pages total');
 
-$result2 = TecDoc::parametricSearch($brakeDiscCatId, 2, 2, 'price_asc', [], null, null, 'sk');
+$result2 = Products::parametricSearch($specCatId, 2, 2, 'price_asc', [], null, null, 'sk');
 assert_equals(1, count($result2['products']), 'Pagination: page 2 has 1 item');
 
 // Empty category returns no filters
-$emptyCatId = $brakeSystemId; // parent with no direct products
-$result = TecDoc::parametricSearch($emptyCatId, 1, 24, 'price_asc', [], null, null, 'sk');
+$emptyCatId = $specParentCatId; // parent with no direct products
+$result = Products::parametricSearch($emptyCatId, 1, 24, 'price_asc', [], null, null, 'sk');
 assert_equals(0, $result['total'], 'Empty category → 0 products');
 assert_true(empty($result['filters']), 'Empty category → no filters');
 

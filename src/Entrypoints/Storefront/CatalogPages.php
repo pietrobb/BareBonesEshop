@@ -42,7 +42,7 @@ function renderCategory(array $cat): string {
     $pmax = !empty($_GET['pmax']) ? Security::int($_GET['pmax']) * 100 : null;
     $ranges = [];
     foreach (['rmin' => 'min', 'rmax' => 'max'] as $input => $edge) foreach ((array)($_GET[$input] ?? []) as $name => $value) if ($value !== '') $ranges[Security::clean($name)][$edge] = (float)$value;
-    $result = TecDoc::parametricSearch($ids, $page, 24, $sort, $spec, $pmin, $pmax, $lang, $ranges);
+    $result = Products::parametricSearch($ids, $page, 24, $sort, $spec, $pmin, $pmax, $lang, $ranges);
     $children = array_values(array_filter(Categories::children($catId), static fn(array $row): bool => (int)$row['product_count'] > 0));
     $filters = [];
     foreach ($result['filters'] as $name => $values) {
@@ -81,21 +81,12 @@ function renderSearch(string $query, array $result, array $filters): string {
         'clear_url' => Template::storeUrl('/?page=search&q=' . rawurlencode($query)),
     ]);
 }
-function renderOE(string $query, array $result): string { return renderSearchPage($query, $result, I18n::t('oe_search'), '?page=oe&q=' . rawurlencode($query)); }
 function renderSearchPage(string $query, array $result, string $heading, string $base, array $filterView = []): string {
     return Template::render('storefront/search-results', [
         'breadcrumbs' => [['url'=>Template::storeUrl('/'),'label'=>I18n::t('home'),'current'=>false],['url'=>'','label'=>$heading . ': ' . $query,'current'=>true]],
         'heading'=>$heading, 'total'=>(int)$result['total'], 'query'=>$query, 'products'=>storefrontProductItems($result['products']),
         'pagination'=>storefrontPagination((int)$result['page'], (int)$result['pages'], $base), 't'=>I18n::all(),
     ] + $filterView + ['show_filters' => false]);
-}
-
-function renderVehicle(int $ktype, array $result, array $categories, ?int $activeCatId): string {
-    return Template::render('storefront/vehicle-page', [
-        'heading'=>I18n::t('vehicle_parts'), 'ktype'=>$ktype, 'total'=>(int)$result['total'],
-        'categories'=>array_map(static fn(array $row): array => ['url'=>Template::storeUrl('/?page=vehicle&ktype='.$ktype.'&cat='.(int)$row['id']),'name'=>(string)$row['name'],'count'=>(int)$row['part_count'],'active'=>$activeCatId===(int)$row['id']], $categories),
-        'products'=>storefrontProductItems($result['products']), 'pagination'=>storefrontPagination((int)$result['page'], (int)$result['pages'], '?page=vehicle&ktype='.$ktype), 't'=>I18n::all(),
-    ]);
 }
 
 function storefrontProductItems(array $products): array { return array_map([StorefrontViewModel::class, 'productCard'], Products::enrichMany($products)); }

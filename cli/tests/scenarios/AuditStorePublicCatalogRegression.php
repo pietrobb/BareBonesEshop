@@ -1,6 +1,6 @@
 <?php
 
-echo "\n--- Audit A05.4: public TecDoc lookups and sitemap per store/catalog ---\n";
+echo "\n--- Audit A05.4: public specification lookups and sitemap per store/catalog ---\n";
 $a054Root = test_fixture_path('public-catalog-store');
 mkdir($a054Root);
 $a054Fixture = $a054Root . '/request.php';
@@ -34,10 +34,6 @@ if ($phase === 'setup') {
             $db->prepare("INSERT INTO products (store_id, sku, slug, name, category_id, price, stock, status) VALUES (?, ?, ?, ?, ?, ?, 5, 'active')")
                 ->execute([$owner, "A05TS{$suffix}-{$owner}", "a05tp{$suffix}-{$owner}", "A05TP{$suffix}-{$owner}-NAME", $category, 1000 * $n]);
             $product = (int)$db->lastInsertId();
-            $db->prepare("INSERT INTO product_vehicles (product_id, ktype, manufacturer, model, type_name) VALUES (?, 7001, 'A05MAKE', ?, '')")
-                ->execute([$product, "MODEL-{$owner}"]);
-            $db->prepare("INSERT INTO product_oe_numbers (product_id, oem_brand, oem_number, oem_number_norm) VALUES (?, 'A05BRAND', ?, ?)")
-                ->execute([$product, "A05OE-{$owner}", 'A05OE' . strtoupper($owner) . $suffix]);
             $db->prepare("INSERT INTO product_specifications (product_id, lang, criteria_name, criteria_value, numeric_val) VALUES (?, 'en', 'A05CRIT', ?, NULL)")
                 ->execute([$product, "SPEC{$suffix}-{$owner}"]);
         }
@@ -68,21 +64,13 @@ $owner = str_ends_with($action, '_foreign') ? $foreign : $store;
 $product = $idOf('products', 'slug', "a05tp-{$owner}");
 $category = $idOf('categories', 'slug', "a05tc-{$owner}");
 $_GET = match ($action) {
-    'parts' => ['ktype'=>'7001'],
-    'parts_cat_foreign' => ['ktype'=>'7001', 'category_id'=>(string)$category],
-    'oe_prefix' => ['q'=>'A05OE'],
-    'oe_contains' => ['q'=>'05OE'],
     'param_own', 'param_foreign' => ['category_id'=>(string)$category],
-    'specs_own', 'specs_foreign', 'oe_own', 'oe_foreign', 'vehicles_own', 'vehicles_foreign' => ['id'=>(string)$product],
+    'specs_own', 'specs_foreign' => ['id'=>(string)$product],
     default => [],
 };
 $result = match ($action) {
-    'parts', 'parts_cat_foreign' => apiVehicleParts(),
-    'oe_prefix', 'oe_contains' => apiOESearch(),
     'param_own', 'param_foreign' => apiParametricSearch(),
     'specs_own', 'specs_foreign' => apiProductSpecs(),
-    'oe_own', 'oe_foreign' => apiProductOE(),
-    'vehicles_own', 'vehicles_foreign' => apiProductVehicles(),
     'sitemap' => Sitemap::xml('https://shop.test'),
 };
 print is_string($result) ? $result : json_encode($result, JSON_THROW_ON_ERROR);
@@ -99,16 +87,10 @@ $a054Run = static function(array $args) use ($a054Fixture): array {
 };
 // Own-store markers that must appear in a positive lookup.
 $a054OwnMarkers = [
-    'parts' => ['A05TP-%s-NAME', 'A05TPb-%s-NAME', 'A05TC-%s-NAME'],
-    'oe_prefix' => ['A05TP-%s-NAME', 'A05OE-%s'],
-    'oe_contains' => ['A05TP-%s-NAME', 'A05OE-%s'],
     'param_own' => ['A05TP-%s-NAME', 'SPEC-%s', 'SPECb-%s'],
     'specs_own' => ['SPEC-%s'],
-    'oe_own' => ['A05OE-%s'],
-    'vehicles_own' => ['MODEL-%s'],
 ];
-$a054Actions = ['parts', 'parts_cat_foreign', 'oe_prefix', 'oe_contains', 'param_own', 'param_foreign',
-    'specs_own', 'specs_foreign', 'oe_own', 'oe_foreign', 'vehicles_own', 'vehicles_foreign', 'sitemap'];
+$a054Actions = ['param_own', 'param_foreign', 'specs_own', 'specs_foreign', 'sitemap'];
 $a054Drivers = ['sqlite' => $a054Root . '/catalog.sqlite'];
 if (getenv('TEST_MYSQL_DSN')) $a054Drivers['mysql'] = 'bbe_a054_catalog_' . getmypid() . '_' . bin2hex(random_bytes(4)) . '_test';
 else print "  [SKIP] Audit A05.4 native public catalog boundary (set TEST_MYSQL_DSN)\n";
@@ -143,16 +125,16 @@ try {
                     assert_true(@$a054Doc->loadXML($a054Out) !== false, "{$a054Label}: sitemap stays well-formed");
                     continue;
                 }
-                assert_true(!str_contains($a054Out, "-{$a054Foreign}") && !str_contains($a054Out, 'A05OE' . strtoupper($a054Foreign)), "{$a054Label}: no foreign catalog data disclosed");
+                assert_true(!str_contains($a054Out, "-{$a054Foreign}"), "{$a054Label}: no foreign catalog data disclosed");
                 $a054Data = json_decode($a054Out, true, 512, JSON_THROW_ON_ERROR);
                 foreach ($a054OwnMarkers[$a054Action] ?? [] as $a054Marker) {
                     assert_true(str_contains($a054Out, sprintf($a054Marker, $a054Store)), "{$a054Label}: own store data {$a054Marker} returned");
                 }
-                if (in_array($a054Action, ['parts', 'oe_prefix', 'oe_contains', 'param_own'], true)) {
+                if ($a054Action === 'param_own') {
                     assert_equals(2, $a054Data['total'] ?? null, "{$a054Label}: total counts only own catalog products");
                 }
                 if (str_ends_with($a054Action, '_foreign')) {
-                    $a054Payload = $a054Data['products'] ?? $a054Data['specifications'] ?? $a054Data['oe_numbers'] ?? $a054Data['vehicles'] ?? null;
+                    $a054Payload = $a054Data['products'] ?? $a054Data['specifications'] ?? null;
                     assert_equals([], $a054Payload, "{$a054Label}: foreign product/category lookup is empty");
                 }
             }

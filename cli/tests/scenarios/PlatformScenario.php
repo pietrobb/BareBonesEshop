@@ -1012,7 +1012,6 @@ assert_true(str_contains($vm['product']['description_html'], '<strong>content</s
 assert_true($vm['product']['availability']['purchasable'] && !$vm['product']['availability']['tracks_stock'] && $vm['product']['availability']['quantity'] === 0, 'G12 availability: stock-zero digital product remains purchasable without stock tracking');
 assert_equals('VM-CURATED', $vm['product']['relations']['related'][0]['sku'], 'G12 relations: curated related product wins over category fallback');
 assert_equals('VM-FORMAT', $vm['product']['relations']['format'][0]['sku'], 'G12 relations: arbitrary format relation uses the canonical card model');
-assert_true(!isset($vm['extensions']['automotive']), 'G12 extensions: product without automotive data has no automotive payload or UI signal');
 assert_equals(9701, $vm['extensions']['contract_test']['product_id'], 'G12 extensions: custom namespaced provider augments the product model');
 assert_true(str_starts_with($vm['product']['url'], '/test/de/product/') && str_starts_with($vm['product']['images'][0]['url'], '/test/uploads/full/'), 'G12 URLs: locale-aware product and subdirectory-aware image URLs are canonical');
 $forbiddenHtmlKeys = [];
@@ -1797,4 +1796,5 @@ require __DIR__ . '/AuditStoreSwitcherRegression.php';
 require __DIR__ . '/AuditAdminI18nRegression.php';
 require __DIR__ . '/AuditEmailTemplateRegression.php';
 require __DIR__ . '/AuditExtensionRegression.php';
+require __DIR__ . '/AuditExtensionDataRegression.php';
 foreach (['Gopay', 'Comgate', 'Thepay', 'ShipmentAdmin'] as $auditTailRegression) require __DIR__ . "/Audit{$auditTailRegression}Regression.php";

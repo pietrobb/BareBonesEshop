@@ -8,7 +8,6 @@ final class StorefrontComposition
             StorefrontCoreSectionProviders::class,
             StorefrontReviewExtension::class,
             StorefrontWishlistExtension::class,
-            StorefrontAutomotiveExtension::class,
         ] as $provider) {
             if (class_exists($provider)) $provider::register();
         }

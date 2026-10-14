@@ -79,30 +79,6 @@
             }
         },
 
-        "auto_part": {
-            "name": {"en": "Auto Part", "sk": "Autodiel", "de": "Autoteil"},
-            "has_variants": false,
-            "attributes": {
-                "supplier": {
-                    "type": "select",
-                    "label": {"en": "Supplier", "sk": "Dodávateľ", "de": "Lieferant"},
-                    "filterable": true,
-                    "options_from": "data"
-                },
-                "genart": {
-                    "type": "hidden",
-                    "label": {"en": "GenArt No.", "sk": "GenArt č."},
-                    "filterable": false
-                }
-            },
-            "features": {
-                "specifications": true,
-                "oe_numbers": true,
-                "vehicle_compatibility": true,
-                "parametric_search": true
-            }
-        },
-
         "downloadable": {
             "name": {"en": "Digital Download", "sk": "Digitálny produkt"},
             "has_variants": false,
