@@ -18,7 +18,7 @@ function renderOrderShipments(array $order): void {
     $trackingFields = static function(array $shipment = []): void { ?>
         <input name="carrier" maxlength="100" value="<?= esc((string)($shipment['carrier'] ?? '')) ?>" placeholder="<?= esc(I18n::t('admin.shipment.carrier')) ?>" aria-label="<?= esc(I18n::t('admin.shipment.carrier')) ?>">
         <input name="tracking_number" maxlength="100" value="<?= esc((string)($shipment['tracking_number'] ?? '')) ?>" placeholder="<?= esc(I18n::t('admin.shipment.tracking_number')) ?>" aria-label="<?= esc(I18n::t('admin.shipment.tracking_number')) ?>">
-        <input name="tracking_url" type="url" maxlength="500" value="<?= esc((string)($shipment['tracking_url'] ?? '')) ?>" placeholder="https://…" aria-label="<?= esc(I18n::t('admin.shipment.tracking_url')) ?>">
+        <input name="tracking_url" type="url" maxlength="500" value="<?= esc((string)($shipment['tracking_url'] ?? '')) ?>" aria-label="<?= esc(I18n::t('admin.shipment.tracking_url')) ?>">
     <?php };
     ?>
     <div class="card" id="shipments">

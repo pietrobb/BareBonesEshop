@@ -616,6 +616,10 @@ $emailOverrideMigration = require TEST_CLI_DIR . '/../migrations/20261013130000_
 $emailOverrideMigration->up($pdo, true);
 $emailOverrideMigration->up($pdo, true);
 assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='email_template_overrides'")->fetchColumn(), 'A15.8 migration: e-mail template overrides table exists idempotently');
+$shipmentTrackingMigration = require TEST_CLI_DIR . '/../migrations/20261014090000_shipment_tracking_url.php';
+$shipmentTrackingMigration->up($pdo, true);
+$shipmentTrackingMigration->up($pdo, true);
+assert_true(in_array('tracking_url', array_column($pdo->query('PRAGMA table_info(shipments)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true), 'A12.8 migration: shipment tracking URL column is added idempotently');
 
 // ============================================================
 // TEST 3: CSV Import
