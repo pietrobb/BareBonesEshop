@@ -31,14 +31,48 @@ class Fulfillment {
 
         $shipmentIds = [];
         foreach ($groups as $warehouseKey => $group) {
-            $shipmentIds[] = self::createShipment(
-                $orderId,
-                $group['warehouse_id'],
-                array_values($group['items']),
-                "order:{$orderId}:warehouse:{$warehouseKey}"
-            );
+            $key = "order:{$orderId}:warehouse:{$warehouseKey}";
+            // Plan only what earlier (e.g. partial admin) shipments have not covered yet.
+            $items = [];
+            foreach ($group['items'] as $item) {
+                $item['quantity'] -= self::plannedQuantity($orderId, $item['order_item_id'], $item['sku'], $group['warehouse_id'], $key);
+                if ($item['quantity'] > 0) $items[] = $item;
+            }
+            if ($items) {
+                $shipmentIds[] = self::createShipment($orderId, $group['warehouse_id'], $items, $key);
+            }
         }
         return $shipmentIds;
+    }
+
+    /**
+     * Open quantities per warehouse for new shipments of an order in the active store:
+     * [['warehouse_id' => ?int, 'lines' => [['order_item_id', 'sku', 'name', 'allocated', 'planned', 'remaining']]]].
+     */
+    public static function shippable(int $orderId): array {
+        if (!Orders::byId($orderId)) return [];
+        $groups = [];
+        foreach (Orders::items($orderId) as $orderItem) {
+            foreach (Inventory::reservationLines($orderItem) as $line) {
+                $sku = (string)$line['sku'];
+                $warehouses = [];
+                foreach ($line['allocations'] ?? [] as $allocation) {
+                    if (!in_array((string)($allocation['status'] ?? 'reserved'), ['reserved', 'legacy_variant'], true)) continue;
+                    $warehouses[empty($allocation['warehouse_id']) ? 'legacy' : (string)(int)$allocation['warehouse_id']] = true;
+                }
+                foreach (array_keys($warehouses) as $warehouseKey) {
+                    $warehouseId = $warehouseKey === 'legacy' ? null : (int)$warehouseKey;
+                    $allocated = self::allocatedQuantity($orderItem, $sku, $warehouseId);
+                    $planned = self::plannedQuantity($orderId, (int)$orderItem['id'], $sku, $warehouseId);
+                    $groups[$warehouseKey] ??= ['warehouse_id' => $warehouseId, 'lines' => []];
+                    $groups[$warehouseKey]['lines'][] = [
+                        'order_item_id' => (int)$orderItem['id'], 'sku' => $sku, 'name' => (string)$orderItem['name'],
+                        'allocated' => $allocated, 'planned' => $planned, 'remaining' => max(0, $allocated - $planned),
+                    ];
+                }
+            }
+        }
+        return array_values($groups);
     }
 
     /** Explicit partial shipment; quantities cannot exceed the frozen reservation snapshot. */
@@ -49,6 +83,7 @@ class Fulfillment {
         string $idempotencyKey
     ): int {
         if (!$items || trim($idempotencyKey) === '') throw new InvalidArgumentException('Shipment items and idempotency key are required');
+        if (!Orders::byId($orderId)) throw new InvalidArgumentException("Order #{$orderId} not found");
         $db = Db::get();
         $own = !$db->inTransaction();
         if ($own) $db->beginTransaction();
@@ -60,12 +95,16 @@ class Fulfillment {
                 ':store' => StoreContext::current()->id(), ':order' => $orderId,
                 ':warehouse' => $warehouseId, ':key' => $idempotencyKey,
             ]);
+            $replayStatus = 'planned';
             if ($insert->rowCount() === 1) {
                 $shipmentId = (int)$db->lastInsertId();
             } else {
-                $existing = $db->prepare('SELECT id FROM shipments WHERE store_id = :store AND idempotency_key = :key');
+                $existing = $db->prepare('SELECT id, order_id, status FROM shipments WHERE store_id = :store AND idempotency_key = :key');
                 $existing->execute([':store' => StoreContext::current()->id(), ':key' => $idempotencyKey]);
-                $shipmentId = (int)$existing->fetchColumn();
+                $row = $existing->fetch(PDO::FETCH_ASSOC) ?: [];
+                if ($row && (int)$row['order_id'] !== $orderId) throw new RuntimeException('Shipment idempotency key belongs to another order');
+                $shipmentId = (int)($row['id'] ?? 0);
+                $replayStatus = (string)($row['status'] ?? '');
             }
             if ($shipmentId <= 0) throw new RuntimeException('Shipment could not be resolved');
 
@@ -81,19 +120,13 @@ class Fulfillment {
                     throw new InvalidArgumentException('Invalid shipment item');
                 }
                 $capacity = self::allocatedQuantity($orderItems[$orderItemId], $sku, $warehouseId);
-                $plannedStmt = $db->prepare("SELECT COALESCE(SUM(si.quantity), 0)
-                    FROM shipment_items si JOIN shipments s ON s.id = si.shipment_id
-                    WHERE s.order_id = :order AND si.order_item_id = :item AND si.sku = :sku
-                      AND ((s.warehouse_id = :warehouse) OR (s.warehouse_id IS NULL AND :warehouse2 IS NULL))");
-                $plannedStmt->execute([
-                    ':order' => $orderId, ':item' => $orderItemId, ':sku' => $sku,
-                    ':warehouse' => $warehouseId, ':warehouse2' => $warehouseId,
-                ]);
-                $alreadyPlanned = (int)$plannedStmt->fetchColumn();
+                $alreadyPlanned = self::plannedQuantity($orderId, $orderItemId, $sku, $warehouseId);
                 $currentStmt = $db->prepare('SELECT quantity FROM shipment_items WHERE shipment_id = :shipment AND order_item_id = :item AND sku = :sku');
                 $currentStmt->execute([':shipment' => $shipmentId, ':item' => $orderItemId, ':sku' => $sku]);
                 $current = (int)($currentStmt->fetchColumn() ?: 0);
-                if ($current > 0 && $current !== $quantity) throw new RuntimeException('Shipment idempotency key was reused with different quantities');
+                if (($current > 0 && $current !== $quantity) || ($current === 0 && $replayStatus !== 'planned')) {
+                    throw new RuntimeException('Shipment idempotency key was reused with different quantities');
+                }
                 if ($alreadyPlanned - $current + $quantity > $capacity) throw new RuntimeException("Shipment exceeds reserved allocation for SKU: {$sku}");
                 $itemInsert->execute([':shipment' => $shipmentId, ':item' => $orderItemId, ':sku' => $sku, ':quantity' => $quantity]);
             }
@@ -106,7 +139,8 @@ class Fulfillment {
     }
 
     /** Ship one planned fulfillment exactly once. */
-    public static function ship(int $shipmentId, ?string $carrier = null, ?string $trackingNumber = null): bool {
+    public static function ship(int $shipmentId, ?string $carrier = null, ?string $trackingNumber = null, ?string $trackingUrl = null): bool {
+        [$carrier, $trackingNumber, $trackingUrl] = self::tracking($carrier, $trackingNumber, $trackingUrl);
         $db = Db::get();
         $own = !$db->inTransaction();
         if ($own) $db->beginTransaction();
@@ -142,9 +176,9 @@ class Fulfillment {
             $db->prepare("UPDATE shipment_items SET status = 'shipped' WHERE shipment_id = :shipment AND status = 'planned'")
                 ->execute([':shipment' => $shipmentId]);
             $db->prepare("UPDATE shipments SET status = 'shipped', carrier = :carrier,
-                    tracking_number = :tracking, shipped_at = " . Db::now() . ", updated_at = " . Db::now() . "
+                    tracking_number = :tracking, tracking_url = :url, shipped_at = " . Db::now() . ", updated_at = " . Db::now() . "
                 WHERE id = :id")
-                ->execute([':carrier' => $carrier, ':tracking' => $trackingNumber, ':id' => $shipmentId]);
+                ->execute([':carrier' => $carrier, ':tracking' => $trackingNumber, ':url' => $trackingUrl, ':id' => $shipmentId]);
             self::refreshOrderItemStatuses((int)$shipment['order_id']);
             if ($own) $db->commit();
             return true;
@@ -159,9 +193,79 @@ class Fulfillment {
         $stmt = Db::get()->prepare('SELECT COALESCE(SUM(backordered_qty), 0) FROM order_items WHERE order_id = :order');
         $stmt->execute([':order' => $orderId]);
         if ((int)$stmt->fetchColumn() > 0) throw new RuntimeException('Backordered items require allocation before final shipment');
-        $ids = self::planOrder($orderId);
-        foreach ($ids as $id) self::ship($id);
+        self::planOrder($orderId);
+        // Ship everything still planned, including partial shipments created earlier in the admin.
+        $ids = [];
+        foreach (self::shipments($orderId) as $shipment) {
+            if ($shipment['status'] !== 'planned') continue;
+            $ids[] = (int)$shipment['id'];
+            self::ship((int)$shipment['id']);
+        }
         return $ids;
+    }
+
+    /** Correct carrier/tracking of a shipped shipment of the active store; false when nothing changed. */
+    public static function updateTracking(int $shipmentId, ?string $carrier, ?string $trackingNumber, ?string $trackingUrl): bool {
+        [$carrier, $trackingNumber, $trackingUrl] = self::tracking($carrier, $trackingNumber, $trackingUrl);
+        $stmt = Db::get()->prepare("UPDATE shipments SET carrier = :carrier, tracking_number = :tracking, tracking_url = :url,
+                updated_at = " . Db::now() . "
+            WHERE id = :id AND store_id = :store AND status = 'shipped'");
+        $stmt->execute([':carrier' => $carrier, ':tracking' => $trackingNumber, ':url' => $trackingUrl,
+            ':id' => $shipmentId, ':store' => StoreContext::current()->id()]);
+        return $stmt->rowCount() === 1;
+    }
+
+    /** Cancel a planned (not yet shipped) shipment; its quantities become shippable again. */
+    public static function cancel(int $shipmentId): bool {
+        $db = Db::get();
+        $own = !$db->inTransaction();
+        if ($own) $db->beginTransaction();
+        try {
+            $stmt = $db->prepare("UPDATE shipments SET status = 'cancelled', updated_at = " . Db::now() . "
+                WHERE id = :id AND store_id = :store AND status = 'planned'");
+            $stmt->execute([':id' => $shipmentId, ':store' => StoreContext::current()->id()]);
+            $cancelled = $stmt->rowCount() === 1;
+            if ($cancelled) {
+                $db->prepare("UPDATE shipment_items SET status = 'cancelled' WHERE shipment_id = :shipment AND status = 'planned'")
+                    ->execute([':shipment' => $shipmentId]);
+            }
+            if ($own) $db->commit();
+            return $cancelled;
+        } catch (Throwable $e) {
+            if ($own && $db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+    }
+
+    /** @return array{0:?string,1:?string,2:?string} trimmed carrier, tracking number and http(s) tracking URL */
+    private static function tracking(?string $carrier, ?string $trackingNumber, ?string $trackingUrl): array {
+        $values = [];
+        foreach ([$carrier, $trackingNumber, $trackingUrl] as $index => $value) {
+            $value = trim((string)$value);
+            if (preg_match('/[\x00-\x1F\x7F]/', $value) || mb_strlen($value) > ($index === 2 ? 500 : 100)) {
+                throw new InvalidArgumentException('Invalid carrier or tracking value');
+            }
+            $values[] = $value === '' ? null : $value;
+        }
+        if ($values[2] !== null && (!filter_var($values[2], FILTER_VALIDATE_URL)
+            || !in_array(strtolower((string)parse_url($values[2], PHP_URL_SCHEME)), ['http', 'https'], true))) {
+            throw new InvalidArgumentException('Tracking URL must be an http(s) address');
+        }
+        return $values;
+    }
+
+    /** Quantity of an order line already in non-cancelled shipments of one warehouse (optionally ignoring one idempotency key). */
+    private static function plannedQuantity(int $orderId, int $orderItemId, string $sku, ?int $warehouseId, ?string $exceptKey = null): int {
+        $stmt = Db::get()->prepare("SELECT COALESCE(SUM(si.quantity), 0)
+            FROM shipment_items si JOIN shipments s ON s.id = si.shipment_id
+            WHERE s.order_id = :order AND si.order_item_id = :item AND si.sku = :sku AND si.status <> 'cancelled'
+              AND ((s.warehouse_id = :warehouse) OR (s.warehouse_id IS NULL AND :warehouse2 IS NULL))
+              AND s.idempotency_key <> :except");
+        $stmt->execute([
+            ':order' => $orderId, ':item' => $orderItemId, ':sku' => $sku,
+            ':warehouse' => $warehouseId, ':warehouse2' => $warehouseId, ':except' => $exceptKey ?? '',
+        ]);
+        return (int)$stmt->fetchColumn();
     }
 
     public static function shipments(int $orderId): array {

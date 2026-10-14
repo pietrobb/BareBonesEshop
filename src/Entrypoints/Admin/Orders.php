@@ -1,5 +1,6 @@
 <?php
 /** Sales, orders, invoices, refunds and RMA administration. */
+require_once __DIR__ . '/Shipments.php';
 
 function pageSalesOverview(): void {
     Security::adminRequire('orders.view');
@@ -324,6 +325,8 @@ function pageOrder(): void {
             <p style="font-size:1.2rem"><strong><?= esc(I18n::t('admin.order.grand_total')) ?>: <?= I18n::price((int)$order['total'], $order['currency']) ?></strong></p>
         </div>
     </div>
+
+    <?php renderOrderShipments($order); ?>
 
     <?php if ($digitalEntitlements): ?>
     <div class="card">

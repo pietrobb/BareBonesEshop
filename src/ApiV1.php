@@ -424,6 +424,7 @@ class ApiV1 {
             'warehouse_id' => $row['warehouse_id'] === null ? null : (int)$row['warehouse_id'],
             'carrier' => $row['carrier'] === null ? null : (string)$row['carrier'],
             'tracking_number' => $row['tracking_number'] === null ? null : (string)$row['tracking_number'],
+            'tracking_url' => ($row['tracking_url'] ?? null) === null ? null : (string)$row['tracking_url'],
             'shipped_at' => $row['shipped_at'] === null ? null : (string)$row['shipped_at'],
             'created_at' => (string)($row['created_at'] ?? ''),
             'items' => array_map(static fn(array $item): array => [

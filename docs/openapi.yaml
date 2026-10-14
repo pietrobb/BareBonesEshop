@@ -460,13 +460,14 @@ components:
         note: { type: [string, 'null'], maxLength: 500 }
     Shipment:
       type: object
-      required: [id, status, warehouse_id, carrier, tracking_number, shipped_at, created_at, items]
+      required: [id, status, warehouse_id, carrier, tracking_number, tracking_url, shipped_at, created_at, items]
       properties:
         id: { type: integer }
-        status: { type: string }
+        status: { type: string, enum: [planned, shipping, shipped, cancelled] }
         warehouse_id: { type: [integer, 'null'] }
         carrier: { type: [string, 'null'] }
         tracking_number: { type: [string, 'null'] }
+        tracking_url: { type: [string, 'null'], format: uri }
         shipped_at: { type: [string, 'null'] }
         created_at: { type: string }
         items:
