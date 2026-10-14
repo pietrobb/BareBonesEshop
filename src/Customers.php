@@ -11,6 +11,7 @@ class Customers {
 
     private const BCRYPT_COST = 12;
     private const RESET_TOKEN_TTL_SECONDS = 3600; // 1 hour
+    private const EMAIL_VERIFY_TTL_SECONDS = 86400; // 24 hours
     private const SESSION_IDLE_TTL_SECONDS = 1800;
     private const MIN_PASSWORD_LEN = 8;
     private static ?string $dummyPasswordHash = null;
@@ -92,12 +93,16 @@ class Customers {
             $new = password_hash($password, PASSWORD_BCRYPT, ['cost' => self::BCRYPT_COST]);
             $db->prepare("UPDATE customers SET password_hash = ? WHERE id = ? AND store_id = ?")
                ->execute([$new, $c['id'], StoreContext::current()->id()]);
+            // The session is bound to the stored hash; binding it to the replaced one logs the customer out on the next request.
+            $c['password_hash'] = $new;
         }
         // Session setup
         Security::sessionStart();
         if (function_exists('session_regenerate_id')) {
             @session_regenerate_id(true);
         }
+        // A pre-login CSRF token (possibly planted together with the session) must not survive authentication.
+        Security::rotateCsrfToken();
         $_SESSION['customer_id'] = (int)$c['id'];
         $_SESSION['customer_email'] = $c['email'];
         $_SESSION['customer_auth_hash'] = hash('sha256', (string)$c['password_hash']);
@@ -115,6 +120,7 @@ class Customers {
         if (function_exists('session_regenerate_id')) {
             @session_regenerate_id(true);
         }
+        Security::rotateCsrfToken();
     }
 
     // ============================================================
@@ -263,6 +269,115 @@ class Customers {
         return $token;
     }
 
+    /**
+     * Forgot-password request. Callers show one generic result whatever happens;
+     * the outcome (sent|unknown|unavailable|failed) is only for logs and tests.
+     */
+    public static function requestPasswordReset(string $email, string $locale, array $cfg): string {
+        try {
+            $baseUrl = Security::appUrl($cfg);
+        } catch (RuntimeException $e) {
+            // Never fall back to the Host header (reset-link poisoning): fail closed, but visibly.
+            Logger::error('password_reset.app_url_invalid', ['message' => $e->getMessage()]);
+            return 'unavailable';
+        }
+        $token = self::startPasswordReset($email);
+        if ($token === null) return 'unknown';
+        // Keep the store prefix: tokens are store-scoped, so the link must reopen the same store.
+        $resetUrl = $baseUrl . Template::seoPath(Template::storeUrl('/account.php')) . '?p=reset&token=' . rawurlencode($token);
+        $mail = MailService::send('account_password_reset', $email, $locale, [
+            'customer_name' => $email,
+            'reset_url'     => $resetUrl,
+            'expires_in'    => '1',
+        ]);
+        if (($mail['status'] ?? '') !== 'sent') {
+            Logger::error('password_reset.mail_not_sent', ['status' => $mail['status'] ?? '', 'error' => $mail['error'] ?? '']);
+            return 'failed';
+        }
+        return 'sent';
+    }
+
+    /** Issues a verification token for an unverified active customer; earlier unused tokens are dropped. */
+    public static function startEmailVerification(int $customerId): ?string {
+        $db = Db::get();
+        $stmt = $db->prepare("SELECT email, email_verified_at FROM customers WHERE id = ? AND store_id = ? AND status = 'active'");
+        $stmt->execute([$customerId, StoreContext::current()->id()]);
+        $c = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$c || !empty($c['email_verified_at'])) return null;
+        $token = bin2hex(random_bytes(32));
+        $db->beginTransaction();
+        try {
+            $db->prepare('DELETE FROM customer_email_verifications WHERE customer_id = ? AND used_at IS NULL')->execute([$customerId]);
+            $db->prepare('INSERT INTO customer_email_verifications (customer_id, email, token_hash, expires_at) VALUES (?, ?, ?, ?)')
+               ->execute([$customerId, (string)$c['email'], hash('sha256', $token), gmdate('Y-m-d H:i:s', time() + self::EMAIL_VERIFY_TTL_SECONDS)]);
+            $db->commit();
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            Logger::error('email_verification.start_failed', ['customer_id' => $customerId, 'message' => $e->getMessage()]);
+            return null;
+        }
+        return $token;
+    }
+
+    /**
+     * Sends (or re-sends) the verification e-mail. Outcome: sent|verified|unknown|throttled|unavailable|failed.
+     * Re-sends are throttled per customer so the address cannot be mail-bombed through the account.
+     */
+    public static function requestEmailVerification(int $customerId, string $locale, array $cfg): string {
+        $customer = self::byId($customerId);
+        if (!$customer || ($customer['status'] ?? '') !== 'active') return 'unknown';
+        if (!empty($customer['email_verified_at'])) return 'verified';
+        if (!Security::rateLimit('account_email_verify_' . $customerId, 3, 3600, false)) return 'throttled';
+        try {
+            $baseUrl = Security::appUrl($cfg);
+        } catch (RuntimeException $e) {
+            Logger::error('email_verification.app_url_invalid', ['message' => $e->getMessage()]);
+            return 'unavailable';
+        }
+        $token = self::startEmailVerification($customerId);
+        if ($token === null) return 'failed';
+        $url = $baseUrl . Template::seoPath(Template::storeUrl('/account.php')) . '?p=verify_email&token=' . rawurlencode($token);
+        $mail = MailService::send('account_email_verification', (string)$customer['email'], $locale, [
+            'customer_name' => (string)(($customer['name'] ?? '') ?: $customer['email']),
+            'verify_url'    => $url,
+            'expires_in'    => (string)intdiv(self::EMAIL_VERIFY_TTL_SECONDS, 3600),
+        ]);
+        if (($mail['status'] ?? '') !== 'sent') {
+            Logger::error('email_verification.mail_not_sent', ['status' => $mail['status'] ?? '', 'error' => $mail['error'] ?? '']);
+            return 'failed';
+        }
+        return 'sent';
+    }
+
+    /** Consumes a verification token once; it only verifies the address it was issued for. Returns the customer ID. */
+    public static function verifyEmail(string $token): ?int {
+        if (!preg_match('/^[a-f0-9]{64}$/', $token)) return null;
+        $db = Db::get();
+        $hash = hash('sha256', $token);
+        $now = gmdate('Y-m-d H:i:s');
+        $db->beginTransaction();
+        try {
+            $find = $db->prepare("SELECT v.customer_id FROM customer_email_verifications v
+                JOIN customers c ON c.id = v.customer_id
+                WHERE v.token_hash = ? AND v.used_at IS NULL AND v.expires_at > ? AND c.store_id = ? AND c.email = v.email AND c.status = 'active'");
+            $find->execute([$hash, $now, StoreContext::current()->id()]);
+            $cid = (int)$find->fetchColumn();
+            $consume = $db->prepare('UPDATE customer_email_verifications SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?');
+            if ($cid <= 0 || !$consume->execute([$now, $hash, $now]) || $consume->rowCount() !== 1) {
+                $db->rollBack();
+                return null;
+            }
+            $db->prepare('UPDATE customers SET email_verified_at = ? WHERE id = ? AND store_id = ? AND email_verified_at IS NULL')
+               ->execute([$now, $cid, StoreContext::current()->id()]);
+            $db->commit();
+            return $cid;
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            Logger::error('email_verification.verify_failed', ['message' => $e->getMessage()]);
+            return null;
+        }
+    }
+
     public static function verifyResetToken(string $token): ?int {
         $stmt = Db::get()->prepare(
             "SELECT prt.customer_id, prt.expires_at, prt.used_at
@@ -364,14 +479,14 @@ class Customers {
         );
         $ins->execute([
             $customerId, $type, $isDefault,
-            trim($data['name'] ?? ''),
-            trim($data['company'] ?? ''),
-            trim($data['vat_id'] ?? ''),
-            trim($data['street'] ?? ''),
-            trim($data['city'] ?? ''),
-            trim($data['zip'] ?? ''),
-            strtoupper(trim($data['country'] ?? '')),
-            trim($data['phone'] ?? ''),
+            trim(Security::str($data['name'] ?? '')),
+            trim(Security::str($data['company'] ?? '')),
+            trim(Security::str($data['vat_id'] ?? '')),
+            trim(Security::str($data['street'] ?? '')),
+            trim(Security::str($data['city'] ?? '')),
+            trim(Security::str($data['zip'] ?? '')),
+            strtoupper(trim(Security::str($data['country'] ?? ''))),
+            trim(Security::str($data['phone'] ?? '')),
         ]);
         return (int)$db->lastInsertId();
     }
@@ -399,8 +514,8 @@ class Customers {
             if (array_key_exists($k, $data)) {
                 $fields[] = "{$k} = ?";
                 $params[] = ($k === 'country')
-                    ? strtoupper(trim($data[$k]))
-                    : trim($data[$k]);
+                    ? strtoupper(trim(Security::str($data[$k])))
+                    : trim(Security::str($data[$k]));
             }
         }
         $fields[] = "type = ?"; $params[] = $type;
@@ -456,6 +571,18 @@ class Customers {
         return $row ?: null;
     }
 
+    /** Line items of an order owned by this customer in the current store; [] for any other order. */
+    public static function orderItems(int $customerId, int $orderId): array {
+        $stmt = Db::get()->prepare(
+            "SELECT oi.id, oi.product_id, oi.variant_id, oi.sku, oi.name, oi.quantity, oi.unit_price, oi.total
+             FROM order_items oi JOIN orders o ON o.id = oi.order_id
+             WHERE oi.order_id = ? AND o.customer_id = ? AND o.store_id = ?
+             ORDER BY oi.id ASC"
+        );
+        $stmt->execute([$orderId, $customerId, StoreContext::current()->id()]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     // ============================================================
     // B2B commercial profile
     // ============================================================
@@ -466,7 +593,7 @@ class Customers {
             $stmt = Db::get()->prepare("SELECT
                     c.id AS customer_id, c.customer_group_id, c.company_id,
                     cg.code AS customer_group_code, cg.discount_bps,
-                    co.code AS company_code, co.legal_name, co.vat_id, co.vat_country,
+                    co.code AS company_code, co.legal_name, co.registration_number, co.vat_id, co.vat_country,
                     co.vat_validated_at, co.approval_status, co.credit_limit,
                     co.payment_terms_days, co.invoice_purchase, co.active AS company_active
                 FROM customers c
@@ -493,6 +620,11 @@ class Customers {
 
         $creditLimit = max(0, (int)($profile['credit_limit'] ?? 0));
         if ($creditLimit === 0) return true;
+        return self::companyOpenTotal((int)$profile['company_id']) + $amount <= $creditLimit;
+    }
+
+    /** Total of the company members' orders in this store that are neither cancelled nor settled (credit exposure). */
+    public static function companyOpenTotal(int $companyId): int {
         $stmt = Db::get()->prepare("SELECT COALESCE(SUM(o.total), 0)
             FROM orders o
             JOIN customers c ON c.id = o.customer_id AND c.store_id = o.store_id
@@ -501,9 +633,9 @@ class Customers {
               AND COALESCE(o.payment_status, 'pending') NOT IN ('paid', 'refunded', 'cancelled', 'failed')");
         $stmt->execute([
             ':store' => StoreContext::current()->id(),
-            ':company' => (int)$profile['company_id'],
+            ':company' => $companyId,
         ]);
-        return (int)$stmt->fetchColumn() + $amount <= $creditLimit;
+        return (int)$stmt->fetchColumn();
     }
 
     // ============================================================
@@ -522,8 +654,8 @@ class Customers {
         $sql = "SELECT id, email, name, status, created_at, last_login_at FROM customers WHERE store_id = ?";
         $params = [StoreContext::current()->id()];
         if ($query !== '') {
-            $sql .= " AND (LOWER(email) LIKE LOWER(?) OR LOWER(name) LIKE LOWER(?)";
-            $like = '%' . $query . '%';
+            $sql .= " AND (LOWER(email) LIKE LOWER(?) ESCAPE '!' OR LOWER(name) LIKE LOWER(?) ESCAPE '!'";
+            $like = '%' . Db::likeLiteral($query) . '%';
             $params[] = $like;
             $params[] = $like;
             if (ctype_digit($query)) {

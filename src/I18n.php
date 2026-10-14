@@ -64,10 +64,14 @@ class I18n {
         if (empty($localeData)) {
             return $row; // no translation — return base row as-is
         }
-        foreach (['name', 'summary', 'description', 'slug'] as $field) {
+        foreach (['name', 'summary', 'description', 'slug', 'seo_title', 'meta_description'] as $field) {
             if (!empty($localeData[$field])) {
                 $row[$field] = $localeData[$field];
             }
+        }
+        if (!empty($localeData['image_alts']) && is_array($localeData['image_alts'])) {
+            $base = json_decode((string)($row['image_alts'] ?? ''), true);
+            $row['image_alts'] = json_encode(array_merge(is_array($base) ? $base : [], $localeData['image_alts']), JSON_UNESCAPED_UNICODE);
         }
         return $row;
     }
@@ -135,6 +139,13 @@ class I18n {
         if (isset(self::$lang[$key])) return self::$lang[$key];
         if (self::$fallbackLang === null) self::$fallbackLang = require __DIR__ . '/../lang/en.php';
         return self::$fallbackLang[$key] ?? $key;
+    }
+
+    /** UI translation with {name} placeholders replaced by $vars['name']. */
+    public static function format(string $key, array $vars = []): string {
+        $pairs = [];
+        foreach ($vars as $name => $value) $pairs['{' . $name . '}'] = (string)$value;
+        return strtr(self::t($key), $pairs);
     }
 
     /**

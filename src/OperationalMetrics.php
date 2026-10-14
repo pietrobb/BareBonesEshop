@@ -103,6 +103,7 @@ class OperationalMetrics
             'metrics' => $metrics,
             'alerts' => $alerts,
             'health_checks' => $health['checks'] ?? [],
+            'incident_monitor' => $operations['incident_monitor'] ?? [],
         ];
     }
 

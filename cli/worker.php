@@ -11,6 +11,13 @@ require_once __DIR__ . '/cli-only.php';
  */
 require_once __DIR__ . '/../src/autoload.php';
 
+set_exception_handler(static function (Throwable $e): void {
+    IncidentMonitor::heartbeat('worker', 'failed');
+    IncidentMonitor::report('worker.unhandled_failed', 'worker', 'critical', ['exception' => $e]);
+    fwrite(STDERR, "worker.unhandled_failed\n");
+    exit(1);
+});
+
 $once = in_array('--once', $argv ?? []);
 $verbose = in_array('--verbose', $argv ?? []);
 
@@ -52,21 +59,23 @@ $handlers = [
     'digital_fulfill'   => 'handleDigitalFulfill',
     'digital_revoke'    => 'handleDigitalRevoke',
     'merchant_notify'   => 'handleMerchantNotify',
+    'incident_notify'   => static fn(array $payload): int => IncidentMonitor::notify((string)($payload['fingerprint'] ?? '')),
 ];
 
-// Release abandoned online reservations on every cron worker run. Provider
+// Release abandoned unpaid reservations in every store on every cron worker run. Provider
 // errors and non-terminal payment states are skipped by Orders::expirePending.
 try {
     $gateways = [];
-    $expiredOrders = Orders::expirePending(
-        (int)($cfg['pending_order_expiry_seconds'] ?? 172800),
-        (int)($cfg['pending_order_expiry_batch'] ?? 25),
+    $expiredOrders = PendingOrderExpiry::sweep(
+        $cfg,
         static function (array $order) use (&$gateways): string {
             $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true) ?: [];
             $provider = strtolower((string)($snapshot['provider'] ?? orderProviderCode($order, 'payment')));
             if ($provider === '') $provider = Adapters::defaultProviderCode('payment');
-            $gateways[$provider] ??= Adapters::payment($provider);
-            return $gateways[$provider]->getStatus((string)$order['payment_id']);
+            // Stores may hold different provider credentials, so gateways are cached per provider scope.
+            $gatewayKey = StoreContext::current()->providerId() . ':' . $provider;
+            $gateways[$gatewayKey] ??= Adapters::payment($provider);
+            return $gateways[$gatewayKey]->getStatus((string)$order['payment_id']);
         }
     );
     if ($verbose && $expiredOrders > 0) echo "Expired pending orders: {$expiredOrders}\n";
@@ -100,6 +109,14 @@ try {
 } catch (\Throwable $e) {
     Logger::exception('worker.stock_digest_failed', $e);
 }
+
+$monitorStore = StoreContext::current();
+foreach (Bootstrap::stores()['stores'] ?? [] as $monitorStoreCode => $_) {
+    Bootstrap::initStoreContext('/', '', (string)$monitorStoreCode);
+    IncidentMonitor::heartbeat('worker', 'running');
+    IncidentMonitor::sweep();
+}
+StoreContext::activate($monitorStore);
 
 // Process loop
 $maxRuntime = 55; // seconds (cron runs every minute)
@@ -143,7 +160,7 @@ do {
                 (string)($payload['_store_id'] ?? 'default'),
                 (string)($payload['_channel_id'] ?? 'storefront')
             );
-            if ($handler && function_exists($handler)) {
+            if ($handler && is_callable($handler)) {
                 $handler($payload, $job);
             } else {
                 throw new \RuntimeException("Unknown job type: {$type}");
@@ -155,9 +172,14 @@ do {
             if ($verbose) echo "    [OK]\n";
 
         } catch (\Throwable $e) {
-            JobQueue::fail($procFile, $job, $e->getMessage());
-            if ($verbose) echo "    [FAIL] {$e->getMessage()}\n";
-            Logger::exception('worker.job_failed', $e, ['job_id' => $job['id'] ?? '', 'job_type' => $type]);
+            try {
+                JobQueue::fail($procFile, $job, 'worker.job_failed');
+            } catch (Throwable $retryError) {
+                if ($type !== 'incident_notify') IncidentMonitor::report('worker.retry_failed', 'worker', 'critical', ['exception' => $retryError]);
+            }
+            if ($verbose) echo "    [FAIL] worker.job_failed\n";
+            if ($type === 'incident_notify') Logger::safeWrite('error', 'monitoring.notification_failed', ['phase' => 'notification']);
+            else IncidentMonitor::report($type === 'digital_fulfill' ? 'digital.fulfillment_failed' : 'worker.job_failed', $type === 'digital_fulfill' ? 'digital' : 'worker', 'critical', ['exception' => $e, 'attempts' => (int)($job['attempts'] ?? 0)]);
         }
     }
 
@@ -219,6 +241,10 @@ function processOutbox(array $cfg, bool $verbose = false): void {
                     $failures[] = (string)$code . ':' . ($result['response_code'] ?? 'network');
                 }
             }
+            // In-process listeners of enabled extensions, with the same per-endpoint retry/dedup.
+            $extensionDelivery = Extensions::deliver($event, $envelope);
+            $matched += $extensionDelivery['matched'];
+            array_push($failures, ...$extensionDelivery['failures']);
             if ($failures === []) {
                 Outbox::markDelivered((string)$event['id']);
                 if ($verbose) echo "Delivered outbox event {$event['id']} to {$matched} endpoint(s)\n";
@@ -387,6 +413,7 @@ function handleEmailSend(array $payload, array $job): void {
                 'carrier'        => $order['carrier'] ?? '',
                 'tracking_number'=> $order['tracking_number'] ?? '',
             ]);
+            if ($template === 'order_confirmation') $vars = array_merge($vars, BankTransferInstructions::mailVars($order));
             $items = Orders::items((int)$orderId);
             $vars['items'] = array_map(fn($it) => [
                 'name'       => $it['name'],
@@ -403,7 +430,8 @@ function handleEmailSend(array $payload, array $job): void {
     // Retry with the provider frozen on the order; legacy jobs use the current default.
     $providerCode = (string)($payload['_provider_code'] ?? ($order ? orderProviderCode($order, 'mail') : ''));
     if ($providerCode === '') $providerCode = Adapters::defaultProviderCode('mail');
-    MailService::send($template, $to, $locale, $vars, $orderId !== null ? (int)$orderId : null, [], $providerCode);
+    $result = MailService::send($template, $to, $locale, $vars, $orderId !== null ? (int)$orderId : null, [], $providerCode);
+    if (($result['status'] ?? '') === 'failed') throw new RuntimeException('mail.delivery_failed');
 }
 
 function handleDigitalFulfill(array $payload, array $job): void {

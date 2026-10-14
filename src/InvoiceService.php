@@ -22,6 +22,8 @@
 final class InvoiceService
 {
     private static ?string $storageDir = null;
+    /** Lowest baseline (mm from the top of A4) for invoice body text; the register note sits at 285 mm. */
+    private const PDF_CONTENT_BOTTOM_MM = 278.0;
 
     public const STATUS_ISSUED    = 'issued';
     public const STATUS_CANCELLED = 'cancelled';
@@ -923,15 +925,26 @@ final class InvoiceService
         $pdf->line(20, $y, 190, $y);
         $y += 6;
 
-        // Items header
-        $pdf->text(20, $y, $L['col_item'], ['size' => 9, 'bold' => true]);
-        $pdf->text(100, $y, $L['col_qty'], ['size' => 9, 'bold' => true, 'align' => 'right', 'width' => 15]);
-        $pdf->text(120, $y, $L['col_unit_price'], ['size' => 9, 'bold' => true, 'align' => 'right', 'width' => 25]);
-        $pdf->text(150, $y, $L['col_vat'], ['size' => 9, 'bold' => true, 'align' => 'right', 'width' => 12]);
-        $pdf->text(165, $y, $L['col_total'], ['size' => 9, 'bold' => true, 'align' => 'right', 'width' => 25]);
-        $y += 4;
-        $pdf->line(20, $y, 190, $y);
-        $y += 4;
+        // Items header (repeated on every continuation page)
+        $itemsHeader = static function () use ($pdf, $L, &$y): void {
+            $pdf->text(20, $y, $L['col_item'], ['size' => 9, 'bold' => true]);
+            $pdf->text(100, $y, $L['col_qty'], ['size' => 9, 'bold' => true, 'align' => 'right', 'width' => 15]);
+            $pdf->text(120, $y, $L['col_unit_price'], ['size' => 9, 'bold' => true, 'align' => 'right', 'width' => 25]);
+            $pdf->text(150, $y, $L['col_vat'], ['size' => 9, 'bold' => true, 'align' => 'right', 'width' => 12]);
+            $pdf->text(165, $y, $L['col_total'], ['size' => 9, 'bold' => true, 'align' => 'right', 'width' => 25]);
+            $y += 4;
+            $pdf->line(20, $y, 190, $y);
+            $y += 4;
+        };
+        // Start a new A4 page when the next block would run into the footer area (y ≥ 280 mm);
+        // long invoices used to keep writing below the page edge, losing items and totals.
+        $ensureSpace = static function (float $needed, bool $withItemsHeader = false) use ($pdf, $itemsHeader, &$y): void {
+            if ($y + $needed <= self::PDF_CONTENT_BOTTOM_MM) return;
+            $pdf->addPage();
+            $y = 20.0;
+            if ($withItemsHeader) $itemsHeader();
+        };
+        $itemsHeader();
 
         // Each line shows its OWN VAT rate (mixed-rate invoices: a 23% line and a
         // 10% line coexist instead of all lines borrowing the first rate).
@@ -941,6 +954,7 @@ final class InvoiceService
             $unit = (int)$item['unit_price'];
             $tot  = (int)$item['total'];
             $lineRate = self::rateKey((float)($item['vat_rate'] ?? 0));
+            $ensureSpace(5, true);
             $pdf->text(20, $y, mb_substr($name, 0, 50), ['size' => 9]);
             $pdf->text(100, $y, (string)$qty, ['size' => 9, 'align' => 'right', 'width' => 15]);
             $pdf->text(120, $y, I18n::price($unit, $currency), ['size' => 9, 'align' => 'right', 'width' => 25]);
@@ -952,6 +966,7 @@ final class InvoiceService
         if (!empty($order['shipping_cost']) && (int)$order['shipping_cost'] > 0) {
             // Shipping carries the standard (highest) rate when VAT applies, 0% otherwise.
             $shipRate = self::rateKey(self::maxRate($vatBreakdown['rates'] ?? []));
+            $ensureSpace(5, true);
             $pdf->text(20, $y, $L['shipping'], ['size' => 9]);
             $pdf->text(150, $y, $shipRate . '%', ['size' => 9, 'align' => 'right', 'width' => 12]);
             $pdf->text(165, $y, I18n::price((int)$order['shipping_cost'], $currency),
@@ -963,6 +978,7 @@ final class InvoiceService
         $y += 6;
 
         // Totals
+        $ensureSpace(18);
         $pdf->text(120, $y, $L['total_net'] . ': ' . I18n::price((int)$invoice['total_net'], $currency),
             ['size' => 9, 'align' => 'right', 'width' => 70]);
         $y += 5;
@@ -975,9 +991,11 @@ final class InvoiceService
 
         // VAT breakdown table
         if (!empty($vatBreakdown['rates'])) {
+            $ensureSpace(10);
             $pdf->text(20, $y, $L['vat_recap'], ['size' => 9, 'bold' => true]);
             $y += 5;
             foreach ($vatBreakdown['rates'] as $r => $info) {
+                $ensureSpace(5);
                 $pdf->text(20, $y, $r . '%', ['size' => 9]);
                 $pdf->text(40, $y, $L['col_net'] . ' ' . I18n::price((int)$info['net'], $currency), ['size' => 9]);
                 $pdf->text(100, $y, $L['col_vat'] . ' ' . I18n::price((int)$info['vat'], $currency), ['size' => 9]);
@@ -991,12 +1009,14 @@ final class InvoiceService
         if ($noteKey !== '') {
             $labelKey = str_replace('vat.', '', $noteKey);
             if (isset($L[$labelKey])) {
+                $ensureSpace(5);
                 $pdf->text(20, $y, $L[$labelKey], ['size' => 9, 'bold' => true]);
                 $y += 5;
             }
         }
 
         // Payment info
+        $ensureSpace(15);
         $pdf->text(20, $y, $L['payment_method'] . ': ' . ($invoice['payment_method'] ?: '—'), ['size' => 9]);
         $y += 5;
         if (!empty($sellerSnap['iban'])) {

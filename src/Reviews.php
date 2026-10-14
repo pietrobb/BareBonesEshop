@@ -81,13 +81,14 @@ class Reviews {
      */
     public static function pending(int $limit = 100, int $offset = 0): array {
         $stmt = Db::get()->prepare(
-            "SELECT id, product_id, customer_id, author_name, rating, title, body, created_at
-             FROM product_reviews
-             WHERE status = 'pending'
-             ORDER BY id ASC
+            "SELECT r.id, r.product_id, r.customer_id, r.author_name, r.rating, r.title, r.body, r.created_at
+             FROM product_reviews r
+             JOIN products p ON p.id = r.product_id AND p.store_id = ?
+             WHERE r.status = 'pending'
+             ORDER BY r.id ASC
              LIMIT ? OFFSET ?"
         );
-        $stmt->execute([$limit, $offset]);
+        $stmt->execute([StoreContext::current()->catalogId(), $limit, $offset]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -126,9 +127,9 @@ class Reviews {
         $stmt = Db::get()->prepare(
             "UPDATE product_reviews
              SET status = ?, updated_at = " . (Db::isSqlite() ? "datetime('now')" : "NOW()") . "
-             WHERE id = ?"
+             WHERE id = ? AND product_id IN (SELECT id FROM products WHERE store_id = ?)"
         );
-        $stmt->execute([$status, $id]);
+        $stmt->execute([$status, $id, StoreContext::current()->catalogId()]);
         return $stmt->rowCount() > 0;
     }
 }

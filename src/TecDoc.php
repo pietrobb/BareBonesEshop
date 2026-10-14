@@ -90,8 +90,8 @@ class TecDoc {
         $db = Db::get();
         $offset = ($page - 1) * $perPage;
 
-        $where = "pv.ktype = :ktype AND p.status = 'active'";
-        $params = [':ktype' => $ktype];
+        $where = "pv.ktype = :ktype AND p.status = 'active' AND p.store_id = :store";
+        $params = [':ktype' => $ktype, ':store' => StoreContext::current()->catalogId()];
 
         if ($categoryId !== null) {
             $where .= " AND p.category_id = :cat";
@@ -132,12 +132,13 @@ class TecDoc {
             SELECT c.*, COUNT(DISTINCT pv.product_id) as part_count
             FROM product_vehicles pv
             JOIN products p ON p.id = pv.product_id
-            JOIN categories c ON c.id = p.category_id
-            WHERE pv.ktype = :ktype AND p.status = 'active'
+            JOIN categories c ON c.id = p.category_id AND c.store_id = :category_store
+            WHERE pv.ktype = :ktype AND p.status = 'active' AND p.store_id = :store
             GROUP BY c.id
             ORDER BY c.path, c.sort_order
         ");
-        $stmt->execute([':ktype' => $ktype]);
+        $catalog = StoreContext::current()->catalogId();
+        $stmt->execute([':ktype' => $ktype, ':store' => $catalog, ':category_store' => $catalog]);
         return $stmt->fetchAll();
     }
 
@@ -156,16 +157,17 @@ class TecDoc {
         // Normalize: strip spaces, dashes, dots, slashes, quotes
         $normalized = strtoupper(preg_replace('/[\s\-\.\/\']/', '', $oeNumber));
         $offset = ($page - 1) * $perPage;
+        $store = StoreContext::current()->catalogId();
 
         // Try prefix match first (uses index), fall back to contains
         // Prefix is the common case: user types "1K0615301" to find "1K0615301AD"
         $stmt = $db->prepare("SELECT COUNT(DISTINCT p.id)
             FROM product_oe_numbers oe
             JOIN products p ON p.id = oe.product_id
-            WHERE oe.oem_number_norm LIKE :oe
-              AND p.status = 'active'
+            WHERE oe.oem_number_norm LIKE :oe ESCAPE '!'
+              AND p.status = 'active' AND p.store_id = :store
         ");
-        $stmt->execute([':oe' => $normalized . '%']);
+        $stmt->execute([':oe' => Db::likeLiteral($normalized) . '%', ':store' => $store]);
         $prefixTotal = (int)$stmt->fetchColumn();
 
         if ($prefixTotal > 0) {
@@ -175,28 +177,28 @@ class TecDoc {
                 SELECT DISTINCT p.*, oe.oem_brand, oe.oem_number
                 FROM product_oe_numbers oe
                 JOIN products p ON p.id = oe.product_id
-                WHERE oe.oem_number_norm LIKE :oe AND p.status = 'active'
+                WHERE oe.oem_number_norm LIKE :oe ESCAPE '!' AND p.status = 'active' AND p.store_id = :store
                 ORDER BY p.name LIMIT :limit OFFSET :offset
             ");
-            $stmt->execute([':oe' => $normalized . '%', ':limit' => $perPage, ':offset' => $offset]);
+            $stmt->execute([':oe' => Db::likeLiteral($normalized) . '%', ':store' => $store, ':limit' => $perPage, ':offset' => $offset]);
         } else {
             // Fall back to contains (slower, full scan)
             $stmt = $db->prepare("SELECT COUNT(DISTINCT p.id)
                 FROM product_oe_numbers oe
                 JOIN products p ON p.id = oe.product_id
-                WHERE oe.oem_number_norm LIKE :oe AND p.status = 'active'
+                WHERE oe.oem_number_norm LIKE :oe ESCAPE '!' AND p.status = 'active' AND p.store_id = :store
             ");
-            $stmt->execute([':oe' => '%' . $normalized . '%']);
+            $stmt->execute([':oe' => '%' . Db::likeLiteral($normalized) . '%', ':store' => $store]);
             $total = (int)$stmt->fetchColumn();
 
             $stmt = $db->prepare("
                 SELECT DISTINCT p.*, oe.oem_brand, oe.oem_number
                 FROM product_oe_numbers oe
                 JOIN products p ON p.id = oe.product_id
-                WHERE oe.oem_number_norm LIKE :oe AND p.status = 'active'
+                WHERE oe.oem_number_norm LIKE :oe ESCAPE '!' AND p.status = 'active' AND p.store_id = :store
                 ORDER BY p.name LIMIT :limit OFFSET :offset
             ");
-            $stmt->execute([':oe' => '%' . $normalized . '%', ':limit' => $perPage, ':offset' => $offset]);
+            $stmt->execute([':oe' => '%' . Db::likeLiteral($normalized) . '%', ':store' => $store, ':limit' => $perPage, ':offset' => $offset]);
         }
         $products = $stmt->fetchAll();
 
@@ -215,10 +217,11 @@ class TecDoc {
      */
     public static function oeNumbers(int $productId): array {
         $stmt = Db::get()->prepare("
-            SELECT oem_brand, oem_number FROM product_oe_numbers
-            WHERE product_id = :pid ORDER BY oem_brand, oem_number
+            SELECT oe.oem_brand, oe.oem_number FROM product_oe_numbers oe
+            JOIN products p ON p.id = oe.product_id AND p.store_id = :store
+            WHERE oe.product_id = :pid ORDER BY oe.oem_brand, oe.oem_number
         ");
-        $stmt->execute([':pid' => $productId]);
+        $stmt->execute([':pid' => $productId, ':store' => StoreContext::current()->catalogId()]);
         return $stmt->fetchAll();
     }
 
@@ -231,12 +234,13 @@ class TecDoc {
      */
     public static function specifications(int $productId, string $lang = 'sk'): array {
         $stmt = Db::get()->prepare("
-            SELECT criteria_name, criteria_value, numeric_val
-            FROM product_specifications
-            WHERE product_id = :pid AND lang = :lang
-            ORDER BY sort_order, criteria_name
+            SELECT ps.criteria_name, ps.criteria_value, ps.numeric_val
+            FROM product_specifications ps
+            JOIN products p ON p.id = ps.product_id AND p.store_id = :store
+            WHERE ps.product_id = :pid AND ps.lang = :lang
+            ORDER BY ps.sort_order, ps.criteria_name
         ");
-        $stmt->execute([':pid' => $productId, ':lang' => $lang]);
+        $stmt->execute([':pid' => $productId, ':lang' => $lang, ':store' => StoreContext::current()->catalogId()]);
         return $stmt->fetchAll();
     }
 
@@ -259,6 +263,8 @@ class TecDoc {
             $baseWhere = "p.category_id = :cat AND p.status = 'active'";
             $baseParams = [':cat' => $categoryId];
         }
+        $baseWhere .= ' AND p.store_id = :store';
+        $baseParams[':store'] = StoreContext::current()->catalogId();
 
         if ($priceMin !== null) {
             $baseWhere .= " AND p.price >= :pmin";
@@ -301,14 +307,14 @@ class TecDoc {
                 $params[':facet_criterion'] = $criterion;
             }
             $stmt = $db->prepare("
-                SELECT ps.criteria_name, ps.criteria_value, ps.numeric_val,
+                SELECT ps.criteria_name, ps.criteria_value, MIN(ps.numeric_val) AS numeric_val,
                        COUNT(DISTINCT ps.product_id) AS cnt
                 FROM product_specifications ps
                 JOIN products p ON p.id = ps.product_id
                 WHERE {$where} AND ps.lang = :facet_lang{$criterionWhere}
                 GROUP BY ps.criteria_name, ps.criteria_value
-                HAVING cnt > 0
-                ORDER BY ps.criteria_name, ps.numeric_val IS NULL, ps.numeric_val, ps.criteria_value
+                HAVING COUNT(DISTINCT ps.product_id) > 0
+                ORDER BY ps.criteria_name, MIN(ps.numeric_val) IS NULL, MIN(ps.numeric_val), ps.criteria_value
             ");
             $stmt->execute($params);
             return $stmt->fetchAll();
@@ -365,6 +371,8 @@ class TecDoc {
             $where = "p.category_id = :cat AND p.status = 'active'";
             $params = [':cat' => $categoryId];
         }
+        $where .= ' AND p.store_id = :store';
+        $params[':store'] = StoreContext::current()->catalogId();
 
         if ($priceMin !== null) {
             $where .= " AND p.price >= :pmin";
@@ -464,13 +472,14 @@ class TecDoc {
      */
     public static function vehiclesForProduct(int $productId, int $limit = 100): array {
         $stmt = Db::get()->prepare("
-            SELECT manufacturer, model, type_name, ktype
-            FROM product_vehicles
-            WHERE product_id = :pid
-            ORDER BY manufacturer, model, type_name
+            SELECT pv.manufacturer, pv.model, pv.type_name, pv.ktype
+            FROM product_vehicles pv
+            JOIN products p ON p.id = pv.product_id AND p.store_id = :store
+            WHERE pv.product_id = :pid
+            ORDER BY pv.manufacturer, pv.model, pv.type_name
             LIMIT :limit
         ");
-        $stmt->execute([':pid' => $productId, ':limit' => $limit]);
+        $stmt->execute([':pid' => $productId, ':store' => StoreContext::current()->catalogId(), ':limit' => $limit]);
         return $stmt->fetchAll();
     }
 

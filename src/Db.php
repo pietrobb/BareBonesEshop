@@ -39,6 +39,7 @@ class Db {
             if (!is_dir($dbDir) || !is_writable($dbDir)) {
                 throw new RuntimeException("SQLite directory must exist and be writable: {$dbDir}");
             }
+            SqliteMaintenance::assertOpen($sqlitePath);
             self::$pdo = new $pdoClass('sqlite:' . $sqlitePath, null, null, [
                 PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -69,6 +70,13 @@ class Db {
         self::$driver = '';
     }
 
+    /** Drops the shared connection if it holds the SQLite file $sqlitePath (restore/rollback replaces that file). */
+    public static function releaseSqliteFile(string $sqlitePath): bool {
+        if (!self::$pdo || !SqliteMaintenance::sameFile(self::$pdo, $sqlitePath)) return false;
+        self::reset();
+        return true;
+    }
+
     public static function resetQueryCount(): void {
         if (self::$pdo instanceof QueryCountingPDO) self::$pdo->resetQueryCount();
     }
@@ -84,6 +92,14 @@ class Db {
 
     public static function isSqlite(): bool { return self::driver() === 'sqlite'; }
     public static function isMysql(): bool  { return self::driver() === 'mysql'; }
+
+    /**
+     * Literal text for a `LIKE ... ESCAPE '!'` pattern: user-typed % and _ stay characters on
+     * SQLite and MySQL alike ("!" avoids MySQL's backslash string-literal rules).
+     */
+    public static function likeLiteral(string $value): string {
+        return strtr($value, ['!' => '!!', '%' => '!%', '_' => '!_']);
+    }
 
     /** Persisted machine timestamps are UTC; PHP's display timezone is unchanged. */
     public static function now(): string {

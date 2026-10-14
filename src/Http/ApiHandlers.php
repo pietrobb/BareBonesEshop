@@ -28,8 +28,9 @@ function apiProducts(): array {
     $catSlug = Security::slug($_GET['cat'] ?? '');
     $page = max(1, Security::int($_GET['page'] ?? 1));
     $sort = Security::slug($_GET['sort'] ?? 'price_asc');
-    $filtersJson = $_GET['filters'] ?? '{}';
-    $filters = json_decode($filtersJson, true) ?: [];
+    $filtersJson = Security::str($_GET['filters'] ?? '{}', '{}');
+    $filters = json_decode($filtersJson, true);
+    if (!is_array($filters)) $filters = [];
     $priceMin = isset($_GET['price_min']) ? Security::int($_GET['price_min']) : null;
     $priceMax = isset($_GET['price_max']) ? Security::int($_GET['price_max']) : null;
 
@@ -91,7 +92,7 @@ function apiProduct(): array {
 }
 
 function apiSearch(): array {
-    $q = trim($_GET['q'] ?? '');
+    $q = trim(Security::str($_GET['q'] ?? ''));
     $page = max(1, Security::int($_GET['page'] ?? 1));
 
     if (strlen($q) < 2) {
@@ -105,9 +106,10 @@ function apiSearch(): array {
 }
 
 function apiSearchSuggest(): array {
-    $q = trim($_GET['q'] ?? '');
+    $q = trim(Security::str($_GET['q'] ?? ''));
     if (strlen($q) < 2) return [];
-    return Adapters::search()->suggest($q, 5);
+    // url: the store-aware product link, so the theme never builds paths itself.
+    return array_map(static fn(array $row): array => $row + ['url' => StorefrontViewModel::productUrl((string)($row['slug'] ?? ''))], Adapters::search()->suggest($q, 5));
 }
 
 function apiValidateCoupon(): array {
@@ -122,7 +124,7 @@ function apiValidateCoupon(): array {
     }
 
     $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
-    $code = trim($input['code'] ?? '');
+    $code = trim(Security::str($input['code'] ?? ''));
     $subtotal = Security::int($input['subtotal'] ?? 0);
     $email = Security::email($input['email'] ?? '') ?? null;
 
@@ -350,7 +352,7 @@ function apiShippingRates(): array {
         return ['error' => 'Method not allowed'];
     }
 
-    $country = strtoupper(trim($_GET['country'] ?? 'SK'));
+    $country = strtoupper(trim(Security::str($_GET['country'] ?? 'SK')));
     if (!preg_match('/^[A-Z]{2}$/', $country)) {
         return ['error' => 'Invalid country'];
     }
@@ -397,11 +399,11 @@ function apiPaymentMethods(): array {
         return ['error' => 'Method not allowed'];
     }
 
-    $country = strtoupper(trim($_GET['country'] ?? 'SK'));
+    $country = strtoupper(trim(Security::str($_GET['country'] ?? 'SK')));
     if (!preg_match('/^[A-Z]{2}$/', $country)) {
         return ['error' => 'Invalid country'];
     }
-    $currency = strtolower(trim($_GET['currency'] ?? 'eur'));
+    $currency = strtolower(trim(Security::str($_GET['currency'] ?? 'eur')));
     if (!preg_match('/^[a-z]{3}$/', $currency)) {
         return ['error' => 'Invalid currency'];
     }
@@ -447,11 +449,7 @@ function apiConsentDefinitions(): array {
     }
     $country = strtoupper(trim((string)($_GET['country'] ?? '')));
     $cart = Cart::enriched();
-    $context = [
-        'country' => preg_match('/^[A-Z]{2}$/', $country) ? $country : '',
-        'product_types' => array_values(array_unique(array_column($cart['items'] ?? [], 'product_type'))),
-    ];
-    return ['consents' => array_values(ConsentService::definitions($context))];
+    return ['consents' => array_values(CheckoutService::consentDefinitions(preg_match('/^[A-Z]{2}$/', $country) ? $country : '', $cart['items'] ?? []))];
 }
 
 function apiCheckout(?array $runtimeConfig = null): array {
@@ -472,14 +470,18 @@ function apiCheckout(?array $runtimeConfig = null): array {
     }
 
     $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+    if (!is_array($input)) {
+        http_response_code(400);
+        return ['error' => 'Invalid request body'];
+    }
     return CheckoutService::execute($input, $runtimeConfig);
 }
 
 function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
-    $name = trim($input['name'] ?? '');
+    $name = trim(Security::str($input['name'] ?? ''));
     $email = Security::email($input['email'] ?? '');
-    $phone = trim($input['phone'] ?? '');
-    $country = strtoupper(trim($input['country'] ?? 'SK'));
+    $phone = trim(Security::str($input['phone'] ?? ''));
+    $country = strtoupper(trim(Security::str($input['country'] ?? 'SK')));
     if (!preg_match('/^[A-Z]{2}$/', $country)) {
         return ['error' => 'Invalid country'];
     }
@@ -513,7 +515,13 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     // VAT context — resolve scenario before enriching cart so per-line VAT is captured.
     StoreContext::current()->assertPermission('tax');
     $store = apiActiveStore();
-    $vatId = strtoupper(preg_replace('/\s+/', '', (string)($input['vat_id'] ?? '')));
+    // Company buyer: name, IČO, DIČ and IČ DPH go onto the order address the invoice is issued to.
+    $buyerCompany = CheckoutService::buyerCompany($input);
+    if ($buyerCompany['error'] !== null) {
+        http_response_code(422);
+        return ['success' => false, 'error' => $buyerCompany['error']];
+    }
+    $vatId = $buyerCompany['vat_id'];
     $sellerCountry = strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
     $sellerVatRegistered = array_key_exists('vat_registered', $store['legal'] ?? [])
         ? (bool)$store['legal']['vat_registered']
@@ -527,7 +535,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
             $vatIdValid  = ($vatRes['status'] === 'valid');
             $vatIdStatus = $vatRes['status'];
         } catch (\Throwable $e) {
-            error_log("VAT ID validation failed [{$vatId}]: " . $e->getMessage());
+            IncidentMonitor::report('checkout.vat_verification_failed', 'tax', 'warning', ['exception' => $e]);
             $vatIdStatus = 'unverified';
         }
         // Persist VAT ID on logged-in customer so future orders remember it
@@ -563,6 +571,11 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     if (empty($availableItems)) {
         return ['success' => false, 'error' => 'Žiadne dostupné produkty v košíku.'];
     }
+    // One order is charged in one currency; a mixed cart is refused, never summed into the first line's currency.
+    if (count(array_unique(array_map(static fn(array $item): string => strtolower((string)($item['currency'] ?? 'eur')), $availableItems))) > 1) {
+        http_response_code(422);
+        return ['success' => false, 'error' => 'Košík obsahuje produkty v rôznych menách. Objednajte ich samostatne.'];
+    }
     $cart['items'] = $availableItems;
     $cart['subtotal'] = array_sum(array_column($availableItems, 'total'));
     $digitalOnly = cartIsDigitalOnly($availableItems);
@@ -584,7 +597,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     }
 
     // Apply coupon if provided
-    $couponCode = trim($input['coupon_code'] ?? '');
+    $couponCode = trim(Security::str($input['coupon_code'] ?? ''));
     $couponDiscount = 0;
     if ($couponCode) {
         $couponResult = Pricing::applyCoupon($couponCode, $cart['subtotal'], $email);
@@ -603,6 +616,13 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         : ShippingService::selectRate($shippingMethod, $country, $totalWeight, $cart['subtotal'], $paymentMethod === 'cod', $totalVolume, ShippingService::physicalQuantity($cart['items']));
     if (!$selectedRate) {
         return ['success' => false, 'error' => 'Doručenie nie je dostupné do zvolenej krajiny.'];
+    }
+    if (!$digitalOnly) {
+        // Point-delivery carriers: the chosen pick-up point must be on the carrier's list for this address.
+        $pickupInput = $input['pickup_point'] ?? '';
+        $pickup = ShippingService::choosePickupPoint($selectedRate, $country, trim(Security::str($input['zip'] ?? '')), is_string($pickupInput) ? $pickupInput : '');
+        if ($pickup['error'] !== null) return ['success' => false, 'error' => I18n::t($pickup['error'])];
+        if ($pickup['point'] !== null) $selectedRate['pickup_point'] = $pickup['point'];
     }
     $shippingCost = (int)$selectedRate['price'];
     $autoRules = Pricing::autoCartRules($cart['subtotal'], $cart['items'], $loggedInCustomerId);
@@ -652,15 +672,17 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
 
     $customer = [
         'customer_id'    => $loggedInCustomerId,
+        'consents' => $submittedConsents,
+        'consent_context' => $consentContext,
         'name'           => $name,
         'email'          => $email,
         'phone'          => $phone,
         'address'        => [
-            'street'  => $digitalOnly ? '' : trim($input['street'] ?? ''),
-            'city'    => $digitalOnly ? '' : trim($input['city'] ?? ''),
-            'zip'     => $digitalOnly ? '' : trim($input['zip'] ?? ''),
+            'street'  => $digitalOnly ? '' : trim(Security::str($input['street'] ?? '')),
+            'city'    => $digitalOnly ? '' : trim(Security::str($input['city'] ?? '')),
+            'zip'     => $digitalOnly ? '' : trim(Security::str($input['zip'] ?? '')),
             'country' => $country,
-        ],
+        ] + $buyerCompany['fields'],
         'currency'       => $currency,
         'locale'         => I18n::locale(),
         'shipping_cost'  => $shippingCost,
@@ -677,6 +699,10 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         'vat_country'    => $vatId !== '' ? substr($vatId, 0, 2) : '',
         'vat_id_status'  => $vatIdStatus,
         'vat_scenario'   => $vatScenario['scenario'],
+        // Buyer note from the HTML form and JSON API: plain text, control characters removed, bounded.
+        'notes'          => is_string($input['notes'] ?? null)
+            ? mb_substr(trim((string)preg_replace('/[^\P{C}\n\t]/u', '', $input['notes'])), 0, 2000)
+            : '',
         'is_synthetic'   => $synthetic,
     ];
 
@@ -687,13 +713,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
 
     try {
         $orderId = Orders::create($availableItems, $customer, $paymentMethod, $coupon);
-        ConsentService::record(
-            $orderId,
-            $submittedConsents,
-            $consentContext,
-            Security::clientIp(),
-            (string)($_SERVER['HTTP_USER_AGENT'] ?? '')
-        );
+
         if ($freeDigitalOrder) {
             PaymentService::updatePaymentStatus($orderId, 'paid');
             OrderWorkflow::transition($orderId, 'paid', 'Bezplatná digitálna objednávka');
@@ -710,11 +730,15 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         $confirmationToken = CheckoutSession::createConfirmation($orderId, CheckoutSession::browserSessionId());
         // For COD/bank_transfer: send confirmation immediately (no webhook will fire)
         // For Stripe: confirmation email is sent from the webhook after payment is confirmed
-        if (!$freeDigitalOrder && empty($selectedPayment['requires_online'])) {
-            JobQueue::push('email_send', ['template' => 'order_confirmation', 'to' => $email, 'order_id' => $orderId]);
+        try {
+            if (!$freeDigitalOrder && empty($selectedPayment['requires_online'])) {
+                JobQueue::push('email_send', ['template' => 'order_confirmation', 'to' => $email, 'order_id' => $orderId]);
+            }
+            // Merchant hears about every order at creation, including unpaid bank transfers.
+            if (!$synthetic) JobQueue::push('merchant_notify', ['order_id' => $orderId, 'event' => 'created'], 6);
+        } catch (Throwable $e) {
+            IncidentMonitor::report('checkout.notification_failed', 'notification', 'critical', ['order_id' => $orderId, 'exception' => $e]);
         }
-        // Merchant hears about every order at creation, including unpaid bank transfers.
-        if (!$synthetic) JobQueue::push('merchant_notify', ['order_id' => $orderId, 'event' => 'created'], 6);
 
         $result = [
             'success'      => true,
@@ -723,6 +747,8 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
             'total'        => (int)$order['total'],
             'confirmation_token' => $confirmationToken,
         ];
+        $bankTransfer = BankTransferInstructions::forApi($order);
+        if ($bankTransfer !== null) $result['bank_transfer'] = $bankTransfer;
 
         // For online payments, create a payment session
         if (!empty($selectedPayment['requires_online'])) {
@@ -735,12 +761,16 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
                     'order_number'   => $order['order_number'],
                     'total'          => (int)$order['total'],
                     'customer_email' => $email,
+                    'customer_name'  => (string)($order['customer_name'] ?? ''),
+                    'locale'         => (string)($order['locale'] ?? ''),
                     'currency'       => $order['currency'] ?? 'eur',
                     'items'          => $orderItems,
                     'shipping_cost'  => (int)$order['shipping_cost'],
                     'financial_snapshot_id' => $financialSnapshot['fingerprint'],
                     'success_url'    => $baseUrl . '/?page=order-done&order=' . rawurlencode($order['order_number']) . '&confirmation_token=' . rawurlencode($confirmationToken) . '&session_id={CHECKOUT_SESSION_ID}',
                     'cancel_url'     => $baseUrl . '/?page=checkout-cancel&order=' . rawurlencode($order['order_number']),
+                    // Provider-specific notification endpoint (PayU notifyUrl, GoPay notification_url, ...).
+                    'notify_url'     => $baseUrl . '/api.php?action=webhook_payment&provider=' . rawurlencode($paymentProvider),
                 ], $payment, $paymentProvider);
                 $result['payment_url'] = $session['url'];
                 $result['session_id'] = $session['session_id'];
@@ -755,7 +785,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
                 }
             } catch (\Throwable $e) {
                 // Payment adapter error — order still created, log and return
-                error_log("Payment session creation failed for order #{$orderId}: " . $e->getMessage());
+                IncidentMonitor::report('payment.session_failed', 'payment', 'critical', ['order_id' => $orderId, 'exception' => $e]);
                 $result['payment_error'] = 'Payment processing unavailable. Please try again.';
             }
         }
@@ -765,9 +795,9 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         }
 
         return $result;
-    } catch (\RuntimeException $e) {
+    } catch (OrderRejectedException $e) {
         Cart::removeUnavailable([]);
-        return ['success' => false, 'error' => $e->getMessage()];
+        return ['success' => false, 'error' => I18n::t('stock_changed')];
     }
 }
 
@@ -870,17 +900,21 @@ function apiWebhookStripe(): array {
     }
 
     try {
-        match($event['type']) {
+        $resolvedStore = match($event['type']) {
             'checkout.session.completed',
             'checkout.session.async_payment_succeeded' => onPaymentCompleted($event['data']['object'] ?? []),
             'charge.refunded'            => onChargeRefunded($event['data']['object'] ?? []),
             'charge.dispute.created'     => onDisputeCreated($event['data']['object'] ?? []),
             default                      => null,
         };
+        if ($resolvedStore !== null) PaymentWebhookRouting::resolved('stripe', (string)$event['id'], $resolvedStore);
+    } catch (PaymentWebhookUnresolved $e) {
+        Idempotency::unmark($eventKey);
+        return paymentWebhookParkedResponse(PaymentWebhookRouting::park('stripe', (string)$event['id'], (string)$event['type'], $e));
     } catch (\Throwable $e) {
         // Unmark so Stripe can retry the webhook
         Idempotency::unmark($eventKey);
-        error_log("Webhook error [{$event['type']}]: {$e->getMessage()}\n" . $e->getTraceAsString());
+        IncidentMonitor::report('payment.webhook_failed', 'webhook', 'critical', ['exception' => $e]);
         http_response_code(500);
         return ['error' => 'Processing failed'];
     }
@@ -888,15 +922,32 @@ function apiWebhookStripe(): array {
     return ['status' => 'ok'];
 }
 
-function onPaymentCompleted(array $session): void {
-    $sessionId = (string)($session['id'] ?? '');
-    $orderId = (int)($session['metadata']['order_id'] ?? 0);
-    if ($orderId <= 0 && $sessionId !== '') $orderId = CheckoutSession::resolveOrderId($sessionId, 'stripe') ?? 0;
-    if ($orderId <= 0) return;
+/** Unresolved retry → 503 so the provider redelivers; exhausted → 202, persisted as a webhook incident. */
+function paymentWebhookParkedResponse(array $parked): array {
+    if ($parked['status'] === 'dead') {
+        http_response_code(202);
+        return ['status' => 'parked'];
+    }
+    http_response_code(503);
+    return ['error' => 'Order not resolvable yet', 'retry' => true];
+}
 
+/** Stripe handlers return the store that owned the order, or null when the event needs no order. */
+function onPaymentCompleted(array $session): ?string {
+    if (isset($session['payment_status']) && $session['payment_status'] !== 'paid') return null;
+    $sessionId = (string)($session['id'] ?? '');
+    $target = PaymentWebhookRouting::locate(array_filter([
+        'order_id' => (int)($session['metadata']['order_id'] ?? 0),
+        'session_id' => $sessionId,
+        'order_number' => (string)($session['client_reference_id'] ?? ''),
+    ]), 'stripe');
+    PaymentWebhookRouting::within($target['store_id'], static fn() => applyStripePaymentCompleted($session, $sessionId, $target['id']));
+    return $target['store_id'];
+}
+
+function applyStripePaymentCompleted(array $session, string $sessionId, int $orderId): void {
     $order = Orders::byId($orderId);
-    if (!$order) return;
-    if (isset($session['payment_status']) && $session['payment_status'] !== 'paid') return;
+    if (!$order) throw new RuntimeException("Order #{$orderId} vanished during Stripe webhook");
     if (isset($session['amount_total']) && (int)$session['amount_total'] !== (int)$order['total']) {
         throw new RuntimeException("Stripe amount mismatch for order #{$orderId}");
     }
@@ -924,14 +975,17 @@ function onPaymentCompleted(array $session): void {
     }
 }
 
-function onChargeRefunded(array $charge): void {
-    $paymentIntent = $charge['payment_intent'] ?? '';
-    if (!$paymentIntent) return;
+function onChargeRefunded(array $charge): ?string {
+    $paymentIntent = (string)($charge['payment_intent'] ?? '');
+    if ($paymentIntent === '') return null;
+    $target = PaymentWebhookRouting::locate(['payment_id' => $paymentIntent], 'stripe');
+    PaymentWebhookRouting::within($target['store_id'], static fn() => applyStripeChargeRefunded($charge, $paymentIntent, $target['id']));
+    return $target['store_id'];
+}
 
-    $stmt = Db::get()->prepare("SELECT * FROM orders WHERE payment_id = :pid LIMIT 1");
-    $stmt->execute([':pid' => $paymentIntent]);
-    $order = $stmt->fetch();
-    if (!$order) return;
+function applyStripeChargeRefunded(array $charge, string $paymentIntent, int $orderId): void {
+    $order = Orders::byId($orderId);
+    if (!$order) throw new RuntimeException("Order #{$orderId} vanished during Stripe webhook");
 
     $refundedAmount = (int)($charge['amount_refunded'] ?? 0);
     $orderTotal = (int)$order['total'];
@@ -939,7 +993,6 @@ function onChargeRefunded(array $charge): void {
     AuditLog::log('order_refund', (int)$order['id'], '', (string)$refundedAmount,
         "Stripe refund: {$refundedAmount}/{$orderTotal} cents");
 
-    $orderId = (int)$order['id'];
     $fullRefund = $refundedAmount >= $orderTotal;
     $targetPaymentStatus = $fullRefund ? 'refunded' : 'partially_refunded';
     $refundDelta = max(0, $refundedAmount - PaymentService::refundedAmount($orderId));
@@ -973,16 +1026,17 @@ function onChargeRefunded(array $charge): void {
     }
 }
 
-function onDisputeCreated(array $dispute): void {
-    $paymentIntent = $dispute['payment_intent'] ?? '';
-    if (!$paymentIntent) return;
+function onDisputeCreated(array $dispute): ?string {
+    $paymentIntent = (string)($dispute['payment_intent'] ?? '');
+    if ($paymentIntent === '') return null;
+    $target = PaymentWebhookRouting::locate(['payment_id' => $paymentIntent], 'stripe');
+    PaymentWebhookRouting::within($target['store_id'], static fn() => applyStripeDisputeCreated($dispute, $paymentIntent, $target['id']));
+    return $target['store_id'];
+}
 
-    $stmt = Db::get()->prepare("SELECT * FROM orders WHERE payment_id = :pid LIMIT 1");
-    $stmt->execute([':pid' => $paymentIntent]);
-    $order = $stmt->fetch();
-    if (!$order) return;
-
-    $orderId = (int)$order['id'];
+function applyStripeDisputeCreated(array $dispute, string $paymentIntent, int $orderId): void {
+    $order = Orders::byId($orderId);
+    if (!$order) throw new RuntimeException("Order #{$orderId} vanished during Stripe webhook");
     AuditLog::log('order_dispute', $orderId, $order['status'], 'disputed', 'Stripe dispute: ' . ($dispute['id'] ?? ''));
     if (($order['payment_status'] ?? '') !== 'disputed'
         && PaymentService::canPaymentTransition((string)($order['payment_status'] ?? 'pending'), 'disputed')) {
@@ -1036,6 +1090,8 @@ function apiWebhookPayment(): array {
     }
     // Both Stripe URLs must use the same verified processing and claim/retry path.
     if ($provider === 'stripe') return apiWebhookStripe();
+    $pulled = apiWebhookPulledNotification($provider);
+    if ($pulled !== null) return $pulled;
 
     $rawPayload = file_get_contents('php://input');
     if (!$rawPayload) {
@@ -1084,11 +1140,47 @@ function apiWebhookPayment(): array {
             http_response_code(400);
             return ['error' => 'Invalid signature'];
         }
-        error_log("webhook_payment [{$provider}] error: " . $e->getMessage());
+        IncidentMonitor::report('payment.webhook_failed', 'webhook', 'critical', ['exception' => $e]);
         http_response_code(500);
         return ['error' => 'Processing failed'];
     }
 
+    if (isset($result['parked'])) return paymentWebhookParkedResponse($result['parked']);
+    return ['status' => $result['duplicate'] ?? false ? 'already_processed' : 'ok'];
+}
+
+/**
+ * Reference notifications (GoPay GET ?id=…, Comgate push): answered only for providers that verify
+ * every notification through their authenticated API. Returns null for signed-webhook providers.
+ * 400 = the provider does not confirm the payment (nothing changes); 500 = retry later.
+ */
+function apiWebhookPulledNotification(string $provider): ?array {
+    try {
+        if (!isset(Adapters::registry('payment')[$provider])) return null;
+        $gateway = Adapters::payment($provider);
+    } catch (\Throwable $e) {
+        return null;
+    }
+    if (!$gateway instanceof PullVerifiedNotificationAdapter) return null;
+
+    // Query string, form body or JSON body (Comgate REST push); only scalar values reach the adapter.
+    $json = json_decode((string)file_get_contents('php://input'), true);
+    $notification = array_filter(
+        array_diff_key($_GET + $_POST + (is_array($json) ? $json : []), ['action' => true, 'provider' => true]),
+        'is_scalar'
+    );
+    try {
+        $result = PaymentService::handlePulledNotification($notification, $gateway, $provider);
+    } catch (PaymentNotificationUnverified $e) {
+        error_log("webhook_payment [{$provider}] unverified notification: " . $e->getMessage());
+        http_response_code(400);
+        return ['error' => 'Invalid notification'];
+    } catch (\Throwable $e) {
+        error_log("webhook_payment [{$provider}] error: " . $e->getMessage());
+        http_response_code(500);
+        return ['error' => 'Processing failed'];
+    }
+    if (isset($result['parked'])) return paymentWebhookParkedResponse($result['parked']);
     return ['status' => $result['duplicate'] ?? false ? 'already_processed' : 'ok'];
 }
 
@@ -1125,7 +1217,7 @@ function apiWebhookShipping(): array {
             http_response_code(400);
             return ['error' => 'Invalid signature'];
         }
-        error_log("webhook_shipping [{$carrier}] error: " . $e->getMessage());
+        IncidentMonitor::report('shipping.webhook_failed', 'webhook', 'critical', ['exception' => $e]);
         http_response_code(500);
         return ['error' => 'Processing failed'];
     }
@@ -1263,7 +1355,7 @@ function apiCookieConsent(): array {
     $cid = (int)($_SESSION['customer_id'] ?? 0);
     GdprService::logCookieConsent([
         'customer_id' => $cid > 0 ? $cid : null,
-        'session_id'  => session_id() ?: null,
+        'session_id'  => Security::sessionKey() ?: null,
         'ip'          => $_SERVER['REMOTE_ADDR'] ?? null,
         'user_agent'  => substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255),
         'categories'  => $cats,
@@ -1275,8 +1367,8 @@ function apiCookieConsent(): array {
 function apiPage(): array {
     $slug = Security::slug($_GET['slug'] ?? '');
     if (!$slug) return ['error' => 'slug required'];
-    $stmt = Db::get()->prepare("SELECT * FROM pages WHERE slug = :slug AND status = 'active'");
-    $stmt->execute([':slug' => $slug]);
+    $stmt = Db::get()->prepare("SELECT * FROM pages WHERE store_id = :store AND slug = :slug AND status = 'active'");
+    $stmt->execute([':store' => StoreContext::current()->id(), ':slug' => $slug]);
     $page = $stmt->fetch();
     if (!$page) { http_response_code(404); return ['error' => 'Page not found']; }
     // Translate if non-default locale

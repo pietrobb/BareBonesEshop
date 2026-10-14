@@ -323,11 +323,11 @@ foreach ([
     $stmt = $pdo->prepare("INSERT INTO promotions (store_id, code, name, scope, priority, stacking, conditions, actions) VALUES ('default', ?, ?, 'cart', ?, ?, ?, ?)");
     $stmt->execute([$code, $code, $priority, $stacking, json_encode($conditions), json_encode($actions)]);
 }
-$g6CartItems = [['product_id' => $g6ProductId, 'variant_id' => null, 'qty' => 2, 'price' => 1111]];
-$g6CartActions = Promotions::cartActions($g6CartItems, 2222, $aliceId, '2026-08-01 12:00:00');
+$g6CartItems = [['product_id' => $g6ProductId, 'variant_id' => null, 'qty' => 3, 'price' => 1111]];
+$g6CartActions = Promotions::cartActions($g6CartItems, 3333, $aliceId, '2026-08-01 12:00:00');
 assert_true(in_array('free_shipping', array_column($g6CartActions, 'action'), true), 'G6: automatic free-shipping promotion resolves');
 $g6Bxgy = array_values(array_filter($g6CartActions, static fn(array $rule): bool => $rule['action'] === 'buy_x_get_y'))[0] ?? [];
-assert_equals(1111, (int)($g6Bxgy['discount'] ?? 0), 'G6: buy-X-get-Y discounts only an eligible in-cart unit');
+assert_equals(1111, (int)($g6Bxgy['discount'] ?? 0), 'G6: buy 2 get 1 of the same product needs 3 units in cart and discounts one');
 $g6Gift = array_values(array_filter($g6CartActions, static fn(array $rule): bool => $rule['action'] === 'gift'))[0] ?? [];
 assert_equals($g6ProductId, (int)($g6Gift['gift']['product_id'] ?? 0), 'G6: gift entitlement is explicit without silently mutating stock');
 

@@ -81,6 +81,7 @@ try {
 
     $a03GdprMigration = require dirname(TEST_CLI_DIR) . '/migrations/20260425033813_add_gdpr_tables.php';
     $a03GdprMigration->up($a03Db, true);
+    (require dirname(TEST_CLI_DIR) . '/migrations/20261012180000_gdpr_events_store.php')->up($a03Db, true);
     $a03GdprChecks = static function(PDO $a03Db, int $a03Customer, bool $isSqlite): void {
     echo "\n--- Audit A03: GDPR export ownership and transactional erasure (" . ($isSqlite ? 'sqlite' : $a03Db->getAttribute(PDO::ATTR_SERVER_VERSION)) . ") ---\n";
     $a03Email = 'a03-victim@example.test';

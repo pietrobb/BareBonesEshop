@@ -16,7 +16,7 @@ class AbandonedCarts {
     /** Persist the current session cart with the shopper's e-mail. Never resets a sent reminder. */
     public static function capture(string $email, ?string $sessionId = null): void {
         $email = strtolower(trim($email));
-        $sessionId ??= session_id();
+        $sessionId ??= Security::sessionKey();
         if ($sessionId === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) return;
         $summary = Cart::enriched();
         if (empty($summary['items'])) return;
@@ -58,7 +58,7 @@ class AbandonedCarts {
 
     /** Link the session's cart to the order created from it. */
     public static function markConverted(int $orderId, ?string $sessionId = null): void {
-        $sessionId ??= session_id();
+        $sessionId ??= Security::sessionKey();
         if ($sessionId === '' || $orderId <= 0) return;
         $now = Db::now();
         Db::get()->prepare("UPDATE abandoned_carts SET order_id = :order, converted_at = {$now},

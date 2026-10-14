@@ -30,6 +30,18 @@ class OperationalDashboard {
                 FROM event_outbox WHERE store_id=:store AND status IN ('retry','dead')
                 ORDER BY updated_at DESC LIMIT :limit", $storeId, $limit)
             : [];
+        if (self::tableExists($db, 'payment_webhook_inbox')) {
+            $parked = self::rows($db, "SELECT id, provider, event_type, status, attempts, last_error, correlation_id, updated_at
+                FROM payment_webhook_inbox WHERE store_id=:store AND status IN ('retry','dead')
+                ORDER BY updated_at DESC LIMIT :limit", $storeId, $limit);
+            foreach ($parked as $row) {
+                $row['event_type'] = $row['provider'] . ':' . $row['event_type'];
+                $row['status'] = 'unresolved_' . $row['status'];
+                unset($row['provider']);
+                $webhooks[] = $row;
+            }
+            $webhooks = array_slice($webhooks, 0, $limit);
+        }
 
         $jobs = array_values(array_filter(
             JobQueue::failures($limit * 2),
@@ -52,6 +64,7 @@ class OperationalDashboard {
             'failed_mail' => $mail,
             'payment_incidents' => $payments,
             'webhook_incidents' => $webhooks,
+            'incident_monitor' => IncidentMonitor::snapshot($storeId),
         ];
     }
 

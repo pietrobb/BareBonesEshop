@@ -71,6 +71,7 @@ playwright-report/
 test-results/
 .lighthouseci/
 tests/e2e/.state.json
+tests/e2e/.state.json.totp-step
 
 # Local config with secrets (copy config.example.php -> config.php)
 config.php

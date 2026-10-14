@@ -98,6 +98,52 @@ class Promotions {
         return $result;
     }
 
+    /**
+     * Cart promotion of this store redeemed with the coupon code (case-insensitive). Coupon promotions never apply
+     * automatically (cartActions skips them); Pricing::applyCoupon prices them. $activeOnly=false finds the row even
+     * after it was deactivated, so an order priced before still honours its usage limits.
+     */
+    public static function couponRule(string $code, bool $activeOnly = true, ?string $at = null): ?array {
+        $code = strtoupper(trim($code));
+        if ($code === '') return null;
+        if ($activeOnly) {
+            foreach (self::activeRules('cart', $at) as $rule) {
+                if (strtoupper((string)($rule['coupon_code'] ?? '')) === $code) return $rule;
+            }
+            return null;
+        }
+        $stmt = Db::get()->prepare("SELECT * FROM promotions WHERE store_id = :store AND scope = 'cart' AND UPPER(coupon_code) = :code ORDER BY id LIMIT 1");
+        $stmt->execute([':store' => StoreContext::current()->id(), ':code' => $code]);
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    /** Usage limits of a coupon promotion (0 = unlimited). */
+    public static function couponLimits(array $rule): array {
+        $conditions = self::jsonObject($rule['conditions'] ?? '{}');
+        return ['max_uses' => max(0, (int)($conditions['max_uses'] ?? 0)), 'per_customer' => max(0, (int)($conditions['per_customer'] ?? 0))];
+    }
+
+    /** Discount of a coupon promotion for the cart subtotal, in the Pricing::applyCoupon result shape. */
+    public static function couponDiscount(array $rule, int $subtotal, ?int $customerId = null): array {
+        $conditions = self::jsonObject($rule['conditions'] ?? '{}');
+        if (isset($conditions['min_subtotal']) && $subtotal < (int)$conditions['min_subtotal']) {
+            return ['discount' => 0, 'name' => null, 'error' => 'Minimum order not met'];
+        }
+        $profile = Customers::commerceProfile($customerId ?? self::sessionCustomerId());
+        if (!empty($conditions['customer_group_ids']) && !in_array((int)($profile['customer_group_id'] ?? 0), array_map('intval', $conditions['customer_group_ids']), true)) {
+            return ['discount' => 0, 'name' => null, 'error' => 'Invalid coupon'];
+        }
+        $actions = self::jsonObject($rule['actions'] ?? '{}');
+        $discount = min(max(0, $subtotal), match ((string)($actions['type'] ?? '')) {
+            'discount_fixed' => max(0, (int)($actions['amount'] ?? 0)),
+            'discount_percent' => self::percent(max(0, $subtotal), (int)($actions['bps'] ?? 0)),
+            default => 0,
+        });
+        return $discount > 0
+            ? ['discount' => $discount, 'name' => (string)$rule['name'], 'error' => null]
+            : ['discount' => 0, 'name' => null, 'error' => 'Invalid coupon'];
+    }
+
     private static function activeRules(string $scope, ?string $at): array {
         $at = $at ?? gmdate('Y-m-d H:i:s');
         try {
@@ -171,6 +217,12 @@ class Promotions {
             }
         }
         if ($unitPrice === null) return 0;
+        if ($buyId === $getId) {
+            // Same product: every free unit needs its own paid units (buy 2 get 1 → 3 in cart for 1 free).
+            $group = $buyQty + $getQty;
+            $freeQty = intdiv($bought, $group) * $getQty + min($getQty, max(0, $bought % $group - $buyQty));
+            return $unitPrice * $freeQty;
+        }
         $freeQty = min($eligible, intdiv($bought, $buyQty) * $getQty);
         return $unitPrice * $freeQty;
     }

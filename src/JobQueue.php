@@ -6,6 +6,8 @@ require_once __DIR__ . '/Queue.php';
  * JSON files in jobs/ directory. Zero external dependencies.
  */
 class JobQueue {
+    /** Same default as the durable backends' lease_seconds; worker runs are capped at ~55 s. */
+    private const FILE_LEASE_SECONDS = 300;
     private static ?string $jobsDir = null;
     private static ?QueueBackend $backendOverride = null;
     private static ?QueueBackend $configuredBackend = null;
@@ -89,6 +91,7 @@ class JobQueue {
      */
     public static function pull(int $limit = 10): array {
         if ($backend = self::backend()) return $backend->pull($limit);
+        self::recoverStale();
         $dir = self::dir() . '/pending';
         if (!is_dir($dir)) return [];
 
@@ -134,7 +137,26 @@ class JobQueue {
         if (!@rename($source, $procFile)) {
             return '';
         }
+        touch($procFile); // mtime = claim time; recoverStale() measures the lease from it
         return $procFile;
+    }
+
+    /**
+     * A worker that dies mid-job (fatal error, OOM, kill) leaves the file in processing/.
+     * After the lease it counts as a failed attempt: retried with backoff, or moved to
+     * failed/ (dead letter) once max_attempts is reached — never retried forever.
+     */
+    private static function recoverStale(): void {
+        $dir = self::dir() . '/processing';
+        if (!is_dir($dir)) return;
+        foreach (glob($dir . '/*.json') ?: [] as $file) {
+            $mtime = @filemtime($file);
+            if ($mtime === false || $mtime > time() - self::FILE_LEASE_SECONDS) continue;
+            $raw = @file_get_contents($file);
+            $job = $raw !== false ? json_decode($raw, true) : null;
+            if (!is_array($job)) continue;
+            self::fail($file, $job, 'Worker stopped while processing the job (lease expired)');
+        }
     }
 
     /**
@@ -251,7 +273,7 @@ class JobQueue {
     }
 
     private static function ensureDirectory(string $dir): void {
-        if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) {
+        if (!is_dir($dir) && !@mkdir($dir, 0750, true) && !is_dir($dir)) {
             throw new RuntimeException("JobQueue: cannot create directory {$dir}");
         }
         $canonical = realpath($dir);
@@ -273,7 +295,7 @@ class JobQueue {
     private static function writeJson(string $file, array $job, bool $exclusive = false): void {
         $json = json_encode($job, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         $target = $exclusive ? $file : $file . '.tmp-' . bin2hex(random_bytes(6));
-        $handle = fopen($target, 'x');
+        $handle = @fopen($target, 'x');
         if ($handle === false) {
             throw new RuntimeException("JobQueue: cannot open {$target}");
         }

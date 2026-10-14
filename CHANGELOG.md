@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- **Shipments and tracking in the admin order detail** (A12.8). Migration `20261014090000_shipment_tracking_url`.
+  - Per-warehouse partial shipments limited to the not-yet-shipped remainder; ship now or plan,
+    cancel a planned shipment; carrier, tracking number and http(s) tracking URL, correctable later.
+  - Permission `orders.ship`, CSRF, store scope; every change is written to the audit log.
+  - `shipments.tracking_url` is exposed in API v1 (`Shipment` schema in `docs/openapi.yaml`).
 - **Merchant low / critical stock e-mail** (`StockAlerts`, worker job `stock_alert`).
   - Two thresholds `low` / `critical` (inclusive; 0 = always critical/sold out). Global default in
     config `stock_alerts`, per-product override in the admin product form and in CSV import/export
@@ -46,6 +51,8 @@
   (bb758f1, 7d2c940): inbound dispatch in `redirect.php`, outbound links, 301 from core routes.
 
 ### Fixed
+- Changing an order to `shipped` after a partial shipment failed with "Shipment exceeds reserved
+  allocation"; it now ships only the remainder that is not yet in any shipment.
 - **P0: card payment from the HTML checkout was dead since 1.9.0.** CSP `form-action 'self'`
   also applies to the redirect after a form submit, so the browser silently dropped the 302 to
   `checkout.stripe.com` ("nothing happens", second click → "cart is empty", pending orders, no payment).

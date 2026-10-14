@@ -136,7 +136,7 @@ try { OfflinePaymentQueue::confirm($digitalOrderId ?? Orders::create([[
 catch (LogicException $e) { $cardOrderRejected = true; }
 assert_true($cardOrderRejected, 'Awaiting payment: card orders cannot be confirmed as transfers');
 $recoverySource = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Recovery.php');
-assert_true(str_contains($recoverySource, "adminRequire('orders.edit')"), 'Awaiting payment: confirm action requires orders.edit');
+assert_true(str_contains($recoverySource, "adminRequire('orders.payments')"), 'Awaiting payment: confirm action requires orders.payments');
 
 // Abandoned carts: capture, conversion, exactly one reminder, opt-out, restore.
 $acAge = static function (string $sid, int $hours) use ($pdo): void {
@@ -417,7 +417,9 @@ assert_true(str_contains($adminSourceG6, "adminCan('customers.edit')"), 'G6 RBAC
 assert_true(str_contains($adminSourceG6, "adminRequire('customers.edit')"), 'G6 RBAC: customer status mutation requires edit permission server-side');
 $paymentSourceG7 = file_get_contents(TEST_CLI_DIR . '/../src/PaymentService.php') ?: '';
 assert_true(!str_contains($paymentSourceG7, '->quote('), 'G7 SQL: payment webhook order lookups never interpolate quoted values');
-assert_true(substr_count($paymentSourceG7, 'payment_id = :payment_id') >= 2 && str_contains($paymentSourceG7, 'order_number = :order_number'), 'G7 SQL: Stripe and PayU fallback identifiers use bound parameters');
+$webhookRoutingSourceG7 = file_get_contents(TEST_CLI_DIR . '/../src/PaymentWebhookRouting.php') ?: '';
+assert_true(!str_contains($webhookRoutingSourceG7, '->quote(') && str_contains($webhookRoutingSourceG7, 'WHERE {$column} = ? AND store_id IN ({$marks})')
+    && str_contains($webhookRoutingSourceG7, "['order_number', (string)\$refs['order_number']]") && str_contains($webhookRoutingSourceG7, "['payment_id', (string)\$refs['payment_id']]"), 'G7 SQL: Stripe and PayU fallback identifiers use bound parameters on fixed columns');
 
 $accountSourceG6 = file_get_contents(TEST_CLI_DIR . '/../account.php') ?: '';
 assert_true(str_contains($accountSourceG6, 'GDPR erase failed [{$errorId}]'), 'G6 errors: erase failure details are logged with a correlation ID');
@@ -1528,7 +1530,7 @@ $afSaved = AdminForm::validate('admin-product', $afStored, [], $afStored + ['csr
 $afSorted = static function (array $a): array { ksort($a); return $a; };
 assert_true(is_array($afSaved) && $afSorted(array_diff_key($afSaved, ['image_upload' => 1])) === $afSorted($afStored) && $afSaved['image_upload'] === ['action' => 'keep', 'files' => []],
     'Admin product save: the untouched stored form validates to exactly the stored values, without extra posted keys');
-assert_true(AdminForm::validate('admin-product', $afStored, [], ['status' => 'retired'] + $afStored, []) === null && str_contains(AdminForm::firstError(), 'Stav'),
+assert_true(AdminForm::validate('admin-product', $afStored, [], ['status' => 'retired'] + $afStored, []) === null && str_contains(AdminForm::firstError(), I18n::t('admin.form.admin_product.status')),
     'Admin product save: a status outside the list is refused');
 assert_true(AdminForm::validate('admin-product', ['status' => 'retired', 'category_id' => '999999'] + $afStored, [], ['status' => 'retired', 'category_id' => '999999'] + $afStored, []) !== null,
     'Admin product save: a stored status or category no longer in the list is still accepted unchanged');
@@ -1745,6 +1747,54 @@ try {
 
 require __DIR__ . '/AuditPaymentsRegression.php';
 require __DIR__ . '/AuditCustomerRegression.php';
-require __DIR__ . '/AuditUtcRegression.php';
+foreach (['CheckoutConsentRegression', 'IncidentMonitoringRegression', 'AuditUtcRegression'] as $checkoutOpsRegression) require __DIR__ . "/{$checkoutOpsRegression}.php";
 require __DIR__ . '/AuditStoreAdminRegression.php';
 require __DIR__ . '/AuditOrderAdminRegression.php';
+require __DIR__ . '/AuditStoreConfigRegression.php';
+require __DIR__ . '/AuditStorePublicCatalogRegression.php';
+require __DIR__ . '/AuditStoreConfigUniqueRegression.php';
+require __DIR__ . '/AuditWebhookStoreRegression.php';
+require __DIR__ . '/AuditStoreAdminRemainderRegression.php';
+require __DIR__ . '/AuditPaymentStateRegression.php';
+require __DIR__ . '/AuditCheckoutMoneyRegression.php';
+require __DIR__ . '/AuditCouponRaceRegression.php';
+require __DIR__ . '/AuditOfflineInventoryRegression.php';
+require __DIR__ . '/AuditOfflineExpiryNativeRegression.php';
+require __DIR__ . '/AuditPromotionNoteRegression.php';
+require __DIR__ . '/AuditRoleMatrixRegression.php';
+require __DIR__ . '/AuditPasswordResetRegression.php';
+require __DIR__ . '/AuditSessionHardeningRegression.php';
+require __DIR__ . '/AuditAdminUsersRegression.php';
+require __DIR__ . '/AuditEmailVerificationRegression.php';
+require __DIR__ . '/AuditApiPatchRegression.php';
+require __DIR__ . '/AuditApiDomainsRegression.php';
+require __DIR__ . '/AuditQueuePoisonRegression.php';
+require __DIR__ . '/AuditUpdaterToctouRegression.php';
+require __DIR__ . '/AuditBackupMaintenanceRegression.php';
+require __DIR__ . '/AuditSqliteMaintenanceRegression.php';
+require __DIR__ . '/AuditReleasesRoutingRegression.php';
+require __DIR__ . '/AuditBoundaryRedirectHostRegression.php';
+require __DIR__ . '/AuditBoundaryInputRegression.php';
+require __DIR__ . '/AuditBoundaryOutputRegression.php';
+require __DIR__ . '/AuditInstallSmokeRegression.php';
+require __DIR__ . '/AuditDocsAccuracyRegression.php';
+require __DIR__ . '/AuditProductEditorRegression.php';
+require __DIR__ . '/AuditTaxonomyRegression.php';
+require __DIR__ . '/AuditPricingAdminRegression.php';
+require __DIR__ . '/AuditB2bAdminRegression.php';
+require __DIR__ . '/AuditSupplierAdminRegression.php';
+require __DIR__ . '/AuditAccountOrderRegression.php';
+require __DIR__ . '/AuditCheckoutCouponRegression.php';
+require __DIR__ . '/AuditCheckoutAddressRegression.php';
+require __DIR__ . '/AuditCheckoutPickupRegression.php';
+require __DIR__ . '/AuditCheckoutCompanyRegression.php';
+require __DIR__ . '/AuditCheckoutBankTransferRegression.php';
+require __DIR__ . '/AuditStorefrontResponsiveRegression.php';
+require __DIR__ . '/AuditStorefrontA11yRegression.php';
+require __DIR__ . '/AuditSalesReportRegression.php';
+require __DIR__ . '/AuditOrderBulkRegression.php';
+require __DIR__ . '/AuditStoreSwitcherRegression.php';
+require __DIR__ . '/AuditAdminI18nRegression.php';
+require __DIR__ . '/AuditEmailTemplateRegression.php';
+require __DIR__ . '/AuditExtensionRegression.php';
+foreach (['Gopay', 'Comgate', 'Thepay', 'ShipmentAdmin'] as $auditTailRegression) require __DIR__ . "/Audit{$auditTailRegression}Regression.php";

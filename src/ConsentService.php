@@ -15,13 +15,15 @@ class ConsentService {
         $result = [];
         foreach ($definitions as $key => $definition) {
             if (!preg_match('/^[a-z0-9_-]{2,80}$/', (string)$key) || !is_array($definition)) continue;
-            if (!self::applies($definition, $context)) continue;
+            if (($definition['active'] ?? true) === false || !self::applies($definition, $context)) continue;
+            $url = (string)($definition['url'] ?? '');
+            if (preg_match('/[\x00-\x20\x7F\\\\]/', $url) || !(preg_match('#^https?://#i', $url) || (str_starts_with($url, '/') && !str_starts_with($url, '//')))) $url = '';
             $result[$key] = [
                 'key' => (string)$key,
                 'version' => (string)($definition['version'] ?? '1'),
                 'required' => !empty($definition['required']),
                 'text' => (string)($definition['text'] ?? ''),
-                'url' => (string)($definition['url'] ?? ''),
+                'url' => $url,
             ];
         }
         return $result;

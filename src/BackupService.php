@@ -7,7 +7,7 @@
  *   BackupService::create(array $opts = []): array  // returns meta of created backup
  *   BackupService::restore(string $remotePath, array $opts = []): array
  *   BackupService::gc(): array                       // returns ['kept' => N, 'deleted' => [...]]
- *   BackupService::list(): array                     // pass-through to storage
+ *   BackupService::list(): array                     // storage rows, deterministic newest first
  *   BackupService::storage(): BackupStorage
  *
  * Config (loaded from config/backup.json):
@@ -316,6 +316,7 @@ class BackupService
                 'filename'       => basename($remotePath),
                 'remote_path'    => $remotePath,
                 'timestamp'      => $when->format('c'),
+                'created_us'     => $when->format('Uu'),
                 'size_bytes'     => $size,
                 'sha256'         => $sha,
                 'schema_version' => $schemaVersion,
@@ -477,74 +478,80 @@ class BackupService
 
         $lockHandle = self::acquireLock();
         try {
-            // 3. close live PDO
+            // 3. close this process's connections to the live file; the gate proves no other process holds it
             self::$db = null;
-            if (class_exists('Db', false)) {
-                try {
-                    if (Db::isSqlite()) Db::reset();
-                } catch (\Throwable $e) { /* ignore */ }
-            }
+            $sharedReleased = class_exists('Db', false) && Db::releaseSqliteFile($livePath);
             gc_collect_cycles();
 
-            // 4. rollback-safe same-filesystem replacement
-            @unlink($livePath . '-wal');
-            @unlink($livePath . '-shm');
-            $rollbackPath = $livePath . '.pre-restore-' . bin2hex(random_bytes(6)) . '.rollback';
-            $movedLive = false;
-            for ($i = 0; $i < $maxRetries; $i++) {
-                if (@rename($livePath, $rollbackPath)) {
-                    $movedLive = true;
-                    break;
-                }
-                usleep($retryDelayMs * 1000);
-            }
-            if (!$movedLive) {
-                throw new RuntimeException('Restore: cannot move the live database aside; stop all workers and retry');
-            }
-            if (!@rename($restoreTemp, $livePath)) {
-                $restoreError = error_get_last()['message'] ?? 'unknown';
-                if (!@rename($rollbackPath, $livePath)) {
-                    throw new RuntimeException("Restore: replacement failed and automatic rollback failed; recovery copy: {$rollbackPath}");
-                }
-                throw new RuntimeException("Restore: atomic replacement failed: {$restoreError}");
-            }
-            $restoreTemp = null;
-
-            // 5. open fresh PDO + integrity; restore the old DB if post-swap verification fails
             try {
-                $newDb = new PDO('sqlite:' . $livePath, null, null, [
-                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                ]);
-                $newDb->exec('PRAGMA journal_mode = WAL');
-                $newDb->exec('PRAGMA foreign_keys = ON');
-                $integrity = (string)$newDb->query('PRAGMA integrity_check')->fetchColumn();
-                if ($integrity !== 'ok') {
-                    throw new RuntimeException("restored database integrity_check failed: {$integrity}");
-                }
-            } catch (\Throwable $verificationError) {
-                $newDb = null;
-                @unlink($livePath . '-wal');
-                @unlink($livePath . '-shm');
-                @unlink($livePath);
-                if (!@rename($rollbackPath, $livePath)) {
-                    throw new RuntimeException(
-                        "Restore verification failed and automatic rollback failed; recovery copy: {$rollbackPath}",
-                        0,
-                        $verificationError
-                    );
-                }
-                $oldDb = new PDO('sqlite:' . $livePath, null, null, [
-                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                ]);
-                if (class_exists('Db', false)) Db::init($oldDb, 'sqlite');
-                self::$db = $oldDb;
-                throw new RuntimeException('Restore verification failed; previous live database was restored', 0, $verificationError);
-            }
-            @unlink($rollbackPath);
+                $swapped = SqliteMaintenance::exclusive($livePath, 'backup restore', static function () use ($livePath, &$restoreTemp, $maxRetries, $retryDelayMs): array {
+                    // 4. rollback-safe same-filesystem replacement
+                    @unlink($livePath . '-wal');
+                    @unlink($livePath . '-shm');
+                    $rollbackPath = $livePath . '.pre-restore-' . bin2hex(random_bytes(6)) . '.rollback';
+                    $movedLive = false;
+                    for ($i = 0; $i < $maxRetries; $i++) {
+                        if (@rename($livePath, $rollbackPath)) {
+                            $movedLive = true;
+                            break;
+                        }
+                        usleep($retryDelayMs * 1000);
+                    }
+                    if (!$movedLive) {
+                        throw new RuntimeException('Restore: cannot move the live database aside; stop all workers and retry');
+                    }
+                    if (!@rename($restoreTemp, $livePath)) {
+                        $restoreError = error_get_last()['message'] ?? 'unknown';
+                        if (!@rename($rollbackPath, $livePath)) {
+                            throw new RuntimeException("Restore: replacement failed and automatic rollback failed; recovery copy: {$rollbackPath}");
+                        }
+                        throw new RuntimeException("Restore: atomic replacement failed: {$restoreError}");
+                    }
+                    $restoreTemp = null;
 
-            if (class_exists('Db', false)) {
+                    // 5. open fresh PDO + integrity; restore the old DB if post-swap verification fails
+                    try {
+                        $newDb = new PDO('sqlite:' . $livePath, null, null, [
+                            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                        ]);
+                        $newDb->exec('PRAGMA journal_mode = WAL');
+                        $newDb->exec('PRAGMA foreign_keys = ON');
+                        $integrity = (string)$newDb->query('PRAGMA integrity_check')->fetchColumn();
+                        if ($integrity !== 'ok') {
+                            throw new RuntimeException("restored database integrity_check failed: {$integrity}");
+                        }
+                    } catch (\Throwable $verificationError) {
+                        $newDb = null;
+                        @unlink($livePath . '-wal');
+                        @unlink($livePath . '-shm');
+                        @unlink($livePath);
+                        if (!@rename($rollbackPath, $livePath)) {
+                            throw new RuntimeException(
+                                "Restore verification failed and automatic rollback failed; recovery copy: {$rollbackPath}",
+                                0,
+                                $verificationError
+                            );
+                        }
+                        throw new RuntimeException('Restore verification failed; previous live database was restored', 0, $verificationError);
+                    }
+                    @unlink($rollbackPath);
+                    return [$newDb, $integrity];
+                });
+            } catch (\Throwable $restoreError) {
+                // Refused (database busy) or rolled back: reconnect to whatever is live now.
+                if (is_file($livePath)) {
+                    self::$db = new PDO('sqlite:' . $livePath, null, null, [
+                        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                    ]);
+                    if ($sharedReleased) Db::init(self::$db, 'sqlite');
+                }
+                throw $restoreError;
+            }
+            [$newDb, $integrity] = $swapped;
+
+            if ($sharedReleased) {
                 Db::init($newDb, 'sqlite');
             }
             self::$db = $newDb;
@@ -632,7 +639,19 @@ class BackupService
 
     public static function list(): array
     {
-        return self::$storage->list();
+        $rows = self::$storage->list();
+        // Newest first without relying on 1 s file mtimes or directory order: microsecond creation
+        // stamp, else the metadata/mtime second, then the -N suffix reserveUniquePath() appends.
+        usort($rows, static fn(array $a, array $b): int => self::orderKey($b) <=> self::orderKey($a));
+        return $rows;
+    }
+
+    private static function orderKey(array $row): array
+    {
+        $createdUs = (string)($row['meta']['created_us'] ?? '');
+        $micro = ctype_digit($createdUs) ? (int)$createdUs : self::rowWhen($row)->getTimestamp() * 1000000;
+        $suffix = preg_match('/-\d{8}-\d{6}-(\d+)\.db(?:\.gz)?$/', (string)($row['path'] ?? ''), $m) === 1 ? (int)$m[1] : 0;
+        return [$micro, $suffix];
     }
 
     /**
@@ -658,7 +677,7 @@ class BackupService
         $monthly = (int)($cfg['monthly']       ?? 6);
         $minKept = (int)($cfg['minimum_kept']  ?? 3);
 
-        $all = self::$storage->list(); // newest first
+        $all = self::list(); // newest first
         if (count($all) <= $minKept) {
             return ['kept' => count($all), 'deleted' => []];
         }

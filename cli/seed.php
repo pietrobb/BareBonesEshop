@@ -186,9 +186,10 @@ for ($i = 1; $i <= $count; $i++) {
 
 if ($db->inTransaction()) $db->commit();
 
-// Update category product counts
+// Subtree counts, as the importer keeps them: products sit in leaf categories, and the storefront menu
+// lists only root categories with products.
 echo "\nUpdating category counts...\n";
-$db->exec("UPDATE categories SET product_count = (SELECT COUNT(*) FROM products WHERE category_id = categories.id AND status = 'active')");
+Import::recountCategories($db);
 
 $elapsed = round((microtime(true) - $start) * 1000);
 $totalProducts = (int)$db->query("SELECT COUNT(*) FROM products")->fetchColumn();

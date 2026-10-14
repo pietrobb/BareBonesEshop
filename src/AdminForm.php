@@ -12,8 +12,25 @@ require_once dirname(__DIR__) . '/vendor/bbf/bbf_render.php';
 class AdminForm {
     private const STATE = 'admin_form_state';
 
+    /** The form in the admin language: "admin.form.<form>.<field>" (and ".placeholder") keys replace the JSON's Slovak texts. */
     public static function definition(string $formId): array {
-        return bbf_load_form($formId, dirname(__DIR__) . '/forms');
+        $form = bbf_load_form($formId, dirname(__DIR__) . '/forms');
+        $prefix = 'admin.form.' . str_replace('-', '_', $formId) . '.';
+        $t = static function (string $key, string $default): string {
+            $text = I18n::t($key);
+            return $text === $key ? $default : $text;
+        };
+        foreach (['submit_label' => 'submit', 'submitting_label' => 'submitting'] as $attribute => $suffix) {
+            if (isset($form[$attribute])) $form[$attribute] = $t($prefix . $suffix, $t('admin.form.' . $suffix, $form[$attribute]));
+        }
+        if (isset($form['description'])) $form['description'] = $t($prefix . 'description', $form['description']);
+        foreach ($form['fields'] as &$field) {
+            $name = (string)($field['name'] ?? '');
+            if (isset($field['label'])) $field['label'] = $t($prefix . $name, $field['label']);
+            if (isset($field['placeholder'])) $field['placeholder'] = $t($prefix . $name . '.placeholder', $field['placeholder']);
+        }
+        unset($field);
+        return $form;
     }
 
     /**
@@ -66,7 +83,7 @@ class AdminForm {
     private static function options(array $values): array {
         return [
             'values' => $values,
-            'lang' => 'sk',
+            'lang' => I18n::locale(),
             'options_resolver' => static fn(string $source): ?array => BbfOptions::fromSource($source),
         ];
     }

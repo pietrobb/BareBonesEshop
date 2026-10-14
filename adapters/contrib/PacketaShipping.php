@@ -7,14 +7,21 @@
  * COD: supported for SK, CZ
  * Coverage: SK, CZ; EU via partner carriers
  */
-class PacketaShipping implements ShippingAdapter
+class PacketaShipping implements ShippingLifecycleAdapter
 {
+    /** Pick-up points offered at once in the checkout list, nearest postal codes first. */
+    private const PICKUP_LIST_LIMIT = 50;
+
     // Free shipping threshold from env or default (5000 = 50 EUR)
     private int $freeAboveCents;
+    private string $pointsDir;
 
-    public function __construct()
+    public function __construct(array $config = [])
     {
         $this->freeAboveCents = (int)($_ENV['SHIP_PACKETA_FREE_ABOVE'] ?? 5000);
+        $dir = (string)($_ENV['SHIP_PACKETA_POINTS_DIR'] ?? getenv('SHIP_PACKETA_POINTS_DIR') ?: '');
+        $this->pointsDir = $dir !== '' ? rtrim($dir, '/\\')
+            : rtrim((string)($config['private_cache_dir'] ?? $config['cache_dir'] ?? sys_get_temp_dir()), '/\\') . '/packeta';
     }
 
     public function carrierId(): string
@@ -88,7 +95,8 @@ class PacketaShipping implements ShippingAdapter
         $awb = 'PKT' . str_pad((string)$order['id'], 10, '0', STR_PAD_LEFT);
         return [
             'awb'        => $awb,
-            'label_data' => base64_encode("MOCK PACKETA LABEL\nAWB: {$awb}\nOrder: {$order['id']}"),
+            'label_data' => base64_encode("MOCK PACKETA LABEL\nAWB: {$awb}\nOrder: {$order['id']}"
+                . (!empty($order['pickup_point_id']) ? "\nPick-up point: {$order['pickup_point_id']}" : '')),
             'carrier'    => $this->carrierId(),
         ];
     }
@@ -106,7 +114,83 @@ class PacketaShipping implements ShippingAdapter
         ];
     }
 
+    /**
+     * Packeta pick-up points of one country from the locally stored feed (see syncPickupPoints),
+     * nearest postal codes first. Nothing is invented: without a synced feed the list is empty.
+     */
+    public function pickupPoints(string $country, string $postalCode = ''): array
+    {
+        $file = $this->pointsFile($country);
+        $points = is_file($file) ? json_decode((string)file_get_contents($file), true) : null;
+        if (!is_array($points)) return [];
+        $zip = (int)preg_replace('/\D/', '', $postalCode);
+        if ($zip > 0) {
+            usort($points, static fn(array $a, array $b): int =>
+                abs((int)preg_replace('/\D/', '', $a['zip']) - $zip) <=> abs((int)preg_replace('/\D/', '', $b['zip']) - $zip) ?: strcmp($a['id'], $b['id']));
+        }
+        return array_map(static fn(array $p): array => [
+            'id' => $p['id'], 'name' => $p['name'], 'address' => trim($p['street'] . ', ' . $p['zip'] . ' ' . $p['city'], ', '),
+        ], array_slice($points, 0, self::PICKUP_LIST_LIMIT));
+    }
+
+    /**
+     * Download the official v5 branch feed of one country and keep the points customers can pick:
+     * in operation (statusId 1) and meant for the frontend (displayFrontend 1).
+     * https://docs.packeta.com/docs/pudo-delivery/packeta-pudos — Packeta asks for 1–4 refreshes a day.
+     */
+    public function syncPickupPoints(string $country): int
+    {
+        $apiKey = (string)($_ENV['SHIP_PACKETA_API_KEY'] ?? getenv('SHIP_PACKETA_API_KEY') ?: '');
+        if (!preg_match('/^[A-Za-z0-9]{8,64}$/', $apiKey)) throw new \RuntimeException('SHIP_PACKETA_API_KEY is not configured');
+        $country = $this->assertCountry($country);
+        $feed = JsonHttpClient::request('https://pickup-point.api.packeta.com', '/v5/' . $apiKey . '/branch/json?country=' . strtolower($country) . '&lang=sk', 'GET', null, [], 120);
+        return $this->storePickupPoints($country, $feed);
+    }
+
+    /** @param array<int,array<string,mixed>> $branches Branch objects in the v5 feed format. */
+    public function storePickupPoints(string $country, array $branches): int
+    {
+        $country = $this->assertCountry($country);
+        $points = [];
+        foreach ($branches as $branch) {
+            if (!is_array($branch) || strtoupper((string)($branch['country'] ?? '')) !== $country) continue;
+            if ((string)($branch['status']['statusId'] ?? '') !== '1' || (string)($branch['displayFrontend'] ?? '') !== '1') continue;
+            $id = (string)($branch['id'] ?? '');
+            if (!preg_match('/^\d{1,12}$/', $id)) continue;
+            $points[] = ['id' => $id, 'name' => (string)($branch['name'] ?? ''), 'street' => (string)($branch['street'] ?? ''),
+                'city' => (string)($branch['city'] ?? ''), 'zip' => (string)($branch['zip'] ?? '')];
+        }
+        if (!is_dir($this->pointsDir) && !mkdir($this->pointsDir, 0750, true) && !is_dir($this->pointsDir)) {
+            throw new \RuntimeException('Cannot create Packeta pick-up point directory');
+        }
+        $file = $this->pointsFile($country);
+        $tmp = $file . '.' . bin2hex(random_bytes(4)) . '.tmp';
+        file_put_contents($tmp, json_encode($points, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+        rename($tmp, $file);
+        return count($points);
+    }
+
+    public function cancelLabel(string $awb): array
+    {
+        if (!empty($_ENV['SHIP_PACKETA_API_KEY'])) {
+            throw new \RuntimeException('Packeta production API not yet wired (set SHIP_PACKETA_API_KEY)');
+        }
+        return ['awb' => $awb, 'status' => 'cancelled'];
+    }
+
     // ─── Private helpers ───────────────────────────────────────────────────────
+
+    private function assertCountry(string $country): string
+    {
+        $country = strtoupper(trim($country));
+        if (!preg_match('/^[A-Z]{2}$/', $country)) throw new \InvalidArgumentException('Invalid country code');
+        return $country;
+    }
+
+    private function pointsFile(string $country): string
+    {
+        return $this->pointsDir . '/branch-' . $this->assertCountry($country) . '.json';
+    }
 
     private function lookupDbRate(string $country, int $weightG): ?int
     {

@@ -10,6 +10,12 @@ class Adapters {
         'payment' => [
             'stripe' => ['class' => 'StripePayment', 'capabilities' => ['checkout', 'status', 'webhook', 'refund'], 'signature_header' => 'HTTP_STRIPE_SIGNATURE'],
             'payu' => ['class' => 'PayUPayment', 'capabilities' => ['checkout', 'status', 'webhook', 'refund'], 'signature_header' => 'HTTP_OPENPAYU_SIGNATURE'],
+            // Unsigned GET notifications, each verified by an authenticated payment inquiry.
+            'gopay' => ['class' => 'GoPayPayment', 'capabilities' => ['checkout', 'status', 'webhook', 'refund'], 'notification' => 'pull'],
+            // Push with merchant+secret, always confirmed by the authenticated status call.
+            'comgate' => ['class' => 'ComgatePayment', 'capabilities' => ['checkout', 'status', 'webhook', 'refund'], 'notification' => 'pull'],
+            // Unsigned GET notifications, each confirmed by the signed payment detail call.
+            'thepay' => ['class' => 'ThePayPayment', 'capabilities' => ['checkout', 'status', 'webhook', 'refund'], 'notification' => 'pull'],
             'mock' => ['class' => 'MockPayment', 'capabilities' => ['checkout', 'status', 'webhook', 'refund'], 'signature_header' => 'HTTP_X_MOCK_SIGNATURE'],
             'cod' => ['class' => 'CashOnDelivery', 'capabilities' => ['checkout', 'status', 'refund']],
         ],
@@ -65,6 +71,10 @@ class Adapters {
                 $registry[$providerType][$code] = $definition + ($registry[$providerType][$code] ?? ['capabilities' => []]);
             }
         }
+        // Extension providers never replace a core or configured code (ExtensionApi::provider refuses it).
+        foreach (Extensions::providers() as $providerType => $definitions) {
+            foreach ($definitions as $code => $definition) $registry[$providerType][$code] ??= $definition;
+        }
         $scope = class_exists('StoreContext') ? StoreContext::current()->providerId() : 'default';
         foreach ($registry as &$definitions) {
             foreach ($definitions as &$definition) $definition['scope'] = $scope;
@@ -73,6 +83,12 @@ class Adapters {
         if ($type === null) return $registry;
         if (!array_key_exists($type, $registry)) throw new \InvalidArgumentException("Unknown provider type: {$type}");
         return $registry[$type];
+    }
+
+    /** @return class-string the interface every provider of $type implements */
+    public static function providerInterface(string $type): string {
+        if (!isset(self::PROVIDER_INTERFACES[$type])) throw new \InvalidArgumentException("Unknown provider type: {$type}");
+        return self::PROVIDER_INTERFACES[$type];
     }
 
     /** @return array<string,object> */

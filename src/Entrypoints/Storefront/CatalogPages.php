@@ -67,14 +67,27 @@ function renderCategory(array $cat): string {
     ]);
 }
 
-function renderSearch(string $query, array $result): string { return renderSearchPage($query, $result, I18n::t('search_results'), '?page=search&q=' . rawurlencode($query)); }
+/** $filters comes from Search::filtersFromQuery(). */
+function renderSearch(string $query, array $result, array $filters): string {
+    $base = '?page=search&q=' . rawurlencode($query) . ($filters['sort'] !== 'relevance' ? '&sort=' . rawurlencode($filters['sort']) : '')
+        . ($filters['pmin'] !== null ? '&pmin=' . $filters['pmin'] : '') . ($filters['pmax'] !== null ? '&pmax=' . $filters['pmax'] : '') . ($filters['cat'] > 0 ? '&cat=' . $filters['cat'] : '');
+    global $catName;
+    $name = is_callable($catName ?? null) ? $catName : static fn(string $value): string => $value;
+    return renderSearchPage($query, $result, I18n::t('search_results'), $base, [
+        'show_filters' => true, 'sort' => $filters['sort'], 'price_min' => $filters['pmin'] ?? '', 'price_max' => $filters['pmax'] ?? '', 'cat' => $filters['cat'] ?: '',
+        'sort_options' => array_map(static fn(string $value): array => ['value' => $value, 'label' => I18n::t($value), 'selected' => $filters['sort'] === $value], $filters['sorts']),
+        'category_options' => array_map(static fn(array $row): array => ['id' => $row['id'], 'name' => $name($row['name']), 'count' => $row['count'], 'checked' => $filters['cat'] === $row['id']], (array)($result['categories'] ?? [])),
+        'all_categories_checked' => $filters['cat'] === 0,
+        'clear_url' => Template::storeUrl('/?page=search&q=' . rawurlencode($query)),
+    ]);
+}
 function renderOE(string $query, array $result): string { return renderSearchPage($query, $result, I18n::t('oe_search'), '?page=oe&q=' . rawurlencode($query)); }
-function renderSearchPage(string $query, array $result, string $heading, string $base): string {
+function renderSearchPage(string $query, array $result, string $heading, string $base, array $filterView = []): string {
     return Template::render('storefront/search-results', [
         'breadcrumbs' => [['url'=>Template::storeUrl('/'),'label'=>I18n::t('home'),'current'=>false],['url'=>'','label'=>$heading . ': ' . $query,'current'=>true]],
         'heading'=>$heading, 'total'=>(int)$result['total'], 'query'=>$query, 'products'=>storefrontProductItems($result['products']),
         'pagination'=>storefrontPagination((int)$result['page'], (int)$result['pages'], $base), 't'=>I18n::all(),
-    ]);
+    ] + $filterView + ['show_filters' => false]);
 }
 
 function renderVehicle(int $ktype, array $result, array $categories, ?int $activeCatId): string {

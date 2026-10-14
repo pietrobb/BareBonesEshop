@@ -99,18 +99,19 @@ class Warehouse {
         $beforeStmt->execute([':wh' => $warehouseId, ':sku' => $sku]);
         $before = $beforeStmt->fetch(PDO::FETCH_ASSOC) ?: ['qty' => 0, 'reserved' => 0];
         $params = [
-            ':store' => StoreContext::current()->id(), ':wh' => $warehouseId,
+            ':store' => StoreContext::current()->id(), ':store2' => StoreContext::current()->id(), ':wh' => $warehouseId,
             ':sku' => $sku, ':qty' => $qty, ':qty2' => $qty,
         ];
+        // Native MySQL prepares (Db::get) reject a reused named placeholder, hence :store2.
         if (Db::isSqlite()) {
             $db->prepare("INSERT INTO warehouse_stock (store_id, warehouse_id, sku, qty, updated_at)
                 VALUES (:store, :wh, :sku, :qty, datetime('now'))
-                ON CONFLICT(warehouse_id, sku) DO UPDATE SET store_id = :store, qty = :qty2, updated_at = datetime('now')")
+                ON CONFLICT(warehouse_id, sku) DO UPDATE SET store_id = :store2, qty = :qty2, updated_at = datetime('now')")
                ->execute($params);
         } else {
             $db->prepare("INSERT INTO warehouse_stock (store_id, warehouse_id, sku, qty, updated_at)
                 VALUES (:store, :wh, :sku, :qty, NOW())
-                ON DUPLICATE KEY UPDATE store_id = :store, qty = :qty2, updated_at = NOW()")
+                ON DUPLICATE KEY UPDATE store_id = :store2, qty = :qty2, updated_at = NOW()")
                ->execute($params);
         }
         Inventory::movement(
@@ -407,6 +408,26 @@ class Warehouse {
                 $stmt->execute([':sku' => $sku, ':sku2' => $sku, ':store' => StoreContext::current()->catalogId()]);
             }
         }
+        self::syncVariantStock($skus);
+    }
+
+    /**
+     * Mirror ledger availability into variants.stock (read by cart and purchasability checks) for variant SKUs the
+     * ledger tracks; variants without warehouse rows keep their legacy stock column.
+     */
+    private static function syncVariantStock(array $skus): void {
+        $sql = "UPDATE variants SET stock = (
+                SELECT COALESCE(SUM(ws.qty - ws.reserved), 0) FROM warehouse_stock ws WHERE ws.sku = variants.sku AND ws.store_id = :store
+            )
+            WHERE EXISTS (SELECT 1 FROM warehouse_stock w2 WHERE w2.sku = variants.sku AND w2.store_id = :store2)
+              AND product_id IN (SELECT id FROM products WHERE store_id = :catalog)";
+        $params = [':store' => StoreContext::current()->id(), ':store2' => StoreContext::current()->id(), ':catalog' => StoreContext::current()->catalogId()];
+        if (empty($skus)) {
+            Db::get()->prepare($sql)->execute($params);
+            return;
+        }
+        $stmt = Db::get()->prepare($sql . ' AND sku = :sku');
+        foreach ($skus as $sku) $stmt->execute($params + [':sku' => $sku]);
     }
 
     private static function stockRow(int $warehouseId, string $sku, bool $required = true): ?array {

@@ -3,7 +3,7 @@ require_once __DIR__ . '/cli-only.php';
 require_once __DIR__ . '/../src/autoload.php';
 
 $command = strtolower((string)($argv[1] ?? ''));
-$options = getopt('', ['name:', 'store:', 'scopes:', 'expires::', 'key:']);
+$options = cli_long_options($argv, ['name:', 'store:', 'scopes:', 'expires::', 'key:']);
 
 try {
     if ($command === 'create') {
@@ -51,6 +51,7 @@ try {
 
     fwrite(STDERR, "Usage:\n");
     fwrite(STDERR, "  php cli/api-client.php create --name=ERP --store=default --scopes=products:read,orders:read\n");
+    fwrite(STDERR, "  scopes: products|orders|categories|customers|inventory:read, products|orders|inventory|refunds:write\n");
     fwrite(STDERR, "  php cli/api-client.php list\n");
     fwrite(STDERR, "  php cli/api-client.php revoke --key=<12-hex-key-id>\n");
     exit(64);

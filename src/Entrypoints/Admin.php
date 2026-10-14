@@ -1,18 +1,21 @@
 <?php
-/**
- * BareBones Shop — Admin Panel
- * Minimal admin: dashboard, products CRUD, orders, import, cache.
- * HTTP Basic Auth with brute-force protection.
- */
+/** BareBones Shop admin panel: session/MFA auth (Security::adminAuth), permission map, POST dispatch and page layout. */
 require_once dirname(__DIR__, 2) . '/src/autoload.php';
 
 require_once __DIR__ . '/Admin/Shared.php';
 require_once __DIR__ . '/Admin/Catalog.php';
 require_once __DIR__ . '/Admin/Orders.php';
+require_once __DIR__ . '/Admin/OrderOperations.php';
 require_once __DIR__ . '/Admin/Customers.php';
+require_once __DIR__ . '/Admin/B2b.php';
+require_once __DIR__ . '/Admin/Suppliers.php';
 require_once __DIR__ . '/Admin/Operations.php';
+require_once __DIR__ . '/Admin/Reports.php';
 require_once __DIR__ . '/Admin/Recovery.php';
+require_once __DIR__ . '/Admin/AdminUsers.php';
+require_once __DIR__ . '/Admin/EmailTemplates.php';
 require_once __DIR__ . '/Admin/Request.php';
+require_once __DIR__ . '/Admin/StoreScope.php';
 // Auth
 Security::adminAuth();
 
@@ -21,9 +24,13 @@ Security::adminAuth();
 // nonce and inline on*= handlers were delegated, so no 'unsafe-inline' is needed.
 Security::headers();
 
-// Admin locale: URL ?lang=xx (persisted in session) → session → system default.
-Bootstrap::initStoreContext();
+// Store scope: one granted store per request; a foreign ?store= / POST store is refused (Admin/StoreScope.php).
 $storesCfg = Bootstrap::stores();
+$adminStores = adminActivateStore($storesCfg);
+$pagePermissions = require __DIR__ . '/Admin/Permissions.php';
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && isset($_POST['admin_switch_store'])) handleStoreSwitch($pagePermissions);
+
+// Admin locale: URL ?lang=xx (persisted in session) → session → system default.
 $adminSupportedLocales = [];
 foreach ($storesCfg['stores'] ?? [] as $s) {
     foreach ($s['languages'] ?? [] as $lc) $adminSupportedLocales[$lc] = true;
@@ -37,51 +44,22 @@ I18n::setLocale($adminLocale);
 $adminConfig = require dirname(__DIR__, 2) . '/config.php';
 $adminAppName = trim((string)($adminConfig['admin_name'] ?? '')) ?: I18n::t('admin.app_name');
 
-$page = $_GET['p'] ?? 'dashboard';
-$action = $_GET['action'] ?? '';
+// p[]=… / action[]=… arrive as arrays; treat them like unknown pages instead of an array-key TypeError.
+$page = Security::str($_GET['p'] ?? 'dashboard', 'dashboard');
+$action = Security::str($_GET['action'] ?? '');
 
 // CSV export — POST only, so the CSRF token travels in the request body
 // instead of the URL (URLs leak via Referer header, browser history and
 // access/proxy logs). Security::csrfValidate() accepts $_POST or X-CSRF-Token.
-if ($page === 'products' && $action === 'export' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+if (in_array($page, ['products', 'orders'], true) && $action === 'export' && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     if (!Security::csrfValidate()) {
         http_response_code(403);
         exit('Forbidden');
     }
-    handleExport();
+    $page === 'orders' ? handleOrdersExport() : handleExport();
 }
 
 // Role-based permission map
-$pagePermissions = [
-    'dashboard'  => 'reports.view',
-    'sales'      => 'orders.view',
-    'products'   => 'products.view',
-    'product'    => 'products.edit',
-    'orders'     => 'orders.view',
-    'order'      => 'orders.view',
-    'awaiting_payment' => 'orders.view',
-    'abandoned_carts' => 'orders.view',
-    'import'     => 'import',
-    'cache'      => 'cache',
-    'audit'      => 'reports.view',
-    'gdpr'       => 'gdpr.view',
-    'pages'      => 'products.edit',
-    'page_edit'  => 'products.edit',
-    'content'    => 'products.edit',
-    'attributes' => 'products.edit',
-    'attribute'  => 'products.edit',
-    'warehouses' => 'import',
-    'warehouse'  => 'import',
-    'feeds'      => 'import',
-    'feed'       => 'import',
-    'shipping'   => 'products.edit',
-    'payments'   => 'products.edit',
-    'digital_assets' => 'products.edit',
-    'reviews'    => 'products.edit',
-    'rma'        => 'products.edit',
-    'customers'  => 'customers.view',
-    'customer'   => 'customers.view',
-];
 $requiredPerm = $pagePermissions[$page] ?? 'reports.view';
 Security::adminRequire($requiredPerm);
 
@@ -90,34 +68,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     handlePost($page, $action);
 }
 
+// Binary downloads leave before the HTML layout starts, otherwise the PDF is wrapped in admin markup.
+if ($page === 'invoice_pdf' || $page === 'delivery_note') {
+    $page === 'invoice_pdf' ? pageInvoicePdf() : pageDeliveryNotes();
+    exit;
+}
+
 // Render page
 $title = match($page) {
     'dashboard'  => I18n::t('admin.title.dashboard'),
     'sales'      => I18n::t('admin.title.sales'),
+    'reports'    => I18n::t('admin.title.reports'),
     'products'   => I18n::t('admin.title.products'),
     'product'    => isset($_GET['id']) ? I18n::t('admin.title.product_edit') : I18n::t('admin.title.product_new'),
     'orders'     => I18n::t('admin.title.orders'),
     'order'      => I18n::t('admin.title.order_detail'),
-    'awaiting_payment' => 'Čaká na platbu',
-    'abandoned_carts' => 'Opustené košíky',
+    'awaiting_payment' => I18n::t('admin.title.awaiting_payment'),
+    'abandoned_carts' => I18n::t('admin.title.abandoned_carts'),
     'import'     => I18n::t('admin.title.import'),
     'cache'      => I18n::t('admin.title.cache'),
     'audit'      => I18n::t('admin.title.audit_log'),
     'gdpr'       => I18n::t('admin.title.gdpr'),
     'pages'      => I18n::t('admin.title.cms_pages'),
     'page_edit'  => I18n::t('admin.title.cms_page_edit'),
-    'content'    => 'Content & Marketing',
+    'content'    => I18n::t('admin.title.content'),
     'attributes' => I18n::t('admin.title.attributes'),
     'attribute'  => isset($_GET['id']) ? I18n::t('admin.title.attribute_edit') : I18n::t('admin.title.attribute_new'),
+    'categories' => I18n::t('admin.title.categories'),
+    'brands'     => I18n::t('admin.title.brands'),
+    'promotions' => I18n::t('admin.title.promotions'),
+    'price_lists' => I18n::t('admin.title.price_lists'),
+    'companies'  => I18n::t('admin.title.companies'),
+    'customer_groups' => I18n::t('admin.title.customer_groups'),
+    'suppliers'  => I18n::t('admin.title.suppliers'),
+    'purchase_orders' => I18n::t('admin.title.purchase_orders'),
     'warehouses' => I18n::t('admin.title.warehouses'),
     'warehouse'  => isset($_GET['id']) ? I18n::t('admin.title.warehouse_edit') : I18n::t('admin.title.warehouse_new'),
     'feeds'      => I18n::t('admin.title.feeds'),
     'feed'       => isset($_GET['id']) ? I18n::t('admin.title.feed_edit') : I18n::t('admin.title.feed_new'),
-    'shipping'   => 'Doprava',
-    'payments'   => 'Platby',
-    'digital_assets' => 'Digitálne súbory',
-    'customers'  => 'Zákazníci',
-    'customer'   => 'Zákazník',
+    'shipping'   => I18n::t('admin.title.shipping'),
+    'payments'   => I18n::t('admin.title.payments'),
+    'digital_assets' => I18n::t('admin.title.digital_assets'),
+    'customers'  => I18n::t('admin.title.customers'),
+    'customer'   => I18n::t('admin.title.customer'),
+    'admin_users' => I18n::t('admin.title.admin_users'),
+    'email_templates' => I18n::t('admin.title.email_templates'),
+    'reviews'    => I18n::t('admin.title.reviews'),
+    'rma'        => I18n::t('admin.title.rma'),
     default      => I18n::t('admin.title.default'),
 };
 
@@ -165,8 +162,10 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
 .bbf-submit{display:inline-block;padding:.4rem .8rem;border-radius:4px;font-size:.85rem;cursor:pointer;background:#2563eb;color:#fff;border:1px solid #2563eb}
 .pagination{display:flex;gap:.5rem;margin-top:1rem}
 .stock-low{color:#b45309;font-weight:600}.stock-critical{color:#dc2626;font-weight:700}
-.muted{color:#64748b;font-size:.85rem}
+.muted{color:#475569;font-size:.85rem}
 .sales-toolbar{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap}.sales-toolbar .form-row{margin:0}.sales-toolbar input{min-width:220px}
+.report-bar{margin-left:.5rem;width:8rem;vertical-align:middle}details>summary{cursor:pointer;font-weight:600;margin:.5rem 0}
+.store-switcher{display:flex;flex-wrap:wrap;gap:.25rem;align-items:center;padding:0 1rem .75rem;font-size:.75rem;color:#cbd5e1}.store-switcher select{flex:1;min-width:0}
 .table-scroll{overflow-x:auto}.status-ok{color:#047857}.status-warn{color:#b45309}.status-error{color:#b91c1c;font-weight:600}
 @media(max-width:760px){.wrap{display:block}nav{width:100%;display:flex;overflow-x:auto;padding:.5rem}nav h2,nav div{display:none}nav a{white-space:nowrap}main{padding:1rem}.sales-toolbar input{min-width:0;width:100%}.sales-toolbar .form-row{width:100%}}
 </style>
@@ -178,8 +177,9 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
     <div style="padding:0.3rem 1rem;font-size:0.75rem;color:#94a3b8;margin-bottom:0.5rem"><?= esc(Security::adminUser()) ?> (<?= esc(Security::adminRole()) ?>)</div>
     <form method="post" action="admin.php" style="padding:0 1rem .5rem">
         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-        <button class="btn btn-sm" type="submit" name="admin_logout" value="1">Sign out</button>
+        <button class="btn btn-sm" type="submit" name="admin_logout" value="1"><?= esc(I18n::t('admin.sign_out')) ?></button>
     </form>
+    <?php renderStoreSwitcher($adminStores, $storesCfg, $page); ?>
     <div style="padding:0.3rem 1rem;font-size:0.75rem;color:#94a3b8;margin-bottom:0.5rem">
         <?= esc(I18n::t('admin.language')) ?>:
         <?php foreach ($adminSupportedLocales as $lc): ?>
@@ -187,27 +187,9 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
             <a href="admin.php?<?= esc($qs) ?>" style="<?= $lc===$adminLocale?'color:#fff;font-weight:600':'color:#94a3b8' ?>"><?= strtoupper(esc($lc)) ?></a>
         <?php endforeach; ?>
     </div>
-    <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=dashboard" class="<?= $page==='dashboard'?'active':'' ?>"><?= esc(I18n::t('admin.nav.dashboard')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=sales" class="<?= $page==='sales'?'active':'' ?>"><?= esc(I18n::t('admin.nav.sales')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('products.view')): ?><a href="admin.php?p=products" class="<?= $page==='products'?'active':'' ?>"><?= esc(I18n::t('admin.nav.products')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=orders" class="<?= $page==='orders'?'active':'' ?>"><?= esc(I18n::t('admin.nav.orders')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=awaiting_payment" class="<?= $page==='awaiting_payment'?'active':'' ?>">Čaká na platbu</a><?php endif; ?>
-    <?php if (Security::adminCan('orders.view')): ?><a href="admin.php?p=abandoned_carts" class="<?= $page==='abandoned_carts'?'active':'' ?>">Opustené košíky</a><?php endif; ?>
-    <?php if (Security::adminCan('import')): ?><a href="admin.php?p=import" class="<?= $page==='import'?'active':'' ?>"><?= esc(I18n::t('admin.nav.import_csv')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('cache')): ?><a href="admin.php?p=cache" class="<?= $page==='cache'?'active':'' ?>"><?= esc(I18n::t('admin.nav.cache')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=attributes" class="<?= $page==='attributes'||$page==='attribute'?'active':'' ?>"><?= esc(I18n::t('admin.nav.attributes')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('import')): ?><a href="admin.php?p=warehouses" class="<?= $page==='warehouses'||$page==='warehouse'?'active':'' ?>"><?= esc(I18n::t('admin.nav.warehouses')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('import')): ?><a href="admin.php?p=feeds" class="<?= $page==='feeds'||$page==='feed'?'active':'' ?>"><?= esc(I18n::t('admin.nav.feeds')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=pages" class="<?= $page==='pages'?'active':'' ?>"><?= esc(I18n::t('admin.nav.cms_pages')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=content" class="<?= $page==='content'?'active':'' ?>">Content & Marketing</a><?php endif; ?>
-    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=shipping" class="<?= $page==='shipping'?'active':'' ?>">Doprava</a><?php endif; ?>
-    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=payments" class="<?= $page==='payments'?'active':'' ?>">Platby</a><?php endif; ?>
-    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=digital_assets" class="<?= $page==='digital_assets'?'active':'' ?>">Digitálne súbory</a><?php endif; ?>
-    <?php if (Security::adminCan('reports.view')): ?><a href="admin.php?p=audit" class="<?= $page==='audit'?'active':'' ?>"><?= esc(I18n::t('admin.nav.audit')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('gdpr.view')): ?><a href="admin.php?p=gdpr" class="<?= $page==='gdpr'?'active':'' ?>"><?= esc(I18n::t('admin.nav.gdpr')) ?></a><?php endif; ?>
-    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=reviews" class="<?= $page==='reviews'?'active':'' ?>">Recenzie</a><?php endif; ?>
-    <?php if (Security::adminCan('products.edit')): ?><a href="admin.php?p=rma" class="<?= $page==='rma'?'active':'' ?>">Reklamácie</a><?php endif; ?>
-    <?php if (Security::adminCan('customers.view')): ?><a href="admin.php?p=customers" class="<?= $page==='customers'||$page==='customer'?'active':'' ?>">Zákazníci</a><?php endif; ?>
+    <?php foreach (require __DIR__ . '/Admin/Navigation.php' as [$navPage, $navPerm, $navKey, $navAlso]): if (!Security::adminCan($navPerm)) continue; ?>
+    <a href="admin.php?p=<?= esc($navPage) ?>" class="<?= $page === $navPage || in_array($page, $navAlso, true) ? 'active' : '' ?>"><?= esc(I18n::t($navKey)) ?></a>
+    <?php endforeach; ?>
 </nav>
 <main>
 <?php flash(); ?>
@@ -215,13 +197,13 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
 match($page) {
     'dashboard' => pageDashboard(),
     'sales'     => pageSalesOverview(),
+    'reports'   => pageReports(),
     'products'  => pageProducts(),
     'product'   => pageProduct(),
     'orders'    => pageOrders(),
     'order'     => pageOrder(),
     'awaiting_payment' => pageAwaitingPayment(),
     'abandoned_carts' => pageAbandonedCarts(),
-    'invoice_pdf' => pageInvoicePdf(),
     'import'    => pageImport(),
     'cache'     => pageCache(),
     'audit'     => pageAudit(),
@@ -231,6 +213,11 @@ match($page) {
     'content'    => pageContentMarketing(),
     'attributes' => pageAttributes(),
     'attribute'  => pageAttribute(),
+    'categories' => pageCategories(),
+    'brands'     => pageBrands(),
+    'promotions' => pagePromotions(), 'price_lists' => pagePriceLists(),
+    'companies'  => pageCompanies(), 'customer_groups' => pageCustomerGroups(),
+    'suppliers'  => pageSuppliers(), 'purchase_orders' => pagePurchaseOrders(),
     'warehouses' => pageWarehouses(),
     'warehouse'  => pageWarehouse(),
     'feeds'      => pageFeeds(),
@@ -242,6 +229,8 @@ match($page) {
     'rma'        => pageRma(),
     'customers'  => pageCustomers(),
     'customer'   => pageCustomerDetail(),
+    'admin_users' => pageAdminUsers(),
+    'email_templates' => pageEmailTemplates(),
     default      => pageDashboard(),
 };
 ?>

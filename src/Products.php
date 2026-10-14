@@ -22,10 +22,11 @@ class Products {
             SELECT p.* FROM slug_registry sr
             JOIN products p ON p.id = sr.entity_id
             WHERE sr.slug = :slug AND sr.entity = 'product'
-              AND sr.store_id = :store AND p.store_id = :store AND p.status = 'active'
+              AND sr.store_id = :store AND p.store_id = :product_store AND p.status = 'active'
             LIMIT 1
         ");
-        $stmt->execute([':slug' => $slug, ':store' => StoreContext::current()->catalogId()]);
+        $store = StoreContext::current()->catalogId();
+        $stmt->execute([':slug' => $slug, ':store' => $store, ':product_store' => $store]);
         return $stmt->fetch() ?: null;
     }
 
@@ -41,9 +42,9 @@ class Products {
         $stmt = $db->prepare("SELECT p.* FROM slug_registry sr
             JOIN products p ON p.id = sr.entity_id
             WHERE sr.slug = :slug AND sr.entity = 'product'
-              AND sr.store_id = :store AND p.store_id = :store
+              AND sr.store_id = :store AND p.store_id = :product_store
             LIMIT 1");
-        $stmt->execute([':slug' => $slug, ':store' => $store]);
+        $stmt->execute([':slug' => $slug, ':store' => $store, ':product_store' => $store]);
         return $stmt->fetch() ?: null;
     }
 
@@ -174,8 +175,8 @@ class Products {
         if (!$catPath) return ['products' => [], 'total' => 0, 'page' => 1, 'per_page' => $perPage, 'pages' => 0];
 
         // Get all category IDs in subtree
-        $stmt = $db->prepare("SELECT id FROM categories WHERE store_id = :store AND (path = :path OR path LIKE :pathPrefix)");
-        $stmt->execute([':store' => StoreContext::current()->catalogId(), ':path' => $catPath, ':pathPrefix' => $catPath . '/%']);
+        $stmt = $db->prepare("SELECT id FROM categories WHERE store_id = :store AND (path = :path OR path LIKE :pathPrefix ESCAPE '!')");
+        $stmt->execute([':store' => StoreContext::current()->catalogId(), ':path' => $catPath, ':pathPrefix' => Db::likeLiteral((string)$catPath) . '/%']);
         $catIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
         if (empty($catIds)) $catIds = [$categoryId];
@@ -312,11 +313,12 @@ class Products {
             JOIN products p ON p.id = pr.related_product_id
             WHERE pr.product_id = :id AND pr.relation_type = :type
               AND p.store_id = :store AND p.status = 'active'
-              AND EXISTS (SELECT 1 FROM products source WHERE source.id = pr.product_id AND source.store_id = :store)
+              AND EXISTS (SELECT 1 FROM products source WHERE source.id = pr.product_id AND source.store_id = :source_store)
             ORDER BY pr.sort_order, pr.related_product_id
             LIMIT :limit
         ");
-        $stmt->execute([':id' => $productId, ':type' => $relationType, ':store' => StoreContext::current()->catalogId(), ':limit' => max(1, min(500, $limit))]);
+        $store = StoreContext::current()->catalogId();
+        $stmt->execute([':id' => $productId, ':type' => $relationType, ':store' => $store, ':source_store' => $store, ':limit' => max(1, min(500, $limit))]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -327,11 +329,12 @@ class Products {
             FROM product_related_products pr
             JOIN products p ON p.id = pr.related_product_id
             WHERE pr.product_id = :id AND p.store_id = :store AND p.status = 'active'
-              AND EXISTS (SELECT 1 FROM products source WHERE source.id = pr.product_id AND source.store_id = :store)
+              AND EXISTS (SELECT 1 FROM products source WHERE source.id = pr.product_id AND source.store_id = :source_store)
             ORDER BY pr.relation_type, pr.sort_order, pr.related_product_id
             LIMIT :limit
         ");
-        $stmt->execute([':id' => $productId, ':store' => StoreContext::current()->catalogId(), ':limit' => max(1, min(1000, $limit))]);
+        $store = StoreContext::current()->catalogId();
+        $stmt->execute([':id' => $productId, ':store' => $store, ':source_store' => $store, ':limit' => max(1, min(1000, $limit))]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 

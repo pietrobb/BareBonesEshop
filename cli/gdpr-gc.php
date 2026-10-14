@@ -8,7 +8,9 @@ require_once __DIR__ . '/cli-only.php';
  *
  * Usage:
  *   php cli/gdpr-gc.php                  Dry-run all policies (default — safe)
- *   php cli/gdpr-gc.php --apply          Actually delete/scrub. Triggers BackupService snapshot first.
+ *   php cli/gdpr-gc.php --apply          Actually delete/scrub. Triggers BackupService snapshot first
+ *                                        (SQLite only; refuses when backups are disabled or on MySQL).
+ *   php cli/gdpr-gc.php --apply --skip-backup   Apply after the operator took an external backup.
  *   php cli/gdpr-gc.php --policy=email_log   Run a single named policy
  *   php cli/gdpr-gc.php --quiet          Print one summary line (cron-friendly)
  *
@@ -21,9 +23,10 @@ require_once __DIR__ . '/cli-only.php';
 require_once __DIR__ . '/../src/autoload.php';
 
 $argvLocal = $argv ?? [];
-$opts = ['apply' => false, 'policy' => null, 'quiet' => false];
+$opts = ['apply' => false, 'policy' => null, 'quiet' => false, 'skip_backup' => false];
 foreach (array_slice($argvLocal, 1) as $a) {
     if ($a === '--apply') { $opts['apply'] = true; continue; }
+    if ($a === '--skip-backup') { $opts['skip_backup'] = true; continue; }
     if ($a === '--quiet') { $opts['quiet'] = true; continue; }
     if (str_starts_with($a, '--policy=')) { $opts['policy'] = substr($a, 9); continue; }
     fwrite(STDERR, "Unknown arg: {$a}\n");
@@ -55,16 +58,20 @@ if ($opts['policy'] !== null) {
 }
 
 // Pre-backup snapshot on --apply
-if ($opts['apply']) {
+if ($opts['apply'] && $opts['skip_backup']) {
+    $say("[backup] skipped by --skip-backup (operator confirmed an external backup)");
+} elseif ($opts['apply']) {
     try {
-        if (class_exists('BackupService')) {
-            $svc = new BackupService();
-            $say("[backup] taking pre-retention snapshot...");
-            $info = $svc->create(['label' => 'pre-retention-gc']);
-            $say("[backup] OK " . ($info['filename'] ?? '?') . " sha=" . substr($info['sha256'] ?? '', 0, 12));
-        } else {
-            $say("[backup] BackupService not available — proceeding without snapshot (NOT RECOMMENDED)");
+        BackupService::init(Db::get(), null, dirname(__DIR__));
+        if (!BackupService::isEnabled()) {
+            throw new RuntimeException('backups are disabled in config/backup.json; take an external backup and re-run with --skip-backup');
         }
+        if (BackupService::livePath() === null) {
+            throw new RuntimeException('automatic snapshots need a file-based SQLite database; take an external dump (e.g. mysqldump) and re-run with --skip-backup');
+        }
+        $say("[backup] taking pre-retention snapshot...");
+        $info = BackupService::create(['label' => 'pre-retention-gc', 'trigger' => 'auto']);
+        $say("[backup] OK " . ($info['filename'] ?? '?') . " sha=" . substr($info['sha256'] ?? '', 0, 12));
     } catch (\Throwable $e) {
         fwrite(STDERR, "Pre-backup failed: " . $e->getMessage() . "\n");
         exit(3);

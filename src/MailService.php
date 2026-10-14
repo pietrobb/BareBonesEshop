@@ -20,7 +20,7 @@
  */
 class MailService {
     private static ?MailAdapter $adapterOverride = null;
-    private static array $fallbackLocales = ['en'];
+    private const SECRET_LINK_VARS = ['reset_url', 'verify_url', 'cart_url', 'unsubscribe_url', 'download_links'];
 
     /** For tests: inject a specific adapter (bypasses env). */
     public static function useAdapter(?MailAdapter $a): void {
@@ -101,8 +101,15 @@ class MailService {
             ],
         ];
 
-        $result = $adapter->send($msg);
+        try {
+            $result = $adapter->send($msg);
+        } catch (Throwable $e) {
+            $result = ['status' => 'failed', 'message' => 'Mail adapter failed'];
+        }
         self::logUpdate($logId, $result['status'] ?? 'failed', $result['message'] ?? '');
+        if (($result['status'] ?? '') !== 'sent' && $template !== 'merchant_incident') {
+            IncidentMonitor::report('mail.delivery_failed', 'mail', 'critical', $orderId !== null ? ['order_id' => $orderId] : []);
+        }
 
         return [
             'status'  => $result['status'] ?? 'failed',
@@ -118,8 +125,8 @@ class MailService {
      * Creates a NEW email_log entry — the original row stays immutable.
      */
     public static function resend(int $logId, ?int $orderId = null): array {
-        $sql = "SELECT * FROM email_log WHERE id = :id";
-        $params = [':id' => $logId];
+        $sql = "SELECT * FROM email_log WHERE id = :id AND store_id = :store";
+        $params = [':id' => $logId, ':store' => StoreContext::current()->id()];
         if ($orderId !== null) {
             $sql .= " AND order_id = :order_id";
             $params[':order_id'] = $orderId;
@@ -131,6 +138,9 @@ class MailService {
             return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => '', 'error' => 'log entry not found'];
         }
         $vars = json_decode((string)($row['payload'] ?? '{}'), true) ?: [];
+        if (!empty($vars['_redacted'])) {
+            return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => '', 'error' => 'one-time links are not stored; trigger a fresh email instead'];
+        }
         return self::send(
             (string)$row['template'],
             (string)$row['recipient'],
@@ -145,22 +155,11 @@ class MailService {
      * Returns ['subject' => ..., 'html' => ..., 'text' => ...].
      */
     public static function render(string $template, string $locale, array $vars): array {
-        $baseDir = self::templateDir();
-        $locales = array_unique(array_merge([$locale], self::$fallbackLocales));
-
-        $htmlFile = $subjectFile = $textFile = null;
-        foreach ($locales as $loc) {
-            $h = "{$baseDir}/{$loc}/{$template}.html";
-            if ($htmlFile === null && file_exists($h)) $htmlFile = $h;
-            $s = "{$baseDir}/{$loc}/{$template}.subject.txt";
-            if ($subjectFile === null && file_exists($s)) $subjectFile = $s;
-            $t = "{$baseDir}/{$loc}/{$template}.txt";
-            if ($textFile === null && file_exists($t)) $textFile = $t;
-        }
-
-        $html    = $htmlFile    ? (string)file_get_contents($htmlFile)    : "<p>{$template}</p>";
-        $subject = $subjectFile ? trim((string)file_get_contents($subjectFile)) : $template;
-        $text    = $textFile    ? (string)file_get_contents($textFile)    : '';
+        // The active store's admin override for this exact locale wins; otherwise the files with their locale fallback.
+        $source  = EmailTemplates::source($template, $locale);
+        $html    = $source['html'] ?? "<p>{$template}</p>";
+        $subject = $source['subject'] ?? $template;
+        $text    = $source['text'] ?? '';
 
         // Render in template-engine order used by worker.php: each → if → vars
         $html    = self::renderString($html, $vars);
@@ -169,11 +168,15 @@ class MailService {
         if ($text !== '') {
             $text = self::renderString($text, $vars, false);
         } else {
-            // Fallback plain text from HTML
-            $text = trim(preg_replace('/\s+\n/', "\n", strip_tags($html)));
+            $text = self::textFromHtml($html);
         }
 
         return ['subject' => $subject, 'html' => $html, 'text' => $text];
+    }
+
+    /** Plain-text part derived from rendered HTML; the HTML escaping is decoded so links survive (p=reset&token=..., not &amp;token=). */
+    public static function textFromHtml(string $html): string {
+        return trim(preg_replace('/\s+\n/', "\n", html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8')));
     }
 
     /** Expand {{#each}} / {{#if}} / {{var}} — matches worker.php renderTemplate. */
@@ -216,6 +219,7 @@ class MailService {
     private static function recipientAllowed(string $recipient, string $template): bool {
         $limits = [
             'account_password_reset' => [3, 3600],
+            'account_email_verification' => [3, 3600],
             'account_welcome' => [2, 86400],
             'cart_reminder' => [1, 86400],
             // Configured merchant inbox, deduplicated per order: a busy hour must not drop orders.
@@ -289,10 +293,6 @@ class MailService {
         };
     }
 
-    private static function templateDir(): string {
-        return realpath(__DIR__ . '/..') . '/templates/emails';
-    }
-
     private static function logInsert(string $to, string $tpl, string $locale, string $subject, string $adapterId, ?int $orderId, array $vars): int {
         $stmt = Db::get()->prepare("
             INSERT INTO email_log (order_id, recipient, template, locale, subject, adapter, status, payload, store_id, correlation_id)
@@ -305,11 +305,28 @@ class MailService {
             ':locale'    => $locale,
             ':subject'   => $subject,
             ':adapter'   => $adapterId,
-            ':payload'   => json_encode($vars, JSON_UNESCAPED_UNICODE),
+            ':payload'   => json_encode(self::loggableVars($vars), JSON_UNESCAPED_UNICODE),
             ':store'     => StoreContext::current()->id(),
             ':correlation' => Logger::correlationId(),
         ]);
         return (int)Db::get()->lastInsertId();
+    }
+
+    /**
+     * Bearer links (password reset, cart recovery/opt-out, downloads) must not outlive the
+     * mail: their tokens are stored hashed, so the log keeps only a redaction marker.
+     */
+    private static function loggableVars(array $vars): array {
+        $redacted = false;
+        foreach (self::SECRET_LINK_VARS as $key) {
+            if (!array_key_exists($key, $vars)) continue;
+            $redacted = true;
+            $vars[$key] = is_array($vars[$key])
+                ? array_map(static fn($item) => is_array($item) && array_key_exists('url', $item) ? ['url' => '[redacted]'] + $item : '[redacted]', $vars[$key])
+                : '[redacted]';
+        }
+        if ($redacted) $vars['_redacted'] = true;
+        return $vars;
     }
 
     private static function logUpdate(int $id, string $status, string $error): void {

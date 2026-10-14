@@ -10,7 +10,7 @@
             <form class="search-form" action="{{base_url}}/" method="get" role="search">
                 <input type="hidden" name="page" value="search">
                 <label class="sr-only" for="site-search">{{t.search}}</label>
-                <input id="site-search" type="search" name="q" placeholder="{{t.search_placeholder}}" class="search-input">
+                <input id="site-search" type="search" name="q" placeholder="{{t.search_placeholder}}" class="search-input" data-search-suggest="{{t.search_suggestions}}">
             </form>
             <a href="{{cart_url}}" class="cart-badge" data-cart-badge aria-label="{{t.cart}}">
                 {{t.cart}} (<span data-cart-count>{{cart.count}}</span>)

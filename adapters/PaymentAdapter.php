@@ -1,8 +1,9 @@
 <?php
 /**
  * BareBones Shop — Payment Adapter Interface
- * Default: StripePayment (Stripe Checkout — hosted flow)
- * Optional: PayPalPayment, GoPay, TatraPay, BankTransfer, CashOnDelivery
+ * Shipped adapters (adapters/contrib): StripePayment (Stripe Checkout — hosted flow), PayUPayment,
+ * GoPayPayment, ComgatePayment, ThePayPayment, CashOnDelivery, MockPayment (tests). Bank transfer is a built-in offline method, not an adapter.
+ * Other gateways are added as new classes implementing this interface.
  */
 interface PaymentAdapter {
     /** Create a payment session, returns redirect URL or client secret */
@@ -27,6 +28,25 @@ interface HostedCheckoutAdapter extends PaymentAdapter {
     /** @return list<string> https origins (scheme://host[:port]) createSession() may redirect to */
     public function redirectOrigins(): array;
 }
+
+/**
+ * Providers whose notification is only a reference to be confirmed with the provider
+ * (GoPayPayment: unsigned GET ?id=<payment>; ComgatePayment: push with merchant+secret;
+ * ThePayPayment: unsigned GET ?project_id=…&payment_uid=…).
+ * The event is never taken from the request: verifiedEvent() asks the provider's authenticated
+ * API for the payment and returns the same shape as handleWebhook() (event_type, event_id, data
+ * with order_number/payment_id, amount, currency), so the payment state machine applies it.
+ */
+interface PullVerifiedNotificationAdapter extends PaymentAdapter {
+    /**
+     * @param array<string,mixed> $notification request parameters of the notification
+     * @throws PaymentNotificationUnverified when the provider does not confirm the reference
+     */
+    public function verifiedEvent(array $notification): array;
+}
+
+/** The notified payment is unknown to the provider or not ours: answer 400, change nothing. */
+class PaymentNotificationUnverified extends RuntimeException {}
 
 /** Provider capability required for retry-safe external refund mutations. */
 interface IdempotentRefundAdapter extends PaymentAdapter {

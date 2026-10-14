@@ -18,6 +18,40 @@ class ShippingService
     /** @var ShippingAdapter[] */
     private static array $adapters = [];
 
+    /** Country names in their own language, so the list reads the same in every storefront locale. */
+    private const COUNTRY_NAMES = [
+        'AT' => 'Österreich', 'BE' => 'België / Belgique', 'BG' => 'България', 'CH' => 'Schweiz / Suisse', 'CY' => 'Κύπρος',
+        'CZ' => 'Česko', 'DE' => 'Deutschland', 'DK' => 'Danmark', 'EE' => 'Eesti', 'ES' => 'España', 'FI' => 'Suomi',
+        'FR' => 'France', 'GB' => 'United Kingdom', 'GR' => 'Ελλάδα', 'HR' => 'Hrvatska', 'HU' => 'Magyarország',
+        'IE' => 'Ireland', 'IS' => 'Ísland', 'IT' => 'Italia', 'LI' => 'Liechtenstein', 'LT' => 'Lietuva',
+        'LU' => 'Luxembourg', 'LV' => 'Latvija', 'MT' => 'Malta', 'NL' => 'Nederland', 'NO' => 'Norge', 'PL' => 'Polska',
+        'PT' => 'Portugal', 'RO' => 'România', 'SE' => 'Sverige', 'SI' => 'Slovenija', 'SK' => 'Slovensko',
+        'UA' => 'Україна', 'US' => 'United States',
+    ];
+
+    /**
+     * Countries the checkout offers: the store's database shipping zones plus the shipping.json
+     * zones, as code => name sorted by code. Wildcard zones name no country; with nothing
+     * configured the historical default list is kept.
+     * @return array<string,string>
+     */
+    public static function destinationCountries(): array
+    {
+        $codes = Shipping::zoneCountries();
+        if (self::hasDatabasePricing()) {
+            $stmt = Db::get()->prepare("SELECT DISTINCT country FROM shipping_zone_countries WHERE store_id = :store");
+            $stmt->execute([':store' => StoreContext::current()->providerId()]);
+            foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $code) {
+                if (preg_match('/^[A-Za-z]{2}$/', (string)$code)) $codes[] = strtoupper((string)$code);
+            }
+        }
+        $codes = array_unique($codes) ?: ['SK', 'CZ', 'DE', 'AT', 'HU', 'PL'];
+        sort($codes);
+        $countries = [];
+        foreach ($codes as $code) $countries[$code] = self::COUNTRY_NAMES[$code] ?? $code;
+        return $countries;
+    }
+
     /** Override adapters for testing */
     public static function setAdapters(array $adapters): void
     {
@@ -142,6 +176,8 @@ class ShippingService
 
         $adapter = self::findAdapter($carrierId);
         $order   = self::fetchOrder($orderId);
+        $snapshot = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true);
+        $order['pickup_point_id'] = (string)($snapshot['pickup_point']['id'] ?? '');
         $result = $adapter->generateLabel($order);
 
         // Persist label record
@@ -174,6 +210,53 @@ class ShippingService
             throw new \RuntimeException("Shipping carrier does not support pickup points: {$carrierId}");
         }
         return $adapter->pickupPoints(strtoupper(trim($country)), trim($postalCode));
+    }
+
+    /**
+     * Pick-up points the customer can choose for a selected rate, from its carrier adapter.
+     * required: the rate only delivers to a point (service_type pickup or pickup_required);
+     * a parcel rate that supports pick-up may also go to the address. Carriers without the
+     * lifecycle contract (in-store pickup) offer no list and need no choice.
+     * @return array{points: list<array{id:string,name:string,address:string}>, required: bool}
+     */
+    public static function pickupOptions(array $rate, string $country, string $postalCode): array
+    {
+        $adapter = self::pickupAdapter($rate);
+        if ($adapter === null) return ['points' => [], 'required' => false];
+        $required = ($rate['service_type'] ?? '') === 'pickup' || !empty($rate['pickup_required']);
+        try {
+            $points = $adapter->pickupPoints(strtoupper(trim($country)), trim($postalCode));
+        } catch (\Throwable $e) {
+            error_log('Pick-up points unavailable for ' . $adapter->carrierId() . ': ' . $e->getMessage());
+            $points = [];
+        }
+        return ['points' => array_values(array_filter($points, static fn(array $p): bool => ($p['id'] ?? '') !== '')), 'required' => $required];
+    }
+
+    /** Carrier adapter that lists pick-up points for this rate, or null when the rate has no point choice. */
+    public static function pickupAdapter(array $rate): ?ShippingLifecycleAdapter
+    {
+        if (($rate['service_type'] ?? '') !== 'pickup' && empty($rate['pickup_required']) && empty($rate['supports_pickup'])) return null;
+        foreach (self::resolveAdapters() as $adapter) {
+            if ($adapter->carrierId() === (string)($rate['carrier'] ?? '')) return $adapter instanceof ShippingLifecycleAdapter ? $adapter : null;
+        }
+        return null;
+    }
+
+    /**
+     * Validate the posted pick-up point against the carrier's own list for this address.
+     * @return array{point: ?array{id:string,name:string,address:string}, error: ?string} error is an i18n key
+     */
+    public static function choosePickupPoint(array $rate, string $country, string $postalCode, string $pointId): array
+    {
+        $options = self::pickupOptions($rate, $country, $postalCode);
+        $pointId = trim($pointId);
+        foreach ($options['points'] as $point) {
+            if ($pointId !== '' && $point['id'] === $pointId) return ['point' => $point, 'error' => null];
+        }
+        if ($pointId !== '' && ($options['points'] || $options['required'])) return ['point' => null, 'error' => 'pickup_point_invalid'];
+        if ($options['required']) return ['point' => null, 'error' => $options['points'] ? 'pickup_point_required' : 'pickup_point_unavailable'];
+        return ['point' => null, 'error' => null];
     }
 
     /** Cancel the latest active label exactly once and retain its audit row. */
@@ -241,15 +324,23 @@ class ShippingService
         }
 
         // Resolve label record
-        $db    = Db::get();
-        $label = $db->prepare("SELECT * FROM shipping_labels WHERE awb = :awb AND carrier = :carrier AND store_id = :store LIMIT 1");
-        $label->execute([':awb' => $awb, ':carrier' => $carrierId, ':store' => StoreContext::current()->id()]);
-        $labelRow = $label->fetch();
-
-        if (!$labelRow) {
+        // The label may belong to any store sharing the endpoint's provider scope; process it in that store.
+        $stores = PaymentWebhookRouting::eligibleStoreIds();
+        $label = Db::get()->prepare("SELECT * FROM shipping_labels WHERE awb = ? AND carrier = ? AND store_id IN (" . implode(',', array_fill(0, count($stores), '?')) . ") LIMIT 2");
+        $label->execute([$awb, $carrierId, ...$stores]);
+        $labelRows = $label->fetchAll(\PDO::FETCH_ASSOC);
+        if (count($labelRows) !== 1) {
+            if ($labelRows) error_log("shipping webhook [{$carrierId}] AWB {$awb} is ambiguous across stores");
             return ['handled' => false, 'reason' => 'unknown_awb'];
         }
 
+        return PaymentWebhookRouting::within((string)$labelRows[0]['store_id'], static fn(): array => self::applyTrackingUpdate($labelRows[0], $carrierId, (string)$awb, (string)$status, $rawPayload));
+    }
+
+    private static function applyTrackingUpdate(array $labelRow, string $carrierId, string $awb, string $status, string $rawPayload): array
+    {
+        StoreContext::current()->assertPermission('shipping');
+        $db = Db::get();
         $eventId = 'shipping_' . hash('sha256', $carrierId . "\0" . $rawPayload);
         if (Idempotency::webhookProcessed($eventId)) {
             return ['handled' => false, 'reason' => 'already_processed', 'duplicate' => true];

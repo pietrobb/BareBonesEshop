@@ -5,8 +5,9 @@ require_once __DIR__ . '/cli-only.php';
  * BareBones Shop — Manual / Cron Backup CLI
  *
  * Usage:
- *   php cli/backup.php                       Default backup (label=manual)
- *   php cli/backup.php --label=before-import Custom label
+ *   php cli/backup.php                       Default (cron) backup, label=scheduled — subject to retention GC
+ *   php cli/backup.php --label=manual        Keep forever: manual/pre-migration/pre-restore-snapshot are never GC'd
+ *   php cli/backup.php --label=before-import Custom label (subject to retention GC)
  *   php cli/backup.php --gz                  Also produce gzipped copy
  *   php cli/backup.php --gc                  Also run retention GC
  *   php cli/backup.php --gc-only             Only run GC, skip backup
@@ -22,7 +23,7 @@ require_once __DIR__ . '/../src/autoload.php';
 
 $argvLocal = $argv ?? [];
 $opts = [
-    'label'    => 'manual',
+    'label'    => 'scheduled',
     'gz'       => false,
     'gc'       => false,
     'gc_only'  => false,
@@ -59,7 +60,7 @@ if (!$opts['gc_only']) {
         $say('Creating backup (label=' . $opts['label'] . ')...');
         $meta = BackupService::create([
             'label'    => $opts['label'],
-            'trigger'  => 'manual',
+            'trigger'  => $opts['label'] === 'manual' ? 'manual' : 'auto',
             'compress' => $opts['gz'],
         ]);
         $say('OK ' . $meta['remote_path'] . ' size=' . $meta['size_bytes'] . ' sha256=' . $meta['sha256']);

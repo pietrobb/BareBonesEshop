@@ -31,7 +31,7 @@ test('HTML card checkout opens a real Stripe test-mode Checkout session', async 
 
   await Promise.all([
     page.waitForURL(url => url.origin === STRIPE, { timeout: 30_000 }),
-    page.locator('form.checkout-form button[type="submit"]').click(),
+    page.locator('form.checkout-form button.btn-checkout').click(),
   ]);
   // Every engine, iPhone Safari (WebKit) above all — the client that could not pay in 1.9.0: the browser
   // landed on a real test-mode session and the shop's own CSP blocked nothing on the way.

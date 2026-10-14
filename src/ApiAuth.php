@@ -47,6 +47,9 @@ class ApiAuth {
         $stmt = Db::get()->prepare('SELECT * FROM api_clients WHERE key_id=:key AND active=1 LIMIT 1');
         $stmt->execute([':key' => $keyId]);
         $client = $stmt->fetch(PDO::FETCH_ASSOC);
+        // An unfinished SELECT keeps the SQLite read snapshot open; the UPDATE below would then
+        // fail with "database is locked" instead of waiting when another request is writing.
+        $stmt->closeCursor();
         $actualHash = hash('sha256', $token);
         if (!$client || !hash_equals((string)$client['token_hash'], $actualHash)) {
             throw new ApiAuthException('Invalid bearer credential');
@@ -89,11 +92,25 @@ class ApiAuth {
         ];
     }
 
+    /**
+     * Claims the key inside the caller's transaction before any mutation. A concurrent request with
+     * the same key waits on the unique row and gets false once the holder commits (then replay it).
+     * Must be the first statement of the transaction so SQLite takes the write lock with busy-wait.
+     */
+    public static function claim(array $client, string $key, string $requestHash): bool {
+        self::assertIdempotencyKey($key);
+        $stmt = Db::get()->prepare(Db::insertIgnore() . " INTO api_idempotency
+            (store_id, client_id, idempotency_key, request_hash, response_status, response_body)
+            VALUES (:store, :client, :key, :hash, 0, '{}')");
+        $stmt->execute([':store' => $client['store_id'], ':client' => $client['id'], ':key' => $key, ':hash' => $requestHash]);
+        return $stmt->rowCount() === 1;
+    }
+
+    /** Records the final response on the row claimed by claim() in the same transaction. */
     public static function storeResponse(array $client, string $key, string $requestHash, int $status, array $body): void {
         self::assertIdempotencyKey($key);
-        $stmt = Db::get()->prepare("INSERT INTO api_idempotency
-            (store_id, client_id, idempotency_key, request_hash, response_status, response_body)
-            VALUES (:store, :client, :key, :hash, :status, :body)");
+        $stmt = Db::get()->prepare("UPDATE api_idempotency SET response_status = :status, response_body = :body
+            WHERE store_id = :store AND client_id = :client AND idempotency_key = :key AND request_hash = :hash");
         $stmt->execute([
             ':store' => $client['store_id'],
             ':client' => $client['id'],
@@ -102,6 +119,7 @@ class ApiAuth {
             ':status' => $status,
             ':body' => json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
         ]);
+        if ($stmt->rowCount() !== 1) throw new LogicException('Idempotency key was not claimed');
     }
 
     public static function cleanupIdempotency(int $olderThanDays = 30): int {

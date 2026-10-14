@@ -62,25 +62,52 @@ function renderCheckout(): string {
             'breadcrumbs' => $breadcrumbs, 'message' => $t('cart_empty'), 'home_url' => Template::storeUrl('/'), 'continue_label' => $t('continue_shopping'),
         ]);
     }
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['checkout'])) return processCheckout();
-
+    // The coupon, saved-address and country buttons submit the whole checkout form (no JS needed) to re-price
+    // or refill it, not to place the order. A refused order re-renders the form with every value kept.
+    $posted = $_SERVER['REQUEST_METHOD'] === 'POST';
+    $couponAction = $posted && is_string($_POST['coupon_action'] ?? null) ? $_POST['coupon_action'] : '';
+    $formAction = $couponAction !== '' || ($posted && (isset($_POST['address_action']) || !empty($_POST['checkout_refresh'])));
+    if ($formAction && !Security::csrfValidate()) {
+        return Template::render('storefront/checkout-error', ['home_url' => Template::storeUrl('/'), 'home_label' => 'Domov', 'error_label' => 'Chyba', 'message' => 'CSRF token mismatch.']);
+    }
+    $placed = !$formAction && $posted && !empty($_POST['checkout']) ? processCheckout() : ['error' => ''];
+    if (isset($placed['page'])) return $placed['page'];
+    $checkoutError = $placed['error'];
+    if ($checkoutError !== '') {
+        // A refusal can drop sold-out lines from the cart: show what is left, or only the reason.
+        $cart = ($cartData = Cart::enriched())['items'];
+        if (!$cart) return Template::render('storefront/checkout-error', ['home_url' => Template::storeUrl('/'), 'home_label' => 'Domov', 'error_label' => 'Chyba', 'message' => $checkoutError]);
+    }
+    $state = CheckoutService::formState($_POST, $posted);
+    $form = static fn(string $key): string => $posted && is_string($_POST[$key] ?? null) ? mb_substr(trim($_POST[$key]), 0, 64) : '';
     $subtotal = (int)$cartData['subtotal'];
-    $countryInput = $_POST['country'] ?? 'SK';
-    $country = strtoupper(Security::clean(is_string($countryInput) ? $countryInput : 'SK'));
-    $shippingInput = $_POST['shipping_method'] ?? '';
-    $quote = ShippingService::cartQuote($cart, $subtotal, $country, is_string($shippingInput) ? Security::clean($shippingInput) : '');
+    $country = $state['country'];
+    $quote = CheckoutService::deliveryQuote($cart, $subtotal, $country, $_POST['shipping_method'] ?? '');
     $shippingRates = $quote['rates'];
     $selectedRate = $quote['selected'];
     $selectedShipping = (string)($selectedRate['method_code'] ?? '');
     $shipping = $quote['price'];
     $customerId = (int)($_SESSION['customer_id'] ?? 0);
     $paymentMethods = $selectedRate ? PaymentService::availableMethods($country, $storeCurrency, $subtotal + $shipping, (string)$selectedRate['method_code'], $customerId ?: null) : [];
-    $selectedPayment = $paymentMethods[0] ?? null;
+    $postedPayment = $form('payment');
+    $selectedPayment = null;
+    foreach ($paymentMethods as $method) if ((string)$method['code'] === $postedPayment) $selectedPayment = $method;
+    $selectedPayment ??= $paymentMethods[0] ?? null;
     $paymentFee = $selectedPayment ? (int)$selectedPayment['fee'] : 0;
     $freeLabel = $t('free_shipping');
 
+    // Same discount rules as CheckoutService::execute: coupon + automatic promotions, capped at the subtotal.
+    $couponCode = $couponAction === 'remove' ? '' : $form('coupon_code');
+    $preview = CheckoutService::discountPreview($couponCode, $subtotal, Security::email($state['values']['email']) ?? null, $cart, $customerId ?: null);
+    $couponDiscount = $preview['coupon_discount'];
+    $couponError = $preview['coupon_error'] === null ? '' : sprintf($t($preview['coupon_error']), $couponCode);
+    if ($couponError !== '') $couponCode = '';
+    if ($preview['free_shipping']) $shipping = 0;
+    $discount = min($subtotal, $couponDiscount + $preview['promotion_discount']);
+
     return Template::render('storefront/checkout', [
-        'breadcrumbs' => $breadcrumbs, 'title' => $t('checkout_title'), 'csrf_token' => Security::csrfToken(),
+        'breadcrumbs' => $breadcrumbs, 'title' => $t('checkout_title'), 'csrf_token' => Security::csrfToken(), 'address_required' => !$quote['digital'],
+        'refresh_label' => $t('checkout.refresh'), 'consents' => array_values(CheckoutService::consentDefinitions($country, $cart)),
         'contact_label' => $t('contact'), 'name_label' => $t('name'), 'email_label' => $t('email'), 'phone_label' => $t('phone'),
         'address_label' => $t('address'), 'street_label' => $t('street'), 'city_label' => $t('city'), 'zip_label' => $t('zip'),
         'shipping_label' => $t('shipping'), 'shipping_options' => array_map(static fn(array $rate): array => [
@@ -89,9 +116,9 @@ function renderCheckout(): string {
             'checked' => (string)$rate['method_code'] === $selectedShipping,
         ], $shippingRates),
         'shipping_unavailable' => $shippingRates ? '' : $t('shipping_unavailable'), 'free_shipping_hint' => $quote['hint'], 'payment_label' => $t('payment'),
-        'payment_options' => array_map(static fn(array $method, int $index): array => [
+        'payment_options' => array_map(static fn(array $method): array => [
             'code' => (string)$method['code'], 'label' => (string)$method['label'], 'description' => (string)($method['description'] ?: $method['provider']),
-            'fee' => (int)$method['fee'] === 0 ? $freeLabel : $price((int)$method['fee']), 'checked' => $index === 0,
+            'fee' => (int)$method['fee'] === 0 ? $freeLabel : $price((int)$method['fee']), 'checked' => (string)$method['code'] === (string)($selectedPayment['code'] ?? ''),
             'online' => !empty($method['requires_online']),
         ], $paymentMethods, array_keys($paymentMethods)),
         'submitting_label' => $t('checkout_submitting'), 'redirecting_label' => $t('checkout_redirecting'),
@@ -100,21 +127,33 @@ function renderCheckout(): string {
         'items' => array_map(static fn(array $item): array => ['name' => (string)$item['name'], 'quantity' => (int)$item['qty'], 'total' => $price((int)$item['total'])], $cart),
         'subtotal_cents' => $subtotal, 'subtotal_label' => $t('subtotal'), 'subtotal' => $price($subtotal),
         'shipping' => $shipping === 0 ? $freeLabel : $price($shipping), 'payment_fee' => $paymentFee === 0 ? $freeLabel : $price($paymentFee),
-        'total_price_label' => $t('total_price'), 'total' => $price($subtotal + $shipping + $paymentFee),
-    ]);
+        'discount_cents' => $discount, 'discount_label' => $t('discount'), 'discount' => $discount > 0 ? $price(-$discount) : '',
+        'total_price_label' => $t('total_price'), 'total' => $price($subtotal - $discount + $shipping + $paymentFee),
+        'values' => $state['values'], 'checkout_error' => $checkoutError, 'saved_addresses' => $state['addresses'],
+        'saved_address_label' => $t('checkout_saved_address'), 'saved_address_use_label' => $t('checkout_saved_address_use'),
+        'country_label' => $t('country'), 'country_options' => array_map(static fn(string $code, string $name): array => ['code' => $code, 'name' => $name, 'selected' => $code === $country],
+            array_keys($state['countries']), $state['countries']),
+        'coupon_label' => $t('coupon_code'), 'coupon_apply_label' => $t('coupon_apply'), 'coupon_remove_label' => $t('coupon_remove'),
+        'coupon_code' => $couponCode, 'coupon_error' => $couponError,
+        'coupon_applied' => $couponDiscount > 0 ? sprintf($t('coupon_applied'), $couponCode, $price($couponDiscount)) : '',
+    ] + CheckoutService::pickupView($shippingRates, $selectedRate, $country, $state['values']['zip'], $form('pickup_point')) + CheckoutService::companyLabels());
 }
 
-function processCheckout(): string {
-    if (!Security::csrfValidate()) {
-        return Template::render('storefront/checkout-error', ['home_url' => Template::storeUrl('/'), 'home_label' => 'Domov', 'error_label' => 'Chyba', 'message' => 'CSRF token mismatch.']);
-    }
+/**
+ * Places the order and redirects. Returns ['page' => html] when the created order must be paid through a
+ * link instead, or ['error' => reason] when no order was created.
+ * @return array{page: string}|array{error: string}
+ */
+function processCheckout(): array {
+    if (!Security::csrfValidate()) return ['error' => 'CSRF token mismatch.'];
     if (!Security::rateLimit('checkout', 10)
         || !Security::rateLimit('checkout_global', 200, 60, false)
         || !Security::rateLimit('checkout_session_' . hash('sha256', session_id()), 5, 900, false)) {
-        return Template::render('storefront/checkout-error', ['home_url' => Template::storeUrl('/'), 'home_label' => 'Domov', 'error_label' => 'Chyba', 'message' => 'Príliš veľa pokusov o objednávku. Skúste to neskôr.']);
+        return ['error' => 'Príliš veľa pokusov o objednávku. Skúste to neskôr.'];
     }
 
     $input = $_POST;
+    $input['consents'] = array_map(static fn($value): bool => $value === '1', is_array($input['consents'] ?? null) ? $input['consents'] : []);
     $paymentInput = $input['payment'] ?? 'cod';
     $input['payment_method'] = Security::clean(is_string($paymentInput) ? $paymentInput : 'cod');
     $result = CheckoutService::execute($input, require dirname(__DIR__, 3) . '/config.php');
@@ -124,7 +163,7 @@ function processCheckout(): string {
             ? CheckoutSession::pendingPayment() : null;
         if ($pending) {
             error_log('Checkout payment origin missing from CSP form-action: ' . (string)parse_url((string)$result['payment_url'], PHP_URL_HOST));
-            return renderPendingPayment($pending, false);
+            return ['page' => renderPendingPayment($pending, false)];
         }
         $target = !empty($result['payment_url'])
             ? (string)$result['payment_url']
@@ -134,10 +173,9 @@ function processCheckout(): string {
         exit;
     }
 
-    return Template::render('storefront/checkout-error', [
-        'home_url' => '?', 'home_label' => 'Domov', 'error_label' => 'Chyba',
-        'message' => (string)($result['error'] ?? 'Chyba pri spracovaní objednávky. Skúste to znova.'),
-    ]);
+    global $t;
+    if (!empty($result['consent_errors'])) return ['error' => $t('checkout.consent_required')];
+    return ['error' => (string)($result['error'] ?? '') ?: 'Chyba pri spracovaní objednávky. Skúste to znova.'];
 }
 
 function renderOrderDone(string $orderNum): string {
@@ -170,6 +208,7 @@ function renderOrderDone(string $orderNum): string {
     return Template::render('storefront/order-done', [
         'title' => $t('order_sent'), 'order_number_label' => $t('order_num'), 'order_number' => $orderNum,
         'payment' => $payment, 'pay_url' => $payUrl, 'pay_label' => $t('checkout_pay_now'),
+        'bank_transfer_html' => $order ? BankTransferInstructions::html($order) : '',
         'email_message' => $t('order_email'), 'home_url' => Template::storeUrl('/'), 'continue_label' => $t('continue_shopping'),
     ]);
 }

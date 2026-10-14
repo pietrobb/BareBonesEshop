@@ -5,6 +5,7 @@
  * Copy this file to `config.php` and fill in your own values.
  * `config.php` is gitignored so your secrets never land in the repo.
  *   cp config.example.php config.php
+ * or let `php cli/setup.php install` create it with a generated admin_identity_key.
  */
 return [
     // Database: 'sqlite' or 'mysql'
@@ -42,6 +43,10 @@ return [
     // confirmation of a terminal unpaid state. Keep above provider session TTL.
     'pending_order_expiry_seconds' => 172800,
     'pending_order_expiry_batch'   => 25,
+    // Unpaid offline orders (payment service_type => seconds) are cancelled and their stock
+    // released after this age; the buyer gets the order_cancelled e-mail. Types not listed
+    // (cod, invoice, offline) never auto-expire. Omitted key = bank_transfer after 14 days.
+    'offline_order_expiry_seconds' => ['bank_transfer' => 1209600],
 
     // Admin
     'admin_name'     => '', // optional admin brand; defaults to the translated BareBonesShop name
@@ -104,7 +109,7 @@ return [
         // 'erp' => 'money',
     ],
     'providers' => [
-        'payment' => [], // e.g. 'gopay' => 'GoPayPayment'
+        'payment' => [], // stripe/payu/gopay/comgate/thepay/mock are built in; register a custom gateway as code => ['class' => <your PaymentAdapter class>]
         'shipping' => [],
         'mail' => [],
         'tax' => [],
@@ -122,6 +127,18 @@ return [
     'operations' => [
         'worker_cron' => '', // e.g. * * * * *; install it in the platform scheduler too
         'monitor_cron' => '', // e.g. */5 * * * * php cli/monitor.php
+    ],
+    // Technical incidents only; normal checkout validation never sends mail.
+    // Run worker + monitor cron. Mail 'log' is simulation, not delivery evidence.
+    'incident_alerts' => [
+        'enabled' => false,
+        'recipients' => [], // merchant_notifications.recipients, then admin_email
+        'locale' => '',
+        'window_seconds' => 900,
+        'checkout_failures' => 3,
+        'cooldown_seconds' => 900,
+        'lease_seconds' => 300,
+        'heartbeat_max_age_seconds' => 300,
     ],
     'monitoring' => [
         'backup_rpo_seconds' => 86400,
@@ -157,6 +174,13 @@ return [
         // ],
     ],
 
+    // Extensions to load from extensions/<code>/extension.php (docs/EXTENSIONS.md). They add
+    // providers, domain event listeners and storefront data without editing core files;
+    // updates never overwrite extensions/ and the drift guard does not report it.
+    'extensions' => [
+        // 'acme-loyalty',
+    ],
+
     // Dev only: route api.php?action=webhook_payment&provider=mock even when the
     // active payment adapter is not MockPayment. NEVER enable in production —
     // the mock webhook marks orders as paid. Pair with 'mock_webhook_secret'.
@@ -174,6 +198,28 @@ return [
     'stripe_secret_key'      => '',
     'stripe_publishable_key' => '',
     'stripe_webhook_secret'  => '',
+
+    // GoPay (provider code gopay). Notifications need no secret: each one is verified by an
+    // authenticated payment inquiry. Env PAY_GOPAY_* overrides these values.
+    'gopay_goid'          => '',
+    'gopay_client_id'     => '',
+    'gopay_client_secret' => '',
+    'gopay_env'           => 'sandbox', // 'production' uses gate.gopay.cz
+
+    // Comgate (provider code comgate). Set the push notification URL in the Comgate client portal to
+    // <app_url>/api.php?action=webhook_payment&provider=comgate; every push is checked against the
+    // merchant/secret and confirmed by the status API. Env PAY_COMGATE_* overrides these values.
+    'comgate_merchant' => '',
+    'comgate_secret'   => '',
+    'comgate_test'     => true, // false creates real (production) payments
+
+    // ThePay (provider code thepay). Allow the shop server's IP in the ThePay administration
+    // (Implementation). Notifications need no secret: each one is confirmed by the signed payment
+    // detail call. Env PAY_THEPAY_* overrides these values.
+    'thepay_merchant_id' => '',
+    'thepay_project_id'  => '',
+    'thepay_password'    => '',
+    'thepay_env'         => 'demo', // 'production' uses api.thepay.cz / gate.thepay.cz
 
     // Digital files are stored below this directory; digital_assets.storage_path
     // contains only a relative path such as ebooks/manual.pdf.

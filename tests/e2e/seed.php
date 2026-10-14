@@ -18,6 +18,10 @@ if ((int)$db->query('SELECT COUNT(*) FROM products')->fetchColumn() === 0) {
 }
 $warehouseId = (int)$db->query('SELECT id FROM warehouses WHERE is_default = 1 ORDER BY id LIMIT 1')->fetchColumn();
 if ($warehouseId <= 0) throw new RuntimeException('Disposable E2E database has no default warehouse');
+// The A14 product-page checks below use the oldest product in every browser project; cli/seed.php
+// stock is rand(0, 500), so a low draw sold it out mid-run and its quantity box disappeared.
+$oldestProductId = (int)$db->query("SELECT id FROM products WHERE status='active' ORDER BY id LIMIT 1")->fetchColumn();
+$db->prepare('UPDATE products SET stock = 500 WHERE id = ?')->execute([$oldestProductId]);
 $stockInsert = $db->prepare(Db::insertIgnore() . ' INTO warehouse_stock (warehouse_id, sku, qty, reserved) VALUES (?, ?, ?, 0)');
 foreach ($db->query("SELECT sku, stock FROM products WHERE status='active'")->fetchAll(PDO::FETCH_ASSOC) as $product) {
     $stockInsert->execute([$warehouseId, (string)$product['sku'], max(0, (int)$product['stock'])]);
@@ -47,6 +51,8 @@ $adminUsername = 'g12-operator';
 $adminPassword = 'G12-admin-password-2026';
 $adminId = AdminIdentity::create($adminUsername, $adminPassword, 'owner', true);
 AdminIdentity::grantStore($adminId, 'default', ['*']);
+// A second granted store makes the admin store switcher render (admin-store-switcher.spec.js).
+AdminIdentity::grantStore($adminId, 'cz', ['*']);
 $enrollment = AdminIdentity::enrollTotp($adminId);
 AdminIdentity::setStatus($adminId, 'active');
 
@@ -110,7 +116,25 @@ if (!$rmaOrderItem) throw new RuntimeException('RMA fixture order has no item');
 [$rmaCreated, $rmaId, $rmaError] = Rma::create($rmaOrderId, null, 'G12 partial browser return', [(int)$rmaOrderItem['id'] => 1]);
 if (!$rmaCreated || !$rmaId) throw new RuntimeException('Cannot create E2E RMA: ' . (string)$rmaError);
 
+// A14.1: the oldest product (not on the home page) gets two 1920px photos for the responsive product-page check.
+$wideProduct = $db->query("SELECT id, slug, name, category_id FROM products WHERE status='active' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+if (!$wideProduct) throw new RuntimeException('Disposable E2E catalog has no active product');
+// A14.2: the first photo carries alt:"" as feeds do — the storefront must still name it.
+$db->prepare('UPDATE products SET images = ? WHERE id = ?')
+    ->execute([json_encode([['url' => '/assets/img/slider1.jpg', 'alt' => ''], '/assets/img/slider2.jpg']), (int)$wideProduct['id']]);
+$a11yCategory = $db->prepare('SELECT slug FROM categories WHERE id = ?');
+$a11yCategory->execute([(int)$wideProduct['category_id']]);
+$a11yCategorySlug = (string)$a11yCategory->fetchColumn();
+if ($a11yCategorySlug === '') throw new RuntimeException('Disposable E2E product has no category');
+$a11ySearchTerm = (string)(preg_split('~\s+~u', trim((string)$wideProduct['name']))[0] ?? '');
+
 $state = [
+    // product.php directly: the e2e server is `php -S` without the .htaccess /product/<slug> rewrite.
+    'responsive' => ['product_path' => '/product.php?slug=' . rawurlencode((string)$wideProduct['slug'])],
+    'a11y' => [
+        'category_path' => '/?page=category&slug=' . rawurlencode($a11yCategorySlug),
+        'search_path' => '/?page=search&q=' . rawurlencode($a11ySearchTerm),
+    ],
     'customer' => ['id' => (int)$customerId, 'email' => $customerEmail, 'password' => $customerPassword],
     'admin' => ['id' => $adminId, 'username' => $adminUsername, 'password' => $adminPassword, 'secret' => $enrollment['secret']],
     'fulfillment' => ['order_id' => $fulfillmentOrderId],
