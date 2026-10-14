@@ -13,11 +13,8 @@ test.beforeEach(() => {
   execFileSync('php', ['tests/e2e/reset-rate-limits.php'], { cwd: process.cwd(), encoding: 'utf8' });
 });
 
-test('HTML card checkout opens a real Stripe test-mode Checkout session', async ({ page }) => {
+test('HTML card checkout opens a real Stripe test-mode Checkout session', async ({ page, cspViolations }, testInfo) => {
   test.skip(!state.stripe_test, 'Set E2E_STRIPE_TEST_SECRET_KEY=sk_test_... or rk_test_... before tests/e2e/prepare.php and seed.php');
-  const violations = [];
-  page.on('console', (message) => { if (/content security policy|form-action/i.test(message.text())) violations.push(message.text()); });
-
   await page.goto('/');
   const rejectConsent = page.locator('#cc-reject');
   if (await rejectConsent.isVisible()) await rejectConsent.click();
@@ -36,8 +33,16 @@ test('HTML card checkout opens a real Stripe test-mode Checkout session', async 
     page.waitForURL(url => url.origin === STRIPE, { timeout: 30_000 }),
     page.locator('form.checkout-form button[type="submit"]').click(),
   ]);
-  expect(new URL(page.url()).pathname).toMatch(/^\/c\/pay\/cs_test_/);
+  // Every engine, iPhone Safari (WebKit) above all — the client that could not pay in 1.9.0: the browser
+  // landed on a real test-mode session and the shop's own CSP blocked nothing on the way.
+  expect(page.url()).toMatch(/^https:\/\/checkout\.stripe\.com\/c\/pay\/cs_test_/);
+  expect(cspViolations, 'Content-Security-Policy violations on shop documents').toEqual([]);
+  if (testInfo.project.name === 'webkit-iphone') {
+    // Playwright's Linux WebKit build trips over Stripe's own CSP and Stripe shows "Something went wrong";
+    // that page is Stripe's, not the shop's, so rendering is asserted in Chromium and Firefox only.
+    testInfo.annotations.push({ type: 'stripe-render-not-asserted', description: 'Stripe hosted page does not render in Playwright WebKit (Stripe CSP); redirect + shop CSP asserted above' });
+    return;
+  }
   // Stripe rendered its hosted page (amount and a pay button), not an error page.
   await expect(page.locator('body')).toContainText(/€|EUR/, { timeout: 30_000 });
-  expect(violations).toEqual([]);
 });

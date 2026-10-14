@@ -112,7 +112,8 @@ jobs:
           CI: '1'
           E2E_STATE_PATH: /tmp/barebones-e2e-stripe-state.json
           BBE_ADMIN_IDENTITY_KEY: RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU=
-        run: npx playwright test stripe-test.spec.js commerce.spec.js --grep "Stripe|card checkout|online payment|double click"
+        # csp-guard.spec.js proves the CSP guard itself still catches the 1.9.0 form-action drop.
+        run: npx playwright test stripe-test.spec.js csp-guard.spec.js commerce.spec.js --grep "Stripe|card checkout|online payment|double click"
 
       - name: Upload browser evidence on failure
         if: failure()
@@ -123,4 +124,4 @@ jobs:
             playwright-report/
             test-results/
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 3
