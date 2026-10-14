@@ -39,11 +39,12 @@ $config['mock_webhook_secret'] = (string)(getenv('E2E_MOCK_WEBHOOK_SECRET') ?: '
 $config['mock_result'] = 'success';
 // Card payments leave the shop origin like Stripe Checkout (tests/e2e/mock-gateway.php).
 $config['mock_checkout_url'] = rtrim((string)(getenv('E2E_GATEWAY_URL') ?: 'http://127.0.0.1:8099'), '/') . '/checkout';
-// Optional real Stripe Checkout in TEST mode (tests/e2e/stripe-test.spec.js). Never a live key.
+// Optional real Stripe Checkout in TEST mode (tests/e2e/stripe-test.spec.js). Accepts a test
+// secret key (sk_test_) or a restricted test key (rk_test_); never a live key (sk_live_/rk_live_).
 $stripeTestKey = (string)(getenv('E2E_STRIPE_TEST_SECRET_KEY') ?: '');
 if ($stripeTestKey !== '') {
-    if (!str_starts_with($stripeTestKey, 'sk_test_')) {
-        throw new RuntimeException('E2E_STRIPE_TEST_SECRET_KEY must be a Stripe test-mode key (sk_test_...)');
+    if (!str_starts_with($stripeTestKey, 'sk_test_') && !str_starts_with($stripeTestKey, 'rk_test_')) {
+        throw new RuntimeException('E2E_STRIPE_TEST_SECRET_KEY must be a Stripe test-mode key (sk_test_... or restricted rk_test_...)');
     }
     $config['stripe_secret_key'] = $stripeTestKey;
 }

@@ -2,7 +2,8 @@
 // Layer 3 of the checkout critical path (P0 2026-10-13): the real Stripe Checkout in TEST mode.
 // The mock gateway proves the browser may leave the shop; this proves the real adapter creates a
 // real session and the customer's browser lands on checkout.stripe.com. Runs only with
-// E2E_STRIPE_TEST_SECRET_KEY=sk_test_... (prepare.php + seed.php add the "card_stripe_test" method).
+// E2E_STRIPE_TEST_SECRET_KEY=sk_test_... or a restricted rk_test_... (prepare.php + seed.php add the
+// "card_stripe_test" method). A restricted key needs write access to Checkout Sessions.
 const { execFileSync } = require('node:child_process');
 const { test, expect, state } = require('./support');
 
@@ -13,7 +14,7 @@ test.beforeEach(() => {
 });
 
 test('HTML card checkout opens a real Stripe test-mode Checkout session', async ({ page }) => {
-  test.skip(!state.stripe_test, 'Set E2E_STRIPE_TEST_SECRET_KEY=sk_test_... before tests/e2e/prepare.php and seed.php');
+  test.skip(!state.stripe_test, 'Set E2E_STRIPE_TEST_SECRET_KEY=sk_test_... or rk_test_... before tests/e2e/prepare.php and seed.php');
   const violations = [];
   page.on('console', (message) => { if (/content security policy|form-action/i.test(message.text())) violations.push(message.text()); });
 

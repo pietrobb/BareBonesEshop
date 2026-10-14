@@ -20,7 +20,7 @@ A release that touches the checkout critical path — `src/Security.php` (CSP/he
 |---|---|---|
 | 1. Contract | every hosted-checkout adapter declares its redirect origins and the CSP `form-action` allows each; gateway `success_url`/`cancel_url` are real pages; resubmit continues the pending payment | `cli/tests/scenarios/CheckoutPaymentRedirectRegression.php` |
 | 2. Browser | a real click on the order button follows the redirect to a gateway on **another origin** in Chromium, WebKit (iPhone) and Firefox and fails on any CSP violation; the same specs fail on the 1.9.0 code | `tests/e2e/commerce.spec.js`, CI job *Browser, axe & Lighthouse* |
-| 3. Real gateway | a real Stripe **test-mode** Checkout session opened by the browser on `checkout.stripe.com` | `tests/e2e/stripe-test.spec.js`, workflow *Payment gateway (Stripe test mode)* (nightly and on critical-path changes; needs secret `STRIPE_TEST_SECRET_KEY`) |
+| 3. Real gateway | a real Stripe **test-mode** Checkout session opened by the browser on `checkout.stripe.com` | `tests/e2e/stripe-test.spec.js`, workflow *Payment gateway (Stripe test mode)* (nightly and on critical-path changes; needs secret `STRIPE_TEST_SECRET_KEY` with a test-mode key: `sk_test_…` or a restricted `rk_test_…` with write access to Checkout Sessions (`POST /v1/checkout/sessions`); live keys are refused) |
 | 4. Production | `php cli/smoke-checkout.php` right after deploy (synthetic order, closed immediately), CSP violation reports, and the payment funnel alarm in `php cli/monitor.php` | `docs/OPERATIONS_RUNBOOK.md` → *Post-deploy checkout smoke* |
 
 A missing layer is a release blocker, not an observation. Record the smoke output and the first `monitor.php` snapshot after deploy with the release evidence.

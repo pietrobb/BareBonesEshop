@@ -2,7 +2,8 @@ name: Payment gateway (Stripe test mode)
 
 # Checkout critical path, layer 3 (P0 2026-10-13): a real Stripe test-mode Checkout session
 # opened by a real browser click. Runs nightly and whenever a file on the checkout critical
-# path changes. Needs the repository secret STRIPE_TEST_SECRET_KEY (sk_test_...); without it
+# path changes. Needs the repository secret STRIPE_TEST_SECRET_KEY: a test-mode key, either
+# sk_test_... or a restricted rk_test_... (live keys are refused by tests/e2e/prepare.php); without it
 # the spec reports a skip and this job fails, because a critical-path change must not ship unproven.
 on:
   schedule:
@@ -67,7 +68,7 @@ jobs:
       - name: Require the Stripe test key
         run: |
           if [ -z "$E2E_STRIPE_TEST_SECRET_KEY" ]; then
-            echo "::error::Repository secret STRIPE_TEST_SECRET_KEY (sk_test_...) is missing; the real gateway path is unproven."
+            echo "::error::Repository secret STRIPE_TEST_SECRET_KEY (sk_test_... or rk_test_...) is missing; the real gateway path is unproven."
             exit 1
           fi
 
