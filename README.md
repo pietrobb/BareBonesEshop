@@ -438,4 +438,4 @@ production path. Backups, migrations, and CLI tools live under `cli/`.
 
 `.github/workflows/ci.yml` runs on every push and pull request: a `php -l`
 syntax check across all sources plus the full `cli/test.php` suite, on a
-PHP **8.1 / 8.2 / 8.3** matrix.
+PHP **8.1 / 8.2 / 8.3 / 8.4** matrix.
