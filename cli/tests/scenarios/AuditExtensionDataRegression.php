@@ -33,7 +33,7 @@ PHP),
 return new class {
     public function up(PDO $db, bool $isSqlite): void {
         $id = $isSqlite ? 'INTEGER PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTO_INCREMENT';
-        $db->exec("CREATE TABLE IF NOT EXISTS ext_acme_shop_notes ({$id}, product_id INTEGER NOT NULL, note TEXT NOT NULL)");
+        $db->exec("CREATE TABLE IF NOT EXISTS ext_acme_shop_notes (id {$id}, product_id INTEGER NOT NULL, note TEXT NOT NULL)");
     }
 };
 PHP,
