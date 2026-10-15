@@ -142,7 +142,7 @@ $forbiddenDependencies = [
     'src/Entrypoints/Admin/Orders.php' => ['Products::', 'ContentService::', 'ApiHandlers'],
     'src/Entrypoints/Admin/Recovery.php' => ['Products::', 'CheckoutService::', 'ApiHandlers', 'Db::get('],
     'src/Entrypoints/Storefront/CatalogPages.php' => ['CheckoutService::', 'CheckoutSession::', 'Orders::'],
-    'src/Entrypoints/Storefront/CheckoutPages.php' => ['Products::', 'Categories::', 'TecDoc::', 'ContentService::'],
+    'src/Entrypoints/Storefront/CheckoutPages.php' => ['Products::', 'Categories::', 'ContentService::'],
     'src/Entrypoints/Storefront/Layout.php' => ['CheckoutService::', 'CheckoutSession::', 'Orders::create('],
 ];
 foreach ($architectureBudgets as $relative => $budget) {

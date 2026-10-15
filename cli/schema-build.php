@@ -43,7 +43,7 @@ if ($fresh) {
         'abandoned_carts', 'email_suppressions', 'coupon_uses', 'processed_events', 'email_log', 'payment_transactions', 'audit_log',
         'merchant_notifications', 'order_consents', 'checkout_sessions', 'digital_entitlements', 'digital_assets',
         'order_items', 'orders',
-        'product_vehicles', 'product_oe_numbers', 'product_specifications',
+        'product_specifications',
         'category_attributes', 'attribute_options', 'attribute_definitions',
         'pages', 'feeds', 'stock_alert_state', 'stock_alert_digests', 'csp_violations', 'warehouse_stock', 'warehouses',
         'slug_registry', 'variants', 'product_attrs', 'products',
@@ -51,7 +51,6 @@ if ($fresh) {
     ];
     if ($isSqlite) {
         $tables[] = 'products_fts';
-        $tables[] = 'oe_fts';
     }
     foreach ($tables as $t) {
         $db->exec("DROP TABLE IF EXISTS {$t}");

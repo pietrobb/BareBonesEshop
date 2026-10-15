@@ -19,7 +19,6 @@
 </article>
 {{#if product.description_html}}<section class="product-description"><h2>{{t.description}}</h2>{{{product.description_html}}}</section>{{/if}}
 {{#if product.attributes}}<section class="product-attributes"><h2>{{t.specs}}</h2><table class="spec-table"><tbody>{{#each product.attributes}}<tr><th scope="row">{{label}}</th><td>{{value}}</td></tr>{{/each}}</tbody></table></section>{{/if}}
-{{#if extensions.automotive.product}}<section class="product-automotive"><h2>{{t.compatible_with}}</h2>{{#if extensions.automotive.product.oe_numbers}}<h3>{{t.oe_numbers}}</h3><ul>{{#each extensions.automotive.product.oe_numbers}}<li><a href="{{url}}">{{brand}} {{number}}</a></li>{{/each}}</ul>{{/if}}{{#if extensions.automotive.product.vehicles}}<h3>{{t.vehicles_tab}}</h3><table><tbody>{{#each extensions.automotive.product.vehicles}}<tr><td>{{manufacturer}} {{model}}</td><td>{{type}}</td></tr>{{/each}}</tbody></table>{{/if}}</section>{{/if}}
 {{#if extensions.reviews.product}}<section class="reviews" id="reviews">
   <h2>{{extensions.reviews.product.title}}</h2>
   {{#if extensions.reviews.product.count}}<p><strong>{{extensions.reviews.product.average}}</strong> / 5 ({{extensions.reviews.product.count}})</p>{{else}}<p>{{extensions.reviews.product.empty_label}}</p>{{/if}}

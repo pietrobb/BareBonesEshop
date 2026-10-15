@@ -301,7 +301,7 @@ final class StorefrontViewModel
         $rows = Products::attrs($productId);
         $specifications = [];
         foreach (array_unique([I18n::locale(), StoreContext::current()->defaultLocale(), 'en', 'sk']) as $locale) {
-            $specifications = TecDoc::specifications($productId, $locale);
+            $specifications = Products::specifications($productId, $locale);
             if ($specifications !== []) break;
         }
         foreach ($specifications as $specification) {

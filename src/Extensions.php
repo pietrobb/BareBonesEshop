@@ -1,8 +1,10 @@
 <?php
 /**
  * Extensions: shop-specific code in extensions/<code>/ that plugs into the core registries —
- * providers (payment, shipping, mail, ...), domain event listeners and storefront view-model
- * data — without editing core files. Only codes listed in config 'extensions' are loaded.
+ * providers (payment, shipping, mail, ...), domain event listeners, storefront view-model data,
+ * storefront pages, JSON API actions and its own database migrations (extensions/<code>/migrations,
+ * applied by `php cli/migrate.php`) — without editing core files. Only codes listed in config
+ * 'extensions' are loaded.
  * The updater never writes to extensions/ and the drift guard does not hash it.
  *
  * extensions/<code>/extension.php returns ['code' => '<code>', 'name' => ..., 'version' => ...,
@@ -19,6 +21,9 @@ final class Extensions
     private static array $providers = [];
     private static array $listeners = [];
     private static array $storefront = [];
+    private static array $pages = [];
+    private static array $api = [];
+    private static array $roots = [];
     private static array $errors = [];
     private static array $autoloaders = [];
 
@@ -77,6 +82,49 @@ final class Extensions
     }
 
     /**
+     * Render the extension page for a storefront ?page= value, or null when no extension owns it.
+     * @return array{title:string, content:string}|null
+     */
+    public static function page(string $route): ?array
+    {
+        self::boot();
+        if (!isset(self::$pages[$route])) return null;
+        $result = (self::$pages[$route])($_GET);
+        if (!is_array($result) || !is_string($result['title'] ?? null) || !is_string($result['content'] ?? null)) {
+            throw new UnexpectedValueException("extension page {$route} must return ['title' => string, 'content' => string]");
+        }
+        return ['title' => $result['title'], 'content' => $result['content']];
+    }
+
+    /** Run the extension JSON API action for ?action=, or null when no extension owns it. */
+    public static function api(string $action): ?array
+    {
+        self::boot();
+        if (!isset(self::$api[$action])) return null;
+        $result = (self::$api[$action])($_GET);
+        if (!is_array($result)) throw new UnexpectedValueException("extension API action {$action} must return an array");
+        return $result;
+    }
+
+    /**
+     * One migration runner per loaded extension that ships a migrations/ directory. Files use the
+     * core format (<TIMESTAMP>_<name>.php returning an object with up(PDO, bool)); they are recorded
+     * as "<code>/<file>" in extension_migrations and are checksummed like core migrations.
+     * @return array<string,Migrator> extension code => runner, in config order
+     */
+    public static function migrators(?PDO $db = null, ?string $lockFile = null): array
+    {
+        self::boot();
+        $migrators = [];
+        foreach (self::$roots as $code => $root) {
+            $directory = $root . '/migrations';
+            if (!is_dir($directory) || is_link($directory)) continue;
+            $migrators[$code] = new Migrator($db, $directory, $lockFile, 'extension_migrations', $code . '/');
+        }
+        return $migrators;
+    }
+
+    /**
      * Run the listeners matching one claimed outbox event. Each listener is its own delivery
      * endpoint (ext-<code>-<name>) in webhook_deliveries, so a retry skips the ones that succeeded.
      * @return array{matched:int, failures:list<string>}
@@ -108,7 +156,7 @@ final class Extensions
     {
         foreach (self::$autoloaders as $autoloader) spl_autoload_unregister($autoloader);
         self::$booted = false;
-        self::$loaded = self::$providers = self::$listeners = self::$storefront = self::$errors = self::$autoloaders = [];
+        self::$loaded = self::$providers = self::$listeners = self::$storefront = self::$pages = self::$api = self::$roots = self::$errors = self::$autoloaders = [];
     }
 
     private static function load(string $code, string $directory): void
@@ -152,6 +200,9 @@ final class Extensions
         }
         self::$listeners += $registrations['listeners'];
         array_push(self::$storefront, ...$registrations['storefront']);
+        self::$pages += $registrations['pages'];
+        self::$api += $registrations['api'];
+        self::$roots[$code] = $root;
         self::$loaded[$code] = [
             'code' => $code,
             'name' => (string)($manifest['name'] ?? $code),

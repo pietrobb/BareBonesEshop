@@ -2744,8 +2744,8 @@ warmups. The query budget is more authoritative than the portability of local wa
 
 | Measured path | Before p95 / queries | After p95 / queries | Decision |
 |---|---:|---:|---|
-| TecDoc facets without a filter | 364.124 ms / 5 | 24.106 ms / 1 | Criteria are aggregated with one batch query. |
-| TecDoc facets, 1 active filter | 372.684 ms / 5 | 56.891 ms / 2 | One shared subset + one self-exclusion query. |
+| Specification facets without a filter | 364.124 ms / 5 | 24.106 ms / 1 | Criteria are aggregated with one batch query. |
+| Specification facets, 1 active filter | 372.684 ms / 5 | 56.891 ms / 2 | One shared subset + one self-exclusion query. |
 | Category tree, 2,020 nodes | 91.556 ms / 1 | 4.733 ms / 1 | An O(n) parent index replaced the repeated scan of all rows. |
 | Related, a category with 5,000 products | 1.032 ms / 2 | 1.059 ms / 2 | `RANDOM/RAND` was not changed: the measurement did not confirm a hotspot. |
 

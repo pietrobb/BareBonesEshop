@@ -263,7 +263,6 @@ return array_replace(require __DIR__ . '/en.php', [
     'variant_invalid' => 'La variante seleccionada no es válida.', 'product_invalid' => 'El producto no está disponible.', 'product_unavailable' => 'Esta selección no está disponible.',
     'shipping_loading' => 'Cargando opciones de envío…', 'shipping_unavailable' => 'El envío no está disponible.', 'select_shipping_first' => 'Selecciona primero el envío.',
     'payment_loading' => 'Cargando métodos de pago…', 'payment_unavailable' => 'El pago no está disponible.',
-    'vehicle_manufacturer_model' => 'Fabricante / Modelo', 'vehicle_engine_type' => 'Tipo de motor',
     'admin.dashboard.low_stock_alert' => 'Alerta de stock bajo',
     'admin.dashboard.stock_threshold' => 'Umbral bajo / crítico',
     'admin.products.filter_low_stock' => 'Stock bajo',

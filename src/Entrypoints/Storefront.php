@@ -1,7 +1,7 @@
 <?php
 /**
  * BareBones Shop — Storefront
- * Generic catalog with conditional TecDoc auto-parts features.
+ * Generic catalog; extensions can add their own pages.
  */
 require_once dirname(__DIR__, 2) . '/src/autoload.php';
 
@@ -41,10 +41,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['cart_action'])) {
 if (isset($_GET['cart_recover'])) StorefrontCartAction::recover((string)$_GET['cart_recover']);
 $cartCount = StorefrontCartAction::count();
 
-// Detect catalog type — conditionally enable TecDoc features
-$_catalog = json_decode(file_get_contents(dirname(__DIR__, 2) . '/catalog.json'), true);
-$hasTecDoc = isset($_catalog['product_types']['auto_part']);
-
 // Route: support both ?page=X and URL-rewritten ?category=slug
 $page = Security::clean($_GET['page'] ?? '');
 if (!$page && !empty($_GET['category'])) $page = 'category';
@@ -81,17 +77,6 @@ switch ($page) {
         $title = Template::pageTitle((string)($GLOBALS['storefront_view_model']['page']['title'] ?? $product['name']));
         break;
 
-    case 'vehicle':
-        if (!$hasTecDoc) { $content = Template::render('storefront/status-message', ['message' => $t('product_unavailable')]); break; }
-        $ktype = Security::int($_GET['ktype'] ?? 0);
-        $catId = !empty($_GET['cat']) ? Security::int($_GET['cat']) : null;
-        $pg = max(1, Security::int($_GET['pg'] ?? 1));
-        $result = TecDoc::partsByKtype($ktype, $pg, 24, $catId);
-        $cats = TecDoc::categoriesForKtype($ktype);
-        $title = Template::pageTitle($t('vehicle_parts'));
-        $content = renderVehicle($ktype, $result, $cats, $catId);
-        break;
-
     case 'search':
         $q = Security::clean($_GET['q'] ?? '');
         $pg = max(1, Security::int($_GET['pg'] ?? 1));
@@ -99,15 +84,6 @@ switch ($page) {
         $result = Adapters::search()->search($q, ['page' => $pg, 'per_page' => 24] + $searchFilters['opts']);
         $title = Template::pageTitle($t('search') . ': ' . $q);
         $content = renderSearch($q, $result, $searchFilters);
-        break;
-
-    case 'oe':
-        if (!$hasTecDoc) { $content = Template::render('storefront/status-message', ['message' => $t('product_unavailable')]); break; }
-        $q = Security::clean($_GET['q'] ?? '');
-        $pg = max(1, Security::int($_GET['pg'] ?? 1));
-        $result = TecDoc::searchByOE($q, $pg, 24);
-        $title = Template::pageTitle('OE: ' . $q);
-        $content = renderOE($q, $result);
         break;
 
     case 'privacy':
@@ -145,8 +121,14 @@ switch ($page) {
         $content = renderOrderDone($ordNum);
         break;
 
-    default: // home
-        $content = renderHome();
+    default: // a page registered by an extension ("<code>" or "<code>.<name>"), otherwise home
+        $extensionPage = Extensions::page($page);
+        if ($extensionPage === null) {
+            $content = renderHome();
+            break;
+        }
+        $title = Template::pageTitle($extensionPage['title']);
+        $content = $extensionPage['content'];
         break;
 }
 

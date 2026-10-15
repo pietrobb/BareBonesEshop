@@ -7,7 +7,8 @@
  * Files: migrations/<TIMESTAMP>_<snake_name>.php — each returns an anonymous
  * class with: public function up(PDO $db, bool $isSqlite): void.
  *
- * State: schema_migrations(name UNIQUE, checksum, applied_at, duration_ms).
+ * State: schema_migrations(name UNIQUE, checksum, applied_at, duration_ms). Extension migrations
+ * (extensions/<code>/migrations) use the same runner with their own table and a "<code>/" name prefix.
  *
  * Concurrency: file lock on db/.migrations.lock (flock, 10s timeout).
  *
@@ -108,10 +109,15 @@ class Migrator {
     private bool   $isSqlite;
     private string $migrationsDir;
     private string $lockFile;
+    private string $table;
+    private string $namePrefix;
     /** @var resource|null */
     private $lockHandle = null;
 
-    public function __construct(?PDO $db = null, ?string $migrationsDir = null, ?string $lockFile = null) {
+    public function __construct(?PDO $db = null, ?string $migrationsDir = null, ?string $lockFile = null, string $table = 'schema_migrations', string $namePrefix = '') {
+        if (!preg_match('/^[a-z_]+$/', $table)) throw new \InvalidArgumentException('invalid migrations table name');
+        $this->table         = $table;
+        $this->namePrefix    = $namePrefix;
         $this->db            = $db ?? Db::get();
         $this->isSqlite      = $this->db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite';
         $this->migrationsDir = $migrationsDir ?? (dirname(__DIR__) . '/migrations');
@@ -156,7 +162,7 @@ class Migrator {
                     $migration->up($this->db, $this->isSqlite);
                     $duration = (int)round((microtime(true) - $start) * 1000);
                     $stmt = $this->db->prepare(
-                        "INSERT INTO schema_migrations (name, checksum, duration_ms) VALUES (?, ?, ?)"
+                        "INSERT INTO {$this->table} (name, checksum, duration_ms) VALUES (?, ?, ?)"
                     );
                     $stmt->execute([$name, $checksum, $duration]);
                     if ($this->db->inTransaction()) {
@@ -192,7 +198,7 @@ class Migrator {
             $this->ensureMigrationsTable();
             $marked = [];
             foreach ($this->allFiles() as $name => $path) {
-                $exists = $this->db->prepare("SELECT 1 FROM schema_migrations WHERE name = ?");
+                $exists = $this->db->prepare("SELECT 1 FROM {$this->table} WHERE name = ?");
                 $exists->execute([$name]);
                 if ($exists->fetchColumn()) {
                     $logger("  [skip] {$name} (already recorded)");
@@ -200,7 +206,7 @@ class Migrator {
                 }
                 $checksum = $this->fileChecksum($path);
                 $stmt = $this->db->prepare(
-                    "INSERT INTO schema_migrations (name, checksum, duration_ms) VALUES (?, ?, 0)"
+                    "INSERT INTO {$this->table} (name, checksum, duration_ms) VALUES (?, ?, 0)"
                 );
                 $stmt->execute([$name, $checksum]);
                 $marked[] = $name;
@@ -220,9 +226,9 @@ class Migrator {
      */
     public function status(): array {
         $this->ensureMigrationsTable();
-        $rows = $this->db->query(
-            "SELECT name, checksum, applied_at FROM schema_migrations ORDER BY name"
-        )->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $rows = $this->ownRows($this->db->query(
+            "SELECT name, checksum, applied_at FROM {$this->table} ORDER BY name"
+        )->fetchAll(PDO::FETCH_ASSOC) ?: []);
         $files = $this->allFiles();
 
         $applied = [];
@@ -297,7 +303,7 @@ PHP;
         $short   = MigrationSql::short($this->isSqlite);
         $date    = MigrationSql::datetime($this->isSqlite);
         $this->db->exec(
-            "CREATE TABLE IF NOT EXISTS schema_migrations (
+            "CREATE TABLE IF NOT EXISTS {$this->table} (
                 id          INTEGER PRIMARY KEY{$autoinc},
                 name        {$short} NOT NULL UNIQUE,
                 checksum    {$short} NOT NULL,
@@ -315,7 +321,7 @@ PHP;
         $files = glob($this->migrationsDir . '/*.php') ?: [];
         $out = [];
         foreach ($files as $f) {
-            $name = basename($f, '.php');
+            $name = $this->namePrefix . basename($f, '.php');
             $out[$name] = $f;
         }
         ksort($out);
@@ -324,7 +330,7 @@ PHP;
 
     /** @return array<string,string> name => path of files not yet applied */
     public function pendingFiles(): array {
-        $rows = $this->db->query("SELECT name FROM schema_migrations")->fetchAll(PDO::FETCH_COLUMN) ?: [];
+        $rows = $this->db->query("SELECT name FROM {$this->table}")->fetchAll(PDO::FETCH_COLUMN) ?: [];
         $applied = array_flip($rows);
         $out = [];
         foreach ($this->allFiles() as $name => $path) {
@@ -351,9 +357,9 @@ PHP;
      * which would silently desync the DB.
      */
     private function verifyChecksums(): void {
-        $rows = $this->db->query(
-            "SELECT name, checksum FROM schema_migrations"
-        )->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $rows = $this->ownRows($this->db->query(
+            "SELECT name, checksum FROM {$this->table}"
+        )->fetchAll(PDO::FETCH_ASSOC) ?: []);
         $files = $this->allFiles();
         foreach ($rows as $r) {
             $name = $r['name'];
@@ -367,6 +373,12 @@ PHP;
                 );
             }
         }
+    }
+
+    /** Rows of this runner only: an extension's runner shares its table with other extensions. */
+    private function ownRows(array $rows): array {
+        if ($this->namePrefix === '') return $rows;
+        return array_values(array_filter($rows, fn(array $row): bool => str_starts_with((string)$row['name'], $this->namePrefix)));
     }
 
     private function checksumMatches(string $name, string $recorded, string $actual): bool {

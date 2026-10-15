@@ -9,6 +9,8 @@ final class ExtensionApi
     private array $providers = [];
     private array $listeners = [];
     private array $storefront = [];
+    private array $pages = [];
+    private array $api = [];
 
     public function __construct(private string $code) {}
 
@@ -75,9 +77,41 @@ final class ExtensionApi
         $this->storefront[$context . ' ' . $namespace] = [$context, $namespace, $provider];
     }
 
+    /**
+     * Storefront page at /?page=<code>.<name>. $handler(array $query) returns ['title' => string,
+     * 'content' => string]; content is HTML placed inside the theme layout, so escape data through
+     * Template::process()/Template::render() like core pages do.
+     */
+    public function page(string $name, callable $handler): void
+    {
+        $this->pages[$this->route('page', $name)] = $handler;
+    }
+
+    /**
+     * JSON API action /api/?action=<code>.<name> (same session, locale and rate limit as core actions).
+     * $handler(array $query) returns the array that is sent as JSON.
+     */
+    public function api(string $name, callable $handler): void
+    {
+        $this->api[$this->route('api action', $name)] = $handler;
+    }
+
     /** @internal Extensions::boot() */
     public function registrations(): array
     {
-        return ['providers' => $this->providers, 'listeners' => $this->listeners, 'storefront' => array_values($this->storefront)];
+        return ['providers' => $this->providers, 'listeners' => $this->listeners, 'storefront' => array_values($this->storefront),
+            'pages' => $this->pages, 'api' => $this->api];
+    }
+
+    private function route(string $kind, string $name): string
+    {
+        if (!preg_match('/^[a-z][a-z0-9_-]{0,39}$/', $name)) {
+            throw new InvalidArgumentException("invalid {$kind} name \"{$name}\" (a-z, 0-9, \"_\" and \"-\", up to 40 characters)");
+        }
+        $route = $this->code . '.' . $name;
+        if (($kind === 'page' && isset($this->pages[$route])) || ($kind !== 'page' && isset($this->api[$route]))) {
+            throw new RuntimeException("{$kind} \"{$name}\" registered twice");
+        }
+        return $route;
     }
 }

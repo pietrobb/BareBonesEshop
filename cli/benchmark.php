@@ -645,8 +645,8 @@ $sku = (string)$product['sku'];
 $domain = [
     benchmarkMeasure('product_by_slug', fn() => Products::bySlug($slug), $iterations),
     benchmarkMeasure('category_listing_price_asc', fn() => Products::byCategory($categoryId, 1, 24, 'price_asc'), $iterations),
-    benchmarkMeasure('category_spec_filter_values', fn() => TecDoc::specFilterValues($categoryId, 'sk'), $iterations),
-    benchmarkMeasure('category_spec_filter_active', fn() => TecDoc::specFilterValues($categoryId, 'sk', ['Brand' => ['Brand 1']]), $iterations),
+    benchmarkMeasure('category_spec_filter_values', fn() => Products::specFilterValues($categoryId, 'sk'), $iterations),
+    benchmarkMeasure('category_spec_filter_active', fn() => Products::specFilterValues($categoryId, 'sk', ['Brand' => ['Brand 1']]), $iterations),
     benchmarkMeasure('category_tree_2020_nodes', fn() => Categories::tree(), $iterations),
     benchmarkMeasure('related_from_5000_products', fn() => Products::related($productId, 4), $iterations),
     benchmarkMeasure('search_selective_sku', fn() => Search::query($sku, 1, 24), $iterations),
