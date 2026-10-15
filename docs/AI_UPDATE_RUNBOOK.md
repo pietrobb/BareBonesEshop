@@ -32,7 +32,7 @@ php -r "exit(extension_loaded('sodium') ? 0 : 1);"
 Version 1.8.0 predates the updater, so it cannot install its own updater. Perform this bootstrap once:
 
 1. Confirm that the deployment is really v1.8.0. Do not infer the version from a directory name. Compare the deployed core against the immutable `v1.8.0` source and preserve all customer changes.
-2. Put the shop and all writers into maintenance mode.
+2. Stop all writers. The application has no built-in maintenance mode: block shop traffic at the web server or load balancer (static maintenance page or HTTP 503), then stop workers, cron, imports and webhooks.
 3. Make an independent filesystem and database backup using the deployment platform.
 4. From the trusted `v1.9.0` source, copy only these bootstrap files into the v1.8.0 deployment:
    - `cli/cli-only.php`
@@ -74,7 +74,7 @@ PACKAGE=/trusted/releases/update-X.Y.Z
 Then execute this state machine:
 
 1. **Observe** — record current application version, health, free disk space, active jobs, and database driver.
-2. **Quiesce** — enable maintenance mode and stop workers, cron, imports, and all other writers.
+2. **Quiesce** — the application has no built-in maintenance mode: block shop traffic at the web server or load balancer (static maintenance page or HTTP 503), then stop workers, cron, imports, and all other writers. Record the time: a later database rollback loses everything written after the update snapshot.
 3. **Prove readiness**:
 
 ```bash
@@ -204,6 +204,8 @@ php cli/update.php rollback --snapshot=YYYYmmddHHMMSS-abcdef123456
 ```
 
 Normal rollback refuses to overwrite post-update file changes. If it refuses, inspect and preserve those changes. `--force` is a last-resort operator decision, not an AI default.
+
+**Data loss:** for an update that ran migrations, rollback replaces the live database with the pre-update snapshot. Every order, payment, customer, stock movement and other write since the snapshot is permanently lost, so a rollback a day after the update deletes that day's orders. The command refuses with a warning showing the snapshot time and age. Only after the operator has exported or reconciled those records (orders, captured payments, shipments) may it be re-run with `--accept-data-loss`; this flag is an operator decision, never an AI default. If the update has been live with traffic, prefer a forward fix over a rollback.
 
 After rollback, rerun health and migration-status checks before restoring traffic.
 

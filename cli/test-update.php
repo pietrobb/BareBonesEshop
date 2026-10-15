@@ -328,7 +328,7 @@ try {
         $probeCheck->execute([$mysqlProbeDatabase]);
         assert_equals(0, (int)$probeCheck->fetchColumn(), 'Updater MySQL live: disposable probe database is removed after verification');
 
-        $mysqlUpdater->rollback($mysqlApplied['snapshot']);
+        $mysqlUpdater->rollback($mysqlApplied['snapshot'], false, true);
         $mysqlAfterRollback = new PDO($mysqlLiveDsn, $mysqlUser, $mysqlPassword, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
         assert_equals(0, (int)$mysqlAfterRollback->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'migration_added'")->fetchColumn(), 'Updater MySQL live: manual rollback removes migration schema changes');
         assert_equals(2, (int)$mysqlAfterRollback->query('SELECT COUNT(*) FROM stable_data')->fetchColumn(), 'Updater MySQL live: manual rollback restores pre-update data');

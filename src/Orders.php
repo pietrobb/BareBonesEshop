@@ -5,6 +5,14 @@
  */
 class Orders {
     /**
+     * Lowercased gateway getStatus() values meaning the payment can no longer be paid. Covers the states each adapter's
+     * webhook maps to payment.failed (Stripe, Comgate, GoPay TIMEOUTED, PayU REJECTED, ThePay error/preauth_*);
+     * anything else (created, waiting_for_payment, open, ...) may still be paid and keeps the reservation.
+     */
+    private const PROVIDER_FINAL_UNPAID = ['expired', 'cancelled', 'canceled', 'failed', 'timeouted', 'rejected', 'error',
+        'preauth_expired', 'preauth_cancelled'];
+
+    /**
      * Create order from cart with atomic stock reservation.
      * Returns order ID on success, throws on failure.
      */
@@ -426,12 +434,16 @@ class Orders {
     }
 
     /**
-     * Update order status
+     * Update order status; with $expectedFrom only while the order is still in that status.
+     * Returns whether the row changed.
      */
-    public static function updateStatus(int $orderId, string $status): void {
-        $now = Db::isSqlite() ? "datetime('now')" : 'NOW()';
-        $stmt = Db::get()->prepare("UPDATE orders SET status = :status, updated_at = {$now} WHERE id = :id AND store_id = :store");
-        $stmt->execute([':status' => $status, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
+    public static function updateStatus(int $orderId, string $status, ?string $expectedFrom = null): bool {
+        $params = [':status' => $status, ':id' => $orderId, ':store' => StoreContext::current()->id()];
+        if ($expectedFrom !== null) $params[':from'] = $expectedFrom;
+        $stmt = Db::get()->prepare("UPDATE orders SET status = :status, updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store"
+            . ($expectedFrom !== null ? ' AND status = :from' : ''));
+        $stmt->execute($params);
+        return $stmt->rowCount() === 1;
     }
 
     /**
@@ -538,7 +550,7 @@ class Orders {
     }
 
     /**
-     * Cancel genuinely expired, unpaid checkouts and release stock once.
+     * Cancel genuinely expired, unpaid checkouts (payment pending or declined) and release stock once.
      * Online: eligible after $olderThanSeconds and, when a provider session exists,
      * only after the provider confirms a terminal unpaid state (errors fail closed).
      * Offline: eligible only for payment service types listed in $offlineExpirySeconds
@@ -559,7 +571,7 @@ class Orders {
         $db = Db::get();
         $storeId = StoreContext::current()->id();
         $scan = $db->prepare("SELECT * FROM orders
-            WHERE store_id = :store AND status = 'pending' AND payment_status = 'pending'
+            WHERE store_id = :store AND status = 'pending' AND payment_status IN ('pending', 'failed')
               AND created_at <= {$cutoff($minAge)} AND id > :after
             ORDER BY id ASC LIMIT 100");
 
@@ -596,7 +608,7 @@ class Orders {
                         error_log("Pending order expiry skipped for #{$order['id']}: " . $e->getMessage());
                         continue;
                     }
-                    if (!in_array($providerStatus, ['expired', 'cancelled', 'canceled', 'failed'], true)) continue;
+                    if (!in_array($providerStatus, self::PROVIDER_FINAL_UNPAID, true)) continue;
                 }
                 if (self::expireClaimed($order, $cutoff($ttl), $online)) $expired++;
                 if ($expired >= $limit) break 2;
@@ -614,7 +626,7 @@ class Orders {
         try {
             $claim = $db->prepare("UPDATE orders
                 SET status = 'cancelled', payment_status = 'cancelled', updated_at = " . Db::now() . "
-                WHERE id = :id AND store_id = :store AND status = 'pending' AND payment_status = 'pending'
+                WHERE id = :id AND store_id = :store AND status = 'pending' AND payment_status IN ('pending', 'failed')
                   AND created_at <= {$cutoffSql}");
             $claim->execute([':id' => $orderId, ':store' => StoreContext::current()->id()]);
             if ($claim->rowCount() !== 1) {

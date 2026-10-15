@@ -85,31 +85,13 @@ class FeedImport {
 
                 if ($importMode === 'price_stock') {
                     // Only update price + stock for existing products — never create or overwrite content
-                    $existing = $db->prepare("SELECT id, price FROM products WHERE sku = :sku");
-                    $existing->execute([':sku' => $mapped['sku']]);
-                    $row = $existing->fetch();
-                    if ($row) {
-                        $updates = [];
-                        $params = [':sku' => $mapped['sku']];
-                        if (isset($mapped['price'])) {
-                            $priceCents = Import::parsePriceToCents($mapped['price']);
-                            $updates[] = 'price = :price';
-                            $params[':price'] = $priceCents;
-                            // Set old price as compare_price if price dropped
-                            if ($priceCents < (int)$row['price'] && (int)$row['price'] > 0) {
-                                $updates[] = 'compare_price = :cprice';
-                                $params[':cprice'] = (int)$row['price'];
-                            }
-                        }
-                        if (!empty($updates)) {
-                            $updates[] = "updated_at = " . (Db::isSqlite() ? "datetime('now')" : "NOW()");
-                            $db->prepare("UPDATE products SET " . implode(', ', $updates) . " WHERE sku = :sku")
-                               ->execute($params);
-                        }
-                        $result['imported']++;
-                    } else {
+                    if (!self::updatePriceOnly($mapped, $db)) {
+                        // Unknown here (or another catalog's SKU): no stock for this warehouse either.
+                        $db->exec('RELEASE SAVEPOINT row_import');
                         $result['skipped']++;
+                        continue;
                     }
+                    $result['imported']++;
                 } else {
                     // Full upsert — create or update product with all fields
                     Import::importProduct($mapped, $db);
@@ -192,6 +174,32 @@ class FeedImport {
     }
 
     // ─── Download ────────────────────────────────────────────
+
+    /** price_stock mode: update the price of an existing product in the current catalog; false when the SKU is not there. */
+    private static function updatePriceOnly(array $mapped, PDO $db): bool {
+        $params = [':sku' => $mapped['sku'], ':catalog' => StoreContext::current()->catalogId()];
+        $existing = $db->prepare("SELECT id, price FROM products WHERE sku = :sku AND store_id = :catalog");
+        $existing->execute($params);
+        $row = $existing->fetch();
+        if (!$row) return false;
+        $updates = [];
+        if (isset($mapped['price'])) {
+            $priceCents = Import::parsePriceToCents($mapped['price']);
+            $updates[] = 'price = :price';
+            $params[':price'] = $priceCents;
+            // Set old price as compare_price if price dropped
+            if ($priceCents < (int)$row['price'] && (int)$row['price'] > 0) {
+                $updates[] = 'compare_price = :cprice';
+                $params[':cprice'] = (int)$row['price'];
+            }
+        }
+        if (!empty($updates)) {
+            $updates[] = "updated_at = " . (Db::isSqlite() ? "datetime('now')" : "NOW()");
+            $db->prepare("UPDATE products SET " . implode(', ', $updates) . " WHERE sku = :sku AND store_id = :catalog")
+               ->execute($params);
+        }
+        return true;
+    }
 
     private static function download(string $url): string|false {
         $endpoint = self::publicFeedEndpoint($url);

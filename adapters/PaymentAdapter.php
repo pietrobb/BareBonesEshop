@@ -48,6 +48,16 @@ interface PullVerifiedNotificationAdapter extends PaymentAdapter {
 /** The notified payment is unknown to the provider or not ours: answer 400, change nothing. */
 class PaymentNotificationUnverified extends RuntimeException {}
 
+/**
+ * Providers that can void an unpaid checkout/payment, so a cancelled order can no longer be paid.
+ * Payments captured anyway (provider without this capability, race) are refunded by
+ * PaymentService::settleCapture().
+ */
+interface CancellablePaymentAdapter extends PaymentAdapter {
+    /** Void the unpaid session/payment; a no-op when it is already closed. */
+    public function cancelPayment(string $paymentId): void;
+}
+
 /** Provider capability required for retry-safe external refund mutations. */
 interface IdempotentRefundAdapter extends PaymentAdapter {
     public function refundWithIdempotency(string $paymentId, int $amount, string $idempotencyKey): array;

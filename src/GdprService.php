@@ -534,6 +534,11 @@ class GdprService {
                 throw new InvalidArgumentException("policy.scrub_fields invalid: {$f}");
             }
         }
+        // Checked in dry-run too: a wrong column would otherwise only fail on --apply once old rows exist.
+        $missing = array_diff($scrub, self::tableColumns($db, $table));
+        if ($missing) {
+            throw new InvalidArgumentException("policy.scrub_fields not in {$table}: " . implode(', ', $missing));
+        }
         $cutoff = self::computeCutoff($p);
         $marker = '[erased per GDPR retention at ' . gmdate('Y-m-d') . ']';
 

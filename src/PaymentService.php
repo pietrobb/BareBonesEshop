@@ -13,8 +13,10 @@ class PaymentService {
         'refund_pending' => ['paid', 'partially_refunded', 'refunded', 'failed'],
         'partially_refunded' => ['refund_pending', 'refunded', 'disputed'],
         'disputed' => ['paid', 'refund_pending', 'refunded'],
-        'failed' => [],
-        'cancelled' => [],
+        // Money captured after a failure, a cancellation or an expiry is a fact the ledger records;
+        // settleCapture() then pays the order or refunds the cancelled one.
+        'failed' => ['paid', 'cancelled'],
+        'cancelled' => ['paid'],
         'refunded' => [],
     ];
 
@@ -259,11 +261,27 @@ class PaymentService {
         ?string $idempotencyKey = null,
         ?string $currency = null
     ): array {
-        if ($idempotencyKey !== null && $idempotencyKey !== '') {
-            if (!$gateway instanceof IdempotentRefundAdapter) {
-                throw new RuntimeException('Payment provider does not support idempotent refunds');
-            }
+        if ($idempotencyKey !== null && $idempotencyKey !== '' && $gateway instanceof IdempotentRefundAdapter) {
             $result = $gateway->refundWithIdempotency($paymentId, $amount, $idempotencyKey);
+        } elseif ($idempotencyKey !== null && $idempotencyKey !== '') {
+            // Without provider idempotency a retry after an unknown outcome could refund twice:
+            // the key allows one provider call, any further attempt is for a human to reconcile.
+            $attemptKey = 'refund_attempt_' . $idempotencyKey;
+            if (self::transactionExists($attemptKey)) {
+                throw new RuntimeException('Refund was already attempted at a provider without idempotent refunds; reconcile manually');
+            }
+            self::logTransaction(
+                orderId: $orderId,
+                provider: self::providerName($gateway),
+                providerRef: $paymentId,
+                status: 'refund_attempted',
+                amount: $amount,
+                currency: strtolower($currency ?: (string)(Orders::byId($orderId)['currency'] ?? 'eur')),
+                idempotencyKey: $attemptKey,
+                rawResponse: ['payment_id' => $paymentId],
+                failClosed: true,
+            );
+            $result = $gateway->refund($paymentId, $amount);
         } else {
             $result = $gateway->refund($paymentId, $amount);
         }
@@ -312,7 +330,8 @@ class PaymentService {
         if ($amount <= 0 || $idempotencyKey === '') throw new \InvalidArgumentException('Invalid refund request');
 
         $db = Db::get();
-        $db->beginTransaction();
+        $ownTransaction = !$db->inTransaction();
+        if ($ownTransaction) $db->beginTransaction();
         try {
             $order = Orders::byId($orderId);
             if (!$order) throw new \RuntimeException("Order #{$orderId} not found");
@@ -350,12 +369,103 @@ class PaymentService {
                 'provider' => (string)($snapshot['provider'] ?? $order['payment_method'] ?? ''),
                 'provider_ref' => (string)($order['payment_id'] ?? ''),
             ]);
-            $db->commit();
+            if ($ownTransaction) $db->commit();
             return true;
+        } catch (\Throwable $e) {
+            if ($ownTransaction && $db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+    }
+
+    /**
+     * Payment side of an order cancellation, inside the caller's transaction. An unpaid payment
+     * is closed (payment_status cancelled) and the provider session voided by a payment_cancel
+     * job, so the customer can no longer pay; captured money goes on the refund ledger.
+     *
+     * @return list<array{0:string,1:array,2:int}> deferred jobs
+     */
+    public static function cancellationJobsWithin(int $orderId): array {
+        $order = Orders::byId($orderId);
+        if (!$order) return [];
+        $from = (string)($order['payment_status'] ?? 'pending');
+        if (in_array($from, ['pending', 'authorized', 'failed'], true)) {
+            self::updatePaymentStatus($orderId, 'cancelled', 'order.cancelled', [], $from);
+            AuditLog::log('payment_status', $orderId, $from, 'cancelled', 'order.cancelled');
+            $paymentId = trim((string)($order['payment_id'] ?? ''));
+            return $paymentId === '' ? [] : [['payment_cancel', ['order_id' => $orderId, 'payment_id' => $paymentId], 1]];
+        }
+        return self::orderRefundJobsWithin($orderId, 'order.cancelled');
+    }
+
+    /**
+     * Put the whole refundable balance of a captured order on the refund ledger (once per order)
+     * and return the payment_refund job that executes it with a stable provider idempotency key.
+     *
+     * @return list<array{0:string,1:array,2:int}>
+     */
+    public static function orderRefundJobsWithin(int $orderId, string $reason): array {
+        $order = Orders::byId($orderId);
+        $paymentId = trim((string)($order['payment_id'] ?? ''));
+        $requestKey = 'order_refund_request_' . $orderId;
+        if (!$order || $paymentId === '' || self::transactionExists($requestKey)) return [];
+        $amount = self::refundableBalance($orderId);
+        if ($amount <= 0) return [];
+        $from = (string)($order['payment_status'] ?? '');
+        if (!in_array($from, ['paid', 'partially_refunded'], true)) {
+            // A refund already in flight or a dispute: the merchant settles it by hand.
+            IncidentMonitor::report('payment.order_refund_manual', 'payment', 'critical', ['order_id' => $orderId]);
+            return [];
+        }
+        self::requestRefund($orderId, $amount, $requestKey, ['reason' => $reason]);
+        return [['payment_refund', [
+            'order_id' => $orderId,
+            'payment_id' => $paymentId,
+            'amount' => $amount,
+            'idempotency_key' => 'order_refund_' . $orderId,
+        ], 1]];
+    }
+
+    /** The provider confirmed the refund executed under this idempotency key. */
+    public static function refundSucceeded(string $idempotencyKey): bool {
+        $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE idempotency_key = :key AND status = 'refund_succeeded' LIMIT 1");
+        $stmt->execute([':key' => $idempotencyKey]);
+        return (bool)$stmt->fetchColumn();
+    }
+
+    /** @return array{amount:int, idempotency_key:string}|null the whole-order refund claimed by orderRefundJobsWithin() */
+    public static function orderRefundRequest(int $orderId): ?array {
+        $stmt = Db::get()->prepare("SELECT amount FROM payment_transactions WHERE idempotency_key = :key AND order_id = :order AND store_id = :store");
+        $stmt->execute([':key' => 'order_refund_request_' . $orderId, ':order' => $orderId, ':store' => StoreContext::current()->id()]);
+        $amount = $stmt->fetchColumn();
+        return $amount === false ? null : ['amount' => (int)$amount, 'idempotency_key' => 'order_refund_' . $orderId];
+    }
+
+    /**
+     * After the provider captured money: a payable order moves to paid. An order cancelled or
+     * expired meanwhile stays cancelled, its payment is refunded and a critical incident is
+     * raised, so money is never kept silently.
+     */
+    public static function settleCapture(int $orderId, string $note): void {
+        $order = Orders::byId($orderId);
+        if (!$order) return;
+        if (OrderWorkflow::canTransition((string)$order['status'], 'paid')) {
+            OrderWorkflow::transition($orderId, 'paid', $note);
+            return;
+        }
+        if ((string)$order['status'] !== 'cancelled') return;
+        $db = Db::get();
+        $db->beginTransaction();
+        try {
+            $jobs = self::orderRefundJobsWithin($orderId, 'payment.captured_after_cancel');
+            if ($jobs !== []) AuditLog::log('order_refund', $orderId, 'cancelled', 'refund_pending', 'Payment captured on a cancelled order: ' . $note);
+            $db->commit();
         } catch (\Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();
             throw $e;
         }
+        if ($jobs === []) return;
+        IncidentMonitor::report('payment.captured_after_cancel', 'payment', 'critical', ['order_id' => $orderId]);
+        OrderWorkflow::pushDeferredJobs($jobs);
     }
 
     /**
@@ -512,12 +622,14 @@ class PaymentService {
         } else {
             self::recordEvent($orderId, $eventType, 'ignored', $amount, $currency ?: $orderCurrency, $eventKey, $payload + ['payment_status' => $from], $provider, $providerRef);
             if ($to !== null) AuditLog::log('payment_webhook_ignored', $orderId, $from, $from, "{$provider} {$eventType}");
+            // A redelivery after a failed settlement finishes it (settleCapture is idempotent).
+            if ($to === 'paid' && $from === 'paid') self::settleCapture($orderId, 'Payment confirmed via webhook');
             return;
         }
 
         $order = Orders::byId($orderId) ?: $order;
-        if ($to === 'paid' && OrderWorkflow::canTransition((string)$order['status'], 'paid')) {
-            OrderWorkflow::transition($orderId, 'paid', 'Payment confirmed via webhook');
+        if ($to === 'paid') {
+            self::settleCapture($orderId, 'Payment confirmed via webhook');
         } elseif ($to === 'refunded' && in_array($order['status'], ['returned', 'cancelled'], true)
             && OrderWorkflow::canTransition((string)$order['status'], 'refunded')) {
             OrderWorkflow::transition($orderId, 'refunded', 'Refund confirmed via webhook');

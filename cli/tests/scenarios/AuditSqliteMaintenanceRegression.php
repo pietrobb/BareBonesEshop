@@ -144,7 +144,7 @@ try {
     $writer = $a093Start($updDbPath, $updProc);
     $rollbackRefusal = '';
     try {
-        $updater->rollback($applied['snapshot']);
+        $updater->rollback($applied['snapshot'], false, true);
     } catch (Throwable $e) {
         $rollbackRefusal = $e->getMessage();
     }
@@ -154,7 +154,19 @@ try {
     assert_equals('committed', trim($a093Finish($writer, $updProc)), 'A09.3 updater: the live process commits after the refused rollback');
     assert_equals(['pre-update', 'migrated', 'written by live process'], $a093Notes($updDbPath), 'A09.3 updater: no committed write is lost');
 
-    $updater->rollback($applied['snapshot']);
+    // Code review 2026-10-15 H8: rolling back a migration update silently discarded every write since the snapshot.
+    $h8Warning = '';
+    try {
+        $updater->rollback($applied['snapshot']);
+    } catch (RuntimeException $e) {
+        $h8Warning = $e->getMessage();
+    }
+    assert_true(str_contains($h8Warning, 'permanently lost') && str_contains($h8Warning, '--accept-data-loss'),
+        'H8: rollback of a migration update without --accept-data-loss is refused with a data-loss warning');
+    assert_equals(["core v2\n", ['pre-update', 'migrated', 'written by live process']], [file_get_contents($updDir . '/installed/src/Core.php'), $a093Notes($updDbPath)],
+        'H8: the refused rollback leaves code and every post-update write untouched');
+    $h8Result = $updater->rollback($applied['snapshot'], false, true);
+    assert_true(is_string($h8Result['database_restored_to'] ?? null), 'H8: confirmed rollback reports the point in time the database was restored to');
     assert_equals("core v1\n", file_get_contents($updDir . '/installed/src/Core.php'), 'A09.3 updater: rollback restores code once the database is free');
     assert_equals(['pre-update'], $a093Notes($updDbPath), 'A09.3 updater: rollback restores the pre-update database');
 } finally {

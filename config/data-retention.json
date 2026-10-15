@@ -36,8 +36,8 @@
       "ttl_days": 730,
       "field": "created_at",
       "action": "scrub_pii",
-      "scrub_fields": ["payload_json"],
-      "rationale": "After 24m, scrub PII payload but keep action+actor+timestamp for compliance trail."
+      "scrub_fields": ["ip_address", "old_value", "new_value", "note"],
+      "rationale": "After 24m, scrub the IP address and the change payload (old/new value, note) but keep entity+action+actor+timestamp for compliance trail."
     },
     "coupon_uses": {
       "table": "coupon_uses",

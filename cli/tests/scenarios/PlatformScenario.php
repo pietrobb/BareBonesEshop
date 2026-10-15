@@ -1797,4 +1797,4 @@ require __DIR__ . '/AuditAdminI18nRegression.php';
 require __DIR__ . '/AuditEmailTemplateRegression.php';
 require __DIR__ . '/AuditExtensionRegression.php';
 require __DIR__ . '/AuditExtensionDataRegression.php';
-foreach (['Gopay', 'Comgate', 'Thepay', 'ShipmentAdmin'] as $auditTailRegression) require __DIR__ . "/Audit{$auditTailRegression}Regression.php";
+foreach (['Gopay', 'Comgate', 'Thepay', 'ShipmentAdmin', 'ImportStoreScope', 'GdprRetention'] as $auditTailRegression) require __DIR__ . "/Audit{$auditTailRegression}Regression.php";

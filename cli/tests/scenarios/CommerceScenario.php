@@ -1,5 +1,24 @@
 <?php
 
+// RMA tables (mirror of migrations/20260426100000_create_rma.php)
+$pdo->exec("CREATE TABLE IF NOT EXISTS rma_requests (
+    id INTEGER PRIMARY KEY, rma_number TEXT NOT NULL, order_id INTEGER NOT NULL,
+    customer_id INTEGER DEFAULT NULL, status TEXT NOT NULL DEFAULT 'requested',
+    reason TEXT NOT NULL DEFAULT '', admin_note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(rma_number)
+)");
+$pdo->exec("CREATE TABLE IF NOT EXISTS rma_items (
+    id INTEGER PRIMARY KEY, rma_id INTEGER NOT NULL, order_item_id INTEGER NOT NULL,
+    product_id INTEGER DEFAULT NULL, sku TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '',
+    quantity INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)");
+$returnsCreditMigration = require TEST_CLI_DIR . '/../migrations/20260801210000_returns_credit_notes.php';
+$returnsCreditMigration->up($pdo, true);
+$returnsCreditMigration->up($pdo, true);
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='order_refunds'")->fetchColumn(), 'G8 migration: item refund ledger exists and migration is idempotent');
+
 // TEST 20: Pricing
 // ============================================================
 echo "\n--- Test 20: Pricing ---\n";
@@ -1301,7 +1320,7 @@ foreach (glob($testJobsDir45 . '/pending/*.json') ?: [] as $jf) {
 }
 assert_true(!$refundJobFound, 'No refund job queued for checkout session (cs_*) payment_id');
 
-// Now test with a payment_intent ID — refund SHOULD be queued
+// An unpaid payment_intent is voided, not refunded (captured payments: AuditOrderPaymentLifecycleRegression)
 $piOrder = $pdo->prepare("INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, shipping_addr, subtotal, shipping_cost, tax_amount, discount_amount, total, currency, status, payment_method, payment_id)
     VALUES ('ORD-PI-TEST', 'Test User', 'test@test.com', '', '{}', 2000, 0, 0, 0, 2000, 'eur', 'pending', 'stripe', 'pi_test_intent_456')");
 $piOrder->execute();
@@ -1310,13 +1329,16 @@ $piOrderId = (int)$pdo->lastInsertId();
 OrderWorkflow::transition($piOrderId, 'cancelled', 'Test cancel with payment intent');
 
 $refundJobFound2 = false;
+$cancelJobFound2 = false;
 foreach (glob($testJobsDir45 . '/pending/*.json') ?: [] as $jf) {
     $jd = json_decode(file_get_contents($jf), true);
-    if (($jd['type'] ?? '') === 'payment_refund' && ($jd['payload']['order_id'] ?? 0) === $piOrderId) {
-        $refundJobFound2 = true;
-    }
+    if (($jd['payload']['order_id'] ?? 0) !== $piOrderId) continue;
+    if (($jd['type'] ?? '') === 'payment_refund') $refundJobFound2 = true;
+    if (($jd['type'] ?? '') === 'payment_cancel') $cancelJobFound2 = true;
 }
-assert_true($refundJobFound2, 'Refund job queued for payment_intent (pi_*) payment_id');
+assert_true(!$refundJobFound2, 'No refund job queued for an unpaid payment_intent (pi_*)');
+assert_true($cancelJobFound2, 'Unpaid payment_intent (pi_*) is voided by a payment_cancel job');
+assert_equals('cancelled', Orders::byId($piOrderId)['payment_status'], 'Cancelled unpaid order closes its payment');
 
 // Cleanup jobs dir
 foreach (['pending', 'processing', 'completed', 'failed'] as $sub) {

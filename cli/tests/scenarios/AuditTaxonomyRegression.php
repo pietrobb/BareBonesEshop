@@ -209,8 +209,7 @@ try {
                 $a124Brands = array_column($a124Own($a124Result['after']['brands'] ?? [], $a124Store), null, 'code');
                 $a124NewAudit = array_slice($a124Result['after']['audit'] ?? [], count($a124Result['before']['audit'] ?? []));
                 assert_true(!preg_match('/A124[A-Z]+(-[a-z]+)?-' . $a124Foreign . '-NAME/', $a124Output), "{$a124Label}: no foreign catalog data rendered");
-                // import_scope deliberately writes into the default catalog (the CSV import target).
-                foreach ($a124Action === 'import_scope' ? ['brands'] : ['categories', 'brands'] as $a124Table) {
+                foreach (['categories', 'brands'] as $a124Table) {
                     assert_equals($a124Own($a124Result['before'][$a124Table] ?? [], $a124Foreign), $a124Own($a124Result['after'][$a124Table] ?? [], $a124Foreign), "{$a124Label}: foreign catalog {$a124Table} unchanged");
                 }
                 // The default catalog already owns the root "shoes"; there the same create is a sibling conflict.
@@ -258,8 +257,8 @@ try {
                     'brand_foreign_code' => assert_true(isset($a124Brands["a124br-used-{$a124Foreign}"]), "{$a124Label}: a code used by another catalog is free in this one"),
                     'brand_edit' => assert_equals(['Renamed', 0], [$a124Brands["a124br-unused-{$a124Store}"]['name'] ?? null, (int)($a124Brands["a124br-unused-{$a124Store}"]['active'] ?? 1)], "{$a124Label}: rename and deactivate"),
                     'brand_delete_unused' => assert_equals([false, true], [isset($a124Brands["a124br-unused-{$a124Store}"]), isset($a124Brands["a124br-used-{$a124Store}"])], "{$a124Label}: only the unused brand deleted"),
-                    'import_scope' => assert_equals(['default', 'a124a-cz/a124b-cz', 1], [$a124Result['extra']['store_id'] ?? null, $a124Result['extra']['path'] ?? null, (int)($a124Result['extra']['depth'] ?? -1)],
-                        "{$a124Label}: CSV import creates its category in the default catalog instead of reusing another catalog's"),
+                    'import_scope' => assert_equals([$a124Store, 'a124a-cz/a124b-cz', 1], [$a124Result['extra']['store_id'] ?? null, $a124Result['extra']['path'] ?? null, (int)($a124Result['extra']['depth'] ?? -1)],
+                        "{$a124Label}: CSV import creates or reuses its category in the active catalog, never another catalog's"),
                 };
             }
         }

@@ -1278,3 +1278,4 @@ assert_equals('en', $orderEmail['locale'], 'Email: worker propagated order.local
 
 // Reset adapter override for downstream safety
 MailService::useAdapter(null);
+require __DIR__ . '/AuditOrderPaymentLifecycleRegression.php';
