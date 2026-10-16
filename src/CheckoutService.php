@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 /** Canonical application boundary shared by HTML and JSON checkout transports. */
 class CheckoutService {
     public static function isDigitalOnly(array $items): bool {

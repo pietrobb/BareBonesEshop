@@ -86,6 +86,10 @@ foreach ($verticalFiles as $file) {
 $stalePayloads = array_map(static fn(string $dir): string => substr($dir, strlen($root) + 1), glob($root . '/releases/*/payload', GLOB_ONLYDIR) ?: []);
 $check($stalePayloads === [], 'Repository hygiene: no historical release payloads are tracked (build and sign from the qualified SHA)' . ($stalePayloads ? ': ' . implode(', ', $stalePayloads) : ''));
 $check($verticalHits === [], 'Universal engine: no auto-parts vertical in core (belongs in an extension)' . ($verticalHits ? ': ' . implode(', ', $verticalHits) : ''));
+// Money paths must not silently coerce scalars ("12.5" → 12 cents); strict_types turns that into a TypeError.
+$looseMoney = array_values(array_filter(['Pricing', 'CheckoutService', 'Orders', 'InvoiceService'],
+    static fn(string $class): bool => !preg_match('/^<\?php\s+declare\(strict_types=1\);/', (string)file_get_contents($root . "/src/{$class}.php"))));
+$check($looseMoney === [], 'Money-critical classes declare strict_types=1' . ($looseMoney ? ': ' . implode(', ', $looseMoney) : ''));
 
 $langFiles = glob($root . '/lang/*.php') ?: [];
 $catalogs = [];

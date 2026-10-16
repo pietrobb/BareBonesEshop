@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 /**
  * BareBones Shop — Orders
  * Order creation with atomic stock reservation, queries, status updates.
