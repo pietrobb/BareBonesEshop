@@ -579,9 +579,7 @@ class ShippingService
     private static function tableExists(\PDO $db, string $table): bool
     {
         try {
-            $stmt = $db->prepare("SELECT 1 FROM {$table} LIMIT 1");
-            $stmt->execute();
-            return true;
+            return Db::tableExists($table, $db);
         } catch (\Throwable $e) {
             return false;
         }

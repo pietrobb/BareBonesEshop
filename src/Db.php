@@ -6,6 +6,8 @@
 class Db {
     private static ?PDO $pdo = null;
     private static string $driver = '';
+    /** @var WeakMap<PDO, array<string, list<string>>>|null Column lists of existing tables, per connection. */
+    private static ?WeakMap $schemaCache = null;
 
     public static function get(): PDO {
         if (self::$pdo) return self::$pdo;
@@ -62,12 +64,14 @@ class Db {
         if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') $pdo->exec("SET SESSION time_zone='+00:00'");
         self::$pdo = $pdo;
         self::$driver = $driver;
+        self::forgetSchema($pdo);
     }
 
     /** Reset connection (for testing) */
     public static function reset(): void {
         self::$pdo = null;
         self::$driver = '';
+        self::$schemaCache = null;
     }
 
     /** Drops the shared connection if it holds the SQLite file $sqlitePath (restore/rollback replaces that file). */
@@ -138,5 +142,57 @@ class Db {
         return self::isSqlite()
             ? "datetime({$field}, '+' || {$seconds} || ' seconds')"
             : "DATE_ADD({$field}, INTERVAL {$seconds} SECOND)";
+    }
+
+    /**
+     * Column names of $table (empty when the table does not exist), always read from the schema.
+     * Errors other than "missing table" (connection loss, privileges) propagate.
+     *
+     * @return list<string>
+     */
+    public static function tableColumns(string $table, ?PDO $db = null): array {
+        if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/D', $table)) throw new InvalidArgumentException('Invalid table name');
+        $db ??= self::get();
+        if ($db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite') {
+            $columns = array_column($db->query("PRAGMA table_info({$table})")->fetchAll(PDO::FETCH_ASSOC), 'name');
+        } else {
+            $stmt = $db->prepare('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION');
+            $stmt->execute([$table]);
+            $columns = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        }
+        $columns = array_values(array_map('strval', $columns));
+        if ($columns !== []) {
+            self::$schemaCache ??= new WeakMap();
+            $tables = self::$schemaCache[$db] ?? [];
+            $tables[$table] = $columns;
+            self::$schemaCache[$db] = $tables;
+        }
+        return $columns;
+    }
+
+    /**
+     * Probes for optional code paths, so a schema whose migrations are not applied yet degrades
+     * instead of failing. A hit is cached per connection; a miss is probed again next time (a
+     * migration may have added it meanwhile). Migrator::apply() and forgetSchema() drop the cache.
+     */
+    public static function tableExists(string $table, ?PDO $db = null): bool {
+        $db ??= self::get();
+        if (isset(self::$schemaCache[$db][$table])) return true;
+        return self::tableColumns($table, $db) !== [];
+    }
+
+    public static function hasColumn(string $table, string $column, ?PDO $db = null): bool {
+        $db ??= self::get();
+        if (in_array($column, self::$schemaCache[$db][$table] ?? [], true)) return true;
+        return in_array($column, self::tableColumns($table, $db), true);
+    }
+
+    /** Forget cached table probes (after DDL), for one connection or all of them. */
+    public static function forgetSchema(?PDO $db = null): void {
+        if ($db === null) {
+            self::$schemaCache = null;
+        } elseif (self::$schemaCache !== null) {
+            unset(self::$schemaCache[$db]);
+        }
     }
 }

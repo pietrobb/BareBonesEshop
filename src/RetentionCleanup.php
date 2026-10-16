@@ -2,7 +2,7 @@
 /**
  * Daily housekeeping of bookkeeping tables that otherwise grow without bound:
  * processed webhook events, replayable API responses, delivered outbox events (with their
- * delivery attempts) and completed queue jobs. Dead/failed rows stay for the operator.
+ * delivery attempts), completed queue jobs and CSP violation reports (14 days). Dead/failed rows stay for the operator.
  */
 final class RetentionCleanup
 {
@@ -61,6 +61,9 @@ final class RetentionCleanup
         $jobs = $db->prepare("DELETE FROM queue_jobs WHERE state = 'completed' AND completed_at < :cutoff");
         $jobs->execute([':cutoff' => $cutoff((int)($cfg['completed_jobs_days'] ?? 7))]);
         $deleted['queue_jobs'] = $jobs->rowCount();
+
+        // CSP reports are purged on ingest too, but a quiet site would otherwise keep old ones forever.
+        $deleted['csp_violations'] = Db::tableExists('csp_violations', $db) ? CspReports::purge($db, $now) : 0;
 
         $deleted['job_files'] = 0;
         $completedDir = (string)($cfg['jobs_dir'] ?? '') . '/completed';

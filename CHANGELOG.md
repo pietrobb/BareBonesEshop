@@ -2,6 +2,81 @@
 
 ## Unreleased
 
+### Upgrade notes (operator-facing and breaking changes from PRs #10-#14 and the follow-up audit)
+
+Read before updating a live shop; run `php cli/migrate.php` after the files are in place.
+
+- **Backup / restore / update CLI**
+  - `cli/restore.php` restores MySQL/MariaDB `.sql` backups now, but only with `--i-stopped-writers`
+    (stop web traffic, workers and cron first; there is no lock that proves nobody writes). The dump
+    is imported into a scratch database first (`backup_mysql_restore_scratch_database`, default
+    `<db_name>_restore_scratch`, must not exist; `db_user` needs `ALL PRIVILEGES` on it and on
+    `db_name`) and verified before `db_name` is dropped and re-imported.
+  - `--skip-snapshot` is refused for MySQL/MariaDB restores (SQLite only): the pre-restore snapshot is
+    the rollback copy. If a restore fails after `db_name` was dropped, the pre-restore dump is kept
+    (0600) in `backup_recovery_dir` and its path is printed.
+  - New `--files` (database, then the files archive) and `--files-only` (`--force` overwrites live
+    files that differ) restore invoices, uploads and the GDPR salt from `<backup>.files.tar`.
+  - `cli/update.php rollback` that restores the database requires `--accept-data-loss`; an automatic or
+    manual rollback reports the orders/payments written after the snapshot (`discarded_writes`,
+    critical incident `update.rollback_discarded_writes`).
+  - `cli/update.php doctor --skip-backup-probe` skips the doctor's real backup/restore probe.
+  - `cli/migrate.php` fails closed when the pre-migration backup cannot be initialised (it used to
+    continue without a backup); pass `--skip-backup` (or disable `auto_pre_migration`) knowingly.
+  - Files backups skip unreadable files inside a readable source (listed as `files_skipped`); an
+    unreadable configured source still fails the backup. `config/backup.json` `include_files`
+    (default `true`) turns the files archive off.
+- **New config keys** (all optional; see `config.example.php` and `config/config.schema.json`, which
+  now lists every key the code reads): `backup_recovery_dir` (default
+  `<private_runtime_dir>/restore-recovery`), `backup_mysql_restore_scratch_database`,
+  `update_mysql_dump_binary` / `update_mysql_client_binary` (defaults `mysqldump` / `mysql`, falling
+  back to `mariadb-dump` / `mariadb` when only those are on PATH),
+  `monitoring.csp_form_action_reports_critical` (default 5), `uploads_dir` / `uploads_url`
+  (documented; default `<shop>/uploads`, `/uploads`), `payu_*`. `cli/staging-preflight.php` now also
+  requires `backup_recovery_dir` and `update_storage_dir` outside the application root.
+- **Migrations**: `20261015120000_processed_events_claim_state` (webhook claim `state`/`claimed_at`),
+  `20261016120000_csp_reporter_hash`, `20261016130000_erp_status_checked_at`,
+  `20261016140000_csp_request_id`, `20261016150000_normalize_coupon_use_emails` (all idempotent; the
+  code degrades instead of failing between deploying the files and running them).
+  `20261015120000_processed_events_claim_state` gained a missing-table guard after release; its old
+  checksum is accepted (`Migrator::LEGACY_CHECKSUMS`).
+- **Daily `cleanup` worker job** (queued at most once a day by the worker): deletes processed webhook
+  events after 7 days, replayable API idempotency responses after 30 days, delivered outbox events
+  and their delivery attempts after 30 days, completed queue jobs and `jobs/completed/*.json` after
+  7 days, and CSP violation reports after 14 days. Dead/failed rows stay for the operator.
+- **Admin users**: a delegated (non-owner) `admins.manage` holder may only create or manage accounts
+  whose role permissions it holds itself, in every store the target is granted; the create form lists
+  only those roles, and a non-owner cannot change its own grants, role or status (it may still reset
+  its own password/MFA and revoke its own sessions). Owners are unchanged.
+- **Payment webhooks**: a webhook event is claimed as `processing` and marked `done` only after its
+  handler finished; a claim older than the 300 s lease (`Idempotency::LEASE_SECONDS`) is taken over
+  by a provider retry, and a timed-out handler can no longer delete the takeover's claim. Signature
+  checks moved to the capability interface `SignedWebhookPaymentAdapter`: **extension payment
+  adapters that receive signed webhooks must implement it**, otherwise their webhooks are rejected as
+  unverified (fail closed).
+- **Payments after cancellation**: money received for a cancelled/expired order (gateway webhook,
+  offline transfer confirm, admin "mark paid") is recorded, the order stays cancelled, a refund is
+  flagged (provider refund, or `refund_manual_required` for offline/manual payments) and the critical
+  incident `payment.captured_after_cancel` is raised. Cancelling a paid order without `payment_id`
+  (bank transfer/COD) raises `payment.order_refund_manual`; a second capture not matching the recorded
+  payment raises `payment.duplicate_capture`. A payment can be set to cancelled only on a cancelled order.
+- **CSP alarm thresholds**: `csp_form_action_violation` (critical) fires when blocked form-action
+  reports come from `csp_form_action_critical` (default 2) distinct reporters (salted IP hashes), or -
+  only while `trusted_proxies` is empty and from at least two separate report requests - when the
+  raw report count reaches `csp_form_action_reports_critical` (default 5). One client can raise that
+  fallback; configure `trusted_proxies` behind a proxy/CDN to rely on distinct reporters only.
+- **Inventory feeds**: `Warehouse::bulkSetStock` applies the valid rows and skips invalid ones (empty
+  SKU, non-integer or negative count), reporting them (incident `inventory.feed_invalid_rows`)
+  instead of rejecting the whole feed.
+- **Storefront files**: the account portal moved from `account.php` into
+  `src/Entrypoints/Storefront/Account.php` (URLs and forms unchanged; customisations of `account.php`
+  must move). `page.php` renders CMS pages in the theme shell (`Storefront/Layout.php`, theme assets,
+  SEO head; a missing slug is a 404 inside the shell). The legacy `shop.js` / `shop.css` and the
+  `base_css` / `shop_js` document slots are removed: themes that referenced them must ship their own assets.
+- **E-mail normalisation**: customer and coupon-use e-mails are stored and compared as
+  `Str::normalizeEmail()` (trim + ASCII lowercase) without SQL `LOWER()`. Coupon per-customer limits
+  previously lowercased non-ASCII letters too; such addresses now count separately.
+
 ### Added
 - **Shipments and tracking in the admin order detail** (A12.8). Migration `20261014090000_shipment_tracking_url`.
   - Per-warehouse partial shipments limited to the not-yet-shipped remainder; ship now or plan,

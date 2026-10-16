@@ -46,6 +46,7 @@ Example deployment configuration:
     'payment_funnel_min_started' => 3,
     'csp_window_seconds' => 86400,
     'csp_form_action_critical' => 2,
+    'csp_form_action_reports_critical' => 5,
     'csp_violations_warning' => 20,
     'synthetic_token' => '<at least 32 random characters from the deployment secret store>',
 ],
@@ -53,7 +54,7 @@ Example deployment configuration:
 
 Do not expose the JSONL file over HTTP. Public `/healthz` and `/readyz` remain deliberately non-sensitive.
 
-CSP reports need a valid absolute `app_url`; the endpoint stores only directive, blocked origin (no path or query), document path and time, keeps 14 days, and is rate limited. Browser-extension noise is dropped. Each report also keeps a salted hash of the reporting IP: `csp_form_action_violations` counts distinct reporters, so the critical alert (default 2) cannot be raised by one client posting forged reports.
+CSP reports need a valid absolute `app_url`; the endpoint stores only directive, blocked origin (no path or query), document path and time, keeps 14 days, and is rate limited. Browser-extension noise is dropped. Each report also keeps a salted hash of the reporting IP: `csp_form_action_violations` counts distinct reporters (`csp_form_action_critical`, default 2), so that signal cannot be raised by one client posting forged reports. The endpoint is unauthenticated, though, and a second signal exists for shops behind a proxy/CDN that is not listed in `trusted_proxies` (every report then carries the proxy IP and counts as one reporter): while `trusted_proxies` is empty, `csp_form_action_violation` also fires when the raw number of blocked form-action reports reaches `csp_form_action_reports_critical` (default 5) and they arrived in at least two separate requests (`csp_form_action_report_requests`). **One client can raise that fallback** by posting a few forged reports, so treat the alert as "verify checkout now", not proof of a broken CSP. Configure `trusted_proxies` when a proxy sits in front of the shop: the raw-count fallback is then disabled and only distinct reporters alarm; setting `csp_form_action_reports_critical` to `0` disables the fallback too. The daily `cleanup` worker job also purges reports older than 14 days, so retention holds on sites that stop receiving reports.
 
 ## Post-deploy checkout smoke
 
@@ -79,7 +80,7 @@ The request carries `X-BareBones-Synthetic` with `monitoring.synthetic_token`. T
 4. Schedule the existing backup command at least daily and monitor `backup_age_seconds`.
 5. Treat `backup_probe_failed`, `backup_missing`, and `backup_rpo_breached` as critical. `MountedBackupStorage` fails closed if the sentinel disappears, preventing silent local fallback.
 
-Each backup is a database copy (`.db` VACUUM INTO for SQLite, `.sql` single-transaction dump for MySQL/MariaDB) plus a companion `<backup>.files.tar` with issued invoice PDFs, uploads and the GDPR salt file. **The files archive is sensitive:** the GDPR salt is the secret behind every pseudonymised GDPR record, so anyone holding it can re-link erased customers to their hashes. Store backups only on encrypted, access-reviewed targets and never attach them to tickets or chat.
+Each backup is a database copy (`.db` VACUUM INTO for SQLite, `.sql` single-transaction dump for MySQL/MariaDB) plus a companion `<backup>.files.tar` with issued invoice PDFs, uploads and the GDPR salt file. The files come from `invoice_storage_dir`, `uploads_dir` (default `<shop>/uploads`) and `gdpr_salt_file` in `config.php`; set `"include_files": false` in `config/backup.json` to back up the database only (default `true`; a restore then has no files archive to apply). **The files archive is sensitive:** the GDPR salt is the secret behind every pseudonymised GDPR record, so anyone holding it can re-link erased customers to their hashes. Store backups only on encrypted, access-reviewed targets and never attach them to tickets or chat.
 
 ### Restoring with `cli/restore.php`
 

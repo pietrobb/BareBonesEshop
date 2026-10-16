@@ -9,6 +9,7 @@ return new class {
         $columns = $isSqlite
             ? array_column($db->query('PRAGMA table_info(processed_events)')->fetchAll(PDO::FETCH_ASSOC), 'name')
             : $db->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'processed_events'")->fetchAll(PDO::FETCH_COLUMN);
+        if ($columns === []) return;
         if (!in_array('state', $columns, true)) {
             $db->exec('ALTER TABLE processed_events ADD COLUMN state ' . ($isSqlite ? 'TEXT' : 'VARCHAR(16)') . " NOT NULL DEFAULT 'done'");
         }

@@ -120,6 +120,11 @@ function runStagingPreflight(array $argvLocal = []): array {
         'backup_log_file' => (string)($cfg['backup_log_file'] ?? ''),
         'metrics_log_file' => (string)($cfg['metrics_log_file'] ?? ''),
         'gdpr_salt_file' => (string)($cfg['gdpr_salt_file'] ?? ''),
+        // Unset, both fall back to <private_runtime_dir>/... as BackupService and cli/update.php do.
+        'backup_recovery_dir' => (string)($cfg['backup_recovery_dir'] ?? '')
+            ?: ((string)($cfg['private_runtime_dir'] ?? '') !== '' ? rtrim((string)$cfg['private_runtime_dir'], '/\\') . '/restore-recovery' : ''),
+        'update_storage_dir' => (string)($cfg['update_storage_dir']
+            ?? ((string)($cfg['private_runtime_dir'] ?? '') !== '' ? rtrim((string)$cfg['private_runtime_dir'], '/\\') . '/updates' : '')),
     ];
     foreach ($privatePaths as $key => $path) {
         $ok = $path !== '' && $privatePathOk($path);

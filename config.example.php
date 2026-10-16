@@ -154,8 +154,9 @@ return [
         'payment_funnel_min_started' => 3,
         // Browser CSP reports (api.php?action=csp_report). A blocked form-action is critical once
         // reported by csp_form_action_critical distinct clients (IP hashes), or by
-        // csp_form_action_reports_critical reports in total (behind a proxy/CDN without
-        // trusted_proxies every report has the same IP). 0 disables a threshold.
+        // csp_form_action_reports_critical reports in total from >= 2 requests - that fallback only
+        // applies while trusted_proxies is empty (behind an unlisted proxy/CDN every report has the
+        // same IP) and one client CAN raise it. 0 disables a threshold.
         'csp_window_seconds' => 86400,
         'csp_form_action_critical' => 2,
         'csp_form_action_reports_critical' => 5,
@@ -225,9 +226,22 @@ return [
     'thepay_password'    => '',
     'thepay_env'         => 'demo', // 'production' uses api.thepay.cz / gate.thepay.cz
 
+    // PayU (provider code payu). Env PAY_PAYU_* overrides these values.
+    'payu_client_id'     => '',
+    'payu_client_secret' => '',
+    'payu_second_key'    => '',
+    'payu_pos_id'        => '',
+    'payu_env'           => 'sandbox', // 'production' uses secure.payu.com
+
     // Digital files are stored below this directory; digital_assets.storage_path
     // contains only a relative path such as ebooks/manual.pdf.
     'digital_assets_base_dir' => dirname(__DIR__) . '/private_downloads',
+
+    // Product image uploads written by the LocalStorage adapter and served at uploads_url. File
+    // backups (cli/backup.php, unless config/backup.json sets "include_files": false) and
+    // cli/restore.php --files use this directory too.
+    'uploads_dir' => __DIR__ . '/uploads',
+    'uploads_url' => '/uploads',
 
     // Deployments define the exact legal text and version they require. Optional
     // product_types/countries arrays make a checkbox context-specific.

@@ -27,7 +27,7 @@ class Customers {
      * Throws nothing; all errors returned as strings for form display.
      */
     public static function register(string $email, string $password, string $name = '', array $extras = []): array {
-        $email = strtolower(trim($email));
+        $email = Str::normalizeEmail($email);
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             return [false, null, 'invalid_email'];
         }
@@ -78,7 +78,7 @@ class Customers {
      * On success, populates $_SESSION['customer_id'] and regenerates the session id.
      */
     public static function login(string $email, string $password): array {
-        $email = strtolower(trim($email));
+        $email = Str::normalizeEmail($email);
         $db = Db::get();
         $stmt = $db->prepare("SELECT * FROM customers WHERE email = ? AND store_id = ?");
         $stmt->execute([$email, StoreContext::current()->id()]);
@@ -168,7 +168,7 @@ class Customers {
                     last_login_at, created_at, updated_at
              FROM customers WHERE email = ? AND store_id = ?"
         );
-        $stmt->execute([strtolower(trim($email)), StoreContext::current()->id()]);
+        $stmt->execute([Str::normalizeEmail($email), StoreContext::current()->id()]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row ?: null;
     }
@@ -241,7 +241,7 @@ class Customers {
      * still display a generic success message to avoid enumeration.
      */
     public static function startPasswordReset(string $email): ?string {
-        $email = strtolower(trim($email));
+        $email = Str::normalizeEmail($email);
         $db = Db::get();
         $stmt = $db->prepare("SELECT id FROM customers WHERE email = ? AND store_id = ? AND status = 'active'");
         $stmt->execute([$email, StoreContext::current()->id()]);

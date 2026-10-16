@@ -105,6 +105,11 @@ class Migrator {
             '25b037d8ebf85a7ba7671fc8ee3ac169aba9523402b0cfb385a4d1b3b9e620ee' => ['18521c5bb67c210913edf59671785fbdc698a6d02f48697555c4e6862375d75f', '4f67a797a2e3ad34c4dc84694f306c679775ad1f8df0fdf3f4ee8993fabf4ad1'],
             '2d0fc8d86beed79179a3a06ea6d5b0d8d6e3d9c48cb3e2e684fd2f31e7e2f6e4' => ['18521c5bb67c210913edf59671785fbdc698a6d02f48697555c4e6862375d75f', '4f67a797a2e3ad34c4dc84694f306c679775ad1f8df0fdf3f4ee8993fabf4ad1'],
         ],
+        // Gained the missing-table guard of its sibling migrations after release (same effect on existing tables).
+        '20261015120000_processed_events_claim_state' => [
+            '773fdbfd1b627d980bb6487a56a707e94b001a529d9b867e972b36a5563d083b' => ['8eff996a08aec22b5b262a0b5b2b0e47cf75710d4b2047b4a99b060d9085f9de', '0889dd2115fb075ae960de6c308b2ca9a35ea15852a8ee264e79b88eea7e680a'],
+            'f1d101d228cebf018735beb147b88013963d32c8ebbac1566c4f6b9f3c28664d' => ['8eff996a08aec22b5b262a0b5b2b0e47cf75710d4b2047b4a99b060d9085f9de', '0889dd2115fb075ae960de6c308b2ca9a35ea15852a8ee264e79b88eea7e680a'],
+        ],
     ];
 
     private PDO    $db;
@@ -197,6 +202,7 @@ class Migrator {
             }
             return $applied;
         } finally {
+            Db::forgetSchema($this->db);
             $this->unlock();
         }
     }

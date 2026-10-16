@@ -369,18 +369,10 @@ class Orders {
 
     private static function hasColumn(string $table, string $column): bool {
         try {
-            $stmt = Db::get()->query("PRAGMA table_info({$table})");
-            foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
-                if (($row['name'] ?? '') === $column) return true;
-            }
+            return Db::hasColumn($table, $column);
         } catch (\Throwable $e) {
-            try {
-                $stmt = Db::get()->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_NAME=? AND COLUMN_NAME=?");
-                $stmt->execute([$table, $column]);
-                return ((int)$stmt->fetchColumn()) > 0;
-            } catch (\Throwable $ignored) {}
+            return false;
         }
-        return false;
     }
 
     /**
@@ -694,17 +686,20 @@ class Orders {
     /**
      * Open ERP orders whose status is due for a pull: never polled first (NULL sorts first in ascending
      * order on SQLite and MySQL), then the longest unpolled. updated_at only moves on a status change,
-     * so ordering by it polled the same 50 orders forever.
+     * so ordering by it polled the same 50 orders forever. Until the erp_status_checked_at migration
+     * has run, the pull falls back to id order instead of failing.
      */
     public static function pendingStatusSync(int $limit = 50): array {
+        $order = self::hasColumn('orders', 'erp_status_checked_at') ? 'erp_status_checked_at ASC, id ASC' : 'id ASC';
         $stmt = Db::get()->prepare("SELECT * FROM orders WHERE store_id = :store AND erp_id IS NOT NULL AND status NOT IN ('delivered','cancelled','refunded')
-            ORDER BY erp_status_checked_at ASC, id ASC LIMIT " . max(1, min(500, $limit)));
+            ORDER BY {$order} LIMIT " . max(1, min(500, $limit)));
         $stmt->execute([':store' => StoreContext::current()->id()]);
         return $stmt->fetchAll();
     }
 
     /** Stamp an ERP status poll (whatever its outcome) so the next pull moves on to other orders. */
     public static function markErpStatusChecked(int $orderId): void {
+        if (!self::hasColumn('orders', 'erp_status_checked_at')) return;
         $stmt = Db::get()->prepare("UPDATE orders SET erp_status_checked_at = " . Db::now() . " WHERE id = :id AND store_id = :store");
         $stmt->execute([':id' => $orderId, ':store' => StoreContext::current()->id()]);
     }
