@@ -342,9 +342,9 @@ class ShippingService
         StoreContext::current()->assertPermission('shipping');
         $db = Db::get();
         $eventId = 'shipping_' . hash('sha256', $carrierId . "\0" . $rawPayload);
-        if (Idempotency::webhookProcessed($eventId)) {
-            return ['handled' => false, 'reason' => 'already_processed', 'duplicate' => true];
-        }
+        $claim = Idempotency::claim($eventId);
+        if ($claim === 'in_flight') return ['handled' => false, 'reason' => 'in_flight', 'retry' => true];
+        if ($claim === 'done') return ['handled' => false, 'reason' => 'already_processed', 'duplicate' => true];
 
         try {
             $db->prepare("UPDATE shipping_labels SET status = :status, updated_at = " . Db::now() . " WHERE awb = :awb AND carrier = :carrier AND store_id = :store")
@@ -372,6 +372,7 @@ class ShippingService
                 }
             }
         }
+        Idempotency::complete($eventId);
 
         return $result;
     }
@@ -496,12 +497,12 @@ class ShippingService
      * Shipping summary for cart/checkout pages: offered rates, the requested
      * (or first) rate, its price, and the free-shipping hint for the cart items.
      */
-    public static function cartQuote(array $items, int $subtotal, string $country, string $requestedMethod = ''): array
+    public static function cartQuote(array $items, int $subtotal, string $country, string $requestedMethod = '', bool $cod = false): array
     {
         $physicalQty = self::physicalQuantity($items);
         $weightG = 0;
         foreach ($items as $item) $weightG += (int)($item['weight_g'] ?? 0) * (int)($item['qty'] ?? 0);
-        $rates = self::calculateRates($country, $weightG, $subtotal, false, 0, $physicalQty);
+        $rates = self::calculateRates($country, $weightG, $subtotal, $cod, 0, $physicalQty);
         $selected = $rates[0] ?? null;
         foreach ($rates as $rate) {
             if ($requestedMethod !== '' && ($rate['method_code'] ?? '') === $requestedMethod) { $selected = $rate; break; }

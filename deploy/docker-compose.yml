@@ -1,14 +1,16 @@
 # BareBones Shop — sample stack: nginx + PHP-FPM + queue worker, SQLite on a volume.
 #
-#   docker compose -f deploy/docker-compose.yml run --rm --user www-data -e BBE_ADMIN_PASSWORD=... php \
+#   docker compose -f deploy/docker-compose.yml run --rm -e BBE_ADMIN_PASSWORD=... setup \
 #     php cli/setup.php install --app-url=http://localhost:8080 --admin-username=admin
 #   docker compose -f deploy/docker-compose.yml up -d
 #
 # The checkout (with the vendor/bbf submodule) is mounted as the document root; config.php
 # and private runtime data (../bareboneseshop-private in config.example.php) never live in
-# the image. PHP runs as www-data (uid 33), which must be able to write config.php (once),
-# cache/ and import/ in the checkout. For MySQL add a database service and set
-# db_driver/db_* in config.php.
+# the image. PHP runs as www-data (uid 33) on a read-only root filesystem with the
+# application code mounted read-only: only cache/, uploads/, import/ and logs/ of the
+# checkout are writable, so uid 33 must own those four directories. The opt-in `setup`
+# service is the only one that can write config.php. For MySQL add a database service and
+# set db_driver/db_* in config.php.
 name: bareboneseshop
 
 services:
@@ -16,8 +18,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    read_only: true
+    tmpfs:
+      - /tmp
     volumes:
-      - ..:/var/www/html
+      - ..:/var/www/html:ro
+      - ../cache:/var/www/html/cache
+      - ../uploads:/var/www/html/uploads
+      - ../import:/var/www/html/import
+      - ../logs:/var/www/html/logs
       - private:/var/www/bareboneseshop-private
     restart: unless-stopped
 
@@ -25,13 +34,29 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    user: www-data
+    read_only: true
+    tmpfs:
+      - /tmp
     command: ["sh", "-c", "while true; do php cli/worker.php; sleep 60; done"]
     volumes:
-      - ..:/var/www/html
+      - ..:/var/www/html:ro
+      - ../cache:/var/www/html/cache
+      - ../uploads:/var/www/html/uploads
+      - ../import:/var/www/html/import
+      - ../logs:/var/www/html/logs
       - private:/var/www/bareboneseshop-private
     depends_on: [php]
     restart: unless-stopped
+
+  # One-off installer: `docker compose run --rm setup php cli/setup.php ...`.
+  setup:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: [setup]
+    volumes:
+      - ..:/var/www/html
+      - private:/var/www/bareboneseshop-private
 
   nginx:
     image: nginx:1.27-alpine

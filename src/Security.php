@@ -532,13 +532,12 @@ class Security {
             if ($user !== '' && $pass !== '') {
                 $ip = self::clientIp();
                 $throttle = new AdminLoginThrottle(self::rateDb());
-                $retryAfter = $throttle->retryAfter($user, $ip);
+                $retryAfter = $throttle->reserve($user, $ip);
                 if ($retryAfter > 0) {
                     header('Retry-After: ' . $retryAfter);
                     self::renderAdminLogin('Too many login attempts. Try again later.', 429);
                 }
                 $identity = AdminIdentity::authenticate($user, $pass, $mfa, $ip, (string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
-                if ($identity === null) $throttle->recordFailure($user, $ip);
                 if ($identity !== null) {
                     $throttle->recordSuccess($user, $ip);
                     session_regenerate_id(true);
@@ -564,7 +563,7 @@ class Security {
         $pass = $_SERVER['PHP_AUTH_PW'] ?? '';
         $ip = self::clientIp();
         $throttle = new AdminLoginThrottle(self::rateDb());
-        $retryAfter = $user !== '' ? $throttle->retryAfter($user, $ip) : 0;
+        $retryAfter = $user !== '' ? $throttle->reserve($user, $ip) : 0;
         if ($retryAfter > 0) {
             http_response_code(429);
             header('Retry-After: ' . $retryAfter);
@@ -612,8 +611,6 @@ class Security {
                 exit('Service unavailable.');
             }
         }
-
-        if ($user !== '') $throttle->recordFailure($user, $ip);
 
         header('WWW-Authenticate: Basic realm="Shop Admin"');
         http_response_code(401);

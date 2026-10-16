@@ -112,7 +112,7 @@ $_POST = [
 ];
 $transferCheckout = apiCheckout();
 $transferOrderId = (int)($transferCheckout['order_id'] ?? 0);
-assert_true(!empty($transferCheckout['success']) && $transferOrderId > 0, 'Awaiting payment: digital bank-transfer checkout succeeds');
+assert_true(!empty($transferCheckout['success']) && $transferOrderId > 0, 'Awaiting payment: digital bank-transfer checkout succeeds (' . ($transferCheckout['error'] ?? 'ok') . ')');
 assert_equals('pending', (string)Orders::byId($transferOrderId)['payment_status'], 'Awaiting payment: transfer order starts unpaid');
 $awaitingIds = array_map('intval', array_column(OfflinePaymentQueue::awaiting(), 'id'));
 assert_true(in_array($transferOrderId, $awaitingIds, true), 'Awaiting payment: unpaid transfer is listed');
@@ -1797,4 +1797,4 @@ require __DIR__ . '/AuditAdminI18nRegression.php';
 require __DIR__ . '/AuditEmailTemplateRegression.php';
 require __DIR__ . '/AuditExtensionRegression.php';
 require __DIR__ . '/AuditExtensionDataRegression.php';
-foreach (['Gopay', 'Comgate', 'Thepay', 'ShipmentAdmin', 'ImportStoreScope', 'GdprRetention'] as $auditTailRegression) require __DIR__ . "/Audit{$auditTailRegression}Regression.php";
+foreach (['Gopay', 'Comgate', 'Thepay', 'ShipmentAdmin', 'ImportStoreScope', 'GdprRetention', 'CheckoutCod', 'WarehouseFeedStock', 'WebhookClaim', 'JobLease', 'SqliteMaintenanceStale', 'BackupCompleteness', 'RetentionCleanup', 'GdprEraseCompleteness', 'InvoiceMailFailure', 'DockerSample'] as $auditTailRegression) require __DIR__ . "/Audit{$auditTailRegression}Regression.php";

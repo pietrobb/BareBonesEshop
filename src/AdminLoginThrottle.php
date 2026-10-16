@@ -6,7 +6,8 @@
  * Only failed attempts are recorded, and a rejected attempt records nothing, so
  * an attacker cannot extend a block by continuing to send requests.
  *  - pair    (account + IP): strict; a success from that IP clears it.
- *  - ip      (any account):  stops one IP from spraying usernames.
+ *  - ip      (any account):  stops one IP from spraying usernames; a success
+ *    does not clear it.
  *  - account (all IPs):      ceiling for distributed guessing; it only blocks
  *    IPs that have not logged into this account successfully in the last
  *    TRUST_SECONDS, so the owner from a known IP is never locked out.
@@ -22,9 +23,12 @@ final class AdminLoginThrottle
     private PDO $db;
     /** @var Closure(): int */
     private Closure $clock;
+    /** @var list<int> */
+    private array $reserved = [];
 
     public function __construct(PDO $db, ?Closure $clock = null)
     {
+        $db->exec('PRAGMA busy_timeout = 5000');
         $db->exec('CREATE TABLE IF NOT EXISTS hits (key TEXT NOT NULL, ts INTEGER NOT NULL)');
         $db->exec('CREATE INDEX IF NOT EXISTS idx_hits ON hits(key, ts)');
         $db->exec('CREATE TABLE IF NOT EXISTS admin_login_trust (key TEXT PRIMARY KEY, ts INTEGER NOT NULL)');
@@ -46,23 +50,56 @@ final class AdminLoginThrottle
         return $wait;
     }
 
-    public function recordFailure(string $account, string $ip): void
+    /**
+     * Atomically checks the limits and, when allowed, records this attempt as a
+     * failure before the password is verified, so parallel requests cannot all
+     * pass the check. Returns seconds to wait; 0 = attempt reserved. A rejected
+     * attempt still writes nothing. recordSuccess() releases the reservation.
+     */
+    public function reserve(string $account, string $ip): int
+    {
+        $this->db->exec('BEGIN IMMEDIATE');
+        try {
+            $wait = $this->retryAfter($account, $ip);
+            if ($wait === 0) $this->reserved = $this->recordFailure($account, $ip);
+            $this->db->exec('COMMIT');
+        } catch (Throwable $e) {
+            $this->db->exec('ROLLBACK');
+            throw $e;
+        }
+        return $wait;
+    }
+
+    /** @return list<int> rowids of the inserted ip/account hits */
+    public function recordFailure(string $account, string $ip): array
     {
         $account = self::normalize($account);
         $insert = $this->db->prepare('INSERT INTO hits (key, ts) VALUES (:key, :ts)');
         $now = ($this->clock)();
-        foreach ([$this->key('pair', $account, $ip), $this->key('ip', '', $ip), $this->key('account', $account, '')] as $key) {
+        $insert->execute([':key' => $this->key('pair', $account, $ip), ':ts' => $now]);
+        $rowIds = [];
+        foreach ([$this->key('ip', '', $ip), $this->key('account', $account, '')] as $key) {
             $insert->execute([':key' => $key, ':ts' => $now]);
+            $rowIds[] = (int)$this->db->lastInsertId();
         }
+        return $rowIds;
     }
 
+    /**
+     * Clears the account+IP pair bucket and this attempt's own reservation.
+     * The IP and account buckets keep earlier failures: a valid login on one
+     * account must not reset the spray limit for the other accounts.
+     */
     public function recordSuccess(string $account, string $ip): void
     {
         $account = self::normalize($account);
         $now = ($this->clock)();
-        $delete = $this->db->prepare('DELETE FROM hits WHERE key = :key');
-        $delete->execute([':key' => $this->key('pair', $account, $ip)]);
-        $delete->execute([':key' => $this->key('ip', '', $ip)]);
+        $this->db->prepare('DELETE FROM hits WHERE key = :key')
+            ->execute([':key' => $this->key('pair', $account, $ip)]);
+        if ($this->reserved !== []) {
+            $this->db->exec('DELETE FROM hits WHERE rowid IN (' . implode(',', array_map('intval', $this->reserved)) . ')');
+            $this->reserved = [];
+        }
         $this->db->prepare('DELETE FROM admin_login_trust WHERE ts < :cutoff')
             ->execute([':cutoff' => $now - self::TRUST_SECONDS]);
         $this->db->prepare('INSERT OR REPLACE INTO admin_login_trust (key, ts) VALUES (:key, :ts)')

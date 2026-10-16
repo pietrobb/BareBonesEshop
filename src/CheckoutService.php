@@ -12,12 +12,19 @@ class CheckoutService {
     }
 
     /** Delivery quote of the checkout form: a digital-only cart gets only the free electronic delivery. */
-    public static function deliveryQuote(array $cart, int $subtotal, string $country, mixed $method): array {
+    public static function deliveryQuote(array $cart, int $subtotal, string $country, mixed $method, bool $cod = false): array {
         if (self::isDigitalOnly(array_values(array_filter($cart, static fn(array $item): bool => $item['available'] ?? true)))) {
             $rate = self::digitalRate();
             return ['rates' => [$rate], 'selected' => $rate, 'price' => 0, 'hint' => '', 'digital' => true];
         }
-        return ShippingService::cartQuote($cart, $subtotal, $country, is_string($method) ? Security::clean($method) : '') + ['digital' => false];
+        return ShippingService::cartQuote($cart, $subtotal, $country, is_string($method) ? Security::clean($method) : '', $cod) + ['digital' => false];
+    }
+
+    /** Shipping shown in the summary: cash on delivery adds the carrier's COD surcharge, as checkout charges it. */
+    public static function summaryShipping(array $cart, int $subtotal, string $country, string $method, ?array $payment, int $shipping): int {
+        if (($payment['service_type'] ?? '') !== 'cod' || $method === '') return $shipping;
+        $codQuote = self::deliveryQuote($cart, $subtotal, $country, $method, true);
+        return ($codQuote['selected']['method_code'] ?? '') === $method ? (int)$codQuote['price'] : $shipping;
     }
 
     public static function consentDefinitions(string $country, array $items): array {
@@ -154,9 +161,11 @@ class CheckoutService {
     public static function discountPreview(string $couponCode, int $subtotal, ?string $email, array $items, ?int $customerId): array {
         $couponDiscount = 0;
         $couponError = null;
+        $couponStacking = 'stack';
         if ($couponCode !== '') {
             $coupon = Pricing::applyCoupon($couponCode, $subtotal, $email);
             $couponDiscount = max(0, (int)$coupon['discount']);
+            $couponStacking = (string)($coupon['stacking'] ?? 'stack');
             if ($couponDiscount === 0) $couponError = match ((string)($coupon['error'] ?? '')) {
                 'Minimum order not met' => 'coupon_min_subtotal', 'Coupon expired' => 'coupon_used_up',
                 'Coupon already used' => 'coupon_already_used', default => 'coupon_invalid',
@@ -168,6 +177,10 @@ class CheckoutService {
             if ($rule['action'] === 'free_shipping') $freeShipping = true;
             $promotionDiscount += max(0, (int)($rule['discount'] ?? 0));
         }
+        $combined = Pricing::combineDiscounts($couponDiscount, $couponStacking, $promotionDiscount);
+        if ($couponDiscount > 0 && $combined['coupon'] === 0) $couponError = 'coupon_not_combinable';
+        $couponDiscount = $combined['coupon'];
+        $promotionDiscount = $combined['promotion'];
         return ['coupon_discount' => $couponDiscount, 'coupon_error' => $couponError, 'promotion_discount' => $promotionDiscount, 'free_shipping' => $freeShipping];
     }
 }

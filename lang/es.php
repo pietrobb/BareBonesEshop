@@ -250,6 +250,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'coupon_invalid' => 'El cupón %s no existe o no es válido.',
     'coupon_min_subtotal' => 'El cupón %s requiere un importe de pedido mayor.',
     'coupon_used_up' => 'El cupón %s está agotado.',
+    'coupon_not_combinable' => 'El cupón %s no se puede combinar con la promoción actual, que ya le resulta más ventajosa.',
     'coupon_already_used' => 'Ya ha usado el cupón %s.',
     'checkout_submitting' => 'Enviando el pedido…',
     'checkout_redirecting' => 'Redirigiendo al pago…',

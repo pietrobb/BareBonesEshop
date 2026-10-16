@@ -104,6 +104,13 @@ try {
     Logger::exception('worker.cart_reminder_sweep_failed', $e);
 }
 
+// Retention housekeeping runs as a queued job once a day; nothing else enqueues it.
+try {
+    if (RetentionCleanup::enqueueIfDue(workerJobsDir($cfg) . '/retention-cleanup.last') && $verbose) echo "Cleanup job queued\n";
+} catch (\Throwable $e) {
+    Logger::exception('worker.cleanup_schedule_failed', $e);
+}
+
 // Optional daily low-stock digest (stock_alerts.digest_hour); claimed once per day.
 try {
     StockAlerts::digest();
@@ -133,6 +140,7 @@ do {
         continue;
     }
 
+    $claimedAny = false;
     foreach ($jobs as $job) {
         // Skip jobs waiting for exponential backoff
         if (!JobQueue::isReady($job)) continue;
@@ -152,6 +160,8 @@ do {
         }
 
         if ($verbose) echo "  Processing: {$type} (ID: {$job['id']})\n";
+        $claimedAny = true;
+        JobQueue::beginWork($procFile);
 
         try {
             $payload = $job['payload'] ?? [];
@@ -172,6 +182,10 @@ do {
             Logger::info('worker.job_completed', ['job_id' => $job['id'] ?? '', 'job_type' => $type]);
             if ($verbose) echo "    [OK]\n";
 
+        } catch (JobLeaseLost $e) {
+            // The job now belongs to another worker: neither complete nor fail this stale claim.
+            Logger::warning('worker.job_lease_lost', ['job_id' => $job['id'] ?? '', 'job_type' => $type]);
+            if ($verbose) echo "    [ABORTED] lease lost\n";
         } catch (\Throwable $e) {
             try {
                 JobQueue::fail($procFile, $job, 'worker.job_failed');
@@ -181,10 +195,14 @@ do {
             if ($verbose) echo "    [FAIL] worker.job_failed\n";
             if ($type === 'incident_notify') Logger::safeWrite('error', 'monitoring.notification_failed', ['phase' => 'notification']);
             else IncidentMonitor::report($type === 'digital_fulfill' ? 'digital.fulfillment_failed' : 'worker.job_failed', $type === 'digital_fulfill' ? 'digital' : 'worker', 'critical', ['exception' => $e, 'attempts' => (int)($job['attempts'] ?? 0)]);
+        } finally {
+            JobQueue::endWork();
         }
     }
 
     if ($once) break;
+    // Every pulled job was in backoff or claimed elsewhere: wait instead of spinning.
+    if (!$claimedAny) sleep(2);
 
 } while (time() - $startTime < $maxRuntime);
 
@@ -296,6 +314,7 @@ function handleCacheRebuild(array $payload, array $job): void {
             $perPage = $cfg['per_page'] ?? 24;
 
             foreach ($allCats as $cat) {
+                JobQueue::heartbeat();
                 $data = Products::byCategory($cat['id'], 1, $perPage, 'price_asc');
                 $data['products'] = Products::enrichMany(array_map([I18n::class, 'product'], $data['products']));
                 Cache::writeJson(Cache::localePath($locale, "cat/{$cat['slug']}/page-1.json"), $data);
@@ -323,6 +342,7 @@ function handleCacheRebuild(array $payload, array $job): void {
         $pricingGroups = array_keys(Pricing::config()['customer_groups'] ?? ['guest' => []]);
         if (!in_array('guest', $pricingGroups, true)) array_unshift($pricingGroups, 'guest');
         foreach ($pricingGroups as $group) {
+            JobQueue::heartbeat();
             $prices = [];
             foreach ($allProducts as $p) {
                 $priced = Pricing::apply($p, $group);
@@ -704,19 +724,13 @@ function cartReminderBaseUrl(array $cfg): string {
 }
 
 function handleCleanup(array $payload, array $job): void {
-    // Clean old processed events and replayable machine-API responses.
-    Idempotency::cleanup(7);
-    ApiAuth::cleanupIdempotency(30);
+    $cfg = require __DIR__ . '/../config.php';
+    $deleted = RetentionCleanup::run(['jobs_dir' => workerJobsDir($cfg)]);
+    Logger::info('worker.retention_cleanup', $deleted);
+}
 
-    // Clean old completed jobs (older than 7 days)
-    $completedDir = (require __DIR__ . '/../config.php')['jobs_dir'] ?? dirname(__DIR__, 2) . '/bareboneseshop-private/jobs';
-    $completedDir .= '/completed';
-    if (is_dir($completedDir)) {
-        $cutoff = time() - (7 * 86400);
-        foreach (glob($completedDir . '/*.json') ?: [] as $file) {
-            if (filemtime($file) < $cutoff) @unlink($file);
-        }
-    }
+function workerJobsDir(array $cfg): string {
+    return (string)($cfg['jobs_dir'] ?? dirname(__DIR__, 2) . '/bareboneseshop-private/jobs');
 }
 
 function handleImageResize(array $payload, array $job): void {
@@ -759,7 +773,7 @@ function handleInvoiceIssue(array $payload, array $job): void {
         'customer_name'  => $order['customer_name'],
     ];
 
-    MailService::send(
+    $result = MailService::send(
         'invoice_issued',
         (string)$order['customer_email'],
         $locale,
@@ -768,6 +782,8 @@ function handleInvoiceIssue(array $payload, array $job): void {
         $attachments,
         orderProviderCode($order, 'mail') ?: Adapters::defaultProviderCode('mail')
     );
+    // Fail the job so the queue retries delivery; issuing the invoice again is idempotent.
+    if (($result['status'] ?? '') === 'failed') throw new RuntimeException('mail.delivery_failed');
 }
 
 function handleImportProcess(array $payload, array $job): void {

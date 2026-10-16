@@ -23,6 +23,10 @@ class BackupService
     private static ?string $rootDir = null;
     /** Path to the live SQLite file backing the configured PDO; null if unknown / not local. */
     private static ?string $livePath = null;
+    /** MySQL installs: callable(string $dumpPath): array that writes a consistent dump. */
+    private static ?Closure $mysqlDumper = null;
+    /** Non-database state archived next to every backup: name => file or directory. */
+    private static array $fileSources = [];
 
     public static function init(PDO $db, ?array $config = null, ?string $rootDir = null, ?BackupStorage $storage = null): void
     {
@@ -30,14 +34,39 @@ class BackupService
         self::$rootDir = $rootDir ?: dirname(__DIR__);
         self::$cfg = $config ?: self::loadConfig(self::$rootDir . '/config/backup.json');
 
+        self::$mysqlDumper = null;
+        self::$fileSources = [];
         if ($config !== null) {
             $storageRoot = (string)($config['storage_dir'] ?? self::$rootDir . '/storage/backups');
             $storageClass = (string)($config['storage_adapter'] ?? 'LocalBackupStorage');
+            self::$fileSources = (array)($config['files'] ?? []);
         } else {
             $appCfg = require self::$rootDir . '/config.php';
             $storageRoot = (string)($appCfg['backup_storage_dir'] ?? dirname(self::$rootDir) . '/bareboneseshop-private/backups');
             $storageClass = (string)($appCfg['backup_storage_adapter'] ?? 'LocalBackupStorage');
             self::$cfg['log_file'] = (string)($appCfg['backup_log_file'] ?? dirname(self::$rootDir) . '/bareboneseshop-private/logs/backup.log');
+            if (self::$cfg['include_files'] ?? true) {
+                $private = dirname(self::$rootDir) . '/bareboneseshop-private';
+                self::$fileSources = [
+                    'invoices'  => (string)($appCfg['invoice_storage_dir'] ?? $private . '/invoices'),
+                    'uploads'   => (string)($appCfg['uploads_dir'] ?? self::$rootDir . '/uploads'),
+                    'gdpr_salt' => (string)($appCfg['gdpr_salt_file'] ?? $private . '/secrets/gdpr_salt'),
+                ];
+            }
+            if (self::driverName($db) === 'mysql') {
+                self::$mysqlDumper = static fn(string $dumpPath): array => (new MysqlUpdateDatabaseBackup(
+                    (string)($appCfg['db_host'] ?? ''),
+                    (int)($appCfg['db_port'] ?? 3306),
+                    (string)($appCfg['db_name'] ?? ''),
+                    (string)($appCfg['db_user'] ?? ''),
+                    (string)($appCfg['db_password'] ?? ''),
+                    (string)($appCfg['db_charset'] ?? 'utf8mb4'),
+                    // dumpTo() never touches the probe schema; the constructor only validates its name.
+                    trim((string)($appCfg['update_mysql_probe_database'] ?? '')) ?: substr((string)($appCfg['db_name'] ?? ''), 0, 51) . '_update_probe',
+                    (string)($appCfg['update_mysql_dump_binary'] ?? 'mysqldump'),
+                    (string)($appCfg['update_mysql_client_binary'] ?? 'mysql')
+                ))->dumpTo($dumpPath);
+            }
         }
         $logPath = (string)(self::$cfg['log_file'] ?? 'storage/backup.log');
         if (!self::isAbsolutePath($logPath)) $logPath = self::$rootDir . '/' . $logPath;
@@ -65,6 +94,23 @@ class BackupService
         self::$storage = null;
         self::$rootDir = null;
         self::$livePath = null;
+        self::$mysqlDumper = null;
+        self::$fileSources = [];
+    }
+
+    /** Override the MySQL dump step (tests, custom dump tooling). */
+    public static function useMysqlDumper(?Closure $dumper): void
+    {
+        self::$mysqlDumper = $dumper;
+    }
+
+    private static function driverName(PDO $db): string
+    {
+        try {
+            return strtolower((string)$db->getAttribute(PDO::ATTR_DRIVER_NAME));
+        } catch (\Throwable $e) {
+            return '';
+        }
     }
 
     public static function isEnabled(): bool
@@ -165,22 +211,22 @@ class BackupService
 
     // ---------- Naming / paths ----------
 
-    public static function buildRemotePath(\DateTimeInterface $when, int $suffix = 0): string
+    public static function buildRemotePath(\DateTimeInterface $when, int $suffix = 0, string $extension = 'db'): string
     {
         $datePart = $when->format('Y/m/d');
         $stamp = $when->format('Ymd-His');
-        $name = 'eshop-' . $stamp . ($suffix > 0 ? '-' . $suffix : '') . '.db';
+        $name = 'eshop-' . $stamp . ($suffix > 0 ? '-' . $suffix : '') . '.' . $extension;
         return $datePart . '/' . $name;
     }
 
-    /** Reserve a unique remote path for `now` — appends -1, -2, ... if the .db already exists. */
-    public static function reserveUniquePath(\DateTimeInterface $when): string
+    /** Reserve a unique remote path for `now` — appends -1, -2, ... if the file already exists. */
+    public static function reserveUniquePath(\DateTimeInterface $when, string $extension = 'db'): string
     {
-        $rp = self::buildRemotePath($when, 0);
+        $rp = self::buildRemotePath($when, 0, $extension);
         $i = 0;
         while (self::storedRow($rp) !== null) {
             $i++;
-            $rp = self::buildRemotePath($when, $i);
+            $rp = self::buildRemotePath($when, $i, $extension);
             if ($i > 999) {
                 throw new RuntimeException('BackupService: cannot reserve unique backup path');
             }
@@ -244,36 +290,47 @@ class BackupService
         if (self::$db === null) {
             throw new RuntimeException('BackupService::create — not initialized');
         }
-        if (self::$livePath === null) {
+        $driver = self::driverName(self::$db);
+        if ($driver === 'mysql') {
+            if (self::$mysqlDumper === null) {
+                throw new RuntimeException('BackupService::create — MySQL dump is not configured');
+            }
+        } elseif (self::$livePath === null) {
             throw new RuntimeException('BackupService::create — live SQLite path unknown (in-memory or unsupported driver)');
         }
 
         $label    = (string)($opts['label']   ?? 'manual');
         $trigger  = (string)($opts['trigger'] ?? $label);
         $compress = (bool)($opts['compress']  ?? (self::$cfg['compression'] ?? false));
+        $extension = $driver === 'mysql' ? 'sql' : 'db';
 
         $stagedDb = null;
         $stagedGz = null;
+        $stagedFiles = null;
         $lockHandle = self::acquireLock();
         try {
             // 1. WAL checkpoint (best-effort)
-            if (!empty(self::$cfg['wal_checkpoint'])) {
+            if ($driver !== 'mysql' && !empty(self::$cfg['wal_checkpoint'])) {
                 try { self::$db->exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (\Throwable $e) { /* non-fatal */ }
             }
 
             // 2. Reserve a unique remote path
             $when = new DateTimeImmutable('now');
-            $remotePath = self::reserveUniquePath($when);
-            $absPath = $stagedDb = self::stagingPath('.db');
+            $remotePath = self::reserveUniquePath($when, $extension);
+            $absPath = $stagedDb = self::stagingPath('.' . $extension);
 
-            // 3. VACUUM INTO — atomic, consistent snapshot
-            $sqlPath = str_replace("'", "''", $absPath);
+            // 3. Consistent snapshot: VACUUM INTO (SQLite) or single-transaction dump (MySQL)
             try {
-                self::$db->exec("VACUUM INTO '{$sqlPath}'");
+                if ($driver === 'mysql') {
+                    (self::$mysqlDumper)($absPath);
+                } else {
+                    $sqlPath = str_replace("'", "''", $absPath);
+                    self::$db->exec("VACUUM INTO '{$sqlPath}'");
+                }
             } catch (\Throwable $e) {
                 @unlink($absPath);
                 self::log("CREATE FAIL label={$label} err=" . $e->getMessage());
-                throw new RuntimeException('VACUUM INTO failed: ' . $e->getMessage(), 0, $e);
+                throw new RuntimeException(($driver === 'mysql' ? 'MySQL dump' : 'VACUUM INTO') . ' failed: ' . $e->getMessage(), 0, $e);
             }
             if (!is_file($absPath)) {
                 throw new RuntimeException("Backup file not created: {$absPath}");
@@ -308,8 +365,14 @@ class BackupService
                 }
             }
 
-            // 6. Schema version
+            // 6. Schema version + invoices/uploads/GDPR salt, which a database restore alone cannot bring back
             $schemaVersion = self::currentSchemaVersion(self::$db);
+            $files = null;
+            if (self::$fileSources !== []) {
+                $stagedFiles = self::stagingPath('.files.tar');
+                $files = self::archiveFiles($stagedFiles);
+                $files['remote_path'] = $remotePath . '.files.tar';
+            }
 
             // 7. Meta JSON written by storage adapter
             $meta = [
@@ -324,8 +387,24 @@ class BackupService
                 'trigger'        => $trigger,
                 'compressed'     => $compressed,
                 'created_by'     => 'BackupService',
+                'driver'         => $driver === 'mysql' ? 'mysql' : 'sqlite',
+                'files_archive'  => $files['remote_path'] ?? null,
+                'files'          => $files['sources'] ?? null,
             ];
             try {
+                if ($files !== null) {
+                    self::$storage->put($stagedFiles, $files['remote_path'], [
+                        'filename'    => basename($files['remote_path']),
+                        'remote_path' => $files['remote_path'],
+                        'kind'        => 'files',
+                        'backup'      => $remotePath,
+                        'timestamp'   => $meta['timestamp'],
+                        'size_bytes'  => $files['size_bytes'],
+                        'sha256'      => $files['sha256'],
+                        'entries'     => $files['entries'],
+                        'sources'     => $files['sources'],
+                    ]);
+                }
                 self::$storage->put($absPath, $remotePath, $meta);
                 if ($compressed && $stagedGz !== null) {
                     $compressedMeta = $meta;
@@ -339,6 +418,9 @@ class BackupService
                 }
             } catch (\Throwable $e) {
                 try { self::$storage->delete($remotePath); } catch (\Throwable $ignored) { }
+                if ($files !== null) {
+                    try { self::$storage->delete($files['remote_path']); } catch (\Throwable $ignored) { }
+                }
                 if ($compressed) {
                     try { self::$storage->delete($remotePath . '.gz'); } catch (\Throwable $ignored) { }
                 }
@@ -362,10 +444,66 @@ class BackupService
 
             return $meta;
         } finally {
+            self::removeStagedFile($stagedFiles);
             self::removeStagedFile($stagedGz);
             self::removeStagedFile($stagedDb);
             self::releaseLock($lockHandle);
         }
+    }
+
+    /** Tar every configured file source; a source that is configured but unreadable fails the backup. */
+    private static function archiveFiles(string $tarPath): array
+    {
+        $tar = new PharData($tarPath);
+        $entries = 0;
+        $sources = [];
+        foreach (self::$fileSources as $name => $path) {
+            $name = (string)$name;
+            $path = (string)$path;
+            if (!preg_match('/^[a-z][a-z0-9_]{0,31}$/', $name)) {
+                throw new RuntimeException("BackupService: invalid file source name: {$name}");
+            }
+            if ($path === '' || is_link($path)) {
+                $sources[$name] = $path === '' ? 'not_configured' : 'symlink_skipped';
+            } elseif (is_file($path)) {
+                $tar->addFile($path, $name . '/' . basename($path));
+                $entries++;
+                $sources[$name] = 'file';
+            } elseif (is_dir($path)) {
+                $base = rtrim(str_replace('\\', '/', $path), '/') . '/';
+                $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS));
+                foreach ($iterator as $file) {
+                    if ($file->isLink() || !$file->isFile()) continue;
+                    $relative = substr(str_replace('\\', '/', $file->getPathname()), strlen($base));
+                    $tar->addFile($file->getPathname(), $name . '/' . $relative);
+                    $entries++;
+                }
+                $sources[$name] = 'directory';
+            } else {
+                $sources[$name] = 'missing';
+            }
+        }
+        if ($entries === 0) {
+            // PharData only writes the archive once it has an entry; keep the companion uniform.
+            $tar->addFromString('.backup-files', "no file sources present\n");
+        }
+        unset($tar);
+        if (!is_file($tarPath)) {
+            throw new RuntimeException('BackupService: files archive was not created');
+        }
+        return [
+            'size_bytes' => filesize($tarPath),
+            'sha256'     => hash_file('sha256', $tarPath),
+            'entries'    => $entries,
+            'sources'    => $sources,
+        ];
+    }
+
+    private static function deleteBackup(array $row): void
+    {
+        self::$storage->delete($row['path']);
+        $files = (string)($row['meta']['files_archive'] ?? '');
+        if ($files !== '') self::$storage->delete($files);
     }
 
     // ---------- restore() ----------
@@ -393,6 +531,10 @@ class BackupService
     {
         if (self::$db === null) {
             throw new RuntimeException('BackupService::restore — not initialized');
+        }
+        if (preg_match('/\.sql(?:\.gz)?$/', $remotePath) === 1) {
+            throw new RuntimeException('Restore: MySQL dumps are restored manually — stop web traffic and workers, then import the .sql file '
+                . 'with the mysql client into db_name; automatic restore supports SQLite backups only');
         }
         if (self::$livePath === null) {
             throw new RuntimeException('BackupService::restore — live SQLite path unknown');
@@ -619,7 +761,7 @@ class BackupService
     /** Keep only the newest `$keep` backups labelled 'pre-restore-snapshot'; delete the rest. */
     private static function pruneSnapshots(int $keep): void
     {
-        $all = self::$storage->list();
+        $all = self::list();
         $snaps = [];
         foreach ($all as $row) {
             if ((string)($row['meta']['label'] ?? '') === 'pre-restore-snapshot') {
@@ -630,7 +772,7 @@ class BackupService
         // already newest-first
         for ($i = $keep; $i < count($snaps); $i++) {
             try {
-                self::$storage->delete($snaps[$i]['path']);
+                self::deleteBackup($snaps[$i]);
             } catch (\Throwable $e) { /* ignore */ }
         }
     }
@@ -639,7 +781,11 @@ class BackupService
 
     public static function list(): array
     {
-        $rows = self::$storage->list();
+        // Files archives are companions of a database backup, not restore points of their own.
+        $rows = array_values(array_filter(
+            self::$storage->list(),
+            static fn(array $row): bool => !str_ends_with((string)($row['path'] ?? ''), '.files.tar')
+        ));
         // Newest first without relying on 1 s file mtimes or directory order: microsecond creation
         // stamp, else the metadata/mtime second, then the -N suffix reserveUniquePath() appends.
         usort($rows, static fn(array $a, array $b): int => self::orderKey($b) <=> self::orderKey($a));
@@ -650,7 +796,7 @@ class BackupService
     {
         $createdUs = (string)($row['meta']['created_us'] ?? '');
         $micro = ctype_digit($createdUs) ? (int)$createdUs : self::rowWhen($row)->getTimestamp() * 1000000;
-        $suffix = preg_match('/-\d{8}-\d{6}-(\d+)\.db(?:\.gz)?$/', (string)($row['path'] ?? ''), $m) === 1 ? (int)$m[1] : 0;
+        $suffix = preg_match('/-\d{8}-\d{6}-(\d+)\.(?:db|sql)(?:\.gz)?$/', (string)($row['path'] ?? ''), $m) === 1 ? (int)$m[1] : 0;
         return [$micro, $suffix];
     }
 
@@ -744,7 +890,7 @@ class BackupService
         foreach ($all as $row) {
             if (isset($keep[$row['path']])) continue;
             try {
-                self::$storage->delete($row['path']);
+                self::deleteBackup($row);
                 $deleted[] = $row['path'];
             } catch (\Throwable $e) {
                 self::log('GC delete fail ' . $row['path'] . ' err=' . $e->getMessage());

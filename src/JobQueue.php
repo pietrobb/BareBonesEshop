@@ -8,6 +8,10 @@ require_once __DIR__ . '/Queue.php';
 class JobQueue {
     /** Same default as the durable backends' lease_seconds; worker runs are capped at ~55 s. */
     private const FILE_LEASE_SECONDS = 300;
+    /** Below the smallest configurable lease (30 s), so a heartbeating job never expires. */
+    private const HEARTBEAT_SECONDS = 10;
+    private static string $activeClaim = '';
+    private static int $leaseRenewedAt = 0;
     private static ?string $jobsDir = null;
     private static ?QueueBackend $backendOverride = null;
     private static ?QueueBackend $configuredBackend = null;
@@ -95,15 +99,18 @@ class JobQueue {
         $dir = self::dir() . '/pending';
         if (!is_dir($dir)) return [];
 
-        $files = glob($dir . '/*.json');
+        $files = glob($dir . '/*.json') ?: [];
         sort($files); // sorts by filename = priority + timestamp
 
+        // Jobs still in backoff are skipped here, like the durable backends' available_at filter.
+        // Returning them made the worker spin without sleeping and starved ready jobs behind them.
         $jobs = [];
-        foreach (array_slice($files, 0, max(0, $limit)) as $file) {
+        foreach ($files as $file) {
+            if (count($jobs) >= $limit) break;
             if (is_link($file) || !is_file($file)) continue;
             $raw = file_get_contents($file);
             $job = $raw !== false ? json_decode($raw, true) : null;
-            if (is_array($job)) {
+            if (is_array($job) && self::isReady($job)) {
                 $job['_file'] = $file;
                 $jobs[] = $job;
             }
@@ -157,6 +164,38 @@ class JobQueue {
             if (!is_array($job)) continue;
             self::fail($file, $job, 'Worker stopped while processing the job (lease expired)');
         }
+    }
+
+    /** Renew a claim's lease; false when the job was recovered or claimed by another worker. */
+    public static function extendLease(string $claim): bool {
+        if ($backend = self::backend()) return $backend->extendLease($claim);
+        $procFile = self::assertQueueFile($claim, 'processing', true);
+        return is_file($procFile) && touch($procFile);
+    }
+
+    /** The worker registers the claim it is running, so long handlers can heartbeat() it. */
+    public static function beginWork(string $claim): void {
+        self::$activeClaim = $claim;
+        self::$leaseRenewedAt = time();
+    }
+
+    public static function endWork(): void {
+        self::$activeClaim = '';
+    }
+
+    /**
+     * Long-running handlers (imports, cache rebuilds) call this between units of work. The lease is
+     * renewed at most every HEARTBEAT_SECONDS; once another worker owns the job, the run is aborted
+     * so it is not processed twice. No-op outside a worker job.
+     */
+    public static function heartbeat(bool $force = false): void {
+        if (self::$activeClaim === '') return;
+        if (!$force && time() - self::$leaseRenewedAt < self::HEARTBEAT_SECONDS) return;
+        if (!self::extendLease(self::$activeClaim)) {
+            self::$activeClaim = '';
+            throw new JobLeaseLost('JobQueue: job lease was lost to another worker');
+        }
+        self::$leaseRenewedAt = time();
     }
 
     /**

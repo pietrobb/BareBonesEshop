@@ -57,8 +57,10 @@ database admin account exists.
   deny and rewrite rules.
 - **Docker**: [`deploy/docker-compose.yml`](deploy/docker-compose.yml) runs nginx and the
   PHP-FPM image from [`deploy/Dockerfile`](deploy/Dockerfile) with the private runtime data
-  on a named volume. First run:
-  `docker compose -f deploy/docker-compose.yml run --rm --user www-data -e BBE_ADMIN_PASSWORD=... php php cli/setup.php install --app-url=http://localhost:8080 --admin-username=admin`,
+  on a named volume. PHP runs as `www-data` (uid 33) on a read-only root filesystem with the
+  code mounted read-only; only `cache/`, `uploads/`, `import/` and `logs/` are writable and
+  must be owned by uid 33. First run, through the opt-in installer that may write `config.php`:
+  `docker compose -f deploy/docker-compose.yml run --rm -e BBE_ADMIN_PASSWORD=... setup php cli/setup.php install --app-url=http://localhost:8080 --admin-username=admin`,
   then `docker compose -f deploy/docker-compose.yml up -d`.
 
 Never use `php -S` without `router.php`, and never for production.

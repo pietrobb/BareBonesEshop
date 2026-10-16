@@ -65,6 +65,13 @@ class Import {
 
         while (($row = fgetcsv($handle, self::MAX_ROW_BYTES, ',', '"', '')) !== false) {
             $lineNum++;
+            try {
+                JobQueue::heartbeat(); // a long import must keep its worker lease
+            } catch (JobLeaseLost $e) {
+                $db->rollBack(); // the worker that took the job over re-imports the open batch
+                fclose($handle);
+                throw $e;
+            }
             if ($lineNum > self::MAX_ROWS + 1) {
                 $errors[] = 'CSV exceeds the 100000 row limit; earlier committed batches remain imported';
                 $limitExceeded = true;

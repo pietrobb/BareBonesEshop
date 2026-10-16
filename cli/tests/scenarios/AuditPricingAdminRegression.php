@@ -281,7 +281,7 @@ try {
                         assert_equals(["JESEN-{$a125Up}", 'cart', ['min_subtotal'=>500, 'max_uses'=>1], ['type'=>'discount_percent', 'bps'=>1000]],
                             [$a125Promos['jesen']['coupon_code'] ?? null, $a125Promos['jesen']['scope'] ?? null, $a125Json('jesen', 'conditions'), $a125Json('jesen', 'actions')],
                             "{$a125Label}: coupon code upper-cased on a cart promotion with min subtotal and usage limit");
-                        assert_equals([['discount'=>200, 'name'=>'Jeseň', 'error'=>null], 'Minimum order not met', 'Coupon expired', 'refused'],
+                        assert_equals([['discount'=>200, 'name'=>'Jeseň', 'error'=>null, 'stacking'=>'exclusive'], 'Minimum order not met', 'Coupon expired', 'refused'],
                             [$a125Result['extra']['coupons'][0] ?? null, $a125Result['extra']['coupons'][1]['error'] ?? null, $a125Result['extra']['coupons'][2]['error'] ?? null, $a125Result['extra']['coupons'][3] ?? null],
                             "{$a125Label}: checkout redeems the admin coupon (case-insensitive), enforces min subtotal and max_uses at preview and at order");
                     })(),

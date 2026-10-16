@@ -597,12 +597,10 @@ function handleRmaStatus(): void {
             if (!$rma) throw new RuntimeException(I18n::t('admin.rma.not_found'));
             $source = InvoiceService::byOrderId((int)$rma['order_id']);
             if (!$source) throw new RuntimeException(I18n::t('admin.rma.no_source_invoice'));
-            $quantities = [];
-            foreach (Rma::items($id) as $item) {
-                $remaining = (int)$item['received_quantity'] - (int)$item['refunded_quantity'];
-                if ($remaining > 0) $quantities[(int)$item['id']] = $remaining;
-            }
-            $credit = InvoiceService::credit((int)$source['id'], $id, $quantities, 'admin-credit-' . $id);
+            $quantities = InvoiceService::creditableQuantities($id);
+            if (!$quantities) throw new LogicException(I18n::t('admin.rma.nothing_to_credit'));
+            // One key per attempt: a concurrent double submit shares it, a retry after a failed refund gets a new credit note.
+            $credit = InvoiceService::credit((int)$source['id'], $id, $quantities, 'admin-credit-' . $id . '-' . InvoiceService::creditAttempts($id));
             $order = Orders::byId((int)$rma['order_id']);
             if (trim((string)($order['payment_id'] ?? '')) === '') {
                 Rma::completeRefund((int)$credit['refund_id'], 'manual-admin');

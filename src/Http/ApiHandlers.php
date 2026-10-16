@@ -553,7 +553,8 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         'seller_vat_registered' => $sellerVatRegistered,
         'seller_oss_enabled'    => $sellerOss,
         'customer_country'      => $country,
-        'customer_vat_id_valid' => $vatIdValid,
+        // Reverse charge needs a VAT ID of another member state; Greece's prefix is EL.
+        'customer_vat_id_valid' => $vatIdValid && (substr($vatId, 0, 2) === 'EL' ? 'GR' : substr($vatId, 0, 2)) !== $sellerCountry,
         'is_b2b'                => $vatId !== '',
     ];
     $taxProviderCode = Adapters::defaultProviderCode('tax');
@@ -599,10 +600,12 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     // Apply coupon if provided
     $couponCode = trim(Security::str($input['coupon_code'] ?? ''));
     $couponDiscount = 0;
+    $couponStacking = 'stack';
     if ($couponCode) {
         $couponResult = Pricing::applyCoupon($couponCode, $cart['subtotal'], $email);
         if ($couponResult['discount'] > 0) {
             $couponDiscount = $couponResult['discount'];
+            $couponStacking = (string)($couponResult['stacking'] ?? 'stack');
         } else {
             return ['error' => $couponResult['error'] ?? 'Invalid coupon'];
         }
@@ -613,7 +616,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     $totalVolume = $digitalOnly ? 0 : $metrics['volume_cm3'];
     $selectedRate = $digitalOnly
         ? digitalDeliveryRate()
-        : ShippingService::selectRate($shippingMethod, $country, $totalWeight, $cart['subtotal'], $paymentMethod === 'cod', $totalVolume, ShippingService::physicalQuantity($cart['items']));
+        : ShippingService::selectRate($shippingMethod, $country, $totalWeight, $cart['subtotal'], PaymentService::isCashOnDelivery($paymentMethod), $totalVolume, ShippingService::physicalQuantity($cart['items']));
     if (!$selectedRate) {
         return ['success' => false, 'error' => 'Doručenie nie je dostupné do zvolenej krajiny.'];
     }
@@ -630,6 +633,15 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     foreach ($autoRules as $rule) {
         if ($rule['action'] === 'free_shipping') $shippingCost = 0;
         $promotionDiscount += max(0, (int)($rule['discount'] ?? 0));
+    }
+    $combinedDiscounts = Pricing::combineDiscounts($couponDiscount, $couponStacking, $promotionDiscount);
+    if ($couponDiscount > 0 && $combinedDiscounts['coupon'] === 0) {
+        return ['success' => false, 'error' => 'Coupon cannot be combined with the current promotion'];
+    }
+    $promotionDiscount = $combinedDiscounts['promotion'];
+    // Shipping rates include domestic VAT like catalog prices; zero-rated sales are charged them net.
+    if ($shippingCost > 0 && Cart::chargesNetOfDomesticVat($vatScenario)) {
+        $shippingCost = Cart::netOfDomesticVat($shippingCost, $sellerCountry, 'standard', $taxProviderCode);
     }
     $totalDiscount = min($cart['subtotal'], $couponDiscount + $promotionDiscount);
 
@@ -895,9 +907,9 @@ function apiWebhookStripe(): array {
     }
 
     $eventKey = 'payment_stripe_' . $event['id'];
-    if (Idempotency::webhookAlreadyProcessed($event['id']) || Idempotency::webhookProcessed($eventKey)) {
-        return ['status' => 'already_processed'];
-    }
+    $claim = Idempotency::webhookAlreadyProcessed($event['id']) ? 'done' : Idempotency::claim($eventKey);
+    if ($claim === 'in_flight') return paymentWebhookInFlightResponse();
+    if ($claim === 'done') return ['status' => 'already_processed'];
 
     try {
         $resolvedStore = match($event['type']) {
@@ -918,6 +930,7 @@ function apiWebhookStripe(): array {
         http_response_code(500);
         return ['error' => 'Processing failed'];
     }
+    Idempotency::complete($eventKey);
 
     return ['status' => 'ok'];
 }
@@ -930,6 +943,12 @@ function paymentWebhookParkedResponse(array $parked): array {
     }
     http_response_code(503);
     return ['error' => 'Order not resolvable yet', 'retry' => true];
+}
+
+/** Another request is processing the same event right now → 409 so the provider redelivers it later. */
+function paymentWebhookInFlightResponse(): array {
+    http_response_code(409);
+    return ['error' => 'Event is being processed', 'retry' => true];
 }
 
 /** Stripe handlers return the store that owned the order, or null when the event needs no order. */
@@ -1143,6 +1162,7 @@ function apiWebhookPayment(): array {
     }
 
     if (isset($result['parked'])) return paymentWebhookParkedResponse($result['parked']);
+    if (!empty($result['retry'])) return paymentWebhookInFlightResponse();
     return ['status' => $result['duplicate'] ?? false ? 'already_processed' : 'ok'];
 }
 
@@ -1178,6 +1198,7 @@ function apiWebhookPulledNotification(string $provider): ?array {
         return ['error' => 'Processing failed'];
     }
     if (isset($result['parked'])) return paymentWebhookParkedResponse($result['parked']);
+    if (!empty($result['retry'])) return paymentWebhookInFlightResponse();
     return ['status' => $result['duplicate'] ?? false ? 'already_processed' : 'ok'];
 }
 
@@ -1218,6 +1239,7 @@ function apiWebhookShipping(): array {
         http_response_code(500);
         return ['error' => 'Processing failed'];
     }
+    if (!empty($result['retry'])) return paymentWebhookInFlightResponse();
 
     return $result;
 }

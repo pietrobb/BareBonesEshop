@@ -14,7 +14,11 @@
 final class SqliteMaintenance
 {
     private const WAIT_SECONDS = 15.0;
+    /** Covers the instant between creating the marker and locking it in enter(). */
+    private const STALE_GRACE_SECONDS = 5;
     private static ?float $defaultWait = null;
+    /** @var array<string, resource> markers this process owns, held open and locked */
+    private static array $held = [];
 
     /** Test hook: how long exclusive() waits for other connections to close (null = default). */
     public static function setDefaultWait(?float $seconds): void
@@ -27,9 +31,33 @@ final class SqliteMaintenance
         return $dbPath . '.maintenance';
     }
 
+    /**
+     * The owner holds an OS lock on the marker for the whole operation; the OS drops it when the
+     * process dies (fatal error, OOM, kill), where `finally` never runs. An unlocked marker past the
+     * grace period is therefore stale and cleared — but only while the live database file exists:
+     * a crash between the two renames of a swap leaves no live file, and reopening would create an
+     * empty database, so the shop stays closed until the operator restores the .rollback copy.
+     */
     public static function isActive(string $dbPath): bool
     {
-        return is_file(self::markerPath($dbPath));
+        $marker = self::markerPath($dbPath);
+        if (!is_file($marker)) return false;
+        if (isset(self::$held[$marker])) return true;
+        $mtime = @filemtime($marker);
+        if ($mtime === false || $mtime > time() - self::STALE_GRACE_SECONDS || !is_file($dbPath)) return true;
+        $handle = @fopen($marker, 'r');
+        if ($handle === false) return is_file($marker);
+        if (!flock($handle, LOCK_EX | LOCK_NB)) {
+            fclose($handle);
+            return true; // the owning process is still running
+        }
+        @unlink($marker); // POSIX: unlink while holding the lock, so no new marker can be hit
+        flock($handle, LOCK_UN);
+        fclose($handle);
+        if (is_file($marker)) @unlink($marker); // Windows refuses to delete an open file
+        if (is_file($marker)) return true;
+        if (class_exists('Logger')) Logger::warning('sqlite.maintenance_stale_cleared', ['marker' => basename($marker)]);
+        return false;
     }
 
     public static function assertOpen(string $dbPath): void
@@ -41,17 +69,30 @@ final class SqliteMaintenance
 
     public static function enter(string $dbPath, string $reason): void
     {
-        $handle = @fopen(self::markerPath($dbPath), 'x');
+        $marker = self::markerPath($dbPath);
+        $handle = self::isActive($dbPath) ? false : @fopen($marker, 'x');
         if ($handle === false) {
-            throw new RuntimeException('Database maintenance is already in progress: ' . self::markerPath($dbPath));
+            throw new RuntimeException('Database maintenance is already in progress: ' . $marker);
+        }
+        if (!flock($handle, LOCK_EX | LOCK_NB)) {
+            fclose($handle);
+            @unlink($marker);
+            throw new RuntimeException('Database maintenance marker cannot be locked: ' . $marker);
         }
         fwrite($handle, (string)json_encode(['reason' => $reason, 'pid' => getmypid(), 'since' => gmdate('c')]));
-        fclose($handle);
+        fflush($handle);
+        self::$held[$marker] = $handle; // kept open (and locked) until leave() or process death
     }
 
     public static function leave(string $dbPath): void
     {
-        @unlink(self::markerPath($dbPath));
+        $marker = self::markerPath($dbPath);
+        if (isset(self::$held[$marker])) {
+            flock(self::$held[$marker], LOCK_UN);
+            fclose(self::$held[$marker]);
+            unset(self::$held[$marker]);
+        }
+        @unlink($marker);
     }
 
     /** Runs $swap behind the gate once no other connection holds $dbPath; refuses without side effects otherwise. */

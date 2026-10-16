@@ -90,9 +90,8 @@ function renderCheckout(): string {
     $customerId = (int)($_SESSION['customer_id'] ?? 0);
     $paymentMethods = $selectedRate ? PaymentService::availableMethods($country, $storeCurrency, $subtotal + $shipping, (string)$selectedRate['method_code'], $customerId ?: null) : [];
     $postedPayment = $form('payment');
-    $selectedPayment = null;
-    foreach ($paymentMethods as $method) if ((string)$method['code'] === $postedPayment) $selectedPayment = $method;
-    $selectedPayment ??= $paymentMethods[0] ?? null;
+    $selectedPayment = array_values(array_filter($paymentMethods, static fn(array $method): bool => (string)$method['code'] === $postedPayment))[0] ?? $paymentMethods[0] ?? null;
+    $shipping = CheckoutService::summaryShipping($cart, $subtotal, $country, $selectedShipping, $selectedPayment, $shipping);
     $paymentFee = $selectedPayment ? (int)$selectedPayment['fee'] : 0;
     $freeLabel = $t('free_shipping');
 
