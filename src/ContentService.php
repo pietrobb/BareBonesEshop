@@ -75,8 +75,12 @@ class ContentService {
         return $page;
     }
 
-    /** Validate data-only CMS sections; file paths and executable content are never accepted. */
-    public static function sanitizeSections(mixed $value): string {
+    /**
+     * Validate data-only CMS sections; file paths and executable content are never accepted.
+     * Every *url value (content, cta, media, data, settings, nested items) must be a local path or an
+     * HTTPS URL: saving rejects anything else; rendering ($dropInvalidUrls) blanks rows stored before.
+     */
+    public static function sanitizeSections(mixed $value, bool $dropInvalidUrls = false): string {
         if (is_string($value)) {
             $value = trim($value);
             if ($value === '') return '[]';
@@ -87,17 +91,17 @@ class ContentService {
         foreach (array_values($value) as $index => $section) {
             if (!is_array($section)) throw new InvalidArgumentException('Invalid CMS section');
             $type = self::code((string)($section['type'] ?? ''), 'section type');
-            $content = self::safeSectionData((array)($section['content'] ?? []));
+            $content = self::sectionData((array)($section['content'] ?? []), $dropInvalidUrls);
             $content['heading'] = self::optionalText((string)($section['content']['heading'] ?? $section['heading'] ?? ''), 500);
             $content['body_html'] = Security::sanitizeRichHtml((string)($section['content']['body_html'] ?? $section['body_html'] ?? ''));
-            $content['media'] = self::sectionData((array)($section['content']['media'] ?? $section['media'] ?? []));
-            $content['cta'] = self::sectionData((array)($section['content']['cta'] ?? $section['cta'] ?? []));
+            $content['media'] = self::sectionData((array)($section['content']['media'] ?? $section['media'] ?? []), $dropInvalidUrls);
+            $content['cta'] = self::sectionData((array)($section['content']['cta'] ?? $section['cta'] ?? []), $dropInvalidUrls);
             $source = $section['data_source'] ?? null;
             if (is_string($source)) $source = ['provider' => $source, 'parameters' => []];
             $provider = is_array($source) && !empty($source['provider']) ? self::provider((string)$source['provider']) : '';
-            $data = self::safeSectionData((array)($section['data'] ?? []));
-            if (!empty($section['items']) && !isset($data['items'])) $data['items'] = self::safeSectionData((array)$section['items']);
-            $settings = self::safeSectionData((array)($section['settings'] ?? $section['props'] ?? []));
+            $data = self::sectionData((array)($section['data'] ?? []), $dropInvalidUrls);
+            if (!empty($section['items']) && !isset($data['items'])) $data['items'] = self::sectionData((array)$section['items'], $dropInvalidUrls);
+            $settings = self::sectionData((array)($section['settings'] ?? $section['props'] ?? []), $dropInvalidUrls);
             $settings['variant'] = self::code((string)($section['settings']['variant'] ?? $section['variant'] ?? 'default'), 'section variant');
             $block = strtolower(trim((string)($section['block'] ?? '')));
             $clean = [
@@ -310,13 +314,26 @@ class ContentService {
         throw new InvalidArgumentException('URL must be a local path' . ($allowAbsolute ? ' or HTTPS URL' : ''));
     }
 
-    private static function sectionData(array $data): array {
-        $result = self::safeSectionData($data);
-        foreach ($result as $key => $item) {
-            if (!is_string($item) || !str_ends_with((string)$key, 'url') || $item === '') continue;
-            $result[$key] = self::url($item, true, true);
+    /** safeSectionData() plus URL validation of every *url key at any depth. */
+    private static function sectionData(array $data, bool $dropInvalidUrls = false): array {
+        return self::sectionUrls(self::safeSectionData($data), $dropInvalidUrls);
+    }
+
+    private static function sectionUrls(array $data, bool $dropInvalidUrls): array {
+        foreach ($data as $key => $item) {
+            if (is_array($item)) {
+                $data[$key] = self::sectionUrls($item, $dropInvalidUrls);
+                continue;
+            }
+            if (!is_string($item) || !is_string($key) || !str_ends_with(strtolower($key), 'url') || $item === '') continue;
+            try {
+                $data[$key] = self::url($item, true, true);
+            } catch (InvalidArgumentException $e) {
+                if (!$dropInvalidUrls) throw $e;
+                $data[$key] = '';
+            }
         }
-        return $result;
+        return $data;
     }
 
     private static function safeSectionData(array $data): array {

@@ -78,6 +78,49 @@ class Cache {
     }
 
     /**
+     * Filesystem path of an entry that is fresh (TTL and flush marker), for streaming large
+     * entries (sitemap, feeds) to the client without loading them into memory; null when stale.
+     */
+    public static function freshFile(string $path, int $ttl): ?string {
+        $file = self::path($path);
+        clearstatcache(true, $file);
+        if (!is_file($file)) return null;
+        $flushMarker = self::path('.flush_marker');
+        if (is_file($flushMarker) && filemtime($file) < (int)file_get_contents($flushMarker)) return null;
+        return (time() - (int)filemtime($file)) > $ttl ? null : $file;
+    }
+
+    /**
+     * Atomically replace an entry with what $writer streams into the handle it is given; returns
+     * the entry's filesystem path, or null when the cache is not writable (the writer did not run).
+     * A failing writer leaves the previous entry in place and its exception propagates.
+     * @param callable(resource): void $writer
+     */
+    public static function writeStream(string $path, callable $writer): ?string {
+        $file = self::path($path);
+        $dir = dirname($file);
+        $tmp = $file . '.tmp.' . getmypid() . '.' . bin2hex(random_bytes(4));
+        $handle = (is_dir($dir) || @mkdir($dir, 0750, true) || is_dir($dir)) ? @fopen($tmp, 'wb') : false;
+        if ($handle === false) {
+            Logger::warning('cache.write_failed', ['path' => $path]);
+            return null;
+        }
+        try {
+            $writer($handle);
+        } catch (Throwable $e) {
+            fclose($handle);
+            @unlink($tmp);
+            throw $e;
+        }
+        if (!fclose($handle) || !@rename($tmp, $file)) {
+            @unlink($tmp);
+            Logger::warning('cache.write_failed', ['path' => $path]);
+            return null;
+        }
+        return $file;
+    }
+
+    /**
      * Write JSON to cache
      */
     public static function writeJson(string $path, array $data): void {

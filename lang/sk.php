@@ -1494,4 +1494,5 @@ return [
     'checkout_failed' => 'Chyba pri spracovaní objednávky. Skúste to znova.',
     'order_done_unverified' => 'Ďakujeme. Ak ste odoslali objednávku, jej potvrdenie sme poslali na váš e-mail.',
     'reviews.duplicate' => 'Tento produkt ste už nedávno hodnotili.',
+    'shipping_load_error' => 'Možnosti dopravy sa nepodarilo načítať. Skontrolujte pripojenie a skúste znova zmeniť krajinu.', 'payment_load_error' => 'Spôsoby platby sa nepodarilo načítať. Skontrolujte pripojenie a znova vyberte dopravu.',
 ];

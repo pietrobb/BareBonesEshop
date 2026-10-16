@@ -1485,4 +1485,5 @@ return [
     'checkout_failed' => 'The order could not be processed. Please try again.',
     'order_done_unverified' => 'Thank you. If you have placed an order, its confirmation has been sent to your e-mail.',
     'reviews.duplicate' => 'You have already reviewed this product recently.',
+    'shipping_load_error' => 'Shipping rates could not be loaded. Check your connection and change the country to try again.', 'payment_load_error' => 'Payment methods could not be loaded. Check your connection and choose the shipping again.',
 ];

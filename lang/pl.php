@@ -1465,4 +1465,5 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout_failed' => 'Nie udało się przetworzyć zamówienia. Spróbuj ponownie.',
     'order_done_unverified' => 'Dziękujemy. Jeśli złożyłeś zamówienie, jego potwierdzenie wysłaliśmy na Twój e-mail.',
     'reviews.duplicate' => 'Niedawno oceniłeś już ten produkt.',
+    'payment_loading' => 'Ładowanie metod płatności…', 'payment_unavailable' => 'Płatność jest niedostępna.', 'shipping_load_error' => 'Nie udało się wczytać metod dostawy. Sprawdź połączenie i ponownie zmień kraj.', 'payment_load_error' => 'Nie udało się wczytać metod płatności. Sprawdź połączenie i ponownie wybierz dostawę.',
 ]);

@@ -1465,4 +1465,5 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout_failed' => 'Die Bestellung konnte nicht verarbeitet werden. Bitte versuchen Sie es erneut.',
     'order_done_unverified' => 'Vielen Dank. Falls Sie eine Bestellung aufgegeben haben, wurde die Bestätigung an Ihre E-Mail-Adresse gesendet.',
     'reviews.duplicate' => 'Sie haben dieses Produkt vor Kurzem bereits bewertet.',
+    'payment_loading' => 'Zahlungsarten werden geladen…', 'payment_unavailable' => 'Zahlung ist nicht verfügbar.', 'shipping_load_error' => 'Versandarten konnten nicht geladen werden. Prüfen Sie Ihre Verbindung und ändern Sie das Land erneut.', 'payment_load_error' => 'Zahlungsarten konnten nicht geladen werden. Prüfen Sie Ihre Verbindung und wählen Sie den Versand erneut.',
 ]);

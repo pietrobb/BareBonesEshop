@@ -15,5 +15,18 @@ if ($base === null) {
     exit;
 }
 
-header('Content-Type: application/xml; charset=utf-8');
-echo Sitemap::xml($base);
+// /sitemap.xml is part 0 (the urlset, or a sitemap index past 50,000 URLs); /sitemap-N.xml is part N.
+$part = preg_match('/^[1-9][0-9]{0,5}$/', (string)($_GET['part'] ?? '')) ? (int)$_GET['part'] : 0;
+if (isset($_GET['part']) && $part === 0) {
+    http_response_code(404);
+    exit;
+}
+try {
+    // Rendered once per TTL / catalog change into the store's cache namespace, then streamed from disk.
+    $writer = static function($out) use ($base, $part): void { Sitemap::write($out, $base, $part); };
+    header('Content-Type: application/xml; charset=utf-8');
+    PublicFeedCache::send('sitemap-' . $part . '.xml', $base, $writer);
+} catch (OutOfRangeException) {
+    header_remove('Content-Type');
+    http_response_code(404);
+}

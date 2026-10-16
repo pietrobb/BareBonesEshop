@@ -1465,4 +1465,5 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout_failed' => 'A rendelést nem sikerült feldolgozni. Kérjük, próbálja újra.',
     'order_done_unverified' => 'Köszönjük. Ha leadott rendelést, a visszaigazolást elküldtük az e-mail-címére.',
     'reviews.duplicate' => 'Ezt a terméket nemrég már értékelte.',
+    'payment_loading' => 'Fizetési módok betöltése…', 'payment_unavailable' => 'A fizetés nem érhető el.', 'shipping_load_error' => 'A szállítási módokat nem sikerült betölteni. Ellenőrizze a kapcsolatot, és válassza ki újra az országot.', 'payment_load_error' => 'A fizetési módokat nem sikerült betölteni. Ellenőrizze a kapcsolatot, és válassza ki újra a szállítást.',
 ]);

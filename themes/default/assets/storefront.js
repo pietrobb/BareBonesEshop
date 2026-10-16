@@ -34,10 +34,24 @@
     return Math.max(0, subtotal - (discountElement ? parseInt(discountElement.value || '0', 10) : 0));
   }
 
-  function parseMoney(value) {
-    if (String(value).includes(text.free)) return 0;
-    const normalized = String(value).replace(/[^0-9,.-]/g, '').replace(',', '.');
-    return Math.round((parseFloat(normalized) || 0) * 100);
+  // Each refresh supersedes the previous one: a response that arrives after a newer request started is dropped.
+  let shippingRequest = 0;
+  let paymentRequest = 0;
+
+  async function fetchCheckoutJson(params) {
+    const response = await fetch(`${apiUrl}?${params}`, {headers: {Accept: 'application/json'}});
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  }
+
+  // Integer cents carried by the rendered option (never re-parsed from the formatted, locale-dependent label).
+  function optionCents(input) {
+    const cents = input ? parseInt(input.dataset.priceCents || '', 10) : NaN;
+    return Number.isFinite(cents) ? cents : 0;
+  }
+
+  function showCheckoutError(box, className, message) {
+    box.innerHTML = `<div class="${className}" role="alert">${escapeHtml(message)}</div>`;
   }
 
   async function addToCart(productId, quantity, variantId, button) {
@@ -123,11 +137,11 @@
     const box = document.getElementById('payment-options');
     const subtotalElement = document.getElementById('checkout-subtotal');
     if (!country || !box || !subtotalElement) return;
+    const request = ++paymentRequest;
     const subtotal = parseInt(subtotalElement.value || '0', 10);
     const checkedShipping = document.querySelector('input[name="shipping_method"]:checked');
     const selectedShipping = shippingMethod || (checkedShipping ? checkedShipping.value : '');
-    const shippingLabel = checkedShipping ? checkedShipping.closest('label') : null;
-    const shippingPrice = shippingLabel ? parseMoney(shippingLabel.querySelector('strong').textContent) : 0;
+    const shippingPrice = optionCents(checkedShipping);
     if (!selectedShipping) {
       box.innerHTML = `<div class="payment-empty">${escapeHtml(text.selectShipping)}</div>`;
       updateCheckoutTotal(shippingPrice, 0, subtotal);
@@ -135,14 +149,20 @@
     }
     const previous = box.querySelector('input[name="payment"]:checked');
     const previousCode = previous ? previous.value : '';
-    box.innerHTML = `<div class="payment-loading">${escapeHtml(text.paymentLoading)}</div>`;
+    box.innerHTML = `<div class="payment-loading" role="status">${escapeHtml(text.paymentLoading)}</div>`;
     const params = new URLSearchParams({
       action: 'payment_methods', country: country.value, currency: config.currency,
       amount: String(checkoutGoods(subtotal) + shippingPrice), shipping_method: selectedShipping
     });
-    const response = await fetch(`${apiUrl}?${params}`);
-    const result = await response.json();
-    const methods = result.methods || [];
+    let result;
+    try {
+      result = await fetchCheckoutJson(params);
+    } catch {
+      if (request === paymentRequest) showCheckoutError(box, 'payment-error', text.paymentError || text.paymentUnavailable);
+      return;
+    }
+    if (request !== paymentRequest) return;
+    const methods = Array.isArray(result.methods) ? result.methods : [];
     if (!methods.length) {
       box.innerHTML = `<div class="payment-empty">${escapeHtml(text.paymentUnavailable)}</div>`;
       updateCheckoutTotal(shippingPrice, 0, subtotal);
@@ -167,14 +187,26 @@
     const summaryShipping = document.getElementById('summary-shipping');
     const subtotalElement = document.getElementById('checkout-subtotal');
     if (!country || !box || !summaryShipping || !subtotalElement) return;
+    const request = ++shippingRequest;
+    paymentRequest++; // payment options of the previous shipping choice are stale as well
     const subtotal = parseInt(subtotalElement.value || '0', 10);
     const previous = box.querySelector('input[name="shipping_method"]:checked');
     const previousCode = previous ? previous.value : '';
-    box.innerHTML = `<div class="shipping-loading">${escapeHtml(text.shippingLoading)}</div>`;
+    box.innerHTML = `<div class="shipping-loading" role="status">${escapeHtml(text.shippingLoading)}</div>`;
     const params = new URLSearchParams({action: 'shipping_rates', country: country.value, subtotal: String(checkoutGoods(subtotal))});
-    const response = await fetch(`${apiUrl}?${params}`);
-    const result = await response.json();
-    const methods = result.methods || [];
+    let result;
+    try {
+      result = await fetchCheckoutJson(params);
+    } catch {
+      if (request !== shippingRequest) return;
+      showCheckoutError(box, 'shipping-error', text.shippingError || text.shippingUnavailable);
+      summaryShipping.textContent = '—';
+      const payments = document.getElementById('payment-options');
+      if (payments) payments.innerHTML = `<div class="payment-empty">${escapeHtml(text.selectShipping)}</div>`;
+      return;
+    }
+    if (request !== shippingRequest) return;
+    const methods = Array.isArray(result.methods) ? result.methods : [];
     const freeHint = document.getElementById('free-shipping-hint');
     if (freeHint) {
       freeHint.textContent = result.free_shipping_hint || '';
@@ -194,7 +226,7 @@
       label.className = 'shipping-option';
       const methodCode = method.method_code || method.key || '';
       const price = parseInt(method.price || 0, 10);
-      label.innerHTML = `<span><input type="radio" name="shipping_method" value="${escapeHtml(methodCode)}" ${index === selectedIndex ? 'checked' : ''}> ${escapeHtml(method.label || methodCode)}<small>${escapeHtml(method.delivery_days || '')}</small></span><strong>${formatCents(price)}</strong>`;
+      label.innerHTML = `<span><input type="radio" name="shipping_method" value="${escapeHtml(methodCode)}" data-price-cents="${price}" ${index === selectedIndex ? 'checked' : ''}> ${escapeHtml(method.label || methodCode)}<small>${escapeHtml(method.delivery_days || '')}</small></span><strong>${formatCents(price)}</strong>`;
       label.querySelector('input').addEventListener('change', () => refreshCheckoutPayments(methodCode));
       box.appendChild(label);
     });

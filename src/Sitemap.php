@@ -80,44 +80,88 @@ class Sitemap {
         return $sets;
     }
 
+    /** Protocol limit of <url> entries per sitemap file (sitemaps.org). */
+    public const MAX_URLS = 50000;
+    private static int $maxUrls = self::MAX_URLS;
+
+    /** Test hook: a lower per-file limit exercises the sitemap index without 50k rows. */
+    public static function setMaxUrlsForTesting(?int $max): void {
+        self::$maxUrls = $max === null ? self::MAX_URLS : max(1, $max);
+    }
+
     /**
-     * Render the full sitemap XML for the given absolute base (scheme + host,
-     * no trailing slash), e.g. "https://shop.example".
+     * Render the sitemap XML for the given absolute base (scheme + host + install path, no
+     * trailing slash), e.g. "https://shop.example". Part 0 is /sitemap.xml: the full urlset while
+     * it fits MAX_URLS, otherwise a <sitemapindex> of /sitemap-1.xml … /sitemap-N.xml (parts 1..N).
+     * @throws OutOfRangeException for a part that does not exist
      */
-    public static function xml(string $base): string {
+    public static function xml(string $base, int $part = 0): string {
+        $stream = fopen('php://temp', 'w+');
+        if ($stream === false) throw new RuntimeException('Unable to create sitemap stream');
+        self::write($stream, $base, $part);
+        rewind($stream);
+        $xml = (string)stream_get_contents($stream);
+        fclose($stream);
+        return $xml;
+    }
+
+    /**
+     * Stream one sitemap document (see xml()) into $out.
+     * @param resource $out
+     * @throws OutOfRangeException for a part that does not exist
+     */
+    public static function write($out, string $base, int $part = 0): void {
         $base = rtrim($base, '/');
         $sets = self::storePathSets();
-        $defaultStore = (string)(Bootstrap::stores()['default_store'] ?? '');
+        $total = 0;
+        foreach (self::allPaths($sets) as $path) {
+            foreach ($sets as $set) if (isset($set['paths'][$path])) $total++;
+        }
+        $parts = max(1, (int)ceil($total / self::$maxUrls));
+        if ($part < 0 || $part > $parts || ($part > 0 && $parts === 1)) throw new OutOfRangeException('Unknown sitemap part');
         $e = static fn(string $s): string => htmlspecialchars($s, ENT_XML1, 'UTF-8');
+        fwrite($out, '<?xml version="1.0" encoding="UTF-8"?>' . "\n");
+        if ($part === 0 && $parts > 1) {
+            fwrite($out, '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n");
+            for ($number = 1; $number <= $parts; $number++) {
+                fwrite($out, '  <sitemap><loc>' . $e($base . '/sitemap-' . $number . '.xml') . "</loc></sitemap>\n");
+            }
+            fwrite($out, "</sitemapindex>\n");
+            return;
+        }
 
-        $out  = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
-        $out .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" '
-              . 'xmlns:xhtml="http://www.w3.org/1999/xhtml">' . "\n";
-
-        $allPaths = [];
-        foreach ($sets as $set) $allPaths += $set['paths'];
-        foreach (array_keys($allPaths) as $path) {
-            $path = (string)$path;
-            $rootPath = ($path === '/') ? '/' : $path;
+        fwrite($out, '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" '
+              . 'xmlns:xhtml="http://www.w3.org/1999/xhtml">' . "\n");
+        $first = $part === 0 ? 0 : ($part - 1) * self::$maxUrls;
+        $last = $part === 0 ? PHP_INT_MAX : $first + self::$maxUrls;
+        $defaultStore = (string)(Bootstrap::stores()['default_store'] ?? '');
+        $index = 0;
+        foreach (self::allPaths($sets) as $path) {
             $serving = array_filter($sets, static fn(array $set): bool => isset($set['paths'][$path]));
             foreach ($serving as $set) {
-                $out .= "  <url>\n";
-                $out .= '    <loc>' . $e($base . $set['prefix'] . $rootPath) . "</loc>\n";
+                if ($index++ < $first) continue;
+                if ($index > $last) break 2;
+                $entry = "  <url>\n" . '    <loc>' . $e($base . $set['prefix'] . $path) . "</loc>\n";
                 $alternates = [];
                 foreach ($serving as $alt) $alternates[$alt['locale']] ??= $alt['prefix'];
                 foreach ($alternates as $altLocale => $altPrefix) {
-                    $out .= '    <xhtml:link rel="alternate" hreflang="' . $e((string)$altLocale)
-                          . '" href="' . $e($base . $altPrefix . $rootPath) . "\"/>\n";
+                    $entry .= '    <xhtml:link rel="alternate" hreflang="' . $e((string)$altLocale)
+                          . '" href="' . $e($base . $altPrefix . $path) . "\"/>\n";
                 }
                 if (isset($serving[$defaultStore])) {
-                    $xHref = $base . $serving[$defaultStore]['prefix'] . $rootPath;
-                    $out .= '    <xhtml:link rel="alternate" hreflang="x-default" href="' . $e($xHref) . "\"/>\n";
+                    $entry .= '    <xhtml:link rel="alternate" hreflang="x-default" href="'
+                          . $e($base . $serving[$defaultStore]['prefix'] . $path) . "\"/>\n";
                 }
-                $out .= "  </url>\n";
+                fwrite($out, $entry . "  </url>\n");
             }
         }
+        fwrite($out, "</urlset>\n");
+    }
 
-        $out .= "</urlset>\n";
-        return $out;
+    /** @return list<string> every path served by at least one store, in a stable order */
+    private static function allPaths(array $sets): array {
+        $allPaths = [];
+        foreach ($sets as $set) $allPaths += $set['paths'];
+        return array_map('strval', array_keys($allPaths));
     }
 }

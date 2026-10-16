@@ -87,6 +87,26 @@ class Bootstrap {
         return self::$categoryNames[$locale][$name] ?? $name;
     }
 
+    /** Query parameters that identify a storefront page; sort, filters and tracking never do. */
+    public const CANONICAL_QUERY_PARAMS = ['page', 'slug', 'category', 'pg', 'q', 'p', 'order', 'id'];
+
+    /**
+     * Current request as a base-less local path (/cs/?page=category&slug=x&pg=2) for alternates
+     * and the language switcher: the deployment base path is removed (Template::url adds it back)
+     * and only the CANONICAL_QUERY_PARAMS survive.
+     */
+    public static function canonicalRequestPath(?string $uri = null): string {
+        $uri = $uri ?? (string)($_SERVER['REQUEST_URI'] ?? '/');
+        $path = Template::seoPath((string)(parse_url($uri, PHP_URL_PATH) ?: '/'));
+        if (str_ends_with($path, '/index.php')) $path = substr($path, 0, -9);
+        parse_str((string)(parse_url($uri, PHP_URL_QUERY) ?? ''), $query);
+        $kept = [];
+        foreach (self::CANONICAL_QUERY_PARAMS as $key) {
+            if (is_scalar($query[$key] ?? null) && (string)$query[$key] !== '') $kept[$key] = (string)$query[$key];
+        }
+        return ($path === '' ? '/' : $path) . ($kept === [] ? '' : '?' . http_build_query($kept));
+    }
+
     /**
      * Build hreflang alternates for the current request from stores.json.
      * Returns:
@@ -103,7 +123,7 @@ class Bootstrap {
             $alternates[$locale] = $store['url_prefix'] ?? '';
         }
 
-        $pathNoPrefix = $uri ?? ($_SERVER['REQUEST_URI'] ?? '/');
+        $pathNoPrefix = $uri ?? self::canonicalRequestPath();
         foreach ($alternates as $p) {
             if ($p !== '' && str_starts_with($pathNoPrefix, $p . '/')) {
                 $pathNoPrefix = substr($pathNoPrefix, strlen($p));

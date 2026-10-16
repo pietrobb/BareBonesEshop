@@ -6,7 +6,7 @@
  * wraps a payload in a CSP-nonce'd <script type="application/ld+json"> tag, so
  * the schema can be unit-tested without an HTTP round-trip.
  *
- *   organization()    Organization (name, url, contact, postal address)
+ *   organization()    Organization (name, url, contact, postal address) of one store
  *   webSite()         WebSite + SearchAction (sitelinks searchbox)
  *   breadcrumbList()  BreadcrumbList (ordered ListItem trail)
  */
@@ -23,19 +23,19 @@ class JsonLd {
     }
 
     /**
-     * Organization schema for the default store. $base is the absolute origin
-     * (scheme + host, no trailing slash); '' yields a root-relative '/' url.
+     * Organization schema for the store $storeId (the page's store; default store when null).
+     * $base is the absolute origin (scheme + host, no trailing slash); '' yields a
+     * root-relative url. The url is that store's home, including its url_prefix.
      */
-    public static function organization(string $base, array $storesCfg): array {
-        $store = self::defaultStore($storesCfg);
+    public static function organization(string $base, array $storesCfg, ?string $storeId = null): array {
+        $store = self::store($storesCfg, $storeId);
         $legal = $store['legal'] ?? [];
-        $base  = rtrim($base, '/');
 
         $org = [
             '@context' => 'https://schema.org',
             '@type'    => 'Organization',
             'name'     => $legal['name'] ?? ($store['name'] ?? 'BareBones Shop'),
-            'url'      => $base !== '' ? $base . '/' : '/',
+            'url'      => self::homeUrl($base, $store),
         ];
         if (!empty($legal['email'])) $org['email']     = $legal['email'];
         if (!empty($legal['phone'])) $org['telephone'] = $legal['phone'];
@@ -56,10 +56,9 @@ class JsonLd {
      * WebSite schema with a SearchAction (Google sitelinks searchbox), pointed
      * at the storefront search route ?page=search&q={search_term_string}.
      */
-    public static function webSite(string $base, array $storesCfg): array {
-        $store = self::defaultStore($storesCfg);
-        $base  = rtrim($base, '/');
-        $url   = $base !== '' ? $base . '/' : '/';
+    public static function webSite(string $base, array $storesCfg, ?string $storeId = null): array {
+        $store = self::store($storesCfg, $storeId);
+        $url   = self::homeUrl($base, $store);
 
         return [
             '@context' => 'https://schema.org',
@@ -104,11 +103,19 @@ class JsonLd {
         ];
     }
 
-    /** The default store config, falling back to the first store, then []. */
-    private static function defaultStore(array $storesCfg): array {
+    /** The named store config, else the default store, falling back to the first store, then []. */
+    private static function store(array $storesCfg, ?string $storeId): array {
         $stores = $storesCfg['stores'] ?? [];
+        if ($storeId !== null && isset($stores[$storeId]) && is_array($stores[$storeId])) return $stores[$storeId];
         $key    = $storesCfg['default_store'] ?? '';
         if ($key !== '' && isset($stores[$key])) return $stores[$key];
         return $stores ? (array)reset($stores) : [];
+    }
+
+    /** Store home: $base plus the store's url_prefix, always ending in '/'. */
+    private static function homeUrl(string $base, array $store): string {
+        $prefix = rtrim((string)($store['url_prefix'] ?? ''), '/');
+        if ($prefix !== '' && (!str_starts_with($prefix, '/') || str_contains($prefix, '..'))) $prefix = '';
+        return rtrim($base, '/') . $prefix . '/';
     }
 }

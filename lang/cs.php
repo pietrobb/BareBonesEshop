@@ -1465,4 +1465,5 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout_failed' => 'Objednávku se nepodařilo zpracovat. Zkuste to znovu.',
     'order_done_unverified' => 'Děkujeme. Pokud jste odeslali objednávku, její potvrzení jsme poslali na váš e-mail.',
     'reviews.duplicate' => 'Tento produkt jste již nedávno hodnotili.',
+    'payment_loading' => 'Načítám způsoby platby…', 'payment_unavailable' => 'Platba není dostupná.', 'shipping_load_error' => 'Možnosti dopravy se nepodařilo načíst. Zkontrolujte připojení a zkuste znovu změnit zemi.', 'payment_load_error' => 'Způsoby platby se nepodařilo načíst. Zkontrolujte připojení a znovu vyberte dopravu.',
 ]);
