@@ -34,6 +34,8 @@ $scenarioFiles = [
 foreach ($scenarioFiles as $scenarioFile) {
     require __DIR__ . '/tests/scenarios/' . $scenarioFile;
 }
+// Every *Regression.php, historical order first, then auto-discovered (tests/RegressionSuite.php).
+require __DIR__ . '/tests/RegressionSuite.php';
 require __DIR__ . '/test-update.php';
 require __DIR__ . '/test-theme-contract.php';
 require __DIR__ . '/test-theme-upgrade-gate.php';
