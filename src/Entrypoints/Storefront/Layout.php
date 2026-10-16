@@ -107,8 +107,9 @@ $shell = [
         'label' => $catName((string)$category['name']),
     ], array_slice($footerCategories, 0, 6)),
     'year' => date('Y'),
-    'about_url' => Template::storeUrl('/page/about'),
-    'contact_url' => Template::storeUrl('/page/contact'),
+    // Only link CMS pages that exist: a footer link to a missing page is a 404 on every page view.
+    'about_url' => ContentService::page('about') !== null ? Template::storeUrl('/page/about') : '',
+    'contact_url' => ContentService::page('contact') !== null ? Template::storeUrl('/page/contact') : '',
     'privacy_url' => Template::storeUrl('/?page=privacy'),
     'terms_url' => Template::storeUrl('/?page=terms'),
     'cookies_url' => Template::storeUrl('/?page=cookies'),

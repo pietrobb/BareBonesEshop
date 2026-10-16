@@ -129,6 +129,15 @@ try {
     $sfaT = require $sfaApp . '/lang/' . $sfaLang . '.php';
     $sfaE = static fn(string $key): string => htmlspecialchars((string)$sfaT[$key], ENT_QUOTES, 'UTF-8');
 
+    // Footer About/Contact link only to CMS pages that exist and are active (no 404 link on every page).
+    assert_true(!str_contains($sfaHome['body'], '/page/about') && !str_contains($sfaHome['body'], '/page/contact'),
+        'SFA footer: no About/Contact links while those CMS pages do not exist');
+    $sfaDb->exec("INSERT INTO pages (slug, title, body, status, store_id) VALUES ('about', 'About', '<p>About</p>', 'active', 'default'), ('contact', 'Contact', '<p>Contact</p>', 'draft', 'default')");
+    $sfaFooter = $sfaHttp('GET', '/', [], $sfaSid)['body'];
+    assert_true(str_contains($sfaFooter, '/page/about') && !str_contains($sfaFooter, '/page/contact'),
+        'SFA footer: an active About page is linked, a draft Contact page is not');
+    $sfaDb->exec("DELETE FROM pages WHERE slug IN ('about', 'contact') AND store_id = 'default'");
+
     // 1. Every search token is a quoted FTS5 string; only the last one is a prefix.
     foreach (['t-shirt blue', '3.5 mm', "o'neil shirt", 'a,b c', '50% off', 'x/y z', '+x y', 'NEAR(a b)', '"', '* -', 'col:val x'] as $sfaQuery) {
         $sfaSearch = $sfaHttp('GET', '/?page=search&q=' . rawurlencode($sfaQuery), [], $sfaSid);
