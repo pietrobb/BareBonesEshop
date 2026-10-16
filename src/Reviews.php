@@ -18,8 +18,10 @@ class Reviews {
     private const MAX_BODY   = 2000;
     private const MIN_BODY   = 3;
     public const MAX_AUTHOR  = 80;
-    /** Seconds one customer (guests: one client IP) waits before reviewing the same product again. */
+    /** Seconds one customer (guests: one session) waits before reviewing the same product again. */
     public const DUPLICATE_WINDOW = 86400;
+    /** Guest reviews of one product per client IP and DUPLICATE_WINDOW (coarse: an IP may be a whole office or CDN edge). */
+    public const GUEST_IP_CAP = 5;
 
     public const STATUSES = ['pending', 'approved', 'rejected'];
 

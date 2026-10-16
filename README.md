@@ -54,7 +54,9 @@ database admin account exists.
 
 - **Apache**: the bundled `.htaccess` (needs `AllowOverride All` and `mod_rewrite`).
 - **nginx + PHP-FPM**: [`deploy/nginx.conf`](deploy/nginx.conf) mirrors the `.htaccess`
-  deny and rewrite rules.
+  deny and rewrite rules. Keep its `location ~ \.php$ { try_files $uri @redirect; ... }`:
+  store-prefixed scripts such as `/cs/api.php` do not exist on disk and reach PHP only through
+  that fallback (set `operations.nginx_config` and `php cli/setup.php doctor` checks it).
 - **Docker**: [`deploy/docker-compose.yml`](deploy/docker-compose.yml) runs nginx and the
   PHP-FPM image from [`deploy/Dockerfile`](deploy/Dockerfile) with the private runtime data
   on a named volume. PHP runs as `www-data` (uid 33) on a read-only root filesystem with the
@@ -170,7 +172,9 @@ Commerce mutations write CloudEvents-compatible records to `event_outbox` in the
 same database transaction. `cli/worker.php` signs each configured delivery with
 `X-BBE-Event-ID`, `X-BBE-Timestamp`, and `X-BBE-Signature`, retries non-2xx
 responses with exponential backoff, and moves exhausted events to `dead` after
-eight attempts. Endpoint URLs and secrets live only in deployment configuration.
+eight attempts. Endpoint URLs and secrets live only in deployment configuration;
+endpoints must use `https://` (plain `http://` only with `'allow_insecure_http' => true`
+for a receiver on a trusted local network) and a secret of at least 32 bytes.
 
 ---
 

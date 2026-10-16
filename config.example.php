@@ -131,6 +131,9 @@ return [
     'operations' => [
         'worker_cron' => '', // e.g. * * * * *; install it in the platform scheduler too
         'monitor_cron' => '', // e.g. */5 * * * * php cli/monitor.php
+        // Live nginx site config (absolute path, readable by PHP): doctor and staging-preflight warn
+        // when its PHP location lacks the @redirect fallback that store-prefixed AJAX needs. '' = not checked.
+        'nginx_config' => '',
     ],
     // Technical incidents only; normal checkout validation never sends mail.
     // Run worker + monitor cron. Mail 'log' is simulation, not delivery evidence.

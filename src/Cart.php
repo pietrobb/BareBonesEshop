@@ -6,6 +6,18 @@
 class Cart {
     /** Most units of one line: every add/update path (JSON API, storefront form, reorder, restore) is capped here. */
     public const MAX_QTY = 99;
+    /** unavailable_reason of a line whose effective unit price is negative (e.g. a variant delta that outgrew its base price). */
+    public const UNAVAILABLE_PRICE_INVALID = 'price_invalid';
+    /** @var array<string, true> SKUs already reported in this request */
+    private static array $reportedInvalidPrices = [];
+
+    /** Catalog data error, not shopper input: log the SKU and raise one incident per SKU and request. */
+    private static function reportInvalidPrice(string $sku): void {
+        if (isset(self::$reportedInvalidPrices[$sku])) return;
+        self::$reportedInvalidPrices[$sku] = true;
+        Logger::safeWrite('error', 'cart.negative_unit_price', ['sku' => $sku]);
+        IncidentMonitor::report('catalog.negative_price', 'cart', 'error', ['count' => 1]);
+    }
 
     public static function get(): array {
         $cart = $_SESSION['cart'] ?? [];
@@ -170,10 +182,11 @@ class Cart {
             if (!empty($item['variant_id'])) {
                 $variant = $variants[$item['variant_id']] ?? null;
                 if (!$variant) { unset($_SESSION['cart'][$key]); continue; }
-                // A negative delta can outgrow a later-lowered base price: the unit price never goes below zero.
-                $price = max(0, $variant['price_absolute'] !== null
+                // A negative delta can outgrow a later-lowered base price. Such a line is not sold
+                // (unavailable, incident raised below) instead of being clamped to a free item.
+                $price = $variant['price_absolute'] !== null
                     ? (int)$variant['price_absolute']
-                    : (int)$product['price'] + (int)$variant['price_delta']);
+                    : (int)$product['price'] + (int)$variant['price_delta'];
                 $sku = $variant['sku'];
                 $variantName = $variant['name'];
                 $stock = (int)$variant['stock'];
@@ -190,7 +203,7 @@ class Cart {
                 $widthMm = (int)($variant['width_mm'] ?? 0) > 0 ? (int)$variant['width_mm'] : $widthMm;
                 $heightMm = (int)($variant['height_mm'] ?? 0) > 0 ? (int)$variant['height_mm'] : $heightMm;
             } else {
-                $price = max(0, (int)$product['price']);
+                $price = (int)$product['price'];
                 $sku = $product['sku'];
                 $variantName = '';
                 $stock = (int)$product['stock'];
@@ -211,21 +224,31 @@ class Cart {
             $available = $availability === VariantAvailability::ACTIVE && ($isDigital || $qty > 0);
             if (!$available) $qty = (int)$item['qty']; // preserve requested qty for display
 
-            $customerId = (int)($_SESSION['customer_id'] ?? 0);
+            $unavailableReason = $available ? null : 'not_available';
             $pricingProduct = $product;
             $pricingProduct['price'] = $price;
-            $pricingProduct = Pricing::applyPriceList(
-                $pricingProduct,
-                !empty($item['variant_id']) ? (int)$item['variant_id'] : null,
-                max(1, $qty),
-                $customerId > 0 ? $customerId : null
-            );
-            $pricingProduct = Promotions::applyToProduct(
-                $pricingProduct,
-                max(1, $qty),
-                $customerId > 0 ? $customerId : null
-            );
-            $price = max(0, (int)$pricingProduct['price']);
+            if ($price >= 0) {
+                $customerId = (int)($_SESSION['customer_id'] ?? 0);
+                $pricingProduct = Pricing::applyPriceList(
+                    $pricingProduct,
+                    !empty($item['variant_id']) ? (int)$item['variant_id'] : null,
+                    max(1, $qty),
+                    $customerId > 0 ? $customerId : null
+                );
+                $pricingProduct = Promotions::applyToProduct(
+                    $pricingProduct,
+                    max(1, $qty),
+                    $customerId > 0 ? $customerId : null
+                );
+                $price = (int)$pricingProduct['price'];
+            }
+            if ($price < 0) {
+                // Never sell at 0 because of a clamp: the line stays visible but is not purchasable,
+                // keeps its negative price (Orders::create refuses it too) and an incident is raised.
+                $available = false;
+                $unavailableReason = self::UNAVAILABLE_PRICE_INVALID;
+                self::reportInvalidPrice((string)$sku);
+            }
             $pricingSnapshot = array_filter([
                 'price_list' => $pricingProduct['price_list_snapshot'] ?? null,
                 'promotions' => $pricingProduct['promotion_snapshot'] ?? null,
@@ -264,6 +287,7 @@ class Cart {
                 'attrs'            => $pricingSnapshot === [] ? [] : ['_pricing' => $pricingSnapshot],
                 'currency'         => $currency,
                 'available'        => $available,
+                'unavailable_reason' => $available ? null : $unavailableReason,
                 'currency_mismatch' => $currencyMismatch,
                 'vat_class'        => $product['vat_class'] ?? 'standard',
             ];

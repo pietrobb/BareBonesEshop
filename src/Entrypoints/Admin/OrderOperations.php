@@ -8,7 +8,11 @@ function handleOrdersExport(): void {
     header('Content-Disposition: attachment; filename="orders-' . StoreContext::current()->id() . '-' . date('Y-m-d') . '.csv"');
     header('X-Content-Type-Options: nosniff');
     $out = fopen('php://output', 'w');
-    OrderExport::writeCsv($out, $_POST);
+    try {
+        OrderExport::writeCsv($out, $_POST);
+    } catch (CsvExportTruncated) {
+        CsvExport::abortResponse(); // logged + incident already; an already started download stays incomplete
+    }
     fclose($out);
     exit;
 }

@@ -1,7 +1,7 @@
 <?php
 /**
  * Coupon per-customer limits compare coupon_uses.customer_email as stored, normalised exactly like
- * Str::normalizeEmail() (trim + ASCII lowercase), instead of LOWER(TRIM(...)) in SQL, which is
+ * Str::normalizeEmail() (trim + UTF-8 mb_strtolower), instead of LOWER(TRIM(...)) in SQL, which is
  * ASCII-only on SQLite but Unicode-aware on MySQL. Older rows may still carry the e-mail as typed.
  * Normalised in PHP so both drivers end with the same bytes.
  */
@@ -18,7 +18,7 @@ return new class {
             foreach ($rows as $row) {
                 $lastId = (int)$row['id'];
                 $email = (string)$row['customer_email'];
-                $normalized = strtolower(trim($email));
+                $normalized = mb_strtolower(trim($email), 'UTF-8');
                 if ($normalized !== $email) $update->execute([':email' => $normalized, ':id' => $lastId]);
             }
         } while (count($rows) === 1000);

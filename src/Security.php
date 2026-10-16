@@ -315,10 +315,31 @@ class Security {
         self::$rateDbLastCleanup = time();
     }
 
+    /**
+     * Check-only variant of rateLimit(): true while fewer than $maxHits hits were recorded in the
+     * window. Records nothing, so a refused attempt never extends a block (pair with rateLimitRecord()
+     * after the guarded action succeeded).
+     */
+    public static function rateLimitAllows(string $action, int $maxHits, int $windowSeconds, bool $bindIp = true): bool {
+        $windowSeconds = max(1, min(86400, $windowSeconds));
+        $stmt = self::rateDb()->prepare("SELECT COUNT(*) FROM hits WHERE key = :key AND ts > :window");
+        $stmt->execute([':key' => self::rateKey($action, $bindIp), ':window' => time() - $windowSeconds]);
+        return (int)$stmt->fetchColumn() < max(0, $maxHits);
+    }
+
+    /** Records one hit for $action (see rateLimitAllows()). */
+    public static function rateLimitRecord(string $action, bool $bindIp = true): void {
+        self::rateDb()->prepare("INSERT INTO hits (key, ts) VALUES (:key, :ts)")
+            ->execute([':key' => self::rateKey($action, $bindIp), ':ts' => time()]);
+    }
+
+    private static function rateKey(string $action, bool $bindIp): string {
+        return hash('sha256', $action . '|' . ($bindIp ? self::clientIp() : 'global'));
+    }
+
     public static function rateLimit(string $action, int $maxHits = 60, int $windowSeconds = 60, bool $bindIp = true): bool {
         $windowSeconds = max(1, min(86400, $windowSeconds));
-        $identity = $bindIp ? self::clientIp() : 'global';
-        $key = hash('sha256', $action . '|' . $identity);
+        $key = self::rateKey($action, $bindIp);
         $now = time();
         $window = $now - $windowSeconds;
         $db = self::rateDb();

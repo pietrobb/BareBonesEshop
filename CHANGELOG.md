@@ -2,9 +2,12 @@
 
 ## Unreleased
 
-### Upgrade notes (operator-facing and breaking changes from PRs #10-#14 and the follow-up audit)
+### Upgrade notes (operator-facing and breaking changes from PRs #10-#14 and the follow-up audits)
 
-Read before updating a live shop; run `php cli/migrate.php` after the files are in place.
+Read before updating a live shop; run `php cli/migrate.php` after the files are in place, then
+`php cli/setup.php doctor` (and `php cli/staging-preflight.php` on staging), which warn about the
+settings below that silently change behaviour (http webhooks, cart reminders without consent, the
+nginx PHP fallback when `operations.nginx_config` is set).
 
 - **Backup / restore / update CLI**
   - `cli/restore.php` restores MySQL/MariaDB `.sql` backups now, but only with `--i-stopped-writers`
@@ -32,12 +35,21 @@ Read before updating a live shop; run `php cli/migrate.php` after the files are 
   `update_mysql_dump_binary` / `update_mysql_client_binary` (defaults `mysqldump` / `mysql`, falling
   back to `mariadb-dump` / `mariadb` when only those are on PATH),
   `monitoring.csp_form_action_reports_critical` (default 5), `uploads_dir` / `uploads_url`
-  (documented; default `<shop>/uploads`, `/uploads`), `payu_*`. `cli/staging-preflight.php` now also
+  (documented; default `<shop>/uploads`, `/uploads`), `payu_*`, `operations.nginx_config` (optional path
+  of the live nginx site config for the doctor), `outbox_sweep_budget_seconds` (default 20),
+  `shipping_webhook_require_timestamp` (default false), `digital_download_resume_minutes` (default 30),
+  `queue.redis.completed_ttl_seconds` (default 7 days), `integrations.http_shipping.rates_timeout`
+  (default 5 s), `outbound_webhooks.<code>.allow_insecure_http`, `checkout_consents.cart_reminder`. `cli/staging-preflight.php` now also
   requires `backup_recovery_dir` and `update_storage_dir` outside the application root.
 - **Migrations**: `20261015120000_processed_events_claim_state` (webhook claim `state`/`claimed_at`),
   `20261016120000_csp_reporter_hash`, `20261016130000_erp_status_checked_at`,
-  `20261016140000_csp_request_id`, `20261016150000_normalize_coupon_use_emails` (all idempotent; the
-  code degrades instead of failing between deploying the files and running them).
+  `20261016140000_csp_request_id` (CSP report `request_id`),
+  `20261016140500_invoice_number_counters` (per-seller document series, see Invoices below),
+  `20261016141000_slug_registry_product_store` (translated product slugs of non-default catalogs),
+  `20261016142000_cart_reminder_consent_download_resume` (cart reminder consent columns on
+  `abandoned_carts`, `digital_entitlements.last_download_at`),
+  `20261016150000_normalize_coupon_use_emails` (all idempotent; the code degrades instead of failing
+  between deploying the files and running them).
   `20261015120000_processed_events_claim_state` gained a missing-table guard after release; its old
   checksum is accepted (`Migrator::LEGACY_CHECKSUMS`).
 - **Daily `cleanup` worker job** (queued at most once a day by the worker): deletes processed webhook
@@ -74,8 +86,90 @@ Read before updating a live shop; run `php cli/migrate.php` after the files are 
   SEO head; a missing slug is a 404 inside the shell). The legacy `shop.js` / `shop.css` and the
   `base_css` / `shop_js` document slots are removed: themes that referenced them must ship their own assets.
 - **E-mail normalisation**: customer and coupon-use e-mails are stored and compared as
-  `Str::normalizeEmail()` (trim + ASCII lowercase) without SQL `LOWER()`. Coupon per-customer limits
-  previously lowercased non-ASCII letters too; such addresses now count separately.
+  `Str::normalizeEmail()` (trim + UTF-8 `mb_strtolower`) without SQL `LOWER()`, so `Éva@x` and
+  `éva@x` share one per-customer coupon limit on SQLite and MySQL alike. Migration
+  `20261016150000_normalize_coupon_use_emails` rewrites existing `coupon_uses` rows the same way.
+- **nginx (store-prefixed AJAX)**: `deploy/nginx.conf` now ends its PHP location with
+  `location ~ \.php$ { try_files $uri @redirect; ... }`. Store-prefixed scripts such as `/cs/api.php`,
+  `/cs/account.php` and `/cs/wishlist.php` do not exist on disk; without that line nginx answers 404
+  for **every AJAX call of a prefixed store** (cart, checkout refreshes, wishlist). Copy the block into
+  your site config and reload nginx. Apache (`.htaccess`) and `router.php` need no change. Set
+  `operations.nginx_config` to the live file and `php cli/setup.php doctor` / `cli/staging-preflight.php`
+  warn when the line is missing.
+- **Outbound webhooks**: endpoints must use `https://`; a plain `http://` URL is refused (failed
+  delivery audit row, warning incident `webhook.endpoint_misconfigured`, `provider.webhook_config`
+  doctor failure) unless the endpoint sets `'allow_insecure_http' => true` (only for a receiver on a
+  trusted local network). Secrets must be 32+ bytes and endpoint codes `[a-z0-9_-]`. An endpoint that
+  times out twice in one sweep is skipped for the rest of it (`outbox_sweep_budget_seconds`, default
+  20, time-boxes the sweep); an event whose only failures are such skips is released without using up
+  a delivery attempt.
+- **Cart reminders are opt-in and need a consent**: the feature is off by default, and a cart (and its
+  e-mail) is only kept for a reminder when the shopper ticked the checkout consent `cart_reminder`.
+  An existing `config.php` with `'cart_reminder' => ['enabled' => true, ...]` but no such consent
+  **silently stops sending reminders**. Configure it, e.g.
+  `'checkout_consents' => ['cart_reminder' => ['version' => '2026-10-16', 'required' => false, 'text' => 'Send me one e-mail reminder if I do not finish this order.']]`
+  (optional, never `required`; bump `version` when the text changes). Carts stored before the upgrade
+  have no consent and are not reminded. Reminders carry `List-Unsubscribe` / one-click
+  `List-Unsubscribe-Post`. Doctor/preflight warn about `enabled` without the consent.
+- **Invoices and credit notes**: an invoice can only be issued for a paid order
+  (paid/processing/shipped/delivered, payment neither failed nor cancelled); the admin button and
+  `InvoiceService::issue()` refuse unpaid orders. The seller and number series come from the
+  order's own store (currency detection only for legacy orders without one). Numbers are counted
+  per seller + document type + year + prefix (`invoice_number_counters`); legacy shared
+  `invoice_counters` rows get one owner and keep their last number. The default credit-note prefix is
+  now `<invoice_prefix>CN-` (unchanged `CN-` for a store without an invoice prefix): **a non-default
+  store that relied on the shared `CN-` series starts a new series mid-year** unless you set
+  `legal.credit_note_prefix` in `stores.json` (a prefix another seller already numbers that year is
+  refused). `stores.json` series that share a prefix are refused.
+- **Extension API actions**: every non-GET/HEAD request to an extension action must carry the session
+  CSRF token (`X-CSRF-Token` or `csrf_token`, HTTP 403 otherwise); actions can be limited with
+  `'method' => 'GET'|'POST'` (405 otherwise). **Server-to-server POSTs to an extension action break**
+  unless the action declares `'csrf' => false` (then authenticate it yourself, e.g. a signature).
+  Extension listener endpoint keys are now `ext:<code>:<name>`; a duplicate fails the extension's load.
+- **Supplier feeds**: feeds are store-scoped (a feed belongs to its warehouse's store). A feed whose
+  stored `import_mode` is not one of `upsert`, `price_stock`, `stock_only` now ends with
+  `error: bad import mode` instead of running a full upsert; fix the mode in the admin feed form.
+- **Digital asset paths**: new and re-saved digital assets are stored under
+  `<digital_assets_base_dir>/<catalog_id>/`; traversal and symlink escapes are refused. Existing rows
+  keep their base-relative path and keep downloading. Downloads support HTTP ranges; resumes within
+  `digital_download_resume_minutes` (default 30) are not counted again.
+- **Storefront routing**: an unknown `?page=` value (and an unknown category) now answers 404 instead
+  of the homepage with 200; `?page=home` and no page still render home. The footer About/Contact links
+  point to `/page/about` and `/page/contact` and are shown only when those CMS pages exist and are
+  active (create them to keep the links).
+- **Carrier tracking webhooks**: only the statuses `created`, `in_transit`, `out_for_delivery`,
+  `ready_for_pickup`, `failed`, `delivered` are accepted (others answer `unknown_status`); a label never
+  moves back to a lower status and a cancelled label is not revived. Carriers may sign
+  `X-Shipping-Timestamp` (HMAC of `"<ts>.<body>"`, ±300 s); `shipping_webhook_require_timestamp => true`
+  makes it mandatory. Carrier codes may contain `-` (secret env `SHIP_HTTP_CARRIER_WEBHOOK_SECRET`); a
+  missing/weak secret answers 503 with the critical incident `shipping.webhook_misconfigured`.
+- **Shipping quotes outside EUR**: Packeta and GLS built-in tiers, COD fees and free-shipping thresholds
+  are EUR amounts and are only quoted in EUR stores; `shipping.json` declares `"currency": "EUR"` and is
+  not quoted to other currencies. **A non-EUR store gets no Packeta/GLS/shipping.json quote until it has
+  its own `shipping_rates` rows** (admin shipping rates, scoped to the store). A failing carrier adapter
+  is skipped (warning incident `shipping.rates_adapter_failed`) instead of failing all rates.
+- **Checkout destinations**: physical orders to a country that is not in the offered destination
+  countries (the zones of `shipping.json` and the store's shipping zones) are refused; `Shipping::calculate` returns -1
+  (unavailable) for unknown methods and countries instead of free shipping.
+- **Mail**: `SmtpMail` refuses AUTH over an unencrypted connection unless `SMTP_ALLOW_PLAINTEXT_AUTH=1`
+  (use `SMTP_ENCRYPTION=tls|ssl`); EHLO uses `SMTP_HELO` / the host name. `SesMail` sends through
+  `SendRawEmail` (attachments and custom headers are kept; the IAM policy needs `ses:SendRawEmail`).
+  `MailService::send()` can return the new status `rate_limited` (order mail is limited per order;
+  the worker re-queues the job after the window, at most 3 times) - custom callers that treated only
+  `sent`/`failed`/`skipped` must handle it.
+- **Uploads**: without `uploads_dir` in `config.php`, `LocalStorage` now writes to the application's
+  `uploads/` (served as `/uploads`) instead of `adapters/uploads/`; images uploaded by such installs
+  before the upgrade are in `adapters/uploads/` and must be moved to `uploads/`.
+- **Cart prices**: a line whose effective unit price is negative (e.g. a variant `price_delta` that
+  outgrew a lowered base price) is no longer clamped to a free item: it stays in the cart as
+  unavailable (`unavailable_reason: price_invalid`), checkout skips it and the incident
+  `catalog.negative_price` is raised. Fix the variant price.
+- **Reviews**: one review per product per customer, for guests per browser session plus at most
+  `Reviews::GUEST_IP_CAP` (5) per client IP, within 24 hours; a refused attempt no longer extends the block.
+- **CSV exports**: the product and order exports stream from the database. A failure mid-stream
+  (e.g. MySQL `net_write_timeout` on a slow download) is logged (`export.truncated`) and raises the
+  incident `export.truncated`; when nothing was sent yet the download answers 500, otherwise the file
+  is incomplete - check the incidents before importing an export elsewhere.
 
 ### Added
 - **Shipments and tracking in the admin order detail** (A12.8). Migration `20261014090000_shipment_tracking_url`.
