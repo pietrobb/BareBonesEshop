@@ -10,6 +10,7 @@ final class StorefrontWishlistExtension
             $translations = I18n::all();
             return [
                 'active' => $active,
+                'pressed' => $active ? 'true' : 'false',
                 'label' => $active ? ($translations['wishlist.in'] ?? 'In wishlist') : ($translations['wishlist.add'] ?? 'Add to wishlist'),
                 'toggle_url' => Template::storeUrl('/wishlist.php'),
                 'return_url' => (string)$product['url'],

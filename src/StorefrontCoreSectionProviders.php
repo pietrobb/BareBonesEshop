@@ -56,7 +56,7 @@ final class StorefrontCoreSectionProviders
             'id' => (int)$row['id'],
             'name' => (string)$row['name'],
             'slug' => (string)$row['slug'],
-            'url' => Template::storeUrl('/category/' . rawurlencode((string)($row['path'] ?? $row['slug']))),
+            'url' => Template::storeUrl('/category/' . rawurlencode((string)$row['slug'])),
             'count' => (int)($row['product_count'] ?? 0),
         ];
     }

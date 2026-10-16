@@ -26,13 +26,20 @@ function apiCategories(): array {
 
 function apiProducts(): array {
     $catSlug = Security::slug($_GET['cat'] ?? '');
-    $page = max(1, Security::int($_GET['page'] ?? 1));
+    $page = max(1, min(Search::MAX_PAGE, Security::int($_GET['page'] ?? 1)));
     $sort = Security::slug($_GET['sort'] ?? 'price_asc');
     $filtersJson = Security::str($_GET['filters'] ?? '{}', '{}');
-    $filters = json_decode($filtersJson, true);
+    $filters = json_decode($filtersJson, true, 4);
     if (!is_array($filters)) $filters = [];
-    $priceMin = isset($_GET['price_min']) ? Security::int($_GET['price_min']) : null;
-    $priceMax = isset($_GET['price_max']) ? Security::int($_GET['price_max']) : null;
+    // {"attr": "value"} or {"attr": ["v1", "v2"]} only: deeper nesting used to reach a string-typed tokenizer (500).
+    foreach ($filters as $values) {
+        if (is_array($values) && array_filter($values, static fn($value): bool => !is_scalar($value)) !== []) {
+            http_response_code(400);
+            return ['error' => 'Invalid filters', 'products' => [], 'total' => 0];
+        }
+    }
+    $priceMin = isset($_GET['price_min']) ? max(0, Security::int($_GET['price_min'])) : null;
+    $priceMax = isset($_GET['price_max']) ? max(0, Security::int($_GET['price_max'])) : null;
 
     $cfg = require dirname(__DIR__, 2) . '/config.php';
     $perPage = $cfg['per_page'] ?? 24;
@@ -93,7 +100,7 @@ function apiProduct(): array {
 
 function apiSearch(): array {
     $q = trim(Security::str($_GET['q'] ?? ''));
-    $page = max(1, Security::int($_GET['page'] ?? 1));
+    $page = max(1, min(Search::MAX_PAGE, Security::int($_GET['page'] ?? 1)));
 
     if (strlen($q) < 2) {
         return ['products' => [], 'total' => 0, 'query' => $q];
@@ -155,6 +162,20 @@ function apiValidateCoupon(): array {
 }
 
 function apiReviewSubmit(): array {
+    $input = json_decode((string)file_get_contents('php://input'), true);
+    $result = reviewSubmitResult(is_array($input) ? $input : $_POST);
+    // The product page form also works without JavaScript: a plain form POST that names its product page
+    // goes back there (303) with a flash message instead of showing this JSON.
+    $returnTo = !is_array($input) ? Security::safeLocalPath($_POST['return_to'] ?? '', '') : '';
+    if ($returnTo !== '' && str_starts_with($returnTo, '/')) {
+        $_SESSION['review_flash'] = ['ok' => !empty($result['ok']), 'error' => (string)($result['error'] ?? '')];
+        http_response_code(303);
+        header('Location: ' . $returnTo . '#reviews');
+    }
+    return $result;
+}
+
+function reviewSubmitResult(array $input): array {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         http_response_code(405);
         return ['error' => 'Method not allowed'];
@@ -170,16 +191,17 @@ function apiReviewSubmit(): array {
         return ['ok' => false, 'error' => 'rate_limited'];
     }
 
-    $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
     $productId = Security::int($input['product_id'] ?? 0);
-    if ($productId <= 0 || !Products::byId($productId)) {
+    $product = $productId > 0 ? Products::byId($productId) : null;
+    // Only products shoppers can see may collect reviews (not drafts or archived ones).
+    if (!$product || ($product['status'] ?? '') !== 'active') {
         return ['ok' => false, 'error' => 'invalid_product'];
     }
 
     $data = [
         'rating' => Security::int($input['rating'] ?? 0),
-        'title'  => (string)($input['title'] ?? ''),
-        'body'   => (string)($input['body'] ?? ''),
+        'title'  => Security::str($input['title'] ?? ''),
+        'body'   => Security::str($input['body'] ?? ''),
     ];
 
     // Logged-in customer: attribute the review and use the account name.
@@ -188,10 +210,19 @@ function apiReviewSubmit(): array {
         $data['customer_id'] = $customerId;
         $c = Customers::byId($customerId);
         $data['author_name'] = trim((string)($c['name'] ?? '')) !== ''
-            ? $c['name']
-            : (string)($input['author_name'] ?? '');
+            ? mb_substr(trim((string)$c['name']), 0, Reviews::MAX_AUTHOR)
+            : Security::str($input['author_name'] ?? '');
     } else {
-        $data['author_name'] = (string)($input['author_name'] ?? '');
+        $data['author_name'] = Security::str($input['author_name'] ?? '');
+    }
+
+    $error = Reviews::validationError($productId, $data);
+    if ($error !== null) return ['ok' => false, 'error' => $error];
+    // One review per product per customer (guests: per hashed client IP) within the window.
+    $reviewer = $customerId > 0 ? 'review_once_' . $productId . '_c' . $customerId : 'review_once_' . $productId;
+    if (!Security::rateLimit($reviewer, 1, Reviews::DUPLICATE_WINDOW, $customerId <= 0)) {
+        http_response_code(429);
+        return ['ok' => false, 'error' => 'duplicate_review'];
     }
 
     [$ok, $id, $err] = Reviews::submit($productId, $data);
@@ -223,7 +254,9 @@ function apiWishlistToggle(): array {
 
     $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
     $productId = Security::int($input['product_id'] ?? 0);
-    if ($productId <= 0 || !Products::byId($productId)) {
+    $product = $productId > 0 ? Products::byId($productId) : null;
+    // Adding needs an active product; removing an entry whose product was since archived stays possible.
+    if (!$product || (($product['status'] ?? '') !== 'active' && !Wishlist::has($productId))) {
         return ['ok' => false, 'error' => 'invalid_product'];
     }
 
@@ -1281,7 +1314,7 @@ function apiParametricSearch(): array {
     $catId = Security::int($_GET['category_id'] ?? 0);
     if (!$catId) return ['error' => 'category_id required'];
 
-    $page = max(1, Security::int($_GET['page'] ?? 1));
+    $page = max(1, min(Search::MAX_PAGE, Security::int($_GET['page'] ?? 1)));
     $sort = Security::clean($_GET['sort'] ?? 'price_asc');
     $lang = I18n::locale();
 
@@ -1343,8 +1376,10 @@ function apiCookieConsent(): array {
         'analytics' => !empty($_POST['analytics']),
         'marketing' => !empty($_POST['marketing']),
     ];
-    $method = (string)($_POST['method'] ?? 'preferences');
-    if (!in_array($method, ['accept_all', 'reject_all', 'preferences'], true)) {
+    // The banner sends GdprService's own method names; the short legacy spellings map onto them.
+    $method = Security::str($_POST['method'] ?? 'preferences', 'preferences');
+    $method = ['accept_all' => 'banner_accept_all', 'reject_all' => 'banner_reject_all'][$method] ?? $method;
+    if (!in_array($method, ['banner_accept_all', 'banner_reject_all', 'preferences'], true)) {
         $method = 'preferences';
     }
     $cid = (int)($_SESSION['customer_id'] ?? 0);

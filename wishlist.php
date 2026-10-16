@@ -8,6 +8,7 @@
  */
 require_once __DIR__ . '/src/autoload.php';
 
+Security::headers();
 Security::sessionStart();
 Customers::isLoggedIn();
 if (!isset($_SESSION['cart'])) $_SESSION['cart'] = [];
@@ -17,18 +18,21 @@ $lang = Bootstrap::initLocale();
 // No-JS POST fallback (CSRF-guarded). op=toggle from the product page,
 // op=remove (default) from the wishlist page itself.
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (Security::csrfValidate()) {
-        $pid = Security::int($_POST['product_id'] ?? 0);
-        $op  = (string)($_POST['op'] ?? 'remove');
-        if ($pid > 0) {
-            $op === 'toggle' ? Wishlist::toggle($pid) : Wishlist::remove($pid);
-        }
+    $op = Security::str($_POST['op'] ?? 'remove', 'remove');
+    $pid = Security::int($_POST['product_id'] ?? 0);
+    // Only an existing product of this store can be toggled, and only an active one added (same rule as the JSON API).
+    $product = $pid > 0 ? Products::byId($pid) : null;
+    if (Security::csrfValidate() && $pid > 0) {
+        if ($op !== 'toggle') Wishlist::remove($pid);
+        elseif ($product && (($product['status'] ?? '') === 'active' || Wishlist::has($pid))) Wishlist::toggle($pid);
     }
-    // Only honour a local /product/... return target to avoid open redirects.
-    $return = (string)($_POST['return_to'] ?? '');
-    $back = (($_POST['op'] ?? '') === 'toggle' && preg_match('~^/product/[a-z0-9-]+/?$~', $return))
-        ? Template::storeUrl($return)
-        : Template::storeUrl('/wishlist.php');
+    // return_to is the product URL the theme rendered (store prefix, base path and aliases included):
+    // honour it only as a same-site absolute path, otherwise rebuild the product URL server-side.
+    $back = Template::storeUrl('/wishlist.php');
+    if ($op === 'toggle' && $product) {
+        $return = Security::safeLocalPath($_POST['return_to'] ?? '', '');
+        $back = str_starts_with($return, '/') ? $return : StorefrontViewModel::productUrl((string)$product['slug']);
+    }
     header('Location: ' . $back);
     exit;
 }

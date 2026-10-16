@@ -123,7 +123,7 @@ try {
                         'consent.' . $key, 'Render all consents; required only where required=true, never preselect optional marketing.');
                 }
                 $check($count($form . "//button[@type='submit' and not(@name) and not(@disabled)] | " . $form . "//input[@type='submit' and not(@disabled)]") > 0, 'submit', 'Usable order submit control is missing.');
-                if ($scenario === 'rejected-redisplay') $check(str_contains($html, 'CSRF token mismatch.'), 'error', 'checkout_error is not displayed after a refused order.');
+                if ($scenario === 'rejected-redisplay') $check(str_contains($html, esc(I18n::t('checkout_csrf_error'))), 'error', 'checkout_error is not displayed after a refused order.');
             }
         } catch (Throwable $e) {
             $report['failures'][] = $target . ': ' . $e->getMessage();

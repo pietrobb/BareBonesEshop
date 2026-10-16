@@ -1,6 +1,6 @@
 <div class="product-info">
     <h1 class="product-info__name">{{product.name}}</h1>
-    <p class="product-info__sku">SKU: {{product.sku}}</p>
+    <p class="product-info__sku">{{t.sku_label}}: {{product.sku}}</p>
     <div class="product-info__price">
         {{#if product.compare_price}}
             <span class="price--old">{{product.compare_price_formatted}}</span>

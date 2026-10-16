@@ -290,7 +290,7 @@ final class StorefrontViewModel
                 'id' => (int)$row['id'],
                 'name' => (string)$row['name'],
                 'slug' => (string)$row['slug'],
-                'url' => Template::storeUrl('/category/' . rawurlencode((string)$row['path'])),
+                'url' => Template::storeUrl('/category/' . rawurlencode((string)$row['slug'])), // the router resolves slugs, not nested paths
             ];
         }
         return $result;

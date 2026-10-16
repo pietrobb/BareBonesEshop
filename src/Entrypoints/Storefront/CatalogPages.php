@@ -27,22 +27,35 @@ function renderProduct(array $product): string {
 function renderCategory(array $cat): string {
     global $catName, $t, $lang;
     $catId = (int)$cat['id'];
-    $selected = !empty($_GET['subcat']) && is_array($_GET['subcat']) ? array_map('intval', $_GET['subcat']) : [];
     $ids = Categories::descendantIds($catId);
+    // subcat[] may only narrow to real descendants of this category (bounded: one descendant lookup each).
+    $selected = !empty($_GET['subcat']) && is_array($_GET['subcat'])
+        ? array_slice(array_values(array_intersect(array_unique(array_map('intval', array_filter($_GET['subcat'], 'is_scalar'))), array_map('intval', $ids))), 0, 50)
+        : [];
     if ($selected) {
-        $ids = [];
-        foreach ($selected as $id) $ids = array_merge($ids, Categories::descendantIds($id));
-        $ids = array_values(array_unique($ids));
+        $narrowed = [];
+        foreach ($selected as $id) $narrowed = array_merge($narrowed, Categories::descendantIds($id));
+        $ids = array_values(array_unique($narrowed));
     }
-    $page = max(1, Security::int($_GET['pg'] ?? 1));
+    $page = max(1, min(Search::MAX_PAGE, Security::int($_GET['pg'] ?? 1)));
     $sort = Security::clean($_GET['sort'] ?? 'price_asc');
+    // Only scalar values pass here; Products::parametricSearch() keeps the category's own facets, capped (max_input_vars bounds the loop).
     $spec = [];
-    foreach ((array)($_GET['spec'] ?? []) as $name => $values) $spec[Security::clean($name)] = array_map([Security::class, 'clean'], (array)$values);
-    $pmin = !empty($_GET['pmin']) ? Security::int($_GET['pmin']) * 100 : null;
-    $pmax = !empty($_GET['pmax']) ? Security::int($_GET['pmax']) * 100 : null;
+    foreach (is_array($_GET['spec'] ?? null) ? $_GET['spec'] : [] as $name => $values) {
+        $spec[Security::clean((string)$name)] = array_map([Security::class, 'clean'], array_slice(array_filter((array)$values, 'is_scalar'), 0, Products::MAX_FILTER_VALUES));
+    }
+    $money = static fn(string $key): ?int => !empty($_GET[$key]) && is_scalar($_GET[$key]) ? max(0, min(Search::MAX_PRICE_FILTER, Security::int($_GET[$key]))) * 100 : null;
+    $pmin = $money('pmin');
+    $pmax = $money('pmax');
     $ranges = [];
-    foreach (['rmin' => 'min', 'rmax' => 'max'] as $input => $edge) foreach ((array)($_GET[$input] ?? []) as $name => $value) if ($value !== '') $ranges[Security::clean($name)][$edge] = (float)$value;
+    foreach (['rmin' => 'min', 'rmax' => 'max'] as $input => $edge) {
+        foreach (is_array($_GET[$input] ?? null) ? $_GET[$input] : [] as $name => $value) {
+            if (is_scalar($value) && is_numeric($value)) $ranges[Security::clean((string)$name)][$edge] = (float)$value;
+        }
+    }
     $result = Products::parametricSearch($ids, $page, 24, $sort, $spec, $pmin, $pmax, $lang, $ranges);
+    $spec = $result['applied_spec'];
+    $ranges = $result['applied_ranges'];
     $children = array_values(array_filter(Categories::children($catId), static fn(array $row): bool => (int)$row['product_count'] > 0));
     $filters = [];
     foreach ($result['filters'] as $name => $values) {

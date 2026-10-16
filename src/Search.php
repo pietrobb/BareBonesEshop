@@ -4,6 +4,8 @@
  * Abstraction over SQLite FTS5 and MySQL FULLTEXT.
  */
 class Search {
+    /** Largest whole-currency price filter: keeps the *100 cents conversion far from integer overflow. */
+    public const MAX_PRICE_FILTER = 100000000;
     /**
      * Search products
      */
@@ -12,7 +14,7 @@ class Search {
     /** Search-page sort and filters from a query string: whole-currency price inputs become cents, unknown sorts fall back to relevance. */
     public static function filtersFromQuery(array $get): array {
         $sort = in_array($get['sort'] ?? '', self::SORTS, true) ? (string)$get['sort'] : 'relevance';
-        $number = static fn(string $key): ?int => isset($get[$key]) && is_scalar($get[$key]) && trim((string)$get[$key]) !== '' ? max(0, Security::int($get[$key])) : null;
+        $number = static fn(string $key): ?int => isset($get[$key]) && is_scalar($get[$key]) && trim((string)$get[$key]) !== '' ? max(0, min(self::MAX_PRICE_FILTER, Security::int($get[$key]))) : null;
         $pmin = $number('pmin');
         $pmax = $number('pmax');
         $cat = (int)($number('cat') ?? 0);
@@ -28,14 +30,41 @@ class Search {
      * The result carries a 'categories' facet (id, name, slug, count) of the matches before the category filter.
      */
     public static function query(string $q, int $page = 1, int $perPage = 24, array $opts = []): array {
-        $db = Db::get();
         $q = trim($q);
         if ($q === '') return ['products' => [], 'total' => 0, 'page' => 1, 'per_page' => $perPage, 'pages' => 0, 'categories' => []];
+        $page = max(1, min(self::MAX_PAGE, $page));
+        try {
+            return self::runQuery($q, $page, $perPage, $opts, false);
+        } catch (PDOException $e) {
+            // A query the full-text engine still refuses must not become a 500: degrade to a LIKE scan.
+            error_log('[Search] full-text query failed, using LIKE fallback: ' . $e->getMessage());
+            return self::runQuery($q, $page, $perPage, $opts, true);
+        }
+    }
 
+    /** Highest result page a request may ask for; larger values only produce huge OFFSETs (or int overflow). */
+    public const MAX_PAGE = 10000;
+
+    private static function runQuery(string $q, int $page, int $perPage, array $opts, bool $like): array {
+        $db = Db::get();
         $offset = ($page - 1) * $perPage;
         $sort = in_array($opts['sort'] ?? '', self::SORTS, true) ? (string)$opts['sort'] : 'relevance';
         $params = [':store' => StoreContext::current()->catalogId()];
-        if (Db::isSqlite()) {
+        if ($like) {
+            $from = 'FROM products p';
+            $where = "p.store_id = :store AND p.status = 'active'";
+            foreach (array_slice(preg_split('/\s+/u', $q) ?: [], 0, 8) as $i => $word) {
+                $pattern = '%' . Db::likeLiteral($word) . '%';
+                $alternatives = [];
+                foreach (['name', 'sku', 'summary', 'tags'] as $j => $column) {
+                    $alternatives[] = "p.{$column} LIKE :like{$i}_{$j} ESCAPE '!'";
+                    $params[":like{$i}_{$j}"] = $pattern;
+                }
+                $where .= ' AND (' . implode(' OR ', $alternatives) . ')';
+            }
+            $select = 'p.*';
+            $relevance = 'p.name ASC, p.id ASC';
+        } elseif (Db::isSqlite()) {
             $from = "FROM products_fts fts JOIN products p ON p.id = fts.rowid";
             $where = "products_fts MATCH :q AND p.store_id = :store AND p.status = 'active'";
             $params[':q'] = self::sanitizeFtsQuery($q);
@@ -76,7 +105,7 @@ class Search {
         };
         $stmt = $db->prepare("SELECT {$select} {$from} WHERE {$where} ORDER BY {$orderBy} LIMIT :limit OFFSET :offset");
         $fetch = $params + [':limit' => $perPage, ':offset' => $offset];
-        if (!Db::isSqlite()) $fetch[':q_rel'] = $params[':q'];
+        if (!$like && !Db::isSqlite()) $fetch[':q_rel'] = $params[':q'];
         foreach ($fetch as $name => $value) $stmt->bindValue($name, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
         $stmt->execute();
         $products = $stmt->fetchAll();
@@ -166,14 +195,15 @@ class Search {
     private static function sanitizeFtsQuery(string $q): string {
         $q = preg_replace('/["\*\(\)\{\}\[\]:^~]/', ' ', $q);
         $q = preg_replace('/\b(AND|OR|NOT|NEAR)\b/i', '', $q);
-        $q = trim(preg_replace('/\s+/', ' ', $q));
-        if ($q === '') return '""';
-
+        // Every token is a quoted FTS5 string: a raw "t-shirt", "3.5", "o'neil" or "a,b" is FTS5 syntax
+        // (column filter, bareword error) and used to fail the whole search with an SQL error.
+        // Tokens without a letter or digit ("%", "/") would be empty phrases that match nothing.
+        $words = array_values(array_filter(preg_split('/\s+/u', trim($q)) ?: [], static fn(string $w): bool => preg_match('/[\p{L}\p{N}]/u', $w) === 1));
+        if ($words === []) return '""';
+        $quoted = array_map(static fn(string $w): string => '"' . str_replace('"', '""', $w) . '"', $words);
         // Prefix match for last word (autocomplete effect)
-        $words = explode(' ', $q);
-        $last = array_pop($words);
-        $words[] = '"' . $last . '" *';
-        return implode(' ', $words);
+        $quoted[count($quoted) - 1] .= ' *';
+        return implode(' ', $quoted);
     }
 
     /** Escape a single term for FTS */

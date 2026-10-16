@@ -1047,7 +1047,7 @@ StoreContext::activate($context);
 Template::activate($context);
 I18n::setLocale($argv[4] === "/de" ? "de" : "en");
 $category = Categories::byId((int)$argv[5]);
-UrlAliases::setRules($argv[6] === "alias" ? ["/knihy" => "/category/" . $category["path"]] : []);
+UrlAliases::setRules($argv[6] === "alias" ? ["/knihy" => "/category/" . $category["slug"]] : []);
 $product = Products::byId(9701);
 $product["name"] = "Canonical Product & <Guide>";
 $model = StorefrontViewModel::product($product);
@@ -1075,7 +1075,7 @@ try {
             $trails = array_values(array_filter($payloads, static fn(array $payload): bool => ($payload['@type'] ?? '') === 'BreadcrumbList'));
             assert_equals(1, count($trails), "{$label}: SEO head renders one BreadcrumbList");
             $trail = $trails[0]['itemListElement'];
-            $categoryPath = $urlScheme === 'alias' ? 'knihy' : 'category/' . rawurlencode((string)Categories::byId($vmCategory)['path']);
+            $categoryPath = $urlScheme === 'alias' ? 'knihy' : 'category/' . rawurlencode((string)Categories::byId($vmCategory)['slug']); // the router resolves slugs
             $absolutePrefix = 'https://shop.example' . $uiPrefix;
             assert_equals([$absolutePrefix, $absolutePrefix . $categoryPath], array_column($trail, 'item'), "{$label}: home and category have exact absolute URLs without duplicated /test");
             assert_equals([1, 2, 3], array_column($trail, 'position'), "{$label}: category order and positions are preserved");
