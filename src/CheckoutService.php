@@ -28,6 +28,23 @@ class CheckoutService {
         return ($codQuote['selected']['method_code'] ?? '') === $method ? (int)$codQuote['price'] : $shipping;
     }
 
+    /**
+     * Payment methods of the checkout form, priced like execute(): on the goods after discounts plus the shipping
+     * the order charges (cash on delivery adds the carrier surcharge; a free-shipping promotion keeps it at zero).
+     * $shipping is the selected rate's price ('' method = no rate offered, so no payment either).
+     * @return array{methods: list<array>, selected: ?array, shipping: int}
+     */
+    public static function paymentPreview(array $cart, int $goods, string $country, string $currency, string $method, int $shipping, bool $freeShipping, string $postedPayment, ?int $customerId): array {
+        $methods = $method !== '' ? PaymentService::availableMethods($country, $currency, $goods + $shipping, $method, $customerId) : [];
+        $selected = array_values(array_filter($methods, static fn(array $m): bool => (string)$m['code'] === $postedPayment))[0] ?? $methods[0] ?? null;
+        $charged = $freeShipping ? 0 : self::summaryShipping($cart, $goods, $country, $method, $selected, $shipping);
+        if ($selected && $charged !== $shipping) {
+            $selected = PaymentService::selectMethod((string)$selected['code'], $country, $currency, $goods + $charged, $method, $customerId) ?? $selected;
+            $methods = array_map(static fn(array $m): array => $m['code'] === $selected['code'] ? $selected : $m, $methods);
+        }
+        return ['methods' => $methods, 'selected' => $selected, 'shipping' => $charged];
+    }
+
     public static function consentDefinitions(string $country, array $items): array {
         $available = array_filter($items, static fn(array $item): bool => $item['available'] ?? true);
         return ConsentService::definitions(['country' => $country, 'product_types' => array_values(array_unique(array_column($available, 'product_type')))]);
@@ -155,28 +172,41 @@ class CheckoutService {
     }
 
     /**
+     * Coupon of checkout and its preview, priced after the automatic promotions ($promotionDiscount).
+     * A stacking coupon applies (minimum order included) to the subtotal the promotions leave; any other
+     * coupon is an alternative to them (Pricing::combineDiscounts), so it is priced on the full subtotal.
+     */
+    public static function couponFor(string $code, int $subtotal, int $promotionDiscount, ?string $email): array {
+        $coupon = Pricing::applyCoupon($code, $subtotal, $email);
+        if ($promotionDiscount > 0 && (int)$coupon['discount'] > 0 && (string)($coupon['stacking'] ?? 'stack') === 'stack') {
+            $coupon = Pricing::applyCoupon($code, max(0, $subtotal - $promotionDiscount), $email);
+        }
+        return $coupon;
+    }
+
+    /**
      * Discount the checkout form shows before the order exists, with the same rules execute() applies:
      * the coupon (i18n key of the refusal reason when it gives nothing) plus automatic promotions.
      * @return array{coupon_discount: int, coupon_error: ?string, promotion_discount: int, free_shipping: bool}
      */
     public static function discountPreview(string $couponCode, int $subtotal, ?string $email, array $items, ?int $customerId): array {
+        $promotionDiscount = 0;
+        $freeShipping = false;
+        foreach (Pricing::autoCartRules($subtotal, $items, $customerId) as $rule) {
+            if ($rule['action'] === 'free_shipping') $freeShipping = true;
+            $promotionDiscount += max(0, (int)($rule['discount'] ?? 0));
+        }
         $couponDiscount = 0;
         $couponError = null;
         $couponStacking = 'stack';
         if ($couponCode !== '') {
-            $coupon = Pricing::applyCoupon($couponCode, $subtotal, $email);
+            $coupon = self::couponFor($couponCode, $subtotal, $promotionDiscount, $email);
             $couponDiscount = max(0, (int)$coupon['discount']);
             $couponStacking = (string)($coupon['stacking'] ?? 'stack');
             if ($couponDiscount === 0) $couponError = match ((string)($coupon['error'] ?? '')) {
                 'Minimum order not met' => 'coupon_min_subtotal', 'Coupon expired' => 'coupon_used_up',
                 'Coupon already used' => 'coupon_already_used', default => 'coupon_invalid',
             };
-        }
-        $promotionDiscount = 0;
-        $freeShipping = false;
-        foreach (Pricing::autoCartRules($subtotal, $items, $customerId) as $rule) {
-            if ($rule['action'] === 'free_shipping') $freeShipping = true;
-            $promotionDiscount += max(0, (int)($rule['discount'] ?? 0));
         }
         $combined = Pricing::combineDiscounts($couponDiscount, $couponStacking, $promotionDiscount);
         if ($couponDiscount > 0 && $combined['coupon'] === 0) $couponError = 'coupon_not_combinable';

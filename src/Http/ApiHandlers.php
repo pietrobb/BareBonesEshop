@@ -597,12 +597,21 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         return ['success' => false, 'error' => 'Required consent missing', 'consent_errors' => $consentErrors];
     }
 
+    // Automatic promotions first; the coupon is then priced on what they leave (CheckoutService::couponFor).
+    $autoRules = Pricing::autoCartRules($cart['subtotal'], $cart['items'], $loggedInCustomerId);
+    $promotionDiscount = 0;
+    $promotionFreeShipping = false;
+    foreach ($autoRules as $rule) {
+        if ($rule['action'] === 'free_shipping') $promotionFreeShipping = true;
+        $promotionDiscount += max(0, (int)($rule['discount'] ?? 0));
+    }
+
     // Apply coupon if provided
     $couponCode = trim(Security::str($input['coupon_code'] ?? ''));
     $couponDiscount = 0;
     $couponStacking = 'stack';
     if ($couponCode) {
-        $couponResult = Pricing::applyCoupon($couponCode, $cart['subtotal'], $email);
+        $couponResult = CheckoutService::couponFor($couponCode, $cart['subtotal'], $promotionDiscount, $email);
         if ($couponResult['discount'] > 0) {
             $couponDiscount = $couponResult['discount'];
             $couponStacking = (string)($couponResult['stacking'] ?? 'stack');
@@ -610,13 +619,20 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
             return ['error' => $couponResult['error'] ?? 'Invalid coupon'];
         }
     }
+    $combinedDiscounts = Pricing::combineDiscounts($couponDiscount, $couponStacking, $promotionDiscount);
+    if ($couponDiscount > 0 && $combinedDiscounts['coupon'] === 0) {
+        return ['success' => false, 'error' => 'Coupon cannot be combined with the current promotion'];
+    }
+    $promotionDiscount = $combinedDiscounts['promotion'];
+    $totalDiscount = min($cart['subtotal'], $couponDiscount + $promotionDiscount);
 
     $metrics = shippingCartMetrics($cart['items']);
     $totalWeight = $digitalOnly ? 0 : $metrics['weight_g'];
     $totalVolume = $digitalOnly ? 0 : $metrics['volume_cm3'];
+    // Free shipping "from X" is earned by what the buyer pays for the goods, i.e. after discounts.
     $selectedRate = $digitalOnly
         ? digitalDeliveryRate()
-        : ShippingService::selectRate($shippingMethod, $country, $totalWeight, $cart['subtotal'], PaymentService::isCashOnDelivery($paymentMethod), $totalVolume, ShippingService::physicalQuantity($cart['items']));
+        : ShippingService::selectRate($shippingMethod, $country, $totalWeight, $cart['subtotal'] - $totalDiscount, PaymentService::isCashOnDelivery($paymentMethod), $totalVolume, ShippingService::physicalQuantity($cart['items']));
     if (!$selectedRate) {
         return ['success' => false, 'error' => 'Doručenie nie je dostupné do zvolenej krajiny.'];
     }
@@ -627,23 +643,11 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         if ($pickup['error'] !== null) return ['success' => false, 'error' => I18n::t($pickup['error'])];
         if ($pickup['point'] !== null) $selectedRate['pickup_point'] = $pickup['point'];
     }
-    $shippingCost = (int)$selectedRate['price'];
-    $autoRules = Pricing::autoCartRules($cart['subtotal'], $cart['items'], $loggedInCustomerId);
-    $promotionDiscount = 0;
-    foreach ($autoRules as $rule) {
-        if ($rule['action'] === 'free_shipping') $shippingCost = 0;
-        $promotionDiscount += max(0, (int)($rule['discount'] ?? 0));
-    }
-    $combinedDiscounts = Pricing::combineDiscounts($couponDiscount, $couponStacking, $promotionDiscount);
-    if ($couponDiscount > 0 && $combinedDiscounts['coupon'] === 0) {
-        return ['success' => false, 'error' => 'Coupon cannot be combined with the current promotion'];
-    }
-    $promotionDiscount = $combinedDiscounts['promotion'];
+    $shippingCost = $promotionFreeShipping ? 0 : (int)$selectedRate['price'];
     // Shipping rates include domestic VAT like catalog prices; zero-rated sales are charged them net.
     if ($shippingCost > 0 && Cart::chargesNetOfDomesticVat($vatScenario)) {
         $shippingCost = Cart::netOfDomesticVat($shippingCost, $sellerCountry, 'standard', $taxProviderCode);
     }
-    $totalDiscount = min($cart['subtotal'], $couponDiscount + $promotionDiscount);
 
     $currency = $cart['items'][0]['currency'] ?? 'eur';
     $paymentBaseAmount = max(0, $cart['subtotal'] - $totalDiscount) + $shippingCost;
@@ -663,6 +667,10 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         return ['success' => false, 'error' => 'Synthetic checkout requires an online payment method'];
     }
     $paymentFee = (int)$selectedPayment['fee'];
+    // Payment fees include domestic VAT like shipping rates; zero-rated sales are charged them net.
+    if ($paymentFee > 0 && Cart::chargesNetOfDomesticVat($vatScenario)) {
+        $paymentFee = Cart::netOfDomesticVat($paymentFee, $sellerCountry, 'standard', $taxProviderCode);
+    }
     $providerCodes = [
         'tax' => $taxProviderCode,
         'payment' => (string)$selectedPayment['provider'],

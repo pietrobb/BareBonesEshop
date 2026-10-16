@@ -4,6 +4,9 @@
  * Session-based with localStorage restore endpoint.
  */
 class Cart {
+    /** Most units of one line: every add/update path (JSON API, storefront form, reorder, restore) is capped here. */
+    public const MAX_QTY = 99;
+
     public static function get(): array {
         $cart = $_SESSION['cart'] ?? [];
         $normalized = [];
@@ -29,7 +32,7 @@ class Cart {
                 'qty'        => 0,
             ];
         }
-        $_SESSION['cart'][$key]['qty'] += $qty;
+        $_SESSION['cart'][$key]['qty'] = min(self::MAX_QTY, (int)$_SESSION['cart'][$key]['qty'] + max(0, $qty));
     }
 
     /** Validate a storefront cart command against canonical server data. */
@@ -48,7 +51,7 @@ class Cart {
         if (!VariantAvailability::isPurchasable($productId, $variantId)) {
             return ['ok' => false, 'error' => 'product_unavailable'];
         }
-        self::add($productId, $variantId, max(1, min(99, $qty)));
+        self::add($productId, $variantId, max(1, min(self::MAX_QTY, $qty)));
         $key = $variantId === null ? "p_{$productId}" : "v_{$variantId}";
         $summary = self::enriched();
         $item = null;
@@ -80,7 +83,7 @@ class Cart {
             unset($_SESSION['cart'][$key]);
         } else {
             if (isset($_SESSION['cart'][$key])) {
-                $_SESSION['cart'][$key]['qty'] = $qty;
+                $_SESSION['cart'][$key]['qty'] = min(self::MAX_QTY, $qty);
             }
         }
     }
@@ -390,7 +393,7 @@ class Cart {
             $productId = Security::int($item['product_id'] ?? 0);
             $variantId = isset($item['variant_id']) && $item['variant_id']
                 ? Security::int($item['variant_id']) : null;
-            $qty = max(1, min(99, Security::int($item['qty'] ?? 1)));
+            $qty = max(1, min(self::MAX_QTY, Security::int($item['qty'] ?? 1)));
             if ($productId > 0 && VariantAvailability::isPurchasable($productId, $variantId)) {
                 self::add($productId, $variantId, $qty);
             }
