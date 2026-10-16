@@ -8,7 +8,7 @@ require_once __DIR__ . '/cli-only.php';
  *   php cli/restore.php <remote_path>            Restore from backup at remote_path
  *   php cli/restore.php --latest                 Restore from newest backup
  *   php cli/restore.php --list                   List available backups (newest first)
- *   php cli/restore.php <path> --skip-snapshot   Don't take a pre-restore-snapshot (DANGEROUS)
+ *   php cli/restore.php <path> --skip-snapshot   Don't take a pre-restore-snapshot (DANGEROUS; SQLite only)
  *   php cli/restore.php <path> --quiet           Minimal output
  *   php cli/restore.php <path> --yes             Skip interactive confirmation
  *   php cli/restore.php <path> --i-stopped-writers
@@ -79,9 +79,10 @@ if (isset($flags['list'])) {
 
 $remotePath = null;
 if (isset($flags['latest'])) {
-    $rows = BackupService::list();
+    // The newest restore point, never a .gz companion that shares its creation stamp.
+    $rows = array_values(array_filter(BackupService::list(), static fn(array $row): bool => !BackupService::isCompressedCopy($row)));
     if (!$rows) { fwrite(STDERR, "No backups available.\n"); exit(2); }
-    $remotePath = $rows[0]['path'];
+    $remotePath = (string)$rows[0]['path'];
 } else {
     $remotePath = $positional[0] ?? null;
 }
@@ -94,6 +95,11 @@ $isMysqlDump = preg_match('/\.sql(?:\.gz)?$/', $remotePath) === 1;
 if (!$filesOnly && $isMysqlDump && !$writersStopped) {
     fwrite(STDERR, "REFUSED: a MySQL/MariaDB restore drops and re-imports db_name, discarding anything written while it runs.\n"
         . "Stop web traffic (maintenance page), workers and cron, then re-run with --i-stopped-writers.\n");
+    exit(1);
+}
+if (!$filesOnly && $isMysqlDump && $skipSnapshot) {
+    fwrite(STDERR, "REFUSED: --skip-snapshot is not supported for a MySQL/MariaDB restore; the pre-restore-snapshot is the stored copy\n"
+        . "of the current database if the restore and its automatic rollback both fail.\n");
     exit(1);
 }
 

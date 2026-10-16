@@ -27,7 +27,15 @@ class BackupService
     private static ?Closure $mysqlDumper = null;
     /** MySQL installs: verified scratch-first restore of a backup dump (restore()). */
     private static ?MysqlUpdateDatabaseBackup $mysqlDatabase = null;
+    /**
+     * Builds $mysqlDatabase on first use. Construction validates the connection configuration and
+     * throws for one it cannot dump (e.g. a db_name with a hyphen); doing that lazily keeps init()
+     * working (list, files restore) and makes create() — and so a pre-migration backup — fail loudly.
+     */
+    private static ?Closure $mysqlDatabaseFactory = null;
     private static string $mysqlScratchDatabase = '';
+    /** Durable private directory that keeps a MySQL rollback dump when a restore fails after dropping live. */
+    private static string $recoveryDir = '';
     /** Non-database state archived next to every backup: name => file or directory. */
     private static array $fileSources = [];
 
@@ -39,12 +47,14 @@ class BackupService
 
         self::$mysqlDumper = null;
         self::$mysqlDatabase = null;
+        self::$mysqlDatabaseFactory = null;
         self::$mysqlScratchDatabase = '';
         self::$fileSources = [];
         if ($config !== null) {
             $storageRoot = (string)($config['storage_dir'] ?? self::$rootDir . '/storage/backups');
             $storageClass = (string)($config['storage_adapter'] ?? 'LocalBackupStorage');
             self::$fileSources = (array)($config['files'] ?? []);
+            self::$recoveryDir = (string)($config['recovery_dir'] ?? dirname($storageRoot) . '/restore-recovery');
         } else {
             $appCfg = require self::$rootDir . '/config.php';
             $storageRoot = (string)($appCfg['backup_storage_dir'] ?? dirname(self::$rootDir) . '/bareboneseshop-private/backups');
@@ -58,8 +68,10 @@ class BackupService
                     'gdpr_salt' => (string)($appCfg['gdpr_salt_file'] ?? $private . '/secrets/gdpr_salt'),
                 ];
             }
+            self::$recoveryDir = (string)($appCfg['backup_recovery_dir'] ?? '')
+                ?: rtrim((string)($appCfg['private_runtime_dir'] ?? dirname(self::$rootDir) . '/bareboneseshop-private'), '/\\') . '/restore-recovery';
             if (self::driverName($db) === 'mysql') {
-                $mysql = new MysqlUpdateDatabaseBackup(
+                self::$mysqlDatabaseFactory = static fn(): MysqlUpdateDatabaseBackup => new MysqlUpdateDatabaseBackup(
                     (string)($appCfg['db_host'] ?? ''),
                     (int)($appCfg['db_port'] ?? 3306),
                     (string)($appCfg['db_name'] ?? ''),
@@ -71,10 +83,9 @@ class BackupService
                     self::mysqlBinary((string)($appCfg['update_mysql_dump_binary'] ?? 'mysqldump'), 'mysqldump', 'mariadb-dump'),
                     self::mysqlBinary((string)($appCfg['update_mysql_client_binary'] ?? 'mysql'), 'mysql', 'mariadb')
                 );
-                self::useMysqlDatabase(
-                    $mysql,
-                    trim((string)($appCfg['backup_mysql_restore_scratch_database'] ?? '')) ?: substr((string)($appCfg['db_name'] ?? ''), 0, 48) . '_restore_scratch'
-                );
+                self::$mysqlScratchDatabase = trim((string)($appCfg['backup_mysql_restore_scratch_database'] ?? ''))
+                    ?: substr((string)($appCfg['db_name'] ?? ''), 0, 48) . '_restore_scratch';
+                self::$mysqlDumper = static fn(string $dumpPath): array => self::mysqlDatabase()->dumpTo($dumpPath);
             }
         }
         $logPath = (string)(self::$cfg['log_file'] ?? 'storage/backup.log');
@@ -122,7 +133,9 @@ class BackupService
         self::$livePath = null;
         self::$mysqlDumper = null;
         self::$mysqlDatabase = null;
+        self::$mysqlDatabaseFactory = null;
         self::$mysqlScratchDatabase = '';
+        self::$recoveryDir = '';
         self::$fileSources = [];
     }
 
@@ -136,8 +149,22 @@ class BackupService
     public static function useMysqlDatabase(?MysqlUpdateDatabaseBackup $database, string $scratchDatabase = ''): void
     {
         self::$mysqlDatabase = $database;
+        self::$mysqlDatabaseFactory = null;
         self::$mysqlScratchDatabase = $scratchDatabase;
         self::$mysqlDumper = $database === null ? null : static fn(string $dumpPath): array => $database->dumpTo($dumpPath);
+    }
+
+    /** The configured MySQL backup adapter, built on first use; null when none is configured. */
+    private static function mysqlDatabase(): ?MysqlUpdateDatabaseBackup
+    {
+        if (self::$mysqlDatabase === null && self::$mysqlDatabaseFactory !== null) {
+            try {
+                self::$mysqlDatabase = (self::$mysqlDatabaseFactory)();
+            } catch (InvalidArgumentException $e) {
+                throw new RuntimeException('MySQL backups cannot use this database configuration: ' . $e->getMessage(), 0, $e);
+            }
+        }
+        return self::$mysqlDatabase;
     }
 
     private static function driverName(PDO $db): string
@@ -845,8 +872,11 @@ class BackupService
      * MySQL/MariaDB counterpart of the SQLite restore: the dump is downloaded and verified
      * (identity, size, sha256), imported into the scratch database and checked row-for-row against
      * the dump, and only then does it replace db_name (see MysqlUpdateDatabaseBackup::restoreBackupDump).
-     * A dump of the current database is taken first — stored as a pre-restore-snapshot unless
-     * skip_snapshot — and is re-imported automatically if replacing the live database fails.
+     * A dump of the current database is taken first — always stored as a pre-restore-snapshot
+     * (skip_snapshot is refused: the rollback dump must never be the only copy of live) — and is
+     * re-imported automatically if replacing the live database fails. Its local copy lives in the
+     * private recovery directory (0600) and is kept, with its path in the error, whenever the restore
+     * fails after the live database was dropped.
      *
      * Replacing db_name discards everything written while it runs, and MySQL has no file lock that
      * proves nobody else is writing, so the caller must confirm writers_stopped => true
@@ -861,13 +891,17 @@ class BackupService
             throw new RuntimeException('Restore: a MySQL restore drops and re-imports db_name, discarding anything written while it runs. '
                 . 'Stop web traffic (maintenance page), workers and cron, then re-run with --i-stopped-writers');
         }
-        $mysql = self::$mysqlDatabase;
-        if (self::driverName(self::$db) !== 'mysql' || $mysql === null) {
+        $mysql = self::driverName(self::$db) === 'mysql' ? self::mysqlDatabase() : null;
+        if ($mysql === null) {
             throw new RuntimeException('Restore: a MySQL dump is restored only into a configured MySQL/MariaDB installation (db_driver=mysql)');
         }
-        $skipSnapshot = (bool)($opts['skip_snapshot'] ?? false);
+        if (!empty($opts['skip_snapshot'])) {
+            throw new RuntimeException('Restore: --skip-snapshot is not supported for a MySQL/MariaDB restore; the pre-restore-snapshot is the '
+                . 'stored copy of the current database if the restore and its automatic rollback both fail');
+        }
         $source = null;
         $rollback = null;
+        $keepRollback = false;
         try {
             $source = self::stagingPath('.restore.sql');
             $meta = self::downloadVerified($remotePath, $source);
@@ -881,16 +915,13 @@ class BackupService
 
             // Pre-restore snapshot (create() owns the backup lock) doubles as the automatic rollback copy.
             $snapshotPath = null;
-            $rollback = self::stagingPath('.rollback.sql');
             try {
-                if ($skipSnapshot) {
-                    $mysql->dumpTo($rollback);
-                } else {
-                    $snap = self::create(['label' => 'pre-restore-snapshot', 'trigger' => 'auto']);
-                    $snapshotPath = (string)$snap['remote_path'];
-                    self::pruneSnapshots(5);
-                    self::downloadVerified($snapshotPath, $rollback);
-                }
+                $rollback = self::recoveryPath($mysql->database());
+                $snap = self::create(['label' => 'pre-restore-snapshot', 'trigger' => 'auto']);
+                $snapshotPath = (string)$snap['remote_path'];
+                self::pruneSnapshots(5);
+                self::downloadVerified($snapshotPath, $rollback);
+                @chmod($rollback, 0600);
             } catch (\Throwable $e) {
                 self::log('Restore: pre-snapshot failed: ' . $e->getMessage());
                 throw new RuntimeException('Pre-restore snapshot failed: ' . $e->getMessage(), 0, $e);
@@ -912,6 +943,12 @@ class BackupService
             try {
                 $result = $mysql->restoreBackupDump($source, self::$mysqlScratchDatabase, $rollback, $schema, $ownSessions);
             } catch (\Throwable $e) {
+                if ($e->getCode() === MysqlUpdateDatabaseBackup::RESTORE_FAILED_AFTER_DROP) {
+                    // Live was dropped: whatever happened next, the pre-restore dump stays where the operator can use it.
+                    $keepRollback = true;
+                    $e = new RuntimeException($e->getMessage() . " (pre-restore dump kept at {$rollback}; also stored as backup {$snapshotPath})",
+                        MysqlUpdateDatabaseBackup::RESTORE_FAILED_AFTER_DROP, $e);
+                }
                 self::log("RESTORE FAIL driver=mysql src={$remotePath} err=" . $e->getMessage());
                 throw $e;
             } finally {
@@ -938,9 +975,34 @@ class BackupService
                 'meta'            => $meta,
             ];
         } finally {
-            self::removeStagedFile($rollback);
+            if (!$keepRollback && $rollback !== null && is_file($rollback)) @unlink($rollback);
             self::removeStagedFile($source);
         }
+    }
+
+    /**
+     * A fresh 0600 file path in the private recovery directory (created 0700) for the MySQL rollback dump.
+     * Unlike the staging directory (system temp, often cleared on reboot) it survives until an operator removes it.
+     */
+    private static function recoveryPath(string $database): string
+    {
+        $dir = self::$recoveryDir;
+        if ($dir === '') {
+            throw new RuntimeException('BackupService: no private recovery directory configured');
+        }
+        self::assertPrivateAbsolutePath($dir, 'backup_recovery_dir');
+        if (is_link($dir) || (!is_dir($dir) && !@mkdir($dir, 0700, true) && !is_dir($dir))) {
+            throw new RuntimeException("BackupService: cannot create the private recovery directory {$dir}");
+        }
+        @chmod($dir, 0700);
+        $path = $dir . DIRECTORY_SEPARATOR . 'pre-restore-' . $database . '-' . gmdate('Ymd-His') . '-' . bin2hex(random_bytes(4)) . '.sql';
+        $handle = @fopen($path, 'xb');
+        if ($handle === false) {
+            throw new RuntimeException("BackupService: cannot create the rollback dump {$path}");
+        }
+        fclose($handle);
+        @chmod($path, 0600);
+        return $path;
     }
 
     /**
@@ -984,10 +1046,13 @@ class BackupService
             }
             $kinds = is_array($archiveMeta['sources'] ?? null) ? $archiveMeta['sources'] : (array)($meta['files'] ?? []);
 
+            // Plan everything before writing anything: containment (no symlinked or non-directory path
+            // component below the configured directory), target type, writability and content conflicts.
             $plan = [];
             $conflicts = [];
             $refused = [];
             $skippedSources = [];
+            $targets = [];
             $unchanged = 0;
             foreach ($entries as $entry) {
                 [$name, $rest] = explode('/', $entry, 2) + [1 => ''];
@@ -1005,8 +1070,18 @@ class BackupService
                     throw new RuntimeException("Restore: files archive entry {$entry} does not fit source {$name} ({$kind})");
                 }
                 $source = $stagingDir . '/' . $entry;
+                if (isset($targets[$target])) {
+                    $refused[] = "{$entry} (same target as {$targets[$target]})";
+                    continue;
+                }
+                $targets[$target] = $entry;
+                $directory = self::inspectRestoreDirectory($base, dirname($target));
+                if (is_string($directory)) {
+                    $refused[] = "{$entry} ({$directory})";
+                    continue;
+                }
                 if (is_link($target) || (file_exists($target) && !is_file($target))) {
-                    $refused[] = $entry;
+                    $refused[] = "{$entry} (target is a link or not a regular file)";
                     continue;
                 }
                 $overwrite = false;
@@ -1018,10 +1093,15 @@ class BackupService
                     $conflicts[] = $entry;
                     $overwrite = true;
                 }
-                $plan[] = [$entry, $source, $target, $base, $name === 'gdpr_salt' ? 0600 : 0640, $overwrite];
+                if (!is_writable($directory['existing'])) {
+                    $refused[] = "{$entry} ({$directory['existing']} is not writable by this user)";
+                    continue;
+                }
+                $plan[] = [$entry, $source, $target, $base, self::restoredFileOwnership($target, $directory['existing'], $name === 'gdpr_salt'), $overwrite];
             }
             if ($refused !== []) {
-                throw new RuntimeException('Restore: ' . count($refused) . ' target(s) are links or not regular files, refusing: ' . implode(', ', array_slice($refused, 0, 5)));
+                throw new RuntimeException('Restore: ' . count($refused) . ' target(s) cannot be restored safely, nothing was written: '
+                    . implode(', ', array_slice($refused, 0, 5)) . (count($refused) > 5 ? ', ...' : ''));
             }
             if ($conflicts !== [] && !$force) {
                 throw new RuntimeException('Restore: ' . count($conflicts) . ' live file(s) differ from the backup (' . implode(', ', array_slice($conflicts, 0, 5))
@@ -1029,8 +1109,17 @@ class BackupService
             }
 
             $overwritten = [];
-            foreach ($plan as [$entry, $source, $target, $base, $mode, $overwrite]) {
-                self::installRestoredFile($source, $target, $base, $mode);
+            $written = [];
+            foreach ($plan as [$entry, $source, $target, $base, $ownership, $overwrite]) {
+                try {
+                    self::installRestoredFile($source, $target, $base, $ownership);
+                } catch (\Throwable $e) {
+                    $message = 'Restore: files restore stopped at ' . $entry . ': ' . preg_replace('/^Restore: /', '', $e->getMessage()) . '. '
+                        . ($written === [] ? 'No file was written.' : count($written) . ' file(s) were already written: ' . implode(', ', $written));
+                    self::log('RESTORE FILES FAIL src=' . $archivePath . ' ' . $message);
+                    throw new RuntimeException($message, 0, $e);
+                }
+                $written[] = $entry;
                 if ($overwrite) $overwritten[] = $entry;
             }
             self::log("RESTORE FILES OK src={$archivePath} written=" . count($plan) . " unchanged={$unchanged} overwritten=" . count($overwritten)
@@ -1145,7 +1234,10 @@ class BackupService
 
     private static function isSafeArchivePath(string $path): bool
     {
-        if ($path === '' || strlen($path) > 4096 || preg_match('/[\x00-\x1F\x7F\\\\:]/', $path) === 1 || str_starts_with($path, '/')) {
+        // ':' and '\' are ordinary filename characters on Linux ('foto 10:30.jpg'); on Windows they
+        // are drive and path separators.
+        $forbidden = PHP_OS_FAMILY === 'Windows' ? '/[\x00-\x1F\x7F\\\\:]/' : '/[\x00-\x1F\x7F]/';
+        if ($path === '' || strlen($path) > 4096 || preg_match($forbidden, $path) === 1 || str_starts_with($path, '/')) {
             return false;
         }
         foreach (explode('/', $path) as $segment) {
@@ -1154,25 +1246,125 @@ class BackupService
         return true;
     }
 
-    /** Atomic same-directory install of a staged file; the target directory must resolve inside $base. */
-    private static function installRestoredFile(string $source, string $target, string $base, int $mode): void
+    /**
+     * Checks the directory a restored file goes to without creating anything. $base (the configured
+     * directory, or the parent of a configured file) and its ancestors are operator configuration and
+     * may be symlinks; every component below $base is lstat()ed and must be a real directory, not a
+     * symlink. Returns ['create' => directories to create in order, 'existing' => deepest existing
+     * directory], or the reason the path is refused.
+     */
+    private static function inspectRestoreDirectory(string $base, string $directory): array|string
     {
-        $directory = dirname($target);
-        if (!is_dir($directory) && !@mkdir($directory, 0750, true) && !is_dir($directory)) {
-            throw new RuntimeException("Restore: cannot create {$directory}");
+        $base = rtrim($base, '/\\');
+        if ($directory !== $base && !str_starts_with($directory, $base . '/')) {
+            return 'outside its configured directory';
         }
+        $create = [];
+        $existing = $base;
+        if (is_link($base) && !is_dir($base)) {
+            return "{$base} is a dangling link";
+        }
+        if (!is_dir($base)) {
+            // The configured directory itself (and missing configured ancestors) is created.
+            for ($probe = $base; !is_dir($probe); $probe = dirname($probe)) {
+                if (is_link($probe) || file_exists($probe) || dirname($probe) === $probe) return "{$probe} is not a directory";
+                array_unshift($create, $probe);
+                $existing = dirname($probe);
+            }
+        }
+        $current = $base;
+        foreach ($directory === $base ? [] : explode('/', substr($directory, strlen($base) + 1)) as $segment) {
+            $current .= '/' . $segment;
+            if ($create !== []) {
+                $create[] = $current;
+                continue;
+            }
+            clearstatcache(true, $current);
+            $stat = @lstat($current);
+            if ($stat === false) {
+                $create[] = $current;
+                continue;
+            }
+            if (($stat['mode'] & 0170000) === 0120000) return "{$current} is a symlink";
+            if (($stat['mode'] & 0170000) !== 0040000) return "{$current} is not a directory";
+            $existing = $current;
+        }
+        return ['create' => $create, 'existing' => $existing];
+    }
+
+    /**
+     * Mode and owner a restored file gets: those of the file it replaces, else derived from the
+     * directory it lands in (no execute bits; a new GDPR salt never group-writable or world-readable),
+     * so a restore run as root does not leave files the web server cannot read. New directories copy
+     * the mode and owner of that directory.
+     */
+    private static function restoredFileOwnership(string $target, string $directory, bool $secret): array
+    {
+        $file = is_file($target) ? @stat($target) : false;
+        $dir = @stat($directory);
+        $dirMode = is_array($dir) ? $dir['mode'] & 07777 : 0750;
+        $mode = is_array($file) ? $file['mode'] & 07777 : ($dirMode & 0666);
+        if (!is_array($file) && $secret) $mode &= 0640;
+        $template = is_array($file) ? $file : $dir;
+        return [
+            'mode'     => $mode,
+            'dir_mode' => $dirMode,
+            'uid'      => is_array($template) ? (int)$template['uid'] : null,
+            'gid'      => is_array($template) ? (int)$template['gid'] : null,
+            'dir_uid'  => is_array($dir) ? (int)$dir['uid'] : null,
+            'dir_gid'  => is_array($dir) ? (int)$dir['gid'] : null,
+        ];
+    }
+
+    /** chown/chgrp are applied only when running as root (an unprivileged user cannot give files away). */
+    private static function applyOwnership(string $path, ?int $uid, ?int $gid): void
+    {
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) return;
+        if ($uid !== null && !@chown($path, $uid)) {
+            throw new RuntimeException("Restore: cannot set the owner of {$path}");
+        }
+        if ($gid !== null && !@chgrp($path, $gid)) {
+            throw new RuntimeException("Restore: cannot set the group of {$path}");
+        }
+    }
+
+    /**
+     * Atomic same-directory install of a staged file. Missing directories are created one at a time
+     * after re-checking every component with lstat (no symlink may have appeared since planning),
+     * and the result must still resolve inside $base.
+     */
+    private static function installRestoredFile(string $source, string $target, string $base, array $ownership): void
+    {
+        $directory = self::inspectRestoreDirectory($base, dirname($target));
+        if (is_string($directory)) {
+            throw new RuntimeException("Restore: {$target} cannot be restored safely ({$directory})");
+        }
+        foreach ($directory['create'] as $dir) {
+            if (!@mkdir($dir, $ownership['dir_mode']) || is_link($dir) || !is_dir($dir)) {
+                throw new RuntimeException("Restore: cannot create {$dir}");
+            }
+            @chmod($dir, $ownership['dir_mode']);
+            self::applyOwnership($dir, $ownership['dir_uid'], $ownership['dir_gid']);
+        }
+        $parent = dirname($target);
         $realBase = realpath($base);
-        $realDirectory = realpath($directory);
+        $realDirectory = realpath($parent);
         if ($realBase === false || $realDirectory === false
             || ($realDirectory !== $realBase && !str_starts_with($realDirectory, rtrim($realBase, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR))) {
             throw new RuntimeException("Restore: {$target} resolves outside its configured directory; refusing");
         }
-        $temporary = $directory . DIRECTORY_SEPARATOR . '.' . basename($target) . '.restore-' . bin2hex(random_bytes(6)) . '.tmp';
+        $temporary = $parent . DIRECTORY_SEPARATOR . '.' . basename($target) . '.restore-' . bin2hex(random_bytes(6)) . '.tmp';
         if (!@copy($source, $temporary)) {
             @unlink($temporary);
             throw new RuntimeException("Restore: cannot stage {$target}");
         }
-        @chmod($temporary, $mode);
+        try {
+            @chmod($temporary, $ownership['mode']);
+            self::applyOwnership($temporary, $ownership['uid'], $ownership['gid']);
+        } catch (\Throwable $e) {
+            @unlink($temporary);
+            throw $e;
+        }
         if (!@rename($temporary, $target)) {
             @unlink($temporary);
             throw new RuntimeException("Restore: cannot install {$target}");
@@ -1230,8 +1422,17 @@ class BackupService
     {
         $createdUs = (string)($row['meta']['created_us'] ?? '');
         $micro = ctype_digit($createdUs) ? (int)$createdUs : self::rowWhen($row)->getTimestamp() * 1000000;
-        $suffix = preg_match('/-\d{8}-\d{6}-(\d+)\.(?:db|sql)(?:\.gz)?$/', (string)($row['path'] ?? ''), $m) === 1 ? (int)$m[1] : 0;
-        return [$micro, $suffix];
+        $path = (string)($row['path'] ?? '');
+        $suffix = preg_match('/-\d{8}-\d{6}-(\d+)\.(?:db|sql)(?:\.gz)?$/', $path, $m) === 1 ? (int)$m[1] : 0;
+        // A .gz copy shares its backup's creation stamp; the plain restore point sorts first.
+        $plain = self::isCompressedCopy($row) ? 0 : 1;
+        return [$micro, $suffix, $plain];
+    }
+
+    /** True for the gzip companion of a backup (restore uses the uncompressed object next to it). */
+    public static function isCompressedCopy(array $row): bool
+    {
+        return str_ends_with((string)($row['path'] ?? ''), '.gz') || (string)($row['meta']['content_encoding'] ?? '') === 'gzip';
     }
 
     /**

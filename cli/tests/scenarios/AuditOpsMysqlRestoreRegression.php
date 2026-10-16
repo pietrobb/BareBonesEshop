@@ -51,6 +51,35 @@ assert_equals(
 file_put_contents($opsDump, "INSERT INTO `orders` VALUES (1,'unterminated\n");
 assert_true(str_contains($opsError(static fn() => MysqlUpdateDatabaseBackup::countDumpRows($opsDump)), 'truncated'), 'Ops dump rows: a dump that ends inside an INSERT is refused as truncated');
 
+// Review follow-up: the scratch/probe import must stay inside the database it is imported into.
+foreach ([
+    'top-level USE' => "CREATE TABLE `t` (`id` int);\nUSE `shop`;\nDROP TABLE `orders`;\n",
+    'CREATE DATABASE' => "-- MySQL dump\nCREATE DATABASE /*!32312 IF NOT EXISTS*/ `other` /*!40100 DEFAULT CHARACTER SET utf8mb4 */;\n",
+    'versioned DROP SCHEMA' => "/*!40000 DROP SCHEMA `shop` */;\n",
+    'MariaDB versioned USE' => "/*M!100000 USE `shop` */;\n",
+    'statement after a delimiter on the same line' => "SET @a = 1; use shop;\n",
+    'client shell escape' => "CREATE TABLE `t` (`id` int);\n\\! touch /tmp/pwned\n",
+    'client source command' => "source /etc/passwd\n",
+] as $opsCase => $opsSql) {
+    file_put_contents($opsDump, $opsSql);
+    assert_true(str_contains($opsError(static fn() => MysqlUpdateDatabaseBackup::countDumpRows($opsDump)), 'refusing'), "Ops dump isolation: a dump with a {$opsCase} is refused");
+}
+file_put_contents($opsDump, "/*M!999999\\- enable the sandbox mode */ \n"
+    . "-- USE `shop` in a comment\n/* CREATE DATABASE `x` in a block comment */\n"
+    . "CREATE TABLE `use` (`id` int, `note` text) COMMENT='first line\nUSE `shop`;\nCREATE DATABASE x;';\n"
+    . "INSERT INTO `use` VALUES (1,'USE `shop`;\nCREATE DATABASE `x`; \\\\! rm'),(2,'#not a comment');\n"
+    . "DELIMITER ;;\nCREATE PROCEDURE `p`() BEGIN\n  SELECT 'use x';\nEND ;;\nDELIMITER ;\n");
+assert_equals(['use' => 2], MysqlUpdateDatabaseBackup::countDumpRows($opsDump),
+    'Ops dump isolation: USE/CREATE DATABASE text inside strings, comments, identifiers and routine bodies is data, and the mariadb-dump sandbox line is accepted');
+
+// otherSessions() fails closed: an unreadable session list refuses the restore instead of counting 0.
+$opsSessions = new ReflectionMethod(MysqlUpdateDatabaseBackup::class, 'otherSessions');
+$opsSessionsError = $opsError(static fn() => $opsSessions->invoke(
+    new MysqlUpdateDatabaseBackup('127.0.0.1', 3306, 'shop', 'shop', 'secret', 'utf8mb4', 'shop_update_probe'),
+    new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]), 'shop', []
+));
+assert_true(str_contains($opsSessionsError, 'cannot read the session list'), 'Ops MySQL restore: an unreadable session list refuses the restore (fail closed)');
+
 // ---------- (3) files archive restore ----------
 $opsPrivate = $opsRoot . '/private';
 @mkdir($opsPrivate . '/invoices/2026/10', 0700, true);
@@ -148,6 +177,159 @@ try {
 } finally {
     BackupService::reset();
 }
+
+// ---------- review follow-up: files restore safety, ownership, ordering ----------
+$opsF = $opsRoot . '/follow-up';
+$opsFPrivate = $opsF . '/private';
+@mkdir($opsFPrivate . '/invoices/2026/10', 0750, true);
+@mkdir($opsFPrivate . '/uploads/products', 0755, true);
+@mkdir($opsF . '/outside', 0700, true);
+chmod($opsFPrivate . '/uploads', 0755);
+chmod($opsFPrivate . '/uploads/products', 0755);
+file_put_contents($opsFPrivate . '/invoices/2026/10/F1.pdf', '%PDF F1');
+file_put_contents($opsFPrivate . '/uploads/products/shirt.jpg', 'SHIRT');
+file_put_contents($opsFPrivate . '/uploads/products/foto 10:30.jpg', 'FOTO');
+@mkdir($opsFPrivate . '/uploads/gallery/2026', 0755, true);
+file_put_contents($opsFPrivate . '/uploads/gallery/2026/a.jpg', 'GALLERY');
+$opsFCfg = $opsCfg;
+$opsFCfg['storage_dir'] = $opsF . '/backups';
+$opsFCfg['files'] = ['invoices' => $opsFPrivate . '/invoices', 'uploads' => $opsFPrivate . '/uploads'];
+$opsImmutable = null;
+try {
+    BackupService::init($opsSqlite, $opsFCfg, $opsRoot);
+    $opsFMeta = BackupService::create(['label' => 'manual']);
+
+    // ':' is legal in Linux filenames; one such upload must not abort the archive restore.
+    unlink($opsFPrivate . '/uploads/products/foto 10:30.jpg');
+    if (PHP_OS_FAMILY !== 'Windows') {
+        $opsColon = $opsError(static fn() => BackupService::restoreFiles($opsFMeta['remote_path']));
+        assert_true($opsColon === '' && (string)@file_get_contents($opsFPrivate . '/uploads/products/foto 10:30.jpg') === 'FOTO',
+            'Ops files restore: an upload named with ":" is restored on Linux' . ($opsColon !== '' ? " ({$opsColon})" : ''));
+    }
+
+    // Mode (and, as root, owner/group) come from the replaced file, else from the directory.
+    chmod($opsFPrivate . '/uploads/products/shirt.jpg', 0644);
+    file_put_contents($opsFPrivate . '/uploads/products/shirt.jpg', 'NEWER SHIRT');
+    $opsRunAsRoot = function_exists('posix_geteuid') && posix_geteuid() === 0;
+    if ($opsRunAsRoot) {
+        chown($opsFPrivate . '/uploads/products/shirt.jpg', 4321);
+        chgrp($opsFPrivate . '/uploads/products/shirt.jpg', 4322);
+        chown($opsFPrivate . '/uploads', 4401);
+        chgrp($opsFPrivate . '/uploads', 4402);
+    }
+    unlink($opsFPrivate . '/uploads/gallery/2026/a.jpg');
+    rmdir($opsFPrivate . '/uploads/gallery/2026');
+    rmdir($opsFPrivate . '/uploads/gallery');
+    BackupService::restoreFiles($opsFMeta['remote_path'], ['force' => true]);
+    clearstatcache();
+    assert_equals(0644, fileperms($opsFPrivate . '/uploads/products/shirt.jpg') & 0777, 'Ops files restore: an overwritten file keeps its mode');
+    assert_equals(0644, fileperms($opsFPrivate . '/uploads/gallery/2026/a.jpg') & 0777, 'Ops files restore: a new file gets its directory mode without execute bits');
+    assert_equals(0755, fileperms($opsFPrivate . '/uploads/gallery/2026') & 0777, 'Ops files restore: new directories copy the mode of the existing parent');
+    if ($opsRunAsRoot) {
+        assert_equals([4321, 4322], [fileowner($opsFPrivate . '/uploads/products/shirt.jpg'), filegroup($opsFPrivate . '/uploads/products/shirt.jpg')],
+            'Ops files restore (root): an overwritten file keeps its owner and group');
+        assert_equals([4401, 4402, 4401, 4402], [fileowner($opsFPrivate . '/uploads/gallery/2026/a.jpg'), filegroup($opsFPrivate . '/uploads/gallery/2026/a.jpg'),
+            fileowner($opsFPrivate . '/uploads/gallery'), filegroup($opsFPrivate . '/uploads/gallery')],
+            'Ops files restore (root): new files and directories take the owner and group of the existing parent, not root');
+    } else {
+        echo "  [SKIP] Ops files restore owner/group preservation (needs root)\n";
+    }
+
+    // A symlinked directory below the configured root is refused while planning: nothing is written anywhere.
+    unlink($opsFPrivate . '/invoices/2026/10/F1.pdf');
+    unlink($opsFPrivate . '/uploads/products/shirt.jpg');
+    unlink($opsFPrivate . '/uploads/products/foto 10:30.jpg');
+    rmdir($opsFPrivate . '/uploads/products');
+    symlink($opsF . '/outside', $opsFPrivate . '/uploads/products');
+    $opsSymlinked = $opsError(static fn() => BackupService::restoreFiles($opsFMeta['remote_path'], ['force' => true]));
+    clearstatcache();
+    assert_true(str_contains($opsSymlinked, 'is a symlink') && str_contains($opsSymlinked, 'nothing was written'),
+        'Ops files restore: a symlinked directory below the configured root is refused');
+    assert_true((scandir($opsF . '/outside') ?: []) === ['.', '..'] && !file_exists($opsFPrivate . '/invoices/2026/10/F1.pdf'),
+        'Ops files restore: the refusal happens before any write (nothing outside, no other file restored)');
+    unlink($opsFPrivate . '/uploads/products');
+
+    // A write that still fails mid-way names the files already written.
+    mkdir($opsFPrivate . '/uploads/products', 0755);
+    if ($opsRunAsRoot) {
+        // Root bypasses permissions: an immutable live file makes the final rename fail instead.
+        file_put_contents($opsFPrivate . '/uploads/products/shirt.jpg', 'IMMUTABLE');
+        exec('chattr +i ' . escapeshellarg($opsFPrivate . '/uploads/products/shirt.jpg') . ' 2>/dev/null', $opsOut, $opsCode);
+        $opsImmutable = $opsCode === 0 ? $opsFPrivate . '/uploads/products/shirt.jpg' : null;
+    } else {
+        chmod($opsFPrivate . '/uploads/products', 0200); // writable but not searchable: planning passes, the write fails
+        $opsImmutable = $opsFPrivate . '/uploads/products';
+    }
+    if ($opsImmutable !== null) {
+        $opsMidway = $opsError(static fn() => BackupService::restoreFiles($opsFMeta['remote_path'], ['force' => true]));
+        assert_true(str_contains($opsMidway, 'stopped at uploads/products/') && str_contains($opsMidway, 'already written: invoices/2026/10/F1.pdf'),
+            'Ops files restore: a write failing mid-way reports which files were already written' . ($opsMidway === '' ? '' : " ({$opsMidway})"));
+    } else {
+        echo "  [SKIP] Ops files restore mid-way failure report (chattr unavailable)\n";
+    }
+} catch (Throwable $opsFailure) {
+    assert_true(false, 'Ops files restore follow-up (' . $opsFailure->getMessage() . ')');
+} finally {
+    if ($opsImmutable !== null) {
+        if ($opsRunAsRoot ?? false) exec('chattr -i ' . escapeshellarg($opsImmutable) . ' 2>/dev/null');
+        if (is_dir($opsImmutable)) @chmod($opsImmutable, 0755);
+    }
+    BackupService::reset();
+}
+
+// --latest must never pick a .gz companion that shares its backup's creation stamp (storages that list it).
+$opsGzStorage = new class implements BackupStorage {
+    public function put(string $localPath, string $remotePath, array $meta): void {}
+    public function get(string $remotePath, string $localPath): void {}
+    public function delete(string $remotePath): void {}
+    public function list(string $prefix = ''): array
+    {
+        $meta = ['created_us' => '1792143329215038', 'filename' => 'eshop-20261016-093529.sql', 'remote_path' => '2026/10/16/eshop-20261016-093529.sql'];
+        return [
+            ['path' => '2026/10/16/eshop-20261016-093529.sql.gz', 'mtime' => 1, 'meta' => ['content_encoding' => 'gzip'] + $meta],
+            ['path' => '2026/10/16/eshop-20261016-093529.sql', 'mtime' => 1, 'meta' => $meta],
+        ];
+    }
+};
+try {
+    BackupService::init($opsSqlite, $opsCfg, $opsRoot, $opsGzStorage);
+    $opsRows = BackupService::list();
+    assert_true($opsRows[0]['path'] === '2026/10/16/eshop-20261016-093529.sql' && BackupService::isCompressedCopy($opsRows[1]),
+        'Ops restore --latest: the plain backup sorts before its .gz companion with the same created_us');
+} finally {
+    BackupService::reset();
+}
+$opsRestoreCli = (string)file_get_contents(dirname(__DIR__, 2) . '/restore.php');
+assert_true(str_contains($opsRestoreCli, 'BackupService::isCompressedCopy($row)'), 'Ops restore --latest: the CLI filters gzip companions before picking the newest row');
+
+// MySQL adapter construction is lazy: a configuration it cannot dump fails the backup, not init()
+// (cli/migrate.php used to "continue without backup" when init() threw).
+$opsApp = $opsRoot . '/lazy-app';
+@mkdir($opsApp . '/config', 0700, true);
+file_put_contents($opsApp . '/config.php', '<?php return ' . var_export([
+    'db_driver' => 'mysql', 'db_host' => '127.0.0.1', 'db_port' => 3306, 'db_name' => 'my-shop', 'db_user' => 'shop', 'db_password' => 'x',
+    'backup_storage_dir' => $opsRoot . '/lazy-backups', 'backup_log_file' => $opsRoot . '/lazy-logs/backup.log',
+    'invoice_storage_dir' => $opsRoot . '/lazy-invoices', 'uploads_dir' => $opsRoot . '/lazy-uploads', 'gdpr_salt_file' => $opsRoot . '/lazy-salt',
+    'private_runtime_dir' => $opsRoot . '/lazy-private',
+], true) . ";\n");
+$opsLazyMysql = new class('sqlite:' . $opsRoot . '/lazy-stand-in.db') extends PDO {
+    public function getAttribute(int $attribute): mixed
+    {
+        return $attribute === PDO::ATTR_DRIVER_NAME ? 'mysql' : parent::getAttribute($attribute);
+    }
+};
+try {
+    $opsLazyInit = $opsError(static fn() => BackupService::init($opsLazyMysql, null, $opsApp));
+    assert_equals('', $opsLazyInit, 'Ops MySQL backup: init() accepts a db_name the dump adapter rejects (construction is lazy)');
+    assert_true(str_contains($opsError(static fn() => BackupService::create(['label' => 'pre-migration'])), 'cannot use this database configuration'),
+        'Ops MySQL backup: the backup itself fails loudly for that configuration (a pre-migration backup hard-fails)');
+} finally {
+    BackupService::reset();
+    $opsLazyMysql = null;
+}
+$opsMigrate = (string)file_get_contents(dirname(__DIR__, 2) . '/migrate.php');
+assert_true(!str_contains($opsMigrate, 'continuing without backup') && str_contains($opsMigrate, 'Pre-migration backup unavailable'),
+    'Ops migrate: a failing backup init stops the migration when pre-migration backups are enabled');
 
 // ---------- (2) MySQL restore refuses without stopped writers ----------
 $opsFakeMysql = new class('sqlite:' . $opsRoot . '/mysql-stand-in.db') extends PDO {
@@ -249,7 +431,8 @@ if (!$opsMysqlEnabled) {
     $opsPass = (string)(getenv('TEST_MYSQL_UPDATE_PASS') ?: '');
     $opsDumpBin = (string)(getenv('TEST_MYSQL_DUMP_BINARY') ?: 'mysqldump');
     $opsClientBin = (string)(getenv('TEST_MYSQL_CLIENT_BINARY') ?: 'mysql');
-    $opsTag = 'barebones_opsr' . getmypid() . bin2hex(random_bytes(2));
+    // Scratch names derive from the configured disposable database so parallel runs on one server do not collide.
+    $opsTag = substr((string)preg_replace('/[^A-Za-z0-9_]/', '', (string)getenv('TEST_MYSQL_UPDATE_DATABASE')), 0, 24) . '_opsr' . bin2hex(random_bytes(2));
     $opsLive = $opsTag . '_live';
     $opsProbe = $opsTag . '_update_probe';
     $opsScratch = $opsTag . '_restore_scratch';
@@ -274,6 +457,24 @@ if (!$opsMysqlEnabled) {
     $opsBackup = static fn(string $dump = '', string $client = ''): MysqlUpdateDatabaseBackup => new MysqlUpdateDatabaseBackup(
         $opsHost, $opsPort, $opsLive, $opsUser, $opsPass, 'utf8mb4', $opsProbe, $dump ?: $opsDumpBin, $client ?: $opsClientBin
     );
+    $opsRecoveryDir = $opsRoot . '/restore-recovery';
+    $opsKeptDump = static fn(string $message): string => preg_match('/pre-restore dump kept at (\S+\.sql)/', $message, $m) === 1 ? $m[1] : '';
+    // What the runbook tells the operator to do with a kept rollback dump: recreate db_name and import it.
+    $opsManualImport = static function (string $dumpPath) use ($opsServer, $opsQ, $opsLive, $opsHost, $opsPort, $opsUser, $opsPass, $opsClientBin, &$opsLivePdo): void {
+        if ($dumpPath === '') return;
+        $opsServer->exec('DROP DATABASE IF EXISTS ' . $opsQ($opsLive));
+        $opsServer->exec('CREATE DATABASE ' . $opsQ($opsLive) . ' CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
+        $process = proc_open([$opsClientBin, '--protocol=TCP', '--host=' . $opsHost, '--port=' . $opsPort, '--user=' . $opsUser, '--password=' . $opsPass, '--database=' . $opsLive],
+            [0 => ['file', $dumpPath, 'rb'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        if (is_resource($process)) {
+            stream_get_contents($pipes[1]);
+            stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            proc_close($process);
+        }
+        $opsLivePdo->exec('USE ' . $opsQ($opsLive));
+    };
     try {
         $opsServer->exec('CREATE DATABASE ' . $opsQ($opsLive) . ' CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
         $opsLivePdo = $opsConnect();
@@ -315,23 +516,77 @@ if (!$opsMysqlEnabled) {
         assert_true(str_contains($opsError(static fn() => BackupService::restore($opsMysqlMeta['remote_path'])), '--i-stopped-writers') && $opsDrifted(),
             'Ops MySQL live: restore without --i-stopped-writers is refused and changes nothing');
 
+        assert_true(str_contains($opsError(static fn() => BackupService::restore($opsMysqlMeta['remote_path'], ['writers_stopped' => true, 'skip_snapshot' => true])), '--skip-snapshot') && $opsDrifted(),
+            'Ops MySQL live: --skip-snapshot is refused for a MySQL restore (the rollback dump must never be the only copy)');
+
         $opsIntruder = $opsConnect();
-        $opsIntruderError = $opsError(static fn() => BackupService::restore($opsMysqlMeta['remote_path'], ['writers_stopped' => true, 'skip_snapshot' => true]));
+        $opsIntruderError = $opsError(static fn() => BackupService::restore($opsMysqlMeta['remote_path'], ['writers_stopped' => true]));
         $opsIntruder = null;
         assert_true(str_contains($opsIntruderError, 'other session') && $opsDrifted() && !$opsSchemaExists($opsScratch),
             'Ops MySQL live: a visible writer session refuses the restore before live is touched; scratch is dropped');
+        assert_equals([], glob($opsRecoveryDir . '/*.sql') ?: [], 'Ops MySQL live: a restore refused before live was dropped keeps no rollback dump around');
         usleep(300000);
 
         $opsFailMarker = $opsRoot . '/fail-live-import';
         touch($opsFailMarker);
+        $opsLossMarker = $opsRoot . '/lose-a-row';
         $opsFailingClient = $opsScript('client-fail-live.sh',
-            'for a in "$@"; do if [ "$a" = ' . escapeshellarg('--database=' . $opsLive) . ' ] && [ -f ' . escapeshellarg($opsFailMarker) . ' ]; then rm -f '
-            . escapeshellarg($opsFailMarker) . '; echo "simulated live import failure" >&2; exit 1; fi; done' . "\n"
+            'for a in "$@"; do if [ "$a" = ' . escapeshellarg('--database=' . $opsLive) . ' ]; then' . "\n"
+            . '  if [ -f ' . escapeshellarg($opsFailMarker) . ' ]; then [ -f ' . escapeshellarg($opsFailMarker . '-sticky') . ' ] || rm -f ' . escapeshellarg($opsFailMarker)
+            . '; echo "simulated live import failure" >&2; exit 1; fi' . "\n"
+            . '  if [ -f ' . escapeshellarg($opsLossMarker) . ' ]; then ' . escapeshellarg($opsClientBin) . ' "$@" || exit $?; exec ' . escapeshellarg($opsClientBin)
+            . ' "$1" --protocol=TCP ' . escapeshellarg('--database=' . $opsLive) . ' -e ' . escapeshellarg('DELETE FROM orders ORDER BY id DESC LIMIT 1') . '; fi' . "\n"
+            . 'fi; done' . "\n"
             . 'exec ' . escapeshellarg($opsClientBin) . ' "$@"' . "\n");
         BackupService::useMysqlDatabase($opsBackup('', $opsFailingClient), $opsScratch);
-        $opsFailedRestore = $opsError(static fn() => BackupService::restore($opsMysqlMeta['remote_path'], ['writers_stopped' => true, 'skip_snapshot' => true]));
-        assert_true(str_contains($opsFailedRestore, 'previous database was re-imported') && $opsDrifted(),
+        $opsFailedRestore = $opsError(static fn() => BackupService::restore($opsMysqlMeta['remote_path'], ['writers_stopped' => true]));
+        assert_true(str_contains($opsFailedRestore, 'previous database was re-imported and verified') && $opsDrifted(),
             'Ops MySQL live: a failed live import re-imports the pre-restore database automatically');
+        $opsKept = $opsKeptDump($opsFailedRestore);
+        assert_true($opsKept !== '' && is_file($opsKept), 'Ops MySQL live: the rollback dump is kept (path in the error) once live was dropped');
+        if ($opsKept !== '') @unlink($opsKept);
+
+        // Both the live import and the automatic re-import fail: the rollback dump is the way back and must survive.
+        touch($opsFailMarker);
+        touch($opsFailMarker . '-sticky');
+        $opsBothFail = $opsError(static fn() => BackupService::restore($opsMysqlMeta['remote_path'], ['writers_stopped' => true]));
+        @unlink($opsFailMarker . '-sticky');
+        @unlink($opsFailMarker);
+        $opsKept = $opsKeptDump($opsBothFail);
+        clearstatcache();
+        assert_true(str_contains($opsBothFail, 're-importing the previous database also failed') && str_contains($opsBothFail, 'import ' . $opsKept . ' manually'),
+            'Ops MySQL live: when the re-import fails too, the error names the rollback dump to import');
+        assert_true($opsKept !== '' && is_file($opsKept) && str_starts_with($opsKept, $opsRecoveryDir . '/'),
+            'Ops MySQL live: that rollback dump still exists, in the durable private recovery directory');
+        assert_equals(0600, $opsKept !== '' ? (fileperms($opsKept) & 0777) : null, 'Ops MySQL live: the kept rollback dump is owner-only');
+        assert_equals(4, $opsKept !== '' ? (MysqlUpdateDatabaseBackup::countDumpRows($opsKept)['orders'] ?? null) : null, 'Ops MySQL live: the kept dump holds the pre-restore live rows');
+        $opsManualImport($opsKept);
+        assert_true($opsDrifted(), 'Ops MySQL live: importing the kept rollback dump by hand brings the pre-restore database back');
+        if ($opsKept !== '') @unlink($opsKept);
+
+        // The automatic re-import is verified, not assumed: a re-import that loses a row is reported as failed.
+        touch($opsFailMarker);
+        touch($opsLossMarker);
+        $opsLossy = $opsError(static fn() => BackupService::restore($opsMysqlMeta['remote_path'], ['writers_stopped' => true]));
+        @unlink($opsLossMarker);
+        assert_true(str_contains($opsLossy, 'also failed') && str_contains($opsLossy, 'rollback re-import row counts do not match'),
+            'Ops MySQL live: a rollback re-import that does not reproduce the pre-restore rows is not reported as success');
+        $opsKept = $opsKeptDump($opsLossy);
+        $opsManualImport($opsKept);
+        assert_true($opsDrifted(), 'Ops MySQL live: the kept dump of that lossy rollback still recovers every row');
+        if ($opsKept !== '') @unlink($opsKept);
+
+        // A dump that is not confined to its database is refused before anything is imported.
+        $opsEvil = $opsRoot . '/evil.sql';
+        file_put_contents($opsEvil, "CREATE TABLE `t` (`id` int) ENGINE=InnoDB;\nUSE " . $opsQ($opsLive) . ";\nDROP TABLE `orders`;\n");
+        $opsEvilRollback = $opsRoot . '/evil-rollback.sql';
+        file_put_contents($opsEvilRollback, "-- rollback\n");
+        $opsEvilError = $opsError(static fn() => $opsBackup()->restoreBackupDump($opsEvil, $opsScratch, $opsEvilRollback));
+        assert_true(str_contains($opsEvilError, 'switches or changes databases') && $opsDrifted() && !$opsSchemaExists($opsScratch),
+            'Ops MySQL live: a dump with a top-level USE is refused before the scratch import; live is untouched');
+        file_put_contents($opsEvil, "CREATE DATABASE /*!32312 IF NOT EXISTS*/ `elsewhere`;\n");
+        assert_true(str_contains($opsError(static fn() => $opsBackup()->restoreBackupDump($opsEvil, $opsScratch, $opsEvilRollback)), 'switches or changes databases') && !$opsSchemaExists($opsScratch),
+            'Ops MySQL live: a dump with CREATE DATABASE is refused before the scratch import');
 
         BackupService::useMysqlDatabase($opsBackup(), $opsScratch);
         $opsRestore = BackupService::restore($opsMysqlMeta['remote_path'], ['writers_stopped' => true]);
@@ -344,12 +599,12 @@ if (!$opsMysqlEnabled) {
         assert_true(!$opsSchemaExists($opsScratch), 'Ops MySQL live: the scratch database is dropped after a successful restore');
 
         $opsServer->exec('CREATE DATABASE ' . $opsQ($opsScratch));
-        assert_true(str_contains($opsError(static fn() => BackupService::restore($opsMysqlMeta['remote_path'], ['writers_stopped' => true, 'skip_snapshot' => true])), 'existing MySQL scratch database'),
+        assert_true(str_contains($opsError(static fn() => BackupService::restore($opsMysqlMeta['remote_path'], ['writers_stopped' => true])), 'existing MySQL scratch database'),
             'Ops MySQL live: an existing scratch database is never overwritten');
         $opsServer->exec('DROP DATABASE ' . $opsQ($opsScratch));
 
         file_put_contents($opsMysqlCfg['storage_dir'] . '/' . $opsMysqlMeta['remote_path'], "-- tampered\n", FILE_APPEND);
-        assert_true(str_contains($opsError(static fn() => BackupService::restore($opsMysqlMeta['remote_path'], ['writers_stopped' => true, 'skip_snapshot' => true])), 'mismatch'),
+        assert_true(str_contains($opsError(static fn() => BackupService::restore($opsMysqlMeta['remote_path'], ['writers_stopped' => true])), 'mismatch'),
             'Ops MySQL live: a tampered dump fails size/sha256 verification');
     } catch (Throwable $opsFailure) {
         assert_true(false, 'Ops MySQL live (' . $opsFailure->getMessage() . ')');
