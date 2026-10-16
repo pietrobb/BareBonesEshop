@@ -1,5 +1,9 @@
 # BareBones Shop — Design Document
 
+> **Design record, not a specification.** This document captures the original design and the reasoning
+> behind it; sketches below (code samples, directory trees, checklists) may lag the implementation.
+> Where they disagree, the code, its tests and README.md are authoritative.
+
 > Core B2C commerce without Magento-level complexity.
 > Covers 80% of real e-shop needs. The remaining 20% is deliberately left out.
 
@@ -1276,8 +1280,8 @@ class JobWorker {
         'search_reindex' => 'JobHandlers::searchReindex',
         'stock_alert'    => 'JobHandlers::stockAlert',
         'order_process'  => 'JobHandlers::orderProcess',
-        'sitemap_build'  => 'JobHandlers::sitemapBuild',
     ];
+    // The shipped registry lives in cli/worker.php ($handlers); this sketch shows only the shape.
 
     public static function run(): void {
         $pending = glob(__DIR__ . '/../jobs/pending/*.json');
@@ -1337,9 +1341,10 @@ An order is created      → job: email_send (confirmation)
 Bulk import              → job: import_process (the whole CSV)
                          → after completion: cache_rebuild (full)
 
-Cron (daily)             → job: sitemap_build
-                         → job: cart_abandonment (carts > 24h with an e-mail → reminder)
+Cron (daily)             → job: cart_abandonment (carts > 24h with an e-mail → reminder)
                          → job: cleanup (completed jobs, expired sessions)
+
+sitemap.xml              → no job: sitemap.php renders it on request
 ```
 
 ### Comparison with Magento
@@ -1584,8 +1589,8 @@ barebone-shop/
 ├── product.php                   # Product detail (SSR for SEO)
 ├── api.php                       # API router
 ├── config.php                    # Configuration (1 file, all credentials)
-├── shop.js                       # Frontend logic
-├── shop.css                      # Styles
+├── page.php                      # CMS page (rendered in the theme's storefront shell)
+├── themes/default/               # Theme package: theme.json, layouts.json, blocks/, assets/ (storefront.css/.js)
 │
 ├── catalog.json                  # DEFINITION: product types, attributes, filters
 ├── stores.json                   # DEFINITION: stores, languages, currencies
@@ -1695,8 +1700,8 @@ barebone-shop/
 │   └── checkout.json             # BBF checkout form
 │
 ├── templates/
-│   ├── confirm-order.html        # E-mail confirmation (BBF template)
-│   └── notify-order.html         # Admin notification
+│   ├── emails/<locale>/          # Transactional e-mails (order_confirmation, merchant_order_created, ...)
+│   └── legal/<locale>/           # Default legal pages (privacy, terms, cookies)
 │
 └── import/                       # Auto-generated import templates per type
     ├── clothing-template.csv
@@ -2430,7 +2435,7 @@ Filter counters (counts for the sidebar) are computed asynchronously and cached 
 
 **Dual persistence:** PHP session + a localStorage mirror. The session expires (24 min by default) — localStorage does not. When the customer comes back (mobile, the next day), JS restores the cart from localStorage into the session. No lost cart = no lost conversion.
 
-### Frontend — localStorage mirror (shop.js)
+### Frontend — localStorage mirror (design sketch: the server side is `Cart::restore`; no shipped script writes the mirror today)
 
 ```javascript
 const CartStore = {
@@ -3073,7 +3078,7 @@ a new link invalidates the old one. `verify_url` is not stored in `email_log`.
 
 ## Frontend — vanilla JS
 
-### Catalog (shop.js)
+### Catalog (theme storefront.js; the original sketch below predates SSR-first rendering)
 
 ```javascript
 // Structure - no framework, plain DOM
@@ -3886,7 +3891,7 @@ Phase 1: Foundation + schema
 Phase 2: Storefront (multi-language from the first request)
   [ ] Template.php — engine + the blocks/ directory
   [ ] api.php — products, categories, search, cart
-  [ ] shop.js — catalog, filters, cart, locale switcher
+  [ ] themes/default/assets/storefront.js — catalog, filters, cart, locale switcher
   [ ] product.php — SSR detail with JSON-LD (per locale)
   [ ] Cache.php — flat cache per locale, stale-while-revalidate
   [ ] .htaccess — rewrite + Level 0 cache

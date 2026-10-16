@@ -265,6 +265,15 @@ and explicit CSS/JS/block byte budgets. `Template::document()` is the shared
 accessible SSR shell; the fallback chain remains store → theme package → legacy
 theme block → base block.
 
+Page layouts come from several `layouts.json` files merged by `Template::loadLayouts()`, later
+files winning: the root `layouts.json` (base layouts and pages for the legacy `blocks/`), then
+each theme in the inheritance chain from the root ancestor down to the active theme
+(`themes/default/layouts.json` first, a child theme's after it), then the store override
+`blocks/stores/<store>/layouts.json`. Objects merge key by key, so a theme can redefine one page
+(the default theme maps `homepage`, `product`, `cms`, `account` and `wishlist` to its
+`storefront` layout) and keep the rest; arrays such as a page's `sections` or a layout's `slots`
+are replaced as a whole, never appended.
+
 The **Content & Marketing** admin page publishes menus, banners, landing pages, and
 301/302/307/308 redirects with CSRF, store permissions, validation, sanitization,
 and audit records. `/feeds/google.xml` and `/feeds/meta.csv` export the active store
