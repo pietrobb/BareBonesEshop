@@ -159,7 +159,8 @@ foreach ($a152Drivers as $a152Driver => $_) {
         $a152Cancel = $a152Request('bulk', ['order_ids' => ['A152-PAID', 'A152-PENDING', 'A152-SHIPPED', 'A152-CZ', 999999, 'x', ['nested']], 'new_status' => 'cancelled', 'note' => 'Bulk cancel']);
         assert_equals(['A152-PAID' => 'cancelled/1', 'A152-PENDING' => 'cancelled/1', 'A152-SHIPPED' => 'shipped/0', 'A152-CZ' => 'paid/0'], $a152Cancel['orders'],
             "{$a152Label}: allowed orders are cancelled, shipped (not allowed) and the other store's order are untouched");
-        assert_equals([15, 2, ['order.status_changed' => 2, 'stock.changed' => 2]], [$a152Cancel['stock'], $a152Cancel['audit'], $a152Cancel['events']],
+        // The unpaid order's payment is closed with it (code review H1): one payment event.
+        assert_equals([15, 2, ['order.status_changed' => 2, 'payment.status_changed' => 1, 'stock.changed' => 2]], [$a152Cancel['stock'], $a152Cancel['audit'], $a152Cancel['events']],
             "{$a152Label}: stock returns once per cancelled order, with one audit entry and status + stock events each");
         assert_true(str_contains((string)($a152Cancel['flash']['msg'] ?? ''), 'A152-PAID, A152-PENDING') && str_contains((string)($a152Cancel['flash']['msg'] ?? ''), $a152En['admin.orders.reason.invalid_transition'])
             && str_contains((string)($a152Cancel['flash']['msg'] ?? ''), $a152En['admin.orders.reason.not_found']), "{$a152Label}: the result names changed orders and why the others were refused");

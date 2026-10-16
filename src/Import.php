@@ -127,8 +127,9 @@ class Import {
             throw new \InvalidArgumentException("Missing required field: sku or name");
         }
 
-        $stmt = $db->prepare("SELECT * FROM products WHERE sku = :sku");
-        $stmt->execute([':sku' => $sku]);
+        $catalog = self::assertSkuInCatalog($sku, $db);
+        $stmt = $db->prepare("SELECT * FROM products WHERE sku = :sku AND store_id = :catalog");
+        $stmt->execute([':sku' => $sku, ':catalog' => $catalog]);
         $existing = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
 
         if ($existing) {
@@ -167,6 +168,21 @@ class Import {
         }
     }
 
+    /**
+     * SKUs are unique across all catalogs, so a SKU owned by another catalog must never be
+     * created or upserted here: that would overwrite the other store's product. Returns the current catalog.
+     */
+    private static function assertSkuInCatalog(string $sku, PDO $db): string {
+        $catalog = StoreContext::current()->catalogId();
+        $stmt = $db->prepare("SELECT store_id FROM products WHERE sku = :sku");
+        $stmt->execute([':sku' => $sku]);
+        $owner = $stmt->fetchColumn();
+        if ($owner !== false && (string)$owner !== $catalog) {
+            throw new \RuntimeException("SKU '{$sku}' belongs to another catalog");
+        }
+        return $catalog;
+    }
+
     private static function createProduct(array $data, string $productType, PDO $db): int {
         $sku = trim($data['sku']);
         $name = trim($data['name']);
@@ -194,8 +210,8 @@ class Import {
             'translations'  => self::gatherTranslations($data),
         ], $db);
 
-        $stmt = $db->prepare("SELECT id FROM products WHERE sku = :sku");
-        $stmt->execute([':sku' => $sku]);
+        $stmt = $db->prepare("SELECT id FROM products WHERE sku = :sku AND store_id = :catalog");
+        $stmt->execute([':sku' => $sku, ':catalog' => StoreContext::current()->catalogId()]);
         $productId = (int)$stmt->fetchColumn();
         self::syncProductAttrs($productId, $attrs, $db);
         return $productId;
@@ -274,6 +290,7 @@ class Import {
      */
     public static function upsertProduct(array $data, ?PDO $db = null): void {
         $db = $db ?? Db::get();
+        $catalog = self::assertSkuInCatalog((string)$data['sku'], $db);
         $data['description'] = Security::sanitizeRichHtml((string)($data['description'] ?? ''));
         foreach (($data['translations'] ?? []) as $locale => $translation) {
             if (isset($translation['description'])) {
@@ -283,9 +300,9 @@ class Import {
 
         if (Db::isSqlite()) {
             $stmt = $db->prepare("
-                INSERT INTO products (sku, slug, product_type, name, category_id, price, compare_price, stock, status,
+                INSERT INTO products (store_id, sku, slug, product_type, name, category_id, price, compare_price, stock, status,
                     summary, description, images, attrs, tags, filter_tags, weight_g, translations)
-                VALUES (:sku, :slug, :ptype, :name, :cat, :price, :cprice, :stock, :status,
+                VALUES (:catalog, :sku, :slug, :ptype, :name, :cat, :price, :cprice, :stock, :status,
                     :summary, :desc, :images, :attrs, :tags, :ftags, :weight, :translations)
                 ON CONFLICT(sku) DO UPDATE SET
                     slug = excluded.slug,
@@ -308,9 +325,9 @@ class Import {
             ");
         } else {
             $stmt = $db->prepare("
-                INSERT INTO products (sku, slug, product_type, name, category_id, price, compare_price, stock, status,
+                INSERT INTO products (store_id, sku, slug, product_type, name, category_id, price, compare_price, stock, status,
                     summary, description, images, attrs, tags, filter_tags, weight_g, translations)
-                VALUES (:sku, :slug, :ptype, :name, :cat, :price, :cprice, :stock, :status,
+                VALUES (:catalog, :sku, :slug, :ptype, :name, :cat, :price, :cprice, :stock, :status,
                     :summary, :desc, :images, :attrs, :tags, :ftags, :weight, :translations)
                 ON DUPLICATE KEY UPDATE
                     slug = VALUES(slug),
@@ -334,6 +351,7 @@ class Import {
         }
 
         $stmt->execute([
+            ':catalog'      => $catalog,
             ':sku'          => $data['sku'],
             ':slug'         => $data['slug'],
             ':ptype'        => $data['product_type'] ?? 'simple',
@@ -359,6 +377,7 @@ class Import {
      */
     public static function ensureCategory(string $path, ?PDO $db = null): int {
         $db = $db ?? Db::get();
+        $catalog = StoreContext::current()->catalogId();
         $parts = array_filter(array_map('trim', explode('/', $path)));
         if (empty($parts)) $parts = ['uncategorized'];
 
@@ -371,14 +390,14 @@ class Import {
             $slug = self::slugify($part);
             $fullPath = $fullPath ? $fullPath . '/' . $slug : $slug;
 
-            // Imported products land in the 'default' catalog (products.store_id default), so their categories must too:
+            // Imported products land in the current catalog, so their categories must too:
             // other catalogs may own a category with the same slug and parent level.
             if ($parentId === null) {
-                $stmt = $db->prepare("SELECT id FROM categories WHERE slug = :slug AND parent_id IS NULL AND store_id = 'default'");
-                $stmt->execute([':slug' => $slug]);
+                $stmt = $db->prepare("SELECT id FROM categories WHERE slug = :slug AND parent_id IS NULL AND store_id = :catalog");
+                $stmt->execute([':slug' => $slug, ':catalog' => $catalog]);
             } else {
-                $stmt = $db->prepare("SELECT id FROM categories WHERE slug = :slug AND parent_id = :parent AND store_id = 'default'");
-                $stmt->execute([':slug' => $slug, ':parent' => $parentId]);
+                $stmt = $db->prepare("SELECT id FROM categories WHERE slug = :slug AND parent_id = :parent AND store_id = :catalog");
+                $stmt->execute([':slug' => $slug, ':parent' => $parentId, ':catalog' => $catalog]);
             }
             $existing = $stmt->fetch();
 
@@ -387,9 +406,10 @@ class Import {
             } else {
                 $stmt = $db->prepare("
                     INSERT INTO categories (store_id, slug, name, parent_id, path, depth, sort_order)
-                    VALUES ('default', :slug, :name, :parent, :path, :depth, 0)
+                    VALUES (:catalog, :slug, :name, :parent, :path, :depth, 0)
                 ");
                 $stmt->execute([
+                    ':catalog' => $catalog,
                     ':slug'   => $slug,
                     ':name'   => $part,
                     ':parent' => $parentId,

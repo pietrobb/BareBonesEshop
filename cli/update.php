@@ -10,7 +10,7 @@ require_once __DIR__ . '/cli-only.php';
  *   php cli/update.php backup   --package=/path/to/release [--public-key=...]
  *   php cli/update.php apply    --package=/path/to/release [--public-key=...]
  *   php cli/update.php baseline --version=1.0.0
- *   php cli/update.php rollback --snapshot=YYYYmmddHHMMSS-abcdef123456 [--force]
+ *   php cli/update.php rollback --snapshot=YYYYmmddHHMMSS-abcdef123456 [--force] [--accept-data-loss]
  *   php cli/update.php list
  *
  * Unsigned packages are refused unless --allow-unsigned is explicitly supplied.
@@ -21,7 +21,7 @@ $args = array_slice($argv ?? [], 1);
 $command = $args[0] ?? 'help';
 $options = [];
 foreach (array_slice($args, 1) as $argument) {
-    if (in_array($argument, ['--allow-unsigned', '--force', '--json', '--skip-backup-probe'], true)) {
+    if (in_array($argument, ['--allow-unsigned', '--force', '--json', '--skip-backup-probe', '--accept-data-loss'], true)) {
         $options[substr($argument, 2)] = true;
         continue;
     }
@@ -108,8 +108,9 @@ try {
             throw new InvalidArgumentException('rollback requires --snapshot=ID');
         }
         $updater = new Updater($root, $stateDirectory, null, null, $databaseBackup);
-        $result = $updater->rollback($snapshotId, !empty($options['force']));
-        echo "Rollback complete: {$result['snapshot']}, restored {$result['restored_files']} file(s).\n";
+        $result = $updater->rollback($snapshotId, !empty($options['force']), !empty($options['accept-data-loss']));
+        echo "Rollback complete: {$result['snapshot']}, restored {$result['restored_files']} file(s)"
+            . ($result['database_restored_to'] !== null ? ", database restored to {$result['database_restored_to']}" : '') . ".\n";
         updateRecordCoreBaseline($root, $stateDirectory, $config, 'rollback ' . $snapshotId, null);
         exit(0);
     }
@@ -255,7 +256,9 @@ function updateHelp(): void
     echo "  php cli/update.php backup --package=DIR [--public-key=KEY]\n";
     echo "  php cli/update.php apply --package=DIR [--public-key=KEY]\n";
     echo "  php cli/update.php baseline --version=VERSION\n";
-    echo "  php cli/update.php rollback --snapshot=ID [--force]\n";
+    echo "  php cli/update.php rollback --snapshot=ID [--force] [--accept-data-loss]\n";
+    echo "    A migration update rollback restores the pre-update database: all orders and other writes since the\n";
+    echo "    snapshot are lost. It is refused with a warning unless --accept-data-loss is given.\n";
     echo "  php cli/update.php list\n";
     echo "Options:\n";
     echo "  --allow-unsigned  Accept an unsigned package explicitly (development only)\n";

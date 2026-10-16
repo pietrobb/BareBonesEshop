@@ -7,8 +7,14 @@
  *   'fail'              — createSession succeeds but webhook simulates failed payment
  *   'error'             — createSession throws RuntimeException
  */
-class MockPayment implements HostedCheckoutAdapter {
+class MockPayment implements HostedCheckoutAdapter, CancellablePaymentAdapter {
     private string $result;
+    /** 'succeeded' (default), 'pending', 'failed' or 'error' (throws) — $cfg['mock_refund_result'] */
+    private string $refundResult;
+    /** @var list<string> payment ids voided through cancelPayment() */
+    public static array $cancelled = [];
+    /** @var list<array{payment_id:string, amount:int}> refund calls that reached the provider */
+    public static array $refunds = [];
     private string $secret;
     /** Optional hosted page on another origin (browser tests: tests/e2e/mock-gateway.php), receives session/success/cancel. */
     private string $checkoutUrl;
@@ -19,6 +25,7 @@ class MockPayment implements HostedCheckoutAdapter {
         $this->result = $cfg['mock_result'] ?? 'success';
         $this->secret = (string)($cfg['mock_webhook_secret'] ?? '');
         $this->checkoutUrl = (string)($cfg['mock_checkout_url'] ?? '');
+        $this->refundResult = (string)($cfg['mock_refund_result'] ?? 'succeeded');
     }
 
     public function redirectOrigins(): array {
@@ -72,10 +79,16 @@ class MockPayment implements HostedCheckoutAdapter {
     }
 
     public function refund(string $paymentId, int $amount): array {
+        if ($this->refundResult === 'error') throw new \RuntimeException('MockPayment: simulated refund error');
+        self::$refunds[] = ['payment_id' => $paymentId, 'amount' => $amount];
         return [
             'refund_id' => 'mock_ref_' . uniqid(),
-            'status'    => 'succeeded',
+            'status'    => $this->refundResult,
         ];
+    }
+
+    public function cancelPayment(string $paymentId): void {
+        self::$cancelled[] = $paymentId;
     }
 
     public function getStatus(string $paymentId): string {

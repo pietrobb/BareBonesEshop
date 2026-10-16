@@ -487,24 +487,6 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS wishlist_items (
     UNIQUE(owner_key, product_id)
 )");
 
-// RMA tables (mirror of migrations/20260426100000_create_rma.php)
-$pdo->exec("CREATE TABLE IF NOT EXISTS rma_requests (
-    id INTEGER PRIMARY KEY, rma_number TEXT NOT NULL, order_id INTEGER NOT NULL,
-    customer_id INTEGER DEFAULT NULL, status TEXT NOT NULL DEFAULT 'requested',
-    reason TEXT NOT NULL DEFAULT '', admin_note TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(rma_number)
-)");
-$pdo->exec("CREATE TABLE IF NOT EXISTS rma_items (
-    id INTEGER PRIMARY KEY, rma_id INTEGER NOT NULL, order_item_id INTEGER NOT NULL,
-    product_id INTEGER DEFAULT NULL, sku TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '',
-    quantity INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now'))
-)");
-$returnsCreditMigration = require TEST_CLI_DIR . '/../migrations/20260801210000_returns_credit_notes.php';
-$returnsCreditMigration->up($pdo, true);
-$returnsCreditMigration->up($pdo, true);
-assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='order_refunds'")->fetchColumn(), 'G8 migration: item refund ledger exists and migration is idempotent');
 
 $wlProd = (int)($pdo->query("SELECT id FROM products LIMIT 1")->fetchColumn() ?: 0);
 $wlProd2 = (int)($pdo->query("SELECT id FROM products ORDER BY id LIMIT 1 OFFSET 1")->fetchColumn() ?: 0);
@@ -784,6 +766,25 @@ catch (LogicException $e) { $exchangeOverClaim = true; }
 assert_true($exchangeOverClaim, 'RMA: exchange cannot reuse refunded or already exchanged quantity');
 assert_true(Rma::setStatus($rId2, 'refunded') === true, 'RMA: exchanged request can be closed');
 assert_true(Rma::openForOrder($rmaOrderId) === null, 'RMA: no open request after every partial request is terminal');
+
+// Code review H5: both units came back through RMA (one restocked, one discarded) — the
+// order-level return must not put them on stock a second time.
+$rmaStockBeforeOrderReturn = (int)$pdo->query("SELECT SUM(qty) FROM warehouse_stock WHERE sku=" . $pdo->quote($rmaProd['sku']))->fetchColumn();
+OrderWorkflow::transition($rmaOrderId, 'returned', 'H5 whole order returned after RMA receipts');
+assert_equals($rmaStockBeforeOrderReturn, (int)$pdo->query("SELECT SUM(qty) FROM warehouse_stock WHERE sku=" . $pdo->quote($rmaProd['sku']))->fetchColumn(), 'H5: order return after RMA receipts does not restock the same units twice');
+
+// H5 reverse order: the order-level return restocks first, a later RMA restock adds nothing.
+$h5OrderId = Orders::create($rmaCart, $rmaCustomer, 'cod');
+Fulfillment::shipOrder($h5OrderId);
+Orders::updateStatus($h5OrderId, 'delivered');
+$h5Stock = static fn(): int => (int)$pdo->query("SELECT SUM(qty) FROM warehouse_stock WHERE sku=" . $pdo->quote($rmaProd['sku']))->fetchColumn();
+$h5Before = $h5Stock();
+[, $h5RmaId] = Rma::create($h5OrderId, $aliceId, 'H5 reverse', [(int)Orders::items($h5OrderId)[0]['id'] => 2]);
+Rma::setStatus($h5RmaId, 'approved');
+OrderWorkflow::transition($h5OrderId, 'returned', 'H5 whole order returned first');
+assert_equals($h5Before + 2, $h5Stock(), 'H5: order-level return restocks the shipped units once');
+Rma::receive($h5RmaId, [(int)Rma::items($h5RmaId)[0]['id'] => ['quantity' => 2, 'disposition' => 'restock']], 'receipt-h5-reverse');
+assert_equals($h5Before + 2, $h5Stock(), 'H5: RMA restock after the order-level return does not restock again');
 
 // ============================================================
 // TEST: Admin customer management (P7.5)

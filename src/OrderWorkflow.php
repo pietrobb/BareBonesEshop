@@ -108,8 +108,11 @@ class OrderWorkflow {
             throw new \LogicException("Cannot transition order #{$orderId} from '{$from}' to '{$to}'");
         }
 
-        // Update status
-        Orders::updateStatus($orderId, $to);
+        // Compare-and-set: of two concurrent transitions (webhook "paid", admin "cancel") only the
+        // first wins; the loser changes nothing and its side effects roll back with it.
+        if (!Orders::updateStatus($orderId, $to, $from)) {
+            throw new \LogicException("Order #{$orderId} changed status concurrently (expected '{$from}')");
+        }
 
         // Audit log
         AuditLog::log('order_status', $orderId, $from, $to, $note);
@@ -177,29 +180,20 @@ class OrderWorkflow {
     }
 
     /**
-     * Cancellation: restore stock (in DB), return deferred jobs
+     * Cancellation: restore stock (in DB); an unpaid payment is closed and voided at the
+     * provider, a captured one is refunded through the refund ledger.
      */
     private static function handleCancellation(array $order): array {
         Orders::restoreStock($order['id']);
 
-        $jobs = [
+        return array_merge([
             ['email_send', [
                 'template' => 'order_cancelled',
                 'to'       => $order['customer_email'],
                 'locale'   => $order['locale'] ?? '',
                 'order_id' => $order['id'],
             ], 5],
-        ];
-        // Only queue refund if payment_id is a payment_intent (pi_*), not a checkout session (cs_*)
-        $pid = $order['payment_id'] ?? '';
-        if ($pid && !str_starts_with($pid, 'cs_')) {
-            $jobs[] = ['payment_refund', [
-                'order_id'   => $order['id'],
-                'payment_id' => $pid,
-                'amount'     => $order['total'],
-            ], 1];
-        }
-        return $jobs;
+        ], PaymentService::cancellationJobsWithin((int)$order['id']));
     }
 
     /**

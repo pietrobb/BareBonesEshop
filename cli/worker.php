@@ -48,6 +48,7 @@ $handlers = [
     'stock_alert'       => 'handleStockAlert',
     'search_reindex'    => 'handleSearchReindex',
     'payment_refund'    => 'handlePaymentRefund',
+    'payment_cancel'    => 'handlePaymentCancel',
     'erp_order_push'    => 'handleErpOrderPush',
     'erp_order_update'  => 'handleErpOrderUpdate',
     'sitemap_build'     => 'handleSitemapBuild',
@@ -503,65 +504,97 @@ function handleSearchReindex(array $payload, array $job): void {
     }
 }
 
+function orderPaymentGateway(array $payload, ?array $order): PaymentAdapter {
+    $paymentSnapshot = $order ? (json_decode((string)($order['payment_method_snapshot'] ?? ''), true) ?: []) : [];
+    $providerCode = (string)($payload['_provider_code'] ?? ($paymentSnapshot['provider'] ?? ($order ? orderProviderCode($order, 'payment') : '')));
+    if ($providerCode === '') $providerCode = Adapters::defaultProviderCode('payment');
+    return Adapters::payment($providerCode);
+}
+
+/**
+ * Refund job. Item refunds carry their order_refunds id; whole-order refunds (cancellation,
+ * payment captured on a cancelled order) carry a ledger idempotency key from
+ * PaymentService::orderRefundJobsWithin(). A provider failure fails the job, so it is retried
+ * and, when retries run out, raised as an incident — never recorded as done.
+ */
 function handlePaymentRefund(array $payload, array $job): void {
-    $orderId = $payload['order_id'] ?? 0;
-    $amount = $payload['amount'] ?? 0;
-    $paymentId = $payload['payment_id'] ?? '';
+    $orderId = (int)($payload['order_id'] ?? 0);
+    $amount = (int)($payload['amount'] ?? 0);
+    $paymentId = (string)($payload['payment_id'] ?? '');
     $itemRefundId = (int)($payload['refund_id'] ?? 0);
+    $idempotencyKey = (string)($payload['idempotency_key'] ?? '');
+    $order = $orderId > 0 ? Orders::byId($orderId) : null;
+
+    if ($itemRefundId === 0 && $idempotencyKey === '' && $order) {
+        // Job queued before the refund ledger: claim the order's refundable balance now.
+        $db = Db::get();
+        $db->beginTransaction();
+        try {
+            PaymentService::orderRefundJobsWithin($orderId, 'order.cancelled');
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+        // Read back from the ledger, so a retry of this job refunds the same claim.
+        $request = PaymentService::orderRefundRequest($orderId);
+        if ($request === null) return; // unpaid or nothing left to refund
+        [$amount, $idempotencyKey] = [$request['amount'], $request['idempotency_key']];
+    }
+    // A redelivered whole-order job after the provider confirmed the refund only finishes the bookkeeping.
+    $alreadyRefunded = $itemRefundId === 0 && $idempotencyKey !== '' && PaymentService::refundSucceeded($idempotencyKey);
 
     $logDir = __DIR__ . '/../logs';
     if (!is_dir($logDir)) mkdir($logDir, 0750, true);
 
-    $result = ['status' => 'skipped'];
-    if ($paymentId) {
+    $result = $alreadyRefunded ? ['status' => 'succeeded', 'replayed' => true] : ['status' => 'skipped'];
+    if (!$alreadyRefunded && $paymentId !== '' && $orderId > 0 && $amount > 0) {
         try {
-            $order = $orderId ? Orders::byId((int)$orderId) : null;
-            $paymentSnapshot = $order ? (json_decode((string)($order['payment_method_snapshot'] ?? ''), true) ?: []) : [];
-            $providerCode = (string)($payload['_provider_code'] ?? ($paymentSnapshot['provider'] ?? ($order ? orderProviderCode($order, 'payment') : '')));
-            if ($providerCode === '') $providerCode = Adapters::defaultProviderCode('payment');
-            $payment = Adapters::payment($providerCode);
-            $result = PaymentService::refund(
-                (int)$orderId,
-                (string)$paymentId,
-                (int)$amount,
-                $payment,
-                (string)($payload['idempotency_key'] ?? ''),
-                (string)($order['currency'] ?? 'eur')
-            );
+            $result = PaymentService::refund($orderId, $paymentId, $amount, orderPaymentGateway($payload, $order), $idempotencyKey, (string)($order['currency'] ?? 'eur'));
         } catch (\Throwable $e) {
             $result = ['status' => 'error', 'message' => $e->getMessage()];
         }
     }
-
-    // Update order after successful refund
-    if ($orderId && ($result['status'] ?? '') === 'succeeded') {
-        $refundId = $result['refund_id'] ?? $result['id'] ?? '';
-        if ($refundId) {
-            Orders::setRefundId($orderId, $refundId);
-        }
-        $order = Orders::byId($orderId);
-        if ($itemRefundId > 0) {
-            Rma::completeRefund($itemRefundId, (string)$refundId);
-            $refunded = PaymentService::refundedAmount((int)$orderId);
-            $paymentStatus = $order && $refunded >= (int)$order['total'] ? 'refunded' : 'partially_refunded';
-            PaymentService::updatePaymentStatus((int)$orderId, $paymentStatus, 'refund.succeeded', [
-                'refund_id' => $itemRefundId,
-                'amount' => (int)$amount,
-                'provider_ref' => (string)$refundId,
-            ]);
-        } elseif ($order && OrderWorkflow::canTransition($order['status'], 'refunded')) {
-            // Preserve the legacy whole-order cancellation refund path.
-            OrderWorkflow::transition($orderId, 'refunded', "Payment refund completed: {$paymentId}");
-        }
-    }
-
     file_put_contents($logDir . '/refunds.log',
         date('c') . " | ORDER: {$orderId} | AMOUNT: {$amount} | PAYMENT: {$paymentId} | RESULT: " . json_encode($result) . "\n",
         FILE_APPEND | LOCK_EX
     );
-    if ($itemRefundId > 0 && ($result['status'] ?? '') !== 'succeeded') {
-        throw new RuntimeException('Item refund provider call did not succeed');
+
+    $status = (string)($result['status'] ?? '');
+    if ($status === 'skipped') return;
+    // An asynchronous provider refund is finalised by its refund webhook.
+    if ($status === 'pending' && $itemRefundId === 0) return;
+    if ($status !== 'succeeded') {
+        throw new RuntimeException("Refund provider call did not succeed for order #{$orderId}");
     }
+
+    $refundId = (string)($result['refund_id'] ?? $result['id'] ?? '');
+    if ($refundId !== '') Orders::setRefundId($orderId, $refundId);
+    if ($itemRefundId > 0) Rma::completeRefund($itemRefundId, $refundId);
+    $order = Orders::byId($orderId);
+    if (!$order) return;
+    $paymentStatus = PaymentService::refundedAmount($orderId) >= (int)$order['total'] ? 'refunded' : 'partially_refunded';
+    if ($itemRefundId > 0 || ($order['payment_status'] ?? '') === 'refund_pending') {
+        PaymentService::updatePaymentStatus($orderId, $paymentStatus, 'refund.succeeded', [
+            'refund_id' => $itemRefundId > 0 ? $itemRefundId : null,
+            'amount' => $amount,
+            'provider_ref' => $refundId,
+        ]);
+    }
+    if ($itemRefundId === 0 && $paymentStatus === 'refunded' && OrderWorkflow::canTransition((string)$order['status'], 'refunded')) {
+        OrderWorkflow::transition($orderId, 'refunded', "Payment refund completed: {$paymentId}");
+    }
+}
+
+/** Void the provider session of a cancelled, unpaid order so it can no longer be paid. */
+function handlePaymentCancel(array $payload, array $job): void {
+    $orderId = (int)($payload['order_id'] ?? 0);
+    $order = $orderId > 0 ? Orders::byId($orderId) : null;
+    $paymentId = (string)($payload['payment_id'] ?? '');
+    // Paid meanwhile: PaymentService::settleCapture() refunds it instead.
+    if (!$order || $paymentId === '' || ($order['payment_status'] ?? '') !== 'cancelled') return;
+    $gateway = orderPaymentGateway($payload, $order);
+    if ($gateway instanceof CancellablePaymentAdapter) $gateway->cancelPayment($paymentId);
 }
 
 function handleErpOrderPush(array $payload, array $job): void {

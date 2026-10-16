@@ -969,10 +969,7 @@ function applyStripePaymentCompleted(array $session, string $sessionId, int $ord
             ['session_id' => $sessionId, 'payment_id' => $paymentRef]
         );
     }
-    $order = Orders::byId($orderId);
-    if ($order && OrderWorkflow::canTransition((string)$order['status'], 'paid')) {
-        OrderWorkflow::transition($orderId, 'paid', 'Stripe webhook: ' . $sessionId);
-    }
+    PaymentService::settleCapture($orderId, 'Stripe webhook: ' . $sessionId);
 }
 
 function onChargeRefunded(array $charge): ?string {

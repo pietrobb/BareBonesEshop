@@ -349,7 +349,9 @@ compatibility with installed files. `doctor --json` is suitable for deployment
 automation. Packages are Ed25519-verified and unsigned packages are refused
 unless the operator supplies `--allow-unsigned` explicitly. Rollback refuses to
 overwrite files changed after an update unless `--force` is supplied after
-manual review.
+manual review. Rolling back an update that ran migrations restores the
+pre-update database and loses every order and other write made since then, so
+it is refused with a warning unless `--accept-data-loss` is supplied.
 
 Before any file, snapshot or migration changes, the updater assembles a private
 candidate in `update_storage_dir` (installed code, themes, `blocks/`,

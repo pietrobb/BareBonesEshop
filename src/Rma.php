@@ -312,7 +312,8 @@ class Rma {
                         if ((int)$candidate['id'] === (int)$item['order_item_id']) { $orderItem = $candidate; break; }
                     }
                     if (!$orderItem) throw new RuntimeException('Order item not found');
-                    Inventory::returnOrderItemQuantity($orderItem, $quantity, "{$rmaId}:{$rmaItemId}:{$idempotencyKey}", (int)$previous->fetchColumn());
+                    // The order-level return (status 'returned') already put its goods back on stock.
+                    if ((int)(Orders::byId((int)$rma['order_id'])['stock_restored'] ?? 0) === 0) Inventory::returnOrderItemQuantity($orderItem, $quantity, "{$rmaId}:{$rmaItemId}:{$idempotencyKey}", (int)$previous->fetchColumn());
                 }
                 $db->prepare("UPDATE rma_items SET received_quantity = received_quantity + :quantity,
                         disposition = CASE WHEN disposition IN ('pending', :same) THEN :same2 ELSE 'mixed' END

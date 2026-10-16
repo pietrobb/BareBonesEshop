@@ -291,13 +291,23 @@ final class Updater
         }
     }
 
-    public function rollback(string $snapshotId, bool $force = false): array
+    /**
+     * Restores code and, for a migration update, the database snapshot. That discards every database write since
+     * the snapshot (orders, payments, customers, stock), so it is refused unless $acceptDataLoss confirms it.
+     */
+    public function rollback(string $snapshotId, bool $force = false, bool $acceptDataLoss = false): array
     {
         $this->lock();
         try {
+            $metadata = $this->snapshotMetadata($snapshotId);
+            $databaseAt = is_array($metadata['database'] ?? null) ? (string)$metadata['created_at'] : null;
+            if ($databaseAt !== null && !$acceptDataLoss) {
+                throw new RuntimeException(self::dataLossWarning($databaseAt)
+                    . ' Stop all writers, export or reconcile those records, then re-run with --accept-data-loss.');
+            }
             $result = $this->restoreSnapshot($snapshotId, $force);
             $this->setSnapshotStatus($snapshotId, 'rolled-back');
-            return $result;
+            return $result + ['database_restored_to' => $databaseAt];
         } finally {
             $this->unlock();
         }
@@ -517,16 +527,30 @@ final class Updater
         ];
     }
 
-    private function restoreSnapshot(string $snapshotId, bool $force): array
+    public static function dataLossWarning(string $snapshotCreatedAt): string
+    {
+        $age = max(0, time() - (int)strtotime($snapshotCreatedAt));
+        return sprintf('WARNING: rollback replaces the live database with the snapshot taken at %s (%dh %02dm ago).'
+            . ' Every order, payment, customer, stock movement and other change written since then is permanently lost.',
+            $snapshotCreatedAt, intdiv($age, 3600), intdiv($age % 3600, 60));
+    }
+
+    private function snapshotMetadata(string $snapshotId): array
     {
         if (!preg_match('/^\d{14}-[0-9a-f]{12}$/', $snapshotId)) {
             throw new InvalidArgumentException('Invalid update snapshot ID');
         }
-        $directory = $this->snapshotDirectory($snapshotId);
-        $metadata = $this->readJson($directory . DIRECTORY_SEPARATOR . 'snapshot.json');
+        $metadata = $this->readJson($this->snapshotDirectory($snapshotId) . DIRECTORY_SEPARATOR . 'snapshot.json');
         if (!$metadata || ($metadata['id'] ?? null) !== $snapshotId || !is_array($metadata['files'] ?? null)) {
             throw new RuntimeException("Update snapshot not found or invalid: {$snapshotId}");
         }
+        return $metadata;
+    }
+
+    private function restoreSnapshot(string $snapshotId, bool $force): array
+    {
+        $metadata = $this->snapshotMetadata($snapshotId);
+        $directory = $this->snapshotDirectory($snapshotId);
 
         if (!$force) {
             foreach ($metadata['files'] as $row) {

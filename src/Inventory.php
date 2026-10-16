@@ -134,10 +134,16 @@ class Inventory {
         }
     }
 
+    /**
+     * Whole-order return. Units already received through RMA were dispositioned there (restocked
+     * once, or discarded) and are skipped in the allocation order returnOrderItemQuantity() uses.
+     */
     public static function returnOrderItem(array $orderItem, string|int $referenceId): void {
         $hasShipmentHistory = self::hasShipmentHistory((int)$orderItem['id']);
+        $rmaReceived = self::rmaReceivedQuantity((int)$orderItem['id']);
         $hasAllocationSnapshot = false;
         foreach (self::reservationLines($orderItem) as $line) {
+            $skip = $rmaReceived * max(1, (int)($line['quantity_per_bundle'] ?? 1));
             foreach ($line['allocations'] ?? [] as $allocation) {
                 $hasAllocationSnapshot = true;
                 $status = (string)($allocation['status'] ?? 'reserved');
@@ -145,6 +151,9 @@ class Inventory {
                 $quantity = $hasShipmentHistory
                     ? min((int)$allocation['qty'], self::shippedQuantity((int)$orderItem['id'], (string)$line['sku'], $warehouseId))
                     : (int)$allocation['qty'];
+                if ($skip >= $quantity) { $skip -= $quantity; continue; }
+                $quantity -= $skip;
+                $skip = 0;
                 if ($quantity <= 0) continue;
                 $allocation['qty'] = $quantity;
                 if ($status === 'reserved' && $warehouseId !== null) {
@@ -154,9 +163,19 @@ class Inventory {
                 }
             }
         }
-        if (!$hasAllocationSnapshot && empty($orderItem['variant_id'])) {
-            Products::incrementStock((int)$orderItem['product_id'], (int)$orderItem['quantity']);
+        $unreturned = (int)$orderItem['quantity'] - $rmaReceived;
+        if (!$hasAllocationSnapshot && empty($orderItem['variant_id']) && $unreturned > 0) {
+            Products::incrementStock((int)$orderItem['product_id'], $unreturned);
         }
+    }
+
+    /** Units of an order line already received through RMA (restocked, discarded or repaired). */
+    public static function rmaReceivedQuantity(int $orderItemId): int {
+        $stmt = Db::get()->prepare("SELECT COALESCE(SUM(rc.quantity), 0) FROM return_receipts rc
+            JOIN rma_items ri ON ri.id = rc.rma_item_id
+            WHERE ri.order_item_id = :order_item AND rc.store_id = :store");
+        $stmt->execute([':order_item' => $orderItemId, ':store' => StoreContext::current()->id()]);
+        return (int)$stmt->fetchColumn();
     }
 
     /** Restock only the accepted quantity of an order line, preserving allocation order. */

@@ -4,7 +4,7 @@
  * Uses Stripe Checkout (hosted flow) via raw HTTP API.
  * Zero external dependencies — curl only.
  */
-class StripePayment implements IdempotentRefundAdapter, HostedCheckoutAdapter {
+class StripePayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, CancellablePaymentAdapter {
     private string $secretKey;
     private string $webhookSecret;
 
@@ -134,6 +134,18 @@ class StripePayment implements IdempotentRefundAdapter, HostedCheckoutAdapter {
             'refund_id' => $response['id'] ?? '',
             'status' => $response['status'] ?? 'failed',
         ];
+    }
+
+    /** Expire an open Checkout Session or cancel an uncaptured PaymentIntent. */
+    public function cancelPayment(string $paymentId): void {
+        if (str_starts_with($paymentId, 'cs_')) {
+            $path = '/v1/checkout/sessions/' . rawurlencode($paymentId);
+            if (($this->apiCall('GET', $path)['status'] ?? '') === 'open') $this->apiCall('POST', $path . '/expire');
+            return;
+        }
+        $path = '/v1/payment_intents/' . rawurlencode($paymentId);
+        $cancellable = ['requires_payment_method', 'requires_confirmation', 'requires_action', 'requires_capture'];
+        if (in_array($this->apiCall('GET', $path)['status'] ?? '', $cancellable, true)) $this->apiCall('POST', $path . '/cancel');
     }
 
     /**
