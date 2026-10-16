@@ -833,6 +833,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.digital.limit_days' => 'Korlát / nap',
     'admin.digital.entitlements' => 'Jogosultságok',
     'admin.digital.invalid' => 'Érvénytelen digitális fájladatok, vagy az SKU nem ennek a katalógusnak a terméke.',
+    'admin.digital.file_missing' => 'A fájl nem létezik ennek az áruháznak a letöltési könyvtárában ({dir} a digital_assets_base_dir alatt). Először töltse fel oda.',
+    'admin.digital.legacy_location' => 'A fájl még a régi helyén van közvetlenül a digital_assets_base_dir alatt. Helyezze át az áruház {dir} könyvtárába, és mentse újra.',
     'admin.digital.saved' => 'Digitális fájl mentve.',
     'admin.digital.save_failed' => 'A digitális fájlt nem sikerült menteni.',
     'admin.digital.activated' => 'Digitális fájl aktiválva.',

@@ -231,10 +231,10 @@ switch ($action) {
     case 'invoice_migration':
         $db->exec('DELETE FROM invoice_number_counters');
         $db->exec('DELETE FROM invoice_counters');
-        $db->exec("INSERT INTO invoice_counters (year, prefix, type, last_number) VALUES (2025, '', 'invoice', 7), (2025, 'CN-', 'invoice', 2), (2024, 'CZ-', 'invoice', 4), (2023, 'ZZ-', 'invoice', 0)");
+        $db->exec("INSERT INTO invoice_counters (year, prefix, type, last_number) VALUES (2025, '', 'invoice', 7), (2025, 'CN-', 'invoice', 2), (2024, 'CZ-', 'invoice', 4), (2023, 'ZZ-', 'invoice', 0), (2025, 'OLD-', 'invoice', 3)");
         $legacy = $db->prepare("INSERT INTO invoices (order_id, store_id, number, issued_at, pdf_path, download_token, type) VALUES (?, ?, ?, '2025-01-01', 'x.pdf', ?, ?)");
         foreach ([['default', '20250007', 'invoice', 'AAC-O1'], ['de', '20250006', 'invoice', 'AAC-O2'], ['default', '20250005', 'invoice', 'AAC-O3'],
-                  ['cz', 'CN-20250002', 'credit_note', 'AAC-O4'], ['pl', 'CN-20250001', 'credit_note', 'AAC-O4']] as $i => [$owner, $number, $type, $order]) {
+                  ['cz', 'CN-20250002', 'credit_note', 'AAC-O4'], ['pl', 'CN-20250001', 'credit_note', 'AAC-O4'], ['pl', 'OLD-20250003', 'invoice', 'AAC-O4']] as $i => [$owner, $number, $type, $order]) {
             $legacy->execute([$orderId($order), $owner, $number, "aac-token-{$i}", $type]);
         }
         $migration = require $root . '/migrations/20261016140500_invoice_number_counters.php';
@@ -350,9 +350,53 @@ switch ($action) {
         $extra = static fn(): array => ['registry' => $q("SELECT slug, locale, store_id FROM slug_registry WHERE slug IN ('aac-cz-2', 'aac-czech-thing') ORDER BY slug"),
             'resolved' => $resolved['sku'] ?? null, 'broken' => $broken['sku'] ?? null, 'repaired' => Products::bySlug('aac-czech-thing')['sku'] ?? null];
         break;
-    case 'digital_assets':
+    case 'digital_asset_legacy_keep':
+    case 'digital_asset_missing':
+    case 'digital_asset_legacy_move':
         $base = sys_get_temp_dir() . '/aac-digital-' . getmypid();
         @mkdir($base . '/default', 0700, true);
+        @mkdir($base . '/legacy', 0700, true);
+        file_put_contents($base . '/legacy/old.pdf', 'old');
+        file_put_contents($base . '/legacy/other.pdf', 'other');
+        DigitalDelivery::setConfigForTesting(['digital_assets_base_dir' => $base]);
+        $db->exec("INSERT INTO digital_assets (sku, asset_key, storage_path, download_name) VALUES ('AAC-DEF-2', 'default', 'legacy/old.pdf', 'old.pdf')");
+        $_POST = ['csrf_token' => 'aac-token', 'sku' => 'AAC-DEF-2', 'asset_key' => 'default', 'label' => 'Manual', 'download_name' => 'm.pdf',
+            'content_type' => 'application/pdf', 'download_limit' => '3', 'expiry_days' => '7', 'active' => '1',
+            'storage_path' => ['digital_asset_legacy_keep' => 'legacy/old.pdf', 'digital_asset_missing' => 'missing.pdf', 'digital_asset_legacy_move' => 'legacy/other.pdf'][$action]];
+        $extra = static function() use ($q, $base, $action): array {
+            foreach (['/legacy/old.pdf', '/legacy/other.pdf'] as $file) @unlink($base . $file);
+            foreach (['/legacy', '/default', ''] as $dir) @rmdir($base . $dir);
+            return ['assets' => $q('SELECT sku, storage_path, download_name FROM digital_assets'),
+                't' => $action === 'digital_asset_legacy_keep' ? '' : I18n::format($action === 'digital_asset_missing' ? 'admin.digital.file_missing' : 'admin.digital.legacy_location', ['dir' => 'default/'])];
+        };
+        handleDigitalAssetSave();
+        break;
+    case 'invoice_sellers':
+        $root = InvoiceService::storesRoot();
+        $root['stores']['nolegal'] = ['id' => 'nolegal', 'currency' => 'eur', 'default_locale' => 'sk'];
+        $root['stores']['brand'] = ['id' => 'brand', 'currency' => 'eur', 'default_locale' => 'sk', 'legal' => ['seller' => 'default', 'name' => 'AAC Brand', 'invoice_prefix' => 'IGNORED-']];
+        $root['stores']['clash'] = ['id' => 'clash', 'currency' => 'eur', 'default_locale' => 'sk', 'legal' => ['name' => 'AAC Clash s.r.o.']];
+        InvoiceService::setStoresConfigForTesting($root);
+        $db->exec("UPDATE orders SET status = 'paid', payment_status = 'paid' WHERE order_number = 'AAC-O4'");
+        $issued = [];
+        foreach (['AAC-O1' => 'nolegal', 'AAC-O2' => 'brand', 'AAC-O3' => 'cz', 'AAC-O4' => 'clash'] as $number => $storeCode) {
+            $owner = (string)$q('SELECT store_id FROM orders WHERE order_number = ?', [$number])[0]['store_id'];
+            try { $issued[$number] = PaymentWebhookRouting::within($owner, static fn(): string => (string)InvoiceService::issue($orderId($number), $storeCode)['number']); }
+            catch (RuntimeException $e) { $issued[$number] = str_contains($e->getMessage(), 'numbering configuration conflict') ? 'refused' : $e->getMessage(); }
+        }
+        $sellers = [];
+        foreach ($q('SELECT number, seller_code, seller_snapshot FROM invoices ORDER BY id') as $row) {
+            $snapshot = json_decode((string)$row['seller_snapshot'], true);
+            $sellers[$row['number']] = [$row['seller_code'], $snapshot['name'] ?? null, $snapshot['ico'] ?? null];
+        }
+        $extra = static fn(): array => ['issued' => $issued, 'sellers' => $sellers, 'conflicts' => array_keys(InvoiceService::numberingConflicts($root)),
+            'counters' => $q("SELECT store_id, type, prefix, last_number FROM invoice_number_counters WHERE year = ? ORDER BY store_id, type, prefix", [$year]),
+            'incidents' => (int)$q("SELECT COUNT(*) AS n FROM operational_incidents WHERE code = 'invoice.numbering_conflict'")[0]['n']];
+        break;
+    case 'digital_assets':
+        $base = sys_get_temp_dir() . '/aac-digital-' . getmypid();
+        @mkdir($base . '/default/manuals', 0700, true);
+        file_put_contents($base . '/default/manuals/m.pdf', 'pdf');
         file_put_contents($base . '/outside.txt', 'x');
         @symlink($base, $base . '/default/escape');
         DigitalDelivery::setConfigForTesting(['digital_assets_base_dir' => $base]);
@@ -365,6 +409,8 @@ switch ($action) {
         $extra = static function() use ($q, $paths, $base): array {
             @unlink($base . '/default/escape');
             @unlink($base . '/outside.txt');
+            @unlink($base . '/default/manuals/m.pdf');
+            @rmdir($base . '/default/manuals');
             @rmdir($base . '/default');
             @rmdir($base);
             return ['paths' => $paths, 'assets' => $q('SELECT sku, storage_path FROM digital_assets')];
@@ -506,10 +552,31 @@ try {
         assert_equals([[], false], [$r['extra']['invoices'], str_contains($r['extra']['page'], 'action=invoice_issue')], "AAC {$aacDriver}: no invoice and no issue button for an unpaid order");
         if ($aacDriver === 'sqlite') {
             $r = $aac('invoice_migration');
-            $aacBackfill = [['cz', 'invoice', 2024, 'CZ-', 4], ['default', 'invoice', 2025, '', 7], ['cz', 'credit_note', 2025, 'CN-', 2]];
+            $aacBackfill = [['cz', 'invoice', 2024, 'CZ-', 4], ['default', 'invoice', 2025, '', 7], ['default', 'credit_note', 2025, 'CN-', 2], ['pl', 'invoice', 2025, 'OLD-', 3]];
             assert_equals($aacBackfill, array_map(static fn(array $c): array => [$c['store_id'], $c['type'], (int)$c['year'], $c['prefix'], (int)$c['last_number']], $r['extra']['first']),
-                "AAC {$aacDriver}: backfill gives each shared legacy sequence one owner (default store first, else most documents, else the configured prefix) and keeps last_number");
-            assert_equals([$r['extra']['first'], 4], [$r['extra']['second'], $r['extra']['legacy']], "AAC {$aacDriver}: counter migration is idempotent and keeps the legacy table");
+                "AAC {$aacDriver}: backfill gives each legacy sequence one owner: the seller owning the prefix by configuration ('CN-' stays the default store's although only cz and pl issued under it), else the seller that issued under it; last_number kept");
+            assert_equals([$r['extra']['first'], 5], [$r['extra']['second'], $r['extra']['legacy']], "AAC {$aacDriver}: counter migration is idempotent and keeps the legacy table");
+        }
+
+        // Review fix 1: stores without a legal block invoice as the default seller (one shared series); legal.seller shares
+        // a series explicitly; only a real conflict is refused, with an incident, and the default store keeps issuing.
+        $r = $aac('invoice_sellers');
+        assert_equals(['AAC-O1' => "{$aacYear}0001", 'AAC-O2' => "{$aacYear}0002", 'AAC-O3' => "CZ-{$aacYear}0001", 'AAC-O4' => 'refused'], $r['extra']['issued'],
+            "AAC {$aacDriver}: a store without legal block and a store with legal.seller=default number in the default series; a store with its own legal block reusing the default prefixes is refused");
+        assert_equals(["{$aacYear}0001" => ['default', 'Woodle s.r.o.', '12345678'], "{$aacYear}0002" => ['default', 'AAC Brand', '12345678'], "CZ-{$aacYear}0001" => ['cz', 'Woodle CZ s.r.o.', '01234567']], $r['extra']['sellers'],
+            "AAC {$aacDriver}: invoices record their seller; a store without legal block prints the default seller, a legal.seller store its own name over the seller's details");
+        assert_equals([['clash/invoice', 'clash/credit_note'], [['cz', 'invoice', 'CZ-', 1], ['default', 'invoice', '', 2]], 1],
+            [$r['extra']['conflicts'], array_map(static fn(array $c): array => [$c['store_id'], $c['type'], $c['prefix'], (int)$c['last_number']], $r['extra']['counters']), $r['extra']['incidents']],
+            "AAC {$aacDriver}: only the conflicting seller's series are refused (not the default store's), one shared counter per seller, the refusal is an operational incident");
+
+        // Review fix 4: an existing asset keeps its legacy base-relative path; a missing file or a file at the old location is refused.
+        $r = $aac('digital_asset_legacy_keep');
+        assert_equals(['ok', [['sku' => 'AAC-DEF-2', 'storage_path' => 'legacy/old.pdf', 'download_name' => 'm.pdf']]], [$r['flash']['type'] ?? null, $r['extra']['assets']],
+            "AAC {$aacDriver}: re-saving a legacy asset with its unchanged path keeps the path (no silent rewrite to <catalog>/)");
+        foreach (['digital_asset_missing', 'digital_asset_legacy_move'] as $aacAction) {
+            $r = $aac($aacAction);
+            $refused($r, "AAC {$aacDriver}/{$aacAction}");
+            assert_equals([['sku' => 'AAC-DEF-2', 'storage_path' => 'legacy/old.pdf', 'download_name' => 'old.pdf']], $r['extra']['assets'], "AAC {$aacDriver}/{$aacAction}: the asset is unchanged");
         }
 
         // 5./14. Product list of the active catalog only; array query input is no TypeError.
@@ -601,6 +668,59 @@ assert_equals([[], 'CN-', 'CZ-CN-', 'X-'], [InvoiceService::numberingConflicts(B
     'AAC numbering: the shipped stores.json has no shared prefix; credit notes default to "<invoice_prefix>CN-"');
 $aacConflicts = InvoiceService::numberingConflicts(['stores' => ['a' => ['legal' => ['invoice_prefix' => 'S-']], 'b' => ['legal' => ['invoice_prefix' => 'S-']], 'c' => ['legal' => ['invoice_prefix' => 'C-', 'credit_note_prefix' => 'C-']]]]);
 assert_equals(['a/invoice', 'b/invoice', 'a/credit_note', 'b/credit_note', 'c/invoice', 'c/credit_note'], array_keys($aacConflicts), 'AAC numbering: two sellers (and so their derived credit-note prefixes), or both document types of one seller, sharing a prefix are refused');
+$aacSellerRoot = ['default_store' => 'main', 'stores' => [
+    'main' => ['currency' => 'eur', 'legal' => ['name' => 'Main', 'ico' => '1']],
+    'second' => ['currency' => 'eur'],
+    'cz' => ['currency' => 'czk', 'legal' => ['name' => 'CZ', 'ico' => '2', 'invoice_prefix' => 'CZ-']],
+    'czshop' => ['currency' => 'czk'],
+    'brand' => ['currency' => 'eur', 'legal' => ['seller' => 'cz']],
+    'broken' => ['currency' => 'eur', 'legal' => ['seller' => 'second']],
+]];
+assert_equals(['main', 'main', 'cz', 'cz', 'main', 'cz', null], [InvoiceService::sellerCode($aacSellerRoot, 'main'), InvoiceService::sellerCode($aacSellerRoot, 'second', 'eur'),
+    InvoiceService::sellerCode($aacSellerRoot, 'cz'), InvoiceService::sellerCode($aacSellerRoot, 'czshop', 'czk'), InvoiceService::sellerCode($aacSellerRoot, 'czshop', 'usd'),
+    InvoiceService::sellerCode($aacSellerRoot, 'brand'), InvoiceService::sellerCode($aacSellerRoot, 'broken')],
+    'AAC numbering: stores without legal block invoice as the seller of their currency, else the default seller; legal.seller shares a seller; a legal.seller naming no seller resolves to none');
+assert_equals([['broken/invoice', 'broken/credit_note'], ['' => ['main', 'invoice'], 'CN-' => ['main', 'credit_note'], 'CZ-' => ['cz', 'invoice'], 'CZ-CN-' => ['cz', 'credit_note']]],
+    [array_keys(InvoiceService::numberingConflicts($aacSellerRoot)), InvoiceService::configuredSeries($aacSellerRoot)],
+    'AAC numbering: stores without legal block are no sellers (no conflict with the default store); only the invalid legal.seller is refused');
+$aacClash = InvoiceService::numberingConflicts(['default_store' => 'main', 'stores' => ['main' => ['legal' => ['name' => 'M']], 'other' => ['legal' => ['name' => 'O']]]]);
+assert_equals(['other/invoice', 'other/credit_note'], array_keys($aacClash), "AAC numbering: a second seller without own prefixes conflicts, but the default store keeps its '' / 'CN-' series");
+// Review fix 2: a credit note follows its source invoice's seller, not the order's current store.
+InvoiceService::setStoresConfigForTesting(null);
+$aacCreditSeller = new ReflectionMethod(InvoiceService::class, 'creditSeller');
+$aacCredit = static fn(array $source, string $orderStore): string => (string)$aacCreditSeller->invoke(null, $source + ['issued_at' => '2025-03-01', 'seller_snapshot' => '{}'], ['id' => 1, 'store_id' => $orderStore, 'currency' => 'eur'])[0];
+assert_equals(['cz', 'cz', 'cz', 'default', 'default'], [
+    $aacCredit(['number' => 'CZ-20250003'], 'default'),
+    $aacCredit(['number' => 'GONE-20250001', 'seller_snapshot' => json_encode(['name' => 'Woodle CZ s.r.o.', 'ico' => '01234567'])], 'default'),
+    $aacCredit(['number' => '20250001', 'seller_code' => 'cz'], 'default'),
+    $aacCredit(['number' => '20250009'], 'cz'),
+    $aacCredit(['number' => 'GONE-20250001'], 'default'),
+], 'AAC credit notes: seller from the recorded seller_code, else the legacy invoice number prefix, else the seller snapshot, else the order store');
+// Review fix 4: at download time a "<catalog>/" row must stay inside that store's directory (symlink escape).
+$aacDl = test_fixture_path('aac-dl');
+mkdir($aacDl . '/default', 0700, true);
+mkdir($aacDl . '/cz', 0700, true);
+mkdir($aacDl . '/legacy', 0700, true);
+file_put_contents($aacDl . '/cz/secret.pdf', 's');
+file_put_contents($aacDl . '/default/own.pdf', 'o');
+file_put_contents($aacDl . '/legacy/old.pdf', 'l');
+$aacLinked = @symlink($aacDl . '/cz', $aacDl . '/default/link');
+DigitalDelivery::setConfigForTesting(['digital_assets_base_dir' => $aacDl]);
+try {
+    assert_equals([true, true, true, $aacLinked ? false : null], [DigitalDelivery::resolvedPath(['storage_path' => 'default/own.pdf']) !== null, DigitalDelivery::resolvedPath(['storage_path' => 'cz/secret.pdf']) !== null,
+        DigitalDelivery::resolvedPath(['storage_path' => 'legacy/old.pdf']) !== null, $aacLinked ? DigitalDelivery::resolvedPath(['storage_path' => 'default/link/secret.pdf']) !== null : null],
+        'AAC downloads: a store-directory row cannot reach another store\'s file through a symlink; legacy base-relative rows keep downloading');
+    assert_equals([['default/own.pdf', null], [null, 'admin.digital.file_missing'], [null, 'admin.digital.legacy_location'], ['legacy/old.pdf', null], [null, 'admin.digital.invalid']], [
+        DigitalDelivery::assetPathForSave('own.pdf', null, 'default'), DigitalDelivery::assetPathForSave('nothing.pdf', null, 'default'),
+        DigitalDelivery::assetPathForSave('legacy/old.pdf', null, 'default'), DigitalDelivery::assetPathForSave('legacy/old.pdf', 'legacy/old.pdf', 'default'),
+        DigitalDelivery::assetPathForSave('../cz/secret.pdf', null, 'default'),
+    ], 'AAC assets: saving needs the file in the store directory; an unchanged legacy path is kept; a file at the old location must be moved');
+} finally {
+    DigitalDelivery::setConfigForTesting(null);
+    if ($aacLinked) unlink($aacDl . '/default/link');
+    foreach (['/cz/secret.pdf', '/default/own.pdf', '/legacy/old.pdf'] as $aacFile) unlink($aacDl . $aacFile);
+    foreach (['/cz', '/default', '/legacy', ''] as $aacDir) rmdir($aacDl . $aacDir);
+}
 require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Shared.php';
 require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Catalog.php';
 $aacEsc = (string)ADMIN_JS_ESC_HTML;

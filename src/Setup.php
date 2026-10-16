@@ -74,6 +74,12 @@ class Setup
         $defaultStore = is_array($stores) ? (string)($stores['default_store'] ?? '') : '';
         $storeOk = is_array($stores) && isset($stores['stores'][$defaultStore]);
         $add($storeOk ? 'pass' : 'fail', 'stores.default', $storeOk ? "Default store: {$defaultStore}" : 'stores.json has no valid default store', 'Define default_store and its store record.');
+        // Invoice / credit-note series that would issue the same numbers are refused at issue time: report them now.
+        $numbering = is_array($stores) ? InvoiceService::numberingConflicts($stores) : [];
+        $add($numbering === [] ? 'pass' : 'fail', 'stores.invoice_numbering', $numbering === []
+            ? 'Every seller has its own invoice and credit-note number series.'
+            : 'Invoice numbering conflicts (these series are refused): ' . implode(' | ', array_map(static fn(string $series, string $message): string => "{$series}: {$message}", array_keys($numbering), $numbering)),
+            'Give each store with its own legal block its own legal.invoice_prefix / legal.credit_note_prefix, or set legal.seller to the store whose series a storefront of the same company shares.');
 
         foreach (self::runtimePaths($config) as $name => $path) {
             $target = str_ends_with($name, '_file') ? dirname($path) : $path;

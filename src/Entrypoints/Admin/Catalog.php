@@ -677,8 +677,15 @@ function handleDigitalAssetSave(): void {
     $sku = trim((string)($_POST['sku'] ?? ''));
     $assetKey = trim((string)($_POST['asset_key'] ?? 'default'));
     $label = trim((string)($_POST['label'] ?? ''));
-    // Relative to the active catalog's own directory <digital_assets_base_dir>/<catalog_id>/ (stored with that prefix).
-    $path = DigitalDelivery::storePath(Security::str($_POST['storage_path'] ?? ''));
+    // Relative to the active catalog's own directory <digital_assets_base_dir>/<catalog_id>/ (stored with that prefix);
+    // the file must exist there. An older asset re-saved with its unchanged base-relative path keeps it.
+    $current = null;
+    if (preg_match('/^[A-Za-z0-9._-]{1,191}$/', $sku) && preg_match('/^[A-Za-z0-9._-]{1,80}$/', $assetKey) && CatalogScope::ownsSku($sku)) {
+        $currentStmt = Db::get()->prepare('SELECT storage_path FROM digital_assets WHERE sku = :sku AND asset_key = :asset_key');
+        $currentStmt->execute([':sku' => $sku, ':asset_key' => $assetKey]);
+        $current = $currentStmt->fetchColumn();
+    }
+    [$path, $pathError] = DigitalDelivery::assetPathForSave(Security::str($_POST['storage_path'] ?? ''), is_string($current) ? $current : null);
     $downloadName = basename(str_replace('\\', '/', trim((string)($_POST['download_name'] ?? ''))));
     $contentType = trim((string)($_POST['content_type'] ?? 'application/octet-stream'));
     $submittedLimit = max(0, min(10000, Security::int($_POST['download_limit'] ?? 5)));
@@ -691,7 +698,10 @@ function handleDigitalAssetSave(): void {
         || !preg_match('/^[A-Za-z0-9._-]{1,80}$/', $assetKey) || $invalidPath
         || $downloadName === '' || !preg_match('#^[a-z0-9.+-]+/[a-z0-9.+-]+$#i', $contentType)
         || !CatalogScope::ownsSku($sku)) {
-        setFlash('err', I18n::t('admin.digital.invalid'));
+        $message = $pathError !== null && $pathError !== 'admin.digital.invalid' && CatalogScope::ownsSku($sku)
+            ? I18n::format($pathError, ['dir' => StoreContext::current()->catalogId() . '/'])
+            : I18n::t('admin.digital.invalid');
+        setFlash('err', $message);
         header('Location: admin.php?p=digital_assets');
         exit;
     }

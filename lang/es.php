@@ -934,6 +934,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.digital.limit_days' => 'Límite / días',
     'admin.digital.entitlements' => 'Derechos',
     'admin.digital.invalid' => 'Datos del archivo digital no válidos, o el SKU no es un producto de este catálogo.',
+    'admin.digital.file_missing' => 'El archivo no existe en el directorio de descargas de esta tienda ({dir} dentro de digital_assets_base_dir). Súbalo allí primero.',
+    'admin.digital.legacy_location' => 'El archivo sigue en su ubicación antigua directamente en digital_assets_base_dir. Muévalo al directorio de esta tienda {dir} y guarde de nuevo.',
     'admin.digital.saved' => 'Archivo digital guardado.',
     'admin.digital.save_failed' => 'No se pudo guardar el archivo digital.',
     'admin.digital.activated' => 'Archivo digital activado.',

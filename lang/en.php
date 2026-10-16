@@ -806,6 +806,8 @@ return [
     'admin.digital.limit_days' => 'Limit / days',
     'admin.digital.entitlements' => 'Entitlements',
     'admin.digital.invalid' => 'Invalid digital file data, or the SKU is not a product of this catalog.',
+    'admin.digital.file_missing' => 'The file does not exist in this store\'s download directory ({dir} under digital_assets_base_dir). Upload it there first.',
+    'admin.digital.legacy_location' => 'The file is still at its old location directly under digital_assets_base_dir. Move it into this store\'s directory {dir} and save again.',
     'admin.digital.saved' => 'Digital file saved.',
     'admin.digital.save_failed' => 'The digital file could not be saved.',
     'admin.digital.activated' => 'Digital file activated.',

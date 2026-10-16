@@ -425,13 +425,14 @@ function handleDigitalFulfill(array $payload, array $job): void {
     // delivered and grant() has nothing left (a crashed holder's claim lapses after its lease).
     if ($claim === null) throw new RuntimeException("Digital fulfilment of order #{$orderId} is already in progress");
     try {
-        fulfilDigitalOrder($orderId);
+        fulfilDigitalOrder($orderId, $claim);
     } finally {
         DigitalDelivery::releaseFulfilment($claim);
     }
 }
 
-function fulfilDigitalOrder(int $orderId): void {
+/** $claim (the fulfilment claim, renewed in place) is renewed right before the mail, so its lease covers the delivery. */
+function fulfilDigitalOrder(int $orderId, ?string &$claim = null): void {
     $links = DigitalDelivery::grant($orderId);
     if (!$links) return;
     $order = Orders::byId($orderId);
@@ -445,6 +446,14 @@ function fulfilDigitalOrder(int $orderId): void {
         return ['label' => $link['label'], 'url' => $link['url'], 'validity' => $validity];
     }, $links);
 
+    // Fresh leases for the slow mail: the job's, and the per-order claim (lost = another worker took the order
+    // over and rotates these links; it delivers its own, so this run must not mail links about to be revoked).
+    JobQueue::heartbeat();
+    if ($claim !== null) {
+        $renewed = DigitalDelivery::renewFulfilment($claim);
+        if ($renewed === null) throw new RuntimeException("Digital fulfilment claim of order #{$orderId} was lost to another worker");
+        $claim = $renewed;
+    }
     $result = MailService::send('digital_delivery', (string)$order['customer_email'], (string)($order['locale'] ?? ''), [
         'order_number' => $order['order_number'],
         'customer_name' => $order['customer_name'],

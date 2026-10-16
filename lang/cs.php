@@ -833,6 +833,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.digital.limit_days' => 'Limit / dny',
     'admin.digital.entitlements' => 'Oprávnění',
     'admin.digital.invalid' => 'Neplatné údaje digitálního souboru nebo SKU nepatří produktu tohoto katalogu.',
+    'admin.digital.file_missing' => 'Soubor neexistuje v adresáři stahování tohoto obchodu ({dir} v digital_assets_base_dir). Nejprve ho tam nahrajte.',
+    'admin.digital.legacy_location' => 'Soubor je ještě na starém místě přímo v digital_assets_base_dir. Přesuňte ho do adresáře tohoto obchodu {dir} a uložte znovu.',
     'admin.digital.saved' => 'Digitální soubor byl uložen.',
     'admin.digital.save_failed' => 'Digitální soubor se nepodařilo uložit.',
     'admin.digital.activated' => 'Digitální soubor byl aktivován.',

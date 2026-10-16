@@ -811,6 +811,8 @@ return [
     'admin.digital.limit_days' => 'Limit / dni',
     'admin.digital.entitlements' => 'Oprávnenia',
     'admin.digital.invalid' => 'Neplatné údaje digitálneho súboru alebo SKU nepatrí produktu tohto katalógu.',
+    'admin.digital.file_missing' => 'Súbor neexistuje v adresári stiahnutí tohto obchodu ({dir} v digital_assets_base_dir). Najprv ho tam nahrajte.',
+    'admin.digital.legacy_location' => 'Súbor je ešte na starom mieste priamo v digital_assets_base_dir. Presuňte ho do adresára tohto obchodu {dir} a uložte znova.',
     'admin.digital.saved' => 'Digitálny súbor bol uložený.',
     'admin.digital.save_failed' => 'Digitálny súbor sa nepodarilo uložiť.',
     'admin.digital.activated' => 'Digitálny súbor bol aktivovaný.',

@@ -149,6 +149,20 @@ $newProduct = static fn(int $categoryId): array => ['sku'=>"A057N-{$own}", 'name
     'summary'=>'', 'description'=>'', 'images'=>'', 'weight_g'=>'0', 'tags'=>''];
 $asset = ['asset_key'=>'default', 'label'=>'HACKED-LABEL', 'storage_path'=>'a057/hacked.pdf', 'download_name'=>'hacked.pdf', 'content_type'=>'application/pdf', 'download_limit'=>'5', 'expiry_days'=>'7', 'active'=>'1'];
 $shared = $idOf('attribute_definitions', 'slug', 'a057-shared');
+if ($action === 'digital_save_own') {
+    // An asset is saved only when its file exists in the store's own download directory.
+    $assetDir = sys_get_temp_dir() . '/a057-digital-' . getmypid();
+    $assetFile = $assetDir . '/' . StoreContext::current()->catalogId() . '/a057/hacked.pdf';
+    @mkdir(dirname($assetFile), 0700, true);
+    file_put_contents($assetFile, 'x');
+    DigitalDelivery::setConfigForTesting(['digital_assets_base_dir' => $assetDir]);
+    register_shutdown_function(static function() use ($assetDir, $assetFile): void {
+        @unlink($assetFile);
+        @rmdir(dirname($assetFile));
+        @rmdir(dirname($assetFile, 2));
+        @rmdir($assetDir);
+    });
+}
 match ($action) {
     'dashboard' => pageDashboard(),
     'audit' => pageAudit(),

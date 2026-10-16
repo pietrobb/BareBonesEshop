@@ -833,6 +833,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.digital.limit_days' => 'Limit / Tage',
     'admin.digital.entitlements' => 'Berechtigungen',
     'admin.digital.invalid' => 'Ungültige Daten der digitalen Datei oder die SKU gehört zu keinem Produkt dieses Katalogs.',
+    'admin.digital.file_missing' => 'Die Datei existiert nicht im Download-Verzeichnis dieses Shops ({dir} unter digital_assets_base_dir). Laden Sie sie zuerst dort hoch.',
+    'admin.digital.legacy_location' => 'Die Datei liegt noch am alten Ort direkt unter digital_assets_base_dir. Verschieben Sie sie in das Verzeichnis dieses Shops {dir} und speichern Sie erneut.',
     'admin.digital.saved' => 'Digitale Datei gespeichert.',
     'admin.digital.save_failed' => 'Die digitale Datei konnte nicht gespeichert werden.',
     'admin.digital.activated' => 'Digitale Datei aktiviert.',

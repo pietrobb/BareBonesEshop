@@ -76,22 +76,68 @@ class DigitalDelivery {
         return $links;
     }
 
-    /** Lease of a fulfilment claim: longer than grant() + the delivery mail, short enough to recover a crash. */
-    public const FULFIL_CLAIM_SECONDS = 120;
+    /**
+     * Lease of a fulfilment claim: longer than grant() plus a slow delivery mail (SMTP/API timeouts), short enough to
+     * recover a crashed worker. The worker also renews the claim right before mailing (renewFulfilment()).
+     */
+    public const FULFIL_CLAIM_SECONDS = 600;
+    /** claimed_at values from this value up are claim tokens (microseconds + random), below it Unix seconds. */
+    private const TOKEN_FLOOR = 100000000000;
 
     /**
      * Claim the fulfilment of one order (grant + delivery mail) so two workers never run it at
      * the same time: grant() rotates undelivered tokens, so a concurrent run would revoke the links
-     * the other one is mailing. Returns the claim key, or null while another worker holds it.
+     * the other one is mailing. Returns the claim ("<key>#<token>"), or null while another worker holds it.
+     * The token (processed_events.claimed_at: microseconds plus a random part) is unique per claim, so a worker
+     * whose lease ran out can never renew or release the claim another worker has taken over in the same second.
      */
     public static function claimFulfilment(int $orderId): ?string {
         $key = 'digital_fulfill_' . $orderId;
-        return Idempotency::claim($key, self::FULFIL_CLAIM_SECONDS) === 'claimed' ? $key : null;
+        $db = Db::get();
+        if (!Db::hasColumn('processed_events', 'claimed_at', $db) || !Db::hasColumn('processed_events', 'state', $db)) {
+            return Idempotency::claim($key, self::FULFIL_CLAIM_SECONDS) === 'claimed' ? $key : null;
+        }
+        $now = time();
+        $token = self::claimToken($now);
+        try {
+            $db->prepare("INSERT INTO processed_events (event_id, state, claimed_at) VALUES (:id, 'processing', :token)")
+               ->execute([':id' => $key, ':token' => $token]);
+            return $key . '#' . $token;
+        } catch (\PDOException $e) {
+            if (!in_array($e->getCode(), ['23000', '23505'], true)) throw $e;
+        }
+        // Take over a lapsed claim (claimed_at in seconds was written by Idempotency::claim() before this format).
+        $cutoff = $now - self::FULFIL_CLAIM_SECONDS;
+        $takeover = $db->prepare("UPDATE processed_events SET claimed_at = :token
+            WHERE event_id = :id AND state = 'processing'
+              AND (claimed_at IS NULL OR claimed_at < :cutoff_s OR (claimed_at >= :floor AND claimed_at < :cutoff_token))");
+        $takeover->execute([':token' => $token, ':id' => $key, ':cutoff_s' => min($cutoff, self::TOKEN_FLOOR), ':floor' => self::TOKEN_FLOOR, ':cutoff_token' => $cutoff * 1000000]);
+        return $takeover->rowCount() === 1 ? $key . '#' . $token : null;
     }
 
-    /** Release a fulfilment claim (also after a failure, so the job's retry can claim it again). */
+    /**
+     * Renew a fulfilment claim for another full lease (call before the slow delivery mail). Returns the renewed claim,
+     * or null when it was lost (lapsed and taken over by another worker): then the caller must not mail its links.
+     */
+    public static function renewFulfilment(string $claim): ?string {
+        [$key, $token] = array_pad(explode('#', $claim, 2), 2, '');
+        if ($token === '') return $claim; // legacy claim (migration pending): nothing to renew
+        $next = self::claimToken(time());
+        $stmt = Db::get()->prepare("UPDATE processed_events SET claimed_at = :next WHERE event_id = :id AND state = 'processing' AND claimed_at = :token");
+        $stmt->execute([':next' => $next, ':id' => $key, ':token' => (int)$token]);
+        return $stmt->rowCount() === 1 ? $key . '#' . $next : null;
+    }
+
+    /** Release a fulfilment claim (also after a failure, so the job's retry can claim it again); never another worker's. */
     public static function releaseFulfilment(string $claim): void {
-        Idempotency::unmark($claim);
+        [$key, $token] = array_pad(explode('#', $claim, 2), 2, '');
+        if ($token === '') { Idempotency::unmark($key); return; }
+        Db::get()->prepare("DELETE FROM processed_events WHERE event_id = :id AND state = 'processing' AND claimed_at = :token")
+            ->execute([':id' => $key, ':token' => (int)$token]);
+    }
+
+    private static function claimToken(int $now): int {
+        return $now * 1000000 + random_int(0, 999999);
     }
 
     public static function markDelivered(array $ids): void {
@@ -141,9 +187,12 @@ class DigitalDelivery {
         if (in_array($row['order_status'] ?? '', ['cancelled', 'refunded'], true)) return null;
         if ($row['expires_at'] !== null && time() > (int)$row['expires_at']) return null;
         // A spent limit still lets the last counted download resume inside its window (see authorizeTransfer()).
-        if ($row['download_limit'] !== null && (int)$row['download_count'] >= (int)$row['download_limit'] && !self::inResumeWindow($row)) return null;
+        if ($row['download_limit'] !== null && (int)$row['download_count'] >= (int)$row['download_limit'] && !self::canResume($row)) return null;
         return $row;
     }
+
+    /** Free resumes of one counted download (inside its window, never past the bytes it already served). */
+    public const MAX_FREE_RESUMES = 5;
 
     /** Seconds after a counted download in which Range requests resume it without counting again. */
     public static function resumeWindowSeconds(): int {
@@ -151,14 +200,64 @@ class DigitalDelivery {
     }
 
     /**
-     * Whether this transfer may start. A download is counted once: a request from the first byte
-     * (no Range, or a range starting at 0) consumes one download; a request resuming later in the
-     * file is free while the last counted download is younger than the resume window, and counts as
-     * a new download otherwise. HEAD never counts.
+     * Whether this transfer may start (see beginTransfer()).
      */
     public static function authorizeTransfer(array $entitlement, int $rangeStart, ?int $now = null): bool {
-        if ($rangeStart > 0 && self::inResumeWindow($entitlement, $now)) return true;
-        return self::consume((int)$entitlement['id'], $now);
+        return self::beginTransfer($entitlement, $rangeStart, $now) !== null;
+    }
+
+    /**
+     * Start a transfer: the time of the counted download it belongs to (pass it to recordProgress()), or null when it
+     * is refused. A download is counted once: a request from the first byte (no Range, or a range starting at 0)
+     * consumes one download. A request resuming later in the file is free only when it continues the last counted
+     * download: inside the resume window, starting no later than the bytes that download already served
+     * (last_download_offset, see recordProgress()), at most MAX_FREE_RESUMES times. Any other request counts as a new
+     * download, so once the limit is spent it is refused ("Range: bytes=1-" is no free copy). HEAD never counts.
+     */
+    public static function beginTransfer(array $entitlement, int $rangeStart, ?int $now = null): ?int {
+        $now ??= time();
+        if ($rangeStart > 0 && self::claimResume($entitlement, $rangeStart, $now)) return (int)$entitlement['last_download_at'];
+        return self::consume((int)$entitlement['id'], $now) ? $now : null;
+    }
+
+    /**
+     * The counted download started at $countedAt has served the file up to byte $offset (exclusive): later free
+     * resumes may start up to there. Only ever grows, and only while that download is still the last counted one.
+     */
+    public static function recordProgress(int $entitlementId, int $countedAt, int $offset): void {
+        if ($offset <= 0 || !self::resumeTracked()) return;
+        Db::get()->prepare("UPDATE digital_entitlements
+            SET last_download_offset = CASE WHEN last_download_offset IS NULL OR last_download_offset < :grow THEN :offset ELSE last_download_offset END
+            WHERE id = :id AND last_download_at = :counted_at")
+            ->execute([':grow' => $offset, ':offset' => $offset, ':id' => $entitlementId, ':counted_at' => $countedAt]);
+    }
+
+    /** Take one free resume of the last counted download (atomic: the limit of free resumes holds under concurrency). */
+    private static function claimResume(array $entitlement, int $rangeStart, int $now): bool {
+        if (!self::canResume($entitlement, $now) || $rangeStart > (int)$entitlement['last_download_offset']) return false;
+        $stmt = Db::get()->prepare("UPDATE digital_entitlements
+            SET resume_count = resume_count + 1, updated_at = " . Db::now() . "
+            WHERE id = :id AND status = 'active' AND last_download_at = :counted_at AND last_download_at >= :since
+              AND resume_count < :max_resumes AND last_download_offset >= :start
+              AND (expires_at IS NULL OR expires_at >= :now)
+              AND EXISTS (
+                  SELECT 1 FROM orders o
+                  WHERE o.id = digital_entitlements.order_id
+                    AND o.payment_status = 'paid'
+                    AND o.status NOT IN ('cancelled', 'refunded')
+              )");
+        $stmt->execute([
+            ':id' => (int)$entitlement['id'], ':counted_at' => (int)$entitlement['last_download_at'], ':since' => $now - self::resumeWindowSeconds(),
+            ':max_resumes' => self::MAX_FREE_RESUMES, ':start' => $rangeStart, ':now' => $now,
+        ]);
+        return $stmt->rowCount() === 1;
+    }
+
+    /** Resume tracking needs the columns of migrations 20261016142000 and 20261016161000 (before them every transfer counts). */
+    private static function resumeTracked(): bool {
+        return Db::hasColumn('digital_entitlements', 'last_download_at')
+            && Db::hasColumn('digital_entitlements', 'last_download_offset')
+            && Db::hasColumn('digital_entitlements', 'resume_count');
     }
 
     /**
@@ -182,14 +281,20 @@ class DigitalDelivery {
         return [$start, $end];
     }
 
-    private static function inResumeWindow(array $entitlement, ?int $now = null): bool {
+    /** The last counted download may still be resumed for free: inside its window, with bytes served and resumes left. */
+    private static function canResume(array $entitlement, ?int $now = null): bool {
         $last = $entitlement['last_download_at'] ?? null;
-        return $last !== null && (int)$last >= ($now ?? time()) - self::resumeWindowSeconds();
+        return $last !== null && (int)$last >= ($now ?? time()) - self::resumeWindowSeconds()
+            && (int)($entitlement['last_download_offset'] ?? 0) > 0
+            && array_key_exists('resume_count', $entitlement) && (int)$entitlement['resume_count'] < self::MAX_FREE_RESUMES;
     }
 
     public static function consume(int $entitlementId, ?int $now = null): bool {
+        // Before the resume migrations ran the columns are missing: count without resume tracking instead of failing.
+        $tracking = !Db::hasColumn('digital_entitlements', 'last_download_at') ? ''
+            : (self::resumeTracked() ? 'last_download_at = :counted_at, last_download_offset = 0, resume_count = 0, ' : 'last_download_at = :counted_at, ');
         $stmt = Db::get()->prepare("UPDATE digital_entitlements
-            SET download_count = download_count + 1, last_download_at = :counted_at, updated_at = " . Db::now() . "
+            SET download_count = download_count + 1, {$tracking}updated_at = " . Db::now() . "
             WHERE id = :id AND status = 'active'
               AND (expires_at IS NULL OR expires_at >= :now)
               AND (download_limit IS NULL OR download_count < download_limit)
@@ -200,7 +305,9 @@ class DigitalDelivery {
                     AND o.status NOT IN ('cancelled', 'refunded')
               )");
         $now ??= time();
-        $stmt->execute([':id' => $entitlementId, ':now' => $now, ':counted_at' => $now]);
+        $params = [':id' => $entitlementId, ':now' => $now];
+        if ($tracking !== '') $params[':counted_at'] = $now;
+        $stmt->execute($params);
         return $stmt->rowCount() === 1;
     }
 
@@ -215,7 +322,48 @@ class DigitalDelivery {
         $real = realpath($baseReal . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative));
         if ($real === false || !is_file($real) || !is_readable($real)) return null;
         if ($real !== $baseReal && !str_starts_with($real, $baseReal . DIRECTORY_SEPARATOR)) return null;
+        // A "<catalog_id>/..." row must stay inside that store's directory: a symlink there must not reach another
+        // store's files (or other files below the base). Legacy base-relative rows only need to stay below the base.
+        $segment = explode('/', $relative, 2)[0];
+        if (str_contains($relative, '/') && in_array($segment, self::catalogIds(), true)) {
+            $storeDir = realpath($baseReal . DIRECTORY_SEPARATOR . $segment);
+            if ($storeDir === false || !str_starts_with($real, $storeDir . DIRECTORY_SEPARATOR)) return null;
+        }
         return $real;
+    }
+
+    /**
+     * storage_path to save for the path an admin entered for an asset of the active catalog, or [null, lang key] with
+     * the reason it is refused. The file must exist in the store directory <base>/<catalog_id>/. An asset saved before
+     * per-store directories keeps its base-relative path when it is re-saved unchanged and its file still exists (it is
+     * never rewritten to a path where no file is); a path whose file is only found at the old base-relative location
+     * is refused with a message to move the file into the store directory.
+     * @return array{0:?string,1:?string}
+     */
+    public static function assetPathForSave(string $input, ?string $currentPath, ?string $catalogId = null): array {
+        $catalogId ??= StoreContext::current()->catalogId();
+        $input = str_replace('\\', '/', trim($input));
+        $base = rtrim((string)(self::config()['digital_assets_base_dir'] ?? ''), '/\\');
+        if ($currentPath !== null && $input === $currentPath && !str_starts_with($currentPath, $catalogId . '/')) {
+            return self::resolvedPath(['storage_path' => $currentPath]) !== null ? [$currentPath, null] : [null, 'admin.digital.file_missing'];
+        }
+        $stored = self::storePath($input, $catalogId);
+        if ($stored === null) return [null, 'admin.digital.invalid'];
+        $storeDir = $base === '' ? false : realpath($base . DIRECTORY_SEPARATOR . $catalogId);
+        $file = $storeDir === false ? false : realpath($base . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $stored));
+        if ($file !== false && is_file($file) && str_starts_with($file, $storeDir . DIRECTORY_SEPARATOR)) return [$stored, null];
+        if (!str_starts_with($input, $catalogId . '/') && self::resolvedPath(['storage_path' => $input]) !== null) return [null, 'admin.digital.legacy_location'];
+        return [null, 'admin.digital.file_missing'];
+    }
+
+    /** Catalog ids (and store codes) of the configured stores: the store directories below digital_assets_base_dir. */
+    private static function catalogIds(): array {
+        $ids = [StoreContext::current()->catalogId()];
+        foreach ((array)(Bootstrap::stores()['stores'] ?? []) as $code => $store) {
+            $ids[] = (string)$code;
+            if (is_array($store) && isset($store['catalog_scope'])) $ids[] = (string)$store['catalog_scope'];
+        }
+        return array_values(array_unique($ids));
     }
 
     /**

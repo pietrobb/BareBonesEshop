@@ -364,11 +364,25 @@ $pdo->exec('PRAGMA foreign_keys = ON');
 $aigEntId = (int)$pdo->lastInsertId();
 $aigEnt = static fn(): array => $pdo->query("SELECT * FROM digital_entitlements WHERE id = {$aigEntId}")->fetch(PDO::FETCH_ASSOC) ?: [];
 $aigNow = time();
-assert_true($aigPaidOrder > 0 && DigitalDelivery::authorizeTransfer($aigEnt(), 0, $aigNow), '18 download: the first transfer from byte 0 counts the download');
+$aigCounted = DigitalDelivery::beginTransfer($aigEnt(), 0, $aigNow);
+assert_true($aigPaidOrder > 0 && $aigCounted === $aigNow, '18 download: the first transfer from byte 0 counts the download');
 assert_equals(1, (int)$aigEnt()['download_count'], '18 download: one download counted');
-assert_true(DigitalDelivery::authorizeTransfer($aigEnt(), 4096, $aigNow + 60) && (int)$aigEnt()['download_count'] === 1, '18 download: a resumed range inside the window is not counted again (limit 1 already used)');
+assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 1, $aigNow + 30), '18 download: "Range: bytes=1-" before the counted download served anything is refused once the limit is spent');
+DigitalDelivery::recordProgress($aigEntId, $aigCounted, 8192);
+DigitalDelivery::recordProgress($aigEntId, $aigCounted, 4000);
+assert_equals(8192, (int)$aigEnt()['last_download_offset'], '18 download: the bytes served by the counted download are recorded (only ever growing)');
+assert_true(DigitalDelivery::authorizeTransfer($aigEnt(), 8192, $aigNow + 60) && (int)$aigEnt()['download_count'] === 1, '18 download: a legit resume at the bytes already served is not counted again (limit 1 already used)');
+assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 8193, $aigNow + 60), '18 download: a range starting past the bytes the counted download served is refused (a new download, limit spent)');
 assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 0, $aigNow + 60), '18 download: a new download from byte 0 is refused once the limit is used');
+for ($aigResume = 2; $aigResume <= DigitalDelivery::MAX_FREE_RESUMES; $aigResume++) DigitalDelivery::authorizeTransfer($aigEnt(), 4096, $aigNow + 60);
+assert_equals(DigitalDelivery::MAX_FREE_RESUMES, (int)$aigEnt()['resume_count'], '18 download: each free resume is counted');
+assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 4096, $aigNow + 60), '18 download: free resumes are capped');
+$pdo->exec("UPDATE digital_entitlements SET resume_count = 0 WHERE id = {$aigEntId}");
 assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 4096, $aigNow + 3600), '18 download: after the resume window a resume counts as a new download (and the limit stops it)');
+$pdo->exec("UPDATE digital_entitlements SET download_limit = 3 WHERE id = {$aigEntId}");
+$aigRecount = DigitalDelivery::beginTransfer($aigEnt(), 1, $aigNow + 3600);
+assert_true($aigRecount === $aigNow + 3600 && (int)$aigEnt()['download_count'] === 2 && (int)$aigEnt()['last_download_offset'] === 0 && (int)$aigEnt()['resume_count'] === 0,
+    '18 download: with downloads left, a range that is no resume counts a new download and starts its own resume bound');
 $pdo->exec("DELETE FROM digital_entitlements WHERE id = {$aigEntId}");
 $aigDownload = (string)file_get_contents(TEST_CLI_DIR . '/../download.php');
 assert_true(str_contains($aigDownload, 'http_response_code(206)') && str_contains($aigDownload, "header('Accept-Ranges: bytes')") && str_contains($aigDownload, 'http_response_code(416)'),
@@ -380,6 +394,50 @@ $aigClaim = DigitalDelivery::claimFulfilment(770001);
 assert_true($aigClaim !== null, '18 fulfil: released after the run, so a later fulfilment can claim it');
 DigitalDelivery::releaseFulfilment((string)$aigClaim);
 assert_true((bool)preg_match('/function handleDigitalFulfill\(.*?DigitalDelivery::claimFulfilment\(\$orderId\).*?finally \{\s*DigitalDelivery::releaseFulfilment\(\$claim\);/s', $aigWorker), '18 worker: digital_fulfill runs under the per-order claim');
+$aigClaim = (string)DigitalDelivery::claimFulfilment(770002);
+$aigRenewed = DigitalDelivery::renewFulfilment($aigClaim);
+assert_true($aigRenewed !== null && $aigRenewed !== $aigClaim && DigitalDelivery::renewFulfilment($aigClaim) === null, '18 fulfil: renewing gives a fresh claim token; the old token can no longer renew');
+DigitalDelivery::releaseFulfilment($aigClaim);
+assert_true(DigitalDelivery::claimFulfilment(770002) === null, '18 fulfil: a stale claim token cannot release the current claim');
+$pdo->prepare("UPDATE processed_events SET claimed_at = ? WHERE event_id = 'digital_fulfill_770002'")->execute([(time() - DigitalDelivery::FULFIL_CLAIM_SECONDS - 5) * 1000000 + 7]);
+$aigTakeover = DigitalDelivery::claimFulfilment(770002);
+assert_true($aigTakeover !== null && DigitalDelivery::renewFulfilment((string)$aigRenewed) === null, '18 fulfil: a lapsed claim is taken over in the same second without the old holder renewing it');
+DigitalDelivery::releaseFulfilment((string)$aigRenewed);
+assert_true(DigitalDelivery::claimFulfilment(770002) === null, '18 fulfil: the old holder cannot release the new holder\'s claim');
+DigitalDelivery::releaseFulfilment((string)$aigTakeover);
+assert_true(DigitalDelivery::claimFulfilment(770002) !== null, '18 fulfil: the holder releases its own claim');
+$pdo->exec("DELETE FROM processed_events WHERE event_id = 'digital_fulfill_770002'");
+assert_true((bool)preg_match('/function fulfilDigitalOrder\(int \$orderId, \?string &\$claim = null\).*?DigitalDelivery::renewFulfilment\(\$claim\).*?MailService::send\(\'digital_delivery\'/s', $aigWorker)
+    && DigitalDelivery::FULFIL_CLAIM_SECONDS >= 300, '18 worker: the claim is renewed right before the delivery mail and its lease outlasts a slow mail');
+
+// Review fix 5: before the new migrations ran, downloads and invoice numbering degrade instead of failing.
+$aigLegacy = new PDO('sqlite::memory:');
+$aigLegacy->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$aigLegacy->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+$aigLegacy->exec("CREATE TABLE orders (id INTEGER PRIMARY KEY, status TEXT, payment_status TEXT)");
+$aigLegacy->exec("CREATE TABLE digital_entitlements (id INTEGER PRIMARY KEY, order_id INTEGER, status TEXT, download_count INTEGER NOT NULL DEFAULT 0,
+    download_limit INTEGER, expires_at INTEGER, updated_at TEXT)");
+$aigLegacy->exec("INSERT INTO orders VALUES (1, 'paid', 'paid')");
+$aigLegacy->exec("INSERT INTO digital_entitlements (id, order_id, status, download_limit) VALUES (1, 1, 'active', 2)");
+$aigLegacy->exec("CREATE TABLE invoice_counters (year INTEGER NOT NULL, prefix TEXT NOT NULL DEFAULT '', last_number INTEGER NOT NULL DEFAULT 0, type TEXT NOT NULL DEFAULT 'invoice', PRIMARY KEY (year, prefix))");
+$aigLegacy->exec("CREATE TABLE invoices (id INTEGER PRIMARY KEY, store_id TEXT, number TEXT, type TEXT)");
+$aigAllocate = new ReflectionMethod(InvoiceService::class, 'allocateNumber');
+$aigSuiteDb = Db::get();
+$aigSuiteDriver = Db::driver();
+Db::init($aigLegacy, 'sqlite');
+try {
+    $aigLegacyEnt = $aigLegacy->query('SELECT * FROM digital_entitlements WHERE id = 1')->fetch();
+    $aigLegacyResults = [DigitalDelivery::authorizeTransfer($aigLegacyEnt, 0), DigitalDelivery::authorizeTransfer($aigLegacyEnt, 100), (int)$aigLegacy->query('SELECT download_count FROM digital_entitlements')->fetchColumn()];
+    $aigLegacyNumbers = [$aigAllocate->invoke(null, $aigLegacy, 'default', 'invoice', 2026, ''), $aigAllocate->invoke(null, $aigLegacy, 'default', 'invoice', 2026, '')];
+    $aigLegacy->exec("INSERT INTO invoices (store_id, number, type) VALUES ('default', '20260001', 'invoice'), ('pl', '20260002', 'invoice')");
+    (require TEST_CLI_DIR . '/../migrations/20261016140500_invoice_number_counters.php')->up($aigLegacy, true);
+    Db::forgetSchema($aigLegacy);
+    $aigLegacyNumbers[] = $aigAllocate->invoke(null, $aigLegacy, 'default', 'invoice', 2026, '');
+} finally {
+    Db::init($aigSuiteDb, $aigSuiteDriver);
+}
+assert_equals([true, true, 2], $aigLegacyResults, '5 migration window: downloads work (each transfer counted) before the resume columns exist');
+assert_equals(['20260001', '20260002', '20260003'], $aigLegacyNumbers, '5 migration window: invoices are numbered from the legacy counters, and the migration continues that sequence');
 
 // ── 7. Delayed jobs on the database queue (used for rate-limited mail) ───────────────────────────
 $aigDbQueue = new DatabaseQueue($pdo, 30);

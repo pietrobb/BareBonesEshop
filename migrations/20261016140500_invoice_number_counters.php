@@ -9,15 +9,18 @@
  * (a new table instead of a rebuild: no DROP of a live table, nothing to resume after a failed MySQL DDL step).
  *
  * Backfill of the shared rows (issued numbers can never be renumbered, so history keeps its interleaving):
- * - each (year, prefix) row keeps its last_number and gets exactly ONE owner, so the owner's next number is above
- *   every number ever issued under that prefix and year, and no number can be issued twice;
- * - the owner is the store that issued documents with that prefix and year — the default store first, else the
- *   store with the most documents — with the document type it issued most under that prefix;
- * - a row nobody issued from (invoices deleted) goes to the store whose configured prefix matches, else to the
- *   default store, so its numbers are not reused either;
- * - every other store starts fresh only under a prefix nobody issued from that year. A store that shared a prefix
- *   with the owner is refused by InvoiceService until it has its own invoice_prefix / credit_note_prefix (the
- *   default credit-note prefix is now "<invoice_prefix>CN-", which separates stores with distinct invoice prefixes).
+ * - each (year, prefix) row keeps its last_number and gets exactly ONE owner (seller, document type), so the owner's
+ *   next number is above every number ever issued under that prefix and year, and no number can be issued twice;
+ * - the owner is the seller that owns the prefix by configuration (InvoiceService::configuredSeries(): '' and 'CN-'
+ *   belong to the default store's seller), however many documents other stores issued under it. Stores without
+ *   their own legal block, and stores whose legal.seller names that seller, invoice as that seller
+ *   (InvoiceService::sellerCode()), so they keep numbering from the SAME counter;
+ * - a prefix no seller configures any more goes to the seller that issued documents under it (the default store's
+ *   seller first, else the one with the most documents, with the type it issued most), else to the default seller,
+ *   so its numbers are not reused either;
+ * - every other seller starts fresh only under a prefix nobody issued from that year. A seller with its own legal
+ *   block that shared a prefix with the owner is refused by InvoiceService (and reported by cli/setup.php doctor)
+ *   until it has its own invoice_prefix / credit_note_prefix (the default credit-note prefix is "<invoice_prefix>CN-").
  * Idempotent: rows already in invoice_number_counters are kept.
  */
 return new class {
@@ -49,18 +52,21 @@ return new class {
         }
     }
 
-    /** [store_id, type] owning a legacy (year, prefix) sequence. */
+    /** [seller store_id, type] owning a legacy (year, prefix) sequence. */
     private function owner(PDO $db, int $year, string $prefix): array {
-        $default = $this->defaultStore();
+        $root = $this->storesRoot();
+        $configured = class_exists('InvoiceService') ? InvoiceService::configuredSeries($root) : [];
+        if (isset($configured[$prefix])) return $configured[$prefix];
+        $default = $this->sellerOf($root, (string)($root['default_store'] ?? 'default'));
         $stmt = $db->prepare("SELECT store_id, type, number FROM invoices WHERE number LIKE :pattern ESCAPE '!'");
         $stmt->execute([':pattern' => strtr($prefix, ['!' => '!!', '%' => '!%', '_' => '!_']) . $year . '%']);
         $counts = [];
         $pattern = '/^' . preg_quote($prefix, '/') . $year . '\d{4,}$/';
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $invoice) {
             if (!preg_match($pattern, (string)$invoice['number'])) continue;
-            $storeId = (string)($invoice['store_id'] ?? '') ?: $default;
+            $seller = $this->sellerOf($root, (string)($invoice['store_id'] ?? '') ?: $default);
             $docType = (string)($invoice['type'] ?? '') ?: 'invoice';
-            $counts[$storeId][$docType] = ($counts[$storeId][$docType] ?? 0) + 1;
+            $counts[$seller][$docType] = ($counts[$seller][$docType] ?? 0) + 1;
         }
         if ($counts !== []) {
             $ownerStore = $default;
@@ -73,30 +79,17 @@ return new class {
             arsort($types);
             return [$ownerStore, (string)array_key_first($types)];
         }
-        foreach ($this->configuredPrefixes($default) as [$storeId, $docType, $configured]) {
-            if ($configured === $prefix) return [$storeId, $docType];
-        }
         return [$default, $prefix === 'CN-' ? 'credit_note' : 'invoice'];
     }
 
-    private function defaultStore(): string {
-        $root = class_exists('Bootstrap') ? Bootstrap::stores() : [];
-        return (string)($root['default_store'] ?? 'default');
+    private function storesRoot(): array {
+        if (class_exists('InvoiceService')) return InvoiceService::storesRoot();
+        return class_exists('Bootstrap') ? Bootstrap::stores() : [];
     }
 
-    /** [store_id, type, prefix] of every configured store, the default store first (as InvoiceService::numberPrefix() derives them). */
-    private function configuredPrefixes(string $default): array {
-        $root = class_exists('Bootstrap') ? Bootstrap::stores() : [];
-        $stores = is_array($root['stores'] ?? null) ? $root['stores'] : [];
-        uksort($stores, static fn($a, $b): int => [(string)$a !== $default, (string)$a] <=> [(string)$b !== $default, (string)$b]);
-        $out = [];
-        foreach ($stores as $storeId => $store) {
-            $legal = is_array($store['legal'] ?? null) ? $store['legal'] : [];
-            $invoice = (string)($legal['invoice_prefix'] ?? '');
-            $out[] = [(string)$storeId, 'invoice', $invoice];
-            $out[] = [(string)$storeId, 'credit_note', (string)($legal['credit_note_prefix'] ?? $invoice . 'CN-')];
-        }
-        return $out;
+    /** The seller a store's documents number under (InvoiceService::sellerCode(); the store itself when unknown). */
+    private function sellerOf(array $root, string $storeId): string {
+        return (class_exists('InvoiceService') ? InvoiceService::sellerCode($root, $storeId) : null) ?? $storeId;
     }
 
     private function tableExists(PDO $db, bool $isSqlite, string $table): bool {
