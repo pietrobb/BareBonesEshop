@@ -66,9 +66,6 @@ if ($opts['apply'] && $opts['skip_backup']) {
         if (!BackupService::isEnabled()) {
             throw new RuntimeException('backups are disabled in config/backup.json; take an external backup and re-run with --skip-backup');
         }
-        if (BackupService::livePath() === null) {
-            throw new RuntimeException('automatic snapshots need a file-based SQLite database; take an external dump (e.g. mysqldump) and re-run with --skip-backup');
-        }
         $say("[backup] taking pre-retention snapshot...");
         $info = BackupService::create(['label' => 'pre-retention-gc', 'trigger' => 'auto']);
         $say("[backup] OK " . ($info['filename'] ?? '?') . " sha=" . substr($info['sha256'] ?? '', 0, 12));

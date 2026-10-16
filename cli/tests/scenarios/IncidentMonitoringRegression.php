@@ -161,7 +161,11 @@ StockAlerts::setConfigForTesting($cfg);
     assert_equals(0, proc_close($imWorker), 'Incident: real isolated worker handles injected jobs without crashing');
     assert_true((int)$imDb->query("SELECT COUNT(*) FROM operational_incidents WHERE code = 'worker.job_failed'")->fetchColumn() > 0, 'Incident: real worker fault recorded');
     assert_true((int)$imDb->query("SELECT COUNT(*) FROM operational_incidents WHERE code = 'digital.fulfillment_failed'")->fetchColumn() > 0, 'Incident: real digital fulfillment fault recorded');
-    $imRetryJobs = array_filter(JobQueue::pull(100), static fn(array $job): bool => ($job['type'] ?? '') === 'fault_fixture_unknown');
+    // The retry is in backoff, which pull() no longer hands out (CR-M10): read the pending queue.
+    $imRetryJobs = array_filter(
+        array_map(static fn(string $file): ?array => json_decode((string)file_get_contents($file), true), glob($imRoot . '/worker/jobs/pending/*.json') ?: []),
+        static fn(?array $job): bool => ($job['type'] ?? '') === 'fault_fixture_unknown' && !JobQueue::isReady($job)
+    );
     assert_equals(1, count($imRetryJobs), 'Incident: real worker fault remains queued for retry');
     assert_equals('worker.job_failed', array_values($imRetryJobs)[0]['last_error'], 'Incident: worker retry error is stable and contains no raw exception');
     assert_equals('incident-regression-correlation', array_values($imRetryJobs)[0]['correlation_id'], 'Incident: worker preserves correlation across retry');

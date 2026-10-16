@@ -126,6 +126,51 @@ try {
     assert_true($a071Denied($r), $a071Label('A07.1 grants: rma.manage without orders.refund cannot refund an RMA', $r));
     $r = $a071Run('direct', 'manager', 'rma', 'handleRmaStatus', ['__grants' => ['rma.manage'], 'rma_id' => '999999', 'status' => 'approved']);
     assert_true($a071Handled($r), $a071Label('A07.1 grants: rma.manage still handles non-refund RMA steps', $r));
+
+    // CR-M5: the admin credit note covers only units not already exchanged or credited; a second credit note on the
+    // same RMA (an exchange fell through) must not collide with the first one's idempotency key; and no credit note
+    // may exceed what the order can still refund.
+    Cart::clear();
+    Cart::add(9711, null, 4);
+    $_SERVER['REQUEST_METHOD'] = 'POST';
+    $_SESSION['csrf_token'] = 'crm5-checkout';
+    $_POST = ['csrf_token' => 'crm5-checkout', 'name' => 'CRM5 Buyer', 'email' => 'crm5@example.com', 'country' => 'SK',
+        'street' => 'Credit 1', 'city' => 'Bratislava', 'zip' => '81101', 'shipping_method' => 'packeta', 'payment_method' => 'bank_transfer'];
+    $crm5Checkout = apiCheckout();
+    $_POST = [];
+    Cart::clear();
+    $crm5OrderId = (int)($crm5Checkout['order_id'] ?? 0);
+    $pdo->exec("UPDATE orders SET status='paid', payment_status='paid', payment_id='' WHERE id={$crm5OrderId}");
+    InvoiceService::issue($crm5OrderId);
+    $pdo->exec("UPDATE orders SET status='delivered' WHERE id={$crm5OrderId}");
+    $crm5Item = Orders::items($crm5OrderId)[0];
+    [, $crm5RmaId] = Rma::create($crm5OrderId, null, 'CRM5 return', [(int)$crm5Item['id'] => 4]);
+    Rma::setStatus($crm5RmaId, 'approved');
+    $crm5RmaItemId = (int)Rma::items($crm5RmaId)[0]['id'];
+    Rma::receive($crm5RmaId, [$crm5RmaItemId => ['quantity' => 4, 'disposition' => 'repair']], 'crm5-receipt');
+    Rma::createExchange($crm5RmaId, $crm5RmaItemId, 1, 9711, null, 'crm5-exchange-1');
+    Rma::createExchange($crm5RmaId, $crm5RmaItemId, 1, 9711, null, 'crm5-exchange-2');
+    // No admin screen cancels an exchange yet; a replacement that fell through is recorded as status 'cancelled'.
+    $crm5CancelExchange = static fn(string $key) => $pdo->prepare("UPDATE return_exchanges SET status = 'cancelled' WHERE idempotency_key = ?")->execute([$key]);
+    $crm5Credits = static fn(): int => (int)$a071Read("SELECT COUNT(*) FROM order_refunds WHERE rma_id = ? AND credit_note_id IS NOT NULL", [$crm5RmaId]);
+    $crm5Credited = static fn(): int => (int)$a071Read("SELECT COALESCE(SUM(cni.quantity), 0) FROM credit_note_items cni JOIN order_refunds r ON r.id = cni.refund_id WHERE r.rma_id = ?", [$crm5RmaId]);
+    $crm5Refund = ['__grants' => ['rma.manage', 'orders.refund'], 'rma_id' => (string)$crm5RmaId, 'status' => 'refunded'];
+    $r = $a071Run('direct', 'manager', 'rma', 'handleRmaStatus', $crm5Refund);
+    assert_true(($r['flash']['type'] ?? '') === 'ok' && $crm5Credits() === 1 && $crm5Credited() === 2,
+        $a071Label('CR-M5: the credit note covers the received units that are not being exchanged', $r));
+    $crm5CancelExchange('crm5-exchange-1');
+    $r = $a071Run('direct', 'manager', 'rma', 'handleRmaStatus', $crm5Refund);
+    assert_true(($r['flash']['type'] ?? '') === 'ok' && $crm5Credits() === 2 && $crm5Credited() === 3,
+        $a071Label('CR-M5: a second credit note on the same RMA covers the unit whose exchange fell through', $r));
+    $r = $a071Run('direct', 'manager', 'rma', 'handleRmaStatus', $crm5Refund);
+    assert_true(($r['flash']['type'] ?? '') !== 'ok' && $crm5Credits() === 2, $a071Label('CR-M5: resubmitting with nothing left to credit issues no credit note', $r));
+    // The rest of the order is refunded through the gateway ledger, so the last unit has nothing left to refund.
+    $crm5Left = (int)Orders::byId($crm5OrderId)['total'] - (int)$a071Read("SELECT COALESCE(SUM(amount), 0) FROM order_refunds WHERE order_id = ?", [$crm5OrderId]);
+    $pdo->prepare("INSERT INTO payment_transactions (order_id, provider, status, amount, currency, idempotency_key, store_id) VALUES (?, 'manual', 'refunded', ?, 'eur', 'crm5-ledger-refund', 'default')")
+        ->execute([$crm5OrderId, $crm5Left]);
+    $crm5CancelExchange('crm5-exchange-2');
+    $r = $a071Run('direct', 'manager', 'rma', 'handleRmaStatus', $crm5Refund);
+    assert_true(($r['flash']['type'] ?? '') !== 'ok' && $crm5Credits() === 2, $a071Label('CR-M5: a credit note beyond the refundable balance is refused', $r));
 } finally {
     $pdo->exec("DELETE FROM payment_methods WHERE code IN ('a071-editor', 'a071-manager')");
     $a071Tree = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($a071Root, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);

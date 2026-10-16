@@ -7,6 +7,8 @@ interface QueueBackend {
     public function markProcessing(array $job): string;
     public function complete(string $claim): void;
     public function fail(string $claim, array $job, string $error): void;
+    /** Renew the lease of a claim still owned by this worker; false when it has been taken over. */
+    public function extendLease(string $claim): bool;
     public function stats(): array;
     public function failures(int $limit = 20): array;
 }
@@ -118,6 +120,19 @@ class DatabaseQueue implements QueueBackend {
             ':updated' => gmdate('Y-m-d H:i:s'), ':id' => $id, ':token' => $token,
         ]);
         if ($stmt->rowCount() !== 1) throw new RuntimeException('DatabaseQueue: claim is no longer owned');
+    }
+
+    public function extendLease(string $claim): bool {
+        [$id, $token] = $this->parseClaim($claim);
+        $now = gmdate('Y-m-d H:i:s');
+        $stmt = $this->db->prepare("UPDATE queue_jobs SET claimed_at=:claimed, updated_at=:updated
+            WHERE id=:id AND state='processing' AND claim_token=:token");
+        $stmt->execute([':claimed' => $now, ':updated' => $now, ':id' => $id, ':token' => $token]);
+        if ($stmt->rowCount() === 1) return true;
+        // MySQL reports 0 affected rows when the renewal lands in the same second as the claim.
+        $owned = $this->db->prepare("SELECT 1 FROM queue_jobs WHERE id=:id AND state='processing' AND claim_token=:token");
+        $owned->execute([':id' => $id, ':token' => $token]);
+        return $owned->fetchColumn() !== false;
     }
 
     public function stats(): array {
@@ -258,6 +273,16 @@ class RedisQueue implements QueueBackend {
             (string)$available, substr($error, 0, 2000), gmdate('c'), (string)$score,
         ], 3);
         if ((int)$ok !== 1) throw new RuntimeException('RedisQueue: claim is no longer owned');
+    }
+
+    public function extendLease(string $claim): bool {
+        [$id, $token] = $this->parseClaim($claim);
+        $script = "if redis.call('hget', KEYS[1], 'claim_token') ~= ARGV[1] then return 0 end "
+            . "if redis.call('zscore', KEYS[2], ARGV[2]) == false then return 0 end "
+            . "redis.call('zadd', KEYS[2], ARGV[3], ARGV[2]) redis.call('hset', KEYS[1], 'updated_at', ARGV[4]) return 1";
+        return (int)$this->redis->eval($script, [
+            $this->jobKey($id), $this->key('processing'), $token, $id, (string)(time() + $this->leaseSeconds), gmdate('c'),
+        ], 2) === 1;
     }
 
     public function stats(): array {

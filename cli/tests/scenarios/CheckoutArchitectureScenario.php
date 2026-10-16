@@ -116,10 +116,11 @@ $p0Checkout = function (array $overrides) {
     $_SERVER['HTTP_HOST'] = 'localhost';
     $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
     $_SESSION['csrf_token'] = 'p0-regression-test';
-    $_SESSION['cart'] = [
+    $_SESSION['cart'] = $overrides['__cart'] ?? [
         'p_501' => ['product_id' => 501, 'variant_id' => null, 'qty' => 2],
         'p_502' => ['product_id' => 502, 'variant_id' => null, 'qty' => 1],
     ];
+    unset($overrides['__cart']);
     $country = $overrides['country'] ?? 'SK';
     // Pick whatever shipping method is actually offered for the country
     // (DB-driven rates for SK, legacy JSON fallback for DE) — the test
@@ -214,6 +215,69 @@ assert_equals('reverse_charge', (string)($o2['vat_scenario'] ?? ''), 'P0 #3: VIE
 assert_equals(0, (int)($o2['vat_total'] ?? -1), 'P0 #3: reverse charge vat_total == 0');
 assert_equals((int)$o2['subtotal'] + (int)$o2['shipping_cost'], (int)$o2['total'],
     'P0 #3: reverse charge total has no VAT added');
+// Code review M1: reverse charge charges the seller's domestic NET price, not the VAT-inclusive gross.
+$crmNet = static function (int $gross, float $rate): int {
+    $den = 10000 + (int)round($rate * 100);
+    return intdiv($gross * 10000 + intdiv($den, 2), $den);
+};
+$crmExpected = [];
+foreach ($pdo->query("SELECT sku, unit_price, vat_rate FROM order_items WHERE order_id=" . (int)($r['order_id'] ?? 0))->fetchAll() as $crmLine) {
+    $crmExpected[$crmLine['sku']] = $crmNet((int)$crmLine['unit_price'], (float)$crmLine['vat_rate']);
+}
+$crmCharged = [];
+foreach ($pdo->query("SELECT sku, unit_price FROM order_items WHERE order_id=" . (int)($r2['order_id'] ?? 0))->fetchAll() as $crmLine) {
+    $crmCharged[$crmLine['sku']] = (int)$crmLine['unit_price'];
+}
+ksort($crmExpected);
+ksort($crmCharged);
+assert_equals($crmExpected, $crmCharged, 'CR-M1: reverse charge unit prices are the domestic prices without Slovak VAT');
+assert_equals((int)$o2['subtotal'] + (int)$o2['shipping_cost'], (int)$o2['total'], 'CR-M1: reverse charge total = net subtotal + net shipping');
+// The CR-M checkouts below come from the same test IP; a fresh rate store keeps them under the checkout throttle.
+Security::setRateDbForTesting(new PDO('sqlite::memory:'));
+// The P0 cart ships free (pricing.json: free shipping over 50 €); one SKU-B (30,25 €) pays a DE parcel rate.
+$crmDeRates = ShippingService::calculateRates('DE', 0, 3025, false, 0);
+$crmPaid = array_values(array_filter($crmDeRates, static fn(array $rate): bool => (int)$rate['price'] > 0))[0] ?? null;
+// Promotions left active by earlier scenarios (G6 free shipping over 10 €) would zero the rate; pause them for this order.
+$crmActivePromotions = $pdo->query("SELECT id FROM promotions WHERE active = 1")->fetchAll(PDO::FETCH_COLUMN);
+$pdo->exec("UPDATE promotions SET active = 0");
+$r3 = $p0Checkout(['country' => 'DE', 'company' => 'P0 Kunde GmbH', 'vat_id' => 'DE811907980', 'shipping_method' => (string)($crmPaid['method_code'] ?? ''),
+    '__cart' => ['p_502' => ['product_id' => 502, 'variant_id' => null, 'qty' => 1]]]);
+if ($crmActivePromotions) $pdo->exec("UPDATE promotions SET active = 1 WHERE id IN (" . implode(',', array_map('intval', $crmActivePromotions)) . ")");
+$o3 = $pdo->query("SELECT * FROM orders WHERE id=" . (int)($r3['order_id'] ?? 0))->fetch() ?: [];
+$crmRateSnapshot = json_decode((string)($o3['shipping_rate_snapshot'] ?? ''), true) ?: [];
+assert_true(!empty($r3['success']) && (int)($crmRateSnapshot['price'] ?? 0) > 0 && ($o3['vat_scenario'] ?? '') === 'reverse_charge',
+    'CR-M1: reverse charge order with a paid shipping rate (' . ($r3['error'] ?? 'ok') . ')');
+assert_equals($crmNet((int)($crmRateSnapshot['price'] ?? 0), VatService::rate('SK', 'standard')), (int)($o3['shipping_cost'] ?? -1),
+    'CR-M1: reverse charge shipping is charged without Slovak VAT');
+// Code review M2: a valid VAT ID of the seller's own country is not grounds for reverse charge.
+$pdo->exec("INSERT INTO vat_id_cache (vat_id, country, status, trader_name, trader_addr, checked_at, ttl_seconds, raw_response) VALUES ('SK2020273893','SK','valid',NULL,NULL,datetime('now'),86400,NULL)");
+$r4 = $p0Checkout(['country' => 'DE', 'company' => 'P0 Domaca s.r.o.', 'vat_id' => 'SK2020273893']);
+$o4 = $pdo->query("SELECT * FROM orders WHERE id=" . (int)($r4['order_id'] ?? 0))->fetch() ?: [];
+assert_true(!empty($r4['success']) && ($o4['vat_scenario'] ?? '') !== 'reverse_charge' && (int)($o4['vat_total'] ?? 0) > 0,
+    'CR-M2: a Slovak VAT ID buying from a Slovak seller pays VAT, no reverse charge (' . ($r4['error'] ?? ($o4['vat_scenario'] ?? '')) . ')');
+// Code review M4: an exclusive coupon is not added on top of automatic promotions; a cancelled order gives the coupon use back.
+$pdo->exec("INSERT INTO promotions (store_id, code, name, scope, coupon_code, priority, stacking, conditions, actions, active)
+    VALUES ('default', 'CRM4AUTO', 'CRM4 automatic', 'cart', NULL, 10, 'stack', '{}', '{\"type\":\"discount_fixed\",\"amount\":500}', 1),
+           ('default', 'CRM4COUPON', 'CRM4 exclusive coupon', 'cart', 'CRM4EXCL', 20, 'exclusive', '{\"max_uses\":1}', '{\"type\":\"discount_fixed\",\"amount\":1000}', 1)");
+Security::setRateDbForTesting(new PDO('sqlite::memory:'));
+try {
+    $r5 = $p0Checkout(['country' => 'SK', 'coupon_code' => 'CRM4EXCL']);
+    $o5 = $pdo->query("SELECT * FROM orders WHERE id=" . (int)($r5['order_id'] ?? 0))->fetch() ?: [];
+    assert_true(!empty($r5['success']) && (int)($o5['discount_amount'] ?? -1) === 1000,
+        'CR-M4: an exclusive coupon (10 €) replaces the automatic 5 € discount instead of adding to it (' . ($r5['error'] ?? ($o5['discount_amount'] ?? '')) . ')');
+    if ((int)($r5['order_id'] ?? 0) > 0) OrderWorkflow::transition((int)$r5['order_id'], 'cancelled', 'CR-M4 cancel');
+    assert_equals(0, (int)$pdo->query("SELECT COUNT(*) FROM coupon_uses WHERE order_id=" . (int)($r5['order_id'] ?? 0))->fetchColumn(), 'CR-M4: cancelling the order removes its coupon use');
+    $r6 = $p0Checkout(['country' => 'SK', 'coupon_code' => 'CRM4EXCL']);
+    assert_true(!empty($r6['success']), 'CR-M4: a single-use coupon from a cancelled order can be used again (' . ($r6['error'] ?? 'ok') . ')');
+    $pdo->exec("UPDATE promotions SET actions = '{\"type\":\"discount_fixed\",\"amount\":300}', conditions = '{}' WHERE code = 'CRM4COUPON'");
+    $r7 = $p0Checkout(['country' => 'SK', 'coupon_code' => 'CRM4EXCL']);
+    assert_true(empty($r7['success']) && ($r7['error'] ?? '') === 'Coupon cannot be combined with the current promotion',
+        'CR-M4: an exclusive coupon worth less than the automatic discount is refused, not summed (' . ($r7['error'] ?? 'placed') . ')');
+} finally {
+    $pdo->exec("DELETE FROM promotions WHERE code IN ('CRM4AUTO', 'CRM4COUPON')");
+    // Later scenarios share this session; give them a checkout throttle untouched by the CR-M checkouts.
+    Security::setRateDbForTesting(new PDO('sqlite::memory:'));
+}
 
 // 55.4 — Bug #4: mock webhook routing gate is closed in the shipped config template
 $prodCfg = require dirname(TEST_CLI_DIR) . '/config.example.php';

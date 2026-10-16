@@ -4,22 +4,43 @@
  * Prevent duplicate webhook/import processing.
  */
 class Idempotency {
+    /** A claim older than this belongs to a process that died mid-event; a redelivery may take it over. */
+    public const LEASE_SECONDS = 300;
+
     /**
-     * Check if event was already processed. Returns true if DUPLICATE (skip it).
+     * Claim an event for processing: 'claimed' (process it, then complete()), 'done' (already processed, skip) or
+     * 'in_flight' (another request is processing it right now; ask the sender to retry later).
+     */
+    public static function claim(string $eventId, int $leaseSeconds = self::LEASE_SECONDS): string {
+        $db = Db::get();
+        $now = time();
+        try {
+            $db->prepare("INSERT INTO processed_events (event_id, state, claimed_at) VALUES (:id, 'processing', :now)")
+               ->execute([':id' => $eventId, ':now' => $now]);
+            return 'claimed';
+        } catch (\PDOException $e) {
+            // Only unique constraint violations mean "seen before"; real DB errors (connection, disk) propagate.
+            if (!in_array($e->getCode(), ['23000', '23505'], true)) throw $e;
+        }
+        $takeover = $db->prepare("UPDATE processed_events SET claimed_at = :now
+            WHERE event_id = :id AND state = 'processing' AND (claimed_at IS NULL OR claimed_at < :cutoff)");
+        $takeover->execute([':now' => $now, ':id' => $eventId, ':cutoff' => $now - $leaseSeconds]);
+        if ($takeover->rowCount() === 1) return 'claimed';
+        $state = $db->prepare('SELECT state FROM processed_events WHERE event_id = :id');
+        $state->execute([':id' => $eventId]);
+        return $state->fetchColumn() === 'processing' ? 'in_flight' : 'done';
+    }
+
+    /** The claimed event was fully processed: later deliveries are duplicates. */
+    public static function complete(string $eventId): void {
+        Db::get()->prepare("UPDATE processed_events SET state = 'done' WHERE event_id = :id")->execute([':id' => $eventId]);
+    }
+
+    /**
+     * Claim an event; true means skip it (already processed or in flight). Callers must complete() after processing.
      */
     public static function webhookProcessed(string $eventId): bool {
-        $db = Db::get();
-        try {
-            $stmt = $db->prepare("INSERT INTO processed_events (event_id) VALUES (:id)");
-            $stmt->execute([':id' => $eventId]);
-            return false; // new event, needs processing
-        } catch (\PDOException $e) {
-            // Only treat unique constraint violations as "already processed"
-            if (in_array($e->getCode(), ['23000', '23505'], true)) {
-                return true;  // duplicate, skip
-            }
-            throw $e; // Re-throw real DB errors (connection, disk, etc.)
-        }
+        return self::claim($eventId) !== 'claimed';
     }
 
     public static function webhookAlreadyProcessed(string $eventId): bool {

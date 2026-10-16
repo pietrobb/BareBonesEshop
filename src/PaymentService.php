@@ -81,6 +81,14 @@ class PaymentService {
         return null;
     }
 
+    /** Cash on delivery is a method's service type, not its (renamable) code. */
+    public static function isCashOnDelivery(string $methodCode): bool {
+        if (!self::hasMethodTables()) return $methodCode === 'cod';
+        $stmt = Db::get()->prepare("SELECT service_type FROM payment_methods WHERE store_id = :store AND code = :code");
+        $stmt->execute([':store' => StoreContext::current()->providerId(), ':code' => $methodCode]);
+        return $stmt->fetchColumn() === 'cod';
+    }
+
     public static function canPaymentTransition(string $from, string $to): bool {
         return in_array($to, self::PAYMENT_TRANSITIONS[$from] ?? [], true);
     }
@@ -219,7 +227,11 @@ class PaymentService {
             throw new \RuntimeException('Webhook event identity is missing');
         }
         $eventKey = 'payment_' . $providerName . '_' . $eventId;
-        if (Idempotency::webhookAlreadyProcessed($eventId) || Idempotency::webhookProcessed($eventKey)) {
+        $claim = Idempotency::webhookAlreadyProcessed($eventId) ? 'done' : Idempotency::claim($eventKey);
+        if ($claim === 'in_flight') {
+            return ['handled' => false, 'event_type' => $eventType, 'order_id' => null, 'retry' => true];
+        }
+        if ($claim === 'done') {
             return ['handled' => false, 'event_type' => $eventType, 'order_id' => null, 'duplicate' => true];
         }
 
@@ -230,6 +242,7 @@ class PaymentService {
                 $target = PaymentWebhookRouting::locate(self::orderRefs($data, $providerName), $providerName);
             } catch (PaymentWebhookUnresolved $e) {
                 if ($status === 'unknown') {
+                    Idempotency::complete($eventKey);
                     return ['handled' => true, 'event_type' => $eventType, 'order_id' => null];
                 }
                 Idempotency::unmark($eventKey);
@@ -245,6 +258,7 @@ class PaymentService {
             Idempotency::unmark($eventKey);
             throw $e;
         }
+        Idempotency::complete($eventKey);
 
         return ['handled' => true, 'event_type' => $eventType, 'order_id' => $orderId];
     }

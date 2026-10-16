@@ -151,6 +151,48 @@ final class InvoiceService
         return $invoice;
     }
 
+    /** Received quantity of one RMA item not yet committed to a credit note or an exchange. */
+    private static function uncommittedQuantity(array $rmaItem): int {
+        $stmt = Db::get()->prepare("SELECT
+                COALESCE((SELECT SUM(cni.quantity) FROM credit_note_items cni JOIN order_refunds r ON r.id=cni.refund_id WHERE cni.rma_item_id=:item AND r.status IN ('pending','succeeded')),0) AS credited,
+                COALESCE((SELECT SUM(re.quantity) FROM return_exchanges re WHERE re.rma_item_id=:item2 AND re.store_id=:store AND re.status!='cancelled'),0) AS exchanged");
+        $stmt->execute([':item' => (int)$rmaItem['id'], ':item2' => (int)$rmaItem['id'], ':store' => StoreContext::current()->id()]);
+        $reserved = $stmt->fetch(PDO::FETCH_ASSOC);
+        return (int)$rmaItem['received_quantity'] - (int)$reserved['credited'] - (int)$reserved['exchanged'];
+    }
+
+    /** Credit notes already issued on this RMA, whatever their refund outcome. */
+    public static function creditAttempts(int $rmaId): int {
+        $stmt = Db::get()->prepare('SELECT COUNT(*) FROM order_refunds WHERE rma_id=:rma AND store_id=:store AND credit_note_id IS NOT NULL');
+        $stmt->execute([':rma' => $rmaId, ':store' => StoreContext::current()->id()]);
+        return (int)$stmt->fetchColumn();
+    }
+
+    /** rma_item_id => quantity that a further credit note on this RMA may still cover. */
+    public static function creditableQuantities(int $rmaId): array {
+        $quantities = [];
+        foreach (Rma::items($rmaId) as $item) {
+            $remaining = self::uncommittedQuantity($item);
+            if ($remaining > 0) $quantities[(int)$item['id']] = $remaining;
+        }
+        return $quantities;
+    }
+
+    /**
+     * Money of the order not yet returned: the total less provider refunds (whole-order and completed item
+     * refunds), pending credit notes, and credit notes settled outside the gateway (no payment id).
+     */
+    private static function refundableForCredit(array $order): int {
+        $stmt = Db::get()->prepare("SELECT
+                COALESCE(SUM(CASE WHEN status='pending' THEN amount ELSE 0 END),0) AS pending,
+                COALESCE(SUM(CASE WHEN status='succeeded' THEN amount ELSE 0 END),0) AS succeeded
+            FROM order_refunds WHERE order_id=:order AND store_id=:store");
+        $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
+        $credits = $stmt->fetch(PDO::FETCH_ASSOC);
+        $offGateway = trim((string)($order['payment_id'] ?? '')) === '' ? (int)$credits['succeeded'] : 0;
+        return (int)$order['total'] - PaymentService::refundedAmount((int)$order['id']) - (int)$credits['pending'] - $offGateway;
+    }
+
     /**
      * Issue an immutable item-level credit note from received RMA quantities.
      * Amounts are deterministic slices of the original financial snapshot.
@@ -211,12 +253,7 @@ final class InvoiceService
             $quantity = (int)$quantity;
             $rmaItem = $rmaItems[$rmaItemId] ?? null;
             if (!$rmaItem || $quantity <= 0) throw new InvalidArgumentException('Invalid credit note item');
-            $reservedStmt = $db->prepare("SELECT
-                    COALESCE((SELECT SUM(cni.quantity) FROM credit_note_items cni JOIN order_refunds r ON r.id=cni.refund_id WHERE cni.rma_item_id=:item AND r.status IN ('pending','succeeded')),0) AS credited,
-                    COALESCE((SELECT SUM(re.quantity) FROM return_exchanges re WHERE re.rma_item_id=:item2 AND re.store_id=:store AND re.status!='cancelled'),0) AS exchanged");
-            $reservedStmt->execute([':item' => $rmaItemId, ':item2' => $rmaItemId, ':store' => StoreContext::current()->id()]);
-            $reserved = $reservedStmt->fetch(PDO::FETCH_ASSOC);
-            if ($quantity > (int)$rmaItem['received_quantity'] - (int)$reserved['credited'] - (int)$reserved['exchanged']) {
+            if ($quantity > self::uncommittedQuantity($rmaItem)) {
                 throw new LogicException('Credit quantity exceeds received uncommitted quantity');
             }
             $orderItemId = (int)$rmaItem['order_item_id'];
@@ -249,6 +286,7 @@ final class InvoiceService
             $breakdown[$rateKey]['vat'] -= $vat;
         }
         if ($totals['gross'] <= 0 || $totals['gross'] > (int)$source['total_gross']) throw new LogicException('Credit total is invalid');
+        if ($totals['gross'] > self::refundableForCredit($order)) throw new LogicException('Credit exceeds the amount that can still be refunded');
 
         $creditData = [
             'version' => 1, 'source_invoice_id' => $sourceInvoiceId,

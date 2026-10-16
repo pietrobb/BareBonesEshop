@@ -404,6 +404,8 @@ class GdprService {
                 }
             }
 
+            $rowsOther = self::eraseCustomerContent($db, $customerId, $origEmail, $ownership, $placeholder, $erasureMarker);
+
             $db->commit();
         } catch (\Throwable $e) {
             $db->rollBack();
@@ -423,7 +425,7 @@ class GdprService {
                     'email_log'     => $rowsEmail,
                     'audit_log'     => $rowsAudit,
                     'coupon_uses'   => $rowsCoupon,
-                ],
+                ] + $rowsOther,
             ]);
         } catch (\Throwable $e) {
             $errorId = bin2hex(random_bytes(6));
@@ -439,8 +441,59 @@ class GdprService {
                 'email_log'   => $rowsEmail,
                 'audit_log'   => $rowsAudit,
                 'coupon_uses' => $rowsCoupon,
-            ],
+            ] + $rowsOther,
         ];
+    }
+
+    /**
+     * Personal data outside the customer/order records: reviews and wishlists (deleted), abandoned
+     * carts (deleted), RMA reasons (scrubbed, the RMA stays for the credit-note trail) and outbox
+     * event payloads (customer events rewritten, the e-mail replaced in order events).
+     */
+    private static function eraseCustomerContent(PDO $db, int $customerId, string $email, array $ownership, string $placeholder, string $marker): array {
+        $store = StoreContext::current()->id();
+        $rows = [];
+
+        $stmt = $db->prepare("DELETE FROM product_reviews WHERE customer_id = :id");
+        $stmt->execute([':id' => $customerId]);
+        $rows['product_reviews'] = $stmt->rowCount();
+
+        $stmt = $db->prepare("DELETE FROM wishlist_items WHERE customer_id = :id OR owner_key = :owner");
+        $stmt->execute([':id' => $customerId, ':owner' => 'c:' . $customerId]);
+        $rows['wishlist_items'] = $stmt->rowCount();
+
+        // Carts are keyed by e-mail only: unverified accounts may erase just carts that became their orders.
+        $stmt = $db->prepare("DELETE FROM abandoned_carts
+            WHERE LOWER(customer_email) = LOWER(:cart_email) AND (store_id = :cart_store OR store_id IS NULL)
+              AND (:cart_verified = '1' OR order_id IN (" . self::CUSTOMER_ORDERS . "))");
+        $stmt->execute($ownership + [':cart_email' => $email, ':cart_store' => $store, ':cart_verified' => $ownership[':verified']]);
+        $rows['abandoned_carts'] = $stmt->rowCount();
+
+        $stmt = $db->prepare("UPDATE rma_requests SET reason = :marker, updated_at = " . Db::now() . "
+            WHERE store_id = :rma_store AND (customer_id = :rma_customer OR order_id IN (" . self::CUSTOMER_ORDERS . "))");
+        $stmt->execute($ownership + [':marker' => $marker, ':rma_store' => $store, ':rma_customer' => $customerId]);
+        $rows['rma_requests'] = $stmt->rowCount();
+
+        $stmt = $db->prepare("UPDATE event_outbox SET payload = :payload
+            WHERE store_id = :event_store AND aggregate_type = 'customer' AND aggregate_id = :aggregate");
+        $stmt->execute([
+            ':payload' => json_encode(['customer_id' => $customerId, 'erased' => true]),
+            ':event_store' => $store,
+            ':aggregate' => (string)$customerId,
+        ]);
+        $rows['event_outbox'] = $stmt->rowCount();
+        // Order ids are bound as strings: a CAST(... AS CHAR) subquery mixes collations with aggregate_id on MySQL.
+        $stmt = $db->prepare(self::CUSTOMER_ORDERS);
+        $stmt->execute($ownership);
+        $orderIds = array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        if ($orderIds !== []) {
+            $stmt = $db->prepare("UPDATE event_outbox SET payload = REPLACE(payload, ?, ?)
+                WHERE store_id = ? AND aggregate_type = 'order' AND INSTR(payload, ?) > 0
+                  AND aggregate_id IN (" . implode(',', array_fill(0, count($orderIds), '?')) . ")");
+            $stmt->execute(array_merge([$email, $placeholder, $store, $email], $orderIds));
+            $rows['event_outbox'] += $stmt->rowCount();
+        }
+        return $rows;
     }
 
     /**

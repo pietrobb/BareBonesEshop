@@ -100,6 +100,27 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
         ];
     }
 
+    /**
+     * Consistent single-transaction dump of the live database to $dumpPath (scheduled backups).
+     * Unlike create() it does not need the disposable probe schema.
+     */
+    public function dumpTo(string $dumpPath): array
+    {
+        if (file_exists($dumpPath)) {
+            throw new RuntimeException('MySQL backup dump path already exists');
+        }
+        $server = $this->serverConnection();
+        $this->assertSchemaExists($server, $this->database);
+        $schema = $this->schemaSettings($server, $this->database);
+        $this->assertTransactionalTables($server, $this->database);
+        $this->dump($dumpPath);
+        if (!is_file($dumpPath) || filesize($dumpPath) === 0) {
+            throw new RuntimeException('MySQL backup dump was not created');
+        }
+        @chmod($dumpPath, 0600);
+        return ['database' => $this->database] + $schema;
+    }
+
     public function restore(string $snapshotDirectory, array $metadata): void
     {
         if (($metadata['driver'] ?? null) !== 'mysql' || ($metadata['database'] ?? null) !== $this->database

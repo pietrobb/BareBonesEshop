@@ -185,6 +185,7 @@ class OrderWorkflow {
      */
     private static function handleCancellation(array $order): array {
         Orders::restoreStock($order['id']);
+        Pricing::releaseCouponUse((int)$order['id']);
 
         return array_merge([
             ['email_send', [

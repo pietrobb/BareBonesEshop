@@ -315,7 +315,7 @@ class Pricing {
                 continue;
             }
 
-            return ['discount' => $discount, 'name' => $rule['name'], 'error' => null];
+            return ['discount' => $discount, 'name' => $rule['name'], 'error' => null, 'stacking' => (string)($rule['stacking'] ?? 'stack')];
         }
 
         // Coupon promotions from the admin (promotions.coupon_code); pricing.json keeps precedence and the admin refuses its codes.
@@ -328,7 +328,17 @@ class Pricing {
         if ($limits['per_customer'] > 0 && $customerEmail && self::couponUseCount($code, $customerEmail) >= $limits['per_customer']) {
             return ['discount' => 0, 'name' => null, 'error' => 'Coupon already used'];
         }
-        return Promotions::couponDiscount($promotion, $subtotal);
+        return Promotions::couponDiscount($promotion, $subtotal) + ['stacking' => (string)($promotion['stacking'] ?? 'exclusive')];
+    }
+
+    /**
+     * Coupon plus automatic cart discounts. A coupon whose stacking is not 'stack' is never added on top of
+     * automatic discounts: the larger of the two applies, so entering a coupon never costs the buyer more.
+     * @return array{coupon:int, promotion:int}
+     */
+    public static function combineDiscounts(int $coupon, string $stacking, int $promotion): array {
+        if ($coupon <= 0 || $promotion <= 0 || $stacking === 'stack') return ['coupon' => max(0, $coupon), 'promotion' => max(0, $promotion)];
+        return $coupon >= $promotion ? ['coupon' => $coupon, 'promotion' => 0] : ['coupon' => 0, 'promotion' => $promotion];
     }
 
     /** Upper-case coupon codes that pricing.json defines for the active store. */
@@ -372,6 +382,23 @@ class Pricing {
         $db = Db::get();
         $stmt = $db->prepare("INSERT INTO coupon_uses (coupon_code, order_id, customer_email, discount, store_id) VALUES (:code, :oid, :email, :disc, :store)");
         $stmt->execute([':code' => $upperCode, ':oid' => $orderId, ':email' => $email, ':disc' => $discount, ':store' => StoreContext::current()->id()]);
+    }
+
+    /** A cancelled or expired order gives its coupon use back: the usage row and both limit counters. */
+    public static function releaseCouponUse(int $orderId): void {
+        $db = Db::get();
+        $store = StoreContext::current()->id();
+        $uses = $db->prepare("SELECT id, coupon_code, customer_email FROM coupon_uses WHERE order_id = :order AND store_id = :store");
+        $uses->execute([':order' => $orderId, ':store' => $store]);
+        $delete = $db->prepare("DELETE FROM coupon_uses WHERE id = :id");
+        $decrement = $db->prepare("UPDATE coupon_usage_counters SET uses = uses - 1
+            WHERE store_id = :store AND coupon_code = :code AND subject = :subject AND uses > 0");
+        foreach ($uses->fetchAll(PDO::FETCH_ASSOC) as $use) {
+            $delete->execute([':id' => (int)$use['id']]);
+            foreach ([null, self::normalizeEmail((string)$use['customer_email'])] as $email) {
+                $decrement->execute([':store' => $store, ':code' => strtoupper((string)$use['coupon_code']), ':subject' => self::couponSubject($email)]);
+            }
+        }
     }
 
     public static function normalizeEmail(string $email): string {

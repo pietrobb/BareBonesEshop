@@ -635,6 +635,7 @@ class Orders {
             }
 
             self::restoreStock($orderId, 'release');
+            Pricing::releaseCouponUse($orderId);
             $db->prepare("UPDATE checkout_sessions SET status = 'expired', updated_at = " . Db::now() . " WHERE order_id = :id AND status = 'pending'")
                ->execute([':id' => $orderId]);
             AuditLog::log('order_status', $orderId, 'pending', 'cancelled', $note);

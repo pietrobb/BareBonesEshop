@@ -501,6 +501,7 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS audit_log (
 $pdo->exec("CREATE TABLE IF NOT EXISTS processed_events (
     event_id TEXT PRIMARY KEY, created_at TEXT DEFAULT (datetime('now'))
 )");
+(require TEST_CLI_DIR . '/../migrations/20261015120000_processed_events_claim_state.php')->up($pdo, true);
 
 // Product specifications
 $pdo->exec("CREATE TABLE IF NOT EXISTS product_specifications (
@@ -951,6 +952,29 @@ assert_true($throttle->retryAfter('admin', '10.77.0.1') > 0, 'Admin throttle (c)
 assert_equals(0, $throttle->retryAfter('admin', '198.51.100.2'), 'Admin throttle (c): the owner IP that logged in before is not locked out');
 $throttleNow += AdminLoginThrottle::WINDOW_SECONDS + 1;
 assert_equals(0, $throttle->retryAfter('admin', '10.77.0.1'), 'Admin throttle (c): the account ceiling expires with the window');
+// CR-M8: a valid login on the attacker's own account must not reset the IP spray bucket.
+$throttleNow += AdminLoginThrottle::WINDOW_SECONDS + 1;
+for ($i = 0; $i < AdminLoginThrottle::IP_LIMIT - 1; $i++) $attempt('victim' . $i, '203.0.113.9');
+$throttle->recordSuccess('attacker', '203.0.113.9');
+$sprayAfterSuccess = 0;
+for ($i = 0; $i < 10; $i++) $sprayAfterSuccess += $attempt('victim-b' . $i, '203.0.113.9') ? 1 : 0;
+assert_equals(1, $sprayAfterSuccess, 'CR-M8: a successful login does not reset the IP spray bucket (only 1 of IP_LIMIT left)');
+// CR-M8: parallel requests reserve atomically; in-flight attempts count before the password is checked.
+$throttleNow += AdminLoginThrottle::WINDOW_SECONDS + 1;
+$m8File = tempnam(sys_get_temp_dir(), 'bbe_m8_');
+$m8Clock = static function () use (&$throttleNow): int { return $throttleNow; };
+$m8Workers = [new AdminLoginThrottle(new PDO('sqlite:' . $m8File), $m8Clock), new AdminLoginThrottle(new PDO('sqlite:' . $m8File), $m8Clock)];
+$inFlight = 0;
+for ($i = 0; $i < 12; $i++) $inFlight += $m8Workers[$i % 2]->reserve('admin', '203.0.113.10') === 0 ? 1 : 0;
+assert_equals(AdminLoginThrottle::PAIR_LIMIT, $inFlight, 'CR-M8: 12 parallel in-flight attempts from two processes get only PAIR_LIMIT reservations');
+$throttleNow += AdminLoginThrottle::WINDOW_SECONDS + 1;
+$m8Owner = new AdminLoginThrottle(new PDO('sqlite:' . $m8File), $m8Clock);
+assert_equals(0, $m8Owner->reserve('owner', '203.0.113.11'), 'CR-M8: owner attempt is reserved');
+$m8Owner->recordSuccess('owner', '203.0.113.11');
+$m8Left = (int)(new PDO('sqlite:' . $m8File))->query('SELECT COUNT(*) FROM hits')->fetchColumn();
+assert_equals(3 * AdminLoginThrottle::PAIR_LIMIT, $m8Left, 'CR-M8: a successful login releases its own reservation and leaves other hits intact');
+$m8Owner = $m8Workers = null;
+@unlink($m8File);
 assert_true(!str_contains($securitySource, "rateLimit('admin_") && !str_contains($securitySource, "'/admin_' . md5("), 'Admin throttle: no per-account hard lock or separate file IP lock remains in Security');
 
 // ============================================================
@@ -1330,6 +1354,12 @@ assert_equals(1, $stats2['pending'], 'Failed job retried — back in pending');
 
 // Exhaust retries
 for ($i = 0; $i < 3; $i++) {
+    // Let the backoff elapse: pull() only returns jobs that are due (CR-M10).
+    foreach (glob($testJobsDir . '/pending/*.json') ?: [] as $dueFile) {
+        $dueJob = json_decode((string)file_get_contents($dueFile), true);
+        unset($dueJob['retry_after']);
+        file_put_contents($dueFile, json_encode($dueJob));
+    }
     $retryJobs = JobQueue::pull(10);
     if (empty($retryJobs)) break;
     $pf = JobQueue::markProcessing($retryJobs[0]);

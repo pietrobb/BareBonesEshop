@@ -306,6 +306,10 @@ class Cart {
         $atDate   = $vatContext['at_date'] ?? null;
         $rateCountry = $scenario['rate_country'];
         $applies  = $scenario['applies_vat'];
+        // Catalog prices include the seller's domestic VAT. A zero-rated sale
+        // (reverse charge, export) is charged that price without the VAT.
+        $sellerCountry = strtoupper((string)$vctx['seller_country']);
+        $stripDomesticVat = self::chargesNetOfDomesticVat($scenario);
 
         $vatTotal = 0;
         $netTotal = 0;
@@ -324,6 +328,14 @@ class Cart {
             $vatClass = $item['vat_class'] ?? 'standard';
             $resolved = method_exists($taxProvider, 'resolveClass') ? $taxProvider::resolveClass($vatClass) : $vatClass;
             $rate     = $applies ? $taxProvider::rate($rateCountry, $resolved, $atDate) : 0.0;
+            if ($stripDomesticVat) {
+                $unitNet = $taxProvider::computeLine((int)$item['price'], 1, $taxProvider::rate($sellerCountry, $resolved, $atDate), false)['net'];
+                $summary['subtotal'] -= (int)$item['total'] - $unitNet * (int)$item['qty'];
+                $item['price'] = $unitNet;
+                $item['total'] = $unitNet * (int)$item['qty'];
+                $item['price_formatted'] = I18n::price($item['price'], $summary['currency']);
+                $item['total_formatted'] = I18n::price($item['total'], $summary['currency']);
+            }
 
             $line = $taxProvider::computeLine(
                 (int)$item['price'],
@@ -342,6 +354,7 @@ class Cart {
         }
 
         $summary['items']                    = $newItems;
+        $summary['subtotal_formatted']       = I18n::price($summary['subtotal'], $summary['currency']);
         $summary['vat_scenario']             = $scenario['scenario'];
         $summary['vat_rate_country']         = $rateCountry;
         $summary['vat_applies']              = $applies;
@@ -352,6 +365,17 @@ class Cart {
         $summary['net_total_formatted']      = I18n::price($netTotal, $summary['currency']);
 
         return $summary;
+    }
+
+    /** Reverse charge and export are zero-rated: the buyer pays the price without the seller's domestic VAT. */
+    public static function chargesNetOfDomesticVat(array $scenario): bool {
+        return in_array((string)($scenario['scenario'] ?? ''), ['reverse_charge', 'export'], true);
+    }
+
+    /** Domestic VAT-inclusive amount → the same amount without the seller's domestic VAT. */
+    public static function netOfDomesticVat(int $gross, string $sellerCountry, string $class = 'standard', ?string $taxProviderCode = null): int {
+        $taxProvider = Adapters::tax($taxProviderCode ?? Adapters::defaultProviderCode('tax'));
+        return $taxProvider::computeLine($gross, 1, $taxProvider::rate(strtoupper($sellerCountry), $class), false)['net'];
     }
 
     public static function clear(): void {
