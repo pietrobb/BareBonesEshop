@@ -265,6 +265,10 @@ return [
     'update_mysql_probe_database' => '',
     'update_mysql_dump_binary'    => 'mysqldump', // use mariadb-dump where appropriate
     'update_mysql_client_binary'  => 'mysql',     // use mariadb where appropriate
+    // MySQL/MariaDB backup restore (php cli/restore.php ... --i-stopped-writers) imports the dump here
+    // first and verifies it before replacing db_name. Must end with _restore_scratch; default
+    // <db_name>_restore_scratch. db_user needs CREATE/DROP on it (and on db_name) — see OPERATIONS_RUNBOOK.md.
+    'backup_mysql_restore_scratch_database' => '',
     'gdpr_salt_file'      => dirname(__DIR__) . '/bareboneseshop-private/secrets/gdpr_salt',
 
     // GDPR — prefer injecting this secret; otherwise it is generated in gdpr_salt_file.

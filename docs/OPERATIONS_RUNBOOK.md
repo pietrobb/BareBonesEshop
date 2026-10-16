@@ -79,6 +79,26 @@ The request carries `X-BareBones-Synthetic` with `monitoring.synthetic_token`. T
 4. Schedule the existing backup command at least daily and monitor `backup_age_seconds`.
 5. Treat `backup_probe_failed`, `backup_missing`, and `backup_rpo_breached` as critical. `MountedBackupStorage` fails closed if the sentinel disappears, preventing silent local fallback.
 
+Each backup is a database copy (`.db` VACUUM INTO for SQLite, `.sql` single-transaction dump for MySQL/MariaDB) plus a companion `<backup>.files.tar` with issued invoice PDFs, uploads and the GDPR salt file. **The files archive is sensitive:** the GDPR salt is the secret behind every pseudonymised GDPR record, so anyone holding it can re-link erased customers to their hashes. Store backups only on encrypted, access-reviewed targets and never attach them to tickets or chat.
+
+### Restoring with `cli/restore.php`
+
+```bash
+php cli/restore.php --list                                            # restore points, newest first (files=yes marks a files archive)
+php cli/restore.php 2026/10/16/eshop-20261016-020000.db               # SQLite database
+php cli/restore.php 2026/10/16/eshop-20261016-020000.sql --i-stopped-writers   # MySQL/MariaDB database
+php cli/restore.php <backup> --files                                  # database, then the files archive
+php cli/restore.php <backup> --files-only                             # only invoices/uploads/GDPR salt
+php cli/restore.php <backup> --files-only --force                     # also overwrite differing live files
+```
+
+Every restore first downloads the backup and verifies its metadata identity, size and SHA-256, and takes a `pre-restore-snapshot` backup of the current database (unless `--skip-snapshot`).
+
+- **SQLite:** `PRAGMA integrity_check` on the copy, then an atomic swap under the exclusive `<db>.maintenance` gate, which refuses while any other process holds the database.
+- **MySQL/MariaDB:** MySQL has no lock that proves nobody else is writing, so the restore is refused unless you stop web traffic (maintenance page), workers and cron and pass `--i-stopped-writers`. The dump is imported into the scratch database `backup_mysql_restore_scratch_database` (default `<db_name>_restore_scratch`; it must not exist) and each table must hold exactly the rows the dump carries. Only then is `db_name` dropped, recreated with the dumped character set/collation, re-imported and proven identical (schema, row counts, extended content checksums) to the scratch copy; if that fails, the dump of the current database taken just before is re-imported automatically. Sessions still connected to `db_name` are refused when the server shows them (other users' sessions are visible only with the `PROCESS` privilege). The scratch database is dropped afterwards. A database cannot be renamed and `RENAME TABLE` cannot move triggers, views or routines across schemas, so the live database is replaced, not swapped.
+  Required grants for `db_user`, scoped to the two schema names: `ALL PRIVILEGES` on `db_name` and on the scratch database (create/drop the schema, create tables, triggers, routines, events, insert). For example: `GRANT ALL PRIVILEGES ON shop.* TO 'shop'@'%'; GRANT ALL PRIVILEGES ON shop_restore_scratch.* TO 'shop'@'%';`. With binary logging on, importing triggers/routines as a non-SUPER user also needs `log_bin_trust_function_creators=1`.
+- **Files (`--files`, `--files-only`):** the archive's SHA-256, size and entry count are verified, then it is extracted into a private staging directory by a strict reader that accepts only regular files and directories with relative paths (absolute paths, `..`, links and devices refuse the whole archive). Each file goes to the directory configured *now* (`invoice_storage_dir`, `uploads_dir`, `gdpr_salt_file`). Identical files are skipped; if any live file differs from the backup nothing is written unless `--force`. Files that are not in the backup are kept. Replacing the GDPR salt with an older one changes every pseudonym computed after that backup, so restore it only together with the matching database.
+
 ### Monthly disposable restore drill
 
 Never run the drill against a production database.

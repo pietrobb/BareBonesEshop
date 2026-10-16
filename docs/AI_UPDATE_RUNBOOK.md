@@ -231,7 +231,8 @@ The updater refuses:
 - a probe schema that already exists;
 - non-InnoDB base tables, because `--single-transaction` cannot guarantee their consistency;
 - missing dump/client binaries or insufficient privileges;
-- a dump whose disposable restore differs in tables, columns, indexes, constraints, triggers, routines, events, row counts, or extended table-content checksums.
+- a schema that changes while the dump runs (the live schema inventory is read before and after the dump and must be identical);
+- a dump whose disposable restore differs from the live schema (tables, columns, indexes, constraints, triggers, routines, events) or from the rows the dump itself carries (row count per table, counted from its `INSERT` statements).
 
 Credentials are written only to a mode-`0600` temporary MySQL option file and are never passed as process arguments. The temporary file is deleted after each client invocation.
 
@@ -243,11 +244,15 @@ For a MySQL/MariaDB migration package, `apply` performs:
 2. SHA-256 recording of the private dump;
 3. creation of the reserved disposable probe schema;
 4. a real import into the probe schema;
-5. schema/object inventory, exact row-count, and extended table-content checksum comparison with the live source;
+5. schema/object inventory comparison with the live source, and an exact per-table row-count comparison with the dump itself; the probe's extended table-content checksums are recorded for rollback;
 6. removal of the probe schema;
 7. only then, installation of files and execution of migrations.
 
-On rollback, the stored dump checksum and disposable restore are proved again before the live database is dropped and recreated. The restored live inventory is checked again afterward.
+Row counts and content checksums are never compared against the *live* database: the dump is a `--single-transaction` snapshot of one instant, while workers (heartbeats every minute), checkout and cron keep writing, so a live read a moment later describes a different instant and would fail every update on a live shop. The dump's own rows are the expectation; the schema is the only live comparison, and it is read before and after the dump to prove no DDL ran in between.
+
+On rollback, the stored dump checksum and disposable restore (including the recorded content checksums) are proved again before the live database is dropped and recreated. The restored live inventory is checked again afterward.
+
+**Rows discarded by a rollback are counted, never silent.** The snapshot records `MAX(id)` of `orders` and `payment_transactions` just before the dump. When `apply` rolls back automatically after a failed migration, or a manual rollback runs with a database connection, the rows above those marks are counted before the database is replaced, stored as `discarded_writes` in the snapshot's `snapshot.json`, and — when any (or an unknown number) were discarded — raised as the critical incident `update.rollback_discarded_writes` and appended to the update error. Reconcile those orders and payments with the payment provider before reopening the shop.
 
 ### First adoption of MySQL migration support
 

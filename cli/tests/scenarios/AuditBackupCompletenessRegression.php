@@ -102,7 +102,7 @@ try {
     } catch (RuntimeException $e) {
         $m12RestoreError = $e->getMessage();
     }
-    assert_true(str_contains($m12RestoreError, 'mysql client'), 'CR-M12: restoring a MySQL dump is refused with manual import instructions');
+    assert_true(str_contains($m12RestoreError, '--i-stopped-writers'), 'CR-M12: restoring a MySQL dump is refused until writers are confirmed stopped');
 } catch (Throwable $m12Error) {
     assert_true(false, 'CR-M12: MySQL backup is created (' . $m12Error->getMessage() . ')');
 } finally {
