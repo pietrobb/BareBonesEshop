@@ -148,6 +148,16 @@ function runStagingPreflight(array $argvLocal = []): array {
         $add($filled ? 'ok' : 'fail', "shipping_webhook_secret:{$carrier}", $filled ? ucfirst($carrier) . ' webhook secret configured.' : ucfirst($carrier) . ' webhook secret missing/placeholder.', "Set {$envKey} or shipping_webhook_secrets.{$carrier}.");
     }
 
+    // Settings that silently change behaviour after this upgrade (CHANGELOG "Upgrade notes").
+    $insecureWebhooks = UpgradeChecks::insecureHttpWebhooks($cfg);
+    $add($insecureWebhooks === [] ? 'ok' : 'warn', 'webhook_http', $insecureWebhooks === [] ? 'No outbound webhook relies on plain http.' : 'Outbound webhooks over plain http are no longer delivered: ' . implode(', ', array_keys($insecureWebhooks)), 'Use https, or allow_insecure_http => true only for a receiver on a trusted local network.');
+    $reminderWithoutConsent = UpgradeChecks::cartReminderWithoutConsent($cfg);
+    $add($reminderWithoutConsent ? 'warn' : 'ok', 'cart_reminder_consent', $reminderWithoutConsent ? 'cart_reminder is enabled without an active checkout_consents.cart_reminder: no reminder is stored or sent.' : 'Cart reminder consent configuration is consistent.', "Add checkout_consents['cart_reminder'] (version, text, required => false) or disable cart_reminder.");
+    $nginxFallback = UpgradeChecks::nginxPhpFallback($cfg);
+    if ($nginxFallback !== null) {
+        $add($nginxFallback ? 'ok' : 'warn', 'nginx_php_fallback', $nginxFallback ? 'nginx sends missing .php scripts to @redirect.' : 'nginx PHP location lacks "try_files $uri @redirect;": store-prefixed AJAX (/cs/api.php) answers 404.', 'Copy the location ~ \.php$ block from deploy/nginx.conf into operations.nginx_config and reload nginx.');
+    }
+
     $mailAdapter = strtolower(preflightEnv('MAIL_ADAPTER') ?: 'log');
     $add($mailAdapter === 'log' ? 'warn' : 'ok', 'mail_adapter', "MAIL_ADAPTER={$mailAdapter}", $mailAdapter === 'log' ? 'For staging email delivery tests, configure smtp or ses; log is safe but does not send.' : '');
 

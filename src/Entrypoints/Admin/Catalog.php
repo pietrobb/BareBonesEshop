@@ -964,7 +964,11 @@ function handleExport(): void {
     header('Content-Type: text/csv; charset=UTF-8');
     header('Content-Disposition: attachment; filename="products-' . date('Y-m-d') . '.csv"');
     $out = fopen('php://output', 'w');
-    exportProductsCsv($out, is_string($_POST['q'] ?? null) ? $_POST['q'] : '', is_string($_POST['status'] ?? null) ? $_POST['status'] : '');
+    try {
+        exportProductsCsv($out, is_string($_POST['q'] ?? null) ? $_POST['q'] : '', is_string($_POST['status'] ?? null) ? $_POST['status'] : '');
+    } catch (CsvExportTruncated) {
+        CsvExport::abortResponse(); // logged + incident already; an already started download stays incomplete
+    }
     fclose($out);
     exit;
 }
@@ -985,12 +989,13 @@ function exportProductsCsv($out, string $search = '', string $statusFilter = '')
         stock_low_threshold, stock_critical_threshold FROM products WHERE {$where} ORDER BY id");
     $stmt->execute($params);
 
-    fputcsv($out, ['sku', 'name', 'slug', 'product_type', 'price', 'compare_price', 'stock', 'status', 'summary', 'weight_g', 'stock_low_threshold', 'stock_critical_threshold'], ',', '"', '');
-    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+    $header = ['sku', 'name', 'slug', 'product_type', 'price', 'compare_price', 'stock', 'status', 'summary', 'weight_g', 'stock_low_threshold', 'stock_critical_threshold'];
+    // A failure mid-stream is logged, raised as an incident and thrown (CsvExportTruncated).
+    CsvExport::stream($out, $stmt, $header, static function (array $row): array {
         $row['price'] = Import::formatCents((int)$row['price']);
         if ($row['compare_price'] !== null) $row['compare_price'] = Import::formatCents((int)$row['compare_price']);
-        fputcsv($out, array_map([Security::class, 'csvCell'], $row), ',', '"', '');
-    }
+        return array_values(array_map([Security::class, 'csvCell'], $row));
+    }, 'products');
 }
 function pageAttributes(): void {
     $db = Db::get();

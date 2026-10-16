@@ -51,9 +51,8 @@ final class OrderExport {
         $stmt = Db::prepareUnbuffered("SELECT o.*, (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_quantity
             FROM orders o WHERE {$filters['where']} ORDER BY o.created_at DESC, o.id DESC");
         $stmt->execute($filters['params']);
-        fputcsv($out, self::COLUMNS, ',', '"', '');
-        $count = 0;
-        while ($order = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        // A failure mid-stream is logged, raised as an incident and thrown (CsvExportTruncated).
+        return CsvExport::stream($out, $stmt, self::COLUMNS, static function (array $order): array {
             $address = json_decode((string)($order['shipping_addr'] ?? ''), true);
             $address = is_array($address) ? $address : [];
             $money = static fn(string $key): string => Import::formatCents((int)($order[$key] ?? 0));
@@ -63,9 +62,7 @@ final class OrderExport {
                 strtoupper((string)$order['currency']), $money('subtotal'), $money('shipping_cost'), $money('payment_fee'), $money('tax_amount'), $money('total'),
                 (int)$order['item_quantity'], $order['notes'] ?? '',
             ];
-            fputcsv($out, array_map(static fn($cell): string => Security::csvCell(is_scalar($cell) ? (string)$cell : ''), $row), ',', '"', '');
-            $count++;
-        }
-        return $count;
+            return array_map(static fn($cell): string => Security::csvCell(is_scalar($cell) ? (string)$cell : ''), $row);
+        }, 'orders');
     }
 }

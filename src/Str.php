@@ -5,12 +5,14 @@
  */
 class Str {
     /**
-     * The one e-mail normalisation for storage and lookups: trimmed, ASCII-lowercased. ASCII-only on
-     * purpose: it matches what is already stored (customers, coupon uses), and stored values are
-     * compared as-is in SQL, so no LOWER() is needed (SQLite's LOWER() is ASCII-only, MySQL's is not).
+     * The one e-mail normalisation for storage and lookups: trimmed, UTF-8 lowercased (mb_strtolower),
+     * so "Éva@x" and "éva@x" are one customer for coupon limits. Stored values are compared as-is in
+     * SQL (no LOWER(): SQLite's is ASCII-only, MySQL's is not), so both drivers agree. Customer
+     * registration only accepts ASCII addresses (FILTER_VALIDATE_EMAIL), where this equals the
+     * former ASCII-only lowercase.
      */
     public static function normalizeEmail(string $email): string {
-        return strtolower(trim($email));
+        return mb_strtolower(trim($email), 'UTF-8');
     }
 
     /** Diacritics map for Central European languages (SK/CZ/DE/PL) */

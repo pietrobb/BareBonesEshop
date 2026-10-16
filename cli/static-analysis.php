@@ -127,7 +127,8 @@ $architectureBudgets = [
     // +2 coupling: AdminForm (server-rendered BBF forms replace inline bbf.js) and Import (shared CSV price format).
     // +1 coupling: CatalogScope keeps the catalog_scope-bound editor queries (categories, digital assets, attribute links) out of the entrypoint.
     // +1 coupling: ProductEditor validates and saves brand, GTIN/MPN, SEO, extra categories and translations outside the entrypoint.
-    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1250, 'functions' => 24, 'max_function_lines' => 210, 'coupling' => 16],
+    // +1 coupling: CsvExport streams the product export and reports a truncated one (log, incident, 500 when possible).
+    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1250, 'functions' => 24, 'max_function_lines' => 210, 'coupling' => 17],
     // +1 coupling: ProductVariants owns variant validation, ledger stock booking and the delete/SKU-change guards.
     // +1 coupling: I18n gives the editor's labels in the admin language (A15.5).
     'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 105, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 4],

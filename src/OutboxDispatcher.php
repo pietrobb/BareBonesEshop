@@ -8,12 +8,15 @@
  *   for that endpoint only; the remaining endpoints and the extension listeners still run.
  * - The sweep runs before queued jobs, so it is time-boxed: no new event is claimed once
  *   $budgetSeconds have passed, and an endpoint that timed out TIMEOUT_SKIP_AFTER times in
- *   this run is skipped (left for the next run's retry) instead of stalling every event.
+ *   this run is skipped (left for the next run's retry) instead of stalling every event. An event
+ *   whose only failures are such skips is released without consuming a delivery attempt.
  */
 final class OutboxDispatcher
 {
     public const DEFAULT_BUDGET_SECONDS = 20;
     public const TIMEOUT_SKIP_AFTER = 2;
+    /** Failure reason of an endpoint not tried in this run. */
+    public const SKIPPED = 'skipped_after_timeouts';
 
     /**
      * @param callable|null $transport Webhook transport for tests (see Webhook::deliver)
@@ -77,6 +80,10 @@ final class OutboxDispatcher
             if ($failures === []) {
                 $owned = Outbox::markDelivered((string)$event['id'], $claimed);
                 if ($verbose) echo "Delivered outbox event {$event['id']} to {$matched} endpoint(s)\n";
+            } elseif (self::onlySkipped($failures)) {
+                // Nothing was tried and failed: give the claim back without burning an attempt.
+                $owned = Outbox::release((string)$event['id'], $claimed, implode(', ', $failures));
+                if ($verbose) echo "Released outbox event {$event['id']}: " . implode(', ', $failures) . "\n";
             } else {
                 $owned = Outbox::markRetry((string)$event['id'], $claimed, implode(', ', $failures), $claimed);
                 if ($verbose) echo "Deferred outbox event {$event['id']}: " . implode(', ', $failures) . "\n";
@@ -86,6 +93,15 @@ final class OutboxDispatcher
             Outbox::markRetry((string)$event['id'], (int)$event['attempts'], $e->getMessage(), (int)$event['attempts']);
             if ($verbose) echo "Deferred outbox event {$event['id']}: {$e->getMessage()}\n";
         }
+    }
+
+    /** @param list<string> $failures "<endpoint>:<reason>" entries */
+    private static function onlySkipped(array $failures): bool
+    {
+        foreach ($failures as $failure) {
+            if (!str_ends_with($failure, ':' . self::SKIPPED)) return false;
+        }
+        return $failures !== [];
     }
 
     /** @return string|null failure reason, null when delivered (now or earlier) */
@@ -101,7 +117,7 @@ final class OutboxDispatcher
             return 'invalid_config';
         }
         if (Outbox::endpointDelivered((string)$event['id'], $code)) return null;
-        if (($timeouts[$code] ?? 0) >= self::TIMEOUT_SKIP_AFTER) return 'skipped_after_timeouts';
+        if (($timeouts[$code] ?? 0) >= self::TIMEOUT_SKIP_AFTER) return self::SKIPPED;
 
         $sent = $clock();
         try {

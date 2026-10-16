@@ -218,19 +218,47 @@ function reviewSubmitResult(array $input): array {
 
     $error = Reviews::validationError($productId, $data);
     if ($error !== null) return ['ok' => false, 'error' => $error];
-    // One review per product per customer (guests: per hashed client IP) within the window.
-    $reviewer = $customerId > 0 ? 'review_once_' . $productId . '_c' . $customerId : 'review_once_' . $productId;
-    if (!Security::rateLimit($reviewer, 1, Reviews::DUPLICATE_WINDOW, $customerId <= 0)) {
-        http_response_code(429);
-        return ['ok' => false, 'error' => 'duplicate_review'];
+    // One review per product per customer within the window. Guests are keyed by their session
+    // (one IP can be a whole office or a CDN edge) plus a coarse per-IP cap. Check first and record
+    // only an accepted review, so refused retries never extend the block.
+    $buckets = reviewDuplicateBuckets($productId, $customerId);
+    foreach ($buckets as [$bucket, $max, $bindIp]) {
+        if (!Security::rateLimitAllows($bucket, $max, Reviews::DUPLICATE_WINDOW, $bindIp)) {
+            http_response_code(429);
+            header('Retry-After: ' . Reviews::DUPLICATE_WINDOW);
+            return ['ok' => false, 'error' => 'duplicate_review'];
+        }
     }
 
     [$ok, $id, $err] = Reviews::submit($productId, $data);
     if (!$ok) {
         return ['ok' => false, 'error' => $err];
     }
+    foreach ($buckets as [$bucket, , $bindIp]) {
+        Security::rateLimitRecord($bucket, $bindIp);
+    }
     // Reviews always land as pending — never visible until an admin approves.
     return ['ok' => true, 'id' => $id, 'status' => 'pending'];
+}
+
+/**
+ * Duplicate-review buckets as [action, max hits per Reviews::DUPLICATE_WINDOW, bind to client IP].
+ * Customers: one per account. Guests: one per session and Reviews::GUEST_IP_CAP per client IP
+ * (without a session, only the IP cap applies). $sessionId defaults to the active session's id.
+ *
+ * @return list<array{0:string,1:int,2:bool}>
+ */
+function reviewDuplicateBuckets(int $productId, int $customerId, ?string $sessionId = null): array {
+    if ($customerId > 0) {
+        return [['review_once_' . $productId . '_c' . $customerId, 1, false]];
+    }
+    $buckets = [];
+    $sid = $sessionId ?? (session_status() === PHP_SESSION_ACTIVE ? (string)session_id() : '');
+    if ($sid !== '') {
+        $buckets[] = ['review_once_' . $productId . '_s' . hash('sha256', $sid), 1, false];
+    }
+    $buckets[] = ['review_once_' . $productId . '_ip', Reviews::GUEST_IP_CAP, true];
+    return $buckets;
 }
 
 function apiWishlist(): array {

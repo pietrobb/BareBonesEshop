@@ -171,6 +171,7 @@
       "type": "object",
       "properties": {
         "worker_cron": {"oneOf": [{"const": ""}, {"type": "string", "pattern": "^(?:\\S+\\s+){4}\\S+$"}]},
+        "nginx_config": {"type": "string", "description": "Absolute path of the live nginx site config; doctor/preflight check its PHP location for the @redirect fallback. Empty: not checked."},
         "monitor_cron": {"oneOf": [{"const": ""}, {"type": "string", "pattern": "^(?:\\S+\\s+){4}\\S+$"}]}
       },
       "additionalProperties": true
