@@ -21,6 +21,69 @@ class GdprService {
     private const CUSTOMER_ORDERS = "SELECT o.id FROM orders o
         WHERE o.store_id = :order_store AND (o.customer_id = :customer_id
             OR (:verified = '1' AND o.customer_id IS NULL AND LOWER(o.customer_email) = LOWER(:owner_email)))";
+    // Carts are keyed by e-mail only: unverified accounts own just the carts that became their orders.
+    private const CUSTOMER_CARTS = "LOWER(customer_email) = LOWER(:cart_email) AND (store_id = :cart_store OR store_id IS NULL)
+              AND (:cart_verified = '1' OR order_id IN (" . self::CUSTOMER_ORDERS . "))";
+
+    /**
+     * PII registry: every table holding a customer's personal data, what erasure does with it and
+     * which exportCustomer() section carries it. Both anonymizeCustomer() and exportCustomer() refuse
+     * to finish when a registered table has no handler, and the schema walk in
+     * AuditOpsGdprErpRegression fails for a table with personal-data columns that is neither here
+     * nor in PII_EXEMPT_TABLES.
+     *   erase:  anonymize | delete | scrub | retain (legal hold, 'reason' says why)
+     *   export: section key of exportCustomer(), or null ('reason' says why)
+     */
+    public const PII_REGISTRY = [
+        'customers'                    => ['columns' => ['email', 'name', 'phone', 'vat_id'], 'erase' => 'anonymize', 'export' => 'customer'],
+        'customer_addresses'           => ['columns' => ['name', 'company', 'vat_id', 'street', 'city', 'zip', 'phone'], 'erase' => 'delete', 'export' => 'addresses'],
+        'customer_email_verifications' => ['columns' => ['customer_id', 'email'], 'erase' => 'delete', 'export' => null,
+            'reason' => 'single-use token hashes; the e-mail itself is exported with the customer'],
+        'password_reset_tokens'        => ['columns' => ['customer_id', 'token'], 'erase' => 'delete', 'export' => null,
+            'reason' => 'credential secrets are never exported'],
+        'orders'                       => ['columns' => ['customer_id', 'customer_name', 'customer_email', 'customer_phone', 'shipping_addr', 'ip_address', 'notes'], 'erase' => 'retain', 'export' => 'orders',
+            'reason' => '10-year accounting retention (SK Act 431/2002 §35), scrubbed by cli/gdpr-gc.php afterwards'],
+        'order_items'                  => ['columns' => ['name'], 'erase' => 'retain', 'export' => 'orders', 'reason' => 'accounting record of the retained order'],
+        'invoices'                     => ['columns' => ['customer_snapshot'], 'erase' => 'retain', 'export' => 'orders', 'reason' => 'accounting record of the retained order'],
+        'order_consents'               => ['columns' => ['ip_hash', 'user_agent'], 'erase' => 'retain', 'export' => 'orders',
+            'reason' => 'proof of the consent given at checkout (Art.7(1)), kept with the retained order'],
+        'coupon_uses'                  => ['columns' => ['customer_email'], 'erase' => 'scrub', 'export' => 'coupon_uses'],
+        'email_log'                    => ['columns' => ['recipient', 'subject', 'payload'], 'erase' => 'scrub', 'export' => 'email_log'],
+        'audit_log'                    => ['columns' => ['old_value', 'new_value'], 'erase' => 'scrub', 'export' => null,
+            'reason' => 'staff accountability trail; the data it snapshots is exported from its source tables'],
+        'cookie_consent'               => ['columns' => ['customer_id', 'session_id', 'ip_hash', 'user_agent'], 'erase' => 'scrub', 'export' => 'consent_history'],
+        'product_reviews'              => ['columns' => ['customer_id', 'author_name', 'title', 'body'], 'erase' => 'delete', 'export' => 'reviews'],
+        'wishlist_items'               => ['columns' => ['owner_key', 'customer_id'], 'erase' => 'delete', 'export' => 'wishlist'],
+        'abandoned_carts'              => ['columns' => ['customer_email', 'cart_data'], 'erase' => 'delete', 'export' => 'abandoned_carts'],
+        'rma_requests'                 => ['columns' => ['customer_id', 'reason', 'admin_note'], 'erase' => 'scrub', 'export' => 'rma_requests'],
+        'rma_items'                    => ['columns' => ['name'], 'erase' => 'retain', 'export' => 'rma_requests', 'reason' => 'product lines of the retained RMA (credit-note trail)'],
+        'return_receipts'              => ['columns' => ['note'], 'erase' => 'scrub', 'export' => 'rma_requests'],
+        'event_outbox'                 => ['columns' => ['payload'], 'erase' => 'scrub', 'export' => 'events'],
+        'queue_jobs'                   => ['columns' => ['payload'], 'erase' => 'scrub', 'export' => 'queued_jobs'],
+    ];
+
+    private const NOT_CUSTOMER_DATA = 'catalog, configuration or bookkeeping names, not a customer\'s personal data';
+
+    /** Tables with personal-data-like columns that deliberately stay out of erasure and export. */
+    public const PII_EXEMPT_TABLES = [
+        'admin_accounts' => 'staff identities, not shop customers',
+        'admin_devices' => 'staff devices, not shop customers',
+        'admin_sessions' => 'staff sessions, not shop customers',
+        'companies' => 'B2B legal entity shared by several accounts; it is not a natural person',
+        'email_suppressions' => 'kept on erasure so the address is never mailed again (opt-out must survive)',
+        'gdpr_events' => 'salted hashes only; the Art.5(2) accountability record of the erasure itself',
+        'merchant_notifications' => 'recipient is the merchant\'s own address',
+        'vat_id_cache' => 'public VIES register data keyed by VAT id, purged by TTL retention',
+        'credit_note_items' => 'product lines of a retained accounting document',
+        'api_clients' => self::NOT_CUSTOMER_DATA, 'attribute_definitions' => self::NOT_CUSTOMER_DATA,
+        'brands' => self::NOT_CUSTOMER_DATA, 'categories' => self::NOT_CUSTOMER_DATA, 'customer_groups' => self::NOT_CUSTOMER_DATA,
+        'digital_assets' => self::NOT_CUSTOMER_DATA, 'feeds' => self::NOT_CUSTOMER_DATA, 'payment_methods' => self::NOT_CUSTOMER_DATA,
+        'price_lists' => self::NOT_CUSTOMER_DATA, 'product_attrs' => self::NOT_CUSTOMER_DATA, 'product_specifications' => self::NOT_CUSTOMER_DATA,
+        'products' => self::NOT_CUSTOMER_DATA, 'products_fts' => self::NOT_CUSTOMER_DATA, 'promotions' => self::NOT_CUSTOMER_DATA,
+        'schema_migrations' => self::NOT_CUSTOMER_DATA, 'shipping_methods' => self::NOT_CUSTOMER_DATA, 'shipping_zones' => self::NOT_CUSTOMER_DATA,
+        'sqlite_sequence' => self::NOT_CUSTOMER_DATA, 'suppliers' => self::NOT_CUSTOMER_DATA, 'variants' => self::NOT_CUSTOMER_DATA,
+        'warehouses' => self::NOT_CUSTOMER_DATA,
+    ];
 
     /** @var ?string Cached salt (loaded once per request) */
     private static ?string $cachedSalt = null;
@@ -221,8 +284,10 @@ class GdprService {
 
     /**
      * Subject Access Request — export ALL data for a customer as a structured array.
-     * Returns: ['customer'=>{}, 'addresses'=>[], 'orders'=>[{order, items, invoices}],
-     *           'email_log'=>[], 'consent_history'=>[], 'meta'=>{exported_at, customer_id}]
+     * Returns: ['customer'=>{}, 'addresses'=>[], 'orders'=>[{order, items, invoices, payments, consents}],
+     *           'email_log'=>[], 'consent_history'=>[], 'coupon_uses'=>[], 'reviews'=>[], 'wishlist'=>[],
+     *           'abandoned_carts'=>[], 'rma_requests'=>[{rma, items, receipts}], 'events'=>[], 'queued_jobs'=>[],
+     *           'meta'=>{exported_at, customer_id}] — one section per PII_REGISTRY 'export' key.
      * Payment data redacted (no `raw_response` field).
      */
     public static function exportCustomer(int $customerId): array {
@@ -246,6 +311,7 @@ class GdprService {
         $stmt = $db->prepare("SELECT * FROM orders WHERE id IN (" . self::CUSTOMER_ORDERS . ") ORDER BY id ASC");
         $stmt->execute($ownership);
         $orders = [];
+        $hasOrderConsents = self::hasTable($db, 'order_consents');
         foreach ($stmt->fetchAll() as $o) {
             $orderId = (int)$o['id'];
             $itemsStmt = $db->prepare("SELECT * FROM order_items WHERE order_id = ? ORDER BY id");
@@ -261,11 +327,18 @@ class GdprService {
                 FROM payment_transactions WHERE order_id = ? AND store_id = ? ORDER BY id
             ");
             $payStmt->execute([$orderId, StoreContext::current()->id()]);
+            $consents = [];
+            if ($hasOrderConsents) {
+                $consentStmt = $db->prepare("SELECT * FROM order_consents WHERE order_id = ? ORDER BY id");
+                $consentStmt->execute([$orderId]);
+                $consents = $consentStmt->fetchAll();
+            }
             $orders[] = [
                 'order'    => $o,
                 'items'    => $itemsStmt->fetchAll(),
                 'invoices' => $invStmt->fetchAll(),
                 'payments' => $payStmt->fetchAll(),
+                'consents' => $consents,
             ];
         }
 
@@ -278,23 +351,78 @@ class GdprService {
         $stmt->execute($ownership + [':log_store' => StoreContext::current()->id(), ':recipient_email' => $email, ':unlinked_verified' => $ownership[':verified']]);
         $emailLog = $stmt->fetchAll();
 
-        // Cookie consent history by customer_id
-        $stmt = $db->prepare("SELECT * FROM cookie_consent WHERE customer_id = ? ORDER BY id ASC");
-        $stmt->execute([$customerId]);
-        $consent = $stmt->fetchAll();
+        $store = StoreContext::current()->id();
+        $orderIds = self::customerOrderIds($db, $ownership);
+        $sessionKeys = self::customerSessionKeys($db, $customerId, $email, $ownership, $orderIds);
 
-        return [
+        // Cookie consent history: the account's own records and those of its browser sessions.
+        $consent = [];
+        if (self::hasTable($db, 'cookie_consent')) {
+            $stmt = $db->prepare("SELECT * FROM cookie_consent WHERE customer_id = ?" . self::inList(' OR session_id', $sessionKeys) . " ORDER BY id ASC");
+            $stmt->execute(array_merge([$customerId], $sessionKeys));
+            $consent = $stmt->fetchAll();
+        }
+
+        $stmt = $db->prepare("SELECT id, store_id, order_id, coupon_code, customer_email, discount, created_at FROM coupon_uses
+            WHERE store_id = :coupon_store AND LOWER(customer_email) = LOWER(:coupon_email) AND order_id IN (" . self::CUSTOMER_ORDERS . ") ORDER BY id ASC");
+        $stmt->execute($ownership + [':coupon_store' => $store, ':coupon_email' => $email]);
+        $couponUses = $stmt->fetchAll();
+
+        $stmt = $db->prepare("SELECT * FROM product_reviews WHERE customer_id = ? ORDER BY id ASC");
+        $stmt->execute([$customerId]);
+        $reviews = $stmt->fetchAll();
+
+        $owners = array_merge(['c:' . $customerId], array_map(static fn(string $key): string => 's:' . $key, $sessionKeys));
+        $stmt = $db->prepare("SELECT * FROM wishlist_items WHERE customer_id = ?" . self::inList(' OR owner_key', $owners) . " ORDER BY id ASC");
+        $stmt->execute(array_merge([$customerId], $owners));
+        $wishlist = $stmt->fetchAll();
+
+        $stmt = $db->prepare("SELECT id, session_id, customer_email, cart_data, cart_value, item_count, currency, locale, order_id,
+                created_at, updated_at, reminded_at, converted_at, reminder_status
+            FROM abandoned_carts WHERE " . self::CUSTOMER_CARTS . " ORDER BY id ASC");
+        $stmt->execute($ownership + [':cart_email' => $email, ':cart_store' => $store, ':cart_verified' => $ownership[':verified']]);
+        $carts = $stmt->fetchAll();
+
+        $stmt = $db->prepare("SELECT * FROM rma_requests
+            WHERE store_id = :rma_store AND (customer_id = :rma_customer OR order_id IN (" . self::CUSTOMER_ORDERS . ")) ORDER BY id ASC");
+        $stmt->execute($ownership + [':rma_store' => $store, ':rma_customer' => $customerId]);
+        $rmas = [];
+        $hasReceipts = self::hasTable($db, 'return_receipts');
+        foreach ($stmt->fetchAll() as $rma) {
+            $itemsStmt = $db->prepare("SELECT * FROM rma_items WHERE rma_id = ? ORDER BY id");
+            $itemsStmt->execute([(int)$rma['id']]);
+            $receipts = [];
+            if ($hasReceipts) {
+                $receiptStmt = $db->prepare("SELECT id, rma_item_id, quantity, disposition, note, created_at FROM return_receipts WHERE rma_id = ? AND store_id = ? ORDER BY id");
+                $receiptStmt->execute([(int)$rma['id'], $store]);
+                $receipts = $receiptStmt->fetchAll();
+            }
+            $rmas[] = ['rma' => $rma, 'items' => $itemsStmt->fetchAll(), 'receipts' => $receipts];
+        }
+
+        $payloads = self::customerPayloadRows($db, $customerId, $email, $ownership, $orderIds);
+
+        $export = [
             'meta' => [
                 'exported_at' => gmdate('c'),
                 'customer_id' => $customerId,
-                'export_version' => 1,
+                'export_version' => 2,
             ],
             'customer' => $customer,
             'addresses' => $addresses,
             'orders'    => $orders,
             'email_log' => $emailLog,
             'consent_history' => $consent,
+            'coupon_uses' => $couponUses,
+            'reviews' => $reviews,
+            'wishlist' => $wishlist,
+            'abandoned_carts' => $carts,
+            'rma_requests' => $rmas,
+            'events' => array_map(static fn(array $row): array => array_intersect_key($row, array_flip(['id', 'event_type', 'aggregate_type', 'aggregate_id', 'payload', 'status', 'occurred_at'])), $payloads['event_outbox']),
+            'queued_jobs' => array_map(static fn(array $row): array => array_intersect_key($row, array_flip(['id', 'type', 'state', 'payload', 'created_at', 'completed_at'])), $payloads['queue_jobs']),
         ];
+        self::assertRegistryCovered('export', array_keys($export));
+        return $export;
     }
 
     /**
@@ -305,7 +433,9 @@ class GdprService {
      *   - email_log: scrub PII (recipient→deleted-{id}@anonymized.local, subject→[erased], payload→[erased])
      *   - audit_log: scrub payload_json with placeholder
      *   - coupon_uses: hash email
+     *   - everything else in PII_REGISTRY: see eraseCustomerContent()
      *   - orders.customer_*, invoices.customer_snapshot: KEPT (10y legal retention)
+     * Job files of the file-backed JobQueue (jobs_dir) are outside the database and not rewritten.
      *
      * Logs gdpr_events row with action='erase'.
      */
@@ -404,7 +534,15 @@ class GdprService {
                 }
             }
 
-            $rowsOther = self::eraseCustomerContent($db, $customerId, $origEmail, $ownership, $placeholder, $erasureMarker);
+            $rows = [
+                'customers'          => $rowsCust,
+                'customer_addresses' => $rowsAddr,
+                'email_log'          => $rowsEmail,
+                'audit_log'          => $rowsAudit,
+                'coupon_uses'        => $rowsCoupon,
+            ] + self::eraseCustomerContent($db, $customerId, $origEmail, $ownership, $placeholder, $erasureMarker);
+            // A registered table without an erasure step must not report a completed erasure.
+            self::assertRegistryCovered('erase', array_keys($rows));
 
             $db->commit();
         } catch (\Throwable $e) {
@@ -419,13 +557,7 @@ class GdprService {
                 'customer_id' => $customerId,
                 'email'       => $origEmail,
                 'actor'       => $actor,
-                'payload'     => [
-                    'customers'     => $rowsCust,
-                    'addresses'     => $rowsAddr,
-                    'email_log'     => $rowsEmail,
-                    'audit_log'     => $rowsAudit,
-                    'coupon_uses'   => $rowsCoupon,
-                ] + $rowsOther,
+                'payload'     => $rows,
             ]);
         } catch (\Throwable $e) {
             $errorId = bin2hex(random_bytes(6));
@@ -435,65 +567,171 @@ class GdprService {
         return [
             'status' => 'anonymized',
             'customer_id' => $customerId,
-            'rows' => [
-                'customers'   => $rowsCust,
-                'addresses'   => $rowsAddr,
-                'email_log'   => $rowsEmail,
-                'audit_log'   => $rowsAudit,
-                'coupon_uses' => $rowsCoupon,
-            ] + $rowsOther,
+            'rows' => $rows,
         ];
     }
 
+    /** @param 'erase'|'export' $kind */
+    private static function assertRegistryCovered(string $kind, array $handled): void {
+        $missing = [];
+        foreach (self::PII_REGISTRY as $table => $entry) {
+            $key = $kind === 'erase' ? ($entry['erase'] === 'retain' ? null : $table) : $entry['export'];
+            if ($key !== null && !in_array($key, $handled, true)) $missing[] = $table;
+        }
+        if ($missing !== []) throw new LogicException("GDPR {$kind} has no handler for registered PII table(s): " . implode(', ', $missing));
+    }
+
     /**
-     * Personal data outside the customer/order records: reviews and wishlists (deleted), abandoned
-     * carts (deleted), RMA reasons (scrubbed, the RMA stays for the credit-note trail) and outbox
-     * event payloads (customer events rewritten, the e-mail replaced in order events).
+     * Personal data outside the customer/order records: reviews, wishlists (account and linked
+     * browser sessions) and abandoned carts are deleted; verification and password-reset tokens are
+     * deleted (the customer row is updated, so no FK cascade fires); cookie consents keep only the
+     * choice; RMA reasons, admin notes and return receipt notes are scrubbed (the RMA stays for the
+     * credit-note trail); outbox events and queued jobs lose the e-mail (matched case-insensitively,
+     * in PHP, so a mixed-case guest e-mail is caught on SQLite and MySQL alike) and customer events
+     * are rewritten.
      */
     private static function eraseCustomerContent(PDO $db, int $customerId, string $email, array $ownership, string $placeholder, string $marker): array {
         $store = StoreContext::current()->id();
         $rows = [];
+        $orderIds = self::customerOrderIds($db, $ownership);
+        // Read before carts and consents are erased: they are what links the browser sessions.
+        $sessionKeys = self::customerSessionKeys($db, $customerId, $email, $ownership, $orderIds);
 
         $stmt = $db->prepare("DELETE FROM product_reviews WHERE customer_id = :id");
         $stmt->execute([':id' => $customerId]);
         $rows['product_reviews'] = $stmt->rowCount();
 
-        $stmt = $db->prepare("DELETE FROM wishlist_items WHERE customer_id = :id OR owner_key = :owner");
-        $stmt->execute([':id' => $customerId, ':owner' => 'c:' . $customerId]);
+        $owners = array_merge(['c:' . $customerId], array_map(static fn(string $key): string => 's:' . $key, $sessionKeys));
+        $stmt = $db->prepare("DELETE FROM wishlist_items WHERE customer_id = ?" . self::inList(' OR owner_key', $owners));
+        $stmt->execute(array_merge([$customerId], $owners));
         $rows['wishlist_items'] = $stmt->rowCount();
 
-        // Carts are keyed by e-mail only: unverified accounts may erase just carts that became their orders.
-        $stmt = $db->prepare("DELETE FROM abandoned_carts
-            WHERE LOWER(customer_email) = LOWER(:cart_email) AND (store_id = :cart_store OR store_id IS NULL)
-              AND (:cart_verified = '1' OR order_id IN (" . self::CUSTOMER_ORDERS . "))");
+        $stmt = $db->prepare("DELETE FROM abandoned_carts WHERE " . self::CUSTOMER_CARTS);
         $stmt->execute($ownership + [':cart_email' => $email, ':cart_store' => $store, ':cart_verified' => $ownership[':verified']]);
         $rows['abandoned_carts'] = $stmt->rowCount();
 
-        $stmt = $db->prepare("UPDATE rma_requests SET reason = :marker, updated_at = " . Db::now() . "
-            WHERE store_id = :rma_store AND (customer_id = :rma_customer OR order_id IN (" . self::CUSTOMER_ORDERS . "))");
-        $stmt->execute($ownership + [':marker' => $marker, ':rma_store' => $store, ':rma_customer' => $customerId]);
-        $rows['rma_requests'] = $stmt->rowCount();
+        foreach (['password_reset_tokens', 'customer_email_verifications'] as $tokenTable) {
+            $rows[$tokenTable] = 0;
+            if (!self::hasTable($db, $tokenTable)) continue;
+            $stmt = $db->prepare("DELETE FROM {$tokenTable} WHERE customer_id = ?");
+            $stmt->execute([$customerId]);
+            $rows[$tokenTable] = $stmt->rowCount();
+        }
 
-        $stmt = $db->prepare("UPDATE event_outbox SET payload = :payload
-            WHERE store_id = :event_store AND aggregate_type = 'customer' AND aggregate_id = :aggregate");
-        $stmt->execute([
-            ':payload' => json_encode(['customer_id' => $customerId, 'erased' => true]),
-            ':event_store' => $store,
-            ':aggregate' => (string)$customerId,
-        ]);
-        $rows['event_outbox'] = $stmt->rowCount();
-        // Order ids are bound as strings: a CAST(... AS CHAR) subquery mixes collations with aggregate_id on MySQL.
-        $stmt = $db->prepare(self::CUSTOMER_ORDERS);
-        $stmt->execute($ownership);
-        $orderIds = array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN));
-        if ($orderIds !== []) {
-            $stmt = $db->prepare("UPDATE event_outbox SET payload = REPLACE(payload, ?, ?)
-                WHERE store_id = ? AND aggregate_type = 'order' AND INSTR(payload, ?) > 0
-                  AND aggregate_id IN (" . implode(',', array_fill(0, count($orderIds), '?')) . ")");
-            $stmt->execute(array_merge([$email, $placeholder, $store, $email], $orderIds));
-            $rows['event_outbox'] += $stmt->rowCount();
+        // The consent choice itself stays as Art.7(1) evidence; nothing links it to the person any more.
+        $rows['cookie_consent'] = 0;
+        if (self::hasTable($db, 'cookie_consent')) {
+            $stmt = $db->prepare("UPDATE cookie_consent SET customer_id = NULL, session_id = NULL, ip_hash = NULL, user_agent = NULL
+                WHERE customer_id = ?" . self::inList(' OR session_id', $sessionKeys));
+            $stmt->execute(array_merge([$customerId], $sessionKeys));
+            $rows['cookie_consent'] = $stmt->rowCount();
+        }
+
+        // Staff notes are free text that often quotes the customer: redacted like the reason, never kept.
+        $rmaScope = "store_id = :rma_store AND (customer_id = :rma_customer OR order_id IN (" . self::CUSTOMER_ORDERS . "))";
+        $stmt = $db->prepare("UPDATE rma_requests SET reason = :marker,
+                admin_note = CASE WHEN admin_note IS NULL OR admin_note = '' THEN admin_note ELSE :note_marker END,
+                updated_at = " . Db::now() . "
+            WHERE {$rmaScope}");
+        $stmt->execute($ownership + [':marker' => $marker, ':note_marker' => $marker, ':rma_store' => $store, ':rma_customer' => $customerId]);
+        $rows['rma_requests'] = $stmt->rowCount();
+        $rows['return_receipts'] = 0;
+        if (self::hasTable($db, 'return_receipts')) {
+            $stmt = $db->prepare("UPDATE return_receipts SET note = :marker
+                WHERE store_id = :receipt_store AND note IS NOT NULL AND note <> '' AND rma_id IN (SELECT id FROM rma_requests WHERE {$rmaScope})");
+            $stmt->execute($ownership + [':marker' => $marker, ':receipt_store' => $store, ':rma_store' => $store, ':rma_customer' => $customerId]);
+            $rows['return_receipts'] = $stmt->rowCount();
+        }
+
+        $payloads = self::customerPayloadRows($db, $customerId, $email, $ownership, $orderIds);
+        $rows['event_outbox'] = 0;
+        $erasedEvent = json_encode(['customer_id' => $customerId, 'erased' => true]);
+        $update = $db->prepare("UPDATE event_outbox SET payload = ? WHERE id = ?");
+        foreach ($payloads['event_outbox'] as $event) {
+            $payload = $event['aggregate_type'] === 'customer' ? $erasedEvent : str_ireplace($email, $placeholder, (string)$event['payload']);
+            $update->execute([$payload, $event['id']]);
+            $rows['event_outbox'] += $update->rowCount();
+        }
+        $rows['queue_jobs'] = 0;
+        $update = $db->prepare("UPDATE queue_jobs SET payload = ? WHERE id = ?");
+        foreach ($payloads['queue_jobs'] as $job) {
+            $update->execute([str_ireplace($email, $placeholder, (string)$job['payload']), $job['id']]);
+            $rows['queue_jobs'] += $update->rowCount();
         }
         return $rows;
+    }
+
+    /** @return list<string> ids of the orders the customer owns, as strings (see customerPayloadRows). */
+    private static function customerOrderIds(PDO $db, array $ownership): array {
+        $stmt = $db->prepare(self::CUSTOMER_ORDERS);
+        $stmt->execute($ownership);
+        return array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Browser session keys (Security::sessionKey()) provably used by the customer: consents logged
+     * while signed in, the customer's carts and the checkout sessions of the customer's orders. An
+     * anonymous wishlist is keyed 's:<session key>', so these find it after the session is gone.
+     *
+     * @return list<string>
+     */
+    private static function customerSessionKeys(PDO $db, int $customerId, string $email, array $ownership, array $orderIds): array {
+        $keys = [];
+        if (self::hasTable($db, 'cookie_consent')) {
+            $stmt = $db->prepare("SELECT session_id FROM cookie_consent WHERE customer_id = ? AND session_id IS NOT NULL");
+            $stmt->execute([$customerId]);
+            $keys = array_merge($keys, $stmt->fetchAll(PDO::FETCH_COLUMN));
+        }
+        $stmt = $db->prepare("SELECT session_id FROM abandoned_carts WHERE " . self::CUSTOMER_CARTS);
+        $stmt->execute($ownership + [':cart_email' => $email, ':cart_store' => StoreContext::current()->id(), ':cart_verified' => $ownership[':verified']]);
+        $keys = array_merge($keys, $stmt->fetchAll(PDO::FETCH_COLUMN));
+        if ($orderIds !== [] && self::hasTable($db, 'checkout_sessions')) {
+            $stmt = $db->prepare("SELECT browser_session_hash FROM checkout_sessions WHERE browser_session_hash IS NOT NULL" . self::inList(' AND order_id', $orderIds));
+            $stmt->execute($orderIds);
+            $keys = array_merge($keys, $stmt->fetchAll(PDO::FETCH_COLUMN));
+        }
+        // Converted carts are re-keyed 'order:<id>'; only real session keys can own a wishlist.
+        return array_values(array_unique(array_filter(array_map('strval', $keys), static fn(string $key): bool => preg_match('/^[a-f0-9]{64}$/D', $key) === 1)));
+    }
+
+    /**
+     * Outbox events and queued jobs carrying the customer's data: the customer's own events, events
+     * of the customer's orders whose payload names the e-mail, and jobs naming the e-mail (for an
+     * unverified account only jobs of its own orders). The e-mail is matched case-insensitively in
+     * PHP: a SQL REPLACE/INSTR is case-sensitive on SQLite and collation-dependent on MySQL.
+     *
+     * @return array{event_outbox: list<array<string, mixed>>, queue_jobs: list<array<string, mixed>>}
+     */
+    private static function customerPayloadRows(PDO $db, int $customerId, string $email, array $ownership, array $orderIds): array {
+        $store = StoreContext::current()->id();
+        $stmt = $db->prepare("SELECT * FROM event_outbox WHERE store_id = ? AND aggregate_type = 'customer' AND aggregate_id = ? ORDER BY id");
+        $stmt->execute([$store, (string)$customerId]);
+        $events = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $jobs = [];
+        if ($email === '') return ['event_outbox' => $events, 'queue_jobs' => $jobs];
+        // Order ids are bound as strings: a CAST(... AS CHAR) subquery mixes collations with aggregate_id on MySQL.
+        if ($orderIds !== []) {
+            $stmt = $db->prepare("SELECT * FROM event_outbox WHERE store_id = ? AND aggregate_type = 'order'" . self::inList(' AND aggregate_id', $orderIds) . " ORDER BY id");
+            $stmt->execute(array_merge([$store], $orderIds));
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $event) {
+                if (stripos((string)$event['payload'], $email) !== false) $events[] = $event;
+            }
+        }
+        if (!self::hasTable($db, 'queue_jobs')) return ['event_outbox' => $events, 'queue_jobs' => $jobs];
+        $stmt = $db->prepare("SELECT * FROM queue_jobs WHERE store_id = ? AND INSTR(LOWER(payload), ?) > 0 ORDER BY created_at, id");
+        $stmt->execute([$store, strtolower($email)]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $job) {
+            if (stripos((string)$job['payload'], $email) === false) continue;
+            $payload = json_decode((string)$job['payload'], true);
+            $orderId = is_array($payload) && isset($payload['order_id']) ? (string)(int)$payload['order_id'] : '';
+            if ((string)$ownership[':verified'] === '1' || in_array($orderId, $orderIds, true)) $jobs[] = $job;
+        }
+        return ['event_outbox' => $events, 'queue_jobs' => $jobs];
+    }
+
+    /** " <column> IN (?, ...)" for a non-empty list, '' otherwise; $prefix carries the connective and column. */
+    private static function inList(string $prefix, array $values): string {
+        return $values === [] ? '' : $prefix . ' IN (' . implode(', ', array_fill(0, count($values), '?')) . ')';
     }
 
     /**
@@ -704,6 +942,11 @@ class GdprService {
             ':verified' => !empty($customer['email_verified_at']) ? 1 : 0,
             ':owner_email' => (string)$customer['email'],
         ];
+    }
+
+    /** Tables added by later migrations may be missing on a partially migrated schema: there is nothing to erase there. */
+    private static function hasTable(PDO $db, string $table): bool {
+        return self::tableColumns($db, $table) !== [];
     }
 
     private static function tableColumns(PDO $db, string $table): array {
