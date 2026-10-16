@@ -2,6 +2,9 @@
 
 final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
 {
+    /** Exception code of a restoreBackupDump() failure after the live database was dropped: keep the rollback dump. */
+    public const RESTORE_FAILED_AFTER_DROP = 4201;
+
     private string $host;
     private int $port;
     private string $database;
@@ -155,7 +158,8 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
         ];
         $this->validateSchemaSettings($schema);
 
-        // Re-prove that the stored dump can be restored before touching the live database.
+        // Re-prove that the stored dump is confined to one database and can be restored before touching live.
+        self::countDumpRows($dumpPath);
         $this->verifyDisposableRestore($dumpPath, $schema, $metadata['inventory']);
 
         $server = $this->serverConnection();
@@ -176,8 +180,10 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
      * then is the live database replaced and proven identical to the scratch copy. MySQL cannot
      * rename a database and RENAME TABLE cannot move triggers, views, routines or events across
      * schemas, so live is replaced by drop + import rather than swapped. If that import or its
-     * verification fails, $rollbackDumpPath (a dump of live taken just before) is imported back.
-     * Every writer must be stopped by the caller; sessions the server shows on the live database
+     * verification fails, $rollbackDumpPath (a dump of live taken just before) is imported back and
+     * proven to hold the live schema and exactly the rows that dump carries. Any failure after live
+     * was dropped throws with code RESTORE_FAILED_AFTER_DROP: the caller must keep $rollbackDumpPath.
+     * Both dumps must be confined to one database (see countDumpRows()). Every writer must be stopped by the caller; sessions the server shows on the live database
      * are refused, except the caller's own $ignoredSessionIds (without the PROCESS privilege only
      * this user's own sessions are visible).
      */
@@ -197,6 +203,7 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
         $schema ??= $this->schemaSettings($server, $this->database);
         $this->validateSchemaSettings($schema);
         $dumpRows = self::countDumpRows($dumpPath);
+        $rollbackRows = self::countDumpRows($rollbackDumpPath);
         if ($this->schemaExists($server, $scratchDatabase)) {
             throw new RuntimeException("Refusing to overwrite existing MySQL scratch database {$scratchDatabase}; drop it once you have checked it holds nothing you need");
         }
@@ -219,6 +226,8 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
             }
 
             // 3. Replace live and prove it equals the verified scratch copy, else re-import the previous database.
+            $previousSchema = $this->schemaInventory($server, $this->database);
+            $previousCharset = $this->schemaSettings($server, $this->database);
             $server->exec('DROP DATABASE ' . $this->quoteIdentifier($this->database));
             try {
                 $this->createSchema($server, $this->database, $schema);
@@ -228,13 +237,20 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
             } catch (Throwable $restoreError) {
                 try {
                     $server->exec('DROP DATABASE IF EXISTS ' . $this->quoteIdentifier($this->database));
-                    $this->createSchema($server, $this->database, $schema);
+                    $this->createSchema($server, $this->database, $previousCharset);
                     $this->import($rollbackDumpPath, $this->database);
+                    // The re-imported database must be the previous one: same schema, exactly the dumped rows.
+                    $reimported = $this->inventory($server, $this->database);
+                    $this->assertMatchingInventory($previousSchema, array_intersect_key($reimported, $previousSchema), 'rollback re-import schema');
+                    if ($reimported['row_counts'] !== $this->expectedRowCounts($reimported, $rollbackRows)) {
+                        throw new RuntimeException('MySQL rollback re-import row counts do not match the rows in the pre-restore dump');
+                    }
                 } catch (Throwable $rollbackError) {
                     throw new RuntimeException('MySQL restore failed (' . $restoreError->getMessage() . ') and re-importing the previous database also failed ('
-                        . $rollbackError->getMessage() . "); import {$rollbackDumpPath} manually", 0, $restoreError);
+                        . $rollbackError->getMessage() . "); import {$rollbackDumpPath} manually", self::RESTORE_FAILED_AFTER_DROP, $restoreError);
                 }
-                throw new RuntimeException('MySQL restore failed; the previous database was re-imported: ' . $restoreError->getMessage(), 0, $restoreError);
+                throw new RuntimeException('MySQL restore failed; the previous database was re-imported and verified: ' . $restoreError->getMessage(),
+                    self::RESTORE_FAILED_AFTER_DROP, $restoreError);
             }
 
             $migrations = null;
@@ -258,8 +274,13 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
 
     /**
      * Rows per table in a mysqldump/mariadb-dump file, counted from its INSERT statements (one value
-     * tuple is one row). Strings are skipped with the dump's quoting and backslash escapes, and
-     * statements inside DELIMITER blocks (routine and trigger bodies) are not data.
+     * tuple is one row). Strings, quoted identifiers and comments are skipped with the dump's quoting
+     * and backslash escapes, and statements inside DELIMITER blocks (routine and trigger bodies) are
+     * not data.
+     *
+     * The same scan proves the dump stays inside the database it is imported into: a top-level USE,
+     * CONNECT, CREATE/ALTER/DROP DATABASE|SCHEMA, a mysql client command (SOURCE, SYSTEM, \u, \!, ...)
+     * or any backslash outside a string is refused, so nothing is imported from such a dump.
      */
     public static function countDumpRows(string $dumpPath): array
     {
@@ -269,48 +290,87 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
         }
         $counts = [];
         $delimiter = ';';
-        $table = null;
+        $table = null;          // INSERT target while inside a data statement
+        $statementStart = true; // the next significant character starts a statement
         $depth = 0;
-        $quote = null;
+        $quote = null;          // ', " or ` while inside a quoted string/identifier
         $escaped = false;
+        $blockComment = false;
+        $lineNumber = 0;
         try {
             while (($line = fgets($handle)) !== false) {
-                $offset = 0;
-                if ($table === null) {
-                    if (preg_match('/^DELIMITER\s+(\S+)/i', $line, $match) === 1) {
-                        $delimiter = $match[1];
-                        continue;
-                    }
-                    if ($delimiter !== ';' || preg_match('/^INSERT INTO `((?:[^`]|``)+)`(?: \([^)]*\))? VALUES ?/', $line, $match) !== 1) {
-                        continue;
-                    }
-                    $table = str_replace('``', '`', $match[1]);
-                    $counts[$table] ??= 0;
-                    $offset = strlen($match[0]);
+                $lineNumber++;
+                if ($statementStart && !$blockComment && $quote === null
+                    && preg_match('/^DELIMITER\s+(\S+)/i', $line, $match) === 1) {
+                    $delimiter = $match[1];
+                    continue;
                 }
                 $length = strlen($line);
-                for ($i = $offset; $i < $length; $i++) {
+                for ($i = 0; $i < $length; $i++) {
                     $char = $line[$i];
+                    if ($blockComment) {
+                        if ($char === '*' && ($line[$i + 1] ?? '') === '/') {
+                            $blockComment = false;
+                            $i++;
+                        }
+                        continue;
+                    }
                     if ($quote !== null) {
                         if ($escaped) {
                             $escaped = false;
-                        } elseif ($char === '\\') {
+                        } elseif ($char === '\\' && $quote !== '`') {
                             $escaped = true;
                         } elseif ($char === $quote) {
                             $quote = null;
                         }
-                    } elseif ($char === "'" || $char === '"') {
+                        continue;
+                    }
+                    if ($char === '#' || ($char === '-' && ($line[$i + 1] ?? '') === '-' && ctype_space($line[$i + 2] ?? "\n"))) {
+                        break; // comment to the end of the line
+                    }
+                    // /*! ... */ and MariaDB's /*M! ... */ are executed, not comments.
+                    if ($char === '/' && ($line[$i + 1] ?? '') === '*' && ($line[$i + 2] ?? '') !== '!'
+                        && !(($line[$i + 2] ?? '') === 'M' && ($line[$i + 3] ?? '') === '!')) {
+                        $blockComment = true;
+                        $i++;
+                        continue;
+                    }
+                    if ($statementStart) {
+                        if (ctype_space($char)) {
+                            continue;
+                        }
+                        $rest = substr($line, $i);
+                        if (preg_match('/^\/\*M!999999\\\\- enable the sandbox mode \*\/\s*$/', $rest) === 1) {
+                            break; // mariadb-dump's first line: the mariadb client's sandbox mode (no client commands)
+                        }
+                        $statementStart = false;
+                        if (preg_match('/^(?:\/\*M?!\d*\s*)?(?:USE|CONNECT|SOURCE|SYSTEM|(?:CREATE|ALTER|DROP)\s+(?:DATABASE|SCHEMA))\b/i', $rest) === 1) {
+                            throw new RuntimeException("MySQL dump line {$lineNumber} switches or changes databases (USE / CREATE DATABASE / client command); "
+                                . 'refusing to import a dump that is not confined to one database');
+                        }
+                        if ($delimiter === ';' && preg_match('/^INSERT INTO `((?:[^`]|``)+)`(?: \([^)]*\))? VALUES ?/', $rest, $match) === 1) {
+                            $table = str_replace('``', '`', $match[1]);
+                            $counts[$table] ??= 0;
+                            $i += strlen($match[0]) - 1;
+                            continue;
+                        }
+                    }
+                    if ($char === '\\') {
+                        throw new RuntimeException("MySQL dump line {$lineNumber} holds a backslash outside a string (mysql client command); refusing to import it");
+                    }
+                    if ($char === "'" || $char === '"' || $char === '`') {
                         $quote = $char;
-                    } elseif ($char === '(') {
+                    } elseif ($table !== null && $char === '(') {
                         if ($depth === 0) {
                             $counts[$table]++;
                         }
                         $depth++;
-                    } elseif ($char === ')') {
+                    } elseif ($table !== null && $char === ')') {
                         $depth--;
-                    } elseif ($char === ';' && $depth === 0) {
+                    } elseif ($depth === 0 && $char === $delimiter[0] && substr_compare($line, $delimiter, $i, strlen($delimiter)) === 0) {
                         $table = null;
-                        break;
+                        $statementStart = true;
+                        $i += strlen($delimiter) - 1;
                     }
                 }
             }
@@ -318,7 +378,7 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
             fclose($handle);
         }
         if ($table !== null || $depth !== 0 || $quote !== null) {
-            throw new RuntimeException('MySQL dump ends inside an INSERT statement (truncated dump)');
+            throw new RuntimeException('MySQL dump ends inside an INSERT statement or a quoted string (truncated dump)');
         }
         ksort($counts);
         return $counts;
@@ -342,20 +402,22 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
         return $expected;
     }
 
-    /** Sessions using $database other than this one and the caller's own ($ignoredSessionIds). */
+    /**
+     * Sessions using $database other than this one and the caller's own ($ignoredSessionIds).
+     * Fails closed: if the process list cannot be read, the restore is refused.
+     */
     private function otherSessions(PDO $server, string $database, array $ignoredSessionIds): int
     {
         try {
             $statement = $server->prepare('SELECT ID FROM information_schema.PROCESSLIST WHERE DB = ? AND ID <> CONNECTION_ID()');
             $statement->execute([$database]);
-            $ignored = array_map('intval', $ignoredSessionIds);
-            return count(array_filter(
-                $statement->fetchAll(PDO::FETCH_COLUMN),
-                static fn($id): bool => !in_array((int)$id, $ignored, true)
-            ));
+            $ids = $statement->fetchAll(PDO::FETCH_COLUMN);
         } catch (Throwable $e) {
-            return 0;
+            throw new RuntimeException('Refusing to replace the live MySQL database: cannot read the session list to prove no other session uses it ('
+                . $e->getMessage() . ')', 0, $e);
         }
+        $ignored = array_map('intval', $ignoredSessionIds);
+        return count(array_filter($ids, static fn($id): bool => !in_array((int)$id, $ignored, true)));
     }
 
     /**

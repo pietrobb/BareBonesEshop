@@ -255,6 +255,8 @@ return [
     'backup_storage_dir'  => dirname(__DIR__) . '/bareboneseshop-private/backups',
     'backup_storage_adapter' => 'LocalBackupStorage', // MountedBackupStorage requires an operator-mounted off-site target + sentinel
     'backup_log_file'     => dirname(__DIR__) . '/bareboneseshop-private/logs/backup.log',
+    // Keeps the pre-restore MySQL dump (0600) when a restore fails after dropping db_name; default <private_runtime_dir>/restore-recovery
+    'backup_recovery_dir' => dirname(__DIR__) . '/bareboneseshop-private/restore-recovery',
     'structured_log_file' => dirname(__DIR__) . '/bareboneseshop-private/logs/application.jsonl',
     'metrics_log_file'    => dirname(__DIR__) . '/bareboneseshop-private/logs/metrics.jsonl',
     'update_storage_dir'  => dirname(__DIR__) . '/bareboneseshop-private/updates',
