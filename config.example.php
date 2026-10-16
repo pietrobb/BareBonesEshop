@@ -67,7 +67,10 @@ return [
     ],
     // One reminder per abandoned cart (worker cron). Needs app_url for the recovery/opt-out links.
     // Carts older than max_age_hours are never reminded, so enabling it causes no mail burst.
-    'cart_reminder' => ['enabled' => true, 'delay_hours' => 24, 'max_age_hours' => 72],
+    // Off by default: a reminder is marketing mail, so it is only sent to shoppers who ticked the
+    // checkout consent 'cart_reminder' (see checkout_consents below); carts are only stored with
+    // that consent. Reminders carry List-Unsubscribe / one-click List-Unsubscribe-Post headers.
+    'cart_reminder' => ['enabled' => false, 'delay_hours' => 24, 'max_age_hours' => 72],
     // Shop-owned public URL scheme; core routes stay reachable and 301 to the alias.
     // 'url_aliases' => ['/kniha/{slug}' => '/product/{slug}', '/knihy' => '/category/knihy', '/kosik' => '/?page=cart'],
     'url_aliases' => [],
@@ -121,6 +124,7 @@ return [
         'http_shipping' => [
             'base_url' => '', 'api_key' => '', 'carrier_code' => 'http-carrier',
             'supports_cod' => false, 'timeout' => 15,
+            'rates_timeout' => 5, // checkout waits on the rate call; a failing carrier is skipped
         ],
         'http_erp' => ['base_url' => '', 'api_key' => '', 'timeout' => 15],
     ],
@@ -175,8 +179,12 @@ return [
         //     'events' => ['order.*', 'payment.*', 'stock.*'],
         //     'stores' => ['default'],
         //     'active' => false,
+        //     // https only; 'allow_insecure_http' => true accepts http:// for a local dev receiver
         // ],
     ],
+    // The worker delivers outbox events before queued jobs; one sweep stops claiming new events
+    // after this many seconds, and an endpoint that timed out twice in a sweep waits for the next one.
+    'outbox_sweep_budget_seconds' => 20,
 
     // Extensions to load from extensions/<code>/extension.php (docs/EXTENSIONS.md). They add
     // providers, domain event listeners and storefront data without editing core files;
@@ -193,10 +201,16 @@ return [
 
     // Carrier webhook HMAC secrets, keyed by carrier ID. Environment variables
     // such as SHIP_PACKETA_WEBHOOK_SECRET take precedence.
+    // Env names write "-" as "_": carrier http-carrier reads SHIP_HTTP_CARRIER_WEBHOOK_SECRET.
+    // Signature = hex HMAC-SHA256 of the raw body; a carrier that sends X-Shipping-Timestamp
+    // (Unix seconds, ±300 s) signs "<timestamp>.<raw body>" instead.
     'shipping_webhook_secrets' => [
         'packeta' => '',
         'gls' => '',
     ],
+    // true = reject carrier webhooks without a signed X-Shipping-Timestamp (replay protection);
+    // keep false while a carrier can only sign the body.
+    'shipping_webhook_require_timestamp' => false,
 
     // Stripe (when using StripePayment adapter)
     'stripe_secret_key'      => '',
@@ -227,11 +241,19 @@ return [
 
     // Digital files are stored below this directory; digital_assets.storage_path
     // contains only a relative path such as ebooks/manual.pdf.
+    // An interrupted download may resume (HTTP Range) for this long without counting another download.
+    'digital_download_resume_minutes' => 30,
     'digital_assets_base_dir' => dirname(__DIR__) . '/private_downloads',
 
     // Deployments define the exact legal text and version they require. Optional
     // product_types/countries arrays make a checkbox context-specific.
     'checkout_consents' => [
+        // Optional (never required) consent for the abandoned-cart reminder; without it no cart
+        // reminder is stored or sent. The key must be 'cart_reminder'.
+        // 'cart_reminder' => [
+        //     'version' => '2026-10-16', 'required' => false,
+        //     'text' => 'Send me one e-mail reminder if I do not finish this order.',
+        // ],
         // 'digital_delivery' => [
         //     'version' => '2026-01-01', 'required' => true,
         //     'text' => 'I request immediate delivery of the digital content and acknowledge the loss of my withdrawal right once delivery begins.',
@@ -246,6 +268,8 @@ return [
         'redis' => [
             'host' => '127.0.0.1', 'port' => 6379, 'database' => 0,
             'password' => '', 'timeout' => 2.0, 'prefix' => 'bbe:queue:',
+            // Completed job hashes expire after this; the daily cleanup trims the completed index.
+            'completed_ttl_seconds' => 604800,
         ],
     ],
 

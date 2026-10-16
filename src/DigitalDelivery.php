@@ -76,6 +76,24 @@ class DigitalDelivery {
         return $links;
     }
 
+    /** Lease of a fulfilment claim: longer than grant() + the delivery mail, short enough to recover a crash. */
+    public const FULFIL_CLAIM_SECONDS = 120;
+
+    /**
+     * Claim the fulfilment of one order (grant + delivery mail) so two workers never run it at
+     * the same time: grant() rotates undelivered tokens, so a concurrent run would revoke the links
+     * the other one is mailing. Returns the claim key, or null while another worker holds it.
+     */
+    public static function claimFulfilment(int $orderId): ?string {
+        $key = 'digital_fulfill_' . $orderId;
+        return Idempotency::claim($key, self::FULFIL_CLAIM_SECONDS) === 'claimed' ? $key : null;
+    }
+
+    /** Release a fulfilment claim (also after a failure, so the job's retry can claim it again). */
+    public static function releaseFulfilment(string $claim): void {
+        Idempotency::unmark($claim);
+    }
+
     public static function markDelivered(array $ids): void {
         $ids = array_values(array_filter(array_map('intval', $ids), fn(int $id) => $id > 0));
         if (!$ids) return;
@@ -122,13 +140,56 @@ class DigitalDelivery {
         if (($row['payment_status'] ?? '') !== 'paid') return null;
         if (in_array($row['order_status'] ?? '', ['cancelled', 'refunded'], true)) return null;
         if ($row['expires_at'] !== null && time() > (int)$row['expires_at']) return null;
-        if ($row['download_limit'] !== null && (int)$row['download_count'] >= (int)$row['download_limit']) return null;
+        // A spent limit still lets the last counted download resume inside its window (see authorizeTransfer()).
+        if ($row['download_limit'] !== null && (int)$row['download_count'] >= (int)$row['download_limit'] && !self::inResumeWindow($row)) return null;
         return $row;
     }
 
-    public static function consume(int $entitlementId): bool {
+    /** Seconds after a counted download in which Range requests resume it without counting again. */
+    public static function resumeWindowSeconds(): int {
+        return max(0, (int)(self::config()['digital_download_resume_minutes'] ?? 30)) * 60;
+    }
+
+    /**
+     * Whether this transfer may start. A download is counted once: a request from the first byte
+     * (no Range, or a range starting at 0) consumes one download; a request resuming later in the
+     * file is free while the last counted download is younger than the resume window, and counts as
+     * a new download otherwise. HEAD never counts.
+     */
+    public static function authorizeTransfer(array $entitlement, int $rangeStart, ?int $now = null): bool {
+        if ($rangeStart > 0 && self::inResumeWindow($entitlement, $now)) return true;
+        return self::consume((int)$entitlement['id'], $now);
+    }
+
+    /**
+     * One "bytes=" range of a file of $size bytes: null = serve the whole file (no header, several
+     * ranges, or a syntax this endpoint does not support), false = unsatisfiable (HTTP 416),
+     * otherwise [start, end] inclusive.
+     * @return array{0:int,1:int}|false|null
+     */
+    public static function parseRange(string $header, int $size): array|false|null {
+        $header = trim($header);
+        if ($header === '' || !preg_match('/^bytes=(\d*)-(\d*)$/i', $header, $m) || ($m[1] === '' && $m[2] === '')) return null;
+        if ($m[1] === '') {
+            // Suffix range: the last N bytes.
+            $length = (int)$m[2];
+            if ($length <= 0 || $size <= 0) return false;
+            return [max(0, $size - $length), $size - 1];
+        }
+        $start = (int)$m[1];
+        $end = $m[2] === '' ? $size - 1 : min((int)$m[2], $size - 1);
+        if ($start >= $size || $end < $start) return false;
+        return [$start, $end];
+    }
+
+    private static function inResumeWindow(array $entitlement, ?int $now = null): bool {
+        $last = $entitlement['last_download_at'] ?? null;
+        return $last !== null && (int)$last >= ($now ?? time()) - self::resumeWindowSeconds();
+    }
+
+    public static function consume(int $entitlementId, ?int $now = null): bool {
         $stmt = Db::get()->prepare("UPDATE digital_entitlements
-            SET download_count = download_count + 1, updated_at = " . Db::now() . "
+            SET download_count = download_count + 1, last_download_at = :counted_at, updated_at = " . Db::now() . "
             WHERE id = :id AND status = 'active'
               AND (expires_at IS NULL OR expires_at >= :now)
               AND (download_limit IS NULL OR download_count < download_limit)
@@ -138,7 +199,8 @@ class DigitalDelivery {
                     AND o.payment_status = 'paid'
                     AND o.status NOT IN ('cancelled', 'refunded')
               )");
-        $stmt->execute([':id' => $entitlementId, ':now' => time()]);
+        $now ??= time();
+        $stmt->execute([':id' => $entitlementId, ':now' => $now, ':counted_at' => $now]);
         return $stmt->rowCount() === 1;
     }
 

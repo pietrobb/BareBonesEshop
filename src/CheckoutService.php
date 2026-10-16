@@ -50,6 +50,19 @@ class CheckoutService {
         return ConsentService::definitions(['country' => $country, 'product_types' => array_values(array_unique(array_column($available, 'product_type')))]);
     }
 
+    /**
+     * The accepted abandoned-cart reminder consent of a checkout submit: the configured
+     * checkout_consents entry AbandonedCarts::CONSENT_KEY, ticked (consents[cart_reminder] === true).
+     * Null when it is not configured for this country or not given; the cart is then not kept for reminders.
+     * @return array{version:string,text:string}|null
+     */
+    public static function cartReminderConsent(array $input, string $country): ?array {
+        $definition = ConsentService::definitions(['country' => $country])[AbandonedCarts::CONSENT_KEY] ?? null;
+        $submitted = is_array($input['consents'] ?? null) ? $input['consents'] : [];
+        if ($definition === null || ($submitted[AbandonedCarts::CONSENT_KEY] ?? null) !== true) return null;
+        return ['version' => (string)$definition['version'], 'text' => (string)$definition['text']];
+    }
+
     public static function execute(array $input, ?array $runtimeConfig = null): array {
         if (!function_exists('checkoutExecute')) {
             require_once __DIR__ . '/Http/ApiHandlers.php';

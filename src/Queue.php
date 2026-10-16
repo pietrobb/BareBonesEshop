@@ -13,8 +13,13 @@ interface QueueBackend {
     public function failures(int $limit = 20): array;
 }
 
+/** Optional capability: a job that becomes available only at a given Unix time. */
+interface DelayedQueueBackend extends QueueBackend {
+    public function pushAt(string $type, array $payload, int $availableAt, int $priority = 5): string;
+}
+
 /** Database queue with conditional-update claims safe across concurrent workers. */
-class DatabaseQueue implements QueueBackend {
+class DatabaseQueue implements DelayedQueueBackend {
     private PDO $db;
     private int $leaseSeconds;
 
@@ -26,6 +31,10 @@ class DatabaseQueue implements QueueBackend {
     public function name(): string { return 'database'; }
 
     public function push(string $type, array $payload, int $priority = 5): string {
+        return $this->pushAt($type, $payload, time(), $priority);
+    }
+
+    public function pushAt(string $type, array $payload, int $availableAt, int $priority = 5): string {
         self::assertType($type);
         $priority = max(0, min(999, $priority));
         $context = StoreContext::current();
@@ -42,7 +51,7 @@ class DatabaseQueue implements QueueBackend {
                 ':id' => $id, ':store' => $payload['_store_id'], ':channel' => $payload['_channel_id'],
                 ':type' => $type, ':priority' => $priority,
                 ':payload' => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
-                ':available' => $now, ':correlation' => Logger::correlationId(),
+                ':available' => gmdate('Y-m-d H:i:s', max(time(), $availableAt)), ':correlation' => Logger::correlationId(),
                 ':created' => $now, ':updated' => $now,
             ]);
         return $id;
@@ -181,16 +190,21 @@ class DatabaseQueue implements QueueBackend {
  * GDPR: jobs held here are not reached by GdprService's export or erasure (QueueBackend has no way
  * to enumerate jobs); see the queue section of ESHOP-DESIGN.md.
  */
-class RedisQueue implements QueueBackend {
+class RedisQueue implements DelayedQueueBackend {
+    /** Default lifetime of a completed job hash (config queue.redis.completed_ttl_seconds). */
+    public const COMPLETED_TTL_SECONDS = 604800;
+
     private object $redis;
     private string $prefix;
     private int $leaseSeconds;
+    private int $completedTtl;
 
     public function __construct(array $config) {
         if (!class_exists('Redis')) throw new RuntimeException('Redis queue requires ext-redis');
         $this->prefix = (string)($config['prefix'] ?? 'bbe:queue:');
         if (!preg_match('/^[A-Za-z0-9:_-]{1,80}$/', $this->prefix)) throw new InvalidArgumentException('Invalid Redis queue prefix');
         $this->leaseSeconds = max(30, min(3600, (int)($config['lease_seconds'] ?? 300)));
+        $this->completedTtl = max(60, (int)($config['completed_ttl_seconds'] ?? self::COMPLETED_TTL_SECONDS));
         $redis = new Redis();
         $redis->connect((string)($config['host'] ?? '127.0.0.1'), (int)($config['port'] ?? 6379), (float)($config['timeout'] ?? 2.0));
         if ((string)($config['password'] ?? '') !== '') $redis->auth((string)$config['password']);
@@ -201,6 +215,10 @@ class RedisQueue implements QueueBackend {
     public function name(): string { return 'redis'; }
 
     public function push(string $type, array $payload, int $priority = 5): string {
+        return $this->pushAt($type, $payload, time(), $priority);
+    }
+
+    public function pushAt(string $type, array $payload, int $availableAt, int $priority = 5): string {
         if (!preg_match('/^[a-z][a-z0-9_.-]{1,79}$/', $type)) throw new InvalidArgumentException('Invalid queue job type');
         $context = StoreContext::current();
         $payload['_store_id'] ??= $context->id();
@@ -212,12 +230,12 @@ class RedisQueue implements QueueBackend {
             'type' => $type, 'priority' => (string)max(0, min(99, $priority)),
             'payload' => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             'state' => 'pending', 'attempts' => '0', 'max_attempts' => '3',
-            'available_at' => (string)$now, 'correlation_id' => Logger::correlationId(),
+            'available_at' => (string)max($now, $availableAt), 'correlation_id' => Logger::correlationId(),
             'created_at' => gmdate('c', $now), 'updated_at' => gmdate('c', $now),
         ];
         $this->redis->multi();
         $this->redis->hMSet($this->jobKey($id), $job);
-        $this->redis->zAdd($this->key('pending'), ($now * 100) + (int)$job['priority'], $id);
+        $this->redis->zAdd($this->key('pending'), (max($now, $availableAt) * 100) + (int)$job['priority'], $id);
         $this->redis->exec();
         return $id;
     }
@@ -251,10 +269,12 @@ class RedisQueue implements QueueBackend {
 
     public function complete(string $claim): void {
         [$id, $token] = $this->parseClaim($claim);
+        // The completed hash expires (completed_ttl_seconds); trimCompleted() drops its zset entry.
         $script = "if redis.call('hget', KEYS[1], 'claim_token') ~= ARGV[1] then return 0 end "
             . "redis.call('zrem', KEYS[2], ARGV[2]) redis.call('hmset', KEYS[1], 'state','completed','claim_token','','updated_at',ARGV[3]) "
+            . "redis.call('expire', KEYS[1], tonumber(ARGV[5])) "
             . "redis.call('zadd', KEYS[3], ARGV[4], ARGV[2]) return 1";
-        $ok = $this->redis->eval($script, [$this->jobKey($id), $this->key('processing'), $this->key('completed'), $token, $id, gmdate('c'), (string)time()], 3);
+        $ok = $this->redis->eval($script, [$this->jobKey($id), $this->key('processing'), $this->key('completed'), $token, $id, gmdate('c'), (string)time(), (string)$this->completedTtl], 3);
         if ((int)$ok !== 1) throw new RuntimeException('RedisQueue: claim is no longer owned');
     }
 
@@ -312,6 +332,23 @@ class RedisQueue implements QueueBackend {
             ];
         }
         return $failures;
+    }
+
+    /**
+     * Retention: remove completed jobs older than $olderThanSeconds from the completed index and
+     * delete their hashes (normally already expired). Failed jobs stay for the operator.
+     */
+    public function trimCompleted(int $olderThanSeconds, ?int $now = null): int {
+        $cutoff = ($now ?? time()) - max(0, $olderThanSeconds);
+        $removed = 0;
+        do {
+            $ids = $this->redis->zRangeByScore($this->key('completed'), '-inf', (string)$cutoff, ['limit' => [0, 500]]);
+            foreach ($ids ?: [] as $id) {
+                $this->redis->del($this->jobKey((string)$id));
+                $removed += (int)$this->redis->zRem($this->key('completed'), (string)$id);
+            }
+        } while (is_array($ids) && count($ids) === 500);
+        return $removed;
     }
 
     /** Expired lease = the worker died mid-job; count it as an attempt and dead-letter at max_attempts. */

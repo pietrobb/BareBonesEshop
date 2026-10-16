@@ -94,7 +94,7 @@ $_SESSION['csrf_token'] = 'a073-planted';
 require_once $root . '/src/Http/ApiHandlers.php';
 Wishlist::add(9731);
 Cart::add(9731, null, 1);
-AbandonedCarts::capture('a073-cart@example.com');
+AbandonedCarts::capture('a073-cart@example.com', null, ['version' => '1', 'text' => 'Remind me']);
 $_SERVER['REQUEST_METHOD'] = 'POST';
 $_POST = ['csrf_token' => 'a073-planted', 'analytics' => '1', 'method' => 'preferences'];
 $result['consent'] = apiCookieConsent();

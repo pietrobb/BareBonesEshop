@@ -39,7 +39,7 @@ $a112Unread = [];
 foreach (array_unique($a112Vars[1]) as $a112Var) {
     // Direct getenv() or the SMTP/SES adapters' getenv-first `$env('NAME', default)` helper.
     $direct = str_contains($a112Source, "getenv('{$a112Var}')") || str_contains($a112Source, "\$env('{$a112Var}'");
-    $pattern = preg_match('/^SHIP_[A-Z0-9]+_WEBHOOK_SECRET$/', $a112Var) === 1 && str_contains($a112Source, "'SHIP_' . strtoupper(\$carrierId) . '_WEBHOOK_SECRET'");
+    $pattern = preg_match('/^SHIP_[A-Z0-9]+_WEBHOOK_SECRET$/', $a112Var) === 1 && str_contains($a112Source, "'SHIP_' . strtoupper(str_replace('-', '_', \$carrierId)) . '_WEBHOOK_SECRET'");
     if (!$direct && !$pattern) $a112Unread[] = $a112Var;
 }
 assert_equals([], $a112Unread, 'A11.2 .env.example: documents only variables the code reads');

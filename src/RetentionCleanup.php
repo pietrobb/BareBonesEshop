@@ -2,7 +2,8 @@
 /**
  * Daily housekeeping of bookkeeping tables that otherwise grow without bound:
  * processed webhook events, replayable API responses, delivered outbox events (with their
- * delivery attempts) and completed queue jobs. Dead/failed rows stay for the operator.
+ * delivery attempts) and completed queue jobs (database rows, Redis index entries, job files).
+ * Dead/failed rows stay for the operator.
  */
 final class RetentionCleanup
 {
@@ -61,6 +62,12 @@ final class RetentionCleanup
         $jobs = $db->prepare("DELETE FROM queue_jobs WHERE state = 'completed' AND completed_at < :cutoff");
         $jobs->execute([':cutoff' => $cutoff((int)($cfg['completed_jobs_days'] ?? 7))]);
         $deleted['queue_jobs'] = $jobs->rowCount();
+
+        // Redis keeps completed jobs outside the database: hashes expire on completion, the index is trimmed here.
+        $backend = JobQueue::activeBackend();
+        $deleted['redis_jobs'] = $backend instanceof RedisQueue
+            ? $backend->trimCompleted((int)($cfg['completed_jobs_days'] ?? 7) * 86400, $now)
+            : 0;
 
         $deleted['job_files'] = 0;
         $completedDir = (string)($cfg['jobs_dir'] ?? '') . '/completed';
