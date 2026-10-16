@@ -17,6 +17,10 @@ assert_true($crsFirst === $crsSecond && in_array($crsFirst, (new ReflectionClass
     'CR follow-up admin login: the unknown-user hash is a precomputed constant (no password_hash() per request)');
 assert_true(!password_needs_rehash($crsFirst, PASSWORD_DEFAULT) && !password_verify('', $crsFirst),
     'CR follow-up admin login: the precomputed hash matches PASSWORD_DEFAULT cost and accepts no password');
+$crsCustomerDummy = (string)(new ReflectionClassConstant(Customers::class, 'DUMMY_PASSWORD_HASH'))->getValue();
+assert_true(!password_needs_rehash($crsCustomerDummy, PASSWORD_BCRYPT, ['cost' => (int)(new ReflectionClassConstant(Customers::class, 'BCRYPT_COST'))->getValue()])
+    && !(new ReflectionClass(Customers::class))->hasProperty('dummyPasswordHash'),
+    'CR follow-up customer login: unknown e-mails verify against a precomputed hash at the customer bcrypt cost (no password_hash() per request)');
 
 $crsRoot = test_fixture_path('cr-followup-security');
 mkdir($crsRoot, 0700, true);
