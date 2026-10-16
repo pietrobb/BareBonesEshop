@@ -69,7 +69,7 @@
           icon.appendChild(nextBadge);
         }
       }
-    } catch (error) {
+    } catch {
       button.textContent = text.cartError;
     } finally {
       setTimeout(() => { button.disabled = false; button.textContent = original; }, 1600);
@@ -101,7 +101,7 @@
           message.hidden = false;
           message.textContent = result.ok ? form.dataset.successLabel : form.dataset.errorLabel;
         }
-      } catch (error) {
+      } catch {
         if (message) {
           message.hidden = false;
           message.textContent = form.dataset.errorLabel;
@@ -364,7 +364,7 @@
       active = -1;
       suggestions.forEach((suggestion) => {
         let url;
-        try { url = new URL(String(suggestion.url || ''), window.location.href); } catch (error) { return; }
+        try { url = new URL(String(suggestion.url || ''), window.location.href); } catch { return; }
         if (url.origin !== window.location.origin || !suggestion.name) return;
         // An option must not contain a link (nested-interactive); it carries its target instead.
         const option = document.createElement('li');
@@ -390,7 +390,7 @@
           const response = await fetch(`${apiUrl}?${new URLSearchParams({action: 'search_suggest', q: query})}`, {headers: {Accept: 'application/json'}});
           const result = response.ok ? await response.json() : [];
           if (mine === request) show(Array.isArray(result) ? result : []);
-        } catch (error) {
+        } catch {
           if (mine === request) close();
         }
       }, 250);

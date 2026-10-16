@@ -107,6 +107,24 @@ $check(substr_count($esSource, '=>') >= 100, 'Spanish locale provides substantia
 $htaccess = (string)file_get_contents($root . '/.htaccess');
 $check(str_contains($htaccess, 'feeds/google\\.xml') && str_contains($htaccess, 'feeds/meta\\.csv'), 'Google Merchant and Meta feed routes are published');
 $check(str_contains((string)file_get_contents($root . '/src/MarketingConsent.php'), "'analytics' => false"), 'Consent hooks default analytics and marketing to off');
+// CI supply chain: third-party actions run with repository tokens, so a moved tag must not change what runs;
+// the application and its tests connect as a least-privilege user (root only provisions it).
+$workflows = [];
+foreach (glob($root . '/.github/workflows/*.yml') ?: [] as $file) $workflows[basename($file)] = (string)file_get_contents($file);
+$unpinned = [];
+$rootCredentials = [];
+foreach ($workflows as $name => $yaml) {
+    preg_match_all('/^\s*(?:-\s*)?uses:\s*([^\s#]+)/m', $yaml, $uses);
+    foreach ($uses[1] as $action) if (!str_starts_with($action, './') && preg_match('/@[0-9a-f]{40}$/', $action) !== 1) $unpinned[] = "{$name}: {$action}";
+    preg_match_all('/^\s*([A-Z0-9_]*_USER):\s*[\'"]?root[\'"]?\s*$/m', $yaml, $users);
+    foreach ($users[1] as $variable) $rootCredentials[] = "{$name}: {$variable}";
+}
+$ci = $workflows['ci.yml'] ?? '';
+$check($workflows !== [] && $unpinned === [], 'CI actions are pinned to full commit SHAs' . ($unpinned ? ': ' . implode(', ', $unpinned) : ''));
+$check($ci !== '' && $rootCredentials === [], 'CI application and tests use a non-root database user' . ($rootCredentials ? ': ' . implode(', ', $rootCredentials) : ''));
+$check(preg_match('/docker build\b[^\n]*deploy/', $ci) === 1, 'CI builds the deploy Docker image');
+$check(is_file($root . '/eslint.config.js') && str_contains($ci, 'npx eslint'), 'CI lints the storefront JavaScript with ESLint');
+
 require_once __DIR__ . '/theme-check.php'; $themeContract = runThemeCompatibility(); $check($themeContract['status'] === 'GO', 'Theme checkout contract: ' . $themeContract['checks'] . ' checks; ' . implode("\n", $themeContract['failures']));
 if ($failures) {
     echo "\nQuality gates FAILED (" . count($failures) . ")\n";
