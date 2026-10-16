@@ -10,7 +10,6 @@
  */
 class Bootstrap {
     private static ?array $stores = null;
-    private static ?array $catTranslations = null;
     private static ?array $categoryNames = null;
 
     /** Per-request cached stores.json decode. Always returns an array. */
@@ -65,25 +64,12 @@ class Bootstrap {
         return $path;
     }
 
-    /**
-     * Legacy category-name fallback (locale => [English name => translated]).
-     * Cached per request. Used for category names not yet migrated to the
-     * categories.translations JSON column.
-     */
-    public static function catTranslations(): array {
-        if (self::$catTranslations === null) {
-            $file = __DIR__ . '/../data/category-translations.php';
-            self::$catTranslations = is_file($file) ? (require $file) : [];
-        }
-        return self::$catTranslations;
-    }
-
     /** Validate any persisted customer session before storefront rendering. */
     public static function validateCustomerSession(): void {
         Customers::isLoggedIn();
     }
 
-    /** Localized category name with DB translations and the legacy fallback. */
+    /** Localized category name from categories.translations; falls back to the base name. */
     public static function categoryName(string $name, string $locale): string {
         if (self::$categoryNames === null) {
             self::$categoryNames = [];
@@ -98,7 +84,7 @@ class Bootstrap {
                 // Installation may not have the categories table yet.
             }
         }
-        return self::$categoryNames[$locale][$name] ?? self::catTranslations()[$locale][$name] ?? $name;
+        return self::$categoryNames[$locale][$name] ?? $name;
     }
 
     /**

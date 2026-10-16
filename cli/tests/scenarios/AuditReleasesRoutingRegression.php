@@ -42,8 +42,20 @@ foreach ([
     'RELEASES/update-1.9.0/manifest.json',
     'tests/parity/selftest.mjs',
     'tests/e2e/package.json',
+    // CR-A: local tooling output in a developer/CI checkout (dependencies, Playwright traces with cookies).
+    'node_modules/playwright/package.json',
+    'test-results/checkout-chromium/trace.zip',
+    'playwright-report/index.html',
+    'parity-report/index.html',
+    // CR-A: PHPStan configuration and baseline (the baseline maps known findings to source lines).
+    'phpstan.neon.dist',
+    'phpstan-baseline.neon',
 ] as $a094Path) {
     assert_true($a094Denied($a094Path), "A09.4 .htaccess: /{$a094Path} is denied over HTTP");
+}
+$a094Nginx = (string)file_get_contents($a094Root . '/deploy/nginx.conf');
+foreach (['node_modules', 'test-results', 'playwright-report', 'parity-report'] as $a094Tool) {
+    assert_true(preg_match('#location ~\* \^/\(\?:[^)]*\b' . preg_quote($a094Tool, '#') . '\b[^)]*\)\(\?:/\|\$\) \{ return 403; \}#', $a094Nginx) === 1, "CR-A nginx.conf: /{$a094Tool}/ is denied");
 }
 foreach (['index.php', 'product.php', 'api/v1/index.php', 'assets/logo.png', 'themes/default/assets/storefront.css', 'vendor/bbf/bbf.js', 'releasesnotes.html'] as $a094Path) {
     assert_true(!$a094Denied($a094Path), "A09.4 .htaccess: /{$a094Path} stays public");

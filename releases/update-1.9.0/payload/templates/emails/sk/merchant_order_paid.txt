@@ -1,7 +1,0 @@
-Nová zaplatená objednávka {{order_number}}
-Zákazník: {{customer_name}} ({{customer_email}})
-Celkom: {{order_total}}
-Platba: {{payment_status}} / {{payment_id}}
-
-{{#each items}}{{quantity}} x {{name}} ({{sku}}) — {{total}}
-{{/each}}

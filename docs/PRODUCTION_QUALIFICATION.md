@@ -101,7 +101,7 @@ The current HTML transport delegates to the same checkout application path as JS
 1. **P2 compatibility boundary — direct legacy order callers.** `Orders::create()` retains a snapshotless compatibility path for direct historical imports/integrations, while both current public checkout transports always provide and validate the canonical snapshot. Removing that branch requires an inventory and migration of external callers and is operator-owned for a breaking release; it is not reachable through the qualified HTML/JSON checkout routes.
 2. **P3 local qualification tooling.** Lighthouse 12.6 cannot complete against the host's Chrome 150 Lantern all-frames path. The pinned Linux CI job passed; update the local Chrome/Lighthouse pairing before relying on local Lighthouse evidence alone.
 3. **P3 CSP/metadata hardening.** Storefront inline CSS still requires `style-src 'unsafe-inline'`, and public metadata URL generation should ultimately prefer the configured canonical URL over request-host input. Existing controls prevent these observations from crossing a script-execution, authentication, payment, secret, or order-integrity boundary.
-4. **Historical release payloads.** Files under `releases/update-1.9.0/payload` are historical artifacts, not the qualified runtime source. A production rollout must build and sign a fresh release from the qualified SHA rather than reuse an older payload directory.
+4. **Historical release payloads.** The repository tracks no release payloads (`releases/` holds only `update-public.key`; `cli/quality-gates.php` fails on any `releases/*/payload`). A production rollout must build and sign a fresh release from the qualified SHA.
 
 ## Operator-owned live acceptance
 

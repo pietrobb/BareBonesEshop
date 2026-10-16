@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 /**
  * BareBones Shop — Pricing
  * Catalog rules, customer group discounts, cart rules, tier pricing.

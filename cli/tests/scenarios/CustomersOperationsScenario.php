@@ -1,24 +1,13 @@
 <?php
 
-// TEST: Category translations — DB migration + I18n::category
+// TEST: Category translations — categories.translations JSON + I18n::category
 // ============================================================
-echo "\n--- Test: Category translations (migration + I18n::category) ---\n";
+echo "\n--- Test: Category translations (DB JSON + I18n::category) ---\n";
 
-// Seed a category with base English name, no translations
-$pdo->exec("INSERT INTO categories (slug, name, path, translations) VALUES ('test-body', 'Body', 'test-body', '{}')");
+// Translations live only in categories.translations; the bundled auto-parts dictionary left the core (CR-A).
+$pdo->exec("INSERT INTO categories (slug, name, path, translations) VALUES ('test-body', 'Body', 'test-body', '{\"sk\":{\"name\":\"Karoséria\"},\"de\":{\"name\":\"Karosserie\"}}')");
 $testCatId = (int)$pdo->lastInsertId();
-
-// Load migration module (defines migrateCatTranslations / migrateCatTranslationsData)
-require_once TEST_CLI_DIR . '/../cli/migrate-cat-translations.php';
-migrateCatTranslations(false);
-
-// Verify translations JSON populated
-$row = $pdo->query("SELECT translations FROM categories WHERE id = {$testCatId}")->fetch();
-$tr = json_decode($row['translations'] ?? '{}', true) ?: [];
-assert_true(isset($tr['sk']['name']), 'CatI18n: SK translation populated for "Body"');
-assert_equals('Karoséria', $tr['sk']['name'], 'CatI18n: SK "Body" = "Karoséria"');
-assert_true(isset($tr['de']['name']), 'CatI18n: DE translation populated');
-assert_equals('Karosserie', $tr['de']['name'], 'CatI18n: DE "Body" = "Karosserie"');
+assert_equals('Brake System', Bootstrap::categoryName('Brake System', 'sk'), 'CR-A: untranslated category keeps its base name (no auto-parts fallback)');
 
 // I18n::category reads from translations JSON
 $catRow = $pdo->query("SELECT * FROM categories WHERE id = {$testCatId}")->fetch();
@@ -33,20 +22,6 @@ assert_equals('Karosserie', $trDe['name'], 'CatI18n: I18n::category returns DE t
 I18n::setLocale('en');
 $trEn = I18n::category($catRow);
 assert_equals('Body', $trEn['name'], 'CatI18n: I18n::category keeps base name for EN (no translation entry)');
-
-// Migration is idempotent — re-running doesn't duplicate entries
-migrateCatTranslations(false);
-$row2 = $pdo->query("SELECT translations FROM categories WHERE id = {$testCatId}")->fetch();
-assert_equals($row['translations'], $row2['translations'], 'CatI18n: migration is idempotent (re-run is no-op)');
-
-// Migration does NOT overwrite existing DB-curated translations (without --force)
-$upd = $pdo->prepare("UPDATE categories SET translations = :tr WHERE id = :id");
-$upd->execute([':tr' => '{"sk":{"name":"Custom SK"}}', ':id' => $testCatId]);
-migrateCatTranslations(false);
-$row3 = $pdo->query("SELECT translations FROM categories WHERE id = {$testCatId}")->fetch();
-$tr3 = json_decode($row3['translations'] ?? '{}', true) ?: [];
-assert_equals('Custom SK', $tr3['sk']['name'] ?? '', 'CatI18n: existing DB-curated SK translation is preserved (no --force)');
-assert_equals('Karosserie', $tr3['de']['name'] ?? '', 'CatI18n: missing DE translation is still added by migration');
 
 // ============================================================
 // TEST: Customer Accounts (register, login, reset, addresses, orders)

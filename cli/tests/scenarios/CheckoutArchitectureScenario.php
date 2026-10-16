@@ -573,12 +573,10 @@ assert_equals('sk', Bootstrap::initLocale('/'), 'Bootstrap: initLocale uses the 
 assert_equals('sk', I18n::locale(), 'Bootstrap: initLocale applies the active store default before the system fallback');
 I18n::setLocale($savedLocale); // restore for downstream tests
 
-// catTranslations() fallback parity — SK + DE legacy names intact after extraction to data file
-$bsCat = Bootstrap::catTranslations();
-assert_equals('Brzdový kotúč', $bsCat['sk']['Brake Disc'] ?? null, 'Bootstrap: catTranslations sk Brake Disc preserved');
-assert_equals('Brzdový systém', $bsCat['sk']['Brake System'] ?? null, 'Bootstrap: catTranslations sk Brake System preserved');
-assert_equals('Karosserie', $bsCat['de']['Body'] ?? null, 'Bootstrap: catTranslations de Body preserved');
-assert_true(($bsCat['sk']['Brake System'] ?? null) === (Bootstrap::catTranslations()['sk']['Brake System'] ?? null), 'Bootstrap: catTranslations stable across calls');
+// CR-A (code review 2026-10-15): the auto-parts (TecDoc) category dictionary left the core. An untranslated
+// category keeps its base name instead of a hardcoded vertical translation.
+assert_true(!method_exists('Bootstrap', 'catTranslations'), 'CR-A: Bootstrap has no legacy auto-parts category dictionary');
+assert_true(!is_file(TEST_CLI_DIR . '/../data/category-translations.php'), 'CR-A: data/category-translations.php is gone');
 
 // hreflangAlternates() — alternates keyed by locale, prefix stripping, x-default
 $hl = Bootstrap::hreflangAlternates('/de/products');
