@@ -91,8 +91,11 @@ class Sync {
         }
 
         // A skipped product would never be pulled again past a newer watermark: keep the previous one so the next run retries it.
+        // Until it is fixed every run re-pulls the delta since then, so the operator must see it.
         if ($result['products_skipped'] === 0) {
             Cache::set('last_erp_sync', date('c'));
+        } else {
+            IncidentMonitor::report('erp.products_skipped', 'erp', 'warning', ['count' => $result['products_skipped']]);
         }
 
         // 5. Invalidate cache for changed products
