@@ -538,6 +538,7 @@ return [
     'admin.order.msg.invalid_payment_transition' => 'Neplatný prechod platby.',
     'admin.order.msg.payment_changed' => 'Stav platby zmenený na \'{status}\'.',
     'admin.order.msg.payment_error' => 'Chyba pri zmene stavu platby.',
+    'admin.order.msg.paid_on_cancelled' => 'Objednávka je zrušená a zostáva zrušená: platba bola zaznamenaná, treba ju vrátiť zákazníkovi a bol nahlásený incident.',
     'admin.order.msg.refund_amount' => 'Suma refundu musí byť v rozsahu dostupného zostatku.',
     'admin.order.msg.refund_requested' => 'Refund požiadavka bola vytvorená.',
     'admin.order.msg.refund_error' => 'Chyba pri vytváraní refund požiadavky.',

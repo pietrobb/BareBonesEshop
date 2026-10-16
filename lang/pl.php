@@ -531,6 +531,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.invalid_payment_transition' => 'Nieprawidłowe przejście płatności.',
     'admin.order.msg.payment_changed' => 'Status płatności zmieniony na \'{status}\'.',
     'admin.order.msg.payment_error' => 'Błąd podczas zmiany statusu płatności.',
+    'admin.order.msg.paid_on_cancelled' => 'Zamówienie jest anulowane i pozostaje anulowane: płatność została zarejestrowana, trzeba ją zwrócić klientowi i zgłoszono incydent.',
     'admin.order.msg.refund_amount' => 'Kwota zwrotu musi mieścić się w dostępnym saldzie.',
     'admin.order.msg.refund_requested' => 'Utworzono żądanie zwrotu.',
     'admin.order.msg.refund_error' => 'Błąd podczas tworzenia żądania zwrotu.',

@@ -531,6 +531,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.invalid_payment_transition' => 'Érvénytelen fizetési átmenet.',
     'admin.order.msg.payment_changed' => 'A fizetés állapota módosítva: \'{status}\'.',
     'admin.order.msg.payment_error' => 'Hiba a fizetés állapotának módosításakor.',
+    'admin.order.msg.paid_on_cancelled' => 'A rendelés törölve van, és törölve marad: a fizetést rögzítettük, vissza kell téríteni a vásárlónak, és incidenst jelentettünk.',
     'admin.order.msg.refund_amount' => 'A visszatérítés összegének a rendelkezésre álló egyenlegen belül kell lennie.',
     'admin.order.msg.refund_requested' => 'A visszatérítési kérelem létrejött.',
     'admin.order.msg.refund_error' => 'Hiba a visszatérítési kérelem létrehozásakor.',

@@ -663,6 +663,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.invalid_payment_transition' => 'Transición de pago no válida.',
     'admin.order.msg.payment_changed' => 'Estado del pago cambiado a \'{status}\'.',
     'admin.order.msg.payment_error' => 'Error al cambiar el estado del pago.',
+    'admin.order.msg.paid_on_cancelled' => 'El pedido está cancelado y sigue cancelado: el pago se registró, debe devolverse al cliente y se ha notificado una incidencia.',
     'admin.order.msg.refund_amount' => 'El importe del reembolso debe estar dentro del saldo disponible.',
     'admin.order.msg.refund_requested' => 'Solicitud de reembolso creada.',
     'admin.order.msg.refund_error' => 'Error al crear la solicitud de reembolso.',

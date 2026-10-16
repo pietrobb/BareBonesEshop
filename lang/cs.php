@@ -531,6 +531,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.msg.invalid_payment_transition' => 'Neplatný přechod platby.',
     'admin.order.msg.payment_changed' => 'Stav platby změněn na \'{status}\'.',
     'admin.order.msg.payment_error' => 'Chyba při změně stavu platby.',
+    'admin.order.msg.paid_on_cancelled' => 'Objednávka je zrušená a zůstává zrušená: platba byla zaznamenána, je třeba ji vrátit zákazníkovi a byl nahlášen incident.',
     'admin.order.msg.refund_amount' => 'Částka refundace musí být v rozsahu dostupného zůstatku.',
     'admin.order.msg.refund_requested' => 'Požadavek na refundaci byl vytvořen.',
     'admin.order.msg.refund_error' => 'Chyba při vytváření požadavku na refundaci.',
