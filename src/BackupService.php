@@ -63,8 +63,8 @@ class BackupService
                     (string)($appCfg['db_charset'] ?? 'utf8mb4'),
                     // dumpTo() never touches the probe schema; the constructor only validates its name.
                     trim((string)($appCfg['update_mysql_probe_database'] ?? '')) ?: substr((string)($appCfg['db_name'] ?? ''), 0, 51) . '_update_probe',
-                    (string)($appCfg['update_mysql_dump_binary'] ?? 'mysqldump'),
-                    (string)($appCfg['update_mysql_client_binary'] ?? 'mysql')
+                    self::mysqlBinary((string)($appCfg['update_mysql_dump_binary'] ?? 'mysqldump'), 'mysqldump', 'mariadb-dump'),
+                    self::mysqlBinary((string)($appCfg['update_mysql_client_binary'] ?? 'mysql'), 'mysql', 'mariadb')
                 ))->dumpTo($dumpPath);
             }
         }
@@ -85,6 +85,23 @@ class BackupService
             self::$storage = $candidate;
         }
         self::$livePath = self::detectLivePath($db);
+    }
+
+    /**
+     * The default MySQL tool names fall back to their MariaDB names when only those are on PATH
+     * (MariaDB 11 client packages ship mariadb-dump/mariadb without the mysql* compat names).
+     * An explicitly configured other binary or path is used as is.
+     */
+    public static function mysqlBinary(string $configured, string $default, string $mariadbName, ?string $path = null): string
+    {
+        if ($configured !== $default) return $configured;
+        $onPath = static function (string $binary) use ($path): bool {
+            foreach (explode(PATH_SEPARATOR, $path ?? (string)getenv('PATH')) as $dir) {
+                if ($dir !== '' && is_file($dir . '/' . $binary) && is_executable($dir . '/' . $binary)) return true;
+            }
+            return false;
+        };
+        return !$onPath($default) && $onPath($mariadbName) ? $mariadbName : $default;
     }
 
     public static function reset(): void
@@ -390,6 +407,7 @@ class BackupService
                 'driver'         => $driver === 'mysql' ? 'mysql' : 'sqlite',
                 'files_archive'  => $files['remote_path'] ?? null,
                 'files'          => $files['sources'] ?? null,
+                'files_skipped'  => $files['skipped'] ?? null,
             ];
             try {
                 if ($files !== null) {
@@ -403,6 +421,7 @@ class BackupService
                         'sha256'      => $files['sha256'],
                         'entries'     => $files['entries'],
                         'sources'     => $files['sources'],
+                        'skipped'     => $files['skipped'],
                     ]);
                 }
                 self::$storage->put($absPath, $remotePath, $meta);
@@ -451,12 +470,29 @@ class BackupService
         }
     }
 
-    /** Tar every configured file source; a source that is configured but unreadable fails the backup. */
+    /**
+     * Tar every configured file source. Entries are buffered and the archive is written once
+     * (per-file addFile() rewrites the whole tar, quadratic in the file count). An unreadable file
+     * or directory does not fail the whole backup: it is skipped with a logged warning and listed
+     * under 'skipped', which the backup manifest records.
+     */
     private static function archiveFiles(string $tarPath): array
     {
         $tar = new PharData($tarPath);
+        $tar->startBuffering();
         $entries = 0;
         $sources = [];
+        $skipped = [];
+        $addFile = static function (string $file, string $entry) use ($tar, &$entries, &$skipped): void {
+            try {
+                if (!is_readable($file)) throw new RuntimeException('not readable');
+                $tar->addFile($file, $entry);
+                $entries++;
+            } catch (\Throwable $e) {
+                $skipped[] = $entry;
+                self::log("CREATE WARN skipped unreadable file {$entry}: " . $e->getMessage());
+            }
+        };
         foreach (self::$fileSources as $name => $path) {
             $name = (string)$name;
             $path = (string)$path;
@@ -466,17 +502,30 @@ class BackupService
             if ($path === '' || is_link($path)) {
                 $sources[$name] = $path === '' ? 'not_configured' : 'symlink_skipped';
             } elseif (is_file($path)) {
-                $tar->addFile($path, $name . '/' . basename($path));
-                $entries++;
+                $addFile($path, $name . '/' . basename($path));
                 $sources[$name] = 'file';
             } elseif (is_dir($path)) {
                 $base = rtrim(str_replace('\\', '/', $path), '/') . '/';
-                $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS));
-                foreach ($iterator as $file) {
+                $relativeOf = static fn(\SplFileInfo $file): string => substr(str_replace('\\', '/', $file->getPathname()), strlen($base));
+                if (!is_readable($path) || !is_executable($path)) {
+                    $skipped[] = $name . '/';
+                    self::log("CREATE WARN skipped unreadable directory {$name}/");
+                    $sources[$name] = 'unreadable';
+                    continue;
+                }
+                // Unreadable subdirectories are not descended into (RecursiveDirectoryIterator would throw).
+                $filter = new RecursiveCallbackFilterIterator(
+                    new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
+                    static function (\SplFileInfo $file) use ($name, $relativeOf, &$skipped): bool {
+                        if ($file->isLink() || !$file->isDir() || ($file->isReadable() && $file->isExecutable())) return true;
+                        $skipped[] = $name . '/' . $relativeOf($file) . '/';
+                        self::log("CREATE WARN skipped unreadable directory {$name}/" . $relativeOf($file) . '/');
+                        return false;
+                    }
+                );
+                foreach (new RecursiveIteratorIterator($filter) as $file) {
                     if ($file->isLink() || !$file->isFile()) continue;
-                    $relative = substr(str_replace('\\', '/', $file->getPathname()), strlen($base));
-                    $tar->addFile($file->getPathname(), $name . '/' . $relative);
-                    $entries++;
+                    $addFile($file->getPathname(), $name . '/' . $relativeOf($file));
                 }
                 $sources[$name] = 'directory';
             } else {
@@ -487,6 +536,7 @@ class BackupService
             // PharData only writes the archive once it has an entry; keep the companion uniform.
             $tar->addFromString('.backup-files', "no file sources present\n");
         }
+        $tar->stopBuffering();
         unset($tar);
         if (!is_file($tarPath)) {
             throw new RuntimeException('BackupService: files archive was not created');
@@ -496,6 +546,7 @@ class BackupService
             'sha256'     => hash_file('sha256', $tarPath),
             'entries'    => $entries,
             'sources'    => $sources,
+            'skipped'    => $skipped,
         ];
     }
 

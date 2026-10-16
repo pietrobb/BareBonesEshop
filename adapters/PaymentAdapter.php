@@ -17,6 +17,12 @@ interface PaymentAdapter {
 
     /** Get current payment status */
     public function getStatus(string $paymentId): string;
+
+    /**
+     * Authenticate a webhook request (raw body + signature header) before handleWebhook() runs.
+     * Providers without signed webhooks return false, so a forged request is never applied.
+     */
+    public function verifySignature(string $payload, string $sigHeader): bool;
 }
 
 /**

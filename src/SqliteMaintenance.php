@@ -51,6 +51,18 @@ final class SqliteMaintenance
             fclose($handle);
             return true; // the owning process is still running
         }
+        // The lock was taken on the inode opened above. Another process may have cleared that stale
+        // marker and a new owner created a fresh one at the same path meanwhile: unlinking by path
+        // would then delete the live marker. Only clear the path while it is still the locked file.
+        $opened = fstat($handle);
+        clearstatcache(true, $marker);
+        $current = @stat($marker);
+        if ($opened === false || $current === false
+            || $opened['ino'] !== $current['ino'] || $opened['dev'] !== $current['dev']) {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+            return $current !== false; // replaced: a new owner's marker (within its grace period)
+        }
         @unlink($marker); // POSIX: unlink while holding the lock, so no new marker can be hit
         flock($handle, LOCK_UN);
         fclose($handle);

@@ -261,15 +261,18 @@ function processOutbox(array $cfg, bool $verbose = false): void {
             $extensionDelivery = Extensions::deliver($event, $envelope);
             $matched += $extensionDelivery['matched'];
             array_push($failures, ...$extensionDelivery['failures']);
+            // Guarded by the claim: after a stale-lease takeover the other worker's outcome stands.
+            $claimed = (int)$event['attempts'];
             if ($failures === []) {
-                Outbox::markDelivered((string)$event['id']);
+                $owned = Outbox::markDelivered((string)$event['id'], $claimed);
                 if ($verbose) echo "Delivered outbox event {$event['id']} to {$matched} endpoint(s)\n";
             } else {
-                Outbox::markRetry((string)$event['id'], (int)$event['attempts'], implode(', ', $failures));
+                $owned = Outbox::markRetry((string)$event['id'], $claimed, implode(', ', $failures), $claimed);
                 if ($verbose) echo "Deferred outbox event {$event['id']}: " . implode(', ', $failures) . "\n";
             }
+            if (!$owned) Logger::warning('worker.outbox_claim_lost', ['event_id' => (string)$event['id']]);
         } catch (\Throwable $e) {
-            Outbox::markRetry((string)$event['id'], (int)$event['attempts'], $e->getMessage());
+            Outbox::markRetry((string)$event['id'], (int)$event['attempts'], $e->getMessage(), (int)$event['attempts']);
             if ($verbose) echo "Deferred outbox event {$event['id']}: {$e->getMessage()}\n";
         }
     }
@@ -509,12 +512,14 @@ function handleSearchReindex(array $payload, array $job): void {
                 ->execute([':id' => $productId]);
         } else {
             // Full reindex — rebuild FTS5
+            JobQueue::heartbeat(true); // a fresh lease for the rebuild (no-op outside a worker job)
             Db::get()->exec("INSERT INTO products_fts(products_fts) VALUES('rebuild')");
         }
     } else {
         // MySQL — FULLTEXT indexes are maintained automatically, but we can
         // OPTIMIZE TABLE to rebuild if full reindex is requested
         if (!$productId) {
+            JobQueue::heartbeat(true);
             Db::get()->exec("OPTIMIZE TABLE products");
         }
         // Single product: no action needed — MySQL FULLTEXT auto-updates on change
@@ -566,6 +571,8 @@ function handlePaymentRefund(array $payload, array $job): void {
 
     $result = $alreadyRefunded ? ['status' => 'succeeded', 'replayed' => true] : ['status' => 'skipped'];
     if (!$alreadyRefunded && $paymentId !== '' && $orderId > 0 && $amount > 0) {
+        // Renew the lease before moving money (outside any transaction); aborts if another worker owns the job.
+        JobQueue::heartbeat(true);
         try {
             $result = PaymentService::refund($orderId, $paymentId, $amount, orderPaymentGateway($payload, $order), $idempotencyKey, (string)($order['currency'] ?? 'eur'));
         } catch (\Throwable $e) {
@@ -622,6 +629,7 @@ function handleErpOrderPush(array $payload, array $job): void {
     $adapter = $providerCode !== '' ? Adapters::integration($providerCode) : Adapters::integration();
     if (!$adapter) return;
     $order['items'] = Orders::items($orderId);
+    JobQueue::heartbeat(true); // a fresh lease for the ERP call
     Orders::markSynced($orderId, $adapter->pushOrder($order));
 }
 
@@ -636,6 +644,7 @@ function handleErpOrderUpdate(array $payload, array $job): void {
         throw new RuntimeException("ERP provider does not support order status updates: {$providerCode}");
     }
     $status = strtolower((string)($payload['status'] ?? $order['status'] ?? ''));
+    JobQueue::heartbeat(true); // a fresh lease for the ERP call
     $adapter->updateOrderStatus((string)$order['erp_id'], $status, [
         'order_id' => $orderId,
         'order_number' => (string)$order['order_number'],
@@ -660,6 +669,7 @@ function cartReminderBaseUrl(array $cfg): string {
 
 function handleCleanup(array $payload, array $job): void {
     $cfg = require __DIR__ . '/../config.php';
+    JobQueue::heartbeat(true); // a fresh lease for the retention sweep
     $deleted = RetentionCleanup::run(['jobs_dir' => workerJobsDir($cfg)]);
     Logger::info('worker.retention_cleanup', $deleted);
 }
@@ -673,6 +683,11 @@ function handleImageResize(array $payload, array $job): void {
     if (!$path) return;
 
     $storage = Adapters::storage();
+    if (!$storage instanceof ImageVariantStorageAdapter) {
+        Logger::info('worker.image_variants_unsupported', ['adapter' => get_class($storage)]);
+        return;
+    }
+    JobQueue::heartbeat(true); // a fresh lease for the image processing
     $storage->generateVariants($path);
 }
 
@@ -681,8 +696,10 @@ function handleInvoiceIssue(array $payload, array $job): void {
     if (!$orderId) return;
 
     // Issue invoice (idempotent — returns existing invoice if already issued)
+    JobQueue::heartbeat(true); // a fresh lease for the PDF rendering
     $invoice = InvoiceService::issue($orderId);
     if (!$invoice) return;
+    JobQueue::heartbeat(); // renew (or abort if taken over) before the slow mail delivery
 
     $order = Orders::byId($orderId);
     if (!$order) return;
