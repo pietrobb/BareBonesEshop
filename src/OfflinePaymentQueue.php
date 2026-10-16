@@ -32,7 +32,11 @@ class OfflinePaymentQueue {
         return $rows;
     }
 
-    /** Record the received transfer and release paid fulfillment. Returns false when already confirmed. */
+    /**
+     * Record the received transfer and release paid fulfillment. Returns false when already confirmed.
+     * Money that arrives for an order already cancelled or expired is still recorded (it was received),
+     * but settleCapture() keeps the order cancelled and flags the refund; check the order status after.
+     */
     public static function confirm(int $orderId, string $actor, string $note = ''): bool {
         $order = Orders::byId($orderId);
         if (!$order) throw new RuntimeException("Order #{$orderId} not found");
@@ -43,10 +47,7 @@ class OfflinePaymentQueue {
 
         $recorded = PaymentService::transitionPayment($orderId, 'paid', 'admin.offline_payment_received', 0,
             'offline_paid_' . $orderId, ['actor' => $actor, 'note' => $note]);
-        $order = Orders::byId($orderId);
-        if ($order && OrderWorkflow::canTransition((string)$order['status'], 'paid')) {
-            OrderWorkflow::transition($orderId, 'paid', 'Platba prevodom prijatá' . ($note !== '' ? ': ' . $note : ''));
-        }
+        PaymentService::settleCapture($orderId, 'Platba prevodom prijatá' . ($note !== '' ? ': ' . $note : ''));
         return $recorded;
     }
 

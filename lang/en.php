@@ -533,6 +533,7 @@ return [
     'admin.order.msg.invalid_payment_transition' => 'Invalid payment transition.',
     'admin.order.msg.payment_changed' => 'Payment status changed to \'{status}\'.',
     'admin.order.msg.payment_error' => 'Error while changing the payment status.',
+    'admin.order.msg.paid_on_cancelled' => 'The order is cancelled and stays cancelled: the payment was recorded, must be returned to the customer and an incident was raised.',
     'admin.order.msg.refund_amount' => 'The refund amount must be within the available balance.',
     'admin.order.msg.refund_requested' => 'Refund request created.',
     'admin.order.msg.refund_error' => 'Error while creating the refund request.',

@@ -638,6 +638,7 @@ onPaymentCompleted([
     'id' => 'cs_legacy_paid_1',
     'payment_intent' => 'pi_legacy_paid_1',
     'amount_total' => (int)Orders::byId($legacyStripeOrderId)['total'],
+    'currency' => 'eur',
     'metadata' => ['order_id' => $legacyStripeOrderId],
 ]);
 $legacyStripeOrder = Orders::byId($legacyStripeOrderId);

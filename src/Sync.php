@@ -26,6 +26,7 @@ class Sync {
             'orders_pushed'    => 0,
             'orders_failed'    => 0,
             'statuses_updated' => 0,
+            'products_skipped' => 0,
         ];
 
         // 1. Pull products (delta sync since last run)
@@ -33,8 +34,14 @@ class Sync {
         $since = $lastSync ? new \DateTime($lastSync) : null;
 
         foreach ($adapter->pullProducts($since) as $productData) {
-            Import::upsertProduct($productData);
-            $result['products_updated']++;
+            // One bad product (e.g. a SKU owned by another catalog) must not abort stock, order push and status pull.
+            try {
+                Import::upsertProduct($productData);
+                $result['products_updated']++;
+            } catch (\Throwable $e) {
+                $result['products_skipped']++;
+                error_log('ERP product sync skipped [' . (string)($productData['sku'] ?? '?') . "]: {$e->getMessage()}");
+            }
         }
 
         // 2. Pull stock levels

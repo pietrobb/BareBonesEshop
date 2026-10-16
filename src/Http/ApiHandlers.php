@@ -967,14 +967,20 @@ function onPaymentCompleted(array $session): ?string {
 function applyStripePaymentCompleted(array $session, string $sessionId, int $orderId): void {
     $order = Orders::byId($orderId);
     if (!$order) throw new RuntimeException("Order #{$orderId} vanished during Stripe webhook");
-    if (isset($session['amount_total']) && (int)$session['amount_total'] !== (int)$order['total']) {
-        throw new RuntimeException("Stripe amount mismatch for order #{$orderId}");
+    // Like the generic path in PaymentService: a capture without amount or currency is unverified, never paid.
+    if (!isset($session['amount_total']) || (int)$session['amount_total'] !== (int)$order['total']) {
+        throw new RuntimeException("Stripe amount missing or mismatched for order #{$orderId}");
     }
-    if (isset($session['currency']) && strtolower((string)$session['currency']) !== strtolower((string)$order['currency'])) {
-        throw new RuntimeException("Stripe currency mismatch for order #{$orderId}");
+    if (!isset($session['currency']) || strtolower((string)$session['currency']) !== strtolower((string)$order['currency'])) {
+        throw new RuntimeException("Stripe currency missing or mismatched for order #{$orderId}");
     }
 
     $paymentRef = (string)($session['payment_intent'] ?? $sessionId);
+    // A second session paid for an already settled order: alert, and keep the recorded payment_id refunds use.
+    if (in_array((string)($order['payment_status'] ?? 'pending'), ['paid', 'refund_pending', 'partially_refunded', 'refunded', 'disputed'], true)
+        && PaymentService::reportForeignCapture($order, [$paymentRef, $sessionId])) {
+        return;
+    }
     if ($paymentRef !== '') Orders::setPaymentId($orderId, $paymentRef);
     if ($sessionId !== '') CheckoutSession::markCompleted($sessionId, 'stripe');
 

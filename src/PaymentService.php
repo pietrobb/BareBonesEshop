@@ -421,9 +421,14 @@ class PaymentService {
         $order = Orders::byId($orderId);
         $paymentId = trim((string)($order['payment_id'] ?? ''));
         $requestKey = 'order_refund_request_' . $orderId;
-        if (!$order || $paymentId === '' || self::transactionExists($requestKey)) return [];
+        if (!$order || self::transactionExists($requestKey)) return [];
         $amount = self::refundableBalance($orderId);
         if ($amount <= 0) return [];
+        if ($paymentId === '') {
+            // Offline money (bank transfer, COD) has no provider payment to refund: the merchant returns it by hand.
+            self::flagManualRefundWithin($order, $amount, $reason);
+            return [];
+        }
         $from = (string)($order['payment_status'] ?? '');
         if (!in_array($from, ['paid', 'partially_refunded'], true)) {
             // A refund already in flight or a dispute: the merchant settles it by hand.
@@ -437,6 +442,62 @@ class PaymentService {
             'amount' => $amount,
             'idempotency_key' => 'order_refund_' . $orderId,
         ], 1]];
+    }
+
+    /**
+     * Once per order: a ledger row (status refund_manual_required) and a critical incident record
+     * captured money no provider refund can return, so it is never kept silently.
+     */
+    private static function flagManualRefundWithin(array $order, int $amount, string $reason): void {
+        $orderId = (int)$order['id'];
+        $key = 'order_refund_manual_' . $orderId;
+        if (self::transactionExists($key)) return;
+        $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
+        self::logTransaction(
+            orderId: $orderId,
+            provider: (string)($snapshot['provider'] ?? $order['payment_method'] ?? ''),
+            providerRef: '',
+            status: 'refund_manual_required',
+            amount: $amount,
+            currency: strtolower((string)($order['currency'] ?? 'eur')),
+            idempotencyKey: $key,
+            rawResponse: ['event_type' => 'refund.manual_required', 'reason' => $reason],
+            failClosed: true,
+        );
+        AuditLog::log('order_refund', $orderId, (string)($order['payment_status'] ?? ''), 'refund_manual_required', $reason);
+        IncidentMonitor::report('payment.order_refund_manual', 'payment', 'critical', ['order_id' => $orderId]);
+    }
+
+    /**
+     * A capture reported for an order whose payment is already settled. A redelivery of the
+     * recorded payment is harmless; one under a provider reference the order never had is money
+     * taken twice, which raises a critical incident. Returns true for such a foreign capture.
+     */
+    public static function reportForeignCapture(array $order, array $refs): bool {
+        $refs = array_values(array_filter(array_map('strval', $refs), static fn(string $ref): bool => $ref !== ''));
+        if ($refs === []) return false;
+        $known = [(string)($order['payment_id'] ?? '')];
+        $stmt = Db::get()->prepare("SELECT provider_ref, raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store");
+        $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $tx) {
+            // The ledger row of a capture carries the order's payment_id; the captured references sit in its payload.
+            $raw = json_decode((string)($tx['raw_response'] ?? ''), true);
+            $known[] = (string)$tx['provider_ref'];
+            foreach (is_array($raw) ? self::captureRefs($raw) : [] as $ref) $known[] = $ref;
+        }
+        if (array_intersect($refs, $known) !== []) return false;
+        IncidentMonitor::report('payment.duplicate_capture', 'payment', 'critical', ['order_id' => (int)$order['id']]);
+        AuditLog::log('payment_duplicate_capture', (int)$order['id'], (string)($order['payment_status'] ?? ''), (string)($order['payment_status'] ?? ''), 'Capture under another provider reference: ' . implode(', ', $refs));
+        return true;
+    }
+
+    /** @return list<string> provider references a payment event or ledger payload names */
+    private static function captureRefs(array $data): array {
+        $refs = [];
+        foreach (['payment_id', 'provider_ref', 'orderId', 'payment_intent', 'session_id', 'id'] as $key) {
+            if (isset($data[$key]) && is_scalar($data[$key]) && (string)$data[$key] !== '') $refs[] = (string)$data[$key];
+        }
+        return $refs;
     }
 
     /** The provider confirmed the refund executed under this idempotency key. */
@@ -467,17 +528,21 @@ class PaymentService {
             return;
         }
         if ((string)$order['status'] !== 'cancelled') return;
+        $manualKey = 'order_refund_manual_' . $orderId;
+        $manualBefore = self::transactionExists($manualKey);
         $db = Db::get();
         $db->beginTransaction();
         try {
             $jobs = self::orderRefundJobsWithin($orderId, 'payment.captured_after_cancel');
             if ($jobs !== []) AuditLog::log('order_refund', $orderId, 'cancelled', 'refund_pending', 'Payment captured on a cancelled order: ' . $note);
+            // Offline money gets no refund job, only the manual-refund ledger row: still a capture to report.
+            $manual = !$manualBefore && self::transactionExists($manualKey);
             $db->commit();
         } catch (\Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();
             throw $e;
         }
-        if ($jobs === []) return;
+        if ($jobs === [] && !$manual) return;
         IncidentMonitor::report('payment.captured_after_cancel', 'payment', 'critical', ['order_id' => $orderId]);
         OrderWorkflow::pushDeferredJobs($jobs);
     }
@@ -603,7 +668,8 @@ class PaymentService {
      * Provider events never bypass the payment state machine. Money events must match the order
      * currency (and, for captures, the exact total); refunds accumulate per refund. Events that do
      * not apply (late failure after capture, refund of an unpaid order, repeated capture) change
-     * nothing and stay in the payment log as 'ignored'.
+     * nothing and stay in the payment log as 'ignored'; a repeated capture under another provider
+     * reference also raises an incident.
      */
     private static function applyWebhookEvent(int $orderId, string $provider, string $eventType, string $eventKey, array $data): void {
         $order = Orders::byId($orderId);
@@ -634,6 +700,8 @@ class PaymentService {
         } elseif ($to === 'partially_refunded' && $from === $to && $amount > 0) {
             self::recordEvent($orderId, $eventType, $to, $amount, $orderCurrency, $eventKey, $payload, $provider, $providerRef);
         } else {
+            // Checked before this event's own row joins the ledger, whose references it would match.
+            if ($to === 'paid') self::reportForeignCapture($order, self::captureRefs($data));
             self::recordEvent($orderId, $eventType, 'ignored', $amount, $currency ?: $orderCurrency, $eventKey, $payload + ['payment_status' => $from], $provider, $providerRef);
             if ($to !== null) AuditLog::log('payment_webhook_ignored', $orderId, $from, $from, "{$provider} {$eventType}");
             // A redelivery after a failed settlement finishes it (settleCapture is idempotent).
