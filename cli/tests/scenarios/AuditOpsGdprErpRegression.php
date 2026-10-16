@@ -136,7 +136,8 @@ $ogChecks = static function (PDO $ogDb, array $ogOrderTemplate, string $ogLabel)
     foreach (GdprService::PII_REGISTRY as $ogTable => $ogEntry) {
         if ($ogEntry['export'] !== null) assert_true(array_key_exists($ogEntry['export'], $ogExport), "OG 2 {$ogLabel}: export has the '{$ogEntry['export']}' section for {$ogTable}");
     }
-    assert_equals(['s:' . $ogKey('checkout'), 's:' . $ogKey('consent')], (static function (array $keys): array { sort($keys); return $keys; })(array_column($ogExport['wishlist'], 'owner_key')),
+    $ogSorted = static function (array $keys): array { sort($keys); return $keys; };
+    assert_equals($ogSorted(['s:' . $ogKey('checkout'), 's:' . $ogKey('consent')]), $ogSorted(array_column($ogExport['wishlist'], 'owner_key')),
         "OG 2/6 {$ogLabel}: export lists the wishlists of the signed-in and checkout sessions, not of the abandoned cart's session");
     assert_equals(2, count($ogExport['consent_history']), "OG 2 {$ogLabel}: export lists the signed-in and the same-session anonymous consent");
     assert_equals([], array_values(array_filter(array_column($ogExport['consent_history'], 'session_id'), static fn($id): bool => $id === $ogKey('cart'))),
