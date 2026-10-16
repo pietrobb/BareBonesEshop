@@ -421,7 +421,7 @@ $webhookRoutingSourceG7 = file_get_contents(TEST_CLI_DIR . '/../src/PaymentWebho
 assert_true(!str_contains($webhookRoutingSourceG7, '->quote(') && str_contains($webhookRoutingSourceG7, 'WHERE {$column} = ? AND store_id IN ({$marks})')
     && str_contains($webhookRoutingSourceG7, "['order_number', (string)\$refs['order_number']]") && str_contains($webhookRoutingSourceG7, "['payment_id', (string)\$refs['payment_id']]"), 'G7 SQL: Stripe and PayU fallback identifiers use bound parameters on fixed columns');
 
-$accountSourceG6 = file_get_contents(TEST_CLI_DIR . '/../account.php') ?: '';
+$accountSourceG6 = entrypointSource('account.php');
 assert_true(str_contains($accountSourceG6, 'GDPR erase failed [{$errorId}]'), 'G6 errors: erase failure details are logged with a correlation ID');
 assert_true(!str_contains($accountSourceG6, "gdpr_erase_failed') . ': ' . \$ex->getMessage()"), 'G6 errors: erase exception detail is not rendered to the customer');
 $importSourceG6 = file_get_contents(TEST_CLI_DIR . '/../src/Import.php') ?: '';

@@ -848,7 +848,7 @@ assert_true(!Security::formTrapValidate('test_register', $hpToken, 'https://spam
 $oldToken = Security::formTrapToken('test_register', 3600);
 $_SESSION[$trapKey][$oldToken] = time() - 3601;
 assert_true(!Security::formTrapValidate('test_register', $oldToken, '', 4, 3600), 'formTrapValidate rejects expired tokens');
-$accountSource = file_get_contents(TEST_CLI_DIR . '/../account.php') ?: '';
+$accountSource = entrypointSource('account.php');
 $accountThemeSource = file_get_contents(TEST_CLI_DIR . '/../themes/default/blocks/storefront/account-page.html') ?: '';
 assert_true(str_contains($accountThemeSource, 'name="register_token"'), 'Account register form includes form-trap token');
 assert_true(!str_contains($accountSource, 'HTTP_HOST'), 'G3: password reset URL does not trust the Host header');

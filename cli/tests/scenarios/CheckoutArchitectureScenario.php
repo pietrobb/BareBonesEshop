@@ -709,7 +709,7 @@ $storefrontSrc = entrypointSource('index.php');
 $storefrontThemeSrc = '';
 foreach (glob(TEST_CLI_DIR . '/../themes/default/blocks/storefront/*.html') ?: [] as $block) $storefrontThemeSrc .= file_get_contents($block) ?: '';
 $storefrontJsSrc = file_get_contents(TEST_CLI_DIR . '/../themes/default/assets/storefront.js') ?: '';
-$accountSrc = (file_get_contents(TEST_CLI_DIR . '/../account.php') ?: '')
+$accountSrc = entrypointSource('account.php')
     . (file_get_contents(TEST_CLI_DIR . '/../themes/default/blocks/storefront/account-page.html') ?: '')
     . $storefrontJsSrc;
 assert_true(
