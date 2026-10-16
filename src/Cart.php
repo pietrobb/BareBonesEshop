@@ -431,14 +431,16 @@ class Cart {
     }
 
     /**
-     * Cart abandonment: save email and persist cart to DB for recovery
+     * Cart abandonment: save email and persist cart to DB for recovery — only with the shopper's
+     * reminder consent (AbandonedCarts::capture()).
+     * @param array{version?:string,text?:string}|null $reminderConsent accepted cart-reminder consent, null = none
      */
-    public static function setEmail(string $email): void {
+    public static function setEmail(string $email, ?array $reminderConsent = null): void {
         $_SESSION['cart_email'] = $email;
         $_SESSION['cart_email_at'] = time();
 
         try {
-            AbandonedCarts::capture($email);
+            AbandonedCarts::capture($email, null, $reminderConsent);
         } catch (\Throwable $e) {
             // Cart recovery tracking must never block checkout.
             error_log("Cart::setEmail persist failed: " . $e->getMessage());

@@ -25,6 +25,12 @@ class Shipping {
         return array_values(array_unique($codes));
     }
 
+    /** ISO currency the shipping.json amounts (rates, free_above) are written in; EUR when not declared. */
+    public static function currency(): string {
+        $currency = strtoupper((string)(self::config()['currency'] ?? 'EUR'));
+        return preg_match('/^[A-Z]{3}$/', $currency) ? $currency : 'EUR';
+    }
+
     /** Override config (for testing) */
     public static function setConfig(array $config): void {
         self::$config = $config;
@@ -36,19 +42,19 @@ class Shipping {
      * @param string $country  ISO country code: SK, CZ, DE...
      * @param int    $weightG  Total weight in grams
      * @param int    $subtotal Cart subtotal in cents (for free shipping check)
-     * @return int Cost in cents
+     * @return int Cost in cents; -1 when the method does not exist or does not serve the country
      */
     public static function calculate(string $method, string $country, int $weightG = 0, int $subtotal = 0): int {
         $cfg = self::config();
         $methodCfg = $cfg['methods'][$method] ?? null;
-        if (!$methodCfg) return 0;
+        if (!$methodCfg) return -1; // unknown method is unavailable, never free
 
         // Pickup is always free
         if (($methodCfg['price'] ?? null) === 0) return 0;
 
         // Determine zones for country (may belong to multiple: local + domestic)
         $zones = self::zonesForCountry($country);
-        if (empty($zones)) return 0;
+        if (empty($zones)) return -1; // country outside every zone: unavailable, never free
 
         // Check zone availability and find matching rates
         $rates = null;

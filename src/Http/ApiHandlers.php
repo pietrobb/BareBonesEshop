@@ -557,8 +557,8 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     $cfg = $runtimeConfig ?? require dirname(__DIR__, 2) . '/config.php';
     $synthetic = SyntheticCheckout::isRequest($cfg);
 
-    // Capture email for abandoned cart recovery
-    if (!$synthetic) Cart::setEmail($email);
+    // Capture email for abandoned cart recovery — only with the shopper's reminder consent.
+    if (!$synthetic) Cart::setEmail($email, CheckoutService::cartReminderConsent($input, $country));
 
     if (!preg_match('/^[a-z0-9_-]{2,40}$/', $paymentMethod)) {
         return ['error' => 'Invalid payment method'];
@@ -636,6 +636,9 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         $shippingMethod = 'digital';
     } elseif (trim((string)($input['street'] ?? '')) === '' || trim((string)($input['city'] ?? '')) === '' || trim((string)($input['zip'] ?? '')) === '') {
         return ['success' => false, 'error' => 'Doručovacia adresa je povinná pri fyzických produktoch.'];
+    } elseif (!array_key_exists($country, ShippingService::destinationCountries())) {
+        // Only countries the checkout offers; a wildcard zone price is not a destination by itself.
+        return ['success' => false, 'error' => 'Doručenie nie je dostupné do zvolenej krajiny.'];
     }
 
     $consentContext = [
@@ -1266,7 +1269,8 @@ function apiWebhookPulledNotification(string $provider): ?array {
 
 function apiWebhookShipping(): array {
     $carrier = Security::clean($_GET['carrier'] ?? '');
-    if (!$carrier || !preg_match('/^[a-z0-9_]+$/', $carrier)) {
+    // Carrier codes allow "-" (HttpShipping's default is http-carrier), as adapter codes do.
+    if (!$carrier || !preg_match('/^[a-z0-9][a-z0-9_-]{0,39}$/', $carrier)) {
         http_response_code(400);
         return ['error' => 'Invalid carrier'];
     }
@@ -1291,7 +1295,12 @@ function apiWebhookShipping(): array {
     };
 
     try {
-        $result = ShippingService::handleTrackingWebhook($carrier, $parsed, $sigHeader, $rawPayload);
+        $result = ShippingService::handleTrackingWebhook($carrier, $parsed, $sigHeader, $rawPayload, (string)($_SERVER['HTTP_X_SHIPPING_TIMESTAMP'] ?? ''));
+    } catch (ShippingWebhookConfigurationError $e) {
+        // Our own misconfiguration: not the carrier's fault, so not "Invalid signature"; the carrier retries.
+        IncidentMonitor::report('shipping.webhook_misconfigured', 'webhook', 'critical', ['exception' => $e]);
+        http_response_code(503);
+        return ['error' => 'Webhook not configured'];
     } catch (\RuntimeException $e) {
         if (str_contains($e->getMessage(), 'signature')) {
             http_response_code(400);

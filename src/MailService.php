@@ -21,6 +21,10 @@
 class MailService {
     private static ?MailAdapter $adapterOverride = null;
     private const SECRET_LINK_VARS = ['reset_url', 'verify_url', 'cart_url', 'unsubscribe_url', 'download_links'];
+    /** Marketing mail: carries List-Unsubscribe / List-Unsubscribe-Post (RFC 2369 / RFC 8058) from its unsubscribe_url. */
+    public const MARKETING_TEMPLATES = ['cart_reminder'];
+    /** Rate-limited order mail is retried at most this many times by the worker. */
+    public const RATE_LIMIT_MAX_RETRIES = 3;
 
     /** For tests: inject a specific adapter (bypasses env). */
     public static function useAdapter(?MailAdapter $a): void {
@@ -45,7 +49,8 @@ class MailService {
      * @param int|null $orderId  Optional order link (for audit + resend)
      *
      * @return array {
-     *   status:  'sent' | 'failed' | 'skipped',
+     *   status:  'sent' | 'failed' | 'skipped' | 'rate_limited',
+     *            rate_limited: the recipient/template budget is spent; retry after retry_after seconds
      *   log_id:  int,
      *   subject: string,
      *   adapter: string,
@@ -68,8 +73,10 @@ class MailService {
         if (!preg_match('/^[a-z0-9_-]{1,80}$/i', $template)) {
             return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => '', 'error' => 'invalid template'];
         }
-        if (!self::recipientAllowed($to, $template)) {
-            return ['status' => 'skipped', 'log_id' => 0, 'subject' => '', 'adapter' => '', 'error' => 'recipient rate limit'];
+        $window = self::recipientWindow($to, $template, $orderId);
+        if ($window !== null) {
+            // Not 'skipped': the caller can retry once the window has passed (see deferRateLimited()).
+            return ['status' => 'rate_limited', 'log_id' => 0, 'subject' => '', 'adapter' => '', 'error' => 'recipient rate limit', 'retry_after' => $window + 60];
         }
         $locale = $locale !== '' ? $locale : self::defaultLocale();
 
@@ -98,7 +105,7 @@ class MailService {
                 'X-Mailer'   => 'BareBonesShop',
                 'X-Template' => $template,
                 'X-Locale'   => $locale,
-            ],
+            ] + self::unsubscribeHeaders($template, $vars),
         ];
 
         try {
@@ -179,44 +186,76 @@ class MailService {
         return trim(preg_replace('/\s+\n/', "\n", html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8')));
     }
 
-    /** Expand {{#each}} / {{#if}} / {{var}} — matches worker.php renderTemplate. */
+    /**
+     * Expand {{#each}} / {{#if}} / {{var}} — matches worker.php renderTemplate. Every placeholder
+     * is replaced in one pass over the template, so a value that itself contains "{{other}}"
+     * (a customer name, an item name) is output literally, never expanded.
+     */
     public static function renderString(string $tpl, array $vars, bool $html = true): string {
         $value = static fn($v): string => $html ? htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8') : (string)$v;
         // {{#each key}}...{{/each}}
-        $tpl = preg_replace_callback('/\{\{#each\s+(\w+)\}\}(.*?)\{\{\/each\}\}/s', function ($m) use ($vars, $value) {
+        $tpl = (string)preg_replace_callback('/\{\{#each\s+(\w+)\}\}(.*?)\{\{\/each\}\}/s', function ($m) use ($vars, $value) {
             $items = $vars[$m[1]] ?? [];
             if (!is_array($items)) return '';
             $out = '';
             foreach ($items as $item) {
-                $row = $m[2];
-                if (is_array($item)) {
-                    foreach ($item as $k => $v) {
-                        $row = str_replace('{{' . $k . '}}', $value($v), $row);
-                    }
-                } else {
-                    $row = str_replace('{{this}}', $value($item), $row);
-                }
-                $out .= $row;
+                $values = is_array($item) ? $item : ['this' => $item];
+                // Row placeholders without a value stay for the outer pass ({{currency}} inside a row).
+                $out .= (string)preg_replace_callback('/\{\{([A-Za-z0-9_.-]+)\}\}/', static function (array $r) use ($values, $value): string {
+                    if (!array_key_exists($r[1], $values)) return $r[0];
+                    return is_scalar($values[$r[1]]) ? "\x00" . base64_encode($value($values[$r[1]])) . "\x01" : '';
+                }, $m[2]);
             }
             return $out;
         }, $tpl);
 
         // {{#if key}}...{{/if}}
-        $tpl = preg_replace_callback('/\{\{#if\s+(\w+)\}\}(.*?)\{\{\/if\}\}/s', function ($m) use ($vars) {
+        $tpl = (string)preg_replace_callback('/\{\{#if\s+(\w+)\}\}(.*?)\{\{\/if\}\}/s', function ($m) use ($vars) {
             return !empty($vars[$m[1]]) ? $m[2] : '';
         }, $tpl);
 
-        // {{var}}
-        foreach ($vars as $k => $v) {
-            if (is_scalar($v)) {
-                $tpl = str_replace('{{' . $k . '}}', $value($v), $tpl);
-            }
+        // {{var}} — one pass over the template: values are never rescanned, unknown or non-scalar
+        // placeholders become empty. Row values from {{#each}} were sealed above and are unsealed last.
+        $tpl = (string)preg_replace_callback('/\{\{([^}]+)\}\}/', static function (array $m) use ($vars, $value): string {
+            $v = $vars[$m[1]] ?? null;
+            return is_scalar($v) ? $value($v) : '';
+        }, $tpl);
+        return (string)preg_replace_callback('/\x00([A-Za-z0-9+\/=]*)\x01/', static fn(array $m): string => (string)base64_decode($m[1]), $tpl);
+    }
+
+    /**
+     * Worker retry for a rate_limited order mail: queue the same email_send job again, due after the
+     * limit window, at most RATE_LIMIT_MAX_RETRIES times. Mail without an order (cart reminders) is
+     * deduplication, not lost mail, and is not retried. Returns whether a retry was queued.
+     */
+    public static function deferRateLimited(array $payload, array $result): bool {
+        $retries = (int)($payload['_rate_limit_retries'] ?? 0);
+        if (empty($payload['order_id']) || $retries >= self::RATE_LIMIT_MAX_RETRIES) {
+            Logger::warning('mail.rate_limited_dropped', ['template' => (string)($payload['template'] ?? ''), 'attempts' => $retries]);
+            IncidentMonitor::report('mail.rate_limited_dropped', 'mail', 'warning', isset($payload['order_id']) ? ['order_id' => (int)$payload['order_id']] : []);
+            return false;
         }
-        return preg_replace('/\{\{[^}]+\}\}/', '', $tpl);
+        $payload['_rate_limit_retries'] = $retries + 1;
+        JobQueue::pushDelayed('email_send', $payload, max(60, (int)($result['retry_after'] ?? 3660)), 5);
+        return true;
+    }
+
+    /** @return array<string,string> List-Unsubscribe headers for marketing templates with an absolute https unsubscribe link */
+    private static function unsubscribeHeaders(string $template, array $vars): array {
+        $url = (string)($vars['unsubscribe_url'] ?? '');
+        if (!in_array($template, self::MARKETING_TEMPLATES, true) || !preg_match('#^https?://[^\s<>"]+$#i', $url)) return [];
+        // One-click (RFC 8058): the link also answers a POST "List-Unsubscribe=One-Click".
+        return ['List-Unsubscribe' => '<' . $url . '>', 'List-Unsubscribe-Post' => 'List-Unsubscribe=One-Click'];
     }
 
     // ─── Internal helpers ────────────────────────────────────────
-    private static function recipientAllowed(string $recipient, string $template): bool {
+    /**
+     * Seconds of the spent rate-limit window, or null when the mail may go out. Mail linked to an
+     * order (confirmation, invoice, digital delivery) is limited per order, not per recipient:
+     * a B2B buyer with many orders, or someone placing orders with another person's address,
+     * cannot exhaust the budget of a different order's transactional mail.
+     */
+    private static function recipientWindow(string $recipient, string $template, ?int $orderId): ?int {
         $limits = [
             'account_password_reset' => [3, 3600],
             'account_email_verification' => [3, 3600],
@@ -230,12 +269,18 @@ class MailService {
         ];
         [$max, $window] = $limits[$template] ?? [10, 3600];
         $since = gmdate('Y-m-d H:i:s', time() - $window);
+        $params = [':recipient' => $recipient, ':template' => $template, ':since' => $since];
+        $orderScope = '';
+        if ($orderId !== null) {
+            $orderScope = ' AND order_id = :order';
+            $params[':order'] = $orderId;
+        }
         $stmt = Db::get()->prepare(
             "SELECT COUNT(*) FROM email_log
-             WHERE recipient = :recipient AND template = :template AND created_at >= :since"
+             WHERE recipient = :recipient AND template = :template AND created_at >= :since{$orderScope}"
         );
-        $stmt->execute([':recipient' => $recipient, ':template' => $template, ':since' => $since]);
-        return (int)$stmt->fetchColumn() < $max;
+        $stmt->execute($params);
+        return (int)$stmt->fetchColumn() < $max ? null : $window;
     }
 
     private static function defaultLocale(): string {

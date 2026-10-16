@@ -151,6 +151,11 @@ class Setup
         $add($mail === 'log' ? 'warn' : 'pass', 'provider.mail', "Mail provider selected: {$mail}", $mail === 'log' ? 'Configure smtp or ses and send a staging message before launch.' : '');
         $webhooks = array_filter((array)($config['outbound_webhooks'] ?? []), static fn($endpoint): bool => is_array($endpoint) && ($endpoint['active'] ?? true));
         $add($webhooks === [] ? 'warn' : 'pass', 'provider.webhook', $webhooks === [] ? 'No active outbound webhook configured.' : count($webhooks) . ' active outbound webhook endpoint(s).', 'Configure one signed staging endpoint and verify a delivery audit row.');
+        $invalidWebhooks = Webhook::invalidEndpoints($config);
+        $add($invalidWebhooks === [] ? 'pass' : 'fail', 'provider.webhook_config', $invalidWebhooks === []
+            ? 'Outbound webhook endpoints are valid.'
+            : 'Invalid outbound webhook endpoints: ' . implode('; ', array_map(static fn(string $code, string $problem): string => "{$code}: {$problem}", array_keys($invalidWebhooks), $invalidWebhooks)),
+            'Use https URLs (allow_insecure_http only for a local receiver), secrets of 32+ bytes and codes of a-z, 0-9, "_" and "-".');
         Extensions::boot($config);
         $extensionErrors = Extensions::errors();
         $add($extensionErrors === [] ? 'pass' : 'fail', 'extensions', $extensionErrors === []

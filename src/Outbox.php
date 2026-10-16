@@ -119,7 +119,8 @@ class Outbox {
         ?int $responseCode,
         ?string $error
     ): void {
-        if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,63}$/', $endpointCode)) {
+        // Configured endpoints use [a-z0-9_-]; extension listeners are "ext:<code>:<name>".
+        if (!preg_match('/^[a-z0-9][a-z0-9_:-]{0,63}$/', $endpointCode)) {
             throw new InvalidArgumentException('Invalid webhook endpoint code');
         }
         $stmt = Db::get()->prepare("INSERT INTO webhook_deliveries

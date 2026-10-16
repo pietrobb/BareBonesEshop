@@ -44,32 +44,28 @@ class PacketaShipping implements ShippingLifecycleAdapter
         $weightG  = (int)($params['weight_g'] ?? 0);
         $subtotal = (int)($params['subtotal'] ?? 0);
         $codWanted = !empty($params['cod']);
+        // The built-in tiers, the COD fee and SHIP_PACKETA_FREE_ABOVE are EUR cents; other store
+        // currencies are quoted only from the store's own shipping_rates rows (entered in that currency).
+        $eur = strtoupper((string)($params['currency'] ?? 'EUR')) === 'EUR';
 
-        // Check free threshold
-        if ($subtotal >= $this->freeAboveCents && $subtotal > 0) {
+        // Coverage first: free shipping is never offered to a country Packeta does not serve.
+        $price = $this->lookupDbRate($country, $weightG) ?? ($eur ? $this->fallbackRate($country, $weightG) : null);
+        if ($price === null) {
+            return []; // carrier does not service this country (or has no price in this currency)
+        }
+
+        if ($eur && $subtotal >= $this->freeAboveCents && $subtotal > 0) {
             return [[
                 'carrier'       => $this->carrierId(),
                 'label'         => 'Packeta — zadarmo',
                 'price'         => 0,
                 'cod_surcharge' => 0,
-                'delivery_days' => '2-3',
+                'delivery_days' => $this->deliveryDays($country),
                 'cod'           => $this->supportsCOD(),
             ]];
         }
 
-        // Try DB rates first
-        $price = $this->lookupDbRate($country, $weightG);
-
-        if ($price === null) {
-            // Fallback: hardcoded SK/CZ tiers
-            $price = $this->fallbackRate($country, $weightG);
-        }
-
-        if ($price === null) {
-            return []; // carrier does not service this country
-        }
-
-        $codSurcharge = ($codWanted && $this->supportsCOD()) ? $this->codSurcharge($country) : 0;
+        $codSurcharge = ($codWanted && $this->supportsCOD()) ? $this->codSurcharge($country, $eur) : 0;
 
         return [[
             'carrier'       => $this->carrierId(),
@@ -198,11 +194,11 @@ class PacketaShipping implements ShippingLifecycleAdapter
             $db   = Db::get();
             $stmt = $db->prepare("
                 SELECT price FROM shipping_rates
-                WHERE carrier = 'packeta' AND country = :country
+                WHERE carrier = 'packeta' AND country = :country AND store_id = :store
                   AND :weight BETWEEN weight_from_g AND weight_to_g
                 ORDER BY weight_from_g ASC LIMIT 1
             ");
-            $stmt->execute([':country' => $country, ':weight' => $weightG]);
+            $stmt->execute([':country' => $country, ':weight' => $weightG, ':store' => StoreContext::current()->providerId()]);
             $row = $stmt->fetch();
             return $row ? (int)$row['price'] : null;
         } catch (\Throwable $e) {
@@ -216,10 +212,10 @@ class PacketaShipping implements ShippingLifecycleAdapter
             $db   = Db::get();
             $stmt = $db->prepare("
                 SELECT cod_surcharge FROM shipping_rates
-                WHERE carrier = 'packeta' AND country = :country
+                WHERE carrier = 'packeta' AND country = :country AND store_id = :store
                 ORDER BY weight_from_g ASC LIMIT 1
             ");
-            $stmt->execute([':country' => $country]);
+            $stmt->execute([':country' => $country, ':store' => StoreContext::current()->providerId()]);
             $row = $stmt->fetch();
             return $row ? (int)$row['cod_surcharge'] : null;
         } catch (\Throwable $e) {
@@ -244,9 +240,10 @@ class PacketaShipping implements ShippingLifecycleAdapter
         return null;
     }
 
-    private function codSurcharge(string $country): int
+    private function codSurcharge(string $country, bool $eur = true): int
     {
-        return $this->lookupDbCodSurcharge($country) ?? 100; // default 1 EUR COD fee
+        // The 1 EUR default only applies to EUR stores; other currencies use the store's own row.
+        return $this->lookupDbCodSurcharge($country) ?? ($eur ? 100 : 0);
     }
 
     private function label(string $country): string

@@ -28,7 +28,7 @@ class HttpShipping implements ShippingLifecycleAdapter
             'subtotal' => max(0, (int)($params['subtotal'] ?? 0)),
             'currency' => strtolower((string)($params['currency'] ?? 'eur')),
             'cod' => !empty($params['cod']),
-        ]);
+        ], (int)($this->config['rates_timeout'] ?? 5)); // checkout waits on this call: a short timeout
         $rates = $result['rates'] ?? [];
         if (!is_array($rates)) throw new RuntimeException('Carrier rates response is invalid');
         return array_map(function (array $rate): array {
@@ -87,12 +87,12 @@ class HttpShipping implements ShippingLifecycleAdapter
         return ['awb' => $awb, 'status' => (string)($result['status'] ?? 'created'), 'events' => $events];
     }
 
-    private function call(string $path, string $method = 'GET', ?array $payload = null): array
+    private function call(string $path, string $method = 'GET', ?array $payload = null, ?int $timeout = null): array
     {
         $baseUrl = (string)($this->config['base_url'] ?? '');
         $apiKey = (string)($this->config['api_key'] ?? '');
         if ($baseUrl === '' || strlen($apiKey) < 16) throw new RuntimeException('HTTP shipping integration is not configured');
-        return JsonHttpClient::request($baseUrl, $path, $method, $payload, ['Authorization: Bearer ' . $apiKey], (int)($this->config['timeout'] ?? 15));
+        return JsonHttpClient::request($baseUrl, $path, $method, $payload, ['Authorization: Bearer ' . $apiKey], max(1, $timeout ?? (int)($this->config['timeout'] ?? 15)));
     }
 
     private function assertAwb(string $awb): string

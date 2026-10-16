@@ -192,7 +192,7 @@ PHP);
     $a161Deliveries = array_map(static fn(array $d): string => $d['endpoint_code'] . '=' . $d['status'], $a161State['deliveries'] ?? []);
     assert_equals(["points:{$a161Event}:A161-1:default"], $a161Log(), 'A16.1 worker: the real worker runs the extension listener with the event envelope (' . trim(substr($a161Raw, 0, 300)) . ')');
     assert_true(($a161State['events'][0]['status'] ?? '') === 'retry' && str_contains((string)$a161State['events'][0]['last_error'], 'acme flaky listener not ready')
-        && $a161Deliveries === ['ext-acme-loyalty-points=delivered', 'ext-acme-loyalty-flaky=failed'],
+        && $a161Deliveries === ['ext:acme-loyalty:points=delivered', 'ext:acme-loyalty:flaky=failed'],
         'A16.1 worker: a throwing listener puts the event into retry with a readable error; the other listener is recorded as delivered (' . json_encode($a161State) . ')');
 
     touch($a161Ext . '/acme-loyalty/flaky.ok');

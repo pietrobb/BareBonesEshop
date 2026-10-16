@@ -60,7 +60,9 @@ final class ExtensionApi
         if (!$valid) {
             throw new InvalidArgumentException("unknown domain event \"{$events}\" (see DomainEvents)");
         }
-        $endpoint = 'ext-' . $this->code . '-' . $name;
+        // ":" is allowed neither in extension codes nor in listener names, so "<code>:<name>" pairs
+        // cannot collide (with "-" "ext-a-b"+"c" and "ext-a"+"b-c" were the same endpoint).
+        $endpoint = self::listenerEndpoint($this->code, $name);
         if (isset($this->listeners[$endpoint])) throw new RuntimeException("listener \"{$name}\" registered twice");
         $this->listeners[$endpoint] = ['events' => $events, 'listener' => $listener];
     }
@@ -87,13 +89,33 @@ final class ExtensionApi
         $this->pages[$this->route('page', $name)] = $handler;
     }
 
+    /** Delivery endpoint code of an extension listener in webhook_deliveries. */
+    public static function listenerEndpoint(string $code, string $name): string
+    {
+        return 'ext:' . $code . ':' . $name;
+    }
+
     /**
      * JSON API action /api/?action=<code>.<name> (same session, locale and rate limit as core actions).
      * $handler(array $query) returns the array that is sent as JSON.
+     *
+     * $options:
+     *  - 'method' => 'GET' | 'POST': the only HTTP method the action answers (others get 405).
+     *    Without it every method is accepted.
+     *  - 'csrf' => bool (default true): any non-GET/HEAD request must carry the session CSRF token
+     *    (X-CSRF-Token header or csrf_token field), else 403. Set false only for a server-to-server
+     *    action that authenticates its caller itself (e.g. a signed webhook).
      */
-    public function api(string $name, callable $handler): void
+    public function api(string $name, callable $handler, array $options = []): void
     {
-        $this->api[$this->route('api action', $name)] = $handler;
+        $method = isset($options['method']) ? strtoupper((string)$options['method']) : null;
+        if ($method !== null && !in_array($method, ['GET', 'POST'], true)) {
+            throw new InvalidArgumentException("api action \"{$name}\": method must be GET or POST");
+        }
+        if (array_key_exists('csrf', $options) && !is_bool($options['csrf'])) {
+            throw new InvalidArgumentException("api action \"{$name}\": csrf must be true or false");
+        }
+        $this->api[$this->route('api action', $name)] = ['handler' => $handler, 'method' => $method, 'csrf' => $options['csrf'] ?? true];
     }
 
     /** @internal Extensions::boot() */

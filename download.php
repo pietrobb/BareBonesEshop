@@ -35,14 +35,36 @@ if ($size === false) {
 $contentType = (string)($entitlement['content_type'] ?: 'application/octet-stream');
 if (!preg_match('#^[a-z0-9.+-]+/[a-z0-9.+-]+$#i', $contentType)) $contentType = 'application/octet-stream';
 $name = DigitalDelivery::safeDownloadName($entitlement);
+$etag = '"' . hash('sha256', (int)$entitlement['id'] . ':' . $size . ':' . (int)@filemtime($path)) . '"';
 
-if ($method !== 'HEAD' && !DigitalDelivery::consume((int)$entitlement['id'])) {
+// Single byte range (RFC 9110 14): resumable downloads. If-Range with another validator, several
+// ranges or an unsupported syntax get the whole file; an unsatisfiable range gets 416.
+$range = DigitalDelivery::parseRange((string)($_SERVER['HTTP_RANGE'] ?? ''), (int)$size);
+$ifRange = trim((string)($_SERVER['HTTP_IF_RANGE'] ?? ''));
+if ($range !== null && $ifRange !== '' && $ifRange !== $etag) $range = null;
+if ($range === false) {
+    http_response_code(416);
+    header('Content-Range: bytes */' . $size);
+    header('Accept-Ranges: bytes');
+    exit;
+}
+[$start, $end] = $range ?? [0, max(0, $size - 1)];
+$length = $size > 0 ? $end - $start + 1 : 0;
+
+// A download counts once: from byte 0; resumes inside the window are free (DigitalDelivery::authorizeTransfer()).
+if ($method !== 'HEAD' && !DigitalDelivery::authorizeTransfer($entitlement, $start)) {
     http_response_code(404);
     exit('Not Found');
 }
 
+if ($range !== null) {
+    http_response_code(206);
+    header('Content-Range: bytes ' . $start . '-' . $end . '/' . $size);
+}
 header('Content-Type: ' . $contentType);
-header('Content-Length: ' . $size);
+header('Content-Length: ' . $length);
+header('Accept-Ranges: bytes');
+header('ETag: ' . $etag);
 header("Content-Disposition: attachment; filename*=UTF-8''" . rawurlencode($name));
 header('Cache-Control: no-store, no-cache, must-revalidate, private');
 header('Pragma: no-cache');
@@ -59,9 +81,12 @@ if ($handle === false) {
     exit('Temporarily Unavailable');
 }
 try {
-    while (!feof($handle) && !connection_aborted()) {
-        $chunk = fread($handle, 524288);
-        if ($chunk === false) break;
+    if ($start > 0) fseek($handle, $start);
+    $remaining = $length;
+    while ($remaining > 0 && !feof($handle) && !connection_aborted()) {
+        $chunk = fread($handle, min(524288, $remaining));
+        if ($chunk === false || $chunk === '') break;
+        $remaining -= strlen($chunk);
         echo $chunk;
         flush();
     }

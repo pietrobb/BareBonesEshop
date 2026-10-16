@@ -2,7 +2,8 @@
 /**
  * Daily housekeeping of bookkeeping tables that otherwise grow without bound:
  * processed webhook events, replayable API responses, delivered outbox events (with their
- * delivery attempts), completed queue jobs and CSP violation reports (14 days). Dead/failed rows stay for the operator.
+ * delivery attempts), completed queue jobs (database rows, Redis index entries, job files) and
+ * CSP violation reports (14 days). Dead/failed rows stay for the operator.
  */
 final class RetentionCleanup
 {
@@ -64,6 +65,12 @@ final class RetentionCleanup
 
         // CSP reports are purged on ingest too, but a quiet site would otherwise keep old ones forever.
         $deleted['csp_violations'] = Db::tableExists('csp_violations', $db) ? CspReports::purge($db, $now) : 0;
+
+        // Redis keeps completed jobs outside the database: hashes expire on completion, the index is trimmed here.
+        $backend = JobQueue::activeBackend();
+        $deleted['redis_jobs'] = $backend instanceof RedisQueue
+            ? $backend->trimCompleted((int)($cfg['completed_jobs_days'] ?? 7) * 86400, $now)
+            : 0;
 
         $deleted['job_files'] = 0;
         $completedDir = (string)($cfg['jobs_dir'] ?? '') . '/completed';
