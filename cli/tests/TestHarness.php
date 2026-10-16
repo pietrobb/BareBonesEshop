@@ -16,6 +16,7 @@ function entrypointSource(string $entrypoint): string {
         'api.php' => ['src/Entrypoints/Api.php', 'src/Http/ApiHandlers.php'],
         'account.php' => ['src/Entrypoints/Storefront/Account.php', 'src/Entrypoints/Storefront/Layout.php'],
         'wishlist.php' => ['src/Entrypoints/Storefront/Layout.php'],
+        'page.php' => ['src/Entrypoints/Storefront/Layout.php'],
         'index.php' => [
             'src/Entrypoints/Storefront.php', 'src/Entrypoints/Storefront/Layout.php',
             'src/Entrypoints/Storefront/CatalogPages.php', 'src/Entrypoints/Storefront/CheckoutPages.php',

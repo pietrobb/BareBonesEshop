@@ -56,7 +56,7 @@ if ($smokeAvailable) {
         }
     }
 } else {
-    echo "  [SKIP] No server running at {$smokeBaseUrl} — start with: php -S localhost:8080\n";
+    echo "  [SKIP] No server running at {$smokeBaseUrl} — start with: php -S localhost:8080 router.php\n";
 }
 
 // ============================================================

@@ -3,8 +3,8 @@
  * BareBones Shop — Wishlist Page (SSR)
  *
  * Lists the current owner's saved products (logged-in customer or anonymous
- * session). Removal is progressive-enhancement via shop.js → api wishlist_toggle;
- * a no-JS POST fallback keeps the page functional without scripting.
+ * session). Removal and the product-page toggle are CSRF-guarded POSTs to this page
+ * (JSON clients use api wishlist_toggle), so the page works without scripting.
  */
 require_once __DIR__ . '/src/autoload.php';
 

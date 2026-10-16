@@ -1,5 +1,5 @@
 <?php
-/** Store-scoped CMS page rendered from a canonical model by the active theme. */
+/** Store-scoped CMS page rendered from a canonical model inside the theme's storefront shell. */
 require_once __DIR__ . '/src/autoload.php';
 
 UrlAliases::redirectInternal();
@@ -9,23 +9,26 @@ if (!isset($_SESSION['cart'])) $_SESSION['cart'] = [];
 
 $lang = Bootstrap::initLocale();
 $slug = Security::slug($_GET['slug'] ?? '');
-$page = $slug !== '' ? ContentService::page($slug, $lang) : null;
-if (!$page) {
+$cmsPage = $slug !== '' ? ContentService::page($slug, $lang) : null;
+$t = static fn(string $key): string => I18n::t($key);
+$e = static fn(string $value): string => esc($value);
+$catName = static fn(string $name): string => Bootstrap::categoryName($name, $lang);
+$cartCount = StorefrontCartAction::count();
+$page = 'cms';
+
+if (!$cmsPage) {
     http_response_code(404);
-    echo Template::page('404', ['t' => I18n::all()]);
-    exit;
+    $title = Template::pageTitle($t('account.page_not_found'));
+    // A status block, not the full-page 404 layout: the storefront shell already provides header and footer.
+    $content = Template::render('storefront/status-message', ['message' => $t('account.page_not_found')]);
+} else {
+    $model = StorefrontViewModel::cmsPage($cmsPage);
+    $template = (string)$model['page']['template'];
+    if (!isset(Template::loadLayouts()['pages'][$template])) $template = 'cms';
+    $content = Template::page($template, $model);
+    $title = Template::pageTitle((string)$model['page']['seo']['title']);
+    // Layout.php renders the canonical SEO head (canonical URL, description, JSON-LD) from this model.
+    $GLOBALS['storefront_view_model'] = $model;
 }
 
-$model = StorefrontViewModel::cmsPage($page);
-$template = (string)$model['page']['template'];
-if (!isset(Template::loadLayouts()['pages'][$template])) $template = 'cms';
-$content = Template::page($template, $model);
-$seo = $model['page']['seo'];
-$cartCount = 0;
-foreach ((array)$_SESSION['cart'] as $quantity) $cartCount += max(0, (int)$quantity);
-$shopName = (string)(StoreContext::current()->config()['name'] ?? 'BareBones Shop');
-
-echo Template::document((string)$seo['title'] . ' — ' . $shopName, $content, [
-    'seo_head' => Template::viewModelSeoHead($model, (string)$seo['title']),
-    'cart' => ['count' => $cartCount],
-]);
+require __DIR__ . '/src/Entrypoints/Storefront/Layout.php';

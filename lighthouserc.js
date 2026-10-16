@@ -1,7 +1,7 @@
 module.exports = {
   ci: {
     collect: {
-      startServerCommand: 'php -S 127.0.0.1:8080 -t .',
+      startServerCommand: 'php -S 127.0.0.1:8080 router.php',
       startServerReadyPattern: 'Development Server',
       url: [
         'http://127.0.0.1:8080/',

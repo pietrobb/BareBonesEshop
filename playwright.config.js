@@ -29,7 +29,8 @@ module.exports = defineConfig({
   ],
   webServer: [
     process.env.E2E_EXTERNAL_SERVER === '1' ? null : {
-      command: 'php -S 127.0.0.1:8080 -t .',
+      // The shop's router.php (the .htaccess deny/rewrite rules) plus the CSP-guard HTTP fixture.
+      command: 'php -S 127.0.0.1:8080 tests/e2e/router.php',
       url: baseURL,
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,

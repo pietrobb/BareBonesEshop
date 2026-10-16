@@ -4,7 +4,6 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>{{title}}</title>
-    {{{base_css}}}
     {{#each assets.css}}<link rel="stylesheet" href="{{this}}">{{/each}}
     {{{seo_head}}}
 </head>
@@ -22,6 +21,5 @@
 {{{body_end}}}
 {{#each assets.js}}<script src="{{this}}" defer></script>{{/each}}
 {{{marketing_hooks}}}
-{{{shop_js}}}
 </body>
 </html>

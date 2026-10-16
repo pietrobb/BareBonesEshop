@@ -5,23 +5,23 @@
 echo "\n--- Test: Category translations (DB JSON + I18n::category) ---\n";
 
 // Translations live only in categories.translations; the bundled auto-parts dictionary left the core (CR-A).
-$pdo->exec("INSERT INTO categories (slug, name, path, translations) VALUES ('test-body', 'Body', 'test-body', '{\"sk\":{\"name\":\"Karoséria\"},\"de\":{\"name\":\"Karosserie\"}}')");
+$pdo->exec("INSERT INTO categories (slug, name, path, translations) VALUES ('test-garden', 'Garden', 'test-garden', '{\"sk\":{\"name\":\"Záhrada\"},\"de\":{\"name\":\"Garten\"}}')");
 $testCatId = (int)$pdo->lastInsertId();
-assert_equals('Brake System', Bootstrap::categoryName('Brake System', 'sk'), 'CR-A: untranslated category keeps its base name (no auto-parts fallback)');
+assert_equals('Kitchen Tools', Bootstrap::categoryName('Kitchen Tools', 'sk'), 'CR-A: untranslated category keeps its base name (no auto-parts fallback)');
 
 // I18n::category reads from translations JSON
 $catRow = $pdo->query("SELECT * FROM categories WHERE id = {$testCatId}")->fetch();
 I18n::setLocale('sk');
 $trSk = I18n::category($catRow);
-assert_equals('Karoséria', $trSk['name'], 'CatI18n: I18n::category returns SK translated name');
+assert_equals('Záhrada', $trSk['name'], 'CatI18n: I18n::category returns SK translated name');
 
 I18n::setLocale('de');
 $trDe = I18n::category($catRow);
-assert_equals('Karosserie', $trDe['name'], 'CatI18n: I18n::category returns DE translated name');
+assert_equals('Garten', $trDe['name'], 'CatI18n: I18n::category returns DE translated name');
 
 I18n::setLocale('en');
 $trEn = I18n::category($catRow);
-assert_equals('Body', $trEn['name'], 'CatI18n: I18n::category keeps base name for EN (no translation entry)');
+assert_equals('Garden', $trEn['name'], 'CatI18n: I18n::category keeps base name for EN (no translation entry)');
 
 // ============================================================
 // TEST: Customer Accounts (register, login, reset, addresses, orders)

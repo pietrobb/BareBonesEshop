@@ -573,7 +573,7 @@ assert_equals('sk', Bootstrap::initLocale('/'), 'Bootstrap: initLocale uses the 
 assert_equals('sk', I18n::locale(), 'Bootstrap: initLocale applies the active store default before the system fallback');
 I18n::setLocale($savedLocale); // restore for downstream tests
 
-// CR-A (code review 2026-10-15): the auto-parts (TecDoc) category dictionary left the core. An untranslated
+// CR-A (code review 2026-10-15): the bundled vertical-specific category dictionary left the core. An untranslated
 // category keeps its base name instead of a hardcoded vertical translation.
 assert_true(!method_exists('Bootstrap', 'catTranslations'), 'CR-A: Bootstrap has no legacy auto-parts category dictionary');
 assert_true(!is_file(TEST_CLI_DIR . '/../data/category-translations.php'), 'CR-A: data/category-translations.php is gone');
@@ -636,13 +636,13 @@ assert_true(str_contains($ldWs['potentialAction']['target']['urlTemplate'], '{se
 // --- JsonLd::breadcrumbList() — ordered trail, leaf has no item ---
 $ldBc = JsonLd::breadcrumbList([
     ['name' => 'Home', 'url' => '/'],
-    ['name' => 'Brakes', 'url' => '/category/brakes'],
-    ['name' => 'Front Disc'],
+    ['name' => 'Kitchen', 'url' => '/category/kitchen'],
+    ['name' => 'Chef Knife'],
 ], 'https://shop.example');
 assert_equals('BreadcrumbList', $ldBc['@type'], 'JsonLd: breadcrumb @type');
 assert_equals(3, count($ldBc['itemListElement']), 'JsonLd: breadcrumb has all items');
 assert_equals(1, $ldBc['itemListElement'][0]['position'], 'JsonLd: breadcrumb positions are 1-based');
-assert_equals('https://shop.example/category/brakes', $ldBc['itemListElement'][1]['item'], 'JsonLd: breadcrumb ancestor has absolute item URL');
+assert_equals('https://shop.example/category/kitchen', $ldBc['itemListElement'][1]['item'], 'JsonLd: breadcrumb ancestor has absolute item URL');
 assert_true(!isset($ldBc['itemListElement'][2]['item']), 'JsonLd: breadcrumb leaf omits item (current page)');
 
 // --- JsonLd::render() — nonce'd script wrapper with valid JSON payload ---
@@ -811,7 +811,7 @@ assert_equals("'@SUM(A1)",   Security::csvCell('@SUM(A1)'),   'F9: leading @ neu
 assert_equals("'-cmd|calc",  Security::csvCell('-cmd|calc'),  'F9: leading-dash command neutralized');
 assert_equals('-500',        Security::csvCell('-500'),       'F9: legitimate negative number left intact');
 assert_equals('1990',        Security::csvCell(1990),         'F9: numeric cell unchanged');
-assert_equals('Brake Disc',  Security::csvCell('Brake Disc'), 'F9: plain text unchanged');
+assert_equals('Chef Knife',  Security::csvCell('Chef Knife'), 'F9: plain text unchanged');
 
 // ============================================================
 // TEST: Audit v1.12 remediation — Sprint B (F2, F5, F6, F7)
