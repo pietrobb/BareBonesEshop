@@ -1,8 +1,0 @@
-Súbory sú pripravené
-
-Dobrý deň, {{customer_name}},
-platba za objednávku {{order_number}} bola potvrdená.
-
-{{#each download_links}}{{label}}: {{url}} ({{validity}})
-{{/each}}
-Tieto súkromné odkazy neposkytujte ďalším osobám.

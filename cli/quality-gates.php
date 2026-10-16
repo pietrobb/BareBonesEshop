@@ -74,13 +74,17 @@ $verticalHits = [];
 $verticalFiles = array_merge(
     glob($root . '/src/*.php') ?: [], glob($root . '/src/*/*.php') ?: [], glob($root . '/src/*/*/*.php') ?: [], glob($root . '/cli/*.php') ?: [],
     glob($root . '/lang/*.php') ?: [], glob($root . '/themes/default/blocks/*/*.html') ?: [], glob($root . '/migrations/*.php') ?: [],
+    glob($root . '/data/*') ?: [], glob($root . '/*.php') ?: [],
     [$root . '/catalog.json', $root . '/config.example.php']
 );
 foreach ($verticalFiles as $file) {
     // Applied migrations are immutable history (checksummed); the removal migration names what it drops.
     if (in_array(basename($file), ['20260424000000_baseline.php', '20261014120000_remove_auto_parts_tables.php', 'quality-gates.php'], true)) continue;
-    if (preg_match('/tecdoc|ktype|product_vehicles|product_oe_numbers|oe_fts|auto_part|automotive/i', (string)file_get_contents($file))) $verticalHits[] = substr($file, strlen($root) + 1);
+    // Besides identifiers, catch the TecDoc category vocabulary (legacy category-name dictionaries).
+    if (is_file($file) && preg_match('/tecdoc|ktype|product_vehicles|product_oe_numbers|oe_fts|auto_part|automotive|brake pad|timing belt|shock absorber|cylinder head/i', (string)file_get_contents($file))) $verticalHits[] = substr($file, strlen($root) + 1);
 }
+$stalePayloads = array_map(static fn(string $dir): string => substr($dir, strlen($root) + 1), glob($root . '/releases/*/payload', GLOB_ONLYDIR) ?: []);
+$check($stalePayloads === [], 'Repository hygiene: no historical release payloads are tracked (build and sign from the qualified SHA)' . ($stalePayloads ? ': ' . implode(', ', $stalePayloads) : ''));
 $check($verticalHits === [], 'Universal engine: no auto-parts vertical in core (belongs in an extension)' . ($verticalHits ? ': ' . implode(', ', $verticalHits) : ''));
 
 $langFiles = glob($root . '/lang/*.php') ?: [];

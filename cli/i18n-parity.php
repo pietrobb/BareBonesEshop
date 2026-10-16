@@ -17,6 +17,7 @@ if (!$files) {
 }
 
 $locales = [];
+$catalogs = [];
 foreach ($files as $f) {
     $code = basename($f, '.php');
     $arr = require $f;
@@ -25,6 +26,21 @@ foreach ($files as $f) {
         exit(1);
     }
     $locales[$code] = array_keys($arr);
+    $catalogs[$code] = $arr;
+}
+
+// Every catalog is array_replace(en.php, overrides), so key parity alone always passes. A locale is
+// only complete when its values are translated: count word-like values still identical to English
+// (brand names, "IBAN", "Email" ... legitimately stay, hence the small budget).
+const I18N_ENGLISH_FALLBACK_BUDGET = 0.05;
+$untranslated = [];
+foreach ($catalogs as $code => $catalog) {
+    if ($code === 'en' || !isset($catalogs['en'])) continue;
+    $same = 0;
+    foreach ($catalog as $key => $value) {
+        if (is_string($value) && ($catalogs['en'][$key] ?? null) === $value && preg_match('/\p{L}{3}/u', $value)) $same++;
+    }
+    $untranslated[$code] = $same;
 }
 
 if (empty($locales)) {
@@ -59,6 +75,12 @@ foreach ($report as $code => $r) {
     echo sprintf("  [%s] %s: %d keys", $status, $code, $r['count']);
     if ($r['missing']) echo ", missing: " . implode(', ', $r['missing']);
     echo "\n";
+}
+foreach ($untranslated as $code => $same) {
+    $share = $same / max(1, count($catalogs[$code]));
+    $ok = $share <= I18N_ENGLISH_FALLBACK_BUDGET;
+    if (!$ok) $failed = true;
+    echo sprintf("  [%s] %s: %d values still English (%.1f%%, budget %d%%)\n", $ok ? 'OK' : 'FAIL', $code, $same, $share * 100, I18N_ENGLISH_FALLBACK_BUDGET * 100);
 }
 
 if ($failed) {

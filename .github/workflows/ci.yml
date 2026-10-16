@@ -55,6 +55,35 @@ jobs:
           php cli/i18n-parity.php
           php cli/quality-gates.php
 
+  phpstan:
+    name: PHPStan level 5 (baseline)
+    runs-on: ubuntu-latest
+    env:
+      PHPSTAN_VERSION: '2.3.1'
+      PHPSTAN_SHA256: 85157dba3d95d77ca603d2b7303aa78a538f9e3b56ccad07dd794c53aa96d1ae
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo, pdo_sqlite, mbstring, json, dom, libxml, sodium
+          coverage: none
+          tools: none
+
+      - name: Download pinned PHPStan phar (CI only, the runtime stays dependency-free)
+        run: |
+          curl -fsSL -o /tmp/phpstan.phar "https://github.com/phpstan/phpstan/releases/download/${PHPSTAN_VERSION}/phpstan.phar"
+          echo "${PHPSTAN_SHA256}  /tmp/phpstan.phar" | sha256sum -c -
+
+      - name: Analyse (new findings fail; existing ones are in phpstan-baseline.neon)
+        run: php -d memory_limit=2G /tmp/phpstan.phar analyse -c phpstan.neon.dist --no-progress
+
   browser-qualification:
     name: Browser, axe & Lighthouse
     runs-on: ubuntu-latest

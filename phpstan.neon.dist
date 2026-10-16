@@ -1,0 +1,36 @@
+# PHPStan runs in CI only, as a pinned and checksummed phar (.github/workflows/ci.yml), so the shop
+# runtime keeps zero dependencies. New code must pass level 5; existing findings live in the baseline
+# and are paid down over time - never add entries by hand, regenerate with --generate-baseline.
+includes:
+    - phpstan-baseline.neon
+
+parameters:
+    level: 5
+    phpVersion:
+        min: 80100
+        max: 80499
+    bootstrapFiles:
+        - src/autoload.php
+    paths:
+        - src
+        - adapters
+        - cli
+        - api
+        - account.php
+        - admin.php
+        - api.php
+        - download.php
+        - feed.php
+        - health.php
+        - index.php
+        - page.php
+        - product.php
+        - redirect.php
+        - robots.php
+        - router.php
+        - sitemap.php
+        - wishlist.php
+    excludePaths:
+        analyse:
+            - cli/tests
+    tmpDir: cache/phpstan

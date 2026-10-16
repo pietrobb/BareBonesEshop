@@ -51,7 +51,6 @@ $handlers = [
     'payment_cancel'    => 'handlePaymentCancel',
     'erp_order_push'    => 'handleErpOrderPush',
     'erp_order_update'  => 'handleErpOrderUpdate',
-    'sitemap_build'     => 'handleSitemapBuild',
     'cart_abandonment'  => 'handleCartAbandonment',
     'cleanup'           => 'handleCleanup',
     'image_resize'      => 'handleImageResize',
@@ -644,68 +643,6 @@ function handleErpOrderUpdate(array $payload, array $job): void {
         'order_number' => (string)$order['order_number'],
         'store_id' => StoreContext::current()->id(),
     ]);
-}
-
-function handleSitemapBuild(array $payload, array $job): void {
-    $db = Db::get();
-    $baseUrl = filter_var($payload['base_url'] ?? 'https://example.com', FILTER_VALIDATE_URL)
-        ?: 'https://example.com';
-    $safeBase = htmlspecialchars(rtrim($baseUrl, '/'), ENT_XML1 | ENT_QUOTES, 'UTF-8');
-
-    // Load store prefixes for multi-locale URLs
-    $stores = json_decode(file_get_contents(__DIR__ . '/../stores.json'), true);
-    $prefixes = [''];  // default locale has no prefix
-    foreach ($stores['stores'] ?? [] as $store) {
-        $p = $store['url_prefix'] ?? '';
-        if ($p !== '' && !in_array($p, $prefixes, true)) $prefixes[] = $p;
-    }
-
-    $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
-    $xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
-
-    // Homepages per locale
-    foreach ($prefixes as $prefix) {
-        $safePrefix = htmlspecialchars($prefix, ENT_XML1 | ENT_QUOTES, 'UTF-8');
-        $xml .= "<url><loc>{$safeBase}{$safePrefix}/</loc><priority>1.0</priority></url>\n";
-    }
-
-    // Build prefix→locale map for translated slugs
-    $sysDefault = $stores['default_locale'] ?? 'en';
-    $prefixLocale = ['' => $sysDefault];
-    foreach ($stores['stores'] ?? [] as $store) {
-        $p = $store['url_prefix'] ?? '';
-        if ($p !== '') $prefixLocale[$p] = $store['default_locale'] ?? $store['locale'] ?? $sysDefault;
-    }
-
-    // Categories per locale (with translated slugs)
-    $cats = $db->query("SELECT * FROM categories ORDER BY path")->fetchAll();
-    foreach ($cats as $cat) {
-        foreach ($prefixes as $prefix) {
-            $safePrefix = htmlspecialchars($prefix, ENT_XML1 | ENT_QUOTES, 'UTF-8');
-            I18n::setLocale($prefixLocale[$prefix] ?? $sysDefault);
-            $trCat = I18n::category($cat);
-            $slug = htmlspecialchars($trCat['slug'], ENT_XML1 | ENT_QUOTES, 'UTF-8');
-            $xml .= "<url><loc>{$safeBase}{$safePrefix}/category/{$slug}</loc><priority>0.8</priority></url>\n";
-        }
-    }
-
-    // Products per locale (with translated slugs)
-    $stmt = $db->query("SELECT * FROM products WHERE status = 'active' ORDER BY updated_at DESC");
-    $allProducts = $stmt->fetchAll();
-    foreach ($allProducts as $p) {
-        $lastmod = substr($p['updated_at'], 0, 10);
-        foreach ($prefixes as $prefix) {
-            $safePrefix = htmlspecialchars($prefix, ENT_XML1 | ENT_QUOTES, 'UTF-8');
-            I18n::setLocale($prefixLocale[$prefix] ?? $sysDefault);
-            $trP = I18n::product($p);
-            $slug = htmlspecialchars($trP['slug'], ENT_XML1 | ENT_QUOTES, 'UTF-8');
-            $xml .= "<url><loc>{$safeBase}{$safePrefix}/product/{$slug}</loc><lastmod>{$lastmod}</lastmod><priority>0.6</priority></url>\n";
-        }
-    }
-
-    $xml .= "</urlset>\n";
-
-    file_put_contents(__DIR__ . '/../sitemap.xml', $xml, LOCK_EX);
 }
 
 function handleCartAbandonment(array $payload, array $job): void {
