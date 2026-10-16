@@ -48,8 +48,10 @@ nginx PHP fallback when `operations.nginx_config` is set).
   `20261016141000_slug_registry_product_store` (translated product slugs of non-default catalogs),
   `20261016142000_cart_reminder_consent_download_resume` (cart reminder consent columns on
   `abandoned_carts`, `digital_entitlements.last_download_at`),
-  `20261016150000_normalize_coupon_use_emails` (all idempotent; the code degrades instead of failing
-  between deploying the files and running them).
+  `20261016150000_normalize_coupon_use_emails`,
+  `20261016161000_invoice_seller_download_resume_bound` (`invoices.seller_code`, so credit notes follow
+  their invoice's series; `digital_entitlements.last_download_offset`/`resume_count` bounding free download
+  resumes) (all idempotent; the code degrades instead of failing between deploying the files and running them).
   `20261015120000_processed_events_claim_state` gained a missing-table guard after release; its old
   checksum is accepted (`Migrator::LEGACY_CHECKSUMS`).
 - **Daily `cleanup` worker job** (queued at most once a day by the worker): deletes processed webhook
@@ -113,14 +115,19 @@ nginx PHP fallback when `operations.nginx_config` is set).
   `List-Unsubscribe-Post`. Doctor/preflight warn about `enabled` without the consent.
 - **Invoices and credit notes**: an invoice can only be issued for a paid order
   (paid/processing/shipped/delivered, payment neither failed nor cancelled); the admin button and
-  `InvoiceService::issue()` refuse unpaid orders. The seller and number series come from the
-  order's own store (currency detection only for legacy orders without one). Numbers are counted
-  per seller + document type + year + prefix (`invoice_number_counters`); legacy shared
-  `invoice_counters` rows get one owner and keep their last number. The default credit-note prefix is
-  now `<invoice_prefix>CN-` (unchanged `CN-` for a store without an invoice prefix): **a non-default
-  store that relied on the shared `CN-` series starts a new series mid-year** unless you set
-  `legal.credit_note_prefix` in `stores.json` (a prefix another seller already numbers that year is
-  refused). `stores.json` series that share a prefix are refused.
+  `InvoiceService::issue()` refuse unpaid orders. A **seller** is a store with its own `legal` block
+  in `stores.json`; a store without one invoices as the first seller selling in the order's currency,
+  else as the default store (as before), and shares that seller's series. Two storefronts of one
+  company can share a series explicitly with `legal.seller: "<store code>"`. Numbers are counted per
+  seller + document type + year + prefix (`invoice_number_counters`); a legacy shared
+  `invoice_counters` row goes to the seller that owns the prefix by configuration (the default store
+  for `''`/`CN-`) and keeps its last number. Invoices record `seller_code`; a credit note follows its
+  invoice's seller and series (legacy invoices: from the number prefix or seller snapshot). The default
+  credit-note prefix is now `<invoice_prefix>CN-` (unchanged `CN-` for a seller without an invoice
+  prefix): **a separate seller that relied on the shared `CN-` series starts a new series mid-year**
+  unless you set `legal.credit_note_prefix`. Two real sellers sharing a prefix are a conflict: `cli/setup.php
+  doctor` (`stores.invoice_numbering`) and `cli/staging-preflight.php` report it, and issuing for the
+  non-owning seller is refused with an `invoice.numbering_conflict` incident; the owning seller keeps issuing.
 - **Extension API actions**: every non-GET/HEAD request to an extension action must carry the session
   CSRF token (`X-CSRF-Token` or `csrf_token`, HTTP 403 otherwise); actions can be limited with
   `'method' => 'GET'|'POST'` (405 otherwise). **Server-to-server POSTs to an extension action break**
@@ -131,8 +138,10 @@ nginx PHP fallback when `operations.nginx_config` is set).
   `error: bad import mode` instead of running a full upsert; fix the mode in the admin feed form.
 - **Digital asset paths**: new and re-saved digital assets are stored under
   `<digital_assets_base_dir>/<catalog_id>/`; traversal and symlink escapes are refused. Existing rows
-  keep their base-relative path and keep downloading. Downloads support HTTP ranges; resumes within
-  `digital_download_resume_minutes` (default 30) are not counted again.
+  keep their base-relative path and keep downloading. Downloads support HTTP ranges; a resume within
+  `digital_download_resume_minutes` (default 30) is not counted again when it continues the counted
+  transfer (starts at most 16 MiB below the bytes it served, at most 5 free resumes); any other range is a
+  new download, so `Range: bytes=1-` is no free copy once the limit is spent.
 - **Storefront routing**: an unknown `?page=` value (and an unknown category) now answers 404 instead
   of the homepage with 200; `?page=home` and no page still render home. The footer About/Contact links
   point to `/page/about` and `/page/contact` and are shown only when those CMS pages exist and are
