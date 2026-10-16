@@ -319,12 +319,6 @@ parameters:
 			path: cli/vat-backfill.php
 
 		-
-			message: '#^Call to an undefined method StorageAdapter\:\:generateVariants\(\)\.$#'
-			identifier: method.notFound
-			count: 1
-			path: cli/worker.php
-
-		-
 			message: '#^Call to function is_callable\(\) with ''handleCacheRebuild''\|''handleCartAbandonme…''\|''handleCleanup''\|''handleDigitalFulfill''\|''handleDigitalRevoke''\|''handleEmailSend''\|''handleErpOrderPush''\|''handleErpOrderUpdate''\|''handleImageResize''\|''handleImportProcess''\|''handleInvoiceIssue''\|''handleMerchantNotify''\|''handlePaymentCancel''\|''handlePaymentRefund''\|''handleSearchReindex''\|''handleStockAlert''\|\(Closure\(array\)\: int\) will always evaluate to true\.$#'
 			identifier: function.alreadyNarrowedType
 			count: 1
@@ -527,12 +521,6 @@ parameters:
 			identifier: booleanOr.alwaysTrue
 			count: 1
 			path: src/PayBySquare.php
-
-		-
-			message: '#^Call to an undefined method PaymentAdapter\:\:verifySignature\(\)\.$#'
-			identifier: method.notFound
-			count: 1
-			path: src/PaymentService.php
 
 		-
 			message: '#^Right side of && is always false\.$#'

@@ -24,4 +24,9 @@ class CashOnDelivery implements PaymentAdapter {
     public function getStatus(string $paymentId): string {
         return 'pending_delivery';
     }
+
+    /** Cash on delivery has no provider webhooks: every webhook request is rejected. */
+    public function verifySignature(string $payload, string $sigHeader): bool {
+        return false;
+    }
 }
