@@ -683,7 +683,8 @@ function handleImageResize(array $payload, array $job): void {
     if (!$path) return;
 
     $storage = Adapters::storage();
-    if (!$storage instanceof ImageVariantStorageAdapter) {
+    // Custom adapters written before the capability interface only define generateVariants().
+    if (!$storage instanceof ImageVariantStorageAdapter && !method_exists($storage, 'generateVariants')) {
         Logger::info('worker.image_variants_unsupported', ['adapter' => get_class($storage)]);
         return;
     }

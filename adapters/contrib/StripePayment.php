@@ -4,7 +4,7 @@
  * Uses Stripe Checkout (hosted flow) via raw HTTP API.
  * Zero external dependencies — curl only.
  */
-class StripePayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, CancellablePaymentAdapter {
+class StripePayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, CancellablePaymentAdapter, SignedWebhookPaymentAdapter {
     private string $secretKey;
     private string $webhookSecret;
 

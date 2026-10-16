@@ -27,6 +27,7 @@ class OperationalMetrics
             'payment_funnel_min_started' => 3,
             'csp_window_seconds' => 86400,
             'csp_form_action_critical' => 2,
+            'csp_form_action_reports_critical' => 5,
             'csp_violations_warning' => 20,
         ], (array)($config['monitoring'] ?? []));
 
@@ -61,6 +62,7 @@ class OperationalMetrics
             'payment_online_paid' => $funnel['paid'],
             'csp_violations' => $csp['total'],
             'csp_form_action_violations' => $csp['form_action'],
+            'csp_form_action_reports' => $csp['form_action_reports'],
         ];
 
         $alerts = [];
@@ -87,7 +89,15 @@ class OperationalMetrics
                 self::alert($alerts, 'payment_funnel_stalled', 'critical', $funnel['started'], $minStarted);
             }
         }
-        self::thresholdAlert($alerts, 'csp_form_action_violation', 'critical', $metrics['csp_form_action_violations'], (int)$thresholds['csp_form_action_critical']);
+        // Distinct reporters resist forged reports from one source; the raw count still alarms when
+        // every report carries the same client IP (proxy/CDN without trusted_proxies).
+        $formActionReporters = (int)$thresholds['csp_form_action_critical'];
+        $formActionReports = (int)$thresholds['csp_form_action_reports_critical'];
+        if ($formActionReporters > 0 && $metrics['csp_form_action_violations'] >= $formActionReporters) {
+            self::alert($alerts, 'csp_form_action_violation', 'critical', $metrics['csp_form_action_violations'], $formActionReporters);
+        } else {
+            self::thresholdAlert($alerts, 'csp_form_action_violation', 'critical', $metrics['csp_form_action_reports'], $formActionReports);
+        }
         self::thresholdAlert($alerts, 'csp_violations_high', 'warning', $metrics['csp_violations'], (int)$thresholds['csp_violations_warning']);
 
         $status = 'ok';

@@ -12,7 +12,7 @@
  *   PAY_PAYU_POS_ID          — POS identifier (same as client_id usually)
  *   PAY_PAYU_ENV             — 'production' | 'sandbox' (default: sandbox)
  */
-class PayUPayment implements IdempotentRefundAdapter, HostedCheckoutAdapter {
+class PayUPayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, SignedWebhookPaymentAdapter {
     private string $clientId;
     private string $clientSecret;
     private string $secondKey;

@@ -1088,7 +1088,8 @@ assert_true($threw, 'Invoice: throws on non-existent order');
 
 // 9. Invoice MailService attachment plumbing
 LogMail::clearCaptured();
-MailService::useAdapter(new LogMail());
+// Explicit log file in a fixture: the default would create the private runtime logs/ directory.
+MailService::useAdapter(new LogMail(['log_file' => test_fixture_path('invoice-mail') . '/emails.log']));
 $pdfBytes = file_get_contents($pdfPath);
 $res = MailService::send('invoice_issued', 'jan@example.sk', 'sk', [
     'order_number'   => 'INV-5001',

@@ -202,8 +202,8 @@ function createUpdateDatabaseBackup(array $config): ?UpdateDatabaseBackup
         (string)($config['db_password'] ?? ''),
         (string)($config['db_charset'] ?? 'utf8mb4'),
         $probeDatabase,
-        (string)($config['update_mysql_dump_binary'] ?? 'mysqldump'),
-        (string)($config['update_mysql_client_binary'] ?? 'mysql')
+        BackupService::mysqlBinary((string)($config['update_mysql_dump_binary'] ?? 'mysqldump'), 'mysqldump', 'mariadb-dump'),
+        BackupService::mysqlBinary((string)($config['update_mysql_client_binary'] ?? 'mysql'), 'mysql', 'mariadb')
     );
 }
 
