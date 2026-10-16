@@ -305,6 +305,22 @@ migration runs (configurable via the backup service). Migration files live in
 anonymous class with an `up(PDO $db, bool $isSqlite)` method that keeps
 SQLite/MySQL parity.
 
+### Backups and restore
+
+```bash
+php cli/backup.php --gc                       # cron: database copy + <backup>.files.tar, then retention GC
+php cli/restore.php --list
+php cli/restore.php <backup.db>               # SQLite: verified swap under the maintenance gate
+php cli/restore.php <backup.sql> --i-stopped-writers   # MySQL/MariaDB: scratch database first, then live
+php cli/restore.php <backup> --files[-only] [--force]  # invoices, uploads, GDPR salt
+```
+
+Restores verify the backup's SHA-256 and size and take a `pre-restore-snapshot`
+first. The `.files.tar` archive holds the GDPR salt, the secret behind every
+pseudonymised GDPR record: keep backups on encrypted, access-controlled storage.
+Grants, the scratch database and the files-overwrite rules are in the
+[operations runbook](docs/OPERATIONS_RUNBOOK.md#restoring-with-clirestorephp).
+
 ---
 
 ## Production updates

@@ -2,7 +2,7 @@
 require_once __DIR__ . '/cli-only.php';
 
 /**
- * BareBones Shop — Restore SQLite DB from backup
+ * BareBones Shop — Restore the database (SQLite or MySQL/MariaDB) and stored files from a backup
  *
  * Usage:
  *   php cli/restore.php <remote_path>            Restore from backup at remote_path
@@ -11,9 +11,21 @@ require_once __DIR__ . '/cli-only.php';
  *   php cli/restore.php <path> --skip-snapshot   Don't take a pre-restore-snapshot (DANGEROUS)
  *   php cli/restore.php <path> --quiet           Minimal output
  *   php cli/restore.php <path> --yes             Skip interactive confirmation
+ *   php cli/restore.php <path> --i-stopped-writers
+ *                                                Required for a MySQL/MariaDB (.sql) restore: confirms web
+ *                                                traffic, workers and cron are stopped (db_name is dropped
+ *                                                and re-imported; anything written meanwhile is lost)
+ *   php cli/restore.php <path> --files           Also restore the backup's invoices/uploads/GDPR-salt archive
+ *   php cli/restore.php <path> --files-only      Restore only that files archive, not the database
+ *   php cli/restore.php <path> --files --force   Overwrite live files whose content differs from the backup
  *
- * Safety: takes a `pre-restore-snapshot` backup of the current live DB before replacing it,
- *         unless --skip-snapshot is passed. The snapshot is retained (max 5 newest).
+ * Safety: the backup is verified (identity, size, sha256) before anything changes. SQLite is checked
+ *         with integrity_check and swapped under the exclusive maintenance gate. MySQL is imported into
+ *         the scratch database (backup_mysql_restore_scratch_database) and checked row-for-row first.
+ *         A `pre-restore-snapshot` backup of the current database is taken unless --skip-snapshot
+ *         (retained, max 5 newest). Files are extracted into a private staging directory by a strict
+ *         reader (regular files only, no absolute/../link entries); differing live files are only
+ *         overwritten with --force, and files missing from the backup are kept.
  */
 require_once __DIR__ . '/../src/autoload.php';
 
@@ -38,6 +50,10 @@ foreach ($argvLocal as $a) {
 $quiet = isset($flags['quiet']);
 $skipSnapshot = isset($flags['skip-snapshot']);
 $yes = isset($flags['yes']);
+$filesOnly = isset($flags['files-only']);
+$withFiles = $filesOnly || isset($flags['files']);
+$force = isset($flags['force']);
+$writersStopped = isset($flags['i-stopped-writers']);
 $emit = static function (string $s) use ($quiet) { if (!$quiet) echo $s . "\n"; };
 
 try {
@@ -55,7 +71,8 @@ if (isset($flags['list'])) {
         $label = (string)($r['meta']['label'] ?? '?');
         $sha   = substr((string)($r['meta']['sha256'] ?? ''), 0, 12);
         $size  = (int)($r['size'] ?? 0);
-        $emit(sprintf('%s  size=%d  sha=%s  label=%s', $r['path'], $size, $sha, $label));
+        $files = !empty($r['meta']['files_archive']) ? '  files=yes' : '';
+        $emit(sprintf('%s  size=%d  sha=%s  label=%s%s', $r['path'], $size, $sha, $label, $files));
     }
     exit(0);
 }
@@ -70,14 +87,25 @@ if (isset($flags['latest'])) {
 }
 
 if (!$remotePath) {
-    fwrite(STDERR, "Usage: php cli/restore.php <remote_path>|--latest|--list [--skip-snapshot] [--quiet] [--yes]\n");
+    fwrite(STDERR, "Usage: php cli/restore.php <remote_path>|--latest|--list [--skip-snapshot] [--quiet] [--yes] [--i-stopped-writers] [--files|--files-only] [--force]\n");
+    exit(1);
+}
+$isMysqlDump = preg_match('/\.sql(?:\.gz)?$/', $remotePath) === 1;
+if (!$filesOnly && $isMysqlDump && !$writersStopped) {
+    fwrite(STDERR, "REFUSED: a MySQL/MariaDB restore drops and re-imports db_name, discarding anything written while it runs.\n"
+        . "Stop web traffic (maintenance page), workers and cron, then re-run with --i-stopped-writers.\n");
     exit(1);
 }
 
-$emit("Restoring from: {$remotePath}");
-$emit('Live DB: ' . (BackupService::livePath() ?: '(unknown)'));
-if ($skipSnapshot) {
+$emit("Restoring from: {$remotePath}" . ($filesOnly ? ' (files archive only)' : ($withFiles ? ' (database + files archive)' : '')));
+if (!$filesOnly) {
+    $emit('Live DB: ' . ($isMysqlDump ? '(MySQL/MariaDB db_name, verified in the scratch database first)' : (BackupService::livePath() ?: '(unknown)')));
+}
+if ($skipSnapshot && !$filesOnly) {
     $emit('WARNING: --skip-snapshot — pre-restore-snapshot will NOT be taken.');
+}
+if ($withFiles && $force) {
+    $emit('WARNING: --force — live files that differ from the backup will be overwritten.');
 }
 
 if (!$yes && !$quiet) {
@@ -86,21 +114,40 @@ if (!$yes && !$quiet) {
     if (strtolower($line) !== 'yes') { $emit('Aborted.'); exit(1); }
 }
 
-try {
-    $res = BackupService::restore($remotePath, [
-        'skip_snapshot' => $skipSnapshot,
-    ]);
-} catch (\Throwable $e) {
-    fwrite(STDERR, 'RESTORE FAILED: ' . $e->getMessage() . "\n");
-    exit(4);
+if (!$filesOnly) {
+    try {
+        $res = BackupService::restore($remotePath, [
+            'skip_snapshot'   => $skipSnapshot,
+            'writers_stopped' => $writersStopped,
+        ]);
+    } catch (\Throwable $e) {
+        fwrite(STDERR, 'RESTORE FAILED: ' . $e->getMessage() . "\n");
+        exit(4);
+    }
+
+    $emit('OK');
+    $emit('  integrity:    ' . $res['integrity']);
+    $emit('  snapshot:     ' . ($res['snapshot'] ?? '(skipped)'));
+    $emit('  applied:      ' . $res['applied_count']);
+    $emit('  pending:      ' . $res['pending_count']);
+    foreach ($res['schema_warnings'] as $w) {
+        fwrite(STDERR, 'WARNING: ' . $w . "\n");
+    }
 }
 
-$emit('OK');
-$emit('  integrity:    ' . $res['integrity']);
-$emit('  snapshot:     ' . ($res['snapshot'] ?? '(skipped)'));
-$emit('  applied:      ' . $res['applied_count']);
-$emit('  pending:      ' . $res['pending_count']);
-foreach ($res['schema_warnings'] as $w) {
-    fwrite(STDERR, 'WARNING: ' . $w . "\n");
+if ($withFiles) {
+    try {
+        $files = BackupService::restoreFiles($remotePath, ['force' => $force]);
+    } catch (\Throwable $e) {
+        fwrite(STDERR, 'FILES RESTORE FAILED: ' . $e->getMessage() . "\n");
+        exit(5);
+    }
+    $emit('FILES OK ' . $files['archive']);
+    $emit('  written:      ' . $files['written']);
+    $emit('  unchanged:    ' . $files['unchanged']);
+    $emit('  overwritten:  ' . count($files['overwritten']));
+    foreach ($files['skipped_sources'] as $name) {
+        fwrite(STDERR, "WARNING: files source '{$name}' is not configured here; its archived files were not restored\n");
+    }
 }
 exit(0);

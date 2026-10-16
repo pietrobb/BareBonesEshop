@@ -111,6 +111,9 @@ try {
         $result = $updater->rollback($snapshotId, !empty($options['force']), !empty($options['accept-data-loss']));
         echo "Rollback complete: {$result['snapshot']}, restored {$result['restored_files']} file(s)"
             . ($result['database_restored_to'] !== null ? ", database restored to {$result['database_restored_to']}" : '') . ".\n";
+        foreach ((array)($result['discarded_writes'] ?? []) as $table => $count) {
+            echo "  discarded since the snapshot: {$table}=" . ($count === null ? 'unknown' : $count) . "\n";
+        }
         updateRecordCoreBaseline($root, $stateDirectory, $config, 'rollback ' . $snapshotId, null);
         exit(0);
     }

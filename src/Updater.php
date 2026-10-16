@@ -9,6 +9,9 @@ final class Updater
         'cache/', 'db/', 'extensions/', 'jobs/', 'logs/', 'storage/', 'uploads/',
     ];
 
+    /** Tables whose MAX(id) at snapshot time shows what a database rollback throws away. */
+    private const HIGH_WATER_TABLES = ['orders', 'payment_transactions'];
+
     private string $root;
     private string $stateDirectory;
     private ?PDO $database;
@@ -274,15 +277,21 @@ final class Updater
                 // over an untouched installation would only add risk.
                 $this->setSnapshotStatus($snapshot['id'], 'aborted', $e->getMessage());
             } elseif (is_array($snapshot) && isset($snapshot['id'])) {
+                // Counted before the restore wipes them: writes since the snapshot that the rollback discards.
+                $discarded = $this->discardedWrites($snapshot);
                 try {
                     $this->restoreSnapshot($snapshot['id'], true);
-                    $this->setSnapshotStatus($snapshot['id'], 'auto-rolled-back', $e->getMessage());
+                    $this->setSnapshotStatus($snapshot['id'], 'auto-rolled-back', $e->getMessage(), $discarded);
                 } catch (Throwable $rollbackError) {
                     throw new RuntimeException(
                         'Update failed: ' . $e->getMessage() . '; automatic rollback also failed: ' . $rollbackError->getMessage(),
                         0,
                         $e
                     );
+                }
+                $notice = $this->reportDiscardedWrites($discarded, 'automatic rollback');
+                if ($notice !== null) {
+                    throw new RuntimeException($e->getMessage() . '; ' . $notice, 0, $e);
                 }
             }
             throw $e;
@@ -305,9 +314,11 @@ final class Updater
                 throw new RuntimeException(self::dataLossWarning($databaseAt)
                     . ' Stop all writers, export or reconcile those records, then re-run with --accept-data-loss.');
             }
+            $discarded = $databaseAt !== null ? $this->discardedWrites($metadata) : null;
             $result = $this->restoreSnapshot($snapshotId, $force);
-            $this->setSnapshotStatus($snapshotId, 'rolled-back');
-            return $result + ['database_restored_to' => $databaseAt];
+            $this->setSnapshotStatus($snapshotId, 'rolled-back', null, $discarded);
+            $this->reportDiscardedWrites($discarded, 'manual rollback');
+            return $result + ['database_restored_to' => $databaseAt, 'discarded_writes' => $discarded];
         } finally {
             $this->unlock();
         }
@@ -486,12 +497,15 @@ final class Updater
 
             if ($package->runsMigrations()) {
                 $driver = (string)$this->database?->getAttribute(PDO::ATTR_DRIVER_NAME);
+                // Read before the dump, so a row written while it runs counts as "since the snapshot" (over-, never under-reported).
+                $highWater = $this->highWaterMarks();
                 $metadata['database'] = $driver === 'mysql'
                     ? $this->databaseBackup?->create($snapshotDirectory)
                     : $this->snapshotSqliteDatabase($snapshotDirectory);
                 if (!is_array($metadata['database'])) {
                     throw new RuntimeException('Database migration snapshot was not created');
                 }
+                $metadata['database']['high_water'] = $highWater;
             }
             $this->writeJsonAtomic($snapshotDirectory . DIRECTORY_SEPARATOR . 'snapshot.json', $metadata);
             return $metadata;
@@ -812,7 +826,7 @@ final class Updater
         @chmod($path, 0640);
     }
 
-    private function setSnapshotStatus(string $id, string $status, ?string $error = null): void
+    private function setSnapshotStatus(string $id, string $status, ?string $error = null, ?array $discardedWrites = null): void
     {
         $path = $this->snapshotDirectory($id) . DIRECTORY_SEPARATOR . 'snapshot.json';
         $metadata = $this->readJson($path);
@@ -824,7 +838,89 @@ final class Updater
         if ($error !== null) {
             $metadata['error'] = $error;
         }
+        if ($discardedWrites !== null) {
+            $metadata['discarded_writes'] = $discardedWrites;
+        }
         $this->writeJsonAtomic($path, $metadata);
+    }
+
+    /** Highest id per tracked table (0 when empty); a table that cannot be read is left out. */
+    private function highWaterMarks(): array
+    {
+        $marks = [];
+        if ($this->database === null) {
+            return $marks;
+        }
+        foreach (self::HIGH_WATER_TABLES as $table) {
+            try {
+                $marks[$table] = (int)$this->database->query("SELECT COALESCE(MAX(id), 0) FROM {$table}")->fetchColumn();
+            } catch (Throwable $e) {
+                // Table not created yet on this installation.
+            }
+        }
+        return $marks;
+    }
+
+    /**
+     * Rows each tracked table gained since the snapshot's high-water mark: what restoring the
+     * snapshot throws away. A count that cannot be read is null (unknown, never assumed zero).
+     * Returns null for a snapshot without a database, or when this instance has no connection
+     * (cli/update.php rollback, where --accept-data-loss already acknowledged the loss).
+     */
+    private function discardedWrites(array $snapshot): ?array
+    {
+        if (!is_array($snapshot['database'] ?? null) || $this->database === null) {
+            return null;
+        }
+        $marks = $snapshot['database']['high_water'] ?? null;
+        $counts = [];
+        foreach (self::HIGH_WATER_TABLES as $table) {
+            if (is_array($marks) && !array_key_exists($table, $marks)) {
+                continue; // the table did not exist when the snapshot was taken
+            }
+            $mark = is_array($marks) ? $marks[$table] : null;
+            if (!is_int($mark)) {
+                $counts[$table] = null;
+                continue;
+            }
+            try {
+                $statement = $this->database->prepare("SELECT COUNT(*) FROM {$table} WHERE id > ?");
+                $statement->execute([$mark]);
+                $counts[$table] = (int)$statement->fetchColumn();
+            } catch (Throwable $e) {
+                $counts[$table] = null;
+            }
+        }
+        return $counts;
+    }
+
+    /**
+     * Makes a rollback that discards data loud: logs and raises a critical incident when rows were
+     * (or may have been) written since the snapshot. Returns the operator notice, or null when the
+     * rollback provably discarded no tracked rows.
+     */
+    private function reportDiscardedWrites(?array $discarded, string $context): ?string
+    {
+        if ($discarded === null) {
+            return null;
+        }
+        $known = array_filter($discarded, static fn($count): bool => is_int($count));
+        $total = array_sum($known);
+        $unknown = array_keys(array_diff_key($discarded, $known));
+        if ($total === 0 && $unknown === []) {
+            return null;
+        }
+        $parts = [];
+        foreach ($known as $table => $count) {
+            if ($count > 0) $parts[] = "{$count} {$table} row(s)";
+        }
+        if ($unknown !== []) $parts[] = 'an unknown number of ' . implode('/', $unknown) . ' rows';
+        $notice = "{$context} discarded " . implode(' and ', $parts) . ' written after the update snapshot;'
+            . ' recover them from the pre-update data (orders, payments, payment provider records) before reopening the shop';
+        if (class_exists('IncidentMonitor')) {
+            IncidentMonitor::report('update.rollback_discarded_writes', 'update', 'critical', ['count' => $total]);
+        }
+        return $notice;
     }
 
     private function assertApplicable(array $report): void
