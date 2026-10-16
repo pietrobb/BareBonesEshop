@@ -997,6 +997,12 @@ if (file_exists($financialMigFile)) {
 }
 $storeScopeMigration->up(Db::get(), true);
 $returnsCreditMigration->up(Db::get(), true);
+// Invoice/credit-note counters per seller and document type (InvoiceService::allocateNumber), applied twice: idempotent.
+$invoiceCounterMigration = require TEST_CLI_DIR . '/../migrations/20261016140000_invoice_number_counters.php';
+$invoiceCounterMigration->up(Db::get(), true);
+$invoiceCounterMigration->up(Db::get(), true);
+assert_true(in_array('store_id', array_column(Db::get()->query('PRAGMA table_info(invoice_number_counters)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true),
+    'Invoice counter migration: counters are keyed by store and document type, idempotently');
 
 // Seed a minimal paid order
 $db = Db::get();

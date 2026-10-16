@@ -170,9 +170,10 @@ class Cart {
             if (!empty($item['variant_id'])) {
                 $variant = $variants[$item['variant_id']] ?? null;
                 if (!$variant) { unset($_SESSION['cart'][$key]); continue; }
-                $price = $variant['price_absolute'] !== null
+                // A negative delta can outgrow a later-lowered base price: the unit price never goes below zero.
+                $price = max(0, $variant['price_absolute'] !== null
                     ? (int)$variant['price_absolute']
-                    : (int)$product['price'] + (int)$variant['price_delta'];
+                    : (int)$product['price'] + (int)$variant['price_delta']);
                 $sku = $variant['sku'];
                 $variantName = $variant['name'];
                 $stock = (int)$variant['stock'];
@@ -189,7 +190,7 @@ class Cart {
                 $widthMm = (int)($variant['width_mm'] ?? 0) > 0 ? (int)$variant['width_mm'] : $widthMm;
                 $heightMm = (int)($variant['height_mm'] ?? 0) > 0 ? (int)$variant['height_mm'] : $heightMm;
             } else {
-                $price = (int)$product['price'];
+                $price = max(0, (int)$product['price']);
                 $sku = $product['sku'];
                 $variantName = '';
                 $stock = (int)$product['stock'];
@@ -224,7 +225,7 @@ class Cart {
                 max(1, $qty),
                 $customerId > 0 ? $customerId : null
             );
-            $price = (int)$pricingProduct['price'];
+            $price = max(0, (int)$pricingProduct['price']);
             $pricingSnapshot = array_filter([
                 'price_list' => $pricingProduct['price_list_snapshot'] ?? null,
                 'promotions' => $pricingProduct['promotion_snapshot'] ?? null,

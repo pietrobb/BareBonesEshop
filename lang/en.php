@@ -1470,4 +1470,16 @@ return [
     'select_shipping_first' => 'Select shipping first.',
     'payment_loading' => 'Loading payment methods…',
     'payment_unavailable' => 'Payment is not available.',
+
+    // Admin catalog/operations audit fixes
+    'admin.feed.mode_price_stock' => 'Price and stock only (existing products; nothing created, no content changed)',
+    'admin.feed.warehouse_foreign' => 'The warehouse does not belong to this store.',
+    'admin.feed.code_taken' => 'This feed code is already used (feed codes are unique across all stores).',
+    'admin.order.msg.invoice_unpaid' => 'An invoice can only be issued for a paid order.',
+    'admin.msg.product.sku_change_blocked' => 'The SKU {sku} cannot be changed ({reason}).',
+    'admin.msg.product.price_below_variants' => 'The price must be at least {min} cents, otherwise a variant with a price discount would cost less than zero.',
+    'admin.products.bulk.delete_skipped' => 'Not deleted because orders refer to them (archive them instead): {list}.',
+    'admin.products.bulk.price_clamped' => 'Kept at the lowest allowed price (zero, or what keeps every variant price at zero or more): {list}.',
+    'admin.attr.options_invalid' => 'Invalid attribute values.',
+    'admin.attr.shared_locked' => 'Another catalog uses this attribute, so its slug and type cannot be changed.',
 ];

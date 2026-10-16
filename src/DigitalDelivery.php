@@ -156,6 +156,29 @@ class DigitalDelivery {
         return $real;
     }
 
+    /**
+     * storage_path (relative to digital_assets_base_dir) for a path an admin entered for the active catalog: every
+     * new or edited asset lives under <base>/<catalog_id>/, so one store can never point a download at another
+     * store's files. The input is relative to that store directory (a leading "<catalog_id>/" is accepted as well).
+     * Null for an absolute or traversing path, an unsafe catalog id, or an existing file that resolves (symlink)
+     * outside the store directory. Rows saved before this rule keep their base-relative path and keep working.
+     */
+    public static function storePath(string $input, ?string $catalogId = null): ?string {
+        $catalogId ??= StoreContext::current()->catalogId();
+        $path = str_replace('\\', '/', trim($input));
+        if (!preg_match('/^[A-Za-z0-9_-]{1,64}$/', $catalogId) || $path === '' || str_starts_with($path, '/')
+            || preg_match('/^[A-Za-z]:\//', $path) || str_contains($path, "\0")) return null;
+        if (str_starts_with($path, $catalogId . '/')) $path = substr($path, strlen($catalogId) + 1);
+        $segments = explode('/', $path);
+        if ($path === '' || in_array('..', $segments, true) || in_array('', $segments, true)) return null;
+        $stored = $catalogId . '/' . $path;
+        $base = rtrim((string)(self::config()['digital_assets_base_dir'] ?? ''), '/\\');
+        $storeDir = $base === '' ? false : realpath($base . DIRECTORY_SEPARATOR . $catalogId);
+        $file = $storeDir === false ? false : realpath($storeDir . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $path));
+        if ($file !== false && !str_starts_with($file, $storeDir . DIRECTORY_SEPARATOR)) return null;
+        return $stored;
+    }
+
     public static function safeDownloadName(array $entitlement): string {
         $name = basename(str_replace('\\', '/', (string)($entitlement['download_name'] ?? 'download.bin')));
         $name = preg_replace('/[^A-Za-z0-9._ -]/u', '_', $name) ?: 'download.bin';

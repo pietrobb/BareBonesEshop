@@ -47,7 +47,8 @@ final class OrderExport {
     /** Write the filtered orders of the current store as CSV; returns the number of order rows. */
     public static function writeCsv($out, array $input): int {
         $filters = self::filters($input, 'all');
-        $stmt = Db::get()->prepare("SELECT o.*, (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_quantity
+        // Unbuffered on MySQL: orders stream to the CSV, so memory stays flat however many orders match.
+        $stmt = Db::prepareUnbuffered("SELECT o.*, (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_quantity
             FROM orders o WHERE {$filters['where']} ORDER BY o.created_at DESC, o.id DESC");
         $stmt->execute($filters['params']);
         fputcsv($out, self::COLUMNS, ',', '"', '');

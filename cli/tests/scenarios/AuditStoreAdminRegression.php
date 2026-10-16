@@ -24,6 +24,11 @@ $db->exec("CREATE " . ($driver === "mysql" ? "TEMPORARY " : "") . "TABLE product
 $db->exec("INSERT INTO products (id,store_id,sku,name,slug,product_type,price,stock,status,summary)
  VALUES (5,\'default\',\'A05-DEFAULT\',\'Default private product\',\'a05-default\',\'physical\',1000,3,\'draft\',\'private default\'),
  (7,\'cz\',\'A05-CZ\',\'CZ private product\',\'a05-cz\',\'physical\',2000,4,\'draft\',\'private cz\')");
+// Bulk actions read order references and the variant price floor, and write the audit log.
+$tmp = $driver === "mysql" ? "TEMPORARY " : "";
+$db->exec("CREATE {$tmp}TABLE variants (id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL, price_absolute INTEGER NULL, price_delta INTEGER NOT NULL DEFAULT 0)");
+$db->exec("CREATE {$tmp}TABLE order_items (id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL)");
+$db->exec("CREATE {$tmp}TABLE audit_log (id INTEGER PRIMARY KEY " . ($driver === "mysql" ? "AUTO_INCREMENT" : "") . ", entity VARCHAR(40), entity_id INTEGER, action VARCHAR(40), old_value TEXT, new_value TEXT, note TEXT, actor VARCHAR(80), ip_address VARCHAR(80), store_id VARCHAR(40), correlation_id VARCHAR(80), created_at DATETIME NULL)");
 $store = $argv[2];
 $stores = Bootstrap::stores();
 $stores["stores"]["cz"] = array_replace($stores["stores"]["default"], ["id"=>"cz", "url_prefix"=>"/cz", "domains"=>[], "catalog_scope"=>"cz", "provider_scope"=>"cz"]);

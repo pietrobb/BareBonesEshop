@@ -4,21 +4,22 @@ require_once __DIR__ . '/CatalogEditor.php';
 require_once __DIR__ . '/Taxonomy.php';
 require_once __DIR__ . '/PricingRules.php';
 /** The one escaping helper the catalog editors' nonce'd inline scripts (product and attribute forms) build markup with. */
-const ADMIN_JS_ESC_HTML = "function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }";
+const ADMIN_JS_ESC_HTML = "function escHtml(s) { return String(s ?? '').replace(/[&<>\"']/g, function (c) { return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;'}[c]; }); }";
 function pageProducts(): void {
     $db = Db::get();
     $page = max(1, Security::int($_GET['page'] ?? 1));
     $perPage = 25;
     $offset = ($page - 1) * $perPage;
     $search = trim(Security::str($_GET['q'] ?? ''));
-    $statusFilter = $_GET['status'] ?? '';
+    $statusFilter = in_array($_GET['status'] ?? '', ['active', 'draft', 'archived'], true) ? $_GET['status'] : '';
     $stockFilter = ($_GET['stock'] ?? '') === 'low' ? 'low' : '';
     // Same thresholds and warehouse availability as the stock e-mails (worst level first).
     $stockLevels = [];
     foreach (StockAlerts::belowLow() as $row) $stockLevels[$row['product_id']] ??= $row['level'];
 
-    $where = '1=1';
-    $params = [];
+    // Only the active store's catalog (list and count).
+    $where = 'store_id = :catalog';
+    $params = [':catalog' => StoreContext::current()->catalogId()];
     if ($search) {
         $where .= " AND (name LIKE :q ESCAPE '!' OR sku LIKE :q2 ESCAPE '!')";
         $escaped = Db::likeLiteral($search);
@@ -337,7 +338,7 @@ function pageDigitalAssets(): void {
     <h1><?= esc(I18n::t('admin.title.digital_assets')) ?></h1>
     <div class="card">
         <p><?= esc(I18n::t('admin.digital.location_hint')) ?></p>
-        <p><code><?= esc($baseDir ?: I18n::t('admin.digital.not_configured')) ?></code></p>
+        <p><code><?= esc($baseDir ? rtrim($baseDir, '/\\') . '/' . StoreContext::current()->catalogId() . '/' : I18n::t('admin.digital.not_configured')) ?></code></p>
         <p class="muted"><?= strtr(esc(I18n::t('admin.digital.path_hint')), ['{example}' => '<code>ebooks/manual.pdf</code>']) ?></p>
     </div>
     <div class="card">
@@ -647,16 +648,22 @@ function handleCmsPageSave(): void {
         $id = (int)$db->lastInsertId();
         setFlash('ok', I18n::t('admin.cms.created'));
     }
+    AuditLog::log('page', $id, $old, ContentService::pageById($id), $old ? 'Admin page edit' : 'Admin page create');
     header("Location: admin.php?p=page_edit&id={$id}");
     exit;
 }
 function handleCmsPageDelete(): void {
     $id = Security::int($_POST['page_id'] ?? 0);
     if ($id) {
+        $old = ContentService::pageById($id);
         $stmt = Db::get()->prepare("DELETE FROM pages WHERE id = :id AND store_id = :store");
         $stmt->execute([':id' => $id, ':store' => StoreContext::current()->id()]);
-        if ($stmt->rowCount()) setFlash('ok', I18n::t('admin.cms.deleted'));
-        else setFlash('err', I18n::t('admin.cms.not_found'));
+        if ($stmt->rowCount()) {
+            AuditLog::log('page', $id, $old, null, 'Admin page delete');
+            setFlash('ok', I18n::t('admin.cms.deleted'));
+        } else {
+            setFlash('err', I18n::t('admin.cms.not_found'));
+        }
     }
     header('Location: admin.php?p=pages');
     exit;
@@ -670,7 +677,8 @@ function handleDigitalAssetSave(): void {
     $sku = trim((string)($_POST['sku'] ?? ''));
     $assetKey = trim((string)($_POST['asset_key'] ?? 'default'));
     $label = trim((string)($_POST['label'] ?? ''));
-    $path = str_replace('\\', '/', trim((string)($_POST['storage_path'] ?? '')));
+    // Relative to the active catalog's own directory <digital_assets_base_dir>/<catalog_id>/ (stored with that prefix).
+    $path = DigitalDelivery::storePath(Security::str($_POST['storage_path'] ?? ''));
     $downloadName = basename(str_replace('\\', '/', trim((string)($_POST['download_name'] ?? ''))));
     $contentType = trim((string)($_POST['content_type'] ?? 'application/octet-stream'));
     $submittedLimit = max(0, min(10000, Security::int($_POST['download_limit'] ?? 5)));
@@ -678,8 +686,7 @@ function handleDigitalAssetSave(): void {
     $expiryDays = max(0, min(3650, Security::int($_POST['expiry_days'] ?? 7)));
     $active = !empty($_POST['active']) ? 1 : 0;
 
-    $invalidPath = $path === '' || str_starts_with($path, '/') || preg_match('/^[A-Za-z]:\//', $path)
-        || in_array('..', explode('/', $path), true) || str_contains($path, "\0");
+    $invalidPath = $path === null || strlen($path) > 500;
     if ($sku === '' || strlen($sku) > 191 || !preg_match('/^[A-Za-z0-9._-]{1,191}$/', $sku)
         || !preg_match('/^[A-Za-z0-9._-]{1,80}$/', $assetKey) || $invalidPath
         || $downloadName === '' || !preg_match('#^[a-z0-9.+-]+/[a-z0-9.+-]+$#i', $contentType)
@@ -709,6 +716,8 @@ function handleDigitalAssetSave(): void {
             ':expiry_seconds' => $expiryDays > 0 ? $expiryDays * 86400 : null,
             ':active' => $active,
         ]);
+        AuditLog::log('digital_asset', 0, null, ['sku' => $sku, 'asset_key' => $assetKey, 'storage_path' => $path, 'download_name' => $downloadName,
+            'download_limit' => $downloadLimit, 'expiry_days' => $expiryDays, 'active' => $active], 'Admin digital asset save');
         setFlash('ok', I18n::t('admin.digital.saved'));
     } catch (Throwable $e) {
         error_log('Digital asset save failed: ' . $e->getMessage());
@@ -721,9 +730,11 @@ function handleDigitalAssetToggle(): void {
     Security::adminRequire('products.edit');
     $id = Security::int($_POST['asset_id'] ?? 0);
     $active = !empty($_POST['active']) ? 1 : 0;
-    if ($id > 0) {
-        CatalogScope::setDigitalAssetActive($id, $active);
+    if ($id > 0 && CatalogScope::setDigitalAssetActive($id, $active)) {
+        AuditLog::log('digital_asset', $id, ['active' => 1 - $active], ['active' => $active], 'Admin digital asset toggle');
         setFlash('ok', I18n::t($active ? 'admin.digital.activated' : 'admin.digital.deactivated'));
+    } elseif ($id > 0) {
+        setFlash('err', I18n::t('admin.common.record_missing'));
     }
     header('Location: admin.php?p=digital_assets');
     exit;
@@ -732,6 +743,7 @@ function handleReviewModerate(string $status): void {
     Security::adminRequire('products.edit');
     $id = Security::int($_POST['review_id'] ?? 0);
     if ($id > 0 && Reviews::setStatus($id, $status)) {
+        AuditLog::log('review', $id, null, ['status' => $status], 'Admin review moderation');
         setFlash('ok', strtr(I18n::t('admin.reviews.moderated'), ['{id}' => $id, '{status}' => adminCodeLabel('admin.reviews.status.', $status)]));
     } else {
         setFlash('err', I18n::t('admin.reviews.failed'));
@@ -886,7 +898,7 @@ function handleProductSave(): void {
     }
 
     // Save attribute values to product_specifications
-    $attrValues = $_POST['attr'] ?? [];
+    $attrValues = is_array($_POST['attr'] ?? null) ? array_filter($_POST['attr'], 'is_scalar') : [];
     if (!empty($attrValues) && $id) {
         // Get attribute definitions for mapping name → type/unit
         $catId = $data[':category_id'];
@@ -911,7 +923,7 @@ function handleProductSave(): void {
         // Insert new values
         $specIns = $db->prepare("INSERT INTO product_specifications (product_id, criteria_name, criteria_value, numeric_val, lang) VALUES (:pid, :name, :val, :num, 'sk')");
         foreach ($attrValues as $name => $val) {
-            $val = trim($val);
+            $val = trim((string)$val);
             if ($val === '' || !isset($attrDefs[$name])) continue;
             $def = $attrDefs[$name];
             $numericVal = null;
@@ -931,45 +943,18 @@ function handleProductSave(): void {
 function handleBulkAction(): void {
     // CSRF already validated by handlePost()
     Security::adminRequire('products.edit');
-    $ids = array_map('intval', $_POST['product_ids'] ?? []);
-    $action = $_POST['bulk_action'] ?? '';
+    $ids = Security::intList($_POST['product_ids'] ?? []);
+    $action = is_string($_POST['bulk_action'] ?? null) ? $_POST['bulk_action'] : '';
     if (empty($ids) || !$action) { header('Location: admin.php?p=products'); exit; }
 
-    $db = Db::get();
-    $ph = implode(',', array_fill(0, count($ids), '?'));
-    $params = [...$ids, StoreContext::current()->catalogId()];
-    $now = Db::now();
-    switch ($action) {
-        case 'activate':
-            $stmt = $db->prepare("UPDATE products SET status = 'active', updated_at = {$now} WHERE id IN ({$ph}) AND store_id = ?");
-            $stmt->execute($params);
-            setFlash('ok', strtr(I18n::t('admin.products.bulk.activated'), ['{count}' => $stmt->rowCount()]));
-            break;
-        case 'archive':
-            $stmt = $db->prepare("UPDATE products SET status = 'archived', updated_at = {$now} WHERE id IN ({$ph}) AND store_id = ?");
-            $stmt->execute($params);
-            setFlash('ok', strtr(I18n::t('admin.products.bulk.archived'), ['{count}' => $stmt->rowCount()]));
-            break;
-        case 'delete':
-            $stmt = $db->prepare("DELETE FROM products WHERE id IN ({$ph}) AND store_id = ?");
-            $stmt->execute($params);
-            setFlash('ok', strtr(I18n::t('admin.products.bulk.deleted'), ['{count}' => $stmt->rowCount()]));
-            break;
-        case 'price_up_5':
-        case 'price_up_10':
-        case 'price_up_20':
-        case 'price_down_5':
-        case 'price_down_10':
-        case 'price_down_20':
-            $percent = (int)filter_var($action, FILTER_SANITIZE_NUMBER_INT);
-            $direction = str_contains($action, 'up') ? 1 : -1;
-            $multiplier = round(1 + ($direction * abs($percent) / 100), 4);
-            $clamp = Db::isSqlite() ? 'MAX' : 'GREATEST';
-            $stmt = $db->prepare("UPDATE products SET price = {$clamp}(0, ROUND(price * CAST(? AS DECIMAL(10,4)))), updated_at = {$now} WHERE id IN ({$ph}) AND store_id = ?");
-            $stmt->execute([$multiplier, ...$params]);
-            $sign = $direction > 0 ? '+' : '-';
-            setFlash('ok', strtr(I18n::t('admin.products.bulk.price_changed'), ['{count}' => $stmt->rowCount(), '{change}' => $sign . abs($percent) . '%']));
-            break;
+    $result = ProductBulk::apply($action, $ids);
+    if ($result['ok']) {
+        $percent = ProductBulk::PRICE_ACTIONS[$action] ?? 0;
+        $key = ['activate' => 'activated', 'archive' => 'archived', 'delete' => 'deleted'][$action] ?? 'price_changed';
+        $msg = I18n::format('admin.products.bulk.' . $key, ['count' => $result['count'], 'change' => sprintf('%+d%%', $percent)]);
+        if ($result['skipped']) $msg .= ' ' . I18n::format('admin.products.bulk.delete_skipped', ['list' => implode(', ', $result['skipped'])]);
+        if ($result['clamped']) $msg .= ' ' . I18n::format('admin.products.bulk.price_clamped', ['list' => implode(', ', $result['clamped'])]);
+        setFlash($result['skipped'] ? 'err' : 'ok', $msg);
     }
     header('Location: admin.php?p=products');
     exit;
@@ -979,7 +964,7 @@ function handleExport(): void {
     header('Content-Type: text/csv; charset=UTF-8');
     header('Content-Disposition: attachment; filename="products-' . date('Y-m-d') . '.csv"');
     $out = fopen('php://output', 'w');
-    exportProductsCsv($out, (string)($_POST['q'] ?? ''), (string)($_POST['status'] ?? ''));
+    exportProductsCsv($out, is_string($_POST['q'] ?? null) ? $_POST['q'] : '', is_string($_POST['status'] ?? null) ? $_POST['status'] : '');
     fclose($out);
     exit;
 }
@@ -995,7 +980,8 @@ function exportProductsCsv($out, string $search = '', string $statusFilter = '')
     }
     if ($statusFilter) { $where .= " AND status = :status"; $params[':status'] = $statusFilter; }
 
-    $stmt = Db::get()->prepare("SELECT sku, name, slug, product_type, price, compare_price, stock, status, summary, weight_g,
+    // Unbuffered on MySQL: rows stream to the CSV instead of the whole catalog being held in memory.
+    $stmt = Db::prepareUnbuffered("SELECT sku, name, slug, product_type, price, compare_price, stock, status, summary, weight_g,
         stock_low_threshold, stock_critical_threshold FROM products WHERE {$where} ORDER BY id");
     $stmt->execute($params);
 
@@ -1169,8 +1155,21 @@ function handleAttributeSave(): void {
     $unit = $form['unit'];
     $sortOrder = Security::int($form['sort_order']);
 
-    if (!$slug) {
-        setFlash('err', I18n::t('admin.attr.required'));
+    // Enum values: options[] with option_order[] — scalars only (anything else is a forged post, refused, not a 500).
+    $optValues = $_POST['options'] ?? [];
+    $optOrders = $_POST['option_order'] ?? [];
+    $scalars = static fn($list): bool => is_array($list) && !array_filter($list, static fn($v): bool => !is_scalar($v));
+    $options = [];
+    if ($scalars($optValues) && $scalars($optOrders)) {
+        foreach ($optValues as $i => $val) if (($val = trim((string)$val)) !== '') $options[$val] ??= Security::int($optOrders[$i] ?? 0);
+    }
+    // Another catalog's categories use this shared definition: its identity (slug, type) stays as it is.
+    $shared = $id && $old && CatalogScope::attributeUsedByOtherCatalog($id);
+    $error = $id && !$old ? 'admin.common.record_missing' : (!$slug ? 'admin.attr.required' : null);
+    $error ??= (!$scalars($optValues) || !$scalars($optOrders) ? 'admin.attr.options_invalid'
+        : ($shared && ($slug !== ($old['slug'] ?? '') || $type !== ($old['type'] ?? '')) ? 'admin.attr.shared_locked' : null));
+    if ($error !== null) {
+        setFlash('err', I18n::t($error));
         header("Location: admin.php?p=attribute" . ($id ? "&id={$id}" : ''));
         exit;
     }
@@ -1193,21 +1192,15 @@ function handleAttributeSave(): void {
         $id = (int)$db->lastInsertId();
     }
 
-    // Save enum options
-    $db->prepare("DELETE FROM attribute_options WHERE attribute_id = :aid")->execute([':aid' => $id]);
-    if ($type === 'enum') {
-        $optValues = $_POST['options'] ?? [];
-        $optOrders = $_POST['option_order'] ?? [];
-        $ins = $db->prepare("INSERT INTO attribute_options (attribute_id, value, sort_order) VALUES (:aid, :val, :sort)");
-        foreach ($optValues as $i => $val) {
-            $val = trim($val);
-            if ($val === '') continue;
-            $ins->execute([':aid' => $id, ':val' => $val, ':sort' => (int)($optOrders[$i] ?? 0)]);
-        }
-    }
+    // Enum options; values another catalog may use are never deleted (see CatalogScope::saveAttributeOptions).
+    $oldOptions = CatalogScope::attributeOptionValues($id);
+    CatalogScope::saveAttributeOptions($id, $type === 'enum' ? $options : [], $shared);
 
     // Category assignments of the active catalog; other catalogs keep their links to this shared attribute.
     CatalogScope::replaceAttributeCategories($id, $_POST['category_ids'] ?? []);
+    AuditLog::log('attribute', $id, $old ? $old + ['options' => $oldOptions] : null,
+        ['name' => $name, 'slug' => $slug, 'type' => $type, 'unit' => $unit, 'sort_order' => $sortOrder, 'options' => CatalogScope::attributeOptionValues($id)],
+        $old ? 'Admin attribute edit' : 'Admin attribute create');
 
     setFlash('ok', I18n::t('admin.attr.saved'));
     header("Location: admin.php?p=attribute&id={$id}");
@@ -1219,9 +1212,14 @@ function handleAttributeDelete(): void {
     if ($id && CatalogScope::attributeUsedByOtherCatalog($id)) {
         setFlash('err', I18n::t('admin.attr.used_elsewhere'));
     } elseif ($id) {
+        $stmt = $db->prepare("SELECT * FROM attribute_definitions WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        $old = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        $options = CatalogScope::attributeOptionValues($id);
         $db->prepare("DELETE FROM attribute_options WHERE attribute_id = :id")->execute([':id' => $id]);
         $db->prepare("DELETE FROM category_attributes WHERE attribute_id = :id")->execute([':id' => $id]);
         $db->prepare("DELETE FROM attribute_definitions WHERE id = :id")->execute([':id' => $id]);
+        if ($old) AuditLog::log('attribute', $id, $old + ['options' => $options], null, 'Admin attribute delete');
         setFlash('ok', I18n::t('admin.attr.deleted'));
     }
     header('Location: admin.php?p=attributes');

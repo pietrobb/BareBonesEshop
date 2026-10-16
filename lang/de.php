@@ -1450,4 +1450,16 @@ return array_replace(require __DIR__ . '/en.php', [
     'variant_invalid' => 'Die gewählte Variante ist ungültig.', 'product_invalid' => 'Produkt ist nicht verfügbar.', 'product_unavailable' => 'Diese Auswahl ist nicht verfügbar.',
     'shipping_loading' => 'Versandarten werden geladen…', 'shipping_unavailable' => 'Versand ist nicht verfügbar.', 'select_shipping_first' => 'Wählen Sie zuerst den Versand.',
     'payment_loading' => 'Zahlungsarten werden geladen…', 'payment_unavailable' => 'Zahlung ist nicht verfügbar.',
+
+    // Admin catalog/operations audit fixes
+    'admin.feed.mode_price_stock' => 'Nur Preis und Bestand (vorhandene Produkte; nichts wird angelegt, kein Inhalt geändert)',
+    'admin.feed.warehouse_foreign' => 'Das Lager gehört nicht zu diesem Shop.',
+    'admin.feed.code_taken' => 'Dieser Feed-Code wird bereits verwendet (Feed-Codes sind über alle Shops hinweg eindeutig).',
+    'admin.order.msg.invoice_unpaid' => 'Eine Rechnung kann nur für eine bezahlte Bestellung ausgestellt werden.',
+    'admin.msg.product.sku_change_blocked' => 'Die SKU {sku} kann nicht geändert werden ({reason}).',
+    'admin.msg.product.price_below_variants' => 'Der Preis muss mindestens {min} Cent betragen, sonst würde eine Variante mit Preisnachlass weniger als null kosten.',
+    'admin.products.bulk.delete_skipped' => 'Nicht gelöscht, weil Bestellungen darauf verweisen (stattdessen archivieren): {list}.',
+    'admin.products.bulk.price_clamped' => 'Auf dem niedrigsten zulässigen Preis belassen (null oder der Preis, bei dem keine Variante unter null fällt): {list}.',
+    'admin.attr.options_invalid' => 'Ungültige Attributwerte.',
+    'admin.attr.shared_locked' => 'Ein anderer Katalog verwendet dieses Attribut, daher können Slug und Typ nicht geändert werden.',
 ]);

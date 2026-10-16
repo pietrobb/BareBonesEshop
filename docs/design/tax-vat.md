@@ -125,7 +125,7 @@ ALTER TABLE invoices ADD COLUMN refers_to_invoice_id INTEGER DEFAULT NULL;      
 
 - The original stays immutable (per the existing rule).
 - A credit note has **opposite signs** in `subtotal_net`, `vat_amount`, `total_gross`.
-- The number sequence is shared (the next number, but `type` is 'credit_note', and the number has a `CN-` prefix if `stores.legal.credit_note_prefix` is set, otherwise just the sequence number). Default — a shared number sequence without a prefix.
+- Every seller (store) numbers each document type in its own gapless series per year and prefix (`invoice_number_counters`, keyed by store, type, year, prefix). Credit notes use `stores.legal.credit_note_prefix`, by default `<invoice_prefix>CN-` (`CN-` for a store without an invoice prefix). Two series may never share a prefix: `InvoiceService::numberingConflicts()` refuses such a stores.json, and a prefix another seller already numbers in that year is refused at issue time. The legacy shared `invoice_counters` rows were given one owner each by migration `20261016140000_invoice_number_counters` (see its header).
 - The PDF uses the same template, only the header label is "Credit Note" (multi-locale; the Slovak label is `Dobropis`).
 
 P0 = the backend (`InvoiceService::issueCreditNote($invoiceId, $reason)`) + an admin button in the order detail. An automatic hook from the refund flow is **P1** (through `OrderWorkflow::handleRefund()`).

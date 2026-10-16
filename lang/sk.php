@@ -1479,4 +1479,16 @@ return [
     'select_shipping_first' => 'Najprv vyberte dopravu.',
     'payment_loading' => 'Načítavam spôsoby platby…',
     'payment_unavailable' => 'Platba nie je dostupná.',
+
+    // Admin catalog/operations audit fixes
+    'admin.feed.mode_price_stock' => 'Iba cena a sklad (existujúce produkty; nič sa nevytvára, obsah sa nemení)',
+    'admin.feed.warehouse_foreign' => 'Sklad nepatrí do tohto obchodu.',
+    'admin.feed.code_taken' => 'Tento kód feedu sa už používa (kódy feedov sú jedinečné naprieč všetkými obchodmi).',
+    'admin.order.msg.invoice_unpaid' => 'Faktúru možno vystaviť iba k zaplatenej objednávke.',
+    'admin.msg.product.sku_change_blocked' => 'SKU {sku} nemožno zmeniť ({reason}).',
+    'admin.msg.product.price_below_variants' => 'Cena musí byť aspoň {min} centov, inak by variant so zľavou z ceny stál menej ako nula.',
+    'admin.products.bulk.delete_skipped' => 'Nezmazané, lebo na ne odkazujú objednávky (namiesto toho ich archivujte): {list}.',
+    'admin.products.bulk.price_clamped' => 'Ponechané na najnižšej povolenej cene (nula alebo cena, pri ktorej žiadny variant neklesne pod nulu): {list}.',
+    'admin.attr.options_invalid' => 'Neplatné hodnoty atribútu.',
+    'admin.attr.shared_locked' => 'Tento atribút používa iný katalóg, preto nemožno zmeniť jeho slug ani typ.',
 ];

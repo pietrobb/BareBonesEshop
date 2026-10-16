@@ -440,6 +440,13 @@ class Security {
             ? (int)$input : $default;
     }
 
+    /** Positive ids of a posted list (name[]): a non-array, nested or non-numeric entry yields nothing, never a TypeError. */
+    public static function intList(mixed $input): array {
+        if (!is_array($input)) return [];
+        $ids = array_map(static fn($id): int => is_scalar($id) ? self::int($id) : 0, $input);
+        return array_values(array_unique(array_filter($ids, static fn(int $id): bool => $id > 0)));
+    }
+
     public static function email(mixed $input): ?string {
         $email = filter_var(trim(self::str($input)), FILTER_VALIDATE_EMAIL);
         return $email ?: null;

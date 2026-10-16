@@ -1423,4 +1423,16 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.gdpr_cookies_title' => 'Cookies',
     'bank_transfer.iban' => 'IBAN',
     'bank_transfer.bic' => 'BIC (SWIFT)',
+
+    // Admin catalog/operations audit fixes
+    'admin.feed.mode_price_stock' => 'Solo precio y stock (productos existentes; no se crea nada ni se cambia el contenido)',
+    'admin.feed.warehouse_foreign' => 'El almacén no pertenece a esta tienda.',
+    'admin.feed.code_taken' => 'Este código de feed ya está en uso (los códigos de feed son únicos en todas las tiendas).',
+    'admin.order.msg.invoice_unpaid' => 'Solo se puede emitir una factura para un pedido pagado.',
+    'admin.msg.product.sku_change_blocked' => 'El SKU {sku} no se puede cambiar ({reason}).',
+    'admin.msg.product.price_below_variants' => 'El precio debe ser de al menos {min} céntimos; de lo contrario, una variante con descuento costaría menos de cero.',
+    'admin.products.bulk.delete_skipped' => 'No eliminados porque hay pedidos que los referencian (archívelos en su lugar): {list}.',
+    'admin.products.bulk.price_clamped' => 'Mantenidos en el precio mínimo permitido (cero o el precio con el que ninguna variante baja de cero): {list}.',
+    'admin.attr.options_invalid' => 'Valores de atributo no válidos.',
+    'admin.attr.shared_locked' => 'Otro catálogo usa este atributo, por lo que no se pueden cambiar su slug ni su tipo.',
 ]);

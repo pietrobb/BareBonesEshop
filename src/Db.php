@@ -94,6 +94,18 @@ class Db {
     public static function isMysql(): bool  { return self::driver() === 'mysql'; }
 
     /**
+     * A statement whose rows stream from the server (MySQL: an unbuffered result set on this statement only, so a
+     * large export never holds the whole result in PHP memory; SQLite always steps row by row). Read it to the end
+     * (or closeCursor()) before running another query on the connection.
+     */
+    public static function prepareUnbuffered(string $sql): PDOStatement {
+        $pdo = self::get();
+        if (!self::isMysql()) return $pdo->prepare($sql);
+        $attribute = defined('Pdo\Mysql::ATTR_USE_BUFFERED_QUERY') ? constant('Pdo\Mysql::ATTR_USE_BUFFERED_QUERY') : constant('PDO::MYSQL_ATTR_USE_BUFFERED_QUERY');
+        return $pdo->prepare($sql, [$attribute => false]);
+    }
+
+    /**
      * Literal text for a `LIKE ... ESCAPE '!'` pattern: user-typed % and _ stay characters on
      * SQLite and MySQL alike ("!" avoids MySQL's backslash string-literal rules).
      */
