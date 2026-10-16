@@ -1376,6 +1376,16 @@ such a run counts as a failed attempt: the job goes back to retry, and after `ma
 `failed` (dead letter) with the error "lease expired". A job that keeps crashing the worker
 therefore does not repeat forever and the file backend does not get stuck in `processing/`.
 
+Queued job payloads carry personal data (a mail job's `to`, a customer's `email`). The GDPR export
+and erasure (`GdprService`) cover the `queue_jobs` table and the file backend's job files in
+`pending/`, `processing/`, `failed/` and `completed/`: a job belongs to the customer when an e-mail
+field (`to`, `email`, `customer_email`, `recipient`, at any depth) holds exactly the customer's
+address, and erasure rewrites only those fields. A job a worker is running at that moment keeps
+the payload it already read; if that run fails it is written back, so run the erasure again.
+**The Redis backend is not covered:** the queue contract cannot enumerate jobs, so jobs held in
+Redis (including the completed ones it keeps) are neither exported nor scrubbed. With
+`queue.backend = redis`, purge the customer's jobs in Redis by hand when handling an erasure request.
+
 ---
 
 ## Price rules, discounts, B2B — pricing.json

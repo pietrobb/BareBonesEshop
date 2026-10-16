@@ -62,6 +62,14 @@ class GdprService {
         'queue_jobs'                   => ['columns' => ['payload'], 'erase' => 'scrub', 'export' => 'queued_jobs'],
     ];
 
+    /**
+     * Payload keys that hold an e-mail address, at any depth: JobQueue::push() mail jobs use 'to'
+     * (OrderWorkflow, Orders, AbandonedCarts, ApiHandlers), Outbox::record() customer events 'email',
+     * checkout and merchant mail data 'customer_email', mail records 'recipient'. Order status events
+     * also use 'to' for the new status, which never equals an e-mail address.
+     */
+    private const PAYLOAD_EMAIL_KEYS = ['to', 'email', 'customer_email', 'recipient'];
+
     private const NOT_CUSTOMER_DATA = 'catalog, configuration or bookkeeping names, not a customer\'s personal data';
 
     /** Tables with personal-data-like columns that deliberately stay out of erasure and export. */
@@ -288,7 +296,8 @@ class GdprService {
      *           'email_log'=>[], 'consent_history'=>[], 'coupon_uses'=>[], 'reviews'=>[], 'wishlist'=>[],
      *           'abandoned_carts'=>[], 'rma_requests'=>[{rma, items, receipts}], 'events'=>[], 'queued_jobs'=>[],
      *           'meta'=>{exported_at, customer_id}] — one section per PII_REGISTRY 'export' key.
-     * Payment data redacted (no `raw_response` field).
+     * Payment data redacted (no `raw_response` field). 'queued_jobs' lists the queue_jobs table and
+     * the file backend's job files; jobs held by the Redis backend are not listed (see anonymizeCustomer()).
      */
     public static function exportCustomer(int $customerId): array {
         $db = Db::get();
@@ -353,7 +362,7 @@ class GdprService {
 
         $store = StoreContext::current()->id();
         $orderIds = self::customerOrderIds($db, $ownership);
-        $sessionKeys = self::customerSessionKeys($db, $customerId, $email, $ownership, $orderIds);
+        $sessionKeys = self::customerSessionKeys($db, $customerId, $orderIds);
 
         // Cookie consent history: the account's own records and those of its browser sessions.
         $consent = [];
@@ -419,7 +428,14 @@ class GdprService {
             'abandoned_carts' => $carts,
             'rma_requests' => $rmas,
             'events' => array_map(static fn(array $row): array => array_intersect_key($row, array_flip(['id', 'event_type', 'aggregate_type', 'aggregate_id', 'payload', 'status', 'occurred_at'])), $payloads['event_outbox']),
-            'queued_jobs' => array_map(static fn(array $row): array => array_intersect_key($row, array_flip(['id', 'type', 'state', 'payload', 'created_at', 'completed_at'])), $payloads['queue_jobs']),
+            'queued_jobs' => array_merge(
+                array_map(static fn(array $row): array => array_intersect_key($row, array_flip(['id', 'type', 'state', 'payload', 'created_at', 'completed_at'])), $payloads['queue_jobs']),
+                array_map(static fn(array $file): array => [
+                    'id' => (string)($file['job']['id'] ?? ''), 'type' => (string)($file['job']['type'] ?? ''), 'state' => $file['state'],
+                    'payload' => json_encode($file['job']['payload'] ?? null, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    'created_at' => $file['job']['created_at'] ?? null, 'completed_at' => null,
+                ], self::customerFileJobs($email, $ownership, $orderIds)),
+            ),
         ];
         self::assertRegistryCovered('export', array_keys($export));
         return $export;
@@ -435,7 +451,10 @@ class GdprService {
      *   - coupon_uses: hash email
      *   - everything else in PII_REGISTRY: see eraseCustomerContent()
      *   - orders.customer_*, invoices.customer_snapshot: KEPT (10y legal retention)
-     * Job files of the file-backed JobQueue (jobs_dir) are outside the database and not rewritten.
+     * Queued jobs are scrubbed in the queue_jobs table (database backend) and in the job files of the
+     * file backend (jobs_dir, see JobQueue::rewriteFileJobs()). The Redis backend is NOT covered: the
+     * QueueBackend contract cannot enumerate jobs, so jobs held in Redis (including the completed ones
+     * it keeps) keep the e-mail until the operator purges them, and the export does not list them.
      *
      * Logs gdpr_events row with action='erase'.
      */
@@ -586,16 +605,15 @@ class GdprService {
      * browser sessions) and abandoned carts are deleted; verification and password-reset tokens are
      * deleted (the customer row is updated, so no FK cascade fires); cookie consents keep only the
      * choice; RMA reasons, admin notes and return receipt notes are scrubbed (the RMA stays for the
-     * credit-note trail); outbox events and queued jobs lose the e-mail (matched case-insensitively,
-     * in PHP, so a mixed-case guest e-mail is caught on SQLite and MySQL alike) and customer events
-     * are rewritten.
+     * credit-note trail); outbox events and queued jobs (table and file backend) lose the e-mail in
+     * their e-mail fields (see scrubPayloadEmail()) and customer events are rewritten.
      */
     private static function eraseCustomerContent(PDO $db, int $customerId, string $email, array $ownership, string $placeholder, string $marker): array {
         $store = StoreContext::current()->id();
         $rows = [];
         $orderIds = self::customerOrderIds($db, $ownership);
         // Read before carts and consents are erased: they are what links the browser sessions.
-        $sessionKeys = self::customerSessionKeys($db, $customerId, $email, $ownership, $orderIds);
+        $sessionKeys = self::customerSessionKeys($db, $customerId, $orderIds);
 
         $stmt = $db->prepare("DELETE FROM product_reviews WHERE customer_id = :id");
         $stmt->execute([':id' => $customerId]);
@@ -648,16 +666,18 @@ class GdprService {
         $erasedEvent = json_encode(['customer_id' => $customerId, 'erased' => true]);
         $update = $db->prepare("UPDATE event_outbox SET payload = ? WHERE id = ?");
         foreach ($payloads['event_outbox'] as $event) {
-            $payload = $event['aggregate_type'] === 'customer' ? $erasedEvent : str_ireplace($email, $placeholder, (string)$event['payload']);
+            $payload = $event['aggregate_type'] === 'customer' ? $erasedEvent : self::scrubPayloadJson((string)$event['payload'], $email, $placeholder);
             $update->execute([$payload, $event['id']]);
             $rows['event_outbox'] += $update->rowCount();
         }
         $rows['queue_jobs'] = 0;
         $update = $db->prepare("UPDATE queue_jobs SET payload = ? WHERE id = ?");
         foreach ($payloads['queue_jobs'] as $job) {
-            $update->execute([str_ireplace($email, $placeholder, (string)$job['payload']), $job['id']]);
+            $update->execute([self::scrubPayloadJson((string)$job['payload'], $email, $placeholder), $job['id']]);
             $rows['queue_jobs'] += $update->rowCount();
         }
+        // Last: file writes are not transactional; a failure rolls the database back and a rerun redoes them.
+        $rows['queue_jobs'] += self::eraseFileJobs($email, $ownership, $orderIds, $placeholder);
         return $rows;
     }
 
@@ -670,21 +690,21 @@ class GdprService {
 
     /**
      * Browser session keys (Security::sessionKey()) provably used by the customer: consents logged
-     * while signed in, the customer's carts and the checkout sessions of the customer's orders. An
+     * while signed in as the customer and the checkout sessions of the customer's orders. An
      * anonymous wishlist is keyed 's:<session key>', so these find it after the session is gone.
+     * Abandoned carts are no source: anyone can type the customer's e-mail into a checkout in their
+     * own browser, so a cart's session may be a third party's (and a cart that became an order is
+     * re-keyed 'order:<id>', its checkout session is already covered).
      *
      * @return list<string>
      */
-    private static function customerSessionKeys(PDO $db, int $customerId, string $email, array $ownership, array $orderIds): array {
+    private static function customerSessionKeys(PDO $db, int $customerId, array $orderIds): array {
         $keys = [];
         if (self::hasTable($db, 'cookie_consent')) {
             $stmt = $db->prepare("SELECT session_id FROM cookie_consent WHERE customer_id = ? AND session_id IS NOT NULL");
             $stmt->execute([$customerId]);
             $keys = array_merge($keys, $stmt->fetchAll(PDO::FETCH_COLUMN));
         }
-        $stmt = $db->prepare("SELECT session_id FROM abandoned_carts WHERE " . self::CUSTOMER_CARTS);
-        $stmt->execute($ownership + [':cart_email' => $email, ':cart_store' => StoreContext::current()->id(), ':cart_verified' => $ownership[':verified']]);
-        $keys = array_merge($keys, $stmt->fetchAll(PDO::FETCH_COLUMN));
         if ($orderIds !== [] && self::hasTable($db, 'checkout_sessions')) {
             $stmt = $db->prepare("SELECT browser_session_hash FROM checkout_sessions WHERE browser_session_hash IS NOT NULL" . self::inList(' AND order_id', $orderIds));
             $stmt->execute($orderIds);
@@ -697,8 +717,9 @@ class GdprService {
     /**
      * Outbox events and queued jobs carrying the customer's data: the customer's own events, events
      * of the customer's orders whose payload names the e-mail, and jobs naming the e-mail (for an
-     * unverified account only jobs of its own orders). The e-mail is matched case-insensitively in
-     * PHP: a SQL REPLACE/INSTR is case-sensitive on SQLite and collation-dependent on MySQL.
+     * unverified account only jobs of its own orders). "Names" means an e-mail field of the decoded
+     * payload holds exactly that address, case-insensitively (see PAYLOAD_EMAIL_KEYS): a substring
+     * match would take another customer's 'joann@x.sk' for 'ann@x.sk'. The SQL INSTR is a prefilter.
      *
      * @return array{event_outbox: list<array<string, mixed>>, queue_jobs: list<array<string, mixed>>}
      */
@@ -714,19 +735,79 @@ class GdprService {
             $stmt = $db->prepare("SELECT * FROM event_outbox WHERE store_id = ? AND aggregate_type = 'order'" . self::inList(' AND aggregate_id', $orderIds) . " ORDER BY id");
             $stmt->execute(array_merge([$store], $orderIds));
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $event) {
-                if (stripos((string)$event['payload'], $email) !== false) $events[] = $event;
+                if (self::payloadNamesEmail(json_decode((string)$event['payload'], true), $email)) $events[] = $event;
             }
         }
         if (!self::hasTable($db, 'queue_jobs')) return ['event_outbox' => $events, 'queue_jobs' => $jobs];
         $stmt = $db->prepare("SELECT * FROM queue_jobs WHERE store_id = ? AND INSTR(LOWER(payload), ?) > 0 ORDER BY created_at, id");
         $stmt->execute([$store, strtolower($email)]);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $job) {
-            if (stripos((string)$job['payload'], $email) === false) continue;
-            $payload = json_decode((string)$job['payload'], true);
-            $orderId = is_array($payload) && isset($payload['order_id']) ? (string)(int)$payload['order_id'] : '';
-            if ((string)$ownership[':verified'] === '1' || in_array($orderId, $orderIds, true)) $jobs[] = $job;
+            if (self::jobBelongsToCustomer(json_decode((string)$job['payload'], true), $email, $ownership, $orderIds)) $jobs[] = $job;
         }
         return ['event_outbox' => $events, 'queue_jobs' => $jobs];
+    }
+
+    /**
+     * File-backend jobs (JobQueue::fileJobs()) of the current store that belong to the customer.
+     *
+     * @return list<array{state: string, job: array}>
+     */
+    private static function customerFileJobs(string $email, array $ownership, array $orderIds): array {
+        if ($email === '') return [];
+        $store = StoreContext::current()->id();
+        return array_values(array_filter(JobQueue::fileJobs(), static fn(array $file): bool =>
+            self::fileJobInStore($file['job'], $store) && self::jobBelongsToCustomer($file['job']['payload'] ?? null, $email, $ownership, $orderIds)));
+    }
+
+    /** Rewrites the e-mail fields of the customer's file-backend jobs; returns the number of files rewritten. */
+    private static function eraseFileJobs(string $email, array $ownership, array $orderIds, string $placeholder): int {
+        if ($email === '') return 0;
+        $store = StoreContext::current()->id();
+        return JobQueue::rewriteFileJobs(static function (array $job) use ($email, $ownership, $orderIds, $placeholder, $store): ?array {
+            if (!self::fileJobInStore($job, $store) || !self::jobBelongsToCustomer($job['payload'] ?? null, $email, $ownership, $orderIds)) return null;
+            $job['payload'] = self::scrubPayloadEmail($job['payload'], $email, $placeholder);
+            return $job;
+        });
+    }
+
+    private static function fileJobInStore(array $job, string $store): bool {
+        $payload = is_array($job['payload'] ?? null) ? $job['payload'] : [];
+        return (string)($payload['_store_id'] ?? 'default') === $store;
+    }
+
+    /** The payload names the e-mail; an unverified account owns only the jobs of its own orders. */
+    private static function jobBelongsToCustomer(mixed $payload, string $email, array $ownership, array $orderIds): bool {
+        if (!is_array($payload) || !self::payloadNamesEmail($payload, $email)) return false;
+        $orderId = isset($payload['order_id']) ? (string)(int)$payload['order_id'] : '';
+        return (string)$ownership[':verified'] === '1' || in_array($orderId, $orderIds, true);
+    }
+
+    private static function payloadNamesEmail(mixed $payload, string $email): bool {
+        return $email !== '' && is_array($payload) && self::scrubPayloadEmail($payload, $email, '') !== $payload;
+    }
+
+    /**
+     * $payload with every e-mail field (PAYLOAD_EMAIL_KEYS, at any depth) that holds exactly $email,
+     * case-insensitively, replaced by $placeholder. Every other value is kept as it was.
+     */
+    private static function scrubPayloadEmail(mixed $payload, string $email, string $placeholder): mixed {
+        if (!is_array($payload)) return $payload;
+        foreach ($payload as $key => $value) {
+            if (is_array($value)) {
+                $payload[$key] = self::scrubPayloadEmail($value, $email, $placeholder);
+            } elseif (is_string($value) && is_string($key) && in_array(strtolower($key), self::PAYLOAD_EMAIL_KEYS, true)
+                && strcasecmp(trim($value), trim($email)) === 0) {
+                $payload[$key] = $placeholder;
+            }
+        }
+        return $payload;
+    }
+
+    /** A JSON payload column rewritten by scrubPayloadEmail(); an undecodable payload is returned unchanged. */
+    private static function scrubPayloadJson(string $json, string $email, string $placeholder): string {
+        $payload = json_decode($json, true);
+        if (!is_array($payload)) return $json;
+        return json_encode(self::scrubPayloadEmail($payload, $email, $placeholder), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     }
 
     /** " <column> IN (?, ...)" for a non-empty list, '' otherwise; $prefix carries the connective and column. */

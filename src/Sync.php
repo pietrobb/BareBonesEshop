@@ -73,6 +73,8 @@ class Sync {
                 $externalId = (string)($order['erp_id'] ?? '');
                 if ($externalId === '') continue;
 
+                // Stamped before the pull: an order whose pull keeps failing must not hold the head of the rotation.
+                Orders::markErpStatusChecked((int)$order['id']);
                 $status = $adapter->pullOrderStatus($externalId);
                 $lastErpStatus = $order['erp_status'] ?? null;
                 if ($lastErpStatus === null && preg_match_all('/erp_status:(\S+)/', (string)($order['notes'] ?? ''), $m2)) {

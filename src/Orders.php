@@ -691,11 +691,22 @@ class Orders {
         $stmt->execute([':err' => substr($error, 0, 500), ':id' => $orderId, ':store' => StoreContext::current()->id()]);
     }
 
-    /** Get orders pending ERP status sync */
-    public static function pendingStatusSync(): array {
-        $stmt = Db::get()->prepare("SELECT * FROM orders WHERE store_id = :store AND erp_id IS NOT NULL AND status NOT IN ('delivered','cancelled','refunded') ORDER BY updated_at ASC LIMIT 50");
+    /**
+     * Open ERP orders whose status is due for a pull: never polled first (NULL sorts first in ascending
+     * order on SQLite and MySQL), then the longest unpolled. updated_at only moves on a status change,
+     * so ordering by it polled the same 50 orders forever.
+     */
+    public static function pendingStatusSync(int $limit = 50): array {
+        $stmt = Db::get()->prepare("SELECT * FROM orders WHERE store_id = :store AND erp_id IS NOT NULL AND status NOT IN ('delivered','cancelled','refunded')
+            ORDER BY erp_status_checked_at ASC, id ASC LIMIT " . max(1, min(500, $limit)));
         $stmt->execute([':store' => StoreContext::current()->id()]);
         return $stmt->fetchAll();
+    }
+
+    /** Stamp an ERP status poll (whatever its outcome) so the next pull moves on to other orders. */
+    public static function markErpStatusChecked(int $orderId): void {
+        $stmt = Db::get()->prepare("UPDATE orders SET erp_status_checked_at = " . Db::now() . " WHERE id = :id AND store_id = :store");
+        $stmt->execute([':id' => $orderId, ':store' => StoreContext::current()->id()]);
     }
 
     /** Update ERP status on order */

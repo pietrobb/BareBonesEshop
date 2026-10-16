@@ -608,6 +608,10 @@ $cspReporterMigration = require TEST_CLI_DIR . '/../migrations/20261016120000_cs
 $cspReporterMigration->up($pdo, true);
 $cspReporterMigration->up($pdo, true);
 assert_true(in_array('reporter_hash', array_column($pdo->query('PRAGMA table_info(csp_violations)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true), 'CSP reporter migration: reporter hash column exists idempotently');
+$erpCheckedMigration = require TEST_CLI_DIR . '/../migrations/20261016130000_erp_status_checked_at.php';
+$erpCheckedMigration->up($pdo, true);
+$erpCheckedMigration->up($pdo, true);
+assert_true(in_array('erp_status_checked_at', array_column($pdo->query('PRAGMA table_info(orders)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true), 'ERP status poll migration: erp_status_checked_at column exists idempotently');
 $emailOverrideMigration = require TEST_CLI_DIR . '/../migrations/20261013130000_email_template_overrides.php';
 $emailOverrideMigration->up($pdo, true);
 $emailOverrideMigration->up($pdo, true);
