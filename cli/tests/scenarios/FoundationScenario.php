@@ -30,6 +30,19 @@ foreach (['storage', 'db', 'jobs', 'logs', 'config', 'cli', 'src', 'migrations',
 }
 assert_true(str_contains($htaccess, 'RewriteRule ^vendor/(?!bbf/'), '.htaccess: vendor tree is denied except explicit BBF public integration files');
 assert_true(str_contains($htaccess, 'bbf\.(?:css|js)|submit\.php'), '.htaccess: required BBF assets and handler remain public');
+// CR-D: vendor/bbf/.htaccess replaces the root rewrite rules on Apache, so the RewriteRule above
+// never applied to vendor/bbf/* (editor.php, viewer.php, demo*.html were served; verified on
+// php:8.4-apache). The deny must be an <If> authz block that applies below vendor/bbf as well.
+$vendorGuardFound = preg_match('/^<If "\(-f %\{REQUEST_FILENAME\} \|\| -d %\{REQUEST_FILENAME\}\) && %\{REQUEST_URI\} =~ m#(\/vendor\/[^#]+)#i">\n\s+Require all denied\n<\/If>$/m', $htaccess, $vendorGuardMatch) === 1;
+assert_true($vendorGuardFound, '.htaccess: CR-D vendor tree is denied by an <If> authz block (applies under vendor/bbf too)');
+$vendorGuardRegex = '#' . ($vendorGuardMatch[1] ?? '(?!)') . '#i';
+foreach (['/vendor/bbf/editor.php', '/vendor/bbf/viewer.php', '/vendor/bbf/submissions.php', '/vendor/bbf/demo.html', '/vendor/bbf/',
+          '/vendor/bbf/EDITOR.PHP', '/shop/vendor/bbf/check.php', '/vendor/other/x.php', '/vendor/bbf/bbf.js.map'] as $vendorUri) {
+    assert_true(preg_match($vendorGuardRegex, $vendorUri) === 1, ".htaccess: CR-D vendor guard denies {$vendorUri}");
+}
+foreach (['/vendor/bbf/bbf.js', '/vendor/bbf/bbf.css', '/vendor/bbf/submit.php', '/shop/vendor/bbf/BBF.JS'] as $vendorUri) {
+    assert_true(preg_match($vendorGuardRegex, $vendorUri) !== 1, ".htaccess: CR-D vendor guard keeps {$vendorUri} public");
+}
 
 // Admin forms must not be reachable through BBF's public submit.php. The guard is an
 // <If> authz block (vendor/bbf/.htaccess replaces root rewrite rules below it). Evaluate

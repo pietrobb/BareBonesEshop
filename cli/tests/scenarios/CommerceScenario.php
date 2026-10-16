@@ -735,6 +735,17 @@ $result = Products::parametricSearch($specCatId, 1, 24, 'price_asc', [
 assert_equals(1, $result['total'], 'Parametric: Vpredu + Vetraný → 1 product');
 assert_equals('BD-001', $result['products'][0]['sku'], 'Filtered product is BD-001');
 
+// CR-D: value keys come from the query string (?spec[Typ][x-y]=Plný); they were pasted into
+// placeholder names (:sv_0_x-y), so a crafted key turned the request into a PDO error / HTTP 500.
+$crdSpecError = null;
+try {
+    $result = Products::parametricSearch($specCatId, 1, 24, 'price_asc', ['Typ' => ['x-y) OR 1=1 --' => 'Plný', 'k' => 'Vetraný']], null, null, 'sk');
+} catch (Throwable $crdSpecException) {
+    $crdSpecError = get_class($crdSpecException) . ': ' . $crdSpecException->getMessage();
+}
+assert_equals(null, $crdSpecError, 'CR-D parametric: string value keys from the query string do not break the query');
+assert_equals(3, $result['total'] ?? null, 'CR-D parametric: values with string keys still filter (Plný OR Vetraný → 3)');
+
 // Price range filter within parametric search
 $result = Products::parametricSearch($specCatId, 1, 24, 'price_asc', [], 4000, 5000, 'sk');
 assert_equals(1, $result['total'], 'Price range 4000-5000 → 1 product');

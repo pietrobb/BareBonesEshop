@@ -696,26 +696,19 @@ final class Updater
 
     private function commitStagedFile(string $temporary, string $target): void
     {
-        $old = null;
         try {
-            if (file_exists($target)) {
-                if (!is_file($target) || is_link($target)) {
-                    throw new RuntimeException("Update target is not a regular file: {$target}");
-                }
-                $old = dirname($target) . DIRECTORY_SEPARATOR . '.' . basename($target)
-                    . '.old-' . bin2hex(random_bytes(6));
-                if (!rename($target, $old)) {
-                    throw new RuntimeException("Cannot move current update target: {$target}");
-                }
+            if (file_exists($target) && (!is_file($target) || is_link($target))) {
+                throw new RuntimeException("Update target is not a regular file: {$target}");
             }
-            if (!rename($temporary, $target)) {
-                if ($old !== null) {
-                    @rename($old, $target);
+            // One rename replaces the target in place (rename(2) on POSIX, MoveFileEx with
+            // REPLACE_EXISTING on Windows). Moving the old file aside first left a window in
+            // which live requests found no file at all; on failure the old file stays intact.
+            // Windows refuses the replace while a request briefly holds the target open: retry.
+            for ($attempt = 1; !@rename($temporary, $target); $attempt++) {
+                if (DIRECTORY_SEPARATOR !== '\\' || $attempt >= 40) {
+                    throw new RuntimeException("Cannot atomically install update file: {$target}");
                 }
-                throw new RuntimeException("Cannot atomically install update file: {$target}");
-            }
-            if ($old !== null) {
-                @unlink($old);
+                usleep(25000);
             }
         } finally {
             @unlink($temporary);

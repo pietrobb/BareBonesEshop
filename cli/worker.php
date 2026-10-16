@@ -30,13 +30,11 @@ if (!JobQueue::supportsConcurrentWorkers()) {
     $jobsDir = $cfg['jobs_dir'] ?? dirname(__DIR__, 2) . '/bareboneseshop-private/jobs';
     if (!is_dir($jobsDir)) mkdir($jobsDir, 0750, true);
     $lockFile = $jobsDir . '/worker.lock';
-    $lock = fopen($lockFile, 'w+');
-    if (!is_resource($lock) || !flock($lock, LOCK_EX | LOCK_NB)) {
+    $lock = JobQueue::acquireWorkerLock($lockFile);
+    if ($lock === null) {
         if ($verbose) echo "Worker is already running.\n";
         exit(0);
     }
-    fwrite($lock, (string)getmypid());
-    fflush($lock);
 }
 
 if ($verbose) echo "Worker started (PID: " . getmypid() . ", queue: " . JobQueue::backendName() . ")\n";
@@ -205,11 +203,11 @@ do {
 
 } while (time() - $startTime < $maxRuntime);
 
-// Release the file-backend process lock, when one was acquired.
+// Release the file-backend process lock, when one was acquired. The file itself stays: unlinking
+// it lets a worker that opened the old file and a worker that creates a new one both "hold" it.
 if (is_resource($lock)) {
     flock($lock, LOCK_UN);
     fclose($lock);
-    if ($lockFile !== null) @unlink($lockFile);
 }
 
 if ($verbose) echo "Worker done. Processed: {$processed} jobs.\n";

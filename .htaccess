@@ -7,6 +7,13 @@ RewriteRule ^themes/[^/]+/(?:theme\.json|blocks(?:/|$)) - [F,L,NC]
 # BBF's browser client and handler are public integration points; all other
 # vendor code stays private. Only the documented import example is public.
 RewriteRule ^vendor/(?!bbf/(?:bbf\.(?:css|js)|submit\.php)$) - [F,L,NC]
+# On Apache that rule never sees vendor/bbf/*: vendor/bbf/.htaccess turns on its own
+# rewrite engine, which replaces the root rules there (editor.php, viewer.php, demos...
+# were served). The <If> authz block applies below it as well. Only existing files and
+# directories are matched, so storefront URLs with a "vendor" segment keep working.
+<If "(-f %{REQUEST_FILENAME} || -d %{REQUEST_FILENAME}) && %{REQUEST_URI} =~ m#/vendor/(?!bbf/(?:bbf\.(?:css|js)|submit\.php)$)#i">
+    Require all denied
+</If>
 # Admin forms (forms/admin-*.json) are rendered and saved only by admin.php, so
 # BBF's public handler must not serve, issue CSRF for, or accept them.
 # BBF reads the form id only from the query string and strips everything except

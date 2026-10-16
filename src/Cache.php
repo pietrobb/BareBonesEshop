@@ -62,15 +62,19 @@ class Cache {
     }
 
     /**
-     * Atomic write — write to .tmp then rename
+     * Atomic write — write to a unique .tmp then rename. A short or failed write (disk full)
+     * never replaces the last good entry with a truncated one and leaves no .tmp behind.
      */
     public static function write(string $path, string $data): void {
         $file = self::path($path);
-        $tmp = $file . '.tmp.' . getmypid();
+        $tmp = $file . '.tmp.' . getmypid() . '.' . bin2hex(random_bytes(4));
         $dir = dirname($file);
         if (!is_dir($dir)) mkdir($dir, 0750, true);
-        file_put_contents($tmp, $data, LOCK_EX);
-        rename($tmp, $file);
+        // The .tmp name is unique per write, so no lock is needed: nobody else writes this file.
+        if (@file_put_contents($tmp, $data) !== strlen($data) || !@rename($tmp, $file)) {
+            @unlink($tmp);
+            Logger::warning('cache.write_failed', ['path' => $path]);
+        }
     }
 
     /**
