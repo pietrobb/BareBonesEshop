@@ -221,7 +221,7 @@ PHP);
     // logs/ directory outside the test fixtures.
     $crsExampleRuntime = (string)((require TEST_CLI_DIR . '/../config.example.php')['private_runtime_dir'] ?? '');
     $crsConfigured = str_replace('\\', '/', rtrim($crsExampleRuntime, '/\\') . '/logs/emails.log');
-    assert_true($crsExampleRuntime !== '' && str_starts_with($crsConfigured, '/') && !str_starts_with($crsConfigured, $crsAppRoot . '/'), 'CR follow-up LogMail: the configured default is outside the application root (' . $crsConfigured . ')');
+    assert_true($crsExampleRuntime !== '' && preg_match('#^(?:/|[A-Za-z]:/)#', $crsConfigured) === 1 && !str_starts_with($crsConfigured, $crsAppRoot . '/'), 'CR follow-up LogMail: the configured default is outside the application root (' . $crsConfigured . ')');
     assert_true(str_contains((string)file_get_contents(dirname(TEST_CLI_DIR) . '/adapters/contrib/LogMail.php'), "dirname(__DIR__, 3) . '/bareboneseshop-private'"), 'CR follow-up LogMail: without a runtime dir the fallback is the private directory next to the application root');
 
     // 5. Anyone can POST a CSP report: one forged form-action used to raise the critical alarm.

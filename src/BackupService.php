@@ -522,6 +522,12 @@ class BackupService
         }
     }
 
+    /** A directory can be listed and entered. Windows has no execute bit: is_executable() is false for every directory. */
+    private static function dirTraversable(string $path): bool
+    {
+        return is_readable($path) && (DIRECTORY_SEPARATOR === '\\' || is_executable($path));
+    }
+
     /**
      * Tar every configured file source. Entries are buffered and the archive is written once
      * (per-file addFile() rewrites the whole tar, quadratic in the file count). An unreadable file
@@ -564,14 +570,14 @@ class BackupService
             } elseif (is_dir($path)) {
                 $base = rtrim(str_replace('\\', '/', $path), '/') . '/';
                 $relativeOf = static fn(\SplFileInfo $file): string => substr(str_replace('\\', '/', $file->getPathname()), strlen($base));
-                if (!is_readable($path) || !is_executable($path)) {
+                if (!self::dirTraversable($path)) {
                     throw new RuntimeException("BackupService: file source {$name} is not readable");
                 }
                 // Unreadable subdirectories are not descended into (RecursiveDirectoryIterator would throw).
                 $filter = new RecursiveCallbackFilterIterator(
                     new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
                     static function (\SplFileInfo $file) use ($name, $relativeOf, &$skipped): bool {
-                        if ($file->isLink() || !$file->isDir() || ($file->isReadable() && $file->isExecutable())) return true;
+                        if ($file->isLink() || !$file->isDir() || self::dirTraversable($file->getPathname())) return true;
                         $skipped[] = $name . '/' . $relativeOf($file) . '/';
                         self::log("CREATE WARN skipped unreadable directory {$name}/" . $relativeOf($file) . '/');
                         return false;
