@@ -135,7 +135,9 @@ try {
     assert_equals('%PDF invoice F1', (string)@file_get_contents($opsPrivate . '/invoices/2026/10/F1.pdf'), 'Ops files restore: a lost invoice PDF comes back');
     assert_equals('ORIGINAL-JPEG', (string)@file_get_contents($opsPrivate . '/uploads/products/shirt.jpg'), 'Ops files restore: uploads come back to the backed-up content');
     assert_equals(str_repeat('s', 64), (string)@file_get_contents($opsPrivate . '/secrets/gdpr_salt'), 'Ops files restore: the GDPR salt comes back to its configured path');
-    assert_equals(0600, fileperms($opsPrivate . '/secrets/gdpr_salt') & 0777, 'Ops files restore: the restored GDPR salt is owner-only');
+    if (PHP_OS_FAMILY !== 'Windows') {
+        assert_equals(0600, fileperms($opsPrivate . '/secrets/gdpr_salt') & 0777, 'Ops files restore: the restored GDPR salt is owner-only');
+    }
     assert_equals('%PDF invoice F2', (string)@file_get_contents($opsPrivate . '/invoices/2026/10/F2.pdf'), 'Ops files restore: live files absent from the backup are kept');
     $opsAgain = BackupService::restoreFiles($opsMeta['remote_path']);
     assert_equals([0, 3], [$opsAgain['written'], $opsAgain['unchanged']], 'Ops files restore: restoring again is a no-op without --force');
@@ -188,7 +190,10 @@ chmod($opsFPrivate . '/uploads', 0755);
 chmod($opsFPrivate . '/uploads/products', 0755);
 file_put_contents($opsFPrivate . '/invoices/2026/10/F1.pdf', '%PDF F1');
 file_put_contents($opsFPrivate . '/uploads/products/shirt.jpg', 'SHIRT');
-file_put_contents($opsFPrivate . '/uploads/products/foto 10:30.jpg', 'FOTO');
+// POSIX file semantics (':' in names, modes, symlinks, a non-searchable directory) are checked on Linux/macOS only:
+// on NTFS "foto 10:30.jpg" names an alternate data stream and chmod() only toggles read-only.
+$opsPosix = PHP_OS_FAMILY !== 'Windows';
+if ($opsPosix) file_put_contents($opsFPrivate . '/uploads/products/foto 10:30.jpg', 'FOTO');
 @mkdir($opsFPrivate . '/uploads/gallery/2026', 0755, true);
 file_put_contents($opsFPrivate . '/uploads/gallery/2026/a.jpg', 'GALLERY');
 $opsFCfg = $opsCfg;
@@ -200,8 +205,8 @@ try {
     $opsFMeta = BackupService::create(['label' => 'manual']);
 
     // ':' is legal in Linux filenames; one such upload must not abort the archive restore.
-    unlink($opsFPrivate . '/uploads/products/foto 10:30.jpg');
-    if (PHP_OS_FAMILY !== 'Windows') {
+    if ($opsPosix) {
+        unlink($opsFPrivate . '/uploads/products/foto 10:30.jpg');
         $opsColon = $opsError(static fn() => BackupService::restoreFiles($opsFMeta['remote_path']));
         assert_true($opsColon === '' && (string)@file_get_contents($opsFPrivate . '/uploads/products/foto 10:30.jpg') === 'FOTO',
             'Ops files restore: an upload named with ":" is restored on Linux' . ($opsColon !== '' ? " ({$opsColon})" : ''));
@@ -222,9 +227,15 @@ try {
     rmdir($opsFPrivate . '/uploads/gallery');
     BackupService::restoreFiles($opsFMeta['remote_path'], ['force' => true]);
     clearstatcache();
-    assert_equals(0644, fileperms($opsFPrivate . '/uploads/products/shirt.jpg') & 0777, 'Ops files restore: an overwritten file keeps its mode');
-    assert_equals(0644, fileperms($opsFPrivate . '/uploads/gallery/2026/a.jpg') & 0777, 'Ops files restore: a new file gets its directory mode without execute bits');
-    assert_equals(0755, fileperms($opsFPrivate . '/uploads/gallery/2026') & 0777, 'Ops files restore: new directories copy the mode of the existing parent');
+    if ($opsPosix) {
+        assert_equals(0644, fileperms($opsFPrivate . '/uploads/products/shirt.jpg') & 0777, 'Ops files restore: an overwritten file keeps its mode');
+        assert_equals(0644, fileperms($opsFPrivate . '/uploads/gallery/2026/a.jpg') & 0777, 'Ops files restore: a new file gets its directory mode without execute bits');
+        assert_equals(0755, fileperms($opsFPrivate . '/uploads/gallery/2026') & 0777, 'Ops files restore: new directories copy the mode of the existing parent');
+    } else {
+        assert_equals(['SHIRT', 'GALLERY'], [(string)@file_get_contents($opsFPrivate . '/uploads/products/shirt.jpg'), (string)@file_get_contents($opsFPrivate . '/uploads/gallery/2026/a.jpg')],
+            'Ops files restore: --force overwrites the differing file and restores the missing one');
+        echo "  [SKIP] Ops files restore POSIX mode preservation (Windows)\n";
+    }
     if ($opsRunAsRoot) {
         assert_equals([4321, 4322], [fileowner($opsFPrivate . '/uploads/products/shirt.jpg'), filegroup($opsFPrivate . '/uploads/products/shirt.jpg')],
             'Ops files restore (root): an overwritten file keeps its owner and group');
@@ -235,37 +246,41 @@ try {
         echo "  [SKIP] Ops files restore owner/group preservation (needs root)\n";
     }
 
-    // A symlinked directory below the configured root is refused while planning: nothing is written anywhere.
-    unlink($opsFPrivate . '/invoices/2026/10/F1.pdf');
-    unlink($opsFPrivate . '/uploads/products/shirt.jpg');
-    unlink($opsFPrivate . '/uploads/products/foto 10:30.jpg');
-    rmdir($opsFPrivate . '/uploads/products');
-    symlink($opsF . '/outside', $opsFPrivate . '/uploads/products');
-    $opsSymlinked = $opsError(static fn() => BackupService::restoreFiles($opsFMeta['remote_path'], ['force' => true]));
-    clearstatcache();
-    assert_true(str_contains($opsSymlinked, 'is a symlink') && str_contains($opsSymlinked, 'nothing was written'),
-        'Ops files restore: a symlinked directory below the configured root is refused');
-    assert_true((scandir($opsF . '/outside') ?: []) === ['.', '..'] && !file_exists($opsFPrivate . '/invoices/2026/10/F1.pdf'),
-        'Ops files restore: the refusal happens before any write (nothing outside, no other file restored)');
-    unlink($opsFPrivate . '/uploads/products');
+    if (!$opsPosix) {
+        echo "  [SKIP] Ops files restore symlinked-directory refusal and mid-way failure report (Windows)\n";
+    } else {
+        // A symlinked directory below the configured root is refused while planning: nothing is written anywhere.
+        unlink($opsFPrivate . '/invoices/2026/10/F1.pdf');
+        unlink($opsFPrivate . '/uploads/products/shirt.jpg');
+        unlink($opsFPrivate . '/uploads/products/foto 10:30.jpg');
+        rmdir($opsFPrivate . '/uploads/products');
+        symlink($opsF . '/outside', $opsFPrivate . '/uploads/products');
+        $opsSymlinked = $opsError(static fn() => BackupService::restoreFiles($opsFMeta['remote_path'], ['force' => true]));
+        clearstatcache();
+        assert_true(str_contains($opsSymlinked, 'is a symlink') && str_contains($opsSymlinked, 'nothing was written'),
+            'Ops files restore: a symlinked directory below the configured root is refused');
+        assert_true((scandir($opsF . '/outside') ?: []) === ['.', '..'] && !file_exists($opsFPrivate . '/invoices/2026/10/F1.pdf'),
+            'Ops files restore: the refusal happens before any write (nothing outside, no other file restored)');
+        unlink($opsFPrivate . '/uploads/products');
 
-    // A write that still fails mid-way names the files already written.
-    mkdir($opsFPrivate . '/uploads/products', 0755);
-    if ($opsRunAsRoot) {
-        // Root bypasses permissions: an immutable live file makes the final rename fail instead.
-        file_put_contents($opsFPrivate . '/uploads/products/shirt.jpg', 'IMMUTABLE');
-        exec('chattr +i ' . escapeshellarg($opsFPrivate . '/uploads/products/shirt.jpg') . ' 2>/dev/null', $opsOut, $opsCode);
-        $opsImmutable = $opsCode === 0 ? $opsFPrivate . '/uploads/products/shirt.jpg' : null;
-    } else {
-        chmod($opsFPrivate . '/uploads/products', 0200); // writable but not searchable: planning passes, the write fails
-        $opsImmutable = $opsFPrivate . '/uploads/products';
-    }
-    if ($opsImmutable !== null) {
-        $opsMidway = $opsError(static fn() => BackupService::restoreFiles($opsFMeta['remote_path'], ['force' => true]));
-        assert_true(str_contains($opsMidway, 'stopped at uploads/products/') && str_contains($opsMidway, 'already written: invoices/2026/10/F1.pdf'),
-            'Ops files restore: a write failing mid-way reports which files were already written' . ($opsMidway === '' ? '' : " ({$opsMidway})"));
-    } else {
-        echo "  [SKIP] Ops files restore mid-way failure report (chattr unavailable)\n";
+        // A write that still fails mid-way names the files already written.
+        mkdir($opsFPrivate . '/uploads/products', 0755);
+        if ($opsRunAsRoot) {
+            // Root bypasses permissions: an immutable live file makes the final rename fail instead.
+            file_put_contents($opsFPrivate . '/uploads/products/shirt.jpg', 'IMMUTABLE');
+            exec('chattr +i ' . escapeshellarg($opsFPrivate . '/uploads/products/shirt.jpg') . ' 2>/dev/null', $opsOut, $opsCode);
+            $opsImmutable = $opsCode === 0 ? $opsFPrivate . '/uploads/products/shirt.jpg' : null;
+        } else {
+            chmod($opsFPrivate . '/uploads/products', 0200); // writable but not searchable: planning passes, the write fails
+            $opsImmutable = $opsFPrivate . '/uploads/products';
+        }
+        if ($opsImmutable !== null) {
+            $opsMidway = $opsError(static fn() => BackupService::restoreFiles($opsFMeta['remote_path'], ['force' => true]));
+            assert_true(str_contains($opsMidway, 'stopped at uploads/products/') && str_contains($opsMidway, 'already written: invoices/2026/10/F1.pdf'),
+                'Ops files restore: a write failing mid-way reports which files were already written' . ($opsMidway === '' ? '' : " ({$opsMidway})"));
+        } else {
+            echo "  [SKIP] Ops files restore mid-way failure report (chattr unavailable)\n";
+        }
     }
 } catch (Throwable $opsFailure) {
     assert_true(false, 'Ops files restore follow-up (' . $opsFailure->getMessage() . ')');
@@ -558,7 +573,9 @@ if (!$opsMysqlEnabled) {
             'Ops MySQL live: when the re-import fails too, the error names the rollback dump to import');
         assert_true($opsKept !== '' && is_file($opsKept) && str_starts_with($opsKept, $opsRecoveryDir . '/'),
             'Ops MySQL live: that rollback dump still exists, in the durable private recovery directory');
-        assert_equals(0600, $opsKept !== '' ? (fileperms($opsKept) & 0777) : null, 'Ops MySQL live: the kept rollback dump is owner-only');
+        if (PHP_OS_FAMILY !== 'Windows') {
+            assert_equals(0600, $opsKept !== '' ? (fileperms($opsKept) & 0777) : null, 'Ops MySQL live: the kept rollback dump is owner-only');
+        }
         assert_equals(4, $opsKept !== '' ? (MysqlUpdateDatabaseBackup::countDumpRows($opsKept)['orders'] ?? null) : null, 'Ops MySQL live: the kept dump holds the pre-restore live rows');
         $opsManualImport($opsKept);
         assert_true($opsDrifted(), 'Ops MySQL live: importing the kept rollback dump by hand brings the pre-restore database back');

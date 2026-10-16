@@ -115,9 +115,11 @@ class BackupService
     public static function mysqlBinary(string $configured, string $default, string $mariadbName, ?string $path = null): string
     {
         if ($configured !== $default) return $configured;
-        $onPath = static function (string $binary) use ($path): bool {
+        // Windows executables carry the .exe extension (is_executable() goes by it).
+        $suffix = DIRECTORY_SEPARATOR === '\\' ? '.exe' : '';
+        $onPath = static function (string $binary) use ($path, $suffix): bool {
             foreach (explode(PATH_SEPARATOR, $path ?? (string)getenv('PATH')) as $dir) {
-                if ($dir !== '' && is_file($dir . '/' . $binary) && is_executable($dir . '/' . $binary)) return true;
+                if ($dir !== '' && is_file($dir . '/' . $binary . $suffix) && is_executable($dir . '/' . $binary . $suffix)) return true;
             }
             return false;
         };

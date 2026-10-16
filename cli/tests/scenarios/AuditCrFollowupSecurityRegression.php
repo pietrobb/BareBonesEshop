@@ -208,6 +208,8 @@ PHP);
     assert_equals(0, (int)($r['customer_id'] ?? -1), 'CR follow-up customer login: an IP that hammered the account is throttled on it');
     $r = $crsCustomerLogin('198.51.100.11');
     assert_true(($r['customer_id'] ?? 0) > 0, 'CR follow-up customer login: attempts from other IPs never lock the owner out (' . json_encode($r) . ')');
+    // Release every handle on rate.sqlite: Windows cannot delete an open file in the cleanup below.
+    $crsSeed = null;
     $crsRate = null;
 
     // 4. LogMail wrote whole emails (reset/verification/download tokens) to logs/ inside the app root.

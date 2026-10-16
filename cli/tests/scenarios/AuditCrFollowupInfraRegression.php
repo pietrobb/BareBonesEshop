@@ -99,7 +99,7 @@ if ($crfSuiteCopied) {
 // 2. Long worker jobs renew their lease around the slow external step (outside DB transactions).
 $crfWorker = (string)file_get_contents(TEST_CLI_DIR . '/worker.php');
 foreach (['handleSearchReindex', 'handlePaymentRefund', 'handleErpOrderPush', 'handleErpOrderUpdate', 'handleCleanup', 'handleImageResize', 'handleInvoiceIssue'] as $crfHandler) {
-    preg_match('/function ' . $crfHandler . '\(.*?\n}\n/s', $crfWorker, $crfBody);
+    preg_match('/function ' . $crfHandler . '\(.*?\R}\R/s', $crfWorker, $crfBody);
     assert_true(str_contains($crfBody[0] ?? '', 'JobQueue::heartbeat('), "CR follow-up worker: {$crfHandler} renews its job lease");
 }
 
@@ -184,8 +184,9 @@ $crfBin = $crfRoot . '/bin';
 mkdir($crfBin . '/mariadb-only', 0700, true);
 mkdir($crfBin . '/both', 0700, true);
 foreach (['mariadb-only/mariadb-dump', 'mariadb-only/mariadb', 'both/mysqldump', 'both/mariadb-dump'] as $crfTool) {
-    file_put_contents($crfBin . '/' . $crfTool, "#!/bin/sh\n");
-    chmod($crfBin . '/' . $crfTool, 0755);
+    $crfToolFile = $crfBin . '/' . $crfTool . (PHP_OS_FAMILY === 'Windows' ? '.exe' : '');
+    file_put_contents($crfToolFile, "#!/bin/sh\n");
+    chmod($crfToolFile, 0755);
 }
 assert_equals('mariadb-dump', BackupService::mysqlBinary('mysqldump', 'mysqldump', 'mariadb-dump', $crfBin . '/mariadb-only'), 'CR follow-up backup: mysqldump falls back to mariadb-dump when only that is on PATH');
 assert_equals('mariadb', BackupService::mysqlBinary('mysql', 'mysql', 'mariadb', $crfBin . '/mariadb-only'), 'CR follow-up backup: mysql client falls back to mariadb');
