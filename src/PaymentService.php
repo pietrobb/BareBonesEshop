@@ -81,6 +81,17 @@ class PaymentService {
         return null;
     }
 
+    /**
+     * Fee checkout charges for a quoted method. Under reverse charge or export ($netOfDomesticVat) the fixed part
+     * loses the seller's domestic VAT like shipping does; the percentage part is already taken of the net amount.
+     */
+    public static function chargedFee(array $quote, bool $netOfDomesticVat, string $sellerCountry, ?string $taxProviderCode = null): int {
+        $fee = max(0, (int)($quote['fee'] ?? 0));
+        $fixedFee = min($fee, max(0, (int)($quote['fixed_fee'] ?? $fee)));
+        if (!$netOfDomesticVat || $fixedFee === 0) return $fee;
+        return $fee - $fixedFee + Cart::netOfDomesticVat($fixedFee, $sellerCountry, 'standard', $taxProviderCode);
+    }
+
     /** Cash on delivery is a method's service type, not its (renamable) code. */
     public static function isCashOnDelivery(string $methodCode): bool {
         if (!self::hasMethodTables()) return $methodCode === 'cod';
@@ -426,7 +437,9 @@ class PaymentService {
         if ($amount <= 0) return [];
         if ($paymentId === '') {
             // Offline money (bank transfer, COD) has no provider payment to refund: the merchant returns it by hand.
-            self::flagManualRefundWithin($order, $amount, $reason);
+            // A refund already requested returns its own amount, so only the rest is flagged.
+            $manual = $amount - self::pendingRefundAmount($order);
+            if ($manual > 0) self::flagManualRefundWithin($order, $manual, $reason);
             return [];
         }
         $from = (string)($order['payment_status'] ?? '');
@@ -442,6 +455,34 @@ class PaymentService {
             'amount' => $amount,
             'idempotency_key' => 'order_refund_' . $orderId,
         ], 1]];
+    }
+
+    /** The refund in flight: requestRefund() allows one at a time, so it is the latest request while the payment is refund_pending. */
+    private static function pendingRefundAmount(array $order): int {
+        if ((string)($order['payment_status'] ?? '') !== 'refund_pending') return 0;
+        $stmt = Db::get()->prepare("SELECT amount FROM payment_transactions WHERE order_id = :order AND store_id = :store AND status = 'refund_pending' ORDER BY id DESC LIMIT 1");
+        $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
+        return max(0, (int)$stmt->fetchColumn());
+    }
+
+    /**
+     * Money an admin recorded by hand on a cancelled order. No provider session captured it, so no
+     * gateway refund is attempted: the recorded amount is flagged for a manual refund and a critical
+     * incident raised. Captures reported by a gateway go through settleCapture().
+     */
+    public static function settleAdminPaymentOnCancelled(int $orderId, int $amount, string $note): void {
+        $order = Orders::byId($orderId);
+        if (!$order || (string)$order['status'] !== 'cancelled' || $amount <= 0) return;
+        $db = Db::get();
+        $db->beginTransaction();
+        try {
+            self::flagManualRefundWithin($order, $amount, 'payment.captured_after_cancel: ' . $note);
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+        IncidentMonitor::report('payment.captured_after_cancel', 'payment', 'critical', ['order_id' => $orderId]);
     }
 
     /**
@@ -748,10 +789,11 @@ class PaymentService {
     }
 
     private static function methodRowToQuote(array $row, int $amount, string $currency): array {
-        $fee = (int)($row['fixed_fee'] ?? 0);
+        $fixedFee = (int)($row['fixed_fee'] ?? 0);
+        $fee = $fixedFee;
         $bps = (int)($row['percent_fee_bps'] ?? 0);
         if ($bps > 0) $fee += (int)ceil($amount * $bps / 10000);
-        if (!empty($row['free_above']) && $amount >= (int)$row['free_above']) $fee = 0;
+        if (!empty($row['free_above']) && $amount >= (int)$row['free_above']) $fee = $fixedFee = 0;
 
         return [
             'code' => (string)$row['code'],
@@ -760,6 +802,7 @@ class PaymentService {
             'description' => (string)($row['description'] ?? ''),
             'service_type' => (string)($row['service_type'] ?? 'offline'),
             'fee' => $fee,
+            'fixed_fee' => $fixedFee,
             'currency' => $currency,
             'requires_online' => !empty($row['requires_online']),
             'payment_terms_days' => isset($row['payment_terms_days']) ? (int)$row['payment_terms_days'] : null,

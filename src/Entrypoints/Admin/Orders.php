@@ -684,8 +684,9 @@ function handleOrderPaymentTransition(): void {
             'note' => $note,
         ]);
         if ($newStatus === 'paid' && (string)$order['status'] === 'cancelled') {
-            // Money for a cancelled order: settleCapture keeps the order cancelled, refunds or flags it and raises an incident.
-            PaymentService::settleCapture($orderId, 'Admin payment: ' . $note);
+            // Money recorded by hand for a cancelled order: no gateway session captured it, so the recorded
+            // amount (the order total when none was entered) is flagged for a manual refund with an incident.
+            PaymentService::settleAdminPaymentOnCancelled($orderId, $amount > 0 ? $amount : (int)$order['total'], 'Admin payment: ' . $note);
             setFlash('err', I18n::t('admin.order.msg.paid_on_cancelled'));
         } else {
             setFlash('ok', I18n::format('admin.order.msg.payment_changed', ['status' => $newStatus]));

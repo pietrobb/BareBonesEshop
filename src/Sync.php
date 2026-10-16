@@ -90,7 +90,10 @@ class Sync {
             }
         }
 
-        Cache::set('last_erp_sync', date('c'));
+        // A skipped product would never be pulled again past a newer watermark: keep the previous one so the next run retries it.
+        if ($result['products_skipped'] === 0) {
+            Cache::set('last_erp_sync', date('c'));
+        }
 
         // 5. Invalidate cache for changed products
         if ($result['products_updated'] > 0 || $result['stock_updated'] > 0) {

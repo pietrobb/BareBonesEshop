@@ -23,9 +23,10 @@ $pdo->exec("INSERT INTO shipping_rates (carrier, country, zone_code, method_code
     VALUES ('gls', '', 'domestic', 'crfship', 0, 999999, 400, 0, 1), ('gls', '', 'near_eu', 'crfship', 0, 999999, 400, 0, 1)");
 $pdo->exec("INSERT INTO payment_methods (code, provider, name, description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, requires_online, active, sort_order)
     VALUES ('crfpct', 'manual', 'CRF percent', '', 'offline', 0, 0, 0, 1000, NULL, 0, 1, 1), ('crffix', 'manual', 'CRF fixed', '', 'offline', 0, 0, 1230, 0, NULL, 0, 1, 2)");
-$pdo->exec("INSERT INTO payment_method_countries (method_code, country) VALUES ('crfpct', 'SK'), ('crffix', 'SK'), ('crffix', 'DE')");
+$pdo->exec("INSERT INTO payment_method_countries (method_code, country) VALUES ('crfpct', 'SK'), ('crfpct', 'DE'), ('crffix', 'SK'), ('crffix', 'DE')");
 $pdo->exec("INSERT INTO promotions (store_id, code, name, scope, coupon_code, priority, stacking, conditions, actions, active)
     VALUES ('default', 'CRFAUTO', 'CRF automatic 15', 'cart', NULL, 10, 'stack', '{}', '{\"type\":\"discount_fixed\",\"amount\":1500}', 1)");
+$crfServer = array_intersect_key($_SERVER, array_flip(['REQUEST_METHOD', 'HTTP_HOST', 'REMOTE_ADDR']));
 $crfCheckout = static function(int $qty, array $extra = []) use ($pdo): array {
     Security::setRateDbForTesting(new PDO('sqlite::memory:'));
     Cart::clear();
@@ -72,6 +73,39 @@ try {
     [$crfResult, , $crfMoney] = $crfCheckout(2, ['coupon_code' => 'CRFEXCL']);
     assert_equals(['subtotal' => 6000, 'discount_amount' => 3000, 'shipping_cost' => 400, 'payment_fee' => 340, 'total' => 3740], $crfMoney,
         'CR follow-up coupon: an exclusive coupon replaces the promotion and is priced on the full subtotal (' . ($crfResult['error'] ?? 'ok') . ')');
+
+    // 4b. The coupon check of the storefront API prices the coupon like checkout: the cart's automatic promotion
+    //     first, so a stacking coupon's minimum order sees 45 € and its percentage applies to 45 €.
+    $crfValidate = static function(string $code): array {
+        Cart::clear();
+        Cart::add(9781, null, 2);
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_SERVER['HTTP_HOST'] = 'localhost';
+        $_SERVER['REMOTE_ADDR'] = '127.0.9.78';
+        $_SESSION['csrf_token'] = 'crf-checkout';
+        $_POST = ['csrf_token' => 'crf-checkout', 'code' => $code, 'subtotal' => '6000', 'email' => 'crf-buyer@example.com'];
+        $result = apiValidateCoupon();
+        $_POST = [];
+        return $result;
+    };
+    assert_equals([false, 'Minimum order not met'], [($crfV = $crfValidate('CRFMIN'))['valid'] ?? null, $crfV['error'] ?? null],
+        'CR follow-up coupon API: the minimum order is checked after the automatic promotion, as checkout does');
+    assert_equals([true, 450], [($crfV = $crfValidate('CRF10'))['valid'] ?? null, $crfV['discount'] ?? null],
+        'CR follow-up coupon API: a stacking coupon is priced on the subtotal the promotion leaves');
+
+    // 4c. Shipping rates preview: goods of 0 (a coupon covering the cart) are below the free-shipping threshold,
+    //     not a missing amount replaced by the full cart subtotal.
+    $_SERVER['REQUEST_METHOD'] = 'GET';
+    $_GET = ['country' => 'SK', 'subtotal' => '0'];
+    $crfPreviewRates = array_column(apiShippingRates()['methods'] ?? [], 'price', 'method_code');
+    assert_equals(400, $crfPreviewRates['crfship'] ?? null, 'CR follow-up shipping preview: goods of 0 € are charged shipping, as checkout charges it');
+    // An automatic free-shipping promotion zeroes the previewed rate like checkout zeroes the charged one.
+    Pricing::setConfig(['cart_rules' => array_merge($crfRules['cart_rules'], [['type' => 'automatic', 'active' => true, 'name' => 'CRF free shipping', 'action' => 'free_shipping']])]);
+    $crfPreviewRates = array_column(apiShippingRates()['methods'] ?? [], 'price', 'method_code');
+    Pricing::setConfig($crfRules);
+    assert_equals(0, $crfPreviewRates['crfship'] ?? null, 'CR follow-up shipping preview: a free-shipping promotion shows the rate checkout charges (0)');
+    $_GET = [];
+    Cart::clear();
 
     // 5. The HTML checkout summary (real renderCheckout, child process on this database) shows what order 2 charged.
     $crfRoot = test_fixture_path('cr-followup-checkout');
@@ -129,6 +163,12 @@ PHP);
         'CR follow-up fee VAT: reverse charge payment fee is charged without Slovak VAT, like shipping');
     assert_equals(($crfMoney['subtotal'] ?? 0) + ($crfMoney['shipping_cost'] ?? 0) + $crfNetFee, $crfMoney['total'] ?? null,
         'CR follow-up fee VAT: reverse charge total = net goods + net shipping + net payment fee');
+    // A percentage fee is taken of the net goods and net shipping already, so it loses no VAT a second time.
+    [$crfResult, , $crfMoney] = $crfCheckout(1, ['country' => 'DE', 'company' => 'CRF Kunde GmbH', 'vat_id' => 'DE811907980', 'payment_method' => 'crfpct', 'zip' => '10115', 'city' => 'Berlin']);
+    $crfNetBase = ($crfMoney['subtotal'] ?? 0) + ($crfMoney['shipping_cost'] ?? 0);
+    assert_equals([Cart::netOfDomesticVat(3000, 'SK'), Cart::netOfDomesticVat(400, 'SK'), (int)ceil($crfNetBase / 10), $crfNetBase + (int)ceil($crfNetBase / 10)],
+        [$crfMoney['subtotal'] ?? null, $crfMoney['shipping_cost'] ?? null, $crfMoney['payment_fee'] ?? null, $crfMoney['total'] ?? null],
+        'CR follow-up fee VAT: a 10 % fee under reverse charge is 10 % of the net goods and shipping (' . ($crfResult['error'] ?? 'ok') . ')');
 
     // 7. Every cart path caps a line at Cart::MAX_QTY (only the JSON API capped before).
     Cart::clear();
@@ -165,11 +205,36 @@ PHP);
         'CR follow-up RMA: an exchange beyond the received quantity is refused inside its transaction (' . ($crfExchangeOver ?? 'accepted') . ')');
 } finally {
     $_POST = [];
+    $_GET = [];
     Cart::clear();
     Pricing::setConfig($crfPricing ?? []);
     $pdo->exec("DELETE FROM promotions WHERE code = 'CRFAUTO'");
     if ($crfActivePromotions) $pdo->exec("UPDATE promotions SET active = 1 WHERE id IN (" . implode(',', array_map('intval', $crfActivePromotions)) . ")");
-    $pdo->exec("UPDATE payment_methods SET active = 0 WHERE code IN ('crfpct', 'crffix')");
-    $pdo->exec("UPDATE shipping_methods SET active = 0 WHERE code = 'crfship'");
+    // Orders placed here, with every row that refers to them or to their RMAs, then the catalog fixtures.
+    try {
+        $crfOrderIds = implode(',', array_map('intval', $pdo->query("SELECT id FROM orders WHERE customer_email = 'crf-buyer@example.com'")->fetchAll(PDO::FETCH_COLUMN)));
+        if ($crfOrderIds !== '') {
+            $crfRmaIds = implode(',', array_map('intval', $pdo->query("SELECT id FROM rma_requests WHERE order_id IN ({$crfOrderIds})")->fetchAll(PDO::FETCH_COLUMN)));
+            foreach ($pdo->query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('orders', 'rma_requests')")->fetchAll(PDO::FETCH_COLUMN) as $crfTable) {
+                $crfColumns = array_column($pdo->query('PRAGMA table_info("' . $crfTable . '")')->fetchAll(PDO::FETCH_ASSOC), 'name');
+                if ($crfRmaIds !== '' && in_array('rma_id', $crfColumns, true)) $pdo->exec("DELETE FROM \"{$crfTable}\" WHERE rma_id IN ({$crfRmaIds})");
+                if (in_array('order_id', $crfColumns, true)) $pdo->exec("DELETE FROM \"{$crfTable}\" WHERE order_id IN ({$crfOrderIds})");
+            }
+            $pdo->exec("DELETE FROM rma_requests WHERE order_id IN ({$crfOrderIds})");
+            $pdo->exec("DELETE FROM orders WHERE id IN ({$crfOrderIds})");
+        }
+    } catch (Throwable $e) {
+        // Best effort: the fixtures below are removed either way.
+    }
+    $pdo->exec("DELETE FROM products WHERE id = 9781");
+    $pdo->exec("DELETE FROM shipping_rates WHERE method_code = 'crfship'");
+    $pdo->exec("DELETE FROM shipping_methods WHERE code = 'crfship'");
+    $pdo->exec("DELETE FROM payment_method_countries WHERE method_code IN ('crfpct', 'crffix')");
+    $pdo->exec("DELETE FROM payment_methods WHERE code IN ('crfpct', 'crffix')");
+    $pdo->exec("DELETE FROM vat_id_cache WHERE vat_id = 'DE811907980'");
+    foreach (['REQUEST_METHOD', 'HTTP_HOST', 'REMOTE_ADDR'] as $crfKey) {
+        if (array_key_exists($crfKey, $crfServer)) $_SERVER[$crfKey] = $crfServer[$crfKey];
+        else unset($_SERVER[$crfKey]);
+    }
     Security::setRateDbForTesting(new PDO('sqlite::memory:'));
 }

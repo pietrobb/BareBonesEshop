@@ -95,6 +95,23 @@ try {
         assert_equals(1, $crfpIncidents('payment.order_refund_manual', $crfp3), "CRFP 3 {$crfp3Method}: the flag is raised once per order");
     }
 
+    // 7. An admin recording a payment on a cancelled online order: its gateway session captured nothing,
+    // so no provider refund is queued; the amount the admin recorded is flagged for a manual refund.
+    $crfp7 = $crfpOrder('cancelled', 'cancelled', 'mock', 'mock_crfp_7');
+    PaymentService::transitionPayment($crfp7, 'paid', 'admin.paid', 700, 'crfp_7_paid');
+    PaymentService::settleAdminPaymentOnCancelled($crfp7, 700, 'CRFP admin paid');
+    assert_equals(['cancelled', 'paid'], $crfpState($crfp7), 'CRFP 7: an admin payment on a cancelled online order keeps the order cancelled');
+    assert_equals([[], [700]], [$crfpLedger($crfp7, 'refund_pending'), $crfpLedger($crfp7, 'refund_manual_required')],
+        'CRFP 7: no provider refund is requested; the recorded amount is flagged for a manual refund');
+    assert_equals([1, 1], [$crfpIncidents('payment.captured_after_cancel', $crfp7), $crfpIncidents('payment.order_refund_manual', $crfp7)],
+        'CRFP 7: the captured-after-cancel and manual-refund incidents are raised');
+
+    // 8. Cancelling an offline order with a partial refund in flight flags only what that refund does not return.
+    $crfp8 = $crfpOrder('paid', 'paid', 'bank_transfer', '', 2500);
+    PaymentService::requestRefund($crfp8, 1000, 'crfp_8_partial_refund');
+    OrderWorkflow::transition($crfp8, 'cancelled', 'CRFP cancel with a pending refund');
+    assert_equals([1500], $crfpLedger($crfp8, 'refund_manual_required'), 'CRFP 8: the manual refund flag leaves out the pending partial refund');
+
     // 4. A second capture on a paid order: a redelivery of the same payment stays quiet, a payment
     // under another provider reference is money taken twice and raises an incident.
     $crfp4 = $crfpOrder('pending', 'pending', 'mock', 'mock_crfp_4');
@@ -139,12 +156,13 @@ if (!class_exists('CrfpSyncAdapter', false)) {
     final class CrfpSyncAdapter implements IntegrationAdapter {
         public array $pushed = [];
         public int $categoryId = 0;
+        public bool $foreign = true;
         public function pushOrder(array $order): string { $this->pushed[] = (int)$order['id']; return 'crfp-erp-' . $order['id']; }
         public function pullOrderStatus(string $externalId): string { return 'crfp-status'; }
         public function pushCustomer(array $customer): string { return ''; }
         public function healthCheck(): bool { return true; }
         public function pullProducts(?\DateTimeInterface $since = null): iterable {
-            yield ['sku' => 'CRFP-FOREIGN', 'slug' => 'crfp-foreign', 'name' => 'Foreign', 'category_id' => $this->categoryId, 'price' => 1, 'compare_price' => null, 'stock' => 0];
+            if ($this->foreign) yield ['sku' => 'CRFP-FOREIGN', 'slug' => 'crfp-foreign', 'name' => 'Foreign', 'category_id' => $this->categoryId, 'price' => 1, 'compare_price' => null, 'stock' => 0];
             yield ['sku' => 'CRFP-OWN', 'slug' => 'crfp-own', 'name' => 'Own', 'category_id' => $this->categoryId, 'price' => 100, 'compare_price' => null, 'stock' => 3];
         }
         public function pushProduct(array $product): void {}
@@ -157,12 +175,17 @@ $crfpSyncAdapter->categoryId = (int)$pdo->query("SELECT id FROM categories WHERE
 $crfpAdapters->setValue(null, ['integration' => $crfpSyncAdapter] + $crfpSavedAdapters);
 $pdo->beginTransaction();
 try {
+    Cache::set('last_erp_sync', '2026-01-02T03:04:05+00:00');
     $crfp6Order = $crfpOrder('paid', 'paid', 'mock', 'mock_crfp_6');
     $pdo->prepare("INSERT INTO products (sku, slug, name, category_id, price, stock, store_id) VALUES ('CRFP-FOREIGN', 'crfp-foreign-other', 'Other catalog', ?, 500, 1, 'crfp-other-catalog')")->execute([$crfpSyncAdapter->categoryId]);
     $crfp6 = Sync::run();
     assert_equals([1, 1], [$crfp6['products_updated'] ?? null, $crfp6['products_skipped'] ?? null], 'CRFP 6: the foreign SKU is skipped and counted, the own product is synced');
     assert_true(in_array($crfp6Order, $crfpSyncAdapter->pushed, true) && ($crfp6['orders_pushed'] ?? 0) >= 1, 'CRFP 6: orders are still pushed after a refused product');
-    assert_true(Cache::get('last_erp_sync') !== $crfpLastSync, 'CRFP 6: the sync run completes and records its watermark');
+    assert_equals('2026-01-02T03:04:05+00:00', Cache::get('last_erp_sync'), 'CRFP 6: a run that skipped a product keeps the previous watermark so the product is pulled again');
+    $crfpSyncAdapter->foreign = false;
+    $crfp6Clean = Sync::run();
+    assert_equals(0, $crfp6Clean['products_skipped'] ?? null, 'CRFP 6: a run without refused products skips nothing');
+    assert_true(Cache::get('last_erp_sync') !== '2026-01-02T03:04:05+00:00', 'CRFP 6: a clean sync run advances its watermark');
     $crfp6Foreign = $pdo->query("SELECT store_id, name FROM products WHERE sku = 'CRFP-FOREIGN'")->fetch(PDO::FETCH_ASSOC);
     assert_equals(['crfp-other-catalog', 'Other catalog'], [$crfp6Foreign['store_id'], $crfp6Foreign['name']], 'CRFP 6: the other catalog product is untouched');
 } catch (Throwable $e) {

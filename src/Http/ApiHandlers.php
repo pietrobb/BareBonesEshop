@@ -130,15 +130,26 @@ function apiValidateCoupon(): array {
 
     if (!$code) return ['valid' => false, 'error' => 'Coupon code is required'];
 
-    $result = Pricing::applyCoupon($code, $subtotal, $email);
+    // Same inputs and rules as checkout: the cart's available goods, its automatic promotions, then the coupon.
+    $items = array_values(array_filter(Cart::enriched()['items'] ?? [], static fn(array $item): bool => $item['available'] ?? true));
+    if ($items) $subtotal = (int)array_sum(array_column($items, 'total'));
+    $promotionDiscount = 0;
+    foreach (Pricing::autoCartRules($subtotal, $items, !empty($_SESSION['customer_id']) ? (int)$_SESSION['customer_id'] : null) as $rule) {
+        $promotionDiscount += max(0, (int)($rule['discount'] ?? 0));
+    }
+    $result = CheckoutService::couponFor($code, $subtotal, $promotionDiscount, $email);
     if ($result['discount'] <= 0) {
         return ['valid' => false, 'error' => $result['error'] ?? 'Invalid coupon'];
+    }
+    $combined = Pricing::combineDiscounts((int)$result['discount'], (string)($result['stacking'] ?? 'stack'), $promotionDiscount);
+    if ($combined['coupon'] === 0) {
+        return ['valid' => false, 'error' => 'Coupon cannot be combined with the current promotion'];
     }
 
     return [
         'valid'    => true,
         'code'     => $code,
-        'discount' => $result['discount'],
+        'discount' => $combined['coupon'],
         'name'     => $result['name'] ?? $code,
     ];
 }
@@ -356,6 +367,8 @@ function apiShippingRates(): array {
     if (!preg_match('/^[A-Z]{2}$/', $country)) {
         return ['error' => 'Invalid country'];
     }
+    // A goods amount of 0 (a coupon covering the whole cart) is a real amount, not a missing one.
+    $subtotalGiven = isset($_GET['subtotal']) && $_GET['subtotal'] !== '';
     $subtotal = Security::int($_GET['subtotal'] ?? 0);
     $cart = Cart::enriched();
     if (cartIsDigitalOnly($cart['items'] ?? [])) {
@@ -374,13 +387,18 @@ function apiShippingRates(): array {
     if ($weightG <= 0) {
         $cart = Cart::enriched();
         $metrics = shippingCartMetrics($cart['items'] ?? []);
-        $subtotal = $subtotal > 0 ? $subtotal : (int)($cart['subtotal'] ?? 0);
+        $subtotal = $subtotalGiven ? $subtotal : (int)($cart['subtotal'] ?? 0);
         $weightG = $metrics['weight_g'];
         $volumeCm3 = $metrics['volume_cm3'];
     }
 
     $physicalQty = ShippingService::physicalQuantity($cart['items'] ?? []);
     $methods = ShippingService::calculateRates($country, $weightG, $subtotal, $cod, $volumeCm3, $physicalQty);
+    // An automatic free-shipping promotion zeroes the delivery checkout charges, so the preview shows the same.
+    $customerId = (int)($_SESSION['customer_id'] ?? 0);
+    if (CheckoutService::discountPreview('', (int)($cart['subtotal'] ?? 0), null, $cart['items'] ?? [], $customerId ?: null)['free_shipping']) {
+        $methods = array_map(static fn(array $method): array => ['price' => 0] + $method, $methods);
+    }
     $unitsToFree = ShippingService::unitsToFreeShipping($methods, $physicalQty);
     return [
         'country' => $country,
@@ -413,7 +431,8 @@ function apiPaymentMethods(): array {
     $digitalOnly = cartIsDigitalOnly($cart['items'] ?? []);
     if ($digitalOnly) {
         $shippingMethod = 'digital';
-        $amount = (int)($cart['subtotal'] ?? $amount);
+        // The goods amount after discounts is respected (0 = a coupon covers the cart); only a missing one falls back to the cart.
+        if (!isset($_GET['amount']) || $_GET['amount'] === '') $amount = (int)($cart['subtotal'] ?? 0);
     }
     $customerId = (int)($_SESSION['customer_id'] ?? 0);
     $methods = $digitalOnly && $amount === 0
@@ -666,11 +685,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         http_response_code(422);
         return ['success' => false, 'error' => 'Synthetic checkout requires an online payment method'];
     }
-    $paymentFee = (int)$selectedPayment['fee'];
-    // Payment fees include domestic VAT like shipping rates; zero-rated sales are charged them net.
-    if ($paymentFee > 0 && Cart::chargesNetOfDomesticVat($vatScenario)) {
-        $paymentFee = Cart::netOfDomesticVat($paymentFee, $sellerCountry, 'standard', $taxProviderCode);
-    }
+    $paymentFee = PaymentService::chargedFee($selectedPayment, Cart::chargesNetOfDomesticVat($vatScenario), $sellerCountry, $taxProviderCode);
     $providerCodes = [
         'tax' => $taxProviderCode,
         'payment' => (string)$selectedPayment['provider'],
