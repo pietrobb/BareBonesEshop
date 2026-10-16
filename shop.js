@@ -474,7 +474,7 @@ const Shop = {
                     msg.hidden = false;
                     msg.textContent = 'Recenziu sa nepodarilo odoslať (' + this.esc(json.error || 'error') + ').';
                 }
-            } catch (err) {
+            } catch {
                 if (msg) { msg.hidden = false; msg.textContent = 'Chyba siete.'; }
             } finally {
                 if (btn) btn.disabled = false;
@@ -525,7 +525,7 @@ const Shop = {
                 body: JSON.stringify({ product_id: productId }),
             });
             return await res.json();
-        } catch (err) {
+        } catch {
             this.showNotification('Chyba siete.');
             return null;
         }
@@ -566,7 +566,7 @@ const CartStore = {
     save(cart) {
         try {
             localStorage.setItem(this.KEY, JSON.stringify(cart));
-        } catch (e) { /* localStorage full or blocked */ }
+        } catch { /* localStorage full or blocked */ }
     },
 
     load() {

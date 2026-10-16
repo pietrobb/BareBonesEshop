@@ -415,7 +415,7 @@ class Products {
             foreach ($activeFilters as $filterName => $filterValues) {
                 if ($filterName === $excludedFilter || empty($filterValues)) continue;
                 $placeholders = [];
-                foreach ($filterValues as $valueIndex => $filterValue) {
+                foreach (array_values((array)$filterValues) as $valueIndex => $filterValue) {
                     $key = ":fv_{$filterIndex}_{$valueIndex}";
                     $placeholders[] = $key;
                     $params[$key] = $filterValue;
@@ -521,7 +521,8 @@ class Products {
         foreach ($specFilters as $criterionName => $values) {
             if (empty($values)) continue;
             $placeholders = [];
-            foreach ($values as $i => $v) {
+            // Value keys come from the query string: never paste them into placeholder names.
+            foreach (array_values((array)$values) as $i => $v) {
                 $key = ":sv_{$filterIdx}_{$i}";
                 $placeholders[] = $key;
                 $params[$key] = $v;

@@ -61,6 +61,26 @@ class JobQueue {
     public static function supportsConcurrentWorkers(): bool { return self::backend() !== null; }
 
     /**
+     * Single-worker lock for the file backend. The file is opened without truncation and only
+     * the lock holder rewrites it, so a second worker that loses the race cannot wipe the
+     * running worker's PID. Returns the held handle, or null when another worker holds it.
+     * @return resource|null
+     */
+    public static function acquireWorkerLock(string $lockFile) {
+        $lock = @fopen($lockFile, 'c+');
+        if (!is_resource($lock)) return null;
+        if (!flock($lock, LOCK_EX | LOCK_NB)) {
+            fclose($lock);
+            return null;
+        }
+        ftruncate($lock, 0);
+        rewind($lock);
+        fwrite($lock, (string)getmypid());
+        fflush($lock);
+        return $lock;
+    }
+
+    /**
      * Push a new job to the queue
      */
     public static function push(string $type, array $payload, int $priority = 5): string {

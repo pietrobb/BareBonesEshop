@@ -2,6 +2,7 @@
 /** Database-backed admin identities, MFA, store grants, devices, and revocable sessions. */
 class AdminIdentity {
     private const ROLES = ['owner', 'manager', 'editor', 'fulfillment', 'viewer'];
+    private static ?string $dummyPasswordHash = null;
 
     public static function available(): bool {
         return self::tableExists('admin_accounts');
@@ -123,8 +124,7 @@ class AdminIdentity {
         $stmt = Db::get()->prepare('SELECT * FROM admin_accounts WHERE username=:username LIMIT 1');
         $stmt->execute([':username' => $username]);
         $account = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
-        $dummyHash = '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi.';
-        $validPassword = password_verify($password, (string)($account['password_hash'] ?? $dummyHash));
+        $validPassword = password_verify($password, (string)($account['password_hash'] ?? self::dummyPasswordHash()));
         $locked = $account && $account['locked_until'] !== null && strtotime((string)$account['locked_until'] . ' UTC') > time();
         if (!$account || $account['status'] !== 'active' || $locked || !$validPassword) {
             // Wrong passwords must not lock the account: anyone could lock the
@@ -306,6 +306,12 @@ class AdminIdentity {
         $stmt = Db::get()->prepare('UPDATE admin_recovery_codes SET used_at=:used WHERE account_id=:account AND code_hash=:hash AND used_at IS NULL');
         $stmt->execute([':used' => gmdate('Y-m-d H:i:s'), ':account' => $accountId, ':hash' => $hash]);
         return $stmt->rowCount() === 1;
+    }
+
+    // Unknown usernames are verified against a hash made exactly like real ones (PASSWORD_DEFAULT,
+    // cost 12 on PHP 8.4+), so the response time does not reveal whether an account exists.
+    private static function dummyPasswordHash(): string {
+        return self::$dummyPasswordHash ??= password_hash(bin2hex(random_bytes(16)), PASSWORD_DEFAULT);
     }
 
     private static function recordFailure(int $accountId): void {

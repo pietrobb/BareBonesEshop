@@ -21,12 +21,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: true
 
       - name: Setup PHP ${{ matrix.php }}
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: ${{ matrix.php }}
           extensions: pdo, pdo_sqlite, mbstring, json, dom, libxml, sodium
@@ -64,12 +64,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: true
 
       - name: Setup PHP 8.3
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.3'
           extensions: pdo, pdo_sqlite, mbstring, json, dom, libxml, sodium
@@ -84,18 +84,32 @@ jobs:
       - name: Analyse (new findings fail; existing ones are in phpstan-baseline.neon)
         run: php -d memory_limit=2G /tmp/phpstan.phar analyse -c phpstan.neon.dist --no-progress
 
+  docker-image:
+    name: Deploy Docker image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Build deploy/Dockerfile and smoke-test the PHP runtime
+        run: |
+          docker build --pull -t bareboneseshop-ci deploy
+          docker run --rm bareboneseshop-ci php -m | tee /tmp/php-modules.txt
+          grep -qx pdo_mysql /tmp/php-modules.txt
+
   browser-qualification:
     name: Browser, axe & Lighthouse
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: true
 
       - name: Setup PHP 8.3
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.3'
           extensions: pdo, pdo_sqlite, mbstring, json, dom, libxml, sodium
@@ -103,7 +117,7 @@ jobs:
           tools: none
 
       - name: Setup Node.js 24
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '24'
           cache: npm
@@ -112,6 +126,9 @@ jobs:
         run: |
           npm ci
           npx playwright install --with-deps chromium webkit firefox
+
+      - name: ESLint (storefront scripts and qualification tooling)
+        run: npx eslint --max-warnings=0 .
 
       - name: Prepare disposable SQLite application
         env:
@@ -136,7 +153,7 @@ jobs:
 
       - name: Upload browser evidence on failure
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: browser-qualification-evidence
           path: |
@@ -179,12 +196,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           submodules: true
 
       - name: Setup PHP 8.3
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.3'
           extensions: pdo, pdo_sqlite, pdo_mysql, mbstring, json, dom, libxml, sodium
@@ -196,18 +213,33 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y mariadb-client
 
+      # Root only provisions; the shop and every test connect as bbe_ci, which owns nothing but the
+      # disposable bbe_* / barebones_* databases (the same shape as a production shop user).
+      # MySQL 8 has binary logging on, where a non-SUPER user may create triggers only with
+      # log_bin_trust_function_creators enabled.
+      - name: Provision least-privilege database user
+        env:
+          MYSQL_PWD: update-root
+        run: |
+          mariadb -h 127.0.0.1 -uroot -e "
+            CREATE USER 'bbe_ci'@'%' IDENTIFIED BY 'bbe-ci-password';
+            GRANT ALL PRIVILEGES ON \`bbe\\_%\`.* TO 'bbe_ci'@'%';
+            GRANT ALL PRIVILEGES ON \`barebones\\_%\`.* TO 'bbe_ci'@'%';
+            SET GLOBAL log_bin_trust_function_creators = 1;
+            CREATE DATABASE barebones_parity_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+          MYSQL_PWD=bbe-ci-password mariadb -h 127.0.0.1 -ubbe_ci -e 'SHOW GRANTS'
+
       - name: Prepare disposable native database application
         env:
           E2E_DB_DRIVER: mysql
           E2E_DB_HOST: 127.0.0.1
           E2E_DB_NAME: barebones_e2e_test
-          E2E_DB_USER: root
-          E2E_DB_PASSWORD: update-root
+          E2E_DB_USER: bbe_ci
+          E2E_DB_PASSWORD: bbe-ci-password
           E2E_RUNTIME_DIR: /tmp/barebones-e2e-database
           E2E_STATE_PATH: /tmp/barebones-e2e-db-state.json
           BBE_ADMIN_IDENTITY_KEY: RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU=
         run: |
-          mariadb -h 127.0.0.1 -uroot -pupdate-root -e 'CREATE DATABASE barebones_parity_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
           php tests/e2e/prepare.php
           php cli/migrate.php
           php cli/seed.php --count=30
@@ -219,13 +251,13 @@ jobs:
           BAREBONES_REQUIRE_MYSQL_UPDATE_TEST: '1'
           SMOKE_URL: http://127.0.0.1:8080
           TEST_MYSQL_DSN: mysql:host=127.0.0.1;port=3306;dbname=barebones_parity_test;charset=utf8mb4
-          TEST_MYSQL_USER: root
-          TEST_MYSQL_PASS: update-root
+          TEST_MYSQL_USER: bbe_ci
+          TEST_MYSQL_PASS: bbe-ci-password
           TEST_MYSQL_UPDATE_DATABASE: barebones_update_test
           TEST_MYSQL_UPDATE_HOST: 127.0.0.1
           TEST_MYSQL_UPDATE_PORT: '3306'
-          TEST_MYSQL_UPDATE_USER: root
-          TEST_MYSQL_UPDATE_PASS: update-root
+          TEST_MYSQL_UPDATE_USER: bbe_ci
+          TEST_MYSQL_UPDATE_PASS: bbe-ci-password
           TEST_MYSQL_DUMP_BINARY: mariadb-dump
           TEST_MYSQL_CLIENT_BINARY: mariadb
           BBE_ADMIN_IDENTITY_KEY: RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU=

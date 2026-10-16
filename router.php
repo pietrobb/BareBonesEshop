@@ -60,6 +60,10 @@ foreach ($bbeRouterLines as $bbeRouterLine) {
         continue;
     }
     if (str_starts_with($bbeRouterLine, '<If ')) {
+        if (preg_match('/^<If "\(-f %\{REQUEST_FILENAME\} \|\| -d %\{REQUEST_FILENAME\}\) && %\{REQUEST_URI\} =~ m#(.+?)#(i?)">$/', $bbeRouterLine, $m)) {
+            $bbeRouterIfDenies[] = ['#' . $m[1] . '#' . $m[2], null];
+            continue;
+        }
         if (!preg_match('/^<If "%\{REQUEST_URI\} =~ m#(.+?)#(i?) && %\{QUERY_STRING\} =~ m#(.+?)#(i?)">$/', $bbeRouterLine, $m)) $bbeRouterStop(500);
         $bbeRouterIfDenies[] = ['#' . $m[1] . '#' . $m[2], '#' . $m[3] . '#' . $m[4]];
         continue;
@@ -70,7 +74,10 @@ foreach ($bbeRouterLines as $bbeRouterLine) {
 if ($bbeRouterRules === []) $bbeRouterStop(500);
 
 foreach ($bbeRouterIfDenies as [$uriPattern, $queryPattern]) {
-    if (preg_match($uriPattern, '/' . $bbeRouterPath) === 1 && preg_match($queryPattern, $bbeRouterQuery) === 1) {
+    $bbeRouterIfApplies = $queryPattern === null
+        ? $bbeRouterPath !== '' && file_exists($bbeRouterRoot . '/' . $bbeRouterPath)
+        : preg_match($queryPattern, $bbeRouterQuery) === 1;
+    if ($bbeRouterIfApplies && preg_match($uriPattern, '/' . $bbeRouterPath) === 1) {
         $bbeRouterStop(403);
     }
 }

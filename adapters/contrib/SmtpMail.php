@@ -43,6 +43,33 @@ class SmtpMail implements MailAdapter {
         return str_replace(["\r", "\n"], '', $v);
     }
 
+    /**
+     * Body text for the wire: CRLF line ends only (servers reject bare LF) and quoted-printable,
+     * which keeps every line under 76 octets — 8bit HTML on one line broke the 998-octet limit.
+     */
+    private static function qpBody(string $v): string {
+        return quoted_printable_encode((string)preg_replace('/\r\n|\r|\n/', "\r\n", $v));
+    }
+
+    /**
+     * RFC 2047 subject as a run of B encoded-words, one per folded line (≤ 77 octets with "Subject: ").
+     * Whitespace between encoded-words is dropped on decode, so the subject round-trips exactly.
+     */
+    private static function encodeSubject(string $v): string {
+        if ($v === '') return '';
+        $words = [];
+        $chunk = '';
+        foreach (mb_str_split($v, 1, 'UTF-8') as $ch) {
+            if ($chunk !== '' && strlen(base64_encode($chunk . $ch)) > 56) {
+                $words[] = $chunk;
+                $chunk = '';
+            }
+            $chunk .= $ch;
+        }
+        $words[] = $chunk;
+        return implode("\r\n ", array_map(static fn(string $w): string => '=?UTF-8?B?' . base64_encode($w) . '?=', $words));
+    }
+
     public function send(array $msg): array {
         $to       = self::stripCrlf(trim((string)($msg['to'] ?? '')));
         $from     = self::stripCrlf(trim((string)($msg['from'] ?? '')));
@@ -115,11 +142,18 @@ class SmtpMail implements MailAdapter {
 
             $altBoundary = 'bbe-alt-' . bin2hex(random_bytes(8));
             $mixBoundary = 'bbe-mix-' . bin2hex(random_bytes(8));
+            // RFC 2047 encoded-words are folded (75 chars each) instead of one unbounded line.
             $data = "From: {$from}\r\n"
                   . "To: {$to}\r\n"
-                  . "Subject: =?UTF-8?B?" . base64_encode($subject) . "?=\r\n"
+                  . "Subject: " . self::encodeSubject($subject) . "\r\n"
                   . "Date: " . date('r') . "\r\n"
                   . "MIME-Version: 1.0\r\n";
+            $hasMessageId = false;
+            foreach (array_keys($headers) as $k) $hasMessageId = $hasMessageId || strcasecmp(trim((string)$k), 'Message-ID') === 0;
+            if (!$hasMessageId) {
+                // Without a Message-ID spam filters score the mail down and threading breaks.
+                $data .= 'Message-ID: <' . bin2hex(random_bytes(16)) . '@' . substr((string)strrchr($from, '@'), 1) . ">\r\n";
+            }
             if ($replyTo) $data .= "Reply-To: {$replyTo}\r\n";
             foreach ($headers as $k => $v) {
                 $data .= self::stripCrlf((string)$k) . ": " . self::stripCrlf((string)$v) . "\r\n";
@@ -127,13 +161,14 @@ class SmtpMail implements MailAdapter {
 
             // Build the message body part (text-only or multipart/alternative).
             $bodyPart = '';
+            $qp = "Content-Transfer-Encoding: quoted-printable\r\n\r\n";
             if ($html !== '') {
                 $bodyPart .= "Content-Type: multipart/alternative; boundary=\"{$altBoundary}\"\r\n\r\n";
-                $bodyPart .= "--{$altBoundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{$text}\r\n";
-                $bodyPart .= "--{$altBoundary}\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{$html}\r\n";
+                $bodyPart .= "--{$altBoundary}\r\nContent-Type: text/plain; charset=UTF-8\r\n{$qp}" . self::qpBody($text) . "\r\n";
+                $bodyPart .= "--{$altBoundary}\r\nContent-Type: text/html; charset=UTF-8\r\n{$qp}" . self::qpBody($html) . "\r\n";
                 $bodyPart .= "--{$altBoundary}--\r\n";
             } else {
-                $bodyPart .= "Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{$text}\r\n";
+                $bodyPart .= "Content-Type: text/plain; charset=UTF-8\r\n{$qp}" . self::qpBody($text) . "\r\n";
             }
 
             if (!empty($attachments)) {
