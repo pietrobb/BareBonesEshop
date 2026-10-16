@@ -528,14 +528,14 @@ class Security {
             $user = (string)($isFormLogin ? ($_POST['admin_username'] ?? '') : ($_SERVER['PHP_AUTH_USER'] ?? ''));
             $pass = (string)($isFormLogin ? ($_POST['admin_password'] ?? '') : ($_SERVER['PHP_AUTH_PW'] ?? ''));
             $mfa = (string)($isFormLogin ? ($_POST['admin_mfa'] ?? '') : ($_SERVER['HTTP_X_ADMIN_MFA'] ?? ''));
-            if ($isFormLogin && !self::csrfValidate()) self::renderAdminLogin('Invalid or expired login form.');
+            if ($isFormLogin && !self::csrfValidate()) self::renderAdminLogin('admin.login.error_form_expired');
             if ($user !== '' && $pass !== '') {
                 $ip = self::clientIp();
                 $throttle = new AdminLoginThrottle(self::rateDb());
                 $retryAfter = $throttle->reserve($user, $ip);
                 if ($retryAfter > 0) {
                     header('Retry-After: ' . $retryAfter);
-                    self::renderAdminLogin('Too many login attempts. Try again later.', 429);
+                    self::renderAdminLogin('admin.login.error_throttled', 429);
                 }
                 $identity = AdminIdentity::authenticate($user, $pass, $mfa, $ip, (string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
                 if ($identity !== null) {
@@ -556,7 +556,7 @@ class Security {
                     return true;
                 }
             }
-            self::renderAdminLogin(($isFormLogin || $user !== '') ? 'Invalid credentials or verification code.' : null);
+            self::renderAdminLogin(($isFormLogin || $user !== '') ? 'admin.login.error_invalid' : null);
         }
 
         $user = $_SERVER['PHP_AUTH_USER'] ?? '';
@@ -626,26 +626,24 @@ class Security {
         );
     }
 
-    private static function renderAdminLogin(?string $error = null, int $status = 0): never {
+    /**
+     * Sign-in page (templates/admin/login.php) in the admin's last chosen language, else the system default.
+     * $errorKey is an admin.login.error_* i18n key; null renders the plain form.
+     */
+    private static function renderAdminLogin(?string $errorKey = null, int $status = 0): never {
         self::headers();
-        http_response_code($status ?: ($error === null ? 401 : 403));
-        $returnTo = self::safeLocalPath((string)($_SERVER['REQUEST_URI'] ?? '/admin.php'), '/admin.php');
-        $csrf = self::csrfToken();
-        $nonce = self::cspNonce();
-        $errorHtml = $error === null ? '' : '<p class="error">' . htmlspecialchars($error, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '</p>';
-        $returnHtml = htmlspecialchars($returnTo, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $csrfHtml = htmlspecialchars($csrf, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-            . '<title>Admin sign in</title><style nonce="' . $nonce . '">body{font:16px system-ui;background:#f1f5f9;margin:0;display:grid;place-items:center;min-height:100vh}'
-            . 'form{background:#fff;padding:2rem;border-radius:.75rem;box-shadow:0 8px 30px #0002;width:min(24rem,calc(100% - 2rem))}'
-            . 'label{display:block;margin-top:1rem;font-weight:600}input{box-sizing:border-box;width:100%;padding:.7rem;margin-top:.3rem}'
-            . 'button{width:100%;margin-top:1.25rem;padding:.8rem;background:#0f172a;color:#fff;border:0;border-radius:.35rem}.error{color:#b91c1c}</style></head><body>'
-            . '<form method="post" action="admin.php" autocomplete="on"><h1>Admin sign in</h1>' . $errorHtml
-            . '<input type="hidden" name="admin_login" value="1"><input type="hidden" name="csrf_token" value="' . $csrfHtml . '">'
-            . '<input type="hidden" name="return_to" value="' . $returnHtml . '"><label>Username<input name="admin_username" required autocomplete="username"></label>'
-            . '<label>Password<input type="password" name="admin_password" required autocomplete="current-password"></label>'
-            . '<label>Authenticator or recovery code<input name="admin_mfa" inputmode="numeric" autocomplete="one-time-code"></label>'
-            . '<button type="submit">Sign in</button></form></body></html>';
+        http_response_code($status ?: ($errorKey === null ? 401 : 403));
+        $sessionLocale = $_SESSION['admin_locale'] ?? null;
+        $locale = is_string($sessionLocale) && preg_match('/^[a-z]{2}(?:[_-][A-Za-z]{2})?$/', $sessionLocale) ? $sessionLocale : I18n::sysDefault();
+        I18n::setLocale($locale);
+        $view = [
+            'locale' => $locale,
+            'nonce' => self::cspNonce(),
+            'csrf' => self::csrfToken(),
+            'return_to' => self::safeLocalPath((string)($_SERVER['REQUEST_URI'] ?? '/admin.php'), '/admin.php'),
+            'error' => $errorKey === null ? null : I18n::t($errorKey),
+        ];
+        require __DIR__ . '/../templates/admin/login.php';
         exit;
     }
 
