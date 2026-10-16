@@ -374,6 +374,11 @@ assert_equals(8192, (int)$aigEnt()['last_download_offset'], '18 download: the by
 assert_true(DigitalDelivery::authorizeTransfer($aigEnt(), 8192, $aigNow + 60) && (int)$aigEnt()['download_count'] === 1, '18 download: a legit resume at the bytes already served is not counted again (limit 1 already used)');
 assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 8193, $aigNow + 60), '18 download: a range starting past the bytes the counted download served is refused (a new download, limit spent)');
 assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 0, $aigNow + 60), '18 download: a new download from byte 0 is refused once the limit is used');
+// A long partial transfer: "bytes=1-" is no resume (it would be a free near-complete copy), a resume near the cut is.
+$pdo->exec("UPDATE digital_entitlements SET last_download_offset = " . (64 * 1024 * 1024) . " WHERE id = {$aigEntId}");
+assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 1, $aigNow + 60), '18 download: after 64 MiB served, "Range: bytes=1-" is not a free resume (limit spent, refused)');
+assert_true(DigitalDelivery::authorizeTransfer($aigEnt(), 64 * 1024 * 1024 - 1024 * 1024, $aigNow + 60), '18 download: a resume a little below the served bytes (data in flight) is free');
+$pdo->exec("UPDATE digital_entitlements SET last_download_offset = 8192, resume_count = 1 WHERE id = {$aigEntId}");
 for ($aigResume = 2; $aigResume <= DigitalDelivery::MAX_FREE_RESUMES; $aigResume++) DigitalDelivery::authorizeTransfer($aigEnt(), 4096, $aigNow + 60);
 assert_equals(DigitalDelivery::MAX_FREE_RESUMES, (int)$aigEnt()['resume_count'], '18 download: each free resume is counted');
 assert_true(!DigitalDelivery::authorizeTransfer($aigEnt(), 4096, $aigNow + 60), '18 download: free resumes are capped');

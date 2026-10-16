@@ -194,6 +194,13 @@ class DigitalDelivery {
     /** Free resumes of one counted download (inside its window, never past the bytes it already served). */
     public const MAX_FREE_RESUMES = 5;
 
+    /**
+     * A resume continues where the interrupted transfer stopped: the client has received a little less than the
+     * server sent (buffers in flight), so a free resume must start within this many bytes below the recorded offset.
+     * Without the lower bound "Range: bytes=1-" after a long partial transfer would be a free near-complete copy.
+     */
+    public const RESUME_SLACK_BYTES = 16 * 1024 * 1024;
+
     /** Seconds after a counted download in which Range requests resume it without counting again. */
     public static function resumeWindowSeconds(): int {
         return max(0, (int)(self::config()['digital_download_resume_minutes'] ?? 30)) * 60;
@@ -210,8 +217,8 @@ class DigitalDelivery {
      * Start a transfer: the time of the counted download it belongs to (pass it to recordProgress()), or null when it
      * is refused. A download is counted once: a request from the first byte (no Range, or a range starting at 0)
      * consumes one download. A request resuming later in the file is free only when it continues the last counted
-     * download: inside the resume window, starting no later than the bytes that download already served
-     * (last_download_offset, see recordProgress()), at most MAX_FREE_RESUMES times. Any other request counts as a new
+     * download: inside the resume window, starting at most RESUME_SLACK_BYTES below the bytes that download already
+     * served and no later than them (last_download_offset, see recordProgress()), at most MAX_FREE_RESUMES times. Any other request counts as a new
      * download, so once the limit is spent it is refused ("Range: bytes=1-" is no free copy). HEAD never counts.
      */
     public static function beginTransfer(array $entitlement, int $rangeStart, ?int $now = null): ?int {
@@ -234,11 +241,12 @@ class DigitalDelivery {
 
     /** Take one free resume of the last counted download (atomic: the limit of free resumes holds under concurrency). */
     private static function claimResume(array $entitlement, int $rangeStart, int $now): bool {
-        if (!self::canResume($entitlement, $now) || $rangeStart > (int)$entitlement['last_download_offset']) return false;
+        $served = (int)$entitlement['last_download_offset'];
+        if (!self::canResume($entitlement, $now) || $rangeStart > $served || $rangeStart < $served - self::RESUME_SLACK_BYTES) return false;
         $stmt = Db::get()->prepare("UPDATE digital_entitlements
             SET resume_count = resume_count + 1, updated_at = " . Db::now() . "
             WHERE id = :id AND status = 'active' AND last_download_at = :counted_at AND last_download_at >= :since
-              AND resume_count < :max_resumes AND last_download_offset >= :start
+              AND resume_count < :max_resumes AND last_download_offset >= :start AND last_download_offset <= :start_plus_slack
               AND (expires_at IS NULL OR expires_at >= :now)
               AND EXISTS (
                   SELECT 1 FROM orders o
@@ -248,7 +256,7 @@ class DigitalDelivery {
               )");
         $stmt->execute([
             ':id' => (int)$entitlement['id'], ':counted_at' => (int)$entitlement['last_download_at'], ':since' => $now - self::resumeWindowSeconds(),
-            ':max_resumes' => self::MAX_FREE_RESUMES, ':start' => $rangeStart, ':now' => $now,
+            ':max_resumes' => self::MAX_FREE_RESUMES, ':start' => $rangeStart, ':start_plus_slack' => $rangeStart + self::RESUME_SLACK_BYTES, ':now' => $now,
         ]);
         return $stmt->rowCount() === 1;
     }
