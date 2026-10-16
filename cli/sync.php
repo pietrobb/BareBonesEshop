@@ -21,6 +21,7 @@ if ($verbose) {
         echo "Error: {$result['error']}\n";
     } else {
         echo "Products updated:  {$result['products_updated']}\n";
+        echo "Products skipped:  {$result['products_skipped']}\n";
         echo "Stock updated:     {$result['stock_updated']}\n";
         echo "Orders pushed:     {$result['orders_pushed']}\n";
         echo "Orders failed:     {$result['orders_failed']}\n";

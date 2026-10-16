@@ -68,20 +68,17 @@ class Sync {
         $pendingSync = Orders::pendingStatusSync();
         foreach ($pendingSync as $order) {
             try {
-                // Extract external ID from notes (format: erp_synced:{id})
-                $externalId = null;
-                if (preg_match('/erp_synced:(\S+)/', $order['notes'] ?? '', $m)) {
-                    $externalId = $m[1];
-                }
-                if (!$externalId) continue;
+                // Orders::markSynced/updateErpStatus write the erp_id/erp_status columns (pendingStatusSync selects on erp_id);
+                // a legacy row may still carry its last status only as an erp_status: note marker.
+                $externalId = (string)($order['erp_id'] ?? '');
+                if ($externalId === '') continue;
 
                 $status = $adapter->pullOrderStatus($externalId);
-                // Extract last known ERP status from notes
-                $lastErpStatus = null;
-                if (preg_match_all('/erp_status:(\S+)/', $order['notes'] ?? '', $m2)) {
+                $lastErpStatus = $order['erp_status'] ?? null;
+                if ($lastErpStatus === null && preg_match_all('/erp_status:(\S+)/', (string)($order['notes'] ?? ''), $m2)) {
                     $lastErpStatus = end($m2[1]);
                 }
-                if ($status !== $lastErpStatus) {
+                if ($status !== (string)$lastErpStatus) {
                     Orders::updateErpStatus((int)$order['id'], $status);
                     $result['statuses_updated']++;
                 }
