@@ -1,3 +1,6 @@
-<section class="product-gone"><h1>{{t.product_discontinued}}</h1><p>{{name}}</p>
-{{#if products}}<h2>{{t.related_products}}</h2>{{> storefront/product-grid}}{{/if}}
-<p><a href="{{home_url}}">{{t.home}}</a></p></section>
+<section class="product-gone">
+  <h1>{{product.name}}</h1>
+  <p class="storefront-status">{{t.product_discontinued}}</p>
+  {{#if products.length > 0}}<h2>{{t.related_products}}</h2>{{> storefront/product-grid}}{{/if}}
+  <p><a href="{{home_url}}" class="btn">{{t.home}}</a></p>
+</section>

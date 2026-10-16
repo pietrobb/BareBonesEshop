@@ -164,7 +164,7 @@ try {
     assert_equals(410, $sfaGonePage['status'], 'SFA 410: archived product answers 410');
     assert_true($sfaCount('<main', $sfaGonePage['body']) === 1 && $sfaCount('<footer', $sfaGonePage['body']) === 1 && $sfaCount('<h1', $sfaGonePage['body']) === 1,
         'SFA 410: one main/footer and one h1');
-    assert_true(str_contains($sfaGonePage['body'], '<h1>' . $sfaE('product_discontinued') . '</h1>') && str_contains($sfaGonePage['body'], 'SFA Retired Kettle')
+    assert_true(str_contains($sfaGonePage['body'], '<h1>SFA Retired Kettle</h1>') && str_contains($sfaGonePage['body'], $sfaE('product_discontinued'))
         && str_contains($sfaGonePage['body'], '/product/sfa-mug"'), 'SFA 410: h1, product name and related product cards');
     assert_true(!is_file($sfaApp . '/blocks/error/404.html') && !is_file($sfaApp . '/blocks/error/410.html')
         && !str_contains((string)file_get_contents($sfaApp . '/layouts.json'), 'error/'), 'SFA 404: the untranslated error layouts are gone');

@@ -1134,6 +1134,23 @@ $pdo->exec("UPDATE products SET status='archived' WHERE id=9703");
 assert_true(Products::bySlug('vm-format') === null && Products::bySlugAnyStatus('vm-format')['status'] === 'archived', 'G12 routes: inactive lookup preserves archived-product 410 handling');
 $productStatusRouteSource = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Storefront/ProductStatusPages.php');
 assert_true(str_contains($productStatusRouteSource, 'http_response_code(404)') && str_contains($productStatusRouteSource, 'http_response_code(410)'), 'G12 routes: missing and archived products retain real HTTP status codes');
+require_once TEST_CLI_DIR . '/../src/Entrypoints/Storefront/CatalogPages.php';
+require_once TEST_CLI_DIR . '/../src/Entrypoints/Storefront/ProductStatusPages.php';
+$statusLocaleBefore = I18n::locale();
+foreach (['de', 'sk'] as $statusLocale) {
+    I18n::setLocale($statusLocale);
+    [$missingHtml, $missingTitle] = renderUnavailableProduct('no-such-product-slug');
+    assert_true(str_contains($missingHtml, esc(I18n::t('product_not_found'))) && str_contains($missingTitle, I18n::t('product_not_found')), "Product 404 ({$statusLocale}): localized message and title");
+    [$goneHtml, $goneTitle] = renderUnavailableProduct('vm-format');
+    assert_true(str_contains($goneHtml, esc(I18n::t('product_discontinued'))) && str_contains($goneTitle, I18n::t('product_discontinued')), "Product 410 ({$statusLocale}): localized discontinued message and title");
+    assert_true(str_contains($goneHtml, esc((string)I18n::product(Products::bySlugAnyStatus('vm-format'))['name'])), "Product 410 ({$statusLocale}): names the archived product");
+    foreach (['404' => $missingHtml, '410' => $goneHtml] as $statusCode => $statusHtml) {
+        assert_true(!preg_match('/<(header|footer|main)\b/i', $statusHtml), "Product {$statusCode} ({$statusLocale}): renders as a block inside the storefront shell, no second header/footer/main");
+        assert_true(!str_contains($statusHtml, '{{') && !str_contains($statusHtml, '<!-- missing') && !str_contains($statusHtml, 'nebola nájdená'), "Product {$statusCode} ({$statusLocale}): no unresolved directives, missing blocks or hardcoded Slovak");
+    }
+}
+I18n::setLocale($statusLocaleBefore);
+assert_true(!isset(Template::loadLayouts()['pages']['404']) && !is_file(TEST_CLI_DIR . '/../blocks/error/404.html'), 'Product 404: legacy full-layout 404 page with hardcoded Slovak is gone');
 $productBlockSource = (string)file_get_contents(TEST_CLI_DIR . '/../themes/default/blocks/storefront/product-page.html');
 assert_true(str_contains($productBlockSource, 'data-review-form'), 'G12 theme boundary: review submission remains owned by the product theme block');
 
