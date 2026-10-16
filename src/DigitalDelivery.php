@@ -241,7 +241,7 @@ class DigitalDelivery {
 
     /** Take one free resume of the last counted download (atomic: the limit of free resumes holds under concurrency). */
     private static function claimResume(array $entitlement, int $rangeStart, int $now): bool {
-        $served = (int)$entitlement['last_download_offset'];
+        $served = (int)($entitlement['last_download_offset'] ?? 0);
         if (!self::canResume($entitlement, $now) || $rangeStart > $served || $rangeStart < $served - self::RESUME_SLACK_BYTES) return false;
         $stmt = Db::get()->prepare("UPDATE digital_entitlements
             SET resume_count = resume_count + 1, updated_at = " . Db::now() . "
