@@ -160,7 +160,7 @@ $architectureBudgets = [
     // Customer account portal behind the thin /account.php (registration, login, reset, GDPR, addresses, orders).
     // +1 coupling: Str::normalizeEmail is the one e-mail normalisation shared with Customers and Pricing.
     'src/Entrypoints/Storefront/Account.php' => ['lines' => 450, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 14],
-    'src/Entrypoints/Storefront/CatalogPages.php' => ['lines' => 120, 'functions' => 10, 'max_function_lines' => 49, 'coupling' => 8],
+    'src/Entrypoints/Storefront/CatalogPages.php' => ['lines' => 120, 'functions' => 10, 'max_function_lines' => 60, /* category page: bounded spec/subcat filter parsing */ 'coupling' => 8],
     // +2 functions: pending-payment page and the gateway cancel page (P0 2026-10-13 checkout redirect).
     // +1 coupling: BankTransferInstructions renders the IBAN / variable symbol / PAY by square block on order-done (A13.6).
     // +1 coupling: I18n::all() gives cart/checkout blocks the catalog their breadcrumb/pagination landmarks are labelled from.

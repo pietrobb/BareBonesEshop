@@ -186,3 +186,11 @@ try {
     Db::init($xcDb, $xcDriver);
     FileSystem::removeTree($xcRoot);
 }
+
+// LocalStorage without uploads_dir must default to the app root's uploads/ (served as /uploads),
+// not adapters/uploads next to the adapter file, which the web server never serves.
+$xcUploadsDir = new ReflectionProperty(LocalStorage::class, 'uploadsDir');
+$xcStorage = new LocalStorage([]);
+assert_equals(realpath(dirname(TEST_CLI_DIR) . '/uploads'), realpath((string)$xcUploadsDir->getValue($xcStorage)),
+    'Cross-cutting LocalStorage: the default uploads dir is the app root uploads/');
+assert_true(!is_dir(dirname(TEST_CLI_DIR) . '/adapters/uploads'), 'Cross-cutting LocalStorage: no stray adapters/uploads directory is created');
