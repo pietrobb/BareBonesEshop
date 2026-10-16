@@ -997,7 +997,7 @@ function applyStripePaymentCompleted(array $session, string $sessionId, int $ord
             $orderId,
             'paid',
             'checkout.session.completed',
-            (int)($session['amount_total'] ?? $order['total']),
+            (int)$session['amount_total'],
             'stripe_checkout_' . ($sessionId ?: $paymentRef),
             ['session_id' => $sessionId, 'payment_id' => $paymentRef]
         );
