@@ -16,7 +16,9 @@ function renderCart(): string {
     }
 
     $subtotal = (int)$cartData['subtotal'];
-    $quote = ShippingService::cartQuote($cart, $subtotal, 'SK');
+    // Free shipping thresholds see the goods after automatic promotions, as checkout does (no coupon entered yet).
+    $promotion = CheckoutService::discountPreview('', $subtotal, null, $cart, (int)($_SESSION['customer_id'] ?? 0) ?: null)['promotion_discount'];
+    $quote = ShippingService::cartQuote($cart, $subtotal - min($subtotal, $promotion), 'SK');
     $shipping = $quote['delivery_price'];
     $items = array_map(static fn(array $item): array => [
         'id' => (int)$item['product_id'], 'cart_key' => (string)$item['key'],
@@ -82,18 +84,7 @@ function renderCheckout(): string {
     $form = static fn(string $key): string => $posted && is_string($_POST[$key] ?? null) ? mb_substr(trim($_POST[$key]), 0, 64) : '';
     $subtotal = (int)$cartData['subtotal'];
     $country = $state['country'];
-    $quote = CheckoutService::deliveryQuote($cart, $subtotal, $country, $_POST['shipping_method'] ?? '');
-    $shippingRates = $quote['rates'];
-    $selectedRate = $quote['selected'];
-    $selectedShipping = (string)($selectedRate['method_code'] ?? '');
-    $shipping = $quote['price'];
     $customerId = (int)($_SESSION['customer_id'] ?? 0);
-    $paymentMethods = $selectedRate ? PaymentService::availableMethods($country, $storeCurrency, $subtotal + $shipping, (string)$selectedRate['method_code'], $customerId ?: null) : [];
-    $postedPayment = $form('payment');
-    $selectedPayment = array_values(array_filter($paymentMethods, static fn(array $method): bool => (string)$method['code'] === $postedPayment))[0] ?? $paymentMethods[0] ?? null;
-    $shipping = CheckoutService::summaryShipping($cart, $subtotal, $country, $selectedShipping, $selectedPayment, $shipping);
-    $paymentFee = $selectedPayment ? (int)$selectedPayment['fee'] : 0;
-    $freeLabel = $t('free_shipping');
 
     // Same discount rules as CheckoutService::execute: coupon + automatic promotions, capped at the subtotal.
     $couponCode = $couponAction === 'remove' ? '' : $form('coupon_code');
@@ -101,8 +92,17 @@ function renderCheckout(): string {
     $couponDiscount = $preview['coupon_discount'];
     $couponError = $preview['coupon_error'] === null ? '' : sprintf($t($preview['coupon_error']), $couponCode);
     if ($couponError !== '') $couponCode = '';
-    if ($preview['free_shipping']) $shipping = 0;
     $discount = min($subtotal, $couponDiscount + $preview['promotion_discount']);
+
+    // As at checkout: free shipping thresholds and payment fees see the goods after discounts.
+    $quote = CheckoutService::deliveryQuote($cart, $subtotal - $discount, $country, $_POST['shipping_method'] ?? '');
+    $shippingRates = $quote['rates'];
+    $selectedRate = $quote['selected'];
+    $selectedShipping = (string)($selectedRate['method_code'] ?? '');
+    $payment = CheckoutService::paymentPreview($cart, $subtotal - $discount, $country, $storeCurrency, $selectedShipping, $preview['free_shipping'] ? 0 : $quote['price'], $preview['free_shipping'], $form('payment'), $customerId ?: null);
+    [$paymentMethods, $selectedPayment, $shipping] = [$payment['methods'], $payment['selected'], $payment['shipping']];
+    $paymentFee = $selectedPayment ? (int)$selectedPayment['fee'] : 0;
+    $freeLabel = $t('free_shipping');
 
     return Template::render('storefront/checkout', [
         'breadcrumbs' => $breadcrumbs, 'title' => $t('checkout_title'), 'csrf_token' => Security::csrfToken(), 'address_required' => !$quote['digital'],
