@@ -331,12 +331,6 @@ parameters:
 			path: cli/worker.php
 
 		-
-			message: '#^Strict comparison using \!\=\= between non\-falsy\-string and null will always evaluate to true\.$#'
-			identifier: notIdentical.alwaysTrue
-			count: 1
-			path: cli/worker.php
-
-		-
 			message: '#^Expression on left side of \?\? is not nullable\.$#'
 			identifier: nullCoalesce.expr
 			count: 1
