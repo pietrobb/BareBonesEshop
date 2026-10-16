@@ -217,10 +217,7 @@ function pageOrder(): void {
     $allowed = OrderWorkflow::allowedTransitions($order['status']);
     $canRefund = Security::adminCan('orders.refund');
     if (!$canRefund) $allowed = array_values(array_diff($allowed, ['refunded']));
-    $paymentTransitions = Security::adminCan('orders.payments') ? array_values(array_diff(
-        PaymentService::allowedPaymentTransitions((string)($order['payment_status'] ?? 'pending')),
-        ['refund_pending', 'partially_refunded', 'refunded']
-    )) : [];
+    $paymentTransitions = Security::adminCan('orders.payments') ? adminManualPaymentTransitions($order) : [];
     $paymentTxs = PaymentService::transactionsForOrder($id);
     $refundableBalance = PaymentService::refundableBalance($id);
     $paymentSnapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
@@ -647,6 +644,19 @@ function handleOrderStatus(): void {
     header("Location: admin.php?p=order&id={$orderId}");
     exit;
 }
+/**
+ * Payment states an admin may set by hand. Refunds go through the refund ledger. An open order's
+ * payment is cancelled only by cancelling the order: a cancelled payment on a pending order would
+ * leave the expiry sweep and keep its stock reserved for ever.
+ */
+function adminManualPaymentTransitions(array $order): array {
+    $orderCancelled = (string)($order['status'] ?? '') === 'cancelled';
+    return array_values(array_filter(
+        PaymentService::allowedPaymentTransitions((string)($order['payment_status'] ?? 'pending')),
+        static fn(string $to): bool => !in_array($to, ['refund_pending', 'partially_refunded', 'refunded'], true)
+            && ($to !== 'cancelled' || $orderCancelled)
+    ));
+}
 function handleOrderPaymentTransition(): void {
     Security::adminRequire('orders.payments');
     $orderId = Security::int($_GET['id'] ?? 0);
@@ -660,10 +670,8 @@ function handleOrderPaymentTransition(): void {
     $newStatus = trim((string)($_POST['new_payment_status'] ?? ''));
     $amount = max(0, Security::int($_POST['amount'] ?? 0));
     $note = trim((string)($_POST['note'] ?? ''));
-    $from = (string)($order['payment_status'] ?? 'pending');
 
-    if (in_array($newStatus, ['refund_pending', 'partially_refunded', 'refunded'], true)
-        || !PaymentService::canPaymentTransition($from, $newStatus)) {
+    if (!in_array($newStatus, adminManualPaymentTransitions($order), true)) {
         setFlash('err', I18n::t('admin.order.msg.invalid_payment_transition'));
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
@@ -675,7 +683,14 @@ function handleOrderPaymentTransition(): void {
             'actor' => Security::adminUser(),
             'note' => $note,
         ]);
-        setFlash('ok', I18n::format('admin.order.msg.payment_changed', ['status' => $newStatus]));
+        if ($newStatus === 'paid' && (string)$order['status'] === 'cancelled') {
+            // Money recorded by hand for a cancelled order: no gateway session captured it, so the recorded
+            // amount (the order total when none was entered) is flagged for a manual refund with an incident.
+            PaymentService::settleAdminPaymentOnCancelled($orderId, $amount > 0 ? $amount : (int)$order['total'], 'Admin payment: ' . $note);
+            setFlash('err', I18n::t('admin.order.msg.paid_on_cancelled'));
+        } else {
+            setFlash('ok', I18n::format('admin.order.msg.payment_changed', ['status' => $newStatus]));
+        }
     } catch (\Throwable $e) {
         error_log("Payment status change error [{$orderId}]: " . $e->getMessage());
         setFlash('err', I18n::t('admin.order.msg.payment_error'));

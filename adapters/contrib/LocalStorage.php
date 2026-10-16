@@ -3,7 +3,7 @@
  * BareBones Shop — Local Storage Adapter
  * Stores files in uploads/ directory. Image resize via GD.
  */
-class LocalStorage implements StorageAdapter {
+class LocalStorage implements ImageVariantStorageAdapter {
     private string $uploadsDir;
     private string $uploadsPrefix;
     private string $baseUrl;

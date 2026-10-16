@@ -604,6 +604,14 @@ $paymentMonitoringMigration->up($pdo, true);
 $paymentMonitoringMigration->up($pdo, true);
 assert_true(in_array('is_synthetic', array_column($pdo->query('PRAGMA table_info(orders)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true)
     && (bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='csp_violations'")->fetchColumn(), 'Payment monitoring migration: synthetic order flag and CSP report table exist idempotently');
+$cspReporterMigration = require TEST_CLI_DIR . '/../migrations/20261016120000_csp_reporter_hash.php';
+$cspReporterMigration->up($pdo, true);
+$cspReporterMigration->up($pdo, true);
+assert_true(in_array('reporter_hash', array_column($pdo->query('PRAGMA table_info(csp_violations)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true), 'CSP reporter migration: reporter hash column exists idempotently');
+$erpCheckedMigration = require TEST_CLI_DIR . '/../migrations/20261016130000_erp_status_checked_at.php';
+$erpCheckedMigration->up($pdo, true);
+$erpCheckedMigration->up($pdo, true);
+assert_true(in_array('erp_status_checked_at', array_column($pdo->query('PRAGMA table_info(orders)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true), 'ERP status poll migration: erp_status_checked_at column exists idempotently');
 $emailOverrideMigration = require TEST_CLI_DIR . '/../migrations/20261013130000_email_template_overrides.php';
 $emailOverrideMigration->up($pdo, true);
 $emailOverrideMigration->up($pdo, true);
@@ -844,7 +852,7 @@ assert_true(!Security::formTrapValidate('test_register', $hpToken, 'https://spam
 $oldToken = Security::formTrapToken('test_register', 3600);
 $_SESSION[$trapKey][$oldToken] = time() - 3601;
 assert_true(!Security::formTrapValidate('test_register', $oldToken, '', 4, 3600), 'formTrapValidate rejects expired tokens');
-$accountSource = file_get_contents(TEST_CLI_DIR . '/../account.php') ?: '';
+$accountSource = entrypointSource('account.php');
 $accountThemeSource = file_get_contents(TEST_CLI_DIR . '/../themes/default/blocks/storefront/account-page.html') ?: '';
 assert_true(str_contains($accountThemeSource, 'name="register_token"'), 'Account register form includes form-trap token');
 assert_true(!str_contains($accountSource, 'HTTP_HOST'), 'G3: password reset URL does not trust the Host header');

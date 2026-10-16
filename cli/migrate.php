@@ -50,8 +50,15 @@ if ($cmd === 'apply' && !$skipBackup) {
         try {
             BackupService::init($db);
         } catch (\Throwable $e) {
-            $log("  [backup] init failed: " . $e->getMessage() . " — continuing without backup.");
-            return;
+            // Fail closed: an unusable backup configuration must not turn into an unbacked migration.
+            $backupCfg = BackupService::loadConfig(dirname(__DIR__) . '/config/backup.json');
+            if (empty($backupCfg['enabled']) || empty($backupCfg['auto_pre_migration'])) {
+                return; // explicitly disabled in config
+            }
+            throw new \RuntimeException(
+                'Pre-migration backup unavailable (backup init failed: ' . $e->getMessage() . ')' .
+                ' — fix the backup configuration, or re-run with --skip-backup to override (NOT RECOMMENDED).'
+            );
         }
         $cfg = BackupService::config();
         if (empty($cfg['enabled']) || empty($cfg['auto_pre_migration'])) {

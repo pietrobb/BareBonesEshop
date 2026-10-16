@@ -130,15 +130,26 @@ function apiValidateCoupon(): array {
 
     if (!$code) return ['valid' => false, 'error' => 'Coupon code is required'];
 
-    $result = Pricing::applyCoupon($code, $subtotal, $email);
+    // Same inputs and rules as checkout: the cart's available goods, its automatic promotions, then the coupon.
+    $items = array_values(array_filter(Cart::enriched()['items'] ?? [], static fn(array $item): bool => $item['available'] ?? true));
+    if ($items) $subtotal = (int)array_sum(array_column($items, 'total'));
+    $promotionDiscount = 0;
+    foreach (Pricing::autoCartRules($subtotal, $items, !empty($_SESSION['customer_id']) ? (int)$_SESSION['customer_id'] : null) as $rule) {
+        $promotionDiscount += max(0, (int)($rule['discount'] ?? 0));
+    }
+    $result = CheckoutService::couponFor($code, $subtotal, $promotionDiscount, $email);
     if ($result['discount'] <= 0) {
         return ['valid' => false, 'error' => $result['error'] ?? 'Invalid coupon'];
+    }
+    $combined = Pricing::combineDiscounts((int)$result['discount'], (string)($result['stacking'] ?? 'stack'), $promotionDiscount);
+    if ($combined['coupon'] === 0) {
+        return ['valid' => false, 'error' => 'Coupon cannot be combined with the current promotion'];
     }
 
     return [
         'valid'    => true,
         'code'     => $code,
-        'discount' => $result['discount'],
+        'discount' => $combined['coupon'],
         'name'     => $result['name'] ?? $code,
     ];
 }
@@ -356,6 +367,8 @@ function apiShippingRates(): array {
     if (!preg_match('/^[A-Z]{2}$/', $country)) {
         return ['error' => 'Invalid country'];
     }
+    // A goods amount of 0 (a coupon covering the whole cart) is a real amount, not a missing one.
+    $subtotalGiven = isset($_GET['subtotal']) && $_GET['subtotal'] !== '';
     $subtotal = Security::int($_GET['subtotal'] ?? 0);
     $cart = Cart::enriched();
     if (cartIsDigitalOnly($cart['items'] ?? [])) {
@@ -374,13 +387,18 @@ function apiShippingRates(): array {
     if ($weightG <= 0) {
         $cart = Cart::enriched();
         $metrics = shippingCartMetrics($cart['items'] ?? []);
-        $subtotal = $subtotal > 0 ? $subtotal : (int)($cart['subtotal'] ?? 0);
+        $subtotal = $subtotalGiven ? $subtotal : (int)($cart['subtotal'] ?? 0);
         $weightG = $metrics['weight_g'];
         $volumeCm3 = $metrics['volume_cm3'];
     }
 
     $physicalQty = ShippingService::physicalQuantity($cart['items'] ?? []);
     $methods = ShippingService::calculateRates($country, $weightG, $subtotal, $cod, $volumeCm3, $physicalQty);
+    // An automatic free-shipping promotion zeroes the delivery checkout charges, so the preview shows the same.
+    $customerId = (int)($_SESSION['customer_id'] ?? 0);
+    if (CheckoutService::discountPreview('', (int)($cart['subtotal'] ?? 0), null, $cart['items'] ?? [], $customerId ?: null)['free_shipping']) {
+        $methods = array_map(static fn(array $method): array => ['price' => 0] + $method, $methods);
+    }
     $unitsToFree = ShippingService::unitsToFreeShipping($methods, $physicalQty);
     return [
         'country' => $country,
@@ -413,7 +431,8 @@ function apiPaymentMethods(): array {
     $digitalOnly = cartIsDigitalOnly($cart['items'] ?? []);
     if ($digitalOnly) {
         $shippingMethod = 'digital';
-        $amount = (int)($cart['subtotal'] ?? $amount);
+        // The goods amount after discounts is respected (0 = a coupon covers the cart); only a missing one falls back to the cart.
+        if (!isset($_GET['amount']) || $_GET['amount'] === '') $amount = (int)($cart['subtotal'] ?? 0);
     }
     $customerId = (int)($_SESSION['customer_id'] ?? 0);
     $methods = $digitalOnly && $amount === 0
@@ -597,12 +616,21 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         return ['success' => false, 'error' => 'Required consent missing', 'consent_errors' => $consentErrors];
     }
 
+    // Automatic promotions first; the coupon is then priced on what they leave (CheckoutService::couponFor).
+    $autoRules = Pricing::autoCartRules($cart['subtotal'], $cart['items'], $loggedInCustomerId);
+    $promotionDiscount = 0;
+    $promotionFreeShipping = false;
+    foreach ($autoRules as $rule) {
+        if ($rule['action'] === 'free_shipping') $promotionFreeShipping = true;
+        $promotionDiscount += max(0, (int)($rule['discount'] ?? 0));
+    }
+
     // Apply coupon if provided
     $couponCode = trim(Security::str($input['coupon_code'] ?? ''));
     $couponDiscount = 0;
     $couponStacking = 'stack';
     if ($couponCode) {
-        $couponResult = Pricing::applyCoupon($couponCode, $cart['subtotal'], $email);
+        $couponResult = CheckoutService::couponFor($couponCode, $cart['subtotal'], $promotionDiscount, $email);
         if ($couponResult['discount'] > 0) {
             $couponDiscount = $couponResult['discount'];
             $couponStacking = (string)($couponResult['stacking'] ?? 'stack');
@@ -610,13 +638,20 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
             return ['error' => $couponResult['error'] ?? 'Invalid coupon'];
         }
     }
+    $combinedDiscounts = Pricing::combineDiscounts($couponDiscount, $couponStacking, $promotionDiscount);
+    if ($couponDiscount > 0 && $combinedDiscounts['coupon'] === 0) {
+        return ['success' => false, 'error' => 'Coupon cannot be combined with the current promotion'];
+    }
+    $promotionDiscount = $combinedDiscounts['promotion'];
+    $totalDiscount = min($cart['subtotal'], $couponDiscount + $promotionDiscount);
 
     $metrics = shippingCartMetrics($cart['items']);
     $totalWeight = $digitalOnly ? 0 : $metrics['weight_g'];
     $totalVolume = $digitalOnly ? 0 : $metrics['volume_cm3'];
+    // Free shipping "from X" is earned by what the buyer pays for the goods, i.e. after discounts.
     $selectedRate = $digitalOnly
         ? digitalDeliveryRate()
-        : ShippingService::selectRate($shippingMethod, $country, $totalWeight, $cart['subtotal'], PaymentService::isCashOnDelivery($paymentMethod), $totalVolume, ShippingService::physicalQuantity($cart['items']));
+        : ShippingService::selectRate($shippingMethod, $country, $totalWeight, $cart['subtotal'] - $totalDiscount, PaymentService::isCashOnDelivery($paymentMethod), $totalVolume, ShippingService::physicalQuantity($cart['items']));
     if (!$selectedRate) {
         return ['success' => false, 'error' => 'Doručenie nie je dostupné do zvolenej krajiny.'];
     }
@@ -627,23 +662,11 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         if ($pickup['error'] !== null) return ['success' => false, 'error' => I18n::t($pickup['error'])];
         if ($pickup['point'] !== null) $selectedRate['pickup_point'] = $pickup['point'];
     }
-    $shippingCost = (int)$selectedRate['price'];
-    $autoRules = Pricing::autoCartRules($cart['subtotal'], $cart['items'], $loggedInCustomerId);
-    $promotionDiscount = 0;
-    foreach ($autoRules as $rule) {
-        if ($rule['action'] === 'free_shipping') $shippingCost = 0;
-        $promotionDiscount += max(0, (int)($rule['discount'] ?? 0));
-    }
-    $combinedDiscounts = Pricing::combineDiscounts($couponDiscount, $couponStacking, $promotionDiscount);
-    if ($couponDiscount > 0 && $combinedDiscounts['coupon'] === 0) {
-        return ['success' => false, 'error' => 'Coupon cannot be combined with the current promotion'];
-    }
-    $promotionDiscount = $combinedDiscounts['promotion'];
+    $shippingCost = $promotionFreeShipping ? 0 : (int)$selectedRate['price'];
     // Shipping rates include domestic VAT like catalog prices; zero-rated sales are charged them net.
     if ($shippingCost > 0 && Cart::chargesNetOfDomesticVat($vatScenario)) {
         $shippingCost = Cart::netOfDomesticVat($shippingCost, $sellerCountry, 'standard', $taxProviderCode);
     }
-    $totalDiscount = min($cart['subtotal'], $couponDiscount + $promotionDiscount);
 
     $currency = $cart['items'][0]['currency'] ?? 'eur';
     $paymentBaseAmount = max(0, $cart['subtotal'] - $totalDiscount) + $shippingCost;
@@ -662,7 +685,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         http_response_code(422);
         return ['success' => false, 'error' => 'Synthetic checkout requires an online payment method'];
     }
-    $paymentFee = (int)$selectedPayment['fee'];
+    $paymentFee = PaymentService::chargedFee($selectedPayment, Cart::chargesNetOfDomesticVat($vatScenario), $sellerCountry, $taxProviderCode);
     $providerCodes = [
         'tax' => $taxProviderCode,
         'payment' => (string)$selectedPayment['provider'],
@@ -967,14 +990,20 @@ function onPaymentCompleted(array $session): ?string {
 function applyStripePaymentCompleted(array $session, string $sessionId, int $orderId): void {
     $order = Orders::byId($orderId);
     if (!$order) throw new RuntimeException("Order #{$orderId} vanished during Stripe webhook");
-    if (isset($session['amount_total']) && (int)$session['amount_total'] !== (int)$order['total']) {
-        throw new RuntimeException("Stripe amount mismatch for order #{$orderId}");
+    // Like the generic path in PaymentService: a capture without amount or currency is unverified, never paid.
+    if (!isset($session['amount_total']) || (int)$session['amount_total'] !== (int)$order['total']) {
+        throw new RuntimeException("Stripe amount missing or mismatched for order #{$orderId}");
     }
-    if (isset($session['currency']) && strtolower((string)$session['currency']) !== strtolower((string)$order['currency'])) {
-        throw new RuntimeException("Stripe currency mismatch for order #{$orderId}");
+    if (!isset($session['currency']) || strtolower((string)$session['currency']) !== strtolower((string)$order['currency'])) {
+        throw new RuntimeException("Stripe currency missing or mismatched for order #{$orderId}");
     }
 
     $paymentRef = (string)($session['payment_intent'] ?? $sessionId);
+    // A second session paid for an already settled order: alert, and keep the recorded payment_id refunds use.
+    if (in_array((string)($order['payment_status'] ?? 'pending'), ['paid', 'refund_pending', 'partially_refunded', 'refunded', 'disputed'], true)
+        && PaymentService::reportForeignCapture($order, [$paymentRef, $sessionId])) {
+        return;
+    }
     if ($paymentRef !== '') Orders::setPaymentId($orderId, $paymentRef);
     if ($sessionId !== '') CheckoutSession::markCompleted($sessionId, 'stripe');
 
@@ -983,7 +1012,7 @@ function applyStripePaymentCompleted(array $session, string $sessionId, int $ord
             $orderId,
             'paid',
             'checkout.session.completed',
-            (int)($session['amount_total'] ?? $order['total']),
+            (int)$session['amount_total'],
             'stripe_checkout_' . ($sessionId ?: $paymentRef),
             ['session_id' => $sessionId, 'payment_id' => $paymentRef]
         );

@@ -19,6 +19,18 @@ jobs:
       matrix:
         php: ['8.1', '8.2', '8.3', '8.4']
 
+    # RedisQueue's Lua claim/lease scripts run against a real server here (AuditRedisQueueRegression).
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -29,15 +41,15 @@ jobs:
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: ${{ matrix.php }}
-          extensions: pdo, pdo_sqlite, mbstring, json, dom, libxml, sodium
+          extensions: pdo, pdo_sqlite, mbstring, json, dom, libxml, sodium, gd, redis
           coverage: none
           tools: none
 
+      # Tracked files only: each file is linted once, and the vendor/bbf submodule (its own repository) is skipped.
       - name: PHP syntax check (php -l) on all sources
         run: |
           set -e
-          find src cli migrations tests . -maxdepth 4 -name '*.php' -print0 \
-            | xargs -0 -n1 -P4 php -l > /dev/null
+          git ls-files -z '*.php' | xargs -0 -n1 -P4 php -l > /dev/null
 
       - name: Prepare runtime directories
         run: |
@@ -47,6 +59,9 @@ jobs:
       - name: Run test suite
         env:
           BAREBONES_REQUIRE_UPDATE_SIGNATURE_TEST: '1'
+          BAREBONES_REQUIRE_REDIS_TEST: '1'
+          TEST_REDIS_HOST: 127.0.0.1
+          TEST_REDIS_PORT: '6379'
         run: php cli/test.php
 
       - name: Static analysis, i18n, WCAG 2.2 AA, and performance source gates
@@ -97,6 +112,7 @@ jobs:
           docker build --pull -t bareboneseshop-ci deploy
           docker run --rm bareboneseshop-ci php -m | tee /tmp/php-modules.txt
           grep -qx pdo_mysql /tmp/php-modules.txt
+          grep -qx gd /tmp/php-modules.txt
 
   browser-qualification:
     name: Browser, axe & Lighthouse
@@ -112,7 +128,7 @@ jobs:
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.3'
-          extensions: pdo, pdo_sqlite, mbstring, json, dom, libxml, sodium
+          extensions: pdo, pdo_sqlite, mbstring, json, dom, libxml, sodium, gd
           coverage: none
           tools: none
 
@@ -204,7 +220,7 @@ jobs:
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.3'
-          extensions: pdo, pdo_sqlite, pdo_mysql, mbstring, json, dom, libxml, sodium
+          extensions: pdo, pdo_sqlite, pdo_mysql, mbstring, json, dom, libxml, sodium, gd
           coverage: none
           tools: none
 
@@ -262,7 +278,8 @@ jobs:
           TEST_MYSQL_CLIENT_BINARY: mariadb
           BBE_ADMIN_IDENTITY_KEY: RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU=
         run: |
-          php -S 127.0.0.1:8080 -t . >/tmp/barebones-http.log 2>&1 &
+          # router.php applies the .htaccess deny/rewrite rules; bare `php -S -t .` would serve private files.
+          php -S 127.0.0.1:8080 router.php >/tmp/barebones-http.log 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid"' EXIT
           for attempt in $(seq 1 30); do

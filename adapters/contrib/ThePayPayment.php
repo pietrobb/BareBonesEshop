@@ -19,7 +19,7 @@
  *   PAY_THEPAY_PASSWORD    / thepay_password    — API password
  *   PAY_THEPAY_ENV         / thepay_env         — 'production' | 'demo' (default demo)
  */
-class ThePayPayment implements HostedCheckoutAdapter, PullVerifiedNotificationAdapter {
+class ThePayPayment implements HostedCheckoutAdapter, PullVerifiedNotificationAdapter, SignedWebhookPaymentAdapter {
     private const STATES = ['waiting_for_payment', 'waiting_for_confirmation', 'paid', 'partially_refunded', 'refunded', 'expired', 'preauthorized', 'preauth_cancelled', 'preauth_expired', 'error'];
     private const LANGS = ['cs', 'sk', 'de', 'en'];
     private const UID = '/^[A-Za-z0-9._-]{1,100}$/D';

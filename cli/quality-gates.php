@@ -75,13 +75,16 @@ $verticalFiles = array_merge(
     glob($root . '/src/*.php') ?: [], glob($root . '/src/*/*.php') ?: [], glob($root . '/src/*/*/*.php') ?: [], glob($root . '/cli/*.php') ?: [],
     glob($root . '/lang/*.php') ?: [], glob($root . '/themes/default/blocks/*/*.html') ?: [], glob($root . '/migrations/*.php') ?: [],
     glob($root . '/data/*') ?: [], glob($root . '/*.php') ?: [],
-    [$root . '/catalog.json', $root . '/config.example.php']
+    glob($root . '/cli/tests/*.php') ?: [], glob($root . '/cli/tests/scenarios/*.php') ?: [],
+    [$root . '/catalog.json', $root . '/config.example.php', $root . '/.htaccess']
 );
 foreach ($verticalFiles as $file) {
-    // Applied migrations are immutable history (checksummed); the removal migration names what it drops.
-    if (in_array(basename($file), ['20260424000000_baseline.php', '20261014120000_remove_auto_parts_tables.php', 'quality-gates.php'], true)) continue;
-    // Besides identifiers, catch the TecDoc category vocabulary (legacy category-name dictionaries).
-    if (is_file($file) && preg_match('/tecdoc|ktype|product_vehicles|product_oe_numbers|oe_fts|auto_part|automotive|brake pad|timing belt|shock absorber|cylinder head/i', (string)file_get_contents($file))) $verticalHits[] = substr($file, strlen($root) + 1);
+    // Applied migrations are immutable history (checksummed); the removal migration names what it drops, and its
+    // regression test asserts the removal.
+    if (in_array(basename($file), ['20260424000000_baseline.php', '20261014120000_remove_auto_parts_tables.php', 'AuditExtensionDataRegression.php', 'quality-gates.php'], true)) continue;
+    // Besides identifiers, catch the TecDoc category vocabulary (legacy category-name dictionaries, sample slugs and
+    // fixture names in English and Slovak).
+    if (is_file($file) && preg_match('/tecdoc|ktype|product_vehicles|product_oe_numbers|oe_fts|auto_part|automotive|brake|brzd|crankshaft|camshaft|timing belt|shock absorber|cylinder head|spark plug|karos[eé]ri/i', (string)file_get_contents($file))) $verticalHits[] = substr($file, strlen($root) + 1);
 }
 $stalePayloads = array_map(static fn(string $dir): string => substr($dir, strlen($root) + 1), glob($root . '/releases/*/payload', GLOB_ONLYDIR) ?: []);
 $check($stalePayloads === [], 'Repository hygiene: no historical release payloads are tracked (build and sign from the qualified SHA)' . ($stalePayloads ? ': ' . implode(', ', $stalePayloads) : ''));

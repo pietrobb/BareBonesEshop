@@ -158,6 +158,4 @@ echo Template::document($title, '', [
     'body_html' => $bodyHtml,
     'body_end' => '',
     'assets' => $themeAssets,
-    'base_css' => '',
-    'shop_js' => '',
 ]);

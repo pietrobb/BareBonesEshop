@@ -26,6 +26,7 @@ class Sync {
             'orders_pushed'    => 0,
             'orders_failed'    => 0,
             'statuses_updated' => 0,
+            'products_skipped' => 0,
         ];
 
         // 1. Pull products (delta sync since last run)
@@ -33,8 +34,14 @@ class Sync {
         $since = $lastSync ? new \DateTime($lastSync) : null;
 
         foreach ($adapter->pullProducts($since) as $productData) {
-            Import::upsertProduct($productData);
-            $result['products_updated']++;
+            // One bad product (e.g. a SKU owned by another catalog) must not abort stock, order push and status pull.
+            try {
+                Import::upsertProduct($productData);
+                $result['products_updated']++;
+            } catch (\Throwable $e) {
+                $result['products_skipped']++;
+                error_log('ERP product sync skipped [' . (string)($productData['sku'] ?? '?') . "]: {$e->getMessage()}");
+            }
         }
 
         // 2. Pull stock levels
@@ -61,20 +68,19 @@ class Sync {
         $pendingSync = Orders::pendingStatusSync();
         foreach ($pendingSync as $order) {
             try {
-                // Extract external ID from notes (format: erp_synced:{id})
-                $externalId = null;
-                if (preg_match('/erp_synced:(\S+)/', $order['notes'] ?? '', $m)) {
-                    $externalId = $m[1];
-                }
-                if (!$externalId) continue;
+                // Orders::markSynced/updateErpStatus write the erp_id/erp_status columns (pendingStatusSync selects on erp_id);
+                // a legacy row may still carry its last status only as an erp_status: note marker.
+                $externalId = (string)($order['erp_id'] ?? '');
+                if ($externalId === '') continue;
 
+                // Stamped before the pull: an order whose pull keeps failing must not hold the head of the rotation.
+                Orders::markErpStatusChecked((int)$order['id']);
                 $status = $adapter->pullOrderStatus($externalId);
-                // Extract last known ERP status from notes
-                $lastErpStatus = null;
-                if (preg_match_all('/erp_status:(\S+)/', $order['notes'] ?? '', $m2)) {
+                $lastErpStatus = $order['erp_status'] ?? null;
+                if ($lastErpStatus === null && preg_match_all('/erp_status:(\S+)/', (string)($order['notes'] ?? ''), $m2)) {
                     $lastErpStatus = end($m2[1]);
                 }
-                if ($status !== $lastErpStatus) {
+                if ($status !== (string)$lastErpStatus) {
                     Orders::updateErpStatus((int)$order['id'], $status);
                     $result['statuses_updated']++;
                 }
@@ -83,7 +89,13 @@ class Sync {
             }
         }
 
-        Cache::set('last_erp_sync', date('c'));
+        // A skipped product would never be pulled again past a newer watermark: keep the previous one so the next run retries it.
+        // Until it is fixed every run re-pulls the delta since then, so the operator must see it.
+        if ($result['products_skipped'] === 0) {
+            Cache::set('last_erp_sync', date('c'));
+        } else {
+            IncidentMonitor::report('erp.products_skipped', 'erp', 'warning', ['count' => $result['products_skipped']]);
+        }
 
         // 5. Invalidate cache for changed products
         if ($result['products_updated'] > 0 || $result['stock_updated'] > 0) {

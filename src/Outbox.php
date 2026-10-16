@@ -139,33 +139,42 @@ class Outbox {
         }
     }
 
-    public static function markDelivered(string $eventId): void {
-        self::updateState($eventId, 'delivered', gmdate('Y-m-d H:i:s'), null);
+    /**
+     * Delivery outcomes apply only to an event still being delivered. $claimedAttempts is the
+     * claim's `attempts` value (claim() increments it on every claim, including a takeover after the
+     * 300 s stale lease), so it identifies the claim like DatabaseQueue's claim token: a slow first
+     * deliverer can no longer overwrite the state written by the worker that took the event over.
+     * They return false when the claim is no longer owned.
+     */
+    public static function markDelivered(string $eventId, ?int $claimedAttempts = null): bool {
+        return self::updateState($eventId, 'delivered', gmdate('Y-m-d H:i:s'), null, $claimedAttempts);
     }
 
-    public static function markRetry(string $eventId, int $attempts, string $error): void {
+    public static function markRetry(string $eventId, int $attempts, string $error, ?int $claimedAttempts = null): bool {
         if ($attempts >= self::MAX_ATTEMPTS) {
-            self::markDead($eventId, $error);
-            return;
+            return self::markDead($eventId, $error, $claimedAttempts);
         }
         $delay = min(3600, 5 * (2 ** max(0, $attempts - 1)));
-        self::updateState($eventId, 'retry', gmdate('Y-m-d H:i:s', time() + $delay), $error);
+        return self::updateState($eventId, 'retry', gmdate('Y-m-d H:i:s', time() + $delay), $error, $claimedAttempts);
     }
 
-    public static function markDead(string $eventId, string $error): void {
-        self::updateState($eventId, 'dead', gmdate('Y-m-d H:i:s'), $error);
+    public static function markDead(string $eventId, string $error, ?int $claimedAttempts = null): bool {
+        return self::updateState($eventId, 'dead', gmdate('Y-m-d H:i:s'), $error, $claimedAttempts);
     }
 
-    private static function updateState(string $eventId, string $status, string $availableAt, ?string $error): void {
+    private static function updateState(string $eventId, string $status, string $availableAt, ?string $error, ?int $claimedAttempts): bool {
         $stmt = Db::get()->prepare("UPDATE event_outbox
             SET status=:status, available_at=:available, last_error=:error, updated_at=:updated
-            WHERE id=:id");
-        $stmt->execute([
+            WHERE id=:id AND status='delivering'" . ($claimedAttempts === null ? '' : ' AND attempts=:attempts'));
+        $params = [
             ':status' => $status,
             ':available' => $availableAt,
             ':error' => $error === null ? null : substr($error, 0, 2000),
             ':updated' => gmdate('Y-m-d H:i:s'),
             ':id' => $eventId,
-        ]);
+        ];
+        if ($claimedAttempts !== null) $params[':attempts'] = $claimedAttempts;
+        $stmt->execute($params);
+        return $stmt->rowCount() === 1;
     }
 }

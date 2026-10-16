@@ -2,18 +2,8 @@
 /** BareBones Shop admin panel: session/MFA auth (Security::adminAuth), permission map, POST dispatch and page layout. */
 require_once dirname(__DIR__, 2) . '/src/autoload.php';
 
+// Shared helpers, POST dispatch and store scope load on every request; page modules load per route below.
 require_once __DIR__ . '/Admin/Shared.php';
-require_once __DIR__ . '/Admin/Catalog.php';
-require_once __DIR__ . '/Admin/Orders.php';
-require_once __DIR__ . '/Admin/OrderOperations.php';
-require_once __DIR__ . '/Admin/Customers.php';
-require_once __DIR__ . '/Admin/B2b.php';
-require_once __DIR__ . '/Admin/Suppliers.php';
-require_once __DIR__ . '/Admin/Operations.php';
-require_once __DIR__ . '/Admin/Reports.php';
-require_once __DIR__ . '/Admin/Recovery.php';
-require_once __DIR__ . '/Admin/AdminUsers.php';
-require_once __DIR__ . '/Admin/EmailTemplates.php';
 require_once __DIR__ . '/Admin/Request.php';
 require_once __DIR__ . '/Admin/StoreScope.php';
 // Auth
@@ -47,6 +37,9 @@ $adminAppName = trim((string)($adminConfig['admin_name'] ?? '')) ?: I18n::t('adm
 // p[]=… / action[]=… arrive as arrays; treat them like unknown pages instead of an array-key TypeError.
 $page = Security::str($_GET['p'] ?? 'dashboard', 'dashboard');
 $action = Security::str($_GET['action'] ?? '');
+// Only the modules behind this route (Admin/Modules.php); an unknown page renders the dashboard.
+$adminModules = require __DIR__ . '/Admin/Modules.php';
+foreach ($adminModules[$page] ?? $adminModules['dashboard'] as $adminModule) require_once __DIR__ . '/Admin/' . $adminModule . '.php';
 
 // CSV export — POST only, so the CSRF token travels in the request body
 // instead of the URL (URLs leak via Referer header, browser history and

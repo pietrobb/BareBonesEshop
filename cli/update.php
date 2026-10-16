@@ -111,6 +111,9 @@ try {
         $result = $updater->rollback($snapshotId, !empty($options['force']), !empty($options['accept-data-loss']));
         echo "Rollback complete: {$result['snapshot']}, restored {$result['restored_files']} file(s)"
             . ($result['database_restored_to'] !== null ? ", database restored to {$result['database_restored_to']}" : '') . ".\n";
+        foreach ((array)($result['discarded_writes'] ?? []) as $table => $count) {
+            echo "  discarded since the snapshot: {$table}=" . ($count === null ? 'unknown' : $count) . "\n";
+        }
         updateRecordCoreBaseline($root, $stateDirectory, $config, 'rollback ' . $snapshotId, null);
         exit(0);
     }
@@ -202,8 +205,8 @@ function createUpdateDatabaseBackup(array $config): ?UpdateDatabaseBackup
         (string)($config['db_password'] ?? ''),
         (string)($config['db_charset'] ?? 'utf8mb4'),
         $probeDatabase,
-        (string)($config['update_mysql_dump_binary'] ?? 'mysqldump'),
-        (string)($config['update_mysql_client_binary'] ?? 'mysql')
+        BackupService::mysqlBinary((string)($config['update_mysql_dump_binary'] ?? 'mysqldump'), 'mysqldump', 'mariadb-dump'),
+        BackupService::mysqlBinary((string)($config['update_mysql_client_binary'] ?? 'mysql'), 'mysql', 'mariadb')
     );
 }
 

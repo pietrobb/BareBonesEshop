@@ -28,6 +28,12 @@
     });
   }
 
+  // Goods after the discount: checkout prices free shipping thresholds and payment fees on this amount.
+  function checkoutGoods(subtotal) {
+    const discountElement = document.getElementById('checkout-discount');
+    return Math.max(0, subtotal - (discountElement ? parseInt(discountElement.value || '0', 10) : 0));
+  }
+
   function parseMoney(value) {
     if (String(value).includes(text.free)) return 0;
     const normalized = String(value).replace(/[^0-9,.-]/g, '').replace(',', '.');
@@ -132,7 +138,7 @@
     box.innerHTML = `<div class="payment-loading">${escapeHtml(text.paymentLoading)}</div>`;
     const params = new URLSearchParams({
       action: 'payment_methods', country: country.value, currency: config.currency,
-      amount: String(subtotal + shippingPrice), shipping_method: selectedShipping
+      amount: String(checkoutGoods(subtotal) + shippingPrice), shipping_method: selectedShipping
     });
     const response = await fetch(`${apiUrl}?${params}`);
     const result = await response.json();
@@ -165,7 +171,7 @@
     const previous = box.querySelector('input[name="shipping_method"]:checked');
     const previousCode = previous ? previous.value : '';
     box.innerHTML = `<div class="shipping-loading">${escapeHtml(text.shippingLoading)}</div>`;
-    const params = new URLSearchParams({action: 'shipping_rates', country: country.value, subtotal: String(subtotal)});
+    const params = new URLSearchParams({action: 'shipping_rates', country: country.value, subtotal: String(checkoutGoods(subtotal))});
     const response = await fetch(`${apiUrl}?${params}`);
     const result = await response.json();
     const methods = result.methods || [];

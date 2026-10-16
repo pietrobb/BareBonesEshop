@@ -56,10 +56,10 @@ RewriteRule ^feeds/meta\.csv$ feed.php?channel=meta [QSA,L]
 # Store URL prefixes (/cs/..., /de/..., any url_prefix in stores.json) are served by the
 # redirect.php fallback below (UrlAliases::storeRoute), so adding a store needs no rule here.
 
-# Product detail: /product/brzdovy-kotuc-predny → product.php?slug=brzdovy-kotuc-predny
+# Product detail: /product/ceramic-mug-blue → product.php?slug=ceramic-mug-blue
 RewriteRule ^product/([a-z0-9-]+)/?$ product.php?slug=$1 [QSA,L]
 
-# Category: /category/brzdovy-system → index.php?category=brzdovy-system
+# Category: /category/kitchen → index.php?category=kitchen
 RewriteRule ^category/([a-z0-9/-]+)/?$ index.php?category=$1 [QSA,L]
 
 # CMS Page: /page/about → page.php?slug=about

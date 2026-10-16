@@ -12,7 +12,7 @@ This runbook defines the minimum operated-production contract for BareBonesEshop
 | Queue health | fewer than 100 pending jobs and no unresolved failed jobs | `queue_pending`, `failed_jobs` | warning at configured thresholds |
 | Commerce integrations | no unresolved payment, mail, or webhook incidents | `payment_incidents`, `failed_mail`, `webhook_incidents` | payment is critical; mail and webhook failures are warnings |
 | Payment funnel | customers who choose online payment reach the gateway and pay | `payment_online_started`, `payment_online_redirected`, `payment_online_paid` (real orders older than 30 minutes, last 24 hours; synthetic smoke orders excluded) | critical `payment_session_failing` when ≥ 3 online orders got no gateway session; critical `payment_funnel_stalled` when ≥ 3 got a session and none was paid |
-| Browser policy | the browser blocks nothing the shop needs | `csp_violations`, `csp_form_action_violations` from `report-uri`/`report-to` (`api.php?action=csp_report`, last 24 hours) | critical `csp_form_action_violation` on any blocked form target (a dropped gateway redirect); warning `csp_violations_high` at 20 |
+| Browser policy | the browser blocks nothing the shop needs | `csp_violations`, `csp_form_action_violations` from `report-uri`/`report-to` (`api.php?action=csp_report`, last 24 hours) | critical `csp_form_action_violation` on a blocked form target (a dropped gateway redirect) reported by ≥ 2 distinct clients (`csp_form_action_critical`) or in ≥ 5 reports in total (`csp_form_action_reports_critical`; behind a proxy/CDN without `trusted_proxies` all reports share one client IP); warning `csp_violations_high` at 20 |
 
 The availability SLO is calculated by the external probe system; the application emits the current bounded signal and never invents historical availability. Tune thresholds in `monitoring` only after measuring normal traffic. A threshold change is an operational policy change and must be reviewed.
 
@@ -45,7 +45,7 @@ Example deployment configuration:
     'payment_funnel_grace_seconds' => 1800,
     'payment_funnel_min_started' => 3,
     'csp_window_seconds' => 86400,
-    'csp_form_action_critical' => 1,
+    'csp_form_action_critical' => 2,
     'csp_violations_warning' => 20,
     'synthetic_token' => '<at least 32 random characters from the deployment secret store>',
 ],
@@ -53,7 +53,7 @@ Example deployment configuration:
 
 Do not expose the JSONL file over HTTP. Public `/healthz` and `/readyz` remain deliberately non-sensitive.
 
-CSP reports need a valid absolute `app_url`; the endpoint stores only directive, blocked origin (no path or query), document path and time, keeps 14 days, and is rate limited. Browser-extension noise is dropped.
+CSP reports need a valid absolute `app_url`; the endpoint stores only directive, blocked origin (no path or query), document path and time, keeps 14 days, and is rate limited. Browser-extension noise is dropped. Each report also keeps a salted hash of the reporting IP: `csp_form_action_violations` counts distinct reporters, so the critical alert (default 2) cannot be raised by one client posting forged reports.
 
 ## Post-deploy checkout smoke
 
@@ -78,6 +78,28 @@ The request carries `X-BareBones-Synthetic` with `monitoring.synthetic_token`. T
 3. Configure `backup_storage_adapter` as `MountedBackupStorage` and `backup_storage_dir` as the mount path. Credentials remain in the host mount, never in application config or Git.
 4. Schedule the existing backup command at least daily and monitor `backup_age_seconds`.
 5. Treat `backup_probe_failed`, `backup_missing`, and `backup_rpo_breached` as critical. `MountedBackupStorage` fails closed if the sentinel disappears, preventing silent local fallback.
+
+Each backup is a database copy (`.db` VACUUM INTO for SQLite, `.sql` single-transaction dump for MySQL/MariaDB) plus a companion `<backup>.files.tar` with issued invoice PDFs, uploads and the GDPR salt file. **The files archive is sensitive:** the GDPR salt is the secret behind every pseudonymised GDPR record, so anyone holding it can re-link erased customers to their hashes. Store backups only on encrypted, access-reviewed targets and never attach them to tickets or chat.
+
+### Restoring with `cli/restore.php`
+
+```bash
+php cli/restore.php --list                                            # restore points, newest first (files=yes marks a files archive)
+php cli/restore.php 2026/10/16/eshop-20261016-020000.db               # SQLite database
+php cli/restore.php 2026/10/16/eshop-20261016-020000.sql --i-stopped-writers   # MySQL/MariaDB database
+php cli/restore.php <backup> --files                                  # database, then the files archive
+php cli/restore.php <backup> --files-only                             # only invoices/uploads/GDPR salt
+php cli/restore.php <backup> --files-only --force                     # also overwrite differing live files
+```
+
+Every restore first downloads the backup and verifies its metadata identity, size and SHA-256, and takes a `pre-restore-snapshot` backup of the current database (`--skip-snapshot` skips it for SQLite only; a MySQL/MariaDB restore refuses it). `--latest` picks the newest uncompressed backup, never its `.gz` copy.
+
+**Run `cli/restore.php` as the application user** (the user PHP-FPM/workers run as), e.g. `sudo -u www-data php cli/restore.php ...`. Restored files keep the mode, owner and group of the file they replace, or take them from the directory they land in (new files without execute bits); owner/group can only be set when running as root, so a restore as any other user leaves new files owned by that user.
+
+- **SQLite:** `PRAGMA integrity_check` on the copy, then an atomic swap under the exclusive `<db>.maintenance` gate, which refuses while any other process holds the database.
+- **MySQL/MariaDB:** MySQL has no lock that proves nobody else is writing, so the restore is refused unless you stop web traffic (maintenance page), workers and cron and pass `--i-stopped-writers`. The dump is imported into the scratch database `backup_mysql_restore_scratch_database` (default `<db_name>_restore_scratch`; it must not exist) and each table must hold exactly the rows the dump carries. Only then is `db_name` dropped, recreated with the dumped character set/collation, re-imported and proven identical (schema, row counts, extended content checksums) to the scratch copy; if that fails, the dump of the current database taken just before is re-imported automatically and verified (same schema, exactly the rows that dump carries). Once `db_name` has been dropped, a failed restore keeps that dump (mode 0600) in the private recovery directory `backup_recovery_dir` (default `<private_runtime_dir>/restore-recovery`) and prints its path; if the automatic re-import failed too, recreate `db_name` with its character set and import that file with the `mysql`/`mariadb` client, then delete it. Dumps containing a top-level `USE`, `CREATE`/`ALTER`/`DROP DATABASE`, or a mysql client command (`SOURCE`, `SYSTEM`, `\!`, ...) are refused before anything is imported. Sessions still connected to `db_name` are refused when the server shows them (other users' sessions are visible only with the `PROCESS` privilege). The scratch database is dropped afterwards. A database cannot be renamed and `RENAME TABLE` cannot move triggers, views or routines across schemas, so the live database is replaced, not swapped.
+  Required grants for `db_user`, scoped to the two schema names: `ALL PRIVILEGES` on `db_name` and on the scratch database (create/drop the schema, create tables, triggers, routines, events, insert). For example: `GRANT ALL PRIVILEGES ON shop.* TO 'shop'@'%'; GRANT ALL PRIVILEGES ON shop_restore_scratch.* TO 'shop'@'%';`. With binary logging on, importing triggers/routines as a non-SUPER user also needs `log_bin_trust_function_creators=1`.
+- **Files (`--files`, `--files-only`):** the archive's SHA-256, size and entry count are verified, then it is extracted into a private staging directory by a strict reader that accepts only regular files and directories with relative paths (absolute paths, `..`, links and devices refuse the whole archive). Each file goes to the directory configured *now* (`invoice_storage_dir`, `uploads_dir`, `gdpr_salt_file`); a symlinked or non-directory path component below that directory, a non-regular target or an unwritable directory refuses the restore before anything is written (if a write still fails, the error lists the files already written). Identical files are skipped; if any live file differs from the backup nothing is written unless `--force`. Files that are not in the backup are kept. Replacing the GDPR salt with an older one changes every pseudonym computed after that backup, so restore it only together with the matching database.
 
 ### Monthly disposable restore drill
 

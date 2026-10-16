@@ -32,13 +32,16 @@ try {
     assert_true($m6Direct && (int)$m6Row('M6-RES')['qty'] === 3, 'CR-M6: a manual count below the reservations is refused');
 
     Warehouse::setStock($m6Wh, 'M6-OK', 4);
+    // CR follow-up: one invalid feed row is skipped and reported; it no longer throws away the rest of the feed.
     $m6Threw = false;
-    try { Warehouse::bulkSetStock($m6Wh, ['M6-OK' => 9, 'M6-BAD' => -1]); } catch (Throwable $e) { $m6Threw = true; }
+    $m6Skipped = null;
+    $m6Count = 0;
+    try { $m6Count = Warehouse::bulkSetStock($m6Wh, ['M6-OK' => 9, 'M6-BAD' => -1], $m6Skipped); } catch (Throwable $e) { $m6Threw = true; }
     $m6OpenTx = $m6Db->inTransaction();
     if ($m6OpenTx) $m6Db->rollBack();
-    assert_true($m6Threw && !$m6OpenTx, 'CR-M6: a failing bulk sync does not leave its transaction open');
-    assert_equals(4, (int)$m6Row('M6-OK')['qty'], 'CR-M6: a failing bulk sync rolls back the SKUs it already wrote');
-    assert_true($m6Row('M6-BAD')['qty'] === null, 'CR-M6: a failing bulk sync writes nothing for the failing SKU');
+    assert_true(!$m6Threw && !$m6OpenTx && $m6Count === 1, 'CR-M6: a feed with an invalid row neither throws nor leaves its transaction open');
+    assert_equals(9, (int)$m6Row('M6-OK')['qty'], 'CR-M6: the valid SKUs of a feed with an invalid row are applied');
+    assert_true($m6Row('M6-BAD')['qty'] === null && $m6Skipped === ['M6-BAD'], 'CR-M6: the invalid row is skipped, written nowhere and reported');
 
     $m6Erp = null;
     try { Products::bulkUpdateStock([['sku' => 'M6-RES', 'qty' => 0]]); } catch (Throwable $e) { $m6Erp = $e->getMessage(); }

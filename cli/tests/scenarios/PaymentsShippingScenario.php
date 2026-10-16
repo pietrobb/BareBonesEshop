@@ -56,7 +56,7 @@ if ($smokeAvailable) {
         }
     }
 } else {
-    echo "  [SKIP] No server running at {$smokeBaseUrl} — start with: php -S localhost:8080\n";
+    echo "  [SKIP] No server running at {$smokeBaseUrl} — start with: php -S localhost:8080 router.php\n";
 }
 
 // ============================================================
@@ -638,6 +638,7 @@ onPaymentCompleted([
     'id' => 'cs_legacy_paid_1',
     'payment_intent' => 'pi_legacy_paid_1',
     'amount_total' => (int)Orders::byId($legacyStripeOrderId)['total'],
+    'currency' => 'eur',
     'metadata' => ['order_id' => $legacyStripeOrderId],
 ]);
 $legacyStripeOrder = Orders::byId($legacyStripeOrderId);

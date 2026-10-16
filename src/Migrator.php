@@ -10,7 +10,9 @@
  * State: schema_migrations(name UNIQUE, checksum, applied_at, duration_ms). Extension migrations
  * (extensions/<code>/migrations) use the same runner with their own table and a "<code>/" name prefix.
  *
- * Concurrency: file lock on db/.migrations.lock (flock, 10s timeout).
+ * Concurrency: file lock on db/.migrations.lock (flock, 10s timeout). When db/ is not writable
+ * (read-only code mount, e.g. deploy/docker-compose.yml) the lock lives in the private runtime
+ * directory (config private_runtime_dir), else in the system temp directory.
  *
  * Failure: SQLite wraps each migration in BEGIN/ROLLBACK. MySQL-family DDL
  * commits implicitly; on every driver the marker row is inserted only on success.
@@ -121,9 +123,24 @@ class Migrator {
         $this->db            = $db ?? Db::get();
         $this->isSqlite      = $this->db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite';
         $this->migrationsDir = $migrationsDir ?? (dirname(__DIR__) . '/migrations');
-        $dbDir               = dirname(__DIR__) . '/db';
+        $this->lockFile = $lockFile ?? self::defaultLockFile();
+    }
+
+    /** First writable of: <app>/db, the private runtime directory, the system temp directory. */
+    public static function defaultLockFile(?string $appRoot = null, ?array $config = null): string {
+        $appRoot ??= dirname(__DIR__);
+        $dbDir = $appRoot . '/db';
         if (!is_dir($dbDir)) @mkdir($dbDir, 0750, true);
-        $this->lockFile = $lockFile ?? ($dbDir . '/' . self::LOCK_FILENAME);
+        if (is_dir($dbDir) && is_writable($dbDir)) return $dbDir . '/' . self::LOCK_FILENAME;
+        if ($config === null) {
+            $config = is_file($appRoot . '/config.php') ? (array)(require $appRoot . '/config.php') : [];
+        }
+        $runtimeDir = rtrim((string)($config['private_runtime_dir'] ?? ''), '/\\');
+        if ($runtimeDir !== '' && is_dir($runtimeDir) && is_writable($runtimeDir)) {
+            return $runtimeDir . '/' . self::LOCK_FILENAME;
+        }
+        // One lock per installation, so installations sharing the temp directory do not block each other.
+        return rtrim(sys_get_temp_dir(), '/\\') . '/bbeshop-' . substr(hash('sha256', $appRoot), 0, 16) . self::LOCK_FILENAME;
     }
 
     // ------------------------------------------------------------

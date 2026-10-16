@@ -124,33 +124,45 @@ class Warehouse {
     }
 
     /**
-     * Bulk set stock for many SKUs in one warehouse (feed/ERP sync), all or nothing. A count below the units already
-     * reserved for open orders is clamped to the reservations (nothing left to sell) and reported as an oversell.
+     * Bulk set stock for many SKUs in one warehouse (feed/ERP sync). A row with an empty SKU or a count that is not a
+     * whole number >= 0 is skipped (its SKU listed in $skipped, reported to operations) and the rest of the feed is
+     * applied. A count below the units already reserved for open orders is clamped to the reservations (nothing left
+     * to sell) and reported as an oversell. A database failure still rolls back the whole sync.
      */
-    public static function bulkSetStock(int $warehouseId, array $stockMap): int {
+    public static function bulkSetStock(int $warehouseId, array $stockMap, ?array &$skipped = null): int {
         $count = 0;
         $oversold = 0;
+        $skipped = [];
+        $applied = [];
         $db = Db::get();
         $ownsTransaction = !$db->inTransaction();
         if ($ownsTransaction) $db->beginTransaction();
         try {
-            $reservedStmt = $db->prepare('SELECT reserved FROM warehouse_stock WHERE warehouse_id = :wh AND sku = :sku');
+            // Locked on MySQL so a concurrent reservation cannot slip in between this read and the write.
+            $reservedStmt = $db->prepare('SELECT reserved FROM warehouse_stock WHERE warehouse_id = :wh AND sku = :sku' . (Db::isMysql() ? ' FOR UPDATE' : ''));
             foreach ($stockMap as $sku => $qty) {
-                $reservedStmt->execute([':wh' => $warehouseId, ':sku' => (string)$sku]);
+                $sku = (string)$sku;
+                if (trim($sku) === '' || filter_var($qty, FILTER_VALIDATE_INT) === false || (int)$qty < 0) {
+                    $skipped[] = $sku;
+                    continue;
+                }
+                $reservedStmt->execute([':wh' => $warehouseId, ':sku' => $sku]);
                 $reserved = (int)$reservedStmt->fetchColumn();
                 $reservedStmt->closeCursor();
                 $qty = (int)$qty;
-                if ($qty >= 0 && $qty < $reserved) { $oversold++; $qty = $reserved; }
-                self::setStock($warehouseId, (string)$sku, $qty, 'feed_sync', 'warehouse_feed', $warehouseId);
+                if ($qty < $reserved) { $oversold++; $qty = $reserved; }
+                self::setStock($warehouseId, $sku, $qty, 'feed_sync', 'warehouse_feed', $warehouseId);
+                $applied[] = $sku;
                 $count++;
             }
-            self::syncProductStock(array_map('strval', array_keys($stockMap)));
+            self::syncProductStock($applied);
             if ($ownsTransaction) $db->commit();
         } catch (Throwable $e) {
             if ($ownsTransaction && $db->inTransaction()) $db->rollBack();
             throw $e;
         }
         if ($oversold > 0) IncidentMonitor::report('inventory.feed_below_reserved', 'inventory', 'warning', ['count' => $oversold]);
+        if ($skipped !== []) IncidentMonitor::report('inventory.feed_invalid_rows', 'inventory', 'warning', ['count' => count($skipped)]);
 
         return $count;
     }

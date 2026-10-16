@@ -7,7 +7,7 @@ module.exports = [
   { ignores: ['node_modules/**', 'vendor/**', 'releases/**', 'playwright-report/**', 'test-results/**', 'parity-report/**', '.lighthouseci/**'] },
   js.configs.recommended,
   {
-    files: ['shop.js', 'themes/**/assets/*.js'],
+    files: ['themes/**/assets/*.js'],
     languageOptions: { ecmaVersion: 2020, sourceType: 'script', globals: globals.browser },
   },
   {

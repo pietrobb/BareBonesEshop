@@ -152,9 +152,13 @@ return [
         'payment_funnel_window_seconds' => 86400,
         'payment_funnel_grace_seconds' => 1800,
         'payment_funnel_min_started' => 3,
-        // Browser CSP reports (api.php?action=csp_report); any blocked form-action is critical.
+        // Browser CSP reports (api.php?action=csp_report). A blocked form-action is critical once
+        // reported by csp_form_action_critical distinct clients (IP hashes), or by
+        // csp_form_action_reports_critical reports in total (behind a proxy/CDN without
+        // trusted_proxies every report has the same IP). 0 disables a threshold.
         'csp_window_seconds' => 86400,
-        'csp_form_action_critical' => 1,
+        'csp_form_action_critical' => 2,
+        'csp_form_action_reports_critical' => 5,
         'csp_violations_warning' => 20,
         // Post-deploy smoke (cli/smoke-checkout.php) sends this in X-BareBones-Synthetic; its order is
         // flagged synthetic, sends no mail and is closed right after the gateway redirect.
@@ -251,6 +255,8 @@ return [
     'backup_storage_dir'  => dirname(__DIR__) . '/bareboneseshop-private/backups',
     'backup_storage_adapter' => 'LocalBackupStorage', // MountedBackupStorage requires an operator-mounted off-site target + sentinel
     'backup_log_file'     => dirname(__DIR__) . '/bareboneseshop-private/logs/backup.log',
+    // Keeps the pre-restore MySQL dump (0600) when a restore fails after dropping db_name; default <private_runtime_dir>/restore-recovery
+    'backup_recovery_dir' => dirname(__DIR__) . '/bareboneseshop-private/restore-recovery',
     'structured_log_file' => dirname(__DIR__) . '/bareboneseshop-private/logs/application.jsonl',
     'metrics_log_file'    => dirname(__DIR__) . '/bareboneseshop-private/logs/metrics.jsonl',
     'update_storage_dir'  => dirname(__DIR__) . '/bareboneseshop-private/updates',
@@ -261,6 +267,10 @@ return [
     'update_mysql_probe_database' => '',
     'update_mysql_dump_binary'    => 'mysqldump', // use mariadb-dump where appropriate
     'update_mysql_client_binary'  => 'mysql',     // use mariadb where appropriate
+    // MySQL/MariaDB backup restore (php cli/restore.php ... --i-stopped-writers) imports the dump here
+    // first and verifies it before replacing db_name. Must end with _restore_scratch; default
+    // <db_name>_restore_scratch. db_user needs CREATE/DROP on it (and on db_name) — see OPERATIONS_RUNBOOK.md.
+    'backup_mysql_restore_scratch_database' => '',
     'gdpr_salt_file'      => dirname(__DIR__) . '/bareboneseshop-private/secrets/gdpr_salt',
 
     // GDPR — prefer injecting this secret; otherwise it is generated in gdpr_salt_file.

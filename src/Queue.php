@@ -176,7 +176,11 @@ class DatabaseQueue implements QueueBackend {
     }
 }
 
-/** Redis queue using Lua claims so multiple workers cannot own the same job. */
+/**
+ * Redis queue using Lua claims so multiple workers cannot own the same job.
+ * GDPR: jobs held here are not reached by GdprService's export or erasure (QueueBackend has no way
+ * to enumerate jobs); see the queue section of ESHOP-DESIGN.md.
+ */
 class RedisQueue implements QueueBackend {
     private object $redis;
     private string $prefix;

@@ -187,8 +187,6 @@ class Template {
             'seo_head' => '',
             'body_html' => '',
             'body_end' => '',
-            'base_css' => '<link rel="stylesheet" href="' . esc(self::url('/shop.css')) . '">',
-            'shop_js' => '<script src="' . esc(self::url('/shop.js')) . '" defer></script>',
             'marketing_hooks' => MarketingConsent::hooks($_COOKIE, Security::cspNonce()),
         ];
         return self::render('global/document', array_replace($defaults, $data));

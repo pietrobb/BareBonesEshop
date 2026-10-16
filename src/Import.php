@@ -60,17 +60,29 @@ class Import {
         $batch = 0;
         $limitExceeded = false;
 
+        // A long import must keep its worker lease. The heartbeat runs only between batches, never
+        // inside the open batch transaction: on the same PDO it would hold the queue row lock until
+        // the commit (blocking other workers' expired-claim recovery) and be lost on a rollback.
+        $heartbeat = static function () use ($handle): void {
+            try {
+                JobQueue::heartbeat();
+            } catch (JobLeaseLost $e) {
+                fclose($handle); // the worker that took the job over re-imports the remaining rows
+                throw $e;
+            }
+        };
+        $heartbeat();
         $db->beginTransaction();
         $lineNum = 1; // header = line 1
 
         while (($row = fgetcsv($handle, self::MAX_ROW_BYTES, ',', '"', '')) !== false) {
             $lineNum++;
-            try {
-                JobQueue::heartbeat(); // a long import must keep its worker lease
-            } catch (JobLeaseLost $e) {
-                $db->rollBack(); // the worker that took the job over re-imports the open batch
-                fclose($handle);
-                throw $e;
+            // Commit in batches for performance (counting every row, so a run of bad rows heartbeats too)
+            if (++$batch > $batchSize) {
+                $db->commit();
+                $heartbeat();
+                $db->beginTransaction();
+                $batch = 1;
             }
             if ($lineNum > self::MAX_ROWS + 1) {
                 $errors[] = 'CSV exceeds the 100000 row limit; earlier committed batches remain imported';
@@ -91,14 +103,6 @@ class Import {
                 self::importProduct($data, $db);
                 $db->exec('RELEASE SAVEPOINT row_import');
                 $imported++;
-                $batch++;
-
-                // Commit in batches for performance
-                if ($batch >= $batchSize) {
-                    $db->commit();
-                    $db->beginTransaction();
-                    $batch = 0;
-                }
             } catch (\Throwable $e) {
                 $db->exec('ROLLBACK TO SAVEPOINT row_import');
                 $errors[] = "Line {$lineNum} (SKU: " . ($data['sku'] ?? '?') . "): " . $e->getMessage();

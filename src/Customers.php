@@ -14,7 +14,9 @@ class Customers {
     private const EMAIL_VERIFY_TTL_SECONDS = 86400; // 24 hours
     private const SESSION_IDLE_TTL_SECONDS = 1800;
     private const MIN_PASSWORD_LEN = 8;
-    private static ?string $dummyPasswordHash = null;
+    // Unknown e-mails are verified against this precomputed hash (of a discarded random secret) at
+    // BCRYPT_COST, so the miss path costs one password_verify like a real account and never a password_hash().
+    private const DUMMY_PASSWORD_HASH = '$2y$12$3aA7J9zu5aqoTiYlkeXhrueHZL9MGkKL7qR1FN6QOa6.LZiQGndeW';
 
     // ============================================================
     // Registration
@@ -81,10 +83,7 @@ class Customers {
         $stmt = $db->prepare("SELECT * FROM customers WHERE email = ? AND store_id = ?");
         $stmt->execute([$email, StoreContext::current()->id()]);
         $c = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (self::$dummyPasswordHash === null) {
-            self::$dummyPasswordHash = password_hash(bin2hex(random_bytes(16)), PASSWORD_BCRYPT, ['cost' => self::BCRYPT_COST]);
-        }
-        $passwordValid = password_verify($password, (string)($c['password_hash'] ?? self::$dummyPasswordHash));
+        $passwordValid = password_verify($password, (string)($c['password_hash'] ?? self::DUMMY_PASSWORD_HASH));
         if (!$c || ($c['status'] ?? 'active') !== 'active' || !$passwordValid) {
             return [false, null, 'invalid_credentials'];
         }

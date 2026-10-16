@@ -59,24 +59,28 @@ class Rma {
             return [false, null, 'reason_required'];
         }
         // Multiple partial RMAs may be open at once. Quantity is reserved by all
-        // non-rejected requests so concurrent requests cannot over-claim a line.
-
-        // Resolve which order_items are being returned and clamp quantities.
-        $orderItems = [];
-        foreach (Orders::items($orderId) as $oi) {
-            $orderItems[(int)$oi['id']] = $oi;
-        }
-        $selected = self::normalizeItems($orderId, $items, $orderItems);
-        if (!$selected) {
-            return [false, null, 'no_items'];
-        }
-
+        // non-rejected requests so concurrent requests cannot over-claim a line:
+        // the claimed quantities are read and the new claim written in one transaction,
+        // serialised per order by the order row lock (SQLite serialises writers itself).
         $db = Db::get();
-        $now = Db::isSqlite() ? "datetime('now')" : 'NOW()';
         $rmaNumber = self::generateNumber($orderId);
 
         $db->beginTransaction();
         try {
+            if (Db::isMysql()) {
+                $db->prepare('SELECT id FROM orders WHERE id = ? FOR UPDATE')->execute([$orderId]);
+            }
+            // Resolve which order_items are being returned and clamp quantities.
+            $orderItems = [];
+            foreach (Orders::items($orderId) as $oi) {
+                $orderItems[(int)$oi['id']] = $oi;
+            }
+            $selected = self::normalizeItems($orderId, $items, $orderItems);
+            if (!$selected) {
+                $db->rollBack();
+                return [false, null, 'no_items'];
+            }
+
             $ins = $db->prepare(
                 "INSERT INTO rma_requests
                     (store_id, rma_number, order_id, customer_id, status, reason)
@@ -262,12 +266,20 @@ class Rma {
             throw new LogicException('RMA is not ready to receive');
         }
         if ($idempotencyKey === '' || !$decisions) throw new InvalidArgumentException('Receipt decisions and idempotency key are required');
-        $items = [];
-        foreach (self::items($rmaId) as $item) $items[(int)$item['id']] = $item;
         $db = Db::get();
         $own = !$db->inTransaction();
         if ($own) $db->beginTransaction();
         try {
+            // Status and received quantities are re-read inside the transaction (row-locked on MySQL),
+            // so two concurrent receipts cannot both pass the "exceeds requested quantity" check.
+            $rma = self::lockedRma($rmaId);
+            if (!$rma || !in_array((string)$rma['status'], ['approved', 'received'], true)) {
+                throw new LogicException('RMA is not ready to receive');
+            }
+            $items = [];
+            $lines = $db->prepare('SELECT * FROM rma_items WHERE rma_id = ? ORDER BY id' . (Db::isMysql() ? ' FOR UPDATE' : ''));
+            $lines->execute([$rmaId]);
+            foreach ($lines->fetchAll(PDO::FETCH_ASSOC) as $item) $items[(int)$item['id']] = $item;
             $changed = false;
             foreach ($decisions as $rmaItemId => $decision) {
                 $rmaItemId = (int)$rmaItemId;
@@ -351,6 +363,32 @@ class Rma {
         $rma = self::byId($rmaId);
         if (!$rma || !in_array((string)$rma['status'], ['received', 'refunded'], true)) throw new LogicException('RMA is not received');
         if ($quantity <= 0 || $idempotencyKey === '' || !Products::byId($replacementProductId)) throw new InvalidArgumentException('Exchange request is invalid');
+        // The available quantity is checked and the exchange inserted in one transaction, with the
+        // RMA line locked on MySQL, so concurrent exchanges cannot both reserve the same units.
+        $db = Db::get();
+        $own = !$db->inTransaction();
+        if ($own) $db->beginTransaction();
+        try {
+            $exchangeId = self::insertExchange($rmaId, $rmaItemId, $quantity, $replacementProductId, $replacementVariantId, $idempotencyKey);
+            if ($own) $db->commit();
+            return $exchangeId;
+        } catch (Throwable $e) {
+            if ($own && $db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+    }
+
+    /** RMA row for update inside a transaction: locked on MySQL; SQLite serialises writers itself. */
+    private static function lockedRma(int $rmaId): ?array {
+        $stmt = Db::get()->prepare('SELECT * FROM rma_requests WHERE id = ? AND store_id = ?' . (Db::isMysql() ? ' FOR UPDATE' : ''));
+        $stmt->execute([$rmaId, StoreContext::current()->id()]);
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    private static function insertExchange(int $rmaId, int $rmaItemId, int $quantity, int $replacementProductId, ?int $replacementVariantId, string $idempotencyKey): int {
+        $rma = self::lockedRma($rmaId);
+        if (!$rma || !in_array((string)$rma['status'], ['received', 'refunded'], true)) throw new LogicException('RMA is not received');
+        if (Db::isMysql()) Db::get()->prepare('SELECT id FROM rma_items WHERE id = ? FOR UPDATE')->execute([$rmaItemId]);
         $stmt = Db::get()->prepare("SELECT ri.*,
                 COALESCE((SELECT SUM(cni.quantity) FROM credit_note_items cni JOIN order_refunds r ON r.id=cni.refund_id WHERE cni.rma_item_id=ri.id AND r.status IN ('pending','succeeded')),0) AS credited,
                 COALESCE((SELECT SUM(quantity) FROM return_exchanges re WHERE re.rma_item_id=ri.id AND re.store_id=:store2 AND re.status!='cancelled'),0) AS exchanged

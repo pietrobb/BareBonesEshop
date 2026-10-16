@@ -16,6 +16,8 @@ class JobQueue {
     private static ?QueueBackend $backendOverride = null;
     private static ?QueueBackend $configuredBackend = null;
     private static bool $forceFile = false;
+    /** Job file states of the file backend, in the order a job moves through them. */
+    private const FILE_STATES = ['pending', 'processing', 'failed', 'completed'];
 
     private static function backend(): ?QueueBackend {
         if (self::$forceFile) return null;
@@ -289,6 +291,68 @@ class JobQueue {
             ];
         }
         return $result;
+    }
+
+    /**
+     * File backend only (empty for the database and Redis backends): every job file in pending/,
+     * processing/, failed/ and completed/ with its state. Read by the GDPR export.
+     *
+     * @return list<array{state: string, job: array}>
+     */
+    public static function fileJobs(): array {
+        if (self::backend() !== null) return [];
+        $jobs = [];
+        foreach (self::FILE_STATES as $state) {
+            foreach (glob(self::dir() . '/' . $state . '/*.json') ?: [] as $file) {
+                $job = self::readJobFile($file);
+                if ($job !== null) $jobs[] = ['state' => $state, 'job' => $job];
+            }
+        }
+        return $jobs;
+    }
+
+    /**
+     * File backend only (0 for the database and Redis backends): GDPR erasure rewrites job files.
+     * $rewrite gets a decoded job and returns the job to store, or null to leave the file alone; it
+     * must return null for a job it already rewrote. Each file is first renamed to a hidden name in
+     * its directory: rename() is atomic, so a worker can no longer claim, complete or fail it while
+     * it is rewritten (atomically, see writeJson()) and renamed back. A file a worker moved in the
+     * meantime is skipped and found in its new state directory by the second pass. A job a worker
+     * is running keeps the payload it already read: if that run fails, fail() writes it back, and a
+     * later erasure run is needed to scrub it.
+     */
+    public static function rewriteFileJobs(callable $rewrite): int {
+        if (self::backend() !== null) return 0;
+        $rewritten = 0;
+        for ($pass = 0; $pass < 2; $pass++) {
+            foreach (self::FILE_STATES as $state) {
+                foreach (glob(self::dir() . '/' . $state . '/*.json') ?: [] as $file) {
+                    $job = self::readJobFile($file);
+                    if ($job === null || $rewrite($job) === null) continue;
+                    $hold = $file . '.gdpr-' . bin2hex(random_bytes(6));
+                    if (!@rename($file, $hold)) continue;
+                    try {
+                        // Re-read under the hold: fail() may have rewritten the file between the read and the rename.
+                        $job = self::readJobFile($hold);
+                        $updated = $job !== null ? $rewrite($job) : null;
+                        if (is_array($updated)) {
+                            self::writeJson($hold, $updated);
+                            $rewritten++;
+                        }
+                    } finally {
+                        if (!rename($hold, $file)) throw new RuntimeException("JobQueue: cannot restore {$file}");
+                    }
+                }
+            }
+        }
+        return $rewritten;
+    }
+
+    private static function readJobFile(string $file): ?array {
+        if (is_link($file) || !is_file($file)) return null;
+        $raw = @file_get_contents($file);
+        $job = $raw !== false ? json_decode($raw, true) : null;
+        return is_array($job) ? $job : null;
     }
 
     private static function validatePrivateDir(string $dir): string {

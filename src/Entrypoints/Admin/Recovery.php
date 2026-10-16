@@ -84,9 +84,14 @@ function handleAwaitingPaymentConfirm(): void {
     $note = mb_substr(trim((string)($_POST['note'] ?? '')), 0, 200);
     try {
         $recorded = OfflinePaymentQueue::confirm($orderId, Security::adminUser(), $note);
-        setFlash($recorded ? 'ok' : 'err', $recorded
-            ? I18n::t('admin.recovery.confirmed')
-            : I18n::t('admin.recovery.already_paid'));
+        if ((string)(Orders::byId($orderId)['status'] ?? '') === 'cancelled') {
+            // The order expired or was cancelled meanwhile: it stays cancelled and the money must go back.
+            setFlash('err', I18n::t('admin.order.msg.paid_on_cancelled'));
+        } else {
+            setFlash($recorded ? 'ok' : 'err', $recorded
+                ? I18n::t('admin.recovery.confirmed')
+                : I18n::t('admin.recovery.already_paid'));
+        }
     } catch (\Throwable $e) {
         error_log("Offline payment confirm error [{$orderId}]: " . $e->getMessage());
         setFlash('err', I18n::t('admin.recovery.confirm_failed'));

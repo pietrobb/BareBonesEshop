@@ -3,6 +3,8 @@
 require_once __DIR__ . '/CatalogEditor.php';
 require_once __DIR__ . '/Taxonomy.php';
 require_once __DIR__ . '/PricingRules.php';
+/** The one escaping helper the catalog editors' nonce'd inline scripts (product and attribute forms) build markup with. */
+const ADMIN_JS_ESC_HTML = "function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }";
 function pageProducts(): void {
     $db = Db::get();
     $page = max(1, Security::int($_GET['page'] ?? 1));
@@ -321,7 +323,8 @@ function pageProduct(): void {
         });
         container.innerHTML = html;
     }
-    function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    <?= ADMIN_JS_ESC_HTML ?>
+
     document.getElementById('field-category_id').addEventListener('change', updateAttrFields);
     </script>
     <?php
@@ -1120,7 +1123,8 @@ function pageAttribute(): void {
             '<button type="button" data-action="remove-parent" class="btn btn-sm btn-danger">×</button>';
         document.getElementById('options-list').appendChild(div);
     }
-    function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    <?= ADMIN_JS_ESC_HTML ?>
+
     toggleOptions();
     function filterCats() {
         var q = document.getElementById('cat-filter').value.toLowerCase();

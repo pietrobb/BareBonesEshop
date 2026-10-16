@@ -421,7 +421,7 @@ $webhookRoutingSourceG7 = file_get_contents(TEST_CLI_DIR . '/../src/PaymentWebho
 assert_true(!str_contains($webhookRoutingSourceG7, '->quote(') && str_contains($webhookRoutingSourceG7, 'WHERE {$column} = ? AND store_id IN ({$marks})')
     && str_contains($webhookRoutingSourceG7, "['order_number', (string)\$refs['order_number']]") && str_contains($webhookRoutingSourceG7, "['payment_id', (string)\$refs['payment_id']]"), 'G7 SQL: Stripe and PayU fallback identifiers use bound parameters on fixed columns');
 
-$accountSourceG6 = file_get_contents(TEST_CLI_DIR . '/../account.php') ?: '';
+$accountSourceG6 = entrypointSource('account.php');
 assert_true(str_contains($accountSourceG6, 'GDPR erase failed [{$errorId}]'), 'G6 errors: erase failure details are logged with a correlation ID');
 assert_true(!str_contains($accountSourceG6, "gdpr_erase_failed') . ': ' . \$ex->getMessage()"), 'G6 errors: erase exception detail is not rendered to the customer');
 $importSourceG6 = file_get_contents(TEST_CLI_DIR . '/../src/Import.php') ?: '';
@@ -888,7 +888,7 @@ assert_true(in_array('accessibility.css', $g10Manifest['assets']['css'], true) &
 assert_true(in_array('storefront.js', $g10Manifest['assets']['js'], true), 'G10 theme: storefront behavior belongs to the theme package');
 assert_true(str_contains(Template::assets()['css'][0], '?v=' . $g10Manifest['version']), 'G10 theme: asset URL carries manifest version');
 $g10Document = Template::document('G10 document', '<h1>Content</h1>', [
-    'body_end' => '<script nonce="test-nonce">window.BBS={};</script>',
+    'body_end' => '<script nonce="test-nonce">window.testBootstrap={};</script>',
     'marketing_hooks' => '',
 ]);
 assert_true(str_contains($g10Document, 'href="#main-content"') && str_contains($g10Document, '<main id="main-content"'), 'G10 WCAG: shared shell has a functional skip link');
@@ -905,12 +905,11 @@ I18n::setLocale('en');
 $originalScriptName = $_SERVER['SCRIPT_NAME'] ?? null;
 $_SERVER['SCRIPT_NAME'] = '/test/index.php';
 assert_true(str_starts_with(Template::assets()['css'][0], '/test/themes/default/assets/'), 'G10 theme: assets inherit a subdirectory installation prefix');
-assert_true(str_contains(Template::document('Subdirectory', '<p>Content</p>', ['marketing_hooks' => '']), 'href="/test/shop.css"'), 'G10 theme: core assets inherit a subdirectory installation prefix');
+$g10SubdirDocument = Template::document('Subdirectory', '<p>Content</p>', ['marketing_hooks' => '']);
+assert_true(str_contains($g10SubdirDocument, 'href="/test/themes/default/assets/') && !str_contains($g10SubdirDocument, 'shop.css') && !str_contains($g10SubdirDocument, 'shop.js'), 'G10 theme: the document shell links only theme assets, under the subdirectory installation prefix');
 if ($originalScriptName === null) unset($_SERVER['SCRIPT_NAME']); else $_SERVER['SCRIPT_NAME'] = $originalScriptName;
 $g11CustomBody = Template::document('G11 custom body', '', [
     'body_html' => '<header id="legacy-header"></header><main id="main-content"></main>',
-    'base_css' => '',
-    'shop_js' => '',
     'marketing_hooks' => '',
 ]);
 assert_true(str_contains($g11CustomBody, 'id="legacy-header"'), 'G11 theme: shared shell preserves an entrypoint-specific body without escaping it');
@@ -1743,58 +1742,3 @@ try {
 } finally {
     unlink($bulkFixture);
 }
-
-require __DIR__ . '/AuditPaymentsRegression.php';
-require __DIR__ . '/AuditCustomerRegression.php';
-foreach (['CheckoutConsentRegression', 'IncidentMonitoringRegression', 'AuditUtcRegression'] as $checkoutOpsRegression) require __DIR__ . "/{$checkoutOpsRegression}.php";
-require __DIR__ . '/AuditStoreAdminRegression.php';
-require __DIR__ . '/AuditOrderAdminRegression.php';
-require __DIR__ . '/AuditStoreConfigRegression.php';
-require __DIR__ . '/AuditStorePublicCatalogRegression.php';
-require __DIR__ . '/AuditStoreConfigUniqueRegression.php';
-require __DIR__ . '/AuditWebhookStoreRegression.php';
-require __DIR__ . '/AuditStoreAdminRemainderRegression.php';
-require __DIR__ . '/AuditPaymentStateRegression.php';
-require __DIR__ . '/AuditCheckoutMoneyRegression.php';
-require __DIR__ . '/AuditCouponRaceRegression.php';
-require __DIR__ . '/AuditOfflineInventoryRegression.php';
-require __DIR__ . '/AuditOfflineExpiryNativeRegression.php';
-require __DIR__ . '/AuditPromotionNoteRegression.php';
-require __DIR__ . '/AuditRoleMatrixRegression.php';
-require __DIR__ . '/AuditPasswordResetRegression.php';
-require __DIR__ . '/AuditSessionHardeningRegression.php';
-require __DIR__ . '/AuditAdminUsersRegression.php';
-require __DIR__ . '/AuditEmailVerificationRegression.php';
-require __DIR__ . '/AuditApiPatchRegression.php';
-require __DIR__ . '/AuditApiDomainsRegression.php';
-require __DIR__ . '/AuditQueuePoisonRegression.php';
-require __DIR__ . '/AuditUpdaterToctouRegression.php';
-require __DIR__ . '/AuditBackupMaintenanceRegression.php';
-require __DIR__ . '/AuditSqliteMaintenanceRegression.php';
-require __DIR__ . '/AuditReleasesRoutingRegression.php';
-require __DIR__ . '/AuditBoundaryRedirectHostRegression.php';
-require __DIR__ . '/AuditBoundaryInputRegression.php';
-require __DIR__ . '/AuditBoundaryOutputRegression.php';
-require __DIR__ . '/AuditInstallSmokeRegression.php';
-require __DIR__ . '/AuditDocsAccuracyRegression.php';
-require __DIR__ . '/AuditProductEditorRegression.php';
-require __DIR__ . '/AuditTaxonomyRegression.php';
-require __DIR__ . '/AuditPricingAdminRegression.php';
-require __DIR__ . '/AuditB2bAdminRegression.php';
-require __DIR__ . '/AuditSupplierAdminRegression.php';
-require __DIR__ . '/AuditAccountOrderRegression.php';
-require __DIR__ . '/AuditCheckoutCouponRegression.php';
-require __DIR__ . '/AuditCheckoutAddressRegression.php';
-require __DIR__ . '/AuditCheckoutPickupRegression.php';
-require __DIR__ . '/AuditCheckoutCompanyRegression.php';
-require __DIR__ . '/AuditCheckoutBankTransferRegression.php';
-require __DIR__ . '/AuditStorefrontResponsiveRegression.php';
-require __DIR__ . '/AuditStorefrontA11yRegression.php';
-require __DIR__ . '/AuditSalesReportRegression.php';
-require __DIR__ . '/AuditOrderBulkRegression.php';
-require __DIR__ . '/AuditStoreSwitcherRegression.php';
-require __DIR__ . '/AuditAdminI18nRegression.php';
-require __DIR__ . '/AuditEmailTemplateRegression.php';
-require __DIR__ . '/AuditExtensionRegression.php';
-require __DIR__ . '/AuditExtensionDataRegression.php';
-foreach (['Gopay', 'Comgate', 'Thepay', 'ShipmentAdmin', 'ImportStoreScope', 'GdprRetention', 'CheckoutCod', 'WarehouseFeedStock', 'WebhookClaim', 'JobLease', 'SqliteMaintenanceStale', 'BackupCompleteness', 'RetentionCleanup', 'GdprEraseCompleteness', 'InvoiceMailFailure', 'DockerSample', 'DeadCode', 'CrMinor'] as $auditTailRegression) require __DIR__ . "/Audit{$auditTailRegression}Regression.php";
