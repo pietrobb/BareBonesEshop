@@ -247,6 +247,12 @@ BBE_ADMIN_IDENTITY_KEY=<secret> BBE_ADMIN_PASSWORD=<secret> \
   php cli/admin-user.php create --username=ops --role=owner --store=default
 ```
 
+**Delegated admin management.** Owners can manage every account (except the owner
+protections). A non-owner with `admins.manage` may only create or manage accounts
+whose role permissions are a subset of its own, in every store the target account
+is granted; the create form lists only those roles. It cannot change its own role,
+status or store grants, but may reset its own password/MFA and revoke its own sessions.
+
 Set `queue.backend` to `file`, `database`, or `redis`. File mode retains the
 single-worker lock; database and Redis modes use opaque atomic claims and leases
 so multiple workers may run concurrently. In every mode a job whose worker died
@@ -287,7 +293,13 @@ as CI before deployment:
 ```bash
 php cli/i18n-parity.php
 php cli/quality-gates.php
+php cli/static-analysis.php
+cli/phpstan.sh            # PHPStan level 5 exactly as CI: pinned phar, clean `git archive HEAD` copy
 ```
+
+`cli/phpstan.sh` analyses the committed tree only (commit first) and must report no errors. The
+baseline (`phpstan-baseline.neon`) can only shrink: an entry that no longer matches fails the run,
+so a fix that removes a baselined finding deletes its entry in the same change.
 
 The quality gate verifies package paths, declared byte budgets, WCAG 2.2 AA skip/focus/target-size/reduced-motion/forced-colors invariants, feed routes, consent defaults, and runs `php cli/theme-check.php`.
 `php cli/update.php check|backup|apply` and `doctor --package` run the same theme gate automatically before anything changes: the **new core from the package with the installed themes, stores.json and store block overrides** (see [Production updates](#production-updates)). Testing the bundled default theme alone does not qualify a custom theme; do not update production first to run this check. For a manually assembled tree, run `php cli/theme-check.php` (nonzero exit on incompatibility) and `php cli/staging-preflight.php --strict` in it.

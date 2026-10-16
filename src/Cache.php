@@ -168,19 +168,4 @@ class Cache {
             }
         }
     }
-
-    /** Delete directory recursively (used only by flush for cleanup) */
-    private static function deleteDir(string $dir): void {
-        if (!is_dir($dir)) return;
-        $files = array_diff(scandir($dir), ['.', '..']);
-        foreach ($files as $file) {
-            $path = $dir . '/' . $file;
-            if (is_dir($path)) {
-                self::deleteDir($path);
-            } else {
-                @unlink($path);
-            }
-        }
-        @rmdir($dir);
-    }
 }

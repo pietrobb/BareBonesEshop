@@ -211,6 +211,7 @@ class BackupService
             'auto_pre_migration'  => true,
             'auto_gc_on_backup'   => true,
             'wal_checkpoint'      => true,
+            'include_files'       => true,
             'log_file'            => 'storage/backup.log',
             'log_max_bytes'       => 10485760,
             'log_max_files'       => 5,
@@ -1381,15 +1382,7 @@ class BackupService
 
     private static function removeTree(string $path): void
     {
-        if (is_link($path) || is_file($path)) {
-            @unlink($path);
-            return;
-        }
-        if (!is_dir($path)) return;
-        foreach (scandir($path) ?: [] as $entry) {
-            if ($entry !== '.' && $entry !== '..') self::removeTree($path . DIRECTORY_SEPARATOR . $entry);
-        }
-        @rmdir($path);
+        FileSystem::removeTree($path);
     }
 
     /** Keep only the newest `$keep` backups labelled 'pre-restore-snapshot'; delete the rest. */

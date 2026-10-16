@@ -109,28 +109,10 @@ parameters:
 			path: cli/TestSuite.php
 
 		-
-			message: '#^Variable \$argv might not be defined\.$#'
-			identifier: variable.undefined
-			count: 1
-			path: cli/admin-user.php
-
-		-
-			message: '#^Variable \$argv might not be defined\.$#'
-			identifier: variable.undefined
-			count: 1
-			path: cli/api-client.php
-
-		-
 			message: '#^Variable \$locales in empty\(\) always exists and is not falsy\.$#'
 			identifier: empty.variable
 			count: 1
 			path: cli/i18n-parity.php
-
-		-
-			message: '#^Variable \$argv might not be defined\.$#'
-			identifier: variable.undefined
-			count: 1
-			path: cli/import.php
 
 		-
 			message: '#^Comparison operation "\>" between \*NEVER\* and 20 results in an error\.$#'
@@ -247,12 +229,6 @@ parameters:
 			path: cli/migrate-magento.php
 
 		-
-			message: '#^Variable \$argv might not be defined\.$#'
-			identifier: variable.undefined
-			count: 1
-			path: cli/oss-report.php
-
-		-
 			message: '#^Offset ''dom\-zahrada''\|''elektronika''\|''knihy''\|''oblecenie''\|''sport'' on array\{oblecenie\: array\{''Tričko'', ''Košeľa'', ''Mikina'', ''Bunda'', ''Nohavice'', ''Šortky'', ''Sveter'', ''Vesta''\}, elektronika\: array\{''Telefón'', ''Tablet'', ''Notebook'', ''Slúchadlá'', ''Nabíjačka'', ''Puzdro'', ''Kábel'', ''Adaptér''\}, dom\-zahrada\: array\{''Stolička'', ''Stôl'', ''Lampa'', ''Vankúš'', ''Záves'', ''Váza'', ''Polica'', ''Koberec''\}, sport\: array\{''Lopta'', ''Činky'', ''Podložka'', ''Fľaša'', ''Rukavice'', ''Batoh'', ''Helma'', ''Topánky''\}, knihy\: array\{''Román'', ''Učebnica'', ''Príručka'', ''Zbierka'', ''Atlas'', ''Slovník'', ''Encyklopédia'', ''Komiks''\}\} on left side of \?\? always exists and is not nullable\.$#'
 			identifier: nullCoalesce.offset
 			count: 1
@@ -269,12 +245,6 @@ parameters:
 			identifier: argument.type
 			count: 1
 			path: cli/seed.php
-
-		-
-			message: '#^Variable \$argv might not be defined\.$#'
-			identifier: variable.undefined
-			count: 1
-			path: cli/setup.php
 
 		-
 			message: '#^Variable \$http_response_header on left side of \?\? always exists and is not nullable\.$#'
@@ -307,18 +277,6 @@ parameters:
 			path: cli/test-update.php
 
 		-
-			message: '#^Variable \$argv might not be defined\.$#'
-			identifier: variable.undefined
-			count: 2
-			path: cli/theme-check.php
-
-		-
-			message: '#^Variable \$argv might not be defined\.$#'
-			identifier: variable.undefined
-			count: 1
-			path: cli/vat-backfill.php
-
-		-
 			message: '#^Call to function is_callable\(\) with ''handleCacheRebuild''\|''handleCartAbandonme…''\|''handleCleanup''\|''handleDigitalFulfill''\|''handleDigitalRevoke''\|''handleEmailSend''\|''handleErpOrderPush''\|''handleErpOrderUpdate''\|''handleImageResize''\|''handleImportProcess''\|''handleInvoiceIssue''\|''handleMerchantNotify''\|''handlePaymentCancel''\|''handlePaymentRefund''\|''handleSearchReindex''\|''handleStockAlert''\|\(Closure\(array\)\: int\) will always evaluate to true\.$#'
 			identifier: function.alreadyNarrowedType
 			count: 1
@@ -341,12 +299,6 @@ parameters:
 			identifier: notIdentical.alwaysTrue
 			count: 1
 			path: src/BackupService.php
-
-		-
-			message: '#^Static method Cache\:\:deleteDir\(\) is unused\.$#'
-			identifier: method.unused
-			count: 1
-			path: src/Cache.php
 
 		-
 			message: '#^Parameter \#1 \$array \(non\-empty\-list\<mixed\>\) of array_values is already a list, call has no effect\.$#'
@@ -449,12 +401,6 @@ parameters:
 			identifier: notIdentical.alwaysTrue
 			count: 1
 			path: src/Http/ApiHandlers.php
-
-		-
-			message: '#^Static method I18n\:\:cfg\(\) is unused\.$#'
-			identifier: method.unused
-			count: 1
-			path: src/I18n.php
 
 		-
 			message: '#^Call to preg_quote\(\) is missing delimiter / to be effective\.$#'
@@ -573,12 +519,6 @@ parameters:
 		-
 			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
 			identifier: function.alreadyNarrowedType
-			count: 1
-			path: src/StorefrontViewModel.php
-
-		-
-			message: '#^Static method StorefrontViewModel\:\:sectionData\(\) is unused\.$#'
-			identifier: method.unused
 			count: 1
 			path: src/StorefrontViewModel.php
 

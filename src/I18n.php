@@ -9,14 +9,6 @@ class I18n {
     private static ?array $fallbackLang = null;
     private static ?array $catalog = null;
     private static ?array $stores = null;
-    private static ?array $cfg = null;
-
-    private static function cfg(): array {
-        if (!self::$cfg) {
-            self::$cfg = require __DIR__ . '/../config.php';
-        }
-        return self::$cfg;
-    }
 
     /** System default locale — from stores.json.default_locale, fallback 'en'. */
     public static function sysDefault(): string {

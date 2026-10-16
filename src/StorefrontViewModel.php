@@ -393,15 +393,6 @@ final class StorefrontViewModel
         return $sections;
     }
 
-    private static function sectionData(array $data): array
-    {
-        $result = self::safeData($data);
-        foreach ($result as $key => $value) {
-            if (is_string($value) && str_ends_with((string)$key, 'url')) $result[$key] = self::contentUrl($value);
-        }
-        return $result;
-    }
-
     private static function safeData(array $data): array
     {
         $result = [];
@@ -426,16 +417,6 @@ final class StorefrontViewModel
         $segments = array_values(array_filter(explode('/', str_replace('\\', '/', $value)), static fn(string $part): bool => $part !== ''));
         if ($segments === [] || in_array('..', $segments, true)) return '';
         return Template::url('/uploads/' . $size . '/' . implode('/', array_map('rawurlencode', $segments)));
-    }
-
-    private static function contentUrl(string $value): string
-    {
-        $value = trim($value);
-        if ($value === '') return '';
-        if (preg_match('#^https://#i', $value)) return $value;
-        if ($value[0] === '#') return $value;
-        if ($value[0] === '?') return Template::storeUrl('/' . $value);
-        return Template::storeUrl('/' . ltrim($value, '/'));
     }
 
     private static function slug(string $value, string $fallback): string
