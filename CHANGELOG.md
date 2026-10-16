@@ -49,6 +49,13 @@
   is replaced by `StockAlerts::summary()`.
 - Shop-owned URL aliases (config `url_aliases`, `UrlAliases`) brought over from `aeon/candidate`
   (bb758f1, 7d2c940): inbound dispatch in `redirect.php`, outbound links, 301 from core routes.
+- Payment webhook signatures are a capability: `SignedWebhookPaymentAdapter::verifySignature()`
+  (implemented by Stripe, PayU, GoPay, Comgate, ThePay, Mock). `PaymentAdapter` is unchanged, so
+  extension adapters without `verifySignature()` still load; a webhook for a gateway without the
+  capability is rejected as unverified (fail closed). Extension adapters that receive signed
+  webhooks must add `implements SignedWebhookPaymentAdapter`.
+- Storage adapters advertise pre-generated image variants with `ImageVariantStorageAdapter`;
+  custom adapters that only define a public `generateVariants()` method keep working.
 
 ### Fixed
 - Changing an order to `shipped` after a partial shipment failed with "Shipment exceeds reserved

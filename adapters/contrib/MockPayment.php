@@ -7,7 +7,7 @@
  *   'fail'              — createSession succeeds but webhook simulates failed payment
  *   'error'             — createSession throws RuntimeException
  */
-class MockPayment implements HostedCheckoutAdapter, CancellablePaymentAdapter {
+class MockPayment implements HostedCheckoutAdapter, CancellablePaymentAdapter, SignedWebhookPaymentAdapter {
     private string $result;
     /** 'succeeded' (default), 'pending', 'failed' or 'error' (throws) — $cfg['mock_refund_result'] */
     private string $refundResult;

@@ -152,9 +152,13 @@ return [
         'payment_funnel_window_seconds' => 86400,
         'payment_funnel_grace_seconds' => 1800,
         'payment_funnel_min_started' => 3,
-        // Browser CSP reports (api.php?action=csp_report); any blocked form-action is critical.
+        // Browser CSP reports (api.php?action=csp_report). A blocked form-action is critical once
+        // reported by csp_form_action_critical distinct clients (IP hashes), or by
+        // csp_form_action_reports_critical reports in total (behind a proxy/CDN without
+        // trusted_proxies every report has the same IP). 0 disables a threshold.
         'csp_window_seconds' => 86400,
         'csp_form_action_critical' => 2,
+        'csp_form_action_reports_critical' => 5,
         'csp_violations_warning' => 20,
         // Post-deploy smoke (cli/smoke-checkout.php) sends this in X-BareBones-Synthetic; its order is
         // flagged synthetic, sends no mail and is closed right after the gateway redirect.

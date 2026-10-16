@@ -103,11 +103,21 @@ foreach (['handleSearchReindex', 'handlePaymentRefund', 'handleErpOrderPush', 'h
     assert_true(str_contains($crfBody[0] ?? '', 'JobQueue::heartbeat('), "CR follow-up worker: {$crfHandler} renews its job lease");
 }
 
-// 3. Backups: the files archive is written once (buffered) and an unreadable file or directory is
-//    skipped and recorded instead of failing the whole backup. Root reads everything, so the
-//    backup runs in a child process that drops to "nobody" when started as root.
+// 3. Backups: the files archive is written once (buffered) and an unreadable file or directory inside
+//    a source is skipped and recorded instead of failing the whole backup, while a configured source
+//    that cannot be read at all fails it. Root reads everything, so the backup runs in a child
+//    process that drops to "nobody" when started as root. The child loads a copy of the app code
+//    from the fixture, so a checkout under a directory "nobody" cannot traverse does not matter.
 $crfBk = $crfRoot . '/backup';
 foreach (['/src/uploads/many', '/src/uploads/locked-dir', '/work'] as $crfDir) mkdir($crfBk . $crfDir, 0777, true);
+foreach (['src', 'adapters'] as $crfCodeDir) {
+    $crfCodeSrc = dirname(TEST_CLI_DIR) . '/' . $crfCodeDir;
+    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($crfCodeSrc, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::SELF_FIRST) as $crfEntry) {
+        $crfTarget = $crfBk . '/app/' . $crfCodeDir . substr($crfEntry->getPathname(), strlen($crfCodeSrc));
+        if ($crfEntry->isDir()) { if (!is_dir($crfTarget)) mkdir($crfTarget, 0755, true); }
+        else { if (!is_dir(dirname($crfTarget))) mkdir(dirname($crfTarget), 0755, true); copy($crfEntry->getPathname(), $crfTarget); }
+    }
+}
 for ($crfI = 0; $crfI < 300; $crfI++) file_put_contents($crfBk . "/src/uploads/many/f{$crfI}.txt", "file {$crfI}\n");
 file_put_contents($crfBk . '/src/uploads/secret.jpg', 'unreadable');
 file_put_contents($crfBk . '/src/uploads/locked-dir/inner.jpg', 'inside an unreadable directory');
@@ -119,7 +129,7 @@ chmod($crfBk . '/work', 0777);
 chmod($crfBk . '/src/uploads/secret.jpg', 0000);
 chmod($crfBk . '/src/uploads/locked-dir', 0000);
 file_put_contents($crfBk . '/child.php', '<?php
-require ' . var_export(dirname(TEST_CLI_DIR) . '/src/autoload.php', true) . ';
+require __DIR__ . "/app/src/autoload.php";
 if (function_exists("posix_geteuid") && posix_geteuid() === 0) { posix_setgid(65534); posix_setuid(65534); }
 $root = $argv[1];
 $simulated = !is_readable($root . "/src/uploads/secret.jpg");
@@ -129,19 +139,25 @@ BackupService::init($pdo, [
     "enabled" => true, "compression" => false, "auto_gc_on_backup" => false,
     "retention" => ["daily" => 0, "weekly" => 0, "monthly" => 0, "minimum_kept" => 1],
     "storage_dir" => $root . "/work/backups", "log_file" => $root . "/work/backup.log",
-    "files" => ["uploads" => $root . "/src/uploads"],
+    "files" => ["uploads" => $root . $argv[2]],
 ], $root . "/work");
-echo json_encode(["simulated" => $simulated, "meta" => BackupService::create(["label" => "crf"])]);
+try {
+    echo json_encode(["simulated" => $simulated, "meta" => BackupService::create(["label" => "crf"])]);
+} catch (Throwable $e) {
+    echo json_encode(["simulated" => $simulated, "error" => $e->getMessage()]);
+}
 ');
-$crfProc = proc_open([PHP_BINARY, $crfBk . '/child.php', $crfBk], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $crfPipes);
-fclose($crfPipes[0]);
-$crfOut = (string)stream_get_contents($crfPipes[1]);
-$crfErr = (string)stream_get_contents($crfPipes[2]);
-fclose($crfPipes[1]);
-fclose($crfPipes[2]);
-$crfExit = proc_close($crfProc);
-$crfChild = json_decode($crfOut, true);
-assert_true($crfExit === 0 && is_array($crfChild), 'CR follow-up backup: a backup with unreadable files completes (' . trim($crfErr . ' ' . substr($crfOut, 0, 300)) . ')');
+$crfRunChild = static function (string $source) use ($crfBk): array {
+    $proc = proc_open([PHP_BINARY, $crfBk . '/child.php', $crfBk, $source], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+    fclose($pipes[0]);
+    $out = (string)stream_get_contents($pipes[1]);
+    $err = (string)stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    return [proc_close($proc), json_decode($out, true), trim($err . ' ' . substr($out, 0, 300))];
+};
+[$crfExit, $crfChild, $crfDiag] = $crfRunChild('/src/uploads');
+assert_true($crfExit === 0 && is_array($crfChild) && !isset($crfChild['error']), 'CR follow-up backup: a backup with unreadable files completes (' . $crfDiag . ')');
 if (is_array($crfChild) && ($crfChild['simulated'] ?? false)) {
     $crfMeta = (array)$crfChild['meta'];
     $crfSkipped = (array)($crfMeta['files_skipped'] ?? []);
@@ -155,6 +171,11 @@ if (is_array($crfChild) && ($crfChild['simulated'] ?? false)) {
     assert_equals(300, count(array_filter($crfNames, static fn(string $n): bool => str_starts_with($n, 'uploads/many/'))), 'CR follow-up backup: every readable file is archived');
     assert_true(!in_array('uploads/secret.jpg', $crfNames, true), 'CR follow-up backup: the unreadable file is not in the archive');
     assert_true(str_contains((string)@file_get_contents($crfBk . '/work/backup.log'), 'skipped unreadable file uploads/secret.jpg'), 'CR follow-up backup: a skipped file is logged as a warning');
+}
+[$crfExit, $crfChild, $crfDiag] = $crfRunChild('/src/uploads/locked-dir');
+assert_true($crfExit === 0 && is_array($crfChild), 'CR follow-up backup: the unreadable-source child ran (' . $crfDiag . ')');
+if (is_array($crfChild) && ($crfChild['simulated'] ?? false)) {
+    assert_true(str_contains((string)($crfChild['error'] ?? ''), 'file source uploads is not readable'), 'CR follow-up backup: a configured source that cannot be read fails the backup (' . $crfDiag . ')');
 }
 assert_true(str_contains((string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/BackupService.php'), '$tar->startBuffering()'), 'CR follow-up backup: the files archive is buffered and written once');
 
@@ -231,9 +252,30 @@ try {
     Db::init($pdo, $crfDriver);
 }
 
-// 7. Adapter contracts: verifySignature() is part of PaymentAdapter, image variants are a capability.
-assert_true((new ReflectionClass('PaymentAdapter'))->hasMethod('verifySignature'), 'CR follow-up adapters: PaymentAdapter declares verifySignature()');
-assert_true(!(new CashOnDelivery([]))->verifySignature('{}', 'any'), 'CR follow-up adapters: cash on delivery rejects every webhook signature');
+// 7. Adapter contracts: signed webhooks and image variants are capabilities. PaymentAdapter itself
+//    stays unchanged, so extension adapters written against it keep loading; a gateway without the
+//    signed-webhook capability has every webhook rejected as unverified.
+assert_true(!(new ReflectionClass('PaymentAdapter'))->hasMethod('verifySignature'), 'CR follow-up adapters: PaymentAdapter does not require verifySignature() from extension adapters');
+foreach (['StripePayment', 'PayUPayment', 'GoPayPayment', 'ComgatePayment', 'ThePayPayment', 'MockPayment'] as $crfGateway) {
+    assert_true(is_subclass_of($crfGateway, 'SignedWebhookPaymentAdapter'), "CR follow-up adapters: {$crfGateway} advertises signed webhooks");
+}
+$crfLegacyGateway = new class implements PaymentAdapter {
+    public bool $applied = false;
+    public function createSession(array $order): array { return []; }
+    public function handleWebhook(array $payload): array { $this->applied = true; return []; }
+    public function refund(string $paymentId, int $amount): array { return []; }
+    public function getStatus(string $paymentId): string { return 'unknown'; }
+};
+foreach ([new CashOnDelivery([]), $crfLegacyGateway] as $crfGateway) {
+    $crfRejected = '';
+    try {
+        PaymentService::handleWebhook('{}', 'any', [], $crfGateway, 'crf_unsigned');
+    } catch (RuntimeException $e) {
+        $crfRejected = $e->getMessage();
+    }
+    assert_equals('Webhook signature verification failed', $crfRejected, 'CR follow-up adapters: a webhook for ' . get_class($crfGateway) . ' without signed webhooks fails closed');
+}
+assert_true(!$crfLegacyGateway->applied, 'CR follow-up adapters: an unverified webhook never reaches the gateway');
 assert_true(is_subclass_of('LocalStorage', 'ImageVariantStorageAdapter'), 'CR follow-up adapters: LocalStorage advertises image variant generation');
 $crfBaseline = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/phpstan-baseline.neon');
 assert_true(!str_contains($crfBaseline, 'verifySignature') && !str_contains($crfBaseline, 'generateVariants'), 'CR follow-up adapters: the contract violations are no longer baselined');

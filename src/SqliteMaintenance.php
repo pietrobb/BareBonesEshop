@@ -66,7 +66,9 @@ final class SqliteMaintenance
         @unlink($marker); // POSIX: unlink while holding the lock, so no new marker can be hit
         flock($handle, LOCK_UN);
         fclose($handle);
-        if (is_file($marker)) @unlink($marker); // Windows refuses to delete an open file
+        // Windows refuses to delete an open file. On POSIX a second unlink by path after releasing
+        // the lock could delete a marker a new owner has created meanwhile.
+        if (PHP_OS_FAMILY === 'Windows' && is_file($marker)) @unlink($marker);
         if (is_file($marker)) return true;
         if (class_exists('Logger')) Logger::warning('sqlite.maintenance_stale_cleared', ['marker' => basename($marker)]);
         return false;

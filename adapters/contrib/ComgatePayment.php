@@ -18,7 +18,7 @@
  *   PAY_COMGATE_SECRET   / comgate_secret   — connection password
  *   PAY_COMGATE_TEST     / comgate_test     — true (default) creates test payments; false = production
  */
-class ComgatePayment implements HostedCheckoutAdapter, PullVerifiedNotificationAdapter {
+class ComgatePayment implements HostedCheckoutAdapter, PullVerifiedNotificationAdapter, SignedWebhookPaymentAdapter {
     private const ORIGIN = 'https://payments.comgate.cz';
     private const STATES = ['PENDING', 'AUTHORIZED', 'PAID', 'CANCELLED'];
     private const LANGS = ['bg', 'cs', 'da', 'de', 'el', 'en', 'es', 'et', 'fi', 'fr', 'hr', 'hu', 'it', 'lt', 'lv', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sl', 'sk', 'sv', 'uk', 'vi'];

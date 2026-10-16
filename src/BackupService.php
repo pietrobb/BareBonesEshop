@@ -502,16 +502,18 @@ class BackupService
             if ($path === '' || is_link($path)) {
                 $sources[$name] = $path === '' ? 'not_configured' : 'symlink_skipped';
             } elseif (is_file($path)) {
+                // A configured source that cannot be read at all fails the backup (only files and
+                // subdirectories inside a readable source are skipped).
+                if (!is_readable($path)) {
+                    throw new RuntimeException("BackupService: file source {$name} is not readable");
+                }
                 $addFile($path, $name . '/' . basename($path));
                 $sources[$name] = 'file';
             } elseif (is_dir($path)) {
                 $base = rtrim(str_replace('\\', '/', $path), '/') . '/';
                 $relativeOf = static fn(\SplFileInfo $file): string => substr(str_replace('\\', '/', $file->getPathname()), strlen($base));
                 if (!is_readable($path) || !is_executable($path)) {
-                    $skipped[] = $name . '/';
-                    self::log("CREATE WARN skipped unreadable directory {$name}/");
-                    $sources[$name] = 'unreadable';
-                    continue;
+                    throw new RuntimeException("BackupService: file source {$name} is not readable");
                 }
                 // Unreadable subdirectories are not descended into (RecursiveDirectoryIterator would throw).
                 $filter = new RecursiveCallbackFilterIterator(

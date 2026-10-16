@@ -199,8 +199,8 @@ class PaymentService {
         PaymentAdapter $gateway,
         string         $providerName
     ): array {
-        // 1. Verify signature — ALWAYS required
-        if (!$gateway->verifySignature($rawPayload, $sigHeader)) {
+        // 1. Verify signature — ALWAYS required; gateways without signed webhooks fail closed
+        if (!$gateway instanceof SignedWebhookPaymentAdapter || !$gateway->verifySignature($rawPayload, $sigHeader)) {
             throw new \RuntimeException('Webhook signature verification failed');
         }
 

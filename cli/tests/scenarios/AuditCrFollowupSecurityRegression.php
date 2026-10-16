@@ -1,7 +1,7 @@
 <?php
 
 // CR follow-up (security/auth): admin login timing, delegated admins.manage escalation,
-// distributed customer password guessing, mail capture location and forged CSP alarms.
+// customer login lockout, mail capture location and forged CSP alarms.
 echo "\n--- CR follow-up: security and auth findings ---\n";
 foreach ($GLOBALS as $crsValue) if ($crsValue instanceof PDOStatement) $crsValue->closeCursor();
 
@@ -149,11 +149,24 @@ PHP);
         $crsLabel('CR follow-up delegate: cannot widen its own store grants', $r));
     $r = $crsAdmin('mgr', 'create', ['username' => 'crs-restricted-viewer', 'role' => 'viewer', 'password' => 'Crs-new-password']);
     assert_true($crsAccount('crs-restricted-viewer') === null, $crsLabel('CR follow-up delegate: store grants limit which roles it may create', $r));
+    // ...but its own credentials stay its own: narrowed grants must not block revoking its own
+    // sessions or resetting its own MFA and password.
+    $crsAdminWith = static fn(string $token, string $action, array $post): array => $crsRun(
+        [$crsRoot . '/admin.php', dirname(TEST_CLI_DIR), $testDbPath, $crsRoot, $crsKey, 'mgr', $token, 'admin_users', $action, json_encode($post)], 'CRSRESULT');
+    $crsMgrOther = $crsLogin('crs-mgr');
+    $r = $crsAdmin('mgr', 'revoke_sessions', ['account_id' => (string)$crsIds['crs-mgr']]);
+    assert_true(($r['flash']['type'] ?? '') === 'ok' && AdminIdentity::session($crsMgrOther) === null, $crsLabel('CR follow-up delegate: a narrowed delegate can revoke its own sessions', $r));
+    $crsMgrToken = $crsLogin('crs-mgr');
+    $r = $crsAdminWith($crsMgrToken, 'mfa', ['account_id' => (string)$crsIds['crs-mgr']]);
+    assert_true(($r['flash']['type'] ?? '') === 'ok' && (string)($crsAccount('crs-mgr')['totp_secret_encrypted'] ?? '') !== '', $crsLabel('CR follow-up delegate: a narrowed delegate can reset its own MFA', $r));
+    $r = $crsAdminWith($crsMgrToken, 'password', ['account_id' => (string)$crsIds['crs-mgr'], 'password' => 'Crs-own-rotated-password']);
+    assert_true(password_verify('Crs-own-rotated-password', $crsHash('crs-mgr')), $crsLabel('CR follow-up delegate: a narrowed delegate can reset its own password', $r));
     $r = $crsAdmin('owner', 'grant', ['account_id' => (string)$crsIds['crs-owner'], 'permissions' => '*']);
     assert_true(($r['flash']['type'] ?? '') === 'ok', $crsLabel('CR follow-up owner: owners keep editing their own grants', $r));
 
-    // 3. The customer login limit was per account AND client IP only: rotating addresses allowed
-    // unlimited guesses against one account. A high cross-IP ceiling per account now applies too.
+    // 3. The customer login limit stays per account AND client IP: a cross-IP ceiling per account
+    // would let a few addresses lock any customer out (lockout DoS), so failures from other IPs
+    // must never block the owner, while the hammering IPs themselves are throttled.
     $crsEmail = 'crs-login@example.com';
     $pdo->prepare("INSERT INTO customers (email, password_hash, name, locale, status, store_id) VALUES (?, ?, 'CRS', 'en', 'active', 'default')")
         ->execute([$crsEmail, password_hash('crs-customer-pass', PASSWORD_BCRYPT, ['cost' => 4])]);
@@ -184,13 +197,17 @@ require $root . '/account.php';
 PHP);
     $crsCustomerLogin = static fn(string $ip): array => $crsRun([$crsRoot . '/account.php', dirname(TEST_CLI_DIR), $testDbPath, $crsRoot, $crsEmail, 'crs-customer-pass', $ip], 'CRSLOGIN');
     $r = $crsCustomerLogin('198.51.100.10');
-    assert_true(($r['customer_id'] ?? 0) > 0, 'CR follow-up customer login: the right password signs in under the global ceiling (' . json_encode($r) . ')');
+    assert_true(($r['customer_id'] ?? 0) > 0, 'CR follow-up customer login: the right password signs in (' . json_encode($r) . ')');
     $crsRate = new PDO('sqlite:' . $crsRoot . '/rate.sqlite');
-    $crsGlobalKey = hash('sha256', 'account_login_account_global_' . hash('sha256', $crsEmail) . '|global');
     $crsSeed = $crsRate->prepare('INSERT INTO hits (key, ts) VALUES (?, ?)');
-    for ($crsI = 0; $crsI < 100; $crsI++) $crsSeed->execute([$crsGlobalKey, time()]);
+    foreach (['198.51.100.21', '198.51.100.22', '198.51.100.23'] as $crsIp) {
+        $crsAccountKey = hash('sha256', 'account_login_account_' . hash('sha256', $crsEmail) . '|' . $crsIp);
+        for ($crsI = 0; $crsI < 100; $crsI++) $crsSeed->execute([$crsAccountKey, time()]);
+    }
+    $r = $crsCustomerLogin('198.51.100.21');
+    assert_equals(0, (int)($r['customer_id'] ?? -1), 'CR follow-up customer login: an IP that hammered the account is throttled on it');
     $r = $crsCustomerLogin('198.51.100.11');
-    assert_equals(0, (int)($r['customer_id'] ?? -1), 'CR follow-up customer login: after 100 attempts from many IPs within an hour, even a fresh IP is throttled');
+    assert_true(($r['customer_id'] ?? 0) > 0, 'CR follow-up customer login: attempts from other IPs never lock the owner out (' . json_encode($r) . ')');
     $crsRate = null;
 
     // 4. LogMail wrote whole emails (reset/verification/download tokens) to logs/ inside the app root.
@@ -200,14 +217,18 @@ PHP);
     assert_equals($crsRoot . '/private/logs/emails.log', $crsMailPath, 'CR follow-up LogMail: captures go to the private runtime directory');
     assert_equals($crsRoot . '/explicit/mail.log', (string)$crsLogFile->getValue(new LogMail(['private_runtime_dir' => $crsRoot . '/private', 'log_file' => $crsRoot . '/explicit/mail.log'])),
         'CR follow-up LogMail: an explicit log_file still overrides the location');
-    $crsConfigured = (string)$crsLogFile->getValue(new LogMail(require TEST_CLI_DIR . '/../config.php'));
-    assert_true(!str_starts_with(str_replace('\\', '/', $crsConfigured), $crsAppRoot . '/'), 'CR follow-up LogMail: the configured default is outside the application root (' . $crsConfigured . ')');
+    // The shipped default is checked as a path only: constructing LogMail with it would create its
+    // logs/ directory outside the test fixtures.
+    $crsExampleRuntime = (string)((require TEST_CLI_DIR . '/../config.example.php')['private_runtime_dir'] ?? '');
+    $crsConfigured = str_replace('\\', '/', rtrim($crsExampleRuntime, '/\\') . '/logs/emails.log');
+    assert_true($crsExampleRuntime !== '' && str_starts_with($crsConfigured, '/') && !str_starts_with($crsConfigured, $crsAppRoot . '/'), 'CR follow-up LogMail: the configured default is outside the application root (' . $crsConfigured . ')');
+    assert_true(str_contains((string)file_get_contents(dirname(TEST_CLI_DIR) . '/adapters/contrib/LogMail.php'), "dirname(__DIR__, 3) . '/bareboneseshop-private'"), 'CR follow-up LogMail: without a runtime dir the fallback is the private directory next to the application root');
 
     // 5. Anyone can POST a CSP report: one forged form-action used to raise the critical alarm.
     $pdo->exec('DELETE FROM csp_violations');
     $crsNow = time();
     $crsForged = (string)json_encode(['csp-report' => ['document-uri' => 'https://shop.example/pokladna', 'effective-directive' => 'form-action', 'blocked-uri' => 'https://evil.example/x']]);
-    for ($crsI = 0; $crsI < 5; $crsI++) CspReports::ingest($crsForged, $pdo, $crsNow - $crsI, '203.0.113.7');
+    for ($crsI = 0; $crsI < 4; $crsI++) CspReports::ingest($crsForged, $pdo, $crsNow - $crsI, '203.0.113.7');
     $crsMetricsConfig = require TEST_CLI_DIR . '/../config.php';
     $crsMetricsConfig['jobs_dir'] = sys_get_temp_dir();
     $crsMetricsConfig['private_cache_dir'] = sys_get_temp_dir();
@@ -218,7 +239,7 @@ PHP);
     $crsSnapshot = static fn(): array => OperationalMetrics::snapshot($crsMetricsConfig, dirname(TEST_CLI_DIR), $pdo, 'default', [['meta' => ['timestamp' => gmdate('c', $crsNow - 60)]]], $crsNow);
     $crsAlarm = static fn(array $s): bool => in_array('csp_form_action_violation', array_column($s['alerts'], 'code'), true);
     $crsOne = $crsSnapshot();
-    assert_true($crsOne['metrics']['csp_form_action_violations'] === 1 && !$crsAlarm($crsOne), 'CR follow-up CSP: repeated form-action reports from one source count once and do not alarm');
+    assert_true($crsOne['metrics']['csp_form_action_violations'] === 1 && $crsOne['metrics']['csp_form_action_reports'] === 4 && !$crsAlarm($crsOne), 'CR follow-up CSP: repeated form-action reports from one source count once and do not alarm below the raw threshold');
     $crsPrevAddr = $_SERVER['REMOTE_ADDR'] ?? null;
     $_SERVER['REMOTE_ADDR'] = '203.0.113.8';
     CspReports::ingest($crsForged, $pdo, $crsNow);
@@ -226,7 +247,16 @@ PHP);
     $crsTwo = $crsSnapshot();
     assert_true($crsTwo['metrics']['csp_form_action_violations'] === 2 && $crsAlarm($crsTwo), 'CR follow-up CSP: form-action reports from two clients (request IP by default) raise the critical alarm');
     assert_true(!str_contains((string)json_encode($pdo->query('SELECT reporter_hash FROM csp_violations')->fetchAll(PDO::FETCH_COLUMN)), '203.0.113'), 'CR follow-up CSP: reporter IPs are stored only hashed');
+    // Behind a proxy/CDN without trusted_proxies every report has the proxy's IP: the raw count alarms.
     $pdo->exec('DELETE FROM csp_violations');
+    for ($crsI = 0; $crsI < 5; $crsI++) CspReports::ingest($crsForged, $pdo, $crsNow - $crsI, '192.0.2.1');
+    $crsProxied = $crsSnapshot();
+    assert_true($crsProxied['metrics']['csp_form_action_violations'] === 1 && $crsProxied['metrics']['csp_form_action_reports'] === 5 && $crsAlarm($crsProxied), 'CR follow-up CSP: form-action reports that all share one client IP raise the alarm at the raw report threshold');
+    $crsMetricsConfig['monitoring']['csp_form_action_reports_critical'] = 0;
+    assert_true(!$crsAlarm(OperationalMetrics::snapshot($crsMetricsConfig, dirname(TEST_CLI_DIR), $pdo, 'default', [['meta' => ['timestamp' => gmdate('c', $crsNow - 60)]]], $crsNow)), 'CR follow-up CSP: the raw report threshold can be disabled');
+    $pdo->exec('DELETE FROM csp_violations');
+    // An unusable GDPR salt must not turn the public report endpoint into a 500.
+    assert_true(str_contains((string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/CspReports.php'), "Logger::warning('csp_report.reporter_hash_unavailable'"), 'CR follow-up CSP: a failing reporter hash falls back instead of failing the ingest');
 } finally {
     putenv('BBE_ADMIN_IDENTITY_KEY');
     $crsTree = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($crsRoot, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);

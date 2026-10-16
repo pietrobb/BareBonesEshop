@@ -89,8 +89,12 @@ function adminUsersStoreGrant(int $accountId, string $storeId): array {
     return is_array($decoded) ? array_map('strval', $decoded) : [];
 }
 
-/** Resolves the target account and enforces owner protection; returns null after setting a flash. */
-function adminUsersTarget(): ?array {
+/**
+ * Resolves the target account and enforces owner protection; returns null after setting a flash.
+ * $allowSelf: an admin may act on its own account (password, MFA reset, revoking its sessions)
+ * even when its store grants were narrowed below its role; grant/role/status changes never pass it.
+ */
+function adminUsersTarget(bool $allowSelf = false): ?array {
     $target = AdminIdentity::accountById(Security::int($_POST['account_id'] ?? 0));
     if (!$target) {
         setFlash('err', I18n::t('admin.users.failed'));
@@ -103,7 +107,7 @@ function adminUsersTarget(): ?array {
     }
     // A delegated admins.manage may only act on accounts it fully outranks: resetting a
     // peer's password or MFA would hand over that peer's extra permissions.
-    if (!adminUsersCanManage($target)) {
+    if (!($allowSelf && adminUsersIsSelf($target)) && !adminUsersCanManage($target)) {
         setFlash('err', I18n::t('admin.users.forbidden_role'));
         return null;
     }
@@ -198,7 +202,7 @@ function handleAdminUserStatus(): void {
 
 function handleAdminUserPassword(): void {
     Security::adminRequire('admins.manage');
-    $target = adminUsersTarget();
+    $target = adminUsersTarget(true);
     if ($target) {
         try {
             AdminIdentity::setPassword((int)$target['id'], (string)($_POST['password'] ?? ''));
@@ -212,7 +216,7 @@ function handleAdminUserPassword(): void {
 
 function handleAdminUserMfa(): void {
     Security::adminRequire('admins.manage');
-    $target = adminUsersTarget();
+    $target = adminUsersTarget(true);
     if ($target && !AdminIdentity::mfaKeyConfigured()) {
         setFlash('err', I18n::t('admin.users.mfa_key_missing'));
         $target = null;
@@ -228,7 +232,7 @@ function handleAdminUserMfa(): void {
 
 function handleAdminUserRevokeSessions(): void {
     Security::adminRequire('admins.manage');
-    $target = adminUsersTarget();
+    $target = adminUsersTarget(true);
     if ($target) {
         AdminIdentity::revokeSessions((int)$target['id']);
         setFlash('ok', I18n::t('admin.users.saved'));
