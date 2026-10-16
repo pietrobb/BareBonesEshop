@@ -500,7 +500,7 @@ $pdo->exec("CREATE INDEX IF NOT EXISTS idx_ac_email ON abandoned_carts(customer_
 $cartRecoveryMigration = require TEST_CLI_DIR . '/../migrations/20261007110000_abandoned_cart_recovery.php';
 $cartRecoveryMigration->up($pdo, true);
 $cartRecoveryMigration->up($pdo, true);
-(require TEST_CLI_DIR . '/../migrations/20261016140000_cart_reminder_consent_download_resume.php')->up($pdo, true);
+(require TEST_CLI_DIR . '/../migrations/20261016142000_cart_reminder_consent_download_resume.php')->up($pdo, true);
 $cartRecoveryColumns = array_column($pdo->query('PRAGMA table_info(abandoned_carts)')->fetchAll(PDO::FETCH_ASSOC), 'name');
 assert_true(!array_diff(['cart_value', 'item_count', 'recovery_token', 'order_id', 'converted_at', 'reminder_status', 'updated_at'], $cartRecoveryColumns), 'Cart recovery migration: adds recovery columns idempotently');
 assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='email_suppressions'")->fetchColumn(), 'Cart recovery migration: creates the e-mail opt-out list');

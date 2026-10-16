@@ -169,7 +169,7 @@ $digitalCommerceMigFile = TEST_CLI_DIR . '/../migrations/20260713093000_digital_
 if (file_exists($digitalCommerceMigFile)) {
     $digitalCommerceMig = require $digitalCommerceMigFile;
     $digitalCommerceMig->up($pdo, true);
-    (require TEST_CLI_DIR . '/../migrations/20261016140000_cart_reminder_consent_download_resume.php')->up($pdo, true);
+    (require TEST_CLI_DIR . '/../migrations/20261016142000_cart_reminder_consent_download_resume.php')->up($pdo, true);
 }
 
 // Shipping tables
