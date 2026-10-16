@@ -18,7 +18,7 @@ $aunChangelog = (string)file_get_contents($aunApp . '/CHANGELOG.md');
 $aunNotes = substr($aunChangelog, (int)strpos($aunChangelog, '### Upgrade notes'), (int)strpos($aunChangelog, '### Added') - (int)strpos($aunChangelog, '### Upgrade notes'));
 foreach ([
     'try_files $uri @redirect;', '/cs/api.php', 'allow_insecure_http', 'cart_reminder', 'silently stops sending',
-    '<invoice_prefix>CN-', 'paid order', "order's own store", "'csrf' => false", 'import_mode', '<digital_assets_base_dir>/<catalog_id>/',
+    '<invoice_prefix>CN-', 'paid order', 'legal.seller', "'csrf' => false", 'import_mode', '<digital_assets_base_dir>/<catalog_id>/',
     'unknown `?page=`', 'X-Shipping-Timestamp', 'shipping_rates', 'destination', 'SMTP_ALLOW_PLAINTEXT_AUTH', 'SendRawEmail',
     'rate_limited', 'ext:<code>:<name>', '/page/about', 'adapters/uploads/', 'mb_strtolower',
     '20261016140000_csp_request_id', '20261016140500_invoice_number_counters', '20261016141000_slug_registry_product_store',

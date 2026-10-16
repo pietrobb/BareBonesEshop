@@ -20,8 +20,8 @@ register_shutdown_function(static function () use (&$suiteCompleted): void {
     if ($suiteCompleted) return;
     while (ob_get_level() > 0) ob_end_flush();
     $last = error_get_last();
-    fwrite(STDERR, "\nTEST SUITE ABORTED before the results summary"
-        . ($last ? ': ' . $last['message'] . ' at ' . $last['file'] . ':' . $last['line'] : '') . "\n");
+    fwrite(STDERR, "\nTEST SUITE ABORTED before the results summary (exit or fatal error)"
+        . ($last ? "; last PHP error (may be unrelated): " . $last['message'] . ' at ' . $last['file'] . ':' . $last['line'] : '') . "\n");
     exit(1);
 });
 
@@ -49,6 +49,8 @@ $scenarioFiles = [
     'CheckoutArchitectureScenario.php',
     'PlatformScenario.php',
 ];
+// Scenarios may install their own exception handler (cli/worker.php does), so catch here as well.
+try {
 foreach ($scenarioFiles as $scenarioFile) {
     require __DIR__ . '/tests/scenarios/' . $scenarioFile;
 }
@@ -57,6 +59,13 @@ require __DIR__ . '/tests/RegressionSuite.php';
 require __DIR__ . '/test-update.php';
 require __DIR__ . '/test-theme-contract.php';
 require __DIR__ . '/test-theme-upgrade-gate.php';
+} catch (Throwable $suiteAbort) {
+    while (ob_get_level() > 0) ob_end_flush();
+    fwrite(STDERR, "\nTEST SUITE ABORTED by an uncaught " . get_class($suiteAbort) . ': ' . $suiteAbort->getMessage()
+        . "\n  at " . $suiteAbort->getFile() . ':' . $suiteAbort->getLine() . "\n" . $suiteAbort->getTraceAsString() . "\n");
+    $suiteCompleted = true; // reported above; the shutdown check would only repeat it
+    exit(1);
+}
 
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
