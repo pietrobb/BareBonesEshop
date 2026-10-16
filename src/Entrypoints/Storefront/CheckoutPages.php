@@ -18,7 +18,7 @@ function renderCart(): string {
     $subtotal = (int)$cartData['subtotal'];
     // Free shipping thresholds see the goods after automatic promotions, as checkout does (no coupon entered yet).
     $promotion = CheckoutService::discountPreview('', $subtotal, null, $cart, (int)($_SESSION['customer_id'] ?? 0) ?: null)['promotion_discount'];
-    $quote = ShippingService::cartQuote($cart, $subtotal - min($subtotal, $promotion), 'SK');
+    $quote = ShippingService::cartQuote($cart, $subtotal - min($subtotal, $promotion), CheckoutService::formState([], false)['country']);
     $shipping = $quote['delivery_price'];
     $items = array_map(static fn(array $item): array => [
         'id' => (int)$item['product_id'], 'cart_key' => (string)$item['key'],

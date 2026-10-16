@@ -1,8 +1,5 @@
 <?php
 /** Shared storefront document renderer. Included in request scope. */
-$hreflangData = Bootstrap::hreflangAlternates();
-$hreflangs = $hreflangData['alternates'];
-$pathNoPrefix = $hreflangData['pathNoPrefix'];
 $themeAssets = Template::assets();
 $store = StoreContext::current();
 $brand = Template::branding();
@@ -13,46 +10,12 @@ $localUrl = static function(string $url): string {
     return $url[0] === '/' ? Template::url($url) : $url;
 };
 
-// Absolute structured-data URLs come from app_url only (never the Host header); unset → base-relative URLs.
-$base = Security::configuredAppUrl() ?? Template::baseUrl();
-$jsonLd = '';
 $nonce = Security::cspNonce();
-if ($page === 'home') {
-    $jsonLd  = JsonLd::render(JsonLd::organization($base, Bootstrap::stores()), $nonce);
-    $jsonLd .= JsonLd::render(JsonLd::webSite($base, Bootstrap::stores()), $nonce);
-} elseif ($page === 'category' && !empty($cat)) {
-    // $base already contains the deployment base path, so join it with base-less paths.
-    $crumbItems = [['name' => $t('home'), 'url' => Template::seoPath(Template::url('/'))]];
-    foreach (Categories::breadcrumb((int)$cat['id']) as $crumbCat) {
-        $crumbItems[] = [
-            'name' => $catName($crumbCat['name']),
-            'url' => Template::seoPath(Template::url('/?page=category&slug=' . rawurlencode((string)$crumbCat['slug']))),
-        ];
-    }
-    $jsonLd = JsonLd::render(JsonLd::breadcrumbList($crumbItems, $base), $nonce);
-}
-
-ob_start();
-foreach ($hreflangs as $locale => $prefix) {
-    echo '<link rel="alternate" hreflang="' . $e($locale) . '" href="' . $e(Template::url($prefix . $pathNoPrefix)) . '">' . "\n";
-}
-echo '<link rel="alternate" hreflang="x-default" href="' . $e(Template::url($hreflangData['xDefaultPrefix'] . $pathNoPrefix)) . '">' . "\n";
-if ($jsonLd !== '') echo $jsonLd . "\n";
-$seoHead = ob_get_clean();
+// Canonical/robots/hreflang/JSON-LD for every page type; alternates never copy tracking or filter parameters.
 $viewModel = $GLOBALS['storefront_view_model'] ?? null;
-if (is_array($viewModel) && is_array($viewModel['page']['seo'] ?? null)) {
-    $seoHead = Template::viewModelSeoHead($viewModel, $title);
-    if ($jsonLd !== '') $seoHead .= "\n" . $jsonLd;
-}
-
-$languageLinks = [];
-foreach ($hreflangs as $locale => $prefix) {
-    $languageLinks[] = [
-        'url' => Template::url($prefix . $pathNoPrefix),
-        'label' => strtoupper($locale),
-        'active' => $lang === $locale,
-    ];
-}
+$seo = StorefrontSeo::document($page, $title, is_array($viewModel) ? $viewModel : null, isset($cat) && is_array($cat) ? $cat : null);
+$seoHead = $seo['head'];
+$languageLinks = $seo['language_links'];
 
 $navigation = [];
 $managedNavigation = ContentService::menu('primary', $lang);
@@ -126,8 +89,9 @@ $shell = [
 ];
 
 $runtimeConfig = [
-    'apiUrl' => Template::url('/api.php'),
-    'currentUrl' => Template::url('/'),
+    // Store-prefixed (/cs/api.php): the API resolves the store, locale and currency from the path.
+    'apiUrl' => Template::storeUrl('/api.php'),
+    'currentUrl' => Template::storeUrl('/'),
     'baseUrl' => Template::baseUrl(),
     'csrfToken' => Security::csrfToken(),
     'locale' => I18n::locale(),
@@ -146,6 +110,8 @@ $runtimeConfig = [
         'selectShipping' => I18n::t('select_shipping_first'),
         'paymentLoading' => I18n::t('payment_loading'),
         'paymentUnavailable' => I18n::t('payment_unavailable'),
+        'shippingError' => I18n::t('shipping_load_error'),
+        'paymentError' => I18n::t('payment_load_error'),
     ],
 ];
 $shell['content_html'] = $content;

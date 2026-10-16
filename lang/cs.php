@@ -1449,5 +1449,5 @@ return array_replace(require __DIR__ . '/en.php', [
     'select_variant' => 'Vyberte variantu.', 'cart_error' => 'Položku se nepodařilo přidat.', 'variant_required' => 'Vyberte variantu.',
     'variant_invalid' => 'Vybraná varianta není platná.', 'product_invalid' => 'Produkt není dostupný.', 'product_unavailable' => 'Tento výběr není dostupný.',
     'shipping_loading' => 'Načítám možnosti dopravy…', 'shipping_unavailable' => 'Doručení není dostupné.', 'select_shipping_first' => 'Nejprve vyberte dopravu.',
-    'payment_loading' => 'Načítám způsoby platby…', 'payment_unavailable' => 'Platba není dostupná.',
+    'payment_loading' => 'Načítám způsoby platby…', 'payment_unavailable' => 'Platba není dostupná.', 'shipping_load_error' => 'Možnosti dopravy se nepodařilo načíst. Zkontrolujte připojení a zkuste znovu změnit zemi.', 'payment_load_error' => 'Způsoby platby se nepodařilo načíst. Zkontrolujte připojení a znovu vyberte dopravu.',
 ]);

@@ -1449,5 +1449,5 @@ return array_replace(require __DIR__ . '/en.php', [
     'select_variant' => 'Válasszon változatot.', 'cart_error' => 'A termék nem adható hozzá.', 'variant_required' => 'Válasszon változatot.',
     'variant_invalid' => 'A kiválasztott változat érvénytelen.', 'product_invalid' => 'A termék nem érhető el.', 'product_unavailable' => 'Ez a választás nem érhető el.',
     'shipping_loading' => 'Szállítási módok betöltése…', 'shipping_unavailable' => 'A szállítás nem érhető el.', 'select_shipping_first' => 'Először válasszon szállítást.',
-    'payment_loading' => 'Fizetési módok betöltése…', 'payment_unavailable' => 'A fizetés nem érhető el.',
+    'payment_loading' => 'Fizetési módok betöltése…', 'payment_unavailable' => 'A fizetés nem érhető el.', 'shipping_load_error' => 'A szállítási módokat nem sikerült betölteni. Ellenőrizze a kapcsolatot, és válassza ki újra az országot.', 'payment_load_error' => 'A fizetési módokat nem sikerült betölteni. Ellenőrizze a kapcsolatot, és válassza ki újra a szállítást.',
 ]);

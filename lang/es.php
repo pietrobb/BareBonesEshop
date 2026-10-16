@@ -263,7 +263,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'select_variant' => 'Selecciona una variante.', 'cart_error' => 'No se pudo añadir el artículo.', 'variant_required' => 'Selecciona una variante.',
     'variant_invalid' => 'La variante seleccionada no es válida.', 'product_invalid' => 'El producto no está disponible.', 'product_unavailable' => 'Esta selección no está disponible.',
     'shipping_loading' => 'Cargando opciones de envío…', 'shipping_unavailable' => 'El envío no está disponible.', 'select_shipping_first' => 'Selecciona primero el envío.',
-    'payment_loading' => 'Cargando métodos de pago…', 'payment_unavailable' => 'El pago no está disponible.',
+    'payment_loading' => 'Cargando métodos de pago…', 'payment_unavailable' => 'El pago no está disponible.', 'shipping_load_error' => 'No se pudieron cargar las opciones de envío. Comprueba tu conexión y vuelve a cambiar el país.', 'payment_load_error' => 'No se pudieron cargar los métodos de pago. Comprueba tu conexión y vuelve a elegir el envío.',
     'admin.dashboard.low_stock_alert' => 'Alerta de stock bajo',
     'admin.dashboard.stock_threshold' => 'Umbral bajo / crítico',
     'admin.products.filter_low_stock' => 'Stock bajo',

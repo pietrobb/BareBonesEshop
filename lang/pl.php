@@ -1449,5 +1449,5 @@ return array_replace(require __DIR__ . '/en.php', [
     'select_variant' => 'Wybierz wariant.', 'cart_error' => 'Nie udało się dodać produktu.', 'variant_required' => 'Wybierz wariant.',
     'variant_invalid' => 'Wybrany wariant jest nieprawidłowy.', 'product_invalid' => 'Produkt jest niedostępny.', 'product_unavailable' => 'Ten wybór jest niedostępny.',
     'shipping_loading' => 'Ładowanie metod dostawy…', 'shipping_unavailable' => 'Dostawa jest niedostępna.', 'select_shipping_first' => 'Najpierw wybierz dostawę.',
-    'payment_loading' => 'Ładowanie metod płatności…', 'payment_unavailable' => 'Płatność jest niedostępna.',
+    'payment_loading' => 'Ładowanie metod płatności…', 'payment_unavailable' => 'Płatność jest niedostępna.', 'shipping_load_error' => 'Nie udało się wczytać metod dostawy. Sprawdź połączenie i ponownie zmień kraj.', 'payment_load_error' => 'Nie udało się wczytać metod płatności. Sprawdź połączenie i ponownie wybierz dostawę.',
 ]);

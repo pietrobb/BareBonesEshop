@@ -1469,5 +1469,5 @@ return [
     'shipping_unavailable' => 'Shipping is not available.',
     'select_shipping_first' => 'Select shipping first.',
     'payment_loading' => 'Loading payment methods…',
-    'payment_unavailable' => 'Payment is not available.',
+    'payment_unavailable' => 'Payment is not available.', 'shipping_load_error' => 'Shipping rates could not be loaded. Check your connection and change the country to try again.', 'payment_load_error' => 'Payment methods could not be loaded. Check your connection and choose the shipping again.',
 ];

@@ -8,8 +8,13 @@ function renderLegalPage(string $page): string {
     $legal = StoreContext::current()->legal();
     $vars = [];
     foreach ($legal as $key => $value) $vars['{{' . $key . '}}'] = esc((string)$value);
-    $vars['{{updated_at}}'] = date('Y-m-d');
-    return Template::render('storefront/legal-page', ['content_html' => strtr((string)file_get_contents($tpl), $vars)]);
+    // The date the text last changed: the store's legal.updated_at, else the template's own
+    // <!-- legal-updated: YYYY-MM-DD --> marker, else the template file's mtime — never "today".
+    $html = (string)file_get_contents($tpl);
+    $updated = (string)($legal['updated_at'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $updated)) $updated = preg_match('/<!--\s*legal-updated:\s*(\d{4}-\d{2}-\d{2})\s*-->/', $html, $m) ? $m[1] : date('Y-m-d', (int)filemtime($tpl));
+    $vars['{{updated_at}}'] = esc($updated);
+    return Template::render('storefront/legal-page', ['content_html' => strtr($html, $vars)]);
 }
 
 function renderHome(): string {
@@ -89,7 +94,7 @@ function renderSearchPage(string $query, array $result, string $heading, string 
     ] + $filterView + ['show_filters' => false]);
 }
 
-function storefrontProductItems(array $products): array { return array_map([StorefrontViewModel::class, 'productCard'], Products::enrichMany($products)); }
+function storefrontProductItems(array $products): array { return array_values(StorefrontViewModel::productCards($products)); }
 function storefrontPagination(int $page, int $pages, string $base): array {
     if ($pages <= 1) return [];
     $separator = str_contains($base, '?') ? '&' : '?'; $links = [];
@@ -97,7 +102,8 @@ function storefrontPagination(int $page, int $pages, string $base): array {
     return $links;
 }
 function buildCategoryUrl(string $slug, string $sort, array $spec, ?int $pmin, ?int $pmax, array $subcats=[], array $ranges=[]): string {
-    $url='?page=category&slug='.rawurlencode($slug).'&sort='.rawurlencode($sort);
+    // The default order adds no sort= (robots.txt disallows sort URLs; pagination must stay crawlable).
+    $url='?page=category&slug='.rawurlencode($slug).($sort!=='price_asc'?'&sort='.rawurlencode($sort):'');
     foreach($subcats as $id)$url.='&subcat[]='.(int)$id;
     foreach($spec as $name=>$values)foreach($values as $value)$url.='&spec['.rawurlencode($name).'][]='.rawurlencode($value);
     if($pmin)$url.='&pmin='.(int)($pmin/100); if($pmax)$url.='&pmax='.(int)($pmax/100);

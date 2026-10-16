@@ -1478,5 +1478,5 @@ return [
     'shipping_unavailable' => 'Doručenie nie je dostupné.',
     'select_shipping_first' => 'Najprv vyberte dopravu.',
     'payment_loading' => 'Načítavam spôsoby platby…',
-    'payment_unavailable' => 'Platba nie je dostupná.',
+    'payment_unavailable' => 'Platba nie je dostupná.', 'shipping_load_error' => 'Možnosti dopravy sa nepodarilo načítať. Skontrolujte pripojenie a skúste znova zmeniť krajinu.', 'payment_load_error' => 'Spôsoby platby sa nepodarilo načítať. Skontrolujte pripojenie a znova vyberte dopravu.',
 ];

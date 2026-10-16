@@ -26,18 +26,21 @@ final class StorefrontViewModel
         }
         $images = self::images($source);
         $url = self::productUrl((string)$source['slug']);
+        // Structured data and og:image are read off-site: absolute URLs from app_url (never the Host header).
+        $appUrl = rtrim((string)((require __DIR__ . '/../config.php')['app_url'] ?? ''), '/');
+        $absolute = static fn(string $local): string => $appUrl === '' || $local === '' || preg_match('#^https?://#i', $local)
+            ? $local : $appUrl . Template::seoPath($local);
+        $absoluteUrl = $absolute($url);
         $currency = strtoupper((string)($source['currency'] ?? StoreContext::current()->currency()));
+        // All relation cards are built in one batch (one enrichment context, one availability query).
+        $relationRows = Products::typedRelations($productId, 100);
+        $relationCards = self::productCards($relationRows);
         $relations = [];
-        foreach (Products::typedRelations($productId, 100) as $relation) {
-            $type = (string)$relation['relation_type'];
-            unset($relation['relation_type'], $relation['relation_sort_order']);
-            $relations[$type][] = self::productCard($relation);
+        foreach ($relationRows as $index => $relation) {
+            $relations[(string)$relation['relation_type']][] = $relationCards[$index];
         }
         if (empty($relations['related'])) {
-            $relations['related'] = array_map(
-                static fn(array $related): array => self::productCard($related),
-                Products::related($productId, 4)
-            );
+            $relations['related'] = array_values(self::productCards(Products::related($productId, 4)));
         }
 
         $breadcrumbs = [[
@@ -81,7 +84,7 @@ final class StorefrontViewModel
             'name' => $product['name'],
             'description' => $product['summary'],
             'sku' => $product['sku'],
-            'url' => $url,
+            'url' => $absoluteUrl,
             'offers' => [
                 '@type' => 'Offer',
                 'price' => number_format($product['price']['amount_minor'] / 100, 2, '.', ''),
@@ -89,11 +92,11 @@ final class StorefrontViewModel
                 'availability' => $availability['purchasable']
                     ? 'https://schema.org/InStock'
                     : 'https://schema.org/OutOfStock',
-                'url' => $url,
+                'url' => $absoluteUrl,
             ],
         ];
         if ($images !== []) {
-            $jsonLd['image'] = array_column($images, 'url');
+            $jsonLd['image'] = array_map($absolute, array_column($images, 'url'));
         }
         $brand = self::brandName((int)($source['brand_id'] ?? 0));
         if ($brand !== '') $jsonLd['brand'] = ['@type' => 'Brand', 'name' => $brand];
@@ -110,11 +113,11 @@ final class StorefrontViewModel
                     'title' => trim((string)($source['seo_title'] ?? '')) ?: $product['name'],
                     'description' => trim((string)($source['meta_description'] ?? '')) ?: $product['summary'],
                     'canonical_url' => $url,
-                    'image_url' => $images[0]['url'] ?? '',
+                    'image_url' => $absolute($images[0]['url'] ?? ''),
                     'json_ld' => [$jsonLd, JsonLd::breadcrumbList(array_map(
                         static fn(array $item): array => ['name' => $item['current'] ? $product['name'] : $item['label'], 'url' => $item['url'] !== '' ? Template::seoPath($item['url']) : ''],
                         $breadcrumbs
-                    ), (string)((require __DIR__ . '/../config.php')['app_url'] ?? ''))],
+                    ), $appUrl)],
                 ],
                 'breadcrumbs' => $breadcrumbs,
             ],
@@ -139,20 +142,44 @@ final class StorefrontViewModel
 
     public static function productCard(array $row): array
     {
-        $product = self::enrichedProduct($row);
-        $images = self::images($product);
-        return [
-            'id' => (int)$product['id'],
-            'slug' => (string)$product['slug'],
-            'sku' => (string)$product['sku'],
-            'type' => (string)($product['product_type'] ?? 'simple'),
-            'name' => (string)$product['name'],
-            'summary' => (string)($product['summary'] ?? ''),
-            'url' => self::productUrl((string)$product['slug']),
-            'price' => self::price($product),
-            'availability' => self::availability($product),
-            'image' => $images[0] ?? null,
-        ];
+        return self::productCards([$row])[0];
+    }
+
+    /**
+     * Card models for a listing with a constant query budget: rows that are not enriched yet share
+     * one Products::enrichMany() context (categories, price lists, promotions) and purchasability
+     * is one batched lookup. Keys and order of $rows are preserved.
+     */
+    public static function productCards(array $rows): array
+    {
+        if ($rows === []) return [];
+        $products = [];
+        $raw = [];
+        foreach ($rows as $key => $row) {
+            $row = I18n::product($row);
+            if (!is_array($row['images'] ?? null) || !is_array($row['attrs'] ?? null)) $raw[$key] = $row;
+            else $products[$key] = $row;
+        }
+        if ($raw !== []) $products = Products::enrichMany($raw) + $products;
+        $purchasable = VariantAvailability::purchasableMany(array_map(static fn(array $product): int => (int)$product['id'], $products));
+        $cards = [];
+        foreach (array_keys($rows) as $key) {
+            $product = $products[$key];
+            $images = self::images($product);
+            $cards[$key] = [
+                'id' => (int)$product['id'],
+                'slug' => (string)$product['slug'],
+                'sku' => (string)$product['sku'],
+                'type' => (string)($product['product_type'] ?? 'simple'),
+                'name' => (string)$product['name'],
+                'summary' => (string)($product['summary'] ?? ''),
+                'url' => self::productUrl((string)$product['slug']),
+                'price' => self::price($product),
+                'availability' => self::availability($product, null, $purchasable[(int)$product['id']] ?? false),
+                'image' => $images[0] ?? null,
+            ];
+        }
+        return $cards;
     }
 
     public static function home(): array
@@ -243,11 +270,11 @@ final class StorefrontViewModel
         ];
     }
 
-    private static function availability(array $product, ?int $variantId = null): array
+    private static function availability(array $product, ?int $variantId = null, ?bool $purchasable = null): array
     {
         $digital = VariantAvailability::isDigitalType((string)($product['product_type'] ?? ''));
         $quantity = max(0, (int)($product['stock'] ?? 0));
-        $purchasable = VariantAvailability::isPurchasable((int)$product['id'], $variantId);
+        $purchasable ??= VariantAvailability::isPurchasable((int)$product['id'], $variantId);
         $inStock = $digital || $quantity > 0;
         return [
             'purchasable' => $purchasable,
@@ -379,7 +406,8 @@ final class StorefrontViewModel
     private static function pageSections(mixed $encoded, array $context): array
     {
         try {
-            $sections = json_decode(ContentService::sanitizeSections($encoded), true, 32, JSON_THROW_ON_ERROR);
+            // Rows saved before *url validation render with the offending URL blanked, not as a link.
+            $sections = json_decode(ContentService::sanitizeSections($encoded, true), true, 32, JSON_THROW_ON_ERROR);
         } catch (InvalidArgumentException|JsonException $exception) {
             return [];
         }
@@ -418,7 +446,8 @@ final class StorefrontViewModel
         return Template::storeUrl('/product/' . rawurlencode($slug));
     }
 
-    private static function imageUrl(string $value, string $size): string
+    /** Storefront URL of a stored product image reference (HTTPS URL, local path, or uploads file). */
+    public static function imageUrl(string $value, string $size = 'full'): string
     {
         $value = trim($value);
         if (preg_match('#^https://#i', $value)) return $value;

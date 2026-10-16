@@ -162,7 +162,8 @@ $architectureBudgets = [
     // +2 functions: pending-payment page and the gateway cancel page (P0 2026-10-13 checkout redirect).
     // +1 coupling: BankTransferInstructions renders the IBAN / variable symbol / PAY by square block on order-done (A13.6).
     'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 240, 'functions' => 6, 'max_function_lines' => 100, 'coupling' => 9],
-    'src/Entrypoints/Storefront/Layout.php' => ['lines' => 180, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 8],
+    // Ratcheted: canonical/robots/hreflang/JSON-LD moved to StorefrontSeo (storefront SEO audit).
+    'src/Entrypoints/Storefront/Layout.php' => ['lines' => 140, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 8],
     'src/Entrypoints/Storefront/ProductStatusPages.php' => ['lines' => 20, 'functions' => 1, 'max_function_lines' => 20, 'coupling' => 3],
 ];
 $forbiddenDependencies = [
