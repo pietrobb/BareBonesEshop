@@ -1702,6 +1702,10 @@ $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 Db::init($db, $driver);
 $db->exec("CREATE " . ($driver === "mysql" ? "TEMPORARY " : "") . "TABLE products (id INTEGER PRIMARY KEY, store_id VARCHAR(40) NOT NULL DEFAULT \'default\', price INTEGER NOT NULL, updated_at DATETIME NULL)");
 $db->exec("INSERT INTO products (id, price) VALUES (5, 1001), (7, 1010), (9, 0), (11, 99), (13, -100)");
+// Bulk price changes read the variant price floor and write the audit log.
+$tmp = $driver === "mysql" ? "TEMPORARY " : "";
+$db->exec("CREATE {$tmp}TABLE variants (id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL, price_absolute INTEGER NULL, price_delta INTEGER NOT NULL DEFAULT 0)");
+$db->exec("CREATE {$tmp}TABLE audit_log (id INTEGER PRIMARY KEY " . ($driver === "mysql" ? "AUTO_INCREMENT" : "") . ", entity VARCHAR(40), entity_id INTEGER, action VARCHAR(40), old_value TEXT, new_value TEXT, note TEXT, actor VARCHAR(80), ip_address VARCHAR(80), store_id VARCHAR(40), correlation_id VARCHAR(80), created_at DATETIME NULL)");
 $_SESSION = ["admin_role" => "owner"];
 $_POST = ["bulk_action" => $argv[2], "product_ids" => json_decode($argv[3], true, 512, JSON_THROW_ON_ERROR)];
 register_shutdown_function(static function() use ($db): void {

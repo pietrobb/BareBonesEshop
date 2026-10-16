@@ -477,7 +477,7 @@ function pageOrder(): void {
         <?php else: ?>
         <p class="muted"><?= esc(I18n::t('admin.order.no_invoices')) ?></p>
         <?php endif; ?>
-        <?php if ($order['status'] === 'paid' || $order['status'] === 'shipped' || $order['status'] === 'delivered'): ?>
+        <?php if (InvoiceService::canIssue($order)): ?>
         <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=invoice_issue" style="display:inline;margin-top:.5rem">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
             <button class="btn btn-primary btn-sm" type="submit"><?= esc(I18n::t('admin.order.issue_invoice')) ?></button>
@@ -760,8 +760,10 @@ function handleOrderEmailResend(): void {
 function handleOrderInvoiceIssue(): void {
     Security::adminRequire('orders.edit');
     $orderId = Security::int($_GET['id'] ?? 0);
-    if ($orderId <= 0 || !Security::rateLimit('admin_invoice_issue_' . $orderId, 3, 3600, false)) {
-        setFlash('err', I18n::t('admin.order.msg.invoice_issue_refused'));
+    // Same rule as the button: no invoice for an order that is not paid (InvoiceService::issue() refuses it too).
+    $unpaid = $orderId > 0 && ($order = Orders::byId($orderId)) && !InvoiceService::byOrderId($orderId) && !InvoiceService::canIssue($order);
+    if ($orderId <= 0 || $unpaid || !Security::rateLimit('admin_invoice_issue_' . $orderId, 3, 3600, false)) {
+        setFlash('err', I18n::t($unpaid ? 'admin.order.msg.invoice_unpaid' : 'admin.order.msg.invoice_issue_refused'));
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }

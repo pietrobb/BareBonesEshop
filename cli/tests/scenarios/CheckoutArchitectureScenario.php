@@ -850,7 +850,7 @@ assert_equals(900, (int)$f2Order['vat_total'] + (int)$f2Order['net_total'], 'F2:
 //     not abort the whole run (structural guard — network-free).
 $f5Src = file_get_contents(TEST_CLI_DIR . '/../src/FeedImport.php') ?: '';
 assert_true(
-    (bool)preg_match('/foreach\s*\(\$feeds as \$feed\).*?try\s*\{.*?self::sync\(.*?\}\s*catch\s*\(\\\\Throwable/s', $f5Src),
+    (bool)preg_match('/foreach\s*\(\$feeds as \$feed\).*?try\s*\{.*?self::sync(?:InStore)?\(.*?\}\s*catch\s*\(\\\\Throwable/s', $f5Src),
     'F5: syncAll isolates per-feed sync() failures in try/catch'
 );
 

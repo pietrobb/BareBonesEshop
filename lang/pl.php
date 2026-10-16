@@ -1466,4 +1466,16 @@ return array_replace(require __DIR__ . '/en.php', [
     'order_done_unverified' => 'Dziękujemy. Jeśli złożyłeś zamówienie, jego potwierdzenie wysłaliśmy na Twój e-mail.',
     'reviews.duplicate' => 'Niedawno oceniłeś już ten produkt.',
     'payment_loading' => 'Ładowanie metod płatności…', 'payment_unavailable' => 'Płatność jest niedostępna.', 'shipping_load_error' => 'Nie udało się wczytać metod dostawy. Sprawdź połączenie i ponownie zmień kraj.', 'payment_load_error' => 'Nie udało się wczytać metod płatności. Sprawdź połączenie i ponownie wybierz dostawę.',
+
+    // Admin catalog/operations audit fixes
+    'admin.feed.mode_price_stock' => 'Tylko cena i stan (istniejące produkty; nic nie jest tworzone, treść się nie zmienia)',
+    'admin.feed.warehouse_foreign' => 'Magazyn nie należy do tego sklepu.',
+    'admin.feed.code_taken' => 'Ten kod feedu jest już używany (kody feedów są unikalne we wszystkich sklepach).',
+    'admin.order.msg.invoice_unpaid' => 'Fakturę można wystawić tylko dla opłaconego zamówienia.',
+    'admin.msg.product.sku_change_blocked' => 'Nie można zmienić SKU {sku} ({reason}).',
+    'admin.msg.product.price_below_variants' => 'Cena musi wynosić co najmniej {min} groszy, w przeciwnym razie wariant z rabatem kosztowałby mniej niż zero.',
+    'admin.products.bulk.delete_skipped' => 'Nie usunięto, ponieważ odwołują się do nich zamówienia (zamiast tego je zarchiwizuj): {list}.',
+    'admin.products.bulk.price_clamped' => 'Pozostawiono na najniższej dozwolonej cenie (zero lub cena, przy której żaden wariant nie spada poniżej zera): {list}.',
+    'admin.attr.options_invalid' => 'Nieprawidłowe wartości atrybutu.',
+    'admin.attr.shared_locked' => 'Ten atrybut jest używany przez inny katalog, dlatego nie można zmienić jego sluga ani typu.',
 ]);

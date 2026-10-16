@@ -1466,4 +1466,16 @@ return array_replace(require __DIR__ . '/en.php', [
     'order_done_unverified' => 'Köszönjük. Ha leadott rendelést, a visszaigazolást elküldtük az e-mail-címére.',
     'reviews.duplicate' => 'Ezt a terméket nemrég már értékelte.',
     'payment_loading' => 'Fizetési módok betöltése…', 'payment_unavailable' => 'A fizetés nem érhető el.', 'shipping_load_error' => 'A szállítási módokat nem sikerült betölteni. Ellenőrizze a kapcsolatot, és válassza ki újra az országot.', 'payment_load_error' => 'A fizetési módokat nem sikerült betölteni. Ellenőrizze a kapcsolatot, és válassza ki újra a szállítást.',
+
+    // Admin catalog/operations audit fixes
+    'admin.feed.mode_price_stock' => 'Csak ár és készlet (meglévő termékek; semmi sem jön létre, a tartalom nem változik)',
+    'admin.feed.warehouse_foreign' => 'A raktár nem ehhez az üzlethez tartozik.',
+    'admin.feed.code_taken' => 'Ez a feedkód már használatban van (a feedkódok minden üzletben egyediek).',
+    'admin.order.msg.invoice_unpaid' => 'Számla csak kifizetett rendeléshez állítható ki.',
+    'admin.msg.product.sku_change_blocked' => 'A(z) {sku} cikkszám nem módosítható ({reason}).',
+    'admin.msg.product.price_below_variants' => 'Az árnak legalább {min} centnek kell lennie, különben egy árkedvezményes változat nullánál kevesebbe kerülne.',
+    'admin.products.bulk.delete_skipped' => 'Nem törölve, mert rendelések hivatkoznak rájuk (archiválja őket helyette): {list}.',
+    'admin.products.bulk.price_clamped' => 'A legalacsonyabb megengedett áron maradt (nulla, vagy az az ár, amelynél egy változat sem csökken nulla alá): {list}.',
+    'admin.attr.options_invalid' => 'Érvénytelen attribútumértékek.',
+    'admin.attr.shared_locked' => 'Egy másik katalógus használja ezt az attribútumot, ezért a slugja és a típusa nem módosítható.',
 ]);

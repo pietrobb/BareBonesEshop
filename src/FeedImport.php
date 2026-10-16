@@ -14,8 +14,17 @@
  */
 class FeedImport {
 
+    /** Full upsert: create or update products with every mapped field, then set the warehouse stock. */
+    public const MODE_UPSERT = 'upsert';
+    /** Existing products of the catalog: update the price and the warehouse stock, never create or touch content. */
+    public const MODE_PRICE_STOCK = 'price_stock';
+    /** Existing products/variants of the catalog: only the warehouse stock changes; nothing is created or overwritten. */
+    public const MODE_STOCK_ONLY = 'stock_only';
+    /** The import modes the admin form offers, Warehouse::saveFeed() accepts and applyItems() implements. */
+    public const MODES = [self::MODE_UPSERT, self::MODE_PRICE_STOCK, self::MODE_STOCK_ONLY];
+
     /**
-     * Sync a single feed: download → parse → import products → update stock
+     * Sync a single feed of the active store: download → parse → import products → update stock
      */
     public static function sync(int $feedId, bool $verbose = false): array {
         $feed = Warehouse::feedById($feedId);
@@ -39,6 +48,11 @@ class FeedImport {
         if (empty($fieldMap)) {
             $result['error'] = 'Empty field_map — cannot map feed fields to product fields';
             Warehouse::updateFeedStatus($feedId, 'error: no field_map', 0);
+            return $result;
+        }
+        if (!in_array($feed['import_mode'] ?? '', self::MODES, true)) {
+            $result['error'] = 'Unknown import mode: ' . ($feed['import_mode'] ?? '');
+            Warehouse::updateFeedStatus($feedId, 'error: bad import mode', 0);
             return $result;
         }
 
@@ -65,6 +79,26 @@ class FeedImport {
         }
 
         if ($verbose) echo "  Parsed " . count($items) . " items\n";
+        $result = self::applyItems($feed, $items, $result);
+
+        if ($verbose) {
+            echo "  Imported: {$result['imported']}, Stock: {$result['stock_updated']}, " .
+                 "Skipped: {$result['skipped']}, Errors: " . count($result['errors']) . "\n";
+        }
+
+        return $result;
+    }
+
+    /**
+     * Import parsed feed items into the active store per the feed's import mode and book the stock into the feed's
+     * warehouse; records the feed status. The feed must belong to the active store (Warehouse::feedById()).
+     */
+    public static function applyItems(array $feed, array $items, ?array $result = null): array {
+        $feedId = (int)$feed['id'];
+        $result ??= ['feed_id' => $feedId, 'feed_code' => $feed['code'], 'imported' => 0, 'stock_updated' => 0, 'skipped' => 0, 'errors' => []];
+        $importMode = (string)($feed['import_mode'] ?? '');
+        if (!in_array($importMode, self::MODES, true)) throw new InvalidArgumentException("Unknown feed import mode: {$importMode}");
+        $fieldMap = json_decode((string)$feed['field_map'], true) ?: [];
 
         // Import products + collect stock data
         $db = Db::get();
@@ -81,22 +115,20 @@ class FeedImport {
                     continue;
                 }
 
-                $importMode = $feed['import_mode'] ?? 'upsert';
-
-                if ($importMode === 'price_stock') {
-                    // Only update price + stock for existing products — never create or overwrite content
-                    if (!self::updatePriceOnly($mapped, $db)) {
-                        // Unknown here (or another catalog's SKU): no stock for this warehouse either.
-                        $db->exec('RELEASE SAVEPOINT row_import');
-                        $result['skipped']++;
-                        continue;
-                    }
-                    $result['imported']++;
-                } else {
+                if ($importMode === self::MODE_UPSERT) {
                     // Full upsert — create or update product with all fields
                     Import::importProduct($mapped, $db);
-                    $result['imported']++;
+                } elseif (!($importMode === self::MODE_PRICE_STOCK
+                    // Only update price + stock for existing products — never create or overwrite content
+                    ? self::updatePriceOnly($mapped, $db)
+                    // Only the warehouse stock of an existing product or variant SKU of this catalog
+                    : self::skuInCatalog((string)$mapped['sku'], $db))) {
+                    // Unknown here (or another catalog's SKU): no stock for this warehouse either.
+                    $db->exec('RELEASE SAVEPOINT row_import');
+                    $result['skipped']++;
+                    continue;
                 }
+                $result['imported']++;
 
                 // Collect stock for warehouse update
                 if (isset($mapped['stock'])) {
@@ -124,20 +156,15 @@ class FeedImport {
         // Update feed status
         $status = empty($result['errors']) ? 'ok' : 'ok with ' . count($result['errors']) . ' errors';
         Warehouse::updateFeedStatus($feedId, $status, $result['imported']);
-
-        if ($verbose) {
-            echo "  Imported: {$result['imported']}, Stock: {$result['stock_updated']}, " .
-                 "Skipped: {$result['skipped']}, Errors: " . count($result['errors']) . "\n";
-        }
-
         return $result;
     }
 
     /**
-     * Sync all enabled feeds (optionally only those due by schedule)
+     * Sync all enabled feeds of every store (optionally only those due by schedule). Each feed runs inside the store
+     * context of its warehouse, so products, slugs and stock land in that store's catalog and ledger.
      */
     public static function syncAll(bool $verbose = false, bool $respectSchedule = true): array {
-        $feeds = Warehouse::allFeeds();
+        $feeds = Warehouse::allFeedsAllStores();
         $results = [];
 
         foreach ($feeds as $feed) {
@@ -150,9 +177,9 @@ class FeedImport {
                 }
             }
 
-            if ($verbose) echo "[{$feed['code']}] Syncing...\n";
+            if ($verbose) echo "[{$feed['code']}] Syncing ({$feed['store_id']})...\n";
             try {
-                $results[$feed['code']] = self::sync((int)$feed['id'], $verbose);
+                $results[$feed['code']] = self::syncInStore((string)$feed['store_id'], (int)$feed['id'], $verbose);
             } catch (\Throwable $e) {
                 // F5: isolate per-feed failures (e.g. parseXml throw, network error)
                 // so one bad feed does NOT abort syncAll and skip the remaining feeds.
@@ -173,6 +200,22 @@ class FeedImport {
         return $results;
     }
 
+    /** Run sync() for a feed inside its warehouse's store context (the previous context is restored afterwards). */
+    public static function syncInStore(string $storeId, int $feedId, bool $verbose = false): array {
+        return PaymentWebhookRouting::within($storeId, static fn(): array => self::sync($feedId, $verbose));
+    }
+
+    /** True when the SKU is a product or a variant of a product of the active catalog. */
+    private static function skuInCatalog(string $sku, PDO $db): bool {
+        $catalog = StoreContext::current()->catalogId();
+        $stmt = $db->prepare('SELECT 1 FROM products WHERE sku = :sku AND store_id = :catalog');
+        $stmt->execute([':sku' => $sku, ':catalog' => $catalog]);
+        if ($stmt->fetchColumn() !== false) return true;
+        $stmt = $db->prepare('SELECT 1 FROM variants v JOIN products p ON p.id = v.product_id WHERE v.sku = :sku AND p.store_id = :catalog');
+        $stmt->execute([':sku' => $sku, ':catalog' => $catalog]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     // ─── Download ────────────────────────────────────────────
 
     /** price_stock mode: update the price of an existing product in the current catalog; false when the SKU is not there. */
@@ -184,7 +227,7 @@ class FeedImport {
         if (!$row) return false;
         $updates = [];
         if (isset($mapped['price'])) {
-            $priceCents = Import::parsePriceToCents($mapped['price']);
+            $priceCents = Import::assertVariantFloor((int)$row['id'], Import::parsePriceToCents($mapped['price']));
             $updates[] = 'price = :price';
             $params[':price'] = $priceCents;
             // Set old price as compare_price if price dropped

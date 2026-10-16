@@ -33,17 +33,20 @@ if ($verbose) {
     echo date('Y-m-d H:i:s') . "\n\n";
 }
 
+// Feeds of every store; each one is synced inside the store context of its warehouse.
+$allFeeds = Warehouse::allFeedsAllStores();
+
 if ($list) {
-    $feeds = Warehouse::allFeeds();
+    $feeds = $allFeeds;
     if (empty($feeds)) {
         echo "No feeds configured.\n";
         exit;
     }
-    printf("%-4s %-20s %-15s %-8s %-20s %-6s %s\n", 'ID', 'Code', 'Warehouse', 'Format', 'Last Sync', 'Count', 'Status');
-    echo str_repeat('-', 100) . "\n";
+    printf("%-4s %-20s %-10s %-15s %-8s %-20s %-6s %s\n", 'ID', 'Code', 'Store', 'Warehouse', 'Format', 'Last Sync', 'Count', 'Status');
+    echo str_repeat('-', 110) . "\n";
     foreach ($feeds as $f) {
-        printf("%-4d %-20s %-15s %-8s %-20s %-6d %s\n",
-            $f['id'], $f['code'], $f['warehouse_code'], $f['format'],
+        printf("%-4d %-20s %-10s %-15s %-8s %-20s %-6d %s\n",
+            $f['id'], $f['code'], $f['store_id'], $f['warehouse_code'], $f['format'],
             $f['last_sync'] ?? 'never', $f['last_count'] ?? 0,
             $f['enabled'] ? ($f['last_status'] ?? '—') : 'DISABLED'
         );
@@ -53,12 +56,9 @@ if ($list) {
 
 if ($feedArg !== null) {
     // Sync specific feed
-    if (is_numeric($feedArg)) {
-        $feed = Warehouse::feedById((int)$feedArg);
-    } else {
-        $stmt = Db::get()->prepare("SELECT * FROM feeds WHERE code = :code");
-        $stmt->execute([':code' => $feedArg]);
-        $feed = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    $feed = null;
+    foreach ($allFeeds as $candidate) {
+        if (is_numeric($feedArg) ? (int)$candidate['id'] === (int)$feedArg : $candidate['code'] === $feedArg) $feed = $candidate;
     }
 
     if (!$feed) {
@@ -66,8 +66,8 @@ if ($feedArg !== null) {
         exit(1);
     }
 
-    if ($verbose) echo "Syncing feed: {$feed['code']}...\n";
-    $result = FeedImport::sync((int)$feed['id'], $verbose);
+    if ($verbose) echo "Syncing feed: {$feed['code']} (store {$feed['store_id']})...\n";
+    $result = FeedImport::syncInStore((string)$feed['store_id'], (int)$feed['id'], $verbose);
 
     if (!empty($result['error'])) {
         echo "ERROR: {$result['error']}\n";

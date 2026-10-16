@@ -64,6 +64,8 @@ if (str_starts_with($action, 'member')) {
 $orders = static fn(): array => $db->query("SELECT id, order_number, shipping_addr, vat_scenario FROM orders ORDER BY id")->fetchAll();
 $result = static function (array $payload): never { exit("\nA135RESULT" . json_encode($payload + ['code' => 200, 'new_orders' => []], JSON_INVALID_UTF8_SUBSTITUTE)); };
 if ($action === 'invoice') {
+    // Invoices are issued only for paid orders (InvoiceService::canIssue).
+    $db->prepare("UPDATE orders SET status = 'paid', payment_status = 'paid' WHERE id = ?")->execute([(int)($orders()[0]['id'] ?? 0)]);
     $invoice = InvoiceService::issue((int)($orders()[0]['id'] ?? 0));
     $row = InvoiceService::byId((int)$invoice['id']);
     $result(['output' => json_encode(['customer' => json_decode((string)$row['customer_snapshot'], true), 'seller' => json_decode((string)$row['seller_snapshot'], true)])]);

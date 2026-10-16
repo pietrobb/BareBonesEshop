@@ -29,10 +29,13 @@ final class CatalogScope {
             ORDER BY da.sku, da.asset_key');
     }
 
-    public static function setDigitalAssetActive(int $id, int $active): void {
-        Db::get()->prepare('UPDATE digital_assets SET active = :active, updated_at = ' . Db::now() . ' WHERE id = :id
-            AND EXISTS (SELECT 1 FROM products p WHERE p.sku = digital_assets.sku AND p.store_id = :catalog)')
+    /** False when the asset is not one of the active catalog's. */
+    public static function setDigitalAssetActive(int $id, int $active): bool {
+        $owned = 'id = :id AND EXISTS (SELECT 1 FROM products p WHERE p.sku = digital_assets.sku AND p.store_id = :catalog)';
+        if (!self::rows("SELECT 1 AS owned FROM digital_assets WHERE {$owned}", [':id' => $id])) return false;
+        Db::get()->prepare('UPDATE digital_assets SET active = :active, updated_at = ' . Db::now() . " WHERE {$owned}")
             ->execute([':active' => $active, ':id' => $id, ':catalog' => StoreContext::current()->catalogId()]);
+        return true;
     }
 
     /** Attribute definitions with the names of the active catalog's categories they are linked to. */
@@ -58,6 +61,35 @@ final class CatalogScope {
             ->execute([':aid' => $attributeId, ':catalog' => StoreContext::current()->catalogId()]);
         $insert = $db->prepare('INSERT INTO category_attributes (category_id, attribute_id) VALUES (:cid, :aid)');
         foreach ($selected as $categoryId) $insert->execute([':cid' => $categoryId, ':aid' => $attributeId]);
+    }
+
+    /**
+     * Write the enum values of an attribute (value => sort order). The vocabulary is shared by every catalog: while
+     * another catalog uses the attribute ($shared), values are only added or re-sorted, never deleted.
+     */
+    public static function saveAttributeOptions(int $attributeId, array $options, bool $shared): void {
+        $db = Db::get();
+        $existing = [];
+        $stmt = $db->prepare('SELECT id, value FROM attribute_options WHERE attribute_id = :aid');
+        $stmt->execute([':aid' => $attributeId]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $existing[(string)$row['value']] = (int)$row['id'];
+        if (!$shared) {
+            $db->prepare('DELETE FROM attribute_options WHERE attribute_id = :aid')->execute([':aid' => $attributeId]);
+            $existing = [];
+        }
+        $insert = $db->prepare('INSERT INTO attribute_options (attribute_id, value, sort_order) VALUES (:aid, :val, :sort)');
+        $resort = $db->prepare('UPDATE attribute_options SET sort_order = :sort WHERE id = :id');
+        foreach ($options as $value => $sort) {
+            if (isset($existing[$value])) $resort->execute([':sort' => $sort, ':id' => $existing[$value]]);
+            else $insert->execute([':aid' => $attributeId, ':val' => $value, ':sort' => $sort]);
+        }
+    }
+
+    /** Enum values of an attribute in display order. */
+    public static function attributeOptionValues(int $attributeId): array {
+        $stmt = Db::get()->prepare('SELECT value FROM attribute_options WHERE attribute_id = :aid ORDER BY sort_order, value');
+        $stmt->execute([':aid' => $attributeId]);
+        return $stmt->fetchAll(PDO::FETCH_COLUMN);
     }
 
     public static function attributeUsedByOtherCatalog(int $attributeId): bool {

@@ -18,9 +18,27 @@ final class StoreConfig {
         return $found === false ? null : (string)$found;
     }
 
+    /** The active store's row $id of $table, or null. */
+    public static function row(string $table, int $id): ?array {
+        $stmt = Db::get()->prepare("SELECT * FROM {$table} WHERE id = :id AND store_id = :store");
+        $stmt->execute([':id' => $id, ':store' => StoreContext::current()->providerId()]);
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    /** Delete the active store's row $id of $table; the deleted row is written to the audit log. */
     public static function delete(string $table, int $id): bool {
+        $old = self::row($table, $id);
         $stmt = Db::get()->prepare("DELETE FROM {$table} WHERE id = :id AND store_id = :store");
         $stmt->execute([':id' => $id, ':store' => StoreContext::current()->providerId()]);
-        return $stmt->rowCount() > 0;
+        if ($stmt->rowCount() === 0) return false;
+        AuditLog::log($table, $id, $old, null, 'Admin config delete');
+        return true;
+    }
+
+    /** Audit a saved row: $id 0 means it was just inserted (lastInsertId); $old is the row before the change. */
+    public static function audit(string $table, int $id, ?array $old): void {
+        $id = $id ?: (int)Db::get()->lastInsertId();
+        if ($id <= 0) return;
+        AuditLog::log($table, $id, $old, self::row($table, $id), $old ? 'Admin config edit' : 'Admin config create');
     }
 }

@@ -26,6 +26,16 @@ final class ProductVariants {
         return VariantAvailability::statuses();
     }
 
+    /**
+     * Lowest base price (cents) of the product that keeps every variant priced by a delta at zero or more: a price
+     * change (editor, CSV import, bulk change) below it is refused or clamped, so no variant price turns negative.
+     */
+    public static function minBasePrice(int $productId): int {
+        $stmt = Db::get()->prepare('SELECT MIN(price_delta) FROM variants WHERE product_id = :id AND price_absolute IS NULL');
+        $stmt->execute([':id' => $productId]);
+        return max(0, -(int)$stmt->fetchColumn());
+    }
+
     /** The empty "add a variant" row of the editor. */
     public static function blank(int $sortOrder): array {
         return ['id' => 'new', 'sku' => '', 'name' => '', 'attrs_text' => '', 'price_absolute' => null, 'price_delta' => 0, 'stock' => 0,
@@ -81,7 +91,7 @@ final class ProductVariants {
                 $blocked = self::referencedBy((int)$old['id'], (string)$old['sku'], false);
                 if ($blocked !== null) return I18n::format('admin.msg.variant.sku_change_blocked', ['sku' => $old['sku'], 'reason' => $blocked]);
             }
-            if (self::skuTaken($sku, $id)) return I18n::format('admin.msg.variant.sku_taken', ['sku' => $sku]);
+            if (SkuGuard::taken($sku, 0, $id)) return I18n::format('admin.msg.variant.sku_taken', ['sku' => $sku]);
             $name = trim((string)($fields['name'] ?? ''));
             if (mb_strlen($name) > 255) return I18n::format('admin.msg.variant.name_long', ['sku' => $sku]);
             $attrs = self::parseAttrs((string)($fields['attrs'] ?? ''));
@@ -192,16 +202,6 @@ final class ProductVariants {
             if ((int)$legacy->fetchColumn() > 0 && !self::ledgered($sku)) return I18n::t('admin.msg.variant.legacy_stock');
         }
         return null;
-    }
-
-    /** SKUs share one ledger key, so a variant SKU may collide with no product and no other variant (any store). */
-    private static function skuTaken(string $sku, int $variantId): bool {
-        $db = Db::get();
-        $product = $db->prepare('SELECT 1 FROM products WHERE sku = :sku');
-        $product->execute([':sku' => $sku]);
-        $variant = $db->prepare('SELECT 1 FROM variants WHERE sku = :sku AND id != :id');
-        $variant->execute([':sku' => $sku, ':id' => $variantId ?: -1]);
-        return (bool)$product->fetchColumn() || (bool)$variant->fetchColumn();
     }
 
     /** "key=value" lines into an attrs object (keys ≤ 60, values ≤ 255 characters). */

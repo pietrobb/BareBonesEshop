@@ -137,18 +137,20 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/Modules.php' => ['lines' => 65, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 0],
     'src/Entrypoints/Admin/Navigation.php' => ['lines' => 40, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 0],
     'src/Entrypoints/Admin/Permissions.php' => ['lines' => 50, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 0],
-    'src/Entrypoints/Admin/Operations.php' => ['lines' => 760, 'functions' => 36, 'max_function_lines' => 136, 'coupling' => 18],
+    // +lines: warehouse, feed and shipping/payment changes are audited; feeds are refused across stores (admin catalog audit).
+    'src/Entrypoints/Admin/Operations.php' => ['lines' => 800, 'functions' => 36, 'max_function_lines' => 136, 'coupling' => 18],
     // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
     // +1 coupling: SalesReport gives the sales overview shop-local day boundaries (A15.1).
     // +1 coupling: OrderExport owns the order list filters shared by the sales overview and the CSV export (A15.2).
     'src/Entrypoints/Admin/Orders.php' => ['lines' => 850, 'functions' => 14, 'max_function_lines' => 300, 'coupling' => 20],
-    'src/Entrypoints/Admin/OrderOperations.php' => ['lines' => 85, 'functions' => 4, 'max_function_lines' => 32, 'coupling' => 7],
+    'src/Entrypoints/Admin/OrderOperations.php' => ['lines' => 80, 'functions' => 4, 'max_function_lines' => 32, 'coupling' => 7],
     'src/Entrypoints/Admin/PricingRules.php' => ['lines' => 235, 'functions' => 7, 'max_function_lines' => 115, 'coupling' => 5],
     'src/Entrypoints/Admin/Reports.php' => ['lines' => 90, 'functions' => 2, 'max_function_lines' => 74, 'coupling' => 4],
     'src/Entrypoints/Admin/Recovery.php' => ['lines' => 115, 'functions' => 4, 'max_function_lines' => 44, 'coupling' => 7],
     'src/Entrypoints/Admin/Request.php' => ['lines' => 90, 'functions' => 1, 'max_function_lines' => 9, 'coupling' => 2],
     // +1 function, +1 coupling: adminCodeLabel shows stored codes (product/page status, attribute type) in the admin language (A15.5).
-    'src/Entrypoints/Admin/Shared.php' => ['lines' => 36, 'functions' => 4, 'max_function_lines' => 12, 'coupling' => 1],
+    // +lines: windowed pagination (first, last and a window around the current page) instead of one link per page.
+    'src/Entrypoints/Admin/Shared.php' => ['lines' => 42, 'functions' => 4, 'max_function_lines' => 17, 'coupling' => 1],
     'src/Entrypoints/Admin/Shipments.php' => ['lines' => 260, 'functions' => 9, 'max_function_lines' => 105, 'coupling' => 8],
     // A15.3: store switcher and per-request store activation, limited to the admin's granted stores (AdminStoreScope).
     'src/Entrypoints/Admin/StoreScope.php' => ['lines' => 70, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 5],

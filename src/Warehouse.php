@@ -470,29 +470,52 @@ class Warehouse {
 
     // ─── Feed CRUD ───────────────────────────────────────────
 
+    // Feeds carry no store column: a feed belongs to the store of its warehouse, so every read and write joins
+    // warehouses and is bound to the active store.
+
     public static function allFeeds(): array {
-        return Db::get()->query("
-            SELECT f.*, w.name as warehouse_name, w.code as warehouse_code
+        $stmt = Db::get()->prepare("
+            SELECT f.*, w.name as warehouse_name, w.code as warehouse_code, w.store_id
             FROM feeds f JOIN warehouses w ON w.id = f.warehouse_id
+            WHERE w.store_id = :store
             ORDER BY f.name
+        ");
+        $stmt->execute([':store' => StoreContext::current()->id()]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** Feeds of every store with their warehouse's store_id: only for runners that switch into that store per feed (cli/feed-sync.php). */
+    public static function allFeedsAllStores(): array {
+        return Db::get()->query("
+            SELECT f.*, w.name as warehouse_name, w.code as warehouse_code, w.store_id
+            FROM feeds f JOIN warehouses w ON w.id = f.warehouse_id
+            ORDER BY w.store_id, f.name
         ")->fetchAll(PDO::FETCH_ASSOC);
     }
 
     public static function feedById(int $id): ?array {
-        $stmt = Db::get()->prepare("SELECT * FROM feeds WHERE id = :id");
-        $stmt->execute([':id' => $id]);
+        $stmt = Db::get()->prepare("SELECT f.*, w.store_id FROM feeds f JOIN warehouses w ON w.id = f.warehouse_id WHERE f.id = :id AND w.store_id = :store");
+        $stmt->execute([':id' => $id, ':store' => StoreContext::current()->id()]);
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
 
     public static function feedsByWarehouse(int $warehouseId): array {
-        $stmt = Db::get()->prepare("SELECT * FROM feeds WHERE warehouse_id = :wh ORDER BY name");
-        $stmt->execute([':wh' => $warehouseId]);
+        $stmt = Db::get()->prepare("SELECT f.* FROM feeds f JOIN warehouses w ON w.id = f.warehouse_id WHERE f.warehouse_id = :wh AND w.store_id = :store ORDER BY f.name");
+        $stmt->execute([':wh' => $warehouseId, ':store' => StoreContext::current()->id()]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /**
+     * Create or update a feed of the active store. Refuses (RuntimeException) a warehouse of another store, a feed id of
+     * another store and an import mode outside FeedImport::MODES.
+     */
     public static function saveFeed(array $data): int {
         $db = Db::get();
         $id = (int)($data['id'] ?? 0);
+        if (!self::byId((int)($data['warehouse_id'] ?? 0))) throw new RuntimeException('Warehouse not found in active store');
+        if ($id && !self::feedById($id)) throw new RuntimeException('Feed not found in active store');
+        $mode = (string)($data['import_mode'] ?? FeedImport::MODE_UPSERT);
+        if (!in_array($mode, FeedImport::MODES, true)) throw new InvalidArgumentException("Unknown feed import mode: {$mode}");
 
         $params = [
             ':code' => $data['code'],
@@ -501,7 +524,7 @@ class Warehouse {
             ':url'  => $data['url'],
             ':fmt'  => $data['format'] ?? 'xml',
             ':map'  => is_string($data['field_map'] ?? '') ? $data['field_map'] : json_encode($data['field_map'] ?? []),
-            ':mode' => $data['import_mode'] ?? 'upsert',
+            ':mode' => $mode,
             ':sched' => $data['schedule'] ?? '0 */6 * * *',
             ':on'   => (int)($data['enabled'] ?? 1),
         ];
@@ -520,8 +543,12 @@ class Warehouse {
         return $id;
     }
 
-    public static function deleteFeed(int $id): void {
-        Db::get()->prepare("DELETE FROM feeds WHERE id = :id")->execute([':id' => $id]);
+    /** Delete a feed of the active store; false when it does not exist there. */
+    public static function deleteFeed(int $id): bool {
+        if (!self::feedById($id)) return false;
+        $stmt = Db::get()->prepare("DELETE FROM feeds WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        return $stmt->rowCount() > 0;
     }
 
     public static function updateFeedStatus(int $feedId, string $status, int $count): void {

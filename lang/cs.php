@@ -1466,4 +1466,16 @@ return array_replace(require __DIR__ . '/en.php', [
     'order_done_unverified' => 'Děkujeme. Pokud jste odeslali objednávku, její potvrzení jsme poslali na váš e-mail.',
     'reviews.duplicate' => 'Tento produkt jste již nedávno hodnotili.',
     'payment_loading' => 'Načítám způsoby platby…', 'payment_unavailable' => 'Platba není dostupná.', 'shipping_load_error' => 'Možnosti dopravy se nepodařilo načíst. Zkontrolujte připojení a zkuste znovu změnit zemi.', 'payment_load_error' => 'Způsoby platby se nepodařilo načíst. Zkontrolujte připojení a znovu vyberte dopravu.',
+
+    // Admin catalog/operations audit fixes
+    'admin.feed.mode_price_stock' => 'Pouze cena a sklad (existující produkty; nic se nevytváří, obsah se nemění)',
+    'admin.feed.warehouse_foreign' => 'Sklad nepatří do tohoto obchodu.',
+    'admin.feed.code_taken' => 'Tento kód feedu se už používá (kódy feedů jsou jedinečné napříč všemi obchody).',
+    'admin.order.msg.invoice_unpaid' => 'Fakturu lze vystavit pouze k zaplacené objednávce.',
+    'admin.msg.product.sku_change_blocked' => 'SKU {sku} nelze změnit ({reason}).',
+    'admin.msg.product.price_below_variants' => 'Cena musí být alespoň {min} centů, jinak by varianta se slevou z ceny stála méně než nula.',
+    'admin.products.bulk.delete_skipped' => 'Nesmazáno, protože na ně odkazují objednávky (místo toho je archivujte): {list}.',
+    'admin.products.bulk.price_clamped' => 'Ponecháno na nejnižší povolené ceně (nula nebo cena, při které žádná varianta neklesne pod nulu): {list}.',
+    'admin.attr.options_invalid' => 'Neplatné hodnoty atributu.',
+    'admin.attr.shared_locked' => 'Tento atribut používá jiný katalog, proto nelze změnit jeho slug ani typ.',
 ]);
