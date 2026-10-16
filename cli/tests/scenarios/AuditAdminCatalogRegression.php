@@ -237,7 +237,7 @@ switch ($action) {
                   ['cz', 'CN-20250002', 'credit_note', 'AAC-O4'], ['pl', 'CN-20250001', 'credit_note', 'AAC-O4']] as $i => [$owner, $number, $type, $order]) {
             $legacy->execute([$orderId($order), $owner, $number, "aac-token-{$i}", $type]);
         }
-        $migration = require $root . '/migrations/20261016140000_invoice_number_counters.php';
+        $migration = require $root . '/migrations/20261016140500_invoice_number_counters.php';
         $migration->up($db, $driver === 'sqlite');
         $first = $q('SELECT store_id, type, year, prefix, last_number FROM invoice_number_counters ORDER BY year, prefix');
         $migration->up($db, $driver === 'sqlite');
