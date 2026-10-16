@@ -158,7 +158,7 @@ try {
         assert_true(str_contains($a111Sitemap['body'], '<urlset'), 'A11.1 php -S router.php applies the sitemap rewrite' . (str_contains($a111Sitemap['body'], '<urlset') ? '' : " ({$a111Sitemap['status']}: " . substr($a111Sitemap['body'], 0, 300) . ')'));
         assert_equals(200, $a111Get('/healthz')['status'], 'A11.1 php -S router.php serves /healthz');
         assert_equals(200, $a111Get('/vendor/bbf/bbf.js')['status'], 'A11.1 php -S router.php keeps public BBF assets');
-        assert_equals(200, $a111Get('/shop.css')['status'], 'A11.1 php -S router.php serves static assets');
+        assert_equals(200, $a111Get('/themes/default/assets/storefront.css')['status'], 'A11.1 php -S router.php serves static assets');
         assert_equals(404, $a111Get('/nic-take')['status'], 'A11.1 php -S router.php: unknown paths stay 404 through redirect.php');
         $a111Admin = $a111Get('/admin.php');
         assert_true(in_array($a111Admin['status'], [200, 401], true) && str_contains($a111Admin['body'], 'admin_password'), 'A11.1 admin login form is served after install (DB owner account)');

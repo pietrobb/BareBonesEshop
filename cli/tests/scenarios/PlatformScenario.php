@@ -888,7 +888,7 @@ assert_true(in_array('accessibility.css', $g10Manifest['assets']['css'], true) &
 assert_true(in_array('storefront.js', $g10Manifest['assets']['js'], true), 'G10 theme: storefront behavior belongs to the theme package');
 assert_true(str_contains(Template::assets()['css'][0], '?v=' . $g10Manifest['version']), 'G10 theme: asset URL carries manifest version');
 $g10Document = Template::document('G10 document', '<h1>Content</h1>', [
-    'body_end' => '<script nonce="test-nonce">window.BBS={};</script>',
+    'body_end' => '<script nonce="test-nonce">window.testBootstrap={};</script>',
     'marketing_hooks' => '',
 ]);
 assert_true(str_contains($g10Document, 'href="#main-content"') && str_contains($g10Document, '<main id="main-content"'), 'G10 WCAG: shared shell has a functional skip link');
@@ -905,12 +905,11 @@ I18n::setLocale('en');
 $originalScriptName = $_SERVER['SCRIPT_NAME'] ?? null;
 $_SERVER['SCRIPT_NAME'] = '/test/index.php';
 assert_true(str_starts_with(Template::assets()['css'][0], '/test/themes/default/assets/'), 'G10 theme: assets inherit a subdirectory installation prefix');
-assert_true(str_contains(Template::document('Subdirectory', '<p>Content</p>', ['marketing_hooks' => '']), 'href="/test/shop.css"'), 'G10 theme: core assets inherit a subdirectory installation prefix');
+$g10SubdirDocument = Template::document('Subdirectory', '<p>Content</p>', ['marketing_hooks' => '']);
+assert_true(str_contains($g10SubdirDocument, 'href="/test/themes/default/assets/') && !str_contains($g10SubdirDocument, 'shop.css') && !str_contains($g10SubdirDocument, 'shop.js'), 'G10 theme: the document shell links only theme assets, under the subdirectory installation prefix');
 if ($originalScriptName === null) unset($_SERVER['SCRIPT_NAME']); else $_SERVER['SCRIPT_NAME'] = $originalScriptName;
 $g11CustomBody = Template::document('G11 custom body', '', [
     'body_html' => '<header id="legacy-header"></header><main id="main-content"></main>',
-    'base_css' => '',
-    'shop_js' => '',
     'marketing_hooks' => '',
 ]);
 assert_true(str_contains($g11CustomBody, 'id="legacy-header"'), 'G11 theme: shared shell preserves an entrypoint-specific body without escaping it');
