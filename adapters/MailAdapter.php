@@ -3,7 +3,7 @@
  * BareBones Shop — Mail Adapter Interface
  *
  * Pluggable mail transport. Implementations live in adapters/contrib/:
- *   - LogMail     — captures to logs/emails.log (dev / test default)
+ *   - LogMail     — captures to <private_runtime_dir>/logs/emails.log (dev / test default)
  *   - SmtpMail    — real SMTP over fsockopen with AUTH LOGIN
  *   - SesMail     — AWS SES via SendEmail HTTP API (signed)
  *

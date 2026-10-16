@@ -76,7 +76,7 @@ $a074Account = static fn(string $name): ?array => $a074Read('SELECT * FROM admin
 $a074Label = static fn(string $label, array $r): string => $label . ' (code=' . var_export($r['code'], true) . ' flash=' . json_encode($r['flash']) . ($r['raw'] !== '' ? ' raw=' . $r['raw'] : '') . ')';
 $a074Denied = static fn(array $r): bool => $r['code'] === 403 && str_contains($r['out'], 'insufficient permissions');
 $a074Secret = static fn(array $r): string => preg_match('#<code>([A-Z2-7]{32})</code>#', $r['out'], $m) ? $m[1] : '';
-$a074DelegateRoles = ['__roles' => ['roles' => ['manager' => ['permissions' => ['admins.manage', 'reports.view']]]]];
+$a074DelegateRoles = ['__roles' => ['roles' => ['manager' => ['permissions' => ['admins.manage', 'products.view', 'orders.view', 'reports.view']]]]];
 
 try {
     $r = $a074Run('owner', 'admin_users');

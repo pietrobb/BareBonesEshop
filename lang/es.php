@@ -1370,6 +1370,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.users.saved' => 'Guardado.',
     'admin.users.failed' => 'No se pudo guardar el cambio',
     'admin.users.forbidden_owner' => 'Solo un propietario puede gestionar cuentas de propietario.',
+    'admin.users.forbidden_role' => 'Solo puede gestionar cuentas cuyo rol no tenga más permisos que el suyo.',
     'admin.users.self_or_last_owner' => 'No puede desactivar su propia cuenta ni la del último propietario activo.',
     'admin.users.legacy_notice' => 'En cuanto exista el primer administrador en la base de datos, dejarán de funcionar los inicios de sesión de config.php y admin-roles.json.',
     'admin.order.status_prefix' => 'Estado',

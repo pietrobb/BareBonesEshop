@@ -2,6 +2,12 @@
 /** Database-backed admin identities, MFA, store grants, devices, and revocable sessions. */
 class AdminIdentity {
     private const ROLES = ['owner', 'manager', 'editor', 'fulfillment', 'viewer'];
+    // Precomputed hashes of random, discarded secrets. Unknown usernames are verified
+    // against the one matching PASSWORD_DEFAULT, so they cost one bcrypt like real ones.
+    private const DUMMY_PASSWORD_HASHES = [
+        '$2y$12$55YGVGpCkKI/3pGg/T.Pku96KONPoRHVMKZf3cTECvxPJgcR637rK',
+        '$2y$10$KacDGwBc1/rBfYOUMGWDhuTFjk0sQnmeVYwsZIElrRx8f0urwfUMa',
+    ];
     private static ?string $dummyPasswordHash = null;
 
     public static function available(): bool {
@@ -308,10 +314,17 @@ class AdminIdentity {
         return $stmt->rowCount() === 1;
     }
 
-    // Unknown usernames are verified against a hash made exactly like real ones (PASSWORD_DEFAULT,
-    // cost 12 on PHP 8.4+), so the response time does not reveal whether an account exists.
+    // Unknown usernames are verified against a hash with the same parameters as real ones
+    // (PASSWORD_DEFAULT: cost 10, or 12 on PHP 8.4+), so the response time does not reveal
+    // whether an account exists. password_hash() is not called on the request path: that
+    // would make unknown usernames cost two bcrypt rounds instead of one.
     private static function dummyPasswordHash(): string {
-        return self::$dummyPasswordHash ??= password_hash(bin2hex(random_bytes(16)), PASSWORD_DEFAULT);
+        if (self::$dummyPasswordHash !== null) return self::$dummyPasswordHash;
+        foreach (self::DUMMY_PASSWORD_HASHES as $hash) {
+            if (!password_needs_rehash($hash, PASSWORD_DEFAULT)) return self::$dummyPasswordHash = $hash;
+        }
+        // Future PASSWORD_DEFAULT with no precomputed match: hash once per process.
+        return self::$dummyPasswordHash = password_hash(bin2hex(random_bytes(16)), PASSWORD_DEFAULT);
     }
 
     private static function recordFailure(int $accountId): void {

@@ -45,7 +45,7 @@ Example deployment configuration:
     'payment_funnel_grace_seconds' => 1800,
     'payment_funnel_min_started' => 3,
     'csp_window_seconds' => 86400,
-    'csp_form_action_critical' => 1,
+    'csp_form_action_critical' => 2,
     'csp_violations_warning' => 20,
     'synthetic_token' => '<at least 32 random characters from the deployment secret store>',
 ],
@@ -53,7 +53,7 @@ Example deployment configuration:
 
 Do not expose the JSONL file over HTTP. Public `/healthz` and `/readyz` remain deliberately non-sensitive.
 
-CSP reports need a valid absolute `app_url`; the endpoint stores only directive, blocked origin (no path or query), document path and time, keeps 14 days, and is rate limited. Browser-extension noise is dropped.
+CSP reports need a valid absolute `app_url`; the endpoint stores only directive, blocked origin (no path or query), document path and time, keeps 14 days, and is rate limited. Browser-extension noise is dropped. Each report also keeps a salted hash of the reporting IP: `csp_form_action_violations` counts distinct reporters, so the critical alert (default 2) cannot be raised by one client posting forged reports.
 
 ## Post-deploy checkout smoke
 

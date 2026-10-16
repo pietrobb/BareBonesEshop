@@ -70,10 +70,13 @@ assert_true(!in_array('csp_form_action_violation', $pmCodes($pmQuiet), true), 'P
 CspReports::ingest((string)json_encode(['csp-report' => ['document-uri' => 'https://shop.example/', 'effective-directive' => 'form-action', 'blocked-uri' => 'https://x.example/', 'disposition' => 'report']]), $pdo, $pmNow);
 assert_equals(0, $pmSnapshot()['metrics']['csp_form_action_violations'], 'P0 CSP: report-only violations are not counted as blocked');
 assert_equals(0, CspReports::ingest('not json', $pdo, $pmNow) + CspReports::ingest('{"csp-report":{"effective-directive":"x;drop","blocked-uri":"https://a.example"}}', $pdo, $pmNow), 'P0 CSP: malformed reports are ignored');
-CspReports::ingest((string)$pmFormAction, $pdo, $pmNow - 60);
+CspReports::ingest((string)$pmFormAction, $pdo, $pmNow - 60, '198.51.100.1');
+CspReports::ingest((string)$pmFormAction, $pdo, $pmNow - 30, '198.51.100.1');
+assert_equals(1, $pmSnapshot()['metrics']['csp_form_action_violations'], 'P0 CSP: blocked form-action is exported as distinct reporters');
+CspReports::ingest((string)$pmFormAction, $pdo, $pmNow - 20, '198.51.100.2');
 $pmBlocked = $pmSnapshot();
-assert_equals(1, $pmBlocked['metrics']['csp_form_action_violations'], 'P0 CSP: blocked form-action is exported');
-assert_true(in_array('csp_form_action_violation', $pmCodes($pmBlocked), true) && $pmBlocked['status'] === 'critical', 'P0 CSP: a blocked form-action (gateway redirect) is critical');
+assert_equals(2, $pmBlocked['metrics']['csp_form_action_violations'], 'P0 CSP: a second reporter is counted');
+assert_true(in_array('csp_form_action_violation', $pmCodes($pmBlocked), true) && $pmBlocked['status'] === 'critical', 'P0 CSP: a blocked form-action (gateway redirect) reported by two clients is critical');
 $pdo->exec('DELETE FROM csp_violations');
 
 // Only the configured token (>= 32 chars) makes a checkout synthetic.

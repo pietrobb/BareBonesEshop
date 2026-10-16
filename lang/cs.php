@@ -1250,6 +1250,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.users.saved' => 'Uloženo.',
     'admin.users.failed' => 'Změnu se nepodařilo uložit',
     'admin.users.forbidden_owner' => 'Účty vlastníka může spravovat pouze vlastník.',
+    'admin.users.forbidden_role' => 'Spravovat můžete jen účty, jejichž role nemá více oprávnění než vaše.',
     'admin.users.self_or_last_owner' => 'Nemůžete zablokovat vlastní účet ani posledního aktivního vlastníka.',
     'admin.users.legacy_notice' => 'Po vytvoření prvního administrátora v databázi přestanou fungovat přihlášení z config.php a admin-roles.json.',
     'admin.order.status_prefix'   => 'Stav',

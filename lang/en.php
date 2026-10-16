@@ -1250,6 +1250,7 @@ return [
     'admin.users.saved' => 'Saved.',
     'admin.users.failed' => 'The change could not be saved',
     'admin.users.forbidden_owner' => 'Only an owner can manage owner accounts.',
+    'admin.users.forbidden_role' => 'You can only manage accounts whose role has no more permissions than your own.',
     'admin.users.self_or_last_owner' => 'You cannot disable your own account or the last active owner.',
     'admin.users.legacy_notice' => 'Once the first database admin exists, logins from config.php and admin-roles.json stop working.',
     'admin.order.status_prefix'   => 'Status',

@@ -1,6 +1,10 @@
 <?php
 /**
- * LogMail — writes fully rendered emails to logs/emails.log.
+ * LogMail — writes fully rendered emails to <private_runtime_dir>/logs/emails.log.
+ *
+ * Captured emails carry one-time secrets (password reset, verification and
+ * download links), so the default file lives in the private runtime directory
+ * outside the web root. An explicit 'log_file' config entry overrides it.
  *
  * Zero external dependencies, zero network. Default adapter for
  * APP_ENV=development and for the test suite. In production, emit
@@ -24,8 +28,9 @@ class LogMail implements MailAdapter {
     private static int $captureLimit = 100;
 
     public function __construct(array $cfg = []) {
-        $this->logFile = $cfg['log_file']
-            ?? (__DIR__ . '/../../logs/emails.log');
+        $runtimeDir = rtrim((string)($cfg['private_runtime_dir'] ?? ''), '/\\');
+        if ($runtimeDir === '') $runtimeDir = dirname(__DIR__, 3) . '/bareboneseshop-private';
+        $this->logFile = (string)($cfg['log_file'] ?? ($runtimeDir . '/logs/emails.log'));
         $dir = dirname($this->logFile);
         if (!is_dir($dir)) @mkdir($dir, 0750, true);
     }

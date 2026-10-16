@@ -81,7 +81,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ipAllowed = Security::rateLimit('account_login_ip', 30, 900);
         // Per account AND client IP: foreign failures must not lock the owner out (no lockout DoS).
         $accountAllowed = Security::rateLimit('account_login_account_' . $emailKey, 10, 900);
-        if ($ipAllowed && $accountAllowed) {
+        // Plus a high per-account ceiling across all IPs, so a botnet rotating addresses cannot
+        // guess one password indefinitely. Only attempts that passed the per-IP limits count,
+        // so one source can spend at most a fraction of it on someone else's account.
+        $accountGlobalAllowed = $ipAllowed && $accountAllowed
+            && Security::rateLimit('account_login_account_global_' . $emailKey, 100, 3600, false);
+        if ($accountGlobalAllowed) {
             [$ok, $c, $err] = Customers::login($email, $password);
             if ($ok) {
                 $next = Security::safeLocalPath($_POST['next'] ?? null, Template::storeUrl('/account.php'));

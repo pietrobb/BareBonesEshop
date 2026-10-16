@@ -1250,6 +1250,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.users.saved' => 'Mentve.',
     'admin.users.failed' => 'A változást nem sikerült menteni',
     'admin.users.forbidden_owner' => 'Tulajdonosi fiókokat csak tulajdonos kezelhet.',
+    'admin.users.forbidden_role' => 'Csak olyan fiókokat kezelhet, amelyek szerepköre nem rendelkezik több jogosultsággal, mint az Öné.',
     'admin.users.self_or_last_owner' => 'Nem tilthatja le a saját fiókját vagy az utolsó aktív tulajdonost.',
     'admin.users.legacy_notice' => 'Az első adatbázis-adminisztrátor létrejötte után a config.php és admin-roles.json bejelentkezések megszűnnek.',
     'admin.order.status_prefix'   => 'Állapot',

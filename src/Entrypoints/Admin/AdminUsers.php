@@ -19,7 +19,7 @@ function pageAdminUsers(): void {
     }
     $storeId = StoreContext::current()->id();
     $csrf = Security::csrfToken();
-    $roles = AdminIdentity::roles();
+    $roles = array_values(array_filter(AdminIdentity::roles(), [Security::class, 'adminCanAssumeRole']));
     if (AdminIdentity::accountCount() === 0) {
         echo '<div class="card"><p class="muted">' . esc(I18n::t('admin.users.legacy_notice')) . '</p></div>';
     }
@@ -101,7 +101,40 @@ function adminUsersTarget(): ?array {
         setFlash('err', I18n::t('admin.users.forbidden_owner'));
         return null;
     }
+    // A delegated admins.manage may only act on accounts it fully outranks: resetting a
+    // peer's password or MFA would hand over that peer's extra permissions.
+    if (!adminUsersCanManage($target)) {
+        setFlash('err', I18n::t('admin.users.forbidden_role'));
+        return null;
+    }
     return $target;
+}
+
+/**
+ * True when every permission the target holds — its role, in every store it is granted — is
+ * also held by the current admin in that store. Owners manage everyone (owner rules aside).
+ */
+function adminUsersCanManage(array $target): bool {
+    if (Security::adminRole() === 'owner') return true;
+    $role = (string)$target['role'];
+    if (!Security::adminCanAssumeRole($role)) return false;
+    if (empty($_SESSION['admin_identity_id'])) return true;
+    $actorGrants = is_array($_SESSION['admin_store_permissions'] ?? null) ? $_SESSION['admin_store_permissions'] : [];
+    $stmt = Db::get()->prepare('SELECT store_id, permissions FROM admin_store_permissions WHERE account_id = :account');
+    $stmt->execute([':account' => (int)$target['id']]);
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $storeId = (string)$row['store_id'];
+        $grants = json_decode((string)$row['permissions'], true);
+        foreach (is_array($grants) ? array_map('strval', $grants) : [] as $grant) {
+            foreach (Security::adminRolePermissions($role) as $permission) {
+                // Effective permission is the narrower of an overlapping role permission and store grant.
+                $effective = AdminIdentity::storeAllows([$storeId => [$grant]], $storeId, $permission) ? $permission
+                    : (AdminIdentity::storeAllows([$storeId => [$permission]], $storeId, $grant) ? $grant : null);
+                if ($effective !== null && !AdminIdentity::storeAllows($actorGrants, $storeId, $effective)) return false;
+            }
+        }
+    }
+    return true;
 }
 
 function adminUsersIsSelf(array $target): bool {
@@ -122,8 +155,8 @@ function handleAdminUserCreate(): void {
     Security::adminRequire('admins.manage');
     $role = Security::clean($_POST['role'] ?? 'viewer');
     $mfa = !empty($_POST['mfa']);
-    if ($role === 'owner' && Security::adminRole() !== 'owner') {
-        setFlash('err', I18n::t('admin.users.forbidden_owner'));
+    if (!Security::adminCanAssumeRole($role)) {
+        setFlash('err', I18n::t($role === 'owner' ? 'admin.users.forbidden_owner' : 'admin.users.forbidden_role'));
         adminUsersDone();
     }
     if ($mfa && !AdminIdentity::mfaKeyConfigured()) {
@@ -206,6 +239,11 @@ function handleAdminUserRevokeSessions(): void {
 function handleAdminUserGrant(): void {
     Security::adminRequire('admins.manage');
     $target = adminUsersTarget();
+    // Store grants narrow the role: a delegated admin widening its own would undo the owner's restriction.
+    if ($target && adminUsersIsSelf($target) && Security::adminRole() !== 'owner') {
+        setFlash('err', I18n::t('admin.users.forbidden_role'));
+        $target = null;
+    }
     if ($target) {
         $permissions = array_values(array_filter(array_map('trim', explode(',', (string)($_POST['permissions'] ?? '')))));
         try {

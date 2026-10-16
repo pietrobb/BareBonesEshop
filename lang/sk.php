@@ -1259,6 +1259,7 @@ return [
     'admin.users.saved' => 'Uložené.',
     'admin.users.failed' => 'Zmenu sa nepodarilo uložiť',
     'admin.users.forbidden_owner' => 'Účty vlastníka môže spravovať iba vlastník.',
+    'admin.users.forbidden_role' => 'Spravovať môžete iba účty, ktorých rola nemá viac oprávnení než vaša.',
     'admin.users.self_or_last_owner' => 'Nemôžete zablokovať vlastný účet ani posledného aktívneho vlastníka.',
     'admin.users.legacy_notice' => 'Po vytvorení prvého administrátora v databáze prestanú fungovať prihlásenia z config.php a admin-roles.json.',
     'admin.order.status_prefix'   => 'Stav',

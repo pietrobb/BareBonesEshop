@@ -666,17 +666,9 @@ class Security {
         self::$cachedRolesData = $rolesData;
     }
 
-    /** Check if current admin has a permission */
-    public static function adminCan(string $permission): bool {
-        if (!empty($_SESSION['admin_identity_id'])) {
-            $storeId = StoreContext::current()->id();
-            $grants = is_array($_SESSION['admin_store_permissions'] ?? null) ? $_SESSION['admin_store_permissions'] : [];
-            if (!AdminIdentity::storeAllows($grants, $storeId, $permission)) return false;
-        }
-        $role = self::adminRole();
+    /** Permissions of a role: built-in definition, overridden by admin-roles.json (cached per request). */
+    public static function adminRolePermissions(string $role): array {
         $perms = self::$rolePermissions[$role] ?? [];
-
-        // Load custom roles from admin-roles.json (cached per request)
         if (self::$cachedRolesData === null) {
             $rolesFile = __DIR__ . '/../admin-roles.json';
             self::$cachedRolesData = file_exists($rolesFile)
@@ -685,7 +677,32 @@ class Security {
         }
         if (isset(self::$cachedRolesData['roles'][$role]['permissions'])) {
             $perms = self::$cachedRolesData['roles'][$role]['permissions'];
+            if (!is_array($perms)) return [];
         }
+        return array_values(array_filter($perms, 'is_string'));
+    }
+
+    /**
+     * True when the current admin holds every permission of $role (wildcards included), so
+     * delegated admins.manage cannot create or take over an account more powerful than itself.
+     */
+    public static function adminCanAssumeRole(string $role): bool {
+        if (self::adminRole() === 'owner') return true;
+        if ($role === 'owner') return false;
+        foreach (self::adminRolePermissions($role) as $perm) {
+            if (!self::adminCan($perm)) return false;
+        }
+        return true;
+    }
+
+    /** Check if current admin has a permission */
+    public static function adminCan(string $permission): bool {
+        if (!empty($_SESSION['admin_identity_id'])) {
+            $storeId = StoreContext::current()->id();
+            $grants = is_array($_SESSION['admin_store_permissions'] ?? null) ? $_SESSION['admin_store_permissions'] : [];
+            if (!AdminIdentity::storeAllows($grants, $storeId, $permission)) return false;
+        }
+        $perms = self::adminRolePermissions(self::adminRole());
 
         foreach ($perms as $perm) {
             if ($perm === '*') return true;

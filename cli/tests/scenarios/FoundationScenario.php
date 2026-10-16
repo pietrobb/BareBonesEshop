@@ -604,6 +604,10 @@ $paymentMonitoringMigration->up($pdo, true);
 $paymentMonitoringMigration->up($pdo, true);
 assert_true(in_array('is_synthetic', array_column($pdo->query('PRAGMA table_info(orders)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true)
     && (bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='csp_violations'")->fetchColumn(), 'Payment monitoring migration: synthetic order flag and CSP report table exist idempotently');
+$cspReporterMigration = require TEST_CLI_DIR . '/../migrations/20261016120000_csp_reporter_hash.php';
+$cspReporterMigration->up($pdo, true);
+$cspReporterMigration->up($pdo, true);
+assert_true(in_array('reporter_hash', array_column($pdo->query('PRAGMA table_info(csp_violations)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true), 'CSP reporter migration: reporter hash column exists idempotently');
 $emailOverrideMigration = require TEST_CLI_DIR . '/../migrations/20261013130000_email_template_overrides.php';
 $emailOverrideMigration->up($pdo, true);
 $emailOverrideMigration->up($pdo, true);

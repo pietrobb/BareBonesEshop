@@ -26,7 +26,7 @@ class OperationalMetrics
             'payment_funnel_grace_seconds' => 1800,
             'payment_funnel_min_started' => 3,
             'csp_window_seconds' => 86400,
-            'csp_form_action_critical' => 1,
+            'csp_form_action_critical' => 2,
             'csp_violations_warning' => 20,
         ], (array)($config['monitoring'] ?? []));
 

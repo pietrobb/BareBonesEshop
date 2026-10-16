@@ -1250,6 +1250,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.users.saved' => 'Gespeichert.',
     'admin.users.failed' => 'Die Änderung konnte nicht gespeichert werden',
     'admin.users.forbidden_owner' => 'Nur ein Inhaber kann Inhaberkonten verwalten.',
+    'admin.users.forbidden_role' => 'Sie können nur Konten verwalten, deren Rolle nicht mehr Berechtigungen hat als Ihre eigene.',
     'admin.users.self_or_last_owner' => 'Sie können weder Ihr eigenes Konto noch den letzten aktiven Inhaber sperren.',
     'admin.users.legacy_notice' => 'Sobald der erste Datenbank-Administrator existiert, funktionieren Anmeldungen aus config.php und admin-roles.json nicht mehr.',
     'admin.order.status_prefix'   => 'Status',

@@ -1250,6 +1250,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.users.saved' => 'Zapisano.',
     'admin.users.failed' => 'Nie udało się zapisać zmiany',
     'admin.users.forbidden_owner' => 'Kontami właściciela może zarządzać tylko właściciel.',
+    'admin.users.forbidden_role' => 'Możesz zarządzać tylko kontami, których rola nie ma więcej uprawnień niż Twoja.',
     'admin.users.self_or_last_owner' => 'Nie możesz zablokować własnego konta ani ostatniego aktywnego właściciela.',
     'admin.users.legacy_notice' => 'Po utworzeniu pierwszego administratora w bazie logowanie z config.php i admin-roles.json przestaje działać.',
     'admin.order.status_prefix'   => 'Status',
