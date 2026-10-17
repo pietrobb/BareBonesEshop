@@ -1,9 +1,10 @@
 <?php
 require_once __DIR__ . '/cli-only.php';
 
+$argv = $_SERVER['argv'] ?? [];
 $command = (string)($argv[1] ?? 'doctor');
-$json = in_array('--json', $argv ?? [], true);
-$strict = in_array('--strict', $argv ?? [], true);
+$json = in_array('--json', $argv, true);
+$strict = in_array('--strict', $argv, true);
 $root = dirname(__DIR__);
 
 // install runs before anything reads config.php or the bundled BBF forms library.

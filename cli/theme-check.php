@@ -42,6 +42,7 @@ function runPackageThemeGate(array $arguments): array {
 }
 
 if (realpath((string)($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__) {
+    $argv = $_SERVER['argv'] ?? [];
     $arguments = array_slice($argv, 1);
     $packageMode = (bool)preg_grep('/^--package=/', $arguments);
     $result = $packageMode ? runPackageThemeGate($arguments) : runThemeCompatibility($arguments);

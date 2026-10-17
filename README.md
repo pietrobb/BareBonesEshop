@@ -1,5 +1,9 @@
 # BareBones Shop
 
+[![CI](https://github.com/pietrobb/BareBonesEshop/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pietrobb/BareBonesEshop/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![PHP 8.1+](https://img.shields.io/badge/php-8.1%2B-777bb4.svg)
+
 A dependency-free PHP e-commerce framework: server-side rendered storefront,
 JSON API, and admin back-office. Runs on **SQLite** out of the box or **MySQL/
 MariaDB** for production. Multi-language, multi-currency, extensible through
@@ -480,3 +484,10 @@ production path. Backups, migrations, and CLI tools live under `cli/`.
 `.github/workflows/ci.yml` runs on every push and pull request: a `php -l`
 syntax check across all sources plus the full `cli/test.php` suite, on a
 PHP **8.1 / 8.2 / 8.3 / 8.4** matrix.
+
+---
+
+## License
+
+Released under the [MIT License](LICENSE). The bundled `vendor/bbf` submodule
+([BareBonesForms](https://github.com/pietrobb/BareBonesForms)) is MIT-licensed as well.
