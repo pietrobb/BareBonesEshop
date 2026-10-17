@@ -23,7 +23,7 @@
   <h2>{{extensions.reviews.product.title}}</h2>
   {{#if extensions.reviews.product.count}}<p><strong>{{extensions.reviews.product.average}}</strong> / 5 ({{extensions.reviews.product.count}})</p>{{else}}<p>{{extensions.reviews.product.empty_label}}</p>{{/if}}
   {{#each extensions.reviews.product.items}}<article class="review"><header><strong>{{author_name}}</strong> <span>{{rating}} / 5</span></header>{{#if title}}<h3>{{title}}</h3>{{/if}}<p>{{body}}</p></article>{{/each}}
-  <form class="review-form" method="post" action="{{extensions.reviews.product.submit_url}}" data-review-form data-success-label="{{extensions.reviews.product.success_label}}" data-error-label="{{extensions.reviews.product.error_label}}">
+  <form class="review-form" method="post" action="{{extensions.reviews.product.submit_url}}" data-review-form data-success-label="{{extensions.reviews.product.success_label}}" data-error-label="{{extensions.reviews.product.error_label}}" data-duplicate-label="{{extensions.reviews.product.duplicate_label}}" data-rate-limited-label="{{extensions.reviews.product.rate_limited_label}}">
     <h3>{{extensions.reviews.product.form_title}}</h3>
     <input type="hidden" name="csrf_token" value="{{extensions.reviews.product.csrf_token}}">
     <input type="hidden" name="product_id" value="{{product.id}}">

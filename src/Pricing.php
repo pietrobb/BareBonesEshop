@@ -287,11 +287,6 @@ class Pricing {
             if (($rule['type'] ?? '') !== 'coupon') continue;
             if (strtoupper($rule['code'] ?? '') !== strtoupper($code)) continue;
 
-            // Check min subtotal
-            if (!empty($rule['min_subtotal']) && $subtotal < $rule['min_subtotal']) {
-                return ['discount' => 0, 'name' => null, 'error' => 'Minimum order not met'];
-            }
-
             // Check max_uses limit
             if (!empty($rule['max_uses'])) {
                 $totalUses = self::couponUseCount($code);
@@ -306,6 +301,11 @@ class Pricing {
                 if ($customerUses >= $rule['per_customer']) {
                     return ['discount' => 0, 'name' => null, 'error' => 'Coupon already used'];
                 }
+            }
+
+            // Min subtotal last, as for admin coupons: it is reported only for an otherwise usable code.
+            if (!empty($rule['min_subtotal']) && $subtotal < $rule['min_subtotal']) {
+                return ['discount' => 0, 'name' => null, 'error' => 'Minimum order not met'];
             }
 
             if ($rule['discount_type'] === 'percent') {

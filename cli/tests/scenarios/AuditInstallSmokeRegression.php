@@ -183,9 +183,23 @@ try {
             $a111Unknown = $a111Get($a111Path);
             assert_equals([404, ['error' => 'Unknown action']], [$a111Unknown['status'], $a111Json($a111Unknown)], "API: {$a111Path} is not a route");
         }
-        foreach (['/api.php?action=categories', '/api/categories', '/api.php?action=webhook_payment&provider=mock'] as $a111Path) {
+        foreach (['/api.php?action=categories', '/api.php', '/api/categories'] as $a111Path) {
             assert_equals(404, $a111Get($a111Path)['status'], "API: legacy {$a111Path} is gone");
         }
+        // One release: notification URLs stored before the upgrade still reach the handlers; old cached JS too.
+        $a111LegacyMock = $a111Post('/api.php?action=webhook_payment&provider=mock', '{"id":"evt_x"}');
+        assert_equals([400, ['error' => 'Unknown provider: mock']], [$a111LegacyMock['status'], $a111Json($a111LegacyMock)], 'API: legacy payment notification URL reaches the provider gate');
+        $a111LegacyStripe = $a111Post('/api.php?action=webhook_stripe', '{"id":"evt_x"}');
+        assert_equals([503, ['error' => 'Webhook not configured']], [$a111LegacyStripe['status'], $a111Json($a111LegacyStripe)], 'API: legacy Stripe notification URL reaches the Stripe handler');
+        $a111LegacyShipping = $a111Post('/api.php?action=webhook_shipping&carrier=http-carrier', '');
+        assert_equals([400, ['error' => 'Empty payload']], [$a111LegacyShipping['status'], $a111Json($a111LegacyShipping)], 'API: legacy carrier notification URL reaches the carrier handler');
+        $a111LegacyCsp = $a111Post('/api.php?action=csp_report', '{"csp-report":{"violated-directive":"img-src","blocked-uri":"https://evil.example/y.png"}}', 'application/csp-report');
+        assert_equals(202, $a111LegacyCsp['status'], 'API: legacy CSP report URL is accepted');
+        $a111LegacyJs = $a111Get('/api/v1/storefront?action=categories');
+        assert_true($a111LegacyJs['status'] === 200 && !isset($a111Json($a111LegacyJs)['error']), "API: cached old storefront.js (<apiUrl>?action=categories) still works ({$a111LegacyJs['status']})");
+        $a111Hyphen = $a111Post('/api/v1/webhooks/shipping/http-carrier', '');
+        assert_equals([400, ['error' => 'Empty payload']], [$a111Hyphen['status'], $a111Json($a111Hyphen)], 'API: a carrier code with a hyphen reaches the carrier handler');
+        assert_equals(403, $a111Get('/c%61che/x.json')['status'], 'php -S router.php: percent-encoded cache/ path is denied');
         $a111External = $a111Get('/api/v1/products');
         assert_equals([401, 'unauthorized'], [$a111External['status'], $a111Json($a111External)['error']['code'] ?? null], 'API: other /api/v1 paths stay the key-authenticated external API');
         $a111Mock = $a111Post('/api/v1/webhooks/payment/mock', '{"id":"evt_x"}');

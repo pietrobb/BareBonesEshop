@@ -122,8 +122,10 @@
         const result = await response.json();
         if (result.ok) form.reset();
         if (message) {
+          const errors = {duplicate_review: form.dataset.duplicateLabel, rate_limited: form.dataset.rateLimitedLabel};
+          const error = errors[result.error] || (response.status === 429 ? form.dataset.rateLimitedLabel : '') || form.dataset.errorLabel;
           message.hidden = false;
-          message.textContent = result.ok ? form.dataset.successLabel : form.dataset.errorLabel;
+          message.textContent = result.ok ? form.dataset.successLabel : error;
         }
       } catch {
         if (message) {

@@ -183,7 +183,17 @@ class MailService {
 
     /** Plain-text part derived from rendered HTML; the HTML escaping is decoded so links survive (p=reset&token=..., not &amp;token=). */
     public static function textFromHtml(string $html): string {
-        return trim(preg_replace('/\s+\n/', "\n", html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8')));
+        $decode = static fn(string $s): string => html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        // Source whitespace collapses as in HTML; structure (cells, rows, paragraphs, links) becomes text.
+        $html = (string)preg_replace(['#<(head|style|script|title)\b.*?</\1\s*>#is', '/[ \t\r\n]+/'], ['', ' '], $html);
+        $html = (string)preg_replace_callback('#<a\b[^>]*?\shref\s*=\s*(["\'])(.*?)\1[^>]*>(.*?)</a\s*>#is', static function (array $m) use ($decode): string {
+            $url = trim($m[2]);
+            return $url === '' || trim($decode(strip_tags($m[3]))) === $decode($url) ? $m[3] : $m[3] . ' (' . $url . ')';
+        }, $html);
+        $html = (string)preg_replace(['#</t[dh]\s*>#i', '#<br\s*/?>|</(?:tr|li|div)\s*>#i', '#</(?:p|h[1-6]|table|ul|ol)\s*>#i'], ["\t", "\n", "\n\n"], $html);
+        $text = $decode(strip_tags($html));
+        $text = (string)preg_replace(['/[ \t]*\t[ \t]*/', '/ {2,}/', '/^[ \t]+|[ \t]+$/m', '/\n{3,}/'], ["\t", ' ', '', "\n\n"], $text);
+        return trim($text);
     }
 
     /**
@@ -193,17 +203,19 @@ class MailService {
      */
     public static function renderString(string $tpl, array $vars, bool $html = true): string {
         $value = static fn($v): string => $html ? htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8') : (string)$v;
+        // Per-call seal marker: a value (e.g. a guest's name) cannot forge a sealed row value it cannot predict.
+        $seal = "\x00" . bin2hex(random_bytes(16));
         // {{#each key}}...{{/each}}
-        $tpl = (string)preg_replace_callback('/\{\{#each\s+(\w+)\}\}(.*?)\{\{\/each\}\}/s', function ($m) use ($vars, $value) {
+        $tpl = (string)preg_replace_callback('/\{\{#each\s+(\w+)\}\}(.*?)\{\{\/each\}\}/s', function ($m) use ($vars, $value, $seal) {
             $items = $vars[$m[1]] ?? [];
             if (!is_array($items)) return '';
             $out = '';
             foreach ($items as $item) {
                 $values = is_array($item) ? $item : ['this' => $item];
                 // Row placeholders without a value stay for the outer pass ({{currency}} inside a row).
-                $out .= (string)preg_replace_callback('/\{\{([A-Za-z0-9_.-]+)\}\}/', static function (array $r) use ($values, $value): string {
+                $out .= (string)preg_replace_callback('/\{\{([A-Za-z0-9_.-]+)\}\}/', static function (array $r) use ($values, $value, $seal): string {
                     if (!array_key_exists($r[1], $values)) return $r[0];
-                    return is_scalar($values[$r[1]]) ? "\x00" . base64_encode($value($values[$r[1]])) . "\x01" : '';
+                    return is_scalar($values[$r[1]]) ? $seal . base64_encode($value($values[$r[1]])) . "\x01" : '';
                 }, $m[2]);
             }
             return $out;
@@ -220,7 +232,7 @@ class MailService {
             $v = $vars[$m[1]] ?? null;
             return is_scalar($v) ? $value($v) : '';
         }, $tpl);
-        return (string)preg_replace_callback('/\x00([A-Za-z0-9+\/=]*)\x01/', static fn(array $m): string => (string)base64_decode($m[1]), $tpl);
+        return (string)preg_replace_callback('/' . preg_quote($seal, '/') . '([A-Za-z0-9+\/=]*)\x01/', static fn(array $m): string => (string)base64_decode($m[1]), $tpl);
     }
 
     /**

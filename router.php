@@ -110,13 +110,10 @@ if ($bbeRouterPath !== '' && file_exists($bbeRouterFile)) {
     $bbeRouterFile = $bbeRouterReal;
 }
 
-$bbeRouterCondMatches = static function (array $cond) use ($bbeRouterFile, $bbeRouterUri, $bbeRouterPath, $bbeRouterRegex, $bbeRouterStop): bool {
+// Only decoded-path conditions: %{THE_REQUEST} is the raw request line, which percent-encoding bypasses.
+$bbeRouterCondMatches = static function (array $cond) use ($bbeRouterFile, $bbeRouterPath, $bbeRouterStop): bool {
     if ($cond['var'] === '%{REQUEST_FILENAME}' && $cond['test'] === '-d') return $bbeRouterPath !== '' && is_dir($bbeRouterFile);
     if ($cond['var'] === '%{REQUEST_FILENAME}' && $cond['test'] === '-f') return $bbeRouterPath !== '' && is_file($bbeRouterFile);
-    if ($cond['var'] === '%{THE_REQUEST}') {
-        $request = ($_SERVER['REQUEST_METHOD'] ?? 'GET') . ' ' . $bbeRouterUri . ' ' . ($_SERVER['SERVER_PROTOCOL'] ?? 'HTTP/1.1');
-        return preg_match($bbeRouterRegex($cond['test'], $cond['nc']), $request) === 1;
-    }
     $bbeRouterStop(500);
 };
 

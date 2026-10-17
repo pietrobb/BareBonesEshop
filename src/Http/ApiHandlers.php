@@ -141,6 +141,13 @@ function apiValidateCoupon(): array {
     $email = Security::email($input['email'] ?? '') ?? null;
 
     if (!$code) return ['valid' => false, 'error' => 'Coupon code is required'];
+    // Code guessing: 10 attempts per 10 minutes per client IP and per session.
+    $sessionKey = Security::sessionKey();
+    if (!Security::rateLimit('validate_coupon', 10, 600)
+        || ($sessionKey !== '' && !Security::rateLimit('validate_coupon_s' . $sessionKey, 10, 600, false))) {
+        http_response_code(429);
+        return ['valid' => false, 'error' => 'Too many attempts'];
+    }
 
     // Same inputs and rules as checkout: the cart's available goods, its automatic promotions, then the coupon.
     $items = array_values(array_filter(Cart::enriched()['items'] ?? [], static fn(array $item): bool => $item['available'] ?? true));
@@ -151,7 +158,9 @@ function apiValidateCoupon(): array {
     }
     $result = CheckoutService::couponFor($code, $subtotal, $promotionDiscount, $email);
     if ($result['discount'] <= 0) {
-        return ['valid' => false, 'error' => $result['error'] ?? 'Invalid coupon'];
+        // Unknown, expired, not yet valid and already used codes look the same; the minimum order is only
+        // checked for an otherwise valid code.
+        return ['valid' => false, 'error' => ($result['error'] ?? '') === 'Minimum order not met' ? 'Minimum order not met' : 'Invalid coupon'];
     }
     $combined = Pricing::combineDiscounts((int)$result['discount'], (string)($result['stacking'] ?? 'stack'), $promotionDiscount);
     if ($combined['coupon'] === 0) {
@@ -563,6 +572,10 @@ function apiCheckout(?array $runtimeConfig = null): array {
 }
 
 function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
+    // Name, contact and address fields reach e-mails, invoices and carrier labels: no control characters.
+    foreach (['name', 'phone', 'street', 'city', 'zip', 'company'] as $field) {
+        if (is_string($input[$field] ?? null)) $input[$field] = (string)preg_replace('/[\x00-\x1F\x7F]+/', ' ', $input[$field]);
+    }
     $name = trim(Security::str($input['name'] ?? ''));
     $email = Security::email($input['email'] ?? '');
     $phone = trim(Security::str($input['phone'] ?? ''));

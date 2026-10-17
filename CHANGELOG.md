@@ -194,9 +194,20 @@ nginx PHP fallback when `operations.nginx_config` is set).
 - **Upgrade:** when deploying, change the webhook URL in every payment gateway portal at the same
   time: Stripe (Developers → Webhooks) to `<app_url>/api/v1/webhooks/payment/stripe`, Comgate push URL
   to `<app_url>/api/v1/webhooks/payment/comgate`, and likewise any carrier webhooks. GoPay, ThePay and
-  PayU get the new notification URL with every new payment automatically. Custom themes that call
+  PayU get the new notification URL with every new payment; payments created before the deploy keep
+  calling the old `api.php` URL they were given. Custom themes that call
   `api.php` must use `window.BareBonesStorefront.apiUrl` + `/<action>`; nginx needs the updated
-  `deploy/nginx.conf` (the `/api/(.*)` rewrite is gone).
+  `deploy/nginx.conf` (the `/api/(.*)` rewrite is gone, an `api.php` rewrite is added).
+- **Legacy routes for one release** (removed in the next one): `/api.php?action=` `webhook_payment`,
+  `webhook_stripe`, `webhook_shipping` and `csp_report` are rewritten to the API (`.htaccess`,
+  `deploy/nginx.conf`, `router.php`), so notifications of in-flight payments and not yet updated portal
+  URLs still arrive; every other `api.php` action answers 404. `/api/v1/storefront?action=<action>` serves
+  `storefront.js` cached from before the update (the theme version is now 2.3.0, so fresh pages load the
+  new script). Update portal and carrier URLs before the next release.
+- Carrier webhook routes accept the same codes as the handler, including hyphens (the default
+  `http-carrier`): `/api/v1/webhooks/shipping/http-carrier` answered 404.
+- The external API also answers below an install subdirectory and a store prefix (`/shop/api/v1/…`,
+  `/cs/api/v1/…`, were 404). A store prefix must name the API key's store, otherwise 403 `forbidden`.
 
 ### Added
 - **Shipments and tracking in the admin order detail** (A12.8). Migration `20261014090000_shipment_tracking_url`.
@@ -230,7 +241,7 @@ nginx PHP fallback when `operations.nginx_config` is set).
     the gateway to answer. Its request carries `X-BareBones-Synthetic` (`monitoring.synthetic_token`,
     ≥ 32 chars): the order is flagged `orders.is_synthetic`, sends no mail, emits no ERP/webhook events,
     refuses offline payment, and is cancelled with stock released right after the gateway session.
-  - CSP `report-uri` + `report-to` (`Reporting-Endpoints`) → `api.php?action=csp_report` → table
+  - CSP `report-uri` + `report-to` (`Reporting-Endpoints`) → `/api/v1/csp-report` → table
     `csp_violations` (directive, blocked origin, document path; 14 days; rate limited).
   - `OperationalMetrics` / `cli/monitor.php`: payment funnel (`payment_online_started/redirected/paid`)
     with critical `payment_session_failing` / `payment_funnel_stalled`, and CSP metrics with critical
@@ -283,6 +294,23 @@ nginx PHP fallback when `operations.nginx_config` is set).
   for admin redirects and 404s. Regression test drives the fallback router over real HTTP
   (`php -S`): POST `cart_action=update` with CSRF on `/kosik` → 302 back to the cart with the new
   quantity; POST on an unknown path → 405.
+- Review form: a store with a `url_prefix` posts reviews into its own store (was the default store), and
+  the form shows the duplicate-review and rate-limit messages instead of the generic error.
+- Plain-text e-mail parts derived from HTML keep table cells (tab), rows, paragraphs, list items and
+  line breaks apart and show link targets as `text (URL)` (was e.g. "ProduktKsCena", links without URL).
+- **Security:** a guest checkout name (or any other top-level mail variable) containing
+  `\x00<base64>\x01` was unsealed as raw HTML into transactional e-mails; `{{#each}}` row values are now
+  sealed with a per-render random marker. Checkout strips control characters from name, phone, address
+  and company at input.
+- **Security:** rich-text links (`Security::sanitizeRichHtml`) use a prefix allow-list (`http(s)://`,
+  `mailto:`, `tel:`, `/path`, `#`, `?`, relative paths without a scheme); `javascript:80/…` and similar
+  targets passed because `parse_url` saw no scheme. Whitespace/control characters are removed first.
+- **Security:** `cache/` is denied on the decoded path in `.htaccess` (the `THE_REQUEST` condition
+  was bypassed by `/c%61che/…`); `router.php` no longer evaluates `THE_REQUEST` conditions.
+- **Security:** `validate_coupon` has its own throttle (10 attempts / 10 minutes per client IP and
+  per session, then 429 `Too many attempts`) and answers `Invalid coupon` for unknown, expired, used-up
+  and already-used codes alike; `Minimum order not met` is reported only for an otherwise usable code
+  (pricing.json coupons check usage limits before the minimum order now, as admin coupons did).
 
 ### Migration
 - `20261008090000_stock_alerts` (idempotent): `products.stock_low_threshold`,

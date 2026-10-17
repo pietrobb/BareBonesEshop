@@ -160,7 +160,8 @@ $architectureBudgets = [
     // +1 coupling: ApiRoute maps the /api/v1 route groups (storefront, options, webhooks, csp-report) to actions.
     'src/Entrypoints/Api.php' => ['lines' => 75, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 6],
     // External key-authenticated API v1 (was api/v1/index.php), loaded by Api.php for non-browser routes.
-    'src/Entrypoints/ApiExternal.php' => ['lines' => 50, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 6],
+    // +5 lines: the path below the install subdirectory / store prefix, and the prefix-vs-key store check.
+    'src/Entrypoints/ApiExternal.php' => ['lines' => 55, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 6],
     // +1 coupling: Search::filtersFromQuery turns the search route's sort/price/category parameters into search options (A14.2).
     'src/Entrypoints/Storefront.php' => ['lines' => 150, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
     // Customer account portal behind the thin /account.php (registration, login, reset, GDPR, addresses, orders).
