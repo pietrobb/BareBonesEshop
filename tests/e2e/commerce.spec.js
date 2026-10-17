@@ -84,15 +84,15 @@ test('checkout rates show a translated error state, drop stale responses and use
   const shippingBox = page.locator('#shipping-options');
 
   // A failed rate request ends in a visible, translated alert, not a stuck "Loading…".
-  await page.route(/[?&]action=shipping_rates/, route => route.abort());
+  await page.route(/\/api\/v1\/storefront\/shipping_rates(?:\?|$)/, route => route.abort());
   await country.selectOption('CZ');
   await expect(shippingBox.locator('[role="alert"]')).toBeVisible();
   await expect(shippingBox.locator('.shipping-loading')).toHaveCount(0);
-  await page.unroute(/[?&]action=shipping_rates/);
+  await page.unroute(/\/api\/v1\/storefront\/shipping_rates(?:\?|$)/);
 
   // An older, slower response must not overwrite the rates of the latest country.
   let calls = 0;
-  await page.route(/[?&]action=shipping_rates/, async route => {
+  await page.route(/\/api\/v1\/storefront\/shipping_rates(?:\?|$)/, async route => {
     calls += 1;
     if (calls === 1) {
       await new Promise(resolve => setTimeout(resolve, 1500));
@@ -103,7 +103,7 @@ test('checkout rates show a translated error state, drop stale responses and use
   });
   // The payment request carries the goods plus the selected rate in integer cents (no display-string parsing).
   const amounts = [];
-  await page.route(/[?&]action=payment_methods/, async route => {
+  await page.route(/\/api\/v1\/storefront\/payment_methods(?:\?|$)/, async route => {
     amounts.push(new URL(route.request().url()).searchParams.get('amount'));
     await route.fulfill({ json: { methods: [{ code: 'bank_transfer', label: 'Bank transfer', fee: 0 }] } });
   });
@@ -115,8 +115,8 @@ test('checkout rates show a translated error state, drop stale responses and use
   const subtotal = Number(await page.locator('#checkout-subtotal').inputValue());
   const discount = Number(await page.locator('#checkout-discount').inputValue() || '0');
   expect(amounts.at(-1)).toBe(String(Math.max(0, subtotal - discount) + 123450));
-  await page.unroute(/[?&]action=shipping_rates/);
-  await page.unroute(/[?&]action=payment_methods/);
+  await page.unroute(/\/api\/v1\/storefront\/shipping_rates(?:\?|$)/);
+  await page.unroute(/\/api\/v1\/storefront\/payment_methods(?:\?|$)/);
 });
 
 test('account login preserves authenticated checkout ownership', async ({ page }) => {
