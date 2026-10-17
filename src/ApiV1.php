@@ -218,7 +218,8 @@ class ApiV1 {
                     'reason' => 'api.v1.product.patch',
                 ]);
             }
-            return ['status' => 200, 'body' => ['data' => self::productDto($updated), 'meta' => ['idempotent_replay' => false]]];
+            return ['status' => 200, 'body' => ['data' => self::productDto($updated), 'meta' => ['idempotent_replay' => false]],
+                'after' => static fn() => Cache::catalogChanged()];
         });
     }
 

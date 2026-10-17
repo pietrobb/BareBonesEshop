@@ -200,6 +200,7 @@ class Migrator {
                     throw $e;
                 }
             }
+            if ($applied && $this->isSqlite) Db::optimize($this->db);
             return $applied;
         } finally {
             Db::forgetSchema($this->db);

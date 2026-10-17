@@ -13,6 +13,8 @@ class Import {
      * Import products from CSV file
      * CSV format: sku,name,category,price,stock,summary,image,attr:color,attr:size,...
      * Translations: name_en, name_de, summary_en, slug_en, etc.
+     * The file should be UTF-8 (a BOM is skipped); a non-UTF-8 file is read as Windows-1250 (Excel SK/CZ
+     * "CSV") and the result's 'encoding' says so, or it is rejected with 'encoding' => 'invalid'.
      */
     public static function csv(string $filePath, ?string $productTypeOverride = null): array {
         if (!is_file($filePath) || is_link($filePath)) {
@@ -35,8 +37,27 @@ class Import {
         }
 
         // Strip UTF-8 BOM if present (Excel exports)
-        $bom = fread($handle, 3);
-        if ($bom !== "\xEF\xBB\xBF") rewind($handle);
+        $dataStart = fread($handle, 3) === "\xEF\xBB\xBF" ? 3 : 0;
+        fseek($handle, $dataStart);
+
+        // Excel in SK/CZ locales saves "CSV" as Windows-1250: stored as-is, those bytes are invalid UTF-8
+        // that escaping and JSON encoding turn into empty pages and empty API responses.
+        $encoding = 'utf-8';
+        $content = (string)stream_get_contents($handle);
+        if (!mb_check_encoding($content, 'UTF-8')) {
+            $converted = function_exists('iconv') ? @iconv('CP1250', 'UTF-8', $content) : false;
+            fclose($handle);
+            if ($converted === false || !mb_check_encoding($converted, 'UTF-8')) {
+                return ['success' => false, 'imported' => 0, 'errors' => ['CSV is not valid UTF-8 (nor Windows-1250); save it as "CSV UTF-8" and import again'], 'encoding' => 'invalid'];
+            }
+            $handle = fopen('php://temp', 'w+b');
+            if (!$handle) return ['success' => false, 'imported' => 0, 'errors' => ['Cannot buffer the converted CSV']];
+            fwrite($handle, $converted);
+            unset($converted);
+            $encoding = 'windows-1250';
+        }
+        unset($content);
+        fseek($handle, $encoding === 'utf-8' ? $dataStart : 0);
 
         // Read header
         $header = fgetcsv($handle, self::MAX_ROW_BYTES, ',', '"', '');
@@ -115,10 +136,14 @@ class Import {
         // Recount category products
         self::recountCategories($db);
 
+        Db::optimize($db);
+        if ($imported > 0) Cache::catalogChanged();
+
         return [
             'success'  => !$limitExceeded,
             'imported' => $imported,
             'errors'   => $errors,
+            'encoding' => $encoding, // 'windows-1250' when the file was converted
         ];
     }
 

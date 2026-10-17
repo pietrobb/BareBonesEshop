@@ -1036,6 +1036,8 @@ return [
     'admin.import.rejected' => 'CSV súbor nebol prijatý:',
     'admin.import.done' => 'Import úspešný: {count} produktov.',
     'admin.import.partial' => 'Import: {imported} OK, {errors} chýb.',
+    'admin.import.converted_cp1250' => 'Súbor nebol v UTF-8, bol prevedený z Windows-1250 (Excel CSV); skontrolujte diakritiku.',
+    'admin.import.invalid_encoding' => 'Súbor nie je v UTF-8: v Exceli ho uložte ako "CSV UTF-8" a importujte znova.',
     'admin.cache.title' => 'Správa cache',
     'admin.cache.files' => 'Súbory cache',
     'admin.cache.size' => 'Veľkosť',

@@ -1058,6 +1058,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.import.rejected' => 'A CSV-fájl nem lett elfogadva:',
     'admin.import.done' => 'Importálás kész: {count} termék.',
     'admin.import.partial' => 'Importálás: {imported} OK, {errors} hiba.',
+    'admin.import.converted_cp1250' => 'A fájl nem UTF-8 volt, Windows-1250-ből (Excel CSV) lett átalakítva; ellenőrizze az ékezeteket.',
+    'admin.import.invalid_encoding' => 'A fájl nem UTF-8: Excelben mentse "CSV UTF-8" formátumban, és importálja újra.',
     'admin.cache.title' => 'Gyorsítótár kezelése',
     'admin.cache.files' => 'Gyorsítótár-fájlok',
     'admin.cache.size' => 'Méret',

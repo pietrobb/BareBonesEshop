@@ -82,6 +82,10 @@ The request carries `X-BareBones-Synthetic` with `monitoring.synthetic_token`. T
 
 Each backup is a database copy (`.db` VACUUM INTO for SQLite, `.sql` single-transaction dump for MySQL/MariaDB) plus a companion `<backup>.files.tar` with issued invoice PDFs, uploads and the GDPR salt file. The files come from `invoice_storage_dir`, `uploads_dir` (default `<shop>/uploads`) and `gdpr_salt_file` in `config.php`; set `"include_files": false` in `config/backup.json` to back up the database only (default `true`; a restore then has no files archive to apply). **The files archive is sensitive:** the GDPR salt is the secret behind every pseudonymised GDPR record, so anyone holding it can re-link erased customers to their hashes. Store backups only on encrypted, access-reviewed targets and never attach them to tickets or chat.
 
+### Retention
+
+`php cli/backup.php --gc` (and `auto_gc_on_backup`) rotates backups by `retention` in `config/backup.json`: `daily`/`weekly`/`monthly` (newest per day/week/month), `minimum_kept` newest always, the newest `pre_migration` (default 5) `pre-migration` backups, and `manual` backups forever unless `manual_max_age_days` is set. `cli/update.php apply` keeps the newest `update_snapshots_keep` (default 3) `pre-update` snapshots in `update_storage_dir` plus the installed release's. **Personal data erased or scrubbed for GDPR stays in older backups and update snapshots until they rotate out**; state that retention period in the records of processing, and do not restore a backup to resurrect erased data (re-run the erasure after a restore).
+
 ### Restoring with `cli/restore.php`
 
 ```bash

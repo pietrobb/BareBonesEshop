@@ -170,6 +170,12 @@ try {
     foreach ($result['retired'] as $retiredPath) {
         echo "Moved obsolete generated file {$retiredPath} into the snapshot (retired/)\n";
     }
+    try {
+        $pruned = $updater->pruneSnapshots((int)($config['update_snapshots_keep'] ?? 3));
+        if ($pruned) echo 'Deleted ' . count($pruned) . " old pre-update snapshot(s) (update_snapshots_keep).\n";
+    } catch (Throwable $e) {
+        fwrite(STDERR, 'WARNING: old update snapshots not pruned: ' . $e->getMessage() . "\n");
+    }
     updateRecordCoreBaseline($root, $stateDirectory, $config, 'update ' . $result['version'], (string)$result['version']);
     exit(0);
 } catch (Throwable $e) {

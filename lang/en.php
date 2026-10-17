@@ -1031,6 +1031,8 @@ return [
     'admin.import.rejected' => 'The CSV file was not accepted:',
     'admin.import.done' => 'Import finished: {count} products.',
     'admin.import.partial' => 'Import: {imported} OK, {errors} errors.',
+    'admin.import.converted_cp1250' => 'The file was not UTF-8 and was converted from Windows-1250 (Excel CSV); check accented characters.',
+    'admin.import.invalid_encoding' => 'The file is not UTF-8: in Excel save it as "CSV UTF-8" and import it again.',
     'admin.cache.title' => 'Cache management',
     'admin.cache.files' => 'Cache files',
     'admin.cache.size' => 'Size',

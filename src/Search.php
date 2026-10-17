@@ -65,7 +65,9 @@ class Search {
             $select = 'p.*';
             $relevance = 'p.name ASC, p.id ASC';
         } elseif (Db::isSqlite()) {
-            $from = "FROM products_fts fts JOIN products p ON p.id = fts.rowid";
+            // CROSS JOIN pins the FTS table as the outer loop: with a plain JOIN the planner may scan
+            // every product and run one FTS lookup per row (tens of seconds at 50k products for "?q=a").
+            $from = "FROM products_fts fts CROSS JOIN products p ON p.id = fts.rowid";
             $where = "products_fts MATCH :q AND p.store_id = :store AND p.status = 'active'";
             $params[':q'] = self::sanitizeFtsQuery($q);
             $select = 'p.*, rank';
@@ -134,7 +136,7 @@ class Search {
             $stmt = $db->prepare("
                 SELECT DISTINCT p.name, p.slug
                 FROM products_fts fts
-                JOIN products p ON p.id = fts.rowid
+                CROSS JOIN products p ON p.id = fts.rowid
                 WHERE products_fts MATCH :q AND p.store_id = :store AND p.status = 'active'
                 ORDER BY rank
                 LIMIT :limit
@@ -172,7 +174,7 @@ class Search {
                 highlight(products_fts, 0, '<mark>', '</mark>') AS name_hl,
                 rank
             FROM products_fts fts
-            JOIN products p ON p.id = fts.rowid
+            CROSS JOIN products p ON p.id = fts.rowid
             WHERE products_fts MATCH :q AND p.store_id = :store AND p.status = 'active'
             ORDER BY rank
             LIMIT :limit OFFSET :offset

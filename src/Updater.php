@@ -301,6 +301,32 @@ final class Updater
     }
 
     /**
+     * Delete all but the newest $keep (at least 1) 'pre-update' snapshots: each holds a full database copy
+     * or dump, so they would otherwise pile up with every update (and keep erased personal data forever).
+     * The snapshot of the installed release and 'manual-backup' snapshots are never deleted.
+     * @return list<string> ids of the deleted snapshots
+     */
+    public function pruneSnapshots(int $keep): array
+    {
+        $this->lock();
+        try {
+            $installed = (string)($this->readJson($this->statePath())['snapshot'] ?? '');
+            $deleted = [];
+            $kept = 0;
+            foreach ($this->listSnapshots() as $snapshot) { // newest first
+                $id = (string)($snapshot['id'] ?? '');
+                if (($snapshot['reason'] ?? '') !== 'pre-update' || !preg_match('/^\d{14}-[0-9a-f]{12}$/', $id)) continue;
+                if (++$kept <= max(1, $keep) || $id === $installed) continue;
+                $this->removeTree($this->snapshotDirectory($id));
+                $deleted[] = $id;
+            }
+            return $deleted;
+        } finally {
+            $this->unlock();
+        }
+    }
+
+    /**
      * Restores code and, for a migration update, the database snapshot. That discards every database write since
      * the snapshot (orders, payments, customers, stock), so it is refused unless $acceptDataLoss confirms it.
      */

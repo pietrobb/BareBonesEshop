@@ -946,6 +946,7 @@ function handleProductSave(): void {
             $specIns->execute([':pid' => $id, ':name' => $name, ':val' => $displayVal, ':num' => $numericVal]);
         }
     }
+    Cache::catalogChanged();
 
     header("Location: admin.php?p=product&id={$id}");
     exit;

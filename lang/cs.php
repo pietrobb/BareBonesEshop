@@ -1058,6 +1058,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.import.rejected' => 'CSV soubor nebyl přijat:',
     'admin.import.done' => 'Import úspěšný: {count} produktů.',
     'admin.import.partial' => 'Import: {imported} OK, {errors} chyb.',
+    'admin.import.converted_cp1250' => 'Soubor nebyl v UTF-8, byl převeden z Windows-1250 (Excel CSV); zkontrolujte diakritiku.',
+    'admin.import.invalid_encoding' => 'Soubor není v UTF-8: v Excelu jej uložte jako "CSV UTF-8" a importujte znovu.',
     'admin.cache.title' => 'Správa cache',
     'admin.cache.files' => 'Soubory cache',
     'admin.cache.size' => 'Velikost',

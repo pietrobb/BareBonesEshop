@@ -144,6 +144,7 @@ class FeedImport {
         }
 
         $db->commit();
+        if ($result['imported'] > 0) Cache::catalogChanged();
 
         // Update warehouse stock
         if (!empty($stockMap)) {

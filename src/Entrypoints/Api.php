@@ -65,7 +65,8 @@ if (!defined('BB_TEST_LOAD_API_ONLY')) {
             default => Extensions::api($action) ?? apiUnknownAction(),
         };
 
-        echo json_encode($result, JSON_UNESCAPED_UNICODE);
+        // A row with invalid UTF-8 (legacy import) must not turn the whole response into an empty body.
+        echo json_encode($result, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
     } catch (\Throwable $e) {
         http_response_code(500);
         echo json_encode(['error' => 'Internal error']);
