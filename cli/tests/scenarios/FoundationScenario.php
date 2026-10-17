@@ -871,7 +871,7 @@ assert_true(str_contains($workerSourceG4, '$template !== \'cart_reminder\''), 'G
 $mailSourceG4 = file_get_contents(TEST_CLI_DIR . '/../src/MailService.php') ?: '';
 assert_true(!str_contains($mailSourceG4, "SERVER_NAME"), 'G4: mail sender does not trust the request host');
 assert_true(str_contains($mailSourceG4, "FILTER_VALIDATE_EMAIL"), 'G4: sender, recipient and reply-to are validated');
-foreach (['api.php', 'index.php', 'wishlist.php'] as $customerEntrypoint) {
+foreach (['api/v1/index.php', 'index.php', 'wishlist.php'] as $customerEntrypoint) {
     $entrySource = entrypointSource($customerEntrypoint);
     $validatesCustomerSession = str_contains($entrySource, 'Customers::isLoggedIn();')
         || str_contains($entrySource, 'Bootstrap::validateCustomerSession();');
@@ -879,7 +879,7 @@ foreach (['api.php', 'index.php', 'wishlist.php'] as $customerEntrypoint) {
 }
 $productEntrypoint = entrypointSource('product.php');
 assert_true(str_contains($productEntrypoint, "src/Entrypoints/Storefront.php"), 'G4: product.php delegates session validation to the canonical storefront');
-$apiSourceG5 = entrypointSource('api.php');
+$apiSourceG5 = entrypointSource('api/v1/index.php');
 $indexSourceG5 = entrypointSource('index.php');
 foreach (['checkout_global', 'checkout_session_', 'checkout_subject_', 'Security::rotateCsrfToken()'] as $checkoutGuard) {
     assert_true(str_contains($apiSourceG5, $checkoutGuard), "G5: canonical checkout uses {$checkoutGuard}");
@@ -899,7 +899,7 @@ foreach ([
 }
 // UTF-8 Slovak text re-read as Windows-1250 ("úspešný" -> "ĂşspeĹˇnĂ˝") must never reach the UI.
 $mojibakeFiles = [];
-$mojibakeRoots = ['src', 'themes', 'lang', 'admin.php', 'api.php', 'index.php'];
+$mojibakeRoots = ['src', 'themes', 'lang', 'admin.php', 'api', 'index.php'];
 foreach ($mojibakeRoots as $mojibakeRoot) {
     $mojibakePath = TEST_CLI_DIR . '/../' . $mojibakeRoot;
     $mojibakeList = is_dir($mojibakePath)

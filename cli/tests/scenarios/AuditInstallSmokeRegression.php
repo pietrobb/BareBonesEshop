@@ -160,6 +160,45 @@ try {
         assert_equals(200, $a111Get('/vendor/bbf/bbf.js')['status'], 'A11.1 php -S router.php keeps public BBF assets');
         assert_equals(200, $a111Get('/themes/default/assets/storefront.css')['status'], 'A11.1 php -S router.php serves static assets');
         assert_equals(404, $a111Get('/nic-take')['status'], 'A11.1 php -S router.php: unknown paths stay 404 through redirect.php');
+
+        // One JSON API under /api/v1 (api.php and the /api/<action> rewrite are gone).
+        $a111Json = static fn(array $response): mixed => json_decode($response['body'], true);
+        $a111Post = static function (string $path, string $body, string $type = 'application/json') use ($a111Port): array {
+            $context = stream_context_create(['http' => ['method' => 'POST', 'header' => "Content-Type: {$type}\r\n", 'content' => $body, 'follow_location' => 0, 'ignore_errors' => true, 'timeout' => 20]]);
+            $raw = @file_get_contents("http://127.0.0.1:{$a111Port}{$path}", false, $context);
+            return ['status' => (int)(explode(' ', (string)(($http_response_header ?? [])[0] ?? ''))[1] ?? 0), 'body' => (string)$raw];
+        };
+        $a111Categories = $a111Get('/api/v1/storefront/categories');
+        assert_true($a111Categories['status'] === 200 && is_array($a111Json($a111Categories)) && !isset($a111Json($a111Categories)['error']),
+            "API: /api/v1/storefront/categories answers the storefront action ({$a111Categories['status']} " . substr($a111Categories['body'], 0, 120) . ')');
+        $a111Name = (string)(new PDO('sqlite:' . $a111Private . '/db/shop.sqlite'))->query("SELECT name FROM products WHERE slug = " . (new PDO('sqlite::memory:'))->quote($a111Slug))->fetchColumn();
+        $a111Suggest = $a111Get('/api/v1/storefront/search_suggest?q=' . rawurlencode((string)strtok($a111Name, ' ')));
+        $a111SuggestUrls = array_column((array)$a111Json($a111Suggest), 'url');
+        assert_true($a111Suggest['status'] === 200 && $a111SuggestUrls !== [] && array_filter($a111SuggestUrls, static fn($u): bool => !str_starts_with((string)$u, '/product/')) === [],
+            'API: storefront action reads its query string and links products from the shop root, not /api/v1 (' . substr($a111Suggest['body'], 0, 160) . ')');
+        $a111Options = $a111Get('/api/v1/options/product_statuses');
+        assert_true($a111Options['status'] === 200 && in_array('archived', array_column((array)$a111Json($a111Options), 'value'), true), 'API: /api/v1/options/<name> serves BBF option lists');
+        foreach (['/api/v1/storefront/nope', '/api/v1/storefront/webhook_payment', '/api/v1/storefront/csp_report',
+            '/api/v1/storefront/bbf_categories', '/api/v1/options/nope', '/api/v1/webhooks/payment/Bad-Name', '/api/v1/webhooks/other/x'] as $a111Path) {
+            $a111Unknown = $a111Get($a111Path);
+            assert_equals([404, ['error' => 'Unknown action']], [$a111Unknown['status'], $a111Json($a111Unknown)], "API: {$a111Path} is not a route");
+        }
+        foreach (['/api.php?action=categories', '/api/categories', '/api.php?action=webhook_payment&provider=mock'] as $a111Path) {
+            assert_equals(404, $a111Get($a111Path)['status'], "API: legacy {$a111Path} is gone");
+        }
+        $a111External = $a111Get('/api/v1/products');
+        assert_equals([401, 'unauthorized'], [$a111External['status'], $a111Json($a111External)['error']['code'] ?? null], 'API: other /api/v1 paths stay the key-authenticated external API');
+        $a111Mock = $a111Post('/api/v1/webhooks/payment/mock', '{"id":"evt_x"}');
+        assert_equals([400, ['error' => 'Unknown provider: mock']], [$a111Mock['status'], $a111Json($a111Mock)], 'API: payment webhook route reaches the provider gate (mock disabled in production config)');
+        $a111Stripe = $a111Post('/api/v1/webhooks/payment/stripe', '{"id":"evt_x"}');
+        assert_equals([503, ['error' => 'Webhook not configured']], [$a111Stripe['status'], $a111Json($a111Stripe)], 'API: Stripe webhook route reaches the Stripe handler (no secret after install)');
+        $a111Shipping = $a111Post('/api/v1/webhooks/shipping/packeta', '');
+        assert_equals([400, ['error' => 'Empty payload']], [$a111Shipping['status'], $a111Json($a111Shipping)], 'API: shipping webhook route reaches the carrier handler');
+        assert_equals(405, $a111Get('/api/v1/csp-report')['status'], 'API: /api/v1/csp-report is POST only');
+        $a111Csp = $a111Post('/api/v1/csp-report', '{"csp-report":{"violated-directive":"img-src","blocked-uri":"https://evil.example/x.png"}}', 'application/csp-report');
+        assert_equals([202, ['ok' => true]], [$a111Csp['status'], $a111Json($a111Csp)], 'API: /api/v1/csp-report accepts a browser report');
+        $a111Robots = $a111Get('/robots.txt')['body'];
+        assert_true(str_contains($a111Robots, 'Disallow: /api/'), 'API: robots.txt keeps crawlers out of /api/');
         $a111Admin = $a111Get('/admin.php');
         assert_true(in_array($a111Admin['status'], [200, 401], true) && str_contains($a111Admin['body'], 'admin_password'), 'A11.1 admin login form is served after install (DB owner account)');
     } finally {

@@ -31,13 +31,13 @@
             "type": "select",
             "label": "Hlavná kategória",
             "required": true,
-            "options_from": "/api.php?action=bbf_categories"
+            "options_from": "/api/v1/options/categories"
         },
         {
             "name": "brand_id",
             "type": "select",
             "label": "Značka",
-            "options_from": "/api.php?action=bbf_brands",
+            "options_from": "/api/v1/options/brands",
             "size": "half"
         },
         {
@@ -56,7 +56,7 @@
             "name": "product_type",
             "type": "select",
             "label": "Typ produktu",
-            "options_from": "/api.php?action=bbf_product_types",
+            "options_from": "/api/v1/options/product_types",
             "size": "half"
         },
         {
@@ -99,7 +99,7 @@
             "name": "status",
             "type": "select",
             "label": "Stav",
-            "options_from": "/api.php?action=bbf_product_statuses",
+            "options_from": "/api/v1/options/product_statuses",
             "size": "half"
         },
         {

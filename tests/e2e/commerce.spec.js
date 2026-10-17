@@ -13,7 +13,15 @@ test.beforeEach(() => {
 });
 
 async function fillCheckout(page, email) {
+  // The checkout loads shipping rates and payment methods from the JSON API (/api/v1/storefront/<action>).
+  const apiCalls = ['shipping_rates', 'payment_methods'].map(action => page.waitForResponse(
+    response => new URL(response.url()).pathname === `/api/v1/storefront/${action}`));
   await page.goto('/?page=checkout');
+  for (const call of apiCalls) {
+    const response = await call;
+    expect(response.status()).toBe(200);
+    expect(Array.isArray((await response.json()).methods)).toBe(true);
+  }
   await page.locator('input[name="name"]').fill('G12 Browser Customer');
   await page.locator('input[name="email"]').fill(email);
   await page.locator('input[name="phone"]').fill('+421900000012');
@@ -29,7 +37,7 @@ async function addFirstProduct(page) {
   await page.goto('/');
   const rejectConsent = page.locator('#cc-reject');
   if (await rejectConsent.isVisible()) {
-    const consentResponse = page.waitForResponse(response => response.url().includes('action=cookie_consent'));
+    const consentResponse = page.waitForResponse(response => response.url().includes('/api/v1/storefront/cookie_consent'));
     await rejectConsent.click();
     expect((await consentResponse).status()).toBe(200);
   }
@@ -156,7 +164,7 @@ test('online payment redirect and signed webhook complete the bound checkout', a
     currency: 'eur'
   });
   const signature = crypto.createHmac('sha256', state.mock_webhook_secret).update(payload).digest('hex');
-  const webhook = await request.post('/api.php?action=webhook_payment&provider=mock', {
+  const webhook = await request.post('/api/v1/webhooks/payment/mock', {
     data: payload, headers: { 'Content-Type': 'application/json', 'X-Mock-Signature': signature }
   });
   expect((await webhook.json()).status).toBe('ok');

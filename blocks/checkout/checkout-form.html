@@ -1,6 +1,6 @@
 <div class="checkout-form">
     <h2>{{t.checkout}}</h2>
-    <form method="post" action="/api.php?action=checkout" data-checkout>
+    <form method="post" action="/api/v1/storefront/checkout" data-checkout>
         <input type="hidden" name="csrf_token" value="{{csrf_token}}">
 
         <fieldset>

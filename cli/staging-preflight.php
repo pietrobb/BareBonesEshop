@@ -134,7 +134,7 @@ function runStagingPreflight(array $argvLocal = []): array {
         $stripeWh = (string)($cfg['stripe_webhook_secret'] ?? '');
         $add(preflightSecretLooksFilled($stripeSk) ? 'ok' : 'fail', 'stripe_secret_key', preflightSecretLooksFilled($stripeSk) ? 'Stripe secret key configured.' : 'Stripe secret key missing/placeholder.', 'Use Stripe test secret key for staging.');
         $add(preflightSecretLooksFilled($stripePk) ? 'ok' : 'warn', 'stripe_publishable_key', preflightSecretLooksFilled($stripePk) ? 'Stripe publishable key configured.' : 'Stripe publishable key missing/placeholder.', 'Set Stripe test publishable key if checkout UI needs it.');
-        $add(preflightSecretLooksFilled($stripeWh) ? 'ok' : 'fail', 'stripe_webhook_secret', preflightSecretLooksFilled($stripeWh) ? 'Stripe webhook secret configured.' : 'Stripe webhook secret missing/placeholder.', 'Set webhook secret for /api.php?action=webhook_stripe or generic payment webhook.');
+        $add(preflightSecretLooksFilled($stripeWh) ? 'ok' : 'fail', 'stripe_webhook_secret', preflightSecretLooksFilled($stripeWh) ? 'Stripe webhook secret configured.' : 'Stripe webhook secret missing/placeholder.', 'Set the webhook secret for /api/v1/webhooks/payment/stripe.');
     }
     foreach (['packeta', 'gls'] as $carrier) {
         $envKey = 'SHIP_' . strtoupper($carrier) . '_WEBHOOK_SECRET';

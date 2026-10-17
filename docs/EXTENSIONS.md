@@ -55,7 +55,7 @@ return [
                 ['points' => AcmeLoyaltyPoints::forCustomer()]),
         ]);
 
-        // JSON API action /api/?action=acme-loyalty.balance.
+        // JSON API action /api/v1/storefront/acme-loyalty.balance.
         $api->api('balance', static fn(array $query): array => ['points' => AcmeLoyaltyPoints::forCustomer()]);
     },
 ];
@@ -76,7 +76,7 @@ return [
 - **Pages** answer `/?page=<code>.<name>` and return `['title' => string, 'content' => string]`.
   The content is HTML placed into the active theme's layout, so render data through
   `Template::process()` / `Template::render()` (they escape `{{ }}`). Core routes cannot be replaced.
-- **API actions** answer `/api/?action=<code>.<name>` with the returned array as JSON, under the
+- **API actions** answer `/api/v1/storefront/<code>.<name>` with the returned array as JSON, under the
   same session, locale and per-action rate limit as core actions. Validate input like core
   handlers (`Security::int()`, `Security::clean()`); state-changing actions must check CSRF.
 - **Failure is per extension and all-or-nothing.** A missing directory, a manifest that does

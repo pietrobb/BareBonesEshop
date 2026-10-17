@@ -203,6 +203,7 @@ UrlAliases::setRules([]);
 Extensions::boot(' . var_export($edConfig, true) . ', ' . var_export($edExt, true) . ');
 chdir(' . var_export($edAppRoot, true) . ');
 $script = ltrim((string)parse_url($_SERVER["REQUEST_URI"], PHP_URL_PATH), "/") ?: "index.php";
+if (str_starts_with($script, "api/v1/")) { require "api/v1/index.php"; exit; }
 if (!preg_match("/^[a-z]+\\.php$/", $script) || !is_file($script)) { http_response_code(404); exit; }
 require $script;
 ');
@@ -222,11 +223,11 @@ require $script;
     assert_true($edStatus === 200 && str_contains($edBody, '<p class="acme-hello">&lt;script&gt;alert(1)&lt;/script&gt;</p>') && str_contains($edBody, 'Acme hello page')
         && !str_contains($edBody, '<script>alert(1)'),
         'Generic core HTTP: /?page=<code>.<name> renders the extension page inside the theme layout, escaped (' . $edStatus . ' ' . substr(strip_tags($edBody), 0, 160) . ')');
-    [$edStatus, $edBody] = $edGet('/api.php?action=acme-shop.notes');
-    assert_equals(['notes' => 0, 'badge_column' => true], json_decode($edBody, true), 'Generic core HTTP: /api.php?action=<code>.<name> returns the extension action as JSON (' . $edStatus . ')');
+    [$edStatus, $edBody] = $edGet('/api/v1/storefront/acme-shop.notes');
+    assert_equals(['notes' => 0, 'badge_column' => true], json_decode($edBody, true), 'Generic core HTTP: /api/v1/storefront/<code>.<name> returns the extension action as JSON (' . $edStatus . ')');
     foreach (['vehicle_manufacturers', 'oe_search', 'product_vehicles', 'bad-route.ok'] as $edAction) {
-        [$edStatus, $edBody] = $edGet('/api.php?action=' . $edAction);
-        assert_equals(['error' => 'Unknown action'], json_decode($edBody, true), "Generic core HTTP: API action {$edAction} does not exist ({$edStatus})");
+        [$edStatus, $edBody] = $edGet('/api/v1/storefront/' . $edAction);
+        assert_equals([404, ['error' => 'Unknown action']], [$edStatus, json_decode($edBody, true)], "Generic core HTTP: API action {$edAction} does not exist");
     }
     foreach (['vehicle&ktype=1', 'oe&q=1K0', 'acme-shop.unknown', 'bad-route.ok'] as $edPage) {
         [$edStatus, $edBody] = $edGet('/?page=' . $edPage);

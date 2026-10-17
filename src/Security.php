@@ -79,7 +79,7 @@ class Security {
     public static function cspReportUrl(): ?string {
         if (!is_file(dirname(__DIR__) . '/config.php')) return null;
         try {
-            return self::appUrl(self::cfg()) . '/api.php?action=csp_report';
+            return self::appUrl(self::cfg()) . ApiRoute::PREFIX . '/csp-report';
         } catch (\RuntimeException $e) {
             return null;
         }

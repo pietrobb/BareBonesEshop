@@ -165,7 +165,7 @@ Return operations are a separate auditable layer on top of the order: several op
 
 ### Entry points and extension boundaries (G14 baseline)
 
-The public `admin.php`, `index.php`, `api.php` and the CLI `cli/test.php` are only 6/6/6/5-line bootstraps. The HTTP implementations live under the web-denied `src/Entrypoints`; the JSON API additionally separates the 88-line request lifecycle/router from `src/Http/ApiHandlers.php`. `cli/TestSuite.php` holds the existing sequential fixture suite, while `cli/test.php` stays the stable command. Source regressions assemble the whole bundle, so moving code does not weaken CSP, checkout or permission guards.
+The public `admin.php`, `index.php`, `api/v1/index.php` and the CLI `cli/test.php` are only short bootstraps. The HTTP implementations live under the web-denied `src/Entrypoints`; the JSON API additionally separates the request lifecycle/router (`src/Entrypoints/Api.php`, route groups in `src/ApiRoute.php`, external API in `src/Entrypoints/ApiExternal.php`) from `src/Http/ApiHandlers.php`. `cli/TestSuite.php` holds the existing sequential fixture suite, while `cli/test.php` stays the stable command. Source regressions assemble the whole bundle, so moving code does not weaken CSP, checkout or permission guards.
 
 The reproducible baseline command `git ls-files --cached --others --exclude-standard "*.php"` reports 299 PHP files and 83,668 lines in this state, including migrations and tests; the historical test suite alone has 7,058 lines. The numbers are not a marketing estimate and must be updated on the next split.
 

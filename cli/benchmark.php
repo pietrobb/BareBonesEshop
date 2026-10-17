@@ -659,7 +659,7 @@ $customerCookie = benchmarkCustomerSession($db);
 $httpIterations = min($iterations, 20);
 $clearCache = static fn() => benchmarkClearCacheFiles($runtime . '/cache');
 $categoryUrl = $baseUrl . '/index.php?page=category&slug=benchmark-category-0&lang=sk';
-$apiCategoryUrl = $baseUrl . '/api.php?action=parametric_search&category_id=' . $categoryId . '&lang=sk';
+$apiCategoryUrl = $baseUrl . '/api/v1/storefront/parametric_search?category_id=' . $categoryId . '&lang=sk';
 $validateCategorySsr = static fn(string $body): bool => str_contains($body, '5,000') && str_contains($body, 'Benchmark Product');
 $validateCategoryApi = static function (string $body): bool {
     $payload = json_decode($body, true);

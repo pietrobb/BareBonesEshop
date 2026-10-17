@@ -54,7 +54,7 @@ $_SERVER['REQUEST_METHOD'] = 'GET';
     'search_price_desc' => ['/index.php?page=search&q=lamp&sort=price_desc', ['page' => 'search', 'q' => 'lamp', 'sort' => 'price_desc'], 'index.php'],
     'search_pmax' => ['/index.php?page=search&q=lamp&pmax=15', ['page' => 'search', 'q' => 'lamp', 'pmax' => '15'], 'index.php'],
     'search_cat' => ['/index.php?page=search&q=lamp', ['page' => 'search', 'q' => 'lamp', 'sort' => 'price_asc', 'cat' => (string)$db->query("SELECT id FROM categories WHERE slug = 'a142-cat'")->fetchColumn()], 'index.php'],
-    'suggest' => ['/api.php?action=search_suggest&q=lam', ['action' => 'search_suggest', 'q' => 'lam'], 'api.php'],
+    'suggest' => ['/api/v1/storefront/search_suggest?q=lam', ['q' => 'lam'], 'api/v1/index.php'],
     'cart' => ['/index.php?page=cart', ['page' => 'cart'], 'index.php'],
     'checkout' => ['/index.php?page=checkout', ['page' => 'checkout'], 'index.php'],
     'product' => ['/product.php?slug=a142-product', ['slug' => 'a142-product'], 'product.php'],

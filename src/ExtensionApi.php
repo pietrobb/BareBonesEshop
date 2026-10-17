@@ -88,7 +88,7 @@ final class ExtensionApi
     }
 
     /**
-     * JSON API action /api/?action=<code>.<name> (same session, locale and rate limit as core actions).
+     * JSON API action /api/v1/storefront/<code>.<name> (same session, locale and rate limit as core actions).
      * $handler(array $query) returns the array that is sent as JSON.
      */
     public function api(string $name, callable $handler): void

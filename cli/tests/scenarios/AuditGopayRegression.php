@@ -40,7 +40,7 @@ if ($a164Ready) {
     $a164Gateway = new GoPayPayment($a164Cfg, $a164Transport);
     $a164Order = ['order_number' => 'A164-1', 'total' => 1990, 'currency' => 'eur', 'customer_email' => 'buyer@example.com',
         'success_url' => 'https://shop.example/?page=order-done&order=A164-1&session_id={CHECKOUT_SESSION_ID}',
-        'notify_url' => 'https://shop.example/api.php?action=webhook_payment&provider=gopay'];
+        'notify_url' => 'https://shop.example/api/v1/webhooks/payment/gopay'];
     $a164Session = $a164Gateway->createSession($a164Order);
     assert_equals(['url' => 'https://gw.sandbox.gopay.com/gw/v3/a164', 'session_id' => '3123456789'], $a164Session, 'A16.4 GoPay create: redirect to gw_url, GoPay payment id kept as session');
     assert_equals(['POST', 'https://gw.sandbox.gopay.com/api/oauth2/token'], [$a164Calls[0]['method'] ?? '', $a164Calls[0]['url'] ?? ''], 'A16.4 GoPay token: POST /api/oauth2/token on the sandbox');
@@ -53,7 +53,7 @@ if ($a164Ready) {
     assert_equals([1990, 'EUR', 'A164-1', ['type' => 'ACCOUNT', 'goid' => 8123456789], 'buyer@example.com'],
         [$a164Body['amount'] ?? null, $a164Body['currency'] ?? null, $a164Body['order_number'] ?? null, $a164Body['target'] ?? null, $a164Body['payer']['contact']['email'] ?? null],
         'A16.4 GoPay create: amount in minor units, upper-case currency, order number, ACCOUNT target GoID, payer e-mail');
-    assert_equals(['return_url' => 'https://shop.example/?page=order-done&order=A164-1&session_id=', 'notification_url' => 'https://shop.example/api.php?action=webhook_payment&provider=gopay'],
+    assert_equals(['return_url' => 'https://shop.example/?page=order-done&order=A164-1&session_id=', 'notification_url' => 'https://shop.example/api/v1/webhooks/payment/gopay'],
         $a164Body['callback'] ?? null, 'A16.4 GoPay create: return and notification URLs');
     $a164Answers['3123456789'] = $a164Payment(3123456789, 'PAID');
     assert_equals('paid', $a164Gateway->getStatus('3123456789'), 'A16.4 GoPay status: GET /payments/payment/{id} state');
@@ -145,7 +145,7 @@ try {
     $a164Create = array_values(array_filter($a164Calls, static fn($c) => $c['method'] === 'POST' && str_ends_with($c['url'], '/payments/payment')))[0] ?? null;
     $a164Callback = json_decode((string)($a164Create['body'] ?? ''), true)['callback'] ?? [];
     assert_true(!empty($a164Result['success']) && empty($a164Result['payment_error']), 'A16.4 checkout: GoPay order is created with a payment session (' . ($a164Result['payment_error'] ?? $a164Result['error'] ?? 'ok') . ')');
-    assert_equals('https://shop.example/api.php?action=webhook_payment&provider=gopay', $a164Callback['notification_url'] ?? null, 'A16.4 checkout: provider notification URL is sent to the gateway');
+    assert_equals('https://shop.example/api/v1/webhooks/payment/gopay', $a164Callback['notification_url'] ?? null, 'A16.4 checkout: provider notification URL is sent to the gateway');
     assert_equals('https://gw.sandbox.gopay.com/gw/v3/a164', $a164Result['payment_url'] ?? null, 'A16.4 checkout: customer is sent to the GoPay gateway');
     assert_equals('3123456789', (string)$pdo->query("SELECT payment_id FROM orders WHERE id = " . (int)($a164Result['order_id'] ?? 0))->fetchColumn(), 'A16.4 checkout: GoPay payment id stored on the order');
 } finally {

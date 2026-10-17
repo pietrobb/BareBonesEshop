@@ -1,6 +1,11 @@
 <?php
 /** BareBones Shop — JSON API handler functions loaded by the thin router. */
 
+function apiUnknownAction(): array {
+    http_response_code(404);
+    return ['error' => 'Unknown action'];
+}
+
 function apiCategories(): array {
     $locale = I18n::locale();
     $cached = Cache::readJson(Cache::localePath($locale, 'categories.json'), 3600);
@@ -805,7 +810,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
                     'success_url'    => $baseUrl . '/?page=order-done&order=' . rawurlencode($order['order_number']) . '&confirmation_token=' . rawurlencode($confirmationToken) . '&session_id={CHECKOUT_SESSION_ID}',
                     'cancel_url'     => $baseUrl . '/?page=checkout-cancel&order=' . rawurlencode($order['order_number']),
                     // Provider-specific notification endpoint (PayU notifyUrl, GoPay notification_url, ...).
-                    'notify_url'     => $baseUrl . '/api.php?action=webhook_payment&provider=' . rawurlencode($paymentProvider),
+                    'notify_url'     => ApiRoute::paymentWebhook($baseUrl, $paymentProvider),
                 ], $payment, $paymentProvider);
                 $result['payment_url'] = $session['url'];
                 $result['session_id'] = $session['session_id'];
@@ -1124,7 +1129,7 @@ function verifyStripeSignature(string $payload, string $sigHeader, string $secre
 
 // ============================================================
 // Generic Payment Webhook Handler (Stripe, PayU, Mock)
-// Usage: POST /api.php?action=webhook_payment&provider=stripe|payu|mock
+// Usage: POST /api/v1/webhooks/payment/<provider> (stripe, comgate, gopay, thepay, mock, ...)
 // ============================================================
 
 function apiWebhookPayment(): array {
@@ -1133,7 +1138,7 @@ function apiWebhookPayment(): array {
         http_response_code(400);
         return ['error' => 'Invalid provider'];
     }
-    // Both Stripe URLs must use the same verified processing and claim/retry path.
+    // Stripe has its own verified processing and claim/retry path.
     if ($provider === 'stripe') return apiWebhookStripe();
     $pulled = apiWebhookPulledNotification($provider);
     if ($pulled !== null) return $pulled;

@@ -5,7 +5,7 @@
  * dependencies — curl only.
  *
  * Push notifications are sent to the URL set in the Comgate client portal
- * (…/api.php?action=webhook_payment&provider=comgate), as JSON (REST v2.0) or as a form (HTTP POST
+ * (…/api/v1/webhooks/payment/comgate), as JSON (REST v2.0) or as a form (HTTP POST
  * v1.0). They carry the merchant id and secret, which are checked first; the payment state, amount
  * and currency are then always taken from the authenticated /status call, as Comgate requires
  * (PullVerifiedNotificationAdapter). A test payment never pays an order of a production shop.

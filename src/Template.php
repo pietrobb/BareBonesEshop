@@ -77,7 +77,8 @@ class Template {
         $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
         $directory = $script === '' ? '' : str_replace('\\', '/', dirname($script));
         if ($directory === '' || $directory === '.' || $directory === '/') return '';
-        return '/' . trim($directory, '/');
+        // The JSON API front controller is <base>/api/v1/index.php; its URLs are relative to the shop root.
+        return (string)preg_replace('#/api/v1$#D', '', '/' . trim($directory, '/'));
     }
 
     /** Build a local URL that also works when the shop is installed in a subdirectory. */

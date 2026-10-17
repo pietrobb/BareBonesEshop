@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Changed (breaking) — one JSON API under `/api/v1`
+- `api.php` and the `/api/<action>` rewrite are removed. Its actions moved to route groups of the
+  existing `/api/v1` entrypoint (routes in `src/ApiRoute.php`; handlers and responses unchanged):
+  - `api.php?action=<action>` → `/api/v1/storefront/<action>` (also extension actions `<code>.<name>`)
+  - `api.php?action=bbf_<name>` → `/api/v1/options/<name>` (forms `options_from`)
+  - `api.php?action=webhook_payment&provider=<p>` and `action=webhook_stripe` → `/api/v1/webhooks/payment/<p>`
+  - `api.php?action=webhook_shipping&carrier=<c>` → `/api/v1/webhooks/shipping/<c>`
+  - `api.php?action=csp_report` → `/api/v1/csp-report`
+  - An unknown action answers 404 (was 200) with the same `{"error": "Unknown action"}` body.
+- **Upgrade:** when deploying, change the webhook URL in every payment gateway portal at the same
+  time: Stripe (Developers → Webhooks) to `<app_url>/api/v1/webhooks/payment/stripe`, Comgate push URL
+  to `<app_url>/api/v1/webhooks/payment/comgate`, and likewise any carrier webhooks. GoPay, ThePay and
+  PayU get the new notification URL with every new payment automatically. Custom themes that call
+  `api.php` must use `window.BareBonesStorefront.apiUrl` + `/<action>`; nginx needs the updated
+  `deploy/nginx.conf` (the `/api/(.*)` rewrite is gone).
+
 ### Added
 - **Shipments and tracking in the admin order detail** (A12.8). Migration `20261014090000_shipment_tracking_url`.
   - Per-warehouse partial shipments limited to the not-yet-shipped remainder; ship now or plan,

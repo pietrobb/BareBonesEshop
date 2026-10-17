@@ -23,6 +23,7 @@ $path = (string)parse_url($_SERVER["REQUEST_URI"], PHP_URL_PATH);
 chdir(' . var_export($a102Root, true) . ');
 $script = ltrim($path, "/");
 if ($script === "" ) $script = "index.php";
+if (str_starts_with($script, "api/v1/")) { require "api/v1/index.php"; exit; }
 if (!preg_match("/^[a-z]+\\.php$/", $script) || !is_file($script)) { http_response_code(404); exit; }
 require $script;
 ');
@@ -90,8 +91,11 @@ $a102Cases[] = ['GET / with page[]', 'GET', '/?page[]=cart', []];
 foreach (['login', 'register', 'forgot', 'reset', 'orders', 'privacy', 'verify'] as $a102P) {
     $a102Cases[] = ["GET account.php?p={$a102P} with array query values", 'GET', '/account.php?' . http_build_query($a102Arrays($a102GetNames, ['p' => $a102P])), []];
 }
+$a102ApiPath = static fn(string $action): string => str_starts_with($action, 'bbf_')
+    ? '/api/v1/options/' . substr($action, 4)
+    : '/api/v1/storefront/' . $action;
 foreach ($a102ApiActions as $a102Action) {
-    $a102Cases[] = ["GET api.php?action={$a102Action} with array query values", 'GET', '/api.php?' . http_build_query($a102Arrays($a102GetNames, ['action' => $a102Action])), []];
+    $a102Cases[] = ["GET {$a102ApiPath($a102Action)} with array query values", 'GET', $a102ApiPath($a102Action) . '?' . http_build_query($a102Arrays($a102GetNames)), []];
 }
 foreach (['feed.php', 'redirect.php', 'wishlist.php', 'download.php', 'page.php', 'product.php', 'health.php', 'admin.php', 'sitemap.php', 'robots.php'] as $a102Script) {
     $a102Cases[] = ["GET {$a102Script} with array query values", 'GET', '/' . $a102Script . '?' . http_build_query($a102Arrays($a102GetNames)), []];
@@ -120,10 +124,10 @@ try {
         $a102Cases[] = ["POST {$a102Label} with array fields", 'POST', $a102Target, ['cookie' => $a102S['cookie'], 'form' => $a102Arrays($a102PostNames, $a102Fixed + ['csrf_token' => $a102S['csrf']])]];
     }
     foreach ($a102ApiActions as $a102Action) {
-        $a102Cases[] = ["POST api.php?action={$a102Action} with csrf_token[] form", 'POST', '/api.php?action=' . $a102Action, ['cookie' => $a102S['cookie'], 'form' => ['csrf_token' => ['x']]]];
-        $a102Cases[] = ["POST api.php?action={$a102Action} with array JSON fields", 'POST', '/api.php?action=' . $a102Action,
+        $a102Cases[] = ["POST {$a102ApiPath($a102Action)} with csrf_token[] form", 'POST', $a102ApiPath($a102Action), ['cookie' => $a102S['cookie'], 'form' => ['csrf_token' => ['x']]]];
+        $a102Cases[] = ["POST {$a102ApiPath($a102Action)} with array JSON fields", 'POST', $a102ApiPath($a102Action),
             ['cookie' => $a102S['cookie'], 'csrf_header' => $a102S['csrf'], 'json' => $a102Arrays($a102PostNames)]];
-        $a102Cases[] = ["POST api.php?action={$a102Action} with JSON array body", 'POST', '/api.php?action=' . $a102Action,
+        $a102Cases[] = ["POST {$a102ApiPath($a102Action)} with JSON array body", 'POST', $a102ApiPath($a102Action),
             ['cookie' => $a102S['cookie'], 'csrf_header' => $a102S['csrf'], 'json' => ['a', 'b']]];
     }
 

@@ -51,7 +51,7 @@ if ($a165Ready) {
     $a165Order = ['order_number' => 'A165-1', 'total' => 1990, 'currency' => 'eur', 'customer_email' => 'buyer@example.com', 'customer_name' => 'Jana Nováková', 'locale' => 'sk',
         'success_url' => 'https://shop.example/?page=order-done&order=A165-1&session_id={CHECKOUT_SESSION_ID}',
         'cancel_url' => 'https://shop.example/?page=checkout-cancel&order=A165-1',
-        'notify_url' => 'https://shop.example/api.php?action=webhook_payment&provider=comgate'];
+        'notify_url' => 'https://shop.example/api/v1/webhooks/payment/comgate'];
     $a165Session = $a165Gateway->createSession($a165Order);
     assert_equals(['url' => 'https://payments.comgate.cz/client/instructions/index?id=AB12-CD34-EF56', 'session_id' => 'AB12-CD34-EF56'], $a165Session, 'A16.5 Comgate create: redirect URL, transId kept as session');
     $a165Create = $a165Calls[0] ?? ['method' => '', 'url' => '', 'headers' => [], 'body' => ''];
