@@ -78,6 +78,7 @@
     "metrics_log_file": {"type": "string", "x-private-path": true},
     "update_storage_dir": {"type": "string", "x-private-path": true},
     "update_public_key": {"type": "string"},
+    "update_snapshots_keep": {"type": "integer", "minimum": 1, "description": "Newest pre-update snapshots (each a full database copy) kept after an update; older ones are deleted."},
     "update_mysql_probe_database": {"oneOf": [{"const": ""}, {"type": "string", "pattern": "_update_probe$"}]},
     "update_mysql_dump_binary": {"type": "string", "minLength": 1, "description": "mysqldump, or mariadb-dump on MariaDB-only hosts"},
     "update_mysql_client_binary": {"type": "string", "minLength": 1, "description": "mysql, or mariadb on MariaDB-only hosts"},

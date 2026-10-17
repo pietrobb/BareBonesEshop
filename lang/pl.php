@@ -1058,6 +1058,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.import.rejected' => 'Plik CSV nie został przyjęty:',
     'admin.import.done' => 'Import zakończony: {count} produktów.',
     'admin.import.partial' => 'Import: {imported} OK, {errors} błędów.',
+    'admin.import.converted_cp1250' => 'Plik nie był w UTF-8 i został przekonwertowany z Windows-1250 (CSV z Excela); sprawdź polskie znaki.',
+    'admin.import.invalid_encoding' => 'Plik nie jest w UTF-8: zapisz go w Excelu jako "CSV UTF-8" i zaimportuj ponownie.',
     'admin.cache.title' => 'Zarządzanie pamięcią podręczną',
     'admin.cache.files' => 'Pliki pamięci podręcznej',
     'admin.cache.size' => 'Rozmiar',

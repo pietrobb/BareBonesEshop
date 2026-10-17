@@ -147,7 +147,7 @@ class Cache {
      * Write JSON to cache
      */
     public static function writeJson(string $path, array $data): void {
-        self::write($path, json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+        self::write($path, json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_INVALID_UTF8_SUBSTITUTE));
     }
 
     /**
@@ -184,6 +184,40 @@ class Cache {
         if (class_exists('JobQueue')) {
             JobQueue::push('cache_rebuild', ['prefix' => $prefix], 2);
         }
+    }
+
+    /**
+     * Mark every cached product page, category listing/filter and category tree built from a catalog
+     * (default: the active one) stale at once, in every store and channel sharing that catalog.
+     * Called by the product, stock and import write paths; readCatalogJson() honours it.
+     */
+    public static function catalogChanged(?string $catalogId = null): void {
+        try {
+            $marker = self::catalogMarker($catalogId ?? StoreContext::current()->catalogId());
+            $dir = dirname($marker);
+            $written = (is_dir($dir) || @mkdir($dir, 0750, true) || is_dir($dir))
+                && @file_put_contents($marker, (string)time(), LOCK_EX) !== false;
+        } catch (Throwable $e) {
+            $written = false; // a cache marker must never fail the product write that triggered it
+        }
+        if (!$written) Logger::warning('cache.write_failed', ['path' => 'catalogs']);
+    }
+
+    /**
+     * readJson() for entries derived from catalog rows: also a miss when the entry was written in or before
+     * the second of the last catalogChanged() of the active catalog.
+     */
+    public static function readCatalogJson(string $path, int $ttl): ?array {
+        $file = self::path($path);
+        $marker = self::catalogMarker(StoreContext::current()->catalogId());
+        clearstatcache(true, $file);
+        clearstatcache(true, $marker);
+        if (is_file($file) && is_file($marker) && (int)filemtime($file) <= (int)file_get_contents($marker)) return null;
+        return self::readJson($path, $ttl);
+    }
+
+    private static function catalogMarker(string $catalogId): string {
+        return self::dir() . '/catalogs/' . rawurlencode($catalogId) . '.changed';
     }
 
     /**

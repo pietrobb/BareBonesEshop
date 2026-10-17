@@ -8,7 +8,7 @@ function apiUnknownAction(): array {
 
 function apiCategories(): array {
     $locale = I18n::locale();
-    $cached = Cache::readJson(Cache::localePath($locale, 'categories.json'), 3600);
+    $cached = Cache::readCatalogJson(Cache::localePath($locale, 'categories.json'), 3600);
     if ($cached) return $cached;
 
     $tree = Categories::tree();
@@ -60,7 +60,7 @@ function apiProducts(): array {
     $cacheable = empty($_SESSION['customer_id']) && empty($filters) && $page === 1
         && !$priceMin && !$priceMax && $sort === 'price_asc';
     if ($cacheable) {
-        $cached = Cache::readJson(Cache::localePath($locale, "cat/{$catSlug}/page-1.json"), 3600);
+        $cached = Cache::readCatalogJson(Cache::localePath($locale, "cat/{$catSlug}/page-1.json"), 3600);
         if ($cached) return $cached;
     }
 
@@ -86,7 +86,7 @@ function apiProduct(): array {
     // Personalized prices must neither read nor populate the shared guest cache.
     $cacheable = empty($_SESSION['customer_id']);
     if ($cacheable) {
-        $cached = Cache::readJson(Cache::localePath($locale, "product/{$slug}.json"), 3600);
+        $cached = Cache::readCatalogJson(Cache::localePath($locale, "product/{$slug}.json"), 3600);
         if ($cached) return $cached;
     }
 
@@ -317,7 +317,7 @@ function apiFilters(): array {
     if (!$category) return ['filters' => []];
 
     $locale = I18n::locale();
-    $cached = Cache::readJson(Cache::localePath($locale, "cat/{$catSlug}/filters.json"), 3600);
+    $cached = Cache::readCatalogJson(Cache::localePath($locale, "cat/{$catSlug}/filters.json"), 3600);
     if ($cached) return $cached;
 
     $raw = Products::filterValues($category['id']);

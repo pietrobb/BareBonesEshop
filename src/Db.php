@@ -207,4 +207,18 @@ class Db {
             unset(self::$schemaCache[$db]);
         }
     }
+
+    /**
+     * Refresh SQLite planner statistics after schema changes or bulk writes (cheap: only re-analyzes
+     * what changed). No-op on MySQL/MariaDB; never fails the caller.
+     */
+    public static function optimize(?PDO $db = null): void {
+        $db ??= self::get();
+        if ($db->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite') return;
+        try {
+            $db->exec('PRAGMA optimize');
+        } catch (\Throwable $e) {
+            error_log('[Db] PRAGMA optimize failed: ' . $e->getMessage());
+        }
+    }
 }

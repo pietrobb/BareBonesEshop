@@ -1158,6 +1158,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.import.rejected' => 'El archivo CSV no se aceptó:',
     'admin.import.done' => 'Importación finalizada: {count} productos.',
     'admin.import.partial' => 'Importación: {imported} correctos, {errors} errores.',
+    'admin.import.converted_cp1250' => 'El archivo no estaba en UTF-8 y se convirtió desde Windows-1250 (CSV de Excel); revise los acentos.',
+    'admin.import.invalid_encoding' => 'El archivo no está en UTF-8: guárdelo en Excel como "CSV UTF-8" e impórtelo de nuevo.',
     'admin.cache.title' => 'Gestión de la caché',
     'admin.cache.files' => 'Archivos de caché',
     'admin.cache.size' => 'Tamaño',

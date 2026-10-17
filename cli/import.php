@@ -49,6 +49,7 @@ if ($ext === 'csv') {
 }
 
 echo "Imported: {$result['imported']} products\n";
+if (($result['encoding'] ?? '') === 'windows-1250') echo "Notice: the file was not UTF-8 and was converted from Windows-1250.\n";
 if (!empty($result['errors'])) {
     echo "Errors:\n";
     foreach ($result['errors'] as $err) {

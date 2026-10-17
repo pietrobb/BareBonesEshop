@@ -179,6 +179,36 @@ nginx PHP fallback when `operations.nginx_config` is set).
   (e.g. MySQL `net_write_timeout` on a slow download) is logged (`export.truncated`) and raises the
   incident `export.truncated`; when nothing was sent yet the download answers 500, otherwise the file
   is incomplete - check the incidents before importing an export elsewhere.
+- **Backup and update snapshot retention**: `cli/backup.php --gc` (and `auto_gc_on_backup`) now keeps
+  only the newest `retention.pre_migration` (default 5) `pre-migration` backups instead of all of them;
+  `manual` backups are still kept unless `retention.manual_max_age_days` (default 0 = forever) is set.
+  `cli/update.php apply` deletes all but the newest `update_snapshots_keep` (default 3, min 1)
+  `pre-update` snapshots in `update_storage_dir` (each a full database copy/dump); the snapshot of the
+  installed release and `manual-backup` snapshots are never deleted. Raise the values before updating if
+  you rely on older snapshots. **GDPR: erased or retention-scrubbed personal data survives in backups
+  and update snapshots until they rotate out** - the oldest kept backup bounds how long (document it
+  in your privacy policy / records of processing).
+- **Retention `orders_pii`** also scrubs `orders.notes` (customer order notes). Copy the extra field
+  into a customised `config/data-retention.json`. `scrub_pii` now only touches rows that still hold PII
+  (a re-run neither rewrites already scrubbed rows nor counts them), and uses distinct placeholders
+  (the repeated `:marker` failed under native MySQL prepares).
+- **CSV import encoding**: a CSV that is not valid UTF-8 (Excel "CSV" in SK/CZ locales is Windows-1250)
+  is converted from Windows-1250 (needs the `iconv` extension) and the admin flash / `cli/import.php`
+  says so; a file that is neither is rejected with a hint to save it as "CSV UTF-8". Before, such files
+  stored invalid UTF-8 names that blanked HTML and API responses. The JSON API now substitutes invalid
+  UTF-8 (`JSON_INVALID_UTF8_SUBSTITUTE`) instead of answering an empty body; fix rows imported earlier
+  by re-importing them as UTF-8.
+- **API product/category cache**: product saves (admin, bulk actions, CSV/feed import, API v1 PATCH)
+  and every stock movement mark the catalog's cached `product/*.json`, `cat/*` and `categories.json`
+  entries stale (`<cache_dir>/catalogs/<catalog>.changed`, shared by all stores of the catalog), so
+  prices, names, stock and deactivation show up at once instead of after up to an hour.
+- **Worker logs**: refund attempts and processed imports are written to the structured log
+  (`Logger`, redacted, in `<private_runtime_dir>/logs/application.jsonl`, events `refund.attempt`,
+  `import.processed`) instead of `logs/refunds.log` / `logs/imports.log` in the application root.
+  Existing files there can be archived and deleted.
+- **SQLite search**: full-text queries join from the FTS index (`CROSS JOIN`), so a short query such as
+  `?q=a` no longer scans every product (80 s → ~0.1 s at 50k products). `PRAGMA optimize` runs after
+  migrations and CSV imports. MySQL/MariaDB FULLTEXT search is unchanged.
 
 ### Changed (breaking) — one JSON API under `/api/v1`
 - `api.php` and the `/api/<action>` rewrite are removed. Its actions moved to route groups of the

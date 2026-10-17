@@ -253,7 +253,7 @@ Granular commits in this order:
 1. **schema** — migration `add_gdpr_tables` (cookie_consent, gdpr_events with triggers) + `data-retention.json` + `processors.json`.
 2. **GdprService skeleton** — `exportCustomer`, `anonymizeCustomer`, `recordEvent`, `consentRecord`, `consentRead`.
 3. **GdprService::applyRetention** — table-by-table GC, `--dry-run` aware, returns counts.
-4. **CLI cli/gdpr-gc.php** — daily cron. `--dry-run` default. Auto pre-run BackupService snapshot when `--apply`; refuses (exit 3) when no SQLite snapshot is possible (backups disabled, MySQL) unless `--skip-backup` confirms an external backup.
+4. **CLI cli/gdpr-gc.php** — daily cron. Erasure and scrubbing do not reach existing backups and update snapshots: the data persists there until backup GC / `update_snapshots_keep` rotates them out (see OPERATIONS_RUNBOOK "Retention"). `--dry-run` default. Auto pre-run BackupService snapshot when `--apply`; refuses (exit 3) when no SQLite snapshot is possible (backups disabled, MySQL) unless `--skip-backup` confirms an external backup.
 5. **CLI cli/gdpr-export.php** — admin-only by email; mirror of customer export for postal SAR. In the web admin the same export is a CSRF-protected POST `admin.php?p=gdpr&action=export` (`gdpr.view`, active store only, audited as `export` with the admin as actor); the admin never links to the CLI script, which is HTTP-denied.
 6. **account.php** — Privacy section: data export button, erasure button, manage cookies link. 32 new `gdpr.*` lang keys × 6 locales.
 7. **admin.php** — GDPR panel: search by email, anonymize button, audit log viewer. RBAC `gdpr.view` + `gdpr.erase`.

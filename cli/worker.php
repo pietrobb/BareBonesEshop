@@ -548,9 +548,6 @@ function handlePaymentRefund(array $payload, array $job): void {
     // A redelivered whole-order job after the provider confirmed the refund only finishes the bookkeeping.
     $alreadyRefunded = $itemRefundId === 0 && $idempotencyKey !== '' && PaymentService::refundSucceeded($idempotencyKey);
 
-    $logDir = __DIR__ . '/../logs';
-    if (!is_dir($logDir)) mkdir($logDir, 0750, true);
-
     $result = $alreadyRefunded ? ['status' => 'succeeded', 'replayed' => true] : ['status' => 'skipped'];
     if (!$alreadyRefunded && $paymentId !== '' && $orderId > 0 && $amount > 0) {
         // Renew the lease before moving money (outside any transaction); aborts if another worker owns the job.
@@ -561,10 +558,8 @@ function handlePaymentRefund(array $payload, array $job): void {
             $result = ['status' => 'error', 'message' => $e->getMessage()];
         }
     }
-    file_put_contents($logDir . '/refunds.log',
-        date('c') . " | ORDER: {$orderId} | AMOUNT: {$amount} | PAYMENT: {$paymentId} | RESULT: " . json_encode($result) . "\n",
-        FILE_APPEND | LOCK_EX
-    );
+    // Structured log in the private runtime directory (redacted), never a file under the web root.
+    Logger::info('refund.attempt', ['order_id' => $orderId, 'amount' => $amount, 'payment_id' => $paymentId, 'result' => $result]);
 
     $status = (string)($result['status'] ?? '');
     if ($status === 'skipped') return;
@@ -730,11 +725,7 @@ function handleImportProcess(array $payload, array $job): void {
 
     $result = Import::csv($file);
 
-    $logDir = __DIR__ . '/../logs';
-    if (!is_dir($logDir)) mkdir($logDir, 0750, true);
-    $errCount = count($result['errors'] ?? []);
-    $logEntry = date('c') . " | IMPORT: {$result['imported']} ok, {$errCount} errors | FILE: {$file}\n";
-    file_put_contents($logDir . '/imports.log', $logEntry, FILE_APPEND | LOCK_EX);
+    Logger::info('import.processed', ['imported' => $result['imported'], 'error_count' => count($result['errors'] ?? []), 'file' => basename($file), 'encoding' => $result['encoding'] ?? 'utf-8']);
 
     // Clean up temp file only on success
     if (empty($result['errors'])) {

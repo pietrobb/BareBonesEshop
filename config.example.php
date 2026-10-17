@@ -302,6 +302,7 @@ return [
     'metrics_log_file'    => dirname(__DIR__) . '/bareboneseshop-private/logs/metrics.jsonl',
     'update_storage_dir'  => dirname(__DIR__) . '/bareboneseshop-private/updates',
     'update_public_key'   => '', // Ed25519 public key (base64/hex or absolute key-file path)
+    'update_snapshots_keep' => 3, // newest pre-update snapshots kept (full database copies); older ones are deleted after an update
     // Required only for MySQL/MariaDB packages containing migrations. Reserve
     // this disposable schema name and grant db_user access, but do not create it;
     // it must end with _update_probe. The updater refuses to overwrite an existing schema.

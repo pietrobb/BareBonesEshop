@@ -11,7 +11,7 @@
  *   BackupService::storage(): BackupStorage
  *
  * Config (loaded from config/backup.json):
- *   enabled, storage, compression, retention { daily, weekly, monthly, minimum_kept },
+ *   enabled, storage, compression, retention { daily, weekly, monthly, minimum_kept, pre_migration, manual_max_age_days },
  *   auto_pre_migration, auto_gc_on_backup, wal_checkpoint, log_file, log_max_bytes, log_max_files
  */
 class BackupService
@@ -1513,10 +1513,17 @@ class BackupService
             $monthlyKept++;
         }
 
-        // Preserve manual / pre-migration / pre-restore-snapshot labels
-        foreach ($all as $row) {
+        // Labelled backups outside the rotation: pre-restore snapshots (pruned by restore itself), the newest
+        // `pre_migration` pre-migration backups and manual backups, which expire only past `manual_max_age_days`.
+        $preMigrationKeep = max(0, (int)($cfg['pre_migration'] ?? 5));
+        $manualMaxAge = max(0, (int)($cfg['manual_max_age_days'] ?? 0));
+        $manualCutoff = $manualMaxAge > 0 ? new \DateTimeImmutable("-{$manualMaxAge} days") : null;
+        $preMigrationSeen = 0;
+        foreach ($all as $row) { // newest first
             $label = (string)($row['meta']['label'] ?? '');
-            if (in_array($label, ['pre-restore-snapshot', 'pre-migration', 'manual'], true)) {
+            if ($label === 'pre-restore-snapshot'
+                || ($label === 'pre-migration' && $preMigrationSeen++ < $preMigrationKeep)
+                || ($label === 'manual' && ($manualCutoff === null || self::rowWhen($row) >= $manualCutoff))) {
                 $keep[$row['path']] = true;
             }
         }
