@@ -1,21 +1,28 @@
 <?php
 /**
- * BareBones Shop — JSON API request lifecycle and action router.
- * Domain handlers live in src/Http/ApiHandlers.php.
+ * BareBones Shop — the single JSON API entrypoint (/api/v1/…, route groups in src/ApiRoute.php).
+ * Browser, option, webhook and CSP routes run the action router below; every other path is the
+ * external machine API (src/Entrypoints/ApiExternal.php). Domain handlers live in src/Http/ApiHandlers.php.
  */
 require_once dirname(__DIR__, 2) . '/src/autoload.php';
 require_once dirname(__DIR__) . '/Http/ApiHandlers.php';
 
-$action = $_GET['action'] ?? '';
-
 if (!defined('BB_TEST_LOAD_API_ONLY')) {
+    $uri = (string)($_SERVER['REQUEST_URI'] ?? '/');
+    $route = ApiRoute::resolve($uri);
+    if ($route === null) {
+        require __DIR__ . '/ApiExternal.php';
+        return;
+    }
+    $action = $route['action'];
+    $_GET = array_merge($_GET, $route['get']);
+
     Security::headers();
     header('Content-Type: application/json; charset=utf-8');
 
     Security::sessionStart();
     Customers::isLoggedIn();
 
-    $uri = $_SERVER['REQUEST_URI'] ?? '/';
     Bootstrap::initLocale($uri);
 
     if (!Security::rateLimit('api_' . $action, 120)) {
@@ -45,7 +52,6 @@ if (!defined('BB_TEST_LOAD_API_ONLY')) {
             'review_submit' => apiReviewSubmit(),
             'wishlist' => apiWishlist(),
             'wishlist_toggle' => apiWishlistToggle(),
-            'webhook_stripe' => apiWebhookStripe(),
             'webhook_payment' => apiWebhookPayment(),
             'webhook_shipping' => apiWebhookShipping(),
             'cookie_consent' => apiCookieConsent(),
@@ -55,7 +61,8 @@ if (!defined('BB_TEST_LOAD_API_ONLY')) {
             'page' => apiPage(),
             'bbf_categories', 'bbf_brands', 'bbf_product_types', 'bbf_attr_types', 'bbf_page_statuses',
             'bbf_product_statuses', 'bbf_payment_methods' => BbfOptions::forAction($action),
-            default => (is_string($action) ? Extensions::api($action) : null) ?? ['error' => 'Unknown action'],
+            '' => apiUnknownAction(),
+            default => Extensions::api($action) ?? apiUnknownAction(),
         };
 
         echo json_encode($result, JSON_UNESCAPED_UNICODE);

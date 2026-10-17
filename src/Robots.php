@@ -14,7 +14,6 @@ class Robots {
         '/admin',
         '/admin.php',
         '/api/',
-        '/api.php',
         '/account',
         '/account.php',
         '/cart',

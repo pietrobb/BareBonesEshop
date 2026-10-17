@@ -101,7 +101,7 @@ echo "\n--- Test 55: P0 regression (HTTP checkout path) ---\n";
 
 if (!function_exists('apiCheckout')) {
     define('BB_TEST_LOAD_API_ONLY', true);
-    require_once TEST_CLI_DIR . '/../api.php';
+    require_once TEST_CLI_DIR . '/../src/Entrypoints/Api.php';
 }
 
 // Deterministic offline payment method, zero fees, available for SK + DE
@@ -794,7 +794,7 @@ assert_true($f4Rejected, 'F4: order with only a negative-qty item is rejected (R
 assert_equals($f4Before, $f4After, 'F4: negative qty does NOT inflate product stock');
 
 // --- F8: apiCookieConsent must CSRF-validate, and the banner must send the token.
-$f8Api = entrypointSource('api.php');
+$f8Api = entrypointSource('api/v1/index.php');
 assert_true(
     (bool)preg_match('/function apiCookieConsent\(\).*?Security::csrfValidate\(\)/s', $f8Api),
     'F8: apiCookieConsent() calls Security::csrfValidate()'

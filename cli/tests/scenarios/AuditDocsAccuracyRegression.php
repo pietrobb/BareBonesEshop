@@ -25,10 +25,10 @@ $a112Api = (string)file_get_contents($a112Root . '/src/Entrypoints/Api.php');
 preg_match('/match\(\$action\) \{(.*?)\n\s*\};/s', $a112Api, $a112Match);
 preg_match_all("/'([a-z0-9_]+)'/", $a112Match[1] ?? '', $a112Actions);
 $a112ActionCount = count(array_unique($a112Actions[1]));
-if (preg_match('/JSON API\*\* \(`api\.php`\) — (\d+) actions/', $a112Readme, $a112Stated)) {
-    assert_equals($a112ActionCount, (int)$a112Stated[1], 'A11.2 README: stated api.php action count matches the dispatcher');
+if (preg_match('#JSON API\*\* \(`/api/v1`\) — (\d+) actions#', $a112Readme, $a112Stated)) {
+    assert_equals($a112ActionCount, (int)$a112Stated[1], 'A11.2 README: stated JSON API action count matches the dispatcher');
 } else {
-    assert_true(false, 'A11.2 README: api.php action count is stated from the dispatcher');
+    assert_true(false, 'A11.2 README: JSON API action count is stated from the dispatcher');
 }
 
 // .env.example: every variable it documents is read by the code from the process environment,

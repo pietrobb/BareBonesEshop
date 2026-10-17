@@ -69,7 +69,7 @@ if ($stripeTest) {
 }
 
 if (!defined('BB_TEST_LOAD_API_ONLY')) define('BB_TEST_LOAD_API_ONLY', true);
-require_once dirname(__DIR__, 2) . '/api.php';
+require_once dirname(__DIR__, 2) . '/src/Entrypoints/Api.php';
 $product = $db->query("SELECT id, sku FROM products WHERE status='active' AND stock >= 20 ORDER BY stock DESC, id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
 if (!$product) throw new RuntimeException('Disposable E2E catalog needs one product with at least 20 units');
 $createCheckoutOrder = static function (string $email, int $quantity) use ($config, $product): int {

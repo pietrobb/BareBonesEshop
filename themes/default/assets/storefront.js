@@ -2,7 +2,11 @@
   'use strict';
   const config = window.BareBonesStorefront || {};
   const text = config.text || {};
-  const apiUrl = config.apiUrl || 'api.php';
+  const apiBase = (config.apiUrl || '/api/v1/storefront').replace(/\/+$/, '');
+  const apiUrl = (action, params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    return `${apiBase}/${action}${query ? `?${query}` : ''}`;
+  };
 
   function setTab(id) {
     document.querySelectorAll('[data-product-tab]').forEach((tab) => {
@@ -136,11 +140,10 @@
     const previous = box.querySelector('input[name="payment"]:checked');
     const previousCode = previous ? previous.value : '';
     box.innerHTML = `<div class="payment-loading">${escapeHtml(text.paymentLoading)}</div>`;
-    const params = new URLSearchParams({
-      action: 'payment_methods', country: country.value, currency: config.currency,
+    const response = await fetch(apiUrl('payment_methods', {
+      country: country.value, currency: config.currency,
       amount: String(checkoutGoods(subtotal) + shippingPrice), shipping_method: selectedShipping
-    });
-    const response = await fetch(`${apiUrl}?${params}`);
+    }));
     const result = await response.json();
     const methods = result.methods || [];
     if (!methods.length) {
@@ -171,8 +174,7 @@
     const previous = box.querySelector('input[name="shipping_method"]:checked');
     const previousCode = previous ? previous.value : '';
     box.innerHTML = `<div class="shipping-loading">${escapeHtml(text.shippingLoading)}</div>`;
-    const params = new URLSearchParams({action: 'shipping_rates', country: country.value, subtotal: String(checkoutGoods(subtotal))});
-    const response = await fetch(`${apiUrl}?${params}`);
+    const response = await fetch(apiUrl('shipping_rates', {country: country.value, subtotal: String(checkoutGoods(subtotal))}));
     const result = await response.json();
     const methods = result.methods || [];
     const freeHint = document.getElementById('free-shipping-hint');
@@ -224,7 +226,7 @@
     form.append('marketing', categories.marketing ? 1 : 0);
     form.append('method', method);
     form.append('csrf_token', config.csrfToken || '');
-    fetch(`${apiUrl}?action=cookie_consent`, {method: 'POST', body: form}).catch(() => {});
+    fetch(apiUrl('cookie_consent'), {method: 'POST', body: form}).catch(() => {});
     if (banner) banner.remove();
   }
 
@@ -393,7 +395,7 @@
       timer = setTimeout(async () => {
         const mine = ++request;
         try {
-          const response = await fetch(`${apiUrl}?${new URLSearchParams({action: 'search_suggest', q: query})}`, {headers: {Accept: 'application/json'}});
+          const response = await fetch(apiUrl('search_suggest', {q: query}), {headers: {Accept: 'application/json'}});
           const result = response.ok ? await response.json() : [];
           if (mine === request) show(Array.isArray(result) ? result : []);
         } catch {

@@ -149,8 +149,9 @@ locally as an inline SVG.
 
 ## External API v1 and event webhooks
 
-The machine API is served below `/api/v1` and is separate from the browser-oriented
-`api.php`. It uses store-bound bearer credentials and scopes, opaque cursor
+The machine API is served below `/api/v1`, next to the browser routes of the same
+entrypoint (`/api/v1/storefront`, `/api/v1/options`, `/api/v1/webhooks`,
+`/api/v1/csp-report`). It uses store-bound bearer credentials and scopes, opaque cursor
 pagination, stable DTOs, and a required `Idempotency-Key` on every mutation. The
 complete contract is [`docs/openapi.yaml`](docs/openapi.yaml).
 
@@ -443,8 +444,17 @@ stock, shipping/payment pricing engines, feeds/import, CMS pages, GDPR tools,
 review moderation, RMA processing, and **customer management** (search, status
 toggle, per-customer orders/addresses/RMA). Role-based access control.
 
-**JSON API** (`api.php`) — 36 actions with rate limiting, CSRF on mutating
-requests, registry-routed payment/shipping webhook endpoints, and a CSP violation report endpoint.
+**JSON API** (`/api/v1`) — 34 actions with rate limiting, CSRF on mutating
+requests, registry-routed payment/shipping webhook endpoints, and a CSP violation report endpoint:
+
+| Route | Use | Authentication |
+|---|---|---|
+| `/api/v1/storefront/<action>` | storefront JS (cart, checkout, shipping/payment, search, reviews, wishlist, consent) and extension actions `<code>.<name>` | session, CSRF on writes |
+| `/api/v1/options/<name>` | option lists of BBF forms (`options_from`) | public |
+| `/api/v1/webhooks/payment/<provider>` | payment notifications (Stripe, Comgate, GoPay, ThePay, PayU, ...) | provider signature / status API |
+| `/api/v1/webhooks/shipping/<carrier>` | carrier tracking notifications | carrier signature |
+| `/api/v1/csp-report` | browser CSP violation reports | none (rate limited) |
+| `/api/v1/products`, `/orders`, ... | external machine API ([`docs/openapi.yaml`](docs/openapi.yaml)) | API key, scopes |
 
 **Operations** — store-scoped provider registry for concurrent payment, shipping,
 ERP, mail, and tax adapters; legacy single-adapter config remains supported. The
@@ -460,7 +470,7 @@ production path. Backups, migrations, and CLI tools live under `cli/`.
 ```
 .
 ├── index.php              Storefront router
-├── api.php                JSON API
+├── api/v1/index.php       JSON API (routes in src/ApiRoute.php)
 ├── admin.php              Admin back-office
 ├── account.php            Customer account portal
 ├── product.php · wishlist.php · page.php · sitemap.php · robots.php

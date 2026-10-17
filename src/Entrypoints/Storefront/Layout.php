@@ -126,7 +126,7 @@ $shell = [
 ];
 
 $runtimeConfig = [
-    'apiUrl' => Template::url('/api.php'),
+    'apiUrl' => Template::url('/api/v1/storefront'),
     'currentUrl' => Template::url('/'),
     'baseUrl' => Template::baseUrl(),
     'csrfToken' => Security::csrfToken(),

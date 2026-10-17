@@ -5,7 +5,7 @@
  *
  * The form posts to admin.php, so admin auth, RBAC and CSRF apply; the save handler validates the post with
  * validate() and stores the normalized data. Stored values are shown on edit, and options_from lists come from
- * BbfOptions, the same lists api.php serves.
+ * BbfOptions, the same lists /api/v1/options/<name> serves.
  */
 require_once dirname(__DIR__) . '/vendor/bbf/bbf_render.php';
 

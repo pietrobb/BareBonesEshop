@@ -490,7 +490,7 @@ assert_true($checkoutPaymentPickupCod === null, 'Payment UX: checkout blocks COD
 
 if (!function_exists('apiCheckout')) {
     define('BB_TEST_LOAD_API_ONLY', true);
-    require_once TEST_CLI_DIR . '/../api.php';
+    require_once TEST_CLI_DIR . '/../src/Entrypoints/Api.php';
 }
 Adapters::set('payment', $mockGateway);
 $_SERVER['REQUEST_METHOD'] = 'POST';

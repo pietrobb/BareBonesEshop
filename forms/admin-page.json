@@ -50,7 +50,7 @@
             "name": "status",
             "type": "select",
             "label": "Stav",
-            "options_from": "/api.php?action=bbf_page_statuses"
+            "options_from": "/api/v1/options/page_statuses"
         }
     ],
     "on_submit": {

@@ -1,10 +1,10 @@
 <?php
 /**
  * BareBones Shop — option lists referenced by BBF form definitions (options_from).
- * One source for the public api.php?action=bbf_* endpoints and the server-rendered admin forms.
+ * One source for the public /api/v1/options/<name> endpoints and the server-rendered admin forms.
  */
 class BbfOptions {
-    /** Options for an api.php action such as "bbf_categories"; null when the action is unknown. */
+    /** Options for an API action such as "bbf_categories"; null when the action is unknown. */
     public static function forAction(string $action): ?array {
         return match ($action) {
             'bbf_categories' => self::categories(),
@@ -34,10 +34,10 @@ class BbfOptions {
         };
     }
 
-    /** Resolve an options_from URL like "/api.php?action=bbf_categories". */
+    /** Resolve an options_from URL like "/api/v1/options/categories". */
     public static function fromSource(string $source): ?array {
-        parse_str((string)parse_url($source, PHP_URL_QUERY), $query);
-        return self::forAction((string)($query['action'] ?? ''));
+        $route = ApiRoute::resolve($source, '');
+        return $route !== null && str_starts_with($route['action'], 'bbf_') ? self::forAction($route['action']) : null;
     }
 
     private static function categories(): array {

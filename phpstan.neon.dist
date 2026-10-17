@@ -18,7 +18,6 @@ parameters:
         - api
         - account.php
         - admin.php
-        - api.php
         - download.php
         - feed.php
         - health.php

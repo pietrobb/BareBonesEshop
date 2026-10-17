@@ -104,7 +104,7 @@ if ($uri === "/__seed") {
 }
 chdir(' . var_export($p0AppRoot, true) . ');
 if ($uri === "/" || $uri === "/index.php") { require ' . var_export($p0AppRoot . '/index.php', true) . '; exit; }
-if ($uri === "/api.php") { require ' . var_export($p0AppRoot . '/api.php', true) . '; exit; }
+if (str_starts_with($uri, "/api/v1/")) { require ' . var_export($p0AppRoot . '/api/v1/index.php', true) . '; exit; }
 $_GET["path"] = $uri;
 require ' . var_export($p0AppRoot . '/redirect.php', true) . ';
 ');
@@ -200,12 +200,12 @@ try {
     assert_true(str_contains($p0Guard['body'], 'href="https://undeclared-gateway.example/pay/cs_test_p0_'), 'P0 HTTP: undeclared gateway gets a clickable payment link');
 
     // Layer 4b: the browser tells the shop about every CSP violation.
-    $p0ReportUrl = "http://127.0.0.1:{$p0Port}/api.php?action=csp_report";
+    $p0ReportUrl = "http://127.0.0.1:{$p0Port}/api/v1/csp-report";
     assert_true(str_contains($p0Page['csp'], "report-uri {$p0ReportUrl};") && str_contains($p0Page['csp'], 'report-to csp-endpoint;'), 'P0 layer 4: checkout CSP reports violations to the shop');
     assert_equals('csp-endpoint="' . $p0ReportUrl . '"', $p0Page['reporting'], 'P0 layer 4: Reporting-Endpoints names the CSP report endpoint');
     $p0Report = static function (string $method, string $body, string $type) use ($p0Port): int {
         $context = stream_context_create(['http' => ['method' => $method, 'header' => "Content-Type: {$type}\r\n", 'content' => $body, 'ignore_errors' => true, 'timeout' => 15]]);
-        @file_get_contents("http://127.0.0.1:{$p0Port}/api.php?action=csp_report", false, $context);
+        @file_get_contents("http://127.0.0.1:{$p0Port}/api/v1/csp-report", false, $context);
         return (int)(explode(' ', $http_response_header[0] ?? '')[1] ?? 0);
     };
     $p0Db->exec('DELETE FROM csp_violations');
