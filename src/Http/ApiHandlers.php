@@ -1108,36 +1108,47 @@ function applyStripeChargeRefunded(array $charge, string $paymentIntent, int $or
         "Stripe refund: {$refundedAmount}/{$orderTotal} cents");
 
     $fullRefund = $refundedAmount >= $orderTotal;
-    $targetPaymentStatus = $fullRefund ? 'refunded' : 'partially_refunded';
-    $refundDelta = max(0, $refundedAmount - PaymentService::refundedAmount($orderId));
-    if ($refundDelta > 0) {
-        $eventKey = 'stripe_refund_' . (string)($charge['id'] ?? $paymentIntent) . '_' . $refundedAmount;
-        $eventPayload = ['cumulative_amount' => $refundedAmount];
-        if (($order['payment_status'] ?? '') !== $targetPaymentStatus
-            && PaymentService::canPaymentTransition((string)($order['payment_status'] ?? 'pending'), $targetPaymentStatus)) {
-            PaymentService::transitionPayment($orderId, $targetPaymentStatus, 'charge.refunded', $refundDelta, $eventKey, $eventPayload);
-        } else {
-            PaymentService::recordEvent(
-                $orderId,
-                'charge.refunded',
-                $targetPaymentStatus,
-                $refundDelta,
-                (string)($order['currency'] ?? 'eur'),
-                $eventKey,
-                $eventPayload,
-                'stripe',
-                (string)$paymentIntent
-            );
+    $chargeId = (string)($charge['id'] ?? $paymentIntent);
+    $eventPayload = ['charge_id' => $chargeId, 'cumulative_amount' => $refundedAmount];
+    $refunds = stripeChargeRefunds($charge);
+    if ($refunds !== null) {
+        // One ledger row per Stripe refund id, shared with the refund worker: whichever books it first wins.
+        foreach ($refunds as $refund) {
+            $refundId = (string)($refund['id'] ?? '');
+            if ($refundId === '' || (int)($refund['amount'] ?? 0) <= 0 || in_array((string)($refund['status'] ?? ''), ['failed', 'canceled'], true)) continue;
+            PaymentService::bookProviderRefund($orderId, 'stripe', $refundId, (int)$refund['amount'], 'charge.refunded', 'stripe_refund_' . $refundId, $eventPayload);
         }
+    } else {
+        PaymentService::bookCumulativeRefund($orderId, 'stripe', $refundedAmount, 'charge.refunded', 'stripe_refund_' . $chargeId . '_' . $refundedAmount, $eventPayload);
     }
 
     if ($fullRefund) {
-        if (OrderWorkflow::canTransition((string)$order['status'], 'refunded')) {
+        $order = Orders::byId($orderId) ?: $order;
+        if (OrderWorkflow::canTransition((string)$order['status'], 'refunded') && PaymentService::refundableBalance($orderId) === 0) {
             OrderWorkflow::transition($orderId, 'refunded', "Stripe full refund: {$refundedAmount} cents");
         } else {
             FulfillmentDispatcher::queue('refunded', $order);
         }
     }
+}
+
+/**
+ * The refunds of a refunded charge: embedded in the event (older API versions), else listed through
+ * the Stripe API. Null when neither is available; the cumulative amount is booked instead.
+ *
+ * @return list<array<string, mixed>>|null
+ */
+function stripeChargeRefunds(array $charge): ?array {
+    $embedded = $charge['refunds'] ?? null;
+    if (is_array($embedded) && is_array($embedded['data'] ?? null) && empty($embedded['has_more'])) {
+        return array_values(array_filter($embedded['data'], 'is_array'));
+    }
+    try {
+        $gateway = Adapters::payment('stripe');
+    } catch (\RuntimeException $e) {
+        return null;
+    }
+    return $gateway instanceof StripePayment ? $gateway->chargeRefunds((string)($charge['id'] ?? '')) : null;
 }
 
 function onDisputeCreated(array $dispute): ?string {
@@ -1292,6 +1303,8 @@ function apiWebhookPulledNotification(string $provider): ?array {
         return ['error' => 'Invalid notification'];
     } catch (\Throwable $e) {
         error_log("webhook_payment [{$provider}] error: " . $e->getMessage());
+        // Same critical incident as the signed-webhook path: a verified payment event the shop could not apply.
+        IncidentMonitor::report('payment.webhook_failed', 'webhook', 'critical', ['exception' => $e]);
         http_response_code(500);
         return ['error' => 'Processing failed'];
     }

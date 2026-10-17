@@ -136,6 +136,21 @@ class StripePayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, C
         ];
     }
 
+    /**
+     * The refunds of a charge (charge.refunded events of current API versions no longer embed them),
+     * or null when no secret key is configured to ask.
+     *
+     * @return list<array<string, mixed>>|null
+     */
+    public function chargeRefunds(string $chargeId): ?array {
+        if ($this->secretKey === '' || $chargeId === '') return null;
+        $response = $this->apiCall('GET', '/v1/refunds', ['charge' => $chargeId, 'limit' => 100]);
+        if (!isset($response['data']) || !is_array($response['data']) || !empty($response['has_more'])) {
+            throw new \RuntimeException('Stripe refund list is incomplete');
+        }
+        return array_values(array_filter($response['data'], 'is_array'));
+    }
+
     /** Expire an open Checkout Session or cancel an uncaptured PaymentIntent. */
     public function cancelPayment(string $paymentId): void {
         if (str_starts_with($paymentId, 'cs_')) {

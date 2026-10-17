@@ -568,13 +568,16 @@ function handlePaymentRefund(array $payload, array $job): void {
 
     $status = (string)($result['status'] ?? '');
     if ($status === 'skipped') return;
-    // An asynchronous provider refund is finalised by its refund webhook.
-    if ($status === 'pending' && $itemRefundId === 0) return;
+    $refundId = (string)($result['refund_id'] ?? $result['id'] ?? '');
+    // An asynchronous provider refund is finalised by its refund webhook, which finds an item refund by this id.
+    if ($status === 'pending') {
+        if ($itemRefundId > 0 && $refundId !== '') Rma::noteProviderRefund($itemRefundId, $refundId);
+        return;
+    }
     if ($status !== 'succeeded') {
         throw new RuntimeException("Refund provider call did not succeed for order #{$orderId}");
     }
 
-    $refundId = (string)($result['refund_id'] ?? $result['id'] ?? '');
     if ($refundId !== '') Orders::setRefundId($orderId, $refundId);
     if ($itemRefundId > 0) Rma::completeRefund($itemRefundId, $refundId);
     $order = Orders::byId($orderId);

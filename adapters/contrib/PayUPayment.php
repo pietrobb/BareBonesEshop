@@ -163,8 +163,17 @@ class PayUPayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, Sig
         $response = $this->apiCall('POST', "/api/v2_1/orders/{$paymentId}/refunds", $body, $token);
         return [
             'refund_id' => $response['refund']['refundId'] ?? '',
-            'status'    => strtolower($response['refund']['status'] ?? 'failed'),
+            'status'    => self::refundStatus((string)($response['refund']['status'] ?? '')),
         ];
+    }
+
+    /** PayU answers PENDING (finalised later by its refund notification), FINALIZED or CANCELED. */
+    private static function refundStatus(string $payuStatus): string {
+        return match (strtolower($payuStatus)) {
+            'finalized' => 'succeeded',
+            'pending' => 'pending',
+            default => 'failed',
+        };
     }
 
     /**

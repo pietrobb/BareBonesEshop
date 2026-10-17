@@ -199,13 +199,20 @@ final class InvoiceService
 
     /**
      * Money of the order not yet returned: the total less provider refunds (whole-order and completed item
-     * refunds), pending credit notes, and credit notes settled outside the gateway (no payment id).
+     * refunds), pending credit notes, and credit notes settled outside the gateway (no payment id). A pending
+     * credit note whose provider refund is already booked on the ledger (under its key or its provider refund
+     * id) is in the refunded amount and is not subtracted twice.
      */
     private static function refundableForCredit(array $order): int {
         $stmt = Db::get()->prepare("SELECT
-                COALESCE(SUM(CASE WHEN status='pending' THEN amount ELSE 0 END),0) AS pending,
-                COALESCE(SUM(CASE WHEN status='succeeded' THEN amount ELSE 0 END),0) AS succeeded
-            FROM order_refunds WHERE order_id=:order AND store_id=:store");
+                COALESCE(SUM(CASE WHEN r.status='pending' AND NOT EXISTS (
+                    SELECT 1 FROM payment_transactions t
+                    WHERE t.order_id=r.order_id AND t.store_id=r.store_id
+                      AND t.status IN ('partially_refunded', 'refunded', 'refund_succeeded')
+                      AND (t.idempotency_key=r.idempotency_key OR (r.payment_reference IS NOT NULL AND r.payment_reference<>'' AND t.provider_ref=r.payment_reference))
+                ) THEN r.amount ELSE 0 END),0) AS pending,
+                COALESCE(SUM(CASE WHEN r.status='succeeded' THEN r.amount ELSE 0 END),0) AS succeeded
+            FROM order_refunds r WHERE r.order_id=:order AND r.store_id=:store");
         $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
         $credits = $stmt->fetch(PDO::FETCH_ASSOC);
         $offGateway = trim((string)($order['payment_id'] ?? '')) === '' ? (int)$credits['succeeded'] : 0;

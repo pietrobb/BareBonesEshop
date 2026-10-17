@@ -10,8 +10,9 @@
  * amount and currency drive the payment state machine.
  *
  * ThePay's refund request has no idempotency key, so this adapter does not offer
- * IdempotentRefundAdapter (credit-note refunds that require one fail closed). REFUNDED /
- * PARTIALLY_REFUNDED notifications are logged but move no money in the shop.
+ * IdempotentRefundAdapter (credit-note refunds that require one fail closed). A
+ * refunded notification completes the shop's own refund in flight when that refund is the whole
+ * remaining balance; partially_refunded and other refund reports are logged and move no money.
  *
  * Config (env var wins over config.php):
  *   PAY_THEPAY_MERCHANT_ID / thepay_merchant_id — merchant ID (administration: Implementation)

@@ -149,7 +149,8 @@ class PaymentService {
         $currency = (string)($order['currency'] ?? 'eur');
 
         $db = Db::get();
-        $db->beginTransaction();
+        $ownTransaction = !$db->inTransaction();
+        if ($ownTransaction) $db->beginTransaction();
         try {
             if ($idempotencyKey === '' || !self::transactionExists($idempotencyKey)) {
                 self::recordEvent($orderId, $eventType, $to, $amount, $currency, $idempotencyKey, $payload, $provider, $providerRef);
@@ -160,13 +161,13 @@ class PaymentService {
                     'provider_ref' => $providerRef,
                 ], $from);
                 AuditLog::log('payment_status', $orderId, $from, $to, $eventType);
-                $db->commit();
+                if ($ownTransaction) $db->commit();
                 return true;
             }
-            $db->rollBack();
+            if ($ownTransaction) $db->rollBack();
             return false;
         } catch (\Throwable $e) {
-            if ($db->inTransaction()) $db->rollBack();
+            self::rollBackOwn($ownTransaction);
             throw $e;
         }
     }
@@ -311,17 +312,31 @@ class PaymentService {
             $result = $gateway->refund($paymentId, $amount);
         }
 
-        $status = $result['status'] ?? 'failed';
-        self::logTransaction(
-            orderId:        $orderId,
-            provider:       self::providerName($gateway),
-            providerRef:    $result['refund_id'] ?? '',
-            status:         'refund_' . $status,
-            amount:         $amount,
-            currency:       strtolower($currency ?: (string)(Orders::byId($orderId)['currency'] ?? 'eur')),
-            idempotencyKey: $idempotencyKey ?: ('refund_' . $orderId . '_' . ($result['refund_id'] ?? uniqid())),
-            rawResponse:    $result,
-        );
+        $status = (string)($result['status'] ?? 'failed');
+        $refundId = (string)($result['refund_id'] ?? '');
+        $db = Db::get();
+        $ownTransaction = !$db->inTransaction();
+        if ($ownTransaction) $db->beginTransaction();
+        try {
+            // The provider's refund webhook may have booked this refund (by its id) first: the ledger keeps one
+            // money row per provider refund, this call's row then only confirms it (refund_confirmed moves no money).
+            self::lockOrderWithin($orderId);
+            if ($status === 'succeeded' && self::refundAlreadyRecorded($orderId, $refundId)) $status = 'confirmed';
+            self::logTransaction(
+                orderId:        $orderId,
+                provider:       self::providerName($gateway),
+                providerRef:    $refundId,
+                status:         'refund_' . $status,
+                amount:         $amount,
+                currency:       strtolower($currency ?: (string)(Orders::byId($orderId)['currency'] ?? 'eur')),
+                idempotencyKey: $idempotencyKey ?: ('refund_' . $orderId . '_' . ($refundId !== '' ? $refundId : uniqid())),
+                rawResponse:    $result,
+            );
+            if ($ownTransaction) $db->commit();
+        } catch (\Throwable $e) {
+            self::rollBackOwn($ownTransaction);
+            throw $e;
+        }
 
         return $result;
     }
@@ -400,6 +415,24 @@ class PaymentService {
             if ($ownTransaction && $db->inTransaction()) $db->rollBack();
             throw $e;
         }
+    }
+
+    /**
+     * A refund an admin requested: claimed on the ledger like requestRefund(), then executed by a
+     * payment_refund job at the provider (its refund webhook may complete it first). Money returned
+     * by hand (refundsByHand()) gets no job: the admin records it with completeManualRefund().
+     */
+    public static function requestRefundAndQueue(int $orderId, int $amount, string $idempotencyKey, array $payload = []): void {
+        if (Db::get()->inTransaction()) throw new \LogicException('The refund job is queued after commit: call outside a transaction');
+        self::requestRefund($orderId, $amount, $idempotencyKey, $payload);
+        $order = Orders::byId($orderId);
+        if (!$order || self::refundsByHand($order)) return;
+        JobQueue::push('payment_refund', [
+            'order_id' => $orderId,
+            'payment_id' => (string)$order['payment_id'],
+            'amount' => $amount,
+            'idempotency_key' => $idempotencyKey . '_execute',
+        ], 1);
     }
 
     /**
@@ -541,9 +574,9 @@ class PaymentService {
         return $refs;
     }
 
-    /** The provider confirmed the refund executed under this idempotency key. */
+    /** The provider confirmed the refund executed under this idempotency key (booked here or first by its webhook). */
     public static function refundSucceeded(string $idempotencyKey): bool {
-        $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE idempotency_key = :key AND status = 'refund_succeeded' LIMIT 1");
+        $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE idempotency_key = :key AND status IN ('refund_succeeded', 'refund_confirmed') LIMIT 1");
         $stmt->execute([':key' => $idempotencyKey]);
         return (bool)$stmt->fetchColumn();
     }
@@ -707,10 +740,10 @@ class PaymentService {
 
     /**
      * Provider events never bypass the payment state machine. Money events must match the order
-     * currency (and, for captures, the exact total); refunds accumulate per refund. Events that do
-     * not apply (late failure after capture, refund of an unpaid order, repeated capture) change
-     * nothing and stay in the payment log as 'ignored'; a repeated capture under another provider
-     * reference also raises an incident.
+     * currency (and, for captures, the exact total); refunds are booked once per provider refund
+     * (applyRefundEvent()). Events that do not apply (late failure after capture, repeated capture)
+     * change nothing and stay in the payment log as 'ignored'; a repeated capture under another
+     * provider reference also raises an incident.
      */
     private static function applyWebhookEvent(int $orderId, string $provider, string $eventType, string $eventKey, array $data): void {
         $order = Orders::byId($orderId);
@@ -724,22 +757,21 @@ class PaymentService {
             && ($currency !== $orderCurrency || $amount <= 0 || ($eventType === 'payment.paid' && $amount !== $total))) {
             throw new RuntimeException("Payment webhook {$eventType} amount/currency does not match order #{$orderId}");
         }
-        // A refund the worker already executed and logged under the provider refund id moves no new money.
-        if ($eventType === 'refund.succeeded' && self::refundAlreadyRecorded($orderId, (string)($data['refund_id'] ?? ''))) $amount = 0;
+        if ($eventType === 'refund.succeeded' || $eventType === 'refund.reported') {
+            self::applyRefundEvent($orderId, $provider, $eventType, $eventKey, $data);
+            return;
+        }
 
         $to = match ($eventType) {
             'payment.paid' => 'paid',
             'payment.failed' => in_array($from, ['pending', 'authorized'], true) ? 'failed' : null,
             'payment.disputed' => 'disputed',
-            'refund.succeeded' => self::refundedAmount($orderId) + $amount >= $total ? 'refunded' : 'partially_refunded',
             default => null,
         };
         $payload = array_merge(['provider' => $provider], $data);
         $providerRef = (string)($data['refund_id'] ?? $data['provider_ref'] ?? $data['orderId'] ?? $data['id'] ?? '');
         if ($to !== null && $to !== $from && self::canPaymentTransition($from, $to)) {
-            self::applyTransition($order, $to, $eventType, $amount, $eventKey, $payload, (string)($data['refund_id'] ?? ''));
-        } elseif ($to === 'partially_refunded' && $from === $to && $amount > 0) {
-            self::recordEvent($orderId, $eventType, $to, $amount, $orderCurrency, $eventKey, $payload, $provider, $providerRef);
+            self::applyTransition($order, $to, $eventType, $amount, $eventKey, $payload);
         } else {
             // Checked before this event's own row joins the ledger, whose references it would match.
             if ($to === 'paid') self::reportForeignCapture($order, self::captureRefs($data));
@@ -750,13 +782,193 @@ class PaymentService {
             return;
         }
 
-        $order = Orders::byId($orderId) ?: $order;
-        if ($to === 'paid') {
-            self::settleCapture($orderId, 'Payment confirmed via webhook');
-        } elseif ($to === 'refunded' && in_array($order['status'], ['returned', 'cancelled'], true)
-            && OrderWorkflow::canTransition((string)$order['status'], 'refunded')) {
-            OrderWorkflow::transition($orderId, 'refunded', 'Refund confirmed via webhook');
+        if ($to === 'paid') self::settleCapture($orderId, 'Payment confirmed via webhook');
+    }
+
+    /**
+     * A provider refund event, booked under the order row lock. refund.succeeded carries the provider
+     * refund id and amount (bookRefundWithin()). refund.reported (GoPay, ThePay: the payment shows as
+     * refunded, with neither refund id nor refunded amount) completes the shop's own refund in flight
+     * only when the payment is fully refunded and that refund is exactly the remaining balance;
+     * anything else stays a log entry.
+     */
+    private static function applyRefundEvent(int $orderId, string $provider, string $eventType, string $eventKey, array $data): void {
+        self::withLockedOrder($orderId, static function (array $order) use ($orderId, $provider, $eventType, $eventKey, $data): bool {
+            $from = (string)($order['payment_status'] ?? 'pending');
+            $orderCurrency = strtolower((string)($order['currency'] ?? 'eur'));
+            $currency = strtolower((string)($data['currency'] ?? ''));
+            $payload = array_merge(['provider' => $provider], $data);
+            if ($eventType === 'refund.succeeded') {
+                return self::bookRefundWithin($order, $provider, (string)($data['refund_id'] ?? ''), (int)$data['amount'], $eventType, $eventKey, $payload);
+            }
+            $inFlight = self::pendingRefundAmount($order);
+            if (strtolower((string)($data['state'] ?? '')) === 'refunded' && $from === 'refund_pending' && $currency === $orderCurrency
+                && $inFlight > 0 && $inFlight === self::refundableBalance($orderId)) {
+                return self::bookRefundWithin($order, $provider, '', $inFlight, $eventType, $eventKey, $payload);
+            }
+            self::recordEvent($orderId, $eventType, 'ignored', (int)($data['amount'] ?? 0), $currency ?: $orderCurrency, $eventKey,
+                $payload + ['payment_status' => $from], $provider, (string)($data['provider_ref'] ?? ''));
+            return false;
+        });
+        self::closeRefundedOrder($orderId, 'Refund confirmed via webhook');
+    }
+
+    /**
+     * Book a refund the provider executed (e.g. listed by a Stripe charge.refunded event), once per
+     * provider refund id: whichever of the refund worker and the webhook comes first records the money.
+     */
+    public static function bookProviderRefund(int $orderId, string $provider, string $refundId, int $amount, string $eventType, string $eventKey, array $payload = []): bool {
+        if ($refundId === '') throw new \InvalidArgumentException('A provider refund needs its refund id');
+        return self::withLockedOrder($orderId, static fn(array $order): bool => self::bookRefundWithin($order, $provider, $refundId, $amount, $eventType, $eventKey, $payload));
+    }
+
+    /**
+     * Book the part of a provider's cumulative refunded amount the ledger does not hold yet, for
+     * events that name no refund ids. Read and written under the order row lock, so two concurrent
+     * events cannot both book the same difference.
+     */
+    public static function bookCumulativeRefund(int $orderId, string $provider, int $cumulativeAmount, string $eventType, string $eventKey, array $payload = []): bool {
+        return self::withLockedOrder($orderId, static function (array $order) use ($orderId, $provider, $cumulativeAmount, $eventType, $eventKey, $payload): bool {
+            $delta = $cumulativeAmount - self::refundedAmount($orderId);
+            return $delta > 0 && self::bookRefundWithin($order, $provider, '', $delta, $eventType, $eventKey, $payload);
+        });
+    }
+
+    /** Whether an order's payment is returned by hand: offline money, or a provider without a refund API. */
+    public static function refundsByHand(array $order): bool {
+        return trim((string)($order['payment_id'] ?? '')) === '' || in_array(self::orderProvider($order), ['manual', 'cod', 'none'], true);
+    }
+
+    /**
+     * Record a refund the merchant paid out by hand (bank transfer back, cash) for a payment no
+     * provider refund API returns (refundsByHand()). Moves the payment to partially_refunded or
+     * refunded, audited with the acting admin; a fully refunded returned or cancelled order closes.
+     */
+    public static function completeManualRefund(int $orderId, int $amount, string $actor, string $note): void {
+        if ($amount <= 0 || trim($note) === '') throw new \InvalidArgumentException('Invalid manual refund');
+        self::withLockedOrder($orderId, static function (array $order) use ($orderId, $amount, $actor, $note): bool {
+            $from = (string)($order['payment_status'] ?? 'pending');
+            if (!self::refundsByHand($order) || $amount > self::refundableBalance($orderId)) {
+                throw new \LogicException('Manual refund is not available for this order or amount');
+            }
+            $to = self::refundedAmount($orderId) + $amount >= (int)$order['total'] ? 'refunded' : 'partially_refunded';
+            $key = 'manual_refund_' . $orderId . '_' . bin2hex(random_bytes(12));
+            $payload = ['actor' => $actor, 'note' => $note];
+            if ($from === $to) {
+                self::recordEvent($orderId, 'refund.manual_completed', $to, $amount, (string)($order['currency'] ?? 'eur'), $key, $payload, self::orderProvider($order));
+            } elseif (self::canPaymentTransition($from, $to)) {
+                self::applyTransition($order, $to, 'refund.manual_completed', $amount, $key, $payload);
+            } else {
+                throw new \LogicException("Manual refund cannot move payment from '{$from}' to '{$to}'");
+            }
+            AuditLog::log('order_refund', $orderId, $from, $to, "Manual refund of {$amount} completed by {$actor}: {$note}");
+            return true;
+        });
+        self::closeRefundedOrder($orderId, 'Manual refund completed');
+    }
+
+    /**
+     * One money row per provider refund (by refund id when the provider names one), inside the
+     * caller's transaction under the order row lock. Moves the payment to partially_refunded or
+     * refunded and completes the item refund (credit note) it settles. Returns false when the
+     * refund was already booked or does not apply to the payment (logged as 'ignored').
+     */
+    private static function bookRefundWithin(array $order, string $provider, string $refundId, int $amount, string $eventType, string $eventKey, array $payload): bool {
+        $orderId = (int)$order['id'];
+        $from = (string)($order['payment_status'] ?? 'pending');
+        $currency = strtolower((string)($order['currency'] ?? 'eur'));
+        if ($amount <= 0 || self::transactionExists($eventKey)) return false;
+        $payload = array_merge(['provider' => $provider], $payload, $refundId !== '' ? ['refund_id' => $refundId] : []);
+        if (self::refundAlreadyRecorded($orderId, $refundId)) {
+            // The refund worker (or another event) booked this refund: logged, no money moves.
+            self::recordEvent($orderId, $eventType, 'ignored', 0, $currency, $eventKey, $payload + ['payment_status' => $from], $provider, $refundId);
+            return false;
         }
+        $to = self::refundedAmount($orderId) + $amount >= (int)$order['total'] ? 'refunded' : 'partially_refunded';
+        $ref = $refundId !== '' ? $refundId : (string)($order['payment_id'] ?? '');
+        if ($to !== $from && self::canPaymentTransition($from, $to)) {
+            self::applyTransition($order, $to, $eventType, $amount, $eventKey, $payload, $ref);
+        } elseif ($to === 'partially_refunded' && $from === $to) {
+            self::recordEvent($orderId, $eventType, $to, $amount, $currency, $eventKey, $payload, $provider, $ref);
+        } else {
+            self::recordEvent($orderId, $eventType, 'ignored', $amount, $currency, $eventKey, $payload + ['payment_status' => $from], $provider, $ref);
+            AuditLog::log('payment_webhook_ignored', $orderId, $from, $from, "{$provider} {$eventType}");
+            return false;
+        }
+        self::completeItemRefundWithin($orderId, $refundId, $amount);
+        return true;
+    }
+
+    /** The pending item refund (credit note) a booked provider refund settles: by refund id, else by exact amount. */
+    private static function completeItemRefundWithin(int $orderId, string $refundId, int $amount): void {
+        $db = Db::get();
+        $store = StoreContext::current()->id();
+        $itemRefund = false;
+        if ($refundId !== '') {
+            $stmt = $db->prepare("SELECT id FROM order_refunds WHERE order_id = :order AND store_id = :store AND status = 'pending' AND payment_reference = :ref ORDER BY id LIMIT 1");
+            $stmt->execute([':order' => $orderId, ':store' => $store, ':ref' => $refundId]);
+            $itemRefund = $stmt->fetchColumn();
+        }
+        if ($itemRefund === false) {
+            $stmt = $db->prepare("SELECT id FROM order_refunds WHERE order_id = :order AND store_id = :store AND status = 'pending' AND amount = :amount
+                AND (payment_reference IS NULL OR payment_reference = '') ORDER BY id LIMIT 1");
+            $stmt->execute([':order' => $orderId, ':store' => $store, ':amount' => $amount]);
+            $itemRefund = $stmt->fetchColumn();
+        }
+        if ($itemRefund !== false) Rma::completeRefund((int)$itemRefund, $refundId !== '' ? $refundId : 'provider-refund');
+    }
+
+    /** A fully refunded payment closes its returned or cancelled order. */
+    private static function closeRefundedOrder(int $orderId, string $note): void {
+        $order = Orders::byId($orderId);
+        if ($order && (string)($order['payment_status'] ?? '') === 'refunded' && in_array((string)$order['status'], ['returned', 'cancelled'], true)
+            && OrderWorkflow::canTransition((string)$order['status'], 'refunded')) {
+            OrderWorkflow::transition($orderId, 'refunded', $note);
+        }
+    }
+
+    /**
+     * Run $work with the freshly read order inside a transaction that holds the order row lock.
+     *
+     * @param callable(array): bool $work
+     */
+    private static function withLockedOrder(int $orderId, callable $work): bool {
+        $db = Db::get();
+        $ownTransaction = !$db->inTransaction();
+        if ($ownTransaction) $db->beginTransaction();
+        try {
+            self::lockOrderWithin($orderId);
+            $order = Orders::byId($orderId);
+            if (!$order) throw new RuntimeException("Order #{$orderId} not found");
+            $result = $work($order);
+            if ($ownTransaction) $db->commit();
+            return $result;
+        } catch (\Throwable $e) {
+            self::rollBackOwn($ownTransaction);
+            throw $e;
+        }
+    }
+
+    /**
+     * Serialise refund bookkeeping per order inside the open transaction: MySQL/MariaDB lock the
+     * order row; SQLite takes its single writer lock now, before the ledger is read.
+     */
+    private static function lockOrderWithin(int $orderId): void {
+        $sql = Db::isMysql()
+            ? 'SELECT id FROM orders WHERE id = :id AND store_id = :store FOR UPDATE'
+            : 'UPDATE orders SET updated_at = updated_at WHERE id = :id AND store_id = :store';
+        Db::get()->prepare($sql)->execute([':id' => $orderId, ':store' => StoreContext::current()->id()]);
+    }
+
+    /** Roll back a transaction this call opened, if it is still open. */
+    private static function rollBackOwn(bool $ownTransaction): void {
+        $db = Db::get();
+        if ($ownTransaction && $db->inTransaction()) $db->rollBack();
+    }
+
+    private static function orderProvider(array $order): string {
+        $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
+        return (string)($snapshot['provider'] ?? $order['payment_method'] ?? '');
     }
 
     private static function refundAlreadyRecorded(int $orderId, string $refundId): bool {

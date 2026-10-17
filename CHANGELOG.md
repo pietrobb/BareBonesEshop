@@ -74,6 +74,23 @@ nginx PHP fallback when `operations.nginx_config` is set).
   incident `payment.captured_after_cancel` is raised. Cancelling a paid order without `payment_id`
   (bank transfer/COD) raises `payment.order_refund_manual`; a second capture not matching the recorded
   payment raises `payment.duplicate_capture`. A payment can be set to cancelled only on a cancelled order.
+- **Refunds**: an admin "Request refund" now queues the `payment_refund` worker job that executes it
+  at the provider (before, nothing executed it and the payment stayed `refund_pending`; finish such
+  old requests by hand). Payments no provider refund API returns (bank transfer, COD, manual, no
+  `payment_id`) get the audited admin action "Record manual refund" (permission `orders.refund`),
+  which books the amount and moves the payment to `partially_refunded`/`refunded`. **A paid order can
+  no longer be set to `refunded` while a refundable balance remains** (admin, bulk, API v1 answer
+  `refund_outstanding`): the status restocks, revokes downloads and mails "refund issued" but moves no
+  money; cancel the order or request a refund instead, which closes it when the refund completes.
+  Refund ledger rows are keyed by the provider refund id (Stripe `charge.refunded` reads the
+  charge's refunds, from the Stripe API when the event does not embed them, so the webhook needs the
+  configured `stripe_secret_key`); a refund the webhook booked first is logged by the worker as
+  `refund_confirmed` and counts once. Item (credit-note) refunds a provider accepts asynchronously
+  (PayU `PENDING`, Stripe `pending`) no longer fail the job: the refund webhook completes the credit
+  note by refund id or amount. A GoPay `REFUNDED` / ThePay `refunded` notification completes the
+  shop's refund in flight when it is the whole remaining balance. A failed GoPay/Comgate/ThePay
+  notification raises the critical incident `payment.webhook_failed`. Downloads stay available after
+  a partial refund, except for credited lines. No migration.
 - **CSP alarm thresholds**: `csp_form_action_violation` (critical) fires when blocked form-action
   reports come from `csp_form_action_critical` (default 2) distinct reporters (salted IP hashes), or -
   only while `trusted_proxies` is empty and from at least two separate report requests - when the
@@ -254,6 +271,11 @@ nginx PHP fallback when `operations.nginx_config` is set).
   custom adapters that only define a public `generateVariants()` method keep working.
 
 ### Fixed
+- Refunds could be booked twice when the Stripe `charge.refunded` webhook and the refund worker both
+  saw them (a full refund showed 2000 of 1000), and concurrent `charge.refunded` events could over- or
+  under-book; refunds are now booked once per provider refund id under the order row lock. Credit
+  notes no longer double-count a pending refund already on the ledger (`refundableForCredit`), and
+  PayU refunds answered `FINALIZED` count as succeeded.
 - Changing an order to `shipped` after a partial shipment failed with "Shipment exceeds reserved
   allocation"; it now ships only the remainder that is not yet in any shipment.
 - **P0: card payment from the HTML checkout was dead since 1.9.0.** CSP `form-action 'self'`

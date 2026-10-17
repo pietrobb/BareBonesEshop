@@ -290,6 +290,14 @@ function pageOrder(): void {
             <?php else: ?>
             <p class="muted" style="margin-top:.5rem"><?= esc(I18n::t('admin.order.refund_unavailable')) ?></p>
             <?php endif; ?>
+            <?php if ($canRefund && $refundableBalance > 0 && PaymentService::refundsByHand($order)): ?>
+            <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_manual" style="margin-top:.5rem" data-manual-refund>
+                <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                <input name="amount" type="number" min="1" max="<?= $refundableBalance ?>" step="1" value="<?= $refundableBalance ?>">
+                <input name="note" placeholder="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" required>
+                <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.order.manual_refund')) ?></button>
+            </form>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -625,8 +633,12 @@ function handleOrderStatus(): void {
     }
     if ($newStatus === 'refunded') Security::adminRequire('orders.refund');
     $rejection = OrderWorkflow::adminRejection(Orders::byId($orderId), $newStatus, true);
-    if (in_array($rejection, ['not_found', 'payment_not_confirmed'], true)) {
-        setFlash('err', I18n::t($rejection === 'payment_not_confirmed' ? 'admin.order.msg.confirm_payment_first' : 'admin.order.msg.not_found'));
+    if (in_array($rejection, ['not_found', 'payment_not_confirmed', 'refund_outstanding'], true)) {
+        setFlash('err', I18n::t(match ($rejection) {
+            'payment_not_confirmed' => 'admin.order.msg.confirm_payment_first',
+            'refund_outstanding' => 'admin.order.msg.refund_outstanding',
+            default => 'admin.order.msg.not_found',
+        }));
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }
@@ -720,7 +732,8 @@ function handleOrderRefundRequest(): void {
 
     try {
         $key = 'admin_refund_request_' . $orderId . '_' . bin2hex(random_bytes(12));
-        PaymentService::requestRefund($orderId, $amount, $key, [
+        // The ledger claim, then the payment_refund job that executes it at the provider.
+        PaymentService::requestRefundAndQueue($orderId, $amount, $key, [
             'actor' => Security::adminUser(),
             'amount' => $amount,
             'reason' => $reason,
@@ -728,6 +741,36 @@ function handleOrderRefundRequest(): void {
         setFlash('ok', I18n::t('admin.order.msg.refund_requested'));
     } catch (\Throwable $e) {
         error_log("Refund request error [{$orderId}]: " . $e->getMessage());
+        setFlash('err', I18n::t('admin.order.msg.refund_error'));
+    }
+
+    header("Location: admin.php?p=order&id={$orderId}");
+    exit;
+}
+/** Money returned by hand (bank transfer back, cash) for a payment no provider refund API returns. */
+function handleOrderManualRefund(): void {
+    Security::adminRequire('orders.refund');
+    $orderId = Security::int($_GET['id'] ?? 0);
+    $order = Orders::byId($orderId);
+    if (!$order) {
+        setFlash('err', I18n::t('admin.order.msg.not_found'));
+        header('Location: admin.php?p=orders');
+        exit;
+    }
+
+    $amount = Security::int($_POST['amount'] ?? 0);
+    $note = trim((string)($_POST['note'] ?? ''));
+    if ($amount <= 0 || $amount > PaymentService::refundableBalance($orderId) || $note === '' || !PaymentService::refundsByHand($order)) {
+        setFlash('err', I18n::t('admin.order.msg.refund_amount'));
+        header("Location: admin.php?p=order&id={$orderId}");
+        exit;
+    }
+
+    try {
+        PaymentService::completeManualRefund($orderId, $amount, Security::adminUser(), $note);
+        setFlash('ok', I18n::t('admin.order.msg.manual_refund_recorded'));
+    } catch (\Throwable $e) {
+        error_log("Manual refund error [{$orderId}]: " . $e->getMessage());
         setFlash('err', I18n::t('admin.order.msg.refund_error'));
     }
 
