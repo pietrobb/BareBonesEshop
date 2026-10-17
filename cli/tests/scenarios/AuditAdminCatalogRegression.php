@@ -96,7 +96,9 @@ if ($phase === 'setup') {
 
 $stores = Bootstrap::stores();
 $stores['stores']['cz'] = array_replace($stores['stores']['cz'], ['catalog_scope' => 'cz', 'provider_scope' => 'cz', 'channels' => ['storefront', 'api'], 'languages' => ['cs', 'en']]);
-$store = str_starts_with($action, 'cz_') ? 'cz' : 'default';
+// Store switches (PaymentWebhookRouting::within, feed runs in their warehouse's catalog) resolve from Bootstrap::stores().
+(new ReflectionProperty(Bootstrap::class, 'stores'))->setValue(null, $stores);
+$store =str_starts_with($action, 'cz_') ? 'cz' : 'default';
 StoreContext::activate(StoreContext::resolve($stores, '/', '', $store));
 I18n::setLocale('en');
 $_SESSION = ['admin_role' => 'owner', 'admin_user' => 'aac', 'csrf_token' => 'aac-token'];

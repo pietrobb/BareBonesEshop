@@ -173,7 +173,8 @@ $architectureBudgets = [
     // +2 functions: pending-payment page and the gateway cancel page (P0 2026-10-13 checkout redirect).
     // +1 coupling: BankTransferInstructions renders the IBAN / variable symbol / PAY by square block on order-done (A13.6).
     // +1 coupling: I18n::all() gives cart/checkout blocks the catalog their breadcrumb/pagination landmarks are labelled from.
-    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 240, 'functions' => 6, 'max_function_lines' => 100, 'coupling' => 10],
+    // +1 function: storefrontCartPrice() formats cart/checkout amounts in the cart currency (shared-catalog stores).
+    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 250, 'functions' => 7, 'max_function_lines' => 100, 'coupling' => 10],
     // Ratcheted: canonical/robots/hreflang/JSON-LD moved to StorefrontSeo (storefront SEO audit).
     'src/Entrypoints/Storefront/Layout.php' => ['lines' => 140, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 8],
     'src/Entrypoints/Storefront/ProductStatusPages.php' => ['lines' => 20, 'functions' => 1, 'max_function_lines' => 18, 'coupling' => 3],

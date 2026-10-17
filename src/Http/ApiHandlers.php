@@ -872,7 +872,9 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
             try {
                 $paymentProvider = (string)$selectedPayment['provider'];
                 $payment = Adapters::payment($paymentProvider);
-                $baseUrl = Security::appUrl($cfg);
+                // The order's store (domain + url_prefix): its return pages find the store-scoped order, and its
+                // webhook endpoint verifies with the store's provider scope.
+                $baseUrl = AbandonedCarts::storeBaseUrl(StoreContext::current()->id(), Security::appUrl($cfg));
                 $session = PaymentService::initiate([
                     'order_id'       => $orderId,
                     'order_number'   => $order['order_number'],

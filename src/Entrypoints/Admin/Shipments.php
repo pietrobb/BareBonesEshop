@@ -101,10 +101,10 @@ function renderOrderShipments(array $order): void {
     <?php
 }
 
-/** @return array<int,string> warehouse id => name of the active store */
+/** @return array<int,string> warehouse id => name of the active store's catalog */
 function adminShipmentWarehouseNames(): array {
     $stmt = Db::get()->prepare('SELECT id, name FROM warehouses WHERE store_id = :store');
-    $stmt->execute([':store' => StoreContext::current()->id()]);
+    $stmt->execute([':store' => StoreContext::current()->catalogId()]);
     return array_map('strval', array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'name', 'id'));
 }
 

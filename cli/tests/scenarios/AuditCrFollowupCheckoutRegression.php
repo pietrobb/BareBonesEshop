@@ -123,8 +123,6 @@ ConsentService::setDefinitionsForTesting([]);
 I18n::setLocale('sk');
 require $root . '/src/Entrypoints/Storefront/CheckoutPages.php';
 $t = static fn(string $key): string => $key;
-$price = static fn(int $cents): string => (string)$cents;
-$storeCurrency = 'eur';
 $_SESSION = ['cart' => ['p_9781' => ['product_id' => 9781, 'variant_id' => null, 'qty' => 2]], 'csrf_token' => 'crf-preview'];
 $_SERVER['REQUEST_METHOD'] = 'POST';
 $_SERVER['REMOTE_ADDR'] = '127.0.9.79';
@@ -148,7 +146,8 @@ PHP);
     @rmdir($crfRoot);
     $crfAt = strrpos($crfOut, 'CRFRESULT');
     $crfSummary = $crfAt === false ? null : json_decode(substr($crfOut, $crfAt + 9), true);
-    assert_equals(['discount' => '-1950', 'shipping' => '400', 'payment' => '445', 'total' => (string)(int)($crfOrder['total'] ?? 0)], $crfSummary,
+    // Amounts are formatted in the cart's currency (storefrontCartPrice()), not with an injected $price.
+    assert_equals(['discount' => I18n::price(-1950, 'eur'), 'shipping' => I18n::price(400, 'eur'), 'payment' => I18n::price(445, 'eur'), 'total' => I18n::price((int)($crfOrder['total'] ?? 0), 'eur')], $crfSummary,
         'CR follow-up preview: the checkout summary shows the discount, shipping, payment fee and total the order charges (' . substr(trim(strip_tags($crfAt === false ? $crfOut : '')), 0, 300) . ')');
 
     // 6. Reverse charge: the payment fee loses the seller's domestic VAT exactly like the shipping rate.

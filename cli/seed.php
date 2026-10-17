@@ -26,6 +26,7 @@ if ($fresh) {
     $db->exec("DELETE FROM order_items");
     $db->exec("DELETE FROM orders");
     $db->exec("DELETE FROM products");
+    $db->exec("DELETE FROM warehouse_stock");
     $db->exec("DELETE FROM categories");
     echo "Done.\n\n";
 }
@@ -105,6 +106,13 @@ foreach ($categoryTree as $rootSlug => [$_, $children]) {
 
 $prodStmt = $db->prepare("INSERT INTO products (sku, slug, product_type, name, category_id, price, compare_price, currency, stock, status, images, summary, attrs, tags, filter_tags, weight_g, translations) VALUES (:sku, :slug, :type, :name, :cat, :price, :cp, 'eur', :stock, 'active', :images, :summary, :attrs, :tags, :ftags, :weight, :trans)");
 $attrStmt = $db->prepare("INSERT INTO product_attrs (product_id, attr_name, attr_value, numeric_val) VALUES (:pid, :name, :val, :num)");
+// Checkout reserves from the warehouse ledger, not products.stock: book every product's stock on the default warehouse.
+$warehouse = Warehouse::defaultWarehouse();
+if (!$warehouse) {
+    echo "No default warehouse — run php cli/migrate.php first.\n";
+    exit(1);
+}
+$stockStmt = $db->prepare(Db::insertIgnore() . " INTO warehouse_stock (store_id, warehouse_id, sku, qty, reserved) VALUES (:store, :wh, :sku, :qty, 0)");
 
 $batchSize = 500;
 $db->beginTransaction();
@@ -169,6 +177,7 @@ for ($i = 1; $i <= $count; $i++) {
         ':trans'   => $trans,
     ]);
     $productId = (int)$db->lastInsertId();
+    $stockStmt->execute([':store' => $warehouse['store_id'], ':wh' => (int)$warehouse['id'], ':sku' => $sku, ':qty' => $stock]);
 
     // Attributes
     $attrStmt->execute([':pid' => $productId, ':name' => 'color', ':val' => $color, ':num' => null]);

@@ -25,10 +25,14 @@
     })[character]);
   }
 
+  // Amounts are in the cart's currency, rounded like the server (stores.json decimals, e.g. 0 for CZK/HUF).
   function formatCents(cents) {
+    const decimals = Number.isInteger(config.currencyDecimals) ? config.currencyDecimals : undefined;
     return (cents / 100).toLocaleString(config.locale || document.documentElement.lang, {
       style: 'currency',
-      currency: String(config.currency).toUpperCase()
+      currency: String(config.currency).toUpperCase(),
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals
     });
   }
 
