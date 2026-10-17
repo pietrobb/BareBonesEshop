@@ -197,12 +197,28 @@ class CheckoutService {
         return $coupon;
     }
 
-    /** Lang key (with a %s for the code) of a coupon refusal reason from Pricing::applyCoupon(). */
+    /**
+     * Lang key (with a %s for the code) of a coupon refusal reason from Pricing::applyCoupon(). Unknown,
+     * expired, used-up and already used codes look the same (no code-guessing oracle); the minimum order is
+     * only reported for an otherwise valid code.
+     */
     public static function couponErrorKey(string $error): string {
-        return match ($error) {
-            'Minimum order not met' => 'coupon_min_subtotal', 'Coupon expired' => 'coupon_used_up',
-            'Coupon already used' => 'coupon_already_used', default => 'coupon_invalid',
-        };
+        return $error === 'Minimum order not met' ? 'coupon_min_subtotal' : 'coupon_invalid';
+    }
+
+    /** Coupon code guessing: 10 attempts per 10 minutes per client IP and per session, one budget for the coupon API and the checkout form. */
+    public static function couponAttemptAllowed(): bool {
+        $sessionKey = Security::sessionKey();
+        return Security::rateLimit('validate_coupon', 10, 600)
+            && ($sessionKey === '' || Security::rateLimit('validate_coupon_s' . $sessionKey, 10, 600, false));
+    }
+
+    /**
+     * Whether the checkout form may price $code, whichever of its buttons sent it: the code this session last had
+     * accepted ($_SESSION['checkout_coupon']) is free, any other spends a coupon attempt (couponAttemptAllowed()).
+     */
+    public static function formCouponAllowed(string $code): bool {
+        return $code === '' || $code === ($_SESSION['checkout_coupon'] ?? null) || self::couponAttemptAllowed();
     }
 
     /**

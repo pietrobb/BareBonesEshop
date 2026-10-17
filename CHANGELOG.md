@@ -75,8 +75,10 @@ nginx PHP fallback when `operations.nginx_config` is set).
   (bank transfer/COD) raises `payment.order_refund_manual`; a second capture not matching the recorded
   payment raises `payment.duplicate_capture`. A payment can be set to cancelled only on a cancelled order.
 - **Refunds**: an admin "Request refund" now queues the `payment_refund` worker job that executes it
-  at the provider (before, nothing executed it and the payment stayed `refund_pending`; finish such
-  old requests by hand). Payments no provider refund API returns (bank transfer, COD, manual, no
+  at the provider (before, nothing executed it and the payment stayed `refund_pending`). Such an old
+  request at a provider with a refund API gets the audited admin action "Retry refund" (permission
+  `orders.refund`), which queues its job under the same idempotency key a new request would use; it is
+  offered only while nothing was booked after the request and no job ever executed it. Payments no provider refund API returns (bank transfer, COD, manual, no
   `payment_id`) get the audited admin action "Record manual refund" (permission `orders.refund`),
   which books the amount and moves the payment to `partially_refunded`/`refunded`. **A paid order can
   no longer be set to `refunded` while a refundable balance remains** (admin, bulk, API v1 answer
@@ -88,7 +90,8 @@ nginx PHP fallback when `operations.nginx_config` is set).
   `refund_confirmed` and counts once. Item (credit-note) refunds a provider accepts asynchronously
   (PayU `PENDING`, Stripe `pending`) no longer fail the job: the refund webhook completes the credit
   note by refund id or amount. A GoPay `REFUNDED` / ThePay `refunded` notification completes the
-  shop's refund in flight when it is the whole remaining balance. A failed GoPay/Comgate/ThePay
+  shop's refund in flight when it is the whole remaining balance; the ledger row names the request it
+  settled, so the refund worker's own result for that request is only `refund_confirmed`. A failed GoPay/Comgate/ThePay
   notification raises the critical incident `payment.webhook_failed`. Downloads stay available after
   a partial refund, except for credited lines. No migration.
 - **CSP alarm thresholds**: `csp_form_action_violation` (critical) fires when blocked form-action
@@ -215,10 +218,13 @@ nginx PHP fallback when `operations.nginx_config` is set).
   stored invalid UTF-8 names that blanked HTML and API responses. The JSON API now substitutes invalid
   UTF-8 (`JSON_INVALID_UTF8_SUBSTITUTE`) instead of answering an empty body; fix rows imported earlier
   by re-importing them as UTF-8.
-- **API product/category cache**: product saves (admin, bulk actions, CSV/feed import, API v1 PATCH)
-  and every stock movement mark the catalog's cached `product/*.json`, `cat/*` and `categories.json`
-  entries stale (`<cache_dir>/catalogs/<catalog>.changed`, shared by all stores of the catalog), so
-  prices, names, stock and deactivation show up at once instead of after up to an hour.
+- **API product/category cache**: product saves (admin, bulk actions, CSV/feed import, API v1 PATCH),
+  category tree and pricing edits, and stock movements mark the catalog's cached `product/*.json`,
+  `cat/*` and `categories.json` entries stale (`<cache_dir>/catalogs/<catalog>.changed`, shared by all
+  stores of the catalog), so prices, names, availability and deactivation show up at once instead of
+  after up to an hour. Admin, import, feed/ERP, receipt and return movements always do; checkout
+  reservations, their releases and shipments only when a product or variant goes out of or back into
+  stock, so a busy shop keeps its caches (the exact stock count shown may lag up to the cache TTL).
 - **Worker logs**: refund attempts and processed imports are written to the structured log
   (`Logger`, redacted, in `<private_runtime_dir>/logs/application.jsonl`, events `refund.attempt`,
   `import.processed`) instead of `logs/refunds.log` / `logs/imports.log` in the application root.
@@ -238,7 +244,8 @@ nginx PHP fallback when `operations.nginx_config` is set).
     catalog, then each store pushes its orders (with their items) and pulls their statuses. Cancelled
     orders that never reached the ERP are not pushed; a failed push is retried after 15 min, doubling
     up to a day (`orders.erp_attempts`, `erp_next_retry_at`). A run still in progress makes the next
-    cron run exit (`<jobs_dir>/sync.lock`). The product watermark is the run's start time, kept in the
+    cron run exit 0 (`<jobs_dir>/sync.lock`); a lock file it cannot open (missing or read-only
+    `jobs_dir`) is an error on STDERR with exit code 1. The product watermark is the run's start time, kept in the
     new table `erp_sync_state` instead of the cache (the cached value is read once as a fallback).
   - `cli/gdpr-export.php` exports a customer of any store in that store; `--store=<id>` narrows the lookup.
   - Cart and checkout amounts are formatted in the cart's (product) currency; the storefront runtime
@@ -341,7 +348,8 @@ nginx PHP fallback when `operations.nginx_config` is set).
   saw them (a full refund showed 2000 of 1000), and concurrent `charge.refunded` events could over- or
   under-book; refunds are now booked once per provider refund id under the order row lock. Credit
   notes no longer double-count a pending refund already on the ledger (`refundableForCredit`), and
-  PayU refunds answered `FINALIZED` count as succeeded.
+  PayU refunds answered `FINALIZED` count as succeeded. GoPay/ThePay refunds (no refund id) were booked
+  twice when the `REFUNDED` notification arrived while the worker's refund call was in flight.
 - **Storefront UX review (round 4).**
   - Add to cart works without JavaScript: product cards, the home product list and the product page
     render POST forms (`cart_action=add`, quantity, variant, CSRF token, redirect back) to the store URL;
@@ -370,7 +378,8 @@ nginx PHP fallback when `operations.nginx_config` is set).
     prefix (`/cs/?page=terms`).
   - `q[]=x` and other array query values (`cart_recover`, `cart_unsubscribe`, `lang`, `token`, `msg`,
     the redirect fallback `path`) no longer raise "Array to string conversion".
-  - Managed menu links get the store prefix; navigation, footer, breadcrumb, pagination and cart links
+  - Managed menu links get the store prefix (a link already entered with it, `/cs/page/x`, keeps a
+    single one instead of `/cs/cs/page/x`); navigation, footer, breadcrumb, pagination and cart links
     use the canonical `/category/{slug}` and `/product/{slug}` paths.
 - Changing an order to `shipped` after a partial shipment failed with "Shipment exceeds reserved
   allocation"; it now ships only the remainder that is not yet in any shipment.
@@ -417,7 +426,11 @@ nginx PHP fallback when `operations.nginx_config` is set).
 - **Security:** `validate_coupon` has its own throttle (10 attempts / 10 minutes per client IP and
   per session, then 429 `Too many attempts`) and answers `Invalid coupon` for unknown, expired, used-up
   and already-used codes alike; `Minimum order not met` is reported only for an otherwise usable code
-  (pricing.json coupons check usage limits before the minimum order now, as admin coupons did).
+  (pricing.json coupons check usage limits before the minimum order now, as admin coupons did). The
+  HTML checkout's coupon field spends the same budget (each code the session has not had accepted) and,
+  like order placement, refuses with `coupon_invalid` or `coupon_min_subtotal` only; the lang keys
+  `coupon_used_up` and `coupon_already_used` are gone (themes overriding them can drop them), the new
+  `coupon_too_many_attempts` is shown when throttled.
 - **Customer account (UX audit round 4).** Withdrawing cookie consent in the account works: the
   choice is written as `cc_v1` (the banner's cookie, name, JSON value and path), logged in
   `cookie_consent` like the banner's API action, a legacy `cookie_consent` cookie is cleared, and the
@@ -429,7 +442,8 @@ nginx PHP fallback when `operations.nginx_config` is set).
   display timezone and the locale's `format.date`/`format.datetime` (`I18n::dateTime()`). New
   `?p=downloads` page lists the customer's digital entitlements (expiry, downloads left); its button
   issues a fresh link (`DigitalDelivery::reissueForCustomer()`: only token hashes are stored, so the
-  e-mailed link stops working, limits and expiry are unchanged). Unknown `?p=` values are a real 404.
+  e-mailed link stops working, limits and expiry are unchanged); it follows the download rules, so after
+  a partial refund the uncredited lines stay available. Unknown `?p=` values are a real 404.
   The profile offers only the current store's languages; a too-fast registration (form trap) says
   "please try again" instead of "too many attempts".
 - **Admin.** Rejected product and CMS page saves keep the typed input (one-shot, `AdminForm::keepInput()`);

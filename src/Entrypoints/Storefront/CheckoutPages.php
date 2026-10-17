@@ -91,10 +91,12 @@ function renderCheckout(): string {
 
     // Same discount rules as CheckoutService::execute: coupon + automatic promotions, capped at the subtotal.
     $couponCode = $couponAction === 'remove' ? '' : $form('coupon_code');
-    $preview = CheckoutService::discountPreview($couponCode, $subtotal, Security::email($state['values']['email']) ?? null, $cart, $customerId ?: null);
+    $couponThrottled = !CheckoutService::formCouponAllowed($couponCode);
+    $preview = CheckoutService::discountPreview($couponThrottled ? '' : $couponCode, $subtotal, Security::email($state['values']['email']) ?? null, $cart, $customerId ?: null);
     $couponDiscount = $preview['coupon_discount'];
-    $couponError = $preview['coupon_error'] === null ? '' : sprintf($t($preview['coupon_error']), $couponCode);
+    $couponError = $couponThrottled ? $t('coupon_too_many_attempts') : ($preview['coupon_error'] === null ? '' : sprintf($t($preview['coupon_error']), $couponCode));
     if ($couponError !== '') $couponCode = '';
+    elseif ($couponDiscount > 0) $_SESSION['checkout_coupon'] = $couponCode; // accepted: re-pricing it is free
     $discount = min($subtotal, $couponDiscount + $preview['promotion_discount']);
 
     // As at checkout: free shipping thresholds and payment fees see the goods after discounts.

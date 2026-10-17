@@ -174,7 +174,7 @@ try {
     assert_true(str_contains($r4Layout, "'search_query' => Security::str(\$_GET['q'] ?? '')") && str_contains($r4StorefrontSrc, "StorefrontCartAction::recover(Security::str(\$_GET['cart_recover']))")
         && str_contains((string)file_get_contents($r4Root . '/redirect.php'), "Security::str(\$_GET['path']"), 'R4 input: q[]=x and other array query values no longer raise Array to string conversion');
     assert_true(!str_contains($r4Layout, '?page=category') && !str_contains((string)file_get_contents($r4Root . '/src/Entrypoints/Storefront/CatalogPages.php'), "storeUrl('/?page=category")
-        && !str_contains($r4CheckoutPages, '?page=product&slug') && str_contains($r4Layout, "Template::storeUrl(\$url) : \$url"),
+        && !str_contains($r4CheckoutPages, '?page=product&slug') && str_contains($r4Layout, "Template::menuUrl((string)\$item['url'])"),
         'R4 links: navigation, footer, breadcrumbs and cart lines use canonical paths; managed menu links get the store prefix');
     assert_equals([Template::storeUrl('/category/r4-cat'), '/category/r4-cat?sort=price_desc&pmin=10'], [StorefrontViewModel::categoryUrl('r4-cat'), buildCategoryUrl('r4-cat', 'price_desc', [], 1000, null)],
         'R4 links: category links and pagination bases use /category/{slug}');

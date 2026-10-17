@@ -174,7 +174,7 @@ class DigitalDelivery {
 
     /** Active entitlements of a customer's orders in the current store, newest first (account downloads page). */
     public static function forCustomer(int $customerId): array {
-        $stmt = Db::get()->prepare("SELECT de.id, de.download_count, de.download_limit, de.expires_at,
+        $stmt = Db::get()->prepare("SELECT de.id, de.order_item_id, de.download_count, de.download_limit, de.expires_at,
                 da.label, da.download_name, da.asset_key, da.active AS asset_active,
                 o.id AS order_id, o.order_number, o.status AS order_status, o.payment_status
             FROM digital_entitlements de
@@ -188,8 +188,7 @@ class DigitalDelivery {
 
     /** Whether a forCustomer() row may start a new download (the same rules as resolve() and consume()). */
     public static function downloadable(array $row, ?int $now = null): bool {
-        return (int)$row['asset_active'] === 1 && ($row['payment_status'] ?? '') === 'paid'
-            && !in_array($row['order_status'] ?? '', ['cancelled', 'refunded'], true)
+        return (int)$row['asset_active'] === 1 && self::orderCoversDownload($row)
             && ($row['expires_at'] === null || (int)$row['expires_at'] >= ($now ?? time()))
             && ($row['download_limit'] === null || (int)$row['download_count'] < (int)$row['download_limit']);
     }
@@ -221,16 +220,23 @@ class DigitalDelivery {
             WHERE de.token_hash = :token_hash LIMIT 1");
         $stmt->execute([':token_hash' => hash('sha256', $rawToken)]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$row || $row['status'] !== 'active' || !(int)$row['asset_active']) return null;
-        // A partial refund keeps paid downloads, except of the line it credited (digital_revoke handles whole reversals).
-        $paymentStatus = (string)($row['payment_status'] ?? '');
-        if (!in_array($paymentStatus, ['paid', 'partially_refunded', 'refund_pending'], true)) return null;
-        if ($paymentStatus !== 'paid' && self::lineCredited((int)$row['order_item_id'])) return null;
-        if (in_array($row['order_status'] ?? '', ['cancelled', 'refunded'], true)) return null;
+        if (!$row || $row['status'] !== 'active' || !(int)$row['asset_active'] || !self::orderCoversDownload($row)) return null;
         if ($row['expires_at'] !== null && time() > (int)$row['expires_at']) return null;
         // A spent limit still lets the last counted download resume inside its window (see authorizeTransfer()).
         if ($row['download_limit'] !== null && (int)$row['download_count'] >= (int)$row['download_limit'] && !self::canResume($row)) return null;
         return $row;
+    }
+
+    /**
+     * Whether the entitlement's order (payment_status, order_status, order_item_id) still pays for its download:
+     * a partial refund keeps paid downloads, except of the line it credited (digital_revoke handles whole reversals).
+     * consume() and claimResume() check the same payment and order states in SQL.
+     */
+    private static function orderCoversDownload(array $row): bool {
+        $paymentStatus = (string)($row['payment_status'] ?? '');
+        if (!in_array($paymentStatus, ['paid', 'partially_refunded', 'refund_pending'], true)) return false;
+        if (in_array($row['order_status'] ?? '', ['cancelled', 'refunded'], true)) return false;
+        return $paymentStatus === 'paid' || !self::lineCredited((int)$row['order_item_id']);
     }
 
     /** Free resumes of one counted download (inside its window, never past the bytes it already served). */

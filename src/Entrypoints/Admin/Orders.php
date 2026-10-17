@@ -290,6 +290,13 @@ function pageOrder(): void {
             <?php else: ?>
             <p class="muted" style="margin-top:.5rem"><?= esc(I18n::t('admin.order.refund_unavailable')) ?></p>
             <?php endif; ?>
+            <?php if ($canRefund && ($unexecutedRefund = PaymentService::unexecutedRefundRequest($order)) !== null): ?>
+            <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_retry" style="margin-top:.5rem" data-refund-retry>
+                <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                <span class="muted"><?= esc(I18n::format('admin.order.retry_refund_hint', ['amount' => I18n::price($unexecutedRefund['amount'], $order['currency'])])) ?></span>
+                <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.order.retry_refund')) ?></button>
+            </form>
+            <?php endif; ?>
             <?php if ($canRefund && $refundableBalance > 0 && PaymentService::refundsByHand($order)): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_manual" style="margin-top:.5rem" data-manual-refund>
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -744,6 +751,20 @@ function handleOrderRefundRequest(): void {
         setFlash('err', I18n::t('admin.order.msg.refund_error'));
     }
 
+    header("Location: admin.php?p=order&id={$orderId}");
+    exit;
+}
+/** Queue the provider refund of a refund request no payment_refund job ever executed (stuck in refund_pending). */
+function handleOrderRefundRetry(): void {
+    Security::adminRequire('orders.refund');
+    $orderId = Security::int($_GET['id'] ?? 0);
+    try {
+        $queued = PaymentService::retryRefundRequest($orderId, Security::adminUser());
+        setFlash($queued ? 'ok' : 'err', I18n::t($queued ? 'admin.order.msg.refund_retry_queued' : 'admin.order.msg.refund_error'));
+    } catch (\Throwable $e) {
+        error_log("Refund retry error [{$orderId}]: " . $e->getMessage());
+        setFlash('err', I18n::t('admin.order.msg.refund_error'));
+    }
     header("Location: admin.php?p=order&id={$orderId}");
     exit;
 }

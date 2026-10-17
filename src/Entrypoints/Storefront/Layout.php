@@ -5,10 +5,6 @@ $store = StoreContext::current();
 $brand = Template::branding();
 $shopName = (string)$brand['name'];
 $homeUrl = Template::storeUrl('/');
-$localUrl = static function(string $url): string {
-    if ($url === '' || $url[0] === '?' || $url[0] === '#') return $url;
-    return $url[0] === '/' ? Template::storeUrl($url) : $url; // store prefix (/cs/...) like every other storefront link
-};
 
 $nonce = Security::cspNonce();
 // Canonical/robots/hreflang/JSON-LD for every page type; alternates never copy tracking or filter parameters.
@@ -21,7 +17,7 @@ $navigation = [];
 $managedNavigation = ContentService::menu('primary', $lang);
 if ($managedNavigation) {
     foreach ($managedNavigation as $item) {
-        $navigation[] = ['url' => $localUrl((string)$item['url']), 'label' => (string)$item['label'], 'children' => []];
+        $navigation[] = ['url' => Template::menuUrl((string)$item['url']), 'label' => (string)$item['label'], 'children' => []];
     }
 } else {
     $navCategories = Categories::roots();

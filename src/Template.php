@@ -90,6 +90,18 @@ class Template {
         return self::baseUrl() . ($suffix === '/' ? '/' : $suffix);
     }
 
+    /**
+     * URL of a managed menu item: a local path gets the store prefix (/cs/...) like every other storefront
+     * link, once (an item entered as /cs/page/x stays /cs/page/x); query, fragment and absolute URLs stay.
+     */
+    public static function menuUrl(string $url): string {
+        if ($url === '' || $url[0] !== '/' || str_starts_with($url, '//')) return $url;
+        $prefix = rtrim((string)(StoreContext::current()->config()['url_prefix'] ?? ''), '/');
+        $rest = substr($url, strlen($prefix));
+        if ($prefix !== '' && str_starts_with($url, $prefix) && ($rest === '' || str_contains('/?#', $rest[0]))) $url = '/' . ltrim($rest, '/');
+        return self::storeUrl($url);
+    }
+
     /** Store/locale-aware local URL, separate from public asset URLs. */
     public static function storeUrl(string $path = ''): string {
         if ($path !== '' && (preg_match('#^[a-z][a-z0-9+.-]*:#i', $path) || str_starts_with($path, '//'))) {

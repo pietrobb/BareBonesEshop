@@ -141,10 +141,7 @@ function apiValidateCoupon(): array {
     $email = Security::email($input['email'] ?? '') ?? null;
 
     if (!$code) return ['valid' => false, 'error' => 'Coupon code is required'];
-    // Code guessing: 10 attempts per 10 minutes per client IP and per session.
-    $sessionKey = Security::sessionKey();
-    if (!Security::rateLimit('validate_coupon', 10, 600)
-        || ($sessionKey !== '' && !Security::rateLimit('validate_coupon_s' . $sessionKey, 10, 600, false))) {
+    if (!CheckoutService::couponAttemptAllowed()) {
         http_response_code(429);
         return ['valid' => false, 'error' => 'Too many attempts'];
     }

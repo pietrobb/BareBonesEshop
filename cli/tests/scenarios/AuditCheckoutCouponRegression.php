@@ -1,7 +1,8 @@
 <?php
 
 // A13.2 / checkout coupon UI through the real storefront handler (index.php?page=checkout): the HTML form applies and
-// removes a coupon without JS (CSRF-protected, nothing ordered), explains why a code is refused, keeps what the buyer
+// removes a coupon without JS (CSRF-protected, nothing ordered), refuses a code without a guessing oracle (only the
+// minimum order is a reason of its own; attempts share the coupon API's throttle), keeps what the buyer
 // typed, shows the discount in the summary and the placed order carries the same discount. SQLite always,
 // MySQL 8 / MariaDB 11.4 via TEST_MYSQL_DSN.
 echo "\n--- Audit A13.2: checkout coupon UI (no-JS apply/remove, refusal reasons, kept values, discount in order) ---\n";
@@ -49,7 +50,7 @@ if ($phase === 'setup') {
 
 $config = is_file($root . '/config.php') ? require $root . '/config.php' : require $root . '/config.example.php';
 (new ReflectionProperty(Security::class, 'cfg'))->setValue(null, ['app_url' => 'https://shop.example'] + $config);
-Security::setRateDbForTesting(new PDO('sqlite:' . $dir . '/rate.sqlite'));
+Security::setRateDbForTesting(new PDO('sqlite:' . $dir . '/rate-' . $driver . '.sqlite'));
 ini_set('session.use_cookies', '0');
 session_save_path($dir . '/sessions');
 session_start();
@@ -161,7 +162,8 @@ try {
             preg_match('~<p id="checkout-coupon-error"[^>]*>([^<]*)</p>~', (string)$r['output'], $a132M);
             $a132Reasons[] = $a132M[1] ?? '';
         }
-        assert_true(count(array_unique($a132Reasons)) === 3, 'A13.2 ' . $a132Driver . ': unknown, minimum-amount and used-up coupons give distinct reasons ('
+        assert_true($a132Reasons[0] !== $a132Reasons[1] && str_replace('A132ONCE', 'A132NOPE', $a132Reasons[2]) === $a132Reasons[0],
+            'A13.2 ' . $a132Driver . ': a used-up coupon reads like an unknown one, only the minimum amount has its own reason ('
             . json_encode($a132Reasons, JSON_UNESCAPED_UNICODE) . ')');
 
         [$l, $r] = $a132Do('remove');
@@ -178,6 +180,15 @@ try {
         assert_true(count($r['new_orders']) === 1 && (int)($a132Order['subtotal'] ?? 0) === 4000 && (int)($a132Order['discount_amount'] ?? 0) === 400,
             "{$l}: the order placed with the shown coupon carries the same 400 discount (" . json_encode($r['new_orders'])
             . ($r['new_orders'] ? '' : ' ' . substr(trim(strip_tags((string)preg_replace('~^.*<main[^>]*>|</main>.*$~s', '', (string)$r['output']))), 0, 300)) . ')');
+
+        // The form's coupon attempts count against the coupon API's budget (10 per 10 minutes per client IP).
+        $a132Throttled = array_filter(array_map(static fn(string $f): string => htmlspecialchars((string)((require $f)['coupon_too_many_attempts'] ?? ''), ENT_QUOTES, 'UTF-8'), glob(dirname(TEST_CLI_DIR) . '/lang/*.php')));
+        $a132Tries = 0;
+        do {
+            [$l, $r] = $a132Do('apply_unknown');
+            $a132Hit = array_filter($a132Throttled, static fn(string $m): bool => str_contains((string)$r['output'], $m)) !== [];
+        } while (!$a132Hit && ++$a132Tries < 12);
+        assert_true($a132Hit && $a132Tries <= 3, "{$l}: after 10 coupon attempts from the checkout form the next one is throttled ({$a132Tries} extra tries)");
     }
 } finally {
     if (isset($a132Drivers['mysql'])) $a132Run(['mysql', 'teardown', 'none', $a132App, $a132Drivers['mysql'], $a132Root, '{}']);

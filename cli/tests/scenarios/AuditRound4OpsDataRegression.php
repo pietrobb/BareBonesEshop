@@ -72,8 +72,9 @@ try {
     ProductBulk::apply('archive', [$r4Id]);
     assert_equals(null, Cache::readCatalogJson($r4Path, 3600), 'R4 cache: deactivating a product makes cached product pages stale');
     $r4Seed();
+    $r4Db->exec("UPDATE products SET stock = 5 WHERE sku = 'R4-CP'"); // no warehouse rows: the sync sells it out
     Warehouse::syncProductStock(['R4-CP']);
-    assert_equals(null, Cache::readCatalogJson($r4Path, 3600), 'R4 cache: a stock sync makes cached product pages stale');
+    assert_equals(null, Cache::readCatalogJson($r4Path, 3600), 'R4 cache: a stock sync that sells a product out makes cached product pages stale');
     $r4Seed();
     Import::csv($r4Csv('again.csv', "sku,name,price\nR4-U8,Čaj zelený,1.00\n"));
     assert_equals(null, Cache::readCatalogJson($r4Path, 3600), 'R4 cache: a CSV import makes cached product pages stale');

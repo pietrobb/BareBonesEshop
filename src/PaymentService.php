@@ -318,10 +318,14 @@ class PaymentService {
         $ownTransaction = !$db->inTransaction();
         if ($ownTransaction) $db->beginTransaction();
         try {
-            // The provider's refund webhook may have booked this refund (by its id) first: the ledger keeps one
-            // money row per provider refund, this call's row then only confirms it (refund_confirmed moves no money).
+            // The provider's refund webhook may have booked this refund (by its id, or for GoPay/ThePay, which name
+            // none, by the refund request it settled) first: the ledger keeps one money row per provider refund,
+            // this call's row then only confirms it (refund_confirmed moves no money).
             self::lockOrderWithin($orderId);
-            if ($status === 'succeeded' && self::refundAlreadyRecorded($orderId, $refundId)) $status = 'confirmed';
+            if ($status === 'succeeded' && (self::refundAlreadyRecorded($orderId, $refundId)
+                || ($refundId === '' && self::refundRequestSettled($orderId, (string)$idempotencyKey, $amount)))) {
+                $status = 'confirmed';
+            }
             self::logTransaction(
                 orderId:        $orderId,
                 provider:       self::providerName($gateway),
@@ -431,8 +435,49 @@ class PaymentService {
             'order_id' => $orderId,
             'payment_id' => (string)$order['payment_id'],
             'amount' => $amount,
-            'idempotency_key' => $idempotencyKey . '_execute',
+            'idempotency_key' => self::refundExecuteKey($idempotencyKey),
         ], 1);
+    }
+
+    /**
+     * The latest refund request no payment_refund job ever executed (e.g. requested before requestRefundAndQueue()
+     * queued one): the payment is refund_pending at a provider with a refund API, nothing was booked after the
+     * request and its execute key never reached the ledger.
+     *
+     * @return array{amount:int, idempotency_key:string}|null its amount and the job's execute key
+     */
+    public static function unexecutedRefundRequest(array $order): ?array {
+        if ((string)($order['payment_status'] ?? '') !== 'refund_pending' || self::refundsByHand($order)) return null;
+        $db = Db::get();
+        $params = [':order' => (int)$order['id'], ':store' => StoreContext::current()->id()];
+        $stmt = $db->prepare("SELECT id, amount, idempotency_key FROM payment_transactions WHERE order_id = :order AND store_id = :store AND status = 'refund_pending' ORDER BY id DESC LIMIT 1");
+        $stmt->execute($params);
+        $request = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if (!$request) return null;
+        $executeKey = self::refundExecuteKey((string)$request['idempotency_key']);
+        $later = $db->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store
+            AND ((id > :id AND status IN ('partially_refunded', 'refunded', 'refund_succeeded', 'refund_confirmed')) OR idempotency_key IN (:execute, :attempt)) LIMIT 1");
+        $later->execute($params + [':id' => (int)$request['id'], ':execute' => $executeKey, ':attempt' => 'refund_attempt_' . $executeKey]);
+        return $later->fetchColumn() ? null : ['amount' => (int)$request['amount'], 'idempotency_key' => $executeKey];
+    }
+
+    /**
+     * Queue the payment_refund job of a refund request no job ever executed (unexecutedRefundRequest()), audited.
+     * Its execute key is the one requestRefundAndQueue() would have used, so a job still queued for it cannot refund twice.
+     */
+    public static function retryRefundRequest(int $orderId, string $actor): bool {
+        if (Db::get()->inTransaction()) throw new \LogicException('The refund job is queued after commit: call outside a transaction');
+        $order = Orders::byId($orderId);
+        $request = $order ? self::unexecutedRefundRequest($order) : null;
+        if ($order === null || $request === null) return false;
+        JobQueue::push('payment_refund', [
+            'order_id' => $orderId,
+            'payment_id' => (string)$order['payment_id'],
+            'amount' => $request['amount'],
+            'idempotency_key' => $request['idempotency_key'],
+        ], 1);
+        AuditLog::log('order_refund', $orderId, 'refund_pending', 'refund_pending', "Refund of {$request['amount']} re-queued by {$actor}");
+        return true;
     }
 
     /**
@@ -492,10 +537,48 @@ class PaymentService {
 
     /** The refund in flight: requestRefund() allows one at a time, so it is the latest request while the payment is refund_pending. */
     private static function pendingRefundAmount(array $order): int {
-        if ((string)($order['payment_status'] ?? '') !== 'refund_pending') return 0;
-        $stmt = Db::get()->prepare("SELECT amount FROM payment_transactions WHERE order_id = :order AND store_id = :store AND status = 'refund_pending' ORDER BY id DESC LIMIT 1");
+        return (int)(self::pendingRefundRequest($order)['amount'] ?? 0);
+    }
+
+    /** @return array{amount:int, idempotency_key:string}|null the refund request in flight (pendingRefundAmount()) */
+    private static function pendingRefundRequest(array $order): ?array {
+        if ((string)($order['payment_status'] ?? '') !== 'refund_pending') return null;
+        $stmt = Db::get()->prepare("SELECT amount, idempotency_key FROM payment_transactions WHERE order_id = :order AND store_id = :store AND status = 'refund_pending' ORDER BY id DESC LIMIT 1");
         $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
-        return max(0, (int)$stmt->fetchColumn());
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        return $row ? ['amount' => max(0, (int)$row['amount']), 'idempotency_key' => (string)$row['idempotency_key']] : null;
+    }
+
+    /** The payment_refund job's execute key of a ledger refund request key (requestRefundAndQueue(), orderRefundJobsWithin()). */
+    private static function refundExecuteKey(string $requestKey): string {
+        return preg_match('/^order_refund_request_(\d+)$/', $requestKey, $m) ? 'order_refund_' . $m[1] : $requestKey . '_execute';
+    }
+
+    /** The ledger request key of a payment_refund job's execute key (the inverse of refundExecuteKey()). */
+    public static function refundRequestKey(string $executeKey): ?string {
+        if (preg_match('/^order_refund_(\d+)$/', $executeKey, $m)) return 'order_refund_request_' . $m[1];
+        return str_ends_with($executeKey, '_execute') ? substr($executeKey, 0, -strlen('_execute')) : null;
+    }
+
+    /**
+     * Whether a refund without a provider refund id was already booked under the order lock: a
+     * refund.reported event settled this call's refund request, or the ledger could not hold it
+     * on top of what is already refunded.
+     */
+    private static function refundRequestSettled(int $orderId, string $executeKey, int $amount): bool {
+        $order = Orders::byId($orderId);
+        if (!$order) return false;
+        if (self::refundedAmount($orderId) + $amount > (int)$order['total']) return true;
+        $requestKey = self::refundRequestKey($executeKey);
+        if ($requestKey === null) return false;
+        $stmt = Db::get()->prepare("SELECT raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store
+            AND status IN ('partially_refunded', 'refunded', 'refund_succeeded')");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
+        foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $raw) {
+            $settled = json_decode((string)$raw, true);
+            if (is_array($settled) && ($settled['settles_refund_request'] ?? null) === $requestKey) return true;
+        }
+        return false;
     }
 
     /**
@@ -801,10 +884,13 @@ class PaymentService {
             if ($eventType === 'refund.succeeded') {
                 return self::bookRefundWithin($order, $provider, (string)($data['refund_id'] ?? ''), (int)$data['amount'], $eventType, $eventKey, $payload);
             }
-            $inFlight = self::pendingRefundAmount($order);
+            $request = self::pendingRefundRequest($order);
+            $inFlight = (int)($request['amount'] ?? 0);
             if (strtolower((string)($data['state'] ?? '')) === 'refunded' && $from === 'refund_pending' && $currency === $orderCurrency
                 && $inFlight > 0 && $inFlight === self::refundableBalance($orderId)) {
-                return self::bookRefundWithin($order, $provider, '', $inFlight, $eventType, $eventKey, $payload);
+                // Names the request it settles, so the refund worker's own result only confirms it (refundRequestSettled()).
+                return self::bookRefundWithin($order, $provider, '', $inFlight, $eventType, $eventKey,
+                    $payload + ['settles_refund_request' => (string)($request['idempotency_key'] ?? '')]);
             }
             self::recordEvent($orderId, $eventType, 'ignored', (int)($data['amount'] ?? 0), $currency ?: $orderCurrency, $eventKey,
                 $payload + ['payment_status' => $from], $provider, (string)($data['provider_ref'] ?? ''));

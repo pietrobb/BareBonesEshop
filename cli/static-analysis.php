@@ -145,7 +145,8 @@ $architectureBudgets = [
     // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
     // +1 coupling: SalesReport gives the sales overview shop-local day boundaries (A15.1).
     // +1 coupling: OrderExport owns the order list filters shared by the sales overview and the CSV export (A15.2).
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 880, 'functions' => 14, 'max_function_lines' => 300, 'coupling' => 20],
+    // +1 function, +21 lines: "Retry refund" re-queues a refund request no payment_refund job ever executed (round 4 final review).
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 901, 'functions' => 15, 'max_function_lines' => 300, 'coupling' => 20],
     'src/Entrypoints/Admin/OrderOperations.php' => ['lines' => 80, 'functions' => 4, 'max_function_lines' => 32, 'coupling' => 7],
     'src/Entrypoints/Admin/PricingRules.php' => ['lines' => 235, 'functions' => 7, 'max_function_lines' => 115, 'coupling' => 5],
     'src/Entrypoints/Admin/Reports.php' => ['lines' => 90, 'functions' => 2, 'max_function_lines' => 74, 'coupling' => 4],
@@ -177,7 +178,8 @@ $architectureBudgets = [
     // +1 coupling: I18n::all() gives cart/checkout blocks the catalog their breadcrumb/pagination landmarks are labelled from.
     // +1 function: storefrontCartPrice() formats cart/checkout amounts in the cart currency (shared-catalog stores).
     // +1 line / +1 coupling: round-4 merge (cart-currency formatting + translated free/payment labels).
-    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 251, 'functions' => 7, 'max_function_lines' => 100, 'coupling' => 11],
+    // +2 lines (renderCheckout): the form's coupon attempts spend the coupon API's throttle (round 4 final review).
+    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 253, 'functions' => 7, 'max_function_lines' => 102, 'coupling' => 11],
     // Ratcheted: canonical/robots/hreflang/JSON-LD moved to StorefrontSeo (storefront SEO audit).
     // +2 coupling: cart currency decimals for the JS config and the one-shot StorefrontFlash notice.
     'src/Entrypoints/Storefront/Layout.php' => ['lines' => 140, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 10],

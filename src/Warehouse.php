@@ -432,9 +432,14 @@ class Warehouse {
         self::syncProductStock([$sku]);
     }
 
-    /** Sync products.stock column from warehouse_stock totals */
+    /**
+     * Sync products.stock column from warehouse_stock totals. The catalog caches go stale when a SKU's
+     * product or variant changes availability (in stock <-> out of stock) or on a full sync; a checkout
+     * reservation that leaves the goods in stock keeps them.
+     */
     public static function syncProductStock(array $skus = []): void {
         $db = Db::get();
+        $before = $skus ? self::inStockState($skus) : null;
         if (empty($skus)) {
             // Sync all
             $db->exec("UPDATE products SET stock = COALESCE((
@@ -451,7 +456,21 @@ class Warehouse {
             }
         }
         self::syncVariantStock($skus);
-        Cache::catalogChanged();
+        if ($before === null || self::inStockState($skus) !== $before) Cache::catalogChanged();
+    }
+
+    /** @return list<array{id:string, in_stock:int}> whether each product and variant of these SKUs in the catalog is in stock */
+    private static function inStockState(array $skus): array {
+        $skus = array_values(array_unique(array_map('strval', $skus)));
+        $in = implode(', ', array_map(static fn(int $i): string => ":s{$i}", array_keys($skus)));
+        $variantIn = implode(', ', array_map(static fn(int $i): string => ":v{$i}", array_keys($skus)));
+        $params = [':store' => StoreContext::current()->catalogId(), ':store2' => StoreContext::current()->catalogId()];
+        foreach ($skus as $i => $sku) $params[":s{$i}"] = $params[":v{$i}"] = $sku;
+        $stmt = Db::get()->prepare("SELECT 'p' AS kind, id, CASE WHEN stock > 0 THEN 1 ELSE 0 END AS in_stock FROM products WHERE store_id = :store AND sku IN ({$in})
+            UNION ALL SELECT 'v', v.id, CASE WHEN v.stock > 0 THEN 1 ELSE 0 END FROM variants v JOIN products p ON p.id = v.product_id
+            WHERE p.store_id = :store2 AND v.sku IN ({$variantIn}) ORDER BY 1, 2");
+        $stmt->execute($params);
+        return array_map(static fn(array $row): array => ['id' => $row['kind'] . $row['id'], 'in_stock' => (int)$row['in_stock']], $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
     /**

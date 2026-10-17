@@ -15,9 +15,17 @@ if ($verbose) echo "BareBones Shop — ERP Sync\n";
 
 $cfg = require __DIR__ . '/../config.php';
 $jobsDir = $cfg['jobs_dir'] ?? dirname(__DIR__, 2) . '/bareboneseshop-private/jobs';
-if (!is_dir($jobsDir)) mkdir($jobsDir, 0750, true);
-$lock = JobQueue::acquireWorkerLock($jobsDir . '/sync.lock');
+if (!is_dir($jobsDir)) @mkdir($jobsDir, 0750, true);
+$lockFile = $jobsDir . '/sync.lock';
+$lock = JobQueue::acquireWorkerLock($lockFile);
 if ($lock === null) {
+    // A lock that cannot be opened (jobs_dir missing or not writable) is an error cron must see, not a run in progress.
+    $probe = @fopen($lockFile, 'c+');
+    if (!is_resource($probe)) {
+        fwrite(STDERR, "ERP sync: cannot open the lock file {$lockFile} (check jobs_dir permissions).\n");
+        exit(1);
+    }
+    fclose($probe);
     if ($verbose) echo "ERP sync is already running.\n";
     exit(0);
 }

@@ -165,6 +165,8 @@ class Bootstrap {
         $context = StoreContext::current();
         $locale = I18n::locale();
         $languages = array_map('strtolower', (array)($context->config()['languages'] ?? []));
-        return $locale !== $context->defaultLocale() && in_array($locale, $languages, true) ? $locale : null;
+        // Another store's default language is that store's URL (its hreflang alternate), not ?lang= here.
+        $storeDefaults = array_map('strtolower', array_map('strval', array_keys(self::hreflangAlternates('/')['alternates'])));
+        return $locale !== $context->defaultLocale() && in_array($locale, $languages, true) && !in_array($locale, $storeDefaults, true) ? $locale : null;
     }
 }
