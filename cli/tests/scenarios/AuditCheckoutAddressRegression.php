@@ -159,7 +159,7 @@ try {
             "{$l}: another customer's address id is ignored: nothing of it is shown and the typed values stay");
 
         [$l, $r, $html] = $a133Do('member_use_no_csrf');
-        assert_true($r['new_orders'] === [] && str_contains($html, 'CSRF') && !str_contains($html, 'value="A133 Second Street 2"'),
+        assert_true($r['new_orders'] === [] && array_filter(array_map(static fn(string $f): string => htmlspecialchars((string)((require $f)['checkout_csrf_error'] ?? ''), ENT_QUOTES, 'UTF-8'), glob(dirname(TEST_CLI_DIR) . '/lang/*.php')), static fn(string $m): bool => str_contains($html, $m)) !== [] && !str_contains($html, 'value="A133 Second Street 2"'),
             "{$l}: picking an address without the CSRF token is refused");
 
         [$l, $r, $html, $form] = $a133Do('guest_refused');

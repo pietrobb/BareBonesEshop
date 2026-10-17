@@ -87,6 +87,10 @@ class JobQueue {
      */
     public static function push(string $type, array $payload, int $priority = 5): string {
         if ($backend = self::backend()) return $backend->push($type, $payload, $priority);
+        return self::pushFile($type, $payload, $priority, null);
+    }
+
+    private static function pushFile(string $type, array $payload, int $priority, ?string $retryAfter): string {
         if (class_exists('StoreContext')) {
             $payload['_store_id'] ??= StoreContext::current()->id();
             $payload['_channel_id'] ??= StoreContext::current()->channel();
@@ -102,6 +106,7 @@ class JobQueue {
             'max_attempts' => 3,
             'correlation_id' => Logger::correlationId(),
         ];
+        if ($retryAfter !== null) $job['retry_after'] = $retryAfter;
 
         $dir = self::dir() . '/pending';
         self::ensureDirectory($dir);
@@ -110,6 +115,24 @@ class JobQueue {
         self::writeJson($file, $job, true);
 
         return $id;
+    }
+
+    /**
+     * Push a job that becomes available only after $delaySeconds (e.g. a rate-limited mail retried
+     * after the limit window). Backends without delayed delivery run it as soon as a worker pulls it.
+     */
+    public static function pushDelayed(string $type, array $payload, int $delaySeconds, int $priority = 5): string {
+        $availableAt = time() + max(0, $delaySeconds);
+        $backend = self::backend();
+        if ($backend instanceof DelayedQueueBackend) return $backend->pushAt($type, $payload, $availableAt, $priority);
+        if ($backend !== null) return $backend->push($type, $payload, $priority);
+        // File backend: the pending file carries retry_after like a job in backoff (pull() skips it until then).
+        return self::pushFile($type, $payload, $priority, gmdate('Y-m-d\TH:i:s', $availableAt));
+    }
+
+    /** The configured durable backend, or null for the file queue (retention cleanup). */
+    public static function activeBackend(): ?QueueBackend {
+        return self::backend();
     }
 
     /**

@@ -1,4 +1,6 @@
 {
+    "currency": "EUR",
+
     "methods": {
         "pickup": {
             "name": {"en": "In-store pickup", "sk": "Osobný odber", "de": "Abholung im Laden"},

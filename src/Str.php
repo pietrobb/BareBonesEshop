@@ -4,6 +4,17 @@
  * Shared text normalization for FTS tokens, slugs, etc.
  */
 class Str {
+    /**
+     * The one e-mail normalisation for storage and lookups: trimmed, UTF-8 lowercased (mb_strtolower),
+     * so "Éva@x" and "éva@x" are one customer for coupon limits. Stored values are compared as-is in
+     * SQL (no LOWER(): SQLite's is ASCII-only, MySQL's is not), so both drivers agree. Customer
+     * registration only accepts ASCII addresses (FILTER_VALIDATE_EMAIL), where this equals the
+     * former ASCII-only lowercase.
+     */
+    public static function normalizeEmail(string $email): string {
+        return mb_strtolower(trim($email), 'UTF-8');
+    }
+
     /** Diacritics map for Central European languages (SK/CZ/DE/PL) */
     private static array $diacritics = [
         'á'=>'a','ä'=>'a','č'=>'c','ď'=>'d','é'=>'e','ě'=>'e','í'=>'i','ĺ'=>'l','ľ'=>'l',

@@ -345,21 +345,28 @@ function handleWarehouseSave(): void {
         'contact' => trim(Security::str($_POST['contact'] ?? '')),
         'notes' => trim(Security::str($_POST['notes'] ?? '')),
     ];
-    if (!$data['code'] || !$data['name']) {
-        setFlash('err', I18n::t('admin.common.code_name_required'));
+    $old = $id ? Warehouse::byId($id) : null;
+    if (!$data['code'] || !$data['name'] || ($id && !$old)) {
+        setFlash('err', I18n::t($id && !$old ? 'admin.common.record_missing' : 'admin.common.code_name_required'));
         header("Location: admin.php?p=warehouse" . ($id ? "&id={$id}" : ''));
         exit;
     }
     $id = Warehouse::save($data);
+    AuditLog::log('warehouse', $id, $old, Warehouse::byId($id), $old ? 'Admin warehouse edit' : 'Admin warehouse create');
     setFlash('ok', I18n::t('admin.warehouse.saved'));
     header("Location: admin.php?p=warehouse&id={$id}");
     exit;
 }
 function handleWarehouseDelete(): void {
     $id = Security::int($_POST['warehouse_id'] ?? 0);
-    if ($id) {
+    $old = $id ? Warehouse::byId($id) : null;
+    if ($old) {
+        $old['feeds'] = Warehouse::feedsByWarehouse($id);
         Warehouse::delete($id);
+        AuditLog::log('warehouse', $id, $old, null, 'Admin warehouse delete');
         setFlash('ok', I18n::t('admin.warehouse.deleted'));
+    } elseif ($id) {
+        setFlash('err', I18n::t('admin.common.record_missing'));
     }
     header('Location: admin.php?p=warehouses');
     exit;
@@ -434,8 +441,9 @@ function pageFeed(): void {
             </div>
             <div class="form-row"><label><?= esc(I18n::t('admin.feed.import_mode')) ?></label>
                 <select name="import_mode">
-                    <option value="upsert" <?= ($f['import_mode'] ?? 'upsert') === 'upsert' ? 'selected' : '' ?>><?= esc(I18n::t('admin.feed.mode_upsert')) ?></option>
-                    <option value="stock_only" <?= ($f['import_mode'] ?? '') === 'stock_only' ? 'selected' : '' ?>><?= esc(I18n::t('admin.feed.mode_stock')) ?></option>
+                    <?php foreach ([FeedImport::MODE_UPSERT => 'admin.feed.mode_upsert', FeedImport::MODE_PRICE_STOCK => 'admin.feed.mode_price_stock', FeedImport::MODE_STOCK_ONLY => 'admin.feed.mode_stock'] as $mode => $label): ?>
+                    <option value="<?= esc($mode) ?>" <?= ($f['import_mode'] ?? FeedImport::MODE_UPSERT) === $mode ? 'selected' : '' ?>><?= esc(I18n::t($label)) ?></option>
+                    <?php endforeach; ?>
                 </select>
             </div>
             <div class="form-row"><label><?= esc(I18n::t('admin.feed.field_map')) ?></label>
@@ -482,27 +490,42 @@ function handleFeedSave(): void {
         'url' => trim(Security::str($_POST['url'] ?? '')),
         'format' => in_array($_POST['format'] ?? '', ['xml', 'csv']) ? $_POST['format'] : 'xml',
         'field_map' => json_encode($fieldMap, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT),
-        'import_mode' => in_array($_POST['import_mode'] ?? '', ['upsert', 'stock_only']) ? $_POST['import_mode'] : 'upsert',
+        'import_mode' => in_array($_POST['import_mode'] ?? '', FeedImport::MODES, true) ? $_POST['import_mode'] : FeedImport::MODE_UPSERT,
         'schedule' => trim(Security::str($_POST['schedule'] ?? '0 */6 * * *')),
         'enabled' => (int)!empty($_POST['enabled']),
     ];
 
-    if (!$data['code'] || !$data['name'] || !$data['warehouse_id'] || !$data['url']) {
-        setFlash('err', I18n::t('admin.feed.required'));
+    $old = $id ? Warehouse::feedById($id) : null;
+    $error = !$data['code'] || !$data['name'] || !$data['warehouse_id'] || !$data['url'] ? 'admin.feed.required'
+        : ($id && !$old ? 'admin.common.record_missing' : (!Warehouse::byId($data['warehouse_id']) ? 'admin.feed.warehouse_foreign' : null));
+    if ($error !== null) {
+        setFlash('err', I18n::t($error));
         header("Location: admin.php?p=feed" . ($id ? "&id={$id}" : ''));
         exit;
     }
 
-    $id = Warehouse::saveFeed($data);
+    try {
+        $id = Warehouse::saveFeed($data);
+    } catch (PDOException $e) {
+        // feeds.code is unique across stores.
+        if ((string)$e->getCode() !== '23000') throw $e;
+        setFlash('err', I18n::t('admin.feed.code_taken'));
+        header("Location: admin.php?p=feed" . ($id ? "&id={$id}" : ''));
+        exit;
+    }
+    AuditLog::log('feed', $id, $old, Warehouse::feedById($id), $old ? 'Admin feed edit' : 'Admin feed create');
     setFlash('ok', I18n::t('admin.feed.saved'));
     header("Location: admin.php?p=feed&id={$id}");
     exit;
 }
 function handleFeedDelete(): void {
     $id = Security::int($_POST['feed_id'] ?? 0);
-    if ($id) {
-        Warehouse::deleteFeed($id);
+    $old = $id ? Warehouse::feedById($id) : null;
+    if ($old && Warehouse::deleteFeed($id)) {
+        AuditLog::log('feed', $id, $old, null, 'Admin feed delete');
         setFlash('ok', I18n::t('admin.feed.deleted'));
+    } elseif ($id) {
+        setFlash('err', I18n::t('admin.common.record_missing'));
     }
     header('Location: admin.php?p=feeds');
     exit;
@@ -579,10 +602,12 @@ function handleShippingMethodSave(): void {
     if (!$code || !$carrier || !$name) { setFlash('err', I18n::t('admin.shipping.method_required')); header('Location: admin.php?p=shipping'); exit; }
     $data = [':code'=>$code, ':carrier'=>$carrier, ':name'=>$name, ':description'=>trim(Security::str($_POST['description'] ?? '')), ':adapter_class'=>trim(Security::str($_POST['adapter_class'] ?? '')), ':service_type'=>$serviceType, ':supports_cod'=>(int)!empty($_POST['supports_cod']), ':supports_pickup'=>(int)!empty($_POST['supports_pickup']), ':free_above'=>shippingNullableInt('free_above'), ':free_from_qty'=>shippingNullableInt('free_from_qty'), ':max_weight_g'=>shippingNullableInt('max_weight_g'), ':max_volume_cm3'=>shippingNullableInt('max_volume_cm3'), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
     $data[':store'] = StoreContext::current()->providerId();
-    if ($id && StoreConfig::value('shipping_methods', 'id', (string)$id) === null) { setFlash('err', I18n::t('admin.common.record_missing')); header('Location: admin.php?p=shipping'); exit; }
+    $old = $id ? StoreConfig::row('shipping_methods', $id) : null;
+    if ($id && $old === null) { setFlash('err', I18n::t('admin.common.record_missing')); header('Location: admin.php?p=shipping'); exit; }
     if (!in_array(StoreConfig::value('shipping_methods', 'code', $code), [null, (string)$id], true)) { setFlash('err', I18n::t('admin.shipping.method_exists')); header('Location: admin.php?p=shipping'); exit; }
     if ($id) { $data[':id'] = $id; $stmt = $db->prepare("UPDATE shipping_methods SET code=:code, carrier=:carrier, name=:name, description=:description, adapter_class=:adapter_class, service_type=:service_type, supports_cod=:supports_cod, supports_pickup=:supports_pickup, free_above=:free_above, free_from_qty=:free_from_qty, max_weight_g=:max_weight_g, max_volume_cm3=:max_volume_cm3, active=:active, sort_order=:sort_order, updated_at=" . Db::now() . " WHERE id=:id AND store_id=:store"); $stmt->execute($data); setFlash('ok', I18n::t('admin.shipping.method_saved')); }
     else { $db->prepare("INSERT INTO shipping_methods (store_id, code, carrier, name, description, adapter_class, service_type, supports_cod, supports_pickup, free_above, free_from_qty, max_weight_g, max_volume_cm3, active, sort_order) VALUES (:store, :code, :carrier, :name, :description, :adapter_class, :service_type, :supports_cod, :supports_pickup, :free_above, :free_from_qty, :max_weight_g, :max_volume_cm3, :active, :sort_order)")->execute($data); setFlash('ok', I18n::t('admin.shipping.method_saved')); }
+    StoreConfig::audit('shipping_methods', $id, $old);
     header('Location: admin.php?p=shipping'); exit;
 }
 function handleShippingMethodDelete(): void { Security::adminRequire('shipping.manage'); storeConfigDelete('shipping_methods', I18n::t('admin.shipping.method_deleted')); header('Location: admin.php?p=shipping'); exit; }
@@ -592,10 +617,12 @@ function handleShippingZoneSave(): void {
     if (!$code || !$name) { setFlash('err', I18n::t('admin.common.code_name_required')); header('Location: admin.php?p=shipping'); exit; }
     $data = [':code'=>$code, ':name'=>$name, ':description'=>trim(Security::str($_POST['description'] ?? '')), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
     $data[':store'] = StoreContext::current()->providerId();
-    if ($id && StoreConfig::value('shipping_zones', 'id', (string)$id) === null) { setFlash('err', I18n::t('admin.common.record_missing')); header('Location: admin.php?p=shipping'); exit; }
+    $old = $id ? StoreConfig::row('shipping_zones', $id) : null;
+    if ($id && $old === null) { setFlash('err', I18n::t('admin.common.record_missing')); header('Location: admin.php?p=shipping'); exit; }
     if (!in_array(StoreConfig::value('shipping_zones', 'code', $code), [null, (string)$id], true)) { setFlash('err', I18n::t('admin.shipping.zone_exists')); header('Location: admin.php?p=shipping'); exit; }
     if ($id) { $data[':id']=$id; $stmt = $db->prepare("UPDATE shipping_zones SET code=:code, name=:name, description=:description, active=:active, sort_order=:sort_order, updated_at=" . Db::now() . " WHERE id=:id AND store_id=:store"); $stmt->execute($data); setFlash('ok', I18n::t('admin.shipping.zone_saved')); }
     else { $db->prepare("INSERT INTO shipping_zones (store_id, code, name, description, active, sort_order) VALUES (:store, :code, :name, :description, :active, :sort_order)")->execute($data); setFlash('ok', I18n::t('admin.shipping.zone_saved')); }
+    StoreConfig::audit('shipping_zones', $id, $old);
     header('Location: admin.php?p=shipping'); exit;
 }
 function handleShippingZoneDelete(): void { Security::adminRequire('shipping.manage'); storeConfigDelete('shipping_zones', I18n::t('admin.shipping.zone_deleted')); header('Location: admin.php?p=shipping'); exit; }
@@ -603,7 +630,9 @@ function handleShippingCountrySave(): void {
     Security::adminRequire('shipping.manage');
     $db = Db::get(); $zoneCode = Security::slug($_POST['zone_code'] ?? ''); $country = strtoupper(trim(Security::str($_POST['country'] ?? '')));
     if (!$zoneCode || !preg_match('/^[A-Z]{2}$/', $country) || StoreConfig::value('shipping_zones', 'code', $zoneCode) === null) { setFlash('err', I18n::t('admin.shipping.country_required')); header('Location: admin.php?p=shipping'); exit; }
-    $db->prepare(Db::insertIgnore() . " INTO shipping_zone_countries (store_id, zone_code, country, postal_min, postal_max) VALUES (:store, :zone, :country, :min, :max)")->execute([':store'=>StoreContext::current()->providerId(), ':zone'=>$zoneCode, ':country'=>$country, ':min'=>trim(Security::str($_POST['postal_min'] ?? '')), ':max'=>trim(Security::str($_POST['postal_max'] ?? ''))]);
+    $stmt = $db->prepare(Db::insertIgnore() . " INTO shipping_zone_countries (store_id, zone_code, country, postal_min, postal_max) VALUES (:store, :zone, :country, :min, :max)");
+    $stmt->execute([':store'=>StoreContext::current()->providerId(), ':zone'=>$zoneCode, ':country'=>$country, ':min'=>trim(Security::str($_POST['postal_min'] ?? '')), ':max'=>trim(Security::str($_POST['postal_max'] ?? ''))]);
+    if ($stmt->rowCount() > 0) StoreConfig::audit('shipping_zone_countries', 0, null);
     setFlash('ok', I18n::t('admin.shipping.country_added')); header('Location: admin.php?p=shipping'); exit;
 }
 function handleShippingCountryDelete(): void { Security::adminRequire('shipping.manage'); storeConfigDelete('shipping_zone_countries', I18n::t('admin.common.country_deleted')); header('Location: admin.php?p=shipping'); exit; }
@@ -615,9 +644,11 @@ function handleShippingRateSave(): void {
     if ($carrier === null || !$zoneCode || StoreConfig::value('shipping_zones', 'code', $zoneCode) === null || ($country !== '' && !preg_match('/^[A-Z]{2}$/', $country)) || $to < $from) { setFlash('err', I18n::t('admin.shipping.rate_invalid')); header('Location: admin.php?p=shipping'); exit; }
     $data = [':method_code'=>$methodCode, ':carrier'=>$carrier, ':country'=>$country, ':zone_code'=>$zoneCode, ':weight_from_g'=>$from, ':weight_to_g'=>$to, ':volume_to_cm3'=>shippingNullableInt('volume_to_cm3'), ':price'=>max(0, Security::int($_POST['price'] ?? 0)), ':cod_surcharge'=>max(0, Security::int($_POST['cod_surcharge'] ?? 0)), ':delivery_days'=>trim(Security::str($_POST['delivery_days'] ?? '')), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
     $data[':store'] = StoreContext::current()->providerId();
-    if ($id && StoreConfig::value('shipping_rates', 'id', (string)$id) === null) { setFlash('err', I18n::t('admin.common.record_missing')); header('Location: admin.php?p=shipping'); exit; }
+    $old = $id ? StoreConfig::row('shipping_rates', $id) : null;
+    if ($id && $old === null) { setFlash('err', I18n::t('admin.common.record_missing')); header('Location: admin.php?p=shipping'); exit; }
     if ($id) { $data[':id']=$id; $stmt = $db->prepare("UPDATE shipping_rates SET method_code=:method_code, carrier=:carrier, country=:country, zone_code=:zone_code, weight_from_g=:weight_from_g, weight_to_g=:weight_to_g, volume_to_cm3=:volume_to_cm3, price=:price, cod_surcharge=:cod_surcharge, delivery_days=:delivery_days, active=:active, sort_order=:sort_order, updated_at=" . Db::now() . " WHERE id=:id AND store_id=:store"); $stmt->execute($data); setFlash('ok', I18n::t('admin.shipping.rate_saved')); }
     else { $db->prepare("INSERT INTO shipping_rates (store_id, method_code, carrier, country, zone_code, weight_from_g, weight_to_g, volume_to_cm3, price, cod_surcharge, delivery_days, active, sort_order) VALUES (:store, :method_code, :carrier, :country, :zone_code, :weight_from_g, :weight_to_g, :volume_to_cm3, :price, :cod_surcharge, :delivery_days, :active, :sort_order)")->execute($data); setFlash('ok', I18n::t('admin.shipping.rate_saved')); }
+    StoreConfig::audit('shipping_rates', $id, $old);
     header('Location: admin.php?p=shipping'); exit;
 }
 function handleShippingRateDelete(): void { Security::adminRequire('shipping.manage'); storeConfigDelete('shipping_rates', I18n::t('admin.shipping.rate_deleted')); header('Location: admin.php?p=shipping'); exit; }
@@ -665,13 +696,14 @@ function handlePaymentMethodSave(): void {
     $data = [':code'=>$code, ':provider'=>$provider, ':name'=>$name, ':description'=>trim(Security::str($_POST['description'] ?? '')), ':service_type'=>$serviceType, ':min_amount'=>$min, ':max_amount'=>$max, ':fixed_fee'=>max(0, Security::int($_POST['fixed_fee'] ?? 0)), ':percent_fee_bps'=>max(0, Security::int($_POST['percent_fee_bps'] ?? 0)), ':free_above'=>paymentNullableInt('free_above'), ':requires_online'=>(int)!empty($_POST['requires_online']), ':active'=>(int)!empty($_POST['active']), ':sort_order'=>Security::int($_POST['sort_order'] ?? 100)];
     $data[':store'] = StoreContext::current()->providerId();
     if (!in_array(StoreConfig::value('payment_methods', 'code', $code), [null, (string)$id], true)) { setFlash('err', I18n::t('admin.payments.exists')); header('Location: admin.php?p=payments'); exit; }
+    $old = $id ? StoreConfig::row('payment_methods', $id) : null;
     if ($id) {
-        $oldCode = StoreConfig::value('payment_methods', 'id', (string)$id, 'code');
-        if ($oldCode === null) { setFlash('err', I18n::t('admin.common.record_missing')); header('Location: admin.php?p=payments'); exit; }
+        if ($old === null) { setFlash('err', I18n::t('admin.common.record_missing')); header('Location: admin.php?p=payments'); exit; }
         $data[':id']=$id; $db->prepare("UPDATE payment_methods SET code=:code, provider=:provider, name=:name, description=:description, service_type=:service_type, min_amount=:min_amount, max_amount=:max_amount, fixed_fee=:fixed_fee, percent_fee_bps=:percent_fee_bps, free_above=:free_above, requires_online=:requires_online, active=:active, sort_order=:sort_order, updated_at=" . Db::now() . " WHERE id=:id AND store_id=:store")->execute($data);
-        PaymentService::renameMethodCodeLinks($oldCode, $code);
+        PaymentService::renameMethodCodeLinks((string)$old['code'], $code);
     }
     else { $db->prepare("INSERT INTO payment_methods (store_id, code, provider, name, description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, requires_online, active, sort_order) VALUES (:store, :code, :provider, :name, :description, :service_type, :min_amount, :max_amount, :fixed_fee, :percent_fee_bps, :free_above, :requires_online, :active, :sort_order)")->execute($data); }
+    StoreConfig::audit('payment_methods', $id, $old);
     setFlash('ok', I18n::t('admin.payments.saved')); header('Location: admin.php?p=payments'); exit;
 }
 function handlePaymentMethodDelete(): void { Security::adminRequire('payments.manage'); storeConfigDelete('payment_methods', I18n::t('admin.payments.deleted')); header('Location: admin.php?p=payments'); exit; }
@@ -679,7 +711,9 @@ function handlePaymentCountrySave(): void {
     Security::adminRequire('payments.manage');
     $methodCode = Security::slug($_POST['method_code'] ?? ''); $country = strtoupper(trim(Security::str($_POST['country'] ?? '')));
     if (!$methodCode || !preg_match('/^[A-Z]{2}$/', $country) || StoreConfig::value('payment_methods', 'code', $methodCode) === null) { setFlash('err', I18n::t('admin.payments.country_required')); header('Location: admin.php?p=payments'); exit; }
-    Db::get()->prepare(Db::insertIgnore() . " INTO payment_method_countries (store_id, method_code, country) VALUES (:store, :method, :country)")->execute([':store'=>StoreContext::current()->providerId(), ':method'=>$methodCode, ':country'=>$country]);
+    $stmt = Db::get()->prepare(Db::insertIgnore() . " INTO payment_method_countries (store_id, method_code, country) VALUES (:store, :method, :country)");
+    $stmt->execute([':store'=>StoreContext::current()->providerId(), ':method'=>$methodCode, ':country'=>$country]);
+    if ($stmt->rowCount() > 0) StoreConfig::audit('payment_method_countries', 0, null);
     setFlash('ok', I18n::t('admin.payments.country_added')); header('Location: admin.php?p=payments'); exit;
 }
 function handlePaymentCountryDelete(): void { Security::adminRequire('payments.manage'); storeConfigDelete('payment_method_countries', I18n::t('admin.common.country_deleted')); header('Location: admin.php?p=payments'); exit; }
@@ -687,7 +721,9 @@ function handlePaymentShippingSave(): void {
     Security::adminRequire('payments.manage');
     $methodCode = Security::slug($_POST['method_code'] ?? ''); $shippingCode = Security::slug($_POST['shipping_method_code'] ?? '');
     if (!$methodCode || !$shippingCode || StoreConfig::value('payment_methods', 'code', $methodCode) === null || StoreConfig::value('shipping_methods', 'code', $shippingCode) === null) { setFlash('err', I18n::t('admin.payments.shipping_required')); header('Location: admin.php?p=payments'); exit; }
-    Db::get()->prepare(Db::insertIgnore() . " INTO payment_method_shipping (store_id, method_code, shipping_method_code) VALUES (:store, :method, :shipping)")->execute([':store'=>StoreContext::current()->providerId(), ':method'=>$methodCode, ':shipping'=>$shippingCode]);
+    $stmt = Db::get()->prepare(Db::insertIgnore() . " INTO payment_method_shipping (store_id, method_code, shipping_method_code) VALUES (:store, :method, :shipping)");
+    $stmt->execute([':store'=>StoreContext::current()->providerId(), ':method'=>$methodCode, ':shipping'=>$shippingCode]);
+    if ($stmt->rowCount() > 0) StoreConfig::audit('payment_method_shipping', 0, null);
     setFlash('ok', I18n::t('admin.payments.shipping_added')); header('Location: admin.php?p=payments'); exit;
 }
 function handlePaymentShippingDelete(): void { Security::adminRequire('payments.manage'); storeConfigDelete('payment_method_shipping', I18n::t('admin.payments.shipping_deleted')); header('Location: admin.php?p=payments'); exit; }
@@ -701,13 +737,15 @@ function storeConfigDelete(string $table, string $message): void {
 }
 function handleFeedSync(): void {
     $id = Security::int($_POST['feed_id'] ?? 0);
-    if (!$id) {
+    // Only a feed of the active store (its warehouse's store) can be synced from here.
+    if (!$id || !Warehouse::feedById($id)) {
         setFlash('err', I18n::t('admin.feed.invalid'));
         header('Location: admin.php?p=feeds');
         exit;
     }
 
     $result = FeedImport::sync($id);
+    AuditLog::log('feed', $id, null, array_diff_key($result, ['errors' => 1]) + ['error_count' => count($result['errors'] ?? [])], 'Admin feed sync');
 
     if (!empty($result['error'])) {
         setFlash('err', I18n::t('admin.feed.sync_error') . ' ' . $result['error']);

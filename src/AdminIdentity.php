@@ -406,14 +406,7 @@ class AdminIdentity {
 
     private static function tableExists(string $table): bool {
         try {
-            $db = Db::get();
-            if (Db::isSqlite()) {
-                $stmt = $db->prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=:name");
-            } else {
-                $stmt = $db->prepare('SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=:name');
-            }
-            $stmt->execute([':name' => $table]);
-            return (bool)$stmt->fetchColumn();
+            return Db::tableExists($table);
         } catch (Throwable $e) {
             return false;
         }

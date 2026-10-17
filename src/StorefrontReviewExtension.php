@@ -8,6 +8,11 @@ final class StorefrontReviewExtension
             $productId = (int)$context['model']['product']['id'];
             $aggregate = Reviews::aggregate($productId);
             $translations = I18n::all();
+            // Result of a no-JS form post (api review_submit redirected back here), shown once.
+            $flash = is_array($_SESSION['review_flash'] ?? null) ? $_SESSION['review_flash'] : null;
+            unset($_SESSION['review_flash']);
+            $flashMessage = $flash === null ? '' : (!empty($flash['ok']) ? $translations['reviews.success']
+                : (($flash['error'] ?? '') === 'duplicate_review' ? $translations['reviews.duplicate'] : $translations['reviews.error']));
             return [
                 'title' => $translations['reviews'], 'empty_label' => $translations['reviews.none'],
                 'items' => array_map(static fn(array $review): array => [
@@ -23,6 +28,7 @@ final class StorefrontReviewExtension
                 'author_label' => $translations['reviews.author'], 'review_title_label' => $translations['reviews.review_title'],
                 'body_label' => $translations['reviews.body'], 'submit_label' => $translations['reviews.submit'],
                 'success_label' => $translations['reviews.success'], 'error_label' => $translations['reviews.error'],
+                'return_url' => (string)($context['model']['product']['url'] ?? ''), 'flash' => $flashMessage,
             ];
         });
     }

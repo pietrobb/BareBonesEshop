@@ -27,7 +27,7 @@ Mapping of every column carrying personal data, plus its **legal basis** (Art. 6
 | `email_log` | `recipient`,`subject`,`payload` (JSON, may contain order snapshot) | direct id + content | 6(1)(f) ops audit | **90 days** (GC) | hard DELETE after 90d; on erasure delete by recipient match |
 | `password_reset_tokens` | `token`,`customer_id` | secret | 6(1)(b) | 1 hour TTL | already auto-expired; GC removes >24h |
 | `vat_id_cache` | `vat_id`,`trader_name`,`trader_addr`,`raw_response` | business id | 6(1)(c) (VAT validation evidence) | 24h TTL | already self-expiring |
-| `abandoned_carts` | `customer_email`,`cart_data` (JSON), `session_id` | direct id | 6(1)(a) consent (cart_recovery cookie) | 30 days | hard DELETE after 30d via GC; consent withdrawal triggers immediate delete |
+| `abandoned_carts` | `customer_email`,`cart_data` (JSON), `session_id` | direct id | 6(1)(a) consent: the optional checkout consent `cart_reminder` (`checkout_consents`; its version, text and time are stored on the cart) | 30 days | hard DELETE after 30d via GC; unticking the consent withdraws it (no cart kept, no reminder); every reminder has a one-click unsubscribe |
 | `audit_log` | `actor` (admin email/id), `ip_address`, `old_value`/`new_value` (may contain PII pre/post change) | direct id + activity | 6(1)(f) security audit | 24 months | scrub PII fields after 24m, keep IDs+actions |
 | `coupon_uses` | `customer_email`,`order_id` | direct id | 6(1)(f) fraud prevention | 24 months post-order | hash email to SHA-256 after 24m (preserve dedup, anonymise) |
 | `shipping_labels` | `awb`,`label_data` (JSON, contains name/address) | direct id + address | 6(1)(b) shipping contract | 18 months (carrier dispute window) | scrub `label_data` after 18m, keep AWB |

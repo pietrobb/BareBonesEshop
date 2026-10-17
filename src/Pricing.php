@@ -403,7 +403,7 @@ class Pricing {
     }
 
     public static function normalizeEmail(string $email): string {
-        return mb_strtolower(trim($email), 'UTF-8');
+        return Str::normalizeEmail($email);
     }
 
     /** Counter subject: '' for all uses, a hash for one customer (no plain e-mail outside coupon_uses). */
@@ -418,7 +418,7 @@ class Pricing {
         $subject = self::couponSubject($email);
         $seed = $db->prepare(Db::insertIgnore() . " INTO coupon_usage_counters (store_id, coupon_code, subject, uses)
             SELECT :store, :code, :subject, COUNT(*) FROM coupon_uses WHERE store_id = :use_store AND coupon_code = :use_code"
-            . ($email === null ? '' : ' AND LOWER(TRIM(customer_email)) = :email'));
+            . ($email === null ? '' : ' AND customer_email = :email'));
         $params = [':store' => $store, ':code' => $code, ':subject' => $subject, ':use_store' => $store, ':use_code' => $code];
         if ($email !== null) $params[':email'] = $email;
         $seed->execute($params);
@@ -438,7 +438,7 @@ class Pricing {
         $claimed = $counter->fetchColumn();
         if ($claimed !== false) return (int)$claimed;
         if ($email !== null) {
-            $stmt = $db->prepare("SELECT COUNT(*) FROM coupon_uses WHERE coupon_code = :code AND LOWER(TRIM(customer_email)) = :email AND store_id = :store");
+            $stmt = $db->prepare("SELECT COUNT(*) FROM coupon_uses WHERE coupon_code = :code AND customer_email = :email AND store_id = :store");
             $stmt->execute([':code' => $code, ':email' => $email, ':store' => $store]);
         } else {
             $stmt = $db->prepare("SELECT COUNT(*) FROM coupon_uses WHERE coupon_code = :code AND store_id = :store");

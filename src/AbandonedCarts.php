@@ -3,6 +3,8 @@
  * Abandoned-cart capture, conversion tracking and the single recovery reminder.
  *
  * Invariants:
+ *  - a cart is only stored with an e-mail, and only reminded, when the shopper ticked the checkout
+ *    consent CONSENT_KEY (config checkout_consents); its version, text and time are kept with the cart,
  *  - a cart gets at most one reminder (claimed atomically before the mail job is queued),
  *  - a cart that became an order is linked to it and never reminded,
  *  - a cart whose e-mail ordered later, or opted out, is never reminded,
@@ -12,12 +14,26 @@ class AbandonedCarts {
     public const STATUS_SENT = 'sent';
     public const STATUS_ORDERED = 'ordered';
     public const STATUS_SUPPRESSED = 'suppressed';
+    /** Checkout consent (config checkout_consents) that allows the reminder e-mail. */
+    public const CONSENT_KEY = 'cart_reminder';
 
-    /** Persist the current session cart with the shopper's e-mail. Never resets a sent reminder. */
-    public static function capture(string $email, ?string $sessionId = null): void {
+    /**
+     * Persist the current session cart with the shopper's e-mail and reminder consent. Never resets a
+     * sent reminder. Without consent nothing is stored, and a cart stored earlier in the session
+     * loses its e-mail and consent (the shopper unticked the box), so it is never reminded.
+     * @param array{version?:string,text?:string}|null $consent the accepted CONSENT_KEY definition
+     */
+    public static function capture(string $email, ?string $sessionId = null, ?array $consent = null): void {
         $email = strtolower(trim($email));
         $sessionId ??= Security::sessionKey();
         if ($sessionId === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) return;
+        if ($consent === null) {
+            Db::get()->prepare("UPDATE abandoned_carts SET customer_email = NULL, reminder_consent_version = NULL,
+                    reminder_consent_text = NULL, reminder_consent_at = NULL
+                WHERE session_id = :sid AND order_id IS NULL AND reminded_at IS NULL")
+                ->execute([':sid' => $sessionId]);
+            return;
+        }
         $summary = Cart::enriched();
         if (empty($summary['items'])) return;
 
@@ -37,19 +53,23 @@ class AbandonedCarts {
             ':currency' => (string)($summary['currency'] ?? 'eur'),
             ':locale' => I18n::locale(),
             ':sid' => $sessionId,
+            ':consent_version' => substr((string)($consent['version'] ?? '1'), 0, 64),
+            ':consent_text' => (string)($consent['text'] ?? ''),
         ];
 
         $db = Db::get();
         $now = Db::now();
         $update = $db->prepare("UPDATE abandoned_carts SET customer_email = :email, cart_data = :data, cart_value = :value,
-            item_count = :count, currency = :currency, locale = :locale, updated_at = {$now}
+            item_count = :count, currency = :currency, locale = :locale, updated_at = {$now},
+            reminder_consent_version = :consent_version, reminder_consent_text = :consent_text, reminder_consent_at = {$now}
             WHERE session_id = :sid AND order_id IS NULL");
         $update->execute($data);
         if ($update->rowCount() > 0) return;
         try {
             $db->prepare("INSERT INTO abandoned_carts (session_id, customer_email, cart_data, cart_value, item_count, currency, locale,
-                    store_id, recovery_token, updated_at)
-                VALUES (:sid, :email, :data, :value, :count, :currency, :locale, :store, :token, {$now})")
+                    store_id, recovery_token, updated_at, reminder_consent_version, reminder_consent_text, reminder_consent_at)
+                VALUES (:sid, :email, :data, :value, :count, :currency, :locale, :store, :token, {$now},
+                    :consent_version, :consent_text, {$now})")
                ->execute($data + [':store' => StoreContext::current()->id(), ':token' => bin2hex(random_bytes(16))]);
         } catch (\PDOException $e) {
             // Concurrent capture for the same session already created the row.
@@ -67,7 +87,11 @@ class AbandonedCarts {
             ->execute([':order' => $orderId, ':status' => self::STATUS_ORDERED, ':archived' => 'order:' . $orderId, ':sid' => $sessionId]);
     }
 
-    /** Queue the single reminder for every due cart. Returns the number of reminders queued. */
+    /**
+     * Queue the single reminder for every due cart with recorded consent. Returns the number of
+     * reminders queued. Links point to the cart's own store (its domain / URL prefix), with the
+     * app_url in $options['base_url'] as the scheme and base path.
+     */
     public static function sweep(array $options = []): int {
         $hours = max(1, (int)($options['delay_hours'] ?? 24));
         $maxAge = max($hours + 1, (int)($options['max_age_hours'] ?? 72));
@@ -81,7 +105,7 @@ class AbandonedCarts {
         $activity = 'COALESCE(updated_at, created_at)';
         $stmt = $db->prepare("SELECT * FROM abandoned_carts
             WHERE order_id IS NULL AND reminded_at IS NULL AND reminder_status IS NULL
-              AND customer_email IS NOT NULL AND customer_email <> ''
+              AND customer_email IS NOT NULL AND customer_email <> '' AND reminder_consent_at IS NOT NULL
               AND {$activity} < {$ago($hours)} AND {$activity} >= {$ago($maxAge)}
             ORDER BY id LIMIT 50");
         $stmt->execute();
@@ -114,21 +138,48 @@ class AbandonedCarts {
                 'to' => $email,
                 'locale' => (string)($cart['locale'] ?? ''),
                 '_store_id' => (string)($cart['store_id'] ?? '') ?: 'default',
-                'vars' => self::mailVars($cart, $baseUrl),
+                'vars' => self::mailVars($cart, self::storeBaseUrl((string)($cart['store_id'] ?? ''), $baseUrl)),
             ], 8);
             $sent++;
         }
         return $sent;
     }
 
-    /** @return array<int,array> newest first; filter = abandoned | converted | all */
+    /**
+     * Public base URL of a store for links in mail sent outside a request: the store's first
+     * domain (keeping the app_url scheme and path) or the app_url, plus the store's url_prefix.
+     */
+    public static function storeBaseUrl(string $storeId, string $appUrl): string {
+        $appUrl = rtrim($appUrl, '/');
+        $store = (Bootstrap::stores()['stores'] ?? [])[$storeId] ?? null;
+        if (!is_array($store)) return $appUrl;
+        $domains = $store['domains'] ?? [];
+        if (is_string($domains)) $domains = [$domains];
+        $domain = is_array($domains) ? strtolower(trim((string)($domains[0] ?? ''))) : '';
+        $base = $appUrl;
+        if ($domain !== '' && filter_var($domain, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) !== false) {
+            $parts = parse_url($appUrl);
+            $base = (string)($parts['scheme'] ?? 'https') . '://' . $domain . rtrim((string)($parts['path'] ?? ''), '/');
+        }
+        $prefix = rtrim((string)($store['url_prefix'] ?? ''), '/');
+        if ($prefix !== '' && str_starts_with($prefix, '/') && !str_contains($prefix, '..') && preg_match('#^[A-Za-z0-9/_-]+$#', $prefix)) {
+            $base .= $prefix;
+        }
+        return $base;
+    }
+
+    /** @return array<int,array> newest first, current store only; filter = abandoned | converted | all */
     public static function list(string $filter = 'abandoned', int $limit = 200): array {
         $where = match ($filter) {
             'converted' => 'order_id IS NOT NULL',
             'all' => '1=1',
             default => "order_id IS NULL AND customer_email IS NOT NULL AND customer_email <> ''",
         };
-        $stmt = Db::get()->prepare("SELECT * FROM abandoned_carts WHERE {$where} ORDER BY id DESC LIMIT :limit");
+        // Rows from before carts carried a store belong to the default store.
+        $store = StoreContext::current()->id();
+        $legacy = $store === (string)(Bootstrap::stores()['default_store'] ?? 'default') ? ' OR store_id IS NULL' : '';
+        $stmt = Db::get()->prepare("SELECT * FROM abandoned_carts WHERE (store_id = :store{$legacy}) AND {$where} ORDER BY id DESC LIMIT :limit");
+        $stmt->bindValue(':store', $store);
         $stmt->bindValue(':limit', max(1, $limit), PDO::PARAM_INT);
         $stmt->execute();
         return array_map(static function (array $row): array {

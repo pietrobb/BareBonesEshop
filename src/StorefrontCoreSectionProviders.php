@@ -15,19 +15,19 @@ final class StorefrontCoreSectionProviders
         });
         self::provider('core.latest-products', static function(array $parameters): array {
             $limit = self::limit($parameters, 12);
-            return ['items' => array_map([StorefrontViewModel::class, 'productCard'], Products::latest($limit))];
+            return ['items' => array_values(StorefrontViewModel::productCards(Products::latest($limit)))];
         });
         self::provider('core.curated-products', static function(array $parameters): array {
-            $items = [];
+            $rows = [];
             foreach (array_slice((array)($parameters['ids'] ?? []), 0, 100) as $id) {
                 $row = Products::byId((int)$id);
-                if ($row) $items[(int)$row['id']] = StorefrontViewModel::productCard($row);
+                if ($row) $rows[(int)$row['id']] = $row;
             }
             foreach (array_slice((array)($parameters['slugs'] ?? []), 0, 100) as $slug) {
                 $row = Products::bySlug(Security::slug((string)$slug));
-                if ($row) $items[(int)$row['id']] = StorefrontViewModel::productCard($row);
+                if ($row) $rows[(int)$row['id']] = $row;
             }
-            return ['items' => array_values($items)];
+            return ['items' => array_values(StorefrontViewModel::productCards($rows))];
         });
         self::provider('core.category-products', static function(array $parameters): array {
             $category = !empty($parameters['id'])
@@ -35,7 +35,7 @@ final class StorefrontCoreSectionProviders
                 : Categories::bySlug(Security::slug((string)($parameters['slug'] ?? '')));
             if (!$category) return ['category' => null, 'items' => []];
             $result = Products::byCategory((int)$category['id'], 1, self::limit($parameters, 12), (string)($parameters['sort'] ?? 'newest'));
-            return ['category' => self::category($category), 'items' => array_map([StorefrontViewModel::class, 'productCard'], $result['products'])];
+            return ['category' => self::category($category), 'items' => array_values(StorefrontViewModel::productCards($result['products']))];
         });
     }
 
@@ -56,7 +56,7 @@ final class StorefrontCoreSectionProviders
             'id' => (int)$row['id'],
             'name' => (string)$row['name'],
             'slug' => (string)$row['slug'],
-            'url' => Template::storeUrl('/category/' . rawurlencode((string)($row['path'] ?? $row['slug']))),
+            'url' => Template::storeUrl('/category/' . rawurlencode((string)$row['slug'])),
             'count' => (int)($row['product_count'] ?? 0),
         ];
     }

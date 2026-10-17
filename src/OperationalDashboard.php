@@ -69,13 +69,7 @@ class OperationalDashboard {
     }
 
     private static function tableExists(PDO $db, string $table): bool {
-        if (Db::isSqlite()) {
-            $stmt = $db->prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=:table");
-        } else {
-            $stmt = $db->prepare('SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=:table');
-        }
-        $stmt->execute([':table' => $table]);
-        return (bool)$stmt->fetchColumn();
+        return Db::tableExists($table, $db);
     }
 
     private static function rows(PDO $db, string $sql, string $storeId, int $limit, ?string $stale = null): array {

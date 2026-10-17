@@ -57,6 +57,9 @@ return [
 
         // JSON API action /api/v1/storefront/acme-loyalty.balance.
         $api->api('balance', static fn(array $query): array => ['points' => AcmeLoyaltyPoints::forCustomer()]);
+
+        // State-changing action: POST only, the session CSRF token is enforced by the core.
+        $api->api('redeem', static fn(array $query): array => AcmeLoyaltyPoints::redeem(), ['method' => 'POST']);
     },
 ];
 ```
@@ -68,7 +71,8 @@ return [
   parameter receive the deployment config, as for core adapters.
 - **Listeners** receive the CloudEvents envelope that outbound webhooks get. They run in
   `cli/worker.php` after the domain transaction committed, at least once. Each listener is
-  its own delivery endpoint `ext-<code>-<name>` in `webhook_deliveries`: a throwing listener
+  its own delivery endpoint `ext:<code>:<name>` in `webhook_deliveries` (":" appears in neither
+  part, so two listeners never share an endpoint; a duplicate fails the extension's load): a throwing listener
   makes the event retry with backoff (up to `Outbox::MAX_ATTEMPTS`), and listeners that
   already succeeded are not run again. Listeners must be idempotent per event `id`.
 - **Storefront** providers return an array, which templates read from
@@ -78,7 +82,14 @@ return [
   `Template::process()` / `Template::render()` (they escape `{{ }}`). Core routes cannot be replaced.
 - **API actions** answer `/api/v1/storefront/<code>.<name>` with the returned array as JSON, under the
   same session, locale and per-action rate limit as core actions. Validate input like core
-  handlers (`Security::int()`, `Security::clean()`); state-changing actions must check CSRF.
+  handlers (`Security::int()`, `Security::clean()`). The third argument of `$api->api()` takes
+  options: `'method' => 'GET'|'POST'` limits the action to that method (others get HTTP 405), and
+  every non-GET/HEAD request must carry the session CSRF token (`X-CSRF-Token` header or a
+  `csrf_token` field, HTTP 403 otherwise). Declare state-changing actions `'method' => 'POST'`
+  so a GET link cannot trigger them. `'csrf' => false` turns the token check off for one action;
+  use it only for a server-to-server call that authenticates its caller itself (a signed webhook).
+  Upgrading from the `ext-<code>-<name>` listener endpoints: a listener of an event that was
+  still being retried during the upgrade may run once more, which the idempotency rule above absorbs.
 - **Failure is per extension and all-or-nothing.** A missing directory, a manifest that does
   not match, an exception in `register()`, a missing or wrong provider class, or a namespace
   outside the extension's own is reported, and none of that extension's registrations are

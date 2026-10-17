@@ -4,28 +4,29 @@ require_once __DIR__ . '/src/autoload.php';
 
 Security::headers();
 $locale = Bootstrap::initLocale();
-$cfg = require __DIR__ . '/config.php';
-$baseUrl = (string)($cfg['app_url'] ?? '');
+$baseUrl = Security::configuredAppUrl();
 $channel = strtolower((string)($_GET['channel'] ?? ''));
 
-try {
-    if ($channel === 'google') {
-        header('Content-Type: application/xml; charset=utf-8');
-        header('Cache-Control: public, max-age=900');
-        echo MarketingFeed::google($baseUrl, $locale);
-        exit;
-    }
-    if ($channel === 'meta') {
-        header('Content-Type: text/csv; charset=utf-8');
-        header('Content-Disposition: inline; filename="meta-catalog.csv"');
-        header('Cache-Control: public, max-age=900');
-        echo MarketingFeed::meta($baseUrl, $locale);
-        exit;
-    }
-    http_response_code(404);
-    echo 'Feed not found';
-} catch (InvalidArgumentException $e) {
+if ($baseUrl === null) {
     http_response_code(503);
     header('Content-Type: text/plain; charset=utf-8');
     echo 'Marketing feed is not configured.';
+    exit;
 }
+$feeds = [
+    'google' => ['google-%s.xml', 'application/xml; charset=utf-8', [MarketingFeed::class, 'writeGoogle']],
+    'meta' => ['meta-%s.csv', 'text/csv; charset=utf-8', [MarketingFeed::class, 'writeMeta']],
+];
+if (!isset($feeds[$channel])) {
+    http_response_code(404);
+    echo 'Feed not found';
+    exit;
+}
+[$name, $contentType, $write] = $feeds[$channel];
+header('Content-Type: ' . $contentType);
+if ($channel === 'meta') header('Content-Disposition: inline; filename="meta-catalog.csv"');
+header('Cache-Control: public, max-age=' . PublicFeedCache::TTL);
+// Rendered once per TTL / catalog change into the store's cache namespace, then streamed from disk.
+PublicFeedCache::send(sprintf($name, $locale), $baseUrl, static function($out) use ($write, $baseUrl, $locale): void {
+    $write($out, $baseUrl, $locale);
+});

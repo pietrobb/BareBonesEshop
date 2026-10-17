@@ -170,7 +170,7 @@ try {
             && !str_contains((string)$r['output'], 'id="summary-discount"') && $a132Kept($form), "{$l}: removing the coupon drops the discount and keeps the form");
 
         [$l, $r] = $a132Do('apply_no_csrf');
-        assert_true($r['new_orders'] === [] && str_contains((string)$r['output'], 'CSRF') && !str_contains((string)$r['output'], 'name="coupon_action" value="remove"'),
+        assert_true($r['new_orders'] === [] && array_filter(array_map(static fn(string $f): string => htmlspecialchars((string)((require $f)['checkout_csrf_error'] ?? ''), ENT_QUOTES, 'UTF-8'), glob(dirname(TEST_CLI_DIR) . '/lang/*.php')), static fn(string $m): bool => str_contains((string)$r['output'], $m)) !== [] && !str_contains((string)$r['output'], 'name="coupon_action" value="remove"'),
             "{$l}: a coupon request without the CSRF token is refused");
 
         [$l, $r] = $a132Do('place');

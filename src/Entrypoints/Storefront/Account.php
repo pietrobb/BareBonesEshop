@@ -41,7 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'register') {
         $fieldValues = $_POST;
-        $email = strtolower(trim(Security::str($_POST['email'] ?? '')));
+        $email = Str::normalizeEmail(Security::str($_POST['email'] ?? ''));
         $password = Security::str($_POST['password'] ?? '');
         $name = Security::clean($_POST['name'] ?? '');
         $rlKey = 'account_register_' . md5($_SERVER['REMOTE_ADDR'] ?? 'cli');
@@ -75,7 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     elseif ($action === 'login') {
         $fieldValues = $_POST;
-        $email = strtolower(trim(Security::str($_POST['email'] ?? '')));
+        $email = Str::normalizeEmail(Security::str($_POST['email'] ?? ''));
         $password = Security::str($_POST['password'] ?? '');
         $emailKey = hash('sha256', $email);
         $ipAllowed = Security::rateLimit('account_login_ip', 30, 900);
@@ -105,7 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     elseif ($action === 'forgot') {
         $fieldValues = $_POST;
-        $email = strtolower(trim(Security::str($_POST['email'] ?? '')));
+        $email = Str::normalizeEmail(Security::str($_POST['email'] ?? ''));
         $emailKey = hash('sha256', $email);
         $ipAllowed = Security::rateLimit('account_forgot_ip', 5, 60);
         $recipientAllowed = Security::rateLimit('account_forgot_recipient_' . $emailKey, 3, 3600, false);

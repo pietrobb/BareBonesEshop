@@ -16,7 +16,8 @@ class LocalStorage implements ImageVariantStorageAdapter {
     ];
 
     public function __construct(array $cfg) {
-        $uploadsDir = (string)($cfg['uploads_dir'] ?? dirname(__DIR__) . '/uploads');
+        // Default to the app root's uploads/ (served as /uploads), not adapters/uploads next to this file.
+        $uploadsDir = (string)($cfg['uploads_dir'] ?? dirname(__DIR__, 2) . '/uploads');
         $this->baseUrl = $cfg['uploads_url'] ?? '/uploads';
         if (!is_dir($uploadsDir) && !@mkdir($uploadsDir, 0750, true) && !is_dir($uploadsDir)) {
             throw new \RuntimeException("Cannot create uploads directory: {$uploadsDir}");

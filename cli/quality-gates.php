@@ -127,6 +127,13 @@ $check($workflows !== [] && $unpinned === [], 'CI actions are pinned to full com
 $check($ci !== '' && $rootCredentials === [], 'CI application and tests use a non-root database user' . ($rootCredentials ? ': ' . implode(', ', $rootCredentials) : ''));
 $check(preg_match('/docker build\b[^\n]*deploy/', $ci) === 1, 'CI builds the deploy Docker image');
 $check(is_file($root . '/eslint.config.js') && str_contains($ci, 'npx eslint'), 'CI lints the storefront JavaScript with ESLint');
+$phpstanScript = (string)@file_get_contents($root . '/cli/phpstan.sh');
+$phpstanPins = static fn(string $source): array => [
+    preg_match("/PHPSTAN_VERSION:?\\s*=?\\s*'([^']+)'/", $source, $v) === 1 ? $v[1] : null,
+    preg_match("/PHPSTAN_SHA256:?\\s*=?\\s*'?([0-9a-f]{64})/", $source, $h) === 1 ? $h[1] : null,
+];
+$check($phpstanScript !== '' && !in_array(null, $phpstanPins($ci), true) && $phpstanPins($ci) === $phpstanPins($phpstanScript),
+    'cli/phpstan.sh pins the same PHPStan version and checksum as CI');
 
 require_once __DIR__ . '/theme-check.php'; $themeContract = runThemeCompatibility(); $check($themeContract['status'] === 'GO', 'Theme checkout contract: ' . $themeContract['checks'] . ' checks; ' . implode("\n", $themeContract['failures']));
 if ($failures) {

@@ -169,6 +169,8 @@ $digitalCommerceMigFile = TEST_CLI_DIR . '/../migrations/20260713093000_digital_
 if (file_exists($digitalCommerceMigFile)) {
     $digitalCommerceMig = require $digitalCommerceMigFile;
     $digitalCommerceMig->up($pdo, true);
+    (require TEST_CLI_DIR . '/../migrations/20261016142000_cart_reminder_consent_download_resume.php')->up($pdo, true);
+    (require TEST_CLI_DIR . '/../migrations/20261016161000_invoice_seller_download_resume_bound.php')->up($pdo, true);
 }
 
 // Shipping tables
@@ -1167,7 +1169,7 @@ for ($i = 0; $i < 3; $i++) {
     assert_equals('sent', $resetMail['status'], 'G4: reset mail within recipient budget is sent');
 }
 $blockedResetMail = MailService::send('account_password_reset', 'flood-target@example.com', 'en', ['reset_url' => 'https://shop.example/reset']);
-assert_equals('skipped', $blockedResetMail['status'], 'G4: fourth reset mail to one recipient is throttled');
+assert_equals('rate_limited', $blockedResetMail['status'], 'G4: fourth reset mail to one recipient is throttled (retryable, not skipped)');
 assert_equals('recipient rate limit', $blockedResetMail['error'], 'G4: recipient throttle returns a stable internal reason');
 
 echo "\n--- Test: Email — SmtpMail rejects bad addresses without connecting ---\n";

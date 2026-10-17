@@ -191,6 +191,10 @@ class Import {
         if ($owner !== false && (string)$owner !== $catalog) {
             throw new \RuntimeException("SKU '{$sku}' belongs to another catalog");
         }
+        // Same rule as the product and variant editors (SkuGuard): a variant's SKU is never a product SKU too.
+        if ($owner === false && SkuGuard::taken($sku)) {
+            throw new \RuntimeException("SKU '{$sku}' is already used by a variant");
+        }
         return $catalog;
     }
 
@@ -237,7 +241,7 @@ class Import {
         if ($has('slug')) $set['slug'] = trim((string)$data['slug']) ?: self::slugify($name);
         if ($has('product_type')) $set['product_type'] = trim((string)$data['product_type']) ?: 'simple';
         if ($has('category')) $set['category_id'] = self::ensureCategory(trim((string)$data['category']) ?: 'uncategorized', $db);
-        if ($has('price')) $set['price'] = self::parsePriceToCents($data['price']);
+        if ($has('price')) $set['price'] = self::assertVariantFloor((int)$existing['id'], self::parsePriceToCents($data['price']));
         if ($has('compare_price')) $set['compare_price'] = !empty($data['compare_price']) ? self::parsePriceToCents($data['compare_price']) : null;
         if ($has('stock') && trim((string)$data['stock']) !== '') $set['stock'] = (int)$data['stock'];
         if ($has('status')) $set['status'] = trim((string)$data['status']) ?: 'active';
@@ -490,23 +494,18 @@ class Import {
             throw new \RuntimeException("Slug '{$slug}' ({$locale}) is already used by another {$entity}");
         }
 
-        // Safe to upsert for the same entity_id (re-import of same product)
-        if (Db::isSqlite()) {
-            $stmt = $db->prepare("
-                INSERT OR REPLACE INTO slug_registry (slug, locale, entity, entity_id)
-                VALUES (:slug, :locale, :entity, :eid)
-            ");
-        } else {
-            $stmt = $db->prepare("
-                REPLACE INTO slug_registry (slug, locale, entity, entity_id)
-                VALUES (:slug, :locale, :entity, :eid)
-            ");
-        }
+        // Safe to upsert for the same entity_id (re-import of same product). The row carries the active catalog:
+        // storefront lookups (Products::bySlug) only resolve slugs registered for the catalog being browsed.
+        $stmt = $db->prepare((Db::isSqlite() ? 'INSERT OR REPLACE' : 'REPLACE') . "
+            INTO slug_registry (slug, locale, entity, entity_id, store_id)
+            VALUES (:slug, :locale, :entity, :eid, :catalog)
+        ");
         $stmt->execute([
-            ':slug'   => $slug,
-            ':locale' => $locale,
-            ':entity' => $entity,
-            ':eid'    => $entityId,
+            ':slug'    => $slug,
+            ':locale'  => $locale,
+            ':entity'  => $entity,
+            ':eid'     => $entityId,
+            ':catalog' => StoreContext::current()->catalogId(),
         ]);
     }
 
@@ -585,16 +584,24 @@ class Import {
         return $value;
     }
 
+    /** A new base price for an existing product; refused when a variant priced by a negative delta would go below zero. */
+    public static function assertVariantFloor(int $productId, int $cents): int {
+        $floor = ProductVariants::minBasePrice($productId);
+        if ($cents < $floor) throw new \InvalidArgumentException("Price must be at least " . self::formatCents($floor) . " (a variant discount would make its price negative)");
+        return $cents;
+    }
+
     /** Price in cents → the CSV format read by parsePriceToCents(): 2398 → "23.98". */
     public static function formatCents(int $cents): string {
         return number_format($cents / 100, 2, '.', '');
     }
 
-    /** Convert price to cents: "19.90" → 1990. Always treats CSV values as euros. */
+    /** Convert price to cents: "19.90" → 1990. Always treats CSV values as euros. A negative price is refused. */
     public static function parsePriceToCents($price): int {
-        if (is_int($price)) return $price; // Already in cents (from code)
-        $price = (float)str_replace(',', '.', (string)$price);
-        return (int)round($price * 100);
+        $cents = is_int($price) ? $price // Already in cents (from code)
+            : (int)round((float)str_replace(',', '.', trim((string)$price)) * 100);
+        if ($cents < 0) throw new \InvalidArgumentException('Price must not be negative');
+        return $cents;
     }
 
     /** Generate URL-safe slug with proper Central European transliteration */

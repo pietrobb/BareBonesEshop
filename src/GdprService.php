@@ -1027,15 +1027,11 @@ class GdprService {
 
     /** Tables added by later migrations may be missing on a partially migrated schema: there is nothing to erase there. */
     private static function hasTable(PDO $db, string $table): bool {
-        return self::tableColumns($db, $table) !== [];
+        return Db::tableExists($table, $db);
     }
 
     private static function tableColumns(PDO $db, string $table): array {
-        if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/D', $table)) throw new InvalidArgumentException('Invalid table name');
-        if (Db::isSqlite()) return array_column($db->query("PRAGMA table_info({$table})")->fetchAll(PDO::FETCH_ASSOC), 'name');
-        $stmt = $db->prepare('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION');
-        $stmt->execute([$table]);
-        return $stmt->fetchAll(PDO::FETCH_COLUMN);
+        return Db::tableColumns($table, $db);
     }
 
     /** Returns config array. Stored separately so tests can stub. */

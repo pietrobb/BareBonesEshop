@@ -119,7 +119,8 @@ class Outbox {
         ?int $responseCode,
         ?string $error
     ): void {
-        if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,63}$/', $endpointCode)) {
+        // Configured endpoints use [a-z0-9_-]; extension listeners are "ext:<code>:<name>".
+        if (!preg_match('/^[a-z0-9][a-z0-9_:-]{0,63}$/', $endpointCode)) {
             throw new InvalidArgumentException('Invalid webhook endpoint code');
         }
         $stmt = Db::get()->prepare("INSERT INTO webhook_deliveries
@@ -156,6 +157,21 @@ class Outbox {
         }
         $delay = min(3600, 5 * (2 ** max(0, $attempts - 1)));
         return self::updateState($eventId, 'retry', gmdate('Y-m-d H:i:s', time() + $delay), $error, $claimedAttempts);
+    }
+
+    /**
+     * Give a claimed event back without consuming the attempt claim() counted: for an event none of
+     * whose failing deliveries was actually tried in this sweep (each was skipped), so a skipped
+     * event can never die unattempted. Guarded by the claim token like the other outcomes; the
+     * event is due again immediately (the next sweep picks it up).
+     */
+    public static function release(string $eventId, int $claimedAttempts, string $reason): bool {
+        $stmt = Db::get()->prepare("UPDATE event_outbox
+            SET status='retry', attempts=attempts-1, available_at=:available, last_error=:error, updated_at=:updated
+            WHERE id=:id AND status='delivering' AND attempts=:attempts AND attempts > 0");
+        $now = gmdate('Y-m-d H:i:s');
+        $stmt->execute([':available' => $now, ':error' => substr($reason, 0, 2000), ':updated' => $now, ':id' => $eventId, ':attempts' => $claimedAttempts]);
+        return $stmt->rowCount() === 1;
     }
 
     public static function markDead(string $eventId, string $error, ?int $claimedAttempts = null): bool {

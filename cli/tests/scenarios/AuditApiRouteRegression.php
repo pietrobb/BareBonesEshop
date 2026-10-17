@@ -33,6 +33,19 @@ foreach ([
 ] as [$arUri, $arBase, $arExpected]) {
     assert_equals($arExpected, ApiRoute::resolve($arUri, $arBase), "API route: {$arUri}" . ($arBase !== '' ? " (base {$arBase})" : ''));
 }
+// A store with a url_prefix calls <prefix>/api/v1/…: the longest matching prefix is stripped, as StoreContext resolves it.
+$arStores = ['default' => ['url_prefix' => ''], 'cz' => ['url_prefix' => '/cs'], 'czb' => ['url_prefix' => '/cs/b2b/']];
+foreach ([
+    ['/cs/api/v1/storefront/cart', '', ['action' => 'cart', 'get' => []]],
+    ['/shop/cs/api/v1/storefront/payment_methods?country=CZ', '/shop', ['action' => 'payment_methods', 'get' => []]],
+    ['/cs/b2b/api/v1/storefront/wishlist', '', ['action' => 'wishlist', 'get' => []]],
+    ['/cs/api/v1/products', '', null],
+    ['/pl/api/v1/storefront/cart', '', null],
+    ['/csx/api/v1/storefront/cart', '', null],
+    ['/cs/api.php', '', null],
+] as [$arUri, $arBase, $arExpected]) {
+    assert_equals($arExpected, ApiRoute::resolve($arUri, $arBase, $arStores), "API route (store prefix): {$arUri}" . ($arBase !== '' ? " (base {$arBase})" : ''));
+}
 assert_equals('https://shop.example/api/v1/webhooks/payment/comgate', ApiRoute::paymentWebhook('https://shop.example', 'comgate'), 'API route: payment notification URL sent to gateways');
 
 // No second entrypoint or rewrite for the old browser API.
@@ -45,7 +58,7 @@ assert_true(str_contains($arNginx, 'rewrite ^/api/v1(?:/.*)?$ /api/v1/index.php 
 // Every caller uses the new routes.
 $arJs = (string)file_get_contents($arRoot . '/themes/default/assets/storefront.js');
 assert_true(str_contains($arJs, "config.apiUrl || '/api/v1/storefront'") && !str_contains($arJs, 'api.php') && !preg_match('/[?&]action=/', $arJs), 'API: storefront JS calls /api/v1/storefront/<action>');
-assert_true(str_contains((string)file_get_contents($arRoot . '/src/Entrypoints/Storefront/Layout.php'), "Template::url('/api/v1/storefront')"), 'API: storefront config points the JS at /api/v1/storefront');
+assert_true(str_contains((string)file_get_contents($arRoot . '/src/Entrypoints/Storefront/Layout.php'), "Template::storeUrl('/api/v1/storefront')"), 'API: storefront config points the JS at <store prefix>/api/v1/storefront');
 foreach (glob($arRoot . '/forms/admin-*.json') ?: [] as $arForm) {
     foreach ((array)(json_decode((string)file_get_contents($arForm), true)['fields'] ?? []) as $arField) {
         if (!isset($arField['options_from'])) continue;

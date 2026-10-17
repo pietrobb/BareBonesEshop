@@ -234,8 +234,9 @@ require $script;
     }
     foreach (['vehicle&ktype=1', 'oe&q=1K0', 'acme-shop.unknown', 'bad-route.ok'] as $edPage) {
         [$edStatus, $edBody] = $edGet('/?page=' . $edPage);
-        assert_true($edStatus === 200 && !preg_match('/Fatal error|Uncaught|TypeError/', $edBody) && !str_contains($edBody, 'leaked'),
-            "Generic core HTTP: /?page={$edPage} is not a route any more and falls back to the home page ({$edStatus})");
+        // Storefront core audit: an unknown page is a real 404 page, not the homepage answered with 200.
+        assert_true($edStatus === 404 && !preg_match('/Fatal error|Uncaught|TypeError/', $edBody) && !str_contains($edBody, 'leaked'),
+            "Generic core HTTP: /?page={$edPage} is not a route any more and answers a 404 page ({$edStatus})");
     }
 } finally {
     if (is_resource($edServer)) {

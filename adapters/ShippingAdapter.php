@@ -11,14 +11,16 @@ interface ShippingAdapter
      * @param array $params {
      *   country   string  ISO-3166 country code (e.g. 'SK', 'CZ', 'DE')
      *   weight_g  int     Total package weight in grams
-     *   subtotal  int     Cart subtotal in cents (for free-shipping threshold)
+     *   subtotal  int     Cart subtotal in minor units of `currency` (for free-shipping threshold)
+     *   currency  string  ISO-4217 store currency (e.g. 'EUR', 'CZK'); every amount in and out is in it.
+     *                     An adapter whose prices exist only in another currency returns [] (no quote).
      *   cod       bool    Customer wants cash-on-delivery
      * }
      * @return array[] List of rate options: [{
      *   carrier      string  Adapter identifier (e.g. 'packeta')
      *   label        string  Human-readable name (locale-aware)
-     *   price        int     Shipping price in cents (0 = free)
-     *   cod_surcharge int    Additional COD fee in cents (0 if not applicable)
+     *   price        int     Shipping price in minor units of `currency` (0 = free)
+     *   cod_surcharge int    Additional COD fee in minor units (0 if not applicable)
      *   delivery_days string Estimated delivery range, e.g. '1-2'
      *   cod          bool    Whether COD is available for this option
      * }]

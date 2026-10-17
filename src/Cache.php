@@ -78,6 +78,72 @@ class Cache {
     }
 
     /**
+     * Filesystem path of an entry that is fresh (TTL and flush marker), for streaming large
+     * entries (sitemap, feeds) to the client without loading them into memory; null when stale.
+     */
+    public static function freshFile(string $path, int $ttl): ?string {
+        $file = self::path($path);
+        clearstatcache(true, $file);
+        if (!is_file($file)) return null;
+        $flushMarker = self::path('.flush_marker');
+        if (is_file($flushMarker) && filemtime($file) < (int)file_get_contents($flushMarker)) return null;
+        return (time() - (int)filemtime($file)) > $ttl ? null : $file;
+    }
+
+    /** writeStream(): the entry was replaced; 'file' is the cached entry. */
+    public const STREAM_CACHED = 'cached';
+    /** writeStream(): the writer ran but the entry could not be replaced; 'file' is a temporary copy the caller serves and unlinks. */
+    public const STREAM_NOT_CACHED = 'not_cached';
+    /** writeStream(): nothing writable, the writer did not run; 'file' is null. */
+    public const STREAM_UNWRITABLE = 'unwritable';
+
+    /**
+     * Atomically replace an entry with what $writer streams into the handle it is given.
+     * The status tells the caller whether the writer ran, so it never runs it twice:
+     * STREAM_CACHED (file = entry), STREAM_NOT_CACHED (written, rename failed; file = temporary copy
+     * to serve and unlink) or STREAM_UNWRITABLE (writer not run; file = null).
+     * A failing writer leaves the previous entry in place and its exception propagates.
+     * @param callable(resource): void $writer
+     * @return array{status: string, file: ?string}
+     */
+    public static function writeStream(string $path, callable $writer): array {
+        $file = self::path($path);
+        $dir = dirname($file);
+        $tmp = $file . '.tmp.' . getmypid() . '.' . bin2hex(random_bytes(4));
+        $handle = (is_dir($dir) || @mkdir($dir, 0750, true) || is_dir($dir)) ? @fopen($tmp, 'wb') : false;
+        if ($handle === false) {
+            Logger::warning('cache.write_failed', ['path' => $path]);
+            return ['status' => self::STREAM_UNWRITABLE, 'file' => null];
+        }
+        try {
+            $writer($handle);
+        } catch (Throwable $e) {
+            fclose($handle);
+            @unlink($tmp);
+            throw $e;
+        }
+        if (!fclose($handle) || !self::renameFile($tmp, $file)) {
+            Logger::warning('cache.write_failed', ['path' => $path]);
+            return is_file($tmp)
+                ? ['status' => self::STREAM_NOT_CACHED, 'file' => $tmp]
+                : ['status' => self::STREAM_UNWRITABLE, 'file' => null];
+        }
+        return ['status' => self::STREAM_CACHED, 'file' => $file];
+    }
+
+    /** @var (callable(string, string): bool)|null test hook that replaces rename() */
+    private static $renameHook = null;
+
+    /** @param (callable(string, string): bool)|null $hook */
+    public static function setRenameHookForTesting(?callable $hook): void {
+        self::$renameHook = $hook;
+    }
+
+    private static function renameFile(string $from, string $to): bool {
+        return self::$renameHook !== null ? (bool)(self::$renameHook)($from, $to) : @rename($from, $to);
+    }
+
+    /**
      * Write JSON to cache
      */
     public static function writeJson(string $path, array $data): void {
@@ -167,20 +233,5 @@ class Cache {
                 touch($path, 1);
             }
         }
-    }
-
-    /** Delete directory recursively (used only by flush for cleanup) */
-    private static function deleteDir(string $dir): void {
-        if (!is_dir($dir)) return;
-        $files = array_diff(scandir($dir), ['.', '..']);
-        foreach ($files as $file) {
-            $path = $dir . '/' . $file;
-            if (is_dir($path)) {
-                self::deleteDir($path);
-            } else {
-                @unlink($path);
-            }
-        }
-        @rmdir($dir);
     }
 }

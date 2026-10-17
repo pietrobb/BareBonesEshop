@@ -74,6 +74,31 @@ if (!class_exists('Redis') || $rqHost === '') {
         assert_true(!in_array($rqId, array_column($rqQueue->pull(10), 'id'), true), 'RedisQueue: an expired lease at max_attempts is not re-delivered');
         $rqFailures = array_values(array_filter($rqQueue->failures(10), static fn(array $row): bool => $row['id'] === $rqId));
         assert_true(str_contains((string)($rqFailures[0]['last_error'] ?? ''), 'lease expired'), 'RedisQueue: the dead-lettered job records why it failed');
+
+        // Retention: completed job hashes expire (completed_ttl_seconds) and the daily cleanup trims the
+        // completed index by age; before, both grew forever and RetentionCleanup never looked at Redis.
+        $rqTtlQueue = new RedisQueue($rqConfig + ['completed_ttl_seconds' => 120]);
+        $rqId = $rqTtlQueue->push('redis_probe', ['n' => 4]);
+        $rqJob = array_values(array_filter($rqTtlQueue->pull(10), static fn(array $job): bool => $job['id'] === $rqId))[0] ?? [];
+        $rqTtlQueue->complete($rqTtlQueue->markProcessing($rqJob));
+        $rqTtl = (int)$rqRedis->ttl($rqPrefix . 'job:' . $rqId);
+        assert_true($rqTtl > 0 && $rqTtl <= 120, 'RedisQueue: a completed job hash expires after completed_ttl_seconds');
+        $rqDefaultTtl = (int)$rqRedis->ttl($rqPrefix . 'job:' . $rqClaimOf($rqClaimB));
+        assert_true($rqDefaultTtl > 120 && $rqDefaultTtl <= RedisQueue::COMPLETED_TTL_SECONDS, 'RedisQueue: the default expiry is 7 days');
+        $rqRedis->zAdd($rqPrefix . 'completed', time() - 8 * 86400, $rqId);
+        JobQueue::useBackend($rqTtlQueue);
+        try {
+            $rqDeleted = RetentionCleanup::run(['completed_jobs_days' => 7]);
+        } finally {
+            JobQueue::useBackend(null); // back to the file queue the suite uses
+        }
+        assert_true(($rqDeleted['redis_jobs'] ?? 0) === 1 && $rqRedis->zScore($rqPrefix . 'completed', $rqId) === false && !$rqRedis->exists($rqPrefix . 'job:' . $rqId),
+            'RedisQueue: retention cleanup trims completed jobs older than completed_jobs_days from the index and deletes their hash');
+        assert_true($rqRedis->zScore($rqPrefix . 'completed', $rqClaimOf($rqClaimB)) !== false, 'RedisQueue: younger completed jobs stay');
+
+        // Delayed push (rate-limited mail retries): not pulled before its time.
+        $rqId = $rqTtlQueue->pushAt('redis_probe', ['n' => 5], time() + 600);
+        assert_true(!in_array($rqId, array_column($rqTtlQueue->pull(100), 'id'), true), 'RedisQueue: a delayed job is not pulled before its time');
     } finally {
         $rqKeys = $rqRedis->keys($rqPrefix . '*');
         if ($rqKeys) $rqRedis->del($rqKeys);

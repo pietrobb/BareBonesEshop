@@ -17,39 +17,45 @@ class Reviews {
     private const MAX_TITLE  = 150;
     private const MAX_BODY   = 2000;
     private const MIN_BODY   = 3;
+    public const MAX_AUTHOR  = 80;
+    /** Seconds one customer (guests: one session) waits before reviewing the same product again. */
+    public const DUPLICATE_WINDOW = 86400;
+    /** Guest reviews of one product per client IP and DUPLICATE_WINDOW (coarse: an IP may be a whole office or CDN edge). */
+    public const GUEST_IP_CAP = 5;
 
     public const STATUSES = ['pending', 'approved', 'rejected'];
 
     /**
+     * The stable error code submit() would return for this input, or null when it would be stored.
+     * Callers run it before spending a duplicate-guard slot on input that is refused anyway.
+     */
+    public static function validationError(int $productId, array $data): ?string {
+        if ($productId <= 0) return 'invalid_product';
+        $rating = (int)($data['rating'] ?? 0);
+        if ($rating < self::MIN_RATING || $rating > self::MAX_RATING) return 'invalid_rating';
+        $body = trim((string)($data['body'] ?? ''));
+        if (mb_strlen($body) < self::MIN_BODY) return 'body_too_short';
+        if (mb_strlen($body) > self::MAX_BODY) return 'body_too_long';
+        $authorName = trim((string)($data['author_name'] ?? ''));
+        if ($authorName === '') return 'author_required';
+        if (mb_strlen($authorName) > self::MAX_AUTHOR) return 'author_too_long';
+        return null;
+    }
+
+    /**
      * Submit a new review. Always stored as 'pending'.
      * Returns [success, id|null, error|null]; errors are stable strings for
-     * form display (invalid_rating, body_too_short, body_too_long, author_required).
+     * form display (invalid_rating, body_too_short, body_too_long, author_required, author_too_long).
      */
     public static function submit(int $productId, array $data): array {
-        if ($productId <= 0) {
-            return [false, null, 'invalid_product'];
-        }
-        $rating = (int)($data['rating'] ?? 0);
-        if ($rating < self::MIN_RATING || $rating > self::MAX_RATING) {
-            return [false, null, 'invalid_rating'];
-        }
-        $body = trim((string)($data['body'] ?? ''));
-        if (mb_strlen($body) < self::MIN_BODY) {
-            return [false, null, 'body_too_short'];
-        }
-        if (mb_strlen($body) > self::MAX_BODY) {
-            return [false, null, 'body_too_long'];
-        }
-        $title = trim((string)($data['title'] ?? ''));
-        if (mb_strlen($title) > self::MAX_TITLE) {
-            $title = mb_substr($title, 0, self::MAX_TITLE);
-        }
+        $error = self::validationError($productId, $data);
+        if ($error !== null) return [false, null, $error];
+        $rating = (int)$data['rating'];
+        $body = trim((string)$data['body']);
+        $title = mb_substr(trim((string)($data['title'] ?? '')), 0, self::MAX_TITLE);
         $customerId = isset($data['customer_id']) ? (int)$data['customer_id'] : 0;
         $customerId = $customerId > 0 ? $customerId : null;
-        $authorName = trim((string)($data['author_name'] ?? ''));
-        if ($authorName === '') {
-            return [false, null, 'author_required'];
-        }
+        $authorName = trim((string)$data['author_name']);
 
         $db = Db::get();
         $ins = $db->prepare(

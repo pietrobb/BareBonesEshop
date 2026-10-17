@@ -265,7 +265,9 @@ function handleCustomerStatus(): void {
     Security::adminRequire('customers.edit');
     $id = Security::int($_POST['customer_id'] ?? 0);
     $status = Security::clean($_POST['status'] ?? '');
+    $before = $id > 0 ? Customers::byId($id) : null;
     if ($id > 0 && Customers::setStatus($id, $status)) {
+        AuditLog::log('customer', $id, ['status' => $before['status'] ?? null], ['status' => $status], 'Admin customer status');
         setFlash('ok', I18n::format('admin.customers.status_changed', ['id' => $id, 'status' => $status]));
     } else {
         setFlash('err', I18n::t('admin.customers.status_failed'));

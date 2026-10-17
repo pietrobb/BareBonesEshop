@@ -221,21 +221,6 @@ final class UpdatePackageBuilder
 
     private static function removeTree(string $path): void
     {
-        if (!is_dir($path) || is_link($path)) {
-            @unlink($path);
-            return;
-        }
-        $items = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::CHILD_FIRST
-        );
-        foreach ($items as $item) {
-            if ($item->isDir() && !$item->isLink()) {
-                @rmdir($item->getPathname());
-            } else {
-                @unlink($item->getPathname());
-            }
-        }
-        @rmdir($path);
+        FileSystem::removeTree($path);
     }
 }

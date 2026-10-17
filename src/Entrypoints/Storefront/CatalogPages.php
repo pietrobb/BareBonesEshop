@@ -8,8 +8,13 @@ function renderLegalPage(string $page): string {
     $legal = StoreContext::current()->legal();
     $vars = [];
     foreach ($legal as $key => $value) $vars['{{' . $key . '}}'] = esc((string)$value);
-    $vars['{{updated_at}}'] = date('Y-m-d');
-    return Template::render('storefront/legal-page', ['content_html' => strtr((string)file_get_contents($tpl), $vars)]);
+    // The date the text last changed: the store's legal.updated_at, else the template's own
+    // <!-- legal-updated: YYYY-MM-DD --> marker, else the template file's mtime — never "today".
+    $html = (string)file_get_contents($tpl);
+    $updated = (string)($legal['updated_at'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $updated)) $updated = preg_match('/<!--\s*legal-updated:\s*(\d{4}-\d{2}-\d{2})\s*-->/', $html, $m) ? $m[1] : date('Y-m-d', (int)filemtime($tpl));
+    $vars['{{updated_at}}'] = esc($updated);
+    return Template::render('storefront/legal-page', ['content_html' => strtr($html, $vars)]);
 }
 
 function renderHome(): string {
@@ -27,22 +32,35 @@ function renderProduct(array $product): string {
 function renderCategory(array $cat): string {
     global $catName, $t, $lang;
     $catId = (int)$cat['id'];
-    $selected = !empty($_GET['subcat']) && is_array($_GET['subcat']) ? array_map('intval', $_GET['subcat']) : [];
     $ids = Categories::descendantIds($catId);
+    // subcat[] may only narrow to real descendants of this category (bounded: one descendant lookup each).
+    $selected = !empty($_GET['subcat']) && is_array($_GET['subcat'])
+        ? array_slice(array_values(array_intersect(array_unique(array_map('intval', array_filter($_GET['subcat'], 'is_scalar'))), array_map('intval', $ids))), 0, 50)
+        : [];
     if ($selected) {
-        $ids = [];
-        foreach ($selected as $id) $ids = array_merge($ids, Categories::descendantIds($id));
-        $ids = array_values(array_unique($ids));
+        $narrowed = [];
+        foreach ($selected as $id) $narrowed = array_merge($narrowed, Categories::descendantIds($id));
+        $ids = array_values(array_unique($narrowed));
     }
-    $page = max(1, Security::int($_GET['pg'] ?? 1));
+    $page = max(1, min(Search::MAX_PAGE, Security::int($_GET['pg'] ?? 1)));
     $sort = Security::clean($_GET['sort'] ?? 'price_asc');
+    // Only scalar values pass here; Products::parametricSearch() keeps the category's own facets, capped (max_input_vars bounds the loop).
     $spec = [];
-    foreach ((array)($_GET['spec'] ?? []) as $name => $values) $spec[Security::clean($name)] = array_map([Security::class, 'clean'], (array)$values);
-    $pmin = !empty($_GET['pmin']) ? Security::int($_GET['pmin']) * 100 : null;
-    $pmax = !empty($_GET['pmax']) ? Security::int($_GET['pmax']) * 100 : null;
+    foreach (is_array($_GET['spec'] ?? null) ? $_GET['spec'] : [] as $name => $values) {
+        $spec[Security::clean((string)$name)] = array_map([Security::class, 'clean'], array_slice(array_filter((array)$values, 'is_scalar'), 0, Products::MAX_FILTER_VALUES));
+    }
+    $money = static fn(string $key): ?int => !empty($_GET[$key]) && is_scalar($_GET[$key]) ? max(0, min(Search::MAX_PRICE_FILTER, Security::int($_GET[$key]))) * 100 : null;
+    $pmin = $money('pmin');
+    $pmax = $money('pmax');
     $ranges = [];
-    foreach (['rmin' => 'min', 'rmax' => 'max'] as $input => $edge) foreach ((array)($_GET[$input] ?? []) as $name => $value) if ($value !== '') $ranges[Security::clean($name)][$edge] = (float)$value;
+    foreach (['rmin' => 'min', 'rmax' => 'max'] as $input => $edge) {
+        foreach (is_array($_GET[$input] ?? null) ? $_GET[$input] : [] as $name => $value) {
+            if (is_scalar($value) && is_numeric($value)) $ranges[Security::clean((string)$name)][$edge] = (float)$value;
+        }
+    }
     $result = Products::parametricSearch($ids, $page, 24, $sort, $spec, $pmin, $pmax, $lang, $ranges);
+    $spec = $result['applied_spec'];
+    $ranges = $result['applied_ranges'];
     $children = array_values(array_filter(Categories::children($catId), static fn(array $row): bool => (int)$row['product_count'] > 0));
     $filters = [];
     foreach ($result['filters'] as $name => $values) {
@@ -89,7 +107,7 @@ function renderSearchPage(string $query, array $result, string $heading, string 
     ] + $filterView + ['show_filters' => false]);
 }
 
-function storefrontProductItems(array $products): array { return array_map([StorefrontViewModel::class, 'productCard'], Products::enrichMany($products)); }
+function storefrontProductItems(array $products): array { return array_values(StorefrontViewModel::productCards($products)); }
 function storefrontPagination(int $page, int $pages, string $base): array {
     if ($pages <= 1) return [];
     $separator = str_contains($base, '?') ? '&' : '?'; $links = [];
@@ -97,7 +115,8 @@ function storefrontPagination(int $page, int $pages, string $base): array {
     return $links;
 }
 function buildCategoryUrl(string $slug, string $sort, array $spec, ?int $pmin, ?int $pmax, array $subcats=[], array $ranges=[]): string {
-    $url='?page=category&slug='.rawurlencode($slug).'&sort='.rawurlencode($sort);
+    // The default order adds no sort= (robots.txt disallows sort URLs; pagination must stay crawlable).
+    $url='?page=category&slug='.rawurlencode($slug).($sort!=='price_asc'?'&sort='.rawurlencode($sort):'');
     foreach($subcats as $id)$url.='&subcat[]='.(int)$id;
     foreach($spec as $name=>$values)foreach($values as $value)$url.='&spec['.rawurlencode($name).'][]='.rawurlencode($value);
     if($pmin)$url.='&pmin='.(int)($pmin/100); if($pmax)$url.='&pmax='.(int)($pmax/100);

@@ -120,6 +120,11 @@ function runStagingPreflight(array $argvLocal = []): array {
         'backup_log_file' => (string)($cfg['backup_log_file'] ?? ''),
         'metrics_log_file' => (string)($cfg['metrics_log_file'] ?? ''),
         'gdpr_salt_file' => (string)($cfg['gdpr_salt_file'] ?? ''),
+        // Unset, both fall back to <private_runtime_dir>/... as BackupService and cli/update.php do.
+        'backup_recovery_dir' => (string)($cfg['backup_recovery_dir'] ?? '')
+            ?: ((string)($cfg['private_runtime_dir'] ?? '') !== '' ? rtrim((string)$cfg['private_runtime_dir'], '/\\') . '/restore-recovery' : ''),
+        'update_storage_dir' => (string)($cfg['update_storage_dir']
+            ?? ((string)($cfg['private_runtime_dir'] ?? '') !== '' ? rtrim((string)$cfg['private_runtime_dir'], '/\\') . '/updates' : '')),
     ];
     foreach ($privatePaths as $key => $path) {
         $ok = $path !== '' && $privatePathOk($path);
@@ -143,6 +148,16 @@ function runStagingPreflight(array $argvLocal = []): array {
         $add($filled ? 'ok' : 'fail', "shipping_webhook_secret:{$carrier}", $filled ? ucfirst($carrier) . ' webhook secret configured.' : ucfirst($carrier) . ' webhook secret missing/placeholder.', "Set {$envKey} or shipping_webhook_secrets.{$carrier}.");
     }
 
+    // Settings that silently change behaviour after this upgrade (CHANGELOG "Upgrade notes").
+    $insecureWebhooks = UpgradeChecks::insecureHttpWebhooks($cfg);
+    $add($insecureWebhooks === [] ? 'ok' : 'warn', 'webhook_http', $insecureWebhooks === [] ? 'No outbound webhook relies on plain http.' : 'Outbound webhooks over plain http are no longer delivered: ' . implode(', ', array_keys($insecureWebhooks)), 'Use https, or allow_insecure_http => true only for a receiver on a trusted local network.');
+    $reminderWithoutConsent = UpgradeChecks::cartReminderWithoutConsent($cfg);
+    $add($reminderWithoutConsent ? 'warn' : 'ok', 'cart_reminder_consent', $reminderWithoutConsent ? 'cart_reminder is enabled without an active checkout_consents.cart_reminder: no reminder is stored or sent.' : 'Cart reminder consent configuration is consistent.', "Add checkout_consents['cart_reminder'] (version, text, required => false) or disable cart_reminder.");
+    $nginxFallback = UpgradeChecks::nginxPhpFallback($cfg);
+    if ($nginxFallback !== null) {
+        $add($nginxFallback ? 'ok' : 'warn', 'nginx_php_fallback', $nginxFallback ? 'nginx sends missing .php scripts to @redirect.' : 'nginx PHP location lacks "try_files $uri @redirect;": store-prefixed scripts (/cs/account.php, /cs/wishlist.php) answer 404.', 'Copy the location ~ \.php$ block from deploy/nginx.conf into operations.nginx_config and reload nginx.');
+    }
+
     $mailAdapter = strtolower(preflightEnv('MAIL_ADAPTER') ?: 'log');
     $add($mailAdapter === 'log' ? 'warn' : 'ok', 'mail_adapter', "MAIL_ADAPTER={$mailAdapter}", $mailAdapter === 'log' ? 'For staging email delivery tests, configure smtp or ses; log is safe but does not send.' : '');
 
@@ -153,6 +168,10 @@ function runStagingPreflight(array $argvLocal = []): array {
             $encoded = strtolower(json_encode($data));
             $hasExample = str_contains($encoded, 'example.') || str_contains($encoded, '12345678') || str_contains($encoded, 'woodle');
             $add($hasExample ? 'warn' : 'ok', 'legal_placeholders', $hasExample ? 'Store legal/contact data appears to contain demo/example values.' : 'Store legal/contact data does not contain obvious demo markers.', 'Replace stores.json legal blocks with staging/real merchant values before production.');
+            $numbering = InvoiceService::numberingConflicts($data);
+            $add($numbering === [] ? 'ok' : 'fail', 'invoice_numbering', $numbering === [] ? 'Every seller has its own invoice and credit-note number series.'
+                : 'Invoice numbering conflicts (refused at issue time): ' . implode(' | ', array_map(static fn(string $series, string $message): string => "{$series}: {$message}", array_keys($numbering), $numbering)),
+                'Give each store with its own legal block its own legal.invoice_prefix / legal.credit_note_prefix, or set legal.seller to the store whose series a storefront of the same company shares.');
         }
     }
 

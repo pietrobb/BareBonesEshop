@@ -14,7 +14,8 @@ declare(strict_types=1);
  * service will detect mpdf/autoload.php and route through Mpdf. See
  * vendor/mpdf/README.md.
  *
- * Numbering: per-(year, prefix) monotonic via invoice_counters table.
+ * Numbering: gapless per (seller store, document type, year, prefix) via the invoice_number_counters table;
+ * two series may never share a prefix (numberingConflicts(), allocateNumber()).
  * Format: {prefix}{YYYY}{NNNN}, e.g. "20260001", "DE-20260001".
  *
  * Storage: configured private invoice_storage_dir, outside the webroot.
@@ -23,6 +24,7 @@ declare(strict_types=1);
 final class InvoiceService
 {
     private static ?string $storageDir = null;
+    private static ?array $storesOverride = null;
     /** Lowest baseline (mm from the top of A4) for invoice body text; the register note sits at 285 mm. */
     private const PDF_CONTENT_BOTTOM_MM = 278.0;
 
@@ -36,8 +38,18 @@ final class InvoiceService
         'NL', 'PL', 'PT', 'RO', 'SE', 'SI', 'SK', 'GR',
     ];
 
+    /** Order statuses after payment: only these orders get an invoice (admin button, worker, backfill alike). */
+    public const INVOICEABLE_STATUSES = ['paid', 'processing', 'shipped', 'delivered'];
+
+    /** True when the order may be invoiced: it reached a paid status and its payment did not fail or get cancelled. */
+    public static function canIssue(array $order): bool
+    {
+        return in_array((string)($order['status'] ?? ''), self::INVOICEABLE_STATUSES, true)
+            && !in_array((string)($order['payment_status'] ?? ''), ['cancelled', 'failed'], true);
+    }
+
     /**
-     * Issue an invoice for a paid order. Idempotent: re-calling for the
+     * Issue an invoice for a paid order (see canIssue()). Idempotent: re-calling for the
      * same order_id returns the existing invoice.
      *
      * @return array Invoice row.
@@ -53,9 +65,12 @@ final class InvoiceService
         if (!$order) {
             throw new \RuntimeException("Order #{$orderId} not found");
         }
+        if (!self::canIssue($order)) {
+            throw new \RuntimeException("Order #{$orderId} is not paid (status {$order['status']}); no invoice is issued");
+        }
 
         $items  = Orders::items($orderId);
-        $store  = self::resolveStore($order, $storeCode);
+        [$sellerCode, $store] = self::resolveStore($order, $storeCode);
         $legal  = $store['legal'] ?? [];
 
         $sellerSnapshot   = self::sellerSnapshot($legal);
@@ -73,8 +88,8 @@ final class InvoiceService
         try {
             // Allocate next number atomically.
             $year   = (int)date('Y', strtotime($issuedAt));
-            $prefix = (string)($legal['invoice_prefix'] ?? '');
-            $number = self::allocateNumber($db, $year, $prefix);
+            $prefix = self::numberPrefix($legal, 'invoice');
+            $number = self::allocateNumber($db, $sellerCode, 'invoice', $year, $prefix);
 
             $token  = bin2hex(random_bytes(32));
 
@@ -124,6 +139,9 @@ final class InvoiceService
                 ':financial_snapshot'=> $financialSnapshot === null ? null : json_encode($financialSnapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             ]);
             $invoiceId = (int)$db->lastInsertId();
+            self::recordSeller($db, $invoiceId, $sellerCode);
+            AuditLog::log('invoice', $invoiceId, null, ['number' => $number, 'order_id' => $orderId, 'type' => 'invoice', 'seller' => $sellerCode,
+                'total_gross' => (int)$order['total'], 'currency' => (string)($order['currency'] ?? 'eur')], 'Invoice issued');
 
             $db->commit();
         } catch (\PDOException $e) {
@@ -297,16 +315,17 @@ final class InvoiceService
         ];
         $creditData['fingerprint'] = hash('sha256', json_encode($creditData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
         $issuedAt = date('Y-m-d');
-        $store = self::resolveStore($order, null);
+        // The credit note continues the source invoice's seller (its series and snapshot), not the order's current store.
+        [$sellerCode, $store] = self::creditSeller($source, $order);
         $legal = $store['legal'] ?? [];
-        $prefix = (string)($legal['credit_note_prefix'] ?? 'CN-');
+        $prefix = self::numberPrefix($legal, 'credit_note');
         $year = (int)date('Y');
         $number = '';
         $invoiceId = 0;
         $refundId = 0;
         $db->beginTransaction();
         try {
-            $number = self::allocateNumber($db, $year, $prefix);
+            $number = self::allocateNumber($db, $sellerCode, 'credit_note', $year, $prefix);
             $relPath = sprintf('%d/%02d/%s.pdf', $year, (int)date('m'), rawurlencode($number));
             $token = bin2hex(random_bytes(32));
             $insert = $db->prepare("INSERT INTO invoices
@@ -329,6 +348,7 @@ final class InvoiceService
                 ':credit' => json_encode($creditData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             ]);
             $invoiceId = (int)$db->lastInsertId();
+            self::recordSeller($db, $invoiceId, $sellerCode);
             $refund = $db->prepare("INSERT INTO order_refunds
                 (store_id, order_id, rma_id, credit_note_id, amount, currency, status, idempotency_key)
                 VALUES (:store, :order, :rma, :credit, :amount, :currency, 'pending', :key)");
@@ -477,9 +497,10 @@ final class InvoiceService
         $where = ['store_id = :store'];
         $params = [':store' => StoreContext::current()->id()];
         if ($year !== null) {
-            $where[] = "substr(number, instr(number, '-')+1, 4) = :y_pref OR (instr(number, '-')=0 AND substr(number, 1, 4) = :y)";
+            // Parenthesized so the year filter never escapes the store filter; the issue date (not the number,
+            // whose prefix may itself contain dashes, e.g. "CZ-CN-") gives the year.
+            $where[] = "(substr(issued_at, 1, 4) = :y)";
             $params[':y'] = (string)$year;
-            $params[':y_pref'] = (string)$year;
         }
         $sql = "SELECT * FROM invoices";
         if ($where) $sql .= " WHERE " . implode(' AND ', $where);
@@ -516,35 +537,287 @@ final class InvoiceService
     // Internal helpers
     // ──────────────────────────────────────────────────────────────────
 
-    private static function allocateNumber(PDO $db, int $year, string $prefix): string
+    /**
+     * Number prefix of a seller's document type: legal.invoice_prefix for invoices; legal.credit_note_prefix for
+     * credit notes, by default "<invoice_prefix>CN-" so sellers with distinct invoice prefixes never share a series.
+     */
+    public static function numberPrefix(array $legal, string $type): string
     {
-        // INSERT IF NOT EXISTS — driver-aware (INSERT OR IGNORE / INSERT IGNORE).
-        $db->prepare(Db::insertIgnore() . " INTO invoice_counters (year, prefix, last_number) VALUES (:y, :p, 0)")
-           ->execute([':y' => $year, ':p' => $prefix]);
+        $invoicePrefix = (string)($legal['invoice_prefix'] ?? '');
+        return $type === 'credit_note' ? (string)($legal['credit_note_prefix'] ?? $invoicePrefix . 'CN-') : $invoicePrefix;
+    }
 
-        // Update + read in same statement (SQLite 3.35+ supports RETURNING; fallback otherwise).
-        $hasReturning = false;
-        try {
-            $stmt = $db->prepare("UPDATE invoice_counters SET last_number = last_number + 1
-                                  WHERE year = :y AND prefix = :p RETURNING last_number");
-            $stmt->execute([':y' => $year, ':p' => $prefix]);
-            $row = $stmt->fetch();
-            if ($row && isset($row['last_number'])) {
-                $hasReturning = true;
-                $next = (int)$row['last_number'];
+    /** stores.json as InvoiceService reads it (the test override when one is set). */
+    public static function storesRoot(): array
+    {
+        return self::storesConfig();
+    }
+
+    /** Replace stores.json for tests (null reads the file again). */
+    public static function setStoresConfigForTesting(?array $root): void
+    {
+        self::$storesOverride = $root;
+    }
+
+    /**
+     * Seller of a configured store: the legal entity whose invoice and credit-note number series (and counters) the
+     * store's documents use.
+     * - A store with its own non-empty `legal` block is its own seller, unless legal.seller names another store that
+     *   is a seller itself: storefronts of one company then share that store's series and counter (its prefixes;
+     *   their own legal fields only override the printed seller details).
+     * - A store without a `legal` block is no seller of its own (as before per-seller numbering, when its documents
+     *   used the store found by the order's currency): it invoices as the first seller selling in the order's
+     *   currency, else as the default store's seller, else as the first seller configured.
+     * Null for an unknown store, or a legal.seller that names no seller (numberingConflicts() reports it).
+     */
+    public static function sellerCode(array $root, string $storeCode, ?string $currency = null): ?string
+    {
+        $stores = self::storeMap($root);
+        if (!isset($stores[$storeCode])) return null;
+        $legal = self::legalBlock($stores[$storeCode]);
+        if ($legal === null) return self::fallbackSeller($root, $currency);
+        $target = trim((string)($legal['seller'] ?? ''));
+        if ($target === '' || $target === $storeCode) return $storeCode;
+        return self::ownsSeries($stores, $target) ? $target : null;
+    }
+
+    /**
+     * Number series of the configured sellers that cannot be issued: "store/type" => message. A prefix shared by two
+     * series belongs to the default store's seller when it is one of them (its invoices first): the default store's
+     * '' / 'CN-' series keep working, the other series sharing the prefix are refused. Without the default seller
+     * involved every series sharing the prefix is refused. A legal.seller naming no seller is refused as well.
+     * Stores without a legal block are no sellers (see sellerCode()) and never conflict.
+     * Reported by cli/setup.php doctor and cli/staging-preflight.php; issuing refuses the series with an incident.
+     */
+    public static function numberingConflicts(array $root): array
+    {
+        $stores = self::storeMap($root);
+        $byPrefix = [];
+        $conflicts = [];
+        foreach ($stores as $storeId => $store) {
+            $storeId = (string)$storeId;
+            $legal = self::legalBlock($store);
+            if ($legal === null) continue;
+            $target = trim((string)($legal['seller'] ?? ''));
+            if ($target !== '' && $target !== $storeId) {
+                if (!self::ownsSeries($stores, $target)) {
+                    foreach (['invoice', 'credit_note'] as $type) {
+                        $conflicts["{$storeId}/{$type}"] = "Store {$storeId}: legal.seller '{$target}' is not a store with its own legal block; name a seller store or remove legal.seller in stores.json";
+                    }
+                }
+                continue;
             }
-        } catch (\Throwable $e) {
-            // Older SQLite — fall through to UPDATE+SELECT.
+            foreach (['invoice', 'credit_note'] as $type) $byPrefix[self::numberPrefix($legal, $type)][] = "{$storeId}/{$type}";
         }
-        if (!$hasReturning) {
-            $db->prepare("UPDATE invoice_counters SET last_number = last_number + 1
-                          WHERE year = :y AND prefix = :p")
-               ->execute([':y' => $year, ':p' => $prefix]);
-            $stmt = $db->prepare("SELECT last_number FROM invoice_counters WHERE year = :y AND prefix = :p");
-            $stmt->execute([':y' => $year, ':p' => $prefix]);
-            $next = (int)$stmt->fetchColumn();
+        $default = self::defaultSeller($root);
+        foreach ($byPrefix as $prefix => $series) {
+            if (count($series) < 2) continue;
+            $owner = null;
+            foreach (['invoice', 'credit_note'] as $type) {
+                if ($owner === null && $default !== null && in_array("{$default}/{$type}", $series, true)) $owner = "{$default}/{$type}";
+            }
+            foreach ($series as $one) {
+                if ($one === $owner) continue;
+                $conflicts[$one] = 'Number series ' . implode(', ', $series) . " share the prefix '{$prefix}'"
+                    . ($owner !== null ? " (it belongs to {$owner})" : '')
+                    . '; give each seller its own invoice_prefix / credit_note_prefix in stores.json, or let storefronts of one company share a series with legal.seller';
+            }
         }
+        return $conflicts;
+    }
+
+    /**
+     * Prefix => [seller, type] of every number series that may be issued (numberingConflicts() excluded): the owner
+     * of a prefix by configuration, also of a legacy shared counter with that prefix (invoice_number_counters migration).
+     */
+    public static function configuredSeries(?array $root = null): array
+    {
+        $root ??= self::storesConfig();
+        $conflicts = self::numberingConflicts($root);
+        $series = [];
+        foreach (self::storeMap($root) as $storeId => $store) {
+            $legal = self::legalBlock($store);
+            if ($legal === null || self::sellerCode($root, $storeId) !== $storeId) continue;
+            foreach (['invoice', 'credit_note'] as $type) {
+                if (isset($conflicts["{$storeId}/{$type}"])) continue;
+                $series[self::numberPrefix($legal, $type)] ??= [$storeId, $type];
+            }
+        }
+        return $series;
+    }
+
+    /** @return array<string,array<mixed>> */
+    private static function storeMap(array $root): array
+    {
+        $stores = [];
+        foreach ((array)($root['stores'] ?? []) as $code => $store) {
+            if (is_array($store)) $stores[(string)$code] = $store;
+        }
+        return $stores;
+    }
+
+    private static function legalBlock(array $store): ?array
+    {
+        return is_array($store['legal'] ?? null) && $store['legal'] !== [] ? $store['legal'] : null;
+    }
+
+    /** True when the store is a seller of its own (own legal block, no legal.seller naming another store). */
+    private static function ownsSeries(array $stores, string $code): bool
+    {
+        $legal = isset($stores[$code]) ? self::legalBlock($stores[$code]) : null;
+        if ($legal === null) return false;
+        $target = trim((string)($legal['seller'] ?? ''));
+        return $target === '' || $target === $code;
+    }
+
+    private static function defaultSeller(array $root): ?string
+    {
+        $default = (string)($root['default_store'] ?? '');
+        $stores = self::storeMap($root);
+        if ($default === '' || !isset($stores[$default]) || self::legalBlock($stores[$default]) === null) return null;
+        return self::sellerCode($root, $default);
+    }
+
+    private static function fallbackSeller(array $root, ?string $currency): ?string
+    {
+        $stores = self::storeMap($root);
+        if ($currency !== null && $currency !== '') {
+            foreach ($stores as $code => $store) {
+                if (self::legalBlock($store) === null || strtolower((string)($store['currency'] ?? '')) !== strtolower($currency)) continue;
+                $seller = self::sellerCode($root, $code);
+                if ($seller !== null) return $seller;
+            }
+        }
+        $default = self::defaultSeller($root);
+        if ($default !== null) return $default;
+        foreach (array_keys($stores) as $code) {
+            if (self::ownsSeries($stores, $code)) return $code;
+        }
+        return null;
+    }
+
+    /** Legal details a store's documents print: its seller's, with the store's own fields over them (never the prefixes). */
+    private static function effectiveLegal(array $root, string $storeCode, string $sellerCode): array
+    {
+        $stores = self::storeMap($root);
+        $sellerLegal = isset($stores[$sellerCode]) ? (self::legalBlock($stores[$sellerCode]) ?? []) : [];
+        $own = isset($stores[$storeCode]) ? self::legalBlock($stores[$storeCode]) : null;
+        if ($own === null || $storeCode === $sellerCode) return $sellerLegal;
+        unset($own['seller'], $own['invoice_prefix'], $own['credit_note_prefix']);
+        return array_replace($sellerLegal, $own);
+    }
+
+    /**
+     * [seller code, store config carrying the seller's effective legal block] for documents of $storeCode in
+     * $sellerCode's series of $type. A series numberingConflicts() refuses (or a store without any seller) is reported
+     * as an operational incident and refused with the configuration error: the job fails loudly, nothing is numbered twice.
+     */
+    private static function sellerStore(array $root, string $storeCode, ?string $sellerCode, string $type, int $orderId): array
+    {
+        $stores = self::storeMap($root);
+        if ($stores === []) return [$storeCode, []];
+        $conflicts = self::numberingConflicts($root);
+        $conflict = $sellerCode === null
+            ? ($conflicts["{$storeCode}/{$type}"] ?? "Store {$storeCode} has no seller: add a legal block to a store in stores.json")
+            : ($conflicts["{$sellerCode}/{$type}"] ?? null);
+        if ($conflict !== null || $sellerCode === null) {
+            IncidentMonitor::report('invoice.numbering_conflict', 'invoicing', 'error', ['order_id' => $orderId]);
+            throw new \RuntimeException('Invoice numbering configuration conflict: ' . $conflict . ' (see php cli/setup.php doctor)');
+        }
+        $store = $stores[$storeCode] ?? $stores[$sellerCode] ?? [];
+        $store['legal'] = self::effectiveLegal($root, $storeCode, $sellerCode);
+        return [$sellerCode, $store];
+    }
+
+    /**
+     * Seller of a credit note: the seller of its source invoice, never the order's current store. Invoices record
+     * their seller (seller_code); for invoices issued before that, the seller whose configured invoice prefix the
+     * invoice number carries, else the seller whose legal details the invoice's seller snapshot shows, else the
+     * order's seller.
+     */
+    private static function creditSeller(array $source, array $order): array
+    {
+        $root = self::storesConfig();
+        $stores = self::storeMap($root);
+        $seller = null;
+        $recorded = (string)($source['seller_code'] ?? '');
+        if ($recorded !== '' && isset($stores[$recorded])) $seller = self::sellerCode($root, $recorded);
+        $seller ??= self::sellerByInvoiceNumber($root, (string)($source['number'] ?? ''), (string)($source['issued_at'] ?? ''));
+        $seller ??= self::sellerBySnapshot($root, json_decode((string)($source['seller_snapshot'] ?? ''), true) ?: []);
+        if ($seller === null) return self::resolveStore($order, null, 'credit_note');
+        return self::sellerStore($root, $seller, $seller, 'credit_note', (int)($order['id'] ?? 0));
+    }
+
+    private static function sellerByInvoiceNumber(array $root, string $number, string $issuedAt): ?string
+    {
+        $year = substr($issuedAt, 0, 4);
+        if (!preg_match('/^\d{4}$/', $year) || !preg_match('/^(.*?)' . $year . '\d{4,}$/s', $number, $m)) return null;
+        $series = self::configuredSeries($root)[$m[1]] ?? null;
+        return $series !== null && $series[1] === 'invoice' ? $series[0] : null;
+    }
+
+    private static function sellerBySnapshot(array $root, array $snapshot): ?string
+    {
+        $ico = trim((string)($snapshot['ico'] ?? ''));
+        $name = trim((string)($snapshot['name'] ?? ''));
+        if ($ico === '' && $name === '') return null;
+        $stores = self::storeMap($root);
+        foreach ($stores as $code => $store) {
+            if (!self::ownsSeries($stores, $code)) continue;
+            $legal = self::legalBlock($store) ?? [];
+            if (trim((string)($legal['ico'] ?? '')) === $ico && trim((string)($legal['name'] ?? '')) === $name) return $code;
+        }
+        return null;
+    }
+
+    /**
+     * Next gapless number of one seller's document series (store, type, year, prefix). Runs inside the caller's
+     * issuing transaction, so a rolled-back issue gives its number back. A prefix that another seller or document
+     * type already numbers in that year is refused: both would issue the same numbers.
+     * Before the invoice_number_counters migration ran, numbers come from the legacy per-(year, prefix) table
+     * invoice_counters; the migration carries its last numbers over, so no number is issued twice.
+     */
+    private static function allocateNumber(PDO $db, string $storeId, string $type, int $year, string $prefix): string
+    {
+        if (!Db::tableExists('invoice_number_counters', $db)) return self::allocateLegacyNumber($db, $year, $prefix);
+        $key = [':s' => $storeId, ':t' => $type, ':y' => $year, ':p' => $prefix];
+        $shared = $db->prepare("SELECT store_id, type FROM invoice_number_counters
+            WHERE year = :y AND prefix = :p AND last_number > 0 AND NOT (store_id = :s AND type = :t) LIMIT 1");
+        $shared->execute($key);
+        if ($owner = $shared->fetch(PDO::FETCH_ASSOC)) {
+            throw new \RuntimeException("Number prefix '{$prefix}' is already used in {$year} by {$owner['store_id']}/{$owner['type']}; "
+                . "give store {$storeId} its own " . ($type === 'credit_note' ? 'credit_note_prefix' : 'invoice_prefix') . ' in stores.json');
+        }
+
+        // INSERT IF NOT EXISTS — driver-aware (INSERT OR IGNORE / INSERT IGNORE).
+        $db->prepare(Db::insertIgnore() . " INTO invoice_number_counters (store_id, type, year, prefix, last_number) VALUES (:s, :t, :y, :p, 0)")
+           ->execute($key);
+
+        // Row-locking increment, then read back inside the same transaction (portable to SQLite and MySQL/MariaDB).
+        $where = 'store_id = :s AND type = :t AND year = :y AND prefix = :p';
+        $db->prepare("UPDATE invoice_number_counters SET last_number = last_number + 1 WHERE {$where}")->execute($key);
+        $stmt = $db->prepare("SELECT last_number FROM invoice_number_counters WHERE {$where}");
+        $stmt->execute($key);
+        $next = (int)$stmt->fetchColumn();
         return sprintf('%s%d%04d', $prefix, $year, $next);
+    }
+
+    /** The seller whose series numbered the document (credit notes of it follow it); skipped before its migration ran. */
+    private static function recordSeller(PDO $db, int $invoiceId, string $sellerCode): void
+    {
+        if (!Db::hasColumn('invoices', 'seller_code', $db)) return;
+        $db->prepare('UPDATE invoices SET seller_code = :seller WHERE id = :id')->execute([':seller' => $sellerCode, ':id' => $invoiceId]);
+    }
+
+    /** Migration window: the pre-upgrade sequence shared per (year, prefix), which the migration carries over. */
+    private static function allocateLegacyNumber(PDO $db, int $year, string $prefix): string
+    {
+        $key = [':y' => $year, ':p' => $prefix];
+        $db->prepare(Db::insertIgnore() . " INTO invoice_counters (year, prefix, last_number) VALUES (:y, :p, 0)")->execute($key);
+        $db->prepare("UPDATE invoice_counters SET last_number = last_number + 1 WHERE year = :y AND prefix = :p")->execute($key);
+        $stmt = $db->prepare("SELECT MAX(last_number) FROM invoice_counters WHERE year = :y AND prefix = :p");
+        $stmt->execute($key);
+        return sprintf('%s%d%04d', $prefix, $year, (int)$stmt->fetchColumn());
     }
 
     private static function sellerSnapshot(array $legal): array
@@ -769,11 +1042,21 @@ final class InvoiceService
         }
     }
 
-    private static function resolveStore(array $order, ?string $storeCode): array
+    /**
+     * [seller code, store config] of the order's legal seller: the seller of the explicit store code, else of the
+     * order's own store, else of the first store selling in the order's currency (orders written before stores were
+     * scoped). See sellerCode(): a store without a legal block invoices as another seller. Refuses (with an incident)
+     * a series numberingConflicts() reports.
+     */
+    private static function resolveStore(array $order, ?string $storeCode, string $type = 'invoice'): array
     {
-        $stores = self::storesConfig();
-        $code = $storeCode ?? self::detectStoreCode($order, $stores);
-        return $stores['stores'][$code] ?? array_values($stores['stores'])[0] ?? [];
+        $root = self::storesConfig();
+        $stores = self::storeMap($root);
+        $orderStore = (string)($order['store_id'] ?? '');
+        $code = $storeCode ?? (isset($stores[$orderStore]) ? $orderStore : self::detectStoreCode($order, $root));
+        if (!isset($stores[$code])) $code = (string)(array_key_first($stores) ?? $code);
+        $seller = self::sellerCode($root, $code, strtolower((string)($order['currency'] ?? '')));
+        return self::sellerStore($root, $code, $seller, $type, (int)($order['id'] ?? 0));
     }
 
     private static function detectStoreCode(array $order, array $stores): string
@@ -792,6 +1075,7 @@ final class InvoiceService
 
     private static function storesConfig(): array
     {
+        if (self::$storesOverride !== null) return self::$storesOverride;
         $file = self::baseDir() . '/stores.json';
         $j = file_exists($file) ? json_decode((string)file_get_contents($file), true) : [];
         return $j ?: [];

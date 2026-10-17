@@ -1,9 +1,11 @@
 <?php
 /**
- * SesMail — AWS SES SendEmail via HTTPS (SigV4 signed, no SDK required).
+ * SesMail — AWS SES SendRawEmail via HTTPS (SigV4 signed, no SDK required).
  *
- * Uses the classic v2 SES `SendEmail` HTTPS endpoint with AWS
- * Signature Version 4 auth (derived signing key). One POST per email.
+ * Uses the classic SES Query API `SendRawEmail` action with AWS Signature Version 4 auth
+ * (derived signing key). One POST per email. The raw MIME message comes from MimeMessage (the
+ * same builder SmtpMail uses), so attachments (invoice PDFs) and custom headers
+ * (List-Unsubscribe) are delivered; plain `SendEmail` silently dropped both.
  *
  * Config (env or ctor args):
  *   MAIL_SES_REGION      e.g. "eu-central-1"
@@ -18,8 +20,11 @@ class SesMail implements MailAdapter {
     private string $region;
     private string $accessKey;
     private string $secretKey;
+    /** @var null|callable(string $url, string $headers, string $body): (string|false) test transport */
+    private $transport;
 
-    public function __construct(array $cfg = []) {
+    public function __construct(array $cfg = [], ?callable $transport = null) {
+        $this->transport = $transport;
         $env = fn(string $k, $d = '') => getenv($k) !== false ? getenv($k) : ($cfg[strtolower($k)] ?? $d);
         $this->region    = (string)$env('MAIL_SES_REGION', 'eu-central-1');
         $this->accessKey = (string)$env('MAIL_SES_KEY', '');
@@ -38,25 +43,14 @@ class SesMail implements MailAdapter {
         $method  = 'POST';
         $uri     = '/';
 
-        // SES v1 Query API SendEmail — simple and avoids JSON body signing.
+        // SES Query API SendRawEmail: the whole RFC 5322 message, base64 encoded.
+        $raw = MimeMessage::build($msg);
         $params = [
-            'Action'                         => 'SendEmail',
-            'Source'                         => (string)($msg['from'] ?? ''),
-            'Destination.ToAddresses.member.1' => (string)($msg['to'] ?? ''),
-            'Message.Subject.Data'           => (string)($msg['subject'] ?? ''),
-            'Message.Subject.Charset'        => 'UTF-8',
+            'Action'                  => 'SendRawEmail',
+            'Source'                  => MimeMessage::stripCrlf((string)($msg['from'] ?? '')),
+            'Destinations.member.1'   => MimeMessage::stripCrlf((string)($msg['to'] ?? '')),
+            'RawMessage.Data'         => base64_encode($raw),
         ];
-        if (!empty($msg['html'])) {
-            $params['Message.Body.Html.Data']    = (string)$msg['html'];
-            $params['Message.Body.Html.Charset'] = 'UTF-8';
-        }
-        if (!empty($msg['text']) || empty($msg['html'])) {
-            $params['Message.Body.Text.Data']    = (string)($msg['text'] ?? strip_tags($msg['html'] ?? ''));
-            $params['Message.Body.Text.Charset'] = 'UTF-8';
-        }
-        if (!empty($msg['reply_to'])) {
-            $params['ReplyToAddresses.member.1'] = $msg['reply_to'];
-        }
 
         ksort($params);
         $body = http_build_query($params, '', '&', PHP_QUERY_RFC3986);
@@ -84,19 +78,23 @@ class SesMail implements MailAdapter {
         $authHeader = "AWS4-HMAC-SHA256 Credential={$this->accessKey}/{$credentialScope}, "
                     . "SignedHeaders={$signedHeaders}, Signature={$signature}";
 
-        $ctx = stream_context_create([
-            'http' => [
-                'method'        => $method,
-                'header'        => "Content-Type: application/x-www-form-urlencoded; charset=utf-8\r\n"
-                                 . "X-Amz-Date: {$amzDate}\r\n"
-                                 . "Authorization: {$authHeader}\r\n",
-                'content'       => $body,
-                'ignore_errors' => true,
-                'timeout'       => 15,
-            ],
-        ]);
-
-        $response = @file_get_contents("https://{$host}{$uri}", false, $ctx);
+        $requestHeaders = "Content-Type: application/x-www-form-urlencoded; charset=utf-8\r\n"
+                        . "X-Amz-Date: {$amzDate}\r\n"
+                        . "Authorization: {$authHeader}\r\n";
+        if ($this->transport !== null) {
+            $response = ($this->transport)("https://{$host}{$uri}", $requestHeaders, $body);
+        } else {
+            $ctx = stream_context_create([
+                'http' => [
+                    'method'        => $method,
+                    'header'        => $requestHeaders,
+                    'content'       => $body,
+                    'ignore_errors' => true,
+                    'timeout'       => 15,
+                ],
+            ]);
+            $response = @file_get_contents("https://{$host}{$uri}", false, $ctx);
+        }
         $status   = 'failed';
         $message  = '';
         if ($response !== false) {

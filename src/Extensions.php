@@ -96,12 +96,28 @@ final class Extensions
         return ['title' => $result['title'], 'content' => $result['content']];
     }
 
-    /** Run the extension JSON API action for ?action=, or null when no extension owns it. */
+    /**
+     * Run the extension JSON API action for ?action=, or null when no extension owns it. The
+     * action's declared method is enforced (405) and a non-GET/HEAD request needs the session
+     * CSRF token unless the action registered 'csrf' => false (403).
+     */
     public static function api(string $action): ?array
     {
         self::boot();
         if (!isset(self::$api[$action])) return null;
-        $result = (self::$api[$action])($_GET);
+        $definition = self::$api[$action];
+        $requestMethod = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+        $declared = $definition['method'];
+        if ($declared !== null && $requestMethod !== $declared && !($declared === 'GET' && $requestMethod === 'HEAD')) {
+            http_response_code(405);
+            if (!headers_sent()) header('Allow: ' . ($declared === 'GET' ? 'GET, HEAD' : $declared));
+            return ['error' => 'Method not allowed'];
+        }
+        if (!in_array($requestMethod, ['GET', 'HEAD'], true) && $definition['csrf'] && !Security::csrfValidate()) {
+            http_response_code(403);
+            return ['error' => 'Invalid CSRF token'];
+        }
+        $result = ($definition['handler'])($_GET);
         if (!is_array($result)) throw new UnexpectedValueException("extension API action {$action} must return an array");
         return $result;
     }
@@ -126,7 +142,7 @@ final class Extensions
 
     /**
      * Run the listeners matching one claimed outbox event. Each listener is its own delivery
-     * endpoint (ext-<code>-<name>) in webhook_deliveries, so a retry skips the ones that succeeded.
+     * endpoint (ext:<code>:<name>) in webhook_deliveries, so a retry skips the ones that succeeded.
      * @return array{matched:int, failures:list<string>}
      */
     public static function deliver(array $event, array $envelope): array
@@ -191,6 +207,12 @@ final class Extensions
         } catch (Throwable $e) {
             spl_autoload_unregister($autoloader);
             throw $e;
+        }
+
+        $collisions = array_intersect_key($registrations['listeners'], self::$listeners);
+        if ($collisions !== []) {
+            spl_autoload_unregister($autoloader);
+            throw new RuntimeException('listener endpoint already registered: ' . implode(', ', array_keys($collisions)));
         }
 
         // All-or-nothing: nothing above is visible to the shop until register() fully succeeded.

@@ -153,6 +153,17 @@ class Template {
         return $url === '' ? '/' : $url;
     }
 
+    /**
+     * Absolute public URL for a local URL (Template::url/storeUrl output), joined to the configured
+     * app_url — never the Host header. Absolute http(s) URLs pass through; without app_url the
+     * base-relative URL is returned unchanged.
+     */
+    public static function absoluteUrl(string $url): string {
+        if ($url === '' || preg_match('#^https?://#i', $url) || !str_starts_with($url, '/') || str_starts_with($url, '//')) return $url;
+        $base = Security::configuredAppUrl();
+        return $base === null ? $url : $base . self::seoPath($url);
+    }
+
     /** Serialize canonical page SEO data without putting markup in the view model. */
     public static function viewModelSeoHead(array $model, string $fallbackTitle): string {
         $seo = (array)($model['page']['seo'] ?? []);
@@ -163,7 +174,7 @@ class Template {
             true
         );
         if (!empty($seo['image_url'])) {
-            $head .= "\n<meta property=\"og:image\" content=\"" . esc((string)$seo['image_url']) . '">';
+            $head .= "\n<meta property=\"og:image\" content=\"" . esc(self::absoluteUrl((string)$seo['image_url'])) . '">';
         }
         foreach ((array)($seo['json_ld'] ?? []) as $payload) {
             if (is_array($payload)) $head .= "\n" . JsonLd::render($payload, Security::cspNonce());

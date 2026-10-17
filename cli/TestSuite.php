@@ -7,6 +7,23 @@ require __DIR__ . '/tests/TestHarness.php';
 ob_start();
 set_error_handler('fail_on_php_error');
 
+// A scenario that throws (or a fatal error) must never end the run looking green: tests may point error_log at a
+// file, so the message is written to STDERR here and the exit code is forced to 1 unless the summary was reached.
+set_exception_handler(static function (Throwable $exception): void {
+    while (ob_get_level() > 0) ob_end_flush();
+    fwrite(STDERR, "\nTEST SUITE ABORTED by an uncaught " . get_class($exception) . ': ' . $exception->getMessage()
+        . "\n  at " . $exception->getFile() . ':' . $exception->getLine() . "\n" . $exception->getTraceAsString() . "\n");
+    exit(1);
+});
+register_shutdown_function(static function (): void {
+    if (defined('TEST_SUITE_COMPLETED')) return;
+    while (ob_get_level() > 0) ob_end_flush();
+    $last = error_get_last();
+    fwrite(STDERR, "\nTEST SUITE ABORTED before the results summary (exit or fatal error)"
+        . ($last ? "; last PHP error (may be unrelated): " . $last['message'] . ' at ' . $last['file'] . ':' . $last['line'] : '') . "\n");
+    exit(1);
+});
+
 echo "========================================\n";
 echo "BareBones Shop — Test Suite\n";
 echo "========================================\n\n";
@@ -31,6 +48,8 @@ $scenarioFiles = [
     'CheckoutArchitectureScenario.php',
     'PlatformScenario.php',
 ];
+// Scenarios may install their own exception handler (cli/worker.php does), so catch here as well.
+try {
 foreach ($scenarioFiles as $scenarioFile) {
     require __DIR__ . '/tests/scenarios/' . $scenarioFile;
 }
@@ -39,6 +58,13 @@ require __DIR__ . '/tests/RegressionSuite.php';
 require __DIR__ . '/test-update.php';
 require __DIR__ . '/test-theme-contract.php';
 require __DIR__ . '/test-theme-upgrade-gate.php';
+} catch (Throwable $suiteAbort) {
+    while (ob_get_level() > 0) ob_end_flush();
+    fwrite(STDERR, "\nTEST SUITE ABORTED by an uncaught " . get_class($suiteAbort) . ': ' . $suiteAbort->getMessage()
+        . "\n  at " . $suiteAbort->getFile() . ':' . $suiteAbort->getLine() . "\n" . $suiteAbort->getTraceAsString() . "\n");
+    define('TEST_SUITE_COMPLETED', true); // reported above; the shutdown check would only repeat it
+    exit(1);
+}
 
 echo "\n========================================\n";
 echo "Results: {$passed}/{$tests} passed";
@@ -61,4 +87,5 @@ usleep(100000);
 restore_error_handler();
 echo "========================================\n";
 ob_end_flush();
+define('TEST_SUITE_COMPLETED', true);
 exit($failed > 0 ? 1 : 0);

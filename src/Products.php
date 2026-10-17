@@ -79,6 +79,7 @@ class Products {
         ?int $priceMax = null
     ): array {
         $db = Db::get();
+        $page = max(1, min(Search::MAX_PAGE, $page));
         $offset = ($page - 1) * $perPage;
 
         // Base conditions
@@ -98,16 +99,19 @@ class Products {
         }
 
         // Attribute filters via FTS
+        $ftsQuery = '';
         if (!empty($filters)) {
             $ftsTokens = [];
-            foreach ($filters as $attrName => $values) {
+            foreach (array_slice($filters, 0, self::MAX_FILTER_CRITERIA, true) as $attrName => $values) {
                 if (!is_array($values)) $values = [$values];
                 $orTokens = [];
-                foreach ($values as $v) {
-                    $n = self::normalizeToken($attrName);
-                    $val = self::normalizeToken($v);
+                // Only scalar values become tokens: a nested array from a JSON filter used to be a TypeError (500).
+                foreach (array_slice(array_values(array_filter($values, 'is_scalar')), 0, self::MAX_FILTER_VALUES) as $v) {
+                    $n = self::normalizeToken((string)$attrName);
+                    $val = self::normalizeToken((string)$v);
                     $orTokens[] = "attr_{$n}_{$val}";
                 }
+                if ($orTokens === []) continue;
                 // Within same attribute: OR (pick any size)
                 if (count($orTokens) === 1) {
                     $ftsTokens[] = $orTokens[0];
@@ -117,7 +121,8 @@ class Products {
             }
             // Between different attributes: AND (must match all)
             $ftsQuery = implode(' AND ', $ftsTokens);
-
+        }
+        if ($ftsQuery !== '') {
             if (Db::isSqlite()) {
                 $where .= " AND p.id IN (
                     SELECT rowid FROM products_fts WHERE products_fts MATCH :fts
@@ -476,6 +481,43 @@ class Products {
         return $filters;
     }
 
+    /** Bounds for query-string facet filters: every criterion is one correlated subquery per request. */
+    public const MAX_FILTER_CRITERIA = 10;
+    public const MAX_FILTER_VALUES = 20;
+
+    /**
+     * Keep only spec/range filters on criteria the categories really have in $lang, at most
+     * MAX_FILTER_CRITERIA criteria with MAX_FILTER_VALUES distinct scalar values each, and finite range edges.
+     * Returns [$specFilters, $rangeFilters].
+     */
+    public static function boundSpecFilters(int|array $categoryId, string $lang, array $specFilters, array $rangeFilters): array {
+        $catIds = array_values(array_unique(array_map('intval', (array)$categoryId)));
+        if ($catIds === [] || ($specFilters === [] && $rangeFilters === [])) return [[], []];
+        $stmt = Db::get()->prepare('SELECT DISTINCT ps.criteria_name FROM product_specifications ps
+            JOIN products p ON p.id = ps.product_id
+            WHERE p.category_id IN (' . implode(',', $catIds) . ") AND p.store_id = :store AND p.status = 'active' AND ps.lang = :lang");
+        $stmt->execute([':store' => StoreContext::current()->catalogId(), ':lang' => $lang]);
+        $known = array_flip(array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+        $spec = [];
+        foreach ($specFilters as $name => $values) {
+            if (count($spec) >= self::MAX_FILTER_CRITERIA) break;
+            if (!isset($known[(string)$name])) continue;
+            $values = array_values(array_unique(array_map('strval', array_filter((array)$values, 'is_scalar'))));
+            if ($values !== []) $spec[(string)$name] = array_slice($values, 0, self::MAX_FILTER_VALUES);
+        }
+        $ranges = [];
+        foreach ($rangeFilters as $name => $range) {
+            if (count($ranges) >= self::MAX_FILTER_CRITERIA) break;
+            if (!isset($known[(string)$name]) || !is_array($range)) continue;
+            $edges = [];
+            foreach (['min', 'max'] as $edge) {
+                if (isset($range[$edge]) && is_numeric($range[$edge]) && is_finite((float)$range[$edge])) $edges[$edge] = (float)$range[$edge];
+            }
+            if ($edges !== []) $ranges[(string)$name] = $edges;
+        }
+        return [$spec, $ranges];
+    }
+
     /**
      * Search products within categories using parametric spec filters.
      * $specFilters = ['Material' => ['cotton', 'wool']] (AND across criteria, OR within one);
@@ -493,7 +535,9 @@ class Products {
         array $rangeFilters = []
     ): array {
         $db = Db::get();
+        $page = max(1, min(Search::MAX_PAGE, $page));
         $offset = ($page - 1) * $perPage;
+        [$specFilters, $rangeFilters] = self::boundSpecFilters($categoryId, $lang, $specFilters, $rangeFilters);
 
         if (is_array($categoryId)) {
             $catIds = array_map('intval', $categoryId);
@@ -598,6 +642,9 @@ class Products {
             'per_page'   => $perPage,
             'pages'      => (int)ceil($total / $perPage),
             'filters'    => self::specFilterValues($categoryId, $lang, $specFilters, $priceMin, $priceMax),
+            // The filters actually applied after boundSpecFilters(): presenters echo these, not the raw query.
+            'applied_spec' => $specFilters,
+            'applied_ranges' => $rangeFilters,
         ];
     }
 

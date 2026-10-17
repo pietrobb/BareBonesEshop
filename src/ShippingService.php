@@ -90,7 +90,9 @@ class ShippingService
         }
 
         $adapters = self::resolveAdapters();
-        $params   = compact('country', 'weightG', 'subtotal', 'cod');
+        // Amounts (subtotal, free-shipping thresholds, returned prices) are minor units of the store currency.
+        $currency = strtoupper(StoreContext::current()->currency());
+        $params   = compact('country', 'weightG', 'subtotal', 'cod', 'currency');
         $params['weight_g'] = $weightG;
         $params['volume_cm3'] = $volumeCm3;
 
@@ -99,7 +101,14 @@ class ShippingService
 
         foreach ($adapters as $providerCode => $adapter) {
             if (is_int($providerCode)) $providerCode = $adapter->carrierId();
-            $adapterRates = $adapter->getRates($params);
+            try {
+                $adapterRates = $adapter->getRates($params);
+            } catch (\Throwable $e) {
+                // One carrier outage (HTTP 5xx, timeout, bad config) must not take checkout down for the others.
+                Logger::warning('shipping.rates_adapter_failed', ['carrier' => (string)$providerCode, 'exception_type' => get_class($e)]);
+                IncidentMonitor::report('shipping.rates_adapter_failed', 'shipping', 'warning', ['exception' => $e]);
+                continue;
+            }
             if (!empty($adapterRates)) {
                 foreach ($adapterRates as $rate) {
                     $rate['provider'] = (string)$providerCode;
@@ -111,8 +120,9 @@ class ShippingService
             }
         }
 
-        // Legacy fallback: add JSON-based methods for carriers not yet adapted
-        $legacyMethods = ['standard', 'express'];
+        // Legacy fallback: add JSON-based methods for carriers not yet adapted. shipping.json prices
+        // are in its own "currency" (EUR when absent) and are never quoted to a store in another one.
+        $legacyMethods = Shipping::currency() === $currency ? ['standard', 'express'] : [];
         foreach ($legacyMethods as $method) {
             // Skip if already covered by an adapter
             if (in_array($method, $coveredCarriers, true)) continue;
@@ -282,45 +292,91 @@ class ShippingService
     }
 
     /**
+     * Tracking statuses a carrier webhook may set, by progress. A label never moves to a lower rank,
+     * so a replayed or late "in_transit" cannot undo "delivered". Equal ranks may alternate
+     * (a failed attempt is followed by another out_for_delivery). "cancelled" is set only by cancelLabel().
+     */
+    public const TRACKING_STATUS_RANK = [
+        'created' => 0,
+        'in_transit' => 1,
+        'out_for_delivery' => 2,
+        'ready_for_pickup' => 2,
+        'failed' => 2,
+        'delivered' => 3,
+    ];
+
+    /** Seconds a signed X-Shipping-Timestamp may differ from the shop clock. */
+    public const WEBHOOK_TIMESTAMP_TOLERANCE = 300;
+
+    /** Environment variable holding a carrier's webhook secret: SHIP_<CARRIER>_WEBHOOK_SECRET, "-" written as "_". */
+    public static function webhookSecretEnvName(string $carrierId): string
+    {
+        return 'SHIP_' . strtoupper(str_replace('-', '_', $carrierId)) . '_WEBHOOK_SECRET';
+    }
+
+    /**
      * Handle a tracking webhook from a carrier.
      * If status = 'delivered' → transitions order to 'delivered' via OrderWorkflow.
+     *
+     * Signature: hex HMAC-SHA256 of the raw body with the carrier secret. A carrier that also sends
+     * a Unix timestamp (X-Shipping-Timestamp) signs "<timestamp>.<raw body>" instead, and the
+     * timestamp must be within WEBHOOK_TIMESTAMP_TOLERANCE seconds; config
+     * shipping_webhook_require_timestamp makes it mandatory. Body-only signatures stay accepted
+     * for carriers that cannot send one; replays of them are absorbed by the event idempotency
+     * claim and by the status order above.
      *
      * @param string $carrierId
      * @param array  $payload    Parsed webhook body
      * @param string $signature  Raw signature header for verification
      * @param string $rawPayload Exact request body covered by the signature
+     * @param string $timestamp  Optional signed timestamp header
      * @return array {handled, awb, status, order_id}
+     * @throws ShippingWebhookConfigurationError when the shop side is misconfigured (not the sender's fault)
      */
     public static function handleTrackingWebhook(
         string $carrierId,
         array  $payload,
         string $signature = '',
-        string $rawPayload = ''
+        string $rawPayload = '',
+        string $timestamp = '',
+        ?int $now = null
     ): array {
         StoreContext::current()->assertPermission('shipping');
-        $envName = 'SHIP_' . strtoupper($carrierId) . '_WEBHOOK_SECRET';
-        $envSecret = getenv($envName);
+        $envSecret = getenv(self::webhookSecretEnvName($carrierId));
         $secret = is_string($envSecret) ? $envSecret : '';
+        $cfg = require __DIR__ . '/../config.php';
         if ($secret === '') {
-            $cfg = require __DIR__ . '/../config.php';
             $secret = (string)($cfg['shipping_webhook_secrets'][$carrierId] ?? '');
         }
         if (strlen($secret) < 16 || trim($secret) !== $secret) {
-            throw new \RuntimeException("Webhook signature secret is not configured securely for carrier: {$carrierId}");
+            throw new ShippingWebhookConfigurationError("Webhook signature secret is not configured securely for carrier: {$carrierId}");
         }
         if ($rawPayload === '' || $signature === '') {
             throw new \RuntimeException("Invalid webhook signature for carrier: {$carrierId}");
         }
-        $computed = hash_hmac('sha256', $rawPayload, $secret);
-        if (!hash_equals($computed, $signature)) {
+        if ($timestamp !== '') {
+            $now ??= time();
+            if (!preg_match('/^\d{1,12}$/', $timestamp) || abs($now - (int)$timestamp) > self::WEBHOOK_TIMESTAMP_TOLERANCE) {
+                throw new \RuntimeException("Invalid webhook signature timestamp for carrier: {$carrierId}");
+            }
+            $computed = hash_hmac('sha256', $timestamp . '.' . $rawPayload, $secret);
+        } elseif (!empty($cfg['shipping_webhook_require_timestamp'])) {
+            throw new \RuntimeException("Invalid webhook signature (timestamp required) for carrier: {$carrierId}");
+        } else {
+            $computed = hash_hmac('sha256', $rawPayload, $secret);
+        }
+        if (!hash_equals($computed, strtolower($signature))) {
             throw new \RuntimeException("Invalid webhook signature for carrier: {$carrierId}");
         }
 
         $awb    = $payload['awb'] ?? $payload['tracking_number'] ?? '';
-        $status = $payload['status'] ?? '';
+        $status = strtolower(trim((string)($payload['status'] ?? '')));
 
         if (!$awb) {
             return ['handled' => false, 'reason' => 'missing_awb'];
+        }
+        if (!array_key_exists($status, self::TRACKING_STATUS_RANK)) {
+            return ['handled' => false, 'reason' => 'unknown_status'];
         }
 
         // Resolve label record
@@ -334,7 +390,7 @@ class ShippingService
             return ['handled' => false, 'reason' => 'unknown_awb'];
         }
 
-        return PaymentWebhookRouting::within((string)$labelRows[0]['store_id'], static fn(): array => self::applyTrackingUpdate($labelRows[0], $carrierId, (string)$awb, (string)$status, $rawPayload));
+        return PaymentWebhookRouting::within((string)$labelRows[0]['store_id'], static fn(): array => self::applyTrackingUpdate($labelRows[0], $carrierId, (string)$awb, $status, $rawPayload));
     }
 
     private static function applyTrackingUpdate(array $labelRow, string $carrierId, string $awb, string $status, string $rawPayload): array
@@ -346,12 +402,24 @@ class ShippingService
         if ($claim === 'in_flight') return ['handled' => false, 'reason' => 'in_flight', 'retry' => true];
         if ($claim === 'done') return ['handled' => false, 'reason' => 'already_processed', 'duplicate' => true];
 
+        // Forward-only: the label may move to this status from an equal or lower rank, or from a
+        // legacy status outside the table; never from a higher rank and never out of "cancelled".
+        $rank = self::TRACKING_STATUS_RANK[$status];
+        $from = array_keys(array_filter(self::TRACKING_STATUS_RANK, static fn(int $r): bool => $r <= $rank));
+        $known = array_merge(array_keys(self::TRACKING_STATUS_RANK), ['cancelled']);
         try {
-            $db->prepare("UPDATE shipping_labels SET status = :status, updated_at = " . Db::now() . " WHERE awb = :awb AND carrier = :carrier AND store_id = :store")
-               ->execute([':status' => $status, ':awb' => $awb, ':carrier' => $carrierId, ':store' => StoreContext::current()->id()]);
+            $update = $db->prepare("UPDATE shipping_labels SET status = ?, updated_at = " . Db::now() . "
+                WHERE awb = ? AND carrier = ? AND store_id = ?
+                  AND (status IN (" . implode(',', array_fill(0, count($from), '?')) . ")
+                       OR status NOT IN (" . implode(',', array_fill(0, count($known), '?')) . "))");
+            $update->execute([$status, $awb, $carrierId, StoreContext::current()->id(), ...$from, ...$known]);
         } catch (\Throwable $e) {
             Idempotency::unmark($eventId);
             throw $e;
+        }
+        if ($update->rowCount() === 0) {
+            Idempotency::complete($eventId);
+            return ['handled' => false, 'reason' => 'stale_status', 'awb' => $awb, 'status' => $status, 'order_id' => (int)$labelRow['order_id']];
         }
 
         $orderId = (int)$labelRow['order_id'];
@@ -579,9 +647,7 @@ class ShippingService
     private static function tableExists(\PDO $db, string $table): bool
     {
         try {
-            $stmt = $db->prepare("SELECT 1 FROM {$table} LIMIT 1");
-            $stmt->execute();
-            return true;
+            return Db::tableExists($table, $db);
         } catch (\Throwable $e) {
             return false;
         }

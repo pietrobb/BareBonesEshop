@@ -315,10 +315,31 @@ class Security {
         self::$rateDbLastCleanup = time();
     }
 
+    /**
+     * Check-only variant of rateLimit(): true while fewer than $maxHits hits were recorded in the
+     * window. Records nothing, so a refused attempt never extends a block (pair with rateLimitRecord()
+     * after the guarded action succeeded).
+     */
+    public static function rateLimitAllows(string $action, int $maxHits, int $windowSeconds, bool $bindIp = true): bool {
+        $windowSeconds = max(1, min(86400, $windowSeconds));
+        $stmt = self::rateDb()->prepare("SELECT COUNT(*) FROM hits WHERE key = :key AND ts > :window");
+        $stmt->execute([':key' => self::rateKey($action, $bindIp), ':window' => time() - $windowSeconds]);
+        return (int)$stmt->fetchColumn() < max(0, $maxHits);
+    }
+
+    /** Records one hit for $action (see rateLimitAllows()). */
+    public static function rateLimitRecord(string $action, bool $bindIp = true): void {
+        self::rateDb()->prepare("INSERT INTO hits (key, ts) VALUES (:key, :ts)")
+            ->execute([':key' => self::rateKey($action, $bindIp), ':ts' => time()]);
+    }
+
+    private static function rateKey(string $action, bool $bindIp): string {
+        return hash('sha256', $action . '|' . ($bindIp ? self::clientIp() : 'global'));
+    }
+
     public static function rateLimit(string $action, int $maxHits = 60, int $windowSeconds = 60, bool $bindIp = true): bool {
         $windowSeconds = max(1, min(86400, $windowSeconds));
-        $identity = $bindIp ? self::clientIp() : 'global';
-        $key = hash('sha256', $action . '|' . $identity);
+        $key = self::rateKey($action, $bindIp);
         $now = time();
         $window = $now - $windowSeconds;
         $db = self::rateDb();
@@ -438,6 +459,13 @@ class Security {
     public static function int($input, int $default = 0): int {
         return filter_var($input, FILTER_VALIDATE_INT) !== false
             ? (int)$input : $default;
+    }
+
+    /** Positive ids of a posted list (name[]): a non-array, nested or non-numeric entry yields nothing, never a TypeError. */
+    public static function intList(mixed $input): array {
+        if (!is_array($input)) return [];
+        $ids = array_map(static fn($id): int => is_scalar($id) ? self::int($id) : 0, $input);
+        return array_values(array_unique(array_filter($ids, static fn(int $id): bool => $id > 0)));
     }
 
     public static function email(mixed $input): ?string {

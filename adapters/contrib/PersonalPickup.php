@@ -31,8 +31,10 @@ class PersonalPickup implements ShippingAdapter
 
     public function generateLabel(array $order): array
     {
-        // No physical label needed — generate a pickup confirmation code
-        $code = 'PU-' . strtoupper(substr(md5((string)$order['id'] . 'pickup'), 0, 8));
+        // No physical label needed — generate a pickup confirmation code. It is the collection
+        // secret, so it is random (not derived from the order ID); ShippingService::generateLabel()
+        // stores it as the label AWB / order tracking number and returns the stored one on repeat calls.
+        $code = 'PU-' . strtoupper(bin2hex(random_bytes(5)));
         return [
             'awb'        => $code,
             'label_data' => base64_encode("PICKUP CONFIRMATION\nCode: {$code}\nOrder: {$order['id']}\nPlease bring this code to the store."),

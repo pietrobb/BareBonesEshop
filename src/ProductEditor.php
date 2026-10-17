@@ -44,11 +44,17 @@ final class ProductEditor {
         $slug = Security::slug($form['slug'] !== '' ? $form['slug'] : $form['name']);
         if ($slug === '') return I18n::t('admin.msg.product.slug_from_name');
         $db = Db::get();
-        foreach (['slug' => $slug, 'sku' => (string)$form['sku']] as $column => $value) {
-            $taken = $db->prepare("SELECT 1 FROM products WHERE {$column} = :value AND id != :id");
-            $taken->execute([':value' => $value, ':id' => $id ?: -1]);
-            if ($taken->fetchColumn()) return I18n::format('admin.msg.product.taken', ['column' => strtoupper($column), 'value' => $value]);
+        $taken = $db->prepare('SELECT 1 FROM products WHERE slug = :value AND id != :id');
+        $taken->execute([':value' => $slug, ':id' => $id ?: -1]);
+        if ($taken->fetchColumn()) return I18n::format('admin.msg.product.taken', ['column' => 'SLUG', 'value' => $slug]);
+        // The SKU rule of the variant editor and the import: no other product and no variant of any store may use it.
+        $sku = (string)$form['sku'];
+        if (SkuGuard::taken($sku, $id)) return I18n::format('admin.msg.variant.sku_taken', ['sku' => $sku]);
+        if ($old !== null && $sku !== (string)$old['sku'] && ($pinned = SkuGuard::productSkuPinned($id, (string)$old['sku'])) !== null) {
+            return I18n::format('admin.msg.product.sku_change_blocked', ['sku' => $old['sku'], 'reason' => $pinned]);
         }
+        $minPrice = $id ? ProductVariants::minBasePrice($id) : 0;
+        if (Security::int($form['price']) < $minPrice) return I18n::format('admin.msg.product.price_below_variants', ['min' => $minPrice]);
         $images = self::parseImages((string)$form['images']);
         if (is_string($images)) return $images;
         [$imageUrls, $imageAlts] = $images;
@@ -133,13 +139,25 @@ final class ProductEditor {
     public static function storeUpload(array $upload, string $sku): array|string {
         $dimensions = @getimagesize($upload['tmp_name']);
         $valid = is_array($dimensions) && $dimensions[0] > 0 && $dimensions[1] > 0
-            && $dimensions[0] <= 12000 && $dimensions[1] <= 12000 && $dimensions[0] * $dimensions[1] <= 40000000;
+            && $dimensions[0] <= 12000 && $dimensions[1] <= 12000 && $dimensions[0] * $dimensions[1] <= self::maxUploadPixels();
         if (!$valid) return I18n::t('admin.msg.product.image_invalid');
         $extension = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'][$upload['type']];
         $path = self::uploadPath($sku, $extension);
         $bytes = file_get_contents($upload['tmp_name']);
         if ($bytes === false || strlen($bytes) !== $upload['size']) throw new RuntimeException('Uploaded image could not be read completely');
         return [Adapters::storage()->store($path, $bytes), $path];
+    }
+
+    /**
+     * Largest upload (pixels) the resize job can decode: GD holds ~5 bytes per pixel (truecolor + alpha, plus the
+     * resized copy), so the cap is 25 MP and lower when memory_limit leaves less than that headroom.
+     */
+    public static function maxUploadPixels(?string $memoryLimit = null): int {
+        $cap = 25_000_000;
+        $limit = trim($memoryLimit ?? (string)ini_get('memory_limit'));
+        if ($limit === '' || $limit === '-1') return $cap;
+        $bytes = (int)$limit * (['k' => 1024, 'm' => 1048576, 'g' => 1073741824][strtolower(substr($limit, -1))] ?? 1);
+        return $bytes > 0 ? max(1_000_000, min($cap, intdiv($bytes - 32 * 1048576, 5))) : $cap;
     }
 
     /** Unique storage path of a product image upload (two uploads in the same second never overwrite each other). */

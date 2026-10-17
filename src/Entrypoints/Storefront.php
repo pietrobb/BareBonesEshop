@@ -61,7 +61,12 @@ switch ($page) {
     case 'category':
         $slug = Security::clean($_GET['slug'] ?? $_GET['category'] ?? '');
         $cat = Categories::bySlug($slug);
-        if (!$cat) { $content = Template::render('storefront/status-message', ['message' => $t('cat_not_found')]); break; }
+        if (!$cat) {
+            http_response_code(404);
+            $title = Template::pageTitle($t('cat_not_found'));
+            $content = Template::render('storefront/status-message', ['message' => $t('cat_not_found')]);
+            break;
+        }
         $title = Template::pageTitle($catName($cat['name']));
         $content = renderCategory($cat);
         break;
@@ -79,7 +84,7 @@ switch ($page) {
 
     case 'search':
         $q = Security::clean($_GET['q'] ?? '');
-        $pg = max(1, Security::int($_GET['pg'] ?? 1));
+        $pg = max(1, min(Search::MAX_PAGE, Security::int($_GET['pg'] ?? 1)));
         $searchFilters = Search::filtersFromQuery($_GET);
         $result = Adapters::search()->search($q, ['page' => $pg, 'per_page' => 24] + $searchFilters['opts']);
         $title = Template::pageTitle($t('search') . ': ' . $q);
@@ -89,7 +94,7 @@ switch ($page) {
     case 'privacy':
     case 'terms':
     case 'cookies':
-        $legalTitles = ['privacy' => 'Privacy Policy', 'terms' => 'Terms & Conditions', 'cookies' => 'Cookie Policy'];
+        $legalTitles = ['privacy' => $t('privacy_policy'), 'terms' => $t('terms_conditions'), 'cookies' => $t('cookie_policy')];
         $title = Template::pageTitle($legalTitles[$page]);
         $content = renderLegalPage($page);
         break;
@@ -121,10 +126,16 @@ switch ($page) {
         $content = renderOrderDone($ordNum);
         break;
 
-    default: // a page registered by an extension ("<code>" or "<code>.<name>"), otherwise home
+    case 'home':
+        $content = renderHome();
+        break;
+
+    default: // a page registered by an extension ("<code>" or "<code>.<name>"), otherwise a real 404 (not the homepage with 200)
         $extensionPage = Extensions::page($page);
         if ($extensionPage === null) {
-            $content = renderHome();
+            http_response_code(404);
+            $title = Template::pageTitle($t('account.page_not_found'));
+            $content = Template::render('storefront/status-message', ['message' => $t('account.page_not_found')]);
             break;
         }
         $title = Template::pageTitle($extensionPage['title']);

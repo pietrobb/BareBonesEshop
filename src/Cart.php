@@ -6,6 +6,18 @@
 class Cart {
     /** Most units of one line: every add/update path (JSON API, storefront form, reorder, restore) is capped here. */
     public const MAX_QTY = 99;
+    /** unavailable_reason of a line whose effective unit price is negative (e.g. a variant delta that outgrew its base price). */
+    public const UNAVAILABLE_PRICE_INVALID = 'price_invalid';
+    /** @var array<string, true> SKUs already reported in this request */
+    private static array $reportedInvalidPrices = [];
+
+    /** Catalog data error, not shopper input: log the SKU and raise one incident per SKU and request. */
+    private static function reportInvalidPrice(string $sku): void {
+        if (isset(self::$reportedInvalidPrices[$sku])) return;
+        self::$reportedInvalidPrices[$sku] = true;
+        Logger::safeWrite('error', 'cart.negative_unit_price', ['sku' => $sku]);
+        IncidentMonitor::report('catalog.negative_price', 'cart', 'error', ['count' => 1]);
+    }
 
     public static function get(): array {
         $cart = $_SESSION['cart'] ?? [];
@@ -170,6 +182,8 @@ class Cart {
             if (!empty($item['variant_id'])) {
                 $variant = $variants[$item['variant_id']] ?? null;
                 if (!$variant) { unset($_SESSION['cart'][$key]); continue; }
+                // A negative delta can outgrow a later-lowered base price. Such a line is not sold
+                // (unavailable, incident raised below) instead of being clamped to a free item.
                 $price = $variant['price_absolute'] !== null
                     ? (int)$variant['price_absolute']
                     : (int)$product['price'] + (int)$variant['price_delta'];
@@ -210,21 +224,31 @@ class Cart {
             $available = $availability === VariantAvailability::ACTIVE && ($isDigital || $qty > 0);
             if (!$available) $qty = (int)$item['qty']; // preserve requested qty for display
 
-            $customerId = (int)($_SESSION['customer_id'] ?? 0);
+            $unavailableReason = $available ? null : 'not_available';
             $pricingProduct = $product;
             $pricingProduct['price'] = $price;
-            $pricingProduct = Pricing::applyPriceList(
-                $pricingProduct,
-                !empty($item['variant_id']) ? (int)$item['variant_id'] : null,
-                max(1, $qty),
-                $customerId > 0 ? $customerId : null
-            );
-            $pricingProduct = Promotions::applyToProduct(
-                $pricingProduct,
-                max(1, $qty),
-                $customerId > 0 ? $customerId : null
-            );
-            $price = (int)$pricingProduct['price'];
+            if ($price >= 0) {
+                $customerId = (int)($_SESSION['customer_id'] ?? 0);
+                $pricingProduct = Pricing::applyPriceList(
+                    $pricingProduct,
+                    !empty($item['variant_id']) ? (int)$item['variant_id'] : null,
+                    max(1, $qty),
+                    $customerId > 0 ? $customerId : null
+                );
+                $pricingProduct = Promotions::applyToProduct(
+                    $pricingProduct,
+                    max(1, $qty),
+                    $customerId > 0 ? $customerId : null
+                );
+                $price = (int)$pricingProduct['price'];
+            }
+            if ($price < 0) {
+                // Never sell at 0 because of a clamp: the line stays visible but is not purchasable,
+                // keeps its negative price (Orders::create refuses it too) and an incident is raised.
+                $available = false;
+                $unavailableReason = self::UNAVAILABLE_PRICE_INVALID;
+                self::reportInvalidPrice((string)$sku);
+            }
             $pricingSnapshot = array_filter([
                 'price_list' => $pricingProduct['price_list_snapshot'] ?? null,
                 'promotions' => $pricingProduct['promotion_snapshot'] ?? null,
@@ -263,6 +287,7 @@ class Cart {
                 'attrs'            => $pricingSnapshot === [] ? [] : ['_pricing' => $pricingSnapshot],
                 'currency'         => $currency,
                 'available'        => $available,
+                'unavailable_reason' => $available ? null : $unavailableReason,
                 'currency_mismatch' => $currencyMismatch,
                 'vat_class'        => $product['vat_class'] ?? 'standard',
             ];
@@ -430,14 +455,16 @@ class Cart {
     }
 
     /**
-     * Cart abandonment: save email and persist cart to DB for recovery
+     * Cart abandonment: save email and persist cart to DB for recovery — only with the shopper's
+     * reminder consent (AbandonedCarts::capture()).
+     * @param array{version?:string,text?:string}|null $reminderConsent accepted cart-reminder consent, null = none
      */
-    public static function setEmail(string $email): void {
+    public static function setEmail(string $email, ?array $reminderConsent = null): void {
         $_SESSION['cart_email'] = $email;
         $_SESSION['cart_email_at'] = time();
 
         try {
-            AbandonedCarts::capture($email);
+            AbandonedCarts::capture($email, null, $reminderConsent);
         } catch (\Throwable $e) {
             // Cart recovery tracking must never block checkout.
             error_log("Cart::setEmail persist failed: " . $e->getMessage());

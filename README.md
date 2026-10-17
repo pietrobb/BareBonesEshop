@@ -11,6 +11,10 @@ MariaDB** for production. Multi-language, multi-currency, extensible through
 
 No Composer dependencies, no build step — plain PHP 8.1+ and PDO.
 
+**Status:** actively developed. Read the **Upgrade notes** in [CHANGELOG.md](CHANGELOG.md) before
+updating an installation. Found a security problem? See [SECURITY.md](SECURITY.md) — please report
+it privately, not as a public issue. Licensed under the [MIT License](LICENSE).
+
 ---
 
 ## Requirements
@@ -58,7 +62,9 @@ database admin account exists.
 
 - **Apache**: the bundled `.htaccess` (needs `AllowOverride All` and `mod_rewrite`).
 - **nginx + PHP-FPM**: [`deploy/nginx.conf`](deploy/nginx.conf) mirrors the `.htaccess`
-  deny and rewrite rules.
+  deny and rewrite rules. Keep its `location ~ \.php$ { try_files $uri @redirect; ... }`:
+  store-prefixed scripts such as `/cs/account.php` do not exist on disk and reach PHP only through
+  that fallback (set `operations.nginx_config` and `php cli/setup.php doctor` checks it).
 - **Docker**: [`deploy/docker-compose.yml`](deploy/docker-compose.yml) runs nginx and the
   PHP-FPM image from [`deploy/Dockerfile`](deploy/Dockerfile) with the private runtime data
   on a named volume. PHP runs as `www-data` (uid 33) on a read-only root filesystem with the
@@ -175,7 +181,9 @@ Commerce mutations write CloudEvents-compatible records to `event_outbox` in the
 same database transaction. `cli/worker.php` signs each configured delivery with
 `X-BBE-Event-ID`, `X-BBE-Timestamp`, and `X-BBE-Signature`, retries non-2xx
 responses with exponential backoff, and moves exhausted events to `dead` after
-eight attempts. Endpoint URLs and secrets live only in deployment configuration.
+eight attempts. Endpoint URLs and secrets live only in deployment configuration;
+endpoints must use `https://` (plain `http://` only with `'allow_insecure_http' => true`
+for a receiver on a trusted local network) and a secret of at least 32 bytes.
 
 ---
 
@@ -252,6 +260,12 @@ BBE_ADMIN_IDENTITY_KEY=<secret> BBE_ADMIN_PASSWORD=<secret> \
   php cli/admin-user.php create --username=ops --role=owner --store=default
 ```
 
+**Delegated admin management.** Owners can manage every account (except the owner
+protections). A non-owner with `admins.manage` may only create or manage accounts
+whose role permissions are a subset of its own, in every store the target account
+is granted; the create form lists only those roles. It cannot change its own role,
+status or store grants, but may reset its own password/MFA and revoke its own sessions.
+
 Set `queue.backend` to `file`, `database`, or `redis`. File mode retains the
 single-worker lock; database and Redis modes use opaque atomic claims and leases
 so multiple workers may run concurrently. In every mode a job whose worker died
@@ -292,7 +306,13 @@ as CI before deployment:
 ```bash
 php cli/i18n-parity.php
 php cli/quality-gates.php
+php cli/static-analysis.php
+cli/phpstan.sh            # PHPStan level 5 exactly as CI: pinned phar, clean `git archive HEAD` copy
 ```
+
+`cli/phpstan.sh` analyses the committed tree only (commit first) and must report no errors. The
+baseline (`phpstan-baseline.neon`) can only shrink: an entry that no longer matches fails the run,
+so a fix that removes a baselined finding deletes its entry in the same change.
 
 The quality gate verifies package paths, declared byte budgets, WCAG 2.2 AA skip/focus/target-size/reduced-motion/forced-colors invariants, feed routes, consent defaults, and runs `php cli/theme-check.php`.
 `php cli/update.php check|backup|apply` and `doctor --package` run the same theme gate automatically before anything changes: the **new core from the package with the installed themes, stores.json and store block overrides** (see [Production updates](#production-updates)). Testing the bundled default theme alone does not qualify a custom theme; do not update production first to run this check. For a manually assembled tree, run `php cli/theme-check.php` (nonzero exit on incompatibility) and `php cli/staging-preflight.php --strict` in it.
@@ -491,9 +511,16 @@ production path. Backups, migrations, and CLI tools live under `cli/`.
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every push and pull request: a `php -l`
-syntax check across all sources plus the full `cli/test.php` suite, on a
-PHP **8.1 / 8.2 / 8.3 / 8.4** matrix.
+`.github/workflows/ci.yml` runs on every push and pull request:
+
+- `php -l` on every tracked PHP file and the full `cli/test.php` suite on PHP **8.1 / 8.2 / 8.3 / 8.4**
+  against a Redis service (live Redis queue tests), plus the static-analysis, i18n-parity and quality gates;
+- PHPStan level 5 against `phpstan-baseline.neon` (run it locally exactly like CI with `cli/phpstan.sh`);
+- the application, parity and updater suite on **MySQL 8.0** and **MariaDB 11.4** with a least-privilege user;
+- Playwright e2e (Chromium, WebKit iPhone, Firefox) with axe WCAG 2.2 AA checks and Lighthouse budgets;
+- a Docker image build smoke test.
+
+`.github/workflows/payment-gateway.yml` runs the real Stripe test-mode checkout when test keys are configured.
 
 ---
 

@@ -8,6 +8,8 @@ class Seo {
         if ($base !== '' && (!filter_var($base, FILTER_VALIDATE_URL) || !in_array(strtolower((string)parse_url($base, PHP_URL_SCHEME)), ['http', 'https'], true))) {
             throw new RuntimeException('app_url must be an absolute HTTP(S) URL');
         }
+        // Without app_url the links stay relative, but keep the deployment base path (subdirectory installs).
+        if ($base === '') $base = Template::baseUrl();
         $canonical = $base . $path;
         $e = static fn(string $value): string => htmlspecialchars($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $lines = [

@@ -74,6 +74,12 @@ class Setup
         $defaultStore = is_array($stores) ? (string)($stores['default_store'] ?? '') : '';
         $storeOk = is_array($stores) && isset($stores['stores'][$defaultStore]);
         $add($storeOk ? 'pass' : 'fail', 'stores.default', $storeOk ? "Default store: {$defaultStore}" : 'stores.json has no valid default store', 'Define default_store and its store record.');
+        // Invoice / credit-note series that would issue the same numbers are refused at issue time: report them now.
+        $numbering = is_array($stores) ? InvoiceService::numberingConflicts($stores) : [];
+        $add($numbering === [] ? 'pass' : 'fail', 'stores.invoice_numbering', $numbering === []
+            ? 'Every seller has its own invoice and credit-note number series.'
+            : 'Invoice numbering conflicts (these series are refused): ' . implode(' | ', array_map(static fn(string $series, string $message): string => "{$series}: {$message}", array_keys($numbering), $numbering)),
+            'Give each store with its own legal block its own legal.invoice_prefix / legal.credit_note_prefix, or set legal.seller to the store whose series a storefront of the same company shares.');
 
         foreach (self::runtimePaths($config) as $name => $path) {
             $target = str_ends_with($name, '_file') ? dirname($path) : $path;
@@ -151,6 +157,12 @@ class Setup
         $add($mail === 'log' ? 'warn' : 'pass', 'provider.mail', "Mail provider selected: {$mail}", $mail === 'log' ? 'Configure smtp or ses and send a staging message before launch.' : '');
         $webhooks = array_filter((array)($config['outbound_webhooks'] ?? []), static fn($endpoint): bool => is_array($endpoint) && ($endpoint['active'] ?? true));
         $add($webhooks === [] ? 'warn' : 'pass', 'provider.webhook', $webhooks === [] ? 'No active outbound webhook configured.' : count($webhooks) . ' active outbound webhook endpoint(s).', 'Configure one signed staging endpoint and verify a delivery audit row.');
+        $invalidWebhooks = Webhook::invalidEndpoints($config);
+        $add($invalidWebhooks === [] ? 'pass' : 'fail', 'provider.webhook_config', $invalidWebhooks === []
+            ? 'Outbound webhook endpoints are valid.'
+            : 'Invalid outbound webhook endpoints: ' . implode('; ', array_map(static fn(string $code, string $problem): string => "{$code}: {$problem}", array_keys($invalidWebhooks), $invalidWebhooks)),
+            'Use https URLs (allow_insecure_http only for a local receiver), secrets of 32+ bytes and codes of a-z, 0-9, "_" and "-".');
+        self::upgradeChecks($config, $add);
         Extensions::boot($config);
         $extensionErrors = Extensions::errors();
         $add($extensionErrors === [] ? 'pass' : 'fail', 'extensions', $extensionErrors === []
@@ -164,6 +176,28 @@ class Setup
         $erp = (array)($config['integrations']['http_erp'] ?? []);
         $erpReady = self::integrationReady($erp);
         $add($erpReady ? 'pass' : 'warn', 'provider.erp', $erpReady ? 'HTTP ERP contract configured.' : 'HTTP ERP contract not configured.', 'Configure integrations.http_erp and verify create/status update in staging.');
+    }
+
+    /** Settings that silently change behaviour after the upgrade (UpgradeChecks, CHANGELOG upgrade notes). */
+    private static function upgradeChecks(array $config, callable $add): void
+    {
+        $insecure = UpgradeChecks::insecureHttpWebhooks($config);
+        $add($insecure === [] ? 'pass' : 'warn', 'upgrade.webhook_http', $insecure === []
+            ? 'No outbound webhook relies on plain http.'
+            : 'Outbound webhooks over plain http are no longer delivered: ' . implode(', ', array_keys($insecure)),
+            'Switch the endpoint to https, or set allow_insecure_http => true only for a receiver on a trusted local network.');
+        $reminderBroken = UpgradeChecks::cartReminderWithoutConsent($config);
+        $add($reminderBroken ? 'warn' : 'pass', 'upgrade.cart_reminder_consent', $reminderBroken
+            ? 'cart_reminder is enabled but checkout_consents has no active cart_reminder consent: no reminder is stored or sent.'
+            : 'Cart reminder consent configuration is consistent.',
+            "Add checkout_consents['cart_reminder'] (version, text, required => false) or disable cart_reminder.");
+        $nginx = UpgradeChecks::nginxPhpFallback($config);
+        if ($nginx !== null) {
+            $add($nginx ? 'pass' : 'warn', 'upgrade.nginx_php_fallback', $nginx
+                ? 'nginx sends missing .php scripts to @redirect (store-prefixed scripts work).'
+                : 'nginx PHP location has no "try_files $uri @redirect;": store-prefixed scripts (/cs/account.php, /cs/wishlist.php) answer 404.',
+                'Copy the location ~ \.php$ block from deploy/nginx.conf into ' . (string)($config['operations']['nginx_config'] ?? 'the nginx site config') . ' and reload nginx.');
+        }
     }
 
     private static function integrationReady(array $integration): bool

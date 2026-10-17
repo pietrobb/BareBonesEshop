@@ -66,11 +66,10 @@ class Idempotency {
     }
 
     private static function hasClaimColumns(PDO $db): bool {
-        $columns = $db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite'
-            ? array_column($db->query('PRAGMA table_info(processed_events)')->fetchAll(PDO::FETCH_ASSOC), 'name')
-            : $db->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'processed_events'")->fetchAll(PDO::FETCH_COLUMN);
-        // An unreadable or missing table is a real error, not a pending migration.
-        return $columns === [] || (in_array('state', $columns, true) && in_array('claimed_at', $columns, true));
+        // An unreadable or missing table is a real error, not a pending migration. Hits are cached
+        // per connection, so a migrated schema costs no probe query per webhook.
+        return (Db::hasColumn('processed_events', 'state', $db) && Db::hasColumn('processed_events', 'claimed_at', $db))
+            || !Db::tableExists('processed_events', $db);
     }
 
     /**

@@ -3,8 +3,8 @@
     <div class="footer-col"><h4>{{shop_name}}</h4><p>{{t.storefront_tagline}}</p></div>
     <div class="footer-col"><h4>{{t.categories}}</h4>{{#each footer_categories}}<a href="{{url}}">{{label}}</a>{{/each}}</div>
     <div class="footer-col"><h4>{{t.information}}</h4>
-      <a href="{{about_url}}">{{t.about_us}}</a>
-      <a href="{{contact_url}}">{{t.contact}}</a>
+      {{#if about_url}}<a href="{{about_url}}">{{t.about_us}}</a>{{/if}}
+      {{#if contact_url}}<a href="{{contact_url}}">{{t.contact}}</a>{{/if}}
       <a href="{{privacy_url}}">{{t.privacy_policy}}</a>
       <a href="{{terms_url}}">{{t.terms_conditions}}</a>
       <a href="{{cookies_url}}">{{t.cookie_policy}}</a>

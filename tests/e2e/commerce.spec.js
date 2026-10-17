@@ -77,6 +77,48 @@ test('guest cart and checkout complete in a real browser', async ({ page }) => {
   await checkout(page, 'guest-g12@example.test');
 });
 
+test('checkout rates show a translated error state, drop stale responses and use integer cents', async ({ page }) => {
+  await addFirstProduct(page);
+  await fillCheckout(page, 'rates-g12@example.test');
+  const country = page.locator('#checkout-country');
+  const shippingBox = page.locator('#shipping-options');
+
+  // A failed rate request ends in a visible, translated alert, not a stuck "Loading…".
+  await page.route(/\/api\/v1\/storefront\/shipping_rates(?:\?|$)/, route => route.abort());
+  await country.selectOption('CZ');
+  await expect(shippingBox.locator('[role="alert"]')).toBeVisible();
+  await expect(shippingBox.locator('.shipping-loading')).toHaveCount(0);
+  await page.unroute(/\/api\/v1\/storefront\/shipping_rates(?:\?|$)/);
+
+  // An older, slower response must not overwrite the rates of the latest country.
+  let calls = 0;
+  await page.route(/\/api\/v1\/storefront\/shipping_rates(?:\?|$)/, async route => {
+    calls += 1;
+    if (calls === 1) {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      await route.fulfill({ json: { methods: [{ method_code: 'stale', label: 'Stale rate', price: 100 }] } }).catch(() => {});
+      return;
+    }
+    await route.fulfill({ json: { methods: [{ method_code: 'big', label: 'Big parcel', price: 123450 }] } });
+  });
+  // The payment request carries the goods plus the selected rate in integer cents (no display-string parsing).
+  const amounts = [];
+  await page.route(/\/api\/v1\/storefront\/payment_methods(?:\?|$)/, async route => {
+    amounts.push(new URL(route.request().url()).searchParams.get('amount'));
+    await route.fulfill({ json: { methods: [{ code: 'bank_transfer', label: 'Bank transfer', fee: 0 }] } });
+  });
+  await country.selectOption('SK');
+  await country.selectOption('CZ');
+  await expect(shippingBox.locator('input[value="big"]')).toBeChecked();
+  await page.waitForTimeout(2000);
+  await expect(shippingBox.getByText('Stale rate')).toHaveCount(0);
+  const subtotal = Number(await page.locator('#checkout-subtotal').inputValue());
+  const discount = Number(await page.locator('#checkout-discount').inputValue() || '0');
+  expect(amounts.at(-1)).toBe(String(Math.max(0, subtotal - discount) + 123450));
+  await page.unroute(/\/api\/v1\/storefront\/shipping_rates(?:\?|$)/);
+  await page.unroute(/\/api\/v1\/storefront\/payment_methods(?:\?|$)/);
+});
+
 test('account login preserves authenticated checkout ownership', async ({ page }) => {
   test.skip(!state.customer, 'Run tests/e2e/seed.php first');
   await page.goto('/account.php?p=login');

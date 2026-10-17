@@ -91,9 +91,10 @@ try {
 
 // The single abandoned-cart reminder is due-date driven, so it is swept on every
 // cron run instead of depending on someone enqueueing a cart_abandonment job.
+// Off unless enabled; even then only carts whose shopper gave reminder consent are reminded.
 try {
     $reminderCfg = (array)($cfg['cart_reminder'] ?? []);
-    if (($reminderCfg['enabled'] ?? true) !== false) {
+    if (($reminderCfg['enabled'] ?? false) === true) {
         $reminders = AbandonedCarts::sweep($reminderCfg + ['base_url' => cartReminderBaseUrl($cfg)]);
         if ($verbose && $reminders > 0) echo "Cart reminders queued: {$reminders}\n";
     }
@@ -108,12 +109,18 @@ try {
     Logger::exception('worker.cleanup_schedule_failed', $e);
 }
 
-// Optional daily low-stock digest (stock_alerts.digest_hour); claimed once per day.
-try {
-    StockAlerts::digest();
-} catch (\Throwable $e) {
-    Logger::exception('worker.stock_digest_failed', $e);
+// Optional daily low-stock digest (stock_alerts.digest_hour); claimed once per store and day,
+// so every store gets its own digest, like the incident sweep below.
+$digestStore = StoreContext::current();
+foreach (Bootstrap::stores()['stores'] ?? [] as $digestStoreCode => $_) {
+    try {
+        Bootstrap::initStoreContext('/', '', (string)$digestStoreCode);
+        StockAlerts::digest();
+    } catch (\Throwable $e) {
+        Logger::exception('worker.stock_digest_failed', $e, ['store' => (string)$digestStoreCode]);
+    }
 }
+StoreContext::activate($digestStore);
 
 $monitorStore = StoreContext::current();
 foreach (Bootstrap::stores()['stores'] ?? [] as $monitorStoreCode => $_) {
@@ -221,61 +228,12 @@ function orderProviderCode(array $order, string $type): string {
     return strtolower((string)($snapshot['providers'][$type] ?? ''));
 }
 
+/**
+ * Outbox sweep (see OutboxDispatcher): per-endpoint failures are recorded and retried with
+ * Outbox::markRetry without blocking other endpoints, and the sweep is time-boxed.
+ */
 function processOutbox(array $cfg, bool $verbose = false): void {
-    $endpoints = is_array($cfg['outbound_webhooks'] ?? null) ? $cfg['outbound_webhooks'] : [];
-    foreach (Outbox::pending(25) as $pending) {
-        $event = Outbox::claim((string)$pending['id']);
-        if ($event === null) continue;
-        try {
-            Bootstrap::initStoreContext(
-                '/',
-                '',
-                (string)$event['store_id'],
-                (string)$event['channel_id']
-            );
-            $envelope = Outbox::envelope($event);
-            $matched = 0;
-            $failures = [];
-            foreach ($endpoints as $code => $endpoint) {
-                if (!is_array($endpoint)) continue;
-                $stores = $endpoint['stores'] ?? [];
-                if (is_array($stores) && $stores !== [] && !in_array((string)$event['store_id'], $stores, true)) continue;
-                if (!Webhook::endpointAccepts($endpoint, (string)$event['event_type'])) continue;
-                $matched++;
-                if (Outbox::endpointDelivered((string)$event['id'], (string)$code)) continue;
-
-                $result = Webhook::deliver($endpoint, $envelope);
-                Outbox::recordDelivery(
-                    (string)$event['id'],
-                    (string)$code,
-                    (int)$event['attempts'],
-                    $result['delivered'],
-                    $result['response_code'],
-                    $result['error']
-                );
-                if (!$result['delivered']) {
-                    $failures[] = (string)$code . ':' . ($result['response_code'] ?? 'network');
-                }
-            }
-            // In-process listeners of enabled extensions, with the same per-endpoint retry/dedup.
-            $extensionDelivery = Extensions::deliver($event, $envelope);
-            $matched += $extensionDelivery['matched'];
-            array_push($failures, ...$extensionDelivery['failures']);
-            // Guarded by the claim: after a stale-lease takeover the other worker's outcome stands.
-            $claimed = (int)$event['attempts'];
-            if ($failures === []) {
-                $owned = Outbox::markDelivered((string)$event['id'], $claimed);
-                if ($verbose) echo "Delivered outbox event {$event['id']} to {$matched} endpoint(s)\n";
-            } else {
-                $owned = Outbox::markRetry((string)$event['id'], $claimed, implode(', ', $failures), $claimed);
-                if ($verbose) echo "Deferred outbox event {$event['id']}: " . implode(', ', $failures) . "\n";
-            }
-            if (!$owned) Logger::warning('worker.outbox_claim_lost', ['event_id' => (string)$event['id']]);
-        } catch (\Throwable $e) {
-            Outbox::markRetry((string)$event['id'], (int)$event['attempts'], $e->getMessage(), (int)$event['attempts']);
-            if ($verbose) echo "Deferred outbox event {$event['id']}: {$e->getMessage()}\n";
-        }
-    }
+    OutboxDispatcher::run($cfg, $verbose);
 }
 
 function handleCacheRebuild(array $payload, array $job): void {
@@ -453,12 +411,28 @@ function handleEmailSend(array $payload, array $job): void {
     if ($providerCode === '') $providerCode = Adapters::defaultProviderCode('mail');
     $result = MailService::send($template, $to, $locale, $vars, $orderId !== null ? (int)$orderId : null, [], $providerCode);
     if (($result['status'] ?? '') === 'failed') throw new RuntimeException('mail.delivery_failed');
+    // Rate-limited order mail is queued again after the limit window instead of being dropped.
+    if (($result['status'] ?? '') === 'rate_limited') MailService::deferRateLimited($payload, $result);
 }
 
 function handleDigitalFulfill(array $payload, array $job): void {
     $orderId = (int)($payload['order_id'] ?? 0);
     if ($orderId <= 0 || !DigitalDelivery::orderHasAssets($orderId)) return;
 
+    // One fulfilment per order at a time: a concurrent job would rotate (revoke) the links this one mails.
+    $claim = DigitalDelivery::claimFulfilment($orderId);
+    // Another worker is fulfilling this order right now: retry with backoff, by then its links are
+    // delivered and grant() has nothing left (a crashed holder's claim lapses after its lease).
+    if ($claim === null) throw new RuntimeException("Digital fulfilment of order #{$orderId} is already in progress");
+    try {
+        fulfilDigitalOrder($orderId, $claim);
+    } finally {
+        DigitalDelivery::releaseFulfilment($claim);
+    }
+}
+
+/** $claim (the fulfilment claim, renewed in place) is renewed right before the mail, so its lease covers the delivery. */
+function fulfilDigitalOrder(int $orderId, ?string &$claim = null): void {
     $links = DigitalDelivery::grant($orderId);
     if (!$links) return;
     $order = Orders::byId($orderId);
@@ -472,6 +446,14 @@ function handleDigitalFulfill(array $payload, array $job): void {
         return ['label' => $link['label'], 'url' => $link['url'], 'validity' => $validity];
     }, $links);
 
+    // Fresh leases for the slow mail: the job's, and the per-order claim (lost = another worker took the order
+    // over and rotates these links; it delivers its own, so this run must not mail links about to be revoked).
+    JobQueue::heartbeat();
+    if ($claim !== null) {
+        $renewed = DigitalDelivery::renewFulfilment($claim);
+        if ($renewed === null) throw new RuntimeException("Digital fulfilment claim of order #{$orderId} was lost to another worker");
+        $claim = $renewed;
+    }
     $result = MailService::send('digital_delivery', (string)$order['customer_email'], (string)($order['locale'] ?? ''), [
         'order_number' => $order['order_number'],
         'customer_name' => $order['customer_name'],
@@ -655,6 +637,7 @@ function handleErpOrderUpdate(array $payload, array $job): void {
 function handleCartAbandonment(array $payload, array $job): void {
     $cfg = require __DIR__ . '/../config.php';
     $options = (array)($cfg['cart_reminder'] ?? []);
+    if (($options['enabled'] ?? false) !== true) return;
     if (isset($payload['hours'])) $options['delay_hours'] = (int)$payload['hours'];
     AbandonedCarts::sweep($options + ['base_url' => cartReminderBaseUrl($cfg)]);
 }

@@ -49,6 +49,7 @@ RewriteRule ^uploads/.*\.(?:php(?:[0-9]+|s)?|phtml?|phar)(?:[./]|$) - [F,L,NC]
 
 # XML sitemap, robots.txt, and store-scoped commerce feeds
 RewriteRule ^sitemap\.xml$ sitemap.php [L]
+RewriteRule ^sitemap-([0-9]+)\.xml$ sitemap.php?part=$1 [L]
 RewriteRule ^robots\.txt$ robots.php [L]
 RewriteRule ^feeds/google\.xml$ feed.php?channel=google [QSA,L]
 RewriteRule ^feeds/meta\.csv$ feed.php?channel=meta [QSA,L]

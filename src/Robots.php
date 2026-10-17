@@ -9,19 +9,30 @@
  * Pure (base string in, body string out) so it is unit-testable without HTTP.
  */
 class Robots {
-    /** Paths crawlers must not index. */
+    /**
+     * Paths crawlers must not fetch, matching the URLs the storefront really links: transactional
+     * pages are query routes (/?page=cart, /cs/?page=checkout), account/wishlist/API are scripts that
+     * may sit under a store url_prefix (/cs/account.php). Category pagination (?pg=) stays crawlable:
+     * listing links only carry sort= for a non-default order.
+     */
     private const DISALLOW = [
         '/admin',
         '/admin.php',
         '/api/',
+        '/*/api/',
         '/account',
-        '/account.php',
-        '/cart',
-        '/checkout',
-        '/order-done',
+        '/*/account.php',
+        '/wishlist',
+        '/*/wishlist',
+        '/*?*page=cart',
+        '/*?*page=checkout',
+        '/*?*page=order-done',
+        '/*?*cart_recover=',
+        '/*?*cart_unsubscribe=',
+        '/checkout/',
         '/cache/',
         '/*?*add=',     // cart mutation query params
-        '/*?*sort=',    // faceted-sort URL noise
+        '/*?*sort=',    // non-default sort orders duplicate the canonical listing
     ];
 
     /**

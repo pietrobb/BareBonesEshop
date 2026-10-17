@@ -31,13 +31,20 @@ function apiCategories(): array {
 
 function apiProducts(): array {
     $catSlug = Security::slug($_GET['cat'] ?? '');
-    $page = max(1, Security::int($_GET['page'] ?? 1));
+    $page = max(1, min(Search::MAX_PAGE, Security::int($_GET['page'] ?? 1)));
     $sort = Security::slug($_GET['sort'] ?? 'price_asc');
     $filtersJson = Security::str($_GET['filters'] ?? '{}', '{}');
-    $filters = json_decode($filtersJson, true);
+    $filters = json_decode($filtersJson, true, 4);
     if (!is_array($filters)) $filters = [];
-    $priceMin = isset($_GET['price_min']) ? Security::int($_GET['price_min']) : null;
-    $priceMax = isset($_GET['price_max']) ? Security::int($_GET['price_max']) : null;
+    // {"attr": "value"} or {"attr": ["v1", "v2"]} only: deeper nesting used to reach a string-typed tokenizer (500).
+    foreach ($filters as $values) {
+        if (is_array($values) && array_filter($values, static fn($value): bool => !is_scalar($value)) !== []) {
+            http_response_code(400);
+            return ['error' => 'Invalid filters', 'products' => [], 'total' => 0];
+        }
+    }
+    $priceMin = isset($_GET['price_min']) ? max(0, Security::int($_GET['price_min'])) : null;
+    $priceMax = isset($_GET['price_max']) ? max(0, Security::int($_GET['price_max'])) : null;
 
     $cfg = require dirname(__DIR__, 2) . '/config.php';
     $perPage = $cfg['per_page'] ?? 24;
@@ -98,7 +105,7 @@ function apiProduct(): array {
 
 function apiSearch(): array {
     $q = trim(Security::str($_GET['q'] ?? ''));
-    $page = max(1, Security::int($_GET['page'] ?? 1));
+    $page = max(1, min(Search::MAX_PAGE, Security::int($_GET['page'] ?? 1)));
 
     if (strlen($q) < 2) {
         return ['products' => [], 'total' => 0, 'query' => $q];
@@ -160,6 +167,20 @@ function apiValidateCoupon(): array {
 }
 
 function apiReviewSubmit(): array {
+    $input = json_decode((string)file_get_contents('php://input'), true);
+    $result = reviewSubmitResult(is_array($input) ? $input : $_POST);
+    // The product page form also works without JavaScript: a plain form POST that names its product page
+    // goes back there (303) with a flash message instead of showing this JSON.
+    $returnTo = !is_array($input) ? Security::safeLocalPath($_POST['return_to'] ?? '', '') : '';
+    if ($returnTo !== '' && str_starts_with($returnTo, '/')) {
+        $_SESSION['review_flash'] = ['ok' => !empty($result['ok']), 'error' => (string)($result['error'] ?? '')];
+        http_response_code(303);
+        header('Location: ' . $returnTo . '#reviews');
+    }
+    return $result;
+}
+
+function reviewSubmitResult(array $input): array {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         http_response_code(405);
         return ['error' => 'Method not allowed'];
@@ -175,16 +196,17 @@ function apiReviewSubmit(): array {
         return ['ok' => false, 'error' => 'rate_limited'];
     }
 
-    $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
     $productId = Security::int($input['product_id'] ?? 0);
-    if ($productId <= 0 || !Products::byId($productId)) {
+    $product = $productId > 0 ? Products::byId($productId) : null;
+    // Only products shoppers can see may collect reviews (not drafts or archived ones).
+    if (!$product || ($product['status'] ?? '') !== 'active') {
         return ['ok' => false, 'error' => 'invalid_product'];
     }
 
     $data = [
         'rating' => Security::int($input['rating'] ?? 0),
-        'title'  => (string)($input['title'] ?? ''),
-        'body'   => (string)($input['body'] ?? ''),
+        'title'  => Security::str($input['title'] ?? ''),
+        'body'   => Security::str($input['body'] ?? ''),
     ];
 
     // Logged-in customer: attribute the review and use the account name.
@@ -193,18 +215,55 @@ function apiReviewSubmit(): array {
         $data['customer_id'] = $customerId;
         $c = Customers::byId($customerId);
         $data['author_name'] = trim((string)($c['name'] ?? '')) !== ''
-            ? $c['name']
-            : (string)($input['author_name'] ?? '');
+            ? mb_substr(trim((string)$c['name']), 0, Reviews::MAX_AUTHOR)
+            : Security::str($input['author_name'] ?? '');
     } else {
-        $data['author_name'] = (string)($input['author_name'] ?? '');
+        $data['author_name'] = Security::str($input['author_name'] ?? '');
+    }
+
+    $error = Reviews::validationError($productId, $data);
+    if ($error !== null) return ['ok' => false, 'error' => $error];
+    // One review per product per customer within the window. Guests are keyed by their session
+    // (one IP can be a whole office or a CDN edge) plus a coarse per-IP cap. Check first and record
+    // only an accepted review, so refused retries never extend the block.
+    $buckets = reviewDuplicateBuckets($productId, $customerId);
+    foreach ($buckets as [$bucket, $max, $bindIp]) {
+        if (!Security::rateLimitAllows($bucket, $max, Reviews::DUPLICATE_WINDOW, $bindIp)) {
+            http_response_code(429);
+            header('Retry-After: ' . Reviews::DUPLICATE_WINDOW);
+            return ['ok' => false, 'error' => 'duplicate_review'];
+        }
     }
 
     [$ok, $id, $err] = Reviews::submit($productId, $data);
     if (!$ok) {
         return ['ok' => false, 'error' => $err];
     }
+    foreach ($buckets as [$bucket, , $bindIp]) {
+        Security::rateLimitRecord($bucket, $bindIp);
+    }
     // Reviews always land as pending — never visible until an admin approves.
     return ['ok' => true, 'id' => $id, 'status' => 'pending'];
+}
+
+/**
+ * Duplicate-review buckets as [action, max hits per Reviews::DUPLICATE_WINDOW, bind to client IP].
+ * Customers: one per account. Guests: one per session and Reviews::GUEST_IP_CAP per client IP
+ * (without a session, only the IP cap applies). $sessionId defaults to the active session's id.
+ *
+ * @return list<array{0:string,1:int,2:bool}>
+ */
+function reviewDuplicateBuckets(int $productId, int $customerId, ?string $sessionId = null): array {
+    if ($customerId > 0) {
+        return [['review_once_' . $productId . '_c' . $customerId, 1, false]];
+    }
+    $buckets = [];
+    $sid = $sessionId ?? (session_status() === PHP_SESSION_ACTIVE ? (string)session_id() : '');
+    if ($sid !== '') {
+        $buckets[] = ['review_once_' . $productId . '_s' . hash('sha256', $sid), 1, false];
+    }
+    $buckets[] = ['review_once_' . $productId . '_ip', Reviews::GUEST_IP_CAP, true];
+    return $buckets;
 }
 
 function apiWishlist(): array {
@@ -228,7 +287,9 @@ function apiWishlistToggle(): array {
 
     $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
     $productId = Security::int($input['product_id'] ?? 0);
-    if ($productId <= 0 || !Products::byId($productId)) {
+    $product = $productId > 0 ? Products::byId($productId) : null;
+    // Adding needs an active product; removing an entry whose product was since archived stays possible.
+    if (!$product || (($product['status'] ?? '') !== 'active' && !Wishlist::has($productId))) {
         return ['ok' => false, 'error' => 'invalid_product'];
     }
 
@@ -529,8 +590,8 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     $cfg = $runtimeConfig ?? require dirname(__DIR__, 2) . '/config.php';
     $synthetic = SyntheticCheckout::isRequest($cfg);
 
-    // Capture email for abandoned cart recovery
-    if (!$synthetic) Cart::setEmail($email);
+    // Capture email for abandoned cart recovery — only with the shopper's reminder consent.
+    if (!$synthetic) Cart::setEmail($email, CheckoutService::cartReminderConsent($input, $country));
 
     if (!preg_match('/^[a-z0-9_-]{2,40}$/', $paymentMethod)) {
         return ['error' => 'Invalid payment method'];
@@ -608,6 +669,9 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         $shippingMethod = 'digital';
     } elseif (trim((string)($input['street'] ?? '')) === '' || trim((string)($input['city'] ?? '')) === '' || trim((string)($input['zip'] ?? '')) === '') {
         return ['success' => false, 'error' => 'Doručovacia adresa je povinná pri fyzických produktoch.'];
+    } elseif (!array_key_exists($country, ShippingService::destinationCountries())) {
+        // Only countries the checkout offers; a wildcard zone price is not a destination by itself.
+        return ['success' => false, 'error' => 'Doručenie nie je dostupné do zvolenej krajiny.'];
     }
 
     $consentContext = [
@@ -1238,7 +1302,8 @@ function apiWebhookPulledNotification(string $provider): ?array {
 
 function apiWebhookShipping(): array {
     $carrier = Security::clean($_GET['carrier'] ?? '');
-    if (!$carrier || !preg_match('/^[a-z0-9_]+$/', $carrier)) {
+    // Carrier codes allow "-" (HttpShipping's default is http-carrier), as adapter codes do.
+    if (!$carrier || !preg_match('/^[a-z0-9][a-z0-9_-]{0,39}$/', $carrier)) {
         http_response_code(400);
         return ['error' => 'Invalid carrier'];
     }
@@ -1263,7 +1328,12 @@ function apiWebhookShipping(): array {
     };
 
     try {
-        $result = ShippingService::handleTrackingWebhook($carrier, $parsed, $sigHeader, $rawPayload);
+        $result = ShippingService::handleTrackingWebhook($carrier, $parsed, $sigHeader, $rawPayload, (string)($_SERVER['HTTP_X_SHIPPING_TIMESTAMP'] ?? ''));
+    } catch (ShippingWebhookConfigurationError $e) {
+        // Our own misconfiguration: not the carrier's fault, so not "Invalid signature"; the carrier retries.
+        IncidentMonitor::report('shipping.webhook_misconfigured', 'webhook', 'critical', ['exception' => $e]);
+        http_response_code(503);
+        return ['error' => 'Webhook not configured'];
     } catch (\RuntimeException $e) {
         if (str_contains($e->getMessage(), 'signature')) {
             http_response_code(400);
@@ -1286,7 +1356,7 @@ function apiParametricSearch(): array {
     $catId = Security::int($_GET['category_id'] ?? 0);
     if (!$catId) return ['error' => 'category_id required'];
 
-    $page = max(1, Security::int($_GET['page'] ?? 1));
+    $page = max(1, min(Search::MAX_PAGE, Security::int($_GET['page'] ?? 1)));
     $sort = Security::clean($_GET['sort'] ?? 'price_asc');
     $lang = I18n::locale();
 
@@ -1348,8 +1418,10 @@ function apiCookieConsent(): array {
         'analytics' => !empty($_POST['analytics']),
         'marketing' => !empty($_POST['marketing']),
     ];
-    $method = (string)($_POST['method'] ?? 'preferences');
-    if (!in_array($method, ['accept_all', 'reject_all', 'preferences'], true)) {
+    // The banner sends GdprService's own method names; the short legacy spellings map onto them.
+    $method = Security::str($_POST['method'] ?? 'preferences', 'preferences');
+    $method = ['accept_all' => 'banner_accept_all', 'reject_all' => 'banner_reject_all'][$method] ?? $method;
+    if (!in_array($method, ['banner_accept_all', 'banner_reject_all', 'preferences'], true)) {
         $method = 'preferences';
     }
     $cid = (int)($_SESSION['customer_id'] ?? 0);

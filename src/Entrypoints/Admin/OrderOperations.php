@@ -8,16 +8,18 @@ function handleOrdersExport(): void {
     header('Content-Disposition: attachment; filename="orders-' . StoreContext::current()->id() . '-' . date('Y-m-d') . '.csv"');
     header('X-Content-Type-Options: nosniff');
     $out = fopen('php://output', 'w');
-    OrderExport::writeCsv($out, $_POST);
+    try {
+        OrderExport::writeCsv($out, $_POST);
+    } catch (CsvExportTruncated) {
+        CsvExport::abortResponse(); // logged + incident already; an already started download stays incomplete
+    }
     fclose($out);
     exit;
 }
 
 /** @return int[] order ids posted as order_ids[] (non-array or nested input yields none) */
 function postedOrderIds(): array {
-    $ids = $_POST['order_ids'] ?? [];
-    if (!is_array($ids)) return [];
-    return array_values(array_filter(array_map(static fn($id): int => is_scalar($id) ? Security::int($id) : 0, $ids), static fn(int $id): bool => $id > 0));
+    return Security::intList($_POST['order_ids'] ?? []);
 }
 
 function handleOrdersBulkStatus(): void {
