@@ -25,7 +25,7 @@
             "name": "type",
             "type": "select",
             "label": "Typ",
-            "options_from": "/api.php?action=bbf_attr_types",
+            "options_from": "/api/v1/options/attr_types",
             "size": "half"
         },
         {

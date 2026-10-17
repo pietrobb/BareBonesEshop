@@ -132,7 +132,7 @@ return [
         'worker_cron' => '', // e.g. * * * * *; install it in the platform scheduler too
         'monitor_cron' => '', // e.g. */5 * * * * php cli/monitor.php
         // Live nginx site config (absolute path, readable by PHP): doctor and staging-preflight warn
-        // when its PHP location lacks the @redirect fallback that store-prefixed AJAX needs. '' = not checked.
+        // when its PHP location lacks the @redirect fallback that store-prefixed scripts need. '' = not checked.
         'nginx_config' => '',
     ],
     // Technical incidents only; normal checkout validation never sends mail.
@@ -159,7 +159,7 @@ return [
         'payment_funnel_window_seconds' => 86400,
         'payment_funnel_grace_seconds' => 1800,
         'payment_funnel_min_started' => 3,
-        // Browser CSP reports (api.php?action=csp_report). A blocked form-action is critical once
+        // Browser CSP reports (/api/v1/csp-report). A blocked form-action is critical once
         // reported by csp_form_action_critical distinct clients (IP hashes), or by
         // csp_form_action_reports_critical reports in total from >= 2 requests - that fallback only
         // applies while trusted_proxies is empty (behind an unlisted proxy/CDN every report has the
@@ -197,7 +197,7 @@ return [
         // 'acme-loyalty',
     ],
 
-    // Dev only: route api.php?action=webhook_payment&provider=mock even when the
+    // Dev only: accept /api/v1/webhooks/payment/mock even when the
     // active payment adapter is not MockPayment. NEVER enable in production —
     // the mock webhook marks orders as paid. Pair with 'mock_webhook_secret'.
     'allow_mock_webhook' => false,
@@ -229,7 +229,7 @@ return [
     'gopay_env'           => 'sandbox', // 'production' uses gate.gopay.cz
 
     // Comgate (provider code comgate). Set the push notification URL in the Comgate client portal to
-    // <app_url>/api.php?action=webhook_payment&provider=comgate; every push is checked against the
+    // <app_url>/api/v1/webhooks/payment/comgate; every push is checked against the
     // merchant/secret and confirmed by the status API. Env PAY_COMGATE_* overrides these values.
     'comgate_merchant' => '',
     'comgate_secret'   => '',

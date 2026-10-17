@@ -91,13 +91,13 @@ nginx PHP fallback when `operations.nginx_config` is set).
   `Str::normalizeEmail()` (trim + UTF-8 `mb_strtolower`) without SQL `LOWER()`, so `Éva@x` and
   `éva@x` share one per-customer coupon limit on SQLite and MySQL alike. Migration
   `20261016150000_normalize_coupon_use_emails` rewrites existing `coupon_uses` rows the same way.
-- **nginx (store-prefixed AJAX)**: `deploy/nginx.conf` now ends its PHP location with
-  `location ~ \.php$ { try_files $uri @redirect; ... }`. Store-prefixed scripts such as `/cs/api.php`,
-  `/cs/account.php` and `/cs/wishlist.php` do not exist on disk; without that line nginx answers 404
-  for **every AJAX call of a prefixed store** (cart, checkout refreshes, wishlist). Copy the block into
-  your site config and reload nginx. Apache (`.htaccess`) and `router.php` need no change. Set
-  `operations.nginx_config` to the live file and `php cli/setup.php doctor` / `cli/staging-preflight.php`
-  warn when the line is missing.
+- **nginx (store-prefixed scripts)**: `deploy/nginx.conf` now ends its PHP location with
+  `location ~ \.php$ { try_files $uri @redirect; ... }`. Store-prefixed scripts such as `/cs/account.php`
+  and `/cs/wishlist.php` do not exist on disk; without that line nginx answers 404 for them (account
+  portal and wishlist of a prefixed store). The store-prefixed API (`/cs/api/v1/…`) reaches `@redirect`
+  through `location /`. Copy the block into your site config and reload nginx. Apache (`.htaccess`) and
+  `router.php` need no change. Set `operations.nginx_config` to the live file and `php cli/setup.php doctor` /
+  `cli/staging-preflight.php` warn when the line is missing.
 - **Outbound webhooks**: endpoints must use `https://`; a plain `http://` URL is refused (failed
   delivery audit row, warning incident `webhook.endpoint_misconfigured`, `provider.webhook_config`
   doctor failure) unless the endpoint sets `'allow_insecure_http' => true` (only for a receiver on a
@@ -179,6 +179,24 @@ nginx PHP fallback when `operations.nginx_config` is set).
   (e.g. MySQL `net_write_timeout` on a slow download) is logged (`export.truncated`) and raises the
   incident `export.truncated`; when nothing was sent yet the download answers 500, otherwise the file
   is incomplete - check the incidents before importing an export elsewhere.
+
+### Changed (breaking) — one JSON API under `/api/v1`
+- `api.php` and the `/api/<action>` rewrite are removed. Its actions moved to route groups of the
+  existing `/api/v1` entrypoint (routes in `src/ApiRoute.php`; handlers and responses unchanged):
+  - `api.php?action=<action>` → `/api/v1/storefront/<action>` (also extension actions `<code>.<name>`)
+  - `api.php?action=bbf_<name>` → `/api/v1/options/<name>` (forms `options_from`)
+  - `api.php?action=webhook_payment&provider=<p>` and `action=webhook_stripe` → `/api/v1/webhooks/payment/<p>`
+  - `api.php?action=webhook_shipping&carrier=<c>` → `/api/v1/webhooks/shipping/<c>`
+  - `api.php?action=csp_report` → `/api/v1/csp-report`
+  - An unknown action answers 404 (was 200) with the same `{"error": "Unknown action"}` body.
+  - A store with a `url_prefix` calls `<prefix>/api/v1/storefront/<action>` (e.g. `/cs/api/v1/…`, was
+    `/cs/api.php`); the API resolves the store, locale and currency from that path.
+- **Upgrade:** when deploying, change the webhook URL in every payment gateway portal at the same
+  time: Stripe (Developers → Webhooks) to `<app_url>/api/v1/webhooks/payment/stripe`, Comgate push URL
+  to `<app_url>/api/v1/webhooks/payment/comgate`, and likewise any carrier webhooks. GoPay, ThePay and
+  PayU get the new notification URL with every new payment automatically. Custom themes that call
+  `api.php` must use `window.BareBonesStorefront.apiUrl` + `/<action>`; nginx needs the updated
+  `deploy/nginx.conf` (the `/api/(.*)` rewrite is gone).
 
 ### Added
 - **Shipments and tracking in the admin order detail** (A12.8). Migration `20261014090000_shipment_tracking_url`.

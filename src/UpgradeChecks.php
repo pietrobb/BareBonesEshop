@@ -35,7 +35,7 @@ final class UpgradeChecks
 
     /**
      * Whether the live nginx site config (config operations.nginx_config) sends missing .php
-     * scripts to @redirect, which store-prefixed AJAX (/cs/api.php) needs. Null when not
+     * scripts to @redirect, which store-prefixed scripts (/cs/account.php) need. Null when not
      * determinable: no path configured, the file is unreadable, or it has no PHP location.
      */
     public static function nginxPhpFallback(array $config): ?bool

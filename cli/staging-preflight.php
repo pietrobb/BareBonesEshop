@@ -139,7 +139,7 @@ function runStagingPreflight(array $argvLocal = []): array {
         $stripeWh = (string)($cfg['stripe_webhook_secret'] ?? '');
         $add(preflightSecretLooksFilled($stripeSk) ? 'ok' : 'fail', 'stripe_secret_key', preflightSecretLooksFilled($stripeSk) ? 'Stripe secret key configured.' : 'Stripe secret key missing/placeholder.', 'Use Stripe test secret key for staging.');
         $add(preflightSecretLooksFilled($stripePk) ? 'ok' : 'warn', 'stripe_publishable_key', preflightSecretLooksFilled($stripePk) ? 'Stripe publishable key configured.' : 'Stripe publishable key missing/placeholder.', 'Set Stripe test publishable key if checkout UI needs it.');
-        $add(preflightSecretLooksFilled($stripeWh) ? 'ok' : 'fail', 'stripe_webhook_secret', preflightSecretLooksFilled($stripeWh) ? 'Stripe webhook secret configured.' : 'Stripe webhook secret missing/placeholder.', 'Set webhook secret for /api.php?action=webhook_stripe or generic payment webhook.');
+        $add(preflightSecretLooksFilled($stripeWh) ? 'ok' : 'fail', 'stripe_webhook_secret', preflightSecretLooksFilled($stripeWh) ? 'Stripe webhook secret configured.' : 'Stripe webhook secret missing/placeholder.', 'Set the webhook secret for /api/v1/webhooks/payment/stripe.');
     }
     foreach (['packeta', 'gls'] as $carrier) {
         $envKey = 'SHIP_' . strtoupper($carrier) . '_WEBHOOK_SECRET';
@@ -155,7 +155,7 @@ function runStagingPreflight(array $argvLocal = []): array {
     $add($reminderWithoutConsent ? 'warn' : 'ok', 'cart_reminder_consent', $reminderWithoutConsent ? 'cart_reminder is enabled without an active checkout_consents.cart_reminder: no reminder is stored or sent.' : 'Cart reminder consent configuration is consistent.', "Add checkout_consents['cart_reminder'] (version, text, required => false) or disable cart_reminder.");
     $nginxFallback = UpgradeChecks::nginxPhpFallback($cfg);
     if ($nginxFallback !== null) {
-        $add($nginxFallback ? 'ok' : 'warn', 'nginx_php_fallback', $nginxFallback ? 'nginx sends missing .php scripts to @redirect.' : 'nginx PHP location lacks "try_files $uri @redirect;": store-prefixed AJAX (/cs/api.php) answers 404.', 'Copy the location ~ \.php$ block from deploy/nginx.conf into operations.nginx_config and reload nginx.');
+        $add($nginxFallback ? 'ok' : 'warn', 'nginx_php_fallback', $nginxFallback ? 'nginx sends missing .php scripts to @redirect.' : 'nginx PHP location lacks "try_files $uri @redirect;": store-prefixed scripts (/cs/account.php, /cs/wishlist.php) answer 404.', 'Copy the location ~ \.php$ block from deploy/nginx.conf into operations.nginx_config and reload nginx.');
     }
 
     $mailAdapter = strtolower(preflightEnv('MAIL_ADAPTER') ?: 'log');

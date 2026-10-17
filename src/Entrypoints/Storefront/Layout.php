@@ -90,8 +90,8 @@ $shell = [
 ];
 
 $runtimeConfig = [
-    // Store-prefixed (/cs/api.php): the API resolves the store, locale and currency from the path.
-    'apiUrl' => Template::storeUrl('/api.php'),
+    // Store-prefixed (/cs/api/v1/storefront): the API resolves the store, locale and currency from the path.
+    'apiUrl' => Template::storeUrl('/api/v1/storefront'),
     'currentUrl' => Template::storeUrl('/'),
     'baseUrl' => Template::baseUrl(),
     'csrfToken' => Security::csrfToken(),

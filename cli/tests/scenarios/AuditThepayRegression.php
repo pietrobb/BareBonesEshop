@@ -56,7 +56,7 @@ if ($a166Ready) {
     $a166Order = ['order_number' => 'A166-1', 'total' => 1990, 'currency' => 'eur', 'customer_email' => 'buyer@example.com', 'customer_name' => 'Jana Mária Nováková', 'locale' => 'sk',
         'success_url' => 'https://shop.example/?page=order-done&order=A166-1&session_id={CHECKOUT_SESSION_ID}',
         'cancel_url' => 'https://shop.example/?page=checkout-cancel&order=A166-1',
-        'notify_url' => 'https://shop.example/api.php?action=webhook_payment&provider=thepay'];
+        'notify_url' => 'https://shop.example/api/v1/webhooks/payment/thepay'];
     $a166Session = (new ThePayPayment($a166Cfg, $a166Transport))->createSession($a166Order);
     $a166Create = $a166Calls[0] ?? ['method' => '', 'url' => '', 'headers' => [], 'body' => ''];
     $a166Body = json_decode((string)$a166Create['body'], true) ?: [];
@@ -68,7 +68,7 @@ if ($a166Ready) {
     assert_equals([1990, 'EUR', 'A166-1', 'sk', ['name' => 'Jana Mária', 'surname' => 'Nováková', 'email' => 'buyer@example.com']],
         [$a166Body['amount'] ?? null, $a166Body['currency_code'] ?? null, $a166Body['order_id'] ?? null, $a166Body['language_code'] ?? null, $a166Body['customer'] ?? null],
         'A16.6 ThePay create: amount in minor units, ISO currency, order id, language, customer name/surname/e-mail');
-    assert_equals(['https://shop.example/?page=order-done&order=A166-1&session_id=', 'https://shop.example/api.php?action=webhook_payment&provider=thepay'],
+    assert_equals(['https://shop.example/?page=order-done&order=A166-1&session_id=', 'https://shop.example/api/v1/webhooks/payment/thepay'],
         [$a166Body['return_url'] ?? null, $a166Body['notif_url'] ?? null], 'A16.6 ThePay create: return and notification URLs');
     assert_true(!str_contains((string)$a166Create['body'], 'a166-password') && !str_contains((string)$a166Create['url'], 'a166-password'), 'A16.6 ThePay create: the API password never leaves the shop');
     $a166Calls = [];
@@ -177,7 +177,7 @@ try {
     $a166Body = json_decode((string)($a166Create['body'] ?? ''), true) ?: [];
     $a166OrderRow = $pdo->query("SELECT order_number, payment_id FROM orders WHERE id = " . (int)($a166Result['order_id'] ?? 0))->fetch() ?: ['order_number' => '', 'payment_id' => ''];
     assert_true(!empty($a166Result['success']) && empty($a166Result['payment_error']), 'A16.6 checkout: ThePay order is created with a payment session (' . ($a166Result['payment_error'] ?? $a166Result['error'] ?? 'ok') . ')');
-    assert_equals(['https://shop.example/api.php?action=webhook_payment&provider=thepay', ['name' => 'A166', 'surname' => 'Buyer', 'email' => 'a166@example.com'], $a166OrderRow['order_number']],
+    assert_equals(['https://shop.example/api/v1/webhooks/payment/thepay', ['name' => 'A166', 'surname' => 'Buyer', 'email' => 'a166@example.com'], $a166OrderRow['order_number']],
         [$a166Body['notif_url'] ?? null, $a166Body['customer'] ?? null, $a166Body['order_id'] ?? null], 'A16.6 checkout: notification URL, payer and order number are sent to ThePay');
     assert_equals('https://demo.gate.thepay.cz/a166/pay/', $a166Result['payment_url'] ?? null, 'A16.6 checkout: customer is sent to the ThePay gate');
     assert_equals($a166Body['uid'] ?? 'missing', (string)$a166OrderRow['payment_id'], 'A16.6 checkout: ThePay payment uid stored on the order');

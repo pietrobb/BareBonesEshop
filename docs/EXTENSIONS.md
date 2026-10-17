@@ -55,7 +55,7 @@ return [
                 ['points' => AcmeLoyaltyPoints::forCustomer()]),
         ]);
 
-        // JSON API action /api/?action=acme-loyalty.balance.
+        // JSON API action /api/v1/storefront/acme-loyalty.balance.
         $api->api('balance', static fn(array $query): array => ['points' => AcmeLoyaltyPoints::forCustomer()]);
 
         // State-changing action: POST only, the session CSRF token is enforced by the core.
@@ -80,7 +80,7 @@ return [
 - **Pages** answer `/?page=<code>.<name>` and return `['title' => string, 'content' => string]`.
   The content is HTML placed into the active theme's layout, so render data through
   `Template::process()` / `Template::render()` (they escape `{{ }}`). Core routes cannot be replaced.
-- **API actions** answer `/api/?action=<code>.<name>` with the returned array as JSON, under the
+- **API actions** answer `/api/v1/storefront/<code>.<name>` with the returned array as JSON, under the
   same session, locale and per-action rate limit as core actions. Validate input like core
   handlers (`Security::int()`, `Security::clean()`). The third argument of `$api->api()` takes
   options: `'method' => 'GET'|'POST'` limits the action to that method (others get HTTP 405), and

@@ -39,7 +39,7 @@ RewriteRule \.(?:(?:sqlite3?|db)(?:-(?:wal|shm))?|wal|shm|sql|dump|bak|backup|lo
 # Uploaded content must never be dispatched through a PHP handler.
 RewriteRule ^uploads/.*\.(?:php(?:[0-9]+|s)?|phtml?|phar)(?:[./]|$) - [F,L,NC]
 
-# No web-server cache shortcut: api.php serves its file cache itself, because entries live under
+# No web-server cache shortcut: the API serves its file cache itself, because entries live under
 # the resolved store namespace (cache/stores/<store>/<channel>/...) and are skipped for logged-in
 # customers with personal prices — neither is visible to Apache.
 
@@ -72,10 +72,8 @@ RewriteRule ^wishlist/?$ wishlist.php [QSA,L]
 # Public load-balancer probes expose no configuration or exception detail.
 RewriteRule ^(?:healthz|readyz)$ health.php [QSA,L]
 
-# Versioned machine API keeps path semantics; legacy browser API stays action-based.
+# The single JSON API: storefront, options, webhooks, CSP reports and the external API (src/ApiRoute.php).
 RewriteRule ^api/v1(?:/.*)?$ api/v1/index.php [QSA,L]
-# API routing: /api/products → api.php?action=products
-RewriteRule ^api/(.*)$ api.php?action=$1 [QSA,L]
 
 # ============================================================
 # Static assets — skip rewriting; never expose directory listings

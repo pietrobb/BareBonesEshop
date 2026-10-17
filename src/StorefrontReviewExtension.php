@@ -22,7 +22,7 @@ final class StorefrontReviewExtension
                 ], Reviews::approved($productId)),
                 'count' => (int)$aggregate['count'],
                 'average' => (int)$aggregate['count'] > 0 ? (float)$aggregate['avg'] : null,
-                'submit_url' => Template::url('/api.php?action=review_submit'),
+                'submit_url' => Template::url(ApiRoute::PREFIX . '/storefront/review_submit'),
                 'csrf_token' => Security::csrfToken(), 'requires_author' => empty($_SESSION['customer_id']),
                 'form_title' => $translations['reviews.write'], 'rating_label' => $translations['reviews.rating'],
                 'author_label' => $translations['reviews.author'], 'review_title_label' => $translations['reviews.review_title'],

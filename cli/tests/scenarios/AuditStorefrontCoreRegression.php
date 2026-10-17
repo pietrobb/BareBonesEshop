@@ -85,10 +85,11 @@ function with_error_log_silenced(callable $callback): mixed {
 chdir($sfaApp);
 $entry = match ($uri) {
     "/", "/index.php" => "index.php",
-    "/product.php", "/wishlist.php", "/api.php", "/page.php" => ltrim($uri, "/"),
-    default => null,
+    "/product.php", "/wishlist.php", "/page.php" => ltrim($uri, "/"),
+    default => str_starts_with($uri, "/api/v1/") ? "api/v1/index.php" : null,
 };
-if ($entry !== null) { require $sfaApp . "/" . $entry; exit; }
+// Like router.php: before PHP 8.4 the built-in server sets SCRIPT_NAME to a dotted request path.
+if ($entry !== null) { $_SERVER["SCRIPT_NAME"] = $_SERVER["PHP_SELF"] = "/" . $entry; require $sfaApp . "/" . $entry; exit; }
 // The .htaccess clean URLs (/product/x, /category/x, /page/x).
 $route = UrlAliases::entry(["path" => $uri, "query" => []]);
 if ($route !== null) { $_GET = $route[1] + $_GET; require $sfaApp . "/" . $route[0]; exit; }
@@ -142,7 +143,7 @@ try {
     foreach (['t-shirt blue', '3.5 mm', "o'neil shirt", 'a,b c', '50% off', 'x/y z', '+x y', 'NEAR(a b)', '"', '* -', 'col:val x'] as $sfaQuery) {
         $sfaSearch = $sfaHttp('GET', '/?page=search&q=' . rawurlencode($sfaQuery), [], $sfaSid);
         assert_true($sfaSearch['status'] === 200 && $sfaNoFatal($sfaSearch), "SFA search: '{$sfaQuery}' renders (HTTP {$sfaSearch['status']}, not a 500)");
-        $sfaApiSearch = $sfaHttp('GET', '/api.php?action=search&q=' . rawurlencode($sfaQuery), [], $sfaSid);
+        $sfaApiSearch = $sfaHttp('GET', '/api/v1/storefront/search?q=' . rawurlencode($sfaQuery), [], $sfaSid);
         assert_true($sfaApiSearch['status'] === 200 && is_array(json_decode($sfaApiSearch['body'], true)) && !isset(json_decode($sfaApiSearch['body'], true)['error']),
             "SFA api search: '{$sfaQuery}' answers JSON results");
     }
@@ -202,16 +203,16 @@ try {
         $sfaResult = $sfaHttp('GET', $sfaPath, [], $sfaSid);
         assert_true($sfaResult['status'] === 200 && $sfaNoFatal($sfaResult), "SFA overflow: {$sfaPath} renders (HTTP {$sfaResult['status']})");
     }
-    foreach (["/api.php?action=products&cat=sfa-kitchen&page={$sfaHuge}", "/api.php?action=search&q=sfa&page={$sfaHuge}",
-        "/api.php?action=parametric_search&category_id={$sfaKitchen}&page={$sfaHuge}", "/api.php?action=products&cat=sfa-kitchen&price_min={$sfaHuge}"] as $sfaPath) {
+    foreach (["/api/v1/storefront/products?cat=sfa-kitchen&page={$sfaHuge}", "/api/v1/storefront/search?q=sfa&page={$sfaHuge}",
+        "/api/v1/storefront/parametric_search?category_id={$sfaKitchen}&page={$sfaHuge}", "/api/v1/storefront/products?cat=sfa-kitchen&price_min={$sfaHuge}"] as $sfaPath) {
         $sfaResult = $sfaHttp('GET', $sfaPath, [], $sfaSid);
         assert_true($sfaResult['status'] === 200 && !isset(json_decode($sfaResult['body'], true)['error']), "SFA overflow: {$sfaPath} answers JSON (HTTP {$sfaResult['status']})");
     }
     assert_equals(Search::MAX_PRICE_FILTER * 100, $sfaProbeResult['filters_from_query']['opts']['price_min'] ?? null, 'SFA overflow: search pmin is clamped before the cents conversion');
     assert_equals(0, $sfaProbeResult['filters_from_query']['opts']['price_max'] ?? null, 'SFA overflow: a negative pmax is clamped to 0');
-    $sfaNested = $sfaHttp('GET', '/api.php?action=products&cat=sfa-kitchen&filters=' . rawurlencode('{"color":[["red"]]}'), [], $sfaSid);
+    $sfaNested = $sfaHttp('GET', '/api/v1/storefront/products?cat=sfa-kitchen&filters=' . rawurlencode('{"color":[["red"]]}'), [], $sfaSid);
     assert_true($sfaNested['status'] === 400 && (json_decode($sfaNested['body'], true)['error'] ?? '') === 'Invalid filters', 'SFA api products: nested filter arrays are a 400, not a TypeError 500');
-    $sfaFlat = $sfaHttp('GET', '/api.php?action=products&cat=sfa-kitchen&filters=' . rawurlencode('{"color":["red"],"size":"m"}'), [], $sfaSid);
+    $sfaFlat = $sfaHttp('GET', '/api/v1/storefront/products?cat=sfa-kitchen&filters=' . rawurlencode('{"color":["red"],"size":"m"}'), [], $sfaSid);
     assert_equals(200, $sfaFlat['status'], 'SFA api products: flat filters still work');
 
     // 6. Category links use the slug the router resolves (not the urlencoded nested path).
@@ -221,12 +222,12 @@ try {
     assert_true(preg_match('~"item":"[^"]*\\\\?/category\\\\?/sfa-mugs"~', $sfaShirtPage['body']) === 1, 'SFA links: breadcrumb JSON-LD names the slug URL');
     $sfaCategoryBySlug = $sfaHttp('GET', '/category/sfa-mugs', [], $sfaSid);
     assert_true($sfaCategoryBySlug['status'] === 200 && str_contains($sfaCategoryBySlug['body'], 'SFA Mug'), 'SFA links: the linked category URL resolves');
-    $sfaApiCategory = json_decode($sfaHttp('GET', '/api.php?action=products&cat=sfa-mugs', [], $sfaSid)['body'], true);
+    $sfaApiCategory = json_decode($sfaHttp('GET', '/api/v1/storefront/products?cat=sfa-mugs', [], $sfaSid)['body'], true);
     assert_true(str_ends_with((string)($sfaApiCategory['category']['url'] ?? ''), '/category/sfa-mugs'), 'SFA links: the API category URL uses the slug too');
 
     // 7. Cookie consent methods reach the consent log under GdprService's names.
     foreach (['banner_accept_all' => 'banner_accept_all', 'banner_reject_all' => 'banner_reject_all', 'accept_all' => 'banner_accept_all', 'bogus' => 'preferences'] as $sfaSent => $sfaStored) {
-        $sfaConsent = $sfaHttp('POST', '/api.php?action=cookie_consent', ['csrf_token' => 'sfa-csrf', 'method' => $sfaSent, 'analytics' => '1'], $sfaSid);
+        $sfaConsent = $sfaHttp('POST', '/api/v1/storefront/cookie_consent', ['csrf_token' => 'sfa-csrf', 'method' => $sfaSent, 'analytics' => '1'], $sfaSid);
         $sfaRow = $sfaDb->query('SELECT method FROM cookie_consent ORDER BY id DESC LIMIT 1')->fetchColumn();
         assert_true($sfaConsent['status'] === 200 && $sfaRow === $sfaStored, "SFA consent: method {$sfaSent} is stored as {$sfaStored} (got " . var_export($sfaRow, true) . ')');
     }
@@ -255,12 +256,12 @@ try {
     foreach ([$sfaGone, $sfaDraft, 999999] as $sfaPid) {
         $sfaHttp('POST', '/wishlist.php', ['csrf_token' => 'sfa-csrf', 'op' => 'toggle', 'product_id' => $sfaPid], $sfaSid);
         assert_equals(0, $sfaWishCount($sfaPid), "SFA wishlist: no-JS toggle does not save inactive/missing product {$sfaPid}");
-        $sfaApiToggle = json_decode($sfaHttp('POST', '/api.php?action=wishlist_toggle', ['csrf_token' => 'sfa-csrf', 'product_id' => $sfaPid], $sfaSid)['body'], true);
+        $sfaApiToggle = json_decode($sfaHttp('POST', '/api/v1/storefront/wishlist_toggle', ['csrf_token' => 'sfa-csrf', 'product_id' => $sfaPid], $sfaSid)['body'], true);
         assert_true(($sfaApiToggle['error'] ?? '') === 'invalid_product' && $sfaWishCount($sfaPid) === 0, "SFA wishlist: API toggle refuses inactive/missing product {$sfaPid}");
     }
 
     // 9. Reviews: length limits, active products only, duplicate guard, no-JS redirect with a flash.
-    $sfaReview = static fn(array $fields) => $sfaHttp('POST', '/api.php?action=review_submit', $fields + ['csrf_token' => 'sfa-csrf', 'rating' => '5', 'body' => 'Great mug indeed'], $sfaSid);
+    $sfaReview = static fn(array $fields) => $sfaHttp('POST', '/api/v1/storefront/review_submit', $fields + ['csrf_token' => 'sfa-csrf', 'rating' => '5', 'body' => 'Great mug indeed'], $sfaSid);
     assert_equals('author_too_long', json_decode($sfaReview(['product_id' => $sfaMug, 'author_name' => str_repeat('a', Reviews::MAX_AUTHOR + 1)])['body'], true)['error'] ?? null, 'SFA reviews: author_name is length-limited server-side');
     assert_equals('body_too_long', json_decode($sfaReview(['product_id' => $sfaMug, 'author_name' => 'Ann', 'body' => str_repeat('b', 2001)])['body'], true)['error'] ?? null, 'SFA reviews: body is length-limited server-side');
     foreach ([$sfaGone, $sfaDraft] as $sfaPid) {
@@ -275,7 +276,7 @@ try {
     assert_true($sfaDuplicate['status'] === 429 && (json_decode($sfaDuplicate['body'], true)['error'] ?? '') === 'duplicate_review' && $sfaDuplicate['location'] === '',
         'SFA reviews: a second review of the same product within the window is refused; a foreign return_to is not followed');
     assert_equals(1, (int)$sfaDb->query('SELECT COUNT(*) FROM product_reviews WHERE product_id = ' . $sfaMug)->fetchColumn(), 'SFA reviews: one stored review');
-    $sfaJson = $sfaHttp('POST', '/api.php?action=review_submit', [], $sfaSid, ['X-CSRF-Token: sfa-csrf']);
+    $sfaJson = $sfaHttp('POST', '/api/v1/storefront/review_submit', [], $sfaSid, ['X-CSRF-Token: sfa-csrf']);
     assert_equals('', $sfaJson['location'], 'SFA reviews: requests without return_to keep the JSON answer');
 
     // 10. Order-done only shows a verified order number.

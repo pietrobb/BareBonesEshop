@@ -17,7 +17,7 @@ try {
 $aunChangelog = (string)file_get_contents($aunApp . '/CHANGELOG.md');
 $aunNotes = substr($aunChangelog, (int)strpos($aunChangelog, '### Upgrade notes'), (int)strpos($aunChangelog, '### Added') - (int)strpos($aunChangelog, '### Upgrade notes'));
 foreach ([
-    'try_files $uri @redirect;', '/cs/api.php', 'allow_insecure_http', 'cart_reminder', 'silently stops sending',
+    'try_files $uri @redirect;', '/cs/account.php', 'allow_insecure_http', 'cart_reminder', 'silently stops sending',
     '<invoice_prefix>CN-', 'paid order', 'legal.seller', "'csrf' => false", 'import_mode', '<digital_assets_base_dir>/<catalog_id>/',
     'unknown `?page=`', 'X-Shipping-Timestamp', 'shipping_rates', 'destination', 'SMTP_ALLOW_PLAINTEXT_AUTH', 'SendRawEmail',
     'rate_limited', 'ext:<code>:<name>', '/page/about', 'adapters/uploads/', 'mb_strtolower',
@@ -74,7 +74,7 @@ assert_true(str_contains((string)file_get_contents($aunApp . '/config/config.sch
 
 // ── 3. Review dedupe: per session for guests, check-then-record ──────────────────────────────────
 $aunRateProp = new ReflectionProperty(Security::class, 'rateDb');
-$aunRateProp->setAccessible(true);
+if (PHP_VERSION_ID < 80100) $aunRateProp->setAccessible(true);
 $aunPreviousRateDb = $aunRateProp->getValue();
 $aunRate = new PDO('sqlite::memory:');
 Security::setRateDbForTesting($aunRate);
@@ -148,7 +148,7 @@ assert_equals(['éva@x.hu', 'éva@x.hu'], $aunCoupons->query('SELECT customer_em
 
 // ── 6. Public feed cache: category checksum, lock, no double writer ──────────────────────────────
 $aunCacheDir = new ReflectionProperty(Cache::class, 'cacheDir');
-$aunCacheDir->setAccessible(true);
+if (PHP_VERSION_ID < 80100) $aunCacheDir->setAccessible(true);
 $aunPreviousCacheDir = $aunCacheDir->getValue();
 Cache::setDir($aunRoot . '/cache');
 $aunCalls = 0;

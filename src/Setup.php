@@ -194,8 +194,8 @@ class Setup
         $nginx = UpgradeChecks::nginxPhpFallback($config);
         if ($nginx !== null) {
             $add($nginx ? 'pass' : 'warn', 'upgrade.nginx_php_fallback', $nginx
-                ? 'nginx sends missing .php scripts to @redirect (store-prefixed AJAX works).'
-                : 'nginx PHP location has no "try_files $uri @redirect;": store-prefixed AJAX (/cs/api.php) answers 404.',
+                ? 'nginx sends missing .php scripts to @redirect (store-prefixed scripts work).'
+                : 'nginx PHP location has no "try_files $uri @redirect;": store-prefixed scripts (/cs/account.php, /cs/wishlist.php) answer 404.',
                 'Copy the location ~ \.php$ block from deploy/nginx.conf into ' . (string)($config['operations']['nginx_config'] ?? 'the nginx site config') . ' and reload nginx.');
         }
     }

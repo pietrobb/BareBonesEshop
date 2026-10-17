@@ -398,7 +398,8 @@ switch ($action) {
         @mkdir($base . '/default/manuals', 0700, true);
         file_put_contents($base . '/default/manuals/m.pdf', 'pdf');
         file_put_contents($base . '/outside.txt', 'x');
-        @symlink($base, $base . '/default/escape');
+        // Windows without the symlink privilege cannot create the link; the assertion then skips the escape case.
+        try { $linked = symlink($base, $base . '/default/escape'); } catch (Throwable) { $linked = false; }
         DigitalDelivery::setConfigForTesting(['digital_assets_base_dir' => $base]);
         $paths = [];
         foreach (['ebooks/a.pdf', 'default/ebooks/a.pdf', '../cz/a.pdf', '/etc/passwd', 'a//b.pdf', 'escape/outside.txt'] as $input) $paths[$input] = DigitalDelivery::storePath($input);
@@ -406,14 +407,14 @@ switch ($action) {
         $paths['bad-catalog'] = DigitalDelivery::storePath('a.pdf', '../x');
         $_POST = ['csrf_token' => 'aac-token', 'sku' => 'AAC-DEF-2', 'asset_key' => 'default', 'label' => 'Manual', 'storage_path' => 'manuals/m.pdf', 'download_name' => 'm.pdf',
             'content_type' => 'application/pdf', 'download_limit' => '3', 'expiry_days' => '7', 'active' => '1'];
-        $extra = static function() use ($q, $paths, $base): array {
-            @unlink($base . '/default/escape');
+        $extra = static function() use ($q, $paths, $base, $linked): array {
+            if (is_link($base . '/default/escape')) @unlink($base . '/default/escape');
             @unlink($base . '/outside.txt');
             @unlink($base . '/default/manuals/m.pdf');
             @rmdir($base . '/default/manuals');
             @rmdir($base . '/default');
             @rmdir($base);
-            return ['paths' => $paths, 'assets' => $q('SELECT sku, storage_path FROM digital_assets')];
+            return ['paths' => $paths, 'linked' => $linked, 'assets' => $q('SELECT sku, storage_path FROM digital_assets')];
         };
         handleDigitalAssetSave();
         break;
@@ -637,7 +638,9 @@ try {
         $r = $aac('digital_assets');
         assert_equals(['ebooks/a.pdf' => 'default/ebooks/a.pdf', 'default/ebooks/a.pdf' => 'default/ebooks/a.pdf', '../cz/a.pdf' => null, '/etc/passwd' => null, 'a//b.pdf' => null],
             array_slice($r['extra']['paths'], 0, 5, true), "AAC {$aacDriver}: asset paths are kept inside <base>/<catalog>/");
-        assert_equals([null, 'cz/a.pdf', null], array_values(array_slice($r['extra']['paths'], 5, 3, true)), "AAC {$aacDriver}: symlink escape and unsafe catalog ids refused; other catalogs get their own directory");
+        // Without the symlink privilege (Windows) "escape" is an ordinary in-base path; the escape case needs the link.
+        $aacEscape = !empty($r['extra']['linked']) ? null : 'default/escape/outside.txt';
+        assert_equals([$aacEscape, 'cz/a.pdf', null], array_values(array_slice($r['extra']['paths'], 5, 3, true)), "AAC {$aacDriver}: symlink escape and unsafe catalog ids refused; other catalogs get their own directory");
         assert_equals([['sku' => 'AAC-DEF-2', 'storage_path' => 'default/manuals/m.pdf']], $r['extra']['assets'], "AAC {$aacDriver}: saved asset stored under the store directory");
         assert_equals([['digital_asset', 'Admin digital asset save']], array_map(static fn(array $a): array => [$a['entity'], $a['note']], $r['audit']), "AAC {$aacDriver}: digital asset save audited");
         $r = $aac('digital_asset_toggle');

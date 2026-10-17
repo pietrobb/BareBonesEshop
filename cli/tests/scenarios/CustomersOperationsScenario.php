@@ -393,7 +393,7 @@ assert_equals(0, Reviews::aggregate(2)['count'], 'Reviews: aggregate isolated pe
 // --- P7.2: api.php review_submit endpoint ---
 if (!defined('BB_TEST_LOAD_API_ONLY')) {
     define('BB_TEST_LOAD_API_ONLY', true);
-    require_once TEST_CLI_DIR . '/../api.php';
+    require_once TEST_CLI_DIR . '/../src/Entrypoints/Api.php';
 }
 // A real product is needed (handler verifies Products::byId). Product 501/502 exist from earlier seed;
 // fall back to creating one if not present in this DB position.

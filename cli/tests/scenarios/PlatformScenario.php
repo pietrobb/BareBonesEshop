@@ -429,7 +429,7 @@ assert_true(!str_contains($accountSourceG6, "gdpr_erase_failed') . ': ' . \$ex->
 $importSourceG6 = file_get_contents(TEST_CLI_DIR . '/../src/Import.php') ?: '';
 $pageSourceG6 = file_get_contents(TEST_CLI_DIR . '/../page.php') ?: '';
 $viewModelSourceG6 = file_get_contents(TEST_CLI_DIR . '/../src/StorefrontViewModel.php') ?: '';
-$apiSourceG6 = entrypointSource('api.php');
+$apiSourceG6 = entrypointSource('api/v1/index.php');
 assert_true(substr_count($adminSourceG6, 'Security::sanitizeRichHtml') >= 2, 'G6 rich HTML: CMS and admin product writes are sanitized');
 assert_true(str_contains($importSourceG6, "\$data['description'] = Security::sanitizeRichHtml"), 'G6 rich HTML: product imports sanitize descriptions');
 assert_true(str_contains($pageSourceG6, 'StorefrontViewModel::cmsPage') && str_contains($viewModelSourceG6, 'Security::sanitizeRichHtml'), 'G6 rich HTML: historical CMS content is sanitized at the canonical view-model boundary');
@@ -1540,7 +1540,8 @@ assert_true(str_contains($afStatus, '<option value="retired" selected data-bbf-s
 foreach (['admin-product', 'admin-page', 'admin-attribute', 'admin-import'] as $afId) {
     assert_true(count(AdminForm::definition($afId)['fields']) > 0, "Admin forms: {$afId} definition renders");
 }
-assert_equals(BbfOptions::forAction('bbf_product_statuses'), BbfOptions::fromSource('/api.php?action=bbf_product_statuses'), 'Admin forms: options_from resolves to the same lists as api.php');
+assert_equals(BbfOptions::forAction('bbf_product_statuses'), BbfOptions::fromSource('/api/v1/options/product_statuses'), 'Admin forms: options_from resolves to the same lists as /api/v1/options');
+assert_equals(null, BbfOptions::fromSource('/api/v1/storefront/bbf_product_statuses'), 'Admin forms: option lists are not served as storefront actions');
 // Admin saves are validated by BBF (bbf_validate) against the same definitions and lists.
 $afStored = adminFormValues('admin-product', $rtRow('SA-BOOK'));
 $afSaved = AdminForm::validate('admin-product', $afStored, [], $afStored + ['csrf_token' => 'x', 'attr' => ['Farba' => 'modrá']], []);

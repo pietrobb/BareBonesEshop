@@ -108,7 +108,7 @@ foreach ($phpFiles as $file) {
 $entrypointBudgets = [
     'account.php' => 20,
     'admin.php' => 20,
-    'api.php' => 20,
+    'api/v1/index.php' => 20,
     'index.php' => 20,
     'cli/test.php' => 20,
 ];
@@ -157,7 +157,10 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/StoreScope.php' => ['lines' => 70, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 5],
     'src/Entrypoints/Admin/Suppliers.php' => ['lines' => 175, 'functions' => 8, 'max_function_lines' => 75, 'coupling' => 5],
     'src/Entrypoints/Admin/Taxonomy.php' => ['lines' => 140, 'functions' => 7, 'max_function_lines' => 65, 'coupling' => 4],
-    'src/Entrypoints/Api.php' => ['lines' => 75, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 5],
+    // +1 coupling: ApiRoute maps the /api/v1 route groups (storefront, options, webhooks, csp-report) to actions.
+    'src/Entrypoints/Api.php' => ['lines' => 75, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 6],
+    // External key-authenticated API v1 (was api/v1/index.php), loaded by Api.php for non-browser routes.
+    'src/Entrypoints/ApiExternal.php' => ['lines' => 50, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 6],
     // +1 coupling: Search::filtersFromQuery turns the search route's sort/price/category parameters into search options (A14.2).
     'src/Entrypoints/Storefront.php' => ['lines' => 150, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
     // Customer account portal behind the thin /account.php (registration, login, reset, GDPR, addresses, orders).

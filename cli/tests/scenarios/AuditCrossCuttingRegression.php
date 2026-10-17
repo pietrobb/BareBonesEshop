@@ -43,7 +43,7 @@ try {
     assert_true($xcThrown, 'Cross-cutting probe: table names are validated before reaching SQL');
     $xcDbSource = (string)file_get_contents($xcApp . '/src/Db.php');
     assert_true(str_contains($xcDbSource, 'TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?'), 'Cross-cutting probe: MySQL probes are confined to the current schema');
-    $xcOrdersSource = (string)file_get_contents($xcApp . '/src/Orders.php');
+    $xcOrdersSource = str_replace("\r\n", "\n", (string)file_get_contents($xcApp . '/src/Orders.php'));
     $xcHasColumn = preg_match('/function hasColumn\(.*?\n    }\n/s', $xcOrdersSource, $xcMatch) === 1 ? $xcMatch[0] : '';
     assert_true($xcHasColumn !== '' && !str_contains($xcHasColumn, 'PRAGMA') && str_contains($xcHasColumn, 'Db::hasColumn($table, $column)'), 'Cross-cutting probe: Orders::hasColumn no longer runs PRAGMA on MySQL');
     foreach (['GdprService', 'Idempotency', 'OperationalDashboard', 'AdminIdentity', 'ShippingService'] as $xcClass) {

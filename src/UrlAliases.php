@@ -112,8 +112,9 @@ final class UrlAliases {
         $path = $route['path'];
         $get = $route['query'];
         if ($path === '/') return ['index.php', $get];
-        // Store-prefixed scripts (/cs/api.php, /cs/account.php): the script resolves the store from REQUEST_URI.
-        if (in_array($path, ['/api.php', '/account.php', '/wishlist.php'], true)) return [substr($path, 1), $get];
+        // Store-prefixed API and scripts (/cs/api/v1/…, /cs/account.php): the script resolves the store from REQUEST_URI.
+        if ($path === ApiRoute::PREFIX || str_starts_with($path, ApiRoute::PREFIX . '/')) return ['api/v1/index.php', $get];
+        if (in_array($path, ['/account.php', '/wishlist.php'], true)) return [substr($path, 1), $get];
         if ($path === '/wishlist') return ['wishlist.php', $get];
         // Each store's merchant feeds live under its prefix (/cs/feeds/google.xml): links, prices and currency are that store's.
         if (preg_match('#^/feeds/(google)\.xml$|^/feeds/(meta)\.csv$#', $path, $m)) return ['feed.php', ['channel' => $m[1] !== '' ? $m[1] : $m[2]] + $get];

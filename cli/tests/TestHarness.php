@@ -13,7 +13,7 @@ function entrypointSource(string $entrypoint): string {
             'src/Entrypoints/Admin/Customers.php', 'src/Entrypoints/Admin/Operations.php',
             'src/Entrypoints/Admin/Request.php',
         ],
-        'api.php' => ['src/Entrypoints/Api.php', 'src/Http/ApiHandlers.php'],
+        'api/v1/index.php' => ['src/Entrypoints/Api.php', 'src/ApiRoute.php', 'src/Http/ApiHandlers.php', 'src/Entrypoints/ApiExternal.php'],
         'account.php' => ['src/Entrypoints/Storefront/Account.php', 'src/Entrypoints/Storefront/Layout.php'],
         'wishlist.php' => ['src/Entrypoints/Storefront/Layout.php'],
         'page.php' => ['src/Entrypoints/Storefront/Layout.php'],

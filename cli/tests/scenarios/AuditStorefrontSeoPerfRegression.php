@@ -227,13 +227,15 @@ try {
 
     // --- 4: the browser runtime calls the API and posts cart actions in the page's store context ---
     $sfbRuntime = preg_match('#window\.BareBonesStorefront=(\{.*?\});#s', $sfbHtml, $m) ? json_decode($m[1], true) : [];
-    assert_equals(['/shop/cs/api.php', '/shop/cs/'], [$sfbRuntime['apiUrl'] ?? null, $sfbRuntime['currentUrl'] ?? null], 'Storefront API: a /cs page calls /shop/cs/api.php and posts to /shop/cs/');
+    assert_equals(['/shop/cs/api/v1/storefront', '/shop/cs/'], [$sfbRuntime['apiUrl'] ?? null, $sfbRuntime['currentUrl'] ?? null], 'Storefront API: a /cs page calls /shop/cs/api/v1/storefront and posts to /shop/cs/');
     assert_true(isset($sfbRuntime['text']['shippingError'], $sfbRuntime['text']['paymentError']) && $sfbRuntime['text']['shippingError'] !== 'shipping_load_error',
         'Checkout JS: translated shipping/payment load-error texts reach the runtime config');
-    assert_equals('api.php', UrlAliases::dispatch('/cs/api.php'), 'Storefront API: /cs/api.php is routed (redirect.php fallback, router.php, nginx) to api.php');
-    $sfbApi = $sfbPage(['script' => 'redirect.php', 'script_name' => '/redirect.php', 'uri' => '/cs/api.php?action=cart', 'get' => ['path' => '/cs/api.php', 'action' => 'cart']]);
-    assert_equals(['cz', 'cs'], [$sfbApi['store'] ?? null, $sfbApi['locale'] ?? null], 'Storefront API: /cs/api.php runs in the CZ store and Czech locale');
-    assert_true(is_array(json_decode(trim((string)$sfbApi['output']), true)), 'Storefront API: /cs/api.php answers the action as JSON');
+    assert_equals('api/v1/index.php', UrlAliases::dispatch('/cs/api/v1/storefront/cart'), 'Storefront API: /cs/api/v1/storefront/cart is routed (redirect.php fallback, router.php, nginx) to the API');
+    assert_equals(null, UrlAliases::dispatch('/cs/api.php'), 'Storefront API: the removed /cs/api.php is not routed');
+    assert_equals(['action' => 'cart', 'get' => []], ApiRoute::resolve('/cs/api/v1/storefront/cart', '', ['cz' => ['url_prefix' => '/cs'], 'czb' => ['url_prefix' => '/cs/b2b']]), 'Storefront API: the API strips the store prefix before routing');
+    $sfbApi = $sfbPage(['script' => 'redirect.php', 'script_name' => '/redirect.php', 'uri' => '/cs/api/v1/storefront/cart', 'get' => ['path' => '/cs/api/v1/storefront/cart']]);
+    assert_equals(['cz', 'cs'], [$sfbApi['store'] ?? null, $sfbApi['locale'] ?? null], 'Storefront API: /cs/api/v1/storefront/cart runs in the CZ store and Czech locale');
+    assert_true(is_array(json_decode(trim((string)$sfbApi['output']), true)), 'Storefront API: /cs/api/v1/storefront/cart answers the action as JSON');
 
     // --- 1: default sort adds no sort= to pagination; robots.txt matches the real URLs ---
     $sfbDefault = $sfbPage(['script' => 'index.php', 'script_name' => '/index.php', 'uri' => '/?page=category&slug=sfb-cat', 'get' => ['page' => 'category', 'slug' => 'sfb-cat']]);
@@ -250,7 +252,7 @@ try {
         }
         return false;
     };
-    foreach (['/?page=cart', '/cs/?page=cart', '/?page=checkout', '/pl/?page=order-done&order=X', '/account.php', '/cs/account.php?p=login', '/wishlist', '/cs/wishlist', '/cs/api.php?action=cart', '/?page=category&slug=x&sort=name_desc'] as $sfbUrl) {
+    foreach (['/?page=cart', '/cs/?page=cart', '/?page=checkout', '/pl/?page=order-done&order=X', '/account.php', '/cs/account.php?p=login', '/wishlist', '/cs/wishlist', '/cs/api/v1/storefront/cart', '/api/v1/storefront/cart', '/?page=category&slug=x&sort=name_desc'] as $sfbUrl) {
         assert_true($sfbBlocked($sfbUrl), "robots.txt: {$sfbUrl} is disallowed");
     }
     foreach (['/', '/?page=category&slug=x&pg=2', '/category/x?pg=3', '/cs/?page=category&slug=x&pg=2', '/product/x', '/cs/product/x', '/page/about'] as $sfbUrl) {
