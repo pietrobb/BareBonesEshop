@@ -164,6 +164,21 @@ class I18n {
         return self::$lang;
     }
 
+    /**
+     * A stored UTC timestamp ("Y-m-d H:i:s") in the shop's display timezone (PHP's default, as in SalesReport)
+     * and the locale's format.date / format.datetime pattern; unparsable input comes back unchanged.
+     */
+    public static function dateTime(string $utc, bool $withTime = true): string {
+        if (trim($utc) === '') return '';
+        try {
+            $moment = new DateTimeImmutable($utc, new DateTimeZone('UTC'));
+        } catch (Exception) {
+            return $utc;
+        }
+        return $moment->setTimezone(new DateTimeZone(date_default_timezone_get()))
+            ->format(self::t($withTime ? 'format.datetime' : 'format.date'));
+    }
+
     /** Format price according to currency config */
     public static function price(int $cents, ?string $currency = null): string {
         $stores = self::stores();

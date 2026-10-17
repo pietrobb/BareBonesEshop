@@ -60,6 +60,7 @@ $content = '';
 switch ($page) {
     case 'category':
         $slug = Security::clean($_GET['slug'] ?? $_GET['category'] ?? '');
+        redirectCategoryTrailingSlash($slug);
         $cat = Categories::bySlug($slug);
         if (!$cat) {
             http_response_code(404);

@@ -89,9 +89,7 @@ final class StorefrontViewModel
                 '@type' => 'Offer',
                 'price' => number_format($product['price']['amount_minor'] / 100, 2, '.', ''),
                 'priceCurrency' => $currency,
-                'availability' => $availability['purchasable']
-                    ? 'https://schema.org/InStock'
-                    : 'https://schema.org/OutOfStock',
+                'availability' => $availability['schema'],
                 'url' => $absoluteUrl,
             ],
         ];
@@ -276,12 +274,16 @@ final class StorefrontViewModel
         $quantity = max(0, (int)($product['stock'] ?? 0));
         $purchasable ??= VariantAvailability::isPurchasable((int)$product['id'], $variantId);
         $inStock = $digital || $quantity > 0;
+        // Purchasable without stock means the inventory policy sells ahead of it (backorder or preorder).
+        $schema = !$purchasable ? 'OutOfStock'
+            : ($inStock ? 'InStock' : (($product['inventory_policy'] ?? '') === Inventory::PREORDER ? 'PreOrder' : 'BackOrder'));
         return [
             'purchasable' => $purchasable,
             'tracks_stock' => !$digital,
             'in_stock' => $inStock,
             'quantity' => $quantity,
             'label' => $purchasable && $inStock ? I18n::t('in_stock') : ($purchasable ? I18n::t('available') : I18n::t('out_of_stock')),
+            'schema' => 'https://schema.org/' . $schema,
         ];
     }
 
@@ -289,6 +291,7 @@ final class StorefrontViewModel
     {
         $variantProduct = $product;
         $variantProduct['stock'] = (int)($variant['stock'] ?? 0);
+        if (($variant['inventory_policy'] ?? 'inherit') !== 'inherit') $variantProduct['inventory_policy'] = $variant['inventory_policy'];
         $delta = (int)($variant['price_delta'] ?? 0);
         $amount = $variant['price_absolute'] !== null
             ? (int)$variant['price_absolute']

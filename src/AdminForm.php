@@ -66,12 +66,20 @@ class AdminForm {
     public static function validate(string $formId, array $stored = [], array $uploads = [], ?array $input = null, ?array $files = null): ?array {
         $result = bbf_validate(self::definition($formId), $input ?? $_POST, $files ?? $_FILES, self::options($stored) + ['uploads' => $uploads]);
         if (!$result['errors']) return $result['data'];
+        self::keepInput($formId, array_diff_key($result['data'], $result['errors']), $result['errors']);
+        return null;
+    }
+
+    /**
+     * Keep a rejected post for the next render() of this form (one-shot, in the session): used when the save
+     * handler refuses validated data (a taken slug, a failed editor check), so the redirect does not lose the input.
+     */
+    public static function keepInput(string $formId, array $values, array $errors = []): void {
         $_SESSION[self::STATE] = [
             'form' => $formId,
-            'errors' => $result['errors'],
-            'values' => array_filter(array_diff_key($result['data'], $result['errors']), 'is_scalar'),
+            'errors' => $errors,
+            'values' => array_filter($values, 'is_scalar'),
         ];
-        return null;
     }
 
     /** The first error message kept by the last rejected validate(), for a flash message. */

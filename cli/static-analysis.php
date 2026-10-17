@@ -128,7 +128,8 @@ $architectureBudgets = [
     // +1 coupling: CatalogScope keeps the catalog_scope-bound editor queries (categories, digital assets, attribute links) out of the entrypoint.
     // +1 coupling: ProductEditor validates and saves brand, GTIN/MPN, SEO, extra categories and translations outside the entrypoint.
     // +1 coupling: CsvExport streams the product export and reports a truncated one (log, incident, 500 when possible).
-    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1250, 'functions' => 24, 'max_function_lines' => 210, 'coupling' => 18],
+    // +15 lines: rejected product/CMS saves keep the typed input; product bulk actions report and keep the list filters.
+    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1265, 'functions' => 24, 'max_function_lines' => 210, 'coupling' => 18],
     // +1 coupling: ProductVariants owns variant validation, ledger stock booking and the delete/SKU-change guards.
     // +1 coupling: I18n gives the editor's labels in the admin language (A15.5).
     'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 105, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 4],
@@ -166,7 +167,8 @@ $architectureBudgets = [
     'src/Entrypoints/Storefront.php' => ['lines' => 150, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
     // Customer account portal behind the thin /account.php (registration, login, reset, GDPR, addresses, orders).
     // +1 coupling: Str::normalizeEmail is the one e-mail normalisation shared with Customers and Pricing.
-    'src/Entrypoints/Storefront/Account.php' => ['lines' => 450, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 14],
+    // +2 coupling: DigitalDelivery issues the downloads page's links; StoreContext limits the profile languages to the store's.
+    'src/Entrypoints/Storefront/Account.php' => ['lines' => 450, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 16],
     'src/Entrypoints/Storefront/CatalogPages.php' => ['lines' => 135, 'functions' => 10, 'max_function_lines' => 60, /* category page: bounded spec/subcat filter parsing */ 'coupling' => 8],
     // +2 functions: pending-payment page and the gateway cancel page (P0 2026-10-13 checkout redirect).
     // +1 coupling: BankTransferInstructions renders the IBAN / variable symbol / PAY by square block on order-done (A13.6).

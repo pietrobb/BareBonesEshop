@@ -181,11 +181,11 @@ function pageOrders(): void {
         <form method="post" action="admin.php?p=orders&amp;action=bulk_status" id="orders-bulk">
         <?= $filterFields ?>
         <div class="sales-toolbar" style="margin-bottom:1rem">
-            <div class="form-row"><label for="bulk-status"><?= esc(I18n::t('admin.orders.bulk_status')) ?></label><select id="bulk-status" name="new_status"><?php foreach (OrderWorkflow::statuses() as $s): ?><option value="<?= esc($s) ?>"><?= esc($s) ?></option><?php endforeach; ?></select></div>
+            <div class="form-row"><label for="bulk-status"><?= esc(I18n::t('admin.orders.bulk_status')) ?></label><select id="bulk-status" name="new_status" required><option value="">— <?= esc(I18n::t('admin.orders.bulk.choose_status')) ?> —</option><?php foreach (OrderWorkflow::statuses() as $s): ?><option value="<?= esc($s) ?>"><?= esc($s) ?></option><?php endforeach; ?></select></div>
             <div class="form-row"><label for="bulk-note"><?= esc(I18n::t('admin.order.note')) ?></label><input id="bulk-note" name="note"></div>
-            <button class="btn btn-primary btn-sm" type="submit"><?= esc(I18n::t('admin.orders.bulk_apply')) ?></button>
-            <button class="btn btn-sm" type="submit" formaction="admin.php?p=delivery_note" formtarget="_blank" name="format" value="html"><?= esc(I18n::t('admin.delivery_note.html')) ?></button>
-            <button class="btn btn-sm" type="submit" formaction="admin.php?p=delivery_note" formtarget="_blank" name="format" value="pdf"><?= esc(I18n::t('admin.delivery_note.pdf')) ?></button>
+            <button class="btn btn-primary btn-sm" type="submit" data-confirm="<?= esc(I18n::t('admin.orders.bulk.confirm')) ?>"><?= esc(I18n::t('admin.orders.bulk_apply')) ?></button>
+            <button class="btn btn-sm" type="submit" formaction="admin.php?p=delivery_note" formtarget="_blank" formnovalidate name="format" value="html"><?= esc(I18n::t('admin.delivery_note.html')) ?></button>
+            <button class="btn btn-sm" type="submit" formaction="admin.php?p=delivery_note" formtarget="_blank" formnovalidate name="format" value="pdf"><?= esc(I18n::t('admin.delivery_note.pdf')) ?></button>
         </div>
         <table>
             <tr><th><span class="sr-only"><?= esc(I18n::t('admin.orders.select')) ?></span></th><th><?= esc(I18n::t('admin.th.number')) ?></th><th><?= esc(I18n::t('admin.th.customer')) ?></th><th><?= esc(I18n::t('admin.th.email')) ?></th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.order.payment')) ?></th><th><?= esc(I18n::t('admin.th.date')) ?></th><th></th></tr>

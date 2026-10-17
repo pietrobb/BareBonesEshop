@@ -201,7 +201,9 @@ try {
     foreach (["/?page=search&q=sfa&pg={$sfaHuge}", "/?page=search&q=sfa&pmin={$sfaHuge}&pmax={$sfaHuge}", "/?page=category&slug=sfa-kitchen&pg={$sfaHuge}",
         "/?page=category&slug=sfa-kitchen&pmin={$sfaHuge}&pmax={$sfaHuge}", "/?page=category&slug=sfa-kitchen&pmin=99999999999999999999"] as $sfaPath) {
         $sfaResult = $sfaHttp('GET', $sfaPath, [], $sfaSid);
-        assert_true($sfaResult['status'] === 200 && $sfaNoFatal($sfaResult), "SFA overflow: {$sfaPath} renders (HTTP {$sfaResult['status']})");
+        // A category page past the last one is a real 404 (round 4 soft-404 fix); it still renders without a fatal.
+        $sfaExpected = str_contains($sfaPath, 'page=category') && str_contains($sfaPath, '&pg=') ? 404 : 200;
+        assert_true($sfaResult['status'] === $sfaExpected && $sfaNoFatal($sfaResult), "SFA overflow: {$sfaPath} renders (HTTP {$sfaResult['status']})");
     }
     foreach (["/api/v1/storefront/products?cat=sfa-kitchen&page={$sfaHuge}", "/api/v1/storefront/search?q=sfa&page={$sfaHuge}",
         "/api/v1/storefront/parametric_search?category_id={$sfaKitchen}&page={$sfaHuge}", "/api/v1/storefront/products?cat=sfa-kitchen&price_min={$sfaHuge}"] as $sfaPath) {

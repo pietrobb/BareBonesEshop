@@ -172,6 +172,45 @@ class DigitalDelivery {
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /** Active entitlements of a customer's orders in the current store, newest first (account downloads page). */
+    public static function forCustomer(int $customerId): array {
+        $stmt = Db::get()->prepare("SELECT de.id, de.download_count, de.download_limit, de.expires_at,
+                da.label, da.download_name, da.asset_key, da.active AS asset_active,
+                o.id AS order_id, o.order_number, o.status AS order_status, o.payment_status
+            FROM digital_entitlements de
+            JOIN digital_assets da ON da.id = de.asset_id
+            JOIN orders o ON o.id = de.order_id
+            WHERE o.customer_id = :customer AND o.store_id = :store AND de.status = 'active'
+            ORDER BY de.id DESC LIMIT 200");
+        $stmt->execute([':customer' => $customerId, ':store' => StoreContext::current()->id()]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** Whether a forCustomer() row may start a new download (the same rules as resolve() and consume()). */
+    public static function downloadable(array $row, ?int $now = null): bool {
+        return (int)$row['asset_active'] === 1 && ($row['payment_status'] ?? '') === 'paid'
+            && !in_array($row['order_status'] ?? '', ['cancelled', 'refunded'], true)
+            && ($row['expires_at'] === null || (int)$row['expires_at'] >= ($now ?? time()))
+            && ($row['download_limit'] === null || (int)$row['download_count'] < (int)$row['download_limit']);
+    }
+
+    /**
+     * A fresh download link for the signed-in customer's own entitlement, or null. Only the token hash is stored, so
+     * the link rotates the token: the previously e-mailed link stops working; limit and expiry stay as they were.
+     */
+    public static function reissueForCustomer(int $customerId, int $entitlementId): ?string {
+        foreach (self::forCustomer($customerId) as $row) {
+            if ((int)$row['id'] !== $entitlementId) continue;
+            if (!self::downloadable($row)) return null;
+            $rawToken = bin2hex(random_bytes(32));
+            $stmt = Db::get()->prepare("UPDATE digital_entitlements SET token_hash = :hash, updated_at = " . Db::now() . "
+                WHERE id = :id AND status = 'active'");
+            $stmt->execute([':hash' => hash('sha256', $rawToken), ':id' => $entitlementId]);
+            return $stmt->rowCount() === 1 ? self::downloadUrl($rawToken) : null;
+        }
+        return null;
+    }
+
     public static function resolve(string $rawToken): ?array {
         if (!preg_match('/^[0-9a-f]{64}$/', $rawToken)) return null;
         $stmt = Db::get()->prepare("SELECT de.*, da.storage_path, da.download_name, da.content_type,

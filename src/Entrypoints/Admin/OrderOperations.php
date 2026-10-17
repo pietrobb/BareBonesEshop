@@ -28,8 +28,9 @@ function handleOrdersBulkStatus(): void {
     $to = Security::str($_POST['new_status'] ?? '');
     $note = trim(Security::str($_POST['note'] ?? ''));
     $back = 'admin.php?' . http_build_query(['p' => 'orders', 'status' => Security::str($_POST['status'] ?? ''), 'payment_status' => Security::str($_POST['payment_status'] ?? '')]);
-    if (!$ids) {
-        setFlash('err', I18n::t('admin.orders.bulk.none_selected'));
+    // The form's empty "choose a status" option; any other unusable value is refused per order below.
+    if (!$ids || ($_POST['new_status'] ?? '') === '') {
+        setFlash('err', I18n::t($ids ? 'admin.orders.bulk.choose_status' : 'admin.orders.bulk.none_selected'));
         header('Location: ' . $back);
         exit;
     }
