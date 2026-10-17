@@ -222,7 +222,10 @@ class DigitalDelivery {
         $stmt->execute([':token_hash' => hash('sha256', $rawToken)]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$row || $row['status'] !== 'active' || !(int)$row['asset_active']) return null;
-        if (($row['payment_status'] ?? '') !== 'paid') return null;
+        // A partial refund keeps paid downloads, except of the line it credited (digital_revoke handles whole reversals).
+        $paymentStatus = (string)($row['payment_status'] ?? '');
+        if (!in_array($paymentStatus, ['paid', 'partially_refunded', 'refund_pending'], true)) return null;
+        if ($paymentStatus !== 'paid' && self::lineCredited((int)$row['order_item_id'])) return null;
         if (in_array($row['order_status'] ?? '', ['cancelled', 'refunded'], true)) return null;
         if ($row['expires_at'] !== null && time() > (int)$row['expires_at']) return null;
         // A spent limit still lets the last counted download resume inside its window (see authorizeTransfer()).
@@ -290,7 +293,7 @@ class DigitalDelivery {
               AND EXISTS (
                   SELECT 1 FROM orders o
                   WHERE o.id = digital_entitlements.order_id
-                    AND o.payment_status = 'paid'
+                    AND o.payment_status IN ('paid', 'partially_refunded', 'refund_pending')
                     AND o.status NOT IN ('cancelled', 'refunded')
               )");
         $stmt->execute([
@@ -348,7 +351,7 @@ class DigitalDelivery {
               AND EXISTS (
                   SELECT 1 FROM orders o
                   WHERE o.id = digital_entitlements.order_id
-                    AND o.payment_status = 'paid'
+                    AND o.payment_status IN ('paid', 'partially_refunded', 'refund_pending')
                     AND o.status NOT IN ('cancelled', 'refunded')
               )");
         $now ??= time();
@@ -454,6 +457,14 @@ class DigitalDelivery {
             ORDER BY id DESC LIMIT 1");
         $stmt->execute([':order_item_id' => $orderItemId, ':asset_id' => $assetId]);
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    /** The order line is on a credit note whose refund is pending or done. */
+    private static function lineCredited(int $orderItemId): bool {
+        $stmt = Db::get()->prepare("SELECT 1 FROM credit_note_items cni JOIN order_refunds r ON r.id = cni.refund_id
+            WHERE cni.order_item_id = :item AND r.status IN ('pending', 'succeeded') LIMIT 1");
+        $stmt->execute([':item' => $orderItemId]);
+        return (bool)$stmt->fetchColumn();
     }
 
     private static function revokeIds(array $ids, string $reason): int {

@@ -447,6 +447,12 @@ class Rma {
         }
     }
 
+    /** The provider accepted an item refund asynchronously: its refund id lets the refund webhook complete it. */
+    public static function noteProviderRefund(int $refundId, string $providerRefundId): void {
+        Db::get()->prepare("UPDATE order_refunds SET payment_reference=:reference, updated_at=" . Db::now() . " WHERE id=:id AND store_id=:store AND status='pending'")
+            ->execute([':reference' => $providerRefundId, ':id' => $refundId, ':store' => StoreContext::current()->id()]);
+    }
+
     public static function refundById(int $refundId): ?array {
         $stmt = Db::get()->prepare('SELECT * FROM order_refunds WHERE id=:id AND store_id=:store');
         $stmt->execute([':id' => $refundId, ':store' => StoreContext::current()->id()]);
