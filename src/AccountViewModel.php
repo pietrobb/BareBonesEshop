@@ -101,13 +101,13 @@ final class AccountViewModel
                 'number' => (string)$order['order_number'],
                 'url' => Template::storeUrl('/account.php?p=order&id=' . (int)$order['id']),
                 'status' => (string)$order['status'],
-                'status_label' => self::statusLabel('order_status', (string)$order['status']),
+                'status_label' => OrderStatusLabels::order((string)$order['status']),
                 'payment_status' => (string)($order['payment_status'] ?? 'pending'),
-                'payment_status_label' => self::statusLabel('payment_status', (string)($order['payment_status'] ?? 'pending')),
+                'payment_status_label' => OrderStatusLabels::payment((string)($order['payment_status'] ?? 'pending')),
                 'payment_label' => (string)($snapshot['label'] ?? $snapshot['name'] ?? $order['payment_method'] ?? ''),
                 'transactions' => array_map(static fn(array $transaction): array => [
                     'date' => I18n::dateTime((string)$transaction['created_at']),
-                    'status' => self::statusLabel('payment_status', (string)$transaction['status']),
+                    'status' => OrderStatusLabels::payment((string)$transaction['status']),
                     'reference' => (string)($transaction['provider_ref'] ?? ''),
                 ], PaymentService::transactionsForOrder((int)$order['id'])),
                 'total' => I18n::price((int)$order['total'], (string)$order['currency']),
@@ -143,9 +143,9 @@ final class AccountViewModel
             'number' => (string)$order['order_number'],
             'date' => I18n::dateTime((string)$order['created_at']),
             'status' => (string)$order['status'],
-            'status_label' => self::statusLabel('order_status', (string)$order['status']),
+            'status_label' => OrderStatusLabels::order((string)$order['status']),
             'payment_status' => (string)($order['payment_status'] ?? 'pending'),
-            'payment_status_label' => self::statusLabel('payment_status', (string)($order['payment_status'] ?? 'pending')),
+            'payment_status_label' => OrderStatusLabels::payment((string)($order['payment_status'] ?? 'pending')),
             'payment_label' => (string)($payment['label'] ?? $payment['name'] ?? $order['payment_method'] ?? ''),
             'shipping_label' => (string)($shipping['name'] ?? $shipping['label'] ?? $order['shipping_method'] ?? ''),
             'tracking' => trim((string)($order['carrier'] ?? '') . ' ' . (string)($order['tracking_number'] ?? '')),
@@ -170,14 +170,6 @@ final class AccountViewModel
             'orders_url' => Template::storeUrl('/account.php?p=orders'),
             'cart_url' => Template::storeUrl('/?page=cart'),
         ];
-    }
-
-    /** Translated order_status.<code> / payment_status.<code>; an unknown code stays readable as itself. */
-    private static function statusLabel(string $group, string $code): string
-    {
-        $key = $group . '.' . $code;
-        $label = I18n::t($key);
-        return $label === $key ? $code : $label;
     }
 
     private static function addresses(int $customerId, array $values, array $errors): array
