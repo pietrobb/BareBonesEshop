@@ -7,7 +7,7 @@
     <div class="price" style="font-size:1.6em;margin-bottom:12px">{{price}}{{#if compare_price}}<span class="old-price" style="font-size:.6em">{{compare_price}}</span>{{/if}}</div>
     {{#if in_stock}}<div class="badge" style="font-size:.9em;margin-bottom:12px">&#10003; {{in_stock_label}} ({{stock}} ks)</div>{{else}}<div style="color:#c62828;font-size:.9em;margin-bottom:12px">&#10007; {{out_of_stock_label}}</div>{{/if}}
     {{#if summary}}<p style="margin-top:12px;color:#555">{{summary}}</p>{{/if}}
-    <div style="margin-top:20px;display:flex;gap:8px;align-items:center"><input type="number" value="1" min="1" max="99" class="qty-input" id="qty-{{id}}"><button class="btn-cart btn-cart-lg" type="button" data-storefront-action="cart-add" data-product-id="{{id}}" data-quantity-input="qty-{{id}}">{{add_to_cart_label}}</button></div>
+    <form class="cart-add-form" method="post" action="{{cart_form.action}}" style="margin-top:20px;display:flex;gap:8px;align-items:center"><input type="hidden" name="csrf_token" value="{{cart_form.csrf_token}}"><input type="hidden" name="cart_action" value="add"><input type="hidden" name="product_id" value="{{id}}"><input type="hidden" name="redirect" value="{{cart_form.redirect}}"><input type="number" name="quantity" value="1" min="1" max="99" class="qty-input" id="qty-{{id}}"><button class="btn-cart btn-cart-lg" type="submit" data-storefront-action="cart-add" data-product-id="{{id}}" data-quantity-input="qty-{{id}}">{{add_to_cart_label}}</button></form>
   </div>
 </div>
 <div class="tabs" role="tablist"><button type="button" class="tab active" role="tab" aria-selected="true" data-product-tab="specs">{{specs_label}} ({{spec_count}})</button></div>

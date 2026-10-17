@@ -46,7 +46,7 @@ class Bootstrap {
         $uri = self::storeRouteUri($uri ?? ($_SERVER['REQUEST_URI'] ?? ''));
         $context = self::initStoreContext($uri);
         $lang = I18n::detectLocale($uri);
-        $requested = strtolower((string)($_GET['lang'] ?? ''));
+        $requested = strtolower(Security::str($_GET['lang'] ?? ''));
         $languages = array_map('strtolower', (array)($context->config()['languages'] ?? []));
         if ($requested !== '' && preg_match('/^[a-z]{2}(?:-[a-z]{2})?$/', $requested) && in_array($requested, $languages, true)) {
             $lang = $requested;

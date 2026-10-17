@@ -382,15 +382,19 @@ function handleEmailSend(array $payload, array $job): void {
             $to = (string)$order['customer_email'];
             // Prefer locale from order row, then payload, then default.
             if ($locale === '') $locale = (string)($order['locale'] ?? '');
+            $currency = $order['currency'] ?? null;
+            // Admin shipments carry the carrier and tracking; the legacy order columns are the fallback.
+            $tracking = Fulfillment::latestTracking((int)$orderId);
             $vars = array_merge($vars, [
                 'order_number'   => $order['order_number'],
-                'order_status'   => $order['status'],
-                'order_total'    => I18n::price((int)$order['total'], $order['currency'] ?? null),
+                'order_status'   => OrderStatusLabels::order((string)$order['status'], $locale),
+                'order_total'    => I18n::price((int)$order['total'], $currency),
                 'customer_name'  => $order['customer_name'],
                 'customer_email' => $order['customer_email'],
                 'payment_method' => $order['payment_method'] ?? '',
-                'carrier'        => $order['carrier'] ?? '',
-                'tracking_number'=> $order['tracking_number'] ?? '',
+                'carrier'        => (string)($tracking['carrier'] ?? '') ?: (string)($order['carrier'] ?? ''),
+                'tracking_number'=> (string)($tracking['tracking_number'] ?? '') ?: (string)($order['tracking_number'] ?? ''),
+                'tracking_url'   => (string)($tracking['tracking_url'] ?? ''),
             ]);
             if ($template === 'order_confirmation') $vars = array_merge($vars, BankTransferInstructions::mailVars($order));
             $items = Orders::items((int)$orderId);
@@ -398,8 +402,8 @@ function handleEmailSend(array $payload, array $job): void {
                 'name'       => $it['name'],
                 'sku'        => $it['sku'],
                 'quantity'   => $it['quantity'],
-                'unit_price' => I18n::price((int)$it['unit_price']),
-                'total'      => I18n::price((int)$it['total']),
+                'unit_price' => I18n::price((int)$it['unit_price'], $currency),
+                'total'      => I18n::price((int)$it['total'], $currency),
             ], $items);
         } else {
             return;

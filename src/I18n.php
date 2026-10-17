@@ -144,7 +144,8 @@ class I18n {
      * Count-aware translation: picks "{$key}_one", "{$key}_few" (Slavic 2–4)
      * or "{$key}_many" and substitutes {count}.
      */
-    public static function plural(string $key, int $count): string {
+    /** $display replaces {count} instead of the number itself, e.g. a range "1–2" chosen by its upper bound. */
+    public static function plural(string $key, int $count, ?string $display = null): string {
         $form = 'many';
         if ($count === 1) {
             $form = 'one';
@@ -153,7 +154,19 @@ class I18n {
         } elseif (self::locale() === 'pl' && in_array($count % 10, [2, 3, 4], true) && !in_array($count % 100, [12, 13, 14], true)) {
             $form = 'few';
         }
-        return str_replace('{count}', (string)$count, self::t($key . '_' . $form));
+        return str_replace('{count}', $display ?? (string)$count, self::t($key . '_' . $form));
+    }
+
+    /** UI translation in another locale (e-mails of an order placed in that locale); unknown locales use the current one. */
+    public static function tIn(string $key, string $locale): string {
+        $current = self::locale();
+        if ($locale === $current || !preg_match('/^[a-z]{2}$/', $locale) || !is_file(__DIR__ . '/../lang/' . $locale . '.php')) return self::t($key);
+        self::setLocale($locale);
+        try {
+            return self::t($key);
+        } finally {
+            self::setLocale($current);
+        }
     }
 
     /** All UI translations (for template rendering) */

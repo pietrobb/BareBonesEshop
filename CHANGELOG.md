@@ -254,6 +254,36 @@ nginx PHP fallback when `operations.nginx_config` is set).
   custom adapters that only define a public `generateVariants()` method keep working.
 
 ### Fixed
+- **Storefront UX review (round 4).**
+  - Add to cart works without JavaScript: product cards, the home product list and the product page
+    render POST forms (`cart_action=add`, quantity, variant, CSRF token, redirect back) to the store URL;
+    JS intercepts the form submit, so behaviour with JS is unchanged. A no-JS add, a wishlist toggle or
+    removal now shows a one-shot notice in a `role="status"` region of the shell (`StorefrontFlash`).
+    A no-JS form post that is refused redirects back with the reason instead of answering 422.
+  - Listing cards of products with variants (`requires_variant`, one batched query) link to the product
+    page ("Choose options") instead of an add-to-cart button that always failed.
+  - Adding more than the stock or more than 99 units reports the quantity the cart really holds
+    (`quantity`, `clamped` in the cart response) instead of a plain "Added".
+  - Checkout refusals are translated (`checkout.error.*` and existing keys) and the JSON API returns
+    `error_code` next to the translated `error`; no Slovak/English strings are hard-coded any more.
+  - Order e-mails format line items in the order currency, show a translated order status
+    (`order_status.*`; `OrderStatusLabels` for reuse) and take carrier, tracking number and tracking
+    link of the latest shipped shipment (admin shipments), so "order shipped" mails carry them.
+  - All e-mail templates exist in Spanish.
+  - The order confirmation page's payment summary is translated, including the payment status
+    (`payment_status.*`); a free payment method shows "Free", not "Free shipping".
+  - Category and search totals use plural forms ("1 produkt", "2 výsledky pre"); product attribute
+    labels are translated; shipping options show "Delivery in 2 days" (nothing for 0/unknown) instead of
+    a bare number (`delivery_label` in the shipping_rates API).
+  - A failed shipping-rate refresh keeps the rendered options and adds an alert instead of replacing them.
+  - Sort selects no longer submit on every arrow key (WCAG 3.2.2): a visible sort button, Enter, or a
+    pointer choice submits; cart quantities submit once after a short pause.
+  - `checkout_consents.*.text` may be a `{locale: text}` map; a relative consent `url` gets the store
+    prefix (`/cs/?page=terms`).
+  - `q[]=x` and other array query values (`cart_recover`, `cart_unsubscribe`, `lang`, `token`, `msg`,
+    the redirect fallback `path`) no longer raise "Array to string conversion".
+  - Managed menu links get the store prefix; navigation, footer, breadcrumb, pagination and cart links
+    use the canonical `/category/{slug}` and `/product/{slug}` paths.
 - Changing an order to `shipped` after a partial shipment failed with "Shipment exceeds reserved
   allocation"; it now ships only the remainder that is not yet in any shipment.
 - **P0: card payment from the HTML checkout was dead since 1.9.0.** CSP `form-action 'self'`

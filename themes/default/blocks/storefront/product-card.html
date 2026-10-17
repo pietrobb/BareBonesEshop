@@ -5,5 +5,5 @@
     <div class="price">{{price.formatted}}{{#if price.compare_formatted}}<span class="old-price">{{price.compare_formatted}}</span>{{/if}}</div>
     <div class="badge">{{availability.label}}</div>
   </a>
-  {{#if availability.purchasable}}{{#unless requires_variant}}<button class="btn-cart" type="button" data-storefront-action="cart-add" data-product-id="{{id}}" data-quantity="1">{{../t.add_to_cart}}</button>{{/unless}}{{/if}}
+  {{> storefront/product-card-buy}}
 </article>

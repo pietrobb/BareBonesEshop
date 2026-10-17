@@ -271,10 +271,14 @@ return [
         //     'version' => '2026-10-16', 'required' => false,
         //     'text' => 'Send me one e-mail reminder if I do not finish this order.',
         // ],
+        // 'text' is one string or a per-locale map; a relative 'url' gets the store prefix (/cs/?page=terms).
         // 'digital_delivery' => [
         //     'version' => '2026-01-01', 'required' => true,
-        //     'text' => 'I request immediate delivery of the digital content and acknowledge the loss of my withdrawal right once delivery begins.',
-        //     'url' => '/terms', 'product_types' => ['downloadable'],
+        //     'text' => [
+        //         'en' => 'I request immediate delivery of the digital content and acknowledge the loss of my withdrawal right once delivery begins.',
+        //         'sk' => 'Žiadam o okamžité dodanie digitálneho obsahu a beriem na vedomie, že jeho začatím strácam právo na odstúpenie od zmluvy.',
+        //     ],
+        //     'url' => '/?page=terms', 'product_types' => ['downloadable'],
         // ],
     ],
 

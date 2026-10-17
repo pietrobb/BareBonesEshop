@@ -22,7 +22,7 @@ function renderCart(): string {
     $shipping = $quote['delivery_price'];
     $items = array_map(static fn(array $item): array => [
         'id' => (int)$item['product_id'], 'cart_key' => (string)$item['key'],
-        'url' => Template::storeUrl('/?page=product&slug=' . rawurlencode((string)$item['slug'])),
+        'url' => Template::storeUrl('/product/' . rawurlencode((string)$item['slug'])), // canonical product path
         'name' => (string)$item['name'], 'sku' => (string)$item['sku'], 'price' => $price((int)$item['price']),
         'quantity' => (int)$item['qty'], 'line_total' => $price((int)$item['total']),
         'remove_label' => $t('remove'),
@@ -104,7 +104,7 @@ function renderCheckout(): string {
     $payment = CheckoutService::paymentPreview($cart, $subtotal - $discount, $country, $storeCurrency, $selectedShipping, $preview['free_shipping'] ? 0 : $quote['price'], $preview['free_shipping'], $form('payment'), $customerId ?: null);
     [$paymentMethods, $selectedPayment, $shipping] = [$payment['methods'], $payment['selected'], $payment['shipping']];
     $paymentFee = $selectedPayment ? (int)$selectedPayment['fee'] : 0;
-    $freeLabel = $t('free_shipping');
+    [$freeLabel, $freeFeeLabel] = [$t('free_shipping'), $t('free')]; // a free payment fee is not "free shipping"
 
     return Template::render('storefront/checkout', [
         'breadcrumbs' => $breadcrumbs, 'title' => $t('checkout_title'), 'csrf_token' => Security::csrfToken(), 'address_required' => !$quote['digital'],
@@ -112,14 +112,14 @@ function renderCheckout(): string {
         'contact_label' => $t('contact'), 'name_label' => $t('name'), 'email_label' => $t('email'), 'phone_label' => $t('phone'),
         'address_label' => $t('address'), 'street_label' => $t('street'), 'city_label' => $t('city'), 'zip_label' => $t('zip'),
         'shipping_label' => $t('shipping'), 'shipping_options' => array_map(static fn(array $rate): array => [
-            'code' => (string)$rate['method_code'], 'label' => (string)$rate['label'], 'delivery_days' => (string)($rate['delivery_days'] ?? ''),
-            'price' => (int)$rate['price'] === 0 ? $freeLabel : $price((int)$rate['price']),
+            'code' => (string)$rate['method_code'], 'label' => (string)$rate['label'], 'delivery_days' => ShippingService::deliveryLabel($rate['delivery_days'] ?? ''),
+            'price' => (int)$rate['price'] === 0 ? $freeLabel : $price((int)$rate['price']), 'price_cents' => (int)$rate['price'],
             'checked' => (string)$rate['method_code'] === $selectedShipping,
         ], $shippingRates),
         'shipping_unavailable' => $shippingRates ? '' : $t('shipping_unavailable'), 'free_shipping_hint' => $quote['hint'], 'payment_label' => $t('payment'),
         'payment_options' => array_map(static fn(array $method): array => [
             'code' => (string)$method['code'], 'label' => (string)$method['label'], 'description' => (string)($method['description'] ?: $method['provider']),
-            'fee' => (int)$method['fee'] === 0 ? $freeLabel : $price((int)$method['fee']), 'checked' => (string)$method['code'] === (string)($selectedPayment['code'] ?? ''),
+            'fee' => (int)$method['fee'] === 0 ? $freeFeeLabel : $price((int)$method['fee']), 'checked' => (string)$method['code'] === (string)($selectedPayment['code'] ?? ''),
             'online' => !empty($method['requires_online']),
         ], $paymentMethods, array_keys($paymentMethods)),
         'submitting_label' => $t('checkout_submitting'), 'redirecting_label' => $t('checkout_redirecting'),
@@ -127,7 +127,7 @@ function renderCheckout(): string {
         'submit_label' => $t('submit_order'), 'your_order_label' => $t('your_order'),
         'items' => array_map(static fn(array $item): array => ['name' => (string)$item['name'], 'quantity' => (int)$item['qty'], 'total' => $price((int)$item['total'])], $cart),
         'subtotal_cents' => $subtotal, 'subtotal_label' => $t('subtotal'), 'subtotal' => $price($subtotal),
-        'shipping' => $shipping === 0 ? $freeLabel : $price($shipping), 'payment_fee' => $paymentFee === 0 ? $freeLabel : $price($paymentFee),
+        'shipping' => $shipping === 0 ? $freeLabel : $price($shipping), 'payment_fee' => $paymentFee === 0 ? $freeFeeLabel : $price($paymentFee),
         'discount_cents' => $discount, 'discount_label' => $t('discount'), 'discount' => $discount > 0 ? $price(-$discount) : '',
         'total_price_label' => $t('total_price'), 'total' => $price($subtotal - $discount + $shipping + $paymentFee),
         'values' => $state['values'], 'checkout_error' => $checkoutError, 'saved_addresses' => $state['addresses'],
@@ -202,7 +202,9 @@ function renderOrderDone(string $orderNum): string {
     $transactions = PaymentService::transactionsForOrder((int)$order['id']);
     $lastTransaction = $transactions ? end($transactions) : null;
     $payment = [
-        'status_class' => preg_replace('/[^a-z0-9_-]/i', '', $status), 'status' => $status,
+        'status_class' => preg_replace('/[^a-z0-9_-]/i', '', $status), 'status' => OrderStatusLabels::payment($status),
+        'heading' => $t('payment'), 'status_label' => $t('order_payment.status'),
+        'method_label' => $t('order_payment.method'), 'reference_label' => $t('order_payment.reference'),
         'label' => (string)($snapshot['label'] ?? $snapshot['name'] ?? $order['payment_method'] ?? ''),
         'reference' => $lastTransaction ? (string)($lastTransaction['provider_ref'] ?? '') : '',
     ];

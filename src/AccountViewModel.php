@@ -198,7 +198,7 @@ final class AccountViewModel
                 ], $items),
             ];
         }
-        $message = (string)($_GET['msg'] ?? '');
+        $message = Security::str($_GET['msg'] ?? '');
         return [
             'returns' => $returns, 'returnable_orders' => $returnable,
             'return_message' => $message === '' ? null : [
