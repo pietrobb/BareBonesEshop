@@ -7,6 +7,7 @@ require_once __DIR__ . '/cli-only.php';
  */
 require_once __DIR__ . '/../src/autoload.php';
 
+$argv = $_SERVER['argv'] ?? [];
 $file = $argv[1] ?? null;
 $type = null;
 

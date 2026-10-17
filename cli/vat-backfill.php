@@ -25,6 +25,7 @@ require_once __DIR__ . '/cli-only.php';
 require __DIR__ . '/../src/autoload.php';
 require __DIR__ . '/../config.php';
 
+$argv = $_SERVER['argv'] ?? [];
 $args = array_slice($argv, 1);
 $apply    = in_array('--apply',   $args, true);
 $dryRun   = !$apply || in_array('--dry-run', $args, true);

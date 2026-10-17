@@ -31,6 +31,7 @@ require_once __DIR__ . '/cli-only.php';
 require __DIR__ . '/../src/autoload.php';
 
 if (!defined('BB_TEST_LOAD_OSS_ONLY')) {
+$argv = $_SERVER['argv'] ?? [];
 $opts = parseArgs($argv);
 if (!empty($opts['help'])) { printHelp(); exit(0); }
 
