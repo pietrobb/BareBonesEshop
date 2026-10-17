@@ -83,13 +83,14 @@ function renderCategory(array $cat): string {
         ];
     }
     $breadcrumbs = [['url' => Template::storeUrl('/'), 'label' => $t('home'), 'current' => false]];
-    foreach (Categories::breadcrumb($catId) as $item) $breadcrumbs[] = ['url' => Template::storeUrl('/?page=category&slug=' . rawurlencode((string)$item['slug'])), 'label' => $catName((string)$item['name']), 'current' => false];
+    foreach (Categories::breadcrumb($catId) as $item) $breadcrumbs[] = ['url' => StorefrontViewModel::categoryUrl((string)$item['slug']), 'label' => $catName((string)$item['name']), 'current' => false];
     return Template::render('storefront/category-page', [
         'breadcrumbs' => $breadcrumbs, 'name' => $catName((string)$cat['name']), 'slug' => (string)$cat['slug'], 'total' => (int)$result['total'],
+        'total_label' => I18n::plural('products_count', (int)$result['total']),
         'sort' => $sort, 'sort_options' => array_map(static fn(string $value): array => ['value' => $value, 'label' => $t($value), 'selected' => $sort === $value], ['price_asc','price_desc','name_asc','name_desc','newest']),
         'subcategories' => array_map(static fn(array $row): array => ['id' => (int)$row['id'], 'name' => $catName((string)$row['name']), 'count' => (int)$row['product_count'], 'checked' => in_array((int)$row['id'], $selected, true)], $children),
         'filters' => $filters, 'price_min' => $pmin ? $pmin / 100 : '', 'price_max' => $pmax ? $pmax / 100 : '',
-        'clear_url' => Template::storeUrl('/?page=category&slug=' . rawurlencode((string)$cat['slug'])),
+        'clear_url' => StorefrontViewModel::categoryUrl((string)$cat['slug']),
         'products' => storefrontProductItems($result['products']), 'pagination' => storefrontPagination((int)$result['page'], (int)$result['pages'], buildCategoryUrl((string)$cat['slug'], $sort, $spec, $pmin, $pmax, $selected, $ranges)),
         't' => I18n::all(),
     ]);
@@ -112,7 +113,7 @@ function renderSearch(string $query, array $result, array $filters): string {
 function renderSearchPage(string $query, array $result, string $heading, string $base, array $filterView = []): string {
     return Template::render('storefront/search-results', [
         'breadcrumbs' => [['url'=>Template::storeUrl('/'),'label'=>I18n::t('home'),'current'=>false],['url'=>'','label'=>$heading . ': ' . $query,'current'=>true]],
-        'heading'=>$heading, 'total'=>(int)$result['total'], 'query'=>$query, 'products'=>storefrontProductItems($result['products']),
+        'heading'=>$heading, 'total'=>(int)$result['total'], 'total_label'=>I18n::plural('search_results_count', (int)$result['total']), 'query'=>$query, 'products'=>storefrontProductItems($result['products']),
         'pagination'=>storefrontPagination((int)$result['page'], (int)$result['pages'], $base), 't'=>I18n::all(),
     ] + $filterView + ['show_filters' => false]);
 }
@@ -126,10 +127,11 @@ function storefrontPagination(int $page, int $pages, string $base): array {
 }
 function buildCategoryUrl(string $slug, string $sort, array $spec, ?int $pmin, ?int $pmax, array $subcats=[], array $ranges=[]): string {
     // The default order adds no sort= (robots.txt disallows sort URLs; pagination must stay crawlable).
-    $url='?page=category&slug='.rawurlencode($slug).($sort!=='price_asc'?'&sort='.rawurlencode($sort):'');
+    // Pagination links share the canonical /category/{slug} path (StorefrontSeo::categoryPath).
+    $url=($sort!=='price_asc'?'&sort='.rawurlencode($sort):'');
     foreach($subcats as $id)$url.='&subcat[]='.(int)$id;
     foreach($spec as $name=>$values)foreach($values as $value)$url.='&spec['.rawurlencode($name).'][]='.rawurlencode($value);
     if($pmin)$url.='&pmin='.(int)($pmin/100); if($pmax)$url.='&pmax='.(int)($pmax/100);
     foreach($ranges as $name=>$range)foreach($range as $edge=>$value)$url.='&r'.$edge.'['.rawurlencode($name).']='.rawurlencode((string)$value);
-    return $url;
+    return '/category/'.rawurlencode($slug).($url!==''?'?'.substr($url,1):'');
 }

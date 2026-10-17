@@ -1,6 +1,6 @@
 <a class="skip-link" href="#main-content">{{t.skip_to_content}}</a>
 {{> storefront/header}}
-<main id="main-content" tabindex="-1"><div class="wrap">{{{content_html}}}</div></main>
+<main id="main-content" tabindex="-1"><div class="wrap"><p class="storefront-flash" id="storefront-flash" role="status">{{flash}}</p>{{{content_html}}}</div></main>
 {{> storefront/footer}}
 {{#if show_cookie_banner}}{{> storefront/cookie-banner}}{{/if}}
 <script nonce="{{nonce}}">window.BareBonesStorefront={{{runtime_config_json}}};</script>

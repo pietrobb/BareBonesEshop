@@ -97,7 +97,7 @@ $pmOrdersBefore = (int)$pdo->query('SELECT COUNT(*) FROM orders')->fetchColumn()
 $pmOffline = checkoutExecute(['name' => 'Smoke', 'email' => 'pm-synthetic-cod@example.test', 'street' => 'Smoke 1', 'city' => 'Bratislava',
     'zip' => '81101', 'country' => 'SK', 'shipping_method' => 'packeta', 'payment_method' => 'cod'],
     array_replace($pmConfig, ['app_url' => 'https://shop.example', 'monitoring' => ['synthetic_token' => $pmToken]]));
-assert_equals('Synthetic checkout requires an online payment method', (string)($pmOffline['error'] ?? ''), 'P0 synthetic: offline payment is refused');
+assert_equals('checkout.error.synthetic_requires_online', (string)($pmOffline['error_code'] ?? ''), 'P0 synthetic: offline payment is refused');
 assert_equals($pmOrdersBefore, (int)$pdo->query('SELECT COUNT(*) FROM orders')->fetchColumn(), 'P0 synthetic: refused smoke creates no order');
 if ($pmPrevHeader === null) unset($_SERVER['HTTP_X_BAREBONES_SYNTHETIC']); else $_SERVER['HTTP_X_BAREBONES_SYNTHETIC'] = $pmPrevHeader;
 http_response_code(200);

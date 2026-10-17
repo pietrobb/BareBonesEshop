@@ -452,7 +452,7 @@ function apiShippingRates(): array {
             'weight_g' => 0,
             'volume_cm3' => 0,
             'delivery_type' => 'digital',
-            'methods' => [digitalDeliveryRate()],
+            'methods' => shippingMethodsWithDeliveryLabel([digitalDeliveryRate()]),
         ];
     }
     $weightG = Security::int($_GET['weight_g'] ?? 0);
@@ -482,8 +482,13 @@ function apiShippingRates(): array {
         'physical_qty' => $physicalQty,
         'units_to_free_shipping' => $unitsToFree,
         'free_shipping_hint' => ShippingService::freeShippingHint($unitsToFree),
-        'methods' => $methods,
+        'methods' => shippingMethodsWithDeliveryLabel($methods),
     ];
+}
+
+/** Rates with their localized delivery time (delivery_label) next to the raw delivery_days. */
+function shippingMethodsWithDeliveryLabel(array $methods): array {
+    return array_map(static fn(array $method): array => $method + ['delivery_label' => ShippingService::deliveryLabel($method['delivery_days'] ?? '')], $methods);
 }
 
 function apiPaymentMethods(): array {
@@ -541,7 +546,7 @@ function apiConsentDefinitions(): array {
         http_response_code(405);
         return ['error' => 'Method not allowed'];
     }
-    $country = strtoupper(trim((string)($_GET['country'] ?? '')));
+    $country = strtoupper(trim(Security::str($_GET['country'] ?? '')));
     $cart = Cart::enriched();
     return ['consents' => array_values(CheckoutService::consentDefinitions(preg_match('/^[A-Z]{2}$/', $country) ? $country : '', $cart['items'] ?? []))];
 }
@@ -552,23 +557,26 @@ function apiCheckout(?array $runtimeConfig = null): array {
         return ['error' => 'Method not allowed'];
     }
 
-    if (!Security::csrfValidate()) {
-        http_response_code(403);
-        return ['error' => 'Invalid CSRF token'];
-    }
+    if (!Security::csrfValidate()) return checkoutRefusal('checkout_csrf_error', 403);
 
     if (!Security::rateLimit('checkout', 10)
         || !Security::rateLimit('checkout_global', 200, 60, false)
         || !Security::rateLimit('checkout_session_' . hash('sha256', session_id()), 5, 900, false)) {
-        return ['error' => 'Too many checkout attempts'];
+        return checkoutRefusal('checkout_too_many_attempts');
     }
 
     $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
-    if (!is_array($input)) {
-        http_response_code(400);
-        return ['error' => 'Invalid request body'];
-    }
+    if (!is_array($input)) return checkoutRefusal('checkout.failed', 400);
     return CheckoutService::execute($input, $runtimeConfig);
+}
+
+/**
+ * A refused checkout: error_code is the stable lang key, error its message in the shopper's locale
+ * (the HTML checkout shows it, JSON clients may translate error_code themselves).
+ */
+function checkoutRefusal(string $code, ?int $status = null, array $extra = []): array {
+    if ($status !== null) http_response_code($status);
+    return ['success' => false, 'error' => I18n::t($code), 'error_code' => $code] + $extra;
 }
 
 function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
@@ -580,22 +588,16 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     $email = Security::email($input['email'] ?? '');
     $phone = trim(Security::str($input['phone'] ?? ''));
     $country = strtoupper(trim(Security::str($input['country'] ?? 'SK')));
-    if (!preg_match('/^[A-Z]{2}$/', $country)) {
-        return ['error' => 'Invalid country'];
-    }
+    if (!preg_match('/^[A-Z]{2}$/', $country)) return checkoutRefusal('checkout.error.invalid_country');
     $shippingMethod = Security::slug($input['shipping_method'] ?? '');
     $paymentMethod = $input['payment_method'] ?? 'stripe';
     $loggedInCustomerId = !empty($_SESSION['customer_id']) ? (int)$_SESSION['customer_id'] : null;
 
-    if (!$name || !$email) {
-        return ['error' => 'Name and email are required'];
-    }
+    if (!$name || !$email) return checkoutRefusal('checkout.error.name_email_required');
     $checkoutSubject = !empty($_SESSION['customer_id'])
         ? 'customer_' . (int)$_SESSION['customer_id']
         : 'email_' . hash('sha256', strtolower($email));
-    if (!Security::rateLimit('checkout_subject_' . $checkoutSubject, 3, 1800, false)) {
-        return ['error' => 'Too many checkout attempts'];
-    }
+    if (!Security::rateLimit('checkout_subject_' . $checkoutSubject, 3, 1800, false)) return checkoutRefusal('checkout_too_many_attempts');
 
     // $cfg must be loaded here: apiCheckout is a function, the file-scope $cfg is not
     // visible (it used to be silently undefined → seller always 'SK', OSS always off,
@@ -606,9 +608,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     // Capture email for abandoned cart recovery — only with the shopper's reminder consent.
     if (!$synthetic) Cart::setEmail($email, CheckoutService::cartReminderConsent($input, $country));
 
-    if (!preg_match('/^[a-z0-9_-]{2,40}$/', $paymentMethod)) {
-        return ['error' => 'Invalid payment method'];
-    }
+    if (!preg_match('/^[a-z0-9_-]{2,40}$/', $paymentMethod)) return checkoutRefusal('checkout.error.invalid_payment_method');
 
     // VAT context — resolve scenario before enriching cart so per-line VAT is captured.
     StoreContext::current()->assertPermission('tax');
@@ -663,17 +663,12 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     // Cart preview and the immutable order snapshot use the same canonical
     // provider inputs. No downstream consumer resolves the scenario again.
     $cart = Cart::enriched($vatContext);
-    if (empty($cart['items'])) {
-        return ['error' => 'Cart is empty'];
-    }
+    if (empty($cart['items'])) return checkoutRefusal('cart_empty');
     $availableItems = array_values(array_filter($cart['items'], static fn(array $item): bool => $item['available'] ?? true));
-    if (empty($availableItems)) {
-        return ['success' => false, 'error' => 'Žiadne dostupné produkty v košíku.'];
-    }
+    if (empty($availableItems)) return checkoutRefusal('checkout.error.no_available_items');
     // One order is charged in one currency; a mixed cart is refused, never summed into the first line's currency.
     if (count(array_unique(array_map(static fn(array $item): string => strtolower((string)($item['currency'] ?? 'eur')), $availableItems))) > 1) {
-        http_response_code(422);
-        return ['success' => false, 'error' => 'Košík obsahuje produkty v rôznych menách. Objednajte ich samostatne.'];
+        return checkoutRefusal('checkout.error.mixed_currency', 422);
     }
     $cart['items'] = $availableItems;
     $cart['subtotal'] = array_sum(array_column($availableItems, 'total'));
@@ -681,10 +676,10 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     if ($digitalOnly) {
         $shippingMethod = 'digital';
     } elseif (trim((string)($input['street'] ?? '')) === '' || trim((string)($input['city'] ?? '')) === '' || trim((string)($input['zip'] ?? '')) === '') {
-        return ['success' => false, 'error' => 'Doručovacia adresa je povinná pri fyzických produktoch.'];
+        return checkoutRefusal('checkout.error.address_required');
     } elseif (!array_key_exists($country, ShippingService::destinationCountries())) {
         // Only countries the checkout offers; a wildcard zone price is not a destination by itself.
-        return ['success' => false, 'error' => 'Doručenie nie je dostupné do zvolenej krajiny.'];
+        return checkoutRefusal('checkout.error.shipping_unavailable');
     }
 
     $consentContext = [
@@ -694,8 +689,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     $submittedConsents = is_array($input['consents'] ?? null) ? $input['consents'] : [];
     $consentErrors = ConsentService::validate($submittedConsents, $consentContext);
     if ($consentErrors) {
-        http_response_code(422);
-        return ['success' => false, 'error' => 'Required consent missing', 'consent_errors' => $consentErrors];
+        return checkoutRefusal('checkout.consent_required', 422, ['consent_errors' => $consentErrors]);
     }
 
     // Automatic promotions first; the coupon is then priced on what they leave (CheckoutService::couponFor).
@@ -717,12 +711,13 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
             $couponDiscount = $couponResult['discount'];
             $couponStacking = (string)($couponResult['stacking'] ?? 'stack');
         } else {
-            return ['error' => $couponResult['error'] ?? 'Invalid coupon'];
+            $couponError = CheckoutService::couponErrorKey((string)($couponResult['error'] ?? ''));
+            return ['success' => false, 'error' => sprintf(I18n::t($couponError), $couponCode), 'error_code' => $couponError];
         }
     }
     $combinedDiscounts = Pricing::combineDiscounts($couponDiscount, $couponStacking, $promotionDiscount);
     if ($couponDiscount > 0 && $combinedDiscounts['coupon'] === 0) {
-        return ['success' => false, 'error' => 'Coupon cannot be combined with the current promotion'];
+        return ['success' => false, 'error' => sprintf(I18n::t('coupon_not_combinable'), $couponCode), 'error_code' => 'coupon_not_combinable'];
     }
     $promotionDiscount = $combinedDiscounts['promotion'];
     $totalDiscount = min($cart['subtotal'], $couponDiscount + $promotionDiscount);
@@ -734,14 +729,12 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     $selectedRate = $digitalOnly
         ? digitalDeliveryRate()
         : ShippingService::selectRate($shippingMethod, $country, $totalWeight, $cart['subtotal'] - $totalDiscount, PaymentService::isCashOnDelivery($paymentMethod), $totalVolume, ShippingService::physicalQuantity($cart['items']));
-    if (!$selectedRate) {
-        return ['success' => false, 'error' => 'Doručenie nie je dostupné do zvolenej krajiny.'];
-    }
+    if (!$selectedRate) return checkoutRefusal('checkout.error.shipping_unavailable');
     if (!$digitalOnly) {
         // Point-delivery carriers: the chosen pick-up point must be on the carrier's list for this address.
         $pickupInput = $input['pickup_point'] ?? '';
         $pickup = ShippingService::choosePickupPoint($selectedRate, $country, trim(Security::str($input['zip'] ?? '')), is_string($pickupInput) ? $pickupInput : '');
-        if ($pickup['error'] !== null) return ['success' => false, 'error' => I18n::t($pickup['error'])];
+        if ($pickup['error'] !== null) return checkoutRefusal((string)$pickup['error']);
         if ($pickup['point'] !== null) $selectedRate['pickup_point'] = $pickup['point'];
     }
     $shippingCost = $promotionFreeShipping ? 0 : (int)$selectedRate['price'];
@@ -760,12 +753,11 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         $selectedPayment = PaymentService::selectMethod($paymentMethod, $country, $currency, $paymentBaseAmount, $selectedRate['method_code'], $loggedInCustomerId);
     }
     if (!$selectedPayment || ($digitalOnly && ($selectedPayment['service_type'] ?? '') === 'cod')) {
-        return ['success' => false, 'error' => 'Platba nie je dostupná pre digitálne doručenie.'];
+        return checkoutRefusal('checkout.error.payment_unavailable');
     }
     if ($synthetic && empty($selectedPayment['requires_online'])) {
         // The smoke test exists to prove the gateway redirect; anything else would be a real order.
-        http_response_code(422);
-        return ['success' => false, 'error' => 'Synthetic checkout requires an online payment method'];
+        return checkoutRefusal('checkout.error.synthetic_requires_online', 422);
     }
     $paymentFee = PaymentService::chargedFee($selectedPayment, Cart::chargesNetOfDomesticVat($vatScenario), $sellerCountry, $taxProviderCode);
     $providerCodes = [
@@ -905,7 +897,8 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
             } catch (\Throwable $e) {
                 // Payment adapter error — order still created, log and return
                 IncidentMonitor::report('payment.session_failed', 'payment', 'critical', ['order_id' => $orderId, 'exception' => $e]);
-                $result['payment_error'] = 'Payment processing unavailable. Please try again.';
+                $result['payment_error'] = I18n::t('checkout.error.payment_session_failed');
+                $result['payment_error_code'] = 'checkout.error.payment_session_failed';
             }
         }
         if ($synthetic) {
@@ -916,7 +909,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         return $result;
     } catch (OrderRejectedException $e) {
         Cart::removeUnavailable([]);
-        return ['success' => false, 'error' => I18n::t('stock_changed')];
+        return checkoutRefusal('stock_changed');
     }
 }
 

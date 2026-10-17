@@ -7,7 +7,7 @@ $shopName = (string)$brand['name'];
 $homeUrl = Template::storeUrl('/');
 $localUrl = static function(string $url): string {
     if ($url === '' || $url[0] === '?' || $url[0] === '#') return $url;
-    return $url[0] === '/' ? Template::url($url) : $url;
+    return $url[0] === '/' ? Template::storeUrl($url) : $url; // store prefix (/cs/...) like every other storefront link
 };
 
 $nonce = Security::cspNonce();
@@ -32,17 +32,17 @@ if ($managedNavigation) {
         usort($children, static fn(array $a, array $b): int => (int)$b['product_count'] <=> (int)$a['product_count']);
         $children = array_values(array_filter($children, static fn(array $child): bool => (int)$child['product_count'] > 0));
         $childLinks = array_map(static fn(array $child): array => [
-            'url' => Template::storeUrl('/?page=category&slug=' . rawurlencode((string)$child['slug'])),
+            'url' => StorefrontViewModel::categoryUrl((string)$child['slug']),
             'label' => $catName((string)$child['name']),
         ], array_slice($children, 0, 12));
         if (count($children) > 12) {
             $childLinks[] = [
-                'url' => Template::storeUrl('/?page=category&slug=' . rawurlencode((string)$category['slug'])),
+                'url' => StorefrontViewModel::categoryUrl((string)$category['slug']),
                 'label' => I18n::t('view_all'),
             ];
         }
         $navigation[] = [
-            'url' => Template::storeUrl('/?page=category&slug=' . rawurlencode((string)$category['slug'])),
+            'url' => StorefrontViewModel::categoryUrl((string)$category['slug']),
             'label' => $catName((string)$category['name']),
             'children' => $childLinks,
         ];
@@ -64,9 +64,10 @@ $shell = [
     'cart_count' => $cartCount,
     'language_links' => $languageLinks,
     'navigation' => $navigation,
-    'search_query' => (string)($_GET['q'] ?? ''),
+    'search_query' => Security::str($_GET['q'] ?? ''), // q[]=x is an array, not a query
+    'flash' => StorefrontFlash::pull(),
     'footer_categories' => array_map(static fn(array $category): array => [
-        'url' => Template::storeUrl('/?page=category&slug=' . rawurlencode((string)$category['slug'])),
+        'url' => StorefrontViewModel::categoryUrl((string)$category['slug']),
         'label' => $catName((string)$category['name']),
     ], array_slice($footerCategories, 0, 6)),
     'year' => date('Y'),
@@ -108,7 +109,8 @@ $runtimeConfig = [
         'variant_invalid' => I18n::t('variant_invalid'),
         'product_invalid' => I18n::t('product_invalid'),
         'product_unavailable' => I18n::t('product_unavailable'),
-        'free' => I18n::t('free_shipping'),
+        'free' => I18n::t('free'),
+        'quantityClamped' => I18n::t('cart_quantity_clamped'),
         'shippingLoading' => I18n::t('shipping_loading'),
         'shippingUnavailable' => I18n::t('shipping_unavailable'),
         'selectShipping' => I18n::t('select_shipping_first'),

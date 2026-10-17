@@ -271,7 +271,7 @@ try {
     assert_true(!empty($r6['success']), 'CR-M4: a single-use coupon from a cancelled order can be used again (' . ($r6['error'] ?? 'ok') . ')');
     $pdo->exec("UPDATE promotions SET actions = '{\"type\":\"discount_fixed\",\"amount\":300}', conditions = '{}' WHERE code = 'CRM4COUPON'");
     $r7 = $p0Checkout(['country' => 'SK', 'coupon_code' => 'CRM4EXCL']);
-    assert_true(empty($r7['success']) && ($r7['error'] ?? '') === 'Coupon cannot be combined with the current promotion',
+    assert_true(empty($r7['success']) && ($r7['error_code'] ?? '') === 'coupon_not_combinable',
         'CR-M4: an exclusive coupon worth less than the automatic discount is refused, not summed (' . ($r7['error'] ?? 'placed') . ')');
 } finally {
     $pdo->exec("DELETE FROM promotions WHERE code IN ('CRM4AUTO', 'CRM4COUPON')");

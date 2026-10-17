@@ -1,0 +1,8 @@
+Tus descargas están listas
+
+Hola {{customer_name}}:
+se ha confirmado el pago de tu pedido {{order_number}}.
+
+{{#each download_links}}{{label}}: {{url}} ({{validity}})
+{{/each}}
+Mantén estos enlaces privados en un lugar seguro.

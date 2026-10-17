@@ -197,6 +197,14 @@ class CheckoutService {
         return $coupon;
     }
 
+    /** Lang key (with a %s for the code) of a coupon refusal reason from Pricing::applyCoupon(). */
+    public static function couponErrorKey(string $error): string {
+        return match ($error) {
+            'Minimum order not met' => 'coupon_min_subtotal', 'Coupon expired' => 'coupon_used_up',
+            'Coupon already used' => 'coupon_already_used', default => 'coupon_invalid',
+        };
+    }
+
     /**
      * Discount the checkout form shows before the order exists, with the same rules execute() applies:
      * the coupon (i18n key of the refusal reason when it gives nothing) plus automatic promotions.
@@ -216,10 +224,7 @@ class CheckoutService {
             $coupon = self::couponFor($couponCode, $subtotal, $promotionDiscount, $email);
             $couponDiscount = max(0, (int)$coupon['discount']);
             $couponStacking = (string)($coupon['stacking'] ?? 'stack');
-            if ($couponDiscount === 0) $couponError = match ((string)($coupon['error'] ?? '')) {
-                'Minimum order not met' => 'coupon_min_subtotal', 'Coupon expired' => 'coupon_used_up',
-                'Coupon already used' => 'coupon_already_used', default => 'coupon_invalid',
-            };
+            if ($couponDiscount === 0) $couponError = self::couponErrorKey((string)($coupon['error'] ?? ''));
         }
         $combined = Pricing::combineDiscounts($couponDiscount, $couponStacking, $promotionDiscount);
         if ($couponDiscount > 0 && $combined['coupon'] === 0) $couponError = 'coupon_not_combinable';

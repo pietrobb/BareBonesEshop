@@ -170,14 +170,17 @@ $architectureBudgets = [
     // +1 coupling: Str::normalizeEmail is the one e-mail normalisation shared with Customers and Pricing.
     // +2 coupling: DigitalDelivery issues the downloads page's links; StoreContext limits the profile languages to the store's.
     'src/Entrypoints/Storefront/Account.php' => ['lines' => 450, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 16],
-    'src/Entrypoints/Storefront/CatalogPages.php' => ['lines' => 135, 'functions' => 10, 'max_function_lines' => 60, /* category page: bounded spec/subcat filter parsing */ 'coupling' => 8],
+    // +2 lines: round-4 merge (canonical category links + trailing-slash/past-last-page 404).
+    'src/Entrypoints/Storefront/CatalogPages.php' => ['lines' => 137, 'functions' => 10, 'max_function_lines' => 60, /* category page: bounded spec/subcat filter parsing */ 'coupling' => 8],
     // +2 functions: pending-payment page and the gateway cancel page (P0 2026-10-13 checkout redirect).
     // +1 coupling: BankTransferInstructions renders the IBAN / variable symbol / PAY by square block on order-done (A13.6).
     // +1 coupling: I18n::all() gives cart/checkout blocks the catalog their breadcrumb/pagination landmarks are labelled from.
     // +1 function: storefrontCartPrice() formats cart/checkout amounts in the cart currency (shared-catalog stores).
-    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 250, 'functions' => 7, 'max_function_lines' => 100, 'coupling' => 10],
+    // +1 line / +1 coupling: round-4 merge (cart-currency formatting + translated free/payment labels).
+    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 251, 'functions' => 7, 'max_function_lines' => 100, 'coupling' => 11],
     // Ratcheted: canonical/robots/hreflang/JSON-LD moved to StorefrontSeo (storefront SEO audit).
-    'src/Entrypoints/Storefront/Layout.php' => ['lines' => 140, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 8],
+    // +2 coupling: cart currency decimals for the JS config and the one-shot StorefrontFlash notice.
+    'src/Entrypoints/Storefront/Layout.php' => ['lines' => 140, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 10],
     'src/Entrypoints/Storefront/ProductStatusPages.php' => ['lines' => 20, 'functions' => 1, 'max_function_lines' => 18, 'coupling' => 3],
 ];
 $forbiddenDependencies = [

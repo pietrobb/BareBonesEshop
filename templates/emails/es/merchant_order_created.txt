@@ -1,0 +1,10 @@
+Nuevo pedido {{order_number}}
+Cliente: {{customer_name}} ({{customer_email}})
+Total: {{order_total}}
+Pago: {{payment_method}} — {{payment_status}}
+{{#if awaiting_payment}}El pedido aún no está pagado.
+{{/if}}
+{{#each items}}{{quantity}} x {{name}} ({{sku}}) — {{total}}
+{{/each}}{{#if admin_url}}
+Detalle: {{admin_url}}
+{{/if}}

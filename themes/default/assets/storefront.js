@@ -62,6 +62,12 @@
     box.innerHTML = `<div class="${className}" role="alert">${escapeHtml(message)}</div>`;
   }
 
+  // The page's live region (storefront/shell): cart and wishlist results are announced, not only shown on a button.
+  function announce(message) {
+    const region = document.getElementById('storefront-flash');
+    if (region) region.textContent = message || '';
+  }
+
   async function addToCart(productId, quantity, variantId, button) {
     const original = button.textContent;
     if (button.dataset.variantPicker && !variantId) {
@@ -83,9 +89,14 @@
       const result = await response.json();
       if (!response.ok || !result.ok) {
         button.textContent = text[result.error] || text.cartError;
+        announce(button.textContent);
         return;
       }
-      button.textContent = text.added;
+      // Above the stock or the per-line maximum the cart keeps less than asked: say how many it holds.
+      button.textContent = result.clamped
+        ? String(text.quantityClamped || '').replace('{count}', String(result.quantity))
+        : text.added;
+      announce(result.clamped ? button.textContent : '');
       const badge = document.querySelector('.cart-badge');
       if (badge) badge.textContent = result.count;
       else {
@@ -99,6 +110,7 @@
       }
     } catch {
       button.textContent = text.cartError;
+      announce(text.cartError);
     } finally {
       setTimeout(() => { button.disabled = false; button.textContent = original; }, 1600);
     }
@@ -202,17 +214,17 @@
     const subtotal = parseInt(subtotalElement.value || '0', 10);
     const previous = box.querySelector('input[name="shipping_method"]:checked');
     const previousCode = previous ? previous.value : '';
-    box.innerHTML = `<div class="shipping-loading" role="status">${escapeHtml(text.shippingLoading)}</div>`;
+    // The rendered options stay until new rates arrive: a failed request only adds a notice above them.
+    box.querySelectorAll('.shipping-loading, .shipping-error').forEach((node) => node.remove());
+    box.insertAdjacentHTML('afterbegin', `<div class="shipping-loading" role="status">${escapeHtml(text.shippingLoading)}</div>`);
     const params = {country: country.value, subtotal: String(checkoutGoods(subtotal))};
     let result;
     try {
       result = await fetchCheckoutJson('shipping_rates', params);
     } catch {
       if (request !== shippingRequest) return;
-      showCheckoutError(box, 'shipping-error', text.shippingError || text.shippingUnavailable);
-      summaryShipping.textContent = '—';
-      const payments = document.getElementById('payment-options');
-      if (payments) payments.innerHTML = `<div class="payment-empty">${escapeHtml(text.selectShipping)}</div>`;
+      box.querySelectorAll('.shipping-loading').forEach((node) => node.remove());
+      box.insertAdjacentHTML('afterbegin', `<div class="shipping-error shipping-notice" role="alert">${escapeHtml(text.shippingError || text.shippingUnavailable)}</div>`);
       return;
     }
     if (request !== shippingRequest) return;
@@ -236,7 +248,7 @@
       label.className = 'shipping-option';
       const methodCode = method.method_code || method.key || '';
       const price = parseInt(method.price || 0, 10);
-      label.innerHTML = `<span><input type="radio" name="shipping_method" value="${escapeHtml(methodCode)}" data-price-cents="${price}" ${index === selectedIndex ? 'checked' : ''}> ${escapeHtml(method.label || methodCode)}<small>${escapeHtml(method.delivery_days || '')}</small></span><strong>${formatCents(price)}</strong>`;
+      label.innerHTML = `<span><input type="radio" name="shipping_method" value="${escapeHtml(methodCode)}" data-price-cents="${price}" ${index === selectedIndex ? 'checked' : ''}> ${escapeHtml(method.label || methodCode)}<small>${escapeHtml(method.delivery_label || '')}</small></span><strong>${formatCents(price)}</strong>`;
       label.querySelector('input').addEventListener('change', () => refreshCheckoutPayments(methodCode));
       box.appendChild(label);
     });
@@ -270,18 +282,50 @@
     if (banner) banner.remove();
   }
 
+  function addFromButton(cartButton) {
+    const quantityInput = cartButton.dataset.quantityInput ? document.getElementById(cartButton.dataset.quantityInput) : null;
+    const variant = cartButton.dataset.variantPicker
+      ? document.querySelector(`[name="variant-${cartButton.dataset.variantPicker}"]:checked`)
+      : null;
+    addToCart(cartButton.dataset.productId, quantityInput ? quantityInput.value : cartButton.dataset.quantity, variant ? variant.value : '', cartButton);
+  }
+
+  // Add-to-cart buttons submit a real form (works without JS); with JS the submit stays on the page.
+  document.addEventListener('submit', (event) => {
+    const cartButton = event.target.querySelector('[data-storefront-action="cart-add"]');
+    if (!cartButton) return;
+    event.preventDefault();
+    addFromButton(cartButton);
+  });
+
   document.addEventListener('click', (event) => {
+    // A theme override that still renders a formless type="button" add-to-cart button keeps working.
     const cartButton = event.target.closest('[data-storefront-action="cart-add"]');
-    if (cartButton) {
-      const quantityInput = cartButton.dataset.quantityInput ? document.getElementById(cartButton.dataset.quantityInput) : null;
-      const variant = cartButton.dataset.variantPicker
-        ? document.querySelector(`[name="variant-${cartButton.dataset.variantPicker}"]:checked`)
-        : null;
-      addToCart(cartButton.dataset.productId, quantityInput ? quantityInput.value : cartButton.dataset.quantity, variant ? variant.value : '', cartButton);
+    if (cartButton && !cartButton.form) {
+      addFromButton(cartButton);
       return;
     }
     const tab = event.target.closest('[data-product-tab]');
     if (tab) setTab(tab.dataset.productTab);
+  });
+
+  // data-submit-on-change (WCAG 3.2.2): a select submits on a pointer choice, not on every arrow key —
+  // keyboard users press Enter or the visible submit button; a quantity field submits once typing pauses.
+  let keyboardSelect = null;
+  let submitTimer = 0;
+  document.addEventListener('keydown', (event) => {
+    const select = event.target.closest && event.target.closest('select[data-submit-on-change]');
+    if (!select) return;
+    if (event.key === 'Enter' && select.form) {
+      event.preventDefault();
+      select.form.requestSubmit();
+    } else if (event.key !== 'Tab') {
+      keyboardSelect = select;
+    }
+  });
+  document.addEventListener('pointerdown', () => { keyboardSelect = null; });
+  document.addEventListener('input', (event) => {
+    if (event.target.closest('input[data-submit-on-change]')) clearTimeout(submitTimer);
   });
 
   document.addEventListener('change', (event) => {
@@ -294,7 +338,10 @@
       if (availability) availability.textContent = variant.dataset.availability || '';
     }
     const control = event.target.closest('[data-submit-on-change]');
-    if (control && control.form) control.form.requestSubmit();
+    if (!control || !control.form) return;
+    clearTimeout(submitTimer);
+    if (control.tagName !== 'SELECT') submitTimer = setTimeout(() => control.form.requestSubmit(), 800);
+    else if (keyboardSelect !== control) control.form.requestSubmit();
   });
 
   document.addEventListener('submit', (event) => {

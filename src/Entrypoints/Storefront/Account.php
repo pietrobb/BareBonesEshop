@@ -352,7 +352,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // Public signed-token invoice download (no login required)
 // ============================================================
 if ($p === 'invoice') {
-    $token = (string)($_GET['token'] ?? '');
+    $token = Security::str($_GET['token'] ?? '');
     if ($token === '' || strlen($token) !== 64 || !ctype_xdigit($token)) {
         http_response_code(400);
         exit('Invalid token.');
@@ -382,7 +382,7 @@ if ($p === 'invoice') {
 // ============================================================
 $loggedIn = Customers::isLoggedIn();
 if ($p === 'verify_email') {
-    $token = (string)($_GET['token'] ?? '');
+    $token = Security::str($_GET['token'] ?? '');
     $verified = Security::rateLimit('account_verify_email_ip', 20, 3600) && Customers::verifyEmail($token) !== null;
     $flash = $t($verified ? 'account.verify_email_done' : 'account.verify_email_invalid');
     $flashType = $verified ? 'ok' : 'error';

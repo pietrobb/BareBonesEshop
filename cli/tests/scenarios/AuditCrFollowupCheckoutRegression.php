@@ -65,7 +65,7 @@ try {
 
     // 3. Its minimum order is checked on the same base: 45 € after the promotion does not reach 50 €.
     [$crfResult, , $crfMoney] = $crfCheckout(2, ['coupon_code' => 'CRFMIN']);
-    assert_equals(['Minimum order not met', []], [$crfResult['error'] ?? 'placed', $crfMoney], 'CR follow-up coupon: the coupon minimum order sees the subtotal after promotions');
+    assert_equals(['coupon_min_subtotal', []], [$crfResult['error_code'] ?? 'placed', $crfMoney], 'CR follow-up coupon: the coupon minimum order sees the subtotal after promotions');
     assert_equals('coupon_min_subtotal', CheckoutService::discountPreview('CRFMIN', 6000, null, [['product_id' => 9781, 'qty' => 2, 'price' => 3000, 'total' => 6000]], null)['coupon_error'],
         'CR follow-up coupon: the preview refuses the same coupon for the same reason');
 
