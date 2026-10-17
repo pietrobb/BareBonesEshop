@@ -7,6 +7,10 @@ MariaDB** for production. Multi-language, multi-currency, extensible through
 
 No Composer dependencies, no build step — plain PHP 8.1+ and PDO.
 
+**Status:** actively developed. Read the **Upgrade notes** in [CHANGELOG.md](CHANGELOG.md) before
+updating an installation. Found a security problem? See [SECURITY.md](SECURITY.md) — please report
+it privately, not as a public issue. Licensed under the [MIT License](LICENSE).
+
 ---
 
 ## Requirements
@@ -493,6 +497,20 @@ production path. Backups, migrations, and CLI tools live under `cli/`.
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every push and pull request: a `php -l`
-syntax check across all sources plus the full `cli/test.php` suite, on a
-PHP **8.1 / 8.2 / 8.3 / 8.4** matrix.
+`.github/workflows/ci.yml` runs on every push and pull request:
+
+- `php -l` on every tracked PHP file and the full `cli/test.php` suite on PHP **8.1 / 8.2 / 8.3 / 8.4**
+  against a Redis service (live Redis queue tests), plus the static-analysis, i18n-parity and quality gates;
+- PHPStan level 5 against `phpstan-baseline.neon` (run it locally exactly like CI with `cli/phpstan.sh`);
+- the application, parity and updater suite on **MySQL 8.0** and **MariaDB 11.4** with a least-privilege user;
+- Playwright e2e (Chromium, WebKit iPhone, Firefox) with axe WCAG 2.2 AA checks and Lighthouse budgets;
+- a Docker image build smoke test.
+
+`.github/workflows/payment-gateway.yml` runs the real Stripe test-mode checkout when test keys are configured.
+
+---
+
+## License
+
+[MIT](LICENSE) — the same license as [BareBonesForms](https://github.com/pietrobb/BareBonesForms),
+which ships as the `vendor/bbf` submodule.
