@@ -233,7 +233,8 @@ try {
     // --- 14: secondary store language canonical/hreflang/switcher; legal pages canonical ---
     $r4Spanish = $r4Http('GET', '/en/?lang=es', [], $r4Sid)['body'];
     // Seo::head() joins app_url from config.php (absolute) or stays base-relative without it: compare paths.
-    $r4Paths = static fn(string $html): string => str_replace('http://127.0.0.1:' . $r4Port, '', $html);
+    $r4AppUrl = rtrim(trim((string)((require __DIR__ . '/../../../config.php')['app_url'] ?? '')), '/');
+    $r4Paths = static fn(string $html): string => str_replace(array_filter(['http://127.0.0.1:' . $r4Port, $r4AppUrl]), '', $html);
     $r4SpanishHead = $r4Paths($r4Head($r4Spanish));
     assert_true(str_contains($r4Spanish, '<html lang="es"') && str_contains($r4SpanishHead, '<link rel="canonical" href="/en/?lang=es">')
         && str_contains($r4SpanishHead, 'hreflang="es" href="/en/?lang=es"') && str_contains($r4SpanishHead, 'hreflang="en" href="/en/"')
