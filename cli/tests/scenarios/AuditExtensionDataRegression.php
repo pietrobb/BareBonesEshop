@@ -203,7 +203,10 @@ UrlAliases::setRules([]);
 Extensions::boot(' . var_export($edConfig, true) . ', ' . var_export($edExt, true) . ');
 chdir(' . var_export($edAppRoot, true) . ');
 $script = ltrim((string)parse_url($_SERVER["REQUEST_URI"], PHP_URL_PATH), "/") ?: "index.php";
-if (str_starts_with($script, "api/v1/")) { require "api/v1/index.php"; exit; }
+if (str_starts_with($script, "api/v1/")) $script = "api/v1/index.php";
+// Like router.php: before PHP 8.4 the built-in server sets SCRIPT_NAME to a dotted request path.
+$_SERVER["SCRIPT_NAME"] = $_SERVER["PHP_SELF"] = "/" . $script;
+if ($script === "api/v1/index.php") { require $script; exit; }
 if (!preg_match("/^[a-z]+\\.php$/", $script) || !is_file($script)) { http_response_code(404); exit; }
 require $script;
 ');
