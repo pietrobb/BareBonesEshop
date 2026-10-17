@@ -614,6 +614,11 @@ $erpCheckedMigration = require TEST_CLI_DIR . '/../migrations/20261016130000_erp
 $erpCheckedMigration->up($pdo, true);
 $erpCheckedMigration->up($pdo, true);
 assert_true(in_array('erp_status_checked_at', array_column($pdo->query('PRAGMA table_info(orders)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true), 'ERP status poll migration: erp_status_checked_at column exists idempotently');
+$catalogStockMigration = require TEST_CLI_DIR . '/../migrations/20261017093000_catalog_stock_erp_retry.php';
+$catalogStockMigration->up($pdo, true);
+$catalogStockMigration->up($pdo, true);
+assert_true(!array_diff(['erp_attempts', 'erp_next_retry_at'], array_column($pdo->query('PRAGMA table_info(orders)')->fetchAll(PDO::FETCH_ASSOC), 'name'))
+    && (bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_sync_state'")->fetchColumn(), 'ERP retry migration: backoff columns and the watermark table exist idempotently');
 $emailOverrideMigration = require TEST_CLI_DIR . '/../migrations/20261013130000_email_template_overrides.php';
 $emailOverrideMigration->up($pdo, true);
 $emailOverrideMigration->up($pdo, true);

@@ -177,7 +177,7 @@ final class ProductVariants {
 
     private static function ledgered(string $sku): bool {
         $stmt = Db::get()->prepare('SELECT 1 FROM warehouse_stock WHERE sku = :sku AND store_id = :store');
-        $stmt->execute([':sku' => $sku, ':store' => StoreContext::current()->id()]);
+        $stmt->execute([':sku' => $sku, ':store' => StoreContext::current()->catalogId()]);
         return (bool)$stmt->fetchColumn();
     }
 

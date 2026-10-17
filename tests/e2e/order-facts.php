@@ -1,6 +1,6 @@
 <?php
 // Read-only order facts for browser tests (no state change, unlike assert-checkout.php).
-// Usage: php tests/e2e/order-facts.php ORD-…   |   php tests/e2e/order-facts.php --email=x@example.test
+// Usage: php tests/e2e/order-facts.php ORD-… [store]   |   php tests/e2e/order-facts.php --email=x@example.test
 require_once __DIR__ . '/../../cli/cli-only.php';
 require_once __DIR__ . '/../../src/autoload.php';
 
@@ -13,7 +13,8 @@ if (!$safe) {
     throw new RuntimeException('Refusing to inspect a database that is not explicitly disposable E2E storage');
 }
 
-Bootstrap::initStoreContext('/', '127.0.0.1');
+// Orders are store-scoped: an order of another store (multistore-checkout.spec.js) names its store.
+Bootstrap::initStoreContext('/', '127.0.0.1', isset($argv[2]) ? (string)$argv[2] : null);
 $arg = trim((string)($argv[1] ?? ''));
 if (str_starts_with($arg, '--email=')) {
     $stmt = Db::get()->prepare('SELECT COUNT(*) FROM orders WHERE customer_email = :email');
@@ -31,4 +32,6 @@ echo json_encode([
     'total' => (int)$order['total'],
     'status' => (string)$order['status'],
     'payment_status' => (string)($order['payment_status'] ?? ''),
+    'store_id' => (string)$order['store_id'],
+    'currency' => (string)$order['currency'],
 ], JSON_THROW_ON_ERROR);

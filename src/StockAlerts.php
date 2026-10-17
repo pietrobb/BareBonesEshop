@@ -174,7 +174,7 @@ class StockAlerts {
         }
         $context = StoreContext::current();
         $cfg = self::config();
-        $stockParams = [$context->id()];
+        $stockParams = [$context->catalogId()];
         $skuFilter = '';
         if ($skus !== null) {
             $skuFilter = ' AND sku IN (' . implode(', ', array_fill(0, count($skus), '?')) . ')';

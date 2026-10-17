@@ -355,7 +355,7 @@ class Inventory {
         if (!in_array($policy, [self::DENY, self::BACKORDER, self::PREORDER], true)) throw new RuntimeException('Invalid inventory policy');
 
         $countStmt = $db->prepare('SELECT COUNT(*) FROM warehouse_stock WHERE sku = :sku AND store_id = :store');
-        $countStmt->execute([':sku' => $sku, ':store' => StoreContext::current()->id()]);
+        $countStmt->execute([':sku' => $sku, ':store' => StoreContext::current()->catalogId()]);
         if ((int)$countStmt->fetchColumn() > 0 || $variantId === null) {
             $allocations = Warehouse::reserve($sku, $quantity, $policy);
             $reserved = 0;

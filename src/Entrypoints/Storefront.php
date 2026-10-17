@@ -49,8 +49,6 @@ if (!$page && isset($_GET['cart_unsubscribe'])) $page = 'cart-unsubscribe';
 if (!$page) $page = 'home';
 
 $e = fn(string $s) => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
-$storeCurrency = StoreContext::current()->currency();
-$price = fn(int $cents) => I18n::price($cents, $storeCurrency);
 // ============================================================
 // Route & fetch data
 // ============================================================

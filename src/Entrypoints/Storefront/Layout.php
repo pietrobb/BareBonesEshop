@@ -89,6 +89,8 @@ $shell = [
     'cookie_save' => I18n::t('cookie_banner.save_preferences'),
 ];
 
+// Checkout amounts are in the cart's currency (storefrontCartPrice()), formatted with its configured decimals.
+$runtimeCurrency = (string)($GLOBALS['storefront_currency'] ?? $store->currency());
 $runtimeConfig = [
     // Store-prefixed (/cs/api/v1/storefront): the API resolves the store, locale and currency from the path.
     'apiUrl' => Template::storeUrl('/api/v1/storefront'),
@@ -96,7 +98,8 @@ $runtimeConfig = [
     'baseUrl' => Template::baseUrl(),
     'csrfToken' => Security::csrfToken(),
     'locale' => I18n::locale(),
-    'currency' => strtoupper($store->currency()),
+    'currency' => strtoupper($runtimeCurrency),
+    'currencyDecimals' => (int)(Bootstrap::stores()['currencies'][$runtimeCurrency]['decimals'] ?? 2),
     'text' => [
         'added' => I18n::t('added_to_cart'),
         'selectVariant' => I18n::t('select_variant'),

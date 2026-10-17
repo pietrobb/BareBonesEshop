@@ -1,8 +1,8 @@
 <?php
 /** Cart/checkout data presenters and checkout transport. Markup is theme-owned. */
 function renderCart(): string {
-    global $price, $t;
-    $cartData = Cart::enriched();
+    global $t;
+    $price = storefrontCartPrice($cartData = Cart::enriched());
     $cart = $cartData['items'];
     $breadcrumbs = [
         ['url' => Template::storeUrl('/'), 'label' => $t('home'), 'current' => false],
@@ -42,8 +42,8 @@ function renderCart(): string {
 }
 
 function renderCheckout(): string {
-    global $price, $t, $storeCurrency;
-    $cartData = Cart::enriched();
+    global $t;
+    $price = storefrontCartPrice($cartData = Cart::enriched());
     $cart = $cartData['items'];
     $breadcrumbs = [
         ['url' => Template::storeUrl('/'), 'label' => $t('home'), 'current' => false],
@@ -79,7 +79,8 @@ function renderCheckout(): string {
     $checkoutError = $placed['error'];
     if ($checkoutError !== '') {
         // A refusal can drop sold-out lines from the cart: show what is left, or only the reason.
-        $cart = ($cartData = Cart::enriched())['items'];
+        $price = storefrontCartPrice($cartData = Cart::enriched());
+        $cart = $cartData['items'];
         if (!$cart) return Template::render('storefront/checkout-error', ['home_url' => Template::storeUrl('/'), 'home_label' => $t('home'), 'error_label' => $t('checkout_error_title'), 'message' => $checkoutError]);
     }
     $state = CheckoutService::formState($_POST, $posted);
@@ -101,7 +102,7 @@ function renderCheckout(): string {
     $shippingRates = $quote['rates'];
     $selectedRate = $quote['selected'];
     $selectedShipping = (string)($selectedRate['method_code'] ?? '');
-    $payment = CheckoutService::paymentPreview($cart, $subtotal - $discount, $country, $storeCurrency, $selectedShipping, $preview['free_shipping'] ? 0 : $quote['price'], $preview['free_shipping'], $form('payment'), $customerId ?: null);
+    $payment = CheckoutService::paymentPreview($cart, $subtotal - $discount, $country, (string)$cartData['currency'], $selectedShipping, $preview['free_shipping'] ? 0 : $quote['price'], $preview['free_shipping'], $form('payment'), $customerId ?: null);
     [$paymentMethods, $selectedPayment, $shipping] = [$payment['methods'], $payment['selected'], $payment['shipping']];
     $paymentFee = $selectedPayment ? (int)$selectedPayment['fee'] : 0;
     $freeLabel = $t('free_shipping');
@@ -139,6 +140,16 @@ function renderCheckout(): string {
         'coupon_applied' => $couponDiscount > 0 ? sprintf($t('coupon_applied'), $couponCode, $price($couponDiscount)) : '',
         't' => I18n::all(),
     ] + CheckoutService::pickupView($shippingRates, $selectedRate, $country, $state['values']['zip'], $form('pickup_point')) + CheckoutService::companyLabels());
+}
+
+/**
+ * Formatter for cart amounts: they are in the cart's (product) currency, which in a store sharing another store's
+ * catalog is not the store currency. Also hands that currency to the storefront runtime config (Layout.php).
+ */
+function storefrontCartPrice(array $cartData): Closure {
+    $currency = isset($cartData['currency']) ? (string)$cartData['currency'] : null; // absent for an empty cart
+    if ($currency !== null) $GLOBALS['storefront_currency'] = $currency;
+    return static fn(int $cents): string => I18n::price($cents, $currency);
 }
 
 /**

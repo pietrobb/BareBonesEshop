@@ -181,13 +181,13 @@ try {
     $crfp6 = Sync::run();
     assert_equals([1, 1], [$crfp6['products_updated'] ?? null, $crfp6['products_skipped'] ?? null], 'CRFP 6: the foreign SKU is skipped and counted, the own product is synced');
     assert_true(in_array($crfp6Order, $crfpSyncAdapter->pushed, true) && ($crfp6['orders_pushed'] ?? 0) >= 1, 'CRFP 6: orders are still pushed after a refused product');
-    assert_equals('2026-01-02T03:04:05+00:00', Cache::get('last_erp_sync'), 'CRFP 6: a run that skipped a product keeps the previous watermark so the product is pulled again');
+    assert_equals('2026-01-02T03:04:05+00:00', Sync::watermark(), 'CRFP 6: a run that skipped a product keeps the previous watermark so the product is pulled again');
     assert_true((int)$pdo->query("SELECT COUNT(*) FROM operational_incidents WHERE code = 'erp.products_skipped'")->fetchColumn() >= 1,
         'CRFP 6: skipped products raise an incident, since every run re-pulls the delta until they are fixed');
     $crfpSyncAdapter->foreign = false;
     $crfp6Clean = Sync::run();
     assert_equals(0, $crfp6Clean['products_skipped'] ?? null, 'CRFP 6: a run without refused products skips nothing');
-    assert_true(Cache::get('last_erp_sync') !== '2026-01-02T03:04:05+00:00', 'CRFP 6: a clean sync run advances its watermark');
+    assert_true(Sync::watermark() !== '2026-01-02T03:04:05+00:00', 'CRFP 6: a clean sync run advances its watermark');
     $crfp6Foreign = $pdo->query("SELECT store_id, name FROM products WHERE sku = 'CRFP-FOREIGN'")->fetch(PDO::FETCH_ASSOC);
     assert_equals(['crfp-other-catalog', 'Other catalog'], [$crfp6Foreign['store_id'], $crfp6Foreign['name']], 'CRFP 6: the other catalog product is untouched');
 } catch (Throwable $e) {

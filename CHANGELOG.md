@@ -179,6 +179,24 @@ nginx PHP fallback when `operations.nginx_config` is set).
   (e.g. MySQL `net_write_timeout` on a slow download) is logged (`export.truncated`) and raises the
   incident `export.truncated`; when nothing was sent yet the download answers 500, otherwise the file
   is incomplete - check the incidents before importing an export elsewhere.
+- **Stores sharing a catalog** (migration `20261017093000_catalog_stock_erp_retry`):
+  - Stock belongs to the catalog: warehouses, warehouse stock, feeds and the admin warehouse pages are
+    bound to the store's `catalog_scope`, so every store sharing a catalog sells from (and its admin
+    edits) the same warehouses. The migration moves warehouses a store created under its own id to its
+    catalog (the catalog's default warehouse stays the default) and refreshes the catalog's stock.
+  - Gateway `success_url`, `cancel_url` and `notify_url` carry the order's store domain and
+    `url_prefix` (e.g. `<app_url>/cs/api/v1/webhooks/payment/<p>`). Stripe events (one dashboard endpoint,
+    the global `stripe_webhook_secret`) now settle orders of every store, also of another `provider_scope`.
+  - `cli/sync.php` syncs every store: products and stock are pulled once into the default store's
+    catalog, then each store pushes its orders (with their items) and pulls their statuses. Cancelled
+    orders that never reached the ERP are not pushed; a failed push is retried after 15 min, doubling
+    up to a day (`orders.erp_attempts`, `erp_next_retry_at`). A run still in progress makes the next
+    cron run exit (`<jobs_dir>/sync.lock`). The product watermark is the run's start time, kept in the
+    new table `erp_sync_state` instead of the cache (the cached value is read once as a fallback).
+  - `cli/gdpr-export.php` exports a customer of any store in that store; `--store=<id>` narrows the lookup.
+  - Cart and checkout amounts are formatted in the cart's (product) currency; the storefront runtime
+    config adds `currencyDecimals` (from `stores.json` `currencies`), which `storefront.js` uses.
+    `cli/seed.php` books the seeded stock on the default warehouse (`warehouse_stock`).
 
 ### Changed (breaking) — one JSON API under `/api/v1`
 - `api.php` and the `/api/<action>` rewrite are removed. Its actions moved to route groups of the
@@ -254,6 +272,13 @@ nginx PHP fallback when `operations.nginx_config` is set).
   custom adapters that only define a public `generateVariants()` method keep working.
 
 ### Fixed
+- **Non-default stores sharing a catalog** (e.g. `/cs/`) were broken end to end: checkout always failed
+  with "stock changed" (stock looked up under the store id, products under the catalog), the cart showed
+  EUR amounts as CZK, gateway return pages said "order not verified" and webhooks parked (URLs of the
+  default store), the worker's full cache rebuild wrote other catalogs' categories and prices into the
+  store's cache, the ERP sync only pushed the default store's orders (without items) and a failing order
+  blocked its batch, and `cli/gdpr-export.php` could not find other stores' customers
+  (`AuditRound4MultistoreRegression`, e2e `multistore-checkout.spec.js`).
 - Changing an order to `shipped` after a partial shipment failed with "Shipment exceeds reserved
   allocation"; it now ships only the remainder that is not yet in any shipment.
 - **P0: card payment from the HTML checkout was dead since 1.9.0.** CSP `form-action 'self'`

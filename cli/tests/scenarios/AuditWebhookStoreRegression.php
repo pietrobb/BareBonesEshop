@@ -95,6 +95,7 @@ try {
         $a056Insert('C3', 'cz', 'czk', 'paid', 'pi_a056_c3');
         $a056Insert('C4', 'cz', 'czk', 'paid', 'pi_a056_c4');
         $a056Insert('X1', 'xx', 'eur');
+        $a056Insert('X2', 'xx', 'czk');
         $a056State = static function(string $case) use ($a056Db, &$a056Ids): string {
             $stmt = $a056Db->prepare('SELECT payment_status FROM orders WHERE id = ?');
             $stmt->execute([$a056Ids[$case]]);
@@ -156,10 +157,16 @@ try {
             assert_equals([200, ['status' => 'ok']], $a056Stripe('/cz', $a056Completed('d1', $a056Ids['D1'], 'eur')), "{$a056Tag}/stripe: cz endpoint accepts default order completion");
             assert_equals('paid', $a056State('D1'), "{$a056Tag}/stripe: default order paid via cz endpoint");
 
-            // A store in another provider scope is never reachable with these credentials.
-            assert_equals(503, $a056Stripe('', $a056Completed('x1', $a056Ids['X1'], 'eur'))[0], "{$a056Tag}/stripe: foreign provider scope order is not settled but retried");
-            assert_equals('pending', $a056State('X1'), "{$a056Tag}/stripe: foreign provider scope order stays pending");
-            assert_equals(['store_id' => 'default', 'status' => 'retry', 'attempts' => 1, 'resolved_store_id' => null], $a056Inbox('evt_a056_x1'), "{$a056Tag}/stripe: foreign scope event persisted for retry");
+            // Audit round 4: Stripe verifies with the single global stripe_webhook_secret (one dashboard endpoint), so an
+            // order of a store in another provider scope is located and settled as well.
+            assert_equals([200, ['status' => 'ok']], $a056Stripe('', $a056Completed('x1', $a056Ids['X1'], 'eur')), "{$a056Tag}/stripe: other provider scope order is settled by the global Stripe endpoint");
+            assert_equals('paid', $a056State('X1'), "{$a056Tag}/stripe: other provider scope order paid in its store");
+            assert_equals([], $a056Inbox('evt_a056_x1'), "{$a056Tag}/stripe: other provider scope event is not parked");
+            // Other providers keep their scope: a PayU notification for the xx order reaches it only through /xx.
+            assert_equals(503, $a056PayU('', 'A056-X2', 'COMPLETED')[0], "{$a056Tag}/payu: foreign provider scope order is not settled but retried");
+            assert_equals('pending', $a056State('X2'), "{$a056Tag}/payu: foreign provider scope order stays pending");
+            assert_equals([200, ['status' => 'ok']], $a056PayU('/xx', 'A056-X2', 'COMPLETED'), "{$a056Tag}/payu: the store's own notify_url settles it");
+            assert_equals('paid', $a056State('X2'), "{$a056Tag}/payu: order paid through its store's endpoint");
 
             // Unknown order: persisted, provider retries are bounded, then parked as an incident.
             $a056Unknown = $a056Completed('unknown', 99999999, 'eur');

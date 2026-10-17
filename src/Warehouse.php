@@ -5,6 +5,8 @@
  * Warehouses hold stock per SKU. Total available = SUM(qty - reserved) across all warehouses.
  * Each warehouse has a priority — orders reserve from highest priority first.
  * Feeds are linked to warehouses — a feed updates stock for its warehouse.
+ * Stock belongs to the catalog that owns the SKU: warehouses.store_id and warehouse_stock.store_id hold the
+ * catalog_scope (StoreContext::catalogId()), so every store sharing a catalog sells from the same warehouses.
  */
 class Warehouse {
 
@@ -12,25 +14,35 @@ class Warehouse {
 
     public static function all(): array {
         $stmt = Db::get()->prepare("SELECT * FROM warehouses WHERE store_id = :store ORDER BY priority DESC, name");
-        $stmt->execute([':store' => StoreContext::current()->id()]);
+        $stmt->execute([':store' => StoreContext::current()->catalogId()]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** The store a catalog's stock jobs run in: the store whose id is the catalog scope, else the first store sharing it. */
+    public static function catalogStoreId(string $catalog): string {
+        $stores = (array)(Bootstrap::stores()['stores'] ?? []);
+        if (isset($stores[$catalog])) return $catalog;
+        foreach ($stores as $id => $config) {
+            if ((string)(is_array($config) ? ($config['catalog_scope'] ?? $id) : $id) === $catalog) return (string)$id;
+        }
+        return $catalog;
     }
 
     public static function byId(int $id): ?array {
         $stmt = Db::get()->prepare("SELECT * FROM warehouses WHERE id = :id AND store_id = :store");
-        $stmt->execute([':id' => $id, ':store' => StoreContext::current()->id()]);
+        $stmt->execute([':id' => $id, ':store' => StoreContext::current()->catalogId()]);
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
 
     public static function byCode(string $code): ?array {
         $stmt = Db::get()->prepare("SELECT * FROM warehouses WHERE code = :code AND store_id = :store");
-        $stmt->execute([':code' => $code, ':store' => StoreContext::current()->id()]);
+        $stmt->execute([':code' => $code, ':store' => StoreContext::current()->catalogId()]);
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
 
     public static function defaultWarehouse(): ?array {
         $stmt = Db::get()->prepare("SELECT * FROM warehouses WHERE store_id = :store AND is_default = 1 LIMIT 1");
-        $stmt->execute([':store' => StoreContext::current()->id()]);
+        $stmt->execute([':store' => StoreContext::current()->catalogId()]);
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
 
@@ -47,7 +59,7 @@ class Warehouse {
                    ':dropship' => (int)($data['is_dropship'] ?? 0),
                    ':def' => (int)($data['is_default'] ?? 0),
                    ':contact' => $data['contact'] ?? '', ':notes' => $data['notes'] ?? '',
-                   ':id' => $id, ':store' => StoreContext::current()->id(),
+                   ':id' => $id, ':store' => StoreContext::current()->catalogId(),
                ]);
         } else {
             $db->prepare("INSERT INTO warehouses (store_id, code, name, priority, is_dropship, is_default, contact, notes)
@@ -58,7 +70,7 @@ class Warehouse {
                    ':dropship' => (int)($data['is_dropship'] ?? 0),
                    ':def' => (int)($data['is_default'] ?? 0),
                    ':contact' => $data['contact'] ?? '', ':notes' => $data['notes'] ?? '',
-                   ':store' => StoreContext::current()->id(),
+                   ':store' => StoreContext::current()->catalogId(),
                ]);
             $id = (int)$db->lastInsertId();
         }
@@ -66,7 +78,7 @@ class Warehouse {
         // Only one default warehouse
         if (!empty($data['is_default'])) {
             $db->prepare("UPDATE warehouses SET is_default = 0 WHERE store_id = :store AND id != :id")
-                ->execute([':store' => StoreContext::current()->id(), ':id' => $id]);
+                ->execute([':store' => StoreContext::current()->catalogId(), ':id' => $id]);
         }
 
         return $id;
@@ -102,7 +114,7 @@ class Warehouse {
             throw new RuntimeException("Stock count {$qty} is below the {$before['reserved']} units reserved for SKU: {$sku}");
         }
         $params = [
-            ':store' => StoreContext::current()->id(), ':store2' => StoreContext::current()->id(), ':wh' => $warehouseId,
+            ':store' => StoreContext::current()->catalogId(), ':store2' => StoreContext::current()->catalogId(), ':wh' => $warehouseId,
             ':sku' => $sku, ':qty' => $qty, ':qty2' => $qty,
         ];
         // Native MySQL prepares (Db::get) reject a reused named placeholder, hence :store2.
@@ -179,8 +191,8 @@ class Warehouse {
         ");
         $stmt->execute([
             ':sku' => $sku,
-            ':stock_store' => StoreContext::current()->id(),
-            ':warehouse_store' => StoreContext::current()->id(),
+            ':stock_store' => StoreContext::current()->catalogId(),
+            ':warehouse_store' => StoreContext::current()->catalogId(),
         ]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
@@ -190,7 +202,7 @@ class Warehouse {
         $stmt = Db::get()->prepare("
             SELECT COALESCE(SUM(qty - reserved), 0) FROM warehouse_stock WHERE sku = :sku AND store_id = :store
         ");
-        $stmt->execute([':sku' => $sku, ':store' => StoreContext::current()->id()]);
+        $stmt->execute([':sku' => $sku, ':store' => StoreContext::current()->catalogId()]);
         return max(0, (int)$stmt->fetchColumn());
     }
 
@@ -224,8 +236,8 @@ class Warehouse {
         ");
         $rows->execute([
             ':sku' => $sku,
-            ':store' => StoreContext::current()->id(),
-            ':warehouse_store' => StoreContext::current()->id(),
+            ':store' => StoreContext::current()->catalogId(),
+            ':warehouse_store' => StoreContext::current()->catalogId(),
         ]);
 
         // NOTE: :take2 MUST be bound as PARAM_INT — execute(array) binds TEXT,
@@ -451,7 +463,7 @@ class Warehouse {
             )
             WHERE EXISTS (SELECT 1 FROM warehouse_stock w2 WHERE w2.sku = variants.sku AND w2.store_id = :store2)
               AND product_id IN (SELECT id FROM products WHERE store_id = :catalog)";
-        $params = [':store' => StoreContext::current()->id(), ':store2' => StoreContext::current()->id(), ':catalog' => StoreContext::current()->catalogId()];
+        $params = [':store' => StoreContext::current()->catalogId(), ':store2' => StoreContext::current()->catalogId(), ':catalog' => StoreContext::current()->catalogId()];
         if (empty($skus)) {
             Db::get()->prepare($sql)->execute($params);
             return;
@@ -462,7 +474,7 @@ class Warehouse {
 
     private static function stockRow(int $warehouseId, string $sku, bool $required = true): ?array {
         $stmt = Db::get()->prepare('SELECT qty, reserved FROM warehouse_stock WHERE warehouse_id = :warehouse AND sku = :sku AND store_id = :store');
-        $stmt->execute([':warehouse' => $warehouseId, ':sku' => $sku, ':store' => StoreContext::current()->id()]);
+        $stmt->execute([':warehouse' => $warehouseId, ':sku' => $sku, ':store' => StoreContext::current()->catalogId()]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$row && $required) throw new RuntimeException("Warehouse stock row missing for SKU: {$sku}");
         return $row ?: null;
@@ -470,8 +482,8 @@ class Warehouse {
 
     // ─── Feed CRUD ───────────────────────────────────────────
 
-    // Feeds carry no store column: a feed belongs to the store of its warehouse, so every read and write joins
-    // warehouses and is bound to the active store.
+    // Feeds carry no store column: a feed belongs to the catalog of its warehouse, so every read and write joins
+    // warehouses and is bound to the active store's catalog.
 
     public static function allFeeds(): array {
         $stmt = Db::get()->prepare("
@@ -480,11 +492,11 @@ class Warehouse {
             WHERE w.store_id = :store
             ORDER BY f.name
         ");
-        $stmt->execute([':store' => StoreContext::current()->id()]);
+        $stmt->execute([':store' => StoreContext::current()->catalogId()]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    /** Feeds of every store with their warehouse's store_id: only for runners that switch into that store per feed (cli/feed-sync.php). */
+    /** Feeds of every catalog with their warehouse's store_id (a catalog scope): only for runners that switch into that catalog per feed (cli/feed-sync.php, FeedImport::syncInStore()). */
     public static function allFeedsAllStores(): array {
         return Db::get()->query("
             SELECT f.*, w.name as warehouse_name, w.code as warehouse_code, w.store_id
@@ -495,13 +507,13 @@ class Warehouse {
 
     public static function feedById(int $id): ?array {
         $stmt = Db::get()->prepare("SELECT f.*, w.store_id FROM feeds f JOIN warehouses w ON w.id = f.warehouse_id WHERE f.id = :id AND w.store_id = :store");
-        $stmt->execute([':id' => $id, ':store' => StoreContext::current()->id()]);
+        $stmt->execute([':id' => $id, ':store' => StoreContext::current()->catalogId()]);
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
 
     public static function feedsByWarehouse(int $warehouseId): array {
         $stmt = Db::get()->prepare("SELECT f.* FROM feeds f JOIN warehouses w ON w.id = f.warehouse_id WHERE f.warehouse_id = :wh AND w.store_id = :store ORDER BY f.name");
-        $stmt->execute([':wh' => $warehouseId, ':store' => StoreContext::current()->id()]);
+        $stmt->execute([':wh' => $warehouseId, ':store' => StoreContext::current()->catalogId()]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
