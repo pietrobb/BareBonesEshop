@@ -28,6 +28,8 @@ final class StorefrontSeo
             $head = Template::viewModelSeoHead($viewModel, $title);
         } elseif ($page === 'category' && $category !== null) {
             $head = Seo::head($title, '', self::categoryPath($category, (int)($_GET['pg'] ?? 1)), true);
+        } elseif (in_array($page, ['privacy', 'terms', 'cookies'], true)) {
+            $head = Seo::head($title, '', Template::seoPath(Template::storeUrl('/?page=' . $page)), true);
         } else {
             $head = self::hreflang($alternates);
         }
@@ -60,18 +62,33 @@ final class StorefrontSeo
             $lines[] = '<link rel="alternate" hreflang="' . esc((string)$locale) . '" href="'
                 . esc(Template::absoluteUrl(Template::url($prefix . $alternates['pathNoPrefix']))) . '">';
         }
+        foreach ($alternates['secondary'] as $locale => $prefix) {
+            $lines[] = '<link rel="alternate" hreflang="' . esc((string)$locale) . '" href="'
+                . esc(Template::absoluteUrl(Bootstrap::withLang(Template::url($prefix . $alternates['pathNoPrefix']), (string)$locale))) . '">';
+        }
         $lines[] = '<link rel="alternate" hreflang="x-default" href="'
             . esc(Template::absoluteUrl(Template::url($alternates['xDefaultPrefix'] . $alternates['pathNoPrefix']))) . '">';
         return implode("\n", $lines);
     }
 
-    /** @return list<array{url: string, label: string, active: bool}> */
+    /**
+     * Every language of every store: each store's default language, then the further store languages
+     * (?lang=xx) that no store has as its default.
+     * @return list<array{url: string, label: string, active: bool}>
+     */
     private static function languageLinks(array $alternates): array
     {
         $links = [];
         foreach ($alternates['alternates'] as $locale => $prefix) {
             $links[] = [
                 'url' => Template::url($prefix . $alternates['pathNoPrefix']),
+                'label' => strtoupper((string)$locale),
+                'active' => I18n::locale() === $locale,
+            ];
+        }
+        foreach ($alternates['secondary'] as $locale => $prefix) {
+            $links[] = [
+                'url' => Bootstrap::withLang(Template::url($prefix . $alternates['pathNoPrefix']), (string)$locale),
                 'label' => strtoupper((string)$locale),
                 'active' => I18n::locale() === $locale,
             ];

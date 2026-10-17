@@ -75,6 +75,8 @@ function pageProducts(): void {
                 <button type="submit" class="btn btn-sm"><?= esc(I18n::t('admin.btn.apply')) ?></button>
                 <input type="hidden" name="q" value="<?= esc($search) ?>">
                 <input type="hidden" name="status" value="<?= esc($statusFilter) ?>">
+                <input type="hidden" name="stock" value="<?= esc($stockFilter) ?>">
+                <input type="hidden" name="page" value="<?= (int)$page ?>">
                 <button type="submit" class="btn btn-sm" formaction="admin.php?p=products&amp;action=export" formmethod="post" data-skip-confirm><?= esc(I18n::t('admin.btn.export_csv')) ?></button>
             </div>
         <table>
@@ -606,9 +608,10 @@ function handleCmsPageSave(): void {
         }
     }
     $form = AdminForm::validate('admin-page', $old ? adminFormValues('admin-page', $old) : []);
+    $back = 'Location: admin.php?p=page_edit' . ($id ? "&id={$id}" : '');
     if ($form === null) {
         setFlash('err', I18n::t('admin.cms.not_saved') . ' ' . AdminForm::firstError());
-        header("Location: admin.php?p=page_edit&id={$id}");
+        header($back);
         exit;
     }
     $slug = Security::slug($form['slug']);
@@ -625,16 +628,19 @@ function handleCmsPageSave(): void {
     try {
         $sections = ContentService::sanitizeSections($form['sections'] !== '' ? $form['sections'] : '[]');
     } catch (JsonException | InvalidArgumentException $e) {
+        AdminForm::keepInput('admin-page', $form, ['sections' => I18n::t('admin.cms.sections_invalid')]);
         setFlash('err', I18n::t('admin.cms.sections_invalid'));
-        header("Location: admin.php?p=page_edit&id={$id}");
+        header($back);
         exit;
     }
     $status = $form['status'] !== '' ? $form['status'] : 'active';
 
     $slugOwner = $slug ? ContentService::pageIdBySlug($slug) : null;
     if (!$slug || ($slugOwner !== null && $slugOwner !== $id)) {
-        setFlash('err', I18n::t(!$slug ? 'admin.cms.slug_required' : 'admin.cms.slug_taken'));
-        header("Location: admin.php?p=page_edit&id={$id}");
+        $message = I18n::t(!$slug ? 'admin.cms.slug_required' : 'admin.cms.slug_taken');
+        AdminForm::keepInput('admin-page', $form, ['slug' => $message]);
+        setFlash('err', $message);
+        header($back);
         exit;
     }
 
@@ -812,9 +818,12 @@ function handleProductSave(): void {
     $form = AdminForm::validate('admin-product', $old ? adminFormValues('admin-product', $old) : []);
     // Brand, GTIN/MPN, SEO, extra categories and translations are checked against the active catalog first.
     $editor = $form === null ? AdminForm::firstError() : ProductEditor::validate($form, $_POST, $id, $old);
+    // A new product goes back to the (prefilled) new-product form, not to an "id=0" record.
+    $back = 'Location: admin.php?p=product' . ($id ? "&id={$id}" : '');
     if (is_string($editor)) {
+        if ($form !== null) AdminForm::keepInput('admin-product', $form);
         setFlash('err', I18n::t('admin.product.not_saved') . ' ' . $editor);
-        header("Location: admin.php?p=product&id={$id}");
+        header($back);
         exit;
     }
     $nullableCount = static fn(string $v): ?int => $v === '' ? null : max(0, Security::int($v));
@@ -841,8 +850,9 @@ function handleProductSave(): void {
     $images = $editor['images'];
     $upload = $form['image_upload']['action'] === 'replace' ? ProductEditor::storeUpload($form['image_upload']['files'][0], $data[':sku']) : null;
     if (is_string($upload)) {
+        AdminForm::keepInput('admin-product', $form);
         setFlash('err', $upload);
-        header("Location: admin.php?p=product&id={$id}");
+        header($back);
         exit;
     }
     if ($upload) $images[] = $upload[0];
@@ -955,10 +965,19 @@ function handleBulkAction(): void {
     Security::adminRequire('products.edit');
     $ids = Security::intList($_POST['product_ids'] ?? []);
     $action = is_string($_POST['bulk_action'] ?? null) ? $_POST['bulk_action'] : '';
-    if (empty($ids) || !$action) { header('Location: admin.php?p=products'); exit; }
+    // Back to the list the admin was looking at (same search, filters and page).
+    $filters = array_filter(array_map(static fn($value): string => is_string($value) ? trim($value) : '', array_intersect_key($_POST, array_flip(['q', 'status', 'stock', 'page']))), static fn(string $value): bool => $value !== '');
+    $back = 'Location: admin.php?' . http_build_query(['p' => 'products'] + $filters);
+    if (empty($ids) || !$action) {
+        setFlash('err', I18n::t(empty($ids) ? 'admin.products.bulk.none_selected' : 'admin.products.bulk.no_action'));
+        header($back);
+        exit;
+    }
 
     $result = ProductBulk::apply($action, $ids);
-    if ($result['ok']) {
+    if (!$result['ok']) {
+        setFlash('err', I18n::t('admin.products.bulk.failed'));
+    } else {
         $percent = ProductBulk::PRICE_ACTIONS[$action] ?? 0;
         $key = ['activate' => 'activated', 'archive' => 'archived', 'delete' => 'deleted'][$action] ?? 'price_changed';
         $msg = I18n::format('admin.products.bulk.' . $key, ['count' => $result['count'], 'change' => sprintf('%+d%%', $percent)]);
@@ -966,7 +985,7 @@ function handleBulkAction(): void {
         if ($result['clamped']) $msg .= ' ' . I18n::format('admin.products.bulk.price_clamped', ['list' => implode(', ', $result['clamped'])]);
         setFlash($result['skipped'] ? 'err' : 'ok', $msg);
     }
-    header('Location: admin.php?p=products');
+    header($back);
     exit;
 }
 function handleExport(): void {

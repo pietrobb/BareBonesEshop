@@ -29,6 +29,14 @@ function renderProduct(array $product): string {
     return Template::page((string)$model['page']['template'], $model);
 }
 
+/** /category/knihy/ (the clean-URL rewrite captures the slash) → 301 to the canonical /category/knihy. */
+function redirectCategoryTrailingSlash(string $slug): void {
+    if (!preg_match('#^[a-z0-9/-]*[a-z0-9-]/+$#i', $slug) || !in_array($_SERVER['REQUEST_METHOD'] ?? 'GET', ['GET', 'HEAD'], true)) return;
+    $query = http_build_query(array_diff_key($_GET, ['category' => true, 'slug' => true, 'page' => true]));
+    header('Location: ' . Template::storeUrl('/category/' . rtrim($slug, '/')) . ($query !== '' ? '?' . $query : ''), true, 301);
+    exit;
+}
+
 function renderCategory(array $cat): string {
     global $catName, $t, $lang;
     $catId = (int)$cat['id'];
@@ -59,6 +67,8 @@ function renderCategory(array $cat): string {
         }
     }
     $result = Products::parametricSearch($ids, $page, 24, $sort, $spec, $pmin, $pmax, $lang, $ranges);
+    // A page past the last one lists nothing: a real 404 (StorefrontSeo then emits noindex), not a soft 404.
+    if ($page > max(1, (int)$result['pages'])) http_response_code(404);
     $spec = $result['applied_spec'];
     $ranges = $result['applied_ranges'];
     $children = array_values(array_filter(Categories::children($catId), static fn(array $row): bool => (int)$row['product_count'] > 0));

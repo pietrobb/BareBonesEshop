@@ -283,6 +283,34 @@ nginx PHP fallback when `operations.nginx_config` is set).
   for admin redirects and 404s. Regression test drives the fallback router over real HTTP
   (`php -S`): POST `cart_action=update` with CSRF on `/kosik` → 302 back to the cart with the new
   quantity; POST on an unknown path → 405.
+- **Customer account (UX audit round 4).** Withdrawing cookie consent in the account works: the
+  choice is written as `cc_v1` (the banner's cookie, name, JSON value and path), logged in
+  `cookie_consent` like the banner's API action, a legacy `cookie_consent` cookie is cleared, and the
+  privacy page reads the same cookie as the banner and `MarketingConsent`. New addresses are validated
+  (name, street, city, ZIP required; country from the checkout's delivery countries, now a select)
+  and re-rendered with field errors and the typed values instead of "Saved"; address types are
+  translated. Every account form label is linked to its control, with `autocomplete` hints. Order
+  list/detail show translated statuses (`order_status.*`, `payment_status.*`) and dates in the shop's
+  display timezone and the locale's `format.date`/`format.datetime` (`I18n::dateTime()`). New
+  `?p=downloads` page lists the customer's digital entitlements (expiry, downloads left); its button
+  issues a fresh link (`DigitalDelivery::reissueForCustomer()`: only token hashes are stored, so the
+  e-mailed link stops working, limits and expiry are unchanged). Unknown `?p=` values are a real 404.
+  The profile offers only the current store's languages; a too-fast registration (form trap) says
+  "please try again" instead of "too many attempts".
+- **Admin.** Rejected product and CMS page saves keep the typed input (one-shot, `AdminForm::keepInput()`);
+  a rejected new product returns to the prefilled new-product form, not `id=0`. The customers list is
+  paginated (50 per page) and its heading shows the real total. Product bulk actions flash a message
+  when nothing is selected, no action is chosen or the action fails, and return to the filtered list
+  (search, status, stock, page). Order bulk status starts with an empty required choice and asks for
+  confirmation; a post without a status changes nothing.
+- **Storefront SEO.** A category page past the last one (`/category/x?pg=999`) is a 404 with `noindex`
+  instead of an indexable empty page. `/category/x/` 301s to `/category/x` (the clean-URL rewrite
+  captured the slash in the default store). Product JSON-LD maps backorder/preorder stock to
+  `BackOrder`/`PreOrder` instead of `InStock`. A store's further `languages` (selected with `?lang=xx`)
+  get their own canonical (`…?lang=xx`), an hreflang entry and a language-switcher entry when no store
+  has that language as its default (that store stays the language's one hreflang URL). Internal links
+  do not carry `?lang=` yet, so browsing on from such a page returns to the store's default language.
+  Legal pages (`?page=privacy|terms|cookies`) have a canonical and hreflang alternates.
 
 ### Migration
 - `20261008090000_stock_alerts` (idempotent): `products.stock_low_threshold`,

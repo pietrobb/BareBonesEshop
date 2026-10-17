@@ -12,12 +12,8 @@ Security::sessionStart();
 Security::headers();
 
 $locale = Bootstrap::initLocale();
-$storesCfg = Bootstrap::stores();
-$supported = [];
-foreach ($storesCfg['stores'] ?? [] as $storeConfig) {
-    foreach ($storeConfig['languages'] ?? [] as $code) $supported[$code] = true;
-}
-$supported = array_keys($supported) ?: [$locale];
+// A profile can only pick a language the current store actually serves.
+$supported = array_values(array_unique(array_map('strval', (array)(StoreContext::current()->config()['languages'] ?? [])))) ?: [$locale];
 
 $t = fn(string $k) => I18n::t($k);
 $e = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
@@ -50,8 +46,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             (string)($_POST['register_token'] ?? ''),
             (string)($_POST['company_website'] ?? '')
         );
-        if (!Security::rateLimit($rlKey, 4) || !$looksHuman) {
+        if (!Security::rateLimit($rlKey, 4)) {
             $flash = $t('account.rate_limited'); $flashType = 'error';
+        } elseif (!$looksHuman) {
+            // A too-fast or expired form is not a rate limit; a neutral retry keeps real users moving.
+            $flash = $t('account.form_retry'); $flashType = 'error';
         } else {
             [$ok, $id, $err] = Customers::register($email, $password, $name, ['locale' => $locale]);
             if ($ok) {
@@ -176,20 +175,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     elseif ($action === 'address_add' && Customers::isLoggedIn()) {
         $cid = (int)$_SESSION['customer_id'];
-        Customers::addAddress($cid, [
-            'type'       => Security::str($_POST['type'] ?? 'shipping'),
-            'is_default' => !empty($_POST['is_default']),
-            'name'       => Security::str($_POST['name'] ?? ''),
-            'company'    => Security::str($_POST['company'] ?? ''),
-            'vat_id'     => Security::str($_POST['vat_id'] ?? ''),
-            'street'     => Security::str($_POST['street'] ?? ''),
-            'city'       => Security::str($_POST['city'] ?? ''),
-            'zip'        => Security::str($_POST['zip'] ?? ''),
-            'country'    => Security::str($_POST['country'] ?? ''),
-            'phone'      => Security::str($_POST['phone'] ?? ''),
-        ]);
-        header('Location: ' . Template::storeUrl('/account.php?p=addresses&ok=1'));
-        exit;
+        $address = ['type' => Security::str($_POST['type'] ?? 'shipping'), 'is_default' => !empty($_POST['is_default'])];
+        foreach (['name', 'company', 'vat_id', 'street', 'city', 'zip', 'country', 'phone'] as $field) {
+            $address[$field] = trim(Security::str($_POST[$field] ?? ''));
+        }
+        $address['country'] = strtoupper($address['country']);
+        $fieldErrors = Customers::addressErrors($address);
+        if (!$fieldErrors) {
+            Customers::addAddress($cid, $address);
+            header('Location: ' . Template::storeUrl('/account.php?p=addresses&ok=1'));
+            exit;
+        }
+        $fieldValues = $address;
+        $flash = $t('account.err_address_invalid');
+        $flashType = 'error';
+        $p = 'addresses';
     }
 
     elseif ($action === 'address_update' && Customers::isLoggedIn()) {
@@ -298,6 +298,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
+    elseif ($action === 'download' && Customers::isLoggedIn()) {
+        // The e-mailed token is stored only as a hash, so the account issues a fresh link for its own entitlement.
+        $url = DigitalDelivery::reissueForCustomer((int)$_SESSION['customer_id'], Security::int($_POST['id'] ?? 0));
+        if ($url !== null) {
+            header('Location: ' . $url, true, 303);
+            exit;
+        }
+        $flash = $t('account.download_unavailable');
+        $flashType = 'error';
+        $p = 'downloads';
+    }
+
     elseif ($action === 'cookie_consent') {
         $cats = [
             'necessary' => true,
@@ -305,8 +317,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'marketing' => !empty($_POST['marketing']),
         ];
         $method = (string)($_POST['method'] ?? 'preferences');
+        if (!in_array($method, ['banner_accept_all', 'banner_reject_all', 'preferences'], true)) $method = 'preferences';
         $cid = Customers::isLoggedIn() ? (int)$_SESSION['customer_id'] : null;
-        $consentId = GdprService::logCookieConsent([
+        // Same consent log as the banner's cookie_consent API action.
+        GdprService::logCookieConsent([
             'session_id'  => Security::sessionKey() ?: null,
             'customer_id' => $cid,
             'categories'  => $cats,
@@ -314,14 +328,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'ip'          => $_SERVER['REMOTE_ADDR'] ?? '',
             'user_agent'  => substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255),
         ]);
-        $cookieValue = json_encode($cats);
-        setcookie('cookie_consent', $cookieValue, [
+        // The banner (storefront.js) and MarketingConsent read cc_v1: same name, value and path as the banner writes.
+        $cookieOptions = [
             'expires'  => time() + 31536000, // 12 months
-            'path'     => '/',
+            'path'     => Template::baseUrl() ?: '/',
             'secure'   => !empty($_SERVER['HTTPS']),
             'httponly' => false,
             'samesite' => 'Lax',
-        ]);
+        ];
+        setcookie('cc_v1', (string)json_encode($cats), $cookieOptions);
+        // Older releases stored the account choice under cookie_consent, which MarketingConsent still honours.
+        if (isset($_COOKIE['cookie_consent'])) {
+            setcookie('cookie_consent', '', ['expires' => 1] + $cookieOptions);
+            setcookie('cookie_consent', '', ['expires' => 1, 'path' => '/'] + $cookieOptions);
+        }
+        $_SESSION['account_flash'] = ['message' => $t('account.saved'), 'type' => 'ok'];
         header('Location: ' . Security::safeLocalPath($_POST['return_to'] ?? null, Template::storeUrl('/account.php?p=privacy')));
         exit;
     }
@@ -391,7 +412,7 @@ if ($flash === null && isset($_SESSION['account_flash'])) {
 }
 // Only the customer's own order in this store; any other id is indistinguishable from a missing one.
 $order = $customer && $p === 'order' ? Customers::order((int)$customer['id'], Security::int($_GET['id'] ?? 0)) : null;
-if ($p === 'order' && $order === null) {
+if (($p === 'order' && $order === null) || !in_array($p, AccountViewModel::PAGES, true)) {
     http_response_code(404);
     $p = 'unknown';
 }
@@ -399,7 +420,7 @@ if ($p === 'order' && $order === null) {
 // ============================================================
 // Render through the active theme and shared storefront shell
 // ============================================================
-$viewData = AccountViewModel::build($p, $customer, $supported, $fieldValues, $flash, $flashType, $order);
+$viewData = AccountViewModel::build($p, $customer, $supported, $fieldValues, $flash, $flashType, $order, $fieldErrors);
 $content = Template::page('account', $viewData);
 $title = Template::pageTitle($t('account.title'));
 $cartCount = StorefrontCartAction::count();

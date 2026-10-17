@@ -113,6 +113,9 @@ class Bootstrap {
      *   'alternates'     => [locale => url_prefix, ...] (one per store)
      *   'pathNoPrefix'   => request path with the matched store prefix stripped
      *   'xDefaultPrefix' => url_prefix of the default_store (for hreflang=x-default)
+     *   'secondary'      => [locale => url_prefix, ...] the further `languages` of a store, served as
+     *                       <prefix><path>?lang=<locale> (initLocale); a locale that is some store's
+     *                       default_locale is left to that store, so every hreflang code has one URL
      * Pass an explicit $uri to override $_SERVER['REQUEST_URI'] (tests).
      */
     public static function hreflangAlternates(?string $uri = null): array {
@@ -121,6 +124,13 @@ class Bootstrap {
         foreach ($storesCfg['stores'] ?? [] as $store) {
             $locale = $store['default_locale'] ?? 'en';
             $alternates[$locale] = $store['url_prefix'] ?? '';
+        }
+        $secondary = [];
+        foreach ($storesCfg['stores'] ?? [] as $store) {
+            foreach ((array)($store['languages'] ?? []) as $locale) {
+                $locale = strtolower((string)$locale);
+                if (!isset($alternates[$locale]) && !isset($secondary[$locale])) $secondary[$locale] = $store['url_prefix'] ?? '';
+            }
         }
 
         $pathNoPrefix = $uri ?? self::canonicalRequestPath();
@@ -140,6 +150,21 @@ class Bootstrap {
             'alternates'     => $alternates,
             'pathNoPrefix'   => $pathNoPrefix,
             'xDefaultPrefix' => $xDefaultPrefix,
+            'secondary'      => $secondary,
         ];
+    }
+
+    /** Append ?lang=<locale> (or &lang=) to a local URL. */
+    public static function withLang(string $url, string $locale): string {
+        return $url . (str_contains($url, '?') ? '&' : '?') . 'lang=' . rawurlencode($locale);
+    }
+
+    /** The active locale when it is a non-primary language of the current store (selected by ?lang=), else null. */
+    public static function secondaryLocale(): ?string {
+        if (!StoreContext::hasCurrent()) return null;
+        $context = StoreContext::current();
+        $locale = I18n::locale();
+        $languages = array_map('strtolower', (array)($context->config()['languages'] ?? []));
+        return $locale !== $context->defaultLocale() && in_array($locale, $languages, true) ? $locale : null;
     }
 }

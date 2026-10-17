@@ -3,7 +3,11 @@
 
 function pageCustomers(): void {
     $q = trim((string)($_GET['q'] ?? ''));
-    $customers = Customers::adminList($q, 100);
+    $perPage = 50;
+    $total = Customers::adminCount($q);
+    $pages = max(1, (int)ceil($total / $perPage));
+    $page = min($pages, max(1, Security::int($_GET['page'] ?? 1)));
+    $customers = Customers::adminList($q, $perPage, ($page - 1) * $perPage);
     // Pre-fetch order counts for the listed customers.
     $counts = [];
     $ids = array_map(static fn($c) => (int)$c['id'], $customers);
@@ -14,7 +18,7 @@ function pageCustomers(): void {
         foreach ($st->fetchAll() as $r) { $counts[(int)$r['customer_id']] = (int)$r['cnt']; }
     }
     ?>
-    <h1><?= esc(I18n::t('admin.title.customers')) ?> <span class="muted">(<?= count($customers) ?>)</span></h1>
+    <h1><?= esc(I18n::t('admin.title.customers')) ?> <span class="muted">(<?= $total ?>)</span></h1>
     <div class="card">
         <form method="get" action="admin.php" style="display:flex;gap:.5rem;align-items:center;margin-bottom:1rem">
             <input type="hidden" name="p" value="customers">
@@ -39,6 +43,7 @@ function pageCustomers(): void {
             </tr>
             <?php endforeach; ?>
         </table>
+        <?php pagination($page, $pages, 'admin.php?p=customers&q=' . urlencode($q)); ?>
         <?php endif; ?>
     </div>
     <?php
