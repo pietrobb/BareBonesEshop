@@ -267,15 +267,12 @@ nginx PHP fallback when `operations.nginx_config` is set).
   time: Stripe (Developers → Webhooks) to `<app_url>/api/v1/webhooks/payment/stripe`, Comgate push URL
   to `<app_url>/api/v1/webhooks/payment/comgate`, and likewise any carrier webhooks. GoPay, ThePay and
   PayU get the new notification URL with every new payment; payments created before the deploy keep
-  calling the old `api.php` URL they were given. Custom themes that call
+  calling the old `api.php` URL, which answers 404, so settle or check those payments in the provider
+  portal after the deploy. There are no legacy routes: `api.php` (any action) and
+  `/api/v1/storefront?action=<action>` answer 404. Custom themes that call
   `api.php` must use `window.BareBonesStorefront.apiUrl` + `/<action>`; nginx needs the updated
-  `deploy/nginx.conf` (the `/api/(.*)` rewrite is gone, an `api.php` rewrite is added).
-- **Legacy routes for one release** (removed in the next one): `/api.php?action=` `webhook_payment`,
-  `webhook_stripe`, `webhook_shipping` and `csp_report` are rewritten to the API (`.htaccess`,
-  `deploy/nginx.conf`, `router.php`), so notifications of in-flight payments and not yet updated portal
-  URLs still arrive; every other `api.php` action answers 404. `/api/v1/storefront?action=<action>` serves
-  `storefront.js` cached from before the update (the theme version is now 2.3.0, so fresh pages load the
-  new script). Update portal and carrier URLs before the next release.
+  `deploy/nginx.conf` (the `/api/(.*)` rewrite is gone). The theme version is now 2.3.0, so pages
+  load the new `storefront.js` instead of a cached one.
 - Carrier webhook routes accept the same codes as the handler, including hyphens (the default
   `http-carrier`): `/api/v1/webhooks/shipping/http-carrier` answered 404.
 - The external API also answers below an install subdirectory and a store prefix (`/shop/api/v1/…`,

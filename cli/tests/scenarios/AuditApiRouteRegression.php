@@ -28,7 +28,7 @@ foreach ([
     ['/api/v1/orders/5/status', '', null],
     ['/api/v1', '', null],
     ['/api/v1/index.php', '', null],
-    ['/api.php', '', ['action' => '', 'get' => []]], // legacy notification shim only (AuditRound4ApiSecurityRegression)
+    ['/api.php', '', null],
     ['/storefront/cart', '', null],
 ] as [$arUri, $arBase, $arExpected]) {
     assert_equals($arExpected, ApiRoute::resolve($arUri, $arBase), "API route: {$arUri}" . ($arBase !== '' ? " (base {$arBase})" : ''));
@@ -42,7 +42,7 @@ foreach ([
     ['/cs/api/v1/products', '', null],
     ['/pl/api/v1/storefront/cart', '', null],
     ['/csx/api/v1/storefront/cart', '', null],
-    ['/cs/api.php', '', ['action' => '', 'get' => []]],
+    ['/cs/api.php', '', null],
 ] as [$arUri, $arBase, $arExpected]) {
     assert_equals($arExpected, ApiRoute::resolve($arUri, $arBase, $arStores), "API route (store prefix): {$arUri}" . ($arBase !== '' ? " (base {$arBase})" : ''));
 }
@@ -52,8 +52,8 @@ assert_equals('https://shop.example/api/v1/webhooks/payment/comgate', ApiRoute::
 assert_true(!is_file($arRoot . '/api.php'), 'API: api.php is removed');
 $arHtaccess = (string)file_get_contents($arRoot . '/.htaccess');
 $arNginx = (string)file_get_contents($arRoot . '/deploy/nginx.conf');
-assert_true(str_contains($arHtaccess, 'RewriteRule ^api/v1(?:/.*)?$ api/v1/index.php [QSA,L]') && substr_count($arHtaccess, 'api\\.php') === 1, 'API: .htaccess routes /api/v1 (plus the one-release legacy notification rewrite)');
-assert_true(str_contains($arNginx, 'rewrite ^/api/v1(?:/.*)?$ /api/v1/index.php last;') && substr_count($arNginx, 'api\\.php') === 1, 'API: nginx.conf routes /api/v1 (plus the one-release legacy notification rewrite)');
+assert_true(str_contains($arHtaccess, 'RewriteRule ^api/v1(?:/.*)?$ api/v1/index.php [QSA,L]') && !str_contains($arHtaccess, 'api.php'), 'API: .htaccess routes only /api/v1');
+assert_true(str_contains($arNginx, 'rewrite ^/api/v1(?:/.*)?$ /api/v1/index.php last;') && !str_contains($arNginx, 'api.php'), 'API: nginx.conf routes only /api/v1');
 
 // Every caller uses the new routes.
 $arJs = (string)file_get_contents($arRoot . '/themes/default/assets/storefront.js');
@@ -71,7 +71,7 @@ foreach (['src', 'adapters', 'themes', 'blocks', 'forms', 'cli', 'tests/e2e'] as
     foreach ($arIterator as $arFile) {
         if (!preg_match('/\.(?:php|js|html|json)$/', $arFile->getFilename()) || str_contains($arFile->getPathname(), 'node_modules')
             || realpath($arFile->getPathname()) === __FILE__
-            || in_array($arFile->getFilename(), ['AuditInstallSmokeRegression.php', 'AuditRound4ApiSecurityRegression.php'], true)) continue; // exercise the legacy URLs
+            || in_array($arFile->getFilename(), ['AuditInstallSmokeRegression.php', 'AuditRound4ApiSecurityRegression.php'], true)) continue; // assert the legacy URLs are gone
         $arText = (string)file_get_contents($arFile->getPathname());
         // Test stubs call the handlers through their own routers with ?action=; real URLs must not use api.php.
         if (preg_match('#/api\.php\?|["\'`]api\.php["\'`?]#', $arText)) $arUnresolved[] = substr($arFile->getPathname(), strlen($arRoot) + 1);

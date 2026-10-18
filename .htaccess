@@ -71,8 +71,6 @@ RewriteRule ^(?:healthz|readyz)$ health.php [QSA,L]
 
 # The single JSON API: storefront, options, webhooks, CSP reports and the external API (src/ApiRoute.php).
 RewriteRule ^api/v1(?:/.*)?$ api/v1/index.php [QSA,L]
-# Legacy for one release: notification URLs stored before the upgrade (only webhook/CSP actions are routed).
-RewriteRule ^api\.php$ api/v1/index.php [QSA,L]
 
 # ============================================================
 # Static assets — skip rewriting; never expose directory listings

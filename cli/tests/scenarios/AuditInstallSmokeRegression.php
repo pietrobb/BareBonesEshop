@@ -186,17 +186,13 @@ try {
         foreach (['/api.php?action=categories', '/api.php', '/api/categories'] as $a111Path) {
             assert_equals(404, $a111Get($a111Path)['status'], "API: legacy {$a111Path} is gone");
         }
-        // One release: notification URLs stored before the upgrade still reach the handlers; old cached JS too.
-        $a111LegacyMock = $a111Post('/api.php?action=webhook_payment&provider=mock', '{"id":"evt_x"}');
-        assert_equals([400, ['error' => 'Unknown provider: mock']], [$a111LegacyMock['status'], $a111Json($a111LegacyMock)], 'API: legacy payment notification URL reaches the provider gate');
-        $a111LegacyStripe = $a111Post('/api.php?action=webhook_stripe', '{"id":"evt_x"}');
-        assert_equals([503, ['error' => 'Webhook not configured']], [$a111LegacyStripe['status'], $a111Json($a111LegacyStripe)], 'API: legacy Stripe notification URL reaches the Stripe handler');
-        $a111LegacyShipping = $a111Post('/api.php?action=webhook_shipping&carrier=http-carrier', '');
-        assert_equals([400, ['error' => 'Empty payload']], [$a111LegacyShipping['status'], $a111Json($a111LegacyShipping)], 'API: legacy carrier notification URL reaches the carrier handler');
-        $a111LegacyCsp = $a111Post('/api.php?action=csp_report', '{"csp-report":{"violated-directive":"img-src","blocked-uri":"https://evil.example/y.png"}}', 'application/csp-report');
-        assert_equals(202, $a111LegacyCsp['status'], 'API: legacy CSP report URL is accepted');
-        $a111LegacyJs = $a111Get('/api/v1/storefront?action=categories');
-        assert_true($a111LegacyJs['status'] === 200 && !isset($a111Json($a111LegacyJs)['error']), "API: cached old storefront.js (<apiUrl>?action=categories) still works ({$a111LegacyJs['status']})");
+        // One API gateway: the old notification URLs and the ?action= query are not routed either.
+        foreach (['/api.php?action=webhook_payment&provider=mock', '/api.php?action=webhook_stripe', '/api.php?action=csp_report'] as $a111Path) {
+            // Not routed to the API: the generic fallback refuses the POST (405), it never reaches a handler.
+            $a111Legacy = $a111Post($a111Path, '{"id":"evt_x"}');
+            assert_true(in_array($a111Legacy['status'], [404, 405], true) && !is_array($a111Json($a111Legacy)), "API: legacy notification URL {$a111Path} is gone ({$a111Legacy['status']})");
+        }
+        assert_equals(404, $a111Get('/api/v1/storefront?action=categories')['status'], 'API: /api/v1/storefront?action= is not a route');
         $a111Hyphen = $a111Post('/api/v1/webhooks/shipping/http-carrier', '');
         assert_equals([400, ['error' => 'Empty payload']], [$a111Hyphen['status'], $a111Json($a111Hyphen)], 'API: a carrier code with a hyphen reaches the carrier handler');
         assert_equals(403, $a111Get('/c%61che/x.json')['status'], 'php -S router.php: percent-encoded cache/ path is denied');

@@ -1,9 +1,9 @@
 <?php
 /**
- * Review round 4 (API routing after the /api/v1 unification, security): legacy routes for one release,
+ * Review round 4 (API routing after the /api/v1 unification, security): no legacy api.php/?action= routes,
  * hyphenated carrier codes, store-prefixed and subdirectory external API, review form store URL and errors,
  * mail sealing and plain-text parts, rich-text link allow-list, cache deny, coupon throttle.
- * The HTTP side of the legacy routes and the cache deny is covered in AuditInstallSmokeRegression.
+ * The HTTP side (legacy URLs answer 404) and the cache deny is covered in AuditInstallSmokeRegression.
  */
 
 echo "\n--- Round 4: API routing and security ---\n";
@@ -16,38 +16,23 @@ $r4Theme = json_decode((string)file_get_contents($r4Root . '/themes/default/them
 assert_true(version_compare((string)($r4Theme['version'] ?? ''), '2.3.0', '>='), 'Round 4 theme: version bumped with the storefront.js API URL change');
 assert_true(array_filter(Template::assets()['js'], static fn(string $u): bool => str_ends_with($u, 'storefront.js?v=' . rawurlencode((string)$r4Theme['version']))) !== [],
     'Round 4 theme: storefront.js URL carries the theme version');
-// Old cached storefront.js calls <apiUrl>?action=<action>, apiUrl now being /api/v1/storefront.
+// 2. One API gateway only: neither the old ?action= query nor api.php (any action) is routed.
 foreach ([
-    ['/api/v1/storefront?action=cart', ['action' => 'cart', 'get' => []]],
-    ['/api/v1/storefront?action=search_suggest&q=lamp', ['action' => 'search_suggest', 'get' => []]],
-    ['/cs/api/v1/storefront?action=payment_methods&country=CZ', ['action' => 'payment_methods', 'get' => []]],
-    ['/api/v1/storefront?action=webhook_payment&provider=mock', ['action' => '', 'get' => []]],
-    ['/api/v1/storefront?action=bbf_categories', ['action' => '', 'get' => []]],
-    ['/api/v1/storefront?action[]=cart', ['action' => '', 'get' => []]],
-    ['/api/v1/storefront?action=Cart', ['action' => '', 'get' => []]],
-    ['/api/v1/storefront/cart?action=wishlist', ['action' => 'cart', 'get' => []]],
-] as [$r4Uri, $r4Expected]) {
-    assert_equals($r4Expected, ApiRoute::resolve($r4Uri, '', $r4Stores), "Round 4 legacy JS route: {$r4Uri}");
-}
-
-// 2. Notification URLs stored before the upgrade (GoPay/ThePay/PayU per payment, Stripe/Comgate portals).
-foreach ([
-    ['/api.php?action=webhook_payment&provider=gopay', '', ['action' => 'webhook_payment', 'get' => []]],
-    ['/api.php?action=webhook_stripe', '', ['action' => 'webhook_payment', 'get' => ['provider' => 'stripe']]],
-    ['/api.php?action=webhook_shipping&carrier=http-carrier', '', ['action' => 'webhook_shipping', 'get' => []]],
-    ['/api.php?action=csp_report', '', ['action' => 'csp_report', 'get' => []]],
-    ['/shop/api.php?action=webhook_payment&provider=payu', '/shop', ['action' => 'webhook_payment', 'get' => []]],
-    ['/api.php?action=categories', '', ['action' => '', 'get' => []]],
-    ['/api.php?action=cart_add', '', ['action' => '', 'get' => []]],
-    ['/api.php?action=bbf_categories', '', ['action' => '', 'get' => []]],
-    ['/api.php', '', ['action' => '', 'get' => []]],
+    ['/api/v1/storefront?action=cart', '', ['action' => '', 'get' => []]],
+    ['/cs/api/v1/storefront?action=payment_methods&country=CZ', '', ['action' => '', 'get' => []]],
+    ['/api/v1/storefront/cart?action=wishlist', '', ['action' => 'cart', 'get' => []]],
+    ['/api.php?action=webhook_payment&provider=gopay', '', null],
+    ['/api.php?action=webhook_stripe', '', null],
+    ['/api.php?action=csp_report', '', null],
+    ['/shop/api.php?action=webhook_payment&provider=payu', '/shop', null],
+    ['/api.php?action=categories', '', null],
 ] as [$r4Uri, $r4Base, $r4Expected]) {
-    assert_equals($r4Expected, ApiRoute::resolve($r4Uri, $r4Base, $r4Stores), "Round 4 legacy notification route: {$r4Uri}");
+    assert_equals($r4Expected, ApiRoute::resolve($r4Uri, $r4Base, $r4Stores), "Round 4 single API: {$r4Uri} has no legacy route");
 }
 $r4Htaccess = (string)file_get_contents($r4Root . '/.htaccess');
-assert_true(str_contains($r4Htaccess, 'RewriteRule ^api\.php$ api/v1/index.php [QSA,L]'), 'Round 4 legacy: .htaccess (and router.php, which parses it) rewrites api.php to the API');
-assert_true(str_contains((string)file_get_contents($r4Root . '/deploy/nginx.conf'), 'rewrite ^/api\.php$ /api/v1/index.php last;'), 'Round 4 legacy: nginx.conf rewrites api.php to the API');
-assert_true(!is_file($r4Root . '/api.php'), 'Round 4 legacy: no second entrypoint script');
+assert_true(!str_contains($r4Htaccess, 'api\.php'), 'Round 4 single API: .htaccess (and router.php, which parses it) has no api.php rewrite');
+assert_true(!str_contains((string)file_get_contents($r4Root . '/deploy/nginx.conf'), 'api\.php'), 'Round 4 single API: nginx.conf has no api.php rewrite');
+assert_true(!is_file($r4Root . '/api.php'), 'Round 4 single API: no second entrypoint script');
 
 // 3. Carrier codes as apiWebhookShipping accepts them (the default carrier is http-carrier).
 foreach ([['http-carrier', 'http-carrier'], ['dpd_sk', 'dpd_sk'], ['-x', null], ['Bad', null], [str_repeat('a', 41), null], [str_repeat('a', 40), str_repeat('a', 40)]] as [$r4Carrier, $r4Expected]) {

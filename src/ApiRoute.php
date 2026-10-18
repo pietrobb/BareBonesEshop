@@ -7,17 +7,12 @@
  *   /api/v1/webhooks/shipping/<carrier>   carrier tracking notifications
  *   /api/v1/csp-report                    browser CSP violation reports
  * Any other path is the external machine API (API key, ApiV1).
- * Legacy for one release: /api.php with action=<webhook or CSP action> (notification URLs stored before
- * the upgrade) and /api/v1/storefront with action=<action> (storefront.js cached from before the upgrade).
  */
 class ApiRoute {
     public const PREFIX = '/api/v1';
 
     /** Actions that have their own route group and are not reachable as /storefront/<action>. */
     private const NOT_STOREFRONT = ['webhook_payment', 'webhook_shipping', 'csp_report'];
-
-    /** Legacy /api.php actions still routed for one release: notifications only, never the browser API. */
-    private const LEGACY_API_PHP = ['webhook_payment', 'webhook_stripe', 'webhook_shipping', 'csp_report'];
 
     /**
      * The internal handler action and the $_GET values taken from the path, or null for the external API.
@@ -27,21 +22,10 @@ class ApiRoute {
      */
     public static function resolve(string $uri, ?string $baseUrl = null, ?array $stores = null): ?array {
         $path = self::normalize($uri, $baseUrl, $stores)['path'];
-        parse_str((string)(parse_url($uri, PHP_URL_QUERY) ?: ''), $query);
-        $legacyAction = is_string($query['action'] ?? null) ? $query['action'] : '';
-        if ($path === '/api.php') {
-            // Legacy for one release: GoPay/ThePay/PayU store the notification URL per payment.
-            if (!in_array($legacyAction, self::LEGACY_API_PHP, true)) return ['action' => '', 'get' => []];
-            return $legacyAction === 'webhook_stripe'
-                ? ['action' => 'webhook_payment', 'get' => ['provider' => 'stripe']]
-                : ['action' => $legacyAction, 'get' => []];
-        }
         if ($path !== self::PREFIX && !str_starts_with($path, self::PREFIX . '/')) return null;
         $rest = substr($path, strlen(self::PREFIX));
 
         if ($rest === '/csp-report') return ['action' => 'csp_report', 'get' => []];
-        // Legacy for one release: storefront.js cached from before the upgrade calls <apiUrl>?action=<action>.
-        if ($rest === '/storefront' && $legacyAction !== '') $rest .= '/' . $legacyAction;
         if (preg_match('#^/storefront/([a-z0-9_.-]+)$#D', $rest, $m)) {
             $action = $m[1];
             if (in_array($action, self::NOT_STOREFRONT, true) || str_starts_with($action, 'bbf_')) $action = '';
