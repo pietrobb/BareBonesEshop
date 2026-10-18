@@ -40,16 +40,17 @@ assert_equals([true, 1, 500], $a063Shape('p_9633'), 'A06.3 cart: deny line is st
 
 // HTML transport: the theme cart renders the same backorder totals.
 if (!function_exists('renderCart')) require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Storefront/CheckoutPages.php';
-$a063Globals = ['t' => $GLOBALS['t'] ?? null, 'price' => $GLOBALS['price'] ?? null];
+$a063Globals = ['t' => $GLOBALS['t'] ?? null, 'storefront_currency' => $GLOBALS['storefront_currency'] ?? null];
 $GLOBALS['t'] = static fn(string $key): string => $key;
-$GLOBALS['price'] = static fn(int $cents): string => "A063P{$cents}";
+// Cart amounts are formatted in the cart's currency (storefrontCartPrice()).
+$a063Price = static fn(int $cents): string => htmlspecialchars(I18n::price($cents, (string)Cart::enriched()['currency']));
 try {
     $a063Html = renderCart();
 } finally {
     foreach ($a063Globals as $a063Key => $a063Value) $GLOBALS[$a063Key] = $a063Value;
 }
-assert_true(str_contains($a063Html, 'A063P2474') && str_contains($a063Html, 'A063P4222'), 'A06.3 HTML cart: backorder and preorder line totals are rendered');
-assert_true(str_contains($a063Html, 'A063P8996'), 'A06.3 HTML cart: subtotal includes backorder/preorder lines');
+assert_true(str_contains($a063Html, $a063Price(2474)) && str_contains($a063Html, $a063Price(4222)), 'A06.3 HTML cart: backorder and preorder line totals are rendered');
+assert_true(str_contains($a063Html, $a063Price(8996)), 'A06.3 HTML cart: subtotal includes backorder/preorder lines');
 
 // API transport: checkout freezes the shortfall as backordered instead of refusing the order.
 $a063Checkout = static function(array $lines, string $ip, string $email) use ($pdo): array {

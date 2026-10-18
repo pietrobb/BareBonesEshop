@@ -71,7 +71,7 @@ foreach (['src', 'adapters', 'themes', 'blocks', 'forms', 'cli', 'tests/e2e'] as
     foreach ($arIterator as $arFile) {
         if (!preg_match('/\.(?:php|js|html|json)$/', $arFile->getFilename()) || str_contains($arFile->getPathname(), 'node_modules')
             || realpath($arFile->getPathname()) === __FILE__
-            || $arFile->getFilename() === 'AuditInstallSmokeRegression.php') continue; // asserts the legacy URLs answer 404
+            || in_array($arFile->getFilename(), ['AuditInstallSmokeRegression.php', 'AuditRound4ApiSecurityRegression.php'], true)) continue; // assert the legacy URLs are gone
         $arText = (string)file_get_contents($arFile->getPathname());
         // Test stubs call the handlers through their own routers with ?action=; real URLs must not use api.php.
         if (preg_match('#/api\.php\?|["\'`]api\.php["\'`?]#', $arText)) $arUnresolved[] = substr($arFile->getPathname(), strlen($arRoot) + 1);

@@ -198,6 +198,30 @@ class CheckoutService {
     }
 
     /**
+     * Lang key (with a %s for the code) of a coupon refusal reason from Pricing::applyCoupon(). Unknown,
+     * expired, used-up and already used codes look the same (no code-guessing oracle); the minimum order is
+     * only reported for an otherwise valid code.
+     */
+    public static function couponErrorKey(string $error): string {
+        return $error === 'Minimum order not met' ? 'coupon_min_subtotal' : 'coupon_invalid';
+    }
+
+    /** Coupon code guessing: 10 attempts per 10 minutes per client IP and per session, one budget for the coupon API and the checkout form. */
+    public static function couponAttemptAllowed(): bool {
+        $sessionKey = Security::sessionKey();
+        return Security::rateLimit('validate_coupon', 10, 600)
+            && ($sessionKey === '' || Security::rateLimit('validate_coupon_s' . $sessionKey, 10, 600, false));
+    }
+
+    /**
+     * Whether the checkout form may price $code, whichever of its buttons sent it: the code this session last had
+     * accepted ($_SESSION['checkout_coupon']) is free, any other spends a coupon attempt (couponAttemptAllowed()).
+     */
+    public static function formCouponAllowed(string $code): bool {
+        return $code === '' || $code === ($_SESSION['checkout_coupon'] ?? null) || self::couponAttemptAllowed();
+    }
+
+    /**
      * Discount the checkout form shows before the order exists, with the same rules execute() applies:
      * the coupon (i18n key of the refusal reason when it gives nothing) plus automatic promotions.
      * @return array{coupon_discount: int, coupon_error: ?string, promotion_discount: int, free_shipping: bool}
@@ -216,10 +240,7 @@ class CheckoutService {
             $coupon = self::couponFor($couponCode, $subtotal, $promotionDiscount, $email);
             $couponDiscount = max(0, (int)$coupon['discount']);
             $couponStacking = (string)($coupon['stacking'] ?? 'stack');
-            if ($couponDiscount === 0) $couponError = match ((string)($coupon['error'] ?? '')) {
-                'Minimum order not met' => 'coupon_min_subtotal', 'Coupon expired' => 'coupon_used_up',
-                'Coupon already used' => 'coupon_already_used', default => 'coupon_invalid',
-            };
+            if ($couponDiscount === 0) $couponError = self::couponErrorKey((string)($coupon['error'] ?? ''));
         }
         $combined = Pricing::combineDiscounts($couponDiscount, $couponStacking, $promotionDiscount);
         if ($couponDiscount > 0 && $combined['coupon'] === 0) $couponError = 'coupon_not_combinable';

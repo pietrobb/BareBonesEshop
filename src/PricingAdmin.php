@@ -477,12 +477,13 @@ final class PricingAdmin {
         return is_array($decoded) ? $decoded : [];
     }
 
-    /** Guest product and category listings are cached with resolved prices; mark every locale of this store stale. */
+    /** Guest product and category listings are cached with resolved prices; mark every locale stale, in every store sharing the catalog too. */
     private static function invalidatePrices(): void {
         foreach (ProductEditor::locales() as $locale) {
             Cache::invalidatePrefix(Cache::localePath($locale, 'product'));
             Cache::invalidatePrefix(Cache::localePath($locale, 'cat'));
         }
+        Cache::catalogChanged();
     }
 
     /** @throws DomainException */

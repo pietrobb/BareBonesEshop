@@ -21,12 +21,7 @@ class ApiRoute {
      * @return array{action:string,get:array<string,string>}|null
      */
     public static function resolve(string $uri, ?string $baseUrl = null, ?array $stores = null): ?array {
-        $baseUrl ??= Template::baseUrl();
-        $path = '/' . trim((string)(parse_url($uri, PHP_URL_PATH) ?: '/'), '/');
-        if ($baseUrl !== '' && ($path === $baseUrl || str_starts_with($path, $baseUrl . '/'))) {
-            $path = substr($path, strlen($baseUrl)) ?: '/';
-        }
-        $path = self::withoutStorePrefix($path, $stores ?? (array)(Bootstrap::stores()['stores'] ?? []));
+        $path = self::normalize($uri, $baseUrl, $stores)['path'];
         if ($path !== self::PREFIX && !str_starts_with($path, self::PREFIX . '/')) return null;
         $rest = substr($path, strlen(self::PREFIX));
 
@@ -40,7 +35,8 @@ class ApiRoute {
         if (preg_match('#^/webhooks/payment/([a-z0-9_]+)$#D', $rest, $m)) {
             return ['action' => 'webhook_payment', 'get' => ['provider' => $m[1]]];
         }
-        if (preg_match('#^/webhooks/shipping/([a-z0-9_]+)$#D', $rest, $m)) {
+        // Same carrier code shape as apiWebhookShipping accepts (e.g. the default http-carrier).
+        if (preg_match('#^/webhooks/shipping/([a-z0-9][a-z0-9_-]{0,39})$#D', $rest, $m)) {
             return ['action' => 'webhook_shipping', 'get' => ['carrier' => $m[1]]];
         }
         if (preg_match('#^/(?:storefront|options|webhooks)(?:/|$)#', $rest)) return ['action' => '', 'get' => []];
@@ -48,18 +44,36 @@ class ApiRoute {
     }
 
     /**
+     * The request path without the install subdirectory and store prefix (/shop/cs/api/v1/x → /api/v1/x)
+     * and the store whose url_prefix was stripped (null when none was).
+     *
+     * @return array{path:string,store:?string}
+     */
+    public static function normalize(string $uri, ?string $baseUrl = null, ?array $stores = null): array {
+        $baseUrl ??= Template::baseUrl();
+        $path = '/' . trim((string)(parse_url($uri, PHP_URL_PATH) ?: '/'), '/');
+        if ($baseUrl !== '' && ($path === $baseUrl || str_starts_with($path, $baseUrl . '/'))) {
+            $path = substr($path, strlen($baseUrl)) ?: '/';
+        }
+        return self::withoutStorePrefix($path, $stores ?? (array)(Bootstrap::stores()['stores'] ?? []));
+    }
+
+    /**
      * Store-prefixed API path (/cs/api/v1/…) → /api/v1/…: the longest configured url_prefix, as StoreContext
      * resolves the store from the same REQUEST_URI.
+     *
+     * @return array{path:string,store:?string}
      */
-    private static function withoutStorePrefix(string $path, array $stores): string {
-        if ($path === self::PREFIX || str_starts_with($path, self::PREFIX . '/')) return $path;
+    private static function withoutStorePrefix(string $path, array $stores): array {
+        if ($path === self::PREFIX || str_starts_with($path, self::PREFIX . '/')) return ['path' => $path, 'store' => null];
         $best = '';
-        foreach ($stores as $store) {
+        $bestStore = null;
+        foreach ($stores as $storeId => $store) {
             $prefix = rtrim((string)(is_array($store) ? ($store['url_prefix'] ?? '') : ''), '/');
             if ($prefix === '' || !str_starts_with($prefix, '/') || strlen($prefix) <= strlen($best)) continue;
-            if (str_starts_with($path, $prefix . '/')) $best = $prefix;
+            if (str_starts_with($path, $prefix . '/')) [$best, $bestStore] = [$prefix, (string)$storeId];
         }
-        return $best === '' ? $path : substr($path, strlen($best));
+        return $best === '' ? ['path' => $path, 'store' => null] : ['path' => substr($path, strlen($best)), 'store' => $bestStore];
     }
 
     /** Absolute or base-relative URL of a payment webhook: $base is the shop URL without a trailing slash. */

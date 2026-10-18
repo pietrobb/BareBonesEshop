@@ -441,15 +441,24 @@ class Security {
             }
         }
         if ($tag === 'a' && $node->hasAttribute('href')) {
-            $href = html_entity_decode(trim($node->getAttribute('href')), ENT_QUOTES | ENT_HTML5, 'UTF-8');
-            $scheme = parse_url($href, PHP_URL_SCHEME);
-            if ($href === '' || str_starts_with($href, '//') || preg_match('/[\x00-\x1F\x7F]/', $href)
-                || ($scheme !== null && !in_array(strtolower($scheme), ['http', 'https'], true))) {
+            $href = self::richUrl($node->getAttribute('href'));
+            if ($href === null) {
                 $node->removeAttribute('href');
             } else {
                 $node->setAttribute('href', $href);
             }
         }
+    }
+
+    /**
+     * Rich-text link target by prefix allow-list (parse_url finds no scheme in "javascript:80/x"): http(s)://,
+     * mailto:, tel:, /path (not //), #, ? or a relative path without ':' before its first '/', '?' or '#'.
+     * Whitespace and control characters, which browsers drop inside URLs, are removed before the check.
+     */
+    private static function richUrl(string $url): ?string {
+        $url = (string)preg_replace('/[\x00-\x20\x7F]+/', '', html_entity_decode($url, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        if ($url === '' || str_contains($url, '\\')) return null; // browsers read "\" as "/" ("/\host" is protocol-relative)
+        return preg_match('~^(?:https?://|mailto:|tel:|/(?!/)|[#?]|[^:/?#]+(?:[/?#]|$))~i', $url) ? $url : null;
     }
 
     public static function slug(mixed $input): string {

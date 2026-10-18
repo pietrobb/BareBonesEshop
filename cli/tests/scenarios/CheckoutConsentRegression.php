@@ -103,7 +103,11 @@ try {
             [$ccStatus, $ccHtml] = $ccRequest($ccKind, 'html', null, $ccCountry);
             $ccContext = ['country' => $ccCountry, 'product_types' => $ccKind === 'mixed' ? ['downloadable', 'simple'] : [$ccKind === 'digital' ? 'downloadable' : 'simple']];
             ConsentService::setDefinitionsForTesting($ccDefinitions);
+            // Relative consent URLs are store URLs: resolve them as the web front controller does, not cli/test.php.
+            $ccScript = $_SERVER['SCRIPT_NAME'] ?? null;
+            $_SERVER['SCRIPT_NAME'] = '/index.php';
             $ccExpected = ConsentService::definitions($ccContext);
+            if ($ccScript === null) unset($_SERVER['SCRIPT_NAME']); else $_SERVER['SCRIPT_NAME'] = $ccScript;
             $ccDom = $ccXpath($ccHtml);
             $ccBoxes = $ccDom->query('//input[@type="checkbox" and starts-with(@name,"consents[")]');
             assert_equals(array_keys($ccExpected), array_map(static fn(DOMElement $el): string => substr($el->getAttribute('name'), 9, -1), iterator_to_array($ccBoxes)), "Consent {$ccKind}/{$ccCountry}: HTML matches canonical active definitions");

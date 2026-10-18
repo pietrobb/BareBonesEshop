@@ -461,6 +461,22 @@ class Customers {
         return $row ?: null;
     }
 
+    /**
+     * Account address check: field => error message key. Name, street, city and ZIP are required and the
+     * country must be one the shop delivers to (the checkout's country list).
+     * @return array<string,string>
+     */
+    public static function addressErrors(array $address): array {
+        $errors = [];
+        foreach (['name', 'street', 'city', 'zip', 'country'] as $field) {
+            if (trim((string)($address[$field] ?? '')) === '') $errors[$field] = 'account.err_address_required';
+        }
+        if (!isset($errors['country']) && !isset(ShippingService::destinationCountries()[strtoupper((string)$address['country'])])) {
+            $errors['country'] = 'account.err_address_country';
+        }
+        return $errors;
+    }
+
     public static function addAddress(int $customerId, array $data): int {
         $type = in_array(($data['type'] ?? 'shipping'), ['shipping', 'billing'], true)
             ? $data['type'] : 'shipping';
@@ -648,9 +664,25 @@ class Customers {
      * List customers for the admin UI, optionally filtered by a free-text query
      * matching email, name, or numeric id. Newest first.
      */
-    public static function adminList(string $query = '', int $limit = 50): array {
+    public static function adminList(string $query = '', int $limit = 50, int $offset = 0): array {
+        [$where, $params] = self::adminFilter($query);
+        $stmt = Db::get()->prepare("SELECT id, email, name, status, created_at, last_login_at FROM customers WHERE {$where} ORDER BY id DESC LIMIT ? OFFSET ?");
+        $stmt->execute([...$params, $limit, max(0, $offset)]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** Number of customers adminList() pages through for the same query. */
+    public static function adminCount(string $query = ''): int {
+        [$where, $params] = self::adminFilter($query);
+        $stmt = Db::get()->prepare("SELECT COUNT(*) FROM customers WHERE {$where}");
+        $stmt->execute($params);
+        return (int)$stmt->fetchColumn();
+    }
+
+    /** @return array{0:string,1:list<int|string>} */
+    private static function adminFilter(string $query): array {
         $query = trim($query);
-        $sql = "SELECT id, email, name, status, created_at, last_login_at FROM customers WHERE store_id = ?";
+        $sql = "store_id = ?";
         $params = [StoreContext::current()->id()];
         if ($query !== '') {
             $sql .= " AND (LOWER(email) LIKE LOWER(?) ESCAPE '!' OR LOWER(name) LIKE LOWER(?) ESCAPE '!'";
@@ -663,11 +695,7 @@ class Customers {
             }
             $sql .= ')';
         }
-        $sql .= " ORDER BY id DESC LIMIT ?";
-        $params[] = $limit;
-        $stmt = Db::get()->prepare($sql);
-        $stmt->execute($params);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return [$sql, $params];
     }
 
     /**

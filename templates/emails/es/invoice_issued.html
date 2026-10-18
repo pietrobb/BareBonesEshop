@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="es">
+<body style="font-family:Arial,sans-serif;color:#222;max-width:640px;margin:0 auto;">
+<h2>Factura {{invoice_number}}</h2>
+<p>Estimado/a {{customer_name}}:</p>
+<p>adjuntamos la factura <strong>{{invoice_number}}</strong>
+de tu pedido <strong>{{order_number}}</strong>.</p>
+<table cellpadding="6" style="border-collapse:collapse;border:1px solid #ddd;">
+  <tr><td>Fecha de emisión</td><td>{{issued_at}}</td></tr>
+  <tr><td>Fecha de vencimiento</td><td>{{due_date}}</td></tr>
+  <tr><td>Importe a pagar</td><td><strong>{{total_gross_formatted}}</strong></td></tr>
+</table>
+<p>El PDF va adjunto. Acceso en línea:
+<a href="{{invoice_download_url}}">{{invoice_download_url}}</a></p>
+<p>Gracias por tu compra,<br/>{{seller_name}}</p>
+</body></html>

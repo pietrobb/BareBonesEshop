@@ -63,14 +63,18 @@ class Cart {
         if (!VariantAvailability::isPurchasable($productId, $variantId)) {
             return ['ok' => false, 'error' => 'product_unavailable'];
         }
-        self::add($productId, $variantId, max(1, min(self::MAX_QTY, $qty)));
         $key = $variantId === null ? "p_{$productId}" : "v_{$variantId}";
+        $requested = (int)(self::get()[$key]['qty'] ?? 0) + max(1, $qty);
+        self::add($productId, $variantId, max(1, min(self::MAX_QTY, $qty)));
         $summary = self::enriched();
         $item = null;
         foreach ($summary['items'] as $candidate) {
             if ($candidate['key'] === $key) { $item = $candidate; break; }
         }
-        return ['ok' => true, 'error' => null, 'item' => $item, 'count' => (int)$summary['count']];
+        // The line holds at most MAX_QTY and, without backorders, the stock: report what it really holds.
+        $quantity = $item === null ? 0 : (int)$item['qty'];
+        return ['ok' => true, 'error' => null, 'item' => $item, 'count' => (int)$summary['count'],
+            'quantity' => $quantity, 'clamped' => $item !== null && $quantity < $requested];
     }
 
     /**

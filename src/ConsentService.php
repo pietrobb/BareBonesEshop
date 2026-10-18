@@ -18,15 +18,31 @@ class ConsentService {
             if (($definition['active'] ?? true) === false || !self::applies($definition, $context)) continue;
             $url = (string)($definition['url'] ?? '');
             if (preg_match('/[\x00-\x20\x7F\\\\]/', $url) || !(preg_match('#^https?://#i', $url) || (str_starts_with($url, '/') && !str_starts_with($url, '//')))) $url = '';
+            // A relative URL is a page of the shop: it gets the store prefix (/cs/terms) like every storefront link.
+            elseif ($url[0] === '/') $url = Template::storeUrl($url);
             $result[$key] = [
                 'key' => (string)$key,
                 'version' => (string)($definition['version'] ?? '1'),
                 'required' => !empty($definition['required']),
-                'text' => (string)($definition['text'] ?? ''),
+                'text' => self::localizedText($definition['text'] ?? ''),
                 'url' => $url,
             ];
         }
         return $result;
+    }
+
+    /**
+     * Consent text in the shopper's locale: a plain string, or a {locale: text} map falling back to the
+     * store's default locale, then English, then the first entry.
+     */
+    private static function localizedText(mixed $text): string {
+        if (!is_array($text)) return is_scalar($text) ? (string)$text : '';
+        $default = StoreContext::hasCurrent() ? StoreContext::current()->defaultLocale() : I18n::sysDefault();
+        foreach ([I18n::locale(), $default, 'en'] as $locale) {
+            if (is_string($text[$locale] ?? null) && $text[$locale] !== '') return $text[$locale];
+        }
+        $first = reset($text);
+        return is_string($first) ? $first : '';
     }
 
     public static function validate(array $submitted, array $context = []): array {

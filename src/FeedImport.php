@@ -144,6 +144,7 @@ class FeedImport {
         }
 
         $db->commit();
+        if ($result['imported'] > 0) Cache::catalogChanged();
 
         // Update warehouse stock
         if (!empty($stockMap)) {
@@ -200,9 +201,9 @@ class FeedImport {
         return $results;
     }
 
-    /** Run sync() for a feed inside its warehouse's store context (the previous context is restored afterwards). */
-    public static function syncInStore(string $storeId, int $feedId, bool $verbose = false): array {
-        return PaymentWebhookRouting::within($storeId, static fn(): array => self::sync($feedId, $verbose));
+    /** Run sync() for a feed inside a store of its warehouse's catalog (the previous context is restored afterwards). */
+    public static function syncInStore(string $catalog, int $feedId, bool $verbose = false): array {
+        return PaymentWebhookRouting::within(Warehouse::catalogStoreId($catalog), static fn(): array => self::sync($feedId, $verbose));
     }
 
     /** True when the SKU is a product or a variant of a product of the active catalog. */

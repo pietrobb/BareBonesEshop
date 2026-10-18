@@ -65,9 +65,8 @@ foreach (['form=odstupenie-od-zmluvy', 'form=odstupenie-od-zmluvy&action=csrf', 
     assert_true(!$bbfGuardDenies($storefrontQuery), ".htaccess: storefront BBF form stays public via ?{$storefrontQuery}");
 }
 assert_true(str_contains($htaccess, 'RewriteRule ^import/(?!test-products\.csv$)'), '.htaccess: only the documented import example remains public');
-assert_true(str_contains($htaccess, '%{THE_REQUEST}'), '.htaccess: direct cache denial distinguishes original requests');
-assert_true(str_contains($htaccess, '(?:[^?\s]+/)?cache'), '.htaccess: direct cache denial covers subdirectory deployments');
-assert_true(preg_match('/^RewriteRule \^cache[^\r\n]*\s-\s+\[F,L,NC\]$/mi', $htaccess) === 1, '.htaccess: direct cache requests are denied');
+assert_true(!str_contains($htaccess, '%{THE_REQUEST}'), '.htaccess: no deny depends on the raw (percent-encoded) request line');
+assert_true(preg_match('/^RewriteRule \^\(\?:[^)\r\n]*\|cache\|[^\r\n]*\s-\s+\[F,L,NC\]$/mi', $htaccess) === 1, '.htaccess: direct cache requests are denied unconditionally');
 assert_equals(0, substr_count($htaccess, 'RewriteRule ^api\.php$ cache/'), '.htaccess: no API cache rewrite bypasses the store-namespaced PHP cache');
 assert_true(!str_contains($htaccess, 'RewriteCond %{REQUEST_URI} ^/cache/'), '.htaccess: broad direct cache serving condition is absent');
 assert_true(preg_match('/RewriteRule\s+\^\(\.\*\)\$\s+\$1\s+\[L,T=application\/json\]/i', $htaccess) !== 1, '.htaccess: broad direct cache serving rewrite is absent');
@@ -614,6 +613,11 @@ $erpCheckedMigration = require TEST_CLI_DIR . '/../migrations/20261016130000_erp
 $erpCheckedMigration->up($pdo, true);
 $erpCheckedMigration->up($pdo, true);
 assert_true(in_array('erp_status_checked_at', array_column($pdo->query('PRAGMA table_info(orders)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true), 'ERP status poll migration: erp_status_checked_at column exists idempotently');
+$catalogStockMigration = require TEST_CLI_DIR . '/../migrations/20261017093000_catalog_stock_erp_retry.php';
+$catalogStockMigration->up($pdo, true);
+$catalogStockMigration->up($pdo, true);
+assert_true(!array_diff(['erp_attempts', 'erp_next_retry_at'], array_column($pdo->query('PRAGMA table_info(orders)')->fetchAll(PDO::FETCH_ASSOC), 'name'))
+    && (bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='erp_sync_state'")->fetchColumn(), 'ERP retry migration: backoff columns and the watermark table exist idempotently');
 $emailOverrideMigration = require TEST_CLI_DIR . '/../migrations/20261013130000_email_template_overrides.php';
 $emailOverrideMigration->up($pdo, true);
 $emailOverrideMigration->up($pdo, true);

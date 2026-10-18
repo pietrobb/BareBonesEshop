@@ -562,6 +562,20 @@ class ShippingService
     }
 
     /**
+     * Localized delivery time of a rate's delivery_days ("2" → "Delivery in 2 days", "1-2" → "Delivery in 1–2 days").
+     * Empty for an unknown or zero value; free text a carrier sends is shown as it is.
+     */
+    public static function deliveryLabel(mixed $days): string
+    {
+        $days = trim(is_scalar($days) ? (string)$days : '');
+        if (preg_match('/^\d+$/', $days)) return (int)$days > 0 ? I18n::plural('delivery_days', (int)$days) : '';
+        if (preg_match('/^(\d+)\s*[-–]\s*(\d+)$/u', $days, $range) && (int)$range[2] > 0) {
+            return I18n::plural('delivery_days', (int)$range[2], (int)$range[1] . '–' . (int)$range[2]);
+        }
+        return $days;
+    }
+
+    /**
      * Shipping summary for cart/checkout pages: offered rates, the requested
      * (or first) rate, its price, and the free-shipping hint for the cart items.
      */

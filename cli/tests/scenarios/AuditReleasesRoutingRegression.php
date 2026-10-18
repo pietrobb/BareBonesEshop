@@ -66,7 +66,7 @@ foreach (['index.php', 'product.php', 'api/v1/index.php', 'assets/logo.png', 'th
 // serve nothing — or, if "fixed" naively, guest/other-store prices to B2B customers.
 assert_true(str_contains(Cache::path(Cache::localePath('sk', 'categories.json')), '/' . StoreContext::current()->cacheNamespace() . '/sk/'), 'A09.4 cache: PHP cache entries live under the store namespace');
 assert_equals(0, preg_match_all('/^RewriteRule\s+\S+\s+cache\//m', $a094Htaccess), 'A09.4 .htaccess: no dead rewrite serves JSON from cache/ bypassing PHP');
-assert_true(preg_match('/^RewriteRule \^cache[^\n]*\s-\s+\[F,L,NC\]$/m', $a094Htaccess) === 1, 'A09.4 .htaccess: direct cache requests stay denied');
+assert_true(preg_match('/^RewriteRule \^\(\?:[^\n]*\|cache\|[^\n]*\s-\s+\[F,L,NC\]$/m', $a094Htaccess) === 1, 'A09.4 .htaccess: direct cache requests stay denied');
 assert_equals(0, preg_match('/^RewriteRule \^(?:de|en|cs|pl|hu)\//m', $a094Htaccess), 'A09.4 .htaccess: no hardcoded per-store prefix rules (the fallback serves every configured prefix)');
 
 // Every configured store prefix is served through the real .htaccess fallback (redirect.php?path=/...).

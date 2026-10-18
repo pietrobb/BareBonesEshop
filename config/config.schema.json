@@ -72,12 +72,31 @@
     "digital_download_resume_minutes": {"type": "integer", "minimum": 0},
     "uploads_dir": {"type": "string", "minLength": 1, "description": "Product image uploads (LocalStorage adapter) and the uploads part of file backups; served at uploads_url."},
     "uploads_url": {"type": "string"},
-    "checkout_consents": {"type": ["array", "object"]},
+    "checkout_consents": {
+      "type": ["array", "object"],
+      "description": "Checkout consent checkboxes keyed by consent code.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "version": {"type": "string"},
+          "required": {"type": "boolean"},
+          "active": {"type": "boolean"},
+          "text": {
+            "oneOf": [{"type": "string"}, {"type": "object", "additionalProperties": {"type": "string"}}],
+            "description": "Label text: one string for every locale, or a {locale: text} map (e.g. {\"sk\": \"...\", \"en\": \"...\"}); a missing locale falls back to the store default locale, then en."
+          },
+          "url": {"type": "string", "description": "https:// URL, or a shop path such as /?page=terms that is prefixed with the store URL (/cs/?page=terms)."},
+          "countries": {"type": "array", "items": {"type": "string"}},
+          "product_types": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
     "backup_storage_adapter": {"type": "string", "enum": ["LocalBackupStorage", "MountedBackupStorage"]},
     "backup_recovery_dir": {"type": "string", "x-private-path": true},
     "metrics_log_file": {"type": "string", "x-private-path": true},
     "update_storage_dir": {"type": "string", "x-private-path": true},
     "update_public_key": {"type": "string"},
+    "update_snapshots_keep": {"type": "integer", "minimum": 1, "description": "Newest pre-update snapshots (each a full database copy) kept after an update; older ones are deleted."},
     "update_mysql_probe_database": {"oneOf": [{"const": ""}, {"type": "string", "pattern": "_update_probe$"}]},
     "update_mysql_dump_binary": {"type": "string", "minLength": 1, "description": "mysqldump, or mariadb-dump on MariaDB-only hosts"},
     "update_mysql_client_binary": {"type": "string", "minLength": 1, "description": "mysql, or mariadb on MariaDB-only hosts"},

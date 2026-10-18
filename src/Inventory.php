@@ -5,6 +5,12 @@ class Inventory {
     public const BACKORDER = 'backorder';
     public const PREORDER = 'preorder';
 
+    /**
+     * Order-flow movements (checkout reservations and shortfalls, their releases, shipments of reserved goods):
+     * frequent, so they make the catalog caches stale only when they flip availability (in stock <-> out of stock).
+     */
+    private const ORDER_FLOW_MOVEMENTS = ['reserve', 'release', self::BACKORDER, self::PREORDER, 'reserve_legacy_variant', 'shipment'];
+
     public static function movement(
         ?int $warehouseId,
         string $sku,
@@ -37,8 +43,14 @@ class Inventory {
             ':idempotency' => $idempotencyKey,
             ':metadata' => json_encode($metadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
         ]);
-        // Every ledger movement re-checks the SKU's alert level asynchronously (worker job).
+        // Every ledger movement re-checks the SKU's alert level asynchronously (worker job). Cached product pages
+        // and listings show availability: any other movement (admin, import, feed/ERP, receipt, return) makes them
+        // stale, an order-flow one only when it empties or refills its stock row (Warehouse::syncProductStock()
+        // checks the SKU's totals too).
         StockAlerts::touch($sku);
+        $availableAfter = $onHandAfter - $reservedAfter;
+        $availableBefore = $availableAfter - $quantityDelta + $reservedDelta;
+        if (!in_array($type, self::ORDER_FLOW_MOVEMENTS, true) || ($availableBefore > 0) !== ($availableAfter > 0)) Cache::catalogChanged();
         return $stmt->rowCount() === 1;
     }
 
@@ -355,7 +367,7 @@ class Inventory {
         if (!in_array($policy, [self::DENY, self::BACKORDER, self::PREORDER], true)) throw new RuntimeException('Invalid inventory policy');
 
         $countStmt = $db->prepare('SELECT COUNT(*) FROM warehouse_stock WHERE sku = :sku AND store_id = :store');
-        $countStmt->execute([':sku' => $sku, ':store' => StoreContext::current()->id()]);
+        $countStmt->execute([':sku' => $sku, ':store' => StoreContext::current()->catalogId()]);
         if ((int)$countStmt->fetchColumn() > 0 || $variantId === null) {
             $allocations = Warehouse::reserve($sku, $quantity, $policy);
             $reserved = 0;

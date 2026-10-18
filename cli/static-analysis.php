@@ -128,7 +128,9 @@ $architectureBudgets = [
     // +1 coupling: CatalogScope keeps the catalog_scope-bound editor queries (categories, digital assets, attribute links) out of the entrypoint.
     // +1 coupling: ProductEditor validates and saves brand, GTIN/MPN, SEO, extra categories and translations outside the entrypoint.
     // +1 coupling: CsvExport streams the product export and reports a truncated one (log, incident, 500 when possible).
-    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1250, 'functions' => 24, 'max_function_lines' => 210, 'coupling' => 17],
+    // +15 lines: rejected product/CMS saves keep the typed input; product bulk actions report and keep the list filters.
+    // +1 line: product save marks the catalog cache stale (Cache::catalogChanged).
+    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1266, 'functions' => 24, 'max_function_lines' => 210, 'coupling' => 18],
     // +1 coupling: ProductVariants owns variant validation, ledger stock booking and the delete/SKU-change guards.
     // +1 coupling: I18n gives the editor's labels in the admin language (A15.5).
     'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 105, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 4],
@@ -143,7 +145,8 @@ $architectureBudgets = [
     // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
     // +1 coupling: SalesReport gives the sales overview shop-local day boundaries (A15.1).
     // +1 coupling: OrderExport owns the order list filters shared by the sales overview and the CSV export (A15.2).
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 850, 'functions' => 14, 'max_function_lines' => 300, 'coupling' => 20],
+    // +1 function, +21 lines: "Retry refund" re-queues a refund request no payment_refund job ever executed (round 4 final review).
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 901, 'functions' => 15, 'max_function_lines' => 300, 'coupling' => 20],
     'src/Entrypoints/Admin/OrderOperations.php' => ['lines' => 80, 'functions' => 4, 'max_function_lines' => 32, 'coupling' => 7],
     'src/Entrypoints/Admin/PricingRules.php' => ['lines' => 235, 'functions' => 7, 'max_function_lines' => 115, 'coupling' => 5],
     'src/Entrypoints/Admin/Reports.php' => ['lines' => 90, 'functions' => 2, 'max_function_lines' => 74, 'coupling' => 4],
@@ -160,19 +163,26 @@ $architectureBudgets = [
     // +1 coupling: ApiRoute maps the /api/v1 route groups (storefront, options, webhooks, csp-report) to actions.
     'src/Entrypoints/Api.php' => ['lines' => 75, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 6],
     // External key-authenticated API v1 (was api/v1/index.php), loaded by Api.php for non-browser routes.
-    'src/Entrypoints/ApiExternal.php' => ['lines' => 50, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 6],
+    // +5 lines: the path below the install subdirectory / store prefix, and the prefix-vs-key store check.
+    'src/Entrypoints/ApiExternal.php' => ['lines' => 55, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 6],
     // +1 coupling: Search::filtersFromQuery turns the search route's sort/price/category parameters into search options (A14.2).
     'src/Entrypoints/Storefront.php' => ['lines' => 150, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
     // Customer account portal behind the thin /account.php (registration, login, reset, GDPR, addresses, orders).
     // +1 coupling: Str::normalizeEmail is the one e-mail normalisation shared with Customers and Pricing.
-    'src/Entrypoints/Storefront/Account.php' => ['lines' => 450, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 14],
-    'src/Entrypoints/Storefront/CatalogPages.php' => ['lines' => 135, 'functions' => 10, 'max_function_lines' => 60, /* category page: bounded spec/subcat filter parsing */ 'coupling' => 8],
+    // +2 coupling: DigitalDelivery issues the downloads page's links; StoreContext limits the profile languages to the store's.
+    'src/Entrypoints/Storefront/Account.php' => ['lines' => 450, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 16],
+    // +2 lines: round-4 merge (canonical category links + trailing-slash/past-last-page 404).
+    'src/Entrypoints/Storefront/CatalogPages.php' => ['lines' => 137, 'functions' => 10, 'max_function_lines' => 60, /* category page: bounded spec/subcat filter parsing */ 'coupling' => 8],
     // +2 functions: pending-payment page and the gateway cancel page (P0 2026-10-13 checkout redirect).
     // +1 coupling: BankTransferInstructions renders the IBAN / variable symbol / PAY by square block on order-done (A13.6).
     // +1 coupling: I18n::all() gives cart/checkout blocks the catalog their breadcrumb/pagination landmarks are labelled from.
-    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 240, 'functions' => 6, 'max_function_lines' => 100, 'coupling' => 10],
+    // +1 function: storefrontCartPrice() formats cart/checkout amounts in the cart currency (shared-catalog stores).
+    // +1 line / +1 coupling: round-4 merge (cart-currency formatting + translated free/payment labels).
+    // +2 lines (renderCheckout): the form's coupon attempts spend the coupon API's throttle (round 4 final review).
+    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 253, 'functions' => 7, 'max_function_lines' => 102, 'coupling' => 11],
     // Ratcheted: canonical/robots/hreflang/JSON-LD moved to StorefrontSeo (storefront SEO audit).
-    'src/Entrypoints/Storefront/Layout.php' => ['lines' => 140, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 8],
+    // +2 coupling: cart currency decimals for the JS config and the one-shot StorefrontFlash notice.
+    'src/Entrypoints/Storefront/Layout.php' => ['lines' => 140, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 10],
     'src/Entrypoints/Storefront/ProductStatusPages.php' => ['lines' => 20, 'functions' => 1, 'max_function_lines' => 18, 'coupling' => 3],
 ];
 $forbiddenDependencies = [

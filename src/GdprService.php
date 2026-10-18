@@ -912,19 +912,29 @@ class GdprService {
             throw new InvalidArgumentException("policy.scrub_fields not in {$table}: " . implode(', ', $missing));
         }
         $cutoff = self::computeCutoff($p);
-        $marker = '[erased per GDPR retention at ' . gmdate('Y-m-d') . ']';
+        $markerPrefix = '[erased per GDPR retention at ';
+        $marker = $markerPrefix . gmdate('Y-m-d') . ']';
 
-        // Count rows that have at least one PII field non-null AND created before cutoff
-        $countStmt = $db->prepare("SELECT COUNT(*) AS c FROM {$table} WHERE {$field} <= :cutoff");
-        $countStmt->execute([':cutoff' => $cutoff]);
+        // Only rows created before the cutoff that still hold PII in at least one field: a re-run
+        // neither rewrites rows scrubbed earlier (and their marker date) nor counts them again.
+        // Distinct placeholders: native MySQL prepares reject a repeated named parameter.
+        $params = [':cutoff' => $cutoff];
+        $pending = [];
+        $sets = [];
+        foreach (array_values($scrub) as $i => $f) {
+            $pending[] = "({$f} IS NOT NULL AND {$f} NOT LIKE :erased{$i})";
+            $params[":erased{$i}"] = $markerPrefix . '%';
+            $sets[] = "{$f} = :marker{$i}";
+        }
+        $where = "{$field} <= :cutoff AND (" . implode(' OR ', $pending) . ')';
+        $countStmt = $db->prepare("SELECT COUNT(*) AS c FROM {$table} WHERE {$where}");
+        $countStmt->execute($params);
         $affected = (int)$countStmt->fetch()['c'];
 
         if ($mode === 'apply' && $affected > 0) {
-            $sets = [];
-            foreach ($scrub as $f) $sets[] = "{$f} = :marker";
-            $sql = "UPDATE {$table} SET " . implode(', ', $sets) . " WHERE {$field} <= :cutoff";
-            $stmt = $db->prepare($sql);
-            $stmt->execute([':marker' => $marker, ':cutoff' => $cutoff]);
+            foreach (array_keys($sets) as $i) $params[":marker{$i}"] = $marker;
+            $stmt = $db->prepare("UPDATE {$table} SET " . implode(', ', $sets) . " WHERE {$where}");
+            $stmt->execute($params);
             $affected = $stmt->rowCount();
         }
 

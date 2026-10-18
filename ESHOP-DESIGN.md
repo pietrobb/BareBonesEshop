@@ -141,7 +141,7 @@ Return operations are a separate auditable layer on top of the order: several op
                    │ dynamic operations (cart, checkout, search)
                    ▼
 ┌─────────────────────────────────────────────────────────┐
-│  PHP API layer (api.php)                                │
+│  PHP API layer (/api/v1)                                │
 │  - Cache-first: flat file → DB fallback                 │
 │  - CSRF, rate limiting, input sanitization              │
 └──────────────────┬──────────────────────────────────────┘
@@ -333,9 +333,9 @@ When you run `php cli/schema-build.php`:
 - **Concurrency:** flock on `storage/backups/.backup.lock` (10 s timeout), the same API as Migrator.
 - **Idempotency:** sub-second filename collisions → `-1`, `-2`, … suffix counter.
 - **Compression:** OFF by default (`VACUUM INTO` already defragments). Opt in with the `--gz` flag or `compression: true` → `*.db.gz` sidecar.
-- **GC retention:** grandfather-father-son (7 daily / 4 weekly / 6 monthly); `minimum_kept: 3` protects against GC emptying everything during the initial ramp-up.
+- **GC retention:** grandfather-father-son (7 daily / 4 weekly / 6 monthly); `minimum_kept: 3` protects against GC emptying everything during the initial ramp-up. Labelled backups: the newest `retention.pre_migration` (default 5) `pre-migration` backups are kept, `manual` backups are kept unless `retention.manual_max_age_days` (default 0 = forever) is set, `pre-restore-snapshot` backups are pruned by the restore itself. `cli/update.php apply` keeps the newest `update_snapshots_keep` (default 3) `pre-update` snapshots plus the installed release's. Erased (GDPR) personal data stays in these copies until they rotate out.
 - **Migrator pre-hook:** with `auto_pre_migration: true`, `cli/migrate.php` calls `BackupService::create(['label' => 'pre-migration'])` before applying pending migrations. Override: `--skip-backup`. If the hook throws → the migration does not run (table marker NOT inserted).
-- **Manual:** `php cli/backup.php [--gc] [--gz] [--label=<text>] [--quiet]`. Cron friendly. The default label is `scheduled` (subject to GC retention); GC never deletes the labels `manual`, `pre-migration` and `pre-restore-snapshot` — use `--label=manual` only for backups that must be kept forever.
+- **Manual:** `php cli/backup.php [--gc] [--gz] [--label=<text>] [--quiet]`. Cron friendly. The default label is `scheduled` (subject to GC retention); GC keeps `manual` backups (unless `retention.manual_max_age_days` is set) and the newest `pre-migration` backups — use `--label=manual` only for backups that must be kept.
 - **Permissions:** backups contain personal data — `LocalBackupStorage` writes `.db`/`.meta.json` with `0600` and directories with `0700` (independent of umask; on Windows POSIX bits do not apply and the test skips them with an explicit SKIP). The update SQLite snapshot is also `0600`.
 - **GDPR GC:** `php cli/gdpr-gc.php --apply` first initializes `BackupService` and stores a `pre-retention-gc` snapshot; if the snapshot is not possible (backups disabled, MySQL), it refuses with exit 3. After an external backup (e.g. mysqldump) use `--apply --skip-backup`.
 - **Restore:** `php cli/restore.php <remote_path> [--force] [--no-snapshot]`.
@@ -1597,7 +1597,7 @@ Originally this list also included customer accounts, reviews, wishlist, live ca
 barebone-shop/
 ├── index.php                     # Home page / catalog
 ├── product.php                   # Product detail (SSR for SEO)
-├── api.php                       # API router
+├── api/v1/index.php              # The single JSON API (routes: src/ApiRoute.php)
 ├── config.php                    # Configuration (1 file, all credentials)
 ├── page.php                      # CMS page (rendered in the theme's storefront shell)
 ├── themes/default/               # Theme package: theme.json, layouts.json, blocks/, assets/ (storefront.css/.js)
@@ -2091,22 +2091,22 @@ CREATE INDEX idx_oi_order ON order_items(order_id);
 
 ## API endpoints
 
-Everything goes through `api.php`, routed by `$_GET['action']`.
+Everything goes through `/api/v1` (routes in `src/ApiRoute.php`); browser actions are `/api/v1/storefront/<action>`.
 
 | Endpoint | Method | Description | Cache |
 |---|---|---|---|
-| `?action=categories` | GET | Category tree | `cache/categories.json`, TTL 1h |
-| `?action=products&cat={slug}&page={n}&sort={field}&filters={json}` | GET | Paginated listing | `cache/cat/{slug}/page-{n}.json` |
-| `?action=product&slug={slug}` | GET | Product detail + variants | `cache/product/{slug}.json` |
-| `?action=search&q={query}&page={n}` | GET | FTS5 search | Not cached (fast even without) |
-| `?action=filters&cat={slug}` | GET | Available filters for a category | `cache/cat/{slug}/filters.json` |
-| `?action=cart` | GET | Current cart | Session |
-| `?action=cart_add` | POST | Add to cart | — |
-| `?action=cart_update` | POST | Change quantity / remove | — |
+| `/storefront/categories` | GET | Category tree | `cache/categories.json`, TTL 1h |
+| `/storefront/products?cat={slug}&page={n}&sort={field}&filters={json}` | GET | Paginated listing | `cache/cat/{slug}/page-{n}.json` |
+| `/storefront/product?slug={slug}` | GET | Product detail + variants | `cache/product/{slug}.json` |
+| `/storefront/search?q={query}&page={n}` | GET | FTS5 search | Not cached (fast even without) |
+| `/storefront/filters?cat={slug}` | GET | Available filters for a category | `cache/cat/{slug}/filters.json` |
+| `/storefront/cart` | GET | Current cart | Session |
+| `/storefront/cart_add` | POST | Add to cart | — |
+| `/storefront/cart_update` | POST | Change quantity / remove | — |
 
 Checkout goes through BareBonesForms (`forms/checkout.json` → `submit.php`).
 
-The separate machine API `/api/v1` (products, orders with status changes and shipments, categories, customers, inventory) is described in `docs/openapi.yaml`.
+The key-authenticated machine API (every other `/api/v1` path: products, orders with status changes and shipments, categories, customers, inventory) is described in `docs/openapi.yaml`.
 
 ---
 
@@ -2118,7 +2118,7 @@ Level 0: Apache/Nginx (fastest)
   PHP does not run at all. A pure filesystem read.
 
 Level 1: PHP flat-file cache
-  api.php checks the cache file's filemtime()
+  The API handler checks the cache file's filemtime()
   If < TTL → readfile() and exit
   If expired → query SQLite → write the cache → respond
 
@@ -2167,12 +2167,10 @@ class Cache {
 ### .htaccess rules for the Level 0 cache
 
 ```apache
-# If a cache file exists, serve it directly (bypass PHP)
-RewriteCond %{DOCUMENT_ROOT}/cache/cat/%1/page-%2.json -f
-RewriteRule ^api\.php\?action=products&cat=([^&]+)&page=(\d+)$ cache/cat/$1/page-$2.json [L,T=application/json]
+# No web-server cache shortcut any more: cache entries are store-namespaced and read by the API itself.
 
-# API fallback
-RewriteRule ^api/(.*)$ api.php?route=$1 [QSA,L]
+# The single JSON API
+RewriteRule ^api/v1(?:/.*)?$ api/v1/index.php [QSA,L]
 
 # SEO-friendly product URLs
 RewriteRule ^product/([a-z0-9-]+)$ product.php?slug=$1 [QSA,L]
@@ -2462,7 +2460,7 @@ const CartStore = {
 
     // On page load: if the PHP session is empty but localStorage has data → restore
     async restore() {
-        const serverCart = await fetch('api.php?action=cart').then(r => r.json());
+        const serverCart = await fetch('/api/v1/storefront/cart').then(r => r.json());
         if (serverCart.count > 0) {
             this.save(serverCart); // sync server → local
             return serverCart;
@@ -2470,12 +2468,12 @@ const CartStore = {
         const local = this.load();
         if (local && local.items?.length > 0) {
             // The session expired but localStorage has a cart → restore it on the server
-            await fetch('api.php?action=cart_restore', {
+            await fetch('/api/v1/storefront/cart_restore', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
                 body: JSON.stringify(local.items),
             });
-            return await fetch('api.php?action=cart').then(r => r.json());
+            return await fetch('/api/v1/storefront/cart').then(r => r.json());
         }
         return serverCart;
     }
@@ -3104,13 +3102,12 @@ const Shop = {
     // Loading products (cache-through)
     async loadProducts() {
         const params = new URLSearchParams({
-            action: 'products',
             cat: this.state.category,
             page: this.state.page,
             sort: this.state.sort,
             filters: JSON.stringify(this.state.filters),
         });
-        const res = await fetch(`api.php?${params}`);
+        const res = await fetch(`/api/v1/storefront/products?${params}`);
         const data = await res.json();
         this.renderProducts(data.products);
         this.renderPagination(data.total, data.page, data.per_page);
@@ -3613,7 +3610,7 @@ CREATE TABLE processed_events (
 ### Payment webhooks — correct handling
 
 ```php
-// api.php?action=webhook_stripe
+// POST /api/v1/webhooks/payment/stripe
 public static function handleStripeWebhook(): void {
     // 1. Signature verification (Stripe signing secret)
     $payload = file_get_contents('php://input');
@@ -3900,7 +3897,7 @@ Phase 1: Foundation + schema
 
 Phase 2: Storefront (multi-language from the first request)
   [ ] Template.php — engine + the blocks/ directory
-  [ ] api.php — products, categories, search, cart
+  [ ] /api/v1 (src/Entrypoints/Api.php) — products, categories, search, cart
   [ ] themes/default/assets/storefront.js — catalog, filters, cart, locale switcher
   [ ] product.php — SSR detail with JSON-LD (per locale)
   [ ] Cache.php — flat cache per locale, stale-while-revalidate

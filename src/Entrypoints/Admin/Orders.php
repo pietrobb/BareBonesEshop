@@ -181,11 +181,11 @@ function pageOrders(): void {
         <form method="post" action="admin.php?p=orders&amp;action=bulk_status" id="orders-bulk">
         <?= $filterFields ?>
         <div class="sales-toolbar" style="margin-bottom:1rem">
-            <div class="form-row"><label for="bulk-status"><?= esc(I18n::t('admin.orders.bulk_status')) ?></label><select id="bulk-status" name="new_status"><?php foreach (OrderWorkflow::statuses() as $s): ?><option value="<?= esc($s) ?>"><?= esc($s) ?></option><?php endforeach; ?></select></div>
+            <div class="form-row"><label for="bulk-status"><?= esc(I18n::t('admin.orders.bulk_status')) ?></label><select id="bulk-status" name="new_status" required><option value="">— <?= esc(I18n::t('admin.orders.bulk.choose_status')) ?> —</option><?php foreach (OrderWorkflow::statuses() as $s): ?><option value="<?= esc($s) ?>"><?= esc($s) ?></option><?php endforeach; ?></select></div>
             <div class="form-row"><label for="bulk-note"><?= esc(I18n::t('admin.order.note')) ?></label><input id="bulk-note" name="note"></div>
-            <button class="btn btn-primary btn-sm" type="submit"><?= esc(I18n::t('admin.orders.bulk_apply')) ?></button>
-            <button class="btn btn-sm" type="submit" formaction="admin.php?p=delivery_note" formtarget="_blank" name="format" value="html"><?= esc(I18n::t('admin.delivery_note.html')) ?></button>
-            <button class="btn btn-sm" type="submit" formaction="admin.php?p=delivery_note" formtarget="_blank" name="format" value="pdf"><?= esc(I18n::t('admin.delivery_note.pdf')) ?></button>
+            <button class="btn btn-primary btn-sm" type="submit" data-confirm="<?= esc(I18n::t('admin.orders.bulk.confirm')) ?>"><?= esc(I18n::t('admin.orders.bulk_apply')) ?></button>
+            <button class="btn btn-sm" type="submit" formaction="admin.php?p=delivery_note" formtarget="_blank" formnovalidate name="format" value="html"><?= esc(I18n::t('admin.delivery_note.html')) ?></button>
+            <button class="btn btn-sm" type="submit" formaction="admin.php?p=delivery_note" formtarget="_blank" formnovalidate name="format" value="pdf"><?= esc(I18n::t('admin.delivery_note.pdf')) ?></button>
         </div>
         <table>
             <tr><th><span class="sr-only"><?= esc(I18n::t('admin.orders.select')) ?></span></th><th><?= esc(I18n::t('admin.th.number')) ?></th><th><?= esc(I18n::t('admin.th.customer')) ?></th><th><?= esc(I18n::t('admin.th.email')) ?></th><th><?= esc(I18n::t('admin.th.amount')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.order.payment')) ?></th><th><?= esc(I18n::t('admin.th.date')) ?></th><th></th></tr>
@@ -289,6 +289,21 @@ function pageOrder(): void {
             </form>
             <?php else: ?>
             <p class="muted" style="margin-top:.5rem"><?= esc(I18n::t('admin.order.refund_unavailable')) ?></p>
+            <?php endif; ?>
+            <?php if ($canRefund && ($unexecutedRefund = PaymentService::unexecutedRefundRequest($order)) !== null): ?>
+            <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_retry" style="margin-top:.5rem" data-refund-retry>
+                <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                <span class="muted"><?= esc(I18n::format('admin.order.retry_refund_hint', ['amount' => I18n::price($unexecutedRefund['amount'], $order['currency'])])) ?></span>
+                <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.order.retry_refund')) ?></button>
+            </form>
+            <?php endif; ?>
+            <?php if ($canRefund && $refundableBalance > 0 && PaymentService::refundsByHand($order)): ?>
+            <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_manual" style="margin-top:.5rem" data-manual-refund>
+                <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                <input name="amount" type="number" min="1" max="<?= $refundableBalance ?>" step="1" value="<?= $refundableBalance ?>">
+                <input name="note" placeholder="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" required>
+                <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.order.manual_refund')) ?></button>
+            </form>
             <?php endif; ?>
         </div>
     </div>
@@ -625,8 +640,12 @@ function handleOrderStatus(): void {
     }
     if ($newStatus === 'refunded') Security::adminRequire('orders.refund');
     $rejection = OrderWorkflow::adminRejection(Orders::byId($orderId), $newStatus, true);
-    if (in_array($rejection, ['not_found', 'payment_not_confirmed'], true)) {
-        setFlash('err', I18n::t($rejection === 'payment_not_confirmed' ? 'admin.order.msg.confirm_payment_first' : 'admin.order.msg.not_found'));
+    if (in_array($rejection, ['not_found', 'payment_not_confirmed', 'refund_outstanding'], true)) {
+        setFlash('err', I18n::t(match ($rejection) {
+            'payment_not_confirmed' => 'admin.order.msg.confirm_payment_first',
+            'refund_outstanding' => 'admin.order.msg.refund_outstanding',
+            default => 'admin.order.msg.not_found',
+        }));
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }
@@ -720,7 +739,8 @@ function handleOrderRefundRequest(): void {
 
     try {
         $key = 'admin_refund_request_' . $orderId . '_' . bin2hex(random_bytes(12));
-        PaymentService::requestRefund($orderId, $amount, $key, [
+        // The ledger claim, then the payment_refund job that executes it at the provider.
+        PaymentService::requestRefundAndQueue($orderId, $amount, $key, [
             'actor' => Security::adminUser(),
             'amount' => $amount,
             'reason' => $reason,
@@ -728,6 +748,50 @@ function handleOrderRefundRequest(): void {
         setFlash('ok', I18n::t('admin.order.msg.refund_requested'));
     } catch (\Throwable $e) {
         error_log("Refund request error [{$orderId}]: " . $e->getMessage());
+        setFlash('err', I18n::t('admin.order.msg.refund_error'));
+    }
+
+    header("Location: admin.php?p=order&id={$orderId}");
+    exit;
+}
+/** Queue the provider refund of a refund request no payment_refund job ever executed (stuck in refund_pending). */
+function handleOrderRefundRetry(): void {
+    Security::adminRequire('orders.refund');
+    $orderId = Security::int($_GET['id'] ?? 0);
+    try {
+        $queued = PaymentService::retryRefundRequest($orderId, Security::adminUser());
+        setFlash($queued ? 'ok' : 'err', I18n::t($queued ? 'admin.order.msg.refund_retry_queued' : 'admin.order.msg.refund_error'));
+    } catch (\Throwable $e) {
+        error_log("Refund retry error [{$orderId}]: " . $e->getMessage());
+        setFlash('err', I18n::t('admin.order.msg.refund_error'));
+    }
+    header("Location: admin.php?p=order&id={$orderId}");
+    exit;
+}
+/** Money returned by hand (bank transfer back, cash) for a payment no provider refund API returns. */
+function handleOrderManualRefund(): void {
+    Security::adminRequire('orders.refund');
+    $orderId = Security::int($_GET['id'] ?? 0);
+    $order = Orders::byId($orderId);
+    if (!$order) {
+        setFlash('err', I18n::t('admin.order.msg.not_found'));
+        header('Location: admin.php?p=orders');
+        exit;
+    }
+
+    $amount = Security::int($_POST['amount'] ?? 0);
+    $note = trim((string)($_POST['note'] ?? ''));
+    if ($amount <= 0 || $amount > PaymentService::refundableBalance($orderId) || $note === '' || !PaymentService::refundsByHand($order)) {
+        setFlash('err', I18n::t('admin.order.msg.refund_amount'));
+        header("Location: admin.php?p=order&id={$orderId}");
+        exit;
+    }
+
+    try {
+        PaymentService::completeManualRefund($orderId, $amount, Security::adminUser(), $note);
+        setFlash('ok', I18n::t('admin.order.msg.manual_refund_recorded'));
+    } catch (\Throwable $e) {
+        error_log("Manual refund error [{$orderId}]: " . $e->getMessage());
         setFlash('err', I18n::t('admin.order.msg.refund_error'));
     }
 

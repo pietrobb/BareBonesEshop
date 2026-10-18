@@ -195,7 +195,7 @@ GC retention (5y) bypasses trigger via `PRAGMA defer_foreign_keys=ON; DROP TRIGG
 
 Renderer = simple `strtr()` over store legal config (`stores.json.legal` already exists from invoices feature).
 
-Routes (added to `index.php` + `api.php`):
+Routes (added to `index.php` + the `/api/v1` storefront routes):
 - `index.php?p=privacy` / `?p=terms` / `?p=cookies`
 - pretty-URLs: `/sk/ochrana-sukromia`, `/sk/podmienky`, `/sk/cookies` (per locale)
 
@@ -225,7 +225,7 @@ Privacy template renders this list under "Recipients / sub-processors".
 
 ## 9. PII in logs — audit result
 
-`grep -n error_log src/ admin.php api.php` shows **15 sites**. All log only `{$id}` / `$e->getMessage()` / template name. **None log raw email, name, address, phone**. **Already PII-clean.** Doc this as a `lesson` in HMOS so future contributors keep the bar.
+`grep -n error_log src/ admin.php api/` shows **15 sites**. All log only `{$id}` / `$e->getMessage()` / template name. **None log raw email, name, address, phone**. **Already PII-clean.** Doc this as a `lesson` in HMOS so future contributors keep the bar.
 
 Action items:
 - Add a one-line policy comment in `src/Security.php` header: `// PII in logs is forbidden — log IDs + safe metadata only.`
@@ -253,7 +253,7 @@ Granular commits in this order:
 1. **schema** — migration `add_gdpr_tables` (cookie_consent, gdpr_events with triggers) + `data-retention.json` + `processors.json`.
 2. **GdprService skeleton** — `exportCustomer`, `anonymizeCustomer`, `recordEvent`, `consentRecord`, `consentRead`.
 3. **GdprService::applyRetention** — table-by-table GC, `--dry-run` aware, returns counts.
-4. **CLI cli/gdpr-gc.php** — daily cron. `--dry-run` default. Auto pre-run BackupService snapshot when `--apply`; refuses (exit 3) when no SQLite snapshot is possible (backups disabled, MySQL) unless `--skip-backup` confirms an external backup.
+4. **CLI cli/gdpr-gc.php** — daily cron. Erasure and scrubbing do not reach existing backups and update snapshots: the data persists there until backup GC / `update_snapshots_keep` rotates them out (see OPERATIONS_RUNBOOK "Retention"). `--dry-run` default. Auto pre-run BackupService snapshot when `--apply`; refuses (exit 3) when no SQLite snapshot is possible (backups disabled, MySQL) unless `--skip-backup` confirms an external backup.
 5. **CLI cli/gdpr-export.php** — admin-only by email; mirror of customer export for postal SAR. In the web admin the same export is a CSRF-protected POST `admin.php?p=gdpr&action=export` (`gdpr.view`, active store only, audited as `export` with the admin as actor); the admin never links to the CLI script, which is HTTP-denied.
 6. **account.php** — Privacy section: data export button, erasure button, manage cookies link. 32 new `gdpr.*` lang keys × 6 locales.
 7. **admin.php** — GDPR panel: search by email, anonymize button, audit log viewer. RBAC `gdpr.view` + `gdpr.erase`.

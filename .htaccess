@@ -1,7 +1,8 @@
 RewriteEngine On
 
 # Deny private/runtime/source trees before the generic existing-file bypass.
-RewriteRule ^(?:storage|db|jobs|logs|config|cli|src|migrations|adapters|extensions|lang|demo|docs|forms|blocks|data|templates|releases|tests|deploy|node_modules|test-results|playwright-report|parity-report)(?:/|$) - [F,L,NC]
+# cache/ is read only through PHP; matched on the decoded path, so /c%61che/ is denied as well.
+RewriteRule ^(?:storage|db|jobs|logs|config|cli|src|migrations|adapters|extensions|lang|demo|docs|forms|blocks|data|templates|releases|tests|deploy|cache|node_modules|test-results|playwright-report|parity-report)(?:/|$) - [F,L,NC]
 RewriteRule ^themes/[^/]+/(?:theme\.json|blocks(?:/|$)) - [F,L,NC]
 
 # BBF's browser client and handler are public integration points; all other
@@ -25,10 +26,6 @@ RewriteRule ^vendor/(?!bbf/(?:bbf\.(?:css|js)|submit\.php)$) - [F,L,NC]
     Require all denied
 </If>
 RewriteRule ^import/(?!test-products\.csv$) - [F,L,NC]
-
-# Deny direct cache requests (the file cache is read only through PHP).
-RewriteCond %{THE_REQUEST} "\s/+(?:[^?\s]+/)?cache(?:[/\s?]|$)" [NC]
-RewriteRule ^cache(?:/|$) - [F,L,NC]
 
 # Keep ACME validation and security.txt available, deny all other dotfiles.
 RewriteRule ^\.well-known/(?:acme-challenge/[A-Za-z0-9_-]+|security\.txt)$ - [L,NC]

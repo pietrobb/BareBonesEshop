@@ -702,6 +702,7 @@ class Products {
             // Fallback: direct update
             $db->prepare("UPDATE products SET stock = stock + :qty WHERE id = :id AND store_id = :store")
                ->execute([':qty' => $qty, ':id' => $id, ':store' => StoreContext::current()->catalogId()]);
+            Cache::catalogChanged();
         }
     }
 
@@ -730,6 +731,7 @@ class Products {
             if ($stmt->rowCount() > 0) $updated++;
         }
         if ($ownTransaction) $db->commit();
+        if ($updated > 0) Cache::catalogChanged();
         return $updated;
     }
 

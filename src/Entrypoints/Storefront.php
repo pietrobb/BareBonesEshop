@@ -27,18 +27,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['cart_action'])) {
         exit('CSRF token mismatch');
     }
     $result = StorefrontCartAction::execute($_POST);
-    if (!$result['ok']) http_response_code(422);
     if (!empty($_SERVER['HTTP_X_REQUESTED_WITH'])) {
+        if (!$result['ok']) http_response_code(422);
         header('Content-Type: application/json');
         echo json_encode($result);
         exit;
     }
+    // No-JS form post: redirect back (a 422 status would drop the redirect) with a one-shot notice.
+    if (($_POST['cart_action'] ?? '') === 'add') StorefrontCartAction::flash($result);
     $redirect = Security::safeLocalPath($_POST['redirect'] ?? null, Template::storeUrl('/'));
     header('Location: ' . $redirect);
     exit;
 }
 
-if (isset($_GET['cart_recover'])) StorefrontCartAction::recover((string)$_GET['cart_recover']);
+if (isset($_GET['cart_recover'])) StorefrontCartAction::recover(Security::str($_GET['cart_recover']));
 $cartCount = StorefrontCartAction::count();
 
 // Route: support both ?page=X and URL-rewritten ?category=slug
@@ -49,8 +51,6 @@ if (!$page && isset($_GET['cart_unsubscribe'])) $page = 'cart-unsubscribe';
 if (!$page) $page = 'home';
 
 $e = fn(string $s) => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
-$storeCurrency = StoreContext::current()->currency();
-$price = fn(int $cents) => I18n::price($cents, $storeCurrency);
 // ============================================================
 // Route & fetch data
 // ============================================================
@@ -60,6 +60,7 @@ $content = '';
 switch ($page) {
     case 'category':
         $slug = Security::clean($_GET['slug'] ?? $_GET['category'] ?? '');
+        redirectCategoryTrailingSlash($slug);
         $cat = Categories::bySlug($slug);
         if (!$cat) {
             http_response_code(404);
@@ -105,7 +106,7 @@ switch ($page) {
         break;
 
     case 'cart-unsubscribe':
-        $unsubscribed = StorefrontCartAction::unsubscribeReminder((string)($_GET['cart_unsubscribe'] ?? ''));
+        $unsubscribed = StorefrontCartAction::unsubscribeReminder(Security::str($_GET['cart_unsubscribe'] ?? ''));
         $title = Template::pageTitle($t('cart'));
         $content = Template::render('storefront/status-message', ['message' => $t($unsubscribed ? 'cart_reminder_unsubscribed' : 'cart_reminder_unsubscribe_invalid')]);
         break;

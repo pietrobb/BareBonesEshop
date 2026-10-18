@@ -50,6 +50,7 @@ final class ProductBulk {
             if ($db->inTransaction()) $db->rollBack();
             throw $e;
         }
+        if ($result['count'] > 0) Cache::catalogChanged();
         $result['ok'] = true;
         return $result;
     }

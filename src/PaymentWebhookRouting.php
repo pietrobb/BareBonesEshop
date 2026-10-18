@@ -3,8 +3,9 @@
  * Store resolution for verified payment webhooks.
  *
  * The request host/prefix only selects which provider credentials verify the signature.
- * The order itself is then located in every store sharing that provider scope, and the
- * event is processed inside the order's own StoreContext. Unresolvable events are
+ * The order itself is then located in every store sharing that provider scope (every store for
+ * Stripe, verified with the single global stripe_webhook_secret), and the event is processed
+ * inside the order's own StoreContext. Unresolvable events are
  * persisted for bounded provider retry and surfaced as webhook incidents, never dropped.
  */
 final class PaymentWebhookRouting {
@@ -42,7 +43,10 @@ final class PaymentWebhookRouting {
             throw new PaymentWebhookUnresolved($refs, 'Webhook carries no order reference');
         }
 
-        $stores = self::eligibleStoreIds();
+        // checkout's notify_url carries the order's store prefix/domain, so other providers arrive in its scope.
+        $stores = $provider === 'stripe'
+            ? array_values(array_unique([...array_map('strval', array_keys((array)(Bootstrap::stores()['stores'] ?? []))), ...self::eligibleStoreIds()]))
+            : self::eligibleStoreIds();
         $marks = implode(',', array_fill(0, count($stores), '?'));
         $stmt = $db->prepare("SELECT id, store_id FROM orders WHERE {$column} = ? AND store_id IN ({$marks}) LIMIT 2");
         $stmt->execute([$value, ...$stores]);

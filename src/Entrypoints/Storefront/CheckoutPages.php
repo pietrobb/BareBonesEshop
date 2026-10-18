@@ -1,8 +1,8 @@
 <?php
 /** Cart/checkout data presenters and checkout transport. Markup is theme-owned. */
 function renderCart(): string {
-    global $price, $t;
-    $cartData = Cart::enriched();
+    global $t;
+    $price = storefrontCartPrice($cartData = Cart::enriched());
     $cart = $cartData['items'];
     $breadcrumbs = [
         ['url' => Template::storeUrl('/'), 'label' => $t('home'), 'current' => false],
@@ -22,7 +22,7 @@ function renderCart(): string {
     $shipping = $quote['delivery_price'];
     $items = array_map(static fn(array $item): array => [
         'id' => (int)$item['product_id'], 'cart_key' => (string)$item['key'],
-        'url' => Template::storeUrl('/?page=product&slug=' . rawurlencode((string)$item['slug'])),
+        'url' => Template::storeUrl('/product/' . rawurlencode((string)$item['slug'])), // canonical product path
         'name' => (string)$item['name'], 'sku' => (string)$item['sku'], 'price' => $price((int)$item['price']),
         'quantity' => (int)$item['qty'], 'line_total' => $price((int)$item['total']),
         'remove_label' => $t('remove'),
@@ -42,8 +42,8 @@ function renderCart(): string {
 }
 
 function renderCheckout(): string {
-    global $price, $t, $storeCurrency;
-    $cartData = Cart::enriched();
+    global $t;
+    $price = storefrontCartPrice($cartData = Cart::enriched());
     $cart = $cartData['items'];
     $breadcrumbs = [
         ['url' => Template::storeUrl('/'), 'label' => $t('home'), 'current' => false],
@@ -79,7 +79,8 @@ function renderCheckout(): string {
     $checkoutError = $placed['error'];
     if ($checkoutError !== '') {
         // A refusal can drop sold-out lines from the cart: show what is left, or only the reason.
-        $cart = ($cartData = Cart::enriched())['items'];
+        $price = storefrontCartPrice($cartData = Cart::enriched());
+        $cart = $cartData['items'];
         if (!$cart) return Template::render('storefront/checkout-error', ['home_url' => Template::storeUrl('/'), 'home_label' => $t('home'), 'error_label' => $t('checkout_error_title'), 'message' => $checkoutError]);
     }
     $state = CheckoutService::formState($_POST, $posted);
@@ -90,10 +91,12 @@ function renderCheckout(): string {
 
     // Same discount rules as CheckoutService::execute: coupon + automatic promotions, capped at the subtotal.
     $couponCode = $couponAction === 'remove' ? '' : $form('coupon_code');
-    $preview = CheckoutService::discountPreview($couponCode, $subtotal, Security::email($state['values']['email']) ?? null, $cart, $customerId ?: null);
+    $couponThrottled = !CheckoutService::formCouponAllowed($couponCode);
+    $preview = CheckoutService::discountPreview($couponThrottled ? '' : $couponCode, $subtotal, Security::email($state['values']['email']) ?? null, $cart, $customerId ?: null);
     $couponDiscount = $preview['coupon_discount'];
-    $couponError = $preview['coupon_error'] === null ? '' : sprintf($t($preview['coupon_error']), $couponCode);
+    $couponError = $couponThrottled ? $t('coupon_too_many_attempts') : ($preview['coupon_error'] === null ? '' : sprintf($t($preview['coupon_error']), $couponCode));
     if ($couponError !== '') $couponCode = '';
+    elseif ($couponDiscount > 0) $_SESSION['checkout_coupon'] = $couponCode; // accepted: re-pricing it is free
     $discount = min($subtotal, $couponDiscount + $preview['promotion_discount']);
 
     // As at checkout: free shipping thresholds and payment fees see the goods after discounts.
@@ -101,10 +104,10 @@ function renderCheckout(): string {
     $shippingRates = $quote['rates'];
     $selectedRate = $quote['selected'];
     $selectedShipping = (string)($selectedRate['method_code'] ?? '');
-    $payment = CheckoutService::paymentPreview($cart, $subtotal - $discount, $country, $storeCurrency, $selectedShipping, $preview['free_shipping'] ? 0 : $quote['price'], $preview['free_shipping'], $form('payment'), $customerId ?: null);
+    $payment = CheckoutService::paymentPreview($cart, $subtotal - $discount, $country, (string)$cartData['currency'], $selectedShipping, $preview['free_shipping'] ? 0 : $quote['price'], $preview['free_shipping'], $form('payment'), $customerId ?: null);
     [$paymentMethods, $selectedPayment, $shipping] = [$payment['methods'], $payment['selected'], $payment['shipping']];
     $paymentFee = $selectedPayment ? (int)$selectedPayment['fee'] : 0;
-    $freeLabel = $t('free_shipping');
+    [$freeLabel, $freeFeeLabel] = [$t('free_shipping'), $t('free')]; // a free payment fee is not "free shipping"
 
     return Template::render('storefront/checkout', [
         'breadcrumbs' => $breadcrumbs, 'title' => $t('checkout_title'), 'csrf_token' => Security::csrfToken(), 'address_required' => !$quote['digital'],
@@ -112,14 +115,14 @@ function renderCheckout(): string {
         'contact_label' => $t('contact'), 'name_label' => $t('name'), 'email_label' => $t('email'), 'phone_label' => $t('phone'),
         'address_label' => $t('address'), 'street_label' => $t('street'), 'city_label' => $t('city'), 'zip_label' => $t('zip'),
         'shipping_label' => $t('shipping'), 'shipping_options' => array_map(static fn(array $rate): array => [
-            'code' => (string)$rate['method_code'], 'label' => (string)$rate['label'], 'delivery_days' => (string)($rate['delivery_days'] ?? ''),
-            'price' => (int)$rate['price'] === 0 ? $freeLabel : $price((int)$rate['price']),
+            'code' => (string)$rate['method_code'], 'label' => (string)$rate['label'], 'delivery_days' => ShippingService::deliveryLabel($rate['delivery_days'] ?? ''),
+            'price' => (int)$rate['price'] === 0 ? $freeLabel : $price((int)$rate['price']), 'price_cents' => (int)$rate['price'],
             'checked' => (string)$rate['method_code'] === $selectedShipping,
         ], $shippingRates),
         'shipping_unavailable' => $shippingRates ? '' : $t('shipping_unavailable'), 'free_shipping_hint' => $quote['hint'], 'payment_label' => $t('payment'),
         'payment_options' => array_map(static fn(array $method): array => [
             'code' => (string)$method['code'], 'label' => (string)$method['label'], 'description' => (string)($method['description'] ?: $method['provider']),
-            'fee' => (int)$method['fee'] === 0 ? $freeLabel : $price((int)$method['fee']), 'checked' => (string)$method['code'] === (string)($selectedPayment['code'] ?? ''),
+            'fee' => (int)$method['fee'] === 0 ? $freeFeeLabel : $price((int)$method['fee']), 'checked' => (string)$method['code'] === (string)($selectedPayment['code'] ?? ''),
             'online' => !empty($method['requires_online']),
         ], $paymentMethods, array_keys($paymentMethods)),
         'submitting_label' => $t('checkout_submitting'), 'redirecting_label' => $t('checkout_redirecting'),
@@ -127,7 +130,7 @@ function renderCheckout(): string {
         'submit_label' => $t('submit_order'), 'your_order_label' => $t('your_order'),
         'items' => array_map(static fn(array $item): array => ['name' => (string)$item['name'], 'quantity' => (int)$item['qty'], 'total' => $price((int)$item['total'])], $cart),
         'subtotal_cents' => $subtotal, 'subtotal_label' => $t('subtotal'), 'subtotal' => $price($subtotal),
-        'shipping' => $shipping === 0 ? $freeLabel : $price($shipping), 'payment_fee' => $paymentFee === 0 ? $freeLabel : $price($paymentFee),
+        'shipping' => $shipping === 0 ? $freeLabel : $price($shipping), 'payment_fee' => $paymentFee === 0 ? $freeFeeLabel : $price($paymentFee),
         'discount_cents' => $discount, 'discount_label' => $t('discount'), 'discount' => $discount > 0 ? $price(-$discount) : '',
         'total_price_label' => $t('total_price'), 'total' => $price($subtotal - $discount + $shipping + $paymentFee),
         'values' => $state['values'], 'checkout_error' => $checkoutError, 'saved_addresses' => $state['addresses'],
@@ -139,6 +142,16 @@ function renderCheckout(): string {
         'coupon_applied' => $couponDiscount > 0 ? sprintf($t('coupon_applied'), $couponCode, $price($couponDiscount)) : '',
         't' => I18n::all(),
     ] + CheckoutService::pickupView($shippingRates, $selectedRate, $country, $state['values']['zip'], $form('pickup_point')) + CheckoutService::companyLabels());
+}
+
+/**
+ * Formatter for cart amounts: they are in the cart's (product) currency, which in a store sharing another store's
+ * catalog is not the store currency. Also hands that currency to the storefront runtime config (Layout.php).
+ */
+function storefrontCartPrice(array $cartData): Closure {
+    $currency = isset($cartData['currency']) ? (string)$cartData['currency'] : null; // absent for an empty cart
+    if ($currency !== null) $GLOBALS['storefront_currency'] = $currency;
+    return static fn(int $cents): string => I18n::price($cents, $currency);
 }
 
 /**
@@ -202,7 +215,9 @@ function renderOrderDone(string $orderNum): string {
     $transactions = PaymentService::transactionsForOrder((int)$order['id']);
     $lastTransaction = $transactions ? end($transactions) : null;
     $payment = [
-        'status_class' => preg_replace('/[^a-z0-9_-]/i', '', $status), 'status' => $status,
+        'status_class' => preg_replace('/[^a-z0-9_-]/i', '', $status), 'status' => OrderStatusLabels::payment($status),
+        'heading' => $t('payment'), 'status_label' => $t('order_payment.status'),
+        'method_label' => $t('order_payment.method'), 'reference_label' => $t('order_payment.reference'),
         'label' => (string)($snapshot['label'] ?? $snapshot['name'] ?? $order['payment_method'] ?? ''),
         'reference' => $lastTransaction ? (string)($lastTransaction['provider_ref'] ?? '') : '',
     ];

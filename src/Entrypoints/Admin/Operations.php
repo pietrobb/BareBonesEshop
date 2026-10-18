@@ -224,10 +224,15 @@ function handleImportUpload(): void {
             'complete' => (bool)$result['success'],
         ], 'CSV import');
     }
+    $encodingNote = match ($result['encoding'] ?? '') {
+        'windows-1250' => ' ' . I18n::t('admin.import.converted_cp1250'),
+        'invalid' => ' ' . I18n::t('admin.import.invalid_encoding'),
+        default => '',
+    };
     if ($result['success'] && $errCount === 0) {
-        setFlash('ok', strtr(I18n::t('admin.import.done'), ['{count}' => (string)$result['imported']]));
+        setFlash('ok', strtr(I18n::t('admin.import.done'), ['{count}' => (string)$result['imported']]) . $encodingNote);
     } else {
-        setFlash('err', strtr(I18n::t('admin.import.partial'), ['{imported}' => (string)$result['imported'], '{errors}' => (string)$errCount]));
+        setFlash('err', strtr(I18n::t('admin.import.partial'), ['{imported}' => (string)$result['imported'], '{errors}' => (string)$errCount]) . $encodingNote);
     }
 
     header("Location: admin.php?p=import");

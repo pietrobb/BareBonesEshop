@@ -13,6 +13,11 @@ try {
     } else {
         $authorization = (string)($_SERVER['HTTP_AUTHORIZATION'] ?? '');
         $client = ApiAuth::authenticate($authorization);
+        // Install subdirectory and store prefix stripped; a store prefix must name the credential's store.
+        $route = ApiRoute::normalize((string)($_SERVER['REQUEST_URI'] ?? ApiRoute::PREFIX));
+        if ($route['store'] !== null && $route['store'] !== (string)$client['store_id']) {
+            throw new DomainException('API credential store does not match the store URL prefix');
+        }
         Bootstrap::initStoreContext('/', '', (string)$client['store_id'], 'api');
         if (!StoreContext::current()->allows('api')) {
             throw new DomainException('External API is disabled for this store');
@@ -31,7 +36,7 @@ try {
         $headers['Idempotency-Key'] ??= (string)($_SERVER['HTTP_IDEMPOTENCY_KEY'] ?? '');
         $result = ApiV1::dispatch(
             $method,
-            (string)($_SERVER['REQUEST_URI'] ?? '/api/v1'),
+            $route['path'],
             $_GET,
             $requestBody,
             $headers,
@@ -45,4 +50,4 @@ try {
 }
 
 http_response_code($status);
-echo json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+echo json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);

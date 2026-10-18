@@ -23,8 +23,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Only an existing product of this store can be toggled, and only an active one added (same rule as the JSON API).
     $product = $pid > 0 ? Products::byId($pid) : null;
     if (Security::csrfValidate() && $pid > 0) {
-        if ($op !== 'toggle') Wishlist::remove($pid);
-        elseif ($product && (($product['status'] ?? '') === 'active' || Wishlist::has($pid))) Wishlist::toggle($pid);
+        if ($op !== 'toggle') {
+            Wishlist::remove($pid);
+            StorefrontFlash::set(I18n::t('wishlist.removed'));
+        } elseif ($product && (($product['status'] ?? '') === 'active' || Wishlist::has($pid))) {
+            StorefrontFlash::set(I18n::t(Wishlist::toggle($pid) === 'added' ? 'wishlist.added' : 'wishlist.removed'));
+        }
     }
     // return_to is the product URL the theme rendered (store prefix, base path and aliases included):
     // honour it only as a same-site absolute path, otherwise rebuild the product URL server-side.

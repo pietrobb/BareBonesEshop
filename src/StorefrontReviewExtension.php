@@ -11,8 +11,9 @@ final class StorefrontReviewExtension
             // Result of a no-JS form post (api review_submit redirected back here), shown once.
             $flash = is_array($_SESSION['review_flash'] ?? null) ? $_SESSION['review_flash'] : null;
             unset($_SESSION['review_flash']);
+            $errorMessages = ['duplicate_review' => $translations['reviews.duplicate'], 'rate_limited' => $translations['account.rate_limited']];
             $flashMessage = $flash === null ? '' : (!empty($flash['ok']) ? $translations['reviews.success']
-                : (($flash['error'] ?? '') === 'duplicate_review' ? $translations['reviews.duplicate'] : $translations['reviews.error']));
+                : ($errorMessages[(string)($flash['error'] ?? '')] ?? $translations['reviews.error']));
             return [
                 'title' => $translations['reviews'], 'empty_label' => $translations['reviews.none'],
                 'items' => array_map(static fn(array $review): array => [
@@ -22,12 +23,13 @@ final class StorefrontReviewExtension
                 ], Reviews::approved($productId)),
                 'count' => (int)$aggregate['count'],
                 'average' => (int)$aggregate['count'] > 0 ? (float)$aggregate['avg'] : null,
-                'submit_url' => Template::url(ApiRoute::PREFIX . '/storefront/review_submit'),
+                'submit_url' => Template::storeUrl(ApiRoute::PREFIX . '/storefront/review_submit'),
                 'csrf_token' => Security::csrfToken(), 'requires_author' => empty($_SESSION['customer_id']),
                 'form_title' => $translations['reviews.write'], 'rating_label' => $translations['reviews.rating'],
                 'author_label' => $translations['reviews.author'], 'review_title_label' => $translations['reviews.review_title'],
                 'body_label' => $translations['reviews.body'], 'submit_label' => $translations['reviews.submit'],
                 'success_label' => $translations['reviews.success'], 'error_label' => $translations['reviews.error'],
+                'duplicate_label' => $errorMessages['duplicate_review'], 'rate_limited_label' => $errorMessages['rate_limited'],
                 'return_url' => (string)($context['model']['product']['url'] ?? ''), 'flash' => $flashMessage,
             ];
         });

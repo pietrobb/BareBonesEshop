@@ -46,7 +46,7 @@ class Bootstrap {
         $uri = self::storeRouteUri($uri ?? ($_SERVER['REQUEST_URI'] ?? ''));
         $context = self::initStoreContext($uri);
         $lang = I18n::detectLocale($uri);
-        $requested = strtolower((string)($_GET['lang'] ?? ''));
+        $requested = strtolower(Security::str($_GET['lang'] ?? ''));
         $languages = array_map('strtolower', (array)($context->config()['languages'] ?? []));
         if ($requested !== '' && preg_match('/^[a-z]{2}(?:-[a-z]{2})?$/', $requested) && in_array($requested, $languages, true)) {
             $lang = $requested;
@@ -113,6 +113,9 @@ class Bootstrap {
      *   'alternates'     => [locale => url_prefix, ...] (one per store)
      *   'pathNoPrefix'   => request path with the matched store prefix stripped
      *   'xDefaultPrefix' => url_prefix of the default_store (for hreflang=x-default)
+     *   'secondary'      => [locale => url_prefix, ...] the further `languages` of a store, served as
+     *                       <prefix><path>?lang=<locale> (initLocale); a locale that is some store's
+     *                       default_locale is left to that store, so every hreflang code has one URL
      * Pass an explicit $uri to override $_SERVER['REQUEST_URI'] (tests).
      */
     public static function hreflangAlternates(?string $uri = null): array {
@@ -121,6 +124,13 @@ class Bootstrap {
         foreach ($storesCfg['stores'] ?? [] as $store) {
             $locale = $store['default_locale'] ?? 'en';
             $alternates[$locale] = $store['url_prefix'] ?? '';
+        }
+        $secondary = [];
+        foreach ($storesCfg['stores'] ?? [] as $store) {
+            foreach ((array)($store['languages'] ?? []) as $locale) {
+                $locale = strtolower((string)$locale);
+                if (!isset($alternates[$locale]) && !isset($secondary[$locale])) $secondary[$locale] = $store['url_prefix'] ?? '';
+            }
         }
 
         $pathNoPrefix = $uri ?? self::canonicalRequestPath();
@@ -140,6 +150,23 @@ class Bootstrap {
             'alternates'     => $alternates,
             'pathNoPrefix'   => $pathNoPrefix,
             'xDefaultPrefix' => $xDefaultPrefix,
+            'secondary'      => $secondary,
         ];
+    }
+
+    /** Append ?lang=<locale> (or &lang=) to a local URL. */
+    public static function withLang(string $url, string $locale): string {
+        return $url . (str_contains($url, '?') ? '&' : '?') . 'lang=' . rawurlencode($locale);
+    }
+
+    /** The active locale when it is a non-primary language of the current store (selected by ?lang=), else null. */
+    public static function secondaryLocale(): ?string {
+        if (!StoreContext::hasCurrent()) return null;
+        $context = StoreContext::current();
+        $locale = I18n::locale();
+        $languages = array_map('strtolower', (array)($context->config()['languages'] ?? []));
+        // Another store's default language is that store's URL (its hreflang alternate), not ?lang= here.
+        $storeDefaults = array_map('strtolower', array_map('strval', array_keys(self::hreflangAlternates('/')['alternates'])));
+        return $locale !== $context->defaultLocale() && in_array($locale, $languages, true) && !in_array($locale, $storeDefaults, true) ? $locale : null;
     }
 }

@@ -22,6 +22,8 @@ if ($warehouseId <= 0) throw new RuntimeException('Disposable E2E database has n
 // stock is rand(0, 500), so a low draw sold it out mid-run and its quantity box disappeared.
 $oldestProductId = (int)$db->query("SELECT id FROM products WHERE status='active' ORDER BY id LIMIT 1")->fetchColumn();
 $db->prepare('UPDATE products SET stock = 500 WHERE id = ?')->execute([$oldestProductId]);
+// cli/seed.php books its stock on the default warehouse already; the ledger row is what checkout reserves from.
+$db->prepare('UPDATE warehouse_stock SET qty = 500 WHERE warehouse_id = ? AND sku = (SELECT sku FROM products WHERE id = ?)')->execute([$warehouseId, $oldestProductId]);
 $stockInsert = $db->prepare(Db::insertIgnore() . ' INTO warehouse_stock (warehouse_id, sku, qty, reserved) VALUES (?, ?, ?, 0)');
 foreach ($db->query("SELECT sku, stock FROM products WHERE status='active'")->fetchAll(PDO::FETCH_ASSOC) as $product) {
     $stockInsert->execute([$warehouseId, (string)$product['sku'], max(0, (int)$product['stock'])]);

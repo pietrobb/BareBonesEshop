@@ -239,14 +239,9 @@ function processOutbox(array $cfg, bool $verbose = false): void {
 function handleCacheRebuild(array $payload, array $job): void {
     $scope = $payload['scope'] ?? 'partial';
     $cfg = require __DIR__ . '/../config.php';
-    $stores = json_decode(file_get_contents(__DIR__ . '/../stores.json'), true);
-    $locales = [];
-    foreach ($stores['stores'] ?? [] as $store) {
-        foreach ($store['languages'] ?? [] as $lang) {
-            $locales[$lang] = true;
-        }
-    }
-    $locales = array_keys($locales) ?: [$stores['default_locale'] ?? 'en'];
+    // The job runs in the store that queued it (_store_id): its cache namespace, languages and catalog only.
+    $store = StoreContext::current();
+    $locales = array_values(array_unique(array_map('strval', (array)($store->config()['languages'] ?? [])))) ?: [$store->defaultLocale()];
 
     if ($scope === 'full' || !empty($payload['prefix'])) {
         // Full rebuild — categories + all category listings
@@ -268,7 +263,7 @@ function handleCacheRebuild(array $payload, array $job): void {
             Cache::writeJson(Cache::localePath($locale, 'categories.json'), ['categories' => $translatedTree]);
 
             // Category listings (first page of each)
-            $allCats = Db::get()->query("SELECT * FROM categories")->fetchAll();
+            $allCats = CatalogScope::rows('SELECT * FROM categories WHERE store_id = :catalog');
             $perPage = $cfg['per_page'] ?? 24;
 
             foreach ($allCats as $cat) {
@@ -296,7 +291,7 @@ function handleCacheRebuild(array $payload, array $job): void {
         }
 
         // Pre-computed price cache per customer group
-        $allProducts = Db::get()->query("SELECT id, sku, price, category_id FROM products WHERE status = 'active'")->fetchAll();
+        $allProducts = CatalogScope::rows("SELECT id, sku, price, category_id FROM products WHERE store_id = :catalog AND status = 'active'");
         $pricingGroups = array_keys(Pricing::config()['customer_groups'] ?? ['guest' => []]);
         if (!in_array('guest', $pricingGroups, true)) array_unshift($pricingGroups, 'guest');
         foreach ($pricingGroups as $group) {
@@ -382,15 +377,19 @@ function handleEmailSend(array $payload, array $job): void {
             $to = (string)$order['customer_email'];
             // Prefer locale from order row, then payload, then default.
             if ($locale === '') $locale = (string)($order['locale'] ?? '');
+            $currency = $order['currency'] ?? null;
+            // Admin shipments carry the carrier and tracking; the legacy order columns are the fallback.
+            $tracking = Fulfillment::latestTracking((int)$orderId);
             $vars = array_merge($vars, [
                 'order_number'   => $order['order_number'],
-                'order_status'   => $order['status'],
-                'order_total'    => I18n::price((int)$order['total'], $order['currency'] ?? null),
+                'order_status'   => OrderStatusLabels::order((string)$order['status'], $locale),
+                'order_total'    => I18n::price((int)$order['total'], $currency),
                 'customer_name'  => $order['customer_name'],
                 'customer_email' => $order['customer_email'],
                 'payment_method' => $order['payment_method'] ?? '',
-                'carrier'        => $order['carrier'] ?? '',
-                'tracking_number'=> $order['tracking_number'] ?? '',
+                'carrier'        => (string)($tracking['carrier'] ?? '') ?: (string)($order['carrier'] ?? ''),
+                'tracking_number'=> (string)($tracking['tracking_number'] ?? '') ?: (string)($order['tracking_number'] ?? ''),
+                'tracking_url'   => (string)($tracking['tracking_url'] ?? ''),
             ]);
             if ($template === 'order_confirmation') $vars = array_merge($vars, BankTransferInstructions::mailVars($order));
             $items = Orders::items((int)$orderId);
@@ -398,8 +397,8 @@ function handleEmailSend(array $payload, array $job): void {
                 'name'       => $it['name'],
                 'sku'        => $it['sku'],
                 'quantity'   => $it['quantity'],
-                'unit_price' => I18n::price((int)$it['unit_price']),
-                'total'      => I18n::price((int)$it['total']),
+                'unit_price' => I18n::price((int)$it['unit_price'], $currency),
+                'total'      => I18n::price((int)$it['total'], $currency),
             ], $items);
         } else {
             return;
@@ -548,9 +547,6 @@ function handlePaymentRefund(array $payload, array $job): void {
     // A redelivered whole-order job after the provider confirmed the refund only finishes the bookkeeping.
     $alreadyRefunded = $itemRefundId === 0 && $idempotencyKey !== '' && PaymentService::refundSucceeded($idempotencyKey);
 
-    $logDir = __DIR__ . '/../logs';
-    if (!is_dir($logDir)) mkdir($logDir, 0750, true);
-
     $result = $alreadyRefunded ? ['status' => 'succeeded', 'replayed' => true] : ['status' => 'skipped'];
     if (!$alreadyRefunded && $paymentId !== '' && $orderId > 0 && $amount > 0) {
         // Renew the lease before moving money (outside any transaction); aborts if another worker owns the job.
@@ -561,20 +557,21 @@ function handlePaymentRefund(array $payload, array $job): void {
             $result = ['status' => 'error', 'message' => $e->getMessage()];
         }
     }
-    file_put_contents($logDir . '/refunds.log',
-        date('c') . " | ORDER: {$orderId} | AMOUNT: {$amount} | PAYMENT: {$paymentId} | RESULT: " . json_encode($result) . "\n",
-        FILE_APPEND | LOCK_EX
-    );
+    // Structured log in the private runtime directory (redacted), never a file under the web root.
+    Logger::info('refund.attempt', ['order_id' => $orderId, 'amount' => $amount, 'payment_id' => $paymentId, 'result' => $result]);
 
     $status = (string)($result['status'] ?? '');
     if ($status === 'skipped') return;
-    // An asynchronous provider refund is finalised by its refund webhook.
-    if ($status === 'pending' && $itemRefundId === 0) return;
+    $refundId = (string)($result['refund_id'] ?? $result['id'] ?? '');
+    // An asynchronous provider refund is finalised by its refund webhook, which finds an item refund by this id.
+    if ($status === 'pending') {
+        if ($itemRefundId > 0 && $refundId !== '') Rma::noteProviderRefund($itemRefundId, $refundId);
+        return;
+    }
     if ($status !== 'succeeded') {
         throw new RuntimeException("Refund provider call did not succeed for order #{$orderId}");
     }
 
-    $refundId = (string)($result['refund_id'] ?? $result['id'] ?? '');
     if ($refundId !== '') Orders::setRefundId($orderId, $refundId);
     if ($itemRefundId > 0) Rma::completeRefund($itemRefundId, $refundId);
     $order = Orders::byId($orderId);
@@ -610,9 +607,8 @@ function handleErpOrderPush(array $payload, array $job): void {
     $providerCode = (string)($payload['_provider_code'] ?? orderProviderCode($order, 'erp'));
     $adapter = $providerCode !== '' ? Adapters::integration($providerCode) : Adapters::integration();
     if (!$adapter) return;
-    $order['items'] = Orders::items($orderId);
     JobQueue::heartbeat(true); // a fresh lease for the ERP call
-    Orders::markSynced($orderId, $adapter->pushOrder($order));
+    Orders::markSynced($orderId, $adapter->pushOrder(Orders::erpPayload($order)));
 }
 
 function handleErpOrderUpdate(array $payload, array $job): void {
@@ -730,11 +726,7 @@ function handleImportProcess(array $payload, array $job): void {
 
     $result = Import::csv($file);
 
-    $logDir = __DIR__ . '/../logs';
-    if (!is_dir($logDir)) mkdir($logDir, 0750, true);
-    $errCount = count($result['errors'] ?? []);
-    $logEntry = date('c') . " | IMPORT: {$result['imported']} ok, {$errCount} errors | FILE: {$file}\n";
-    file_put_contents($logDir . '/imports.log', $logEntry, FILE_APPEND | LOCK_EX);
+    Logger::info('import.processed', ['imported' => $result['imported'], 'error_count' => count($result['errors'] ?? []), 'file' => basename($file), 'encoding' => $result['encoding'] ?? 'utf-8']);
 
     // Clean up temp file only on success
     if (empty($result['errors'])) {

@@ -74,6 +74,26 @@ nginx PHP fallback when `operations.nginx_config` is set).
   incident `payment.captured_after_cancel` is raised. Cancelling a paid order without `payment_id`
   (bank transfer/COD) raises `payment.order_refund_manual`; a second capture not matching the recorded
   payment raises `payment.duplicate_capture`. A payment can be set to cancelled only on a cancelled order.
+- **Refunds**: an admin "Request refund" now queues the `payment_refund` worker job that executes it
+  at the provider (before, nothing executed it and the payment stayed `refund_pending`). Such an old
+  request at a provider with a refund API gets the audited admin action "Retry refund" (permission
+  `orders.refund`), which queues its job under the same idempotency key a new request would use; it is
+  offered only while nothing was booked after the request and no job ever executed it. Payments no provider refund API returns (bank transfer, COD, manual, no
+  `payment_id`) get the audited admin action "Record manual refund" (permission `orders.refund`),
+  which books the amount and moves the payment to `partially_refunded`/`refunded`. **A paid order can
+  no longer be set to `refunded` while a refundable balance remains** (admin, bulk, API v1 answer
+  `refund_outstanding`): the status restocks, revokes downloads and mails "refund issued" but moves no
+  money; cancel the order or request a refund instead, which closes it when the refund completes.
+  Refund ledger rows are keyed by the provider refund id (Stripe `charge.refunded` reads the
+  charge's refunds, from the Stripe API when the event does not embed them, so the webhook needs the
+  configured `stripe_secret_key`); a refund the webhook booked first is logged by the worker as
+  `refund_confirmed` and counts once. Item (credit-note) refunds a provider accepts asynchronously
+  (PayU `PENDING`, Stripe `pending`) no longer fail the job: the refund webhook completes the credit
+  note by refund id or amount. A GoPay `REFUNDED` / ThePay `refunded` notification completes the
+  shop's refund in flight when it is the whole remaining balance; the ledger row names the request it
+  settled, so the refund worker's own result for that request is only `refund_confirmed`. A failed GoPay/Comgate/ThePay
+  notification raises the critical incident `payment.webhook_failed`. Downloads stay available after
+  a partial refund, except for credited lines. No migration.
 - **CSP alarm thresholds**: `csp_form_action_violation` (critical) fires when blocked form-action
   reports come from `csp_form_action_critical` (default 2) distinct reporters (salted IP hashes), or -
   only while `trusted_proxies` is empty and from at least two separate report requests - when the
@@ -179,6 +199,58 @@ nginx PHP fallback when `operations.nginx_config` is set).
   (e.g. MySQL `net_write_timeout` on a slow download) is logged (`export.truncated`) and raises the
   incident `export.truncated`; when nothing was sent yet the download answers 500, otherwise the file
   is incomplete - check the incidents before importing an export elsewhere.
+- **Backup and update snapshot retention**: `cli/backup.php --gc` (and `auto_gc_on_backup`) now keeps
+  only the newest `retention.pre_migration` (default 5) `pre-migration` backups instead of all of them;
+  `manual` backups are still kept unless `retention.manual_max_age_days` (default 0 = forever) is set.
+  `cli/update.php apply` deletes all but the newest `update_snapshots_keep` (default 3, min 1)
+  `pre-update` snapshots in `update_storage_dir` (each a full database copy/dump); the snapshot of the
+  installed release and `manual-backup` snapshots are never deleted. Raise the values before updating if
+  you rely on older snapshots. **GDPR: erased or retention-scrubbed personal data survives in backups
+  and update snapshots until they rotate out** - the oldest kept backup bounds how long (document it
+  in your privacy policy / records of processing).
+- **Retention `orders_pii`** also scrubs `orders.notes` (customer order notes). Copy the extra field
+  into a customised `config/data-retention.json`. `scrub_pii` now only touches rows that still hold PII
+  (a re-run neither rewrites already scrubbed rows nor counts them), and uses distinct placeholders
+  (the repeated `:marker` failed under native MySQL prepares).
+- **CSV import encoding**: a CSV that is not valid UTF-8 (Excel "CSV" in SK/CZ locales is Windows-1250)
+  is converted from Windows-1250 (needs the `iconv` extension) and the admin flash / `cli/import.php`
+  says so; a file that is neither is rejected with a hint to save it as "CSV UTF-8". Before, such files
+  stored invalid UTF-8 names that blanked HTML and API responses. The JSON API now substitutes invalid
+  UTF-8 (`JSON_INVALID_UTF8_SUBSTITUTE`) instead of answering an empty body; fix rows imported earlier
+  by re-importing them as UTF-8.
+- **API product/category cache**: product saves (admin, bulk actions, CSV/feed import, API v1 PATCH),
+  category tree and pricing edits, and stock movements mark the catalog's cached `product/*.json`,
+  `cat/*` and `categories.json` entries stale (`<cache_dir>/catalogs/<catalog>.changed`, shared by all
+  stores of the catalog), so prices, names, availability and deactivation show up at once instead of
+  after up to an hour. Admin, import, feed/ERP, receipt and return movements always do; checkout
+  reservations, their releases and shipments only when a product or variant goes out of or back into
+  stock, so a busy shop keeps its caches (the exact stock count shown may lag up to the cache TTL).
+- **Worker logs**: refund attempts and processed imports are written to the structured log
+  (`Logger`, redacted, in `<private_runtime_dir>/logs/application.jsonl`, events `refund.attempt`,
+  `import.processed`) instead of `logs/refunds.log` / `logs/imports.log` in the application root.
+  Existing files there can be archived and deleted.
+- **SQLite search**: full-text queries join from the FTS index (`CROSS JOIN`), so a short query such as
+  `?q=a` no longer scans every product (80 s → ~0.1 s at 50k products). `PRAGMA optimize` runs after
+  migrations and CSV imports. MySQL/MariaDB FULLTEXT search is unchanged.
+- **Stores sharing a catalog** (migration `20261017093000_catalog_stock_erp_retry`):
+  - Stock belongs to the catalog: warehouses, warehouse stock, feeds and the admin warehouse pages are
+    bound to the store's `catalog_scope`, so every store sharing a catalog sells from (and its admin
+    edits) the same warehouses. The migration moves warehouses a store created under its own id to its
+    catalog (the catalog's default warehouse stays the default) and refreshes the catalog's stock.
+  - Gateway `success_url`, `cancel_url` and `notify_url` carry the order's store domain and
+    `url_prefix` (e.g. `<app_url>/cs/api/v1/webhooks/payment/<p>`). Stripe events (one dashboard endpoint,
+    the global `stripe_webhook_secret`) now settle orders of every store, also of another `provider_scope`.
+  - `cli/sync.php` syncs every store: products and stock are pulled once into the default store's
+    catalog, then each store pushes its orders (with their items) and pulls their statuses. Cancelled
+    orders that never reached the ERP are not pushed; a failed push is retried after 15 min, doubling
+    up to a day (`orders.erp_attempts`, `erp_next_retry_at`). A run still in progress makes the next
+    cron run exit 0 (`<jobs_dir>/sync.lock`); a lock file it cannot open (missing or read-only
+    `jobs_dir`) is an error on STDERR with exit code 1. The product watermark is the run's start time, kept in the
+    new table `erp_sync_state` instead of the cache (the cached value is read once as a fallback).
+  - `cli/gdpr-export.php` exports a customer of any store in that store; `--store=<id>` narrows the lookup.
+  - Cart and checkout amounts are formatted in the cart's (product) currency; the storefront runtime
+    config adds `currencyDecimals` (from `stores.json` `currencies`), which `storefront.js` uses.
+    `cli/seed.php` books the seeded stock on the default warehouse (`warehouse_stock`).
 
 ### Changed (breaking) — one JSON API under `/api/v1`
 - `api.php` and the `/api/<action>` rewrite are removed. Its actions moved to route groups of the
@@ -194,9 +266,17 @@ nginx PHP fallback when `operations.nginx_config` is set).
 - **Upgrade:** when deploying, change the webhook URL in every payment gateway portal at the same
   time: Stripe (Developers → Webhooks) to `<app_url>/api/v1/webhooks/payment/stripe`, Comgate push URL
   to `<app_url>/api/v1/webhooks/payment/comgate`, and likewise any carrier webhooks. GoPay, ThePay and
-  PayU get the new notification URL with every new payment automatically. Custom themes that call
+  PayU get the new notification URL with every new payment; payments created before the deploy keep
+  calling the old `api.php` URL, which answers 404, so settle or check those payments in the provider
+  portal after the deploy. There are no legacy routes: `api.php` (any action) and
+  `/api/v1/storefront?action=<action>` answer 404. Custom themes that call
   `api.php` must use `window.BareBonesStorefront.apiUrl` + `/<action>`; nginx needs the updated
-  `deploy/nginx.conf` (the `/api/(.*)` rewrite is gone).
+  `deploy/nginx.conf` (the `/api/(.*)` rewrite is gone). The theme version is now 2.3.0, so pages
+  load the new `storefront.js` instead of a cached one.
+- Carrier webhook routes accept the same codes as the handler, including hyphens (the default
+  `http-carrier`): `/api/v1/webhooks/shipping/http-carrier` answered 404.
+- The external API also answers below an install subdirectory and a store prefix (`/shop/api/v1/…`,
+  `/cs/api/v1/…`, were 404). A store prefix must name the API key's store, otherwise 403 `forbidden`.
 
 ### Added
 - **Shipments and tracking in the admin order detail** (A12.8). Migration `20261014090000_shipment_tracking_url`.
@@ -230,7 +310,7 @@ nginx PHP fallback when `operations.nginx_config` is set).
     the gateway to answer. Its request carries `X-BareBones-Synthetic` (`monitoring.synthetic_token`,
     ≥ 32 chars): the order is flagged `orders.is_synthetic`, sends no mail, emits no ERP/webhook events,
     refuses offline payment, and is cancelled with stock released right after the gateway session.
-  - CSP `report-uri` + `report-to` (`Reporting-Endpoints`) → `api.php?action=csp_report` → table
+  - CSP `report-uri` + `report-to` (`Reporting-Endpoints`) → `/api/v1/csp-report` → table
     `csp_violations` (directive, blocked origin, document path; 14 days; rate limited).
   - `OperationalMetrics` / `cli/monitor.php`: payment funnel (`payment_online_started/redirected/paid`)
     with critical `payment_session_failing` / `payment_funnel_stalled`, and CSP metrics with critical
@@ -254,6 +334,50 @@ nginx PHP fallback when `operations.nginx_config` is set).
   custom adapters that only define a public `generateVariants()` method keep working.
 
 ### Fixed
+- **Non-default stores sharing a catalog** (e.g. `/cs/`) were broken end to end: checkout always failed
+  with "stock changed" (stock looked up under the store id, products under the catalog), the cart showed
+  EUR amounts as CZK, gateway return pages said "order not verified" and webhooks parked (URLs of the
+  default store), the worker's full cache rebuild wrote other catalogs' categories and prices into the
+  store's cache, the ERP sync only pushed the default store's orders (without items) and a failing order
+  blocked its batch, and `cli/gdpr-export.php` could not find other stores' customers
+  (`AuditRound4MultistoreRegression`, e2e `multistore-checkout.spec.js`).
+- Refunds could be booked twice when the Stripe `charge.refunded` webhook and the refund worker both
+  saw them (a full refund showed 2000 of 1000), and concurrent `charge.refunded` events could over- or
+  under-book; refunds are now booked once per provider refund id under the order row lock. Credit
+  notes no longer double-count a pending refund already on the ledger (`refundableForCredit`), and
+  PayU refunds answered `FINALIZED` count as succeeded. GoPay/ThePay refunds (no refund id) were booked
+  twice when the `REFUNDED` notification arrived while the worker's refund call was in flight.
+- **Storefront UX review (round 4).**
+  - Add to cart works without JavaScript: product cards, the home product list and the product page
+    render POST forms (`cart_action=add`, quantity, variant, CSRF token, redirect back) to the store URL;
+    JS intercepts the form submit, so behaviour with JS is unchanged. A no-JS add, a wishlist toggle or
+    removal now shows a one-shot notice in a `role="status"` region of the shell (`StorefrontFlash`).
+    A no-JS form post that is refused redirects back with the reason instead of answering 422.
+  - Listing cards of products with variants (`requires_variant`, one batched query) link to the product
+    page ("Choose options") instead of an add-to-cart button that always failed.
+  - Adding more than the stock or more than 99 units reports the quantity the cart really holds
+    (`quantity`, `clamped` in the cart response) instead of a plain "Added".
+  - Checkout refusals are translated (`checkout.error.*` and existing keys) and the JSON API returns
+    `error_code` next to the translated `error`; no Slovak/English strings are hard-coded any more.
+  - Order e-mails format line items in the order currency, show a translated order status
+    (`order_status.*`; `OrderStatusLabels` for reuse) and take carrier, tracking number and tracking
+    link of the latest shipped shipment (admin shipments), so "order shipped" mails carry them.
+  - All e-mail templates exist in Spanish.
+  - The order confirmation page's payment summary is translated, including the payment status
+    (`payment_status.*`); a free payment method shows "Free", not "Free shipping".
+  - Category and search totals use plural forms ("1 produkt", "2 výsledky pre"); product attribute
+    labels are translated; shipping options show "Delivery in 2 days" (nothing for 0/unknown) instead of
+    a bare number (`delivery_label` in the shipping_rates API).
+  - A failed shipping-rate refresh keeps the rendered options and adds an alert instead of replacing them.
+  - Sort selects no longer submit on every arrow key (WCAG 3.2.2): a visible sort button, Enter, or a
+    pointer choice submits; cart quantities submit once after a short pause.
+  - `checkout_consents.*.text` may be a `{locale: text}` map; a relative consent `url` gets the store
+    prefix (`/cs/?page=terms`).
+  - `q[]=x` and other array query values (`cart_recover`, `cart_unsubscribe`, `lang`, `token`, `msg`,
+    the redirect fallback `path`) no longer raise "Array to string conversion".
+  - Managed menu links get the store prefix (a link already entered with it, `/cs/page/x`, keeps a
+    single one instead of `/cs/cs/page/x`); navigation, footer, breadcrumb, pagination and cart links
+    use the canonical `/category/{slug}` and `/product/{slug}` paths.
 - Changing an order to `shipped` after a partial shipment failed with "Shipment exceeds reserved
   allocation"; it now ships only the remainder that is not yet in any shipment.
 - **P0: card payment from the HTML checkout was dead since 1.9.0.** CSP `form-action 'self'`
@@ -283,6 +407,56 @@ nginx PHP fallback when `operations.nginx_config` is set).
   for admin redirects and 404s. Regression test drives the fallback router over real HTTP
   (`php -S`): POST `cart_action=update` with CSRF on `/kosik` → 302 back to the cart with the new
   quantity; POST on an unknown path → 405.
+- Review form: a store with a `url_prefix` posts reviews into its own store (was the default store), and
+  the form shows the duplicate-review and rate-limit messages instead of the generic error.
+- Plain-text e-mail parts derived from HTML keep table cells (tab), rows, paragraphs, list items and
+  line breaks apart and show link targets as `text (URL)` (was e.g. "ProduktKsCena", links without URL).
+- **Security:** a guest checkout name (or any other top-level mail variable) containing
+  `\x00<base64>\x01` was unsealed as raw HTML into transactional e-mails; `{{#each}}` row values are now
+  sealed with a per-render random marker. Checkout strips control characters from name, phone, address
+  and company at input.
+- **Security:** rich-text links (`Security::sanitizeRichHtml`) use a prefix allow-list (`http(s)://`,
+  `mailto:`, `tel:`, `/path`, `#`, `?`, relative paths without a scheme); `javascript:80/…` and similar
+  targets passed because `parse_url` saw no scheme. Whitespace/control characters are removed first.
+- **Security:** `cache/` is denied on the decoded path in `.htaccess` (the `THE_REQUEST` condition
+  was bypassed by `/c%61che/…`); `router.php` no longer evaluates `THE_REQUEST` conditions.
+- **Security:** `validate_coupon` has its own throttle (10 attempts / 10 minutes per client IP and
+  per session, then 429 `Too many attempts`) and answers `Invalid coupon` for unknown, expired, used-up
+  and already-used codes alike; `Minimum order not met` is reported only for an otherwise usable code
+  (pricing.json coupons check usage limits before the minimum order now, as admin coupons did). The
+  HTML checkout's coupon field spends the same budget (each code the session has not had accepted) and,
+  like order placement, refuses with `coupon_invalid` or `coupon_min_subtotal` only; the lang keys
+  `coupon_used_up` and `coupon_already_used` are gone (themes overriding them can drop them), the new
+  `coupon_too_many_attempts` is shown when throttled.
+- **Customer account (UX audit round 4).** Withdrawing cookie consent in the account works: the
+  choice is written as `cc_v1` (the banner's cookie, name, JSON value and path), logged in
+  `cookie_consent` like the banner's API action, a legacy `cookie_consent` cookie is cleared, and the
+  privacy page reads the same cookie as the banner and `MarketingConsent`. New addresses are validated
+  (name, street, city, ZIP required; country from the checkout's delivery countries, now a select)
+  and re-rendered with field errors and the typed values instead of "Saved"; address types are
+  translated. Every account form label is linked to its control, with `autocomplete` hints. Order
+  list/detail show translated statuses (`order_status.*`, `payment_status.*`) and dates in the shop's
+  display timezone and the locale's `format.date`/`format.datetime` (`I18n::dateTime()`). New
+  `?p=downloads` page lists the customer's digital entitlements (expiry, downloads left); its button
+  issues a fresh link (`DigitalDelivery::reissueForCustomer()`: only token hashes are stored, so the
+  e-mailed link stops working, limits and expiry are unchanged); it follows the download rules, so after
+  a partial refund the uncredited lines stay available. Unknown `?p=` values are a real 404.
+  The profile offers only the current store's languages; a too-fast registration (form trap) says
+  "please try again" instead of "too many attempts".
+- **Admin.** Rejected product and CMS page saves keep the typed input (one-shot, `AdminForm::keepInput()`);
+  a rejected new product returns to the prefilled new-product form, not `id=0`. The customers list is
+  paginated (50 per page) and its heading shows the real total. Product bulk actions flash a message
+  when nothing is selected, no action is chosen or the action fails, and return to the filtered list
+  (search, status, stock, page). Order bulk status starts with an empty required choice and asks for
+  confirmation; a post without a status changes nothing.
+- **Storefront SEO.** A category page past the last one (`/category/x?pg=999`) is a 404 with `noindex`
+  instead of an indexable empty page. `/category/x/` 301s to `/category/x` (the clean-URL rewrite
+  captured the slash in the default store). Product JSON-LD maps backorder/preorder stock to
+  `BackOrder`/`PreOrder` instead of `InStock`. A store's further `languages` (selected with `?lang=xx`)
+  get their own canonical (`…?lang=xx`), an hreflang entry and a language-switcher entry when no store
+  has that language as its default (that store stays the language's one hreflang URL). Internal links
+  do not carry `?lang=` yet, so browsing on from such a page returns to the store's default language.
+  Legal pages (`?page=privacy|terms|cookies`) have a canonical and hreflang alternates.
 
 ### Migration
 - `20261008090000_stock_alerts` (idempotent): `products.stock_low_threshold`,

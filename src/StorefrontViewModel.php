@@ -76,6 +76,7 @@ final class StorefrontViewModel
             'variants' => $variants,
             'requires_variant' => $variants !== [],
             'relations' => $relations,
+            'cart_form' => self::cartForm(),
         ];
 
         $jsonLd = [
@@ -89,9 +90,7 @@ final class StorefrontViewModel
                 '@type' => 'Offer',
                 'price' => number_format($product['price']['amount_minor'] / 100, 2, '.', ''),
                 'priceCurrency' => $currency,
-                'availability' => $availability['purchasable']
-                    ? 'https://schema.org/InStock'
-                    : 'https://schema.org/OutOfStock',
+                'availability' => $availability['schema'],
                 'url' => $absoluteUrl,
             ],
         ];
@@ -161,7 +160,10 @@ final class StorefrontViewModel
             else $products[$key] = $row;
         }
         if ($raw !== []) $products = Products::enrichMany($raw) + $products;
-        $purchasable = VariantAvailability::purchasableMany(array_map(static fn(array $product): int => (int)$product['id'], $products));
+        $ids = array_map(static fn(array $product): int => (int)$product['id'], $products);
+        $purchasable = VariantAvailability::purchasableMany($ids);
+        $withVariants = self::productsWithVariants($ids);
+        $cartForm = self::cartForm();
         $cards = [];
         foreach (array_keys($rows) as $key) {
             $product = $products[$key];
@@ -177,9 +179,44 @@ final class StorefrontViewModel
                 'price' => self::price($product),
                 'availability' => self::availability($product, null, $purchasable[(int)$product['id']] ?? false),
                 'image' => $images[0] ?? null,
+                // A product with variants is bought on its page (Cart::addValidated refuses it without one).
+                'requires_variant' => isset($withVariants[(int)$product['id']]),
+                'cart_form' => $cartForm,
             ];
         }
         return $cards;
+    }
+
+    /**
+     * Target of the theme's add-to-cart forms: the storefront cart POST (index.php, store prefix included)
+     * that works without JavaScript and redirects back to the page the form is on.
+     * @return array{action: string, csrf_token: string, redirect: string}
+     */
+    public static function cartForm(): array
+    {
+        $home = Template::storeUrl('/');
+        return [
+            'action' => $home,
+            'csrf_token' => Security::csrfToken(),
+            'redirect' => Security::safeLocalPath($_SERVER['REQUEST_URI'] ?? '', $home),
+        ];
+    }
+
+    /**
+     * Ids (as keys) of the given products that have variants, in one query per 500 ids.
+     * @param array<int> $productIds
+     * @return array<int, true>
+     */
+    private static function productsWithVariants(array $productIds): array
+    {
+        $ids = array_values(array_unique(array_filter($productIds, static fn(int $id): bool => $id > 0)));
+        $result = [];
+        foreach (array_chunk($ids, 500) as $chunk) {
+            $stmt = Db::get()->prepare('SELECT DISTINCT product_id FROM variants WHERE product_id IN (' . implode(',', array_fill(0, count($chunk), '?')) . ')');
+            $stmt->execute($chunk);
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) $result[(int)$id] = true;
+        }
+        return $result;
     }
 
     public static function home(): array
@@ -276,12 +313,16 @@ final class StorefrontViewModel
         $quantity = max(0, (int)($product['stock'] ?? 0));
         $purchasable ??= VariantAvailability::isPurchasable((int)$product['id'], $variantId);
         $inStock = $digital || $quantity > 0;
+        // Purchasable without stock means the inventory policy sells ahead of it (backorder or preorder).
+        $schema = !$purchasable ? 'OutOfStock'
+            : ($inStock ? 'InStock' : (($product['inventory_policy'] ?? '') === Inventory::PREORDER ? 'PreOrder' : 'BackOrder'));
         return [
             'purchasable' => $purchasable,
             'tracks_stock' => !$digital,
             'in_stock' => $inStock,
             'quantity' => $quantity,
             'label' => $purchasable && $inStock ? I18n::t('in_stock') : ($purchasable ? I18n::t('available') : I18n::t('out_of_stock')),
+            'schema' => 'https://schema.org/' . $schema,
         ];
     }
 
@@ -289,6 +330,7 @@ final class StorefrontViewModel
     {
         $variantProduct = $product;
         $variantProduct['stock'] = (int)($variant['stock'] ?? 0);
+        if (($variant['inventory_policy'] ?? 'inherit') !== 'inherit') $variantProduct['inventory_policy'] = $variant['inventory_policy'];
         $delta = (int)($variant['price_delta'] ?? 0);
         $amount = $variant['price_absolute'] !== null
             ? (int)$variant['price_absolute']
@@ -348,7 +390,7 @@ final class StorefrontViewModel
             $seen[$key] = true;
             $result[] = [
                 'code' => self::slug(Str::normalizeToken($label), 'attribute'),
-                'label' => $label,
+                'label' => I18n::attrLabel($label),
                 'value' => I18n::attr($label, $value),
                 'numeric_value' => $row['numeric_val'] === null ? null : (float)$row['numeric_val'],
                 'group' => null,
@@ -435,6 +477,12 @@ final class StorefrontViewModel
     public static function productUrl(string $slug): string
     {
         return Template::storeUrl('/product/' . rawurlencode($slug));
+    }
+
+    /** Canonical category listing URL (the /category/{slug} route StorefrontSeo::categoryPath() declares). */
+    public static function categoryUrl(string $slug): string
+    {
+        return Template::storeUrl('/category/' . rawurlencode($slug));
     }
 
     /** Storefront URL of a stored product image reference (HTTPS URL, local path, or uploads file). */

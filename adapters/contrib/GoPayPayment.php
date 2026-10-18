@@ -11,8 +11,10 @@
  *
  * Refunds started from the shop go through the refund worker. GoPay's refund call has no
  * idempotency key, so this adapter does not offer IdempotentRefundAdapter (credit-note refunds
- * that require one fail closed). REFUNDED / PARTIALLY_REFUNDED notifications are logged but
- * move no money in the shop: the refund history carries no refund id to deduplicate against.
+ * that require one fail closed). The refund history carries no refund id to
+ * deduplicate against, so a REFUNDED notification only completes the shop's own refund in
+ * flight when that refund is the whole remaining balance; PARTIALLY_REFUNDED (no refunded
+ * amount) and any other refund report are logged and move no money in the shop.
  *
  * Config (env var wins over config.php):
  *   PAY_GOPAY_GOID           / gopay_goid           — merchant GoID (payment target)

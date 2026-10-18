@@ -233,9 +233,10 @@ final class CatalogTaxonomy {
         return array_map('intval', array_column(CatalogScope::rows("SELECT id FROM categories WHERE store_id = :catalog AND path IN ({$placeholders})", $params), 'id'));
     }
 
-    /** The storefront serves categories.json for an hour; mark every locale's tree of this store stale. */
+    /** The storefront serves categories.json for an hour; mark every locale's tree stale, in every store sharing the catalog too. */
     private static function invalidateTree(): void {
         foreach (ProductEditor::locales() as $locale) Cache::invalidate(Cache::localePath($locale, 'categories.json'));
+        Cache::catalogChanged();
     }
 
     private static function recount(array $ids): void {

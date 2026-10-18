@@ -610,8 +610,8 @@ assert_true(!str_contains($unownedConfirmationHtml, 'payment-summary'), 'Payment
 $confirmationToken = CheckoutSession::createConfirmation($confirmationOrderId, CheckoutSession::browserSessionId());
 $_GET['confirmation_token'] = $confirmationToken;
 $confirmationHtml = renderOrderDone((string)$confirmationOrder['order_number']);
-assert_true(str_contains($confirmationHtml, 'Payment'), 'Payment UX: confirmation renders payment summary');
-assert_true(str_contains($confirmationHtml, 'pending'), 'Payment UX: confirmation renders payment status');
+assert_true(str_contains($confirmationHtml, '<strong>' . I18n::t('payment') . '</strong>'), 'Payment UX: confirmation renders payment summary');
+assert_true(str_contains($confirmationHtml, 'badge-pending">' . I18n::t('payment_status.pending') . '<'), 'Payment UX: confirmation renders payment status');
 assert_true(str_contains($confirmationHtml, 'Card'), 'Payment UX: confirmation renders payment method label');
 assert_true(str_contains($confirmationHtml, 'mock_' . $confirmationOrder['order_number']), 'Payment UX: confirmation renders provider reference');
 

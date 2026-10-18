@@ -268,6 +268,21 @@ class Fulfillment {
         return (int)$stmt->fetchColumn();
     }
 
+    /**
+     * Carrier, tracking number and tracking URL of the order's most recently shipped shipment, preferring one
+     * that has tracking details (order e-mails).
+     * By order id alone: the worker sends mail outside any store context.
+     * @return array{carrier: ?string, tracking_number: ?string, tracking_url: ?string}|null
+     */
+    public static function latestTracking(int $orderId): ?array {
+        $stmt = Db::get()->prepare("SELECT carrier, tracking_number, tracking_url FROM shipments
+            WHERE order_id = :order AND status = 'shipped'
+            ORDER BY CASE WHEN tracking_number IS NULL AND carrier IS NULL THEN 1 ELSE 0 END, shipped_at DESC, id DESC LIMIT 1");
+        $stmt->execute([':order' => $orderId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ?: null;
+    }
+
     public static function shipments(int $orderId): array {
         $stmt = Db::get()->prepare('SELECT * FROM shipments WHERE order_id = :order AND store_id = :store ORDER BY id');
         $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);

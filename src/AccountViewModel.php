@@ -2,6 +2,9 @@
 /** Structured customer-account data for theme-owned rendering. */
 final class AccountViewModel
 {
+    /** Pages account.php renders; any other ?p= is a 404. */
+    public const PAGES = ['login', 'register', 'forgot', 'reset', 'dashboard', 'orders', 'order', 'returns', 'downloads', 'addresses', 'profile', 'privacy', 'change-password'];
+
     public static function build(
         string $page,
         ?array $customer,
@@ -9,11 +12,11 @@ final class AccountViewModel
         array $fieldValues,
         ?string $flash,
         ?string $flashType,
-        ?array $order = null
+        ?array $order = null,
+        array $fieldErrors = []
     ): array {
         $loggedIn = $customer !== null;
-        $knownPages = ['login', 'register', 'forgot', 'reset', 'dashboard', 'orders', 'order', 'returns', 'addresses', 'profile', 'privacy', 'change-password'];
-        if (!in_array($page, $knownPages, true)) $page = 'unknown';
+        if (!in_array($page, self::PAGES, true)) $page = 'unknown';
         $model = [
             'page' => $page,
             'is_' . str_replace('-', '_', $page) => true,
@@ -45,27 +48,19 @@ final class AccountViewModel
             $model['order'] = self::orderDetail((int)$customer['id'], $order);
         } elseif ($page === 'returns' && $customer) {
             $model += self::returns((int)$customer['id']);
+        } elseif ($page === 'downloads' && $customer) {
+            $model['downloads'] = self::downloads((int)$customer['id']);
         } elseif ($page === 'addresses' && $customer) {
-            $model['addresses'] = Customers::addresses((int)$customer['id']);
-            $model['address_saved'] = !empty($_GET['ok']);
-            $model['address_fields'] = [
-                ['name' => 'name', 'label' => I18n::t('account.addr_name')],
-                ['name' => 'company', 'label' => I18n::t('account.addr_company')],
-                ['name' => 'vat_id', 'label' => I18n::t('account.addr_vat')],
-                ['name' => 'street', 'label' => I18n::t('account.addr_street')],
-                ['name' => 'city', 'label' => I18n::t('account.addr_city')],
-                ['name' => 'zip', 'label' => I18n::t('account.addr_zip')],
-                ['name' => 'country', 'label' => I18n::t('account.addr_country')],
-                ['name' => 'phone', 'label' => I18n::t('account.addr_phone')],
-            ];
+            $model += self::addresses((int)$customer['id'], $fieldValues, $fieldErrors);
         } elseif ($page === 'profile' && $customer) {
             $model['profile'] = $customer;
             $model['locales'] = array_map(static fn(string $locale): array => [
                 'code' => $locale, 'selected' => $locale === (string)$customer['locale'],
             ], $supportedLocales);
         } elseif ($page === 'privacy') {
-            $consent = isset($_COOKIE['cookie_consent']) ? json_decode((string)$_COOKIE['cookie_consent'], true) : [];
-            $model['consent'] = ['analytics' => !empty($consent['analytics']), 'marketing' => !empty($consent['marketing'])];
+            // The same cookie (cc_v1, legacy cookie_consent as fallback) the banner and the marketing hooks honour.
+            $consent = MarketingConsent::categories($_COOKIE);
+            $model['consent'] = ['analytics' => $consent['analytics'], 'marketing' => $consent['marketing']];
         }
         return ['account' => $model, 't' => I18n::all()];
     }
@@ -74,7 +69,7 @@ final class AccountViewModel
     {
         $pages = [
             'dashboard' => 'account.dashboard', 'orders' => 'account.orders', 'returns' => 'account.returns',
-            'addresses' => 'account.addresses', 'profile' => 'account.profile',
+            'downloads' => 'account.downloads', 'addresses' => 'account.addresses', 'profile' => 'account.profile',
             'change-password' => 'account.change_password', 'privacy' => 'account.privacy',
         ];
         $items = [];
@@ -106,15 +101,17 @@ final class AccountViewModel
                 'number' => (string)$order['order_number'],
                 'url' => Template::storeUrl('/account.php?p=order&id=' . (int)$order['id']),
                 'status' => (string)$order['status'],
+                'status_label' => OrderStatusLabels::order((string)$order['status']),
                 'payment_status' => (string)($order['payment_status'] ?? 'pending'),
+                'payment_status_label' => OrderStatusLabels::payment((string)($order['payment_status'] ?? 'pending')),
                 'payment_label' => (string)($snapshot['label'] ?? $snapshot['name'] ?? $order['payment_method'] ?? ''),
                 'transactions' => array_map(static fn(array $transaction): array => [
-                    'date' => substr((string)$transaction['created_at'], 0, 16),
-                    'status' => (string)$transaction['status'],
+                    'date' => I18n::dateTime((string)$transaction['created_at']),
+                    'status' => OrderStatusLabels::payment((string)$transaction['status']),
                     'reference' => (string)($transaction['provider_ref'] ?? ''),
                 ], PaymentService::transactionsForOrder((int)$order['id'])),
                 'total' => I18n::price((int)$order['total'], (string)$order['currency']),
-                'date' => substr((string)$order['created_at'], 0, 16),
+                'date' => I18n::dateTime((string)$order['created_at']),
                 'invoice' => $invoice ? [
                     'number' => (string)$invoice['number'],
                     'url' => Template::storeUrl('/account.php?p=invoice&token=' . rawurlencode((string)$invoice['download_token'])),
@@ -144,9 +141,11 @@ final class AccountViewModel
         return [
             'id' => $id,
             'number' => (string)$order['order_number'],
-            'date' => substr((string)$order['created_at'], 0, 16),
+            'date' => I18n::dateTime((string)$order['created_at']),
             'status' => (string)$order['status'],
+            'status_label' => OrderStatusLabels::order((string)$order['status']),
             'payment_status' => (string)($order['payment_status'] ?? 'pending'),
+            'payment_status_label' => OrderStatusLabels::payment((string)($order['payment_status'] ?? 'pending')),
             'payment_label' => (string)($payment['label'] ?? $payment['name'] ?? $order['payment_method'] ?? ''),
             'shipping_label' => (string)($shipping['name'] ?? $shipping['label'] ?? $order['shipping_method'] ?? ''),
             'tracking' => trim((string)($order['carrier'] ?? '') . ' ' . (string)($order['tracking_number'] ?? '')),
@@ -173,6 +172,61 @@ final class AccountViewModel
         ];
     }
 
+    private static function addresses(int $customerId, array $values, array $errors): array
+    {
+        $field = static fn(string $name, string $label, string $autocomplete, bool $required = false): array => [
+            'name' => $name, 'id' => 'account-address-' . str_replace('_', '-', $name), 'label' => I18n::t($label),
+            'autocomplete' => $autocomplete, 'required' => $required, 'value' => (string)($values[$name] ?? ''),
+            'error' => isset($errors[$name]) ? I18n::t((string)$errors[$name]) : null,
+        ];
+        $country = strtoupper((string)($values['country'] ?? ''));
+        if ($country === '') $country = strtoupper((string)(StoreContext::current()->legal()['country'] ?? ''));
+        $type = (string)($values['type'] ?? 'shipping');
+        $countries = ShippingService::destinationCountries();
+        return [
+            'addresses' => array_map(static fn(array $address): array => $address + [
+                'type_label' => I18n::t('account.addr_type_' . ($address['type'] === 'billing' ? 'billing' : 'shipping')),
+            ], Customers::addresses($customerId)),
+            'address_saved' => !empty($_GET['ok']),
+            'address_fields' => [
+                $field('name', 'account.addr_name', 'name', true),
+                $field('company', 'account.addr_company', 'organization'),
+                $field('vat_id', 'account.addr_vat', 'off'),
+                $field('street', 'account.addr_street', 'street-address', true),
+                $field('city', 'account.addr_city', 'address-level2', true),
+                $field('zip', 'account.addr_zip', 'postal-code', true),
+                $field('phone', 'account.addr_phone', 'tel'),
+            ],
+            'address_country' => [
+                'error' => isset($errors['country']) ? I18n::t((string)$errors['country']) : null,
+                'options' => array_map(static fn(string $code, string $name): array => [
+                    'code' => $code, 'name' => $name, 'selected' => $code === $country,
+                ], array_keys($countries), $countries),
+            ],
+            'address_types' => array_map(static fn(string $code): array => [
+                'code' => $code, 'label' => I18n::t('account.addr_type_' . $code), 'selected' => $code === $type,
+            ], ['shipping', 'billing']),
+            'address_default' => !empty($values['is_default']),
+        ];
+    }
+
+    /** The customer's digital entitlements in this store with what is left of them. */
+    private static function downloads(int $customerId): array
+    {
+        return array_map(static function(array $row): array {
+            $limit = $row['download_limit'] === null ? null : (int)$row['download_limit'];
+            return [
+                'id' => (int)$row['id'],
+                'label' => (string)($row['label'] ?: $row['download_name'] ?: $row['asset_key']),
+                'order_number' => (string)$row['order_number'],
+                'order_url' => Template::storeUrl('/account.php?p=order&id=' . (int)$row['order_id']),
+                'expires' => $row['expires_at'] === null ? null : I18n::dateTime(gmdate('Y-m-d H:i:s', (int)$row['expires_at'])),
+                'remaining' => $limit === null ? I18n::t('account.download_unlimited') : (string)max(0, $limit - (int)$row['download_count']),
+                'available' => DigitalDelivery::downloadable($row),
+            ];
+        }, DigitalDelivery::forCustomer($customerId));
+    }
+
     private static function returns(int $customerId): array
     {
         $returns = [];
@@ -182,7 +236,7 @@ final class AccountViewModel
                 'number' => (string)$return['rma_number'],
                 'order_number' => (string)($order['order_number'] ?? ('#' . $return['order_id'])),
                 'status' => (string)$return['status'],
-                'date' => substr((string)$return['created_at'], 0, 16),
+                'date' => I18n::dateTime((string)$return['created_at']),
             ];
         }
         $returnable = [];
@@ -192,13 +246,13 @@ final class AccountViewModel
             if (!$items) continue;
             $returnable[] = [
                 'id' => (int)$order['id'], 'number' => (string)$order['order_number'],
-                'date' => substr((string)$order['created_at'], 0, 10),
+                'date' => I18n::dateTime((string)$order['created_at'], false),
                 'items' => array_map(static fn(array $item): array => [
                     'id' => (int)$item['id'], 'name' => (string)$item['name'], 'maximum' => (int)$item['returnable_quantity'],
                 ], $items),
             ];
         }
-        $message = (string)($_GET['msg'] ?? '');
+        $message = Security::str($_GET['msg'] ?? '');
         return [
             'returns' => $returns, 'returnable_orders' => $returnable,
             'return_message' => $message === '' ? null : [

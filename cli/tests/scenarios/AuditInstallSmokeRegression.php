@@ -183,9 +183,19 @@ try {
             $a111Unknown = $a111Get($a111Path);
             assert_equals([404, ['error' => 'Unknown action']], [$a111Unknown['status'], $a111Json($a111Unknown)], "API: {$a111Path} is not a route");
         }
-        foreach (['/api.php?action=categories', '/api/categories', '/api.php?action=webhook_payment&provider=mock'] as $a111Path) {
+        foreach (['/api.php?action=categories', '/api.php', '/api/categories'] as $a111Path) {
             assert_equals(404, $a111Get($a111Path)['status'], "API: legacy {$a111Path} is gone");
         }
+        // One API gateway: the old notification URLs and the ?action= query are not routed either.
+        foreach (['/api.php?action=webhook_payment&provider=mock', '/api.php?action=webhook_stripe', '/api.php?action=csp_report'] as $a111Path) {
+            // Not routed to the API: the generic fallback refuses the POST (405), it never reaches a handler.
+            $a111Legacy = $a111Post($a111Path, '{"id":"evt_x"}');
+            assert_true(in_array($a111Legacy['status'], [404, 405], true) && !is_array($a111Json($a111Legacy)), "API: legacy notification URL {$a111Path} is gone ({$a111Legacy['status']})");
+        }
+        assert_equals(404, $a111Get('/api/v1/storefront?action=categories')['status'], 'API: /api/v1/storefront?action= is not a route');
+        $a111Hyphen = $a111Post('/api/v1/webhooks/shipping/http-carrier', '');
+        assert_equals([400, ['error' => 'Empty payload']], [$a111Hyphen['status'], $a111Json($a111Hyphen)], 'API: a carrier code with a hyphen reaches the carrier handler');
+        assert_equals(403, $a111Get('/c%61che/x.json')['status'], 'php -S router.php: percent-encoded cache/ path is denied');
         $a111External = $a111Get('/api/v1/products');
         assert_equals([401, 'unauthorized'], [$a111External['status'], $a111Json($a111External)['error']['code'] ?? null], 'API: other /api/v1 paths stay the key-authenticated external API');
         $a111Mock = $a111Post('/api/v1/webhooks/payment/mock', '{"id":"evt_x"}');

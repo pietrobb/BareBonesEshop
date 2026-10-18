@@ -40,7 +40,18 @@ class OrderWorkflow {
         if ($to === 'refunded' && !$mayRefund) return 'forbidden';
         if (!self::canTransition((string)$order['status'], $to)) return 'invalid_transition';
         if ($to === 'paid' && ($order['payment_status'] ?? 'pending') !== 'paid') return 'payment_not_confirmed';
+        if (self::refundOutstanding($order, $to)) return 'refund_outstanding';
         return null;
+    }
+
+    /**
+     * A paid order is 'refunded' only once its money went back: the status restores stock, revokes
+     * digital access and emails "refund issued", but moves no money itself. While a refundable
+     * balance remains the transition is refused; the money goes back through the refund ledger
+     * (cancel the order or request a refund), which closes the order when the refund completes.
+     */
+    public static function refundOutstanding(array $order, string $to): bool {
+        return $to === 'refunded' && (string)($order['status'] ?? '') === 'paid' && PaymentService::refundableBalance((int)$order['id']) > 0;
     }
 
     /**
@@ -106,6 +117,9 @@ class OrderWorkflow {
         $from = $order['status'];
         if (!self::canTransition($from, $to)) {
             throw new \LogicException("Cannot transition order #{$orderId} from '{$from}' to '{$to}'");
+        }
+        if (self::refundOutstanding($order, $to)) {
+            throw new \LogicException("Order #{$orderId} still has a refundable payment balance: refund it before marking the order refunded");
         }
 
         // Compare-and-set: of two concurrent transitions (webhook "paid", admin "cancel") only the

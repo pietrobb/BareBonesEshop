@@ -271,10 +271,14 @@ return [
         //     'version' => '2026-10-16', 'required' => false,
         //     'text' => 'Send me one e-mail reminder if I do not finish this order.',
         // ],
+        // 'text' is one string or a per-locale map; a relative 'url' gets the store prefix (/cs/?page=terms).
         // 'digital_delivery' => [
         //     'version' => '2026-01-01', 'required' => true,
-        //     'text' => 'I request immediate delivery of the digital content and acknowledge the loss of my withdrawal right once delivery begins.',
-        //     'url' => '/terms', 'product_types' => ['downloadable'],
+        //     'text' => [
+        //         'en' => 'I request immediate delivery of the digital content and acknowledge the loss of my withdrawal right once delivery begins.',
+        //         'sk' => 'Žiadam o okamžité dodanie digitálneho obsahu a beriem na vedomie, že jeho začatím strácam právo na odstúpenie od zmluvy.',
+        //     ],
+        //     'url' => '/?page=terms', 'product_types' => ['downloadable'],
         // ],
     ],
 
@@ -302,6 +306,7 @@ return [
     'metrics_log_file'    => dirname(__DIR__) . '/bareboneseshop-private/logs/metrics.jsonl',
     'update_storage_dir'  => dirname(__DIR__) . '/bareboneseshop-private/updates',
     'update_public_key'   => '', // Ed25519 public key (base64/hex or absolute key-file path)
+    'update_snapshots_keep' => 3, // newest pre-update snapshots kept (full database copies); older ones are deleted after an update
     // Required only for MySQL/MariaDB packages containing migrations. Reserve
     // this disposable schema name and grant db_user access, but do not create it;
     // it must end with _update_probe. The updater refuses to overwrite an existing schema.

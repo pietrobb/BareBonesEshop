@@ -664,23 +664,37 @@ class Orders {
     // ERP Sync support
     // ============================================================
 
-    /** Get orders not yet synced to ERP */
+    /**
+     * Orders of the active store not yet pushed to the ERP, with their items (erpPayload()). A cancelled order
+     * that never reached the ERP is not pushed; one whose push failed waits for its erp_next_retry_at.
+     */
     public static function unsyncedForErp(): array {
-        $stmt = Db::get()->prepare("SELECT * FROM orders WHERE store_id = :store AND status != 'pending' AND erp_id IS NULL ORDER BY created_at ASC LIMIT 50");
+        $stmt = Db::get()->prepare("SELECT * FROM orders WHERE store_id = :store AND status NOT IN ('pending', 'cancelled') AND erp_id IS NULL
+            AND (erp_next_retry_at IS NULL OR erp_next_retry_at <= " . Db::now() . ") ORDER BY created_at ASC LIMIT 50");
         $stmt->execute([':store' => StoreContext::current()->id()]);
-        return $stmt->fetchAll();
+        return array_map([self::class, 'erpPayload'], $stmt->fetchAll());
+    }
+
+    /** The order row as IntegrationAdapter::pushOrder() receives it: with its items. */
+    public static function erpPayload(array $order): array {
+        $order['items'] = self::items((int)$order['id']);
+        return $order;
     }
 
     /** Mark order as synced to ERP */
     public static function markSynced(int $orderId, string $externalId): void {
-        $stmt = Db::get()->prepare("UPDATE orders SET erp_id = :eid, erp_synced_at = " . Db::now() . ", erp_error = NULL, updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store");
+        $stmt = Db::get()->prepare("UPDATE orders SET erp_id = :eid, erp_synced_at = " . Db::now() . ", erp_error = NULL, erp_attempts = 0, erp_next_retry_at = NULL, updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store");
         $stmt->execute([':eid' => $externalId, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
     }
 
-    /** Mark order ERP sync as failed */
+    /** Mark order ERP sync as failed; the next push waits 15 minutes, doubling per failure up to a day. */
     public static function markSyncFailed(int $orderId, string $error): void {
-        $stmt = Db::get()->prepare("UPDATE orders SET erp_error = :err, updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store");
-        $stmt->execute([':err' => substr($error, 0, 500), ':id' => $orderId, ':store' => StoreContext::current()->id()]);
+        $db = Db::get();
+        $attempts = $db->prepare('SELECT erp_attempts FROM orders WHERE id = :id AND store_id = :store');
+        $attempts->execute([':id' => $orderId, ':store' => StoreContext::current()->id()]);
+        $delay = min(86400, 900 * 2 ** min(7, (int)$attempts->fetchColumn()));
+        $stmt = $db->prepare("UPDATE orders SET erp_error = :err, erp_attempts = erp_attempts + 1, erp_next_retry_at = :retry, updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store");
+        $stmt->execute([':err' => substr($error, 0, 500), ':retry' => gmdate('Y-m-d H:i:s', time() + $delay), ':id' => $orderId, ':store' => StoreContext::current()->id()]);
     }
 
     /**
