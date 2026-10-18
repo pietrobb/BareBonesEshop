@@ -334,6 +334,15 @@ nginx PHP fallback when `operations.nginx_config` is set).
   custom adapters that only define a public `generateVariants()` method keep working.
 
 ### Fixed
+- **"Retry refund" refunded again on every click** once the provider had answered the refund with "pending"
+  (PayU always, Stripe and GoPay sometimes): the refund job's own pending row was offered as a new request
+  under a fresh idempotency key. An executed refund is no longer offered for retry.
+- **Refunds without the refund right**: cancelling an order with captured money refunds it, so it now needs
+  `orders.refund` in the admin (the `fulfillment` role can no longer do it) and `refunds:write` in the API
+  (`orders:write` alone gets 403). Returned and cancelled orders, like paid ones, cannot be set to `refunded`
+  while a refundable balance remains.
+- The multi-store stock migration (`20261017093000`) finishes on a rerun after failing halfway on MySQL
+  (warehouses moved, stock rows not yet).
 - **Non-default stores sharing a catalog** (e.g. `/cs/`) were broken end to end: checkout always failed
   with "stock changed" (stock looked up under the store id, products under the catalog), the cart showed
   EUR amounts as CZK, gateway return pages said "order not verified" and webhooks parked (URLs of the

@@ -241,12 +241,16 @@ class ApiV1 {
         if ($note !== null && (!is_string($note) || strlen($note) > 500)) {
             throw new InvalidArgumentException('note must be null or a string of at most 500 bytes');
         }
-        if ($to === 'refunded') ApiAuth::requireScope($client, 'refunds:write');
+        // Cancelling captured money refunds it: like 'refunded' it needs refunds:write, not just orders:write.
+        $current = Orders::byId($orderId);
+        if ($to === 'refunded' || ($current && OrderWorkflow::returnsMoney($current, $to))) ApiAuth::requireScope($client, 'refunds:write');
 
         return self::idempotentWrite($client, $key, 'POST', $path, $body, static function() use ($orderId, $to, $note, $client): array {
             $order = Orders::byId($orderId);
-            $reason = OrderWorkflow::adminRejection($order, $to, true);
+            $mayRefund = (bool)array_intersect(['refunds:write', '*'], $client['scopes'] ?? []);
+            $reason = OrderWorkflow::adminRejection($order, $to, $mayRefund);
             if ($reason === 'not_found') return self::notFound('Order not found');
+            if ($reason === 'forbidden') return self::error(403, 'forbidden', 'Missing API scope: refunds:write') + ['store' => false];
             if ($reason !== null) {
                 return ['status' => 422, 'body' => ['error' => [
                     'code' => $reason,

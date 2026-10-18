@@ -146,7 +146,8 @@ $architectureBudgets = [
     // +1 coupling: SalesReport gives the sales overview shop-local day boundaries (A15.1).
     // +1 coupling: OrderExport owns the order list filters shared by the sales overview and the CSV export (A15.2).
     // +1 function, +21 lines: "Retry refund" re-queues a refund request no payment_refund job ever executed (round 4 final review).
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 901, 'functions' => 15, 'max_function_lines' => 300, 'coupling' => 20],
+    // +1 line: a cancellation that refunds captured money needs orders.refund (round 5 review).
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 902, 'functions' => 15, 'max_function_lines' => 300, 'coupling' => 20],
     'src/Entrypoints/Admin/OrderOperations.php' => ['lines' => 80, 'functions' => 4, 'max_function_lines' => 32, 'coupling' => 7],
     'src/Entrypoints/Admin/PricingRules.php' => ['lines' => 235, 'functions' => 7, 'max_function_lines' => 115, 'coupling' => 5],
     'src/Entrypoints/Admin/Reports.php' => ['lines' => 90, 'functions' => 2, 'max_function_lines' => 74, 'coupling' => 4],

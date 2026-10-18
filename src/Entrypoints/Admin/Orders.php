@@ -216,7 +216,7 @@ function pageOrder(): void {
     $items = Orders::items($id);
     $allowed = OrderWorkflow::allowedTransitions($order['status']);
     $canRefund = Security::adminCan('orders.refund');
-    if (!$canRefund) $allowed = array_values(array_diff($allowed, ['refunded']));
+    if (!$canRefund) $allowed = array_values(array_filter($allowed, static fn(string $to): bool => !OrderWorkflow::returnsMoney($order, $to)));
     $paymentTransitions = Security::adminCan('orders.payments') ? adminManualPaymentTransitions($order) : [];
     $paymentTxs = PaymentService::transactionsForOrder($id);
     $refundableBalance = PaymentService::refundableBalance($id);
@@ -638,8 +638,9 @@ function handleOrderStatus(): void {
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
     }
-    if ($newStatus === 'refunded') Security::adminRequire('orders.refund');
-    $rejection = OrderWorkflow::adminRejection(Orders::byId($orderId), $newStatus, true);
+    $order = Orders::byId($orderId);
+    if ($newStatus === 'refunded' || ($order && OrderWorkflow::returnsMoney($order, $newStatus))) Security::adminRequire('orders.refund');
+    $rejection = OrderWorkflow::adminRejection($order, $newStatus, true);
     if (in_array($rejection, ['not_found', 'payment_not_confirmed', 'refund_outstanding'], true)) {
         setFlash('err', I18n::t(match ($rejection) {
             'payment_not_confirmed' => 'admin.order.msg.confirm_payment_first',

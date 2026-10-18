@@ -17,22 +17,24 @@ if (!class_exists('Fr4RacingGateway', false)) {
         /** @var (callable(): void)|null */
         public $during = null;
         public int $calls = 0;
+        public string $status = 'succeeded';
         public function createSession(array $order): array { return []; }
         public function handleWebhook(array $payload): array { return []; }
         public function getStatus(string $paymentId): string { return 'paid'; }
         public function refund(string $paymentId, int $amount): array {
             $this->calls++;
             if ($this->during) ($this->during)();
-            return ['refund_id' => '', 'status' => 'succeeded'];
+            return ['refund_id' => '', 'status' => $this->status];
         }
     }
     /** Stripe without network: one refund id per idempotency key. */
     class Fr4FakeStripe extends StripePayment {
         public int $calls = 0;
+        public string $status = 'succeeded';
         public function __construct() { parent::__construct([]); }
         public function refundWithIdempotency(string $paymentId, int $amount, string $idempotencyKey): array {
             $this->calls++;
-            return ['refund_id' => 're_fr4_' . substr(sha1($idempotencyKey), 0, 12), 'status' => 'succeeded'];
+            return ['refund_id' => 're_fr4_' . substr(sha1($idempotencyKey), 0, 12), 'status' => $this->status];
         }
     }
 }
@@ -197,6 +199,24 @@ try {
     if ($o9Job) handlePaymentRefund($o9Job['payload'], $o9Job);
     assert_equals([['partially_refunded', 600], 1, null], [$fr4State($o9), $stripe->calls, PaymentService::unexecutedRefundRequest(Orders::byId($o9))],
         'FR4 9: the job refunds once and the retry is no longer offered');
+    // Round 5: a provider that answers "pending" (PayU always, Stripe/GoPay sometimes) leaves the job's own
+    // refund_pending row; it is the executed refund, so the retry is not offered again (each click refunded again).
+    $fr5Pending = [];
+    foreach (['stripe' => $stripe, 'gopay' => $gateway] as $fr5Provider => $fr5Gateway) {
+        $fr5Gateway->status = 'pending';
+        $fr5Gateway->calls = 0;
+        $fr4Adapters->setValue(null, ['payment' => $fr5Gateway] + $fr4SavedAdapters);
+        $fr5Order = $fr4Order('delivered', 'paid', $fr5Provider, 'fr5_' . $fr5Provider . '_9');
+        PaymentService::requestRefund($fr5Order, 600, 'admin_refund_request_' . $fr5Order . '_fr5');
+        PaymentService::retryRefundRequest($fr5Order, 'fr5-admin');
+        $fr5Job = $fr4Jobs($fr5Order)[0] ?? null;
+        if ($fr5Job) handlePaymentRefund($fr5Job['payload'], $fr5Job);
+        $fr5Pending[$fr5Provider] = [$fr5Gateway->calls, PaymentService::unexecutedRefundRequest(Orders::byId($fr5Order)), PaymentService::retryRefundRequest($fr5Order, 'fr5-admin')];
+        $fr5Gateway->status = 'succeeded';
+    }
+    assert_equals(['stripe' => [1, null, false], 'gopay' => [1, null, false]], $fr5Pending,
+        'FR5 1: after a "pending" provider answer the retry is no longer offered and cannot queue a second refund');
+    $fr4Adapters->setValue(null, ['payment' => $stripe] + $fr4SavedAdapters);
     $o9m = $fr4Order('delivered', 'paid', 'manual', '');
     PaymentService::requestRefund($o9m, 500, 'fr4_9m_request');
     assert_equals([null, false], [PaymentService::unexecutedRefundRequest(Orders::byId($o9m)), PaymentService::retryRefundRequest($o9m, 'fr4-admin')], 'FR4 9: money returned by hand is recorded, not retried');
