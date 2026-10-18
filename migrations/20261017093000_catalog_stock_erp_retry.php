@@ -34,8 +34,9 @@ return new class {
             $storeId = (string)$storeId;
             $catalog = (string)(is_array($config) ? ($config['catalog_scope'] ?? $storeId) : $storeId);
             if ($catalog === $storeId) continue;
-            $moved = $db->prepare('SELECT COUNT(*) FROM warehouses WHERE store_id = ?');
-            $moved->execute([$storeId]);
+            // Not transactional on MySQL: a rerun after a failure between the two moves still finds the stock rows.
+            $moved = $db->prepare('SELECT (SELECT COUNT(*) FROM warehouses WHERE store_id = ?) + (SELECT COUNT(*) FROM warehouse_stock WHERE store_id = ?)');
+            $moved->execute([$storeId, $storeId]);
             if ((int)$moved->fetchColumn() === 0) continue;
             $default = $db->prepare('SELECT COUNT(*) FROM warehouses WHERE store_id = ? AND is_default = 1');
             $default->execute([$catalog]);

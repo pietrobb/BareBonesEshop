@@ -229,6 +229,12 @@ try {
     assert_equals([['store_id' => 'default', 'is_default' => 0]], array_map(static fn(array $w): array => ['store_id' => $w['store_id'], 'is_default' => (int)$w['is_default']], $r4Mem->query("SELECT store_id, is_default FROM warehouses WHERE id = {$r4CzWh}")->fetchAll()),
         'R4 migration: the cz warehouse moves to the catalog, keeping the catalog\'s default warehouse');
     assert_equals([9, 9], [Warehouse::totalAvailable('R4M-SKU'), (int)$r4Mem->query("SELECT stock FROM products WHERE sku = 'R4M-SKU'")->fetchColumn()], 'R4 migration: its stock counts for the catalog and products.stock is refreshed');
+    // Round 5: MySQL runs it without a transaction; a rerun after a failure between the warehouse and the stock move
+    // (warehouses moved, stock rows still under cz) still moves the stock rows.
+    $r4Mem->exec("INSERT INTO warehouse_stock (store_id, warehouse_id, sku, qty, reserved) VALUES ('cz', {$r4CzWh}, 'R5M-LEFT', 2, 0)");
+    (require TEST_CLI_DIR . '/../migrations/20261017093000_catalog_stock_erp_retry.php')->up($r4Mem, true);
+    assert_equals(['default'], $r4Mem->query("SELECT store_id FROM warehouse_stock WHERE sku = 'R5M-LEFT'")->fetchAll(PDO::FETCH_COLUMN),
+        'R5 migration: a rerun moves stock rows left behind after the warehouses moved');
 
     // 2. Stripe events (one global secret) find an order of a store in another provider scope; other providers do not.
     $r4Mem->exec("INSERT INTO orders (order_number, status, payment_status, customer_name, customer_email, payment_method, subtotal, total, currency, store_id) VALUES ('R4-X', 'pending', 'pending', 'R4', 'r4@example.test', 'card', 100, 100, 'czk', 'r4x')");

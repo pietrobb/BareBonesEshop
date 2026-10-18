@@ -32,12 +32,12 @@ class OrderWorkflow {
 
     /**
      * Why an admin may not move this order to $to (null = allowed). Shared by the order
-     * detail and bulk actions: 'paid' needs a confirmed payment, 'refunded' the refund right.
+     * detail and bulk actions: 'paid' needs a confirmed payment, a move that returns money the refund right.
      */
     public static function adminRejection(?array $order, string $to, bool $mayRefund): ?string {
         if (!$order) return 'not_found';
         if (!in_array($to, self::statuses(), true)) return 'invalid_status';
-        if ($to === 'refunded' && !$mayRefund) return 'forbidden';
+        if (!$mayRefund && self::returnsMoney($order, $to)) return 'forbidden';
         if (!self::canTransition((string)$order['status'], $to)) return 'invalid_transition';
         if ($to === 'paid' && ($order['payment_status'] ?? 'pending') !== 'paid') return 'payment_not_confirmed';
         if (self::refundOutstanding($order, $to)) return 'refund_outstanding';
@@ -45,13 +45,18 @@ class OrderWorkflow {
     }
 
     /**
-     * A paid order is 'refunded' only once its money went back: the status restores stock, revokes
-     * digital access and emails "refund issued", but moves no money itself. While a refundable
+     * An order (paid, returned or cancelled) is 'refunded' only once its money went back: the status restores
+     * stock, revokes digital access and emails "refund issued", but moves no money itself. While a refundable
      * balance remains the transition is refused; the money goes back through the refund ledger
      * (cancel the order or request a refund), which closes the order when the refund completes.
      */
     public static function refundOutstanding(array $order, string $to): bool {
-        return $to === 'refunded' && (string)($order['status'] ?? '') === 'paid' && PaymentService::refundableBalance((int)$order['id']) > 0;
+        return $to === 'refunded' && PaymentService::refundableBalance((int)$order['id']) > 0;
+    }
+
+    /** Whether the move returns money: 'refunded', or cancelling captured money (handleCancellation() refunds it). */
+    public static function returnsMoney(array $order, string $to): bool {
+        return $to === 'refunded' || ($to === 'cancelled' && PaymentService::refundableBalance((int)$order['id']) > 0);
     }
 
     /**

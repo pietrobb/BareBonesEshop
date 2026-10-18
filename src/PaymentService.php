@@ -450,10 +450,15 @@ class PaymentService {
         if ((string)($order['payment_status'] ?? '') !== 'refund_pending' || self::refundsByHand($order)) return null;
         $db = Db::get();
         $params = [':order' => (int)$order['id'], ':store' => StoreContext::current()->id()];
-        $stmt = $db->prepare("SELECT id, amount, idempotency_key FROM payment_transactions WHERE order_id = :order AND store_id = :store AND status = 'refund_pending' ORDER BY id DESC LIMIT 1");
+        $stmt = $db->prepare("SELECT id, amount, idempotency_key FROM payment_transactions WHERE order_id = :order AND store_id = :store AND status = 'refund_pending' ORDER BY id DESC");
         $stmt->execute($params);
-        $request = $stmt->fetch(\PDO::FETCH_ASSOC);
-        if (!$request) return null;
+        $request = null;
+        // A job the provider answered "pending" also logs refund_pending, under the execute key: that row is the
+        // executed refund, not a request (re-deriving an execute key from it would refund again).
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            if (self::refundRequestKey((string)$row['idempotency_key']) === null) { $request = $row; break; }
+        }
+        if ($request === null) return null;
         $executeKey = self::refundExecuteKey((string)$request['idempotency_key']);
         $later = $db->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store
             AND ((id > :id AND status IN ('partially_refunded', 'refunded', 'refund_succeeded', 'refund_confirmed')) OR idempotency_key IN (:execute, :attempt)) LIMIT 1");

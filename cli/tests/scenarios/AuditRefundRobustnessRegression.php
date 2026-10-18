@@ -202,6 +202,29 @@ try {
     applyStripeChargeRefunded(['id' => 'ch_arr_3', 'payment_intent' => 'pi_arr_3', 'amount_refunded' => 1000,
         'refunds' => ['data' => [['id' => 're_arr_3', 'amount' => 1000, 'status' => 'succeeded']]]], 'pi_arr_3', $r3);
     assert_equals(['refunded', 'refunded', 1000], $arrState($r3), 'ARR 3: once the money went back the order closes as refunded');
+    // Round 5: returned and cancelled orders with money still kept are not "refunded" either.
+    $r5Returned = $arrOrder('returned', 'paid', 'stripe', 'pi_arr_5r');
+    $r5Cancelled = $arrOrder('cancelled', 'refund_pending', 'stripe', 'pi_arr_5c');
+    $r5Settled = $arrOrder('cancelled', 'refunded', 'stripe', 'pi_arr_5s');
+    assert_equals(['refund_outstanding', 'refund_outstanding', null], [OrderWorkflow::adminRejection(Orders::byId($r5Returned), 'refunded', true),
+        OrderWorkflow::adminRejection(Orders::byId($r5Cancelled), 'refunded', true), OrderWorkflow::adminRejection(Orders::byId($r5Settled), 'refunded', true)],
+        'ARR 5: returned/cancelled -> refunded is refused while a refundable balance remains, allowed once the money went back');
+    // Cancelling captured money refunds it: without the refund right (fulfillment role, API key without refunds:write) it is refused.
+    $r5Paid = $arrOrder('paid', 'paid', 'stripe', 'pi_arr_5p');
+    $r5Unpaid = $arrOrder('pending', 'pending', 'stripe', 'pi_arr_5u');
+    assert_equals(['forbidden', null, null, ['forbidden']], [OrderWorkflow::adminRejection(Orders::byId($r5Paid), 'cancelled', false),
+        OrderWorkflow::adminRejection(Orders::byId($r5Paid), 'cancelled', true), OrderWorkflow::adminRejection(Orders::byId($r5Unpaid), 'cancelled', false),
+        array_values(OrderWorkflow::bulkTransition([$r5Paid], 'cancelled', 'ARR 5', false)['rejected'])],
+        'ARR 5: cancelling a paid order needs the refund right; an unpaid order can be cancelled without it');
+    $r5Api = new ReflectionMethod(ApiV1::class, 'changeOrderStatus');
+    $r5ApiRefused = '';
+    try { $r5Api->invoke(null, $r5Paid, ['status' => 'cancelled'], 'arr-5-key', ['key_id' => 'arr5', 'scopes' => ['orders:write'], 'store_id' => 'default'], '/api/v1/orders/' . $r5Paid . '/status'); }
+    catch (DomainException $e) { $r5ApiRefused = $e->getMessage(); }
+    assert_equals(['Missing API scope: refunds:write', ['paid', 'paid', 0], []], [$r5ApiRefused, $arrState($r5Paid), $arrJobs($r5Paid)],
+        'ARR 5: an API key with orders:write but without refunds:write cannot cancel (refund) a paid order');
+    $r5Admin = entrypointSource('admin.php');
+    assert_true(str_contains($r5Admin, "if (\$newStatus === 'refunded' || (\$order && OrderWorkflow::returnsMoney(\$order, \$newStatus))) Security::adminRequire('orders.refund');"),
+        'ARR 5: the admin status change requires orders.refund for a cancellation that refunds');
 
     // 4. Item (credit note) refunds: PayU answers PENDING, the FINALIZED notification completes the credit note.
     $arrStatus = new ReflectionMethod(PayUPayment::class, 'refundStatus');
