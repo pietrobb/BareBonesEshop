@@ -105,11 +105,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif ($action === 'forgot') {
         $fieldValues = $_POST;
         $email = Str::normalizeEmail(Security::str($_POST['email'] ?? ''));
-        $emailKey = hash('sha256', $email);
-        $ipAllowed = Security::rateLimit('account_forgot_ip', 5, 60);
-        $recipientAllowed = Security::rateLimit('account_forgot_recipient_' . $emailKey, 3, 3600, false);
-        if ($ipAllowed && $recipientAllowed) {
-            Customers::requestPasswordReset($email, $locale, Security::config());
+        // Per client IP here; per recipient (store-scoped, sent mails only) in Customers::forgotPassword().
+        if (Security::rateLimit('account_forgot_ip', 5, 60)) {
+            Customers::forgotPassword($email, $locale, Security::config());
         }
         // Always generic, including throttled and unknown recipients.
         $flash = $t('account.forgot_sent');

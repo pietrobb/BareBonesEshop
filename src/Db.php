@@ -199,6 +199,18 @@ class Db {
         return in_array($column, self::tableColumns($table, $db), true);
     }
 
+    /**
+     * The connection can write: a no-op UPDATE still fails on a read-only SQLite database, a read_only
+     * MySQL server and a user without write grants (SELECT 1 succeeds on all of them).
+     */
+    public static function writable(?PDO $db = null): bool {
+        try {
+            return ($db ?? self::get())->exec('UPDATE orders SET id = id WHERE 1 = 0') !== false;
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+
     /** Forget cached table probes (after DDL), for one connection or all of them. */
     public static function forgetSchema(?PDO $db = null): void {
         if ($db === null) {

@@ -141,10 +141,10 @@ foreach (['sk', 'cs', 'pl', 'hu', 'de', 'es', 'en'] as $r5Locale) {
     $r5Missing = array_diff($r5En, array_keys($r5Labels->invoke(null, $r5Locale)));
     assert_equals([], array_values($r5Missing), "R5 VAT: invoice labels complete in {$r5Locale}");
 }
-assert_true(str_contains((string)InvoiceService::vatNotice(['reverse_charge_note_key' => 'vat.reverse_charge_note'], 'sk', false), '§ 43'), 'R5 VAT: intra-EU goods cite § 43 (exemption)');
-assert_true(str_contains((string)InvoiceService::vatNotice(['reverse_charge_note_key' => 'vat.reverse_charge_note'], 'sk', true), 'čl. 196'), 'R5 VAT: B2B e-services cite the reverse charge (Art. 196)');
-assert_true(str_contains((string)InvoiceService::vatNotice(['reverse_charge_note_key' => 'vat.export_note'], 'sk', false), '§ 47'), 'R5 VAT: export cites § 47');
-assert_equals(null, InvoiceService::vatNotice(['reverse_charge_note_key' => ''], 'sk', false), 'R5 VAT: domestic invoice has no notice');
+assert_true(str_contains((string)InvoiceService::vatNotice(['reverse_charge_note_key' => 'vat.reverse_charge_note'], 'sk', false, 'SK'), '§ 43'), 'R5 VAT: intra-EU goods cite § 43 (exemption)');
+assert_true(str_contains((string)InvoiceService::vatNotice(['reverse_charge_note_key' => 'vat.reverse_charge_note'], 'sk', true, 'SK'), 'čl. 196'), 'R5 VAT: B2B e-services cite the reverse charge (Art. 196)');
+assert_true(str_contains((string)InvoiceService::vatNotice(['reverse_charge_note_key' => 'vat.export_note'], 'sk', false, 'SK'), '§ 47'), 'R5 VAT: export cites § 47');
+assert_equals(null, InvoiceService::vatNotice(['reverse_charge_note_key' => ''], 'sk', false, 'SK'), 'R5 VAT: domestic invoice has no notice');
 
 // --- Date of supply and the invoice e-mail -----------------------------------------------------------------------
 $r5PaidAt = gmdate('Y-m-d H:i:s', strtotime('-3 days 12:00'));

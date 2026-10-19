@@ -888,6 +888,7 @@ function handleProductSave(): void {
                 $stmt->execute($data + [':id' => $id, ':catalog' => StoreContext::current()->catalogId()]);
                 ProductEditor::save($id, $editor);
                 AuditLog::log('product', $id, $old, $data, 'Admin edit: ' . implode(', ', $changed));
+                Products::recordUpdated($id, $old);
                 $db->commit();
                 setFlash('ok', I18n::t('admin.product.updated'));
             } else {

@@ -20,7 +20,7 @@
 class GdprService {
     private const CUSTOMER_ORDERS = "SELECT o.id FROM orders o
         WHERE o.store_id = :order_store AND (o.customer_id = :customer_id
-            OR (:verified = '1' AND o.customer_id IS NULL AND LOWER(o.customer_email) = LOWER(:owner_email)))";
+            OR ((:verified = '1' OR :guest = '1') AND o.customer_id IS NULL AND LOWER(o.customer_email) = LOWER(:owner_email)))";
     // Carts are keyed by e-mail only: unverified accounts own just the carts that became their orders.
     private const CUSTOMER_CARTS = "LOWER(customer_email) = LOWER(:cart_email) AND (store_id = :cart_store OR store_id IS NULL)
               AND (:cart_verified = '1' OR order_id IN (" . self::CUSTOMER_ORDERS . "))";
@@ -604,7 +604,12 @@ class GdprService {
     private static function guestOwnership(PDO $db, string $email): array {
         $email = Str::normalizeEmail($email);
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) throw new RuntimeException('Invalid e-mail');
-        $ownership = [':order_store' => StoreContext::current()->id(), ':customer_id' => 0, ':verified' => 1, ':owner_email' => $email];
+        // ':guest' owns the guest orders. Rows linked to no order (mail log, audit trail, carts, jobs) are only the
+        // guest's ('verified') while no account of this store uses the address: otherwise they may be the account's.
+        $account = $db->prepare("SELECT COUNT(*) FROM customers WHERE store_id = ? AND LOWER(email) = LOWER(?)");
+        $account->execute([StoreContext::current()->id(), $email]);
+        $ownership = [':order_store' => StoreContext::current()->id(), ':customer_id' => 0, ':verified' => (int)$account->fetchColumn() > 0 ? 0 : 1,
+            ':guest' => 1, ':owner_email' => $email];
         $carts = $db->prepare("SELECT COUNT(*) FROM abandoned_carts WHERE LOWER(customer_email) = LOWER(?) AND (store_id = ? OR store_id IS NULL)");
         $carts->execute([$email, StoreContext::current()->id()]);
         if (self::customerOrderIds($db, $ownership) === [] && (int)$carts->fetchColumn() === 0) {
@@ -1122,6 +1127,7 @@ class GdprService {
             ':order_store' => StoreContext::current()->id(),
             ':customer_id' => (int)$customer['id'],
             ':verified' => !empty($customer['email_verified_at']) ? 1 : 0,
+            ':guest' => 0,
             ':owner_email' => (string)$customer['email'],
         ];
     }

@@ -258,7 +258,8 @@ return [
     // contains only a relative path such as ebooks/manual.pdf.
     // An interrupted download may resume (HTTP Range) for this long without counting another download.
     'digital_download_resume_minutes' => 30,
-    'digital_assets_base_dir' => dirname(__DIR__) . '/private_downloads',
+    // Kept with the other private runtime data (the Docker sample's private volume; created by setup.php apply).
+    'digital_assets_base_dir' => dirname(__DIR__) . '/bareboneseshop-private/downloads',
 
     // Product image uploads written by the LocalStorage adapter and served at uploads_url. File
     // backups (cli/backup.php, unless config/backup.json sets "include_files": false) and

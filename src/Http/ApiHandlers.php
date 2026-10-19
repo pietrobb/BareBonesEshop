@@ -740,7 +740,8 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         if ($pickup['error'] !== null) return checkoutRefusal((string)$pickup['error']);
         if ($pickup['point'] !== null) $selectedRate['pickup_point'] = $pickup['point'];
     }
-    $shippingCost = $promotionFreeShipping ? 0 : (int)$selectedRate['price'];
+    // Free shipping waives the carriage, not the cash-on-delivery surcharge.
+    $shippingCost = $promotionFreeShipping ? ShippingService::freeShippingPrice($selectedRate) : (int)$selectedRate['price'];
     // Shipping rates include domestic VAT like catalog prices; zero-rated sales are charged them net.
     if ($shippingCost > 0 && Cart::chargesNetOfDomesticVat($vatScenario)) {
         $shippingCost = Cart::netOfDomesticVat($shippingCost, $sellerCountry, 'standard', $taxProviderCode);

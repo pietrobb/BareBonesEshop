@@ -297,6 +297,14 @@ function pageOrder(): void {
                 <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.order.retry_refund')) ?></button>
             </form>
             <?php endif; ?>
+            <?php if ($canRefund && ($unconfirmedRefund = PaymentService::unconfirmedProviderRefund($order)) !== null): ?>
+            <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_confirm" style="margin-top:.5rem" data-refund-confirm>
+                <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                <span class="muted"><?= esc(I18n::format('admin.order.confirm_refund_hint', ['amount' => I18n::price($unconfirmedRefund['amount'], $order['currency'])])) ?></span>
+                <input name="note" placeholder="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" required>
+                <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.order.confirm_refund')) ?></button>
+            </form>
+            <?php endif; ?>
             <?php if ($canRefund && $refundableBalance > 0 && PaymentService::refundsByHand($order)): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_manual" style="margin-top:.5rem" data-manual-refund>
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -764,6 +772,22 @@ function handleOrderRefundRetry(): void {
         setFlash($queued ? 'ok' : 'err', I18n::t($queued ? 'admin.order.msg.refund_retry_queued' : 'admin.order.msg.refund_error'));
     } catch (\Throwable $e) {
         error_log("Refund retry error [{$orderId}]: " . $e->getMessage());
+        setFlash('err', I18n::t('admin.order.msg.refund_error'));
+    }
+    header("Location: admin.php?p=order&id={$orderId}");
+    exit;
+}
+/** Book a provider refund the provider accepted but never confirms (GoPay/ThePay partial refunds), after the admin checked it at the provider. */
+function handleOrderRefundConfirm(): void {
+    Security::adminRequire('orders.refund');
+    $orderId = Security::int($_GET['id'] ?? 0);
+    $note = trim((string)($_POST['note'] ?? ''));
+    try {
+        if ($note === '') throw new \InvalidArgumentException('A refund confirmation needs a note');
+        PaymentService::confirmProviderRefund($orderId, Security::adminUser(), $note);
+        setFlash('ok', I18n::t('admin.order.msg.refund_confirmed'));
+    } catch (\Throwable $e) {
+        error_log("Refund confirm error [{$orderId}]: " . $e->getMessage());
         setFlash('err', I18n::t('admin.order.msg.refund_error'));
     }
     header("Location: admin.php?p=order&id={$orderId}");

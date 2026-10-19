@@ -26,9 +26,10 @@ foreach ($argvLocal as $a) {
 
 $db = Db::get();
 $placeholders = implode(',', array_fill(0, count($statusFilter), '?'));
-$sql = "SELECT o.id, o.order_number, o.status, o.total, o.currency, o.created_at
+// Every store's orders; an order whose invoice was cancelled gets a replacement (InvoiceService::issue()).
+$sql = "SELECT o.id, o.order_number, o.status, o.total, o.currency, o.created_at, o.store_id
           FROM orders o
-          LEFT JOIN invoices i ON i.order_id = o.id AND i.cancelled_at IS NULL
+          LEFT JOIN invoices i ON i.order_id = o.id AND i.type = 'invoice' AND i.status <> 'cancelled'
          WHERE o.status IN ($placeholders)
            AND i.id IS NULL
          ORDER BY o.id";
@@ -65,7 +66,8 @@ foreach ($candidates as $row) {
     }
 
     try {
-        $inv = InvoiceService::issue($oid);
+        // Issued in the order's own store: its invoice row, number series and lookups are store-scoped.
+        $inv = PaymentWebhookRouting::within((string)$row['store_id'], static fn(): array => InvoiceService::issue($oid));
         echo "  [OK]  order #{$oid} ({$num}) -> invoice {$inv['number']}\n";
         $ok++;
     } catch (\Throwable $e) {
