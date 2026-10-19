@@ -18,7 +18,7 @@
  *   PAY_COMGATE_SECRET   / comgate_secret   — connection password
  *   PAY_COMGATE_TEST     / comgate_test     — true (default) creates test payments; false = production
  */
-class ComgatePayment implements HostedCheckoutAdapter, PullVerifiedNotificationAdapter, SignedWebhookPaymentAdapter {
+class ComgatePayment implements HostedCheckoutAdapter, PullVerifiedNotificationAdapter, PaymentStatusEventAdapter, SignedWebhookPaymentAdapter {
     private const ORIGIN = 'https://payments.comgate.cz';
     private const STATES = ['PENDING', 'AUTHORIZED', 'PAID', 'CANCELLED'];
     private const LANGS = ['bg', 'cs', 'da', 'de', 'el', 'en', 'es', 'et', 'fi', 'fr', 'hr', 'hu', 'it', 'lt', 'lv', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sl', 'sk', 'sv', 'uk', 'vi'];
@@ -136,6 +136,10 @@ class ComgatePayment implements HostedCheckoutAdapter, PullVerifiedNotificationA
         }
         $response = $this->request('POST', '/v2.0/refund.json', ['transId' => $paymentId, 'amount' => $amount, 'test' => $this->test]);
         return ['refund_id' => '', 'status' => ($response['code'] ?? null) === 0 ? 'succeeded' : 'failed'];
+    }
+
+    public function statusEvent(string $paymentId): array {
+        return $this->verifiedEvent(['merchant' => $this->merchant, 'secret' => $this->secret, 'transId' => $paymentId]);
     }
 
     public function getStatus(string $paymentId): string {

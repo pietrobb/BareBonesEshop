@@ -357,8 +357,11 @@ nginx PHP fallback when `operations.nginx_config` is set).
   time: Stripe (Developers → Webhooks) to `<app_url>/api/v1/webhooks/payment/stripe`, Comgate push URL
   to `<app_url>/api/v1/webhooks/payment/comgate`, and likewise any carrier webhooks. GoPay, ThePay and
   PayU get the new notification URL with every new payment; payments created before the deploy keep
-  calling the old `api.php` URL, which answers 404, so settle or check those payments in the provider
-  portal after the deploy. There are no legacy routes: `api.php` (any action) and
+  calling the old `api.php` URL, which answers 404. The worker's pending-order sweep asks GoPay, ThePay,
+  Comgate and PayU for the status of each pending payment older than `pending_order_expiry_seconds`
+  (default 48 h) and books the ones they report paid, so such a payment turns paid at the latest then
+  (it used to stay pending forever); check them in the provider portal if you need them sooner.
+  There are no legacy routes: `api.php` (any action) and
   `/api/v1/storefront?action=<action>` answer 404. Custom themes that call
   `api.php` must use `window.BareBonesStorefront.apiUrl` + `/<action>`; nginx needs the updated
   `deploy/nginx.conf` (the `/api/(.*)` rewrite is gone). The theme version is now 2.3.0, so pages
@@ -426,7 +429,13 @@ nginx PHP fallback when `operations.nginx_config` is set).
 ### Fixed
 - **"Retry refund" refunded again on every click** once the provider had answered the refund with "pending"
   (PayU always, Stripe and GoPay sometimes): the refund job's own pending row was offered as a new request
-  under a fresh idempotency key. An executed refund is no longer offered for retry.
+  under a fresh idempotency key. An executed refund is no longer offered for retry. Credit note and RMA
+  refunds (key `admin-credit-…`) were still offered after a "pending" answer; only refund requests are now.
+- **`migrate` stopped with "modified after being applied"** on installs that had applied
+  `20261017093000_catalog_stock_erp_retry` before it was made resumable; its released checksum is
+  accepted (`Migrator::LEGACY_CHECKSUMS`), and the test suite checks every released migration checksum.
+- **A carrier webhook could deliver another carrier's parcel**: an admin shipment whose carrier names a
+  different carrier ("GLS") no longer matches the webhook of the order's shipping-method carrier.
 - **Refunds without the refund right**: cancelling an order with captured money refunds it, so it now needs
   `orders.refund` in the admin (the `fulfillment` role can no longer do it) and `refunds:write` in the API
   (`orders:write` alone gets 403). Returned and cancelled orders, like paid ones, cannot be set to `refunded`

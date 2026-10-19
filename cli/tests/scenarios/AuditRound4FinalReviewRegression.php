@@ -216,6 +216,24 @@ try {
     }
     assert_equals(['stripe' => [1, null, false], 'gopay' => [1, null, false]], $fr5Pending,
         'FR5 1: after a "pending" provider answer the retry is no longer offered and cannot queue a second refund');
+    // Round 6: a credit note / RMA refund job runs under its own key (admin-credit-…, no _execute suffix); its
+    // "pending" row is the executed refund too, so Retry refund is not offered (PayU showed it on every credit note).
+    $fr6Pending = [];
+    foreach (['stripe' => $stripe, 'gopay' => $gateway] as $fr6Provider => $fr6Gateway) {
+        $fr6Gateway->status = 'pending';
+        $fr6Gateway->calls = 0;
+        $fr4Adapters->setValue(null, ['payment' => $fr6Gateway] + $fr4SavedAdapters);
+        $fr6Order = $fr4Order('delivered', 'refund_pending', $fr6Provider, 'fr6_' . $fr6Provider . '_9');
+        $fr6Key = 'admin-credit-' . $fr6Order . '-1';
+        $pdo->prepare("INSERT INTO order_refunds (store_id, order_id, rma_id, credit_note_id, amount, currency, status, idempotency_key) VALUES ('default', ?, 0, 0, 600, 'eur', 'pending', ?)")
+            ->execute([$fr6Order, $fr6Key]);
+        $fr6Payload = ['order_id' => $fr6Order, 'payment_id' => 'fr6_' . $fr6Provider . '_9', 'amount' => 600, 'refund_id' => (int)$pdo->lastInsertId(), 'idempotency_key' => $fr6Key];
+        handlePaymentRefund($fr6Payload, ['id' => 0, 'payload' => $fr6Payload]);
+        $fr6Pending[$fr6Provider] = [$fr6Gateway->calls, PaymentService::unexecutedRefundRequest(Orders::byId($fr6Order)), PaymentService::retryRefundRequest($fr6Order, 'fr6-admin'), $fr4Jobs($fr6Order)];
+        $fr6Gateway->status = 'succeeded';
+    }
+    assert_equals(['stripe' => [1, null, false, []], 'gopay' => [1, null, false, []]], $fr6Pending,
+        'FR6 2: a credit note refund the provider answered "pending" is not offered for retry and queues no second refund');
     $fr4Adapters->setValue(null, ['payment' => $stripe] + $fr4SavedAdapters);
     $o9m = $fr4Order('delivered', 'paid', 'manual', '');
     PaymentService::requestRefund($o9m, 500, 'fr4_9m_request');

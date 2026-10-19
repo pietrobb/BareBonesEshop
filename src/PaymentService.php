@@ -229,6 +229,14 @@ class PaymentService {
         return self::processEvent($gateway->verifiedEvent($notification), $providerName);
     }
 
+    /**
+     * Apply an event the worker read from the provider's authenticated API (PaymentStatusEventAdapter::statusEvent()),
+     * with the same dedup, routing and state machine as a notification of it.
+     */
+    public static function applyProviderStatusEvent(array $event, string $providerName): array {
+        return self::processEvent($event, $providerName);
+    }
+
     private static function processEvent(array $event, string $providerName): array {
         $eventType = $event['event_type'] ?? '';
         $eventId   = (string)($event['event_id'] ?? '');
@@ -450,13 +458,15 @@ class PaymentService {
         if ((string)($order['payment_status'] ?? '') !== 'refund_pending' || self::refundsByHand($order)) return null;
         $db = Db::get();
         $params = [':order' => (int)$order['id'], ':store' => StoreContext::current()->id()];
-        $stmt = $db->prepare("SELECT id, amount, idempotency_key FROM payment_transactions WHERE order_id = :order AND store_id = :store AND status = 'refund_pending' ORDER BY id DESC");
+        $stmt = $db->prepare("SELECT id, amount, idempotency_key, raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store AND status = 'refund_pending' ORDER BY id DESC");
         $stmt->execute($params);
         $request = null;
-        // A job the provider answered "pending" also logs refund_pending, under the execute key: that row is the
-        // executed refund, not a request (re-deriving an execute key from it would refund again).
+        // Only requestRefund() rows are requests. A job the provider answered "pending" also logs refund_pending, under
+        // its execute key or (credit notes, RMA) its own key: that row is the executed refund, and re-deriving an
+        // execute key from it would refund again.
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
-            if (self::refundRequestKey((string)$row['idempotency_key']) === null) { $request = $row; break; }
+            $raw = json_decode((string)($row['raw_response'] ?? ''), true);
+            if (is_array($raw) && ($raw['event_type'] ?? null) === 'refund.requested') { $request = $row; break; }
         }
         if ($request === null) return null;
         $executeKey = self::refundExecuteKey((string)$request['idempotency_key']);

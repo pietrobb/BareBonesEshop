@@ -73,7 +73,7 @@ try {
             // Stores may hold different provider credentials, so gateways are cached per provider scope.
             $gatewayKey = StoreContext::current()->providerId() . ':' . $provider;
             $gateways[$gatewayKey] ??= Adapters::payment($provider);
-            return $gateways[$gatewayKey]->getStatus((string)$order['payment_id']);
+            return PendingOrderExpiry::providerStatus($order, $gateways[$gatewayKey], $provider);
         }
     );
     if ($verbose && $expiredOrders > 0) echo "Expired pending orders: {$expiredOrders}\n";

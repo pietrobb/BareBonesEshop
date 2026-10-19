@@ -21,6 +21,23 @@ class PendingOrderExpiry {
         return $ttls;
     }
 
+    /**
+     * The provider's status of a pending order's payment. A payment the provider reports paid is booked
+     * here: its notification may never come (e.g. sent to a route a deploy removed), and the expiry
+     * sweep only skips paid payments, which would leave the order pending forever.
+     */
+    public static function providerStatus(array $order, PaymentAdapter $gateway, string $provider): string {
+        $paymentId = (string)$order['payment_id'];
+        if ($gateway instanceof PaymentStatusEventAdapter) {
+            $event = $gateway->statusEvent($paymentId);
+            if ($event['event_type'] === 'payment.paid') {
+                PaymentService::applyProviderStatusEvent($event, $provider);
+                return 'paid';
+            }
+        }
+        return $gateway->getStatus($paymentId);
+    }
+
     public static function sweep(array $cfg, ?callable $paymentStatusResolver): int {
         $storeIds = array_map('strval', array_keys((array)(Bootstrap::stores()['stores'] ?? [])));
         if ($storeIds === []) $storeIds = [StoreContext::current()->id()];

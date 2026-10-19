@@ -45,6 +45,16 @@ interface PullVerifiedNotificationAdapter extends PaymentAdapter {
     public function verifiedEvent(array $notification): array;
 }
 
+/**
+ * Providers whose authenticated API describes a payment as the same event their notification
+ * would (GoPayPayment, ThePayPayment, ComgatePayment, PayUPayment). The pending-order sweep books a payment the provider
+ * reports paid whose notification never arrived (e.g. it went to a route a deploy removed).
+ */
+interface PaymentStatusEventAdapter extends PaymentAdapter {
+    /** @return array{event_type:string, event_id:string, data:array} like handleWebhook() / verifiedEvent() */
+    public function statusEvent(string $paymentId): array;
+}
+
 /** The notified payment is unknown to the provider or not ours: answer 400, change nothing. */
 class PaymentNotificationUnverified extends RuntimeException {}
 

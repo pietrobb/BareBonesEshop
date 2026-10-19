@@ -400,14 +400,26 @@ class ShippingService
     /**
      * Shipped admin shipments of $carrierId with tracking number $awb in $stores. The admin types both by
      * hand: the tracking number matches without spaces/dashes and case, the carrier by its letters and
-     * digits ("Packeta" = packeta, "HTTP Carrier" = http-carrier). An empty carrier or a brand name
-     * ("Zásielkovňa") matches through the carrier of the order's shipping method.
+     * digits ("Packeta", "Packeta SK" = packeta, "HTTP Carrier" = http-carrier). An empty carrier or a brand name
+     * ("Zásielkovňa") matches through the carrier of the order's shipping method; a carrier naming another
+     * registered carrier ("GLS", "GLS Slovakia") never does, so carrier A cannot deliver carrier B's parcel.
      * @param list<string> $stores
      * @return list<array<string,mixed>>
      */
     private static function shippedShipments(string $carrierId, string $awb, array $stores): array
     {
         $key = static fn(string $value): string => strtolower((string)preg_replace('/[^A-Za-z0-9]+/', '', $value));
+        $wanted = $key($carrierId);
+        $others = array_values(array_filter(array_map($key, array_map('strval', array_keys(Adapters::registry('shipping')))),
+            static fn(string $code): bool => $code !== '' && $code !== $wanted));
+        $matches = static function (array $row) use ($key, $wanted, $others): bool {
+            $carrier = $key((string)$row['carrier']);
+            if ($wanted !== '' && str_contains($carrier, $wanted)) return true;
+            foreach ($others as $other) {
+                if (str_contains($carrier, $other)) return false;
+            }
+            return $key((string)$row['method_carrier']) === $wanted;
+        };
         $stmt = Db::get()->prepare("SELECT s.id, s.store_id, s.order_id, s.carrier, m.carrier AS method_carrier FROM shipments s
             LEFT JOIN orders o ON o.id = s.order_id AND o.store_id = s.store_id
             LEFT JOIN shipping_methods m ON m.code = o.shipping_method AND m.store_id = ?
@@ -415,8 +427,7 @@ class ShippingService
               AND LOWER(REPLACE(REPLACE(s.tracking_number, ' ', ''), '-', '')) = ?
               AND s.store_id IN (" . implode(',', array_fill(0, count($stores), '?')) . ") LIMIT 20");
         $stmt->execute([StoreContext::current()->providerId(), strtolower(str_replace([' ', '-'], '', $awb)), ...$stores]);
-        return array_values(array_filter($stmt->fetchAll(\PDO::FETCH_ASSOC), static fn(array $row): bool =>
-            in_array($key($carrierId), [$key((string)$row['carrier']), $key((string)$row['method_carrier'])], true)));
+        return array_values(array_filter($stmt->fetchAll(\PDO::FETCH_ASSOC), $matches));
     }
 
     /**
