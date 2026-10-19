@@ -11,7 +11,8 @@
  *    'country' => string|null,    // ISO2 (echoed)
  *    'trader_name' => string|null,
  *    'trader_addr' => string|null,
- *    'raw' => string|null]        // raw response (debug)
+ *    'raw' => string|null,        // raw response, kept as evidence (vat_id_checks)
+ *    'request_identifier' => string|null]  // optional: registry consultation number (VIES requestIdentifier)
  *
  * Status semantics:
  *   - valid       → VAT ID confirmed by registry; cache 24h
@@ -22,7 +23,7 @@ interface VatIdValidator
 {
     /**
      * @param string $vatId Full VAT ID with country prefix (e.g. "DE123456789")
-     * @return array{status:string, country:string|null, trader_name:string|null, trader_addr:string|null, raw:string|null}
+     * @return array{status:string, country:string|null, trader_name:string|null, trader_addr:string|null, raw:string|null, request_identifier?:string|null}
      */
     public function check(string $vatId): array;
 }

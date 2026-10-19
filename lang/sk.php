@@ -1197,7 +1197,6 @@ return [
     'admin.sales.live_data'       => 'Živé údaje z aktuálnej databázy',
     'admin.sales.updated'         => 'aktualizované',
     'admin.sales.refresh'         => 'Obnoviť údaje',
-    'admin.sales.order_value_today' => 'Dnešná hodnota objednávok',
     'admin.sales.pending_payments' => 'Platby čakajúce na dokončenie',
     'admin.sales.total_downloads' => 'Digitálne stiahnutia spolu',
     'admin.sales.attention'       => 'Vyžaduje pozornosť',

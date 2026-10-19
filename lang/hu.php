@@ -659,7 +659,6 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.sales.live_data' => 'Élő adatok az aktuális adatbázisból',
     'admin.sales.updated' => 'frissítve',
     'admin.sales.refresh' => 'Adatok frissítése',
-    'admin.sales.order_value_today' => 'Mai rendelési érték',
     'admin.sales.pending_payments' => 'Befejezésre váró fizetések',
     'admin.sales.total_downloads' => 'Összes digitális letöltés',
     'admin.sales.attention' => 'Figyelmet igényel',

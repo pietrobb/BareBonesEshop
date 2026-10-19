@@ -150,7 +150,8 @@ function apiValidateCoupon(): array {
     $items = array_values(array_filter(Cart::enriched()['items'] ?? [], static fn(array $item): bool => $item['available'] ?? true));
     if ($items) $subtotal = (int)array_sum(array_column($items, 'total'));
     $promotionDiscount = 0;
-    foreach (Pricing::autoCartRules($subtotal, $items, !empty($_SESSION['customer_id']) ? (int)$_SESSION['customer_id'] : null) as $rule) {
+    $cartCurrency = $items ? strtolower((string)($items[0]['currency'] ?? 'eur')) : null;
+    foreach (Pricing::autoCartRules($subtotal, $items, !empty($_SESSION['customer_id']) ? (int)$_SESSION['customer_id'] : null, $cartCurrency) as $rule) {
         $promotionDiscount += max(0, (int)($rule['discount'] ?? 0));
     }
     $result = CheckoutService::couponFor($code, $subtotal, $promotionDiscount, $email);
@@ -643,14 +644,19 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
             ]);
         }
     }
+    $preliminaryDigitalOnly = cartIsDigitalOnly(array_values(array_filter(Cart::enriched()['items'] ?? [], static fn(array $item): bool => $item['available'] ?? true)));
+    // Goods collected in the seller's own store are supplied there, whatever the buyer's address.
+    $preliminaryRate = $preliminaryDigitalOnly ? null : ShippingService::selectRate($shippingMethod, $country, 0);
     $vatContext = [
         'seller_country'        => $sellerCountry,
         'seller_vat_registered' => $sellerVatRegistered,
         'seller_oss_enabled'    => $sellerOss,
-        'customer_country'      => $country,
+        'customer_country'      => vatSupplyCountry($preliminaryRate, $country, $sellerCountry),
         // Reverse charge needs a VAT ID of another member state; Greece's prefix is EL.
         'customer_vat_id_valid' => $vatIdValid && (substr($vatId, 0, 2) === 'EL' ? 'GR' : substr($vatId, 0, 2)) !== $sellerCountry,
         'is_b2b'                => $vatId !== '',
+        // Goods dispatched to the address back the country; a digital-only order has nothing but the shopper's claim.
+        'customer_country_verified' => !$preliminaryDigitalOnly,
     ];
     $taxProviderCode = Adapters::defaultProviderCode('tax');
     $taxProvider = Adapters::tax($taxProviderCode);
@@ -690,11 +696,10 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     }
 
     // Automatic promotions first; the coupon is then priced on what they leave (CheckoutService::couponFor).
-    $autoRules = Pricing::autoCartRules($cart['subtotal'], $cart['items'], $loggedInCustomerId);
+    $cartCurrency = strtolower((string)($cart['items'][0]['currency'] ?? 'eur'));
+    $autoRules = Pricing::autoCartRules($cart['subtotal'], $cart['items'], $loggedInCustomerId, $cartCurrency);
     $promotionDiscount = 0;
-    $promotionFreeShipping = false;
     foreach ($autoRules as $rule) {
-        if ($rule['action'] === 'free_shipping') $promotionFreeShipping = true;
         $promotionDiscount += max(0, (int)($rule['discount'] ?? 0));
     }
 
@@ -718,6 +723,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     }
     $promotionDiscount = $combinedDiscounts['promotion'];
     $totalDiscount = min($cart['subtotal'], $couponDiscount + $promotionDiscount);
+    $promotionFreeShipping = Pricing::freeShippingEarned($cart['subtotal'] - $totalDiscount, $cart['items'], $loggedInCustomerId, $cartCurrency);
 
     $metrics = shippingCartMetrics($cart['items']);
     $totalWeight = $digitalOnly ? 0 : $metrics['weight_g'];
@@ -766,6 +772,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     if (Adapters::integration() !== null) $providerCodes['erp'] = Adapters::defaultProviderCode('erp');
     $financialSnapshot = $taxProvider::buildSnapshot($availableItems, $vatContext, [
         'discount' => $totalDiscount,
+        'line_discounts' => $promotionDiscount > 0 && class_exists('Promotions') ? Promotions::lineDiscounts($autoRules, $availableItems) : [],
         'shipping' => $shippingCost,
         'payment_fee' => $paymentFee,
         'currency' => $currency,
@@ -916,6 +923,11 @@ function cartIsDigitalOnly(array $items): bool {
         if (!VariantAvailability::isDigitalType((string)($item['product_type'] ?? ''))) return false;
     }
     return true;
+}
+
+/** Country where the goods are supplied for VAT: collected in the seller's own store, they are supplied there. */
+function vatSupplyCountry(?array $shippingRate, string $customerCountry, string $sellerCountry): string {
+    return ($shippingRate['carrier'] ?? '') === 'pickup' ? $sellerCountry : $customerCountry;
 }
 
 function digitalDeliveryRate(): array {

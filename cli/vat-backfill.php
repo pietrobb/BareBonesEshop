@@ -78,7 +78,9 @@ try {
             'customer_vat_id_valid' => false,
             'is_b2b'                => false,
         ]);
-        $issuedAt = substr((string)$o['created_at'], 0, 10) ?: date('Y-m-d');
+        // created_at is stored in UTC; the rate applies on the shop's local date of the sale.
+        $createdAt = strtotime((string)$o['created_at'] . ' UTC');
+        $issuedAt = $createdAt === false ? date('Y-m-d') : date('Y-m-d', $createdAt);
 
         // Per-line backfill
         $itemsStmt = $db->prepare("SELECT id, total, vat_class, vat_amount, net_amount FROM order_items WHERE order_id = ?");

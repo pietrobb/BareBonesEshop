@@ -228,9 +228,8 @@ class CheckoutService {
      */
     public static function discountPreview(string $couponCode, int $subtotal, ?string $email, array $items, ?int $customerId): array {
         $promotionDiscount = 0;
-        $freeShipping = false;
-        foreach (Pricing::autoCartRules($subtotal, $items, $customerId) as $rule) {
-            if ($rule['action'] === 'free_shipping') $freeShipping = true;
+        $currency = strtolower((string)($items[0]['currency'] ?? 'eur'));
+        foreach (Pricing::autoCartRules($subtotal, $items, $customerId, $currency) as $rule) {
             $promotionDiscount += max(0, (int)($rule['discount'] ?? 0));
         }
         $couponDiscount = 0;
@@ -246,6 +245,7 @@ class CheckoutService {
         if ($couponDiscount > 0 && $combined['coupon'] === 0) $couponError = 'coupon_not_combinable';
         $couponDiscount = $combined['coupon'];
         $promotionDiscount = $combined['promotion'];
+        $freeShipping = Pricing::freeShippingEarned($subtotal - min($subtotal, $couponDiscount + $promotionDiscount), $items, $customerId, $currency);
         return ['coupon_discount' => $couponDiscount, 'coupon_error' => $couponError, 'promotion_discount' => $promotionDiscount, 'free_shipping' => $freeShipping];
     }
 }

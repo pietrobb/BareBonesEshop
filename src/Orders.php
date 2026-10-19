@@ -474,8 +474,9 @@ class Orders {
             }
         }
 
-        $rev = $db->prepare("SELECT COALESCE(SUM(total), 0) FROM orders WHERE store_id = :store AND status NOT IN ('cancelled', 'refunded')");
-        $rev->execute([':store' => StoreContext::current()->id()]);
+        [$source, $params] = SalesReport::revenueSource(StoreContext::current()->id());
+        $rev = $db->prepare("SELECT COALESCE(SUM(o.total - COALESCE(r.refunded, 0)), 0) FROM {$source} WHERE " . SalesReport::revenueCondition());
+        $rev->execute($params + [':store' => StoreContext::current()->id()]);
         $result['revenue'] = (int)$rev->fetchColumn();
 
         return $result;

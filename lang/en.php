@@ -1192,7 +1192,6 @@ return [
     'admin.sales.live_data'       => 'Live data from the current database',
     'admin.sales.updated'         => 'updated',
     'admin.sales.refresh'         => 'Refresh data',
-    'admin.sales.order_value_today' => 'Order value today',
     'admin.sales.pending_payments' => 'Payments awaiting completion',
     'admin.sales.total_downloads' => 'Total digital downloads',
     'admin.sales.attention'       => 'Requires attention',

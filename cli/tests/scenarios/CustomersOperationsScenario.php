@@ -1451,11 +1451,11 @@ $snapshotAmounts = ['discount'=>2330, 'shipping'=>600, 'payment_fee'=>120, 'curr
 $financialSnapshot = VatService::buildSnapshot($snapshotItems, $snapshotContext, $snapshotAmounts);
 assert_equals(1, $financialSnapshot['version'], 'VAT snapshot: versioned contract');
 assert_equals(21690, $financialSnapshot['totals']['gross'], 'VAT snapshot: gross includes discounted products, shipping and fee');
-assert_equals(3763, $financialSnapshot['totals']['vat'], 'VAT snapshot: mixed-rate VAT is deterministic');
-assert_equals(17927, $financialSnapshot['totals']['net'], 'VAT snapshot: net + VAT = gross');
-assert_equals(2182, $financialSnapshot['breakdown']['23']['vat'], 'VAT snapshot: shipping follows standard product rate');
+assert_equals(3785, $financialSnapshot['totals']['vat'], 'VAT snapshot: mixed-rate VAT is deterministic');
+assert_equals(17905, $financialSnapshot['totals']['net'], 'VAT snapshot: net + VAT = gross');
+assert_equals(2204, $financialSnapshot['breakdown']['23']['vat'], 'VAT snapshot: shipping and payment fee follow standard product rate');
 assert_equals(1581, $financialSnapshot['breakdown']['19']['vat'], 'VAT snapshot: coupon lowers reduced-rate tax base');
-assert_equals(120, $financialSnapshot['breakdown']['0']['net'], 'VAT snapshot: payment fee remains exempt');
+assert_true(!isset($financialSnapshot['breakdown']['0']), 'VAT snapshot: payment fee is not exempt (part of the price of the goods)');
 assert_equals($financialSnapshot, VatService::buildSnapshot($snapshotItems, $snapshotContext, $snapshotAmounts), 'VAT snapshot: identical inputs produce identical snapshot and fingerprint');
 VatService::validateSnapshot($financialSnapshot);
 $tamperedSnapshot = $financialSnapshot;

@@ -16,7 +16,7 @@ final class ViesVatIdValidator implements VatIdValidator
     {
         $vatId = strtoupper(preg_replace('/\s+/', '', $vatId));
         if (!preg_match('/^([A-Z]{2})([0-9A-Z]{6,14})$/', $vatId, $m)) {
-            return $this->result('invalid', null, null, null, null);
+            return self::result('invalid', null, null, null, null);
         }
         [$_, $country, $number] = $m;
 
@@ -37,14 +37,27 @@ final class ViesVatIdValidator implements VatIdValidator
         $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
         if ($raw === false || $err !== '' || $code < 200 || $code >= 300) {
-            return $this->result('unverified', $country, null, null, $err ?: $raw);
+            return self::result('unverified', $country, null, null, $err ?: (string)$raw);
         }
 
-        $isValid = (bool)preg_match('#<valid[^>]*>true</valid>#', (string)$raw);
-        $name    = $this->soapField((string)$raw, 'name');
-        $addr    = $this->soapField((string)$raw, 'address');
+        return self::parse((string)$raw, $country);
+    }
 
-        return $this->result($isValid ? 'valid' : 'invalid', $country, $name, $addr, (string)$raw);
+    /**
+     * Answer of the checkVat SOAP service. Its elements are namespace-prefixed (<ns2:valid>), so tags are matched
+     * with any prefix. A SOAP fault (MS_UNAVAILABLE, TIMEOUT, ...) or an answer without <valid> is 'unverified' —
+     * never 'invalid', which would bill a valid business with VAT.
+     * @return array{status:string, country:?string, trader_name:?string, trader_addr:?string, raw:?string, request_identifier?:?string}
+     */
+    public static function parse(string $raw, string $country): array
+    {
+        $valid = self::soapField($raw, 'valid');
+        if (self::soapField($raw, 'faultstring') !== null || $valid === null) {
+            return self::result('unverified', $country, null, null, $raw);
+        }
+        $status = strtolower($valid) === 'true' ? 'valid' : 'invalid';
+        return self::result($status, $country, self::soapField($raw, 'name'), self::soapField($raw, 'address'), $raw)
+            + ['request_identifier' => self::soapField($raw, 'requestIdentifier')];
     }
 
     private function buildSoapEnvelope(string $country, string $number): string
@@ -65,16 +78,17 @@ final class ViesVatIdValidator implements VatIdValidator
 XML;
     }
 
-    private function soapField(string $xml, string $tag): ?string
+    private static function soapField(string $xml, string $tag): ?string
     {
-        if (preg_match('#<' . preg_quote($tag, '#') . '[^>]*>(.*?)</' . preg_quote($tag, '#') . '>#s', $xml, $m)) {
+        $tag = preg_quote($tag, '#');
+        if (preg_match('#<(?:[A-Za-z][\w.-]*:)?' . $tag . '(?:\s[^>]*)?>(.*?)</(?:[A-Za-z][\w.-]*:)?' . $tag . '\s*>#s', $xml, $m)) {
             $val = trim(html_entity_decode($m[1], ENT_XML1 | ENT_QUOTES, 'UTF-8'));
             return $val !== '---' && $val !== '' ? $val : null;
         }
         return null;
     }
 
-    private function result(string $status, ?string $country, ?string $name, ?string $addr, ?string $raw): array
+    private static function result(string $status, ?string $country, ?string $name, ?string $addr, ?string $raw): array
     {
         return [
             'status'      => $status,

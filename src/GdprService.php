@@ -82,6 +82,7 @@ class GdprService {
         'gdpr_events' => 'salted hashes only; the Art.5(2) accountability record of the erasure itself',
         'merchant_notifications' => 'recipient is the merchant\'s own address',
         'vat_id_cache' => 'public VIES register data keyed by VAT id, purged by TTL retention',
+        'vat_id_checks' => 'VIES evidence of reverse-charge sales, retained with the accounting documents',
         'credit_note_items' => 'product lines of a retained accounting document',
         'api_clients' => self::NOT_CUSTOMER_DATA, 'attribute_definitions' => self::NOT_CUSTOMER_DATA,
         'brands' => self::NOT_CUSTOMER_DATA, 'categories' => self::NOT_CUSTOMER_DATA, 'customer_groups' => self::NOT_CUSTOMER_DATA,

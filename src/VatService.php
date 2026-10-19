@@ -104,6 +104,7 @@ class VatService implements TaxProvider
     {
         $cfg     = self::config();
         $country = strtoupper(trim($country));
+        $category = strtolower(trim($class));
         $class   = self::resolveClass($class);
         $date    = $atDate ?: date('Y-m-d');
 
@@ -112,23 +113,19 @@ class VatService implements TaxProvider
             return (float)($cfg['default_rate'] ?? 0);
         }
 
-        // Check current band
-        $vfrom = $row['valid_from'] ?? '1970-01-01';
-        if ($date >= $vfrom) {
-            return (float)($row[$class] ?? $row['standard'] ?? 0);
-        }
-
-        // Walk history (date < current valid_from)
-        foreach (($row['history'] ?? []) as $h) {
-            $hf = $h['valid_from'] ?? '1970-01-01';
-            $ht = $h['valid_to']   ?? '9999-12-31';
-            if ($date >= $hf && $date <= $ht) {
-                return (float)($h[$class] ?? $h['standard'] ?? 0);
+        // A product category (books, medicines, ...) may have its own rate in a country; otherwise its class rate.
+        $band = $row;
+        if ($date < ($row['valid_from'] ?? '1970-01-01')) {
+            // Walk history (date < current valid_from); no matching band falls back to the current one.
+            foreach (($row['history'] ?? []) as $h) {
+                if ($date >= ($h['valid_from'] ?? '1970-01-01') && $date <= ($h['valid_to'] ?? '9999-12-31')) {
+                    $band = $h;
+                    break;
+                }
             }
         }
-
-        // Fallback
-        return (float)($row[$class] ?? $row['standard'] ?? 0);
+        if (isset($band['categories'][$category])) return (float)$band['categories'][$category];
+        return (float)($band[$class] ?? $band['standard'] ?? 0);
     }
 
     /**
@@ -141,6 +138,7 @@ class VatService implements TaxProvider
      *   customer_country      ISO-2 of customer
      *   customer_vat_id_valid bool (VIES result)
      *   is_b2b                bool (customer claims B2B)
+     *   customer_country_verified bool (default true; false = declared only, e.g. digital-only order)
      *
      * Returns:
      *   ['scenario' => string, 'vat_rate' => float|null,
@@ -166,6 +164,19 @@ class VatService implements TaxProvider
                 'vat_rate'     => 0.0,
                 'applies_vat'  => false,
                 'note_key'     => 'vat.non_vat_payer_note',
+                'rate_country' => $sc,
+            ];
+        }
+
+        // A country outside the EU only zero-rates the sale when something backs it: goods dispatched to an address
+        // there. A declared country alone (digital-only order) keeps the seller's domestic VAT.
+        $countryVerified = (bool)($ctx['customer_country_verified'] ?? true);
+        if (!self::isEuCountry($cc) && !$countryVerified) {
+            return [
+                'scenario'     => self::SCENARIO_DOMESTIC,
+                'vat_rate'     => null,
+                'applies_vat'  => true,
+                'note_key'     => '',
                 'rate_country' => $sc,
             ];
         }
@@ -270,7 +281,7 @@ class VatService implements TaxProvider
             $gross = $unitGross * $quantity;
             $vatClass = self::resolveClass((string)($item['vat_class'] ?? 'standard'));
             $rateBasisPoints = $appliesVat
-                ? (int)round(self::rate($rateCountry, $vatClass, $effectiveDate) * 100)
+                ? (int)round(self::rate($rateCountry, (string)($item['vat_category'] ?? $item['vat_class'] ?? 'standard'), $effectiveDate) * 100)
                 : 0;
             $products[] = [
                 'index' => (int)$index,
@@ -290,7 +301,21 @@ class VatService implements TaxProvider
         }
 
         $discount = min($subtotal, max(0, (int)($amounts['discount'] ?? 0)));
-        $discounts = self::allocateDiscount($products, $subtotal, $discount);
+        // A discount tied to particular lines (buy X get Y: the free units) stays on them; the rest of the discount is
+        // spread over what remains of every line in proportion.
+        $discounts = array_fill(0, count($products), 0);
+        $targetedTotal = 0;
+        foreach ((array)($amounts['line_discounts'] ?? []) as $position => $amount) {
+            if (!isset($products[$position])) throw new \InvalidArgumentException('Financial snapshot line discount has no line');
+            $amount = min(max(0, (int)$amount), $products[$position]['gross_before_discount'] - $discounts[$position], $discount - $targetedTotal);
+            $discounts[$position] += $amount;
+            $targetedTotal += $amount;
+        }
+        $remaining = $products;
+        foreach ($remaining as $position => $product) $remaining[$position]['gross_before_discount'] -= $discounts[$position];
+        foreach (self::allocateDiscount($remaining, $subtotal - $targetedTotal, $discount - $targetedTotal) as $position => $share) {
+            $discounts[$position] += $share;
+        }
         $components = [];
         $maxProductRate = 0;
         foreach ($products as $position => $product) {
@@ -307,9 +332,12 @@ class VatService implements TaxProvider
             $maxProductRate = max($maxProductRate, $product['rate_basis_points']);
         }
 
+        // Shipping and the payment (e.g. cash on delivery) fee are part of the consideration for the goods: they carry
+        // VAT at the highest rate among the goods.
+        $ancillaryRate = $appliesVat ? $maxProductRate : 0;
         $shipping = max(0, (int)($amounts['shipping'] ?? 0));
         if ($shipping > 0) {
-            $shippingRate = $appliesVat ? $maxProductRate : 0;
+            $shippingRate = $ancillaryRate;
             $calculated = self::computeGross($shipping, $shippingRate);
             $components[] = [
                 'type' => 'shipping',
@@ -323,13 +351,14 @@ class VatService implements TaxProvider
 
         $paymentFee = max(0, (int)($amounts['payment_fee'] ?? 0));
         if ($paymentFee > 0) {
+            $calculated = self::computeGross($paymentFee, $ancillaryRate);
             $components[] = [
                 'type' => 'payment_fee',
-                'vat_class' => 'exempt',
-                'rate_basis_points' => 0,
-                'gross' => $paymentFee,
-                'net' => $paymentFee,
-                'vat' => 0,
+                'vat_class' => 'payment_fee',
+                'rate_basis_points' => $ancillaryRate,
+                'gross' => $calculated['gross'],
+                'net' => $calculated['net'],
+                'vat' => $calculated['vat'],
             ];
         }
 
@@ -463,9 +492,6 @@ class VatService implements TaxProvider
                 $shipping += $componentGross;
             } else {
                 $paymentComponents++;
-                if ($rateBasisPoints !== 0 || $componentVat !== 0) {
-                    throw new \InvalidArgumentException('Financial snapshot payment fee must be exempt');
-                }
                 $paymentFee += $componentGross;
             }
 
@@ -592,7 +618,7 @@ class VatService implements TaxProvider
         }
 
         $res = $validator->check($vatId);
-        $status = (string)($res['status'] ?? 'unverified');
+        $status = (string)$res['status'];
         $ttl = ($status === 'unverified') ? 3600 : 86400; // 1h vs 24h
 
         $up = $db->prepare(
@@ -626,6 +652,15 @@ class VatService implements TaxProvider
             ':ttl' => $ttl,
             ':raw' => $res['raw'] ?? null,
         ]);
+        // The cache row is overwritten by the next check; the evidence a reverse-charge sale relied on is kept.
+        if (Db::tableExists('vat_id_checks')) {
+            $db->prepare('INSERT INTO vat_id_checks (vat_id, country, status, trader_name, trader_addr, request_identifier, checked_at, raw_response)
+                VALUES (:v, :c, :s, :tn, :ta, :rid, :ck, :raw)')->execute([
+                ':v' => $vatId, ':c' => $res['country'] ?? null, ':s' => $status, ':tn' => $res['trader_name'] ?? null,
+                ':ta' => $res['trader_addr'] ?? null, ':rid' => $res['request_identifier'] ?? null,
+                ':ck' => gmdate('Y-m-d H:i:s', $now), ':raw' => $res['raw'] ?? null,
+            ]);
+        }
 
         return [
             'status'      => $status,

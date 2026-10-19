@@ -312,6 +312,12 @@ if ($mysqlDsn) {
         assert_equals(2, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='products' AND COLUMN_NAME IN ('stock_low_threshold','stock_critical_threshold')")->fetchColumn(), 'MySQL live: stock alert migration adds threshold columns idempotently');
         assert_equals(2, (int)$my->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('stock_alert_state','stock_alert_digests')")->fetchColumn(), 'MySQL live: stock alert state and digest tables exist');
         foreach (['stock_alert_state', 'stock_alert_digests'] as $table) $my->exec("DROP TABLE {$table}");
+        $my->exec('DROP TABLE IF EXISTS vat_id_checks');
+        $vatIdChecksMigrationMysql = require TEST_CLI_DIR . '/../migrations/20261019090000_vat_id_checks.php';
+        $vatIdChecksMigrationMysql->up($my, false);
+        $vatIdChecksMigrationMysql->up($my, false);
+        assert_equals(9, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='vat_id_checks'")->fetchColumn(), 'MySQL live: VIES evidence migration creates its table idempotently');
+        $my->exec('DROP TABLE vat_id_checks');
         foreach (['content_redirects', 'content_banners', 'content_menu_items'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['credit_note_items', 'order_refunds', 'return_exchanges', 'return_receipts', 'return_labels'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['shipment_items', 'shipments', 'bundle_components', 'inventory_receipts', 'purchase_order_items', 'purchase_orders', 'supplier_products', 'suppliers', 'stock_movements'] as $table) $my->exec("DROP TABLE {$table}");
@@ -626,6 +632,10 @@ $shipmentTrackingMigration = require TEST_CLI_DIR . '/../migrations/202610140900
 $shipmentTrackingMigration->up($pdo, true);
 $shipmentTrackingMigration->up($pdo, true);
 assert_true(in_array('tracking_url', array_column($pdo->query('PRAGMA table_info(shipments)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true), 'A12.8 migration: shipment tracking URL column is added idempotently');
+$vatIdChecksMigration = require TEST_CLI_DIR . '/../migrations/20261019090000_vat_id_checks.php';
+$vatIdChecksMigration->up($pdo, true);
+$vatIdChecksMigration->up($pdo, true);
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='vat_id_checks'")->fetchColumn(), 'R5 VAT migration: the VIES evidence table exists idempotently');
 
 // ============================================================
 // TEST 3: CSV Import

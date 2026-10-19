@@ -132,7 +132,7 @@ function collect(string $from, string $to, ?string $storeCode): array
 
     $sql = "
         SELECT i.id, i.number, i.issued_at, i.currency, i.customer_snapshot,
-               i.vat_breakdown, i.financial_snapshot
+               i.vat_breakdown, i.financial_snapshot, i.type
         FROM invoices i
         $where
     ";
@@ -146,7 +146,15 @@ function collect(string $from, string $to, ?string $storeCode): array
         if ($cc === '') continue;
 
         $financialJson = trim((string)($row['financial_snapshot'] ?? ''));
-        if ($financialJson !== '') {
+        $creditNote = (string)($row['type'] ?? 'invoice') === 'credit_note';
+        if ($creditNote) {
+            // A credit note carries its source invoice's snapshot for reference; what it credits is its own
+            // breakdown, and it always reduces the period's OSS base and VAT.
+            $rates = [];
+            foreach ((json_decode((string)($row['vat_breakdown'] ?? '{}'), true) ?: []) as $rateKey => $group) {
+                $rates[$rateKey] = ['net' => -abs((int)($group['net'] ?? 0)), 'vat' => -abs((int)($group['vat'] ?? 0))];
+            }
+        } elseif ($financialJson !== '') {
             $financialSnapshot = json_decode($financialJson, true, 512, JSON_THROW_ON_ERROR);
             if (!is_array($financialSnapshot)) throw new RuntimeException('Invoice financial snapshot is invalid');
             $taxProvider = Adapters::tax((string)($financialSnapshot['providers']['tax'] ?? Adapters::defaultProviderCode('tax')));

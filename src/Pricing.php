@@ -451,15 +451,18 @@ class Pricing {
      * Check automatic cart rules (free shipping etc.)
      * Returns array of triggered actions.
      */
-    public static function autoCartRules(int $subtotal, array $items = [], ?int $customerId = null): array {
+    public static function autoCartRules(int $subtotal, array $items = [], ?int $customerId = null, ?string $currency = null): array {
         $cfg = self::config();
         $actions = [];
+        $rulesCurrency = $currency === null ? null : self::cartRulesCurrency();
 
         foreach ($cfg['cart_rules'] ?? [] as $rule) {
             if (!($rule['active'] ?? false)) continue;
             if (($rule['type'] ?? '') !== 'automatic') continue;
 
             $conditions = $rule['conditions'] ?? [];
+            // min_subtotal is an amount in the rule's currency: a cart in another currency is not compared with it.
+            if ($currency !== null && strtolower((string)($conditions['currency'] ?? $rulesCurrency)) !== strtolower($currency)) continue;
             if (!empty($conditions['min_subtotal']) && $subtotal < $conditions['min_subtotal']) continue;
 
             $actions[] = [
@@ -473,6 +476,31 @@ class Pricing {
             $actions = array_merge($actions, Promotions::cartActions($items, $subtotal, $customerId));
         }
         return $actions;
+    }
+
+    /**
+     * Whether an automatic rule gives free shipping. Like a shipping method's "free from", it is earned by what the
+     * buyer pays for the goods ($paidSubtotal = subtotal after the coupon and automatic discounts) in the cart's currency.
+     */
+    public static function freeShippingEarned(int $paidSubtotal, array $items, ?int $customerId, string $currency): bool {
+        foreach (self::autoCartRules(max(0, $paidSubtotal), $items, $customerId, $currency) as $rule) {
+            if (($rule['action'] ?? '') === 'free_shipping') return true;
+        }
+        return false;
+    }
+
+    /**
+     * Currency of pricing.json cart-rule amounts without their own conditions.currency: a store that defines its own
+     * cart_rules (stores.json pricing) prices them in its currency, shared rules are in the default store's currency.
+     */
+    private static function cartRulesCurrency(): string {
+        if (class_exists('StoreContext') && StoreContext::hasCurrent()) {
+            $store = StoreContext::current()->config();
+            if (isset($store['pricing']['cart_rules'])) return strtolower((string)($store['currency'] ?? 'eur'));
+        }
+        $stores = class_exists('Bootstrap') ? Bootstrap::stores() : [];
+        $default = (string)($stores['default_store'] ?? 'default');
+        return strtolower((string)($stores['stores'][$default]['currency'] ?? 'eur'));
     }
 
     /**
