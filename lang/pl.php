@@ -1465,6 +1465,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout_saved_address_use' => 'Użyj adresu',
     'pickup_point' => 'Punkt odbioru',
     'pickup_point_refresh' => 'Pokaż punkty odbioru',
+    'pickup_point_search' => 'Szukaj: miejscowość, ulica lub kod pocztowy',
     'pickup_point_choose' => '— wybierz punkt odbioru —',
     'pickup_point_address' => '— dostawa na mój adres —',
     'pickup_point_unavailable' => 'Dla tego adresu nie ma dostępnych punktów odbioru. Wybierz inną metodę dostawy.',

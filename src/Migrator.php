@@ -10,9 +10,12 @@
  * State: schema_migrations(name UNIQUE, checksum, applied_at, duration_ms). Extension migrations
  * (extensions/<code>/migrations) use the same runner with their own table and a "<code>/" name prefix.
  *
- * Concurrency: file lock on db/.migrations.lock (flock, 10s timeout). When db/ is not writable
- * (read-only code mount, e.g. deploy/docker-compose.yml) the lock lives in the private runtime
- * directory (config private_runtime_dir), else in the system temp directory.
+ * Concurrency (10s timeout): the lock must be the same for every process that migrates the same
+ * database, whatever user or container runs it. SQLite: flock on "<database file>.migrations.lock"
+ * (every writer can write the database directory, SQLite needs it for its journal). MySQL/MariaDB:
+ * GET_LOCK named after the database, held on the migrating connection, plus the file lock below.
+ * Otherwise a file lock on db/.migrations.lock; when db/ is not writable (read-only code mount)
+ * the private runtime directory (config private_runtime_dir), else the system temp directory.
  *
  * Failure: SQLite wraps each migration in BEGIN/ROLLBACK. MySQL-family DDL
  * commits implicitly; on every driver the marker row is inserted only on success.
@@ -125,6 +128,7 @@ class Migrator {
     private string $namePrefix;
     /** @var resource|null */
     private $lockHandle = null;
+    private ?string $dbLockName = null;
 
     public function __construct(?PDO $db = null, ?string $migrationsDir = null, ?string $lockFile = null, string $table = 'schema_migrations', string $namePrefix = '') {
         if (!preg_match('/^[a-z_]+$/', $table)) throw new \InvalidArgumentException('invalid migrations table name');
@@ -133,7 +137,15 @@ class Migrator {
         $this->db            = $db ?? Db::get();
         $this->isSqlite      = $this->db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite';
         $this->migrationsDir = $migrationsDir ?? (dirname(__DIR__) . '/migrations');
-        $this->lockFile = $lockFile ?? self::defaultLockFile();
+        $this->lockFile = $lockFile ?? ($this->isSqlite ? self::sqliteLockFile($this->db) : null) ?? self::defaultLockFile();
+    }
+
+    /** "<main database file>.migrations.lock", or null for an in-memory/temporary database. */
+    private static function sqliteLockFile(PDO $db): ?string {
+        foreach ($db->query('PRAGMA database_list')->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (($row['name'] ?? '') === 'main' && (string)($row['file'] ?? '') !== '') return $row['file'] . self::LOCK_FILENAME;
+        }
+        return null;
     }
 
     /** First writable of: <app>/db, the private runtime directory, the system temp directory. */
@@ -423,6 +435,7 @@ PHP;
         $deadline = microtime(true) + self::LOCK_TIMEOUT_SECONDS;
         while (true) {
             if (flock($this->lockHandle, LOCK_EX | LOCK_NB)) {
+                $this->lockDatabase(max(0, (int)ceil($deadline - microtime(true))));
                 return;
             }
             if (microtime(true) >= $deadline) {
@@ -437,7 +450,32 @@ PHP;
         }
     }
 
+    /**
+     * A file lock only excludes processes that see the same file; app servers or containers sharing
+     * one MySQL database do not. GET_LOCK is server-wide and released with the connection.
+     */
+    private function lockDatabase(int $timeoutSeconds): void {
+        if ($this->isSqlite) return;
+        $name = 'bbe_migrations_' . substr(hash('sha256', (string)$this->db->query('SELECT DATABASE()')->fetchColumn() . '|' . $this->table), 0, 24);
+        $stmt = $this->db->prepare('SELECT GET_LOCK(?, ?)');
+        $stmt->execute([$name, $timeoutSeconds]);
+        if ((int)$stmt->fetchColumn() !== 1) {
+            $this->unlock();
+            throw new \RuntimeException("Could not acquire migrations lock within " . self::LOCK_TIMEOUT_SECONDS .
+                "s — another migrate process running against this database?");
+        }
+        $this->dbLockName = $name;
+    }
+
     private function unlock(): void {
+        if ($this->dbLockName !== null) {
+            try {
+                $this->db->prepare('SELECT RELEASE_LOCK(?)')->execute([$this->dbLockName]);
+            } catch (\Throwable) {
+                // The server drops the lock with the connection anyway.
+            }
+            $this->dbLockName = null;
+        }
         if ($this->lockHandle) {
             @flock($this->lockHandle, LOCK_UN);
             @fclose($this->lockHandle);

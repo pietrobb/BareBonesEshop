@@ -38,7 +38,8 @@ git clone --recurse-submodules <repository-url> shop && cd shop
 #    admin_identity_key, the private runtime directories next to the checkout
 #    (../bareboneseshop-private: database, jobs, invoices, backups, logs),
 #    the schema, admin forms and import templates, and the first owner account;
-#    then prints the doctor checklist. Safe to re-run; never rewrites config.php.
+#    then prints the doctor checklist. Safe to re-run: config.php is never
+#    rewritten and an existing owner account is left unchanged.
 BBE_ADMIN_PASSWORD='a-strong-password' php cli/setup.php install \
   --app-url=http://localhost:8080 --admin-username=admin
 
@@ -350,6 +351,7 @@ SQLite/MySQL parity.
 
 ```bash
 php cli/backup.php --gc                       # cron: database copy + <backup>.files.tar, then retention GC
+php cli/gdpr-gc.php --apply --quiet           # cron, daily: GDPR retention (pre-retention snapshot first; MySQL: --skip-backup after your dump)
 php cli/restore.php --list
 php cli/restore.php <backup.db>               # SQLite: verified swap under the maintenance gate
 php cli/restore.php <backup.sql> --i-stopped-writers   # MySQL/MariaDB: scratch database first, then live

@@ -57,6 +57,8 @@ return [
     'admin_identity_key' => '',
     'admin_session_idle_seconds' => 1800,
     'admin_session_lifetime_seconds' => 28800,
+    // External API v1: requests per minute per API key, across all source addresses.
+    'api_client_rate_limit' => 600,
     'admin_email'    => '', // fallback recipient for merchant order notifications
     'merchant_notifications' => [
         'enabled' => true,

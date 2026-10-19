@@ -111,6 +111,16 @@ try {
     $a111Again = $a111Php(['cli/setup.php', 'install', '--json']);
     assert_true($a111Again['code'] === 0 && (json_decode($a111Again['out'], true)['steps']['config']['action'] ?? '') === 'unchanged', 'A11.1 install is idempotent');
     assert_equals($a111ConfigHash, hash_file('sha256', $a111Shop . '/config.php'), 'A11.1 a second install never rewrites config.php');
+    // R6 low: README says "safe to re-run" — also with the same documented --admin-username.
+    $a111OwnerRow = static function () use ($a111Private): string {
+        $db = new PDO('sqlite:' . $a111Private . '/db/shop.sqlite');
+        return json_encode($db->query("SELECT * FROM admin_accounts WHERE username='owner'")->fetchAll(PDO::FETCH_ASSOC));
+    };
+    $a111OwnerBefore = $a111OwnerRow();
+    $a111Rerun = $a111Php(['cli/setup.php', 'install', '--json', "--app-url=http://127.0.0.1:{$a111Port}", '--admin-username=owner'], ['BBE_ADMIN_PASSWORD' => 'A111-other-Passw0rd!']);
+    assert_true($a111Rerun['code'] === 0 && (json_decode($a111Rerun['out'], true)['steps']['admin'] ?? null) === 'exists',
+        'R6 install re-run with --admin-username exits 0 and reports the owner as existing' . ($a111Rerun['code'] !== 0 ? ': ' . substr($a111Rerun['out'] . $a111Rerun['err'], -400) : ''));
+    assert_equals($a111OwnerBefore, $a111OwnerRow(), 'R6 install re-run leaves the existing owner (password, MFA, recovery codes) unchanged');
     $a111Seed = $a111Php(['cli/seed.php', '--count=3']);
     assert_equals(0, $a111Seed['code'], 'A11.1 README optional seed step works after install' . ($a111Seed['code'] !== 0 ? ': ' . substr($a111Seed['out'] . $a111Seed['err'], -400) : ''));
 

@@ -112,21 +112,52 @@ class PacketaShipping implements ShippingLifecycleAdapter
 
     /**
      * Packeta pick-up points of one country from the locally stored feed (see syncPickupPoints),
-     * nearest postal codes first. Nothing is invented: without a synced feed the list is empty.
+     * nearest postal codes first. $postalCode may also be a search text (town, street or point name):
+     * then only matching points are listed, so a point beyond the nearest PICKUP_LIST_LIMIT can be found.
+     * Nothing is invented: without a synced feed the list is empty.
      */
     public function pickupPoints(string $country, string $postalCode = ''): array
     {
-        $file = $this->pointsFile($country);
-        $points = is_file($file) ? json_decode((string)file_get_contents($file), true) : null;
-        if (!is_array($points)) return [];
+        $points = $this->storedPoints($country);
+        $search = self::fold(trim((string)preg_replace('/[\d\s]+/u', ' ', $postalCode)));
+        if ($search !== '') {
+            $points = array_values(array_filter($points, static fn(array $p): bool =>
+                str_contains(self::fold($p['name'] . ' ' . $p['street'] . ' ' . $p['city']), $search)));
+        }
         $zip = (int)preg_replace('/\D/', '', $postalCode);
         if ($zip > 0) {
             usort($points, static fn(array $a, array $b): int =>
                 abs((int)preg_replace('/\D/', '', $a['zip']) - $zip) <=> abs((int)preg_replace('/\D/', '', $b['zip']) - $zip) ?: strcmp($a['id'], $b['id']));
         }
-        return array_map(static fn(array $p): array => [
-            'id' => $p['id'], 'name' => $p['name'], 'address' => trim($p['street'] . ', ' . $p['zip'] . ' ' . $p['city'], ', '),
-        ], array_slice($points, 0, self::PICKUP_LIST_LIMIT));
+        return array_map([self::class, 'pointView'], array_slice($points, 0, self::PICKUP_LIST_LIMIT));
+    }
+
+    /** Any point of the country's feed by id, also one that is not among the listed nearest ones. */
+    public function pickupPoint(string $country, string $id): ?array
+    {
+        foreach ($this->storedPoints($country) as $point) {
+            if ($point['id'] === $id) return self::pointView($point);
+        }
+        return null;
+    }
+
+    /** @return list<array{id:string,name:string,street:string,city:string,zip:string}> */
+    private function storedPoints(string $country): array
+    {
+        $file = $this->pointsFile($country);
+        $points = is_file($file) ? json_decode((string)file_get_contents($file), true) : null;
+        return is_array($points) ? array_values($points) : [];
+    }
+
+    private static function pointView(array $p): array
+    {
+        return ['id' => $p['id'], 'name' => $p['name'], 'address' => trim($p['street'] . ', ' . $p['zip'] . ' ' . $p['city'], ', ')];
+    }
+
+    /** Lower case without diacritics, so "zilina" finds "Žilina". */
+    private static function fold(string $text): string
+    {
+        return Str::removeDiacritics($text);
     }
 
     /**

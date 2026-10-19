@@ -4,6 +4,7 @@ db/*.sqlite-wal
 db/*.sqlite-shm
 db/*.log
 db/.migrations.lock
+db/*.sqlite.migrations.lock
 
 # Cache
 cache/

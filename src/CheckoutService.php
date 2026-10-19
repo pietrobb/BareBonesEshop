@@ -176,9 +176,14 @@ class CheckoutService {
      * Pick-up point part of the checkout form for the selected rate, keeping the posted choice.
      * The refresh button re-renders the list without JS after the shopper switches carrier or zip.
      */
-    public static function pickupView(array $rates, ?array $selected, string $country, string $zip, string $postedPoint): array {
+    public static function pickupView(array $rates, ?array $selected, string $country, string $zip, string $postedPoint, string $search = ''): array {
         $capable = static fn(array $rate): bool => ShippingService::pickupAdapter($rate) !== null;
-        $options = $selected ? ShippingService::pickupOptions($selected, $country, $zip) : ['points' => [], 'required' => false];
+        // A search (town, street, point name or another postal code) replaces the address zip as the list's anchor.
+        $options = $selected ? ShippingService::pickupOptions($selected, $country, $search !== '' ? $search : $zip) : ['points' => [], 'required' => false];
+        if ($selected && $postedPoint !== '' && !in_array($postedPoint, array_column($options['points'], 'id'), true)) {
+            $chosen = ShippingService::pickupPointById($selected, $country, $postedPoint);
+            if ($chosen !== null) array_unshift($options['points'], $chosen);
+        }
         $offerRefresh = !($selected && $capable($selected)) && array_filter($rates, $capable) !== [];
         return [
             'pickup_show' => $options['points'] || $options['required'] || $offerRefresh,
@@ -186,6 +191,7 @@ class CheckoutService {
                 'id' => $p['id'], 'label' => $p['name'] . ($p['address'] !== '' ? ' — ' . $p['address'] : ''), 'selected' => $p['id'] === $postedPoint,
             ], $options['points']),
             'pickup_point_label' => I18n::t('pickup_point'), 'pickup_refresh_label' => I18n::t('pickup_point_refresh'),
+            'pickup_search_capable' => $selected !== null && $capable($selected), 'pickup_search' => $search, 'pickup_search_label' => I18n::t('pickup_point_search'),
             'pickup_point_none' => I18n::t($options['required'] ? 'pickup_point_choose' : 'pickup_point_address'),
             'pickup_unavailable' => $options['required'] && !$options['points'] ? I18n::t('pickup_point_unavailable') : '',
         ];

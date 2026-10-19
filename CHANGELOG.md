@@ -266,6 +266,26 @@ nginx PHP fallback when `operations.nginx_config` is set).
     **The `stock.adjusted` `reason` is now the ledger movement type** (`manual_adjustment`, `import`,
     `feed_sync`, `receipt`, `api_adjustment`) plus `reference_type`, instead of `api.v1.product.patch` /
     `api.v1.inventory.adjust`.
+- **Audit round 6 (low findings)**
+  - **API keys: only known scopes.** `cli/api-client.php create` refuses a scope no endpoint checks
+    (`product:read` instead of `products:read` used to create a key that could do nothing) and lists the
+    allowed ones. A stored unknown scope grants nothing but does not lock the key out. Each key also has
+    its own budget across all source addresses: `api_client_rate_limit` requests per minute (default
+    600, HTTP 429), on top of the existing 300 per minute per IP.
+  - Customer login is per store also inside one PHP session: visiting another store on the same host no
+    longer logs the shopper out of the first one, and that store does not see the login. Logout ends the
+    login in every store and empties the cart, its contact e-mail and the coupon (shared computers).
+  - Changing the password in the account invalidates the reset links that were still open.
+  - LogMail (development mail adapter) rotates `emails.log` to `emails.log.1` at `log_max_bytes`
+    (default 5 MiB).
+  - `php cli/setup.php install --admin-username=NAME` can be re-run: an existing owner is left unchanged
+    (it used to fail on the second run).
+  - GDPR retention: `doctor` warns (`operations.gdpr_retention_gc`) when `cli/gdpr-gc.php --apply` has
+    not run in 8 days; the README cron list includes it and the Docker worker runs it once a day.
+  - Migration lock per database: SQLite locks `<database file>.migrations.lock`, MySQL/MariaDB take
+    `GET_LOCK`, so two app directories or containers migrating one database exclude each other.
+  - Packeta: the checkout pick-up point field has a search (town, street or point name, diacritics
+    ignored), so a point beyond the nearest 50 can be found and chosen.
 - **Extension API actions**: every non-GET/HEAD request to an extension action must carry the session
   CSRF token (`X-CSRF-Token` or `csrf_token`, HTTP 403 otherwise); actions can be limited with
   `'method' => 'GET'|'POST'` (405 otherwise). **Server-to-server POSTs to an extension action break**
