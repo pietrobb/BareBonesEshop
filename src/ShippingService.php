@@ -243,6 +243,20 @@ class ShippingService
         return ['points' => array_values(array_filter($points, static fn(array $p): bool => ($p['id'] ?? '') !== '')), 'required' => $required];
     }
 
+    /** One point of the carrier's whole list, for adapters that can look a point up by id (optional pickupPoint()). */
+    public static function pickupPointById(array $rate, string $country, string $pointId): ?array
+    {
+        $adapter = self::pickupAdapter($rate);
+        if ($adapter === null || !method_exists($adapter, 'pickupPoint')) return null;
+        try {
+            $point = $adapter->pickupPoint(strtoupper(trim($country)), $pointId);
+        } catch (\Throwable $e) {
+            error_log('Pick-up point lookup failed for ' . $adapter->carrierId() . ': ' . $e->getMessage());
+            return null;
+        }
+        return is_array($point) && ($point['id'] ?? '') === $pointId ? $point : null;
+    }
+
     /** Carrier adapter that lists pick-up points for this rate, or null when the rate has no point choice. */
     public static function pickupAdapter(array $rate): ?ShippingLifecycleAdapter
     {
@@ -264,6 +278,9 @@ class ShippingService
         foreach ($options['points'] as $point) {
             if ($pointId !== '' && $point['id'] === $pointId) return ['point' => $point, 'error' => null];
         }
+        // The list holds only the nearest points; a point the shopper found by searching is valid too.
+        $found = $pointId !== '' ? self::pickupPointById($rate, $country, $pointId) : null;
+        if ($found !== null) return ['point' => $found, 'error' => null];
         if ($pointId !== '' && ($options['points'] || $options['required'])) return ['point' => null, 'error' => 'pickup_point_invalid'];
         if ($options['required']) return ['point' => null, 'error' => $options['points'] ? 'pickup_point_required' : 'pickup_point_unavailable'];
         return ['point' => null, 'error' => null];

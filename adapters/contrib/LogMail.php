@@ -21,7 +21,9 @@
  * can assert on the exact payload without parsing the log file.
  */
 class LogMail implements MailAdapter {
+    private const DEFAULT_MAX_BYTES = 5_242_880;
     private string $logFile;
+    private int $maxBytes;
 
     /** In-memory capture for tests. Kept small (last 100 entries). */
     private static array $captured = [];
@@ -31,6 +33,7 @@ class LogMail implements MailAdapter {
         $runtimeDir = rtrim((string)($cfg['private_runtime_dir'] ?? ''), '/\\');
         if ($runtimeDir === '') $runtimeDir = dirname(__DIR__, 3) . '/bareboneseshop-private';
         $this->logFile = (string)($cfg['log_file'] ?? ($runtimeDir . '/logs/emails.log'));
+        $this->maxBytes = max(1024, (int)($cfg['log_max_bytes'] ?? self::DEFAULT_MAX_BYTES));
         $dir = dirname($this->logFile);
         if (!is_dir($dir)) @mkdir($dir, 0750, true);
     }
@@ -54,6 +57,9 @@ class LogMail implements MailAdapter {
         $line .= $msg['text'] ?? strip_tags($msg['html'] ?? '');
         $line .= "\n----8<----\n";
 
+        // Rotate before the file outgrows the limit: one older generation (.1) is kept, the one before is dropped.
+        clearstatcache(true, $this->logFile);
+        if (@filesize($this->logFile) >= $this->maxBytes) @rename($this->logFile, $this->logFile . '.1');
         @file_put_contents($this->logFile, $line, FILE_APPEND | LOCK_EX);
 
         // In-memory capture for tests

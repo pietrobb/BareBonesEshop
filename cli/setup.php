@@ -55,7 +55,12 @@ if ($command === 'install') {
                 throw new RuntimeException('The database already has admin accounts whose MFA secrets need the previous admin_identity_key; the new config.php was removed. Restore the previous config.php (or set BBE_ADMIN_IDENTITY_KEY) and run install again.');
             }
         }
-        if ($adminUsername !== '') {
+        $existingAdmins = $adminUsername === '' ? [] : array_map(static fn(array $a): string => strtolower((string)($a['username'] ?? '')), json_decode($run(['cli/admin-user.php', 'list'], 'admin-user list'), true) ?: []);
+        if ($adminUsername !== '' && in_array(strtolower($adminUsername), $existingAdmins, true)) {
+            // A re-run keeps the existing owner (password, MFA and recovery codes) untouched.
+            $log('[4/4] first owner account: ' . strtolower($adminUsername) . ' already exists, left unchanged');
+            $steps['admin'] = 'exists';
+        } elseif ($adminUsername !== '') {
             $log('[4/4] first owner account');
             $stores = json_decode((string)file_get_contents($root . '/stores.json'), true);
             $admin = $run(['cli/admin-user.php', 'create', '--username=' . $adminUsername, '--role=owner', '--store=' . (string)($stores['default_store'] ?? 'default')], 'admin-user create');

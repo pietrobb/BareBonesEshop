@@ -1480,6 +1480,7 @@ return [
     'checkout_saved_address_use' => 'Použiť adresu',
     'pickup_point' => 'Výdajné miesto',
     'pickup_point_refresh' => 'Zobraziť výdajné miesta',
+    'pickup_point_search' => 'Hľadať: obec, ulica alebo PSČ',
     'pickup_point_choose' => '— vyberte výdajné miesto —',
     'pickup_point_address' => '— doručiť na adresu —',
     'pickup_point_unavailable' => 'Pre túto adresu nie sú dostupné výdajné miesta. Zvoľte iný spôsob dopravy.',

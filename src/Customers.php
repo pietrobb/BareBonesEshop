@@ -16,6 +16,7 @@ class Customers {
     private const EMAIL_VERIFY_TTL_SECONDS = 86400; // 24 hours
     private const SESSION_IDLE_TTL_SECONDS = 1800;
     private const MIN_PASSWORD_LEN = 8;
+    private const SESSION_AUTH_KEYS = ['customer_id', 'customer_email', 'customer_auth_hash', 'customer_last_seen'];
     // Unknown e-mails are verified against this precomputed hash (of a discarded random secret) at
     // BCRYPT_COST, so the miss path costs one password_verify like a real account and never a password_hash().
     private const DUMMY_PASSWORD_HASH = '$2y$12$3aA7J9zu5aqoTiYlkeXhrueHZL9MGkKL7qR1FN6QOa6.LZiQGndeW';
@@ -104,6 +105,7 @@ class Customers {
         }
         // A pre-login CSRF token (possibly planted together with the session) must not survive authentication.
         Security::rotateCsrfToken();
+        self::bindSessionToStore();
         $_SESSION['customer_id'] = (int)$c['id'];
         $_SESSION['customer_email'] = $c['email'];
         $_SESSION['customer_auth_hash'] = hash('sha256', (string)$c['password_hash']);
@@ -117,7 +119,11 @@ class Customers {
 
     public static function logout(): void {
         Security::sessionStart();
-        unset($_SESSION['customer_id'], $_SESSION['customer_email'], $_SESSION['customer_auth_hash'], $_SESSION['customer_last_seen']);
+        self::bindSessionToStore();
+        foreach (self::SESSION_AUTH_KEYS as $key) unset($_SESSION[$key]);
+        unset($_SESSION['customer_store_logins']);
+        // The next person at a shared computer must not inherit the cart, its contact e-mail or a coupon.
+        unset($_SESSION['cart'], $_SESSION['cart_email'], $_SESSION['cart_email_at'], $_SESSION['checkout_coupon']);
         if (function_exists('session_regenerate_id')) {
             @session_regenerate_id(true);
         }
@@ -130,6 +136,7 @@ class Customers {
 
     public static function current(): ?array {
         Security::sessionStart();
+        self::bindSessionToStore();
         $id = (int)($_SESSION['customer_id'] ?? 0);
         $lastSeen = (int)($_SESSION['customer_last_seen'] ?? 0);
         $sessionHash = (string)($_SESSION['customer_auth_hash'] ?? '');
@@ -147,6 +154,32 @@ class Customers {
         }
         $_SESSION['customer_last_seen'] = time();
         return self::byId($id);
+    }
+
+    /**
+     * Stores on one host share a PHP session, but accounts are per store. The flat customer_* keys
+     * always describe the current store's login; another store's login is parked and restored when
+     * the shopper returns, so visiting store B neither logs them out of A nor lends A's login to B.
+     */
+    private static function bindSessionToStore(): void {
+        $store = StoreContext::current()->id();
+        $owner = (string)($_SESSION['customer_store_id'] ?? '');
+        if ($owner === $store) return;
+        // A session from before store binding is validated against the current store by current().
+        if ($owner === '') {
+            $_SESSION['customer_store_id'] = $store;
+            return;
+        }
+        if (!empty($_SESSION['customer_id'])) {
+            $_SESSION['customer_store_logins'][$owner] = array_intersect_key($_SESSION, array_flip(self::SESSION_AUTH_KEYS));
+        }
+        foreach (self::SESSION_AUTH_KEYS as $key) unset($_SESSION[$key]);
+        $parked = $_SESSION['customer_store_logins'][$store] ?? null;
+        unset($_SESSION['customer_store_logins'][$store]);
+        if (is_array($parked)) {
+            foreach (self::SESSION_AUTH_KEYS as $key) if (isset($parked[$key])) $_SESSION[$key] = $parked[$key];
+        }
+        $_SESSION['customer_store_id'] = $store;
     }
 
     public static function isLoggedIn(): bool {
@@ -225,6 +258,8 @@ class Customers {
         $newHash = password_hash($newPassword, PASSWORD_BCRYPT, ['cost' => self::BCRYPT_COST]);
         Db::get()->prepare("UPDATE customers SET password_hash = ? WHERE id = ? AND store_id = ?")
                  ->execute([$newHash, $id, StoreContext::current()->id()]);
+        // A reset link mailed before the change (possibly to an attacker reading the mailbox) must not undo it.
+        Db::get()->prepare("DELETE FROM password_reset_tokens WHERE customer_id = ?")->execute([$id]);
         Security::sessionStart();
         if (session_status() === PHP_SESSION_ACTIVE) session_regenerate_id(true);
         $_SESSION['customer_auth_hash'] = hash('sha256', $newHash);

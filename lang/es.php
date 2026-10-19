@@ -220,6 +220,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout_saved_address_use' => 'Usar dirección',
     'pickup_point' => 'Punto de recogida',
     'pickup_point_refresh' => 'Mostrar puntos de recogida',
+    'pickup_point_search' => 'Buscar: localidad, calle o código postal',
     'pickup_point_choose' => '— elija un punto de recogida —',
     'pickup_point_address' => '— entregar en mi dirección —',
     'pickup_point_unavailable' => 'No hay puntos de recogida disponibles para esta dirección. Elija otro método de envío.',

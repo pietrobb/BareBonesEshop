@@ -1465,6 +1465,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout_saved_address_use' => 'Použít adresu',
     'pickup_point' => 'Výdejní místo',
     'pickup_point_refresh' => 'Zobrazit výdejní místa',
+    'pickup_point_search' => 'Hledat: obec, ulice nebo PSČ',
     'pickup_point_choose' => '— vyberte výdejní místo —',
     'pickup_point_address' => '— doručit na adresu —',
     'pickup_point_unavailable' => 'Pro tuto adresu nejsou dostupná výdejní místa. Zvolte jiný způsob dopravy.',

@@ -7,12 +7,16 @@ header('Content-Type: application/json; charset=utf-8');
 $status = 500;
 $body = ['error' => ['code' => 'internal_error', 'message' => 'Internal error']];
 try {
-    if (!Security::rateLimit('external_api_v1', 300)) {
+    $client = null;
+    if (Security::rateLimit('external_api_v1', 300)) {
+        $client = ApiAuth::authenticate((string)($_SERVER['HTTP_AUTHORIZATION'] ?? ''));
+        // Per-client budget: a leaked key used from many addresses is still bounded.
+        if (!ApiAuth::withinClientRateLimit($client)) $client = null;
+    }
+    if ($client === null) {
         $status = 429;
         $body = ['error' => ['code' => 'rate_limited', 'message' => 'Too many requests']];
     } else {
-        $authorization = (string)($_SERVER['HTTP_AUTHORIZATION'] ?? '');
-        $client = ApiAuth::authenticate($authorization);
         // Install subdirectory and store prefix stripped; a store prefix must name the credential's store.
         $route = ApiRoute::normalize((string)($_SERVER['REQUEST_URI'] ?? ApiRoute::PREFIX));
         if ($route['store'] !== null && $route['store'] !== (string)$client['store_id']) {
@@ -35,14 +39,7 @@ try {
         $headers = function_exists('getallheaders') ? (getallheaders() ?: []) : [];
         $headers['Idempotency-Key'] ??= (string)($_SERVER['HTTP_IDEMPOTENCY_KEY'] ?? '');
         $headers['If-Match'] ??= (string)($_SERVER['HTTP_IF_MATCH'] ?? '');
-        $result = ApiV1::dispatch(
-            $method,
-            $route['path'],
-            $_GET,
-            $requestBody,
-            $headers,
-            $client
-        );
+        $result = ApiV1::dispatch($method, $route['path'], $_GET, $requestBody, $headers, $client);
         $status = $result['status'];
         $body = $result['body'];
         foreach ($result['headers'] ?? [] as $name => $value) header("{$name}: {$value}");
