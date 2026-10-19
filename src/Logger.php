@@ -58,6 +58,7 @@ class Logger
             error_log(rtrim($line));
             return false;
         }
+        self::rotate($path, (int)($cfg['structured_log_max_bytes'] ?? 10485760), (int)($cfg['structured_log_max_files'] ?? 5));
         if (@file_put_contents($path, $line, FILE_APPEND | LOCK_EX) !== strlen($line)) {
             error_log(rtrim($line));
             return false;
@@ -73,6 +74,29 @@ class Logger
             // Do not call the logger recursively when its own storage is unavailable.
             try { @error_log('BareBones operational log unavailable'); } catch (Throwable $ignored) {}
             return false;
+        }
+    }
+
+    /** Size-based rotation (file → file.1 → … → file.N); a lock file keeps concurrent writers from rotating twice. */
+    private static function rotate(string $path, int $maxBytes, int $maxFiles): void
+    {
+        clearstatcache(true, $path);
+        if ($maxBytes <= 0 || !is_file($path) || (int)filesize($path) < $maxBytes) return;
+        $lock = @fopen($path . '.lock', 'c');
+        if ($lock === false) return;
+        try {
+            if (!flock($lock, LOCK_EX)) return;
+            clearstatcache(true, $path);
+            if (!is_file($path) || (int)filesize($path) < $maxBytes) return;
+            $maxFiles = max(1, $maxFiles);
+            @unlink($path . '.' . $maxFiles);
+            for ($i = $maxFiles - 1; $i >= 1; $i--) {
+                if (is_file($path . '.' . $i)) @rename($path . '.' . $i, $path . '.' . ($i + 1));
+            }
+            @rename($path, $path . '.1');
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
         }
     }
 
