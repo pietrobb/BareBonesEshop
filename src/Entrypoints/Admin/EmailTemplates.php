@@ -27,6 +27,9 @@ function pageEmailTemplates(): void {
                 <td><code><?= esc($name) ?></code></td>
                 <td><?= esc(adminCodeLabel('admin.email.tpl.', $name)) ?></td>
                 <?php foreach ($locales as $loc): $custom = EmailTemplates::override($name, $loc) !== null; ?>
+                <?php if (in_array($name, EmailTemplates::LOCKED_TEMPLATES, true)): ?>
+                <td><span class="badge badge-draft" data-email-locked><?= esc(I18n::t('admin.email.state.locked')) ?></span></td>
+                <?php continue; endif; ?>
                 <td><a href="admin.php?p=email_templates&amp;template=<?= esc(rawurlencode($name)) ?>&amp;locale=<?= esc(rawurlencode($loc)) ?>">
                     <span class="badge badge-<?= $custom ? 'active' : 'draft' ?>"><?= esc(I18n::t($custom ? 'admin.email.state.custom' : 'admin.email.state.default')) ?></span></a></td>
                 <?php endforeach; ?>

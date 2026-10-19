@@ -13,8 +13,10 @@ class Health
         $config ??= require $root . '/config.php';
         $checks = [];
         try {
-            ($db ?? Db::get())->query('SELECT 1')->fetchColumn();
-            $checks['database'] = 'ok';
+            $db ??= Db::get();
+            $db->query('SELECT 1')->fetchColumn();
+            // A read-only database answers SELECT but cannot take an order.
+            $checks['database'] = Db::writable($db) ? 'ok' : 'read_only';
         } catch (Throwable $e) {
             $checks['database'] = 'unavailable';
         }
@@ -25,7 +27,7 @@ class Health
             $path = (string)($config[$key] ?? '');
             $checks[$key] = $path !== '' && is_dir($path) && is_writable($path) ? 'ok' : 'unavailable';
         }
-        $ready = !in_array('unavailable', $checks, true) && !in_array('invalid', $checks, true);
+        $ready = array_unique(array_values($checks)) === ['ok'];
         return ['status' => $ready ? 'ready' : 'not_ready', 'service' => 'bareboneseshop', 'checks' => $checks, 'correlation_id' => Logger::correlationId()];
     }
 }

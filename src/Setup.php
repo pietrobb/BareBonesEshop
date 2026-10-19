@@ -139,6 +139,9 @@ class Setup
             try {
                 $probe->query('SELECT 1 FROM orders LIMIT 1');
                 $add('pass', 'database.schema', 'Commerce schema is available.');
+                $writable = Db::writable($probe);
+                $add($writable ? 'pass' : 'fail', 'database.writable', $writable ? 'Database accepts writes.' : 'Database is read-only: orders, carts and sessions cannot be saved.',
+                    $writable ? '' : 'Give the PHP user write access to the SQLite file and its directory, or a MySQL user with write grants on a server that is not read_only.');
             } catch (Throwable $e) {
                 $add('fail', 'database.schema', 'Commerce schema is not ready.', 'Run php cli/migrate.php.');
             }
@@ -166,10 +169,20 @@ class Setup
         $root ??= dirname(__DIR__);
         $config ??= require $root . '/config.php';
         $changes = [];
-        foreach (self::runtimePaths($config) as $name => $path) {
+        // Same rule as doctor: nothing private is created where the web server serves it (install stops here,
+        // before the database exists).
+        $webRoot = self::enclosingWebRoot($root, $config);
+        $paths = self::runtimePaths($config);
+        // The digital-products directory is optional: created when it is private, otherwise left to doctor's failure.
+        $digital = (string)($config['digital_assets_base_dir'] ?? '');
+        if ($digital !== '' && self::isPrivateAbsolutePath($digital, $webRoot ?? $root)) $paths['digital_assets_base_dir'] = $digital;
+        foreach ($paths as $name => $path) {
             $target = str_ends_with($name, '_file') ? dirname($path) : $path;
             if (!self::isPrivateAbsolutePath($target, $root)) {
                 throw new RuntimeException("Refusing unsafe runtime path: {$name}");
+            }
+            if ($webRoot !== null && !self::isPrivateAbsolutePath($target, $webRoot)) {
+                throw new RuntimeException("Refusing runtime path inside the web root {$webRoot} (downloadable over HTTP): {$name}. Move it above {$webRoot} in config.php (or set operations.document_root if {$webRoot} is not served).");
             }
             if (!is_dir($target)) {
                 if (!mkdir($target, 0750, true) && !is_dir($target)) throw new RuntimeException("Cannot create runtime path: {$name}");

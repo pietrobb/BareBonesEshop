@@ -720,13 +720,21 @@ class ShippingService
             $rate['physical_qty'] = $physicalQty;
             $rate['free_reason'] = $reason;
             if ($reason !== null) {
-                // Database rates carry COD inside price; adapter/legacy rates keep it separate.
-                $rate['price'] = array_key_exists('base_price', $rate) ? (int)($rate['cod_surcharge'] ?? 0) : 0;
+                $rate['price'] = self::freeShippingPrice($rate);
                 if (array_key_exists('base_price', $rate)) $rate['base_price'] = 0;
             }
         }
         unset($rate);
         return $rates;
+    }
+
+    /**
+     * Price of a rate whose shipping is free (carrier threshold or free-shipping promotion): database rates carry
+     * the COD surcharge inside their price and keep charging it; adapter/legacy rates keep COD separate.
+     */
+    public static function freeShippingPrice(array $rate): int
+    {
+        return array_key_exists('base_price', $rate) ? max(0, (int)($rate['cod_surcharge'] ?? 0)) : 0;
     }
 
     /** @return array<string,int> method_code => free_from_qty for adapter-priced methods */

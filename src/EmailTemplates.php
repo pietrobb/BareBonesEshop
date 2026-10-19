@@ -93,9 +93,15 @@ class EmailTemplates {
             'updated_by' => (string)$row['updated_by'], 'updated_at' => (string)$row['updated_at']] : null;
     }
 
+    /**
+     * Security notices to the merchant (core file drift, operational incidents): only the file default is sent, so an
+     * admin allowed to edit templates cannot rewrite an alert into an "all is fine" message.
+     */
+    public const LOCKED_TEMPLATES = ['core_drift_alert', 'merchant_incident'];
+
     /** What MailService renders: the store override (an empty text part is derived from its HTML), else the files. */
     public static function source(string $template, string $locale): array {
-        $override = self::override($template, $locale);
+        $override = in_array($template, self::LOCKED_TEMPLATES, true) ? null : self::override($template, $locale);
         if ($override !== null) return ['subject' => $override['subject'], 'html' => $override['html'], 'text' => $override['text'] === '' ? null : $override['text']];
         return self::fileSource($template, $locale);
     }
@@ -149,6 +155,11 @@ class EmailTemplates {
     /** Secret variables used anywhere else than as a whole href or a stand-alone text value. */
     public static function secretLeaks(string $subject, string $html, string $text): array {
         $leaks = [];
+        preg_match_all('~<[a-zA-Z/!?](?:[^"\'>]|"[^"]*"|\'[^\']*\')*>?~s', $html, $tagMatches, PREG_OFFSET_CAPTURE);
+        $tagSpans = array_map(static fn(array $m): array => [$m[1], $m[1] + strlen($m[0])], $tagMatches[0]);
+        // A style sheet loads url(...) images: a token there reaches a foreign server like an <img src>.
+        preg_match_all('~<style\b.*?(?:</style\s*>|$)~is', $html, $styleMatches, PREG_OFFSET_CAPTURE);
+        $styleSpans = array_map(static fn(array $m): array => [$m[1], $m[1] + strlen($m[0])], $styleMatches[0]);
         foreach (self::SECRET_VARIABLES as $name) {
             $tag = '{{' . $name . '}}';
             if (str_contains($subject, $tag)) $leaks[$name] = true;
@@ -156,23 +167,79 @@ class EmailTemplates {
                 if (!self::standsAlone($text, $at, strlen($tag))) $leaks[$name] = true;
             }
             foreach (self::offsets($html, $tag) as $at) {
-                $open = strrpos(substr($html, 0, $at), '<');
-                $insideTag = $open !== false && strpos(substr($html, $open, $at - $open), '>') === false;
-                $ok = $insideTag
-                    ? preg_match('~\shref\s*=\s*(["\'])$~i', substr($html, 0, $at), $quote) === 1 && substr($html, $at + strlen($tag), 1) === $quote[1]
-                    : self::standsAlone($html, $at, strlen($tag));
+                // Tags are read with their quoted attribute values, so a ">" inside alt=">" does not end the tag.
+                $open = self::spanStart($tagSpans, $at);
+                $ok = $open !== null
+                    ? preg_match('~\shref\s*=\s*(["\'])$~i', substr($html, $open, $at - $open), $quote) === 1 && substr($html, $at + strlen($tag), 1) === $quote[1]
+                    : self::spanStart($styleSpans, $at) === null && self::standsAlone($html, $at, strlen($tag));
                 if (!$ok) $leaks[$name] = true;
             }
         }
         return array_keys($leaks);
     }
 
-    /** A hard-coded IBAN (bank details must come from {{bank_iban}}, the store's configured account). */
+    /**
+     * A hard-coded bank account (bank details must come from {{bank_iban}}, the store's configured account): an IBAN
+     * in any letter case and grouping (spaces, hyphens, dots), or a Czech/Slovak domestic number "prefix-number/bank".
+     * Candidates must pass the IBAN (mod 97) or domestic (mod 11) check digits, so dates and order numbers do not count.
+     */
     public static function hasLiteralIban(string $source): bool {
         $visible = preg_replace('~\{\{.*?\}\}~s', ' ', $source);
         $visible = html_entity_decode(strip_tags((string)$visible), ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $visible = (string)preg_replace('/\p{Cf}+/u', '', $visible);
-        return preg_match('/(?<![A-Z0-9])[A-Z]{2}\d{2}(?:[\s\x{00A0}]*[A-Z0-9]){11,30}(?![A-Z0-9])/u', $visible) === 1;
+        $visible = strtoupper((string)preg_replace('/\p{Cf}+/u', '', $visible));
+        preg_match_all('/(?<![A-Z0-9])[A-Z]{2}\d{2}(?:[\s\x{00A0}.\-]*[A-Z0-9]){11,64}/u', $visible, $ibans);
+        foreach ($ibans[0] as $candidate) {
+            $compact = (string)preg_replace('/[^A-Z0-9]/', '', $candidate);
+            // Every start, so a decoy group in front ("XX00 SK31 …") does not hide the account behind it.
+            for ($start = 0; $start + 15 <= strlen($compact); $start++) {
+                if (!preg_match('/^[A-Z]{2}\d{2}/', substr($compact, $start, 4))) continue;
+                $length = self::IBAN_LENGTHS[substr($compact, $start, 2)] ?? 0;
+                if ($length > 0 && $start + $length <= strlen($compact) && self::ibanChecksumOk(substr($compact, $start, $length))) return true;
+            }
+        }
+        preg_match_all('~(?<![\d/\-])(?:(\d{1,6})\s*-\s*)?(\d{2,10})\s*/\s*(\d{4})(?![\d/])~', $visible, $domestic, PREG_SET_ORDER);
+        foreach ($domestic as $m) {
+            if (self::domesticChecksumOk($m[1], $m[2]) && (int)ltrim($m[2], '0') > 0 && ($m[1] !== '' || strlen(ltrim($m[2], '0')) >= 6)) return true;
+        }
+        return false;
+    }
+
+    /** IBAN length per country (SWIFT IBAN registry). */
+    private const IBAN_LENGTHS = [
+        'AD' => 24, 'AE' => 23, 'AL' => 28, 'AT' => 20, 'AZ' => 28, 'BA' => 20, 'BE' => 16, 'BG' => 22, 'BH' => 22, 'BR' => 29, 'BY' => 28,
+        'CH' => 21, 'CR' => 22, 'CY' => 28, 'CZ' => 24, 'DE' => 22, 'DK' => 18, 'DO' => 28, 'EE' => 20, 'EG' => 29, 'ES' => 24, 'FI' => 18,
+        'FO' => 18, 'FR' => 27, 'GB' => 22, 'GE' => 22, 'GI' => 23, 'GL' => 18, 'GR' => 27, 'GT' => 28, 'HR' => 21, 'HU' => 28, 'IE' => 22,
+        'IL' => 23, 'IQ' => 23, 'IS' => 26, 'IT' => 27, 'JO' => 30, 'KW' => 30, 'KZ' => 20, 'LB' => 28, 'LC' => 32, 'LI' => 21, 'LT' => 20,
+        'LU' => 20, 'LV' => 21, 'MC' => 27, 'MD' => 24, 'ME' => 22, 'MK' => 19, 'MR' => 27, 'MT' => 31, 'MU' => 30, 'NL' => 18, 'NO' => 15,
+        'PK' => 24, 'PL' => 28, 'PS' => 29, 'PT' => 25, 'QA' => 29, 'RO' => 24, 'RS' => 22, 'SA' => 24, 'SC' => 31, 'SE' => 24, 'SI' => 19,
+        'SK' => 24, 'SM' => 27, 'ST' => 25, 'SV' => 28, 'TL' => 23, 'TN' => 24, 'TR' => 26, 'UA' => 29, 'VA' => 22, 'VG' => 24, 'XK' => 20,
+    ];
+
+    private static function ibanChecksumOk(string $iban): bool {
+        $digits = '';
+        foreach (str_split(substr($iban, 4) . substr($iban, 0, 4)) as $char) $digits .= ctype_digit($char) ? $char : (string)(ord($char) - 55);
+        $rest = 0;
+        foreach (str_split($digits, 7) as $chunk) $rest = (int)(($rest . $chunk)) % 97;
+        return $rest === 1;
+    }
+
+    /** Czech/Slovak domestic account check digits: weighted digit sums of prefix and number divisible by 11. */
+    private static function domesticChecksumOk(string $prefix, string $number): bool {
+        $weights = [6, 3, 7, 9, 10, 5, 8, 4, 2, 1];
+        foreach ([[str_pad($prefix, 10, '0', STR_PAD_LEFT), $weights], [str_pad($number, 10, '0', STR_PAD_LEFT), $weights]] as [$digits, $w]) {
+            $sum = 0;
+            foreach (str_split($digits) as $i => $digit) $sum += (int)$digit * $w[$i];
+            if ($sum % 11 !== 0) return false;
+        }
+        return true;
+    }
+
+    /** @param list<array{0:int,1:int}> $spans @return int|null start of the span containing $at */
+    private static function spanStart(array $spans, int $at): ?int {
+        foreach ($spans as [$start, $end]) {
+            if ($at > $start && $at < $end) return $start;
+        }
+        return null;
     }
 
     /** @return list<int> byte offsets of every occurrence */
@@ -254,7 +321,7 @@ class EmailTemplates {
     }
 
     public static function editable(string $template, string $locale): bool {
-        return in_array($template, self::templates(), true) && in_array($locale, self::locales(), true);
+        return !in_array($template, self::LOCKED_TEMPLATES, true) && in_array($template, self::templates(), true) && in_array($locale, self::locales(), true);
     }
 
     /** Names of HTML constructs that may not appear in a template override (empty = safe). */

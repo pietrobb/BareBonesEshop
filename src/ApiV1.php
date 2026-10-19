@@ -204,10 +204,12 @@ class ApiV1 {
             }
             $set[] = 'updated_at=' . Db::now();
             Db::get()->prepare('UPDATE products SET ' . implode(', ', $set) . ' WHERE id=:id AND store_id=:store')->execute($params);
+            $ledgerBooked = false;
             if (array_key_exists('stock', $body) && (int)$old['stock'] !== $body['stock']) {
-                // "stock" is available quantity; the warehouse ledger is the source of truth (as in admin/CSV).
+                // "stock" is available quantity; the warehouse ledger is the source of truth (as in admin/CSV) and
+                // records stock.adjusted itself.
                 try {
-                    Products::setAvailableStock((string)$old['sku'], (string)($old['product_type'] ?? 'simple'), $body['stock'], 'api_adjustment', 'api_v1');
+                    $ledgerBooked = Products::setAvailableStock((string)$old['sku'], (string)($old['product_type'] ?? 'simple'), $body['stock'], 'api_adjustment', 'api_v1');
                 } catch (RuntimeException $e) {
                     return self::error(409, 'stock_conflict', $e->getMessage()) + ['store' => false];
                 }
@@ -215,13 +217,14 @@ class ApiV1 {
             $updated = Products::byId($productId);
             AuditLog::log('product', $productId, $old, $updated, 'API v1 client ' . $client['key_id']);
             Outbox::record(DomainEvents::PRODUCT_UPDATED, 'product', $productId, self::productDto($updated));
-            if (array_key_exists('stock', $body) && (int)$old['stock'] !== (int)$updated['stock']) {
+            if (!$ledgerBooked && array_key_exists('stock', $body) && (int)$old['stock'] !== (int)$updated['stock']) {
                 Outbox::record(DomainEvents::STOCK_ADJUSTED, 'product', $productId, [
                     'product_id' => $productId,
                     'sku' => (string)$updated['sku'],
                     'before' => (int)$old['stock'],
                     'after' => (int)$updated['stock'],
-                    'reason' => 'api.v1.product.patch',
+                    'reason' => 'api_adjustment',
+                    'reference_type' => 'api_v1',
                 ]);
             }
             return ['status' => 200, 'body' => ['data' => self::productDto($updated), 'meta' => ['idempotent_replay' => false]],
@@ -320,13 +323,6 @@ class ApiV1 {
             $note = 'API v1 client ' . $client['key_id'] . ($reason !== null && trim($reason) !== '' ? ': ' . trim($reason) : '');
             AuditLog::log('inventory', $productId, ['sku' => $sku, 'available' => $before],
                 ['sku' => $sku, 'available' => $after, 'warehouse' => (string)$warehouse['code'], 'delta' => $delta], $note);
-            Outbox::record(DomainEvents::STOCK_ADJUSTED, 'product', $productId, [
-                'product_id' => $productId,
-                'sku' => $sku,
-                'before' => $before,
-                'after' => $after,
-                'reason' => 'api.v1.inventory.adjust',
-            ]);
             return ['status' => 200, 'body' => ['data' => self::inventoryDto($sku), 'meta' => ['idempotent_replay' => false]]];
         });
     }

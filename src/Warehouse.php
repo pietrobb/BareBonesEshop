@@ -146,6 +146,7 @@ class Warehouse {
         $oversold = 0;
         $skipped = [];
         $applied = [];
+        $availableBefore = [];
         $db = Db::get();
         $ownsTransaction = !$db->inTransaction();
         if ($ownsTransaction) $db->beginTransaction();
@@ -163,11 +164,13 @@ class Warehouse {
                 $reservedStmt->closeCursor();
                 $qty = (int)$qty;
                 if ($qty < $reserved) { $oversold++; $qty = $reserved; }
+                $availableBefore[$sku] ??= self::totalAvailable($sku);
                 self::setStock($warehouseId, $sku, $qty, 'feed_sync', 'warehouse_feed', $warehouseId);
                 $applied[] = $sku;
                 $count++;
             }
             self::syncProductStock($applied);
+            foreach ($availableBefore as $sku => $before) self::recordAdjusted((string)$sku, $before, 'feed_sync', 'warehouse_feed');
             if ($ownsTransaction) $db->commit();
         } catch (Throwable $e) {
             if ($ownsTransaction && $db->inTransaction()) $db->rollBack();
@@ -366,6 +369,53 @@ class Warehouse {
         ?string $idempotencyKey = null
     ): void {
         if ($delta === 0) return;
+        $db = Db::get();
+        // stock.adjusted is recorded with the change: a lone call runs in its own transaction.
+        $ownsTransaction = !$db->inTransaction();
+        if ($ownsTransaction) $db->beginTransaction();
+        try {
+            $available = self::totalAvailable($sku);
+            self::applyAdjustment($warehouseId, $sku, $delta, $movementType, $referenceType, $referenceId, $idempotencyKey);
+            self::recordAdjusted($sku, $available, $movementType, $referenceType);
+            if ($ownsTransaction) $db->commit();
+        } catch (Throwable $e) {
+            if ($ownsTransaction && $db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+    }
+
+    /**
+     * stock.adjusted for a change of available stock outside the order flow (admin, CSV import, feed, receipt, API);
+     * reason is the ledger movement type. SKUs outside the active catalog emit nothing.
+     */
+    private static function recordAdjusted(string $sku, int $before, string $movementType, ?string $referenceType): void {
+        $after = self::totalAvailable($sku);
+        if ($after === $before) return;
+        $catalog = StoreContext::current()->catalogId();
+        $stmt = Db::get()->prepare('SELECT id FROM products WHERE sku = :sku AND store_id = :store
+            UNION ALL SELECT p.id FROM variants v JOIN products p ON p.id = v.product_id WHERE v.sku = :sku2 AND p.store_id = :store2');
+        $stmt->execute([':sku' => $sku, ':store' => $catalog, ':sku2' => $sku, ':store2' => $catalog]);
+        $productId = $stmt->fetchColumn();
+        if ($productId === false) return;
+        Outbox::record(DomainEvents::STOCK_ADJUSTED, 'product', (int)$productId, [
+            'product_id' => (int)$productId,
+            'sku' => $sku,
+            'before' => $before,
+            'after' => $after,
+            'reason' => $movementType,
+            'reference_type' => $referenceType,
+        ]);
+    }
+
+    private static function applyAdjustment(
+        int $warehouseId,
+        string $sku,
+        int $delta,
+        string $movementType,
+        ?string $referenceType,
+        string|int|null $referenceId,
+        ?string $idempotencyKey
+    ): void {
         $db = Db::get();
         $before = self::stockRow($warehouseId, $sku, false);
         if ($before === null) {

@@ -222,7 +222,7 @@ class FeedImport {
     /** price_stock mode: update the price of an existing product in the current catalog; false when the SKU is not there. */
     private static function updatePriceOnly(array $mapped, PDO $db): bool {
         $params = [':sku' => $mapped['sku'], ':catalog' => StoreContext::current()->catalogId()];
-        $existing = $db->prepare("SELECT id, price FROM products WHERE sku = :sku AND store_id = :catalog");
+        $existing = $db->prepare("SELECT * FROM products WHERE sku = :sku AND store_id = :catalog");
         $existing->execute($params);
         $row = $existing->fetch();
         if (!$row) return false;
@@ -241,6 +241,7 @@ class FeedImport {
             $updates[] = "updated_at = " . (Db::isSqlite() ? "datetime('now')" : "NOW()");
             $db->prepare("UPDATE products SET " . implode(', ', $updates) . " WHERE sku = :sku AND store_id = :catalog")
                ->execute($params);
+            Products::recordUpdated((int)$row['id'], $row);
         }
         return true;
     }

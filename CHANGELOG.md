@@ -238,6 +238,32 @@ nginx PHP fallback when `operations.nginx_config` is set).
     later change (deliveries can arrive out of order after retries).
   - API v1 `GET`/`PATCH /products/{id}` return an `ETag`; `PATCH` with `If-Match` answers 412
     `precondition_failed` when the product changed meanwhile (optional, existing clients keep working).
+- **Audit round 6 (medium findings)**
+  - Refunds: a provider refund that was accepted but that no notification can confirm (GoPay partial
+    refund) is completed in the order detail with "Confirm refund paid" (permission `orders.refund`, audited).
+  - Prices: a customer-group product row plus the variant surcharge never prices a variant above its
+    public variant row. B2B credit exposure counts only unpaid orders.
+  - E-mail templates: overrides cannot put tokens into `<img>` attributes or style sheets, nor hard-code
+    a bank account instead of `{{bank_iban}}`; the merchant alerts `core_drift_alert` and
+    `merchant_incident` can no longer be overridden.
+  - Documents: `cli/oss-report.php --store` includes the shared `CN-` credit notes; automatic free
+    shipping keeps the cash-on-delivery fee; the invoice exemption text follows the seller's country;
+    `cli/invoices-backfill.php` issues every store's orders in their own store and replaces cancelled
+    invoices (the cancelled one keeps its number, type `replaced`); `cli/vat-backfill.php` uses the
+    order's store as seller and taxes the whole total (discount and shipping included).
+  - Customers: the forgot-password throttle is per store and counts only mails actually sent; guest
+    erasure leaves an account with the same e-mail alone; invoice links use the store's own domain.
+  - **`php cli/setup.php apply` (and so `install`) refuses private paths inside an enclosing web root**
+    instead of creating them; it also creates `digital_assets_base_dir` when that is private.
+    `config.example.php` keeps digital products in `<private runtime dir>/downloads` (existing configs
+    are unchanged). The Docker image accepts uploads up to 20 MB.
+  - `/readyz` reports `database: read_only` (not ready) and `doctor` fails `database.writable` when the
+    database answers reads but refuses writes.
+  - `product.updated` is also recorded for admin edits, CSV imports and feed price updates;
+    `stock.adjusted` for every stock-ledger adjustment (admin, import, feed, purchase receipt, API).
+    **The `stock.adjusted` `reason` is now the ledger movement type** (`manual_adjustment`, `import`,
+    `feed_sync`, `receipt`, `api_adjustment`) plus `reference_type`, instead of `api.v1.product.patch` /
+    `api.v1.inventory.adjust`.
 - **Extension API actions**: every non-GET/HEAD request to an extension action must carry the session
   CSRF token (`X-CSRF-Token` or `csrf_token`, HTTP 403 otherwise); actions can be limited with
   `'method' => 'GET'|'POST'` (405 otherwise). **Server-to-server POSTs to an extension action break**

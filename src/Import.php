@@ -155,7 +155,19 @@ class Import {
      */
     public static function importProduct(array $data, ?PDO $db = null): void {
         $db = $db ?? Db::get();
+        // product.updated is recorded with the change: a lone call runs in its own transaction.
+        $ownsTransaction = !$db->inTransaction();
+        if ($ownsTransaction) $db->beginTransaction();
+        try {
+            self::importRow($data, $db);
+            if ($ownsTransaction) $db->commit();
+        } catch (Throwable $e) {
+            if ($ownsTransaction && $db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+    }
 
+    private static function importRow(array $data, PDO $db): void {
         // Required fields
         $sku  = trim($data['sku'] ?? '');
         $name = trim($data['name'] ?? '');
@@ -202,6 +214,7 @@ class Import {
                 self::registerSlug($tr['slug'], $locale, 'product', $productId, $db);
             }
         }
+        if ($existing) Products::recordUpdated($productId, $existing);
     }
 
     /**

@@ -280,6 +280,20 @@ class Customers {
     }
 
     /**
+     * Forgot-password form: requestPasswordReset() under a per-recipient throttle (3 reset mails an hour) that is
+     * independent of the client IP. It is scoped to the store (accounts are) and only a mail actually sent to an
+     * account counts, so requests for an address without an account here never block its owner's reset.
+     * Outcome: throttled or requestPasswordReset()'s outcome.
+     */
+    public static function forgotPassword(string $email, string $locale, array $cfg): string {
+        $recipientKey = 'account_forgot_recipient_' . StoreContext::current()->id() . '|' . hash('sha256', Str::normalizeEmail($email));
+        if (!Security::rateLimitAllows($recipientKey, 3, 3600, false)) return 'throttled';
+        $outcome = self::requestPasswordReset($email, $locale, $cfg);
+        if ($outcome === 'sent') Security::rateLimitRecord($recipientKey, false);
+        return $outcome;
+    }
+
+    /**
      * Forgot-password request. Callers show one generic result whatever happens;
      * the outcome (sent|unknown|unavailable|failed) is only for logs and tests.
      */
@@ -652,14 +666,17 @@ class Customers {
         return self::companyOpenTotal((int)$profile['company_id']) + $amount <= $creditLimit;
     }
 
-    /** Total of the company members' orders in this store that are neither cancelled nor settled (credit exposure). */
+    /**
+     * Total of the company members' orders in this store that are neither cancelled nor paid (credit exposure).
+     * Only unpaid payments count: a paid order stays paid when part of it is refunded or disputed.
+     */
     public static function companyOpenTotal(int $companyId): int {
         $stmt = Db::get()->prepare("SELECT COALESCE(SUM(o.total), 0)
             FROM orders o
             JOIN customers c ON c.id = o.customer_id AND c.store_id = o.store_id
             WHERE o.store_id = :store AND c.company_id = :company
               AND o.status <> 'cancelled'
-              AND COALESCE(o.payment_status, 'pending') NOT IN ('paid', 'refunded', 'cancelled', 'failed')");
+              AND COALESCE(o.payment_status, 'pending') IN ('pending', 'authorized')");
         $stmt->execute([
             ':store' => StoreContext::current()->id(),
             ':company' => $companyId,

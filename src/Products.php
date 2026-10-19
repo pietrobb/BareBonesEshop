@@ -674,6 +674,19 @@ class Products {
     }
 
     /**
+     * product.updated for a product whose API representation changed since $before (admin edit, CSV/feed import),
+     * recorded in the caller's transaction like the API's own event.
+     */
+    public static function recordUpdated(int $productId, array $before): void {
+        $after = self::byId($productId);
+        if (!$after) return;
+        $dto = ApiV1::productDto($after);
+        $comparable = static fn(array $row): array => array_diff_key(ApiV1::productDto($row), ['updated_at' => true]);
+        if ($comparable($before) === $comparable($after)) return;
+        Outbox::record(DomainEvents::PRODUCT_UPDATED, 'product', $productId, $dto);
+    }
+
+    /**
      * Increment stock (for order cancellation).
      * Routes through default warehouse if available.
      */

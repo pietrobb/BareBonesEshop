@@ -455,20 +455,10 @@ class PaymentService {
      * @return array{amount:int, idempotency_key:string}|null its amount and the job's execute key
      */
     public static function unexecutedRefundRequest(array $order): ?array {
-        if ((string)($order['payment_status'] ?? '') !== 'refund_pending' || self::refundsByHand($order)) return null;
+        $request = self::latestRefundRequestRow($order);
+        if ($request === null) return null;
         $db = Db::get();
         $params = [':order' => (int)$order['id'], ':store' => StoreContext::current()->id()];
-        $stmt = $db->prepare("SELECT id, amount, idempotency_key, raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store AND status = 'refund_pending' ORDER BY id DESC");
-        $stmt->execute($params);
-        $request = null;
-        // Only requestRefund() rows are requests. A job the provider answered "pending" also logs refund_pending, under
-        // its execute key or (credit notes, RMA) its own key: that row is the executed refund, and re-deriving an
-        // execute key from it would refund again.
-        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
-            $raw = json_decode((string)($row['raw_response'] ?? ''), true);
-            if (is_array($raw) && ($raw['event_type'] ?? null) === 'refund.requested') { $request = $row; break; }
-        }
-        if ($request === null) return null;
         $executeKey = self::refundExecuteKey((string)$request['idempotency_key']);
         $later = $db->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store
             AND ((id > :id AND status IN ('partially_refunded', 'refunded', 'refund_succeeded', 'refund_confirmed')) OR idempotency_key IN (:execute, :attempt)) LIMIT 1");
@@ -493,6 +483,60 @@ class PaymentService {
         ], 1);
         AuditLog::log('order_refund', $orderId, 'refund_pending', 'refund_pending', "Refund of {$request['amount']} re-queued by {$actor}");
         return true;
+    }
+
+    /**
+     * The latest requestRefund() row of a refund_pending payment at a provider with a refund API.
+     *
+     * @return array{id:mixed, amount:mixed, idempotency_key:mixed, raw_response:mixed}|null
+     */
+    private static function latestRefundRequestRow(array $order): ?array {
+        if ((string)($order['payment_status'] ?? '') !== 'refund_pending' || self::refundsByHand($order)) return null;
+        $stmt = Db::get()->prepare("SELECT id, amount, idempotency_key, raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store AND status = 'refund_pending' ORDER BY id DESC");
+        $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
+        // Only requestRefund() rows are requests. A job the provider answered "pending" also logs refund_pending, under
+        // its execute key or (credit notes, RMA) its own key: that row is the executed refund, and re-deriving an
+        // execute key from it would refund again.
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $raw = json_decode((string)($row['raw_response'] ?? ''), true);
+            if (is_array($raw) && ($raw['event_type'] ?? null) === 'refund.requested') return $row;
+        }
+        return null;
+    }
+
+    /**
+     * A refund request the provider accepted without naming a refund id (GoPay, ThePay): no refund
+     * notification can identify it, and a partial refund is reported without its amount, so the payment
+     * would stay refund_pending forever. The admin who saw it paid out completes it (confirmProviderRefund()).
+     *
+     * @return array{amount:int, request_key:string}|null
+     */
+    public static function unconfirmedProviderRefund(array $order): ?array {
+        $request = self::latestRefundRequestRow($order);
+        if ($request === null) return null;
+        $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store
+            AND idempotency_key = :execute AND status = 'refund_pending' AND (provider_ref IS NULL OR provider_ref = '') LIMIT 1");
+        $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id(),
+            ':execute' => self::refundExecuteKey((string)$request['idempotency_key'])]);
+        return $stmt->fetchColumn() ? ['amount' => (int)$request['amount'], 'request_key' => (string)$request['idempotency_key']] : null;
+    }
+
+    /** Book the provider refund in flight (unconfirmedProviderRefund()) the admin verified at the provider, audited. */
+    public static function confirmProviderRefund(int $orderId, string $actor, string $note): void {
+        if (trim($note) === '') throw new \InvalidArgumentException('A refund confirmation needs a note');
+        self::withLockedOrder($orderId, static function (array $order) use ($orderId, $actor, $note): bool {
+            $pending = self::unconfirmedProviderRefund($order);
+            if ($pending === null) throw new \LogicException('No provider refund awaits confirmation on this order');
+            // Names the request it settles, so a late provider report of the same refund books nothing more.
+            if (!self::bookRefundWithin($order, self::orderProvider($order), '', $pending['amount'], 'refund.admin_confirmed',
+                'refund_admin_confirmed_' . $pending['request_key'], ['actor' => $actor, 'note' => $note, 'settles_refund_request' => $pending['request_key']])) {
+                throw new \LogicException('The provider refund could not be booked');
+            }
+            $to = (string)(Orders::byId($orderId)['payment_status'] ?? '');
+            AuditLog::log('order_refund', $orderId, 'refund_pending', $to, "Provider refund of {$pending['amount']} confirmed by {$actor}: {$note}");
+            return true;
+        });
+        self::closeRefundedOrder($orderId, 'Provider refund confirmed');
     }
 
     /**

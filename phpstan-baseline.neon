@@ -525,5 +525,5 @@ parameters:
 		-
 			message: '#^Right side of && is always false\.$#'
 			identifier: booleanAnd.rightAlwaysFalse
-			count: 1
+			count: 2
 			path: src/Warehouse.php

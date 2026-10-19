@@ -28,16 +28,23 @@ class CheckoutService {
         return ($codQuote['selected']['method_code'] ?? '') === $method ? (int)$codQuote['price'] : $shipping;
     }
 
+    /** What a free-shipping promotion still charges: the carrier's COD surcharge when paying cash on delivery. */
+    private static function freeShippingCharge(array $cart, int $subtotal, string $country, string $method, ?array $payment): int {
+        if (($payment['service_type'] ?? '') !== 'cod' || $method === '') return 0;
+        $rate = self::deliveryQuote($cart, $subtotal, $country, $method, true)['selected'] ?? null;
+        return is_array($rate) && ($rate['method_code'] ?? '') === $method ? ShippingService::freeShippingPrice($rate) : 0;
+    }
+
     /**
      * Payment methods of the checkout form, priced like execute(): on the goods after discounts plus the shipping
-     * the order charges (cash on delivery adds the carrier surcharge; a free-shipping promotion keeps it at zero).
+     * the order charges (cash on delivery adds the carrier surcharge, which a free-shipping promotion keeps).
      * $shipping is the selected rate's price ('' method = no rate offered, so no payment either).
      * @return array{methods: list<array>, selected: ?array, shipping: int}
      */
     public static function paymentPreview(array $cart, int $goods, string $country, string $currency, string $method, int $shipping, bool $freeShipping, string $postedPayment, ?int $customerId): array {
         $methods = $method !== '' ? PaymentService::availableMethods($country, $currency, $goods + $shipping, $method, $customerId) : [];
         $selected = array_values(array_filter($methods, static fn(array $m): bool => (string)$m['code'] === $postedPayment))[0] ?? $methods[0] ?? null;
-        $charged = $freeShipping ? 0 : self::summaryShipping($cart, $goods, $country, $method, $selected, $shipping);
+        $charged = $freeShipping ? self::freeShippingCharge($cart, $goods, $country, $method, $selected) : self::summaryShipping($cart, $goods, $country, $method, $selected, $shipping);
         if ($selected && $charged !== $shipping) {
             $selected = PaymentService::selectMethod((string)$selected['code'], $country, $currency, $goods + $charged, $method, $customerId) ?? $selected;
             $methods = array_map(static fn(array $m): array => $m['code'] === $selected['code'] ? $selected : $m, $methods);

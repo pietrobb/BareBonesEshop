@@ -118,16 +118,17 @@ function collect(string $from, string $to, ?string $storeCode): array
     $where  = "WHERE i.issued_at BETWEEN :from AND :to AND i.vat_scenario = 'oss' AND i.status = 'issued'";
     $params = [':from' => $from, ':to' => $to];
 
-    // Per-store filter via invoice number prefix (e.g. "DE-20260001").
+    // Per-store filter via the number series (e.g. invoices "DE-20260001", credit notes "DE-CN-20260001"). The
+    // credit notes of an unprefixed series ("CN-2026…") contain a hyphen, so they are matched by their own prefix.
     if ($storeCode !== null) {
         $stores = json_decode((string)@file_get_contents(dirname(__DIR__) . '/stores.json'), true);
-        $prefix = $stores['stores'][$storeCode]['legal']['invoice_prefix'] ?? '';
-        if ($prefix === '') {
-            $where .= " AND i.number NOT LIKE '%-%'";
-        } else {
-            $where .= " AND i.number LIKE :prefix";
-            $params[':prefix'] = $prefix . '%';
-        }
+        $legal = $stores['stores'][$storeCode]['legal'] ?? [];
+        $legal = is_array($legal) ? $legal : [];
+        $prefix = InvoiceService::numberPrefix($legal, 'invoice');
+        $invoiceSeries = $prefix === '' ? "i.number NOT LIKE '%-%'" : 'i.number LIKE :prefix';
+        if ($prefix !== '') $params[':prefix'] = $prefix . '%';
+        $where .= " AND ((COALESCE(i.type, 'invoice') <> 'credit_note' AND {$invoiceSeries}) OR (i.type = 'credit_note' AND i.number LIKE :cn_prefix))";
+        $params[':cn_prefix'] = InvoiceService::numberPrefix($legal, 'credit_note') . '%';
     }
 
     $sql = "

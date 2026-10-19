@@ -69,8 +69,7 @@ class Pricing {
                 ORDER BY
                   CASE WHEN pl.customer_group_id IS NULL THEN 0 ELSE 1 END DESC,
                   CASE WHEN pp.variant_id IS NULL THEN 0 ELSE 1 END DESC,
-                  pp.min_qty DESC, pl.priority DESC, pp.id DESC
-                LIMIT 1";
+                  pp.min_qty DESC, pl.priority DESC, pp.id DESC";
             $stmt = Db::get()->prepare($sql);
             $params = [
                 ':product_id' => (int)$product['id'],
@@ -83,9 +82,19 @@ class Pricing {
             ];
             if ($variantId !== null) $params[':variant_id'] = $variantId;
             $stmt->execute($params);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($row && $row['variant_id'] === null && $variant) {
-                $variantDelta = (int)$variant['price_delta'];
+            // The best group row and the best public row: a group price list is a benefit, so a customer in the
+            // group never pays more than a guest (a product-level group row plus the variant surcharge could
+            // otherwise outprice a public row written for the variant).
+            $row = false;
+            $rowPrice = 0;
+            $seen = [];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $candidate) {
+                $scope = $candidate['customer_group_id'] === null ? 'public' : 'group';
+                if (isset($seen[$scope])) continue;
+                $seen[$scope] = true;
+                $delta = $candidate['variant_id'] === null && $variant ? (int)$variant['price_delta'] : 0;
+                $price = max(0, (int)$candidate['price']) + $delta;
+                if ($row === false || $price < $rowPrice) [$row, $rowPrice, $variantDelta] = [$candidate, $price, $delta];
             }
         } catch (PDOException $e) {
             $row = false;

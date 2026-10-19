@@ -50,15 +50,20 @@ final class InvoiceService
 
     /**
      * Issue an invoice for a paid order (see canIssue()). Idempotent: re-calling for the
-     * same order_id returns the existing invoice.
+     * same order_id returns the existing invoice. A cancelled invoice is replaced: it keeps its number and status for
+     * the audit trail and is re-typed 'replaced', which frees the one-invoice-per-order slot for the new invoice.
      *
      * @return array Invoice row.
      */
     public static function issue(int $orderId, ?string $storeCode = null): array
     {
         $existing = self::byOrderId($orderId);
+        $replaces = null;
         if ($existing !== null) {
-            return $existing;
+            if ((string)($existing['type'] ?? 'invoice') !== 'invoice' || (string)($existing['status'] ?? '') !== self::STATUS_CANCELLED) {
+                return $existing;
+            }
+            $replaces = (int)$existing['id'];
         }
 
         $order = Orders::byId($orderId);
@@ -86,6 +91,10 @@ final class InvoiceService
         $db = Db::get();
         $db->beginTransaction();
         try {
+            if ($replaces !== null) {
+                $db->prepare("UPDATE invoices SET type = 'replaced' WHERE id = :id AND type = 'invoice' AND status = :cancelled")
+                    ->execute([':id' => $replaces, ':cancelled' => self::STATUS_CANCELLED]);
+            }
             // Allocate next number atomically.
             $year   = (int)date('Y', strtotime($issuedAt));
             $prefix = self::numberPrefix($legal, 'invoice');
@@ -141,7 +150,8 @@ final class InvoiceService
             $invoiceId = (int)$db->lastInsertId();
             self::recordSeller($db, $invoiceId, $sellerCode);
             AuditLog::log('invoice', $invoiceId, null, ['number' => $number, 'order_id' => $orderId, 'type' => 'invoice', 'seller' => $sellerCode,
-                'total_gross' => (int)$order['total'], 'currency' => (string)($order['currency'] ?? 'eur')], 'Invoice issued');
+                'total_gross' => (int)$order['total'], 'currency' => (string)($order['currency'] ?? 'eur')] + ($replaces !== null ? ['replaces_invoice_id' => $replaces] : []),
+                'Invoice issued');
 
             $db->commit();
         } catch (\PDOException $e) {
@@ -205,6 +215,10 @@ final class InvoiceService
     {
         $seller = json_decode((string)($invoice['seller_snapshot'] ?? ''), true) ?: [];
         $total = I18n::price((int)$invoice['total_gross'], (string)($invoice['currency'] ?? 'eur'));
+        // The token is store-scoped and a store on its own domain is resolved by host: the link must use that host.
+        $link = Template::storeUrl('/account.php?p=invoice&token=' . rawurlencode((string)$invoice['download_token']));
+        $appUrl = Security::configuredAppUrl();
+        $link = $appUrl === null ? $link : Security::storeAppUrl($appUrl, StoreContext::current()->config()) . Template::seoPath($link);
         return [
             'order_number' => (string)($order['order_number'] ?? ''),
             'invoice_number' => (string)$invoice['number'],
@@ -213,7 +227,7 @@ final class InvoiceService
             'due_date' => (string)$invoice['due_date'],
             'total_gross_formatted' => $total,
             'invoice_total' => $total,
-            'invoice_download_url' => Template::absoluteUrl(Template::storeUrl('/account.php?p=invoice&token=' . rawurlencode((string)$invoice['download_token']))),
+            'invoice_download_url' => $link,
             'seller_name' => (string)($seller['name'] ?? ''),
         ];
     }
@@ -1348,15 +1362,27 @@ final class InvoiceService
         return self::renderMinimalPdf($invoice, $rows, $sellerSnap, $customerSnap, $vatBreakdown);
     }
 
-    /** Text of the document's VAT notice (exemption / reverse charge wording), or null. */
-    public static function vatNotice(array $invoice, string $locale, bool $servicesOnly): ?string
+    /** Country whose national VAT act the exemption wording of a document language cites. */
+    private const NOTICE_LAW_COUNTRY = ['sk' => 'SK', 'cs' => 'CZ', 'pl' => 'PL', 'hu' => 'HU', 'de' => 'DE', 'es' => 'ES'];
+
+    /**
+     * Text of the document's VAT notice (exemption / reverse charge wording), or null. The exemption is granted by
+     * the seller's country: the national act a language's wording cites is only quoted for a seller established
+     * there ($sellerCountry), anyone else gets the same wording citing only the VAT Directive.
+     */
+    public static function vatNotice(array $invoice, string $locale, bool $servicesOnly, string $sellerCountry): ?string
     {
         $noteKey = str_replace('vat.', '', (string)($invoice['reverse_charge_note_key'] ?? ''));
         if ($noteKey === '') return null;
         // Electronically supplied services to an EU business are not an exempt supply of goods: the customer
         // accounts for the VAT (Art. 196 of the VAT Directive).
         if ($noteKey === 'reverse_charge_note' && $servicesOnly) $noteKey = 'reverse_charge_services_note';
-        return self::loadInvoiceLabels($locale)[$noteKey] ?? null;
+        $labels = self::loadInvoiceLabels($locale);
+        $lawCountry = self::NOTICE_LAW_COUNTRY[$locale] ?? null;
+        if ($lawCountry !== null && strtoupper(trim($sellerCountry)) !== $lawCountry && isset($labels[$noteKey . '_eu'])) {
+            return $labels[$noteKey . '_eu'];
+        }
+        return $labels[$noteKey] ?? null;
     }
 
     private static function renderMinimalPdf(
@@ -1473,7 +1499,7 @@ final class InvoiceService
 
         // VAT scenario notice: the legal ground of the exemption / reverse charge, wrapped to the page width.
         $noteKey = (string)($invoice['reverse_charge_note_key'] ?? $vatBreakdown['note_key'] ?? '');
-        $notice = self::vatNotice(['reverse_charge_note_key' => $noteKey] + $invoice, $locale, !empty($vatBreakdown['services_only']));
+        $notice = self::vatNotice(['reverse_charge_note_key' => $noteKey] + $invoice, $locale, !empty($vatBreakdown['services_only']), (string)($sellerSnap['country'] ?? ''));
         if ($notice !== null) {
             foreach (explode("\n", wordwrap($notice, 95, "\n", true)) as $noticeLine) {
                 $ensureSpace(5);
@@ -1536,6 +1562,7 @@ final class InvoiceService
                 'export_note' => 'Vývoz tovaru oslobodený od dane podľa § 47 zákona o DPH (čl. 146 smernice 2006/112/ES)', 'non_vat_payer_note' => 'Predávajúci nie je platiteľom DPH',
                 'payment_method' => 'Spôsob úhrady', 'iban' => 'IBAN', 'variable_symbol' => 'Variabilný symbol',
                 'ico' => 'IČO', 'dic' => 'DIČ', 'ic_dph' => 'IČ DPH',
+                'reverse_charge_note_eu' => 'Dodanie tovaru do iného členského štátu oslobodené od dane (čl. 138 smernice 2006/112/ES)', 'export_note_eu' => 'Vývoz tovaru oslobodený od dane (čl. 146 smernice 2006/112/ES)',
                 'reverse_charge_services_note' => 'Prenesenie daňovej povinnosti — daň odvádza príjemca služby (čl. 196 smernice 2006/112/ES)',
                 'credit_title' => 'Dobropis č.',
                 'refers_to' => 'Opravný doklad k faktúre č.',
@@ -1557,6 +1584,7 @@ final class InvoiceService
                 'export_note' => 'Vývoz zboží osvobozený od daně podle § 66 zákona o DPH (čl. 146 směrnice 2006/112/ES)', 'non_vat_payer_note' => 'Prodávající není plátcem DPH',
                 'payment_method' => 'Způsob úhrady', 'iban' => 'IBAN', 'variable_symbol' => 'Variabilní symbol',
                 'ico' => 'IČO', 'dic' => 'DIČ', 'ic_dph' => 'DIČ DPH',
+                'reverse_charge_note_eu' => 'Dodání zboží do jiného členského státu osvobozené od daně (čl. 138 směrnice 2006/112/ES)', 'export_note_eu' => 'Vývoz zboží osvobozený od daně (čl. 146 směrnice 2006/112/ES)',
                 'reverse_charge_services_note' => 'Daň odvede zákazník — přenesení daňové povinnosti (čl. 196 směrnice 2006/112/ES)',
                 'credit_title' => 'Dobropis č.',
                 'refers_to' => 'Opravný daňový doklad k faktuře č.',
@@ -1578,6 +1606,7 @@ final class InvoiceService
                 'export_note' => 'Eksport towarów, stawka 0% (art. 41 ust. 4 ustawy o VAT, art. 146 dyrektywy 2006/112/WE)', 'non_vat_payer_note' => 'Sprzedawca nie jest płatnikiem VAT',
                 'payment_method' => 'Forma płatności', 'iban' => 'IBAN', 'variable_symbol' => 'Symbol var.',
                 'ico' => 'NIP/REGON', 'dic' => 'NIP', 'ic_dph' => 'NIP UE',
+                'reverse_charge_note_eu' => 'Wewnątrzwspólnotowa dostawa towarów zwolniona z podatku (art. 138 dyrektywy 2006/112/WE)', 'export_note_eu' => 'Eksport towarów zwolniony z podatku (art. 146 dyrektywy 2006/112/WE)',
                 'reverse_charge_services_note' => 'Odwrotne obciążenie — podatek rozlicza nabywca (art. 196 dyrektywy 2006/112/WE)',
                 'credit_title' => 'Faktura korygująca nr',
                 'refers_to' => 'Korekta faktury nr',
@@ -1599,6 +1628,7 @@ final class InvoiceService
                 'export_note' => 'Adómentes termékexport (Áfa tv. 98. §, 2006/112/EK irányelv 146. cikk)', 'non_vat_payer_note' => 'Az eladó nem ÁFA-alany',
                 'payment_method' => 'Fizetési mód', 'iban' => 'IBAN', 'variable_symbol' => 'Hivatkozási szám',
                 'ico' => 'Cégjegyzékszám', 'dic' => 'Adószám', 'ic_dph' => 'Közösségi adószám',
+                'reverse_charge_note_eu' => 'Adómentes Közösségen belüli termékértékesítés (2006/112/EK irányelv 138. cikk)', 'export_note_eu' => 'Adómentes termékexport (2006/112/EK irányelv 146. cikk)',
                 'reverse_charge_services_note' => 'Fordított adózás — az adót a vevő fizeti (2006/112/EK irányelv 196. cikk)',
                 'credit_title' => 'Helyesbítő számla sz.',
                 'refers_to' => 'Az alábbi számla helyesbítése:',
@@ -1620,6 +1650,7 @@ final class InvoiceService
                 'export_note' => 'Steuerfreie Ausfuhrlieferung (§ 4 Nr. 1a i.V.m. § 6 UStG, Art. 146 MwStSystRL)', 'non_vat_payer_note' => 'Der Verkäufer ist nicht umsatzsteuerpflichtig',
                 'payment_method' => 'Zahlungsart', 'iban' => 'IBAN', 'variable_symbol' => 'Verwendungszweck',
                 'ico' => 'HR-Nr.', 'dic' => 'Steuernr.', 'ic_dph' => 'USt-IdNr.',
+                'reverse_charge_note_eu' => 'Steuerfreie innergemeinschaftliche Lieferung (Art. 138 MwStSystRL)', 'export_note_eu' => 'Steuerfreie Ausfuhrlieferung (Art. 146 MwStSystRL)',
                 'reverse_charge_services_note' => 'Steuerschuldnerschaft des Leistungsempfängers — Reverse Charge (Art. 196 MwStSystRL)',
                 'credit_title' => 'Gutschrift Nr.',
                 'refers_to' => 'Korrektur zur Rechnung Nr.',
@@ -1641,6 +1672,7 @@ final class InvoiceService
                 'export_note' => 'Exportación de bienes exenta (art. 21 Ley 37/1992 del IVA, art. 146 Directiva 2006/112/CE)', 'non_vat_payer_note' => 'El vendedor no está registrado a efectos del IVA',
                 'payment_method' => 'Forma de pago', 'iban' => 'IBAN', 'variable_symbol' => 'Referencia',
                 'ico' => 'N.º de registro', 'dic' => 'NIF', 'ic_dph' => 'NIF-IVA',
+                'reverse_charge_note_eu' => 'Entrega intracomunitaria de bienes exenta (art. 138 Directiva 2006/112/CE)', 'export_note_eu' => 'Exportación de bienes exenta (art. 146 Directiva 2006/112/CE)',
                 'reverse_charge_services_note' => 'Inversión del sujeto pasivo (art. 196 Directiva 2006/112/CE)',
                 'credit_title' => 'Factura rectificativa n.º', 'refers_to' => 'Rectifica la factura n.º', 'discount' => 'Descuento',
                 'payment_fee' => 'Comisión de pago', 'rounding' => 'Redondeo', 'col_unit_net' => 'Precio unit. sin IVA', 'col_net_total' => 'Sin IVA',

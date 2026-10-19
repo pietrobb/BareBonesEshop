@@ -886,7 +886,8 @@ assert_true(str_contains($accountThemeSource, 'name="register_token"'), 'Account
 assert_true(!str_contains($accountSource, 'HTTP_HOST'), 'G3: password reset URL does not trust the Host header');
 assert_true(str_contains($accountThemeSource, 'name="company_website"'), 'Account register form includes hidden honeypot field');
 assert_true(str_contains($accountSource, "'account_login_account_' . \$emailKey, 10, 900)"), 'G4/A07.3: login throttles per account and client IP (no lockout DoS)');
-assert_true(str_contains($accountSource, 'account_forgot_recipient_'), 'G4: password reset has a per-recipient throttle independent of IP');
+assert_true(str_contains($accountSource, 'Customers::forgotPassword(') && str_contains((string)file_get_contents(TEST_CLI_DIR . '/../src/Customers.php'), "'account_forgot_recipient_'"),
+    'G4: password reset has a per-recipient throttle independent of IP');
 assert_true(str_contains($accountSource, "account.err_invalid_credentials"), 'G4: login returns a generic credential error');
 $adminSourceG4 = entrypointSource('admin.php');
 assert_true(str_contains($adminSourceG4, "adminRequire('customers.edit')"), 'G4: customer status mutation requires edit permission');
