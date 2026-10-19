@@ -190,6 +190,17 @@ nginx PHP fallback when `operations.nginx_config` is set).
     the text, never inside an image, style or foreign address, nor in the subject; a hard-coded IBAN is
     refused (use `{{bank_iban}}`). **An existing override that does this is refused on its next save.**
     The audit log keeps the previous subject and a line diff of the HTML and text parts, not only hashes.
+- **Customers, e-mails and GDPR (audit round 5)**
+  - Migration `20261019120000_customer_email_per_store`: a customer e-mail is unique per store
+    (`uq_customers_store_email` on `store_id, email`) instead of across the installation, so an
+    account in one store no longer blocks (or lets anyone squat) the same address in another store.
+    SQLite rebuilds `customers` with foreign keys off (addresses, reset tokens and verifications are kept).
+  - Password reset and e-mail verification links of a store with its own `domains` use that domain.
+  - A new reset request no longer cancels the links the owner already has (at most 5 open links per
+    account; further requests are dropped silently); setting the password invalidates the others.
+  - GDPR erasure records a `customer.erased` event for webhook subscribers so they erase
+    their copies (customer id, guest flag and retained order ids — never the e-mail).
+  - Admin GDPR: guests (orders without an account) can be exported and erased by e-mail like customers.
 - **Extension API actions**: every non-GET/HEAD request to an extension action must carry the session
   CSRF token (`X-CSRF-Token` or `csrf_token`, HTTP 403 otherwise); actions can be limited with
   `'method' => 'GET'|'POST'` (405 otherwise). **Server-to-server POSTs to an extension action break**
