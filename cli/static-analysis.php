@@ -130,7 +130,8 @@ $architectureBudgets = [
     // +1 coupling: CsvExport streams the product export and reports a truncated one (log, incident, 500 when possible).
     // +15 lines: rejected product/CMS saves keep the typed input; product bulk actions report and keep the list filters.
     // +1 line: product save marks the catalog cache stale (Cache::catalogChanged).
-    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1266, 'functions' => 24, 'max_function_lines' => 210, 'coupling' => 18],
+    // +1 line: product save emits product.updated for API subscribers (round 6 review).
+    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1267, 'functions' => 24, 'max_function_lines' => 210, 'coupling' => 18],
     // +1 coupling: ProductVariants owns variant validation, ledger stock booking and the delete/SKU-change guards.
     // +1 coupling: I18n gives the editor's labels in the admin language (A15.5).
     'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 105, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 4],
@@ -147,7 +148,8 @@ $architectureBudgets = [
     // +1 coupling: OrderExport owns the order list filters shared by the sales overview and the CSV export (A15.2).
     // +1 function, +21 lines: "Retry refund" re-queues a refund request no payment_refund job ever executed (round 4 final review).
     // +1 line: a cancellation that refunds captured money needs orders.refund (round 5 review).
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 902, 'functions' => 15, 'max_function_lines' => 300, 'coupling' => 20],
+    // +1 function, +14 lines: "Confirm refund" books a GoPay/ThePay partial refund the provider never confirms (round 6 review).
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 916, 'functions' => 16, 'max_function_lines' => 303, 'coupling' => 20],
     'src/Entrypoints/Admin/OrderOperations.php' => ['lines' => 80, 'functions' => 4, 'max_function_lines' => 32, 'coupling' => 7],
     'src/Entrypoints/Admin/PricingRules.php' => ['lines' => 235, 'functions' => 7, 'max_function_lines' => 115, 'coupling' => 5],
     'src/Entrypoints/Admin/Reports.php' => ['lines' => 90, 'functions' => 2, 'max_function_lines' => 74, 'coupling' => 4],
