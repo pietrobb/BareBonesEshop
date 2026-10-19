@@ -34,6 +34,7 @@ try {
         }
         $headers = function_exists('getallheaders') ? (getallheaders() ?: []) : [];
         $headers['Idempotency-Key'] ??= (string)($_SERVER['HTTP_IDEMPOTENCY_KEY'] ?? '');
+        $headers['If-Match'] ??= (string)($_SERVER['HTTP_IF_MATCH'] ?? '');
         $result = ApiV1::dispatch(
             $method,
             $route['path'],
@@ -44,6 +45,7 @@ try {
         );
         $status = $result['status'];
         $body = $result['body'];
+        foreach ($result['headers'] ?? [] as $name => $value) header("{$name}: {$value}");
     }
 } catch (Throwable $e) {
     ['status' => $status, 'body' => $body] = ApiV1::errorResponse($e);

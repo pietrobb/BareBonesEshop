@@ -58,6 +58,9 @@ final class RetentionCleanup
         $outbox = $db->prepare("DELETE FROM event_outbox WHERE status = 'delivered' AND updated_at < :cutoff");
         $outbox->execute([':cutoff' => $outboxCutoff]);
         $deleted['event_outbox'] = $outbox->rowCount();
+        // Only the counter value matters; the newest row is kept (MySQL/MariaDB restart the counter from the max row).
+        $lastSequence = (int)$db->query('SELECT COALESCE(MAX(id), 0) FROM event_sequence')->fetchColumn();
+        $db->prepare('DELETE FROM event_sequence WHERE id < :last')->execute([':last' => $lastSequence]);
 
         $jobs = $db->prepare("DELETE FROM queue_jobs WHERE state = 'completed' AND completed_at < :cutoff");
         $jobs->execute([':cutoff' => $cutoff((int)($cfg['completed_jobs_days'] ?? 7))]);

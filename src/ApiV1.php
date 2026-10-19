@@ -1,7 +1,7 @@
 <?php
 /** Stable, additive-first external API v1 contract. */
 class ApiV1 {
-    /** @return array{status:int,body:array} */
+    /** @return array{status:int,body:array,headers?:array<string,string>} */
     public static function dispatch(
         string $method,
         string $path,
@@ -27,11 +27,11 @@ class ApiV1 {
         if ($method === 'GET' && preg_match('#^/products/(\d+)$#', $path, $m)) {
             ApiAuth::requireScope($client, 'products:read');
             $product = Products::byId((int)$m[1]);
-            return $product ? self::ok(['data' => self::productDto($product)]) : self::notFound('Product not found');
+            return $product ? self::withEtag(self::ok(['data' => self::productDto($product)])) : self::notFound('Product not found');
         }
         if ($method === 'PATCH' && preg_match('#^/products/(\d+)$#', $path, $m)) {
             ApiAuth::requireScope($client, 'products:write');
-            return self::patchProduct((int)$m[1], $body, $key, $client, $path);
+            return self::withEtag(self::patchProduct((int)$m[1], $body, $key, $client, $path, self::header($headers, 'if-match')));
         }
         if ($method === 'GET' && $path === '/orders') {
             ApiAuth::requireScope($client, 'orders:read');
@@ -162,7 +162,7 @@ class ApiV1 {
     }
 
     /** @return array{status:int,body:array} */
-    private static function patchProduct(int $productId, array $body, string $key, array $client, string $path): array {
+    private static function patchProduct(int $productId, array $body, string $key, array $client, string $path, string $ifMatch = ''): array {
         $allowed = ['name', 'status', 'price', 'compare_price', 'stock', 'weight_g'];
         if ($body === [] || array_diff(array_keys($body), $allowed)) {
             throw new InvalidArgumentException('Product patch contains unsupported fields');
@@ -185,9 +185,15 @@ class ApiV1 {
             throw new InvalidArgumentException('Invalid product name');
         }
 
-        return self::idempotentWrite($client, $key, 'PATCH', $path, $body, static function() use ($productId, $body, $allowed, $client): array {
+        return self::idempotentWrite($client, $key, 'PATCH', $path, $body, static function() use ($productId, $body, $allowed, $client, $ifMatch): array {
+            // Row lock first, so the If-Match comparison and the update see the same version (no lost update).
+            Db::get()->prepare('UPDATE products SET updated_at = updated_at WHERE id = :id AND store_id = :store')
+                ->execute([':id' => $productId, ':store' => StoreContext::current()->catalogId()]);
             $old = Products::byId($productId);
             if (!$old) return self::notFound('Product not found');
+            if ($ifMatch !== '' && !self::etagMatches($ifMatch, self::etag(self::productDto($old)))) {
+                return self::error(412, 'precondition_failed', 'The product changed since the ETag in If-Match was read') + ['store' => false];
+            }
 
             $set = [];
             $params = [':id' => $productId, ':store' => StoreContext::current()->catalogId()];
@@ -444,6 +450,27 @@ class ApiV1 {
     /** @return array{status:int,body:array} */
     private static function ok(array $body): array {
         return ['status' => 200, 'body' => $body];
+    }
+
+    /** Adds the ETag of the product in a 200 body (GET and PATCH, also a replayed PATCH). */
+    private static function withEtag(array $result): array {
+        if ($result['status'] === 200 && is_array($result['body']['data'] ?? null)) {
+            $result['headers'] = ['ETag' => self::etag($result['body']['data'])];
+        }
+        return $result;
+    }
+
+    private static function etag(array $dto): string {
+        return '"' . substr(hash('sha256', json_encode($dto, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)), 0, 32) . '"';
+    }
+
+    /** If-Match: "*" or a comma-separated list of entity tags (a W/ prefix is ignored). */
+    private static function etagMatches(string $ifMatch, string $etag): bool {
+        foreach (explode(',', $ifMatch) as $candidate) {
+            $candidate = trim($candidate);
+            if ($candidate === '*' || preg_replace('#^W/#', '', $candidate) === $etag) return true;
+        }
+        return false;
     }
 
     /** @return array{status:int,body:array} */

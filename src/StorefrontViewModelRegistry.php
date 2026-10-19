@@ -17,9 +17,16 @@ final class StorefrontViewModelRegistry
         self::assertSlug($context, 'view-model context');
         $extensions = [];
         foreach (self::$providers[$context] ?? [] as $namespace => $provider) {
-            $value = $provider($data);
-            if (!is_array($value)) {
-                throw new UnexpectedValueException("Storefront extension {$namespace} must return an array");
+            // One failing module (extension, reviews, ...) leaves only its own block out, never the whole page.
+            try {
+                $value = $provider($data);
+                if (!is_array($value)) {
+                    throw new UnexpectedValueException("Storefront extension {$namespace} must return an array");
+                }
+            } catch (Throwable $e) {
+                Logger::warning('storefront.extension_failed', ['context' => $context, 'namespace' => $namespace, 'exception_type' => get_class($e)]);
+                IncidentMonitor::report('storefront.extension_failed', 'storefront', 'warning', ['exception' => $e]);
+                continue;
             }
             if ($value === []) continue;
             $target =& $extensions;

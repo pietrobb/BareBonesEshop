@@ -318,6 +318,12 @@ if ($mysqlDsn) {
         $vatIdChecksMigrationMysql->up($my, false);
         assert_equals(9, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='vat_id_checks'")->fetchColumn(), 'MySQL live: VIES evidence migration creates its table idempotently');
         $my->exec('DROP TABLE vat_id_checks');
+        $my->exec('DROP TABLE IF EXISTS event_sequence');
+        $r5ShippingMigrationMysql = require TEST_CLI_DIR . '/../migrations/20261019150000_shipment_tracking_event_sequence.php';
+        $r5ShippingMigrationMysql->up($my, false);
+        $r5ShippingMigrationMysql->up($my, false);
+        assert_equals(4, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND ((TABLE_NAME='shipments' AND COLUMN_NAME IN ('tracking_status','delivered_at')) OR (TABLE_NAME='event_outbox' AND COLUMN_NAME='seq') OR TABLE_NAME='event_sequence')")->fetchColumn(), 'MySQL live: R5 shipment tracking / event sequence migration is applied idempotently');
+        $my->exec('DROP TABLE event_sequence');
         foreach (['content_redirects', 'content_banners', 'content_menu_items'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['credit_note_items', 'order_refunds', 'return_exchanges', 'return_receipts', 'return_labels'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['shipment_items', 'shipments', 'bundle_components', 'inventory_receipts', 'purchase_order_items', 'purchase_orders', 'supplier_products', 'suppliers', 'stock_movements'] as $table) $my->exec("DROP TABLE {$table}");
@@ -636,6 +642,12 @@ $vatIdChecksMigration = require TEST_CLI_DIR . '/../migrations/20261019090000_va
 $vatIdChecksMigration->up($pdo, true);
 $vatIdChecksMigration->up($pdo, true);
 assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='vat_id_checks'")->fetchColumn(), 'R5 VAT migration: the VIES evidence table exists idempotently');
+$r5ShippingMigration = require TEST_CLI_DIR . '/../migrations/20261019150000_shipment_tracking_event_sequence.php';
+$r5ShippingMigration->up($pdo, true);
+$r5ShippingMigration->up($pdo, true);
+assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_sequence'")->fetchColumn()
+    && in_array('seq', array_column($pdo->query('PRAGMA table_info(event_outbox)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true)
+    && !array_diff(['tracking_status', 'delivered_at'], array_column($pdo->query('PRAGMA table_info(shipments)')->fetchAll(PDO::FETCH_ASSOC), 'name')), 'R5 shipping migration: tracking columns, event seq and the sequence table exist idempotently');
 
 // ============================================================
 // TEST 3: CSV Import
