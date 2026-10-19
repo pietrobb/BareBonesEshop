@@ -67,11 +67,18 @@ database admin account exists.
   that fallback (set `operations.nginx_config` and `php cli/setup.php doctor` checks it).
 - **Docker**: [`deploy/docker-compose.yml`](deploy/docker-compose.yml) runs nginx and the
   PHP-FPM image from [`deploy/Dockerfile`](deploy/Dockerfile) with the private runtime data
-  on a named volume. PHP runs as `www-data` (uid 33) on a read-only root filesystem with the
-  code mounted read-only; only `cache/`, `uploads/`, `import/` and `logs/` are writable and
-  must be owned by uid 33. First run, through the opt-in installer that may write `config.php`:
+  on a named volume and the production `php.ini` (no errors shown to visitors). PHP runs as
+  `www-data` (uid 33) on a read-only root filesystem with the code mounted read-only; only
+  `cache/`, `uploads/`, `import/` and `logs/` are writable. From a fresh clone
+  (`git clone --recurse-submodules`), the opt-in installer writes `config.php` and hands those
+  directories to uid 33:
   `docker compose -f deploy/docker-compose.yml run --rm -e BBE_ADMIN_PASSWORD=... setup php cli/setup.php install --app-url=http://localhost:8080 --admin-username=admin`,
   then `docker compose -f deploy/docker-compose.yml up -d`.
+- **Subdirectory of a web root** (for example `public_html/shop`): `install` keeps the private
+  data above the web root (`../bareboneseshop-data/shop/`), because the template's
+  `../bareboneseshop-private` would be inside `public_html`. `doctor` fails a private path inside
+  the web root it detects from the directory name (`public_html`, `httpdocs`, `htdocs`, `wwwroot`,
+  `html`, `www`, `web`); set `operations.document_root` when the guess is wrong.
 
 Never use `php -S` without `router.php`, and never for production.
 

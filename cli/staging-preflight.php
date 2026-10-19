@@ -42,7 +42,8 @@ function runStagingPreflight(array $argvLocal = []): array {
     $add = static function (string $level, string $name, string $message, string $remediation = '') use (&$checks): void {
         $checks[] = compact('level', 'name', 'message', 'remediation');
     };
-    $privatePathOk = static function (string $path) use ($root): bool {
+    $webRoot = Setup::enclosingWebRoot($root, $cfg);
+    $privatePathOk = static function (string $path) use ($root, $webRoot): bool {
         $absolute = str_starts_with($path, '/') || str_starts_with($path, '\\\\')
             || preg_match('/^[A-Za-z]:[\\\\\/]/', $path) === 1;
         if (!$absolute || preg_match('/[\x00-\x1F\x7F]/', $path)) return false;
@@ -66,6 +67,8 @@ function runStagingPreflight(array $argvLocal = []): array {
             $app = strtolower($app);
             $candidate = strtolower($candidate);
         }
+        $served = $webRoot === null ? '' : strtolower(rtrim(str_replace('\\', '/', $webRoot), '/'));
+        if ($served !== '' && str_starts_with(strtolower($candidate) . '/', $served . '/')) return false;
         return $candidate !== $app && !str_starts_with($candidate, $app . '/');
     };
 
@@ -77,12 +80,21 @@ function runStagingPreflight(array $argvLocal = []): array {
         $add('warn', '.env', '.env not found.', 'Create it from .env.example or provide equivalent process environment variables on staging.');
     }
 
-    if (!empty($cfg['admin_password'])) {
+    // Database admin accounts replace the legacy admin_password as soon as one exists.
+    $adminTotal = AdminIdentity::available() ? AdminIdentity::accountCount() : 0;
+    if ($adminTotal > 0) {
+        $adminActive = AdminIdentity::activeCount();
+        $adminLocked = AdminIdentity::undecryptableMfaAccounts();
+        $adminOk = $adminActive > 0 && $adminLocked === [];
+        $add($adminOk ? 'ok' : 'fail', 'admin_accounts', $adminOk ? "{$adminActive} active admin account(s); admin_identity_key opens their MFA secrets."
+            : ($adminActive === 0 ? 'Every admin account is disabled.' : 'admin_identity_key cannot decrypt the MFA secret of: ' . implode(', ', $adminLocked)),
+            'Restore admin_identity_key from the previous config.php (or BBE_ADMIN_IDENTITY_KEY), or php cli/admin-user.php mfa-enroll / status --status=active.');
+    } elseif (!empty($cfg['admin_password'])) {
         $looksHashed = str_starts_with((string)$cfg['admin_password'], '$2y$')
             || str_starts_with((string)$cfg['admin_password'], '$argon2');
         $add($looksHashed ? 'ok' : 'fail', 'admin_password', $looksHashed ? 'Admin password is configured as a hash.' : 'Admin password is not a recognized password_hash() value.', 'Generate one with: php cli/hash-password.php');
     } else {
-        $add('fail', 'admin_password', 'Admin password is empty.', 'Generate one with: php cli/hash-password.php and set config.php/deploy config.');
+        $add('fail', 'admin_password', 'No admin account and no legacy admin_password: nobody can sign in.', 'BBE_ADMIN_PASSWORD=... php cli/admin-user.php create --username=NAME --role=owner');
     }
 
     $add(!empty($cfg['admin_email']) ? 'ok' : 'warn', 'admin_email', !empty($cfg['admin_email']) ? 'Admin notification email is configured.' : 'Admin notification email is empty.', 'Set admin_email for staging order notifications.');
@@ -107,9 +119,9 @@ function runStagingPreflight(array $argvLocal = []): array {
         $add('fail', 'db_driver', 'Unknown db_driver.', 'Use sqlite or mysql.');
     }
 
-    foreach (['cache', 'storage', 'uploads'] as $dir) {
-        $path = $root . '/' . $dir;
-        $add(is_dir($path) && is_writable($path) ? 'ok' : 'fail', "dir:{$dir}", "{$dir}/ " . (is_dir($path) ? 'exists' : 'missing') . (is_writable($path) ? ' and writable' : ' or not writable'), "Create and make {$dir}/ writable by the web/PHP user.");
+    // The only directories of the application the PHP user writes (the Docker sample mounts just these writable).
+    foreach (['cache' => (string)($cfg['cache_dir'] ?? $root . '/cache'), 'uploads' => (string)($cfg['uploads_dir'] ?? $root . '/uploads')] as $dir => $path) {
+        $add(is_dir($path) && is_writable($path) ? 'ok' : 'fail', "dir:{$dir}", "{$dir}/ " . (is_dir($path) ? 'exists' : 'missing') . (is_writable($path) ? ' and writable' : ' or not writable'), "Create and make {$path} writable by the web/PHP user.");
     }
 
     $privatePaths = [
@@ -128,12 +140,13 @@ function runStagingPreflight(array $argvLocal = []): array {
     ];
     foreach ($privatePaths as $key => $path) {
         $ok = $path !== '' && $privatePathOk($path);
-        $add($ok ? 'ok' : 'fail', $key, $ok ? "{$key} is outside the application root." : "{$key} is missing, relative, or inside the application root.", "Configure an absolute private {$key} path outside the document root.");
+        $add($ok ? 'ok' : 'fail', $key, $ok ? "{$key} is outside the application and web root." : "{$key} is missing, relative, or inside the application or web root" . ($webRoot !== null ? " {$webRoot}" : '') . '.', "Configure an absolute private {$key} path outside the document root.");
     }
 
-    $paymentAdapter = (string)($cfg['adapters']['payment'] ?? '');
-    $add($paymentAdapter !== '' ? 'ok' : 'fail', 'payment_adapter', $paymentAdapter !== '' ? "Payment adapter: {$paymentAdapter}" : 'Payment adapter is empty.');
-    if ($paymentAdapter === 'StripePayment') {
+    // Checkout uses provider_defaults.payment; adapters.payment is only the legacy fallback.
+    $paymentAdapter = (string)(($cfg['provider_defaults']['payment'] ?? '') ?: ($cfg['adapters']['payment'] ?? ''));
+    $add($paymentAdapter !== '' ? 'ok' : 'fail', 'payment_adapter', $paymentAdapter !== '' ? "Payment provider: {$paymentAdapter}" : 'Payment provider is empty.');
+    if (in_array($paymentAdapter, ['stripe', 'StripePayment'], true)) {
         $stripeSk = (string)($cfg['stripe_secret_key'] ?? '');
         $stripePk = (string)($cfg['stripe_publishable_key'] ?? '');
         $stripeWh = (string)($cfg['stripe_webhook_secret'] ?? '');
@@ -145,7 +158,9 @@ function runStagingPreflight(array $argvLocal = []): array {
         $envKey = 'SHIP_' . strtoupper($carrier) . '_WEBHOOK_SECRET';
         $secret = preflightEnv($envKey) ?: (string)($cfg['shipping_webhook_secrets'][$carrier] ?? '');
         $filled = preflightSecretLooksFilled($secret);
-        $add($filled ? 'ok' : 'fail', "shipping_webhook_secret:{$carrier}", $filled ? ucfirst($carrier) . ' webhook secret configured.' : ucfirst($carrier) . ' webhook secret missing/placeholder.', "Set {$envKey} or shipping_webhook_secrets.{$carrier}.");
+        // Unset = this carrier's webhooks are refused (fine when it is not used); a weak or placeholder secret is a real fault.
+        $add($filled ? 'ok' : ($secret === '' ? 'warn' : 'fail'), "shipping_webhook_secret:{$carrier}", $filled ? ucfirst($carrier) . ' webhook secret configured.'
+            : ($secret === '' ? ucfirst($carrier) . ' webhook secret not set: its tracking webhooks are refused.' : ucfirst($carrier) . ' webhook secret is a placeholder or shorter than 16 characters.'), "Set {$envKey} or shipping_webhook_secrets.{$carrier}.");
     }
 
     // Settings that silently change behaviour after this upgrade (CHANGELOG "Upgrade notes").
@@ -158,8 +173,8 @@ function runStagingPreflight(array $argvLocal = []): array {
         $add($nginxFallback ? 'ok' : 'warn', 'nginx_php_fallback', $nginxFallback ? 'nginx sends missing .php scripts to @redirect.' : 'nginx PHP location lacks "try_files $uri @redirect;": store-prefixed scripts (/cs/account.php, /cs/wishlist.php) answer 404.', 'Copy the location ~ \.php$ block from deploy/nginx.conf into operations.nginx_config and reload nginx.');
     }
 
-    $mailAdapter = strtolower(preflightEnv('MAIL_ADAPTER') ?: 'log');
-    $add($mailAdapter === 'log' ? 'warn' : 'ok', 'mail_adapter', "MAIL_ADAPTER={$mailAdapter}", $mailAdapter === 'log' ? 'For staging email delivery tests, configure smtp or ses; log is safe but does not send.' : '');
+    $mailAdapter = Setup::mailProvider($cfg);
+    $add($mailAdapter === 'log' ? 'warn' : 'ok', 'mail_adapter', "Mail provider: {$mailAdapter}", $mailAdapter === 'log' ? 'For staging email delivery tests, configure smtp or ses; log is safe but does not send.' : '');
 
     foreach (['stores.json', 'config/processors.json', 'config/data-retention.json', 'config/backup.json'] as $jsonFile) {
         [$ok, $data] = preflightFileJson($root . '/' . $jsonFile);

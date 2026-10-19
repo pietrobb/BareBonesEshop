@@ -11,7 +11,11 @@ RUN apt-get update \
     && docker-php-ext-install -j"$(nproc)" gd pdo_mysql \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /var/www/bareboneseshop-private \
-    && chown www-data:www-data /var/www/bareboneseshop-private
+    && chown www-data:www-data /var/www/bareboneseshop-private \
+    && cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
+
+# Production error handling: nothing is displayed to visitors, everything is logged.
+COPY php.ini "$PHP_INI_DIR/conf.d/zz-bareboneseshop.ini"
 
 # PHP-FPM listens on 9000, so neither the master nor the workers need root.
 USER www-data

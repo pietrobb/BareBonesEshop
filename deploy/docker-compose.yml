@@ -8,9 +8,9 @@
 # and private runtime data (../bareboneseshop-private in config.example.php) never live in
 # the image. PHP runs as www-data (uid 33) on a read-only root filesystem with the
 # application code mounted read-only: only cache/, uploads/, import/ and logs/ of the
-# checkout are writable, so uid 33 must own those four directories. The opt-in `setup`
-# service is the only one that can write config.php. For MySQL add a database service and
-# set db_driver/db_* in config.php.
+# checkout are writable; the opt-in `setup` service creates them for uid 33 and is the only
+# one that can write config.php. For MySQL add a database service and set db_driver/db_* in
+# config.php.
 name: bareboneseshop
 
 services:
@@ -48,12 +48,16 @@ services:
     depends_on: [php]
     restart: unless-stopped
 
-  # One-off installer: `docker compose run --rm setup php cli/setup.php ...`.
+  # One-off installer: `docker compose run --rm setup php cli/setup.php ...`. It runs as root only to
+  # create config.php in the host-owned checkout; deploy/docker-setup.sh then gives cache/, uploads/,
+  # import/, logs/ and the private volume to www-data and config.php to the www-data group.
   setup:
     build:
       context: .
       dockerfile: Dockerfile
     profiles: [setup]
+    user: "0:0"
+    entrypoint: ["sh", "/var/www/html/deploy/docker-setup.sh"]
     volumes:
       - ..:/var/www/html
       - private:/var/www/bareboneseshop-private

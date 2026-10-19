@@ -191,6 +191,7 @@
       "properties": {
         "worker_cron": {"oneOf": [{"const": ""}, {"type": "string", "pattern": "^(?:\\S+\\s+){4}\\S+$"}]},
         "nginx_config": {"type": "string", "description": "Absolute path of the live nginx site config; doctor/preflight check its PHP location for the @redirect fallback. Empty: not checked."},
+        "document_root": {"type": "string", "description": "Directory the web server serves when the shop is installed in a subdirectory of it; doctor/preflight fail private paths inside it. Empty: guessed from the directory name (public_html, httpdocs, htdocs, wwwroot, html, www, web)."},
         "monitor_cron": {"oneOf": [{"const": ""}, {"type": "string", "pattern": "^(?:\\S+\\s+){4}\\S+$"}]}
       },
       "additionalProperties": true

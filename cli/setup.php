@@ -45,6 +45,16 @@ if ($command === 'install') {
         $run(['cli/migrate.php'], 'migrate', true);
         $run(['cli/schema-build.php'], 'schema-build', true);
         $steps['schema'] = 'applied';
+        // A fresh config.php over an existing database (lost config, new checkout over the old private data)
+        // carries a new admin_identity_key that cannot open the existing admins' MFA secrets: undo, do not lock them out.
+        if ($steps['config']['action'] === 'created') {
+            $keyCheck = array_values(array_filter(json_decode($run(['cli/setup.php', 'doctor', '--json'], 'setup doctor'), true)['checks'] ?? [], static fn(array $c): bool => $c['name'] === 'admin.mfa_key'))[0] ?? null;
+            if (($keyCheck['status'] ?? 'pass') === 'fail') {
+                @unlink($root . '/config.php');
+                $steps['config']['action'] = 'removed';
+                throw new RuntimeException('The database already has admin accounts whose MFA secrets need the previous admin_identity_key; the new config.php was removed. Restore the previous config.php (or set BBE_ADMIN_IDENTITY_KEY) and run install again.');
+            }
+        }
         if ($adminUsername !== '') {
             $log('[4/4] first owner account');
             $stores = json_decode((string)file_get_contents($root . '/stores.json'), true);

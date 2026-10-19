@@ -1,2 +1,4 @@
 # Signed release artifacts must retain their exact bytes on every platform.
 releases/** binary
+# Shell scripts run inside Linux containers.
+*.sh text eol=lf

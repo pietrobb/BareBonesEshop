@@ -134,6 +134,10 @@ return [
         // Live nginx site config (absolute path, readable by PHP): doctor and staging-preflight warn
         // when its PHP location lacks the @redirect fallback that store-prefixed scripts need. '' = not checked.
         'nginx_config' => '',
+        // Directory the web server serves when the shop lives in a subdirectory of it (absolute path).
+        // '' = guessed from the directory name (public_html, httpdocs, htdocs, wwwroot, html, www, web);
+        // doctor and staging-preflight fail private paths inside it.
+        'document_root' => '',
     ],
     // Technical incidents only; normal checkout validation never sends mail.
     // Run worker + monitor cron. Mail 'log' is simulation, not delivery evidence.

@@ -106,6 +106,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          submodules: true
 
       - name: Build deploy/Dockerfile and smoke-test the PHP runtime
         run: |
@@ -113,6 +115,25 @@ jobs:
           docker run --rm bareboneseshop-ci php -m | tee /tmp/php-modules.txt
           grep -qx pdo_mysql /tmp/php-modules.txt
           grep -qx gd /tmp/php-modules.txt
+          docker run --rm bareboneseshop-ci php -r 'exit(ini_get("display_errors") === "" || ini_get("display_errors") === "0" ? (ini_get("expose_php") ? 1 : 0) : 1);'
+
+      # README "Docker" from a fresh checkout owned by the runner user (not uid 33).
+      - name: README Docker install, storefront and uploaded image
+        run: |
+          compose="docker compose -f deploy/docker-compose.yml"
+          $compose run --rm -e BBE_ADMIN_PASSWORD=Ci-docker-Passw0rd-1 setup php cli/setup.php install --app-url=http://localhost:8080 --admin-username=admin
+          $compose up -d --wait
+          for i in $(seq 1 30); do curl -fsS -o /dev/null http://localhost:8080/healthz && break; sleep 2; done
+          curl -fsS -o /dev/null -w 'storefront %{http_code}\n' http://localhost:8080/
+          $compose exec -T php php -r 'require "src/autoload.php"; $s = new LocalStorage([]); echo $s->store("ci/probe/pixel.png", base64_decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")), "\n";'
+          curl -fsS -o /dev/null -w 'uploaded image %{http_code}\n' http://localhost:8080/uploads/ci/probe/pixel.png
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/config.php)" != 200
+          $compose exec -T php php cli/setup.php doctor | tail -n 25
+          $compose exec -T php php cli/setup.php doctor --json | php -r '$d = json_decode(stream_get_contents(STDIN), true); $f = array_column(array_filter($d["checks"], fn($c) => $c["status"] === "fail"), "name"); echo implode(",", $f), "\n"; exit($f === [] ? 0 : 1);'
+
+      - name: Docker logs on failure
+        if: failure()
+        run: docker compose -f deploy/docker-compose.yml logs --no-color | tail -n 200
 
   browser-qualification:
     name: Browser, axe & Lighthouse

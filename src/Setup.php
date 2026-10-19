@@ -4,6 +4,27 @@ class Setup
 {
     public const SCHEMA_VERSION = 1;
     public const SUBMODULE_ACTION = 'Run git submodule update --init (or clone with --recurse-submodules).';
+    // Hosting document roots (cPanel, Plesk, XAMPP, IIS, Apache, Wedos, Websupport). /var/www itself is not served.
+    private const WEB_ROOT_NAMES = ['public_html', 'httpdocs', 'htdocs', 'wwwroot', 'html', 'www', 'web'];
+
+    /**
+     * The served directory above the application (installed into a subdirectory such as public_html/shop),
+     * or null when the application root is the document root. operations.document_root overrides the guess.
+     */
+    public static function enclosingWebRoot(string $root, array $config = []): ?string
+    {
+        $normalize = static fn(string $path): string => rtrim(str_replace('\\', '/', $path), '/');
+        $app = $normalize($root);
+        $declared = trim((string)($config['operations']['document_root'] ?? ''));
+        if ($declared !== '') {
+            $declared = $normalize($declared);
+            return strtolower($declared) !== strtolower($app) && str_starts_with(strtolower($app), strtolower($declared) . '/') ? $declared : null;
+        }
+        for ($dir = $normalize(dirname($app)); $dir !== $normalize(dirname($dir)) && $dir !== ''; $dir = $normalize(dirname($dir))) {
+            if (in_array(strtolower(basename($dir)), self::WEB_ROOT_NAMES, true) && strtolower($dir) !== '/var/www') return $dir;
+        }
+        return null;
+    }
 
     public static function bundledFormsPresent(string $root): bool
     {
@@ -25,6 +46,10 @@ class Setup
         $template = @file_get_contents($root . '/config.example.php');
         if (!is_string($template)) throw new RuntimeException('config.example.php is missing');
         $config = $template;
+        // In a subdirectory of a web root the template's ../bareboneseshop-private would be served: keep it above the web root.
+        $webRoot = self::enclosingWebRoot($root);
+        $privateBase = $webRoot === null ? null : dirname($webRoot) . '/bareboneseshop-data/' . basename(str_replace('\\', '/', $root));
+        if ($privateBase !== null) $config = str_replace('dirname(__DIR__)', var_export($privateBase, true), $config);
         foreach (['admin_identity_key' => base64_encode(random_bytes(32)), 'app_url' => rtrim($appUrl, '/')] as $key => $value) {
             if ($value === '') continue;
             $count = 0;
@@ -42,7 +67,8 @@ class Setup
             @unlink($tmp);
             throw new RuntimeException('Cannot write config.php');
         }
-        return ['path' => 'config.php', 'action' => 'created', 'generated' => ['admin_identity_key'], 'app_url' => rtrim($appUrl, '/')];
+        return ['path' => 'config.php', 'action' => 'created', 'generated' => ['admin_identity_key'], 'app_url' => rtrim($appUrl, '/')]
+            + ($privateBase !== null ? ['private_base' => $privateBase, 'web_root' => $webRoot] : []);
     }
 
     public static function doctor(?array $config = null, ?string $root = null, ?PDO $db = null): array
@@ -81,11 +107,19 @@ class Setup
             : 'Invoice numbering conflicts (these series are refused): ' . implode(' | ', array_map(static fn(string $series, string $message): string => "{$series}: {$message}", array_keys($numbering), $numbering)),
             'Give each store with its own legal block its own legal.invoice_prefix / legal.credit_note_prefix, or set legal.seller to the store whose series a storefront of the same company shares.');
 
+        $webRoot = self::enclosingWebRoot($root, $config);
         foreach (self::runtimePaths($config) as $name => $path) {
             $target = str_ends_with($name, '_file') ? dirname($path) : $path;
-            $safe = self::isPrivateAbsolutePath($target, $root);
-            $ready = $safe && is_dir($target) && is_writable($target);
+            if ($webRoot !== null && self::isPrivateAbsolutePath($target, $root) && !self::isPrivateAbsolutePath($target, $webRoot)) {
+                $add('fail', 'runtime.' . $name, "Private path inside the web root {$webRoot} (downloadable over HTTP): {$name}", "Move {$name} above {$webRoot} in config.php (or set operations.document_root if {$webRoot} is not served).");
+                continue;
+            }
+            $ready = self::isPrivateAbsolutePath($target, $root) && is_dir($target) && is_writable($target);
             $add($ready ? 'pass' : 'fail', 'runtime.' . $name, $ready ? "Writable private path configured: {$name}" : "Private path missing, unsafe, or not writable: {$name}", 'Run php cli/setup.php apply, then set ownership for the PHP user.');
+        }
+        foreach (['cache_dir' => $root . '/cache', 'uploads_dir' => $root . '/uploads'] as $name => $default) {
+            $dir = (string)($config[$name] ?? $default);
+            $add(is_dir($dir) && is_writable($dir) ? 'pass' : 'fail', 'runtime.' . $name, (is_dir($dir) && is_writable($dir) ? 'Writable: ' : 'Missing or not writable by the PHP user: ') . $name, "Create {$dir} and make it writable by the PHP user.");
         }
 
         try {
@@ -98,6 +132,7 @@ class Setup
             } catch (Throwable $e) {
                 $add('fail', 'database.schema', 'Commerce schema is not ready.', 'Run php cli/migrate.php.');
             }
+            self::adminChecks($config, $add);
         } catch (Throwable $e) {
             $add('fail', 'database.connection', 'Database connection failed.', 'Verify database credentials/path and run migrations.');
         }
@@ -133,6 +168,11 @@ class Setup
                 $changes[] = ['path' => $name, 'action' => 'unchanged'];
             }
         }
+        // uploads/ is served to visitors (0755); cache/ only to PHP.
+        foreach (['cache_dir' => [$root . '/cache', 0750], 'uploads_dir' => [$root . '/uploads', 0755]] as $name => [$default, $mode]) {
+            $dir = (string)($config[$name] ?? $default);
+            if (!is_dir($dir) && !@mkdir($dir, $mode, true) && !is_dir($dir)) throw new RuntimeException("Cannot create runtime path: {$name}");
+        }
         $stateDir = (string)($config['private_runtime_dir'] ?? '');
         $statePath = rtrim($stateDir, '/\\') . '/setup-state.json';
         $existingState = is_file($statePath) ? json_decode((string)file_get_contents($statePath), true) : null;
@@ -152,7 +192,7 @@ class Setup
     private static function providerChecks(array $config, callable $add): void
     {
         $payment = (string)($config['provider_defaults']['payment'] ?? 'stripe');
-        $mail = (string)($config['provider_defaults']['mail'] ?? (getenv('MAIL_ADAPTER') ?: 'log'));
+        $mail = self::mailProvider($config);
         $add($payment !== '' ? 'pass' : 'fail', 'provider.payment', $payment !== '' ? "Payment provider selected: {$payment}" : 'Payment provider missing.', 'Select provider_defaults.payment.');
         $add($mail === 'log' ? 'warn' : 'pass', 'provider.mail', "Mail provider selected: {$mail}", $mail === 'log' ? 'Configure smtp or ses and send a staging message before launch.' : '');
         $webhooks = array_filter((array)($config['outbound_webhooks'] ?? []), static fn($endpoint): bool => is_array($endpoint) && ($endpoint['active'] ?? true));
@@ -198,6 +238,28 @@ class Setup
                 : 'nginx PHP location has no "try_files $uri @redirect;": store-prefixed scripts (/cs/account.php, /cs/wishlist.php) answer 404.',
                 'Copy the location ~ \.php$ block from deploy/nginx.conf into ' . (string)($config['operations']['nginx_config'] ?? 'the nginx site config') . ' and reload nginx.');
         }
+    }
+
+    /** The provider MailService really uses: MAIL_ADAPTER wins over provider_defaults.mail. */
+    public static function mailProvider(array $config): string
+    {
+        return strtolower((string)(getenv('MAIL_ADAPTER') ?: ($config['provider_defaults']['mail'] ?? '') ?: 'log'));
+    }
+
+    /** Somebody can sign in to the back-office: an active account (or the legacy hash) and an MFA key that opens its secret. */
+    private static function adminChecks(array $config, callable $add): void
+    {
+        if (!AdminIdentity::available()) return;
+        $total = AdminIdentity::accountCount();
+        $active = AdminIdentity::activeCount();
+        $canSignIn = $total === 0 ? (string)($config['admin_password'] ?? '') !== '' : $active > 0;
+        $add($canSignIn ? 'pass' : 'fail', 'admin.accounts', $canSignIn ? "{$active} active admin account(s)." : ($total === 0 ? 'No admin account: nobody can sign in to the back-office.' : 'Every admin account is disabled.'),
+            $canSignIn ? '' : 'BBE_ADMIN_PASSWORD=... php cli/admin-user.php create --username=NAME --role=owner (or status --status=active).');
+        $locked = AdminIdentity::undecryptableMfaAccounts();
+        $add($locked === [] ? 'pass' : 'fail', 'admin.mfa_key', $locked === []
+            ? 'admin_identity_key opens the MFA secret of every active admin.'
+            : 'admin_identity_key cannot decrypt the MFA secret of ' . implode(', ', $locked) . ': they cannot sign in (config.php regenerated or key changed).',
+            $locked === [] ? '' : 'Restore admin_identity_key from the previous config.php (or BBE_ADMIN_IDENTITY_KEY); if it is lost, re-enrol each account: php cli/admin-user.php mfa-enroll --username=NAME.');
     }
 
     private static function integrationReady(array $integration): bool
