@@ -117,6 +117,16 @@ class Setup
             $ready = self::isPrivateAbsolutePath($target, $root) && is_dir($target) && is_writable($target);
             $add($ready ? 'pass' : 'fail', 'runtime.' . $name, $ready ? "Writable private path configured: {$name}" : "Private path missing, unsafe, or not writable: {$name}", 'Run php cli/setup.php apply, then set ownership for the PHP user.');
         }
+        // Optional private paths (schema x-private-path): checked only when configured, but never allowed under the web root.
+        foreach (['digital_assets_base_dir', 'metrics_log_file', 'gdpr_salt_file', 'update_storage_dir', 'backup_recovery_dir'] as $name) {
+            $path = (string)($config[$name] ?? '');
+            if ($path === '') continue;
+            $served = $webRoot ?? $root;
+            $target = str_ends_with($name, '_file') ? dirname($path) : $path;
+            $leaks = !self::isPrivateAbsolutePath($target, $served);
+            $add($leaks ? 'fail' : 'pass', 'runtime.' . $name, $leaks ? "Private path relative or inside the web root {$served} (downloadable over HTTP): {$name}" : "Private path outside the web root: {$name}",
+                "Move {$name} to an absolute path above {$served} in config.php (or set operations.document_root if {$served} is not served).");
+        }
         foreach (['cache_dir' => $root . '/cache', 'uploads_dir' => $root . '/uploads'] as $name => $default) {
             $dir = (string)($config[$name] ?? $default);
             $add(is_dir($dir) && is_writable($dir) ? 'pass' : 'fail', 'runtime.' . $name, (is_dir($dir) && is_writable($dir) ? 'Writable: ' : 'Missing or not writable by the PHP user: ') . $name, "Create {$dir} and make it writable by the PHP user.");

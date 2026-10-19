@@ -45,6 +45,8 @@ try {
         'private_runtime_dir' => $r5dServed, 'db_sqlite_path' => $r5dServed . '/db/shop.sqlite', 'private_cache_dir' => $r5dServed . '/cache',
         'jobs_dir' => $r5dServed . '/jobs', 'invoice_storage_dir' => $r5dServed . '/invoices', 'backup_storage_dir' => $r5dServed . '/backups',
         'backup_log_file' => $r5dServed . '/logs/backup.log', 'structured_log_file' => $r5dServed . '/logs/application.jsonl', 'extensions' => [],
+        'digital_assets_base_dir' => $r5dBase . '/plain/public_html/private_downloads', 'metrics_log_file' => $r5dServed . '/logs/metrics.jsonl',
+        'gdpr_salt_file' => $r5dServed . '/secrets/gdpr_salt', 'update_storage_dir' => $r5dServed . '/updates', 'backup_recovery_dir' => $r5dServed . '/restore-recovery',
     ]);
     foreach (['db', 'cache', 'jobs', 'invoices', 'backups', 'logs'] as $r5dDir) mkdir($r5dServed . '/' . $r5dDir, 0777, true);
     $r5dChecks = static function (array $cfg, string $root): array {
@@ -56,6 +58,12 @@ try {
     assert_true(($r5dDoctor['runtime.private_runtime_dir']['status'] ?? '') === 'fail' && str_contains($r5dDoctor['runtime.private_runtime_dir']['message'] ?? '', 'web root'),
         'R5 deploy: doctor fails a private runtime directory inside the web root of a subdirectory install (' . ($r5dDoctor['runtime.private_runtime_dir']['message'] ?? '') . ')');
     assert_equals('fail', $r5dDoctor['runtime.db_dir']['status'] ?? null, 'R5 deploy: doctor fails a SQLite database inside the web root');
+    foreach (['digital_assets_base_dir', 'metrics_log_file', 'gdpr_salt_file', 'update_storage_dir', 'backup_recovery_dir'] as $r5dKey) {
+        assert_true(($r5dDoctor['runtime.' . $r5dKey]['status'] ?? '') === 'fail' && str_contains($r5dDoctor['runtime.' . $r5dKey]['message'] ?? '', 'web root'),
+            "R5 deploy: doctor fails {$r5dKey} inside the web root (paid downloads, salts and logs are private too)");
+    }
+    $r5dUnset = $r5dChecks(array_diff_key($r5dCfg, ['digital_assets_base_dir' => 1]), $r5dShopOnly);
+    assert_true(!isset($r5dUnset['runtime.digital_assets_base_dir']), 'R5 deploy: a shop without digital goods gets no downloads-folder check');
     $r5dDeclared = $r5dChecks(array_replace_recursive($r5dCfg, ['operations' => ['document_root' => $r5dShopOnly]]), $r5dShopOnly);
     assert_equals('pass', $r5dDeclared['runtime.private_runtime_dir']['status'] ?? null, 'R5 deploy: the same paths pass when operations.document_root says the application root is served');
 
@@ -117,6 +125,21 @@ try {
     assert_true(($r5dMailCheck['level'] ?? '') === 'ok' && str_contains($r5dMailCheck['message'] ?? '', 'smtp'), 'R5 deploy: preflight reports the mail provider MailService uses (MAIL_ADAPTER)');
     $r5dDoctorMail = json_decode($r5dPhp(['cli/setup.php', 'doctor', '--json'], ['MAIL_ADAPTER' => 'smtp'])['out'], true);
     assert_equals('pass', array_column($r5dDoctorMail['checks'] ?? [], 'status', 'name')['provider.mail'] ?? null, 'R5 deploy: doctor reads MAIL_ADAPTER before provider_defaults.mail, like MailService');
+
+    // Old template: only the paid downloads still sit in public_html/private_downloads, every other path was moved.
+    $r5dLeak = $r5dBase . '/home/public_html/private_downloads';
+    mkdir($r5dLeak, 0777, true);
+    copy($r5dShop . '/config.php', $r5dShop . '/config.r5orig.php');
+    file_put_contents($r5dShop . '/config.php', "<?php\n\$c = require __DIR__ . '/config.r5orig.php';\n\$c['digital_assets_base_dir'] = " . var_export($r5dLeak, true) . ";\nreturn \$c;\n");
+    $r5dLeakDoctor = json_decode($r5dPhp(['cli/setup.php', 'doctor', '--json'])['out'], true);
+    $r5dLeakStatus = array_column($r5dLeakDoctor['checks'] ?? [], 'status', 'name');
+    assert_true(($r5dLeakStatus['runtime.digital_assets_base_dir'] ?? '') === 'fail' && ($r5dLeakDoctor['status'] ?? '') !== 'ready',
+        'R5 deploy: doctor is not ready while the paid downloads are inside public_html (' . ($r5dLeakDoctor['status'] ?? '?') . ')');
+    $r5dLeakPre = json_decode($r5dPhp(['cli/staging-preflight.php', '--json'])['out'], true);
+    assert_equals('fail', array_column($r5dLeakPre['checks'] ?? [], 'level', 'name')['digital_assets_base_dir'] ?? null, 'R5 deploy: preflight is NO-GO while the paid downloads are inside public_html');
+    rename($r5dShop . '/config.r5orig.php', $r5dShop . '/config.php');
+    $r5dCleanPre = json_decode($r5dPhp(['cli/staging-preflight.php', '--json'])['out'], true);
+    assert_equals('ok', array_column($r5dCleanPre['checks'] ?? [], 'level', 'name')['digital_assets_base_dir'] ?? null, 'R5 deploy: preflight accepts the downloads folder the installer put above the web root');
 
     // Lost config.php over the existing database: install must not lock the owner out.
     $r5dOldConfig = (string)file_get_contents($r5dShop . '/config.php');

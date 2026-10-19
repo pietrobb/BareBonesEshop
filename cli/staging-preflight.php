@@ -138,6 +138,8 @@ function runStagingPreflight(array $argvLocal = []): array {
         'update_storage_dir' => (string)($cfg['update_storage_dir']
             ?? ((string)($cfg['private_runtime_dir'] ?? '') !== '' ? rtrim((string)$cfg['private_runtime_dir'], '/\\') . '/updates' : '')),
     ];
+    // Only shops selling digital goods configure it; when set, the paid files must not be reachable over HTTP.
+    if ((string)($cfg['digital_assets_base_dir'] ?? '') !== '') $privatePaths['digital_assets_base_dir'] = (string)$cfg['digital_assets_base_dir'];
     foreach ($privatePaths as $key => $path) {
         $ok = $path !== '' && $privatePathOk($path);
         $add($ok ? 'ok' : 'fail', $key, $ok ? "{$key} is outside the application and web root." : "{$key} is missing, relative, or inside the application or web root" . ($webRoot !== null ? " {$webRoot}" : '') . '.', "Configure an absolute private {$key} path outside the document root.");
