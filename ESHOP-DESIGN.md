@@ -320,7 +320,7 @@ When you run `php cli/schema-build.php`:
 - **New migration:** `php cli/migrate.php create add_xyz_column` → creates
   `migrations/<TS>_add_xyz_column.php` with a stub `up(PDO, bool isSqlite)`.
 - **Forward-only.** No `down()`. Rollback = a new migration.
-- **Safety:** flock on `db/.migrations.lock` (private runtime dir when `db/` is read-only; 10 s timeout), per-migration
+- **Safety:** one lock per database, 10 s timeout: SQLite flocks `<database file>.migrations.lock`, MySQL/MariaDB takes `GET_LOCK` (plus `db/.migrations.lock`, private runtime dir when `db/` is read-only), per-migration
   `BEGIN/ROLLBACK`, hard fail on a checksum mismatch (file edited after apply).
 
 ### Backup & Restore (Roadmap 1.6)

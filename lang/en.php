@@ -1471,6 +1471,7 @@ return [
     'checkout_saved_address_use' => 'Use address',
     'pickup_point' => 'Pick-up point',
     'pickup_point_refresh' => 'Show pick-up points',
+    'pickup_point_search' => 'Search: town, street or postal code',
     'pickup_point_choose' => '— choose a pick-up point —',
     'pickup_point_address' => '— deliver to my address —',
     'pickup_point_unavailable' => 'No pick-up points are available for this address. Choose another shipping method.',

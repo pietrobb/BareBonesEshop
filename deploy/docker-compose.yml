@@ -48,7 +48,8 @@ services:
     read_only: true
     tmpfs:
       - /tmp
-    command: ["sh", "-c", "while true; do php cli/worker.php; sleep 60; done"]
+    # GDPR retention GC (cli/gdpr-gc.php --apply, pre-retention snapshot first) runs once a day; one attempt per day.
+    command: ["sh", "-c", "gc=''; while true; do php cli/worker.php; d=$$(date -u +%F); if [ \"$$d\" != \"$$gc\" ]; then php cli/gdpr-gc.php --apply --quiet; gc=$$d; fi; sleep 60; done"]
     volumes:
       - ..:/var/www/html:ro
       - ../cache:/var/www/html/cache

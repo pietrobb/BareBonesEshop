@@ -51,7 +51,7 @@ $a04Checks = static function(PDO $db, string $driver): void {
         assert_equals([true, null], Customers::completePasswordReset($token, 'a04-new-password'), "{$label}: near-expiry reset succeeds");
         assert_equals(null, Customers::verifyResetToken($token), "{$label}: consumed reset rejected");
 
-        $client = ApiAuth::issueClient('A04 ' . $zone, 'default', ['catalog:read'], gmdate('Y-m-d H:i:s', time() + 60));
+        $client = ApiAuth::issueClient('A04 ' . $zone, 'default', ['products:read'], gmdate('Y-m-d H:i:s', time() + 60));
         try { $authenticated = ApiAuth::authenticate('Bearer ' . $client['token']); } catch (ApiAuthException $e) { $authenticated = null; }
         assert_equals($client['id'], $authenticated['id'] ?? null, "{$label}: near-expiry bearer is valid");
         foreach ([-1, 0] as $seconds) {
@@ -110,12 +110,12 @@ $a04Checks = static function(PDO $db, string $driver): void {
         assert_true($isDue->invoke(null, '* * * * *', gmdate('Y-m-d H:i:s', time() - 120)), "{$label}: feed synced two minutes ago is due");
 
         foreach (['2030-06-01 12:00:00' => '2030-06-01 12:00:00', '2030-06-01T12:00:00+02:00' => '2030-06-01 10:00:00'] as $input => $expected) {
-            $issued = ApiAuth::issueClient('A04 normalized', 'default', ['catalog:read'], $input);
+            $issued = ApiAuth::issueClient('A04 normalized', 'default', ['products:read'], $input);
             assert_equals($expected, $db->query('SELECT expires_at FROM api_clients WHERE id=' . $issued['id'])->fetchColumn(), "{$label}: API expiry normalized to UTC {$input}");
         }
         foreach (['not a timestamp', '', '   '] as $invalidInput) {
             $invalid = false;
-            try { ApiAuth::issueClient('A04 invalid', 'default', ['catalog:read'], $invalidInput); } catch (InvalidArgumentException $e) { $invalid = true; }
+            try { ApiAuth::issueClient('A04 invalid', 'default', ['products:read'], $invalidInput); } catch (InvalidArgumentException $e) { $invalid = true; }
             assert_true($invalid, "{$label}: invalid API expiry rejected " . var_export($invalidInput, true));
         }
         assert_equals($zone, date_default_timezone_get(), "{$label}: services preserve display timezone");

@@ -1465,6 +1465,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout_saved_address_use' => 'Adresse verwenden',
     'pickup_point' => 'Abholstelle',
     'pickup_point_refresh' => 'Abholstellen anzeigen',
+    'pickup_point_search' => 'Suche: Ort, Straße oder PLZ',
     'pickup_point_choose' => '— Abholstelle wählen —',
     'pickup_point_address' => '— an meine Adresse liefern —',
     'pickup_point_unavailable' => 'Für diese Adresse sind keine Abholstellen verfügbar. Wählen Sie eine andere Versandart.',

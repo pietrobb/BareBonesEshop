@@ -145,6 +145,7 @@ class Setup
             } catch (Throwable $e) {
                 $add('fail', 'database.schema', 'Commerce schema is not ready.', 'Run php cli/migrate.php.');
             }
+            self::retentionCheck($probe, $add);
             self::adminChecks($config, $add);
         } catch (Throwable $e) {
             $add('fail', 'database.connection', 'Database connection failed.', 'Verify database credentials/path and run migrations.');
@@ -162,6 +163,19 @@ class Setup
             'checks' => $checks,
             'next_command' => $counts['fail'] === 0 ? 'php cli/setup.php doctor --json --strict' : 'php cli/setup.php apply --json',
         ];
+    }
+
+    /** Retention deadlines are only met when cli/gdpr-gc.php --apply actually runs; nothing in the app schedules it. */
+    private static function retentionCheck(PDO $db, callable $add): void {
+        try {
+            $last = $db->query("SELECT MAX(run_at) FROM data_retention_runs WHERE mode = 'apply'")->fetchColumn();
+        } catch (Throwable) {
+            return;
+        }
+        $recent = is_string($last) && $last !== '' && strtotime($last . ' UTC') >= time() - 8 * 86400;
+        $add($recent ? 'pass' : 'warn', 'operations.gdpr_retention_gc',
+            $recent ? "GDPR retention GC last applied {$last} UTC." : ($last ? "GDPR retention GC last applied {$last} UTC, more than 8 days ago." : 'GDPR retention GC has never been applied: personal data outlives its retention period.'),
+            $recent ? '' : 'Schedule it daily, e.g. cron "17 3 * * * php cli/gdpr-gc.php --apply --quiet" (MySQL: after your external backup, with --skip-backup).');
     }
 
     public static function apply(?array $config = null, ?string $root = null): array

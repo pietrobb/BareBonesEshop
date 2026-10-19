@@ -3,6 +3,14 @@
 class ApiAuthException extends RuntimeException {}
 
 class ApiAuth {
+    /** Scopes ApiV1 checks; anything else would be a silently useless grant (a typo) and is refused. */
+    public const KNOWN_SCOPES = [
+        '*', 'products:read', 'products:write', 'orders:read', 'orders:write', 'categories:read',
+        'customers:read', 'inventory:read', 'inventory:write', 'refunds:write',
+    ];
+    /** Requests per minute and API client, across all its source addresses (config api_client_rate_limit). */
+    public const DEFAULT_CLIENT_RATE_LIMIT = 600;
+
     /**
      * Creates a credential and returns the plaintext token exactly once.
      * Callers must display/store it securely; only its SHA-256 hash enters the DB.
@@ -57,7 +65,8 @@ class ApiAuth {
         if (!empty($client['expires_at']) && strtotime((string)$client['expires_at'] . ' UTC') <= time()) {
             throw new ApiAuthException('Expired bearer credential');
         }
-        $client['scopes'] = self::normalizeScopes(json_decode((string)$client['scopes'], true) ?: []);
+        // A stored scope this version no longer knows grants nothing; it must not lock the client out.
+        $client['scopes'] = self::normalizeScopes(json_decode((string)$client['scopes'], true) ?: [], false);
         Db::get()->prepare('UPDATE api_clients SET last_used_at=:used WHERE id=:id')
             ->execute([':used' => gmdate('Y-m-d H:i:s'), ':id' => $client['id']]);
         unset($client['token_hash']);
@@ -140,16 +149,24 @@ class ApiAuth {
         }
     }
 
-    private static function normalizeScopes(array $scopes): array {
+    private static function normalizeScopes(array $scopes, bool $strict = true): array {
         $normalized = [];
         foreach ($scopes as $scope) {
             $scope = strtolower(trim((string)$scope));
-            if ($scope !== '*' && !preg_match('/^[a-z][a-z0-9_.-]*:(read|write)$/D', $scope)) {
-                throw new InvalidArgumentException('Invalid API scope');
+            if (!in_array($scope, self::KNOWN_SCOPES, true)) {
+                if (!$strict) continue;
+                throw new InvalidArgumentException('Unknown API scope ' . substr(preg_replace('/[^a-z0-9_.:*-]/', '', $scope) ?? '', 0, 40)
+                    . ' (allowed: ' . implode(', ', self::KNOWN_SCOPES) . ')');
             }
             $normalized[$scope] = true;
         }
         return array_keys($normalized);
+    }
+
+    /** Per-client request budget, so a leaked key used from many addresses is still bounded. */
+    public static function withinClientRateLimit(array $client, ?array $config = null): bool {
+        $limit = (int)(($config ?? Security::config())['api_client_rate_limit'] ?? self::DEFAULT_CLIENT_RATE_LIMIT);
+        return Security::rateLimit('external_api_v1_client_' . (int)$client['id'], max(1, $limit), 60, false);
     }
 
     private static function sortRecursive(array $value): array {

@@ -1465,6 +1465,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout_saved_address_use' => 'Cím használata',
     'pickup_point' => 'Átvételi pont',
     'pickup_point_refresh' => 'Átvételi pontok megjelenítése',
+    'pickup_point_search' => 'Keresés: település, utca vagy irányítószám',
     'pickup_point_choose' => '— válasszon átvételi pontot —',
     'pickup_point_address' => '— szállítás a címemre —',
     'pickup_point_unavailable' => 'Ehhez a címhez nem érhető el átvételi pont. Válasszon másik szállítási módot.',
