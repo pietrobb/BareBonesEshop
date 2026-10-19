@@ -32,6 +32,18 @@ assert_equals(7247, $r5mPrice(6500, $r5mDelta), 'R5 money: a +5 € variant cost
 assert_equals(6747, $r5mPrice(6000, $r5mInherit), 'R5 money: a variant without own price takes the listed base');
 assert_equals(5000, $r5mPrice(6000, $r5mOwn), 'R5 money: a variant row of the price list wins');
 assert_equals(6747, $r5mPrice(6000, null), 'R5 money: the product itself takes the listed price');
+// A group list with only a product-level row sorts first for a group member; it must not hide the variant's own row.
+$r5mDb->prepare("INSERT INTO price_list_prices (price_list_id, product_id, variant_id, min_qty, price) VALUES (?, ?, ?, 1, 5000)")->execute([$r5mList, $r5mProduct, $r5mAbsolute]);
+$r5mDb->prepare("INSERT INTO customer_groups (store_id, code, name, discount_bps, active) VALUES ('default', 'r5m-group', 'R5M Group', 1000, 1)")->execute();
+$r5mGroup = (int)$r5mDb->lastInsertId();
+$r5mDb->prepare("INSERT INTO customers (store_id, email, password_hash, name, customer_group_id, status) VALUES ('default', 'r5m-group@example.test', '!test!', 'R5M Group', ?, 'active')")->execute([$r5mGroup]);
+$r5mCustomer = (int)$r5mDb->lastInsertId();
+$r5mDb->prepare("INSERT INTO price_lists (store_id, code, name, currency, customer_group_id, priority, active) VALUES ('default', 'r5m-group-list', 'R5M Group', 'eur', ?, 0, 1)")->execute([$r5mGroup]);
+$r5mDb->prepare('INSERT INTO price_list_prices (price_list_id, product_id, variant_id, min_qty, price) VALUES (?, ?, NULL, 1, 6000)')->execute([(int)$r5mDb->lastInsertId(), $r5mProduct]);
+$r5mGroupPriced = Pricing::applyPriceList(['id' => $r5mProduct, 'price' => 99900, 'currency' => 'eur'], $r5mAbsolute, 1, $r5mCustomer);
+assert_equals(5000, (int)$r5mGroupPriced['price'], "R5 money: a group member gets the variant's own price-list row, not a group product-level row");
+assert_equals('r5m-list', (string)($r5mGroupPriced['price_list_snapshot']['code'] ?? ''), 'R5 money: the snapshot names the list of the variant row');
+assert_equals(6500, (int)Pricing::applyPriceList(['id' => $r5mProduct, 'price' => 6500, 'currency' => 'eur'], $r5mDelta, 1, $r5mCustomer)['price'], 'R5 money: a group product-level row + variant delta for a group member');
 
 // --- An extension listener that leaves a transaction open ------------------------------------------------------
 $r5mListeners = new ReflectionProperty(Extensions::class, 'listeners');
