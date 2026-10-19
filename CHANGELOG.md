@@ -241,6 +241,8 @@ nginx PHP fallback when `operations.nginx_config` is set).
 - **Audit round 6 (medium findings)**
   - Refunds: a provider refund that was accepted but that no notification can confirm (GoPay partial
     refund) is completed in the order detail with "Confirm refund paid" (permission `orders.refund`, audited).
+    This includes item refunds (credit note / RMA) at GoPay: confirming books the amount once and completes
+    that credit note's refund, also when an earlier refund on the order was already confirmed.
   - Prices: a customer-group product row plus the variant surcharge never prices a variant above its
     public variant row. B2B credit exposure counts only unpaid orders.
   - E-mail templates: overrides cannot put tokens into `<img>` attributes or style sheets, nor hard-code

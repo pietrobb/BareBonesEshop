@@ -499,7 +499,12 @@ class PaymentService {
         // execute key from it would refund again.
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
             $raw = json_decode((string)($row['raw_response'] ?? ''), true);
-            if (is_array($raw) && ($raw['event_type'] ?? null) === 'refund.requested') return $row;
+            if (!is_array($raw) || ($raw['event_type'] ?? null) !== 'refund.requested') continue;
+            // One request at a time: a refund booked after the latest one settled it, so a later item refund is in flight.
+            $later = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store
+                AND id > :id AND status IN ('partially_refunded', 'refunded', 'refund_succeeded', 'refund_confirmed') LIMIT 1");
+            $later->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id(), ':id' => (int)$row['id']]);
+            return $later->fetchColumn() ? null : $row;
         }
         return null;
     }
@@ -508,17 +513,36 @@ class PaymentService {
      * A refund request the provider accepted without naming a refund id (GoPay, ThePay): no refund
      * notification can identify it, and a partial refund is reported without its amount, so the payment
      * would stay refund_pending forever. The admin who saw it paid out completes it (confirmProviderRefund()).
+     * Item refunds (credit notes, RMA) are executed under their own key and carry their order_refunds id.
      *
-     * @return array{amount:int, request_key:string}|null
+     * @return array{amount:int, request_key:string, refund_id?:int}|null
      */
     public static function unconfirmedProviderRefund(array $order): ?array {
         $request = self::latestRefundRequestRow($order);
-        if ($request === null) return null;
+        if ($request === null) return self::unconfirmedItemRefund($order);
         $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store
             AND idempotency_key = :execute AND status = 'refund_pending' AND (provider_ref IS NULL OR provider_ref = '') LIMIT 1");
         $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id(),
             ':execute' => self::refundExecuteKey((string)$request['idempotency_key'])]);
         return $stmt->fetchColumn() ? ['amount' => (int)$request['amount'], 'request_key' => (string)$request['idempotency_key']] : null;
+    }
+
+    /**
+     * The latest pending item refund (InvoiceService::credit()) whose payment_refund job the provider accepted
+     * without a refund id: no webhook can find it (Rma::noteProviderRefund() had no id to note).
+     *
+     * @return array{amount:int, request_key:string, refund_id:int}|null
+     */
+    private static function unconfirmedItemRefund(array $order): ?array {
+        if ((string)($order['payment_status'] ?? '') !== 'refund_pending' || self::refundsByHand($order)) return null;
+        $stmt = Db::get()->prepare("SELECT r.id, r.amount, r.idempotency_key FROM order_refunds r
+            WHERE r.order_id = :order AND r.store_id = :store AND r.status = 'pending' AND (r.payment_reference IS NULL OR r.payment_reference = '')
+              AND EXISTS (SELECT 1 FROM payment_transactions t WHERE t.order_id = r.order_id AND t.store_id = r.store_id
+                AND t.idempotency_key = r.idempotency_key AND t.status = 'refund_pending' AND (t.provider_ref IS NULL OR t.provider_ref = ''))
+            ORDER BY r.id DESC LIMIT 1");
+        $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        return $row ? ['amount' => (int)$row['amount'], 'request_key' => (string)$row['idempotency_key'], 'refund_id' => (int)$row['id']] : null;
     }
 
     /** Book the provider refund in flight (unconfirmedProviderRefund()) the admin verified at the provider, audited. */
@@ -529,7 +553,8 @@ class PaymentService {
             if ($pending === null) throw new \LogicException('No provider refund awaits confirmation on this order');
             // Names the request it settles, so a late provider report of the same refund books nothing more.
             if (!self::bookRefundWithin($order, self::orderProvider($order), '', $pending['amount'], 'refund.admin_confirmed',
-                'refund_admin_confirmed_' . $pending['request_key'], ['actor' => $actor, 'note' => $note, 'settles_refund_request' => $pending['request_key']])) {
+                'refund_admin_confirmed_' . $pending['request_key'], ['actor' => $actor, 'note' => $note, 'settles_refund_request' => $pending['request_key']],
+                $pending['refund_id'] ?? 0, 'admin-confirmed:' . $actor)) {
                 throw new \LogicException('The provider refund could not be booked');
             }
             $to = (string)(Orders::byId($orderId)['payment_status'] ?? '');
@@ -1016,9 +1041,11 @@ class PaymentService {
      * One money row per provider refund (by refund id when the provider names one), inside the
      * caller's transaction under the order row lock. Moves the payment to partially_refunded or
      * refunded and completes the item refund (credit note) it settles. Returns false when the
-     * refund was already booked or does not apply to the payment (logged as 'ignored').
+     * refund was already booked or does not apply to the payment (logged as 'ignored'). A caller that knows
+     * the item refund it settles names it ($itemRefundId), instead of matching a pending one by amount.
      */
-    private static function bookRefundWithin(array $order, string $provider, string $refundId, int $amount, string $eventType, string $eventKey, array $payload): bool {
+    private static function bookRefundWithin(array $order, string $provider, string $refundId, int $amount, string $eventType, string $eventKey, array $payload,
+        int $itemRefundId = 0, string $itemReference = ''): bool {
         $orderId = (int)$order['id'];
         $from = (string)($order['payment_status'] ?? 'pending');
         $currency = strtolower((string)($order['currency'] ?? 'eur'));
@@ -1040,7 +1067,8 @@ class PaymentService {
             AuditLog::log('payment_webhook_ignored', $orderId, $from, $from, "{$provider} {$eventType}");
             return false;
         }
-        self::completeItemRefundWithin($orderId, $refundId, $amount);
+        if ($itemRefundId > 0) Rma::completeRefund($itemRefundId, $itemReference);
+        else self::completeItemRefundWithin($orderId, $refundId, $amount);
         return true;
     }
 
