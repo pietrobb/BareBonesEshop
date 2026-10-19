@@ -307,6 +307,8 @@ return [
     // Keeps the pre-restore MySQL dump (0600) when a restore fails after dropping db_name; default <private_runtime_dir>/restore-recovery
     'backup_recovery_dir' => dirname(__DIR__) . '/bareboneseshop-private/restore-recovery',
     'structured_log_file' => dirname(__DIR__) . '/bareboneseshop-private/logs/application.jsonl',
+    'structured_log_max_bytes' => 10485760, // rotate application.jsonl at 10 MB …
+    'structured_log_max_files' => 5,        // … and keep application.jsonl.1 … .5
     'metrics_log_file'    => dirname(__DIR__) . '/bareboneseshop-private/logs/metrics.jsonl',
     'update_storage_dir'  => dirname(__DIR__) . '/bareboneseshop-private/updates',
     'update_public_key'   => '', // Ed25519 public key (base64/hex or absolute key-file path)

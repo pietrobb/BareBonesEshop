@@ -25,6 +25,8 @@
     "backup_storage_dir": {"type": "string", "x-private-path": true},
     "backup_log_file": {"type": "string", "x-private-path": true},
     "structured_log_file": {"type": "string", "x-private-path": true},
+    "structured_log_max_bytes": {"type": "integer", "minimum": 0, "description": "Rotate the structured log at this size in bytes; 0 disables rotation."},
+    "structured_log_max_files": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Rotated structured log files kept (application.jsonl.1 … .N)."},
     "default_locale": {"type": "string", "pattern": "^[a-z]{2}(?:[-_][A-Za-z]{2})?$"},
     "default_currency": {"type": "string", "pattern": "^[a-z]{3}$"},
     "per_page": {"type": "integer", "minimum": 1, "maximum": 200},

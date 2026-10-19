@@ -28,6 +28,8 @@ paths:
                 $ref: '#/components/schemas/ProductPage'
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '400': { $ref: '#/components/responses/BadRequest' }
   /products/{id}:
     parameters:
       - $ref: '#/components/parameters/Id'
@@ -50,6 +52,9 @@ paths:
                 properties:
                   data: { $ref: '#/components/schemas/Product' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
     patch:
       operationId: updateProduct
       summary: Idempotently update explicitly supported product fields
@@ -97,6 +102,10 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /orders:
     get:
       operationId: listOrders
@@ -114,6 +123,8 @@ paths:
                 $ref: '#/components/schemas/OrderPage'
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '400': { $ref: '#/components/responses/BadRequest' }
   /orders/{id}:
     parameters:
       - $ref: '#/components/parameters/Id'
@@ -132,6 +143,9 @@ paths:
                 properties:
                   data: { $ref: '#/components/schemas/Order' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /orders/{id}/status:
     parameters:
       - $ref: '#/components/parameters/Id'
@@ -171,6 +185,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /orders/{id}/shipments:
     parameters:
       - $ref: '#/components/parameters/Id'
@@ -189,6 +205,9 @@ paths:
                 properties:
                   data: { type: array, items: { $ref: '#/components/schemas/Shipment' } }
         '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /categories:
     get:
       operationId: listCategories
@@ -210,6 +229,8 @@ paths:
                   meta: { $ref: '#/components/schemas/PageMeta' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '400': { $ref: '#/components/responses/BadRequest' }
   /categories/{id}:
     parameters:
       - $ref: '#/components/parameters/Id'
@@ -228,6 +249,9 @@ paths:
                 properties:
                   data: { $ref: '#/components/schemas/Category' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /customers:
     get:
       operationId: listCustomers
@@ -249,6 +273,8 @@ paths:
                   meta: { $ref: '#/components/schemas/PageMeta' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '400': { $ref: '#/components/responses/BadRequest' }
   /customers/{id}:
     parameters:
       - $ref: '#/components/parameters/Id'
@@ -267,6 +293,9 @@ paths:
                 properties:
                   data: { $ref: '#/components/schemas/Customer' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /inventory:
     get:
       operationId: getInventory
@@ -289,6 +318,9 @@ paths:
                   data: { $ref: '#/components/schemas/Inventory' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /inventory/adjustments:
     post:
       operationId: adjustInventory
@@ -320,6 +352,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
 webhooks:
   commerceEvent:
     post:
@@ -404,6 +438,11 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
     NotFound:
       description: Resource is absent from the credential store
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    TooManyRequests:
+      description: More than 300 requests per minute from one client address (rate_limited); retry later
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
