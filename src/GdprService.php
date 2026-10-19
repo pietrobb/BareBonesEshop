@@ -333,6 +333,14 @@ class GdprService {
         return $export;
     }
 
+    /** Guest orders (no account) of the current store placed with exactly this address; 0 for a non-address. */
+    public static function guestOrderCount(string $email): int {
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) return 0;
+        $stmt = Db::get()->prepare("SELECT COUNT(*) FROM orders WHERE store_id = ? AND customer_id IS NULL AND LOWER(customer_email) = LOWER(?)");
+        $stmt->execute([StoreContext::current()->id(), $email]);
+        return (int)$stmt->fetchColumn();
+    }
+
     private static function exportSubject(PDO $db, ?array $customer, int $customerId, array $addresses, array $ownership): array {
         $email = (string)$ownership[':owner_email'];
         $stmt = $db->prepare("SELECT * FROM orders WHERE id IN (" . self::CUSTOMER_ORDERS . ") ORDER BY id ASC");

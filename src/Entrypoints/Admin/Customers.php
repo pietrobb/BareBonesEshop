@@ -178,12 +178,7 @@ function pageGdpr(): void {
         $customers = $stmt->fetchAll();
     }
     // Guests have no account row: their orders are found by the exact address.
-    $guestOrders = 0;
-    if (filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE store_id = ? AND customer_id IS NULL AND LOWER(customer_email) = LOWER(?)");
-        $stmt->execute([StoreContext::current()->id(), $email]);
-        $guestOrders = (int)$stmt->fetchColumn();
-    }
+    $guestOrders = GdprService::guestOrderCount($email);
     $events = $db->prepare("SELECT * FROM gdpr_events WHERE store_id = :store ORDER BY created_at DESC, id DESC LIMIT 50");
     $events->execute([':store' => StoreContext::current()->id()]);
     $events = $events->fetchAll();
@@ -226,13 +221,11 @@ function pageGdpr(): void {
             <?php endforeach; ?>
             <?php if ($guestOrders > 0): ?>
             <tr>
-                <td>—</td>
-                <td><?= esc($email) ?></td>
+                <td>—</td><td><?= esc($email) ?></td>
                 <td colspan="2" class="muted"><?= esc(I18n::format('admin.gdpr.guest', ['count' => $guestOrders])) ?></td>
                 <td>
                     <form method="post" action="admin.php?p=gdpr&action=export" style="display:inline">
-                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-                        <input type="hidden" name="guest_email" value="<?= esc($email) ?>">
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="guest_email" value="<?= esc($email) ?>">
                         <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.gdpr.export_hint')) ?></button>
                     </form>
                     <?php if (Security::adminCan('gdpr.erase')): ?>
@@ -319,9 +312,7 @@ function handleGdprAnonymize(): void {
         exit;
     }
     try {
-        $result = $guestEmail !== ''
-            ? GdprService::anonymizeGuest($guestEmail, Security::adminUser())
-            : GdprService::anonymizeCustomer($customerId, Security::adminUser());
+        $result = $guestEmail !== '' ? GdprService::anonymizeGuest($guestEmail, Security::adminUser()) : GdprService::anonymizeCustomer($customerId, Security::adminUser());
         GdprService::logEvent([
             'action' => 'admin_anonymize',
             'customer_id' => $guestEmail !== '' ? null : $customerId,
