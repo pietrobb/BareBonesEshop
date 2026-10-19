@@ -177,6 +177,13 @@ function pageGdpr(): void {
         $stmt->execute([':store' => StoreContext::current()->id(), ':email' => '%' . Db::likeLiteral($email) . '%']);
         $customers = $stmt->fetchAll();
     }
+    // Guests have no account row: their orders are found by the exact address.
+    $guestOrders = 0;
+    if (filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $stmt = $db->prepare("SELECT COUNT(*) FROM orders WHERE store_id = ? AND customer_id IS NULL AND LOWER(customer_email) = LOWER(?)");
+        $stmt->execute([StoreContext::current()->id(), $email]);
+        $guestOrders = (int)$stmt->fetchColumn();
+    }
     $events = $db->prepare("SELECT * FROM gdpr_events WHERE store_id = :store ORDER BY created_at DESC, id DESC LIMIT 50");
     $events->execute([':store' => StoreContext::current()->id()]);
     $events = $events->fetchAll();
@@ -217,7 +224,28 @@ function pageGdpr(): void {
                 </td>
             </tr>
             <?php endforeach; ?>
-            <?php if (!$customers): ?><tr><td colspan="5" class="muted"><?= esc(I18n::t('admin.gdpr.no_results')) ?></td></tr><?php endif; ?>
+            <?php if ($guestOrders > 0): ?>
+            <tr>
+                <td>—</td>
+                <td><?= esc($email) ?></td>
+                <td colspan="2" class="muted"><?= esc(I18n::format('admin.gdpr.guest', ['count' => $guestOrders])) ?></td>
+                <td>
+                    <form method="post" action="admin.php?p=gdpr&action=export" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                        <input type="hidden" name="guest_email" value="<?= esc($email) ?>">
+                        <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.gdpr.export_hint')) ?></button>
+                    </form>
+                    <?php if (Security::adminCan('gdpr.erase')): ?>
+                    <form method="post" action="admin.php?p=gdpr&action=anonymize&email=<?= urlencode($email) ?>" style="display:inline" data-confirm="<?= esc(I18n::t('admin.gdpr.anonymize_confirm')) ?>">
+                        <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                        <input type="hidden" name="guest_email" value="<?= esc($email) ?>">
+                        <button class="btn btn-danger btn-sm" type="submit"><?= esc(I18n::t('admin.gdpr.anonymize_btn')) ?></button>
+                    </form>
+                    <?php endif; ?>
+                </td>
+            </tr>
+            <?php endif; ?>
+            <?php if (!$customers && $guestOrders === 0): ?><tr><td colspan="5" class="muted"><?= esc(I18n::t('admin.gdpr.no_results')) ?></td></tr><?php endif; ?>
         </table>
         <?php endif; ?>
     </div>
@@ -243,10 +271,11 @@ function pageGdpr(): void {
 function handleGdprExport(): void {
     Security::adminRequire('gdpr.view');
     $customerId = Security::int($_POST['customer_id'] ?? 0);
+    $guestEmail = trim(Security::str($_POST['guest_email'] ?? ''));
     try {
-        $data = GdprService::exportCustomer($customerId);
+        $data = $guestEmail !== '' ? GdprService::exportGuest($guestEmail) : GdprService::exportCustomer($customerId);
     } catch (RuntimeException $e) {
-        // Unknown id or a customer of another store: nothing is disclosed.
+        // Unknown id, a customer of another store or an address without guest data: nothing is disclosed.
         setFlash('err', I18n::t('admin.gdpr.invalid_customer'));
         header('Location: admin.php?p=gdpr');
         exit;
@@ -254,14 +283,14 @@ function handleGdprExport(): void {
     $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
     GdprService::logEvent([
         'action'      => 'export',
-        'customer_id' => $customerId,
-        'email'       => (string)($data['customer']['email'] ?? ''),
+        'customer_id' => $guestEmail !== '' ? null : $customerId,
+        'email'       => $guestEmail !== '' ? (string)$data['meta']['guest_email'] : (string)($data['customer']['email'] ?? ''),
         'actor'       => Security::adminUser(),
-        'note'        => 'Admin GDPR export of customer #' . $customerId,
+        'note'        => $guestEmail !== '' ? 'Admin GDPR export of a guest' : 'Admin GDPR export of customer #' . $customerId,
         'payload'     => ['orders' => count($data['orders']), 'addresses' => count($data['addresses'])],
     ]);
     header('Content-Type: application/json; charset=utf-8');
-    header('Content-Disposition: attachment; filename="gdpr-export-customer-' . $customerId . '.json"');
+    header('Content-Disposition: attachment; filename="gdpr-export-' . ($guestEmail !== '' ? 'guest' : 'customer-' . $customerId) . '.json"');
     header('Cache-Control: no-store, private');
     echo $json;
     exit;
@@ -283,19 +312,22 @@ function handleCustomerStatus(): void {
 function handleGdprAnonymize(): void {
     Security::adminRequire('gdpr.erase');
     $customerId = Security::int($_POST['customer_id'] ?? 0);
-    if ($customerId <= 0) {
+    $guestEmail = trim(Security::str($_POST['guest_email'] ?? ''));
+    if ($customerId <= 0 && $guestEmail === '') {
         setFlash('err', I18n::t('admin.gdpr.invalid_customer'));
         header('Location: admin.php?p=gdpr');
         exit;
     }
     try {
-        $result = GdprService::anonymizeCustomer($customerId, Security::adminUser());
+        $result = $guestEmail !== ''
+            ? GdprService::anonymizeGuest($guestEmail, Security::adminUser())
+            : GdprService::anonymizeCustomer($customerId, Security::adminUser());
         GdprService::logEvent([
             'action' => 'admin_anonymize',
-            'customer_id' => $customerId,
+            'customer_id' => $guestEmail !== '' ? null : $customerId,
             'actor' => Security::adminUser(),
             'payload' => $result,
-            'note' => 'Admin anonymized customer #' . $customerId,
+            'note' => $guestEmail !== '' ? 'Admin anonymized a guest' : 'Admin anonymized customer #' . $customerId,
         ]);
         setFlash('ok', I18n::t('admin.gdpr.anonymized_ok'));
     } catch (Throwable $e) {

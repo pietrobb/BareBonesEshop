@@ -37,6 +37,11 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS customers (
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
 )");
 $catalogPricingB2bMigration->up($pdo, true);
+// The migration rebuilds customers (DROP TABLE): an unfinished statement of an earlier scenario would lock it.
+foreach ($GLOBALS as $customerEmailOpenStatement) if ($customerEmailOpenStatement instanceof PDOStatement) $customerEmailOpenStatement->closeCursor();
+$customerEmailPerStoreMigration = require TEST_CLI_DIR . '/../migrations/20261019120000_customer_email_per_store.php';
+$customerEmailPerStoreMigration->up($pdo, true);
+$customerEmailPerStoreMigration->up($pdo, true);
 
 $pdo->exec("CREATE TABLE IF NOT EXISTS customer_addresses (
     id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL,
@@ -162,7 +167,9 @@ assert_true($cok2 === false && $cerr2 === 'invalid_current_password', 'Customer:
 $tok = Customers::startPasswordReset('alice@test.local');
 assert_true(is_string($tok) && strlen($tok) >= 32, 'Customer: startPasswordReset returns 32+ char token');
 $replacementTok = Customers::startPasswordReset('alice@test.local');
-assert_true(Customers::verifyResetToken($tok) === null, 'G4: issuing a new reset token invalidates the previous token');
+// Round 5: anyone can request a reset for the address, so a new request must not cancel the owner's link.
+assert_true(Customers::verifyResetToken($tok) === $aliceId, 'R5: a new reset request keeps the earlier link valid');
+$earlierTok = $tok;
 $tok = $replacementTok;
 $noTok = Customers::startPasswordReset('ghost@test.local');
 assert_true($noTok === null, 'Customer: startPasswordReset for unknown email returns null');
@@ -180,6 +187,7 @@ assert_true($lok6 === true, 'Customer: login works with reset password');
 // Reuse token — marked used
 [$rok2, $rerr2] = Customers::completePasswordReset($tok, 'Another1!');
 assert_true($rok2 === false && $rerr2 === 'invalid_or_expired_token', 'Customer: reset token cannot be reused');
+assert_true(Customers::verifyResetToken($earlierTok) === null, 'R5: a completed reset invalidates the other open links');
 
 // --- P4 security: reset token stored hashed (sha256), not plaintext (#12) ---
 $freshTok = Customers::startPasswordReset('alice@test.local');

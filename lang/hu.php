@@ -1288,6 +1288,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.gdpr.anonymize_btn'    => 'Anonimizálás',
     'admin.gdpr.anonymize_confirm'=> 'Anonimizálja az ügyfelet? A könyvelési adatok jogszabály szerint megmaradnak.',
     'admin.gdpr.no_results'       => 'Nincs egyező ügyfél.',
+    'admin.gdpr.guest' => 'Fiók nélküli vendég — rendelések: {count}',
     'admin.gdpr.events_title'     => 'Legutóbbi GDPR események',
     'admin.gdpr.actor'            => 'Szereplő',
     'admin.gdpr.note'             => 'Megjegyzés',

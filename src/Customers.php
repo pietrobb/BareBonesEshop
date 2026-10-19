@@ -11,6 +11,8 @@ class Customers {
 
     private const BCRYPT_COST = 12;
     private const RESET_TOKEN_TTL_SECONDS = 3600; // 1 hour
+    // Bounds the open links per account; when reached, new requests are dropped, never older links evicted.
+    private const MAX_ACTIVE_RESET_TOKENS = 5;
     private const EMAIL_VERIFY_TTL_SECONDS = 86400; // 24 hours
     private const SESSION_IDLE_TTL_SECONDS = 1800;
     private const MIN_PASSWORD_LEN = 8;
@@ -252,10 +254,19 @@ class Customers {
         // Store only the SHA-256 hash; the plaintext token lives solely in the
         // emailed reset URL. A DB leak then cannot be used to hijack resets.
         $tokenHash = hash('sha256', $token);
+        $now = gmdate('Y-m-d H:i:s');
         $db->beginTransaction();
         try {
-            $db->prepare("DELETE FROM password_reset_tokens WHERE customer_id = ? AND used_at IS NULL")
-               ->execute([$cid]);
+            // Anyone can request a reset for any address: a new request must not cancel the link the owner
+            // already has. Earlier links stay valid until they expire or one of them is used.
+            $db->prepare("DELETE FROM password_reset_tokens WHERE customer_id = ? AND (used_at IS NOT NULL OR expires_at <= ?)")
+               ->execute([$cid, $now]);
+            $active = $db->prepare("SELECT COUNT(*) FROM password_reset_tokens WHERE customer_id = ?");
+            $active->execute([$cid]);
+            if ((int)$active->fetchColumn() >= self::MAX_ACTIVE_RESET_TOKENS) {
+                $db->commit();
+                return null;
+            }
             $db->prepare(
                 "INSERT INTO password_reset_tokens (customer_id, token, expires_at)
                  VALUES (?, ?, ?)"
@@ -274,7 +285,8 @@ class Customers {
      */
     public static function requestPasswordReset(string $email, string $locale, array $cfg): string {
         try {
-            $baseUrl = Security::appUrl($cfg);
+            // A store on its own domain resolves the store (and so the token) by host: the link must use that host.
+            $baseUrl = Security::storeAppUrl(Security::appUrl($cfg), StoreContext::current()->config());
         } catch (RuntimeException $e) {
             // Never fall back to the Host header (reset-link poisoning): fail closed, but visibly.
             Logger::error('password_reset.app_url_invalid', ['message' => $e->getMessage()]);
@@ -328,7 +340,7 @@ class Customers {
         if (!empty($customer['email_verified_at'])) return 'verified';
         if (!Security::rateLimit('account_email_verify_' . $customerId, 3, 3600, false)) return 'throttled';
         try {
-            $baseUrl = Security::appUrl($cfg);
+            $baseUrl = Security::storeAppUrl(Security::appUrl($cfg), StoreContext::current()->config());
         } catch (RuntimeException $e) {
             Logger::error('email_verification.app_url_invalid', ['message' => $e->getMessage()]);
             return 'unavailable';
@@ -425,6 +437,8 @@ class Customers {
             }
             $db->prepare("UPDATE customers SET password_hash = ? WHERE id = ? AND store_id = ?")
                ->execute([$hash, $cid, StoreContext::current()->id()]);
+            // The password is set: every other open reset link of the account dies with it.
+            $db->prepare("DELETE FROM password_reset_tokens WHERE customer_id = ? AND used_at IS NULL")->execute([$cid]);
             $db->commit();
         } catch (\Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();

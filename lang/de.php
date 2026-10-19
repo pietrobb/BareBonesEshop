@@ -1288,6 +1288,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.gdpr.anonymize_btn'    => 'Anonymisieren',
     'admin.gdpr.anonymize_confirm'=> 'Kunden anonymisieren? Buchhaltungsdaten bleiben gesetzlich erhalten.',
     'admin.gdpr.no_results'       => 'Keine passenden Kunden.',
+    'admin.gdpr.guest' => 'Gast ohne Konto — Bestellungen: {count}',
     'admin.gdpr.events_title'     => 'Letzte DSGVO-Ereignisse',
     'admin.gdpr.actor'            => 'Akteur',
     'admin.gdpr.note'             => 'Notiz',

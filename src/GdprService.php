@@ -316,8 +316,25 @@ class GdprService {
         $addresses = $stmt->fetchAll();
 
         // Email ownership may link guest orders, never another registered customer's order.
-        $email = (string)$customer['email'];
-        $ownership = self::ownershipParams($customer);
+        return self::exportSubject($db, $customer, $customerId, $addresses, self::ownershipParams($customer));
+    }
+
+    /**
+     * Access request of a guest (orders without an account): everything the store holds for the
+     * address outside registered accounts — the guest orders, their mail, carts, consents, events and
+     * jobs. The merchant verifies the requester's identity before calling this; the 'customer' section
+     * is null and 'addresses' empty because a guest has no account.
+     */
+    public static function exportGuest(string $email): array {
+        $db = Db::get();
+        $ownership = self::guestOwnership($db, $email);
+        $export = self::exportSubject($db, null, 0, [], $ownership);
+        $export['meta']['guest_email'] = $ownership[':owner_email'];
+        return $export;
+    }
+
+    private static function exportSubject(PDO $db, ?array $customer, int $customerId, array $addresses, array $ownership): array {
+        $email = (string)$ownership[':owner_email'];
         $stmt = $db->prepare("SELECT * FROM orders WHERE id IN (" . self::CUSTOMER_ORDERS . ") ORDER BY id ASC");
         $stmt->execute($ownership);
         $orders = [];
@@ -495,75 +512,11 @@ class GdprService {
             $stmt->execute([$customerId]);
             $rowsAddr = $stmt->rowCount();
 
-            // 3) email_log → scrub PII fields, keep template+adapter+status for stats
-            $stmt = $db->prepare("
-                UPDATE email_log
-                SET recipient = :placeholder,
-                    subject = :marker,
-                    payload = :payload_marker
-                WHERE store_id = :log_store AND LOWER(recipient) = LOWER(:recipient_email)
-                  AND (order_id IN (" . self::CUSTOMER_ORDERS . ") OR (order_id IS NULL AND :unlinked_verified = '1'))
-            ");
-            $stmt->execute($ownership + [
-                ':placeholder' => $placeholder,
-                ':marker'      => $erasureMarker,
-                ':payload_marker' => $erasureMarker,
-                ':log_store' => StoreContext::current()->id(),
-                ':recipient_email' => $origEmail,
-                ':unlinked_verified' => $ownership[':verified'],
-            ]);
-            $rowsEmail = $stmt->rowCount();
-
-            // 4) audit_log → scrub old_value + new_value (typically JSON snapshots)
-            //    when they contain the email substring. Keep entity/action/actor/timestamp.
-            $hasAudit = self::tableColumns($db, 'audit_log') !== [];
-            $rowsAudit = 0;
-            if ($hasAudit) {
-                $stmt = $db->prepare("
-                    UPDATE audit_log
-                    SET old_value = :old_marker, new_value = :new_marker
-                    WHERE store_id = :store AND (INSTR(old_value, :old_email) > 0 OR INSTR(new_value, :new_email) > 0)
-                      AND (:verified = '1' OR (entity = 'customer' AND entity_id = :customer_id))
-                ");
-                $stmt->execute([
-                    ':old_marker' => $erasureMarker, ':new_marker' => $erasureMarker,
-                    ':store' => StoreContext::current()->id(),
-                    ':old_email' => $origEmail, ':new_email' => $origEmail,
-                    ':verified' => $ownership[':verified'], ':customer_id' => $customerId,
-                ]);
-                $rowsAudit = $stmt->rowCount();
-            }
-
-            // 5) coupon_uses → hash email column (preserves dedup logic).
-            //    Column name varies: 'customer_email' (current schema) or 'email' (legacy).
-            $couponColumns = self::tableColumns($db, 'coupon_uses');
-            $hasCoupon = $couponColumns !== [];
-            $rowsCoupon = 0;
-            if ($hasCoupon) {
-                $emailCol = null;
-                foreach ($couponColumns as $col) {
-                    $n = strtolower($col);
-                    if ($n === 'customer_email' || $n === 'email') { $emailCol = $col; break; }
-                }
-                if ($emailCol !== null) {
-                    $hashed = self::hashPii(strtolower($origEmail));
-                    $sql = "UPDATE coupon_uses SET {$emailCol} = :hashed WHERE store_id = :coupon_store AND LOWER({$emailCol}) = LOWER(:coupon_email) AND order_id IN (" . self::CUSTOMER_ORDERS . ")";
-                    $stmt = $db->prepare($sql);
-                    $stmt->execute($ownership + [':hashed' => $hashed, ':coupon_store' => StoreContext::current()->id(), ':coupon_email' => $origEmail]);
-                    $rowsCoupon = $stmt->rowCount();
-                }
-            }
-
-            $rows = [
-                'customers'          => $rowsCust,
-                'customer_addresses' => $rowsAddr,
-                'email_log'          => $rowsEmail,
-                'audit_log'          => $rowsAudit,
-                'coupon_uses'        => $rowsCoupon,
-            ] + self::eraseCustomerContent($db, $customerId, $origEmail, $ownership, $placeholder, $erasureMarker);
+            $rows = ['customers' => $rowsCust, 'customer_addresses' => $rowsAddr]
+                + self::eraseSubject($db, $customerId, $origEmail, $ownership, $placeholder, $erasureMarker);
             // A registered table without an erasure step must not report a completed erasure.
             self::assertRegistryCovered('erase', array_keys($rows));
-
+            self::recordErasure($db, $customerId, $customerId, $ownership);
             $db->commit();
         } catch (\Throwable $e) {
             $db->rollBack();
@@ -571,24 +524,153 @@ class GdprService {
         }
 
         // 6) Audit event is best-effort after commit; it must not turn completed erasure into a reported failure.
-        try {
-            self::logEvent([
-                'action'      => 'erase',
-                'customer_id' => $customerId,
-                'email'       => $origEmail,
-                'actor'       => $actor,
-                'payload'     => $rows,
-            ]);
-        } catch (\Throwable $e) {
-            $errorId = bin2hex(random_bytes(6));
-            error_log("GDPR erase audit failed [{$errorId}] for customer #{$customerId}: " . $e->getMessage());
-        }
+        self::logErasure($customerId, $origEmail, $actor, $rows);
 
         return [
             'status' => 'anonymized',
             'customer_id' => $customerId,
             'rows' => $rows,
         ];
+    }
+
+    /**
+     * Right-to-erasure of a guest: the same erasure as anonymizeCustomer() for everything tied to the
+     * address outside registered accounts. Guest orders stay (accounting retention) like an account's.
+     * The merchant verifies the requester's identity before calling this.
+     */
+    public static function anonymizeGuest(string $email, string $actor): array {
+        $db = Db::get();
+        $ownership = self::guestOwnership($db, $email);
+        $email = (string)$ownership[':owner_email'];
+        $placeholder = 'deleted-guest@anonymized.local';
+        $erasureMarker = '[erased per GDPR Art.17 at ' . gmdate('Y-m-d') . ']';
+        $db->beginTransaction();
+        try {
+            $rows = ['customers' => 0, 'customer_addresses' => 0]
+                + self::eraseSubject($db, 0, $email, $ownership, $placeholder, $erasureMarker);
+            self::assertRegistryCovered('erase', array_keys($rows));
+            self::recordErasure($db, null, 'guest', $ownership);
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+        self::logErasure(null, $email, $actor, $rows);
+        return ['status' => 'anonymized', 'customer_id' => null, 'rows' => $rows];
+    }
+
+    /**
+     * Webhook subscribers and extensions received the person's data in earlier events (customer.created,
+     * order.created …); customer.erased tells them to erase their copies. It names the account and the
+     * retained orders, never the e-mail. Recorded in the erasing transaction, after the customer's
+     * earlier events were rewritten.
+     */
+    private static function recordErasure(PDO $db, ?int $customerId, int|string $aggregateId, array $ownership): void {
+        Outbox::record(DomainEvents::CUSTOMER_ERASED, 'customer', $aggregateId, [
+            'customer_id' => $customerId,
+            'guest' => $customerId === null,
+            'order_ids' => array_map('intval', self::customerOrderIds($db, $ownership)),
+            'erased_at' => gmdate('c'),
+        ]);
+    }
+
+    private static function logErasure(?int $customerId, string $email, string $actor, array $rows): void {
+        try {
+            self::logEvent([
+                'action'      => 'erase',
+                'customer_id' => $customerId,
+                'email'       => $email,
+                'actor'       => $actor,
+                'payload'     => $rows,
+            ]);
+        } catch (\Throwable $e) {
+            $errorId = bin2hex(random_bytes(6));
+            error_log("GDPR erase audit failed [{$errorId}] for " . ($customerId !== null ? "customer #{$customerId}" : 'a guest') . ': ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Ownership of a guest: the store's orders without an account placed with the address. Throws when
+     * the store holds no guest order and no cart for it, so an unknown address reports "not found".
+     */
+    private static function guestOwnership(PDO $db, string $email): array {
+        $email = Str::normalizeEmail($email);
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) throw new RuntimeException('Invalid e-mail');
+        $ownership = [':order_store' => StoreContext::current()->id(), ':customer_id' => 0, ':verified' => 1, ':owner_email' => $email];
+        $carts = $db->prepare("SELECT COUNT(*) FROM abandoned_carts WHERE LOWER(customer_email) = LOWER(?) AND (store_id = ? OR store_id IS NULL)");
+        $carts->execute([$email, StoreContext::current()->id()]);
+        if (self::customerOrderIds($db, $ownership) === [] && (int)$carts->fetchColumn() === 0) {
+            throw new RuntimeException('No guest data for this e-mail');
+        }
+        return $ownership;
+    }
+
+    /** Erasure shared by accounts and guests: mail log, audit trail, coupon uses and eraseCustomerContent(). */
+    private static function eraseSubject(PDO $db, int $customerId, string $origEmail, array $ownership, string $placeholder, string $erasureMarker): array {
+        // 3) email_log → scrub PII fields, keep template+adapter+status for stats
+        $stmt = $db->prepare("
+            UPDATE email_log
+            SET recipient = :placeholder,
+                subject = :marker,
+                payload = :payload_marker
+            WHERE store_id = :log_store AND LOWER(recipient) = LOWER(:recipient_email)
+              AND (order_id IN (" . self::CUSTOMER_ORDERS . ") OR (order_id IS NULL AND :unlinked_verified = '1'))
+        ");
+        $stmt->execute($ownership + [
+            ':placeholder' => $placeholder,
+            ':marker'      => $erasureMarker,
+            ':payload_marker' => $erasureMarker,
+            ':log_store' => StoreContext::current()->id(),
+            ':recipient_email' => $origEmail,
+            ':unlinked_verified' => $ownership[':verified'],
+        ]);
+        $rowsEmail = $stmt->rowCount();
+
+        // 4) audit_log → scrub old_value + new_value (typically JSON snapshots)
+        //    when they contain the email substring. Keep entity/action/actor/timestamp.
+        $hasAudit = self::tableColumns($db, 'audit_log') !== [];
+        $rowsAudit = 0;
+        if ($hasAudit) {
+            $stmt = $db->prepare("
+                UPDATE audit_log
+                SET old_value = :old_marker, new_value = :new_marker
+                WHERE store_id = :store AND (INSTR(old_value, :old_email) > 0 OR INSTR(new_value, :new_email) > 0)
+                  AND (:verified = '1' OR (entity = 'customer' AND entity_id = :customer_id))
+            ");
+            $stmt->execute([
+                ':old_marker' => $erasureMarker, ':new_marker' => $erasureMarker,
+                ':store' => StoreContext::current()->id(),
+                ':old_email' => $origEmail, ':new_email' => $origEmail,
+                ':verified' => $ownership[':verified'], ':customer_id' => $customerId,
+            ]);
+            $rowsAudit = $stmt->rowCount();
+        }
+
+        // 5) coupon_uses → hash email column (preserves dedup logic).
+        //    Column name varies: 'customer_email' (current schema) or 'email' (legacy).
+        $couponColumns = self::tableColumns($db, 'coupon_uses');
+        $hasCoupon = $couponColumns !== [];
+        $rowsCoupon = 0;
+        if ($hasCoupon) {
+            $emailCol = null;
+            foreach ($couponColumns as $col) {
+                $n = strtolower($col);
+                if ($n === 'customer_email' || $n === 'email') { $emailCol = $col; break; }
+            }
+            if ($emailCol !== null) {
+                $hashed = self::hashPii(strtolower($origEmail));
+                $sql = "UPDATE coupon_uses SET {$emailCol} = :hashed WHERE store_id = :coupon_store AND LOWER({$emailCol}) = LOWER(:coupon_email) AND order_id IN (" . self::CUSTOMER_ORDERS . ")";
+                $stmt = $db->prepare($sql);
+                $stmt->execute($ownership + [':hashed' => $hashed, ':coupon_store' => StoreContext::current()->id(), ':coupon_email' => $origEmail]);
+                $rowsCoupon = $stmt->rowCount();
+            }
+        }
+
+        return [
+            'email_log'          => $rowsEmail,
+            'audit_log'          => $rowsAudit,
+            'coupon_uses'        => $rowsCoupon,
+        ] + self::eraseCustomerContent($db, $customerId, $origEmail, $ownership, $placeholder, $erasureMarker);
     }
 
     /** @param 'erase'|'export' $kind */
