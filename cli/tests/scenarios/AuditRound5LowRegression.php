@@ -88,3 +88,39 @@ foreach ($r5lOps as $r5lOp => $r5lCodes) {
     $r5lMissing = array_values(array_diff($r5lNeed, $r5lCodes));
     assert_equals([], $r5lMissing, "R5 low OpenAPI: {$r5lOp} documents every status ApiV1 can return");
 }
+
+// --- Cache flush marker: one clock, written after the flush ---------------------------------------
+// The flush marker stored PHP time() and read() compared it with the entry's filesystem mtime (two
+// clocks on a network/container volume), with a strict '<' so an entry built in the flush second stayed.
+$r5lCacheProp = new ReflectionProperty(Cache::class, 'cacheDir');
+$r5lCachePrev = $r5lCacheProp->getValue();
+$r5lCacheDir = test_fixture_path('r5-low-cache');
+mkdir($r5lCacheDir, 0700, true);
+Cache::setDir($r5lCacheDir);
+try {
+    $r5lNow = time();
+    Cache::write('r5low/old.json', '{"v":1}');
+    touch(Cache::path('r5low/old.json'), $r5lNow - 5);
+    Cache::flush();
+    $r5lFlush = Cache::path('.flush_marker');
+    // PHP clock 60 s behind the filesystem clock: the stored time says the flush happened before the entry.
+    file_put_contents($r5lFlush, (string)($r5lNow - 60));
+    touch($r5lFlush, $r5lNow);
+    clearstatcache();
+    assert_true(Cache::read('r5low/old.json') === null, 'R5 low cache: an entry written before Cache::flush() is a miss even when the PHP clock lags the filesystem clock');
+    assert_true(Cache::freshFile('r5low/old.json', 3600) === null, 'R5 low cache: freshFile() honours the flush marker by filesystem time too');
+    Cache::write('r5low/same.json', '{"v":2}');
+    touch(Cache::path('r5low/same.json'), $r5lNow);
+    clearstatcache();
+    assert_true(Cache::read('r5low/same.json') === null, 'R5 low cache: an entry from the same second as the flush is a miss (it may predate the flush)');
+    Cache::write('r5low/new.json', '{"v":3}');
+    touch(Cache::path('r5low/new.json'), $r5lNow + 2);
+    clearstatcache();
+    assert_equals('{"v":3}', Cache::read('r5low/new.json'), 'R5 low cache: an entry rebuilt after the flush is served');
+    assert_true(Cache::freshFile('r5low/new.json', 3600) !== null, 'R5 low cache: freshFile() serves an entry rebuilt after the flush');
+} finally {
+    $r5lCacheProp->setValue(null, $r5lCachePrev);
+    $r5lIt = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($r5lCacheDir, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+    foreach ($r5lIt as $r5lI) $r5lI->isDir() ? @rmdir($r5lI->getPathname()) : @unlink($r5lI->getPathname());
+    @rmdir($r5lCacheDir);
+}
