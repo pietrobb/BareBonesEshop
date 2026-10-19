@@ -133,7 +133,60 @@ class EmailTemplates {
         if ($malformed) $errors[] = I18n::format('admin.email.msg.malformed', ['tags' => implode(' ', array_keys($malformed))]);
         $unsafe = self::unsafeHtml($html);
         if ($unsafe) $errors[] = I18n::format('admin.email.msg.unsafe', ['what' => implode(', ', $unsafe)]);
+        $leaks = self::secretLeaks($subject, $html, $text);
+        if ($leaks) $errors[] = I18n::format('admin.email.msg.secret_link', ['vars' => implode(', ', $leaks)]);
+        if (self::hasLiteralIban($html) || self::hasLiteralIban($text)) $errors[] = I18n::t('admin.email.msg.iban_literal');
         return array_values(array_unique($errors));
+    }
+
+    /**
+     * Variables carrying a one-time token (password reset, e-mail verification, unsubscribe, cart restore,
+     * download link): they may only be a whole link (href="{{x}}") or stand alone in the text, never part
+     * of another URL or attribute (an image or link that would send the token to a foreign server).
+     */
+    public const SECRET_VARIABLES = ['reset_url', 'verify_url', 'unsubscribe_url', 'cart_url', 'url'];
+
+    /** Secret variables used anywhere else than as a whole href or a stand-alone text value. */
+    public static function secretLeaks(string $subject, string $html, string $text): array {
+        $leaks = [];
+        foreach (self::SECRET_VARIABLES as $name) {
+            $tag = '{{' . $name . '}}';
+            if (str_contains($subject, $tag)) $leaks[$name] = true;
+            foreach (self::offsets($text, $tag) as $at) {
+                if (!self::standsAlone($text, $at, strlen($tag))) $leaks[$name] = true;
+            }
+            foreach (self::offsets($html, $tag) as $at) {
+                $open = strrpos(substr($html, 0, $at), '<');
+                $insideTag = $open !== false && strpos(substr($html, $open, $at - $open), '>') === false;
+                $ok = $insideTag
+                    ? preg_match('~\shref\s*=\s*(["\'])$~i', substr($html, 0, $at), $quote) === 1 && substr($html, $at + strlen($tag), 1) === $quote[1]
+                    : self::standsAlone($html, $at, strlen($tag));
+                if (!$ok) $leaks[$name] = true;
+            }
+        }
+        return array_keys($leaks);
+    }
+
+    /** A hard-coded IBAN (bank details must come from {{bank_iban}}, the store's configured account). */
+    public static function hasLiteralIban(string $source): bool {
+        $visible = preg_replace('~\{\{.*?\}\}~s', ' ', $source);
+        $visible = html_entity_decode(strip_tags((string)$visible), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $visible = (string)preg_replace('/\p{Cf}+/u', '', $visible);
+        return preg_match('/(?<![A-Z0-9])[A-Z]{2}\d{2}(?:[\s\x{00A0}]*[A-Z0-9]){11,30}(?![A-Z0-9])/u', $visible) === 1;
+    }
+
+    /** @return list<int> byte offsets of every occurrence */
+    private static function offsets(string $haystack, string $needle): array {
+        $offsets = [];
+        for ($at = strpos($haystack, $needle); $at !== false; $at = strpos($haystack, $needle, $at + 1)) $offsets[] = $at;
+        return $offsets;
+    }
+
+    /** Not glued to URL characters on either side (a mail client would otherwise linkify a foreign URL with the token). */
+    private static function standsAlone(string $source, int $at, int $length): bool {
+        $before = $at > 0 ? $source[$at - 1] : ' ';
+        return preg_match('~[\s>]~', $before) === 1
+            && preg_match('~^[.,;!?)]?(?:\s|<|$)~', substr($source, $at + $length, 2)) === 1;
     }
 
     public static function save(string $template, string $locale, mixed $post): array {
@@ -157,8 +210,9 @@ class EmailTemplates {
                 $db->prepare('INSERT INTO email_template_overrides (store_id, template, locale, subject, html, body_text, updated_by, updated_at)
                     VALUES (:store, :template, :locale, :subject, :html, :text, :by, :at)')->execute($row);
             }
+            $new = ['subject' => $row[':subject'], 'html' => $row[':html'], 'text' => $row[':text']];
             AuditLog::log('email_template', 0, $old === null ? null : self::auditRow($template, $locale, $old),
-                self::auditRow($template, $locale, ['subject' => $row[':subject'], 'html' => $row[':html'], 'text' => $row[':text']]), 'Admin e-mail template override');
+                self::auditRow($template, $locale, $new) + self::auditDiff($old ?? self::fileSource($template, $locale), $new), 'Admin e-mail template override');
             $db->commit();
         } catch (Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();
@@ -178,7 +232,9 @@ class EmailTemplates {
         try {
             $db->prepare('DELETE FROM email_template_overrides WHERE store_id = :store AND template = :template AND locale = :locale')
                 ->execute([':store' => StoreContext::current()->id(), ':template' => $template, ':locale' => $locale]);
-            AuditLog::log('email_template', 0, self::auditRow($template, $locale, $old), null, 'Admin e-mail template reset');
+            // The diff (override → restored file default) rides on the old row: a delete has no new row.
+            AuditLog::log('email_template', 0, self::auditRow($template, $locale, $old) + self::auditDiff($old, self::fileSource($template, $locale)),
+                null, 'Admin e-mail template reset');
             $db->commit();
         } catch (Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();
@@ -225,7 +281,31 @@ class EmailTemplates {
 
     private static function auditRow(string $template, string $locale, array $parts): array {
         return ['template' => $template, 'locale' => $locale, 'subject' => $parts['subject'], 'html_sha256' => hash('sha256', $parts['html']),
-            'text_sha256' => hash('sha256', $parts['text'])];
+            'text_sha256' => hash('sha256', (string)$parts['text'])];
+    }
+
+    /** What changed, readable in the audit log: subject before/after and a line diff of the HTML and text parts. */
+    private static function auditDiff(array $before, array $after): array {
+        return [
+            'subject_before' => (string)($before['subject'] ?? ''),
+            'html_diff' => self::lineDiff((string)($before['html'] ?? ''), (string)($after['html'] ?? '')),
+            'text_diff' => self::lineDiff((string)($before['text'] ?? ''), (string)($after['text'] ?? '')),
+        ];
+    }
+
+    /** Lines between the common head and tail: "-" removed, "+" added (not minimal, but exact and linear). */
+    public static function lineDiff(string $before, string $after): string {
+        $a = explode("\n", str_replace("\r\n", "\n", $before));
+        $b = explode("\n", str_replace("\r\n", "\n", $after));
+        if ($a === $b) return '';
+        $head = 0;
+        while ($head < count($a) && $head < count($b) && $a[$head] === $b[$head]) $head++;
+        $tail = 0;
+        while ($tail < count($a) - $head && $tail < count($b) - $head && $a[count($a) - 1 - $tail] === $b[count($b) - 1 - $tail]) $tail++;
+        $lines = ['@@ line ' . ($head + 1)];
+        foreach (array_slice($a, $head, count($a) - $head - $tail) as $line) $lines[] = '-' . $line;
+        foreach (array_slice($b, $head, count($b) - $head - $tail) as $line) $lines[] = '+' . $line;
+        return implode("\n", $lines);
     }
 
     private static function validName(string $template): bool {

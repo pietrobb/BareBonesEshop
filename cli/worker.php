@@ -201,6 +201,7 @@ do {
             else IncidentMonitor::report($type === 'digital_fulfill' ? 'digital.fulfillment_failed' : 'worker.job_failed', $type === 'digital_fulfill' ? 'digital' : 'worker', 'critical', ['exception' => $e, 'attempts' => (int)($job['attempts'] ?? 0)]);
         } finally {
             JobQueue::endWork();
+            Cache::flushPendingCatalogChanges();
         }
     }
 

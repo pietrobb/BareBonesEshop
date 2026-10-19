@@ -155,11 +155,20 @@ final class Extensions
             $matched++;
             if (Outbox::endpointDelivered((string)$event['id'], $endpoint)) continue;
             $error = null;
+            $db = Db::get();
+            $wasInTransaction = $db->inTransaction();
             try {
                 ($listener['listener'])($envelope);
             } catch (Throwable $e) {
                 $error = get_class($e) . ': ' . $e->getMessage();
                 Logger::exception('extension.listener_failed', $e, ['endpoint' => $endpoint, 'event_id' => (string)$event['id']]);
+            }
+            // A listener that leaves its own transaction open would swallow every later write of
+            // this worker run (refund records included): roll it back and count it as a failure.
+            if (!$wasInTransaction && $db->inTransaction()) {
+                $db->rollBack();
+                $error ??= 'RuntimeException: listener left a database transaction open';
+                Logger::warning('extension.listener_open_transaction', ['endpoint' => $endpoint, 'event_id' => (string)$event['id']]);
             }
             Outbox::recordDelivery((string)$event['id'], $endpoint, (int)$event['attempts'], $error === null, null, $error);
             if ($error !== null) $failures[] = $endpoint . ':' . $error;

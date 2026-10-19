@@ -220,6 +220,8 @@ return [
     'admin.email.msg.unknown_vars' => 'This template does not know the variables: {vars}. Allowed: {allowed}.',
     'admin.email.msg.malformed' => 'Invalid template tags: {tags}.',
     'admin.email.msg.unsafe' => 'The HTML contains content that is not allowed: {what}.',
+    'admin.email.msg.secret_link' => 'Links with a one-time token ({vars}) may only be a whole link (href="{{…}}") or stand alone in the text, not part of another address.',
+    'admin.email.msg.iban_literal' => 'Do not write a bank account number into the template; use {{bank_iban}}, the account set in the store settings.',
     'admin.email.msg.unknown' => 'Unknown template or language of this store.',
     'admin.email.msg.save_failed' => 'The template could not be saved.',
     'admin.email.msg.saved' => 'Template {template} ({locale}) saved.',

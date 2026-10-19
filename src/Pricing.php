@@ -38,11 +38,24 @@ class Pricing {
         $profile = Customers::commerceProfile($customerId);
         $groupId = (int)($profile['customer_group_id'] ?? 0);
         $at = $at ?? gmdate('Y-m-d H:i:s');
+        $variantDelta = 0;
 
         try {
-            $variantCondition = $variantId === null
-                ? 'pp.variant_id IS NULL'
-                : '(pp.variant_id = :variant_id OR pp.variant_id IS NULL)';
+            $variant = false;
+            if ($variantId !== null) {
+                $variantStmt = Db::get()->prepare('SELECT price_absolute, price_delta FROM variants WHERE id = :id AND product_id = :product_id');
+                $variantStmt->execute([':id' => $variantId, ':product_id' => (int)$product['id']]);
+                $variant = $variantStmt->fetch(PDO::FETCH_ASSOC);
+            }
+            // A variant with its own absolute price is priced only by rows written for that variant;
+            // product-level rows price the product base, and other variants keep their delta on top.
+            if ($variantId === null) {
+                $variantCondition = 'pp.variant_id IS NULL';
+            } elseif ($variant && $variant['price_absolute'] !== null) {
+                $variantCondition = 'pp.variant_id = :variant_id';
+            } else {
+                $variantCondition = '(pp.variant_id = :variant_id OR pp.variant_id IS NULL)';
+            }
             $sql = "SELECT pp.price, pp.compare_price, pp.min_qty, pp.variant_id,
                     pl.code AS price_list_code, pl.priority, pl.customer_group_id
                 FROM price_list_prices pp
@@ -71,12 +84,15 @@ class Pricing {
             if ($variantId !== null) $params[':variant_id'] = $variantId;
             $stmt->execute($params);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row && $row['variant_id'] === null && $variant) {
+                $variantDelta = (int)$variant['price_delta'];
+            }
         } catch (PDOException $e) {
             $row = false;
         }
 
         if ($row) {
-            $product['price'] = max(0, (int)$row['price']);
+            $product['price'] = max(0, (int)$row['price']) + $variantDelta;
             $product['compare_price'] = $row['compare_price'] === null
                 ? max($basePrice, (int)($product['compare_price'] ?? 0))
                 : max(0, (int)$row['compare_price']);

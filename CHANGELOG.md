@@ -175,6 +175,21 @@ nginx PHP fallback when `operations.nginx_config` is set).
   - The invoice e-mail prints the amount, issue and due date, online link and seller in all 7 languages.
   - Sales reports and the dashboard count money received: paid orders less refunds; unpaid
     (pending, failed, awaiting transfer / COD) and refunded orders are no longer revenue.
+- **Money and robustness (audit round 5)**
+  - A product-level price-list row (no variant) prices the product base: a variant with its own
+    absolute price keeps it (a 999 € variant was sold for the product's 67.47 €), a variant with a
+    price delta costs the listed base + delta. A variant row of the price list still wins.
+  - An extension event listener that leaves a database transaction open is rolled back and recorded as a
+    failed delivery (`extension.listener_open_transaction`); it used to swallow every later write of
+    the worker run, refund records included.
+  - The catalog cache marker is compared by file modification time (one clock, also on network or
+    container volumes), and a catalog change made inside a transaction writes the marker again after
+    the commit.
+  - E-mail template overrides (`emails.manage`): one-time-token links (`reset_url`, `verify_url`,
+    `unsubscribe_url`, `cart_url`, download `url`) may only be a whole `href="{{…}}"` or stand alone in
+    the text, never inside an image, style or foreign address, nor in the subject; a hard-coded IBAN is
+    refused (use `{{bank_iban}}`). **An existing override that does this is refused on its next save.**
+    The audit log keeps the previous subject and a line diff of the HTML and text parts, not only hashes.
 - **Extension API actions**: every non-GET/HEAD request to an extension action must carry the session
   CSRF token (`X-CSRF-Token` or `csrf_token`, HTTP 403 otherwise); actions can be limited with
   `'method' => 'GET'|'POST'` (405 otherwise). **Server-to-server POSTs to an extension action break**
