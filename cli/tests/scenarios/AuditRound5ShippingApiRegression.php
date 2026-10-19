@@ -74,6 +74,21 @@ assert_true(($r5sResult['handled'] ?? false) === true && empty($r5sResult['trans
     'R5 shipping webhook: an order with goods still waiting for a shipment is not marked delivered (' . json_encode($r5sResult) . ')');
 assert_equals('unknown_awb', $r5sHook('gls', 'Z1234567890', 'delivered', 'x')['reason'] ?? null, 'R5 shipping webhook: the tracking number of another carrier is not matched');
 assert_equals('unknown_awb', $r5sHook('packeta', 'R5S-NOPE', 'in_transit', 'x')['reason'] ?? null, 'R5 shipping webhook: an unknown tracking number stays unknown_awb');
+
+// The admin form leaves the carrier empty or gets the carrier's local brand name; the order's shipping
+// method knows the adapter (capability review run 27).
+$pdo->prepare("INSERT INTO shipping_methods (store_id, code, carrier, name) VALUES (?, 'r5s-zasielkovna', 'packeta', 'R5 Zásielkovňa')")
+    ->execute([StoreContext::current()->providerId()]);
+foreach (['r5s-empty' => [null, 'Z 222 3333 444'], 'r5s-brand' => ['Zásielkovňa', 'Z 222 3333 555']] as $r5sKey => [$r5sCarrier, $r5sTracking]) {
+    $r5sId = $r5sOrder(strtoupper($r5sKey));
+    $pdo->prepare("UPDATE orders SET shipping_method = 'r5s-zasielkovna' WHERE id = ?")->execute([$r5sId]);
+    $r5sShipment($r5sId, $r5sCarrier, $r5sTracking, $r5sKey);
+    $r5sResult = $r5sHook('packeta', str_replace(' ', '', $r5sTracking), 'in_transit', $r5sKey);
+    assert_true(($r5sResult['handled'] ?? false) === true && ($r5sShipmentRow($r5sKey)['tracking_status'] ?? null) === 'in_transit',
+        'R5 shipping webhook: a shipment with carrier ' . json_encode($r5sCarrier, JSON_UNESCAPED_UNICODE) . ' on an order shipped by the packeta method is found (' . json_encode($r5sResult) . ')');
+}
+$r5sResult = $r5sHook('gls', 'Z2223333444', 'in_transit', 'r5s-gls');
+assert_equals('unknown_awb', $r5sResult['reason'] ?? null, "R5 shipping webhook: another carrier's webhook does not take a shipment of the order's packeta method");
 putenv('SHIP_PACKETA_WEBHOOK_SECRET');
 putenv('SHIP_GLS_WEBHOOK_SECRET');
 
