@@ -193,26 +193,64 @@ class Cache {
      */
     public static function catalogChanged(?string $catalogId = null): void {
         try {
-            $marker = self::catalogMarker($catalogId ?? StoreContext::current()->catalogId());
-            $dir = dirname($marker);
-            $written = (is_dir($dir) || @mkdir($dir, 0750, true) || is_dir($dir))
-                && @file_put_contents($marker, (string)time(), LOCK_EX) !== false;
+            $catalogId ??= StoreContext::current()->catalogId();
+            $written = self::writeCatalogMarker($catalogId);
+            // Inside a transaction a reader can still rebuild an entry from the uncommitted (old) rows
+            // after this write: the marker is written again once the transaction is over.
+            if (self::inTransaction()) {
+                if (!self::$pendingFlushRegistered) {
+                    register_shutdown_function([self::class, 'flushPendingCatalogChanges']);
+                    self::$pendingFlushRegistered = true;
+                }
+                self::$pendingCatalogs[$catalogId] = true;
+            }
         } catch (Throwable $e) {
             $written = false; // a cache marker must never fail the product write that triggered it
         }
         if (!$written) Logger::warning('cache.write_failed', ['path' => 'catalogs']);
     }
 
+    /** @var array<string, true> catalogs changed inside a transaction that was still open */
+    private static array $pendingCatalogs = [];
+    private static bool $pendingFlushRegistered = false;
+
+    /** Rewrite the markers of catalogs changed inside a transaction once no transaction is open (worker loop, shutdown). */
+    public static function flushPendingCatalogChanges(): void {
+        if (self::$pendingCatalogs === [] || self::inTransaction()) return;
+        $catalogIds = array_keys(self::$pendingCatalogs);
+        self::$pendingCatalogs = [];
+        foreach ($catalogIds as $catalogId) {
+            if (!self::writeCatalogMarker((string)$catalogId)) Logger::warning('cache.write_failed', ['path' => 'catalogs']);
+        }
+    }
+
+    private static function writeCatalogMarker(string $catalogId): bool {
+        $marker = self::catalogMarker($catalogId);
+        $dir = dirname($marker);
+        return (is_dir($dir) || @mkdir($dir, 0750, true) || is_dir($dir))
+            && @file_put_contents($marker, (string)time(), LOCK_EX) !== false;
+    }
+
+    private static function inTransaction(): bool {
+        try {
+            return Db::get()->inTransaction();
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+
     /**
      * readJson() for entries derived from catalog rows: also a miss when the entry was written in or before
-     * the second of the last catalogChanged() of the active catalog.
+     * the second of the last catalogChanged() of the active catalog. Both times are file modification
+     * times, so they come from the same (filesystem) clock even on a network or container volume.
      */
     public static function readCatalogJson(string $path, int $ttl): ?array {
+        self::flushPendingCatalogChanges();
         $file = self::path($path);
         $marker = self::catalogMarker(StoreContext::current()->catalogId());
         clearstatcache(true, $file);
         clearstatcache(true, $marker);
-        if (is_file($file) && is_file($marker) && (int)filemtime($file) <= (int)file_get_contents($marker)) return null;
+        if (is_file($file) && is_file($marker) && (int)filemtime($file) <= (int)filemtime($marker)) return null;
         return self::readJson($path, $ttl);
     }
 

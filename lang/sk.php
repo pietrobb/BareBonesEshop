@@ -225,6 +225,8 @@ return [
     'admin.email.msg.unknown_vars' => 'Táto šablóna nepozná premenné: {vars}. Povolené: {allowed}.',
     'admin.email.msg.malformed' => 'Neplatné značky šablóny: {tags}.',
     'admin.email.msg.unsafe' => 'HTML obsahuje nepovolený obsah: {what}.',
+    'admin.email.msg.secret_link' => 'Odkazy s jednorazovým tokenom ({vars}) môžu byť len celý odkaz (href="{{…}}") alebo samostatne v texte, nie súčasťou inej adresy.',
+    'admin.email.msg.iban_literal' => 'Do šablóny nepíšte číslo bankového účtu; použite {{bank_iban}}, účet z nastavení obchodu.',
     'admin.email.msg.unknown' => 'Neznáma šablóna alebo jazyk tohto obchodu.',
     'admin.email.msg.save_failed' => 'Šablónu sa nepodarilo uložiť.',
     'admin.email.msg.saved' => 'Šablóna {template} ({locale}) uložená.',

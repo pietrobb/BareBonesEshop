@@ -38,6 +38,7 @@ class Pricing {
         $profile = Customers::commerceProfile($customerId);
         $groupId = (int)($profile['customer_group_id'] ?? 0);
         $at = $at ?? gmdate('Y-m-d H:i:s');
+        $variantDelta = 0;
 
         try {
             $variantCondition = $variantId === null
@@ -71,12 +72,21 @@ class Pricing {
             if ($variantId !== null) $params[':variant_id'] = $variantId;
             $stmt->execute($params);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row && $variantId !== null && $row['variant_id'] === null) {
+                // A product-level row prices the product base; a variant keeps its own absolute
+                // price and its delta on top of the listed base.
+                $variantStmt = Db::get()->prepare('SELECT price_absolute, price_delta FROM variants WHERE id = :id AND product_id = :product_id');
+                $variantStmt->execute([':id' => $variantId, ':product_id' => (int)$product['id']]);
+                $variant = $variantStmt->fetch(PDO::FETCH_ASSOC);
+                if ($variant && $variant['price_absolute'] !== null) $row = false;
+                elseif ($variant) $variantDelta = (int)$variant['price_delta'];
+            }
         } catch (PDOException $e) {
             $row = false;
         }
 
         if ($row) {
-            $product['price'] = max(0, (int)$row['price']);
+            $product['price'] = max(0, (int)$row['price']) + $variantDelta;
             $product['compare_price'] = $row['compare_price'] === null
                 ? max($basePrice, (int)($product['compare_price'] ?? 0))
                 : max(0, (int)$row['compare_price']);
