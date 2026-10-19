@@ -420,6 +420,34 @@ try {
             VALUES (?, 'default', 'payu', 'RF-R6M-1', 'refund_pending', 200, 'eur', 'r6m_unexecuted_request_execute', '{}', " . Db::now() . ', ' . Db::now() . ")")->execute([$r6mUnrequested]);
         assert_true(PaymentService::unconfirmedProviderRefund(Orders::byId($r6mUnrequested)) === null, 'R6 refund: a pending refund with a provider refund id waits for its webhook');
 
+        // The usual partial refund is an item credit note (RMA): InvoiceService::credit() moves the payment to
+        // refund_pending, adds a pending order_refunds row and queues payment_refund with that refund id.
+        $r6mCredited = $r6mOrder('gopay', '3600000303');
+        // An earlier credit note of the same amount, not yet executed: only the accepted one may be completed.
+        $pdo->prepare("INSERT INTO order_refunds (store_id, order_id, rma_id, credit_note_id, amount, currency, status, idempotency_key)
+            VALUES ('default', ?, 0, 0, 250, 'eur', 'pending', 'r6m-credit-0')")->execute([$r6mCredited]);
+        $r6mOtherRefund = (int)$pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO order_refunds (store_id, order_id, rma_id, credit_note_id, amount, currency, status, idempotency_key)
+            VALUES ('default', ?, 0, 0, 250, 'eur', 'pending', 'r6m-credit-1')")->execute([$r6mCredited]);
+        $r6mCreditRefund = (int)$pdo->lastInsertId();
+        $pdo->prepare("UPDATE orders SET payment_status = 'refund_pending' WHERE id = ?")->execute([$r6mCredited]);
+        JobQueue::push('payment_refund', ['order_id' => $r6mCredited, 'payment_id' => '3600000303', 'amount' => 250,
+            'refund_id' => $r6mCreditRefund, 'idempotency_key' => 'r6m-credit-1'], 1);
+        $r6mGoPayState = 'PAID';
+        $r6mRunJobs($r6mCredited);
+        $r6mGoPayState = 'PARTIALLY_REFUNDED';
+        PaymentService::handlePulledNotification(['id' => '3600000303'], $r6mGoPay, 'gopay');
+        assert_equals(['refund_pending', 0, 1000], $r6mState($r6mCredited), 'R6 refund: an accepted GoPay credit-note refund waits; its PARTIALLY_REFUNDED report books nothing');
+        assert_equals(['amount' => 250, 'request_key' => 'r6m-credit-1', 'refund_id' => $r6mCreditRefund], PaymentService::unconfirmedProviderRefund(Orders::byId($r6mCredited)),
+            'R6 refund: an accepted GoPay credit-note refund is offered for confirmation too (was stuck in refund_pending)');
+        PaymentService::confirmProviderRefund($r6mCredited, 'r6m-admin', 'Credit note refund seen in the GoPay portal');
+        assert_equals(['partially_refunded', 250, 750], $r6mState($r6mCredited), 'R6 refund: the confirmed credit-note refund is booked once');
+        assert_equals(['succeeded', 'admin-confirmed:r6m-admin', 'pending'], [(string)Rma::refundById($r6mCreditRefund)['status'],
+            (string)Rma::refundById($r6mCreditRefund)['payment_reference'], (string)Rma::refundById($r6mOtherRefund)['status']],
+            'R6 refund: the confirmation completes that credit note refund, not another of the same amount');
+        PaymentService::handlePulledNotification(['id' => '3600000303'], $r6mGoPay, 'gopay');
+        assert_equals(250, PaymentService::refundedAmount($r6mCredited), 'R6 refund: a later GoPay report of the credit-note refund books nothing more');
+
         $r6mAdmin = str_replace("\r\n", "\n", entrypointSource('admin.php'));
         assert_true(str_contains($r6mAdmin, "'order:refund_confirm' => handleOrderRefundConfirm()")
             && str_contains($r6mAdmin, "function handleOrderRefundConfirm(): void {\n    Security::adminRequire('orders.refund');")
