@@ -33,12 +33,7 @@ class Cache {
         $file = self::path($path);
         if (!file_exists($file)) return null;
 
-        // Check flush marker
-        $flushMarker = self::path('.flush_marker');
-        if (file_exists($flushMarker)) {
-            $flushTime = (int)file_get_contents($flushMarker);
-            if (filemtime($file) < $flushTime) return null;
-        }
+        if (self::flushedSince($file)) return null;
 
         // Check TTL (use config default when ttl=0 or not specified)
         if ($ttl !== null) {
@@ -85,9 +80,19 @@ class Cache {
         $file = self::path($path);
         clearstatcache(true, $file);
         if (!is_file($file)) return null;
-        $flushMarker = self::path('.flush_marker');
-        if (is_file($flushMarker) && filemtime($file) < (int)file_get_contents($flushMarker)) return null;
+        if (self::flushedSince($file)) return null;
         return (time() - (int)filemtime($file)) > $ttl ? null : $file;
+    }
+
+    /**
+     * True when Cache::flush() ran in or after the second $file was written. Both times are file
+     * modification times (one clock, also on network/container volumes); the same second counts as
+     * flushed because the entry may have been built just before the flush.
+     */
+    private static function flushedSince(string $file): bool {
+        $flushMarker = self::path('.flush_marker');
+        clearstatcache(true, $flushMarker);
+        return is_file($flushMarker) && (int)filemtime($file) <= (int)filemtime($flushMarker);
     }
 
     /** writeStream(): the entry was replaced; 'file' is the cached entry. */
