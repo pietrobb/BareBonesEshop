@@ -400,20 +400,23 @@ class ShippingService
     /**
      * Shipped admin shipments of $carrierId with tracking number $awb in $stores. The admin types both by
      * hand: the tracking number matches without spaces/dashes and case, the carrier by its letters and
-     * digits ("Packeta" = packeta, "HTTP Carrier" = http-carrier).
+     * digits ("Packeta" = packeta, "HTTP Carrier" = http-carrier). An empty carrier or a brand name
+     * ("Zásielkovňa") matches through the carrier of the order's shipping method.
      * @param list<string> $stores
      * @return list<array<string,mixed>>
      */
     private static function shippedShipments(string $carrierId, string $awb, array $stores): array
     {
         $key = static fn(string $value): string => strtolower((string)preg_replace('/[^A-Za-z0-9]+/', '', $value));
-        $stmt = Db::get()->prepare("SELECT id, store_id, order_id, carrier FROM shipments
-            WHERE status = 'shipped' AND tracking_number IS NOT NULL
-              AND LOWER(REPLACE(REPLACE(tracking_number, ' ', ''), '-', '')) = ?
-              AND store_id IN (" . implode(',', array_fill(0, count($stores), '?')) . ") LIMIT 20");
-        $stmt->execute([strtolower(str_replace([' ', '-'], '', $awb)), ...$stores]);
-        return array_values(array_filter($stmt->fetchAll(\PDO::FETCH_ASSOC),
-            static fn(array $row): bool => $key((string)$row['carrier']) === $key($carrierId)));
+        $stmt = Db::get()->prepare("SELECT s.id, s.store_id, s.order_id, s.carrier, m.carrier AS method_carrier FROM shipments s
+            LEFT JOIN orders o ON o.id = s.order_id AND o.store_id = s.store_id
+            LEFT JOIN shipping_methods m ON m.code = o.shipping_method AND m.store_id = ?
+            WHERE s.status = 'shipped' AND s.tracking_number IS NOT NULL
+              AND LOWER(REPLACE(REPLACE(s.tracking_number, ' ', ''), '-', '')) = ?
+              AND s.store_id IN (" . implode(',', array_fill(0, count($stores), '?')) . ") LIMIT 20");
+        $stmt->execute([StoreContext::current()->providerId(), strtolower(str_replace([' ', '-'], '', $awb)), ...$stores]);
+        return array_values(array_filter($stmt->fetchAll(\PDO::FETCH_ASSOC), static fn(array $row): bool =>
+            in_array($key($carrierId), [$key((string)$row['carrier']), $key((string)$row['method_carrier'])], true)));
     }
 
     /**
