@@ -94,10 +94,15 @@ class Adapters {
     /** @return array<string,object> */
     public static function providers(string $type): array {
         $providers = [];
-        foreach (array_keys(self::availableRegistry($type)) as $code) {
+        foreach (self::availableCodes($type) as $code) {
             $providers[$code] = self::provider($type, $code);
         }
         return $providers;
+    }
+
+    /** @return list<string> codes of the providers of $type whose required integration config is present */
+    public static function availableCodes(string $type): array {
+        return array_map('strval', array_keys(self::availableRegistry($type)));
     }
 
     public static function provider(string $type, string $code): object {

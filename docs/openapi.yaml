@@ -38,6 +38,10 @@ paths:
       responses:
         '200':
           description: Product
+          headers:
+            ETag:
+              description: Version of the product; send it as If-Match on PATCH to avoid overwriting a concurrent change
+              schema: { type: string }
           content:
             application/json:
               schema:
@@ -52,6 +56,11 @@ paths:
       x-required-scope: products:write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag from GET /products/{id}; when the product changed since, nothing is stored and the answer is 412
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -61,6 +70,10 @@ paths:
       responses:
         '200':
           description: Updated product; an identical retry, also one sent concurrently, returns the stored response with idempotent_replay=true and the change is applied once
+          headers:
+            ETag:
+              description: Version of the product after the change
+              schema: { type: string }
           content:
             application/json:
               schema:
@@ -76,6 +89,11 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '409':
           description: The Idempotency-Key was already used for a different request (idempotency_conflict), or the stock change would break existing warehouse reservations (stock_conflict, nothing is stored and the key can be retried)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '412':
+          description: If-Match does not match the current product (precondition_failed); nothing is stored, read the product again
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -313,9 +331,11 @@ webhooks:
         timestamp + "." + event_id + "." + raw_body))`, reject timestamps more
         than 300 seconds from local time, and persist `X-BBE-Event-ID` after a
         successful transaction to prevent replay. Return any 2xx status only after
-        committing. Non-2xx/network failures are retried with exponential backoff;
-        after eight attempts the event enters the dead-letter state. Retries keep
-        the same event ID and payload but use a fresh timestamp/signature.
+        committing. Non-2xx/network failures are retried with exponential backoff
+        (5 seconds doubling up to 6 hours) for about three days; after 25 attempts
+        the event enters the dead-letter state, and `php cli/outbox-requeue.php`
+        queues it again. Retries keep the same event ID and payload but use a fresh
+        timestamp/signature. Order events of one subject by `sequence`.
       parameters:
         - name: X-BBE-Event-ID
           in: header
@@ -556,7 +576,7 @@ components:
         meta: { $ref: '#/components/schemas/PageMeta' }
     EventEnvelope:
       type: object
-      required: [specversion, id, type, source, time, datacontenttype, subject, bbeversion, store_id, channel_id, data]
+      required: [specversion, id, type, source, time, datacontenttype, subject, sequence, bbeversion, store_id, channel_id, data]
       properties:
         specversion: { const: '1.0' }
         id: { type: string, pattern: '^[a-f0-9]{32}$' }
@@ -565,6 +585,10 @@ components:
         time: { type: string, format: date-time }
         datacontenttype: { const: application/json }
         subject: { type: string }
+        sequence:
+          type: integer
+          minimum: 0
+          description: Grows with every recorded event. Deliveries can arrive out of order (retries); for the same subject the event with the higher sequence is the later change, so ignore one older than the last applied. 0 marks events recorded before sequences existed.
         bbeversion: { type: integer, minimum: 1 }
         store_id: { type: string }
         channel_id: { type: string }

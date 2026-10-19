@@ -385,12 +385,92 @@ class ShippingService
         $label = Db::get()->prepare("SELECT * FROM shipping_labels WHERE awb = ? AND carrier = ? AND store_id IN (" . implode(',', array_fill(0, count($stores), '?')) . ") LIMIT 2");
         $label->execute([$awb, $carrierId, ...$stores]);
         $labelRows = $label->fetchAll(\PDO::FETCH_ASSOC);
-        if (count($labelRows) !== 1) {
-            if ($labelRows) error_log("shipping webhook [{$carrierId}] AWB {$awb} is ambiguous across stores");
-            return ['handled' => false, 'reason' => 'unknown_awb'];
+        if (count($labelRows) === 1) {
+            return PaymentWebhookRouting::within((string)$labelRows[0]['store_id'], static fn(): array => self::applyTrackingUpdate($labelRows[0], $carrierId, (string)$awb, $status, $rawPayload));
         }
+        // Parcels shipped in the admin (Fulfillment) carry the carrier and tracking number on the shipment.
+        $shipmentRows = $labelRows ? [] : self::shippedShipments($carrierId, (string)$awb, $stores);
+        if (count($shipmentRows) === 1) {
+            return PaymentWebhookRouting::within((string)$shipmentRows[0]['store_id'], static fn(): array => self::applyShipmentTracking($shipmentRows[0], $carrierId, (string)$awb, $status, $rawPayload));
+        }
+        if ($labelRows || $shipmentRows) error_log("shipping webhook [{$carrierId}] AWB {$awb} is ambiguous across stores");
+        return ['handled' => false, 'reason' => 'unknown_awb'];
+    }
 
-        return PaymentWebhookRouting::within((string)$labelRows[0]['store_id'], static fn(): array => self::applyTrackingUpdate($labelRows[0], $carrierId, (string)$awb, $status, $rawPayload));
+    /**
+     * Shipped admin shipments of $carrierId with tracking number $awb in $stores. The admin types both by
+     * hand: the tracking number matches without spaces/dashes and case, the carrier by its letters and
+     * digits ("Packeta" = packeta, "HTTP Carrier" = http-carrier).
+     * @param list<string> $stores
+     * @return list<array<string,mixed>>
+     */
+    private static function shippedShipments(string $carrierId, string $awb, array $stores): array
+    {
+        $key = static fn(string $value): string => strtolower((string)preg_replace('/[^A-Za-z0-9]+/', '', $value));
+        $stmt = Db::get()->prepare("SELECT id, store_id, order_id, carrier FROM shipments
+            WHERE status = 'shipped' AND tracking_number IS NOT NULL
+              AND LOWER(REPLACE(REPLACE(tracking_number, ' ', ''), '-', '')) = ?
+              AND store_id IN (" . implode(',', array_fill(0, count($stores), '?')) . ") LIMIT 20");
+        $stmt->execute([strtolower(str_replace([' ', '-'], '', $awb)), ...$stores]);
+        return array_values(array_filter($stmt->fetchAll(\PDO::FETCH_ASSOC),
+            static fn(array $row): bool => $key((string)$row['carrier']) === $key($carrierId)));
+    }
+
+    /**
+     * Forward-only carrier status on an admin shipment; the order becomes delivered once every parcel
+     * of a shipped order is delivered (a parcel still on the way or goods not yet shipped keep it shipped).
+     */
+    private static function applyShipmentTracking(array $shipment, string $carrierId, string $awb, string $status, string $rawPayload): array
+    {
+        StoreContext::current()->assertPermission('shipping');
+        $db = Db::get();
+        $eventId = 'shipping_' . hash('sha256', $carrierId . "\0" . $rawPayload);
+        $claim = Idempotency::claim($eventId);
+        if ($claim === 'in_flight') return ['handled' => false, 'reason' => 'in_flight', 'retry' => true];
+        if ($claim === 'done') return ['handled' => false, 'reason' => 'already_processed', 'duplicate' => true];
+
+        $rank = self::TRACKING_STATUS_RANK[$status];
+        $from = array_keys(array_filter(self::TRACKING_STATUS_RANK, static fn(int $r): bool => $r <= $rank));
+        $known = array_keys(self::TRACKING_STATUS_RANK);
+        $orderId = (int)$shipment['order_id'];
+        try {
+            $update = $db->prepare("UPDATE shipments SET tracking_status = ?, updated_at = " . Db::now() . ",
+                    delivered_at = CASE WHEN ? = 'delivered' THEN COALESCE(delivered_at, " . Db::now() . ") ELSE delivered_at END
+                WHERE id = ? AND store_id = ? AND status = 'shipped'
+                  AND (tracking_status IS NULL OR tracking_status IN (" . implode(',', array_fill(0, count($from), '?')) . ")
+                       OR tracking_status NOT IN (" . implode(',', array_fill(0, count($known), '?')) . "))");
+            $update->execute([$status, $status, (int)$shipment['id'], StoreContext::current()->id(), ...$from, ...$known]);
+            // MySQL counts changed rows only: a retried "delivered" within the same second still has to deliver the order.
+            $current = $db->prepare('SELECT tracking_status FROM shipments WHERE id = ?');
+            $current->execute([(int)$shipment['id']]);
+            if ($update->rowCount() === 0 && !($status === 'delivered' && $current->fetchColumn() === 'delivered')) {
+                Idempotency::complete($eventId);
+                return ['handled' => false, 'reason' => 'stale_status', 'awb' => $awb, 'status' => $status, 'order_id' => $orderId];
+            }
+            $result = ['handled' => true, 'awb' => $awb, 'status' => $status, 'order_id' => $orderId, 'transitioned' => false];
+            if ($status === 'delivered' && self::allParcelsDelivered($orderId)) {
+                try {
+                    OrderWorkflow::transition($orderId, 'delivered');
+                } catch (\Throwable $e) {
+                    if ((Orders::byId($orderId)['status'] ?? '') !== 'delivered') throw $e;
+                }
+                $result['transitioned'] = true;
+            }
+        } catch (\Throwable $e) {
+            Idempotency::unmark($eventId);
+            throw $e;
+        }
+        Idempotency::complete($eventId);
+        return $result;
+    }
+
+    private static function allParcelsDelivered(int $orderId): bool
+    {
+        if ((Orders::byId($orderId)['status'] ?? '') !== 'shipped') return false;
+        $stmt = Db::get()->prepare("SELECT COUNT(*) FROM shipments WHERE order_id = ? AND store_id = ? AND status <> 'cancelled'
+            AND NOT (status = 'shipped' AND COALESCE(tracking_status, '') = 'delivered')");
+        $stmt->execute([$orderId, StoreContext::current()->id()]);
+        return (int)$stmt->fetchColumn() === 0;
     }
 
     private static function applyTrackingUpdate(array $labelRow, string $carrierId, string $awb, string $status, string $rawPayload): array
@@ -674,7 +754,17 @@ class ShippingService
             return self::$adapters;
         }
 
-        return Adapters::providers('shipping');
+        // A carrier that cannot even be constructed (missing key, broken extension) is left out like an outage.
+        $adapters = [];
+        foreach (Adapters::availableCodes('shipping') as $code) {
+            try {
+                $adapters[$code] = Adapters::provider('shipping', (string)$code);
+            } catch (\Throwable $e) {
+                Logger::warning('shipping.adapter_unavailable', ['carrier' => (string)$code, 'exception_type' => get_class($e)]);
+                IncidentMonitor::report('shipping.adapter_unavailable', 'shipping', 'warning', ['exception' => $e]);
+            }
+        }
+        return $adapters;
     }
 
     private static function findAdapter(string $carrierId): ShippingAdapter

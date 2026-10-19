@@ -220,6 +220,24 @@ nginx PHP fallback when `operations.nginx_config` is set).
     `expose_php` off); the `setup` service runs `deploy/docker-setup.sh` as root, which creates
     `config.php` in the host-owned checkout and hands `cache/`, `uploads/`, `import/`, `logs/` and the
     private volume to uid 33. CI runs the README Docker install and fetches an uploaded image.
+- **Shipping, API and extensions (audit round 5)**
+  - Migration `20261019150000_shipment_tracking_event_sequence`: `shipments.tracking_status` /
+    `delivered_at`, `event_outbox.seq` and the `event_sequence` counter table.
+  - Carrier tracking webhooks also find the shipments shipped in the admin (carrier and tracking number
+    as typed: case, spaces and dashes are ignored); they only looked at generated labels, so every real
+    parcel ended as `unknown_awb`. The status only moves forward; the order becomes `delivered` when every
+    parcel of a shipped order is delivered.
+  - A carrier whose adapter cannot be constructed (missing key, broken extension) is left out of the
+    rates with a `shipping.adapter_unavailable` incident instead of failing the checkout; a storefront
+    view-model provider that throws or returns no array is left out of the page
+    (`storefront.extension_failed`) instead of answering 500.
+  - **Outgoing webhooks retry for about three days** (5 s doubling up to 6 h, `Outbox::MAX_ATTEMPTS` 25
+    instead of 8 attempts over ~11 minutes). `php cli/outbox-requeue.php` lists dead events and queues
+    them again (`<event-id>` or `--all`); endpoints that already acknowledged an event are skipped.
+  - The event envelope has a `sequence` that only grows: for the same `subject` the higher one is the
+    later change (deliveries can arrive out of order after retries).
+  - API v1 `GET`/`PATCH /products/{id}` return an `ETag`; `PATCH` with `If-Match` answers 412
+    `precondition_failed` when the product changed meanwhile (optional, existing clients keep working).
 - **Extension API actions**: every non-GET/HEAD request to an extension action must carry the session
   CSRF token (`X-CSRF-Token` or `csrf_token`, HTTP 403 otherwise); actions can be limited with
   `'method' => 'GET'|'POST'` (405 otherwise). **Server-to-server POSTs to an extension action break**

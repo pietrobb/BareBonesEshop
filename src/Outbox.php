@@ -4,7 +4,8 @@
  * record() must run inside the same database transaction as the domain mutation.
  */
 class Outbox {
-    public const MAX_ATTEMPTS = 8;
+    public const MAX_ATTEMPTS = 25;
+    public const MAX_RETRY_DELAY = 21600;
 
     public static function record(
         string $eventType,
@@ -32,11 +33,14 @@ class Outbox {
         $context = StoreContext::current();
         $payloadJson = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         $now = gmdate('Y-m-d H:i:s');
+        // Global counter that only grows (also after retention deleted old events): orders the events of a subject.
+        $db->exec('INSERT INTO event_sequence (id) VALUES (NULL)');
+        $sequence = (int)$db->lastInsertId();
         $stmt = $db->prepare("INSERT INTO event_outbox
             (id, store_id, channel_id, event_type, aggregate_type, aggregate_id, event_version,
-             payload, status, attempts, available_at, occurred_at, updated_at, correlation_id)
+             payload, status, attempts, available_at, occurred_at, updated_at, correlation_id, seq)
             VALUES (:id, :store, :channel, :event, :aggregate, :aggregate_id, :version,
-                    :payload, 'pending', 0, :available, :occurred, :updated, :correlation)");
+                    :payload, 'pending', 0, :available, :occurred, :updated, :correlation, :seq)");
         $stmt->execute([
             ':id' => $eventId,
             ':store' => $context->id(),
@@ -50,6 +54,7 @@ class Outbox {
             ':occurred' => $now,
             ':updated' => $now,
             ':correlation' => Logger::correlationId(),
+            ':seq' => $sequence,
         ]);
         return $eventId;
     }
@@ -62,7 +67,7 @@ class Outbox {
         $stmt = Db::get()->prepare("SELECT * FROM event_outbox
             WHERE (status IN ('pending', 'retry') AND available_at <= :now)
                OR (status = 'delivering' AND updated_at <= :stale)
-            ORDER BY occurred_at, id LIMIT :limit");
+            ORDER BY occurred_at, seq, id LIMIT :limit");
         $stmt->bindValue(':now', $now);
         $stmt->bindValue(':stale', $stale);
         $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
@@ -97,6 +102,8 @@ class Outbox {
             'time' => gmdate('c', strtotime((string)$event['occurred_at'] . ' UTC')),
             'datacontenttype' => 'application/json',
             'subject' => (string)$event['aggregate_type'] . '/' . (string)$event['aggregate_id'],
+            // A later change of the same subject always has a higher sequence (0 = recorded before 2026-10-19).
+            'sequence' => (int)($event['seq'] ?? 0),
             'bbeversion' => (int)$event['event_version'],
             'store_id' => (string)$event['store_id'],
             'channel_id' => (string)$event['channel_id'],
@@ -155,8 +162,25 @@ class Outbox {
         if ($attempts >= self::MAX_ATTEMPTS) {
             return self::markDead($eventId, $error, $claimedAttempts);
         }
-        $delay = min(3600, 5 * (2 ** max(0, $attempts - 1)));
-        return self::updateState($eventId, 'retry', gmdate('Y-m-d H:i:s', time() + $delay), $error, $claimedAttempts);
+        return self::updateState($eventId, 'retry', gmdate('Y-m-d H:i:s', time() + self::retryDelay($attempts)), $error, $claimedAttempts);
+    }
+
+    /**
+     * Seconds before the next delivery after failed attempt $attempts: 5 s doubling up to 6 h. With
+     * MAX_ATTEMPTS the retries span about three days, so a receiver that is down over a weekend
+     * still gets the event.
+     */
+    public static function retryDelay(int $attempts): int {
+        return min(self::MAX_RETRY_DELAY, 5 * (2 ** min(30, max(0, $attempts - 1))));
+    }
+
+    /** Queue a dead event again with fresh attempts (cli/outbox-requeue.php); endpoints that already got it are skipped. */
+    public static function requeue(string $eventId): bool {
+        $now = gmdate('Y-m-d H:i:s');
+        $stmt = Db::get()->prepare("UPDATE event_outbox SET status='retry', attempts=0, available_at=:available, updated_at=:updated
+            WHERE id=:id AND status='dead'");
+        $stmt->execute([':available' => $now, ':updated' => $now, ':id' => $eventId]);
+        return $stmt->rowCount() === 1;
     }
 
     /**
