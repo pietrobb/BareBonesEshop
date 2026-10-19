@@ -499,7 +499,12 @@ class PaymentService {
         // execute key from it would refund again.
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
             $raw = json_decode((string)($row['raw_response'] ?? ''), true);
-            if (is_array($raw) && ($raw['event_type'] ?? null) === 'refund.requested') return $row;
+            if (!is_array($raw) || ($raw['event_type'] ?? null) !== 'refund.requested') continue;
+            // One request at a time: a refund booked after the latest one settled it, so a later item refund is in flight.
+            $later = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store
+                AND id > :id AND status IN ('partially_refunded', 'refunded', 'refund_succeeded', 'refund_confirmed') LIMIT 1");
+            $later->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id(), ':id' => (int)$row['id']]);
+            return $later->fetchColumn() ? null : $row;
         }
         return null;
     }
