@@ -659,7 +659,6 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.sales.live_data' => 'Dane na żywo z bieżącej bazy danych',
     'admin.sales.updated' => 'zaktualizowano',
     'admin.sales.refresh' => 'Odśwież dane',
-    'admin.sales.order_value_today' => 'Wartość zamówień dziś',
     'admin.sales.pending_payments' => 'Płatności oczekujące na zakończenie',
     'admin.sales.total_downloads' => 'Łącznie pobrań cyfrowych',
     'admin.sales.attention' => 'Wymaga uwagi',

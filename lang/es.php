@@ -1318,7 +1318,6 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.sales.live_data' => 'Datos en directo de la base de datos actual',
     'admin.sales.updated' => 'actualizado',
     'admin.sales.refresh' => 'Actualizar datos',
-    'admin.sales.order_value_today' => 'Valor de los pedidos de hoy',
     'admin.sales.pending_payments' => 'Pagos pendientes de completar',
     'admin.sales.total_downloads' => 'Total de descargas digitales',
     'admin.sales.attention' => 'Requiere atención',

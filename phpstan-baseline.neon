@@ -523,12 +523,6 @@ parameters:
 			path: src/Updater.php
 
 		-
-			message: '#^Offset ''status'' on array\{status\: string, country\: string\|null, trader_name\: string\|null, trader_addr\: string\|null, raw\: string\|null\} on left side of \?\? always exists and is not nullable\.$#'
-			identifier: nullCoalesce.offset
-			count: 1
-			path: src/VatService.php
-
-		-
 			message: '#^Right side of && is always false\.$#'
 			identifier: booleanAnd.rightAlwaysFalse
 			count: 1

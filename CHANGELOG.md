@@ -148,6 +148,33 @@ nginx PHP fallback when `operations.nginx_config` is set).
   unless you set `legal.credit_note_prefix`. Two real sellers sharing a prefix are a conflict: `cli/setup.php
   doctor` (`stores.invoice_numbering`) and `cli/staging-preflight.php` report it, and issuing for the
   non-owning seller is refused with an `invoice.numbering_conflict` incident; the owning seller keeps issuing.
+- **VAT and documents (audit round 5)** — **have the merchant's accountant confirm the rates and the
+  legal wording below before going live; they are defaults, not tax advice.**
+  - `config/vat-rates.json`: product categories may have their own rate per country and period
+    (`categories`, keyed by `products.vat_class`): SK `books`/`medicines` 5 % from 2025 (10 % before),
+    CZ `books` 0 % from 2024. EE standard 24 % from 2025-07-01, RO 21 % / 11 % from 2025-08-01
+    (earlier rates kept in `history`).
+  - The payment (e.g. cash-on-delivery) fee is part of the price of the goods and carries the VAT of
+    the highest goods rate, like shipping (it used to be exempt). Existing order snapshots are unchanged.
+  - A digital-only order to a non-EU country keeps the seller's VAT: the declared country alone is no
+    evidence for a zero-rated export. Goods shipped there are still an export.
+  - In-store pickup (`personal_pickup`) is a supply in the seller's country (seller's VAT), whatever
+    the buyer's address.
+  - Automatic free shipping (`pricing.json` `cart_rules`) is earned by the subtotal after the coupon
+    and automatic discounts, and only in the rule's currency (`conditions.currency`, default the
+    currency of the store whose `cart_rules` they are).
+  - A buy-X-get-Y discount is booked on the free product's lines (its own VAT rate), not spread over the cart.
+  - Migration `20261019090000_vat_id_checks`: every live VIES check is kept (`vat_id_checks`: status,
+    trader, VIES `requestIdentifier`, raw answer) as evidence of a reverse-charge sale; the VIES
+    parser reads namespaced answers (`<ns2:valid>`), and a SOAP fault is "unverified", never "invalid".
+  - OSS report: credit notes reduce the period (60 € invoice − 20 € credit note = 40 €).
+  - Invoice PDF: price without VAT per line, discount / payment-fee lines so the lines add up to the
+    totals, the credit note names the invoice it corrects, exemptions cite their legal ground
+    (intra-EU supply of goods Art. 138, export Art. 146, B2B e-services reverse charge Art. 196).
+    The date of supply is the payment or shipment date, not the (late or backfilled) issue date.
+  - The invoice e-mail prints the amount, issue and due date, online link and seller in all 7 languages.
+  - Sales reports and the dashboard count money received: paid orders less refunds; unpaid
+    (pending, failed, awaiting transfer / COD) and refunded orders are no longer revenue.
 - **Extension API actions**: every non-GET/HEAD request to an extension action must carry the session
   CSRF token (`X-CSRF-Token` or `csrf_token`, HTTP 403 otherwise); actions can be limited with
   `'method' => 'GET'|'POST'` (405 otherwise). **Server-to-server POSTs to an extension action break**

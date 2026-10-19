@@ -33,7 +33,7 @@ $db->exec("CREATE TABLE orders (id INTEGER PRIMARY KEY, store_id VARCHAR(40) NOT
 $stmt = $db->prepare('INSERT INTO orders (id, store_id, order_number, customer_name, customer_email, total, currency, status, payment_status, payment_method, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
 foreach ([[5, 'default', 1234], [6, 'default', 2000], [7, 'cz', 10000], [8, 'cz', 25000]] as [$id, $store, $total]) {
     $stmt->execute([$id, $store, 'A05-' . $store . '-' . $id, 'Private ' . $store . ' ' . $id,
-        $store . $id . '@example.test', $total, 'eur', 'pending', 'pending', 'bank', date('Y-m-d H:i:s')]);
+        $store . $id . '@example.test', $total, 'eur', 'pending', in_array($id, [5, 7], true) ? 'paid' : 'pending', 'bank', date('Y-m-d H:i:s')]);
 }
 $db->exec("CREATE TABLE order_items (id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL)");
 $db->exec('INSERT INTO order_items VALUES (1,5), (2,7)');
@@ -118,7 +118,8 @@ try {
                         assert_true(str_contains($a05OrderHtml, '(' . ($a05OrderMode === 'search' ? '0' : '2') . ')</span>'), "{$a05OrderLabel}: pagination count excludes foreign orders");
                         if ($a05OrderAction === 'sales') {
                             preg_match_all('/class="num">(.*?)<\/div>/s', $a05OrderHtml, $a05OrderStats);
-                            assert_equals(['2', I18n::price($a05OrderStore === 'default' ? 3234 : 35000), '2', $a05OrderStore === 'default' ? '5' : '24'], array_map('strip_tags', $a05OrderStats[1]), "{$a05OrderLabel}: sales counters use order store, not shared catalog");
+                            // Revenue is the paid order of the store only (5 resp. 7); the other one is a pending payment.
+                            assert_equals(['2', I18n::price($a05OrderStore === 'default' ? 1234 : 10000), '1', $a05OrderStore === 'default' ? '5' : '24'], array_map('strip_tags', $a05OrderStats[1]), "{$a05OrderLabel}: sales counters use order store, not shared catalog");
                             preg_match('/class="flash flash-err">(.*?)<\/div>/s', $a05OrderHtml, $a05OrderAlert);
                             preg_match_all('/\d+/', strip_tags($a05OrderAlert[1] ?? ''), $a05OrderAlertCounts);
                             assert_equals($a05OrderStore === 'default' ? ['1','1'] : ['2','2'], $a05OrderAlertCounts[0], "{$a05OrderLabel}: failed email and notification counts exclude foreign and unowned rows");

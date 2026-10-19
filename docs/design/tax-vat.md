@@ -249,7 +249,7 @@ Reverse charge on the invoice:
 
 ### Financial snapshot contract
 
-`adapters/TaxProvider.php` defines the single contract and `VatService::buildSnapshot()` is its production implementation. Snapshot version 1 contains `effective_date`, `scenario`, `rate_country`, `components`, `breakdown`, `totals`, the rounding identifier and a SHA-256 `fingerprint`. A coupon is split proportionally with the largest-remainder method; shipping uses the highest product rate and an explicitly exempt payment fee stays in the 0 % group.
+`adapters/TaxProvider.php` defines the single contract and `VatService::buildSnapshot()` is its production implementation. Snapshot version 1 contains `effective_date`, `scenario`, `rate_country`, `components`, `breakdown`, `totals`, the rounding identifier and a SHA-256 `fingerprint`. A buy-X-get-Y discount stays on the free product's lines (`line_discounts`); the rest of the discount (coupon, other promotions) is split proportionally with the largest-remainder method. Shipping and the payment (e.g. cash-on-delivery) fee are part of the consideration for the goods and use the highest product rate. Product categories (`products.vat_class` such as `books`, `medicines`) may have their own rate per country and period in `config/vat-rates.json` `categories`; rates and wording are to be confirmed by the merchant's accountant.
 
 The new flow is `checkout quote → Orders::create validation/persistence → payment fingerprint → InvoiceService exact copy → OSS invoice snapshot aggregation`. Only historical rows with `financial_snapshot IS NULL` use the original invoice fallback; their meaning is never changed retroactively.
 

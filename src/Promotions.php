@@ -84,6 +84,7 @@ class Promotions {
                 'action' => $action,
                 'discount' => $discount,
             ];
+            if ($action === 'buy_x_get_y') $entry['product_id'] = (int)($actions['product_id'] ?? 0);
             if ($action === 'gift') {
                 $entry['gift'] = [
                     'product_id' => (int)($actions['product_id'] ?? 0),
@@ -96,6 +97,30 @@ class Promotions {
             if (($rule['stacking'] ?? 'exclusive') !== 'stack') break;
         }
         return $result;
+    }
+
+    /**
+     * Discounts of cartActions() that belong to particular cart lines, keyed by line position: a buy-X-get-Y discount
+     * is the price of the free units, so it sits on the lines of the free product (cheapest first), not on the cart.
+     * @return array<int,int>
+     */
+    public static function lineDiscounts(array $actions, array $items): array {
+        $lines = [];
+        $items = array_values($items);
+        foreach ($actions as $action) {
+            $left = (int)($action['discount'] ?? 0);
+            if (($action['action'] ?? '') !== 'buy_x_get_y' || $left <= 0) continue;
+            $positions = array_keys(array_filter($items, static fn(array $item): bool => (int)($item['product_id'] ?? 0) === (int)($action['product_id'] ?? 0)));
+            usort($positions, static fn(int $a, int $b): int => ((int)($items[$a]['price'] ?? 0) <=> (int)($items[$b]['price'] ?? 0)) ?: $a <=> $b);
+            foreach ($positions as $position) {
+                $amount = min($left, (int)($items[$position]['total'] ?? 0) - ($lines[$position] ?? 0));
+                if ($amount <= 0) continue;
+                $lines[$position] = ($lines[$position] ?? 0) + $amount;
+                $left -= $amount;
+            }
+        }
+        ksort($lines);
+        return $lines;
     }
 
     /**

@@ -70,7 +70,7 @@ function pageSalesOverview(): void {
 
     <div class="grid grid-4" style="margin-top:1rem">
         <div class="card stat"><div class="num"><?= $ordersToday ?></div><div class="label"><?= esc(I18n::t('admin.stat.orders_today')) ?></div></div>
-        <div class="card stat"><div class="num"><?= adminRevenueToday() ?></div><div class="label"><?= esc(I18n::t('admin.sales.order_value_today')) ?></div></div>
+        <div class="card stat"><div class="num"><?= adminRevenueToday() ?></div><div class="label"><?= esc(I18n::t('admin.stat.revenue_today')) ?></div></div>
         <div class="card stat"><div class="num"><?= $pendingPayments ?></div><div class="label"><?= esc(I18n::t('admin.sales.pending_payments')) ?></div></div>
         <div class="card stat"><div class="num"><?= $downloadCount ?></div><div class="label"><?= esc(I18n::t('admin.sales.total_downloads')) ?></div></div>
     </div>
@@ -838,13 +838,8 @@ function handleOrderInvoiceIssue(): void {
         $order = Orders::byId($orderId);
         if ($order && filter_var($order['customer_email'] ?? '', FILTER_VALIDATE_EMAIL)) {
             $abs = InvoiceService::pdfAbsolutePath($inv);
-            $vars = [
-                'order_number'  => $order['order_number'],
-                'invoice_number'=> $inv['number'],
-                'total_gross'   => I18n::price((int)$inv['total_gross'], $inv['currency']),
-                'due_date'      => $inv['due_date'],
-            ];
-            MailService::send('invoice_issued', $order['customer_email'], (string)($order['locale'] ?? ''), $vars, $orderId,
+            $vars = InvoiceService::mailVars($inv, $order);
+            MailService::send('invoice_issued', $order['customer_email'], (string)($inv['locale'] ?? $order['locale'] ?? ''), $vars, $orderId,
                 [['path' => $abs, 'filename' => $inv['number'] . '.pdf', 'content_type' => 'application/pdf']]);
         }
         setFlash('ok', I18n::format('admin.order.msg.invoice_issued', ['number' => $inv['number']]));
@@ -880,12 +875,7 @@ function handleOrderInvoiceResend(): void {
             header("Location: admin.php?p=order&id={$orderId}");
             exit;
         }
-        $vars = [
-            'order_number'  => $order['order_number'] ?? '',
-            'invoice_number'=> $inv['number'],
-            'total_gross'   => I18n::price((int)$inv['total_gross'], $inv['currency']),
-            'due_date'      => $inv['due_date'],
-        ];
+        $vars = InvoiceService::mailVars($inv, $order ?: []);
         $res = MailService::send('invoice_issued', $order['customer_email'] ?? '', (string)($inv['locale'] ?? ''), $vars, (int)$inv['order_id'],
             [['path' => $abs, 'filename' => $inv['number'] . '.pdf', 'content_type' => 'application/pdf']]);
         if (($res['status'] ?? '') === 'sent') {

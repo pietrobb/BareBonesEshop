@@ -659,7 +659,6 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.sales.live_data' => 'Živá data z aktuální databáze',
     'admin.sales.updated' => 'aktualizováno',
     'admin.sales.refresh' => 'Obnovit data',
-    'admin.sales.order_value_today' => 'Hodnota objednávek dnes',
     'admin.sales.pending_payments' => 'Platby čekající na dokončení',
     'admin.sales.total_downloads' => 'Celkem digitálních stažení',
     'admin.sales.attention' => 'Vyžaduje pozornost',

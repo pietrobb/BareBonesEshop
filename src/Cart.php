@@ -332,6 +332,7 @@ class Cart {
             'seller_oss_enabled'    => (bool)($vatContext['oss_enabled']           ?? $vatContext['seller_oss_enabled']    ?? false),
             'customer_vat_id_valid' => (bool)($vatContext['customer_vat_validated'] ?? $vatContext['customer_vat_id_valid'] ?? false),
             'is_b2b'                => (bool)($vatContext['customer_is_business']  ?? $vatContext['is_b2b']                ?? false),
+            'customer_country_verified' => (bool)($vatContext['customer_country_verified'] ?? true),
         ];
         $taxProvider = Adapters::tax((string)($vatContext['tax_provider'] ?? Adapters::defaultProviderCode('tax')));
         $scenario = $taxProvider::resolveScenario($vctx);
@@ -357,11 +358,12 @@ class Cart {
                 continue;
             }
 
-            $vatClass = $item['vat_class'] ?? 'standard';
+            // The product's own category (books, medicines, ...) picks the rate: a country may tax it apart from its class.
+            $vatClass = strtolower((string)($item['vat_class'] ?? 'standard'));
             $resolved = method_exists($taxProvider, 'resolveClass') ? $taxProvider::resolveClass($vatClass) : $vatClass;
-            $rate     = $applies ? $taxProvider::rate($rateCountry, $resolved, $atDate) : 0.0;
+            $rate     = $applies ? $taxProvider::rate($rateCountry, $vatClass, $atDate) : 0.0;
             if ($stripDomesticVat) {
-                $unitNet = $taxProvider::computeLine((int)$item['price'], 1, $taxProvider::rate($sellerCountry, $resolved, $atDate), false)['net'];
+                $unitNet = $taxProvider::computeLine((int)$item['price'], 1, $taxProvider::rate($sellerCountry, $vatClass, $atDate), false)['net'];
                 $summary['subtotal'] -= (int)$item['total'] - $unitNet * (int)$item['qty'];
                 $item['price'] = $unitNet;
                 $item['total'] = $unitNet * (int)$item['qty'];
@@ -377,6 +379,7 @@ class Cart {
             );
 
             $item['vat_class']  = $resolved;
+            $item['vat_category'] = $vatClass;
             $item['vat_rate']   = $rate;
             $item['vat_amount'] = $line['vat_amount'];
             $item['net_amount'] = $line['net'];

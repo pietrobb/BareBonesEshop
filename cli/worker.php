@@ -697,13 +697,7 @@ function handleInvoiceIssue(array $payload, array $job): void {
 
     // Email the customer with the invoice
     $locale = (string)($invoice['locale'] ?? $order['locale'] ?? '');
-    $vars = [
-        'order_number'   => $order['order_number'],
-        'invoice_number' => $invoice['number'],
-        'invoice_total'  => I18n::price((int)$invoice['total_gross'], $invoice['currency'] ?? null),
-        'due_date'       => $invoice['due_date'],
-        'customer_name'  => $order['customer_name'],
-    ];
+    $vars = InvoiceService::mailVars($invoice, $order);
 
     $result = MailService::send(
         'invoice_issued',
