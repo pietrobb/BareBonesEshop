@@ -89,6 +89,17 @@ foreach (['r5s-empty' => [null, 'Z 222 3333 444'], 'r5s-brand' => ['Zásielkovň
 }
 $r5sResult = $r5sHook('gls', 'Z2223333444', 'in_transit', 'r5s-gls');
 assert_equals('unknown_awb', $r5sResult['reason'] ?? null, "R5 shipping webhook: another carrier's webhook does not take a shipment of the order's packeta method");
+// Round 6: the order's method is packeta but the admin shipped it with GLS. Packeta's webhook for that tracking
+// number must not deliver GLS's parcel; GLS's own webhook and a "Packeta SK" spelling still match.
+foreach (['r6s-gls' => ['GLS', 'R6S 100 200 300', 'packeta', false], 'r6s-glssk' => ['GLS Slovakia', 'R6S 100 200 301', 'packeta', false],
+    'r6s-glsown' => ['GLS Slovakia', 'R6S 100 200 302', 'gls', true], 'r6s-pksk' => ['Packeta SK', 'R6S 100 200 303', 'packeta', true]] as $r6sKey => [$r6sCarrier, $r6sTracking, $r6sFrom, $r6sFound]) {
+    $r6sId = $r5sOrder(strtoupper($r6sKey));
+    $pdo->prepare("UPDATE orders SET shipping_method = 'r5s-zasielkovna' WHERE id = ?")->execute([$r6sId]);
+    $r5sShipment($r6sId, $r6sCarrier, $r6sTracking, $r6sKey);
+    $r6sResult = $r5sHook($r6sFrom, str_replace(' ', '', $r6sTracking), 'delivered', $r6sKey);
+    assert_equals($r6sFound ? 'delivered' : null, $r5sShipmentRow($r6sKey)['tracking_status'] ?? null,
+        "R6 shipping webhook: {$r6sFrom}'s webhook " . ($r6sFound ? 'updates' : 'does not touch') . " a {$r6sCarrier} shipment on a packeta-method order (" . json_encode($r6sResult) . ')');
+}
 putenv('SHIP_PACKETA_WEBHOOK_SECRET');
 putenv('SHIP_GLS_WEBHOOK_SECRET');
 

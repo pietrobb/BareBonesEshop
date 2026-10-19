@@ -20,7 +20,7 @@
  *   PAY_THEPAY_PASSWORD    / thepay_password    — API password
  *   PAY_THEPAY_ENV         / thepay_env         — 'production' | 'demo' (default demo)
  */
-class ThePayPayment implements HostedCheckoutAdapter, PullVerifiedNotificationAdapter, SignedWebhookPaymentAdapter {
+class ThePayPayment implements HostedCheckoutAdapter, PullVerifiedNotificationAdapter, PaymentStatusEventAdapter, SignedWebhookPaymentAdapter {
     private const STATES = ['waiting_for_payment', 'waiting_for_confirmation', 'paid', 'partially_refunded', 'refunded', 'expired', 'preauthorized', 'preauth_cancelled', 'preauth_expired', 'error'];
     private const LANGS = ['cs', 'sk', 'de', 'en'];
     private const UID = '/^[A-Za-z0-9._-]{1,100}$/D';
@@ -140,6 +140,10 @@ class ThePayPayment implements HostedCheckoutAdapter, PullVerifiedNotificationAd
         }
         $this->request('POST', '/payments/' . $paymentId . '/refund', ['amount' => $amount, 'reason' => 'Refund from the shop'], false);
         return ['refund_id' => '', 'status' => 'succeeded'];
+    }
+
+    public function statusEvent(string $paymentId): array {
+        return $this->verifiedEvent(['project_id' => $this->projectId, 'payment_uid' => $paymentId]);
     }
 
     public function getStatus(string $paymentId): string {

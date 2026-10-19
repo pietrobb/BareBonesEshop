@@ -110,6 +110,11 @@ class Migrator {
             '773fdbfd1b627d980bb6487a56a707e94b001a529d9b867e972b36a5563d083b' => ['8eff996a08aec22b5b262a0b5b2b0e47cf75710d4b2047b4a99b060d9085f9de', '0889dd2115fb075ae960de6c308b2ca9a35ea15852a8ee264e79b88eea7e680a'],
             'f1d101d228cebf018735beb147b88013963d32c8ebbac1566c4f6b9f3c28664d' => ['8eff996a08aec22b5b262a0b5b2b0e47cf75710d4b2047b4a99b060d9085f9de', '0889dd2115fb075ae960de6c308b2ca9a35ea15852a8ee264e79b88eea7e680a'],
         ],
+        // Released in PR #19, then made resumable after a partial MySQL run in PR #20 (same effect on a completed run).
+        '20261017093000_catalog_stock_erp_retry' => [
+            'e4ac3a08ba525d6f70581fad4b417601b0b584fe0726d9c23e4c8087f0dc4ffd' => ['ec7fdca2d1764379f64fbe88542a4fff84b84e7a11d9ebef0249fe8a4ccef5d4', '4ad05503aefa1cd3973b16ffdcc5d333bcea8447510834d0d59608d7034587ab'],
+            'b2675f26bd0a0a2c56550c48c98723cfa8f33671433a63aea52f9477b12dfb6e' => ['ec7fdca2d1764379f64fbe88542a4fff84b84e7a11d9ebef0249fe8a4ccef5d4', '4ad05503aefa1cd3973b16ffdcc5d333bcea8447510834d0d59608d7034587ab'],
+        ],
     ];
 
     private PDO    $db;

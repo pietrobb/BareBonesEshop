@@ -22,7 +22,7 @@
  *   PAY_GOPAY_CLIENT_SECRET  / gopay_client_secret  — OAuth2 ClientSecret
  *   PAY_GOPAY_ENV            / gopay_env            — 'production' | 'sandbox' (default sandbox)
  */
-class GoPayPayment implements HostedCheckoutAdapter, PullVerifiedNotificationAdapter, SignedWebhookPaymentAdapter {
+class GoPayPayment implements HostedCheckoutAdapter, PullVerifiedNotificationAdapter, PaymentStatusEventAdapter, SignedWebhookPaymentAdapter {
     private const STATES = ['CREATED', 'PAYMENT_METHOD_CHOSEN', 'TIMEOUTED', 'PAID', 'CANCELED', 'AUTHORIZED', 'PARTIALLY_REFUNDED', 'REFUNDED'];
 
     private string $goid;
@@ -141,6 +141,10 @@ class GoPayPayment implements HostedCheckoutAdapter, PullVerifiedNotificationAda
                 default => 'failed',
             },
         ];
+    }
+
+    public function statusEvent(string $paymentId): array {
+        return $this->verifiedEvent(['id' => $paymentId]);
     }
 
     public function getStatus(string $paymentId): string {

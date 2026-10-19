@@ -12,7 +12,7 @@
  *   PAY_PAYU_POS_ID          — POS identifier (same as client_id usually)
  *   PAY_PAYU_ENV             — 'production' | 'sandbox' (default: sandbox)
  */
-class PayUPayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, SignedWebhookPaymentAdapter {
+class PayUPayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, SignedWebhookPaymentAdapter, PaymentStatusEventAdapter {
     private string $clientId;
     private string $clientSecret;
     private string $secondKey;
@@ -180,10 +180,20 @@ class PayUPayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, Sig
      * Get current PayU order status.
      */
     public function getStatus(string $paymentId): string {
-        $token    = $this->getAccessToken();
-        $response = $this->apiCall('GET', "/api/v2_1/orders/{$paymentId}", [], $token);
-        $orders   = $response['orders'] ?? [];
-        return strtolower($orders[0]['status'] ?? 'unknown');
+        return strtolower((string)($this->order($paymentId)['status'] ?? 'unknown'));
+    }
+
+    /** The order as PayU's authenticated API describes it, in the shape of its notification. */
+    public function statusEvent(string $paymentId): array {
+        $order = $this->order($paymentId);
+        if ((string)($order['orderId'] ?? '') !== $paymentId) throw new \RuntimeException('PayU order inquiry does not describe the payment');
+        return $this->handleWebhook(['order' => $order]);
+    }
+
+    private function order(string $paymentId): array {
+        $response = $this->apiCall('GET', '/api/v2_1/orders/' . rawurlencode($paymentId), [], $this->getAccessToken());
+        $orders = $response['orders'] ?? [];
+        return is_array($orders[0] ?? null) ? $orders[0] : [];
     }
 
     /**

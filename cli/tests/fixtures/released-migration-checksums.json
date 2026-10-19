@@ -1,0 +1,428 @@
+{
+    "20260424000000_baseline": {
+        "lf": [
+            "7a5bd29a8a0ee1100a0149e16a706ba95075f4fb75baa7a81b5f9304b0b8421f"
+        ],
+        "crlf": [
+            "01d474a45922dd8f1de1f1f9adb1a62e85a8e5f8564c4024d8a954a3a7aacc28"
+        ]
+    },
+    "20260424221721_create_invoices": {
+        "lf": [
+            "9426aba6dde40d3b086f1ee3f6664fed9bd7235ef905dc2c230c8e8a127705d2"
+        ],
+        "crlf": [
+            "39b27f592f626e102c1e01c09e3320b4e72d90b9a05dd8c790d8b54618221431"
+        ]
+    },
+    "20260425013405_add_vat_columns": {
+        "lf": [
+            "e81e9601d9beae3ba845ea8d94624776cf96d8d6fe9a894f6e4b90e8b47ef475"
+        ],
+        "crlf": [
+            "62c13dc02a6f69606a30847578783c9cb2f45b1f14cf643b55bbd47a04bd4e2c"
+        ]
+    },
+    "20260425033813_add_gdpr_tables": {
+        "lf": [
+            "2b8698f5da52f19fc93347b10e53fe76231c21c5aa801c0ed61849b1c8b345e1"
+        ],
+        "crlf": [
+            "29e96c2aba08e105bb4c45b13222d7af6163a91c28eda7d7296d8c9283b5c543"
+        ]
+    },
+    "20260425064000_shipping_methods_pricing_engine": {
+        "lf": [
+            "7f108c8a25117d216a54f65e55789c5190830debac8535875b706835ba1a427b"
+        ],
+        "crlf": [
+            "e63f2701cbd3d93d9a915cfee251adea1262d2804941560061487e67ed4ebdb8"
+        ]
+    },
+    "20260425071000_payment_methods_pricing_engine": {
+        "lf": [
+            "6521e702499a264796764e29f7a486ed33a815174ed2ee82bf2a5e2652fa2a1c"
+        ],
+        "crlf": [
+            "b6728bb1845653db6e1ec5ea9f99f4a4745904de580562d93d2f787ff136605b"
+        ]
+    },
+    "20260426090000_create_product_reviews": {
+        "lf": [
+            "102aa40f08e1bc2807be64cb64200fa7bdb0613dc9996e43a3d82d5d36e52c6d"
+        ],
+        "crlf": [
+            "bde17066ffe3259c51ec2f0f31cec94a6fd38fab0bbe55ad9582b604e11a9efc"
+        ]
+    },
+    "20260426093000_create_wishlist_items": {
+        "lf": [
+            "1d14ab07178305da1af1d8873decfadc46ccd53f5f05beb2b42f83d36e021a52"
+        ],
+        "crlf": [
+            "0122c697ee59d7159ed1ae28f88e425dc731fa4d07fb88c2c30779585428acec"
+        ]
+    },
+    "20260426100000_create_rma": {
+        "lf": [
+            "0b0d4537d06dfb0151bed02c03fcba9f86775f558a505948ece9a8f8f2e8fd03"
+        ],
+        "crlf": [
+            "618122227d2494b7cde2a9ad7a2d563532cb6e3d8f4ad9bb2fe9e7cd8e275d81"
+        ]
+    },
+    "20260611213000_add_stock_restored_column": {
+        "lf": [
+            "31beb9b95a29f873f7e0249f3da76b58835865ed1e06bc1267abe86568c61ed7"
+        ],
+        "crlf": [
+            "b937a90ea83bfe5cb364f0f3bc6ca624735769793cc55f6bd4fad6fe4a3df7cc"
+        ]
+    },
+    "20260611220000_add_invoices_order_unique": {
+        "lf": [
+            "cf8642838380d52c95cb0cd0479d6cc5dae6521c7eb4f98367b54b2c01cd7fdf"
+        ],
+        "crlf": [
+            "3d3f4d14399840e1b063829b911ab7ccbf28941818e553bbf00ddaab1ff31d66"
+        ]
+    },
+    "20260713093000_digital_commerce_core": {
+        "lf": [
+            "23474d4cf1e2c9e9ed9ead3940b034cea20213def5f22d94cfc98b18b6fccc80"
+        ],
+        "crlf": [
+            "76bcc6f9685deed930049995733950689d94934a5554859a625de385b5ff7b8c"
+        ]
+    },
+    "20260729150000_product_related_products": {
+        "lf": [
+            "bc4d45aa1f2792f39d2c2db291587f93f7818889a9a5deb2b15fd1bb8150f327"
+        ],
+        "crlf": [
+            "b014ee038d0eae72a1bdfd6403ec6653db1c15d4a1c47243f9a8902b329fc8ad"
+        ]
+    },
+    "20260801141000_financial_snapshots": {
+        "lf": [
+            "74a9b7a695856244d9ed7ebf606929cf743b5484abfa377e719d457051033353"
+        ],
+        "crlf": [
+            "d88eb1afdb3d148a3156c19ea7d87340e00fe285aefe16efbfe86bab4f15be55"
+        ]
+    },
+    "20260801152000_store_context_scope": {
+        "lf": [
+            "01b933cc091825b5c2e40ba372b2c50b14ada9d3ea204192c60eb3995222361a"
+        ],
+        "crlf": [
+            "217003f0fa321e85947b5940de5ba5c7759889961f5cd283c5c31ac1fbf8e791"
+        ]
+    },
+    "20260801163000_event_outbox_api_v1": {
+        "lf": [
+            "d00042329391f63b7e5fc5370b4abb6108ed14ba4b5b9e6c5f45d5d995d9393d"
+        ],
+        "crlf": [
+            "5a880610a0613dc1e65f2f4282b31d94c3b709be4d392efaa419003292e52139"
+        ]
+    },
+    "20260801190000_catalog_pricing_b2b": {
+        "lf": [
+            "e67c01f7fb754fb70697eb3d2987f236037cc6c215f07d8d5ba3849696c04db3"
+        ],
+        "crlf": [
+            "f68cf24641e6b3dd1fd746eec588d7c7da60b10bb79452e6530c2707c15a0bb9"
+        ]
+    },
+    "20260801200000_inventory_ledger_fulfillment": {
+        "lf": [
+            "ac80c16baa1863e6544d9f8ad1526bd10f0f5ca135292471b6ae699ee6237552"
+        ],
+        "crlf": [
+            "7868d06fd0f5e6a45a6c389dac99e6bd08b00fb01d69ae254be5655400694b59"
+        ]
+    },
+    "20260801210000_returns_credit_notes": {
+        "lf": [
+            "b0408cc34f360434f0e46a1508d0b619c793145dedff71e532b0d77d72c67e9e"
+        ],
+        "crlf": [
+            "85c86823b2089908d631cb5711bf03dfff64b3221dafd84f79f9742dbaa7f1c6"
+        ]
+    },
+    "20260801220000_admin_identity_queue_operations": {
+        "lf": [
+            "8f6343ed1384cf04a0f8cc2a52b29135038bdbf4a7751e82692c578868824703"
+        ],
+        "crlf": [
+            "4637094322fef224a59c6e16e49aa92cb838c275a76af6f98645d3e66d48afd3"
+        ]
+    },
+    "20260801230000_theme_content_marketing": {
+        "lf": [
+            "18521c5bb67c210913edf59671785fbdc698a6d02f48697555c4e6862375d75f"
+        ],
+        "crlf": [
+            "4f67a797a2e3ad34c4dc84694f306c679775ad1f8df0fdf3f4ee8993fabf4ad1"
+        ]
+    },
+    "20260804180000_storefront_view_models": {
+        "lf": [
+            "176dfec7a74682d659ce52f3bd1fde37a428fb00bbcfcc5c175b84a07d918dd4"
+        ],
+        "crlf": [
+            "108a8ab946ea105bf459b958e650ed1cd7fd41df420d81cf9a58bb20b2284665"
+        ]
+    },
+    "20260804210000_storefront_page_layouts": {
+        "lf": [
+            "5ceb4fde06ae409b25ac36632a8fc9037a9a96bd780c7169737fa6cb99152371"
+        ],
+        "crlf": [
+            "40ad21afc80c97a85bb2afe1345b1a9a760dbc0d5680f30ea350c2fdbce28c2d"
+        ]
+    },
+    "20261007100000_shipping_free_from_qty": {
+        "lf": [
+            "41967260d529da720d4349830eb5b7c1e32a9010a36bf481a67085003ec361c1"
+        ],
+        "crlf": [
+            "1ae71004502566e4c36fdc118acf777e29e72ad17e1f80e643b519d46212b63d"
+        ]
+    },
+    "20261007110000_abandoned_cart_recovery": {
+        "lf": [
+            "78d0bc428ed3972ed93a186c0547f50458dacef1ee03a405f12a2a7ec9cb9766"
+        ],
+        "crlf": [
+            "f06d12c01e6680b750b4eb066b2c0e73e71f901b7396c07a05433ceb8272809e"
+        ]
+    },
+    "20261008090000_stock_alerts": {
+        "lf": [
+            "7e4dcdef2bbc2a8ebcc77584991fc3e2254525af0ba1effc2f125c2feeb35144"
+        ],
+        "crlf": [
+            "2b84b2c6897697054a981affbf5ed57ae2e9fe94894cd87f48ff4437b439d974"
+        ]
+    },
+    "20261012090000_operational_incidents": {
+        "lf": [
+            "232fefdfdcf8603a8029af95b64c13728eb45c6a6a802761f0e5c8fa441c58be"
+        ],
+        "crlf": [
+            "c7589332b06f524f4fde9e4dc3c25504594191eab3345fb074e1ee74329d9520"
+        ]
+    },
+    "20261012160000_store_scoped_config_unique": {
+        "lf": [
+            "c9ae6582ca8f5cf72c99f38005c6a92ce781224e19257ba654596cbd9a17caf8"
+        ],
+        "crlf": [
+            "f9deee58035087878f57d85e8c9ce88d76001c5bc1ac960702106a66e7ce11ba"
+        ]
+    },
+    "20261012170000_payment_webhook_inbox": {
+        "lf": [
+            "306a37b8cef68f7a156a45df3222e92cd2ef4a8993e93b0c309ecba868a9e800"
+        ],
+        "crlf": [
+            "e17bd004ef18b1f5ff3c308fc688ff5911086d54b72ce2368f23b1a2afd0bcef"
+        ]
+    },
+    "20261012180000_gdpr_events_store": {
+        "lf": [
+            "e072c5e3e5deda3ba201a3eeb5bb66c587259097f107497473e47fc504adea7f"
+        ],
+        "crlf": [
+            "26ce853e49c619f578699f6417ad0a49d266de8a60fa9af4c58f7a0ce215c307"
+        ]
+    },
+    "20261012190000_coupon_usage_counters": {
+        "lf": [
+            "6d92c88740d7dfadd63e55088c63679466799f59fce93f11247c14d06a337093"
+        ],
+        "crlf": [
+            "fcc3876f9b064d3769429859aacb27c865da8ba41abe86df7c2d379b07132255"
+        ]
+    },
+    "20261012200000_totp_counter_session_keys": {
+        "lf": [
+            "5e1ef4177ba1a8bd105cd904bbeebf56eb16197aa2ab3f6f9d661c7d03a7b548"
+        ],
+        "crlf": [
+            "f433a35e100c6467c8592c09f27b386e48ce403ea47450b8357b4c625164fa36"
+        ]
+    },
+    "20261012210000_customer_email_verification": {
+        "lf": [
+            "1c3b2e465a6ca012853af6fb2854cdb465dd9e70096fa76c8125e150b1b2b7f8"
+        ],
+        "crlf": [
+            "13676600f60e74b662bbbea1bfc3a07444d9546784177e638fa8da20b9431c34"
+        ]
+    },
+    "20261013100000_product_seo_fields": {
+        "lf": [
+            "8b74c497019d1e975873102bcd64dc2b0bc007299774849adc1e7573b8b64451"
+        ],
+        "crlf": [
+            "e81a7e2b87fe88ac6a4d90bd81693e129b3e4960774937fd85c231eb197f7789"
+        ]
+    },
+    "20261013110000_product_image_alts": {
+        "lf": [
+            "42cc48e86d314ddb7d1a2ef0e8b853021cbd90018e0392108f2c084836e8b2eb"
+        ],
+        "crlf": [
+            "f6343df8feca7a474c95986a79860317502046a89d10b9d8b7ad35b893b98fb7"
+        ]
+    },
+    "20261013120000_category_slug_per_catalog": {
+        "lf": [
+            "843458adc963493d048108299a14a28cb8f5c089a82e1f21cb5fcd0ea1d7ae47"
+        ],
+        "crlf": [
+            "eab07fc377587e05593d0931256e5b95367feb3e9aadb9a99df2a1b4afdd9079"
+        ]
+    },
+    "20261013120000_payment_monitoring": {
+        "lf": [
+            "52c1c599ab6548947f4bd8d8f9624250f127e1a2a6f38d0ad05053bda5110070"
+        ],
+        "crlf": [
+            "d17afb0ef9a6935ca4938c3578adeaaa3db595a35ed11c04c10648ce1c3cac5b"
+        ]
+    },
+    "20261013130000_email_template_overrides": {
+        "lf": [
+            "232e1acfc8e1cf65e26d5e062ee6de654dc9c462e848f9a9143c8508d6f7e532"
+        ],
+        "crlf": [
+            "3198cfcbec108546f8fe00345c431037470c286a7047dc52ba68a3cc51197b3d"
+        ]
+    },
+    "20261014090000_shipment_tracking_url": {
+        "lf": [
+            "654bcf89da8119154b5c7b3c7c59649c3e8e805fa3b803af08fc54ce54021eb9"
+        ],
+        "crlf": [
+            "093bf653f98877f0bb7b2f325058425fa975c7cf74d6b528525785d4a4d72e74"
+        ]
+    },
+    "20261014120000_remove_auto_parts_tables": {
+        "lf": [
+            "62fcfd1c4c7a008f4edecf93498a9cc30529a8c1b87b2cc509c593bc51706160"
+        ],
+        "crlf": [
+            "0dbd673cf449d56220a2f6ead6b261a24175c3105be84812bd8c45cea14ce6a7"
+        ]
+    },
+    "20261015120000_processed_events_claim_state": {
+        "lf": [
+            "8eff996a08aec22b5b262a0b5b2b0e47cf75710d4b2047b4a99b060d9085f9de"
+        ],
+        "crlf": [
+            "0889dd2115fb075ae960de6c308b2ca9a35ea15852a8ee264e79b88eea7e680a"
+        ]
+    },
+    "20261016120000_csp_reporter_hash": {
+        "lf": [
+            "1223e4d23e7654810071f69f06af9199d91175e91afa2c84bb0e698f1502f765"
+        ],
+        "crlf": [
+            "c61d7f772028886f6cf0ee33bbc9b467d3adc7a9817503d6a72ed67688b63eb3"
+        ]
+    },
+    "20261016130000_erp_status_checked_at": {
+        "lf": [
+            "55523fb4fb41e143c904f2f0be1b9d8cd446a7ecb6c898733cd1668c6ea214ee"
+        ],
+        "crlf": [
+            "9a5d8f3c2a08bd89502433b39408818b2792f374727a8ca8131cab126b482a23"
+        ]
+    },
+    "20261016140000_csp_request_id": {
+        "lf": [
+            "50585df20ecc8720e1c812630b7f010e1870210620c4ade51cf146191e72a4a2"
+        ],
+        "crlf": [
+            "fa62a71835aea2f2da3f8767d1cfc87ac7ee321f9fd45c476d919d65c7923bea"
+        ]
+    },
+    "20261016140500_invoice_number_counters": {
+        "lf": [
+            "ee6f502cf1b9cd59baa3880b5cdb940d02e750d0a58877a5de0cad08b788e616"
+        ],
+        "crlf": [
+            "b89a9da8406b7746de944f3177d822da03e455bc8ff809d4e11da79eaef15b25"
+        ]
+    },
+    "20261016141000_slug_registry_product_store": {
+        "lf": [
+            "3380fb0dd5de64c0160fa24eaf8bf7dee6aa40af2ac214bd8e81e6334de31ea1"
+        ],
+        "crlf": [
+            "e1eb52bbc8d73533dd87d6cd9e28e77c7fab8cc19b30ade2f1ea467cd0c148ba"
+        ]
+    },
+    "20261016142000_cart_reminder_consent_download_resume": {
+        "lf": [
+            "3660d0fa5a1470a63adcce8c3a49c3cd8d572071c004dec484dd94de3b7f9149"
+        ],
+        "crlf": [
+            "b6c73fa042c60c9202e0ec677eff74d687ad32645008457a16238df14a8f254e"
+        ]
+    },
+    "20261016150000_normalize_coupon_use_emails": {
+        "lf": [
+            "a9ff5e7b3d649bc3b85654c0d53db23c9a2497490493e682ca26d44c52585c63"
+        ],
+        "crlf": [
+            "a27409816c2304a55c9dc05b4aaa7e92e393cd0a5d803f907f8067ef08a22522"
+        ]
+    },
+    "20261016161000_invoice_seller_download_resume_bound": {
+        "lf": [
+            "6ebc5f0ccd938f2e465a230d3b51666c2c47ffac6a6ebcad79b8169eb4288029"
+        ],
+        "crlf": [
+            "b4b9acf8b1ffcb25c0eeb040f5b5f7425b20e7d8c142fe36ff03ab48fec03268"
+        ]
+    },
+    "20261017093000_catalog_stock_erp_retry": {
+        "lf": [
+            "e4ac3a08ba525d6f70581fad4b417601b0b584fe0726d9c23e4c8087f0dc4ffd",
+            "ec7fdca2d1764379f64fbe88542a4fff84b84e7a11d9ebef0249fe8a4ccef5d4"
+        ],
+        "crlf": [
+            "b2675f26bd0a0a2c56550c48c98723cfa8f33671433a63aea52f9477b12dfb6e",
+            "4ad05503aefa1cd3973b16ffdcc5d333bcea8447510834d0d59608d7034587ab"
+        ]
+    },
+    "20261019090000_vat_id_checks": {
+        "lf": [
+            "ad5a7f6eff1004c681f85b01d881c5f19ca489189380b24d5e7608bed702fc94"
+        ],
+        "crlf": [
+            "f137bcf4cb992159f2f32f8cfffb5af7511050b738ae6f721969ed60d2c2c2a9"
+        ]
+    },
+    "20261019120000_customer_email_per_store": {
+        "lf": [
+            "5031a9cb8c10df54e4e93bebe3d48e08c32cf734e338c6d836b5f338e3beca9a"
+        ],
+        "crlf": [
+            "26e1bc3a9ca4014ec1924f1cd4f5d3fd5e868352e9320fb4acc70e69c2dc1d51"
+        ]
+    },
+    "20261019150000_shipment_tracking_event_sequence": {
+        "lf": [
+            "d910d53795cdcc8a65e80949c36fb8ea4453ec62de8217f9823f19649078ca3e"
+        ],
+        "crlf": [
+            "21d0233f47cbdc18d4c927e048d2bf804bea87672e9cd8d0559e4c0eadec785e"
+        ]
+    }
+}
