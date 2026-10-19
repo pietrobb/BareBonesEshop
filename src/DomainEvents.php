@@ -9,6 +9,7 @@ final class DomainEvents
     public const PRODUCT_UPDATED = 'product.updated';
     public const CUSTOMER_CREATED = 'customer.created';
     public const CUSTOMER_UPDATED = 'customer.updated';
+    public const CUSTOMER_ERASED = 'customer.erased';
     public const STOCK_ADJUSTED = 'stock.adjusted';
     public const STOCK_RESERVED = 'stock.reserved';
     public const STOCK_CHANGED = 'stock.changed';
@@ -23,6 +24,7 @@ final class DomainEvents
             self::PRODUCT_UPDATED,
             self::CUSTOMER_CREATED,
             self::CUSTOMER_UPDATED,
+            self::CUSTOMER_ERASED,
             self::STOCK_ADJUSTED,
             self::STOCK_RESERVED,
             self::STOCK_CHANGED,

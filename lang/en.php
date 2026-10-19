@@ -1288,6 +1288,7 @@ return [
     'admin.gdpr.anonymize_btn'    => 'Anonymize',
     'admin.gdpr.anonymize_confirm'=> 'Anonymize this customer? Accounting records remain retained by law.',
     'admin.gdpr.no_results'       => 'No matching customers.',
+    'admin.gdpr.guest' => 'Guest without an account — orders: {count}',
     'admin.gdpr.events_title'     => 'Recent GDPR events',
     'admin.gdpr.actor'            => 'Actor',
     'admin.gdpr.note'             => 'Note',

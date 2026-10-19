@@ -236,6 +236,21 @@ class Security {
         return $url;
     }
 
+    /**
+     * A validated app_url moved to the store's own domain: a store with configured domains is served
+     * there (StoreContext resolves it by host), so its links take the first domain and keep the
+     * app_url scheme and path. A store without a valid domain gets the app_url.
+     */
+    public static function storeAppUrl(string $appUrl, array $store): string {
+        $appUrl = rtrim($appUrl, '/');
+        $domains = $store['domains'] ?? [];
+        if (is_string($domains)) $domains = [$domains];
+        $domain = is_array($domains) ? strtolower(trim((string)($domains[0] ?? ''))) : '';
+        if ($domain === '' || filter_var($domain, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) return $appUrl;
+        $parts = parse_url($appUrl);
+        return (string)($parts['scheme'] ?? 'https') . '://' . $domain . rtrim((string)($parts['path'] ?? ''), '/');
+    }
+
     /** Validated public base URL, or null when app_url is not configured. Never derived from the Host header. */
     public static function configuredAppUrl(): ?string {
         try {

@@ -1288,6 +1288,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.gdpr.anonymize_btn'    => 'Anonymizovat',
     'admin.gdpr.anonymize_confirm'=> 'Anonymizovat zákazníka? Účetní záznamy zůstanou podle zákona.',
     'admin.gdpr.no_results'       => 'Žádní odpovídající zákazníci.',
+    'admin.gdpr.guest' => 'Host bez účtu — objednávky: {count}',
     'admin.gdpr.events_title'     => 'Poslední GDPR události',
     'admin.gdpr.actor'            => 'Aktér',
     'admin.gdpr.note'             => 'Poznámka',

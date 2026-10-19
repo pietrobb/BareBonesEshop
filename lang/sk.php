@@ -1297,6 +1297,7 @@ return [
     'admin.gdpr.anonymize_btn'    => 'Anonymizovať',
     'admin.gdpr.anonymize_confirm'=> 'Anonymizovať zákazníka? Účtovné záznamy zostanú podľa zákona.',
     'admin.gdpr.no_results'       => 'Žiadni zhodní zákazníci.',
+    'admin.gdpr.guest' => 'Hosť bez účtu — objednávky: {count}',
     'admin.gdpr.events_title'     => 'Posledné GDPR udalosti',
     'admin.gdpr.actor'            => 'Aktér',
     'admin.gdpr.note'             => 'Poznámka',

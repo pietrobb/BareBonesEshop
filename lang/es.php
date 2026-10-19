@@ -1407,6 +1407,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.gdpr.anonymize_btn' => 'Anonimizar',
     'admin.gdpr.anonymize_confirm' => '¿Anonimizar a este cliente? Los registros contables se conservan por ley.',
     'admin.gdpr.no_results' => 'No hay clientes coincidentes.',
+    'admin.gdpr.guest' => 'Invitado sin cuenta — pedidos: {count}',
     'admin.gdpr.events_title' => 'Eventos RGPD recientes',
     'admin.gdpr.actor' => 'Autor',
     'admin.gdpr.note' => 'Nota',

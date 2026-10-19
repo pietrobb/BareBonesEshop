@@ -1288,6 +1288,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.gdpr.anonymize_btn'    => 'Anonimizuj',
     'admin.gdpr.anonymize_confirm'=> 'Anonimizować klienta? Dane księgowe pozostaną zgodnie z prawem.',
     'admin.gdpr.no_results'       => 'Brak pasujących klientów.',
+    'admin.gdpr.guest' => 'Gość bez konta — zamówienia: {count}',
     'admin.gdpr.events_title'     => 'Ostatnie zdarzenia RODO',
     'admin.gdpr.actor'            => 'Aktor',
     'admin.gdpr.note'             => 'Notatka',

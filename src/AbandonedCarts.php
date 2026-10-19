@@ -150,17 +150,9 @@ class AbandonedCarts {
      * domain (keeping the app_url scheme and path) or the app_url, plus the store's url_prefix.
      */
     public static function storeBaseUrl(string $storeId, string $appUrl): string {
-        $appUrl = rtrim($appUrl, '/');
         $store = (Bootstrap::stores()['stores'] ?? [])[$storeId] ?? null;
-        if (!is_array($store)) return $appUrl;
-        $domains = $store['domains'] ?? [];
-        if (is_string($domains)) $domains = [$domains];
-        $domain = is_array($domains) ? strtolower(trim((string)($domains[0] ?? ''))) : '';
-        $base = $appUrl;
-        if ($domain !== '' && filter_var($domain, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) !== false) {
-            $parts = parse_url($appUrl);
-            $base = (string)($parts['scheme'] ?? 'https') . '://' . $domain . rtrim((string)($parts['path'] ?? ''), '/');
-        }
+        if (!is_array($store)) return rtrim($appUrl, '/');
+        $base = Security::storeAppUrl($appUrl, $store);
         $prefix = rtrim((string)($store['url_prefix'] ?? ''), '/');
         if ($prefix !== '' && str_starts_with($prefix, '/') && !str_contains($prefix, '..') && preg_match('#^[A-Za-z0-9/_-]+$#', $prefix)) {
             $base .= $prefix;
