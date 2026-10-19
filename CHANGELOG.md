@@ -201,6 +201,25 @@ nginx PHP fallback when `operations.nginx_config` is set).
   - GDPR erasure records a `customer.erased` event for webhook subscribers so they erase
     their copies (customer id, guest flag and retained order ids — never the e-mail).
   - Admin GDPR: guests (orders without an account) can be exported and erased by e-mail like customers.
+- **Installation and deployment (audit round 5)**
+  - `setup.php install` into a subdirectory of a web root (`public_html/shop`, also `httpdocs`, `htdocs`,
+    `wwwroot`, `html`, `www`, `web`) writes the private paths above it (`../bareboneseshop-data/<dir>/`);
+    the template's `../bareboneseshop-private` would have been inside `public_html`, database included.
+    **`doctor` and `staging-preflight` now fail a private path inside such a web root**: move it, or set
+    the new `operations.document_root` when the guess is wrong.
+  - `install` over an existing database whose admins' MFA secrets need another `admin_identity_key`
+    (lost `config.php`, new checkout over the old private data) stops and removes the new `config.php`
+    instead of locking every admin out. `doctor` (`admin.accounts`, `admin.mfa_key`) and
+    `staging-preflight` (`admin_accounts`) fail when nobody can sign in.
+  - `staging-preflight` no longer demands the legacy `admin_password` once a database admin account
+    exists, reports unset carrier webhook secrets as a warning (a placeholder or short one still fails),
+    checks `cache_dir` / `uploads_dir` instead of an unused `storage/`, and both tools read the mail
+    provider like `MailService` (`MAIL_ADAPTER` first). `apply` creates `cache_dir` and `uploads_dir`.
+  - Upload directories are created 0755, so a web server running as another user (nginx) serves them.
+  - Docker sample: the image uses the production `php.ini` (errors logged, never displayed,
+    `expose_php` off); the `setup` service runs `deploy/docker-setup.sh` as root, which creates
+    `config.php` in the host-owned checkout and hands `cache/`, `uploads/`, `import/`, `logs/` and the
+    private volume to uid 33. CI runs the README Docker install and fetches an uploaded image.
 - **Extension API actions**: every non-GET/HEAD request to an extension action must carry the session
   CSRF token (`X-CSRF-Token` or `csrf_token`, HTTP 403 otherwise); actions can be limited with
   `'method' => 'GET'|'POST'` (405 otherwise). **Server-to-server POSTs to an extension action break**

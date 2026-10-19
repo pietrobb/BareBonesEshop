@@ -248,6 +248,20 @@ class AdminIdentity {
         }
     }
 
+    /** Active accounts whose MFA secret the configured admin_identity_key cannot decrypt: they cannot sign in. */
+    public static function undecryptableMfaAccounts(): array {
+        if (!self::available()) return [];
+        $locked = [];
+        foreach (Db::get()->query("SELECT username, totp_secret_encrypted FROM admin_accounts WHERE status='active' AND totp_secret_encrypted IS NOT NULL AND totp_secret_encrypted <> '' ORDER BY username")->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            try {
+                self::decrypt((string)$row['totp_secret_encrypted']);
+            } catch (Throwable $e) {
+                $locked[] = (string)$row['username'];
+            }
+        }
+        return $locked;
+    }
+
     public static function accountById(int $id): ?array {
         return self::available() ? self::account($id) : null;
     }

@@ -19,7 +19,7 @@ class LocalStorage implements ImageVariantStorageAdapter {
         // Default to the app root's uploads/ (served as /uploads), not adapters/uploads next to this file.
         $uploadsDir = (string)($cfg['uploads_dir'] ?? dirname(__DIR__, 2) . '/uploads');
         $this->baseUrl = $cfg['uploads_url'] ?? '/uploads';
-        if (!is_dir($uploadsDir) && !@mkdir($uploadsDir, 0750, true) && !is_dir($uploadsDir)) {
+        if (!is_dir($uploadsDir) && !@mkdir($uploadsDir, 0755, true) && !is_dir($uploadsDir)) {
             throw new \RuntimeException("Cannot create uploads directory: {$uploadsDir}");
         }
 
@@ -230,9 +230,10 @@ class LocalStorage implements ImageVariantStorageAdapter {
         }
     }
 
+    // 0755: the web server serving /uploads may run as another user than PHP (nginx in the Docker sample).
     private function createDirectory(string $dir): void {
         $this->assertCanonicalContainment($dir);
-        if (!is_dir($dir) && !@mkdir($dir, 0750, true) && !is_dir($dir)) {
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
             throw new \RuntimeException("Cannot create uploads directory: {$dir}");
         }
         $this->assertCanonicalContainment($dir);
