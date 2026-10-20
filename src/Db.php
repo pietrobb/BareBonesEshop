@@ -222,15 +222,14 @@ class Db {
 
     /**
      * Whether a transaction is open on $db, also one opened with exec('BEGIN'): PDO does not track that
-     * before PHP 8.4 (inTransaction() is false). MySQL reports it in @@in_transaction; SQLite refuses BEGIN
-     * only while a transaction is open.
+     * on SQLite before PHP 8.4 (inTransaction() is false). pdo_mysql's inTransaction() reads the server's
+     * in-transaction status flag, so it already sees a raw BEGIN on MySQL and MariaDB (@@in_transaction is
+     * MariaDB-only). SQLite refuses BEGIN only while a transaction is open.
      */
     public static function transactionOpen(?PDO $db = null): bool {
         $db ??= self::get();
         if ($db->inTransaction()) return true;
-        $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
-        if ($driver === 'mysql') return (int)$db->query('SELECT @@in_transaction')->fetchColumn() === 1;
-        if ($driver !== 'sqlite' || PHP_VERSION_ID >= 80400) return false;
+        if ($db->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite' || PHP_VERSION_ID >= 80400) return false;
         $mode = $db->getAttribute(PDO::ATTR_ERRMODE);
         $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_SILENT);
         try {
