@@ -391,6 +391,21 @@ $pdo->exec("DELETE FROM warehouse_stock WHERE sku LIKE 'R7R-PHANTOM%'");
 $pdo->exec("DELETE FROM stock_movements WHERE sku LIKE 'R7R-PHANTOM%'");
 $pdo->exec('DELETE FROM products WHERE id IN (97750, 97751)');
 
+// ── cli/extract-specs.php deleted every 'sk' specification first, including the admin-entered and imported ones ──
+$r7rSpecs = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+(require TEST_CLI_DIR . '/../migrations/20260424000000_baseline.php')->up($r7rSpecs, true);
+(require TEST_CLI_DIR . '/../migrations/20261020130000_product_specification_source.php')->up($r7rSpecs, true);
+$r7rSpecs->exec("INSERT INTO categories (id, slug, name, path, depth) VALUES (1, 'saunove-pece', 'Pece', 'saunove-pece', 0)");
+$r7rSpecs->exec("INSERT INTO products (id, sku, slug, name, category_id, price, status) VALUES (1, 'R7R-S1', 'r7r-s1', 'Harvia Cilindro 9 kW čierna', 1, 1000, 'active')");
+$r7rSpecs->exec("INSERT INTO product_specifications (product_id, criteria_name, criteria_value, lang) VALUES (1, 'Farba', 'Biela', 'sk'), (1, 'Záruka', '5 rokov', 'sk')");
+$r7rRows = static fn(): array => $r7rSpecs->query("SELECT criteria_name || '=' || criteria_value FROM product_specifications ORDER BY criteria_name")->fetchAll(PDO::FETCH_COLUMN);
+$r7rFirst = SpecExtraction::run($r7rSpecs);
+$r7rSecond = SpecExtraction::run($r7rSpecs);
+assert_equals(['Farba=Biela', 'Výkon (kW)=9 kW', 'Značka=Harvia', 'Záruka=5 rokov'], $r7rRows(),
+    'R7 extract-specs: specs entered in the admin survive and win over the extracted color (were deleted)');
+assert_equals([2, 1, 2, 1], [$r7rFirst['total'], $r7rFirst['kept'], $r7rSecond['total'], $r7rSecond['kept']], 'R7 extract-specs: a re-run replaces only its own rows');
+$r7rSpecs = null;
+
 // R7 low: an invoice_issue job queued when the order was paid, run after the order was cancelled, threw "not paid" on
 // every retry (a critical incident each time) until the job died. It has nothing to invoice and now ends quietly.
 echo "\n--- R7: invoice_issue after the paid order was cancelled ---\n";
