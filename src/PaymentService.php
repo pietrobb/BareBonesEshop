@@ -62,7 +62,11 @@ class PaymentService {
         $stmt->execute($params);
 
         $methods = [];
+        $ownPrices = StoreContext::current()->usesProviderPrices();
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            // Fees and limits are amounts in the scope owner's currency: a store in another currency
+            // only offers methods that have none (a percentage fee is currency-neutral).
+            if (!$ownPrices && ((int)$row['fixed_fee'] > 0 || (int)$row['min_amount'] > 0 || (int)($row['max_amount'] ?? 0) > 0 || (int)($row['free_above'] ?? 0) > 0)) continue;
             if (($row['service_type'] ?? '') === 'invoice') {
                 if ($customerId === null || !Customers::canInvoicePurchase($customerId, $amount)) continue;
                 $profile = Customers::commerceProfile($customerId);
@@ -375,7 +379,19 @@ class PaymentService {
         if (!$order || !in_array((string)($order['payment_status'] ?? ''), ['paid', 'refund_pending', 'partially_refunded', 'disputed'], true)) {
             return 0;
         }
-        return max(0, (int)($order['total'] ?? 0) - self::refundedAmount($orderId));
+        return max(0, (int)($order['total'] ?? 0) - self::refundedAmount($orderId) - self::offLedgerCredits($order));
+    }
+
+    /**
+     * Credit notes settled outside the payment ledger: an order without a payment id has its item refunds
+     * paid back by hand (Rma::completeRefund('manual-admin')), which books no payment transaction. That money
+     * is returned all the same, so the order must not refund it again (InvoiceService::refundableForCredit()).
+     */
+    private static function offLedgerCredits(array $order): int {
+        if (trim((string)($order['payment_id'] ?? '')) !== '') return 0;
+        $stmt = Db::get()->prepare("SELECT COALESCE(SUM(amount), 0) FROM order_refunds WHERE order_id = :order AND store_id = :store AND status = 'succeeded'");
+        $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
+        return max(0, (int)$stmt->fetchColumn());
     }
 
     public static function requestRefund(int $orderId, int $amount, string $idempotencyKey, array $payload = []): bool {
@@ -1021,7 +1037,7 @@ class PaymentService {
             if (!self::refundsByHand($order) || $amount > self::refundableBalance($orderId)) {
                 throw new \LogicException('Manual refund is not available for this order or amount');
             }
-            $to = self::refundedAmount($orderId) + $amount >= (int)$order['total'] ? 'refunded' : 'partially_refunded';
+            $to = self::refundedAmount($orderId) + self::offLedgerCredits($order) + $amount >= (int)$order['total'] ? 'refunded' : 'partially_refunded';
             $key = 'manual_refund_' . $orderId . '_' . bin2hex(random_bytes(12));
             $payload = ['actor' => $actor, 'note' => $note];
             if ($from === $to) {
@@ -1127,10 +1143,7 @@ class PaymentService {
      * order row; SQLite takes its single writer lock now, before the ledger is read.
      */
     private static function lockOrderWithin(int $orderId): void {
-        $sql = Db::isMysql()
-            ? 'SELECT id FROM orders WHERE id = :id AND store_id = :store FOR UPDATE'
-            : 'UPDATE orders SET updated_at = updated_at WHERE id = :id AND store_id = :store';
-        Db::get()->prepare($sql)->execute([':id' => $orderId, ':store' => StoreContext::current()->id()]);
+        Orders::lockWithin($orderId);
     }
 
     /** Roll back a transaction this call opened, if it is still open. */

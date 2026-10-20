@@ -333,8 +333,11 @@ class Inventory {
                 if ($own) $db->rollBack();
                 return false;
             }
-            $db->prepare('UPDATE purchase_order_items SET received_qty = received_qty + :quantity WHERE id = :id')
-                ->execute([':quantity' => $quantity, ':id' => (int)$item['id']]);
+            // Re-check against the row itself: two concurrent receipts both pass the read above on MySQL.
+            $book = $db->prepare('UPDATE purchase_order_items SET received_qty = received_qty + :quantity
+                WHERE id = :id AND received_qty + :quantity2 <= quantity');
+            $book->execute([':quantity' => $quantity, ':quantity2' => $quantity, ':id' => (int)$item['id']]);
+            if ($book->rowCount() !== 1) throw new RuntimeException('Receipt exceeds ordered quantity');
             Warehouse::adjustStock((int)$item['warehouse_id'], $sku, $quantity, 'receipt', 'purchase_order', $purchaseOrderId, 'receipt:' . $idempotencyKey);
             $remaining = (int)$db->query("SELECT COUNT(*) FROM purchase_order_items WHERE purchase_order_id = {$purchaseOrderId} AND received_qty < quantity")->fetchColumn();
             $status = $remaining === 0 ? 'received' : 'partially_received';

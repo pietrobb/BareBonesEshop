@@ -20,6 +20,7 @@
     "admin_session_idle_seconds": {"type": "integer", "minimum": 300, "maximum": 86400},
     "admin_session_lifetime_seconds": {"type": "integer", "minimum": 1800, "maximum": 604800},
     "api_client_rate_limit": {"type": "integer", "minimum": 1, "description": "External API v1: requests per minute per API key, across all source addresses (default 600)"},
+    "checkout_global_limit": {"type": "integer", "minimum": 0, "description": "Optional shop-wide cap on checkout attempts per minute (default 0 = off); refused attempts never count"},
     "private_cache_dir": {"type": "string", "x-private-path": true},
     "jobs_dir": {"type": "string", "x-private-path": true},
     "invoice_storage_dir": {"type": "string", "x-private-path": true},

@@ -1098,6 +1098,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.warehouse.add_feed' => 'Feed hozzáadása',
     'admin.warehouse.saved' => 'Raktár mentve.',
     'admin.warehouse.deleted' => 'Raktár törölve.',
+    'admin.warehouse.delete_reserved' => 'A raktár nem törölhető: nyitott rendelések {count} darabot foglalnak benne. Előbb szállítsa ki, törölje vagy helyezze át őket.',
     'admin.feed.last_sync' => 'Utolsó szinkronizálás',
     'admin.feed.warehouse' => 'Raktár',
     'admin.feed.disabled' => 'Kikapcsolva',

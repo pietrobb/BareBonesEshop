@@ -365,6 +365,11 @@ function handleWarehouseSave(): void {
 function handleWarehouseDelete(): void {
     $id = Security::int($_POST['warehouse_id'] ?? 0);
     $old = $id ? Warehouse::byId($id) : null;
+    if ($old && ($reserved = Warehouse::reservedUnits($id)) > 0) {
+        setFlash('err', str_replace('{count}', (string)$reserved, I18n::t('admin.warehouse.delete_reserved')));
+        header("Location: admin.php?p=warehouse&id={$id}");
+        exit;
+    }
     if ($old) {
         $old['feeds'] = Warehouse::feedsByWarehouse($id);
         Warehouse::delete($id);

@@ -352,6 +352,28 @@ class Security {
         return hash('sha256', $action . '|' . ($bindIp ? self::clientIp() : 'global'));
     }
 
+    /**
+     * Checkout throttling shared by the HTML and JSON transports: per IP, per session, and the optional shop-wide
+     * cap checkout_global_limit (attempts per minute, 0 = off). The cap was a hard-coded 200 that every attempt
+     * counted towards, refused ones included: twenty addresses held it and locked every shopper out. It now
+     * counts only attempts that passed the per-IP and per-session limits, and never records a refused one.
+     */
+    public static function checkoutAllowed(): bool {
+        if (!self::rateLimit('checkout', 10)
+            || !self::rateLimit('checkout_session_' . hash('sha256', session_id()), 5, 900, false)) {
+            return false;
+        }
+        $cap = max(0, (int)(self::cfg()['checkout_global_limit'] ?? 0));
+        if ($cap === 0) return true;
+        if (!self::rateLimitAllows('checkout_global', $cap, 60, false)) {
+            http_response_code(429);
+            header('Retry-After: 60');
+            return false;
+        }
+        self::rateLimitRecord('checkout_global', false);
+        return true;
+    }
+
     public static function rateLimit(string $action, int $maxHits = 60, int $windowSeconds = 60, bool $bindIp = true): bool {
         $windowSeconds = max(1, min(86400, $windowSeconds));
         $key = self::rateKey($action, $bindIp);

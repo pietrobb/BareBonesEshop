@@ -88,6 +88,8 @@ class Fulfillment {
         $own = !$db->inTransaction();
         if ($own) $db->beginTransaction();
         try {
+            // Two concurrent partial shipments must not both pass the capacity check below.
+            Orders::lockWithin($orderId);
             $insert = $db->prepare(Db::insertIgnore() . " INTO shipments
                 (store_id, order_id, warehouse_id, status, idempotency_key)
                 VALUES (:store, :order, :warehouse, 'planned', :key)");
@@ -145,6 +147,11 @@ class Fulfillment {
         $own = !$db->inTransaction();
         if ($own) $db->beginTransaction();
         try {
+            // Ship and cancel of the same order are serialised on the order row (Orders::lockWithin()).
+            $orderStmt = $db->prepare('SELECT order_id FROM shipments WHERE id = :id AND store_id = :store');
+            $orderStmt->execute([':id' => $shipmentId, ':store' => StoreContext::current()->id()]);
+            $lockOrder = (int)$orderStmt->fetchColumn();
+            if ($lockOrder > 0) Orders::lockWithin($lockOrder);
             $shipmentStmt = $db->prepare('SELECT * FROM shipments WHERE id = :id AND store_id = :store');
             $shipmentStmt->execute([':id' => $shipmentId, ':store' => StoreContext::current()->id()]);
             $shipment = $shipmentStmt->fetch(PDO::FETCH_ASSOC);

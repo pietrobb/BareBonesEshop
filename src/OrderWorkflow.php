@@ -114,6 +114,8 @@ class OrderWorkflow {
         if (!Db::get()->inTransaction()) {
             throw new \LogicException('OrderWorkflow::transitionWithin needs an open transaction');
         }
+        // Wait for a concurrent shipment of this order to commit before its state is read (MySQL row lock).
+        Orders::lockWithin($orderId);
         $order = Orders::byId($orderId);
         if (!$order) {
             throw new \RuntimeException("Order #{$orderId} not found");

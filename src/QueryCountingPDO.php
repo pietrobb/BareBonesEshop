@@ -1,5 +1,5 @@
 <?php
-final class QueryCountingPDO extends PDO {
+final class QueryCountingPDO extends ShopPDO {
     private int $queryCount = 0;
 
     public function prepare(string $query, array $options = []): PDOStatement|false {

@@ -1077,6 +1077,7 @@ return [
     'admin.warehouse.add_feed' => 'Pridať feed',
     'admin.warehouse.saved' => 'Sklad uložený.',
     'admin.warehouse.deleted' => 'Sklad zmazaný.',
+    'admin.warehouse.delete_reserved' => 'Sklad nemožno zmazať: otvorené objednávky v ňom majú rezervovaných {count} ks. Najprv ich odošlite, zrušte alebo presuňte.',
     'admin.feed.last_sync' => 'Posledná synchronizácia',
     'admin.feed.warehouse' => 'Sklad',
     'admin.feed.disabled' => 'Vypnutý',

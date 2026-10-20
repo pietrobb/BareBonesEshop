@@ -1098,6 +1098,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.warehouse.add_feed' => 'Přidat feed',
     'admin.warehouse.saved' => 'Sklad uložen.',
     'admin.warehouse.deleted' => 'Sklad smazán.',
+    'admin.warehouse.delete_reserved' => 'Sklad nelze smazat: otevřené objednávky v něm mají rezervováno {count} ks. Nejprve je odešlete, zrušte nebo přesuňte.',
     'admin.feed.last_sync' => 'Poslední synchronizace',
     'admin.feed.warehouse' => 'Sklad',
     'admin.feed.disabled' => 'Vypnutý',

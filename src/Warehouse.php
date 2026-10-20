@@ -84,12 +84,42 @@ class Warehouse {
         return $id;
     }
 
+    /** Units open orders still hold in a warehouse. */
+    public static function reservedUnits(int $id, bool $lock = false): int {
+        $stmt = Db::get()->prepare('SELECT reserved FROM warehouse_stock WHERE warehouse_id = :id' . ($lock && Db::isMysql() ? ' FOR UPDATE' : ''));
+        $stmt->execute([':id' => $id]);
+        return (int)array_sum(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+    }
+
+    /**
+     * Delete a warehouse that holds no reservations. Open orders' allocations point at its stock rows:
+     * dropping them would make every later release of those orders fail (and stall pending-order expiry).
+     */
     public static function delete(int $id): void {
         if (!self::byId($id)) throw new RuntimeException('Warehouse not found in active store');
         $db = Db::get();
-        $db->prepare("DELETE FROM warehouse_stock WHERE warehouse_id = :id")->execute([':id' => $id]);
-        $db->prepare("DELETE FROM feeds WHERE warehouse_id = :id")->execute([':id' => $id]);
-        $db->prepare("DELETE FROM warehouses WHERE id = :id")->execute([':id' => $id]);
+        $ownTransaction = !$db->inTransaction();
+        if ($ownTransaction) $db->beginTransaction();
+        try {
+            // Locked on MySQL: a plain read would see the transaction's snapshot and miss a reservation committed
+            // since, which the DELETE (reading current rows) would then remove; reserve() waits on the row locks.
+            $reserved = self::reservedUnits($id, true);
+            if ($reserved > 0) throw new RuntimeException("Warehouse {$id} still holds {$reserved} reserved units");
+            $skus = $db->prepare('SELECT sku FROM warehouse_stock WHERE warehouse_id = :id');
+            $skus->execute([':id' => $id]);
+            $skus = array_map('strval', $skus->fetchAll(PDO::FETCH_COLUMN));
+            $db->prepare("DELETE FROM warehouse_stock WHERE warehouse_id = :id AND reserved = 0")->execute([':id' => $id]);
+            $left = $db->prepare('SELECT COUNT(*) FROM warehouse_stock WHERE warehouse_id = :id');
+            $left->execute([':id' => $id]);
+            if ((int)$left->fetchColumn() > 0) throw new RuntimeException("Warehouse {$id} gained a reservation while being deleted");
+            $db->prepare("DELETE FROM feeds WHERE warehouse_id = :id")->execute([':id' => $id]);
+            $db->prepare("DELETE FROM warehouses WHERE id = :id")->execute([':id' => $id]);
+            if ($skus) self::syncProductStock($skus);
+            if ($ownTransaction) $db->commit();
+        } catch (\Throwable $e) {
+            if ($ownTransaction && $db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
     }
 
     // ─── Stock per warehouse ─────────────────────────────────

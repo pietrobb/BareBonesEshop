@@ -119,7 +119,8 @@ class PacketaShipping implements ShippingLifecycleAdapter
     public function pickupPoints(string $country, string $postalCode = ''): array
     {
         $points = $this->storedPoints($country);
-        $search = self::fold(trim((string)preg_replace('/[\d\s]+/u', ' ', $postalCode)));
+        // Postal codes, also with a hyphen (PL "00-950"), are not search text: a leftover "-" matched no point.
+        $search = self::fold(trim((string)preg_replace(['/\d+(?:[\s-]+\d+)*/u', '/\s+/u'], ' ', $postalCode)));
         if ($search !== '') {
             $points = array_values(array_filter($points, static fn(array $p): bool =>
                 str_contains(self::fold($p['name'] . ' ' . $p['street'] . ' ' . $p['city']), $search)));
@@ -221,6 +222,7 @@ class PacketaShipping implements ShippingLifecycleAdapter
 
     private function lookupDbRate(string $country, int $weightG): ?int
     {
+        if (!StoreContext::current()->usesProviderPrices()) return null;
         try {
             $db   = Db::get();
             $stmt = $db->prepare("
@@ -239,6 +241,7 @@ class PacketaShipping implements ShippingLifecycleAdapter
 
     private function lookupDbCodSurcharge(string $country): ?int
     {
+        if (!StoreContext::current()->usesProviderPrices()) return null;
         try {
             $db   = Db::get();
             $stmt = $db->prepare("

@@ -286,6 +286,31 @@ nginx PHP fallback when `operations.nginx_config` is set).
     `GET_LOCK`, so two app directories or containers migrating one database exclude each other.
   - Packeta: the checkout pick-up point field has a search (town, street or point name, diacritics
     ignored), so a point beyond the nearest 50 can be found and chosen.
+- **Audit round 7 (hotfix)**
+  - **A warehouse whose stock open orders still reserve cannot be deleted** (admin explains why); deleting
+    one destroyed those reservations. The pending-order expiry isolates every order and every store: an
+    order whose reservation cannot be released stays pending with a critical `order.expiry_failed`
+    incident instead of stopping expiry of all later orders in all stores.
+  - MySQL/MariaDB: shipments, cancellations and purchase-order receipts lock the order / purchase order
+    before reading it, so two concurrent partial shipments cannot ship one order twice (or take another
+    order's reservation), and concurrent receipts cannot receive more than ordered.
+  - **Price lists of a shared provider scope are in the scope owner's currency.** A store whose currency
+    differs from the store owning its `provider_scope` (the sample CZK/PLN/HUF/USD stores share the EUR
+    one) no longer charges those shipping rates, COD surcharges, free-shipping thresholds or payment fees
+    as its own money (4,99 Kč shipping): it gets only carriers with their own prices in its currency and
+    payment methods without fixed amounts. **Give such a store its own `provider_scope`** with shipping
+    methods and payment methods priced in its currency.
+  - A credit note paid back by hand (order without a payment id) counts as refunded: the order can no
+    longer be refunded for that amount a second time.
+  - SQLite: transactions take the write lock when they begin (`BEGIN IMMEDIATE`, `ShopPDO`), so a
+    read-then-write transaction waits for another writer (`busy_timeout`) instead of failing at once with
+    "database is locked" (8–16 % of checkouts at 8 concurrent clients).
+  - `/readyz` and `doctor` report a SQLite database another process is writing (backup, import, GDPR gc)
+    as writable, without waiting for it; only a truly read-only database is `read_only`.
+  - **The shop-wide checkout cap is off by default** (`checkout_global_limit`, attempts per minute, 0 =
+    off): a hard-coded 200 that refused attempts counted towards let twenty addresses lock every shopper
+    out. When set, it counts only attempts that passed the per-IP (10/min) and per-session limits.
+  - Packeta: a postal code with a hyphen (PL `00-950`) lists the nearest points again instead of none.
 - **Extension API actions**: every non-GET/HEAD request to an extension action must carry the session
   CSRF token (`X-CSRF-Token` or `csrf_token`, HTTP 403 otherwise); actions can be limited with
   `'method' => 'GET'|'POST'` (405 otherwise). **Server-to-server POSTs to an extension action break**

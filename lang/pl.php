@@ -1098,6 +1098,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.warehouse.add_feed' => 'Dodaj feed',
     'admin.warehouse.saved' => 'Magazyn zapisany.',
     'admin.warehouse.deleted' => 'Magazyn usunięty.',
+    'admin.warehouse.delete_reserved' => 'Nie można usunąć magazynu: otwarte zamówienia mają w nim zarezerwowane {count} szt. Najpierw je wyślij, anuluj lub przenieś.',
     'admin.feed.last_sync' => 'Ostatnia synchronizacja',
     'admin.feed.warehouse' => 'Magazyn',
     'admin.feed.disabled' => 'Wyłączony',
