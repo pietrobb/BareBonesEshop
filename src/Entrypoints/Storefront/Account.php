@@ -322,6 +322,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ];
         $method = (string)($_POST['method'] ?? 'preferences');
         if (!in_array($method, ['banner_accept_all', 'banner_reject_all', 'preferences'], true)) $method = 'preferences';
+        // The banner's accept/reject buttons (no-JS form submit) carry no checkboxes: the button decides.
+        if ($method !== 'preferences') $cats['analytics'] = $cats['marketing'] = $method === 'banner_accept_all';
         $cid = Customers::isLoggedIn() ? (int)$_SESSION['customer_id'] : null;
         // Same consent log as the banner's cookie_consent API action.
         GdprService::logCookieConsent([
@@ -346,7 +348,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             setcookie('cookie_consent', '', ['expires' => 1] + $cookieOptions);
             setcookie('cookie_consent', '', ['expires' => 1, 'path' => '/'] + $cookieOptions);
         }
-        $_SESSION['account_flash'] = ['message' => $t('account.saved'), 'type' => 'ok'];
+        // The banner returns to the page it covered, which shows no account flash.
+        if (($_POST['source'] ?? '') !== 'banner') $_SESSION['account_flash'] = ['message' => $t('account.saved'), 'type' => 'ok'];
         header('Location: ' . Security::safeLocalPath($_POST['return_to'] ?? null, Template::storeUrl('/account.php?p=privacy')));
         exit;
     }
