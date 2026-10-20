@@ -243,3 +243,31 @@ try {
     Security::setRateDbForTesting(new PDO('sqlite::memory:'));
     @unlink($r7rRateFile);
 }
+
+// R7 low: an invoice_issue job queued when the order was paid, run after the order was cancelled, threw "not paid" on
+// every retry (a critical incident each time) until the job died. It has nothing to invoice and now ends quietly.
+echo "\n--- R7: invoice_issue after the paid order was cancelled ---\n";
+$r7rSavedArgv = $argv ?? [];
+$argv = ['worker.php', '--once'];
+require_once TEST_CLI_DIR . '/../cli/worker.php';
+$argv = $r7rSavedArgv;
+$pdo->prepare("INSERT INTO orders (order_number, store_id, status, payment_status, customer_name, customer_email, payment_method, subtotal, total, currency, locale)
+    VALUES ('R7R-INV-CANCEL', ?, 'cancelled', 'refunded', 'R7 Buyer', 'r7r-inv@example.test', 'card', 2590, 2590, 'eur', 'en')")->execute([$r7rStore]);
+$r7rInvOrder = (int)$pdo->lastInsertId();
+$r7rInvError = null;
+try {
+    handleInvoiceIssue(['order_id' => $r7rInvOrder], []);
+} catch (Throwable $e) {
+    $r7rInvError = $e->getMessage();
+}
+assert_equals([null, null], [$r7rInvError, InvoiceService::byOrderId($r7rInvOrder)],
+    'R7 invoice job: a cancelled order completes the job without an invoice (was "is not paid" on every retry)');
+$pdo->exec("UPDATE orders SET status = 'pending', payment_status = 'pending' WHERE id = {$r7rInvOrder}");
+$r7rInvError = null;
+try {
+    handleInvoiceIssue(['order_id' => $r7rInvOrder], []);
+} catch (Throwable $e) {
+    $r7rInvError = $e->getMessage();
+}
+assert_true($r7rInvError === null && InvoiceService::byOrderId($r7rInvOrder) === null, 'R7 invoice job: an unpaid order is skipped the same way');
+$pdo->exec("DELETE FROM orders WHERE id = {$r7rInvOrder}");
