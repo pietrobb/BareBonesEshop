@@ -336,7 +336,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $cookieOptions = [
             'expires'  => time() + 31536000, // 12 months
             'path'     => Template::baseUrl() ?: '/',
-            'secure'   => !empty($_SERVER['HTTPS']),
+            'secure'   => Security::requestIsHttps(),
             'httponly' => false,
             'samesite' => 'Lax',
         ];

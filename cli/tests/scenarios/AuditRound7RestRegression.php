@@ -187,3 +187,37 @@ assert_equals([2, 'archived'], [count($r7rBulkA), $r7rBulkA[1]['status'] ?? null
     'R7 bulk: a bulk archive records product.updated with the new status (was not recorded)');
 assert_equals(0, count($r7rBulkEvents(970702)), 'R7 bulk: an already archived product records nothing');
 $pdo->exec('DELETE FROM products WHERE id IN (970701, 970702)');
+
+
+// ── HTTPS behind a TLS-terminating proxy: HSTS, secure cookies and the form-action origin see https ──
+$r7rCfgProp = new ReflectionProperty('Security', 'cfg');
+$r7rSavedCfg = $r7rCfgProp->getValue();
+$r7rSavedServer = $_SERVER;
+try {
+    $r7rCfgProp->setValue(null, ['trusted_proxies' => ['10.0.0.1']]);
+    $r7rHttps = static function (array $server): bool {
+        $_SERVER = $server + ['HTTP_HOST' => 'shop.example'];
+        return Security::requestIsHttps();
+    };
+    assert_equals(
+        [true, false, true, false, false, true],
+        [
+            $r7rHttps(['HTTPS' => 'on', 'REMOTE_ADDR' => '203.0.113.9']),
+            $r7rHttps(['HTTPS' => 'off', 'REMOTE_ADDR' => '203.0.113.9']),
+            $r7rHttps(['REMOTE_ADDR' => '10.0.0.1', 'HTTP_X_FORWARDED_PROTO' => 'https']),
+            $r7rHttps(['REMOTE_ADDR' => '203.0.113.9', 'HTTP_X_FORWARDED_PROTO' => 'https']),
+            $r7rHttps(['REMOTE_ADDR' => '10.0.0.1', 'HTTP_X_FORWARDED_PROTO' => 'https, http']),
+            $r7rHttps(['REMOTE_ADDR' => '10.0.0.1', 'HTTP_X_FORWARDED_PROTO' => 'HTTPS']),
+        ],
+        'R7 HSTS: https is direct HTTPS or X-Forwarded-Proto from a trusted proxy (its own, last value); a client cannot claim it (was only $_SERVER[HTTPS])'
+    );
+    $_SERVER = ['REMOTE_ADDR' => '10.0.0.1', 'HTTP_X_FORWARDED_PROTO' => 'https', 'HTTP_HOST' => 'shop.example'];
+    assert_true(Security::formActionAllows('https://shop.example/?page=order-done'),
+        'R7 HSTS: behind the proxy a redirect to the shop\'s own https address passes form-action');
+} finally {
+    $_SERVER = $r7rSavedServer;
+    $r7rCfgProp->setValue(null, $r7rSavedCfg);
+}
+$r7rSecuritySource = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Security.php');
+assert_true((bool)preg_match('/if \(self::requestIsHttps\(\) \|\| [^\n]*app_url[^\n]*\{\s*header\("Strict-Transport-Security/', $r7rSecuritySource),
+    'R7 HSTS: the header is sent on proxied https or an https app_url');

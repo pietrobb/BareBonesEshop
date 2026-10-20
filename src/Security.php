@@ -38,7 +38,7 @@ class Security {
                 'lifetime' => 0,
                 'path'     => '/',
                 'httponly' => true,
-                'secure'   => !empty($_SERVER['HTTPS']) || $configuredHttps,
+                'secure'   => self::requestIsHttps() || $configuredHttps,
                 'samesite' => 'Lax',
             ]);
             session_start();
@@ -67,7 +67,9 @@ class Security {
         header("X-XSS-Protection: 1; mode=block");
         header("Referrer-Policy: strict-origin-when-cross-origin");
         header("Permissions-Policy: camera=(), microphone=(), geolocation=()");
-        if (!empty($_SERVER['HTTPS'])) {
+        // Behind a TLS-terminating proxy PHP sees plain http: trust X-Forwarded-Proto from trusted_proxies, or an https
+        // app_url (browsers ignore HSTS received over http, so sending it there is harmless).
+        if (self::requestIsHttps() || strtolower((string)parse_url((string)(self::cfg()['app_url'] ?? ''), PHP_URL_SCHEME)) === 'https') {
             header("Strict-Transport-Security: max-age=31536000; includeSubDomains; preload");
         }
         $reportUrl = self::cspReportUrl();
@@ -146,7 +148,7 @@ class Security {
         if (!isset($parts['host'])) return !isset($parts['scheme']) && !str_starts_with($url, '//');
         $scheme = strtolower((string)($parts['scheme'] ?? ''));
         $origin = $scheme . '://' . strtolower((string)$parts['host']) . (isset($parts['port']) ? ':' . $parts['port'] : '');
-        $self = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+        $self = (self::requestIsHttps() ? 'https' : 'http') . '://' . strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
         return $origin === $self || in_array($origin, self::paymentRedirectOrigins(), true);
     }
 
@@ -522,6 +524,16 @@ class Security {
     // ============================================================
     // IP address — behind proxy/load balancer
     // ============================================================
+    /** Whether the client reached us over https: directly, or via a trusted proxy that says so in X-Forwarded-Proto. */
+    public static function requestIsHttps(): bool {
+        $https = strtolower((string)($_SERVER['HTTPS'] ?? ''));
+        if ($https !== '' && $https !== 'off') return true;
+        $trusted = self::cfg()['trusted_proxies'] ?? [];
+        if (empty($trusted) || !in_array($_SERVER['REMOTE_ADDR'] ?? '', $trusted, true)) return false;
+        $proto = explode(',', (string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
+        return strtolower(trim(end($proto))) === 'https';
+    }
+
     public static function clientIp(): string {
         $cfg = self::cfg();
         $trusted = $cfg['trusted_proxies'] ?? [];
