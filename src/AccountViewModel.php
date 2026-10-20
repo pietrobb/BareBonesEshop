@@ -241,7 +241,7 @@ final class AccountViewModel
         }
         $returnable = [];
         foreach (Customers::orders($customerId, 100) as $order) {
-            if (($order['status'] ?? '') !== 'delivered') continue;
+            if (($order['status'] ?? '') !== 'delivered' || !Rma::withinReturnWindow($order)) continue;
             $items = Rma::returnableItems((int)$order['id']);
             if (!$items) continue;
             $returnable[] = [
@@ -257,7 +257,11 @@ final class AccountViewModel
             'returns' => $returns, 'returnable_orders' => $returnable,
             'return_message' => $message === '' ? null : [
                 'ok' => $message === 'ok',
-                'text' => $message === 'ok' ? I18n::t('account.return_submitted') : I18n::t('account.return_error') . ': ' . $message,
+                'text' => match ($message) {
+                    'ok' => I18n::t('account.return_submitted'),
+                    'return_window_closed' => I18n::t('account.return_window_closed'),
+                    default => I18n::t('account.return_error') . ': ' . $message,
+                },
             ],
         ];
     }

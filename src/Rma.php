@@ -16,6 +16,8 @@ class Rma {
 
     public const STATUSES = ['requested', 'approved', 'received', 'rejected', 'refunded'];
 
+    public const DEFAULT_RETURN_WINDOW_DAYS = 14;
+
     /** Non-terminal statuses — an order with one of these has an "open" return. */
     private const OPEN_STATUSES = ['requested', 'approved', 'received'];
 
@@ -36,8 +38,8 @@ class Rma {
      * @param string   $reason     Free-text reason (required).
      * @param array    $items      [order_item_id => qty, ...] map of lines to return.
      * @return array [success, rma_id|null, error|null]. Errors are stable strings:
-     *               invalid_order, order_not_returnable, not_owner, reason_required,
-     *               no_items, rma_exists.
+     *               invalid_order, order_not_returnable, not_owner, return_window_closed,
+     *               reason_required, no_items, rma_exists.
      */
     public static function create(int $orderId, ?int $customerId, string $reason, array $items): array {
         if ($orderId <= 0) {
@@ -55,6 +57,10 @@ class Rma {
         if ($customerId !== null && $customerId > 0
             && (int)($order['customer_id'] ?? 0) !== $customerId) {
             return [false, null, 'not_owner'];
+        }
+        // A customer returns within the window; the merchant may still open a return later (warranty, goodwill).
+        if ($customerId !== null && $customerId > 0 && !self::withinReturnWindow($order)) {
+            return [false, null, 'return_window_closed'];
         }
         $reason = trim($reason);
         if ($reason === '') {
@@ -114,6 +120,18 @@ class Rma {
         }
 
         return [true, $rmaId, null];
+    }
+
+    /**
+     * Whether a customer may still return goods of $order: rma_return_window_days (default 14, the EU withdrawal
+     * period; 0 = no limit) after its delivery. An order without a recorded delivery time stays returnable.
+     */
+    public static function withinReturnWindow(array $order, ?int $now = null): bool {
+        $days = (int)(Security::config()['rma_return_window_days'] ?? self::DEFAULT_RETURN_WINDOW_DAYS);
+        $deliveredAt = (string)($order['delivered_at'] ?? '');
+        if ($days <= 0 || $deliveredAt === '') return true;
+        $delivered = strtotime($deliveredAt . ' UTC');
+        return $delivered === false || ($now ?? time()) <= $delivered + $days * 86400;
     }
 
     /**

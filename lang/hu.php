@@ -1317,6 +1317,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.submit_return'       => 'Visszaküldés elküldése',
     'account.return_submitted'    => 'A visszaküldési kérelmet elküldtük.',
     'account.return_error'        => 'A kérelmet nem sikerült elküldeni',
+    'account.return_window_closed' => 'A rendelés visszaküldési határideje lejárt',
     'account.addresses'           => 'Címek',
     'account.profile'             => 'Profil',
     'account.change_password'     => 'Jelszó módosítása',

@@ -1317,6 +1317,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.submit_return'       => 'Rücksendung absenden',
     'account.return_submitted'    => 'Ihre Rücksendeanfrage wurde übermittelt.',
     'account.return_error'        => 'Anfrage konnte nicht gesendet werden',
+    'account.return_window_closed' => 'Die Rückgabefrist für diese Bestellung ist abgelaufen',
     'account.addresses'           => 'Adressen',
     'account.profile'             => 'Profil',
     'account.change_password'     => 'Passwort ändern',

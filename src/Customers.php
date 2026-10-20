@@ -625,7 +625,7 @@ class Customers {
     public static function orders(int $customerId, int $limit = 50, int $offset = 0): array {
         $stmt = Db::get()->prepare(
             "SELECT id, order_number, status, payment_status, total, currency,
-                    tracking_number, carrier, created_at
+                    tracking_number, carrier, created_at, delivered_at
              FROM orders
              WHERE customer_id = ? AND store_id = ?
              ORDER BY id DESC

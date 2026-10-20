@@ -1422,6 +1422,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.gdpr.anonymized_ok' => 'Cliente anonimizado.',
     'admin.gdpr.anonymized_failed' => 'Error en la anonimización',
     'account.return_error' => 'No se pudo enviar la solicitud',
+    'account.return_window_closed' => 'El plazo de devolución de este pedido ha finalizado',
     'account.email' => 'Correo electrónico',
     'account.phone' => 'Teléfono',
     'account.default' => 'predeterminada',

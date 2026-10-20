@@ -1326,6 +1326,7 @@ return [
     'account.submit_return'       => 'Odoslať reklamáciu',
     'account.return_submitted'    => 'Žiadosť o vrátenie bola odoslaná.',
     'account.return_error'        => 'Žiadosť sa nepodarilo odoslať',
+    'account.return_window_closed' => 'Lehota na vrátenie tejto objednávky už uplynula',
     'account.addresses'           => 'Adresy',
     'account.profile'             => 'Profil',
     'account.change_password'     => 'Zmeniť heslo',

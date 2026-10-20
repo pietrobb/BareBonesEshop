@@ -433,7 +433,9 @@ class Orders {
     public static function updateStatus(int $orderId, string $status, ?string $expectedFrom = null): bool {
         $params = [':status' => $status, ':id' => $orderId, ':store' => StoreContext::current()->id()];
         if ($expectedFrom !== null) $params[':from'] = $expectedFrom;
-        $stmt = Db::get()->prepare("UPDATE orders SET status = :status, updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store"
+        // The return window counts from the first delivery.
+        $delivered = $status === 'delivered' ? ', delivered_at = COALESCE(delivered_at, ' . Db::now() . ')' : '';
+        $stmt = Db::get()->prepare("UPDATE orders SET status = :status, updated_at = " . Db::now() . "{$delivered} WHERE id = :id AND store_id = :store"
             . ($expectedFrom !== null ? ' AND status = :from' : ''));
         $stmt->execute($params);
         return $stmt->rowCount() === 1;

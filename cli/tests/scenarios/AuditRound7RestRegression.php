@@ -433,3 +433,47 @@ try {
 }
 assert_true($r7rInvError === null && InvoiceService::byOrderId($r7rInvOrder) === null, 'R7 invoice job: an unpaid order is skipped the same way');
 $pdo->exec("DELETE FROM orders WHERE id = {$r7rInvOrder}");
+
+// R7 low: a customer could request a return of an order delivered any time ago (no return window, no delivery time).
+echo "\n--- R7: return window ---\n";
+$r7rWin = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+(require TEST_CLI_DIR . '/../migrations/20260424000000_baseline.php')->up($r7rWin, true);
+$r7rWin->exec("INSERT INTO orders (order_number, status, customer_name, customer_email, payment_method, subtotal, total, updated_at)
+    VALUES ('R7R-W1', 'delivered', 'B', 'b@example.test', 'card', 1, 1, '2026-01-05 10:00:00'), ('R7R-W2', 'shipped', 'B', 'b@example.test', 'card', 1, 1, '2026-01-05 10:00:00')");
+(require TEST_CLI_DIR . '/../migrations/20261020140000_order_delivered_at.php')->up($r7rWin, true);
+assert_equals(['R7R-W1' => '2026-01-05 10:00:00', 'R7R-W2' => null], $r7rWin->query('SELECT order_number, delivered_at FROM orders ORDER BY order_number')->fetchAll(PDO::FETCH_KEY_PAIR),
+    'R7 return window: the migration dates orders delivered before it by their last update, other orders stay undated');
+$r7rWin = null;
+
+$pdo->prepare("INSERT INTO customers (email, password_hash, name) VALUES ('r7r-rma@example.test', 'x', 'R7 Returner')")->execute();
+$r7rRmaCustomer = (int)$pdo->lastInsertId();
+$pdo->prepare("INSERT INTO orders (order_number, store_id, status, payment_status, customer_id, customer_name, customer_email, payment_method, subtotal, total, currency, locale)
+    VALUES ('R7R-RMA-WIN', ?, 'shipped', 'paid', ?, 'R7 Returner', 'r7r-rma@example.test', 'card', 2590, 2590, 'eur', 'en')")->execute([$r7rStore, $r7rRmaCustomer]);
+$r7rRmaOrder = (int)$pdo->lastInsertId();
+$pdo->prepare("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total) SELECT ?, id, sku, name, 2, 1295, 2590 FROM products ORDER BY id LIMIT 1")
+    ->execute([$r7rRmaOrder]);
+$r7rRmaItem = (int)$pdo->lastInsertId();
+assert_true(Orders::updateStatus($r7rRmaOrder, 'delivered'), 'R7 return window: the order is delivered');
+$r7rDeliveredAt = (string)$pdo->query("SELECT delivered_at FROM orders WHERE id = {$r7rRmaOrder}")->fetchColumn();
+assert_true($r7rDeliveredAt !== '' && abs(strtotime($r7rDeliveredAt . ' UTC') - time()) < 120, 'R7 return window: delivery records the time (UTC)');
+Orders::updateStatus($r7rRmaOrder, 'delivered');
+assert_equals($r7rDeliveredAt, (string)$pdo->query("SELECT delivered_at FROM orders WHERE id = {$r7rRmaOrder}")->fetchColumn(), 'R7 return window: a repeated delivered status keeps the first time');
+$r7rRmaOk = Rma::create($r7rRmaOrder, $r7rRmaCustomer, 'too small', [$r7rRmaItem => 1]);
+assert_true($r7rRmaOk[0] === true, 'R7 return window: a fresh delivery can be returned by the customer');
+$pdo->prepare('UPDATE orders SET delivered_at = ? WHERE id = ?')->execute([gmdate('Y-m-d H:i:s', time() - 15 * 86400), $r7rRmaOrder]);
+assert_equals('return_window_closed', Rma::create($r7rRmaOrder, $r7rRmaCustomer, 'changed my mind', [$r7rRmaItem => 1])[2],
+    'R7 return window: 15 days after delivery the customer request is refused (default 14 days; was accepted)');
+$r7rOrderRow = Orders::byId($r7rRmaOrder);
+assert_equals([false, true], [Rma::withinReturnWindow($r7rOrderRow), Rma::withinReturnWindow($r7rOrderRow, time() - 2 * 86400)], 'R7 return window: the window ends 14 days after delivery');
+$r7rCfgProp->setValue(null, ['rma_return_window_days' => 0] + (array)$r7rSavedCfg);
+assert_true(Rma::withinReturnWindow($r7rOrderRow), 'R7 return window: rma_return_window_days 0 means no limit');
+$r7rCfgProp->setValue(null, ['rma_return_window_days' => 30] + (array)$r7rSavedCfg);
+assert_true(Rma::withinReturnWindow($r7rOrderRow), 'R7 return window: a 30-day window still covers day 15');
+$r7rCfgProp->setValue(null, $r7rSavedCfg);
+$r7rAdminRma = Rma::create($r7rRmaOrder, null, 'warranty claim', [$r7rRmaItem => 1]);
+assert_true($r7rAdminRma[0] === true, 'R7 return window: the merchant can still open a return after the window');
+$pdo->exec("DELETE FROM rma_items WHERE rma_id IN (SELECT id FROM rma_requests WHERE order_id = {$r7rRmaOrder})");
+$pdo->exec("DELETE FROM rma_requests WHERE order_id = {$r7rRmaOrder}");
+$pdo->exec("DELETE FROM order_items WHERE order_id = {$r7rRmaOrder}");
+$pdo->exec("DELETE FROM orders WHERE id = {$r7rRmaOrder}");
+$pdo->exec("DELETE FROM customers WHERE id = {$r7rRmaCustomer}");

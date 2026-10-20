@@ -1317,6 +1317,7 @@ return [
     'account.submit_return'       => 'Submit return',
     'account.return_submitted'    => 'Your return request has been submitted.',
     'account.return_error'        => 'Could not submit the request',
+    'account.return_window_closed' => 'The return period for this order has ended',
     'account.addresses'           => 'Addresses',
     'account.profile'             => 'Profile',
     'account.change_password'     => 'Change password',

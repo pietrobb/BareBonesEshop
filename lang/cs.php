@@ -1317,6 +1317,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.submit_return'       => 'Odeslat reklamaci',
     'account.return_submitted'    => 'Žádost o vrácení byla odeslána.',
     'account.return_error'        => 'Žádost se nepodařilo odeslat',
+    'account.return_window_closed' => 'Lhůta pro vrácení této objednávky již uplynula',
     'account.addresses'           => 'Adresy',
     'account.profile'             => 'Profil',
     'account.change_password'     => 'Změnit heslo',

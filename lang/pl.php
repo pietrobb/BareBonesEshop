@@ -1317,6 +1317,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.submit_return'       => 'Wyślij zwrot',
     'account.return_submitted'    => 'Zgłoszenie zwrotu zostało wysłane.',
     'account.return_error'        => 'Nie udało się wysłać zgłoszenia',
+    'account.return_window_closed' => 'Termin zwrotu tego zamówienia upłynął',
     'account.addresses'           => 'Adresy',
     'account.profile'             => 'Profil',
     'account.change_password'     => 'Zmień hasło',
