@@ -1175,6 +1175,21 @@ class PaymentService {
         return (bool)$stmt->fetchColumn();
     }
 
+    /**
+     * Provider codes of this store's active online payment methods: the gateways checkout can send the buyer to
+     * (Security::paymentRedirectOrigins). Without the method tables checkout offers the Stripe fallback method.
+     * @return list<string>
+     */
+    public static function onlineProviderCodes(): array {
+        try {
+            $stmt = Db::get()->prepare("SELECT DISTINCT provider FROM payment_methods WHERE store_id = :store AND active = 1 AND requires_online = 1 ORDER BY provider");
+            $stmt->execute([':store' => StoreContext::current()->providerId()]);
+            return array_values(array_map('strval', $stmt->fetchAll(\PDO::FETCH_COLUMN)));
+        } catch (\PDOException $e) {
+            return ['stripe'];
+        }
+    }
+
     private static function hasMethodTables(): bool {
         try {
             Db::get()->query("SELECT 1 FROM payment_methods LIMIT 1");

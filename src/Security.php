@@ -105,8 +105,9 @@ class Security {
     }
 
     /**
-     * Origins the checkout form POST may redirect to, declared by every registered
-     * hosted-checkout payment adapter. Browsers apply form-action to the redirect that
+     * Origins the checkout form POST may redirect to, declared by the hosted-checkout payment
+     * adapters this store's active online payment methods use (PaymentService::onlineProviderCodes);
+     * a registered but unused gateway is not allowed. Browsers apply form-action to the redirect that
      * follows a form submission, so a missing origin silently blocks payment
      * (P0 2026-10-13: card checkout dead since 1.9.0). Any CSP change needs the
      * browser E2E payment-redirect test in tests/e2e/commerce.spec.js.
@@ -115,7 +116,7 @@ class Security {
     public static function paymentRedirectOrigins(): array {
         if (!is_file(dirname(__DIR__) . '/config.php')) return [];
         try {
-            $codes = array_keys(Adapters::registry('payment'));
+            $codes = array_intersect(PaymentService::onlineProviderCodes(), array_map('strval', array_keys(Adapters::registry('payment'))));
         } catch (\Throwable $e) {
             error_log('CSP payment origins unavailable: ' . $e->getMessage());
             return [];

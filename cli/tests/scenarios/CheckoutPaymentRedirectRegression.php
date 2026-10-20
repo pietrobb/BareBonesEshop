@@ -16,21 +16,41 @@ $p0Origin = static function (string $url): string {
     return strtolower(($parts['scheme'] ?? '') . '://' . ($parts['host'] ?? '') . (isset($parts['port']) ? ':' . $parts['port'] : ''));
 };
 
-// Every registered online gateway declares where it sends the browser, and the policy allows it.
+// Every registered online gateway declares where it sends the browser. The policy allows exactly the gateways an
+// active online payment method of the store uses (R7: it listed every registered gateway, used or not).
 $p0Sources = $p0FormAction(Security::contentSecurityPolicy());
 assert_equals("'self'", $p0Sources[0] ?? '', "P0 CSP: form-action starts with 'self'");
-foreach (Adapters::registry('payment') as $p0Code => $p0Definition) {
-    if ($p0Code === 'mock') continue; // test double; hosted mode is covered by the browser E2E
-    $p0Class = Adapters::providerClass('payment', (string)$p0Code);
-    if ($p0Class === 'CashOnDelivery') continue;
-    assert_true(is_subclass_of($p0Class, HostedCheckoutAdapter::class), "P0 CSP: online payment adapter {$p0Code} declares its redirect origins");
-    $p0Declared = is_subclass_of($p0Class, HostedCheckoutAdapter::class) ? Adapters::provider('payment', (string)$p0Code)->redirectOrigins() : [];
-    assert_true($p0Declared !== [], "P0 CSP: {$p0Code} declares at least one origin");
-    foreach ($p0Declared as $p0DeclaredOrigin) {
-        assert_true(in_array($p0DeclaredOrigin, $p0Sources, true), "P0 CSP: form-action allows {$p0Code} redirect origin {$p0DeclaredOrigin}");
+$p0SavedMethods = $pdo->query("SELECT id, active FROM payment_methods WHERE requires_online = 1")->fetchAll(PDO::FETCH_KEY_PAIR);
+$pdo->exec("UPDATE payment_methods SET active = 0 WHERE requires_online = 1");
+$pdo->exec("INSERT INTO payment_methods (code, provider, name, service_type, requires_online, active, sort_order) VALUES ('p0stripe', 'stripe', 'P0 card', 'online_card', 1, 1, 1)");
+$p0Sources = $p0FormAction(Security::contentSecurityPolicy());
+try {
+    foreach (Adapters::registry('payment') as $p0Code => $p0Definition) {
+        if ($p0Code === 'mock') continue; // test double; hosted mode is covered by the browser E2E
+        $p0Class = Adapters::providerClass('payment', (string)$p0Code);
+        if ($p0Class === 'CashOnDelivery') continue;
+        assert_true(is_subclass_of($p0Class, HostedCheckoutAdapter::class), "P0 CSP: online payment adapter {$p0Code} declares its redirect origins");
+        $p0Declared = is_subclass_of($p0Class, HostedCheckoutAdapter::class) ? Adapters::provider('payment', (string)$p0Code)->redirectOrigins() : [];
+        assert_true($p0Declared !== [], "P0 CSP: {$p0Code} declares at least one origin");
+        if ($p0Code === 'stripe') continue;
+        $p0Unused = array_values(array_intersect($p0Declared, $p0Sources));
+        $pdo->exec("INSERT INTO payment_methods (code, provider, name, service_type, requires_online, active, sort_order) VALUES ('p0{$p0Code}', " . $pdo->quote((string)$p0Code) . ", 'P0 {$p0Code}', 'online_card', 1, 1, 2)");
+        $p0Used = $p0FormAction(Security::contentSecurityPolicy());
+        $pdo->exec("UPDATE payment_methods SET active = 0 WHERE code = 'p0{$p0Code}'");
+        $p0Inactive = $p0FormAction(Security::contentSecurityPolicy());
+        $pdo->exec("DELETE FROM payment_methods WHERE code = 'p0{$p0Code}'");
+        assert_equals([], $p0Unused, "P0 CSP: form-action does not allow {$p0Code} while no active payment method uses it");
+        assert_equals([], array_values(array_diff($p0Declared, $p0Used)), "P0 CSP: form-action allows every {$p0Code} redirect origin once an active method uses it");
+        assert_equals([], array_values(array_intersect($p0Declared, $p0Inactive)), "P0 CSP: deactivating the {$p0Code} method removes its origins again");
     }
+    assert_true(in_array('https://checkout.stripe.com', $p0Sources, true), 'P0 CSP: form-action allows the Stripe Checkout redirect of an active card method');
+    $pdo->exec("UPDATE payment_methods SET active = 0 WHERE code = 'p0stripe'");
+    assert_equals(["'self'"], $p0FormAction(Security::contentSecurityPolicy()), "P0 CSP: without an active online payment method form-action is only 'self'");
+} finally {
+    $pdo->exec("DELETE FROM payment_methods WHERE code LIKE 'p0%'");
+    foreach ($p0SavedMethods as $p0Id => $p0Active) $pdo->prepare('UPDATE payment_methods SET active = ? WHERE id = ?')->execute([(int)$p0Active, (int)$p0Id]);
 }
-assert_true(in_array('https://checkout.stripe.com', $p0Sources, true), 'P0 CSP: form-action allows the Stripe Checkout redirect');
+$p0Sources = $p0FormAction(Security::contentSecurityPolicy());
 foreach (['production' => ['https://secure.payu.com'], 'sandbox' => ['https://secure.snd.payu.com', 'https://merch-prod.snd.payu.com']] as $p0Env => $p0Expected) {
     assert_equals($p0Expected, (new PayUPayment(['payu_env' => $p0Env]))->redirectOrigins(), "P0 CSP: PayU {$p0Env} declares its pay page origins");
 }
