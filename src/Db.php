@@ -220,6 +220,34 @@ class Db {
         }
     }
 
+    /**
+     * Whether a transaction is open on $db, also one opened with exec('BEGIN'): PDO does not track that
+     * before PHP 8.4 (inTransaction() is false). MySQL reports it in @@in_transaction; SQLite refuses BEGIN
+     * only while a transaction is open.
+     */
+    public static function transactionOpen(?PDO $db = null): bool {
+        $db ??= self::get();
+        if ($db->inTransaction()) return true;
+        $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
+        if ($driver === 'mysql') return (int)$db->query('SELECT @@in_transaction')->fetchColumn() === 1;
+        if ($driver !== 'sqlite' || PHP_VERSION_ID >= 80400) return false;
+        $mode = $db->getAttribute(PDO::ATTR_ERRMODE);
+        $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_SILENT);
+        try {
+            $began = $db->exec('BEGIN') !== false;
+        } finally {
+            $db->setAttribute(PDO::ATTR_ERRMODE, $mode);
+        }
+        if ($began) $db->exec('ROLLBACK');
+        return !$began;
+    }
+
+    /** Roll back the open transaction, also one PDO does not track (see transactionOpen()). */
+    public static function rollBackOpen(?PDO $db = null): bool {
+        $db ??= self::get();
+        return $db->inTransaction() ? $db->rollBack() : $db->exec('ROLLBACK') !== false;
+    }
+
     /** Forget cached table probes (after DDL), for one connection or all of them. */
     public static function forgetSchema(?PDO $db = null): void {
         if ($db === null) {

@@ -59,3 +59,37 @@ $pdo->exec("DELETE FROM price_list_prices WHERE price_list_id = {$r7rList}");
 $pdo->exec("DELETE FROM price_lists WHERE id = {$r7rList}");
 $pdo->exec('DELETE FROM variants WHERE product_id = 97701');
 $pdo->exec('DELETE FROM products WHERE id = 97701');
+
+
+// ── An extension listener that opens its transaction with exec('BEGIN') (invisible to inTransaction() before PHP 8.4) ──
+$r7rDb = Db::get();
+$r7rListeners = new ReflectionProperty(Extensions::class, 'listeners');
+$r7rBooted = new ReflectionProperty(Extensions::class, 'booted');
+$r7rSavedListeners = $r7rListeners->getValue();
+$r7rSavedBooted = $r7rBooted->getValue();
+$r7rDb->beginTransaction();
+$r7rEventId = Outbox::record(DomainEvents::ORDER_CREATED, 'order', 97801, ['order_id' => 97801, 'order_number' => 'R7R-EXT']);
+$r7rDb->commit();
+$r7rEvent = $r7rDb->query("SELECT * FROM event_outbox WHERE id = '{$r7rEventId}'")->fetch(PDO::FETCH_ASSOC);
+try {
+    $r7rBooted->setValue(null, true);
+    $r7rListeners->setValue(null, [
+        'ext:r7r:raw' => ['events' => DomainEvents::ORDER_CREATED, 'listener' => static function () use ($r7rDb): void {
+            $r7rDb->exec('BEGIN');
+            $r7rDb->exec("INSERT INTO categories (store_id, slug, name, parent_id, path, depth) VALUES ('default', 'r7r-leak', 'R7R leak', NULL, 'r7r-leak', 0)");
+        }],
+        'ext:r7r:after' => ['events' => DomainEvents::ORDER_CREATED, 'listener' => static function (): void {}],
+    ]);
+    $r7rResult = Extensions::deliver($r7rEvent, Outbox::envelope($r7rEvent));
+    $r7rOpen = Db::transactionOpen($r7rDb);
+    if ($r7rOpen) Db::rollBackOpen($r7rDb);
+    assert_true(!$r7rOpen, "R7 extensions: a transaction a listener opened with exec('BEGIN') is not left open");
+    assert_equals(0, (int)$r7rDb->query("SELECT COUNT(*) FROM categories WHERE slug = 'r7r-leak'")->fetchColumn(), "R7 extensions: the listener's uncommitted write is rolled back");
+    assert_true(count($r7rResult['failures']) === 1 && str_contains($r7rResult['failures'][0], 'ext:r7r:raw') && str_contains($r7rResult['failures'][0], 'transaction'),
+        'R7 extensions: the raw-BEGIN listener is a failed delivery naming the open transaction (' . json_encode($r7rResult['failures']) . ')');
+} finally {
+    if (Db::transactionOpen($r7rDb)) Db::rollBackOpen($r7rDb);
+    $r7rDb->exec("DELETE FROM categories WHERE slug = 'r7r-leak'");
+    $r7rListeners->setValue(null, $r7rSavedListeners);
+    $r7rBooted->setValue(null, $r7rSavedBooted);
+}
