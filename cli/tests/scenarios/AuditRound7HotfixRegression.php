@@ -132,6 +132,21 @@ $r7hWritable = Db::writable($r7hA);
 assert_true($r7hWritable && microtime(true) - $r7hStarted < 1.0, 'R7 readyz: a database another connection is writing is reported writable, without waiting for the writer');
 assert_equals(5000, (int)$r7hA->query('PRAGMA busy_timeout')->fetchColumn(), 'R7 readyz: the probe restores the connection busy_timeout');
 $r7hB->commit();
+// PDO before PHP 8.4 does not see a transaction opened with exec(): ShopPDO tracks its own (CI runs 8.1–8.4).
+$r7hLife = [$r7hB->inTransaction()];
+$r7hB->beginTransaction();
+$r7hLife[] = $r7hB->inTransaction();
+$r7hB->exec('INSERT INTO orders (id) VALUES (1)');
+$r7hB->commit();
+$r7hLife[] = $r7hB->inTransaction();
+$r7hB->beginTransaction();
+$r7hB->exec('INSERT INTO orders (id) VALUES (2)');
+try { $r7hB->beginTransaction(); $r7hLife[] = 'nested'; } catch (PDOException) { $r7hLife[] = 'nested refused'; }
+$r7hB->rollBack();
+$r7hLife[] = $r7hB->inTransaction();
+$r7hLife[] = (int)$r7hB->query('SELECT COUNT(*) FROM orders')->fetchColumn();
+assert_equals([false, true, false, 'nested refused', false, 1], $r7hLife,
+    'R7 sqlite: a ShopPDO transaction is seen by inTransaction(), commits, refuses nesting and rolls back on every PHP version');
 assert_true(str_contains((string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Db.php'), 'QueryCountingPDO::class : ShopPDO::class'), 'R7 sqlite: the shop connection is a ShopPDO');
 $r7hReadOnly = new PDO('sqlite:' . $r7hFile, null, null, $r7hOpts + (defined('Pdo\Sqlite::ATTR_OPEN_FLAGS')
     ? [constant('Pdo\Sqlite::ATTR_OPEN_FLAGS') => constant('Pdo\Sqlite::OPEN_READONLY')]
