@@ -478,10 +478,10 @@ components:
       properties:
         name: { type: string, minLength: 1, maxLength: 191 }
         status: { type: string, enum: [active, draft, archived] }
-        price: { type: integer, minimum: 0 }
-        compare_price: { type: [integer, 'null'], minimum: 0 }
-        stock: { type: integer, minimum: 0, description: Available quantity; the difference is booked as an api_adjustment in the default warehouse ledger. }
-        weight_g: { type: integer, minimum: 0 }
+        price: { type: integer, minimum: 0, maximum: 2000000000 }
+        compare_price: { type: [integer, 'null'], minimum: 0, maximum: 2000000000 }
+        stock: { type: integer, minimum: 0, maximum: 2000000000, description: Available quantity; the difference is booked as an api_adjustment in the default warehouse ledger. }
+        weight_g: { type: integer, minimum: 0, maximum: 2000000000 }
     Order:
       type: object
       additionalProperties: false

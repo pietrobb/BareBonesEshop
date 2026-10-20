@@ -546,18 +546,23 @@
 
     const banner = document.getElementById('cc-banner');
     if (!banner) return;
-    document.getElementById('cc-accept').addEventListener('click', () => saveConsent({necessary:true,analytics:true,marketing:true}, 'banner_accept_all'));
-    document.getElementById('cc-reject').addEventListener('click', () => saveConsent({necessary:true,analytics:false,marketing:false}, 'banner_reject_all'));
-    document.getElementById('cc-prefs-toggle').addEventListener('click', () => {
+    // The banner is a real form (account.php cookie_consent) so it closes without JS; with JS it is saved in place.
+    banner.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const method = event.submitter ? event.submitter.value : 'preferences';
+      saveConsent({
+        necessary: true,
+        analytics: method === 'banner_accept_all' || (method === 'preferences' && document.getElementById('cc-ana').checked),
+        marketing: method === 'banner_accept_all' || (method === 'preferences' && document.getElementById('cc-mkt').checked)
+      }, method);
+    });
+    const prefsToggle = document.getElementById('cc-prefs-toggle');
+    prefsToggle.hidden = false;
+    prefsToggle.addEventListener('click', () => {
       banner.classList.add('show-prefs');
       document.getElementById('cc-accept').hidden = true;
       document.getElementById('cc-reject').hidden = true;
       document.getElementById('cc-save').hidden = false;
     });
-    document.getElementById('cc-save').addEventListener('click', () => saveConsent({
-      necessary: true,
-      analytics: document.getElementById('cc-ana').checked,
-      marketing: document.getElementById('cc-mkt').checked
-    }, 'preferences'));
   });
 })();

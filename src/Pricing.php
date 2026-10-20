@@ -38,7 +38,6 @@ class Pricing {
         $profile = Customers::commerceProfile($customerId);
         $groupId = (int)($profile['customer_group_id'] ?? 0);
         $at = $at ?? gmdate('Y-m-d H:i:s');
-        $variantDelta = 0;
 
         try {
             $variant = false;
@@ -93,15 +92,16 @@ class Pricing {
                 if (isset($seen[$scope])) continue;
                 $seen[$scope] = true;
                 $delta = $candidate['variant_id'] === null && $variant ? (int)$variant['price_delta'] : 0;
-                $price = max(0, (int)$candidate['price']) + $delta;
-                if ($row === false || $price < $rowPrice) [$row, $rowPrice, $variantDelta] = [$candidate, $price, $delta];
+                // Never below zero, even for rows saved before the editors refused a too-low base for a negative surcharge.
+                $price = max(0, max(0, (int)$candidate['price']) + $delta);
+                if ($row === false || $price < $rowPrice) [$row, $rowPrice] = [$candidate, $price];
             }
         } catch (PDOException $e) {
             $row = false;
         }
 
         if ($row) {
-            $product['price'] = max(0, (int)$row['price']) + $variantDelta;
+            $product['price'] = $rowPrice;
             $product['compare_price'] = $row['compare_price'] === null
                 ? max($basePrice, (int)($product['compare_price'] ?? 0))
                 : max(0, (int)$row['compare_price']);
@@ -337,6 +337,8 @@ class Pricing {
                 $discount = (int)round($subtotal * $rule['discount_value'] / 100);
             } elseif ($rule['discount_type'] === 'fixed') {
                 $discount = min($rule['discount_value'], $subtotal);
+            } elseif ($rule['discount_type'] === 'free_shipping') {
+                return ['discount' => 0, 'name' => $rule['name'], 'error' => null, 'free_shipping' => true, 'stacking' => (string)($rule['stacking'] ?? 'stack')];
             } else {
                 continue;
             }
@@ -355,6 +357,14 @@ class Pricing {
             return ['discount' => 0, 'name' => null, 'error' => 'Coupon already used'];
         }
         return Promotions::couponDiscount($promotion, $subtotal) + ['stacking' => (string)($promotion['stacking'] ?? 'exclusive')];
+    }
+
+    /**
+     * Whether an applyCoupon() result is an accepted coupon: it discounts the goods or waives the shipping.
+     * A free-shipping coupon discounts nothing, so it never competes with automatic discounts (combineDiscounts).
+     */
+    public static function couponApplies(array $coupon): bool {
+        return (int)($coupon['discount'] ?? 0) > 0 || !empty($coupon['free_shipping']);
     }
 
     /**

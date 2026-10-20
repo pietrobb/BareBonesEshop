@@ -74,6 +74,7 @@
     "payu_env": {"type": "string", "enum": ["sandbox", "production"]},
     "digital_assets_base_dir": {"type": "string", "x-private-path": true},
     "digital_download_resume_minutes": {"type": "integer", "minimum": 0},
+    "rma_return_window_days": {"type": "integer", "minimum": 0, "description": "Days after delivery a customer can request a return (0 = no limit)."},
     "uploads_dir": {"type": "string", "minLength": 1, "description": "Product image uploads (LocalStorage adapter) and the uploads part of file backups; served at uploads_url."},
     "uploads_url": {"type": "string"},
     "checkout_consents": {

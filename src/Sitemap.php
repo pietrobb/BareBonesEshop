@@ -71,13 +71,38 @@ class Sitemap {
             } catch (InvalidArgumentException) {
                 continue; // store without a storefront channel has no public URLs
             }
+            $locale = (string)($store->config()['default_locale'] ?? 'en');
             $sets[(string)$storeId] = [
-                'locale' => (string)($store->config()['default_locale'] ?? 'en'),
+                'locale' => $locale,
                 'prefix' => (string)($store->config()['url_prefix'] ?? ''),
                 'paths' => array_flip(self::paths($store)),
+                'localized' => self::localizedProductPaths($store, $locale),
             ];
         }
         return $sets;
+    }
+
+    /**
+     * Base product path => the path in $locale where the product has a translated slug: the store's canonical
+     * URL of that product (I18n::product), which <loc> and the alternates must name instead of the base slug.
+     * @return array<string, string>
+     */
+    private static function localizedProductPaths(StoreContext $store, string $locale): array {
+        $localized = [];
+        try {
+            $stmt = Db::get()->prepare("SELECT slug, translations FROM products WHERE store_id = :store AND status = 'active'
+                AND slug IS NOT NULL AND slug != '' AND translations LIKE :hasSlug");
+            $stmt->execute([':store' => $store->catalogId(), ':hasSlug' => '%"slug"%']);
+            while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
+                $translations = json_decode((string)$row['translations'], true);
+                $slug = is_array($translations) ? (string)($translations[$locale]['slug'] ?? '') : '';
+                if ($slug === '' || $slug === $row['slug']) continue;
+                $localized[UrlAliases::outbound('/product/' . $row['slug'])] = UrlAliases::outbound('/product/' . rawurlencode($slug));
+            }
+        } catch (\Throwable $ignore) {
+            /* fresh install — no products table yet */
+        }
+        return $localized;
     }
 
     /** Protocol limit of <url> entries per sitemap file (sitemaps.org). */
@@ -141,16 +166,17 @@ class Sitemap {
             foreach ($serving as $set) {
                 if ($index++ < $first) continue;
                 if ($index > $last) break 2;
-                $entry = "  <url>\n" . '    <loc>' . $e($base . $set['prefix'] . $path) . "</loc>\n";
+                $url = static fn(array $store): string => $store['prefix'] . ($store['localized'][$path] ?? $path);
+                $entry = "  <url>\n" . '    <loc>' . $e($base . $url($set)) . "</loc>\n";
                 $alternates = [];
-                foreach ($serving as $alt) $alternates[$alt['locale']] ??= $alt['prefix'];
-                foreach ($alternates as $altLocale => $altPrefix) {
+                foreach ($serving as $alt) $alternates[$alt['locale']] ??= $url($alt);
+                foreach ($alternates as $altLocale => $altUrl) {
                     $entry .= '    <xhtml:link rel="alternate" hreflang="' . $e((string)$altLocale)
-                          . '" href="' . $e($base . $altPrefix . $path) . "\"/>\n";
+                          . '" href="' . $e($base . $altUrl) . "\"/>\n";
                 }
                 if (isset($serving[$defaultStore])) {
                     $entry .= '    <xhtml:link rel="alternate" hreflang="x-default" href="'
-                          . $e($base . $serving[$defaultStore]['prefix'] . $path) . "\"/>\n";
+                          . $e($base . $url($serving[$defaultStore])) . "\"/>\n";
                 }
                 fwrite($out, $entry . "  </url>\n");
             }

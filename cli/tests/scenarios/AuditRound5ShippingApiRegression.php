@@ -92,7 +92,11 @@ assert_equals('unknown_awb', $r5sResult['reason'] ?? null, "R5 shipping webhook:
 // Round 6: the order's method is packeta but the admin shipped it with GLS. Packeta's webhook for that tracking
 // number must not deliver GLS's parcel; GLS's own webhook and a "Packeta SK" spelling still match.
 foreach (['r6s-gls' => ['GLS', 'R6S 100 200 300', 'packeta', false], 'r6s-glssk' => ['GLS Slovakia', 'R6S 100 200 301', 'packeta', false],
-    'r6s-glsown' => ['GLS Slovakia', 'R6S 100 200 302', 'gls', true], 'r6s-pksk' => ['Packeta SK', 'R6S 100 200 303', 'packeta', true]] as $r6sKey => [$r6sCarrier, $r6sTracking, $r6sFrom, $r6sFound]) {
+    'r6s-glsown' => ['GLS Slovakia', 'R6S 100 200 302', 'gls', true], 'r6s-pksk' => ['Packeta SK', 'R6S 100 200 303', 'packeta', true],
+    // Round 7: a carrier that is not a registered adapter (DPD) is still another carrier; a name from the
+    // shipping method's own name ("R5 Zásielkovňa") or a lowercase brand spelling is still Packeta.
+    'r7s-dpd' => ['DPD', 'R7S 100 200 304', 'packeta', false], 'r7s-dpdsk' => ['DPD Slovakia', 'R7S 100 200 305', 'packeta', false],
+    'r7s-zasilkovna' => ['zásilkovna', 'R7S 100 200 306', 'packeta', true], 'r7s-method' => ['R5 Zásielkovňa', 'R7S 100 200 307', 'packeta', true]] as $r6sKey => [$r6sCarrier, $r6sTracking, $r6sFrom, $r6sFound]) {
     $r6sId = $r5sOrder(strtoupper($r6sKey));
     $pdo->prepare("UPDATE orders SET shipping_method = 'r5s-zasielkovna' WHERE id = ?")->execute([$r6sId]);
     $r5sShipment($r6sId, $r6sCarrier, $r6sTracking, $r6sKey);

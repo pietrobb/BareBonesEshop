@@ -210,9 +210,14 @@ final class ProductEditor {
         return !str_starts_with($url, '//') && !preg_match('#^[a-z][a-z0-9+.-]*:#i', $url);
     }
 
-    /** Write category links (primary first) and the translated slugs of the edited locales; call inside the save transaction. */
-    public static function save(int $productId, array $validated): void {
+    /**
+     * Write category links (primary first), the translated slugs of the edited locales and the price history
+     * (Omnibus) of the saved product row, and recount the categories it left and joined; call inside the save
+     * transaction, after the products row is written ($old: the row before an edit).
+     */
+    public static function save(int $productId, array $validated, ?array $old = null): void {
         $db = Db::get();
+        $categories = [(int)($old['category_id'] ?? 0), ...CategoryCounts::ofProducts([$productId], $db)];
         if (self::categoriesChanged($productId, $validated)) {
             $db->prepare('DELETE FROM product_categories WHERE product_id = :id')->execute([':id' => $productId]);
             $link = $db->prepare('INSERT INTO product_categories (product_id, category_id, is_primary, sort_order) VALUES (:id, :cat, :primary, :sort)');
@@ -226,6 +231,8 @@ final class ProductEditor {
             $drop->execute([':id' => $productId, ':locale' => $locale]);
             if ($slug !== '') $add->execute([':slug' => $slug, ':locale' => $locale, ':id' => $productId, ':catalog' => StoreContext::current()->catalogId()]);
         }
+        PriceHistory::record([$productId], $db);
+        CategoryCounts::refresh([...$categories, ...CategoryCounts::ofProducts([$productId], $db)], $db);
     }
 
     /** True when saving would change the product's category links. */

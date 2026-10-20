@@ -563,21 +563,22 @@ $g3Counter->resetQueryCount();
 $g3GuestBatch = Products::enrichMany($g3LocalizedProducts);
 $g3GuestQueries = $g3Counter->queryCount();
 assert_equals($g3ExpectedGuest, $g3GuestBatch, 'G3 batch enrichment: guest payload and order match one-by-one enrichment');
-assert_true($g3GuestQueries <= 4, "G3 query budget: guest listing uses at most 4 enrichment queries ({$g3GuestQueries})");
+// R7: +1 for the price history (Omnibus prior price), one query per listing like the others.
+assert_true($g3GuestQueries <= 5, "G3 query budget: guest listing uses at most 5 enrichment queries ({$g3GuestQueries})");
 
 $_SESSION['customer_id'] = $aliceId;
 $g3Counter->resetQueryCount();
 $g3CustomerBatch = Products::enrichMany($g3LocalizedProducts);
 $g3CustomerQueries = $g3Counter->queryCount();
 assert_equals($g3ExpectedCustomer, $g3CustomerBatch, 'G3 batch enrichment: logged-in payload and customer pricing match one-by-one enrichment');
-assert_true($g3CustomerQueries <= 5, "G3 query budget: logged-in listing uses at most 5 enrichment queries ({$g3CustomerQueries})");
+assert_true($g3CustomerQueries <= 6, "G3 query budget: logged-in listing uses at most 6 enrichment queries ({$g3CustomerQueries})");
 
 unset($_SESSION['customer_id']);
 $g3Counter->resetQueryCount();
 $g3Wishlist = Wishlist::list($guest);
 $g3WishlistQueries = $g3Counter->queryCount();
 assert_equals($g3ExpectedWishlist, $g3Wishlist, 'G3 wishlist batch: payload and newest-first order are preserved');
-assert_true($g3WishlistQueries <= 5, "G3 query budget: wishlist uses at most 5 queries ({$g3WishlistQueries})");
+assert_true($g3WishlistQueries <= 6, "G3 query budget: wishlist uses at most 6 queries ({$g3WishlistQueries})");
 Db::init($pdo, 'sqlite');
 if ($g3PreviousCustomerId === null) {
     unset($_SESSION['customer_id']);

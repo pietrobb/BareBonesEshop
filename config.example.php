@@ -47,6 +47,9 @@ return [
     // released after this age; the buyer gets the order_cancelled e-mail. Types not listed
     // (cod, invoice, offline) never auto-expire. Omitted key = bank_transfer after 14 days.
     'offline_order_expiry_seconds' => ['bank_transfer' => 1209600],
+    // Customers can request a return this many days after delivery (EU withdrawal period: 14). 0 = no limit.
+    // The admin can still open a return later (warranty, goodwill).
+    'rma_return_window_days' => 14,
 
     // Admin
     'admin_name'     => '', // optional admin brand; defaults to the translated BareBonesShop name
@@ -95,6 +98,8 @@ return [
     ],
 
     // Security
+    // Reverse proxies / load balancers (exact REMOTE_ADDR values): their X-Forwarded-For gives the client IP and their
+    // X-Forwarded-Proto: https marks the request as https (HSTS, secure cookies) when TLS ends at the proxy.
     'trusted_proxies' => [],
 
     // Adapters

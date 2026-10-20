@@ -155,8 +155,7 @@ class EmailTemplates {
     /** Secret variables used anywhere else than as a whole href or a stand-alone text value. */
     public static function secretLeaks(string $subject, string $html, string $text): array {
         $leaks = [];
-        preg_match_all('~<[a-zA-Z/!?](?:[^"\'>]|"[^"]*"|\'[^\']*\')*>?~s', $html, $tagMatches, PREG_OFFSET_CAPTURE);
-        $tagSpans = array_map(static fn(array $m): array => [$m[1], $m[1] + strlen($m[0])], $tagMatches[0]);
+        $tagSpans = self::tagSpans($html);
         // A style sheet loads url(...) images: a token there reaches a foreign server like an <img src>.
         preg_match_all('~<style\b.*?(?:</style\s*>|$)~is', $html, $styleMatches, PREG_OFFSET_CAPTURE);
         $styleSpans = array_map(static fn(array $m): array => [$m[1], $m[1] + strlen($m[0])], $styleMatches[0]);
@@ -180,14 +179,16 @@ class EmailTemplates {
 
     /**
      * A hard-coded bank account (bank details must come from {{bank_iban}}, the store's configured account): an IBAN
-     * in any letter case and grouping (spaces, hyphens, dots), or a Czech/Slovak domestic number "prefix-number/bank".
+     * in any letter case and grouping (spaces, hyphens, dots, underscores, slashes), or a Czech/Slovak domestic number "prefix-number/bank".
      * Candidates must pass the IBAN (mod 97) or domestic (mod 11) check digits, so dates and order numbers do not count.
      */
     public static function hasLiteralIban(string $source): bool {
         $visible = preg_replace('~\{\{.*?\}\}~s', ' ', $source);
         $visible = html_entity_decode(strip_tags((string)$visible), ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $visible = strtoupper((string)preg_replace('/\p{Cf}+/u', '', $visible));
-        preg_match_all('/(?<![A-Z0-9])[A-Z]{2}\d{2}(?:[\s\x{00A0}.\-]*[A-Z0-9]){11,64}/u', $visible, $ibans);
+        // Any grouping, also inside the country code and check digits ("S K 3 1", "SK31_1200/0000").
+        $gap = '[\s\x{00A0}._\/\\\\|,:;\-]*';
+        preg_match_all("/(?<![A-Z0-9])[A-Z]{$gap}[A-Z]{$gap}\\d{$gap}\\d(?:{$gap}[A-Z0-9]){11,64}/u", $visible, $ibans);
         foreach ($ibans[0] as $candidate) {
             $compact = (string)preg_replace('/[^A-Z0-9]/', '', $candidate);
             // Every start, so a decoy group in front ("XX00 SK31 …") does not hide the account behind it.
@@ -232,6 +233,34 @@ class EmailTemplates {
             if ($sum % 11 !== 0) return false;
         }
         return true;
+    }
+
+    /**
+     * Byte spans of the HTML tags, read as a browser reads them: a quote opens an attribute value only right
+     * after "=" (alt=a' is a plain apostrophe, so ">" inside alt=">" does not end the tag and a stray "'" does
+     * not hide the rest of the tag). An unclosed tag or value runs to the end.
+     * @return list<array{0:int,1:int}>
+     */
+    private static function tagSpans(string $html): array {
+        $spans = [];
+        $length = strlen($html);
+        for ($at = 0; $at < $length; $at++) {
+            if ($html[$at] !== '<' || $at + 1 >= $length || !preg_match('~[a-zA-Z/!?]~', $html[$at + 1])) continue;
+            $start = $at;
+            $lastSignificant = '';
+            for ($at++; $at < $length && $html[$at] !== '>'; $at++) {
+                $char = $html[$at];
+                if (($char === '"' || $char === "'") && $lastSignificant === '=') {
+                    $close = strpos($html, $char, $at + 1);
+                    $at = $close === false ? $length - 1 : $close;
+                    $lastSignificant = $char;
+                    continue;
+                }
+                if (!ctype_space($char)) $lastSignificant = $char;
+            }
+            $spans[] = [$start, min($at + 1, $length)];
+        }
+        return $spans;
     }
 
     /** @param list<array{0:int,1:int}> $spans @return int|null start of the span containing $at */

@@ -31,9 +31,15 @@ try {
     $redirect = null;
 }
 if (!$redirect) {
-    http_response_code(404);
-    header('Content-Type: text/plain; charset=utf-8');
-    echo 'Not found';
+    // A missing asset keeps a bare 404; a page address gets the storefront's 404 page (page.php without a slug).
+    if (preg_match('/\.(?:jpe?g|png|gif|webp|avif|svg|ico|css|js|map|woff2?|ttf|eot)$/i', $path)) {
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Not found';
+        exit;
+    }
+    unset($_GET['path'], $_GET['slug']);
+    require __DIR__ . '/page.php';
     exit;
 }
 header('Cache-Control: no-store');

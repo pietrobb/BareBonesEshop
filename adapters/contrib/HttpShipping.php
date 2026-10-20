@@ -64,7 +64,7 @@ class HttpShipping implements ShippingLifecycleAdapter
         $orderId = (int)($order['id'] ?? 0);
         if ($orderId <= 0) throw new InvalidArgumentException('Carrier label requires an order ID');
         $result = $this->call('/v1/labels', 'POST', [
-            'idempotency_key' => 'order-' . $orderId,
+            'idempotency_key' => 'order-' . $orderId . ((int)($order['label_sequence'] ?? 1) > 1 ? '-' . (int)$order['label_sequence'] : ''),
             'order' => $this->orderPayload($order),
         ]);
         $awb = trim((string)($result['awb'] ?? ''));
@@ -116,6 +116,10 @@ class HttpShipping implements ShippingLifecycleAdapter
             'total' => (int)($order['total'] ?? 0),
             'currency' => strtolower((string)($order['currency'] ?? 'eur')),
             'pickup_point_id' => (string)($order['pickup_point_id'] ?? ''),
+            // Cash on delivery: the amount the carrier collects from the recipient, null for a prepaid parcel.
+            'cod' => (int)($order['cod_amount'] ?? 0) > 0
+                ? ['amount' => (int)$order['cod_amount'], 'currency' => strtolower((string)($order['currency'] ?? 'eur'))]
+                : null,
         ];
     }
 }

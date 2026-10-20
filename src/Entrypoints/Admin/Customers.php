@@ -22,7 +22,7 @@ function pageCustomers(): void {
     <div class="card">
         <form method="get" action="admin.php" style="display:flex;gap:.5rem;align-items:center;margin-bottom:1rem">
             <input type="hidden" name="p" value="customers">
-            <input type="text" name="q" value="<?= esc($q) ?>" placeholder="<?= esc(I18n::t('admin.customers.search_placeholder')) ?>" style="min-width:280px">
+            <input type="text" name="q" aria-label="<?= esc(I18n::t('admin.customers.search_placeholder')) ?>" value="<?= esc($q) ?>" placeholder="<?= esc(I18n::t('admin.customers.search_placeholder')) ?>" style="min-width:280px">
             <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.btn.search')) ?></button>
             <?php if ($q !== ''): ?><a class="btn btn-sm" href="admin.php?p=customers"><?= esc(I18n::t('admin.customers.clear_filter')) ?></a><?php endif; ?>
         </form>

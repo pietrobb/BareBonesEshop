@@ -38,7 +38,7 @@ class Security {
                 'lifetime' => 0,
                 'path'     => '/',
                 'httponly' => true,
-                'secure'   => !empty($_SERVER['HTTPS']) || $configuredHttps,
+                'secure'   => self::requestIsHttps() || $configuredHttps,
                 'samesite' => 'Lax',
             ]);
             session_start();
@@ -67,7 +67,9 @@ class Security {
         header("X-XSS-Protection: 1; mode=block");
         header("Referrer-Policy: strict-origin-when-cross-origin");
         header("Permissions-Policy: camera=(), microphone=(), geolocation=()");
-        if (!empty($_SERVER['HTTPS'])) {
+        // Behind a TLS-terminating proxy PHP sees plain http: trust X-Forwarded-Proto from trusted_proxies, or an https
+        // app_url (browsers ignore HSTS received over http, so sending it there is harmless).
+        if (self::requestIsHttps() || strtolower((string)parse_url((string)(self::cfg()['app_url'] ?? ''), PHP_URL_SCHEME)) === 'https') {
             header("Strict-Transport-Security: max-age=31536000; includeSubDomains; preload");
         }
         $reportUrl = self::cspReportUrl();
@@ -103,8 +105,9 @@ class Security {
     }
 
     /**
-     * Origins the checkout form POST may redirect to, declared by every registered
-     * hosted-checkout payment adapter. Browsers apply form-action to the redirect that
+     * Origins the checkout form POST may redirect to, declared by the hosted-checkout payment
+     * adapters this store's active online payment methods use (PaymentService::onlineProviderCodes);
+     * a registered but unused gateway is not allowed. Browsers apply form-action to the redirect that
      * follows a form submission, so a missing origin silently blocks payment
      * (P0 2026-10-13: card checkout dead since 1.9.0). Any CSP change needs the
      * browser E2E payment-redirect test in tests/e2e/commerce.spec.js.
@@ -113,7 +116,7 @@ class Security {
     public static function paymentRedirectOrigins(): array {
         if (!is_file(dirname(__DIR__) . '/config.php')) return [];
         try {
-            $codes = array_keys(Adapters::registry('payment'));
+            $codes = array_intersect(PaymentService::onlineProviderCodes(), array_map('strval', array_keys(Adapters::registry('payment'))));
         } catch (\Throwable $e) {
             error_log('CSP payment origins unavailable: ' . $e->getMessage());
             return [];
@@ -146,7 +149,7 @@ class Security {
         if (!isset($parts['host'])) return !isset($parts['scheme']) && !str_starts_with($url, '//');
         $scheme = strtolower((string)($parts['scheme'] ?? ''));
         $origin = $scheme . '://' . strtolower((string)$parts['host']) . (isset($parts['port']) ? ':' . $parts['port'] : '');
-        $self = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+        $self = (self::requestIsHttps() ? 'https' : 'http') . '://' . strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
         return $origin === $self || in_array($origin, self::paymentRedirectOrigins(), true);
     }
 
@@ -279,6 +282,7 @@ class Security {
     // ============================================================
     private static ?PDO $rateDb = null;
     private static int $rateDbLastCleanup = 0;
+    private static bool $rateDbFailureReported = false;
 
     private static function privateCacheDir(array $cfg): string {
         $dir = (string)($cfg['private_cache_dir'] ?? dirname(__DIR__, 2) . '/bareboneseshop-private/cache');
@@ -328,6 +332,7 @@ class Security {
         $db->exec('CREATE INDEX IF NOT EXISTS idx_hits ON hits(key, ts)');
         self::$rateDb = $db;
         self::$rateDbLastCleanup = time();
+        self::$rateDbFailureReported = false;
     }
 
     /**
@@ -337,15 +342,39 @@ class Security {
      */
     public static function rateLimitAllows(string $action, int $maxHits, int $windowSeconds, bool $bindIp = true): bool {
         $windowSeconds = max(1, min(86400, $windowSeconds));
-        $stmt = self::rateDb()->prepare("SELECT COUNT(*) FROM hits WHERE key = :key AND ts > :window");
-        $stmt->execute([':key' => self::rateKey($action, $bindIp), ':window' => time() - $windowSeconds]);
-        return (int)$stmt->fetchColumn() < max(0, $maxHits);
+        return self::withRateDb(static function (PDO $db) use ($action, $maxHits, $windowSeconds, $bindIp): bool {
+            $stmt = $db->prepare("SELECT COUNT(*) FROM hits WHERE key = :key AND ts > :window");
+            $stmt->execute([':key' => self::rateKey($action, $bindIp), ':window' => time() - $windowSeconds]);
+            return (int)$stmt->fetchColumn() < max(0, $maxHits);
+        });
     }
 
     /** Records one hit for $action (see rateLimitAllows()). */
     public static function rateLimitRecord(string $action, bool $bindIp = true): void {
-        self::rateDb()->prepare("INSERT INTO hits (key, ts) VALUES (:key, :ts)")
-            ->execute([':key' => self::rateKey($action, $bindIp), ':ts' => time()]);
+        self::withRateDb(static function (PDO $db) use ($action, $bindIp): bool {
+            $db->prepare("INSERT INTO hits (key, ts) VALUES (:key, :ts)")
+                ->execute([':key' => self::rateKey($action, $bindIp), ':ts' => time()]);
+            return true;
+        });
+    }
+
+    /**
+     * Runs a rate-limit query. When the limiter's storage fails (read-only or full disk, unwritable private cache)
+     * the request is allowed rather than answered with a 500: checkout, API and payment webhooks keep working, and
+     * the outage is raised once per request as a critical incident.
+     * @param callable(PDO): bool $query
+     */
+    private static function withRateDb(callable $query): bool {
+        try {
+            return $query(self::rateDb());
+        } catch (Throwable $e) {
+            if (!self::$rateDbFailureReported) {
+                self::$rateDbFailureReported = true;
+                Logger::error('security.rate_limit_storage_failed', ['exception_type' => get_class($e), 'message' => $e->getMessage()]);
+                IncidentMonitor::report('security.rate_limit_storage_failed', 'security', 'critical', ['exception' => $e]);
+            }
+            return true;
+        }
     }
 
     private static function rateKey(string $action, bool $bindIp): string {
@@ -377,18 +406,16 @@ class Security {
     public static function rateLimit(string $action, int $maxHits = 60, int $windowSeconds = 60, bool $bindIp = true): bool {
         $windowSeconds = max(1, min(86400, $windowSeconds));
         $key = self::rateKey($action, $bindIp);
-        $now = time();
-        $window = $now - $windowSeconds;
-        $db = self::rateDb();
+        $allowed = self::withRateDb(static function (PDO $db) use ($key, $windowSeconds, $maxHits): bool {
+            $now = time();
+            $db->prepare("INSERT INTO hits (key, ts) VALUES (:key, :ts)")
+               ->execute([':key' => $key, ':ts' => $now]);
+            $stmt = $db->prepare("SELECT COUNT(*) FROM hits WHERE key = :key AND ts > :window");
+            $stmt->execute([':key' => $key, ':window' => $now - $windowSeconds]);
+            return (int)$stmt->fetchColumn() <= max(0, $maxHits);
+        });
 
-        $db->prepare("INSERT INTO hits (key, ts) VALUES (:key, :ts)")
-           ->execute([':key' => $key, ':ts' => $now]);
-
-        $stmt = $db->prepare("SELECT COUNT(*) FROM hits WHERE key = :key AND ts > :window");
-        $stmt->execute([':key' => $key, ':window' => $window]);
-        $count = (int) $stmt->fetchColumn();
-
-        if ($count > max(0, $maxHits)) {
+        if (!$allowed) {
             http_response_code(429);
             header('Retry-After: ' . $windowSeconds);
             return false;
@@ -522,6 +549,16 @@ class Security {
     // ============================================================
     // IP address — behind proxy/load balancer
     // ============================================================
+    /** Whether the client reached us over https: directly, or via a trusted proxy that says so in X-Forwarded-Proto. */
+    public static function requestIsHttps(): bool {
+        $https = strtolower((string)($_SERVER['HTTPS'] ?? ''));
+        if ($https !== '' && $https !== 'off') return true;
+        $trusted = self::cfg()['trusted_proxies'] ?? [];
+        if (empty($trusted) || !in_array($_SERVER['REMOTE_ADDR'] ?? '', $trusted, true)) return false;
+        $proto = explode(',', (string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
+        return strtolower(trim(end($proto))) === 'https';
+    }
+
     public static function clientIp(): string {
         $cfg = self::cfg();
         $trusted = $cfg['trusted_proxies'] ?? [];

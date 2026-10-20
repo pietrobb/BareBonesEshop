@@ -1,7 +1,8 @@
 <?php
 /** Canonical, hreflang, Open Graph, and indexability metadata for SSR pages. */
 class Seo {
-    public static function head(string $title, string $description, string $path, bool $index = true): string {
+    /** @param array<string, string> $localePaths prefix-less path per hreflang locale where it differs (translated slugs) */
+    public static function head(string $title, string $description, string $path, bool $index = true, array $localePaths = []): string {
         $path = self::localPath($path);
         $cfg = require __DIR__ . '/../config.php';
         $base = rtrim((string)($cfg['app_url'] ?? ''), '/');
@@ -24,16 +25,18 @@ class Seo {
             '<meta property="og:url" content="' . $e($canonical) . '">',
         ];
         $alternates = Bootstrap::hreflangAlternates($path);
+        $pathOf = static fn(string|int $locale): string => (string)($localePaths[(string)$locale] ?? $alternates['pathNoPrefix']);
         foreach ($alternates['alternates'] as $locale => $prefix) {
             $lines[] = '<link rel="alternate" hreflang="' . $e((string)$locale) . '" href="'
-                . $e($base . (string)$prefix . $alternates['pathNoPrefix']) . '">';
+                . $e($base . (string)$prefix . $pathOf($locale)) . '">';
         }
         foreach ($alternates['secondary'] as $locale => $prefix) {
             $lines[] = '<link rel="alternate" hreflang="' . $e((string)$locale) . '" href="'
-                . $e($base . Bootstrap::withLang((string)$prefix . $alternates['pathNoPrefix'], (string)$locale)) . '">';
+                . $e($base . Bootstrap::withLang((string)$prefix . $pathOf($locale), (string)$locale)) . '">';
         }
+        $xDefaultLocale = array_search($alternates['xDefaultPrefix'], $alternates['alternates'], true);
         $lines[] = '<link rel="alternate" hreflang="x-default" href="'
-            . $e($base . $alternates['xDefaultPrefix'] . $alternates['pathNoPrefix']) . '">';
+            . $e($base . $alternates['xDefaultPrefix'] . ($xDefaultLocale === false ? $alternates['pathNoPrefix'] : $pathOf($xDefaultLocale))) . '">';
         return implode("\n", $lines);
     }
 

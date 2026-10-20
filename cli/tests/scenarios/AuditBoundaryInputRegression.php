@@ -134,6 +134,8 @@ try {
     // A logged-in customer reaches the account actions behind Customers::isLoggedIn().
     $a102Email = 'a102-array-' . bin2hex(random_bytes(3)) . '@example.com';
     Customers::register($a102Email, 'A102-strong-pass!', 'Array Tester');
+    $r7rEmail = 'r7r-erase-' . bin2hex(random_bytes(3)) . '@example.com';
+    Customers::register($r7rEmail, 'R7r-strong-pass!', 'Erase Tester');
     $a102Customer = $a102Session();
     $a102Login = $a102Request('POST', '/account.php', ['cookie' => $a102Customer['cookie'],
         'form' => ['csrf_token' => $a102Customer['csrf'], 'action' => 'login', 'email' => $a102Email, 'password' => 'A102-strong-pass!']]);
@@ -166,6 +168,31 @@ try {
     $a102Fresh = $a102Session();
     $a102Valid = $a102Request('POST', '/account.php', ['cookie' => $a102Fresh['cookie'], 'form' => ['csrf_token' => $a102Fresh['csrf'], 'action' => 'cookie_consent', 'analytics' => '1']]);
     assert_true(in_array($a102Valid['status'], [200, 302, 303], true), "A10.2 CSRF: a valid scalar token is still accepted (got {$a102Valid['status']})");
+
+    // Round 7 review (R6 unfixed): self-service account erasure asks for the current password, not only "DELETE".
+    // (customer $r7rEmail is registered before the fuzz loop above, which leaves the test database write-locked)
+    $r7rS = $a102Session();
+    $r7rLogin = $a102Request('POST', '/account.php', ['cookie' => $r7rS['cookie'],
+        'form' => ['csrf_token' => $r7rS['csrf'], 'action' => 'login', 'email' => $r7rEmail, 'password' => 'R7r-strong-pass!']]);
+    $r7rJar = $r7rLogin['cookies'] + array_column(array_map(fn($p) => explode('=', $p, 2), explode('; ', $r7rS['cookie'])), 1, 0);
+    $r7rCookie = implode('; ', array_map(fn($k, $v) => "{$k}={$v}", array_keys($r7rJar), $r7rJar));
+    $r7rPrivacy = $a102Request('GET', '/account.php?p=privacy', ['cookie' => $r7rCookie]);
+    preg_match('/name="csrf_token" value="([a-f0-9]{64})"/', $r7rPrivacy['body'], $r7rM);
+    // Checked over HTTP: after the fuzz loop this process's connection may still read an older snapshot.
+    $r7rStill = static function () use ($a102Session, $a102Request, $r7rEmail): bool {
+        $s = $a102Session();
+        return $a102Request('POST', '/account.php', ['cookie' => $s['cookie'],
+            'form' => ['csrf_token' => $s['csrf'], 'action' => 'login', 'email' => $r7rEmail, 'password' => 'R7r-strong-pass!']])['status'] === 302;
+    };
+    assert_true(str_contains($r7rPrivacy['body'], 'id="account-erase-password"'), 'R7 erase: the privacy page asks for the current password');
+    foreach (['no password' => [], 'a wrong password' => ['password' => 'not-my-password']] as $r7rCase => $r7rExtra) {
+        $a102Request('POST', '/account.php', ['cookie' => $r7rCookie,
+            'form' => ['csrf_token' => $r7rM[1] ?? '', 'action' => 'erase_account', 'confirm' => 'DELETE'] + $r7rExtra]);
+        assert_true($r7rStill(), "R7 erase: \"DELETE\" with {$r7rCase} does not erase the account (was erased)");
+    }
+    $r7rErase = $a102Request('POST', '/account.php', ['cookie' => $r7rCookie,
+        'form' => ['csrf_token' => $r7rM[1] ?? '', 'action' => 'erase_account', 'confirm' => 'DELETE', 'password' => 'R7r-strong-pass!']]);
+    assert_true(!$r7rStill() && $r7rErase['status'] === 302, "R7 erase: \"DELETE\" with the current password erases the account (status {$r7rErase['status']})");
 } finally {
     proc_terminate($a102Server);
     proc_close($a102Server);

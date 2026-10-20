@@ -141,6 +141,7 @@ match ($action) {
     'cat_foreign_parent' => [$_POST = $cat(['name'=>'X', 'parent_id'=>(string)$c('a', $foreign)]), handlePost('categories', 'save')],
     'cat_edit_foreign' => [$_GET = ['id'=>$c('b', $foreign)], $_POST = $cat(['name'=>'Stolen']), handlePost('categories', 'save')],
     'cat_sibling_dup' => [$_POST = $cat(['name'=>'X', 'slug'=>"a124b-{$own}", 'parent_id'=>(string)$c('a')]), handlePost('categories', 'save')],
+    'cat_cousin_dup' => [$_POST = $cat(['name'=>'X', 'slug'=>"a124b-{$own}", 'parent_id'=>(string)$c('d')]), handlePost('categories', 'save')],
     'cat_bad_locale' => [$_POST = $cat(['name'=>'X', 'tr'=>['xx'=>['name'=>'Unknown']]]), handlePost('categories', 'save')],
     'cat_array_name' => [$_POST = $cat(['name'=>['X']]), handlePost('categories', 'save')],
     'cat_no_csrf' => [$_POST = array_diff_key($cat(['name'=>'No token']), ['csrf_token'=>1]), handlePost('categories', 'save')],
@@ -179,7 +180,7 @@ $a124Run = static function(array $args) use ($a124Fixture): array {
 // Refused actions: expected flash fragment; categories and brands must stay byte-identical.
 $a124Refused = [
     'cat_cycle' => 'pod seba', 'cat_self_parent' => 'pod seba', 'cat_foreign_parent' => 'nepatrí do katalógu', 'cat_edit_foreign' => 'neexistuje',
-    'cat_sibling_dup' => 'na tejto úrovni', 'cat_bad_locale' => 'nie je v tomto obchode povolený', 'cat_array_name' => 'Neplatný formulár', 'cat_no_csrf' => 'CSRF',
+    'cat_sibling_dup' => 'v katalógu', 'cat_cousin_dup' => 'v katalógu', 'cat_bad_locale' => 'nie je v tomto obchode povolený', 'cat_array_name' => 'Neplatný formulár', 'cat_no_csrf' => 'CSRF',
     'cat_delete_children' => 'podkategórie', 'cat_delete_products' => 'produkty', 'cat_delete_promo' => 'a124promo-', 'cat_delete_foreign' => 'neexistuje',
     'brand_dup_code' => 'už v tomto katalógu existuje', 'brand_edit_foreign' => 'neexistuje', 'brand_delete_used' => 'produkty', 'brand_delete_promo' => 'a124promo-',
     'brand_delete_foreign' => 'neexistuje',
@@ -212,8 +213,8 @@ try {
                 foreach (['categories', 'brands'] as $a124Table) {
                     assert_equals($a124Own($a124Result['before'][$a124Table] ?? [], $a124Foreign), $a124Own($a124Result['after'][$a124Table] ?? [], $a124Foreign), "{$a124Label}: foreign catalog {$a124Table} unchanged");
                 }
-                // The default catalog already owns the root "shoes"; there the same create is a sibling conflict.
-                $a124RefusedHere = $a124Refused + ($a124Store === 'default' ? ['cat_create_shared_slug' => 'na tejto úrovni'] : []);
+                // The default catalog already owns the root "shoes"; there the same create is a slug conflict.
+                $a124RefusedHere = $a124Refused + ($a124Store === 'default' ? ['cat_create_shared_slug' => 'v katalógu'] : []);
                 if (isset($a124RefusedHere[$a124Action])) {
                     assert_equals(['err', true], [$a124Flash['type'] ?? null, str_contains((string)($a124Flash['msg'] ?? ''), $a124RefusedHere[$a124Action])], "{$a124Label}: refused with a specific error");
                     assert_equals($a124Result['before'], $a124Result['after'], "{$a124Label}: categories, brands and audit log unchanged");

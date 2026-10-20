@@ -292,10 +292,11 @@ class Orders {
             }
 
             // 5. Record coupon use atomically within the order transaction
-            if ($coupon && !empty($coupon['code']) && ($coupon['discount'] ?? 0) > 0) {
+            // A free-shipping coupon discounts no goods (discount 0) but is still a use against its limits.
+            if ($coupon && !empty($coupon['code'])) {
                 Pricing::recordCouponUse(
                     $coupon['code'], $orderId,
-                    $customer['email'], $coupon['discount']
+                    $customer['email'], max(0, (int)($coupon['discount'] ?? 0))
                 );
             }
 
@@ -433,7 +434,9 @@ class Orders {
     public static function updateStatus(int $orderId, string $status, ?string $expectedFrom = null): bool {
         $params = [':status' => $status, ':id' => $orderId, ':store' => StoreContext::current()->id()];
         if ($expectedFrom !== null) $params[':from'] = $expectedFrom;
-        $stmt = Db::get()->prepare("UPDATE orders SET status = :status, updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store"
+        // The return window counts from the first delivery.
+        $delivered = $status === 'delivered' ? ', delivered_at = COALESCE(delivered_at, ' . Db::now() . ')' : '';
+        $stmt = Db::get()->prepare("UPDATE orders SET status = :status, updated_at = " . Db::now() . "{$delivered} WHERE id = :id AND store_id = :store"
             . ($expectedFrom !== null ? ' AND status = :from' : ''));
         $stmt->execute($params);
         return $stmt->rowCount() === 1;

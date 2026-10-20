@@ -62,6 +62,7 @@ switch ($page) {
         $slug = Security::clean($_GET['slug'] ?? $_GET['category'] ?? '');
         redirectCategoryTrailingSlash($slug);
         $cat = Categories::bySlug($slug);
+        if ($cat) StorefrontSeo::redirectToCanonical($slug, (string)$cat['slug'], 'category');
         if (!$cat) {
             http_response_code(404);
             $title = Template::pageTitle($t('cat_not_found'));
@@ -75,6 +76,7 @@ switch ($page) {
     case 'product':
         $slug = Security::clean($_GET['slug'] ?? '');
         $product = Products::bySlug($slug);
+        if ($product) StorefrontSeo::redirectToCanonical($slug, (string)I18n::product($product)['slug'], 'product');
         if (!$product) {
             [$content, $title] = renderUnavailableProduct($slug);
             break;

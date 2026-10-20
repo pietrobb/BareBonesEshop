@@ -244,6 +244,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $flash = $t('account.gdpr_erase_confirm_required');
             $flashType = 'error';
             $p = 'privacy';
+        } elseif (!Security::rateLimit('account_change_password_' . $cid, 5, 900, false)
+            || !Customers::passwordMatches($cid, Security::str($_POST['password'] ?? ''))) {
+            // A hijacked or unattended session alone must not be able to erase the account irreversibly.
+            $flash = $t('account.err_invalid_current_password');
+            $flashType = 'error';
+            $p = 'privacy';
         } else {
             try {
                 GdprService::anonymizeCustomer($cid, 'self');
@@ -316,6 +322,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ];
         $method = (string)($_POST['method'] ?? 'preferences');
         if (!in_array($method, ['banner_accept_all', 'banner_reject_all', 'preferences'], true)) $method = 'preferences';
+        // The banner's accept/reject buttons (no-JS form submit) carry no checkboxes: the button decides.
+        if ($method !== 'preferences') $cats['analytics'] = $cats['marketing'] = $method === 'banner_accept_all';
         $cid = Customers::isLoggedIn() ? (int)$_SESSION['customer_id'] : null;
         // Same consent log as the banner's cookie_consent API action.
         GdprService::logCookieConsent([
@@ -330,7 +338,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $cookieOptions = [
             'expires'  => time() + 31536000, // 12 months
             'path'     => Template::baseUrl() ?: '/',
-            'secure'   => !empty($_SERVER['HTTPS']),
+            'secure'   => Security::requestIsHttps(),
             'httponly' => false,
             'samesite' => 'Lax',
         ];
@@ -340,7 +348,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             setcookie('cookie_consent', '', ['expires' => 1] + $cookieOptions);
             setcookie('cookie_consent', '', ['expires' => 1, 'path' => '/'] + $cookieOptions);
         }
-        $_SESSION['account_flash'] = ['message' => $t('account.saved'), 'type' => 'ok'];
+        // The banner returns to the page it covered, which shows no account flash.
+        if (($_POST['source'] ?? '') !== 'banner') $_SESSION['account_flash'] = ['message' => $t('account.saved'), 'type' => 'ok'];
         header('Location: ' . Security::safeLocalPath($_POST['return_to'] ?? null, Template::storeUrl('/account.php?p=privacy')));
         exit;
     }
@@ -370,7 +379,9 @@ if ($p === 'invoice') {
     header('Content-Type: application/pdf');
     header('Content-Disposition: inline; filename="' . $inv['number'] . '.pdf"');
     header('Content-Length: ' . filesize($abs));
-    header('Cache-Control: private, max-age=300');
+    // Anyone holding the link can open it: no copy stays in a (shared) browser's cache or survives a cancellation.
+    header('Cache-Control: no-store');
+    header('X-Robots-Tag: noindex, nofollow');
     readfile($abs);
     exit;
 }

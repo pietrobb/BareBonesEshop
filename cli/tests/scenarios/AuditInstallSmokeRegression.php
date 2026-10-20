@@ -151,7 +151,8 @@ try {
             '/config.php', '/config.example.php', '/stores.json', '/router.php', '/cli/setup.php', '/src/Db.php', '/migrations/',
             '/releases/update-public.key', '/deploy/nginx.conf', '/vendor/bbf/bbf_render.php', '/vendor/bbf/',
             '/.htaccess', '/.env.example', '/.gitmodules', '/README.md', '/assets/', '/jobs/pending/.gitkeep', '/storage/.gitkeep',
-            '/vendor/bbf/submit.php?form=admin-product',
+            '/vendor/bbf/submit.php?form=admin-product', '/vendor/bbf/submit.php?form=demo-file', '/vendor/bbf/submit.php?form=kontakt',
+            '/vendor/bbf/submit.php',
         ] as $a111Path) {
             assert_equals(403, $a111Get($a111Path)['status'], "A11.1 php -S router.php denies {$a111Path}");
         }

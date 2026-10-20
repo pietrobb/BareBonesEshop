@@ -676,6 +676,19 @@ function handleInvoiceIssue(array $payload, array $job): void {
     $orderId = (int)($payload['order_id'] ?? 0);
     if (!$orderId) return;
 
+    // Paid, then cancelled (or the payment failed) before the worker ran: nothing to invoice any more. Retrying would
+    // only raise the same "not paid" incident until the job is dead; an invoice that already exists is still mailed.
+    $current = Orders::byId($orderId);
+    if (!$current) return;
+    if (!InvoiceService::canIssue($current)) {
+        $existing = InvoiceService::byOrderId($orderId);
+        if ($existing === null || (string)($existing['status'] ?? '') === InvoiceService::STATUS_CANCELLED) {
+            Logger::info('invoice.issue_skipped', ['order_id' => $orderId, 'status' => (string)($current['status'] ?? ''),
+                'payment_status' => (string)($current['payment_status'] ?? '')]);
+            return;
+        }
+    }
+
     // Issue invoice (idempotent — returns existing invoice if already issued)
     JobQueue::heartbeat(true); // a fresh lease for the PDF rendering
     $invoice = InvoiceService::issue($orderId);

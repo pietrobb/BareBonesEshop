@@ -1720,16 +1720,22 @@ $db = $driver === "mysql"
 $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 Db::init($db, $driver);
-$db->exec("CREATE " . ($driver === "mysql" ? "TEMPORARY " : "") . "TABLE products (id INTEGER PRIMARY KEY, store_id VARCHAR(40) NOT NULL DEFAULT \'default\', price INTEGER NOT NULL, updated_at DATETIME NULL)");
-$db->exec("INSERT INTO products (id, price) VALUES (5, 1001), (7, 1010), (9, 0), (11, 99), (13, -100)");
-// Bulk price changes read the variant price floor and write the audit log.
+$db->exec("CREATE " . ($driver === "mysql" ? "TEMPORARY " : "") . "TABLE products (id INTEGER PRIMARY KEY, store_id VARCHAR(40) NOT NULL DEFAULT \'default\', sku VARCHAR(40) NOT NULL DEFAULT \'\', slug VARCHAR(40) NOT NULL DEFAULT \'\', name VARCHAR(80) NOT NULL DEFAULT \'\', product_type VARCHAR(20) NOT NULL DEFAULT \'simple\', price INTEGER NOT NULL, compare_price INTEGER NULL, currency VARCHAR(3) NOT NULL DEFAULT \'eur\', stock INTEGER NOT NULL DEFAULT 0, status VARCHAR(20) NOT NULL DEFAULT \'active\', created_at DATETIME NULL, updated_at DATETIME NULL)");
+$db->exec("INSERT INTO products (id, sku, price) VALUES (5, \'A5\', 1001), (7, \'A7\', 1010), (9, \'A9\', 0), (11, \'A11\', 99), (13, \'A13\', -100)");
+// A price change records product.updated in the same transaction (Outbox).
+$db->exec("CREATE " . ($driver === "mysql" ? "TEMPORARY TABLE event_sequence (id INTEGER PRIMARY KEY AUTO_INCREMENT)" : "TABLE event_sequence (id INTEGER PRIMARY KEY AUTOINCREMENT)"));
+$db->exec("CREATE " . ($driver === "mysql" ? "TEMPORARY " : "") . "TABLE event_outbox (id VARCHAR(32) PRIMARY KEY, store_id VARCHAR(40), channel_id VARCHAR(40), event_type VARCHAR(190), aggregate_type VARCHAR(190), aggregate_id VARCHAR(190), event_version INTEGER, payload TEXT, status VARCHAR(20), attempts INTEGER, available_at DATETIME, occurred_at DATETIME, updated_at DATETIME, correlation_id VARCHAR(80), seq INTEGER)");
+// Bulk price changes read the variant price floor, record the price history (Omnibus) and write the audit log.
 $tmp = $driver === "mysql" ? "TEMPORARY " : "";
+// Not TEMPORARY: MySQL cannot open a temporary table twice in one query (the 30-day lookup unions it with itself).
+$db->exec("DROP TABLE IF EXISTS product_price_history");
+$db->exec("CREATE TABLE product_price_history (id INTEGER PRIMARY KEY " . ($driver === "mysql" ? "AUTO_INCREMENT" : "AUTOINCREMENT") . ", product_id INTEGER NOT NULL, price INTEGER NOT NULL, lowest_prior INTEGER NULL, changed_at DATETIME NOT NULL)");
 $db->exec("CREATE {$tmp}TABLE variants (id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL, price_absolute INTEGER NULL, price_delta INTEGER NOT NULL DEFAULT 0)");
 $db->exec("CREATE {$tmp}TABLE audit_log (id INTEGER PRIMARY KEY " . ($driver === "mysql" ? "AUTO_INCREMENT" : "") . ", entity VARCHAR(40), entity_id INTEGER, action VARCHAR(40), old_value TEXT, new_value TEXT, note TEXT, actor VARCHAR(80), ip_address VARCHAR(80), store_id VARCHAR(40), correlation_id VARCHAR(80), created_at DATETIME NULL)");
 $_SESSION = ["admin_role" => "owner"];
 $_POST = ["bulk_action" => $argv[2], "product_ids" => json_decode($argv[3], true, 512, JSON_THROW_ON_ERROR)];
 register_shutdown_function(static function() use ($db): void {
-    echo json_encode(["products" => $db->query("SELECT id, price, updated_at FROM products ORDER BY id")->fetchAll(), "flash" => $_SESSION["flash"] ?? null], JSON_THROW_ON_ERROR);
+    echo json_encode(["products" => $db->query("SELECT id, price, updated_at FROM products ORDER BY id")->fetchAll(), "events" => $db->query("SELECT event_type, aggregate_id FROM event_outbox ORDER BY seq")->fetchAll(), "flash" => $_SESSION["flash"] ?? null], JSON_THROW_ON_ERROR);
 });
 handleBulkAction();
 ');
@@ -1761,6 +1767,9 @@ try {
             assert_equals($bulkExpected, array_map('intval', array_column($bulkResult['products'], 'price')), "{$bulkLabel}: exact cent prices, clamp and unselected products");
             $bulkUpdated = array_map('intval', array_column(array_filter($bulkResult['products'], static fn(array $row): bool => $row['updated_at'] !== null), 'id'));
             assert_equals($bulkIds, $bulkUpdated, "{$bulkLabel}: only selected products receive updated_at");
+            $bulkChanged = array_keys(array_diff_assoc(array_combine([5, 7, 9, 11, 13], $bulkExpected), [5 => 1001, 7 => 1010, 9 => 0, 11 => 99, 13 => -100]));
+            assert_equals(array_map(static fn(int $id): array => ['event_type' => 'product.updated', 'aggregate_id' => (string)$id], $bulkChanged),
+                $bulkResult['events'], "{$bulkLabel}: one product.updated per product whose price changed, none for an unchanged one");
         }
     }
 } finally {

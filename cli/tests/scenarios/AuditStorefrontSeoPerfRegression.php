@@ -40,6 +40,8 @@ if ($phase === 'setup') {
     if ($warehouse > 0) $db->exec("INSERT INTO warehouse_stock (warehouse_id, sku, qty, reserved) SELECT {$warehouse}, sku, 5, 0 FROM products WHERE sku LIKE 'SFB-%'");
     $ids = $db->query("SELECT id, slug FROM products WHERE slug LIKE 'sfb-%'")->fetchAll(PDO::FETCH_KEY_PAIR);
     $ids = array_flip($ids);
+    // Registered like Import/ProductEditor do: the storefront resolves a translated slug through slug_registry.
+    $db->prepare("INSERT INTO slug_registry (slug, locale, entity, entity_id, store_id) VALUES ('sfb-main-cs', 'cs', 'product', ?, 'default')")->execute([$ids['sfb-main']]);
     $relation = $db->prepare("INSERT INTO product_related_products (product_id, related_product_id, relation_type, sort_order) VALUES (?, ?, ?, ?)");
     for ($i = 1; $i <= 30; $i++) {
         $relation->execute([$ids['sfb-main'], $ids['sfb-p-' . $i], $i % 2 ? 'related' : 'accessory', $i]);
@@ -140,6 +142,7 @@ if ($action === 'sitemap') {
     $outOfRange = false;
     try { Sitemap::xml('https://shop.example/shop', count($parts[1]) + 1); } catch (OutOfRangeException) { $outOfRange = true; }
     preg_match_all('#<loc>([^<]+)</loc>#', $full, $fullLocs);
+    $mainEntries = array_values(array_filter(explode('<url>', $full), static fn(string $entry): bool => str_contains($entry, '/product/sfb-main')));
     // Cached per store: a second request reuses the file, a product save (updated_at) rebuilds it.
     $calls = 0;
     $writer = static function($out) use (&$calls): void { $calls++; fwrite($out, "<urlset>{$calls}</urlset>"); };
@@ -152,7 +155,7 @@ if ($action === 'sitemap') {
     $emit([
         'full_is_urlset' => str_contains($full, '<urlset'), 'index_is_index' => str_contains($index, '<sitemapindex'),
         'part_sizes' => $sizes, 'part_locs' => $locs, 'full_locs' => $fullLocs[1], 'out_of_range' => $outOfRange,
-        'cache' => [$first, $second, $third], 'calls_after_two' => $callsAfterTwo, 'calls' => $calls,
+        'cache' => [$first, $second, $third], 'calls_after_two' => $callsAfterTwo, 'calls' => $calls, 'main_entries' => $mainEntries,
         'cache_file' => is_file($dir . '/cache/stores/default/storefront/public/sitemap-0.xml'),
     ]);
     exit(0);
@@ -162,6 +165,14 @@ if ($action === 'feed') {
     $google = MarketingFeed::google('https://shop.example/shop', 'cs');
     $meta = MarketingFeed::meta('https://shop.example/shop', 'cs');
     $emit(['google' => $google, 'meta' => $meta, 'rows_is_generator' => MarketingFeed::rows('cs') instanceof Generator]);
+    exit(0);
+}
+
+if ($action === 'fix_slugs') {
+    $repair = SlugRepair::run($db);
+    $emit(['repair' => $repair, 'main' => (string)$db->query("SELECT slug FROM products WHERE sku = 'SFB-MAIN'")->fetchColumn(),
+        'cat' => (string)$db->query("SELECT slug FROM categories WHERE name = 'SFB Category'")->fetchColumn(),
+        'aliases' => $db->query("SELECT entity, slug FROM slug_registry WHERE locale = 'previous' AND slug IN ('sfb-main', 'sfb-cat') ORDER BY entity")->fetchAll(PDO::FETCH_KEY_PAIR)]);
     exit(0);
 }
 
@@ -304,6 +315,22 @@ try {
     assert_equals(['https://shop.example/shop/product/sfb-main', 'https://shop.example/shop/product/sfb-main', ['https://shop.example/shop/uploads/full/sfb-main.jpg']],
         [$sfbProductLd['url'] ?? null, $sfbProductLd['offers']['url'] ?? null, $sfbProductLd['image'] ?? null], "Storefront SEO: Product JSON-LD url, offer url and image are absolute ({$sfbNoise})");
     assert_true(str_contains((string)($sfbModel['head'] ?? ''), '<meta property="og:image" content="https://shop.example/shop/uploads/full/sfb-main.jpg">'), 'Storefront SEO: og:image is absolute');
+    // R7: each hreflang alternate names the product's URL in that language (Czech slug sfb-main-cs), from either store.
+    [, $sfbCzModel, $sfbNoise] = $sfbRun('run', 'product_model', ['script_name' => '/shop/index.php', 'store' => 'cz', 'locale' => 'cs']);
+    $sfbHreflang = static function(array $model): array {
+        preg_match_all('#<link rel="alternate" hreflang="([^"]+)" href="([^"]*)"#', (string)($model['head'] ?? ''), $m);
+        return array_combine($m[1], array_map(static fn(string $href): string => html_entity_decode($href, ENT_QUOTES | ENT_HTML5), $m[2]));
+    };
+    $sfbCzLocale = (string)(Bootstrap::stores()['stores']['cz']['default_locale'] ?? 'cs');
+    $sfbDefaultLocale = (string)(Bootstrap::stores()['stores'][(string)(Bootstrap::stores()['default_store'] ?? 'default')]['default_locale'] ?? 'sk');
+    foreach (['default store' => $sfbModel, 'CZ store' => $sfbCzModel] as $sfbLabel => $sfbHeadModel) {
+        $sfbLinks = $sfbHreflang($sfbHeadModel);
+        assert_equals(['https://shop.example/shop/cs/product/sfb-main-cs', 'https://shop.example/shop/product/sfb-main', 'https://shop.example/shop/product/sfb-main'],
+            [$sfbLinks[$sfbCzLocale] ?? null, $sfbLinks[$sfbDefaultLocale] ?? null, $sfbLinks['x-default'] ?? null],
+            "R7 hreflang: on the {$sfbLabel} product page the Czech alternate uses the Czech slug, the others the base slug ({$sfbNoise})");
+    }
+    assert_true(str_contains((string)($sfbCzModel['head'] ?? ''), '<link rel="canonical" href="https://shop.example/shop/cs/product/sfb-main-cs">'),
+        'R7 hreflang: the CZ product canonical is its own Czech alternate');
 
     // --- 6: listing cards and the product page do not issue queries per product ---
     [, $sfbQueries, $sfbNoise] = $sfbRun('run', 'queries', ['store' => 'default', 'locale' => 'en']);
@@ -321,6 +348,17 @@ try {
     assert_true(($sfbSitemap['part_sizes'] ?? []) !== [] && max($sfbSitemap['part_sizes']) <= 10 && count($sfbSitemap['part_sizes']) > 1, 'Sitemap: every part holds at most the per-file limit');
     assert_equals($sfbSitemap['full_locs'] ?? null, $sfbSitemap['part_locs'] ?? [], 'Sitemap: the parts together list exactly the URLs of the single sitemap, in order');
     assert_true($sfbSitemap['out_of_range'] ?? false, 'Sitemap: a part past the last one is refused (404)');
+    $sfbMainLocs = [];
+    foreach ($sfbSitemap['main_entries'] ?? [] as $sfbEntry) {
+        preg_match('#<loc>([^<]+)</loc>#', $sfbEntry, $m);
+        preg_match('#hreflang="' . preg_quote($sfbCzLocale, '#') . '" href="([^"]+)"#', $sfbEntry, $cz);
+        $sfbMainLocs[$m[1] ?? ''] = $cz[1] ?? '';
+    }
+    assert_true(isset($sfbMainLocs['https://shop.example/shop/cs/product/sfb-main-cs'], $sfbMainLocs['https://shop.example/shop/product/sfb-main'])
+        && !isset($sfbMainLocs['https://shop.example/shop/cs/product/sfb-main']),
+        'R7 sitemap: the CZ store lists the product under its Czech slug, the default store under the base slug (' . implode(' ', array_keys($sfbMainLocs)) . ')');
+    assert_equals(['https://shop.example/shop/cs/product/sfb-main-cs'], array_values(array_unique($sfbMainLocs)),
+        'R7 sitemap: every entry of the product names the Czech slug as its Czech alternate');
     assert_equals(['<urlset>1</urlset>', '<urlset>1</urlset>', '<urlset>2</urlset>'], $sfbSitemap['cache'] ?? null, 'Sitemap cache: the second request is served from cache, a product change rebuilds it');
     assert_equals([1, 2, true], [$sfbSitemap['calls_after_two'] ?? null, $sfbSitemap['calls'] ?? null, $sfbSitemap['cache_file'] ?? null], 'Sitemap cache: generated once per change into the store cache namespace');
 
@@ -341,6 +379,28 @@ try {
     foreach (glob(dirname(TEST_CLI_DIR) . '/templates/legal/*/*.html') ?: [] as $sfbTemplate) {
         assert_true(preg_match('/<!--\s*legal-updated:\s*\d{4}-\d{2}-\d{2}\s*-->/', (string)file_get_contents($sfbTemplate)) === 1, 'Legal page: ' . basename(dirname($sfbTemplate)) . '/' . basename($sfbTemplate) . ' declares its legal-updated date');
     }
+
+    // --- R7: cli/fix-slugs.php keeps the replaced slugs, and the storefront 301s them to the new URL (last: renames the fixture) ---
+    [, $sfbFix, $sfbNoise] = $sfbRun('run', 'fix_slugs', ['store' => 'default', 'locale' => 'en']);
+    assert_true(($sfbFix['main'] ?? 'sfb-main') !== 'sfb-main' && ($sfbFix['cat'] ?? 'sfb-cat') !== 'sfb-cat' && ($sfbFix['repair']['products'] ?? 0) > 0,
+        "R7 fix-slugs: product and category slugs are re-slugified ({$sfbNoise})");
+    assert_equals(['category' => 'sfb-cat', 'product' => 'sfb-main'], $sfbFix['aliases'] ?? null, 'R7 fix-slugs: each replaced slug stays registered for its product/category');
+    $sfbStatus = static fn(string $uri, array $get): int => (int)($sfbPage(['script' => 'index.php', 'script_name' => '/index.php', 'uri' => $uri, 'get' => $get])['status'] ?? 0);
+    $sfbNewMain = (string)($sfbFix['main'] ?? '');
+    assert_equals([301, 200, 301, 200], [
+        $sfbStatus('/product/sfb-main', ['page' => 'product', 'slug' => 'sfb-main']),
+        $sfbStatus('/product/' . $sfbNewMain, ['page' => 'product', 'slug' => $sfbNewMain]),
+        $sfbStatus('/category/sfb-cat', ['page' => 'category', 'slug' => 'sfb-cat']),
+        $sfbStatus('/category/' . ($sfbFix['cat'] ?? ''), ['page' => 'category', 'slug' => (string)($sfbFix['cat'] ?? '')]),
+    ], 'R7 fix-slugs: the old product and category URLs answer 301 (were 404), the new ones 200');
+    assert_equals([301, 200], [
+        $sfbStatus('/cs/product/' . $sfbNewMain, ['page' => 'product', 'slug' => $sfbNewMain]),
+        $sfbStatus('/cs/product/sfb-main-cs', ['page' => 'product', 'slug' => 'sfb-main-cs']),
+    ], 'R7 slugs: the CZ store redirects the base slug to the Czech slug it uses as canonical');
+    assert_equals(['/shop/product/new?lang=de&pg=2', null], [
+        SlugRepair::canonicalRedirect('old', 'new', '/shop/product/new', ['page' => 'product', 'slug' => 'old', 'lang' => 'de', 'pg' => '2']),
+        SlugRepair::canonicalRedirect('new', 'new', '/shop/product/new', ['slug' => 'new']),
+    ], 'R7 slugs: the redirect keeps the request parameters except the route ones, and a canonical slug is not redirected');
 } finally {
     $sfbTree = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($sfbRoot, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
     foreach ($sfbTree as $sfbPath) $sfbPath->isDir() ? @rmdir($sfbPath->getPathname()) : @unlink($sfbPath->getPathname());

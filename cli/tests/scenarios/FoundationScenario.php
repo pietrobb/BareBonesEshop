@@ -28,42 +28,24 @@ foreach (['storage', 'db', 'jobs', 'logs', 'config', 'cli', 'src', 'migrations',
         ".htaccess: {$privateTree} tree is denied"
     );
 }
-assert_true(str_contains($htaccess, 'RewriteRule ^vendor/(?!bbf/'), '.htaccess: vendor tree is denied except explicit BBF public integration files');
-assert_true(str_contains($htaccess, 'bbf\.(?:css|js)|submit\.php'), '.htaccess: required BBF assets and handler remain public');
+assert_true(str_contains($htaccess, 'RewriteRule ^vendor/(?!bbf/bbf\.(?:css|js)$) - [F,L,NC]'), '.htaccess: vendor tree is denied except BBF\'s browser assets');
 // CR-D: vendor/bbf/.htaccess replaces the root rewrite rules on Apache, so the RewriteRule above
 // never applied to vendor/bbf/* (editor.php, viewer.php, demo*.html were served; verified on
 // php:8.4-apache). The deny must be an <If> authz block that applies below vendor/bbf as well.
 $vendorGuardFound = preg_match('/^<If "\(-f %\{REQUEST_FILENAME\} \|\| -d %\{REQUEST_FILENAME\}\) && %\{REQUEST_URI\} =~ m#(\/vendor\/[^#]+)#i">\n\s+Require all denied\n<\/If>$/m', $htaccess, $vendorGuardMatch) === 1;
 assert_true($vendorGuardFound, '.htaccess: CR-D vendor tree is denied by an <If> authz block (applies under vendor/bbf too)');
 $vendorGuardRegex = '#' . ($vendorGuardMatch[1] ?? '(?!)') . '#i';
+// R7: the shop embeds BBF (admin forms render and save through admin.php), so BBF's own handler is private as
+// well; it served BBF's bundled demo, contact, newsletter and upload forms once vendor/bbf/config.php existed.
 foreach (['/vendor/bbf/editor.php', '/vendor/bbf/viewer.php', '/vendor/bbf/submissions.php', '/vendor/bbf/demo.html', '/vendor/bbf/',
-          '/vendor/bbf/EDITOR.PHP', '/shop/vendor/bbf/check.php', '/vendor/other/x.php', '/vendor/bbf/bbf.js.map'] as $vendorUri) {
+          '/vendor/bbf/EDITOR.PHP', '/shop/vendor/bbf/check.php', '/vendor/other/x.php', '/vendor/bbf/bbf.js.map',
+          '/vendor/bbf/submit.php', '/vendor/bbf/SUBMIT.PHP', '/shop/vendor/bbf/submit.php'] as $vendorUri) {
     assert_true(preg_match($vendorGuardRegex, $vendorUri) === 1, ".htaccess: CR-D vendor guard denies {$vendorUri}");
 }
-foreach (['/vendor/bbf/bbf.js', '/vendor/bbf/bbf.css', '/vendor/bbf/submit.php', '/shop/vendor/bbf/BBF.JS'] as $vendorUri) {
+foreach (['/vendor/bbf/bbf.js', '/vendor/bbf/bbf.css', '/shop/vendor/bbf/BBF.JS'] as $vendorUri) {
     assert_true(preg_match($vendorGuardRegex, $vendorUri) !== 1, ".htaccess: CR-D vendor guard keeps {$vendorUri} public");
 }
-
-// Admin forms must not be reachable through BBF's public submit.php. The guard is an
-// <If> authz block (vendor/bbf/.htaccess replaces root rewrite rules below it). Evaluate
-// its query-string regex (ap_expr uses PCRE) and prove every refused query really
-// resolves to an admin form in BBF.
-$bbfGuardFound = preg_match('/^<If "%\{REQUEST_URI\} =~ m#\/vendor\/bbf\/submit\\\\\.php\$#i && %\{QUERY_STRING\} =~ m#([^#]+)#i">\n\s+Require all denied\n<\/If>$/m', $htaccess, $bbfGuardMatch) === 1;
-assert_true($bbfGuardFound, '.htaccess: BBF submit.php has a query-string guard for admin forms');
-$bbfGuardRegex = '#' . ($bbfGuardMatch[1] ?? '(?!)') . '#i';
-$bbfGuardDenies = static fn (string $query): bool => preg_match($bbfGuardRegex, $query) === 1;
-foreach (['form=admin-page', 'form=admin-attribute', 'form=admin-product&action=definition', 'form=admin-import&action=csrf',
-          'form=ADMIN-page', 'form=%61dmin-page', '%66orm=admin-page', '+form=admin-page', '%20form=admin-page',
-          'form=a.dmin-page', 'form=a+dmin-page', 'x=1&form=odstupenie-od-zmluvy&form=admin-product'] as $adminQuery) {
-    parse_str($adminQuery, $parsedAdminQuery);
-    $bbfResolvedForm = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($parsedAdminQuery['form'] ?? ''));
-    assert_true(stripos($bbfResolvedForm, 'admin-') === 0 && $bbfGuardDenies($adminQuery), ".htaccess: BBF submit.php refuses admin form via ?{$adminQuery}");
-}
-assert_true($bbfGuardDenies('form=odstupenie-od-zmluvy;form=admin-page'), '.htaccess: BBF admin-form guard also covers ; query separators');
-foreach (['form=odstupenie-od-zmluvy', 'form=odstupenie-od-zmluvy&action=csrf', 'form=odstupenie-od-zmluvy&action=definition',
-          'form=odstupenie-od-zmluvy&sandbox', 'form=contact_us'] as $storefrontQuery) {
-    assert_true(!$bbfGuardDenies($storefrontQuery), ".htaccess: storefront BBF form stays public via ?{$storefrontQuery}");
-}
+assert_true(!str_contains($htaccess, 'submit\.php'), '.htaccess: R7 no rule keeps BBF\'s submit.php public');
 assert_true(str_contains($htaccess, 'RewriteRule ^import/(?!test-products\.csv$)'), '.htaccess: only the documented import example remains public');
 assert_true(!str_contains($htaccess, '%{THE_REQUEST}'), '.htaccess: no deny depends on the raw (percent-encoded) request line');
 assert_true(preg_match('/^RewriteRule \^\(\?:[^)\r\n]*\|cache\|[^\r\n]*\s-\s+\[F,L,NC\]$/mi', $htaccess) === 1, '.htaccess: direct cache requests are denied unconditionally');
@@ -88,7 +70,7 @@ foreach ([
 }
 assert_true(preg_match('/^RewriteRule \^uploads\/[^\r\n]*php[^\r\n]*\s-\s+\[F,L,NC\]$/mi', $htaccess) === 1, '.htaccess: PHP execution under uploads is denied');
 assert_true(str_contains($htaccess, 'RewriteCond %{REQUEST_FILENAME} -f'), '.htaccess: public static assets remain available');
-assert_true(str_contains($htaccess, 'bbf\.(?:css|js)|submit\.php'), '.htaccess: required BBF browser integration remains allowlisted');
+assert_true(str_contains($htaccess, 'bbf/bbf\.(?:css|js)$'), '.htaccess: required BBF browser assets remain allowlisted');
 
 $configExampleSource = (string)file_get_contents(TEST_CLI_DIR . '/../config.example.php');
 foreach (['db_sqlite_path', 'private_cache_dir', 'jobs_dir', 'invoice_storage_dir', 'backup_storage_dir', 'backup_log_file', 'metrics_log_file', 'update_storage_dir', 'gdpr_salt_file'] as $privateConfigKey) {
@@ -324,6 +306,16 @@ if ($mysqlDsn) {
         $r5ShippingMigrationMysql->up($my, false);
         assert_equals(4, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND ((TABLE_NAME='shipments' AND COLUMN_NAME IN ('tracking_status','delivered_at')) OR (TABLE_NAME='event_outbox' AND COLUMN_NAME='seq') OR TABLE_NAME='event_sequence')")->fetchColumn(), 'MySQL live: R5 shipment tracking / event sequence migration is applied idempotently');
         $my->exec('DROP TABLE event_sequence');
+        $my->exec('DROP TABLE IF EXISTS product_price_history');
+        $priceHistoryMigrationMysql = require TEST_CLI_DIR . '/../migrations/20261020120000_product_price_history.php';
+        $priceHistoryMigrationMysql->up($my, false);
+        $priceHistoryMigrationMysql->up($my, false);
+        assert_equals(5, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='product_price_history'")->fetchColumn(), 'MySQL live: R7 price history migration creates its table idempotently');
+        $my->exec('DROP TABLE product_price_history');
+        $deliveredAtMigrationMysql = require TEST_CLI_DIR . '/../migrations/20261020140000_order_delivered_at.php';
+        $deliveredAtMigrationMysql->up($my, false);
+        $deliveredAtMigrationMysql->up($my, false);
+        assert_equals(1, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='orders' AND COLUMN_NAME='delivered_at'")->fetchColumn(), 'MySQL live: R7 orders.delivered_at migration is applied idempotently');
         foreach (['content_redirects', 'content_banners', 'content_menu_items'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['credit_note_items', 'order_refunds', 'return_exchanges', 'return_receipts', 'return_labels'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['shipment_items', 'shipments', 'bundle_components', 'inventory_receipts', 'purchase_order_items', 'purchase_orders', 'supplier_products', 'suppliers', 'stock_movements'] as $table) $my->exec("DROP TABLE {$table}");
@@ -648,6 +640,15 @@ $r5ShippingMigration->up($pdo, true);
 assert_true((bool)$pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_sequence'")->fetchColumn()
     && in_array('seq', array_column($pdo->query('PRAGMA table_info(event_outbox)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true)
     && !array_diff(['tracking_status', 'delivered_at'], array_column($pdo->query('PRAGMA table_info(shipments)')->fetchAll(PDO::FETCH_ASSOC), 'name')), 'R5 shipping migration: tracking columns, event seq and the sequence table exist idempotently');
+$deliveredAtMigration = require TEST_CLI_DIR . '/../migrations/20261020140000_order_delivered_at.php';
+$deliveredAtMigration->up($pdo, true);
+$deliveredAtMigration->up($pdo, true);
+assert_true(in_array('delivered_at', array_column($pdo->query('PRAGMA table_info(orders)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true), 'R7 orders.delivered_at migration: the column exists idempotently');
+$priceHistoryMigration = require TEST_CLI_DIR . '/../migrations/20261020120000_product_price_history.php';
+$priceHistoryMigration->up($pdo, true);
+$priceHistoryMigration->up($pdo, true);
+assert_equals((int)$pdo->query('SELECT COUNT(*) FROM products')->fetchColumn(), (int)$pdo->query('SELECT COUNT(*) FROM product_price_history')->fetchColumn(),
+    'R7 price history migration: one row with the current price per existing product, idempotent');
 
 // ============================================================
 // TEST 3: CSV Import

@@ -156,7 +156,7 @@ final class Extensions
             if (Outbox::endpointDelivered((string)$event['id'], $endpoint)) continue;
             $error = null;
             $db = Db::get();
-            $wasInTransaction = $db->inTransaction();
+            $wasInTransaction = Db::transactionOpen($db);
             try {
                 ($listener['listener'])($envelope);
             } catch (Throwable $e) {
@@ -165,8 +165,9 @@ final class Extensions
             }
             // A listener that leaves its own transaction open would swallow every later write of
             // this worker run (refund records included): roll it back and count it as a failure.
-            if (!$wasInTransaction && $db->inTransaction()) {
-                $db->rollBack();
+            // Also one opened with exec('BEGIN'), which inTransaction() misses before PHP 8.4.
+            if (!$wasInTransaction && Db::transactionOpen($db)) {
+                Db::rollBackOpen($db);
                 $error ??= 'RuntimeException: listener left a database transaction open';
                 Logger::warning('extension.listener_open_transaction', ['endpoint' => $endpoint, 'event_id' => (string)$event['id']]);
             }

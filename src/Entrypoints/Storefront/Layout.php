@@ -74,6 +74,10 @@ $shell = [
     'terms_url' => Template::storeUrl('/?page=terms'),
     'cookies_url' => Template::storeUrl('/?page=cookies'),
     'show_cookie_banner' => (string)($_COOKIE['cc_v1'] ?? '') === '',
+    // Without JS the banner posts to account.php and comes back to this page.
+    'cookie_action_url' => Template::storeUrl('/account.php'),
+    'cookie_csrf_token' => Security::csrfToken(),
+    'cookie_return_to' => Security::safeLocalPath($_SERVER['REQUEST_URI'] ?? null, Template::storeUrl('/')),
     'cookie_title' => I18n::t('cookie_banner.title'),
     'cookie_body' => I18n::t('cookie_banner.body'),
     'cookie_policy_link' => I18n::t('cookie_banner.policy_link'),

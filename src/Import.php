@@ -327,6 +327,7 @@ class Import {
             $params = [':id' => (int)$existing['id']];
             foreach ($changes as $column => $value) $params[":{$column}"] = $value;
             $db->prepare("UPDATE products SET {$assignments}, updated_at = " . Db::now() . " WHERE id = :id")->execute($params);
+            if (isset($changes['price'])) PriceHistory::record([(int)$existing['id']], $db);
         }
         if (isset($changes['attrs'])) self::syncProductAttrs((int)$existing['id'], $attrs, $db);
 
@@ -423,6 +424,9 @@ class Import {
             ':weight'       => $data['weight_g'] ?? 0,
             ':translations' => json_encode($data['translations'] ?? []),
         ]);
+        $id = $db->prepare('SELECT id FROM products WHERE sku = :sku AND store_id = :catalog');
+        $id->execute([':sku' => $data['sku'], ':catalog' => $catalog]);
+        PriceHistory::record([(int)$id->fetchColumn()], $db);
     }
 
     /**
@@ -435,28 +439,44 @@ class Import {
         if (empty($parts)) $parts = ['uncategorized'];
 
         $parentId = null;
-        $fullPath = '';
+        $parentSlug = null;
+        $parentPath = null;
         $depth = 0;
         $categoryId = 0;
 
         foreach ($parts as $part) {
             $slug = self::slugify($part);
-            $fullPath = $fullPath ? $fullPath . '/' . $slug : $slug;
+            $fullPath = $parentPath === null ? $slug : $parentPath . '/' . $slug;
 
             // Imported products land in the current catalog, so their categories must too:
             // other catalogs may own a category with the same slug and parent level.
+            // The storefront addresses a category by its slug alone (/category/{slug}), so a subcategory whose slug
+            // another category of the catalog already has gets its parent's slug in front ("women-accessories").
+            $qualified = $parentSlug === null ? $slug : $parentSlug . '-' . $slug;
             if ($parentId === null) {
-                $stmt = $db->prepare("SELECT id FROM categories WHERE slug = :slug AND parent_id IS NULL AND store_id = :catalog");
+                $stmt = $db->prepare("SELECT id, slug, path FROM categories WHERE slug = :slug AND parent_id IS NULL AND store_id = :catalog");
                 $stmt->execute([':slug' => $slug, ':catalog' => $catalog]);
             } else {
-                $stmt = $db->prepare("SELECT id FROM categories WHERE slug = :slug AND parent_id = :parent AND store_id = :catalog");
-                $stmt->execute([':slug' => $slug, ':parent' => $parentId, ':catalog' => $catalog]);
+                $stmt = $db->prepare("SELECT id, slug, path FROM categories WHERE (slug IN (:slug, :qualified) OR slug LIKE :numbered ESCAPE '!')
+                    AND parent_id = :parent AND store_id = :catalog ORDER BY slug = :slug2 DESC, slug = :qualified2 DESC, id");
+                $stmt->execute([':slug' => $slug, ':qualified' => $qualified, ':numbered' => Db::likeLiteral($qualified) . '-%',
+                    ':parent' => $parentId, ':catalog' => $catalog, ':slug2' => $slug, ':qualified2' => $qualified]);
             }
-            $existing = $stmt->fetch();
+            $existing = false;
+            foreach ($stmt->fetchAll() as $row) {
+                if ($row['slug'] === $slug || $row['slug'] === $qualified || preg_match('/^' . preg_quote($qualified, '/') . '-\d+$/', (string)$row['slug'])) {
+                    $existing = $row;
+                    break;
+                }
+            }
 
             if ($existing) {
                 $categoryId = (int)$existing['id'];
+                $slug = (string)$existing['slug'];
+                $fullPath = (string)$existing['path'];
             } else {
+                if ($parentId !== null) $slug = self::freeCategorySlug($db, $catalog, $slug, $qualified);
+                $fullPath = $parentPath === null ? $slug : $parentPath . '/' . $slug;
                 $stmt = $db->prepare("
                     INSERT INTO categories (store_id, slug, name, parent_id, path, depth, sort_order)
                     VALUES (:catalog, :slug, :name, :parent, :path, :depth, 0)
@@ -473,10 +493,27 @@ class Import {
             }
 
             $parentId = $categoryId;
+            $parentSlug = $slug;
+            $parentPath = $fullPath;
             $depth++;
         }
 
         return $categoryId;
+    }
+
+    /** $slug if no category of the catalog has it, else the parent-qualified slug, numbered when even that is taken. */
+    private static function freeCategorySlug(PDO $db, string $catalog, string $slug, string $qualified): string {
+        $stmt = $db->prepare('SELECT 1 FROM categories WHERE store_id = :catalog AND slug = :slug');
+        $taken = static function (string $candidate) use ($stmt, $catalog): bool {
+            $stmt->execute([':catalog' => $catalog, ':slug' => $candidate]);
+            return $stmt->fetchColumn() !== false;
+        };
+        foreach ([$slug, $qualified] as $candidate) {
+            if (!$taken($candidate)) return $candidate;
+        }
+        $n = 2;
+        while ($taken($qualified . '-' . $n)) $n++;
+        return $qualified . '-' . $n;
     }
 
     /**
@@ -578,18 +615,21 @@ class Import {
             }
         }
         // Count and update separately: MySQL 8 rejects an UPDATE whose subquery reads the updated table (error 1093).
-        $count = $db->prepare("SELECT COUNT(*) FROM products p
-            JOIN categories c2 ON p.category_id = c2.id
-            WHERE c2.store_id = :store AND (c2.path = :path OR c2.path LIKE :pathPrefix ESCAPE '!')
-              AND p.status = 'active'");
+        // A product counts in its primary category and in every linked one, as Products::byCategoryTree() lists it.
+        $subtree = $db->prepare("SELECT id FROM categories WHERE store_id = :store AND (path = :path OR path LIKE :pathPrefix ESCAPE '!')");
         $update = $db->prepare("UPDATE categories SET product_count = :n WHERE id = :id");
 
         foreach ($cats as $cat) {
-            $count->execute([
+            $subtree->execute([
                 ':store'      => $cat['store_id'],
                 ':path'       => $cat['path'],
                 ':pathPrefix' => Db::likeLiteral((string)$cat['path']) . '/%',
             ]);
+            $ids = array_map('intval', $subtree->fetchAll(PDO::FETCH_COLUMN)) ?: [(int)$cat['id']];
+            $in = implode(',', array_fill(0, count($ids), '?'));
+            $count = $db->prepare("SELECT COUNT(*) FROM products p WHERE p.status = 'active'
+                AND (p.category_id IN ({$in}) OR p.id IN (SELECT pc.product_id FROM product_categories pc WHERE pc.category_id IN ({$in})))");
+            $count->execute([...$ids, ...$ids]);
             $update->execute([':n' => (int)$count->fetchColumn(), ':id' => $cat['id']]);
         }
     }

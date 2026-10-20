@@ -188,6 +188,17 @@ class ShippingService
         $order   = self::fetchOrder($orderId);
         $snapshot = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true);
         $order['pickup_point_id'] = (string)($snapshot['pickup_point']['id'] ?? '');
+        // What the carrier collects: the order total of an unpaid cash-on-delivery order.
+        $order['cod_amount'] = ($order['payment_status'] ?? '') !== 'paid' && PaymentService::isCashOnDelivery((string)($order['payment_method'] ?? ''))
+            ? (int)$order['total'] : 0;
+        // A carrier that cannot collect would deliver it as prepaid (in-store pickup is paid at the counter).
+        if ($order['cod_amount'] > 0 && $adapter instanceof ShippingLifecycleAdapter && !$adapter->supportsCOD()) {
+            throw new \RuntimeException("Shipping carrier does not support cash on delivery: {$carrierId}");
+        }
+        // Labels cancelled earlier: a new label is a new carrier request, not a replay of the cancelled one.
+        $cancelled = $db->prepare("SELECT COUNT(*) FROM shipping_labels WHERE order_id = :order_id AND carrier = :carrier AND store_id = :store");
+        $cancelled->execute([':order_id' => $orderId, ':carrier' => $carrierId, ':store' => StoreContext::current()->id()]);
+        $order['label_sequence'] = (int)$cancelled->fetchColumn() + 1;
         $result = $adapter->generateLabel($order);
 
         // Persist label record
@@ -309,8 +320,8 @@ class ShippingService
     }
 
     /**
-     * Tracking statuses a carrier webhook may set, by progress. A label never moves to a lower rank,
-     * so a replayed or late "in_transit" cannot undo "delivered". Equal ranks may alternate
+     * Tracking statuses a carrier webhook may set, by progress. A label never moves to a lower rank
+     * (except failed → in_transit, see TRACKING_REOPEN), so a replayed or late "in_transit" cannot undo "delivered". Equal ranks may alternate
      * (a failed attempt is followed by another out_for_delivery). "cancelled" is set only by cancelLabel().
      */
     public const TRACKING_STATUS_RANK = [
@@ -321,6 +332,20 @@ class ShippingService
         'failed' => 2,
         'delivered' => 3,
     ];
+
+    /** Lower-rank moves that are real progress: after a failed attempt the parcel goes back to the depot and is re-sent. */
+    private const TRACKING_REOPEN = ['in_transit' => ['failed']];
+
+    /** Local brand names of a carrier that the admin may type as a shipment's carrier (carrier key => names). */
+    private const CARRIER_BRANDS = ['packeta' => ['Zásielkovňa', 'Zásilkovna']];
+
+    /** Statuses a parcel may move to $status from: equal or lower rank, plus the reopening moves above. */
+    private static function trackingSources(string $status): array
+    {
+        $rank = self::TRACKING_STATUS_RANK[$status];
+        return array_merge(array_keys(array_filter(self::TRACKING_STATUS_RANK, static fn(int $r): bool => $r <= $rank)),
+            self::TRACKING_REOPEN[$status] ?? []);
+    }
 
     /** Seconds a signed X-Shipping-Timestamp may differ from the shop clock. */
     public const WEBHOOK_TIMESTAMP_TOLERANCE = 300;
@@ -417,27 +442,34 @@ class ShippingService
     /**
      * Shipped admin shipments of $carrierId with tracking number $awb in $stores. The admin types both by
      * hand: the tracking number matches without spaces/dashes and case, the carrier by its letters and
-     * digits ("Packeta", "Packeta SK" = packeta, "HTTP Carrier" = http-carrier). An empty carrier or a brand name
-     * ("Zásielkovňa") matches through the carrier of the order's shipping method; a carrier naming another
-     * registered carrier ("GLS", "GLS Slovakia") never does, so carrier A cannot deliver carrier B's parcel.
+     * digits ("Packeta", "Packeta SK" = packeta, "HTTP Carrier" = http-carrier). An empty carrier matches through
+     * the carrier of the order's shipping method, and so does a brand name of that carrier ("Zásielkovňa", or a
+     * name that the shipping method's own name contains). Any other carrier ("GLS", "DPD") never matches, so
+     * carrier A cannot deliver carrier B's parcel.
      * @param list<string> $stores
      * @return list<array<string,mixed>>
      */
     private static function shippedShipments(string $carrierId, string $awb, array $stores): array
     {
-        $key = static fn(string $value): string => strtolower((string)preg_replace('/[^A-Za-z0-9]+/', '', $value));
+        $key = static fn(string $value): string => str_replace('-', '', Str::slug($value));
         $wanted = $key($carrierId);
         $others = array_values(array_filter(array_map($key, array_map('strval', array_keys(Adapters::registry('shipping')))),
             static fn(string $code): bool => $code !== '' && $code !== $wanted));
-        $matches = static function (array $row) use ($key, $wanted, $others): bool {
+        $brands = array_map($key, self::CARRIER_BRANDS[$wanted] ?? []);
+        $matches = static function (array $row) use ($key, $wanted, $others, $brands): bool {
             $carrier = $key((string)$row['carrier']);
             if ($wanted !== '' && str_contains($carrier, $wanted)) return true;
             foreach ($others as $other) {
                 if (str_contains($carrier, $other)) return false;
             }
-            return $key((string)$row['method_carrier']) === $wanted;
+            if ($key((string)$row['method_carrier']) !== $wanted) return false;
+            if ($carrier === '') return true;
+            foreach ($brands as $brand) {
+                if (str_contains($carrier, $brand)) return true;
+            }
+            return strlen($carrier) >= 3 && str_contains($key((string)$row['method_name']), $carrier);
         };
-        $stmt = Db::get()->prepare("SELECT s.id, s.store_id, s.order_id, s.carrier, m.carrier AS method_carrier FROM shipments s
+        $stmt = Db::get()->prepare("SELECT s.id, s.store_id, s.order_id, s.carrier, m.carrier AS method_carrier, m.name AS method_name FROM shipments s
             LEFT JOIN orders o ON o.id = s.order_id AND o.store_id = s.store_id
             LEFT JOIN shipping_methods m ON m.code = o.shipping_method AND m.store_id = ?
             WHERE s.status = 'shipped' AND s.tracking_number IS NOT NULL
@@ -460,8 +492,7 @@ class ShippingService
         if ($claim === 'in_flight') return ['handled' => false, 'reason' => 'in_flight', 'retry' => true];
         if ($claim === 'done') return ['handled' => false, 'reason' => 'already_processed', 'duplicate' => true];
 
-        $rank = self::TRACKING_STATUS_RANK[$status];
-        $from = array_keys(array_filter(self::TRACKING_STATUS_RANK, static fn(int $r): bool => $r <= $rank));
+        $from = self::trackingSources($status);
         $known = array_keys(self::TRACKING_STATUS_RANK);
         $orderId = (int)$shipment['order_id'];
         try {
@@ -498,10 +529,25 @@ class ShippingService
     private static function allParcelsDelivered(int $orderId): bool
     {
         if ((Orders::byId($orderId)['status'] ?? '') !== 'shipped') return false;
-        $stmt = Db::get()->prepare("SELECT COUNT(*) FROM shipments WHERE order_id = ? AND store_id = ? AND status <> 'cancelled'
-            AND NOT (status = 'shipped' AND COALESCE(tracking_status, '') = 'delivered')");
-        $stmt->execute([$orderId, StoreContext::current()->id()]);
-        return (int)$stmt->fetchColumn() === 0;
+        return !self::parcelsOutstanding($orderId);
+    }
+
+    /**
+     * Whether a parcel of the order is still on the way: an admin shipment not yet shipped or not yet
+     * delivered, or a carrier label neither delivered nor cancelled. A shipped shipment without a tracking
+     * number (an all-items "shipped" transition) travels under the order's carrier label when it has one.
+     */
+    private static function parcelsOutstanding(int $orderId): bool
+    {
+        $store = StoreContext::current()->id();
+        $stmt = Db::get()->prepare("SELECT
+                (SELECT COUNT(*) FROM shipments s WHERE s.order_id = ? AND s.store_id = ? AND s.status <> 'cancelled'
+                    AND NOT (s.status = 'shipped' AND COALESCE(s.tracking_status, '') = 'delivered')
+                    AND NOT (s.status = 'shipped' AND COALESCE(s.tracking_number, '') = ''
+                        AND EXISTS (SELECT 1 FROM shipping_labels l WHERE l.order_id = s.order_id AND l.store_id = s.store_id AND l.status <> 'cancelled')))
+              + (SELECT COUNT(*) FROM shipping_labels WHERE order_id = ? AND store_id = ? AND status NOT IN ('delivered', 'cancelled'))");
+        $stmt->execute([$orderId, $store, $orderId, $store]);
+        return (int)$stmt->fetchColumn() > 0;
     }
 
     private static function applyTrackingUpdate(array $labelRow, string $carrierId, string $awb, string $status, string $rawPayload): array
@@ -514,9 +560,9 @@ class ShippingService
         if ($claim === 'done') return ['handled' => false, 'reason' => 'already_processed', 'duplicate' => true];
 
         // Forward-only: the label may move to this status from an equal or lower rank, or from a
-        // legacy status outside the table; never from a higher rank and never out of "cancelled".
-        $rank = self::TRACKING_STATUS_RANK[$status];
-        $from = array_keys(array_filter(self::TRACKING_STATUS_RANK, static fn(int $r): bool => $r <= $rank));
+        // legacy status outside the table; never from a higher rank (except failed → in_transit, a re-sent
+        // parcel) and never out of "cancelled".
+        $from = self::trackingSources($status);
         $known = array_merge(array_keys(self::TRACKING_STATUS_RANK), ['cancelled']);
         try {
             $update = $db->prepare("UPDATE shipping_labels SET status = ?, updated_at = " . Db::now() . "
@@ -535,9 +581,25 @@ class ShippingService
 
         $orderId = (int)$labelRow['order_id'];
         $result  = ['handled' => true, 'awb' => $awb, 'status' => $status, 'order_id' => $orderId];
+        try {
+            // The admin shipment of this same parcel (its tracking number is the label AWB) follows the label.
+            $shipmentKnown = array_keys(self::TRACKING_STATUS_RANK);
+            $db->prepare("UPDATE shipments SET tracking_status = ?, updated_at = " . Db::now() . ",
+                    delivered_at = CASE WHEN ? = 'delivered' THEN COALESCE(delivered_at, " . Db::now() . ") ELSE delivered_at END
+                WHERE order_id = ? AND store_id = ? AND status = 'shipped' AND tracking_number IS NOT NULL
+                  AND LOWER(REPLACE(REPLACE(tracking_number, ' ', ''), '-', '')) = ?
+                  AND (tracking_status IS NULL OR tracking_status IN (" . implode(',', array_fill(0, count($from), '?')) . ")
+                       OR tracking_status NOT IN (" . implode(',', array_fill(0, count($shipmentKnown), '?')) . "))")
+                ->execute([$status, $status, $orderId, StoreContext::current()->id(), strtolower(str_replace([' ', '-'], '', $awb)), ...$from, ...$shipmentKnown]);
+        } catch (\Throwable $e) {
+            Idempotency::unmark($eventId);
+            throw $e;
+        }
 
-        // Auto-transition order if delivered. OrderWorkflow owns its deferred jobs.
-        if ($status === 'delivered') {
+        // Auto-transition order once its last parcel is delivered. OrderWorkflow owns its deferred jobs.
+        if ($status === 'delivered' && self::parcelsOutstanding($orderId)) {
+            $result['transitioned'] = false;
+        } elseif ($status === 'delivered') {
             try {
                 OrderWorkflow::transition($orderId, 'delivered');
                 $result['transitioned'] = true;

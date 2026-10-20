@@ -1000,13 +1000,27 @@ $elecCables = Db::get()->prepare("SELECT c.id FROM categories c WHERE c.slug = '
 $elecCables->execute();
 $elecId = (int)$elecCables->fetchColumn();
 
-$accCables = Db::get()->prepare("SELECT c.id FROM categories c WHERE c.slug = 'cables' AND c.parent_id = (SELECT id FROM categories WHERE slug = 'accessories')");
+// R7: the storefront finds a category by its slug alone, so the second "cables" gets its parent's slug in front.
+$accCables = Db::get()->prepare("SELECT c.id, c.path FROM categories c WHERE c.slug = 'accessories-cables' AND c.parent_id = (SELECT id FROM categories WHERE slug = 'accessories')");
 $accCables->execute();
-$accId = (int)$accCables->fetchColumn();
+$accRow = $accCables->fetch() ?: [];
+$accId = (int)($accRow['id'] ?? 0);
 
 assert_true($elecId > 0, 'electronics/cables category exists');
 assert_true($accId > 0, 'accessories/cables category exists');
-assert_true($elecId !== $accId, 'Same-slug categories under different parents are distinct');
+assert_true($elecId !== $accId, 'Same-name categories under different parents are distinct');
+assert_equals('accessories/accessories-cables', $accRow['path'] ?? null, 'R7 subcategory slug: the path follows the parent-qualified slug');
+assert_equals([$elecId, $accId], [(int)(Categories::bySlug('cables')['id'] ?? 0), (int)(Categories::bySlug('accessories-cables')['id'] ?? 0)],
+    'R7 subcategory slug: each "cables" has its own storefront address (/category/{slug})');
+assert_equals([$elecId, $accId], [Import::ensureCategory('electronics/cables', Db::get()), Import::ensureCategory('accessories/cables', Db::get())],
+    'R7 subcategory slug: a re-import finds both categories again instead of creating copies');
+// "r7s-x" + "y" qualifies to "r7s-x-y", which another subcategory already has: the third one is numbered.
+Import::ensureCategory('r7s-a/y', Db::get());
+Import::ensureCategory('r7s-b/r7s-x-y', Db::get());
+$r7sNumbered = Import::ensureCategory('r7s-x/y', Db::get());
+assert_equals(['r7s-x-y-2', 'r7s-x/r7s-x-y-2'], Db::get()->query("SELECT slug, path FROM categories WHERE id = {$r7sNumbered}")->fetch(PDO::FETCH_NUM) ?: null,
+    'R7 subcategory slug: a taken qualified slug is numbered');
+assert_equals($r7sNumbered, Import::ensureCategory('r7s-x/y', Db::get()), 'R7 subcategory slug: a re-import finds the numbered category too');
 
 // ============================================================
 // TEST 37: Cart::removeUnavailable

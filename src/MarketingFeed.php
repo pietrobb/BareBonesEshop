@@ -75,7 +75,7 @@ class MarketingFeed {
         $catalog = StoreContext::current()->catalogId();
         $stmt = Db::get()->prepare("SELECT p.id, p.sku, p.slug, p.name, p.summary, p.description, p.category_id, p.brand_id,
                 p.price, p.compare_price, p.currency, p.stock, p.images, p.translations, p.gtin, p.mpn,
-                p.availability, p.available_from, b.name AS brand_name
+                p.product_type, p.status, p.availability, p.available_from, p.inventory_policy, p.preorder_at, b.name AS brand_name
             FROM products p LEFT JOIN brands b ON b.id=p.brand_id AND b.store_id=p.store_id
             WHERE p.store_id=:store AND p.status='active' AND p.id > :after ORDER BY p.id LIMIT " . self::CHUNK);
         $after = 0;
@@ -118,7 +118,8 @@ class MarketingFeed {
             'link' => self::absoluteUrl($baseUrl, StorefrontViewModel::productUrl((string)$product['slug'])),
             'image_link' => $image,
             'availability' => $availability,
-            'availability_date' => $availability === 'preorder' ? self::isoDate((string)($product['available_from'] ?? '')) : '',
+            'availability_date' => $availability === 'preorder'
+                ? self::isoDate((string)(($product['available_from'] ?? '') ?: ($product['preorder_at'] ?? ''))) : '',
             'price' => number_format(max(0, (int)$product['price']) / 100, 2, '.', '') . ' ' . $currency,
             'condition' => 'new',
             'brand' => (string)($product['brand_name'] ?? ''),
@@ -127,11 +128,15 @@ class MarketingFeed {
         ];
     }
 
+    /**
+     * The storefront's rules (VariantAvailability, StorefrontViewModel::availability): a product the shop does not sell
+     * (discontinued, disabled, out_of_stock, not yet released) is out of stock whatever its stock; a digital product
+     * or one with stock is in stock; one sold ahead of stock follows its inventory policy (preorder or backorder).
+     */
     private static function availability(array $product): string {
-        $state = strtolower((string)($product['availability'] ?? 'active'));
-        if (in_array($state, ['preorder', 'pre-order'], true)) return 'preorder';
-        if (in_array($state, ['backorder', 'back-order'], true)) return 'backorder';
-        return (int)($product['stock'] ?? 0) > 0 ? 'in stock' : 'out of stock';
+        if (!VariantAvailability::productPurchasable($product)) return 'out of stock';
+        if (VariantAvailability::isDigitalType((string)($product['product_type'] ?? '')) || (int)($product['stock'] ?? 0) > 0) return 'in stock';
+        return ($product['inventory_policy'] ?? '') === Inventory::PREORDER ? 'preorder' : 'backorder';
     }
 
     private static function isoDate(string $date): string {

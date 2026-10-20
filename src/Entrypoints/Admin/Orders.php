@@ -250,12 +250,12 @@ function pageOrder(): void {
             <?php if (!empty($allowed)): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=status" style="margin-top:.5rem">
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-                <select name="new_status">
+                <select name="new_status" aria-label="<?= esc(I18n::t('admin.order.change_status')) ?>">
                     <?php foreach ($allowed as $s): ?>
                     <option value="<?= esc($s) ?>"><?= esc($s) ?></option>
                     <?php endforeach; ?>
                 </select>
-                <input name="note" placeholder="<?= esc(I18n::t('admin.order.note_placeholder')) ?>">
+                <input name="note" aria-label="<?= esc(I18n::t('admin.common.note')) ?>" placeholder="<?= esc(I18n::t('admin.order.note_placeholder')) ?>">
                 <button class="btn btn-primary btn-sm" type="submit"><?= esc(I18n::t('admin.order.change_status')) ?></button>
             </form>
             <?php else: ?>
@@ -270,21 +270,21 @@ function pageOrder(): void {
             <?php if (!empty($paymentTransitions)): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=payment_transition" style="margin-top:.5rem">
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-                <select name="new_payment_status">
+                <select name="new_payment_status" aria-label="<?= esc(I18n::t('admin.order.change_payment')) ?>">
                     <?php foreach ($paymentTransitions as $s): ?>
                     <option value="<?= esc($s) ?>"><?= esc($s) ?></option>
                     <?php endforeach; ?>
                 </select>
-                <input name="amount" type="number" min="0" step="1" placeholder="<?= esc(I18n::t('admin.order.amount_cents')) ?>">
-                <input name="note" placeholder="<?= esc(I18n::t('admin.order.note_placeholder')) ?>">
+                <input name="amount" aria-label="<?= esc(I18n::t('admin.order.amount_cents')) ?>" type="number" min="0" step="1" placeholder="<?= esc(I18n::t('admin.order.amount_cents')) ?>">
+                <input name="note" aria-label="<?= esc(I18n::t('admin.common.note')) ?>" placeholder="<?= esc(I18n::t('admin.order.note_placeholder')) ?>">
                 <button class="btn btn-primary btn-sm" type="submit"><?= esc(I18n::t('admin.order.change_payment')) ?></button>
             </form>
             <?php endif; ?>
             <?php if ($canRefund && $refundableBalance > 0 && PaymentService::canPaymentTransition((string)($order['payment_status'] ?? 'pending'), 'refund_pending')): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_request" style="margin-top:.5rem">
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-                <input name="amount" type="number" min="1" max="<?= $refundableBalance ?>" step="1" value="<?= $refundableBalance ?>">
-                <input name="note" placeholder="<?= esc(I18n::t('admin.order.refund_reason')) ?>" required>
+                <input name="amount" aria-label="<?= esc(I18n::t('admin.order.amount_cents')) ?>" type="number" min="1" max="<?= $refundableBalance ?>" step="1" value="<?= $refundableBalance ?>">
+                <input name="note" aria-label="<?= esc(I18n::t('admin.order.refund_reason')) ?>" placeholder="<?= esc(I18n::t('admin.order.refund_reason')) ?>" required>
                 <button class="btn btn-danger btn-sm" type="submit"><?= esc(I18n::t('admin.order.request_refund')) ?></button>
             </form>
             <?php else: ?>
@@ -301,15 +301,15 @@ function pageOrder(): void {
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_confirm" style="margin-top:.5rem" data-refund-confirm>
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                 <span class="muted"><?= esc(I18n::format('admin.order.confirm_refund_hint', ['amount' => I18n::price($unconfirmedRefund['amount'], $order['currency'])])) ?></span>
-                <input name="note" placeholder="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" required>
+                <input name="note" aria-label="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" placeholder="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" required>
                 <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.order.confirm_refund')) ?></button>
             </form>
             <?php endif; ?>
             <?php if ($canRefund && $refundableBalance > 0 && PaymentService::refundsByHand($order)): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_manual" style="margin-top:.5rem" data-manual-refund>
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-                <input name="amount" type="number" min="1" max="<?= $refundableBalance ?>" step="1" value="<?= $refundableBalance ?>">
-                <input name="note" placeholder="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" required>
+                <input name="amount" aria-label="<?= esc(I18n::t('admin.order.amount_cents')) ?>" type="number" min="1" max="<?= $refundableBalance ?>" step="1" value="<?= $refundableBalance ?>">
+                <input name="note" aria-label="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" placeholder="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" required>
                 <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.order.manual_refund')) ?></button>
             </form>
             <?php endif; ?>

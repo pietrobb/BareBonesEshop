@@ -424,5 +424,29 @@
         "crlf": [
             "21d0233f47cbdc18d4c927e048d2bf804bea87672e9cd8d0559e4c0eadec785e"
         ]
+    },
+    "20261020120000_product_price_history": {
+        "lf": [
+            "a4b001fafe220a5a3187ce9035d77951436d1484e601d8664f140b327828f916"
+        ],
+        "crlf": [
+            "61c0b2ec7d0e4c1b22b6e453c824b1b2885bd85b135a98b0e0e5de236f5e7f41"
+        ]
+    },
+    "20261020130000_product_specification_source": {
+        "lf": [
+            "0a3e073a6e840590c6d944ddd763714833447700a84ee58729492b52a5940603"
+        ],
+        "crlf": [
+            "9027b6438f81301a8dab0c5383b054ba1600e7a66282099d3804cbcfb0b7a02a"
+        ]
+    },
+    "20261020140000_order_delivered_at": {
+        "lf": [
+            "e8cf8afd4be2a873b5dcf43988d56f0bc08646436d9e4ef725ff718c9c1ce091"
+        ],
+        "crlf": [
+            "a9507faf79de4e3a362300242ccae70e2cee06a137938233b1660cec4ef3a3c7"
+        ]
     }
 }
