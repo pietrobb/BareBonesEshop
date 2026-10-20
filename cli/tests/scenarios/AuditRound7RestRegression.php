@@ -244,6 +244,38 @@ try {
     @unlink($r7rRateFile);
 }
 
+// R7 medium: the Google feed read products.availability as if it held backorder/preorder (those live in
+// inventory_policy) and ignored discontinued/disabled, so it advertised unsellable products and hid sellable ones.
+echo "\n--- R7: Google feed availability follows the storefront ---\n";
+$r7rCatalog = StoreContext::current()->catalogId();
+$r7rFeedRows = [
+    // id, sku, stock, availability, inventory_policy, product_type, available_from, expected
+    [97720, 'R7R-FEED-DISC', 5, 'discontinued', 'deny', 'simple', null, 'out of stock'],
+    [97721, 'R7R-FEED-BACK', 0, 'active', 'backorder', 'simple', null, 'backorder'],
+    [97722, 'R7R-FEED-PRE', 0, 'active', 'preorder', 'simple', '2099-03-01 00:00:00', 'preorder'],
+    [97723, 'R7R-FEED-DIGI', 0, 'active', 'deny', 'digital', null, 'in stock'],
+    [97724, 'R7R-FEED-STOCK', 3, 'active', 'deny', 'simple', null, 'in stock'],
+    [97725, 'R7R-FEED-SOON', 4, 'active', 'deny', 'simple', '2099-03-01 00:00:00', 'out of stock'],
+];
+$pdo->exec('DELETE FROM products WHERE id BETWEEN 97720 AND 97725');
+foreach ($r7rFeedRows as [$id, $sku, $stock, $state, $policy, $type, $from]) {
+    $pdo->prepare("INSERT INTO products (id, store_id, category_id, sku, slug, name, price, stock, status, availability, inventory_policy, product_type, available_from)
+        SELECT ?, ?, id, ?, ?, ?, 1000, ?, 'active', ?, ?, ?, ? FROM categories WHERE store_id = ? ORDER BY id LIMIT 1")
+        ->execute([$id, $r7rCatalog, $sku, strtolower($sku), $sku, $stock, $state, $policy, $type, $from, $r7rCatalog]);
+}
+$r7rFeed = MarketingFeed::google('https://shop.example');
+$r7rFeedItem = static function (string $sku) use ($r7rFeed): string {
+    foreach (explode('<item>', $r7rFeed) as $item) if (str_contains($item, '<g:id>' . $sku . '</g:id>')) return $item;
+    return '';
+};
+foreach ($r7rFeedRows as [$id, $sku, , $state, $policy, $type, , $expected]) {
+    preg_match('#<g:availability>([^<]*)</g:availability>#', $r7rFeedItem($sku), $r7rMatch);
+    assert_equals($expected, $r7rMatch[1] ?? null, "R7 Google feed: {$sku} ({$state}, {$policy}, {$type}) is '{$expected}'");
+}
+assert_true(str_contains($r7rFeedItem('R7R-FEED-PRE'), '<g:availability_date>2099-03-01T00:00:00+00:00</g:availability_date>'),
+    'R7 Google feed: a preorder carries its release date');
+$pdo->exec('DELETE FROM products WHERE id BETWEEN 97720 AND 97725');
+
 // R7 low: an invoice_issue job queued when the order was paid, run after the order was cancelled, threw "not paid" on
 // every retry (a critical incident each time) until the job died. It has nothing to invoice and now ends quietly.
 echo "\n--- R7: invoice_issue after the paid order was cancelled ---\n";

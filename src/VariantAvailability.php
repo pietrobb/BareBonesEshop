@@ -74,7 +74,8 @@ class VariantAvailability {
             || $policy === Inventory::PREORDER;
     }
 
-    private static function productPurchasable(array $product): bool {
+    /** @param array $product row with the PRODUCT_COLUMNS */
+    public static function productPurchasable(array $product): bool {
         if (!self::productOpen($product)) return false;
         $policy = (string)($product['inventory_policy'] ?? Inventory::DENY);
         return self::isDigitalType((string)$product['product_type']) || (int)$product['stock'] > 0
