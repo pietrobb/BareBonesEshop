@@ -207,6 +207,7 @@ class ApiV1 {
             $set[] = 'updated_at=' . Db::now();
             Db::get()->prepare('UPDATE products SET ' . implode(', ', $set) . ' WHERE id=:id AND store_id=:store')->execute($params);
             if (array_key_exists('price', $body)) PriceHistory::record([$productId]);
+            if (($body['status'] ?? $old['status']) !== $old['status']) CategoryCounts::refresh(CategoryCounts::ofProducts([$productId]));
             $ledgerBooked = false;
             if (array_key_exists('stock', $body) && (int)$old['stock'] !== $body['stock']) {
                 // "stock" is available quantity; the warehouse ledger is the source of truth (as in admin/CSV) and

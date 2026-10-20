@@ -322,6 +322,40 @@ assert_equals(10000, PriceHistory::capCompare(['price' => 8000, 'compare_price' 
 $pdo->exec('DELETE FROM product_price_history WHERE product_id BETWEEN 97730 AND 97733');
 $pdo->exec('DELETE FROM products WHERE id BETWEEN 97730 AND 97733');
 
+// R7 medium: categories.product_count (the storefront hides a category at 0 and orders its menus by it) was counted
+// only by the CSV import and the category admin; a product created, moved, archived or deleted in the admin left the
+// counts as they were, and a product linked to a second category never counted there.
+echo "\n--- R7: category product counts follow product writes ---\n";
+$pdo->exec('DELETE FROM categories WHERE id BETWEEN 97790 AND 97792');
+$r7rCat = $pdo->prepare('INSERT INTO categories (id, store_id, slug, name, parent_id, path, depth, product_count) VALUES (?, ?, ?, ?, ?, ?, ?, 0)');
+$r7rCat->execute([97790, $r7rCatalog, 'r7r-cnt', 'R7R count', null, 'r7r-cnt', 0]);
+$r7rCat->execute([97791, $r7rCatalog, 'r7r-cnt-kid', 'R7R count kid', 97790, 'r7r-cnt/r7r-cnt-kid', 1]);
+$r7rCat->execute([97792, $r7rCatalog, 'r7r-cnt-other', 'R7R count other', null, 'r7r-cnt-other', 0]);
+$r7rCounts = static fn(): array => array_map('intval', $pdo->query('SELECT product_count FROM categories WHERE id BETWEEN 97790 AND 97792 ORDER BY id')->fetchAll(PDO::FETCH_COLUMN));
+$r7rRow = static fn(int $id): array => $pdo->query("SELECT * FROM products WHERE id = {$id}")->fetch(PDO::FETCH_ASSOC);
+// Admin create: the product row, then ProductEditor::save() in the same transaction (as Admin\Catalog does).
+$pdo->prepare("INSERT INTO products (id, store_id, category_id, sku, slug, name, price, stock, status) VALUES (97740, ?, 97791, 'R7R-CNT', 'r7r-cnt-p', 'R7R Count', 1000, 3, 'active')")->execute([$r7rCatalog]);
+ProductEditor::save(97740, ['categories' => [97791], 'slugs' => []]);
+assert_equals([1, 1, 0], $r7rCounts(), 'R7 category counts: an admin-created product counts in its category and the parent (was 0, hidden from the menu)');
+// Admin edit moving it to another category, also linked to the old one.
+$r7rOld = $r7rRow(97740);
+$pdo->exec('UPDATE products SET category_id = 97792 WHERE id = 97740');
+ProductEditor::save(97740, ['categories' => [97792], 'slugs' => []], $r7rOld);
+assert_equals([0, 0, 1], $r7rCounts(), 'R7 category counts: a product moved in the admin leaves the old categories and joins the new one');
+$r7rOld = $r7rRow(97740);
+ProductEditor::save(97740, ['categories' => [97792, 97791], 'slugs' => []], $r7rOld);
+assert_equals([1, 1, 1], $r7rCounts(), 'R7 category counts: a product linked to a second category counts there as the category page lists it');
+ProductBulk::apply('archive', [97740]);
+assert_equals([0, 0, 0], $r7rCounts(), 'R7 category counts: a bulk-archived product leaves every count');
+ProductBulk::apply('activate', [97740]);
+assert_equals([1, 1, 1], $r7rCounts(), 'R7 category counts: a bulk-activated product is counted again');
+ProductBulk::apply('delete', [97740]);
+assert_equals([0, 0, 0], $r7rCounts(), 'R7 category counts: a bulk-deleted product leaves every count');
+$pdo->exec('DELETE FROM product_categories WHERE product_id = 97740');
+$pdo->exec('DELETE FROM product_price_history WHERE product_id = 97740');
+$pdo->exec('DELETE FROM products WHERE id = 97740');
+$pdo->exec('DELETE FROM categories WHERE id BETWEEN 97790 AND 97792');
+
 // R7 low: an invoice_issue job queued when the order was paid, run after the order was cancelled, threw "not paid" on
 // every retry (a critical incident each time) until the job died. It has nothing to invoice and now ends quietly.
 echo "\n--- R7: invoice_issue after the paid order was cancelled ---\n";

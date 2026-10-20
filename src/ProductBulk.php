@@ -19,6 +19,8 @@ final class ProductBulk {
         if (!isset(self::PRICE_ACTIONS[$action]) && !isset(self::STATUS_ACTIONS[$action]) && $action !== 'delete') return $result;
         $products = self::owned($ids);
         $db = Db::get();
+        // A status change or delete moves the product in or out of its categories' counts.
+        $categories = isset(self::PRICE_ACTIONS[$action]) ? [] : CategoryCounts::ofProducts(array_column($products, 'id'), $db);
         $db->beginTransaction();
         try {
             foreach ($products as $product) {
@@ -48,6 +50,7 @@ final class ProductBulk {
                 }
                 $result['count']++;
             }
+            if ($result['count'] > 0) CategoryCounts::refresh($categories, $db);
             $db->commit();
         } catch (Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();

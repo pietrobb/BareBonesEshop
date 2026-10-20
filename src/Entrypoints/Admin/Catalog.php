@@ -886,7 +886,7 @@ function handleProductSave(): void {
                     stock_low_threshold=:stock_low_threshold, stock_critical_threshold=:stock_critical_threshold, updated_at={$now} WHERE id=:id AND store_id=:catalog");
                 $db->beginTransaction(); // an exception ends the request; the uncommitted transaction is rolled back
                 $stmt->execute($data + [':id' => $id, ':catalog' => StoreContext::current()->catalogId()]);
-                ProductEditor::save($id, $editor);
+                ProductEditor::save($id, $editor, $old);
                 AuditLog::log('product', $id, $old, $data, 'Admin edit: ' . implode(', ', $changed));
                 Products::recordUpdated($id, $old);
                 $db->commit();

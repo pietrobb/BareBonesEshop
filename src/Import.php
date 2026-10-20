@@ -613,18 +613,21 @@ class Import {
             }
         }
         // Count and update separately: MySQL 8 rejects an UPDATE whose subquery reads the updated table (error 1093).
-        $count = $db->prepare("SELECT COUNT(*) FROM products p
-            JOIN categories c2 ON p.category_id = c2.id
-            WHERE c2.store_id = :store AND (c2.path = :path OR c2.path LIKE :pathPrefix ESCAPE '!')
-              AND p.status = 'active'");
+        // A product counts in its primary category and in every linked one, as Products::byCategoryTree() lists it.
+        $subtree = $db->prepare("SELECT id FROM categories WHERE store_id = :store AND (path = :path OR path LIKE :pathPrefix ESCAPE '!')");
         $update = $db->prepare("UPDATE categories SET product_count = :n WHERE id = :id");
 
         foreach ($cats as $cat) {
-            $count->execute([
+            $subtree->execute([
                 ':store'      => $cat['store_id'],
                 ':path'       => $cat['path'],
                 ':pathPrefix' => Db::likeLiteral((string)$cat['path']) . '/%',
             ]);
+            $ids = array_map('intval', $subtree->fetchAll(PDO::FETCH_COLUMN)) ?: [(int)$cat['id']];
+            $in = implode(',', array_fill(0, count($ids), '?'));
+            $count = $db->prepare("SELECT COUNT(*) FROM products p WHERE p.status = 'active'
+                AND (p.category_id IN ({$in}) OR p.id IN (SELECT pc.product_id FROM product_categories pc WHERE pc.category_id IN ({$in})))");
+            $count->execute([...$ids, ...$ids]);
             $update->execute([':n' => (int)$count->fetchColumn(), ':id' => $cat['id']]);
         }
     }

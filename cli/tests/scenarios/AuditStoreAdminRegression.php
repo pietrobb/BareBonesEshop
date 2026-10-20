@@ -17,7 +17,7 @@ $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 Db::init($db, $driver);
 $db->exec("CREATE " . ($driver === "mysql" ? "TEMPORARY " : "") . "TABLE products (
- id INTEGER PRIMARY KEY, store_id VARCHAR(40) NOT NULL, sku VARCHAR(40) NOT NULL, name VARCHAR(100) NOT NULL,
+ id INTEGER PRIMARY KEY, store_id VARCHAR(40) NOT NULL, category_id INTEGER NULL, sku VARCHAR(40) NOT NULL, name VARCHAR(100) NOT NULL,
  slug VARCHAR(100) NOT NULL, product_type VARCHAR(40) NOT NULL, price INTEGER NOT NULL, compare_price INTEGER NULL,
  stock INTEGER NOT NULL, status VARCHAR(20) NOT NULL, summary VARCHAR(100) NOT NULL, weight_g INTEGER NULL,
  stock_low_threshold INTEGER NULL, stock_critical_threshold INTEGER NULL, updated_at DATETIME NULL)");
@@ -28,6 +28,8 @@ $db->exec("INSERT INTO products (id,store_id,sku,name,slug,product_type,price,st
 $tmp = $driver === "mysql" ? "TEMPORARY " : "";
 $db->exec("CREATE {$tmp}TABLE variants (id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL, price_absolute INTEGER NULL, price_delta INTEGER NOT NULL DEFAULT 0)");
 $db->exec("CREATE {$tmp}TABLE order_items (id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL)");
+// A status change or delete recounts the categories of the products (none here: no category).
+$db->exec("CREATE {$tmp}TABLE product_categories (product_id INTEGER NOT NULL, category_id INTEGER NOT NULL)");
 $db->exec("CREATE {$tmp}TABLE audit_log (id INTEGER PRIMARY KEY " . ($driver === "mysql" ? "AUTO_INCREMENT" : "") . ", entity VARCHAR(40), entity_id INTEGER, action VARCHAR(40), old_value TEXT, new_value TEXT, note TEXT, actor VARCHAR(80), ip_address VARCHAR(80), store_id VARCHAR(40), correlation_id VARCHAR(80), created_at DATETIME NULL)");
 // A status or price change records product.updated (outbox) and a price change the price history (Omnibus).
 $db->exec("CREATE {$tmp}TABLE event_sequence (id INTEGER PRIMARY KEY " . ($driver === "mysql" ? "AUTO_INCREMENT" : "AUTOINCREMENT") . ")");

@@ -164,6 +164,8 @@ class FeedImport {
             }
         }
 
+        // A full upsert creates products and moves them between categories, as a CSV import does.
+        if ($importMode === self::MODE_UPSERT && $result['imported'] > 0) Import::recountCategories($db);
         $db->commit();
         if ($result['imported'] > 0) Cache::catalogChanged();
 
