@@ -292,10 +292,11 @@ class Orders {
             }
 
             // 5. Record coupon use atomically within the order transaction
-            if ($coupon && !empty($coupon['code']) && ($coupon['discount'] ?? 0) > 0) {
+            // A free-shipping coupon discounts no goods (discount 0) but is still a use against its limits.
+            if ($coupon && !empty($coupon['code'])) {
                 Pricing::recordCouponUse(
                     $coupon['code'], $orderId,
-                    $customer['email'], $coupon['discount']
+                    $customer['email'], max(0, (int)($coupon['discount'] ?? 0))
                 );
             }
 

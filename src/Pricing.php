@@ -337,6 +337,8 @@ class Pricing {
                 $discount = (int)round($subtotal * $rule['discount_value'] / 100);
             } elseif ($rule['discount_type'] === 'fixed') {
                 $discount = min($rule['discount_value'], $subtotal);
+            } elseif ($rule['discount_type'] === 'free_shipping') {
+                return ['discount' => 0, 'name' => $rule['name'], 'error' => null, 'free_shipping' => true, 'stacking' => (string)($rule['stacking'] ?? 'stack')];
             } else {
                 continue;
             }
@@ -355,6 +357,14 @@ class Pricing {
             return ['discount' => 0, 'name' => null, 'error' => 'Coupon already used'];
         }
         return Promotions::couponDiscount($promotion, $subtotal) + ['stacking' => (string)($promotion['stacking'] ?? 'exclusive')];
+    }
+
+    /**
+     * Whether an applyCoupon() result is an accepted coupon: it discounts the goods or waives the shipping.
+     * A free-shipping coupon discounts nothing, so it never competes with automatic discounts (combineDiscounts).
+     */
+    public static function couponApplies(array $coupon): bool {
+        return (int)($coupon['discount'] ?? 0) > 0 || !empty($coupon['free_shipping']);
     }
 
     /**

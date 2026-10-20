@@ -155,13 +155,13 @@ function apiValidateCoupon(): array {
         $promotionDiscount += max(0, (int)($rule['discount'] ?? 0));
     }
     $result = CheckoutService::couponFor($code, $subtotal, $promotionDiscount, $email, $cartCurrency ?? StoreContext::current()->currency());
-    if ($result['discount'] <= 0) {
+    if (!Pricing::couponApplies($result)) {
         // Unknown, expired, not yet valid and already used codes look the same; the minimum order is only
         // checked for an otherwise valid code.
         return ['valid' => false, 'error' => ($result['error'] ?? '') === 'Minimum order not met' ? 'Minimum order not met' : 'Invalid coupon'];
     }
     $combined = Pricing::combineDiscounts((int)$result['discount'], (string)($result['stacking'] ?? 'stack'), $promotionDiscount);
-    if ($combined['coupon'] === 0) {
+    if ((int)$result['discount'] > 0 && $combined['coupon'] === 0) {
         return ['valid' => false, 'error' => 'Coupon cannot be combined with the current promotion'];
     }
 
@@ -169,6 +169,7 @@ function apiValidateCoupon(): array {
         'valid'    => true,
         'code'     => $code,
         'discount' => $combined['coupon'],
+        'free_shipping' => !empty($result['free_shipping']),
         'name'     => $result['name'] ?? $code,
     ];
 }
@@ -693,11 +694,13 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     $couponCode = trim(Security::str($input['coupon_code'] ?? ''));
     $couponDiscount = 0;
     $couponStacking = 'stack';
+    $couponFreeShipping = false;
     if ($couponCode) {
         $couponResult = CheckoutService::couponFor($couponCode, $cart['subtotal'], $promotionDiscount, $email, $cartCurrency);
-        if ($couponResult['discount'] > 0) {
-            $couponDiscount = $couponResult['discount'];
+        if (Pricing::couponApplies($couponResult)) {
+            $couponDiscount = (int)$couponResult['discount'];
             $couponStacking = (string)($couponResult['stacking'] ?? 'stack');
+            $couponFreeShipping = !empty($couponResult['free_shipping']);
         } else {
             $couponError = CheckoutService::couponErrorKey((string)($couponResult['error'] ?? ''));
             return ['success' => false, 'error' => sprintf(I18n::t($couponError), $couponCode), 'error_code' => $couponError];
@@ -709,7 +712,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     }
     $promotionDiscount = $combinedDiscounts['promotion'];
     $totalDiscount = min($cart['subtotal'], $couponDiscount + $promotionDiscount);
-    $promotionFreeShipping = Pricing::freeShippingEarned($cart['subtotal'] - $totalDiscount, $cart['items'], $loggedInCustomerId, $cartCurrency);
+    $promotionFreeShipping = $couponFreeShipping || Pricing::freeShippingEarned($cart['subtotal'] - $totalDiscount, $cart['items'], $loggedInCustomerId, $cartCurrency);
 
     $metrics = shippingCartMetrics($cart['items']);
     $totalWeight = $digitalOnly ? 0 : $metrics['weight_g'];
@@ -805,7 +808,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     ];
 
     // Pass coupon info for atomic recording inside the order transaction
-    $coupon = ($couponCode && $couponDiscount > 0)
+    $coupon = ($couponCode && ($couponDiscount > 0 || $couponFreeShipping))
         ? ['code' => $couponCode, 'discount' => $couponDiscount]
         : null;
 

@@ -99,7 +99,7 @@ function renderCheckout(): string {
     $couponDiscount = $preview['coupon_discount'];
     $couponError = $couponThrottled ? $t('coupon_too_many_attempts') : ($preview['coupon_error'] === null ? '' : sprintf($t($preview['coupon_error']), $couponCode));
     if ($couponError !== '') $couponCode = '';
-    elseif ($couponDiscount > 0) $_SESSION['checkout_coupon'] = $couponCode; // accepted: re-pricing it is free
+    elseif ($preview['coupon_applied']) $_SESSION['checkout_coupon'] = $couponCode; // accepted: re-pricing it is free
     $discount = min($subtotal, $couponDiscount + $preview['promotion_discount']);
 
     // As at checkout: free shipping thresholds and payment fees see the goods after discounts.
@@ -141,7 +141,7 @@ function renderCheckout(): string {
             array_keys($state['countries']), $state['countries']),
         'coupon_label' => $t('coupon_code'), 'coupon_apply_label' => $t('coupon_apply'), 'coupon_remove_label' => $t('coupon_remove'),
         'coupon_code' => $couponCode, 'coupon_error' => $couponError,
-        'coupon_applied' => $couponDiscount > 0 ? sprintf($t('coupon_applied'), $couponCode, $price($couponDiscount)) : '',
+        'coupon_applied' => $couponDiscount > 0 ? sprintf($t('coupon_applied'), $couponCode, $price($couponDiscount)) : ($preview['coupon_applied'] ? sprintf($t('coupon_applied_free_shipping'), $couponCode) : ''),
         't' => I18n::all(),
     ] + CheckoutService::pickupView($shippingRates, $selectedRate, $country, $state['values']['zip'], $form('pickup_point'), $form('pickup_search')) + CheckoutService::companyLabels());
 }

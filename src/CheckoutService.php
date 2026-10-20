@@ -296,7 +296,7 @@ class CheckoutService {
      */
     public static function couponFor(string $code, int $subtotal, int $promotionDiscount, ?string $email, string $currency): array {
         $coupon = Pricing::applyCoupon($code, $subtotal, $email);
-        if ($promotionDiscount > 0 && (int)$coupon['discount'] > 0 && (string)($coupon['stacking'] ?? 'stack') === 'stack') {
+        if ($promotionDiscount > 0 && Pricing::couponApplies($coupon) && (string)($coupon['stacking'] ?? 'stack') === 'stack') {
             $coupon = Pricing::applyCoupon($code, max(0, $subtotal - $promotionDiscount), $email);
         }
         // A percentage coupon is charged in units the cart's currency shows (whole Kč/Ft).
@@ -331,7 +331,8 @@ class CheckoutService {
     /**
      * Discount the checkout form shows before the order exists, with the same rules execute() applies:
      * the coupon (i18n key of the refusal reason when it gives nothing) plus automatic promotions.
-     * @return array{coupon_discount: int, coupon_error: ?string, promotion_discount: int, free_shipping: bool}
+     * coupon_applied: the coupon was accepted (it may only waive the shipping, with coupon_discount 0).
+     * @return array{coupon_discount: int, coupon_error: ?string, coupon_applied: bool, promotion_discount: int, free_shipping: bool}
      */
     public static function discountPreview(string $couponCode, int $subtotal, ?string $email, array $items, ?int $customerId): array {
         $promotionDiscount = 0;
@@ -342,17 +343,20 @@ class CheckoutService {
         $couponDiscount = 0;
         $couponError = null;
         $couponStacking = 'stack';
+        $couponFreeShipping = false;
         if ($couponCode !== '') {
             $coupon = self::couponFor($couponCode, $subtotal, $promotionDiscount, $email, $currency);
             $couponDiscount = max(0, (int)$coupon['discount']);
             $couponStacking = (string)($coupon['stacking'] ?? 'stack');
-            if ($couponDiscount === 0) $couponError = self::couponErrorKey((string)($coupon['error'] ?? ''));
+            $couponFreeShipping = !empty($coupon['free_shipping']);
+            if (!Pricing::couponApplies($coupon)) $couponError = self::couponErrorKey((string)($coupon['error'] ?? ''));
         }
         $combined = Pricing::combineDiscounts($couponDiscount, $couponStacking, $promotionDiscount);
         if ($couponDiscount > 0 && $combined['coupon'] === 0) $couponError = 'coupon_not_combinable';
         $couponDiscount = $combined['coupon'];
         $promotionDiscount = $combined['promotion'];
-        $freeShipping = Pricing::freeShippingEarned($subtotal - min($subtotal, $couponDiscount + $promotionDiscount), $items, $customerId, $currency);
-        return ['coupon_discount' => $couponDiscount, 'coupon_error' => $couponError, 'promotion_discount' => $promotionDiscount, 'free_shipping' => $freeShipping];
+        $freeShipping = $couponFreeShipping || Pricing::freeShippingEarned($subtotal - min($subtotal, $couponDiscount + $promotionDiscount), $items, $customerId, $currency);
+        $couponApplied = $couponCode !== '' && $couponError === null;
+        return ['coupon_discount' => $couponDiscount, 'coupon_error' => $couponError, 'coupon_applied' => $couponApplied, 'promotion_discount' => $promotionDiscount, 'free_shipping' => $freeShipping];
     }
 }

@@ -15,11 +15,11 @@ final class PricingAdmin {
     /** Allowed action types per kind of promotion (a coupon is a cart rule with a code). */
     private const ACTIONS = [
         'catalog' => ['discount_percent', 'discount_fixed', 'fixed_price'],
-        'cart' => ['discount_percent', 'discount_fixed', 'buy_x_get_y', 'gift'],
-        'coupon' => ['discount_percent', 'discount_fixed'],
+        'cart' => ['discount_percent', 'discount_fixed', 'free_shipping', 'buy_x_get_y', 'gift'],
+        'coupon' => ['discount_percent', 'discount_fixed', 'free_shipping'],
     ];
     /** Every promotion action type; its label is the lang key admin.promo.action.<type>. */
-    public const ACTION_TYPES = ['discount_percent', 'discount_fixed', 'fixed_price', 'buy_x_get_y', 'gift'];
+    public const ACTION_TYPES = ['discount_percent', 'discount_fixed', 'fixed_price', 'free_shipping', 'buy_x_get_y', 'gift'];
     private const PROMOTION_FIELDS = ['code', 'name', 'scope', 'coupon_code', 'priority', 'stacking', 'valid_from', 'valid_to', 'active',
         'action_type', 'action_value', 'action_sku', 'action_qty', 'cond_min_qty', 'cond_product_skus', 'cond_min_subtotal', 'cond_buy_sku',
         'cond_buy_qty', 'cond_max_uses', 'cond_per_customer'];
@@ -305,6 +305,7 @@ final class PricingAdmin {
             'discount_percent' => ['bps' => self::percentBps($f['action_value'])],
             'discount_fixed' => ['amount' => self::int($f['action_value'], 1, self::MAX_INT, I18n::t('admin.msg.promo.discount_fixed'))],
             'fixed_price' => ['price' => self::int($f['action_value'], 0, self::MAX_INT, I18n::t('admin.msg.promo.fixed_price'))],
+            'free_shipping' => [],
             'buy_x_get_y', 'gift' => self::skuTarget($f['action_sku'], $type === 'gift', I18n::t($type === 'gift' ? 'admin.msg.promo.label_gift' : 'admin.msg.promo.label_free_product'))
                 + ['qty' => self::int($f['action_qty'] === '' ? '1' : $f['action_qty'], 1, 1000, I18n::t('admin.msg.promo.free_qty'))],
         };

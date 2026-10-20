@@ -159,6 +159,8 @@ class Promotions {
             return ['discount' => 0, 'name' => null, 'error' => 'Invalid coupon'];
         }
         $actions = self::jsonObject($rule['actions'] ?? '{}');
+        // A free-shipping coupon discounts no goods: it waives the carriage (Pricing::couponApplies).
+        if (($actions['type'] ?? '') === 'free_shipping') return ['discount' => 0, 'name' => (string)$rule['name'], 'error' => null, 'free_shipping' => true];
         $discount = min(max(0, $subtotal), match ((string)($actions['type'] ?? '')) {
             'discount_fixed' => max(0, (int)($actions['amount'] ?? 0)),
             'discount_percent' => self::percent(max(0, $subtotal), (int)($actions['bps'] ?? 0)),
