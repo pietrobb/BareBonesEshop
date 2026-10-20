@@ -448,6 +448,33 @@ try {
         PaymentService::handlePulledNotification(['id' => '3600000303'], $r6mGoPay, 'gopay');
         assert_equals(250, PaymentService::refundedAmount($r6mCredited), 'R6 refund: a later GoPay report of the credit-note refund books nothing more');
 
+        // R7: two credit notes accepted by GoPay at once. Confirming one leaves the payment partially_refunded; the
+        // other must still be offered, else its money is never booked.
+        $r7Twin = $r6mOrder('gopay', '3600000305');
+        $r7TwinRefunds = [];
+        foreach ([250 => 'r7-twin-a', 300 => 'r7-twin-b'] as $r7Amount => $r7Key) {
+            $pdo->prepare("INSERT INTO order_refunds (store_id, order_id, rma_id, credit_note_id, amount, currency, status, idempotency_key)
+                VALUES ('default', ?, 0, 0, ?, 'eur', 'pending', ?)")->execute([$r7Twin, $r7Amount, $r7Key]);
+            $r7TwinRefunds[$r7Key] = (int)$pdo->lastInsertId();
+            JobQueue::push('payment_refund', ['order_id' => $r7Twin, 'payment_id' => '3600000305', 'amount' => $r7Amount,
+                'refund_id' => $r7TwinRefunds[$r7Key], 'idempotency_key' => $r7Key], 1);
+        }
+        $pdo->prepare("UPDATE orders SET payment_status = 'refund_pending' WHERE id = ?")->execute([$r7Twin]);
+        $r6mGoPayState = 'PAID';
+        $r6mRunJobs($r7Twin);
+        $r6mGoPayState = 'PARTIALLY_REFUNDED';
+        PaymentService::handlePulledNotification(['id' => '3600000305'], $r6mGoPay, 'gopay');
+        $r7First = PaymentService::unconfirmedProviderRefund(Orders::byId($r7Twin));
+        PaymentService::confirmProviderRefund($r7Twin, 'r7-admin', 'First credit note refund seen in the GoPay portal');
+        $r7Second = PaymentService::unconfirmedProviderRefund(Orders::byId($r7Twin));
+        assert_true($r7First !== null && $r7Second !== null && $r7Second['refund_id'] !== $r7First['refund_id'],
+            'R7 refund: after one of two concurrent GoPay credit-note refunds is confirmed, the other is still offered (was hidden by partially_refunded)');
+        PaymentService::confirmProviderRefund($r7Twin, 'r7-admin', 'Second credit note refund seen in the GoPay portal');
+        assert_equals([550, 'succeeded', 'succeeded'], [PaymentService::refundedAmount($r7Twin),
+            (string)Rma::refundById($r7TwinRefunds['r7-twin-a'])['status'], (string)Rma::refundById($r7TwinRefunds['r7-twin-b'])['status']],
+            'R7 refund: both concurrent GoPay credit-note refunds are booked once each');
+        assert_true(PaymentService::unconfirmedProviderRefund(Orders::byId($r7Twin)) === null, 'R7 refund: nothing is left to confirm');
+
         // A goodwill refund the admin confirmed first, then an RMA credit note: the settled request must not hide it.
         $r6mLater = $r6mOrder('gopay', '3600000304');
         PaymentService::requestRefundAndQueue($r6mLater, 300, 'r6m_goodwill_request', ['reason' => 'R6M']);

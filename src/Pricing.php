@@ -500,6 +500,10 @@ class Pricing {
         if ($items !== [] && class_exists('Promotions')) {
             $actions = array_merge($actions, Promotions::cartActions($items, $subtotal, $customerId));
         }
+        // A percentage of a cart is charged in units the cart's currency shows (whole Kč/Ft).
+        if ($currency !== null) {
+            foreach ($actions as $i => $action) $actions[$i]['discount'] = min(max(0, $subtotal), Money::round((int)($action['discount'] ?? 0), $currency));
+        }
         return $actions;
     }
 

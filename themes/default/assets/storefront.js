@@ -174,7 +174,7 @@
     box.innerHTML = `<div class="payment-loading" role="status">${escapeHtml(text.paymentLoading)}</div>`;
     const params = {
       country: country.value, currency: config.currency,
-      amount: String(checkoutGoods(subtotal) + shippingPrice), shipping_method: selectedShipping
+      amount: String(checkoutGoods(subtotal) + shippingPrice), shipping_method: selectedShipping, vat_id: checkoutVatId()
     };
     let result;
     try {
@@ -203,7 +203,25 @@
     updateCheckoutTotal(shippingPrice, parseInt(methods[selectedIndex].fee || 0, 10), subtotal);
   }
 
-  async function refreshCheckoutShipping() {
+  // Buyer VAT ID the order would use: the checkout takes it only together with a company name.
+  function checkoutVatId() {
+    const vatId = document.getElementById('checkout-vat-id');
+    const company = document.getElementById('checkout-company');
+    return vatId && (!company || company.value.trim() !== '') ? vatId.value.trim() : '';
+  }
+
+  // Another VAT scenario (export, reverse charge) re-prices the whole order: let the server re-render it.
+  function repriceCheckout(scenario) {
+    const subtotalElement = document.getElementById('checkout-subtotal');
+    const rendered = subtotalElement ? subtotalElement.dataset.vatScenario : '';
+    if (!rendered || !scenario || rendered === scenario) return false;
+    const button = document.querySelector('form[data-checkout-form] [name="checkout_refresh"]');
+    if (!button) return false;
+    button.form.requestSubmit(button);
+    return true;
+  }
+
+  async function refreshCheckoutShipping(userChange) {
     const country = document.getElementById('checkout-country');
     const box = document.getElementById('shipping-options');
     const summaryShipping = document.getElementById('summary-shipping');
@@ -212,12 +230,10 @@
     const request = ++shippingRequest;
     paymentRequest++; // payment options of the previous shipping choice are stale as well
     const subtotal = parseInt(subtotalElement.value || '0', 10);
-    const previous = box.querySelector('input[name="shipping_method"]:checked');
-    const previousCode = previous ? previous.value : '';
     // The rendered options stay until new rates arrive: a failed request only adds a notice above them.
     box.querySelectorAll('.shipping-loading, .shipping-error').forEach((node) => node.remove());
     box.insertAdjacentHTML('afterbegin', `<div class="shipping-loading" role="status">${escapeHtml(text.shippingLoading)}</div>`);
-    const params = {country: country.value, subtotal: String(checkoutGoods(subtotal))};
+    const params = {country: country.value, subtotal: String(checkoutGoods(subtotal)), vat_id: checkoutVatId()};
     let result;
     try {
       result = await fetchCheckoutJson('shipping_rates', params);
@@ -228,6 +244,7 @@
       return;
     }
     if (request !== shippingRequest) return;
+    if (userChange === true && repriceCheckout(result.vat_scenario)) return;
     const methods = Array.isArray(result.methods) ? result.methods : [];
     const freeHint = document.getElementById('free-shipping-hint');
     if (freeHint) {
@@ -240,8 +257,11 @@
       await refreshCheckoutPayments('');
       return;
     }
+    // Keep the choice on screen when the rates arrive — the server-rendered one (e.g. after applying a coupon) or one
+    // the shopper picked while they were loading; fall back to the first rate.
+    const previous = box.querySelector('input[name="shipping_method"]:checked');
+    const previousCode = previous ? previous.value : '';
     box.innerHTML = '';
-    // Keep the choice the server rendered (e.g. after applying a coupon); fall back to the first rate.
     const selectedIndex = Math.max(0, methods.findIndex((method) => (method.method_code || method.key || '') === previousCode));
     methods.forEach((method, index) => {
       const label = document.createElement('label');
@@ -354,7 +374,7 @@
     const form = event.target.closest('form[data-checkout-form]');
     if (!form || event.defaultPrevented) return;
     // Applying a coupon or a saved address only refills the form; it must not lock the order button.
-    if (event.submitter && (event.submitter.name === 'coupon_action' || event.submitter.name === 'address_action')) return;
+    if (event.submitter && ['coupon_action', 'address_action', 'checkout_refresh'].includes(event.submitter.name)) return;
     const button = form.querySelector('button.btn-checkout');
     if (!button) return;
     if (form.dataset.submitting === '1') {
@@ -517,7 +537,11 @@
     bindCategoryMenus();
     document.querySelectorAll('input[data-search-suggest]').forEach(bindSearchSuggest);
     const country = document.getElementById('checkout-country');
-    if (country) country.addEventListener('change', refreshCheckoutShipping);
+    if (country) country.addEventListener('change', () => refreshCheckoutShipping(true));
+    ['checkout-vat-id', 'checkout-company'].forEach((id) => {
+      const field = document.getElementById(id);
+      if (field && country) field.addEventListener('change', () => refreshCheckoutShipping(true));
+    });
     if (document.getElementById('shipping-options')) refreshCheckoutShipping();
 
     const banner = document.getElementById('cc-banner');

@@ -52,7 +52,8 @@ class Adapters {
 
     private static function cfg(): array {
         static $cfg;
-        return $cfg ??= require __DIR__ . '/../config.php';
+        // Without config.php (the theme contract probe of an update candidate) only the built-in providers exist.
+        return $cfg ??= is_file(__DIR__ . '/../config.php') ? require __DIR__ . '/../config.php' : [];
     }
 
     /** Stable provider definitions, merged with additive deployment config. */

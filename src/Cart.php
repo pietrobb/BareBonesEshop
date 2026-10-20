@@ -244,7 +244,8 @@ class Cart {
                     max(1, $qty),
                     $customerId > 0 ? $customerId : null
                 );
-                $price = (int)$pricingProduct['price'];
+                // Price-list and promotion percentages are charged in units the currency shows (whole Kč/Ft).
+                $price = Money::round((int)$pricingProduct['price'], (string)$currency);
             }
             if ($price < 0) {
                 // Never sell at 0 because of a clamp: the line stays visible but is not purchasable,
@@ -363,7 +364,7 @@ class Cart {
             $resolved = method_exists($taxProvider, 'resolveClass') ? $taxProvider::resolveClass($vatClass) : $vatClass;
             $rate     = $applies ? $taxProvider::rate($rateCountry, $vatClass, $atDate) : 0.0;
             if ($stripDomesticVat) {
-                $unitNet = $taxProvider::computeLine((int)$item['price'], 1, $taxProvider::rate($sellerCountry, $vatClass, $atDate), false)['net'];
+                $unitNet = Money::round($taxProvider::computeLine((int)$item['price'], 1, $taxProvider::rate($sellerCountry, $vatClass, $atDate), false)['net'], (string)$summary['currency']);
                 $summary['subtotal'] -= (int)$item['total'] - $unitNet * (int)$item['qty'];
                 $item['price'] = $unitNet;
                 $item['total'] = $unitNet * (int)$item['qty'];
