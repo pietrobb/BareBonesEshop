@@ -336,6 +336,9 @@ class ShippingService
     /** Lower-rank moves that are real progress: after a failed attempt the parcel goes back to the depot and is re-sent. */
     private const TRACKING_REOPEN = ['in_transit' => ['failed']];
 
+    /** Local brand names of a carrier that the admin may type as a shipment's carrier (carrier key => names). */
+    private const CARRIER_BRANDS = ['packeta' => ['Zásielkovňa', 'Zásilkovna']];
+
     /** Statuses a parcel may move to $status from: equal or lower rank, plus the reopening moves above. */
     private static function trackingSources(string $status): array
     {
@@ -439,27 +442,34 @@ class ShippingService
     /**
      * Shipped admin shipments of $carrierId with tracking number $awb in $stores. The admin types both by
      * hand: the tracking number matches without spaces/dashes and case, the carrier by its letters and
-     * digits ("Packeta", "Packeta SK" = packeta, "HTTP Carrier" = http-carrier). An empty carrier or a brand name
-     * ("Zásielkovňa") matches through the carrier of the order's shipping method; a carrier naming another
-     * registered carrier ("GLS", "GLS Slovakia") never does, so carrier A cannot deliver carrier B's parcel.
+     * digits ("Packeta", "Packeta SK" = packeta, "HTTP Carrier" = http-carrier). An empty carrier matches through
+     * the carrier of the order's shipping method, and so does a brand name of that carrier ("Zásielkovňa", or a
+     * name that the shipping method's own name contains). Any other carrier ("GLS", "DPD") never matches, so
+     * carrier A cannot deliver carrier B's parcel.
      * @param list<string> $stores
      * @return list<array<string,mixed>>
      */
     private static function shippedShipments(string $carrierId, string $awb, array $stores): array
     {
-        $key = static fn(string $value): string => strtolower((string)preg_replace('/[^A-Za-z0-9]+/', '', $value));
+        $key = static fn(string $value): string => str_replace('-', '', Str::slug($value));
         $wanted = $key($carrierId);
         $others = array_values(array_filter(array_map($key, array_map('strval', array_keys(Adapters::registry('shipping')))),
             static fn(string $code): bool => $code !== '' && $code !== $wanted));
-        $matches = static function (array $row) use ($key, $wanted, $others): bool {
+        $brands = array_map($key, self::CARRIER_BRANDS[$wanted] ?? []);
+        $matches = static function (array $row) use ($key, $wanted, $others, $brands): bool {
             $carrier = $key((string)$row['carrier']);
             if ($wanted !== '' && str_contains($carrier, $wanted)) return true;
             foreach ($others as $other) {
                 if (str_contains($carrier, $other)) return false;
             }
-            return $key((string)$row['method_carrier']) === $wanted;
+            if ($key((string)$row['method_carrier']) !== $wanted) return false;
+            if ($carrier === '') return true;
+            foreach ($brands as $brand) {
+                if (str_contains($carrier, $brand)) return true;
+            }
+            return strlen($carrier) >= 3 && str_contains($key((string)$row['method_name']), $carrier);
         };
-        $stmt = Db::get()->prepare("SELECT s.id, s.store_id, s.order_id, s.carrier, m.carrier AS method_carrier FROM shipments s
+        $stmt = Db::get()->prepare("SELECT s.id, s.store_id, s.order_id, s.carrier, m.carrier AS method_carrier, m.name AS method_name FROM shipments s
             LEFT JOIN orders o ON o.id = s.order_id AND o.store_id = s.store_id
             LEFT JOIN shipping_methods m ON m.code = o.shipping_method AND m.store_id = ?
             WHERE s.status = 'shipped' AND s.tracking_number IS NOT NULL
