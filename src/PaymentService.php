@@ -937,7 +937,6 @@ class PaymentService {
     private static function applyWebhookEvent(int $orderId, string $provider, string $eventType, string $eventKey, array $data): void {
         $order = Orders::byId($orderId);
         if (!$order) throw new RuntimeException("Order #{$orderId} vanished during payment webhook");
-        $from = (string)($order['payment_status'] ?? 'pending');
         $total = (int)$order['total'];
         $orderCurrency = strtolower((string)($order['currency'] ?? 'eur'));
         $amount = (int)($data['amount'] ?? 0);
@@ -951,27 +950,32 @@ class PaymentService {
             return;
         }
 
-        $to = match ($eventType) {
-            'payment.paid' => 'paid',
-            'payment.failed' => in_array($from, ['pending', 'authorized'], true) ? 'failed' : null,
-            'payment.disputed' => 'disputed',
-            default => null,
-        };
-        $payload = array_merge(['provider' => $provider], $data);
-        $providerRef = (string)($data['refund_id'] ?? $data['provider_ref'] ?? $data['orderId'] ?? $data['id'] ?? '');
-        if ($to !== null && $to !== $from && self::canPaymentTransition($from, $to)) {
-            self::applyTransition($order, $to, $eventType, $amount, $eventKey, $payload);
-        } else {
+        // Under the order row lock, taken before the ledger insert: two events of one order at once (succeeded and
+        // charge.succeeded) otherwise each held the shared lock the payment_transactions foreign key takes on the
+        // order and then both waited to update it — a MySQL deadlock, and the loser was never applied.
+        $settle = self::withLockedOrder($orderId, static function (array $order) use ($orderId, $provider, $eventType, $eventKey, $data, $amount, $currency, $orderCurrency): bool {
+            $from = (string)($order['payment_status'] ?? 'pending');
+            $to = match ($eventType) {
+                'payment.paid' => 'paid',
+                'payment.failed' => in_array($from, ['pending', 'authorized'], true) ? 'failed' : null,
+                'payment.disputed' => 'disputed',
+                default => null,
+            };
+            $payload = array_merge(['provider' => $provider], $data);
+            $providerRef = (string)($data['refund_id'] ?? $data['provider_ref'] ?? $data['orderId'] ?? $data['id'] ?? '');
+            if ($to !== null && $to !== $from && self::canPaymentTransition($from, $to)) {
+                self::applyTransition($order, $to, $eventType, $amount, $eventKey, $payload);
+                return $to === 'paid';
+            }
             // Checked before this event's own row joins the ledger, whose references it would match.
             if ($to === 'paid') self::reportForeignCapture($order, self::captureRefs($data));
             self::recordEvent($orderId, $eventType, 'ignored', $amount, $currency ?: $orderCurrency, $eventKey, $payload + ['payment_status' => $from], $provider, $providerRef);
             if ($to !== null) AuditLog::log('payment_webhook_ignored', $orderId, $from, $from, "{$provider} {$eventType}");
             // A redelivery after a failed settlement finishes it (settleCapture is idempotent).
-            if ($to === 'paid' && $from === 'paid') self::settleCapture($orderId, 'Payment confirmed via webhook');
-            return;
-        }
+            return $to === 'paid' && $from === 'paid';
+        });
 
-        if ($to === 'paid') self::settleCapture($orderId, 'Payment confirmed via webhook');
+        if ($settle) self::settleCapture($orderId, 'Payment confirmed via webhook');
     }
 
     /**

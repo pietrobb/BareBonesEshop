@@ -57,6 +57,17 @@ final class InvoiceService
      */
     public static function issue(int $orderId, ?string $storeCode = null): array
     {
+        return self::issueAttempt($orderId, $storeCode, 1);
+    }
+
+    /** MySQL/MariaDB picked this transaction as a deadlock victim (its work was rolled back and may simply be retried). */
+    private static function deadlocked(\PDOException $e): bool
+    {
+        return Db::isMysql() && ((string)$e->getCode() === '40001' || (int)($e->errorInfo[1] ?? 0) === 1213);
+    }
+
+    private static function issueAttempt(int $orderId, ?string $storeCode, int $attempt): array
+    {
         $existing = self::byOrderId($orderId);
         $replaces = null;
         if ($existing !== null) {
@@ -166,6 +177,9 @@ final class InvoiceService
                     return $existing;
                 }
             }
+            // The first number of a new series: two issuers can still deadlock creating its counter row. The victim
+            // was rolled back whole, so it starts over (and finds the other's invoice if it was the same order).
+            if (self::deadlocked($e) && $attempt < 3) return self::issueAttempt($orderId, $storeCode, $attempt + 1);
             throw $e;
         } catch (\Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();
@@ -869,13 +883,17 @@ final class InvoiceService
                 . "give store {$storeId} its own " . ($type === 'credit_note' ? 'credit_note_prefix' : 'invoice_prefix') . ' in stores.json');
         }
 
-        // INSERT IF NOT EXISTS — driver-aware (INSERT OR IGNORE / INSERT IGNORE).
-        $db->prepare(Db::insertIgnore() . " INTO invoice_number_counters (store_id, type, year, prefix, last_number) VALUES (:s, :t, :y, :p, 0)")
-           ->execute($key);
-
-        // Row-locking increment, then read back inside the same transaction (portable to SQLite and MySQL/MariaDB).
+        // Row-locking increment first, then read back inside the same transaction (portable to SQLite and MySQL/MariaDB).
+        // Only the series' first number inserts the counter row: an INSERT IGNORE on an existing row takes a shared
+        // lock in MySQL, and two issuers holding it both waited for the other's increment (a deadlock per collision).
         $where = 'store_id = :s AND type = :t AND year = :y AND prefix = :p';
-        $db->prepare("UPDATE invoice_number_counters SET last_number = last_number + 1 WHERE {$where}")->execute($key);
+        $increment = $db->prepare("UPDATE invoice_number_counters SET last_number = last_number + 1 WHERE {$where}");
+        $increment->execute($key);
+        if ($increment->rowCount() === 0) {
+            $db->prepare(Db::insertIgnore() . " INTO invoice_number_counters (store_id, type, year, prefix, last_number) VALUES (:s, :t, :y, :p, 0)")
+               ->execute($key);
+            $increment->execute($key);
+        }
         $stmt = $db->prepare("SELECT last_number FROM invoice_number_counters WHERE {$where}");
         $stmt->execute($key);
         $next = (int)$stmt->fetchColumn();
@@ -893,8 +911,12 @@ final class InvoiceService
     private static function allocateLegacyNumber(PDO $db, int $year, string $prefix): string
     {
         $key = [':y' => $year, ':p' => $prefix];
-        $db->prepare(Db::insertIgnore() . " INTO invoice_counters (year, prefix, last_number) VALUES (:y, :p, 0)")->execute($key);
-        $db->prepare("UPDATE invoice_counters SET last_number = last_number + 1 WHERE year = :y AND prefix = :p")->execute($key);
+        $increment = $db->prepare("UPDATE invoice_counters SET last_number = last_number + 1 WHERE year = :y AND prefix = :p");
+        $increment->execute($key);
+        if ($increment->rowCount() === 0) {
+            $db->prepare(Db::insertIgnore() . " INTO invoice_counters (year, prefix, last_number) VALUES (:y, :p, 0)")->execute($key);
+            $increment->execute($key);
+        }
         $stmt = $db->prepare("SELECT MAX(last_number) FROM invoice_counters WHERE year = :y AND prefix = :p");
         $stmt->execute($key);
         return sprintf('%s%d%04d', $prefix, $year, (int)$stmt->fetchColumn());
