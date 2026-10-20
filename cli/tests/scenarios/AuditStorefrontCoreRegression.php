@@ -52,6 +52,7 @@ JobQueue::setDir($sfaDir . "/jobs");
 $config = require $sfaApp . "/config.php";
 (new ReflectionProperty(Security::class, "cfg"))->setValue(null, ["app_url" => "http://127.0.0.1:' . $sfaPort . '"] + $config);
 Security::setRateDbForTesting(new PDO("sqlite:" . $sfaDir . "/rate.sqlite"));
+(new ReflectionProperty(InvoiceService::class, "storageDir"))->setValue(null, $sfaDir . "/invoices");
 $uri = (string)parse_url($_SERVER["REQUEST_URI"], PHP_URL_PATH);
 if ($uri === "/__seed") {
     session_start();
@@ -104,9 +105,10 @@ $sfaHttp = static function (string $method, string $path, array $post = [], ?str
     $context = stream_context_create(['http' => ['method' => $method, 'header' => $headers, 'content' => http_build_query($post),
         'follow_location' => 0, 'ignore_errors' => true, 'timeout' => 20]]);
     $body = @file_get_contents("http://127.0.0.1:{$sfaPort}{$path}", false, $context);
-    $result = ['status' => 0, 'location' => '', 'csp' => '', 'body' => (string)$body];
+    $result = ['status' => 0, 'location' => '', 'csp' => '', 'body' => (string)$body, 'headers' => []];
     foreach ($http_response_header ?? [] as $index => $line) {
         if ($index === 0) $result['status'] = (int)(explode(' ', $line)[1] ?? 0);
+        if ($index > 0 && str_contains($line, ':')) $result['headers'][strtolower(trim(strstr($line, ':', true)))] = trim(substr(strstr($line, ':'), 1));
         if (stripos($line, 'Location:') === 0) $result['location'] = trim(substr($line, 9));
         if (stripos($line, 'Content-Security-Policy:') === 0) $result['csp'] = trim(substr($line, 24));
         if (preg_match('/^Set-Cookie:\s*PHPSESSID=([^;]+)/i', $line, $cookie)) $sid = $cookie[1];
@@ -198,6 +200,24 @@ try {
     assert_true($sfaNoPage['status'] === 404 && str_contains($sfaNoPage['body'], $sfaE('account.page_not_found')) && !str_contains($sfaNoPage['body'], 'SFA Filler'),
         'SFA soft 404: unknown ?page= answers 404, not the homepage with 200');
     assert_equals(200, $sfaHome['status'], 'SFA soft 404: the homepage itself still answers 200');
+    // R7 low: any other unknown address fell through to redirect.php, which answered a bare text/plain "Not found".
+    $sfaNoUrl = $sfaHttp('GET', '/sfa-no-such-page', [], $sfaSid);
+    assert_true($sfaNoUrl['status'] === 404 && str_starts_with($sfaNoUrl['headers']['content-type'] ?? '', 'text/html')
+        && $sfaCount('<main', $sfaNoUrl['body']) === 1 && str_contains($sfaNoUrl['body'], $sfaE('account.page_not_found')),
+        'R7 404: an unknown address gets the storefront 404 page in the shell (was text/plain "Not found")');
+    $sfaNoAsset = $sfaHttp('GET', '/images/sfa-missing.png', [], $sfaSid);
+    assert_true($sfaNoAsset['status'] === 404 && $sfaNoAsset['body'] === 'Not found', 'R7 404: a missing image keeps the bare 404');
+
+    // R7 low: the invoice opened by its token link (no login) was cacheable for 5 minutes (private, max-age=300).
+    mkdir($sfaRoot . '/invoices', 0700, true);
+    file_put_contents($sfaRoot . '/invoices/sfa-inv.pdf', "%PDF-1.4\n%sfa\n");
+    $sfaToken = str_repeat('ab', 32);
+    $sfaDb->prepare("INSERT INTO invoices (order_id, number, issued_at, pdf_path, download_token) VALUES (999001, 'SFA-INV-1', '2026-10-20', 'sfa-inv.pdf', ?)")->execute([$sfaToken]);
+    $sfaInvoice = $sfaHttp('GET', '/account.php?p=invoice&token=' . $sfaToken, [], $sfaSid);
+    assert_true($sfaInvoice['status'] === 200 && ($sfaInvoice['headers']['content-type'] ?? '') === 'application/pdf' && str_starts_with($sfaInvoice['body'], '%PDF'),
+        'R7 invoice link: the token opens the PDF');
+    assert_equals(['no-store', 'noindex, nofollow'], [$sfaInvoice['headers']['cache-control'] ?? '', $sfaInvoice['headers']['x-robots-tag'] ?? ''],
+        'R7 invoice link: the PDF is not cached and not indexed (was Cache-Control: private, max-age=300)');
 
     // 4. Facet filters are bounded and limited to the category's own criteria and descendants.
     $sfaBounded = $sfaProbeResult['bounded'] ?? [[], []];

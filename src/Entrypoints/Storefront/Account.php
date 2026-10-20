@@ -379,7 +379,9 @@ if ($p === 'invoice') {
     header('Content-Type: application/pdf');
     header('Content-Disposition: inline; filename="' . $inv['number'] . '.pdf"');
     header('Content-Length: ' . filesize($abs));
-    header('Cache-Control: private, max-age=300');
+    // Anyone holding the link can open it: no copy stays in a (shared) browser's cache or survives a cancellation.
+    header('Cache-Control: no-store');
+    header('X-Robots-Tag: noindex, nofollow');
     readfile($abs);
     exit;
 }
