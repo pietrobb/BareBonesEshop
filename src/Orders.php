@@ -535,6 +535,7 @@ class Orders {
                 if ($ownTransaction) $db->rollBack();
                 return; // already restored (or order does not exist)
             }
+            $skus = [];
             foreach ($items as $item) {
                 if (VariantAvailability::isDigitalProduct((int)$item['product_id'])) continue;
                 if ($mode === 'return') {
@@ -544,8 +545,11 @@ class Orders {
                 }
                 foreach (Inventory::reservationLines($item) as $line) {
                     Warehouse::syncProductStock([(string)$line['sku']]);
+                    $skus[] = (string)$line['sku'];
                 }
             }
+            // The released or returned units go to orders waiting for them first.
+            BackorderAllocation::allocate($skus);
 
             if ($ownTransaction) $db->commit();
         } catch (\Throwable $e) {

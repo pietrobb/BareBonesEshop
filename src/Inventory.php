@@ -233,6 +233,51 @@ class Inventory {
             if ($remaining !== 0) throw new RuntimeException('Return quantity exceeds shipped allocation');
             Warehouse::syncProductStock([(string)$line['sku']]);
         }
+        BackorderAllocation::allocate(array_column($lines, 'sku'));
+    }
+
+    /**
+     * Take back off stock units the order-level return already restocked but an RMA receipt then discarded (or kept
+     * for repair): they are not sellable. Taken from the warehouses the line shipped from, never below what other
+     * orders have reserved; what cannot be written off is reported for a manual count.
+     */
+    public static function writeOffReturnedQuantity(array $orderItem, int $quantity, string|int $referenceId): void {
+        if ($quantity <= 0) throw new InvalidArgumentException('Write-off quantity must be positive');
+        $short = 0;
+        foreach (self::reservationLines($orderItem) as $line) {
+            $sku = (string)$line['sku'];
+            $remaining = $quantity * max(1, (int)($line['quantity_per_bundle'] ?? 1));
+            foreach ($line['allocations'] ?? [] as $allocation) {
+                if ($remaining === 0) break;
+                $status = (string)($allocation['status'] ?? 'reserved');
+                $warehouseId = empty($allocation['warehouse_id']) ? null : (int)$allocation['warehouse_id'];
+                if ($status === 'reserved' && $warehouseId !== null) {
+                    $available = 0;
+                    foreach (Warehouse::stockBySku($sku) as $row) {
+                        if ((int)$row['id'] === $warehouseId) $available = max(0, (int)$row['qty'] - (int)$row['reserved']);
+                    }
+                    $take = min($remaining, (int)$allocation['qty'], $available);
+                    if ($take > 0) Warehouse::adjustStock($warehouseId, $sku, -$take, 'rma_write_off', 'rma', $referenceId);
+                    $remaining -= $take;
+                } elseif ($status === 'legacy_variant' && !empty($line['variant_id'])) {
+                    $take = min($remaining, (int)$allocation['qty']);
+                    $update = Db::get()->prepare('UPDATE variants SET stock = stock - :quantity WHERE id = :id AND stock >= :quantity2');
+                    foreach ([':quantity', ':quantity2'] as $parameter) $update->bindValue($parameter, $take, PDO::PARAM_INT);
+                    $update->bindValue(':id', (int)$line['variant_id'], PDO::PARAM_INT);
+                    $update->execute();
+                    if ($update->rowCount() === 1) {
+                        $stock = Db::get()->prepare('SELECT stock FROM variants WHERE id = :id');
+                        $stock->execute([':id' => (int)$line['variant_id']]);
+                        self::movement(null, $sku, 'rma_write_off', -$take, 0, (int)$stock->fetchColumn(), 0, 'rma', $referenceId, null, ['variant_id' => (int)$line['variant_id']]);
+                        $remaining -= $take;
+                    }
+                }
+            }
+            $short += $remaining;
+        }
+        if ($short > 0) {
+            IncidentMonitor::report('inventory.rma_write_off_short', 'inventory', 'warning', ['order_item_id' => (int)$orderItem['id'], 'units' => $short]);
+        }
     }
 
     /**
