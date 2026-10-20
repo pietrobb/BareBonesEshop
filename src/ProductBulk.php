@@ -1,7 +1,7 @@
 <?php
 /**
  * Bulk actions of the admin product list, bound to the active catalog. Every changed product is written to the audit
- * log. A product that orders refer to is never deleted (order_items keeps a foreign key to it): it is skipped and
+ * log, and a status or price change records product.updated in the same transaction. A product that orders refer to is never deleted (order_items keeps a foreign key to it): it is skipped and
  * reported, so the admin can archive it instead. A price change never takes a product below zero or below the
  * price at which a variant with a negative delta would turn negative.
  */
@@ -35,12 +35,14 @@ final class ProductBulk {
                     if ($product['status'] === $status) continue;
                     $db->prepare('UPDATE products SET status = :status, updated_at = ' . Db::now() . ' WHERE id = :id')->execute([':status' => $status, ':id' => $id]);
                     AuditLog::log('product', $id, ['status' => $product['status']], ['status' => $status], 'Admin bulk ' . $action);
+                    Products::recordUpdated($id, $product);
                 } else {
                     $price = self::changedPrice((int)$product['price'], self::PRICE_ACTIONS[$action], ProductVariants::minBasePrice($id));
                     if ($price['clamped']) $result['clamped'][] = (string)($product['sku'] ?? $id);
                     $db->prepare('UPDATE products SET price = :price, updated_at = ' . Db::now() . ' WHERE id = :id')->execute([':price' => $price['price'], ':id' => $id]);
                     if ($price['price'] !== (int)$product['price']) {
                         AuditLog::log('product', $id, ['price' => (int)$product['price']], ['price' => $price['price']], 'Admin bulk price ' . sprintf('%+d%%', self::PRICE_ACTIONS[$action]));
+                        Products::recordUpdated($id, $product);
                     }
                 }
                 $result['count']++;

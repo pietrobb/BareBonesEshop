@@ -162,3 +162,28 @@ try {
     $r7rListeners->setValue(null, $r7rSavedListeners);
     $r7rBooted->setValue(null, $r7rSavedBooted);
 }
+
+
+// ── Admin bulk actions on the product list record product.updated like a single edit (API subscribers saw nothing) ──
+$pdo->prepare("INSERT INTO products (id, store_id, category_id, sku, slug, name, price, stock, status)
+    SELECT ?, 'default', id, ?, ?, ?, 1000, 0, 'active' FROM categories WHERE store_id = 'default' ORDER BY id LIMIT 1")
+    ->execute([970701, 'R7R-BULK-A', 'r7r-bulk-a', 'R7R Bulk A']);
+$pdo->prepare("INSERT INTO products (id, store_id, category_id, sku, slug, name, price, stock, status)
+    SELECT ?, 'default', id, ?, ?, ?, 0, 0, 'archived' FROM categories WHERE store_id = 'default' ORDER BY id LIMIT 1")
+    ->execute([970702, 'R7R-BULK-B', 'r7r-bulk-b', 'R7R Bulk B']);
+$r7rBulkEvents = static function (int $id) use ($pdo): array {
+    $stmt = $pdo->prepare("SELECT payload FROM event_outbox WHERE event_type = 'product.updated' AND aggregate_id = ? ORDER BY seq");
+    $stmt->execute([(string)$id]);
+    return array_map(static fn(string $json): array => json_decode($json, true), $stmt->fetchAll(PDO::FETCH_COLUMN));
+};
+ProductBulk::apply('price_up_10', [970701, 970702]);
+$r7rBulkA = $r7rBulkEvents(970701);
+assert_equals([1, 1100], [count($r7rBulkA), (int)($r7rBulkA[0]['price']['amount'] ?? 0)],
+    'R7 bulk: a bulk price change records product.updated with the new price (was not recorded)');
+assert_equals(0, count($r7rBulkEvents(970702)), 'R7 bulk: a product whose price the bulk action left unchanged (0 + 10 %) records nothing');
+ProductBulk::apply('archive', [970701, 970702]);
+$r7rBulkA = $r7rBulkEvents(970701);
+assert_equals([2, 'archived'], [count($r7rBulkA), $r7rBulkA[1]['status'] ?? null],
+    'R7 bulk: a bulk archive records product.updated with the new status (was not recorded)');
+assert_equals(0, count($r7rBulkEvents(970702)), 'R7 bulk: an already archived product records nothing');
+$pdo->exec('DELETE FROM products WHERE id IN (970701, 970702)');
