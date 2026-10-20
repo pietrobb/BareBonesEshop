@@ -202,11 +202,13 @@ class CheckoutService {
      * A stacking coupon applies (minimum order included) to the subtotal the promotions leave; any other
      * coupon is an alternative to them (Pricing::combineDiscounts), so it is priced on the full subtotal.
      */
-    public static function couponFor(string $code, int $subtotal, int $promotionDiscount, ?string $email): array {
+    public static function couponFor(string $code, int $subtotal, int $promotionDiscount, ?string $email, string $currency): array {
         $coupon = Pricing::applyCoupon($code, $subtotal, $email);
         if ($promotionDiscount > 0 && (int)$coupon['discount'] > 0 && (string)($coupon['stacking'] ?? 'stack') === 'stack') {
             $coupon = Pricing::applyCoupon($code, max(0, $subtotal - $promotionDiscount), $email);
         }
+        // A percentage coupon is charged in units the cart's currency shows (whole Kč/Ft).
+        if ((int)$coupon['discount'] > 0) $coupon['discount'] = min($subtotal, Money::round((int)$coupon['discount'], $currency));
         return $coupon;
     }
 
@@ -249,7 +251,7 @@ class CheckoutService {
         $couponError = null;
         $couponStacking = 'stack';
         if ($couponCode !== '') {
-            $coupon = self::couponFor($couponCode, $subtotal, $promotionDiscount, $email);
+            $coupon = self::couponFor($couponCode, $subtotal, $promotionDiscount, $email, $currency);
             $couponDiscount = max(0, (int)$coupon['discount']);
             $couponStacking = (string)($coupon['stacking'] ?? 'stack');
             if ($couponDiscount === 0) $couponError = self::couponErrorKey((string)($coupon['error'] ?? ''));

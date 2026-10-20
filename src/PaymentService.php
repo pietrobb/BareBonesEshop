@@ -93,7 +93,7 @@ class PaymentService {
         $fee = max(0, (int)($quote['fee'] ?? 0));
         $fixedFee = min($fee, max(0, (int)($quote['fixed_fee'] ?? $fee)));
         if (!$netOfDomesticVat || $fixedFee === 0) return $fee;
-        return $fee - $fixedFee + Cart::netOfDomesticVat($fixedFee, $sellerCountry, 'standard', $taxProviderCode);
+        return $fee - $fixedFee + Money::round(Cart::netOfDomesticVat($fixedFee, $sellerCountry, 'standard', $taxProviderCode), (string)($quote['currency'] ?? 'eur'));
     }
 
     /** Cash on delivery is a method's service type, not its (renamable) code. */
@@ -1191,6 +1191,8 @@ class PaymentService {
         $fee = $fixedFee;
         $bps = (int)($row['percent_fee_bps'] ?? 0);
         if ($bps > 0) $fee += (int)ceil($amount * $bps / 10000);
+        // Charged in units the currency shows (whole Kč/Ft).
+        [$fee, $fixedFee] = [Money::round($fee, $currency), Money::round($fixedFee, $currency)];
         if (!empty($row['free_above']) && $amount >= (int)$row['free_above']) $fee = $fixedFee = 0;
 
         return [

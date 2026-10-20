@@ -154,7 +154,7 @@ function apiValidateCoupon(): array {
     foreach (Pricing::autoCartRules($subtotal, $items, !empty($_SESSION['customer_id']) ? (int)$_SESSION['customer_id'] : null, $cartCurrency) as $rule) {
         $promotionDiscount += max(0, (int)($rule['discount'] ?? 0));
     }
-    $result = CheckoutService::couponFor($code, $subtotal, $promotionDiscount, $email);
+    $result = CheckoutService::couponFor($code, $subtotal, $promotionDiscount, $email, $cartCurrency ?? StoreContext::current()->currency());
     if ($result['discount'] <= 0) {
         // Unknown, expired, not yet valid and already used codes look the same; the minimum order is only
         // checked for an otherwise valid code.
@@ -704,7 +704,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     $couponDiscount = 0;
     $couponStacking = 'stack';
     if ($couponCode) {
-        $couponResult = CheckoutService::couponFor($couponCode, $cart['subtotal'], $promotionDiscount, $email);
+        $couponResult = CheckoutService::couponFor($couponCode, $cart['subtotal'], $promotionDiscount, $email, $cartCurrency);
         if ($couponResult['discount'] > 0) {
             $couponDiscount = $couponResult['discount'];
             $couponStacking = (string)($couponResult['stacking'] ?? 'stack');
@@ -742,6 +742,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     if ($shippingCost > 0 && Cart::chargesNetOfDomesticVat($vatScenario)) {
         $shippingCost = Cart::netOfDomesticVat($shippingCost, $sellerCountry, 'standard', $taxProviderCode);
     }
+    $shippingCost = Money::round($shippingCost, $cartCurrency);
 
     $currency = $cart['items'][0]['currency'] ?? 'eur';
     $paymentBaseAmount = max(0, $cart['subtotal'] - $totalDiscount) + $shippingCost;
