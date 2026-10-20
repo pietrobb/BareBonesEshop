@@ -311,7 +311,11 @@ try {
     assert_equals(['ready', 'ok'], [Health::readiness($r6mReadyCfg, dirname(TEST_CLI_DIR), $r6mOpen())['status'], Health::readiness($r6mReadyCfg, dirname(TEST_CLI_DIR), $r6mOpen())['checks']['database']],
         'R6 readiness: a writable database is ready');
     chmod($r6mDbFile, 0444);
-    try {
+    clearstatcache(true, $r6mDbFile);
+    // root (Docker CI images, some containers) ignores permission bits, so the file stays writable and the check proves nothing.
+    if (is_writable($r6mDbFile)) {
+        echo "  [SKIP] R6 readiness/doctor on a read-only database (chmod 0444 has no effect for this user, e.g. root)\n";
+    } else try {
         $r6mRo = $r6mOpen();
         $r6mReady = Health::readiness($r6mReadyCfg, dirname(TEST_CLI_DIR), $r6mRo);
         assert_equals(['not_ready', 'read_only'], [$r6mReady['status'], $r6mReady['checks']['database'] ?? ''], 'R6 readiness: /readyz is not ready on a read-only database (was ready)');

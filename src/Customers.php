@@ -245,14 +245,19 @@ class Customers {
         }
     }
 
+    /** Re-authentication for sensitive account actions (password change, account erasure). */
+    public static function passwordMatches(int $id, string $password): bool {
+        $stmt = Db::get()->prepare("SELECT password_hash FROM customers WHERE id = ? AND store_id = ?");
+        $stmt->execute([$id, StoreContext::current()->id()]);
+        $hash = $stmt->fetchColumn();
+        return is_string($hash) && $hash !== '' && password_verify($password, $hash);
+    }
+
     public static function changePassword(int $id, string $currentPassword, string $newPassword): array {
         if (strlen($newPassword) < self::MIN_PASSWORD_LEN) {
             return [false, 'weak_password'];
         }
-        $stmt = Db::get()->prepare("SELECT password_hash FROM customers WHERE id = ? AND store_id = ?");
-        $stmt->execute([$id, StoreContext::current()->id()]);
-        $hash = $stmt->fetchColumn();
-        if (!$hash || !password_verify($currentPassword, $hash)) {
+        if (!self::passwordMatches($id, $currentPassword)) {
             return [false, 'invalid_current_password'];
         }
         $newHash = password_hash($newPassword, PASSWORD_BCRYPT, ['cost' => self::BCRYPT_COST]);

@@ -244,6 +244,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $flash = $t('account.gdpr_erase_confirm_required');
             $flashType = 'error';
             $p = 'privacy';
+        } elseif (!Security::rateLimit('account_change_password_' . $cid, 5, 900, false)
+            || !Customers::passwordMatches($cid, Security::str($_POST['password'] ?? ''))) {
+            // A hijacked or unattended session alone must not be able to erase the account irreversibly.
+            $flash = $t('account.err_invalid_current_password');
+            $flashType = 'error';
+            $p = 'privacy';
         } else {
             try {
                 GdprService::anonymizeCustomer($cid, 'self');
