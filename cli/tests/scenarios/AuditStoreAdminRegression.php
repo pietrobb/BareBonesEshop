@@ -26,7 +26,9 @@ $db->exec("INSERT INTO products (id,store_id,sku,name,slug,product_type,price,st
  (7,\'cz\',\'A05-CZ\',\'CZ private product\',\'a05-cz\',\'physical\',2000,4,\'draft\',\'private cz\')");
 // Bulk actions read order references and the variant price floor, and write the audit log.
 $tmp = $driver === "mysql" ? "TEMPORARY " : "";
-$db->exec("CREATE {$tmp}TABLE variants (id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL, price_absolute INTEGER NULL, price_delta INTEGER NOT NULL DEFAULT 0)");
+$db->exec("CREATE {$tmp}TABLE variants (id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL, sku VARCHAR(40) NULL, price_absolute INTEGER NULL, price_delta INTEGER NOT NULL DEFAULT 0)");
+// A delete books out and drops the warehouse stock of the product (none here).
+$db->exec("CREATE {$tmp}TABLE warehouse_stock (id INTEGER PRIMARY KEY, store_id VARCHAR(40), warehouse_id INTEGER NOT NULL, sku VARCHAR(40) NOT NULL, qty INTEGER NOT NULL DEFAULT 0, reserved INTEGER NOT NULL DEFAULT 0)");
 $db->exec("CREATE {$tmp}TABLE order_items (id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL)");
 // A status change or delete recounts the categories of the products (none here: no category).
 $db->exec("CREATE {$tmp}TABLE product_categories (product_id INTEGER NOT NULL, category_id INTEGER NOT NULL)");

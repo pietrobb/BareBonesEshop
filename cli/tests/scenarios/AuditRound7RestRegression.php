@@ -356,6 +356,41 @@ $pdo->exec('DELETE FROM product_price_history WHERE product_id = 97740');
 $pdo->exec('DELETE FROM products WHERE id = 97740');
 $pdo->exec('DELETE FROM categories WHERE id BETWEEN 97790 AND 97792');
 
+// R7 medium: deleting a product left its warehouse stock rows (keyed by SKU) behind; a product created later with the
+// same SKU, or a variant SKU of it, inherited the units and sold stock nobody had.
+echo "\n--- R7: a deleted product's stock does not come back ---\n";
+$r7rWh = (int)(Warehouse::defaultWarehouse()['id'] ?? Warehouse::all()[0]['id']);
+$r7rStockOf = static function (string $sku) use ($pdo): array {
+    $stmt = $pdo->prepare('SELECT qty, reserved FROM warehouse_stock WHERE sku = ?');
+    $stmt->execute([$sku]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+};
+$r7rNewProduct = static function (int $id) use ($pdo, $r7rCatalog): void {
+    $pdo->prepare("INSERT INTO products (id, store_id, category_id, sku, slug, name, price, stock, status)
+        SELECT ?, ?, id, 'R7R-PHANTOM', ?, 'R7R Phantom', 1000, 0, 'active' FROM categories WHERE store_id = ? ORDER BY id LIMIT 1")
+        ->execute([$id, $r7rCatalog, "r7r-phantom-{$id}", $r7rCatalog]);
+};
+$r7rNewProduct(97750);
+$pdo->exec("INSERT INTO variants (id, product_id, sku, name) VALUES (97750, 97750, 'R7R-PHANTOM-XL', 'XL')");
+Warehouse::setStock($r7rWh, 'R7R-PHANTOM', 7, 'receipt');
+Warehouse::setStock($r7rWh, 'R7R-PHANTOM-XL', 4, 'receipt');
+$r7rDeleted = ProductBulk::apply('delete', [97750]);
+assert_equals([1, []], [$r7rDeleted['count'], $r7rDeleted['skipped']], 'R7 phantom stock: the product without orders is deleted');
+assert_equals([[], []], [$r7rStockOf('R7R-PHANTOM'), $r7rStockOf('R7R-PHANTOM-XL')], 'R7 phantom stock: the product and variant stock rows are gone (were 7 and 4 units)');
+assert_equals([['R7R-PHANTOM', -7], ['R7R-PHANTOM-XL', -4]], array_map(static fn(array $r): array => [$r['sku'], (int)$r['quantity_delta']],
+    $pdo->query("SELECT sku, quantity_delta FROM stock_movements WHERE movement_type = 'product_deleted' AND sku LIKE 'R7R-PHANTOM%' ORDER BY sku")->fetchAll(PDO::FETCH_ASSOC)),
+    'R7 phantom stock: the ledger books the units out');
+$r7rNewProduct(97751);
+Warehouse::syncProductStock(['R7R-PHANTOM']);
+assert_equals(0, (int)$pdo->query('SELECT stock FROM products WHERE id = 97751')->fetchColumn(), 'R7 phantom stock: a new product with the SKU starts at 0 (was 7)');
+// Units reserved for an open order keep the product.
+Warehouse::setStock($r7rWh, 'R7R-PHANTOM', 3, 'receipt');
+$pdo->exec("UPDATE warehouse_stock SET reserved = 1 WHERE sku = 'R7R-PHANTOM'");
+assert_equals(['R7R-PHANTOM'], ProductBulk::apply('delete', [97751])['skipped'], 'R7 phantom stock: a product with reserved units is not deleted');
+$pdo->exec("DELETE FROM warehouse_stock WHERE sku LIKE 'R7R-PHANTOM%'");
+$pdo->exec("DELETE FROM stock_movements WHERE sku LIKE 'R7R-PHANTOM%'");
+$pdo->exec('DELETE FROM products WHERE id IN (97750, 97751)');
+
 // R7 low: an invoice_issue job queued when the order was paid, run after the order was cancelled, threw "not paid" on
 // every retry (a critical incident each time) until the job died. It has nothing to invoice and now ends quietly.
 echo "\n--- R7: invoice_issue after the paid order was cancelled ---\n";

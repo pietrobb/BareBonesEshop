@@ -2,7 +2,8 @@
 /**
  * Bulk actions of the admin product list, bound to the active catalog. Every changed product is written to the audit
  * log, and a status or price change records product.updated in the same transaction. A product that orders refer to is never deleted (order_items keeps a foreign key to it): it is skipped and
- * reported, so the admin can archive it instead. A price change never takes a product below zero or below the
+ * reported, so the admin can archive it instead (so is one with reserved units); a deleted product's warehouse stock
+ * is booked out in the ledger and removed. A price change never takes a product below zero or below the
  * price at which a variant with a negative delta would turn negative.
  */
 final class ProductBulk {
@@ -26,10 +27,12 @@ final class ProductBulk {
             foreach ($products as $product) {
                 $id = (int)$product['id'];
                 if ($action === 'delete') {
-                    if (self::inOrders($id)) {
+                    $skus = self::skus($product);
+                    if (self::inOrders($id) || self::reserved($skus)) {
                         $result['skipped'][] = (string)($product['sku'] ?? $id);
                         continue;
                     }
+                    self::writeOffStock($id, $skus);
                     $db->prepare('DELETE FROM products WHERE id = :id AND store_id = :catalog')->execute([':id' => $id, ':catalog' => StoreContext::current()->catalogId()]);
                     AuditLog::log('product', $id, $product, null, 'Admin bulk delete');
                 } elseif (isset(self::STATUS_ACTIONS[$action])) {
@@ -75,6 +78,39 @@ final class ProductBulk {
         $stmt = Db::get()->prepare('SELECT * FROM products WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ') AND store_id = ? ORDER BY id');
         $stmt->execute([...$ids, StoreContext::current()->catalogId()]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** @return list<string> the SKUs of the product and its variants (the warehouse stock is kept per SKU) */
+    private static function skus(array $product): array {
+        $stmt = Db::get()->prepare('SELECT sku FROM variants WHERE product_id = :id');
+        $stmt->execute([':id' => (int)$product['id']]);
+        return array_values(array_unique(array_filter([(string)$product['sku'], ...array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN))], 'strlen')));
+    }
+
+    /** @return list<array{warehouse_id: int|string, sku: string, qty: int|string, reserved: int|string}> */
+    private static function stockRows(array $skus): array {
+        if (!$skus) return [];
+        $stmt = Db::get()->prepare('SELECT warehouse_id, sku, qty, reserved FROM warehouse_stock WHERE store_id = ? AND sku IN ('
+            . implode(',', array_fill(0, count($skus), '?')) . ')' . (Db::isMysql() ? ' FOR UPDATE' : ''));
+        $stmt->execute([StoreContext::current()->catalogId(), ...$skus]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    private static function reserved(array $skus): bool {
+        foreach (self::stockRows($skus) as $row) if ((int)$row['reserved'] > 0) return true;
+        return false;
+    }
+
+    /**
+     * A deleted product's stock rows stayed behind, keyed by SKU: a product created later with that SKU (or a variant
+     * SKU) inherited them and was sold from stock nobody had. The units are booked out in the ledger, then the rows go.
+     */
+    private static function writeOffStock(int $productId, array $skus): void {
+        foreach (self::stockRows($skus) as $row) {
+            if ((int)$row['qty'] > 0) Warehouse::setStock((int)$row['warehouse_id'], (string)$row['sku'], 0, 'product_deleted', 'product', $productId);
+            Db::get()->prepare('DELETE FROM warehouse_stock WHERE warehouse_id = :wh AND sku = :sku AND reserved = 0')
+                ->execute([':wh' => (int)$row['warehouse_id'], ':sku' => (string)$row['sku']]);
+        }
     }
 
     private static function inOrders(int $productId): bool {
