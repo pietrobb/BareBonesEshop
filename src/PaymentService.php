@@ -587,11 +587,12 @@ class PaymentService {
     /**
      * Payment side of an order cancellation, inside the caller's transaction. An unpaid payment
      * is closed (payment_status cancelled) and the provider session voided by a payment_cancel
-     * job, so the customer can no longer pay; captured money goes on the refund ledger.
+     * job, so the customer can no longer pay; captured money goes on the refund ledger, at most
+     * $maxRefund (the goods that never shipped, Fulfillment::unshippedGross()) when part shipped.
      *
      * @return list<array{0:string,1:array,2:int}> deferred jobs
      */
-    public static function cancellationJobsWithin(int $orderId): array {
+    public static function cancellationJobsWithin(int $orderId, ?int $maxRefund = null): array {
         $order = Orders::byId($orderId);
         if (!$order) return [];
         $from = (string)($order['payment_status'] ?? 'pending');
@@ -601,7 +602,7 @@ class PaymentService {
             $paymentId = trim((string)($order['payment_id'] ?? ''));
             return $paymentId === '' ? [] : [['payment_cancel', ['order_id' => $orderId, 'payment_id' => $paymentId], 1]];
         }
-        return self::orderRefundJobsWithin($orderId, 'order.cancelled');
+        return self::orderRefundJobsWithin($orderId, 'order.cancelled', $maxRefund);
     }
 
     /**
@@ -610,12 +611,13 @@ class PaymentService {
      *
      * @return list<array{0:string,1:array,2:int}>
      */
-    public static function orderRefundJobsWithin(int $orderId, string $reason): array {
+    public static function orderRefundJobsWithin(int $orderId, string $reason, ?int $maxRefund = null): array {
         $order = Orders::byId($orderId);
         $paymentId = trim((string)($order['payment_id'] ?? ''));
         $requestKey = 'order_refund_request_' . $orderId;
         if (!$order || self::transactionExists($requestKey)) return [];
         $amount = self::refundableBalance($orderId);
+        if ($maxRefund !== null) $amount = min($amount, max(0, $maxRefund));
         if ($amount <= 0) return [];
         if ($paymentId === '') {
             // Offline money (bank transfer, COD) has no provider payment to refund: the merchant returns it by hand.

@@ -201,6 +201,7 @@ class Warehouse {
             }
             self::syncProductStock($applied);
             foreach ($availableBefore as $sku => $before) self::recordAdjusted((string)$sku, $before, 'feed_sync', 'warehouse_feed');
+            BackorderAllocation::allocate($applied);
             if ($ownsTransaction) $db->commit();
         } catch (Throwable $e) {
             if ($ownsTransaction && $db->inTransaction()) $db->rollBack();
@@ -407,6 +408,7 @@ class Warehouse {
             $available = self::totalAvailable($sku);
             self::applyAdjustment($warehouseId, $sku, $delta, $movementType, $referenceType, $referenceId, $idempotencyKey);
             self::recordAdjusted($sku, $available, $movementType, $referenceType);
+            if ($delta > 0) BackorderAllocation::allocate([$sku]);
             if ($ownsTransaction) $db->commit();
         } catch (Throwable $e) {
             if ($ownsTransaction && $db->inTransaction()) $db->rollBack();

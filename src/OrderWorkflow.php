@@ -202,9 +202,12 @@ class OrderWorkflow {
 
     /**
      * Cancellation: restore stock (in DB); an unpaid payment is closed and voided at the
-     * provider, a captured one is refunded through the refund ledger.
+     * provider, a captured one is refunded through the refund ledger. After a partial shipment
+     * only the goods that never shipped are released and refunded: the shipped units come back
+     * through RMA and its credit note, and shipping and fees stay charged.
      */
     private static function handleCancellation(array $order): array {
+        Fulfillment::cancelPlanned((int)$order['id']);
         Orders::restoreStock($order['id']);
         Pricing::releaseCouponUse((int)$order['id']);
 
@@ -215,7 +218,7 @@ class OrderWorkflow {
                 'locale'   => $order['locale'] ?? '',
                 'order_id' => $order['id'],
             ], 5],
-        ], PaymentService::cancellationJobsWithin((int)$order['id']));
+        ], PaymentService::cancellationJobsWithin((int)$order['id'], Fulfillment::unshippedGross((int)$order['id'])));
     }
 
     /**
