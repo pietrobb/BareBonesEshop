@@ -309,8 +309,8 @@ class ShippingService
     }
 
     /**
-     * Tracking statuses a carrier webhook may set, by progress. A label never moves to a lower rank,
-     * so a replayed or late "in_transit" cannot undo "delivered". Equal ranks may alternate
+     * Tracking statuses a carrier webhook may set, by progress. A label never moves to a lower rank
+     * (except failed → in_transit, see TRACKING_REOPEN), so a replayed or late "in_transit" cannot undo "delivered". Equal ranks may alternate
      * (a failed attempt is followed by another out_for_delivery). "cancelled" is set only by cancelLabel().
      */
     public const TRACKING_STATUS_RANK = [
@@ -321,6 +321,17 @@ class ShippingService
         'failed' => 2,
         'delivered' => 3,
     ];
+
+    /** Lower-rank moves that are real progress: after a failed attempt the parcel goes back to the depot and is re-sent. */
+    private const TRACKING_REOPEN = ['in_transit' => ['failed']];
+
+    /** Statuses a parcel may move to $status from: equal or lower rank, plus the reopening moves above. */
+    private static function trackingSources(string $status): array
+    {
+        $rank = self::TRACKING_STATUS_RANK[$status];
+        return array_merge(array_keys(array_filter(self::TRACKING_STATUS_RANK, static fn(int $r): bool => $r <= $rank)),
+            self::TRACKING_REOPEN[$status] ?? []);
+    }
 
     /** Seconds a signed X-Shipping-Timestamp may differ from the shop clock. */
     public const WEBHOOK_TIMESTAMP_TOLERANCE = 300;
@@ -460,8 +471,7 @@ class ShippingService
         if ($claim === 'in_flight') return ['handled' => false, 'reason' => 'in_flight', 'retry' => true];
         if ($claim === 'done') return ['handled' => false, 'reason' => 'already_processed', 'duplicate' => true];
 
-        $rank = self::TRACKING_STATUS_RANK[$status];
-        $from = array_keys(array_filter(self::TRACKING_STATUS_RANK, static fn(int $r): bool => $r <= $rank));
+        $from = self::trackingSources($status);
         $known = array_keys(self::TRACKING_STATUS_RANK);
         $orderId = (int)$shipment['order_id'];
         try {
@@ -514,9 +524,9 @@ class ShippingService
         if ($claim === 'done') return ['handled' => false, 'reason' => 'already_processed', 'duplicate' => true];
 
         // Forward-only: the label may move to this status from an equal or lower rank, or from a
-        // legacy status outside the table; never from a higher rank and never out of "cancelled".
-        $rank = self::TRACKING_STATUS_RANK[$status];
-        $from = array_keys(array_filter(self::TRACKING_STATUS_RANK, static fn(int $r): bool => $r <= $rank));
+        // legacy status outside the table; never from a higher rank (except failed → in_transit, a re-sent
+        // parcel) and never out of "cancelled".
+        $from = self::trackingSources($status);
         $known = array_merge(array_keys(self::TRACKING_STATUS_RANK), ['cancelled']);
         try {
             $update = $db->prepare("UPDATE shipping_labels SET status = ?, updated_at = " . Db::now() . "
