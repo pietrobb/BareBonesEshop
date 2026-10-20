@@ -281,6 +281,7 @@ class Security {
     // ============================================================
     private static ?PDO $rateDb = null;
     private static int $rateDbLastCleanup = 0;
+    private static bool $rateDbFailureReported = false;
 
     private static function privateCacheDir(array $cfg): string {
         $dir = (string)($cfg['private_cache_dir'] ?? dirname(__DIR__, 2) . '/bareboneseshop-private/cache');
@@ -330,6 +331,7 @@ class Security {
         $db->exec('CREATE INDEX IF NOT EXISTS idx_hits ON hits(key, ts)');
         self::$rateDb = $db;
         self::$rateDbLastCleanup = time();
+        self::$rateDbFailureReported = false;
     }
 
     /**
@@ -339,15 +341,39 @@ class Security {
      */
     public static function rateLimitAllows(string $action, int $maxHits, int $windowSeconds, bool $bindIp = true): bool {
         $windowSeconds = max(1, min(86400, $windowSeconds));
-        $stmt = self::rateDb()->prepare("SELECT COUNT(*) FROM hits WHERE key = :key AND ts > :window");
-        $stmt->execute([':key' => self::rateKey($action, $bindIp), ':window' => time() - $windowSeconds]);
-        return (int)$stmt->fetchColumn() < max(0, $maxHits);
+        return self::withRateDb(static function (PDO $db) use ($action, $maxHits, $windowSeconds, $bindIp): bool {
+            $stmt = $db->prepare("SELECT COUNT(*) FROM hits WHERE key = :key AND ts > :window");
+            $stmt->execute([':key' => self::rateKey($action, $bindIp), ':window' => time() - $windowSeconds]);
+            return (int)$stmt->fetchColumn() < max(0, $maxHits);
+        });
     }
 
     /** Records one hit for $action (see rateLimitAllows()). */
     public static function rateLimitRecord(string $action, bool $bindIp = true): void {
-        self::rateDb()->prepare("INSERT INTO hits (key, ts) VALUES (:key, :ts)")
-            ->execute([':key' => self::rateKey($action, $bindIp), ':ts' => time()]);
+        self::withRateDb(static function (PDO $db) use ($action, $bindIp): bool {
+            $db->prepare("INSERT INTO hits (key, ts) VALUES (:key, :ts)")
+                ->execute([':key' => self::rateKey($action, $bindIp), ':ts' => time()]);
+            return true;
+        });
+    }
+
+    /**
+     * Runs a rate-limit query. When the limiter's storage fails (read-only or full disk, unwritable private cache)
+     * the request is allowed rather than answered with a 500: checkout, API and payment webhooks keep working, and
+     * the outage is raised once per request as a critical incident.
+     * @param callable(PDO): bool $query
+     */
+    private static function withRateDb(callable $query): bool {
+        try {
+            return $query(self::rateDb());
+        } catch (Throwable $e) {
+            if (!self::$rateDbFailureReported) {
+                self::$rateDbFailureReported = true;
+                Logger::error('security.rate_limit_storage_failed', ['exception_type' => get_class($e), 'message' => $e->getMessage()]);
+                IncidentMonitor::report('security.rate_limit_storage_failed', 'security', 'critical', ['exception' => $e]);
+            }
+            return true;
+        }
     }
 
     private static function rateKey(string $action, bool $bindIp): string {
@@ -379,18 +405,16 @@ class Security {
     public static function rateLimit(string $action, int $maxHits = 60, int $windowSeconds = 60, bool $bindIp = true): bool {
         $windowSeconds = max(1, min(86400, $windowSeconds));
         $key = self::rateKey($action, $bindIp);
-        $now = time();
-        $window = $now - $windowSeconds;
-        $db = self::rateDb();
+        $allowed = self::withRateDb(static function (PDO $db) use ($key, $windowSeconds, $maxHits): bool {
+            $now = time();
+            $db->prepare("INSERT INTO hits (key, ts) VALUES (:key, :ts)")
+               ->execute([':key' => $key, ':ts' => $now]);
+            $stmt = $db->prepare("SELECT COUNT(*) FROM hits WHERE key = :key AND ts > :window");
+            $stmt->execute([':key' => $key, ':window' => $now - $windowSeconds]);
+            return (int)$stmt->fetchColumn() <= max(0, $maxHits);
+        });
 
-        $db->prepare("INSERT INTO hits (key, ts) VALUES (:key, :ts)")
-           ->execute([':key' => $key, ':ts' => $now]);
-
-        $stmt = $db->prepare("SELECT COUNT(*) FROM hits WHERE key = :key AND ts > :window");
-        $stmt->execute([':key' => $key, ':window' => $window]);
-        $count = (int) $stmt->fetchColumn();
-
-        if ($count > max(0, $maxHits)) {
+        if (!$allowed) {
             http_response_code(429);
             header('Retry-After: ' . $windowSeconds);
             return false;

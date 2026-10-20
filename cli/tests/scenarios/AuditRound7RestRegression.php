@@ -221,3 +221,25 @@ try {
 $r7rSecuritySource = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Security.php');
 assert_true((bool)preg_match('/if \(self::requestIsHttps\(\) \|\| [^\n]*app_url[^\n]*\{\s*header\("Strict-Transport-Security/', $r7rSecuritySource),
     'R7 HSTS: the header is sent on proxied https or an https app_url');
+
+
+// ── Rate-limit storage failure (read-only disk): requests are allowed and one critical incident is raised (was a 500) ──
+$r7rRateFile = sys_get_temp_dir() . '/r7r-rate-' . bin2hex(random_bytes(4)) . '.sqlite';
+(new PDO('sqlite:' . $r7rRateFile))->exec('CREATE TABLE hits (key TEXT NOT NULL, ts INTEGER NOT NULL); CREATE INDEX idx_hits ON hits(key, ts)');
+$r7rRateIncidents = static fn(): int => (int)$pdo->query("SELECT COUNT(*) FROM operational_incidents WHERE code = 'security.rate_limit_storage_failed'")->fetchColumn();
+$r7rRateBefore = $r7rRateIncidents();
+try {
+    Security::setRateDbForTesting(new PDO('sqlite:' . $r7rRateFile, null, null, [constant(class_exists('Pdo\Sqlite') ? 'Pdo\Sqlite::ATTR_OPEN_FLAGS' : 'PDO::SQLITE_ATTR_OPEN_FLAGS') => constant(class_exists('Pdo\Sqlite') ? 'Pdo\Sqlite::OPEN_READONLY' : 'PDO::SQLITE_OPEN_READONLY')]));
+    $r7rRateErrorLog = ini_set('error_log', sys_get_temp_dir() . '/r7r-rate-error.log');
+    try {
+        $r7rRateResults = [Security::rateLimit('r7r_rate', 5), Security::rateLimitAllows('r7r_rate', 5, 60), Security::rateLimit('r7r_rate', 5)];
+        Security::rateLimitRecord('r7r_rate');
+    } finally {
+        ini_set('error_log', (string)$r7rRateErrorLog);
+    }
+    assert_equals([true, true, true], $r7rRateResults, 'R7 rate limit: a read-only limiter store lets requests through (was an uncaught PDOException, HTTP 500)');
+    assert_equals(1, $r7rRateIncidents() - $r7rRateBefore, 'R7 rate limit: the storage failure is one critical incident per request, not one per check');
+} finally {
+    Security::setRateDbForTesting(new PDO('sqlite::memory:'));
+    @unlink($r7rRateFile);
+}
