@@ -332,6 +332,7 @@ return [
     'admin.msg.pricelist.max_lines' => 'A price list can have at most {max} lines.',
     'admin.msg.pricelist.line_format' => '{line}: enter SKU | min. quantity | price in cents [| original price].',
     'admin.msg.pricelist.price' => '{line}: the price must be a non-negative amount in cents.',
+    'admin.msg.pricelist.variant_floor' => '{line}: {sku} has variants priced by a negative surcharge, so its price must be at least {min} cents.',
     'admin.msg.pricelist.compare' => '{line}: the original price must be an amount in cents, at least the price.',
     'admin.msg.pricelist.duplicate' => '{line}: {sku} with minimum quantity {qty} is in the price list twice.',
     'admin.msg.pricelist.prices_saved' => 'Price list prices saved ({count}).',

@@ -330,6 +330,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.msg.pricelist.max_lines' => 'Egy árlista legfeljebb {max} sorból állhat.',
     'admin.msg.pricelist.line_format' => '{line}: adja meg: SKU | min. mennyiség | ár centben [| eredeti ár].',
     'admin.msg.pricelist.price' => '{line}: az ár nem negatív centösszeg lehet.',
+    'admin.msg.pricelist.variant_floor' => '{line}: a(z) {sku} negatív felárú változatokkal rendelkezik, ezért az ár legalább {min} cent kell legyen.',
     'admin.msg.pricelist.compare' => '{line}: az eredeti ár centösszeg lehet, legalább akkora, mint az ár.',
     'admin.msg.pricelist.duplicate' => '{line}: a(z) {sku} {qty} minimális mennyiséggel kétszer szerepel az árlistában.',
     'admin.msg.pricelist.prices_saved' => 'Árlista árai mentve ({count}).',

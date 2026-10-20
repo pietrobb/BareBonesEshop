@@ -464,6 +464,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.msg.pricelist.max_lines' => 'Una lista de precios puede tener como máximo {max} líneas.',
     'admin.msg.pricelist.line_format' => '{line}: introduzca SKU | cantidad mín. | precio en céntimos [| precio original].',
     'admin.msg.pricelist.price' => '{line}: el precio debe ser un importe no negativo en céntimos.',
+    'admin.msg.pricelist.variant_floor' => '{line}: {sku} tiene variantes con recargo negativo, por lo que el precio debe ser al menos {min} céntimos.',
     'admin.msg.pricelist.compare' => '{line}: el precio original debe ser un importe en céntimos, al menos igual al precio.',
     'admin.msg.pricelist.duplicate' => '{line}: {sku} con cantidad mínima {qty} aparece dos veces en la lista de precios.',
     'admin.msg.pricelist.prices_saved' => 'Precios de la lista guardados ({count}).',

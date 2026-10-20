@@ -330,6 +330,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.msg.pricelist.max_lines' => 'Eine Preisliste darf höchstens {max} Zeilen haben.',
     'admin.msg.pricelist.line_format' => '{line}: geben Sie SKU | Mindestmenge | Preis in Cent [| ursprünglicher Preis] ein.',
     'admin.msg.pricelist.price' => '{line}: der Preis muss ein nicht negativer Betrag in Cent sein.',
+    'admin.msg.pricelist.variant_floor' => '{line}: {sku} hat Varianten mit negativem Aufschlag, daher muss der Preis mindestens {min} Cent betragen.',
     'admin.msg.pricelist.compare' => '{line}: der ursprüngliche Preis muss ein Betrag in Cent sein, mindestens so hoch wie der Preis.',
     'admin.msg.pricelist.duplicate' => '{line}: {sku} mit Mindestmenge {qty} steht zweimal in der Preisliste.',
     'admin.msg.pricelist.prices_saved' => 'Preise der Preisliste gespeichert ({count}).',

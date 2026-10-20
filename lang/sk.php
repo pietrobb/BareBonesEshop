@@ -337,6 +337,7 @@ return [
     'admin.msg.pricelist.max_lines' => 'Cenník môže mať najviac {max} riadkov.',
     'admin.msg.pricelist.line_format' => '{line}: zadajte SKU | min. množstvo | cena v centoch [| pôvodná cena].',
     'admin.msg.pricelist.price' => '{line}: cena musí byť nezáporná suma v centoch.',
+    'admin.msg.pricelist.variant_floor' => '{line}: {sku} má varianty so zápornou prirážkou, preto cena musí byť aspoň {min} centov.',
     'admin.msg.pricelist.compare' => '{line}: pôvodná cena musí byť suma v centoch, najmenej taká ako cena.',
     'admin.msg.pricelist.duplicate' => '{line}: {sku} s minimálnym množstvom {qty} je v cenníku dvakrát.',
     'admin.msg.pricelist.prices_saved' => 'Ceny cenníka uložené ({count}).',

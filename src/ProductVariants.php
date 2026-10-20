@@ -36,6 +36,14 @@ final class ProductVariants {
         return max(0, -(int)$stmt->fetchColumn());
     }
 
+    /** Lowest product-level price of the product: its base price or any price-list row written for the product, not a variant. */
+    private static function lowestProductPrice(int $productId, int $basePrice): int {
+        $stmt = Db::get()->prepare('SELECT MIN(price) FROM price_list_prices WHERE product_id = :id AND variant_id IS NULL');
+        $stmt->execute([':id' => $productId]);
+        $listed = $stmt->fetchColumn();
+        return $listed === null || $listed === false ? $basePrice : min($basePrice, (int)$listed);
+    }
+
     /** The empty "add a variant" row of the editor. */
     public static function blank(int $sortOrder): array {
         return ['id' => 'new', 'sku' => '', 'name' => '', 'attrs_text' => '', 'price_absolute' => null, 'price_delta' => 0, 'stock' => 0,
@@ -70,6 +78,7 @@ final class ProductVariants {
         $rows = [];
         $delete = [];
         $skus = [];
+        $floor = self::lowestProductPrice($productId, (int)$product['price']);
         foreach ($posted as $key => $fields) {
             if (!is_array($fields) || array_filter($fields, static fn($v): bool => !is_scalar($v))) return I18n::t('admin.msg.variant.invalid');
             $id = $key === 'new' ? 0 : Security::int($key);
@@ -103,7 +112,7 @@ final class ProductVariants {
             if (($absolute !== '' && !ctype_digit($absolute)) || !preg_match('/^-?\d+$/', $delta) || !ctype_digit($stock) || !preg_match('/^-?\d+$/', $sort)) {
                 return I18n::format('admin.msg.variant.row_error', ['sku' => $sku, 'error' => I18n::t('admin.msg.variant.numbers')]);
             }
-            if ($absolute === '' && (int)$product['price'] + (int)$delta < 0) return I18n::format('admin.msg.variant.row_error', ['sku' => $sku, 'error' => I18n::t('admin.msg.variant.negative_price')]);
+            if ($absolute === '' && $floor + (int)$delta < 0) return I18n::format('admin.msg.variant.row_error', ['sku' => $sku, 'error' => I18n::t('admin.msg.variant.negative_price')]);
             $availability = (string)($fields['availability'] ?? VariantAvailability::ACTIVE);
             $policy = (string)($fields['inventory_policy'] ?? 'inherit');
             if (!in_array($availability, VariantAvailability::statuses(), true) || !in_array($policy, self::POLICIES, true)) return I18n::format('admin.msg.variant.row_error', ['sku' => $sku, 'error' => I18n::t('admin.msg.variant.availability')]);

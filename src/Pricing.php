@@ -38,7 +38,6 @@ class Pricing {
         $profile = Customers::commerceProfile($customerId);
         $groupId = (int)($profile['customer_group_id'] ?? 0);
         $at = $at ?? gmdate('Y-m-d H:i:s');
-        $variantDelta = 0;
 
         try {
             $variant = false;
@@ -93,15 +92,16 @@ class Pricing {
                 if (isset($seen[$scope])) continue;
                 $seen[$scope] = true;
                 $delta = $candidate['variant_id'] === null && $variant ? (int)$variant['price_delta'] : 0;
-                $price = max(0, (int)$candidate['price']) + $delta;
-                if ($row === false || $price < $rowPrice) [$row, $rowPrice, $variantDelta] = [$candidate, $price, $delta];
+                // Never below zero, even for rows saved before the editors refused a too-low base for a negative surcharge.
+                $price = max(0, max(0, (int)$candidate['price']) + $delta);
+                if ($row === false || $price < $rowPrice) [$row, $rowPrice] = [$candidate, $price];
             }
         } catch (PDOException $e) {
             $row = false;
         }
 
         if ($row) {
-            $product['price'] = max(0, (int)$row['price']) + $variantDelta;
+            $product['price'] = $rowPrice;
             $product['compare_price'] = $row['compare_price'] === null
                 ? max($basePrice, (int)($product['compare_price'] ?? 0))
                 : max(0, (int)$row['compare_price']);

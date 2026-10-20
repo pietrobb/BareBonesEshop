@@ -330,6 +330,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.msg.pricelist.max_lines' => 'Cennik może mieć maks. {max} wierszy.',
     'admin.msg.pricelist.line_format' => '{line}: podaj SKU | min. ilość | cena w groszach [| cena pierwotna].',
     'admin.msg.pricelist.price' => '{line}: cena musi być nieujemną kwotą w groszach.',
+    'admin.msg.pricelist.variant_floor' => '{line}: {sku} ma warianty z ujemną dopłatą, więc cena musi wynosić co najmniej {min} groszy.',
     'admin.msg.pricelist.compare' => '{line}: cena pierwotna musi być kwotą w groszach, co najmniej równą cenie.',
     'admin.msg.pricelist.duplicate' => '{line}: {sku} z minimalną ilością {qty} występuje w cenniku dwukrotnie.',
     'admin.msg.pricelist.prices_saved' => 'Ceny cennika zapisane ({count}).',

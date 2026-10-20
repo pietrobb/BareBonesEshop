@@ -330,6 +330,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.msg.pricelist.max_lines' => 'Ceník může mít nejvýše {max} řádků.',
     'admin.msg.pricelist.line_format' => '{line}: zadejte SKU | min. množství | cena v centech [| původní cena].',
     'admin.msg.pricelist.price' => '{line}: cena musí být nezáporná částka v centech.',
+    'admin.msg.pricelist.variant_floor' => '{line}: {sku} má varianty se zápornou přirážkou, proto cena musí být alespoň {min} centů.',
     'admin.msg.pricelist.compare' => '{line}: původní cena musí být částka v centech, nejméně taková jako cena.',
     'admin.msg.pricelist.duplicate' => '{line}: {sku} s minimálním množstvím {qty} je v ceníku dvakrát.',
     'admin.msg.pricelist.prices_saved' => 'Ceny ceníku uloženy ({count}).',

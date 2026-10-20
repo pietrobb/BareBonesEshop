@@ -33,3 +33,29 @@ foreach (['label' => ['R7R-LABEL', $r7rLabel], 'admin shipment' => ['R7R-PARCEL'
 }
 $pdo->exec("DELETE FROM shipping_labels WHERE awb = 'R7R-LABEL'");
 putenv('SHIP_HTTP_CARRIER_WEBHOOK_SECRET');
+
+// ── Variant surcharge below a price list: base 10.00 €, variant −8.00 €, a product-level price-list row 5.00 € ──
+$pdo->exec('DELETE FROM products WHERE id = 97701');
+$pdo->prepare("INSERT INTO products (id, store_id, category_id, sku, slug, name, price, stock, status)
+    SELECT 97701, ?, id, 'R7R-VAR', 'r7r-var', 'R7R Variant', 1000, 10, 'active' FROM categories WHERE store_id = ? ORDER BY id LIMIT 1")
+    ->execute([StoreContext::current()->catalogId(), StoreContext::current()->catalogId()]);
+$pdo->prepare("INSERT INTO variants (product_id, sku, name, stock, price_absolute, price_delta) VALUES (97701, 'R7R-VAR-S', 'S', 5, NULL, -800)")->execute();
+$r7rVariant = (int)$pdo->lastInsertId();
+$pdo->prepare("INSERT INTO price_lists (store_id, code, name, currency, customer_group_id, priority, active) VALUES (?, 'r7r-list', 'R7R list', 'eur', NULL, 0, 1)")->execute([$r7rStore]);
+$r7rList = (int)$pdo->lastInsertId();
+$r7rSave = PricingAdmin::savePrices($r7rList, ['prices' => "R7R-VAR | 1 | 500"]);
+$r7rRows = static fn(): int => (int)$pdo->query("SELECT COUNT(*) FROM price_list_prices WHERE price_list_id = {$r7rList}")->fetchColumn();
+assert_true(empty($r7rSave['ok']) && $r7rRows() === 0 && str_contains((string)($r7rSave['message'] ?? ''), '800'),
+    'R7 variant price: a product price-list row below the variant floor (8.00 €) is refused (was saved, variant −3.00 €) (' . json_encode($r7rSave) . ')');
+assert_true(!empty(PricingAdmin::savePrices($r7rList, ['prices' => "R7R-VAR | 1 | 800"])['ok']) && $r7rRows() === 1,
+    'R7 variant price: a product price-list row at the floor is saved');
+// Rows written before the check (or a variant saved afterwards) never price the variant below zero.
+$pdo->exec("UPDATE price_list_prices SET price = 500 WHERE price_list_id = {$r7rList}");
+$r7rPriced = Pricing::applyPriceList(['id' => 97701, 'price' => 1000, 'currency' => 'eur'], $r7rVariant);
+assert_equals(0, (int)$r7rPriced['price'], 'R7 variant price: an old too-low price-list row prices the variant at 0, never negative (was −300)');
+$r7rEdit = ProductVariants::validate(97701, [(string)$r7rVariant => ['sku' => 'R7R-VAR-S', 'name' => 'S', 'price_absolute' => '', 'price_delta' => '-600', 'stock' => '5', 'sort_order' => '0']]);
+assert_true(is_string($r7rEdit), 'R7 variant price: the variant editor refuses a surcharge that the product price list would push below zero (5.00 − 6.00)');
+$pdo->exec("DELETE FROM price_list_prices WHERE price_list_id = {$r7rList}");
+$pdo->exec("DELETE FROM price_lists WHERE id = {$r7rList}");
+$pdo->exec('DELETE FROM variants WHERE product_id = 97701');
+$pdo->exec('DELETE FROM products WHERE id = 97701');
