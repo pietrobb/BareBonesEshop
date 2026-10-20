@@ -677,7 +677,7 @@ return [
     'admin.msg.category.parent_foreign' => 'Nadradená kategória nepatrí do katalógu tohto obchodu.',
     'admin.msg.category.parent_cycle' => 'Kategóriu nemožno presunúť pod seba ani pod vlastnú podkategóriu.',
     'admin.msg.category.sort_int' => 'Poradie musí byť celé číslo.',
-    'admin.msg.category.slug_taken' => 'Slug "{slug}" už má iná kategória na tejto úrovni.',
+    'admin.msg.category.slug_taken' => 'Slug "{slug}" už má iná kategória v katalógu (adresa /category/{slug} musí byť jedinečná).',
     'admin.msg.category.path_long' => 'Cesta kategórie alebo jej podkategórie by bola dlhšia ako {max} znakov.',
     'admin.msg.category.saved' => 'Kategória uložená.',
     'admin.msg.category.saved_moved' => 'Kategória uložená (presunuté podkategórie: {count}).',

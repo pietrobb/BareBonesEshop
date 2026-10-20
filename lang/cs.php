@@ -698,7 +698,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.msg.category.parent_foreign' => 'Nadřazená kategorie nepatří do katalogu tohoto obchodu.',
     'admin.msg.category.parent_cycle' => 'Kategorii nelze přesunout pod sebe ani pod vlastní podkategorii.',
     'admin.msg.category.sort_int' => 'Pořadí musí být celé číslo.',
-    'admin.msg.category.slug_taken' => 'Slug "{slug}" už má jiná kategorie na této úrovni.',
+    'admin.msg.category.slug_taken' => 'Slug "{slug}" už má jiná kategorie v katalogu (adresa /category/{slug} musí být jedinečná).',
     'admin.msg.category.path_long' => 'Cesta kategorie nebo její podkategorie by byla delší než {max} znaků.',
     'admin.msg.category.saved' => 'Kategorie uložena.',
     'admin.msg.category.saved_moved' => 'Kategorie uložena (přesunuté podkategorie: {count}).',

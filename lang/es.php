@@ -801,7 +801,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.msg.category.parent_foreign' => 'La categoría superior no está en el catálogo de esta tienda.',
     'admin.msg.category.parent_cycle' => 'Una categoría no se puede mover debajo de sí misma ni de una de sus subcategorías.',
     'admin.msg.category.sort_int' => 'El orden debe ser un número entero.',
-    'admin.msg.category.slug_taken' => 'Otra categoría de este nivel ya tiene el slug "{slug}".',
+    'admin.msg.category.slug_taken' => 'Otra categoría del catálogo ya tiene el slug "{slug}" (la dirección /category/{slug} debe ser única).',
     'admin.msg.category.path_long' => 'La ruta de la categoría o de una de sus subcategorías superaría los {max} caracteres.',
     'admin.msg.category.saved' => 'Categoría guardada.',
     'admin.msg.category.saved_moved' => 'Categoría guardada (subcategorías movidas: {count}).',

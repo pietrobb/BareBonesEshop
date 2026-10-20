@@ -1,7 +1,7 @@
 <?php
 /**
  * Admin CRUD for the categories and brands of the active store's catalog (catalog_scope).
- * Categories: ASCII slug unique among siblings, parent from the same catalog and never the category itself or one of its
+ * Categories: ASCII slug unique in the catalog (the storefront URL is /category/{slug}), parent from the same catalog and never the category itself or one of its
  * descendants; a move or slug change rewrites path/depth of the whole subtree. Categories with subcategories, products or
  * promotion conditions and brands with products or promotion conditions cannot be deleted.
  * Every method returns ['ok' => bool, 'id' => int, 'message' => flash text].
@@ -39,7 +39,7 @@ final class CatalogTaxonomy {
         }
         $sort = trim($fields['sort_order']) ?: '0';
         if (!preg_match('/^-?\d{1,6}$/', $sort)) return self::result(false, $id, I18n::t('admin.msg.category.sort_int'));
-        if (self::siblingSlugTaken($slug, $parent ? (int)$parent['id'] : null, $id)) return self::result(false, $id, I18n::format('admin.msg.category.slug_taken', ['slug' => $slug]));
+        if (self::slugTaken($slug, $id)) return self::result(false, $id, I18n::format('admin.msg.category.slug_taken', ['slug' => $slug]));
         $translations = self::translations((string)($old['translations'] ?? '{}'), is_array($post) ? ($post['tr'] ?? []) : []);
         if (is_string($translations)) return self::result(false, $id, $translations);
         $path = ($parent ? $parent['path'] . '/' : '') . $slug;
@@ -189,10 +189,10 @@ final class CatalogTaxonomy {
         return array_map('intval', array_column(CatalogScope::rows($sql), 'n', 'id'));
     }
 
-    private static function siblingSlugTaken(string $slug, ?int $parentId, int $id): bool {
-        return (bool)CatalogScope::rows('SELECT 1 AS taken FROM categories WHERE store_id = :catalog AND slug = :slug AND '
-            . ($parentId === null ? 'parent_id IS NULL' : 'parent_id = :parent') . ' AND id != :id',
-            [':slug' => $slug, ':id' => $id ?: -1] + ($parentId === null ? [] : [':parent' => $parentId]));
+    /** The storefront addresses a category by its slug alone (/category/{slug}), so a slug is unique in the whole catalog. */
+    private static function slugTaken(string $slug, int $id): bool {
+        return (bool)CatalogScope::rows('SELECT 1 AS taken FROM categories WHERE store_id = :catalog AND slug = :slug AND id != :id',
+            [':slug' => $slug, ':id' => $id ?: -1]);
     }
 
     /** id => row of the category and all its descendants, following parent_id (not the stored paths). */

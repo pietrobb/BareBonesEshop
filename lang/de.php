@@ -698,7 +698,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.msg.category.parent_foreign' => 'Die übergeordnete Kategorie gehört nicht zum Katalog dieses Shops.',
     'admin.msg.category.parent_cycle' => 'Eine Kategorie kann nicht unter sich selbst oder eine eigene Unterkategorie verschoben werden.',
     'admin.msg.category.sort_int' => 'Die Reihenfolge muss eine ganze Zahl sein.',
-    'admin.msg.category.slug_taken' => 'Eine andere Kategorie auf dieser Ebene hat bereits den Slug "{slug}".',
+    'admin.msg.category.slug_taken' => 'Eine andere Kategorie des Katalogs hat bereits den Slug "{slug}" (die Adresse /category/{slug} muss eindeutig sein).',
     'admin.msg.category.path_long' => 'Der Pfad der Kategorie oder einer Unterkategorie wäre länger als {max} Zeichen.',
     'admin.msg.category.saved' => 'Kategorie gespeichert.',
     'admin.msg.category.saved_moved' => 'Kategorie gespeichert (verschobene Unterkategorien: {count}).',

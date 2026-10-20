@@ -698,7 +698,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.msg.category.parent_foreign' => 'Kategoria nadrzędna nie należy do katalogu tego sklepu.',
     'admin.msg.category.parent_cycle' => 'Kategorii nie można przenieść pod nią samą ani pod jej podkategorię.',
     'admin.msg.category.sort_int' => 'Kolejność musi być liczbą całkowitą.',
-    'admin.msg.category.slug_taken' => 'Inna kategoria na tym poziomie ma już slug "{slug}".',
+    'admin.msg.category.slug_taken' => 'Inna kategoria w katalogu ma już slug "{slug}" (adres /category/{slug} musi być unikalny).',
     'admin.msg.category.path_long' => 'Ścieżka kategorii lub jej podkategorii byłaby dłuższa niż {max} znaków.',
     'admin.msg.category.saved' => 'Kategoria zapisana.',
     'admin.msg.category.saved_moved' => 'Kategoria zapisana (przeniesione podkategorie: {count}).',

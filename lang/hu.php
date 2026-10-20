@@ -698,7 +698,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.msg.category.parent_foreign' => 'A szülőkategória nem tartozik ennek az áruháznak a katalógusába.',
     'admin.msg.category.parent_cycle' => 'A kategória nem helyezhető saját maga vagy saját alkategóriája alá.',
     'admin.msg.category.sort_int' => 'A sorrendnek egész számnak kell lennie.',
-    'admin.msg.category.slug_taken' => 'Ezen a szinten már egy másik kategória használja a(z) "{slug}" slugot.',
+    'admin.msg.category.slug_taken' => 'A katalógusban már egy másik kategória használja a(z) "{slug}" slugot (a /category/{slug} címnek egyedinek kell lennie).',
     'admin.msg.category.path_long' => 'A kategória vagy egy alkategóriája útvonala hosszabb lenne {max} karakternél.',
     'admin.msg.category.saved' => 'Kategória mentve.',
     'admin.msg.category.saved_moved' => 'Kategória mentve (áthelyezett alkategóriák: {count}).',

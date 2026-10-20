@@ -435,28 +435,44 @@ class Import {
         if (empty($parts)) $parts = ['uncategorized'];
 
         $parentId = null;
-        $fullPath = '';
+        $parentSlug = null;
+        $parentPath = null;
         $depth = 0;
         $categoryId = 0;
 
         foreach ($parts as $part) {
             $slug = self::slugify($part);
-            $fullPath = $fullPath ? $fullPath . '/' . $slug : $slug;
+            $fullPath = $parentPath === null ? $slug : $parentPath . '/' . $slug;
 
             // Imported products land in the current catalog, so their categories must too:
             // other catalogs may own a category with the same slug and parent level.
+            // The storefront addresses a category by its slug alone (/category/{slug}), so a subcategory whose slug
+            // another category of the catalog already has gets its parent's slug in front ("women-accessories").
+            $qualified = $parentSlug === null ? $slug : $parentSlug . '-' . $slug;
             if ($parentId === null) {
-                $stmt = $db->prepare("SELECT id FROM categories WHERE slug = :slug AND parent_id IS NULL AND store_id = :catalog");
+                $stmt = $db->prepare("SELECT id, slug, path FROM categories WHERE slug = :slug AND parent_id IS NULL AND store_id = :catalog");
                 $stmt->execute([':slug' => $slug, ':catalog' => $catalog]);
             } else {
-                $stmt = $db->prepare("SELECT id FROM categories WHERE slug = :slug AND parent_id = :parent AND store_id = :catalog");
-                $stmt->execute([':slug' => $slug, ':parent' => $parentId, ':catalog' => $catalog]);
+                $stmt = $db->prepare("SELECT id, slug, path FROM categories WHERE (slug IN (:slug, :qualified) OR slug LIKE :numbered ESCAPE '!')
+                    AND parent_id = :parent AND store_id = :catalog ORDER BY slug = :slug2 DESC, slug = :qualified2 DESC, id");
+                $stmt->execute([':slug' => $slug, ':qualified' => $qualified, ':numbered' => Db::likeLiteral($qualified) . '-%',
+                    ':parent' => $parentId, ':catalog' => $catalog, ':slug2' => $slug, ':qualified2' => $qualified]);
             }
-            $existing = $stmt->fetch();
+            $existing = false;
+            foreach ($stmt->fetchAll() as $row) {
+                if ($row['slug'] === $slug || $row['slug'] === $qualified || preg_match('/^' . preg_quote($qualified, '/') . '-\d+$/', (string)$row['slug'])) {
+                    $existing = $row;
+                    break;
+                }
+            }
 
             if ($existing) {
                 $categoryId = (int)$existing['id'];
+                $slug = (string)$existing['slug'];
+                $fullPath = (string)$existing['path'];
             } else {
+                if ($parentId !== null) $slug = self::freeCategorySlug($db, $catalog, $slug, $qualified);
+                $fullPath = $parentPath === null ? $slug : $parentPath . '/' . $slug;
                 $stmt = $db->prepare("
                     INSERT INTO categories (store_id, slug, name, parent_id, path, depth, sort_order)
                     VALUES (:catalog, :slug, :name, :parent, :path, :depth, 0)
@@ -473,10 +489,25 @@ class Import {
             }
 
             $parentId = $categoryId;
+            $parentSlug = $slug;
+            $parentPath = $fullPath;
             $depth++;
         }
 
         return $categoryId;
+    }
+
+    /** $slug if no category of the catalog has it, else the parent-qualified slug, numbered when even that is taken. */
+    private static function freeCategorySlug(PDO $db, string $catalog, string $slug, string $qualified): string {
+        $taken = $db->prepare('SELECT 1 FROM categories WHERE store_id = :catalog AND slug = :slug');
+        foreach ([$slug, $qualified] as $candidate) {
+            $taken->execute([':catalog' => $catalog, ':slug' => $candidate]);
+            if (!$taken->fetchColumn()) return $candidate;
+        }
+        for ($n = 2; ; $n++) {
+            $taken->execute([':catalog' => $catalog, ':slug' => $qualified . '-' . $n]);
+            if (!$taken->fetchColumn()) return $qualified . '-' . $n;
+        }
     }
 
     /**

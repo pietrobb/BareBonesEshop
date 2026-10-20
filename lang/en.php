@@ -672,7 +672,7 @@ return [
     'admin.msg.category.parent_foreign' => 'The parent category is not in this store catalog.',
     'admin.msg.category.parent_cycle' => 'A category cannot be moved under itself or one of its subcategories.',
     'admin.msg.category.sort_int' => 'The order must be a whole number.',
-    'admin.msg.category.slug_taken' => 'Another category on this level already has the slug "{slug}".',
+    'admin.msg.category.slug_taken' => 'Another category in the catalog already has the slug "{slug}" (the address /category/{slug} must be unique).',
     'admin.msg.category.path_long' => 'The path of the category or one of its subcategories would be longer than {max} characters.',
     'admin.msg.category.saved' => 'Category saved.',
     'admin.msg.category.saved_moved' => 'Category saved (subcategories moved: {count}).',
