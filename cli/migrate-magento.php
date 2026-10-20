@@ -15,6 +15,7 @@ require_once __DIR__ . '/cli-only.php';
  *   --media   Path to Magento media/catalog/product directory (optional, for image copy)
  *   --dry-run Parse and report without writing to database
  *   --fresh   Drop existing data and reimport from scratch
+ *   --prefix  Magento table prefix (default: detected from the dump)
  */
 require_once __DIR__ . '/../src/autoload.php';
 
@@ -26,10 +27,11 @@ $dumpPath  = $opts['dump'] ?? null;
 $mediaPath = $opts['media'] ?? null;
 $dryRun    = isset($opts['dry-run']);
 $fresh     = isset($opts['fresh']);
-$prefix    = $opts['prefix'] ?? 'flk58ngdowp'; // Magento table prefix
+// Magento table prefix; detected from the dump when not given (an unprefixed install has none).
+$prefix    = isset($opts['prefix']) ? (string)$opts['prefix'] : null;
 
 if (!$dumpPath) {
-    echo "Usage: php cli/migrate-magento.php --dump=/path/to/dump.sql [--media=/path/to/media/catalog/product] [--dry-run] [--fresh]\n";
+    echo "Usage: php cli/migrate-magento.php --dump=/path/to/dump.sql [--media=/path/to/media/catalog/product] [--prefix=mg_] [--dry-run] [--fresh]\n";
     exit(1);
 }
 if (!file_exists($dumpPath)) {
@@ -170,39 +172,39 @@ if (!$handle) { echo "ERROR: Cannot open dump file\n"; exit(1); }
 
 $lineNum = 0;
 $totalRows = 0;
+$shortNames = array_keys($tables);
+usort($shortNames, static fn(string $a, string $b): int => strlen($b) <=> strlen($a));
+$tablePattern = '/^INSERT INTO `([A-Za-z0-9_]*?)(' . implode('|', array_map(static fn(string $t): string => preg_quote($t, '/'), $shortNames)) . ')`/';
 
 while (($line = fgets($handle)) !== false) {
     $lineNum++;
     $line = rtrim($line, "\r\n");
 
-    // Skip non-INSERT lines
-    if (!str_starts_with($line, 'INSERT INTO')) continue;
-
-    // Match table name
-    foreach ($tables as $shortName => &$storage) {
-        $fullName = $prefix . $shortName;
-        if (strpos($line, "`{$fullName}`") === false) continue;
-
-        $cols = $columnDefs[$shortName] ?? null;
-        if (!$cols) continue;
-
-        // Extract VALUES portion
-        $valuesPos = strpos($line, 'VALUES ');
-        if ($valuesPos === false) continue;
-
-        $valuesPart = substr($line, $valuesPos + 7);
-        $rows = parseMysqlValues($valuesPart, $cols);
-        foreach ($rows as $row) {
-            $storage[] = $row;
-            $totalRows++;
-        }
-        break;
+    // Skip non-INSERT lines; the table is one of ours under the (given or first detected) prefix
+    if (!preg_match($tablePattern, $line, $m)) continue;
+    if ($prefix === null) {
+        $prefix = $m[1];
+        echo "  Detected table prefix: '" . $prefix . "'\n";
     }
-    unset($storage);
+    if ($m[1] !== $prefix) continue;
+    $shortName = $m[2];
+
+    // Extract VALUES portion
+    $valuesPos = strpos($line, 'VALUES ');
+    if ($valuesPos === false) continue;
+
+    foreach (parseMysqlValues(substr($line, $valuesPos + 7), $columnDefs[$shortName]) as $row) {
+        $tables[$shortName][] = $row;
+        $totalRows++;
+    }
 }
 fclose($handle);
 
 echo "  Parsed {$lineNum} lines, extracted {$totalRows} data rows\n";
+if ($tables['catalog_product_entity'] === []) {
+    echo "ERROR: no Magento products found in the dump" . ($prefix !== null ? " for table prefix '{$prefix}'" : '') . " (check --prefix)\n";
+    exit(1);
+}
 foreach ($tables as $name => $rows) {
     if (!empty($rows)) echo "  {$name}: " . count($rows) . " rows\n";
 }
@@ -718,6 +720,7 @@ echo "    Created " . count($bbCategoryIds) . " categories\n";
 // Step 2: Import products
 echo "  Importing products...\n";
 $imported = 0;
+$importedSkus = [];
 $errors = [];
 $batchSize = 200;
 $batch = 0;
@@ -827,6 +830,7 @@ foreach ($productsToImport as $sku => $product) {
         }
 
         $db->exec('RELEASE SAVEPOINT product_import');
+        $importedSkus[] = $sku;
         $imported++;
         $batch++;
 
@@ -843,6 +847,17 @@ foreach ($productsToImport as $sku => $product) {
 }
 
 if ($db->inTransaction()) $db->commit();
+
+// Checkout reserves from the warehouse ledger: products.stock alone shows "in stock" but cannot be bought.
+echo "  Booking stock into the default warehouse...\n";
+$db->beginTransaction();
+if (!Warehouse::defaultWarehouse()) Warehouse::save(['code' => 'magento', 'name' => 'Magento import', 'is_default' => 1]);
+foreach ($importedSkus as $sku) {
+    $quantities = [$sku => $productsToImport[$sku]['stock']] + array_column($variantsToImport[$sku] ?? [], 'stock', 'sku');
+    foreach ($quantities as $stockSku => $qty) Warehouse::setAvailable((string)$stockSku, max(0, (int)$qty), 'import', 'magento_import');
+}
+Warehouse::syncProductStock();
+$db->commit();
 
 // Recount categories
 echo "  Recounting category products...\n";
@@ -869,43 +884,27 @@ if (!empty($errors)) {
 // ============================================================
 // Image processing
 // ============================================================
+/**
+ * Magento images (/h/e/hello.jpg under media/catalog/product) become uploads under storage path magento/h/e/hello.jpg,
+ * stored without their EXIF/GPS metadata and queued for the resized copies; the product keeps the storage URL the
+ * storefront serves. Without --media the URL points where the files are expected to be copied later.
+ */
 function processImages(array $magePaths, ?string $mediaBasePath): array {
-    if (!$mediaBasePath || !is_dir($mediaBasePath)) {
-        // Return Magento-relative paths as-is (user can copy images later)
-        return array_map(function($p) {
-            // Strip leading slash: /h/e/hello.jpg → uploads/magento/h/e/hello.jpg
-            return 'uploads/magento' . $p;
-        }, $magePaths);
-    }
-
-    $uploadsDir = dirname(__DIR__) . '/uploads/magento';
+    $storage = Adapters::storage();
     $processed = [];
-
     foreach ($magePaths as $magePath) {
-        // Magento stores images like /h/e/hello.jpg in media/catalog/product/h/e/hello.jpg
-        $srcPath = rtrim($mediaBasePath, '/\\') . str_replace('/', DIRECTORY_SEPARATOR, $magePath);
-
-        if (!file_exists($srcPath)) {
-            // Try with forward slashes
-            $srcPath = rtrim($mediaBasePath, '/\\') . '/' . ltrim($magePath, '/');
+        $relative = 'magento/' . ltrim(str_replace('\\', '/', $magePath), '/');
+        if (!preg_match('#^magento/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+\.(?:jpe?g|png|gif|webp)$#i', $relative) || str_contains($relative, '..')) continue;
+        $source = $mediaBasePath ? rtrim($mediaBasePath, '/\\') . '/' . substr($relative, strlen('magento/')) : '';
+        if ($source !== '' && is_file($source)) {
+            $bytes = file_get_contents($source);
+            if ($bytes === false) continue;
+            $processed[] = $storage->store($relative, ImageMetadata::strip($bytes));
+            JobQueue::push('image_resize', ['path' => $relative], 3);
+        } else {
+            $processed[] = $storage->url($relative, 'full');
         }
-
-        $relPath = 'uploads/magento' . $magePath;
-        $dstPath = dirname(__DIR__) . '/' . $relPath;
-
-        if (file_exists($srcPath)) {
-            $dstDir = dirname($dstPath);
-            if (!is_dir($dstDir)) {
-                mkdir($dstDir, 0755, true);
-            }
-            if (!file_exists($dstPath)) {
-                copy($srcPath, $dstPath);
-            }
-        }
-
-        $processed[] = $relPath;
     }
-
     return $processed;
 }
 

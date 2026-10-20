@@ -50,6 +50,7 @@ class Search {
         $offset = ($page - 1) * $perPage;
         $sort = in_array($opts['sort'] ?? '', self::SORTS, true) ? (string)$opts['sort'] : 'relevance';
         $params = [':store' => StoreContext::current()->catalogId()];
+        $rank = '';
         if ($like) {
             $from = 'FROM products p';
             $where = "p.store_id = :store AND p.status = 'active'";
@@ -74,10 +75,10 @@ class Search {
             $relevance = 'rank';
         } else {
             $from = 'FROM products p';
-            $where = "MATCH(p.name, p.sku, p.summary, p.tags) AGAINST(:q IN NATURAL LANGUAGE MODE) AND p.store_id = :store AND p.status = 'active'";
-            $params[':q'] = self::sanitizeMysqlQuery($q);
-            $select = 'p.*, MATCH(p.name, p.sku, p.summary, p.tags) AGAINST(:q_rel) AS relevance';
-            $relevance = 'relevance DESC';
+            [$match, $params, $rank] = self::mysqlMatch($q, $params);
+            $where = "{$match} AND p.store_id = :store AND p.status = 'active'";
+            $select = $rank === '' ? 'p.*' : 'p.*, MATCH(p.name, p.sku, p.summary, p.tags) AGAINST(:q_rel) AS relevance';
+            $relevance = $rank === '' ? 'p.name ASC, p.id ASC' : 'relevance DESC';
         }
         if (isset($opts['price_min']) && $opts['price_min'] !== null) { $where .= ' AND p.price >= :pmin'; $params[':pmin'] = (int)$opts['price_min']; }
         if (isset($opts['price_max']) && $opts['price_max'] !== null) { $where .= ' AND p.price <= :pmax'; $params[':pmax'] = (int)$opts['price_max']; }
@@ -107,7 +108,7 @@ class Search {
         };
         $stmt = $db->prepare("SELECT {$select} {$from} WHERE {$where} ORDER BY {$orderBy} LIMIT :limit OFFSET :offset");
         $fetch = $params + [':limit' => $perPage, ':offset' => $offset];
-        if (!$like && !Db::isSqlite()) $fetch[':q_rel'] = $params[':q'];
+        if ($rank !== '') $fetch[':q_rel'] = $rank;
         foreach ($fetch as $name => $value) $stmt->bindValue($name, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
         $stmt->execute();
         $products = $stmt->fetchAll();
@@ -143,15 +144,16 @@ class Search {
             ");
             $stmt->execute([':q' => $ftsQuery, ':store' => StoreContext::current()->catalogId(), ':limit' => $limit]);
         } else {
-            $safePrefix = self::sanitizeMysqlQuery($prefix);
+            [$match, $params] = self::mysqlMatch($prefix, [':store' => StoreContext::current()->catalogId()]);
             $stmt = $db->prepare("
                 SELECT DISTINCT p.name, p.slug
                 FROM products p
-                WHERE MATCH(p.name, p.sku, p.summary, p.tags) AGAINST(:q IN BOOLEAN MODE)
+                WHERE {$match}
                   AND p.store_id = :store AND p.status = 'active'
                 LIMIT :limit
             ");
-            $stmt->execute([':q' => $safePrefix . '*', ':store' => StoreContext::current()->catalogId(), ':limit' => $limit]);
+            foreach ($params + [':limit' => $limit] as $name => $value) $stmt->bindValue($name, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+            $stmt->execute();
         }
 
         return $stmt->fetchAll();
@@ -213,12 +215,44 @@ class Search {
         return preg_replace('/["\*\(\)\{\}\[\]:^~]/', '', $s);
     }
 
+    /** InnoDB's default full-text stopwords: never indexed, so they cannot be required in a MATCH. */
+    private const MYSQL_STOPWORDS = ['a', 'about', 'an', 'are', 'as', 'at', 'be', 'by', 'com', 'de', 'en', 'for', 'from', 'how', 'i', 'in', 'is',
+        'it', 'la', 'of', 'on', 'or', 'that', 'the', 'this', 'to', 'was', 'what', 'when', 'where', 'who', 'will', 'with', 'und', 'www'];
+    /** innodb_ft_min_token_size default: shorter tokens are not in the full-text index. */
+    private const MYSQL_MIN_TOKEN = 3;
+
     /**
-     * Sanitize MySQL FULLTEXT query — strip boolean operators
+     * MySQL condition with the SQLite FTS semantics: every word must match, the last one as a prefix. A word the
+     * full-text index can find ("shirt", "red") is a required boolean-mode term; one it cannot ("TV", the SKU
+     * "AB-12", "wi-fi", a stopword) is a LIKE on the searched columns. Returns [condition, params, relevance query]
+     * where the relevance query is '' when no word went through the index.
      */
-    private static function sanitizeMysqlQuery(string $q): string {
-        // Remove MySQL boolean mode operators: + - > < ( ) ~ * " @
-        $q = preg_replace('/[+\-><()\~\*"@]/', ' ', $q);
-        return trim(preg_replace('/\s+/', ' ', $q));
+    private static function mysqlMatch(string $q, array $params): array {
+        $words = array_values(array_filter(array_slice(preg_split('/\s+/u', trim($q)) ?: [], 0, 8),
+            static fn(string $w): bool => preg_match('/[\p{L}\p{N}]/u', $w) === 1));
+        $required = [];
+        $conditions = [];
+        foreach ($words as $i => $word) {
+            $tokens = preg_split('/[^\p{L}\p{N}_]+/u', $word, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            $indexed = array_filter($tokens, static fn(string $t): bool => mb_strlen($t) >= self::MYSQL_MIN_TOKEN && !in_array(mb_strtolower($t), self::MYSQL_STOPWORDS, true));
+            if (count($indexed) === count($tokens)) {
+                foreach ($tokens as $j => $token) $required[] = '+' . $token . ($i === count($words) - 1 && $j === count($tokens) - 1 ? '*' : '');
+                continue;
+            }
+            $word = preg_replace('/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/u', '', $word) ?? $word;
+            $alternatives = [];
+            foreach (['name', 'sku', 'summary', 'tags'] as $j => $column) {
+                $alternatives[] = "p.{$column} LIKE :mlike{$i}_{$j} ESCAPE '!'";
+                $params[":mlike{$i}_{$j}"] = '%' . Db::likeLiteral($word) . '%';
+            }
+            $conditions[] = '(' . implode(' OR ', $alternatives) . ')';
+        }
+        if ($required !== []) {
+            array_unshift($conditions, 'MATCH(p.name, p.sku, p.summary, p.tags) AGAINST(:q IN BOOLEAN MODE)');
+            $params[':q'] = implode(' ', $required);
+        }
+        if ($conditions === []) $conditions[] = '1 = 0';
+        $rank = implode(' ', array_map(static fn(string $t): string => rtrim(ltrim($t, '+'), '*'), $required));
+        return [implode(' AND ', $conditions), $params, $rank];
     }
 }
