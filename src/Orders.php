@@ -494,6 +494,17 @@ class Orders {
     }
 
     /**
+     * Serialise work on one order inside the open transaction (shipments, cancellation, refunds): MySQL/MariaDB
+     * lock the order row; SQLite takes its single writer lock now. Call it before reading the order's state.
+     */
+    public static function lockWithin(int $orderId): void {
+        $sql = Db::isMysql()
+            ? 'SELECT id FROM orders WHERE id = :id AND store_id = :store FOR UPDATE'
+            : 'UPDATE orders SET updated_at = updated_at WHERE id = :id AND store_id = :store';
+        Db::get()->prepare($sql)->execute([':id' => $orderId, ':store' => StoreContext::current()->id()]);
+    }
+
+    /**
      * Restore stock for order items.
      *
      * $mode:
@@ -604,7 +615,14 @@ class Orders {
                     }
                     if (!in_array($providerStatus, self::PROVIDER_FINAL_UNPAID, true)) continue;
                 }
-                if (self::expireClaimed($order, $cutoff($ttl), $online)) $expired++;
+                // One order that cannot be released (e.g. broken reservation) must not stall every later one.
+                try {
+                    if (self::expireClaimed($order, $cutoff($ttl), $online)) $expired++;
+                } catch (\Throwable $e) {
+                    error_log("Pending order expiry failed for #{$order['id']}: " . $e->getMessage());
+                    IncidentMonitor::report('order.expiry_failed', 'orders', 'critical', ['order_id' => (int)$order['id'], 'exception' => $e]);
+                    continue;
+                }
                 if ($expired >= $limit) break 2;
             }
         }

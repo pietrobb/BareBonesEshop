@@ -18,7 +18,7 @@ class Db {
             throw new RuntimeException('Unsupported db_driver; expected sqlite or mysql');
         }
 
-        $pdoClass = !empty($cfg['benchmark_query_count']) ? QueryCountingPDO::class : PDO::class;
+        $pdoClass = !empty($cfg['benchmark_query_count']) ? QueryCountingPDO::class : ShopPDO::class;
         if (self::$driver === 'mysql') {
             $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=%s',
                 $cfg['db_host'], $cfg['db_port'], $cfg['db_name'], $cfg['db_charset']);
@@ -202,12 +202,21 @@ class Db {
     /**
      * The connection can write: a no-op UPDATE still fails on a read-only SQLite database, a read_only
      * MySQL server and a user without write grants (SELECT 1 succeeds on all of them).
+     * SQLite: a database another connection is writing (backup, import, GDPR gc) is busy, not read-only —
+     * the probe does not wait for that writer (SQLITE_READONLY is reported before any lock is taken).
      */
     public static function writable(?PDO $db = null): bool {
+        $db ??= self::get();
+        $sqlite = $db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite';
+        $timeout = $sqlite ? (int)$db->query('PRAGMA busy_timeout')->fetchColumn() : 0;
+        if ($sqlite) $db->exec('PRAGMA busy_timeout = 0');
         try {
-            return ($db ?? self::get())->exec('UPDATE orders SET id = id WHERE 1 = 0') !== false;
+            return $db->exec('UPDATE orders SET id = id WHERE 1 = 0') !== false;
         } catch (Throwable $e) {
-            return false;
+            // SQLITE_BUSY (5) / SQLITE_LOCKED (6): another connection holds the write lock.
+            return $sqlite && $e instanceof PDOException && in_array((int)($e->errorInfo[1] ?? 0), [5, 6], true);
+        } finally {
+            if ($sqlite) $db->exec('PRAGMA busy_timeout = ' . $timeout);
         }
     }
 

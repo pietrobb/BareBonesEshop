@@ -1098,6 +1098,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.warehouse.add_feed' => 'Feed hinzufügen',
     'admin.warehouse.saved' => 'Lager gespeichert.',
     'admin.warehouse.deleted' => 'Lager gelöscht.',
+    'admin.warehouse.delete_reserved' => 'Lager kann nicht gelöscht werden: offene Bestellungen haben dort {count} Stück reserviert. Versenden, stornieren oder verschieben Sie sie zuerst.',
     'admin.feed.last_sync' => 'Letzte Synchronisierung',
     'admin.feed.warehouse' => 'Lager',
     'admin.feed.disabled' => 'Deaktiviert',

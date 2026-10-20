@@ -59,6 +59,9 @@ return [
     'admin_session_lifetime_seconds' => 28800,
     // External API v1: requests per minute per API key, across all source addresses.
     'api_client_rate_limit' => 600,
+    // Checkout: per IP (10/min) and per session (5 per 15 min) always apply. Optional shop-wide cap on
+    // checkout attempts per minute (0 = off); refused attempts never count towards it.
+    'checkout_global_limit' => 0,
     'admin_email'    => '', // fallback recipient for merchant order notifications
     'merchant_notifications' => [
         'enabled' => true,

@@ -44,12 +44,18 @@ class PendingOrderExpiry {
         $offline = self::offlineTtls($cfg);
         $expired = 0;
         foreach ($storeIds as $storeId) {
-            $expired += PaymentWebhookRouting::within($storeId, static fn(): int => Orders::expirePending(
-                (int)($cfg['pending_order_expiry_seconds'] ?? 172800),
-                (int)($cfg['pending_order_expiry_batch'] ?? 25),
-                $paymentStatusResolver,
-                $offline
-            ));
+            try {
+                $expired += PaymentWebhookRouting::within($storeId, static fn(): int => Orders::expirePending(
+                    (int)($cfg['pending_order_expiry_seconds'] ?? 172800),
+                    (int)($cfg['pending_order_expiry_batch'] ?? 25),
+                    $paymentStatusResolver,
+                    $offline
+                ));
+            } catch (\Throwable $e) {
+                // A failing store must not stop the sweep of the remaining stores.
+                error_log("Pending order expiry failed for store {$storeId}: " . $e->getMessage());
+                IncidentMonitor::report('order.expiry_failed', 'orders', 'critical', ['exception' => $e]);
+            }
         }
         return $expired;
     }

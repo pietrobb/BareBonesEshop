@@ -82,7 +82,7 @@ class ShippingService
         $volumeCm3 = max(0, $volumeCm3);
         $physicalQty = max(0, $physicalQty);
 
-        if (self::hasDatabasePricing()) {
+        if (self::hasDatabasePricing() && StoreContext::current()->usesProviderPrices()) {
             $dbRates = self::databaseRates($country, $weightG, $subtotal, $cod, $volumeCm3);
             if (!empty($dbRates)) {
                 return self::applyFreeShippingRules($dbRates, $subtotal, $physicalQty);

@@ -1072,6 +1072,7 @@ return [
     'admin.warehouse.add_feed' => 'Add feed',
     'admin.warehouse.saved' => 'Warehouse saved.',
     'admin.warehouse.deleted' => 'Warehouse deleted.',
+    'admin.warehouse.delete_reserved' => 'The warehouse cannot be deleted: open orders hold {count} reserved units in it. Ship, cancel or move them first.',
     'admin.feed.last_sync' => 'Last sync',
     'admin.feed.warehouse' => 'Warehouse',
     'admin.feed.disabled' => 'Disabled',

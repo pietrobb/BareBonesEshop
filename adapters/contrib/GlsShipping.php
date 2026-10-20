@@ -106,6 +106,7 @@ class GlsShipping implements ShippingAdapter
 
     private function lookupDbRate(string $country, int $weightG): ?int
     {
+        if (!StoreContext::current()->usesProviderPrices()) return null;
         try {
             $db   = Db::get();
             $stmt = $db->prepare("
@@ -125,6 +126,7 @@ class GlsShipping implements ShippingAdapter
     /** COD fee from the store's own GLS row (store currency); 0 when the row has none. */
     private function lookupDbCodSurcharge(string $country): int
     {
+        if (!StoreContext::current()->usesProviderPrices()) return 0;
         try {
             $stmt = Db::get()->prepare("SELECT cod_surcharge FROM shipping_rates
                 WHERE carrier = 'gls' AND country = :country AND store_id = :store ORDER BY weight_from_g ASC LIMIT 1");

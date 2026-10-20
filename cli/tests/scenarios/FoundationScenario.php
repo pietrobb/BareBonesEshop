@@ -910,10 +910,10 @@ $productEntrypoint = entrypointSource('product.php');
 assert_true(str_contains($productEntrypoint, "src/Entrypoints/Storefront.php"), 'G4: product.php delegates session validation to the canonical storefront');
 $apiSourceG5 = entrypointSource('api/v1/index.php');
 $indexSourceG5 = entrypointSource('index.php');
-foreach (['checkout_global', 'checkout_session_', 'checkout_subject_', 'Security::rotateCsrfToken()'] as $checkoutGuard) {
+foreach (['Security::checkoutAllowed()', 'checkout_subject_', 'Security::rotateCsrfToken()'] as $checkoutGuard) {
     assert_true(str_contains($apiSourceG5, $checkoutGuard), "G5: canonical checkout uses {$checkoutGuard}");
 }
-foreach (['checkout_global', 'checkout_session_'] as $transportGuard) {
+foreach (['Security::checkoutAllowed()'] as $transportGuard) {
     assert_true(str_contains($indexSourceG5, $transportGuard), "G5: HTML transport uses {$transportGuard}");
 }
 assert_true(str_contains($indexSourceG5, 'CheckoutService::execute('), 'G1 convergence: HTML checkout delegates to application service');

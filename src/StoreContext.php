@@ -8,8 +8,9 @@ class StoreContext {
     private string $id;
     private string $channel;
     private array $config;
+    private string $providerCurrency;
 
-    private function __construct(string $id, string $channel, array $config) {
+    private function __construct(string $id, string $channel, array $config, ?string $providerCurrency = null) {
         if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,39}$/', $id)) {
             throw new InvalidArgumentException('Invalid store ID');
         }
@@ -32,6 +33,8 @@ class StoreContext {
         $this->config['id'] = $id;
         $this->config['channel'] = $channel;
         $this->config['currency'] = $currency;
+        $providerCurrency = strtolower((string)$providerCurrency);
+        $this->providerCurrency = preg_match('/^[a-z]{3}$/', $providerCurrency) ? $providerCurrency : $currency;
     }
 
     public static function resolve(
@@ -104,7 +107,8 @@ class StoreContext {
         if (!is_array($channels) || !in_array($channel, $channels, true)) {
             throw new InvalidArgumentException("Channel {$channel} is not enabled for store {$storeId}");
         }
-        return new self($storeId, $channel, $config);
+        $providerOwner = $stores[(string)($config['provider_scope'] ?? $storeId)] ?? null;
+        return new self($storeId, $channel, $config, is_array($providerOwner) ? (string)($providerOwner['currency'] ?? '') : null);
     }
 
     public static function activate(self $context): void {
@@ -131,6 +135,12 @@ class StoreContext {
     public function cacheNamespace(): string { return 'stores/' . $this->id . '/' . $this->channel; }
     public function defaultLocale(): string { return (string)($this->config['default_locale'] ?? 'en'); }
     public function currency(): string { return (string)$this->config['currency']; }
+    /**
+     * Whether the provider scope's price lists (shipping rates, COD surcharges, free-shipping thresholds, payment
+     * fees and limits) are in this store's currency. They are entered in the currency of the store that owns the
+     * scope; a store sharing the scope in another currency must not charge those numbers as its own money.
+     */
+    public function usesProviderPrices(): bool { return $this->providerCurrency === $this->currency(); }
     public function legal(): array { return is_array($this->config['legal'] ?? null) ? $this->config['legal'] : []; }
     public function ossEnabled(): bool { return (bool)($this->config['oss_enabled'] ?? false); }
     public function config(): array { return $this->config; }

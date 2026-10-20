@@ -162,11 +162,7 @@ function storefrontCartPrice(array $cartData): Closure {
 function processCheckout(): array {
     global $t;
     if (!Security::csrfValidate()) return ['error' => $t('checkout_csrf_error')];
-    if (!Security::rateLimit('checkout', 10)
-        || !Security::rateLimit('checkout_global', 200, 60, false)
-        || !Security::rateLimit('checkout_session_' . hash('sha256', session_id()), 5, 900, false)) {
-        return ['error' => $t('checkout_too_many_attempts')];
-    }
+    if (!Security::checkoutAllowed()) return ['error' => $t('checkout_too_many_attempts')];
 
     $input = $_POST;
     $input['consents'] = array_map(static fn($value): bool => $value === '1', is_array($input['consents'] ?? null) ? $input['consents'] : []);

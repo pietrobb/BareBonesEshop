@@ -557,11 +557,7 @@ function apiCheckout(?array $runtimeConfig = null): array {
 
     if (!Security::csrfValidate()) return checkoutRefusal('checkout_csrf_error', 403);
 
-    if (!Security::rateLimit('checkout', 10)
-        || !Security::rateLimit('checkout_global', 200, 60, false)
-        || !Security::rateLimit('checkout_session_' . hash('sha256', session_id()), 5, 900, false)) {
-        return checkoutRefusal('checkout_too_many_attempts');
-    }
+    if (!Security::checkoutAllowed()) return checkoutRefusal('checkout_too_many_attempts');
 
     $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
     if (!is_array($input)) return checkoutRefusal('checkout.failed', 400);

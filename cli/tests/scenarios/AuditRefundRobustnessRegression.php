@@ -147,7 +147,8 @@ try {
     applyStripeChargeRefunded(['id' => 'ch_arr_1e', 'payment_intent' => 'pi_arr_1e', 'amount_refunded' => 700], 'pi_arr_1e', $r1e);
     applyStripeChargeRefunded(['id' => 'ch_arr_1e', 'payment_intent' => 'pi_arr_1e', 'amount_refunded' => 400], 'pi_arr_1e', $r1e);
     assert_equals(['delivered', 'partially_refunded', 700], $arrState($r1e), 'ARR 1: without refund ids only the cumulative difference is booked');
-    assert_true(str_contains((string)file_get_contents(TEST_CLI_DIR . '/../src/PaymentService.php'), 'FROM orders WHERE id = :id AND store_id = :store FOR UPDATE'), 'ARR 1: MySQL/MariaDB lock the order row while booking a refund');
+    assert_true(str_contains((string)file_get_contents(TEST_CLI_DIR . '/../src/PaymentService.php'), 'Orders::lockWithin($orderId)')
+        && str_contains((string)file_get_contents(TEST_CLI_DIR . '/../src/Orders.php'), 'FROM orders WHERE id = :id AND store_id = :store FOR UPDATE'), 'ARR 1: MySQL/MariaDB lock the order row while booking a refund');
 
     // 2. GoPay: the refund request is executed; GoPay accepts it asynchronously and its REFUNDED notification completes it.
     $arrUse($arrGoPay);

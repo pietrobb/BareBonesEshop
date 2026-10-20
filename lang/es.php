@@ -1199,6 +1199,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.warehouse.add_feed' => 'Añadir feed',
     'admin.warehouse.saved' => 'Almacén guardado.',
     'admin.warehouse.deleted' => 'Almacén eliminado.',
+    'admin.warehouse.delete_reserved' => 'No se puede eliminar el almacén: hay pedidos abiertos con {count} unidades reservadas. Envíelos, cancélelos o muévalos primero.',
     'admin.feed.last_sync' => 'Última sincronización',
     'admin.feed.warehouse' => 'Almacén',
     'admin.feed.disabled' => 'Desactivado',
