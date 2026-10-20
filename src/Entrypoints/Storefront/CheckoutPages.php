@@ -2,13 +2,11 @@
 /** Cart/checkout data presenters and checkout transport. Markup is theme-owned. */
 function renderCart(): string {
     global $t;
-    $price = storefrontCartPrice($cartData = Cart::enriched());
-    $cart = $cartData['items'];
     $breadcrumbs = [
         ['url' => Template::storeUrl('/'), 'label' => $t('home'), 'current' => false],
         ['url' => '', 'label' => $t('cart'), 'current' => true],
     ];
-    if (!$cart) {
+    if (!Cart::enriched()['items']) {
         return Template::render('storefront/cart-empty', [
             'breadcrumbs' => $breadcrumbs, 'title' => $t('cart_title'), 'message' => $t('cart_empty'),
             'home_url' => Template::storeUrl('/'), 'continue_label' => $t('continue_shopping'), 't' => I18n::all(),
@@ -17,10 +15,8 @@ function renderCart(): string {
 
     // Priced like checkout in the buyer's VAT scenario (default country and a signed-in company's VAT ID).
     $state = CheckoutService::formState([], false);
-    $vat = CheckoutService::previewVatContext($state['country'], CheckoutService::buyerCompany($state['values'])['vat_id'], '');
-    $price = storefrontCartPrice($cartData = Cart::enriched($vat['context']));
-    $cart = $cartData['items'];
-    $goods = CheckoutService::availableItems($cart); // what checkout orders; unavailable lines stay listed
+    ['vat' => $vat, 'cart' => $cartData, 'goods' => $goods] = CheckoutService::previewCart($state['country'], $state['values'], ''); // goods: what checkout orders; unavailable lines stay listed
+    [$price, $cart] = [storefrontCartPrice($cartData), $cartData['items']];
     $subtotal = (int)$cartData['subtotal'];
     // Free shipping thresholds see the goods after automatic promotions, as checkout does (no coupon entered yet).
     $promotion = CheckoutService::discountPreview('', $subtotal, null, $goods, (int)($_SESSION['customer_id'] ?? 0) ?: null)['promotion_discount'];
@@ -49,14 +45,13 @@ function renderCart(): string {
 
 function renderCheckout(): string {
     global $t;
-    $price = storefrontCartPrice($cartData = Cart::enriched());
-    $cart = $cartData['items'];
     $breadcrumbs = [
         ['url' => Template::storeUrl('/'), 'label' => $t('home'), 'current' => false],
         ['url' => Template::storeUrl('/?page=cart'), 'label' => $t('cart'), 'current' => false],
         ['url' => '', 'label' => $t('checkout_title'), 'current' => true],
     ];
-    if (!$cart) {
+    $cartData = Cart::enriched();
+    if (!$cartData['items']) {
         // The order was already created (cart cleared): a resubmit or a return from the
         // gateway continues that payment instead of reporting an empty cart.
         $pending = CheckoutSession::pendingPayment();
@@ -84,19 +79,16 @@ function renderCheckout(): string {
     if (isset($placed['page'])) return $placed['page'];
     $checkoutError = $placed['error'];
     if ($checkoutError !== '') {
-        // A refusal can drop sold-out lines from the cart: show what is left, or only the reason.
-        $price = storefrontCartPrice($cartData = Cart::enriched());
-        $cart = $cartData['items'];
+        // A refusal can drop sold-out lines from the cart: show what is left (re-read below), or only the reason.
+        $cart = Cart::enriched()['items'];
         if (!$cart) return Template::render('storefront/checkout-error', ['home_url' => Template::storeUrl('/'), 'home_label' => $t('home'), 'error_label' => $t('checkout_error_title'), 'message' => $checkoutError]);
     }
     $state = CheckoutService::formState($_POST, $posted);
     $form = static fn(string $key): string => $posted && is_string($_POST[$key] ?? null) ? mb_substr(trim($_POST[$key]), 0, 64) : '';
     $country = $state['country'];
     // Priced in the order's VAT scenario: reverse charge and export show (and reach thresholds with) the net amounts charged.
-    $vat = CheckoutService::previewVatContext($country, CheckoutService::buyerCompany($state['values'])['vat_id'], Security::clean($form('shipping_method')));
-    $price = storefrontCartPrice($cartData = Cart::enriched($vat['context']));
-    $cart = $cartData['items'];
-    $goods = CheckoutService::availableItems($cart); // what execute() orders and prices
+    ['vat' => $vat, 'cart' => $cartData, 'goods' => $goods] = CheckoutService::previewCart($country, $state['values'], Security::clean($form('shipping_method'))); // goods: what execute() orders
+    [$price, $cart] = [storefrontCartPrice($cartData), $cartData['items']];
     $subtotal = (int)$cartData['subtotal'];
     $customerId = (int)($_SESSION['customer_id'] ?? 0);
 
@@ -112,8 +104,7 @@ function renderCheckout(): string {
 
     // As at checkout: free shipping thresholds and payment fees see the goods after discounts.
     $quote = CheckoutService::chargedQuote(CheckoutService::deliveryQuote($goods, $subtotal - $discount, $country, $_POST['shipping_method'] ?? ''), $vat, (string)$cartData['currency']);
-    $shippingRates = $quote['rates'];
-    $selectedRate = $quote['selected'];
+    [$shippingRates, $selectedRate] = [$quote['rates'], $quote['selected']];
     $selectedShipping = (string)($selectedRate['method_code'] ?? '');
     $payment = CheckoutService::paymentPreview($goods, $subtotal - $discount, $country, (string)$cartData['currency'], $selectedShipping, $preview['free_shipping'] ? 0 : $quote['price'], $preview['free_shipping'], $form('payment'), $customerId ?: null, $vat);
     [$paymentMethods, $selectedPayment, $shipping] = [$payment['methods'], $payment['selected'], $payment['shipping']];

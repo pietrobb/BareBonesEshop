@@ -70,6 +70,16 @@ class CheckoutService {
         return self::vatContext($country, $vatId, $shippingMethod, $verify);
     }
 
+    /**
+     * The cart as an HTML preview shows it: priced in the order's VAT scenario, plus the lines checkout orders.
+     * @return array{vat: array, cart: array, goods: list<array>}
+     */
+    public static function previewCart(string $country, array $values, string $shippingMethod): array {
+        $vat = self::previewVatContext($country, self::buyerCompany($values)['vat_id'], $shippingMethod);
+        $cart = Cart::enriched($vat['context']);
+        return ['vat' => $vat, 'cart' => $cart, 'goods' => self::availableItems($cart['items'])];
+    }
+
     /** A delivery charge (rates include domestic VAT like catalog prices) as checkout bills it under $vat (vatContext()). */
     public static function chargedShipping(int $price, array $vat, string $currency): int {
         if ($price > 0 && $vat['net']) $price = Cart::netOfDomesticVat($price, (string)$vat['seller_country'], 'standard', (string)$vat['tax_provider']);
