@@ -123,6 +123,7 @@ ConsentService::setDefinitionsForTesting([]);
 I18n::setLocale('sk');
 require $root . '/src/Entrypoints/Storefront/CheckoutPages.php';
 $t = static fn(string $key): string => $key;
+Security::sessionStart(); // as the storefront bootstrap does before the cart is read
 $_SESSION = ['cart' => ['p_9781' => ['product_id' => 9781, 'variant_id' => null, 'qty' => 2]], 'csrf_token' => 'crf-preview'];
 $_SERVER['REQUEST_METHOD'] = 'POST';
 $_SERVER['REMOTE_ADDR'] = '127.0.9.79';

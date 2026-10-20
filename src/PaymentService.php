@@ -93,7 +93,7 @@ class PaymentService {
         $fee = max(0, (int)($quote['fee'] ?? 0));
         $fixedFee = min($fee, max(0, (int)($quote['fixed_fee'] ?? $fee)));
         if (!$netOfDomesticVat || $fixedFee === 0) return $fee;
-        return $fee - $fixedFee + Cart::netOfDomesticVat($fixedFee, $sellerCountry, 'standard', $taxProviderCode);
+        return $fee - $fixedFee + Money::round(Cart::netOfDomesticVat($fixedFee, $sellerCountry, 'standard', $taxProviderCode), (string)($quote['currency'] ?? 'eur'));
     }
 
     /** Cash on delivery is a method's service type, not its (renamable) code. */
@@ -545,12 +545,14 @@ class PaymentService {
 
     /**
      * The latest pending item refund (InvoiceService::credit()) whose payment_refund job the provider accepted
-     * without a refund id: no webhook can find it (Rma::noteProviderRefund() had no id to note).
+     * without a refund id: no webhook can find it (Rma::noteProviderRefund() had no id to note). Two such refunds
+     * can be in flight at once: confirming the first moves the payment to partially_refunded, and the second must
+     * still be offered, else its money is never booked.
      *
      * @return array{amount:int, request_key:string, refund_id:int}|null
      */
     private static function unconfirmedItemRefund(array $order): ?array {
-        if ((string)($order['payment_status'] ?? '') !== 'refund_pending' || self::refundsByHand($order)) return null;
+        if (!in_array((string)($order['payment_status'] ?? ''), ['refund_pending', 'partially_refunded'], true) || self::refundsByHand($order)) return null;
         $stmt = Db::get()->prepare("SELECT r.id, r.amount, r.idempotency_key FROM order_refunds r
             WHERE r.order_id = :order AND r.store_id = :store AND r.status = 'pending' AND (r.payment_reference IS NULL OR r.payment_reference = '')
               AND EXISTS (SELECT 1 FROM payment_transactions t WHERE t.order_id = r.order_id AND t.store_id = r.store_id
@@ -567,6 +569,8 @@ class PaymentService {
         self::withLockedOrder($orderId, static function (array $order) use ($orderId, $actor, $note): bool {
             $pending = self::unconfirmedProviderRefund($order);
             if ($pending === null) throw new \LogicException('No provider refund awaits confirmation on this order');
+            // Never more than the payment still holds (a provider report may have booked part of it already).
+            if ($pending['amount'] > self::refundableBalance($orderId)) throw new \LogicException('The provider refund exceeds the refundable balance');
             // Names the request it settles, so a late provider report of the same refund books nothing more.
             if (!self::bookRefundWithin($order, self::orderProvider($order), '', $pending['amount'], 'refund.admin_confirmed',
                 'refund_admin_confirmed_' . $pending['request_key'], ['actor' => $actor, 'note' => $note, 'settles_refund_request' => $pending['request_key']],
@@ -1191,6 +1195,8 @@ class PaymentService {
         $fee = $fixedFee;
         $bps = (int)($row['percent_fee_bps'] ?? 0);
         if ($bps > 0) $fee += (int)ceil($amount * $bps / 10000);
+        // Charged in units the currency shows (whole Kč/Ft).
+        [$fee, $fixedFee] = [Money::round($fee, $currency), Money::round($fixedFee, $currency)];
         if (!empty($row['free_above']) && $amount >= (int)$row['free_above']) $fee = $fixedFee = 0;
 
         return [

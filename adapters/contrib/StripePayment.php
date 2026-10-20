@@ -58,6 +58,10 @@ class StripePayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, C
         if ($expectedTotal <= 0) {
             throw new RuntimeException('Stripe Checkout requires a positive order total');
         }
+        // Stripe takes HUF and TWD in cents but only charges whole units of them.
+        if (in_array($currency, ['huf', 'twd'], true) && $expectedTotal % 100 !== 0) {
+            throw new RuntimeException('Stripe Checkout requires a ' . strtoupper($currency) . ' total that is a multiple of 100');
+        }
 
         $lineItems = [];
         $lineTotal = 0;
