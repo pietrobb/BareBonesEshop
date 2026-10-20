@@ -107,7 +107,7 @@ class MarketingFeed {
         $first = is_array($images) ? ($images[0] ?? '') : '';
         $first = trim(is_array($first) ? (string)($first['url'] ?? '') : (string)$first);
         if ($first === 'placeholder.jpg') $first = ''; // the storefront shows no image for it either
-        $image = $first === '' || preg_match('#^https?://#i', $first) ? $first : self::absoluteUrl($baseUrl, StorefrontViewModel::imageUrl($first));
+        $image = $first === '' ? '' : (preg_match('#^https?://#i', $first) ? StorefrontViewModel::imageUrl($first) : self::absoluteUrl($baseUrl, StorefrontViewModel::imageUrl($first)));
         $description = trim(strip_tags((string)($product['summary'] ?: $product['description'])));
         $availability = self::availability($product);
         $currency = strtoupper(trim((string)($product['currency'] ?? ''))) ?: strtoupper(StoreContext::current()->currency());

@@ -49,6 +49,12 @@ try {
     $r7cPriceFeed['field_map'] = json_encode(['SKU' => 'sku', 'NAME' => 'name', 'PRICE' => 'price']);
     FeedImport::applyItems($r7cPriceFeed, [['SKU' => 'R7C-B', 'NAME' => 'R7C B', 'PRICE' => '6.00']]);
     assert_equals(3, Warehouse::totalAvailable('R7C-A'), 'R7 feed: a feed without a stock column does not zero the products it omits');
+    // A sync that stops at the error limit never saw the rest of the feed: those products are still listed.
+    $r7cBadRows = [];
+    for ($n = 0; $n < 102; $n++) $r7cBadRows[] = ['SKU' => "R7C-BAD-{$n}", 'NAME' => 'R7C bad', 'PRICE' => 'na dotaz', 'STOCK' => '1'];
+    $r7cCut = FeedImport::applyItems($r7cFeed, [...$r7cBadRows, ['SKU' => 'R7C-A', 'NAME' => 'R7C A', 'PRICE' => '10.00', 'STOCK' => '3']]);
+    assert_true(count($r7cCut['errors']) === 101 && Warehouse::totalAvailable('R7C-A') === 3 && (int)($r7cCut['stock_zeroed'] ?? 0) === 0,
+        'R7 feed: a sync cut short by the error limit zeroes nothing (errors ' . count($r7cCut['errors']) . ', R7C-A ' . Warehouse::totalAvailable('R7C-A') . ', zeroed ' . (int)($r7cCut['stock_zeroed'] ?? 0) . ')');
 
     // Prices: thousands separators, currency signs and codes.
     $r7cPrices = [];
@@ -114,3 +120,101 @@ foreach ($r7cSearchDbs as $r7cDriver => $r7cName) {
         @unlink($r7cLock);
     }
 }
+
+// Magento migration: the table prefix was a hard-coded default of one shop's dump, so any other dump imported nothing
+// and reported success; migrated products had products.stock but no warehouse stock (shown in stock, not buyable);
+// image paths were stored as "uploads/magento/..." which the storefront resolved to a missing file.
+echo "\n--- Audit round 7 (catalog): Magento migration ---\n";
+$r7cMage = test_fixture_path('r7c-magento');
+mkdir($r7cMage);
+try {
+    file_put_contents($r7cMage . '/dump.sql', implode("\n", [
+        '-- Magento 1.9 dump with table prefix mg_',
+        "INSERT INTO `mg_catalog_product_entity` VALUES (1,4,4,'simple','MG-CHAIR',0,0,'2020-01-01 00:00:00','2020-01-01 00:00:00');",
+        "INSERT INTO `mg_catalog_product_entity_varchar` VALUES (1,4,71,0,1,'Magento chair'),(2,4,97,0,1,'magento-chair'),(3,4,85,0,1,'/m/g/chair.jpg');",
+        "INSERT INTO `mg_catalog_product_entity_decimal` VALUES (1,4,75,0,1,'49.9000');",
+        "INSERT INTO `mg_catalog_product_entity_int` VALUES (1,4,96,0,1,1);",
+        "INSERT INTO `mg_cataloginventory_stock_item` VALUES (1,1,1,'7.0000',0,1,0,0,1,1,1,0,1,1,NULL,NULL,1,0,1,0,1,0,1,0,0);",
+    ]) . "\n");
+    file_put_contents($r7cMage . '/run.php', '<?php
+const R7C_ROOT = ' . var_export(dirname(TEST_CLI_DIR), true) . ';
+const R7C_DB = ' . var_export($r7cMage . '/shop.sqlite', true) . ';
+require R7C_ROOT . "/src/autoload.php";
+@unlink(R7C_DB);
+$db = new PDO("sqlite:" . R7C_DB, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+(new Migrator($db, R7C_ROOT . "/migrations", R7C_DB . ".lock"))->apply(static fn($m) => null);
+Db::init($db, "sqlite");
+register_shutdown_function(static function () use ($db): void {
+    $product = $db->query("SELECT stock, images FROM products WHERE sku = \'MG-CHAIR\'")->fetch() ?: null;
+    echo "\nRESULT=" . json_encode([$product === null ? null : (int)$product["stock"], Warehouse::totalAvailable("MG-CHAIR"), $product === null ? null : json_decode($product["images"], true)]) . "\n";
+});
+require R7C_ROOT . "/cli/migrate-magento.php";
+');
+    $r7cRun = static function (array $args) use ($r7cMage): array {
+        $process = proc_open(array_merge([PHP_BINARY, $r7cMage . '/run.php'], $args), [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        fclose($pipes[0]);
+        $out = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $code = proc_close($process);
+        return [$code, preg_match('/RESULT=(.*)$/m', $out, $m) ? json_decode($m[1], true) : null, $out];
+    };
+    [$r7cCode, $r7cResult, $r7cOut] = $r7cRun(['--dump=' . $r7cMage . '/dump.sql']);
+    assert_true($r7cCode === 0 && str_contains($r7cOut, "Detected table prefix: 'mg_'") && ($r7cResult[0] ?? null) === 7,
+        'R7 Magento: without --prefix the dump\'s table prefix is detected and its products imported (' . $r7cCode . ', ' . json_encode($r7cResult) . ')');
+    assert_equals(7, $r7cResult[1] ?? null, 'R7 Magento: the migrated stock is in the warehouse ledger, so the product can be bought');
+    assert_equals(['/uploads/magento/m/g/chair.jpg'], $r7cResult[2] ?? null, 'R7 Magento: an image path is the storage URL the storefront serves');
+    [$r7cCode, $r7cResult, $r7cOut] = $r7cRun(['--dump=' . $r7cMage . '/dump.sql', '--prefix=other_']);
+    assert_true($r7cCode === 1 && str_contains($r7cOut, 'no Magento products found') && ($r7cResult[0] ?? null) === null,
+        'R7 Magento: a wrong prefix fails loudly instead of importing nothing and reporting success (' . $r7cCode . ')');
+} finally {
+    foreach (glob($r7cMage . '/*') ?: [] as $r7cFile) @unlink($r7cFile);
+    @rmdir($r7cMage);
+}
+
+// Images: http:// pictures are mixed content on the HTTPS storefront; cards loaded the full original although the
+// resize job writes smaller copies; a public original kept the photo's EXIF, GPS position included.
+echo "\n--- Audit round 7 (catalog): product images ---\n";
+assert_equals('https://cdn.example.com/a.jpg', StorefrontViewModel::imageUrl('http://cdn.example.com/a.jpg'), 'R7 images: an http:// image is served over https');
+assert_equals([['https://cdn.example.com/a.jpg'], []], ProductEditor::parseImages('http://cdn.example.com/a.jpg'), 'R7 images: the editor stores an http:// image as https');
+$r7cUploads = dirname(TEST_CLI_DIR) . '/uploads/r7c-' . getmypid();
+@mkdir($r7cUploads, 0755, true);
+try {
+    $r7cBase = '/uploads/' . basename($r7cUploads) . '/photo';
+    file_put_contents($r7cUploads . '/photo.jpg', 'x');
+    assert_equals(Template::url($r7cBase . '.jpg'), StorefrontViewModel::imageUrl($r7cBase . '.jpg', 'thumb'), 'R7 images: before the resize job ran, the thumbnail is the original');
+    file_put_contents($r7cUploads . '/photo-medium.jpg', 'x');
+    assert_equals(Template::url($r7cBase . '-medium.jpg'), StorefrontViewModel::imageUrl($r7cBase . '.jpg', 'thumb'), 'R7 images: a card thumbnail uses the resized copy instead of the full original');
+    assert_equals(Template::url($r7cBase . '.jpg'), StorefrontViewModel::imageUrl($r7cBase . '.jpg', 'full'), 'R7 images: the full size stays the original');
+} finally {
+    foreach (glob($r7cUploads . '/*') ?: [] as $r7cFile) @unlink($r7cFile);
+    @rmdir($r7cUploads);
+}
+
+// A JPEG with EXIF (GPS + orientation 6), XMP and a comment; a PNG with text and eXIf chunks; a WebP with EXIF.
+$r7cTiff = 'MM' . "\0\x2A\0\0\0\x08" . "\0\x02" . "\x01\x12\0\x03\0\0\0\x01\0\x06\0\0" . "\x88\x25\0\x04\0\0\0\x01\0\0\0\x26" . "\0\0\0\0" . 'GPS 48.1486N 17.1077E';
+$r7cSegment = static fn(int $marker, string $payload): string => "\xFF" . chr($marker) . pack('n', strlen($payload) + 2) . $payload;
+$r7cImage = imagecreatetruecolor(4, 4);
+ob_start(); imagejpeg($r7cImage); $r7cPlainJpeg = (string)ob_get_clean();
+$r7cJpeg = "\xFF\xD8" . $r7cSegment(0xE0, "JFIF\0\x01\x01\0\0\x01\0\x01\0\0") . $r7cSegment(0xE1, "Exif\0\0" . $r7cTiff)
+    . $r7cSegment(0xE1, "http://ns.adobe.com/xap/1.0/\0<x:xmpmeta>GPSLatitude</x:xmpmeta>") . $r7cSegment(0xFE, 'shot at home GPS')
+    . substr($r7cPlainJpeg, 2);
+$r7cStripped = ImageMetadata::strip($r7cJpeg);
+assert_true(!str_contains($r7cStripped, 'GPS') && !str_contains($r7cStripped, 'xmpmeta'), 'R7 images: EXIF/GPS, XMP and comments are removed from an uploaded JPEG');
+assert_true(str_contains($r7cStripped, "Exif\0\0MM") && str_contains($r7cStripped, "\x01\x12\0\x03\0\0\0\x01\0\x06"), 'R7 images: the JPEG keeps its orientation so it still displays upright');
+assert_true(@imagecreatefromstring($r7cStripped) !== false && str_ends_with($r7cStripped, substr($r7cPlainJpeg, -64)), 'R7 images: the stripped JPEG still decodes and its image data is unchanged');
+ob_start(); imagepng($r7cImage); $r7cPlainPng = (string)ob_get_clean();
+$r7cChunk = static fn(string $type, string $data): string => pack('N', strlen($data)) . $type . $data . pack('N', crc32($type . $data));
+$r7cPng = substr($r7cPlainPng, 0, 33) . $r7cChunk('tEXt', "Comment\0GPS 48.1N") . $r7cChunk('eXIf', $r7cTiff) . substr($r7cPlainPng, 33);
+$r7cPngStripped = ImageMetadata::strip($r7cPng);
+assert_true(!str_contains($r7cPngStripped, 'GPS') && @imagecreatefromstring($r7cPngStripped) !== false, 'R7 images: text and EXIF chunks are removed from a PNG, which still decodes');
+if (function_exists('imagewebp')) {
+    ob_start(); imagewebp($r7cImage); $r7cPlainWebp = (string)ob_get_clean();
+    $r7cExif = 'EXIF' . pack('V', strlen($r7cTiff)) . $r7cTiff . (strlen($r7cTiff) % 2 ? "\0" : '');
+    $r7cWebpBody = substr($r7cPlainWebp, 12) . $r7cExif;
+    $r7cWebpStripped = ImageMetadata::strip('RIFF' . pack('V', strlen($r7cWebpBody) + 4) . 'WEBP' . $r7cWebpBody);
+    assert_true(!str_contains($r7cWebpStripped, 'GPS') && unpack('V', substr($r7cWebpStripped, 4, 4))[1] === strlen($r7cWebpStripped) - 8,
+        'R7 images: the EXIF chunk is removed from a WebP and the RIFF size stays consistent');
+}
+$r7cEditor = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/ProductEditor.php');
+assert_true(str_contains($r7cEditor, 'ImageMetadata::strip($bytes)'), 'R7 images: an admin upload is stored without its metadata');

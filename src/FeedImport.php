@@ -105,6 +105,7 @@ class FeedImport {
         $db->beginTransaction();
         $stockMap = [];
         $listed = [];
+        $complete = true;
 
         foreach ($items as $i => $raw) {
             $db->exec('SAVEPOINT row_import');
@@ -146,7 +147,10 @@ class FeedImport {
             } catch (\Throwable $e) {
                 $result['errors'][] = "Item #{$i}: {$e->getMessage()}";
                 $db->exec('ROLLBACK TO SAVEPOINT row_import');
-                if (count($result['errors']) > 100) break;
+                if (count($result['errors']) > 100) {
+                    $complete = false;
+                    break;
+                }
             }
         }
 
@@ -160,7 +164,8 @@ class FeedImport {
                 $stockMap
             );
         }
-        $result['stock_zeroed'] = self::zeroUnlisted($feed, $fieldMap, $listed);
+        // Cut short by the error limit: the rows not visited are still listed, so nothing may be zeroed.
+        $result['stock_zeroed'] = $complete ? self::zeroUnlisted($feed, $fieldMap, $listed) : 0;
 
         // Update feed status
         $status = empty($result['errors']) ? 'ok' : 'ok with ' . count($result['errors']) . ' errors';

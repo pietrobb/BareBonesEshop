@@ -485,12 +485,24 @@ final class StorefrontViewModel
         return Template::storeUrl('/category/' . rawurlencode($slug));
     }
 
-    /** Storefront URL of a stored product image reference (HTTPS URL, local path, or uploads file). */
+    /**
+     * Storefront URL of a stored product image reference (HTTP(S) URL, local path, or uploads file). An http:// URL
+     * is served as https:// (the browser blocks mixed content). For an upload of the local storage (/uploads/...) a
+     * smaller size uses the resized copy the image_resize job wrote next to it, once it exists: cards and thumbnail
+     * strips get the 600 px "medium" copy instead of the full original.
+     */
     public static function imageUrl(string $value, string $size = 'full'): string
     {
         $value = trim($value);
-        if (preg_match('#^https://#i', $value)) return $value;
-        if (str_starts_with($value, '/')) return Template::url($value);
+        if (preg_match('#^https?://#i', $value)) return (string)preg_replace('#^http://#i', 'https://', $value);
+        if (str_starts_with($value, '/')) {
+            $variant = ['thumb' => 'medium', 'medium' => 'medium', 'large' => 'large'][$size] ?? null;
+            if ($variant !== null && preg_match('#^/uploads/((?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+)\.(jpe?g|png|gif|webp)$#', $value, $m)
+                && is_file(dirname(__DIR__) . "/uploads/{$m[1]}-{$variant}.{$m[2]}")) {
+                return Template::url("/uploads/{$m[1]}-{$variant}.{$m[2]}");
+            }
+            return Template::url($value);
+        }
         $segments = array_values(array_filter(explode('/', str_replace('\\', '/', $value)), static fn(string $part): bool => $part !== ''));
         if ($segments === [] || in_array('..', $segments, true)) return '';
         return Template::url('/uploads/' . $size . '/' . implode('/', array_map('rawurlencode', $segments)));

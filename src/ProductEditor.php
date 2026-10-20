@@ -126,6 +126,8 @@ final class ProductEditor {
             [$url, $alt] = [$parts[0], $parts[1] ?? ''];
             if ($url === '') continue;
             if (!self::validImageUrl($url)) return I18n::format('admin.msg.product.image_url', ['url' => $url]);
+            // An http:// image is blocked as mixed content on the HTTPS storefront.
+            $url = (string)preg_replace('#^http://#i', 'https://', $url);
             if (mb_strlen($alt) > self::MAX_ALT) return I18n::format('admin.msg.product.alt_long', ['max' => self::MAX_ALT]);
             if (in_array($url, $urls, true)) continue;
             $urls[] = $url;
@@ -145,7 +147,8 @@ final class ProductEditor {
         $path = self::uploadPath($sku, $extension);
         $bytes = file_get_contents($upload['tmp_name']);
         if ($bytes === false || strlen($bytes) !== $upload['size']) throw new RuntimeException('Uploaded image could not be read completely');
-        return [Adapters::storage()->store($path, $bytes), $path];
+        // The original is public: a phone photo's EXIF would publish where it was taken.
+        return [Adapters::storage()->store($path, ImageMetadata::strip($bytes)), $path];
     }
 
     /**
