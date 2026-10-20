@@ -50,6 +50,17 @@ final class StorefrontSeo
         return $page > 1 ? $path . (str_contains($path, '?') ? '&' : '?') . 'pg=' . $page : $path;
     }
 
+    /** A product/category reached by an old (SlugRepair) or another language's slug: 301 to its canonical URL. */
+    public static function redirectToCanonical(string $requested, string $canonical, string $route): void
+    {
+        if (!in_array($_SERVER['REQUEST_METHOD'] ?? 'GET', ['GET', 'HEAD'], true)) return;
+        $url = $route === 'product' ? StorefrontViewModel::productUrl($canonical) : StorefrontViewModel::categoryUrl($canonical);
+        $target = SlugRepair::canonicalRedirect($requested, $canonical, $url, $_GET);
+        if ($target === null) return;
+        header('Location: ' . $target, true, 301);
+        exit;
+    }
+
     private static function robots(string $directives): string
     {
         return '<meta name="robots" content="' . $directives . '">';

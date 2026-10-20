@@ -40,6 +40,8 @@ if ($phase === 'setup') {
     if ($warehouse > 0) $db->exec("INSERT INTO warehouse_stock (warehouse_id, sku, qty, reserved) SELECT {$warehouse}, sku, 5, 0 FROM products WHERE sku LIKE 'SFB-%'");
     $ids = $db->query("SELECT id, slug FROM products WHERE slug LIKE 'sfb-%'")->fetchAll(PDO::FETCH_KEY_PAIR);
     $ids = array_flip($ids);
+    // Registered like Import/ProductEditor do: the storefront resolves a translated slug through slug_registry.
+    $db->prepare("INSERT INTO slug_registry (slug, locale, entity, entity_id, store_id) VALUES ('sfb-main-cs', 'cs', 'product', ?, 'default')")->execute([$ids['sfb-main']]);
     $relation = $db->prepare("INSERT INTO product_related_products (product_id, related_product_id, relation_type, sort_order) VALUES (?, ?, ?, ?)");
     for ($i = 1; $i <= 30; $i++) {
         $relation->execute([$ids['sfb-main'], $ids['sfb-p-' . $i], $i % 2 ? 'related' : 'accessory', $i]);
@@ -163,6 +165,14 @@ if ($action === 'feed') {
     $google = MarketingFeed::google('https://shop.example/shop', 'cs');
     $meta = MarketingFeed::meta('https://shop.example/shop', 'cs');
     $emit(['google' => $google, 'meta' => $meta, 'rows_is_generator' => MarketingFeed::rows('cs') instanceof Generator]);
+    exit(0);
+}
+
+if ($action === 'fix_slugs') {
+    $repair = SlugRepair::run($db);
+    $emit(['repair' => $repair, 'main' => (string)$db->query("SELECT slug FROM products WHERE sku = 'SFB-MAIN'")->fetchColumn(),
+        'cat' => (string)$db->query("SELECT slug FROM categories WHERE name = 'SFB Category'")->fetchColumn(),
+        'aliases' => $db->query("SELECT entity, slug FROM slug_registry WHERE locale = 'previous' AND slug IN ('sfb-main', 'sfb-cat') ORDER BY entity")->fetchAll(PDO::FETCH_KEY_PAIR)]);
     exit(0);
 }
 
@@ -369,6 +379,28 @@ try {
     foreach (glob(dirname(TEST_CLI_DIR) . '/templates/legal/*/*.html') ?: [] as $sfbTemplate) {
         assert_true(preg_match('/<!--\s*legal-updated:\s*\d{4}-\d{2}-\d{2}\s*-->/', (string)file_get_contents($sfbTemplate)) === 1, 'Legal page: ' . basename(dirname($sfbTemplate)) . '/' . basename($sfbTemplate) . ' declares its legal-updated date');
     }
+
+    // --- R7: cli/fix-slugs.php keeps the replaced slugs, and the storefront 301s them to the new URL (last: renames the fixture) ---
+    [, $sfbFix, $sfbNoise] = $sfbRun('run', 'fix_slugs', ['store' => 'default', 'locale' => 'en']);
+    assert_true(($sfbFix['main'] ?? 'sfb-main') !== 'sfb-main' && ($sfbFix['cat'] ?? 'sfb-cat') !== 'sfb-cat' && ($sfbFix['repair']['products'] ?? 0) > 0,
+        "R7 fix-slugs: product and category slugs are re-slugified ({$sfbNoise})");
+    assert_equals(['category' => 'sfb-cat', 'product' => 'sfb-main'], $sfbFix['aliases'] ?? null, 'R7 fix-slugs: each replaced slug stays registered for its product/category');
+    $sfbStatus = static fn(string $uri, array $get): int => (int)($sfbPage(['script' => 'index.php', 'script_name' => '/index.php', 'uri' => $uri, 'get' => $get])['status'] ?? 0);
+    $sfbNewMain = (string)($sfbFix['main'] ?? '');
+    assert_equals([301, 200, 301, 200], [
+        $sfbStatus('/product/sfb-main', ['page' => 'product', 'slug' => 'sfb-main']),
+        $sfbStatus('/product/' . $sfbNewMain, ['page' => 'product', 'slug' => $sfbNewMain]),
+        $sfbStatus('/category/sfb-cat', ['page' => 'category', 'slug' => 'sfb-cat']),
+        $sfbStatus('/category/' . ($sfbFix['cat'] ?? ''), ['page' => 'category', 'slug' => (string)($sfbFix['cat'] ?? '')]),
+    ], 'R7 fix-slugs: the old product and category URLs answer 301 (were 404), the new ones 200');
+    assert_equals([301, 200], [
+        $sfbStatus('/cs/product/' . $sfbNewMain, ['page' => 'product', 'slug' => $sfbNewMain]),
+        $sfbStatus('/cs/product/sfb-main-cs', ['page' => 'product', 'slug' => 'sfb-main-cs']),
+    ], 'R7 slugs: the CZ store redirects the base slug to the Czech slug it uses as canonical');
+    assert_equals(['/shop/product/new?lang=de&pg=2', null], [
+        SlugRepair::canonicalRedirect('old', 'new', '/shop/product/new', ['page' => 'product', 'slug' => 'old', 'lang' => 'de', 'pg' => '2']),
+        SlugRepair::canonicalRedirect('new', 'new', '/shop/product/new', ['slug' => 'new']),
+    ], 'R7 slugs: the redirect keeps the request parameters except the route ones, and a canonical slug is not redirected');
 } finally {
     $sfbTree = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($sfbRoot, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
     foreach ($sfbTree as $sfbPath) $sfbPath->isDir() ? @rmdir($sfbPath->getPathname()) : @unlink($sfbPath->getPathname());

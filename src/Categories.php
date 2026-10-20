@@ -21,6 +21,13 @@ class Categories {
     public static function bySlug(string $slug): ?array {
         $stmt = Db::get()->prepare("SELECT * FROM categories WHERE slug = :slug AND store_id = :store");
         $stmt->execute([':slug' => $slug, ':store' => StoreContext::current()->catalogId()]);
+        $category = $stmt->fetch();
+        if ($category) return $category;
+        // A slug replaced by cli/fix-slugs.php (SlugRepair) still finds its category; the storefront redirects it.
+        $stmt = Db::get()->prepare("SELECT c.* FROM slug_registry sr JOIN categories c ON c.id = sr.entity_id
+            WHERE sr.slug = :slug AND sr.entity = 'category' AND sr.store_id = :store AND c.store_id = :category_store LIMIT 1");
+        $store = StoreContext::current()->catalogId();
+        $stmt->execute([':slug' => $slug, ':store' => $store, ':category_store' => $store]);
         return $stmt->fetch() ?: null;
     }
 
