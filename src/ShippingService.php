@@ -188,6 +188,17 @@ class ShippingService
         $order   = self::fetchOrder($orderId);
         $snapshot = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true);
         $order['pickup_point_id'] = (string)($snapshot['pickup_point']['id'] ?? '');
+        // What the carrier collects: the order total of an unpaid cash-on-delivery order.
+        $order['cod_amount'] = ($order['payment_status'] ?? '') !== 'paid' && PaymentService::isCashOnDelivery((string)($order['payment_method'] ?? ''))
+            ? (int)$order['total'] : 0;
+        // A carrier that cannot collect would deliver it as prepaid (in-store pickup is paid at the counter).
+        if ($order['cod_amount'] > 0 && $adapter instanceof ShippingLifecycleAdapter && !$adapter->supportsCOD()) {
+            throw new \RuntimeException("Shipping carrier does not support cash on delivery: {$carrierId}");
+        }
+        // Labels cancelled earlier: a new label is a new carrier request, not a replay of the cancelled one.
+        $cancelled = $db->prepare("SELECT COUNT(*) FROM shipping_labels WHERE order_id = :order_id AND carrier = :carrier AND store_id = :store");
+        $cancelled->execute([':order_id' => $orderId, ':carrier' => $carrierId, ':store' => StoreContext::current()->id()]);
+        $order['label_sequence'] = (int)$cancelled->fetchColumn() + 1;
         $result = $adapter->generateLabel($order);
 
         // Persist label record
@@ -508,10 +519,25 @@ class ShippingService
     private static function allParcelsDelivered(int $orderId): bool
     {
         if ((Orders::byId($orderId)['status'] ?? '') !== 'shipped') return false;
-        $stmt = Db::get()->prepare("SELECT COUNT(*) FROM shipments WHERE order_id = ? AND store_id = ? AND status <> 'cancelled'
-            AND NOT (status = 'shipped' AND COALESCE(tracking_status, '') = 'delivered')");
-        $stmt->execute([$orderId, StoreContext::current()->id()]);
-        return (int)$stmt->fetchColumn() === 0;
+        return !self::parcelsOutstanding($orderId);
+    }
+
+    /**
+     * Whether a parcel of the order is still on the way: an admin shipment not yet shipped or not yet
+     * delivered, or a carrier label neither delivered nor cancelled. A shipped shipment without a tracking
+     * number (an all-items "shipped" transition) travels under the order's carrier label when it has one.
+     */
+    private static function parcelsOutstanding(int $orderId): bool
+    {
+        $store = StoreContext::current()->id();
+        $stmt = Db::get()->prepare("SELECT
+                (SELECT COUNT(*) FROM shipments s WHERE s.order_id = ? AND s.store_id = ? AND s.status <> 'cancelled'
+                    AND NOT (s.status = 'shipped' AND COALESCE(s.tracking_status, '') = 'delivered')
+                    AND NOT (s.status = 'shipped' AND COALESCE(s.tracking_number, '') = ''
+                        AND EXISTS (SELECT 1 FROM shipping_labels l WHERE l.order_id = s.order_id AND l.store_id = s.store_id AND l.status <> 'cancelled')))
+              + (SELECT COUNT(*) FROM shipping_labels WHERE order_id = ? AND store_id = ? AND status NOT IN ('delivered', 'cancelled'))");
+        $stmt->execute([$orderId, $store, $orderId, $store]);
+        return (int)$stmt->fetchColumn() > 0;
     }
 
     private static function applyTrackingUpdate(array $labelRow, string $carrierId, string $awb, string $status, string $rawPayload): array
@@ -545,9 +571,25 @@ class ShippingService
 
         $orderId = (int)$labelRow['order_id'];
         $result  = ['handled' => true, 'awb' => $awb, 'status' => $status, 'order_id' => $orderId];
+        try {
+            // The admin shipment of this same parcel (its tracking number is the label AWB) follows the label.
+            $shipmentKnown = array_keys(self::TRACKING_STATUS_RANK);
+            $db->prepare("UPDATE shipments SET tracking_status = ?, updated_at = " . Db::now() . ",
+                    delivered_at = CASE WHEN ? = 'delivered' THEN COALESCE(delivered_at, " . Db::now() . ") ELSE delivered_at END
+                WHERE order_id = ? AND store_id = ? AND status = 'shipped' AND tracking_number IS NOT NULL
+                  AND LOWER(REPLACE(REPLACE(tracking_number, ' ', ''), '-', '')) = ?
+                  AND (tracking_status IS NULL OR tracking_status IN (" . implode(',', array_fill(0, count($from), '?')) . ")
+                       OR tracking_status NOT IN (" . implode(',', array_fill(0, count($shipmentKnown), '?')) . "))")
+                ->execute([$status, $status, $orderId, StoreContext::current()->id(), strtolower(str_replace([' ', '-'], '', $awb)), ...$from, ...$shipmentKnown]);
+        } catch (\Throwable $e) {
+            Idempotency::unmark($eventId);
+            throw $e;
+        }
 
-        // Auto-transition order if delivered. OrderWorkflow owns its deferred jobs.
-        if ($status === 'delivered') {
+        // Auto-transition order once its last parcel is delivered. OrderWorkflow owns its deferred jobs.
+        if ($status === 'delivered' && self::parcelsOutstanding($orderId)) {
+            $result['transitioned'] = false;
+        } elseif ($status === 'delivered') {
             try {
                 OrderWorkflow::transition($orderId, 'delivered');
                 $result['transitioned'] = true;

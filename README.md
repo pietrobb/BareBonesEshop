@@ -143,6 +143,15 @@ a day with `SHIP_PACKETA_API_KEY` set, e.g.
 `23 7,11,15,19 * * * php cli/packeta-pickup-points.php SK CZ`. Without a synced
 feed Packeta offers no points.
 
+A label for an unpaid cash-on-delivery order passes `cod_amount` (the order total)
+to the carrier adapter; the HTTP carrier sends it as `order.cod`
+(`{"amount": <minor units>, "currency": "eur"}`, `null` when prepaid). A carrier
+integration without `supports_cod` refuses such a label instead of shipping it as
+prepaid. A label created after a cancelled one uses the idempotency key
+`order-<id>-<n>`, so the carrier issues a new AWB. A delivered label delivers the
+order only when none of its other parcels (labels or tracked admin shipments) is
+still on the way.
+
 A company buyer fills the optional `company`, `ico` (company ID), `dic` (tax ID)
 and `vat_id` (EU VAT ID) fields of the checkout form or JSON body. Any ID requires
 the company name; IDs of an invalid format are refused. They are stored on the

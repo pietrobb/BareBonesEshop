@@ -32,7 +32,76 @@ foreach (['label' => ['R7R-LABEL', $r7rLabel], 'admin shipment' => ['R7R-PARCEL'
         "R7 tracking ({$r7rKind}): a late in_transit still cannot undo delivered");
 }
 $pdo->exec("DELETE FROM shipping_labels WHERE awb = 'R7R-LABEL'");
+
+// ── Several parcels: a delivered label delivers the order only once every other parcel is delivered too ──
+$pdo->prepare("INSERT INTO orders (order_number, store_id, status, payment_status, customer_name, customer_email, payment_method, subtotal, total, currency, locale)
+    VALUES ('R7R-MULTI', ?, 'shipped', 'paid', 'R7 Buyer', 'r7r-multi@example.test', 'bank_transfer', 1000, 1000, 'eur', 'en')")->execute([$r7rStore]);
+$r7rMulti = (int)$pdo->query("SELECT id FROM orders WHERE order_number = 'R7R-MULTI'")->fetchColumn();
+$pdo->prepare("INSERT INTO shipping_labels (order_id, store_id, carrier, awb, status, label_data) VALUES (?, ?, 'http-carrier', 'R7R-MLABEL', 'created', '')")
+    ->execute([$r7rMulti, $r7rStore]);
+// Parcel 1 is the label's own parcel (same tracking number), parcel 2 a second box.
+foreach (['r7r-m1' => 'R7R-MLABEL', 'r7r-m2' => 'R7R-MPARCEL2'] as $r7rKey => $r7rTracking) {
+    $pdo->prepare("INSERT INTO shipments (store_id, order_id, status, carrier, tracking_number, idempotency_key, shipped_at) VALUES (?, ?, 'shipped', 'HTTP Carrier', ?, ?, '2026-10-20 10:00:00')")
+        ->execute([$r7rStore, $r7rMulti, $r7rTracking, $r7rKey]);
+}
+$r7rMultiStatus = static fn(): string => (string)$pdo->query("SELECT status FROM orders WHERE id = {$r7rMulti}")->fetchColumn();
+$r7rFirst = $r7rHook('R7R-MLABEL', 'delivered', 'm1');
+assert_equals(['shipped', false, 'delivered'], [$r7rMultiStatus(), $r7rFirst['transitioned'] ?? null,
+    (string)$pdo->query("SELECT tracking_status FROM shipments WHERE idempotency_key = 'r7r-m1'")->fetchColumn()],
+    'R7 multi-parcel: a delivered label keeps the order shipped while its second parcel is on the way (was delivered); the label\'s own shipment follows it');
+$r7rHook('R7R-MPARCEL2', 'delivered', 'm2');
+assert_equals('delivered', $r7rMultiStatus(), 'R7 multi-parcel: the last delivered parcel delivers the order');
+$pdo->exec("DELETE FROM shipments WHERE order_id = {$r7rMulti}");
+$pdo->exec("DELETE FROM shipping_labels WHERE order_id = {$r7rMulti}");
 putenv('SHIP_HTTP_CARRIER_WEBHOOK_SECRET');
+
+// ── HTTP carrier labels: cash on delivery is sent, a new label after cancelling is a new request ──
+$r7rLabelCalls = [];
+JsonHttpClient::setFixtureTransport(static function (string $method, string $url, string $body, array $headers) use (&$r7rLabelCalls): array {
+    $path = (string)parse_url($url, PHP_URL_PATH);
+    if ($path === '/v1/labels' && $method === 'POST') {
+        $r7rLabelCalls[] = json_decode($body, true);
+        return ['status' => 201, 'body' => ['awb' => 'R7RAWB' . count($r7rLabelCalls), 'label_data' => '']];
+    }
+    if (str_ends_with($path, '/cancel')) return ['status' => 200, 'body' => ['status' => 'cancelled']];
+    return ['status' => 404, 'body' => ['error' => ['code' => 'fixture_not_found']]];
+});
+$r7rCarrier = static fn(bool $cod): HttpShipping => new HttpShipping(['integrations' => ['http_shipping' => [
+    'base_url' => 'https://carrier.test', 'api_key' => str_repeat('c', 24), 'carrier_code' => 'http-carrier', 'supports_cod' => $cod]]]);
+$r7rLabelOrder = static function (string $number, string $payment, string $paymentStatus) use ($pdo, $r7rStore): int {
+    $pdo->prepare("INSERT INTO orders (order_number, store_id, status, payment_status, customer_name, customer_email, payment_method, subtotal, total, currency, locale)
+        VALUES (?, ?, 'processing', ?, 'R7 Buyer', 'r7r-label@example.test', ?, 2590, 2590, 'eur', 'en')")->execute([$number, $r7rStore, $paymentStatus, $payment]);
+    return (int)$pdo->lastInsertId();
+};
+assert_true(PaymentService::isCashOnDelivery('cod'), 'R7 COD label: fixture payment method cod is cash on delivery');
+$r7rCodOrder = $r7rLabelOrder('R7R-COD', 'cod', 'pending');
+$r7rPrepaidOrder = $r7rLabelOrder('R7R-PREPAID', 'bank_transfer', 'paid');
+ShippingService::setAdapters(['http-carrier' => $r7rCarrier(true)]);
+try {
+    ShippingService::generateLabel($r7rCodOrder, 'http-carrier');
+    ShippingService::generateLabel($r7rPrepaidOrder, 'http-carrier');
+    assert_equals([['amount' => 2590, 'currency' => 'eur'], null], array_map(static fn(array $call) => array_key_exists('cod', $call['order'] ?? []) ? $call['order']['cod'] : 'missing', array_slice($r7rLabelCalls, 0, 2)),
+        'R7 COD label: the carrier is told to collect 25.90 € on the COD parcel and nothing on the prepaid one (was not sent at all)');
+    ShippingService::cancelLabel($r7rCodOrder, 'http-carrier');
+    $r7rRelabel = ShippingService::generateLabel($r7rCodOrder, 'http-carrier');
+    assert_equals(["order-{$r7rCodOrder}", "order-{$r7rCodOrder}-2", 'R7RAWB3'],
+        [$r7rLabelCalls[0]['idempotency_key'] ?? null, $r7rLabelCalls[2]['idempotency_key'] ?? null, (string)($r7rRelabel['awb'] ?? '')],
+        'R7 COD label: a label after cancelling uses a new idempotency key, so the carrier does not replay the cancelled AWB');
+    ShippingService::setAdapters(['http-carrier' => $r7rCarrier(false)]);
+    $r7rNoCodOrder = $r7rLabelOrder('R7R-NOCOD', 'cod', 'pending');
+    $r7rRefused = '';
+    try {
+        ShippingService::generateLabel($r7rNoCodOrder, 'http-carrier');
+    } catch (RuntimeException $e) {
+        $r7rRefused = $e->getMessage();
+    }
+    assert_true(str_contains($r7rRefused, 'does not support cash on delivery') && count($r7rLabelCalls) === 3,
+        "R7 COD label: a carrier without COD gets no label for a COD order (would ship it as prepaid) ({$r7rRefused})");
+} finally {
+    ShippingService::setAdapters([]);
+    JsonHttpClient::setFixtureTransport(null);
+}
+$pdo->exec("DELETE FROM shipping_labels WHERE order_id IN (SELECT id FROM orders WHERE order_number IN ('R7R-COD', 'R7R-PREPAID', 'R7R-NOCOD'))");
 
 // ── Variant surcharge below a price list: base 10.00 €, variant −8.00 €, a product-level price-list row 5.00 € ──
 $pdo->exec('DELETE FROM products WHERE id = 97701');
