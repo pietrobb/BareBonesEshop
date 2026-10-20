@@ -12,11 +12,12 @@ $pdo->exec("INSERT INTO warehouses (code, name, priority, is_default, store_id) 
 $r7sMain = (int)$pdo->query("SELECT id FROM warehouses WHERE code='r7s-main'")->fetchColumn();
 $r7sAux = (int)$pdo->query("SELECT id FROM warehouses WHERE code='r7s-aux'")->fetchColumn();
 $r7sProducts = [];
-$r7sInsert = $pdo->prepare("INSERT INTO products (store_id, category_id, sku, slug, product_type, name, price, stock, status, inventory_policy, preorder_at)
-    VALUES ('default', :category, :sku, :slug, 'simple', :name, :price, 0, 'active', :policy, :preorder)");
+// Fixed ids: an auto-assigned id follows the highest fixed id of earlier scenarios and collides with later ones.
+$r7sInsert = $pdo->prepare("INSERT INTO products (id, store_id, category_id, sku, slug, product_type, name, price, stock, status, inventory_policy, preorder_at)
+    VALUES (:id, 'default', :category, :sku, :slug, 'simple', :name, :price, 0, 'active', :policy, :preorder)");
 foreach ([['R7S-BO', 'backorder', null], ['R7S-FIFO', 'backorder', null], ['R7S-PRE', 'preorder', '2031-03-01 00:00:00'],
     ['R7S-REL', 'backorder', null], ['R7S-CXL', 'deny', null], ['R7S-RMA', 'deny', null]] as [$r7sSku, $r7sPolicy, $r7sPreorder]) {
-    $r7sInsert->execute([':category' => $r7sCategory, ':sku' => $r7sSku, ':slug' => strtolower($r7sSku), ':name' => $r7sSku . ' goods',
+    $r7sInsert->execute([':id' => 97601 + count($r7sProducts), ':category' => $r7sCategory, ':sku' => $r7sSku, ':slug' => strtolower($r7sSku), ':name' => $r7sSku . ' goods',
         ':price' => 800, ':policy' => $r7sPolicy, ':preorder' => $r7sPreorder]);
     $r7sProducts[$r7sSku] = (int)$pdo->lastInsertId();
 }

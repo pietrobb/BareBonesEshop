@@ -29,7 +29,7 @@ class BackorderAllocation {
             $wanted = array_flip($skus);
             foreach ($rows as $row) {
                 if (!array_intersect_key(array_flip(self::lineSkus($row)), $wanted)) continue;
-                Orders::lockWithin((int)$row['order_id']);
+                if (!self::lockUnlessHeld((int)$row['order_id'])) continue;
                 $item = self::orderItem((int)$row['id']);
                 if ($item === null || (int)$item['backordered_qty'] <= 0) continue;
                 $units = self::allocateItem($item, $skus);
@@ -48,6 +48,21 @@ class BackorderAllocation {
         }
     }
 
+    /**
+     * The caller may already hold warehouse stock rows, while a shipment or status change locks its order first and
+     * stock second: waiting on that order could deadlock. An order another transaction holds is skipped; the next
+     * stock increase allocates it. SQLite serializes writers, so there is nothing to skip.
+     */
+    private static function lockUnlessHeld(int $orderId): bool {
+        if (!Db::isMysql()) {
+            Orders::lockWithin($orderId);
+            return true;
+        }
+        $stmt = Db::get()->prepare('SELECT id FROM orders WHERE id = :id AND store_id = :store FOR UPDATE SKIP LOCKED');
+        $stmt->execute([':id' => $orderId, ':store' => StoreContext::current()->id()]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     /** @return list<string> the SKUs an order line reserves (bundle components or the line itself) */
     private static function lineSkus(array $item): array {
         $attrs = json_decode((string)($item['attrs'] ?? '{}'), true) ?: [];
@@ -57,7 +72,7 @@ class BackorderAllocation {
 
     private static function orderItem(int $orderItemId): ?array {
         $stmt = Db::get()->prepare("SELECT oi.* FROM order_items oi JOIN orders o ON o.id = oi.order_id
-            WHERE oi.id = :id AND o.store_id = :store AND o.stock_restored = 0 AND o.status IN ('pending', 'paid', 'processing')");
+            WHERE oi.id = :id AND o.store_id = :store AND o.stock_restored = 0 AND o.status IN ('pending', 'paid', 'processing')" . (Db::isMysql() ? ' FOR UPDATE' : ''));
         $stmt->execute([':id' => $orderItemId, ':store' => StoreContext::current()->id()]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row ?: null;

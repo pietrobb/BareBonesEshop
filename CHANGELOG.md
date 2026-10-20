@@ -346,7 +346,9 @@ nginx PHP fallback when `operations.nginx_config` is set).
 - **Audit round 7 (stock)**
   - **Backorders and preorders are allocated when stock arrives**: a receipt, adjustment, feed sync,
     return or released reservation of the SKU reserves it for waiting order lines of open orders,
-    oldest order first, and the order can ship. Only the surplus goes on sale.
+    oldest order first, and the order can ship. Only the surplus goes on sale. On MySQL a waiting
+    order another transaction holds (e.g. its shipment) is skipped instead of waited for, so a
+    restock cannot deadlock; the next stock increase allocates it.
   - **Cancelling a partly shipped order refunds only the goods that never shipped**; shipping and
     fees stay charged and the order's planned shipments are cancelled. The shipped units can be
     returned through an RMA on the cancelled order (limited to the shipped units), whose restock
