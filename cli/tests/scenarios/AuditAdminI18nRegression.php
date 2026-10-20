@@ -249,7 +249,7 @@ try {
     $a155Basis = (string)$a154Pdo->query("SELECT id FROM categories WHERE slug = 'a155-basis'")->fetchColumn();
     $a154Run(['p' => 'categories', 'action' => 'save'], ['name' => 'A155 Kategorie', 'slug' => '', 'parent_id' => '', 'sort_order' => '0']);
     $a155Core('A15.5 de: duplicate category slug flash is German', $a154Run(['p' => 'categories']),
-        ['Eine andere Kategorie auf dieser Ebene hat bereits den Slug "a155-kategorie".']);
+        ['Eine andere Kategorie des Katalogs hat bereits den Slug "a155-kategorie" (die Adresse /category/a155-kategorie muss eindeutig sein).']);
     $a154Run(['p' => 'categories', 'action' => 'delete'], ['category_id' => $a155Basis]);
     $a155Core('A15.5 de: blocked category delete flash is German', $a154Run(['p' => 'categories']),
         ['Kategorie A155 Basis kann nicht gelöscht werden: sie enthält Produkte; verschieben Sie diese zuerst.']);

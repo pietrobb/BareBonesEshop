@@ -29,6 +29,12 @@ $tmp = $driver === "mysql" ? "TEMPORARY " : "";
 $db->exec("CREATE {$tmp}TABLE variants (id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL, price_absolute INTEGER NULL, price_delta INTEGER NOT NULL DEFAULT 0)");
 $db->exec("CREATE {$tmp}TABLE order_items (id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL)");
 $db->exec("CREATE {$tmp}TABLE audit_log (id INTEGER PRIMARY KEY " . ($driver === "mysql" ? "AUTO_INCREMENT" : "") . ", entity VARCHAR(40), entity_id INTEGER, action VARCHAR(40), old_value TEXT, new_value TEXT, note TEXT, actor VARCHAR(80), ip_address VARCHAR(80), store_id VARCHAR(40), correlation_id VARCHAR(80), created_at DATETIME NULL)");
+// A status or price change records product.updated (outbox) and a price change the price history (Omnibus).
+$db->exec("CREATE {$tmp}TABLE event_sequence (id INTEGER PRIMARY KEY " . ($driver === "mysql" ? "AUTO_INCREMENT" : "AUTOINCREMENT") . ")");
+$db->exec("CREATE {$tmp}TABLE event_outbox (id VARCHAR(32) PRIMARY KEY, store_id VARCHAR(40), channel_id VARCHAR(40), event_type VARCHAR(190), aggregate_type VARCHAR(190), aggregate_id VARCHAR(190), event_version INTEGER, payload TEXT, status VARCHAR(20), attempts INTEGER, available_at DATETIME, occurred_at DATETIME, updated_at DATETIME, correlation_id VARCHAR(80), seq INTEGER)");
+// Not TEMPORARY: the 30-day lookup reads the history table twice in one query, which MySQL refuses for a temporary table.
+$db->exec("DROP TABLE IF EXISTS product_price_history");
+$db->exec("CREATE TABLE product_price_history (id INTEGER PRIMARY KEY " . ($driver === "mysql" ? "AUTO_INCREMENT" : "AUTOINCREMENT") . ", product_id INTEGER NOT NULL, price INTEGER NOT NULL, lowest_prior INTEGER NULL, changed_at DATETIME NOT NULL)");
 $store = $argv[2];
 $stores = Bootstrap::stores();
 $stores["stores"]["cz"] = array_replace($stores["stores"]["default"], ["id"=>"cz", "url_prefix"=>"/cz", "domains"=>[], "catalog_scope"=>"cz", "provider_scope"=>"cz"]);

@@ -424,5 +424,13 @@
         "crlf": [
             "21d0233f47cbdc18d4c927e048d2bf804bea87672e9cd8d0559e4c0eadec785e"
         ]
+    },
+    "20261020120000_product_price_history": {
+        "lf": [
+            "a4b001fafe220a5a3187ce9035d77951436d1484e601d8664f140b327828f916"
+        ],
+        "crlf": [
+            "61c0b2ec7d0e4c1b22b6e453c824b1b2885bd85b135a98b0e0e5de236f5e7f41"
+        ]
     }
 }
