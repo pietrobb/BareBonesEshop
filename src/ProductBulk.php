@@ -41,6 +41,7 @@ final class ProductBulk {
                     if ($price['clamped']) $result['clamped'][] = (string)($product['sku'] ?? $id);
                     $db->prepare('UPDATE products SET price = :price, updated_at = ' . Db::now() . ' WHERE id = :id')->execute([':price' => $price['price'], ':id' => $id]);
                     if ($price['price'] !== (int)$product['price']) {
+                        PriceHistory::record([$id], $db);
                         AuditLog::log('product', $id, ['price' => (int)$product['price']], ['price' => $price['price']], 'Admin bulk price ' . sprintf('%+d%%', self::PRICE_ACTIONS[$action]));
                         Products::recordUpdated($id, $product);
                     }

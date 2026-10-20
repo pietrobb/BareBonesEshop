@@ -1725,8 +1725,11 @@ $db->exec("INSERT INTO products (id, sku, price) VALUES (5, \'A5\', 1001), (7, \
 // A price change records product.updated in the same transaction (Outbox).
 $db->exec("CREATE " . ($driver === "mysql" ? "TEMPORARY TABLE event_sequence (id INTEGER PRIMARY KEY AUTO_INCREMENT)" : "TABLE event_sequence (id INTEGER PRIMARY KEY AUTOINCREMENT)"));
 $db->exec("CREATE " . ($driver === "mysql" ? "TEMPORARY " : "") . "TABLE event_outbox (id VARCHAR(32) PRIMARY KEY, store_id VARCHAR(40), channel_id VARCHAR(40), event_type VARCHAR(190), aggregate_type VARCHAR(190), aggregate_id VARCHAR(190), event_version INTEGER, payload TEXT, status VARCHAR(20), attempts INTEGER, available_at DATETIME, occurred_at DATETIME, updated_at DATETIME, correlation_id VARCHAR(80), seq INTEGER)");
-// Bulk price changes read the variant price floor and write the audit log.
+// Bulk price changes read the variant price floor, record the price history (Omnibus) and write the audit log.
 $tmp = $driver === "mysql" ? "TEMPORARY " : "";
+// Not TEMPORARY: MySQL cannot open a temporary table twice in one query (the 30-day lookup unions it with itself).
+$db->exec("DROP TABLE IF EXISTS product_price_history");
+$db->exec("CREATE TABLE product_price_history (id INTEGER PRIMARY KEY " . ($driver === "mysql" ? "AUTO_INCREMENT" : "AUTOINCREMENT") . ", product_id INTEGER NOT NULL, price INTEGER NOT NULL, lowest_prior INTEGER NULL, changed_at DATETIME NOT NULL)");
 $db->exec("CREATE {$tmp}TABLE variants (id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL, price_absolute INTEGER NULL, price_delta INTEGER NOT NULL DEFAULT 0)");
 $db->exec("CREATE {$tmp}TABLE audit_log (id INTEGER PRIMARY KEY " . ($driver === "mysql" ? "AUTO_INCREMENT" : "") . ", entity VARCHAR(40), entity_id INTEGER, action VARCHAR(40), old_value TEXT, new_value TEXT, note TEXT, actor VARCHAR(80), ip_address VARCHAR(80), store_id VARCHAR(40), correlation_id VARCHAR(80), created_at DATETIME NULL)");
 $_SESSION = ["admin_role" => "owner"];

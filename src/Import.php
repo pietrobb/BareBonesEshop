@@ -327,6 +327,7 @@ class Import {
             $params = [':id' => (int)$existing['id']];
             foreach ($changes as $column => $value) $params[":{$column}"] = $value;
             $db->prepare("UPDATE products SET {$assignments}, updated_at = " . Db::now() . " WHERE id = :id")->execute($params);
+            if (isset($changes['price'])) PriceHistory::record([(int)$existing['id']], $db);
         }
         if (isset($changes['attrs'])) self::syncProductAttrs((int)$existing['id'], $attrs, $db);
 
@@ -423,6 +424,9 @@ class Import {
             ':weight'       => $data['weight_g'] ?? 0,
             ':translations' => json_encode($data['translations'] ?? []),
         ]);
+        $id = $db->prepare('SELECT id FROM products WHERE sku = :sku AND store_id = :catalog');
+        $id->execute([':sku' => $data['sku'], ':catalog' => $catalog]);
+        PriceHistory::record([(int)$id->fetchColumn()], $db);
     }
 
     /**

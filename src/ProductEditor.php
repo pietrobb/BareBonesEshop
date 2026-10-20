@@ -210,7 +210,10 @@ final class ProductEditor {
         return !str_starts_with($url, '//') && !preg_match('#^[a-z][a-z0-9+.-]*:#i', $url);
     }
 
-    /** Write category links (primary first) and the translated slugs of the edited locales; call inside the save transaction. */
+    /**
+     * Write category links (primary first), the translated slugs of the edited locales and the price history
+     * (Omnibus) of the saved product row; call inside the save transaction, after the products row is written.
+     */
     public static function save(int $productId, array $validated): void {
         $db = Db::get();
         if (self::categoriesChanged($productId, $validated)) {
@@ -226,6 +229,7 @@ final class ProductEditor {
             $drop->execute([':id' => $productId, ':locale' => $locale]);
             if ($slug !== '') $add->execute([':slug' => $slug, ':locale' => $locale, ':id' => $productId, ':catalog' => StoreContext::current()->catalogId()]);
         }
+        PriceHistory::record([$productId], $db);
     }
 
     /** True when saving would change the product's category links. */

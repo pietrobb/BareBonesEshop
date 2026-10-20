@@ -356,6 +356,16 @@ nginx PHP fallback when `operations.nginx_config` is set).
   - An RMA receipt that discards (or keeps for repair) units the order-level return had already
     restocked writes them off again (ledger movement `rma_write_off`; units another order reserved
     meanwhile raise `inventory.rma_write_off_short`).
+- **Audit round 7 (remaining findings)**
+  - **Struck-through prices follow the EU Omnibus rule** (migration `20261020120000_product_price_history`):
+    every price a product gets (admin, bulk actions, CSV/feed import, API v1 PATCH) is recorded, and the
+    storefront shows as the prior price at most the lowest price of the 30 days before the reduction. A
+    `compare_price` the product never actually had is no longer shown. **After the upgrade, discounts set
+    before it show no struck-through price** (the migration records only the current price) until the
+    price changes again; promotions and price lists below the base price still show the base price.
+  - **Google feed availability** follows the storefront: discontinued, disabled and not yet released
+    products are `out of stock` whatever their stock, digital products are `in stock`, and products sold
+    ahead of stock are `backorder` or `preorder` from their inventory policy.
 - **Extension API actions**: every non-GET/HEAD request to an extension action must carry the session
   CSRF token (`X-CSRF-Token` or `csrf_token`, HTTP 403 otherwise); actions can be limited with
   `'method' => 'GET'|'POST'` (405 otherwise). **Server-to-server POSTs to an extension action break**

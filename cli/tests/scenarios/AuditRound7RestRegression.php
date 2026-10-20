@@ -276,6 +276,52 @@ assert_true(str_contains($r7rFeedItem('R7R-FEED-PRE'), '<g:availability_date>209
     'R7 Google feed: a preorder carries its release date');
 $pdo->exec('DELETE FROM products WHERE id BETWEEN 97720 AND 97725');
 
+// R7 medium (Omnibus, 98/6/EC art. 6a): the struck-through "original" price came from compare_price, which can be any
+// number; the prior price of a reduction must be the lowest price of the 30 days before it.
+echo "\n--- R7: Omnibus prior price ---\n";
+$r7rAgo = static fn(int $days): string => gmdate('Y-m-d H:i:s', time() - $days * 86400);
+$r7rOmni = static function (int $id, int $price, ?int $compare, array $history) use ($pdo, $r7rCatalog): void {
+    $pdo->exec("DELETE FROM product_price_history WHERE product_id = {$id}");
+    $pdo->exec("DELETE FROM products WHERE id = {$id}");
+    $pdo->prepare("INSERT INTO products (id, store_id, category_id, sku, slug, name, price, compare_price, stock, status)
+        SELECT ?, ?, id, ?, ?, ?, ?, ?, 5, 'active' FROM categories WHERE store_id = ? ORDER BY id LIMIT 1")
+        ->execute([$id, $r7rCatalog, "R7R-OMNI-{$id}", "r7r-omni-{$id}", "R7R Omni {$id}", $history === [] ? $price : $history[0][0], $compare, $r7rCatalog]);
+    foreach ($history as [$historicPrice, $at]) {
+        $pdo->prepare('INSERT INTO product_price_history (product_id, price, lowest_prior, changed_at) VALUES (?, ?, NULL, ?)')->execute([$id, $historicPrice, $at]);
+    }
+    $pdo->prepare('UPDATE products SET price = ? WHERE id = ?')->execute([$price, $id]);
+    PriceHistory::record([$id]); // the write path's call (admin save, API, import, feed, bulk)
+};
+$r7rShown = static function (int $id) use ($pdo): ?int {
+    $row = $pdo->query("SELECT * FROM products WHERE id = {$id}")->fetch(PDO::FETCH_ASSOC);
+    return StorefrontViewModel::productCard($row)['price']['compare_amount_minor'];
+};
+// A new product "reduced" from an invented 199.00: it never had another price.
+$r7rOmni(97730, 9900, 19900, []);
+assert_equals(null, $r7rShown(97730), 'R7 Omnibus: a product that never had another price shows no struck-through price (was 199.00)');
+// 120.00 for months, reduced to 99.00 today: the prior price is 120.00, also when compare_price claims 150.00.
+$r7rOmni(97731, 9900, 15000, [[12000, $r7rAgo(90)]]);
+assert_equals(12000, $r7rShown(97731), 'R7 Omnibus: a real reduction shows the price of the 30 days before it, capped from the claimed 150.00');
+// Raised to 120.00 ten days ago from 99.00 and "reduced" back: the lowest price of the 30 days before is 99.00.
+$r7rOmni(97732, 9900, 12000, [[9900, $r7rAgo(90)], [12000, $r7rAgo(10)]]);
+assert_equals(null, $r7rShown(97732), 'R7 Omnibus: raising the price and "reducing" it back shows no struck-through price (was 120.00)');
+// The admin bulk price action records the history too: 100.00 for months, −20 % today.
+$r7rOmni(97733, 10000, 10000, [[10000, $r7rAgo(90)]]);
+ProductBulk::apply('price_down_20', [97733]);
+assert_equals(10000, $r7rShown(97733), 'R7 Omnibus: a bulk −20 % reduction shows the previous 100.00');
+assert_equals([10000, 8000], array_map('intval', $pdo->query('SELECT price FROM product_price_history WHERE product_id = 97733 ORDER BY id')->fetchAll(PDO::FETCH_COLUMN)),
+    'R7 Omnibus: the bulk price action recorded the new price');
+// A promotion or price list below the base price: the prior price is the base, or a lower price of the last 30 days.
+$r7rLatest = static fn(int $price, ?int $lowest, int $days): array => ['price' => $price, 'lowest_prior' => $lowest, 'changed_at' => $r7rAgo($days)];
+assert_equals(10000, PriceHistory::capCompare(['price' => 8000, 'compare_price' => 10000], 10000, $r7rLatest(10000, 9000, 90))['compare_price'],
+    'R7 Omnibus: a promotion on a long-stable price shows the base price');
+assert_equals(9000, PriceHistory::capCompare(['price' => 8000, 'compare_price' => 10000], 10000, $r7rLatest(10000, 9000, 5))['compare_price'],
+    'R7 Omnibus: a promotion right after a price rise shows the lower price of the last 30 days');
+assert_equals(10000, PriceHistory::capCompare(['price' => 8000, 'compare_price' => 10000], 10000, null)['compare_price'],
+    'R7 Omnibus: a product without recorded history keeps its compare price');
+$pdo->exec('DELETE FROM product_price_history WHERE product_id BETWEEN 97730 AND 97733');
+$pdo->exec('DELETE FROM products WHERE id BETWEEN 97730 AND 97733');
+
 // R7 low: an invoice_issue job queued when the order was paid, run after the order was cancelled, threw "not paid" on
 // every retry (a critical incident each time) until the job died. It has nothing to invoice and now ends quietly.
 echo "\n--- R7: invoice_issue after the paid order was cancelled ---\n";

@@ -290,6 +290,7 @@ class FeedImport {
             $updates[] = "updated_at = " . (Db::isSqlite() ? "datetime('now')" : "NOW()");
             $db->prepare("UPDATE products SET " . implode(', ', $updates) . " WHERE sku = :sku AND store_id = :catalog")
                ->execute($params);
+            PriceHistory::record([(int)$row['id']], $db);
             Products::recordUpdated((int)$row['id'], $row);
         }
         return true;
