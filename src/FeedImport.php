@@ -104,20 +104,27 @@ class FeedImport {
         $db = Db::get();
         $db->beginTransaction();
         $stockMap = [];
+        $listed = [];
 
         foreach ($items as $i => $raw) {
             $db->exec('SAVEPOINT row_import');
             try {
+                // Listed even when the row then fails: only products absent from the feed lose their stock.
+                foreach (self::sourcesOf('sku', $fieldMap) as $source) {
+                    if (is_string($raw[$source] ?? null) && trim($raw[$source]) !== '') $listed[trim($raw[$source])] = true;
+                }
                 $mapped = self::mapFields($raw, $fieldMap);
                 if (empty($mapped['sku'])) {
                     $db->exec('RELEASE SAVEPOINT row_import');
                     $result['skipped']++;
                     continue;
                 }
+                $listed[(string)$mapped['sku']] = true;
 
                 if ($importMode === self::MODE_UPSERT) {
-                    // Full upsert — create or update product with all fields
-                    Import::importProduct($mapped, $db);
+                    // Full upsert — create or update product with all fields. The stock goes only into the feed's
+                    // warehouse below: the product import would book it into the default warehouse as well.
+                    Import::importProduct(array_diff_key($mapped, ['stock' => true]), $db);
                 } elseif (!($importMode === self::MODE_PRICE_STOCK
                     // Only update price + stock for existing products — never create or overwrite content
                     ? self::updatePriceOnly($mapped, $db)
@@ -153,6 +160,7 @@ class FeedImport {
                 $stockMap
             );
         }
+        $result['stock_zeroed'] = self::zeroUnlisted($feed, $fieldMap, $listed);
 
         // Update feed status
         $status = empty($result['errors']) ? 'ok' : 'ok with ' . count($result['errors']) . ' errors';
@@ -204,6 +212,32 @@ class FeedImport {
     /** Run sync() for a feed inside a store of its warehouse's catalog (the previous context is restored afterwards). */
     public static function syncInStore(string $catalog, int $feedId, bool $verbose = false): array {
         return PaymentWebhookRouting::within(Warehouse::catalogStoreId($catalog), static fn(): array => self::sync($feedId, $verbose));
+    }
+
+    /** @return list<string> the feed fields mapped onto the product field $field */
+    private static function sourcesOf(string $field, array $fieldMap): array {
+        $sources = [];
+        foreach ($fieldMap as $source => $target) {
+            if ($target === $field || (is_array($target) && ($target['field'] ?? null) === $field)) $sources[] = (string)$source;
+        }
+        return $sources;
+    }
+
+    /**
+     * A product the supplier no longer lists has nothing left in the feed's warehouse: its count drops to the units
+     * open orders reserve there. Only for a feed that maps stock, listed at least one product and is the warehouse's
+     * only feed (another feed's products must not be zeroed). Returns the number of SKUs zeroed.
+     */
+    private static function zeroUnlisted(array $feed, array $fieldMap, array $listed): int {
+        $warehouseId = (int)$feed['warehouse_id'];
+        if ($listed === [] || self::sourcesOf('stock', $fieldMap) === [] || count(Warehouse::feedsByWarehouse($warehouseId)) !== 1) return 0;
+        $stmt = Db::get()->prepare('SELECT sku FROM warehouse_stock WHERE warehouse_id = :wh AND qty > reserved');
+        $stmt->execute([':wh' => $warehouseId]);
+        $zero = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $sku) {
+            if (!isset($listed[(string)$sku])) $zero[(string)$sku] = 0;
+        }
+        return $zero === [] ? 0 : Warehouse::bulkSetStock($warehouseId, $zero);
     }
 
     /** True when the SKU is a product or a variant of a product of the active catalog. */
@@ -488,8 +522,8 @@ class FeedImport {
         if ($transform === null) return $value;
 
         return match ($transform) {
-            // "39,73" → 3973 (cents)
-            'price_to_cents' => (int)round(floatval(str_replace(',', '.', str_replace(' ', '', $value))) * 100),
+            // "39,73" → 3973, "1 299,00 Kč" → 129900 (cents)
+            'price_to_cents' => Import::parsePriceToCents((string)$value),
 
             // "0,23kg" → 230 (grams)
             'weight_to_grams' => (int)round(floatval(str_replace(',', '.', preg_replace('/[^0-9,.]/', '', $value))) * 1000),

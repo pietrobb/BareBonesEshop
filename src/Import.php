@@ -634,10 +634,35 @@ class Import {
         return number_format($cents / 100, 2, '.', '');
     }
 
-    /** Convert price to cents: "19.90" → 1990. Always treats CSV values as euros. A negative price is refused. */
+    /**
+     * Convert a price in major units to cents: "19.90" → 1990, "1 299,00" / "1.299,00" / "1,299.00" → 129900,
+     * "€24.90" / "24,90 EUR" / "1 299,- Kč" → the number without the currency. With both separators the last one is
+     * the decimal mark; one kind repeated is a thousands separator. An int is already cents. An empty value is 0;
+     * anything else that is not a price, and a negative price, is refused.
+     */
     public static function parsePriceToCents($price): int {
-        $cents = is_int($price) ? $price // Already in cents (from code)
-            : (int)round((float)str_replace(',', '.', trim((string)$price)) * 100);
+        if (is_int($price)) {
+            $cents = $price;
+        } else {
+            $raw = trim((string)$price);
+            if ($raw === '') return 0;
+            // Currency signs and codes around the number, the Czech/Slovak ",-" for whole amounts, digit grouping.
+            $s = trim(preg_replace('/\p{Sc}|(?<![\p{L}\d])(?:[A-Za-z]{3}|K[čc]|z[łl]|Ft|kr|lei)(?![\p{L}\d])/u', '', $raw) ?? '');
+            $s = preg_replace("/[\\s\\x{00A0}\\x{202F}']+/u", '', preg_replace('/[.,]-$/', '', $s) ?? '') ?? '';
+            if (!preg_match('/^-?\d[\d.,]*$/', $s)) throw new \InvalidArgumentException("Not a price: {$raw}");
+            $lastComma = strrpos($s, ',');
+            $lastDot = strrpos($s, '.');
+            if ($lastComma !== false && $lastDot !== false) {
+                $decimal = $lastComma > $lastDot ? ',' : '.';
+                $s = str_replace($decimal === ',' ? '.' : ',', '', $s);
+            } else {
+                $decimal = $lastComma !== false ? ',' : '.';
+                if (substr_count($s, $decimal) > 1) $s = str_replace($decimal, '', $s);
+            }
+            $s = str_replace($decimal, '.', $s);
+            if (!preg_match('/^-?\d+(?:\.\d+)?$/', $s)) throw new \InvalidArgumentException("Not a price: {$raw}");
+            $cents = (int)round((float)$s * 100);
+        }
         if ($cents < 0) throw new \InvalidArgumentException('Price must not be negative');
         return $cents;
     }
