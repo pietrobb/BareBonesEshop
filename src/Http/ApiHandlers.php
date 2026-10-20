@@ -443,10 +443,15 @@ function apiShippingRates(): array {
     // A goods amount of 0 (a coupon covering the whole cart) is a real amount, not a missing one.
     $subtotalGiven = isset($_GET['subtotal']) && $_GET['subtotal'] !== '';
     $subtotal = Security::int($_GET['subtotal'] ?? 0);
-    $cart = Cart::enriched();
+    // Priced in the order's VAT scenario (country + optional buyer VAT ID): reverse charge and export are charged net.
+    $vat = CheckoutService::previewVatContext($country, apiPreviewVatId(), '');
+    $cart = Cart::enriched($vat['context']);
+    $cart['items'] = CheckoutService::availableItems($cart['items'] ?? []); // weight, units and promotions of what checkout orders
     if (cartIsDigitalOnly($cart['items'] ?? [])) {
         return [
             'country' => $country,
+            'vat_scenario' => (string)$vat['scenario']['scenario'],
+            'goods_subtotal' => (int)($cart['subtotal'] ?? 0),
             'weight_g' => 0,
             'volume_cm3' => 0,
             'delivery_type' => 'digital',
@@ -458,7 +463,6 @@ function apiShippingRates(): array {
     $cod = !empty($_GET['cod']) && $_GET['cod'] !== '0';
 
     if ($weightG <= 0) {
-        $cart = Cart::enriched();
         $metrics = shippingCartMetrics($cart['items'] ?? []);
         $subtotal = $subtotalGiven ? $subtotal : (int)($cart['subtotal'] ?? 0);
         $weightG = $metrics['weight_g'];
@@ -472,9 +476,12 @@ function apiShippingRates(): array {
     if (CheckoutService::discountPreview('', (int)($cart['subtotal'] ?? 0), null, $cart['items'] ?? [], $customerId ?: null)['free_shipping']) {
         $methods = array_map(static fn(array $method): array => ['price' => 0] + $method, $methods);
     }
+    $methods = CheckoutService::chargedQuote(['rates' => $methods], $vat, (string)($cart['currency'] ?? 'eur'))['rates'];
     $unitsToFree = ShippingService::unitsToFreeShipping($methods, $physicalQty);
     return [
         'country' => $country,
+        'vat_scenario' => (string)$vat['scenario']['scenario'],
+        'goods_subtotal' => (int)($cart['subtotal'] ?? 0),
         'weight_g' => $weightG,
         'volume_cm3' => $volumeCm3,
         'physical_qty' => $physicalQty,
@@ -482,6 +489,13 @@ function apiShippingRates(): array {
         'free_shipping_hint' => ShippingService::freeShippingHint($unitsToFree),
         'methods' => shippingMethodsWithDeliveryLabel($methods),
     ];
+}
+
+/** Buyer VAT ID of a preview request (?vat_id=), normalized like the checkout form's; '' when absent or malformed. */
+function apiPreviewVatId(): string {
+    $raw = is_string($_GET['vat_id'] ?? null) ? mb_substr($_GET['vat_id'], 0, 40) : '';
+    $vatId = strtoupper((string)preg_replace('/[\s.-]+/', '', $raw));
+    return preg_match('/^[A-Z]{2}[A-Z0-9+*]{6,14}$/', $vatId) ? $vatId : '';
 }
 
 /** Rates with their localized delivery time (delivery_label) next to the raw delivery_days. */
@@ -505,7 +519,10 @@ function apiPaymentMethods(): array {
     }
     $amount = Security::int($_GET['amount'] ?? 0);
     $shippingMethod = Security::slug($_GET['shipping_method'] ?? '');
-    $cart = Cart::enriched();
+    // Fees as the order charges them in its VAT scenario (country + optional buyer VAT ID).
+    $vat = CheckoutService::previewVatContext($country, apiPreviewVatId(), $shippingMethod);
+    $cart = Cart::enriched($vat['context']);
+    $cart['items'] = CheckoutService::availableItems($cart['items'] ?? []);
     $digitalOnly = cartIsDigitalOnly($cart['items'] ?? []);
     if ($digitalOnly) {
         $shippingMethod = 'digital';
@@ -519,9 +536,11 @@ function apiPaymentMethods(): array {
     if ($digitalOnly) {
         $methods = array_values(array_filter($methods, static fn(array $method): bool => ($method['service_type'] ?? '') !== 'cod'));
     }
+    $methods = CheckoutService::chargedFees($methods, $vat);
 
     return [
         'country' => $country,
+        'vat_scenario' => (string)$vat['scenario']['scenario'],
         'currency' => $currency,
         'amount' => $amount,
         'shipping_method' => $shippingMethod,
@@ -606,7 +625,6 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
 
     // VAT context — resolve scenario before enriching cart so per-line VAT is captured.
     StoreContext::current()->assertPermission('tax');
-    $store = apiActiveStore();
     // Company buyer: name, IČO, DIČ and IČ DPH go onto the order address the invoice is issued to.
     $buyerCompany = CheckoutService::buyerCompany($input);
     if ($buyerCompany['error'] !== null) {
@@ -614,22 +632,12 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         return ['success' => false, 'error' => $buyerCompany['error']];
     }
     $vatId = $buyerCompany['vat_id'];
-    $sellerCountry = strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
-    $sellerVatRegistered = array_key_exists('vat_registered', $store['legal'] ?? [])
-        ? (bool)$store['legal']['vat_registered']
-        : true;
-    $sellerOss     = (bool)($store['oss_enabled'] ?? false);
-    $vatIdValid    = false;
-    $vatIdStatus   = null;
+    // The previews price with the same scenario (CheckoutService::vatContext), so they show what this charges.
+    $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod);
+    [$vatContext, $vatScenario, $sellerCountry, $taxProviderCode] = [$vat['context'], $vat['scenario'], $vat['seller_country'], $vat['tax_provider']];
+    [$vatIdValid, $vatIdStatus] = [$vat['vat_id_valid'], $vat['vat_id_status']];
+    $taxProvider = Adapters::tax($taxProviderCode);
     if ($vatId !== '') {
-        try {
-            $vatRes = VatService::validateVatId($vatId, VatService::defaultValidator());
-            $vatIdValid  = ($vatRes['status'] === 'valid');
-            $vatIdStatus = $vatRes['status'];
-        } catch (\Throwable $e) {
-            IncidentMonitor::report('checkout.vat_verification_failed', 'tax', 'warning', ['exception' => $e]);
-            $vatIdStatus = 'unverified';
-        }
         // Persist VAT ID on logged-in customer so future orders remember it
         Security::sessionStart();
         if (!empty($_SESSION['customer_id'])) {
@@ -640,24 +648,6 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
             ]);
         }
     }
-    $preliminaryDigitalOnly = cartIsDigitalOnly(array_values(array_filter(Cart::enriched()['items'] ?? [], static fn(array $item): bool => $item['available'] ?? true)));
-    // Goods collected in the seller's own store are supplied there, whatever the buyer's address.
-    $preliminaryRate = $preliminaryDigitalOnly ? null : ShippingService::selectRate($shippingMethod, $country, 0);
-    $vatContext = [
-        'seller_country'        => $sellerCountry,
-        'seller_vat_registered' => $sellerVatRegistered,
-        'seller_oss_enabled'    => $sellerOss,
-        'customer_country'      => vatSupplyCountry($preliminaryRate, $country, $sellerCountry),
-        // Reverse charge needs a VAT ID of another member state; Greece's prefix is EL.
-        'customer_vat_id_valid' => $vatIdValid && (substr($vatId, 0, 2) === 'EL' ? 'GR' : substr($vatId, 0, 2)) !== $sellerCountry,
-        'is_b2b'                => $vatId !== '',
-        // Goods dispatched to the address back the country; a digital-only order has nothing but the shopper's claim.
-        'customer_country_verified' => !$preliminaryDigitalOnly,
-    ];
-    $taxProviderCode = Adapters::defaultProviderCode('tax');
-    $taxProvider = Adapters::tax($taxProviderCode);
-    $vatContext['tax_provider'] = $taxProviderCode;
-    $vatScenario = $taxProvider::resolveScenario($vatContext);
 
     // Cart preview and the immutable order snapshot use the same canonical
     // provider inputs. No downstream consumer resolves the scenario again.
@@ -739,10 +729,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     // Free shipping waives the carriage, not the cash-on-delivery surcharge.
     $shippingCost = $promotionFreeShipping ? ShippingService::freeShippingPrice($selectedRate) : (int)$selectedRate['price'];
     // Shipping rates include domestic VAT like catalog prices; zero-rated sales are charged them net.
-    if ($shippingCost > 0 && Cart::chargesNetOfDomesticVat($vatScenario)) {
-        $shippingCost = Cart::netOfDomesticVat($shippingCost, $sellerCountry, 'standard', $taxProviderCode);
-    }
-    $shippingCost = Money::round($shippingCost, $cartCurrency);
+    $shippingCost = CheckoutService::chargedShipping($shippingCost, $vat, $cartCurrency);
 
     $currency = $cart['items'][0]['currency'] ?? 'eur';
     $paymentBaseAmount = max(0, $cart['subtotal'] - $totalDiscount) + $shippingCost;
@@ -760,7 +747,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         // The smoke test exists to prove the gateway redirect; anything else would be a real order.
         return checkoutRefusal('checkout.error.synthetic_requires_online', 422);
     }
-    $paymentFee = PaymentService::chargedFee($selectedPayment, Cart::chargesNetOfDomesticVat($vatScenario), $sellerCountry, $taxProviderCode);
+    $paymentFee = (int)CheckoutService::chargedFees([$selectedPayment], $vat)[0]['fee'];
     $providerCodes = [
         'tax' => $taxProviderCode,
         'payment' => (string)$selectedPayment['provider'],

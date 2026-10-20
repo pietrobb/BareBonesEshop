@@ -311,6 +311,22 @@ nginx PHP fallback when `operations.nginx_config` is set).
     off): a hard-coded 200 that refused attempts counted towards let twenty addresses lock every shopper
     out. When set, it counts only attempts that passed the per-IP (10/min) and per-session limits.
   - Packeta: a postal code with a hyphen (PL `00-950`) lists the nearest points again instead of none.
+- **Audit round 7 (money and checkout)**
+  - **Currencies shown without minor units (CZK, HUF) are charged in whole units**: item prices, prices
+    without domestic VAT, promotions, coupons, payment fees and shipping are rounded (`Money::round`),
+    so a CZK order no longer totals 1 279,31 Kč. Stripe refuses a HUF amount that is not a multiple of
+    100 with a clear error before calling the API.
+  - **Export and reverse charge previews show what the order charges**: the cart, the checkout summary
+    and the shipping/payment API price goods, shipping and fees without domestic VAT in those scenarios
+    and judge free-shipping thresholds on the same amounts. The API takes the buyer's VAT ID as
+    `?vat_id=` and returns `vat_scenario`; VIES checks from previews are rate-limited per client.
+  - Previews ignore cart lines checkout does not order (sold out, unavailable): they no longer add
+    weight or units, trigger promotions, or make an e-book order look like a parcel.
+  - Enter in a checkout field re-prices the typed address instead of loading a saved one; a shipping
+    method chosen while the rates load is kept.
+  - GoPay/ThePay: two credit-note refunds accepted at once can both be confirmed; confirming the first
+    no longer hides the second (its money was never booked). A confirmation never exceeds the
+    refundable balance.
 - **Extension API actions**: every non-GET/HEAD request to an extension action must carry the session
   CSRF token (`X-CSRF-Token` or `csrf_token`, HTTP 403 otherwise); actions can be limited with
   `'method' => 'GET'|'POST'` (405 otherwise). **Server-to-server POSTs to an extension action break**

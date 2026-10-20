@@ -15,10 +15,16 @@ function renderCart(): string {
         ]);
     }
 
+    // Priced like checkout in the buyer's VAT scenario (default country and a signed-in company's VAT ID).
+    $state = CheckoutService::formState([], false);
+    $vat = CheckoutService::previewVatContext($state['country'], CheckoutService::buyerCompany($state['values'])['vat_id'], '');
+    $price = storefrontCartPrice($cartData = Cart::enriched($vat['context']));
+    $cart = $cartData['items'];
+    $goods = CheckoutService::availableItems($cart); // what checkout orders; unavailable lines stay listed
     $subtotal = (int)$cartData['subtotal'];
     // Free shipping thresholds see the goods after automatic promotions, as checkout does (no coupon entered yet).
-    $promotion = CheckoutService::discountPreview('', $subtotal, null, $cart, (int)($_SESSION['customer_id'] ?? 0) ?: null)['promotion_discount'];
-    $quote = ShippingService::cartQuote($cart, $subtotal - min($subtotal, $promotion), CheckoutService::formState([], false)['country']);
+    $promotion = CheckoutService::discountPreview('', $subtotal, null, $goods, (int)($_SESSION['customer_id'] ?? 0) ?: null)['promotion_discount'];
+    $quote = CheckoutService::chargedQuote(ShippingService::cartQuote($goods, $subtotal - min($subtotal, $promotion), $state['country']), $vat, (string)$cartData['currency']);
     $shipping = $quote['delivery_price'];
     $items = array_map(static fn(array $item): array => [
         'id' => (int)$item['product_id'], 'cart_key' => (string)$item['key'],
@@ -85,14 +91,19 @@ function renderCheckout(): string {
     }
     $state = CheckoutService::formState($_POST, $posted);
     $form = static fn(string $key): string => $posted && is_string($_POST[$key] ?? null) ? mb_substr(trim($_POST[$key]), 0, 64) : '';
-    $subtotal = (int)$cartData['subtotal'];
     $country = $state['country'];
+    // Priced in the order's VAT scenario: reverse charge and export show (and reach thresholds with) the net amounts charged.
+    $vat = CheckoutService::previewVatContext($country, CheckoutService::buyerCompany($state['values'])['vat_id'], Security::clean($form('shipping_method')));
+    $price = storefrontCartPrice($cartData = Cart::enriched($vat['context']));
+    $cart = $cartData['items'];
+    $goods = CheckoutService::availableItems($cart); // what execute() orders and prices
+    $subtotal = (int)$cartData['subtotal'];
     $customerId = (int)($_SESSION['customer_id'] ?? 0);
 
     // Same discount rules as CheckoutService::execute: coupon + automatic promotions, capped at the subtotal.
     $couponCode = $couponAction === 'remove' ? '' : $form('coupon_code');
     $couponThrottled = !CheckoutService::formCouponAllowed($couponCode);
-    $preview = CheckoutService::discountPreview($couponThrottled ? '' : $couponCode, $subtotal, Security::email($state['values']['email']) ?? null, $cart, $customerId ?: null);
+    $preview = CheckoutService::discountPreview($couponThrottled ? '' : $couponCode, $subtotal, Security::email($state['values']['email']) ?? null, $goods, $customerId ?: null);
     $couponDiscount = $preview['coupon_discount'];
     $couponError = $couponThrottled ? $t('coupon_too_many_attempts') : ($preview['coupon_error'] === null ? '' : sprintf($t($preview['coupon_error']), $couponCode));
     if ($couponError !== '') $couponCode = '';
@@ -100,11 +111,11 @@ function renderCheckout(): string {
     $discount = min($subtotal, $couponDiscount + $preview['promotion_discount']);
 
     // As at checkout: free shipping thresholds and payment fees see the goods after discounts.
-    $quote = CheckoutService::deliveryQuote($cart, $subtotal - $discount, $country, $_POST['shipping_method'] ?? '');
+    $quote = CheckoutService::chargedQuote(CheckoutService::deliveryQuote($goods, $subtotal - $discount, $country, $_POST['shipping_method'] ?? ''), $vat, (string)$cartData['currency']);
     $shippingRates = $quote['rates'];
     $selectedRate = $quote['selected'];
     $selectedShipping = (string)($selectedRate['method_code'] ?? '');
-    $payment = CheckoutService::paymentPreview($cart, $subtotal - $discount, $country, (string)$cartData['currency'], $selectedShipping, $preview['free_shipping'] ? 0 : $quote['price'], $preview['free_shipping'], $form('payment'), $customerId ?: null);
+    $payment = CheckoutService::paymentPreview($goods, $subtotal - $discount, $country, (string)$cartData['currency'], $selectedShipping, $preview['free_shipping'] ? 0 : $quote['price'], $preview['free_shipping'], $form('payment'), $customerId ?: null, $vat);
     [$paymentMethods, $selectedPayment, $shipping] = [$payment['methods'], $payment['selected'], $payment['shipping']];
     $paymentFee = $selectedPayment ? (int)$selectedPayment['fee'] : 0;
     [$freeLabel, $freeFeeLabel] = [$t('free_shipping'), $t('free')]; // a free payment fee is not "free shipping"
@@ -129,7 +140,7 @@ function renderCheckout(): string {
         'payment_unavailable' => $paymentMethods ? '' : $t('payment_unavailable'), 'notes_label' => $t('notes'), 'notes_placeholder' => $t('notes_placeholder'),
         'submit_label' => $t('submit_order'), 'your_order_label' => $t('your_order'),
         'items' => array_map(static fn(array $item): array => ['name' => (string)$item['name'], 'quantity' => (int)$item['qty'], 'total' => $price((int)$item['total'])], $cart),
-        'subtotal_cents' => $subtotal, 'subtotal_label' => $t('subtotal'), 'subtotal' => $price($subtotal),
+        'subtotal_cents' => $subtotal, 'vat_scenario' => (string)$vat['scenario']['scenario'], 'subtotal_label' => $t('subtotal'), 'subtotal' => $price($subtotal),
         'shipping' => $shipping === 0 ? $freeLabel : $price($shipping), 'payment_fee' => $paymentFee === 0 ? $freeFeeLabel : $price($paymentFee),
         'discount_cents' => $discount, 'discount_label' => $t('discount'), 'discount' => $discount > 0 ? $price(-$discount) : '',
         'total_price_label' => $t('total_price'), 'total' => $price($subtotal - $discount + $shipping + $paymentFee),

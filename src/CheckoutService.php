@@ -21,39 +21,121 @@ class CheckoutService {
         return ShippingService::cartQuote($cart, $subtotal, $country, is_string($method) ? Security::clean($method) : '', $cod) + ['digital' => false];
     }
 
+    /**
+     * VAT scenario of a checkout for the buyer's country, VAT ID and delivery method. execute() charges by it and the
+     * previews (cart, checkout form, shipping/payment API) price by it, so reverse charge and export show the net
+     * amounts the order charges. $verifyVatId=false treats a VAT ID as unverified (no VIES call).
+     * @return array{context: array, scenario: array, net: bool, vat_id_valid: bool, vat_id_status: ?string, seller_country: string, tax_provider: string}
+     */
+    public static function vatContext(string $country, string $vatId, string $shippingMethod, bool $verifyVatId = true): array {
+        $store = StoreContext::current()->config();
+        $sellerCountry = strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
+        $vatIdValid = false;
+        $vatIdStatus = null;
+        if ($vatId !== '' && $verifyVatId) {
+            try {
+                $vatIdStatus = (string)VatService::validateVatId($vatId, VatService::defaultValidator())['status'];
+                $vatIdValid = $vatIdStatus === 'valid';
+            } catch (\Throwable $e) {
+                IncidentMonitor::report('checkout.vat_verification_failed', 'tax', 'warning', ['exception' => $e]);
+                $vatIdStatus = 'unverified';
+            }
+        } elseif ($vatId !== '') {
+            $vatIdStatus = 'unverified';
+        }
+        $digitalOnly = self::isDigitalOnly(self::availableItems(Cart::enriched()['items'] ?? []));
+        // Goods collected in the seller's own store are supplied there, whatever the buyer's address.
+        $rate = $digitalOnly ? null : ShippingService::selectRate($shippingMethod, $country, 0);
+        $taxProviderCode = Adapters::defaultProviderCode('tax');
+        $context = [
+            'seller_country'        => $sellerCountry,
+            'seller_vat_registered' => array_key_exists('vat_registered', $store['legal'] ?? []) ? (bool)$store['legal']['vat_registered'] : true,
+            'seller_oss_enabled'    => (bool)($store['oss_enabled'] ?? false),
+            'customer_country'      => vatSupplyCountry($rate, $country, $sellerCountry),
+            // Reverse charge needs a VAT ID of another member state; Greece's prefix is EL.
+            'customer_vat_id_valid' => $vatIdValid && (substr($vatId, 0, 2) === 'EL' ? 'GR' : substr($vatId, 0, 2)) !== $sellerCountry,
+            'is_b2b'                => $vatId !== '',
+            // Goods dispatched to the address back the country; a digital-only order has nothing but the shopper's claim.
+            'customer_country_verified' => !$digitalOnly,
+            'tax_provider'          => $taxProviderCode,
+        ];
+        $scenario = Adapters::tax($taxProviderCode)::resolveScenario($context);
+        return ['context' => $context, 'scenario' => $scenario, 'net' => Cart::chargesNetOfDomesticVat($scenario),
+            'vat_id_valid' => $vatIdValid, 'vat_id_status' => $vatIdStatus, 'seller_country' => $sellerCountry, 'tax_provider' => $taxProviderCode];
+    }
+
+    /** VAT scenario of a preview: a VAT ID is checked in VIES (cached) within a per-client budget, else it counts as unverified. */
+    public static function previewVatContext(string $country, string $vatId, string $shippingMethod): array {
+        $verify = $vatId !== '' && Security::rateLimit('checkout_vat_preview', 20, 600);
+        return self::vatContext($country, $vatId, $shippingMethod, $verify);
+    }
+
+    /** A delivery charge (rates include domestic VAT like catalog prices) as checkout bills it under $vat (vatContext()). */
+    public static function chargedShipping(int $price, array $vat, string $currency): int {
+        if ($price > 0 && $vat['net']) $price = Cart::netOfDomesticVat($price, (string)$vat['seller_country'], 'standard', (string)$vat['tax_provider']);
+        return Money::round($price, $currency);
+    }
+
+    /** A delivery quote (deliveryQuote/cartQuote) with every price as checkout charges it under $vat. */
+    public static function chargedQuote(array $quote, array $vat, string $currency): array {
+        $charge = static fn(array $rate): array => ['price' => self::chargedShipping((int)($rate['price'] ?? 0), $vat, $currency)] + $rate;
+        $quote['rates'] = array_map($charge, $quote['rates'] ?? []);
+        if (is_array($quote['selected'] ?? null)) $quote['selected'] = $charge($quote['selected']);
+        if (isset($quote['delivery_price'])) $quote['delivery_price'] = self::chargedShipping((int)$quote['delivery_price'], $vat, $currency);
+        $quote['price'] = self::chargedShipping((int)($quote['price'] ?? 0), $vat, $currency);
+        return $quote;
+    }
+
     /** Shipping shown in the summary: cash on delivery adds the carrier's COD surcharge, as checkout charges it. */
-    public static function summaryShipping(array $cart, int $subtotal, string $country, string $method, ?array $payment, int $shipping): int {
+    public static function summaryShipping(array $cart, int $subtotal, string $country, string $method, ?array $payment, int $shipping, ?array $vat = null, string $currency = 'eur'): int {
         if (($payment['service_type'] ?? '') !== 'cod' || $method === '') return $shipping;
         $codQuote = self::deliveryQuote($cart, $subtotal, $country, $method, true);
-        return ($codQuote['selected']['method_code'] ?? '') === $method ? (int)$codQuote['price'] : $shipping;
+        if (($codQuote['selected']['method_code'] ?? '') !== $method) return $shipping;
+        return $vat !== null ? self::chargedShipping((int)$codQuote['price'], $vat, $currency) : (int)$codQuote['price'];
     }
 
     /** What a free-shipping promotion still charges: the carrier's COD surcharge when paying cash on delivery. */
-    private static function freeShippingCharge(array $cart, int $subtotal, string $country, string $method, ?array $payment): int {
+    private static function freeShippingCharge(array $cart, int $subtotal, string $country, string $method, ?array $payment, ?array $vat, string $currency): int {
         if (($payment['service_type'] ?? '') !== 'cod' || $method === '') return 0;
         $rate = self::deliveryQuote($cart, $subtotal, $country, $method, true)['selected'] ?? null;
-        return is_array($rate) && ($rate['method_code'] ?? '') === $method ? ShippingService::freeShippingPrice($rate) : 0;
+        $price = is_array($rate) && ($rate['method_code'] ?? '') === $method ? ShippingService::freeShippingPrice($rate) : 0;
+        return $vat !== null ? self::chargedShipping($price, $vat, $currency) : $price;
     }
 
     /**
      * Payment methods of the checkout form, priced like execute(): on the goods after discounts plus the shipping
      * the order charges (cash on delivery adds the carrier surcharge, which a free-shipping promotion keeps).
-     * $shipping is the selected rate's price ('' method = no rate offered, so no payment either).
+     * $shipping is the selected rate's charged price ('' method = no rate offered, so no payment either). Under a
+     * zero-rated $vat scenario (vatContext()) shipping and fixed fees lose the domestic VAT as execute() charges them.
      * @return array{methods: list<array>, selected: ?array, shipping: int}
      */
-    public static function paymentPreview(array $cart, int $goods, string $country, string $currency, string $method, int $shipping, bool $freeShipping, string $postedPayment, ?int $customerId): array {
+    public static function paymentPreview(array $cart, int $goods, string $country, string $currency, string $method, int $shipping, bool $freeShipping, string $postedPayment, ?int $customerId, ?array $vat = null): array {
         $methods = $method !== '' ? PaymentService::availableMethods($country, $currency, $goods + $shipping, $method, $customerId) : [];
         $selected = array_values(array_filter($methods, static fn(array $m): bool => (string)$m['code'] === $postedPayment))[0] ?? $methods[0] ?? null;
-        $charged = $freeShipping ? self::freeShippingCharge($cart, $goods, $country, $method, $selected) : self::summaryShipping($cart, $goods, $country, $method, $selected, $shipping);
+        $charged = $freeShipping ? self::freeShippingCharge($cart, $goods, $country, $method, $selected, $vat, $currency) : self::summaryShipping($cart, $goods, $country, $method, $selected, $shipping, $vat, $currency);
         if ($selected && $charged !== $shipping) {
             $selected = PaymentService::selectMethod((string)$selected['code'], $country, $currency, $goods + $charged, $method, $customerId) ?? $selected;
             $methods = array_map(static fn(array $m): array => $m['code'] === $selected['code'] ? $selected : $m, $methods);
         }
+        if ($vat !== null) {
+            $methods = self::chargedFees($methods, $vat);
+            if ($selected) $selected = self::chargedFees([$selected], $vat)[0];
+        }
         return ['methods' => $methods, 'selected' => $selected, 'shipping' => $charged];
     }
 
+    /** Payment method quotes with the fee checkout charges under $vat (PaymentService::chargedFee). */
+    public static function chargedFees(array $methods, array $vat): array {
+        return array_map(static fn(array $m): array => ['fee' => PaymentService::chargedFee($m, (bool)$vat['net'], (string)$vat['seller_country'], (string)$vat['tax_provider'])] + $m, $methods);
+    }
+
+    /** The cart lines execute() orders: unavailable lines carry no weight, quantity or promotion in any preview either. */
+    public static function availableItems(array $items): array {
+        return array_values(array_filter($items, static fn(array $item): bool => $item['available'] ?? true));
+    }
+
     public static function consentDefinitions(string $country, array $items): array {
-        $available = array_filter($items, static fn(array $item): bool => $item['available'] ?? true);
+        $available = self::availableItems($items);
         return ConsentService::definitions(['country' => $country, 'product_types' => array_values(array_unique(array_column($available, 'product_type')))]);
     }
 
