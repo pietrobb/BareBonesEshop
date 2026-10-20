@@ -447,7 +447,7 @@ function apiShippingRates(): array {
     $vat = CheckoutService::previewVatContext($country, apiPreviewVatId(), '');
     $cart = Cart::enriched($vat['context']);
     $cart['items'] = CheckoutService::availableItems($cart['items'] ?? []); // weight, units and promotions of what checkout orders
-    if (cartIsDigitalOnly($cart['items'] ?? [])) {
+    if (cartIsDigitalOnly($cart['items'])) {
         return [
             'country' => $country,
             'vat_scenario' => (string)$vat['scenario']['scenario'],
@@ -463,17 +463,17 @@ function apiShippingRates(): array {
     $cod = !empty($_GET['cod']) && $_GET['cod'] !== '0';
 
     if ($weightG <= 0) {
-        $metrics = shippingCartMetrics($cart['items'] ?? []);
+        $metrics = shippingCartMetrics($cart['items']);
         $subtotal = $subtotalGiven ? $subtotal : (int)($cart['subtotal'] ?? 0);
         $weightG = $metrics['weight_g'];
         $volumeCm3 = $metrics['volume_cm3'];
     }
 
-    $physicalQty = ShippingService::physicalQuantity($cart['items'] ?? []);
+    $physicalQty = ShippingService::physicalQuantity($cart['items']);
     $methods = ShippingService::calculateRates($country, $weightG, $subtotal, $cod, $volumeCm3, $physicalQty);
     // An automatic free-shipping promotion zeroes the delivery checkout charges, so the preview shows the same.
     $customerId = (int)($_SESSION['customer_id'] ?? 0);
-    if (CheckoutService::discountPreview('', (int)($cart['subtotal'] ?? 0), null, $cart['items'] ?? [], $customerId ?: null)['free_shipping']) {
+    if (CheckoutService::discountPreview('', (int)($cart['subtotal'] ?? 0), null, $cart['items'], $customerId ?: null)['free_shipping']) {
         $methods = array_map(static fn(array $method): array => ['price' => 0] + $method, $methods);
     }
     $methods = CheckoutService::chargedQuote(['rates' => $methods], $vat, (string)($cart['currency'] ?? 'eur'))['rates'];
@@ -523,7 +523,7 @@ function apiPaymentMethods(): array {
     $vat = CheckoutService::previewVatContext($country, apiPreviewVatId(), $shippingMethod);
     $cart = Cart::enriched($vat['context']);
     $cart['items'] = CheckoutService::availableItems($cart['items'] ?? []);
-    $digitalOnly = cartIsDigitalOnly($cart['items'] ?? []);
+    $digitalOnly = cartIsDigitalOnly($cart['items']);
     if ($digitalOnly) {
         $shippingMethod = 'digital';
         // The goods amount after discounts is respected (0 = a coupon covers the cart); only a missing one falls back to the cart.
