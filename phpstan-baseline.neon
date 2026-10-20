@@ -265,12 +265,6 @@ parameters:
 			path: src/Entrypoints/Storefront/Layout.php
 
 		-
-			message: '#^Variable \$lines in empty\(\) always exists and is not falsy\.$#'
-			identifier: empty.variable
-			count: 1
-			path: src/FeedImport.php
-
-		-
 			message: '#^Right side of && is always false\.$#'
 			identifier: booleanAnd.rightAlwaysFalse
 			count: 3

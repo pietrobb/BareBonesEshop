@@ -84,7 +84,7 @@ final class ProductBulk {
     private static function skus(array $product): array {
         $stmt = Db::get()->prepare('SELECT sku FROM variants WHERE product_id = :id');
         $stmt->execute([':id' => (int)$product['id']]);
-        return array_values(array_unique(array_filter([(string)$product['sku'], ...array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN))], 'strlen')));
+        return array_values(array_unique(array_filter([(string)$product['sku'], ...array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN))], static fn(string $sku): bool => $sku !== '')));
     }
 
     /** @return list<array{warehouse_id: int|string, sku: string, qty: int|string, reserved: int|string}> */

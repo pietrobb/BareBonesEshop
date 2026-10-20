@@ -503,15 +503,17 @@ class Import {
 
     /** $slug if no category of the catalog has it, else the parent-qualified slug, numbered when even that is taken. */
     private static function freeCategorySlug(PDO $db, string $catalog, string $slug, string $qualified): string {
-        $taken = $db->prepare('SELECT 1 FROM categories WHERE store_id = :catalog AND slug = :slug');
+        $stmt = $db->prepare('SELECT 1 FROM categories WHERE store_id = :catalog AND slug = :slug');
+        $taken = static function (string $candidate) use ($stmt, $catalog): bool {
+            $stmt->execute([':catalog' => $catalog, ':slug' => $candidate]);
+            return $stmt->fetchColumn() !== false;
+        };
         foreach ([$slug, $qualified] as $candidate) {
-            $taken->execute([':catalog' => $catalog, ':slug' => $candidate]);
-            if (!$taken->fetchColumn()) return $candidate;
+            if (!$taken($candidate)) return $candidate;
         }
-        for ($n = 2; ; $n++) {
-            $taken->execute([':catalog' => $catalog, ':slug' => $qualified . '-' . $n]);
-            if (!$taken->fetchColumn()) return $qualified . '-' . $n;
-        }
+        $n = 2;
+        while ($taken($qualified . '-' . $n)) $n++;
+        return $qualified . '-' . $n;
     }
 
     /**
