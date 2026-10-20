@@ -140,6 +140,7 @@ if ($action === 'sitemap') {
     $outOfRange = false;
     try { Sitemap::xml('https://shop.example/shop', count($parts[1]) + 1); } catch (OutOfRangeException) { $outOfRange = true; }
     preg_match_all('#<loc>([^<]+)</loc>#', $full, $fullLocs);
+    $mainEntries = array_values(array_filter(explode('<url>', $full), static fn(string $entry): bool => str_contains($entry, '/product/sfb-main')));
     // Cached per store: a second request reuses the file, a product save (updated_at) rebuilds it.
     $calls = 0;
     $writer = static function($out) use (&$calls): void { $calls++; fwrite($out, "<urlset>{$calls}</urlset>"); };
@@ -152,7 +153,7 @@ if ($action === 'sitemap') {
     $emit([
         'full_is_urlset' => str_contains($full, '<urlset'), 'index_is_index' => str_contains($index, '<sitemapindex'),
         'part_sizes' => $sizes, 'part_locs' => $locs, 'full_locs' => $fullLocs[1], 'out_of_range' => $outOfRange,
-        'cache' => [$first, $second, $third], 'calls_after_two' => $callsAfterTwo, 'calls' => $calls,
+        'cache' => [$first, $second, $third], 'calls_after_two' => $callsAfterTwo, 'calls' => $calls, 'main_entries' => $mainEntries,
         'cache_file' => is_file($dir . '/cache/stores/default/storefront/public/sitemap-0.xml'),
     ]);
     exit(0);
@@ -304,6 +305,22 @@ try {
     assert_equals(['https://shop.example/shop/product/sfb-main', 'https://shop.example/shop/product/sfb-main', ['https://shop.example/shop/uploads/full/sfb-main.jpg']],
         [$sfbProductLd['url'] ?? null, $sfbProductLd['offers']['url'] ?? null, $sfbProductLd['image'] ?? null], "Storefront SEO: Product JSON-LD url, offer url and image are absolute ({$sfbNoise})");
     assert_true(str_contains((string)($sfbModel['head'] ?? ''), '<meta property="og:image" content="https://shop.example/shop/uploads/full/sfb-main.jpg">'), 'Storefront SEO: og:image is absolute');
+    // R7: each hreflang alternate names the product's URL in that language (Czech slug sfb-main-cs), from either store.
+    [, $sfbCzModel, $sfbNoise] = $sfbRun('run', 'product_model', ['script_name' => '/shop/index.php', 'store' => 'cz', 'locale' => 'cs']);
+    $sfbHreflang = static function(array $model): array {
+        preg_match_all('#<link rel="alternate" hreflang="([^"]+)" href="([^"]*)"#', (string)($model['head'] ?? ''), $m);
+        return array_combine($m[1], array_map(static fn(string $href): string => html_entity_decode($href, ENT_QUOTES | ENT_HTML5), $m[2]));
+    };
+    $sfbCzLocale = (string)(Bootstrap::stores()['stores']['cz']['default_locale'] ?? 'cs');
+    $sfbDefaultLocale = (string)(Bootstrap::stores()['stores'][(string)(Bootstrap::stores()['default_store'] ?? 'default')]['default_locale'] ?? 'sk');
+    foreach (['default store' => $sfbModel, 'CZ store' => $sfbCzModel] as $sfbLabel => $sfbHeadModel) {
+        $sfbLinks = $sfbHreflang($sfbHeadModel);
+        assert_equals(['https://shop.example/shop/cs/product/sfb-main-cs', 'https://shop.example/shop/product/sfb-main', 'https://shop.example/shop/product/sfb-main'],
+            [$sfbLinks[$sfbCzLocale] ?? null, $sfbLinks[$sfbDefaultLocale] ?? null, $sfbLinks['x-default'] ?? null],
+            "R7 hreflang: on the {$sfbLabel} product page the Czech alternate uses the Czech slug, the others the base slug ({$sfbNoise})");
+    }
+    assert_true(str_contains((string)($sfbCzModel['head'] ?? ''), '<link rel="canonical" href="https://shop.example/shop/cs/product/sfb-main-cs">'),
+        'R7 hreflang: the CZ product canonical is its own Czech alternate');
 
     // --- 6: listing cards and the product page do not issue queries per product ---
     [, $sfbQueries, $sfbNoise] = $sfbRun('run', 'queries', ['store' => 'default', 'locale' => 'en']);
@@ -321,6 +338,17 @@ try {
     assert_true(($sfbSitemap['part_sizes'] ?? []) !== [] && max($sfbSitemap['part_sizes']) <= 10 && count($sfbSitemap['part_sizes']) > 1, 'Sitemap: every part holds at most the per-file limit');
     assert_equals($sfbSitemap['full_locs'] ?? null, $sfbSitemap['part_locs'] ?? [], 'Sitemap: the parts together list exactly the URLs of the single sitemap, in order');
     assert_true($sfbSitemap['out_of_range'] ?? false, 'Sitemap: a part past the last one is refused (404)');
+    $sfbMainLocs = [];
+    foreach ($sfbSitemap['main_entries'] ?? [] as $sfbEntry) {
+        preg_match('#<loc>([^<]+)</loc>#', $sfbEntry, $m);
+        preg_match('#hreflang="' . preg_quote($sfbCzLocale, '#') . '" href="([^"]+)"#', $sfbEntry, $cz);
+        $sfbMainLocs[$m[1] ?? ''] = $cz[1] ?? '';
+    }
+    assert_true(isset($sfbMainLocs['https://shop.example/shop/cs/product/sfb-main-cs'], $sfbMainLocs['https://shop.example/shop/product/sfb-main'])
+        && !isset($sfbMainLocs['https://shop.example/shop/cs/product/sfb-main']),
+        'R7 sitemap: the CZ store lists the product under its Czech slug, the default store under the base slug (' . implode(' ', array_keys($sfbMainLocs)) . ')');
+    assert_equals(['https://shop.example/shop/cs/product/sfb-main-cs'], array_values(array_unique($sfbMainLocs)),
+        'R7 sitemap: every entry of the product names the Czech slug as its Czech alternate');
     assert_equals(['<urlset>1</urlset>', '<urlset>1</urlset>', '<urlset>2</urlset>'], $sfbSitemap['cache'] ?? null, 'Sitemap cache: the second request is served from cache, a product change rebuilds it');
     assert_equals([1, 2, true], [$sfbSitemap['calls_after_two'] ?? null, $sfbSitemap['calls'] ?? null, $sfbSitemap['cache_file'] ?? null], 'Sitemap cache: generated once per change into the store cache namespace');
 

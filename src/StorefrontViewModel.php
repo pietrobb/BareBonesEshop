@@ -112,6 +112,7 @@ final class StorefrontViewModel
                     'title' => trim((string)($source['seo_title'] ?? '')) ?: $product['name'],
                     'description' => trim((string)($source['meta_description'] ?? '')) ?: $product['summary'],
                     'canonical_url' => $url,
+                    'alternate_paths' => self::productAlternatePaths($row),
                     'image_url' => $absolute($images[0]['url'] ?? ''),
                     'json_ld' => [$jsonLd, JsonLd::breadcrumbList(array_map(
                         static fn(array $item): array => ['name' => $item['current'] ? $product['name'] : $item['label'], 'url' => $item['url'] !== '' ? Template::seoPath($item['url']) : ''],
@@ -472,6 +473,23 @@ final class StorefrontViewModel
             elseif (is_scalar($value) || $value === null) $result[$key] = is_string($value) ? trim($value) : $value;
         }
         return $result;
+    }
+
+    /**
+     * Prefix-less product path per hreflang locale: the slug I18n::product() gives that language (its translated
+     * slug, else the base slug), so an alternate is the page's canonical URL in that language, not this one's slug.
+     * @return array<string, string>
+     */
+    private static function productAlternatePaths(array $row): array
+    {
+        $translations = json_decode((string)($row['translations'] ?? '{}'), true);
+        $hreflang = Bootstrap::hreflangAlternates('/');
+        $paths = [];
+        foreach (array_keys($hreflang['alternates'] + $hreflang['secondary']) as $locale) {
+            $slug = is_array($translations) ? (string)($translations[$locale]['slug'] ?? '') : '';
+            $paths[(string)$locale] = UrlAliases::outbound('/product/' . rawurlencode($slug !== '' ? $slug : (string)$row['slug']));
+        }
+        return $paths;
     }
 
     public static function productUrl(string $slug): string

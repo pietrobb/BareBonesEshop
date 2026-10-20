@@ -183,7 +183,8 @@ class Template {
             (string)($seo['title'] ?? $model['page']['title'] ?? $fallbackTitle),
             (string)($seo['description'] ?? ''),
             self::seoPath((string)($seo['canonical_url'] ?? self::storeUrl('/'))),
-            true
+            true,
+            array_map('strval', (array)($seo['alternate_paths'] ?? []))
         );
         if (!empty($seo['image_url'])) {
             $head .= "\n<meta property=\"og:image\" content=\"" . esc(self::absoluteUrl((string)$seo['image_url'])) . '">';
