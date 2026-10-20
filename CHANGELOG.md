@@ -366,6 +366,42 @@ nginx PHP fallback when `operations.nginx_config` is set).
   - **Google feed availability** follows the storefront: discontinued, disabled and not yet released
     products are `out of stock` whatever their stock, digital products are `in stock`, and products sold
     ahead of stock are `backorder` or `preorder` from their inventory policy.
+  - **Return window** (migration `20261020140000_order_delivered_at`, new key `rma_return_window_days`,
+    default 14, 0 = no limit): orders record `delivered_at` (backfilled for delivered orders) and a
+    customer can request a return only within the window after delivery. The admin can still open a
+    return later. **Shops that accepted returns at any time must set the key to 0.**
+  - **Account erasure asks for the current password** (rate-limited like the password change).
+  - **Old URLs keep working**: `cli/fix-slugs.php` keeps every replaced product/category slug, and the
+    storefront answers an old or another language's slug with a 301 to the canonical URL. hreflang and
+    the sitemap name each language's own product slug. Unknown addresses get the theme's 404 page.
+  - **`cli/extract-specs.php`** (migration `20261020130000_product_specification_source`) replaces only
+    the specifications it extracted itself; admin-entered and imported ones are kept. It uses the
+    configured database instead of `db/shop.sqlite`.
+  - **Catalog**: a category slug must be unique in the whole catalog (was per parent); the import
+    prefixes a colliding subcategory slug with its parent's. Deleting a product books its warehouse
+    stock out (a later product with that SKU no longer inherits it). Category product counts follow
+    admin, bulk, API and feed writes.
+  - **Promotions**: free shipping is offered for automatic cart promotions and coupons; a coupon that
+    only waives the carriage is accepted and counts against its usage limits.
+  - **Prices**: a variant whose negative surcharge would go below zero is refused in the editor and in
+    price lists. API v1 product PATCH refuses `price`, `stock`, `weight_g` and `compare_price` above
+    2000000000 with a 400 (was a 500 on MySQL).
+  - **Carriers**: COD labels send the amount to collect (a carrier without COD refuses them), a label
+    after a cancelled one is a new request, a delivered parcel delivers the order only when no other
+    parcel is still on the way, `in_transit` after a `failed` attempt is applied, and a webhook
+    shipment typed with an unregistered carrier (e.g. DPD) is no longer matched by the order method's
+    carrier.
+  - **Security and headers**: CSP `form-action` allows only the gateways of the store's active online
+    payment methods (was every registered adapter). `X-Forwarded-Proto: https` from a `trusted_proxies`
+    address enables HSTS and secure cookies. `vendor/bbf/submit.php` is no longer public. The invoice
+    token link is `no-store` and `noindex`. E-mail templates refuse IBANs disguised by separators.
+  - **Robustness**: concurrent payment webhooks and invoice numbering no longer deadlock on MySQL; an
+    extension listener that runs `exec('BEGIN')` is rolled back on MySQL 8.0, MariaDB and SQLite; a
+    failing rate-limiter store fails open (critical incident) instead of a 500; `invoice_issue` for an
+    order cancelled meanwhile ends without an invoice; a feed CSV keeps quoted multi-line fields and a
+    sync that lost rows zeroes no stock; admin bulk price/status actions emit `product.updated`.
+  - **Accessibility**: the cookie banner works without JavaScript, and every admin form field has an
+    accessible name.
 - **Extension API actions**: every non-GET/HEAD request to an extension action must carry the session
   CSRF token (`X-CSRF-Token` or `csrf_token`, HTTP 403 otherwise); actions can be limited with
   `'method' => 'GET'|'POST'` (405 otherwise). **Server-to-server POSTs to an extension action break**
