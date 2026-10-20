@@ -47,20 +47,20 @@ function pageProducts(): void {
     <div class="card">
         <form method="get" style="display:flex;gap:.5rem;margin-bottom:1rem">
             <input type="hidden" name="p" value="products">
-            <input name="q" value="<?= esc($search) ?>" placeholder="<?= esc(I18n::t('admin.products.search_placeholder')) ?>">
-            <select name="status">
+            <input name="q" aria-label="<?= esc(I18n::t('admin.products.search_placeholder')) ?>" value="<?= esc($search) ?>" placeholder="<?= esc(I18n::t('admin.products.search_placeholder')) ?>">
+            <select name="status" aria-label="<?= esc(I18n::t('admin.th.status')) ?>">
                 <option value="">— <?= esc(I18n::t('admin.th.status')) ?> —</option>
                 <option value="active" <?= $statusFilter==='active'?'selected':'' ?>><?= esc(I18n::t('admin.product.status.active')) ?></option>
                 <option value="draft" <?= $statusFilter==='draft'?'selected':'' ?>><?= esc(I18n::t('admin.product.status.draft')) ?></option>
                 <option value="archived" <?= $statusFilter==='archived'?'selected':'' ?>><?= esc(I18n::t('admin.product.status.archived')) ?></option>
             </select>
-            <select name="stock"><option value="">— <?= esc(I18n::t('admin.th.stock')) ?> —</option><option value="low" <?= $stockFilter==='low'?'selected':'' ?>><?= esc(I18n::t('admin.products.filter_low_stock')) ?></option></select>
+            <select name="stock" aria-label="<?= esc(I18n::t('admin.th.stock')) ?>"><option value="">— <?= esc(I18n::t('admin.th.stock')) ?> —</option><option value="low" <?= $stockFilter==='low'?'selected':'' ?>><?= esc(I18n::t('admin.products.filter_low_stock')) ?></option></select>
             <button class="btn" type="submit"><?= esc(I18n::t('admin.btn.apply')) ?></button>
         </form>
         <form method="post" action="admin.php?p=products&action=bulk" id="bulk-form" data-confirm="<?= esc(I18n::t('admin.products.bulk.confirm')) ?>">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
             <div style="display:flex;gap:.5rem;margin-bottom:.5rem">
-                <select name="bulk_action">
+                <select name="bulk_action" aria-label="<?= esc(I18n::t('admin.products.bulk_action')) ?>">
                     <option value="">— <?= esc(I18n::t('admin.products.bulk_action')) ?> —</option>
                     <option value="activate"><?= esc(I18n::t('admin.common.activate')) ?></option>
                     <option value="archive"><?= esc(I18n::t('admin.products.bulk.archive')) ?></option>
@@ -80,10 +80,10 @@ function pageProducts(): void {
                 <button type="submit" class="btn btn-sm" formaction="admin.php?p=products&amp;action=export" formmethod="post" data-skip-confirm><?= esc(I18n::t('admin.btn.export_csv')) ?></button>
             </div>
         <table>
-            <tr><th><input type="checkbox" id="check-all"></th><th><?= esc(I18n::t('admin.th.sku')) ?></th><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.th.price')) ?></th><th><?= esc(I18n::t('admin.th.stock')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.th.actions')) ?></th></tr>
+            <tr><th><input type="checkbox" id="check-all" aria-label="<?= esc(I18n::t('admin.a11y.select_all')) ?>"></th><th><?= esc(I18n::t('admin.th.sku')) ?></th><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.th.price')) ?></th><th><?= esc(I18n::t('admin.th.stock')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.th.actions')) ?></th></tr>
             <?php foreach ($products as $p): ?>
             <tr>
-                <td><input type="checkbox" name="product_ids[]" value="<?= $p['id'] ?>" class="product-check"></td>
+                <td><input type="checkbox" name="product_ids[]" value="<?= $p['id'] ?>" aria-label="<?= esc(strtr(I18n::t('admin.a11y.select_product'), ['{name}' => (string)$p['name']])) ?>" class="product-check"></td>
                 <td><?= esc($p['sku']) ?></td>
                 <td><a href="admin.php?p=product&id=<?= $p['id'] ?>"><?= esc($p['name']) ?></a></td>
                 <td><?= I18n::price((int)$p['price'], $p['currency']) ?></td>
@@ -270,12 +270,12 @@ function pageProduct(): void {
             <form method="post" action="admin.php?p=product&id=<?= (int)$product['id'] ?>&action=related_save">
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                 <div class="form-row">
-                    <label><?= esc(I18n::t('admin.product.relation_type')) ?></label>
-                    <input name="relation_type" value="<?= esc($relationType) ?>" pattern="[a-z][a-z0-9_-]{0,79}" required>
+                    <label for="related-relation-type"><?= esc(I18n::t('admin.product.relation_type')) ?></label>
+                    <input id="related-relation-type" name="relation_type" value="<?= esc($relationType) ?>" pattern="[a-z][a-z0-9_-]{0,79}" required>
                 </div>
                 <div class="form-row">
-                    <label><?= esc(I18n::t('admin.product.related_manual')) ?></label>
-                    <select name="related_product_ids[]" multiple size="8" style="width:100%">
+                    <label for="related-related-product-ids"><?= esc(I18n::t('admin.product.related_manual')) ?></label>
+                    <select id="related-related-product-ids" name="related_product_ids[]" multiple size="8" style="width:100%">
                         <?php foreach ($relatedCandidates as $candidate): ?>
                         <option value="<?= (int)$candidate['id'] ?>" <?= in_array((int)$candidate['id'], $relatedProductIds, true) ? 'selected' : '' ?>>
                             <?= esc($candidate['name']) ?> · <?= esc($candidate['sku']) ?> · <?= esc($candidate['product_type']) ?>
@@ -349,14 +349,14 @@ function pageDigitalAssets(): void {
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
             <input type="hidden" name="asset_id" value="0">
             <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr))">
-                <div class="form-row"><label><?= esc(I18n::t('admin.th.sku')) ?></label><input name="sku" required maxlength="191"></div>
-                <div class="form-row"><label><?= esc(I18n::t('admin.digital.asset_key')) ?></label><input name="asset_key" value="default" required maxlength="80"></div>
-                <div class="form-row"><label><?= esc(I18n::t('admin.th.name')) ?></label><input name="label" maxlength="191"></div>
-                <div class="form-row"><label><?= esc(I18n::t('admin.digital.relative_path')) ?></label><input name="storage_path" placeholder="ebooks/manual.pdf" required maxlength="500"></div>
-                <div class="form-row"><label><?= esc(I18n::t('admin.digital.download_name')) ?></label><input name="download_name" placeholder="manual.pdf" required maxlength="180"></div>
-                <div class="form-row"><label><?= esc(I18n::t('admin.digital.content_type')) ?></label><input name="content_type" value="application/octet-stream" required maxlength="100"></div>
-                <div class="form-row"><label><?= esc(I18n::t('admin.digital.download_limit')) ?></label><input name="download_limit" type="number" min="0" max="10000" value="5"></div>
-                <div class="form-row"><label><?= esc(I18n::t('admin.digital.expiry_days')) ?></label><input name="expiry_days" type="number" min="0" max="3650" value="7"></div>
+                <div class="form-row"><label for="digital-sku"><?= esc(I18n::t('admin.th.sku')) ?></label><input id="digital-sku" name="sku" required maxlength="191"></div>
+                <div class="form-row"><label for="digital-asset-key"><?= esc(I18n::t('admin.digital.asset_key')) ?></label><input id="digital-asset-key" name="asset_key" value="default" required maxlength="80"></div>
+                <div class="form-row"><label for="digital-label"><?= esc(I18n::t('admin.th.name')) ?></label><input id="digital-label" name="label" maxlength="191"></div>
+                <div class="form-row"><label for="digital-storage-path"><?= esc(I18n::t('admin.digital.relative_path')) ?></label><input id="digital-storage-path" name="storage_path" placeholder="ebooks/manual.pdf" required maxlength="500"></div>
+                <div class="form-row"><label for="digital-download-name"><?= esc(I18n::t('admin.digital.download_name')) ?></label><input id="digital-download-name" name="download_name" placeholder="manual.pdf" required maxlength="180"></div>
+                <div class="form-row"><label for="digital-content-type"><?= esc(I18n::t('admin.digital.content_type')) ?></label><input id="digital-content-type" name="content_type" value="application/octet-stream" required maxlength="100"></div>
+                <div class="form-row"><label for="digital-download-limit"><?= esc(I18n::t('admin.digital.download_limit')) ?></label><input id="digital-download-limit" name="download_limit" type="number" min="0" max="10000" value="5"></div>
+                <div class="form-row"><label for="digital-expiry-days"><?= esc(I18n::t('admin.digital.expiry_days')) ?></label><input id="digital-expiry-days" name="expiry_days" type="number" min="0" max="3650" value="7"></div>
             </div>
             <label><input type="checkbox" name="active" value="1" checked> <?= esc(I18n::t('admin.common.active')) ?></label>
             <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.btn.save')) ?></button>
@@ -1091,8 +1091,8 @@ function pageAttribute(): void {
             <div id="options-list">
                 <?php foreach ($options as $i => $opt): ?>
                 <div class="form-row" style="display:flex;gap:.5rem;align-items:center">
-                    <input name="options[]" value="<?= esc($opt['value']) ?>" style="flex:1" placeholder="<?= esc(I18n::t('admin.attr.value')) ?>">
-                    <input type="number" name="option_order[]" value="<?= (int)$opt['sort_order'] ?>" style="width:60px" placeholder="<?= esc(I18n::t('admin.common.sort_order')) ?>">
+                    <input name="options[]" aria-label="<?= esc(I18n::t('admin.attr.value')) ?>" value="<?= esc($opt['value']) ?>" style="flex:1" placeholder="<?= esc(I18n::t('admin.attr.value')) ?>">
+                    <input type="number" name="option_order[]" aria-label="<?= esc(I18n::t('admin.common.sort_order')) ?>" value="<?= (int)$opt['sort_order'] ?>" style="width:60px" placeholder="<?= esc(I18n::t('admin.common.sort_order')) ?>">
                     <button type="button" data-action="remove-parent" class="btn btn-sm btn-danger">x</button>
                 </div>
                 <?php endforeach; ?>
@@ -1101,7 +1101,7 @@ function pageAttribute(): void {
         </div>
 
         <h3 style="margin:1rem 0 .5rem"><?= esc(I18n::t('admin.attr.assign_categories')) ?></h3>
-        <input type="text" id="cat-filter" placeholder="<?= esc(I18n::t('admin.attr.filter_placeholder')) ?>" style="width:100%;padding:.4rem .6rem;margin-bottom:.5rem;border:1px solid #d1d5db;border-radius:4px" data-action="filter-cats">
+        <input type="text" id="cat-filter" aria-label="<?= esc(I18n::t('admin.attr.filter_placeholder')) ?>" placeholder="<?= esc(I18n::t('admin.attr.filter_placeholder')) ?>" style="width:100%;padding:.4rem .6rem;margin-bottom:.5rem;border:1px solid #d1d5db;border-radius:4px" data-action="filter-cats">
         <div style="margin-bottom:.5rem;font-size:.8rem">
             <a href="#" data-action="toggle-cats" data-value="1" style="margin-right:.5rem"><?= esc(I18n::t('admin.attr.select_visible')) ?></a>
             <a href="#" data-action="toggle-cats" data-value="0"><?= esc(I18n::t('admin.attr.unselect_all')) ?></a>
@@ -1140,8 +1140,8 @@ function pageAttribute(): void {
         var div = document.createElement('div');
         div.className = 'form-row';
         div.style.cssText = 'display:flex;gap:.5rem;align-items:center';
-        div.innerHTML = '<input name="options[]" style="flex:1" placeholder="' + escHtml(adminText.value) + '">' +
-            '<input type="number" name="option_order[]" style="width:60px" placeholder="' + escHtml(adminText.order) + '" value="0">' +
+        div.innerHTML = '<input name="options[]" aria-label="' + escHtml(adminText.value) + '" style="flex:1" placeholder="' + escHtml(adminText.value) + '">' +
+            '<input type="number" name="option_order[]" aria-label="' + escHtml(adminText.order) + '" style="width:60px" placeholder="' + escHtml(adminText.order) + '" value="0">' +
             '<button type="button" data-action="remove-parent" class="btn btn-sm btn-danger">×</button>';
         document.getElementById('options-list').appendChild(div);
     }

@@ -432,7 +432,7 @@ try {
     $a157Flash('A15.7 de: coupon on a catalog promotion flash is German', ['p' => 'promotions', 'action' => 'save'], $a157Promo,
         ['p' => 'promotions'], ['Nur eine Warenkorbaktion kann einen Gutscheincode haben.']);
     $a157Flash('A15.7 de: refused cart action flash is German', ['p' => 'promotions', 'action' => 'save'], ['scope' => 'cart', 'action_type' => 'fixed_price'] + $a157Promo,
-        ['p' => 'promotions'], ['Die Aktion Festpreis (Cent) ist für einen Gutschein nicht erlaubt (erlaubt: Rabatt in %, Rabatt um Betrag (Cent)).']);
+        ['p' => 'promotions'], ['Die Aktion Festpreis (Cent) ist für einen Gutschein nicht erlaubt (erlaubt: Rabatt in %, Rabatt um Betrag (Cent), Kostenloser Versand (Warenkorb oder Gutschein)).']);
     $a157Flash('A15.7 de: promotion date flash is German', ['p' => 'promotions', 'action' => 'save'], ['coupon_code' => '', 'valid_from' => 'gestern'] + $a157Promo,
         ['p' => 'promotions'], ['Gültig ab: ungültiges Datum (JJJJ-MM-TT HH:MM, UTC).']);
     $a157Lists = ['p' => 'price_lists', 'id' => $a157List];
@@ -457,6 +457,40 @@ try {
         $a157Detail, ['Erhalten: A155-P: 1 Stück.']);
     $a157Flash('A15.7 de: repeated receipt flash is German', $a157Detail + ['action' => 'receive'], ['receipt_key' => str_repeat('b', 32), 'receive' => [$a157Item => '1']],
         $a157Detail, ['Dieser Wareneingang wurde bereits gebucht; nichts wurde geändert.']);
+
+    // R7 (low, axe "label"): every visible form field of the admin screens has an accessible name — a <label for>,
+    // a wrapping <label>, aria-label, aria-labelledby or title (a placeholder alone is no label).
+    $r7aUnlabelled = static function(string $html): array {
+        $doc = new DOMDocument();
+        libxml_use_internal_errors(true);
+        $doc->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_NONET);
+        libxml_clear_errors();
+        $xpath = new DOMXPath($doc);
+        $labelled = [];
+        foreach ($xpath->query('//label[@for]') as $label) $labelled[$label->getAttribute('for')] = trim($label->textContent) !== '';
+        $found = [];
+        foreach ($xpath->query('//main//input | //main//select | //main//textarea') as $field) {
+            if ($field->nodeName === 'input' && in_array(strtolower($field->getAttribute('type')), ['hidden', 'submit', 'button', 'reset', 'image'], true)) continue;
+            $named = trim($field->getAttribute('aria-label')) !== '' || trim($field->getAttribute('aria-labelledby')) !== '' || trim($field->getAttribute('title')) !== ''
+                || ($field->getAttribute('id') !== '' && ($labelled[$field->getAttribute('id')] ?? false));
+            for ($parent = $field->parentNode; !$named && $parent instanceof DOMElement; $parent = $parent->parentNode) {
+                if ($parent->nodeName === 'label') $named = trim($parent->textContent) !== '';
+            }
+            if (!$named) $found[] = $field->nodeName . '[name=' . $field->getAttribute('name') . ']';
+        }
+        return array_values(array_unique($found));
+    };
+    $a154Run(['p' => 'dashboard', 'lang' => 'en']);
+    foreach ([['p' => 'dashboard'], ['p' => 'orders'], ['p' => 'sales'], $a156Order, ['p' => 'rma'], ['p' => 'customers'], ['p' => 'customer', 'id' => $a156Customer],
+        ['p' => 'awaiting_payment'], ['p' => 'abandoned_carts'], ['p' => 'customer_groups'], ['p' => 'companies'], ['p' => 'promotions'], ['p' => 'price_lists'],
+        ['p' => 'price_lists', 'id' => $a157List], ['p' => 'suppliers', 'id' => $a157Supplier], ['p' => 'purchase_orders'], ['p' => 'purchase_orders', 'id' => $a157Po],
+        ['p' => 'shipping'], ['p' => 'payments'], ['p' => 'warehouses'], ['p' => 'feeds'], ['p' => 'feed'], ['p' => 'import'], ['p' => 'cache'], ['p' => 'audit'],
+        ['p' => 'categories'], ['p' => 'brands'], ['p' => 'attributes'], ['p' => 'attribute'], ['p' => 'products'], ['p' => 'product'], ['p' => 'product', 'id' => (string)$a155Product],
+        ['p' => 'pages'], ['p' => 'page_edit'], ['p' => 'content'], ['p' => 'digital_assets'], ['p' => 'reviews']] as $r7aGet) {
+        $r = $a154Run($r7aGet);
+        $r7aMissing = $r['code'] === 200 ? $r7aUnlabelled((string)$r['out']) : ['code ' . var_export($r['code'], true)];
+        assert_equals([], $r7aMissing, 'R7 admin a11y: every form field of ' . http_build_query($r7aGet) . ' has an accessible name');
+    }
 } finally {
     putenv('BBE_ADMIN_IDENTITY_KEY');
     $a154Pdo = null;
