@@ -343,6 +343,19 @@ nginx PHP fallback when `operations.nginx_config` is set).
   - Images: `http://` image URLs are served as `https://`; cards and thumbnails use the resized copy
     once the resize job wrote it; admin uploads are stored without EXIF/GPS, XMP and comments
     (orientation kept).
+- **Audit round 7 (stock)**
+  - **Backorders and preorders are allocated when stock arrives**: a receipt, adjustment, feed sync,
+    return or released reservation of the SKU reserves it for waiting order lines of open orders,
+    oldest order first, and the order can ship. Only the surplus goes on sale. On MySQL a waiting
+    order another transaction holds (e.g. its shipment) is skipped instead of waited for, so a
+    restock cannot deadlock; the next stock increase allocates it.
+  - **Cancelling a partly shipped order refunds only the goods that never shipped**; shipping and
+    fees stay charged and the order's planned shipments are cancelled. The shipped units can be
+    returned through an RMA on the cancelled order (limited to the shipped units), whose restock
+    now puts them back on stock and whose credit note refunds them.
+  - An RMA receipt that discards (or keeps for repair) units the order-level return had already
+    restocked writes them off again (ledger movement `rma_write_off`; units another order reserved
+    meanwhile raise `inventory.rma_write_off_short`).
 - **Extension API actions**: every non-GET/HEAD request to an extension action must carry the session
   CSRF token (`X-CSRF-Token` or `csrf_token`, HTTP 403 otherwise); actions can be limited with
   `'method' => 'GET'|'POST'` (405 otherwise). **Server-to-server POSTs to an extension action break**

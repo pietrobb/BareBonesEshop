@@ -323,7 +323,54 @@ class Fulfillment {
         return $quantity;
     }
 
-    private static function refreshOrderItemStatuses(int $orderId): void {
+    /** Units of an order line that left a warehouse: a bundle unit once every component of it shipped. */
+    public static function shippedUnits(array $orderItem): int {
+        $stmt = Db::get()->prepare("SELECT si.sku, COALESCE(SUM(si.quantity), 0) AS quantity FROM shipment_items si
+            WHERE si.order_item_id = :item AND si.status = 'shipped' GROUP BY si.sku");
+        $stmt->execute([':item' => (int)$orderItem['id']]);
+        $shipped = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $shipped[(string)$row['sku']] = (int)$row['quantity'];
+        if (!$shipped) return 0;
+        $units = (int)$orderItem['quantity'];
+        foreach (Inventory::reservationLines($orderItem) as $line) {
+            $units = min($units, intdiv($shipped[(string)$line['sku']] ?? 0, max(1, (int)($line['quantity_per_bundle'] ?? 1))));
+        }
+        return $units;
+    }
+
+    /**
+     * Gross of the order's goods that never shipped, or null when nothing shipped. Each line's discounted gross (the
+     * financial snapshot, as credit notes slice it) is split like InvoiceService::credit(): the shipped units are the
+     * first slice, which a later RMA credit note refunds, so both refunds together never exceed the line.
+     */
+    public static function unshippedGross(int $orderId): ?int {
+        $order = Orders::byId($orderId);
+        if (!$order) return null;
+        $snapshot = json_decode((string)($order['financial_snapshot'] ?? ''), true);
+        $components = is_array($snapshot) ? array_values(array_filter((array)($snapshot['components'] ?? []),
+            static fn($component): bool => is_array($component) && ($component['type'] ?? '') === 'product')) : [];
+        $items = Orders::items($orderId);
+        if (count($components) !== count($items)) $components = [];
+        $anyShipped = false;
+        $gross = 0;
+        foreach ($items as $position => $item) {
+            $ordered = max(1, (int)$item['quantity']);
+            $shipped = min($ordered, self::shippedUnits($item));
+            $anyShipped = $anyShipped || $shipped > 0;
+            $line = (int)($components[$position]['gross'] ?? $item['total']);
+            $gross += $line - intdiv($line * $shipped, $ordered);
+        }
+        return $anyShipped ? $gross : null;
+    }
+
+    /** Cancel the order's planned (not yet shipped) shipments: an order cancellation releases their stock. */
+    public static function cancelPlanned(int $orderId): void {
+        foreach (self::shipments($orderId) as $shipment) {
+            if ($shipment['status'] === 'planned') self::cancel((int)$shipment['id']);
+        }
+    }
+
+    public static function refreshOrderItemStatuses(int $orderId): void {
         $db = Db::get();
         foreach (Orders::items($orderId) as $item) {
             $stmt = $db->prepare("SELECT COALESCE(SUM(si.quantity), 0)

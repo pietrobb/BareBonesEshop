@@ -47,7 +47,9 @@ class Rma {
         if (!$order) {
             return [false, null, 'invalid_order'];
         }
-        if (($order['status'] ?? '') !== 'delivered') {
+        // A cancelled order may have shipped part of its goods first: those units come back through RMA.
+        $cancelled = ($order['status'] ?? '') === 'cancelled';
+        if (($order['status'] ?? '') !== 'delivered' && !$cancelled) {
             return [false, null, 'order_not_returnable'];
         }
         if ($customerId !== null && $customerId > 0
@@ -75,7 +77,7 @@ class Rma {
             foreach (Orders::items($orderId) as $oi) {
                 $orderItems[(int)$oi['id']] = $oi;
             }
-            $selected = self::normalizeItems($orderId, $items, $orderItems);
+            $selected = self::normalizeItems($orderId, $items, $orderItems, $cancelled);
             if (!$selected) {
                 $db->rollBack();
                 return [false, null, 'no_items'];
@@ -309,6 +311,11 @@ class Rma {
                 if ((int)$item['received_quantity'] + $quantity > (int)$item['quantity']) {
                     throw new LogicException('Receipt exceeds requested quantity');
                 }
+                $restockedByOrder = self::orderRestockedShippedGoods((int)$rma['order_id']);
+                if ($disposition !== 'restock' && $restockedByOrder) {
+                    // The order-level return put these units back on stock before they were inspected.
+                    Inventory::writeOffReturnedQuantity(self::orderItem((int)$rma['order_id'], (int)$item['order_item_id']), $quantity, "{$rmaId}:{$rmaItemId}:{$idempotencyKey}");
+                }
                 if ($disposition === 'restock') {
                     $previous = $db->prepare("SELECT COALESCE(SUM(quantity), 0) FROM return_receipts
                         WHERE store_id = :store AND rma_item_id IN (
@@ -319,13 +326,9 @@ class Rma {
                         ':store' => StoreContext::current()->id(), ':order_item' => (int)$item['order_item_id'],
                         ':store2' => StoreContext::current()->id(), ':item' => $rmaItemId, ':key' => $idempotencyKey,
                     ]);
-                    $orderItem = null;
-                    foreach (Orders::items((int)$rma['order_id']) as $candidate) {
-                        if ((int)$candidate['id'] === (int)$item['order_item_id']) { $orderItem = $candidate; break; }
-                    }
-                    if (!$orderItem) throw new RuntimeException('Order item not found');
+                    $orderItem = self::orderItem((int)$rma['order_id'], (int)$item['order_item_id']);
                     // The order-level return (status 'returned') already put its goods back on stock.
-                    if ((int)(Orders::byId((int)$rma['order_id'])['stock_restored'] ?? 0) === 0) Inventory::returnOrderItemQuantity($orderItem, $quantity, "{$rmaId}:{$rmaItemId}:{$idempotencyKey}", (int)$previous->fetchColumn());
+                    if (!$restockedByOrder) Inventory::returnOrderItemQuantity($orderItem, $quantity, "{$rmaId}:{$rmaItemId}:{$idempotencyKey}", (int)$previous->fetchColumn());
                 }
                 $db->prepare("UPDATE rma_items SET received_quantity = received_quantity + :quantity,
                         disposition = CASE WHEN disposition IN ('pending', :same) THEN :same2 ELSE 'mixed' END
@@ -462,9 +465,9 @@ class Rma {
     /**
      * Reduce a raw [order_item_id => qty] map to validated [order_item, qty]
      * rows: only ids belonging to the order are kept, qty must be > 0 and is
-     * clamped to the ordered quantity.
+     * clamped to the ordered quantity (of a cancelled order: to the shipped units).
      */
-    private static function normalizeItems(int $orderId, array $items, array $orderItems): array {
+    private static function normalizeItems(int $orderId, array $items, array $orderItems, bool $shippedOnly = false): array {
         $claimedStmt = Db::get()->prepare("SELECT ri.order_item_id, COALESCE(SUM(ri.quantity), 0) AS claimed
             FROM rma_items ri JOIN rma_requests rr ON rr.id = ri.rma_id
             WHERE rr.order_id = :order AND rr.store_id = :store AND rr.status != 'rejected'
@@ -481,12 +484,34 @@ class Rma {
             if (!isset($orderItems[$oiId])) continue;
             $qty = (int)$qty;
             if ($qty <= 0) continue;
-            $ordered = max(1, (int)($orderItems[$oiId]['quantity'] ?? 1));
+            $ordered = $shippedOnly ? Fulfillment::shippedUnits($orderItems[$oiId]) : max(1, (int)($orderItems[$oiId]['quantity'] ?? 1));
             $available = max(0, $ordered - ($claimed[$oiId] ?? 0));
             if ($available === 0) continue;
             $out[$oiId] = ['order_item' => $orderItems[$oiId], 'qty' => min($qty, $available)];
         }
         return array_values($out);
+    }
+
+    private static function orderItem(int $orderId, int $orderItemId): array {
+        foreach (Orders::items($orderId) as $candidate) {
+            if ((int)$candidate['id'] === $orderItemId) return $candidate;
+        }
+        throw new RuntimeException('Order item not found');
+    }
+
+    /**
+     * Whether the order-level return (status 'returned') already put the shipped goods back on stock. A cancellation
+     * or refund before any return also sets stock_restored, but it releases only what never shipped: the shipped
+     * units come back through RMA.
+     */
+    private static function orderRestockedShippedGoods(int $orderId): bool {
+        $order = Orders::byId($orderId);
+        if (!$order || (int)($order['stock_restored'] ?? 0) === 0) return false;
+        if ((string)$order['status'] === 'returned') return true;
+        $stmt = Db::get()->prepare("SELECT 1 FROM stock_movements WHERE store_id = :store AND reference_type = 'order'
+            AND reference_id = :order AND movement_type = 'return' LIMIT 1");
+        $stmt->execute([':store' => StoreContext::current()->id(), ':order' => (string)$orderId]);
+        return (bool)$stmt->fetchColumn();
     }
 
     private static function generateNumber(int $orderId): string {
