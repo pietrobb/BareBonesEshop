@@ -92,6 +92,21 @@ if ($phase === 'single') {
     Warehouse::syncProductStock(['A081-PLAIN']);
     $out['new_row'] = [$status, is_array($body) ? ($body['data']['stock'] ?? null) : $body, (int)$product($ids['plain'])['stock'],
         (int)$db->query("SELECT qty FROM warehouse_stock WHERE sku = 'A081-PLAIN'")->fetchColumn()];
+    // Round 7: values past the signed 32-bit MySQL INTEGER are a 400, not a failed write (500).
+    foreach (['price_huge' => ['price' => 3000000000], 'stock_huge' => ['stock' => 2147483648], 'weight_huge' => ['weight_g' => 2147483648],
+        'compare_huge' => ['compare_price' => 3000000000]] as $case => $body) {
+        $out[$case] = $call($ids['plain'], $body, 'a081-' . str_replace('_', '-', $case) . '-0001', $client)[0];
+    }
+    $out['price_max'] = $call($ids['plain'], ['price' => 2000000000], 'a081-price-max-0001', $client)[0];
+    $out['huge_unchanged'] = $db->query("SELECT price, stock, weight_g, compare_price FROM products WHERE sku = 'A081-PLAIN'")->fetch();
+    Warehouse::setStock((int)Warehouse::defaultWarehouse()['id'], 'A081-PLAIN', 1999999999);
+    try {
+        Warehouse::adjustStock((int)Warehouse::defaultWarehouse()['id'], 'A081-PLAIN', 2);
+        $out['adjust_over_max'] = 'applied';
+    } catch (Throwable $e) {
+        $out['adjust_over_max'] = get_class($e) . ': ' . $e->getMessage();
+    }
+    $out['adjust_over_max_qty'] = (int)$db->query("SELECT qty FROM warehouse_stock WHERE sku = 'A081-PLAIN'")->fetchColumn();
     echo json_encode($out);
     exit(0);
 }
@@ -183,6 +198,15 @@ try {
         assert_equals(1, $a081['movements'] ?? null, "{$a081Tag}: exactly one ledger movement references the API");
         assert_equals([200, true, 1], $a081['replay'] ?? null, "{$a081Tag}: identical retry replays without a second ledger movement");
         assert_equals([200, 4, 4, 4], $a081['new_row'] ?? null, "{$a081Tag}: stock for a SKU without a warehouse row is booked in the default warehouse");
+        assert_equals(['price_huge' => 400, 'stock_huge' => 400, 'weight_huge' => 400, 'compare_huge' => 400],
+            array_intersect_key($a081, ['price_huge' => 1, 'stock_huge' => 1, 'weight_huge' => 1, 'compare_huge' => 1]),
+            "{$a081Tag}: R7 PATCH price/stock/weight_g/compare_price past the MySQL INTEGER range is a 400 (was a 500 on MySQL)");
+        assert_equals([200, ['price' => 2000000000, 'stock' => 4, 'weight_g' => 0, 'compare_price' => null]],
+            [$a081['price_max'] ?? null, array_map(static fn($v) => $v === null ? null : (int)$v, (array)($a081['huge_unchanged'] ?? []))],
+            "{$a081Tag}: R7 the limit itself is accepted and rejected values change nothing");
+        assert_true(str_contains((string)($a081['adjust_over_max'] ?? ''), 'RuntimeException: Adjustment would exceed the stock limit')
+            && ($a081['adjust_over_max_qty'] ?? null) === 1999999999,
+            "{$a081Tag}: R7 a stock adjustment past the limit is refused and books nothing (" . ($a081['adjust_over_max'] ?? '?') . ')');
 
         [$a081Code, $a081Out, $a081Err] = $a081Run('race');
         $a081 = json_decode($a081Out, true);

@@ -1,6 +1,7 @@
 <?php
 /** Stable, additive-first external API v1 contract. */
 class ApiV1 {
+    private const MAX_INT = Warehouse::MAX_QTY;
     /** @return array{status:int,body:array,headers?:array<string,string>} */
     public static function dispatch(
         string $method,
@@ -167,14 +168,15 @@ class ApiV1 {
         if ($body === [] || array_diff(array_keys($body), $allowed)) {
             throw new InvalidArgumentException('Product patch contains unsupported fields');
         }
+        // The columns are signed 32-bit INTEGER on MySQL: a larger value would fail the write (500) there.
         foreach (['price', 'stock', 'weight_g'] as $field) {
-            if (array_key_exists($field, $body) && (!is_int($body[$field]) || $body[$field] < 0)) {
-                throw new InvalidArgumentException("{$field} must be a non-negative integer");
+            if (array_key_exists($field, $body) && (!is_int($body[$field]) || $body[$field] < 0 || $body[$field] > self::MAX_INT)) {
+                throw new InvalidArgumentException("{$field} must be an integer from 0 to " . self::MAX_INT);
             }
         }
         if (array_key_exists('compare_price', $body) && $body['compare_price'] !== null
-            && (!is_int($body['compare_price']) || $body['compare_price'] < 0)) {
-            throw new InvalidArgumentException('compare_price must be null or a non-negative integer');
+            && (!is_int($body['compare_price']) || $body['compare_price'] < 0 || $body['compare_price'] > self::MAX_INT)) {
+            throw new InvalidArgumentException('compare_price must be null or an integer from 0 to ' . self::MAX_INT);
         }
         // array_key_exists, not isset: an explicit null must be rejected, not skip validation.
         if (array_key_exists('status', $body) && !in_array($body['status'], ['active', 'draft', 'archived'], true)) {

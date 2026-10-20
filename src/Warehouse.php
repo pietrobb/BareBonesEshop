@@ -9,6 +9,8 @@
  * catalog_scope (StoreContext::catalogId()), so every store sharing a catalog sells from the same warehouses.
  */
 class Warehouse {
+    /** Highest on-hand quantity of one SKU in one warehouse; qty is a signed 32-bit INTEGER on MySQL. */
+    public const MAX_QTY = 2000000000;
 
     // ─── Warehouse CRUD ──────────────────────────────────────
 
@@ -457,13 +459,19 @@ class Warehouse {
             return;
         }
         $stmt = $db->prepare("UPDATE warehouse_stock SET qty = qty + :delta, updated_at = " . Db::now() . "
-            WHERE warehouse_id = :warehouse AND sku = :sku AND qty + :delta2 >= reserved");
+            WHERE warehouse_id = :warehouse AND sku = :sku AND qty + :delta2 >= reserved AND qty + :delta3 <= :max");
         $stmt->bindValue(':delta', $delta, PDO::PARAM_INT);
         $stmt->bindValue(':delta2', $delta, PDO::PARAM_INT);
+        $stmt->bindValue(':delta3', $delta, PDO::PARAM_INT);
+        $stmt->bindValue(':max', self::MAX_QTY, PDO::PARAM_INT);
         $stmt->bindValue(':warehouse', $warehouseId, PDO::PARAM_INT);
         $stmt->bindValue(':sku', $sku, PDO::PARAM_STR);
         $stmt->execute();
-        if ($stmt->rowCount() !== 1) throw new RuntimeException("Adjustment would violate reservations for SKU: {$sku}");
+        if ($stmt->rowCount() !== 1) {
+            throw new RuntimeException((int)$before['qty'] + $delta > self::MAX_QTY
+                ? "Adjustment would exceed the stock limit of " . self::MAX_QTY . " for SKU: {$sku}"
+                : "Adjustment would violate reservations for SKU: {$sku}");
+        }
         $after = self::stockRow($warehouseId, $sku);
         Inventory::movement(
             $warehouseId, $sku, $movementType, $delta, 0,
