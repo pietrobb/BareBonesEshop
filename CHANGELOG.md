@@ -327,6 +327,22 @@ nginx PHP fallback when `operations.nginx_config` is set).
   - GoPay/ThePay: two credit-note refunds accepted at once can both be confirmed; confirming the first
     no longer hides the second (its money was never booked). A confirmation never exceeds the
     refundable balance.
+- **Audit round 7 (catalog and import)**
+  - **Feeds in upsert mode book stock once**: a new product is no longer stocked in the default
+    warehouse as well as the feed warehouse, and a lower count on a later sync lowers availability.
+    A product the supplier no longer lists drops to its reserved units in the feed warehouse (only for
+    a feed that maps stock, is the warehouse's only feed, and was read to the end; an empty download or
+    a sync stopped at the error limit zeroes nothing). The sync result reports `stock_zeroed`.
+  - Feed and CSV prices with thousands separators or currency signs (`1 299,00`, `€24.90`,
+    `24.90 EUR`) are read correctly; a value that is not a price is a row error instead of 0.
+  - MySQL search finds two-letter words (`TV`) and hyphenated SKUs (`AB-12`) and requires every word,
+    as SQLite does.
+  - `cli/migrate-magento.php` detects the table prefix (`--prefix=` overrides it) and fails when the
+    dump has no products for it; migrated stock is booked into the default warehouse so products can be
+    bought; images get the storage URL the storefront serves, stripped of metadata and queued for resizing.
+  - Images: `http://` image URLs are served as `https://`; cards and thumbnails use the resized copy
+    once the resize job wrote it; admin uploads are stored without EXIF/GPS, XMP and comments
+    (orientation kept).
 - **Extension API actions**: every non-GET/HEAD request to an extension action must carry the session
   CSRF token (`X-CSRF-Token` or `csrf_token`, HTTP 403 otherwise); actions can be limited with
   `'method' => 'GET'|'POST'` (405 otherwise). **Server-to-server POSTs to an extension action break**
