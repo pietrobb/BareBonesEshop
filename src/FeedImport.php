@@ -66,20 +66,8 @@ class FeedImport {
         }
         if ($verbose) echo "  Downloaded " . strlen($xml) . " bytes\n";
 
-        // Parse based on format
-        $items = [];
-        if ($feed['format'] === 'xml') {
-            $items = self::parseXml($xml);
-        } elseif ($feed['format'] === 'csv') {
-            $items = self::parseCsv($xml);
-        } else {
-            $result['error'] = "Unsupported format: {$feed['format']}";
-            Warehouse::updateFeedStatus($feedId, 'error: bad format', 0);
-            return $result;
-        }
-
-        if ($verbose) echo "  Parsed " . count($items) . " items\n";
-        $result = self::applyItems($feed, $items, $result);
+        $result = self::importDocument($feed, $xml, $result);
+        if (isset($result['error'])) return $result;
 
         if ($verbose) {
             echo "  Imported: {$result['imported']}, Stock: {$result['stock_updated']}, " .
@@ -87,6 +75,27 @@ class FeedImport {
         }
 
         return $result;
+    }
+
+    /**
+     * Parse a downloaded feed document per the feed's format and import it (applyItems). CSV rows that cannot be read
+     * are reported as errors and mark the sync incomplete, so no product is zeroed for a row the parser lost.
+     */
+    public static function importDocument(array $feed, string $body, ?array $result = null): array {
+        $result ??= ['feed_id' => (int)$feed['id'], 'feed_code' => $feed['code'], 'imported' => 0, 'stock_updated' => 0, 'skipped' => 0, 'errors' => []];
+        if ($feed['format'] === 'xml') {
+            $items = self::parseXml($body);
+        } elseif ($feed['format'] === 'csv') {
+            $rejected = [];
+            $items = self::parseCsv($body, $rejected);
+            foreach ($rejected as $line) $result['errors'][] = "CSV row {$line}: column count does not match the header";
+            $result['rows_dropped'] = count($rejected);
+        } else {
+            $result['error'] = "Unsupported format: {$feed['format']}";
+            Warehouse::updateFeedStatus((int)$feed['id'], 'error: bad format', 0);
+            return $result;
+        }
+        return self::applyItems($feed, $items, $result);
     }
 
     /**
@@ -105,7 +114,8 @@ class FeedImport {
         $db->beginTransaction();
         $stockMap = [];
         $listed = [];
-        $complete = true;
+        // Rows the parser could not read are still listed by the supplier: nothing may be zeroed then either.
+        $complete = empty($result['rows_dropped']);
 
         foreach ($items as $i => $raw) {
             $db->exec('SAVEPOINT row_import');
@@ -164,7 +174,7 @@ class FeedImport {
                 $stockMap
             );
         }
-        // Cut short by the error limit: the rows not visited are still listed, so nothing may be zeroed.
+        // Cut short by the error limit or rows lost in parsing: those products are still listed, so nothing is zeroed.
         $result['stock_zeroed'] = $complete ? self::zeroUnlisted($feed, $fieldMap, $listed) : 0;
 
         // Update feed status
@@ -431,28 +441,36 @@ class FeedImport {
 
     // ─── CSV Parser ──────────────────────────────────────────
 
-    private static function parseCsv(string $data): array {
-        $lines = explode("\n", $data);
-        if (empty($lines)) return [];
+    /**
+     * Parse CSV records, including quoted fields that span lines. Records whose column count differs from the header
+     * are not imported; their 1-based record numbers go into $rejected.
+     *
+     * @param list<int> $rejected
+     */
+    private static function parseCsv(string $data, array &$rejected = []): array {
+        if (str_starts_with($data, "\xEF\xBB\xBF")) $data = substr($data, 3);
+        $stream = fopen('php://temp', 'r+');
+        fwrite($stream, $data);
+        rewind($stream);
 
-        // BOM
-        if (str_starts_with($lines[0], "\xEF\xBB\xBF")) {
-            $lines[0] = substr($lines[0], 3);
+        $header = fgetcsv($stream, null, ',', '"', '\\');
+        if (!is_array($header) || $header === [null]) {
+            fclose($stream);
+            return [];
         }
-
-        $header = str_getcsv(array_shift($lines), ',', '"', '\\');
-        $header = array_map('trim', $header);
+        $header = array_map(static fn($h) => trim((string)$h), $header);
         $items = [];
-
-        foreach ($lines as $line) {
-            $line = trim($line);
-            if ($line === '') continue;
-            $row = str_getcsv($line, ',', '"', '\\');
+        $record = 0;
+        while (($row = fgetcsv($stream, null, ',', '"', '\\')) !== false) {
+            if (count($row) === 1 && trim((string)$row[0]) === '') continue; // blank line
+            $record++;
             if (count($row) === count($header)) {
-                $items[] = array_combine($header, $row);
+                $items[] = array_combine($header, array_map(static fn($v) => (string)$v, $row));
+            } else {
+                $rejected[] = $record;
             }
         }
-
+        fclose($stream);
         return $items;
     }
 

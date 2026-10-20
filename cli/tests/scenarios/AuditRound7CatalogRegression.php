@@ -55,6 +55,22 @@ try {
     $r7cCut = FeedImport::applyItems($r7cFeed, [...$r7cBadRows, ['SKU' => 'R7C-A', 'NAME' => 'R7C A', 'PRICE' => '10.00', 'STOCK' => '3']]);
     assert_true(count($r7cCut['errors']) === 101 && Warehouse::totalAvailable('R7C-A') === 3 && (int)($r7cCut['stock_zeroed'] ?? 0) === 0,
         'R7 feed: a sync cut short by the error limit zeroes nothing (errors ' . count($r7cCut['errors']) . ', R7C-A ' . Warehouse::totalAvailable('R7C-A') . ', zeroed ' . (int)($r7cCut['stock_zeroed'] ?? 0) . ')');
+    // CSV: a quoted field may span lines (a long description); the supplier still lists that product.
+    $r7cCsvFeed = $r7cFeed;
+    $r7cCsvFeed['format'] = 'csv';
+    FeedImport::applyItems($r7cFeed, [['SKU' => 'R7C-A', 'NAME' => 'R7C A', 'PRICE' => '10.00', 'STOCK' => '3'], ['SKU' => 'R7C-B', 'NAME' => 'R7C B', 'PRICE' => '5.00', 'STOCK' => '4']]);
+    $r7cCsv = FeedImport::importDocument($r7cCsvFeed, "\xEF\xBB\xBFSKU,NAME,PRICE,STOCK\r\nR7C-A,R7C A,10.00,3\r\nR7C-B,\"R7C B\r\nsecond line\",5.00,4\r\n\r\n");
+    assert_true($r7cCsv['errors'] === [] && Warehouse::totalAvailable('R7C-B') === 3 && (int)($r7cCsv['stock_zeroed'] ?? 0) === 0
+        && str_contains((string)Db::get()->query("SELECT name FROM products WHERE sku = 'R7C-B'")->fetchColumn(), 'second line'),
+        'R7 feed CSV: a row with a multi-line quoted field is imported, not zeroed (R7C-B ' . Warehouse::totalAvailable('R7C-B') . ', zeroed ' . (int)($r7cCsv['stock_zeroed'] ?? 0) . ', ' . json_encode($r7cCsv['errors']) . ')');
+    // A row the parser cannot read (wrong column count) is an error, and the sync then zeroes nothing.
+    $r7cCsvBad = FeedImport::importDocument($r7cCsvFeed, "SKU,NAME,PRICE,STOCK\nR7C-A,R7C A,10.00,3\nR7C-B,R7C B,5.00\n");
+    assert_true(count($r7cCsvBad['errors']) === 1 && Warehouse::totalAvailable('R7C-B') === 3 && (int)($r7cCsvBad['stock_zeroed'] ?? 0) === 0,
+        'R7 feed CSV: an unreadable row is reported and zeroes nothing (R7C-B ' . Warehouse::totalAvailable('R7C-B') . ', zeroed ' . (int)($r7cCsvBad['stock_zeroed'] ?? 0) . ', ' . json_encode($r7cCsvBad['errors']) . ')');
+    // Zeroing still works for a clean CSV that leaves a product out.
+    $r7cCsvGone = FeedImport::importDocument($r7cCsvFeed, "SKU,NAME,PRICE,STOCK\nR7C-A,R7C A,10.00,3\n");
+    assert_true($r7cCsvGone['errors'] === [] && Warehouse::totalAvailable('R7C-B') === 0 && (int)($r7cCsvGone['stock_zeroed'] ?? 0) === 1,
+        'R7 feed CSV: a product a clean CSV leaves out is zeroed (R7C-B ' . Warehouse::totalAvailable('R7C-B') . ', zeroed ' . (int)($r7cCsvGone['stock_zeroed'] ?? 0) . ')');
 
     // Prices: thousands separators, currency signs and codes.
     $r7cPrices = [];
