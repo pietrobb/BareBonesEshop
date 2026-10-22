@@ -471,7 +471,7 @@ function apiShippingRates(): array {
     }
 
     $physicalQty = ShippingService::physicalQuantity($cart['items']);
-    $methods = ShippingService::calculateRates($country, $weightG, $subtotal, $cod, $volumeCm3, $physicalQty);
+    $methods = ShippingService::calculateRates($country, $weightG, $subtotal, $cod, $volumeCm3, $physicalQty, isset($cart['currency']) ? (string)$cart['currency'] : null);
     // An automatic free-shipping promotion waives the carriage as checkout does: cash on delivery keeps its surcharge.
     $customerId = (int)($_SESSION['customer_id'] ?? 0);
     if (CheckoutService::discountPreview('', (int)($cart['subtotal'] ?? 0), null, $cart['items'], $customerId ?: null)['free_shipping']) {
@@ -720,7 +720,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     // Free shipping "from X" is earned by what the buyer pays for the goods, i.e. after discounts.
     $selectedRate = $digitalOnly
         ? digitalDeliveryRate()
-        : ShippingService::selectRate($shippingMethod, $country, $totalWeight, $cart['subtotal'] - $totalDiscount, PaymentService::isCashOnDelivery($paymentMethod), $totalVolume, ShippingService::physicalQuantity($cart['items']));
+        : ShippingService::selectRate($shippingMethod, $country, $totalWeight, $cart['subtotal'] - $totalDiscount, PaymentService::isCashOnDelivery($paymentMethod), $totalVolume, ShippingService::physicalQuantity($cart['items']), $cartCurrency);
     if (!$selectedRate) return checkoutRefusal('checkout.error.shipping_unavailable');
     if (!$digitalOnly) {
         // Point-delivery carriers: the chosen pick-up point must be on the carrier's list for this address.

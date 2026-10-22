@@ -66,6 +66,7 @@ class ShippingService
      * @param int    $weightG   Total weight in grams
      * @param int    $subtotal  Cart subtotal in cents
      * @param bool   $cod       Customer wants COD
+     * @param ?string $currency Currency charged (the cart's); null = the store's
      * @return array[] List of all available rate options (from all carriers)
      */
     public static function calculateRates(
@@ -74,7 +75,8 @@ class ShippingService
         int    $subtotal = 0,
         bool   $cod = false,
         int    $volumeCm3 = 0,
-        int    $physicalQty = 0
+        int    $physicalQty = 0,
+        ?string $currency = null
     ): array {
         $country = strtoupper(trim($country ?: 'SK'));
         $weightG = max(0, $weightG);
@@ -82,7 +84,7 @@ class ShippingService
         $volumeCm3 = max(0, $volumeCm3);
         $physicalQty = max(0, $physicalQty);
 
-        if (self::hasDatabasePricing() && StoreContext::current()->usesProviderPrices()) {
+        if (self::hasDatabasePricing() && StoreContext::current()->usesProviderPrices($currency)) {
             $dbRates = self::databaseRates($country, $weightG, $subtotal, $cod, $volumeCm3);
             if (!empty($dbRates)) {
                 return self::applyFreeShippingRules($dbRates, $subtotal, $physicalQty);
@@ -90,8 +92,8 @@ class ShippingService
         }
 
         $adapters = self::resolveAdapters();
-        // Amounts (subtotal, free-shipping thresholds, returned prices) are minor units of the store currency.
-        $currency = strtoupper(StoreContext::current()->currency());
+        // Amounts (subtotal, free-shipping thresholds, returned prices) are minor units of the charged currency.
+        $currency = strtoupper($currency ?? StoreContext::current()->currency());
         $params   = compact('country', 'weightG', 'subtotal', 'cod', 'currency');
         $params['weight_g'] = $weightG;
         $params['volume_cm3'] = $volumeCm3;
@@ -157,9 +159,10 @@ class ShippingService
         int $subtotal = 0,
         bool $cod = false,
         int $volumeCm3 = 0,
-        int $physicalQty = 0
+        int $physicalQty = 0,
+        ?string $currency = null
     ): ?array {
-        foreach (self::calculateRates($country, $weightG, $subtotal, $cod, $volumeCm3, $physicalQty) as $rate) {
+        foreach (self::calculateRates($country, $weightG, $subtotal, $cod, $volumeCm3, $physicalQty, $currency) as $rate) {
             if (($rate['method_code'] ?? $rate['key'] ?? '') === $methodCode) {
                 return $rate;
             }
@@ -757,7 +760,8 @@ class ShippingService
         $physicalQty = self::physicalQuantity($items);
         $weightG = 0;
         foreach ($items as $item) $weightG += (int)($item['weight_g'] ?? 0) * (int)($item['qty'] ?? 0);
-        $rates = self::calculateRates($country, $weightG, $subtotal, $cod, 0, $physicalQty);
+        $currency = isset($items[0]['currency']) ? (string)$items[0]['currency'] : null; // a cart has one currency
+        $rates = self::calculateRates($country, $weightG, $subtotal, $cod, 0, $physicalQty, $currency);
         $selected = $rates[0] ?? null;
         foreach ($rates as $rate) {
             if ($requestedMethod !== '' && ($rate['method_code'] ?? '') === $requestedMethod) { $selected = $rate; break; }

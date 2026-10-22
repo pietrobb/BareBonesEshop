@@ -101,7 +101,8 @@ if ($phase === 'setup') {
 
 $stores = Bootstrap::stores();
 $base = $stores['stores']['default'];
-$stores['stores']['cz'] = array_replace($base, ['id'=>'cz', 'url_prefix'=>'/cz', 'domains'=>[], 'catalog_scope'=>'default', 'provider_scope'=>'cz']);
+// A store with an empty provider scope (the sample cz/hu/pl scopes are seeded by 20261022230000_currency_price_lists).
+$stores['stores']['a055'] = array_replace($base, ['id'=>'a055', 'url_prefix'=>'/a055', 'domains'=>[], 'catalog_scope'=>'default', 'provider_scope'=>'a055']);
 $stores['stores']['sk2'] = array_replace($base, ['id'=>'sk2', 'url_prefix'=>'/sk2', 'domains'=>[], 'catalog_scope'=>'default', 'provider_scope'=>'default']);
 StoreContext::activate(StoreContext::resolve($stores, '/', '', $store));
 I18n::setLocale('en');
@@ -156,21 +157,24 @@ try {
         [$a055Exit, $a055Out, $a055Stderr] = $a055Run([$a055Driver, 'setup', 'default', 'none', dirname(TEST_CLI_DIR), $a055Target]);
         assert_equals([0, ''], [$a055Exit, $a055Stderr], "A05.5 {$a055Driver}: previous schema seeded and upgraded");
         $a055Setup = json_decode($a055Out, true, 512, JSON_THROW_ON_ERROR);
-        assert_equals($a055Setup['before'], $a055Setup['after'], "A05.5 {$a055Driver}: upgrade preserves every existing configuration row and id");
+        $a055Default = static fn(array $rows): array => array_map(static fn(array $table): array => array_values(array_filter($table, static fn(array $row): bool => $row['store_id'] === 'default')), $rows);
+        assert_equals($a055Setup['before'], $a055Default($a055Setup['after']), "A05.5 {$a055Driver}: upgrade preserves every existing configuration row and id");
+        $a055Seeded = array_values(array_unique(array_merge(...array_map(static fn(array $table): array => array_column(array_filter($table, static fn(array $row): bool => $row['store_id'] !== 'default'), 'store_id'), array_values($a055Setup['after'])))));
+        sort($a055Seeded);
+        assert_equals(['cz', 'hu', 'pl'], $a055Seeded, "A05.5 {$a055Driver}: the upgrade adds rows only to the seeded sample price-list scopes");
         assert_equals($a055Unique, array_map(static fn(array $table): array => $table['unique'], $a055Setup['indexes_after']), "A05.5 {$a055Driver}: unique keys are scoped by store_id only");
         assert_equals(array_map(static fn(array $table): array => $table['indexes'], $a055Setup['indexes_before']), array_map(static fn(array $table): array => $table['indexes'], $a055Setup['indexes_after']), "A05.5 {$a055Driver}: secondary indexes survive the rebuild");
         assert_equals(['rejected', 'rejected', 'rejected', 'rejected'], $a055Setup['duplicates'], "A05.5 {$a055Driver}: duplicates inside one store are still rejected");
-        $a055Default = static fn(array $rows): array => array_map(static fn(array $table): array => array_values(array_filter($table, static fn(array $row): bool => $row['store_id'] === 'default')), $rows);
         foreach ($a055Creates as $a055Action) {
             foreach ([$a055Action, str_replace('_create', '_dup', $a055Action)] as $a055Step) {
-                [$a055Exit, $a055Out, $a055Stderr] = $a055Run([$a055Driver, 'run', 'cz', $a055Step, dirname(TEST_CLI_DIR), $a055Target]);
-                assert_equals([0, ''], [$a055Exit, $a055Stderr], "A05.5 {$a055Driver}/cz/{$a055Step}: actual handler exits without errors");
+                [$a055Exit, $a055Out, $a055Stderr] = $a055Run([$a055Driver, 'run', 'a055', $a055Step, dirname(TEST_CLI_DIR), $a055Target]);
+                assert_equals([0, ''], [$a055Exit, $a055Stderr], "A05.5 {$a055Driver}/a055/{$a055Step}: actual handler exits without errors");
             }
         }
         $a055Result = json_decode($a055Out, true, 512, JSON_THROW_ON_ERROR);
-        $a055Cz = array_map(static fn(array $table): int => count(array_filter($table, static fn(array $row): bool => $row['store_id'] === 'cz')), $a055Result['rows']);
-        assert_equals(array_fill_keys(array_keys($a055Unique), 1), $a055Cz, "A05.5 {$a055Driver}: cz reuses every code/slug of default exactly once");
-        assert_equals($a055Default($a055Setup['after']), $a055Default($a055Result['rows']), "A05.5 {$a055Driver}: default store rows unchanged by cz");
+        $a055Own = array_map(static fn(array $table): int => count(array_filter($table, static fn(array $row): bool => $row['store_id'] === 'a055')), $a055Result['rows']);
+        assert_equals(array_fill_keys(array_keys($a055Unique), 1), $a055Own, "A05.5 {$a055Driver}: a second store reuses every code/slug of default exactly once");
+        assert_equals($a055Default($a055Setup['after']), $a055Default($a055Result['rows']), "A05.5 {$a055Driver}: default store rows unchanged by the second store");
         [$a055Exit, $a055Out, $a055Stderr] = $a055Run([$a055Driver, 'run', 'sk2', 'shared_scope_country', dirname(TEST_CLI_DIR), $a055Target]);
         assert_equals([0, ''], [$a055Exit, $a055Stderr], "A05.5 {$a055Driver}/sk2: shared provider_scope handler exits without errors");
         $a055Rows = json_decode($a055Out, true, 512, JSON_THROW_ON_ERROR)['rows']['payment_method_countries'];

@@ -62,10 +62,10 @@ class PaymentService {
         $stmt->execute($params);
 
         $methods = [];
-        $ownPrices = StoreContext::current()->usesProviderPrices();
+        $ownPrices = StoreContext::current()->usesProviderPrices($currency);
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
-            // Fees and limits are amounts in the scope owner's currency: a store in another currency
-            // only offers methods that have none (a percentage fee is currency-neutral).
+            // Fees and limits are amounts in the scope owner's currency: a cart in another currency
+            // only gets methods that have none (a percentage fee is currency-neutral).
             if (!$ownPrices && ((int)$row['fixed_fee'] > 0 || (int)$row['min_amount'] > 0 || (int)($row['max_amount'] ?? 0) > 0 || (int)($row['free_above'] ?? 0) > 0)) continue;
             if (($row['service_type'] ?? '') === 'invoice') {
                 if ($customerId === null || !Customers::canInvoicePurchase($customerId, $amount)) continue;

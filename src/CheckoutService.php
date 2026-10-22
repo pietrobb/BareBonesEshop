@@ -43,9 +43,10 @@ class CheckoutService {
         } elseif ($vatId !== '') {
             $vatIdStatus = 'unverified';
         }
-        $digitalOnly = self::isDigitalOnly(self::availableItems(Cart::enriched()['items'] ?? []));
+        $vatCart = Cart::enriched();
+        $digitalOnly = self::isDigitalOnly(self::availableItems($vatCart['items'] ?? []));
         // Goods collected in the seller's own store are supplied there, whatever the buyer's address.
-        $rate = $digitalOnly ? null : ShippingService::selectRate($shippingMethod, $country, 0);
+        $rate = $digitalOnly ? null : ShippingService::selectRate($shippingMethod, $country, 0, 0, false, 0, 0, isset($vatCart['currency']) ? (string)$vatCart['currency'] : null);
         $taxProviderCode = Adapters::defaultProviderCode('tax');
         $context = [
             'seller_country'        => $sellerCountry,
