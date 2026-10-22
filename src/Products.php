@@ -83,9 +83,12 @@ class Products {
         $offset = ($page - 1) * $perPage;
 
         // Base conditions
-        $where = "(p.category_id = :cat OR EXISTS (
-            SELECT 1 FROM product_categories pc WHERE pc.product_id = p.id AND pc.category_id = :cat_link
-        )) AND p.store_id = :store AND p.status = 'active'";
+        // Primary category or an extra assignment, as an id set from both category indexes: "category_id = ? OR
+        // EXISTS (...)" could use neither and scanned the whole catalog for every category (45 ms at 200k products).
+        $where = "p.id IN (
+            SELECT id FROM products WHERE category_id = :cat
+            UNION SELECT product_id FROM product_categories WHERE category_id = :cat_link
+        ) AND p.store_id = :store AND p.status = 'active'";
         $params = [':cat' => $categoryId, ':cat_link' => $categoryId, ':store' => StoreContext::current()->catalogId()];
 
         // Price range
@@ -198,9 +201,10 @@ class Products {
             default      => 'p.price ASC',
         };
 
-        $categoryWhere = "(p.category_id IN ({$placeholders}) OR EXISTS (
-            SELECT 1 FROM product_categories pc WHERE pc.product_id = p.id AND pc.category_id IN ({$placeholders})
-        ))";
+        $categoryWhere = "p.id IN (
+            SELECT id FROM products WHERE category_id IN ({$placeholders})
+            UNION SELECT product_id FROM product_categories WHERE category_id IN ({$placeholders})
+        )";
         $categoryParams = [...$catIds, ...$catIds];
 
         // Count

@@ -161,6 +161,45 @@ if ($page === 'sitemap') {
     echo json_encode($result);
     exit(0);
 }
+if ($page === 'rebuild') {
+    // 30 extra categories reached only through product_categories, so the listing must keep that branch.
+    $store = $db->quote(StoreContext::current()->catalogId());
+    for ($c = 1; $c <= 30; $c++) {
+        $db->exec("INSERT INTO categories (name, slug, store_id) VALUES ('R8 extra {$c}', 'r8-extra-{$c}', {$store})");
+        $id = (int)$db->lastInsertId();
+        $db->exec("INSERT INTO product_categories (product_id, category_id) SELECT id, {$id} FROM products WHERE sku IN ('R8M-{$c}', 'R8M-" . ($c + 100) . "')");
+    }
+    $rec = new class('sqlite:' . $dir . '/shop.sqlite') extends PDO {
+        /** @var list<string> */
+        public array $listings = [];
+        public function prepare(string $query, array $options = []): PDOStatement|false {
+            if (preg_match('/^\s*SELECT (?:COUNT\(\*\)|p\.\*) FROM products p WHERE/i', $query)) $this->listings[] = $query;
+            return parent::prepare($query, $options);
+        }
+    };
+    $rec->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $rec->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+    Db::init($rec, 'sqlite');
+    Cache::setDir($dir . '/cache');
+    CacheRebuild::run(['scope' => 'full'], ['per_page' => 24]);
+    $extra = (int)$db->query("SELECT id FROM categories WHERE slug = 'r8-extra-7'")->fetchColumn();
+    $count = (string)(array_values(array_filter($rec->listings, static fn($q) => str_contains($q, 'COUNT(*)')))[0] ?? '');
+    $literal = str_replace([':cat_link', ':cat', ':store'], [(string)$extra, (string)$extra, $store], $count);
+    $plan = $count === '' ? [] : array_column($db->query('EXPLAIN QUERY PLAN ' . $literal)->fetchAll(), 'detail');
+    $listing = Cache::readJson(Cache::localePath('en', 'cat/r8-extra-7/page-1.json'));
+    $prices = json_decode((string)Cache::read('prices/guest.json'), true);
+    $sample = $db->query("SELECT id, sku, price, category_id FROM products WHERE sku = 'R8M-39999'")->fetch();
+    echo json_encode([
+        'categories' => (int)$db->query("SELECT COUNT(*) FROM categories WHERE store_id = {$store}")->fetchColumn(),
+        'locales' => count((array)(StoreContext::current()->config()['languages'] ?? [])),
+        'listing_queries' => count($rec->listings), 'plan' => $plan,
+        'extra_skus' => array_column((array)($listing['products'] ?? []), 'sku'), 'extra_total' => $listing['total'] ?? null,
+        'prices' => is_array($prices) ? count($prices) : -1,
+        'sample_ok' => is_array($prices) && ($prices['R8M-39999'] ?? null) === Pricing::apply($sample, 'guest')['price'],
+        'peak_mb' => round(memory_get_peak_usage(true) / 1048576, 1),
+    ]);
+    exit(0);
+}
 $_SESSION = [];
 $_GET = $page === 'products_low' ? ['p' => 'products', 'stock' => 'low'] : ['p' => $page];
 require_once $root . '/src/Entrypoints/Admin/Shared.php';
@@ -206,6 +245,23 @@ try {
     assert_true(($r8sSitemap['result'][1]['urls'] ?? 0) === 10000 && ($r8sSitemap['result'][1]['last'] ?? '') === '</urlset>',
         'R8 sitemap: a part streams exactly its page of URLs within 24 MB, products read in chunks (' . substr($r8sSitemap['raw'], 0, 300) . ')');
 
+    // Full cache rebuild at catalog scale: one listing query pair per category for all languages (it ran again per
+    // language), served from the category indexes instead of a scan of the whole catalog, price maps streamed.
+    $r8sRebuild = $r8sRender('rebuild');
+    $r8sRb = (array)($r8sRebuild['result'] ?? []);
+    assert_true(isset($r8sRb['categories']) && $r8sRebuild['exit'] === 0,
+        'R8 cache rebuild: a full rebuild of 31 categories x 40k products completes within 24 MB (' . substr($r8sRebuild['raw'], 0, 300) . ')');
+    assert_true(($r8sRb['locales'] ?? 0) >= 2 && ($r8sRb['listing_queries'] ?? PHP_INT_MAX) === 2 * ($r8sRb['categories'] ?? 0),
+        'R8 cache rebuild: listings are queried once per category, not once per category and language (' . ($r8sRb['listing_queries'] ?? '?') . ' queries, ' . ($r8sRb['categories'] ?? '?') . ' categories, ' . ($r8sRb['locales'] ?? '?') . ' languages)');
+    $r8sPlan = implode(' | ', (array)($r8sRb['plan'] ?? []));
+    assert_true(str_contains($r8sPlan, 'idx_prod_category') && str_contains($r8sPlan, 'idx_product_categories_category') && !str_contains($r8sPlan, 'store_id=? AND status=?'),
+        'R8 cache rebuild: a category listing reads its products through both category indexes, not the whole catalog (' . $r8sPlan . ')');
+    $r8sExtra = (array)($r8sRb['extra_skus'] ?? []);
+    sort($r8sExtra);
+    assert_equals([['R8M-107', 'R8M-7'], 2], [$r8sExtra, $r8sRb['extra_total'] ?? null], 'R8 cache rebuild: a category listing still includes products assigned through product_categories');
+    assert_true(($r8sRb['prices'] ?? -1) === 40000 && ($r8sRb['sample_ok'] ?? false) === true,
+        'R8 cache rebuild: the streamed guest price map holds every active product with its group price (' . ($r8sRb['prices'] ?? '?') . ')');
+
     // The bounded APIs keep the old semantics: same count, worst first, limited.
     $r8sJobs = static function () use ($r8sMem): array {
         JobQueue::setDir($r8sMem . '/jobs');
@@ -219,6 +275,12 @@ try {
     assert_equals(['pending' => 3000, 'processing' => 0, 'completed' => 3000, 'failed' => 5], $r8sStats, 'R8 queue: file-queue counts are streamed and still exact (dot files ignored)');
     assert_equals(['f5', 'f4', 'f3'], array_column($r8sFailures, 'id'), 'R8 queue: failures() returns the newest N, newest first');
 } finally {
+    if (is_dir($r8sMem . '/cache')) {
+        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($r8sMem . '/cache', FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST) as $r8sF) {
+            $r8sF->isDir() ? @rmdir($r8sF->getPathname()) : @unlink($r8sF->getPathname());
+        }
+        @rmdir($r8sMem . '/cache');
+    }
     foreach (['jobs/pending', 'jobs/completed', 'jobs/failed', 'jobs/processing', 'jobs', ''] as $r8sSub) {
         foreach (glob($r8sMem . '/' . $r8sSub . '/{,.}*', GLOB_BRACE) ?: [] as $r8sF) if (is_file($r8sF)) @unlink($r8sF);
     }
