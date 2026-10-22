@@ -124,6 +124,34 @@ class Db {
     }
 
     /**
+     * Runs "$statement WHERE <key> IN (next batch of keys) AND (<where>)" until no row matches <where>: a retention
+     * purge of millions of rows becomes many short statements (each its own commit outside a transaction) instead
+     * of one that holds the SQLite write lock for half a minute while checkouts give up after busy_timeout.
+     * $statement is "DELETE FROM t" or "UPDATE t SET ..." (its own named parameters in $statementParams); every
+     * placeholder appears once per statement (MySQL native prepares). Returns the rows written.
+     */
+    public static function writeInBatches(string $table, string $statement, string $where, array $params = [],
+        array $statementParams = [], string $key = 'id', int $batch = 1000, ?PDO $db = null): int {
+        $db ??= self::get();
+        $batch = max(1, $batch);
+        $total = 0;
+        do {
+            $select = $db->prepare("SELECT {$key} FROM {$table} WHERE {$where} ORDER BY {$key} LIMIT {$batch}");
+            $select->execute($params);
+            $keys = $select->fetchAll(PDO::FETCH_COLUMN);
+            $select->closeCursor(); // an open read keeps a stale WAL snapshot: the write would fail once another request committed
+            if (!$keys) break;
+            $keyParams = [];
+            foreach (array_values($keys) as $i => $value) $keyParams[":batch_key{$i}"] = $value;
+            $write = $db->prepare("{$statement} WHERE {$key} IN (" . implode(', ', array_keys($keyParams)) . ") AND ({$where})");
+            $write->execute($statementParams + $params + $keyParams);
+            $written = $write->rowCount();
+            $total += $written;
+        } while (count($keys) === $batch && $written > 0);
+        return $total;
+    }
+
+    /**
      * Literal text for a `LIKE ... ESCAPE '!'` pattern: user-typed % and _ stay characters on
      * SQLite and MySQL alike ("!" avoids MySQL's backslash string-literal rules).
      */

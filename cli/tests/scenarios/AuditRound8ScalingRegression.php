@@ -280,6 +280,93 @@ $r8sRenderAt = strpos($r8sAdmin, '<!DOCTYPE html>');
 assert_true($r8sGuardAt !== false && $r8sBufferAt !== false && $r8sBufferAt < $r8sRenderAt && $r8sGuardAt < $r8sRenderAt,
     'R8 admin fatal: admin.php buffers the page and registers the guard before any HTML is emitted');
 
+// Retention jobs on SQLite: one DELETE/UPDATE over years of rows held the write lock for half a minute and every
+// checkout gave up after busy_timeout. Each purge now runs as short statements of at most 1000 keys, each its own
+// commit: a second connection with busy_timeout 0 must be able to write before every one of them.
+[$r8sSavedDb, $r8sSavedDriver] = [Db::get(), Db::driver()];
+$r8sRet = sys_get_temp_dir() . '/bbe-r8ret-' . bin2hex(random_bytes(4));
+mkdir($r8sRet . '/jobs', 0700, true);
+$r8sRetFile = $r8sRet . '/shop.sqlite';
+$r8sRetOther = new PDO('sqlite:' . $r8sRetFile, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+$r8sRetOther->exec('PRAGMA journal_mode = WAL');
+$r8sRetOther->exec('PRAGMA busy_timeout = 0');
+$r8sRetOther->exec('CREATE TABLE r8s_checkout (x INTEGER)');
+$r8sRetDb = new class('sqlite:' . $r8sRetFile) extends PDO {
+    public ?PDO $other = null;
+    /** @var list<array{table: string, keys: int, concurrent: bool}> */
+    public array $writes = [];
+    public function prepare(string $query, array $options = []): PDOStatement|false {
+        if ($this->other !== null && preg_match('/^\s*(?:DELETE FROM|UPDATE)\s+(email_log|queue_jobs)\b/i', $query, $m)) {
+            try { $this->other->exec('INSERT INTO r8s_checkout VALUES (1)'); $ok = true; } catch (PDOException) { $ok = false; }
+            $this->writes[] = ['table' => $m[1], 'keys' => substr_count($query, ':batch_key'), 'concurrent' => $ok];
+        }
+        return parent::prepare($query, $options);
+    }
+};
+$r8sRetDb->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$r8sRetDb->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+try {
+    (new Migrator($r8sRetDb, TEST_CLI_DIR . '/../migrations', $r8sRet . '/migrate.lock'))->apply(static fn($m) => null);
+    Db::init($r8sRetDb, 'sqlite');
+    $r8sOld = gmdate('Y-m-d H:i:s', time() - 400 * 86400);
+    $r8sNew = gmdate('Y-m-d H:i:s');
+    $r8sRetDb->exec("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2600)
+        INSERT INTO email_log (recipient, template, subject, payload, created_at)
+        SELECT 'buyer' || i || '@example.com', 'order_confirmation', 'Order ' || i, '{}', CASE WHEN i <= 2500 THEN '{$r8sOld}' ELSE '{$r8sNew}' END FROM n");
+    $r8sRetDb->exec("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2100)
+        INSERT INTO queue_jobs (id, type, payload, state, available_at, correlation_id, completed_at)
+        SELECT 'job' || i, 'mail', '{}', 'completed', '{$r8sOld}', 'c' || i, CASE WHEN i <= 2050 THEN '{$r8sOld}' ELSE '{$r8sNew}' END FROM n");
+    $r8sRetDb->other = $r8sRetOther;
+    $r8sByTable = static fn(string $t): array => array_values(array_filter($r8sRetDb->writes, static fn($w) => $w['table'] === $t));
+
+    $r8sScrub = GdprService::applyRetention('email_log', ['table' => 'email_log', 'ttl_days' => 90, 'field' => 'created_at',
+        'action' => 'scrub_pii', 'scrub_fields' => ['recipient', 'subject', 'payload']], 'apply');
+    $r8sScrubWrites = $r8sByTable('email_log');
+    $r8sLeft = (int)$r8sRetDb->query("SELECT COUNT(*) FROM email_log WHERE recipient LIKE 'buyer%'")->fetchColumn();
+    assert_true((int)($r8sScrub['affected'] ?? $r8sScrub['rows_affected'] ?? -1) === 2500 && $r8sLeft === 100,
+        'R8 retention: scrub_pii erases exactly the 2500 old rows and keeps the 100 recent ones (left: ' . $r8sLeft . ')');
+    assert_true(count($r8sScrubWrites) >= 3 && max(array_column($r8sScrubWrites, 'keys') ?: [PHP_INT_MAX]) <= 1000 && min(array_column($r8sScrubWrites, 'keys') ?: [0]) >= 1,
+        'R8 retention: scrub_pii runs as statements of at most 1000 keys (' . json_encode(array_column($r8sScrubWrites, 'keys')) . ')');
+    assert_true($r8sScrubWrites !== [] && !in_array(false, array_column($r8sScrubWrites, 'concurrent'), true),
+        'R8 retention: a checkout with busy_timeout 0 can write before every scrub statement');
+    $r8sAgain = GdprService::applyRetention('email_log', ['table' => 'email_log', 'ttl_days' => 90, 'field' => 'created_at',
+        'action' => 'scrub_pii', 'scrub_fields' => ['recipient', 'subject', 'payload']], 'apply');
+    assert_true((int)($r8sAgain['affected'] ?? $r8sAgain['rows_affected'] ?? -1) === 0, 'R8 retention: a re-run finds nothing left to scrub and terminates');
+
+    $r8sRetDb->writes = [];
+    $r8sDel = GdprService::applyRetention('email_log_delete', ['table' => 'email_log', 'ttl_days' => 90, 'field' => 'created_at', 'action' => 'delete'], 'apply');
+    $r8sDelWrites = $r8sByTable('email_log');
+    assert_true((int)($r8sDel['affected'] ?? $r8sDel['rows_affected'] ?? -1) === 2500 && (int)$r8sRetDb->query('SELECT COUNT(*) FROM email_log')->fetchColumn() === 100,
+        'R8 retention: delete removes exactly the 2500 old rows');
+    assert_true(count($r8sDelWrites) >= 3 && max(array_column($r8sDelWrites, 'keys') ?: [PHP_INT_MAX]) <= 1000 && !in_array(false, array_column($r8sDelWrites, 'concurrent'), true),
+        'R8 retention: delete runs as short statements a concurrent checkout can write between (' . json_encode($r8sDelWrites) . ')');
+
+    $r8sRetDb->exec("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2300)
+        INSERT INTO email_log (recipient, template, created_at) SELECT 'Hash' || i || '@Example.com', 'x', '{$r8sOld}' FROM n");
+    $r8sHash = GdprService::applyRetention('email_log_hash', ['table' => 'email_log', 'ttl_days' => 90, 'field' => 'created_at',
+        'action' => 'hash_email', 'scrub_fields' => ['recipient']], 'apply');
+    $r8sPlain = (int)$r8sRetDb->query("SELECT COUNT(*) FROM email_log WHERE recipient LIKE '%@%' AND created_at = '{$r8sOld}'")->fetchColumn();
+    assert_true((int)($r8sHash['affected'] ?? $r8sHash['rows_affected'] ?? -1) === 2300 && $r8sPlain === 0,
+        'R8 retention: hash_email hashes all 2300 old addresses across its 1000-row chunks (plain left: ' . $r8sPlain . ')');
+
+    $r8sRetDb->writes = [];
+    $r8sClean = RetentionCleanup::run(['jobs_dir' => $r8sRet . '/jobs']);
+    $r8sJobWrites = $r8sByTable('queue_jobs');
+    assert_true(($r8sClean['queue_jobs'] ?? -1) === 2050 && (int)$r8sRetDb->query('SELECT COUNT(*) FROM queue_jobs')->fetchColumn() === 50,
+        'R8 retention: the daily cleanup deletes exactly the 2050 old completed jobs');
+    assert_true(count($r8sJobWrites) >= 3 && max(array_column($r8sJobWrites, 'keys') ?: [PHP_INT_MAX]) <= 1000 && !in_array(false, array_column($r8sJobWrites, 'concurrent'), true),
+        'R8 retention: the daily cleanup deletes in short statements a concurrent checkout can write between (' . json_encode(array_column($r8sJobWrites, 'keys')) . ')');
+} finally {
+    Db::init($r8sSavedDb, $r8sSavedDriver);
+    $r8sRetDb = $r8sRetOther = null;
+    gc_collect_cycles();
+    foreach (glob($r8sRet . '/jobs/*/*') ?: [] as $r8sF) @unlink($r8sF);
+    foreach (glob($r8sRet . '/jobs/*') ?: [] as $r8sF) @rmdir($r8sF);
+    @rmdir($r8sRet . '/jobs');
+    foreach (glob($r8sRet . '/*') ?: [] as $r8sF) @unlink($r8sF);
+    @rmdir($r8sRet);
+}
+
 // MySQL: the CSV exports really stream. Native prepares ignore the buffered-query option given to prepare(), so the
 // whole result used to land in PHP memory; Db::executeUnbuffered switches the connection for that execute only.
 if (!getenv('TEST_MYSQL_DSN')) {

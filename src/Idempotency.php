@@ -106,14 +106,12 @@ class Idempotency {
      * Cleanup old events (call periodically)
      */
     public static function cleanup(int $olderThanDays = 7): int {
-        $db = Db::get();
+        // In batches: a single DELETE over a large table holds the SQLite write lock past busy_timeout.
         if (Db::isSqlite()) {
-            $stmt = $db->prepare("DELETE FROM processed_events WHERE created_at < datetime('now', :days)");
-            $stmt->execute([':days' => "-{$olderThanDays} days"]);
-        } else {
-            $days = (int)$olderThanDays;
-            $stmt = $db->query("DELETE FROM processed_events WHERE created_at < DATE_SUB(NOW(), INTERVAL {$days} DAY)");
+            return Db::writeInBatches('processed_events', 'DELETE FROM processed_events', "created_at < datetime('now', :days)",
+                [':days' => "-{$olderThanDays} days"], [], 'event_id');
         }
-        return (int)$stmt->rowCount();
+        $days = (int)$olderThanDays;
+        return Db::writeInBatches('processed_events', 'DELETE FROM processed_events', "created_at < DATE_SUB(NOW(), INTERVAL {$days} DAY)", [], [], 'event_id');
     }
 }

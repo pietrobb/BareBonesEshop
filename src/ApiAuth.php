@@ -133,14 +133,12 @@ class ApiAuth {
 
     public static function cleanupIdempotency(int $olderThanDays = 30): int {
         $olderThanDays = max(1, $olderThanDays);
-        $db = Db::get();
+        // In batches: a single DELETE over a large table holds the SQLite write lock past busy_timeout.
         if (Db::isSqlite()) {
-            $stmt = $db->prepare("DELETE FROM api_idempotency WHERE created_at < datetime('now', :age)");
-            $stmt->execute([':age' => '-' . $olderThanDays . ' days']);
-        } else {
-            $stmt = $db->query("DELETE FROM api_idempotency WHERE created_at < DATE_SUB(NOW(), INTERVAL {$olderThanDays} DAY)");
+            return Db::writeInBatches('api_idempotency', 'DELETE FROM api_idempotency', "created_at < datetime('now', :age)",
+                [':age' => '-' . $olderThanDays . ' days']);
         }
-        return $stmt->rowCount();
+        return Db::writeInBatches('api_idempotency', 'DELETE FROM api_idempotency', "created_at < DATE_SUB(NOW(), INTERVAL {$olderThanDays} DAY)");
     }
 
     private static function assertIdempotencyKey(string $key): void {

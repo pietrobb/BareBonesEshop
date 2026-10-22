@@ -51,20 +51,19 @@ final class RetentionCleanup
             'api_idempotency'  => ApiAuth::cleanupIdempotency((int)($cfg['api_idempotency_days'] ?? 30)),
         ];
 
+        // In batches (Db::writeInBatches): one statement over millions of rows held the SQLite write lock for
+        // half a minute and checkouts failed after busy_timeout.
         $outboxCutoff = $cutoff((int)($cfg['outbox_delivered_days'] ?? 30));
-        $db->prepare("DELETE FROM webhook_deliveries WHERE event_id IN
-            (SELECT id FROM event_outbox WHERE status = 'delivered' AND updated_at < :cutoff)")
-            ->execute([':cutoff' => $outboxCutoff]);
-        $outbox = $db->prepare("DELETE FROM event_outbox WHERE status = 'delivered' AND updated_at < :cutoff");
-        $outbox->execute([':cutoff' => $outboxCutoff]);
-        $deleted['event_outbox'] = $outbox->rowCount();
+        Db::writeInBatches('webhook_deliveries', 'DELETE FROM webhook_deliveries', "event_id IN
+            (SELECT id FROM event_outbox WHERE status = 'delivered' AND updated_at < :cutoff)", [':cutoff' => $outboxCutoff]);
+        $deleted['event_outbox'] = Db::writeInBatches('event_outbox', 'DELETE FROM event_outbox',
+            "status = 'delivered' AND updated_at < :cutoff", [':cutoff' => $outboxCutoff]);
         // Only the counter value matters; the newest row is kept (MySQL/MariaDB restart the counter from the max row).
         $lastSequence = (int)$db->query('SELECT COALESCE(MAX(id), 0) FROM event_sequence')->fetchColumn();
-        $db->prepare('DELETE FROM event_sequence WHERE id < :last')->execute([':last' => $lastSequence]);
+        Db::writeInBatches('event_sequence', 'DELETE FROM event_sequence', 'id < :last', [':last' => $lastSequence]);
 
-        $jobs = $db->prepare("DELETE FROM queue_jobs WHERE state = 'completed' AND completed_at < :cutoff");
-        $jobs->execute([':cutoff' => $cutoff((int)($cfg['completed_jobs_days'] ?? 7))]);
-        $deleted['queue_jobs'] = $jobs->rowCount();
+        $deleted['queue_jobs'] = Db::writeInBatches('queue_jobs', 'DELETE FROM queue_jobs', "state = 'completed' AND completed_at < :cutoff",
+            [':cutoff' => $cutoff((int)($cfg['completed_jobs_days'] ?? 7))]);
 
         // CSP reports are purged on ingest too, but a quiet site would otherwise keep old ones forever.
         $deleted['csp_violations'] = Db::tableExists('csp_violations', $db) ? CspReports::purge($db, $now) : 0;

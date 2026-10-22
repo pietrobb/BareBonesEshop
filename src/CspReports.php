@@ -93,9 +93,8 @@ final class CspReports
     /** Drop reports older than the retention window (also run daily by RetentionCleanup). */
     public static function purge(PDO $db, ?int $now = null): int
     {
-        $stmt = $db->prepare('DELETE FROM csp_violations WHERE created_at < :cutoff');
-        $stmt->execute([':cutoff' => gmdate('Y-m-d H:i:s', ($now ?? time()) - self::RETENTION_DAYS * 86400)]);
-        return $stmt->rowCount();
+        return Db::writeInBatches('csp_violations', 'DELETE FROM csp_violations', 'created_at < :cutoff',
+            [':cutoff' => gmdate('Y-m-d H:i:s', ($now ?? time()) - self::RETENTION_DAYS * 86400)], [], 'id', 1000, $db);
     }
 
     /** @param array<string, string> $values */

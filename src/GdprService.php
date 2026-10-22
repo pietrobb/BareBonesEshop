@@ -966,11 +966,10 @@ class GdprService {
         $countStmt = $db->prepare("SELECT COUNT(*) AS c FROM {$table} WHERE {$field} <= :cutoff");
         $countStmt->execute([':cutoff' => $cutoff]);
         $affected = (int)$countStmt->fetch()['c'];
+        $countStmt->closeCursor();
 
         if ($mode === 'apply' && $affected > 0) {
-            $stmt = $db->prepare("DELETE FROM {$table} WHERE {$field} <= :cutoff");
-            $stmt->execute([':cutoff' => $cutoff]);
-            $affected = $stmt->rowCount();
+            $affected = self::retentionWrite($db, $p, "DELETE FROM {$table}", "{$field} <= :cutoff", [':cutoff' => $cutoff]);
         }
 
         return self::recordRun($db, $key, $mode, $affected, $start, ['cutoff' => $cutoff]);
@@ -984,11 +983,10 @@ class GdprService {
         $sql = Db::dateAddSeconds($field, $ttlField) . " <= " . Db::now();
         $countStmt = $db->query("SELECT COUNT(*) AS c FROM {$table} WHERE {$sql}");
         $affected = (int)$countStmt->fetch()['c'];
+        $countStmt->closeCursor();
 
         if ($mode === 'apply' && $affected > 0) {
-            $stmt = $db->prepare("DELETE FROM {$table} WHERE {$sql}");
-            $stmt->execute();
-            $affected = $stmt->rowCount();
+            $affected = self::retentionWrite($db, $p, "DELETE FROM {$table}", $sql);
         }
 
         return self::recordRun($db, $key, $mode, $affected, $start, ['ttl_field' => $ttlField]);
@@ -1030,12 +1028,12 @@ class GdprService {
         $countStmt = $db->prepare("SELECT COUNT(*) AS c FROM {$table} WHERE {$where}");
         $countStmt->execute($params);
         $affected = (int)$countStmt->fetch()['c'];
+        $countStmt->closeCursor();
 
         if ($mode === 'apply' && $affected > 0) {
-            foreach (array_keys($sets) as $i) $params[":marker{$i}"] = $marker;
-            $stmt = $db->prepare("UPDATE {$table} SET " . implode(', ', $sets) . " WHERE {$where}");
-            $stmt->execute($params);
-            $affected = $stmt->rowCount();
+            $markers = [];
+            foreach (array_keys($sets) as $i) $markers[":marker{$i}"] = $marker;
+            $affected = self::retentionWrite($db, $p, "UPDATE {$table} SET " . implode(', ', $sets), $where, $params, $markers);
         }
 
         return self::recordRun($db, $key, $mode, $affected, $start, [
@@ -1073,28 +1071,47 @@ class GdprService {
         ");
         $countStmt->execute([':cutoff' => $cutoff]);
         $affected = (int)$countStmt->fetch()['c'];
+        $countStmt->closeCursor();
 
         if ($mode === 'apply' && $affected > 0) {
-            // Fetch + hash + update per row (salt is in PHP, not SQL)
+            // Fetch + hash + update per row (salt is in PHP, not SQL), in id-keyset chunks: all matching rows of a
+            // large table at once did not fit in a 128 MB worker.
             $rows = $db->prepare("
                 SELECT id, {$emailCol} AS email FROM {$table}
-                WHERE {$field} <= :cutoff
+                WHERE id > :after AND {$field} <= :cutoff
                   AND {$emailCol} IS NOT NULL
                   AND {$emailCol} != ''
                   AND {$emailCol} NOT LIKE 'sha256:%'
                   AND length({$emailCol}) != 64
+                ORDER BY id LIMIT 1000
             ");
-            $rows->execute([':cutoff' => $cutoff]);
             $upd = $db->prepare("UPDATE {$table} SET {$emailCol} = ? WHERE id = ?");
             $count = 0;
-            foreach ($rows->fetchAll() as $r) {
-                $upd->execute([self::hashPii(strtolower((string)$r['email'])), (int)$r['id']]);
-                $count++;
-            }
+            $after = 0;
+            do {
+                $rows->execute([':after' => $after, ':cutoff' => $cutoff]);
+                $chunk = $rows->fetchAll();
+                $rows->closeCursor();
+                foreach ($chunk as $r) {
+                    $upd->execute([self::hashPii(strtolower((string)$r['email'])), (int)$r['id']]);
+                    $after = (int)$r['id'];
+                    $count++;
+                }
+            } while (count($chunk) === 1000);
             $affected = $count;
         }
 
         return self::recordRun($db, $key, $mode, $affected, $start, ['cutoff' => $cutoff, 'column' => $emailCol]);
+    }
+
+    /**
+     * A retention DELETE/UPDATE in batches by the table's key (policy `key`, default `id`): one statement over
+     * years of rows held the SQLite write lock for half a minute and checkouts failed after busy_timeout.
+     */
+    private static function retentionWrite(PDO $db, array $p, string $statement, string $where, array $params = [], array $statementParams = []): int {
+        $key = (string)($p['key'] ?? 'id');
+        if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $key)) throw new InvalidArgumentException("policy.key invalid: {$key}");
+        return Db::writeInBatches((string)$p['table'], $statement, $where, $params, $statementParams, $key, 1000, $db);
     }
 
     private static function computeCutoff(array $p): string {
