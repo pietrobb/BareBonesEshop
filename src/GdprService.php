@@ -42,7 +42,7 @@ class GdprService {
         'password_reset_tokens'        => ['columns' => ['customer_id', 'token'], 'erase' => 'delete', 'export' => null,
             'reason' => 'credential secrets are never exported'],
         'orders'                       => ['columns' => ['customer_id', 'customer_name', 'customer_email', 'customer_phone', 'shipping_addr', 'ip_address', 'notes'], 'erase' => 'retain', 'export' => 'orders',
-            'reason' => '10-year accounting retention (SK Act 431/2002 §35), scrubbed by cli/gdpr-gc.php afterwards'],
+            'reason' => '10-year accounting retention (SK Act 431/2002 §35), scrubbed by cli/gdpr-gc.php afterwards; ip_address, customer_phone and notes are no accounting data: erased with the customer and scrubbed after 180 days (orders_contact)'],
         'order_items'                  => ['columns' => ['name'], 'erase' => 'retain', 'export' => 'orders', 'reason' => 'accounting record of the retained order'],
         'invoices'                     => ['columns' => ['customer_snapshot'], 'erase' => 'retain', 'export' => 'orders', 'reason' => 'accounting record of the retained order'],
         'order_consents'               => ['columns' => ['ip_hash', 'user_agent'], 'erase' => 'retain', 'export' => 'orders',
@@ -714,6 +714,13 @@ class GdprService {
         $orderIds = self::customerOrderIds($db, $ownership);
         // Read before carts and consents are erased: they are what links the browser sessions.
         $sessionKeys = self::customerSessionKeys($db, $customerId, $orderIds);
+
+        // Not accounting data: the orders' IP address, phone number and free-text note go now; name, address and e-mail
+        // stay for the 10-year retention (PII_REGISTRY 'orders').
+        $stmt = $db->prepare("UPDATE orders SET ip_address = '', customer_phone = '', notes = ''
+            WHERE id IN (" . self::CUSTOMER_ORDERS . ") AND (ip_address <> '' OR customer_phone <> '' OR notes <> '')");
+        $stmt->execute($ownership);
+        $rows['orders'] = $stmt->rowCount();
 
         $stmt = $db->prepare("DELETE FROM product_reviews WHERE customer_id = :id");
         $stmt->execute([':id' => $customerId]);

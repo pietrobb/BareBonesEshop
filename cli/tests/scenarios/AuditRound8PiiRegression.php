@@ -69,3 +69,40 @@ $r8pMigrated = $r8pOld->query('SELECT id, download_token, download_token_expires
 $r8pBad = array_filter($r8pMigrated, static fn(array $r): bool => $r['download_token'] !== hash('sha256', $r8pLegacy[(int)$r['id']])
     || abs(strtotime($r['download_token_expires_at'] . ' UTC') - time() - 30 * 86400) > 120);
 assert_true(count($r8pMigrated) === 1003 && $r8pBad === [], 'R8 PII migration: every existing token (past one batch) is hashed and expires in 30 days (' . count($r8pBad) . ' wrong)');
+
+// 2) The order's IP address, phone and note are no accounting data: erased with the customer, scrubbed after 180 days.
+$r8pCustomer = static function (string $email) use ($r8pDb): int {
+    $r8pDb->prepare("INSERT INTO customers (email, password_hash, name, phone) VALUES (?, 'x', 'R8P Person', '+421900000001')")->execute([$email]);
+    return (int)$r8pDb->lastInsertId();
+};
+$r8pContactOrder = static function (?int $customer, string $email, int $ageDays) use ($r8pDb): int {
+    $r8pDb->prepare("INSERT INTO orders (order_number, status, payment_status, customer_id, customer_name, customer_email, customer_phone, shipping_addr, payment_method,
+            subtotal, total, currency, store_id, locale, ip_address, notes, created_at)
+        VALUES (?, 'delivered', 'paid', ?, 'R8P Person', ?, '+421900000001', '{\"street\":\"R8P street 1\"}', 'card', 1000, 1000, 'eur', 'default', 'sk', '203.0.113.8', 'Ring twice, R8P', ?)")
+        ->execute(['R8P-C-' . bin2hex(random_bytes(3)), $customer, $email, gmdate('Y-m-d H:i:s', time() - $ageDays * 86400)]);
+    return (int)$r8pDb->lastInsertId();
+};
+$r8pContact = static fn(int $id): array => $r8pDb->query("SELECT customer_name, customer_email, shipping_addr, ip_address, customer_phone, notes FROM orders WHERE id = {$id}")->fetch(PDO::FETCH_ASSOC);
+$r8pErased = $r8pCustomer('r8p-erase@example.test');
+$r8pErasedOrder = $r8pContactOrder($r8pErased, 'r8p-erase@example.test', 3);
+$r8pOther = $r8pCustomer('r8p-keep@example.test');
+$r8pOtherOrder = $r8pContactOrder($r8pOther, 'r8p-keep@example.test', 3);
+GdprService::anonymizeCustomer($r8pErased, 'admin');
+$r8pAfter = $r8pContact($r8pErasedOrder);
+assert_equals(['', '', ''], [$r8pAfter['ip_address'], $r8pAfter['customer_phone'], $r8pAfter['notes']],
+    'R8 PII erase: the IP address, phone and note of the customer\'s orders are erased');
+assert_true($r8pAfter['customer_name'] === 'R8P Person' && str_contains((string)$r8pAfter['shipping_addr'], 'R8P street 1'),
+    'R8 PII erase: name and address stay for the accounting retention');
+assert_equals('203.0.113.8', $r8pContact($r8pOtherOrder)['ip_address'], 'R8 PII erase: another customer\'s order keeps its data');
+
+$r8pPolicies = json_decode((string)file_get_contents(dirname(TEST_CLI_DIR) . '/config/data-retention.json'), true)['policies'];
+$r8pOld = $r8pContactOrder(null, 'r8p-guest@example.test', 200);
+$r8pRecent = $r8pContactOrder(null, 'r8p-guest@example.test', 30);
+$r8pRun = GdprService::applyRetention('orders_contact', (array)($r8pPolicies['orders_contact'] ?? []), 'apply');
+$r8pOldRow = $r8pContact($r8pOld);
+assert_true(($r8pPolicies['orders_contact']['ttl_days'] ?? null) === 180 && (int)$r8pRun['affected'] >= 1
+    && !str_contains($r8pOldRow['ip_address'] . $r8pOldRow['customer_phone'] . $r8pOldRow['notes'], 'R8P') && $r8pOldRow['ip_address'] !== '203.0.113.8'
+    && !str_contains($r8pOldRow['customer_phone'], '+421'),
+    'R8 PII retention: after 180 days the IP address, phone and note of an order are scrubbed');
+assert_true($r8pOldRow['customer_email'] === 'r8p-guest@example.test' && $r8pContact($r8pRecent)['ip_address'] === '203.0.113.8',
+    'R8 PII retention: the e-mail stays (10-year policy) and a recent order keeps its contact data');
