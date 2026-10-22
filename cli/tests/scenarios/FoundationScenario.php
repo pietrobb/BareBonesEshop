@@ -340,7 +340,9 @@ if ($mysqlDsn) {
     } catch (\PDOException $e) {
         // Only a server that cannot be reached is a skip. A failing statement used to be reported as a skip too, and
         // since round 7 every check after the orders.delivered_at migration silently never ran in CI.
-        if ($my === null) echo "  [SKIP] TEST_MYSQL_DSN set but MySQL unavailable: " . $e->getMessage() . "\n";
+        // The native-database CI job requires the server: there an unreachable one fails instead of skipping ~40 checks.
+        if ($my === null && getenv('BAREBONES_REQUIRE_MYSQL_UPDATE_TEST') === '1') assert_true(false, 'MySQL live: CI requires a reachable TEST_MYSQL_DSN: ' . $e->getMessage());
+        elseif ($my === null) echo "  [SKIP] TEST_MYSQL_DSN set but MySQL unavailable: " . $e->getMessage() . "\n";
         else assert_true(false, 'MySQL live parity probe runs to the end without a database error: ' . $e->getMessage());
     } finally {
         Db::init($pdo, 'sqlite');
@@ -1482,6 +1484,9 @@ assert_true(str_starts_with($storedTotp, 'v1:') && !str_contains($storedTotp, $e
 assert_true($storedRecovery !== hash('sha256', str_replace('-', '', $enrollment['recovery_codes'][0])), 'G9 identity: recovery codes use a deployment-keyed hash at rest');
 assert_true(Totp::verify($enrollment['secret'], Totp::code($enrollment['secret'])), 'G9 identity: RFC 6238 code verifies');
 // TOTP codes are single-use (A07.3), so each successful login below uses a newer time step in the ±1 window.
+// Start well inside a 30 s step: a step boundary between minting the previous-step code and the (slow, password
+// hashing) check pushed that code out of the window and failed this test now and then.
+if (30 - time() % 30 < 10) sleep(30 - time() % 30);
 $login = AdminIdentity::authenticate('g9-operator', 'Test-password-1234', Totp::code($enrollment['secret'], time() - 30), '127.0.0.1', 'G9 Test Device');
 assert_true($login !== null, 'G9 identity: password and TOTP authenticate');
 assert_true(AdminIdentity::session($login['token']) !== null, 'G9 identity: server-side session validates');
