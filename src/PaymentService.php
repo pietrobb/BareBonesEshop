@@ -133,9 +133,10 @@ class PaymentService {
     }
 
     public static function transitionPayment(int $orderId, string $to, string $eventType, int $amount = 0, string $idempotencyKey = '', array $payload = []): bool {
-        $order = Orders::byId($orderId);
-        if (!$order) throw new \RuntimeException("Order #{$orderId} not found");
-        return self::applyTransition($order, $to, $eventType, $amount > 0 ? $amount : (int)($order['total'] ?? 0), $idempotencyKey, $payload);
+        // Read under the order row lock: a cancellation committing after a plain read failed the compare-and-set
+        // (SQLite: "database is locked") and the confirmed payment answered 500.
+        return self::withLockedOrder($orderId, static fn(array $order): bool =>
+            self::applyTransition($order, $to, $eventType, $amount > 0 ? $amount : (int)($order['total'] ?? 0), $idempotencyKey, $payload));
     }
 
     /** Guarded state-machine transition; $amount is recorded exactly (0 = no money moved). */
@@ -784,29 +785,31 @@ class PaymentService {
      * raised, so money is never kept silently.
      */
     public static function settleCapture(int $orderId, string $note): void {
-        $order = Orders::byId($orderId);
-        if (!$order) return;
-        if (OrderWorkflow::canTransition((string)$order['status'], 'paid')) {
-            OrderWorkflow::transition($orderId, 'paid', $note);
-            return;
-        }
-        if ((string)$order['status'] !== 'cancelled') return;
         $manualKey = 'order_refund_manual_' . $orderId;
-        $manualBefore = self::transactionExists($manualKey);
+        $jobs = [];
+        $captured = false;
         $db = Db::get();
         $db->beginTransaction();
         try {
-            $jobs = self::orderRefundJobsWithin($orderId, 'payment.captured_after_cancel');
-            if ($jobs !== []) AuditLog::log('order_refund', $orderId, 'cancelled', 'refund_pending', 'Payment captured on a cancelled order: ' . $note);
-            // Offline money gets no refund job, only the manual-refund ledger row: still a capture to report.
-            $manual = !$manualBefore && self::transactionExists($manualKey);
+            // Decided under the order row lock: a cancellation committing after a plain read of the order made the
+            // transition to paid fail and the webhook answer 500, instead of refunding on the cancelled order.
+            Orders::lockWithin($orderId);
+            $order = Orders::byId($orderId);
+            if ($order && OrderWorkflow::canTransition((string)$order['status'], 'paid')) {
+                $jobs = OrderWorkflow::transitionWithin($orderId, 'paid', $note);
+            } elseif ($order && (string)$order['status'] === 'cancelled') {
+                $manualBefore = self::transactionExists($manualKey);
+                $jobs = self::orderRefundJobsWithin($orderId, 'payment.captured_after_cancel');
+                if ($jobs !== []) AuditLog::log('order_refund', $orderId, 'cancelled', 'refund_pending', 'Payment captured on a cancelled order: ' . $note);
+                // Offline money gets no refund job, only the manual-refund ledger row: still a capture to report.
+                $captured = $jobs !== [] || (!$manualBefore && self::transactionExists($manualKey));
+            }
             $db->commit();
         } catch (\Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();
             throw $e;
         }
-        if ($jobs === [] && !$manual) return;
-        IncidentMonitor::report('payment.captured_after_cancel', 'payment', 'critical', ['order_id' => $orderId]);
+        if ($captured) IncidentMonitor::report('payment.captured_after_cancel', 'payment', 'critical', ['order_id' => $orderId]);
         OrderWorkflow::pushDeferredJobs($jobs);
     }
 
@@ -965,6 +968,7 @@ class PaymentService {
             $providerRef = (string)($data['refund_id'] ?? $data['provider_ref'] ?? $data['orderId'] ?? $data['id'] ?? '');
             if ($to !== null && $to !== $from && self::canPaymentTransition($from, $to)) {
                 self::applyTransition($order, $to, $eventType, $amount, $eventKey, $payload);
+                if ($to === 'paid') self::recordPaymentReference($order, $provider, $data);
                 return $to === 'paid';
             }
             // Checked before this event's own row joins the ledger, whose references it would match.
@@ -976,6 +980,23 @@ class PaymentService {
         });
 
         if ($settle) self::settleCapture($orderId, 'Payment confirmed via webhook');
+    }
+
+    /**
+     * The provider's payment id of a capture, onto an order that has none (or, at Stripe, only its checkout session
+     * id): without it refundsByHand() sent the refund to the merchant instead of the provider's refund API.
+     */
+    private static function recordPaymentReference(array $order, string $provider, array $data): void {
+        $ref = trim((string)match ($provider) {
+            'stripe' => $data['payment_intent'] ?? $data['id'] ?? '',
+            'payu' => $data['orderId'] ?? '',
+            default => $data['payment_id'] ?? '',
+        });
+        $current = trim((string)($order['payment_id'] ?? ''));
+        if ($ref === '' || $ref === $current) return;
+        if ($current === '' || ($provider === 'stripe' && str_starts_with($current, 'cs_') && !str_starts_with($ref, 'cs_'))) {
+            Orders::setPaymentId((int)$order['id'], $ref);
+        }
     }
 
     /**
