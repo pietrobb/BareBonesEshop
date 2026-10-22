@@ -1558,7 +1558,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'checkout_company' => 'Název firmy',
     'checkout_ico' => 'IČO',
     'checkout_dic' => 'DIČ',
-    'checkout_vat_id' => 'DIČ DPH (EU)',
+    'checkout_vat_id' => 'DIČ pro DPH (EU)',
     'checkout_company_required' => 'Při nákupu na firmu vyplňte název firmy.',
     'checkout_company_invalid' => '%s má neplatný tvar.',
     'bank_transfer.title' => 'Platba bankovním převodem',

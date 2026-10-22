@@ -180,3 +180,19 @@ foreach (['sk', 'cs', 'en', 'de', 'pl', 'hu'] as $r8tLocale) {
     assert_true($r8tLabel !== '' && str_contains($r8tPolicy, $r8tLabel) && !str_contains($r8tPolicy, 'zákazníckom účte, ak je dostupné') && !str_contains($r8tPolicy, 'customer account where available'),
         "R8 cookies ({$r8tLocale}): the cookie policy points to the footer settings link, not only to an account");
 }
+
+// 6) Invoice and payment wording: correct tax terms per language, and no "variable symbol" outside SK/CZ.
+$r8tLabels = (new ReflectionMethod('InvoiceService', 'loadInvoiceLabels'));
+$r8tInv = fn(string $l): array => $r8tLabels->invoke(null, $l);
+assert_true(!str_contains($r8tInv('de')['credit_title'], 'Gutschrift') && str_contains($r8tInv('de')['credit_title'], 'Rechnungskorrektur'),
+    'R8 invoices (de): a corrective document is a Rechnungskorrektur, not a Gutschrift (self-billing)');
+assert_true(!str_contains($r8tInv('pl')['non_vat_payer_note'], 'płatnik') && str_contains($r8tInv('pl')['non_vat_payer_note'], 'podatnikiem VAT'),
+    'R8 invoices (pl): a seller outside VAT is "nie jest czynnym podatnikiem VAT", not a płatnik');
+assert_true($r8tInv('cs')['ic_dph'] !== 'DIČ DPH', 'R8 invoices (cs): no "DIČ DPH" label (a Czech VAT ID is a DIČ)');
+foreach (['en', 'de', 'pl', 'hu', 'es'] as $r8tLocale) {
+    $r8tLang = require $r8tApp . '/lang/' . $r8tLocale . '.php';
+    $r8tWords = implode(' | ', [$r8tLang['bank_transfer.intro'], $r8tLang['bank_transfer.variable_symbol'], $r8tLang['admin.order.variable_symbol'],
+        $r8tLang['admin.recovery.variable_symbol'], $r8tInv($r8tLocale)['variable_symbol']]);
+    assert_true(preg_match('~variable symbol|variables symbol|variabelsymbol|zahlungssymbol|symbol zmienny|symbol var|változó szimbólum|símbolo variable~iu', $r8tWords) === 0,
+        "R8 payment wording ({$r8tLocale}): a payment reference, not a Czech/Slovak variable symbol");
+}
