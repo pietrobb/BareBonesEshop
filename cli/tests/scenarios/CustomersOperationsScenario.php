@@ -37,6 +37,8 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS customers (
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
 )");
 $catalogPricingB2bMigration->up($pdo, true);
+// The Omnibus run copies the listing's price queries read (a missing table costs the G3 budget a fallback query).
+(require TEST_CLI_DIR . '/../migrations/20261022150000_pricing_runs.php')->up($pdo, true);
 // The migration rebuilds customers (DROP TABLE): an unfinished statement of an earlier scenario would lock it.
 foreach ($GLOBALS as $customerEmailOpenStatement) if ($customerEmailOpenStatement instanceof PDOStatement) $customerEmailOpenStatement->closeCursor();
 $customerEmailPerStoreMigration = require TEST_CLI_DIR . '/../migrations/20261019120000_customer_email_per_store.php';

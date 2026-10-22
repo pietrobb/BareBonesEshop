@@ -169,25 +169,36 @@ class Pricing {
             $params[$placeholder] = $productId;
         }
 
+        $sql = "SELECT pp.product_id, pp.price, pp.compare_price, pp.min_qty,
+                pl.code AS price_list_code, pl.priority, pl.customer_group_id,
+                LOWER(pl.currency) AS price_list_currency, pl.valid_from, pl.valid_to,
+                CASE WHEN pl.customer_group_id IS NULL THEN 0 ELSE 1 END AS group_rank, pp.id AS row_id, 0 AS archived
+            FROM price_list_prices pp
+            JOIN price_lists pl ON pl.id = pp.price_list_id
+            WHERE pp.product_id IN (" . implode(', ', $placeholders) . ")
+              AND pp.variant_id IS NULL AND pp.min_qty <= :qty
+              AND pl.store_id = :store AND pl.active = 1
+              AND (pl.customer_group_id IS NULL OR pl.customer_group_id = :group_id)
+              AND (pl.valid_from IS NULL OR pl.valid_from <= :at_from)
+              AND (pl.valid_to IS NULL OR pl.valid_to >= :since)";
+        // Product-level prices of runs an admin change rewrote (PricingRuns); they always count as ended.
+        $runParams = [':run_store' => $params[':store'], ':run_group' => $params[':group_id'], ':run_at' => $at, ':run_since' => $params[':since']];
+        foreach ($placeholders as $index => $placeholder) $runParams[':run_product_' . $index] = $params[$placeholder];
+        $runs = " UNION ALL SELECT r.product_id, r.price, NULL, 1, '', 0, r.customer_group_id, LOWER(r.currency), r.valid_from, r.valid_to, 0, r.id, 1
+            FROM price_list_runs r
+            WHERE r.product_id IN (" . implode(', ', array_slice(array_keys($runParams), 4)) . ")
+              AND r.store_id = :run_store AND (r.customer_group_id IS NULL OR r.customer_group_id = :run_group)
+              AND (r.valid_from IS NULL OR r.valid_from <= :run_at) AND r.valid_to >= :run_since";
+        $order = ' ORDER BY product_id, group_rank DESC, min_qty DESC, priority DESC, row_id DESC';
         try {
-            $stmt = Db::get()->prepare("SELECT pp.product_id, pp.price, pp.compare_price, pp.min_qty,
-                    pl.code AS price_list_code, pl.priority, pl.customer_group_id,
-                    LOWER(pl.currency) AS price_list_currency, pl.valid_from, pl.valid_to
-                FROM price_list_prices pp
-                JOIN price_lists pl ON pl.id = pp.price_list_id
-                WHERE pp.product_id IN (" . implode(', ', $placeholders) . ")
-                  AND pp.variant_id IS NULL AND pp.min_qty <= :qty
-                  AND pl.store_id = :store AND pl.active = 1
-                  AND (pl.customer_group_id IS NULL OR pl.customer_group_id = :group_id)
-                  AND (pl.valid_from IS NULL OR pl.valid_from <= :at_from)
-                  AND (pl.valid_to IS NULL OR pl.valid_to >= :since)
-                ORDER BY pp.product_id,
-                  CASE WHEN pl.customer_group_id IS NULL THEN 0 ELSE 1 END DESC,
-                  pp.min_qty DESC, pl.priority DESC, pp.id DESC");
-            $stmt->execute($params);
-            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        } catch (PDOException $e) {
-            return [[], []];
+            $rows = self::fetchRows($sql . $runs . $order, $params + $runParams);
+        } catch (PDOException) {
+            try {
+                // price_list_runs is missing until migration 20261022150000 is applied.
+                $rows = self::fetchRows($sql . $order, $params);
+            } catch (PDOException) {
+                return [[], []];
+            }
         }
 
         $result = [];
@@ -195,7 +206,7 @@ class Pricing {
         foreach ($rows as $row) {
             $productId = (int)$row['product_id'];
             if (($currencies[$productId] ?? '') !== $row['price_list_currency']) continue;
-            if ($row['valid_to'] !== null && (string)$row['valid_to'] < $at) {
+            if ((int)$row['archived'] === 1 || ($row['valid_to'] !== null && (string)$row['valid_to'] < $at)) {
                 if ((int)$row['min_qty'] <= 1) {
                     $ended[$productId][] = ['price' => max(0, (int)$row['price']), 'valid_from' => $row['valid_from'], 'valid_to' => (string)$row['valid_to']];
                 }
@@ -205,6 +216,12 @@ class Pricing {
             $result[$productId] = $row;
         }
         return [$result, $ended];
+    }
+
+    private static function fetchRows(string $sql, array $params): array {
+        $stmt = Db::get()->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /** Apply a pre-resolved listing price row without further database access. */

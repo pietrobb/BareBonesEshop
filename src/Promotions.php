@@ -24,28 +24,43 @@ class Promotions {
     /**
      * Running catalog rules and, from the same query, those whose time window ended in the year before $at: the prices
      * the ended ones charged still count for the Omnibus prior price of a reduction that starts within 30 days after
-     * them (lowestEndedPrice(), PriceHistory::capCompare()).
+     * them (lowestEndedPrice(), PriceHistory::capCompare()). Runs an admin change rewrote are read from
+     * promotion_runs (PricingRuns) and always count as ended.
      * @return array{0: list<array>, 1: list<array>}
      */
     public static function catalogRulesWithEnded(?string $at = null): array {
         $at ??= gmdate('Y-m-d H:i:s');
+        $since = gmdate('Y-m-d H:i:s', (strtotime($at . ' UTC') ?: time()) - 365 * 86400);
+        $store = StoreContext::current()->id();
+        $sql = "SELECT id, code, scope, priority, stacking, conditions, actions, valid_from, valid_to, 0 AS archived FROM promotions
+            WHERE store_id = :store AND scope = 'catalog' AND active = 1
+              AND (valid_from IS NULL OR valid_from <= :at_from)
+              AND (valid_to IS NULL OR valid_to >= :since)";
+        $runs = " UNION ALL SELECT promotion_id, code, scope, priority, stacking, conditions, actions, valid_from, valid_to, 1 FROM promotion_runs
+            WHERE store_id = :run_store AND scope = 'catalog' AND (valid_from IS NULL OR valid_from <= :run_at) AND valid_to >= :run_since";
+        $params = [':store' => $store, ':at_from' => $at, ':since' => $since];
         try {
-            $stmt = Db::get()->prepare("SELECT * FROM promotions
-                WHERE store_id = :store AND scope = 'catalog' AND active = 1
-                  AND (valid_from IS NULL OR valid_from <= :at_from)
-                  AND (valid_to IS NULL OR valid_to >= :since)
-                ORDER BY priority ASC, id ASC");
-            $stmt->execute([':store' => StoreContext::current()->id(), ':at_from' => $at,
-                ':since' => gmdate('Y-m-d H:i:s', (strtotime($at . ' UTC') ?: time()) - 365 * 86400)]);
-            $running = $ended = [];
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $rule) {
-                if ($rule['valid_to'] === null || (string)$rule['valid_to'] >= $at) $running[] = $rule;
-                else $ended[] = $rule;
-            }
-            return [$running, $ended];
+            $rows = self::fetchRules($sql . $runs, $params + [':run_store' => $store, ':run_at' => $at, ':run_since' => $since]);
         } catch (PDOException) {
-            return [[], []];
+            try {
+                // promotion_runs is missing until migration 20261022150000 is applied.
+                $rows = self::fetchRules($sql, $params);
+            } catch (PDOException) {
+                return [[], []];
+            }
         }
+        $running = $ended = [];
+        foreach ($rows as $rule) {
+            if ((int)$rule['archived'] === 0 && ($rule['valid_to'] === null || (string)$rule['valid_to'] >= $at)) $running[] = $rule;
+            else $ended[] = $rule;
+        }
+        return [$running, $ended];
+    }
+
+    private static function fetchRules(string $sql, array $params): array {
+        $stmt = Db::get()->prepare($sql . ' ORDER BY priority ASC, id ASC');
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /**
@@ -60,7 +75,8 @@ class Promotions {
         if ($inWindow === []) return null;
         $basePrice = max(0, (int)($product['price'] ?? 0));
         $lowest = null;
-        foreach (array_merge(array_map(static fn(array $rule): array => [$rule], $inWindow), [$inWindow]) as $rules) {
+        // Together: one run per rule (a rule's archived runs did not run at the same time).
+        foreach (array_merge(array_map(static fn(array $rule): array => [$rule], $inWindow), [array_values(array_column($inWindow, null, 'id'))]) as $rules) {
             $price = (int)self::applyCatalogRules($product, $rules, $profile)['price'];
             if ($price < $basePrice) $lowest = $lowest === null ? $price : min($lowest, $price);
         }

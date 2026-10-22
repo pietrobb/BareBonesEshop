@@ -363,6 +363,9 @@ nginx PHP fallback when `operations.nginx_config` is set).
     `compare_price` the product never actually had is no longer shown. **After the upgrade, discounts set
     before it show no struck-through price** (the migration records only the current price) until the
     price changes again; promotions and price lists below the base price still show the base price.
+    Prices charged by catalog promotions and price lists in those 30 days count too, also after the admin
+    re-dates, switches off, deletes or reprices them (migration `20261022150000_pricing_runs` keeps a copy
+    of such a run, from the upgrade on).
   - **Google feed availability** follows the storefront: discontinued, disabled and not yet released
     products are `out of stock` whatever their stock, digital products are `in stock`, and products sold
     ahead of stock are `backorder` or `preorder` from their inventory policy.

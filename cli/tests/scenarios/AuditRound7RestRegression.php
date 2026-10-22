@@ -347,6 +347,58 @@ assert_equals([8000, 9000], [$r7rCard['amount_minor'] ?? null, $r7rCard['compare
     'R8 Omnibus: a price list that ended within the 30 days before the promotion lowers its struck-through price to the 90.00 charged');
 $pdo->exec("DELETE FROM price_list_prices WHERE price_list_id = {$r7rEndedList}");
 $pdo->exec("DELETE FROM price_lists WHERE id = {$r7rEndedList}");
+// R8 capability review (run 127): the admin's own ways to end or restart a sale (re-dating the rule, switching it off,
+// deleting it; re-dating, switching off, repricing or deleting a price list) kept the run that charged 80.00 / 90.00.
+$r7rHour = gmdate('Y-m-d H:i:s', time() - 3600);
+$r7rPromoForm = static fn(string $code, string $from, string $to, string $active = '1'): array => ['code' => $code, 'name' => $code, 'scope' => 'catalog',
+    'priority' => '100', 'stacking' => 'exclusive', 'valid_from' => $from, 'valid_to' => $to, 'active' => $active,
+    'action_type' => 'discount_percent', 'action_value' => '20', 'cond_product_skus' => 'R7R-OMNI-97734'];
+$r7rListForm = static fn(string $from, string $to, string $active = '1'): array => ['code' => 'r8-runs', 'name' => 'R8 runs',
+    'currency' => StoreContext::current()->currency(), 'customer_group_id' => '', 'priority' => '0', 'valid_from' => $from, 'valid_to' => $to, 'active' => $active];
+$r7rOk = static function (array $result): int { assert_true($result['ok'], 'R8 Omnibus runs: admin save ' . $result['message']); return $result['id']; };
+$r7rRunsReset = static function () use ($pdo): void {
+    $pdo->exec("DELETE FROM promotions WHERE code LIKE 'r8-restart-%'");
+    $pdo->exec("DELETE FROM price_list_prices WHERE price_list_id IN (SELECT id FROM price_lists WHERE code = 'r8-runs')");
+    $pdo->exec("DELETE FROM price_lists WHERE code = 'r8-runs'");
+    $pdo->exec('DELETE FROM promotion_runs');
+    $pdo->exec('DELETE FROM price_list_runs');
+};
+$r7rShownPair = static function () use ($pdo): array {
+    $card = StorefrontViewModel::productCard($pdo->query('SELECT * FROM products WHERE id = 97734')->fetch(PDO::FETCH_ASSOC))['price'];
+    return [$card['amount_minor'] ?? null, $card['compare_amount_minor'] ?? null];
+};
+$pdo->exec("DELETE FROM promotions WHERE code LIKE 'R8-RESTART-%'");
+foreach (['re-dated to run again' => 'redate', 'switched off' => 'off', 'deleted' => 'delete'] as $r7rLabel => $r7rHow) {
+    $r7rRunsReset();
+    $r7rId = $r7rOk(PricingAdmin::savePromotion(0, $r7rPromoForm('r8-restart-1', $r7rAgo(20), $r7rHow === 'redate' ? $r7rAgo(13) : '')));
+    match ($r7rHow) {
+        'redate' => $r7rOk(PricingAdmin::savePromotion($r7rId, $r7rPromoForm('r8-restart-1', $r7rHour, ''))),
+        'off' => $r7rOk(PricingAdmin::savePromotion($r7rId, $r7rPromoForm('r8-restart-1', $r7rAgo(20), '', '0'))),
+        'delete' => $r7rOk(PricingAdmin::deletePromotion($r7rId)),
+    };
+    if ($r7rHow !== 'redate') $r7rOk(PricingAdmin::savePromotion(0, $r7rPromoForm('r8-restart-2', $r7rHour, '')));
+    assert_equals([8000, null], $r7rShownPair(), "R8 Omnibus runs: a catalog promotion {$r7rLabel} in the admin keeps its 80.00 run, so the new 80.00 shows no struck-through 100.00");
+}
+foreach (['deleted' => 'delete', 're-dated' => 'redate', 'repriced' => 'reprice', 'switched off' => 'off'] as $r7rLabel => $r7rHow) {
+    $r7rRunsReset();
+    $r7rList = $r7rOk(PricingAdmin::savePriceList(0, $r7rListForm($r7rAgo(18), $r7rAgo(10))));
+    $r7rOk(PricingAdmin::savePrices($r7rList, ['prices' => 'R7R-OMNI-97734 | 1 | 9000']));
+    match ($r7rHow) {
+        'delete' => $r7rOk(PricingAdmin::deletePriceList($r7rList)),
+        'redate' => $r7rOk(PricingAdmin::savePriceList($r7rList, $r7rListForm($r7rAgo(400), $r7rAgo(390)))),
+        'reprice' => $r7rOk(PricingAdmin::savePrices($r7rList, ['prices' => 'R7R-OMNI-97734 | 1 | 9900'])),
+        'off' => $r7rOk(PricingAdmin::savePriceList($r7rList, $r7rListForm($r7rAgo(18), $r7rAgo(10), '0'))),
+    };
+    $r7rOk(PricingAdmin::savePromotion(0, $r7rPromoForm('r8-restart-2', $r7rHour, '')));
+    assert_equals([8000, 9000], $r7rShownPair(), "R8 Omnibus runs: a price list {$r7rLabel} in the admin keeps its 90.00 run for the struck-through price");
+}
+// Extending a running promotion is the same run: no copy, the struck-through base price stays.
+$r7rRunsReset();
+$r7rId = $r7rOk(PricingAdmin::savePromotion(0, $r7rPromoForm('r8-restart-1', $r7rAgo(5), gmdate('Y-m-d H:i:s', time() + 5 * 86400))));
+$r7rOk(PricingAdmin::savePromotion($r7rId, $r7rPromoForm('r8-restart-1', $r7rAgo(5), gmdate('Y-m-d H:i:s', time() + 30 * 86400))));
+assert_equals([[8000, 10000], 0], [$r7rShownPair(), (int)$pdo->query('SELECT COUNT(*) FROM promotion_runs')->fetchColumn()],
+    'R8 Omnibus runs: extending a running promotion copies no run and keeps the struck-through base price');
+$r7rRunsReset();
 $pdo->exec("DELETE FROM promotions WHERE code LIKE 'R8-RESTART-%'");
 assert_equals(null, PriceHistory::capCompare(['price' => 8000, 'compare_price' => 10000], 10000, null)['compare_price'],
     'R7/R8 Omnibus: a product without recorded history shows no compare price (no proof of the prior price)');
