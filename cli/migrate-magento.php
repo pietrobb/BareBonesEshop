@@ -56,6 +56,8 @@ const MAGE_ATTR = [
     'short_description' => 73,
     'price'             => 75,
     'special_price'     => 76,
+    'special_from_date' => 77,
+    'special_to_date'   => 78,
     'weight'            => 80,
     'image'             => 85,
     'small_image'       => 86,
@@ -97,6 +99,7 @@ $tables = [
     'catalog_product_entity_text'                => [],
     'catalog_product_entity_decimal'             => [],
     'catalog_product_entity_int'                 => [],
+    'catalog_product_entity_datetime'            => [],
     'catalog_category_entity'                    => [],
     'catalog_category_entity_varchar'            => [],
     'catalog_category_product'                   => [],
@@ -125,6 +128,9 @@ $columnDefs = [
         'value_id', 'entity_type_id', 'attribute_id', 'store_id', 'entity_id', 'value',
     ],
     'catalog_product_entity_int' => [
+        'value_id', 'entity_type_id', 'attribute_id', 'store_id', 'entity_id', 'value',
+    ],
+    'catalog_product_entity_datetime' => [
         'value_id', 'entity_type_id', 'attribute_id', 'store_id', 'entity_id', 'value',
     ],
     'catalog_category_entity' => [
@@ -230,7 +236,7 @@ echo "  Products: " . count($productEntities) . "\n";
 // Build EAV value lookup: [entity_id][attribute_id][store_id] = value
 $eavData = [];
 foreach (['catalog_product_entity_varchar', 'catalog_product_entity_text',
-          'catalog_product_entity_decimal', 'catalog_product_entity_int'] as $tbl) {
+          'catalog_product_entity_decimal', 'catalog_product_entity_int', 'catalog_product_entity_datetime'] as $tbl) {
     foreach ($tables[$tbl] as $row) {
         $eid = (int)$row['entity_id'];
         $aid = (int)$row['attribute_id'];
@@ -517,9 +523,17 @@ foreach ($productEntities as $entityId => $entity) {
     $priceCents = $price ? (int)round((float)$price * 100) : 0;
     $comparePriceCents = null;
     if ($specialPrice && (float)$specialPrice > 0 && (float)$specialPrice < (float)$price) {
-        // In Magento, special_price is the SALE price, so original is the compare price
-        $comparePriceCents = $priceCents;
-        $priceCents = (int)round((float)$specialPrice * 100);
+        // The sale runs from special_from_date to special_to_date (both whole days, either may be empty).
+        $specialFrom = substr((string)eavGet($eavData, $entityId, MAGE_ATTR['special_from_date']), 0, 10);
+        $specialTo = substr((string)eavGet($eavData, $entityId, MAGE_ATTR['special_to_date']), 0, 10);
+        $today = gmdate('Y-m-d');
+        if (($specialFrom === '' || $specialFrom <= $today) && ($specialTo === '' || $specialTo >= $today)) {
+            // In Magento, special_price is the SALE price, so original is the compare price
+            $comparePriceCents = $priceCents;
+            $priceCents = (int)round((float)$specialPrice * 100);
+        } elseif ($specialFrom > $today) {
+            echo "  Notice: {$sku}: special price " . number_format((float)$specialPrice, 2, '.', '') . " from {$specialFrom} not applied (regular price kept); schedule it as a promotion\n";
+        }
     }
 
     // Slug
@@ -705,6 +719,8 @@ $bbCategoryIds = []; // mage_cat_id => bb_category_id
 foreach ($catCache as $mageCatId => $catData) {
     $bbCatId = Import::ensureCategory($catData['path'], $db);
     $bbCategoryIds[$mageCatId] = $bbCatId;
+    // The path is made of URL keys, so ensureCategory() named the category after its URL key.
+    $db->prepare("UPDATE categories SET name = :name WHERE id = :id")->execute([':name' => $catData['name'], ':id' => $bbCatId]);
 
     // Update category translations if any
     if (!empty($catData['translations'])) {
