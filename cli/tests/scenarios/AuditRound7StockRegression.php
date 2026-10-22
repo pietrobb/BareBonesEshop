@@ -105,6 +105,21 @@ assert_equals(1, (int)Rma::items((int)$r7sRmaId)[0]['quantity'], 'R7 cancel: the
 Rma::setStatus((int)$r7sRmaId, 'approved');
 Rma::receive((int)$r7sRmaId, [(int)Rma::items((int)$r7sRmaId)[0]['id'] => ['quantity' => 1, 'disposition' => 'restock']], 'r7s-cxl-receipt');
 assert_equals(3, Warehouse::totalAvailable('R7S-CXL'), 'R7 cancel: the returned shipped unit is restocked (the cancellation did not restore it)');
+// Round 8: a cancelled order never gets a delivered_at, so the customer's return window of its shipped units had no end.
+$r7sCxlRow = Orders::byId($r7sCxl);
+assert_equals([true, false], [Rma::withinReturnWindow($r7sCxlRow, time() + 13 * 86400), Rma::withinReturnWindow($r7sCxlRow, time() + 15 * 86400)],
+    'R8 return window: the shipped units of a cancelled order can be returned 14 days from their shipment (was unlimited)');
+$pdo->exec("UPDATE shipments SET delivered_at = '" . gmdate('Y-m-d H:i:s', time() + 10 * 86400) . "' WHERE id = " . (int)$r7sShipments[0]);
+assert_true(Rma::withinReturnWindow($r7sCxlRow, time() + 20 * 86400), 'R8 return window: a delivery reported by the carrier starts the window instead of the shipment');
+$pdo->exec("UPDATE shipments SET shipped_at = '" . gmdate('Y-m-d H:i:s', time() - 15 * 86400) . "', delivered_at = NULL WHERE id = " . (int)$r7sShipments[0]);
+$pdo->exec("INSERT INTO customers (email, password_hash, name) VALUES ('r8-cxl-window@example.test', 'x', 'R8 Window')");
+$r8wCustomer = (int)$pdo->lastInsertId();
+$pdo->exec("UPDATE orders SET customer_id = {$r8wCustomer} WHERE id = {$r7sCxl}");
+assert_equals('return_window_closed', Rma::create($r7sCxl, $r8wCustomer, 'changed my mind', [(int)$r7sLine($r7sCxl)['id'] => 1])[2],
+    'R8 return window: 15 days after the shipment the customer of a cancelled order is refused');
+assert_true(Rma::withinReturnWindow(['status' => 'cancelled', 'id' => 0, 'delivered_at' => null]), 'R8 return window: a cancelled order without a shipment has no date to count from');
+$pdo->exec("UPDATE orders SET customer_id = NULL WHERE id = {$r7sCxl}");
+$pdo->exec("DELETE FROM customers WHERE id = {$r8wCustomer}");
 $r7sDelivered = $r7sOrder('R7S-CXL', 1);
 assert_equals('order_not_returnable', Rma::create($r7sDelivered, null, 'not shipped', [(int)$r7sLine($r7sDelivered)['id'] => 1])[2], 'R7 cancel: an unshipped open order still has no RMA');
 
