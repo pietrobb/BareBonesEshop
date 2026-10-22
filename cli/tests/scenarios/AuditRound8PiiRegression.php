@@ -154,3 +154,21 @@ foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(dirname(TE
     if (preg_match('/(?<![\w>:])error_log\(/', (string)file_get_contents($r8pFile->getPathname()))) $r8pRaw[] = $r8pFile->getFilename();
 }
 assert_equals([], $r8pRaw, 'R8 PII logs: application code writes the PHP log only through Logger::phpLog');
+
+// 6) payment_transactions.raw_response is in the GDPR registry: erasure removes the payer the gateway named and keeps
+// what the refund and duplicate-capture checks read.
+$r8pPayer = $r8pCustomer('r8p-payer@example.test');
+$r8pPayerOrder = $r8pContactOrder($r8pPayer, 'r8p-payer@example.test', 3);
+$r8pDb->prepare("INSERT INTO payment_transactions (order_id, store_id, provider, provider_ref, status, amount, currency, idempotency_key, raw_response, created_at, updated_at)
+    VALUES (?, 'default', 'stripe', 'cs_r8p', 'paid', 1000, 'eur', 'r8p-pay', ?, datetime('now'), datetime('now'))")
+    ->execute([$r8pPayerOrder, json_encode(['event_type' => 'checkout.session.completed', 'payment_id' => 'pi_r8p', 'session_id' => 'cs_r8p',
+        'receipt_email' => 'r8p-payer@example.test', 'customer_details' => ['email' => 'r8p-payer@example.test', 'name' => 'R8P Payer', 'address' => ['line1' => 'Payer street 9']],
+        'note' => 'R8P-PAYER@example.test'])]);
+assert_equals('scrub', GdprService::PII_REGISTRY['payment_transactions']['erase'] ?? null, 'R8 PII registry: payment_transactions.raw_response is registered for erasure');
+GdprService::anonymizeCustomer($r8pPayer, 'admin');
+$r8pTx = (string)$r8pDb->query("SELECT raw_response FROM payment_transactions WHERE idempotency_key = 'r8p-pay'")->fetchColumn();
+$r8pTxData = json_decode($r8pTx, true);
+assert_true(!str_contains(strtolower($r8pTx), 'r8p-payer@') && !str_contains($r8pTx, 'R8P Payer') && !str_contains($r8pTx, 'Payer street'),
+    "R8 PII erase: the gateway response loses the payer's e-mail, name and address ({$r8pTx})");
+assert_true(($r8pTxData['payment_id'] ?? '') === 'pi_r8p' && ($r8pTxData['event_type'] ?? '') === 'checkout.session.completed' && ($r8pTxData['session_id'] ?? '') === 'cs_r8p',
+    'R8 PII erase: payment id, session and event stay for refunds and the duplicate-capture check');

@@ -64,6 +64,9 @@ class GdprService {
             'reason' => 'complaint record and the written decision for the 24-month liability (Directive (EU) 2019/771), kept with the retained order'],
         'event_outbox'                 => ['columns' => ['payload'], 'erase' => 'scrub', 'export' => 'events'],
         'queue_jobs'                   => ['columns' => ['payload'], 'erase' => 'scrub', 'export' => 'queued_jobs'],
+        // The gateway's answer can name the payer (Stripe customer_details, PayPal payer, receipt_email): erasure removes those
+        // fields and keeps ids, amounts and events the refund and duplicate-capture checks read.
+        'payment_transactions'         => ['columns' => ['raw_response'], 'erase' => 'scrub', 'export' => 'orders'],
     ];
 
     /**
@@ -768,6 +771,19 @@ class GdprService {
             $rows['return_receipts'] = $stmt->rowCount();
         }
 
+        $rows['payment_transactions'] = 0;
+        if ($orderIds !== []) {
+            $stmt = $db->prepare("SELECT id, raw_response FROM payment_transactions WHERE store_id = ?" . self::inList(' AND order_id', $orderIds));
+            $stmt->execute(array_merge([$store], $orderIds));
+            $update = $db->prepare("UPDATE payment_transactions SET raw_response = ? WHERE id = ?");
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $tx) {
+                $raw = json_decode((string)$tx['raw_response'], true);
+                if (!is_array($raw) || ($scrubbed = self::scrubPaymentPayer($raw, $email, $placeholder)) === $raw) continue;
+                $update->execute([json_encode($scrubbed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), $tx['id']]);
+                $rows['payment_transactions'] += $update->rowCount();
+            }
+        }
+
         $payloads = self::customerPayloadRows($db, $customerId, $email, $ownership, $orderIds);
         $rows['event_outbox'] = 0;
         $erasedEvent = json_encode(['customer_id' => $customerId, 'erased' => true]);
@@ -908,6 +924,18 @@ class GdprService {
             }
         }
         return $payload;
+    }
+
+    /** Gateway fields that name the payer; the whole value (an address object too) becomes the placeholder. */
+    private const PAYMENT_PAYER_KEYS = '/^(?:payer|contact|customer_details|billing_details|shipping(?:_details|_address)?|address|billing_address|(?:customer_|receipt_|payer_|billing_)?(?:email|name|phone)|(?:first|last|full)_?name)$/i';
+
+    /** A gateway response without its payer fields, and without any other value equal to the customer's e-mail. */
+    private static function scrubPaymentPayer(mixed $data, string $email, string $placeholder): mixed {
+        if (!is_array($data)) return is_string($data) && $email !== '' && strcasecmp(trim($data), $email) === 0 ? $placeholder : $data;
+        foreach ($data as $key => $value) {
+            $data[$key] = is_string($key) && preg_match(self::PAYMENT_PAYER_KEYS, $key) === 1 ? $placeholder : self::scrubPaymentPayer($value, $email, $placeholder);
+        }
+        return $data;
     }
 
     /** A JSON payload column rewritten by scrubPayloadEmail(); an undecodable payload is returned unchanged. */
