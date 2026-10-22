@@ -194,6 +194,8 @@ function adminShipmentAction(int $orderId, Closure $change, bool $requireOpenOrd
     $db = Db::get();
     $db->beginTransaction();
     try {
+        // Lock before the first read: on MySQL that read fixes the transaction's snapshot.
+        Orders::lockWithin($orderId);
         $order = Orders::byId($orderId);
         if (!$order) throw new DomainException('admin.order.msg.not_found');
         if ($requireOpenOrder && !in_array($order['status'], ADMIN_SHIPPABLE_ORDER_STATUSES, true)) throw new DomainException('admin.shipment.not_shippable');

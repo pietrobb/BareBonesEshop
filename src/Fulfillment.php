@@ -110,8 +110,12 @@ class Fulfillment {
             }
             if ($shipmentId <= 0) throw new RuntimeException('Shipment could not be resolved');
 
+            // MySQL REPEATABLE READ: a caller may have read in this transaction before the lock, so plain SELECTs
+            // would see that stale snapshot. Locking reads see the latest committed rows (allocations, shipments).
             $orderItems = [];
-            foreach (Orders::items($orderId) as $orderItem) $orderItems[(int)$orderItem['id']] = $orderItem;
+            $itemsStmt = $db->prepare('SELECT * FROM order_items WHERE order_id = :order ORDER BY id' . (Db::isMysql() ? ' FOR UPDATE' : ''));
+            $itemsStmt->execute([':order' => $orderId]);
+            foreach ($itemsStmt->fetchAll(PDO::FETCH_ASSOC) as $orderItem) $orderItems[(int)$orderItem['id']] = $orderItem;
             $itemInsert = $db->prepare(Db::insertIgnore() . " INTO shipment_items
                 (shipment_id, order_item_id, sku, quantity) VALUES (:shipment, :item, :sku, :quantity)");
             foreach ($items as $item) {
@@ -122,7 +126,7 @@ class Fulfillment {
                     throw new InvalidArgumentException('Invalid shipment item');
                 }
                 $capacity = self::allocatedQuantity($orderItems[$orderItemId], $sku, $warehouseId);
-                $alreadyPlanned = self::plannedQuantity($orderId, $orderItemId, $sku, $warehouseId);
+                $alreadyPlanned = self::plannedQuantity($orderId, $orderItemId, $sku, $warehouseId, null, true);
                 $currentStmt = $db->prepare('SELECT quantity FROM shipment_items WHERE shipment_id = :shipment AND order_item_id = :item AND sku = :sku');
                 $currentStmt->execute([':shipment' => $shipmentId, ':item' => $orderItemId, ':sku' => $sku]);
                 $current = (int)($currentStmt->fetchColumn() ?: 0);
@@ -262,12 +266,12 @@ class Fulfillment {
     }
 
     /** Quantity of an order line already in non-cancelled shipments of one warehouse (optionally ignoring one idempotency key). */
-    private static function plannedQuantity(int $orderId, int $orderItemId, string $sku, ?int $warehouseId, ?string $exceptKey = null): int {
+    private static function plannedQuantity(int $orderId, int $orderItemId, string $sku, ?int $warehouseId, ?string $exceptKey = null, bool $locking = false): int {
         $stmt = Db::get()->prepare("SELECT COALESCE(SUM(si.quantity), 0)
             FROM shipment_items si JOIN shipments s ON s.id = si.shipment_id
             WHERE s.order_id = :order AND si.order_item_id = :item AND si.sku = :sku AND si.status <> 'cancelled'
               AND ((s.warehouse_id = :warehouse) OR (s.warehouse_id IS NULL AND :warehouse2 IS NULL))
-              AND s.idempotency_key <> :except");
+              AND s.idempotency_key <> :except" . ($locking && Db::isMysql() ? ' FOR UPDATE' : ''));
         $stmt->execute([
             ':order' => $orderId, ':item' => $orderItemId, ':sku' => $sku,
             ':warehouse' => $warehouseId, ':warehouse2' => $warehouseId, ':except' => $exceptKey ?? '',

@@ -88,7 +88,31 @@ $reservation = $try($b, static fn() => Warehouse::reserve('R7L-DEL', 1));
 $deletion = $try($a, static fn() => Warehouse::delete($delWh));
 $deletion === 'ok' ? $a->commit() : $a->rollBack();
 $kept = (int)$a->query("SELECT COALESCE(SUM(reserved), 0) FROM warehouse_stock WHERE warehouse_id = {$delWh}")->fetchColumn();
-echo json_encode([[$first, $concurrent, $after, $planned], [$receipts, $received], [$reservation, $deletion, $kept]]);
+// Round 8: the admin HTTP handler opens the transaction and reads the order before createShipment() locks it. On
+// MySQL that first read fixed B's snapshot, so B's capacity check missed A's shipment committed meanwhile.
+$a->exec("INSERT INTO orders (order_number, status, payment_status, customer_name, customer_email, payment_method, subtotal, total, currency, store_id)
+    VALUES ('R7L-2', 'paid', 'paid', 'R7L', 'r7l@example.test', 'card', 2000, 2000, 'eur', 'default')");
+$order2 = (int)$a->lastInsertId();
+$a->prepare("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total, attrs, reserved_qty) VALUES (?, 97201, 'R7L-SKU', 'R7L', 2, 1000, 2000, ?, 2)")
+    ->execute([$order2, $attrs]);
+$item2 = (int)$a->lastInsertId();
+$ship2 = static fn(string $key): callable => static fn() => Fulfillment::createShipment($order2, $wh, [['order_item_id' => $item2, 'sku' => 'R7L-SKU', 'quantity' => 2]], $key);
+if ($driver === 'mysql') {
+    $a->beginTransaction();
+    $snapFirst = $try($a, $ship2('r8s-a'));
+    $b->beginTransaction();
+    $b->query("SELECT * FROM orders WHERE id = {$order2}")->fetch();
+    $a->commit();
+    $snapSecond = $try($b, $ship2('r8s-b'));
+    $b->inTransaction() ? $b->commit() : null;
+} else {
+    // SQLite has one writer and no older snapshot to read: the sequential pair is the meaningful check.
+    $snapFirst = $try($a, $ship2('r8s-a'));
+    $snapSecond = $try($b, $ship2('r8s-b'));
+}
+$planned2 = (int)$a->query("SELECT COALESCE(SUM(si.quantity), 0) FROM shipment_items si JOIN shipments s ON s.id = si.shipment_id
+    WHERE s.order_id = {$order2} AND si.status <> 'cancelled'")->fetchColumn();
+echo json_encode([[$first, $concurrent, $after, $planned], [$receipts, $received], [$reservation, $deletion, $kept], [$snapFirst, $snapSecond, $planned2]]);
 PHP);
 $r7lPhp = static function(array $args): array {
     $process = proc_open(array_merge([PHP_BINARY], $args), [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
@@ -111,6 +135,7 @@ try {
         assert_true($r7lReserved !== null && ($r7lReserved !== 'ok' || [$r7lDeleted, $r7lKept] === ['refused', 1]),
             "R7 {$r7lDriver} warehouse delete: a reservation committed during the delete survives and the delete is refused (" . json_encode($r7lResult[2] ?? $r7lOut) . ')');
         if ($r7lDriver === 'mysql') assert_equals(['ok', 'refused', 1], $r7lResult[2] ?? $r7lOut, 'R7 mysql warehouse delete: the delete re-reads reservations under lock instead of its stale snapshot');
+        assert_equals(['ok', 'refused', 2], $r7lResult[3] ?? $r7lOut, "R8 {$r7lDriver} shipments: a caller that read before the lock (admin HTTP handler) still sees the committed shipment and is refused");
     }
 } finally {
     if (isset($r7lDrivers['mysql'])) $r7lPhp([$r7lRoot . '/race.php', 'mysql', 'teardown', dirname(TEST_CLI_DIR), $r7lDrivers['mysql']]);
@@ -120,3 +145,6 @@ try {
 $r7lWorkflow = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/OrderWorkflow.php');
 assert_true(preg_match('/needs an open transaction.*?Orders::lockWithin\(\$orderId\);\s*\$order = Orders::byId/s', $r7lWorkflow) === 1,
     'R7 cancel vs ship: a status change locks the order before reading it, so it waits for a concurrent shipment');
+$r8sAdmin = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Shipments.php');
+assert_true(preg_match('/function adminShipmentAction.*?beginTransaction\(\);\s*try \{\s*(?:\/\/[^\n]*\n\s*)?Orders::lockWithin\(\$orderId\);\s*\$order = Orders::byId/s', $r8sAdmin) === 1,
+    'R8 admin shipments: the HTTP handler locks the order before its first read');

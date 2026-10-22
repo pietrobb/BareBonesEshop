@@ -345,6 +345,8 @@ class Import {
     public static function upsertProduct(array $data, ?PDO $db = null): void {
         $db = $db ?? Db::get();
         $catalog = self::assertSkuInCatalog((string)$data['sku'], $db);
+        // MySQL's ON DUPLICATE KEY fires on any unique key: a slug held by another SKU would overwrite that product.
+        $data['slug'] = self::freeProductSlug((string)$data['slug'], (string)$data['sku'], $db);
         $data['description'] = Security::sanitizeRichHtml((string)($data['description'] ?? ''));
         foreach (($data['translations'] ?? []) as $locale => $translation) {
             if (isset($translation['description'])) {
@@ -427,6 +429,16 @@ class Import {
         $id = $db->prepare('SELECT id FROM products WHERE sku = :sku AND store_id = :catalog');
         $id->execute([':sku' => $data['sku'], ':catalog' => $catalog]);
         PriceHistory::record([(int)$id->fetchColumn()], $db);
+    }
+
+    /** $slug, or "$slug-2", "$slug-3"… when another SKU already owns it (product slugs are unique across catalogs). */
+    private static function freeProductSlug(string $slug, string $sku, PDO $db): string {
+        $owner = $db->prepare('SELECT sku FROM products WHERE slug = :slug');
+        for ($n = 1, $candidate = $slug; ; $candidate = $slug . '-' . ++$n) {
+            $owner->execute([':slug' => $candidate]);
+            $ownerSku = $owner->fetchColumn();
+            if ($ownerSku === false || (string)$ownerSku === $sku) return $candidate;
+        }
     }
 
     /**
@@ -602,35 +614,61 @@ class Import {
      */
     public static function recountCategories(?PDO $db = null, ?array $ids = null): void {
         $db = $db ?? Db::get();
-
-        // Count products in entire subtree using materialized path
-        if ($ids === null) {
-            $cats = $db->query("SELECT id, path, store_id FROM categories ORDER BY depth DESC")->fetchAll();
-        } else {
-            $one = $db->prepare("SELECT id, path, store_id FROM categories WHERE id = :id");
-            $cats = [];
-            foreach ($ids as $id) {
-                $one->execute([':id' => (int)$id]);
-                if ($row = $one->fetch()) $cats[] = $row;
+        // One pass over the (product, category) pairs instead of one product scan per category: a product counts once
+        // in its primary category, in every linked one (as Products::byCategoryTree() lists it) and in their ancestors.
+        // Ancestors come from the materialized path, within the category's own catalog.
+        $categories = $db->query('SELECT id, path, store_id, product_count FROM categories')->fetchAll(PDO::FETCH_ASSOC);
+        $byPath = [];
+        foreach ($categories as $category) $byPath[(string)$category['store_id']][(string)$category['path']] = (int)$category['id'];
+        $targets = $ids === null ? array_fill_keys(array_map('intval', array_column($categories, 'id')), true)
+            : array_fill_keys(array_map('intval', $ids), true);
+        $ancestors = []; // category id => the target categories it counts in (itself and its ancestors)
+        foreach ($categories as $category) {
+            $up = [];
+            $prefix = '';
+            foreach (explode('/', (string)$category['path']) as $segment) {
+                $prefix = $prefix === '' ? $segment : $prefix . '/' . $segment;
+                $id = $byPath[(string)$category['store_id']][$prefix] ?? null;
+                if ($id !== null && isset($targets[$id])) $up[] = $id;
             }
+            if (isset($targets[(int)$category['id']]) && !in_array((int)$category['id'], $up, true)) $up[] = (int)$category['id'];
+            if ($up) $ancestors[(int)$category['id']] = $up;
         }
-        // Count and update separately: MySQL 8 rejects an UPDATE whose subquery reads the updated table (error 1093).
-        // A product counts in its primary category and in every linked one, as Products::byCategoryTree() lists it.
-        $subtree = $db->prepare("SELECT id FROM categories WHERE store_id = :store AND (path = :path OR path LIKE :pathPrefix ESCAPE '!')");
-        $update = $db->prepare("UPDATE categories SET product_count = :n WHERE id = :id");
 
-        foreach ($cats as $cat) {
-            $subtree->execute([
-                ':store'      => $cat['store_id'],
-                ':path'       => $cat['path'],
-                ':pathPrefix' => Db::likeLiteral((string)$cat['path']) . '/%',
-            ]);
-            $ids = array_map('intval', $subtree->fetchAll(PDO::FETCH_COLUMN)) ?: [(int)$cat['id']];
-            $in = implode(',', array_fill(0, count($ids), '?'));
-            $count = $db->prepare("SELECT COUNT(*) FROM products p WHERE p.status = 'active'
-                AND (p.category_id IN ({$in}) OR p.id IN (SELECT pc.product_id FROM product_categories pc WHERE pc.category_id IN ({$in})))");
-            $count->execute([...$ids, ...$ids]);
-            $update->execute([':n' => (int)$count->fetchColumn(), ':id' => $cat['id']]);
+        $counts = array_fill_keys(array_keys($targets), 0);
+        if ($ancestors) {
+            $filter = count($ancestors) === count($categories) ? '' : implode(',', array_keys($ancestors));
+            $pairs = $db->query("SELECT p.id AS pid, p.category_id AS cid FROM products p WHERE p.status = 'active' AND p.category_id IS NOT NULL"
+                . ($filter !== '' ? " AND p.category_id IN ({$filter})" : '')
+                . " UNION ALL SELECT pc.product_id AS pid, pc.category_id AS cid FROM product_categories pc
+                    JOIN products p ON p.id = pc.product_id WHERE p.status = 'active'"
+                . ($filter !== '' ? " AND pc.category_id IN ({$filter})" : '')
+                . ' ORDER BY pid');
+            $current = null;
+            $seen = [];
+            foreach ($pairs as $pair) {
+                if ((int)$pair['pid'] !== $current) {
+                    foreach ($seen as $id => $_) $counts[$id]++;
+                    $current = (int)$pair['pid'];
+                    $seen = [];
+                }
+                foreach ($ancestors[(int)$pair['cid']] ?? [] as $id) $seen[$id] = true;
+            }
+            foreach ($seen as $id => $_) $counts[$id]++;
+        }
+
+        $stored = array_column($categories, 'product_count', 'id');
+        $update = $db->prepare('UPDATE categories SET product_count = :n WHERE id = :id');
+        $own = !$db->inTransaction();
+        if ($own) $db->beginTransaction();
+        try {
+            foreach ($counts as $id => $count) {
+                if (array_key_exists($id, $stored) && ($stored[$id] === null || (int)$stored[$id] !== $count)) $update->execute([':n' => $count, ':id' => $id]);
+            }
+            if ($own) $db->commit();
+        } catch (\Throwable $e) {
+            if ($own) Db::rollBackOpen($db);
+            throw $e;
         }
     }
 
