@@ -143,6 +143,24 @@ if ($page === 'seed') {
     $db->exec('ANALYZE');
     exit(0);
 }
+if ($page === 'sitemap') {
+    Sitemap::setMaxUrlsForTesting(10000);
+    $result = [];
+    foreach ([0, 1] as $part) {
+        $out = tmpfile();
+        Sitemap::write($out, 'https://shop.example', $part);
+        rewind($out);
+        $result[$part] = ['urls' => 0, 'index' => false, 'last' => ''];
+        while (($line = fgets($out)) !== false) {
+            if (str_starts_with($line, '  <url>')) $result[$part]['urls']++;
+            if (str_starts_with($line, '<sitemapindex')) $result[$part]['index'] = true;
+            $result[$part]['last'] = trim($line);
+        }
+        fclose($out);
+    }
+    echo json_encode($result);
+    exit(0);
+}
 $_SESSION = [];
 $_GET = $page === 'products_low' ? ['p' => 'products', 'stock' => 'low'] : ['p' => $page];
 require_once $root . '/src/Entrypoints/Admin/Shared.php';
@@ -182,6 +200,11 @@ try {
             "R8 admin memory: the {$r8sLabel} renders completely at 40k low-stock SKUs within 24 MB (" . ($r8sRun['result']['error'] ?? $r8sRun['raw']) . ')');
     }
     assert_true(($r8sRun['result']['rows'] ?? 0) <= 30, 'R8 admin memory: the low-stock filter still pages (25 rows), not the whole low list');
+    $r8sSitemap = $r8sRender('sitemap');
+    assert_true(($r8sSitemap['result'][0]['index'] ?? false) === true && ($r8sSitemap['result'][0]['last'] ?? '') === '</sitemapindex>',
+        'R8 sitemap: 40k products render a sitemap index within 24 MB (' . substr($r8sSitemap['raw'], 0, 300) . ')');
+    assert_true(($r8sSitemap['result'][1]['urls'] ?? 0) === 10000 && ($r8sSitemap['result'][1]['last'] ?? '') === '</urlset>',
+        'R8 sitemap: a part streams exactly its page of URLs within 24 MB, products read in chunks (' . substr($r8sSitemap['raw'], 0, 300) . ')');
 
     // The bounded APIs keep the old semantics: same count, worst first, limited.
     $r8sJobs = static function () use ($r8sMem): array {
