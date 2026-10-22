@@ -1,1 +1,1 @@
-Tu pedido digital {{order_number}} está listo
+Su pedido digital {{order_number}} está listo

@@ -311,15 +311,15 @@ try {
         $a154Run($a156Order + ['action' => $a156Action], $a156Post);
         $a156Check("A15.6 de: order {$a156Action} flash is German", $a154Run($a156Order), [$a156Flash]);
     }
-    $a156Check('A15.6 de: returns page is German', $a154Run(['p' => 'rma']), ['Reklamationen / Rücksendungen', 'Alle', 'Genehmigen', 'Ablehnen', 'Grund', 'A156 Grund']);
+    $a156Check('A15.6 de: returns page is German', $a154Run(['p' => 'rma']), ['Rücksendungen', 'Alle', 'Genehmigen', 'Ablehnen', 'Grund', 'A156 Grund']);
     $a154Run(['p' => 'rma', 'action' => 'status'], ['rma_id' => '0', 'status' => 'approved']);
-    $a156Check('A15.6 de: return status flash is German', $a154Run(['p' => 'rma']), ['Der Reklamationsstatus konnte nicht geändert werden: Ungültige Reklamation.']);
+    $a156Check('A15.6 de: return status flash is German', $a154Run(['p' => 'rma']), ['Der Rücksendestatus konnte nicht geändert werden: Ungültige Rücksendung.']);
     $a156Check('A15.6 de: customers list is German', $a154Run(['p' => 'customers', 'q' => 'a156']),
         ['E-Mail, Name oder ID', 'Filter zurücksetzen', 'Registriert', 'A156 Kunde', 'Details']);
     $a154Run(['p' => 'customer', 'id' => $a156Customer, 'action' => 'status'], ['customer_id' => $a156Customer, 'status' => 'blocked']);
     $a156Check('A15.6 de: customer detail and its status flash are German', $a154Run(['p' => 'customer', 'id' => $a156Customer]),
         ["Kunde #{$a156Customer} → blocked", 'Profil', 'Letzte Anmeldung', 'Telefon', 'Konto entsperren', 'DSGVO-Löschung…', 'Adressen (0)', 'Keine Adressen.',
-            'Bestellungen (2)', 'Reklamationen (', '← Liste'], ['Uložiť']);
+            'Bestellungen (2)', 'Rücksendungen (', '← Liste'], ['Uložiť']);
     $a156Check('A15.6 de: unknown customer is German', $a154Run(['p' => 'customer', 'id' => '999999']), ['Kunde nicht gefunden.', 'Zurück zur Liste']);
     $a156Check('A15.6 de: awaiting payment page is German', $a154Run(['p' => 'awaiting_payment']),
         ['Überweisungsreferenz', 'Als bezahlt markieren', 'Bestellung A156-1 als bezahlt markieren?', 'Notiz (z. B. Kontoauszug)', 'A156 Bank', 'Alter']);

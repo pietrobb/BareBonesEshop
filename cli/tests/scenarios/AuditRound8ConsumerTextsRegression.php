@@ -196,3 +196,23 @@ foreach (['en', 'de', 'pl', 'hu', 'es'] as $r8tLocale) {
     assert_true(preg_match('~variable symbol|variables symbol|variabelsymbol|zahlungssymbol|symbol zmienny|symbol var|változó szimbólum|símbolo variable~iu', $r8tWords) === 0,
         "R8 payment wording ({$r8tLocale}): a payment reference, not a Czech/Slovak variable symbol");
 }
+
+// 7) Language register: one form of address per language and returns are not called complaints.
+$r8tRma = '~^(admin\.rma\.|admin\.nav\.rma$|admin\.title\.rma$|admin\.customers\.(returns|rma_queue)$|account\.returns$)~';
+foreach (['sk', 'cs', 'pl', 'hu', 'de'] as $r8tLocale) {
+    $r8tLang = require $r8tApp . '/lang/' . $r8tLocale . '.php';
+    $r8tBad = array_keys(array_filter($r8tLang, static fn($v, $k): bool => preg_match($r8tRma, (string)$k) === 1 && preg_match('~reklam~iu', (string)$v) === 1, ARRAY_FILTER_USE_BOTH));
+    assert_equals([], $r8tBad, "R8 language ({$r8tLocale}): return (RMA) screens are not labelled as complaints");
+}
+$r8tTexts = static function (string $locale) use ($r8tApp): array {
+    $texts = array_map('strval', array_values(require $r8tApp . '/lang/' . $locale . '.php'));
+    foreach (glob($r8tApp . '/templates/emails/' . $locale . '/*') ?: [] as $file) $texts[] = (string)file_get_contents($file);
+    return $texts;
+};
+$r8tHits = static fn(array $texts, string $re): array => array_values(array_filter($texts, static fn(string $t): bool => preg_match($re, $t) === 1));
+assert_equals([], $r8tHits($r8tTexts('es'), '~\b(tu|tus|te|puedes|tienes|has|quieres|inténtalo|regístrate|haz|mantén)\b|(^|[.!?¿>]\s*)(Selecciona|Revisa|Confirma|Introduce|Restablece)\b~iu'),
+    'R8 language (es): the shopper is addressed as usted everywhere (no tú forms)');
+assert_equals([], $r8tHits($r8tTexts('hu'), '~\b(kosarad|rendelésed|fiókod|jelszavad|leadtuk)\b~iu'),
+    'R8 language (hu): the shopper is addressed formally (magázás) and an order is "megkaptuk", not "leadtuk"');
+assert_equals([], $r8tHits($r8tTexts('pl'), '~\b\w+(łeś|łaś)\b~u'),
+    'R8 language (pl): no gendered second-person forms (złożyłeś/zapomniałeś)');

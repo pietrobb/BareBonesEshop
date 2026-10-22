@@ -1,4 +1,4 @@
-Czy zapomniałeś o czymś w koszyku?
+Coś zostało w koszyku?
 
 Te produkty wciąż czekają w Twoim koszyku:
 {{#each items}}- {{quantity}} × {{name}}
