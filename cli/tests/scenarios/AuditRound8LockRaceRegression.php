@@ -245,6 +245,25 @@ $out['ship_allocated'][] = $try($a, static fn() => Warehouse::adjustStock($wh, '
 $out['ship_allocated'][] = $try($b, static fn() => Fulfillment::createShipment($o11, $wh, [['order_item_id' => $i11, 'sku' => 'R8K-B11', 'quantity' => 2]], 'r8k-s11'));
 $b->inTransaction() ? $b->commit() : null;
 $out['ship_allocated'][] = (int)$a->query("SELECT COALESCE(SUM(si.quantity), 0) FROM shipment_items si JOIN shipments s ON s.id = si.shipment_id WHERE s.order_id = {$o11}")->fetchColumn();
+
+// 12. A credit note for the received units while an exchange of the same units is uncommitted: the credit note takes
+// the RMA row lock before re-reading the quantities, so it waits (and here times out) instead of reading a snapshot
+// without the exchange and committing a refund for units that also get a replacement.
+[$r12, $ri12] = $approved('R8K-12');
+$o12 = (int)$a->query("SELECT order_id FROM rma_requests WHERE id = {$r12}")->fetchColumn();
+$a->prepare('UPDATE orders SET financial_snapshot = ? WHERE id = ?')->execute([json_encode(VatService::buildSnapshot(
+    [['product_id' => 97301, 'sku' => 'R8K-SKU', 'price' => 1000, 'qty' => 2, 'vat_class' => 'standard']],
+    ['seller_country' => 'SK', 'customer_country' => 'SK'],
+    ['discount' => 0, 'shipping' => 0, 'payment_fee' => 0, 'currency' => 'eur', 'effective_date' => date('Y-m-d')])), $o12]);
+Db::init($a, 'mysql');
+$invoice12 = (int)InvoiceService::issue($o12)['id'];
+$try($a, static fn() => Rma::receive($r12, [$ri12 => ['quantity' => 2, 'disposition' => 'discard']], 'r8k-r12'));
+$a->beginTransaction();
+$out['credit_exchange'][] = $try($a, static fn() => Rma::createExchange($r12, $ri12, 2, 97301, null, 'r8k-x12'));
+$out['credit_exchange'][] = $try($b, static fn() => (bool)InvoiceService::credit($invoice12, $r12, [$ri12 => 2], 'r8k-c12'));
+$a->commit();
+$out['credit_exchange'][] = (int)$a->query("SELECT COALESCE(SUM(quantity), 0) FROM return_exchanges WHERE rma_item_id = {$ri12}")->fetchColumn();
+$out['credit_exchange'][] = (int)$a->query("SELECT COALESCE(SUM(quantity), 0) FROM credit_note_items WHERE rma_item_id = {$ri12}")->fetchColumn();
 echo json_encode($out);
 PHP);
 // SQLite has one writer. Orders::lockWithin() takes the write lock with a no-op UPDATE before the order is read, so a
@@ -354,6 +373,8 @@ if (!getenv('TEST_MYSQL_DSN')) {
             'R8 locks: an older snapshot that already saw the stock does not reserve a backorder line allocated meanwhile a second time');
         assert_equals(['ok', 'ok', 2], $r8k['ship_allocated'] ?? $r8kOut,
             'R8 locks: a shipment in a transaction that read before stock was allocated to its backordered line ships the allocated units');
+        assert_equals(['ok', 'refused', 2, 0], $r8k['credit_exchange'] ?? $r8kOut,
+            'R8 locks: a credit note while an exchange of the same units is uncommitted waits for the RMA lock; 2 exchanged, 0 credited');
     } finally {
         $r8kPhp([$r8kRoot . '/race.php', 'teardown', dirname(TEST_CLI_DIR), $r8kDb]);
     }
