@@ -179,6 +179,19 @@ $themeUpgradeGateExit = (static function(): int {
         fclose($pipes[1]);
         fclose($pipes[2]);
         $assert(proc_close($process) === 1 && ($standalone['status'] ?? '') === 'NO-GO', 'standalone package gate (theme-check.php --installed --package) reports NO-GO');
+
+        // H (review round 8): the runbook's `update.php doctor --package` passes the preflight of a package with
+        // migrations — it used to build the updater without a migration runner, so every such package was NOT_READY.
+        [$root, $state, $database] = $install($repaired);
+        $write($root . '/config.php', "<?php\nreturn ['update_storage_dir' => " . var_export($state, true)
+            . ", 'db_driver' => 'sqlite', 'db_sqlite_path' => " . var_export(str_replace('\\', '/', $database), true) . "];\n");
+        [, $output] = $cli($root, ['doctor', '--package=' . $compatible, '--allow-unsigned', '--json']);
+        $doctor = json_decode($output, true);
+        $doctorChecks = array_column((array)($doctor['checks'] ?? []), null, 'name');
+        $blockers = (array)($doctor['package_preflight']['blockers'] ?? ['no JSON: ' . $output]);
+        $assert(($doctorChecks['package']['level'] ?? null) === 'ok' && $blockers === [] && ($doctorChecks['database_backup']['level'] ?? null) === 'ok',
+            'cli doctor passes the preflight of a package with migrations (blockers: ' . implode('; ', $blockers) . ')');
+        $assert(!is_file($root . '/src/ThemeGateRelease.php') && !is_file($state . '/installed.json'), 'cli doctor changes nothing');
     } finally {
         $gate = $pdo = null; // release SQLite handles so Windows can delete the disposable databases
         gc_collect_cycles();

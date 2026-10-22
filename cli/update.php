@@ -64,7 +64,8 @@ try {
                 !empty($options['allow-unsigned'])
             );
         }
-        $updater = new Updater($root, $stateDirectory, Db::get(), null, $databaseBackup, new ThemeUpgradeGate($stateDirectory));
+        // The same migration runner as apply, so a package with migrations gets the preflight apply will see (never run here).
+        $updater = new Updater($root, $stateDirectory, Db::get(), updateMigrationRunner($root), $databaseBackup, new ThemeUpgradeGate($stateDirectory));
         $report = $updater->doctor(
             $publicKey !== '' ? $publicKey : null,
             $package,
@@ -137,13 +138,7 @@ try {
     if ($package->runsMigrations()) {
         $database = Db::get();
         $databaseBackup = createUpdateDatabaseBackup($config);
-        $migrationRunner = static function () use ($root): void {
-            $migrator = new Migrator(Db::get(), $root . '/migrations');
-            $applied = $migrator->apply(static function (string $message): void {
-                echo "  {$message}\n";
-            });
-            echo '  Applied ' . count($applied) . " migration(s).\n";
-        };
+        $migrationRunner = updateMigrationRunner($root);
     }
     $updater = new Updater($root, $stateDirectory, $database, $migrationRunner, $databaseBackup, new ThemeUpgradeGate($stateDirectory));
     $database = null; // Updater owns the only non-static reference; enables SQLite rollback on Windows.
@@ -192,6 +187,17 @@ function updateRecordCoreBaseline(string $root, string $stateDirectory, array $c
     } catch (Throwable $e) {
         fwrite(STDERR, 'WARNING: core drift baseline not recorded: ' . $e->getMessage() . "\n");
     }
+}
+
+function updateMigrationRunner(string $root): Closure
+{
+    return static function () use ($root): void {
+        $migrator = new Migrator(Db::get(), $root . '/migrations');
+        $applied = $migrator->apply(static function (string $message): void {
+            echo "  {$message}\n";
+        });
+        echo '  Applied ' . count($applied) . " migration(s).\n";
+    };
 }
 
 function createUpdateDatabaseBackup(array $config): ?UpdateDatabaseBackup
