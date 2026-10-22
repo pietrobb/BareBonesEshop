@@ -27,11 +27,7 @@ function adminFatalPageGuard(): void {
         header('Content-Type: text/html; charset=UTF-8');
         header('Cache-Control: no-store');
     }
-    try {
-        $message = I18n::t('admin.error.page_failed');
-    } catch (Throwable) {
-        $message = 'The page could not be rendered.';
-    }
+    try { $message = I18n::t('admin.error.page_failed'); } catch (Throwable) { $message = 'The page could not be rendered.'; }
     echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>500</title></head><body><h1>500</h1><p>' . esc($message) . '</p></body></html>';
 }
 /** Label of a stored code in the admin language ($prefix . $code), or the code itself when no label exists for it. */
