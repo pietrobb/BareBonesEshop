@@ -336,6 +336,17 @@ $pdo->exec("UPDATE promotions SET valid_from = '" . $r7rAgo(60) . "', valid_to =
 $r7rCard = StorefrontViewModel::productCard($pdo->query('SELECT * FROM products WHERE id = 97734')->fetch(PDO::FETCH_ASSOC))['price'];
 assert_equals([8000, 10000], [$r7rCard['amount_minor'] ?? null, $r7rCard['compare_amount_minor'] ?? null],
     'R8 Omnibus: a promotion whose previous run ended more than 30 days ago shows the base price');
+// A public price list at 90.00 that ended ten days ago counts too: the promotion now shows 90.00, not 100.00.
+$pdo->exec("DELETE FROM promotions WHERE code = 'R8-RESTART-1'");
+$pdo->prepare("INSERT INTO price_lists (store_id, code, name, currency, customer_group_id, priority, active, valid_from, valid_to) VALUES (?, 'r8-ended', 'R8 ended', 'eur', NULL, 0, 1, ?, ?)")
+    ->execute([$r7rStore, $r7rAgo(18), $r7rAgo(10)]);
+$r7rEndedList = (int)$pdo->lastInsertId();
+$pdo->prepare('INSERT INTO price_list_prices (price_list_id, product_id, price, min_qty) VALUES (?, 97734, 9000, 1)')->execute([$r7rEndedList]);
+$r7rCard = StorefrontViewModel::productCard($pdo->query('SELECT * FROM products WHERE id = 97734')->fetch(PDO::FETCH_ASSOC))['price'];
+assert_equals([8000, 9000], [$r7rCard['amount_minor'] ?? null, $r7rCard['compare_amount_minor'] ?? null],
+    'R8 Omnibus: a price list that ended within the 30 days before the promotion lowers its struck-through price to the 90.00 charged');
+$pdo->exec("DELETE FROM price_list_prices WHERE price_list_id = {$r7rEndedList}");
+$pdo->exec("DELETE FROM price_lists WHERE id = {$r7rEndedList}");
 $pdo->exec("DELETE FROM promotions WHERE code LIKE 'R8-RESTART-%'");
 assert_equals(null, PriceHistory::capCompare(['price' => 8000, 'compare_price' => 10000], 10000, null)['compare_price'],
     'R7/R8 Omnibus: a product without recorded history shows no compare price (no proof of the prior price)');

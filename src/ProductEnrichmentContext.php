@@ -9,7 +9,8 @@ final class ProductEnrichmentContext
         private array $priceListRows,
         private array $promotionRules,
         private array $priceHistory = [],
-        private array $endedPromotionRules = []
+        private array $endedPromotionRules = [],
+        private array $endedPriceListPrices = []
     ) {}
 
     public static function forProducts(array $products, ?array $categoryMap = null, ?int $customerId = null): self
@@ -17,15 +18,17 @@ final class ProductEnrichmentContext
         $at = gmdate('Y-m-d H:i:s');
         $profile = class_exists('Customers') ? Customers::commerceProfile($customerId) : null;
         [$rules, $ended] = class_exists('Promotions') ? Promotions::catalogRulesWithEnded($at) : [[], []];
+        [$priceListRows, $endedPriceLists] = class_exists('Pricing') ? Pricing::priceListRowsWithEnded($products, $profile, 1, $at) : [[], []];
 
         return new self(
             Products::categoryIdsMany($products),
             $categoryMap ?? Products::categoryMap(),
             $profile,
-            class_exists('Pricing') ? Pricing::priceListRows($products, $profile, 1, $at) : [],
+            $priceListRows,
             $rules,
             PriceHistory::latestMany(array_map(static fn(array $product): int => (int)($product['id'] ?? 0), $products)),
-            $ended
+            $ended,
+            $endedPriceLists
         );
     }
 
@@ -50,17 +53,25 @@ final class ProductEnrichmentContext
                 $this->customerProfile
             );
         }
-        $endedLow = null;
+        $beforePromotions = $product;
         if (class_exists('Promotions')) {
-            $beforePromotions = $product;
             $product = Promotions::applyCatalogRules($product, $this->promotionRules, $this->customerProfile);
-            if ($this->endedPromotionRules !== []) {
-                $endedLow = Promotions::lowestEndedPrice($beforePromotions, $this->endedPromotionRules, $this->customerProfile,
-                    $this->reductionStart($product, $basePrice, $this->priceHistory[$productId] ?? null));
+        }
+        $endedLow = null;
+        $endedPriceLists = $this->endedPriceListPrices[$productId] ?? [];
+        if ($this->endedPromotionRules !== [] || $endedPriceLists !== []) {
+            $start = $this->reductionStart($product, $basePrice, $this->priceHistory[$productId] ?? null);
+            $endedLow = $this->endedPromotionRules === [] ? null
+                : Promotions::lowestEndedPrice($beforePromotions, $this->endedPromotionRules, $this->customerProfile, $start);
+            $since = gmdate('Y-m-d H:i:s', $start - PriceHistory::WINDOW_DAYS * 86400);
+            $startAt = gmdate('Y-m-d H:i:s', $start);
+            foreach ($endedPriceLists as $row) {
+                if ($row['valid_to'] < $since || ($row['valid_from'] !== null && (string)$row['valid_from'] >= $startAt) || $row['price'] >= $basePrice) continue;
+                $endedLow = $endedLow === null ? $row['price'] : min($endedLow, $row['price']);
             }
         }
         // Omnibus: the struck-through price is at most the lowest price of the 30 days before the reduction,
-        // including prices charged by catalog promotions that have ended since.
+        // including prices charged by catalog promotions and price lists that have ended since.
         return PriceHistory::capCompare($product, $basePrice, $this->priceHistory[$productId] ?? null, null, $endedLow);
     }
 
