@@ -19,6 +19,9 @@ function adminFatalPageGuard(): void {
     $error = error_get_last();
     if ($error === null || !in_array($error['type'], [E_ERROR, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR], true)) return;
     while (ob_get_level() > 0) ob_end_clean();
+    // After an exhausted memory limit the page's data is still allocated: the error page (and its translation) needs
+    // headroom, or it dies the same way and the client gets an empty 200.
+    @ini_set('memory_limit', (string)(memory_get_usage(true) + 32 * 1024 * 1024));
     if (!headers_sent()) {
         http_response_code(500);
         header('Content-Type: text/html; charset=UTF-8');

@@ -313,6 +313,22 @@ $r8sLevels = StockAlerts::levelsForProducts(array_keys($r8sExpected));
 ksort($r8sLevels);
 assert_equals($r8sExpected, $r8sLevels, 'R8 stock alerts: levels for one list page equal the worst level of each product');
 
+// A queue state directory that does not exist yet (fresh install) lists nothing; the admin's error handler turns any
+// warning into an exception, so opendir() on it broke the dashboard.
+$r8sQueueProps = [new ReflectionProperty(JobQueue::class, 'jobsDir'), new ReflectionProperty(JobQueue::class, 'forceFile')];
+$r8sSavedQueue = array_map(static fn(ReflectionProperty $p) => $p->getValue(), $r8sQueueProps);
+set_error_handler(static function (int $no, string $message): bool { throw new ErrorException($message, 0, $no); });
+try {
+    JobQueue::setDir(sys_get_temp_dir() . '/bbe-r8-nojobs-' . bin2hex(random_bytes(4)));
+    $r8sNoDir = [JobQueue::stats(), JobQueue::failures()];
+} catch (ErrorException $e) {
+    $r8sNoDir = $e->getMessage();
+} finally {
+    restore_error_handler();
+    foreach ($r8sQueueProps as $r8sI => $r8sProp) $r8sProp->setValue(null, $r8sSavedQueue[$r8sI]);
+}
+assert_equals([['pending' => 0, 'processing' => 0, 'completed' => 0, 'failed' => 0], []], $r8sNoDir, 'R8 queue stats: missing queue directories count as empty');
+
 // A fatal error mid-page (here: memory limit) never ships as HTTP 200 with half a page.
 $r8sFatal = sys_get_temp_dir() . '/bbe-r8fatal-' . bin2hex(random_bytes(4)) . '.php';
 file_put_contents($r8sFatal, <<<'PHP'

@@ -299,6 +299,8 @@ class JobQueue {
      * every job would exhaust the admin dashboard's memory).
      */
     private static function eachJobFileName(string $dir, callable $visit): void {
+        // A queue state nobody wrote to yet has no directory: nothing to list (opendir() would warn).
+        if (!is_dir($dir)) return;
         $handle = @opendir($dir);
         if ($handle === false) return;
         try {
