@@ -95,7 +95,7 @@ try {
     Security::setRateDbForTesting(new PDO('sqlite::memory:'));
     $_SESSION = ['cart' => [], 'csrf_token' => 'incident-test'];
     Cart::add($imProduct, null, 1);
-    $imInput = ['name' => 'PrivateName', 'email' => 'fault-buyer@example.test', 'country' => 'SK', 'payment_method' => 'incidentpay'];
+    $imInput = ['name' => 'PrivateName', 'email' => 'fault-buyer@example.test', 'country' => 'SK', 'payment_method' => 'incidentpay', 'consents' => ['digital_delivery' => true]];
     $imDb->exec("CREATE TRIGGER im_checkout_fault BEFORE INSERT ON orders BEGIN SELECT RAISE(ABORT, 'PrivateName private@example.test token=secret-value'); END");
     $imOrderCount = (int)$imDb->query('SELECT COUNT(*) FROM orders')->fetchColumn();
     $imResult = CheckoutService::execute($imInput);
