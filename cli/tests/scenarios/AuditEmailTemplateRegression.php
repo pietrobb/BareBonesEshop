@@ -119,7 +119,8 @@ if (($a158Dsn = getenv('TEST_MYSQL_DSN')) !== false && $a158Dsn !== '') {
         $a158NativeMail = MailService::render('order_confirmation', 'sk', ['order_number' => 'N-1', 'customer_name' => 'Ľubo']);
         $a158Count = (int)$a158My->query('SELECT COUNT(*) FROM email_template_overrides')->fetchColumn();
         assert_true($a158First['ok'] && $a158Again['ok'] && $a158Count === 1 && $a158NativeMail['subject'] === 'A158 Natív N-1'
-            && $a158NativeMail['html'] === '<p>A158 natív Ľubo – N-1</p>' && $a158NativeMail['text'] === 'A158 natív N-1',
+            && str_starts_with($a158NativeMail['html'], '<p>A158 natív Ľubo – N-1</p><p>') && str_contains($a158NativeMail['html'], '>withdraw</a>')
+            && $a158NativeMail['text'] === 'A158 natív N-1',
             "A15.8 native {$a158SuiteDriver}->mysql: save, unchanged re-save and render keep one UTF-8 override (rows={$a158Count})");
         $a158Collation = $a158My->query("SELECT TABLE_COLLATION FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'email_template_overrides'")->fetchColumn();
         assert_equals('utf8mb4_unicode_ci', $a158Collation, 'A15.8 native mysql: the overrides table inherits the database collation');
