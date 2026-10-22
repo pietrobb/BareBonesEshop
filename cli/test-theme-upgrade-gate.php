@@ -18,11 +18,14 @@ $themeUpgradeGateExit = (static function(): int {
         if (!is_dir(dirname($path))) mkdir(dirname($path), 0700, true);
         file_put_contents($path, $content);
     };
-    $copyTree = static function(string $from, string $to, ?callable $accept = null) use ($write): void {
+    // $lf: copy like an LF release export (git archive), also from a Windows checkout with core.autocrlf.
+    $copyTree = static function(string $from, string $to, ?callable $accept = null, bool $lf = false) use ($write): void {
         $items = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($from, FilesystemIterator::SKIP_DOTS));
         foreach ($items as $item) {
             $relative = str_replace('\\', '/', substr($item->getPathname(), strlen($from) + 1));
-            if ($item->isFile() && ($accept === null || $accept($relative))) $write($to . '/' . $relative, (string)file_get_contents($item->getPathname()));
+            if (!$item->isFile() || ($accept !== null && !$accept($relative))) continue;
+            $content = (string)file_get_contents($item->getPathname());
+            $write($to . '/' . $relative, $lf && !str_ends_with($relative, '.csv') ? str_replace("\r\n", "\n", $content) : $content);
         }
     };
     $treeHash = static function(string $root): string {
@@ -46,7 +49,7 @@ $themeUpgradeGateExit = (static function(): int {
         $coreScope = static fn(string $path): bool => (bool)preg_match('~^(src|adapters|cli|migrations|lang|forms|templates|themes|blocks)/~', $path)
             || (bool)preg_match('~^[^/]+\.(php|json)$~', $path) && $path !== 'config.php';
         $from = $temp . '/release-from';
-        $copyTree($repo, $from, static fn(string $path): bool => $coreScope($path) && !str_starts_with($path, 'cli/tests/scenarios/'));
+        $copyTree($repo, $from, static fn(string $path): bool => $coreScope($path) && !str_starts_with($path, 'cli/tests/scenarios/'), true);
 
         $migration = "<?php\nreturn new class {\n    public function up(PDO \$db, bool \$isSqlite): void { \$db->exec('CREATE TABLE theme_gate_release (id INTEGER)'); }\n};\n";
         $release = static function(string $name, callable $edit) use ($temp, $from, $copyTree): string {

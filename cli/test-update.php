@@ -69,6 +69,24 @@ try {
     assert_true(Updater::isProtectedPath('DB/runtime.sqlite'), 'Updater paths: protected directories cannot bypass policy with case changes');
     assert_true(!$builtUpdate['signed'], 'Updater builder: unsigned development package is labelled explicitly');
 
+    // Review round 8: a package built from a Windows checkout (CRLF) matched no LF install — every file conflicted.
+    $crlfTarget = $updateTestRoot . DIRECTORY_SEPARATOR . 'crlf-target';
+    mkdir($crlfTarget . '/src', 0750, true);
+    file_put_contents($crlfTarget . '/src/Core.php', "<?php\r\n// new core\r\n");
+    file_put_contents($crlfTarget . '/unchanged.txt', "same\n");
+    file_put_contents($crlfTarget . '/fixture.csv', "a,b\r\n1,2\r\n");
+    $crlfRefused = '';
+    try {
+        UpdatePackageBuilder::build($updateBase, $crlfTarget, $updateTestRoot . DIRECTORY_SEPARATOR . 'crlf-package', '1.1.0', '1.0.0');
+    } catch (RuntimeException $e) {
+        $crlfRefused = $e->getMessage();
+    }
+    assert_true(str_contains($crlfRefused, 'src/Core.php has CRLF line endings') && !is_dir($updateTestRoot . DIRECTORY_SEPARATOR . 'crlf-package'),
+        'Updater builder: a release tree with CRLF text is refused before any package is written (' . $crlfRefused . ')');
+    file_put_contents($crlfTarget . '/src/Core.php', "<?php\n// new core\n");
+    $lfBuilt = UpdatePackageBuilder::build($updateBase, $crlfTarget, $updateTestRoot . DIRECTORY_SEPARATOR . 'lf-package', '1.1.0', '1.0.0');
+    assert_equals(2, $lfBuilt['files'], 'Updater builder: the same tree with LF text builds (a CSV keeps its RFC 4180 CRLF)');
+
     $unsignedRefused = false;
     try {
         new UpdatePackage($updatePackageDir);
