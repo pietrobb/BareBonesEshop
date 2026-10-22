@@ -21,6 +21,52 @@ class Promotions {
         return self::activeRules('catalog', $at);
     }
 
+    /**
+     * Running catalog rules and, from the same query, those whose time window ended in the year before $at: the prices
+     * the ended ones charged still count for the Omnibus prior price of a reduction that starts within 30 days after
+     * them (lowestEndedPrice(), PriceHistory::capCompare()).
+     * @return array{0: list<array>, 1: list<array>}
+     */
+    public static function catalogRulesWithEnded(?string $at = null): array {
+        $at ??= gmdate('Y-m-d H:i:s');
+        try {
+            $stmt = Db::get()->prepare("SELECT * FROM promotions
+                WHERE store_id = :store AND scope = 'catalog' AND active = 1
+                  AND (valid_from IS NULL OR valid_from <= :at_from)
+                  AND (valid_to IS NULL OR valid_to >= :since)
+                ORDER BY priority ASC, id ASC");
+            $stmt->execute([':store' => StoreContext::current()->id(), ':at_from' => $at,
+                ':since' => gmdate('Y-m-d H:i:s', (strtotime($at . ' UTC') ?: time()) - 365 * 86400)]);
+            $running = $ended = [];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $rule) {
+                if ($rule['valid_to'] === null || (string)$rule['valid_to'] >= $at) $running[] = $rule;
+                else $ended[] = $rule;
+            }
+            return [$running, $ended];
+        } catch (PDOException) {
+            return [[], []];
+        }
+    }
+
+    /**
+     * Lowest price the ended rules charged for this product in the 30 days before $start (one rule at a time, and
+     * all of them together for rules that stacked), or null when none of them ran then or reduced it.
+     */
+    public static function lowestEndedPrice(array $product, array $endedRules, ?array $profile, int $start): ?int {
+        $since = gmdate('Y-m-d H:i:s', $start - PriceHistory::WINDOW_DAYS * 86400);
+        $startAt = gmdate('Y-m-d H:i:s', $start);
+        $inWindow = array_values(array_filter($endedRules, static fn(array $rule): bool => (string)$rule['valid_to'] >= $since
+            && ($rule['valid_from'] === null || (string)$rule['valid_from'] < $startAt)));
+        if ($inWindow === []) return null;
+        $basePrice = max(0, (int)($product['price'] ?? 0));
+        $lowest = null;
+        foreach (array_merge(array_map(static fn(array $rule): array => [$rule], $inWindow), [$inWindow]) as $rules) {
+            $price = (int)self::applyCatalogRules($product, $rules, $profile)['price'];
+            if ($price < $basePrice) $lowest = $lowest === null ? $price : min($lowest, $price);
+        }
+        return $lowest;
+    }
+
     /** Apply already-loaded catalog rules without further database access. */
     public static function applyCatalogRules(array $product, array $rules, ?array $profile, int $qty = 1): array {
         if ($rules === []) return $product;
