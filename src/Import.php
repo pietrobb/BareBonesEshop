@@ -345,6 +345,8 @@ class Import {
     public static function upsertProduct(array $data, ?PDO $db = null): void {
         $db = $db ?? Db::get();
         $catalog = self::assertSkuInCatalog((string)$data['sku'], $db);
+        // MySQL's ON DUPLICATE KEY fires on any unique key: a slug held by another SKU would overwrite that product.
+        $data['slug'] = self::freeProductSlug((string)$data['slug'], (string)$data['sku'], $db);
         $data['description'] = Security::sanitizeRichHtml((string)($data['description'] ?? ''));
         foreach (($data['translations'] ?? []) as $locale => $translation) {
             if (isset($translation['description'])) {
@@ -427,6 +429,16 @@ class Import {
         $id = $db->prepare('SELECT id FROM products WHERE sku = :sku AND store_id = :catalog');
         $id->execute([':sku' => $data['sku'], ':catalog' => $catalog]);
         PriceHistory::record([(int)$id->fetchColumn()], $db);
+    }
+
+    /** $slug, or "$slug-2", "$slug-3"… when another SKU already owns it (product slugs are unique across catalogs). */
+    private static function freeProductSlug(string $slug, string $sku, PDO $db): string {
+        $owner = $db->prepare('SELECT sku FROM products WHERE slug = :slug');
+        for ($n = 1, $candidate = $slug; ; $candidate = $slug . '-' . ++$n) {
+            $owner->execute([':slug' => $candidate]);
+            $ownerSku = $owner->fetchColumn();
+            if ($ownerSku === false || (string)$ownerSku === $sku) return $candidate;
+        }
     }
 
     /**

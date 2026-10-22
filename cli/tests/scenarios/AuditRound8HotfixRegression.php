@@ -56,3 +56,55 @@ try {
     foreach (glob($r8hRoot . '/*') ?: [] as $r8hFile) @unlink($r8hFile);
     @rmdir($r8hRoot);
 }
+
+// Import of two products with the same name (so the same derived slug). MySQL's ON DUPLICATE KEY UPDATE fired on
+// the unique slug: the second row overwrote the first product's price and its stock went to a SKU without a product.
+echo "\n--- Audit round 8 (hotfix): CSV import of two products with the same name ---\n";
+$r8iRoot = test_fixture_path('r8-hotfix-import');
+mkdir($r8iRoot);
+file_put_contents($r8iRoot . '/import.php', <<<'PHP'
+<?php
+[, $driver, $phase, $root, $target, $dir] = $argv;
+require $root . '/src/autoload.php';
+$db = $driver === 'mysql'
+    ? new PDO(getenv('TEST_MYSQL_DSN'), getenv('TEST_MYSQL_USER') ?: 'root', getenv('TEST_MYSQL_PASS') ?: '', [PDO::ATTR_EMULATE_PREPARES => false])
+    : new PDO('sqlite:' . $target);
+$db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+if ($driver === 'mysql') {
+    if ($phase === 'teardown') { $db->exec("DROP DATABASE IF EXISTS `{$target}`"); exit(0); }
+    $db->exec("CREATE DATABASE `{$target}` CHARACTER SET utf8mb4");
+    $db->exec("USE `{$target}`");
+}
+Db::init($db, $driver);
+(new Migrator($db, $root . '/migrations', $dir . '/migrate-' . $driver . '.lock'))->apply();
+file_put_contents($dir . '/same-name.csv', "sku,name,price,stock,category\nR8I-A,R8 Same Name,10.00,3,r8i\nR8I-B,R8 Same Name,20.00,5,r8i\nR8I-A,R8 Same Name,11.00,3,r8i\n");
+$result = Import::csv($dir . '/same-name.csv');
+$rows = $db->query("SELECT sku, slug, price, stock FROM products WHERE sku LIKE 'R8I-%' ORDER BY sku")->fetchAll();
+echo json_encode(['imported' => $result['imported'], 'errors' => $result['errors'], 'products' => array_map(
+    static fn(array $r): array => [$r['sku'], $r['slug'], (int)$r['price'], (int)$r['stock']], $rows)]);
+PHP);
+$r8iDrivers = ['sqlite' => $r8iRoot . '/import.sqlite'];
+if (getenv('TEST_MYSQL_DSN')) $r8iDrivers['mysql'] = 'bbe_r8i_import_' . getmypid() . '_' . bin2hex(random_bytes(4)) . '_test';
+else print "  [SKIP] Audit R8 native MySQL same-name import (set TEST_MYSQL_DSN)\n";
+$r8iRun = static function(array $args): string {
+    $process = proc_open(array_merge([PHP_BINARY], $args), [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+    fclose($pipes[0]);
+    $out = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    proc_close($process);
+    return $out;
+};
+try {
+    foreach ($r8iDrivers as $r8iDriver => $r8iTarget) {
+        $r8iOut = $r8iRun([$r8iRoot . '/import.php', $r8iDriver, 'run', dirname(TEST_CLI_DIR), $r8iTarget, $r8iRoot]);
+        assert_equals(['imported' => 3, 'errors' => [], 'products' => [['R8I-A', 'r8-same-name', 1100, 3], ['R8I-B', 'r8-same-name-2', 2000, 5]]],
+            json_decode(trim($r8iOut), true) ?? $r8iOut,
+            "R8 {$r8iDriver} import: a same-name product gets its own slug, neither product overwrites the other, re-import keeps the slug");
+    }
+} finally {
+    if (isset($r8iDrivers['mysql'])) $r8iRun([$r8iRoot . '/import.php', 'mysql', 'teardown', dirname(TEST_CLI_DIR), $r8iDrivers['mysql'], $r8iRoot]);
+    foreach (glob($r8iRoot . '/*') ?: [] as $r8iFile) @unlink($r8iFile);
+    @rmdir($r8iRoot);
+}
