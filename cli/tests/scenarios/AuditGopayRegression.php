@@ -139,7 +139,7 @@ try {
     $_SERVER['REQUEST_METHOD'] = 'POST';
     $_SERVER['REMOTE_ADDR'] = '127.0.16.4';
     $_SESSION['csrf_token'] = 'a164-checkout';
-    $_POST = ['csrf_token' => 'a164-checkout', 'name' => 'A164 Buyer', 'email' => 'a164@example.com', 'country' => 'SK', 'shipping_method' => 'digital', 'payment_method' => 'a164_gopay'];
+    $_POST = ['csrf_token' => 'a164-checkout', 'name' => 'A164 Buyer', 'email' => 'a164@example.com', 'country' => 'SK', 'shipping_method' => 'digital', 'payment_method' => 'a164_gopay', 'consents' => ['digital_delivery' => true]];
     $a164Result = apiCheckout(['app_url' => 'https://shop.example'] + (require dirname(TEST_CLI_DIR) . '/config.php'));
     $_POST = [];
     $a164Create = array_values(array_filter($a164Calls, static fn($c) => $c['method'] === 'POST' && str_ends_with($c['url'], '/payments/payment')))[0] ?? null;

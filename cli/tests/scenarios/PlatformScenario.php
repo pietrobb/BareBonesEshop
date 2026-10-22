@@ -110,7 +110,7 @@ $_SERVER['REMOTE_ADDR'] = '127.0.0.62';
 $_SESSION['csrf_token'] = 'transfer-digital-checkout-test';
 $_POST = [
     'csrf_token' => 'transfer-digital-checkout-test', 'name' => 'Transfer Buyer', 'email' => 'transfer@example.com',
-    'country' => 'SK', 'shipping_method' => 'digital', 'payment_method' => 'bank_transfer',
+    'country' => 'SK', 'shipping_method' => 'digital', 'payment_method' => 'bank_transfer', 'consents' => ['digital_delivery' => true],
 ];
 $transferCheckout = apiCheckout();
 $transferOrderId = (int)($transferCheckout['order_id'] ?? 0);

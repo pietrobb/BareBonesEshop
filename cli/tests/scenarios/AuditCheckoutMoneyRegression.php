@@ -18,7 +18,7 @@ $a062Checkout = static function(array $productIds, string $ip) use ($pdo): array
     $_SERVER['REQUEST_METHOD'] = 'POST';
     $_SERVER['REMOTE_ADDR'] = $ip;
     $_SESSION['csrf_token'] = 'a062-checkout';
-    $_POST = ['csrf_token' => 'a062-checkout', 'name' => 'A062 Buyer', 'email' => 'a062@example.com', 'country' => 'SK', 'shipping_method' => 'digital', 'payment_method' => 'bank_transfer'];
+    $_POST = ['csrf_token' => 'a062-checkout', 'name' => 'A062 Buyer', 'email' => 'a062@example.com', 'country' => 'SK', 'shipping_method' => 'digital', 'payment_method' => 'bank_transfer', 'consents' => ['digital_delivery' => true]];
     $before = (int)$pdo->query('SELECT COUNT(*) FROM orders')->fetchColumn();
     $result = apiCheckout();
     $_POST = [];
