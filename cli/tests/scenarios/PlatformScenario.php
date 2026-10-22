@@ -77,6 +77,8 @@ $_POST = [
     'country' => 'SK',
     'shipping_method' => 'digital',
     'payment_method' => 'free',
+    // R8: digital content is ordered with the consent to lose the withdrawal right (on by default).
+    'consents' => ['digital_delivery' => true],
 ];
 $freeDigitalCheckout = apiCheckout();
 assert_true(!empty($freeDigitalCheckout['success']), 'Digital checkout: zero-total order succeeds without a payment gateway');
