@@ -399,7 +399,7 @@ function handleEmailSend(array $payload, array $job): void {
                 'tracking_number'=> (string)($tracking['tracking_number'] ?? '') ?: (string)($order['tracking_number'] ?? ''),
                 'tracking_url'   => (string)($tracking['tracking_url'] ?? ''),
             ]);
-            if ($template === 'order_confirmation') $vars = array_merge($vars, BankTransferInstructions::mailVars($order));
+            if ($template === 'order_confirmation') $vars = array_merge($vars, BankTransferInstructions::mailVars($order), ConsumerNotice::mailVars($order));
             $items = Orders::items((int)$orderId);
             $vars['items'] = array_map(fn($it) => [
                 'name'       => $it['name'],
@@ -416,7 +416,9 @@ function handleEmailSend(array $payload, array $job): void {
     // Retry with the provider frozen on the order; legacy jobs use the current default.
     $providerCode = (string)($payload['_provider_code'] ?? ($order ? orderProviderCode($order, 'mail') : ''));
     if ($providerCode === '') $providerCode = Adapters::defaultProviderCode('mail');
-    $result = MailService::send($template, $to, $locale, $vars, $orderId !== null ? (int)$orderId : null, [], $providerCode);
+    // The confirmation carries the terms valid at the time of the order on a durable medium (Directive 2011/83/EU art. 8(7)).
+    $attachments = $template === 'order_confirmation' && $order ? [ConsumerNotice::termsAttachment($order, $locale ?: (string)($order['locale'] ?? 'en'))] : [];
+    $result = MailService::send($template, $to, $locale, $vars, $orderId !== null ? (int)$orderId : null, $attachments, $providerCode);
     if (($result['status'] ?? '') === 'failed') throw new RuntimeException('mail.delivery_failed');
     // Rate-limited order mail is queued again after the limit window instead of being dropped.
     if (($result['status'] ?? '') === 'rate_limited') MailService::deferRateLimited($payload, $result);

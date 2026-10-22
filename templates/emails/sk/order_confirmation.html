@@ -22,4 +22,16 @@
 </table>{{/if}}
 {{#if tracking_url}}<p>Sledovať zásielku: <a href="{{tracking_url}}">{{tracking_url}}</a></p>{{/if}}
 <p>V prípade otázok odpovedzte na tento e-mail.</p>
+<!-- R8 consumer information (Directive 2011/83/EU art. 8(7)); wording for lawyer review. -->
+<h3>Predávajúci</h3>
+<p>{{seller_name}}, {{seller_address}}<br>IČO: {{seller_ico}}, DIČ: {{seller_dic}}{{#if seller_ic_dph}}, IČ DPH: {{seller_ic_dph}}{{/if}}<br>{{seller_email}} {{seller_phone}}<br>{{seller_register_note}}</p>
+<h3>Odstúpenie od zmluvy</h3>
+<p>Od zmluvy môžete odstúpiť bez udania dôvodu do {{withdrawal_days}} dní od prevzatia tovaru (pri viacerých zásielkach od prevzatia poslednej), aj pred jeho doručením. Najjednoduchšie je použiť <a href="{{withdrawal_url}}">funkciu „Odstúpiť od zmluvy tu“</a>; môžete nám tiež poslať e-mail alebo tento vzorový formulár. Peniaze vrátane nákladov na pôvodné doručenie vrátime do 14 dní od doručenia odstúpenia rovnakým spôsobom, akým ste platili; môžeme ich zadržať, kým tovar nedostaneme späť alebo nepreukážete jeho odoslanie. Tovar vráťte do 14 dní; priame náklady na jeho vrátenie znášate vy.</p>
+<p><strong>Vzorový formulár na odstúpenie od zmluvy</strong><br>(vyplňte a zašlite tento formulár len v prípade, že si želáte odstúpiť od zmluvy)<br>Komu: {{seller_name}}, {{seller_address}}, {{seller_email}}<br>Týmto oznamujem/oznamujeme (*), že odstupujem/odstupujeme (*) od zmluvy na tento tovar/od zmluvy o poskytnutí tejto služby (*): …<br>Dátum objednania/dátum prijatia (*): …<br>Meno a priezvisko spotrebiteľa/spotrebiteľov: …<br>Adresa spotrebiteľa/spotrebiteľov: …<br>Podpis spotrebiteľa/spotrebiteľov (iba ak sa tento formulár podáva v listinnej podobe): …<br>Dátum: …<br>(*) Nehodiace sa prečiarknite.</p>
+<h3>Zodpovednosť za vady a reklamácie</h3>
+<p>Za vady tovaru zodpovedáme {{liability_months}} mesiacov od jeho prevzatia. Reklamácia je samostatný postup, nezávislý od odstúpenia od zmluvy: uplatníte ju e-mailom alebo vo svojom účte, potvrdíme jej prijatie a vybavíme ju najneskôr do 30 dní.</p>
+{{#if adr_name}}<h3>Alternatívne riešenie sporov</h3>
+<p>Ak nie ste spokojní s vybavením reklamácie alebo sťažnosti, môžete sa obrátiť na subjekt alternatívneho riešenia sporov: {{adr_name}} ({{adr_url}}).</p>{{/if}}
+<h3>Obchodné podmienky</h3>
+<p>Obchodné podmienky platné v čase objednávky sú v prílohe tohto e-mailu a na <a href="{{terms_url}}">{{terms_url}}</a>.</p>
 </body></html>

@@ -176,7 +176,7 @@ $architectureBudgets = [
     // +2 coupling: DigitalDelivery issues the downloads page's links; StoreContext limits the profile languages to the store's.
     'src/Entrypoints/Storefront/Account.php' => ['lines' => 450, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 16],
     // +2 lines: round-4 merge (canonical category links + trailing-slash/past-last-page 404).
-    'src/Entrypoints/Storefront/CatalogPages.php' => ['lines' => 137, 'functions' => 10, 'max_function_lines' => 60, /* category page: bounded spec/subcat filter parsing */ 'coupling' => 8],
+    'src/Entrypoints/Storefront/CatalogPages.php' => ['lines' => 137, 'functions' => 10, 'max_function_lines' => 60, /* category page: bounded spec/subcat filter parsing; +1 coupling R8: legal pages render through ConsumerNotice, shared with the confirmation attachment */ 'coupling' => 9],
     // +2 functions: pending-payment page and the gateway cancel page (P0 2026-10-13 checkout redirect).
     // +1 coupling: BankTransferInstructions renders the IBAN / variable symbol / PAY by square block on order-done (A13.6).
     // +1 coupling: I18n::all() gives cart/checkout blocks the catalog their breadcrumb/pagination landmarks are labelled from.

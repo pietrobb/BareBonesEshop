@@ -21,4 +21,16 @@
 <tr><td style="padding:2px 12px 2px 0;color:#555">Splatnost</td><td>{{bank_due_date}}</td></tr>
 </table>{{/if}}
 {{#if tracking_url}}<p>Sledovat zásilku: <a href="{{tracking_url}}">{{tracking_url}}</a></p>{{/if}}
+<!-- R8 consumer information (Directive 2011/83/EU art. 8(7)); wording for lawyer review. -->
+<h3>Prodávající</h3>
+<p>{{seller_name}}, {{seller_address}}<br>IČO: {{seller_ico}}, DIČ: {{seller_dic}}<br>{{seller_email}} {{seller_phone}}<br>{{seller_register_note}}</p>
+<h3>Odstoupení od smlouvy</h3>
+<p>Od smlouvy můžete odstoupit bez udání důvodu do {{withdrawal_days}} dnů od převzetí zboží (u více zásilek od převzetí poslední), i před jeho doručením. Nejjednodušší je použít <a href="{{withdrawal_url}}">funkci „Odstoupit od smlouvy zde“</a>; můžete nám také poslat e-mail nebo tento vzorový formulář. Peníze včetně nákladů na původní doručení vrátíme do 14 dnů od doručení odstoupení stejným způsobem, jakým jste platili; můžeme je zadržet, dokud zboží neobdržíme zpět nebo neprokážete jeho odeslání. Zboží vraťte do 14 dnů; přímé náklady na jeho vrácení nesete vy.</p>
+<p><strong>Vzorový formulář pro odstoupení od smlouvy</strong><br>(vyplňte tento formulář a pošlete jej zpět pouze v případě, že chcete odstoupit od smlouvy)<br>Adresát: {{seller_name}}, {{seller_address}}, {{seller_email}}<br>Oznamuji/oznamujeme (*), že tímto odstupuji/odstupujeme (*) od smlouvy o nákupu tohoto zboží (*)/o poskytnutí těchto služeb (*): …<br>Datum objednání (*)/datum obdržení (*): …<br>Jméno a příjmení spotřebitele/spotřebitelů: …<br>Adresa spotřebitele/spotřebitelů: …<br>Podpis spotřebitele/spotřebitelů (pouze pokud je tento formulář zasílán v listinné podobě): …<br>Datum: …<br>(*) Nehodící se škrtněte.</p>
+<h3>Odpovědnost za vady a reklamace</h3>
+<p>Za vady zboží odpovídáme {{liability_months}} měsíců od jeho převzetí. Reklamace je samostatný postup, nezávislý na odstoupení od smlouvy: uplatníte ji e-mailem nebo ve svém účtu, potvrdíme její přijetí a vyřídíme ji nejpozději do 30 dnů.</p>
+{{#if adr_name}}<h3>Mimosoudní řešení sporů</h3>
+<p>Pokud nejste spokojeni s vyřízením reklamace nebo stížnosti, můžete se obrátit na subjekt mimosoudního řešení spotřebitelských sporů: {{adr_name}} ({{adr_url}}).</p>{{/if}}
+<h3>Obchodní podmínky</h3>
+<p>Obchodní podmínky platné v době objednávky jsou v příloze tohoto e-mailu a na <a href="{{terms_url}}">{{terms_url}}</a>.</p>
 </body></html>

@@ -1,20 +1,8 @@
 <?php
 /** Catalog data presenters. Storefront markup is owned by the active theme. */
 function renderLegalPage(string $page): string {
-    if (!in_array($page, ['privacy', 'terms', 'cookies'], true)) return Template::render('storefront/status-message', ['message' => I18n::t('product_not_found')]);
-    $locale = I18n::locale();
-    $tpl = dirname(__DIR__, 3) . '/templates/legal/' . $locale . '/' . $page . '.html';
-    if (!is_file($tpl)) $tpl = dirname(__DIR__, 3) . '/templates/legal/en/' . $page . '.html';
-    $legal = StoreContext::current()->legal();
-    $vars = [];
-    foreach ($legal as $key => $value) $vars['{{' . $key . '}}'] = esc((string)$value);
-    // The date the text last changed: the store's legal.updated_at, else the template's own
-    // <!-- legal-updated: YYYY-MM-DD --> marker, else the template file's mtime — never "today".
-    $html = (string)file_get_contents($tpl);
-    $updated = (string)($legal['updated_at'] ?? '');
-    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $updated)) $updated = preg_match('/<!--\s*legal-updated:\s*(\d{4}-\d{2}-\d{2})\s*-->/', $html, $m) ? $m[1] : date('Y-m-d', (int)filemtime($tpl));
-    $vars['{{updated_at}}'] = esc($updated);
-    return Template::render('storefront/legal-page', ['content_html' => strtr($html, $vars)]);
+    if (!in_array($page, ConsumerNotice::LEGAL_PAGES, true)) return Template::render('storefront/status-message', ['message' => I18n::t('product_not_found')]);
+    return Template::render('storefront/legal-page', ['content_html' => ConsumerNotice::renderLegal($page, I18n::locale(), StoreContext::current()->legal())]);
 }
 
 function renderHome(): string {

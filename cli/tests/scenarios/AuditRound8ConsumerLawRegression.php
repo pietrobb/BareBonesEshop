@@ -51,6 +51,29 @@ $_SERVER['HTTP_HOST'] = 'shop.example';
 JobQueue::setDir($dir . '/jobs');
 Bootstrap::initLocale('/index.php');
 $input = json_decode($extra, true) ?: [];
+if ($action === 'confirmation') {
+    // The worker's real order_confirmation job; a capturing adapter keeps the message with its attachments.
+    $capture = new class implements MailAdapter {
+        public array $sent = [];
+        public function send(array $msg): array { $this->sent[] = $msg; return ['status' => 'sent', 'message' => '']; }
+        public function adapterId(): string { return 'r8l-capture'; }
+    };
+    MailService::useAdapter($capture);
+    $argv = ['worker.php', '--once'];
+    ob_start();
+    require_once $root . '/cli/worker.php';
+    ob_end_clean();
+    $order = $db->query("SELECT * FROM orders WHERE order_number = 'R8L-NEW'")->fetch();
+    handleEmailSend(['template' => 'order_confirmation', 'to' => 'ignored@example.test', 'order_id' => (int)$order['id']], []);
+    $vars = ConsumerNotice::mailVars($order) + ['order_number' => 'R8L-NEW', 'customer_name' => 'R8L Guest', 'order_status' => 'paid', 'order_total' => '30,00 €', 'items' => []];
+    $locales = [];
+    foreach (['sk', 'cs', 'en', 'de', 'pl', 'hu', 'es'] as $locale) $locales[$locale] = MailService::render('order_confirmation', $locale, $vars)['html'];
+    echo "\nR8LRESULT" . json_encode(['sent' => array_map(static fn(array $m): array => [
+        'to' => $m['to'], 'subject' => $m['subject'], 'html' => $m['html'], 'text' => $m['text'],
+        'attachments' => array_map(static fn(array $a): array => ['filename' => $a['filename'], 'content_type' => $a['content_type'], 'data' => $a['data']], $m['attachments']),
+    ], $capture->sent), 'locales' => $locales], JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+    exit(0);
+}
 $page = $action === 'checkout' ? 'checkout' : ($action === 'home' ? 'home' : 'withdrawal');
 $_SERVER['REQUEST_URI'] = '/index.php?page=' . $page;
 $_SERVER['REQUEST_METHOD'] = in_array($action, ['review', 'confirm'], true) ? 'POST' : 'GET';
@@ -163,3 +186,30 @@ $r8lCxl = $r8lDo('review', ['order_number' => 'R8L-CXL', 'email' => 'r8l.guest@e
 assert_true(str_contains((string)$r8lOld['output'], 'Lehota na odstúpenie od tejto objednávky už uplynula') && count($r8lOld['withdrawals']) === 2
     && str_contains((string)$r8lCxl['output'], 'je zrušená alebo vrátená'),
     'R8 withdrawal: after the 14-day period or on a cancelled order the statement is refused with the reason, nothing recorded');
+
+// 3) Order confirmation (art. 8(7)): seller identity, withdrawal period + function + model form, 24-month liability,
+//    ADR body and the terms on a durable medium (attachment); full terms in every shipped locale.
+[$r8lExit, $r8lConf, $r8lNoise] = $r8lRun(['run', 'confirmation', $r8lApp, $r8lDb, $r8lRoot, '{}']);
+$r8lMsg = $r8lConf['sent'][0] ?? ['to' => '', 'subject' => '', 'html' => '', 'text' => '', 'attachments' => []];
+$r8lHtml = html_entity_decode((string)$r8lMsg['html']);
+$r8lNeed = ['Woodle s.r.o.', 'Hlavná 1', 'IČO: 12345678', 'IČ DPH: SK1020304050', 'info@example.sk', 'do 14 dní od prevzatia tovaru',
+    '?page=withdrawal&order=R8L-NEW', 'Vzorový formulár na odstúpenie od zmluvy', 'Týmto oznamujem', '24 mesiacov', 'Slovenská obchodná inšpekcia', '?page=terms'];
+assert_true($r8lExit === 0 && count($r8lConf['sent'] ?? []) === 1 && $r8lMsg['to'] === 'r8l.guest@example.test'
+    && array_filter($r8lNeed, static fn(string $s): bool => !str_contains($r8lHtml, $s)) === [] && !str_contains($r8lHtml, '{{'),
+    'R8 confirmation: the worker\'s order confirmation names the seller, the withdrawal period, function and model form, the 24-month liability, the ADR body and the terms (missing: '
+    . json_encode(array_values(array_filter($r8lNeed, static fn(string $s): bool => !str_contains($r8lHtml, $s))), JSON_UNESCAPED_UNICODE) . ' ' . trim($r8lNoise) . ')');
+$r8lTerms = $r8lMsg['attachments'][0] ?? ['filename' => '', 'content_type' => '', 'data' => ''];
+assert_true($r8lTerms['filename'] === 'terms-R8L-NEW.html' && str_starts_with($r8lTerms['content_type'], 'text/html')
+    && str_contains($r8lTerms['data'], 'Obchodné podmienky') && str_contains($r8lTerms['data'], 'Woodle s.r.o.') && str_contains($r8lTerms['data'], '5. Odstúpenie od zmluvy')
+    && str_contains($r8lTerms['data'], 'Slovenská obchodná inšpekcia') && !str_contains($r8lTerms['data'], '{{'),
+    'R8 confirmation: the terms valid at the order are attached with the seller\'s data and the ADR body (durable medium)');
+foreach ($r8lConf['locales'] ?? [] as $r8lLocale => $r8lLocaleHtml) {
+    assert_true(str_contains((string)$r8lLocaleHtml, 'page=withdrawal&amp;order=R8L-NEW') && str_contains((string)$r8lLocaleHtml, 'Woodle s.r.o.')
+        && str_contains((string)$r8lLocaleHtml, 'Slovensk') && preg_match_all('~<h3>~', (string)$r8lLocaleHtml) >= 5 && !str_contains((string)$r8lLocaleHtml, '{{'),
+        "R8 confirmation ({$r8lLocale}): the template carries the seller, withdrawal, model form, liability, ADR and terms sections");
+}
+foreach (['sk', 'cs', 'en', 'de', 'pl', 'hu', 'es'] as $r8lLocale) {
+    $r8lTc = (string)@file_get_contents($r8lApp . '/templates/legal/' . $r8lLocale . '/terms.html');
+    assert_true(preg_match_all('~<h2>~', $r8lTc) >= 11 && str_contains($r8lTc, '{{adr_name}}') && str_contains($r8lTc, '{{email}}') && strlen($r8lTc) > 3500,
+        "R8 terms ({$r8lLocale}): full terms with withdrawal, exceptions, liability, ADR and the model form annex, not one paragraph");
+}

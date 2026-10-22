@@ -1,5 +1,27 @@
-<!-- legal-updated: 2026-08-02 -->
-<!-- Ten szablon jest punktem wyjścia. Przed produkcją skonsultuj z prawnikiem. -->
-<h1>Regulamin</h1>
-<p>Sprzedawca: {{name}}, {{street}}, {{zip}} {{city}}, {{country}}, ID: {{ico}}, Tax ID: {{dic}}, VAT ID: {{ic_dph}}. Kontakt: {{email}}, {{phone}}.</p>
-<p>Złożenie zamówienia oznacza ofertę zawarcia umowy sprzedaży. Ceny, płatności i dostawa są pokazane w koszyku. Zwroty i reklamacje obsługujemy zgodnie z obowiązującym prawem.</p>
+<!-- legal-updated: 2026-10-22 -->
+<!-- Ten szablon jest tekstem wyjściowym. Przed wdrożeniem należy go skonsultować z prawnikiem. -->
+<h1>Regulamin sklepu</h1>
+<p>Sprzedawca: {{name}}, {{street}}, {{zip}} {{city}}, {{country}}, REGON/KRS: {{ico}}, NIP: {{dic}}. Kontakt: {{email}}, {{phone}}.</p>
+<p>{{register_note}}</p>
+<h2>1. Zakres</h2>
+<p>Regulamin określa zasady zawierania umów sprzedaży za pośrednictwem sklepu internetowego między sprzedawcą a kupującym. Konsumentem jest kupujący dokonujący zakupu niezwiązanego bezpośrednio z jego działalnością gospodarczą lub zawodową. Obowiązuje wersja regulaminu z chwili wysłania zamówienia.</p>
+<h2>2. Zamówienie i zawarcie umowy</h2>
+<p>Przed wysłaniem zamówienia można sprawdzić i poprawić wszystkie dane. Zamówienie wysyła się przyciskiem „Zamawiam z obowiązkiem zapłaty”, co stanowi ofertę zawarcia umowy. Umowa zostaje zawarta z chwilą doręczenia potwierdzenia zamówienia e-mailem. Potwierdzenie zawiera niniejszy regulamin, pouczenie o odstąpieniu od umowy i wzór formularza na trwałym nośniku. Treść umowy jest archiwizowana; umowa zawierana jest w języku sklepu.</p>
+<h2>3. Cena i płatność</h2>
+<p>Ceny są cenami końcowymi zawierającymi VAT, chyba że wskazano inaczej. Koszty dostawy i płatności są wyświetlane przed wysłaniem zamówienia. Dostępne metody płatności są podane przy składaniu zamówienia; przy przelewie termin płatności podano w potwierdzeniu zamówienia.</p>
+<h2>4. Dostawa</h2>
+<p>Towar dostarczamy pod adres lub do punktu odbioru wskazanego w zamówieniu w terminie podanym przy sposobie dostawy, nie później niż w ciągu 30 dni. Ryzyko przypadkowej utraty przechodzi na konsumenta z chwilą wydania mu towaru. O wysyłce informujemy e-mailem.</p>
+<h2>5. Odstąpienie od umowy</h2>
+<p>Konsument może odstąpić od umowy bez podania przyczyny w ciągu 14 dni od otrzymania towaru (przy kilku przesyłkach od otrzymania ostatniej), także przed jego dostarczeniem. Odstąpić można za pomocą funkcji „Odstąp od umowy tutaj” w stopce każdej strony sklepu (bez logowania), e-mailem na adres {{email}} lub za pomocą poniższego wzoru formularza. Do zachowania terminu wystarczy wysłanie oświadczenia przed jego upływem. Otrzymanie oświadczenia niezwłocznie potwierdzimy e-mailem. Zwrócimy wszystkie płatności, w tym koszt najtańszego oferowanego sposobu dostawy, w ciągu 14 dni od otrzymania oświadczenia, tą samą metodą płatności; możemy wstrzymać zwrot do chwili otrzymania towaru lub dowodu jego odesłania. Towar należy odesłać w ciągu 14 dni od odstąpienia; bezpośredni koszt zwrotu ponosi konsument. Konsument odpowiada za zmniejszenie wartości towaru wynikające z korzystania z niego w sposób wykraczający poza konieczny do stwierdzenia jego charakteru.</p>
+<h2>6. Wyjątki od prawa odstąpienia</h2>
+<p>Prawo odstąpienia nie przysługuje w szczególności w odniesieniu do towarów wyprodukowanych według specyfikacji konsumenta, towarów ulegających szybkiemu zepsuciu, towarów w zapieczętowanym opakowaniu, których po otwarciu nie można zwrócić ze względów zdrowotnych lub higienicznych, oraz treści cyfrowych, których dostarczanie rozpoczęto za wyraźną zgodą konsumenta i po przyjęciu przez niego do wiadomości utraty prawa odstąpienia.</p>
+<h2>7. Zgodność towaru z umową i reklamacje</h2>
+<p>Odpowiadamy za brak zgodności towaru z umową przez 24 miesiące od jego dostarczenia. Reklamacja to odrębna procedura, niezależna od odstąpienia od umowy: można ją złożyć e-mailem na adres {{email}} lub w koncie klienta. Potwierdzimy jej otrzymanie i odpowiemy najpóźniej w ciągu 14 dni. W razie braku zgodności konsument może żądać naprawy lub wymiany, a w dalszej kolejności obniżenia ceny lub odstąpienia od umowy.</p>
+<h2>8. Pozasądowe rozwiązywanie sporów</h2>
+<p>W przypadku niezadowolenia z rozpatrzenia reklamacji konsument może skorzystać z pozasądowych sposobów rozwiązywania sporów: {{adr_name}} ({{adr_url}}).</p>
+<h2>9. Dane osobowe</h2>
+<p>Dane osobowe przetwarzamy zgodnie z polityką prywatności opublikowaną w sklepie.</p>
+<h2>10. Postanowienia końcowe</h2>
+<p>Umowa podlega prawu państwa siedziby sprzedawcy; nie pozbawia to konsumenta ochrony wynikającej z prawa państwa jego zwykłego pobytu. Regulamin obowiązuje od {{updated_at}}.</p>
+<h2>Załącznik: wzór formularza odstąpienia od umowy</h2>
+<p>(formularz ten należy wypełnić i odesłać tylko w przypadku chęci odstąpienia od umowy)<br>Adresat: {{name}}, {{street}}, {{zip}} {{city}}, {{email}}<br>Ja/My (*) niniejszym informuję/informujemy (*) o moim/naszym odstąpieniu od umowy sprzedaży następujących rzeczy (*)/umowy o świadczenie następującej usługi (*): …<br>Data zawarcia umowy (*)/odbioru (*): …<br>Imię i nazwisko konsumenta(-ów): …<br>Adres konsumenta(-ów): …<br>Podpis konsumenta(-ów) (tylko jeżeli formularz jest przesyłany w wersji papierowej): …<br>Data: …<br>(*) Niepotrzebne skreślić.</p>
