@@ -29,39 +29,46 @@ php -r "exit(extension_loaded('sodium') ? 0 : 1);"
 
 ## One-time bootstrap from v1.8.0
 
-Version 1.8.0 predates the updater, so it cannot install its own updater. Perform this bootstrap once:
+Version 1.8.0 predates the updater. No v1.9.0 update package was ever published, and copying a few updater files into the old tree does not work (they need classes v1.8.0 does not have). Instead, the updater of the **trusted target release** adopts the installed shop with `--installed=<shop root>`: it reads that shop's `config.php` and database and installs into that tree. Perform this once:
 
 1. Confirm that the deployment is really v1.8.0. Do not infer the version from a directory name. Compare the deployed core against the immutable `v1.8.0` source and preserve all customer changes.
 2. Stop all writers. The application has no built-in maintenance mode: block shop traffic at the web server or load balancer (static maintenance page or HTTP 503), then stop workers, cron, imports and webhooks.
 3. Make an independent filesystem and database backup using the deployment platform.
-4. From the trusted `v1.9.0` source, copy only these bootstrap files into the v1.8.0 deployment:
-   - `cli/cli-only.php`
-   - `cli/update.php`
-   - `src/UpdatePackage.php`
-   - `src/Updater.php`
-5. Copy the trusted `releases/update-public.key` outside the web root and add `update_storage_dir` and `update_public_key` to the deployment's existing `config.php`. Do not replace `config.php` with the example file.
-6. Record the identified baseline:
+4. **v1.x `config.php` notes** (do these before anything else touches the tree):
+   - v1.x tracked `config.php` in git. Copy it to a safe place first. A `git pull`/`git checkout` of a newer release deletes it (newer releases ignore it and ship `config.example.php`), and git refuses the checkout if it was edited. Never replace it with the example file: it holds the database credentials, the admin password hash and the payment secrets.
+   - v1.x kept `db/shop.sqlite`, `jobs/` and `cache/` inside the shop and has no `private_runtime_dir`. The current release refuses private paths inside the application root: the admin dashboard, workers and cron fail with `jobs_dir must be outside the application root`. Add `private_runtime_dir`, `private_cache_dir`, `jobs_dir` and `invoice_storage_dir` (and move `db_sqlite_path`) to absolute paths outside the shop as in `config.example.php` (`dirname(__DIR__) . '/bareboneseshop-private/...'`), and move the existing files there with writers stopped. Both `php cli/update.php doctor` (check `config`) and `php cli/setup.php doctor` name every setting still inside the root. `setup.php apply` only creates directories that are already configured outside the root; it does not move a setting, so rerunning it changes nothing.
+5. Obtain the trusted target release tree as an LF export of the signed tag (`git archive vX.Y.Z | tar -x -C /trusted/bareboneseshop-X.Y.Z`), never a Windows working copy. The release owner builds the signed v1.8.0 delta from two such exports: `php cli/build-update.php --from=<v1.8.0 export> --to=<vX.Y.Z export> --base-version=1.8.0 --version=X.Y.Z --output=/trusted/releases/update-1.8.0-X.Y.Z --secret-key=...`. `build-update` refuses CRLF text, whose hashes would match no LF install.
+6. Copy the trusted `releases/update-public.key` outside the web root and add `update_storage_dir` and `update_public_key` to the deployment's existing `config.php`.
+7. From the trusted release tree, record the baseline, then verify and apply the package into the installed shop (`SHOP` is the v1.8.0 shop root):
 
 ```bash
-php cli/update.php baseline --version=1.8.0
+cd /trusted/bareboneseshop-X.Y.Z
+php cli/update.php baseline --version=1.8.0 --installed="$SHOP"
+php cli/update.php doctor --package=/trusted/releases/update-1.8.0-X.Y.Z --installed="$SHOP" --json
+php cli/update.php check --package=/trusted/releases/update-1.8.0-X.Y.Z --installed="$SHOP"
+php cli/update.php apply --package=/trusted/releases/update-1.8.0-X.Y.Z --installed="$SHOP"
 ```
 
-7. Verify the signed v1.8.0 to v1.9.0 package and the installed file hashes:
+8. If `doctor` is not `READY` or `check` reports a conflict, stop. Preserve the customer file and resolve the difference deliberately; never overwrite it automatically.
+9. In the shop, run `php cli/update.php list` and `php cli/setup.php doctor`, then the smoke tests of the normal procedure.
+
+After this adoption, the deployment has private version state and future updates use the normal procedure below, run from the shop itself.
+
+## Customised e-mail templates from v2.0.0
+
+In v2.0.0 a shop customised its e-mails by editing `templates/emails/<locale>/*` in place. Since then the files are core defaults, and per-store customisations live in the database (admin → E-mail templates). An edited template file is a locally modified core file, so `check` reports it as a conflict and stops. Move the customisations once:
+
+1. Before the update, copy the shop's `templates/emails/` to a private directory, e.g. `$PRIVATE/emails-v2.0.0-custom`. Keep `templates/emails/` of the untouched v2.0.0 release next to it (`git archive v2.0.0 templates/emails`), e.g. `$PRIVATE/emails-v2.0.0-base`.
+2. Restore the release files in the shop (copy the base files over the edited ones), so `check` passes and the update installs the new defaults.
+3. Apply the update and run migrations as usual.
+4. For each store, preview, then import:
 
 ```bash
-php cli/update.php doctor --package=/trusted/releases/update-1.9.0 --json
-php cli/update.php check --package=/trusted/releases/update-1.9.0
+php cli/email-templates.php import --store=default --custom="$PRIVATE/emails-v2.0.0-custom" --base="$PRIVATE/emails-v2.0.0-base" --dry-run
+php cli/email-templates.php import --store=default --custom="$PRIVATE/emails-v2.0.0-custom" --base="$PRIVATE/emails-v2.0.0-base"
 ```
 
-8. If either command reports a conflict, stop. Preserve the customer file and resolve the difference deliberately; never overwrite it automatically.
-9. Apply and verify:
-
-```bash
-php cli/update.php apply --package=/trusted/releases/update-1.9.0
-php cli/update.php list
-```
-
-After this adoption, the deployment has private version state and future updates use the normal procedure below.
+Only parts that differ from the v2.0.0 file become the override (line endings do not count); unchanged parts take the new default. Every override passes the same validation as an admin save. `REFUSED order_confirmation` is expected for a v2.0.0 customisation: the confirmation must now keep the consumer information (`seller_name`, `seller_address`, `withdrawal_url`, `terms_url`). Merge the new default block into the customised text in the admin editor. `SKIPPED` means a language the store does not use, a locked alert template, or an override that already exists (merge by hand). The command exits 1 while anything is refused.
 
 ## Normal signed update procedure
 
@@ -252,7 +259,7 @@ Row counts and content checksums are never compared against the *live* database:
 
 On rollback, the stored dump checksum and disposable restore (including the recorded content checksums) are proved again before the live database is dropped and recreated. The restored live inventory is checked again afterward.
 
-**Rows discarded by a rollback are counted, never silent.** The snapshot records `MAX(id)` of `orders` and `payment_transactions` just before the dump. When `apply` rolls back automatically after a failed migration, or a manual rollback runs with a database connection, the rows above those marks are counted before the database is replaced, stored as `discarded_writes` in the snapshot's `snapshot.json`, and — when any (or an unknown number) were discarded — raised as the critical incident `update.rollback_discarded_writes` and appended to the update error. Reconcile those orders and payments with the payment provider before reopening the shop.
+**Rows discarded by a rollback are counted, never silent.** The snapshot records `MAX(id)` of `orders` and `payment_transactions` just before the dump. When `apply` rolls back automatically after a failed migration, or `php cli/update.php rollback --accept-data-loss` restores the database (it prints `discarded since the snapshot: orders=N`; if the database is unreachable it says so and the count is skipped), the rows above those marks are counted before the database is replaced, stored as `discarded_writes` in the snapshot's `snapshot.json`, and — when any (or an unknown number) were discarded — raised as the critical incident `update.rollback_discarded_writes` and appended to the update error. Reconcile those orders and payments with the payment provider before reopening the shop.
 
 ### First adoption of MySQL migration support
 

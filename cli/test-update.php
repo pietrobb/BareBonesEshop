@@ -69,6 +69,24 @@ try {
     assert_true(Updater::isProtectedPath('DB/runtime.sqlite'), 'Updater paths: protected directories cannot bypass policy with case changes');
     assert_true(!$builtUpdate['signed'], 'Updater builder: unsigned development package is labelled explicitly');
 
+    // Review round 8: a package built from a Windows checkout (CRLF) matched no LF install — every file conflicted.
+    $crlfTarget = $updateTestRoot . DIRECTORY_SEPARATOR . 'crlf-target';
+    mkdir($crlfTarget . '/src', 0750, true);
+    file_put_contents($crlfTarget . '/src/Core.php', "<?php\r\n// new core\r\n");
+    file_put_contents($crlfTarget . '/unchanged.txt', "same\n");
+    file_put_contents($crlfTarget . '/fixture.csv', "a,b\r\n1,2\r\n");
+    $crlfRefused = '';
+    try {
+        UpdatePackageBuilder::build($updateBase, $crlfTarget, $updateTestRoot . DIRECTORY_SEPARATOR . 'crlf-package', '1.1.0', '1.0.0');
+    } catch (RuntimeException $e) {
+        $crlfRefused = $e->getMessage();
+    }
+    assert_true(str_contains($crlfRefused, 'src/Core.php has CRLF line endings') && !is_dir($updateTestRoot . DIRECTORY_SEPARATOR . 'crlf-package'),
+        'Updater builder: a release tree with CRLF text is refused before any package is written (' . $crlfRefused . ')');
+    file_put_contents($crlfTarget . '/src/Core.php', "<?php\n// new core\n");
+    $lfBuilt = UpdatePackageBuilder::build($updateBase, $crlfTarget, $updateTestRoot . DIRECTORY_SEPARATOR . 'lf-package', '1.1.0', '1.0.0');
+    assert_equals(2, $lfBuilt['files'], 'Updater builder: the same tree with LF text builds (a CSV keeps its RFC 4180 CRLF)');
+
     $unsignedRefused = false;
     try {
         new UpdatePackage($updatePackageDir);
@@ -216,6 +234,19 @@ try {
         assert_equals('ok', $doctorChecks['package']['level'] ?? null, 'Updater doctor: signed package preflight is included');
         $skippedProbeReport = $doctorUpdater->doctor($public, $signedPackage, false);
         assert_equals('NOT_READY', $skippedProbeReport['status'], 'Updater doctor: skipping the database backup proof cannot report production readiness');
+        // Review round 8: v1.x config.php kept jobs_dir inside the shop, which the current JobQueue refuses — the admin
+        // dashboard died with a 500 after the update. doctor names the setting before anything changes.
+        $v1ConfigReport = $doctorUpdater->doctor($public, $signedPackage, true, ['jobs_dir' => $updateInstalled . '/jobs', 'cache_dir' => $updateInstalled . '/cache']);
+        $v1ConfigCheck = array_column($v1ConfigReport['checks'], null, 'name')['config'] ?? [];
+        assert_true($v1ConfigReport['status'] === 'NOT_READY' && ($v1ConfigCheck['level'] ?? null) === 'fail'
+            && str_contains((string)($v1ConfigCheck['message'] ?? ''), 'jobs_dir (') && !str_contains((string)($v1ConfigCheck['message'] ?? ''), 'cache_dir'),
+            'Updater doctor: a v1.x jobs_dir inside the application root fails the config check (' . ($v1ConfigCheck['message'] ?? 'no config check') . ')');
+        $escapeCheck = array_column($doctorUpdater->doctor($public, $signedPackage, true, ['jobs_dir' => $updateTestRoot . '/never-created/../' . basename($updateInstalled) . '/new-jobs', 'private_cache_dir' => 'storage/cache'])['checks'], null, 'name')['config'] ?? [];
+        assert_true(($escapeCheck['level'] ?? null) === 'fail' && str_contains((string)($escapeCheck['message'] ?? ''), 'jobs_dir (') && str_contains((string)($escapeCheck['message'] ?? ''), 'private_cache_dir ('),
+            'Updater doctor: a ../ path back into the application root and a relative path fail the config check (' . ($escapeCheck['message'] ?? 'no config check') . ')');
+        $privateConfigReport = $doctorUpdater->doctor($public, $signedPackage, true, ['jobs_dir' => $updateTestRoot . '/private-jobs']);
+        assert_equals(['READY', 'ok'], [$privateConfigReport['status'], array_column($privateConfigReport['checks'], null, 'name')['config']['level'] ?? null],
+            'Updater doctor: private runtime paths outside the application root pass');
         $doctorPdo = null;
 
         $wrongPair = sodium_crypto_sign_keypair();

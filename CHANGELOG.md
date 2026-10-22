@@ -9,6 +9,17 @@ Read before updating a live shop; run `php cli/migrate.php` after the files are 
 settings below that silently change behaviour (http webhooks, cart reminders without consent, the
 nginx PHP fallback when `operations.nginx_config` is set).
 
+- **Upgrading a released shop** (`docs/AI_UPDATE_RUNBOOK.md`)
+  - v1.8.0: the trusted new release adopts the shop with `cli/update.php ... --installed=<shop root>`
+    (no v1.9.0 package exists). Save the git-tracked v1.x `config.php` first, and move `db/`, `jobs/`
+    and `cache/` outside the shop. `update.php doctor` (check `config`) and `setup.php doctor` name
+    every private path still inside the application root.
+  - v2.0.0 e-mail templates edited in `templates/emails/` become store overrides with
+    `php cli/email-templates.php import --custom=<saved copy> --base=<v2.0.0 files>`. An
+    order-confirmation override must keep `seller_name`, `seller_address`, `withdrawal_url` and
+    `terms_url`.
+  - `update.php rollback` now counts and reports the orders/payments it discards; `doctor` no longer
+    reports NOT_READY for every package with migrations.
 - **Backup / restore / update CLI**
   - `cli/restore.php` restores MySQL/MariaDB `.sql` backups now, but only with `--i-stopped-writers`
     (stop web traffic, workers and cron first; there is no lock that proves nobody writes). The dump

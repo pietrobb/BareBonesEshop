@@ -440,6 +440,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.email.msg.unknown_vars' => 'Esta plantilla no conoce las variables: {vars}. Permitidas: {allowed}.',
     'admin.email.msg.malformed' => 'Etiquetas de plantilla no válidas: {tags}.',
     'admin.email.msg.unsafe' => 'El HTML contiene contenido no permitido: {what}.',
+    'admin.email.msg.required_vars' => 'La confirmación del pedido debe conservar la información al consumidor: {vars} (incorpore el nuevo bloque predeterminado a su texto).',
     'admin.email.msg.secret_link' => 'Los enlaces con un token de un solo uso ({vars}) solo pueden ser un enlace completo (href="{{…}}") o aparecer solos en el texto, no como parte de otra dirección.',
     'admin.email.msg.iban_literal' => 'No escriba un número de cuenta bancaria en la plantilla; use {{bank_iban}}, la cuenta de la configuración de la tienda.',
     'admin.email.msg.unknown' => 'Plantilla o idioma desconocido para esta tienda.',

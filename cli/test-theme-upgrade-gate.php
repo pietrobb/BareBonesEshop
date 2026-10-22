@@ -18,11 +18,14 @@ $themeUpgradeGateExit = (static function(): int {
         if (!is_dir(dirname($path))) mkdir(dirname($path), 0700, true);
         file_put_contents($path, $content);
     };
-    $copyTree = static function(string $from, string $to, ?callable $accept = null) use ($write): void {
+    // $lf: copy like an LF release export (git archive), also from a Windows checkout with core.autocrlf.
+    $copyTree = static function(string $from, string $to, ?callable $accept = null, bool $lf = false) use ($write): void {
         $items = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($from, FilesystemIterator::SKIP_DOTS));
         foreach ($items as $item) {
             $relative = str_replace('\\', '/', substr($item->getPathname(), strlen($from) + 1));
-            if ($item->isFile() && ($accept === null || $accept($relative))) $write($to . '/' . $relative, (string)file_get_contents($item->getPathname()));
+            if (!$item->isFile() || ($accept !== null && !$accept($relative))) continue;
+            $content = (string)file_get_contents($item->getPathname());
+            $write($to . '/' . $relative, $lf && !str_ends_with($relative, '.csv') ? str_replace("\r\n", "\n", $content) : $content);
         }
     };
     $treeHash = static function(string $root): string {
@@ -46,7 +49,7 @@ $themeUpgradeGateExit = (static function(): int {
         $coreScope = static fn(string $path): bool => (bool)preg_match('~^(src|adapters|cli|migrations|lang|forms|templates|themes|blocks)/~', $path)
             || (bool)preg_match('~^[^/]+\.(php|json)$~', $path) && $path !== 'config.php';
         $from = $temp . '/release-from';
-        $copyTree($repo, $from, static fn(string $path): bool => $coreScope($path) && !str_starts_with($path, 'cli/tests/scenarios/'));
+        $copyTree($repo, $from, static fn(string $path): bool => $coreScope($path) && !str_starts_with($path, 'cli/tests/scenarios/'), true);
 
         $migration = "<?php\nreturn new class {\n    public function up(PDO \$db, bool \$isSqlite): void { \$db->exec('CREATE TABLE theme_gate_release (id INTEGER)'); }\n};\n";
         $release = static function(string $name, callable $edit) use ($temp, $from, $copyTree): string {
@@ -179,6 +182,62 @@ $themeUpgradeGateExit = (static function(): int {
         fclose($pipes[1]);
         fclose($pipes[2]);
         $assert(proc_close($process) === 1 && ($standalone['status'] ?? '') === 'NO-GO', 'standalone package gate (theme-check.php --installed --package) reports NO-GO');
+
+        // H (review round 8): the runbook's `update.php doctor --package` passes the preflight of a package with
+        // migrations — it used to build the updater without a migration runner, so every such package was NOT_READY.
+        [$root, $state, $database] = $install($repaired);
+        $write($root . '/config.php', "<?php\nreturn ['update_storage_dir' => " . var_export($state, true)
+            . ", 'db_driver' => 'sqlite', 'db_sqlite_path' => " . var_export($database, true) . "];\n");
+        [, $output] = $cli($root, ['doctor', '--package=' . $compatible, '--allow-unsigned', '--json']);
+        $doctor = json_decode($output, true);
+        $doctorChecks = array_column((array)($doctor['checks'] ?? []), null, 'name');
+        $blockers = (array)($doctor['package_preflight']['blockers'] ?? ['no JSON: ' . $output]);
+        $assert(($doctorChecks['package']['level'] ?? null) === 'ok' && $blockers === [] && ($doctorChecks['database_backup']['level'] ?? null) === 'ok',
+            'cli doctor passes the preflight of a package with migrations (blockers: ' . implode('; ', $blockers) . ')');
+        $assert(!is_file($root . '/src/ThemeGateRelease.php') && !is_file($state . '/installed.json'), 'cli doctor changes nothing');
+
+        // I (review round 8): `update.php rollback --accept-data-loss` counts the orders it discards, as the runbook says —
+        // it used to build the updater without a database connection, so the count was silently skipped.
+        $pdo = new PDO('sqlite:' . $database, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $migrations = 0;
+        $snapshot = (string)$updater($root, $state, $pdo, $migrations)->apply(new UpdatePackage($compatible, null, true))['snapshot'];
+        $pdo->exec("INSERT INTO orders (number) VALUES ('2026-0002'), ('2026-0003')");
+        $pdo = null;
+        gc_collect_cycles();
+        [$exit, $output] = $cli($root, ['rollback', '--snapshot=' . $snapshot, '--accept-data-loss']);
+        $assert($exit === 0 && str_contains($output, 'discarded since the snapshot: orders=2'), 'cli rollback reports the 2 orders it discarded: ' . trim($output));
+        $pdo = new PDO('sqlite:' . $database, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $assert((int)$pdo->query('SELECT COUNT(*) FROM orders')->fetchColumn() === 1 && !is_file($root . '/src/ThemeGateRelease.php'),
+            'cli rollback restored the pre-update database and code');
+        $pdo = null;
+
+        // J (review round 8): a shop that predates the updater (v1.8.0) is adopted by the TRUSTED NEW release's CLI run
+        // against it with --installed, instead of copying a few updater files into the old tree (they need more classes).
+        [$root, $state] = $install($repaired);
+        $database = $temp . '/shop-adopt.sqlite';
+        $pdo = new PDO('sqlite:' . $database, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+        (new Migrator($pdo, $from . '/migrations', $temp . '/adopt-migrate.lock'))->apply(static fn($message) => null);
+        $pdo = null;
+        $write($root . '/config.php', "<?php\nreturn ['update_storage_dir' => " . var_export($state, true)
+            . ", 'db_driver' => 'sqlite', 'db_sqlite_path' => " . var_export($database, true) . "];\n");
+        foreach (['cli/update.php', 'src/Updater.php', 'src/ThemeUpgradeGate.php', 'src/UpdatePackage.php'] as $file) unlink($root . '/' . $file);
+        $trusted = $temp . '/release-compatible';
+        $adopt = static fn(array $arguments): array => $cli($trusted, array_merge($arguments, ['--installed=' . $root]));
+        [$exit, $output] = $adopt(['baseline', '--version=9.9.8']);
+        $assert($exit === 0 && is_file($state . '/installed.json'), 'adoption: baseline records the installed shop: ' . trim($output));
+        [$exit, $output] = $adopt(['doctor', '--package=' . $compatible, '--allow-unsigned', '--json']);
+        $doctorChecks = array_column((array)(json_decode($output, true)['checks'] ?? []), null, 'name');
+        $assert(($doctorChecks['package']['level'] ?? null) === 'ok' && ($doctorChecks['database_backup']['level'] ?? null) === 'ok',
+            'adoption: doctor verifies the package and a backup of the installed shop\'s database (failing: '
+            . implode('; ', array_map(static fn(array $c): string => $c['name'] . ': ' . $c['message'], array_filter($doctorChecks, static fn(array $c): bool => $c['level'] === 'fail'))) . ')');
+        [$exit, $output] = $adopt(['apply', '--package=' . $compatible, '--allow-unsigned']);
+        $pdo = new PDO('sqlite:' . $database, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $installedState = json_decode((string)@file_get_contents($state . '/installed.json'), true);
+        $assert($exit === 0 && is_file($root . '/src/ThemeGateRelease.php') && ($installedState['version'] ?? null) === '9.9.9-compatible'
+            && (int)$pdo->query("SELECT COUNT(*) FROM sqlite_master WHERE name = 'theme_gate_release'")->fetchColumn() === 1
+            && !is_file($trusted . '/config.php'),
+            'adoption: apply installs the package into the installed shop and migrates its database: ' . trim($output));
+        $pdo = null;
     } finally {
         $gate = $pdo = null; // release SQLite handles so Windows can delete the disposable databases
         gc_collect_cycles();

@@ -11,6 +11,8 @@ final class UpdatePackageBuilder
         '.env', 'config.php', '.barebones-version.json',
     ];
 
+    private const TEXT_FILE = '~(\.(php|phtml|js|mjs|css|html?|json|md|txt|xml|svg|ya?ml|neon|ini|sql|sh)|(^|/)\.htaccess)$~i';
+
     public static function build(
         string $fromRoot,
         string $toRoot,
@@ -148,6 +150,12 @@ final class UpdatePackageBuilder
             $hash = hash_file('sha256', $absolute);
             if (!is_string($hash)) {
                 throw new RuntimeException("Cannot hash source file: {$relative}");
+            }
+            // The repository stores text with LF. CRLF means a Windows checkout (core.autocrlf): every hash would then
+            // differ from a deployed LF install, so each file of the package would conflict.
+            if (preg_match(self::TEXT_FILE, $relative) === 1 && str_contains((string)file_get_contents($absolute), "\r\n")) {
+                throw new RuntimeException("Release tree file {$relative} has CRLF line endings (a Windows checkout?);"
+                    . ' build from an LF export, e.g. git -c core.autocrlf=false archive --format=tar vX.Y.Z');
             }
             $result[$relative] = $hash;
         }

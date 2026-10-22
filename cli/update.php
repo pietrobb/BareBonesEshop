@@ -36,6 +36,16 @@ foreach (array_slice($args, 1) as $argument) {
 
 $root = dirname(__DIR__);
 try {
+    // --installed=DIR: this (trusted, newer) release's updater operates on the shop in DIR, with DIR's config.php
+    // and database — how a shop that predates the updater (v1.8.0) is adopted without copying files into it.
+    if (isset($options['installed'])) {
+        $installed = realpath((string)$options['installed']);
+        if ($installed === false || !is_file($installed . '/config.php') || !is_dir($installed . '/src')) {
+            throw new InvalidArgumentException('--installed must be the root of an installed shop (with config.php and src/)');
+        }
+        $root = $installed;
+        Db::useConfig($root . '/config.php');
+    }
     $config = require $root . '/config.php';
     if (!is_array($config)) {
         throw new RuntimeException('config.php must return an array');
@@ -64,11 +74,13 @@ try {
                 !empty($options['allow-unsigned'])
             );
         }
-        $updater = new Updater($root, $stateDirectory, Db::get(), null, $databaseBackup, new ThemeUpgradeGate($stateDirectory));
+        // The same migration runner as apply, so a package with migrations gets the preflight apply will see (never run here).
+        $updater = new Updater($root, $stateDirectory, Db::get(), updateMigrationRunner($root), $databaseBackup, new ThemeUpgradeGate($stateDirectory));
         $report = $updater->doctor(
             $publicKey !== '' ? $publicKey : null,
             $package,
-            empty($options['skip-backup-probe'])
+            empty($options['skip-backup-probe']),
+            $config
         );
         printUpdateDoctorReport($report, !empty($options['json']));
         exit($report['status'] === 'READY' ? 0 : 1);
@@ -107,7 +119,16 @@ try {
         if ($snapshotId === '') {
             throw new InvalidArgumentException('rollback requires --snapshot=ID');
         }
-        $updater = new Updater($root, $stateDirectory, null, null, $databaseBackup);
+        // With a connection the rollback counts the rows it discards (the restore releases it before replacing the
+        // database); a code-only rollback still works when the database is unreachable.
+        try {
+            $database = Db::get();
+        } catch (Throwable $e) {
+            $database = null;
+            fwrite(STDERR, 'No database connection; rows discarded by a database rollback cannot be counted: ' . $e->getMessage() . "\n");
+        }
+        $updater = new Updater($root, $stateDirectory, $database, null, $databaseBackup);
+        $database = null;
         $result = $updater->rollback($snapshotId, !empty($options['force']), !empty($options['accept-data-loss']));
         echo "Rollback complete: {$result['snapshot']}, restored {$result['restored_files']} file(s)"
             . ($result['database_restored_to'] !== null ? ", database restored to {$result['database_restored_to']}" : '') . ".\n";
@@ -137,13 +158,7 @@ try {
     if ($package->runsMigrations()) {
         $database = Db::get();
         $databaseBackup = createUpdateDatabaseBackup($config);
-        $migrationRunner = static function () use ($root): void {
-            $migrator = new Migrator(Db::get(), $root . '/migrations');
-            $applied = $migrator->apply(static function (string $message): void {
-                echo "  {$message}\n";
-            });
-            echo '  Applied ' . count($applied) . " migration(s).\n";
-        };
+        $migrationRunner = updateMigrationRunner($root);
     }
     $updater = new Updater($root, $stateDirectory, $database, $migrationRunner, $databaseBackup, new ThemeUpgradeGate($stateDirectory));
     $database = null; // Updater owns the only non-static reference; enables SQLite rollback on Windows.
@@ -192,6 +207,17 @@ function updateRecordCoreBaseline(string $root, string $stateDirectory, array $c
     } catch (Throwable $e) {
         fwrite(STDERR, 'WARNING: core drift baseline not recorded: ' . $e->getMessage() . "\n");
     }
+}
+
+function updateMigrationRunner(string $root): Closure
+{
+    return static function () use ($root): void {
+        $migrator = new Migrator(Db::get(), $root . '/migrations');
+        $applied = $migrator->apply(static function (string $message): void {
+            echo "  {$message}\n";
+        });
+        echo '  Applied ' . count($applied) . " migration(s).\n";
+    };
 }
 
 function createUpdateDatabaseBackup(array $config): ?UpdateDatabaseBackup

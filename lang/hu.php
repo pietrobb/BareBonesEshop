@@ -287,6 +287,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.email.msg.unknown_vars' => 'Ez a sablon nem ismeri a változókat: {vars}. Engedélyezett: {allowed}.',
     'admin.email.msg.malformed' => 'Érvénytelen sablonjelölők: {tags}.',
     'admin.email.msg.unsafe' => 'A HTML nem engedélyezett tartalmat tartalmaz: {what}.',
+    'admin.email.msg.required_vars' => 'A rendelés visszaigazolásának tartalmaznia kell a fogyasztói tájékoztatást: {vars} (illessze be az új alapértelmezett blokkot a szövegébe).',
     'admin.email.msg.secret_link' => 'Az egyszer használatos tokent tartalmazó linkek ({vars}) csak teljes linkként (href="{{…}}") vagy önállóan a szövegben szerepelhetnek, más cím részeként nem.',
     'admin.email.msg.iban_literal' => 'Ne írjon bankszámlaszámot a sablonba; használja a {{bank_iban}} változót, a bolt beállításaiban megadott számlát.',
     'admin.email.msg.unknown' => 'Ismeretlen sablon vagy az áruház nyelve.',
