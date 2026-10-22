@@ -89,6 +89,7 @@ final class PricingAdmin {
         $db->beginTransaction();
         try {
             if ($old) {
+                PricingRuns::promotion($db, $old, $row);
                 $db->prepare('UPDATE promotions SET code = :code, name = :name, scope = :scope, coupon_code = :coupon_code, priority = :priority, stacking = :stacking,
                     conditions = :conditions, actions = :actions, valid_from = :valid_from, valid_to = :valid_to, active = :active, updated_at = ' . Db::now() . '
                     WHERE id = :id AND store_id = :store')->execute($params + [':id' => $id]);
@@ -119,6 +120,7 @@ final class PricingAdmin {
         $db = Db::get();
         $db->beginTransaction();
         try {
+            PricingRuns::promotion($db, $promotion, null);
             $db->prepare('DELETE FROM promotions WHERE id = :id AND store_id = :store')->execute([':id' => $id, ':store' => StoreContext::current()->id()]);
             AuditLog::log('promotion', $id, $promotion, null, 'Admin promotion delete');
             $db->commit();
@@ -179,6 +181,7 @@ final class PricingAdmin {
         $db->beginTransaction();
         try {
             if ($old) {
+                PricingRuns::priceList($db, $old, self::priceRows($id), $row);
                 $db->prepare('UPDATE price_lists SET code = :code, name = :name, currency = :currency, customer_group_id = :customer_group_id, priority = :priority,
                     valid_from = :valid_from, valid_to = :valid_to, active = :active, updated_at = ' . Db::now() . ' WHERE id = :id AND store_id = :store')->execute($params + [':id' => $id]);
             } else {
@@ -205,6 +208,7 @@ final class PricingAdmin {
         $db->beginTransaction();
         try {
             $prices = self::priceRows($id);
+            PricingRuns::priceList($db, $list, $prices, null);
             // Explicit: SQLite enforces the ON DELETE CASCADE only with PRAGMA foreign_keys.
             $db->prepare('DELETE FROM price_list_prices WHERE price_list_id = :id')->execute([':id' => $id]);
             $db->prepare('DELETE FROM price_lists WHERE id = :id AND store_id = :store')->execute([':id' => $id, ':store' => StoreContext::current()->id()]);
@@ -257,6 +261,7 @@ final class PricingAdmin {
         $db->beginTransaction();
         try {
             $before = self::priceRows($listId);
+            PricingRuns::priceList($db, $list, PricingRuns::changedPrices($before, $rows), null);
             $db->prepare('DELETE FROM price_list_prices WHERE price_list_id = :id')->execute([':id' => $listId]);
             $insert = $db->prepare('INSERT INTO price_list_prices (price_list_id, product_id, variant_id, min_qty, price, compare_price)
                 VALUES (:list, :product_id, :variant_id, :min_qty, :price, :compare_price)');
