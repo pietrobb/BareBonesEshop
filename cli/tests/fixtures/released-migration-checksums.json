@@ -465,6 +465,14 @@
             "8f9cd7f4208cb8cb6dc99f3ec47fce7b0cc9bdff51def99bd713a46cdaec7d42"
         ]
     },
+    "20261022110000_invoice_download_token_hash": {
+        "lf": [
+            "ab8f99730f8bf95c462b335a0fef268325e72f1c67e9cedddacba19431af03f7"
+        ],
+        "crlf": [
+            "5bf9702613ecc93d81200decb74d8e8e27ec6e66e897552e455877e61067e358"
+        ]
+    },
     "20261022120000_admin_list_indexes": {
         "lf": [
             "84251e11af091259169a74b57edb9809ae9f5529cfa329f896241054f27fe720"

@@ -36,16 +36,19 @@ if ($p === 'invoice') {
     }
     $h = static fn(string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
     header('Content-Type: text/html; charset=utf-8');
-    echo '<!DOCTYPE html><html lang="' . $h(I18n::locale()) . '"><head><meta charset="utf-8"><meta name="robots" content="noindex, nofollow">'
-        . '<meta name="viewport" content="width=device-width, initial-scale=1"><title>' . $h($t('account.invoice_link_title')) . '</title></head><body>'
+    // No marketing hooks: no third-party script runs on a page whose fragment carries a bearer token.
+    echo Template::document($t('account.invoice_link_title'), '', [
+        'seo_head' => '<meta name="robots" content="noindex, nofollow">',
+        'marketing_hooks' => '',
+        'body_html' => '<main id="main-content" class="container">'
         . ($token !== '' ? '<p role="alert">' . $h($t('account.invoice_link_invalid')) . '</p>' : '')
         . '<form method="post" action="' . $h(Template::storeUrl('/account.php?p=invoice')) . '" id="invoice-link" hidden>'
         . '<input type="hidden" name="token" value=""><button type="submit">' . $h($t('account.invoice_link_open')) . '</button></form>'
         . '<noscript><p>' . $h($t('account.invoice_link_noscript')) . '</p></noscript>'
         . '<script nonce="' . $h(Security::cspNonce()) . '">(function(){var f=document.getElementById("invoice-link"),t=location.hash.slice(1);'
         . 'if(!/^[0-9a-f]{64}$/i.test(t))return;'
-        . 'history.replaceState(null,"",location.pathname+location.search);f.token.value=t;f.submit();})();</script>'
-        . '</body></html>';
+        . 'history.replaceState(null,"",location.pathname+location.search);f.token.value=t;f.submit();})();</script></main>',
+    ]);
     exit;
 }
 
