@@ -385,7 +385,8 @@ class Rma {
         if (!$rma || !in_array((string)$rma['status'], ['received', 'refunded'], true)) throw new LogicException('RMA is not received');
         if ($quantity <= 0 || $idempotencyKey === '' || !Products::byId($replacementProductId)) throw new InvalidArgumentException('Exchange request is invalid');
         // The available quantity is checked and the exchange inserted in one transaction, with the
-        // RMA line locked on MySQL, so concurrent exchanges cannot both reserve the same units.
+        // RMA locked on MySQL (receipts and credit notes take the same lock), so concurrent exchanges or
+        // credit notes cannot both reserve the same units.
         $db = Db::get();
         $own = !$db->inTransaction();
         if ($own) $db->beginTransaction();
@@ -409,7 +410,6 @@ class Rma {
     private static function insertExchange(int $rmaId, int $rmaItemId, int $quantity, int $replacementProductId, ?int $replacementVariantId, string $idempotencyKey): int {
         $rma = self::lockedRma($rmaId);
         if (!$rma || !in_array((string)$rma['status'], ['received', 'refunded'], true)) throw new LogicException('RMA is not received');
-        if (Db::isMysql()) Db::get()->prepare('SELECT id FROM rma_items WHERE id = ? FOR UPDATE')->execute([$rmaItemId]);
         $stmt = Db::get()->prepare("SELECT ri.*,
                 COALESCE((SELECT SUM(cni.quantity) FROM credit_note_items cni JOIN order_refunds r ON r.id=cni.refund_id WHERE cni.rma_item_id=ri.id AND r.status IN ('pending','succeeded')),0) AS credited,
                 COALESCE((SELECT SUM(quantity) FROM return_exchanges re WHERE re.rma_item_id=ri.id AND re.store_id=:store2 AND re.status!='cancelled'),0) AS exchanged

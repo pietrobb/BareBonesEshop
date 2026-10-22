@@ -147,3 +147,63 @@ assert_equals([true, false, false, true], [
 $r8qEmpty = Template::render('storefront/checkout-empty', ['breadcrumbs' => [], 'message' => 'Váš košík je prázdny.', 'home_url' => '/', 'continue_label' => 'Pokračovať v nákupe', 't' => I18n::all()]);
 assert_true(!str_contains($r8qEmpty, '..') && (bool)preg_match('/<a [^>]*text-decoration:\s*underline[^>]*>Pokračovať v nákupe<\/a>/u', $r8qEmpty),
     'R8 tests: the empty checkout has one full stop and an underlined continue-shopping link');
+
+// Credit note vs exchange of the same returned units. An exchange locks the RMA; the credit note checked the
+// quantities before its transaction and took no lock, so on MySQL both committed (refund and replacement for one unit),
+// and on SQLite the credit failed with "database is locked". It now waits for the RMA and re-checks: a clean refusal.
+require_once dirname(TEST_CLI_DIR) . '/src/Http/ApiHandlers.php';
+foreach ($GLOBALS as $r8qValue) if ($r8qValue instanceof PDOStatement) $r8qValue->closeCursor();
+$pdo->exec("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
+    VALUES (97481, 'default', 1, 'R8Q credit race', 'r8q-credit-race', 'R8Q-CREDIT', 'simple', 1500, 'eur', 'active', 0, 'backorder')");
+Security::setRateDbForTesting(new PDO('sqlite::memory:'));
+Cart::clear();
+Cart::add(97481, null, 2);
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_SESSION['csrf_token'] = 'r8q-credit';
+$_POST = ['csrf_token' => 'r8q-credit', 'name' => 'R8Q Buyer', 'email' => 'r8q-credit@example.com', 'country' => 'SK',
+    'street' => 'Credit 1', 'city' => 'Bratislava', 'zip' => '81101', 'shipping_method' => 'packeta', 'payment_method' => 'bank_transfer'];
+$r8qCheckout = apiCheckout();
+$_POST = [];
+Cart::clear();
+$r8qCreditOrder = (int)($r8qCheckout['order_id'] ?? 0);
+$pdo->exec("UPDATE orders SET status='paid', payment_status='paid', payment_id='' WHERE id={$r8qCreditOrder}");
+$r8qInvoice = InvoiceService::issue($r8qCreditOrder);
+$pdo->exec("UPDATE orders SET status='delivered' WHERE id={$r8qCreditOrder}");
+[, $r8qRma] = Rma::create($r8qCreditOrder, null, 'R8Q credit race', [(int)Orders::items($r8qCreditOrder)[0]['id'] => 2]);
+Rma::setStatus((int)$r8qRma, 'approved');
+$r8qRmaItem = (int)Rma::items((int)$r8qRma)[0]['id'];
+Rma::receive((int)$r8qRma, [$r8qRmaItem => ['quantity' => 2, 'disposition' => 'repair']], 'r8q-credit-receipt');
+$r8qHolder = test_fixture_path('r8q-credit-race') . '.php';
+file_put_contents($r8qHolder, <<<'PHP'
+<?php
+// Exchanges both received units in a transaction held open for 2 s.
+[, $root, $file, $rma, $item, $product] = $argv;
+require $root . '/src/autoload.php';
+$db = new PDO('sqlite:' . $file, null, null, [PDO::ATTR_TIMEOUT => 10, PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+Db::init($db, 'sqlite');
+$db->beginTransaction();
+Rma::createExchange((int)$rma, (int)$item, 2, (int)$product, null, 'r8q-credit-race-x');
+echo "held\n";
+usleep(2000000);
+$db->commit();
+echo "committed\n";
+PHP);
+$r8qProc = proc_open([PHP_BINARY, $r8qHolder, dirname(TEST_CLI_DIR), $testDbPath, (string)$r8qRma, (string)$r8qRmaItem, '97481'], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $r8qPipes);
+fclose($r8qPipes[0]);
+$r8qHeld = trim((string)fgets($r8qPipes[1]));
+try {
+    InvoiceService::credit((int)$r8qInvoice['id'], (int)$r8qRma, [$r8qRmaItem => 2], 'r8q-credit-race-c');
+    $r8qCredit = 'credited';
+} catch (Throwable $e) {
+    $r8qCredit = $e->getMessage();
+}
+$r8qHolderOut = trim((string)stream_get_contents($r8qPipes[1]) . stream_get_contents($r8qPipes[2]));
+fclose($r8qPipes[1]);
+fclose($r8qPipes[2]);
+proc_close($r8qProc);
+@unlink($r8qHolder);
+$r8qCommitted = static fn(string $sql): int => (int)$pdo->query($sql)->fetchColumn();
+assert_equals(['held', 'Credit quantity exceeds received uncommitted quantity', 'committed', 2, 0], [$r8qHeld, $r8qCredit, $r8qHolderOut,
+    $r8qCommitted("SELECT COALESCE(SUM(quantity), 0) FROM return_exchanges WHERE rma_item_id = {$r8qRmaItem}"),
+    $r8qCommitted("SELECT COALESCE(SUM(quantity), 0) FROM credit_note_items WHERE rma_item_id = {$r8qRmaItem}")],
+    'R8 tests: a credit note started while an exchange of the same units is uncommitted waits for it and is refused (2 exchanged, 0 credited)');

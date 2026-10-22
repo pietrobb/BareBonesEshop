@@ -209,6 +209,24 @@ Db::init($b, 'mysql');
 $out['backorder'][] = BackorderAllocation::allocate(['R8K-BO']);
 $b->commit();
 $out['backorder'][] = array_map('intval', $a->query("SELECT qty, reserved FROM warehouse_stock WHERE sku = 'R8K-BO'")->fetch(PDO::FETCH_NUM));
+// 10b. The same, but the older snapshot already sees the stock (it arrived without an allocation, e.g. a feed) and
+// another allocation reserves it for the line meanwhile: only the locked re-read of the line stops a second reservation.
+$a->exec("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
+    VALUES (97312, 'default', {$category}, 'R8K bo2', 'r8k-bo2', 'R8K-BO2', 'simple', 1000, 'eur', 'active', 4, 'backorder')");
+$a->exec("INSERT INTO warehouse_stock (store_id, warehouse_id, sku, qty, reserved) VALUES ('default', {$wh}, 'R8K-BO2', 4, 0)");
+$a->exec("INSERT INTO orders (order_number, status, payment_status, customer_name, customer_email, payment_method, subtotal, total, currency, store_id)
+    VALUES ('R8K-10B', 'paid', 'paid', 'R8K', 'r8k@example.test', 'card', 2000, 2000, 'eur', 'default')");
+$o10b = (int)$a->lastInsertId();
+$a->prepare("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total, attrs, reserved_qty, backordered_qty)
+    VALUES (?, 97312, 'R8K-BO2', 'R8K bo2', 2, 1000, 2000, ?, 0, 2)")->execute([$o10b, json_encode(['_inventory_allocations' => [['warehouse_id' => null, 'qty' => 2, 'status' => 'backorder']]])]);
+$b->beginTransaction();
+$b->query("SELECT backordered_qty FROM order_items WHERE order_id = {$o10b}")->fetchAll();
+Db::init($a, 'mysql');
+$out['backorder_seen'][] = BackorderAllocation::allocate(['R8K-BO2']);
+Db::init($b, 'mysql');
+$out['backorder_seen'][] = BackorderAllocation::allocate(['R8K-BO2']);
+$b->commit();
+$out['backorder_seen'][] = array_map('intval', $a->query("SELECT qty, reserved FROM warehouse_stock WHERE sku = 'R8K-BO2'")->fetch(PDO::FETCH_NUM));
 
 // 11. A shipment planned in a transaction that read before stock arrived for its backordered line: the order lines
 // are re-read under lock, so the units allocated meanwhile can be shipped (a stale read saw no allocation).
@@ -332,6 +350,8 @@ if (!getenv('TEST_MYSQL_DSN')) {
             'R8 locks: a cancellation waiting for a shipment being shipped releases only the unit that did not ship');
         assert_equals(['ok', 0, [4, 2]], $r8k['backorder'] ?? $r8kOut,
             'R8 locks: an allocation inside a transaction with an older snapshot does not reserve an already allocated backorder line again');
+        assert_equals([2, 0, [4, 2]], $r8k['backorder_seen'] ?? $r8kOut,
+            'R8 locks: an older snapshot that already saw the stock does not reserve a backorder line allocated meanwhile a second time');
         assert_equals(['ok', 'ok', 2], $r8k['ship_allocated'] ?? $r8kOut,
             'R8 locks: a shipment in a transaction that read before stock was allocated to its backordered line ships the allocated units');
     } finally {

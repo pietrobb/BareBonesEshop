@@ -85,7 +85,8 @@ $a->exec("INSERT INTO warehouse_stock (store_id, warehouse_id, sku, qty, reserve
 $a->beginTransaction();
 $a->query("SELECT COALESCE(SUM(reserved), 0) FROM warehouse_stock WHERE warehouse_id = {$delWh}")->fetchColumn();
 $reservation = $try($b, static fn() => Warehouse::reserve('R7L-DEL', 1));
-$deletion = $try($a, static fn() => Warehouse::delete($delWh));
+Db::init($a, $driver);
+try { Warehouse::delete($delWh); $deletion = 'ok'; } catch (Throwable $e) { $deletion = 'refused: ' . $e->getMessage(); }
 $deletion === 'ok' ? $a->commit() : $a->rollBack();
 $kept = (int)$a->query("SELECT COALESCE(SUM(reserved), 0) FROM warehouse_stock WHERE warehouse_id = {$delWh}")->fetchColumn();
 // Round 8: the admin HTTP handler opens the transaction and reads the order before createShipment() locks it. On
@@ -132,9 +133,11 @@ try {
         assert_equals([0, ['ok', 'refused', 'refused', 2]], [$r7lCode, $r7lResult[0] ?? $r7lOut], "R7 {$r7lDriver} shipments: a concurrent second shipment of the same reservation is refused, only 2 units are planned");
         assert_equals([['ok', 'refused'], 3], $r7lResult[1] ?? $r7lOut, "R7 {$r7lDriver} receipts: a concurrent receipt cannot receive more than the 5 ordered");
         [$r7lReserved, $r7lDeleted, $r7lKept] = $r7lResult[2] ?? [null, null, null];
-        assert_true($r7lReserved !== null && ($r7lReserved !== 'ok' || [$r7lDeleted, $r7lKept] === ['refused', 1]),
+        assert_true($r7lReserved !== null && ($r7lReserved !== 'ok' || (str_starts_with((string)$r7lDeleted, 'refused') && $r7lKept === 1)),
             "R7 {$r7lDriver} warehouse delete: a reservation committed during the delete survives and the delete is refused (" . json_encode($r7lResult[2] ?? $r7lOut) . ')');
-        if ($r7lDriver === 'mysql') assert_equals(['ok', 'refused', 1], $r7lResult[2] ?? $r7lOut, 'R7 mysql warehouse delete: the delete re-reads reservations under lock instead of its stale snapshot');
+        // The locked read refuses up front with the reserved count; a stale read only trips the recount after the DELETE.
+        if ($r7lDriver === 'mysql') assert_true([$r7lReserved, $r7lKept] === ['ok', 1] && (bool)preg_match('/^refused: Warehouse \d+ still holds 1 reserved units$/', (string)$r7lDeleted),
+            'R7 mysql warehouse delete: the delete re-reads reservations under lock instead of its stale snapshot (' . json_encode($r7lResult[2] ?? $r7lOut) . ')');
         assert_equals(['ok', 'refused', 2], $r7lResult[3] ?? $r7lOut, "R8 {$r7lDriver} shipments: a caller that read before the lock (admin HTTP handler) still sees the committed shipment and is refused");
     }
 } finally {
