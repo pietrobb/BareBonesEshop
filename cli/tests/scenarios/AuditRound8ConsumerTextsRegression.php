@@ -29,6 +29,18 @@ if ($phase === 'setup') {
     $hist = (int)$db->lastInsertId();
     $db->prepare('INSERT INTO product_price_history (product_id, price, lowest_prior, changed_at) VALUES (?, 2000, NULL, ?), (?, 1500, 2000, ?)')
         ->execute([$hist, gmdate('Y-m-d H:i:s', time() - 45 * 86400), $hist, gmdate('Y-m-d H:i:s', time() - 5 * 86400)]);
+    // Reviews of R8T-HIST: a buyer with a paid order, a customer who never bought it, a guest.
+    $customer = $db->prepare("INSERT INTO customers (email, password_hash, name) VALUES (?, 'x', ?)");
+    $customer->execute(['r8t-buyer@example.test', 'R8T Buyer']);
+    $buyer = (int)$db->lastInsertId();
+    $customer->execute(['r8t-other@example.test', 'R8T Other']);
+    $other = (int)$db->lastInsertId();
+    $db->prepare("INSERT INTO orders (order_number, status, payment_status, customer_id, customer_name, customer_email, payment_method, subtotal, total, currency, store_id, locale)
+        VALUES ('R8T-ORD', 'processing', 'paid', ?, 'R8T Buyer', 'r8t-buyer@example.test', 'card', 1500, 1500, 'eur', 'default', 'sk')")->execute([$buyer]);
+    $db->prepare('INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total) VALUES (?, ?, ?, ?, 1, 1500, 1500)')
+        ->execute([(int)$db->lastInsertId(), $hist, 'R8T-HIST', 'R8T History']);
+    $review = $db->prepare("INSERT INTO product_reviews (product_id, customer_id, author_name, rating, title, body, status) VALUES (?, ?, ?, 5, '', 'Body text', 'approved')");
+    foreach ([[$buyer, 'R8T-BUYER'], [$other, 'R8T-OTHER'], [null, 'R8T-GUEST']] as [$cid, $author]) $review->execute([$hist, $cid, $author]);
     exit(0);
 }
 $config = is_file($root . '/config.php') ? require $root . '/config.php' : require $root . '/config.example.php';
@@ -114,6 +126,15 @@ assert_true($r8tCode === 200 && str_contains($r8tNoHist, 'R8T No history') && !s
 assert_true(preg_match('~class="old-price">20,00\s*€</span> <small class="price-note">Prečiarknutá cena je najnižšia cena za 30 dní pred zľavou\.</small>~u', $r8tHist) === 1,
     'R8 Omnibus: with history the struck-through price is the 30-day lowest (20,00 €, not 25,00 €) and says so');
 assert_equals(1, substr_count($r8tList, 'class="old-price"'), 'R8 Omnibus: the category listing strikes through only the product with history');
+
+// 3) Reviews say whether they are verified purchases and how the shop checks it.
+$r8tBadge = static function(string $html, string $author): string {
+    return preg_match('~<strong>' . $author . '</strong> <span>5 / 5</span> <span class="review-verification( is-verified)?">([^<]*)</span>~u', $html, $m) === 1 ? trim($m[1] . ' ' . $m[2]) : '';
+};
+assert_equals(['is-verified Overený nákup', 'Neoverený nákup', 'Neoverený nákup'],
+    [$r8tBadge($r8tHist, 'R8T-BUYER'), $r8tBadge($r8tHist, 'R8T-OTHER'), $r8tBadge($r8tHist, 'R8T-GUEST')],
+    'R8 reviews: only the review of a customer who paid for the product is a verified purchase');
+assert_true(str_contains($r8tHist, '<p class="review-policy">Hodnotenia zverejňujeme po kontrole.'), 'R8 reviews: the product page states how reviews are checked');
 
 // 4) The guest reopens the banner from the footer: current choice ticked, "save" offered without JS, returns home.
 [$r8tCode, $r8tSettings] = $r8tPage(['cookie_settings' => '1'], ['cc_v1' => '{"necessary":true,"analytics":true,"marketing":false}'], '/index.php?cookie_settings=1');
