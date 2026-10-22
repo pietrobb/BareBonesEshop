@@ -395,6 +395,16 @@ class Products {
      */
     public static function specFilterValues(int|array $categoryId, string $lang = 'sk', array $activeFilters = [], ?int $priceMin = null, ?int $priceMax = null): array {
         $db = Db::get();
+        // The facets of an unfiltered category page (what every visit opens) are cached until the catalog changes:
+        // aggregating the specifications of a 50k-product category took 0.5-2 s on every request.
+        $cacheKey = null;
+        if ($activeFilters === [] && $priceMin === null && $priceMax === null) {
+            $ids = array_map('intval', (array)$categoryId);
+            sort($ids);
+            $cacheKey = Cache::localePath($lang, 'facets/' . hash('sha256', implode(',', $ids)) . '.json');
+            $cached = Cache::readCatalogJson($cacheKey, 3600);
+            if ($cached !== null) return $cached;
+        }
 
         if (is_array($categoryId)) {
             $catIds = array_map('intval', $categoryId);
@@ -482,6 +492,7 @@ class Products {
                 'numeric' => $value['numeric_val'],
             ], $values);
         }
+        if ($cacheKey !== null) Cache::writeJson($cacheKey, $filters);
         return $filters;
     }
 

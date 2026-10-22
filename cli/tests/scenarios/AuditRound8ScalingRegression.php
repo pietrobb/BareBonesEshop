@@ -194,6 +194,7 @@ if ($page === 'rebuild') {
         'locales' => count((array)(StoreContext::current()->config()['languages'] ?? [])),
         'listing_queries' => count($rec->listings), 'plan' => $plan,
         'extra_skus' => array_column((array)($listing['products'] ?? []), 'sku'), 'extra_total' => $listing['total'] ?? null,
+        'extra_category' => $listing['category']['slug'] ?? null,
         'prices' => is_array($prices) ? count($prices) : -1,
         'sample_ok' => is_array($prices) && ($prices['R8M-39999'] ?? null) === Pricing::apply($sample, 'guest')['price'],
         'peak_mb' => round(memory_get_peak_usage(true) / 1048576, 1),
@@ -259,6 +260,11 @@ try {
     $r8sExtra = (array)($r8sRb['extra_skus'] ?? []);
     sort($r8sExtra);
     assert_equals([['R8M-107', 'R8M-7'], 2], [$r8sExtra, $r8sRb['extra_total'] ?? null], 'R8 cache rebuild: a category listing still includes products assigned through product_categories');
+    assert_equals('r8-extra-7', $r8sRb['extra_category'] ?? null, 'R8 cache rebuild: a rebuilt listing carries its category, like the one the category API caches');
+    $r8sWarm = (string)file_get_contents(TEST_CLI_DIR . '/cache-warm.php');
+    assert_true(str_contains($r8sWarm, 'CacheRebuild::run([\'scope\' => \'full\'], $cfg)') && str_contains($r8sWarm, 'Bootstrap::initStoreContext(')
+        && preg_match('/if \(!\$withProducts\) continue;/', $r8sWarm) === 1,
+        'R8 cache warm: cli/cache-warm.php runs the store-scoped rebuild per store; one file per product and language only with --products');
     assert_true(($r8sRb['prices'] ?? -1) === 40000 && ($r8sRb['sample_ok'] ?? false) === true,
         'R8 cache rebuild: the streamed guest price map holds every active product with its group price (' . ($r8sRb['prices'] ?? '?') . ')');
 

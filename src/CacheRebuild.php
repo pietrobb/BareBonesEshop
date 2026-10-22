@@ -29,7 +29,7 @@ final class CacheRebuild
 
         // One catalog query per category, translated into every language: the same queries used to run again for
         // each language (with a listing query that scanned the whole catalog, ~20 h at 5000 categories).
-        foreach (CatalogScope::rows('SELECT id, slug FROM categories WHERE store_id = :catalog') as $cat) {
+        foreach (CatalogScope::rows('SELECT * FROM categories WHERE store_id = :catalog') as $cat) {
             JobQueue::heartbeat();
             $listing = Products::byCategory((int)$cat['id'], 1, $perPage, 'price_asc');
             $raw = Products::filterValues((int)$cat['id']);
@@ -37,6 +37,7 @@ final class CacheRebuild
                 I18n::setLocale($locale);
                 $data = $listing;
                 $data['products'] = Products::enrichMany(array_map([I18n::class, 'product'], $listing['products']));
+                $data['category'] = Categories::enrich(I18n::category($cat)); // as apiCategory() caches it
                 Cache::writeJson(Cache::localePath($locale, "cat/{$cat['slug']}/page-1.json"), $data);
                 Cache::writeJson(Cache::localePath($locale, "cat/{$cat['slug']}/filters.json"), ['filters' => self::filters($raw)]);
             }
@@ -83,6 +84,7 @@ final class CacheRebuild
             if ($cat) {
                 $data = Products::byCategory((int)$cat['id'], (int)$m[3], $perPage, 'price_asc');
                 $data['products'] = Products::enrichMany(array_map([I18n::class, 'product'], $data['products']));
+                $data['category'] = Categories::enrich(I18n::category($cat));
                 Cache::writeJson(Cache::localePath($m[1], "cat/{$m[2]}/page-{$m[3]}.json"), $data);
             }
         } elseif (preg_match('#^([a-z]{2})/product/([a-z0-9-]+)\.json$#', $path, $m)) {
