@@ -53,6 +53,22 @@ $_SESSION = [];
 $_SERVER['REMOTE_ADDR'] = '127.0.8.22';
 $_SERVER['HTTP_HOST'] = 'shop.example';
 $input = json_decode($extra, true) ?: [];
+if ($phase === 'methods') {
+    // Customer-facing method names per locale; a method the merchant renamed keeps the merchant's name.
+    StoreContext::activate(StoreContext::resolve(json_decode((string)file_get_contents($root . '/stores.json'), true), '/', '', 'default'));
+    if (!empty($input['rename'])) $db->exec("UPDATE payment_methods SET name = 'Merchant COD' WHERE code = 'cod'");
+    $result = [];
+    foreach (['sk', 'cs', 'en', 'de', 'pl', 'hu', 'es'] as $locale) {
+        I18n::setLocale($locale);
+        $result[$locale] = [
+            'payment' => array_column(PaymentService::availableMethods('SK', 'eur', 2000), 'label', 'code'),
+            'payment_desc' => array_column(PaymentService::availableMethods('SK', 'eur', 2000), 'description', 'code'),
+            'shipping' => array_column(ShippingService::calculateRates('SK', 500, 2000), 'label', 'method_code'),
+        ];
+    }
+    echo "\nR8TRESULT" . json_encode($result, JSON_UNESCAPED_UNICODE);
+    exit(0);
+}
 $_GET = $input['get'] ?? [];
 $_COOKIE = $input['cookie'] ?? [];
 $_SERVER['REQUEST_URI'] = $input['uri'] ?? '/index.php?' . http_build_query($_GET);
@@ -135,6 +151,21 @@ assert_equals(['is-verified Overený nákup', 'Neoverený nákup', 'Neoverený n
     [$r8tBadge($r8tHist, 'R8T-BUYER'), $r8tBadge($r8tHist, 'R8T-OTHER'), $r8tBadge($r8tHist, 'R8T-GUEST')],
     'R8 reviews: only the review of a customer who paid for the product is a verified purchase');
 assert_true(str_contains($r8tHist, '<p class="review-policy">Hodnotenia zverejňujeme po kontrole.'), 'R8 reviews: the product page states how reviews are checked');
+
+// 5) Shipping and payment names (and payment descriptions) in the shopper's language, not one Slovak name everywhere.
+[, $r8tMethods, $r8tNoise] = $r8tRun(['methods', $r8tApp, $r8tDb, $r8tRoot, '{}']);
+assert_equals(['sk' => 'Dobierka', 'cs' => 'Dobírka', 'en' => 'Cash on delivery', 'de' => 'Nachnahme', 'pl' => 'Za pobraniem', 'hu' => 'Utánvét', 'es' => 'Contra reembolso'],
+    array_map(static fn(array $l): string => (string)($l['payment']['cod'] ?? ''), (array)$r8tMethods), 'R8 methods: the COD payment is named in each locale (' . $r8tNoise . ')');
+assert_equals(['Kartou online', 'Kartenzahlung online', 'Online bankkártya'], [$r8tMethods['sk']['payment']['card'] ?? '', $r8tMethods['de']['payment']['card'] ?? '', $r8tMethods['hu']['payment']['card'] ?? ''],
+    'R8 methods: the card payment is named in each locale');
+assert_true(($r8tMethods['de']['payment_desc']['bank_transfer'] ?? '') === 'Überweisung auf unser Konto nach der Bestellung.' && ($r8tMethods['sk']['payment_desc']['card'] ?? '') === 'Platba kartou online cez platobnú bránu.',
+    'R8 methods: payment descriptions are in the locale, not in English');
+$r8tShipping = array_map(static fn(array $l): string => (string)($l['shipping']['pickup'] ?? ''), (array)$r8tMethods);
+assert_true(($r8tShipping['de'] ?? '') === 'Selbstabholung' && ($r8tShipping['en'] ?? '') === 'In-store pickup' && ($r8tShipping['sk'] ?? '') === 'Osobný odber',
+    'R8 methods: shipping methods are named in each locale (' . json_encode($r8tShipping, JSON_UNESCAPED_UNICODE) . ')');
+[, $r8tRenamed] = $r8tRun(['methods', $r8tApp, $r8tDb, $r8tRoot, '{"rename":true}']);
+assert_equals(['Merchant COD', 'Merchant COD'], [$r8tRenamed['de']['payment']['cod'] ?? '', $r8tRenamed['sk']['payment']['cod'] ?? ''],
+    'R8 methods: a method name the merchant changed is shown as entered');
 
 // 4) The guest reopens the banner from the footer: current choice ticked, "save" offered without JS, returns home.
 [$r8tCode, $r8tSettings] = $r8tPage(['cookie_settings' => '1'], ['cc_v1' => '{"necessary":true,"analytics":true,"marketing":false}'], '/index.php?cookie_settings=1');

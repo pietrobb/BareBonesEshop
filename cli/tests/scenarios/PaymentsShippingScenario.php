@@ -479,7 +479,7 @@ assert_equals(120, (int)$paymentOrder['payment_fee'], 'Payment methods: order st
 $paymentSnapshot = json_decode((string)$paymentOrder['payment_method_snapshot'], true) ?: [];
 assert_equals('cod', (string)$paymentSnapshot['code'], 'Payment methods: order stores payment snapshot JSON');
 assert_equals('manual', (string)$paymentSnapshot['provider'], 'Payment methods: order snapshot stores provider');
-assert_equals('Dobierka', (string)$paymentSnapshot['label'], 'Payment methods: order snapshot stores label');
+assert_equals(I18n::t('methods.payment.cod'), (string)$paymentSnapshot['label'], 'Payment methods: order snapshot stores label (in the shopper\'s locale, R8)');
 
 $checkoutPaymentMethods = PaymentService::availableMethods('SK', 'eur', 2799, 'packeta');
 $checkoutPaymentCodes = array_column($checkoutPaymentMethods, 'code');
