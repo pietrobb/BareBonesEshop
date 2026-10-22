@@ -1,0 +1,1 @@
+Nová reklamácia k objednávke {{order_number}}

@@ -1,0 +1,1 @@
+Az elállás beérkezésének visszaigazolása — {{order_number}} rendelés

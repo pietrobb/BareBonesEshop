@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="de"><body style="font-family:Arial,sans-serif;color:#111">
+<!-- R8 complaint (Directive (EU) 2019/771); wording for lawyer review. -->
+<h2>Entscheidung über Ihre Mängelrüge</h2>
+<p>Guten Tag {{customer_name}},</p>
+<p>über Ihre Mängelrüge <strong>{{complaint_number}}</strong> zur Bestellung <strong>{{order_number}}</strong> haben wir entschieden: <strong>{{status}}</strong>.</p>
+<table style="border-collapse:collapse">
+<tr><td style="padding:2px 12px 2px 0;color:#555">Produkt</td><td>{{item_name}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Beschreibung des Mangels</td><td>{{defect}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Gewünschte Abhilfe</td><td>{{remedy}}</td></tr>
+</table>
+<h3>Begründung und Art der Erledigung</h3>
+<p>{{decision_note}}</p>
+<p>Verkäufer: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
+</body></html>

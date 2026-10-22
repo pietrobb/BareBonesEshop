@@ -1,0 +1,1 @@
+Acknowledgement of your withdrawal from the contract — order {{order_number}}

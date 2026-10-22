@@ -21,4 +21,16 @@
 <tr><td style="padding:2px 12px 2px 0;color:#555">Termin płatności</td><td>{{bank_due_date}}</td></tr>
 </table>{{/if}}
 {{#if tracking_url}}<p>Śledź przesyłkę: <a href="{{tracking_url}}">{{tracking_url}}</a></p>{{/if}}
+<!-- R8 consumer information (Directive 2011/83/EU art. 8(7)); wording for lawyer review. -->
+<h3>Sprzedawca</h3>
+<p>{{seller_name}}, {{seller_address}}<br>REGON/KRS: {{seller_ico}}, NIP: {{seller_dic}}<br>{{seller_email}} {{seller_phone}}<br>{{seller_register_note}}</p>
+<h3>Prawo odstąpienia od umowy</h3>
+<p>Od umowy można odstąpić bez podania przyczyny w ciągu {{withdrawal_days}} dni od otrzymania towaru (przy kilku przesyłkach od otrzymania ostatniej), także przed jego dostarczeniem. Najprościej skorzystać z <a href="{{withdrawal_url}}">funkcji „Odstąp od umowy tutaj”</a>; można też wysłać e-mail lub poniższy wzór formularza. Zwrócimy wszystkie płatności, w tym koszt pierwotnej dostawy, w ciągu 14 dni od otrzymania oświadczenia, tą samą metodą płatności; możemy wstrzymać zwrot do chwili otrzymania towaru lub dowodu jego odesłania. Towar należy odesłać w ciągu 14 dni; bezpośredni koszt zwrotu ponosi konsument.</p>
+<p><strong>Wzór formularza odstąpienia od umowy</strong><br>(formularz ten należy wypełnić i odesłać tylko w przypadku chęci odstąpienia od umowy)<br>Adresat: {{seller_name}}, {{seller_address}}, {{seller_email}}<br>Ja/My (*) niniejszym informuję/informujemy (*) o moim/naszym odstąpieniu od umowy sprzedaży następujących rzeczy (*)/umowy o świadczenie następującej usługi (*): …<br>Data zawarcia umowy (*)/odbioru (*): …<br>Imię i nazwisko konsumenta(-ów): …<br>Adres konsumenta(-ów): …<br>Podpis konsumenta(-ów) (tylko jeżeli formularz jest przesyłany w wersji papierowej): …<br>Data: …<br>(*) Niepotrzebne skreślić.</p>
+<h3>Zgodność towaru z umową i reklamacje</h3>
+<p>Odpowiadamy za brak zgodności towaru z umową przez {{liability_months}} miesiące od jego dostarczenia. Reklamacja to odrębna procedura, niezależna od odstąpienia od umowy: można ją złożyć e-mailem lub w koncie klienta; potwierdzimy jej otrzymanie i odpowiemy najpóźniej w ciągu 14 dni.</p>
+{{#if adr_name}}<h3>Pozasądowe rozwiązywanie sporów</h3>
+<p>W przypadku niezadowolenia z rozpatrzenia reklamacji można zwrócić się do podmiotu pozasądowego rozwiązywania sporów: {{adr_name}} ({{adr_url}}).</p>{{/if}}
+<h3>Regulamin</h3>
+<p>Regulamin obowiązujący w chwili złożenia zamówienia znajduje się w załączniku do tej wiadomości oraz pod adresem <a href="{{terms_url}}">{{terms_url}}</a>.</p>
 </body></html>

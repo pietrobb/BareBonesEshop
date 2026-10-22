@@ -1,6 +1,8 @@
 <?php
 /** Config-driven checkout consent validation and immutable order evidence. */
 class ConsentService {
+    public const DIGITAL_KEY = 'digital_delivery';
+    private const DIGITAL_VERSION = '2026-10-22';
     private static ?array $definitionsOverride = null;
 
     public static function setDefinitionsForTesting(?array $definitions): void {
@@ -12,6 +14,13 @@ class ConsentService {
             ? ['checkout_consents' => self::$definitionsOverride]
             : require __DIR__ . '/../config.php';
         $definitions = $cfg['checkout_consents'] ?? [];
+        // R8: digital content is supplied only with the consumer's express consent and acknowledgement of losing the
+        // withdrawal right (Directive 2011/83/EU art. 16(m)). On by default; checkout_consents.digital_delivery
+        // replaces the text or turns it off ('active' => false).
+        if (!array_key_exists(self::DIGITAL_KEY, $definitions)) $definitions[self::DIGITAL_KEY] = [
+            'version' => self::DIGITAL_VERSION, 'required' => true, 'text' => I18n::t('checkout.digital_delivery_consent'),
+            'url' => '/?page=terms', 'product_types' => VariantAvailability::DIGITAL_TYPES,
+        ];
         $result = [];
         foreach ($definitions as $key => $definition) {
             if (!preg_match('/^[a-z0-9_-]{2,80}$/', (string)$key) || !is_array($definition)) continue;

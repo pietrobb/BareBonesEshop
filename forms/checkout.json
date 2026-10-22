@@ -3,7 +3,7 @@
     "schema_version": 1,
     "id": "checkout",
     "name": "Objednávka",
-    "submit_label": "Odoslať objednávku",
+    "submit_label": "Objednať s povinnosťou platby",
     "submitting_label": "Spracovávam...",
     "success_message": "Objednávka bola odoslaná. Ďakujeme!",
     "fields": [

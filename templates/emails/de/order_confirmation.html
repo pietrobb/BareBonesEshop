@@ -20,4 +20,16 @@
 <tr><td style="padding:2px 12px 2px 0;color:#555">Verwendungszweck</td><td>{{bank_message}}</td></tr>
 <tr><td style="padding:2px 12px 2px 0;color:#555">Fällig am</td><td>{{bank_due_date}}</td></tr>
 </table>{{/if}}
+<!-- R8 consumer information (Directive 2011/83/EU art. 8(7)); wording for lawyer review. -->
+<h3>Verkäufer</h3>
+<p>{{seller_name}}, {{seller_address}}<br>Register: {{seller_ico}}{{#if seller_ic_dph}}, USt-IdNr.: {{seller_ic_dph}}{{/if}}<br>{{seller_email}} {{seller_phone}}<br>{{seller_register_note}}</p>
+<h3>Widerrufsrecht</h3>
+<p>Sie können den Vertrag binnen {{withdrawal_days}} Tagen ab Erhalt der Ware (bei mehreren Sendungen ab Erhalt der letzten) ohne Angabe von Gründen widerrufen, auch schon vor der Lieferung. Am einfachsten nutzen Sie die <a href="{{withdrawal_url}}">Funktion „Vertrag hier widerrufen“</a>; Sie können uns auch eine E-Mail oder das folgende Muster-Widerrufsformular senden. Wir erstatten alle Zahlungen einschließlich der Kosten der ursprünglichen Lieferung binnen 14 Tagen ab Eingang des Widerrufs über dasselbe Zahlungsmittel; wir können die Rückzahlung verweigern, bis wir die Ware zurückerhalten haben oder Sie die Rücksendung nachgewiesen haben. Senden Sie die Ware binnen 14 Tagen zurück; die unmittelbaren Kosten der Rücksendung tragen Sie.</p>
+<p><strong>Muster-Widerrufsformular</strong><br>(Wenn Sie den Vertrag widerrufen wollen, dann füllen Sie bitte dieses Formular aus und senden Sie es zurück.)<br>An: {{seller_name}}, {{seller_address}}, {{seller_email}}<br>Hiermit widerrufe(n) ich/wir (*) den von mir/uns (*) abgeschlossenen Vertrag über den Kauf der folgenden Waren (*)/die Erbringung der folgenden Dienstleistung (*): …<br>Bestellt am (*)/erhalten am (*): …<br>Name des/der Verbraucher(s): …<br>Anschrift des/der Verbraucher(s): …<br>Unterschrift des/der Verbraucher(s) (nur bei Mitteilung auf Papier): …<br>Datum: …<br>(*) Unzutreffendes streichen.</p>
+<h3>Gewährleistung und Reklamationen</h3>
+<p>Für Mängel der Ware haften wir {{liability_months}} Monate ab Erhalt. Eine Reklamation ist ein eigenes Verfahren, unabhängig vom Widerruf: Sie melden sie per E-Mail oder in Ihrem Konto; wir bestätigen den Eingang und erledigen sie spätestens binnen 30 Tagen.</p>
+{{#if adr_name}}<h3>Außergerichtliche Streitbeilegung</h3>
+<p>Sind Sie mit der Erledigung einer Reklamation nicht zufrieden, können Sie sich an die Verbraucherschlichtungsstelle wenden: {{adr_name}} ({{adr_url}}).</p>{{/if}}
+<h3>Allgemeine Geschäftsbedingungen</h3>
+<p>Die bei der Bestellung gültigen AGB finden Sie im Anhang dieser E-Mail und unter <a href="{{terms_url}}">{{terms_url}}</a>.</p>
 </body></html>

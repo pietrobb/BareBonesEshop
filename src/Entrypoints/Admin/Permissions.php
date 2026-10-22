@@ -35,6 +35,7 @@ return [
     'digital_assets' => 'products.edit',
     'reviews'    => 'products.edit',
     'rma'        => 'rma.manage',
+    'complaints' => 'rma.manage',
     'customers'  => 'customers.view',
     'customer'   => 'customers.view',
     'companies'  => 'customers.edit',

@@ -35,6 +35,9 @@ class EmailTemplates {
         'critical_items' => [['name' => 'Šiltovka Classic', 'sku' => 'CAP-002', 'available' => 1, 'reserved' => 0, 'threshold' => 2, 'admin_url' => 'https://shop.example.com/admin.php?p=product&id=2']],
         'low_items' => [], 'worst_out' => true, 'worst_critical' => false, 'worst_low' => false,
         'first_name' => 'Tričko Basic', 'first_available' => 0, 'more_count' => 1,
+        'received_at' => '2026-10-14 08:30:00 UTC', 'reason' => 'Nesedí veľkosť', 'seller_email' => 'info@barebones.example',
+        'complaint_number' => 'REK-45-A1B2C3', 'item_name' => 'Tričko Basic', 'defect' => 'Po prvom praní sa rozpáral šev.', 'remedy' => 'Výmena za nový tovar',
+        'decide_by' => '2026-11-13', 'status' => 'Uznaná', 'decision_note' => 'Vadu uznávame, nový kus sme odoslali.',
     ];
 
     /** Template names that have a default HTML file in any locale. */

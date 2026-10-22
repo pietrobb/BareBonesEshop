@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="sk"><body style="font-family:Arial,sans-serif;color:#111">
+<!-- R8 withdrawal acknowledgement (Directive 2011/83/EU art. 11a(3)); wording for lawyer review. -->
+<h2>Potvrdenie prijatia odstúpenia od zmluvy</h2>
+<p>Dobrý deň, {{customer_name}},</p>
+<p>potvrdzujeme, že sme <strong>{{received_at}}</strong> prijali vaše odstúpenie od kúpnej zmluvy k objednávke <strong>{{order_number}}</strong> v tomto znení:</p>
+<blockquote style="border-left:3px solid #ccc;margin:0;padding:4px 12px">
+<p>Oznamujem, že odstupujem od kúpnej zmluvy pri týchto položkách:</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if reason}}<p>Dôvod: {{reason}}</p>{{/if}}
+<p>{{customer_name}}, {{received_at}}</p>
+</blockquote>
+<p>Peniaze vrátane nákladov na pôvodné doručenie vám vrátime najneskôr do 14 dní od doručenia odstúpenia, rovnakým spôsobom, akým ste platili. Môžeme ich zadržať, kým nám tovar nevrátite alebo nepreukážete, že ste ho odoslali. Tovar pošlite späť najneskôr do 14 dní.</p>
+<p>Predávajúci: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
+</body></html>

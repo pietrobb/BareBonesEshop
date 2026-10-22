@@ -1,0 +1,1 @@
+Potwierdzenie przyjęcia reklamacji {{complaint_number}}

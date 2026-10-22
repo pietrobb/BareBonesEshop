@@ -801,6 +801,18 @@ final class InvoiceService
         return array_replace($sellerLegal, $own);
     }
 
+    /** Identity of the seller of $order (name, address, ids, e-mail, phone) for consumer notices; [] when none is configured. */
+    public static function sellerIdentity(array $order): array
+    {
+        $root = self::storesConfig();
+        $stores = self::storeMap($root);
+        if ($stores === []) return [];
+        $orderStore = (string)($order['store_id'] ?? '');
+        $code = isset($stores[$orderStore]) ? $orderStore : self::detectStoreCode($order, $root);
+        $seller = self::sellerCode($root, $code, strtolower((string)($order['currency'] ?? '')));
+        return $seller === null ? [] : self::sellerSnapshot(self::effectiveLegal($root, $code, $seller));
+    }
+
     /**
      * [seller code, store config carrying the seller's effective legal block] for documents of $storeCode in
      * $sellerCode's series of $type. A series numberingConflicts() refuses (or a store without any seller) is reported

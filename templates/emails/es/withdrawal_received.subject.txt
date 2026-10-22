@@ -1,0 +1,1 @@
+Acuse de recibo de su desistimiento — pedido {{order_number}}

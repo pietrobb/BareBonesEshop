@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><body style="font-family:Arial,sans-serif;color:#111">
+<!-- R8 withdrawal acknowledgement (Directive 2011/83/EU art. 11a(3)); wording for lawyer review. -->
+<h2>Acknowledgement of your withdrawal</h2>
+<p>Hello {{customer_name}},</p>
+<p>we confirm that on <strong>{{received_at}}</strong> we received your withdrawal from the purchase contract for order <strong>{{order_number}}</strong>, worded as follows:</p>
+<blockquote style="border-left:3px solid #ccc;margin:0;padding:4px 12px">
+<p>I hereby give notice that I withdraw from the purchase contract for these items:</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if reason}}<p>Reason: {{reason}}</p>{{/if}}
+<p>{{customer_name}}, {{received_at}}</p>
+</blockquote>
+<p>We will refund all payments received, including the cost of the original delivery, no later than 14 days after we received your withdrawal, using the same means of payment you used. We may withhold the refund until we have received the goods back or you have supplied evidence of having sent them. Please send the goods back within 14 days.</p>
+<p>Seller: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
+</body></html>

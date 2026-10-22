@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="en"><body style="font-family:Arial,sans-serif;color:#111">
+<h2>Withdrawal from the contract</h2>
+<p>{{customer_name}} ({{customer_email}}) withdrew from the contract for order <strong>{{order_number}}</strong> ({{order_total}}). Cancel the unshipped items or take the goods back, and refund within 14 days.</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if admin_url}}<p><a href="{{admin_url}}">Open the order</a></p>{{/if}}
+</body></html>

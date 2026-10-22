@@ -12,7 +12,15 @@ class MerchantNotifier {
         $recipients = self::recipients($cfg);
         if (!$recipients) return 0;
 
-        $template = (string)($notificationCfg['templates'][$event] ?? ($event === 'created' ? 'merchant_order_created' : 'merchant_order_paid'));
+        // 'withdrawal:<id>' is one event per withdrawal statement (an order may get several partial ones).
+        $kind = explode(':', $event, 2)[0];
+        if (array_key_exists($kind, (array)($notificationCfg['events'] ?? [])) && !$notificationCfg['events'][$kind]) return 0;
+        $template = (string)($notificationCfg['templates'][$kind] ?? match ($kind) {
+            'created' => 'merchant_order_created',
+            'withdrawal' => 'merchant_withdrawal_received',
+            'complaint' => 'merchant_complaint_received',
+            default => 'merchant_order_paid',
+        });
         $paymentSnapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true) ?: [];
         $sent = 0;
         foreach ($recipients as $recipient) {

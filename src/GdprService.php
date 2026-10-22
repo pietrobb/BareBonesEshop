@@ -58,6 +58,10 @@ class GdprService {
         'rma_requests'                 => ['columns' => ['customer_id', 'reason', 'admin_note'], 'erase' => 'scrub', 'export' => 'rma_requests'],
         'rma_items'                    => ['columns' => ['name'], 'erase' => 'retain', 'export' => 'rma_requests', 'reason' => 'product lines of the retained RMA (credit-note trail)'],
         'return_receipts'              => ['columns' => ['note'], 'erase' => 'scrub', 'export' => 'rma_requests'],
+        'withdrawal_requests'          => ['columns' => ['customer_name', 'customer_email', 'reason'], 'erase' => 'retain', 'export' => null,
+            'reason' => 'proof of the withdrawal statement and its receipt time (Directive 2011/83/EU art. 11a), kept with the retained order; the consumer got it on a durable medium'],
+        'complaints'                   => ['columns' => ['customer_name', 'customer_email', 'defect', 'decision_note'], 'erase' => 'retain', 'export' => null,
+            'reason' => 'complaint record and the written decision for the 24-month liability (Directive (EU) 2019/771), kept with the retained order'],
         'event_outbox'                 => ['columns' => ['payload'], 'erase' => 'scrub', 'export' => 'events'],
         'queue_jobs'                   => ['columns' => ['payload'], 'erase' => 'scrub', 'export' => 'queued_jobs'],
     ];

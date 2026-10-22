@@ -21,4 +21,16 @@
 <tr><td style="padding:2px 12px 2px 0;color:#555">Due date</td><td>{{bank_due_date}}</td></tr>
 </table>{{/if}}
 {{#if tracking_url}}<p>Track shipment: <a href="{{tracking_url}}">{{tracking_url}}</a></p>{{/if}}
+<!-- R8 consumer information (Directive 2011/83/EU art. 8(7)); wording for lawyer review. -->
+<h3>Seller</h3>
+<p>{{seller_name}}, {{seller_address}}<br>Company ID: {{seller_ico}}, Tax ID: {{seller_dic}}{{#if seller_ic_dph}}, VAT ID: {{seller_ic_dph}}{{/if}}<br>{{seller_email}} {{seller_phone}}<br>{{seller_register_note}}</p>
+<h3>Right of withdrawal</h3>
+<p>You may withdraw from the contract without giving any reason within {{withdrawal_days}} days of receiving the goods (for several parcels, of receiving the last one), also before delivery. The easiest way is the <a href="{{withdrawal_url}}">“Withdraw from contract here” function</a>; you may also send us an e-mail or the model form below. We refund all payments, including the cost of the original delivery, within 14 days of receiving your withdrawal, using the same means of payment; we may withhold the refund until we have the goods back or you have shown that you sent them. Return the goods within 14 days; you bear the direct cost of returning them.</p>
+<p><strong>Model withdrawal form</strong><br>(complete and return this form only if you wish to withdraw from the contract)<br>To: {{seller_name}}, {{seller_address}}, {{seller_email}}<br>I/We (*) hereby give notice that I/We (*) withdraw from my/our (*) contract of sale of the following goods (*)/for the provision of the following service (*): …<br>Ordered on (*)/received on (*): …<br>Name of consumer(s): …<br>Address of consumer(s): …<br>Signature of consumer(s) (only if this form is notified on paper): …<br>Date: …<br>(*) Delete as appropriate.</p>
+<h3>Legal guarantee and complaints</h3>
+<p>We are liable for defects of the goods for {{liability_months}} months after you receive them. A complaint is a separate procedure, independent of withdrawal: make it by e-mail or in your account; we confirm its receipt and settle it within 30 days at the latest.</p>
+{{#if adr_name}}<h3>Out-of-court dispute resolution</h3>
+<p>If you are not satisfied with how a complaint was handled, you may turn to the alternative dispute resolution body: {{adr_name}} ({{adr_url}}).</p>{{/if}}
+<h3>Terms and conditions</h3>
+<p>The terms and conditions valid at the time of your order are attached to this e-mail and available at <a href="{{terms_url}}">{{terms_url}}</a>.</p>
 </body></html>

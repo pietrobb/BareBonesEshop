@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="es"><body style="font-family:Arial,sans-serif;color:#111">
+<!-- R8 complaint (Directive (EU) 2019/771); wording for lawyer review. -->
+<h2>Acuse de recibo de la reclamación</h2>
+<p>Estimado/a {{customer_name}}:</p>
+<p>le confirmamos que el <strong>{{received_at}}</strong> recibimos su reclamación <strong>{{complaint_number}}</strong> sobre el pedido <strong>{{order_number}}</strong>.</p>
+<table style="border-collapse:collapse">
+<tr><td style="padding:2px 12px 2px 0;color:#555">Producto</td><td>{{item_name}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Descripción del defecto</td><td>{{defect}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Solución solicitada</td><td>{{remedy}}</td></tr>
+</table>
+<p>Resolveremos la reclamación y le comunicaremos el resultado a más tardar el {{decide_by}}.</p>
+<p>Vendedor: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
+</body></html>

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="pl"><body style="font-family:Arial,sans-serif;color:#111">
+<!-- R8 withdrawal acknowledgement (Directive 2011/83/EU art. 11a(3)); wording for lawyer review. -->
+<h2>Potwierdzenie otrzymania odstąpienia od umowy</h2>
+<p>Dzień dobry, {{customer_name}},</p>
+<p>potwierdzamy, że <strong>{{received_at}}</strong> otrzymaliśmy oświadczenie o odstąpieniu od umowy sprzedaży dla zamówienia <strong>{{order_number}}</strong> o następującej treści:</p>
+<blockquote style="border-left:3px solid #ccc;margin:0;padding:4px 12px">
+<p>Niniejszym informuję o odstąpieniu od umowy sprzedaży następujących pozycji:</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if reason}}<p>Powód: {{reason}}</p>{{/if}}
+<p>{{customer_name}}, {{received_at}}</p>
+</blockquote>
+<p>Zwrócimy wszystkie otrzymane płatności, w tym koszt pierwotnej dostawy, nie później niż w ciągu 14 dni od otrzymania oświadczenia, tą samą metodą płatności. Możemy wstrzymać zwrot do chwili otrzymania towaru lub dowodu jego odesłania. Towar należy odesłać w ciągu 14 dni.</p>
+<p>Sprzedawca: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
+</body></html>

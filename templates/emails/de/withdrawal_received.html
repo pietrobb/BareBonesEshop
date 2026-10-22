@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="de"><body style="font-family:Arial,sans-serif;color:#111">
+<!-- R8 withdrawal acknowledgement (Directive 2011/83/EU art. 11a(3)); wording for lawyer review. -->
+<h2>Eingangsbestätigung Ihres Widerrufs</h2>
+<p>Guten Tag {{customer_name}},</p>
+<p>wir bestätigen, dass wir am <strong>{{received_at}}</strong> Ihren Widerruf des Kaufvertrags zur Bestellung <strong>{{order_number}}</strong> mit folgendem Wortlaut erhalten haben:</p>
+<blockquote style="border-left:3px solid #ccc;margin:0;padding:4px 12px">
+<p>Hiermit widerrufe ich den Kaufvertrag über folgende Artikel:</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if reason}}<p>Grund: {{reason}}</p>{{/if}}
+<p>{{customer_name}}, {{received_at}}</p>
+</blockquote>
+<p>Wir erstatten alle Zahlungen einschließlich der Kosten der ursprünglichen Lieferung spätestens binnen 14 Tagen ab Eingang des Widerrufs über dasselbe Zahlungsmittel, das Sie verwendet haben. Wir können die Rückzahlung verweigern, bis wir die Ware zurückerhalten haben oder Sie den Nachweis erbracht haben, dass Sie sie zurückgesandt haben. Bitte senden Sie die Ware binnen 14 Tagen zurück.</p>
+<p>Verkäufer: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
+</body></html>

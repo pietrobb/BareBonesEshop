@@ -47,6 +47,7 @@ return [
     'digital_assets' => $catalog,
     'reviews'    => $catalog,
     'rma'        => $orders,
+    'complaints' => ['Complaints'],
     'customers'  => $customers,
     'customer'   => $customers,
     'companies'  => ['Taxonomy', 'B2b'],
