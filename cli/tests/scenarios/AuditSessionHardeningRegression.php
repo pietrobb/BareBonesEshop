@@ -84,6 +84,18 @@ if ($mode === 'consent_form') {
     require $root . '/account.php';
     exit;
 }
+if ($mode === 'admin') {
+    // Admin login (HTTP Basic against a DB identity) must replace the session ID the visitor arrived with.
+    putenv('BBE_ADMIN_IDENTITY_KEY=' . base64_encode(str_repeat('K', 32)));
+    Security::sessionStart();
+    $before = session_id();
+    $_SERVER['REQUEST_METHOD'] = 'GET';
+    $_SERVER['PHP_AUTH_USER'] = $email;
+    $_SERVER['PHP_AUTH_PW'] = $password;
+    $ok = Security::adminAuth();
+    echo "\nA073RESULT" . json_encode(['login' => $ok, 'sid_before' => $before, 'sid_after' => session_id()]);
+    exit;
+}
 // mode=session: fixation, CSRF rotation and what lands in the database.
 session_id('a073fixatedsessionid0123456789ab');
 Security::sessionStart();
@@ -100,6 +112,7 @@ $_POST = ['csrf_token' => 'a073-planted', 'analytics' => '1', 'method' => 'prefe
 $result['consent'] = apiCookieConsent();
 [$ok] = Customers::login($email, $password);
 $result['login'] = $ok;
+$result['login_sid'] = session_id();
 $result['csrf_rotated'] = ($_SESSION['csrf_token'] ?? '') !== 'a073-planted' && ($_SESSION['csrf_token'] ?? '') !== '';
 echo "\nA073RESULT" . json_encode($result);
 PHP);
@@ -127,6 +140,15 @@ try {
     $s = $a073Run('session', 'a073-owner@example.com', 'A073-owner-pass', '203.0.113.75');
     assert_true(($s['fixation_adopted'] ?? true) === false, 'A07.3 session: an uninitialized client-chosen session ID is not adopted (strict mode) (' . json_encode($s) . ')');
     assert_true(($s['login'] ?? false) === true && ($s['csrf_rotated'] ?? false) === true, 'A07.3 session: customer login rotates the CSRF token');
+    assert_true(($s['sid'] ?? '') !== '' && ($s['login_sid'] ?? '') !== '' && $s['login_sid'] !== $s['sid'],
+        'R8 session fixation: customer login issues a new session ID (' . json_encode([$s['sid'] ?? null, $s['login_sid'] ?? null]) . ')');
+    putenv('BBE_ADMIN_IDENTITY_KEY=' . base64_encode(str_repeat('K', 32)));
+    AdminIdentity::create('r8-session-admin', 'R8-session-pass-1234', 'manager', false);
+    putenv('BBE_ADMIN_IDENTITY_KEY');
+    $r8Admin = $a073Run('admin', 'r8-session-admin', 'R8-session-pass-1234', '203.0.113.77');
+    assert_true(($r8Admin['login'] ?? false) === true && ($r8Admin['sid_before'] ?? '') !== ''
+        && ($r8Admin['sid_after'] ?? '') !== '' && $r8Admin['sid_after'] !== $r8Admin['sid_before'],
+        'R8 session fixation: admin login issues a new session ID (' . json_encode($r8Admin) . ')');
     $a073Sid = (string)($s['sid'] ?? '');
     $a073Key = $a073Sid !== '' ? hash('sha256', $a073Sid) : '';
     $a073Stored = static fn(string $sql): array => $a073Pdo->query($sql)->fetchAll(PDO::FETCH_COLUMN);
@@ -143,6 +165,7 @@ try {
 } finally {
     $a073Pdo->exec("DELETE FROM wishlist_items WHERE product_id = 9731");
     $a073Pdo->exec("DELETE FROM abandoned_carts WHERE customer_email = 'a073-cart@example.com'");
+    $a073Pdo->exec("UPDATE admin_accounts SET status = 'disabled' WHERE username = 'r8-session-admin'");
     $a073Pdo = null;
     $a073Tree = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($a073Root, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
     foreach ($a073Tree as $a073Path) $a073Path->isDir() ? rmdir($a073Path->getPathname()) : unlink($a073Path->getPathname());
