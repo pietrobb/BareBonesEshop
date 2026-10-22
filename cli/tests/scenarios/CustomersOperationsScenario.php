@@ -1131,7 +1131,7 @@ MailService::useAdapter(null);
 echo "\n--- Test 50: Backup & Restore ---\n";
 
 // Use a private isolated SQLite + storage root for the backup tests
-$backupRoot = sys_get_temp_dir() . '/bareboneseshop-backup-test';
+$backupRoot = sys_get_temp_dir() . '/bareboneseshop-backup-test-' . getmypid() . '-' . bin2hex(random_bytes(4));
 if (is_dir($backupRoot)) {
     foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($backupRoot, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST) as $f) {
         $f->isDir() ? @rmdir($f->getPathname()) : @unlink($f->getPathname());

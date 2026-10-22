@@ -78,8 +78,13 @@ test.describe('rendered WCAG 2.2 AA qualification', () => {
 
   test('checkout fields have programmatic names and no serious axe violations', async ({ page }) => {
     await page.goto('/');
-    await page.locator('[data-storefront-action="cart-add"]').first().click();
+    // Leaving before the add-to-cart POST answers cancels it (seen in WebKit): checkout then shows an empty cart.
+    await Promise.all([
+      page.waitForResponse(response => response.request().method() === 'POST'),
+      page.locator('[data-storefront-action="cart-add"]').first().click(),
+    ]);
     await page.goto('/?page=checkout');
+    await expect(page.locator('#checkout-name')).toBeVisible();
     await assertNoSeriousViolations(page);
     for (const id of ['name', 'email', 'phone', 'street', 'city', 'zip', 'country', 'notes']) {
       const field = page.locator(`#checkout-${id}`);
