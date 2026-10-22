@@ -1588,6 +1588,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'cookie_settings' => 'Ustawienia cookies',
     'accessibility_statement' => 'Deklaracja dostępności',
     'adr_label' => 'Pozasądowe rozwiązywanie sporów:',
+    'price_lowest_30d' => 'Przekreślona cena to najniższa cena z 30 dni przed obniżką.',
     'powered_by' => 'Napędzane przez BareBones E-shop', 'added_to_cart' => 'Dodano ✓',
     'select_variant' => 'Wybierz wariant.', 'cart_error' => 'Nie udało się dodać produktu.', 'variant_required' => 'Wybierz wariant.',
     'variant_invalid' => 'Wybrany wariant jest nieprawidłowy.', 'product_invalid' => 'Produkt jest niedostępny.', 'product_unavailable' => 'Ten wybór jest niedostępny.',

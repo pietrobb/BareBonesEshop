@@ -1609,6 +1609,7 @@ return [
     'cookie_settings' => 'Nastavenia cookies',
     'accessibility_statement' => 'Vyhlásenie o prístupnosti',
     'adr_label' => 'Alternatívne riešenie sporov:',
+    'price_lowest_30d' => 'Prečiarknutá cena je najnižšia cena za 30 dní pred zľavou.',
     'powered_by' => 'Poháňa BareBones E-shop',
     'added_to_cart' => 'Pridané ✓',
     'select_variant' => 'Vyberte variant.',

@@ -1588,6 +1588,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'cookie_settings' => 'Süti-beállítások',
     'accessibility_statement' => 'Akadálymentességi nyilatkozat',
     'adr_label' => 'Békéltető testület:',
+    'price_lowest_30d' => 'Az áthúzott ár a leárazás előtti 30 nap legalacsonyabb ára.',
     'powered_by' => 'A BareBones E-shop működteti', 'added_to_cart' => 'Hozzáadva ✓',
     'select_variant' => 'Válasszon változatot.', 'cart_error' => 'A termék nem adható hozzá.', 'variant_required' => 'Válasszon változatot.',
     'variant_invalid' => 'A kiválasztott változat érvénytelen.', 'product_invalid' => 'A termék nem érhető el.', 'product_unavailable' => 'Ez a választás nem érhető el.',

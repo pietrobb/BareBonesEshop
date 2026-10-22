@@ -20,6 +20,15 @@ $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 Db::init($db, 'sqlite');
 if ($phase === 'setup') {
     (new Migrator($db, $root . '/migrations', $dir . '/migrate.lock'))->apply();
+    $db->prepare('INSERT INTO categories (store_id, slug, name, parent_id, path, depth) VALUES (?, ?, ?, NULL, ?, 0)')->execute(['default', 'r8tcat', 'R8T Cat', 'r8tcat']);
+    $cat = (int)$db->query("SELECT id FROM categories WHERE slug = 'r8tcat'")->fetchColumn();
+    $product = $db->prepare("INSERT INTO products (store_id, category_id, sku, slug, name, price, compare_price, stock, status) VALUES ('default', ?, ?, ?, ?, 1500, 2500, 5, 'active')");
+    // Omnibus: R8T-NOHIST has a compare price but no recorded price; R8T-HIST was 2000 for 40 days, reduced to 1500 5 days ago.
+    $product->execute([$cat, 'R8T-NOHIST', 'r8t-nohist', 'R8T No history']);
+    $product->execute([$cat, 'R8T-HIST', 'r8t-hist', 'R8T History']);
+    $hist = (int)$db->lastInsertId();
+    $db->prepare('INSERT INTO product_price_history (product_id, price, lowest_prior, changed_at) VALUES (?, 2000, NULL, ?), (?, 1500, 2000, ?)')
+        ->execute([$hist, gmdate('Y-m-d H:i:s', time() - 45 * 86400), $hist, gmdate('Y-m-d H:i:s', time() - 5 * 86400)]);
     exit(0);
 }
 $config = is_file($root . '/config.php') ? require $root . '/config.php' : require $root . '/config.example.php';
@@ -92,6 +101,19 @@ foreach (['sk', 'cs', 'en', 'de', 'pl', 'hu', 'es'] as $r8tLocale) {
         && is_file($r8tApp . '/templates/legal/' . $r8tLocale . '/accessibility.html'),
         "R8 accessibility ({$r8tLocale}): own statement with standard, status, service, feedback and enforcement");
 }
+
+// 2) Omnibus: a struck-through price only with a recorded price history, capped at the lowest price of the 30 days
+//    before the reduction and explained; a compare price without history is not shown.
+$r8tCapped = PriceHistory::capCompare(['price' => 1500, 'compare_price' => 2500], 1500, null);
+assert_true($r8tCapped['compare_price'] === null, 'R8 Omnibus: a product without price history shows no compare price');
+[$r8tCode, $r8tNoHist] = $r8tPage(['page' => 'product', 'slug' => 'r8t-nohist']);
+[, $r8tHist] = $r8tPage(['page' => 'product', 'slug' => 'r8t-hist']);
+[, $r8tList] = $r8tPage(['page' => 'category', 'slug' => 'r8tcat']);
+assert_true($r8tCode === 200 && str_contains($r8tNoHist, 'R8T No history') && !str_contains($r8tNoHist, 'class="old-price"'),
+    'R8 Omnibus: the product page of a product without history shows no struck-through price (' . $r8tCode . ')');
+assert_true(preg_match('~class="old-price">20,00\s*€</span> <small class="price-note">Prečiarknutá cena je najnižšia cena za 30 dní pred zľavou\.</small>~u', $r8tHist) === 1,
+    'R8 Omnibus: with history the struck-through price is the 30-day lowest (20,00 €, not 25,00 €) and says so');
+assert_equals(1, substr_count($r8tList, 'class="old-price"'), 'R8 Omnibus: the category listing strikes through only the product with history');
 
 // 4) The guest reopens the banner from the footer: current choice ticked, "save" offered without JS, returns home.
 [$r8tCode, $r8tSettings] = $r8tPage(['cookie_settings' => '1'], ['cc_v1' => '{"necessary":true,"analytics":true,"marketing":false}'], '/index.php?cookie_settings=1');

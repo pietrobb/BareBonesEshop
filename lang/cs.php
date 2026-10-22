@@ -1588,6 +1588,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'cookie_settings' => 'Nastavení cookies',
     'accessibility_statement' => 'Prohlášení o přístupnosti',
     'adr_label' => 'Mimosoudní řešení sporů:',
+    'price_lowest_30d' => 'Přeškrtnutá cena je nejnižší cena za 30 dní před slevou.',
     'powered_by' => 'Pohání BareBones E-shop', 'added_to_cart' => 'Přidáno ✓',
     'select_variant' => 'Vyberte variantu.', 'cart_error' => 'Položku se nepodařilo přidat.', 'variant_required' => 'Vyberte variantu.',
     'variant_invalid' => 'Vybraná varianta není platná.', 'product_invalid' => 'Produkt není dostupný.', 'product_unavailable' => 'Tento výběr není dostupný.',

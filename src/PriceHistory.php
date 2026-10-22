@@ -43,7 +43,7 @@ final class PriceHistory {
 
     /**
      * Latest history row of each product. A store whose database has no history table (yet) gets no rows,
-     * and products without rows keep their compare price.
+     * and products without rows show no compare price (capCompare()).
      * @param list<int> $productIds
      * @return array<int, array{price: int, lowest_prior: ?int, changed_at: string}>
      */
@@ -80,7 +80,12 @@ final class PriceHistory {
     public static function capCompare(array $product, int $basePrice, ?array $latest, ?int $now = null): array {
         $price = (int)($product['price'] ?? 0);
         $compare = (int)($product['compare_price'] ?? 0);
-        if ($compare <= $price || $latest === null) return $product;
+        if ($compare <= $price) return $product;
+        // R8: no recorded price, no proof of the prior price — a reduction is never announced without history.
+        if ($latest === null) {
+            $product['compare_price'] = null;
+            return $product;
+        }
         $now ??= time();
         $recent = static fn(string $at): bool => (strtotime($at . ' UTC') ?: 0) > $now - self::WINDOW_DAYS * 86400;
         if ($latest['price'] === $basePrice) {

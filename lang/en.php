@@ -1600,6 +1600,7 @@ return [
     'cookie_settings' => 'Cookie settings',
     'accessibility_statement' => 'Accessibility statement',
     'adr_label' => 'Out-of-court dispute resolution:',
+    'price_lowest_30d' => 'The struck-through price is the lowest price in the 30 days before the reduction.',
     'powered_by' => 'Powered by BareBones E-shop',
     'added_to_cart' => 'Added ✓',
     'select_variant' => 'Select a variant.',
