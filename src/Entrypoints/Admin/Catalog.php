@@ -226,6 +226,7 @@ function pageProduct(): void {
     <div class="card">
         <?php ob_start(); ?>
         <?= productEditorExtrasHtml($categories, $product) ?>
+        <?php if ($product): ?><input type="hidden" name="stock_loaded" value="<?= (int)$product['stock'] ?>"><?php endif; ?>
         <div id="attr-section" style="border-top:2px solid #e2e8f0;margin-top:1rem;padding-top:1rem">
             <h3 style="margin-bottom:.75rem"><?= esc(I18n::t('admin.title.attributes')) ?></h3>
             <p class="muted" style="color:#64748b;font-size:.85rem"><?= esc(I18n::t('admin.product.attrs_hint')) ?></p>
@@ -846,6 +847,12 @@ function handleProductSave(): void {
         ':stock_low_threshold'      => $nullableCount($form['stock_low_threshold']),
         ':stock_critical_threshold' => $nullableCount($form['stock_critical_threshold']),
     ] + $editor['columns'];
+    // The form carries the stock it showed. Stock moved by orders or returns since then must survive the save: an
+    // untouched field keeps today's stock, an edited one applies the admin's change on top of it (was: the stale
+    // number overwrote it, e.g. a sale made while the form was open came back as available stock).
+    if ($old && isset($_POST['stock_loaded']) && is_numeric($_POST['stock_loaded'])) {
+        $data[':stock'] = max(0, (int)$old['stock'] + $data[':stock'] - (int)$_POST['stock_loaded']);
+    }
     $productType = $data[':product_type'];
 
     // Image order, alts and removals come from the editor; an upload is stored last, after every check passed.

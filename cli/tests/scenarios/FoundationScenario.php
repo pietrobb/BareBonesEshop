@@ -158,6 +158,7 @@ $pdo->exec("DROP TABLE _ttl_probe");
 //   TEST_MYSQL_DSN="mysql:host=127.0.0.1;dbname=test;charset=utf8mb4" [TEST_MYSQL_USER=...] [TEST_MYSQL_PASS=...]
 $mysqlDsn = getenv('TEST_MYSQL_DSN');
 if ($mysqlDsn) {
+    $my = null;
     try {
         $my = new PDO($mysqlDsn, getenv('TEST_MYSQL_USER') ?: 'root', getenv('TEST_MYSQL_PASS') ?: '', [
             PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
@@ -312,10 +313,15 @@ if ($mysqlDsn) {
         $priceHistoryMigrationMysql->up($my, false);
         assert_equals(5, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='product_price_history'")->fetchColumn(), 'MySQL live: R7 price history migration creates its table idempotently');
         $my->exec('DROP TABLE product_price_history');
+        // The migration backfills delivered orders from status / updated_at, which the bare probe table lacked.
+        $my->exec("ALTER TABLE orders ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'pending', ADD COLUMN created_at DATETIME NULL, ADD COLUMN updated_at DATETIME NULL");
+        $my->exec("INSERT INTO orders (id, status, created_at, updated_at) VALUES (97001, 'delivered', '2026-10-01 08:00:00', '2026-10-03 09:00:00'), (97002, 'paid', '2026-10-01 08:00:00', '2026-10-02 09:00:00')");
         $deliveredAtMigrationMysql = require TEST_CLI_DIR . '/../migrations/20261020140000_order_delivered_at.php';
         $deliveredAtMigrationMysql->up($my, false);
         $deliveredAtMigrationMysql->up($my, false);
         assert_equals(1, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='orders' AND COLUMN_NAME='delivered_at'")->fetchColumn(), 'MySQL live: R7 orders.delivered_at migration is applied idempotently');
+        assert_equals(['2026-10-03 09:00:00', null], $my->query('SELECT delivered_at FROM orders WHERE id IN (97001, 97002) ORDER BY id')->fetchAll(PDO::FETCH_COLUMN),
+            'MySQL live: R7 orders.delivered_at is backfilled for delivered orders only (from their last update without shipments)');
         foreach (['content_redirects', 'content_banners', 'content_menu_items'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['credit_note_items', 'order_refunds', 'return_exchanges', 'return_receipts', 'return_labels'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['shipment_items', 'shipments', 'bundle_components', 'inventory_receipts', 'purchase_order_items', 'purchase_orders', 'supplier_products', 'suppliers', 'stock_movements'] as $table) $my->exec("DROP TABLE {$table}");
@@ -332,7 +338,12 @@ if ($mysqlDsn) {
         $my->exec("DROP TABLE orders");
         $my->exec("DROP TABLE _parity_probe");
     } catch (\PDOException $e) {
-        echo "  [SKIP] TEST_MYSQL_DSN set but MySQL unavailable: " . $e->getMessage() . "\n";
+        // Only a server that cannot be reached is a skip. A failing statement used to be reported as a skip too, and
+        // since round 7 every check after the orders.delivered_at migration silently never ran in CI.
+        // The native-database CI job requires the server: there an unreachable one fails instead of skipping ~40 checks.
+        if ($my === null && getenv('BAREBONES_REQUIRE_MYSQL_UPDATE_TEST') === '1') assert_true(false, 'MySQL live: CI requires a reachable TEST_MYSQL_DSN: ' . $e->getMessage());
+        elseif ($my === null) echo "  [SKIP] TEST_MYSQL_DSN set but MySQL unavailable: " . $e->getMessage() . "\n";
+        else assert_true(false, 'MySQL live parity probe runs to the end without a database error: ' . $e->getMessage());
     } finally {
         Db::init($pdo, 'sqlite');
     }
@@ -1473,6 +1484,9 @@ assert_true(str_starts_with($storedTotp, 'v1:') && !str_contains($storedTotp, $e
 assert_true($storedRecovery !== hash('sha256', str_replace('-', '', $enrollment['recovery_codes'][0])), 'G9 identity: recovery codes use a deployment-keyed hash at rest');
 assert_true(Totp::verify($enrollment['secret'], Totp::code($enrollment['secret'])), 'G9 identity: RFC 6238 code verifies');
 // TOTP codes are single-use (A07.3), so each successful login below uses a newer time step in the ±1 window.
+// Start well inside a 30 s step: a step boundary between minting the previous-step code and the (slow, password
+// hashing) check pushed that code out of the window and failed this test now and then.
+if (30 - time() % 30 < 10) sleep(30 - time() % 30);
 $login = AdminIdentity::authenticate('g9-operator', 'Test-password-1234', Totp::code($enrollment['secret'], time() - 30), '127.0.0.1', 'G9 Test Device');
 assert_true($login !== null, 'G9 identity: password and TOTP authenticate');
 assert_true(AdminIdentity::session($login['token']) !== null, 'G9 identity: server-side session validates');

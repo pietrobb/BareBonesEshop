@@ -96,6 +96,30 @@ if ($mode === 'admin') {
     echo "\nA073RESULT" . json_encode(['login' => $ok, 'sid_before' => $before, 'sid_after' => session_id()]);
     exit;
 }
+if ($mode === 'legacy_admin') {
+    // Admin login against the config.php password (no DB accounts) must also replace the session ID.
+    Db::init(new PDO('sqlite::memory:'), 'sqlite');
+    (new ReflectionProperty(Security::class, 'cfg'))->setValue(null, ['admin_user' => $email,
+        'admin_password' => password_hash($password, PASSWORD_BCRYPT, ['cost' => 4])] + (require $root . '/config.php'));
+    Security::sessionStart();
+    $before = session_id();
+    $_SERVER['REQUEST_METHOD'] = 'GET';
+    $_SERVER['PHP_AUTH_USER'] = $email;
+    $_SERVER['PHP_AUTH_PW'] = $password;
+    $ok = Security::adminAuth();
+    echo "\nA073RESULT" . json_encode(['login' => $ok, 'sid_before' => $before, 'sid_after' => session_id()]);
+    exit;
+}
+if ($mode === 'logout') {
+    // Logout must hand the next person at the computer a new session ID, not the signed-in one.
+    Security::sessionStart();
+    [$ok] = Customers::login($email, $password);
+    $before = session_id();
+    Customers::logout();
+    echo "\nA073RESULT" . json_encode(['login' => $ok, 'sid_before' => $before, 'sid_after' => session_id(),
+        'customer_id' => $_SESSION['customer_id'] ?? null]);
+    exit;
+}
 // mode=session: fixation, CSRF rotation and what lands in the database.
 session_id('a073fixatedsessionid0123456789ab');
 Security::sessionStart();
@@ -149,6 +173,14 @@ try {
     assert_true(($r8Admin['login'] ?? false) === true && ($r8Admin['sid_before'] ?? '') !== ''
         && ($r8Admin['sid_after'] ?? '') !== '' && $r8Admin['sid_after'] !== $r8Admin['sid_before'],
         'R8 session fixation: admin login issues a new session ID (' . json_encode($r8Admin) . ')');
+    $r8Legacy = $a073Run('legacy_admin', 'r8-legacy-admin', 'R8-legacy-pass-1234', '203.0.113.78');
+    assert_true(($r8Legacy['login'] ?? false) === true && ($r8Legacy['sid_before'] ?? '') !== ''
+        && ($r8Legacy['sid_after'] ?? '') !== '' && $r8Legacy['sid_after'] !== $r8Legacy['sid_before'],
+        'R8 tests: admin login with the config.php password issues a new session ID (' . json_encode($r8Legacy) . ')');
+    $r8Logout = $a073Run('logout', 'a073-owner@example.com', 'A073-owner-pass', '203.0.113.79');
+    assert_true(($r8Logout['login'] ?? false) === true && ($r8Logout['sid_before'] ?? '') !== '' && !isset($r8Logout['customer_id'])
+        && ($r8Logout['sid_after'] ?? '') !== '' && $r8Logout['sid_after'] !== $r8Logout['sid_before'],
+        'R8 tests: customer logout issues a new session ID (' . json_encode($r8Logout) . ')');
     $a073Sid = (string)($s['sid'] ?? '');
     $a073Key = $a073Sid !== '' ? hash('sha256', $a073Sid) : '';
     $a073Stored = static fn(string $sql): array => $a073Pdo->query($sql)->fetchAll(PDO::FETCH_COLUMN);

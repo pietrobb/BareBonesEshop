@@ -248,6 +248,35 @@ try {
     $arrItemRefund($r4c, 400, 'arr-credit-4c');
     $pdo->prepare("INSERT INTO payment_transactions (order_id, store_id, provider, provider_ref, status, amount, currency, idempotency_key, raw_response) VALUES (?, 'default', 'payu', 'RF-ARR-4C', 'refund_succeeded', 400, 'eur', 'arr-credit-4c', '{}')")->execute([$r4c]);
     assert_equals(600, $arrRefundableForCredit->invoke(null, Orders::byId($r4c)), 'ARR 4: a pending credit note already refunded on the ledger is subtracted once');
+    // R8 tests: a pending credit note the ledger does not hold yet still reserves its amount.
+    $r8p = $arrOrder('delivered', 'refund_pending', 'payu', 'PAYU-R8T-P');
+    $arrItemRefund($r8p, 400, 'r8t-credit-p');
+    $r8pOther = $arrOrder('delivered', 'refund_pending', 'payu', 'PAYU-R8T-PO');
+    $pdo->prepare("INSERT INTO payment_transactions (order_id, store_id, provider, provider_ref, status, amount, currency, idempotency_key, raw_response) VALUES (?, 'default', 'payu', 'RF-R8T-PO', 'refund_succeeded', 400, 'eur', 'r8t-credit-p', '{}')")->execute([$r8pOther]);
+    assert_equals(600, $arrRefundableForCredit->invoke(null, Orders::byId($r8p)),
+        'R8 tests: a pending credit note not yet refunded is subtracted (a ledger row with its key on another order does not count)');
+    // Matched by the provider refund id when the ledger row carries a different key (refund booked by webhook).
+    $r8r = $arrOrder('delivered', 'refund_pending', 'payu', 'PAYU-R8T-R');
+    $r8rItem = $arrItemRefund($r8r, 300, 'r8t-credit-r');
+    $pdo->prepare("UPDATE order_refunds SET payment_reference = 'RF-R8T-R' WHERE id = ?")->execute([$r8rItem]);
+    $pdo->prepare("INSERT INTO payment_transactions (order_id, store_id, provider, provider_ref, status, amount, currency, idempotency_key, raw_response) VALUES (?, 'default', 'payu', 'RF-R8T-R', 'refund_succeeded', 300, 'eur', 'webhook-r8t-r', '{}')")->execute([$r8r]);
+    assert_equals(700, $arrRefundableForCredit->invoke(null, Orders::byId($r8r)),
+        'R8 tests: a pending credit note whose provider refund id is on the ledger is subtracted once');
+    // A ledger row that is not a refund does not settle the pending credit note.
+    $r8n = $arrOrder('delivered', 'refund_pending', 'payu', 'PAYU-R8T-N');
+    $arrItemRefund($r8n, 250, 'r8t-credit-n');
+    $pdo->prepare("INSERT INTO payment_transactions (order_id, store_id, provider, provider_ref, status, amount, currency, idempotency_key, raw_response) VALUES (?, 'default', 'payu', 'RF-R8T-N', 'refund_failed', 250, 'eur', 'r8t-credit-n', '{}')")->execute([$r8n]);
+    assert_equals(750, $arrRefundableForCredit->invoke(null, Orders::byId($r8n)),
+        'R8 tests: a failed refund on the ledger leaves the pending credit note subtracted');
+    // Settled outside the gateway (no payment id): succeeded credit notes reduce what is left; with a gateway they are on the ledger.
+    $r8o = $arrOrder('delivered', 'refund_pending', 'manual', '');
+    $r8oItem = $arrItemRefund($r8o, 300, 'r8t-credit-o');
+    $pdo->prepare("UPDATE order_refunds SET status = 'succeeded' WHERE id = ?")->execute([$r8oItem]);
+    $r8g = $arrOrder('delivered', 'refund_pending', 'payu', 'PAYU-R8T-G');
+    $r8gItem = $arrItemRefund($r8g, 300, 'r8t-credit-g');
+    $pdo->prepare("UPDATE order_refunds SET status = 'succeeded' WHERE id = ?")->execute([$r8gItem]);
+    assert_equals([700, 1000], [$arrRefundableForCredit->invoke(null, Orders::byId($r8o)), $arrRefundableForCredit->invoke(null, Orders::byId($r8g))],
+        'R8 tests: a succeeded off-gateway credit note is subtracted; a gateway one is counted only through the ledger');
     // Stripe answers 'pending' for an item refund: accepted, completed by charge.refunded via its refund id.
     $stripe = $arrUse(new ArrFakeStripe());
     $stripe->refundStatus = 'pending';

@@ -379,6 +379,9 @@ final class InvoiceService
                 WHERE cni.order_item_id=:item AND r.store_id=:store AND r.status IN ('pending','succeeded')");
             $priorStmt->execute([':item' => $orderItemId, ':store' => StoreContext::current()->id()]);
             $before = (int)$priorStmt->fetchColumn();
+            // An unfinished SELECT keeps a SQLite read snapshot open, and the write below then fails at once with
+            // "database is locked" instead of waiting for a concurrent writer.
+            $priorStmt->closeCursor();
             $ordered = (int)$orderItem['quantity'];
             if ($before + $quantity > $ordered) throw new LogicException('Order item is already fully credited');
             $component = $componentByItem[$orderItemId];
@@ -420,6 +423,17 @@ final class InvoiceService
         $refundId = 0;
         $db->beginTransaction();
         try {
+            // Take the RMA lock an exchange takes (MySQL row lock; SQLite's writer lock), then check the quantities again:
+            // the check above ran outside any transaction, so a concurrent exchange or credit note could have committed
+            // the same returned units since (customer refunded and sent a replacement for one unit).
+            $db->prepare(Db::isMysql() ? 'SELECT id FROM rma_requests WHERE id = ? AND store_id = ? FOR UPDATE'
+                : 'UPDATE rma_requests SET id = id WHERE id = ? AND store_id = ?')->execute([$rmaId, StoreContext::current()->id()]);
+            $freshItems = array_column(Rma::items($rmaId), null, 'id');
+            foreach ($lines as $line) {
+                if ($line['quantity'] > self::uncommittedQuantity($freshItems[$line['rma_item_id']] ?? ['id' => $line['rma_item_id'], 'received_quantity' => 0])) {
+                    throw new LogicException('Credit quantity exceeds received uncommitted quantity');
+                }
+            }
             $number = self::allocateNumber($db, $sellerCode, 'credit_note', $year, $prefix);
             $relPath = sprintf('%d/%02d/%s.pdf', $year, (int)date('m'), rawurlencode($number));
             $token = self::tokenHash(bin2hex(random_bytes(32)));

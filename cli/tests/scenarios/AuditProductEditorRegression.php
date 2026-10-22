@@ -194,6 +194,10 @@ match ($action) {
     // The untouched editor form as rendered for the seeded product (EN translation with its own slug).
     'edit_unchanged' => [$_GET = ['id'=>$existing], $_POST = $edit(['tr'=>['en'=>['name'=>"EN-X-{$own}", 'slug'=>"taken-{$own}", 'seo_title'=>"EN-SEO-{$own}",
         'meta_description'=>"EN-META-{$own}", 'image_alts'=>"/uploads/products/a122-own-{$own}.jpg | SEED-EN-ALT-{$own}"]]]), handleProductSave()],
+    // R8: two units sell (5 → 3) while the form that showed 5 is open; then the untouched form is saved, or the admin adds 3.
+    'edit_stale_stock', 'edit_stale_stock_changed' => [$_GET = ['id'=>$existing], Products::setAvailableStock("A121X-{$own}", 'simple', 3, 'order', 'order'),
+        $_POST = $edit(['stock'=>$action === 'edit_stale_stock' ? '5' : '8', 'stock_loaded'=>'5', 'tr'=>['en'=>['name'=>"EN-X-{$own}", 'slug'=>"taken-{$own}", 'seo_title'=>"EN-SEO-{$own}",
+        'meta_description'=>"EN-META-{$own}", 'image_alts'=>"/uploads/products/a122-own-{$own}.jpg | SEED-EN-ALT-{$own}"]]]), handleProductSave()],
     // An imported/legacy product has only category_id and no product_categories rows.
     'edit_unchanged_legacy' => [$db->prepare('DELETE FROM product_categories WHERE product_id = ?')->execute([$existing]), $_GET = ['id'=>$existing],
         $_POST = $edit(['extra_category_ids'=>[], 'tr'=>['en'=>['name'=>"EN-X-{$own}", 'slug'=>"taken-{$own}", 'seo_title'=>"EN-SEO-{$own}",
@@ -233,7 +237,7 @@ $a121Run = static function(array $args) use ($a121Fixture): array {
 };
 $a121Rejected = ['create_foreign_brand', 'create_foreign_extra_category', 'create_bad_gtin', 'create_taken_translation_slug', 'create_translation_slug_is_base_slug', 'create_unknown_locale',
     'images_rejected', 'images_bad_url', 'images_alt_unknown', 'duplicate_sku'];
-$a121Actions = array_merge(['create_unicode', 'create_full', 'edit_page', 'edit_unchanged', 'edit_unchanged_legacy', 'edit_clear_translation', 'view_model', 'images_edit', 'images_delete'], $a121Rejected,
+$a121Actions = array_merge(['create_unicode', 'create_full', 'edit_page', 'edit_unchanged', 'edit_stale_stock', 'edit_stale_stock_changed', 'edit_unchanged_legacy', 'edit_clear_translation', 'view_model', 'images_edit', 'images_delete'], $a121Rejected,
     ['variants_page', 'variants_edit', 'variants_delete', 'variants_delete_ordered', 'variants_rename_ordered', 'variants_rename_ledgered', 'variants_sku_product',
         'variants_sku_duplicate', 'variants_negative_stock', 'variants_foreign_row', 'variants_foreign_product']);
 $a122Paths = [ProductEditor::uploadPath('Košeľa/../x', 'jpg'), ProductEditor::uploadPath('Košeľa/../x', 'jpg')];
@@ -372,6 +376,12 @@ try {
                     $a121ExistingId = (int)($a121Existing['id'] ?? 0);
                     $a121Expected = $a121Action === 'edit_unchanged' ? $a121Links(['after' => $a121Result['before']], $a121ExistingId) : [];
                     assert_equals($a121Expected, $a121Links($a121Result, $a121ExistingId), "{$a121Label}: category links not rewritten");
+                }
+                if ($a121Action === 'edit_stale_stock' || $a121Action === 'edit_stale_stock_changed') {
+                    $a121Untouched = $a121Action === 'edit_stale_stock';
+                    assert_equals([$a121Untouched ? 'Bez zmien.' : 'Produkt aktualizovaný.', $a121Untouched ? 3 : 6],
+                        [$a121Result['flash']['msg'] ?? null, (int)($a121Existing['stock'] ?? -1)],
+                        "{$a121Label}: a sale made while the form was open stays booked (untouched form keeps 3; +3 on the shown 5 gives 6, not 8)");
                 }
                 if ($a121Action === 'edit_clear_translation') {
                     $a121Tr = json_decode((string)($a121Existing['translations'] ?? '{}'), true) ?: [];
