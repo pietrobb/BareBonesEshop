@@ -234,6 +234,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.nav.cms_pages'    => 'Strony CMS',
     'admin.nav.audit'        => 'Log audytu',
     'admin.nav.gdpr'         => 'RODO',
+    'admin.error.page_failed' => 'Nie udało się wyświetlić strony. Błąd został zapisany w logu serwera.',
     'admin.title.dashboard'       => 'Panel',
     'admin.title.products'        => 'Produkty',
     'admin.title.product_new'     => 'Nowy produkt',

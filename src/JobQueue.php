@@ -286,20 +286,45 @@ class JobQueue {
     public static function stats(): array {
         if ($backend = self::backend()) return $backend->stats();
         $dir = self::dir();
-        return [
-            'pending'    => count(glob($dir . '/pending/*.json') ?: []),
-            'processing' => count(glob($dir . '/processing/*.json') ?: []),
-            'completed'  => count(glob($dir . '/completed/*.json') ?: []),
-            'failed'     => count(glob($dir . '/failed/*.json') ?: []),
-        ];
+        $stats = [];
+        foreach (['pending', 'processing', 'completed', 'failed'] as $state) {
+            $stats[$state] = 0;
+            self::eachJobFileName("{$dir}/{$state}", static function () use (&$stats, $state): void { $stats[$state]++; });
+        }
+        return $stats;
+    }
+
+    /**
+     * Streams the *.json names of one queue directory (no glob(): completed/ grows without bound and a name array of
+     * every job would exhaust the admin dashboard's memory).
+     */
+    private static function eachJobFileName(string $dir, callable $visit): void {
+        $handle = @opendir($dir);
+        if ($handle === false) return;
+        try {
+            while (($name = readdir($handle)) !== false) {
+                if ($name[0] !== '.' && str_ends_with($name, '.json')) $visit($name);
+            }
+        } finally {
+            closedir($handle);
+        }
     }
 
     public static function failures(int $limit = 20): array {
         if ($backend = self::backend()) return $backend->failures($limit);
-        $files = glob(self::dir() . '/failed/*.json') ?: [];
-        rsort($files);
+        $limit = max(1, min(100, $limit));
+        $dir = self::dir() . '/failed';
+        // Newest $limit names (names sort by time), kept in a bounded heap instead of listing the whole directory.
+        $newest = new SplMinHeap();
+        self::eachJobFileName($dir, static function (string $name) use ($newest, $limit): void {
+            $newest->insert($name);
+            if ($newest->count() > $limit) $newest->extract();
+        });
+        $files = [];
+        foreach ($newest as $name) $files[] = "{$dir}/{$name}";
+        $files = array_reverse($files);
         $result = [];
-        foreach (array_slice($files, 0, max(1, min(100, $limit))) as $file) {
+        foreach ($files as $file) {
             if (is_link($file) || !is_file($file)) continue;
             $job = json_decode((string)file_get_contents($file), true);
             if (!is_array($job)) continue;

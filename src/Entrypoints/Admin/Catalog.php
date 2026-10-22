@@ -13,10 +13,6 @@ function pageProducts(): void {
     $search = trim(Security::str($_GET['q'] ?? ''));
     $statusFilter = in_array($_GET['status'] ?? '', ['active', 'draft', 'archived'], true) ? $_GET['status'] : '';
     $stockFilter = ($_GET['stock'] ?? '') === 'low' ? 'low' : '';
-    // Same thresholds and warehouse availability as the stock e-mails (worst level first).
-    $stockLevels = [];
-    foreach (StockAlerts::belowLow() as $row) $stockLevels[$row['product_id']] ??= $row['level'];
-
     // Only the active store's catalog (list and count).
     $where = 'store_id = :catalog';
     $params = [':catalog' => StoreContext::current()->catalogId()];
@@ -30,7 +26,12 @@ function pageProducts(): void {
         $where .= " AND status = :status";
         $params[':status'] = $statusFilter;
     }
-    if ($stockFilter) $where .= $stockLevels ? ' AND id IN (' . implode(',', array_map('intval', array_keys($stockLevels))) . ')' : ' AND 1=0';
+    // Same thresholds and warehouse availability as the stock e-mails, filtered in SQL (no id list of the whole catalog).
+    if ($stockFilter) {
+        [$lowSql, $lowParams] = StockAlerts::belowLowProductIdsSql();
+        $where .= " AND id IN ({$lowSql})";
+        $params += $lowParams;
+    }
 
     $stmt = $db->prepare("SELECT COUNT(*) FROM products WHERE {$where}");
     $stmt->execute($params);
@@ -42,6 +43,7 @@ function pageProducts(): void {
     $stmt = $db->prepare("SELECT * FROM products WHERE {$where} ORDER BY updated_at DESC LIMIT :limit OFFSET :offset");
     $stmt->execute($params);
     $products = $stmt->fetchAll();
+    $stockLevels = StockAlerts::levelsForProducts(array_column($products, 'id'));
     ?>
     <h1><?= esc(I18n::t('admin.title.products')) ?> <span class="muted">(<?= $total ?>)</span></h1>
     <div class="card">

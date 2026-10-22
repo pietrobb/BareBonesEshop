@@ -239,6 +239,7 @@ return [
     'admin.nav.audit'        => 'Audit Log',
     'admin.nav.gdpr'         => 'GDPR',
     // Page titles
+    'admin.error.page_failed' => 'Stránku sa nepodarilo zobraziť. Chyba bola zaznamenaná v logu servera.',
     'admin.title.dashboard'       => 'Dashboard',
     'admin.title.sales'           => 'Prehľad predaja',
     'admin.title.products'        => 'Produkty',

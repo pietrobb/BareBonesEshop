@@ -235,6 +235,7 @@ return [
     'admin.nav.cms_pages'    => 'CMS Pages',
     'admin.nav.audit'        => 'Audit Log',
     'admin.nav.gdpr'         => 'GDPR',
+    'admin.error.page_failed' => 'The page could not be rendered. The error was recorded in the server log.',
     'admin.title.dashboard'       => 'Dashboard',
     'admin.title.sales'           => 'Sales overview',
     'admin.title.products'        => 'Products',

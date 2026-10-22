@@ -234,6 +234,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.nav.cms_pages'    => 'CMS Stránky',
     'admin.nav.audit'        => 'Audit Log',
     'admin.nav.gdpr'         => 'GDPR',
+    'admin.error.page_failed' => 'Stránku se nepodařilo zobrazit. Chyba byla zaznamenána v logu serveru.',
     'admin.title.dashboard'       => 'Dashboard',
     'admin.title.products'        => 'Produkty',
     'admin.title.product_new'     => 'Nový produkt',
