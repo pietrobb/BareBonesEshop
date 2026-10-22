@@ -120,6 +120,12 @@ class CheckoutService {
      * @return array{methods: list<array>, selected: ?array, shipping: int}
      */
     public static function paymentPreview(array $cart, int $goods, string $country, string $currency, string $method, int $shipping, bool $freeShipping, string $postedPayment, ?int $customerId, ?array $vat = null): array {
+        if ($method !== '' && $goods + $shipping === 0 && self::isDigitalOnly($cart)) {
+            // As execute(): a digital order with nothing to pay is placed with the fee-less free method.
+            if (!function_exists('freeDigitalPayment')) require_once __DIR__ . '/Http/ApiHandlers.php';
+            $free = freeDigitalPayment();
+            return ['methods' => [$free], 'selected' => $free, 'shipping' => 0];
+        }
         $methods = $method !== '' ? PaymentService::availableMethods($country, $currency, $goods + $shipping, $method, $customerId) : [];
         $selected = array_values(array_filter($methods, static fn(array $m): bool => (string)$m['code'] === $postedPayment))[0] ?? $methods[0] ?? null;
         $charged = $freeShipping ? self::freeShippingCharge($cart, $goods, $country, $method, $selected, $vat, $currency) : self::summaryShipping($cart, $goods, $country, $method, $selected, $shipping, $vat, $currency);

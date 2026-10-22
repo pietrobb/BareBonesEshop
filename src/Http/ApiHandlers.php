@@ -472,10 +472,10 @@ function apiShippingRates(): array {
 
     $physicalQty = ShippingService::physicalQuantity($cart['items']);
     $methods = ShippingService::calculateRates($country, $weightG, $subtotal, $cod, $volumeCm3, $physicalQty);
-    // An automatic free-shipping promotion zeroes the delivery checkout charges, so the preview shows the same.
+    // An automatic free-shipping promotion waives the carriage as checkout does: cash on delivery keeps its surcharge.
     $customerId = (int)($_SESSION['customer_id'] ?? 0);
     if (CheckoutService::discountPreview('', (int)($cart['subtotal'] ?? 0), null, $cart['items'], $customerId ?: null)['free_shipping']) {
-        $methods = array_map(static fn(array $method): array => ['price' => 0] + $method, $methods);
+        $methods = array_map(static fn(array $method): array => ['price' => ShippingService::freeShippingPrice($method)] + $method, $methods);
     }
     $methods = CheckoutService::chargedQuote(['rates' => $methods], $vat, (string)($cart['currency'] ?? 'eur'))['rates'];
     $unitsToFree = ShippingService::unitsToFreeShipping($methods, $physicalQty);
