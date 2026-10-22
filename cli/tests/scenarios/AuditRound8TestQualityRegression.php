@@ -48,3 +48,37 @@ assert_equals(['deleted-' . $r8qSubject . '@anonymized.local', '', '', null, nul
     'R8 tests: GDPR erase clears the account name, phone and VAT ID (' . json_encode($r8qErased) . ')');
 assert_equals(['r8q-keep@example.test', 'R8Q Erased Name', '+421 900 111 222', 'SK2020111222', 'SK', '2026-10-01 00:00:00', 'active'], array_values($r8qRow($r8qOther)),
     'R8 tests: GDPR erase leaves another customer with the same name and phone untouched');
+
+// Mutant 3: StripePayment::verifySignature had no direct test — any check in it could be removed.
+$r8qSecret = 'whsec_r8q_0123456789abcdef';
+$r8qStripe = new StripePayment(['stripe_webhook_secret' => $r8qSecret]);
+$r8qBody = '{"id":"evt_r8q","type":"checkout.session.completed"}';
+$r8qNow = (string)time();
+$r8qSig = static fn(string $t, string $body = '', string $secret = ''): string => hash_hmac('sha256', $t . '.' . ($body !== '' ? $body : $r8qBody), $secret !== '' ? $secret : $r8qSecret);
+$r8qGood = $r8qSig($r8qNow);
+assert_true($r8qStripe->verifySignature($r8qBody, 't=' . $r8qNow . ',v1=' . $r8qGood), 'R8 tests: Stripe accepts a valid current signature');
+assert_true($r8qStripe->verifySignature($r8qBody, 't=' . $r8qNow . ', v0=abc, v1=' . str_repeat('0', 64) . ', v1=' . strtoupper($r8qGood)),
+    'R8 tests: Stripe accepts any one matching v1 among several (rolled secrets), case-insensitively');
+$r8qRejected = [
+    'tampered body' => [$r8qBody . ' ', 't=' . $r8qNow . ',v1=' . $r8qGood],
+    'wrong secret' => [$r8qBody, 't=' . $r8qNow . ',v1=' . $r8qSig($r8qNow, '', 'whsec_r8q_other_secret_xx')],
+    'signature over another timestamp' => [$r8qBody, 't=' . $r8qNow . ',v1=' . $r8qSig((string)((int)$r8qNow - 1))],
+    'old timestamp' => [$r8qBody, 't=' . ((int)$r8qNow - 301) . ',v1=' . $r8qSig((string)((int)$r8qNow - 301))],
+    'future timestamp' => [$r8qBody, 't=' . ((int)$r8qNow + 301) . ',v1=' . $r8qSig((string)((int)$r8qNow + 301))],
+    'no timestamp' => [$r8qBody, 'v1=' . $r8qGood],
+    'non-numeric timestamp' => [$r8qBody, 't=' . $r8qNow . 'x,v1=' . $r8qSig($r8qNow . 'x')],
+    'two different timestamps' => [$r8qBody, 't=' . ((int)$r8qNow - 1000) . ',t=' . $r8qNow . ',v1=' . $r8qGood],
+    'no v1' => [$r8qBody, 't=' . $r8qNow . ',v0=' . $r8qGood],
+    'empty v1' => [$r8qBody, 't=' . $r8qNow . ',v1='],
+    'empty header' => [$r8qBody, ''],
+];
+foreach ($r8qRejected as $r8qCase => [$r8qPayload, $r8qHeader]) {
+    assert_true(!$r8qStripe->verifySignature($r8qPayload, $r8qHeader), "R8 tests: Stripe rejects a webhook with {$r8qCase}");
+}
+assert_true($r8qStripe->verifySignature($r8qBody, 't=' . ((int)$r8qNow - 290) . ',v1=' . $r8qSig((string)((int)$r8qNow - 290))),
+    'R8 tests: Stripe accepts a signature inside the 5-minute tolerance');
+foreach (['' => 'no secret', 'whsec_short' => 'a secret shorter than 16 characters', ' ' . $r8qSecret => 'a secret with surrounding whitespace'] as $r8qBad => $r8qCase) {
+    $r8qBadSig = hash_hmac('sha256', $r8qNow . '.' . $r8qBody, (string)$r8qBad);
+    assert_true(!(new StripePayment(['stripe_webhook_secret' => (string)$r8qBad]))->verifySignature($r8qBody, 't=' . $r8qNow . ',v1=' . $r8qBadSig),
+        "R8 tests: Stripe rejects every webhook when configured with {$r8qCase}");
+}
