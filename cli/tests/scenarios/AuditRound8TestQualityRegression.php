@@ -176,19 +176,30 @@ Rma::receive((int)$r8qRma, [$r8qRmaItem => ['quantity' => 2, 'disposition' => 'r
 $r8qHolder = test_fixture_path('r8q-credit-race') . '.php';
 file_put_contents($r8qHolder, <<<'PHP'
 <?php
-// Exchanges both received units in a transaction held open for 2 s.
-[, $root, $file, $rma, $item, $product] = $argv;
+// Exchanges both received units in a transaction held open for 2 s, on the parent's database file and store.
+[, $root, $file, $store, $rma, $item, $product] = $argv;
 require $root . '/src/autoload.php';
+StoreContext::activate(unserialize((string)file_get_contents($store), ['allowed_classes' => [StoreContext::class]]));
 $db = new PDO('sqlite:' . $file, null, null, [PDO::ATTR_TIMEOUT => 10, PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
 Db::init($db, 'sqlite');
 $db->beginTransaction();
-Rma::createExchange((int)$rma, (int)$item, 2, (int)$product, null, 'r8q-credit-race-x');
+try {
+    Rma::createExchange((int)$rma, (int)$item, 2, (int)$product, null, 'r8q-credit-race-x');
+} catch (Throwable $e) {
+    echo 'child: ', $e->getMessage(), ' | store ', StoreContext::current()->id(), ' | rma ', json_encode($db->query('SELECT store_id, status FROM rma_requests WHERE id = ' . (int)$rma)->fetch()), "\n";
+    exit(1);
+}
 echo "held\n";
 usleep(2000000);
 $db->commit();
 echo "committed\n";
 PHP);
-$r8qProc = proc_open([PHP_BINARY, $r8qHolder, dirname(TEST_CLI_DIR), $testDbPath, (string)$r8qRma, (string)$r8qRmaItem, '97481'], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $r8qPipes);
+$r8qStore = $r8qHolder . '.store';
+file_put_contents($r8qStore, serialize(StoreContext::current()));
+$r8qFile = '';
+foreach (Db::get()->query('PRAGMA database_list')->fetchAll(PDO::FETCH_ASSOC) as $r8qDbRow) if ($r8qDbRow['name'] === 'main') $r8qFile = (string)$r8qDbRow['file'];
+assert_true(!Db::get()->inTransaction() && $r8qFile !== '', 'R8 tests: the credit race starts from committed data in a database file (file: ' . $r8qFile . ')');
+$r8qProc = proc_open([PHP_BINARY, $r8qHolder, dirname(TEST_CLI_DIR), $r8qFile, $r8qStore, (string)$r8qRma, (string)$r8qRmaItem, '97481'], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $r8qPipes);
 fclose($r8qPipes[0]);
 $r8qHeld = trim((string)fgets($r8qPipes[1]));
 try {
@@ -202,6 +213,7 @@ fclose($r8qPipes[1]);
 fclose($r8qPipes[2]);
 proc_close($r8qProc);
 @unlink($r8qHolder);
+@unlink($r8qStore);
 $r8qCommitted = static fn(string $sql): int => (int)$pdo->query($sql)->fetchColumn();
 assert_equals(['held', 'Credit quantity exceeds received uncommitted quantity', 'committed', 2, 0], [$r8qHeld, $r8qCredit, $r8qHolderOut,
     $r8qCommitted("SELECT COALESCE(SUM(quantity), 0) FROM return_exchanges WHERE rma_item_id = {$r8qRmaItem}"),
