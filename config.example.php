@@ -29,6 +29,9 @@ return [
     'default_locale'   => 'en',
     'default_currency' => 'eur',
     'app_url'          => '', // public base URL, e.g. https://shop.example.com
+    // Catalog prices include VAT. false only for legacy direct Orders::create() callers that pass net prices
+    // with a separate tax_amount (the storefront checkout always prices from its VAT snapshot).
+    'prices_include_tax' => true,
 
     // Catalog
     'per_page' => 24,

@@ -321,6 +321,11 @@ nginx PHP fallback when `operations.nginx_config` is set).
     A price list is charged only to a cart in its currency - the products' currency, which can differ from
     the store's: EUR goods of the shared catalog in the CZ store get the carriers' EUR rates, never the
     CZK amounts as euros.
+  - **`tax.json` and `src/Tax.php` are removed.** VAT rates come from `VatService`; the file's stale
+    country rates (SK 20 %) were no longer read. Its only setting still in use, `prices_include_tax`, is
+    a `config.php` key (default `true`). A shop that set `"prices_include_tax": false` in `tax.json`
+    must set `'prices_include_tax' => false` in `config.php`; it matters only for legacy direct
+    `Orders::create()` callers that pass net prices with a separate `tax_amount`.
   - A credit note paid back by hand (order without a payment id) counts as refunded: the order can no
     longer be refunded for that amount a second time.
   - SQLite: transactions take the write lock when they begin (`BEGIN IMMEDIATE`, `ShopPDO`), so a

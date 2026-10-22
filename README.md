@@ -514,7 +514,7 @@ production path. Backups, migrations, and CLI tools live under `cli/`.
 ├── product.php · wishlist.php · page.php · sitemap.php · robots.php
 ├── router.php             Deny/rewrite router for `php -S` (development only)
 ├── config.example.php     Template for the untracked config.php (secrets, paths, providers)
-├── stores.json · catalog.json · shipping.json · tax.json · pricing.json · layouts.json
+├── stores.json · catalog.json · shipping.json · pricing.json · layouts.json
 ├── config/                Config schema, backup, data retention, processors, VAT rates
 ├── src/                   Domain and infrastructure classes (Db, Security, Products, Orders, Rma, …)
 ├── adapters/              Provider interfaces; adapters/contrib/ holds the bundled implementations
