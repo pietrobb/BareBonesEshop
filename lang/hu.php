@@ -234,6 +234,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.nav.cms_pages'    => 'CMS Oldalak',
     'admin.nav.audit'        => 'Audit napló',
     'admin.nav.gdpr'         => 'GDPR',
+    'admin.error.page_failed' => 'Az oldalt nem sikerült megjeleníteni. A hibát a szervernapló rögzítette.',
     'admin.title.dashboard'       => 'Irányítópult',
     'admin.title.products'        => 'Termékek',
     'admin.title.product_new'     => 'Új termék',

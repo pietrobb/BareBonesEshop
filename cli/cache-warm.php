@@ -3,110 +3,60 @@ require_once __DIR__ . '/cli-only.php';
 
 /**
  * BareBones Shop — Cache Warmer
- * Pre-generates flat-file cache for all locales.
- * Usage: php cli/cache-warm.php [--verbose]
+ * Runs the full cache rebuild (CacheRebuild: category trees, first listing page and filters of every category,
+ * price maps) for every store, in its own namespace, catalog and languages. Product detail pages are cached on
+ * first view; --products also pre-renders them (one JSON per product and language: at 200k products that is
+ * hundreds of thousands of files that every catalog change makes stale again).
+ * Usage: php cli/cache-warm.php [--products] [--store=<id>] [--verbose]
  */
 require_once __DIR__ . '/../src/autoload.php';
 
-$verbose = in_array('--verbose', $argv ?? []);
+$verbose = in_array('--verbose', $argv ?? [], true);
+$withProducts = in_array('--products', $argv ?? [], true);
+$onlyStore = '';
+foreach ($argv ?? [] as $arg) if (str_starts_with($arg, '--store=')) $onlyStore = substr($arg, 8);
 $cfg = require __DIR__ . '/../config.php';
-$perPage = $cfg['per_page'] ?? 24;
 
 echo "BareBones Shop — Cache Warmer\n";
 echo "==============================\n\n";
-
 $start = microtime(true);
 
-// Determine all locales from stores.json
-$stores = json_decode(file_get_contents(__DIR__ . '/../stores.json'), true);
-$locales = [];
-foreach ($stores['stores'] ?? [] as $store) {
-    foreach ($store['languages'] ?? [] as $lang) {
-        $locales[$lang] = true;
+$storeIds = array_map('strval', array_keys(Bootstrap::stores()['stores'] ?? [])) ?: ['default'];
+if ($onlyStore !== '') {
+    if (!in_array($onlyStore, $storeIds, true)) {
+        fwrite(STDERR, "Unknown store: {$onlyStore}\n");
+        exit(1);
     }
-}
-$locales = array_keys($locales) ?: [$stores['default_locale'] ?? 'en'];
-echo "Locales: " . implode(', ', $locales) . "\n";
-
-// Get all data
-$allCats = Db::get()->query("SELECT * FROM categories ORDER BY path")->fetchAll();
-$totalProducts = (int)Db::get()->query("SELECT COUNT(*) FROM products WHERE status = 'active'")->fetchColumn();
-
-echo "Categories: " . count($allCats) . "\n";
-echo "Products: {$totalProducts}\n\n";
-
-$cached = 0;
-
-foreach ($locales as $locale) {
-    I18n::setLocale($locale);
-    echo "--- Locale: {$locale} ---\n";
-
-    // 1. Category tree
-    $tree = Categories::tree();
-    $translatedTree = array_map(function($cat) {
-        $cat = I18n::category($cat);
-        $cat = Categories::enrich($cat);
-        if (!empty($cat['children'])) {
-            $cat['children'] = array_map(function($c) {
-                return Categories::enrich(I18n::category($c));
-            }, $cat['children']);
-        }
-        return $cat;
-    }, $tree);
-    Cache::writeJson(Cache::localePath($locale, 'categories.json'), ['categories' => $translatedTree]);
-    $cached++;
-    if ($verbose) echo "  [OK] categories.json\n";
-
-    // 2. Category listings + filters
-    foreach ($allCats as $cat) {
-        // First page
-        $data = Products::byCategory($cat['id'], 1, $perPage, 'price_asc');
-        $data['products'] = Products::enrichMany(array_map([I18n::class, 'product'], $data['products']));
-        $data['category'] = I18n::category($cat);
-        Cache::writeJson(Cache::localePath($locale, "cat/{$cat['slug']}/page-1.json"), $data);
-        $cached++;
-
-        // Additional pages
-        $totalPages = $data['pages'] ?? 1;
-        for ($pg = 2; $pg <= min($totalPages, 10); $pg++) {
-            $pageData = Products::byCategory($cat['id'], $pg, $perPage, 'price_asc');
-            $pageData['products'] = Products::enrichMany(array_map([I18n::class, 'product'], $pageData['products']));
-            $pageData['category'] = I18n::category($cat);
-            Cache::writeJson(Cache::localePath($locale, "cat/{$cat['slug']}/page-{$pg}.json"), $pageData);
-            $cached++;
-        }
-
-        // Filters
-        $raw = Products::filterValues($cat['id']);
-        $filters = [];
-        foreach ($raw as $attrName => $options) {
-            $filters[] = [
-                'attr_name' => $attrName,
-                'label'     => I18n::attrLabel($attrName),
-                'options'   => array_map(fn($opt) => [
-                    'value' => $opt['value'],
-                    'label' => I18n::attr($attrName, $opt['value']),
-                    'count' => $opt['count'],
-                ], $options),
-            ];
-        }
-        Cache::writeJson(Cache::localePath($locale, "cat/{$cat['slug']}/filters.json"), ['filters' => $filters]);
-        $cached++;
-
-        if ($verbose) echo "  [OK] cat/{$cat['slug']} ({$totalPages} pages)\n";
-    }
-
-    // 3. Product detail pages
-    $stmt = Db::get()->query("SELECT * FROM products WHERE status = 'active'");
-    while ($product = $stmt->fetch()) {
-        $product = Products::enrich(I18n::product($product));
-        $product['variants'] = Products::variants($product['id']);
-        $product['attributes'] = Products::attrs($product['id']);
-        Cache::writeJson(Cache::localePath($locale, "product/{$product['slug']}.json"), ['product' => $product]);
-        $cached++;
-    }
-    if ($verbose) echo "  [OK] {$totalProducts} product pages\n";
+    $storeIds = [$onlyStore];
 }
 
-$elapsed = microtime(true) - $start;
-echo "\nDone! Cached {$cached} files in " . round($elapsed * 1000) . "ms.\n";
+$products = 0;
+foreach ($storeIds as $storeId) {
+    $store = Bootstrap::initStoreContext('/', '', $storeId);
+    $t = microtime(true);
+    CacheRebuild::run(['scope' => 'full'], $cfg);
+    echo "Store {$storeId}: categories, listings, filters and prices in " . round(microtime(true) - $t, 1) . " s\n";
+    if (!$withProducts) continue;
+
+    $locales = array_values(array_unique(array_map('strval', (array)($store->config()['languages'] ?? [])))) ?: [$store->defaultLocale()];
+    $stmt = Db::get()->prepare("SELECT * FROM products WHERE store_id = :catalog AND status = 'active' AND id > :after ORDER BY id LIMIT 500");
+    $after = 0;
+    do {
+        $stmt->execute([':catalog' => $store->catalogId(), ':after' => $after]);
+        $chunk = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($chunk as $row) {
+            $after = (int)$row['id'];
+            foreach ($locales as $locale) {
+                I18n::setLocale($locale);
+                $product = Products::enrich(I18n::product($row));
+                $product['variants'] = Products::variants((int)$row['id']);
+                $product['attributes'] = Products::attrs((int)$row['id']);
+                Cache::writeJson(Cache::localePath($locale, "product/{$row['slug']}.json"), ['product' => $product]);
+                $products++;
+            }
+        }
+        if ($verbose) echo "  products up to id {$after}\n";
+    } while (count($chunk) === 500);
+}
+
+echo "\nDone in " . round(microtime(true) - $start, 1) . " s" . ($withProducts ? ", {$products} product pages" : '') . ".\n";

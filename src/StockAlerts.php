@@ -147,18 +147,60 @@ class StockAlerts {
         }
     }
 
-    /** Tracked physical SKUs at or below their `low` threshold, worst first (admin dashboard, digest, product filter). */
-    public static function belowLow(): array {
-        $rows = self::rows(null, true);
-        usort($rows, static fn(array $a, array $b): int =>
-            [self::RANK[$b['level']], $a['available'], $a['sku']] <=> [self::RANK[$a['level']], $b['available'], $b['sku']]);
-        return $rows;
+    /**
+     * Tracked physical SKUs at or below their `low` threshold, worst first (dashboard, digest, product filter).
+     * Ordered and limited in SQL: a catalog with 100k+ low SKUs must not be loaded into PHP for a 20-row card.
+     */
+    public static function belowLow(?int $limit = null, int $offset = 0): array {
+        [$sql, $params] = self::trackedSql(null);
+        $sql = "SELECT * FROM ({$sql}) r WHERE r.alert_rank > 0 ORDER BY r.alert_rank DESC, r.available ASC, r.sku ASC";
+        if ($limit !== null) $sql .= ' LIMIT ' . max(1, $limit) . ' OFFSET ' . max(0, $offset);
+        return self::fetchRows($sql, $params);
+    }
+
+    /** Number of tracked SKUs at or below `low` (counted in SQL). */
+    public static function belowLowCount(): int {
+        [$sql, $params] = self::trackedSql(null);
+        $stmt = Db::get()->prepare("SELECT COUNT(*) FROM ({$sql}) r WHERE r.alert_rank > 0");
+        $stmt->execute($params);
+        return (int)$stmt->fetchColumn();
     }
 
     /** Dashboard summary with the same thresholds the e-mails use. */
     public static function summary(int $limit = 20): array {
-        $rows = self::belowLow();
-        return ['count' => count($rows), 'products' => array_slice($rows, 0, max(1, $limit))];
+        return ['count' => self::belowLowCount(), 'products' => self::belowLow(max(1, $limit))];
+    }
+
+    /**
+     * Worst level below `low` per product for the given product ids only (one admin list page).
+     * @param int[] $productIds
+     * @return array<int, string> product id => level
+     */
+    public static function levelsForProducts(array $productIds): array {
+        $productIds = array_values(array_unique(array_filter(array_map('intval', $productIds))));
+        if (!$productIds) return [];
+        $in = implode(', ', $productIds);
+        $catalog = StoreContext::current()->catalogId();
+        $stmt = Db::get()->prepare("SELECT sku FROM products WHERE store_id = :store AND id IN ({$in})
+            UNION SELECT v.sku FROM variants v JOIN products p ON p.id = v.product_id WHERE p.store_id = :store2 AND p.id IN ({$in})");
+        $stmt->execute([':store' => $catalog, ':store2' => $catalog]);
+        $skus = array_values(array_filter(array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN)), static fn(string $sku): bool => $sku !== ''));
+        $levels = [];
+        foreach (self::rows($skus, true) as $row) {
+            $current = $levels[$row['product_id']] ?? self::OK;
+            if (self::RANK[$row['level']] > self::RANK[$current]) $levels[$row['product_id']] = $row['level'];
+        }
+        return $levels;
+    }
+
+    /**
+     * Subquery of product ids with a tracked SKU at or below `low`, for `id IN (...)` filters.
+     * Named parameters are prefixed `:sa_` so they can be merged into the caller's.
+     * @return array{0: string, 1: array<string, mixed>}
+     */
+    public static function belowLowProductIdsSql(): array {
+        [$sql, $params] = self::trackedSql(null);
+        return ["SELECT r.product_id FROM ({$sql}) r WHERE r.alert_rank > 0", $params];
     }
 
     /**
@@ -172,49 +214,72 @@ class StockAlerts {
             foreach (array_chunk($skus, 500) as $chunk) $rows = array_merge($rows, self::rows($chunk, $onlyBelowLow));
             return $rows;
         }
-        $context = StoreContext::current();
-        $cfg = self::config();
-        $stockParams = [$context->catalogId()];
-        $skuFilter = '';
-        if ($skus !== null) {
-            $skuFilter = ' AND sku IN (' . implode(', ', array_fill(0, count($skus), '?')) . ')';
-            $stockParams = array_merge($stockParams, $skus);
-        }
-        $stock = "(SELECT sku, SUM(qty - reserved) AS available, SUM(reserved) AS reserved
-            FROM warehouse_stock WHERE store_id = ?{$skuFilter} GROUP BY sku) s";
-        $digital = implode(', ', array_fill(0, count(VariantAvailability::DIGITAL_TYPES), '?'));
-        $where = "p.store_id = ? AND p.status = 'active' AND LOWER(COALESCE(p.product_type, '')) NOT IN ({$digital})";
-        $whereParams = array_merge([$context->catalogId()], VariantAvailability::DIGITAL_TYPES);
-        if ($onlyBelowLow) {
-            $where .= ' AND s.available <= COALESCE(p.stock_low_threshold, ?)';
-            $whereParams[] = $cfg['low'];
-        }
-        $columns = 's.sku, s.available, s.reserved, p.id AS product_id, p.name AS product_name,
-            p.stock_low_threshold, p.stock_critical_threshold';
-        $sql = "SELECT {$columns}, '' AS variant_name FROM {$stock} JOIN products p ON p.sku = s.sku WHERE {$where}
-            UNION ALL
-            SELECT {$columns}, v.name AS variant_name FROM {$stock} JOIN variants v ON v.sku = s.sku
-                JOIN products p ON p.id = v.product_id WHERE {$where}";
-        $stmt = Db::get()->prepare($sql);
-        $stmt->execute(array_merge($stockParams, $whereParams, $stockParams, $whereParams));
+        [$sql, $params] = self::trackedSql($skus);
+        return self::fetchRows("SELECT * FROM ({$sql}) r" . ($onlyBelowLow ? ' WHERE r.alert_rank > 0' : ''), $params);
+    }
 
+    /**
+     * Tracked availability rows with the effective thresholds (per-product override, else config; never negative,
+     * critical never above low) and the level rank (0 ok … 3 out), computed in SQL like thresholds() and level().
+     * Each UNION branch gets its own parameter names (MySQL native prepares refuse a repeated name).
+     * @param string[]|null $skus
+     * @return array{0: string, 1: array<string, mixed>}
+     */
+    private static function trackedSql(?array $skus): array {
+        $cfg = self::config();
+        $catalog = StoreContext::current()->catalogId();
+        $low = (int)$cfg['low'];
+        $critical = (int)$cfg['critical'];
+        $lowExpr = "CASE WHEN COALESCE(p.stock_low_threshold, {$low}) < 0 THEN 0 ELSE COALESCE(p.stock_low_threshold, {$low}) END";
+        $criticalRaw = "CASE WHEN COALESCE(p.stock_critical_threshold, {$critical}) < 0 THEN 0 ELSE COALESCE(p.stock_critical_threshold, {$critical}) END";
+        $criticalExpr = "CASE WHEN {$criticalRaw} > {$lowExpr} THEN {$lowExpr} ELSE {$criticalRaw} END";
+        $params = [];
+        $branches = [];
+        foreach (['p' => "'' AS variant_name FROM %s JOIN products p ON p.sku = s.sku",
+                  'v' => "v.name AS variant_name FROM %s JOIN variants v ON v.sku = s.sku JOIN products p ON p.id = v.product_id"] as $branch => $from) {
+            $bind = static function (string $name, mixed $value) use (&$params, $branch): string {
+                $key = ":sa_{$branch}_{$name}";
+                $params[$key] = $value;
+                return $key;
+            };
+            $skuFilter = '';
+            if ($skus !== null) {
+                $names = [];
+                foreach (array_values($skus) as $i => $sku) $names[] = $bind("sku{$i}", (string)$sku);
+                $skuFilter = ' AND sku IN (' . implode(', ', $names) . ')';
+            }
+            $stock = '(SELECT sku, SUM(qty - reserved) AS available, SUM(reserved) AS reserved FROM warehouse_stock WHERE store_id = '
+                . $bind('ws', $catalog) . "{$skuFilter} GROUP BY sku) s";
+            $digital = [];
+            foreach (VariantAvailability::DIGITAL_TYPES as $i => $type) $digital[] = $bind("dt{$i}", $type);
+            $branches[] = "SELECT s.sku, CASE WHEN s.available < 0 THEN 0 ELSE s.available END AS available, s.reserved,
+                    p.id AS product_id, p.name AS product_name, {$lowExpr} AS low_threshold, {$criticalExpr} AS critical_threshold, "
+                . sprintf($from, $stock)
+                . ' WHERE p.store_id = ' . $bind('store', $catalog) . " AND p.status = 'active' AND LOWER(COALESCE(p.product_type, '')) NOT IN (" . implode(', ', $digital) . ')';
+        }
+        $sql = 'SELECT t.*, CASE WHEN t.available <= 0 THEN 3 WHEN t.available <= t.critical_threshold THEN 2
+                WHEN t.available <= t.low_threshold THEN 1 ELSE 0 END AS alert_rank
+            FROM (' . implode(' UNION ALL ', $branches) . ') t';
+        return [$sql, $params];
+    }
+
+    private static function fetchRows(string $sql, array $params): array {
+        $stmt = Db::get()->prepare($sql);
+        $stmt->execute($params);
+        $levels = array_flip(self::RANK);
         $rows = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            [$low, $critical] = self::thresholds($row);
-            $available = max(0, (int)$row['available']);
-            $level = self::level($available, $low, $critical);
-            if ($onlyBelowLow && $level === self::OK) continue;
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $name = (string)$row['product_name'];
             if ((string)$row['variant_name'] !== '') $name .= ' – ' . $row['variant_name'];
             $rows[] = [
                 'sku' => (string)$row['sku'],
                 'product_id' => (int)$row['product_id'],
                 'name' => $name,
-                'available' => $available,
+                'available' => (int)$row['available'],
                 'reserved' => max(0, (int)$row['reserved']),
-                'low' => $low,
-                'critical' => $critical,
-                'level' => $level,
+                'low' => (int)$row['low_threshold'],
+                'critical' => (int)$row['critical_threshold'],
+                'level' => $levels[(int)$row['alert_rank']],
             ];
         }
         return $rows;

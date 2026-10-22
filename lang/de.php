@@ -234,6 +234,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.nav.cms_pages'    => 'CMS-Seiten',
     'admin.nav.audit'        => 'Audit-Log',
     'admin.nav.gdpr'         => 'DSGVO',
+    'admin.error.page_failed' => 'Die Seite konnte nicht angezeigt werden. Der Fehler wurde im Serverprotokoll erfasst.',
     'admin.title.dashboard'       => 'Dashboard',
     'admin.title.products'        => 'Produkte',
     'admin.title.product_new'     => 'Neues Produkt',

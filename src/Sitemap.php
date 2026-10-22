@@ -59,50 +59,27 @@ class Sitemap {
     }
 
     /**
-     * Storefront stores keyed by store id => [locale, url_prefix, path set].
+     * Storefront stores in config order: store id => locale, url_prefix, catalog and page owner.
      * hreflang alternates are emitted only between stores that serve the path.
+     * @return array<string, array{locale: string, prefix: string, catalog: string, id: string}>
      */
-    private static function storePathSets(): array {
+    private static function stores(): array {
         $config = Bootstrap::stores();
-        $sets = [];
+        $stores = [];
         foreach (array_keys($config['stores'] ?? []) as $storeId) {
             try {
                 $store = StoreContext::resolve($config, '/', '', (string)$storeId);
             } catch (InvalidArgumentException) {
                 continue; // store without a storefront channel has no public URLs
             }
-            $locale = (string)($store->config()['default_locale'] ?? 'en');
-            $sets[(string)$storeId] = [
-                'locale' => $locale,
+            $stores[(string)$storeId] = [
+                'locale' => (string)($store->config()['default_locale'] ?? 'en'),
                 'prefix' => (string)($store->config()['url_prefix'] ?? ''),
-                'paths' => array_flip(self::paths($store)),
-                'localized' => self::localizedProductPaths($store, $locale),
+                'catalog' => $store->catalogId(),
+                'id' => $store->id(),
             ];
         }
-        return $sets;
-    }
-
-    /**
-     * Base product path => the path in $locale where the product has a translated slug: the store's canonical
-     * URL of that product (I18n::product), which <loc> and the alternates must name instead of the base slug.
-     * @return array<string, string>
-     */
-    private static function localizedProductPaths(StoreContext $store, string $locale): array {
-        $localized = [];
-        try {
-            $stmt = Db::get()->prepare("SELECT slug, translations FROM products WHERE store_id = :store AND status = 'active'
-                AND slug IS NOT NULL AND slug != '' AND translations LIKE :hasSlug");
-            $stmt->execute([':store' => $store->catalogId(), ':hasSlug' => '%"slug"%']);
-            while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
-                $translations = json_decode((string)$row['translations'], true);
-                $slug = is_array($translations) ? (string)($translations[$locale]['slug'] ?? '') : '';
-                if ($slug === '' || $slug === $row['slug']) continue;
-                $localized[UrlAliases::outbound('/product/' . $row['slug'])] = UrlAliases::outbound('/product/' . rawurlencode($slug));
-            }
-        } catch (\Throwable $ignore) {
-            /* fresh install — no products table yet */
-        }
-        return $localized;
+        return $stores;
     }
 
     /** Protocol limit of <url> entries per sitemap file (sitemaps.org). */
@@ -137,12 +114,8 @@ class Sitemap {
      */
     public static function write($out, string $base, int $part = 0): void {
         $base = rtrim($base, '/');
-        $sets = self::storePathSets();
-        $total = 0;
-        foreach (self::allPaths($sets) as $path) {
-            foreach ($sets as $set) if (isset($set['paths'][$path])) $total++;
-        }
-        $parts = max(1, (int)ceil($total / self::$maxUrls));
+        $stores = self::stores();
+        $parts = max(1, (int)ceil(self::entryCount($stores) / self::$maxUrls));
         if ($part < 0 || $part > $parts || ($part > 0 && $parts === 1)) throw new OutOfRangeException('Unknown sitemap part');
         $e = static fn(string $s): string => htmlspecialchars($s, ENT_XML1, 'UTF-8');
         fwrite($out, '<?xml version="1.0" encoding="UTF-8"?>' . "\n");
@@ -161,22 +134,20 @@ class Sitemap {
         $last = $part === 0 ? PHP_INT_MAX : $first + self::$maxUrls;
         $defaultStore = (string)(Bootstrap::stores()['default_store'] ?? '');
         $index = 0;
-        foreach (self::allPaths($sets) as $path) {
-            $serving = array_filter($sets, static fn(array $set): bool => isset($set['paths'][$path]));
-            foreach ($serving as $set) {
+        foreach (self::entries($stores) as $urls) {
+            foreach ($urls as $url) {
                 if ($index++ < $first) continue;
                 if ($index > $last) break 2;
-                $url = static fn(array $store): string => $store['prefix'] . ($store['localized'][$path] ?? $path);
-                $entry = "  <url>\n" . '    <loc>' . $e($base . $url($set)) . "</loc>\n";
+                $entry = "  <url>\n" . '    <loc>' . $e($base . $url) . "</loc>\n";
                 $alternates = [];
-                foreach ($serving as $alt) $alternates[$alt['locale']] ??= $url($alt);
+                foreach ($urls as $storeId => $altUrl) $alternates[$stores[$storeId]['locale']] ??= $altUrl;
                 foreach ($alternates as $altLocale => $altUrl) {
                     $entry .= '    <xhtml:link rel="alternate" hreflang="' . $e((string)$altLocale)
                           . '" href="' . $e($base . $altUrl) . "\"/>\n";
                 }
-                if (isset($serving[$defaultStore])) {
+                if (isset($urls[$defaultStore])) {
                     $entry .= '    <xhtml:link rel="alternate" hreflang="x-default" href="'
-                          . $e($base . $url($serving[$defaultStore])) . "\"/>\n";
+                          . $e($base . $urls[$defaultStore]) . "\"/>\n";
                 }
                 fwrite($out, $entry . "  </url>\n");
             }
@@ -184,10 +155,116 @@ class Sitemap {
         fwrite($out, "</urlset>\n");
     }
 
-    /** @return list<string> every path served by at least one store, in a stable order */
-    private static function allPaths(array $sets): array {
-        $allPaths = [];
-        foreach ($sets as $set) $allPaths += $set['paths'];
-        return array_map('strval', array_keys($allPaths));
+    /** Rows of one product keyset chunk (products.slug is globally unique, so it is the cursor). */
+    private const PRODUCT_CHUNK = 1000;
+
+    /**
+     * Every sitemap path, streamed: store id => URL path (store prefix + localized path) of each store serving it.
+     * Homepage, then categories, products and CMS pages by slug. Products are read in keyset chunks, never all
+     * at once: 200k products × several stores used to exhaust the memory limit.
+     * @return Generator<int, array<string, string>>
+     */
+    private static function entries(array $stores): Generator {
+        $owners = static function (string $kind) use ($stores): array {
+            $byOwner = [];
+            foreach ($stores as $storeId => $store) $byOwner[$store[$kind]][] = $storeId;
+            return $byOwner;
+        };
+        $urls = static function (string $path, array $storeIds, ?array $localized = null) use ($stores): array {
+            $urls = [];
+            foreach ($storeIds as $storeId) $urls[$storeId] = $stores[$storeId]['prefix'] . ($localized[$stores[$storeId]['locale']] ?? $path);
+            return $urls;
+        };
+        yield $urls('/', array_keys($stores));
+
+        $catalogs = $owners('catalog');
+        foreach (self::slugOwners("SELECT DISTINCT slug, store_id FROM categories WHERE slug IS NOT NULL AND slug != ''", array_keys($catalogs)) as $slug => $catalogIds) {
+            $serving = array_merge(...array_map(static fn(string $catalog): array => $catalogs[$catalog], $catalogIds));
+            yield $urls(UrlAliases::outbound('/category/' . $slug), self::inStoreOrder($serving, $stores));
+        }
+        foreach (self::products(array_keys($catalogs)) as $row) {
+            $translations = str_contains((string)$row['translations'], '"slug"') ? json_decode((string)$row['translations'], true) : null;
+            $localized = [];
+            foreach (is_array($translations) ? $translations : [] as $locale => $fields) {
+                $slug = is_array($fields) ? (string)($fields['slug'] ?? '') : '';
+                if ($slug !== '' && $slug !== $row['slug']) $localized[(string)$locale] = UrlAliases::outbound('/product/' . rawurlencode($slug));
+            }
+            yield $urls(UrlAliases::outbound('/product/' . $row['slug']), $catalogs[(string)$row['store_id']], $localized);
+        }
+        $pageOwners = $owners('id');
+        foreach (self::slugOwners("SELECT DISTINCT slug, store_id FROM pages WHERE status = 'active' AND slug IS NOT NULL AND slug != ''", array_keys($pageOwners)) as $slug => $ownerIds) {
+            $serving = array_merge(...array_map(static fn(string $owner): array => $pageOwners[$owner], $ownerIds));
+            yield $urls(UrlAliases::outbound('/page/' . $slug), self::inStoreOrder($serving, $stores));
+        }
+    }
+
+    /** Number of <url> entries (one per path and serving store), counted in SQL. */
+    private static function entryCount(array $stores): int {
+        $total = count($stores);
+        $db = Db::get();
+        $count = static function (string $sql, string $owner) use ($db): int {
+            try {
+                $stmt = $db->prepare($sql);
+                $stmt->execute([':owner' => $owner]);
+                return (int)$stmt->fetchColumn();
+            } catch (\Throwable) {
+                return 0; // fresh install — the table may not exist yet
+            }
+        };
+        foreach ($stores as $store) {
+            $total += $count("SELECT COUNT(DISTINCT slug) FROM categories WHERE store_id = :owner AND slug IS NOT NULL AND slug != ''", $store['catalog'])
+                + $count("SELECT COUNT(*) FROM products WHERE store_id = :owner AND status = 'active' AND slug IS NOT NULL AND slug != ''", $store['catalog'])
+                + $count("SELECT COUNT(DISTINCT slug) FROM pages WHERE store_id = :owner AND status = 'active' AND slug IS NOT NULL AND slug != ''", $store['id']);
+        }
+        return $total;
+    }
+
+    /**
+     * Slug => owner ids (catalogs or stores) for the small per-owner tables (categories, CMS pages), in slug order.
+     * @return array<string, list<string>>
+     */
+    private static function slugOwners(string $sql, array $owners): array {
+        if (!$owners) return [];
+        $params = [];
+        foreach (array_values($owners) as $i => $owner) $params[":o{$i}"] = (string)$owner;
+        $grouped = [];
+        try {
+            $stmt = Db::get()->prepare($sql . ' AND store_id IN (' . implode(', ', array_keys($params)) . ')');
+            $stmt->execute($params);
+            while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) $grouped[(string)$row['slug']][] = (string)$row['store_id'];
+        } catch (\Throwable) {
+            return []; // fresh install — the table may not exist yet
+        }
+        ksort($grouped, SORT_STRING);
+        return $grouped;
+    }
+
+    /**
+     * Active products of the given catalogs in slug order, PRODUCT_CHUNK rows per query.
+     * @return Generator<int, array{slug: string, store_id: string, translations: ?string}>
+     */
+    private static function products(array $catalogs): Generator {
+        if (!$catalogs) return;
+        $params = [];
+        foreach (array_values($catalogs) as $i => $catalog) $params[":c{$i}"] = (string)$catalog;
+        $sql = "SELECT slug, store_id, translations FROM products WHERE status = 'active' AND slug IS NOT NULL AND slug != ''
+            AND store_id IN (" . implode(', ', array_keys($params)) . ')';
+        $after = null;
+        do {
+            try {
+                $stmt = Db::get()->prepare($sql . ($after === null ? '' : ' AND slug > :after') . ' ORDER BY slug LIMIT ' . self::PRODUCT_CHUNK);
+                $stmt->execute($after === null ? $params : $params + [':after' => $after]);
+                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            } catch (\Throwable) {
+                return; // fresh install — no products table yet
+            }
+            foreach ($rows as $row) yield $row;
+            $after = $rows ? (string)$rows[count($rows) - 1]['slug'] : null;
+        } while (count($rows) === self::PRODUCT_CHUNK);
+    }
+
+    /** @return list<string> the given store ids in store config order */
+    private static function inStoreOrder(array $storeIds, array $stores): array {
+        return array_values(array_intersect(array_keys($stores), $storeIds));
     }
 }

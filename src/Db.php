@@ -98,15 +98,57 @@ class Db {
     public static function isMysql(): bool  { return self::driver() === 'mysql'; }
 
     /**
-     * A statement whose rows stream from the server (MySQL: an unbuffered result set on this statement only, so a
-     * large export never holds the whole result in PHP memory; SQLite always steps row by row). Read it to the end
-     * (or closeCursor()) before running another query on the connection.
+     * Prepare and execute a statement whose rows stream from the server, so a large export never holds the whole
+     * result in PHP memory (SQLite always steps row by row). MySQL native prepares ignore the buffered-query option
+     * on prepare() and read the connection's setting at execute(): it is switched off for this execute only and
+     * restored at once, so every other query stays buffered. Read the statement to the end (or closeCursor())
+     * before running another query on the connection.
      */
-    public static function prepareUnbuffered(string $sql): PDOStatement {
+    public static function executeUnbuffered(string $sql, array $params = []): PDOStatement {
         $pdo = self::get();
-        if (!self::isMysql()) return $pdo->prepare($sql);
+        if (!self::isMysql()) {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            return $stmt;
+        }
         $attribute = defined('Pdo\Mysql::ATTR_USE_BUFFERED_QUERY') ? constant('Pdo\Mysql::ATTR_USE_BUFFERED_QUERY') : constant('PDO::MYSQL_ATTR_USE_BUFFERED_QUERY');
-        return $pdo->prepare($sql, [$attribute => false]);
+        $buffered = $pdo->getAttribute($attribute);
+        $pdo->setAttribute($attribute, false);
+        try {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            return $stmt;
+        } finally {
+            $pdo->setAttribute($attribute, $buffered);
+        }
+    }
+
+    /**
+     * Runs "$statement WHERE <key> IN (next batch of keys) AND (<where>)" until no row matches <where>: a retention
+     * purge of millions of rows becomes many short statements (each its own commit outside a transaction) instead
+     * of one that holds the SQLite write lock for half a minute while checkouts give up after busy_timeout.
+     * $statement is "DELETE FROM t" or "UPDATE t SET ..." (its own named parameters in $statementParams); every
+     * placeholder appears once per statement (MySQL native prepares). Returns the rows written.
+     */
+    public static function writeInBatches(string $table, string $statement, string $where, array $params = [],
+        array $statementParams = [], string $key = 'id', int $batch = 1000, ?PDO $db = null): int {
+        $db ??= self::get();
+        $batch = max(1, $batch);
+        $total = 0;
+        do {
+            $select = $db->prepare("SELECT {$key} FROM {$table} WHERE {$where} ORDER BY {$key} LIMIT {$batch}");
+            $select->execute($params);
+            $keys = $select->fetchAll(PDO::FETCH_COLUMN);
+            $select->closeCursor(); // an open read keeps a stale WAL snapshot: the write would fail once another request committed
+            if (!$keys) break;
+            $keyParams = [];
+            foreach (array_values($keys) as $i => $value) $keyParams[":batch_key{$i}"] = $value;
+            $write = $db->prepare("{$statement} WHERE {$key} IN (" . implode(', ', array_keys($keyParams)) . ") AND ({$where})");
+            $write->execute($statementParams + $params + $keyParams);
+            $written = $write->rowCount();
+            $total += $written;
+        } while (count($keys) === $batch && $written > 0);
+        return $total;
     }
 
     /**

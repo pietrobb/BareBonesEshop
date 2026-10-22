@@ -67,7 +67,9 @@ if ($page === 'invoice_pdf' || $page === 'delivery_note') {
     exit;
 }
 
-// Render page
+// Render page — buffered: a fatal error mid-render (e.g. memory limit) becomes a 500, never HTTP 200 with half a page.
+ob_start();
+register_shutdown_function('adminFatalPageGuard');
 $title = match($page) {
     'dashboard'  => I18n::t('admin.title.dashboard'),
     'sales'      => I18n::t('admin.title.sales'),

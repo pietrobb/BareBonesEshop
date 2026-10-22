@@ -382,6 +382,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.nav.cms_pages' => 'Páginas CMS',
     'admin.nav.audit' => 'Registro de auditoría',
     'admin.nav.gdpr' => 'RGPD',
+    'admin.error.page_failed' => 'No se ha podido mostrar la página. El error se ha registrado en el registro del servidor.',
     'admin.title.dashboard' => 'Panel',
     'admin.title.sales' => 'Resumen de ventas',
     'admin.title.products' => 'Productos',
