@@ -344,19 +344,23 @@ class JobQueue {
     }
 
     /**
-     * File backend only (empty for the database and Redis backends): every job file in pending/,
-     * processing/, failed/ and completed/ with its state. Read by the GDPR export.
+     * File backend only (empty for the database and Redis backends): the job files in pending/,
+     * processing/, failed/ and completed/ that $keep accepts, with their state. Read by the GDPR
+     * export. Files are streamed and filtered one by one: completed/ keeps a week of every store's
+     * jobs, so collecting them all first would exhaust a 128 MB request.
      *
+     * @param callable(array): bool $keep
      * @return list<array{state: string, job: array}>
      */
-    public static function fileJobs(): array {
+    public static function fileJobs(callable $keep): array {
         if (self::backend() !== null) return [];
         $jobs = [];
         foreach (self::FILE_STATES as $state) {
-            foreach (glob(self::dir() . '/' . $state . '/*.json') ?: [] as $file) {
-                $job = self::readJobFile($file);
-                if ($job !== null) $jobs[] = ['state' => $state, 'job' => $job];
-            }
+            $dir = self::dir() . '/' . $state;
+            self::eachJobFileName($dir, static function (string $name) use (&$jobs, $keep, $state, $dir): void {
+                $job = self::readJobFile("{$dir}/{$name}");
+                if ($job !== null && $keep($job)) $jobs[] = ['state' => $state, 'job' => $job];
+            });
         }
         return $jobs;
     }
