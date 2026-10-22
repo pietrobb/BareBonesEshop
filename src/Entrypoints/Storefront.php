@@ -78,7 +78,7 @@ switch ($page) {
     case 'product':
         $slug = Security::clean($_GET['slug'] ?? '');
         $product = Products::bySlug($slug);
-        if ($product) StorefrontSeo::redirectToCanonical($slug, (string)I18n::product($product)['slug'], 'product');
+        if ($product) StorefrontSeo::redirectToCanonical($slug, (string)I18n::product($product)['slug'], 'product', (int)$product['id']);
         if (!$product) {
             [$content, $title] = renderUnavailableProduct($slug);
             break;

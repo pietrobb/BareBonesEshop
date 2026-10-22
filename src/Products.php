@@ -9,23 +9,28 @@ class Products {
      */
     public static function bySlug(string $slug): ?array {
         $db = Db::get();
+        $store = StoreContext::current()->catalogId();
+        $registered = "SELECT p.* FROM slug_registry sr
+            JOIN products p ON p.id = sr.entity_id
+            WHERE sr.slug = :slug AND sr.entity = 'product'
+              AND sr.store_id = :store AND p.store_id = :product_store AND p.status = 'active'";
 
-        // Direct slug match first
+        // The current language's slug first: it is the canonical URL the storefront links and redirects to, and it
+        // may be another product's base slug (similar products across languages); base first would loop or hijack.
+        $stmt = $db->prepare($registered . ' AND sr.locale = :locale LIMIT 1');
+        $stmt->execute([':slug' => $slug, ':store' => $store, ':product_store' => $store, ':locale' => I18n::locale()]);
+        $product = $stmt->fetch();
+        if ($product && (string)(I18n::product($product)['slug'] ?? '') === $slug) return $product;
+
+        // Direct slug match
         $stmt = $db->prepare("SELECT * FROM products WHERE slug = :slug AND store_id = :store AND status = 'active'");
-        $stmt->execute([':slug' => $slug, ':store' => StoreContext::current()->catalogId()]);
+        $stmt->execute([':slug' => $slug, ':store' => $store]);
         $product = $stmt->fetch();
 
         if ($product) return $product;
 
-        // Check slug_registry for locale-specific slugs
-        $stmt = $db->prepare("
-            SELECT p.* FROM slug_registry sr
-            JOIN products p ON p.id = sr.entity_id
-            WHERE sr.slug = :slug AND sr.entity = 'product'
-              AND sr.store_id = :store AND p.store_id = :product_store AND p.status = 'active'
-            LIMIT 1
-        ");
-        $store = StoreContext::current()->catalogId();
+        // Another language's (or an old) slug
+        $stmt = $db->prepare($registered . ' LIMIT 1');
         $stmt->execute([':slug' => $slug, ':store' => $store, ':product_store' => $store]);
         return $stmt->fetch() ?: null;
     }
