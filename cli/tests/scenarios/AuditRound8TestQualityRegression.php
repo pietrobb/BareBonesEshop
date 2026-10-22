@@ -141,3 +141,9 @@ assert_equals([true, false, false, true], [
     DigitalDelivery::resolve($r8qOpen) !== null, DigitalDelivery::resolve($r8qSpent) !== null,
     DigitalDelivery::resolve($r8qExpired) !== null, DigitalDelivery::resolve($r8qForever) !== null,
 ], 'R8 tests: resolve — one download left, limit spent, expired, unlimited');
+
+// Empty checkout (the CI WebKit axe failure): the message already ends with a full stop, and the in-text link must not
+// be told apart from the text by colour alone (axe link-in-text-block, 1.92:1 against #333).
+$r8qEmpty = Template::render('storefront/checkout-empty', ['breadcrumbs' => [], 'message' => 'Váš košík je prázdny.', 'home_url' => '/', 'continue_label' => 'Pokračovať v nákupe', 't' => I18n::all()]);
+assert_true(!str_contains($r8qEmpty, '..') && (bool)preg_match('/<a [^>]*text-decoration:\s*underline[^>]*>Pokračovať v nákupe<\/a>/u', $r8qEmpty),
+    'R8 tests: the empty checkout has one full stop and an underlined continue-shopping link');
