@@ -96,6 +96,11 @@ class LocalStorage implements ImageVariantStorageAdapter {
             throw new \RuntimeException("Unsupported image format: {$ext}");
         }
 
+        // GD ignores EXIF and the copy is written without it: turn the pixels the way the original displays.
+        if ($ext === 'jpg' || $ext === 'jpeg') {
+            $src = self::upright($src, ImageMetadata::jpegOrientation((string)file_get_contents($srcPath)));
+        }
+
         $srcW = imagesx($src);
         $srcH = imagesy($src);
 
@@ -103,7 +108,6 @@ class LocalStorage implements ImageVariantStorageAdapter {
         $ratio = min($width / $srcW, $height / $srcH);
         if ($ratio >= 1) {
             // Image already smaller, just copy original
-            imagedestroy($src);
             return $this->url($path, 'full');
         }
 
@@ -119,7 +123,6 @@ class LocalStorage implements ImageVariantStorageAdapter {
         }
 
         imagecopyresampled($dst, $src, 0, 0, 0, 0, $dstW, $dstH, $srcW, $srcH);
-        imagedestroy($src);
 
         // Determine variant name from size
         $variantName = 'custom';
@@ -145,7 +148,6 @@ class LocalStorage implements ImageVariantStorageAdapter {
             default => false,
         };
         if (!$written) {
-            imagedestroy($dst);
             throw new \RuntimeException("Cannot write resized image for format: {$ext}");
         }
 
@@ -154,13 +156,20 @@ class LocalStorage implements ImageVariantStorageAdapter {
             $webpFile = ($dir !== '.' ? $dir . '/' : '') . $base . '-' . $variantName . '.webp';
             $webpPath = $this->safePath($webpFile);
             if (!imagewebp($dst, $webpPath, 80)) {
-                imagedestroy($dst);
                 throw new \RuntimeException("Cannot write WebP image variant: {$webpFile}");
             }
         }
-        imagedestroy($dst);
 
         return $this->baseUrl . '/' . $outFile;
+    }
+
+    /** The image as displayed for an EXIF orientation (2-8 mirror and/or rotate; imagerotate turns counter-clockwise). */
+    private static function upright(\GdImage $image, int $orientation): \GdImage {
+        $rotate = [3 => 180, 5 => 270, 6 => 270, 7 => 90, 8 => 90][$orientation] ?? 0;
+        if ($rotate !== 0) $image = imagerotate($image, $rotate, 0) ?: $image;
+        if (in_array($orientation, [2, 5, 7], true)) imageflip($image, IMG_FLIP_HORIZONTAL);
+        if ($orientation === 4) imageflip($image, IMG_FLIP_VERTICAL);
+        return $image;
     }
 
     /** Generate all standard variants for an uploaded image */

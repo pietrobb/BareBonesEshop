@@ -63,11 +63,12 @@ $db->exec("UPDATE payment_methods SET provider='mock' WHERE code='card'");
 $stripeKey = (string)($config['stripe_secret_key'] ?? '');
 $stripeTest = str_starts_with($stripeKey, 'sk_test_') || str_starts_with($stripeKey, 'rk_test_');
 if ($stripeTest) {
-    $db->exec("INSERT INTO payment_methods (code, provider, name, description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, requires_online, active, sort_order)
-        SELECT 'card_stripe_test', 'stripe', 'Card (Stripe test mode)', description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, 1, 1, sort_order + 1
+    // Every provider scope has its own 'card' row (the CZ/HU/PL price lists add theirs), so each copy keeps its store_id.
+    $db->exec("INSERT INTO payment_methods (store_id, code, provider, name, description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, requires_online, active, sort_order)
+        SELECT store_id, 'card_stripe_test', 'stripe', 'Card (Stripe test mode)', description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, 1, 1, sort_order + 1
         FROM payment_methods WHERE code = 'card'");
-    $db->exec("INSERT INTO payment_method_countries (method_code, country) SELECT 'card_stripe_test', country FROM payment_method_countries WHERE method_code = 'card'");
-    $db->exec("INSERT INTO payment_method_shipping (method_code, shipping_method_code) SELECT 'card_stripe_test', shipping_method_code FROM payment_method_shipping WHERE method_code = 'card'");
+    $db->exec("INSERT INTO payment_method_countries (store_id, method_code, country) SELECT store_id, 'card_stripe_test', country FROM payment_method_countries WHERE method_code = 'card'");
+    $db->exec("INSERT INTO payment_method_shipping (store_id, method_code, shipping_method_code) SELECT store_id, 'card_stripe_test', shipping_method_code FROM payment_method_shipping WHERE method_code = 'card'");
 }
 
 if (!defined('BB_TEST_LOAD_API_ONLY')) define('BB_TEST_LOAD_API_ONLY', true);

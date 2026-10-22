@@ -46,10 +46,11 @@ class PacketaShipping implements ShippingLifecycleAdapter
         $codWanted = !empty($params['cod']);
         // The built-in tiers, the COD fee and SHIP_PACKETA_FREE_ABOVE are EUR cents; other store
         // currencies are quoted only from the store's own shipping_rates rows (entered in that currency).
-        $eur = strtoupper((string)($params['currency'] ?? 'EUR')) === 'EUR';
+        $currency = strtoupper((string)($params['currency'] ?? 'EUR'));
+        $eur = $currency === 'EUR';
 
         // Coverage first: free shipping is never offered to a country Packeta does not serve.
-        $price = $this->lookupDbRate($country, $weightG) ?? ($eur ? $this->fallbackRate($country, $weightG) : null);
+        $price = $this->lookupDbRate($country, $weightG, $currency) ?? ($eur ? $this->fallbackRate($country, $weightG) : null);
         if ($price === null) {
             return []; // carrier does not service this country (or has no price in this currency)
         }
@@ -65,7 +66,7 @@ class PacketaShipping implements ShippingLifecycleAdapter
             ]];
         }
 
-        $codSurcharge = ($codWanted && $this->supportsCOD()) ? $this->codSurcharge($country, $eur) : 0;
+        $codSurcharge = ($codWanted && $this->supportsCOD()) ? $this->codSurcharge($country, $currency) : 0;
 
         return [[
             'carrier'       => $this->carrierId(),
@@ -220,9 +221,9 @@ class PacketaShipping implements ShippingLifecycleAdapter
         return $this->pointsDir . '/branch-' . $this->assertCountry($country) . '.json';
     }
 
-    private function lookupDbRate(string $country, int $weightG): ?int
+    private function lookupDbRate(string $country, int $weightG, string $currency): ?int
     {
-        if (!StoreContext::current()->usesProviderPrices()) return null;
+        if (!StoreContext::current()->usesProviderPrices($currency)) return null;
         try {
             $db   = Db::get();
             $stmt = $db->prepare("
@@ -239,9 +240,9 @@ class PacketaShipping implements ShippingLifecycleAdapter
         }
     }
 
-    private function lookupDbCodSurcharge(string $country): ?int
+    private function lookupDbCodSurcharge(string $country, string $currency): ?int
     {
-        if (!StoreContext::current()->usesProviderPrices()) return null;
+        if (!StoreContext::current()->usesProviderPrices($currency)) return null;
         try {
             $db   = Db::get();
             $stmt = $db->prepare("
@@ -274,10 +275,10 @@ class PacketaShipping implements ShippingLifecycleAdapter
         return null;
     }
 
-    private function codSurcharge(string $country, bool $eur = true): int
+    private function codSurcharge(string $country, string $currency): int
     {
-        // The 1 EUR default only applies to EUR stores; other currencies use the store's own row.
-        return $this->lookupDbCodSurcharge($country) ?? ($eur ? 100 : 0);
+        // The 1 EUR default only applies to EUR carts; other currencies use the store's own row.
+        return $this->lookupDbCodSurcharge($country, $currency) ?? ($currency === 'EUR' ? 100 : 0);
     }
 
     private function label(string $country): string

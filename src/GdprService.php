@@ -882,8 +882,8 @@ class GdprService {
     private static function customerFileJobs(string $email, array $ownership, array $orderIds): array {
         if ($email === '') return [];
         $store = StoreContext::current()->id();
-        return array_values(array_filter(JobQueue::fileJobs(), static fn(array $file): bool =>
-            self::fileJobInStore($file['job'], $store) && self::jobBelongsToCustomer($file['job']['payload'] ?? null, $email, $ownership, $orderIds)));
+        return JobQueue::fileJobs(static fn(array $job): bool =>
+            self::fileJobInStore($job, $store) && self::jobBelongsToCustomer($job['payload'] ?? null, $email, $ownership, $orderIds));
     }
 
     /** Rewrites the e-mail fields of the customer's file-backend jobs; returns the number of files rewritten. */

@@ -311,6 +311,21 @@ nginx PHP fallback when `operations.nginx_config` is set).
     as its own money (4,99 Kč shipping): it gets only carriers with their own prices in its currency and
     payment methods without fixed amounts. **Give such a store its own `provider_scope`** with shipping
     methods and payment methods priced in its currency.
+  - **The sample CZ, HU and PL stores have their own price lists** (they offered only personal pickup and
+    fee-less payments). Migration `20261022230000_currency_price_lists` seeds the provider scopes `cz`,
+    `hu` and `pl` with pickup, Packeta, GLS, card, bank transfer and cash on delivery priced in CZK, HUF
+    and PLN (a scope that already has a shipping or payment method is left alone), and the sample
+    `stores.json` points those stores at them. An existing installation keeps its `stores.json`: set the
+    store's `provider_scope` to `cz` / `hu` / `pl` to use the seeded price list (review the amounts in
+    admin → Shipping / Payments first), or keep sharing the EUR scope. The USD sample store still shares it.
+    A price list is charged only to a cart in its currency - the products' currency, which can differ from
+    the store's: EUR goods of the shared catalog in the CZ store get the carriers' EUR rates, never the
+    CZK amounts as euros.
+  - **`tax.json` and `src/Tax.php` are removed.** VAT rates come from `VatService`; the file's stale
+    country rates (SK 20 %) were no longer read. Its only setting still in use, `prices_include_tax`, is
+    a `config.php` key (default `true`). A shop that set `"prices_include_tax": false` in `tax.json`
+    must set `'prices_include_tax' => false` in `config.php`; it matters only for legacy direct
+    `Orders::create()` callers that pass net prices with a separate `tax_amount`.
   - A credit note paid back by hand (order without a payment id) counts as refunded: the order can no
     longer be refunded for that amount a second time.
   - SQLite: transactions take the write lock when they begin (`BEGIN IMMEDIATE`, `ShopPDO`), so a

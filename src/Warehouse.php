@@ -481,15 +481,44 @@ class Warehouse {
     }
 
     /**
-     * Manual/import stock edit expressed as "available" (what products.stock shows): the difference
-     * is booked as an adjustment on the default warehouse. Returns false without a default warehouse.
+     * Manual/import stock edit expressed as "available" (what products.stock shows, summed over all
+     * warehouses). An increase is booked on the default warehouse; a decrease takes free stock from the
+     * default warehouse first, then from the others by ascending priority, never below reservations.
+     * Returns false without a default warehouse.
      */
     public static function setAvailable(string $sku, int $available, string $movementType = 'manual_adjustment', ?string $referenceType = null): bool {
         if ($available < 0) throw new InvalidArgumentException('Stock count cannot be negative');
         $warehouse = self::defaultWarehouse();
         if (!$warehouse) return false;
-        $delta = $available - self::totalAvailable($sku);
-        if ($delta !== 0) self::adjustStock((int)$warehouse['id'], $sku, $delta, $movementType, $referenceType);
+        $defaultId = (int)$warehouse['id'];
+        $db = Db::get();
+        $ownsTransaction = !$db->inTransaction();
+        if ($ownsTransaction) $db->beginTransaction();
+        try {
+            $before = self::totalAvailable($sku);
+            $delta = $available - $before;
+            if ($delta > 0) {
+                self::adjustStock($defaultId, $sku, $delta, $movementType, $referenceType);
+            } elseif ($delta < 0) {
+                $rows = self::stockBySku($sku);
+                usort($rows, static fn(array $a, array $b): int =>
+                    [(int)$a['id'] !== $defaultId, (int)$a['priority']] <=> [(int)$b['id'] !== $defaultId, (int)$b['priority']]);
+                $remaining = -$delta;
+                foreach ($rows as $row) {
+                    $take = min($remaining, (int)$row['qty'] - (int)$row['reserved']);
+                    if ($take <= 0) continue;
+                    self::applyAdjustment((int)$row['id'], $sku, -$take, $movementType, $referenceType, null, null);
+                    $remaining -= $take;
+                    if ($remaining === 0) break;
+                }
+                if ($remaining > 0) throw new RuntimeException("Adjustment would violate reservations for SKU: {$sku}");
+                self::recordAdjusted($sku, $before, $movementType, $referenceType);
+            }
+            if ($ownsTransaction) $db->commit();
+        } catch (Throwable $e) {
+            if ($ownsTransaction && $db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
         return true;
     }
 

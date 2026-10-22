@@ -127,6 +127,13 @@ jobs:
           curl -fsS -o /dev/null -w 'storefront %{http_code}\n' http://localhost:8080/
           $compose exec -T php php -r 'require "src/autoload.php"; $s = new LocalStorage([]); echo $s->store("ci/probe/pixel.png", base64_decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")), "\n";'
           curl -fsS -o /dev/null -w 'uploaded image %{http_code}\n' http://localhost:8080/uploads/ci/probe/pixel.png
+          # Files nginx serves itself carry the security headers; an upload is sandboxed; a PHP page has one CSP.
+          curl -fsS -D /tmp/upload-headers.txt -o /dev/null http://localhost:8080/uploads/ci/probe/pixel.png
+          grep -qi '^x-content-type-options: nosniff' /tmp/upload-headers.txt
+          grep -qi "^content-security-policy: default-src 'none'.*sandbox" /tmp/upload-headers.txt
+          curl -fsS -D /tmp/asset-headers.txt -o /dev/null http://localhost:8080/themes/default/assets/storefront.css
+          grep -qi '^x-content-type-options: nosniff' /tmp/asset-headers.txt
+          test "$(curl -fsS -D - -o /dev/null http://localhost:8080/ | grep -ci '^content-security-policy:')" = 1
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/config.php)" != 200
           $compose exec -T php php cli/setup.php doctor | tail -n 25
           $compose exec -T php php cli/setup.php doctor --json | php -r '$d = json_decode(stream_get_contents(STDIN), true); $f = array_column(array_filter($d["checks"], fn($c) => $c["status"] === "fail"), "name"); echo implode(",", $f), "\n"; exit($f === [] ? 0 : 1);'

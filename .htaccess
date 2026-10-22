@@ -76,6 +76,23 @@ RewriteRule ^ - [L]
 RewriteRule ^(.+)$ redirect.php?path=/$1 [QSA,L]
 
 # ============================================================
+# Security headers for files Apache serves itself. PHP responses send their own
+# (Security::headers(), with the page CSP), so the block does not match .php.
+# An upload is sandboxed: an SVG opened directly cannot run script on the shop origin.
+# ============================================================
+<IfModule mod_headers.c>
+    <FilesMatch "\.(?i:css|js|mjs|map|jpe?g|png|gif|webp|avif|svg|ico|woff2?|ttf|otf|txt|csv|pdf|xml|json|webmanifest)$">
+        Header always set X-Content-Type-Options "nosniff"
+        Header always set Referrer-Policy "strict-origin-when-cross-origin"
+        Header always set X-Frame-Options "DENY"
+        Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" "expr=%{HTTPS} == 'on'"
+    </FilesMatch>
+    <If "%{REQUEST_FILENAME} =~ m#/uploads/#">
+        Header always set Content-Security-Policy "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox"
+    </If>
+</IfModule>
+
+# ============================================================
 # Compression
 # ============================================================
 <IfModule mod_deflate.c>

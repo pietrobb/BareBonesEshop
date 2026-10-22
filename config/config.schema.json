@@ -31,6 +31,7 @@
     "structured_log_max_files": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Rotated structured log files kept (application.jsonl.1 … .N)."},
     "default_locale": {"type": "string", "pattern": "^[a-z]{2}(?:[-_][A-Za-z]{2})?$"},
     "default_currency": {"type": "string", "pattern": "^[a-z]{3}$"},
+    "prices_include_tax": {"type": "boolean"},
     "per_page": {"type": "integer", "minimum": 1, "maximum": 200},
     "cache_dir": {"type": "string", "minLength": 1},
     "cache_ttl": {"type": "integer", "minimum": 0},

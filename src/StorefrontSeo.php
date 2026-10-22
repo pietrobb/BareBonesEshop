@@ -50,10 +50,14 @@ final class StorefrontSeo
         return $page > 1 ? $path . (str_contains($path, '?') ? '&' : '?') . 'pg=' . $page : $path;
     }
 
-    /** A product/category reached by an old (SlugRepair) or another language's slug: 301 to its canonical URL. */
-    public static function redirectToCanonical(string $requested, string $canonical, string $route): void
+    /**
+     * A product/category reached by an old (SlugRepair) or another language's slug: 301 to its canonical URL. A product
+     * ($productId) is redirected only to a slug that shows it: one taken by another product must not redirect (or loop).
+     */
+    public static function redirectToCanonical(string $requested, string $canonical, string $route, int $productId = 0): void
     {
-        if (!in_array($_SERVER['REQUEST_METHOD'] ?? 'GET', ['GET', 'HEAD'], true)) return;
+        if (!in_array($_SERVER['REQUEST_METHOD'] ?? 'GET', ['GET', 'HEAD'], true) || $canonical === $requested) return;
+        if ($productId > 0 && (int)(Products::bySlug($canonical)['id'] ?? 0) !== $productId) return;
         $url = $route === 'product' ? StorefrontViewModel::productUrl($canonical) : StorefrontViewModel::categoryUrl($canonical);
         $target = SlugRepair::canonicalRedirect($requested, $canonical, $url, $_GET);
         if ($target === null) return;

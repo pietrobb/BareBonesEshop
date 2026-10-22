@@ -329,6 +329,48 @@ try {
 }
 assert_equals([['pending' => 0, 'processing' => 0, 'completed' => 0, 'failed' => 0], []], $r8sNoDir, 'R8 queue stats: missing queue directories count as empty');
 
+// GDPR export on the file queue: completed/ holds a week of every customer's jobs. They were all decoded into one array
+// before the customer's were picked out (about 3 KB each), so a busy shop's export died at 128 MB behind HTTP 200.
+$r8sGdprDir = sys_get_temp_dir() . '/bbe-r8-gdprjobs-' . bin2hex(random_bytes(4));
+$r8sGdprEmail = 'r8-gdpr-' . bin2hex(random_bytes(4)) . '@example.com';
+$r8sGdprStore = StoreContext::current()->id();
+@mkdir($r8sGdprDir . '/completed', 0777, true);
+@mkdir($r8sGdprDir . '/pending', 0777, true);
+$r8sGdprBody = str_repeat('Order confirmation line ', 100);
+for ($r8sI = 0; $r8sI < 6000; $r8sI++) {
+    file_put_contents(sprintf('%s/completed/%010d_r8g%05d.json', $r8sGdprDir, 5, $r8sI), json_encode(['id' => "g{$r8sI}", 'type' => 'email_send',
+        'payload' => ['to' => "other{$r8sI}@example.com", 'subject' => "Order {$r8sI}", 'body' => $r8sGdprBody, '_store_id' => $r8sGdprStore]]));
+}
+file_put_contents(sprintf('%s/pending/%010d_r8gmine.json', $r8sGdprDir, 5), json_encode(['id' => 'g-mine', 'type' => 'email_send', 'created_at' => '2026-10-22T00:00:00+00:00',
+    'payload' => ['to' => $r8sGdprEmail, 'subject' => 'Your order', '_store_id' => $r8sGdprStore]]));
+$r8sSavedQueue = array_map(static fn(ReflectionProperty $p) => $p->getValue(), $r8sQueueProps);
+// A guest the store knows (here by an abandoned cart): the merchant's access request for them reads the queue.
+Db::get()->prepare("INSERT INTO abandoned_carts (session_id, customer_email, store_id, created_at) VALUES ('r8-gdpr', ?, ?, '2026-10-22 00:00:00')")->execute([$r8sGdprEmail, $r8sGdprStore]);
+try {
+    JobQueue::setDir($r8sGdprDir);
+    $r8sGdprPeak = null;
+    if (function_exists('memory_reset_peak_usage')) {
+        memory_reset_peak_usage();
+        $r8sGdprPeak = memory_get_peak_usage();
+    }
+    $r8sGdprExport = GdprService::exportGuest($r8sGdprEmail);
+    $r8sGdprPeak = $r8sGdprPeak === null ? null : memory_get_peak_usage() - $r8sGdprPeak;
+} finally {
+    Db::get()->prepare("DELETE FROM abandoned_carts WHERE customer_email = ?")->execute([$r8sGdprEmail]);
+    foreach ($r8sQueueProps as $r8sI => $r8sProp) $r8sProp->setValue(null, $r8sSavedQueue[$r8sI]);
+    foreach (['completed', 'pending', ''] as $r8sSub) {
+        foreach (glob($r8sGdprDir . '/' . $r8sSub . '/*.json') ?: [] as $r8sF) @unlink($r8sF);
+        @rmdir(rtrim($r8sGdprDir . '/' . $r8sSub, '/'));
+    }
+}
+assert_equals([['g-mine', 'pending']], array_map(static fn(array $j): array => [$j['id'], $j['state']], array_values(array_filter($r8sGdprExport['queued_jobs'], static fn(array $j): bool => str_starts_with((string)$j['id'], 'g')))),
+    'R8 GDPR export: of 6000 unrelated queue files only the subject\'s own job is exported');
+if ($r8sGdprPeak === null) {
+    print "  [SKIP] R8 GDPR export memory: PHP " . PHP_VERSION . " has no memory_reset_peak_usage()\n";
+} else {
+    assert_true($r8sGdprPeak < 4 * 1048576, 'R8 GDPR export: 6000 unrelated queue files are streamed, not held in memory (peak grew ' . round($r8sGdprPeak / 1048576, 1) . ' MB)');
+}
+
 // A fatal error mid-page (here: memory limit) never ships as HTTP 200 with half a page.
 // Runs a PHP script with a 16 MB limit and no error display; returns [stdout, stderr].
 $r8sRunOom = static function (string $code): array {

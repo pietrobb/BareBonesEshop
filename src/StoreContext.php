@@ -137,10 +137,13 @@ class StoreContext {
     public function currency(): string { return (string)$this->config['currency']; }
     /**
      * Whether the provider scope's price lists (shipping rates, COD surcharges, free-shipping thresholds, payment
-     * fees and limits) are in this store's currency. They are entered in the currency of the store that owns the
-     * scope; a store sharing the scope in another currency must not charge those numbers as its own money.
+     * fees and limits) are in the currency being charged - the cart's, which is the products' currency and can differ
+     * from the store's; the store's when none is given. They are entered in the currency of the store that owns the
+     * scope and must never be charged as amounts of another currency.
      */
-    public function usesProviderPrices(): bool { return $this->providerCurrency === $this->currency(); }
+    public function usesProviderPrices(?string $chargeCurrency = null): bool {
+        return $this->providerCurrency === strtolower($chargeCurrency ?? $this->currency());
+    }
     public function legal(): array { return is_array($this->config['legal'] ?? null) ? $this->config['legal'] : []; }
     public function ossEnabled(): bool { return (bool)($this->config['oss_enabled'] ?? false); }
     public function config(): array { return $this->config; }

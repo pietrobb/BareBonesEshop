@@ -33,13 +33,14 @@ class GlsShipping implements ShippingAdapter
         $codWanted = !empty($params['cod']);
         // Built-in tiers, the COD fee and SHIP_GLS_FREE_ABOVE are EUR cents; other store currencies
         // are quoted only from the store's own shipping_rates rows (entered in that currency).
-        $eur = strtoupper((string)($params['currency'] ?? 'EUR')) === 'EUR';
+        $currency = strtoupper((string)($params['currency'] ?? 'EUR'));
+        $eur = $currency === 'EUR';
 
         if (!$this->servicesCountry($country)) {
             return [];
         }
 
-        $price = $this->lookupDbRate($country, $weightG) ?? ($eur ? $this->fallbackRate($country, $weightG) : null);
+        $price = $this->lookupDbRate($country, $weightG, $currency) ?? ($eur ? $this->fallbackRate($country, $weightG) : null);
         if ($price === null) return [];
 
         if ($eur && $subtotal >= $this->freeAboveCents && $subtotal > 0) {
@@ -53,7 +54,7 @@ class GlsShipping implements ShippingAdapter
             ]];
         }
 
-        $codSurcharge = ($codWanted && $this->supportsCOD()) ? ($eur ? $this->codSurcharge($country) : $this->lookupDbCodSurcharge($country)) : 0;
+        $codSurcharge = ($codWanted && $this->supportsCOD()) ? ($eur ? $this->codSurcharge($country) : $this->lookupDbCodSurcharge($country, $currency)) : 0;
 
         return [[
             'carrier'       => $this->carrierId(),
@@ -104,9 +105,9 @@ class GlsShipping implements ShippingAdapter
         return in_array($country, self::$EU_COUNTRIES, true);
     }
 
-    private function lookupDbRate(string $country, int $weightG): ?int
+    private function lookupDbRate(string $country, int $weightG, string $currency): ?int
     {
-        if (!StoreContext::current()->usesProviderPrices()) return null;
+        if (!StoreContext::current()->usesProviderPrices($currency)) return null;
         try {
             $db   = Db::get();
             $stmt = $db->prepare("
@@ -123,10 +124,10 @@ class GlsShipping implements ShippingAdapter
         }
     }
 
-    /** COD fee from the store's own GLS row (store currency); 0 when the row has none. */
-    private function lookupDbCodSurcharge(string $country): int
+    /** COD fee from the store's own GLS row (in the scope's currency); 0 when the row has none or the cart is in another. */
+    private function lookupDbCodSurcharge(string $country, string $currency): int
     {
-        if (!StoreContext::current()->usesProviderPrices()) return 0;
+        if (!StoreContext::current()->usesProviderPrices($currency)) return 0;
         try {
             $stmt = Db::get()->prepare("SELECT cod_surcharge FROM shipping_rates
                 WHERE carrier = 'gls' AND country = :country AND store_id = :store ORDER BY weight_from_g ASC LIMIT 1");

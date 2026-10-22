@@ -488,5 +488,13 @@
         "crlf": [
             "7bdb1671c4237c5396a45811867df54ef47ca40b33925e6d2923c9c69dd9f474"
         ]
+    },
+    "20261022230000_currency_price_lists": {
+        "lf": [
+            "549b0db0915613a15fafd126277159117a33bcd5c248b38490d42f5eda570f3a"
+        ],
+        "crlf": [
+            "bed148212279d2dea8f2dcb2e04bdf900b377cc339cb867d8233bd8705a9543b"
+        ]
     }
 }

@@ -42,6 +42,13 @@ if ($phase === 'setup') {
     $ids = array_flip($ids);
     // Registered like Import/ProductEditor do: the storefront resolves a translated slug through slug_registry.
     $db->prepare("INSERT INTO slug_registry (slug, locale, entity, entity_id, store_id) VALUES ('sfb-main-cs', 'cs', 'product', ?, 'default')")->execute([$ids['sfb-main']]);
+    // R8: similar products whose Czech slugs are each other's base slugs (sk "...-l" is cs "...", and back).
+    foreach ([['SFB-RED-L', 'sfb-red-l', 'SFB Red L', 'sfb-red', 'SFB Cervena A'], ['SFB-RED', 'sfb-red', 'SFB Red', 'sfb-red-l', 'SFB Cervena B']] as [$sku, $slug, $name, $csSlug, $csName]) {
+        $product->execute([$categoryId, $sku, $slug, $name, 1100, 'eur', '[]', json_encode(['cs' => ['slug' => $csSlug, 'name' => $csName]], JSON_THROW_ON_ERROR)]);
+        $db->prepare("INSERT INTO slug_registry (slug, locale, entity, entity_id, store_id) VALUES (?, 'cs', 'product', ?, 'default')")->execute([$csSlug, (int)$db->lastInsertId()]);
+    }
+    // ...and one whose (unregistered) Czech slug is another product's base slug.
+    $product->execute([$categoryId, 'SFB-HIJ', 'sfb-hij', 'SFB Hij', 1100, 'eur', '[]', json_encode(['cs' => ['slug' => 'sfb-few', 'name' => 'SFB Cervena H']], JSON_THROW_ON_ERROR)]);
     $relation = $db->prepare("INSERT INTO product_related_products (product_id, related_product_id, relation_type, sort_order) VALUES (?, ?, ?, ?)");
     for ($i = 1; $i <= 30; $i++) {
         $relation->execute([$ids['sfb-main'], $ids['sfb-p-' . $i], $i % 2 ? 'related' : 'accessory', $i]);
@@ -379,6 +386,17 @@ try {
     foreach (glob(dirname(TEST_CLI_DIR) . '/templates/legal/*/*.html') ?: [] as $sfbTemplate) {
         assert_true(preg_match('/<!--\s*legal-updated:\s*\d{4}-\d{2}-\d{2}\s*-->/', (string)file_get_contents($sfbTemplate)) === 1, 'Legal page: ' . basename(dirname($sfbTemplate)) . '/' . basename($sfbTemplate) . ' declares its legal-updated date');
     }
+
+    // --- R8: a translated slug that is another product's base slug: no 301 loop, each URL shows its own product ---
+    $sfbShown = static function (string $uri, string $slug) use ($sfbPage): string {
+        $r = $sfbPage(['script' => 'index.php', 'script_name' => '/index.php', 'uri' => $uri, 'get' => ['page' => 'product', 'slug' => $slug]]);
+        $out = (string)($r['output'] ?? '');
+        // The page's own product is in <title>; related products of the category appear in the body too.
+        return ($r['status'] ?? 0) . ' ' . (preg_match('#<title>[^<]*SFB Cervena ([ABH])#', $out, $m) ? $m[1] : '-');
+    };
+    assert_equals(['200 A', '200 B'], [$sfbShown('/cs/product/sfb-red', 'sfb-red'), $sfbShown('/cs/product/sfb-red-l', 'sfb-red-l')],
+        'R8 slugs: a Czech slug equal to another product\'s base slug shows its own product (was a 301 loop between the two URLs)');
+    assert_equals('200 H', $sfbShown('/cs/product/sfb-hij', 'sfb-hij'), 'R8 slugs: no 301 to a canonical slug that shows another product (was redirected to SFB Few)');
 
     // --- R7: cli/fix-slugs.php keeps the replaced slugs, and the storefront 301s them to the new URL (last: renames the fixture) ---
     [, $sfbFix, $sfbNoise] = $sfbRun('run', 'fix_slugs', ['store' => 'default', 'locale' => 'en']);

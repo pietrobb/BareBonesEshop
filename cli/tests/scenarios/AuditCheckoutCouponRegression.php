@@ -31,6 +31,7 @@ Pricing::setConfig(['cart_rules' => [
     ['type' => 'coupon', 'active' => true, 'code' => 'A132BIG', 'name' => 'A132 big spender', 'discount_type' => 'fixed', 'discount_value' => 500, 'min_subtotal' => 100000],
     ['type' => 'coupon', 'active' => true, 'code' => 'A132ONCE', 'name' => 'A132 single use', 'discount_type' => 'fixed', 'discount_value' => 300, 'max_uses' => 1],
     ['type' => 'coupon', 'active' => false, 'code' => 'A132OFF', 'name' => 'A132 inactive', 'discount_type' => 'fixed', 'discount_value' => 300],
+    ['type' => 'coupon', 'active' => true, 'code' => 'A132RACE', 'name' => 'A132 single use, raced', 'discount_type' => 'fixed', 'discount_value' => 300, 'max_uses' => 1],
 ]]);
 if ($phase === 'setup') {
     (new Migrator($db, $root . '/migrations', $dir . '/migrate-' . $driver . '.lock'))->apply();
@@ -73,14 +74,24 @@ $buyer = ['name' => 'A132 Buyer', 'email' => 'a132-buyer@example.test', 'phone' 
     'remove' => ['POST', $buyer + ['checkout' => '1', 'csrf_token' => $csrf, 'coupon_code' => 'A132SAVE', 'coupon_action' => 'remove']],
     'apply_no_csrf' => ['POST', $buyer + ['checkout' => '1', 'coupon_code' => 'A132SAVE', 'coupon_action' => 'apply']],
     'place' => ['POST', $buyer + ['checkout' => '1', 'csrf_token' => $csrf, 'coupon_code' => 'A132SAVE']],
+    'place_raced' => ['POST', $buyer + ['checkout' => '1', 'csrf_token' => $csrf, 'coupon_code' => 'A132RACE']],
 };
+// R8: a concurrent checkout takes the last use of A132RACE after this one priced it (the preview accepted the
+// code) and before this order claims it — the trigger is that winner, inside this order's transaction.
+if ($action === 'place_raced') {
+    $db->exec($driver === 'mysql'
+        ? "CREATE TRIGGER a132_race AFTER INSERT ON orders FOR EACH ROW INSERT INTO coupon_usage_counters (store_id, coupon_code, subject, uses) VALUES ('default', 'A132RACE', '', 1) ON DUPLICATE KEY UPDATE uses = 1"
+        : "CREATE TRIGGER a132_race AFTER INSERT ON orders BEGIN INSERT OR REPLACE INTO coupon_usage_counters (store_id, coupon_code, subject, uses) VALUES ('default', 'A132RACE', '', 1); END");
+    register_shutdown_function(static fn() => $db->exec('DROP TRIGGER a132_race'));
+}
 $_SERVER['REQUEST_METHOD'] = $method;
 $_GET = ['page' => 'checkout'];
 $_POST = $post;
 http_response_code(200);
 $orders = static fn(): array => $db->query("SELECT order_number, subtotal, discount_amount, total FROM orders WHERE customer_email = 'a132-buyer@example.test'")->fetchAll();
 $before = count($orders());
-$expected = ['discount' => I18n::price(-400, 'eur'), 'subtotal' => I18n::price(4000, 'eur')];
+$expected = ['discount' => I18n::price(-400, 'eur'), 'subtotal' => I18n::price(4000, 'eur'),
+    'race_refusal' => htmlspecialchars(sprintf(I18n::t('coupon_invalid'), 'A132RACE'), ENT_QUOTES), 'failed' => htmlspecialchars(I18n::t('checkout.failed'), ENT_QUOTES)];
 ob_start();
 register_shutdown_function(static function() use ($orders, $before, $expected): void {
     $out = '';
@@ -180,6 +191,11 @@ try {
         assert_true(count($r['new_orders']) === 1 && (int)($a132Order['subtotal'] ?? 0) === 4000 && (int)($a132Order['discount_amount'] ?? 0) === 400,
             "{$l}: the order placed with the shown coupon carries the same 400 discount (" . json_encode($r['new_orders'])
             . ($r['new_orders'] ? '' : ' ' . substr(trim(strip_tags((string)preg_replace('~^.*<main[^>]*>|</main>.*$~s', '', (string)$r['output']))), 0, 300)) . ')');
+
+        [$l, $r] = $a132Do('place_raced');
+        assert_true($r['code'] === 200 && $r['new_orders'] === [] && str_contains((string)$r['output'], $r['expected']['race_refusal'] ?? '-')
+            && !str_contains((string)$r['output'], $r['expected']['failed'] ?? '-'),
+            "{$l}: losing the last coupon use to a concurrent order is the coupon refusal, not a 503 checkout failure (HTTP {$r['code']}, " . json_encode($r['new_orders']) . ')');
 
         // The form's coupon attempts count against the coupon API's budget (10 per 10 minutes per client IP).
         $a132Throttled = array_filter(array_map(static fn(string $f): string => htmlspecialchars((string)((require $f)['coupon_too_many_attempts'] ?? ''), ENT_QUOTES, 'UTF-8'), glob(dirname(TEST_CLI_DIR) . '/lang/*.php')));

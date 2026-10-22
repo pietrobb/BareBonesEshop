@@ -124,11 +124,17 @@ class Rma {
 
     /**
      * Whether a customer may still return goods of $order: rma_return_window_days (default 14, the EU withdrawal
-     * period; 0 = no limit) after its delivery. An order without a recorded delivery time stays returnable.
+     * period; 0 = no limit) after its delivery. A cancelled order is never delivered: its shipped units count from
+     * their latest carrier-reported delivery, else from their latest shipment. Without any date it stays returnable.
      */
     public static function withinReturnWindow(array $order, ?int $now = null): bool {
         $days = (int)(Security::config()['rma_return_window_days'] ?? self::DEFAULT_RETURN_WINDOW_DAYS);
         $deliveredAt = (string)($order['delivered_at'] ?? '');
+        if ($deliveredAt === '' && ($order['status'] ?? '') === 'cancelled') {
+            $stmt = Db::get()->prepare('SELECT COALESCE(MAX(delivered_at), MAX(shipped_at)) FROM shipments WHERE order_id = ? AND shipped_at IS NOT NULL');
+            $stmt->execute([(int)($order['id'] ?? 0)]);
+            $deliveredAt = (string)($stmt->fetchColumn() ?: '');
+        }
         if ($days <= 0 || $deliveredAt === '') return true;
         $delivered = strtotime($deliveredAt . ' UTC');
         return $delivered === false || ($now ?? time()) <= $delivered + $days * 86400;

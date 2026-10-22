@@ -43,9 +43,10 @@ class CheckoutService {
         } elseif ($vatId !== '') {
             $vatIdStatus = 'unverified';
         }
-        $digitalOnly = self::isDigitalOnly(self::availableItems(Cart::enriched()['items'] ?? []));
+        $vatCart = Cart::enriched();
+        $digitalOnly = self::isDigitalOnly(self::availableItems($vatCart['items'] ?? []));
         // Goods collected in the seller's own store are supplied there, whatever the buyer's address.
-        $rate = $digitalOnly ? null : ShippingService::selectRate($shippingMethod, $country, 0);
+        $rate = $digitalOnly ? null : ShippingService::selectRate($shippingMethod, $country, 0, 0, false, 0, 0, isset($vatCart['currency']) ? (string)$vatCart['currency'] : null);
         $taxProviderCode = Adapters::defaultProviderCode('tax');
         $context = [
             'seller_country'        => $sellerCountry,
@@ -120,6 +121,12 @@ class CheckoutService {
      * @return array{methods: list<array>, selected: ?array, shipping: int}
      */
     public static function paymentPreview(array $cart, int $goods, string $country, string $currency, string $method, int $shipping, bool $freeShipping, string $postedPayment, ?int $customerId, ?array $vat = null): array {
+        if ($method !== '' && $goods + $shipping === 0 && self::isDigitalOnly($cart)) {
+            // As execute(): a digital order with nothing to pay is placed with the fee-less free method.
+            if (!function_exists('freeDigitalPayment')) require_once __DIR__ . '/Http/ApiHandlers.php';
+            $free = freeDigitalPayment();
+            return ['methods' => [$free], 'selected' => $free, 'shipping' => 0];
+        }
         $methods = $method !== '' ? PaymentService::availableMethods($country, $currency, $goods + $shipping, $method, $customerId) : [];
         $selected = array_values(array_filter($methods, static fn(array $m): bool => (string)$m['code'] === $postedPayment))[0] ?? $methods[0] ?? null;
         $charged = $freeShipping ? self::freeShippingCharge($cart, $goods, $country, $method, $selected, $vat, $currency) : self::summaryShipping($cart, $goods, $country, $method, $selected, $shipping, $vat, $currency);

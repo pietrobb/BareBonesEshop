@@ -12,6 +12,8 @@
 - `src/Tax.php` — rate lookup from `tax.json`, VAT extraction from a gross price, `orderBreakdown()` per rate.
 - `tax.json` — flat per-country rates (SK 20, CZ 21, DE 19, AT 20, PL 23, HU 27) + product_tax_class map.
   ⚠️ SK has `standard: 20` in `tax.json` — since 1 Jan 2025 the SK standard rate is **23 %**. Needs a refresh.
+  (Round 8, 2026-10: `src/Tax.php` and `tax.json` are removed — rates come from `VatService`; the only flag still
+  read, `prices_include_tax`, is a `config.php` key.)
 - `invoices` schema — `vat_rate REAL`, `vat_amount INTEGER`, `subtotal_net`, `reverse_charge_text`, `legal_seller_*`, `legal_customer_*`. A reverse-charge text already exists, but the logic is primitive.
 - `stores.json` — per-store `legal.country`, `legal.ic_dph` (the seller's VAT ID), `currency`.
 - `customers` table — **has no** `vat_id` or `vat_validated_at` (missing for B2B).

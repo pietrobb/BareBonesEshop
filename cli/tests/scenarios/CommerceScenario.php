@@ -180,61 +180,6 @@ $methods2 = Shipping::availableMethods('US', 3000);
 assert_equals(1, count($methods2), 'Only standard for US');
 
 // ============================================================
-// TEST 22: Tax
-// ============================================================
-echo "\n--- Test 22: Tax ---\n";
-
-Tax::setConfig([
-    'default_rate' => 20,
-    'prices_include_tax' => true,
-    'rates' => [
-        'SK' => ['standard' => 20, 'reduced' => 10, 'zero' => 0],
-        'DE' => ['standard' => 19, 'reduced' => 7],
-        'US' => ['standard' => 0],
-    ],
-    'product_tax_class' => [
-        'default' => 'standard',
-        'food' => 'reduced',
-        'books' => 'reduced',
-    ],
-]);
-
-// Basic rate lookup
-assert_equals(20.0, Tax::rate('SK'), 'SK standard rate = 20%');
-assert_equals(19.0, Tax::rate('DE'), 'DE standard rate = 19%');
-assert_equals(0.0, Tax::rate('US'), 'US standard rate = 0%');
-assert_equals(10.0, Tax::rate('SK', 'food'), 'SK reduced rate = 10%');
-
-// Extract tax from gross
-$tax = Tax::extractFromGross(1200, 'SK');  // 1200 / 1.20 = 1000, tax = 200
-assert_equals(200, $tax, 'Tax extracted from gross: 1200 → 200');
-
-$tax2 = Tax::extractFromGross(1190, 'DE');  // 1190 / 1.19 = 1000, tax = 190
-assert_equals(190, $tax2, 'Tax extracted from gross DE: 1190 → 190');
-
-// Zero tax country
-$tax3 = Tax::extractFromGross(1000, 'US');
-assert_equals(0, $tax3, 'No tax for US');
-
-// Net from gross
-$net = Tax::netFromGross(1200, 'SK');
-assert_equals(1000, $net, 'Net from gross: 1200 → 1000');
-
-// Calculate on net
-$taxOnNet = Tax::calculateOnNet(1000, 'SK');
-assert_equals(200, $taxOnNet, 'Tax on net: 1000 → 200');
-
-// Order breakdown
-$items = [
-    ['total' => 2400, 'tax_class' => 'default'],
-    ['total' => 1100, 'tax_class' => 'food'],
-];
-$breakdown = Tax::orderBreakdown($items, 'SK');
-assert_equals(500, $breakdown['total_tax'], 'Order tax: 400 (standard) + 100 (reduced) = 500');
-assert_true(isset($breakdown['breakdown']['20.0%']), 'Breakdown includes 20% rate');
-assert_true(isset($breakdown['breakdown']['10.0%']), 'Breakdown includes 10% rate');
-
-// ============================================================
 // TEST 23: Orders + OrderWorkflow
 // ============================================================
 echo "\n--- Test 23: Orders + Workflow ---\n";
@@ -908,6 +853,15 @@ $expectedTotal = max(0, $expectedSubtotal - 500) + 399;
 assert_equals($expectedSubtotal, (int)$couponOrder['subtotal'], 'Coupon order: subtotal correct');
 assert_equals(500, (int)$couponOrder['discount_amount'], 'Coupon discount persisted in order');
 assert_equals($expectedTotal, (int)$couponOrder['total'], 'Coupon order: total = subtotal - discount + shipping (tax included in gross)');
+// Round 8: the flag lived in the root tax.json next to stale country rates nothing read (SK 20 %); it is a config key now.
+Security::config();
+$netCfgProp = new ReflectionProperty('Security', 'cfg');
+$netSavedCfg = $netCfgProp->getValue();
+$netCfgProp->setValue(null, ['prices_include_tax' => false] + (array)$netSavedCfg);
+$netOrder = Orders::byId(Orders::create($couponCartItems, ['email' => 'coupon-net@test.com'] + $couponCustomer, 'cod'));
+$netCfgProp->setValue(null, $netSavedCfg);
+assert_equals($expectedTotal + 200, (int)$netOrder['total'], 'R8 tax: config prices_include_tax false adds the tax to the total of a net-priced legacy order');
+assert_true(!file_exists(TEST_CLI_DIR . '/../tax.json'), 'R8 tax: the stale root tax.json is removed');
 
 // ============================================================
 // TEST 35: Pricing edge cases — zero price, zero compare_price

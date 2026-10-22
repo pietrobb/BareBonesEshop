@@ -151,8 +151,8 @@ class Orders {
                 $couponDiscount = $customer['coupon_discount'] ?? 0;
                 $paymentFee = $customer['payment_fee'] ?? 0;
                 // Legacy direct callers may still supply net prices. The storefront
-                // always uses the snapshot path and therefore never reads Tax here.
-                $taxInTotal = Tax::pricesIncludeTax() ? 0 : $taxAmount;
+                // always uses the snapshot path and therefore never reads prices_include_tax here.
+                $taxInTotal = (Security::config()['prices_include_tax'] ?? true) ? 0 : $taxAmount;
                 $total = max(0, $subtotal - $couponDiscount) + $shippingCost + $taxInTotal + $paymentFee;
 
                 $vatTotal = 0;

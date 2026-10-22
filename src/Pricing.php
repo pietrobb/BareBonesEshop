@@ -425,7 +425,7 @@ class Pricing {
      * Record a coupon use after successful order, inside the caller's order transaction.
      * max_uses and per_customer are claimed with a conditional counter UPDATE, so concurrent
      * redemptions serialize on the counter row instead of racing a COUNT + INSERT.
-     * Throws \RuntimeException if a limit is exhausted (caller must rollback).
+     * Throws CouponRejectedException if a limit is exhausted (caller must rollback).
      */
     public static function recordCouponUse(string $code, int $orderId, string $email, int $discount): void {
         $cfg = self::config();
@@ -444,10 +444,10 @@ class Pricing {
             if ($promotion !== null) $limits = Promotions::couponLimits($promotion);
         }
         if (!empty($limits['max_uses']) && !self::claimCouponUse($upperCode, null, (int)$limits['max_uses'])) {
-            throw new \RuntimeException("Coupon {$upperCode} exceeded max_uses limit");
+            throw new \CouponRejectedException("Coupon {$upperCode} exceeded max_uses limit");
         }
         if (!empty($limits['per_customer']) && !self::claimCouponUse($upperCode, $email, (int)$limits['per_customer'])) {
-            throw new \RuntimeException("Coupon {$upperCode} already used by this customer");
+            throw new \CouponRejectedException("Coupon {$upperCode} already used by this customer");
         }
 
         $db = Db::get();
