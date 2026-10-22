@@ -45,12 +45,18 @@ class Withdrawal {
         return $delivered === false || ($now ?? time()) <= $delivered + max(self::PERIOD_DAYS, $configured) * 86400;
     }
 
-    /** Order lines not yet covered by an earlier withdrawal statement, with their full quantity. */
+    /**
+     * Order lines not yet covered by an earlier withdrawal statement, with their full quantity. Digital content whose
+     * supply began with the consumer's consent to lose the right (ConsentService::DIGITAL_KEY) cannot be withdrawn
+     * from (art. 16(m)); without that consent it stays withdrawable.
+     */
     public static function openItems(array $order): array {
         $withdrawn = [];
         foreach (self::forOrder((int)$order['id']) as $statement) {
             foreach ((array)(json_decode((string)$statement['items'], true) ?: []) as $itemId => $qty) $withdrawn[(int)$itemId] = true;
         }
+        $consented = in_array(ConsentService::DIGITAL_KEY, array_column(ConsentService::forOrder((int)$order['id']), 'consent_key'), true);
+        if ($consented) foreach (DigitalDelivery::forOrder((int)$order['id']) as $entitlement) $withdrawn[(int)$entitlement['order_item_id']] = true;
         return array_values(array_filter(Orders::items((int)$order['id']), static fn(array $item): bool => !isset($withdrawn[(int)$item['id']])));
     }
 

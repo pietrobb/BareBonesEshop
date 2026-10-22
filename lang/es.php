@@ -46,6 +46,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'payment_method' => 'Método de pago',
     'shipping_method' => 'Método de envío',
     'place_order' => 'Pedido con obligación de pago',
+    'checkout.digital_delivery_consent' => 'Solicito el suministro inmediato del contenido digital antes de que finalice el plazo de desistimiento y reconozco que, al comenzar el suministro, pierdo mi derecho de desistimiento.',
     // R8 withdrawal function (Directive 2011/83/EU art. 11a) — wording for lawyer review.
     'withdrawal_link' => 'Desistir del contrato aquí',
     'withdrawal.title' => 'Desistimiento del contrato',

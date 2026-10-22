@@ -59,6 +59,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'payment_method'   => 'Fizetési mód',
     'shipping_method'  => 'Szállítási mód',
     'place_order'      => 'Megrendelés fizetési kötelezettséggel',
+    'checkout.digital_delivery_consent' => 'Kérem a digitális tartalom azonnali szolgáltatását az elállási határidő lejárta előtt, és tudomásul veszem, hogy a szolgáltatás megkezdésével elveszítem elállási jogomat.',
     // R8 withdrawal function (Directive 2011/83/EU art. 11a) — wording for lawyer review.
     'withdrawal_link' => 'Elállás a szerződéstől itt',
     'withdrawal.title' => 'Elállás a szerződéstől',

@@ -59,6 +59,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'payment_method'   => 'Způsob platby',
     'shipping_method'  => 'Způsob dopravy',
     'place_order'      => 'Objednat s povinností platby',
+    'checkout.digital_delivery_consent' => 'Žádám o okamžité dodání digitálního obsahu před uplynutím lhůty pro odstoupení od smlouvy a beru na vědomí, že zahájením jeho dodání ztrácím právo na odstoupení od smlouvy.',
     // R8 withdrawal function (Directive 2011/83/EU art. 11a) — wording for lawyer review.
     'withdrawal_link' => 'Odstoupit od smlouvy zde',
     'withdrawal.title' => 'Odstoupení od smlouvy',

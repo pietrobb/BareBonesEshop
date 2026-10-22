@@ -59,6 +59,7 @@ return [
     'payment_method'   => 'Spôsob platby',
     'shipping_method'  => 'Spôsob dopravy',
     'place_order'      => 'Objednať s povinnosťou platby',
+    'checkout.digital_delivery_consent' => 'Žiadam o okamžité dodanie digitálneho obsahu pred uplynutím lehoty na odstúpenie od zmluvy a beriem na vedomie, že začatím jeho dodania strácam právo na odstúpenie od zmluvy.',
     // R8 withdrawal function (Directive 2011/83/EU art. 11a) — wording for lawyer review.
     'withdrawal_link' => 'Odstúpiť od zmluvy tu',
     'withdrawal.title' => 'Odstúpenie od zmluvy',

@@ -59,6 +59,7 @@ return [
     'payment_method'   => 'Payment Method',
     'shipping_method'  => 'Shipping Method',
     'place_order'      => 'Order with obligation to pay',
+    'checkout.digital_delivery_consent' => 'I request immediate supply of the digital content before the withdrawal period ends and acknowledge that I lose my right of withdrawal once supply begins.',
     // R8 withdrawal function (Directive 2011/83/EU art. 11a) — wording for lawyer review.
     'withdrawal_link' => 'Withdraw from contract here',
     'withdrawal.title' => 'Withdrawal from the contract',

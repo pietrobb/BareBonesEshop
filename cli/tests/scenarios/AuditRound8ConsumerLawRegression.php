@@ -37,6 +37,21 @@ if ($phase === 'setup') {
         $item->execute([$orderId, $product, 'R8L-SKU', 'R8L Chair', 1, 2000, 2000]);
         $item->execute([$orderId, $product, 'R8L-SKU', 'R8L Table', 1, 1000, 1000]);
     }
+    // Digital content: R8L-DIG supplied with the consent to lose the withdrawal right, R8L-DIGN supplied without it.
+    $db->prepare("INSERT INTO products (store_id, category_id, sku, slug, name, price, stock, status, product_type) VALUES (?, ?, ?, ?, ?, ?, 0, 'active', 'downloadable')")
+        ->execute(['default', $cat, 'R8L-EBOOK', 'r8l-ebook', 'R8L E-book', 500]);
+    $ebook = (int)$db->lastInsertId();
+    $db->prepare("INSERT INTO digital_assets (sku, storage_path, download_name) VALUES ('R8L-EBOOK', 'default/r8l.pdf', 'r8l.pdf')")->execute();
+    $asset = (int)$db->lastInsertId();
+    foreach (['R8L-DIG' => true, 'R8L-DIGN' => false] as $number => $consented) {
+        $order->execute([$number, 'paid', null]);
+        $orderId = (int)$db->lastInsertId();
+        $item->execute([$orderId, $product, 'R8L-SKU', 'R8L Chair', 1, 2000, 2000]);
+        $item->execute([$orderId, $ebook, 'R8L-EBOOK', 'R8L E-book', 1, 500, 500]);
+        $db->prepare("INSERT INTO digital_entitlements (order_id, order_item_id, asset_id, token_hash, status) VALUES (?, ?, ?, ?, 'active')")
+            ->execute([$orderId, (int)$db->lastInsertId(), $asset, hash('sha256', $number)]);
+        if ($consented) $db->prepare("INSERT INTO order_consents (order_id, consent_key, version, consent_text, user_agent) VALUES (?, 'digital_delivery', '2026-10-22', 'r8l', '')")->execute([$orderId]);
+    }
     exit(0);
 }
 $config = is_file($root . '/config.php') ? require $root . '/config.php' : require $root . '/config.example.php';
@@ -74,12 +89,24 @@ if ($action === 'confirmation') {
     ], $capture->sent), 'locales' => $locales], JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR);
     exit(0);
 }
-$page = $action === 'checkout' ? 'checkout' : ($action === 'home' ? 'home' : 'withdrawal');
+if ($action === 'consent') {
+    // The consent rules of a digital and of a physical cart with the deployment's config, and with the default turned off.
+    $digital = ['country' => 'SK', 'product_types' => ['downloadable']];
+    $physical = ['country' => 'SK', 'product_types' => ['physical']];
+    $result = ['digital' => ConsentService::validate([], $digital), 'digital_given' => ConsentService::validate([ConsentService::DIGITAL_KEY => true], $digital),
+        'physical' => ConsentService::validate([], $physical), 'text' => ConsentService::definitions($digital)[ConsentService::DIGITAL_KEY]['text'] ?? ''];
+    ConsentService::setDefinitionsForTesting([ConsentService::DIGITAL_KEY => ['active' => false]]);
+    $result['off'] = ConsentService::validate([], $digital);
+    echo "\nR8LRESULT" . json_encode($result, JSON_UNESCAPED_UNICODE);
+    exit(0);
+}
+$page = in_array($action, ['checkout', 'checkout_digital'], true) ? 'checkout' : ($action === 'home' ? 'home' : 'withdrawal');
 $_SERVER['REQUEST_URI'] = '/index.php?page=' . $page;
 $_SERVER['REQUEST_METHOD'] = in_array($action, ['review', 'confirm'], true) ? 'POST' : 'GET';
 $_GET = ['page' => $page];
 $_POST = $_SERVER['REQUEST_METHOD'] === 'POST' ? $input + ['withdrawal_step' => $action, 'csrf_token' => Security::csrfToken()] : [];
 if ($action === 'checkout') Cart::add((int)$db->query("SELECT id FROM products WHERE sku = 'R8L-SKU'")->fetchColumn(), null, 1);
+if ($action === 'checkout_digital') Cart::add((int)$db->query("SELECT id FROM products WHERE sku = 'R8L-EBOOK'")->fetchColumn(), null, 1);
 http_response_code(200);
 ob_start();
 register_shutdown_function(static function() use ($db, $dir): void {
@@ -213,3 +240,28 @@ foreach (['sk', 'cs', 'en', 'de', 'pl', 'hu', 'es'] as $r8lLocale) {
     assert_true(preg_match_all('~<h2>~', $r8lTc) >= 11 && str_contains($r8lTc, '{{adr_name}}') && str_contains($r8lTc, '{{email}}') && strlen($r8lTc) > 3500,
         "R8 terms ({$r8lLocale}): full terms with withdrawal, exceptions, liability, ADR and the model form annex, not one paragraph");
 }
+
+// 4) Digital content (art. 16(m)): supplied only with the express consent to lose the withdrawal right — required by
+//    default, without any checkout_consents entry; once supplied with it, the line is no longer withdrawable.
+[$r8lExit, $r8lCons, $r8lNoise] = $r8lRun(['run', 'consent', $r8lApp, $r8lDb, $r8lRoot, '{}']);
+assert_true($r8lExit === 0 && isset($r8lCons['digital']['digital_delivery']) && ($r8lCons['digital_given'] ?? null) === [] && ($r8lCons['physical'] ?? null) === []
+    && str_contains((string)($r8lCons['text'] ?? ''), 'strácam právo na odstúpenie'),
+    'R8 digital: a digital cart requires the consent to lose the withdrawal right by default (sk text), a physical cart does not (' . json_encode($r8lCons, JSON_UNESCAPED_UNICODE) . ' ' . trim($r8lNoise) . ')');
+assert_true(($r8lCons['off'] ?? null) === [], 'R8 digital: checkout_consents.digital_delivery active=false turns the default off');
+foreach (['sk', 'cs', 'en', 'de', 'pl', 'hu', 'es'] as $r8lLocale) {
+    $r8lLang = require $r8lApp . '/lang/' . $r8lLocale . '.php';
+    assert_true(mb_strlen((string)($r8lLang['checkout.digital_delivery_consent'] ?? '')) > 80, "R8 digital ({$r8lLocale}): the consent text is translated");
+}
+$r8lDigPage = $r8lDo('checkout_digital');
+assert_true(preg_match('~<input[^>]*name="consents\[digital_delivery\]"[^>]*required~', (string)$r8lDigPage['output']) === 1 && str_contains((string)$r8lDigPage['output'], 'strácam právo na odstúpenie'),
+    'R8 digital: the real checkout page of a digital cart shows the required consent checkbox with its text');
+$r8lOffer = static function(array $res): array {
+    preg_match_all('~name="items\[\]" value="(\d+)"~', (string)$res['output'], $m);
+    return array_map('intval', $m[1]);
+};
+$r8lItemIds = [];
+foreach ($r8lDigPage['items'] as $r8lRow) $r8lItemIds[$r8lRow['order_number']][] = (int)$r8lRow['id'];
+assert_equals([$r8lItemIds['R8L-DIG'][0]], $r8lOffer($r8lDo('review', ['order_number' => 'R8L-DIG', 'email' => 'r8l.guest@example.test'])),
+    'R8 digital: e-book supplied with the consent is not withdrawable, the chair of the same order is');
+assert_equals($r8lItemIds['R8L-DIGN'], $r8lOffer($r8lDo('review', ['order_number' => 'R8L-DIGN', 'email' => 'r8l.guest@example.test'])),
+    'R8 digital: e-book supplied without the consent stays withdrawable');

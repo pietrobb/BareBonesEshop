@@ -59,6 +59,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'payment_method'   => 'Zahlungsmethode',
     'shipping_method'  => 'Versandart',
     'place_order'      => 'Zahlungspflichtig bestellen',
+    'checkout.digital_delivery_consent' => 'Ich verlange die sofortige Bereitstellung der digitalen Inhalte vor Ablauf der Widerrufsfrist und nehme zur Kenntnis, dass ich mit Beginn der Bereitstellung mein Widerrufsrecht verliere.',
     // R8 withdrawal function (Directive 2011/83/EU art. 11a) — wording for lawyer review.
     'withdrawal_link' => 'Vertrag hier widerrufen',
     'withdrawal.title' => 'Widerruf des Vertrags',
