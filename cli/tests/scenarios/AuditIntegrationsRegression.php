@@ -51,8 +51,12 @@ $pdo->exec("DELETE FROM shipping_rates WHERE carrier = 'gls' AND country = 'IE'"
 assert_equals([], $aigGls->getRates(['country' => 'IE', 'weight_g' => 1000, 'currency' => 'PLN']), '2 currency: GLS has no PLN price without a store rate row');
 assert_equals(699, (int)($aigGls->getRates(['country' => 'IE', 'weight_g' => 1000, 'currency' => 'EUR'])[0]['price'] ?? -1), '2 currency: GLS built-in EUR tier in an EUR store');
 $pdo->exec("INSERT INTO shipping_rates (store_id, carrier, country, weight_from_g, weight_to_g, price, cod_surcharge) VALUES ('default', 'gls', 'IE', 0, 5000, 4500, 300)");
+assert_equals([], $aigGls->getRates(['country' => 'IE', 'weight_g' => 1000, 'currency' => 'PLN', 'cod' => true]), '2 currency: the EUR store\'s rate row is not quoted to a PLN cart');
+$pdo->exec("UPDATE shipping_rates SET store_id = 'pl' WHERE carrier = 'gls' AND country = 'IE'");
+Bootstrap::initStoreContext('/', '', 'pl');
 $aigGlsPln = $aigGls->getRates(['country' => 'IE', 'weight_g' => 1000, 'currency' => 'PLN', 'cod' => true])[0] ?? [];
 assert_equals([4500, 300], [(int)($aigGlsPln['price'] ?? -1), (int)($aigGlsPln['cod_surcharge'] ?? -1)], '2 currency: a store rate row (store currency) is quoted with its own COD fee');
+Bootstrap::initStoreContext('/', '', 'default');
 $pdo->exec("DELETE FROM shipping_rates WHERE carrier = 'gls' AND country = 'IE'");
 
 // ── 3. Packeta: coverage before the free-shipping threshold ──────────────────────────────────────

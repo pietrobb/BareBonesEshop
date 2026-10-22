@@ -13,6 +13,10 @@ $r8cSample = json_decode((string)file_get_contents($r8cRoot . '/stores.json'), t
 $r8cStoresProp = new ReflectionProperty(Bootstrap::class, 'stores');
 $r8cSavedStores = $r8cStoresProp->getValue();
 $r8cPrevious = StoreContext::current();
+// The suite database applies only selected migrations by hand; the seeded price lists need a fully migrated one.
+[$r8cSavedDb, $r8cSavedDriver] = [Db::get(), Db::driver()];
+$r8cDbPath = test_fixture_path('r8-price-lists');
+$r8cDb = new PDO('sqlite:' . $r8cDbPath, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
 $r8cCases = [
     // store => [currency, destination country, goods subtotal in minor units]
     'cz' => ['czk', 'CZ', 80000],
@@ -20,6 +24,8 @@ $r8cCases = [
     'pl' => ['pln', 'PL', 15000],
 ];
 try {
+    (new Migrator($r8cDb, $r8cRoot . '/migrations', $r8cDbPath . '.lock'))->apply(static fn($m) => null);
+    Db::init($r8cDb, 'sqlite');
     $r8cStoresProp->setValue(null, $r8cSample);
     foreach ($r8cCases as $r8cStore => [$r8cCurrency, $r8cCountry, $r8cSubtotal]) {
         $r8cConfig = $r8cSample['stores'][$r8cStore] ?? [];
@@ -74,6 +80,9 @@ try {
 } finally {
     $r8cStoresProp->setValue(null, $r8cSavedStores);
     StoreContext::activate($r8cPrevious);
+    Db::init($r8cSavedDb, $r8cSavedDriver);
+    $r8cDb = null;
+    foreach (['', '-wal', '-shm', '.lock'] as $r8cSuffix) @unlink($r8cDbPath . $r8cSuffix);
 }
 
 // An existing installation keeps its stores.json: the upgrade notes say how to switch a store to the seeded scope.

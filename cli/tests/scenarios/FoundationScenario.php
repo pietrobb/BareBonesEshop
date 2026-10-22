@@ -52,7 +52,10 @@ assert_true(preg_match('/^RewriteRule \^\(\?:[^)\r\n]*\|cache\|[^\r\n]*\s-\s+\[F
 assert_equals(0, substr_count($htaccess, 'RewriteRule ^api\.php$ cache/'), '.htaccess: no API cache rewrite bypasses the store-namespaced PHP cache');
 assert_true(!str_contains($htaccess, 'RewriteCond %{REQUEST_URI} ^/cache/'), '.htaccess: broad direct cache serving condition is absent');
 assert_true(preg_match('/RewriteRule\s+\^\(\.\*\)\$\s+\$1\s+\[L,T=application\/json\]/i', $htaccess) !== 1, '.htaccess: broad direct cache serving rewrite is absent');
-assert_true(stripos($htaccess, '<FilesMatch') === false, '.htaccess: inert FilesMatch is removed');
+// Access control lives in RewriteRules; a <FilesMatch> may only set response headers (R8 static-file headers).
+preg_match_all('#<FilesMatch\b[^>]*>(.*?)</FilesMatch>#si', $htaccess, $filesMatchBlocks);
+$filesMatchAccess = array_filter($filesMatchBlocks[1], static fn(string $b): bool => preg_match('/^\s*(?!Header\b)\S/mi', $b) === 1);
+assert_true(substr_count(strtolower($htaccess), '<filesmatch') === count($filesMatchBlocks[1]) && $filesMatchAccess === [], '.htaccess: inert FilesMatch is removed (a FilesMatch block only sets headers, no access control)');
 assert_true(str_contains($htaccess, 'RewriteRule ^\.well-known/'), '.htaccess: ACME and security.txt have a narrow dot-path exception');
 assert_true(str_contains($htaccess, 'RewriteRule (?:^|/)\. - [F,L,NC]'), '.htaccess: other dotfiles are denied');
 assert_true(preg_match('/^RewriteRule[^\r\n]*sqlite3\?[^\r\n]*\|log\|lock[^\r\n]*\s-\s+\[F,L,NC\]$/mi', $htaccess) === 1, '.htaccess: database, journal, log, lock, and backup extensions are denied');
