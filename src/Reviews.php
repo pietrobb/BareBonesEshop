@@ -68,14 +68,20 @@ class Reviews {
     }
 
     /**
-     * Approved reviews for a product, newest first.
+     * Approved reviews for a product, newest first. R8 (Directive 2005/29/EC art. 7(6)): 'verified' is 1 when the
+     * author is a customer with a paid or shipped order of this product; guest and other reviews are 0.
      */
     public static function approved(int $productId, int $limit = 50, int $offset = 0): array {
         $stmt = Db::get()->prepare(
-            "SELECT id, product_id, customer_id, author_name, rating, title, body, created_at
-             FROM product_reviews
-             WHERE product_id = ? AND status = 'approved'
-             ORDER BY id DESC
+            "SELECT r.id, r.product_id, r.customer_id, r.author_name, r.rating, r.title, r.body, r.created_at,
+                    CASE WHEN r.customer_id IS NOT NULL AND EXISTS (
+                        SELECT 1 FROM orders o JOIN order_items oi ON oi.order_id = o.id
+                        WHERE o.customer_id = r.customer_id AND oi.product_id = r.product_id
+                          AND (o.payment_status = 'paid' OR o.status IN ('shipped', 'delivered'))
+                    ) THEN 1 ELSE 0 END AS verified
+             FROM product_reviews r
+             WHERE r.product_id = ? AND r.status = 'approved'
+             ORDER BY r.id DESC
              LIMIT ? OFFSET ?"
         );
         $stmt->execute([$productId, $limit, $offset]);

@@ -1,10 +1,10 @@
-¿Te has olvidado algo en el carrito?
+¿Ha olvidado algo en el carrito?
 
-Estos productos siguen esperándote en tu carrito:
+Estos productos le siguen esperando en su carrito:
 {{#each items}}- {{quantity}} × {{name}}
 {{/each}}
 Total: {{cart_total}}
 
 Completar el pedido: {{cart_url}}
 
-Si ya no quieres recibir recordatorios del carrito, date de baja aquí: {{unsubscribe_url}}
+Si ya no desea recibir recordatorios del carrito, dese de baja aquí: {{unsubscribe_url}}

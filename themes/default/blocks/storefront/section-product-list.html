@@ -7,7 +7,7 @@
       <a href="{{url}}">
         {{#if image.url}}<img class="card-img" src="{{image.thumbnail_url}}" alt="{{image.alt}}" loading="lazy">{{/if}}
         <h3>{{name}}</h3>
-        <div class="price">{{price.formatted}}{{#if price.compare_formatted}}<span class="old-price">{{price.compare_formatted}}</span>{{/if}}</div>
+        <div class="price">{{price.formatted}}{{#if price.compare_formatted}}<span class="old-price" title="{{t.price_lowest_30d}}">{{price.compare_formatted}}</span>{{/if}}</div>
         <div class="badge">{{availability.label}}</div>
       </a>
       {{> storefront/product-card-buy}}

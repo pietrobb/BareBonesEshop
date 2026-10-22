@@ -4,4 +4,4 @@ Los archivos del núcleo en {{host}} se han modificado fuera de una actualizaci�
 {{#each files}}- {{kind}}: {{path}}
 {{/each}}
 Referencia registrada: {{recorded_at}}
-Haz primero la corrección en BareBones y publícala como actualización; de lo contrario, la próxima actualización la sobrescribirá.
+Haga primero la corrección en BareBones y publíquela como actualización; de lo contrario, la próxima actualización la sobrescribirá.

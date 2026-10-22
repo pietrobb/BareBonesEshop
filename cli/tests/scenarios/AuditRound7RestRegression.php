@@ -317,8 +317,8 @@ assert_equals(10000, PriceHistory::capCompare(['price' => 8000, 'compare_price' 
     'R7 Omnibus: a promotion on a long-stable price shows the base price');
 assert_equals(9000, PriceHistory::capCompare(['price' => 8000, 'compare_price' => 10000], 10000, $r7rLatest(10000, 9000, 5))['compare_price'],
     'R7 Omnibus: a promotion right after a price rise shows the lower price of the last 30 days');
-assert_equals(10000, PriceHistory::capCompare(['price' => 8000, 'compare_price' => 10000], 10000, null)['compare_price'],
-    'R7 Omnibus: a product without recorded history keeps its compare price');
+assert_equals(null, PriceHistory::capCompare(['price' => 8000, 'compare_price' => 10000], 10000, null)['compare_price'],
+    'R7/R8 Omnibus: a product without recorded history shows no compare price (no proof of the prior price)');
 $pdo->exec('DELETE FROM product_price_history WHERE product_id BETWEEN 97730 AND 97733');
 $pdo->exec('DELETE FROM products WHERE id BETWEEN 97730 AND 97733');
 

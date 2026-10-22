@@ -299,7 +299,7 @@ try {
         ['Verkaufsübersicht', 'Bestellstatus', 'Zahlungsstatus', 'Gesamter Zeitraum', 'Positionen', 'Nummer, Name oder E-Mail']);
     $a154Run($a156Order + ['action' => 'status'], ['new_status' => 'a156-unknown', 'note' => '']);
     $a156Check('A15.6 de: order detail and its invalid-status flash are German', $a154Run($a156Order),
-        ['Ungültiger Bestellstatus.', 'Zahlungsart: A156 Bank', 'Variabelsymbol der Überweisung: ', 'Zahlungsreferenz: ', 'Zahlungsstatus: ', 'Status ändern',
+        ['Ungültiger Bestellstatus.', 'Zahlungsart: A156 Bank', 'Überweisungsreferenz: ', 'Zahlungsreferenz: ', 'Zahlungsstatus: ', 'Status ändern',
             'Zahlung ändern', 'Betrag in Cent', 'Notiz...', 'Für den aktuellen Zahlungsstatus ist keine Erstattung möglich.', 'Positionen', 'Zwischensumme: ',
             'Gesamt: ', 'Zahlungsverlauf', 'Noch keine Zahlungsereignisse erfasst.', 'Rechnungen', 'Noch keine Rechnung ausgestellt.', '← Zurück zur Liste']);
     foreach ([
@@ -311,24 +311,24 @@ try {
         $a154Run($a156Order + ['action' => $a156Action], $a156Post);
         $a156Check("A15.6 de: order {$a156Action} flash is German", $a154Run($a156Order), [$a156Flash]);
     }
-    $a156Check('A15.6 de: returns page is German', $a154Run(['p' => 'rma']), ['Reklamationen / Rücksendungen', 'Alle', 'Genehmigen', 'Ablehnen', 'Grund', 'A156 Grund']);
+    $a156Check('A15.6 de: returns page is German', $a154Run(['p' => 'rma']), ['Rücksendungen', 'Alle', 'Genehmigen', 'Ablehnen', 'Grund', 'A156 Grund']);
     $a154Run(['p' => 'rma', 'action' => 'status'], ['rma_id' => '0', 'status' => 'approved']);
-    $a156Check('A15.6 de: return status flash is German', $a154Run(['p' => 'rma']), ['Der Reklamationsstatus konnte nicht geändert werden: Ungültige Reklamation.']);
+    $a156Check('A15.6 de: return status flash is German', $a154Run(['p' => 'rma']), ['Der Rücksendestatus konnte nicht geändert werden: Ungültige Rücksendung.']);
     $a156Check('A15.6 de: customers list is German', $a154Run(['p' => 'customers', 'q' => 'a156']),
         ['E-Mail, Name oder ID', 'Filter zurücksetzen', 'Registriert', 'A156 Kunde', 'Details']);
     $a154Run(['p' => 'customer', 'id' => $a156Customer, 'action' => 'status'], ['customer_id' => $a156Customer, 'status' => 'blocked']);
     $a156Check('A15.6 de: customer detail and its status flash are German', $a154Run(['p' => 'customer', 'id' => $a156Customer]),
         ["Kunde #{$a156Customer} → blocked", 'Profil', 'Letzte Anmeldung', 'Telefon', 'Konto entsperren', 'DSGVO-Löschung…', 'Adressen (0)', 'Keine Adressen.',
-            'Bestellungen (2)', 'Reklamationen (', '← Liste'], ['Uložiť']);
+            'Bestellungen (2)', 'Rücksendungen (', '← Liste'], ['Uložiť']);
     $a156Check('A15.6 de: unknown customer is German', $a154Run(['p' => 'customer', 'id' => '999999']), ['Kunde nicht gefunden.', 'Zurück zur Liste']);
     $a156Check('A15.6 de: awaiting payment page is German', $a154Run(['p' => 'awaiting_payment']),
-        ['Variabelsymbol', 'Als bezahlt markieren', 'Bestellung A156-1 als bezahlt markieren?', 'Notiz (z. B. Kontoauszug)', 'A156 Bank', 'Alter']);
+        ['Überweisungsreferenz', 'Als bezahlt markieren', 'Bestellung A156-1 als bezahlt markieren?', 'Notiz (z. B. Kontoauszug)', 'A156 Bank', 'Alter']);
     $a156Check('A15.6 de: abandoned carts page is German', $a154Run(['p' => 'abandoned_carts', 'filter' => 'all']),
         ['Verlassen', 'Konvertiert', 'Alle', 'Erinnerung', 'Letzte Änderung', 'Wert', 'wartet', 'a156cart@example.com']);
     $a156Check('A15.6 de: CSRF refusal flash is German', $a154Run(['p' => 'customers', 'action' => 'a156'], ['csrf_token' => 'a156-wrong']), ['Ungültiges CSRF-Token.']);
     $a154Run(['p' => 'dashboard', 'lang' => 'en']);
     $a156Check('A15.6 en: order detail is English', $a154Run($a156Order),
-        ['Payment method: A156 Bank', 'Bank transfer variable symbol: ', 'Payment reference: ', 'Change status', 'Subtotal: ', 'Payment timeline', 'No invoice issued yet.'], $a156English);
+        ['Payment method: A156 Bank', 'Bank transfer reference number: ', 'Payment reference: ', 'Change status', 'Subtotal: ', 'Payment timeline', 'No invoice issued yet.'], $a156English);
     $a156Check('A15.6 en: customers and returns are English', $a154Run(['p' => 'customer', 'id' => $a156Customer]), ['Profile', 'Last sign-in', 'Unblock account', 'Addresses (0)'], ['Uložiť']);
     $a156Check('A15.6 en: returns page is English', $a154Run(['p' => 'rma']), ['Returns and complaints', 'Approve', 'Reject', 'Reason'], $a156English);
     $a154Run(['p' => 'dashboard', 'lang' => 'de']);

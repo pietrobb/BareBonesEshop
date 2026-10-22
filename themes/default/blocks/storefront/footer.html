@@ -8,8 +8,11 @@
       <a href="{{privacy_url}}">{{t.privacy_policy}}</a>
       <a href="{{terms_url}}">{{t.terms_conditions}}</a>
       <a href="{{cookies_url}}">{{t.cookie_policy}}</a>
+      <a href="{{cookie_settings_url}}" rel="nofollow">{{t.cookie_settings}}</a>
+      <a href="{{accessibility_url}}">{{t.accessibility_statement}}</a>
       <a href="{{withdrawal_url}}">{{t.withdrawal_link}}</a>
       <a href="{{complaint_url}}">{{t.complaint_link}}</a>
+      {{#if adr_name}}<p class="footer-adr">{{t.adr_label}} <a href="{{adr_url}}" rel="noopener">{{adr_name}}</a></p>{{/if}}
     </div>
   </div></div>
   <div class="footer-bottom"><div class="wrap">{{shop_name}} &copy; {{year}} — {{t.powered_by}}</div></div>

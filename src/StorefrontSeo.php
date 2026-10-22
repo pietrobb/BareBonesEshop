@@ -28,7 +28,7 @@ final class StorefrontSeo
             $head = Template::viewModelSeoHead($viewModel, $title);
         } elseif ($page === 'category' && $category !== null) {
             $head = Seo::head($title, '', self::categoryPath($category, (int)($_GET['pg'] ?? 1)), true);
-        } elseif (in_array($page, ['privacy', 'terms', 'cookies'], true)) {
+        } elseif (in_array($page, ConsumerNotice::LEGAL_PAGES, true)) {
             $head = Seo::head($title, '', Template::seoPath(Template::storeUrl('/?page=' . $page)), true);
         } else {
             $head = self::hreflang($alternates);

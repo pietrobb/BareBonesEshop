@@ -1,4 +1,4 @@
-<form id="cc-banner" role="dialog" aria-labelledby="cc-title" aria-describedby="cc-body" method="post" action="{{cookie_action_url}}">
+<form id="cc-banner"{{#if cookie_settings_open}} class="show-prefs"{{/if}} role="dialog" aria-labelledby="cc-title" aria-describedby="cc-body" method="post" action="{{cookie_action_url}}">
   <input type="hidden" name="csrf_token" value="{{cookie_csrf_token}}">
   <input type="hidden" name="action" value="cookie_consent">
   <input type="hidden" name="source" value="banner">
@@ -7,13 +7,13 @@
   <p id="cc-body">{{cookie_body}} <a href="{{privacy_url}}" class="cc-link">{{cookie_policy_link}}</a></p>
   <div id="cc-prefs">
     <label><input type="checkbox" checked disabled> {{cookie_necessary}}</label>
-    <label><input type="checkbox" id="cc-ana" name="analytics" value="1"> {{cookie_analytics}}</label>
-    <label><input type="checkbox" id="cc-mkt" name="marketing" value="1"> {{cookie_marketing}}</label>
+    <label><input type="checkbox" id="cc-ana" name="analytics" value="1"{{#if cookie_analytics_on}} checked{{/if}}> {{cookie_analytics}}</label>
+    <label><input type="checkbox" id="cc-mkt" name="marketing" value="1"{{#if cookie_marketing_on}} checked{{/if}}> {{cookie_marketing}}</label>
   </div>
   <div class="cc-btns">
     <button type="button" class="cc-link" id="cc-prefs-toggle" hidden>{{cookie_preferences}}</button>
     <button type="submit" class="danger" id="cc-reject" name="method" value="banner_reject_all">{{cookie_reject}}</button>
     <button type="submit" class="primary" id="cc-accept" name="method" value="banner_accept_all">{{cookie_accept}}</button>
-    <button type="submit" class="primary" id="cc-save" name="method" value="preferences" hidden>{{cookie_save}}</button>
+    <button type="submit" class="primary" id="cc-save" name="method" value="preferences"{{#unless cookie_settings_open}} hidden{{/unless}}>{{cookie_save}}</button>
   </div>
 </form>

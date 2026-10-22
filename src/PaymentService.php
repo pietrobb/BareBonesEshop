@@ -1223,8 +1223,8 @@ class PaymentService {
         return [
             'code' => (string)$row['code'],
             'provider' => (string)($row['provider'] ?? ''),
-            'label' => (string)($row['name'] ?? $row['code']),
-            'description' => (string)($row['description'] ?? ''),
+            'label' => MethodLabels::name('payment', (string)$row['code'], (string)($row['name'] ?? $row['code'])),
+            'description' => MethodLabels::description('payment', (string)$row['code'], (string)($row['description'] ?? '')),
             'service_type' => (string)($row['service_type'] ?? 'offline'),
             'fee' => $fee,
             'fixed_fee' => $fixedFee,

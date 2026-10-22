@@ -9,7 +9,7 @@
 final class ConsumerNotice {
     public const WITHDRAWAL_DAYS = 14;
     public const LIABILITY_MONTHS = 24;
-    public const LEGAL_PAGES = ['privacy', 'terms', 'cookies'];
+    public const LEGAL_PAGES = ['privacy', 'terms', 'cookies', 'accessibility'];
 
     /** Consumer ADR body per seller country (the EU ODR platform closed on 20 July 2025). */
     private const ADR = [
@@ -30,10 +30,19 @@ final class ConsumerNotice {
         ];
     }
 
-    /** Placeholders of the legal templates: the legal block plus the ADR body. */
+    /**
+     * Placeholders of the legal templates: the legal block plus the ADR body. The accessibility statement names the
+     * market surveillance authority only when the store sets legal.accessibility_authority (it differs per country).
+     */
     public static function legalVars(array $legal): array {
         $adr = self::adr($legal);
-        return array_map('strval', array_filter($legal, 'is_scalar')) + ['adr_name' => $adr['name'], 'adr_url' => $adr['url']];
+        $phone = trim((string)($legal['phone'] ?? ''));
+        $authority = trim((string)($legal['accessibility_authority'] ?? ''));
+        return array_map('strval', array_filter($legal, 'is_scalar')) + [
+            'adr_name' => $adr['name'], 'adr_url' => $adr['url'],
+            'phone_sep' => $phone === '' ? '' : ', ' . $phone,
+            'accessibility_authority_sep' => $authority === '' ? '' : ': ' . $authority,
+        ];
     }
 
     /** A legal page (privacy / terms / cookies) of $locale (else English) filled with the seller's data, as HTML. */
