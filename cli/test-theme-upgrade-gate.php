@@ -209,6 +209,35 @@ $themeUpgradeGateExit = (static function(): int {
         $pdo = new PDO('sqlite:' . $database, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
         $assert((int)$pdo->query('SELECT COUNT(*) FROM orders')->fetchColumn() === 1 && !is_file($root . '/src/ThemeGateRelease.php'),
             'cli rollback restored the pre-update database and code');
+        $pdo = null;
+
+        // J (review round 8): a shop that predates the updater (v1.8.0) is adopted by the TRUSTED NEW release's CLI run
+        // against it with --installed, instead of copying a few updater files into the old tree (they need more classes).
+        [$root, $state] = $install($repaired);
+        $database = $temp . '/shop-adopt.sqlite';
+        $pdo = new PDO('sqlite:' . $database, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+        (new Migrator($pdo, $from . '/migrations', $temp . '/adopt-migrate.lock'))->apply(static fn($message) => null);
+        $pdo = null;
+        $write($root . '/config.php', "<?php\nreturn ['update_storage_dir' => " . var_export($state, true)
+            . ", 'db_driver' => 'sqlite', 'db_sqlite_path' => " . var_export($database, true) . "];\n");
+        foreach (['cli/update.php', 'src/Updater.php', 'src/ThemeUpgradeGate.php', 'src/UpdatePackage.php'] as $file) unlink($root . '/' . $file);
+        $trusted = $temp . '/release-compatible';
+        $adopt = static fn(array $arguments): array => $cli($trusted, array_merge($arguments, ['--installed=' . $root]));
+        [$exit, $output] = $adopt(['baseline', '--version=9.9.8']);
+        $assert($exit === 0 && is_file($state . '/installed.json'), 'adoption: baseline records the installed shop: ' . trim($output));
+        [$exit, $output] = $adopt(['doctor', '--package=' . $compatible, '--allow-unsigned', '--json']);
+        $doctorChecks = array_column((array)(json_decode($output, true)['checks'] ?? []), null, 'name');
+        $assert(($doctorChecks['package']['level'] ?? null) === 'ok' && ($doctorChecks['database_backup']['level'] ?? null) === 'ok',
+            'adoption: doctor verifies the package and a backup of the installed shop\'s database (failing: '
+            . implode('; ', array_map(static fn(array $c): string => $c['name'] . ': ' . $c['message'], array_filter($doctorChecks, static fn(array $c): bool => $c['level'] === 'fail'))) . ')');
+        [$exit, $output] = $adopt(['apply', '--package=' . $compatible, '--allow-unsigned']);
+        $pdo = new PDO('sqlite:' . $database, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $installedState = json_decode((string)@file_get_contents($state . '/installed.json'), true);
+        $assert($exit === 0 && is_file($root . '/src/ThemeGateRelease.php') && ($installedState['version'] ?? null) === '9.9.9-compatible'
+            && (int)$pdo->query("SELECT COUNT(*) FROM sqlite_master WHERE name = 'theme_gate_release'")->fetchColumn() === 1
+            && !is_file($trusted . '/config.php'),
+            'adoption: apply installs the package into the installed shop and migrates its database: ' . trim($output));
+        $pdo = null;
     } finally {
         $gate = $pdo = null; // release SQLite handles so Windows can delete the disposable databases
         gc_collect_cycles();

@@ -6,13 +6,14 @@
 class Db {
     private static ?PDO $pdo = null;
     private static string $driver = '';
+    private static ?string $configPath = null;
     /** @var WeakMap<PDO, array<string, list<string>>>|null Column lists of existing tables, per connection. */
     private static ?WeakMap $schemaCache = null;
 
     public static function get(): PDO {
         if (self::$pdo) return self::$pdo;
 
-        $cfg = require __DIR__ . '/../config.php';
+        $cfg = require self::$configPath ?? __DIR__ . '/../config.php';
         self::$driver = strtolower(trim((string)($cfg['db_driver'] ?? '')));
         if (!in_array(self::$driver, ['sqlite', 'mysql'], true)) {
             throw new RuntimeException('Unsupported db_driver; expected sqlite or mysql');
@@ -57,6 +58,15 @@ class Db {
         }
 
         return self::$pdo;
+    }
+
+    /**
+     * Connect with another installation's config.php (a trusted release's cli/update.php run with --installed):
+     * the next get() opens that shop's database.
+     */
+    public static function useConfig(string $configPath): void {
+        self::$configPath = $configPath;
+        self::$pdo = null;
     }
 
     /** Initialize with an existing PDO (for testing) */

@@ -36,6 +36,16 @@ foreach (array_slice($args, 1) as $argument) {
 
 $root = dirname(__DIR__);
 try {
+    // --installed=DIR: this (trusted, newer) release's updater operates on the shop in DIR, with DIR's config.php
+    // and database — how a shop that predates the updater (v1.8.0) is adopted without copying files into it.
+    if (isset($options['installed'])) {
+        $installed = realpath((string)$options['installed']);
+        if ($installed === false || !is_file($installed . '/config.php') || !is_dir($installed . '/src')) {
+            throw new InvalidArgumentException('--installed must be the root of an installed shop (with config.php and src/)');
+        }
+        $root = $installed;
+        Db::useConfig($root . '/config.php');
+    }
     $config = require $root . '/config.php';
     if (!is_array($config)) {
         throw new RuntimeException('config.php must return an array');
@@ -69,7 +79,8 @@ try {
         $report = $updater->doctor(
             $publicKey !== '' ? $publicKey : null,
             $package,
-            empty($options['skip-backup-probe'])
+            empty($options['skip-backup-probe']),
+            $config
         );
         printUpdateDoctorReport($report, !empty($options['json']));
         exit($report['status'] === 'READY' ? 0 : 1);
