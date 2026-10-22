@@ -108,7 +108,16 @@ try {
         if ($snapshotId === '') {
             throw new InvalidArgumentException('rollback requires --snapshot=ID');
         }
-        $updater = new Updater($root, $stateDirectory, null, null, $databaseBackup);
+        // With a connection the rollback counts the rows it discards (the restore releases it before replacing the
+        // database); a code-only rollback still works when the database is unreachable.
+        try {
+            $database = Db::get();
+        } catch (Throwable $e) {
+            $database = null;
+            fwrite(STDERR, 'No database connection; rows discarded by a database rollback cannot be counted: ' . $e->getMessage() . "\n");
+        }
+        $updater = new Updater($root, $stateDirectory, $database, null, $databaseBackup);
+        $database = null;
         $result = $updater->rollback($snapshotId, !empty($options['force']), !empty($options['accept-data-loss']));
         echo "Rollback complete: {$result['snapshot']}, restored {$result['restored_files']} file(s)"
             . ($result['database_restored_to'] !== null ? ", database restored to {$result['database_restored_to']}" : '') . ".\n";

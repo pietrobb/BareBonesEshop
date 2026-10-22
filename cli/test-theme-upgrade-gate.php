@@ -184,7 +184,7 @@ $themeUpgradeGateExit = (static function(): int {
         // migrations — it used to build the updater without a migration runner, so every such package was NOT_READY.
         [$root, $state, $database] = $install($repaired);
         $write($root . '/config.php', "<?php\nreturn ['update_storage_dir' => " . var_export($state, true)
-            . ", 'db_driver' => 'sqlite', 'db_sqlite_path' => " . var_export(str_replace('\\', '/', $database), true) . "];\n");
+            . ", 'db_driver' => 'sqlite', 'db_sqlite_path' => " . var_export($database, true) . "];\n");
         [, $output] = $cli($root, ['doctor', '--package=' . $compatible, '--allow-unsigned', '--json']);
         $doctor = json_decode($output, true);
         $doctorChecks = array_column((array)($doctor['checks'] ?? []), null, 'name');
@@ -192,6 +192,20 @@ $themeUpgradeGateExit = (static function(): int {
         $assert(($doctorChecks['package']['level'] ?? null) === 'ok' && $blockers === [] && ($doctorChecks['database_backup']['level'] ?? null) === 'ok',
             'cli doctor passes the preflight of a package with migrations (blockers: ' . implode('; ', $blockers) . ')');
         $assert(!is_file($root . '/src/ThemeGateRelease.php') && !is_file($state . '/installed.json'), 'cli doctor changes nothing');
+
+        // I (review round 8): `update.php rollback --accept-data-loss` counts the orders it discards, as the runbook says —
+        // it used to build the updater without a database connection, so the count was silently skipped.
+        $pdo = new PDO('sqlite:' . $database, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $migrations = 0;
+        $snapshot = (string)$updater($root, $state, $pdo, $migrations)->apply(new UpdatePackage($compatible, null, true))['snapshot'];
+        $pdo->exec("INSERT INTO orders (number) VALUES ('2026-0002'), ('2026-0003')");
+        $pdo = null;
+        gc_collect_cycles();
+        [$exit, $output] = $cli($root, ['rollback', '--snapshot=' . $snapshot, '--accept-data-loss']);
+        $assert($exit === 0 && str_contains($output, 'discarded since the snapshot: orders=2'), 'cli rollback reports the 2 orders it discarded: ' . trim($output));
+        $pdo = new PDO('sqlite:' . $database, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $assert((int)$pdo->query('SELECT COUNT(*) FROM orders')->fetchColumn() === 1 && !is_file($root . '/src/ThemeGateRelease.php'),
+            'cli rollback restored the pre-update database and code');
     } finally {
         $gate = $pdo = null; // release SQLite handles so Windows can delete the disposable databases
         gc_collect_cycles();
