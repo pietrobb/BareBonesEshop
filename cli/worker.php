@@ -264,6 +264,10 @@ function handleEmailSend(array $payload, array $job): void {
     if ($template === 'cart_reminder' && AbandonedCarts::isSuppressed($to)) return;
 
     $vars = (array)($payload['vars'] ?? []);
+    if ($template === 'cart_reminder' && isset($payload['cart_id'])) {
+        $vars = AbandonedCarts::reminderVars((int)$payload['cart_id'], (string)($payload['base_url'] ?? ''));
+        if ($vars === null) return;
+    }
     if ($orderId) {
         $order = Orders::byId((int)$orderId);
         if ($order) {

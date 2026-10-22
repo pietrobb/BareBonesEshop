@@ -106,3 +106,32 @@ assert_true(($r8pPolicies['orders_contact']['ttl_days'] ?? null) === 180 && (int
     'R8 PII retention: after 180 days the IP address, phone and note of an order are scrubbed');
 assert_true($r8pOldRow['customer_email'] === 'r8p-guest@example.test' && $r8pContact($r8pRecent)['ip_address'] === '203.0.113.8',
     'R8 PII retention: the e-mail stays (10-year policy) and a recent order keeps its contact data');
+
+// 4) A queued cart reminder carries the cart id, not the recovery token: the worker builds the links when it sends.
+$r8pToken4 = str_repeat('d', 32);
+$r8pDb->prepare("INSERT INTO abandoned_carts (session_id, customer_email, cart_data, store_id, recovery_token, cart_value, item_count, reminder_consent_version, reminder_consent_at, created_at, updated_at)
+    VALUES ('r8p-cart', 'r8p-cart@example.test', '[]', 'default', ?, 100, 1, 'v1', datetime('now'), datetime('now', '-30 hours'), datetime('now', '-30 hours'))")->execute([$r8pToken4]);
+JobQueue::setDir($r8pDir . '/jobs');
+// Loading the worker runs one pass over the (still empty) queue.
+if (!function_exists('handleEmailSend')) {
+    $argv = ['worker.php', '--once'];
+    ob_start();
+    require_once TEST_CLI_DIR . '/../cli/worker.php';
+    ob_end_clean();
+}
+AbandonedCarts::sweep(['base_url' => 'https://shop.example']);
+$r8pReminder = null;
+foreach (JobQueue::pull(500) as $r8pJob) if (($r8pJob['payload']['to'] ?? '') === 'r8p-cart@example.test') $r8pReminder = $r8pJob;
+$r8pPayload = json_encode($r8pReminder['payload'] ?? null);
+assert_true($r8pReminder !== null && !str_contains((string)$r8pPayload, $r8pToken4),
+    "R8 PII queue: the cart reminder job holds no recovery token ({$r8pPayload})");
+MailService::useAdapter(new LogMail(['log_file' => $r8pDir . '/mail4.log']));
+try {
+    LogMail::clearCaptured();
+    if ($r8pReminder !== null) handleEmailSend($r8pReminder['payload'], $r8pReminder);
+    $r8pText = (string)(LogMail::lastCaptured()['text'] ?? '');
+} finally {
+    MailService::useAdapter(null);
+}
+assert_true(str_contains($r8pText, 'https://shop.example/?cart_recover=' . $r8pToken4) && str_contains($r8pText, 'cart_unsubscribe=' . $r8pToken4),
+    'R8 PII queue: the worker still sends the working recovery and opt-out links');

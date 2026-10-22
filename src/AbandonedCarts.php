@@ -138,7 +138,9 @@ class AbandonedCarts {
                 'to' => $email,
                 'locale' => (string)($cart['locale'] ?? ''),
                 '_store_id' => (string)($cart['store_id'] ?? '') ?: 'default',
-                'vars' => self::mailVars($cart, self::storeBaseUrl((string)($cart['store_id'] ?? ''), $baseUrl)),
+                // The links carry the recovery token: the worker builds them at send time (no token in the queue).
+                'cart_id' => (int)$cart['id'],
+                'base_url' => self::storeBaseUrl((string)($cart['store_id'] ?? ''), $baseUrl),
             ], 8);
             $sent++;
         }
@@ -248,6 +250,14 @@ class AbandonedCarts {
             $items[] = $item;
         }
         return $items;
+    }
+
+    /** Reminder mail variables of a queued cart (null when the cart is gone or has no token). */
+    public static function reminderVars(int $cartId, string $baseUrl): ?array {
+        $stmt = Db::get()->prepare('SELECT * FROM abandoned_carts WHERE id = :id');
+        $stmt->execute([':id' => $cartId]);
+        $cart = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $cart && (string)($cart['recovery_token'] ?? '') !== '' ? self::mailVars($cart, $baseUrl) : null;
     }
 
     private static function mailVars(array $cart, string $baseUrl): array {

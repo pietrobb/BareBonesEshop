@@ -322,7 +322,7 @@ $pdo->exec("UPDATE abandoned_carts SET created_at = datetime('now', '-30 hours')
 array_map('unlink', $aigQueueFiles());
 assert_equals(2, AbandonedCarts::sweep(['base_url' => 'https://shop.example']), '6 carts: only carts with recorded consent are reminded');
 $aigReminders = [];
-foreach (JobQueue::pull(50) as $aigJob) if (($aigJob['payload']['template'] ?? '') === 'cart_reminder') $aigReminders[(string)$aigJob['payload']['to']] = $aigJob['payload']['vars'];
+foreach (JobQueue::pull(50) as $aigJob) if (($aigJob['payload']['template'] ?? '') === 'cart_reminder') $aigReminders[(string)$aigJob['payload']['to']] = AbandonedCarts::reminderVars((int)$aigJob['payload']['cart_id'], (string)$aigJob['payload']['base_url']);
 assert_true(!isset($aigReminders['legacy@example.test']), '6 carts: a cart captured before consent was required is not reminded');
 assert_equals('https://shop.example/cs/?cart_recover=' . str_repeat('c', 32), (string)($aigReminders['cz@example.test']['cart_url'] ?? ''), '6 carts: reminder links use the cart store prefix (/cs)');
 assert_equals('https://shop.example/?cart_unsubscribe=' . (string)$aigCart['recovery_token'], (string)($aigReminders['consent@example.test']['unsubscribe_url'] ?? ''), '6 carts: default-store links keep the app_url');
