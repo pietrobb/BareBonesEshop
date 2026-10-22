@@ -114,7 +114,13 @@ class Setup
                 $add('fail', 'runtime.' . $name, "Private path inside the web root {$webRoot} (downloadable over HTTP): {$name}", "Move {$name} above {$webRoot} in config.php (or set operations.document_root if {$webRoot} is not served).");
                 continue;
             }
-            $ready = self::isPrivateAbsolutePath($target, $root) && is_dir($target) && is_writable($target);
+            // apply refuses these too: only a config.php change helps (v1.x kept db/ and jobs/ inside the shop).
+            if (!self::isPrivateAbsolutePath($target, $root)) {
+                $add('fail', 'runtime.' . $name, $path === '' ? "Private path not configured: {$name}" : "Private path relative or inside the application root (refused at runtime): {$name}",
+                    'Set ' . ($name === 'db_dir' ? 'db_sqlite_path' : $name) . " in config.php to an absolute path outside {$root} (as in config.example.php: dirname(__DIR__) . '/bareboneseshop-private/...') and move the existing files there with writers stopped.");
+                continue;
+            }
+            $ready = is_dir($target) && is_writable($target);
             $add($ready ? 'pass' : 'fail', 'runtime.' . $name, $ready ? "Writable private path configured: {$name}" : "Private path missing, unsafe, or not writable: {$name}", 'Run php cli/setup.php apply, then set ownership for the PHP user.');
         }
         // Optional private paths (schema x-private-path): checked only when configured, but never allowed under the web root.

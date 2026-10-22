@@ -71,6 +71,21 @@ foreach (['UpgradeChecks::insecureHttpWebhooks($cfg)', 'UpgradeChecks::cartRemin
     assert_true(str_contains($aunPreflight, $aunCall), "Preflight: staging preflight runs {$aunCall}");
 }
 assert_true(str_contains((string)file_get_contents($aunApp . '/config/config.schema.json'), '"nginx_config"'), 'Doctor: operations.nginx_config is in the config schema');
+// Review round 8: a v1.x config.php (db/ and jobs/ inside the shop, no private_runtime_dir) made doctor say "run
+// php cli/setup.php apply", apply refused the same paths, and doctor said it again. A path that apply cannot fix
+// names the config.php change instead.
+$aunV1 = [];
+foreach (Setup::doctor(array_replace($aunDoctorCfg, ['db_driver' => 'sqlite', 'db_sqlite_path' => $aunApp . '/db/shop.sqlite', 'jobs_dir' => $aunApp . '/jobs', 'private_runtime_dir' => '']), $aunApp, Db::get())['checks'] as $aunCheck) $aunV1[$aunCheck['name']] = $aunCheck;
+foreach (['runtime.db_dir', 'runtime.jobs_dir', 'runtime.private_runtime_dir'] as $aunName) {
+    $aunAction = (string)($aunV1[$aunName]['action'] ?? '');
+    assert_true(($aunV1[$aunName]['status'] ?? '') === 'fail' && !str_contains($aunAction, 'setup.php apply') && str_contains($aunAction, 'config.php') && str_contains($aunAction, 'outside'),
+        "Doctor: a v1.x {$aunName} names the config.php change, not setup.php apply ({$aunAction})");
+}
+$aunMissing = $aunRoot . '/private-not-yet-created/jobs';
+$aunV1 = [];
+foreach (Setup::doctor(array_replace($aunDoctorCfg, ['jobs_dir' => $aunMissing]), $aunApp, Db::get())['checks'] as $aunCheck) $aunV1[$aunCheck['name']] = $aunCheck;
+assert_true(!is_dir($aunMissing) && ($aunV1['runtime.jobs_dir']['status'] ?? '') === 'fail' && str_contains((string)($aunV1['runtime.jobs_dir']['action'] ?? ''), 'setup.php apply'),
+    'Doctor: a private path that only needs creating still points to setup.php apply');
 
 // ── 3. Review dedupe: per session for guests, check-then-record ──────────────────────────────────
 $aunRateProp = new ReflectionProperty(Security::class, 'rateDb');
