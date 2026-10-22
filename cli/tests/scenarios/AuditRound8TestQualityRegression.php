@@ -196,9 +196,17 @@ echo "committed\n";
 PHP);
 $r8qStore = $r8qHolder . '.store';
 file_put_contents($r8qStore, serialize(StoreContext::current()));
-$r8qFile = '';
-foreach (Db::get()->query('PRAGMA database_list')->fetchAll(PDO::FETCH_ASSOC) as $r8qDbRow) if ($r8qDbRow['name'] === 'main') $r8qFile = (string)$r8qDbRow['file'];
-assert_true(!Db::get()->inTransaction() && $r8qFile !== '', 'R8 tests: the credit race starts from committed data in a database file (file: ' . $r8qFile . ')');
+// Both processes race on a private snapshot of the suite database: on Linux a second process opening the suite's
+// path did not see rows the suite's own connection had committed (CI: "RMA is not received ... rma false").
+$r8qFile = test_fixture_path('r8q-credit-db') . '.sqlite';
+@unlink($r8qFile);
+$r8qSuiteDb = Db::get();
+$r8qSuiteDb->exec('VACUUM INTO ' . $r8qSuiteDb->quote($r8qFile));
+$r8qDb = new PDO('sqlite:' . $r8qFile, null, null, [PDO::ATTR_TIMEOUT => 10, PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+$r8qDb->exec('PRAGMA journal_mode = WAL');
+Db::init($r8qDb, 'sqlite');
+assert_equals('received', (string)$r8qDb->query('SELECT status FROM rma_requests WHERE id = ' . (int)$r8qRma)->fetchColumn(),
+    'R8 tests: the credit race starts from a private database snapshot holding the received return');
 $r8qProc = proc_open([PHP_BINARY, $r8qHolder, dirname(TEST_CLI_DIR), $r8qFile, $r8qStore, (string)$r8qRma, (string)$r8qRmaItem, '97481'], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $r8qPipes);
 fclose($r8qPipes[0]);
 $r8qHeld = trim((string)fgets($r8qPipes[1]));
@@ -214,8 +222,14 @@ fclose($r8qPipes[2]);
 proc_close($r8qProc);
 @unlink($r8qHolder);
 @unlink($r8qStore);
-$r8qCommitted = static fn(string $sql): int => (int)$pdo->query($sql)->fetchColumn();
-assert_equals(['held', 'Credit quantity exceeds received uncommitted quantity', 'committed', 2, 0], [$r8qHeld, $r8qCredit, $r8qHolderOut,
+$r8qCommitted = static fn(string $sql): int => (int)$r8qDb->query($sql)->fetchColumn();
+$r8qResult = [$r8qHeld, $r8qCredit, $r8qHolderOut,
     $r8qCommitted("SELECT COALESCE(SUM(quantity), 0) FROM return_exchanges WHERE rma_item_id = {$r8qRmaItem}"),
-    $r8qCommitted("SELECT COALESCE(SUM(quantity), 0) FROM credit_note_items WHERE rma_item_id = {$r8qRmaItem}")],
+    $r8qCommitted("SELECT COALESCE(SUM(quantity), 0) FROM credit_note_items WHERE rma_item_id = {$r8qRmaItem}")];
+Db::init($r8qSuiteDb, 'sqlite');
+$r8qDb = null;
+@unlink($r8qFile);
+@unlink($r8qFile . '-wal');
+@unlink($r8qFile . '-shm');
+assert_equals(['held', 'Credit quantity exceeds received uncommitted quantity', 'committed', 2, 0], $r8qResult,
     'R8 tests: a credit note started while an exchange of the same units is uncommitted waits for it and is refused (2 exchanged, 0 credited)');
