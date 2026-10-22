@@ -49,6 +49,10 @@ $loggedIn = !empty($_SESSION['customer_id']);
 $footerCategories = Categories::roots();
 usort($footerCategories, static fn(array $a, array $b): int => (int)$b['product_count'] <=> (int)$a['product_count']);
 $footerCategories = array_filter($footerCategories, static fn(array $category): bool => (int)$category['product_count'] > 0 && $category['slug'] !== 'uncategorized');
+// R8: anyone (guests too) reopens the banner from the footer (?cookie_settings=1) with the current choice ticked.
+$cookieChoice = json_decode((string)($_COOKIE['cc_v1'] ?? ''), true);
+$cookieSettings = ($_GET['cookie_settings'] ?? '') === '1';
+$adr = ConsumerNotice::adr($store->legal());
 $shell = [
     't' => I18n::all(),
     'brand' => $brand,
@@ -75,11 +79,17 @@ $shell = [
     'cookies_url' => Template::storeUrl('/?page=cookies'),
     'withdrawal_url' => Template::storeUrl('/?page=withdrawal'),
     'complaint_url' => Template::storeUrl('/?page=complaint'),
-    'show_cookie_banner' => (string)($_COOKIE['cc_v1'] ?? '') === '',
-    // Without JS the banner posts to account.php and comes back to this page.
+    'accessibility_url' => Template::storeUrl('/?page=accessibility'),
+    'cookie_settings_url' => Template::storeUrl('/?cookie_settings=1'),
+    'adr_name' => $adr['name'], 'adr_url' => $adr['url'],
+    'show_cookie_banner' => $cookieSettings || (string)($_COOKIE['cc_v1'] ?? '') === '',
+    'cookie_settings_open' => $cookieSettings,
+    'cookie_analytics_on' => is_array($cookieChoice) && !empty($cookieChoice['analytics']),
+    'cookie_marketing_on' => is_array($cookieChoice) && !empty($cookieChoice['marketing']),
+    // Without JS the banner posts to account.php and comes back to this page (the settings link returns home).
     'cookie_action_url' => Template::storeUrl('/account.php'),
     'cookie_csrf_token' => Security::csrfToken(),
-    'cookie_return_to' => Security::safeLocalPath($_SERVER['REQUEST_URI'] ?? null, Template::storeUrl('/')),
+    'cookie_return_to' => $cookieSettings ? $homeUrl : Security::safeLocalPath($_SERVER['REQUEST_URI'] ?? null, Template::storeUrl('/')),
     'cookie_title' => I18n::t('cookie_banner.title'),
     'cookie_body' => I18n::t('cookie_banner.body'),
     'cookie_policy_link' => I18n::t('cookie_banner.policy_link'),

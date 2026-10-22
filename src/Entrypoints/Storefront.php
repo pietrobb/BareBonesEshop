@@ -99,7 +99,8 @@ switch ($page) {
     case 'privacy':
     case 'terms':
     case 'cookies':
-        $legalTitles = ['privacy' => $t('privacy_policy'), 'terms' => $t('terms_conditions'), 'cookies' => $t('cookie_policy')];
+    case 'accessibility':
+        $legalTitles = ['privacy' => $t('privacy_policy'), 'terms' => $t('terms_conditions'), 'cookies' => $t('cookie_policy'), 'accessibility' => $t('accessibility_statement')];
         $title = Template::pageTitle($legalTitles[$page]);
         $content = renderLegalPage($page);
         break;
