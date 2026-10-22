@@ -239,20 +239,22 @@ class Import {
     private static function createProduct(array $data, string $productType, PDO $db): int {
         $sku = trim($data['sku']);
         $name = trim($data['name']);
+        // A missing price is an error, not a free product; a free one says 0.
+        if (trim((string)($data['price'] ?? '')) === '') throw new \InvalidArgumentException('Missing required field: price');
         $attrs = [];
         foreach ($data as $key => $value) {
             if (str_starts_with($key, 'attr:') && $value !== '') $attrs[substr($key, 5)] = $value;
         }
         self::upsertProduct([
             'sku'           => $sku,
-            'slug'          => trim($data['slug'] ?? '') ?: self::slugify($name),
+            'slug'          => trim($data['slug'] ?? '') ?: self::productSlug($name, $sku),
             'product_type'  => $productType,
             'name'          => $name,
             'category_id'   => self::ensureCategory(trim($data['category'] ?? 'uncategorized'), $db),
-            'price'         => self::parsePriceToCents($data['price'] ?? 0),
+            'price'         => self::parsePriceToCents($data['price']),
             'compare_price' => !empty($data['compare_price']) ? self::parsePriceToCents($data['compare_price']) : null,
             'stock'         => (int)($data['stock'] ?? 0),
-            'status'        => trim($data['status'] ?? 'active'),
+            'status'        => self::productStatus((string)($data['status'] ?? ''), 'active'),
             'summary'       => trim($data['summary'] ?? ''),
             'description'   => trim($data['description'] ?? ''),
             'images'        => self::pipeList($data['image'] ?? ''),
@@ -276,13 +278,13 @@ class Import {
         $json = static fn($stored): array => is_array($d = json_decode((string)$stored, true)) ? $d : [];
         $name = trim($data['name']);
         $set = ['name' => $name];
-        if ($has('slug')) $set['slug'] = trim((string)$data['slug']) ?: self::slugify($name);
+        if ($has('slug')) $set['slug'] = trim((string)$data['slug']) ?: self::productSlug($name, (string)$existing['sku']);
         if ($has('product_type')) $set['product_type'] = trim((string)$data['product_type']) ?: 'simple';
         if ($has('category')) $set['category_id'] = self::ensureCategory(trim((string)$data['category']) ?: 'uncategorized', $db);
-        if ($has('price')) $set['price'] = self::assertVariantFloor((int)$existing['id'], self::parsePriceToCents($data['price']));
+        if ($has('price') && trim((string)$data['price']) !== '') $set['price'] = self::assertVariantFloor((int)$existing['id'], self::parsePriceToCents($data['price']));
         if ($has('compare_price')) $set['compare_price'] = !empty($data['compare_price']) ? self::parsePriceToCents($data['compare_price']) : null;
         if ($has('stock') && trim((string)$data['stock']) !== '') $set['stock'] = (int)$data['stock'];
-        if ($has('status')) $set['status'] = trim((string)$data['status']) ?: 'active';
+        if ($has('status')) $set['status'] = self::productStatus((string)$data['status'], (string)$existing['status']);
         if ($has('summary')) $set['summary'] = trim((string)$data['summary']);
         if ($has('description')) $set['description'] = Security::sanitizeRichHtml(trim((string)$data['description']));
         if ($has('weight_g') && trim((string)$data['weight_g']) !== '') $set['weight_g'] = (int)$data['weight_g'];
@@ -457,7 +459,7 @@ class Import {
         $categoryId = 0;
 
         foreach ($parts as $part) {
-            $slug = self::slugify($part);
+            $slug = self::categorySlug($part);
             $fullPath = $parentPath === null ? $slug : $parentPath . '/' . $slug;
 
             // Imported products land in the current catalog, so their categories must too:
@@ -748,6 +750,28 @@ class Import {
     /** Generate URL-safe slug with proper Central European transliteration */
     public static function slugify(string $text): string {
         return Str::slug($text);
+    }
+
+    /** A product's slug from its name; a name with nothing to transliterate (e.g. Japanese) falls back to the SKU. */
+    private static function productSlug(string $name, string $sku): string {
+        return self::slugify($name) ?: (self::slugify($sku) ?: 'p-' . substr(sha1($sku), 0, 12));
+    }
+
+    /** A category's slug from its name; one with nothing to transliterate gets a stable one of its own, never "". */
+    private static function categorySlug(string $name): string {
+        return self::slugify($name) ?: 'c-' . substr(sha1($name), 0, 10);
+    }
+
+    private const PRODUCT_STATUSES = ['active', 'draft', 'archived'];
+
+    /** The status column: active, draft or archived in any case; an empty cell keeps $default (new product: active). */
+    private static function productStatus(string $value, string $default): string {
+        $status = strtolower(trim($value));
+        if ($status === '') return $default;
+        if (!in_array($status, self::PRODUCT_STATUSES, true)) {
+            throw new \InvalidArgumentException('Invalid status "' . trim($value) . '" (use ' . implode(', ', self::PRODUCT_STATUSES) . ')');
+        }
+        return $status;
     }
 
     /** Normalize string for FTS token */
