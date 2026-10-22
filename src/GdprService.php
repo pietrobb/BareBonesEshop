@@ -719,11 +719,15 @@ class GdprService {
         $sessionKeys = self::customerSessionKeys($db, $customerId, $orderIds);
 
         // Not accounting data: the orders' IP address, phone number and free-text note go now; name, address and e-mail
-        // stay for the 10-year retention (PII_REGISTRY 'orders').
-        $stmt = $db->prepare("UPDATE orders SET ip_address = '', customer_phone = '', notes = ''
-            WHERE id IN (" . self::CUSTOMER_ORDERS . ") AND (ip_address <> '' OR customer_phone <> '' OR notes <> '')");
-        $stmt->execute($ownership);
-        $rows['orders'] = $stmt->rowCount();
+        // stay for the 10-year retention (PII_REGISTRY 'orders'). The ids are bound (MySQL refuses an UPDATE of orders
+        // that selects from orders, error 1093).
+        $rows['orders'] = 0;
+        if ($orderIds !== []) {
+            $stmt = $db->prepare("UPDATE orders SET ip_address = '', customer_phone = '', notes = ''
+                WHERE (ip_address <> '' OR customer_phone <> '' OR notes <> '')" . self::inList(' AND id', $orderIds));
+            $stmt->execute($orderIds);
+            $rows['orders'] = $stmt->rowCount();
+        }
 
         $stmt = $db->prepare("DELETE FROM product_reviews WHERE customer_id = :id");
         $stmt->execute([':id' => $customerId]);
