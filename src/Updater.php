@@ -367,12 +367,28 @@ final class Updater
         return $rows;
     }
 
-    public function doctor(?string $publicKey = null, ?UpdatePackage $package = null, bool $probeDatabaseBackup = true): array
+    /** config.php paths the current release refuses inside the application root (v1.x shipped them there). */
+    private const PRIVATE_PATH_SETTINGS = ['jobs_dir', 'invoice_storage_dir', 'private_cache_dir', 'gdpr_salt_file', 'update_storage_dir'];
+
+    public function doctor(?string $publicKey = null, ?UpdatePackage $package = null, bool $probeDatabaseBackup = true, ?array $config = null): array
     {
         $checks = [];
         $add = static function (string $level, string $name, string $message) use (&$checks): void {
             $checks[] = compact('level', 'name', 'message');
         };
+
+        if ($config !== null) {
+            $inside = [];
+            foreach (self::PRIVATE_PATH_SETTINGS as $setting) {
+                $path = trim((string)($config[$setting] ?? ''));
+                if ($path !== '' && $this->isInsideRoot($path)) $inside[] = "{$setting} ({$path})";
+            }
+            $add($inside === [] ? 'ok' : 'fail', 'config', $inside === []
+                ? 'config.php keeps private runtime paths outside the application root'
+                : 'config.php points ' . implode(', ', $inside) . ' inside the application root (or uses a relative path), which this release refuses'
+                    . ' (the admin, workers and cron fail); move them outside the web root (default: ../bareboneseshop-private/…)'
+                    . ' and move their contents before the update');
+        }
 
         $add(PHP_VERSION_ID >= 80100 ? 'ok' : 'fail', 'php', 'PHP ' . PHP_VERSION . ' (8.1+ required)');
         $add(PHP_SAPI === 'cli' ? 'ok' : 'fail', 'sapi', 'Update command is running under ' . PHP_SAPI);
@@ -474,6 +490,28 @@ final class Updater
             'checks' => $checks,
             'package_preflight' => $preflight,
         ];
+    }
+
+    /** Mirrors the runtime checks (JobQueue::validatePrivateDir): a relative path is refused as well. */
+    private function isInsideRoot(string $path): bool
+    {
+        $absolute = str_starts_with($path, '/') || str_starts_with($path, '\\\\') || preg_match('/^[A-Za-z]:[\\\\\/]/', $path) === 1;
+        if (!$absolute) return true;
+        $probe = $path;
+        $suffix = [];
+        while (!file_exists($probe) && dirname($probe) !== $probe) {
+            array_unshift($suffix, basename($probe));
+            $probe = dirname($probe);
+        }
+        $candidate = realpath($probe) ?: $probe;
+        foreach ($suffix as $segment) {
+            if ($segment === '.' || $segment === '') continue;
+            $candidate = $segment === '..' ? dirname($candidate) : $candidate . '/' . $segment;
+        }
+        $normalize = static fn(string $value): string => rtrim(DIRECTORY_SEPARATOR === '\\' ? strtolower(str_replace('\\', '/', $value)) : $value, '/');
+        $candidate = $normalize($candidate);
+        $root = $normalize(realpath($this->root) ?: $this->root);
+        return $candidate === $root || str_starts_with($candidate, $root . '/');
     }
 
     private function createSnapshot(UpdatePackage $package, array $report, string $reason): array

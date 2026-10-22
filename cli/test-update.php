@@ -234,6 +234,19 @@ try {
         assert_equals('ok', $doctorChecks['package']['level'] ?? null, 'Updater doctor: signed package preflight is included');
         $skippedProbeReport = $doctorUpdater->doctor($public, $signedPackage, false);
         assert_equals('NOT_READY', $skippedProbeReport['status'], 'Updater doctor: skipping the database backup proof cannot report production readiness');
+        // Review round 8: v1.x config.php kept jobs_dir inside the shop, which the current JobQueue refuses — the admin
+        // dashboard died with a 500 after the update. doctor names the setting before anything changes.
+        $v1ConfigReport = $doctorUpdater->doctor($public, $signedPackage, true, ['jobs_dir' => $updateInstalled . '/jobs', 'cache_dir' => $updateInstalled . '/cache']);
+        $v1ConfigCheck = array_column($v1ConfigReport['checks'], null, 'name')['config'] ?? [];
+        assert_true($v1ConfigReport['status'] === 'NOT_READY' && ($v1ConfigCheck['level'] ?? null) === 'fail'
+            && str_contains((string)($v1ConfigCheck['message'] ?? ''), 'jobs_dir (') && !str_contains((string)($v1ConfigCheck['message'] ?? ''), 'cache_dir'),
+            'Updater doctor: a v1.x jobs_dir inside the application root fails the config check (' . ($v1ConfigCheck['message'] ?? 'no config check') . ')');
+        $escapeCheck = array_column($doctorUpdater->doctor($public, $signedPackage, true, ['jobs_dir' => $updateTestRoot . '/never-created/../' . basename($updateInstalled) . '/new-jobs', 'private_cache_dir' => 'storage/cache'])['checks'], null, 'name')['config'] ?? [];
+        assert_true(($escapeCheck['level'] ?? null) === 'fail' && str_contains((string)($escapeCheck['message'] ?? ''), 'jobs_dir (') && str_contains((string)($escapeCheck['message'] ?? ''), 'private_cache_dir ('),
+            'Updater doctor: a ../ path back into the application root and a relative path fail the config check (' . ($escapeCheck['message'] ?? 'no config check') . ')');
+        $privateConfigReport = $doctorUpdater->doctor($public, $signedPackage, true, ['jobs_dir' => $updateTestRoot . '/private-jobs']);
+        assert_equals(['READY', 'ok'], [$privateConfigReport['status'], array_column($privateConfigReport['checks'], null, 'name')['config']['level'] ?? null],
+            'Updater doctor: private runtime paths outside the application root pass');
         $doctorPdo = null;
 
         $wrongPair = sodium_crypto_sign_keypair();
