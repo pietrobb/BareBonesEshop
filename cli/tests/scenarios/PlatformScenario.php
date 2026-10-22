@@ -170,7 +170,7 @@ assert_equals(1, AbandonedCarts::sweep(['base_url' => 'https://shop.example/']),
 $acJobs = $acReminders();
 assert_equals(1, count($acJobs), 'Cart reminder: exactly one mail job is queued');
 assert_equals('shopper@example.com', (string)($acJobs[0]['payload']['to'] ?? ''), 'Cart reminder: goes to the cart e-mail');
-$acVars = (array)($acJobs[0]['payload']['vars'] ?? []);
+$acVars = (array)AbandonedCarts::reminderVars((int)($acJobs[0]['payload']['cart_id'] ?? 0), (string)($acJobs[0]['payload']['base_url'] ?? ''));
 assert_equals('https://shop.example/?cart_recover=' . $acFirst['recovery_token'], (string)($acVars['cart_url'] ?? ''), 'Cart reminder: absolute recovery link');
 assert_equals('https://shop.example/?cart_unsubscribe=' . $acFirst['recovery_token'], (string)($acVars['unsubscribe_url'] ?? ''), 'Cart reminder: absolute opt-out link');
 assert_equals(0, AbandonedCarts::sweep(['base_url' => 'https://shop.example']), 'Cart reminder: second sweep sends nothing');

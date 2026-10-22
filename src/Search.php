@@ -37,7 +37,7 @@ class Search {
             return self::runQuery($q, $page, $perPage, $opts, false);
         } catch (PDOException $e) {
             // A query the full-text engine still refuses must not become a 500: degrade to a LIKE scan.
-            error_log('[Search] full-text query failed, using LIKE fallback: ' . $e->getMessage());
+            Logger::phpLog('[Search] full-text query failed, using LIKE fallback: ' . $e->getMessage());
             return self::runQuery($q, $page, $perPage, $opts, true);
         }
     }

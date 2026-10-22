@@ -131,7 +131,8 @@ $architectureBudgets = [
     // +15 lines: rejected product/CMS saves keep the typed input; product bulk actions report and keep the list filters.
     // +1 line: product save marks the catalog cache stale (Cache::catalogChanged).
     // +1 line: product save emits product.updated for API subscribers (round 6 review).
-    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1269, 'functions' => 24, 'max_function_lines' => 210, 'coupling' => 18],
+    // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.
+    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1269, 'functions' => 24, 'max_function_lines' => 210, 'coupling' => 19],
     // +1 coupling: ProductVariants owns variant validation, ledger stock booking and the delete/SKU-change guards.
     // +1 coupling: I18n gives the editor's labels in the admin language (A15.5).
     'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 105, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 4],
@@ -160,13 +161,15 @@ $architectureBudgets = [
     // +1 function, +1 coupling: adminCodeLabel shows stored codes (product/page status, attribute type) in the admin language (A15.5).
     // +lines: windowed pagination (first, last and a window around the current page) instead of one link per page.
     'src/Entrypoints/Admin/Shared.php' => ['lines' => 58, 'functions' => 5, 'max_function_lines' => 17, 'coupling' => 1],
-    'src/Entrypoints/Admin/Shipments.php' => ['lines' => 260, 'functions' => 9, 'max_function_lines' => 105, 'coupling' => 8],
+    // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.
+    'src/Entrypoints/Admin/Shipments.php' => ['lines' => 260, 'functions' => 9, 'max_function_lines' => 105, 'coupling' => 9],
     // A15.3: store switcher and per-request store activation, limited to the admin's granted stores (AdminStoreScope).
     'src/Entrypoints/Admin/StoreScope.php' => ['lines' => 70, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 5],
     'src/Entrypoints/Admin/Suppliers.php' => ['lines' => 175, 'functions' => 8, 'max_function_lines' => 75, 'coupling' => 5],
     'src/Entrypoints/Admin/Taxonomy.php' => ['lines' => 140, 'functions' => 7, 'max_function_lines' => 65, 'coupling' => 4],
     // +1 coupling: ApiRoute maps the /api/v1 route groups (storefront, options, webhooks, csp-report) to actions.
-    'src/Entrypoints/Api.php' => ['lines' => 75, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 6],
+    // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.
+    'src/Entrypoints/Api.php' => ['lines' => 75, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 7],
     // External key-authenticated API v1 (was api/v1/index.php), loaded by Api.php for non-browser routes.
     // +5 lines: the path below the install subdirectory / store prefix, and the prefix-vs-key store check.
     'src/Entrypoints/ApiExternal.php' => ['lines' => 55, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 6],
@@ -186,7 +189,8 @@ $architectureBudgets = [
     // +1 function: storefrontCartPrice() formats cart/checkout amounts in the cart currency (shared-catalog stores).
     // +1 line / +1 coupling: round-4 merge (cart-currency formatting + translated free/payment labels).
     // +2 lines (renderCheckout): the form's coupon attempts spend the coupon API's throttle (round 4 final review).
-    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 253, 'functions' => 7, 'max_function_lines' => 102, 'coupling' => 11],
+    // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.
+    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 253, 'functions' => 7, 'max_function_lines' => 102, 'coupling' => 12],
     // Ratcheted: canonical/robots/hreflang/JSON-LD moved to StorefrontSeo (storefront SEO audit).
     // +2 coupling: cart currency decimals for the JS config and the one-shot StorefrontFlash notice.
     /* R8: footer ADR body (ConsumerNotice), accessibility link, guest cookie settings */ 'src/Entrypoints/Storefront/Layout.php' => ['lines' => 145, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],

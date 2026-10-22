@@ -42,7 +42,7 @@ class GdprService {
         'password_reset_tokens'        => ['columns' => ['customer_id', 'token'], 'erase' => 'delete', 'export' => null,
             'reason' => 'credential secrets are never exported'],
         'orders'                       => ['columns' => ['customer_id', 'customer_name', 'customer_email', 'customer_phone', 'shipping_addr', 'ip_address', 'notes'], 'erase' => 'retain', 'export' => 'orders',
-            'reason' => '10-year accounting retention (SK Act 431/2002 §35), scrubbed by cli/gdpr-gc.php afterwards'],
+            'reason' => '10-year accounting retention (SK Act 431/2002 §35), scrubbed by cli/gdpr-gc.php afterwards; ip_address, customer_phone and notes are no accounting data: erased with the customer and scrubbed after 180 days (orders_contact)'],
         'order_items'                  => ['columns' => ['name'], 'erase' => 'retain', 'export' => 'orders', 'reason' => 'accounting record of the retained order'],
         'invoices'                     => ['columns' => ['customer_snapshot'], 'erase' => 'retain', 'export' => 'orders', 'reason' => 'accounting record of the retained order'],
         'order_consents'               => ['columns' => ['ip_hash', 'user_agent'], 'erase' => 'retain', 'export' => 'orders',
@@ -64,6 +64,9 @@ class GdprService {
             'reason' => 'complaint record and the written decision for the 24-month liability (Directive (EU) 2019/771), kept with the retained order'],
         'event_outbox'                 => ['columns' => ['payload'], 'erase' => 'scrub', 'export' => 'events'],
         'queue_jobs'                   => ['columns' => ['payload'], 'erase' => 'scrub', 'export' => 'queued_jobs'],
+        // The gateway's answer can name the payer (Stripe customer_details, PayPal payer, receipt_email): erasure removes those
+        // fields and keeps ids, amounts and events the refund and duplicate-capture checks read.
+        'payment_transactions'         => ['columns' => ['raw_response'], 'erase' => 'scrub', 'export' => 'orders'],
     ];
 
     /**
@@ -597,7 +600,7 @@ class GdprService {
             ]);
         } catch (\Throwable $e) {
             $errorId = bin2hex(random_bytes(6));
-            error_log("GDPR erase audit failed [{$errorId}] for " . ($customerId !== null ? "customer #{$customerId}" : 'a guest') . ': ' . $e->getMessage());
+            Logger::phpLog("GDPR erase audit failed [{$errorId}] for " . ($customerId !== null ? "customer #{$customerId}" : 'a guest') . ': ' . $e->getMessage());
         }
     }
 
@@ -715,6 +718,17 @@ class GdprService {
         // Read before carts and consents are erased: they are what links the browser sessions.
         $sessionKeys = self::customerSessionKeys($db, $customerId, $orderIds);
 
+        // Not accounting data: the orders' IP address, phone number and free-text note go now; name, address and e-mail
+        // stay for the 10-year retention (PII_REGISTRY 'orders'). The ids are bound (MySQL refuses an UPDATE of orders
+        // that selects from orders, error 1093).
+        $rows['orders'] = 0;
+        if ($orderIds !== []) {
+            $stmt = $db->prepare("UPDATE orders SET ip_address = '', customer_phone = '', notes = ''
+                WHERE (ip_address <> '' OR customer_phone <> '' OR notes <> '')" . self::inList(' AND id', $orderIds));
+            $stmt->execute($orderIds);
+            $rows['orders'] = $stmt->rowCount();
+        }
+
         $stmt = $db->prepare("DELETE FROM product_reviews WHERE customer_id = :id");
         $stmt->execute([':id' => $customerId]);
         $rows['product_reviews'] = $stmt->rowCount();
@@ -759,6 +773,19 @@ class GdprService {
                 WHERE store_id = :receipt_store AND note IS NOT NULL AND note <> '' AND rma_id IN (SELECT id FROM rma_requests WHERE {$rmaScope})");
             $stmt->execute($ownership + [':marker' => $marker, ':receipt_store' => $store, ':rma_store' => $store, ':rma_customer' => $customerId]);
             $rows['return_receipts'] = $stmt->rowCount();
+        }
+
+        $rows['payment_transactions'] = 0;
+        if ($orderIds !== []) {
+            $stmt = $db->prepare("SELECT id, raw_response FROM payment_transactions WHERE store_id = ?" . self::inList(' AND order_id', $orderIds));
+            $stmt->execute(array_merge([$store], $orderIds));
+            $update = $db->prepare("UPDATE payment_transactions SET raw_response = ? WHERE id = ?");
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $tx) {
+                $raw = json_decode((string)$tx['raw_response'], true);
+                if (!is_array($raw) || ($scrubbed = self::scrubPaymentPayer($raw, $email, $placeholder)) === $raw) continue;
+                $update->execute([json_encode($scrubbed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), $tx['id']]);
+                $rows['payment_transactions'] += $update->rowCount();
+            }
         }
 
         $payloads = self::customerPayloadRows($db, $customerId, $email, $ownership, $orderIds);
@@ -901,6 +928,18 @@ class GdprService {
             }
         }
         return $payload;
+    }
+
+    /** Gateway fields that name the payer; the whole value (an address object too) becomes the placeholder. */
+    private const PAYMENT_PAYER_KEYS = '/^(?:payer|contact|customer_details|billing_details|shipping(?:_details|_address)?|address|billing_address|(?:customer_|receipt_|payer_|billing_)?(?:email|name|phone)|(?:first|last|full)_?name)$/i';
+
+    /** A gateway response without its payer fields, and without any other value equal to the customer's e-mail. */
+    private static function scrubPaymentPayer(mixed $data, string $email, string $placeholder): mixed {
+        if (!is_array($data)) return is_string($data) && $email !== '' && strcasecmp(trim($data), $email) === 0 ? $placeholder : $data;
+        foreach ($data as $key => $value) {
+            $data[$key] = is_string($key) && preg_match(self::PAYMENT_PAYER_KEYS, $key) === 1 ? $placeholder : self::scrubPaymentPayer($value, $email, $placeholder);
+        }
+        return $data;
     }
 
     /** A JSON payload column rewritten by scrubPayloadEmail(); an undecodable payload is returned unchanged. */

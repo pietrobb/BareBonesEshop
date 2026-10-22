@@ -210,7 +210,7 @@ function adminShipmentAction(int $orderId, Closure $change, bool $requireOpenOrd
             str_contains($e->getMessage(), 'exceeds reserved allocation') => 'admin.shipment.msg.exceeds',
             default => 'admin.shipment.msg.failed',
         };
-        if ($key === 'admin.shipment.msg.failed') error_log("Admin shipment [{$orderId}]: " . $e->getMessage());
+        if ($key === 'admin.shipment.msg.failed') Logger::phpLog("Admin shipment [{$orderId}]: " . $e->getMessage());
         setFlash('err', I18n::t($key));
     }
     header("Location: admin.php?p=order&id={$orderId}#shipments");

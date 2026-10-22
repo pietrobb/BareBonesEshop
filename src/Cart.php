@@ -475,7 +475,7 @@ class Cart {
             AbandonedCarts::capture($email, null, $reminderConsent);
         } catch (\Throwable $e) {
             // Cart recovery tracking must never block checkout.
-            error_log("Cart::setEmail persist failed: " . $e->getMessage());
+            Logger::phpLog("Cart::setEmail persist failed: " . $e->getMessage());
         }
     }
 }

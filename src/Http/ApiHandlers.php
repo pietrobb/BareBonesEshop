@@ -1303,11 +1303,11 @@ function apiWebhookPulledNotification(string $provider): ?array {
     try {
         $result = PaymentService::handlePulledNotification($notification, $gateway, $provider);
     } catch (PaymentNotificationUnverified $e) {
-        error_log("webhook_payment [{$provider}] unverified notification: " . $e->getMessage());
+        Logger::phpLog("webhook_payment [{$provider}] unverified notification: " . $e->getMessage());
         http_response_code(400);
         return ['error' => 'Invalid notification'];
     } catch (\Throwable $e) {
-        error_log("webhook_payment [{$provider}] error: " . $e->getMessage());
+        Logger::phpLog("webhook_payment [{$provider}] error: " . $e->getMessage());
         // Same critical incident as the signed-webhook path: a verified payment event the shop could not apply.
         IncidentMonitor::report('payment.webhook_failed', 'webhook', 'critical', ['exception' => $e]);
         http_response_code(500);

@@ -70,6 +70,6 @@ if (!defined('BB_TEST_LOAD_API_ONLY')) {
     } catch (\Throwable $e) {
         http_response_code(500);
         echo json_encode(['error' => 'Internal error']);
-        error_log("API error [{$action}]: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+        Logger::phpLog("API error [{$action}]: " . $e->getMessage() . "\n" . $e->getTraceAsString());
     }
 }

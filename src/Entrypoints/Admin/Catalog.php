@@ -738,7 +738,7 @@ function handleDigitalAssetSave(): void {
             'download_limit' => $downloadLimit, 'expiry_days' => $expiryDays, 'active' => $active], 'Admin digital asset save');
         setFlash('ok', I18n::t('admin.digital.saved'));
     } catch (Throwable $e) {
-        error_log('Digital asset save failed: ' . $e->getMessage());
+        Logger::phpLog('Digital asset save failed: ' . $e->getMessage());
         setFlash('err', I18n::t('admin.digital.save_failed'));
     }
     header('Location: admin.php?p=digital_assets');

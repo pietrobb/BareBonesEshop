@@ -90,7 +90,7 @@ final class AccountViewModel
         $ids = array_map(static fn(array $order): int => (int)$order['id'], $orders);
         if ($ids) {
             $placeholders = implode(',', array_fill(0, count($ids), '?'));
-            $statement = Db::get()->prepare("SELECT order_id, number, download_token FROM invoices WHERE order_id IN ({$placeholders}) AND status != 'cancelled' ORDER BY id DESC");
+            $statement = Db::get()->prepare("SELECT id, order_id, number FROM invoices WHERE order_id IN ({$placeholders}) AND status != 'cancelled' ORDER BY id DESC");
             $statement->execute($ids);
             foreach ($statement->fetchAll() as $invoice) $invoices[(int)$invoice['order_id']] = $invoice;
         }
@@ -114,7 +114,7 @@ final class AccountViewModel
                 'date' => I18n::dateTime((string)$order['created_at']),
                 'invoice' => $invoice ? [
                     'number' => (string)$invoice['number'],
-                    'url' => Template::storeUrl('/account.php?p=invoice&token=' . rawurlencode((string)$invoice['download_token'])),
+                    'url' => Template::storeUrl('/account.php?p=invoice_pdf&id=' . (int)$invoice['id']),
                 ] : null,
             ];
         }, $orders);
@@ -129,7 +129,7 @@ final class AccountViewModel
         $payment = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
         $shipping = json_decode((string)($order['shipping_rate_snapshot'] ?? '{}'), true) ?: [];
         $address = json_decode((string)($order['shipping_addr'] ?? '{}'), true) ?: [];
-        $invoice = Db::get()->prepare("SELECT number, download_token FROM invoices WHERE order_id = ? AND status != 'cancelled' ORDER BY id DESC LIMIT 1");
+        $invoice = Db::get()->prepare("SELECT id, number FROM invoices WHERE order_id = ? AND status != 'cancelled' ORDER BY id DESC LIMIT 1");
         $invoice->execute([$id]);
         $invoice = $invoice->fetch() ?: null;
         $line = static fn(string $label, $cents): array => ['label' => I18n::t($label), 'amount' => $money($cents)];
@@ -164,7 +164,7 @@ final class AccountViewModel
             'total' => $money($order['total']),
             'invoice' => $invoice ? [
                 'number' => (string)$invoice['number'],
-                'url' => Template::storeUrl('/account.php?p=invoice&token=' . rawurlencode((string)$invoice['download_token'])),
+                'url' => Template::storeUrl('/account.php?p=invoice_pdf&id=' . (int)$invoice['id']),
             ] : null,
             'bank_transfer_html' => BankTransferInstructions::html($order),
             'orders_url' => Template::storeUrl('/account.php?p=orders'),

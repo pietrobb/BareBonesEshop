@@ -176,7 +176,7 @@ function processCheckout(): array {
         $pending = !empty($result['payment_url']) && !Security::formActionAllows((string)$result['payment_url'])
             ? CheckoutSession::pendingPayment() : null;
         if ($pending) {
-            error_log('Checkout payment origin missing from CSP form-action: ' . (string)parse_url((string)$result['payment_url'], PHP_URL_HOST));
+            Logger::phpLog('Checkout payment origin missing from CSP form-action: ' . (string)parse_url((string)$result['payment_url'], PHP_URL_HOST));
             return ['page' => renderPendingPayment($pending, false)];
         }
         $target = !empty($result['payment_url'])

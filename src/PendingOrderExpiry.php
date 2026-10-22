@@ -53,7 +53,7 @@ class PendingOrderExpiry {
                 ));
             } catch (\Throwable $e) {
                 // A failing store must not stop the sweep of the remaining stores.
-                error_log("Pending order expiry failed for store {$storeId}: " . $e->getMessage());
+                Logger::phpLog("Pending order expiry failed for store {$storeId}: " . $e->getMessage());
                 IncidentMonitor::report('order.expiry_failed', 'orders', 'critical', ['exception' => $e]);
             }
         }

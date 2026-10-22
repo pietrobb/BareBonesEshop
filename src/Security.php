@@ -50,6 +50,8 @@ class Security {
     // and every inline <script nonce="..."> in the templates.
     // ============================================================
     private static ?string $cspNonce = null;
+    /** Query parameters that carry a bearer token. */
+    private const BEARER_QUERY_KEYS = ['token' => true, 'confirmation_token' => true, 'cart_recover' => true, 'cart_unsubscribe' => true];
 
     public static function cspNonce(): string {
         if (self::$cspNonce === null) {
@@ -65,7 +67,9 @@ class Security {
         header("X-Content-Type-Options: nosniff");
         header("X-Frame-Options: DENY");
         header("X-XSS-Protection: 1; mode=block");
-        header("Referrer-Policy: strict-origin-when-cross-origin");
+        // A page opened by a bearer link (reset, e-mail verification, invoice, download, cart recovery, order confirmation)
+        // sends no Referer at all: its stylesheets and images would carry the token into this server's own access log.
+        header('Referrer-Policy: ' . (array_intersect_key($_GET, self::BEARER_QUERY_KEYS) !== [] ? 'no-referrer' : 'strict-origin-when-cross-origin'));
         header("Permissions-Policy: camera=(), microphone=(), geolocation=()");
         // Behind a TLS-terminating proxy PHP sees plain http: trust X-Forwarded-Proto from trusted_proxies, or an https
         // app_url (browsers ignore HSTS received over http, so sending it there is harmless).
@@ -118,7 +122,7 @@ class Security {
         try {
             $codes = array_intersect(PaymentService::onlineProviderCodes(), array_map('strval', array_keys(Adapters::registry('payment'))));
         } catch (\Throwable $e) {
-            error_log('CSP payment origins unavailable: ' . $e->getMessage());
+            Logger::phpLog('CSP payment origins unavailable: ' . $e->getMessage());
             return [];
         }
         $origins = [];
@@ -128,7 +132,7 @@ class Security {
             } catch (\RuntimeException $e) {
                 continue; // disabled mock provider or a provider whose class is not installed
             } catch (\Throwable $e) {
-                error_log("CSP payment origins: provider {$code} failed to load: " . $e->getMessage());
+                Logger::phpLog("CSP payment origins: provider {$code} failed to load: " . $e->getMessage());
                 continue;
             }
             if (!$adapter instanceof HostedCheckoutAdapter) continue;

@@ -102,7 +102,7 @@ class ApiV1 {
         if ($e instanceof UnexpectedValueException) return self::error(409, 'idempotency_conflict', $e->getMessage());
         if ($e instanceof DomainException) return self::error(403, 'forbidden', 'Insufficient scope or store permission');
         if ($e instanceof ApiAuthException) return self::error(401, 'unauthorized', 'Invalid API credential');
-        error_log('API v1 error: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
+        Logger::phpLog('API v1 error: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
         return self::error(500, 'internal_error', 'Internal error');
     }
 

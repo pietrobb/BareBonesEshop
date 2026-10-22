@@ -212,12 +212,32 @@ try {
     mkdir($sfaRoot . '/invoices', 0700, true);
     file_put_contents($sfaRoot . '/invoices/sfa-inv.pdf', "%PDF-1.4\n%sfa\n");
     $sfaToken = str_repeat('ab', 32);
-    $sfaDb->prepare("INSERT INTO invoices (order_id, number, issued_at, pdf_path, download_token) VALUES (999001, 'SFA-INV-1', '2026-10-20', 'sfa-inv.pdf', ?)")->execute([$sfaToken]);
+    $sfaDb->prepare("INSERT INTO invoices (order_id, number, issued_at, pdf_path, download_token, download_token_expires_at) VALUES (999001, 'SFA-INV-1', '2026-10-20', 'sfa-inv.pdf', ?, ?)")
+        ->execute([hash('sha256', $sfaToken), gmdate('Y-m-d H:i:s', time() + 3600)]);
     $sfaInvoice = $sfaHttp('GET', '/account.php?p=invoice&token=' . $sfaToken, [], $sfaSid);
     assert_true($sfaInvoice['status'] === 200 && ($sfaInvoice['headers']['content-type'] ?? '') === 'application/pdf' && str_starts_with($sfaInvoice['body'], '%PDF'),
         'R7 invoice link: the token opens the PDF');
     assert_equals(['no-store', 'noindex, nofollow'], [$sfaInvoice['headers']['cache-control'] ?? '', $sfaInvoice['headers']['x-robots-tag'] ?? ''],
         'R7 invoice link: the PDF is not cached and not indexed (was Cache-Control: private, max-age=300)');
+    // R8 PII: the e-mailed link keeps the token in the fragment; the page posts it (no CSRF session needed), sends no Referer.
+    $sfaLanding = $sfaHttp('GET', '/account.php?p=invoice');
+    assert_true($sfaLanding['status'] === 200 && str_contains($sfaLanding['body'], 'id="invoice-link"') && str_contains($sfaLanding['body'], 'location.hash')
+        && ($sfaLanding['headers']['referrer-policy'] ?? '') === 'no-referrer' && preg_match('~<script nonce="[^"]+">~', $sfaLanding['body']) === 1,
+        'R8 PII invoice link: the landing page reads the token from the fragment and posts it, with no Referer (' . $sfaLanding['status'] . ')');
+    $sfaPosted = $sfaHttp('POST', '/account.php?p=invoice', ['token' => $sfaToken]);
+    assert_true($sfaPosted['status'] === 200 && str_starts_with($sfaPosted['body'], '%PDF') && ($sfaPosted['headers']['referrer-policy'] ?? '') === 'no-referrer',
+        'R8 PII invoice link: the posted token opens the PDF (' . $sfaPosted['status'] . ')');
+    assert_equals('no-referrer', $sfaInvoice['headers']['referrer-policy'] ?? '', 'R8 PII: a token in the query (old links) is answered without a Referer policy leak');
+    $sfaDb->prepare("UPDATE invoices SET download_token_expires_at = ? WHERE number = 'SFA-INV-1'")->execute([gmdate('Y-m-d H:i:s', time() - 1)]);
+    $sfaExpired = $sfaHttp('POST', '/account.php?p=invoice', ['token' => $sfaToken]);
+    assert_true($sfaExpired['status'] === 404 && !str_starts_with($sfaExpired['body'], '%PDF') && str_contains($sfaExpired['body'], 'role="alert"'),
+        'R8 PII invoice link: an expired link no longer opens the PDF (' . $sfaExpired['status'] . ')');
+    $sfaRawStored = $sfaHttp('POST', '/account.php?p=invoice', ['token' => hash('sha256', $sfaToken)]);
+    assert_true($sfaRawStored['status'] === 404, 'R8 PII invoice link: the stored hash itself is not a working token');
+    foreach (['/account.php?p=reset&token=' . str_repeat('c', 64), '/account.php?p=verify_email&token=' . str_repeat('c', 64), '/?cart_recover=' . str_repeat('c', 64)] as $sfaBearer) {
+        assert_equals('no-referrer', $sfaHttp('GET', $sfaBearer)['headers']['referrer-policy'] ?? '', "R8 PII: a page opened by a bearer link sends no Referer ({$sfaBearer})");
+    }
+    assert_equals('strict-origin-when-cross-origin', $sfaHome['headers']['referrer-policy'] ?? '', 'R8 PII: other pages keep strict-origin-when-cross-origin');
 
     // 4. Facet filters are bounded and limited to the category's own criteria and descendants.
     $sfaBounded = $sfaProbeResult['bounded'] ?? [[], []];

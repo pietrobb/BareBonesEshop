@@ -21,6 +21,38 @@ $e = fn($s) => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
 $p = Security::clean($_GET['p'] ?? '');
 
 // ============================================================
+// Public invoice link (no login, no session: the token is the bearer)
+// ============================================================
+if ($p === 'invoice') {
+    // The e-mailed link carries its token in the fragment, which never reaches a server log or a Referer: this page
+    // posts it. A token in the query (links mailed before round 8) still opens the PDF until it expires.
+    header('Referrer-Policy: no-referrer');
+    header('Cache-Control: no-store');
+    $token = Security::str($_POST['token'] ?? $_GET['token'] ?? '');
+    if ($token !== '') {
+        $inv = InvoiceService::byToken($token);
+        if ($inv && ($inv['status'] ?? '') !== 'cancelled') InvoiceService::sendPdf($inv);
+        http_response_code(404);
+    }
+    $h = static fn(string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
+    header('Content-Type: text/html; charset=utf-8');
+    // No marketing hooks: no third-party script runs on a page whose fragment carries a bearer token.
+    echo Template::document($t('account.invoice_link_title'), '', [
+        'seo_head' => '<meta name="robots" content="noindex, nofollow">',
+        'marketing_hooks' => '',
+        'body_html' => '<main id="main-content" class="container">'
+        . ($token !== '' ? '<p role="alert">' . $h($t('account.invoice_link_invalid')) . '</p>' : '')
+        . '<form method="post" action="' . $h(Template::storeUrl('/account.php?p=invoice')) . '" id="invoice-link" hidden>'
+        . '<input type="hidden" name="token" value=""><button type="submit">' . $h($t('account.invoice_link_open')) . '</button></form>'
+        . '<noscript><p>' . $h($t('account.invoice_link_noscript')) . '</p></noscript>'
+        . '<script nonce="' . $h(Security::cspNonce()) . '">(function(){var f=document.getElementById("invoice-link"),t=location.hash.slice(1);'
+        . 'if(!/^[0-9a-f]{64}$/i.test(t))return;'
+        . 'history.replaceState(null,"",location.pathname+location.search);f.token.value=t;f.submit();})();</script></main>',
+    ]);
+    exit;
+}
+
+// ============================================================
 // POST handlers
 // ============================================================
 $flash = null;
@@ -260,7 +292,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             } catch (Throwable $ex) {
                 $errorId = bin2hex(random_bytes(6));
-                error_log("GDPR erase failed [{$errorId}] for customer #{$cid}: " . $ex->getMessage());
+                Logger::phpLog("GDPR erase failed [{$errorId}] for customer #{$cid}: " . $ex->getMessage());
                 $flash = $t('account.gdpr_erase_failed') . " ({$errorId})";
                 $flashType = 'error';
                 $p = 'privacy';
@@ -356,37 +388,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // ============================================================
-// Public signed-token invoice download (no login required)
-// ============================================================
-if ($p === 'invoice') {
-    $token = Security::str($_GET['token'] ?? '');
-    if ($token === '' || strlen($token) !== 64 || !ctype_xdigit($token)) {
-        http_response_code(400);
-        exit('Invalid token.');
-    }
-    $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE download_token = :tok LIMIT 1");
-    $stmt->execute([':tok' => $token]);
-    $inv = $stmt->fetch();
-    if (!$inv || ($inv['status'] ?? '') === 'cancelled') {
-        http_response_code(404);
-        exit('Invoice not found.');
-    }
-    $abs = InvoiceService::pdfAbsolutePath($inv);
-    if (!is_file($abs)) {
-        http_response_code(404);
-        exit('PDF missing.');
-    }
-    header('Content-Type: application/pdf');
-    header('Content-Disposition: inline; filename="' . $inv['number'] . '.pdf"');
-    header('Content-Length: ' . filesize($abs));
-    // Anyone holding the link can open it: no copy stays in a (shared) browser's cache or survives a cancellation.
-    header('Cache-Control: no-store');
-    header('X-Robots-Tag: noindex, nofollow');
-    readfile($abs);
-    exit;
-}
-
-// ============================================================
 // E-mail verification link (works signed in or out; token is single-use)
 // ============================================================
 $loggedIn = Customers::isLoggedIn();
@@ -418,6 +419,15 @@ $csrf = Security::csrfToken();
 if ($flash === null && isset($_SESSION['account_flash'])) {
     ['message' => $flash, 'type' => $flashType] = $_SESSION['account_flash'];
     unset($_SESSION['account_flash']);
+}
+// The signed-in customer's own invoice needs no e-mailed link.
+if ($customer && $p === 'invoice_pdf') {
+    $inv = InvoiceService::ownedBy((int)$customer['id'], Security::int($_GET['id'] ?? 0));
+    if ($inv === null) {
+        http_response_code(404);
+        exit('Invoice not found.');
+    }
+    InvoiceService::sendPdf($inv);
 }
 // Only the customer's own order in this store; any other id is indistinguishable from a missing one.
 $order = $customer && $p === 'order' ? Customers::order((int)$customer['id'], Security::int($_GET['id'] ?? 0)) : null;

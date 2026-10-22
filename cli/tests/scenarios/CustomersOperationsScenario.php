@@ -1010,6 +1010,8 @@ $returnsCreditMigration->up(Db::get(), true);
 $invoiceCounterMigration = require TEST_CLI_DIR . '/../migrations/20261016140500_invoice_number_counters.php';
 $invoiceCounterMigration->up(Db::get(), true);
 $invoiceCounterMigration->up(Db::get(), true);
+// R8: download_token holds the SHA-256 of the e-mailed token and the link expires.
+(require TEST_CLI_DIR . '/../migrations/20261022110000_invoice_download_token_hash.php')->up(Db::get(), true);
 assert_true(in_array('store_id', array_column(Db::get()->query('PRAGMA table_info(invoice_number_counters)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true),
     'Invoice counter migration: counters are keyed by store and document type, idempotently');
 
@@ -1029,9 +1031,10 @@ assert_equals('eur', (string)$inv1['currency'], 'Invoice: currency from order');
 assert_equals(64, strlen((string)$inv1['download_token']), 'Invoice: download_token is 64 hex chars');
 assert_true(ctype_xdigit((string)$inv1['download_token']), 'Invoice: download_token is hex');
 assert_equals('default', $inv1['store_id'], 'Invoice: issued invoice stores active store ownership');
+$inv1Token = substr((string)strrchr(InvoiceService::downloadLink((int)$inv1['id']), '#'), 1);
 StoreContext::activate($deContext);
 assert_true(InvoiceService::byOrderId(5001) === null, 'Store isolation: second store cannot read default invoice by order');
-assert_true(InvoiceService::byToken((string)$inv1['download_token']) === null, 'Store isolation: second store cannot use default invoice token');
+assert_true(InvoiceService::byToken($inv1Token) === null, 'Store isolation: second store cannot use default invoice token');
 Bootstrap::initStoreContext('/', '', 'default');
 
 // 2. PDF written to disk
@@ -1062,7 +1065,8 @@ $inv3 = InvoiceService::issue(5002);
 assert_true((int)$inv3['number'] > (int)$inv1['number'], 'Invoice: numbers are monotonic');
 
 // 5. Lookup by token
-$found = InvoiceService::byToken((string)$inv1['download_token']);
+$invLink = InvoiceService::downloadLink((int)$inv1['id']);
+$found = InvoiceService::byToken(substr((string)strrchr($invLink, '#'), 1));
 assert_true($found !== null, 'Invoice: byToken returns row for valid token');
 assert_equals((int)$inv1['id'], (int)($found['id'] ?? 0), 'Invoice: lookup returns correct invoice');
 $bad = InvoiceService::byToken(str_repeat('0', 64));

@@ -100,6 +100,13 @@ class Logger
         }
     }
 
+    /** PHP error log line with e-mail addresses and secret-looking values masked (exception messages carry customer input). */
+    public static function phpLog(string $line): void
+    {
+        error_log((string)preg_replace(['/[^\s@<>"\'(),;:]+@[^\s@<>"\'(),;:]+\.[a-z]{2,}/i', '/(Bearer\s+)[A-Za-z0-9._~-]+|((?:secret|token|password|api[_-]?key)\s*[=:]\s*)\S+/i'],
+            ['[email]', '$1$2[REDACTED]'], $line));
+    }
+
     public static function redact(array $value): array
     {
         foreach ($value as $key => &$item) {

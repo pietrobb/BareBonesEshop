@@ -79,7 +79,7 @@ class OrderWorkflow {
                 } catch (\LogicException) {
                     $reason = 'invalid_transition';
                 } catch (\Throwable $e) {
-                    error_log("Bulk order status error [{$orderId}]: " . $e->getMessage());
+                    Logger::phpLog("Bulk order status error [{$orderId}]: " . $e->getMessage());
                     $reason = 'error';
                 }
             }

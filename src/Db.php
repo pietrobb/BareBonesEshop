@@ -308,7 +308,7 @@ class Db {
         try {
             $db->exec('PRAGMA optimize');
         } catch (\Throwable $e) {
-            error_log('[Db] PRAGMA optimize failed: ' . $e->getMessage());
+            Logger::phpLog('[Db] PRAGMA optimize failed: ' . $e->getMessage());
         }
     }
 }

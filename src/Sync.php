@@ -59,7 +59,7 @@ class Sync {
                 $result['products_updated']++;
             } catch (\Throwable $e) {
                 $result['products_skipped']++;
-                error_log('ERP product sync skipped [' . (string)($productData['sku'] ?? '?') . "]: {$e->getMessage()}");
+                Logger::phpLog('ERP product sync skipped [' . (string)($productData['sku'] ?? '?') . "]: {$e->getMessage()}");
             }
         }
 
@@ -79,7 +79,7 @@ class Sync {
             } catch (\Throwable $e) {
                 Orders::markSyncFailed((int)$order['id'], $e->getMessage());
                 $result['orders_failed']++;
-                error_log("ERP order push failed [{$order['id']}]: {$e->getMessage()}");
+                Logger::phpLog("ERP order push failed [{$order['id']}]: {$e->getMessage()}");
             }
         }
 
@@ -104,7 +104,7 @@ class Sync {
                     $result['statuses_updated']++;
                 }
             } catch (\Throwable $e) {
-                error_log("ERP status pull failed [{$order['id']}]: {$e->getMessage()}");
+                Logger::phpLog("ERP status pull failed [{$order['id']}]: {$e->getMessage()}");
             }
         }
 
