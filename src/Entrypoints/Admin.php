@@ -108,6 +108,7 @@ $title = match($page) {
     'email_templates' => I18n::t('admin.title.email_templates'),
     'reviews'    => I18n::t('admin.title.reviews'),
     'rma'        => I18n::t('admin.title.rma'),
+    'complaints' => I18n::t('admin.title.complaints'),
     default      => I18n::t('admin.title.default'),
 };
 
@@ -220,6 +221,7 @@ match($page) {
     'digital_assets' => pageDigitalAssets(),
     'reviews'    => pageReviews(),
     'rma'        => pageRma(),
+    'complaints' => pageComplaints(),
     'customers'  => pageCustomers(),
     'customer'   => pageCustomerDetail(),
     'admin_users' => pageAdminUsers(),

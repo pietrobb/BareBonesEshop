@@ -18,6 +18,7 @@ class MerchantNotifier {
         $template = (string)($notificationCfg['templates'][$kind] ?? match ($kind) {
             'created' => 'merchant_order_created',
             'withdrawal' => 'merchant_withdrawal_received',
+            'complaint' => 'merchant_complaint_received',
             default => 'merchant_order_paid',
         });
         $paymentSnapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true) ?: [];

@@ -1,0 +1,1 @@
+Döntés a(z) {{complaint_number}} számú hibabejelentésről

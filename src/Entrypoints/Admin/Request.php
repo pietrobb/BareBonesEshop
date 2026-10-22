@@ -67,6 +67,7 @@ function handlePost(string $page, string $action): void {
         'digital_assets:toggle' => handleDigitalAssetToggle(),
         'reviews:approve' => handleReviewModerate('approved'), 'reviews:reject' => handleReviewModerate('rejected'),
         'rma:status'      => handleRmaStatus(),
+        'complaints:status' => handleComplaintStatus(),
         'customer:status' => handleCustomerStatus(),
         'admin_users:create' => handleAdminUserCreate(),
         'admin_users:status' => handleAdminUserStatus(),

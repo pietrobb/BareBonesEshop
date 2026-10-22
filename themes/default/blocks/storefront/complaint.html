@@ -1,0 +1,40 @@
+<section class="shop-wrap complaint">
+  <h1 class="h-lg">{{title}}</h1>
+  {{#if error}}<p class="form-error" role="alert">{{error}}</p>{{/if}}
+  {{#if done}}
+  <p class="form-success" role="status">{{done}}</p>
+  {{/if}}
+  {{#if details}}
+  <form method="post" class="complaint-form">
+    <input type="hidden" name="csrf_token" value="{{csrf_token}}">
+    <input type="hidden" name="complaint_step" value="submit">
+    <input type="hidden" name="order_number" value="{{values.order_number}}">
+    <input type="hidden" name="email" value="{{values.email}}">
+    <fieldset><legend>{{item_label}}</legend>
+      {{#each items}}<label class="complaint-item"><input type="radio" name="item" value="{{id}}" required> {{name}}</label>{{/each}}
+    </fieldset>
+    <label for="complaint-name">{{name_label}}</label>
+    <input id="complaint-name" name="name" value="{{values.name}}" maxlength="191" autocomplete="name">
+    <label for="complaint-defect">{{defect_label}}<span class="req" aria-hidden="true"> *</span></label>
+    <textarea id="complaint-defect" name="defect" rows="4" maxlength="4000" required>{{values.defect}}</textarea>
+    <label for="complaint-remedy">{{remedy_label}}<span class="req" aria-hidden="true"> *</span></label>
+    <select id="complaint-remedy" name="remedy" required>
+      <option value=""></option>
+      {{#each remedies}}<option value="{{value}}"{{#if selected}} selected{{/if}}>{{label}}</option>{{/each}}
+    </select>
+    <button type="submit" class="btn btn--primary">{{submit_label}}</button>
+  </form>
+  {{/if}}
+  {{#if show_form}}
+  <p>{{intro}}</p>
+  <form method="post" class="complaint-form">
+    <input type="hidden" name="csrf_token" value="{{csrf_token}}">
+    <input type="hidden" name="complaint_step" value="identify">
+    <label for="complaint-order">{{order_number_label}}<span class="req" aria-hidden="true"> *</span></label>
+    <input id="complaint-order" name="order_number" value="{{values.order_number}}" required maxlength="64" autocomplete="off">
+    <label for="complaint-email">{{email_label}}<span class="req" aria-hidden="true"> *</span></label>
+    <input id="complaint-email" type="email" name="email" value="{{values.email}}" required maxlength="191" autocomplete="email">
+    <button type="submit" class="btn btn--primary">{{continue_label}}</button>
+  </form>
+  {{/if}}
+</section>

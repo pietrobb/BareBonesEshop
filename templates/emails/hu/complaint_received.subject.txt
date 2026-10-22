@@ -1,0 +1,1 @@
+A(z) {{complaint_number}} számú hibabejelentés visszaigazolása

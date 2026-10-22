@@ -1,0 +1,1 @@
+Eingangsbestätigung Ihrer Mängelrüge {{complaint_number}}

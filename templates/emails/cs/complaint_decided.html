@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="cs"><body style="font-family:Arial,sans-serif;color:#111">
+<!-- R8 complaint (Directive (EU) 2019/771); wording for lawyer review. -->
+<h2>Rozhodnutí o reklamaci</h2>
+<p>Dobrý den, {{customer_name}},</p>
+<p>o vaší reklamaci <strong>{{complaint_number}}</strong> k objednávce <strong>{{order_number}}</strong> jsme rozhodli: <strong>{{status}}</strong>.</p>
+<table style="border-collapse:collapse">
+<tr><td style="padding:2px 12px 2px 0;color:#555">Zboží</td><td>{{item_name}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Popis vady</td><td>{{defect}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Požadované řešení</td><td>{{remedy}}</td></tr>
+</table>
+<h3>Odůvodnění a způsob vyřízení</h3>
+<p>{{decision_note}}</p>
+<p>Prodávající: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
+</body></html>

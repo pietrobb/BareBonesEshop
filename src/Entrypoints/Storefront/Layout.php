@@ -74,6 +74,7 @@ $shell = [
     'terms_url' => Template::storeUrl('/?page=terms'),
     'cookies_url' => Template::storeUrl('/?page=cookies'),
     'withdrawal_url' => Template::storeUrl('/?page=withdrawal'),
+    'complaint_url' => Template::storeUrl('/?page=complaint'),
     'show_cookie_banner' => (string)($_COOKIE['cc_v1'] ?? '') === '',
     // Without JS the banner posts to account.php and comes back to this page.
     'cookie_action_url' => Template::storeUrl('/account.php'),

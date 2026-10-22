@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="hu"><body style="font-family:Arial,sans-serif;color:#111">
+<!-- R8 complaint (Directive (EU) 2019/771); wording for lawyer review. -->
+<h2>Hibabejelentés visszaigazolása</h2>
+<p>Tisztelt {{customer_name}}!</p>
+<p>Visszaigazoljuk, hogy <strong>{{received_at}}</strong> időpontban megkaptuk a(z) <strong>{{order_number}}</strong> számú rendeléshez tartozó <strong>{{complaint_number}}</strong> számú hibabejelentését.</p>
+<table style="border-collapse:collapse">
+<tr><td style="padding:2px 12px 2px 0;color:#555">Termék</td><td>{{item_name}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">A hiba leírása</td><td>{{defect}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Kért megoldás</td><td>{{remedy}}</td></tr>
+</table>
+<p>A hibabejelentésről legkésőbb {{decide_by}} napig döntünk, és az eredményről értesítjük.</p>
+<p>Eladó: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
+</body></html>

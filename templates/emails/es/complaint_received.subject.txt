@@ -1,0 +1,1 @@
+Acuse de recibo de la reclamación {{complaint_number}}

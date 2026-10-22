@@ -1,0 +1,1 @@
+Decisión sobre la reclamación {{complaint_number}}

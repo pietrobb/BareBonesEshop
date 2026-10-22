@@ -154,6 +154,8 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/PricingRules.php' => ['lines' => 235, 'functions' => 7, 'max_function_lines' => 115, 'coupling' => 5],
     'src/Entrypoints/Admin/Reports.php' => ['lines' => 90, 'functions' => 2, 'max_function_lines' => 74, 'coupling' => 4],
     'src/Entrypoints/Admin/Recovery.php' => ['lines' => 115, 'functions' => 4, 'max_function_lines' => 44, 'coupling' => 7],
+    // R8 complaints list and the written decision; the transitions live in Complaints.
+    'src/Entrypoints/Admin/Complaints.php' => ['lines' => 70, 'functions' => 2, 'max_function_lines' => 55, 'coupling' => 4],
     'src/Entrypoints/Admin/Request.php' => ['lines' => 90, 'functions' => 1, 'max_function_lines' => 9, 'coupling' => 2],
     // +1 function, +1 coupling: adminCodeLabel shows stored codes (product/page status, attribute type) in the admin language (A15.5).
     // +lines: windowed pagination (first, last and a window around the current page) instead of one link per page.
@@ -170,7 +172,8 @@ $architectureBudgets = [
     'src/Entrypoints/ApiExternal.php' => ['lines' => 55, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 6],
     // +1 coupling: Search::filtersFromQuery turns the search route's sort/price/category parameters into search options (A14.2).
     // +6 lines: the ?page=withdrawal route (R8 electronic withdrawal function, Directive 2011/83/EU art. 11a).
-    'src/Entrypoints/Storefront.php' => ['lines' => 156, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
+    // +6 lines: the ?page=complaint route (R8 complaints, Directive (EU) 2019/771).
+    'src/Entrypoints/Storefront.php' => ['lines' => 162, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
     // Customer account portal behind the thin /account.php (registration, login, reset, GDPR, addresses, orders).
     // +1 coupling: Str::normalizeEmail is the one e-mail normalisation shared with Customers and Pricing.
     // +2 coupling: DigitalDelivery issues the downloads page's links; StoreContext limits the profile languages to the store's.
@@ -190,6 +193,8 @@ $architectureBudgets = [
     'src/Entrypoints/Storefront/ProductStatusPages.php' => ['lines' => 20, 'functions' => 1, 'max_function_lines' => 18, 'coupling' => 3],
     // R8 withdrawal function: identify → review → confirm; the rules live in Withdrawal.
     'src/Entrypoints/Storefront/WithdrawalPages.php' => ['lines' => 62, 'functions' => 1, 'max_function_lines' => 60, 'coupling' => 4],
+    // R8 complaint form: identify → line, defect, remedy; the rules live in Complaints (order lookup shared with Withdrawal).
+    'src/Entrypoints/Storefront/ComplaintPages.php' => ['lines' => 66, 'functions' => 1, 'max_function_lines' => 64, 'coupling' => 7],
 ];
 $forbiddenDependencies = [
     'src/Entrypoints/Admin/Catalog.php' => ['OrderWorkflow::', 'CheckoutService::', 'ApiHandlers'],

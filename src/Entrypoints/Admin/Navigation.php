@@ -30,6 +30,7 @@ return [
     ['gdpr', 'gdpr.view', 'admin.nav.gdpr', []],
     ['reviews', 'products.edit', 'admin.nav.reviews', []],
     ['rma', 'rma.manage', 'admin.nav.rma', []],
+    ['complaints', 'rma.manage', 'admin.nav.complaints', []],
     ['customers', 'customers.view', 'admin.nav.customers', ['customer']],
     ['email_templates', 'emails.manage', 'admin.nav.email_templates', []],
     ['admin_users', 'admins.manage', 'admin.title.admin_users', []],

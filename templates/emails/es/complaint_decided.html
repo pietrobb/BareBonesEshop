@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="es"><body style="font-family:Arial,sans-serif;color:#111">
+<!-- R8 complaint (Directive (EU) 2019/771); wording for lawyer review. -->
+<h2>Decisión sobre su reclamación</h2>
+<p>Estimado/a {{customer_name}}:</p>
+<p>hemos resuelto su reclamación <strong>{{complaint_number}}</strong> sobre el pedido <strong>{{order_number}}</strong>: <strong>{{status}}</strong>.</p>
+<table style="border-collapse:collapse">
+<tr><td style="padding:2px 12px 2px 0;color:#555">Producto</td><td>{{item_name}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Descripción del defecto</td><td>{{defect}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Solución solicitada</td><td>{{remedy}}</td></tr>
+</table>
+<h3>Motivos y forma de resolución</h3>
+<p>{{decision_note}}</p>
+<p>Vendedor: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
+</body></html>

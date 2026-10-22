@@ -31,7 +31,8 @@ if ($phase === 'setup') {
         VALUES (?, ?, 'paid', 'R8L Guest', 'R8L.Guest@Example.test', 'card', 3000, 3000, 'eur', 'default', 'sk', ?)");
     $item = $db->prepare('INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total) VALUES (?, ?, ?, ?, ?, ?, ?)');
     foreach ([['R8L-NEW', 'paid', null], ['R8L-DONE', 'delivered', gmdate('Y-m-d H:i:s', time() - 3 * 86400)],
-              ['R8L-OLD', 'delivered', gmdate('Y-m-d H:i:s', time() - 20 * 86400)], ['R8L-CXL', 'cancelled', null]] as [$number, $status, $deliveredAt]) {
+              ['R8L-OLD', 'delivered', gmdate('Y-m-d H:i:s', time() - 20 * 86400)], ['R8L-CXL', 'cancelled', null],
+              ['R8L-ANC', 'delivered', gmdate('Y-m-d H:i:s', strtotime('-25 months'))]] as [$number, $status, $deliveredAt]) {
         $order->execute([$number, $status, $deliveredAt]);
         $orderId = (int)$db->lastInsertId();
         $item->execute([$orderId, $product, 'R8L-SKU', 'R8L Chair', 1, 2000, 2000]);
@@ -100,11 +101,24 @@ if ($action === 'consent') {
     echo "\nR8LRESULT" . json_encode($result, JSON_UNESCAPED_UNICODE);
     exit(0);
 }
-$page = in_array($action, ['checkout', 'checkout_digital'], true) ? 'checkout' : ($action === 'home' ? 'home' : 'withdrawal');
+if ($action === 'c_decide') {
+    // The merchant's steps through Complaints, then the admin list as rendered.
+    $id = (int)$db->query('SELECT id FROM complaints ORDER BY id LIMIT 1')->fetchColumn();
+    $errors = [];
+    foreach ($input['steps'] as [$status, $note]) $errors[] = Complaints::setStatus($id, $status, $note);
+    require_once $root . '/src/Entrypoints/Admin/Complaints.php';
+    ob_start();
+    pageComplaints();
+    echo "\nR8LRESULT" . json_encode(['errors' => $errors, 'admin' => ob_get_clean(),
+        'complaints' => $db->query('SELECT * FROM complaints ORDER BY id')->fetchAll(),
+        'mails' => $db->query("SELECT recipient, template, subject, payload FROM email_log WHERE template LIKE '%complaint%' ORDER BY id")->fetchAll()], JSON_INVALID_UTF8_SUBSTITUTE);
+    exit(0);
+}
+$page = in_array($action, ['checkout', 'checkout_digital'], true) ? 'checkout' : ($action === 'home' ? 'home' : (str_starts_with($action, 'c_') ? 'complaint' : 'withdrawal'));
 $_SERVER['REQUEST_URI'] = '/index.php?page=' . $page;
-$_SERVER['REQUEST_METHOD'] = in_array($action, ['review', 'confirm'], true) ? 'POST' : 'GET';
+$_SERVER['REQUEST_METHOD'] = in_array($action, ['review', 'confirm', 'c_identify', 'c_submit'], true) ? 'POST' : 'GET';
 $_GET = ['page' => $page];
-$_POST = $_SERVER['REQUEST_METHOD'] === 'POST' ? $input + ['withdrawal_step' => $action, 'csrf_token' => Security::csrfToken()] : [];
+$_POST = $_SERVER['REQUEST_METHOD'] === 'POST' ? $input + [$page === 'complaint' ? 'complaint_step' : 'withdrawal_step' => substr($action, $page === 'complaint' ? 2 : 0), 'csrf_token' => Security::csrfToken()] : [];
 if ($action === 'checkout') Cart::add((int)$db->query("SELECT id FROM products WHERE sku = 'R8L-SKU'")->fetchColumn(), null, 1);
 if ($action === 'checkout_digital') Cart::add((int)$db->query("SELECT id FROM products WHERE sku = 'R8L-EBOOK'")->fetchColumn(), null, 1);
 http_response_code(200);
@@ -117,6 +131,7 @@ register_shutdown_function(static function() use ($db, $dir): void {
     echo "\nR8LRESULT" . json_encode(['code' => http_response_code(), 'output' => $out,
         'withdrawals' => $db->query('SELECT order_number, customer_name, customer_email, items, reason, received_at, confirmation_status FROM withdrawal_requests ORDER BY id')->fetchAll(),
         'mails' => $db->query("SELECT recipient, template, subject, payload FROM email_log WHERE template LIKE '%withdrawal%' ORDER BY id")->fetchAll(),
+        'complaints' => $db->query('SELECT * FROM complaints ORDER BY id')->fetchAll(),
         'items' => $db->query("SELECT oi.id, o.order_number, oi.name FROM order_items oi JOIN orders o ON o.id = oi.order_id ORDER BY oi.id")->fetchAll(),
         'jobs' => $jobs,
     ], JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR);
@@ -170,7 +185,7 @@ $r8lDo = static function(string $action, array $input = []) use ($r8lRun, $r8lAp
     [$exit, $result, $noise] = $r8lRun(['run', $action, $r8lApp, $r8lDb, $r8lRoot, json_encode($input)]);
     $ok = $exit === 0 && $result !== null && !str_contains((string)$result['output'], 'Fatal error') && !str_contains((string)$result['output'], 'Uncaught');
     assert_true($ok, "R8 withdrawal/{$action}: the real storefront handler completes (exit {$exit} " . trim($noise) . ' ' . substr(strip_tags((string)($result['output'] ?? '')), 0, 300) . ')');
-    return $result ?? ['code' => null, 'output' => '', 'withdrawals' => [], 'mails' => [], 'items' => [], 'jobs' => []];
+    return $result ?? ['code' => null, 'output' => '', 'withdrawals' => [], 'mails' => [], 'items' => [], 'jobs' => [], 'complaints' => []];
 };
 $r8lHome = $r8lDo('home');
 assert_true(preg_match('~<footer.*href="[^"]*\?page=withdrawal"[^>]*>Odstúpiť od zmluvy tu</a>~s', (string)$r8lHome['output']) === 1,
@@ -265,3 +280,40 @@ assert_equals([$r8lItemIds['R8L-DIG'][0]], $r8lOffer($r8lDo('review', ['order_nu
     'R8 digital: e-book supplied with the consent is not withdrawable, the chair of the same order is');
 assert_equals($r8lItemIds['R8L-DIGN'], $r8lOffer($r8lDo('review', ['order_number' => 'R8L-DIGN', 'email' => 'r8l.guest@example.test'])),
     'R8 digital: e-book supplied without the consent stays withdrawable');
+
+// 5) Complaints (Directive (EU) 2019/771): not a return — own form, 24 months from delivery, defect + remedy, receipt
+//    e-mail, the merchant's written decision e-mailed to the consumer.
+assert_true(preg_match('~<footer.*href="[^"]*\?page=complaint"[^>]*>Reklamácia tovaru</a>~s', (string)$r8lHome['output']) === 1,
+    'R8 complaint: every storefront page footer links the complaint form');
+$r8lC = $r8lDo('c_identify', ['order_number' => 'R8L-OLD', 'email' => 'r8l.guest@example.test']);
+assert_true(str_contains((string)$r8lC['output'], 'name="defect"') && str_contains((string)$r8lC['output'], 'value="price_reduction"')
+    && preg_match_all('~name="item" value="(\d+)"~', (string)$r8lC['output']) === 2 && $r8lC['complaints'] === [],
+    'R8 complaint: an order delivered 20 days ago (past the 14-day return window) still gets the complaint form with its lines, defect and remedy');
+$r8lCAnc = $r8lDo('c_identify', ['order_number' => 'R8L-ANC', 'email' => 'r8l.guest@example.test']);
+$r8lCNew = $r8lDo('c_identify', ['order_number' => 'R8L-NEW', 'email' => 'r8l.guest@example.test']);
+assert_true(str_contains((string)$r8lCAnc['output'], 'viac ako 24 mesiacov') && !str_contains((string)$r8lCAnc['output'], 'name="defect"')
+    && str_contains((string)$r8lCNew['output'], 'ešte nebol odoslaný'),
+    'R8 complaint: refused after 24 months from delivery and before the goods were shipped, with the reason');
+$r8lCNoDefect = $r8lDo('c_submit', ['order_number' => 'R8L-OLD', 'email' => 'r8l.guest@example.test', 'item' => $r8lItemIds['R8L-OLD'][0], 'defect' => ' ', 'remedy' => 'repair']);
+assert_true(str_contains((string)$r8lCNoDefect['output'], 'Popíšte vadu tovaru') && $r8lCNoDefect['complaints'] === [],
+    'R8 complaint: the defect description is required, nothing recorded without it');
+$r8lCDone = $r8lDo('c_submit', ['order_number' => 'R8L-OLD', 'email' => 'r8l.guest@example.test', 'item' => $r8lItemIds['R8L-OLD'][1], 'defect' => 'Prasknutá noha stola', 'remedy' => 'replacement']);
+$r8lCRow = $r8lCDone['complaints'][0] ?? [];
+assert_true(count($r8lCDone['complaints']) === 1 && ($r8lCRow['item_name'] ?? '') === 'R8L Table' && ($r8lCRow['remedy'] ?? '') === 'replacement'
+    && ($r8lCRow['status'] ?? '') === 'received' && ($r8lCRow['confirmation_status'] ?? '') === 'sent' && str_contains((string)$r8lCDone['output'], (string)($r8lCRow['complaint_number'] ?? '-'))
+    && in_array(['merchant_notify', 'complaint'], array_map(static fn(array $j): array => [(string)($j['type'] ?? ''), explode(':', (string)($j['payload']['event'] ?? ''))[0]], $r8lCDone['jobs']), true),
+    'R8 complaint: the complaint is recorded for the chosen line with defect and remedy, confirmed on the page, receipt sent, merchant notified (' . json_encode($r8lCRow, JSON_UNESCAPED_UNICODE) . ')');
+assert_equals([], array_values(array_filter(array_map(static fn(array $w): string => (string)$w['order_number'], $r8lCDone['withdrawals']), static fn(string $n): bool => $n === 'R8L-OLD')),
+    'R8 complaint: a complaint is not recorded as a withdrawal');
+[$r8lExit, $r8lDec, $r8lNoise] = $r8lRun(['run', 'c_decide', $r8lApp, $r8lDb, $r8lRoot, json_encode(['steps' => [['accepted', ''], ['in_review', ''], ['accepted', 'Vadu uznávame, posielame nový stôl.'], ['received', '']]])]);
+$r8lDecRow = $r8lDec['complaints'][0] ?? [];
+$r8lDecMail = array_values(array_filter($r8lDec['mails'] ?? [], static fn(array $m): bool => $m['template'] === 'complaint_decided'))[0] ?? [];
+assert_true($r8lExit === 0 && ($r8lDec['errors'] ?? null) === ['note_required', null, null, 'transition_refused'] && ($r8lDecRow['status'] ?? '') === 'accepted'
+    && ($r8lDecRow['decision_note'] ?? '') === 'Vadu uznávame, posielame nový stôl.' && (string)($r8lDecRow['decided_at'] ?? '') !== '',
+    'R8 complaint: the merchant reviews and decides; a decision needs its reasons and the flow only moves forward (' . json_encode($r8lDec['errors'] ?? null) . ' ' . trim($r8lNoise) . ')');
+assert_true(($r8lDecMail['recipient'] ?? '') === 'r8l.guest@example.test' && str_contains((string)($r8lDecMail['payload'] ?? ''), 'posielame nov')
+    && in_array('complaint_received', array_column($r8lDec['mails'] ?? [], 'template'), true),
+    'R8 complaint: the consumer got the receipt and the written decision with its reasons by e-mail');
+assert_true(str_contains((string)($r8lDec['admin'] ?? ''), (string)($r8lDecRow['complaint_number'] ?? '-')) && str_contains((string)($r8lDec['admin'] ?? ''), 'Prasknutá noha stola')
+    && str_contains((string)($r8lDec['admin'] ?? ''), 'value="resolved"'),
+    'R8 complaint: the admin complaints list shows the complaint, its defect and the next step');

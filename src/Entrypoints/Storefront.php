@@ -9,6 +9,7 @@ require_once __DIR__ . '/Storefront/CatalogPages.php';
 require_once __DIR__ . '/Storefront/ProductStatusPages.php';
 require_once __DIR__ . '/Storefront/CheckoutPages.php';
 require_once __DIR__ . '/Storefront/WithdrawalPages.php';
+require_once __DIR__ . '/Storefront/ComplaintPages.php';
 Security::headers();
 Security::sessionStart();
 Bootstrap::validateCustomerSession();
@@ -133,6 +134,11 @@ switch ($page) {
     case 'withdrawal':
         $title = Template::pageTitle($t('withdrawal.title'));
         $content = renderWithdrawal();
+        break;
+
+    case 'complaint':
+        $title = Template::pageTitle($t('complaint.title'));
+        $content = renderComplaint();
         break;
 
     case 'home':

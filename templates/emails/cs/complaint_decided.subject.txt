@@ -1,0 +1,1 @@
+Rozhodnutí o reklamaci {{complaint_number}}
