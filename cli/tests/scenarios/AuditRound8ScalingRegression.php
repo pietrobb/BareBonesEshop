@@ -330,8 +330,30 @@ try {
 assert_equals([['pending' => 0, 'processing' => 0, 'completed' => 0, 'failed' => 0], []], $r8sNoDir, 'R8 queue stats: missing queue directories count as empty');
 
 // A fatal error mid-page (here: memory limit) never ships as HTTP 200 with half a page.
-$r8sFatal = sys_get_temp_dir() . '/bbe-r8fatal-' . bin2hex(random_bytes(4)) . '.php';
-file_put_contents($r8sFatal, <<<'PHP'
+// Runs a PHP script with a 16 MB limit and no error display; returns [stdout, stderr].
+$r8sRunOom = static function (string $code): array {
+    $file = sys_get_temp_dir() . '/bbe-r8fatal-' . bin2hex(random_bytes(4)) . '.php';
+    file_put_contents($file, $code);
+    try {
+        $process = proc_open([PHP_BINARY, '-d', 'memory_limit=16M', '-d', 'display_errors=0', '-d', 'log_errors=0', $file, dirname(TEST_CLI_DIR)],
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        fclose($pipes[0]);
+        $out = [(string)stream_get_contents($pipes[1]), (string)stream_get_contents($pipes[2])];
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        proc_close($process);
+        return $out;
+    } finally {
+        @unlink($file);
+    }
+};
+// Some PHP builds (Ubuntu PHP 8.1.34 of 2026-10-21) run no shutdown function at all after an exhausted memory limit:
+// they print the fatal to stderr and exit. No PHP-level guard can answer there; the probe tells such a runtime apart.
+[, $r8sProbe] = $r8sRunOom('<?php register_shutdown_function(static fn() => fwrite(STDERR, "R8-SHUTDOWN-RAN")); $r = []; while (true) $r[] = str_repeat("x", 1 << 20);');
+if (!str_contains($r8sProbe, 'R8-SHUTDOWN-RAN')) {
+    print "  [SKIP] R8 admin fatal: PHP " . PHP_VERSION . " runs no shutdown function after an exhausted memory limit\n";
+} else {
+    [$r8sOut, $r8sErr] = $r8sRunOom(<<<'PHP'
 <?php
 require $argv[1] . '/src/autoload.php';
 class_exists('Security');
@@ -343,20 +365,9 @@ echo '<table><tr><td>R8-HALF-PAGE</td></tr>';
 $rows = [];
 while (true) $rows[] = str_repeat('x', 1 << 20);
 PHP);
-try {
-    $process = proc_open([PHP_BINARY, '-d', 'memory_limit=16M', '-d', 'display_errors=0', '-d', 'log_errors=0', $r8sFatal, dirname(TEST_CLI_DIR)],
-        [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
-    fclose($pipes[0]);
-    $r8sOut = (string)stream_get_contents($pipes[1]);
-    $r8sErr = (string)stream_get_contents($pipes[2]);
-    fclose($pipes[1]);
-    fclose($pipes[2]);
-    proc_close($process);
-} finally {
-    @unlink($r8sFatal);
+    assert_true(!str_contains($r8sOut, 'R8-HALF-PAGE') && str_contains($r8sOut, '<h1>500</h1>'), 'R8 admin fatal: the half-rendered page is discarded for an error page (got: ' . substr($r8sOut, 0, 160) . ')');
+    assert_true(str_contains($r8sErr, 'status=500'), 'R8 admin fatal: the response status is 500, not 200 (got: ' . substr($r8sErr, 0, 160) . ')');
 }
-assert_true(!str_contains($r8sOut, 'R8-HALF-PAGE') && str_contains($r8sOut, '<h1>500</h1>'), 'R8 admin fatal: the half-rendered page is discarded for an error page (got: ' . substr($r8sOut, 0, 160) . ')');
-assert_true(str_contains($r8sErr, 'status=500'), 'R8 admin fatal: the response status is 500, not 200 (got: ' . substr($r8sErr, 0, 160) . ')');
 $r8sAdmin = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin.php');
 $r8sGuardAt = strpos($r8sAdmin, "register_shutdown_function('adminFatalPageGuard');");
 $r8sBufferAt = strpos($r8sAdmin, 'ob_start();');
