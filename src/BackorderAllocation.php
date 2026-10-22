@@ -49,18 +49,42 @@ class BackorderAllocation {
     }
 
     /**
+     * Worker sweep: allocate stock to waiting lines that allocate() skipped because another transaction held their
+     * order, or whose stock arrived without passing through allocate(). Returns the units allocated.
+     */
+    public static function sweep(): int {
+        $stmt = Db::get()->prepare("SELECT oi.sku, oi.attrs FROM order_items oi JOIN orders o ON o.id = oi.order_id
+            WHERE o.store_id = :store AND oi.backordered_qty > 0 AND o.stock_restored = 0
+              AND o.status IN ('pending', 'paid', 'processing')");
+        $stmt->execute([':store' => StoreContext::current()->id()]);
+        $skus = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            foreach (self::lineSkus($row) as $sku) $skus[$sku] = true;
+        }
+        $skus = array_values(array_filter(array_map('strval', array_keys($skus)), static fn(string $sku): bool => Warehouse::totalAvailable($sku) > 0));
+        return $skus ? self::allocate($skus) : 0;
+    }
+
+    /**
      * The caller may already hold warehouse stock rows, while a shipment or status change locks its order first and
-     * stock second: waiting on that order could deadlock. An order another transaction holds is skipped; the next
-     * stock increase allocates it. SQLite serializes writers, so there is nothing to skip.
+     * stock second: waiting on that order could deadlock. An order another transaction holds is skipped; the worker's
+     * sweep() allocates it later. NOWAIT, not SKIP LOCKED: MariaDB has SKIP LOCKED only since 10.6, NOWAIT since 10.3.
+     * SQLite serializes writers, so there is nothing to skip.
      */
     private static function lockUnlessHeld(int $orderId): bool {
         if (!Db::isMysql()) {
             Orders::lockWithin($orderId);
             return true;
         }
-        $stmt = Db::get()->prepare('SELECT id FROM orders WHERE id = :id AND store_id = :store FOR UPDATE SKIP LOCKED');
-        $stmt->execute([':id' => $orderId, ':store' => StoreContext::current()->id()]);
-        return $stmt->fetchColumn() !== false;
+        try {
+            $stmt = Db::get()->prepare('SELECT id FROM orders WHERE id = :id AND store_id = :store FOR UPDATE NOWAIT');
+            $stmt->execute([':id' => $orderId, ':store' => StoreContext::current()->id()]);
+            return $stmt->fetchColumn() !== false;
+        } catch (PDOException $e) {
+            // MySQL 3572 (ER_LOCK_NOWAIT), MariaDB 1205 (lock wait timeout): only the statement failed.
+            if (in_array((int)($e->errorInfo[1] ?? 0), [3572, 1205], true)) return false;
+            throw $e;
+        }
     }
 
     /** @return list<string> the SKUs an order line reserves (bundle components or the line itself) */

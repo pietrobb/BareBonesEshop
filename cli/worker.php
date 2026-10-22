@@ -119,6 +119,13 @@ foreach (Bootstrap::stores()['stores'] ?? [] as $digestStoreCode => $_) {
     } catch (\Throwable $e) {
         Logger::exception('worker.stock_digest_failed', $e, ['store' => (string)$digestStoreCode]);
     }
+    // Backorder lines skipped while another transaction held their order get the stock that is still free.
+    try {
+        $backorderUnits = BackorderAllocation::sweep();
+        if ($verbose && $backorderUnits > 0) echo "Backorder units allocated ({$digestStoreCode}): {$backorderUnits}\n";
+    } catch (\Throwable $e) {
+        Logger::exception('worker.backorder_sweep_failed', $e, ['store' => (string)$digestStoreCode]);
+    }
 }
 StoreContext::activate($digestStore);
 

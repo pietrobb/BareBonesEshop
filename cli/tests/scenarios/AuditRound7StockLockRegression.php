@@ -55,7 +55,23 @@ $whileLocked = [$waiting($orders[0]), $waiting($orders[1])];
 $b->commit();
 $second = $restock('r7sl-2');
 $reserved = (int)$a->query("SELECT reserved FROM warehouse_stock WHERE warehouse_id = {$wh}")->fetchColumn();
-echo json_encode([$first, $whileLocked, $second, [$waiting($orders[0]), $waiting($orders[1])], $reserved]);
+// Round 8: the only waiting order is held while its stock arrives and no further restock follows. The skipped
+// line used to wait forever next to free stock; the worker's sweep now allocates it.
+$a->exec("INSERT INTO orders (order_number, status, payment_status, customer_name, customer_email, payment_method, subtotal, total, currency, store_id, created_at)
+    VALUES ('R7SL-3', 'paid', 'paid', 'R7SL', 'r7sl@example.test', 'card', 2000, 2000, 'eur', 'default', '2026-10-20 10:05:00')");
+$orders[] = $order = (int)$a->lastInsertId();
+$a->prepare("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total, attrs, reserved_qty, backordered_qty)
+    VALUES (?, 97611, 'R7SL-SKU', 'R7SL', 2, 1000, 2000, ?, 0, 2)")->execute([$order, $attrs]);
+$b->beginTransaction();
+$b->query("SELECT id FROM orders WHERE id = {$order} FOR UPDATE")->fetchAll();
+$third = $restock('r7sl-3');
+$skipped = $waiting($order);
+$b->commit();
+Db::init($a, 'mysql');
+$swept = BackorderAllocation::sweep();
+$reservedAfterSweep = (int)$a->query("SELECT reserved FROM warehouse_stock WHERE warehouse_id = {$wh}")->fetchColumn();
+echo json_encode([$first, $whileLocked, $second, [$waiting($orders[0]), $waiting($orders[1])], $reserved,
+    [$third, $skipped, $swept, $waiting($order), $reservedAfterSweep]]);
 PHP);
 $r7slPhp = static function(array $args): array {
     $process = proc_open(array_merge([PHP_BINARY], $args), [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
@@ -74,11 +90,18 @@ if (!getenv('TEST_MYSQL_DSN')) {
         $r7slResult = json_decode($r7slOut, true);
         assert_equals([0, 'ok', [2, 0]], [$r7slCode, $r7slResult[0] ?? $r7slOut, $r7slResult[1] ?? null],
             'R7 stock mysql: a restock does not wait for an order another transaction holds; the next waiting order gets the units');
-        assert_equals(['ok', [0, 0], 4], array_slice(is_array($r7slResult) ? $r7slResult : [], 2),
+        assert_equals(['ok', [0, 0], 4], array_slice(is_array($r7slResult) ? $r7slResult : [], 2, 3),
             'R7 stock mysql: the skipped order is allocated by the next restock');
+        assert_equals(['ok', 2, 2, 0, 6], $r7slResult[5] ?? $r7slOut,
+            'R8 stock mysql: a line skipped while its order was held, with no later restock, is allocated by the worker sweep');
     } finally {
         $r7slPhp([$r7slRoot . '/lock.php', 'teardown', dirname(TEST_CLI_DIR), $r7slTarget]);
     }
 }
+$r7slSource = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/BackorderAllocation.php');
+assert_true(!str_contains($r7slSource, 'FOR UPDATE SKIP LOCKED') && str_contains($r7slSource, 'FOR UPDATE NOWAIT'),
+    'R8 stock: backorder allocation avoids SKIP LOCKED (MariaDB 10.4/10.5, supported by README, lack it) and uses NOWAIT');
+$r7slWorker = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/cli/worker.php');
+assert_true(str_contains($r7slWorker, 'BackorderAllocation::sweep()'), 'R8 stock: the worker sweeps skipped backorder lines in every store');
 foreach (glob($r7slRoot . '/*') ?: [] as $r7slFile) unlink($r7slFile);
 rmdir($r7slRoot);
