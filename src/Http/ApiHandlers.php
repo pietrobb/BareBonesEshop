@@ -902,6 +902,9 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     } catch (OrderRejectedException $e) {
         Cart::removeUnavailable([]);
         return checkoutRefusal('stock_changed');
+    } catch (CouponRejectedException $e) {
+        // Same refusal as a used-up code at pricing time (no oracle): a concurrent order took the last use.
+        return ['success' => false, 'error' => sprintf(I18n::t('coupon_invalid'), $couponCode), 'error_code' => 'coupon_invalid'];
     }
 }
 
