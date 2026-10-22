@@ -57,6 +57,61 @@ try {
     @rmdir($r8hRoot);
 }
 
+// Category counts: the R7 recount ran one product scan per category (57 s at 40k products), inside the feed's
+// write transaction on every full-upsert sync. Now a fixed number of statements, whatever the category count.
+echo "\n--- Audit round 8 (hotfix): category product counts in one pass ---\n";
+$r8cFile = test_fixture_path('r8-hotfix-counts') . '.sqlite';
+$r8cPrev = [Db::get(), Db::driver()];
+$r8cDb = new QueryCountingPDO('sqlite:' . $r8cFile, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+try {
+    Db::init($r8cDb, 'sqlite');
+    (new Migrator($r8cDb, dirname(TEST_CLI_DIR) . '/migrations', $r8cFile . '.lock'))->apply(static fn() => null);
+    $r8cCat = $r8cDb->prepare('INSERT INTO categories (store_id, name, slug, path, parent_id, depth) VALUES (?, ?, ?, ?, ?, ?)');
+    $r8cId = static function(string $store, string $path, ?int $parent) use ($r8cDb, $r8cCat): int {
+        $r8cCat->execute([$store, $path, $store . '-' . str_replace('/', '-', $path), $path, $parent, substr_count($path, '/')]);
+        return (int)$r8cDb->lastInsertId();
+    };
+    $r8cA = $r8cId('default', 'a', null);
+    $r8cAB = $r8cId('default', 'a/b', $r8cA);
+    $r8cAC = $r8cId('default', 'a/c', $r8cA);
+    $r8cX = $r8cId('default', 'x', null);
+    $r8cCzA = $r8cId('cz', 'a', null);          // same path in another catalog: not an ancestor of default's a/b
+    $r8cEmpty = $r8cId('default', 'empty', null);
+    for ($i = 0; $i < 60; $i++) $r8cId('default', "a/c/n{$i}", $r8cAC); // many categories, still a constant statement count
+    $r8cProduct = $r8cDb->prepare("INSERT INTO products (store_id, sku, slug, name, category_id, price, status) VALUES ('default', ?, ?, ?, ?, 100, ?)");
+    $r8cLink = $r8cDb->prepare('INSERT INTO product_categories (product_id, category_id) VALUES (?, ?)');
+    $r8cAdd = static function(string $sku, int $category, string $status = 'active', array $links = []) use ($r8cDb, $r8cProduct, $r8cLink): void {
+        $r8cProduct->execute([$sku, strtolower($sku), $sku, $category, $status]);
+        $id = (int)$r8cDb->lastInsertId();
+        foreach ($links as $link) $r8cLink->execute([$id, $link]);
+    };
+    $r8cAdd('R8C-1', $r8cAB);
+    $r8cAdd('R8C-2', $r8cAB, 'active', [$r8cAC, $r8cX]); // linked into a sibling (same ancestor a: once) and into x
+    $r8cAdd('R8C-3', $r8cAC, 'draft');
+    $r8cAdd('R8C-4', $r8cX, 'active', [$r8cCzA]);
+    $r8cDb->exec("UPDATE categories SET product_count = 99 WHERE id = {$r8cEmpty}");
+    $r8cDb->resetQueryCount();
+    Import::recountCategories($r8cDb);
+    $r8cStatements = $r8cDb->queryCount();
+    $r8cCounts = $r8cDb->query('SELECT id, product_count FROM categories')->fetchAll(PDO::FETCH_KEY_PAIR);
+    assert_equals([2, 2, 1, 2, 1, 0], array_map(static fn(int $id): int => (int)$r8cCounts[$id], [$r8cA, $r8cAB, $r8cAC, $r8cX, $r8cCzA, $r8cEmpty]),
+        'R8 category counts: subtree totals with linked categories counted once per category, drafts skipped, catalogs kept apart, stale count reset');
+    assert_true($r8cStatements <= 5, "R8 category counts: a full recount of 66 categories takes a constant number of statements ({$r8cStatements})");
+    $r8cDb->exec("UPDATE products SET status = 'draft' WHERE sku = 'R8C-1'");
+    Import::recountCategories($r8cDb, [$r8cAB]);
+    $r8cCounts = $r8cDb->query('SELECT id, product_count FROM categories')->fetchAll(PDO::FETCH_KEY_PAIR);
+    assert_equals([2, 1], [(int)$r8cCounts[$r8cA], (int)$r8cCounts[$r8cAB]],
+        'R8 category counts: recounting given ids touches only those (the ancestor a is refreshed by CategoryCounts::refresh, not here)');
+} finally {
+    Db::init(...$r8cPrev);
+    $r8cDb = null;
+    @unlink($r8cFile);
+    @unlink($r8cFile . '.lock');
+}
+$r8cFeed = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/FeedImport.php');
+assert_true(preg_match('/\$db->commit\(\);\s*(?:\/\/[^\n]*\n\s*)*if \(\$importMode === self::MODE_UPSERT[^\n]*recountCategories/', $r8cFeed) === 1,
+    'R8 feed sync: the category recount runs after the feed transaction commits, not inside it');
+
 // Import of two products with the same name (so the same derived slug). MySQL's ON DUPLICATE KEY UPDATE fired on
 // the unique slug: the second row overwrote the first product's price and its stock went to a SKU without a product.
 echo "\n--- Audit round 8 (hotfix): CSV import of two products with the same name ---\n";
