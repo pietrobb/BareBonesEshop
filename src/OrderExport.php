@@ -48,9 +48,8 @@ final class OrderExport {
     public static function writeCsv($out, array $input): int {
         $filters = self::filters($input, 'all');
         // Unbuffered on MySQL: orders stream to the CSV, so memory stays flat however many orders match.
-        $stmt = Db::prepareUnbuffered("SELECT o.*, (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_quantity
-            FROM orders o WHERE {$filters['where']} ORDER BY o.created_at DESC, o.id DESC");
-        $stmt->execute($filters['params']);
+        $stmt = Db::executeUnbuffered("SELECT o.*, (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_quantity
+            FROM orders o WHERE {$filters['where']} ORDER BY o.created_at DESC, o.id DESC", $filters['params']);
         // A failure mid-stream is logged, raised as an incident and thrown (CsvExportTruncated).
         return CsvExport::stream($out, $stmt, self::COLUMNS, static function (array $order): array {
             $address = json_decode((string)($order['shipping_addr'] ?? ''), true);

@@ -279,3 +279,39 @@ $r8sBufferAt = strpos($r8sAdmin, 'ob_start();');
 $r8sRenderAt = strpos($r8sAdmin, '<!DOCTYPE html>');
 assert_true($r8sGuardAt !== false && $r8sBufferAt !== false && $r8sBufferAt < $r8sRenderAt && $r8sGuardAt < $r8sRenderAt,
     'R8 admin fatal: admin.php buffers the page and registers the guard before any HTML is emitted');
+
+// MySQL: the CSV exports really stream. Native prepares ignore the buffered-query option given to prepare(), so the
+// whole result used to land in PHP memory; Db::executeUnbuffered switches the connection for that execute only.
+if (!getenv('TEST_MYSQL_DSN')) {
+    print "  [SKIP] R8 MySQL unbuffered export (set TEST_MYSQL_DSN)\n";
+} else {
+    [$r8sSavedDb, $r8sSavedDriver] = [Db::get(), Db::driver()];
+    $r8sMy = new PDO(getenv('TEST_MYSQL_DSN'), getenv('TEST_MYSQL_USER') ?: 'root', getenv('TEST_MYSQL_PASS') ?: '', [PDO::ATTR_EMULATE_PREPARES => false]);
+    $r8sMy->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $r8sMyDb = 'bbe_r8s_unbuf_' . bin2hex(random_bytes(4));
+    $r8sBufferedAttr = defined('Pdo\Mysql::ATTR_USE_BUFFERED_QUERY') ? constant('Pdo\Mysql::ATTR_USE_BUFFERED_QUERY') : constant('PDO::MYSQL_ATTR_USE_BUFFERED_QUERY');
+    try {
+        $r8sMy->exec("CREATE DATABASE `{$r8sMyDb}`");
+        $r8sMy->exec("USE `{$r8sMyDb}`");
+        $r8sMy->exec('CREATE TABLE r8s_rows (id INT PRIMARY KEY AUTO_INCREMENT, v VARCHAR(500))');
+        $r8sInsert = $r8sMy->prepare('INSERT INTO r8s_rows (v) VALUES ' . implode(', ', array_fill(0, 500, '(?)')));
+        for ($r8sI = 0; $r8sI < 60; $r8sI++) $r8sInsert->execute(array_fill(0, 500, str_repeat('x', 400)));
+        Db::init($r8sMy, 'mysql');
+        $r8sBefore = memory_get_usage();
+        $r8sStmt = Db::executeUnbuffered('SELECT * FROM r8s_rows ORDER BY id');
+        $r8sHeld = memory_get_usage() - $r8sBefore;
+        $r8sRows = 0;
+        while ($r8sStmt->fetch(PDO::FETCH_NUM) !== false) $r8sRows++;
+        $r8sStmt = null;
+        assert_true($r8sRows === 30000 && $r8sHeld < 2 * 1048576,
+            'R8 MySQL export: 30k rows (~12 MB) stream instead of being buffered in PHP (held after execute: ' . round($r8sHeld / 1048576, 1) . ' MB)');
+        assert_true($r8sMy->getAttribute($r8sBufferedAttr) == true, 'R8 MySQL export: the connection is buffered again for every other query');
+        $r8sA = $r8sMy->query('SELECT COUNT(*) FROM r8s_rows');
+        $r8sB = $r8sMy->query('SELECT 1');
+        assert_equals([30000, 1], [(int)$r8sA->fetchColumn(), (int)$r8sB->fetchColumn()], 'R8 MySQL export: two open buffered queries work after the stream');
+    } finally {
+        Db::init($r8sSavedDb, $r8sSavedDriver);
+        $r8sMy->exec("DROP DATABASE IF EXISTS `{$r8sMyDb}`");
+        $r8sMy = null;
+    }
+}

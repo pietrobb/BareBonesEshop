@@ -753,9 +753,8 @@ assert_equals([25_000_000, 25_000_000, true, 1_000_000], [ProductEditor::maxUplo
     'AAC image upload: pixel cap at most 25 MP and lowered to what memory_limit can decode');
 assert_equals([['price' => 300, 'clamped' => true], ['price' => 1050, 'clamped' => false], ['price' => 0, 'clamped' => true]],
     [ProductBulk::changedPrice(350, -20, 300), ProductBulk::changedPrice(1000, 5), ProductBulk::changedPrice(-100, 5)], 'AAC bulk price: never below zero or the variant floor');
-assert_true(str_contains((string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/OrderExport.php'), 'Db::prepareUnbuffered(')
-    && str_contains((string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Catalog.php'), 'Db::prepareUnbuffered("SELECT sku'),
+assert_true(str_contains((string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/OrderExport.php'), 'Db::executeUnbuffered(')
+    && str_contains((string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Catalog.php'), 'Db::executeUnbuffered("SELECT sku'),
     'AAC exports: order and product CSV exports stream unbuffered on MySQL');
-$aacStmt = Db::prepareUnbuffered('SELECT 1 AS one');
-$aacStmt->execute();
+$aacStmt = Db::executeUnbuffered('SELECT 1 AS one');
 assert_equals(['one' => 1], array_map('intval', (array)$aacStmt->fetch(PDO::FETCH_ASSOC)), 'AAC exports: the streaming statement works on SQLite');

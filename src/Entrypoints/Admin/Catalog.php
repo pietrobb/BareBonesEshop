@@ -1018,9 +1018,8 @@ function exportProductsCsv($out, string $search = '', string $statusFilter = '')
     if ($statusFilter) { $where .= " AND status = :status"; $params[':status'] = $statusFilter; }
 
     // Unbuffered on MySQL: rows stream to the CSV instead of the whole catalog being held in memory.
-    $stmt = Db::prepareUnbuffered("SELECT sku, name, slug, product_type, price, compare_price, stock, status, summary, weight_g,
-        stock_low_threshold, stock_critical_threshold FROM products WHERE {$where} ORDER BY id");
-    $stmt->execute($params);
+    $stmt = Db::executeUnbuffered("SELECT sku, name, slug, product_type, price, compare_price, stock, status, summary, weight_g,
+        stock_low_threshold, stock_critical_threshold FROM products WHERE {$where} ORDER BY id", $params);
 
     $header = ['sku', 'name', 'slug', 'product_type', 'price', 'compare_price', 'stock', 'status', 'summary', 'weight_g', 'stock_low_threshold', 'stock_critical_threshold'];
     // A failure mid-stream is logged, raised as an incident and thrown (CsvExportTruncated).

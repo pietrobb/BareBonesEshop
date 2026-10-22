@@ -1,6 +1,6 @@
 <?php
 /**
- * Streams an unbuffered result set (Db::prepareUnbuffered) into a CSV handle.
+ * Streams an unbuffered result set (Db::executeUnbuffered) into a CSV handle.
  *
  * A streamed export can fail half-way (MySQL net_write_timeout on a slow download, a lost
  * connection). A marker row would be read as data by CSV parsers, so a failure after the header
