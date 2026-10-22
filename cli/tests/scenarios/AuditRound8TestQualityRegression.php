@@ -82,3 +82,62 @@ foreach (['' => 'no secret', 'whsec_short' => 'a secret shorter than 16 characte
     assert_true(!(new StripePayment(['stripe_webhook_secret' => (string)$r8qBad]))->verifySignature($r8qBody, 't=' . $r8qNow . ',v1=' . $r8qBadSig),
         "R8 tests: Stripe rejects every webhook when configured with {$r8qCase}");
 }
+
+// Mutant 4: DigitalDelivery expiry and download-limit checks (off-by-one, removed clause) survived — only the ordinary cases were tested.
+$r8qDb->exec("INSERT INTO digital_assets (sku, asset_key, label, storage_path, download_name) VALUES ('R8Q-DIGI', 'r8q-" . bin2hex(random_bytes(3)) . "', 'R8Q Guide', 'r8q/guide.pdf', 'guide.pdf')");
+$r8qAsset = (int)$r8qDb->lastInsertId();
+$r8qDb->exec("INSERT INTO categories (store_id, slug, name, path, depth) VALUES ('default', 'r8q-digital', 'R8Q Digital', 'r8q-digital', 0)");
+$r8qDb->prepare("INSERT INTO products (store_id, category_id, sku, slug, name, price, stock, status, product_type) VALUES ('default', ?, 'R8Q-DIGI', 'r8q-digi', 'R8Q Guide', 500, 0, 'active', 'downloadable')")->execute([(int)$r8qDb->lastInsertId()]);
+$r8qProduct = (int)$r8qDb->lastInsertId();
+$r8qOrder = static function (string $status = 'paid', string $paymentStatus = 'paid') use ($r8qDb): int {
+    $r8qDb->prepare("INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, shipping_addr, subtotal, shipping_cost, tax_amount, discount_amount, total, currency, status, payment_status, payment_method, store_id, created_at)
+        VALUES (?, 'R8Q', 'r8q@example.test', '', '{}', 500, 0, 0, 0, 500, 'eur', ?, ?, 'manual', 'default', " . Db::now() . ")")
+        ->execute(['R8Q-' . bin2hex(random_bytes(5)), $status, $paymentStatus]);
+    return (int)$r8qDb->lastInsertId();
+};
+// Returns [entitlement id, raw token].
+$r8qEntitlement = static function (?int $limit, int $count, ?int $expiresAt, ?int $orderId = null) use ($r8qDb, $r8qAsset, $r8qOrder, $r8qProduct): array {
+    $token = bin2hex(random_bytes(32));
+    $orderId ??= $r8qOrder();
+    $r8qDb->prepare("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total) VALUES (?, ?, 'R8Q-DIGI', 'R8Q Guide', 1, 500, 500)")->execute([$orderId, $r8qProduct]);
+    $r8qDb->prepare("INSERT INTO digital_entitlements (order_id, order_item_id, asset_id, token_hash, status, download_count, download_limit, expires_at) VALUES (?, ?, ?, ?, 'active', ?, ?, ?)")
+        ->execute([$orderId, (int)$r8qDb->lastInsertId(), $r8qAsset, hash('sha256', $token), $count, $limit, $expiresAt]);
+    return [(int)$r8qDb->lastInsertId(), $token];
+};
+$r8qT = time();
+$r8qRowOf = static fn(?int $limit, int $count, ?int $expiresAt): array => ['asset_active' => 1, 'payment_status' => 'paid', 'order_status' => 'paid', 'order_item_id' => 0,
+    'download_limit' => $limit, 'download_count' => $count, 'expires_at' => $expiresAt];
+assert_equals([true, true, false, true], [
+    DigitalDelivery::downloadable($r8qRowOf(null, 99, null), $r8qT),
+    DigitalDelivery::downloadable($r8qRowOf(3, 0, $r8qT), $r8qT),
+    DigitalDelivery::downloadable($r8qRowOf(3, 0, $r8qT - 1), $r8qT),
+    DigitalDelivery::downloadable($r8qRowOf(3, 2, $r8qT + 60), $r8qT),
+], 'R8 tests: downloadable — no limit/expiry, expiring this second, expired a second ago, one download left');
+assert_equals([false, false], [DigitalDelivery::downloadable($r8qRowOf(3, 3, null), $r8qT), DigitalDelivery::downloadable($r8qRowOf(3, 4, null), $r8qT)],
+    'R8 tests: downloadable — limit reached or exceeded');
+
+// consume(): counts up to the limit, never past it, never after expiry (expiry second itself still counts).
+[$r8qLimited] = $r8qEntitlement(2, 1, null);
+assert_equals([true, false], [DigitalDelivery::consume($r8qLimited, $r8qT), DigitalDelivery::consume($r8qLimited, $r8qT)],
+    'R8 tests: consume takes the last download of the limit, then refuses');
+assert_equals(2, (int)$r8qDb->query('SELECT download_count FROM digital_entitlements WHERE id = ' . $r8qLimited)->fetchColumn(), 'R8 tests: a refused consume does not count');
+[$r8qUnlimited] = $r8qEntitlement(null, 50, null);
+assert_true(DigitalDelivery::consume($r8qUnlimited, $r8qT), 'R8 tests: consume without a limit always counts');
+[$r8qEdge] = $r8qEntitlement(5, 0, $r8qT);
+[$r8qGone] = $r8qEntitlement(5, 0, $r8qT - 1);
+assert_equals([true, false], [DigitalDelivery::consume($r8qEdge, $r8qT), DigitalDelivery::consume($r8qGone, $r8qT)],
+    'R8 tests: consume in the expiry second counts; one second later it is refused');
+[$r8qCancelled] = $r8qEntitlement(5, 0, null, $r8qOrder('cancelled', 'paid'));
+[$r8qUnpaid] = $r8qEntitlement(5, 0, null, $r8qOrder('pending', 'pending'));
+assert_equals([false, false], [DigitalDelivery::consume($r8qCancelled, $r8qT), DigitalDelivery::consume($r8qUnpaid, $r8qT)],
+    'R8 tests: consume refuses a cancelled or unpaid order');
+
+// resolve(): the link itself stops at expiry and at a spent limit (no resume pending).
+[, $r8qOpen] = $r8qEntitlement(3, 2, $r8qT + 60);
+[, $r8qSpent] = $r8qEntitlement(3, 3, $r8qT + 60);
+[, $r8qExpired] = $r8qEntitlement(3, 0, $r8qT - 5);
+[, $r8qForever] = $r8qEntitlement(null, 500, null);
+assert_equals([true, false, false, true], [
+    DigitalDelivery::resolve($r8qOpen) !== null, DigitalDelivery::resolve($r8qSpent) !== null,
+    DigitalDelivery::resolve($r8qExpired) !== null, DigitalDelivery::resolve($r8qForever) !== null,
+], 'R8 tests: resolve — one download left, limit spent, expired, unlimited');
