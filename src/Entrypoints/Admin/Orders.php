@@ -665,7 +665,7 @@ function handleOrderStatus(): void {
     } catch (\LogicException $e) {
         setFlash('err', I18n::t('admin.order.msg.invalid_transition'));
     } catch (\Throwable $e) {
-        error_log("Order status change error [{$orderId}]: " . $e->getMessage());
+        Logger::phpLog("Order status change error [{$orderId}]: " . $e->getMessage());
         setFlash('err', I18n::t('admin.order.msg.status_error'));
     }
 
@@ -720,7 +720,7 @@ function handleOrderPaymentTransition(): void {
             setFlash('ok', I18n::format('admin.order.msg.payment_changed', ['status' => $newStatus]));
         }
     } catch (\Throwable $e) {
-        error_log("Payment status change error [{$orderId}]: " . $e->getMessage());
+        Logger::phpLog("Payment status change error [{$orderId}]: " . $e->getMessage());
         setFlash('err', I18n::t('admin.order.msg.payment_error'));
     }
 
@@ -756,7 +756,7 @@ function handleOrderRefundRequest(): void {
         ]);
         setFlash('ok', I18n::t('admin.order.msg.refund_requested'));
     } catch (\Throwable $e) {
-        error_log("Refund request error [{$orderId}]: " . $e->getMessage());
+        Logger::phpLog("Refund request error [{$orderId}]: " . $e->getMessage());
         setFlash('err', I18n::t('admin.order.msg.refund_error'));
     }
 
@@ -771,7 +771,7 @@ function handleOrderRefundRetry(): void {
         $queued = PaymentService::retryRefundRequest($orderId, Security::adminUser());
         setFlash($queued ? 'ok' : 'err', I18n::t($queued ? 'admin.order.msg.refund_retry_queued' : 'admin.order.msg.refund_error'));
     } catch (\Throwable $e) {
-        error_log("Refund retry error [{$orderId}]: " . $e->getMessage());
+        Logger::phpLog("Refund retry error [{$orderId}]: " . $e->getMessage());
         setFlash('err', I18n::t('admin.order.msg.refund_error'));
     }
     header("Location: admin.php?p=order&id={$orderId}");
@@ -787,7 +787,7 @@ function handleOrderRefundConfirm(): void {
         PaymentService::confirmProviderRefund($orderId, Security::adminUser(), $note);
         setFlash('ok', I18n::t('admin.order.msg.refund_confirmed'));
     } catch (\Throwable $e) {
-        error_log("Refund confirm error [{$orderId}]: " . $e->getMessage());
+        Logger::phpLog("Refund confirm error [{$orderId}]: " . $e->getMessage());
         setFlash('err', I18n::t('admin.order.msg.refund_error'));
     }
     header("Location: admin.php?p=order&id={$orderId}");
@@ -816,7 +816,7 @@ function handleOrderManualRefund(): void {
         PaymentService::completeManualRefund($orderId, $amount, Security::adminUser(), $note);
         setFlash('ok', I18n::t('admin.order.msg.manual_refund_recorded'));
     } catch (\Throwable $e) {
-        error_log("Manual refund error [{$orderId}]: " . $e->getMessage());
+        Logger::phpLog("Manual refund error [{$orderId}]: " . $e->getMessage());
         setFlash('err', I18n::t('admin.order.msg.refund_error'));
     }
 
@@ -840,7 +840,7 @@ function handleOrderEmailResend(): void {
             setFlash('err', I18n::format('admin.order.msg.email_failed', ['error' => $res['error'] ?? $res['status'] ?? I18n::t('admin.order.msg.unknown_error')]));
         }
     } catch (\Throwable $e) {
-        error_log("Resend email #{$logId} failed: " . $e->getMessage());
+        Logger::phpLog("Resend email #{$logId} failed: " . $e->getMessage());
         setFlash('err', I18n::t('admin.order.msg.email_resend_error'));
     }
     header("Location: admin.php?p=order&id={$orderId}");
@@ -868,7 +868,7 @@ function handleOrderInvoiceIssue(): void {
         }
         setFlash('ok', I18n::format('admin.order.msg.invoice_issued', ['number' => $inv['number']]));
     } catch (\Throwable $e) {
-        error_log("Invoice issue [{$orderId}]: " . $e->getMessage());
+        Logger::phpLog("Invoice issue [{$orderId}]: " . $e->getMessage());
         setFlash('err', I18n::format('admin.order.msg.invoice_issue_failed', ['error' => $e->getMessage()]));
     }
     header("Location: admin.php?p=order&id={$orderId}");
@@ -908,7 +908,7 @@ function handleOrderInvoiceResend(): void {
             setFlash('err', I18n::format('admin.order.msg.email_failed', ['error' => $res['error'] ?? $res['status'] ?? I18n::t('admin.order.msg.unknown_error')]));
         }
     } catch (\Throwable $e) {
-        error_log("Invoice resend [{$invoiceId}]: " . $e->getMessage());
+        Logger::phpLog("Invoice resend [{$invoiceId}]: " . $e->getMessage());
         setFlash('err', I18n::format('admin.order.msg.send_error', ['error' => $e->getMessage()]));
     }
     header("Location: admin.php?p=order&id={$orderId}");

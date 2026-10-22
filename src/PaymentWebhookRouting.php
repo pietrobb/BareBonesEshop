@@ -98,7 +98,7 @@ final class PaymentWebhookRouting {
         $stmt = $db->prepare('SELECT status, attempts FROM payment_webhook_inbox WHERE provider = :provider AND event_id = :event');
         $stmt->execute($key);
         $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: ['status' => 'retry', 'attempts' => 1];
-        error_log("payment webhook [{$provider}] {$eventType} {$eventId} unresolved ({$row['status']} #{$row['attempts']}): " . $e->getMessage());
+        Logger::phpLog("payment webhook [{$provider}] {$eventType} {$eventId} unresolved ({$row['status']} #{$row['attempts']}): " . $e->getMessage());
         return ['status' => (string)$row['status'], 'attempts' => (int)$row['attempts']];
     }
 

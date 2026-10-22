@@ -189,7 +189,7 @@ final class ProductEditor {
             try {
                 $storage->delete($path);
             } catch (RuntimeException $e) {
-                error_log("Product image {$path} could not be deleted: " . $e->getMessage());
+                Logger::phpLog("Product image {$path} could not be deleted: " . $e->getMessage());
             }
         }
     }
@@ -199,7 +199,7 @@ final class ProductEditor {
         try {
             Adapters::storage()->delete($path);
         } catch (RuntimeException $e) {
-            error_log("Orphaned product upload {$path}: " . $e->getMessage());
+            Logger::phpLog("Orphaned product upload {$path}: " . $e->getMessage());
         }
     }
 

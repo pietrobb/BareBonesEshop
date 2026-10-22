@@ -901,7 +901,7 @@ class PaymentService {
         } catch (\Throwable $e) {
             if ($failClosed) throw $e;
             // Never let logging failure break merchant-initiated payment operations.
-            error_log("PaymentService: failed to log transaction for order #{$orderId}: " . $e->getMessage());
+            Logger::phpLog("PaymentService: failed to log transaction for order #{$orderId}: " . $e->getMessage());
         }
     }
 

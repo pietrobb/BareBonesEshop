@@ -248,7 +248,7 @@ class ShippingService
         try {
             $points = $adapter->pickupPoints(strtoupper(trim($country)), trim($postalCode));
         } catch (\Throwable $e) {
-            error_log('Pick-up points unavailable for ' . $adapter->carrierId() . ': ' . $e->getMessage());
+            Logger::phpLog('Pick-up points unavailable for ' . $adapter->carrierId() . ': ' . $e->getMessage());
             $points = [];
         }
         return ['points' => array_values(array_filter($points, static fn(array $p): bool => ($p['id'] ?? '') !== '')), 'required' => $required];
@@ -262,7 +262,7 @@ class ShippingService
         try {
             $point = $adapter->pickupPoint(strtoupper(trim($country)), $pointId);
         } catch (\Throwable $e) {
-            error_log('Pick-up point lookup failed for ' . $adapter->carrierId() . ': ' . $e->getMessage());
+            Logger::phpLog('Pick-up point lookup failed for ' . $adapter->carrierId() . ': ' . $e->getMessage());
             return null;
         }
         return is_array($point) && ($point['id'] ?? '') === $pointId ? $point : null;
@@ -435,7 +435,7 @@ class ShippingService
         if (count($shipmentRows) === 1) {
             return PaymentWebhookRouting::within((string)$shipmentRows[0]['store_id'], static fn(): array => self::applyShipmentTracking($shipmentRows[0], $carrierId, (string)$awb, $status, $rawPayload));
         }
-        if ($labelRows || $shipmentRows) error_log("shipping webhook [{$carrierId}] AWB {$awb} is ambiguous across stores");
+        if ($labelRows || $shipmentRows) Logger::phpLog("shipping webhook [{$carrierId}] AWB {$awb} is ambiguous across stores");
         return ['handled' => false, 'reason' => 'unknown_awb'];
     }
 

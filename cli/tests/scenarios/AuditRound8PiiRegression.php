@@ -135,3 +135,22 @@ try {
 }
 assert_true(str_contains($r8pText, 'https://shop.example/?cart_recover=' . $r8pToken4) && str_contains($r8pText, 'cart_unsubscribe=' . $r8pToken4),
     'R8 PII queue: the worker still sends the working recovery and opt-out links');
+
+// 5) Exception messages carry customer input (an e-mail in a failed INSERT, a provider error): the PHP log gets them masked.
+$r8pPhpLog = $r8pDir . '/php-error.log';
+$r8pPrevLog = ini_set('error_log', $r8pPhpLog);
+try {
+    Logger::phpLog("Order status change error [7]: SQLSTATE[23000]: UNIQUE failed (values 'Jan.Novak+eshop@example.co.uk', token=abc123secret)");
+} finally {
+    ini_set('error_log', (string)$r8pPrevLog);
+}
+$r8pLogged = (string)@file_get_contents($r8pPhpLog);
+assert_true(str_contains($r8pLogged, 'Order status change error [7]') && str_contains($r8pLogged, '[email]')
+    && !str_contains($r8pLogged, 'example.co.uk') && !str_contains($r8pLogged, 'abc123secret'),
+    "R8 PII logs: the PHP log line keeps the event but masks the e-mail and the token ({$r8pLogged})");
+$r8pRaw = [];
+foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(dirname(TEST_CLI_DIR) . '/src', FilesystemIterator::SKIP_DOTS)) as $r8pFile) {
+    if ($r8pFile->getExtension() !== 'php' || $r8pFile->getFilename() === 'Logger.php') continue;
+    if (preg_match('/(?<![\w>:])error_log\(/', (string)file_get_contents($r8pFile->getPathname()))) $r8pRaw[] = $r8pFile->getFilename();
+}
+assert_equals([], $r8pRaw, 'R8 PII logs: application code writes the PHP log only through Logger::phpLog');

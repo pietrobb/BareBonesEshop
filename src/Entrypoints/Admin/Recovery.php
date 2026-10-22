@@ -93,7 +93,7 @@ function handleAwaitingPaymentConfirm(): void {
                 : I18n::t('admin.recovery.already_paid'));
         }
     } catch (\Throwable $e) {
-        error_log("Offline payment confirm error [{$orderId}]: " . $e->getMessage());
+        Logger::phpLog("Offline payment confirm error [{$orderId}]: " . $e->getMessage());
         setFlash('err', I18n::t('admin.recovery.confirm_failed'));
     }
     header('Location: admin.php?p=awaiting_payment');

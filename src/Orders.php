@@ -617,7 +617,7 @@ class Orders {
                     try {
                         $providerStatus = strtolower(trim((string)$paymentStatusResolver($order)));
                     } catch (\Throwable $e) {
-                        error_log("Pending order expiry skipped for #{$order['id']}: " . $e->getMessage());
+                        Logger::phpLog("Pending order expiry skipped for #{$order['id']}: " . $e->getMessage());
                         continue;
                     }
                     if (!in_array($providerStatus, self::PROVIDER_FINAL_UNPAID, true)) continue;
@@ -626,7 +626,7 @@ class Orders {
                 try {
                     if (self::expireClaimed($order, $cutoff($ttl), $online)) $expired++;
                 } catch (\Throwable $e) {
-                    error_log("Pending order expiry failed for #{$order['id']}: " . $e->getMessage());
+                    Logger::phpLog("Pending order expiry failed for #{$order['id']}: " . $e->getMessage());
                     IncidentMonitor::report('order.expiry_failed', 'orders', 'critical', ['order_id' => (int)$order['id'], 'exception' => $e]);
                     continue;
                 }

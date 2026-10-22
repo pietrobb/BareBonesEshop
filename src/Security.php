@@ -122,7 +122,7 @@ class Security {
         try {
             $codes = array_intersect(PaymentService::onlineProviderCodes(), array_map('strval', array_keys(Adapters::registry('payment'))));
         } catch (\Throwable $e) {
-            error_log('CSP payment origins unavailable: ' . $e->getMessage());
+            Logger::phpLog('CSP payment origins unavailable: ' . $e->getMessage());
             return [];
         }
         $origins = [];
@@ -132,7 +132,7 @@ class Security {
             } catch (\RuntimeException $e) {
                 continue; // disabled mock provider or a provider whose class is not installed
             } catch (\Throwable $e) {
-                error_log("CSP payment origins: provider {$code} failed to load: " . $e->getMessage());
+                Logger::phpLog("CSP payment origins: provider {$code} failed to load: " . $e->getMessage());
                 continue;
             }
             if (!$adapter instanceof HostedCheckoutAdapter) continue;

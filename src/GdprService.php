@@ -597,7 +597,7 @@ class GdprService {
             ]);
         } catch (\Throwable $e) {
             $errorId = bin2hex(random_bytes(6));
-            error_log("GDPR erase audit failed [{$errorId}] for " . ($customerId !== null ? "customer #{$customerId}" : 'a guest') . ': ' . $e->getMessage());
+            Logger::phpLog("GDPR erase audit failed [{$errorId}] for " . ($customerId !== null ? "customer #{$customerId}" : 'a guest') . ': ' . $e->getMessage());
         }
     }
 

@@ -289,7 +289,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             } catch (Throwable $ex) {
                 $errorId = bin2hex(random_bytes(6));
-                error_log("GDPR erase failed [{$errorId}] for customer #{$cid}: " . $ex->getMessage());
+                Logger::phpLog("GDPR erase failed [{$errorId}] for customer #{$cid}: " . $ex->getMessage());
                 $flash = $t('account.gdpr_erase_failed') . " ({$errorId})";
                 $flashType = 'error';
                 $p = 'privacy';
