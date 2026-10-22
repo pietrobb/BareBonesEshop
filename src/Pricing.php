@@ -135,6 +135,16 @@ class Pricing {
 
     /** Resolve listing price-list rows in one query, keyed by product id. */
     public static function priceListRows(array $products, ?array $profile, int $qty, string $at): array {
+        return self::priceListRowsWithEnded($products, $profile, $qty, $at)[0];
+    }
+
+    /**
+     * priceListRows() and, from the same query, the product-level prices of price lists whose window ended in the year
+     * before $at (keyed by product id: list of price, valid_from, valid_to): for the Omnibus prior price they still count
+     * during the 30 days after they ended (ProductEnrichmentContext, PriceHistory::capCompare()).
+     * @return array{0: array<int, array>, 1: array<int, list<array{price: int, valid_from: ?string, valid_to: string}>>}
+     */
+    public static function priceListRowsWithEnded(array $products, ?array $profile, int $qty, string $at): array {
         $productIds = [];
         $currencies = [];
         foreach ($products as $product) {
@@ -143,14 +153,14 @@ class Pricing {
             $productIds[$productId] = $productId;
             $currencies[$productId] = strtolower((string)($product['currency'] ?? StoreContext::current()->currency()));
         }
-        if ($productIds === []) return [];
+        if ($productIds === []) return [[], []];
 
         $params = [
             ':qty' => max(1, $qty),
             ':store' => StoreContext::current()->id(),
             ':group_id' => (int)($profile['customer_group_id'] ?? 0),
             ':at_from' => $at,
-            ':at_to' => $at,
+            ':since' => gmdate('Y-m-d H:i:s', (strtotime($at . ' UTC') ?: time()) - 365 * 86400),
         ];
         $placeholders = [];
         foreach (array_values($productIds) as $index => $productId) {
@@ -162,7 +172,7 @@ class Pricing {
         try {
             $stmt = Db::get()->prepare("SELECT pp.product_id, pp.price, pp.compare_price, pp.min_qty,
                     pl.code AS price_list_code, pl.priority, pl.customer_group_id,
-                    LOWER(pl.currency) AS price_list_currency
+                    LOWER(pl.currency) AS price_list_currency, pl.valid_from, pl.valid_to
                 FROM price_list_prices pp
                 JOIN price_lists pl ON pl.id = pp.price_list_id
                 WHERE pp.product_id IN (" . implode(', ', $placeholders) . ")
@@ -170,23 +180,31 @@ class Pricing {
                   AND pl.store_id = :store AND pl.active = 1
                   AND (pl.customer_group_id IS NULL OR pl.customer_group_id = :group_id)
                   AND (pl.valid_from IS NULL OR pl.valid_from <= :at_from)
-                  AND (pl.valid_to IS NULL OR pl.valid_to >= :at_to)
+                  AND (pl.valid_to IS NULL OR pl.valid_to >= :since)
                 ORDER BY pp.product_id,
                   CASE WHEN pl.customer_group_id IS NULL THEN 0 ELSE 1 END DESC,
                   pp.min_qty DESC, pl.priority DESC, pp.id DESC");
             $stmt->execute($params);
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         } catch (PDOException $e) {
-            return [];
+            return [[], []];
         }
 
         $result = [];
+        $ended = [];
         foreach ($rows as $row) {
             $productId = (int)$row['product_id'];
-            if (isset($result[$productId]) || ($currencies[$productId] ?? '') !== $row['price_list_currency']) continue;
+            if (($currencies[$productId] ?? '') !== $row['price_list_currency']) continue;
+            if ($row['valid_to'] !== null && (string)$row['valid_to'] < $at) {
+                if ((int)$row['min_qty'] <= 1) {
+                    $ended[$productId][] = ['price' => max(0, (int)$row['price']), 'valid_from' => $row['valid_from'], 'valid_to' => (string)$row['valid_to']];
+                }
+                continue;
+            }
+            if (isset($result[$productId])) continue;
             $result[$productId] = $row;
         }
-        return $result;
+        return [$result, $ended];
     }
 
     /** Apply a pre-resolved listing price row without further database access. */

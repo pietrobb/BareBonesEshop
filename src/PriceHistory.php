@@ -76,8 +76,10 @@ final class PriceHistory {
      *   lower price in force in the last 30 days.
      * - Otherwise the reduction is the last change of the base price: the prior price is the lowest of the 30 days
      *   before that change, and a product that had no earlier price shows none.
+     * - $endedPromotionLow is the lowest price a catalog promotion that has since ended charged in those 30 days
+     *   (Promotions::lowestEndedPrice()); it lowers the prior price, usually below the price now, so none is shown.
      */
-    public static function capCompare(array $product, int $basePrice, ?array $latest, ?int $now = null): array {
+    public static function capCompare(array $product, int $basePrice, ?array $latest, ?int $now = null, ?int $endedPromotionLow = null): array {
         $price = (int)($product['price'] ?? 0);
         $compare = (int)($product['compare_price'] ?? 0);
         if ($compare <= $price) return $product;
@@ -102,6 +104,8 @@ final class PriceHistory {
         } else {
             $reference = $prior;
         }
+        // A catalog promotion that ended within the 30 days before the reduction charged this price too.
+        if ($reference !== null && $endedPromotionLow !== null) $reference = min($reference, $endedPromotionLow);
         $capped = $reference === null ? 0 : min($compare, $reference);
         $product['compare_price'] = $capped > $price ? $capped : null;
         return $product;
