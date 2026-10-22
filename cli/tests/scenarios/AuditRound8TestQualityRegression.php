@@ -32,3 +32,19 @@ assert_true(!InvoiceService::isReverseCharge(['country' => ''], ['country' => 'D
     'R8 tests: invoice without a seller country is not reverse charge');
 assert_true(InvoiceService::isReverseCharge(['country' => 'SK'], ['country' => 'de', 'ic_dph' => 'DE123456789']),
     'R8 tests: invoice to a German company with a VAT ID is reverse charge');
+
+// Mutant 2: GDPR erase could keep the customer's name, phone and VAT ID — only the e-mail, password and addresses were checked.
+$r8qDb = Db::get();
+$r8qInsert = $r8qDb->prepare("INSERT INTO customers (store_id, email, password_hash, name, phone, vat_id, vat_country, vat_validated_at, status)
+    VALUES ('default', ?, '!test!', ?, ?, ?, 'SK', '2026-10-01 00:00:00', 'active')");
+$r8qInsert->execute(['r8q-erase@example.test', 'R8Q Erased Name', '+421 900 111 222', 'SK2020111222']);
+$r8qSubject = (int)$r8qDb->lastInsertId();
+$r8qInsert->execute(['r8q-keep@example.test', 'R8Q Erased Name', '+421 900 111 222', 'SK2020111222']);
+$r8qOther = (int)$r8qDb->lastInsertId();
+GdprService::anonymizeCustomer($r8qSubject, 'r8q-test');
+$r8qRow = static fn(int $id): array => $r8qDb->query('SELECT email, name, phone, vat_id, vat_country, vat_validated_at, status FROM customers WHERE id = ' . $id)->fetch(PDO::FETCH_ASSOC);
+$r8qErased = $r8qRow($r8qSubject);
+assert_equals(['deleted-' . $r8qSubject . '@anonymized.local', '', '', null, null, null, 'anonymized'], array_values($r8qErased),
+    'R8 tests: GDPR erase clears the account name, phone and VAT ID (' . json_encode($r8qErased) . ')');
+assert_equals(['r8q-keep@example.test', 'R8Q Erased Name', '+421 900 111 222', 'SK2020111222', 'SK', '2026-10-01 00:00:00', 'active'], array_values($r8qRow($r8qOther)),
+    'R8 tests: GDPR erase leaves another customer with the same name and phone untouched');
