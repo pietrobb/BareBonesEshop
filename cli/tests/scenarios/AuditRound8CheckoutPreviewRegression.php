@@ -20,11 +20,13 @@ try {
         'R8 free order preview: a digital cart with something to pay still previews the paid methods');
 
     // 2. The shipping-rates API with cash on delivery under an automatic free-shipping promotion: the carriage is
-    //    waived, the carrier's COD surcharge stays, as checkout charges it.
+    //    waived, the carrier's COD surcharge stays, as checkout charges it. No cart rule from an earlier scenario, and
+    //    goods of 1 € stay under any free-shipping threshold of the suite config.
+    Pricing::setConfig(['cart_rules' => []]);
     $pdo->exec("INSERT INTO categories (store_id, name, slug) VALUES ('default', 'R8V', 'r8v-cat')");
     $r8vCategory = (int)$pdo->lastInsertId();
     $pdo->exec("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
-        VALUES (9881, 'default', {$r8vCategory}, 'R8V parcel', 'r8v-parcel', 'R8V-PARCEL', 'simple', 3000, 'eur', 'active', 0, 'backorder')");
+        VALUES (9881, 'default', {$r8vCategory}, 'R8V parcel', 'r8v-parcel', 'R8V-PARCEL', 'simple', 100, 'eur', 'active', 0, 'backorder')");
     $pdo->exec("INSERT INTO shipping_methods (code, carrier, name, service_type, supports_cod, supports_pickup, sort_order) VALUES ('r8vship', 'gls', 'R8V parcel', 'parcel', 1, 0, 1)");
     $pdo->exec("INSERT INTO shipping_rates (carrier, country, zone_code, method_code, weight_from_g, weight_to_g, price, cod_surcharge, sort_order)
         VALUES ('gls', '', 'domestic', 'r8vship', 0, 999999, 400, 150, 1)");
