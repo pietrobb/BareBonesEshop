@@ -667,7 +667,7 @@ class Import {
             }
             if ($own) $db->commit();
         } catch (\Throwable $e) {
-            if ($own && $db->inTransaction()) $db->rollBack();
+            if ($own) Db::rollBackOpen($db);
             throw $e;
         }
     }

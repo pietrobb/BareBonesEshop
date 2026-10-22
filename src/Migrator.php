@@ -219,12 +219,17 @@ class Migrator {
             }
             // A signed update runs this new Migrator inside the old process, where the old Db class
             // (v2.0.0 has neither optimize() nor forgetSchema()) is already loaded.
-            if ($applied && $this->isSqlite && method_exists(Db::class, 'optimize')) Db::optimize($this->db);
+            if ($applied && $this->isSqlite && self::dbHas('optimize')) Db::optimize($this->db);
             return $applied;
         } finally {
-            if (method_exists(Db::class, 'forgetSchema')) Db::forgetSchema($this->db);
+            if (self::dbHas('forgetSchema')) Db::forgetSchema($this->db);
             $this->unlock();
         }
+    }
+
+    /** Whether the loaded Db class (possibly an older release's) has $method. */
+    private static function dbHas(string $method): bool {
+        return method_exists(Db::class, $method);
     }
 
     /**
