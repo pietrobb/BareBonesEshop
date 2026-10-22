@@ -130,6 +130,9 @@ class AdminIdentity {
         $stmt = Db::get()->prepare('SELECT * FROM admin_accounts WHERE username=:username LIMIT 1');
         $stmt->execute([':username' => $username]);
         $account = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        // An open SQLite cursor keeps its WAL snapshot: the writes below would fail with SQLITE_BUSY once any
+        // other request committed in between (the busy timeout does not apply to a stale snapshot).
+        $stmt->closeCursor();
         $validPassword = password_verify($password, (string)($account['password_hash'] ?? self::dummyPasswordHash()));
         $locked = $account && $account['locked_until'] !== null && strtotime((string)$account['locked_until'] . ' UTC') > time();
         if (!$account || $account['status'] !== 'active' || $locked || !$validPassword) {
@@ -174,6 +177,7 @@ class AdminIdentity {
             WHERE s.token_hash=:hash AND s.revoked_at IS NULL LIMIT 1");
         $stmt->execute([':hash' => hash('sha256', $token)]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        $stmt->closeCursor(); // before the last_seen writes, see authenticate()
         $idleSeconds = self::configInt('admin_session_idle_seconds', 1800, 300, 86400);
         if (!$row || $row['account_status'] !== 'active' || $row['device_revoked'] !== null
             || strtotime((string)$row['expires_at'] . ' UTC') <= time()
@@ -303,6 +307,7 @@ class AdminIdentity {
         $read = Db::get()->prepare('SELECT id FROM admin_devices WHERE account_id=:account AND fingerprint=:fingerprint');
         $read->execute([':account' => $accountId, ':fingerprint' => $fingerprint]);
         $id = (int)$read->fetchColumn();
+        $read->closeCursor();
         if ($id > 0) {
             Db::get()->prepare('UPDATE admin_devices SET user_agent=:agent, last_ip=:ip, last_seen_at=:seen, revoked_at=NULL WHERE id=:id')
                 ->execute([':agent' => $userAgent, ':ip' => $ip, ':seen' => $now, ':id' => $id]);
@@ -365,7 +370,9 @@ class AdminIdentity {
     private static function account(int $id): ?array {
         $stmt = Db::get()->prepare('SELECT * FROM admin_accounts WHERE id=:id');
         $stmt->execute([':id' => $id]);
-        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        $account = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        $stmt->closeCursor(); // callers write next (recordFailure), see authenticate()
+        return $account;
     }
 
     private static function username(string $username): string {

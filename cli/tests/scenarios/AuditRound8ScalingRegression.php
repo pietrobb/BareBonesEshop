@@ -67,3 +67,51 @@ try {
     }
     @rmdir($r8sTmp);
 }
+
+// SQLite admin login under concurrent writes: a SELECT left open after one fetch() keeps its WAL snapshot, so the
+// following UPDATE fails with SQLITE_BUSY (snapshot) as soon as any other request committed in between — the
+// busy timeout cannot help. Here a second connection commits right before every admin write; login, the session
+// check and a returning device must still succeed.
+[$r8sSavedDb, $r8sSavedDriver] = [Db::get(), Db::driver()];
+$r8sTmp = sys_get_temp_dir() . '/bbe-r8login-' . bin2hex(random_bytes(4));
+mkdir($r8sTmp, 0700, true);
+$r8sFile = $r8sTmp . '/shop.sqlite';
+$r8sOther = new PDO('sqlite:' . $r8sFile, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+$r8sOther->exec('PRAGMA journal_mode = WAL');
+$r8sOther->exec('CREATE TABLE r8s_noise (x INTEGER)');
+$r8sLogin = new class('sqlite:' . $r8sFile) extends PDO {
+    public ?PDO $other = null;
+    public int $concurrentWrites = 0;
+    public function prepare(string $query, array $options = []): PDOStatement|false {
+        if ($this->other !== null && preg_match('/^\s*(UPDATE|INSERT INTO)\s+admin_(accounts|sessions|devices)\b/i', $query)) {
+            $this->other->exec('INSERT INTO r8s_noise VALUES (1)');
+            $this->concurrentWrites++;
+        }
+        return parent::prepare($query, $options);
+    }
+};
+$r8sLogin->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$r8sLogin->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+$r8sLogin->exec('PRAGMA busy_timeout = 2000');
+try {
+    (new Migrator($r8sLogin, TEST_CLI_DIR . '/../migrations', $r8sTmp . '/migrate.lock'))->apply(static fn($m) => null);
+    Db::init($r8sLogin, 'sqlite');
+    AdminIdentity::create('r8scale', 'R8-Scale-Admin-Passphrase-2026!', 'owner', false);
+    $r8sLogin->other = $r8sOther;
+    $r8sTry = static function (callable $fn): array {
+        try { return [$fn(), null]; } catch (PDOException $e) { return [null, $e->getMessage()]; }
+    };
+    [$r8sFirst, $r8sErr1] = $r8sTry(static fn() => AdminIdentity::authenticate('r8scale', 'R8-Scale-Admin-Passphrase-2026!', '', '203.0.113.8', 'R8 browser'));
+    assert_true(is_array($r8sFirst) && $r8sErr1 === null, 'R8 SQLite: admin login succeeds while other requests write (error: ' . ($r8sErr1 ?? 'none') . ')');
+    [$r8sSession, $r8sErr2] = $r8sTry(static fn() => is_array($r8sFirst) ? AdminIdentity::session((string)$r8sFirst['token']) : null);
+    assert_true(is_array($r8sSession) && $r8sErr2 === null, 'R8 SQLite: the admin session check succeeds while other requests write (error: ' . ($r8sErr2 ?? 'none') . ')');
+    [$r8sAgain, $r8sErr3] = $r8sTry(static fn() => AdminIdentity::authenticate('r8scale', 'R8-Scale-Admin-Passphrase-2026!', '', '203.0.113.8', 'R8 browser'));
+    assert_true(is_array($r8sAgain) && $r8sErr3 === null && $r8sFirst !== null && $r8sAgain['device_id'] === $r8sFirst['device_id'], 'R8 SQLite: a returning device logs in again while other requests write (error: ' . ($r8sErr3 ?? 'none') . ')');
+    assert_true($r8sLogin->concurrentWrites >= 5, 'R8 SQLite: the concurrent writer really committed before each admin write');
+} finally {
+    Db::init($r8sSavedDb, $r8sSavedDriver);
+    $r8sLogin = $r8sOther = null;
+    gc_collect_cycles();
+    foreach (glob($r8sTmp . '/*') ?: [] as $r8sF) @unlink($r8sF);
+    @rmdir($r8sTmp);
+}
