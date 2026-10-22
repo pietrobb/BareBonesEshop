@@ -1,0 +1,1 @@
+Eingangsbestätigung Ihres Widerrufs — Bestellung {{order_number}}

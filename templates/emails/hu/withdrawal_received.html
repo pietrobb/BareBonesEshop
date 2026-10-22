@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="hu"><body style="font-family:Arial,sans-serif;color:#111">
+<!-- R8 withdrawal acknowledgement (Directive 2011/83/EU art. 11a(3)); wording for lawyer review. -->
+<h2>Az elállás beérkezésének visszaigazolása</h2>
+<p>Tisztelt {{customer_name}}!</p>
+<p>Visszaigazoljuk, hogy <strong>{{received_at}}</strong> időpontban megkaptuk a(z) <strong>{{order_number}}</strong> rendelésre vonatkozó adásvételi szerződéstől való elállását, az alábbi szöveggel:</p>
+<blockquote style="border-left:3px solid #ccc;margin:0;padding:4px 12px">
+<p>Kijelentem, hogy az alábbi tételek tekintetében elállok az adásvételi szerződéstől:</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if reason}}<p>Indoklás: {{reason}}</p>{{/if}}
+<p>{{customer_name}}, {{received_at}}</p>
+</blockquote>
+<p>Az Ön által teljesített összes kifizetést, beleértve az eredeti kiszállítás költségét is, legkésőbb az elállás beérkezésétől számított 14 napon belül visszatérítjük, az Ön által használt fizetési móddal. A visszatérítést visszatarthatjuk, amíg az árut vissza nem kapjuk, vagy Ön nem igazolja, hogy visszaküldte. Kérjük, az árut 14 napon belül küldje vissza.</p>
+<p>Eladó: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
+</body></html>

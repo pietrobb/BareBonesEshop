@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="sk"><body style="font-family:Arial,sans-serif;color:#111">
+<h2>Odstúpenie od zmluvy</h2>
+<p>{{customer_name}} ({{customer_email}}) odstúpil(a) od zmluvy k objednávke <strong>{{order_number}}</strong> ({{order_total}}). Zrušte neodoslané položky alebo prevezmite tovar späť a peniaze vráťte do 14 dní.</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if admin_url}}<p><a href="{{admin_url}}">Otvoriť objednávku</a></p>{{/if}}
+</body></html>

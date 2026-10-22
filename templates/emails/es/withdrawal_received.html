@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="es"><body style="font-family:Arial,sans-serif;color:#111">
+<!-- R8 withdrawal acknowledgement (Directive 2011/83/EU art. 11a(3)); wording for lawyer review. -->
+<h2>Acuse de recibo de su desistimiento</h2>
+<p>Estimado/a {{customer_name}}:</p>
+<p>le confirmamos que el <strong>{{received_at}}</strong> recibimos su desistimiento del contrato de compra del pedido <strong>{{order_number}}</strong> con el siguiente texto:</p>
+<blockquote style="border-left:3px solid #ccc;margin:0;padding:4px 12px">
+<p>Por la presente le comunico que desisto del contrato de compra de los siguientes productos:</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if reason}}<p>Motivo: {{reason}}</p>{{/if}}
+<p>{{customer_name}}, {{received_at}}</p>
+</blockquote>
+<p>Le devolveremos todos los pagos recibidos, incluidos los gastos de la entrega original, a más tardar 14 días después de recibir su desistimiento, por el mismo medio de pago que utilizó. Podemos retener el reembolso hasta haber recibido los productos o hasta que usted haya presentado una prueba de su devolución. Devuelva los productos en un plazo de 14 días.</p>
+<p>Vendedor: {{seller_name}} {{#if seller_email}}— {{seller_email}}{{/if}}</p>
+</body></html>

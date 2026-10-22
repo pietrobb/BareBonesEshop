@@ -1,0 +1,43 @@
+<section class="shop-wrap withdrawal">
+  <h1 class="h-lg">{{title}}</h1>
+  {{#if error}}<p class="form-error" role="alert">{{error}}</p>{{/if}}
+  {{#if done}}
+  <p class="form-success" role="status">{{done}}</p>
+  {{/if}}
+  {{#if review}}
+  <form method="post" class="withdrawal-form">
+    <input type="hidden" name="csrf_token" value="{{csrf_token}}">
+    <input type="hidden" name="withdrawal_step" value="confirm">
+    <input type="hidden" name="order_number" value="{{values.order_number}}">
+    <input type="hidden" name="email" value="{{values.email}}">
+    <input type="hidden" name="name" value="{{values.name}}">
+    <input type="hidden" name="reason" value="{{values.reason}}">
+    <p>{{review_hint}}</p>
+    <dl class="withdrawal-summary">
+      <dt>{{order_number_label}}</dt><dd>{{values.order_number}}</dd>
+      <dt>{{name_label}}</dt><dd>{{values.name}}</dd>
+      <dt>{{email_label}}</dt><dd>{{values.email}}</dd>
+    </dl>
+    <fieldset><legend>{{items_label}}</legend>
+      {{#each items}}<label class="withdrawal-item"><input type="checkbox" name="items[]" value="{{id}}" checked> {{name}} × {{quantity}}</label>{{/each}}
+    </fieldset>
+    <button type="submit" class="btn btn--primary">{{confirm_label}}</button>
+  </form>
+  {{/if}}
+  {{#if show_form}}
+  <p>{{intro}}</p>
+  <form method="post" class="withdrawal-form">
+    <input type="hidden" name="csrf_token" value="{{csrf_token}}">
+    <input type="hidden" name="withdrawal_step" value="review">
+    <label for="withdrawal-order">{{order_number_label}}<span class="req" aria-hidden="true"> *</span></label>
+    <input id="withdrawal-order" name="order_number" value="{{values.order_number}}" required maxlength="64" autocomplete="off">
+    <label for="withdrawal-email">{{email_label}}<span class="req" aria-hidden="true"> *</span></label>
+    <input id="withdrawal-email" type="email" name="email" value="{{values.email}}" required maxlength="191" autocomplete="email">
+    <label for="withdrawal-name">{{name_label}}</label>
+    <input id="withdrawal-name" name="name" value="{{values.name}}" maxlength="191" autocomplete="name">
+    <label for="withdrawal-reason">{{reason_label}}</label>
+    <textarea id="withdrawal-reason" name="reason" rows="3" maxlength="2000">{{values.reason}}</textarea>
+    <button type="submit" class="btn btn--primary">{{continue_label}}</button>
+  </form>
+  {{/if}}
+</section>

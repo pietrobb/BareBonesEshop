@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="es"><body style="font-family:Arial,sans-serif;color:#111">
+<h2>Desistimiento del contrato</h2>
+<p>{{customer_name}} ({{customer_email}}) ha desistido del contrato del pedido <strong>{{order_number}}</strong> ({{order_total}}). Cancele los productos no enviados o recoja los productos y reembolse en un plazo de 14 días.</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if admin_url}}<p><a href="{{admin_url}}">Abrir el pedido</a></p>{{/if}}
+</body></html>

@@ -1,0 +1,1 @@
+Desistimiento del contrato — pedido {{order_number}}

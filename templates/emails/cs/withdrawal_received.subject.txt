@@ -1,0 +1,1 @@
+Potvrzení přijetí odstoupení od smlouvy — objednávka {{order_number}}

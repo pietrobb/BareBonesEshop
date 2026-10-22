@@ -8,6 +8,7 @@ require_once dirname(__DIR__, 2) . '/src/autoload.php';
 require_once __DIR__ . '/Storefront/CatalogPages.php';
 require_once __DIR__ . '/Storefront/ProductStatusPages.php';
 require_once __DIR__ . '/Storefront/CheckoutPages.php';
+require_once __DIR__ . '/Storefront/WithdrawalPages.php';
 Security::headers();
 Security::sessionStart();
 Bootstrap::validateCustomerSession();
@@ -127,6 +128,11 @@ switch ($page) {
         $ordNum = Security::clean($_GET['order'] ?? '');
         $title = Template::pageTitle($t('order_placed'));
         $content = renderOrderDone($ordNum);
+        break;
+
+    case 'withdrawal':
+        $title = Template::pageTitle($t('withdrawal.title'));
+        $content = renderWithdrawal();
         break;
 
     case 'home':
