@@ -46,9 +46,18 @@ if ($bbeRouterLines === false) $bbeRouterStop(500);
 $bbeRouterRules = [];
 $bbeRouterIfDenies = [];
 $bbeRouterConds = [];
+$bbeRouterHeaderBlock = null;
 foreach ($bbeRouterLines as $bbeRouterLine) {
     $bbeRouterLine = trim($bbeRouterLine);
     if ($bbeRouterLine === '' || $bbeRouterLine[0] === '#' || $bbeRouterLine === 'RewriteEngine On') continue;
+    // Response-header blocks do not route; anything but a Header line inside one fails closed.
+    if ($bbeRouterHeaderBlock !== null) {
+        if ($bbeRouterLine === $bbeRouterHeaderBlock) $bbeRouterHeaderBlock = null;
+        elseif (!str_starts_with($bbeRouterLine, 'Header ')) $bbeRouterStop(500);
+        continue;
+    }
+    if (preg_match('/^<FilesMatch "[^"]+">$/', $bbeRouterLine)) { $bbeRouterHeaderBlock = '</FilesMatch>'; continue; }
+    if (preg_match('/^<If "%\{REQUEST_FILENAME\} =~ m#[^#]+#i?">$/', $bbeRouterLine)) { $bbeRouterHeaderBlock = '</If>'; continue; }
     if (preg_match('/^RewriteCond\s+(\S+)\s+("[^"]*"|\S+)(?:\s+\[([^\]]*)\])?$/', $bbeRouterLine, $m)) {
         $bbeRouterConds[] = ['var' => $m[1], 'test' => trim($m[2], '"'), 'nc' => stripos($m[3] ?? '', 'NC') !== false];
         continue;
@@ -71,7 +80,7 @@ foreach ($bbeRouterLines as $bbeRouterLine) {
     if (preg_match('/^(?:<\/If>|Require all denied|<\/?IfModule\b.*|AddOutputFilterByType\b.*|Expires(?:Active|ByType)\b.*)$/', $bbeRouterLine)) continue;
     $bbeRouterStop(500); // unknown directive: fail closed instead of silently serving
 }
-if ($bbeRouterRules === []) $bbeRouterStop(500);
+if ($bbeRouterRules === [] || $bbeRouterHeaderBlock !== null) $bbeRouterStop(500);
 
 foreach ($bbeRouterIfDenies as [$uriPattern, $queryPattern]) {
     $bbeRouterIfApplies = $queryPattern === null
