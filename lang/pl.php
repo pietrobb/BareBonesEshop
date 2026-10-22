@@ -287,6 +287,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.email.msg.unknown_vars' => 'Ten szablon nie zna zmiennych: {vars}. Dozwolone: {allowed}.',
     'admin.email.msg.malformed' => 'Nieprawidłowe znaczniki szablonu: {tags}.',
     'admin.email.msg.unsafe' => 'HTML zawiera niedozwoloną treść: {what}.',
+    'admin.email.msg.required_vars' => 'Potwierdzenie zamówienia musi zawierać informacje dla konsumenta: {vars} (scal nowy domyślny blok ze swoim tekstem).',
     'admin.email.msg.secret_link' => 'Linki z jednorazowym tokenem ({vars}) mogą być tylko całym linkiem (href="{{…}}") lub stać osobno w tekście, nie jako część innego adresu.',
     'admin.email.msg.iban_literal' => 'Nie wpisuj numeru konta bankowego do szablonu; użyj {{bank_iban}}, konta z ustawień sklepu.',
     'admin.email.msg.unknown' => 'Nieznany szablon lub język tego sklepu.',

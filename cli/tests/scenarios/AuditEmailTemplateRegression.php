@@ -13,6 +13,8 @@ foreach (['owner' => true, 'manager' => true, 'editor' => false, 'fulfillment' =
 $a158Permissions = require dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Permissions.php';
 assert_equals('emails.manage', $a158Permissions['email_templates'] ?? null, 'A15.8 role: the e-mail templates page requires emails.manage');
 
+// R8: an order-confirmation override must keep the consumer information (EmailTemplates::REQUIRED_VARIABLES).
+$a158Consumer = '<p>{{seller_name}}, {{seller_address}} <a href="{{withdrawal_url}}">withdraw</a> <a href="{{terms_url}}">terms</a></p>';
 $a158PreviousStore = StoreContext::current();
 $a158PreviousLocale = I18n::locale();
 $a158Stores = Bootstrap::stores();
@@ -39,7 +41,7 @@ try {
     assert_equals(['cs', 'en', 'sk'], (static function(array $l): array { sort($l); return $l; })(EmailTemplates::locales()), 'A15.8 locales: overrides exist for the active store\'s languages');
 
     // Store override is what MailService renders, values stay escaped, other locales/stores keep the files.
-    $a158Fields = ['subject' => 'A158 Objednávka {{order_number}}', 'html' => "<p>A158 {{customer_name}}: {{order_number}}</p>\r\n{{#each items}}<li>{{name}} × {{quantity}}</li>{{/each}}", 'text' => ''];
+    $a158Fields = ['subject' => 'A158 Objednávka {{order_number}}', 'html' => "<p>A158 {{customer_name}}: {{order_number}}</p>\r\n{{#each items}}<li>{{name}} × {{quantity}}</li>{{/each}}" . $a158Consumer, 'text' => ''];
     $a158Saved = EmailTemplates::save('order_confirmation', 'sk', $a158Fields);
     assert_true($a158Saved['ok'], 'A15.8 save: a valid override is stored (' . $a158Saved['message'] . ')');
     $a158Vars = ['order_number' => 'A158-N1', 'customer_name' => '<b>Eva</b>', 'items' => [['name' => 'Tričko', 'quantity' => 2]]];
@@ -111,7 +113,7 @@ if (($a158Dsn = getenv('TEST_MYSQL_DSN')) !== false && $a158Dsn !== '') {
         Db::init($a158My, 'mysql');
         (new Migrator($a158My, dirname(TEST_CLI_DIR) . '/migrations', test_fixture_path('a158-mysql') . '.lock'))->apply();
         $a158Activate('default');
-        $a158Native = ['subject' => 'A158 Natív {{order_number}}', 'html' => '<p>A158 natív {{customer_name}} – {{order_number}}</p>', 'text' => 'A158 natív {{order_number}}'];
+        $a158Native = ['subject' => 'A158 Natív {{order_number}}', 'html' => '<p>A158 natív {{customer_name}} – {{order_number}}</p>' . $a158Consumer, 'text' => 'A158 natív {{order_number}}'];
         $a158First = EmailTemplates::save('order_confirmation', 'sk', $a158Native);
         $a158Again = EmailTemplates::save('order_confirmation', 'sk', $a158Native);
         $a158NativeMail = MailService::render('order_confirmation', 'sk', ['order_number' => 'N-1', 'customer_name' => 'Ľubo']);
@@ -213,7 +215,7 @@ $a158Check = static function(string $label, array $r, array $expect, array $abse
         . ($missing || $r['code'] !== 200 ? ' main=' . substr((string)(strstr($r['out'], '<main>') ?: $r['out']), 0, 600) : '') . ')');
 };
 $a158Editor = ['p' => 'email_templates', 'template' => 'order_confirmation', 'locale' => 'sk'];
-$a158Draft = ['subject' => 'A158 Bestellung {{order_number}}', 'html' => '<p>A158 Entwurf {{order_number}} für {{customer_name}}</p>', 'text' => ''];
+$a158Draft = ['subject' => 'A158 Bestellung {{order_number}}', 'html' => '<p>A158 Entwurf {{order_number}} für {{customer_name}}</p>' . $a158Consumer, 'text' => ''];
 try {
     $a158Check('A15.8 de: e-mail template list is German with every template and store language', $a158Run('owner', ['p' => 'email_templates', 'lang' => 'de']),
         ['E-Mail-Vorlagen', 'Bestellbestätigung', 'Passwort zurücksetzen', 'Standard', '>SK<', '>CS<', '>EN<', 'order_shipped', 'merchant_stock_low']);

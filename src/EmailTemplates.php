@@ -102,6 +102,12 @@ class EmailTemplates {
      */
     public const LOCKED_TEMPLATES = ['core_drift_alert', 'merchant_incident'];
 
+    /**
+     * Variables an override's HTML must keep: the order confirmation carries the pre-contractual information on a
+     * durable medium (seller, withdrawal function, terms) — a v2.0.0 customisation predates them.
+     */
+    public const REQUIRED_VARIABLES = ['order_confirmation' => ['seller_name', 'seller_address', 'withdrawal_url', 'terms_url']];
+
     /** What MailService renders: the store override (an empty text part is derived from its HTML), else the files. */
     public static function source(string $template, string $locale): array {
         $override = in_array($template, self::LOCKED_TEMPLATES, true) ? null : self::override($template, $locale);
@@ -138,6 +144,9 @@ class EmailTemplates {
             }
             if ($depth['if'] > 0 || $depth['each'] > 0) $errors[] = I18n::t('admin.email.msg.unbalanced');
         }
+        $used = array_flip(array_map(static fn(string $token): string => preg_replace('~^#(?:if|each) ~', '', $token), self::tokens($html)));
+        $missing = array_values(array_filter(self::REQUIRED_VARIABLES[$template] ?? [], static fn(string $name): bool => !isset($used[$name])));
+        if ($missing) $errors[] = I18n::format('admin.email.msg.required_vars', ['vars' => implode(', ', $missing)]);
         if ($unknown) $errors[] = I18n::format('admin.email.msg.unknown_vars', ['vars' => implode(', ', array_keys($unknown)), 'allowed' => implode(', ', array_keys($allowed))]);
         if ($malformed) $errors[] = I18n::format('admin.email.msg.malformed', ['tags' => implode(' ', array_keys($malformed))]);
         $unsafe = self::unsafeHtml($html);
@@ -319,6 +328,60 @@ class EmailTemplates {
             return self::result(false, I18n::t('admin.email.msg.save_failed'));
         }
         return self::result(true, I18n::format('admin.email.msg.saved', ['template' => $template, 'locale' => $locale]));
+    }
+
+    /**
+     * Upgrade from v2.0.0, where a shop customised templates/emails/ files in place: every part in $customDir that
+     * differs from the same file in $baseDir (the untouched release the shop ran) becomes the active store's override;
+     * parts the shop did not change take the current default. Overrides pass validate() like an admin save, so a
+     * customised order confirmation without the consumer information is refused until it is merged by hand.
+     * Returns one row per changed template + locale: status imported | would_import | refused | skipped.
+     */
+    public static function importCustomised(string $customDir, string $baseDir, bool $dryRun): array {
+        $suffixes = ['subject' => '.subject.txt', 'html' => '.html', 'text' => '.txt'];
+        $read = static fn(string $file): ?string => is_file($file) ? str_replace("\r\n", "\n", (string)file_get_contents($file)) : null;
+        $changed = [];
+        foreach (glob(rtrim($customDir, '/\\') . '/*/*') ?: [] as $file) {
+            $locale = basename(dirname($file));
+            foreach ($suffixes as $part => $suffix) {
+                if (!str_ends_with(basename($file), $suffix)) continue;
+                $template = substr(basename($file), 0, -strlen($suffix));
+                $custom = $read($file);
+                if ($custom !== null && $custom !== $read(rtrim($baseDir, '/\\') . "/{$locale}/" . basename($file))) {
+                    $changed[$template][$locale][$part] = $custom;
+                }
+                break; // '.subject.txt' is tested before '.txt'
+            }
+        }
+        ksort($changed);
+        $rows = [];
+        foreach ($changed as $template => $locales) {
+            ksort($locales);
+            foreach ($locales as $locale => $parts) {
+                $row = ['template' => (string)$template, 'locale' => (string)$locale, 'parts' => array_keys($parts)];
+                if (!self::editable((string)$template, (string)$locale)) {
+                    $rows[] = $row + ['status' => 'skipped', 'message' => in_array($template, self::LOCKED_TEMPLATES, true)
+                        ? 'locked template: only the file default is sent' : 'unknown template or a language the store does not use'];
+                    continue;
+                }
+                if (self::override((string)$template, (string)$locale) !== null) {
+                    $rows[] = $row + ['status' => 'skipped', 'message' => 'the store already has an override; merge by hand in the admin'];
+                    continue;
+                }
+                $draft = array_map(static fn(?string $value): string => (string)$value, self::fileSource((string)$template, (string)$locale));
+                $draft = array_replace($draft, $parts);
+                $errors = self::validate((string)$template, $draft['subject'], $draft['html'], $draft['text']);
+                if ($errors) {
+                    $rows[] = $row + ['status' => 'refused', 'message' => implode(' ', $errors)];
+                } elseif ($dryRun) {
+                    $rows[] = $row + ['status' => 'would_import', 'message' => ''];
+                } else {
+                    $saved = self::save((string)$template, (string)$locale, $draft);
+                    $rows[] = $row + ['status' => $saved['ok'] ? 'imported' : 'refused', 'message' => $saved['message']];
+                }
+            }
+        }
+        return $rows;
     }
 
     /** Drop the active store's override: the file default applies again. */

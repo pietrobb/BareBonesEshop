@@ -287,6 +287,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.email.msg.unknown_vars' => 'Tato šablona nezná proměnné: {vars}. Povolené: {allowed}.',
     'admin.email.msg.malformed' => 'Neplatné značky šablony: {tags}.',
     'admin.email.msg.unsafe' => 'HTML obsahuje nepovolený obsah: {what}.',
+    'admin.email.msg.required_vars' => 'Potvrzení objednávky musí obsahovat informace pro spotřebitele: {vars} (slučte nový výchozí blok s vaším textem).',
     'admin.email.msg.secret_link' => 'Odkazy s jednorázovým tokenem ({vars}) mohou být jen celý odkaz (href="{{…}}") nebo samostatně v textu, ne součástí jiné adresy.',
     'admin.email.msg.iban_literal' => 'Do šablony nepište číslo bankovního účtu; použijte {{bank_iban}}, účet z nastavení obchodu.',
     'admin.email.msg.unknown' => 'Neznámá šablona nebo jazyk tohoto obchodu.',

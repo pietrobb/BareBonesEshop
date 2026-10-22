@@ -287,6 +287,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.email.msg.unknown_vars' => 'Diese Vorlage kennt die Variablen nicht: {vars}. Erlaubt: {allowed}.',
     'admin.email.msg.malformed' => 'Ungültige Vorlagen-Tags: {tags}.',
     'admin.email.msg.unsafe' => 'Das HTML enthält nicht erlaubte Inhalte: {what}.',
+    'admin.email.msg.required_vars' => 'Die Bestellbestätigung muss die Verbraucherinformationen enthalten: {vars} (übernehmen Sie den neuen Standardblock in Ihren Text).',
     'admin.email.msg.secret_link' => 'Links mit einem Einmal-Token ({vars}) dürfen nur ein ganzer Link (href="{{…}}") sein oder allein im Text stehen, nicht Teil einer anderen Adresse.',
     'admin.email.msg.iban_literal' => 'Schreiben Sie keine Kontonummer in die Vorlage; verwenden Sie {{bank_iban}}, das Konto aus den Shop-Einstellungen.',
     'admin.email.msg.unknown' => 'Unbekannte Vorlage oder Sprache dieses Shops.',
