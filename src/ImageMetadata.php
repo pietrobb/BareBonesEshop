@@ -51,6 +51,23 @@ final class ImageMetadata {
         return "\xFF\xD8" . implode('', $kept);
     }
 
+    /** EXIF orientation (1-8) of a JPEG; 1 (upright) when it has none or is not a readable JPEG. */
+    public static function jpegOrientation(string $bytes): int {
+        $length = strlen($bytes);
+        $pos = str_starts_with($bytes, "\xFF\xD8") ? 2 : $length;
+        while ($pos + 4 <= $length && $bytes[$pos] === "\xFF") {
+            $marker = ord($bytes[$pos + 1]);
+            if ($marker === 0xFF) { $pos++; continue; }
+            if ($marker === 0xDA) break;
+            if (($marker >= 0xD0 && $marker <= 0xD7) || $marker === 0x01) { $pos += 2; continue; }
+            $segmentLength = unpack('n', substr($bytes, $pos + 2, 2))[1];
+            $payload = substr($bytes, $pos + 4, max(0, $segmentLength - 2));
+            if ($marker === 0xE1 && str_starts_with($payload, "Exif\0\0")) return self::exifOrientation(substr($payload, 6)) ?? 1;
+            $pos += 2 + $segmentLength;
+        }
+        return 1;
+    }
+
     /** Orientation (1-8) from the TIFF block of an EXIF segment, null when absent or unreadable. */
     private static function exifOrientation(string $tiff): ?int {
         $order = substr($tiff, 0, 2);
