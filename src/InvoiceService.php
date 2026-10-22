@@ -19,7 +19,9 @@ declare(strict_types=1);
  * Format: {prefix}{YYYY}{NNNN}, e.g. "20260001", "DE-20260001".
  *
  * Storage: configured private invoice_storage_dir, outside the webroot.
- * Customer access via signed token (invoices.download_token).
+ * Customer access: the signed-in owner through the account, a guest through a bearer link sent by e-mail. The link's
+ * token is minted per mail (downloadLink()) and only its SHA-256 is stored (invoices.download_token), valid for
+ * DOWNLOAD_LINK_TTL_DAYS; a new mail replaces the previous link.
  */
 final class InvoiceService
 {
@@ -27,6 +29,9 @@ final class InvoiceService
     private static ?array $storesOverride = null;
     /** Lowest baseline (mm from the top of A4) for invoice body text; the register note sits at 285 mm. */
     private const PDF_CONTENT_BOTTOM_MM = 278.0;
+
+    /** Days an e-mailed invoice link stays valid. */
+    public const DOWNLOAD_LINK_TTL_DAYS = 30;
 
     public const STATUS_ISSUED    = 'issued';
     public const STATUS_CANCELLED = 'cancelled';
@@ -111,7 +116,8 @@ final class InvoiceService
             $prefix = self::numberPrefix($legal, 'invoice');
             $number = self::allocateNumber($db, $sellerCode, 'invoice', $year, $prefix);
 
-            $token  = bin2hex(random_bytes(32));
+            // Placeholder secret: the column is unique and required, but no link exists until a mail mints one.
+            $token  = self::tokenHash(bin2hex(random_bytes(32)));
 
             $relPath = sprintf('%d/%02d/%s.pdf',
                 $year, (int)date('m', strtotime($issuedAt)), rawurlencode($number));
@@ -230,7 +236,7 @@ final class InvoiceService
         $seller = json_decode((string)($invoice['seller_snapshot'] ?? ''), true) ?: [];
         $total = I18n::price((int)$invoice['total_gross'], (string)($invoice['currency'] ?? 'eur'));
         // The token is store-scoped and a store on its own domain is resolved by host: the link must use that host.
-        $link = Template::storeUrl('/account.php?p=invoice&token=' . rawurlencode((string)$invoice['download_token']));
+        $link = self::downloadLink((int)($invoice['id'] ?? 0));
         $appUrl = Security::configuredAppUrl();
         $link = $appUrl === null ? $link : Security::storeAppUrl($appUrl, StoreContext::current()->config()) . Template::seoPath($link);
         return [
@@ -416,7 +422,7 @@ final class InvoiceService
         try {
             $number = self::allocateNumber($db, $sellerCode, 'credit_note', $year, $prefix);
             $relPath = sprintf('%d/%02d/%s.pdf', $year, (int)date('m'), rawurlencode($number));
-            $token = bin2hex(random_bytes(32));
+            $token = self::tokenHash(bin2hex(random_bytes(32)));
             $insert = $db->prepare("INSERT INTO invoices
                 (order_id, store_id, number, issued_at, delivery_date, due_date, pdf_path,
                  total_net, total_vat, total_gross, currency, vat_breakdown,
@@ -558,14 +564,63 @@ final class InvoiceService
         return $stmt->fetch() ?: null;
     }
 
+    /** The stored form of a download token: a database read never yields a working link. */
+    public static function tokenHash(string $token): string
+    {
+        return hash('sha256', $token);
+    }
+
+    /**
+     * A fresh bearer link to the invoice PDF for one e-mail: the previous link stops working, the new one expires after
+     * DOWNLOAD_LINK_TTL_DAYS. Only the token's hash is kept, so the link cannot be rebuilt from the database or the mail log.
+     */
+    public static function downloadLink(int $invoiceId): string
+    {
+        $token = bin2hex(random_bytes(32));
+        Db::get()->prepare('UPDATE invoices SET download_token = :hash, download_token_expires_at = :expires WHERE id = :id')
+            ->execute([':hash' => self::tokenHash($token), ':expires' => gmdate('Y-m-d H:i:s', time() + self::DOWNLOAD_LINK_TTL_DAYS * 86400), ':id' => $invoiceId]);
+        // In the fragment: never sent to the server, so it stays out of access logs and Referer headers.
+        return Template::storeUrl('/account.php?p=invoice') . '#' . $token;
+    }
+
+    /** The active store's invoice behind an e-mailed token, unless the link expired. */
     public static function byToken(string $token): ?array
     {
         if (strlen($token) !== 64 || !ctype_xdigit($token)) {
             return null;
         }
-        $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE download_token = :t AND store_id = :store");
-        $stmt->execute([':t' => $token, ':store' => StoreContext::current()->id()]);
+        $stmt = Db::get()->prepare("SELECT * FROM invoices WHERE download_token = :t AND store_id = :store
+            AND download_token_expires_at IS NOT NULL AND download_token_expires_at > :now");
+        $stmt->execute([':t' => self::tokenHash(strtolower($token)), ':store' => StoreContext::current()->id(), ':now' => gmdate('Y-m-d H:i:s')]);
         return $stmt->fetch() ?: null;
+    }
+
+    /** An invoice (or credit note) of the signed-in customer's own order in the active store, or null. */
+    public static function ownedBy(int $customerId, int $invoiceId): ?array
+    {
+        $stmt = Db::get()->prepare("SELECT i.* FROM invoices i JOIN orders o ON o.id = i.order_id
+            WHERE i.id = :invoice AND o.customer_id = :customer AND o.store_id = :order_store AND i.store_id = :invoice_store
+              AND i.status != :cancelled");
+        $stmt->execute([':invoice' => $invoiceId, ':customer' => $customerId, ':order_store' => StoreContext::current()->id(),
+            ':invoice_store' => StoreContext::current()->id(), ':cancelled' => self::STATUS_CANCELLED]);
+        return $stmt->fetch() ?: null;
+    }
+
+    /** Sends an invoice PDF to the browser; nothing of it stays in a (shared) browser's cache. */
+    public static function sendPdf(array $invoice): void
+    {
+        $abs = self::pdfAbsolutePath($invoice);
+        if (!is_file($abs)) {
+            http_response_code(404);
+            exit('PDF missing.');
+        }
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: inline; filename="' . $invoice['number'] . '.pdf"');
+        header('Content-Length: ' . filesize($abs));
+        header('Cache-Control: no-store');
+        header('X-Robots-Tag: noindex, nofollow');
+        readfile($abs);
+        exit;
     }
 
     /** List invoices for a customer (logged-in scope). */

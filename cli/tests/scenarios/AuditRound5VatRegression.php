@@ -154,7 +154,8 @@ $pdo->prepare("INSERT INTO payment_transactions (order_id, store_id, provider, s
 $r5Issued = InvoiceService::issue($r5SupplyOrder);
 assert_equals(date('Y-m-d', strtotime($r5PaidAt . ' UTC')), (string)$r5Issued['delivery_date'], 'R5 VAT: date of supply is the payment date, not the late issue date');
 $r5Vars = InvoiceService::mailVars($r5Issued, Orders::byId($r5SupplyOrder));
-assert_true($r5Vars['total_gross_formatted'] !== '' && $r5Vars['issued_at'] !== '' && str_contains($r5Vars['invoice_download_url'], rawurlencode((string)$r5Issued['download_token'])),
+$r5LinkToken = substr((string)strrchr($r5Vars['invoice_download_url'], '#'), 1);
+assert_true($r5Vars['total_gross_formatted'] !== '' && $r5Vars['issued_at'] !== '' && InvoiceService::tokenHash($r5LinkToken) === (string)InvoiceService::byOrderId($r5SupplyOrder)['download_token'],
     'R5 VAT: invoice e-mail has the amount, the issue date and the online link');
 foreach (['sk', 'cs', 'pl', 'hu', 'de', 'es', 'en'] as $r5Locale) {
     $r5Template = (string)file_get_contents(dirname(TEST_CLI_DIR) . "/templates/emails/{$r5Locale}/invoice_issued.html")

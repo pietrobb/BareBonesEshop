@@ -1062,7 +1062,8 @@ $inv3 = InvoiceService::issue(5002);
 assert_true((int)$inv3['number'] > (int)$inv1['number'], 'Invoice: numbers are monotonic');
 
 // 5. Lookup by token
-$found = InvoiceService::byToken((string)$inv1['download_token']);
+$invLink = InvoiceService::downloadLink((int)$inv1['id']);
+$found = InvoiceService::byToken(substr((string)strrchr($invLink, '#'), 1));
 assert_true($found !== null, 'Invoice: byToken returns row for valid token');
 assert_equals((int)$inv1['id'], (int)($found['id'] ?? 0), 'Invoice: lookup returns correct invoice');
 $bad = InvoiceService::byToken(str_repeat('0', 64));

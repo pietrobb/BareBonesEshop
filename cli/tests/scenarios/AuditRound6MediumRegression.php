@@ -270,7 +270,7 @@ try {
         $r6mStoresProp->setValue(null, $r6mDomainStores);
         $r6mStoreCtx('pl');
         $r6mLink = InvoiceService::mailVars(['seller_snapshot' => '{}', 'total_gross' => 100, 'currency' => 'pln', 'number' => 'X', 'issued_at' => '', 'due_date' => '', 'download_token' => str_repeat('a', 64)], [])['invoice_download_url'];
-        assert_true(str_starts_with($r6mLink, 'https://r6m-pl.example/base/') && str_contains($r6mLink, 'p=invoice&token=' . str_repeat('a', 64)),
+        assert_true(str_starts_with($r6mLink, 'https://r6m-pl.example/base/') && preg_match('~/account\.php\?p=invoice#[0-9a-f]{64}$~', $r6mLink) === 1,
             "R6 invoice mail: a store on its own domain links its invoice on that domain ({$r6mLink})");
     } finally {
         $r6mSecurityCfg->setValue(null, $r6mSavedCfg);
