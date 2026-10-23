@@ -46,12 +46,9 @@ final class ProductEnrichmentContext
     {
         $productId = (int)($product['id'] ?? 0);
         $basePrice = (int)($product['price'] ?? 0);
+        $listRow = $this->priceListRows[$productId] ?? null;
         if (class_exists('Pricing')) {
-            $product = Pricing::applyPriceListContext(
-                $product,
-                $this->priceListRows[$productId] ?? null,
-                $this->customerProfile
-            );
+            $product = Pricing::applyPriceListContext($product, $listRow, $this->customerProfile);
         }
         // Sold in the store's currency by its price list: the recorded price history is the catalog currency's.
         $history = isset($product['catalog_price']) ? null : ($this->priceHistory[$productId] ?? null);
@@ -60,14 +57,23 @@ final class ProductEnrichmentContext
         if (class_exists('Promotions')) {
             $product = Promotions::applyCatalogRules($product, $this->promotionRules, $this->customerProfile);
         }
+        // A running price list that reduces the base price: when it began.
+        $listStart = $listRow !== null && (int)$beforePromotions['price'] < $basePrice
+            ? self::runStart($listRow['valid_from'], $listRow['list_created_at'] ?? null, $listRow['list_updated_at'] ?? null) : null;
+        $promotionStart = $this->promotionStart($product);
         $endedLow = null;
+        // A promotion on top of a price list that ran before it: the price list's price was charged before the promotion.
+        if ($promotionStart !== null && $listStart !== null && $listStart[0] < $promotionStart[1]) {
+            $endedLow = (int)$beforePromotions['price'];
+        }
         $endedPriceLists = $this->endedPriceListPrices[$productId] ?? [];
         if ($this->endedPromotionRules !== [] || $endedPriceLists !== []) {
-            $start = $this->reductionStart($product, $basePrice, $history);
-            $endedLow = $this->endedPromotionRules === [] ? null
-                : Promotions::lowestEndedPrice($beforePromotions, $this->endedPromotionRules, $this->customerProfile, $start);
+            [$start, $latestStart] = $promotionStart ?? $listStart ?? $this->priceChangeStart($basePrice, $history);
+            $promotionLow = $this->endedPromotionRules === [] ? null
+                : Promotions::lowestEndedPrice($beforePromotions, $this->endedPromotionRules, $this->customerProfile, $start, $latestStart);
+            if ($promotionLow !== null) $endedLow = $endedLow === null ? $promotionLow : min($endedLow, $promotionLow);
             $since = gmdate('Y-m-d H:i:s', $start - PriceHistory::WINDOW_DAYS * 86400);
-            $startAt = gmdate('Y-m-d H:i:s', $start);
+            $startAt = gmdate('Y-m-d H:i:s', $latestStart);
             foreach ($endedPriceLists as $row) {
                 if ($row['valid_to'] < $since || ($row['valid_from'] !== null && (string)$row['valid_from'] >= $startAt) || $row['price'] >= $basePrice) continue;
                 $endedLow = $endedLow === null ? $row['price'] : min($endedLow, $row['price']);
@@ -79,25 +85,45 @@ final class ProductEnrichmentContext
     }
 
     /**
-     * When the reduction shown now began: the latest start of the running promotions applied (now if one has no
-     * start), else the last change of the base price, else now.
+     * When the running promotions applied to the product began, as [earliest, latest] possible start (the latest
+     * start among them), or null when none applies.
+     * @return array{0: int, 1: int}|null
      */
-    private function reductionStart(array $product, int $basePrice, ?array $latest): int
+    private function promotionStart(array $product): ?array
+    {
+        $applied = array_column($product['promotion_snapshot']['applied'] ?? [], 'code');
+        if ($applied === []) return null;
+        $start = null;
+        foreach ($this->promotionRules as $rule) {
+            if (!in_array((string)$rule['code'], $applied, true)) continue;
+            $run = self::runStart($rule['valid_from'], $rule['created_at'] ?? null, $rule['updated_at'] ?? null);
+            $start = $start === null ? $run : [max($start[0], $run[0]), max($start[1], $run[1])];
+        }
+        return $start ?? [time(), time()];
+    }
+
+    /**
+     * When a running promotion or price list began, as [earliest, latest] possible start. With valid_from that is
+     * its start. Without, it began when it was created or last saved by an admin (switched on, re-dated, repriced):
+     * an admin change that restarted it is not told apart from one that did not, so both bounds stay possible.
+     * @return array{0: int, 1: int}
+     */
+    private static function runStart(?string $validFrom, ?string $createdAt, ?string $updatedAt): array
     {
         $now = time();
-        $applied = array_column($product['promotion_snapshot']['applied'] ?? [], 'code');
-        if ($applied !== []) {
-            $start = 0;
-            foreach ($this->promotionRules as $rule) {
-                if (!in_array((string)$rule['code'], $applied, true)) continue;
-                $from = $rule['valid_from'] === null ? false : strtotime($rule['valid_from'] . ' UTC');
-                $start = max($start, $from === false ? $now : $from);
-            }
-            return $start ?: $now;
-        }
-        if ($latest !== null && $latest['price'] === $basePrice) {
-            return max($now - PriceHistory::WINDOW_DAYS * 86400, strtotime($latest['changed_at'] . ' UTC') ?: $now);
-        }
-        return $now;
+        $at = static fn(?string $value): ?int => $value === null || $value === '' ? null : (strtotime($value . ' UTC') ?: null);
+        $from = $at($validFrom);
+        if ($from !== null) return [min($from, $now), min($from, $now)];
+        $created = $at($createdAt) ?? $now;
+        return [min($created, $now), min(max($created, $at($updatedAt) ?? $created), $now)];
+    }
+
+    /** No promotion or price list reduces the price: the reduction is the last change of the base price, else now. */
+    private function priceChangeStart(int $basePrice, ?array $latest): array
+    {
+        $now = time();
+        $start = $latest !== null && $latest['price'] === $basePrice
+            ? max($now - PriceHistory::WINDOW_DAYS * 86400, strtotime($latest['changed_at'] . ' UTC') ?: $now) : $now;
+        return [$start, $start];
     }
 }
