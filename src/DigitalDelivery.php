@@ -20,6 +20,32 @@ class DigitalDelivery {
     }
 
     /**
+     * When a consumer's digital content may be supplied, or null for now. Supplying it within the withdrawal period
+     * needs the consumer's express consent and acknowledgement of losing the right (Directive 2011/83/EU art. 16(m),
+     * recorded as ConsentService::DIGITAL_KEY); without it (consent turned off, an API order) the content is held
+     * until the period has passed. A business buyer has no withdrawal right and is never held.
+     */
+    public static function holdUntil(array $order, ?int $now = null): ?int {
+        $consents = array_column(ConsentService::forOrder((int)$order['id']), 'consent_key');
+        if (in_array(ConsentService::DIGITAL_KEY, $consents, true) || Customers::isBusinessBuyer(isset($order['customer_id']) ? (int)$order['customer_id'] : null)) return null;
+        $ordered = Withdrawal::orderedAt($order);
+        if ($ordered === false) return null;
+        $until = $ordered + Withdrawal::PERIOD_DAYS * 86400 + 60;
+        return $until > ($now ?? time()) ? $until : null;
+    }
+
+    /** Whether the consumer sent a withdrawal statement for the order (any store; before the table exists: no). */
+    public static function withdrawn(int $orderId): bool {
+        try {
+            $stmt = Db::get()->prepare('SELECT 1 FROM withdrawal_requests WHERE order_id = ? LIMIT 1');
+            $stmt->execute([$orderId]);
+            return (bool)$stmt->fetchColumn();
+        } catch (PDOException $e) {
+            return false;
+        }
+    }
+
+    /**
      * Create fresh entitlements for all active assets in a paid order.
      * Existing delivered entitlements are left unchanged. Undelivered tokens are
      * rotated so a retried worker never needs a raw token from the database.

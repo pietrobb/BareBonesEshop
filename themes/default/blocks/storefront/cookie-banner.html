@@ -4,7 +4,7 @@
   <input type="hidden" name="source" value="banner">
   <input type="hidden" name="return_to" value="{{cookie_return_to}}">
   <h3 id="cc-title">{{cookie_title}}</h3>
-  <p id="cc-body">{{cookie_body}} <a href="{{privacy_url}}" class="cc-link">{{cookie_policy_link}}</a></p>
+  <p id="cc-body">{{cookie_body}} <a href="{{cookies_url}}" class="cc-link">{{cookie_policy_link}}</a></p>
   <div id="cc-prefs">
     <label><input type="checkbox" checked disabled> {{cookie_necessary}}</label>
     <label><input type="checkbox" id="cc-ana" name="analytics" value="1"{{#if cookie_analytics_on}} checked{{/if}}> {{cookie_analytics}}</label>
@@ -12,7 +12,7 @@
   </div>
   <div class="cc-btns">
     <button type="button" class="cc-link" id="cc-prefs-toggle" hidden>{{cookie_preferences}}</button>
-    <button type="submit" class="danger" id="cc-reject" name="method" value="banner_reject_all">{{cookie_reject}}</button>
+    <button type="submit" class="primary" id="cc-reject" name="method" value="banner_reject_all">{{cookie_reject}}</button>
     <button type="submit" class="primary" id="cc-accept" name="method" value="banner_accept_all">{{cookie_accept}}</button>
     <button type="submit" class="primary" id="cc-save" name="method" value="preferences"{{#unless cookie_settings_open}} hidden{{/unless}}>{{cookie_save}}</button>
   </div>

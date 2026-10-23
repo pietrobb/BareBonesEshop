@@ -4,7 +4,7 @@
 // a CZK price list, but a price list was used only in the product's own currency, so the CZK one was ignored: the
 // store showed and charged euros, and the EUR cart got the English shipping.json methods ("Standard Delivery")
 // instead of the store's Czech carriers priced in CZK. A price list in the store's currency now sells the product in
-// that currency (listing, product page, cart, checkout); without one the product keeps its catalog currency.
+// that currency (listing, product page, cart, checkout); without one the item is not for sale in that store.
 
 echo "\n--- Audit R9: a price list in the store currency sells the shared catalog in it (CZ store in CZK) ---\n";
 require_once TEST_CLI_DIR . '/../src/Http/ApiHandlers.php';
@@ -54,18 +54,20 @@ try {
     assert_equals(['czk', 49900, null], [$r9cShown['currency'], (int)$r9cShown['price'], $r9cShown['compare_price'] ?? null],
         'R9 CZK: the CZ store shows the product at its CZK price list price, with no struck-through euro amount');
     assert_true(str_contains((string)$r9cShown['price_formatted'], 'Kč') && !str_contains((string)$r9cShown['price_formatted'], '€'), 'R9 CZK: the price is formatted in koruny (' . $r9cShown['price_formatted'] . ')');
-    $r9cOther = Products::enrich(Products::byId(97902));
-    assert_equals(['eur', 1999], [$r9cOther['currency'], (int)$r9cOther['price']], 'R9 CZK: a product the CZK price list does not price keeps its catalog price and currency');
+    // Capability review run 154: an item without a CZK price was sold in euros inside the CZ store, and the first line
+    // set the cart's currency, so a euro item added first turned the koruna lines into excluded mismatches.
+    $r9cOther = StorefrontViewModel::productCard(Products::byId(97902));
+    assert_equals(false, $r9cOther['availability']['purchasable'], 'R9 CZK: a product without a CZK price is not for sale in the CZ store (shown unavailable, ' . $r9cOther['availability']['label'] . ')');
 
     $r9cVariantView = new ReflectionMethod(StorefrontViewModel::class, 'variant');
     $r9cVariantRow = static fn(int $id): array => $r9cDb->query("SELECT * FROM variants WHERE id = {$id}")->fetch();
     $r9cViews = [];
     foreach (['plain' => $r9cPlain, 'own row' => $r9cOwnRow, 'surcharge' => $r9cSurcharged] as $r9cLabel => $r9cId) {
         $r9cView = $r9cVariantView->invoke(null, $r9cShown, $r9cVariantRow($r9cId));
-        $r9cViews[$r9cLabel] = [$r9cView['price_amount_minor'], str_contains($r9cView['price_formatted'], 'Kč') ? 'czk' : 'eur'];
+        $r9cViews[$r9cLabel] = [$r9cView['price_amount_minor'], str_contains($r9cView['price_formatted'], 'Kč') ? 'czk' : 'eur', $r9cView['availability']['purchasable']];
     }
-    assert_equals(['plain' => [49900, 'czk'], 'own row' => [52900, 'czk'], 'surcharge' => [2499, 'eur']], $r9cViews,
-        'R9 CZK: variants show what the cart charges — the list price, their own CZK row, or the catalog price when a euro surcharge has no CZK row');
+    assert_equals(['plain' => [49900, 'czk', true], 'own row' => [52900, 'czk', true], 'surcharge' => [2499, 'eur', false]], $r9cViews,
+        'R9 CZK: variants are sold at the list price or their own CZK row; a euro surcharge without a CZK row is not for sale in the CZ store');
 
     $r9cStore('default');
     $r9cHome = Products::enrich(Products::byId(97901));
@@ -74,6 +76,38 @@ try {
     // Cart and a real checkout in the CZ store: koruny all the way, with the store's own Czech carriers.
     $r9cStore('cz');
     Security::setRateDbForTesting(new PDO('sqlite::memory:'));
+    $r9cMixed = [];
+    foreach (['euro item first' => [[97902, null], [97901, null]], 'surcharged variant' => [[97901, $r9cPlain], [97901, $r9cSurcharged]]] as $r9cLabel => $r9cAdds) {
+        $_SESSION = ['cart' => []];
+        foreach ($r9cAdds as [$r9cPid, $r9cVid]) Cart::add($r9cPid, $r9cVid, 1);
+        $r9cMixedCart = Cart::enriched();
+        $r9cMixed[$r9cLabel] = [$r9cMixedCart['currency'], (int)$r9cMixedCart['subtotal'],
+            array_map(static fn(array $i): array => [$i['currency'], $i['available'], $i['unavailable_reason']], $r9cMixedCart['items'])];
+    }
+    $r9cOff = ['eur', false, Cart::UNAVAILABLE_CURRENCY];
+    assert_equals([
+        'euro item first' => ['czk', 49900, [$r9cOff, ['czk', true, null]]],
+        'surcharged variant' => ['czk', 49900, [['czk', true, null], $r9cOff]],
+    ], $r9cMixed, 'R9 CZK: a cart in the CZ store stays in koruny and counts every koruna line; a line without a CZK price is unavailable, whatever was added first');
+    $_SESSION = ['cart' => []];
+    $r9cRefused = [Cart::addValidated(97902, null, 1), Cart::addValidated(97901, $r9cSurcharged, 1)];
+    assert_equals([['ok' => false, 'error' => 'product_unavailable'], ['ok' => false, 'error' => 'product_unavailable'], []],
+        [...$r9cRefused, Cart::get()], 'R9 CZK: adding an item without a CZK price is refused and leaves the cart empty');
+    try {
+        Orders::create([['product_id' => 97902, 'variant_id' => null, 'sku' => 'R9C-UNPRICED', 'name' => 'R9C', 'qty' => 1, 'price' => 1999, 'currency' => 'eur']],
+            ['name' => 'R9C', 'email' => 'r9c-direct@example.com', 'currency' => 'czk'], 'bank_transfer');
+        $r9cDirect = 'created';
+    } catch (OrderRejectedException $e) {
+        $r9cDirect = $e->getMessage();
+    }
+    assert_equals('Not priced in the store currency: eur', $r9cDirect, 'R9 CZK: Orders::create refuses a line priced in another currency than the store\'s');
+    $r9cGap = StoreCurrencyCoverage::unpriced($r9cDb, 'cz', $r9cSample['stores']['cz']);
+    assert_true(in_array('R9C-UNPRICED', $r9cGap['skus'], true) && in_array('R9C-V-PLUS', $r9cGap['skus'], true)
+        && !array_intersect(['R9C-PRICED', 'R9C-V-PLAIN', 'R9C-V-OWN'], $r9cGap['skus']),
+        'R9 CZK: doctor lists the CZ store\'s items without a CZK price, not the priced ones (' . json_encode($r9cGap) . ')');
+    assert_equals(['count' => 0, 'skus' => []], StoreCurrencyCoverage::unpriced($r9cDb, 'default', $r9cSample['stores']['default']),
+        'R9 CZK: the EUR store selling its EUR catalog has nothing unpriced');
+
     $_SESSION = ['cart' => []];
     Cart::add(97901, null, 1);
     $r9cCart = Cart::enriched();

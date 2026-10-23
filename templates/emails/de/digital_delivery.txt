@@ -1,0 +1,8 @@
+Ihre Dateien sind bereit
+
+Guten Tag {{customer_name}},
+die Zahlung für Bestellung {{order_number}} wurde bestätigt.
+
+{{#each download_links}}{{label}}: {{url}} ({{validity}})
+{{/each}}
+Bitte geben Sie diese privaten Links nicht an andere weiter.

@@ -144,8 +144,12 @@ class EmailTemplates {
             }
             if ($depth['if'] > 0 || $depth['each'] > 0) $errors[] = I18n::t('admin.email.msg.unbalanced');
         }
-        $used = array_flip(array_map(static fn(string $token): string => preg_replace('~^#(?:if|each) ~', '', $token), self::tokens($html)));
-        $missing = array_values(array_filter(self::REQUIRED_VARIABLES[$template] ?? [], static fn(string $name): bool => !isset($used[$name])));
+        // Only where the customer sees them: not in a comment or a hidden element, and in a custom text part as well.
+        $names = static fn(string $source): array => array_flip(array_map(static fn(string $token): string => preg_replace('~^#(?:if|each) ~', '', $token), self::tokens($source)));
+        $usedHtml = $names(self::visibleHtml($html));
+        $usedText = trim($text) === '' ? null : $names($text);
+        $missing = array_values(array_filter(self::REQUIRED_VARIABLES[$template] ?? [],
+            static fn(string $name): bool => !isset($usedHtml[$name]) || ($usedText !== null && !isset($usedText[$name]))));
         if ($missing) $errors[] = I18n::format('admin.email.msg.required_vars', ['vars' => implode(', ', $missing)]);
         if ($unknown) $errors[] = I18n::format('admin.email.msg.unknown_vars', ['vars' => implode(', ', array_keys($unknown)), 'allowed' => implode(', ', array_keys($allowed))]);
         if ($malformed) $errors[] = I18n::format('admin.email.msg.malformed', ['tags' => implode(' ', array_keys($malformed))]);
@@ -433,6 +437,66 @@ class EmailTemplates {
             if (stripos((string)$decoded, $needle) !== false) $found[$needle] = true;
         }
         return array_keys($found);
+    }
+
+    /**
+     * The HTML a reader sees: without comments, <head>/<title>/<style>, and elements hidden by the hidden attribute,
+     * an inline style or a class/id a <style> rule hides (display:none, visibility:hidden, zero size or opacity…).
+     * Visible tags are kept with their attributes, so a link's href="{{x}}" counts.
+     */
+    private static function visibleHtml(string $html): string {
+        $html = (string)preg_replace('~<!--.*?(?:-->|$)~s', '', $html);
+        $hiddenNames = [];
+        if (preg_match_all('~<style\b[^>]*>(.*?)(?:</style\s*>|$)~is', $html, $styles)) {
+            foreach ($styles[1] as $css) {
+                preg_match_all('~([^{}]+)\{([^{}]*)\}~', $css, $rules, PREG_SET_ORDER);
+                foreach ($rules as [, $selectors, $declarations]) {
+                    if (!self::hidesContent($declarations)) continue;
+                    preg_match_all('~[.#]([\w-]+)~', $selectors, $m);
+                    foreach ($m[1] as $name) $hiddenNames[strtolower($name)] = true;
+                }
+            }
+        }
+        $void = array_flip(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']);
+        $neverShown = array_flip(['head', 'title', 'style', 'script', 'template']);
+        preg_match_all('~<(/?)([a-zA-Z][\w-]*)\b((?:[^>"\']|"[^"]*"|\'[^\']*\')*)>~', $html, $tags, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
+        $visible = '';
+        $stack = [];
+        $hidden = 0;
+        $pos = 0;
+        foreach ($tags as $tag) {
+            [$whole, $at] = $tag[0];
+            if ($hidden === 0) $visible .= substr($html, $pos, $at - $pos);
+            $pos = $at + strlen($whole);
+            $name = strtolower($tag[2][0]);
+            $attrs = $tag[3][0];
+            if ($tag[1][0] === '/') {
+                $i = count($stack) - 1;
+                while ($i >= 0 && $stack[$i][0] !== $name) $i--;
+                if ($i < 0) continue;
+                while (count($stack) > $i) $hidden -= array_pop($stack)[1] ? 1 : 0;
+                if ($hidden === 0) $visible .= $whole;
+                continue;
+            }
+            $hides = isset($neverShown[$name]) || preg_match('~(?:^|\s)hidden(?:\s|=|/|$)~i', $attrs)
+                || (preg_match('~\sstyle\s*=\s*(?:"([^"]*)"|\'([^\']*)\')~i', $attrs, $style) && self::hidesContent($style[1] . ($style[2] ?? '')));
+            if (!$hides && $hiddenNames && preg_match_all('~\s(?:class|id)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')~i', $attrs, $refs, PREG_SET_ORDER)) {
+                foreach ($refs as $ref) {
+                    foreach (preg_split('/\s+/', strtolower($ref[1] . ($ref[2] ?? ''))) ?: [] as $ref1) if (isset($hiddenNames[$ref1])) $hides = true;
+                }
+            }
+            if ($hidden === 0 && !$hides) $visible .= $whole;
+            if (isset($void[$name]) || str_ends_with(rtrim($attrs), '/')) continue;
+            $stack[] = [$name, (bool)$hides];
+            if ($hides) $hidden++;
+        }
+        if ($hidden === 0) $visible .= substr($html, $pos);
+        return $visible;
+    }
+
+    private static function hidesContent(string $css): bool {
+        return preg_match('~(?:^|[;\s{])(?:display\s*:\s*none|visibility\s*:\s*hidden|mso-hide\s*:\s*all|color\s*:\s*transparent'
+            . '|(?:opacity|font-size|max-height)\s*:\s*(?:0+(?:\.0*)?|\.0+)(?:px|pt|em|rem|%)?\s*(?:!important\s*)?(?:;|$))~i', trim($css)) === 1;
     }
 
     /** Contents of every {{…}} placeholder. */

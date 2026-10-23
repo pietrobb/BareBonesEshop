@@ -170,7 +170,8 @@ class Pricing {
         $sql = "SELECT pp.product_id, pp.price, pp.compare_price, pp.min_qty,
                 pl.code AS price_list_code, pl.priority, pl.customer_group_id,
                 LOWER(pl.currency) AS price_list_currency, pl.valid_from, pl.valid_to,
-                CASE WHEN pl.customer_group_id IS NULL THEN 0 ELSE 1 END AS group_rank, pp.id AS row_id, 0 AS archived
+                CASE WHEN pl.customer_group_id IS NULL THEN 0 ELSE 1 END AS group_rank, pp.id AS row_id, 0 AS archived,
+                pl.created_at AS list_created_at, pl.updated_at AS list_updated_at
             FROM price_list_prices pp
             JOIN price_lists pl ON pl.id = pp.price_list_id
             WHERE pp.product_id IN (" . implode(', ', $placeholders) . ")
@@ -182,7 +183,7 @@ class Pricing {
         // Product-level prices of runs an admin change rewrote (PricingRuns); they always count as ended.
         $runParams = [':run_store' => $params[':store'], ':run_group' => $params[':group_id'], ':run_at' => $at, ':run_since' => $params[':since']];
         foreach ($placeholders as $index => $placeholder) $runParams[':run_product_' . $index] = $params[$placeholder];
-        $runs = " UNION ALL SELECT r.product_id, r.price, NULL, 1, '', 0, r.customer_group_id, LOWER(r.currency), r.valid_from, r.valid_to, 0, r.id, 1
+        $runs = " UNION ALL SELECT r.product_id, r.price, NULL, 1, '', 0, r.customer_group_id, LOWER(r.currency), r.valid_from, r.valid_to, 0, r.id, 1, NULL, NULL
             FROM price_list_runs r
             WHERE r.product_id IN (" . implode(', ', array_slice(array_keys($runParams), 4)) . ")
               AND r.store_id = :run_store AND (r.customer_group_id IS NULL OR r.customer_group_id = :run_group)
@@ -232,6 +233,16 @@ class Pricing {
      * Price-list currencies for a product, preferred first. A store selling in another currency than the product's
      * (the sample CZK store on the shared EUR catalog) sells it in its own when one of its price lists prices it there.
      */
+    /**
+     * Whether the active store sells at a price in $currency. A store sells only in its own currency: an item of the
+     * shared catalog with no price in it (no price-list row there, a surcharged variant without its own row) is not for
+     * sale in that store, instead of being charged in the catalog's currency next to the store's.
+     */
+    public static function soldInStore(string $currency): bool {
+        $store = strtolower(StoreContext::current()->currency());
+        return $store === '' || strtolower($currency) === $store;
+    }
+
     private static function priceCurrencies(string $productCurrency): array {
         $store = strtolower(StoreContext::current()->currency());
         return $store !== '' && $store !== $productCurrency ? [$store, $productCurrency] : [$productCurrency];

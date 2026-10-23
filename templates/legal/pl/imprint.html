@@ -1,0 +1,20 @@
+<!-- legal-updated: 2026-10-23 -->
+<!-- Ten szablon jest punktem wyjścia. Przed produkcją zleć jego weryfikację prawnikowi. R9: seller identity (DE § 5 DDG Impressum; Directive 2000/31/EC art. 5). -->
+<h1>Dane sprzedawcy</h1>
+<h2>Operator sklepu</h2>
+<p>{{name}}<br>{{street}}<br>{{zip}} {{city}}<br>{{country}}</p>
+<!-- if:representative --><p>Reprezentowany przez: {{representative}}</p><!-- /if -->
+<!-- if:register_note --><p>Wpis do rejestru: {{register_note}}</p><!-- /if -->
+<ul>
+<!-- if:ico --><li>REGON / KRS: {{ico}}</li><!-- /if -->
+<!-- if:dic --><li>NIP: {{dic}}</li><!-- /if -->
+<!-- if:ic_dph --><li>NIP UE (VAT): {{ic_dph}}</li><!-- /if -->
+</ul>
+<h2>Kontakt</h2>
+<ul>
+<!-- if:email --><li>E-mail: <a href="mailto:{{email}}">{{email}}</a></li><!-- /if -->
+<!-- if:phone --><li>Telefon: {{phone}}</li><!-- /if -->
+</ul>
+<!-- if:adr_name --><h2>Rozwiązywanie sporów</h2>
+<p>Konsument może rozwiązać spór pozasądowo za pośrednictwem <a href="{{adr_url}}" rel="noopener">{{adr_name}}</a>.</p><!-- /if -->
+<p>Ostatnia zmiana: {{updated_at}}.</p>

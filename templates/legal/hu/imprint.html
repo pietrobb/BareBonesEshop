@@ -1,0 +1,20 @@
+<!-- legal-updated: 2026-10-23 -->
+<!-- Ez a sablon kiindulópont. Éles használat előtt nézesse át jogásszal. R9: seller identity (DE § 5 DDG Impressum; Directive 2000/31/EC art. 5). -->
+<h1>Impresszum</h1>
+<h2>Az üzlet üzemeltetője</h2>
+<p>{{name}}<br>{{street}}<br>{{zip}} {{city}}<br>{{country}}</p>
+<!-- if:representative --><p>Képviseli: {{representative}}</p><!-- /if -->
+<!-- if:register_note --><p>Cégjegyzékszám: {{register_note}}</p><!-- /if -->
+<ul>
+<!-- if:ico --><li>Cégazonosító: {{ico}}</li><!-- /if -->
+<!-- if:dic --><li>Adószám: {{dic}}</li><!-- /if -->
+<!-- if:ic_dph --><li>Közösségi adószám: {{ic_dph}}</li><!-- /if -->
+</ul>
+<h2>Kapcsolat</h2>
+<ul>
+<!-- if:email --><li>E-mail: <a href="mailto:{{email}}">{{email}}</a></li><!-- /if -->
+<!-- if:phone --><li>Telefon: {{phone}}</li><!-- /if -->
+</ul>
+<!-- if:adr_name --><h2>Vitarendezés</h2>
+<p>A fogyasztó a vitát bíróságon kívül rendezheti: <a href="{{adr_url}}" rel="noopener">{{adr_name}}</a>.</p><!-- /if -->
+<p>Utolsó módosítás: {{updated_at}}.</p>

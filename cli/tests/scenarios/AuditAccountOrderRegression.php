@@ -35,11 +35,12 @@ if ($phase === 'setup') {
     foreach (['default' => 'eur', 'cz' => 'czk'] as $owner => $currency) {
         $db->prepare('INSERT INTO categories (store_id, slug, name, parent_id, path, depth) VALUES (?, ?, ?, NULL, ?, 0)')->execute([$owner, "a131cat-{$owner}", 'Cat', "a131cat-{$owner}"]);
         $cat = $idOf('categories', 'slug', "a131cat-{$owner}");
-        $product = $db->prepare('INSERT INTO products (store_id, category_id, sku, slug, name, price, stock, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-        $product->execute([$owner, $cat, "A131-LIVE-{$owner}", "a131-live-{$owner}", "A131 Live {$owner}", 1000, 10, 'active']);
-        $product->execute([$owner, $cat, "A131-VAR-{$owner}", "a131-var-{$owner}", "A131 Variant {$owner}", 500, 0, 'active']);
-        $product->execute([$owner, $cat, "A131-GONE-{$owner}", "a131-gone-{$owner}", "A131 Gone {$owner}", 300, 10, 'draft']);
-        $product->execute([$owner, $cat, "A131-EMPTY-{$owner}", "a131-empty-{$owner}", "A131 Empty {$owner}", 400, 0, 'active']);
+        // Each store's own catalog is priced in the store's currency (a store sells only in it).
+        $product = $db->prepare('INSERT INTO products (store_id, category_id, sku, slug, name, price, stock, status, currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $product->execute([$owner, $cat, "A131-LIVE-{$owner}", "a131-live-{$owner}", "A131 Live {$owner}", 1000, 10, 'active', $currency]);
+        $product->execute([$owner, $cat, "A131-VAR-{$owner}", "a131-var-{$owner}", "A131 Variant {$owner}", 500, 0, 'active', $currency]);
+        $product->execute([$owner, $cat, "A131-GONE-{$owner}", "a131-gone-{$owner}", "A131 Gone {$owner}", 300, 10, 'draft', $currency]);
+        $product->execute([$owner, $cat, "A131-EMPTY-{$owner}", "a131-empty-{$owner}", "A131 Empty {$owner}", 400, 0, 'active', $currency]);
         $db->prepare("INSERT INTO variants (product_id, sku, name, stock) VALUES (?, ?, 'Red', 5)")->execute([$idOf('products', 'sku', "A131-VAR-{$owner}"), "A131-VAR-RED-{$owner}"]);
         $customer = $db->prepare("INSERT INTO customers (store_id, email, password_hash, name, status) VALUES (?, ?, ?, ?, 'active')");
         $customer->execute([$owner, "a131-owner-{$owner}@example.test", $hash, "A131 Owner {$owner}"]);

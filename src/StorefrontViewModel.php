@@ -305,7 +305,20 @@ final class StorefrontViewModel
             'formatted' => I18n::price($amount, $currency),
             'compare_amount_minor' => $compare,
             'compare_formatted' => $compare === null ? '' : I18n::price($compare, $currency),
+            'vat_note' => self::vatNote(),
         ];
+    }
+
+    /**
+     * What the shown price contains (DE PAngV § 3: "inkl. MwSt., zzgl. Versandkosten"; elsewhere the same as good
+     * practice). A seller outside the EU VAT system gets none; one not registered for VAT says it charges none.
+     */
+    private static function vatNote(): string
+    {
+        $legal = StoreContext::current()->legal();
+        if (!VatService::isEuCountry(strtoupper((string)($legal['country'] ?? '')))) return '';
+        $registered = !array_key_exists('vat_registered', $legal) || (bool)$legal['vat_registered'];
+        return I18n::t($registered ? 'price_incl_vat' : 'price_no_vat');
     }
 
     private static function availability(array $product, ?int $variantId = null, ?bool $purchasable = null): array
@@ -313,6 +326,9 @@ final class StorefrontViewModel
         $digital = VariantAvailability::isDigitalType((string)($product['product_type'] ?? ''));
         $quantity = max(0, (int)($product['stock'] ?? 0));
         $purchasable ??= VariantAvailability::isPurchasable((int)$product['id'], $variantId);
+        // Shown, but not sold in this store without a price in its currency (Pricing::soldInStore, Cart refuses it).
+        $priced = Pricing::soldInStore((string)($product['currency'] ?? StoreContext::current()->currency()));
+        $purchasable = $purchasable && $priced;
         $inStock = $digital || $quantity > 0;
         // Purchasable without stock means the inventory policy sells ahead of it (backorder or preorder).
         $schema = !$purchasable ? 'OutOfStock'
@@ -322,7 +338,8 @@ final class StorefrontViewModel
             'tracks_stock' => !$digital,
             'in_stock' => $inStock,
             'quantity' => $quantity,
-            'label' => $purchasable && $inStock ? I18n::t('in_stock') : ($purchasable ? I18n::t('available') : I18n::t('out_of_stock')),
+            'label' => !$priced ? I18n::t('product_unavailable')
+                : ($purchasable && $inStock ? I18n::t('in_stock') : ($purchasable ? I18n::t('available') : I18n::t('out_of_stock'))),
             'schema' => 'https://schema.org/' . $schema,
         ];
     }
@@ -347,6 +364,7 @@ final class StorefrontViewModel
             [$amount, $currency] = [Money::round((int)$priced['price'], (string)$priced['currency']), (string)$priced['currency']];
             $delta = $currency === (string)$product['currency'] ? $amount - (int)$product['price'] : 0;
         }
+        $variantProduct['currency'] = $currency;
         return [
             'id' => (int)$variant['id'],
             'sku' => (string)$variant['sku'],

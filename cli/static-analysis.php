@@ -178,7 +178,7 @@ $architectureBudgets = [
     // +1 coupling: Search::filtersFromQuery turns the search route's sort/price/category parameters into search options (A14.2).
     // +6 lines: the ?page=withdrawal route (R8 electronic withdrawal function, Directive 2011/83/EU art. 11a).
     // +6 lines: the ?page=complaint route (R8 complaints, Directive (EU) 2019/771).
-    'src/Entrypoints/Storefront.php' => ['lines' => 163, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
+    /* R9: Impressum page */ 'src/Entrypoints/Storefront.php' => ['lines' => 164, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
     // Customer account portal behind the thin /account.php (registration, login, reset, GDPR, addresses, orders).
     // +1 coupling: Str::normalizeEmail is the one e-mail normalisation shared with Customers and Pricing.
     // +2 coupling: DigitalDelivery issues the downloads page's links; StoreContext limits the profile languages to the store's.
@@ -195,7 +195,7 @@ $architectureBudgets = [
     'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 256, 'functions' => 7, 'max_function_lines' => 102, 'coupling' => 13],
     // Ratcheted: canonical/robots/hreflang/JSON-LD moved to StorefrontSeo (storefront SEO audit).
     // +2 coupling: cart currency decimals for the JS config and the one-shot StorefrontFlash notice.
-    /* R8: footer ADR body (ConsumerNotice), accessibility link, guest cookie settings */ 'src/Entrypoints/Storefront/Layout.php' => ['lines' => 145, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
+    /* R8: footer ADR body (ConsumerNotice), accessibility link, guest cookie settings; R9: Impressum link */ 'src/Entrypoints/Storefront/Layout.php' => ['lines' => 146, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
     'src/Entrypoints/Storefront/ProductStatusPages.php' => ['lines' => 20, 'functions' => 1, 'max_function_lines' => 18, 'coupling' => 3],
     // R8 withdrawal function: identify → review → confirm; the rules live in Withdrawal.
     'src/Entrypoints/Storefront/WithdrawalPages.php' => ['lines' => 62, 'functions' => 1, 'max_function_lines' => 60, 'coupling' => 4],

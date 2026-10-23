@@ -21,6 +21,12 @@ class PaymentService {
     ];
 
     /**
+     * Payment instruments a consumer may not be surcharged for (PSD2 art. 62(4), Directive 2011/83/EU art. 19):
+     * consumer cards and SEPA credit transfers. Their configured fee applies to approved business accounts only.
+     */
+    public const NO_CONSUMER_SURCHARGE = ['online_card', 'bank_transfer'];
+
+    /**
      * Return available checkout payment methods for country/cart/shipping context.
      */
     public static function availableMethods(string $country, string $currency, int $amount, string $shippingMethod = '', ?int $customerId = null): array {
@@ -63,7 +69,12 @@ class PaymentService {
 
         $methods = [];
         $ownPrices = StoreContext::current()->usesProviderPrices($currency);
+        $businessBuyer = Customers::isBusinessBuyer($customerId);
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            if (!$businessBuyer && in_array((string)($row['service_type'] ?? ''), self::NO_CONSUMER_SURCHARGE, true)) {
+                $row['fixed_fee'] = 0;
+                $row['percent_fee_bps'] = 0;
+            }
             // Fees and limits are amounts in the scope owner's currency: a cart in another currency
             // only gets methods that have none (a percentage fee is currency-neutral).
             if (!$ownPrices && ((int)$row['fixed_fee'] > 0 || (int)$row['min_amount'] > 0 || (int)($row['max_amount'] ?? 0) > 0 || (int)($row['free_above'] ?? 0) > 0)) continue;

@@ -1,0 +1,20 @@
+<!-- legal-updated: 2026-10-23 -->
+<!-- Esta plantilla es un punto de partida. Haga que un abogado la revise antes de producción. R9: seller identity (DE § 5 DDG Impressum; Directive 2000/31/EC art. 5). -->
+<h1>Aviso legal</h1>
+<h2>Titular de la tienda</h2>
+<p>{{name}}<br>{{street}}<br>{{zip}} {{city}}<br>{{country}}</p>
+<!-- if:representative --><p>Representado por: {{representative}}</p><!-- /if -->
+<!-- if:register_note --><p>Datos registrales: {{register_note}}</p><!-- /if -->
+<ul>
+<!-- if:ico --><li>Número de empresa: {{ico}}</li><!-- /if -->
+<!-- if:dic --><li>NIF: {{dic}}</li><!-- /if -->
+<!-- if:ic_dph --><li>NIF-IVA: {{ic_dph}}</li><!-- /if -->
+</ul>
+<h2>Contacto</h2>
+<ul>
+<!-- if:email --><li>Correo electrónico: <a href="mailto:{{email}}">{{email}}</a></li><!-- /if -->
+<!-- if:phone --><li>Teléfono: {{phone}}</li><!-- /if -->
+</ul>
+<!-- if:adr_name --><h2>Resolución de litigios</h2>
+<p>El consumidor puede resolver litigios extrajudicialmente a través de <a href="{{adr_url}}" rel="noopener">{{adr_name}}</a>.</p><!-- /if -->
+<p>Última modificación: {{updated_at}}.</p>

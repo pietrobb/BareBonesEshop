@@ -24,6 +24,11 @@ class Orders {
         if (isset($customer['store_id']) && $customer['store_id'] !== $storeContext->id()) {
             throw new InvalidArgumentException('Order store does not match the active StoreContext');
         }
+        // A store sells only in its own currency (Pricing::soldInStore): no order and no line priced in another one.
+        $orderCurrency = (string)($customer['currency'] ?? 'eur');
+        foreach ([$orderCurrency, ...array_map(static fn(array $item): string => (string)($item['currency'] ?? $orderCurrency), $cartItems)] as $currency) {
+            if (!Pricing::soldInStore($currency)) throw new OrderRejectedException("Not priced in the store currency: {$currency}");
+        }
         $sqliteLock = null;
         if (Db::isSqlite()) {
             $database = $db->query('PRAGMA database_list')->fetch(PDO::FETCH_ASSOC);
