@@ -182,7 +182,10 @@ $r8pDb->prepare("INSERT INTO payment_transactions (order_id, store_id, provider,
         'buyer' => ['email' => 'r9p-payu@example.test', 'phone' => '+48 600 700 800', 'firstName' => 'R9P', 'lastName' => 'Kowalski', 'language' => 'pl',
             'delivery' => ['street' => 'Ulica Payu 5', 'postalCode' => '00-950', 'city' => 'Warszawa', 'recipientName' => 'R9P Kowalski']]])]);
 // R9: the order's withdrawal statement and complaint are in the access export; erasure removes the optional
-// withdrawal reason and keeps the statement and the complaint (legal claims).
+// withdrawal reason and keeps the statement and the complaint (legal claims). The suite's DB gets these tables from
+// later scenarios, so they are created here (idempotent).
+(require TEST_CLI_DIR . '/../migrations/20261022090000_withdrawal_requests.php')->up($r8pDb, Db::isSqlite());
+(require TEST_CLI_DIR . '/../migrations/20261022100000_complaints.php')->up($r8pDb, Db::isSqlite());
 $r8pDb->prepare("INSERT INTO withdrawal_requests (store_id, order_id, order_number, customer_name, customer_email, items, reason, received_at)
     VALUES ('default', ?, 'R9P-W', 'R9P Kowalski', 'r9p-payu@example.test', '[]', 'R9P changed my mind', datetime('now'))")->execute([$r9pOrder]);
 $r8pDb->prepare("INSERT INTO complaints (store_id, complaint_number, order_id, order_item_id, order_number, customer_name, customer_email, item_name, defect, remedy, status, received_at)
