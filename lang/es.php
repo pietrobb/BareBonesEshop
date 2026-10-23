@@ -1371,6 +1371,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.payments.required' => 'El código, el proveedor, el nombre y unos límites válidos son obligatorios.',
     'admin.payments.exists' => 'Ya existe un método de pago con este código.',
     'admin.payments.saved' => 'Método de pago guardado.',
+    'admin.payments.saved_consumer_fee' => 'Método de pago guardado. Las comisiones de tarjeta y transferencia no se cobran a consumidores (PSD2) — solo se aplican a cuentas de empresa aprobadas.',
     'admin.payments.deleted' => 'Método de pago eliminado.',
     'admin.payments.country_required' => 'El método y el país ISO son obligatorios.',
     'admin.payments.country_added' => 'País añadido al método de pago.',

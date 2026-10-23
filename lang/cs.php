@@ -1252,6 +1252,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.payments.required' => 'Kód, poskytovatel, název a platné limity jsou povinné.',
     'admin.payments.exists' => 'Platební metoda s tímto kódem už existuje.',
     'admin.payments.saved' => 'Platební metoda uložena.',
+    'admin.payments.saved_consumer_fee' => 'Platební metoda uložena. Poplatek za kartu a bankovní převod se spotřebitelům neúčtuje (PSD2) — platí jen pro schválené firemní účty.',
     'admin.payments.deleted' => 'Platební metoda smazána.',
     'admin.payments.country_required' => 'Metoda a ISO země jsou povinné.',
     'admin.payments.country_added' => 'Země přidána k platební metodě.',

@@ -1226,6 +1226,7 @@ return [
     'admin.payments.required' => 'Code, provider, name and valid limits are required.',
     'admin.payments.exists' => 'A payment method with this code already exists.',
     'admin.payments.saved' => 'Payment method saved.',
+    'admin.payments.saved_consumer_fee' => 'Payment method saved. Card and bank transfer fees are not charged to consumers (PSD2) — they apply to approved business accounts only.',
     'admin.payments.deleted' => 'Payment method deleted.',
     'admin.payments.country_required' => 'Method and ISO country are required.',
     'admin.payments.country_added' => 'Country added to the payment method.',

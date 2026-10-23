@@ -1252,6 +1252,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.payments.required' => 'Kod, dostawca, nazwa i prawidłowe limity są wymagane.',
     'admin.payments.exists' => 'Metoda płatności z tym kodem już istnieje.',
     'admin.payments.saved' => 'Metoda płatności zapisana.',
+    'admin.payments.saved_consumer_fee' => 'Metoda płatności zapisana. Opłata za kartę i przelew nie jest pobierana od konsumentów (PSD2) — dotyczy tylko zatwierdzonych kont firmowych.',
     'admin.payments.deleted' => 'Metoda płatności usunięta.',
     'admin.payments.country_required' => 'Metoda i kraj ISO są wymagane.',
     'admin.payments.country_added' => 'Kraj dodany do metody płatności.',

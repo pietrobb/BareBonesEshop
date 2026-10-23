@@ -1231,6 +1231,7 @@ return [
     'admin.payments.required' => 'Kód, poskytovateľ, názov a platné limity sú povinné.',
     'admin.payments.exists' => 'Platobná metóda s týmto kódom už existuje.',
     'admin.payments.saved' => 'Platobná metóda uložená.',
+    'admin.payments.saved_consumer_fee' => 'Platobná metóda uložená. Poplatok za kartu a bankový prevod sa spotrebiteľom neúčtuje (PSD2) — platí len pre schválené firemné účty.',
     'admin.payments.deleted' => 'Platobná metóda zmazaná.',
     'admin.payments.country_required' => 'Metóda a ISO krajina sú povinné.',
     'admin.payments.country_added' => 'Krajina pridaná k platobnej metóde.',

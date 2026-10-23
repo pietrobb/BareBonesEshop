@@ -1252,6 +1252,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.payments.required' => 'A kód, szolgáltató, név és érvényes korlátok kötelezők.',
     'admin.payments.exists' => 'Már létezik fizetési mód ezzel a kóddal.',
     'admin.payments.saved' => 'Fizetési mód mentve.',
+    'admin.payments.saved_consumer_fee' => 'Fizetési mód mentve. A kártyás és átutalásos díjat fogyasztóknak nem számítjuk fel (PSD2) — csak jóváhagyott céges fiókokra vonatkozik.',
     'admin.payments.deleted' => 'Fizetési mód törölve.',
     'admin.payments.country_required' => 'A mód és az ISO ország kötelező.',
     'admin.payments.country_added' => 'Ország hozzáadva a fizetési módhoz.',

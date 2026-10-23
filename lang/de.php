@@ -1252,6 +1252,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.payments.required' => 'Code, Anbieter, Name und gültige Limits sind erforderlich.',
     'admin.payments.exists' => 'Eine Zahlungsart mit diesem Code existiert bereits.',
     'admin.payments.saved' => 'Zahlungsart gespeichert.',
+    'admin.payments.saved_consumer_fee' => 'Zahlungsart gespeichert. Gebühren für Karte und Überweisung werden Verbrauchern nicht berechnet (PSD2) — sie gelten nur für freigegebene Geschäftskonten.',
     'admin.payments.deleted' => 'Zahlungsart gelöscht.',
     'admin.payments.country_required' => 'Methode und ISO-Land sind erforderlich.',
     'admin.payments.country_added' => 'Land zur Zahlungsart hinzugefügt.',
