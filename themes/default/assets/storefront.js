@@ -174,7 +174,8 @@
     box.innerHTML = `<div class="payment-loading" role="status">${escapeHtml(text.paymentLoading)}</div>`;
     const params = {
       country: country.value, currency: config.currency,
-      amount: String(checkoutGoods(subtotal) + shippingPrice), shipping_method: selectedShipping, vat_id: checkoutVatId()
+      amount: String(checkoutGoods(subtotal) + shippingPrice), shipping: String(shippingPrice),
+      shipping_method: selectedShipping, vat_id: checkoutVatId()
     };
     let result;
     try {
@@ -192,15 +193,20 @@
     }
     box.innerHTML = '';
     const selectedIndex = Math.max(0, methods.findIndex((method) => (method.code || '') === previousCode));
+    // Shipping the order charges with this method (cash on delivery adds the carrier's COD surcharge).
+    const methodShipping = (method) => {
+      const cents = parseInt(method.shipping, 10);
+      return Number.isFinite(cents) ? cents : shippingPrice;
+    };
     methods.forEach((method, index) => {
       const label = document.createElement('label');
       label.className = 'payment-option';
       const fee = parseInt(method.fee || 0, 10);
       label.innerHTML = `<span><input type="radio" name="payment" value="${escapeHtml(method.code || '')}" ${index === selectedIndex ? 'checked' : ''}${method.requires_online ? ' data-online' : ''}> ${escapeHtml(method.label || method.code || '')}<small>${escapeHtml(method.description || method.provider || '')}</small></span><strong>${fee === 0 ? escapeHtml(text.free) : formatCents(fee)}</strong>`;
-      label.querySelector('input').addEventListener('change', () => updateCheckoutTotal(shippingPrice, fee, subtotal));
+      label.querySelector('input').addEventListener('change', () => updateCheckoutTotal(methodShipping(method), fee, subtotal));
       box.appendChild(label);
     });
-    updateCheckoutTotal(shippingPrice, parseInt(methods[selectedIndex].fee || 0, 10), subtotal);
+    updateCheckoutTotal(methodShipping(methods[selectedIndex]), parseInt(methods[selectedIndex].fee || 0, 10), subtotal);
   }
 
   // Buyer VAT ID the order would use: the checkout takes it only together with a company name.

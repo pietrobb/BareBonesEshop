@@ -31,6 +31,27 @@ class OrderWorkflow {
     }
 
     /**
+     * Next states of this order. Cash on delivery is paid when the carrier hands the parcel over, so an unpaid
+     * COD order is fulfilled from 'pending' (processing, shipped) without being marked paid first; the label then
+     * keeps the amount the carrier collects.
+     */
+    public static function allowedFor(array $order): array {
+        $allowed = self::allowedTransitions((string)($order['status'] ?? ''));
+        if (($order['status'] ?? '') === 'pending' && self::isUnpaidCashOnDelivery($order)) {
+            $allowed = array_merge($allowed, ['processing', 'shipped']);
+        }
+        return $allowed;
+    }
+
+    /** An order paid by cash on delivery whose money the carrier has not collected yet. */
+    public static function isUnpaidCashOnDelivery(array $order): bool {
+        if (!in_array((string)($order['payment_status'] ?? 'pending'), ['pending', ''], true)) return false;
+        $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true);
+        $type = is_array($snapshot) ? (string)($snapshot['service_type'] ?? '') : '';
+        return $type !== '' ? $type === 'cod' : PaymentService::isCashOnDelivery((string)($order['payment_method'] ?? ''));
+    }
+
+    /**
      * Why an admin may not move this order to $to (null = allowed). Shared by the order
      * detail and bulk actions: 'paid' needs a confirmed payment, a move that returns money the refund right.
      */
@@ -38,7 +59,7 @@ class OrderWorkflow {
         if (!$order) return 'not_found';
         if (!in_array($to, self::statuses(), true)) return 'invalid_status';
         if (!$mayRefund && self::returnsMoney($order, $to)) return 'forbidden';
-        if (!self::canTransition((string)$order['status'], $to)) return 'invalid_transition';
+        if (!in_array($to, self::allowedFor($order), true)) return 'invalid_transition';
         if ($to === 'paid' && ($order['payment_status'] ?? 'pending') !== 'paid') return 'payment_not_confirmed';
         if (self::refundOutstanding($order, $to)) return 'refund_outstanding';
         return null;
@@ -122,7 +143,7 @@ class OrderWorkflow {
         }
 
         $from = $order['status'];
-        if (!self::canTransition($from, $to)) {
+        if (!in_array($to, self::allowedFor($order), true)) {
             throw new \LogicException("Cannot transition order #{$orderId} from '{$from}' to '{$to}'");
         }
         if (self::refundOutstanding($order, $to)) {
@@ -229,7 +250,9 @@ class OrderWorkflow {
     private static function handleShipped(array $order): array {
         Fulfillment::shipOrder((int)$order['id']);
 
-        return [
+        // A cash-on-delivery order never passed 'paid': its invoice is issued now and travels with the parcel.
+        $invoice = self::isUnpaidCashOnDelivery($order) ? [['invoice_issue', ['order_id' => $order['id']], 3]] : [];
+        return [...$invoice,
             ['email_send', [
                 'template' => 'order_shipped',
                 'to'       => $order['customer_email'],

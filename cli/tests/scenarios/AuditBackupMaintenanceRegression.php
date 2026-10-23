@@ -70,7 +70,7 @@ try {
     mkdir($app . '/cli', 0750, true);
     mkdir($app . '/config', 0750, true);
     mkdir(dirname($dbPath), 0750, true);
-    foreach (['cli-only.php', 'gdpr-gc.php', 'backup.php'] as $file) {
+    foreach (['cli-only.php', 'gdpr-gc.php', 'backup.php', 'restore.php'] as $file) {
         copy($repoRoot . '/cli/' . $file, $app . '/cli/' . $file);
     }
     copy($repoRoot . '/config/backup.json', $app . '/config/backup.json');
@@ -152,6 +152,20 @@ try {
         }
         assert_equals([], array_values(array_unique($badFiles)), 'A09.2: backup files are 0600 and backup directories 0700');
     }
+
+    // 4. R9 blocker: cli/restore.php kept its own Db::get() connection open, so the exclusive
+    //    maintenance gate always saw "the database is open in another process" and refused.
+    $seed = new PDO('sqlite:' . $dbPath, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $seed->exec("INSERT INTO abandoned_carts (customer_email, created_at) VALUES ('after-backup@example.test', '2999-01-01 00:00:00')");
+    $seed = null;
+    $restored = a092_run($app . '/cli/restore.php', ['--latest', '--yes']);
+    $check = new PDO('sqlite:' . $dbPath, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $afterBackup = (int)$check->query("SELECT COUNT(*) FROM abandoned_carts WHERE customer_email = 'after-backup@example.test'")->fetchColumn();
+    $check = null;
+    assert_true($restored['exit'] === 0 && $afterBackup === 0,
+        'R9: cli/restore.php --latest restores the SQLite backup (exit ' . $restored['exit'] . ', rows written after the backup: ' . $afterBackup . ') — ' . trim(substr($restored['output'], -200)));
+    assert_true(in_array('pre-restore-snapshot', array_column(a092_backups($storage), 'label'), true),
+        'R9: cli/restore.php keeps a pre-restore-snapshot of the replaced database');
 } finally {
     if (function_exists('updateTestRemoveTree')) {
         updateTestRemoveTree($a092Root);

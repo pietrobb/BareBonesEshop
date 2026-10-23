@@ -45,6 +45,12 @@ class Fulfillment {
         return $shipmentIds;
     }
 
+    /** Paid or processing orders ship; so does an unpaid cash-on-delivery order, which the carrier collects on delivery. */
+    public static function orderShippable(array $order): bool {
+        return in_array($order['status'], ['paid', 'processing'], true)
+            || ($order['status'] === 'pending' && OrderWorkflow::isUnpaidCashOnDelivery($order));
+    }
+
     /**
      * Open quantities per warehouse for new shipments of an order in the active store:
      * [['warehouse_id' => ?int, 'lines' => [['order_item_id', 'sku', 'name', 'allocated', 'planned', 'remaining']]]].

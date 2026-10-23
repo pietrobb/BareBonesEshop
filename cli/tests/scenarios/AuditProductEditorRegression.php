@@ -28,6 +28,8 @@ set_error_handler(static function(int $severity, string $message, string $file, 
 });
 final class A121Pdo extends PDO {
     public int $depth = 0;
+    /** Runs once after the handler's next own transaction commits: a sale landing in the middle of the save. */
+    public ?Closure $afterCommit = null;
     public function beginTransaction(): bool {
         if ($this->depth++ === 0) return parent::beginTransaction();
         $this->exec('SAVEPOINT a121_' . $this->depth);
@@ -36,6 +38,10 @@ final class A121Pdo extends PDO {
     public function commit(): bool {
         if (--$this->depth === 0) return parent::commit();
         $this->exec('RELEASE SAVEPOINT a121_' . ($this->depth + 1));
+        if ($this->depth === 1 && $this->afterCommit) {
+            [$hook, $this->afterCommit] = [$this->afterCommit, null];
+            $hook();
+        }
         return true;
     }
     public function rollBack(): bool {
@@ -198,6 +204,18 @@ match ($action) {
     'edit_stale_stock', 'edit_stale_stock_changed' => [$_GET = ['id'=>$existing], Products::setAvailableStock("A121X-{$own}", 'simple', 3, 'order', 'order'),
         $_POST = $edit(['stock'=>$action === 'edit_stale_stock' ? '5' : '8', 'stock_loaded'=>'5', 'tr'=>['en'=>['name'=>"EN-X-{$own}", 'slug'=>"taken-{$own}", 'seo_title'=>"EN-SEO-{$own}",
         'meta_description'=>"EN-META-{$own}", 'image_alts'=>"/uploads/products/a122-own-{$own}.jpg | SEED-EN-ALT-{$own}"]]]), handleProductSave()],
+    // R9: the form showed 5 and the admin adds 3; two units sell (5 → 3) after the save has read the product, before
+    // the stock is booked. The sale stays booked: 6, not the 8 computed from the product read at the start of the save.
+    'edit_stock_sold_during_save' => [$_GET = ['id'=>$existing], Products::setAvailableStock("A121X-{$own}", 'simple', 5, 'manual_adjustment', 'test'),
+        $db->afterCommit = static fn() => Products::setAvailableStock("A121X-{$own}", 'simple', 3, 'order', 'order'),
+        $_POST = $edit(['stock'=>'8', 'stock_loaded'=>'5', 'tr'=>['en'=>['name'=>"EN-X-{$own}", 'slug'=>"taken-{$own}", 'seo_title'=>"EN-SEO-{$own}",
+        'meta_description'=>"EN-META-{$own}", 'image_alts'=>"/uploads/products/a122-own-{$own}.jpg | SEED-EN-ALT-{$own}"]]]), handleProductSave()],
+    // R9: the variant table showed V1 3 (legacy column) and V3 3 (ledger 4 - 1 reserved); the admin adds 4 and 7. Each
+    // sells 1 or 2 units after the rows are written and before the stock is booked; the sold units stay sold.
+    'variants_stock_sold_during_save' => [$_GET = ['id'=>$existing], $db->afterCommit = static function() use ($db, $own): void {
+        $db->prepare('UPDATE variants SET stock = 2 WHERE sku = ?')->execute(["A123V1-{$own}"]);
+        Warehouse::setAvailable("A123V3-{$own}", 1, 'order', 'order');
+    }, $_POST = $vtable(["A123V1-{$own}" => ['stock'=>'7', 'stock_loaded'=>'3'], "A123V3-{$own}" => ['stock'=>'10', 'stock_loaded'=>'3']]), handleProductVariantsSave()],
     // An imported/legacy product has only category_id and no product_categories rows.
     'edit_unchanged_legacy' => [$db->prepare('DELETE FROM product_categories WHERE product_id = ?')->execute([$existing]), $_GET = ['id'=>$existing],
         $_POST = $edit(['extra_category_ids'=>[], 'tr'=>['en'=>['name'=>"EN-X-{$own}", 'slug'=>"taken-{$own}", 'seo_title'=>"EN-SEO-{$own}",
@@ -237,8 +255,8 @@ $a121Run = static function(array $args) use ($a121Fixture): array {
 };
 $a121Rejected = ['create_foreign_brand', 'create_foreign_extra_category', 'create_bad_gtin', 'create_taken_translation_slug', 'create_translation_slug_is_base_slug', 'create_unknown_locale',
     'images_rejected', 'images_bad_url', 'images_alt_unknown', 'duplicate_sku'];
-$a121Actions = array_merge(['create_unicode', 'create_full', 'edit_page', 'edit_unchanged', 'edit_stale_stock', 'edit_stale_stock_changed', 'edit_unchanged_legacy', 'edit_clear_translation', 'view_model', 'images_edit', 'images_delete'], $a121Rejected,
-    ['variants_page', 'variants_edit', 'variants_delete', 'variants_delete_ordered', 'variants_rename_ordered', 'variants_rename_ledgered', 'variants_sku_product',
+$a121Actions = array_merge(['create_unicode', 'create_full', 'edit_page', 'edit_unchanged', 'edit_stale_stock', 'edit_stale_stock_changed', 'edit_stock_sold_during_save', 'edit_unchanged_legacy', 'edit_clear_translation', 'view_model', 'images_edit', 'images_delete'], $a121Rejected,
+    ['variants_page', 'variants_edit', 'variants_stock_sold_during_save', 'variants_delete', 'variants_delete_ordered', 'variants_rename_ordered', 'variants_rename_ledgered', 'variants_sku_product',
         'variants_sku_duplicate', 'variants_negative_stock', 'variants_foreign_row', 'variants_foreign_product']);
 $a122Paths = [ProductEditor::uploadPath('Košeľa/../x', 'jpg'), ProductEditor::uploadPath('Košeľa/../x', 'jpg')];
 assert_true($a122Paths[0] !== $a122Paths[1] && (bool)preg_match('#^products/Ko[A-Za-z0-9_-]*x-[0-9a-f]{16}\.jpg$#', $a122Paths[0]), 'A12.2 upload: two uploads of one SKU get distinct safe names');
@@ -382,6 +400,17 @@ try {
                     assert_equals([$a121Untouched ? 'Bez zmien.' : 'Produkt aktualizovaný.', $a121Untouched ? 3 : 6],
                         [$a121Result['flash']['msg'] ?? null, (int)($a121Existing['stock'] ?? -1)],
                         "{$a121Label}: a sale made while the form was open stays booked (untouched form keeps 3; +3 on the shown 5 gives 6, not 8)");
+                }
+                $a121LedgerOf = static fn(array $result, string $sku): array => array_reduce(array_filter($result['after']['warehouse_stock'] ?? [], static fn(array $row): bool => $row['sku'] === $sku),
+                    static fn(array $sum, array $row): array => [$sum[0] + (int)$row['qty'], $sum[1] + (int)$row['reserved']], [0, 0]);
+                if ($a121Action === 'edit_stock_sold_during_save') {
+                    assert_equals(['Produkt aktualizovaný.', 6, [6, 0]], [$a121Result['flash']['msg'] ?? null, (int)($a121Existing['stock'] ?? -1), $a121LedgerOf($a121Result, "A121X-{$a121Store}")],
+                        "R9 {$a121Driver}/{$a121Store}: two units sold during the save stay sold (+3 on the shown 5 after the sale to 3 gives 6, not 8)");
+                }
+                if ($a121Action === 'variants_stock_sold_during_save') {
+                    assert_equals(['ok', [6, 0], [9, 1], 6, 8], [$a121Result['flash']['type'] ?? null, $a121LedgerOf($a121Result, "A123V1-{$a121Store}"), $a121LedgerOf($a121Result, "A123V3-{$a121Store}"),
+                        (int)($a123Variants["A123V1-{$a121Store}"]['stock'] ?? -1), (int)($a123Variants["A123V3-{$a121Store}"]['stock'] ?? -1)],
+                        "R9 {$a121Driver}/{$a121Store}: variant units sold during the save stay sold (legacy 2 + 4 = 6, ledger 1 + 7 = 8 available, not 7 and 10)");
                 }
                 if ($a121Action === 'edit_clear_translation') {
                     $a121Tr = json_decode((string)($a121Existing['translations'] ?? '{}'), true) ?: [];

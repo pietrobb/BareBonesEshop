@@ -9,6 +9,24 @@ Read before updating a live shop; run `php cli/migrate.php` after the files are 
 settings below that silently change behaviour (http webhooks, cart reminders without consent, the
 nginx PHP fallback when `operations.nginx_config` is set).
 
+- **Round-9 hotfix (2026-10-23)**
+  - `php cli/restore.php` restores SQLite backups again (it held its own database connection, so the
+    maintenance gate always answered "database is still open in another process").
+  - Cash-on-delivery orders ship from `pending` without being marked paid: the label keeps the amount
+    the carrier collects, and the invoice is issued at shipping. Other unpaid orders still do not ship.
+  - The checkout total includes the cash-on-delivery surcharge and keeps an accepted coupon after a
+    reload, so the order charges what the page showed.
+  - nginx (`deploy/nginx.conf`): `location ^~ /uploads/` repeats the deny rules for dotfiles and data
+    files (`.env`, `.sql`, `.sqlite` …). **Copy the updated `location ^~ /uploads/` block** into your
+    server config if you based it on the sample.
+  - Saving stock in the product editor applies the admin's change to today's stock: units sold while
+    the form was open or being saved stay sold.
+  - Migrations `20261022110000_invoice_download_token_hash` and `20261022230000_currency_price_lists`
+    finish when re-run after an interruption on MySQL/MariaDB, and the price lists no longer fail on rows
+    left from an earlier own price list. Installs that already applied them are not affected.
+  - Retention `orders_contact` (`config/data-retention.json`) scrubs only closed orders (delivered,
+    cancelled, returned, refunded), leaves empty fields empty and keeps refund ids and ERP markers in
+    the note. A shop with its own copy of `data-retention.json` should add `status_in` and `keep_lines`.
 - **VAT rates (2026-10-23)** — products with `vat_class` `books` or `medicines` now get each country's
   own rate instead of its `reduced` class (e.g. IE books 0 %, IT/ES 4 %, FR 5.5 %, DE medicines 19 %).
   FI reduced rate 13.5 % from 2026, LT 9 % rate replaced by 12 % / 5 % from 2026. Invoices already

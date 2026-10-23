@@ -61,7 +61,9 @@
       "field": "created_at",
       "action": "scrub_pii",
       "scrub_fields": ["ip_address", "customer_phone", "notes"],
-      "rationale": "Not accounting data: the IP address (fraud checks), phone (delivery) and the free-text note serve the delivery, done within months. Name, e-mail and address stay under orders_pii."
+      "status_in": ["delivered", "cancelled", "returned", "refunded"],
+      "keep_lines": {"notes": "/^(?:Refund: |erp_status:)/"},
+      "rationale": "Not accounting data: the IP address (fraud checks), phone (delivery) and the free-text note serve the delivery, done within months. Only closed orders (an open one still ships); empty fields stay empty; refund ids and ERP markers in the note are internal records and stay. Name, e-mail and address stay under orders_pii."
     },
     "cookie_consent_old": {
       "table": "cookie_consent",

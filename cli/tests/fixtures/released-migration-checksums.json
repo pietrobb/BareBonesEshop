@@ -467,10 +467,12 @@
     },
     "20261022110000_invoice_download_token_hash": {
         "lf": [
-            "ab8f99730f8bf95c462b335a0fef268325e72f1c67e9cedddacba19431af03f7"
+            "ab8f99730f8bf95c462b335a0fef268325e72f1c67e9cedddacba19431af03f7",
+            "ac27ea320db89b379b096d9e3b7c276e02a48e27846e3bf5e2d587cd7b9f349d"
         ],
         "crlf": [
-            "5bf9702613ecc93d81200decb74d8e8e27ec6e66e897552e455877e61067e358"
+            "5bf9702613ecc93d81200decb74d8e8e27ec6e66e897552e455877e61067e358",
+            "b584a622fcec2cd3a873695c7578fff2f47f2887d23a6e0e7cef9e148ed5091e"
         ]
     },
     "20261022120000_admin_list_indexes": {
@@ -491,10 +493,12 @@
     },
     "20261022230000_currency_price_lists": {
         "lf": [
-            "549b0db0915613a15fafd126277159117a33bcd5c248b38490d42f5eda570f3a"
+            "549b0db0915613a15fafd126277159117a33bcd5c248b38490d42f5eda570f3a",
+            "807d92c2fe823036b1000d1cb5bcf9989c920aff6f752581ac7947a7e6f5b7a4"
         ],
         "crlf": [
-            "bed148212279d2dea8f2dcb2e04bdf900b377cc339cb867d8233bd8705a9543b"
+            "bed148212279d2dea8f2dcb2e04bdf900b377cc339cb867d8233bd8705a9543b",
+            "1e14e4412c6fd4a666e46075f4becd705c2e49c3eaa047d7627738dba933639b"
         ]
     }
 }

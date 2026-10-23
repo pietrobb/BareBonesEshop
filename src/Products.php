@@ -682,11 +682,18 @@ class Products {
     /**
      * Admin/CSV stock edit expressed as "available": booked in the warehouse ledger for physical
      * products (digital ones are not stock-tracked). On failure products.stock is re-synced.
+     * With $basis (the stock the editor showed) only the change $available - $basis is booked on today's stock. A SKU not
+     * in the ledger yet is booked at its products.stock, which the editor's save already moved by that change.
      */
-    public static function setAvailableStock(string $sku, string $productType, int $available, string $movementType, string $referenceType): bool {
+    public static function setAvailableStock(string $sku, string $productType, int $available, string $movementType, string $referenceType, ?int $basis = null): bool {
         if (in_array(strtolower($productType), VariantAvailability::DIGITAL_TYPES, true)) return false;
+        if ($basis !== null && !Warehouse::ledgered($sku)) {
+            $current = Db::get()->prepare('SELECT stock FROM products WHERE sku = :sku AND store_id = :catalog');
+            $current->execute([':sku' => $sku, ':catalog' => StoreContext::current()->catalogId()]);
+            [$available, $basis] = [(int)$current->fetchColumn(), null];
+        }
         try {
-            return Warehouse::setAvailable($sku, max(0, $available), $movementType, $referenceType);
+            return Warehouse::setAvailable($sku, max(0, $available), $movementType, $referenceType, $basis);
         } catch (RuntimeException | InvalidArgumentException $e) {
             Warehouse::syncProductStock([$sku]);
             throw $e;

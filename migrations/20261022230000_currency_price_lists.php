@@ -100,10 +100,23 @@ return new class {
         ],
     ];
 
+    /**
+     * Re-runnable: a scope is seeded in one transaction (MySQL commits each statement otherwise, and a failed run left a
+     * half-seeded scope that the next run skipped or failed on again). Zones, zone countries and link rows that remain
+     * from an earlier own price list (e.g. its methods deleted) are kept instead of failing on their unique keys.
+     */
     public function up(PDO $db, bool $isSqlite): void {
         foreach (self::SCOPES as $scope => $list) {
             if ($this->scopeConfigured($db, $scope)) continue;
-            $this->seedScope($db, $scope, $list);
+            $ownsTransaction = !$db->inTransaction();
+            if ($ownsTransaction) $db->beginTransaction();
+            try {
+                $this->seedScope($db, $scope, $list, $isSqlite ? 'INSERT OR IGNORE' : 'INSERT IGNORE');
+                if ($ownsTransaction) $db->commit();
+            } catch (Throwable $e) {
+                if ($ownsTransaction && $db->inTransaction()) $db->rollBack();
+                throw $e;
+            }
         }
     }
 
@@ -116,9 +129,9 @@ return new class {
         return false;
     }
 
-    private function seedScope(PDO $db, string $scope, array $list): void {
-        $zone = $db->prepare('INSERT INTO shipping_zones (store_id, code, name, description, sort_order) VALUES (?, ?, ?, ?, ?)');
-        $zoneCountry = $db->prepare('INSERT INTO shipping_zone_countries (store_id, zone_code, country) VALUES (?, ?, ?)');
+    private function seedScope(PDO $db, string $scope, array $list, string $insertIgnore): void {
+        $zone = $db->prepare("{$insertIgnore} INTO shipping_zones (store_id, code, name, description, sort_order) VALUES (?, ?, ?, ?, ?)");
+        $zoneCountry = $db->prepare("{$insertIgnore} INTO shipping_zone_countries (store_id, zone_code, country) VALUES (?, ?, ?)");
         $zoned = [];
         $sort = 10;
         foreach ($list['zones'] as [$code, $name, $countries]) {
@@ -139,7 +152,12 @@ return new class {
         $rate = $db->prepare('INSERT INTO shipping_rates
             (store_id, method_code, carrier, country, zone_code, weight_from_g, weight_to_g, price, cod_surcharge, delivery_days, sort_order)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        // Rates have no unique key: a method that still has rates in this scope keeps them, without a second copy.
+        $rated = $db->prepare('SELECT DISTINCT method_code FROM shipping_rates WHERE store_id = ?');
+        $rated->execute([$scope]);
+        $rated = $rated->fetchAll(PDO::FETCH_COLUMN);
         foreach ($list['rates'] as $i => [$code, $country, $zoneCode, $from, $to, $price, $cod, $days]) {
+            if (in_array($code, $rated, true)) continue;
             $rate->execute([$scope, $code, $carriers[$code], $country, $zoneCode, $from, $to, $price, $cod, $days, 10 + $i]);
         }
 
@@ -148,13 +166,13 @@ return new class {
             VALUES (?, ?, ?, ?, \'\', ?, ?, ?, ?, 0, NULL, ?, ?)');
         foreach ($list['payments'] as $row) $payment->execute(array_merge([$scope], $row));
 
-        $paymentCountry = $db->prepare('INSERT INTO payment_method_countries (store_id, method_code, country) VALUES (?, ?, ?)');
+        $paymentCountry = $db->prepare("{$insertIgnore} INTO payment_method_countries (store_id, method_code, country) VALUES (?, ?, ?)");
         foreach (['card', 'bank_transfer'] as $code) {
             foreach (self::EU as $country) $paymentCountry->execute([$scope, $code, $country]);
         }
         foreach ($list['cod_countries'] as $country) $paymentCountry->execute([$scope, 'cod', $country]);
 
-        $paymentShipping = $db->prepare('INSERT INTO payment_method_shipping (store_id, method_code, shipping_method_code) VALUES (?, ?, ?)');
+        $paymentShipping = $db->prepare("{$insertIgnore} INTO payment_method_shipping (store_id, method_code, shipping_method_code) VALUES (?, ?, ?)");
         foreach (['packeta', 'gls'] as $carrier) $paymentShipping->execute([$scope, 'cod', $carrier]);
     }
 };

@@ -1048,28 +1048,45 @@ class GdprService {
         if ($missing) {
             throw new InvalidArgumentException("policy.scrub_fields not in {$table}: " . implode(', ', $missing));
         }
+        // status_in: only rows in one of these statuses (e.g. closed orders: an open one still needs the phone for delivery).
+        $statuses = $p['status_in'] ?? null;
+        if ($statuses !== null && (!is_array($statuses) || $statuses === [] || array_filter($statuses, static fn($s): bool => !is_string($s) || !preg_match('/^[a-z_]+$/', $s)))) {
+            throw new InvalidArgumentException("policy.status_in invalid for {$key}");
+        }
+        // keep_lines: field => regex of lines that are internal records (refund id, ERP marker), kept when the rest is erased.
+        $keepLines = $p['keep_lines'] ?? [];
+        if (!is_array($keepLines) || array_diff(array_keys($keepLines), $scrub)
+            || array_filter($keepLines, static fn($re): bool => !is_string($re) || @preg_match($re, '') === false)) {
+            throw new InvalidArgumentException("policy.keep_lines invalid for {$key}");
+        }
         $cutoff = self::computeCutoff($p);
         $markerPrefix = '[erased per GDPR retention at ';
         $marker = $markerPrefix . gmdate('Y-m-d') . ']';
 
         // Only rows created before the cutoff that still hold PII in at least one field: a re-run
-        // neither rewrites rows scrubbed earlier (and their marker date) nor counts them again.
+        // neither rewrites rows scrubbed earlier (and their marker date) nor counts them again. An empty
+        // field holds nothing and stays empty (the marker would show on documents printed later).
         // Distinct placeholders: native MySQL prepares reject a repeated named parameter.
         $params = [':cutoff' => $cutoff];
         $pending = [];
         $sets = [];
         foreach (array_values($scrub) as $i => $f) {
-            $pending[] = "({$f} IS NOT NULL AND {$f} NOT LIKE :erased{$i})";
-            $params[":erased{$i}"] = $markerPrefix . '%';
-            $sets[] = "{$f} = :marker{$i}";
+            $pending[] = "({$f} IS NOT NULL AND {$f} <> '' AND {$f} NOT LIKE :erased{$i})";
+            // A field with kept lines carries the marker after them.
+            $params[":erased{$i}"] = (isset($keepLines[$f]) ? '%' : '') . $markerPrefix . '%';
+            $sets[] = "{$f} = CASE WHEN {$f} IS NULL OR {$f} = '' THEN {$f} ELSE :marker{$i} END";
         }
         $where = "{$field} <= :cutoff AND (" . implode(' OR ', $pending) . ')';
+        foreach (array_values($statuses ?? []) as $i => $status) $params[":status{$i}"] = $status;
+        if ($statuses !== null) $where .= ' AND status IN (' . implode(', ', array_map(static fn(int $i): string => ":status{$i}", array_keys(array_values($statuses)))) . ')';
         $countStmt = $db->prepare("SELECT COUNT(*) AS c FROM {$table} WHERE {$where}");
         $countStmt->execute($params);
         $affected = (int)$countStmt->fetch()['c'];
         $countStmt->closeCursor();
 
-        if ($mode === 'apply' && $affected > 0) {
+        if ($mode === 'apply' && $affected > 0 && $keepLines) {
+            $affected = self::scrubKeepingLines($db, $table, $scrub, $keepLines, $where, $params, $marker, $markerPrefix);
+        } elseif ($mode === 'apply' && $affected > 0) {
             $markers = [];
             foreach (array_keys($sets) as $i) $markers[":marker{$i}"] = $marker;
             $affected = self::retentionWrite($db, $p, "UPDATE {$table} SET " . implode(', ', $sets), $where, $params, $markers);
@@ -1078,6 +1095,49 @@ class GdprService {
         return self::recordRun($db, $key, $mode, $affected, $start, [
             'cutoff' => $cutoff, 'fields' => $scrub
         ]);
+    }
+
+    /**
+     * scrub_pii with keep_lines, row by row in id-keyset chunks: a field with kept lines keeps them followed by the
+     * marker; the other fields get the marker unless empty or already scrubbed.
+     */
+    private static function scrubKeepingLines(PDO $db, string $table, array $scrub, array $keepLines, string $where, array $params, string $marker, string $markerPrefix): int {
+        $columns = implode(', ', $scrub);
+        $read = $db->prepare("SELECT id, {$columns} FROM {$table} WHERE id > :after AND {$where} ORDER BY id LIMIT 1000");
+        $update = $db->prepare("UPDATE {$table} SET " . implode(', ', array_map(static fn(string $f): string => "{$f} = :{$f}", $scrub)) . ' WHERE id = :id');
+        $count = 0;
+        $after = 0;
+        do {
+            $read->execute($params + [':after' => $after]);
+            $rows = $read->fetchAll(PDO::FETCH_ASSOC);
+            $read->closeCursor();
+            $ownsTransaction = !$db->inTransaction();
+            if ($ownsTransaction) $db->beginTransaction();
+            try {
+                foreach ($rows as $row) {
+                    $after = (int)$row['id'];
+                    $values = [':id' => $after];
+                    foreach ($scrub as $f) {
+                        $value = $row[$f];
+                        if ($value === null || $value === '' || str_contains((string)$value, $markerPrefix)) {
+                            $values[":{$f}"] = $value;
+                            continue;
+                        }
+                        $kept = isset($keepLines[$f])
+                            ? array_filter(preg_split('/\R/', (string)$value), static fn(string $line): bool => preg_match($keepLines[$f], $line) === 1)
+                            : [];
+                        $values[":{$f}"] = implode("\n", [...$kept, $marker]);
+                    }
+                    $update->execute($values);
+                    $count++;
+                }
+                if ($ownsTransaction) $db->commit();
+            } catch (Throwable $e) {
+                if ($ownsTransaction && Db::transactionOpen($db)) Db::rollBackOpen($db);
+                throw $e;
+            }
+        } while (count($rows) === 1000);
+        return $count;
     }
 
     private static function retentionHashEmail(PDO $db, string $key, array $p, string $mode, float $start): array {

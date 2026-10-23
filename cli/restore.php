@@ -57,8 +57,9 @@ $writersStopped = isset($flags['i-stopped-writers']);
 $emit = static function (string $s) use ($quiet) { if (!$quiet) echo $s . "\n"; };
 
 try {
-    $db = Db::get();
-    BackupService::init($db);
+    // No local reference: restore() must be able to close every connection of this process
+    // before the maintenance gate proves no other process holds the SQLite file.
+    BackupService::init(Db::get());
 } catch (\Throwable $e) {
     fwrite(STDERR, 'Init failed: ' . $e->getMessage() . "\n");
     exit(3);

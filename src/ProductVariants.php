@@ -109,7 +109,9 @@ final class ProductVariants {
             $delta = trim((string)($fields['price_delta'] ?? '0')) ?: '0';
             $stock = trim((string)($fields['stock'] ?? '0')) ?: '0';
             $sort = trim((string)($fields['sort_order'] ?? '0')) ?: '0';
-            if (($absolute !== '' && !ctype_digit($absolute)) || !preg_match('/^-?\d+$/', $delta) || !ctype_digit($stock) || !preg_match('/^-?\d+$/', $sort)) {
+            $loaded = $old === null ? '' : trim((string)($fields['stock_loaded'] ?? ''));
+            if (($absolute !== '' && !ctype_digit($absolute)) || !preg_match('/^-?\d+$/', $delta) || !ctype_digit($stock) || !preg_match('/^-?\d+$/', $sort)
+                || ($loaded !== '' && !ctype_digit($loaded))) {
                 return I18n::format('admin.msg.variant.row_error', ['sku' => $sku, 'error' => I18n::t('admin.msg.variant.numbers')]);
             }
             if ($absolute === '' && $floor + (int)$delta < 0) return I18n::format('admin.msg.variant.row_error', ['sku' => $sku, 'error' => I18n::t('admin.msg.variant.negative_price')]);
@@ -118,6 +120,7 @@ final class ProductVariants {
             if (!in_array($availability, VariantAvailability::statuses(), true) || !in_array($policy, self::POLICIES, true)) return I18n::format('admin.msg.variant.row_error', ['sku' => $sku, 'error' => I18n::t('admin.msg.variant.availability')]);
             $rows[] = ['id' => $id, 'sku' => $sku, 'name' => $name, 'attrs' => $attrs ? json_encode($attrs, JSON_UNESCAPED_UNICODE) : '{}',
                 'price_absolute' => $absolute === '' ? null : (int)$absolute, 'price_delta' => (int)$delta, 'stock' => (int)$stock,
+                'stock_loaded' => $loaded === '' ? null : (int)$loaded,
                 'availability' => $availability, 'inventory_policy' => $policy, 'sort_order' => (int)$sort];
         }
         if (count($rows) > self::MAX_VARIANTS) return I18n::format('admin.msg.variant.max', ['max' => self::MAX_VARIANTS]);
@@ -141,7 +144,7 @@ final class ProductVariants {
             $insert = $db->prepare('INSERT INTO variants (product_id, sku, name, attrs, price_absolute, price_delta, availability, inventory_policy, sort_order, stock)
                 VALUES (:product, :sku, :name, :attrs, :price_absolute, :price_delta, :availability, :inventory_policy, :sort_order, 0)');
             foreach ($validated['rows'] as &$row) {
-                $values = array_diff_key($row, ['id' => 1, 'stock' => 1]);
+                $values = array_diff_key($row, ['id' => 1, 'stock' => 1, 'stock_loaded' => 1]);
                 $params = [':product' => $productId] + array_combine(array_map(static fn(string $k): string => ":{$k}", array_keys($values)), $values);
                 if ($row['id'] > 0) $update->execute($params + [':id' => $row['id']]);
                 else {
@@ -159,9 +162,11 @@ final class ProductVariants {
         $errors = [];
         if (VariantAvailability::isDigitalType($productType)) return $errors;
         foreach ($validated['rows'] as $row) {
-            if ((int)($before[$row['id']]['stock'] ?? 0) === $row['stock'] && isset($before[$row['id']])) continue;
+            // The stock the row showed is the basis of the admin's change: units sold since the form was loaded stay sold.
+            $basis = isset($before[$row['id']]) ? ($row['stock_loaded'] ?? (int)$before[$row['id']]['stock']) : null;
+            if ($basis !== null && $basis === $row['stock']) continue;
             try {
-                self::setStock($row['id'], $row['sku'], $row['stock']);
+                self::setStock($row['id'], $row['sku'], $row['stock'], $basis);
             } catch (RuntimeException | InvalidArgumentException $e) {
                 $errors[$row['sku']] = $e->getMessage();
             }
@@ -170,18 +175,33 @@ final class ProductVariants {
     }
 
     /** Book a variant's available stock: through the default warehouse when there is one, else the legacy column + movement. */
-    private static function setStock(int $variantId, string $sku, int $available): void {
-        if (Warehouse::setAvailable($sku, $available, 'manual_adjustment', 'admin_variant')) {
+    private static function setStock(int $variantId, string $sku, int $available, ?int $basis): void {
+        if ($basis !== null && !self::ledgered($sku) && Warehouse::defaultWarehouse()) {
+            // The first ledger booking takes over the legacy column: apply the admin's change to its value today.
+            $current = Db::get()->prepare('SELECT stock FROM variants WHERE id = :id');
+            $current->execute([':id' => $variantId]);
+            [$available, $basis] = [max(0, (int)$current->fetchColumn() + $available - $basis), null];
+        }
+        if (Warehouse::setAvailable($sku, $available, 'manual_adjustment', 'admin_variant', $basis)) {
             Warehouse::syncProductStock([$sku]);
             return;
         }
         $db = Db::get();
-        $current = $db->prepare('SELECT stock FROM variants WHERE id = :id');
-        $current->execute([':id' => $variantId]);
-        $delta = $available - (int)$current->fetchColumn();
-        if ($delta === 0) return;
-        $db->prepare('UPDATE variants SET stock = :stock WHERE id = :id')->execute([':stock' => $available, ':id' => $variantId]);
-        Inventory::movement(null, $sku, 'manual_adjustment', $delta, 0, $available, 0, 'admin_variant', null, null, ['variant_id' => $variantId]);
+        $db->beginTransaction();
+        try {
+            $current = $db->prepare('SELECT stock FROM variants WHERE id = :id' . (Db::driver() === 'mysql' ? ' FOR UPDATE' : ''));
+            $current->execute([':id' => $variantId]);
+            $now = (int)$current->fetchColumn();
+            $target = $basis === null ? $available : max(0, $now + $available - $basis);
+            if ($target !== $now) {
+                $db->prepare('UPDATE variants SET stock = :stock WHERE id = :id')->execute([':stock' => $target, ':id' => $variantId]);
+                Inventory::movement(null, $sku, 'manual_adjustment', $target - $now, 0, $target, 0, 'admin_variant', null, null, ['variant_id' => $variantId]);
+            }
+            $db->commit();
+        } catch (Throwable $e) {
+            $db->rollBack();
+            throw $e;
+        }
     }
 
     private static function ledgered(string $sku): bool {

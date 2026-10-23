@@ -889,12 +889,14 @@ function handleProductSave(): void {
             }
             if (ProductEditor::categoriesChanged($id, $editor)) $changed[] = 'categories';
             if ($changed) {
-                $stmt = $db->prepare("UPDATE products SET sku=:sku, name=:name, slug=:slug, product_type=:product_type,
-                    category_id=:category_id, brand_id=:brand_id, gtin=:gtin, mpn=:mpn, seo_title=:seo_title, meta_description=:meta_description, translations=:translations, price=:price, compare_price=:compare_price, stock=:stock,
+                // Stock moves by the admin's change only: a sale committed after $old was read stays sold.
+                $stmt = $db->prepare("UPDATE products SET sku=:sku, name=:name, slug=:slug, product_type=:product_type, stock=CASE WHEN stock + :stock_delta < 0 THEN 0 ELSE stock + :stock_delta2 END,
+                    category_id=:category_id, brand_id=:brand_id, gtin=:gtin, mpn=:mpn, seo_title=:seo_title, meta_description=:meta_description, translations=:translations, price=:price, compare_price=:compare_price,
                     status=:status, summary=:summary, description=:description, images=:images, image_alts=:image_alts, tags=:tags, weight_g=:weight_g,
                     stock_low_threshold=:stock_low_threshold, stock_critical_threshold=:stock_critical_threshold, updated_at={$now} WHERE id=:id AND store_id=:catalog");
                 $db->beginTransaction(); // an exception ends the request; the uncommitted transaction is rolled back
-                $stmt->execute($data + [':id' => $id, ':catalog' => StoreContext::current()->catalogId()]);
+                $stmt->execute(array_diff_key($data, [':stock' => 1]) + [':stock_delta' => $data[':stock'] - (int)$old['stock'], ':stock_delta2' => $data[':stock'] - (int)$old['stock'],
+                    ':id' => $id, ':catalog' => StoreContext::current()->catalogId()]);
                 ProductEditor::save($id, $editor, $old);
                 AuditLog::log('product', $id, $old, $data, 'Admin edit: ' . implode(', ', $changed));
                 Products::recordUpdated($id, $old);
@@ -922,7 +924,7 @@ function handleProductSave(): void {
 
     // The stock field is "available"; book the change in the warehouse ledger (the source of truth).
     try {
-        if ((int)($old['stock'] ?? -1) !== $data[':stock']) Products::setAvailableStock($data[':sku'], $productType, $data[':stock'], 'manual_adjustment', 'admin_product');
+        if ((int)($old['stock'] ?? -1) !== $data[':stock']) Products::setAvailableStock($data[':sku'], $productType, $data[':stock'], 'manual_adjustment', 'admin_product', $old ? (int)$old['stock'] : null);
     } catch (RuntimeException | InvalidArgumentException $e) {
         setFlash('err', I18n::t('admin.product.stock_not_changed') . ' ' . $e->getMessage());
     }

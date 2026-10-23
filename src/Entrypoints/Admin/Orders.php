@@ -214,7 +214,7 @@ function pageOrder(): void {
     if (!$order) { echo '<p>' . esc(I18n::t('admin.order.not_found')) . '</p>'; return; }
 
     $items = Orders::items($id);
-    $allowed = OrderWorkflow::allowedTransitions($order['status']);
+    $allowed = OrderWorkflow::allowedFor($order);
     $canRefund = Security::adminCan('orders.refund');
     if (!$canRefund) $allowed = array_values(array_filter($allowed, static fn(string $to): bool => !OrderWorkflow::returnsMoney($order, $to)));
     $paymentTransitions = Security::adminCan('orders.payments') ? adminManualPaymentTransitions($order) : [];

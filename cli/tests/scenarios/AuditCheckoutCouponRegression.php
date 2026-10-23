@@ -154,7 +154,7 @@ try {
             "{$l}: applying a coupon re-prices the form, shows it as applied with a remove button and places no order");
         preg_match('~id="summary-total">([^<]*)<~', $html, $a132Total);
         assert_true(str_contains($html, 'id="summary-discount">' . htmlspecialchars($r['expected']['discount'], ENT_QUOTES) . '<')
-            && str_contains($html, '<input type="hidden" id="checkout-discount" value="400">') && ($a132Total[1] ?? '') !== '' && ($a132Total[1] ?? '') !== $a132GetTotal,
+            && preg_match('~<input type="hidden" id="checkout-discount" value="400"[ >]~', $html) === 1 && ($a132Total[1] ?? '') !== '' && ($a132Total[1] ?? '') !== $a132GetTotal,
             "{$l}: the summary shows the 10 % discount ({$r['expected']['discount']}) and a reduced total (" . ($a132Total[1] ?? '?') . " vs {$a132GetTotal})");
         assert_true($a132Kept($form) && str_contains($form, 'value="' . ($a132Ship[1] ?? '') . '" checked') && str_contains($form, 'value="' . ($a132Pay[1] ?? '') . '" checked'),
             "{$l}: everything the buyer entered (contact, address, note, shipping, payment) is kept");
