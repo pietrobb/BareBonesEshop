@@ -1,15 +1,13 @@
 <?php
 /** A12.8: shipments and tracking in the admin order detail (partial shipments through Fulfillment). */
 
-const ADMIN_SHIPPABLE_ORDER_STATUSES = ['paid', 'processing'];
-
 function renderOrderShipments(array $order): void {
     $orderId = (int)$order['id'];
     $shipments = Fulfillment::shipments($orderId);
     $shipmentItems = Fulfillment::shipmentItems(array_column($shipments, 'id'));
     $names = array_column(Orders::items($orderId), 'name', 'id');
     $canShip = Security::adminCan('orders.ship');
-    $open = $canShip && in_array($order['status'], ADMIN_SHIPPABLE_ORDER_STATUSES, true);
+    $open = $canShip && Fulfillment::orderShippable($order);
     $groups = $open ? array_values(array_filter(Fulfillment::shippable($orderId),
         static fn(array $g): bool => array_sum(array_column($g['lines'], 'remaining')) > 0)) : [];
     $warehouses = adminShipmentWarehouseNames();
@@ -198,7 +196,7 @@ function adminShipmentAction(int $orderId, Closure $change, bool $requireOpenOrd
         Orders::lockWithin($orderId);
         $order = Orders::byId($orderId);
         if (!$order) throw new DomainException('admin.order.msg.not_found');
-        if ($requireOpenOrder && !in_array($order['status'], ADMIN_SHIPPABLE_ORDER_STATUSES, true)) throw new DomainException('admin.shipment.not_shippable');
+        if ($requireOpenOrder && !Fulfillment::orderShippable($order)) throw new DomainException('admin.shipment.not_shippable');
         $message = $change($order);
         $db->commit();
         setFlash('ok', I18n::t($message));

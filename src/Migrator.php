@@ -118,6 +118,15 @@ class Migrator {
             'e4ac3a08ba525d6f70581fad4b417601b0b584fe0726d9c23e4c8087f0dc4ffd' => ['ec7fdca2d1764379f64fbe88542a4fff84b84e7a11d9ebef0249fe8a4ccef5d4', '4ad05503aefa1cd3973b16ffdcc5d333bcea8447510834d0d59608d7034587ab'],
             'b2675f26bd0a0a2c56550c48c98723cfa8f33671433a63aea52f9477b12dfb6e' => ['ec7fdca2d1764379f64fbe88542a4fff84b84e7a11d9ebef0249fe8a4ccef5d4', '4ad05503aefa1cd3973b16ffdcc5d333bcea8447510834d0d59608d7034587ab'],
         ],
+        // Released in PR #47, made resumable after an interrupted MySQL run in the round-9 hotfix (same result on a completed run).
+        '20261022110000_invoice_download_token_hash' => [
+            'ab8f99730f8bf95c462b335a0fef268325e72f1c67e9cedddacba19431af03f7' => ['ac27ea320db89b379b096d9e3b7c276e02a48e27846e3bf5e2d587cd7b9f349d', 'b584a622fcec2cd3a873695c7578fff2f47f2887d23a6e0e7cef9e148ed5091e'],
+            '5bf9702613ecc93d81200decb74d8e8e27ec6e66e897552e455877e61067e358' => ['ac27ea320db89b379b096d9e3b7c276e02a48e27846e3bf5e2d587cd7b9f349d', 'b584a622fcec2cd3a873695c7578fff2f47f2887d23a6e0e7cef9e148ed5091e'],
+        ],
+        '20261022230000_currency_price_lists' => [
+            '549b0db0915613a15fafd126277159117a33bcd5c248b38490d42f5eda570f3a' => ['807d92c2fe823036b1000d1cb5bcf9989c920aff6f752581ac7947a7e6f5b7a4', '1e14e4412c6fd4a666e46075f4becd705c2e49c3eaa047d7627738dba933639b'],
+            'bed148212279d2dea8f2dcb2e04bdf900b377cc339cb867d8233bd8705a9543b' => ['807d92c2fe823036b1000d1cb5bcf9989c920aff6f752581ac7947a7e6f5b7a4', '1e14e4412c6fd4a666e46075f4becd705c2e49c3eaa047d7627738dba933639b'],
+        ],
     ];
 
     private PDO    $db;

@@ -270,7 +270,7 @@ class ApiV1 {
                     'message' => $reason === 'payment_not_confirmed'
                         ? 'The order payment is not confirmed'
                         : "The order cannot move from '{$order['status']}' to '{$to}'",
-                    'allowed' => OrderWorkflow::allowedTransitions((string)$order['status']),
+                    'allowed' => OrderWorkflow::allowedFor($order),
                 ]]];
             }
             $label = 'API v1 client ' . $client['key_id'] . ($note !== null && trim($note) !== '' ? ': ' . trim($note) : '');

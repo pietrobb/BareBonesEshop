@@ -233,6 +233,13 @@ class Warehouse {
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /** The SKU has stock rows in the active catalog's ledger. */
+    public static function ledgered(string $sku): bool {
+        $stmt = Db::get()->prepare('SELECT 1 FROM warehouse_stock WHERE sku = :sku AND store_id = :store LIMIT 1');
+        $stmt->execute([':sku' => $sku, ':store' => StoreContext::current()->catalogId()]);
+        return (bool)$stmt->fetchColumn();
+    }
+
     /** Total available stock for a SKU (sum of all warehouses, minus reserved) */
     public static function totalAvailable(string $sku): int {
         $stmt = Db::get()->prepare("
@@ -485,8 +492,11 @@ class Warehouse {
      * warehouses). An increase is booked on the default warehouse; a decrease takes free stock from the
      * default warehouse first, then from the others by ascending priority, never below reservations.
      * Returns false without a default warehouse.
+     * With $basis (the stock the editor showed) only the admin's change ($available - $basis) is applied to today's
+     * ledger stock, so units sold or returned while the form was open or being saved are not booked back. A SKU not
+     * in the ledger yet is booked at $available: its first booking takes over the legacy stock column the editor showed.
      */
-    public static function setAvailable(string $sku, int $available, string $movementType = 'manual_adjustment', ?string $referenceType = null): bool {
+    public static function setAvailable(string $sku, int $available, string $movementType = 'manual_adjustment', ?string $referenceType = null, ?int $basis = null): bool {
         if ($available < 0) throw new InvalidArgumentException('Stock count cannot be negative');
         $warehouse = self::defaultWarehouse();
         if (!$warehouse) return false;
@@ -496,6 +506,7 @@ class Warehouse {
         if ($ownsTransaction) $db->beginTransaction();
         try {
             $before = self::totalAvailable($sku);
+            if ($basis !== null && self::ledgered($sku)) $available = max(0, $before + $available - $basis);
             $delta = $available - $before;
             if ($delta > 0) {
                 self::adjustStock($defaultId, $sku, $delta, $movementType, $referenceType);

@@ -180,6 +180,29 @@ function orderFacts(arg) {
   return JSON.parse(execFileSync('php', ['tests/e2e/order-facts.php', arg], { cwd: process.cwd(), encoding: 'utf8' }));
 }
 
+// Round 9: the JS total left out the carrier's COD surcharge (shown 24,09 €, charged 25,09 €).
+test('cash on delivery: the total the checkout shows is the total the order charges', async ({ page }) => {
+  await addFirstProduct(page);
+  await fillCheckout(page, 'cod-total@example.test');
+  const shippingInputs = page.locator('input[name="shipping_method"]');
+  const cod = page.locator('input[name="payment"][value="cod"]');
+  for (let i = 0; i < await shippingInputs.count() && await cod.count() === 0; i++) {
+    const option = shippingInputs.nth(i);
+    if (await option.isChecked()) continue;
+    const payments = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/storefront/payment_methods');
+    await option.check();
+    await payments;
+    await expect(page.locator('input[name="payment"]').first()).toBeVisible();
+  }
+  await expect(cod).toHaveCount(1);
+  await cod.check();
+  const shown = (await page.locator('#summary-total').textContent()).replace(/\D/g, '');
+  await page.locator('form.checkout-form button.btn-checkout').click();
+  await expect(page).toHaveURL(/page=order-done/);
+  const orderNumber = (await page.locator('.order-done > p strong').textContent()).trim();
+  expect(String(orderFacts(orderNumber).total)).toBe(shown);
+});
+
 // Real customer path: click "submit" in the HTML form, follow the cross-origin redirect to the
 // hosted gateway, gateway calls the signed webhook server-to-server, customer returns paid.
 test('online payment redirect and signed webhook complete the bound checkout', async ({ page, request }) => {

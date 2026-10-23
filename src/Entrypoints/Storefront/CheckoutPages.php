@@ -92,14 +92,14 @@ function renderCheckout(): string {
     $subtotal = (int)$cartData['subtotal'];
     $customerId = (int)($_SESSION['customer_id'] ?? 0);
 
-    // Same discount rules as CheckoutService::execute: coupon + automatic promotions, capped at the subtotal.
-    $couponCode = $couponAction === 'remove' ? '' : $form('coupon_code');
+    // Same discount rules as CheckoutService::execute: coupon + automatic promotions, capped at the subtotal. A reload (GET) keeps the accepted coupon.
+    $couponCode = $couponAction === 'remove' ? '' : ($posted ? $form('coupon_code') : CheckoutService::acceptedCoupon());
     $couponThrottled = !CheckoutService::formCouponAllowed($couponCode);
     $preview = CheckoutService::discountPreview($couponThrottled ? '' : $couponCode, $subtotal, Security::email($state['values']['email']) ?? null, $goods, $customerId ?: null);
     $couponDiscount = $preview['coupon_discount'];
     $couponError = $couponThrottled ? $t('coupon_too_many_attempts') : ($preview['coupon_error'] === null ? '' : sprintf($t($preview['coupon_error']), $couponCode));
     if ($couponError !== '') $couponCode = '';
-    elseif ($preview['coupon_applied']) $_SESSION['checkout_coupon'] = $couponCode; // accepted: re-pricing it is free
+    CheckoutService::rememberCoupon($preview['coupon_applied'] ? $couponCode : ''); // accepted: re-pricing it is free
     $discount = min($subtotal, $couponDiscount + $preview['promotion_discount']);
 
     // As at checkout: free shipping thresholds and payment fees see the goods after discounts.
@@ -172,6 +172,7 @@ function processCheckout(): array {
     $input['payment_method'] = Security::clean(is_string($paymentInput) ? $paymentInput : 'cod');
     $result = CheckoutService::execute($input, require dirname(__DIR__, 3) . '/config.php');
     if (!empty($result['success'])) {
+        CheckoutService::rememberCoupon(''); // used by this order; the next checkout starts without it
         // A redirect outside form-action is dropped silently by the browser; offer a link instead.
         $pending = !empty($result['payment_url']) && !Security::formActionAllows((string)$result['payment_url'])
             ? CheckoutSession::pendingPayment() : null;

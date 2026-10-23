@@ -335,6 +335,18 @@ class CheckoutService {
         return $code === '' || $code === ($_SESSION['checkout_coupon'] ?? null) || self::couponAttemptAllowed();
     }
 
+    /** The coupon code the checkout form last had accepted in this session ('' = none): a reload keeps pricing with it. */
+    public static function acceptedCoupon(): string {
+        $code = $_SESSION['checkout_coupon'] ?? '';
+        return is_string($code) ? $code : '';
+    }
+
+    /** Remember the coupon the checkout form accepted ('' forgets it: removed, refused or used by an order). */
+    public static function rememberCoupon(string $code): void {
+        if ($code === '') unset($_SESSION['checkout_coupon']);
+        else $_SESSION['checkout_coupon'] = $code;
+    }
+
     /**
      * Discount the checkout form shows before the order exists, with the same rules execute() applies:
      * the coupon (i18n key of the refusal reason when it gives nothing) plus automatic promotions.

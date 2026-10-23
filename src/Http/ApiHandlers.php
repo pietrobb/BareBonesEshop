@@ -474,7 +474,7 @@ function apiShippingRates(): array {
     $methods = ShippingService::calculateRates($country, $weightG, $subtotal, $cod, $volumeCm3, $physicalQty, isset($cart['currency']) ? (string)$cart['currency'] : null);
     // An automatic free-shipping promotion waives the carriage as checkout does: cash on delivery keeps its surcharge.
     $customerId = (int)($_SESSION['customer_id'] ?? 0);
-    if (CheckoutService::discountPreview('', (int)($cart['subtotal'] ?? 0), null, $cart['items'], $customerId ?: null)['free_shipping']) {
+    if (CheckoutService::discountPreview(CheckoutService::acceptedCoupon(), (int)($cart['subtotal'] ?? 0), null, $cart['items'], $customerId ?: null)['free_shipping']) {
         $methods = array_map(static fn(array $method): array => ['price' => ShippingService::freeShippingPrice($method)] + $method, $methods);
     }
     $methods = CheckoutService::chargedQuote(['rates' => $methods], $vat, (string)($cart['currency'] ?? 'eur'))['rates'];
@@ -538,6 +538,23 @@ function apiPaymentMethods(): array {
         $methods = array_values(array_filter($methods, static fn(array $method): bool => ($method['service_type'] ?? '') !== 'cod'));
     }
     $methods = CheckoutService::chargedFees($methods, $vat);
+    // With the selected rate's price (?shipping=, in amount) each method also carries the shipping the order charges
+    // with it: cash on delivery adds the carrier's COD surcharge (kept under free shipping), and its fee is priced on that.
+    $shipping = !$digitalOnly && $shippingMethod !== '' && is_string($_GET['shipping'] ?? null) && $_GET['shipping'] !== ''
+        ? max(0, Security::int($_GET['shipping'])) : null;
+    if ($shipping !== null) {
+        $goods = max(0, $amount - $shipping);
+        $freeShipping = CheckoutService::discountPreview(CheckoutService::acceptedCoupon(), (int)($cart['subtotal'] ?? 0), null, $cart['items'], $customerId ?: null)['free_shipping'];
+        foreach ($methods as &$method) {
+            $method['shipping'] = $shipping;
+            if (($method['service_type'] ?? '') !== 'cod') continue;
+            $preview = CheckoutService::paymentPreview($cart['items'], $goods, $country, $currency, $shippingMethod, $shipping, $freeShipping, (string)$method['code'], $customerId ?: null, $vat);
+            if (($preview['selected']['code'] ?? null) !== $method['code']) continue;
+            $method['shipping'] = (int)$preview['shipping'];
+            $method['fee'] = (int)$preview['selected']['fee'];
+        }
+        unset($method);
+    }
 
     return [
         'country' => $country,
