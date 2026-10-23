@@ -9,6 +9,10 @@ Read before updating a live shop; run `php cli/migrate.php` after the files are 
 settings below that silently change behaviour (http webhooks, cart reminders without consent, the
 nginx PHP fallback when `operations.nginx_config` is set).
 
+- **VAT rates (2026-10-23)** — products with `vat_class` `books` or `medicines` now get each country's
+  own rate instead of its `reduced` class (e.g. IE books 0 %, IT/ES 4 %, FR 5.5 %, DE medicines 19 %).
+  FI reduced rate 13.5 % from 2026, LT 9 % rate replaced by 12 % / 5 % from 2026. Invoices already
+  issued keep their snapshot; new orders to those countries are priced with the new rates.
 - **Upgrading a released shop** (`docs/AI_UPDATE_RUNBOOK.md`)
   - v1.8.0: the trusted new release adopts the shop with `cli/update.php ... --installed=<shop root>`
     (no v1.9.0 package exists). Save the git-tracked v1.x `config.php` first, and move `db/`, `jobs/`

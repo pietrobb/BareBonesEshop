@@ -404,7 +404,7 @@ After the final report → the operator merges + tags `v1.8.0` + pushes autonomo
 - **MOSS vs OSS:** we use OSS (post-2021). No legacy mode.
 - **VIES SOAP:** if Nimbus/Soa fails — fall back to the VIES REST endpoint (since 2024). If both fail: `valid=false, unverified=true`, B2B falls back to B2C behavior (defensive — better that the customer pays VAT than that we wrongly grant reverse charge).
 - **Currency conversion in the OSS report:** in P0 we report **in the invoice currency** (EUR for the SK store, CZK for the CZ store). Conversion to EUR for the OSS return (a mandatory format) = P1.
-- **Ireland +0 % on e-books, France +5.5 %** etc. — `vat_class='reduced2'` in `vat-rates.json` handles it, but the per-product mapping (which book goes where) is a manual admin concern.
+- **Books and medicines per country** (IE 0 %, FR 5.5 %, IT/ES 4 %, ...) — `vat_class='books'`/`'medicines'` resolve through the country's `categories` in `vat-rates.json` (checked 2026-10-23, sources in `_sources`). Food, baby and transport aliases still use the country's `reduced` rate; products whose rate differs need an explicit class.
 - **Distance selling for digital before 2021:** ignored.
 - **B2B in the same country (SK→SK with a VAT ID):** normal rate, reverse charge does not apply (correct, under § 69 of the SK VAT Act; the rule is "a customer in another member state").
 
