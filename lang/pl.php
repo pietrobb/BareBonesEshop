@@ -214,6 +214,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'order_sent'       => 'Zamówienie zostało złożone',
     'order_num'        => 'Numer zamówienia',
     'order_email'      => 'Potwierdzenie wysłaliśmy na Twój e-mail.',
+    'order_done.payment_failed' => 'Nie udało się rozpocząć płatności. Zamówienie {order} zostało zapisane, ale nie jest opłacone i na razie go nie wyślemy. Napisz do nas: wyślemy nowy link do płatności lub zmienimy formę płatności.',
     'hero_title'       => 'Sauny i produkty z drewna',
     'shop_now'         => 'Kup teraz',
     'ph_from'          => 'od',

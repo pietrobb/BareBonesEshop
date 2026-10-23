@@ -214,6 +214,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'order_sent'       => 'Ihre Bestellung wurde aufgegeben',
     'order_num'        => 'Bestellnummer',
     'order_email'      => 'Eine Bestätigung wurde an Ihre E-Mail gesendet.',
+    'order_done.payment_failed' => 'Die Zahlung konnte nicht gestartet werden. Die Bestellung {order} ist gespeichert, aber nicht bezahlt und wird noch nicht versendet. Bitte schreiben Sie uns: Wir senden Ihnen einen neuen Zahlungslink oder ändern die Zahlungsart.',
     'hero_title'       => 'Sauna & Holzprodukte',
     'shop_now'         => 'Jetzt einkaufen',
     'ph_from'          => 'ab',

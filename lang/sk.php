@@ -214,6 +214,7 @@ return [
     'order_sent'       => 'Objednávka bola odoslaná',
     'order_num'        => 'Číslo objednávky',
     'order_email'      => 'Potvrdenie sme vám poslali e-mailom.',
+    'order_done.payment_failed' => 'Platbu sa nepodarilo spustiť. Objednávka {order} je uložená, ale nie je zaplatená a zatiaľ ju neodošleme. Napíšte nám, prosím: pošleme vám nový odkaz na platbu alebo zmeníme spôsob platby.',
     'hero_title'       => 'Sauna & Drevené výrobky',
     'shop_now'         => 'Nakupovať',
 

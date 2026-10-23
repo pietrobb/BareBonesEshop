@@ -1581,7 +1581,7 @@ final class InvoiceService
         $pdf->text(120, $y, $L['total_vat'] . ': ' . I18n::price((int)$invoice['total_vat'], $currency),
             ['size' => 9, 'align' => 'right', 'width' => 70]);
         $y += 5;
-        $pdf->text(120, $y, $L['total_gross'] . ': ' . I18n::price((int)$invoice['total_gross'], $currency),
+        $pdf->text(120, $y, ($creditNote ? $L['credit_total'] : $L['total_gross']) . ': ' . I18n::price((int)$invoice['total_gross'], $currency),
             ['size' => 11, 'bold' => true, 'align' => 'right', 'width' => 70]);
         $y += 8;
 
@@ -1615,12 +1615,13 @@ final class InvoiceService
         $ensureSpace(15);
         $pdf->text(20, $y, $L['payment_method'] . ': ' . ($invoice['payment_method'] ?: '—'), ['size' => 9]);
         $y += 5;
-        if (!empty($sellerSnap['iban'])) {
+        // A credit note is paid out by the seller: no seller IBAN to pay to. An invoice carries the variable
+        // symbol of the order's payment instructions, so a transfer made from either matches the same order.
+        if (!$creditNote && !empty($sellerSnap['iban'])) {
             $pdf->text(20, $y, $L['iban'] . ': ' . $sellerSnap['iban'], ['size' => 9]);
             $y += 5;
         }
-        $pdf->text(20, $y, $L['variable_symbol'] . ': ' . preg_replace('/\D/', '', (string)$invoice['number']),
-            ['size' => 9]);
+        $pdf->text(20, $y, $L['variable_symbol'] . ': ' . self::variableSymbol($invoice), ['size' => 9]);
         $y += 8;
 
         // Footer (register note)
@@ -1629,6 +1630,18 @@ final class InvoiceService
         }
 
         return $pdf->render();
+    }
+
+    /**
+     * Variable symbol printed on the document: an invoice repeats the order's bank-transfer symbol (the
+     * customer pays by it); a credit note has its own from its own number series, never one of an invoice.
+     */
+    public static function variableSymbol(array $invoice): string
+    {
+        if (($invoice['type'] ?? 'invoice') === 'credit_note') {
+            return substr((string)preg_replace('/\D/', '', (string)$invoice['number']), -10);
+        }
+        return BankTransferInstructions::variableSymbol(['id' => (int)$invoice['order_id']]);
     }
 
     private static function partyLines(array $p, array $L): array
@@ -1668,7 +1681,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Dodanie tovaru do iného členského štátu oslobodené od dane (čl. 138 smernice 2006/112/ES)', 'export_note_eu' => 'Vývoz tovaru oslobodený od dane (čl. 146 smernice 2006/112/ES)',
                 'reverse_charge_services_note' => 'Prenesenie daňovej povinnosti — daň odvádza príjemca služby (čl. 196 smernice 2006/112/ES)',
                 'credit_title' => 'Dobropis č.',
-                'refers_to' => 'Opravný doklad k faktúre č.',
+                'refers_to' => 'Opravný doklad k faktúre č.', 'credit_total' => 'Spolu dobropis',
                 'discount' => 'Zľava',
                 'payment_fee' => 'Poplatok za platbu',
                 'rounding' => 'Zaokrúhlenie',
@@ -1690,7 +1703,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Dodání zboží do jiného členského státu osvobozené od daně (čl. 138 směrnice 2006/112/ES)', 'export_note_eu' => 'Vývoz zboží osvobozený od daně (čl. 146 směrnice 2006/112/ES)',
                 'reverse_charge_services_note' => 'Daň odvede zákazník — přenesení daňové povinnosti (čl. 196 směrnice 2006/112/ES)',
                 'credit_title' => 'Dobropis č.',
-                'refers_to' => 'Opravný daňový doklad k faktuře č.',
+                'refers_to' => 'Opravný daňový doklad k faktuře č.', 'credit_total' => 'Celkem dobropis',
                 'discount' => 'Sleva',
                 'payment_fee' => 'Poplatek za platbu',
                 'rounding' => 'Zaokrouhlení',
@@ -1712,7 +1725,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Wewnątrzwspólnotowa dostawa towarów zwolniona z podatku (art. 138 dyrektywy 2006/112/WE)', 'export_note_eu' => 'Eksport towarów zwolniony z podatku (art. 146 dyrektywy 2006/112/WE)',
                 'reverse_charge_services_note' => 'Odwrotne obciążenie — podatek rozlicza nabywca (art. 196 dyrektywy 2006/112/WE)',
                 'credit_title' => 'Faktura korygująca nr',
-                'refers_to' => 'Korekta faktury nr',
+                'refers_to' => 'Korekta faktury nr', 'credit_total' => 'Razem korekta',
                 'discount' => 'Rabat',
                 'payment_fee' => 'Opłata za płatność',
                 'rounding' => 'Zaokrąglenie',
@@ -1734,7 +1747,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Adómentes Közösségen belüli termékértékesítés (2006/112/EK irányelv 138. cikk)', 'export_note_eu' => 'Adómentes termékexport (2006/112/EK irányelv 146. cikk)',
                 'reverse_charge_services_note' => 'Fordított adózás — az adót a vevő fizeti (2006/112/EK irányelv 196. cikk)',
                 'credit_title' => 'Helyesbítő számla sz.',
-                'refers_to' => 'Az alábbi számla helyesbítése:',
+                'refers_to' => 'Az alábbi számla helyesbítése:', 'credit_total' => 'Helyesbítés összesen',
                 'discount' => 'Kedvezmény',
                 'payment_fee' => 'Fizetési díj',
                 'rounding' => 'Kerekítés',
@@ -1756,7 +1769,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Steuerfreie innergemeinschaftliche Lieferung (Art. 138 MwStSystRL)', 'export_note_eu' => 'Steuerfreie Ausfuhrlieferung (Art. 146 MwStSystRL)',
                 'reverse_charge_services_note' => 'Steuerschuldnerschaft des Leistungsempfängers — Reverse Charge (Art. 196 MwStSystRL)',
                 'credit_title' => 'Rechnungskorrektur Nr.',
-                'refers_to' => 'Korrektur zur Rechnung Nr.',
+                'refers_to' => 'Korrektur zur Rechnung Nr.', 'credit_total' => 'Korrekturbetrag',
                 'discount' => 'Rabatt',
                 'payment_fee' => 'Zahlungsgebühr',
                 'rounding' => 'Rundung',
@@ -1777,7 +1790,7 @@ final class InvoiceService
                 'ico' => 'N.º de registro', 'dic' => 'NIF', 'ic_dph' => 'NIF-IVA',
                 'reverse_charge_note_eu' => 'Entrega intracomunitaria de bienes exenta (art. 138 Directiva 2006/112/CE)', 'export_note_eu' => 'Exportación de bienes exenta (art. 146 Directiva 2006/112/CE)',
                 'reverse_charge_services_note' => 'Inversión del sujeto pasivo (art. 196 Directiva 2006/112/CE)',
-                'credit_title' => 'Factura rectificativa n.º', 'refers_to' => 'Rectifica la factura n.º', 'discount' => 'Descuento',
+                'credit_title' => 'Factura rectificativa n.º', 'refers_to' => 'Rectifica la factura n.º', 'credit_total' => 'Total rectificado', 'discount' => 'Descuento',
                 'payment_fee' => 'Comisión de pago', 'rounding' => 'Redondeo', 'col_unit_net' => 'Precio unit. sin IVA', 'col_net_total' => 'Sin IVA',
             ],
             'en' => [
@@ -1794,7 +1807,7 @@ final class InvoiceService
                 'ico' => 'Company ID', 'dic' => 'Tax ID', 'ic_dph' => 'VAT ID',
                 'reverse_charge_services_note' => 'Reverse charge — VAT to be accounted for by the recipient (Article 196 of Directive 2006/112/EC)',
                 'credit_title' => 'Credit note No.',
-                'refers_to' => 'Corrects invoice No.',
+                'refers_to' => 'Corrects invoice No.', 'credit_total' => 'Total credited',
                 'discount' => 'Discount',
                 'payment_fee' => 'Payment fee',
                 'rounding' => 'Rounding',

@@ -214,6 +214,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'order_sent'       => 'Rendelését megkaptuk',
     'order_num'        => 'Rendelésszám',
     'order_email'      => 'A megerősítést e-mailben elküldtük.',
+    'order_done.payment_failed' => 'A fizetést nem sikerült elindítani. A(z) {order} rendelést rögzítettük, de nincs kifizetve, ezért egyelőre nem küldjük el. Kérjük, írjon nekünk: küldünk új fizetési linket, vagy módosítjuk a fizetési módot.',
     'hero_title'       => 'Szaunák és fatermékek',
     'shop_now'         => 'Vásároljon most',
     'ph_from'          => 'től',

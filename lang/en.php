@@ -214,6 +214,7 @@ return [
     'order_sent'       => 'Your order has been placed',
     'order_num'        => 'Order number',
     'order_email'      => 'A confirmation has been sent to your email.',
+    'order_done.payment_failed' => 'The payment could not be started. Order {order} is saved but not paid, so we will not ship it yet. Please write to us: we will send you a new payment link or change the payment method.',
     'hero_title'       => 'Sauna & Wooden Products',
     'shop_now'         => 'Shop Now',
     'ph_from'          => 'from',

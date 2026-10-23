@@ -184,6 +184,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'order_sent' => 'Su pedido se ha realizado',
     'order_num' => 'Número de pedido',
     'order_email' => 'Hemos enviado una confirmación a su correo.',
+    'order_done.payment_failed' => 'No se pudo iniciar el pago. El pedido {order} está guardado, pero no está pagado y todavía no lo enviaremos. Escríbanos: le enviaremos un nuevo enlace de pago o cambiaremos la forma de pago.',
     'hero_title' => 'Saunas y productos de madera',
     'shop_now' => 'Comprar ahora',
     'account.title' => 'Mi cuenta',

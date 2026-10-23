@@ -214,6 +214,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'order_sent'       => 'Objednávka byla odeslána',
     'order_num'        => 'Číslo objednávky',
     'order_email'      => 'Potvrzení jsme vám poslali e-mailem.',
+    'order_done.payment_failed' => 'Platbu se nepodařilo zahájit. Objednávka {order} je uložená, ale není zaplacená a zatím ji neodešleme. Napište nám prosím: pošleme vám nový odkaz k platbě nebo změníme způsob platby.',
     'hero_title'       => 'Sauna & Dřevěné výrobky',
     'shop_now'         => 'Nakupovat',
     'ph_from'          => 'od',

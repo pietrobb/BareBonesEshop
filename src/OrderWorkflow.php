@@ -206,7 +206,9 @@ class OrderWorkflow {
     private static function handlePaid(array $order): array {
         return [
             ['email_send', [
-                'template' => 'order_paid',
+                // Checkout confirms offline orders at once; an order paid online (card, gateway) or a free digital one
+                // gets its confirmation — seller identity, withdrawal form, terms — when the payment arrives.
+                'template' => self::confirmedAtPayment($order) ? 'order_confirmation' : 'order_paid',
                 'to'       => $order['customer_email'],
                 'locale'   => $order['locale'] ?? '',
                 'order_id' => $order['id'],
@@ -219,6 +221,12 @@ class OrderWorkflow {
                 'status'   => 'paid',
             ], 5],
         ];
+    }
+
+    /** True for orders checkout did not confirm by e-mail (see checkoutExecute): online payment or a free digital order. */
+    public static function confirmedAtPayment(array $order): bool {
+        $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true);
+        return !empty($snapshot['requires_online']) || ($order['payment_method'] ?? '') === 'free';
     }
 
     /**
