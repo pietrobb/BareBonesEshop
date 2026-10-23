@@ -3,12 +3,12 @@
 
     "methods": {
         "pickup": {
-            "name": {"en": "In-store pickup", "sk": "Osobný odber", "de": "Abholung im Laden"},
+            "name": {"en": "In-store pickup", "sk": "Osobný odber", "cs": "Osobní odběr", "de": "Abholung im Laden", "pl": "Odbiór osobisty", "hu": "Személyes átvétel", "es": "Recogida en tienda"},
             "price": 0,
             "available_zones": ["local"]
         },
         "standard": {
-            "name": {"en": "Standard Delivery", "sk": "Štandardné doručenie", "de": "Standardversand"},
+            "name": {"en": "Standard Delivery", "sk": "Štandardné doručenie", "cs": "Standardní doručení", "de": "Standardversand", "pl": "Dostawa standardowa", "hu": "Normál szállítás", "es": "Envío estándar"},
             "delivery_days": "5-7",
             "rates": {
                 "domestic":      {"base": 399, "per_kg": 0},
@@ -18,7 +18,7 @@
             "free_above": 5000
         },
         "express": {
-            "name": {"en": "Express Delivery", "sk": "Expresné doručenie", "de": "Expressversand"},
+            "name": {"en": "Express Delivery", "sk": "Expresné doručenie", "cs": "Expresní doručení", "de": "Expressversand", "pl": "Dostawa ekspresowa", "hu": "Expressz szállítás", "es": "Envío urgente"},
             "delivery_days": "1-2",
             "rates": {
                 "domestic": {"base": 799, "per_kg": 0},

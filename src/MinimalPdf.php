@@ -2,14 +2,11 @@
 /**
  * MinimalPdf — bare-bones PDF generator for invoices.
  *
- * Produces a valid single- or multi-page A4 PDF using built-in Helvetica
- * with /WinAnsiEncoding (CP1252) for Western European text. Characters
- * outside CP1252 (e.g. Polish ł, Hungarian ő, Czech ř) are transliterated
- * to their closest ASCII equivalent.
- *
- * For production-quality PDFs with full Unicode rendering (proper diakritika
- * for sk/cs/pl/hu), drop mPDF into vendor/mpdf/ — InvoiceService will detect
- * it and route through mPDF automatically. See vendor/mpdf/README.md.
+ * Produces a valid single- or multi-page A4 PDF using the built-in Helvetica fonts (nothing embedded).
+ * Text is encoded at render time: CP1252 characters keep their /WinAnsiEncoding byte, and the Latin
+ * Extended-A letters of sk/cs/pl/hu (č ř ů ő ű ł ą …) get free byte slots of this document through an
+ * /Encoding /Differences array with their standard glyph names, so invoices keep their diacritics
+ * ("Faktúra č.", not "Faktura c."). Only characters outside both sets are transliterated.
  *
  * Layout primitives:
  *   addPage()                   start a new page
@@ -22,7 +19,7 @@
  */
 final class MinimalPdf
 {
-    /** @var array<int,string> page content streams */
+    /** @var array<int,list<string|array{0:string,1:float,2:float,3:float,4:string}>> page content: drawing operators or text runs */
     private array $pages = [];
     private int $currentPage = -1;
 
@@ -30,31 +27,34 @@ final class MinimalPdf
     private const PAGE_H_MM = 297.0;
     private const MM_TO_PT  = 2.834645669; // 72 / 25.4
 
-    /** Latin-2 / extended chars not in CP1252 — transliterate to ASCII fallback. */
-    private const TRANSLITERATE = [
-        'ł' => 'l',  'Ł' => 'L',
-        'ő' => 'o',  'Ő' => 'O',
-        'ű' => 'u',  'Ű' => 'U',
-        'ř' => 'r',  'Ř' => 'R',
-        'ě' => 'e',  'Ě' => 'E',
-        'ů' => 'u',  'Ů' => 'U',
-        'ť' => 't',  'Ť' => 'T',
-        'ľ' => 'l',  'Ľ' => 'L',
-        'ŕ' => 'r',  'Ŕ' => 'R',
-        'ą' => 'a',  'Ą' => 'A',
-        'ę' => 'e',  'Ę' => 'E',
-        'ć' => 'c',  'Ć' => 'C',
-        'ń' => 'n',  'Ń' => 'N',
-        'ś' => 's',  'Ś' => 'S',
-        'ź' => 'z',  'Ź' => 'Z',
-        'ż' => 'z',  'Ż' => 'Z',
-        // "€" is in CP1252 (0x80): iconv converts it. Pre-mapping it to a raw 0x80 byte made the
-        // string invalid UTF-8, so iconv //IGNORE silently dropped the euro sign.
+    /** Standard glyph names of U+0100..U+017F (Latin Extended-A), in code point order. */
+    private const LATIN_EXT_A = [
+        'Amacron', 'amacron', 'Abreve', 'abreve', 'Aogonek', 'aogonek', 'Cacute', 'cacute', 'Ccircumflex',
+        'ccircumflex', 'Cdotaccent', 'cdotaccent', 'Ccaron', 'ccaron', 'Dcaron', 'dcaron', 'Dcroat', 'dcroat',
+        'Emacron', 'emacron', 'Ebreve', 'ebreve', 'Edotaccent', 'edotaccent', 'Eogonek', 'eogonek', 'Ecaron',
+        'ecaron', 'Gcircumflex', 'gcircumflex', 'Gbreve', 'gbreve', 'Gdotaccent', 'gdotaccent', 'Gcommaaccent',
+        'gcommaaccent', 'Hcircumflex', 'hcircumflex', 'Hbar', 'hbar', 'Itilde', 'itilde', 'Imacron', 'imacron',
+        'Ibreve', 'ibreve', 'Iogonek', 'iogonek', 'Idotaccent', 'dotlessi', 'IJ', 'ij', 'Jcircumflex', 'jcircumflex',
+        'Kcommaaccent', 'kcommaaccent', 'kgreenlandic', 'Lacute', 'lacute', 'Lcommaaccent', 'lcommaaccent', 'Lcaron',
+        'lcaron', 'Ldot', 'ldot', 'Lslash', 'lslash', 'Nacute', 'nacute', 'Ncommaaccent', 'ncommaaccent', 'Ncaron',
+        'ncaron', 'napostrophe', 'Eng', 'eng', 'Omacron', 'omacron', 'Obreve', 'obreve', 'Ohungarumlaut',
+        'ohungarumlaut', 'OE', 'oe', 'Racute', 'racute', 'Rcommaaccent', 'rcommaaccent', 'Rcaron', 'rcaron',
+        'Sacute', 'sacute', 'Scircumflex', 'scircumflex', 'Scedilla', 'scedilla', 'Scaron', 'scaron', 'Tcommaaccent',
+        'tcommaaccent', 'Tcaron', 'tcaron', 'Tbar', 'tbar', 'Utilde', 'utilde', 'Umacron', 'umacron', 'Ubreve',
+        'ubreve', 'Uring', 'uring', 'Uhungarumlaut', 'uhungarumlaut', 'Uogonek', 'uogonek', 'Wcircumflex',
+        'wcircumflex', 'Ycircumflex', 'ycircumflex', 'Ydieresis', 'Zacute', 'zacute', 'Zdotaccent', 'zdotaccent',
+        'Zcaron', 'zcaron', 'longs',
     ];
+
+    /** Spacing accents used on their own (e.g. "ˇ" in Czech typesetting). */
+    private const EXTRA_GLYPHS = ['ˇ' => 'caron', '˘' => 'breve', '˙' => 'dotaccent', '˛' => 'ogonek', '˝' => 'hungarumlaut'];
+
+    /** CP1252 bytes with no character: always free for /Differences. */
+    private const UNDEFINED_CP1252 = [0x81, 0x8D, 0x8F, 0x90, 0x9D];
 
     public function addPage(): void
     {
-        $this->pages[] = '';
+        $this->pages[] = [];
         $this->currentPage = count($this->pages) - 1;
     }
 
@@ -68,11 +68,8 @@ final class MinimalPdf
         $align = $opts['align'] ?? 'left';
         $width = isset($opts['width']) ? (float)$opts['width'] : null;
 
-        $font = $bold ? '/F2' : '/F1';
         $px = $x * self::MM_TO_PT;
         $py = (self::PAGE_H_MM - $y) * self::MM_TO_PT;
-
-        $encoded = $this->encodeText($str);
 
         if ($align !== 'left' && $width !== null) {
             $textWidth = $this->approxTextWidth($str, $size, $bold);
@@ -83,14 +80,7 @@ final class MinimalPdf
             }
         }
 
-        $this->pages[$this->currentPage] .= sprintf(
-            "BT %s %.2f Tf %.2f %.2f Td (%s) Tj ET\n",
-            $font,
-            $size,
-            $px,
-            $py,
-            $encoded
-        );
+        $this->pages[$this->currentPage][] = [$bold ? '/F2' : '/F1', $size, $px, $py, $str];
     }
 
     public function line(float $x1, float $y1, float $x2, float $y2, float $w = 0.2): void
@@ -98,7 +88,7 @@ final class MinimalPdf
         if ($this->currentPage < 0) {
             $this->addPage();
         }
-        $this->pages[$this->currentPage] .= sprintf(
+        $this->pages[$this->currentPage][] = sprintf(
             "%.2f w %.2f %.2f m %.2f %.2f l S\n",
             $w,
             $x1 * self::MM_TO_PT,
@@ -114,7 +104,7 @@ final class MinimalPdf
             $this->addPage();
         }
         $op = $fill ? 'f' : 'S';
-        $this->pages[$this->currentPage] .= sprintf(
+        $this->pages[$this->currentPage][] = sprintf(
             "%.2f %.2f %.2f %.2f re %s\n",
             $x * self::MM_TO_PT,
             (self::PAGE_H_MM - $y - $h) * self::MM_TO_PT,
@@ -129,6 +119,11 @@ final class MinimalPdf
         if (!$this->pages) {
             $this->addPage();
         }
+
+        [$slots, $differences] = $this->encodingFor($this->pages);
+        $encoding = $differences === ''
+            ? '/WinAnsiEncoding'
+            : "<< /Type /Encoding /BaseEncoding /WinAnsiEncoding /Differences [{$differences}] >>";
 
         $objects = [];
 
@@ -145,12 +140,19 @@ final class MinimalPdf
         $objects[] = "<< /Type /Pages /Kids [" . implode(' ', $kids) . "] /Count " . count($this->pages) . " >>";
 
         // Object 3: Helvetica
-        $objects[] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>";
+        $objects[] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding {$encoding} >>";
         // Object 4: Helvetica-Bold
-        $objects[] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>";
+        $objects[] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding {$encoding} >>";
 
         // Pages: each page = page-obj + content-obj
-        foreach ($this->pages as $i => $stream) {
+        foreach ($this->pages as $i => $items) {
+            $stream = '';
+            foreach ($items as $item) {
+                $stream .= is_string($item) ? $item : sprintf(
+                    "BT %s %.2f Tf %.2f %.2f Td (%s) Tj ET\n",
+                    $item[0], $item[1], $item[2], $item[3], $this->encodeText($item[4], $slots)
+                );
+            }
             $contentObjId = $pageObjStart + $i * 2 + 1;
             $pageObjId    = $pageObjStart + $i * 2;
             $w = self::PAGE_W_MM * self::MM_TO_PT;
@@ -179,27 +181,94 @@ final class MinimalPdf
         return $pdf;
     }
 
-    private function encodeText(string $s): string
+    /**
+     * Byte slots for the document's characters outside CP1252 and the matching /Differences entries.
+     * Slots come from undefined CP1252 bytes first, then from CP1252 characters the document never uses.
+     *
+     * @return array{0: array<string,int>, 1: string}
+     */
+    private function encodingFor(array $pages): array
     {
-        // Transliterate non-CP1252 chars to ASCII fallback.
-        $s = strtr($s, self::TRANSLITERATE);
-        // Convert UTF-8 → CP1252 (Windows-1252).
-        if (function_exists('iconv')) {
-            $cp = @iconv('UTF-8', 'CP1252//TRANSLIT//IGNORE', $s);
-            if ($cp !== false) {
-                $s = $cp;
+        $usedBytes = [];
+        $needed = [];
+        foreach ($pages as $items) {
+            foreach ($items as $item) {
+                if (is_string($item)) continue;
+                foreach (preg_split('//u', $item[4], -1, PREG_SPLIT_NO_EMPTY) ?: [] as $char) {
+                    if (strlen($char) === 1) continue;
+                    $cp = self::toCp1252($char);
+                    if ($cp !== null) $usedBytes[ord($cp)] = true;
+                    elseif (self::glyphName($char) !== null) $needed[$char] = true;
+                }
             }
-        } elseif (function_exists('mb_convert_encoding')) {
-            $s = mb_convert_encoding($s, 'CP1252', 'UTF-8');
+        }
+        if (!$needed) return [[], ''];
+
+        $free = self::UNDEFINED_CP1252;
+        for ($b = 0x80; $b <= 0xFF; $b++) {
+            if (!isset($usedBytes[$b]) && !in_array($b, self::UNDEFINED_CP1252, true) && $b !== 0xA0) $free[] = $b;
+        }
+        $slots = [];
+        $differences = [];
+        foreach (array_keys($needed) as $i => $char) {
+            if (!isset($free[$i])) break; // more than ~120 distinct extra letters: the rest is transliterated
+            $slots[$char] = $free[$i];
+            $differences[] = $free[$i] . ' /' . self::glyphName($char);
+        }
+        return [$slots, implode(' ', $differences)];
+    }
+
+    private static function toCp1252(string $char): ?string
+    {
+        // A lookup, not iconv(): iconv raises a notice for every unmappable letter, which an application error
+        // handler turns into an exception even under @.
+        static $map = null;
+        if ($map === null) {
+            $map = [];
+            for ($b = 0x80; $b <= 0xFF; $b++) {
+                if (in_array($b, self::UNDEFINED_CP1252, true)) continue;
+                $map[mb_convert_encoding(chr($b), 'UTF-8', 'Windows-1252')] = chr($b);
+            }
+        }
+        return $map[$char] ?? null;
+    }
+
+    private static function glyphName(string $char): ?string
+    {
+        if (isset(self::EXTRA_GLYPHS[$char])) return self::EXTRA_GLYPHS[$char];
+        $code = mb_ord($char, 'UTF-8');
+        return $code >= 0x100 && $code <= 0x17F ? self::LATIN_EXT_A[$code - 0x100] : null;
+    }
+
+    /** @param array<string,int> $slots */
+    private function encodeText(string $s, array $slots): string
+    {
+        $out = '';
+        foreach (preg_split('//u', $s, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $char) {
+            if (strlen($char) === 1) {
+                $out .= $char;
+            } elseif (isset($slots[$char])) {
+                $out .= chr($slots[$char]);
+            } elseif (($cp = self::toCp1252($char)) !== null) {
+                $out .= $cp;
+            } else {
+                set_error_handler(static fn(): bool => true); // see toCp1252(): no notice may escape
+                try {
+                    $ascii = function_exists('iconv') ? iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $char) : false;
+                } finally {
+                    restore_error_handler();
+                }
+                $out .= is_string($ascii) && $ascii !== '' ? $ascii : '?';
+            }
         }
         // Escape PDF string syntax.
-        return strtr($s, ['\\' => '\\\\', '(' => '\\(', ')' => '\\)', "\r" => '\\r', "\n" => '\\n']);
+        return strtr($out, ['\\' => '\\\\', '(' => '\\(', ')' => '\\)', "\r" => '\\r', "\n" => '\\n']);
     }
 
     private function approxTextWidth(string $s, float $sizePt, bool $bold): float
     {
         // Rough heuristic: avg char width = 0.5 × size pt for Helvetica.
         $factor = $bold ? 0.55 : 0.5;
-        return strlen($s) * $sizePt * $factor / self::MM_TO_PT;
+        return mb_strlen($s, 'UTF-8') * $sizePt * $factor / self::MM_TO_PT;
     }
 }

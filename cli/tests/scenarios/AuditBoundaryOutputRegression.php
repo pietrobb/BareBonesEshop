@@ -18,8 +18,11 @@ echo "\n--- Audit A10.3: invoice PDF euro/pagination, admin PDF + GDPR export tr
 // --- MinimalPdf: CP1252 encoding keeps the euro sign (0x80) next to other CP1252 characters. ---
 $a103Pdf = new MinimalPdf();
 $a103Pdf->text(20, 20, 'Cena: 12,50 € — Košeľa');
-preg_match('/\((Cena[^)]*)\) Tj/', $a103Pdf->render(), $a103M);
-assert_equals(bin2hex("Cena: 12,50 \x80 \x97 Ko\x9Ae\x6Ca"), bin2hex($a103M[1] ?? ''), 'A10.3 PDF: "€" is encoded as CP1252 0x80 (not dropped), other text intact');
+$a103Rendered = $a103Pdf->render();
+preg_match('/\((Cena[^)]*)\) Tj/', $a103Rendered, $a103M);
+// "ľ" is outside CP1252: R9 gives it the first undefined CP1252 byte (0x81) via /Differences instead of transliterating it to "l".
+assert_equals(bin2hex("Cena: 12,50 \x80 \x97 Ko\x9Ae\x81a"), bin2hex($a103M[1] ?? ''), 'A10.3 PDF: "€" is encoded as CP1252 0x80 (not dropped), other text intact');
+assert_true(str_contains($a103Rendered, '/Differences [129 /lcaron]'), 'A10.3 PDF: the extra letter "ľ" is mapped to its own glyph');
 
 // --- Long invoice: 60 lines paginate, every text baseline stays on the A4 page, nothing is lost. ---
 $a103Db = Db::get();
