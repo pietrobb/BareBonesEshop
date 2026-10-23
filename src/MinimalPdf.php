@@ -220,8 +220,17 @@ final class MinimalPdf
 
     private static function toCp1252(string $char): ?string
     {
-        $cp = function_exists('iconv') ? @iconv('UTF-8', 'CP1252', $char) : @mb_convert_encoding($char, 'CP1252', 'UTF-8');
-        return is_string($cp) && strlen($cp) === 1 && ($char === '?' || $cp !== '?') ? $cp : null;
+        // A lookup, not iconv(): iconv raises a notice for every unmappable letter, which an application error
+        // handler turns into an exception even under @.
+        static $map = null;
+        if ($map === null) {
+            $map = [];
+            for ($b = 0x80; $b <= 0xFF; $b++) {
+                if (in_array($b, self::UNDEFINED_CP1252, true)) continue;
+                $map[mb_convert_encoding(chr($b), 'UTF-8', 'Windows-1252')] = chr($b);
+            }
+        }
+        return $map[$char] ?? null;
     }
 
     private static function glyphName(string $char): ?string
@@ -243,7 +252,12 @@ final class MinimalPdf
             } elseif (($cp = self::toCp1252($char)) !== null) {
                 $out .= $cp;
             } else {
-                $ascii = function_exists('iconv') ? @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $char) : false;
+                set_error_handler(static fn(): bool => true); // see toCp1252(): no notice may escape
+                try {
+                    $ascii = function_exists('iconv') ? iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $char) : false;
+                } finally {
+                    restore_error_handler();
+                }
                 $out .= is_string($ascii) && $ascii !== '' ? $ascii : '?';
             }
         }
