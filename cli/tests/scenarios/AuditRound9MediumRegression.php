@@ -95,3 +95,35 @@ foreach ($r9lsDrivers as $r9lsDriver => $r9lsTarget) {
         }
     }
 }
+
+// Sitemap: each <url> repeats every store's hreflang alternate, so with several stores 50,000 URLs made 42-45 MB
+// parts, close to the 50 MB limit. Parts are now cut by size as well. A low byte limit on the suite catalog: every
+// part stays within it, and the parts together list exactly the URLs of the single sitemap, in order.
+$r9smBase = 'https://shop.example';
+$r9smUrls = static fn(string $xml): array => preg_match_all('~<url>.*?</url>~s', $xml, $m) ? $m[0] : [];
+$r9smFull = $r9smUrls(Sitemap::xml($r9smBase, 0));
+$r9smLargest = max(array_map('strlen', $r9smFull));
+$r9smLimit = 3 * $r9smLargest + 400;
+$r9smParts = [];
+try {
+    if (!method_exists(Sitemap::class, 'setMaxBytesForTesting')) throw new RuntimeException('no byte limit');
+    Sitemap::setMaxBytesForTesting($r9smLimit);
+    $r9smIndex = Sitemap::xml($r9smBase, 0);
+    $r9smCount = preg_match_all('~<sitemap><loc>~', $r9smIndex);
+    for ($r9smI = 1; $r9smI <= $r9smCount; $r9smI++) $r9smParts[$r9smI] = Sitemap::xml($r9smBase, $r9smI);
+    try {
+        Sitemap::xml($r9smBase, $r9smCount + 1);
+        $r9smBeyond = 'rendered';
+    } catch (OutOfRangeException) {
+        $r9smBeyond = 'out of range';
+    }
+} catch (RuntimeException $e) {
+    [$r9smIndex, $r9smCount, $r9smBeyond] = [$e->getMessage(), 0, ''];
+} finally {
+    if (method_exists(Sitemap::class, 'setMaxBytesForTesting')) Sitemap::setMaxBytesForTesting(null);
+}
+$r9smSizes = array_map('strlen', $r9smParts);
+assert_true(count($r9smFull) > 9 && str_contains($r9smIndex, '<sitemapindex') && $r9smCount >= 3 && max($r9smSizes ?: [PHP_INT_MAX]) <= $r9smLimit,
+    "R9 sitemap: past the byte limit /sitemap.xml is an index and every part stays within the limit ({$r9smLimit} B; parts: " . implode(', ', $r9smSizes) . ')');
+assert_equals([$r9smFull, 'out of range'], [array_merge(...array_map($r9smUrls, array_values($r9smParts ?: [''])) ), $r9smBeyond],
+    'R9 sitemap: the size-cut parts list exactly the URLs of the single sitemap, in order, and no part beyond the last');
