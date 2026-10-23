@@ -1133,7 +1133,7 @@ class GdprService {
                 }
                 if ($ownsTransaction) $db->commit();
             } catch (Throwable $e) {
-                if ($ownsTransaction && $db->inTransaction()) $db->rollBack();
+                if ($ownsTransaction && Db::transactionOpen($db)) Db::rollBackOpen($db);
                 throw $e;
             }
         } while (count($rows) === 1000);

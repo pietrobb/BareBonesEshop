@@ -106,8 +106,11 @@ $html = renderCheckout();
 echo 'R9HRESULT' . json_encode([
     'discount' => preg_match('~id="summary-discount">([^<]*)<~', $html, $m) ? $m[1] : null,
     'coupon' => preg_match('~name="coupon_code"[^>]*value="([^"]*)"~', $html, $m) ? $m[1] : null,
-]);
+]) . "\nR9HPAGE" . substr(preg_replace('~\s+~', ' ', strip_tags($html)), 0, 600);
 PHP);
+    // On Linux an earlier child process can have closed this database last and removed its -wal file, leaving this
+    // connection writing into the unlinked one: copy the rows into the database file so the child sees them.
+    $pdo->query('PRAGMA wal_checkpoint(TRUNCATE)')->fetchAll();
     $r9hProcess = proc_open([PHP_BINARY, $r9hRoot . '/reload.php', dirname(TEST_CLI_DIR), $testDbPath, json_encode((new ReflectionProperty(Pricing::class, 'config'))->getValue())],
         [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $r9hPipes);
     fclose($r9hPipes[0]);
@@ -118,9 +121,11 @@ PHP);
     @unlink($r9hRoot . '/reload.php');
     @rmdir($r9hRoot);
     $r9hAt = strrpos($r9hOut, 'R9HRESULT');
-    $r9hReload = $r9hAt === false ? null : json_decode(substr($r9hOut, $r9hAt + 9), true);
-    assert_equals(['discount' => I18n::price(-200, 'eur'), 'coupon' => 'R9HTEN'], $r9hReload,
-        'R9 coupon reload: the reloaded checkout shows the accepted coupon\'s discount and posts the code with the order (' . substr(trim(strip_tags($r9hAt === false ? $r9hOut : '')), 0, 300) . ')');
+    $r9hPage = $r9hAt === false ? '' : (string)strstr(substr($r9hOut, $r9hAt + 9), "\nR9HPAGE");
+    $r9hReload = $r9hAt === false ? null : json_decode(strstr(substr($r9hOut, $r9hAt + 9), "\nR9HPAGE", true) ?: '', true);
+    $r9hExpected = ['discount' => I18n::price(-200, 'eur'), 'coupon' => 'R9HTEN'];
+    assert_equals($r9hExpected, $r9hReload, 'R9 coupon reload: the reloaded checkout shows the accepted coupon\'s discount and posts the code with the order'
+        . ($r9hReload === $r9hExpected ? '' : ' (' . substr(trim(strip_tags($r9hAt === false ? $r9hOut : $r9hPage)), 0, 600) . ')'));
 } finally {
     Pricing::setConfig($r9hPricing);
     $_GET = [];
