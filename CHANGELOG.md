@@ -58,6 +58,13 @@ nginx PHP fallback when `operations.nginx_config` is set).
     PLN, HUF and USD sample stores sell nothing** until you give them price lists in their currency
     (or remove them). With no recorded price history in that currency, no prior price is struck through. `shipping.json` method
     names are shown in the shopper's language (`cs`, `pl`, `hu`, `es` names added).
+- **Round-9 payment readiness (2026-10-23)** — `setup.php doctor` and `staging-preflight.php` check the
+  provider of every active online payment method (`payment.provider.<code>`): an unknown provider, the
+  test gateway `mock`, or a shipped gateway (Stripe, PayU, GoPay, Comgate, ThePay) without its keys fails.
+  The checks `provider.payment` (doctor), `payment_adapter`, `stripe_secret_key`, `stripe_publishable_key`
+  and `stripe_webhook_secret` (preflight) are gone: they judged `provider_defaults.payment`, which
+  checkout does not charge through. **A fresh install now fails `payment.provider.stripe`** until the
+  sample card method gets Stripe keys or is switched off.
 - **VAT rates (2026-10-23)** — products with `vat_class` `books` or `medicines` now get each country's
   own rate instead of its `reduced` class (e.g. IE books 0 %, IT/ES 4 %, FR 5.5 %, DE medicines 19 %).
   FI reduced rate 13.5 % from 2026, LT 9 % rate replaced by 12 % / 5 % from 2026. Invoices already

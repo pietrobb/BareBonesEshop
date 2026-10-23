@@ -167,3 +167,26 @@ $r9otAdmin = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints
 $r9otAccount = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/AccountViewModel.php');
 assert_true(str_contains($r9otAdmin, 'Orders::totalLines($order)') && str_contains($r9otAccount, 'Orders::totalLines($order)') && I18n::tIn('admin.order.vat_included', 'sk') === 'Z toho DPH',
     'R9 order totals: the admin order detail and the customer\'s order page list these lines');
+
+// Doctor/preflight payments: doctor passed "Payment provider selected: stripe" for any provider_defaults value and the
+// preflight checked Stripe keys only when provider_defaults said stripe, although checkout charges through each active
+// method's provider. PaymentReadiness reports every active online method's provider and that provider's credentials.
+$r9prDb = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+$r9prDb->exec('CREATE TABLE payment_methods (store_id TEXT, code TEXT, provider TEXT, active INTEGER, requires_online INTEGER)');
+$r9prDb->exec("INSERT INTO payment_methods VALUES ('default', 'card', 'stripe', 1, 1), ('cz', 'payu', 'payu', 1, 1), ('cz', 'bnpl', 'acme', 1, 1),
+    ('default', 'gopay', 'gopay', 0, 1), ('default', 'bank_transfer', 'manual', 1, 0)");
+$r9prCfg = ['provider_defaults' => ['payment' => 'gopay'], 'stripe_secret_key' => 'sk_test_' . str_repeat('A1', 12), 'stripe_webhook_secret' => 'whsec_' . str_repeat('b2', 10),
+    'payu_pos_id' => '300746', 'payu_client_id' => '300746', 'payu_client_secret' => str_repeat('c', 32)];
+$r9prChecks = [];
+foreach (PaymentReadiness::checks($r9prDb, $r9prCfg) as [$r9prStatus, $r9prName, $r9prMessage]) $r9prChecks[$r9prName] = [$r9prStatus, $r9prMessage];
+assert_equals(['payment.provider.acme' => 'fail', 'payment.provider.payu' => 'fail', 'payment.provider.stripe' => 'pass'], array_map(static fn(array $c): string => $c[0], $r9prChecks),
+    'R9 payments readiness: one check per provider of the active online methods (inactive GoPay, offline manual and provider_defaults are not what checkout charges)');
+assert_true(str_contains($r9prChecks['payment.provider.payu'][1], 'payu_second_key') && !str_contains($r9prChecks['payment.provider.payu'][1], 'payu_pos_id')
+    && str_contains($r9prChecks['payment.provider.payu'][1], 'cz:payu') && str_contains($r9prChecks['payment.provider.acme'][1], 'Unknown payment provider acme'),
+    'R9 payments readiness: names the missing PayU key and the store method, and an unknown provider');
+$r9prKeyless = [];
+foreach (PaymentReadiness::checks($r9prDb, ['stripe_secret_key' => 'sk_test_...', 'stripe_webhook_secret' => ''] + $r9prCfg) as [$r9prStatus, $r9prName]) $r9prKeyless[$r9prName] = $r9prStatus;
+$r9prDb->exec('UPDATE payment_methods SET active = 0 WHERE requires_online = 1');
+assert_true($r9prKeyless['payment.provider.stripe'] === 'fail' && PaymentReadiness::checks($r9prDb, $r9prCfg)[0][0] === 'warn',
+    'R9 payments readiness: a placeholder Stripe key fails; with no online method it only warns that checkout is offline-only');
+$r9prDb = null;
