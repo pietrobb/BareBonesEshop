@@ -1,0 +1,32 @@
+version: 2
+# Actions are pinned to commit SHAs and images to digests; Dependabot bumps both (keeping the
+# version comment / tag) so the pins never go stale silently.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+
+  # Dependabot does not read `services.*.image` in workflow files: the redis/mysql/mariadb digests
+  # in .github/workflows/ci.yml are bumped by hand (README › Continuous integration).
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker-compose
+    directory: /deploy
+    schedule:
+      interval: weekly
+
+  # Dev/test tooling only (Playwright, Lighthouse, axe, ESLint); nothing ships to the shop.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      dev-tooling:
+        patterns: ['*']

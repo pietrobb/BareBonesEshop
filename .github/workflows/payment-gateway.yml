@@ -62,11 +62,13 @@ jobs:
     name: Stripe test-mode checkout (Chromium, WebKit iPhone, Firefox)
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    env:
-      E2E_STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+    # The Stripe key is passed only to the steps that need it (never to npm/npx installs, whose
+    # dependency scripts could read the environment); prepare.php writes it into the runtime config.
 
     steps:
       - name: Require the Stripe test key
+        env:
+          E2E_STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
         run: |
           if [ -z "$E2E_STRIPE_TEST_SECRET_KEY" ]; then
             echo "::error::Repository secret STRIPE_TEST_SECRET_KEY (sk_test_... or rk_test_...) is missing; the real gateway path is unproven."
@@ -94,13 +96,14 @@ jobs:
 
       - name: Install Playwright browsers
         run: |
-          npm ci
+          npm ci --ignore-scripts
           npx playwright install --with-deps chromium webkit firefox
 
       - name: Prepare disposable SQLite application with the Stripe test key
         env:
           E2E_RUNTIME_DIR: /tmp/barebones-e2e-stripe
           E2E_STATE_PATH: /tmp/barebones-e2e-stripe-state.json
+          E2E_STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
           BBE_ADMIN_IDENTITY_KEY: RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU=
         run: |
           php tests/e2e/prepare.php

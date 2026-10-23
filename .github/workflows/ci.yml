@@ -18,12 +18,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.1', '8.2', '8.3', '8.4']
+        php: ['8.1', '8.2', '8.3', '8.4', '8.5']
 
     # RedisQueue's Lua claim/lease scripts run against a real server here (AuditRedisQueueRegression).
     services:
       redis:
-        image: redis:7
+        image: redis:7@sha256:44960b3100c48159a66d28c18b0588c193492e25f7551d60e51dd464fc3eca5b
         ports:
           - 6379:6379
         options: >-
@@ -212,7 +212,7 @@ jobs:
           retention-days: 7
 
   database-qualification:
-    name: Application & updater (${{ matrix.database }})
+    name: Application & updater (${{ matrix.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 40
 
@@ -220,9 +220,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - database: mysql:8.0
+          # Supported LTS lines (MySQL 8.0 reached end of life in April 2026). Dependabot does not read service images:
+          # refresh these digests (and redis above) by hand, e.g. `docker buildx imagetools inspect mysql:8.4`.
+          - name: mysql:8.4
+            database: mysql:8.4@sha256:76f0358884cb92d9a086d24e5671c38048d3fef40f2588703d73eb55392d6b69
             health_command: mysqladmin ping -h 127.0.0.1 -pupdate-root --silent
-          - database: mariadb:11.4
+          - name: mariadb:11.4
+            database: mariadb:11.4@sha256:250e1609e93c0e6aecf64bfbab2d84d5e89d2481540fe77447ff6c855c3b1873
             health_command: healthcheck.sh --connect --innodb_initialized
 
     services:

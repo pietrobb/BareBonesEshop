@@ -531,12 +531,17 @@ production path. Backups, migrations, and CLI tools live under `cli/`.
 
 `.github/workflows/ci.yml` runs on every push and pull request:
 
-- `php -l` on every tracked PHP file and the full `cli/test.php` suite on PHP **8.1 / 8.2 / 8.3 / 8.4**
+- `php -l` on every tracked PHP file and the full `cli/test.php` suite on PHP **8.1 / 8.2 / 8.3 / 8.4 / 8.5**
   against a Redis service (live Redis queue tests), plus the static-analysis, i18n-parity and quality gates;
 - PHPStan level 5 against `phpstan-baseline.neon` (run it locally exactly like CI with `cli/phpstan.sh`);
-- the application, parity and updater suite on **MySQL 8.0** and **MariaDB 11.4** with a least-privilege user;
+- the application, parity and updater suite on **MySQL 8.4 LTS** and **MariaDB 11.4 LTS** with a least-privilege user;
 - Playwright e2e (Chromium, WebKit iPhone, Firefox) with axe WCAG 2.2 AA checks and Lighthouse budgets;
 - a Docker image build smoke test.
+
+Third-party actions are pinned to commit SHAs and container images (CI services, `deploy/Dockerfile`,
+`deploy/docker-compose.yml`) to digests. `.github/dependabot.yml` proposes weekly updates for actions,
+the deploy images and npm; Dependabot does not read workflow `services:` images, so refresh the
+redis/mysql/mariadb digests in `ci.yml` by hand (`docker buildx imagetools inspect mysql:8.4`).
 
 `.github/workflows/payment-gateway.yml` runs the real Stripe test-mode checkout when test keys are configured.
 
