@@ -215,6 +215,10 @@ promotion choices are copied into each cart/order item's `_pricing` snapshot; th
 existing financial snapshot remains the authority for totals and tax.
 
 DB price lists take precedence over the legacy `pricing.json` group fallback.
+A store whose currency differs from its shared catalog's (the sample CZK store on
+the EUR catalog) sells a product in its own currency once one of its price lists
+in that currency prices the product (Admin → Price lists); unpriced products stay
+in the catalog currency, and a cart holds one currency.
 Promotion priority is deterministic; `exclusive` stops after the first applied
 rule and `stack` continues in priority order. Supported cart actions include fixed
 or basis-point discounts, free shipping, buy-X-get-Y, and explicit gift
