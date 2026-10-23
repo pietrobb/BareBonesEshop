@@ -672,11 +672,13 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     $cart = Cart::enriched($vatContext);
     if (empty($cart['items'])) return checkoutRefusal('cart_empty');
     $availableItems = array_values(array_filter($cart['items'], static fn(array $item): bool => $item['available'] ?? true));
-    if (empty($availableItems)) return checkoutRefusal('checkout.error.no_available_items');
     // One order is charged in one currency; a mixed cart is refused, never summed into the first line's currency.
-    if (count(array_unique(array_map(static fn(array $item): string => strtolower((string)($item['currency'] ?? 'eur')), $availableItems))) > 1) {
+    // A line not priced in the store's currency counts too: refused, never silently left out of the order.
+    $pricedItems = array_filter($cart['items'], static fn(array $item): bool => ($item['available'] ?? true) || ($item['unavailable_reason'] ?? null) === Cart::UNAVAILABLE_CURRENCY);
+    if (count(array_unique(array_map(static fn(array $item): string => strtolower((string)($item['currency'] ?? 'eur')), $pricedItems))) > 1) {
         return checkoutRefusal('checkout.error.mixed_currency', 422);
     }
+    if (empty($availableItems)) return checkoutRefusal('checkout.error.no_available_items');
     $cart['items'] = $availableItems;
     $cart['subtotal'] = array_sum(array_column($availableItems, 'total'));
     $digitalOnly = cartIsDigitalOnly($availableItems);

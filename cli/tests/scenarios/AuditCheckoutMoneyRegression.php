@@ -27,10 +27,13 @@ $a062Checkout = static function(array $productIds, string $ip) use ($pdo): array
 [$a062Mixed, $a062Created] = $a062Checkout([9621, 9622], '127.0.6.21');
 assert_true(empty($a062Mixed['success']), 'A06.2 currency: checkout with EUR and HUF lines is refused (' . ($a062Mixed['error'] ?? 'accepted') . ')');
 assert_equals(0, $a062Created, 'A06.2 currency: refused mixed cart creates no order');
-[$a062Single, $a062Created] = $a062Checkout([9622], '127.0.6.22');
+// R9: the EUR store sells only in euros (Pricing::soldInStore), so the forint guide alone is not for sale here either.
+[$a062Foreign, $a062Created] = $a062Checkout([9622], '127.0.6.23');
+assert_true(empty($a062Foreign['success']) && $a062Created === 0, 'A06.2 currency: a cart of a forint item in the euro store is refused (' . ($a062Foreign['error'] ?? 'accepted') . ')');
+[$a062Single, $a062Created] = $a062Checkout([9621], '127.0.6.22');
 $a062Order = Orders::byId((int)($a062Single['order_id'] ?? 0)) ?: ['id' => (int)$pdo->query('SELECT MAX(id) FROM orders')->fetchColumn()];
 assert_true(!empty($a062Single['success']) && $a062Created === 1, 'A06.2 currency: single-currency cart still checks out (' . ($a062Single['error'] ?? 'ok') . ')');
-assert_equals(['huf', 50000], [(string)($a062Order['currency'] ?? ''), (int)($a062Order['subtotal'] ?? 0)], 'A06.2 currency: order uses the cart currency and amount');
+assert_equals(['eur', 50000], [(string)($a062Order['currency'] ?? ''), (int)($a062Order['subtotal'] ?? 0)], 'A06.2 currency: order uses the cart currency and amount');
 Cart::clear();
 JobQueue::pull(500);
 

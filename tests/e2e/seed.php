@@ -64,6 +64,13 @@ AdminIdentity::grantStore($managerId, 'cz', ['*']);
 $managerEnrollment = AdminIdentity::enrollTotp($managerId);
 AdminIdentity::setStatus($managerId, 'active');
 
+// The cz store sells the shared EUR catalog only at CZK prices (Pricing::soldInStore): price every product there.
+$db->exec("INSERT INTO price_lists (store_id, code, name, currency, customer_group_id, priority, active) VALUES ('cz', 'e2e-czk', 'E2E CZK', 'CZK', NULL, 0, 1)");
+$czkList = (int)$db->lastInsertId();
+$czkRow = $db->prepare('INSERT INTO price_list_prices (price_list_id, product_id, variant_id, min_qty, price) VALUES (?, ?, NULL, 1, ?)');
+foreach ($db->query("SELECT id, price FROM products WHERE status='active'")->fetchAll(PDO::FETCH_ASSOC) as $priced) {
+    $czkRow->execute([$czkList, (int)$priced['id'], max(100, (int)round((int)$priced['price'] * 25 / 100) * 100)]);
+}
 $db->exec("UPDATE payment_methods SET provider='mock' WHERE code='card'");
 // With a Stripe test key, a second card method creates real Stripe test-mode Checkout sessions.
 $stripeKey = (string)($config['stripe_secret_key'] ?? '');
