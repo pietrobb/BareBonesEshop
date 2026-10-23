@@ -1012,7 +1012,7 @@ function apiWebhookStripe(): array {
         return ['error' => 'Webhook not configured'];
     }
 
-    if (!verifyStripeSignature($payload, $sigHeader, $secret)) {
+    if (!(new StripePayment(['stripe_webhook_secret' => (string)$secret]))->verifySignature((string)$payload, (string)$sigHeader)) {
         http_response_code(400);
         return ['error' => 'Invalid signature'];
     }
@@ -1199,32 +1199,6 @@ function applyStripeDisputeCreated(array $dispute, string $paymentIntent, int $o
         );
     }
     FulfillmentDispatcher::queue('disputed', $order);
-}
-
-if (!function_exists('verifyStripeSignature')) {
-function verifyStripeSignature(string $payload, string $sigHeader, string $secret): bool {
-    if (strlen($secret) < 16 || trim($secret) !== $secret) return false;
-
-    $timestamp = '';
-    $signatures = [];
-    foreach (explode(',', $sigHeader) as $part) {
-        [$key, $value] = explode('=', trim($part), 2) + [1 => ''];
-        if ($key === 't') {
-            if ($timestamp !== '' && $timestamp !== $value) return false;
-            $timestamp = $value;
-        } elseif ($key === 'v1' && $value !== '') {
-            $signatures[] = strtolower($value);
-        }
-    }
-    if ($timestamp === '' || !ctype_digit($timestamp) || !$signatures) return false;
-    if (abs(time() - (int)$timestamp) > 300) return false;
-
-    $expected = hash_hmac('sha256', $timestamp . '.' . $payload, $secret);
-    foreach ($signatures as $signature) {
-        if (hash_equals($expected, $signature)) return true;
-    }
-    return false;
-}
 }
 
 // ============================================================
