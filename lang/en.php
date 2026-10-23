@@ -98,6 +98,8 @@ return [
     'complaint.defect_required' => 'Please describe the defect.',
     'complaint.remedy_required' => 'Please choose a remedy.',
     'complaint.no_items' => 'Please choose the defective product.',
+    'complaint.already_open' => 'We are already handling a complaint about this product; we will e-mail you the decision.',
+    'complaint.too_many' => 'Several complaints have already been filed for this order today. Please file the next one tomorrow or write to us by e-mail.',
     'complaint.remedy.repair' => 'Repair',
     'complaint.remedy.replacement' => 'Replacement',
     'complaint.remedy.price_reduction' => 'Price reduction',

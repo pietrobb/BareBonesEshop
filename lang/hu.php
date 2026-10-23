@@ -98,6 +98,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'complaint.defect_required' => 'Kérjük, írja le a hibát.',
     'complaint.remedy_required' => 'Kérjük, válassza ki a kért megoldást.',
     'complaint.no_items' => 'Kérjük, válassza ki a hibás terméket.',
+    'complaint.already_open' => 'Ezzel a termékkel kapcsolatos szavatossági igényét már intézzük; a döntést e-mailben küldjük.',
+    'complaint.too_many' => 'Ehhez a rendeléshez ma már több igényt nyújtottak be. A következőt holnap nyújtsa be, vagy írjon nekünk e-mailt.',
     'complaint.remedy.repair' => 'Javítás',
     'complaint.remedy.replacement' => 'Csere',
     'complaint.remedy.price_reduction' => 'Árleszállítás',

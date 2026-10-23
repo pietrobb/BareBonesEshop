@@ -85,6 +85,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'complaint.defect_required' => 'Describa el defecto.',
     'complaint.remedy_required' => 'Elija la solución solicitada.',
     'complaint.no_items' => 'Elija el producto defectuoso.',
+    'complaint.already_open' => 'Ya estamos tramitando una reclamación sobre este producto; le enviaremos la decisión por correo electrónico.',
+    'complaint.too_many' => 'Hoy ya se han presentado varias reclamaciones para este pedido. Presente la siguiente mañana o escríbanos por correo electrónico.',
     'complaint.remedy.repair' => 'Reparación',
     'complaint.remedy.replacement' => 'Sustitución',
     'complaint.remedy.price_reduction' => 'Rebaja del precio',

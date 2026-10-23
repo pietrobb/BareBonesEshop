@@ -31,7 +31,7 @@ function renderComplaint(): string {
                     $view['show_form'] = false;
                 }
             }
-            if ($refusal === null || in_array($refusal, ['defect_required', 'remedy_required', 'no_items'], true)) {
+            if ($refusal === null || in_array($refusal, ['defect_required', 'remedy_required', 'no_items', 'already_open'], true)) {
                 if ($view['done'] === '') {
                     $view['details'] = true;
                     $view['show_form'] = false;

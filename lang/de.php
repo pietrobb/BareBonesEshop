@@ -98,6 +98,8 @@ return array_replace(require __DIR__ . '/en.php', [
     'complaint.defect_required' => 'Bitte beschreiben Sie den Mangel.',
     'complaint.remedy_required' => 'Bitte wählen Sie die gewünschte Abhilfe.',
     'complaint.no_items' => 'Bitte wählen Sie das mangelhafte Produkt.',
+    'complaint.already_open' => 'Eine Reklamation zu diesem Produkt bearbeiten wir bereits; die Entscheidung erhalten Sie per E-Mail.',
+    'complaint.too_many' => 'Zu dieser Bestellung wurden heute bereits mehrere Reklamationen eingereicht. Bitte reichen Sie die nächste morgen ein oder schreiben Sie uns eine E-Mail.',
     'complaint.remedy.repair' => 'Reparatur',
     'complaint.remedy.replacement' => 'Ersatzlieferung',
     'complaint.remedy.price_reduction' => 'Minderung',

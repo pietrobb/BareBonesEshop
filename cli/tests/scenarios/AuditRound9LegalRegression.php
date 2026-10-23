@@ -159,3 +159,74 @@ $pdo->exec("DELETE FROM orders WHERE order_number LIKE 'R9L-%'");
 $pdo->exec("DELETE FROM products WHERE sku LIKE 'R9L-%'");
 $pdo->exec("DELETE FROM customers WHERE email LIKE 'r9l-%'");
 $pdo->exec("DELETE FROM companies WHERE code LIKE 'r9l-%'");
+
+// 5. Complaints: the account's returns section no longer calls a return a complaint (sk/cs), the confirmation e-mail
+//    sends the consumer to the complaint form (there is no complaint function in the account), and an order cannot be
+//    used to flood its own address with complaint e-mails from the shop.
+foreach (['sk', 'cs'] as $r9lLang) {
+    $r9lStrings = require TEST_CLI_DIR . '/../lang/' . $r9lLang . '.php';
+    assert_true(!str_contains(mb_strtolower($r9lStrings['account.submit_return'] . ' ' . $r9lStrings['account.no_returns']), 'reklam'),
+        "R9 complaint: the {$r9lLang} account return button and empty list say return, not complaint");
+}
+$r9lInAccount = [];
+foreach (['sk', 'cs', 'en', 'de', 'pl', 'hu', 'es'] as $r9lLang) {
+    $r9lMail = (string)file_get_contents(TEST_CLI_DIR . "/../templates/emails/{$r9lLang}/order_confirmation.html");
+    if (!str_contains($r9lMail, '<a href="{{complaint_url}}">') || preg_match('~vo svojom účte|ve svém účtu|in your account|in Ihrem Konto|w koncie|a fiókjában|en su cuenta~u', $r9lMail)) $r9lInAccount[] = $r9lLang;
+}
+assert_equals([], $r9lInAccount, 'R9 complaint: every order confirmation links the complaint form instead of a complaint function in the account');
+assert_true(str_ends_with(ConsumerNotice::mailVars(['order_number' => 'X', 'store_id' => 'default'])['complaint_url'] ?? '', '?page=complaint'),
+    'R9 complaint: the confirmation e-mail gets the absolute complaint form URL');
+
+(require TEST_CLI_DIR . '/../migrations/20261022100000_complaints.php')->up($pdo, Db::isSqlite());
+$pdo->prepare("INSERT INTO orders (order_number, status, payment_status, customer_name, customer_email, payment_method, subtotal, total, currency, store_id, locale, created_at, delivered_at)
+    VALUES ('R9L-REK', 'delivered', 'paid', 'R9L Buyer', 'r9l-rek@example.test', 'card', 3000, 3000, 'eur', 'default', 'sk', ?, ?)")
+    ->execute([gmdate('Y-m-d H:i:s', time() - 30 * 86400), gmdate('Y-m-d H:i:s', time() - 20 * 86400)]);
+$r9lRekOrder = Orders::byId((int)$pdo->lastInsertId());
+$r9lLines = [];
+foreach (['A', 'B', 'C', 'D', 'E'] as $r9lName) {
+    $pdo->prepare("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total) VALUES (?, ?, ?, ?, 1, 600, 600)")
+        ->execute([(int)$r9lRekOrder['id'], (int)$pdo->query('SELECT id FROM products ORDER BY id LIMIT 1')->fetchColumn(), 'R9L-' . $r9lName, 'R9L line ' . $r9lName]);
+    $r9lLines[$r9lName] = (int)$pdo->lastInsertId();
+}
+$r9lSubmit = static fn(string $line): array => Complaints::submit($r9lRekOrder, $r9lLines[$line], 'R9L Buyer', 'Broken', 'repair');
+assert_equals([null, 'already_open', null, null, 'too_many'],
+    [$r9lSubmit('A')['error'], $r9lSubmit('A')['error'], $r9lSubmit('B')['error'], $r9lSubmit('C')['error'], $r9lSubmit('D')['error']],
+    'R9 complaint: one open complaint per line, and at most ' . Complaints::MAX_PER_ORDER_PER_DAY . ' new complaints per order a day');
+assert_equals(3, (int)$pdo->query("SELECT COUNT(*) FROM complaints WHERE order_number = 'R9L-REK'")->fetchColumn(),
+    'R9 complaint: refused attempts record nothing');
+$pdo->exec("UPDATE complaints SET status = 'rejected', received_at = '2000-01-01 00:00:00' WHERE order_number = 'R9L-REK'");
+assert_equals([null, null], [$r9lSubmit('A')['error'], $r9lSubmit('E')['error']],
+    'R9 complaint: a decided line can be complained about again, and the daily cap counts only the last 24 hours');
+foreach (['sk', 'cs', 'en', 'de', 'pl', 'hu', 'es'] as $r9lLang) {
+    $r9lStrings = require TEST_CLI_DIR . '/../lang/' . $r9lLang . '.php';
+    assert_true(($r9lStrings['complaint.already_open'] ?? '') !== '' && ($r9lStrings['complaint.too_many'] ?? '') !== '', "R9 complaint: the refusals are translated ({$r9lLang})");
+}
+$pdo->exec("DELETE FROM complaints WHERE order_number = 'R9L-REK'");
+$pdo->exec("DELETE FROM order_items WHERE order_id = " . (int)$r9lRekOrder['id']);
+$pdo->exec("DELETE FROM orders WHERE id = " . (int)$r9lRekOrder['id']);
+
+// 6. The order confirmation's legal information must stay where the customer sees it: an override hiding it in a
+//    comment, a hidden element (attribute, inline style, a class a <style> rule hides) or leaving it out of a custom
+//    text part is refused like deleting it.
+$r9lLocale = I18n::locale();
+I18n::setLocale('en');
+$r9lLegal = '{{seller_name}}, {{seller_address}} <a href="{{withdrawal_url}}">withdraw</a> <a href="{{terms_url}}">terms</a>';
+$r9lRequiredPrefix = (string)strtok(I18n::t('admin.email.msg.required_vars'), '{');
+$r9lRefused = static fn(string $html, string $text = ''): bool => array_filter(EmailTemplates::validate('order_confirmation', 'Order {{order_number}}', $html, $text),
+    static fn(string $e): bool => str_starts_with($e, $r9lRequiredPrefix)) !== [];
+assert_equals(
+    ['visible' => false, 'nested visible' => false, 'comment' => true, 'display:none' => true, 'hidden attribute' => true, 'font-size:0' => true,
+     'style class' => true, 'hidden parent' => true, 'head' => true, 'text part without' => true, 'text part with' => false],
+    ['visible' => $r9lRefused('<p>' . $r9lLegal . '</p>'),
+     'nested visible' => $r9lRefused('<div style="display:none"><p>x</p></div><table><tr><td><p>' . $r9lLegal . '</p></td></tr></table>'),
+     'comment' => $r9lRefused('<p>Thanks</p><!-- ' . $r9lLegal . ' -->'),
+     'display:none' => $r9lRefused('<div style="color:#111; display: none">' . $r9lLegal . '</div>'),
+     'hidden attribute' => $r9lRefused('<p hidden>' . $r9lLegal . '</p>'),
+     'font-size:0' => $r9lRefused('<span style="font-size:0px">' . $r9lLegal . '</span>'),
+     'style class' => $r9lRefused('<style>.small, .fine { display:none }</style><p class="note fine">' . $r9lLegal . '</p>'),
+     'hidden parent' => $r9lRefused('<div style="visibility:hidden"><table><tr><td>' . $r9lLegal . '</td></tr></table></div>'),
+     'head' => $r9lRefused('<html><head><title>' . $r9lLegal . '</title></head><body>Thanks</body></html>'),
+     'text part without' => $r9lRefused('<p>' . $r9lLegal . '</p>', 'Thanks for your order {{order_number}}.'),
+     'text part with' => $r9lRefused('<p>' . $r9lLegal . '</p>', "Seller: {{seller_name}}, {{seller_address}}\nWithdraw: {{withdrawal_url}}\nTerms: {{terms_url}}")],
+    'R9 e-mail legal variables: only visible placement counts, in the HTML and in a custom text part');
+I18n::setLocale($r9lLocale);

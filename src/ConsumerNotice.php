@@ -86,6 +86,7 @@ final class ConsumerNotice {
             'withdrawal_days' => (string)self::WITHDRAWAL_DAYS, 'liability_months' => (string)self::LIABILITY_MONTHS,
             'withdrawal_url' => self::absoluteUrl('/?page=withdrawal&order=' . rawurlencode((string)($order['order_number'] ?? ''))),
             'terms_url' => self::absoluteUrl('/?page=terms'),
+            'complaint_url' => self::absoluteUrl('/?page=complaint'),
         ];
     }
 
