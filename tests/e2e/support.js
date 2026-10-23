@@ -72,13 +72,13 @@ function totp(secret, step) {
   return String(value).padStart(6, '0');
 }
 
-async function adminSignIn(page) {
+async function adminSignIn(page, account = state.admin) {
   await page.goto('/admin.php');
-  await page.locator('input[name="admin_username"]').fill(state.admin.username);
-  await page.locator('input[name="admin_password"]').fill(state.admin.password);
-  await page.locator('input[name="admin_mfa"]').fill(totp(state.admin.secret, await freshTotpStep()));
+  await page.locator('input[name="admin_username"]').fill(account.username);
+  await page.locator('input[name="admin_password"]').fill(account.password);
+  await page.locator('input[name="admin_mfa"]').fill(totp(account.secret, await freshTotpStep()));
   await page.locator('button[type="submit"]').click();
-  await expect(page.locator('nav')).toContainText(state.admin.username);
+  await expect(page.locator('nav')).toContainText(account.username);
 }
 
 module.exports = { test, expect, state, adminSignIn };
