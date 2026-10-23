@@ -32,11 +32,11 @@ class Promotions {
         $at ??= gmdate('Y-m-d H:i:s');
         $since = gmdate('Y-m-d H:i:s', (strtotime($at . ' UTC') ?: time()) - 365 * 86400);
         $store = StoreContext::current()->id();
-        $sql = "SELECT id, code, scope, priority, stacking, conditions, actions, valid_from, valid_to, 0 AS archived FROM promotions
+        $sql = "SELECT id, code, scope, priority, stacking, conditions, actions, valid_from, valid_to, 0 AS archived, created_at, updated_at FROM promotions
             WHERE store_id = :store AND scope = 'catalog' AND active = 1
               AND (valid_from IS NULL OR valid_from <= :at_from)
               AND (valid_to IS NULL OR valid_to >= :since)";
-        $runs = " UNION ALL SELECT promotion_id, code, scope, priority, stacking, conditions, actions, valid_from, valid_to, 1 FROM promotion_runs
+        $runs = " UNION ALL SELECT promotion_id, code, scope, priority, stacking, conditions, actions, valid_from, valid_to, 1, NULL, NULL FROM promotion_runs
             WHERE store_id = :run_store AND scope = 'catalog' AND (valid_from IS NULL OR valid_from <= :run_at) AND valid_to >= :run_since";
         $params = [':store' => $store, ':at_from' => $at, ':since' => $since];
         try {
@@ -64,12 +64,14 @@ class Promotions {
     }
 
     /**
-     * Lowest price the ended rules charged for this product in the 30 days before $start (one rule at a time, and
-     * all of them together for rules that stacked), or null when none of them ran then or reduced it.
+     * Lowest price the ended rules charged for this product in the 30 days before the reduction began (one rule at a
+     * time, and all of them together for rules that stacked), or null when none of them ran then or reduced it. A
+     * reduction whose start is only known to lie between $start and $latestStart counts every rule that ran before
+     * $latestStart and ended in the 30 days before $start.
      */
-    public static function lowestEndedPrice(array $product, array $endedRules, ?array $profile, int $start): ?int {
+    public static function lowestEndedPrice(array $product, array $endedRules, ?array $profile, int $start, ?int $latestStart = null): ?int {
         $since = gmdate('Y-m-d H:i:s', $start - PriceHistory::WINDOW_DAYS * 86400);
-        $startAt = gmdate('Y-m-d H:i:s', $start);
+        $startAt = gmdate('Y-m-d H:i:s', max($start, $latestStart ?? $start));
         $inWindow = array_values(array_filter($endedRules, static fn(array $rule): bool => (string)$rule['valid_to'] >= $since
             && ($rule['valid_from'] === null || (string)$rule['valid_from'] < $startAt)));
         if ($inWindow === []) return null;

@@ -305,7 +305,20 @@ final class StorefrontViewModel
             'formatted' => I18n::price($amount, $currency),
             'compare_amount_minor' => $compare,
             'compare_formatted' => $compare === null ? '' : I18n::price($compare, $currency),
+            'vat_note' => self::vatNote(),
         ];
+    }
+
+    /**
+     * What the shown price contains (DE PAngV § 3: "inkl. MwSt., zzgl. Versandkosten"; elsewhere the same as good
+     * practice). A seller outside the EU VAT system gets none; one not registered for VAT says it charges none.
+     */
+    private static function vatNote(): string
+    {
+        $legal = StoreContext::current()->legal();
+        if (!VatService::isEuCountry(strtoupper((string)($legal['country'] ?? '')))) return '';
+        $registered = !array_key_exists('vat_registered', $legal) || (bool)$legal['vat_registered'];
+        return I18n::t($registered ? 'price_incl_vat' : 'price_no_vat');
     }
 
     private static function availability(array $product, ?int $variantId = null, ?bool $purchasable = null): array

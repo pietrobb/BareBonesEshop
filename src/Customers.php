@@ -690,6 +690,13 @@ class Customers {
         }
     }
 
+    /** An approved, active company account buys as a business; everyone else (guests included) is a consumer. */
+    public static function isBusinessBuyer(?int $customerId): bool {
+        $profile = self::commerceProfile($customerId);
+        return $profile !== null && (int)($profile['company_id'] ?? 0) > 0 && !empty($profile['company_active'])
+            && ($profile['approval_status'] ?? '') === 'approved';
+    }
+
     public static function canInvoicePurchase(int $customerId, int $amount): bool {
         if ($amount < 0) return false;
         $profile = self::commerceProfile($customerId);

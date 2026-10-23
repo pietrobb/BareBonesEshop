@@ -399,6 +399,35 @@ $r7rOk(PricingAdmin::savePromotion($r7rId, $r7rPromoForm('r8-restart-1', $r7rAgo
 assert_equals([[8000, 10000], 0], [$r7rShownPair(), (int)$pdo->query('SELECT COUNT(*) FROM promotion_runs')->fetchColumn()],
     'R8 Omnibus runs: extending a running promotion copies no run and keeps the struck-through base price');
 $r7rRunsReset();
+// R9 high (Omnibus): the start of a reduction by a promotion without valid_from, or by a running price list, was taken
+// as now (30 days before now for a list), so a lower price charged in the 30 days before it actually began dropped out.
+$pdo->exec("DELETE FROM promotions WHERE code LIKE 'R9-OMNI-%'");
+$r9oPromo = $pdo->prepare("INSERT INTO promotions (store_id, code, name, scope, priority, stacking, conditions, actions, active, valid_from, valid_to, created_at, updated_at)
+    VALUES (?, ?, ?, 'catalog', 100, 'exclusive', ?, ?, 1, ?, ?, ?, ?)");
+$r9oAddPromo = static fn(string $code, int $bps, ?string $from, ?string $to, string $created) => $r9oPromo->execute([StoreContext::current()->id(), $code, $code,
+    json_encode(['product_ids' => [97734]]), json_encode(['type' => 'discount_percent', 'bps' => $bps]), $from, $to, $created, $created]);
+$r9oAddPromo('R9-OMNI-EARLIER', 3000, $r7rAgo(50), $r7rAgo(35), $r7rAgo(51));
+$r9oAddPromo('R9-OMNI-NOSTART', 2000, null, null, $r7rAgo(34));
+assert_equals([8000, null], $r7rShownPair(),
+    'R9 Omnibus: a promotion without valid_from created 34 days ago, after a 70.00 promotion that ended a day before, shows no struck-through 100.00');
+$pdo->exec("DELETE FROM promotions WHERE code LIKE 'R9-OMNI-%'");
+$r9oList = $pdo->prepare("INSERT INTO price_lists (store_id, code, name, currency, customer_group_id, priority, active, valid_from, valid_to) VALUES (?, ?, ?, ?, NULL, 0, 1, ?, ?)");
+$r9oAddList = static function (string $code, int $price, string $from, ?string $to) use ($pdo, $r9oList, $r7rStore): void {
+    $r9oList->execute([$r7rStore, $code, $code, strtolower(StoreContext::current()->currency()), $from, $to]);
+    $pdo->prepare('INSERT INTO price_list_prices (price_list_id, product_id, price, min_qty) VALUES (?, 97734, ?, 1)')->execute([(int)$pdo->lastInsertId(), $price]);
+};
+$r9oAddList('r9-omni-earlier', 8500, $r7rAgo(105), $r7rAgo(75));
+$r9oAddList('r9-omni-running', 9000, $r7rAgo(70), null);
+assert_equals([9000, null], $r7rShownPair(),
+    'R9 Omnibus: a price list running for 70 days, started 5 days after an 85.00 price list ended, shows no struck-through 100.00');
+$pdo->exec("DELETE FROM price_list_prices WHERE price_list_id IN (SELECT id FROM price_lists WHERE code = 'r9-omni-earlier')");
+$pdo->exec("DELETE FROM price_lists WHERE code = 'r9-omni-earlier'");
+$r9oAddPromo('R9-OMNI-ONLIST', 2000, $r7rAgo(5), null, $r7rAgo(5));
+assert_equals([7200, 9000], $r7rShownPair(),
+    'R9 Omnibus: a promotion on top of a price list that ran before it shows the list\'s 90.00 as the prior price, not the base 100.00');
+$pdo->exec("DELETE FROM promotions WHERE code LIKE 'R9-OMNI-%'");
+$pdo->exec("DELETE FROM price_list_prices WHERE price_list_id IN (SELECT id FROM price_lists WHERE code LIKE 'r9-omni-%')");
+$pdo->exec("DELETE FROM price_lists WHERE code LIKE 'r9-omni-%'");
 $pdo->exec("DELETE FROM promotions WHERE code LIKE 'R8-RESTART-%'");
 assert_equals(null, PriceHistory::capCompare(['price' => 8000, 'compare_price' => 10000], 10000, null)['compare_price'],
     'R7/R8 Omnibus: a product without recorded history shows no compare price (no proof of the prior price)');

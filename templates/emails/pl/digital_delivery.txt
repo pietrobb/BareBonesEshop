@@ -1,0 +1,8 @@
+Pliki są gotowe
+
+Dzień dobry, {{customer_name}},
+płatność za zamówienie {{order_number}} została potwierdzona.
+
+{{#each download_links}}{{label}}: {{url}} ({{validity}})
+{{/each}}
+Nie udostępniaj tych prywatnych linków innym osobom.

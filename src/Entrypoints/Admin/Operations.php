@@ -714,7 +714,8 @@ function handlePaymentMethodSave(): void {
     }
     else { $db->prepare("INSERT INTO payment_methods (store_id, code, provider, name, description, service_type, min_amount, max_amount, fixed_fee, percent_fee_bps, free_above, requires_online, active, sort_order) VALUES (:store, :code, :provider, :name, :description, :service_type, :min_amount, :max_amount, :fixed_fee, :percent_fee_bps, :free_above, :requires_online, :active, :sort_order)")->execute($data); }
     StoreConfig::audit('payment_methods', $id, $old);
-    setFlash('ok', I18n::t('admin.payments.saved')); header('Location: admin.php?p=payments'); exit;
+    $consumerFeeWaived = in_array($serviceType, PaymentService::NO_CONSUMER_SURCHARGE, true) && ($data[':fixed_fee'] > 0 || $data[':percent_fee_bps'] > 0);
+    setFlash('ok', I18n::t($consumerFeeWaived ? 'admin.payments.saved_consumer_fee' : 'admin.payments.saved')); header('Location: admin.php?p=payments'); exit;
 }
 function handlePaymentMethodDelete(): void { Security::adminRequire('payments.manage'); storeConfigDelete('payment_methods', I18n::t('admin.payments.deleted')); header('Location: admin.php?p=payments'); exit; }
 function handlePaymentCountrySave(): void {

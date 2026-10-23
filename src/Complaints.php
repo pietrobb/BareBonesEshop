@@ -12,6 +12,8 @@ class Complaints {
     public const STATUSES = ['received', 'in_review', 'accepted', 'rejected', 'resolved'];
     public const REMEDIES = ['repair', 'replacement', 'price_reduction', 'refund'];
     public const DECISION_DAYS = 30;
+    /** New complaints one order may file per 24 hours (each sends e-mails). */
+    public const MAX_PER_ORDER_PER_DAY = 3;
 
     public const NEXT = [
         'received' => ['in_review', 'accepted', 'rejected'],
@@ -47,6 +49,14 @@ class Complaints {
         $line = null;
         foreach (Orders::items((int)$order['id']) as $item) if ((int)$item['id'] === $orderItemId) $line = $item;
         if ($line === null) return $fail('no_items');
+        // Each complaint e-mails the order's address from the shop: whoever knows an order number and its e-mail must
+        // not be able to flood that inbox (and the merchant's). One open complaint per line, a few new ones a day.
+        $stmt = Db::get()->prepare("SELECT COUNT(CASE WHEN order_item_id = ? AND status IN ('received', 'in_review') THEN 1 END),
+            COUNT(CASE WHEN received_at >= ? THEN 1 END) FROM complaints WHERE order_id = ? AND store_id = ?");
+        $stmt->execute([$orderItemId, gmdate('Y-m-d H:i:s', time() - 86400), (int)$order['id'], StoreContext::current()->id()]);
+        [$openForLine, $today] = array_map('intval', $stmt->fetch(PDO::FETCH_NUM) ?: [0, 0]);
+        if ($openForLine > 0) return $fail('already_open');
+        if ($today >= self::MAX_PER_ORDER_PER_DAY) return $fail('too_many');
         $name = mb_substr(trim($name), 0, 191) ?: (string)$order['customer_name'];
         $receivedAt = gmdate('Y-m-d H:i:s');
         $number = 'REK-' . (int)$order['id'] . '-' . strtoupper(bin2hex(random_bytes(3)));

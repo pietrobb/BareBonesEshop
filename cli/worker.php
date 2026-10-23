@@ -317,6 +317,15 @@ function handleEmailSend(array $payload, array $job): void {
 function handleDigitalFulfill(array $payload, array $job): void {
     $orderId = (int)($payload['order_id'] ?? 0);
     if ($orderId <= 0 || !DigitalDelivery::orderHasAssets($orderId)) return;
+    // No consent to supply within the withdrawal period: deliver once it has passed (the order may be withdrawn first).
+    $order = Orders::byId($orderId);
+    $holdUntil = $order ? DigitalDelivery::holdUntil($order) : null;
+    if ($holdUntil !== null) {
+        JobQueue::pushDelayed('digital_fulfill', ['order_id' => $orderId, 'held' => true], $holdUntil - time(), 2);
+        return;
+    }
+    // A held order the consumer withdrew from, or that was refunded meanwhile, is not supplied after all.
+    if (!empty($payload['held']) && (!$order || ($order['payment_status'] ?? '') !== 'paid' || DigitalDelivery::withdrawn($orderId))) return;
 
     // One fulfilment per order at a time: a concurrent job would rotate (revoke) the links this one mails.
     $claim = DigitalDelivery::claimFulfilment($orderId);
