@@ -133,11 +133,8 @@ final class AccountViewModel
         $invoice->execute([$id]);
         $invoice = $invoice->fetch() ?: null;
         $line = static fn(string $label, $cents): array => ['label' => I18n::t($label), 'amount' => $money($cents)];
-        $totals = [$line('subtotal', $order['subtotal'])];
-        if ((int)$order['discount_amount'] !== 0) $totals[] = $line('discount', -abs((int)$order['discount_amount']));
-        $totals[] = $line('shipping', $order['shipping_cost']);
-        if ((int)($order['payment_fee'] ?? 0) !== 0) $totals[] = $line('account.payment_fee', $order['payment_fee']);
-        if ((int)$order['tax_amount'] !== 0) $totals[] = $line('tax', $order['tax_amount']);
+        $labels = ['subtotal' => 'subtotal', 'discount' => 'discount', 'shipping' => 'shipping', 'payment_fee' => 'account.payment_fee', 'vat' => 'tax', 'vat_included' => 'tax_included'];
+        $totals = array_map(static fn(array $total): array => $line($labels[$total['key']], $total['cents']), Orders::totalLines($order));
         return [
             'id' => $id,
             'number' => (string)$order['order_number'],

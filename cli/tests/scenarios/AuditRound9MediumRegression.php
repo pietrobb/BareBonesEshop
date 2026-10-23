@@ -148,3 +148,22 @@ assert_equals(['R9DN-SK' => 'Dodací list R9DN-SK', 'R9DN-DE' => 'Lieferschein R
     'R9 delivery note: each note is titled in its order\'s language (unknown locale: the admin\'s)');
 assert_true(str_contains($r9dnPdf, 'Lieferschein') && !str_contains($r9dnPdf, 'Delivery note'), 'R9 delivery note: the PDF of a German order is in German');
 assert_equals('en', $r9dnAfter, 'R9 delivery note: the admin\'s locale is restored after printing');
+
+// Admin order totals: the order detail listed subtotal, shipping, payment fee and VAT but no discount, and VAT as an
+// addend although gross prices already include it, so the lines never added up to the total. Orders::totalLines() gives the
+// lines that add up (discount negative) and VAT as an "of which" line when it is included; net prices still add it.
+$r9otAdds = static function (array $order): bool {
+    $sum = 0;
+    foreach (Orders::totalLines($order) as $line) if ($line['key'] !== 'vat_included') $sum += $line['cents'];
+    return $sum === (int)$order['total'];
+};
+$r9otGross = ['subtotal' => 10000, 'discount_amount' => 1000, 'shipping_cost' => 390, 'payment_fee' => 100, 'tax_amount' => 1748, 'total' => 9490];
+$r9otNet = ['subtotal' => 10000, 'discount_amount' => 0, 'shipping_cost' => 500, 'payment_fee' => 0, 'tax_amount' => 2100, 'total' => 12600];
+assert_equals([['subtotal', 10000], ['discount', -1000], ['shipping', 390], ['payment_fee', 100], ['vat_included', 1748]],
+    array_map(static fn(array $l): array => [$l['key'], $l['cents']], Orders::totalLines($r9otGross)), 'R9 order totals: gross prices list the discount and VAT as an included line');
+assert_true($r9otAdds($r9otGross) && $r9otAdds($r9otNet) && in_array('vat', array_column(Orders::totalLines($r9otNet), 'key'), true),
+    'R9 order totals: the listed lines add up to the order total, with gross and with net prices');
+$r9otAdmin = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Orders.php');
+$r9otAccount = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/AccountViewModel.php');
+assert_true(str_contains($r9otAdmin, 'Orders::totalLines($order)') && str_contains($r9otAccount, 'Orders::totalLines($order)') && I18n::tIn('admin.order.vat_included', 'sk') === 'Z toho DPH',
+    'R9 order totals: the admin order detail and the customer\'s order page list these lines');

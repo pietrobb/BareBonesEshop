@@ -749,4 +749,27 @@ class Orders {
         $stmt = Db::get()->prepare("UPDATE orders SET erp_status = :status, updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store");
         $stmt->execute([':status' => $erpStatus, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
     }
+
+    /**
+     * The total lines of a placed order, in the order they add up to `total`. With gross prices the VAT is already inside
+     * the other lines, so it is an "of which" line (vat_included) that is not added.
+     *
+     * @return list<array{key: string, cents: int}> keys: subtotal, discount, shipping, payment_fee, vat, vat_included
+     */
+    public static function totalLines(array $order): array {
+        $subtotal = (int)$order['subtotal'];
+        $discount = abs((int)($order['discount_amount'] ?? 0));
+        $shipping = (int)($order['shipping_cost'] ?? 0);
+        $fee = (int)($order['payment_fee'] ?? 0);
+        $vat = (int)($order['tax_amount'] ?? 0);
+        $lines = [['key' => 'subtotal', 'cents' => $subtotal]];
+        if ($discount !== 0) $lines[] = ['key' => 'discount', 'cents' => -$discount];
+        $lines[] = ['key' => 'shipping', 'cents' => $shipping];
+        if ($fee !== 0) $lines[] = ['key' => 'payment_fee', 'cents' => $fee];
+        if ($vat !== 0) {
+            $added = max(0, $subtotal - $discount) + $shipping + $fee + $vat === (int)$order['total'];
+            $lines[] = ['key' => $added ? 'vat' : 'vat_included', 'cents' => $vat];
+        }
+        return $lines;
+    }
 }
