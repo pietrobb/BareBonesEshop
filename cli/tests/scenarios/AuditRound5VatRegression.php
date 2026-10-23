@@ -33,6 +33,16 @@ assert_equals(22.0, VatService::rate('EE', 'standard', '2025-06-01'), 'R5 VAT: E
 assert_equals(21.0, VatService::rate('RO', 'standard', '2025-09-01'), 'R5 VAT: RO 21 % from August 2025');
 assert_equals(11.0, VatService::rate('RO', 'reduced', '2025-09-01'), 'R5 VAT: RO reduced 11 % from August 2025');
 assert_equals(19.0, VatService::rate('RO', 'standard', '2025-07-01'), 'R5 VAT: RO 19 % until July 2025');
+// Book and medicine rates outside SK/CZ (checked 2026-10-23 against the EC tables and national authorities).
+foreach (['FR' => 5.5, 'IT' => 4.0, 'ES' => 4.0, 'PL' => 5.0, 'IE' => 0.0, 'HU' => 5.0, 'BE' => 6.0, 'SE' => 6.0, 'LT' => 5.0] as $r5Country => $r5Books) {
+    assert_equals($r5Books, VatService::rate($r5Country, 'books', '2026-10-23'), "R5 VAT: {$r5Country} books {$r5Books} %");
+}
+assert_equals([4.0, 0.0, 19.0, 10.0], [VatService::rate('ES', 'medicines', '2026-10-23'), VatService::rate('IE', 'medicines', '2026-10-23'),
+    VatService::rate('DE', 'medicines', '2026-10-23'), VatService::rate('FR', 'medicines', '2026-10-23')], 'R5 VAT: medicines ES 4 %, IE 0 %, DE standard 19 %, FR non-reimbursed 10 %');
+assert_equals([13.5, 14.0, 10.0], [VatService::rate('FI', 'reduced', '2026-01-01'), VatService::rate('FI', 'books', '2025-06-01'), VatService::rate('FI', 'books', '2024-06-01')],
+    'R5 VAT: FI reduced 13.5 % from 2026, books 14 % in 2025 and 10 % before');
+assert_equals([12.0, 9.0, 5.0], [VatService::rate('LT', 'reduced', '2026-01-01'), VatService::rate('LT', 'books', '2025-12-31'), VatService::rate('RO', 'books', '2025-07-01')],
+    'R5 VAT: LT 9 % rate replaced by 12 % in 2026 (books 9 % before); RO books 5 % before August 2025');
 
 // --- A declared non-EU country alone does not zero-rate --------------------------------------------------------
 $r5Ctx = ['seller_country' => 'SK', 'seller_vat_registered' => true, 'seller_oss_enabled' => true, 'customer_country' => 'US',

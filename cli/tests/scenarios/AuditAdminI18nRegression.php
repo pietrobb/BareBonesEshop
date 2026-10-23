@@ -129,6 +129,8 @@ ob_start();
 register_shutdown_function(static function(): void {
     $out = '';
     while (ob_get_level() > 0) $out = ob_get_clean() . $out;
+    // The random base64 CSP nonce can contain a leftover word such as "Kedy"; leftover checks only look at page text.
+    $out = (string)preg_replace('/ nonce="[^"]*"/', '', $out);
     // Earlier scenarios store deliberately broken UTF-8 in names; substitute it instead of losing the whole page.
     echo "\nA154RESULT" . json_encode(['code' => http_response_code() ?: 200, 'out' => $out], JSON_INVALID_UTF8_SUBSTITUTE);
 });

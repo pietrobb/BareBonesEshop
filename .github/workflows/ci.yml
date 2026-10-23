@@ -13,6 +13,7 @@ jobs:
   test:
     name: Lint & Test (PHP ${{ matrix.php }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     strategy:
       fail-fast: false
@@ -73,6 +74,7 @@ jobs:
   phpstan:
     name: PHPStan level 5 (baseline)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       PHPSTAN_VERSION: '2.3.1'
       PHPSTAN_SHA256: 85157dba3d95d77ca603d2b7303aa78a538f9e3b56ccad07dd794c53aa96d1ae
@@ -102,6 +104,7 @@ jobs:
   docker-image:
     name: Deploy Docker image
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -145,6 +148,7 @@ jobs:
   browser-qualification:
     name: Browser, axe & Lighthouse
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -210,6 +214,7 @@ jobs:
   database-qualification:
     name: Application & updater (${{ matrix.database }})
     runs-on: ubuntu-latest
+    timeout-minutes: 40
 
     strategy:
       fail-fast: false

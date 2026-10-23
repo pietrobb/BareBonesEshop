@@ -61,6 +61,7 @@ jobs:
   stripe-test-checkout:
     name: Stripe test-mode checkout (Chromium, WebKit iPhone, Firefox)
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     env:
       E2E_STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
 
