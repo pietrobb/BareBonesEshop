@@ -174,7 +174,8 @@ foreach (['sk', 'cs', 'en', 'de', 'pl', 'hu', 'es'] as $r9lLang) {
     if (!str_contains($r9lMail, '<a href="{{complaint_url}}">') || preg_match('~vo svojom účte|ve svém účtu|in your account|in Ihrem Konto|w koncie|a fiókjában|en su cuenta~u', $r9lMail)) $r9lInAccount[] = $r9lLang;
 }
 assert_equals([], $r9lInAccount, 'R9 complaint: every order confirmation links the complaint form instead of a complaint function in the account');
-assert_true(str_ends_with(ConsumerNotice::mailVars(['order_number' => 'X', 'store_id' => 'default'])['complaint_url'] ?? '', '?page=complaint'),
+assert_equals((new ReflectionMethod(ConsumerNotice::class, 'absoluteUrl'))->invoke(null, '/?page=complaint'),
+    ConsumerNotice::mailVars(['order_number' => 'X', 'store_id' => 'default'])['complaint_url'] ?? null,
     'R9 complaint: the confirmation e-mail gets the absolute complaint form URL');
 
 (require TEST_CLI_DIR . '/../migrations/20261022100000_complaints.php')->up($pdo, Db::isSqlite());
