@@ -106,7 +106,7 @@ $sfaHttp = static function (string $method, string $path, array $post = [], ?str
         'follow_location' => 0, 'ignore_errors' => true, 'timeout' => 20]]);
     $body = @file_get_contents("http://127.0.0.1:{$sfaPort}{$path}", false, $context);
     $result = ['status' => 0, 'location' => '', 'csp' => '', 'body' => (string)$body, 'headers' => []];
-    foreach ($http_response_header ?? [] as $index => $line) {
+    foreach (HttpResponseHeaders::last($http_response_header ?? null) as $index => $line) {
         if ($index === 0) $result['status'] = (int)(explode(' ', $line)[1] ?? 0);
         if ($index > 0 && str_contains($line, ':')) $result['headers'][strtolower(trim(strstr($line, ':', true)))] = trim(substr(strstr($line, ':'), 1));
         if (stripos($line, 'Location:') === 0) $result['location'] = trim(substr($line, 9));

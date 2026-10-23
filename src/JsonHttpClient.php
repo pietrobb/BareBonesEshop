@@ -74,7 +74,6 @@ class JsonHttpClient
         $ok = curl_exec($ch);
         $error = $ok === false ? curl_error($ch) : '';
         $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-        curl_close($ch);
         if ($tooLarge) throw new RuntimeException('Integration response exceeds 1 MiB');
         if ($ok === false) throw new RuntimeException('Integration request failed: ' . ($error !== '' ? $error : 'transport error'));
         return self::decodeResult(['status' => $status, 'body' => $responseBody]);

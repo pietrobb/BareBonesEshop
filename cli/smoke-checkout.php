@@ -20,6 +20,7 @@ require_once __DIR__ . '/cli-only.php';
  * Exit: 0 all checks passed, 1 a check failed, 2 usage/configuration error.
  */
 require_once __DIR__ . '/../src/SyntheticCheckout.php';
+require_once __DIR__ . '/../src/HttpResponseHeaders.php';
 
 $options = getopt('', ['base-url:', 'product:', 'variant:', 'token:', 'checkout-path:', 'payment:', 'shipping:',
     'country:', 'expect-gateway:', 'no-fetch-gateway', 'timeout:', 'email:']);
@@ -50,7 +51,7 @@ $http = static function (string $method, string $url, array $form = [], array $h
     ]]);
     $body = @file_get_contents($url, false, $context);
     $result = ['status' => 0, 'headers' => [], 'body' => (string)$body];
-    foreach ($http_response_header ?? [] as $index => $line) {
+    foreach (HttpResponseHeaders::last($http_response_header ?? null) as $index => $line) {
         if (preg_match('#^HTTP/\S+\s+(\d{3})#', $line, $status)) { $result['status'] = (int)$status[1]; $result['headers'] = []; continue; }
         if ($index === 0 || !str_contains($line, ':')) continue;
         [$name, $value] = array_map('trim', explode(':', $line, 2));

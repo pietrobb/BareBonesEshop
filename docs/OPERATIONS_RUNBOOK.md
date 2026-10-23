@@ -144,7 +144,7 @@ Rollback is complete only when readiness is green, the critical browser smoke pa
 - PHP lint and `php cli/static-analysis.php`.
 - `php cli/test.php`, including backup integrity, storage-neutral off-site restore drill, metric thresholds, adapter path safety, VAT snapshots, invoice and stock invariants.
 - `php cli/quality-gates.php` and Playwright customer/admin/updater smoke with axe and Lighthouse.
-- SQLite, MySQL 8.0, MariaDB 11.4, PHP 8.1-8.3 CI jobs.
+- SQLite, MySQL 8.4, MariaDB 11.4, PHP 8.1-8.5 CI jobs.
 - Checkout critical path: cross-origin browser checkout in Chromium, WebKit (iPhone) and Firefox; for releases touching the critical-path files listed in `docs/PRODUCTION_QUALIFICATION.md`, also the *Payment gateway (Stripe test mode)* workflow.
 - Reproducible benchmark/load/failure profiles and clean Git diff checks.
 

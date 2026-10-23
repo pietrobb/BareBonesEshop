@@ -2,7 +2,7 @@
 # The official image already ships pdo_sqlite, mbstring, dom, libxml and sodium.
 # GD (JPEG/PNG/WebP) builds product image variants; the MariaDB client provides
 # mysqldump/mariadb-dump for MySQL backups and update snapshots.
-FROM php:8.4-fpm
+FROM php:8.4-fpm@sha256:cc7cdfe4da7d46f6e69ac653e3d3396590bf51d6d6731854d01449d0b32b704c
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

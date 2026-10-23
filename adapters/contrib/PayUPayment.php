@@ -251,7 +251,6 @@ class PayUPayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, Sig
         $resp     = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $err      = curl_error($ch);
-        curl_close($ch);
 
         if ($err || $httpCode >= 400) {
             throw new \RuntimeException("PayU OAuth error: " . ($err ?: "HTTP {$httpCode}"));
@@ -303,7 +302,6 @@ class PayUPayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, Sig
         $resp     = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $err      = curl_error($ch);
-        curl_close($ch);
 
         if ($err) {
             throw new \RuntimeException("PayU API error: {$err}");

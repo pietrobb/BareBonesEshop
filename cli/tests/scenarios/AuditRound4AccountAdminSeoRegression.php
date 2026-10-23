@@ -103,7 +103,7 @@ $r4Http = static function (string $method, string $path, array $post = [], ?stri
         'content' => http_build_query($post), 'follow_location' => 0, 'ignore_errors' => true, 'timeout' => 20]]);
     $body = @file_get_contents("http://127.0.0.1:{$r4Port}{$path}", false, $context);
     $result = ['status' => 0, 'location' => '', 'cookies' => [], 'body' => (string)$body];
-    foreach ($http_response_header ?? [] as $index => $line) {
+    foreach (HttpResponseHeaders::last($http_response_header ?? null) as $index => $line) {
         if ($index === 0) $result['status'] = (int)(explode(' ', $line)[1] ?? 0);
         if (stripos($line, 'Location:') === 0) $result['location'] = trim(substr($line, 9));
         if (stripos($line, 'Set-Cookie:') === 0) $result['cookies'][] = trim(substr($line, 11));

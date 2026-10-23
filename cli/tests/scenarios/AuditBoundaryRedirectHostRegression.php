@@ -70,7 +70,7 @@ $a101Get = static function (string $path, string $appUrl = '') use ($a101Port): 
     $headers = "Host: attacker.example\r\n" . ($appUrl !== '' ? "X-Test-App-Url: {$appUrl}\r\n" : '');
     $context = stream_context_create(['http' => ['method' => 'GET', 'header' => $headers, 'follow_location' => 0, 'ignore_errors' => true, 'timeout' => 20]]);
     $body = @file_get_contents("http://127.0.0.1:{$a101Port}{$path}", false, $context);
-    $responseHeaders = $http_response_header ?? [];
+    $responseHeaders = HttpResponseHeaders::last($http_response_header ?? null);
     $location = null;
     foreach ($responseHeaders as $line) {
         if (stripos($line, 'Location:') === 0) $location = trim(substr($line, 9));

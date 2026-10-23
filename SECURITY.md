@@ -18,9 +18,16 @@ published with credit to the reporter unless you prefer to stay anonymous.
 
 ## Supported versions
 
-Security fixes go to the `main` branch and the latest release. Update through the signed update
-packages (`cli/update.php`, see [README](README.md#production-updates)) and read the
-**Upgrade notes** in [CHANGELOG.md](CHANGELOG.md) before applying an update.
+Only the `main` branch is supported: security fixes land there and are not backported to
+older releases. Fixes reach a tagged release only when the next release is cut from `main`,
+so check [CHANGELOG.md](CHANGELOG.md) (**Unreleased** section) for fixes that are not tagged yet.
+
+A release is installable through the updater (`cli/update.php`, see
+[README](README.md#production-updates)) only if its GitHub release has a signed update package
+attached; the package is verified against the Ed25519 key in `releases/update-public.key`
+(rotation: README › *Signing key rotation*). Releases without an attached package — currently
+including v2.0.0 — are source-only: deploy them from the tagged commit. Read the
+**Upgrade notes** in [CHANGELOG.md](CHANGELOG.md) before any update.
 
 ## Scope
 

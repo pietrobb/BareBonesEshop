@@ -217,7 +217,7 @@ require $script;
     $edGet = static function(string $target) use ($edPort): array {
         for ($i = 0; $i < 50; $i++) {
             $body = @file_get_contents("http://127.0.0.1:{$edPort}{$target}", false, stream_context_create(['http' => ['ignore_errors' => true, 'header' => "Host: shop.example\r\n", 'timeout' => 20]]));
-            if ($body !== false) return [(int)(explode(' ', (string)($http_response_header[0] ?? ''))[1] ?? 0), (string)$body];
+            if ($body !== false) return [(int)(explode(' ', (string)(HttpResponseHeaders::last($http_response_header ?? null)[0] ?? ''))[1] ?? 0), (string)$body];
             usleep(100000);
         }
         return [0, ''];
