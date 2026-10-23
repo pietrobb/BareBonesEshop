@@ -471,6 +471,45 @@ class DigitalDelivery {
         return $stored;
     }
 
+    /**
+     * The admin form's uploaded file ($_FILES entry): null when none was chosen, false when the upload failed or is
+     * not a real HTTP upload, else its temporary path, client name and detected content type.
+     * @return array{tmp:string, name:string, type:string}|false|null
+     */
+    public static function uploadedFile(mixed $file): array|false|null {
+        if (!is_array($file) || (int)($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) return null;
+        $tmp = (string)($file['tmp_name'] ?? '');
+        if ((int)$file['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($tmp)) return false;
+        $type = function_exists('mime_content_type') ? (string)(@mime_content_type($tmp) ?: '') : '';
+        return ['tmp' => $tmp, 'name' => basename(str_replace('\\', '/', (string)($file['name'] ?? ''))), 'type' => $type !== '' ? $type : 'application/octet-stream'];
+    }
+
+    /**
+     * Moves a file the admin uploaded (already checked with is_uploaded_file) into the active store's directory
+     * <base>/<catalog_id>/ at the entered relative path, or at its own sanitized name when none was entered.
+     * A different file already there is never replaced: only the asset's own current file may be overwritten.
+     * @return array{0:?string,1:?string} [storage_path, null] or [null, lang key]
+     */
+    public static function storeUpload(string $source, string $originalName, string $pathInput, ?string $currentPath, ?string $catalogId = null): array {
+        $catalogId ??= StoreContext::current()->catalogId();
+        $base = rtrim((string)(self::config()['digital_assets_base_dir'] ?? ''), '/\\');
+        if ($base === '' || !is_dir($base)) return [null, 'admin.digital.upload_failed'];
+        $name = trim((string)preg_replace('/[^A-Za-z0-9._-]+/', '-', basename(str_replace('\\', '/', $originalName))), '.-');
+        $stored = self::storePath(trim($pathInput) !== '' ? $pathInput : $name, $catalogId);
+        if ($stored === null || strlen($stored) > 500) return [null, 'admin.digital.invalid'];
+        $target = $base . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $stored);
+        if (file_exists($target) && $stored !== $currentPath) return [null, 'admin.digital.file_exists'];
+        $dir = dirname($target);
+        if (!is_dir($dir) && !@mkdir($dir, 0750, true) && !is_dir($dir)) return [null, 'admin.digital.upload_failed'];
+        // A symlinked subdirectory must not carry the file out of the store directory.
+        $storeDir = realpath($base . DIRECTORY_SEPARATOR . $catalogId);
+        $realDir = realpath($dir);
+        if ($storeDir === false || $realDir === false || ($realDir !== $storeDir && !str_starts_with($realDir, $storeDir . DIRECTORY_SEPARATOR))
+            || !@rename($source, $target)) return [null, 'admin.digital.upload_failed'];
+        @chmod($target, 0640);
+        return [$stored, null];
+    }
+
     public static function safeDownloadName(array $entitlement): string {
         $name = basename(str_replace('\\', '/', (string)($entitlement['download_name'] ?? 'download.bin')));
         $name = preg_replace('/[^A-Za-z0-9._ -]/u', '_', $name) ?: 'download.bin';

@@ -346,18 +346,20 @@ function pageDigitalAssets(): void {
         <p><?= esc(I18n::t('admin.digital.location_hint')) ?></p>
         <p><code><?= esc($baseDir ? rtrim($baseDir, '/\\') . '/' . StoreContext::current()->catalogId() . '/' : I18n::t('admin.digital.not_configured')) ?></code></p>
         <p class="muted"><?= strtr(esc(I18n::t('admin.digital.path_hint')), ['{example}' => '<code>ebooks/manual.pdf</code>']) ?></p>
+        <p class="muted"><?= esc(I18n::t('admin.digital.upload_hint')) ?></p>
     </div>
     <div class="card">
         <h3><?= esc(I18n::t('admin.digital.add_edit')) ?></h3>
-        <form method="post" action="admin.php?p=digital_assets&action=save">
+        <form method="post" action="admin.php?p=digital_assets&action=save" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
             <input type="hidden" name="asset_id" value="0">
             <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr))">
                 <div class="form-row"><label for="digital-sku"><?= esc(I18n::t('admin.th.sku')) ?></label><input id="digital-sku" name="sku" required maxlength="191"></div>
                 <div class="form-row"><label for="digital-asset-key"><?= esc(I18n::t('admin.digital.asset_key')) ?></label><input id="digital-asset-key" name="asset_key" value="default" required maxlength="80"></div>
                 <div class="form-row"><label for="digital-label"><?= esc(I18n::t('admin.th.name')) ?></label><input id="digital-label" name="label" maxlength="191"></div>
-                <div class="form-row"><label for="digital-storage-path"><?= esc(I18n::t('admin.digital.relative_path')) ?></label><input id="digital-storage-path" name="storage_path" placeholder="ebooks/manual.pdf" required maxlength="500"></div>
-                <div class="form-row"><label for="digital-download-name"><?= esc(I18n::t('admin.digital.download_name')) ?></label><input id="digital-download-name" name="download_name" placeholder="manual.pdf" required maxlength="180"></div>
+                <div class="form-row"><label for="digital-file"><?= esc(I18n::t('admin.digital.upload')) ?></label><input id="digital-file" name="file" type="file"></div>
+                <div class="form-row"><label for="digital-storage-path"><?= esc(I18n::t('admin.digital.relative_path')) ?></label><input id="digital-storage-path" name="storage_path" placeholder="ebooks/manual.pdf" maxlength="500"></div>
+                <div class="form-row"><label for="digital-download-name"><?= esc(I18n::t('admin.digital.download_name')) ?></label><input id="digital-download-name" name="download_name" placeholder="manual.pdf" maxlength="180"></div>
                 <div class="form-row"><label for="digital-content-type"><?= esc(I18n::t('admin.digital.content_type')) ?></label><input id="digital-content-type" name="content_type" value="application/octet-stream" required maxlength="100"></div>
                 <div class="form-row"><label for="digital-download-limit"><?= esc(I18n::t('admin.digital.download_limit')) ?></label><input id="digital-download-limit" name="download_limit" type="number" min="0" max="10000" value="5"></div>
                 <div class="form-row"><label for="digital-expiry-days"><?= esc(I18n::t('admin.digital.expiry_days')) ?></label><input id="digital-expiry-days" name="expiry_days" type="number" min="0" max="3650" value="7"></div>
@@ -695,9 +697,14 @@ function handleDigitalAssetSave(): void {
         $currentStmt->execute([':sku' => $sku, ':asset_key' => $assetKey]);
         $current = $currentStmt->fetchColumn();
     }
-    [$path, $pathError] = DigitalDelivery::assetPathForSave(Security::str($_POST['storage_path'] ?? ''), is_string($current) ? $current : null);
-    $downloadName = basename(str_replace('\\', '/', trim((string)($_POST['download_name'] ?? ''))));
-    $contentType = trim((string)($_POST['content_type'] ?? 'application/octet-stream'));
+    // An uploaded file is moved into the store directory once the rest of the form is valid; without one the file
+    // must already be there (copied by FTP/SSH).
+    $upload = DigitalDelivery::uploadedFile($_FILES['file'] ?? null);
+    if ($upload === false) { setFlash('err', I18n::t('admin.digital.upload_failed')); header('Location: admin.php?p=digital_assets'); exit; }
+    [$path, $pathError] = $upload ? ['', null] : DigitalDelivery::assetPathForSave(Security::str($_POST['storage_path'] ?? ''), is_string($current) ? $current : null);
+    $downloadName = basename(str_replace('\\', '/', trim((string)($_POST['download_name'] ?? '')))) ?: (string)($upload['name'] ?? '');
+    $contentType = trim((string)($_POST['content_type'] ?? '')) ?: 'application/octet-stream';
+    if ($upload && $contentType === 'application/octet-stream') $contentType = $upload['type'];
     $submittedLimit = max(0, min(10000, Security::int($_POST['download_limit'] ?? 5)));
     $downloadLimit = $submittedLimit > 0 ? $submittedLimit : null;
     $expiryDays = max(0, min(3650, Security::int($_POST['expiry_days'] ?? 7)));
@@ -715,6 +722,8 @@ function handleDigitalAssetSave(): void {
         header('Location: admin.php?p=digital_assets');
         exit;
     }
+    if ($upload) [$path, $pathError] = DigitalDelivery::storeUpload($upload['tmp'], $upload['name'], Security::str($_POST['storage_path'] ?? ''), is_string($current) ? $current : null);
+    if ($path === null) { setFlash('err', I18n::format((string)$pathError, ['dir' => StoreContext::current()->catalogId() . '/'])); header('Location: admin.php?p=digital_assets'); exit; }
 
     try {
         $sql = "INSERT INTO digital_assets
