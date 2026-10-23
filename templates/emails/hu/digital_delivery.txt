@@ -1,0 +1,8 @@
+A fájlok elkészültek
+
+Kedves {{customer_name}}!
+A(z) {{order_number}} rendelés fizetését visszaigazoltuk.
+
+{{#each download_links}}{{label}}: {{url}} ({{validity}})
+{{/each}}
+Ezeket a privát linkeket ne ossza meg másokkal.

@@ -1,0 +1,1 @@
+Digitální objednávka {{order_number}} je připravena

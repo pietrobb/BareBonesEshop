@@ -96,3 +96,66 @@ $r9lConsent = Template::process('{{#each consents}}' . (preg_match('#\{\{\#each 
 assert_equals([1, 1], [substr_count($r9lConsent, 'R9L terms consent'), substr_count($r9lConsent, 'R9L newsletter')],
     'R9 consent: each checkout consent text is shown once, linked when it has a page');
 I18n::setLocale($r9lLocale);
+
+// 4. Digital content (Directive 2011/83/EU art. 16(m)): without the consumer's consent to lose the withdrawal right it
+//    is supplied only once the 14 days have passed; a business buyer is never held. The withdrawal period runs from
+//    delivery, from the order for digital-only orders, and ends at the latest 12 months after the original period.
+$r9lCat = (int)$pdo->query('SELECT id FROM categories ORDER BY id LIMIT 1')->fetchColumn();
+$pdo->prepare("INSERT INTO products (store_id, category_id, sku, slug, name, price, stock, status, product_type) VALUES
+    ('default', ?, 'R9L-EBOOK', 'r9l-ebook', 'R9L E-book', 500, 0, 'active', 'downloadable'),
+    ('default', ?, 'R9L-CHAIR', 'r9l-chair', 'R9L Chair', 2000, 5, 'active', 'simple')")->execute([$r9lCat, $r9lCat]);
+$r9lProduct = static fn(string $sku): int => (int)$pdo->query("SELECT id FROM products WHERE sku = " . $pdo->quote($sku))->fetchColumn();
+$pdo->exec("INSERT INTO companies (store_id, code, legal_name, approval_status, active) VALUES ('default', 'r9l-dig-co', 'R9L Digital s.r.o.', 'approved', 1)");
+$pdo->prepare("INSERT INTO customers (store_id, email, password_hash, name, company_id, status) VALUES ('default', 'r9l-dig-b2b@example.test', '!test!', 'R9L Dig B2B', ?, 'active')")
+    ->execute([(int)$pdo->query("SELECT id FROM companies WHERE code = 'r9l-dig-co'")->fetchColumn()]);
+$r9lB2b = (int)$pdo->query("SELECT id FROM customers WHERE email = 'r9l-dig-b2b@example.test'")->fetchColumn();
+$r9lNow = time();
+$r9lOrder = static function (string $number, array $skus, int $createdAgo, ?int $deliveredAgo = null, ?int $customerId = null, bool $consent = false) use ($pdo, $r9lProduct, $r9lNow): array {
+    $pdo->prepare("INSERT INTO orders (order_number, status, payment_status, customer_id, customer_name, customer_email, payment_method, subtotal, total, currency, store_id, locale, created_at, delivered_at)
+        VALUES (?, 'paid', 'paid', ?, 'R9L Buyer', 'r9l-buyer@example.test', 'card', 500, 500, 'eur', 'default', 'sk', ?, ?)")
+        ->execute([$number, $customerId, gmdate('Y-m-d H:i:s', $r9lNow - $createdAgo), $deliveredAgo === null ? null : gmdate('Y-m-d H:i:s', $r9lNow - $deliveredAgo)]);
+    $id = (int)$pdo->lastInsertId();
+    foreach ($skus as $sku) {
+        $pdo->prepare('INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total) VALUES (?, ?, ?, ?, 1, 500, 500)')->execute([$id, $r9lProduct($sku), $sku, $sku]);
+    }
+    if ($consent) $pdo->prepare("INSERT INTO order_consents (order_id, consent_key, version, consent_text, user_agent) VALUES (?, ?, 'r9l', 'r9l', '')")->execute([$id, ConsentService::DIGITAL_KEY]);
+    return Orders::byId($id);
+};
+$r9lDay = 86400;
+$r9lHeld = $r9lOrder('R9L-HOLD', ['R9L-EBOOK'], 3600);
+$r9lHoldUntil = DigitalDelivery::holdUntil($r9lHeld, $r9lNow);
+assert_true($r9lHoldUntil !== null && abs($r9lHoldUntil - ($r9lNow - 3600 + 14 * $r9lDay)) <= 120,
+    'R9 digital: a consumer order without the delivery consent is held until 14 days after the order');
+assert_equals([null, null, null], [
+    DigitalDelivery::holdUntil($r9lOrder('R9L-CONS', ['R9L-EBOOK'], 3600, null, null, true), $r9lNow),
+    DigitalDelivery::holdUntil($r9lOrder('R9L-B2B', ['R9L-EBOOK'], 3600, null, $r9lB2b), $r9lNow),
+    DigitalDelivery::holdUntil($r9lOrder('R9L-PAST', ['R9L-EBOOK'], 15 * $r9lDay), $r9lNow),
+], 'R9 digital: supplied at once with the consent, to a business buyer, or once the period has passed');
+assert_true(!DigitalDelivery::withdrawn((int)$r9lHeld['id']), 'R9 digital: an order without a withdrawal statement is not withdrawn');
+$r9lWorker = (string)file_get_contents(TEST_CLI_DIR . '/worker.php');
+assert_true(preg_match('/function handleDigitalFulfill\(.*?DigitalDelivery::holdUntil\(\$order\).*?JobQueue::pushDelayed\(\'digital_fulfill\'.*?\'held\' => true.*?return;.*?DigitalDelivery::withdrawn\(\$orderId\)\)\) return;.*?DigitalDelivery::claimFulfilment/s', $r9lWorker) === 1,
+    'R9 digital: the worker re-queues a held order for the end of the period and then skips it if withdrawn or no longer paid');
+
+$r9lPeriod = static fn(array $order): bool => Withdrawal::withinPeriod($order, $r9lNow);
+assert_equals(
+    ['digital 10 d' => true, 'digital 15 d' => false, 'delivered 10 d' => true, 'delivered 15 d' => false, 'undelivered 100 d' => true, 'undelivered 13 months' => false, 'mixed undelivered 20 d' => true],
+    ['digital 10 d' => $r9lPeriod($r9lOrder('R9L-W1', ['R9L-EBOOK'], 10 * $r9lDay)),
+     'digital 15 d' => $r9lPeriod($r9lOrder('R9L-W2', ['R9L-EBOOK'], 15 * $r9lDay)),
+     'delivered 10 d' => $r9lPeriod($r9lOrder('R9L-W3', ['R9L-CHAIR'], 30 * $r9lDay, 10 * $r9lDay)),
+     'delivered 15 d' => $r9lPeriod($r9lOrder('R9L-W4', ['R9L-CHAIR'], 30 * $r9lDay, 15 * $r9lDay)),
+     'undelivered 100 d' => $r9lPeriod($r9lOrder('R9L-W5', ['R9L-CHAIR'], 100 * $r9lDay)),
+     'undelivered 13 months' => $r9lPeriod($r9lOrder('R9L-W6', ['R9L-CHAIR'], 396 * $r9lDay)),
+     'mixed undelivered 20 d' => $r9lPeriod($r9lOrder('R9L-W7', ['R9L-CHAIR', 'R9L-EBOOK'], 20 * $r9lDay))],
+    'R9 withdrawal period: from delivery, from the order for digital-only orders, never longer than 12 months past the original period');
+foreach (['cs', 'de', 'hu', 'pl'] as $r9lLang) {
+    $r9lDir = TEST_CLI_DIR . "/../templates/emails/{$r9lLang}/digital_delivery";
+    assert_true(is_file($r9lDir . '.html') && is_file($r9lDir . '.txt') && is_file($r9lDir . '.subject.txt')
+        && str_contains((string)file_get_contents($r9lDir . '.html'), '{{#each download_links}}'),
+        "R9 digital: the download e-mail exists in {$r9lLang}");
+}
+$pdo->exec("DELETE FROM order_consents WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE 'R9L-%')");
+$pdo->exec("DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE 'R9L-%')");
+$pdo->exec("DELETE FROM orders WHERE order_number LIKE 'R9L-%'");
+$pdo->exec("DELETE FROM products WHERE sku LIKE 'R9L-%'");
+$pdo->exec("DELETE FROM customers WHERE email LIKE 'r9l-%'");
+$pdo->exec("DELETE FROM companies WHERE code LIKE 'r9l-%'");
