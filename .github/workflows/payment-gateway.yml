@@ -61,7 +61,7 @@ jobs:
   stripe-test-checkout:
     name: Stripe test-mode checkout (Chromium, WebKit iPhone, Firefox)
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     # The Stripe key is passed only to the steps that need it (never to npm/npx installs, whose
     # dependency scripts could read the environment); prepare.php writes it into the runtime config.
 
@@ -95,7 +95,7 @@ jobs:
           cache: npm
 
       - name: Install Playwright browsers
-        timeout-minutes: 25
+        timeout-minutes: 40
         run: |
           npm ci --ignore-scripts
           # The runner's apt mirror can stall for minutes per package: time out and retry instead of hanging the job.
@@ -103,6 +103,9 @@ jobs:
           for attempt in 1 2 3; do
             timeout 480 npx playwright install --with-deps chromium webkit firefox && exit 0
             echo "::warning::playwright install attempt $attempt did not finish; retrying"
+            # timeout stops npx, not the apt-get it started: let that finish (it holds the dpkg lock) before retrying.
+            timeout 600 bash -c 'while pgrep -x apt-get >/dev/null || pgrep -x dpkg >/dev/null; do sleep 10; done' || true
+            sudo dpkg --configure -a || true
           done
           exit 1
 

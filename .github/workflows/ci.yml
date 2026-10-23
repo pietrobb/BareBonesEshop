@@ -149,7 +149,7 @@ jobs:
   browser-qualification:
     name: Browser, axe & Lighthouse
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 70
 
     steps:
       - name: Checkout
@@ -172,7 +172,7 @@ jobs:
           cache: npm
 
       - name: Install qualification tools and browsers (Chromium, WebKit, Firefox)
-        timeout-minutes: 25
+        timeout-minutes: 40
         run: |
           npm ci
           # The runner's apt mirror can stall for minutes per package: time out and retry instead of hanging the job.
@@ -180,6 +180,9 @@ jobs:
           for attempt in 1 2 3; do
             timeout 480 npx playwright install --with-deps chromium webkit firefox && exit 0
             echo "::warning::playwright install attempt $attempt did not finish; retrying"
+            # timeout stops npx, not the apt-get it started: let that finish (it holds the dpkg lock) before retrying.
+            timeout 600 bash -c 'while pgrep -x apt-get >/dev/null || pgrep -x dpkg >/dev/null; do sleep 10; done' || true
+            sudo dpkg --configure -a || true
           done
           exit 1
 
