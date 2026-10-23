@@ -228,7 +228,7 @@ final class MinimalPdf
     {
         if (isset(self::EXTRA_GLYPHS[$char])) return self::EXTRA_GLYPHS[$char];
         $code = mb_ord($char, 'UTF-8');
-        return $code !== false && $code >= 0x100 && $code <= 0x17F ? self::LATIN_EXT_A[$code - 0x100] : null;
+        return $code >= 0x100 && $code <= 0x17F ? self::LATIN_EXT_A[$code - 0x100] : null;
     }
 
     /** @param array<string,int> $slots */
