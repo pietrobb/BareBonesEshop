@@ -1,0 +1,20 @@
+<!-- legal-updated: 2026-10-23 -->
+<!-- Diese Vorlage ist ein Ausgangspunkt. Vor Produktion rechtlich prüfen lassen. R9: seller identity (DE § 5 DDG Impressum; Directive 2000/31/EC art. 5). -->
+<h1>Impressum</h1>
+<h2>Angaben gemäß § 5 DDG</h2>
+<p>{{name}}<br>{{street}}<br>{{zip}} {{city}}<br>{{country}}</p>
+<!-- if:representative --><p>Vertreten durch: {{representative}}</p><!-- /if -->
+<!-- if:register_note --><p>Registereintrag: {{register_note}}</p><!-- /if -->
+<ul>
+<!-- if:ico --><li>Firmennummer: {{ico}}</li><!-- /if -->
+<!-- if:dic --><li>Steuernummer: {{dic}}</li><!-- /if -->
+<!-- if:ic_dph --><li>Umsatzsteuer-Identifikationsnummer gemäß § 27a UStG: {{ic_dph}}</li><!-- /if -->
+</ul>
+<h2>Kontakt</h2>
+<ul>
+<!-- if:email --><li>E-Mail: <a href="mailto:{{email}}">{{email}}</a></li><!-- /if -->
+<!-- if:phone --><li>Telefon: {{phone}}</li><!-- /if -->
+</ul>
+<!-- if:adr_name --><h2>Verbraucherstreitbeilegung</h2>
+<p>Verbraucher können sich zur außergerichtlichen Streitbeilegung wenden an: <a href="{{adr_url}}" rel="noopener">{{adr_name}}</a>.</p><!-- /if -->
+<p>Zuletzt geändert: {{updated_at}}.</p>

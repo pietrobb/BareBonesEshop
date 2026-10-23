@@ -8,6 +8,7 @@ class Cart {
     public const MAX_QTY = 99;
     /** unavailable_reason of a line whose effective unit price is negative (e.g. a variant delta that outgrew its base price). */
     public const UNAVAILABLE_PRICE_INVALID = 'price_invalid';
+    public const UNAVAILABLE_CURRENCY = 'not_priced_in_store_currency';
     /** @var array<string, true> SKUs already reported in this request */
     private static array $reportedInvalidPrices = [];
 
@@ -64,12 +65,19 @@ class Cart {
             return ['ok' => false, 'error' => 'product_unavailable'];
         }
         $key = $variantId === null ? "p_{$productId}" : "v_{$variantId}";
+        $previous = $_SESSION['cart'][$key] ?? null;
         $requested = (int)(self::get()[$key]['qty'] ?? 0) + max(1, $qty);
         self::add($productId, $variantId, max(1, min(self::MAX_QTY, $qty)));
         $summary = self::enriched();
         $item = null;
         foreach ($summary['items'] as $candidate) {
             if ($candidate['key'] === $key) { $item = $candidate; break; }
+        }
+        // No price in the store's currency: not sold here, and the cart is left as it was.
+        if (($item['unavailable_reason'] ?? null) === self::UNAVAILABLE_CURRENCY) {
+            if ($previous === null) unset($_SESSION['cart'][$key]);
+            else $_SESSION['cart'][$key] = $previous;
+            return ['ok' => false, 'error' => 'product_unavailable'];
         }
         // The line holds at most MAX_QTY and, without backorders, the stock: report what it really holds.
         $quantity = $item === null ? 0 : (int)$item['qty'];
@@ -164,7 +172,8 @@ class Cart {
 
         $items = [];
         $subtotal = 0;
-        $cartCurrency = null; // enforced currency for entire cart
+        // The store's currency; a line priced in another one is not for sale here (Pricing::soldInStore).
+        $cartCurrency = strtolower(StoreContext::current()->currency()) ?: null;
 
         foreach ($cart as $key => $item) {
             $product = $products[$item['product_id']] ?? null;
@@ -248,6 +257,10 @@ class Cart {
                 $cartCurrency = $currency;
             }
             $currencyMismatch = ($currency !== $cartCurrency);
+            if (!Pricing::soldInStore($currency)) {
+                $available = false;
+                $unavailableReason = self::UNAVAILABLE_CURRENCY;
+            }
             if ($price < 0) {
                 // Never sell at 0 because of a clamp: the line stays visible but is not purchasable,
                 // keeps its negative price (Orders::create refuses it too) and an incident is raised.

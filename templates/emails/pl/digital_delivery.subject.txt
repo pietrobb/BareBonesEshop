@@ -1,0 +1,1 @@
+Zamówienie cyfrowe {{order_number}} jest gotowe

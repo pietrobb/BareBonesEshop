@@ -8,7 +8,8 @@
  * (e-mail with the statement and that time). Withdrawing is not a return: the merchant then cancels or takes the
  * goods back through RMA as usual; a merchant_notify job tells the merchant.
  *
- * Withdrawal period: 14 days after delivery (Rma::withinReturnWindow, rma_return_window_days may only extend it).
+ * Withdrawal period: 14 days after delivery, or after the order for digital content only (withinPeriod();
+ * rma_return_window_days may only extend it).
  * Wording is a technical baseline for a lawyer to review.
  */
 class Withdrawal {
@@ -36,13 +37,36 @@ class Withdrawal {
         return self::openItems($order) === [] ? 'already' : null;
     }
 
+    /**
+     * The period runs from delivery of the goods, or from the contract (the order) for an order of digital content
+     * only (art. 9(2)). Goods not (yet) marked delivered stay withdrawable, but never past the longest period the
+     * directive allows at all: 12 months after the original one (art. 10). rma_return_window_days may only extend it.
+     */
     public static function withinPeriod(array $order, ?int $now = null): bool {
+        $days = max(self::PERIOD_DAYS, (int)(Security::config()['rma_return_window_days'] ?? self::PERIOD_DAYS));
+        $now ??= time();
         $deliveredAt = (string)($order['delivered_at'] ?? '');
-        if ($deliveredAt === '') return true;
-        $configured = (int)(Security::config()['rma_return_window_days'] ?? self::PERIOD_DAYS);
-        if ($configured <= 0) return true;
-        $delivered = strtotime($deliveredAt . ' UTC');
-        return $delivered === false || ($now ?? time()) <= $delivered + max(self::PERIOD_DAYS, $configured) * 86400;
+        $start = $deliveredAt !== '' ? strtotime($deliveredAt . ' UTC') : (self::digitalOnly($order) ? self::orderedAt($order) : false);
+        if ($start !== false) return $now <= $start + $days * 86400;
+        $ordered = self::orderedAt($order);
+        return $ordered === false || $now <= $ordered + ($days + self::MAX_EXTENSION_DAYS) * 86400;
+    }
+
+    /** Art. 10(1): a period not properly disclosed ends 12 months after the original one at the latest. */
+    private const MAX_EXTENSION_DAYS = 365;
+
+    /** Unix time the order (the distance contract) was placed, or false when unknown. */
+    public static function orderedAt(array $order): int|false {
+        $created = (string)($order['created_at'] ?? '');
+        return $created === '' ? false : strtotime($created . ' UTC');
+    }
+
+    /** Whether every line of the order is digital content (nothing is shipped, so nothing is ever "delivered"). */
+    public static function digitalOnly(array $order): bool {
+        $stmt = Db::get()->prepare('SELECT p.product_type FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id WHERE oi.order_id = ?');
+        $stmt->execute([(int)($order['id'] ?? 0)]);
+        $types = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        return $types !== [] && array_filter($types, static fn($type): bool => !VariantAvailability::isDigitalType((string)$type)) === [];
     }
 
     /**

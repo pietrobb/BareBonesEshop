@@ -1002,16 +1002,18 @@ class GdprService {
             throw new InvalidArgumentException("policy.field invalid: {$field}");
         }
         $cutoff = self::computeCutoff($p);
-        $countStmt = $db->prepare("SELECT COUNT(*) AS c FROM {$table} WHERE {$field} <= :cutoff");
-        $countStmt->execute([':cutoff' => $cutoff]);
+        $params = [];
+        $expired = self::expiredWhere($p, $field, $params);
+        $countStmt = $db->prepare("SELECT COUNT(*) AS c FROM {$table} WHERE {$expired}");
+        $countStmt->execute($params);
         $affected = (int)$countStmt->fetch()['c'];
         $countStmt->closeCursor();
 
         if ($mode === 'apply' && $affected > 0) {
-            $affected = self::retentionWrite($db, $p, "DELETE FROM {$table}", "{$field} <= :cutoff", [':cutoff' => $cutoff]);
+            $affected = self::retentionWrite($db, $p, "DELETE FROM {$table}", $expired, $params);
         }
 
-        return self::recordRun($db, $key, $mode, $affected, $start, ['cutoff' => $cutoff]);
+        return self::recordRun($db, $key, $mode, $affected, $start, ['cutoff' => $cutoff] + self::countryCutoffs($p));
     }
 
     private static function retentionDeleteExpiredTtl(PDO $db, string $key, array $p, string $mode, float $start): array {
@@ -1067,7 +1069,8 @@ class GdprService {
         // neither rewrites rows scrubbed earlier (and their marker date) nor counts them again. An empty
         // field holds nothing and stays empty (the marker would show on documents printed later).
         // Distinct placeholders: native MySQL prepares reject a repeated named parameter.
-        $params = [':cutoff' => $cutoff];
+        $params = [];
+        $expired = self::expiredWhere($p, $field, $params);
         $pending = [];
         $sets = [];
         foreach (array_values($scrub) as $i => $f) {
@@ -1076,7 +1079,7 @@ class GdprService {
             $params[":erased{$i}"] = (isset($keepLines[$f]) ? '%' : '') . $markerPrefix . '%';
             $sets[] = "{$f} = CASE WHEN {$f} IS NULL OR {$f} = '' THEN {$f} ELSE :marker{$i} END";
         }
-        $where = "{$field} <= :cutoff AND (" . implode(' OR ', $pending) . ')';
+        $where = "({$expired}) AND (" . implode(' OR ', $pending) . ')';
         foreach (array_values($statuses ?? []) as $i => $status) $params[":status{$i}"] = $status;
         if ($statuses !== null) $where .= ' AND status IN (' . implode(', ', array_map(static fn(int $i): string => ":status{$i}", array_keys(array_values($statuses)))) . ')';
         $countStmt = $db->prepare("SELECT COUNT(*) AS c FROM {$table} WHERE {$where}");
@@ -1094,7 +1097,7 @@ class GdprService {
 
         return self::recordRun($db, $key, $mode, $affected, $start, [
             'cutoff' => $cutoff, 'fields' => $scrub
-        ]);
+        ] + self::countryCutoffs($p));
     }
 
     /**
@@ -1211,6 +1214,57 @@ class GdprService {
         $key = (string)($p['key'] ?? 'id');
         if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $key)) throw new InvalidArgumentException("policy.key invalid: {$key}");
         return Db::writeInBatches((string)$p['table'], $statement, $where, $params, $statementParams, $key, 1000, $db);
+    }
+
+    /**
+     * WHERE clause of the rows past their retention period. With ttl_days_by_country (country code => days, the
+     * accounting retention differs by the seller's country) the rows of a store whose legal.country is listed
+     * use that country's period, the others ttl_days. Adds its placeholders to $params.
+     */
+    private static function expiredWhere(array $p, string $field, array &$params): string {
+        $params[':cutoff'] = self::computeCutoff($p);
+        $byCountry = self::storesByCountry($p);
+        if ($byCountry === []) return "{$field} <= :cutoff";
+        $parts = [];
+        $listed = [];
+        foreach ($byCountry as $country => $storeIds) {
+            $in = [];
+            foreach ($storeIds as $storeId) {
+                $in[] = $name = ':retention_store' . count($listed);
+                $params[$name] = $listed[] = $storeId;
+            }
+            $params[":cutoff_{$country}"] = self::computeCutoff(['ttl_days' => (int)$p['ttl_days_by_country'][$country]]);
+            $parts[] = '(store_id IN (' . implode(', ', $in) . ") AND {$field} <= :cutoff_{$country})";
+        }
+        $others = [];
+        foreach ($listed as $i => $storeId) $params[$others[] = ":retention_other{$i}"] = $storeId;
+        $parts[] = '(store_id NOT IN (' . implode(', ', $others) . ") AND {$field} <= :cutoff)";
+        return implode(' OR ', $parts);
+    }
+
+    /** @return array<string, list<string>> listed country => ids of the stores whose legal.country it is */
+    private static function storesByCountry(array $p): array {
+        $periods = $p['ttl_days_by_country'] ?? null;
+        if ($periods === null) return [];
+        if (!is_array($periods) || array_filter($periods, static fn($days, $country): bool => !preg_match('/^[A-Z]{2}$/', (string)$country)
+                || !is_int($days) || $days < 1, ARRAY_FILTER_USE_BOTH)) {
+            throw new InvalidArgumentException('policy.ttl_days_by_country must map ISO country codes to days');
+        }
+        $result = [];
+        foreach ((array)(Bootstrap::stores()['stores'] ?? []) as $storeId => $store) {
+            $country = strtoupper(trim((string)($store['legal']['country'] ?? '')));
+            if (isset($periods[$country])) $result[$country][] = (string)$storeId;
+        }
+        return $result;
+    }
+
+    /** Run details: the cutoff used per listed country. */
+    private static function countryCutoffs(array $p): array {
+        $cutoffs = [];
+        foreach (array_keys(self::storesByCountry($p)) as $country) {
+            $cutoffs[$country] = self::computeCutoff(['ttl_days' => (int)$p['ttl_days_by_country'][$country]]);
+        }
+        return $cutoffs === [] ? [] : ['cutoff_by_country' => $cutoffs];
     }
 
     private static function computeCutoff(array $p): string {
