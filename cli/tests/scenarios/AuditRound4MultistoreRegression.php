@@ -29,6 +29,9 @@ if ($phase === 'setup') {
     $category->execute(['r4-other', 'r4-foreign-cat', 'R4 foreign category', 'r4-foreign-cat']);
     $db->prepare("INSERT INTO products (store_id, category_id, sku, slug, name, price, currency, stock, status) VALUES ('default', ?, 'R4-SKU', 'r4-product', 'R4 Product', 24585, 'eur', 0, 'active')")->execute([$categoryId]);
     $db->prepare("INSERT INTO products (store_id, category_id, sku, slug, name, price, currency, stock, status) VALUES ('r4-other', ?, 'R4-FOREIGN', 'r4-foreign', 'R4 Foreign', 100, 'eur', 0, 'active')")->execute([$categoryId]);
+    // R9: the cz store sells the shared EUR catalog only at its CZK price list (Pricing::soldInStore).
+    $db->exec("INSERT INTO price_lists (store_id, code, name, currency, customer_group_id, priority, active) VALUES ('cz', 'r4-czk', 'R4 CZK', 'CZK', NULL, 0, 1)");
+    $db->prepare("INSERT INTO price_list_prices (price_list_id, product_id, variant_id, min_qty, price) SELECT ?, id, NULL, 1, 614600 FROM products WHERE sku = 'R4-SKU'")->execute([(int)$db->lastInsertId()]);
     // Stock is booked in the default store (the catalog owner): the cz store must sell from the same warehouse.
     StoreContext::activate(StoreContext::resolve(Bootstrap::stores(), '/', ''));
     Warehouse::setStock((int)Warehouse::defaultWarehouse()['id'], 'R4-SKU', 5);
@@ -82,7 +85,7 @@ if ($action === 'api_card') {
     Bootstrap::initLocale('/cs/');
     Cart::add((int)$db->query("SELECT id FROM products WHERE sku = 'R4-SKU'")->fetchColumn(), null, 1);
     $run = CheckoutService::execute(['name' => 'R4 Card', 'email' => 'r4-card@example.test', 'phone' => '+420777000444', 'street' => 'Vinohradska 4',
-        'city' => 'Praha', 'zip' => '12000', 'country' => 'SK', 'csrf_token' => Security::csrfToken(), 'payment_method' => 'card'] + $input, $config);
+        'city' => 'Praha', 'zip' => '12000', 'country' => 'CZ', 'csrf_token' => Security::csrfToken(), 'payment_method' => 'card'] + $input, $config);
     $result(['run' => $run, 'gateway' => array_intersect_key($gateway::$order, array_flip(['success_url', 'cancel_url', 'notify_url', 'currency'])), 'state' => $state()]);
 }
 $_SERVER['REQUEST_METHOD'] = $action === 'checkout_post' ? 'POST' : 'GET';
@@ -95,7 +98,7 @@ if ($action === 'cart') {
     Cart::add((int)$db->query("SELECT id FROM products WHERE sku = 'R4-SKU'")->fetchColumn(), null, 1);
 } elseif ($action === 'checkout_post') {
     $_POST = ['name' => 'R4 Buyer', 'email' => 'r4-buyer@example.test', 'phone' => '+420777000444', 'street' => 'Vinohradska 4', 'city' => 'Praha',
-        'zip' => '12000', 'country' => 'SK', 'checkout' => '1', 'csrf_token' => Security::csrfToken()] + $input;
+        'zip' => '12000', 'country' => 'CZ', 'checkout' => '1', 'csrf_token' => Security::csrfToken()] + $input;
 } elseif ($action === 'done') {
     $order = Orders::byId((int)$input['order_id']);
     $_GET += ['order' => (string)$order['order_number'], 'confirmation_token' => CheckoutSession::createConfirmation((int)$order['id'], CheckoutSession::browserSessionId())];
@@ -124,12 +127,13 @@ try {
     [$r4Exit, , $r4Noise] = $r4Run('setup', 'none');
     assert_equals([0, ''], [$r4Exit, $r4Noise], 'R4 multistore: fixture migrated with a default-catalog product stocked in the default store');
 
-    // 3. Cart amounts are in the cart (product) currency, and the runtime config carries it with its decimals.
+    // 3. Cart amounts are in the cart currency, and the runtime config carries it with its decimals. Since R9 the
+    // cz store sells the EUR product at its CZK price list (6 146 Kč), never as the catalog's 245,85 €.
     [, $r4Cart, $r4Noise] = $r4Run('run', 'cart');
     $r4Html = (string)($r4Cart['output'] ?? '');
-    assert_true(str_contains($r4Html, '245,85 €') && !str_contains($r4Html, 'Kč'), 'R4 currency: the /cs/ cart shows the EUR line as 245,85 €, not 246 Kč (' . $r4Noise . ')');
-    assert_true(str_contains($r4Html, '"currency":"EUR","currencyDecimals":2') || str_contains($r4Html, '"currency":"EUR","currencyDecimals":2'),
-        'R4 currency: the storefront runtime config formats checkout amounts in EUR with 2 decimals');
+    assert_true(preg_match('~6\D{0,8}146 Kč~u', $r4Html) === 1 && !str_contains($r4Html, '245,85'), 'R4 currency: the /cs/ cart shows the line at the CZK price list price, not the EUR catalog price (' . $r4Noise . ')');
+    assert_true(str_contains($r4Html, '"currency":"CZK","currencyDecimals":0'),
+        'R4 currency: the storefront runtime config formats checkout amounts in CZK with 0 decimals');
 
     // 1. Stock: the checkout page offers shipping and the order reserves the shared warehouse's stock.
     [, $r4Page] = $r4Run('run', 'checkout');
@@ -137,7 +141,7 @@ try {
     assert_true(!empty($r4Ship[1]) && str_contains((string)$r4Page['output'], 'name="payment" value="bank_transfer"'), 'R4 checkout: the /cs/ checkout offers shipping and bank transfer');
     [, $r4Placed, $r4Noise] = $r4Run('run', 'checkout_post', ['shipping_method' => $r4Ship[1] ?? '', 'payment' => 'bank_transfer']);
     $r4Order = $r4Placed['state']['orders'][0] ?? [];
-    assert_true(count($r4Placed['state']['orders'] ?? []) === 1 && ($r4Order['store_id'] ?? '') === 'cz' && ($r4Order['currency'] ?? '') === 'eur',
+    assert_true(count($r4Placed['state']['orders'] ?? []) === 1 && ($r4Order['store_id'] ?? '') === 'cz' && ($r4Order['currency'] ?? '') === 'czk',
         'R4 stock: a guest bank-transfer order is placed in the cz store, not refused with stock_changed (' . substr(strip_tags((string)($r4Placed['output'] ?? '')), 0, 200) . $r4Noise . ')');
     assert_equals([['store_id' => 'default', 'qty' => 5, 'reserved' => 1]], $r4Placed['state']['stock'] ?? null, 'R4 stock: the cz order reserves from the catalog owner\'s warehouse');
     [, $r4Done] = $r4Run('run', 'done', ['order_id' => (int)($r4Order['id'] ?? 0)]);

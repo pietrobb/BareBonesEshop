@@ -233,6 +233,16 @@ class Pricing {
      * Price-list currencies for a product, preferred first. A store selling in another currency than the product's
      * (the sample CZK store on the shared EUR catalog) sells it in its own when one of its price lists prices it there.
      */
+    /**
+     * Whether the active store sells at a price in $currency. A store sells only in its own currency: an item of the
+     * shared catalog with no price in it (no price-list row there, a surcharged variant without its own row) is not for
+     * sale in that store, instead of being charged in the catalog's currency next to the store's.
+     */
+    public static function soldInStore(string $currency): bool {
+        $store = strtolower(StoreContext::current()->currency());
+        return $store === '' || strtolower($currency) === $store;
+    }
+
     private static function priceCurrencies(string $productCurrency): array {
         $store = strtolower(StoreContext::current()->currency());
         return $store !== '' && $store !== $productCurrency ? [$store, $productCurrency] : [$productCurrency];

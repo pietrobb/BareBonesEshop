@@ -21,10 +21,10 @@ test('guest purchase by bank transfer completes in the /cs/ store', async ({ pag
   await button.click();
   await expect(page.locator('.cart-badge')).toHaveText(/^[1-9]/);
 
-  // The seeded products are priced in EUR: the cart formats them in the cart's currency.
+  // The EUR catalog is sold in the cz store at its CZK price list (seed.php): the cart is in koruny.
   await page.goto('/cs/?page=cart');
-  await expect(page.locator('main')).toContainText('€');
-  await expect(page.locator('main')).not.toContainText('Kč');
+  await expect(page.locator('main')).toContainText('Kč');
+  await expect(page.locator('main')).not.toContainText('€');
 
   // The store-prefixed JSON API quotes shipping and payment for the cz cart.
   const apiCalls = ['shipping_rates', 'payment_methods'].map(action => page.waitForResponse(
@@ -39,7 +39,7 @@ test('guest purchase by bank transfer completes in the /cs/ store', async ({ pag
   await page.locator('input[name="zip"]').fill('12000');
   await expect(page.locator('input[name="shipping_method"]').first()).toBeVisible();
   await page.locator('input[name="payment"][value="bank_transfer"]').check();
-  await expect(page.locator('#summary-total')).toContainText('€');
+  await expect(page.locator('#summary-total')).toContainText('Kč');
   await page.locator('form.checkout-form button.btn-checkout').click();
 
   await expect(page).toHaveURL(/\/cs\/\?page=order-done/);
@@ -47,6 +47,6 @@ test('guest purchase by bank transfer completes in the /cs/ store', async ({ pag
   expect(orderNumber).toMatch(/^ORD-/);
   const facts = orderFacts(orderNumber, 'cz');
   expect(facts.store_id).toBe('cz');
-  expect(facts.currency).toBe('eur');
+  expect(facts.currency).toBe('czk');
   expect(facts.status).toBe('pending');
 });

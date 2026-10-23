@@ -50,9 +50,13 @@ nginx PHP fallback when `operations.nginx_config` is set).
     list of a CZK store sharing the EUR catalog was ignored (only lists in the product's currency
     counted), so the store charged euros and offered the EUR `shipping.json` methods. Now a product
     priced by such a list is shown, carted and ordered in the store's currency, and the store's own
-    carriers and payment fees apply. A product the list does not price keeps its catalog currency (a
-    cart holds one currency), a variant with a surcharge needs its own row in the list, and with no
-    recorded price history in that currency no prior price is struck through. `shipping.json` method
+    carriers and payment fees apply. **A store sells only in its own currency:** a product the list
+    does not price, and a variant with a surcharge or its own price but no row of its own, is shown as
+    unavailable in that store, cannot be added to the cart and is refused at checkout. Before, it was
+    sold in the catalog's currency, and a cart mixing it with priced items could not be ordered.
+    `setup.php doctor` warns (`stores.currency_prices.<store>`) and lists such items. **The shipped
+    PLN, HUF and USD sample stores sell nothing** until you give them price lists in their currency
+    (or remove them). With no recorded price history in that currency, no prior price is struck through. `shipping.json` method
     names are shown in the shopper's language (`cs`, `pl`, `hu`, `es` names added).
 - **VAT rates (2026-10-23)** — products with `vat_class` `books` or `medicines` now get each country's
   own rate instead of its `reduced` class (e.g. IE books 0 %, IT/ES 4 %, FR 5.5 %, DE medicines 19 %).
