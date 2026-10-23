@@ -50,10 +50,11 @@
     "orders_pii": {
       "table": "orders",
       "ttl_days": 3650,
+      "ttl_days_by_country": {"SK": 4018, "CZ": 4018, "DE": 4018, "AT": 2922, "PL": 2192, "HU": 3288},
       "field": "created_at",
       "action": "scrub_pii",
       "scrub_fields": ["customer_name", "customer_email", "customer_phone", "shipping_addr", "ip_address", "notes"],
-      "rationale": "10y SK accounting law (Act 431/2002 §35). After 10y, scrub PII; keep numeric/legal columns."
+      "rationale": "Accounting records of the seller's country (stores.json legal.country), counted from the order to the end of the period that runs from the end of its year: SK 10 y (Act 431/2002 §35), CZ 10 y (VAT Act 235/2004 §35), DE 10 y (AO §147), AT 7 y (BAO §132), PL 5 y from the end of the tax year (Ordynacja podatkowa art. 86/70), HU 8 y (Act C/2000 §169) — each plus one year. Other countries: ttl_days. After it, scrub PII; keep numeric/legal columns. LAWYER TO REVIEW the periods."
     },
     "orders_contact": {
       "table": "orders",

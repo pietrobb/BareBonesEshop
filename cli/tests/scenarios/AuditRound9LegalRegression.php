@@ -231,3 +231,33 @@ assert_equals(
      'text part with' => $r9lRefused('<p>' . $r9lLegal . '</p>', "Seller: {{seller_name}}, {{seller_address}}\nWithdraw: {{withdrawal_url}}\nTerms: {{terms_url}}")],
     'R9 e-mail legal variables: only visible placement counts, in the HTML and in a custom text part');
 I18n::setLocale($r9lLocale);
+
+// R9 (retention): one order retention for every country — the accounting period depends on the seller's country.
+echo "\n--- R9: retention by the seller's country ---\n";
+$r9lStores = (array)(Bootstrap::stores()['stores'] ?? []);
+$r9lDe = (string)array_key_first(array_filter($r9lStores, static fn(array $s): bool => strtoupper((string)($s['legal']['country'] ?? '')) === 'DE'));
+$r9lOther = (string)array_key_first(array_filter($r9lStores, static fn(array $s): bool => strtoupper((string)($s['legal']['country'] ?? '')) !== 'DE'));
+assert_true($r9lDe !== '' && $r9lOther !== '', 'R9 retention: the test stores include a German and a non-German seller');
+$r9lRetOrder = $pdo->prepare("INSERT INTO orders (order_number, status, payment_status, customer_name, customer_email, payment_method, subtotal, total, currency, store_id, locale, notes, created_at)
+    VALUES (?, 'r_nine_ret', 'paid', 'R9L Ret', 'r9l-ret@example.test', 'card', 100, 100, 'eur', ?, 'sk', 'ring twice', ?)");
+foreach (['R9L-RET-OTHER-3000' => [$r9lOther, 3000], 'R9L-RET-OTHER-4500' => [$r9lOther, 4500], 'R9L-RET-DE-3000' => [$r9lDe, 3000], 'R9L-RET-DE-2000' => [$r9lDe, 2000]] as $r9lNumber => [$r9lStore, $r9lAge]) {
+    $r9lRetOrder->execute([$r9lNumber, $r9lStore, gmdate('Y-m-d H:i:s', time() - $r9lAge * 86400)]);
+}
+$r9lRetPolicy = ['table' => 'orders', 'ttl_days' => 4000, 'ttl_days_by_country' => ['DE' => 2500], 'field' => 'created_at', 'action' => 'scrub_pii',
+    'scrub_fields' => ['notes'], 'status_in' => ['r_nine_ret']];
+// Dry-run counts (the scenario database has no data_retention_runs log): 3000/4500 days for the other seller, 2000/3000 for the German one.
+$r9lDue = static fn(array $policy): int => (int)GdprService::applyRetention('r9l_orders', $policy + $r9lRetPolicy, 'dry-run')['affected'];
+assert_equals(['DE 2500, others 4000' => 2, 'DE 3500, others 4000' => 1, 'DE 1000, others 5000' => 2, 'no map, 2500' => 3],
+    ['DE 2500, others 4000' => $r9lDue([]), 'DE 3500, others 4000' => $r9lDue(['ttl_days_by_country' => ['DE' => 3500]]),
+     'DE 1000, others 5000' => $r9lDue(['ttl_days' => 5000, 'ttl_days_by_country' => ['DE' => 1000]]), 'no map, 2500' => $r9lDue(['ttl_days' => 2500, 'ttl_days_by_country' => null])],
+    'R9 retention: German orders are due after the German period, the other seller\'s orders after the default one');
+$r9lThrows = static function (array $policy): bool {
+    try { GdprService::applyRetention('r9l_bad', $policy, 'dry-run'); return false; } catch (InvalidArgumentException) { return true; }
+};
+assert_equals([true, true], [$r9lThrows(['ttl_days_by_country' => ['de' => 10]] + $r9lRetPolicy), $r9lThrows(['ttl_days_by_country' => ['DE' => '10']] + $r9lRetPolicy)],
+    'R9 retention: a malformed country map is refused');
+$r9lConfigPolicy = json_decode((string)file_get_contents(TEST_CLI_DIR . '/../config/data-retention.json'), true)['policies']['orders_pii'];
+assert_true(isset($r9lConfigPolicy['ttl_days_by_country']['SK'], $r9lConfigPolicy['ttl_days_by_country']['DE'], $r9lConfigPolicy['ttl_days_by_country']['CZ'])
+    && isset(GdprService::applyRetention('orders_pii', $r9lConfigPolicy, 'dry-run')['details']['cutoff_by_country']['DE']),
+    'R9 retention: the shipped orders_pii policy has per-country periods and applies them');
+$pdo->exec("DELETE FROM orders WHERE status = 'r_nine_ret'");
