@@ -1682,7 +1682,7 @@ $uaHttp = static function (string $method, string $path, array $post = [], strin
     $context = stream_context_create(['http' => ['method' => $method, 'header' => $headers, 'content' => http_build_query($post),
         'follow_location' => 0, 'ignore_errors' => true, 'timeout' => 10]]);
     $body = @file_get_contents("http://127.0.0.1:{$uaPort}{$path}", false, $context);
-    $responseHeaders = $http_response_header ?? [];
+    $responseHeaders = HttpResponseHeaders::last($http_response_header ?? null);
     $location = '';
     foreach ($responseHeaders as $line) if (stripos($line, 'Location:') === 0) $location = trim(substr($line, 9));
     return ['status' => (int)(explode(' ', (string)($responseHeaders[0] ?? ''))[1] ?? 0), 'location' => $location, 'body' => (string)$body];

@@ -136,7 +136,7 @@ $p0Http = static function (string $method, string $path, array $post, string &$s
         'follow_location' => 0, 'ignore_errors' => true, 'timeout' => 15]]);
     $body = @file_get_contents("http://127.0.0.1:{$p0Port}{$path}", false, $context);
     $result = ['status' => 0, 'location' => '', 'csp' => '', 'reporting' => '', 'body' => (string)$body];
-    foreach ($http_response_header ?? [] as $index => $line) {
+    foreach (HttpResponseHeaders::last($http_response_header ?? null) as $index => $line) {
         if ($index === 0) $result['status'] = (int)(explode(' ', $line)[1] ?? 0);
         if (stripos($line, 'Reporting-Endpoints:') === 0) $result['reporting'] = trim(substr($line, 20));
         if (stripos($line, 'Location:') === 0) $result['location'] = trim(substr($line, 9));
@@ -226,7 +226,7 @@ try {
     $p0Report = static function (string $method, string $body, string $type) use ($p0Port): int {
         $context = stream_context_create(['http' => ['method' => $method, 'header' => "Content-Type: {$type}\r\n", 'content' => $body, 'ignore_errors' => true, 'timeout' => 15]]);
         @file_get_contents("http://127.0.0.1:{$p0Port}/api/v1/csp-report", false, $context);
-        return (int)(explode(' ', $http_response_header[0] ?? '')[1] ?? 0);
+        return (int)(explode(' ', HttpResponseHeaders::last($http_response_header ?? null)[0] ?? '')[1] ?? 0);
     };
     $p0Db->exec('DELETE FROM csp_violations');
     assert_equals(405, $p0Report('GET', '', 'text/plain'), 'P0 layer 4: CSP report endpoint is POST only');

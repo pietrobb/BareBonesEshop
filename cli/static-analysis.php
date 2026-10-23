@@ -246,6 +246,17 @@ foreach (array_merge(glob($root . '/src/Entrypoints/*.php') ?: [], glob($root . 
 foreach (['src/Entrypoints/Api.php', 'src/Http/ApiHandlers.php', 'cli/TestSuite.php', 'cli/tests/TestHarness.php', 'cli/tests/RegressionSuite.php'] as $relative) {
     if (!is_file($root . '/' . $relative)) $errors[] = "Missing architecture module: {$relative}";
 }
+// PHP 8.5 deprecations (CI runs 8.5): handle/resource closers that are no-ops on objects, and non-canonical casts.
+foreach (['src', 'adapters', 'cli', 'extensions'] as $deprecationDir) {
+    if (!is_dir($root . '/' . $deprecationDir)) continue;
+    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root . '/' . $deprecationDir, FilesystemIterator::SKIP_DOTS)) as $deprecationFile) {
+        if ($deprecationFile->getExtension() !== 'php') continue;
+        $deprecationSource = (string)file_get_contents($deprecationFile->getPathname());
+        if (preg_match('/(?<![\w\'"])(curl_close|curl_share_close|finfo_close|imagedestroy)\s*\(|\((integer|boolean|double|binary)\)/', $deprecationSource, $deprecated)) {
+            $errors[] = str_replace('\\', '/', substr($deprecationFile->getPathname(), strlen($root) + 1)) . " uses {$deprecated[0]}, deprecated in PHP 8.5";
+        }
+    }
+}
 $testRunnerLines = count(file($root . '/cli/TestSuite.php') ?: []);
 if ($testRunnerLines > 100) $errors[] = "cli/TestSuite.php lines {$testRunnerLines} exceeds budget 100";
 // Thematic *Scenario.php modules are listed in cli/TestSuite.php; *Regression.php files are discovered by

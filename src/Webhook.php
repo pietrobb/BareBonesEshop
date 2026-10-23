@@ -126,7 +126,6 @@ class Webhook {
         $error = $response === false ? curl_error($ch) : null;
         $timedOut = $response === false && curl_errno($ch) === CURLE_OPERATION_TIMEDOUT;
         $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-        curl_close($ch);
         return [
             'delivered' => $error === null && $code >= 200 && $code < 300,
             'response_code' => $code > 0 ? $code : null,

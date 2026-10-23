@@ -142,7 +142,7 @@ try {
     $a111Get = static function (string $path) use ($a111Port): array {
         $context = stream_context_create(['http' => ['method' => 'GET', 'follow_location' => 0, 'ignore_errors' => true, 'timeout' => 20]]);
         $body = @file_get_contents("http://127.0.0.1:{$a111Port}{$path}", false, $context);
-        return ['status' => (int)(explode(' ', (string)(($http_response_header ?? [])[0] ?? ''))[1] ?? 0), 'body' => (string)$body];
+        return ['status' => (int)(explode(' ', (string)(HttpResponseHeaders::last($http_response_header ?? null)[0] ?? ''))[1] ?? 0), 'body' => (string)$body];
     };
     try {
         for ($i = 0; $i < 100 && $a111Get('/healthz')['status'] === 0; $i++) usleep(100000);
@@ -177,7 +177,7 @@ try {
         $a111Post = static function (string $path, string $body, string $type = 'application/json') use ($a111Port): array {
             $context = stream_context_create(['http' => ['method' => 'POST', 'header' => "Content-Type: {$type}\r\n", 'content' => $body, 'follow_location' => 0, 'ignore_errors' => true, 'timeout' => 20]]);
             $raw = @file_get_contents("http://127.0.0.1:{$a111Port}{$path}", false, $context);
-            return ['status' => (int)(explode(' ', (string)(($http_response_header ?? [])[0] ?? ''))[1] ?? 0), 'body' => (string)$raw];
+            return ['status' => (int)(explode(' ', (string)(HttpResponseHeaders::last($http_response_header ?? null)[0] ?? ''))[1] ?? 0), 'body' => (string)$raw];
         };
         $a111Categories = $a111Get('/api/v1/storefront/categories');
         assert_true($a111Categories['status'] === 200 && is_array($a111Json($a111Categories)) && !isset($a111Json($a111Categories)['error']),
