@@ -127,3 +127,24 @@ assert_true(count($r9smFull) > 9 && str_contains($r9smIndex, '<sitemapindex') &&
     "R9 sitemap: past the byte limit /sitemap.xml is an index and every part stays within the limit ({$r9smLimit} B; parts: " . implode(', ', $r9smSizes) . ')');
 assert_equals([$r9smFull, 'out of range'], [array_merge(...array_map($r9smUrls, array_values($r9smParts ?: [''])) ), $r9smBeyond],
     'R9 sitemap: the size-cut parts list exactly the URLs of the single sitemap, in order, and no part beyond the last');
+
+// Delivery note: it travels in the parcel, but was printed in the admin's language. Each note is now in the language
+// its order was placed in (an unknown order locale keeps the admin's), and the admin's locale is restored afterwards.
+$r9dnLocale = I18n::locale();
+$r9dnNote = static fn(string $number, string $locale): array => ['order' => ['order_number' => $number, 'locale' => $locale, 'created_at' => '2026-10-23 10:00:00',
+    'customer_name' => 'R9 Recipient', 'customer_phone' => '', 'shipping_method' => '', 'notes' => ''], 'items' => [['sku' => 'R9DN', 'name' => 'R9 Item', 'quantity' => 2]],
+    'address' => ['street' => 'Main 1', 'zip' => '81101', 'city' => 'Bratislava', 'country' => 'sk'], 'pickup' => null];
+$r9dnNotes = [$r9dnNote('R9DN-SK', 'sk'), $r9dnNote('R9DN-DE', 'de'), $r9dnNote('R9DN-XX', 'xx')];
+try {
+    I18n::setLocale('en');
+    $r9dnHtml = DeliveryNote::html($r9dnNotes);
+    $r9dnPdf = DeliveryNote::pdf([$r9dnNotes[1]]);
+    $r9dnAfter = I18n::locale();
+} finally {
+    I18n::setLocale($r9dnLocale);
+}
+preg_match_all('~<section class="note"[^>]*data-delivery-note="([^"]+)"[^>]*>\s*<h1>([^<]+)</h1>~u', $r9dnHtml, $r9dnTitles, PREG_SET_ORDER);
+assert_equals(['R9DN-SK' => 'Dodací list R9DN-SK', 'R9DN-DE' => 'Lieferschein R9DN-DE', 'R9DN-XX' => 'Delivery note R9DN-XX'], array_column($r9dnTitles, 2, 1),
+    'R9 delivery note: each note is titled in its order\'s language (unknown locale: the admin\'s)');
+assert_true(str_contains($r9dnPdf, 'Lieferschein') && !str_contains($r9dnPdf, 'Delivery note'), 'R9 delivery note: the PDF of a German order is in German');
+assert_equals('en', $r9dnAfter, 'R9 delivery note: the admin\'s locale is restored after printing');
