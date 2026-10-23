@@ -80,6 +80,7 @@ $shell = [
     'withdrawal_url' => Template::storeUrl('/?page=withdrawal'),
     'complaint_url' => Template::storeUrl('/?page=complaint'),
     'accessibility_url' => Template::storeUrl('/?page=accessibility'),
+    'imprint_url' => Template::storeUrl('/?page=imprint'),
     'cookie_settings_url' => Template::storeUrl('/?cookie_settings=1'),
     'adr_name' => $adr['name'], 'adr_url' => $adr['url'],
     'show_cookie_banner' => $cookieSettings || (string)($_COOKIE['cc_v1'] ?? '') === '',

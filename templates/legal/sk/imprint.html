@@ -1,0 +1,20 @@
+<!-- legal-updated: 2026-10-23 -->
+<!-- Táto šablóna je východisko. Pred produkciou ju dajte skontrolovať právnikovi. R9: seller identity (DE § 5 DDG Impressum; Directive 2000/31/EC art. 5). -->
+<h1>Údaje o predávajúcom</h1>
+<h2>Prevádzkovateľ obchodu</h2>
+<p>{{name}}<br>{{street}}<br>{{zip}} {{city}}<br>{{country}}</p>
+<!-- if:representative --><p>Štatutárny orgán: {{representative}}</p><!-- /if -->
+<!-- if:register_note --><p>Zápis v registri: {{register_note}}</p><!-- /if -->
+<ul>
+<!-- if:ico --><li>IČO: {{ico}}</li><!-- /if -->
+<!-- if:dic --><li>DIČ: {{dic}}</li><!-- /if -->
+<!-- if:ic_dph --><li>IČ DPH: {{ic_dph}}</li><!-- /if -->
+</ul>
+<h2>Kontakt</h2>
+<ul>
+<!-- if:email --><li>E-mail: <a href="mailto:{{email}}">{{email}}</a></li><!-- /if -->
+<!-- if:phone --><li>Telefón: {{phone}}</li><!-- /if -->
+</ul>
+<!-- if:adr_name --><h2>Riešenie sporov</h2>
+<p>Spotrebiteľ môže spor riešiť mimosúdne cez <a href="{{adr_url}}" rel="noopener">{{adr_name}}</a>.</p><!-- /if -->
+<p>Naposledy zmenené: {{updated_at}}.</p>
