@@ -256,6 +256,9 @@ function pageOrder(): void {
                     <?php endforeach; ?>
                 </select>
                 <input name="note" aria-label="<?= esc(I18n::t('admin.common.note')) ?>" placeholder="<?= esc(I18n::t('admin.order.note_placeholder')) ?>">
+                <?php if (in_array('shipped', $allowed, true) && Withdrawal::forOrder($id)): ?>
+                <label style="display:block;margin:.25rem 0;color:#c62828"><input type="checkbox" name="withdrawal_ack" value="1" data-withdrawal-ack> <?= esc(I18n::t('admin.shipment.withdrawal_ack')) ?></label>
+                <?php endif; ?>
                 <button class="btn btn-primary btn-sm" type="submit"><?= esc(I18n::t('admin.order.change_status')) ?></button>
             </form>
             <?php else: ?>
@@ -648,11 +651,12 @@ function handleOrderStatus(): void {
     }
     $order = Orders::byId($orderId);
     if ($newStatus === 'refunded' || ($order && OrderWorkflow::returnsMoney($order, $newStatus))) Security::adminRequire('orders.refund');
-    $rejection = OrderWorkflow::adminRejection($order, $newStatus, true);
-    if (in_array($rejection, ['not_found', 'payment_not_confirmed', 'refund_outstanding'], true)) {
+    $rejection = OrderWorkflow::adminRejection($order, $newStatus, true, ($_POST['withdrawal_ack'] ?? '') === '1');
+    if (in_array($rejection, ['not_found', 'payment_not_confirmed', 'refund_outstanding', 'withdrawn'], true)) {
         setFlash('err', I18n::t(match ($rejection) {
             'payment_not_confirmed' => 'admin.order.msg.confirm_payment_first',
             'refund_outstanding' => 'admin.order.msg.refund_outstanding',
+            'withdrawn' => 'admin.shipment.msg.withdrawal_ack',
             default => 'admin.order.msg.not_found',
         }));
         header("Location: admin.php?p=order&id={$orderId}");

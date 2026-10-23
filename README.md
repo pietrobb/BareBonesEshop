@@ -39,9 +39,10 @@ git clone --recurse-submodules <repository-url> shop && cd shop
 #    (../bareboneseshop-private: database, jobs, invoices, backups, logs),
 #    the schema, admin forms and import templates, and the first owner account;
 #    then prints the doctor checklist. Safe to re-run: config.php is never
-#    rewritten and an existing owner account is left unchanged.
+#    rewritten and an existing owner account is left unchanged. New orders,
+#    payments and incidents are e-mailed to --admin-email.
 BBE_ADMIN_PASSWORD='a-strong-password' php cli/setup.php install \
-  --app-url=http://localhost:8080 --admin-username=admin
+  --app-url=http://localhost:8080 --admin-email=you@your-shop.com --admin-username=admin
 
 # 3. (optional) Seed demo data
 php cli/seed.php --count=200
@@ -276,6 +277,10 @@ php cli/admin-user.php keygen
 BBE_ADMIN_IDENTITY_KEY=<secret> BBE_ADMIN_PASSWORD=<secret> \
   php cli/admin-user.php create --username=ops --role=owner --store=default
 ```
+
+An owner administers every store in `stores.json` (including stores added later);
+`--store` only picks the store the admin opens first. Other roles see just the
+stores they are granted (`--store=` / the admin users screen).
 
 **Delegated admin management.** Owners can manage every account (except the owner
 protections). A non-owner with `admins.manage` may only create or manage accounts

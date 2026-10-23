@@ -96,7 +96,8 @@ final class BankTransferInstructions {
         return PendingOrderExpiry::offlineTtls(is_array($cfg) ? $cfg : [])['bank_transfer'] ?? 14 * 86400;
     }
 
-    private static function validIban(string $iban): bool {
+    /** ISO 13616 check digits of an IBAN without spaces, upper case. */
+    public static function validIban(string $iban): bool {
         if (!preg_match('/^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$/', $iban)) return false;
         $rearranged = substr($iban, 4) . substr($iban, 0, 4);
         $remainder = 0;

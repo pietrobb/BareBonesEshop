@@ -10,7 +10,7 @@ $root = dirname(__DIR__);
 // install runs before anything reads config.php or the bundled BBF forms library.
 if ($command === 'install') {
     require_once __DIR__ . '/../src/Setup.php';
-    $options = cli_long_options($argv, ['admin-username:', 'app-url:']);
+    $options = cli_long_options($argv, ['admin-username:', 'app-url:', 'admin-email:']);
     $adminUsername = trim((string)($options['admin-username'] ?? ''));
     $log = static function (string $line) use ($json): void {
         fwrite($json ? STDERR : STDOUT, $line . "\n");
@@ -37,7 +37,7 @@ if ($command === 'install') {
             throw new RuntimeException('--admin-username needs BBE_ADMIN_PASSWORD in the process environment');
         }
         $log('[1/4] config.php');
-        $steps['config'] = Setup::createConfig($root, trim((string)($options['app-url'] ?? '')));
+        $steps['config'] = Setup::createConfig($root, trim((string)($options['app-url'] ?? '')), trim((string)($options['admin-email'] ?? '')));
         $log('  ' . $steps['config']['action']);
         $log('[2/4] private runtime paths');
         $steps['apply'] = json_decode($run(['cli/setup.php', 'apply', '--json'], 'setup apply'), true)['changes'] ?? [];
@@ -100,7 +100,7 @@ try {
         $result = Setup::apply();
         $result['doctor'] = Setup::doctor();
     } else {
-        throw new InvalidArgumentException('Usage: php cli/setup.php install|doctor|apply [--json] [--strict] [--app-url=URL] [--admin-username=NAME]');
+        throw new InvalidArgumentException('Usage: php cli/setup.php install|doctor|apply [--json] [--strict] [--app-url=URL] [--admin-email=ADDRESS] [--admin-username=NAME]');
     }
 
     if ($json) {

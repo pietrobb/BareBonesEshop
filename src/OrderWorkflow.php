@@ -53,15 +53,17 @@ class OrderWorkflow {
 
     /**
      * Why an admin may not move this order to $to (null = allowed). Shared by the order
-     * detail and bulk actions: 'paid' needs a confirmed payment, a move that returns money the refund right.
+     * detail and bulk actions: 'paid' needs a confirmed payment, a move that returns money the refund right,
+     * shipping an order the consumer withdrew from an explicit acknowledgement.
      */
-    public static function adminRejection(?array $order, string $to, bool $mayRefund): ?string {
+    public static function adminRejection(?array $order, string $to, bool $mayRefund, bool $withdrawalAcknowledged = false): ?string {
         if (!$order) return 'not_found';
         if (!in_array($to, self::statuses(), true)) return 'invalid_status';
         if (!$mayRefund && self::returnsMoney($order, $to)) return 'forbidden';
         if (!in_array($to, self::allowedFor($order), true)) return 'invalid_transition';
         if ($to === 'paid' && ($order['payment_status'] ?? 'pending') !== 'paid') return 'payment_not_confirmed';
         if (self::refundOutstanding($order, $to)) return 'refund_outstanding';
+        if ($to === 'shipped' && !$withdrawalAcknowledged && Withdrawal::forOrder((int)$order['id'])) return 'withdrawn';
         return null;
     }
 

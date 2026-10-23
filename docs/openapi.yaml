@@ -517,6 +517,7 @@ components:
       properties:
         status: { type: string, enum: [pending, paid, processing, shipped, delivered, returned, cancelled, refunded] }
         note: { type: [string, 'null'], maxLength: 500 }
+        acknowledge_withdrawal: { type: boolean, default: false, description: 'Ship although the consumer withdrew from the order (otherwise 422 withdrawn)' }
     Shipment:
       type: object
       required: [id, status, warehouse_id, carrier, tracking_number, tracking_url, shipped_at, created_at, items]
