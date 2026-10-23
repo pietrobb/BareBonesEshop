@@ -9,6 +9,16 @@ Read before updating a live shop; run `php cli/migrate.php` after the files are 
 settings below that silently change behaviour (http webhooks, cart reminders without consent, the
 nginx PHP fallback when `operations.nginx_config` is set).
 
+- **Round-9 release & CI (2026-10-23)**
+  - Stripe webhooks are verified by one implementation, `StripePayment::verifySignature`; the global
+    `verifyStripeSignature()` helper is gone (extensions calling it: use the adapter method).
+  - CI: PHP 8.5 joins the matrix, MySQL 8.0 (end of life) is replaced by 8.4 LTS, container images
+    are pinned to digests and Dependabot proposes action/image/npm updates. The Stripe test key is
+    visible only to the steps that need it, never to `npm ci`.
+  - PHP 8.5 clean: no `curl_close()` calls; HTTP response headers come from
+    `http_get_last_response_headers()` on PHP 8.4+.
+  - README documents the update signing key rotation; SECURITY.md states what is actually supported.
+
 - **Round-9 hotfix (2026-10-23)**
   - `php cli/restore.php` restores SQLite backups again (it held its own database connection, so the
     maintenance gate always answered "database is still open in another process").

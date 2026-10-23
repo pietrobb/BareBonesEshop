@@ -417,7 +417,26 @@ checks PHP/sodium, the public key, private storage and locking, database health,
 a real database backup/restore probe, and (when supplied) the signed package's
 compatibility with installed files. `doctor --json` is suitable for deployment
 automation. Packages are Ed25519-verified and unsigned packages are refused
-unless the operator supplies `--allow-unsigned` explicitly. Rollback refuses to
+unless the operator supplies `--allow-unsigned` explicitly.
+
+**Signing key rotation.** A shop trusts exactly one key (`update_public_key`), and a
+package never changes it, so every rotation is an out-of-band step on each shop:
+
+1. Generate the new pair offline (`php cli/build-update.php keygen ...`) and store
+   the secret key offline in two places (losing it means another rotation).
+2. Commit the new public key to `releases/update-public.key` and publish its
+   SHA-256 fingerprint (`php -r "echo hash_file('sha256','releases/update-public.key');"`)
+   in the release notes of the first release signed with it.
+3. On each shop, before applying that release: compare the fingerprint of the key
+   file from the tagged commit with the release notes, replace the file that
+   `update_public_key` points to, then run `php cli/update.php doctor --package=...`.
+   A package signed with the old key is refused from then on.
+
+If the old secret key was lost or may be compromised, do the same immediately and
+say so in the release notes; do not apply packages signed with the old key that
+were not already verified.
+
+Rollback refuses to
 overwrite files changed after an update unless `--force` is supplied after
 manual review. Rolling back an update that ran migrations restores the
 pre-update database and loses every order and other write made since then, so
