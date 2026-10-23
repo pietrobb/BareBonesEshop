@@ -190,6 +190,7 @@ try {
     $r9pSave('forged_type');
     assert_true(str_contains((string)$r9pPage['out'], '<option value="acme_bnpl" selected>acme_bnpl</option>') && $r9pKept === 'acme_bnpl' && $r9pType() === 'offline',
         "R9 admin payments: an extension's type is shown and kept on save; an unknown posted type still becomes offline (kept={$r9pKept}, forged=" . $r9pType() . ')');
+    unset($r9pType); // the arrow fn holds a copy of $a154Pdo; drop it so the cleanup can close and delete the SQLite file (Windows)
     $a154Run(['p' => 'warehouse', 'action' => 'save'], ['code' => 'a154-wh', 'name' => 'A154 Warehouse', 'priority' => '1']);
     $a154Check('A15.4 de: warehouses list is German', $a154Run(['p' => 'warehouses']), ['Lager löschen?', 'A154 Warehouse']);
     $a154Run(['p' => 'feed', 'action' => 'save'], ['code' => 'a154-feed', 'name' => 'A154 Feed', 'field_map' => '{broken']);
