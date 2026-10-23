@@ -108,7 +108,12 @@ try {
     assert_true(is_file($r5dBase . '/home/bareboneseshop-data/shop/bareboneseshop-private/db/shop.sqlite') && !is_dir($r5dBase . '/home/public_html/bareboneseshop-private'),
         'R5 deploy: the database is created above the web root, nothing private inside public_html');
     $r5dFails = array_values(array_column(array_filter($r5dResult['doctor']['checks'] ?? [], static fn(array $c): bool => $c['status'] === 'fail'), 'name'));
-    assert_equals([], $r5dFails, 'R5 deploy: doctor after the subdirectory install has no failing check');
+    // R9: the shipped stores.json is example data, so doctor fails exactly the seller identities until the merchant enters them.
+    $r5dStores = json_decode((string)file_get_contents($r5dShop . '/stores.json'), true);
+    $r5dExampleSellers = array_values(array_map(static fn(string $id): string => 'stores.legal.' . $id, array_keys(array_filter($r5dStores['stores'] ?? [],
+        static fn(array $s): bool => is_array($s['legal'] ?? null) && !isset($s['legal']['seller'])))));
+    assert_true($r5dExampleSellers !== [], 'R5 deploy: the shipped stores.json has example seller identities');
+    assert_equals($r5dExampleSellers, $r5dFails, 'R5 deploy: doctor after the subdirectory install fails only the example seller identities');
     $r5dDoctorNames = array_column($r5dResult['doctor']['checks'] ?? [], 'status', 'name');
     assert_true(($r5dDoctorNames['admin.accounts'] ?? '') === 'pass' && ($r5dDoctorNames['admin.mfa_key'] ?? '') === 'pass', 'R5 deploy: doctor checks that the owner can sign in (account active, MFA key opens the secret)');
 
