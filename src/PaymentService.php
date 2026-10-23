@@ -25,6 +25,14 @@ class PaymentService {
      * consumer cards and SEPA credit transfers. Their configured fee applies to approved business accounts only.
      */
     public const NO_CONSUMER_SURCHARGE = ['online_card', 'bank_transfer'];
+    /** Service types the admin form offers, with their label keys; 'invoice' is the B2B purchase on account. */
+    public const SERVICE_TYPE_LABELS = [
+        'online_card'   => 'admin.payments.type_online_card',
+        'bank_transfer' => 'admin.payments.type_bank_transfer',
+        'cod'           => 'admin.shipping.cod',
+        'invoice'       => 'admin.b2b.invoice_purchase',
+        'offline'       => 'admin.payments.type_offline',
+    ];
 
     /**
      * Return available checkout payment methods for country/cart/shipping context.
