@@ -34,4 +34,5 @@ return [
     ['customers', 'customers.view', 'admin.nav.customers', ['customer']],
     ['email_templates', 'emails.manage', 'admin.nav.email_templates', []],
     ['admin_users', 'admins.manage', 'admin.title.admin_users', []],
+    ['stores', 'stores.manage', 'admin.nav.stores', []],
 ];

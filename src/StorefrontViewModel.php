@@ -337,6 +337,16 @@ final class StorefrontViewModel
             ? (int)$variant['price_absolute']
             : (int)$product['price'] + $delta;
         $currency = (string)($product['currency'] ?? StoreContext::current()->currency());
+        if (isset($product['catalog_price'])) {
+            // The store's price list sells the product in its currency; the surcharge is a catalog-currency amount,
+            // so the variant is priced as the cart will price it (its own row, or the catalog price when it has none).
+            $catalog = $product['catalog_price'];
+            $priced = Pricing::applyPriceList(['id' => (int)$product['id'], 'currency' => $catalog['currency'],
+                'price' => $variant['price_absolute'] !== null ? (int)$variant['price_absolute'] : (int)$catalog['price'] + $delta],
+                (int)$variant['id'], 1, (int)($_SESSION['customer_id'] ?? 0) ?: null);
+            [$amount, $currency] = [Money::round((int)$priced['price'], (string)$priced['currency']), (string)$priced['currency']];
+            $delta = $currency === (string)$product['currency'] ? $amount - (int)$product['price'] : 0;
+        }
         return [
             'id' => (int)$variant['id'],
             'sku' => (string)$variant['sku'],

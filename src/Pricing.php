@@ -55,13 +55,14 @@ class Pricing {
             } else {
                 $variantCondition = '(pp.variant_id = :variant_id OR pp.variant_id IS NULL)';
             }
+            $currencies = self::priceCurrencies($currency);
             $sql = "SELECT pp.price, pp.compare_price, pp.min_qty, pp.variant_id,
-                    pl.code AS price_list_code, pl.priority, pl.customer_group_id
+                    pl.code AS price_list_code, pl.priority, pl.customer_group_id, LOWER(pl.currency) AS price_list_currency
                 FROM price_list_prices pp
                 JOIN price_lists pl ON pl.id = pp.price_list_id
                 WHERE pp.product_id = :product_id AND {$variantCondition}
                   AND pp.min_qty <= :qty
-                  AND pl.store_id = :store AND LOWER(pl.currency) = :currency AND pl.active = 1
+                  AND pl.store_id = :store AND LOWER(pl.currency) IN (:currency, :store_currency) AND pl.active = 1
                   AND (pl.customer_group_id IS NULL OR pl.customer_group_id = :group_id)
                   AND (pl.valid_from IS NULL OR pl.valid_from <= :at_from)
                   AND (pl.valid_to IS NULL OR pl.valid_to >= :at_to)
@@ -75,6 +76,7 @@ class Pricing {
                 ':qty' => max(1, $qty),
                 ':store' => StoreContext::current()->id(),
                 ':currency' => $currency,
+                ':store_currency' => $currencies[0],
                 ':group_id' => $groupId,
                 ':at_from' => $at,
                 ':at_to' => $at,
@@ -84,36 +86,32 @@ class Pricing {
             // The best group row and the best public row: a group price list is a benefit, so a customer in the
             // group never pays more than a guest (a product-level group row plus the variant surcharge could
             // otherwise outprice a public row written for the variant).
+            // Rows in the store's currency win (the store sells in it); within a currency as above.
             $row = false;
             $rowPrice = 0;
-            $seen = [];
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $candidate) {
-                $scope = $candidate['customer_group_id'] === null ? 'public' : 'group';
-                if (isset($seen[$scope])) continue;
-                $seen[$scope] = true;
-                $delta = $candidate['variant_id'] === null && $variant ? (int)$variant['price_delta'] : 0;
-                // Never below zero, even for rows saved before the editors refused a too-low base for a negative surcharge.
-                $price = max(0, max(0, (int)$candidate['price']) + $delta);
-                if ($row === false || $price < $rowPrice) [$row, $rowPrice] = [$candidate, $price];
+            $candidates = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($currencies as $rowCurrency) {
+                $seen = [];
+                foreach ($candidates as $candidate) {
+                    if ($candidate['price_list_currency'] !== $rowCurrency) continue;
+                    $delta = $candidate['variant_id'] === null && $variant ? (int)$variant['price_delta'] : 0;
+                    // The variant surcharge is an amount in the product's currency: never added to another one.
+                    if ($delta !== 0 && $rowCurrency !== $currency) continue;
+                    $scope = $candidate['customer_group_id'] === null ? 'public' : 'group';
+                    if (isset($seen[$scope])) continue;
+                    $seen[$scope] = true;
+                    // Never below zero, even for rows saved before the editors refused a too-low base for a negative surcharge.
+                    $price = max(0, max(0, (int)$candidate['price']) + $delta);
+                    if ($row === false || $price < $rowPrice) [$row, $rowPrice] = [$candidate, $price];
+                }
+                if ($row !== false) break;
             }
         } catch (PDOException $e) {
             $row = false;
         }
 
         if ($row) {
-            $product['price'] = $rowPrice;
-            $product['compare_price'] = $row['compare_price'] === null
-                ? max($basePrice, (int)($product['compare_price'] ?? 0))
-                : max(0, (int)$row['compare_price']);
-            $product['price_list_snapshot'] = [
-                'version' => 1,
-                'code' => (string)$row['price_list_code'],
-                'customer_group_id' => $row['customer_group_id'] === null ? null : (int)$row['customer_group_id'],
-                'currency' => $currency,
-                'min_qty' => (int)$row['min_qty'],
-                'price' => (int)$product['price'],
-            ];
-            return $product;
+            return self::priced($product, $rowPrice, $row, $basePrice, $currency);
         }
 
         $groupBps = max(0, min(10000, (int)($profile['discount_bps'] ?? 0)));
@@ -201,21 +199,69 @@ class Pricing {
             }
         }
 
-        $result = [];
-        $ended = [];
+        $byCurrency = [];
+        $endedByCurrency = [];
         foreach ($rows as $row) {
             $productId = (int)$row['product_id'];
-            if (($currencies[$productId] ?? '') !== $row['price_list_currency']) continue;
+            $rowCurrency = (string)$row['price_list_currency'];
+            if (!in_array($rowCurrency, self::priceCurrencies($currencies[$productId] ?? ''), true)) continue;
             if ((int)$row['archived'] === 1 || ($row['valid_to'] !== null && (string)$row['valid_to'] < $at)) {
                 if ((int)$row['min_qty'] <= 1) {
-                    $ended[$productId][] = ['price' => max(0, (int)$row['price']), 'valid_from' => $row['valid_from'], 'valid_to' => (string)$row['valid_to']];
+                    $endedByCurrency[$productId][$rowCurrency][] = ['price' => max(0, (int)$row['price']), 'valid_from' => $row['valid_from'], 'valid_to' => (string)$row['valid_to']];
                 }
                 continue;
             }
-            if (isset($result[$productId])) continue;
-            $result[$productId] = $row;
+            $byCurrency[$productId][$rowCurrency] ??= $row;
+        }
+        // A row in the store's currency wins (the store sells the product in it); ended prices count in the currency sold.
+        $result = [];
+        $ended = [];
+        foreach ($productIds as $productId) {
+            foreach (self::priceCurrencies($currencies[$productId]) as $rowCurrency) {
+                if (!isset($byCurrency[$productId][$rowCurrency])) continue;
+                $result[$productId] = $byCurrency[$productId][$rowCurrency];
+                break;
+            }
+            $sold = isset($result[$productId]) ? (string)$result[$productId]['price_list_currency'] : $currencies[$productId];
+            if (isset($endedByCurrency[$productId][$sold])) $ended[$productId] = $endedByCurrency[$productId][$sold];
         }
         return [$result, $ended];
+    }
+
+    /**
+     * Price-list currencies for a product, preferred first. A store selling in another currency than the product's
+     * (the sample CZK store on the shared EUR catalog) sells it in its own when one of its price lists prices it there.
+     */
+    private static function priceCurrencies(string $productCurrency): array {
+        $store = strtolower(StoreContext::current()->currency());
+        return $store !== '' && $store !== $productCurrency ? [$store, $productCurrency] : [$productCurrency];
+    }
+
+    /**
+     * The product priced by a price-list row. A row in another currency than the product's sells it in that currency:
+     * the catalog price stays in catalog_price, and with no compare price of its own the row strikes nothing through
+     * (the catalog price is another currency's amount).
+     */
+    private static function priced(array $product, int $price, array $row, int $basePrice, string $currency): array {
+        $rowCurrency = (string)($row['price_list_currency'] ?? $currency);
+        $foreign = $rowCurrency !== $currency;
+        if ($foreign) {
+            $product['catalog_price'] = ['price' => $basePrice, 'currency' => $currency];
+            $product['currency'] = $rowCurrency;
+        }
+        $product['price'] = $price;
+        $product['compare_price'] = $row['compare_price'] !== null
+            ? max(0, (int)$row['compare_price'])
+            : ($foreign ? null : max($basePrice, (int)($product['compare_price'] ?? 0)));
+        $product['price_list_snapshot'] = [
+            'version' => 1,
+            'code' => (string)$row['price_list_code'],
+            'customer_group_id' => $row['customer_group_id'] === null ? null : (int)$row['customer_group_id'],
+            'currency' => $rowCurrency,
+            'min_qty' => (int)$row['min_qty'],
+            'price' => $price,
+        ];
+        return $product;
     }
 
     private static function fetchRows(string $sql, array $params): array {
@@ -232,19 +278,7 @@ class Pricing {
         $groupId = (int)($profile['customer_group_id'] ?? 0);
 
         if ($row) {
-            $product['price'] = max(0, (int)$row['price']);
-            $product['compare_price'] = $row['compare_price'] === null
-                ? max($basePrice, (int)($product['compare_price'] ?? 0))
-                : max(0, (int)$row['compare_price']);
-            $product['price_list_snapshot'] = [
-                'version' => 1,
-                'code' => (string)$row['price_list_code'],
-                'customer_group_id' => $row['customer_group_id'] === null ? null : (int)$row['customer_group_id'],
-                'currency' => $currency,
-                'min_qty' => (int)$row['min_qty'],
-                'price' => (int)$product['price'],
-            ];
-            return $product;
+            return self::priced($product, max(0, (int)$row['price']), $row, $basePrice, $currency);
         }
 
         $groupBps = max(0, min(10000, (int)($profile['discount_bps'] ?? 0)));

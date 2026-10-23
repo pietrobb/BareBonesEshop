@@ -165,7 +165,7 @@ class AdminIdentity {
             'account_id' => (int)$account['id'],
             'username' => (string)$account['username'],
             'role' => (string)$account['role'],
-            'store_permissions' => self::storePermissions((int)$account['id']),
+            'store_permissions' => self::storePermissions((int)$account['id'], (string)$account['role']),
         ];
     }
 
@@ -194,7 +194,7 @@ class AdminIdentity {
             'device_id' => (int)$row['device_id'],
             'username' => (string)$row['username'],
             'role' => (string)$row['role'],
-            'store_permissions' => self::storePermissions((int)$row['account_id']),
+            'store_permissions' => self::storePermissions((int)$row['account_id'], (string)$row['role']),
         ];
     }
 
@@ -356,13 +356,18 @@ class AdminIdentity {
         Logger::warning('admin.login_failed', ['account_id' => $accountId, 'locked_until' => $lockedUntil]);
     }
 
-    private static function storePermissions(int $accountId): array {
+    /** Store grants of an account. An owner administers every configured store (a store added to stores.json
+     *  later included); explicit grants only narrow the other roles. */
+    private static function storePermissions(int $accountId, string $role = ''): array {
         $stmt = Db::get()->prepare('SELECT store_id, permissions FROM admin_store_permissions WHERE account_id=:account');
         $stmt->execute([':account' => $accountId]);
         $result = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $decoded = json_decode((string)$row['permissions'], true);
             $result[(string)$row['store_id']] = is_array($decoded) ? array_values(array_map('strval', $decoded)) : [];
+        }
+        if ($role === 'owner') {
+            foreach (array_keys(Bootstrap::stores()['stores'] ?? []) as $storeId) $result[(string)$storeId] = ['*'];
         }
         return $result;
     }

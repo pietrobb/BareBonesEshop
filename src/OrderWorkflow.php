@@ -53,15 +53,17 @@ class OrderWorkflow {
 
     /**
      * Why an admin may not move this order to $to (null = allowed). Shared by the order
-     * detail and bulk actions: 'paid' needs a confirmed payment, a move that returns money the refund right.
+     * detail and bulk actions: 'paid' needs a confirmed payment, a move that returns money the refund right,
+     * shipping an order the consumer withdrew from an explicit acknowledgement.
      */
-    public static function adminRejection(?array $order, string $to, bool $mayRefund): ?string {
+    public static function adminRejection(?array $order, string $to, bool $mayRefund, bool $withdrawalAcknowledged = false): ?string {
         if (!$order) return 'not_found';
         if (!in_array($to, self::statuses(), true)) return 'invalid_status';
         if (!$mayRefund && self::returnsMoney($order, $to)) return 'forbidden';
         if (!in_array($to, self::allowedFor($order), true)) return 'invalid_transition';
         if ($to === 'paid' && ($order['payment_status'] ?? 'pending') !== 'paid') return 'payment_not_confirmed';
         if (self::refundOutstanding($order, $to)) return 'refund_outstanding';
+        if ($to === 'shipped' && !$withdrawalAcknowledged && Withdrawal::forOrder((int)$order['id'])) return 'withdrawn';
         return null;
     }
 
@@ -206,7 +208,9 @@ class OrderWorkflow {
     private static function handlePaid(array $order): array {
         return [
             ['email_send', [
-                'template' => 'order_paid',
+                // Checkout confirms offline orders at once; an order paid online (card, gateway) or a free digital one
+                // gets its confirmation — seller identity, withdrawal form, terms — when the payment arrives.
+                'template' => self::confirmedAtPayment($order) ? 'order_confirmation' : 'order_paid',
                 'to'       => $order['customer_email'],
                 'locale'   => $order['locale'] ?? '',
                 'order_id' => $order['id'],
@@ -219,6 +223,12 @@ class OrderWorkflow {
                 'status'   => 'paid',
             ], 5],
         ];
+    }
+
+    /** True for orders checkout did not confirm by e-mail (see checkoutExecute): online payment or a free digital order. */
+    public static function confirmedAtPayment(array $order): bool {
+        $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true);
+        return !empty($snapshot['requires_online']) || ($order['payment_method'] ?? '') === 'free';
     }
 
     /**

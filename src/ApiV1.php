@@ -243,9 +243,11 @@ class ApiV1 {
      * @return array{status:int,body:array}
      */
     private static function changeOrderStatus(int $orderId, array $body, string $key, array $client, string $path): array {
-        if ($body === [] || array_diff(array_keys($body), ['status', 'note'])) {
-            throw new InvalidArgumentException('Order status change accepts only status and note');
+        if ($body === [] || array_diff(array_keys($body), ['status', 'note', 'acknowledge_withdrawal'])) {
+            throw new InvalidArgumentException('Order status change accepts only status, note and acknowledge_withdrawal');
         }
+        $acknowledged = $body['acknowledge_withdrawal'] ?? false;
+        if (!is_bool($acknowledged)) throw new InvalidArgumentException('acknowledge_withdrawal must be a boolean');
         $to = $body['status'] ?? null;
         if (!is_string($to) || !in_array($to, OrderWorkflow::statuses(), true)) {
             throw new InvalidArgumentException('Invalid order status');
@@ -258,18 +260,20 @@ class ApiV1 {
         $current = Orders::byId($orderId);
         if ($to === 'refunded' || ($current && OrderWorkflow::returnsMoney($current, $to))) ApiAuth::requireScope($client, 'refunds:write');
 
-        return self::idempotentWrite($client, $key, 'POST', $path, $body, static function() use ($orderId, $to, $note, $client): array {
+        return self::idempotentWrite($client, $key, 'POST', $path, $body, static function() use ($orderId, $to, $note, $client, $acknowledged): array {
             $order = Orders::byId($orderId);
             $mayRefund = (bool)array_intersect(['refunds:write', '*'], $client['scopes'] ?? []);
-            $reason = OrderWorkflow::adminRejection($order, $to, $mayRefund);
+            $reason = OrderWorkflow::adminRejection($order, $to, $mayRefund, $acknowledged);
             if ($reason === 'not_found') return self::notFound('Order not found');
             if ($reason === 'forbidden') return self::error(403, 'forbidden', 'Missing API scope: refunds:write') + ['store' => false];
             if ($reason !== null) {
                 return ['status' => 422, 'body' => ['error' => [
                     'code' => $reason,
-                    'message' => $reason === 'payment_not_confirmed'
-                        ? 'The order payment is not confirmed'
-                        : "The order cannot move from '{$order['status']}' to '{$to}'",
+                    'message' => match ($reason) {
+                        'payment_not_confirmed' => 'The order payment is not confirmed',
+                        'withdrawn' => 'The customer withdrew from this order; send "acknowledge_withdrawal": true to ship it anyway',
+                        default => "The order cannot move from '{$order['status']}' to '{$to}'",
+                    },
                     'allowed' => OrderWorkflow::allowedFor($order),
                 ]]];
             }

@@ -220,11 +220,15 @@ function renderOrderDone(string $orderNum): string {
         'label' => (string)($snapshot['label'] ?? $snapshot['name'] ?? $order['payment_method'] ?? ''),
         'reference' => $lastTransaction ? (string)($lastTransaction['provider_ref'] ?? '') : '',
     ];
+    // An online payment that failed with no way to retry here (e.g. the gateway could not start it): say so, the
+    // confirmation e-mail only follows a payment.
+    $paymentFailed = $status === 'failed' && $payUrl === '' && OrderWorkflow::confirmedAtPayment($order);
     return Template::render('storefront/order-done', [
         'title' => $t('order_sent'), 'order_number_label' => $t('order_num'), 'order_number' => (string)$order['order_number'],
         'payment' => $payment, 'pay_url' => $payUrl, 'pay_label' => $t('checkout_pay_now'),
+        'payment_error' => $paymentFailed ? str_replace('{order}', (string)$order['order_number'], $t('order_done.payment_failed')) : '',
         'bank_transfer_html' => BankTransferInstructions::html($order),
-        'email_message' => $t('order_email'), 'home_url' => Template::storeUrl('/'), 'continue_label' => $t('continue_shopping'),
+        'email_message' => $paymentFailed ? '' : $t('order_email'), 'home_url' => Template::storeUrl('/'), 'continue_label' => $t('continue_shopping'),
     ]);
 }
 

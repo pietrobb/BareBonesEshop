@@ -46,6 +46,7 @@ function pageProducts(): void {
     $stockLevels = StockAlerts::levelsForProducts(array_column($products, 'id'));
     ?>
     <h1><?= esc(I18n::t('admin.title.products')) ?> <span class="muted">(<?= $total ?>)</span></h1>
+    <?php if (Security::adminCan('products.edit')): ?><p style="margin-bottom:1rem"><a href="admin.php?p=product" class="btn btn-primary" data-new-product><?= esc(I18n::t('admin.title.product_new')) ?></a></p><?php endif; ?>
     <div class="card">
         <form method="get" style="display:flex;gap:.5rem;margin-bottom:1rem">
             <input type="hidden" name="p" value="products">

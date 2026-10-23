@@ -133,6 +133,11 @@ class ShippingService
             if ($cost >= 0) { // -1 means "not available for zone"
                 $cfg = self::legacyMethodConfig($method);
                 $jsonCfg = Shipping::methodConfig($method) ?? [];
+                // shipping.json names the method per language; the hardcoded English label is the last resort.
+                $names = is_array($jsonCfg['name'] ?? null) ? $jsonCfg['name'] : [];
+                $name = $names[I18n::locale()] ?? $names['en'] ?? (is_string($jsonCfg['name'] ?? null) ? $jsonCfg['name'] : null);
+                if (is_string($name) && trim($name) !== '') $cfg['label'] = $name;
+                if (isset($jsonCfg['delivery_days'])) $cfg['delivery_days'] = (string)$jsonCfg['delivery_days'];
                 $rates[] = [
                     'key'           => $method,
                     'method_code'   => $method,

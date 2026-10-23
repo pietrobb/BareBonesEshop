@@ -846,10 +846,10 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         $order = Orders::byId($orderId);
         $orderItems = Orders::items($orderId);
         $confirmationToken = CheckoutSession::createConfirmation($orderId, CheckoutSession::browserSessionId());
-        // For COD/bank_transfer: send confirmation immediately (no webhook will fire)
-        // For Stripe: confirmation email is sent from the webhook after payment is confirmed
+        // COD/bank transfer: the confirmation goes out now; online payments and free digital orders get it with
+        // the payment (OrderWorkflow::handlePaid), so it never promises an order the payment did not confirm.
         try {
-            if (!$freeDigitalOrder && empty($selectedPayment['requires_online'])) {
+            if (!OrderWorkflow::confirmedAtPayment($order)) {
                 JobQueue::push('email_send', ['template' => 'order_confirmation', 'to' => $email, 'order_id' => $orderId]);
             }
             // Merchant hears about every order at creation, including unpaid bank transfers.
@@ -906,6 +906,12 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
             } catch (\Throwable $e) {
                 // Payment adapter error — order still created, log and return
                 IncidentMonitor::report('payment.session_failed', 'payment', 'critical', ['order_id' => $orderId, 'exception' => $e]);
+                // The order page and the admin show the payment as failed instead of an endless "awaiting payment".
+                try {
+                    PaymentService::updatePaymentStatus($orderId, 'failed', 'payment.session_failed', [], 'pending');
+                } catch (\Throwable $statusError) {
+                    Logger::phpLog('Checkout: could not mark the payment of order #' . $orderId . ' failed: ' . $statusError->getMessage());
+                }
                 $result['payment_error'] = I18n::t('checkout.error.payment_session_failed');
                 $result['payment_error_code'] = 'checkout.error.payment_session_failed';
             }

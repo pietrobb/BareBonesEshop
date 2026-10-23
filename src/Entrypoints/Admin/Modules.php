@@ -54,4 +54,5 @@ return [
     'customer_groups' => ['Taxonomy', 'B2b'],
     'admin_users' => ['AdminUsers'],
     'email_templates' => ['EmailTemplates'],
+    'stores'     => ['StoreSettings'],
 ];
