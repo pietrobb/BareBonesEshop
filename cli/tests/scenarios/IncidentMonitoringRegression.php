@@ -127,6 +127,10 @@ try {
         assert_true(!empty($imPaymentResult['success']) && isset($imPaymentResult['payment_error']), 'Incident: actual gateway fault preserves created order with safe payment error');
         $imGatewayFault = $imDb->query("SELECT context_json FROM operational_incidents WHERE code = 'payment.session_failed' ORDER BY occurred_at DESC")->fetchAll();
         assert_true(in_array((int)$imPaymentResult['order_id'], array_map(static fn(array $row): int => (int)(json_decode($row['context_json'], true)['order_id'] ?? 0), $imGatewayFault), true), 'Incident: actual gateway exception recorded with order ID');
+        // R9: the customer and the admin see the payment as failed, not an endless "awaiting payment".
+        $imFailedOrder = Orders::byId((int)$imPaymentResult['order_id']);
+        assert_equals(['failed', 'pending', 'checkout.error.payment_session_failed'], [$imFailedOrder['payment_status'] ?? null, $imFailedOrder['status'] ?? null, $imPaymentResult['payment_error_code'] ?? null],
+            'R9 payment start failure: the order stays open with payment_status failed and the checkout answer names the error');
     } finally {
         $imAdaptersProperty->setValue(null, $imOldAdapters);
         $imDb->exec("UPDATE payment_methods SET requires_online = 0, provider = 'manual' WHERE code = 'incidentpay'");

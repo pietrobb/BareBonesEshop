@@ -143,8 +143,19 @@ $coreShipped = static function() use ($orderId, $itemId, $own, $main): int {
     Fulfillment::ship($id, 'GLS', 'OLD-1', null);
     return $id;
 };
+// The consumer withdrew from the order (storefront withdrawal form) after it was paid.
+$withdraw = static function() use ($db, $orderId, $itemId, $own): void {
+    $db->prepare('INSERT INTO withdrawal_requests (store_id, order_id, order_number, customer_name, customer_email, items, reason, received_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        ->execute([$own, $orderId(), "A128-{$own}", "A128BUYER-{$own}-NAME", "{$own}@example.test", json_encode([$itemId() => 1]), "A128REASON-{$own}", '2026-10-23 10:00:00']);
+};
 $_GET = ['id' => $orderId()];
 match ($action) {
+    'withdrawn_page' => [$withdraw(), pageOrder()],
+    'withdrawn_ship' => [$withdraw(), $_POST = ['csrf_token'=>'a128-token', 'shipment_id'=>(string)$setupShipment()] + $tracking, handlePost('order', 'shipment_ship')],
+    'withdrawn_create_ship' => [$withdraw(), $_POST = $create([$line() => '1'], ['ship_now'=>'1']), handlePost('order', 'shipment_create')],
+    'withdrawn_status' => [$withdraw(), $_POST = ['csrf_token'=>'a128-token', 'new_status'=>'shipped'], handlePost('order', 'status')],
+    'withdrawn_bulk' => [$withdraw(), $extra = static fn(): array => OrderWorkflow::bulkTransition([$orderId()], 'shipped', null, false)],
+    'withdrawn_ship_ack' => [$withdraw(), $_POST = ['csrf_token'=>'a128-token', 'shipment_id'=>(string)$setupShipment(), 'withdrawal_ack'=>'1'] + $tracking, handlePost('order', 'shipment_ship')],
     'page' => [$extra = static fn(): array => ['shippable' => Fulfillment::shippable($orderId())], pageOrder()],
     'create_ship' => [$_POST = $create([$line() => '3'], $tracking + ['ship_now'=>'1']), handlePost('order', 'shipment_create')],
     'create_planned' => [$_POST = $create([$line() => '2']), handlePost('order', 'shipment_create')],
@@ -196,9 +207,11 @@ $a128Refused = [
     'create_foreign_line' => 'Invalid shipment form', 'create_foreign_warehouse' => 'Invalid shipment form', 'create_bad_key' => 'Invalid shipment form',
     'create_bad_url' => 'link must start with http', 'create_pending_order' => 'only be created and shipped for paid', 'create_foreign_order' => 'order does not exist',
     'create_no_csrf' => 'CSRF', 'ship_foreign_shipment' => 'shipment does not exist', 'cancel_shipped' => 'already been processed',
+    // R9: goods the consumer withdrew from are not shipped without an explicit acknowledgement.
+    'withdrawn_ship' => 'Confirm the warning', 'withdrawn_create_ship' => 'Confirm the warning', 'withdrawn_status' => 'Confirm the warning',
 ];
 $a128Actions = array_merge(['page', 'create_ship', 'create_planned', 'create_side', 'create_replay', 'ship_planned', 'cancel_planned', 'tracking_update',
-    'order_shipped_after_partial', 'viewer_create'], array_keys($a128Refused));
+    'order_shipped_after_partial', 'viewer_create', 'withdrawn_page', 'withdrawn_bulk', 'withdrawn_ship_ack'], array_keys($a128Refused));
 $a128Drivers = ['sqlite' => $a128Root . '/shipments.sqlite'];
 if (getenv('TEST_MYSQL_DSN')) $a128Drivers['mysql'] = 'bbe_a128_shipments_' . getmypid() . '_' . bin2hex(random_bytes(4)) . '_test';
 else print "  [SKIP] Audit A12.8 native shipments (set TEST_MYSQL_DSN)\n";
@@ -243,10 +256,10 @@ try {
                 $a128Status = array_column($a128Own($a128After['orders'] ?? [], $a128Store), 'status', 'order_number');
                 $a128NewAudit = array_slice($a128After['audit'] ?? [], count($a128Before['audit'] ?? []));
                 $a128StockOf = static fn(string $kind): array => [(int)($a128Stock["a128{$kind}-{$a128Store}"]['qty'] ?? -1), (int)($a128Stock["a128{$kind}-{$a128Store}"]['reserved'] ?? -1)];
-                if (!in_array($a128Action, ['page', 'order_shipped_after_partial'], true)) {
+                if (!in_array($a128Action, ['page', 'order_shipped_after_partial', 'withdrawn_page', 'withdrawn_bulk'], true)) {
                     assert_equals('ok', $a128Flash['type'] ?? null, "{$a128Label}: action succeeds (" . ($a128Flash['msg'] ?? '') . ')');
                 }
-                if (!in_array($a128Action, ['page', 'create_replay', 'order_shipped_after_partial'], true)) {
+                if (!in_array($a128Action, ['page', 'create_replay', 'order_shipped_after_partial', 'withdrawn_page', 'withdrawn_bulk'], true)) {
                     assert_equals([$a128Store], array_values(array_unique(array_column($a128NewAudit, 'store_id'))), "{$a128Label}: change audited in the active store");
                 }
                 match ($a128Action) {
@@ -268,6 +281,16 @@ try {
                     'ship_planned' => assert_equals([['shipped', 'Packeta', 'https://tracking.example.test/Z123456'], [9, 5]],
                         [[$a128Shipments[0]['status'] ?? null, $a128Shipments[0]['carrier'] ?? null, $a128Shipments[0]['tracking_url'] ?? null], $a128StockOf('main')],
                         "{$a128Label}: planned shipment shipped with tracking"),
+                    'withdrawn_ship_ack' => assert_equals(['shipped', [9, 5]], [$a128Shipments[0]['status'] ?? null, $a128StockOf('main')],
+                        "{$a128Label}: with the acknowledgement the withdrawn order ships"),
+                    'withdrawn_page' => assert_true(str_contains($a128Output, 'data-withdrawals') && str_contains($a128Output, "A128REASON-{$a128Store}")
+                        && str_contains($a128Output, "A128ITEM-{$a128Store}-NAME (1×)") && str_contains($a128Output, '2026-10-23 10:00:00 UTC')
+                        && substr_count($a128Output, 'data-withdrawal-ack') === 4,
+                        "{$a128Label}: order detail shows the withdrawal (time, lines, reason) and every ship form asks for the acknowledgement ("
+                            . substr_count($a128Output, 'data-withdrawal-ack') . ')'),
+                    'withdrawn_bulk' => assert_equals([[], 'withdrawn', $a128Before['orders'] ?? null],
+                        [$a128Result['extra']['changed'] ?? null, array_values($a128Result['extra']['rejected'] ?? [])[0] ?? null, $a128After['orders'] ?? null],
+                        "{$a128Label}: bulk status 'shipped' skips the withdrawn order"),
                     'cancel_planned' => assert_equals(['cancelled', [10, 6], 5], [$a128Shipments[0]['status'] ?? null, $a128StockOf('main'),
                         array_column(array_merge(...array_column($a128Result['extra']['shippable'] ?? [], 'lines')), 'remaining')[0] ?? null],
                         "{$a128Label}: cancelled shipment frees its quantity"),

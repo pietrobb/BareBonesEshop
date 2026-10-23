@@ -83,12 +83,20 @@ try {
     $a111Probe = stream_socket_server('tcp://127.0.0.1:0');
     $a111Port = (int)substr(strrchr((string)stream_socket_get_name($a111Probe, false), ':'), 1);
     fclose($a111Probe);
-    $a111Install = $a111Php(['cli/setup.php', 'install', '--json', "--app-url=http://127.0.0.1:{$a111Port}", '--admin-username=owner'], ['BBE_ADMIN_PASSWORD' => 'A111-install-Passw0rd!']);
+    $a111Install = $a111Php(['cli/setup.php', 'install', '--json', "--app-url=http://127.0.0.1:{$a111Port}", '--admin-email=orders@a111-shop.test', '--admin-username=owner'], ['BBE_ADMIN_PASSWORD' => 'A111-install-Passw0rd!']);
     $a111Result = json_decode($a111Install['out'], true);
     assert_equals(0, $a111Install['code'], 'A11.1 setup.php install exits 0 on a clean checkout' . ($a111Install['code'] !== 0 ? ': ' . substr($a111Install['out'] . $a111Install['err'], -600) : ''));
     assert_equals('installed', $a111Result['status'] ?? null, 'A11.1 install reports installed');
     $a111Config = is_file($a111Shop . '/config.php') ? require $a111Shop . '/config.php' : [];
     assert_true(strlen((string)base64_decode((string)($a111Config['admin_identity_key'] ?? ''), true)) === 32, 'A11.1 install creates config.php from config.example.php with a 32-byte admin_identity_key');
+    assert_equals('orders@a111-shop.test', $a111Config['admin_email'] ?? null, 'R9 install --admin-email: new orders, payments and incidents reach the merchant');
+    try {
+        Setup::createConfig($a111Base, '', 'not-an-address');
+        $a111BadEmail = 'accepted';
+    } catch (InvalidArgumentException $e) {
+        $a111BadEmail = $e->getMessage();
+    }
+    assert_true(str_contains($a111BadEmail, '--admin-email') && !is_file($a111Base . '/config.php'), "R9 install: an invalid --admin-email is refused before config.php is written ({$a111BadEmail})");
     assert_true(is_file($a111Private . '/db/shop.sqlite') && is_dir($a111Private . '/jobs') && is_file($a111Private . '/setup-state.json'), 'A11.1 install creates the private runtime paths of config.example.php outside the web root');
     if ($a111Install['code'] !== 0) {
         // Without a working install, continue with the manual steps so the HTTP probe still runs.
@@ -104,7 +112,22 @@ try {
     $a111Db = null;
     assert_true(!empty($a111Result['steps']['admin']['recovery_codes']) && !empty($a111Result['steps']['admin']['mfa_required']), 'A11.1 install returns the owner TOTP enrollment once');
     $a111Fails = array_values(array_map(static fn(array $c): string => $c['name'], array_filter($a111Result['doctor']['checks'] ?? [], static fn(array $c): bool => $c['status'] === 'fail')));
-    assert_equals([], $a111Fails, 'A11.1 doctor after install has no failing check');
+    // R9: the shipped stores.json is example data (Woodle, example.* e-mails, invalid IBANs): doctor is not ready until it is replaced.
+    $a111StoreIds = array_keys(json_decode((string)file_get_contents($a111Shop . '/stores.json'), true)['stores'] ?? []);
+    assert_equals(array_map(static fn(string $id): string => 'stores.legal.' . $id, $a111StoreIds), $a111Fails, 'A11.1 doctor after install fails only on the example seller data of every store');
+    assert_true(($a111Result['doctor']['status'] ?? '') !== 'ready', 'R9 doctor: a shop invoicing as Woodle s.r.o. is not ready');
+    assert_equals('pass', array_column($a111Result['doctor']['checks'] ?? [], 'status', 'name')['config.admin_email'] ?? null, 'R9 doctor: admin_email set by install passes');
+    $a111Stores = json_decode((string)file_get_contents($a111Shop . '/stores.json'), true);
+    $a111Ibans = ['default' => 'SK31 1200 0000 1987 4263 7541', 'cz' => 'CZ65 0800 0000 1920 0014 5399', 'pl' => 'PL61 1090 1014 0000 0712 1981 2874',
+        'hu' => 'HU42 1177 3016 1111 1018 0000 0000', 'de' => 'DE89 3704 0044 0532 0130 00', 'us' => ''];
+    foreach ($a111Stores['stores'] as $a111Id => &$a111Store) {
+        $a111Store['legal'] = array_replace($a111Store['legal'], ['name' => "A111 Trading {$a111Id}", 'email' => "orders-{$a111Id}@a111-shop.test", 'iban' => $a111Ibans[$a111Id] ?? '']);
+    }
+    unset($a111Store);
+    file_put_contents($a111Shop . '/stores.json', json_encode($a111Stores, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    $a111Real = json_decode($a111Php(['cli/setup.php', 'doctor', '--json'])['out'], true);
+    assert_equals([], array_values(array_map(static fn(array $c): string => $c['name'], array_filter($a111Real['checks'] ?? [], static fn(array $c): bool => $c['status'] === 'fail'))),
+        'A11.1 doctor has no failing check once every store has its real seller');
     assert_true(is_file($a111Shop . '/import/template-simple.csv') || glob($a111Shop . '/import/template-*.csv') !== [], 'A11.1 install regenerates import templates');
 
     $a111ConfigHash = hash_file('sha256', $a111Shop . '/config.php');

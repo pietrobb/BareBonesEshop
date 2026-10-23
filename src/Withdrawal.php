@@ -61,6 +61,8 @@ class Withdrawal {
     }
 
     public static function forOrder(int $orderId): array {
+        // Migration window: the order and shipment pages render before 20261022090000_withdrawal_requests has run.
+        if (!Db::tableExists('withdrawal_requests')) return [];
         $stmt = Db::get()->prepare('SELECT * FROM withdrawal_requests WHERE order_id = ? AND store_id = ? ORDER BY id');
         $stmt->execute([$orderId, StoreContext::current()->id()]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);

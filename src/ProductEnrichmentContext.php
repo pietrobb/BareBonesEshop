@@ -53,6 +53,9 @@ final class ProductEnrichmentContext
                 $this->customerProfile
             );
         }
+        // Sold in the store's currency by its price list: the recorded price history is the catalog currency's.
+        $history = isset($product['catalog_price']) ? null : ($this->priceHistory[$productId] ?? null);
+        if (isset($product['catalog_price'])) $basePrice = (int)$product['price'];
         $beforePromotions = $product;
         if (class_exists('Promotions')) {
             $product = Promotions::applyCatalogRules($product, $this->promotionRules, $this->customerProfile);
@@ -60,7 +63,7 @@ final class ProductEnrichmentContext
         $endedLow = null;
         $endedPriceLists = $this->endedPriceListPrices[$productId] ?? [];
         if ($this->endedPromotionRules !== [] || $endedPriceLists !== []) {
-            $start = $this->reductionStart($product, $basePrice, $this->priceHistory[$productId] ?? null);
+            $start = $this->reductionStart($product, $basePrice, $history);
             $endedLow = $this->endedPromotionRules === [] ? null
                 : Promotions::lowestEndedPrice($beforePromotions, $this->endedPromotionRules, $this->customerProfile, $start);
             $since = gmdate('Y-m-d H:i:s', $start - PriceHistory::WINDOW_DAYS * 86400);
@@ -72,7 +75,7 @@ final class ProductEnrichmentContext
         }
         // Omnibus: the struck-through price is at most the lowest price of the 30 days before the reduction,
         // including prices charged by catalog promotions and price lists that have ended since.
-        return PriceHistory::capCompare($product, $basePrice, $this->priceHistory[$productId] ?? null, null, $endedLow);
+        return PriceHistory::capCompare($product, $basePrice, $history, null, $endedLow);
     }
 
     /**

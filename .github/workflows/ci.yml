@@ -139,7 +139,8 @@ jobs:
           test "$(curl -fsS -D - -o /dev/null http://localhost:8080/ | grep -ci '^content-security-policy:')" = 1
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/config.php)" != 200
           $compose exec -T php php cli/setup.php doctor | tail -n 25
-          $compose exec -T php php cli/setup.php doctor --json | php -r '$d = json_decode(stream_get_contents(STDIN), true); $f = array_column(array_filter($d["checks"], fn($c) => $c["status"] === "fail"), "name"); echo implode(",", $f), "\n"; exit($f === [] ? 0 : 1);'
+          # The sample stores.json carries example seller data (Woodle, invalid IBANs): doctor must fail exactly those checks.
+          $compose exec -T php php cli/setup.php doctor --json | php -r '$d = json_decode(stream_get_contents(STDIN), true); $f = array_column(array_filter($d["checks"], fn($c) => $c["status"] === "fail"), "name"); echo implode(",", $f), "\n"; $other = array_filter($f, fn($n) => !str_starts_with($n, "stores.legal.")); exit($other === [] && in_array("stores.legal.default", $f, true) ? 0 : 1);'
 
       - name: Docker logs on failure
         if: failure()

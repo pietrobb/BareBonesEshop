@@ -133,7 +133,7 @@ $architectureBudgets = [
     // +1 line: product save emits product.updated for API subscribers (round 6 review).
     // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.
     // +2 lines R9: the product save moves stock by the admin's change, so units sold meanwhile stay sold.
-    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1277, 'functions' => 24, 'max_function_lines' => 210, 'coupling' => 19],
+    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1278, 'functions' => 24, 'max_function_lines' => 210, 'coupling' => 19],
     // +1 coupling: ProductVariants owns variant validation, ledger stock booking and the delete/SKU-change guards.
     // +1 coupling: I18n gives the editor's labels in the admin language (A15.5).
     'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 105, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 4],
@@ -151,7 +151,7 @@ $architectureBudgets = [
     // +1 function, +21 lines: "Retry refund" re-queues a refund request no payment_refund job ever executed (round 4 final review).
     // +1 line: a cancellation that refunds captured money needs orders.refund (round 5 review).
     // +1 function, +14 lines: "Confirm refund" books a GoPay/ThePay partial refund the provider never confirms (round 6 review).
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 916, 'functions' => 16, 'max_function_lines' => 303, 'coupling' => 20],
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 920, 'functions' => 16, 'max_function_lines' => 306, 'coupling' => 20],
     'src/Entrypoints/Admin/OrderOperations.php' => ['lines' => 80, 'functions' => 4, 'max_function_lines' => 32, 'coupling' => 7],
     'src/Entrypoints/Admin/PricingRules.php' => ['lines' => 235, 'functions' => 7, 'max_function_lines' => 115, 'coupling' => 5],
     'src/Entrypoints/Admin/Reports.php' => ['lines' => 90, 'functions' => 2, 'max_function_lines' => 74, 'coupling' => 4],
@@ -163,7 +163,8 @@ $architectureBudgets = [
     // +lines: windowed pagination (first, last and a window around the current page) instead of one link per page.
     'src/Entrypoints/Admin/Shared.php' => ['lines' => 58, 'functions' => 5, 'max_function_lines' => 17, 'coupling' => 1],
     // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.
-    'src/Entrypoints/Admin/Shipments.php' => ['lines' => 260, 'functions' => 9, 'max_function_lines' => 105, 'coupling' => 9],
+    'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 77, 'functions' => 3, 'max_function_lines' => 49, 'coupling' => 5],
+    'src/Entrypoints/Admin/Shipments.php' => ['lines' => 277, 'functions' => 11, 'max_function_lines' => 105, 'coupling' => 10],
     // A15.3: store switcher and per-request store activation, limited to the admin's granted stores (AdminStoreScope).
     'src/Entrypoints/Admin/StoreScope.php' => ['lines' => 70, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 5],
     'src/Entrypoints/Admin/Suppliers.php' => ['lines' => 175, 'functions' => 8, 'max_function_lines' => 75, 'coupling' => 5],
@@ -191,7 +192,7 @@ $architectureBudgets = [
     // +1 line / +1 coupling: round-4 merge (cart-currency formatting + translated free/payment labels).
     // +2 lines (renderCheckout): the form's coupon attempts spend the coupon API's throttle (round 4 final review).
     // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.
-    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 253, 'functions' => 7, 'max_function_lines' => 102, 'coupling' => 12],
+    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 256, 'functions' => 7, 'max_function_lines' => 102, 'coupling' => 13],
     // Ratcheted: canonical/robots/hreflang/JSON-LD moved to StorefrontSeo (storefront SEO audit).
     // +2 coupling: cart currency decimals for the JS config and the one-shot StorefrontFlash notice.
     /* R8: footer ADR body (ConsumerNotice), accessibility link, guest cookie settings */ 'src/Entrypoints/Storefront/Layout.php' => ['lines' => 145, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],

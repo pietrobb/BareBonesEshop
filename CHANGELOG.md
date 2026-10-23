@@ -27,6 +27,33 @@ nginx PHP fallback when `operations.nginx_config` is set).
   - Retention `orders_contact` (`config/data-retention.json`) scrubs only closed orders (delivered,
     cancelled, returned, refunded), leaves empty fields empty and keeps refund ids and ERP markers in
     the note. A shop with its own copy of `data-retention.json` should add `status_in` and `keep_lines`.
+- **Round-9 merchant onboarding (2026-10-23)**
+  - **Admin → Stores and seller** (`stores.manage`, owners): storefront name, seller identity, IBAN, VAT
+    registration and OSS of each store, written to `stores.json` (atomic, audited). `stores.json` must be
+    writable by PHP for the page to save; otherwise it is read-only with a notice.
+  - **`setup.php doctor` fails while a store still invoices as the shipped example seller** (Woodle,
+    `example.*` e-mail, an IBAN with wrong check digits). Enter the real seller, or remove the stores you
+    do not sell in. `setup.php install --admin-email=<address>` sets `admin_email` (new orders,
+    payments, incidents).
+  - An owner administers every store of `stores.json`, also one granted a single store; other roles
+    still see only their stores. The product list has a "New product" button.
+  - The order detail lists the consumer's withdrawals. Shipping such an order (shipment form, status
+    change, bulk status, API v1 `POST /orders/{id}/status` with `"acknowledge_withdrawal": true`)
+    needs an explicit acknowledgement; without it the API answers 422 `withdrawn`.
+  - Orders paid online (card, gateway) or free get the `order_confirmation` e-mail (seller, withdrawal
+    form, terms) when the payment arrives, not only `order_paid`. A gateway that cannot start a payment
+    marks it failed, and the order page tells the customer.
+  - Invoices repeat the variable symbol of the order's bank-transfer instructions; a credit note has its
+    own, no IBAN and a "total credited" line instead of a negative amount due. Invoice PDFs keep Slovak,
+    Czech, Polish and Hungarian letters.
+  - **A price list in the store's currency sells the shared catalog in that currency.** The CZK price
+    list of a CZK store sharing the EUR catalog was ignored (only lists in the product's currency
+    counted), so the store charged euros and offered the EUR `shipping.json` methods. Now a product
+    priced by such a list is shown, carted and ordered in the store's currency, and the store's own
+    carriers and payment fees apply. A product the list does not price keeps its catalog currency (a
+    cart holds one currency), a variant with a surcharge needs its own row in the list, and with no
+    recorded price history in that currency no prior price is struck through. `shipping.json` method
+    names are shown in the shopper's language (`cs`, `pl`, `hu`, `es` names added).
 - **VAT rates (2026-10-23)** — products with `vat_class` `books` or `medicines` now get each country's
   own rate instead of its `reduced` class (e.g. IE books 0 %, IT/ES 4 %, FR 5.5 %, DE medicines 19 %).
   FI reduced rate 13.5 % from 2026, LT 9 % rate replaced by 12 % / 5 % from 2026. Invoices already

@@ -215,12 +215,6 @@ class Cart {
 
             $currency = $product['currency'] ?? 'eur';
 
-            // Enforce single currency across the entire cart
-            if ($cartCurrency === null) {
-                $cartCurrency = $currency;
-            }
-            $currencyMismatch = ($currency !== $cartCurrency);
-
             // Backorder/preorder lines keep the requested quantity; the shortfall is frozen at reservation.
             $allowsShortfall = in_array($policy, [Inventory::BACKORDER, Inventory::PREORDER], true);
             $qty = $isDigital ? 1 : ($allowsShortfall ? (int)$item['qty'] : min((int)$item['qty'], $stock));
@@ -244,9 +238,16 @@ class Cart {
                     max(1, $qty),
                     $customerId > 0 ? $customerId : null
                 );
+                // A price list in the store's currency sells the product in it (shared catalog in another currency).
+                $currency = (string)($pricingProduct['currency'] ?? $currency);
                 // Price-list and promotion percentages are charged in units the currency shows (whole Kč/Ft).
                 $price = Money::round((int)$pricingProduct['price'], (string)$currency);
             }
+            // Enforce single currency across the entire cart
+            if ($cartCurrency === null) {
+                $cartCurrency = $currency;
+            }
+            $currencyMismatch = ($currency !== $cartCurrency);
             if ($price < 0) {
                 // Never sell at 0 because of a clamp: the line stays visible but is not purchasable,
                 // keeps its negative price (Orders::create refuses it too) and an incident is raised.

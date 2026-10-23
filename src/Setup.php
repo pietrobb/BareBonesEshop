@@ -35,13 +35,16 @@ class Setup
      * Creates config.php from config.example.php with a fresh admin_identity_key.
      * An existing config.php is never touched.
      */
-    public static function createConfig(?string $root = null, string $appUrl = ''): array
+    public static function createConfig(?string $root = null, string $appUrl = '', string $adminEmail = ''): array
     {
         $root ??= dirname(__DIR__);
         $target = $root . '/config.php';
         if (is_file($target)) return ['path' => 'config.php', 'action' => 'unchanged'];
         if ($appUrl !== '' && (!filter_var($appUrl, FILTER_VALIDATE_URL) || !in_array(strtolower((string)parse_url($appUrl, PHP_URL_SCHEME)), ['http', 'https'], true))) {
             throw new InvalidArgumentException('--app-url must be an absolute http(s) URL');
+        }
+        if ($adminEmail !== '' && !filter_var($adminEmail, FILTER_VALIDATE_EMAIL)) {
+            throw new InvalidArgumentException('--admin-email must be an e-mail address');
         }
         $template = @file_get_contents($root . '/config.example.php');
         if (!is_string($template)) throw new RuntimeException('config.example.php is missing');
@@ -50,7 +53,7 @@ class Setup
         $webRoot = self::enclosingWebRoot($root);
         $privateBase = $webRoot === null ? null : dirname($webRoot) . '/bareboneseshop-data/' . basename(str_replace('\\', '/', $root));
         if ($privateBase !== null) $config = str_replace('dirname(__DIR__)', var_export($privateBase, true), $config);
-        foreach (['admin_identity_key' => base64_encode(random_bytes(32)), 'app_url' => rtrim($appUrl, '/')] as $key => $value) {
+        foreach (['admin_identity_key' => base64_encode(random_bytes(32)), 'app_url' => rtrim($appUrl, '/'), 'admin_email' => $adminEmail] as $key => $value) {
             if ($value === '') continue;
             $count = 0;
             $config = preg_replace("/('" . $key . "'\s*=>\s*)''/", '${1}' . var_export($value, true), (string)$config, 1, $count);
@@ -67,7 +70,7 @@ class Setup
             @unlink($tmp);
             throw new RuntimeException('Cannot write config.php');
         }
-        return ['path' => 'config.php', 'action' => 'created', 'generated' => ['admin_identity_key'], 'app_url' => rtrim($appUrl, '/')]
+        return ['path' => 'config.php', 'action' => 'created', 'generated' => ['admin_identity_key'], 'app_url' => rtrim($appUrl, '/'), 'admin_email' => $adminEmail]
             + ($privateBase !== null ? ['private_base' => $privateBase, 'web_root' => $webRoot] : []);
     }
 
@@ -106,6 +109,21 @@ class Setup
             ? 'Every seller has its own invoice and credit-note number series.'
             : 'Invoice numbering conflicts (these series are refused): ' . implode(' | ', array_map(static fn(string $series, string $message): string => "{$series}: {$message}", array_keys($numbering), $numbering)),
             'Give each store with its own legal block its own legal.invoice_prefix / legal.credit_note_prefix, or set legal.seller to the store whose series a storefront of the same company shares.');
+        // The shipped stores.json is an example: invoices, the imprint and transfer instructions would name its company.
+        foreach (is_array($stores) ? ($stores['stores'] ?? []) : [] as $storeId => $store) {
+            $legal = is_array($store['legal'] ?? null) ? $store['legal'] : null;
+            if ($legal === null || isset($legal['seller'])) continue;
+            $problems = self::legalIdentityProblems($legal);
+            $add($problems === [] ? 'pass' : 'fail', 'stores.legal.' . $storeId, $problems === []
+                ? "Seller identity of store {$storeId} is set."
+                : "Store {$storeId} still has example seller data: " . implode('; ', $problems),
+                "Enter the real company, address, IDs, IBAN and e-mail in Admin → Stores and seller (stores.json stores.{$storeId}.legal), or remove the store if you do not sell there.");
+        }
+        $adminEmail = trim((string)($config['admin_email'] ?? ''));
+        $add(filter_var($adminEmail, FILTER_VALIDATE_EMAIL) ? 'pass' : 'warn', 'config.admin_email', $adminEmail !== ''
+            ? (filter_var($adminEmail, FILTER_VALIDATE_EMAIL) ? 'Merchant notifications go to admin_email.' : 'admin_email is not a valid address: order notifications are not delivered.')
+            : 'admin_email is empty: nobody is told about new orders, payments or incidents.',
+            filter_var($adminEmail, FILTER_VALIDATE_EMAIL) ? '' : 'Set admin_email in config.php (php cli/setup.php install --admin-email=ADDRESS sets it on a new install).');
 
         $webRoot = self::enclosingWebRoot($root, $config);
         foreach (self::runtimePaths($config) as $name => $path) {
@@ -169,6 +187,20 @@ class Setup
             'checks' => $checks,
             'next_command' => $counts['fail'] === 0 ? 'php cli/setup.php doctor --json --strict' : 'php cli/setup.php apply --json',
         ];
+    }
+
+    /** What in a store's legal block is still the shipped example or unusable ([] = looks like a real seller). */
+    public static function legalIdentityProblems(array $legal): array
+    {
+        $problems = [];
+        $name = trim((string)($legal['name'] ?? ''));
+        if ($name === '' || stripos($name, 'woodle') !== false) $problems[] = 'company name' . ($name === '' ? ' missing' : " \"{$name}\"");
+        $email = strtolower(trim((string)($legal['email'] ?? '')));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || preg_match('/@(.+\.)?example\.[a-z]+$/', $email)) $problems[] = 'e-mail' . ($email === '' ? ' missing' : " {$email}");
+        $iban = strtoupper((string)preg_replace('/\s+/', '', (string)($legal['iban'] ?? '')));
+        if ($iban !== '' && !BankTransferInstructions::validIban($iban)) $problems[] = "IBAN {$legal['iban']} (check digits invalid)";
+        if (trim((string)($legal['street'] ?? '')) === '' || trim((string)($legal['city'] ?? '')) === '') $problems[] = 'address missing';
+        return $problems;
     }
 
     /** Retention deadlines are only met when cli/gdpr-gc.php --apply actually runs; nothing in the app schedules it. */

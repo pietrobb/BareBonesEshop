@@ -53,10 +53,16 @@ $adminUsername = 'g12-operator';
 $adminPassword = 'G12-admin-password-2026';
 $adminId = AdminIdentity::create($adminUsername, $adminPassword, 'owner', true);
 AdminIdentity::grantStore($adminId, 'default', ['*']);
-// A second granted store makes the admin store switcher render (admin-store-switcher.spec.js).
-AdminIdentity::grantStore($adminId, 'cz', ['*']);
 $enrollment = AdminIdentity::enrollTotp($adminId);
 AdminIdentity::setStatus($adminId, 'active');
+// The owner sees every store; a manager granted two stores sees only those (admin-store-switcher.spec.js).
+$managerUsername = 'g12-manager';
+$managerPassword = 'G12-manager-password-2026';
+$managerId = AdminIdentity::create($managerUsername, $managerPassword, 'manager', true);
+AdminIdentity::grantStore($managerId, 'default', ['*']);
+AdminIdentity::grantStore($managerId, 'cz', ['*']);
+$managerEnrollment = AdminIdentity::enrollTotp($managerId);
+AdminIdentity::setStatus($managerId, 'active');
 
 $db->exec("UPDATE payment_methods SET provider='mock' WHERE code='card'");
 // With a Stripe test key, a second card method creates real Stripe test-mode Checkout sessions.
@@ -140,6 +146,7 @@ $state = [
     ],
     'customer' => ['id' => (int)$customerId, 'email' => $customerEmail, 'password' => $customerPassword],
     'admin' => ['id' => $adminId, 'username' => $adminUsername, 'password' => $adminPassword, 'secret' => $enrollment['secret']],
+    'manager' => ['id' => $managerId, 'username' => $managerUsername, 'password' => $managerPassword, 'secret' => $managerEnrollment['secret']],
     'fulfillment' => ['order_id' => $fulfillmentOrderId],
     'rma' => ['order_id' => $rmaOrderId, 'rma_id' => (int)$rmaId, 'source_invoice_id' => (int)$sourceInvoice['id']],
     'mock_webhook_secret' => (string)$config['mock_webhook_secret'],

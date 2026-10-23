@@ -1,8 +1,43 @@
 <?php
 /** A12.8: shipments and tracking in the admin order detail (partial shipments through Fulfillment). */
 
+/** The consumer's withdrawal statements (storefront withdrawal form): received when, for which lines, why. */
+function renderOrderWithdrawals(array $order, array $withdrawals): void {
+    if (!$withdrawals) return;
+    $names = array_column(Orders::items((int)$order['id']), 'name', 'id');
+    ?>
+    <div class="card" id="withdrawals" data-withdrawals style="border-left:4px solid #c62828">
+        <h3><?= esc(I18n::t('admin.withdrawal.heading')) ?></h3>
+        <p><?= esc(I18n::t('admin.withdrawal.notice')) ?></p>
+        <table>
+            <tr><th><?= esc(I18n::t('admin.withdrawal.received_at')) ?></th><th><?= esc(I18n::t('admin.sales.items')) ?></th><th><?= esc(I18n::t('admin.withdrawal.reason')) ?></th><th><?= esc(I18n::t('admin.withdrawal.confirmation')) ?></th></tr>
+            <?php foreach ($withdrawals as $withdrawal): ?>
+            <tr>
+                <td><?= esc((string)$withdrawal['received_at']) ?> UTC</td>
+                <td><ul class="muted" style="margin:0;padding-left:16px">
+                    <?php foreach ((array)(json_decode((string)$withdrawal['items'], true) ?: []) as $itemId => $qty): ?>
+                    <li><?= esc((string)($names[(int)$itemId] ?? ('#' . (int)$itemId))) ?> (<?= (int)$qty ?>×)</li>
+                    <?php endforeach; ?>
+                </ul></td>
+                <td><?= esc((string)($withdrawal['reason'] ?? '')) ?: '—' ?></td>
+                <td class="muted"><?= esc((string)($withdrawal['confirmation_status'] ?? '')) ?: '—' ?></td>
+            </tr>
+            <?php endforeach; ?>
+        </table>
+    </div>
+    <?php
+}
+
+/** Shipping goods the consumer withdrew from needs an explicit acknowledgement on the form. */
+function adminShipmentWithdrawalCheck(int $orderId): void {
+    if (($_POST['withdrawal_ack'] ?? '') !== '1' && Withdrawal::forOrder($orderId)) throw new DomainException('admin.shipment.msg.withdrawal_ack');
+}
+
 function renderOrderShipments(array $order): void {
     $orderId = (int)$order['id'];
+    $withdrawals = Withdrawal::forOrder($orderId);
+    $withdrawalAck = $withdrawals ? '<label style="display:block;margin:.25rem 0;color:#c62828"><input type="checkbox" name="withdrawal_ack" value="1" data-withdrawal-ack> ' . esc(I18n::t('admin.shipment.withdrawal_ack')) . '</label>' : '';
+    renderOrderWithdrawals($order, $withdrawals);
     $shipments = Fulfillment::shipments($orderId);
     $shipmentItems = Fulfillment::shipmentItems(array_column($shipments, 'id'));
     $names = array_column(Orders::items($orderId), 'name', 'id');
@@ -44,6 +79,7 @@ function renderOrderShipments(array $order): void {
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                         <input type="hidden" name="shipment_id" value="<?= $shipmentId ?>">
                         <?php $trackingFields(); ?>
+                        <?= $withdrawalAck ?>
                         <button class="btn btn-primary btn-sm" type="submit"><?= esc(I18n::t('admin.shipment.ship')) ?></button>
                     </form>
                     <?php endif; ?>
@@ -88,6 +124,7 @@ function renderOrderShipments(array $order): void {
                 <?php endforeach; ?>
             </table>
             <p style="margin-top:.5rem"><?php $trackingFields(); ?></p>
+            <?= $withdrawalAck ?>
             <button class="btn btn-primary btn-sm" type="submit" name="ship_now" value="1"><?= esc(I18n::t('admin.shipment.create_and_ship')) ?></button>
             <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.shipment.create_planned')) ?></button>
         </form>
@@ -137,6 +174,7 @@ function handleOrderShipmentCreate(): void {
         if (!$items) throw new DomainException('admin.shipment.msg.empty');
 
         $shipNow = ($_POST['ship_now'] ?? '') === '1';
+        if ($shipNow) adminShipmentWithdrawalCheck($orderId);
         $tracking = adminShipmentTrackingInput();
         $shipmentId = Fulfillment::createShipment($orderId, $group['warehouse_id'], $items, $coreKey);
         if ($shipNow) Fulfillment::ship($shipmentId, ...$tracking);
@@ -153,6 +191,7 @@ function handleOrderShipmentShip(): void {
     $orderId = Security::int($_GET['id'] ?? 0);
     adminShipmentAction($orderId, static function() use ($orderId): string {
         $shipment = adminOrderShipment($orderId, 'planned');
+        adminShipmentWithdrawalCheck($orderId);
         $tracking = adminShipmentTrackingInput();
         if (!Fulfillment::ship((int)$shipment['id'], ...$tracking)) return 'admin.shipment.msg.already_done';
         AuditLog::log('shipment', (int)$shipment['id'], ['status' => 'planned'],
