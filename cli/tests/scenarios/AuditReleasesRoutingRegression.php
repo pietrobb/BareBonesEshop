@@ -90,7 +90,7 @@ $a094Server = proc_open([PHP_BINARY, '-S', "127.0.0.1:{$a094Port}", $a094Router]
 $a094Get = static function (string $path) use ($a094Port): array {
     $context = stream_context_create(['http' => ['method' => 'GET', 'follow_location' => 0, 'ignore_errors' => true, 'timeout' => 15]]);
     $body = @file_get_contents("http://127.0.0.1:{$a094Port}{$path}", false, $context);
-    return ['status' => (int)(explode(' ', (string)(($http_response_header ?? [])[0] ?? ''))[1] ?? 0), 'body' => (string)$body];
+    return ['status' => (int)(explode(' ', (string)(HttpResponseHeaders::last($http_response_header ?? null)[0] ?? ''))[1] ?? 0), 'body' => (string)$body];
 };
 try {
     for ($i = 0; $i < 50 && $a094Get('/nic-take')['status'] === 0; $i++) usleep(100000);

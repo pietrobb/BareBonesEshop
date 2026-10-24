@@ -61,12 +61,14 @@ jobs:
   stripe-test-checkout:
     name: Stripe test-mode checkout (Chromium, WebKit iPhone, Firefox)
     runs-on: ubuntu-latest
-    timeout-minutes: 40
-    env:
-      E2E_STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+    timeout-minutes: 60
+    # The Stripe key is passed only to the steps that need it (never to npm/npx installs, whose
+    # dependency scripts could read the environment); prepare.php writes it into the runtime config.
 
     steps:
       - name: Require the Stripe test key
+        env:
+          E2E_STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
         run: |
           if [ -z "$E2E_STRIPE_TEST_SECRET_KEY" ]; then
             echo "::error::Repository secret STRIPE_TEST_SECRET_KEY (sk_test_... or rk_test_...) is missing; the real gateway path is unproven."
@@ -93,14 +95,25 @@ jobs:
           cache: npm
 
       - name: Install Playwright browsers
+        timeout-minutes: 40
         run: |
-          npm ci
-          npx playwright install --with-deps chromium webkit firefox
+          npm ci --ignore-scripts
+          # The runner's apt mirror can stall for minutes per package: time out and retry instead of hanging the job.
+          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-timeouts >/dev/null
+          for attempt in 1 2 3; do
+            timeout 480 npx playwright install --with-deps chromium webkit firefox && exit 0
+            echo "::warning::playwright install attempt $attempt did not finish; retrying"
+            # timeout stops npx, not the apt-get it started: let that finish (it holds the dpkg lock) before retrying.
+            timeout 600 bash -c 'while pgrep -x apt-get >/dev/null || pgrep -x dpkg >/dev/null; do sleep 10; done' || true
+            sudo dpkg --configure -a || true
+          done
+          exit 1
 
       - name: Prepare disposable SQLite application with the Stripe test key
         env:
           E2E_RUNTIME_DIR: /tmp/barebones-e2e-stripe
           E2E_STATE_PATH: /tmp/barebones-e2e-stripe-state.json
+          E2E_STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
           BBE_ADMIN_IDENTITY_KEY: RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU=
         run: |
           php tests/e2e/prepare.php

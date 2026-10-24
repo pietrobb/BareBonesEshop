@@ -406,28 +406,21 @@ assert_true($oosException, 'Out-of-stock order throws RuntimeException');
 // ============================================================
 echo "\n--- Test 25: Webhook Signature ---\n";
 
-// Inline the signature verification function for testing (api.php has side effects)
-function verifyStripeSignature(string $payload, string $sigHeader, string $secret): bool {
-    if (strlen($secret) < 16 || trim($secret) !== $secret) return false;
-    $timestamp = '';
-    $signatures = [];
-    foreach (explode(',', $sigHeader) as $part) {
-        [$key, $value] = explode('=', trim($part), 2) + [1 => ''];
-        if ($key === 't') {
-            if ($timestamp !== '' && $timestamp !== $value) return false;
-            $timestamp = $value;
-        } elseif ($key === 'v1' && $value !== '') {
-            $signatures[] = strtolower($value);
+// The production verifier (the /webhooks/stripe endpoint and the generic payment webhook both use it).
+$verifyStripeSignature = static fn(string $payload, string $sigHeader, string $secret): bool
+    => (new StripePayment(['stripe_webhook_secret' => $secret]))->verifySignature($payload, $sigHeader);
+$stripeVerifierCopies = [];
+foreach (['src', 'adapters', 'extensions'] as $stripeVerifierDir) {
+    $stripeVerifierPath = TEST_CLI_DIR . '/../' . $stripeVerifierDir;
+    if (!is_dir($stripeVerifierPath)) continue;
+    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($stripeVerifierPath, FilesystemIterator::SKIP_DOTS)) as $stripeVerifierFile) {
+        if ($stripeVerifierFile->getExtension() !== 'php') continue;
+        if (preg_match('/function\s+verifyStripeSignature|\$key\s*===\s*\'v1\'/', (string)file_get_contents($stripeVerifierFile->getPathname()))) {
+            $stripeVerifierCopies[] = str_replace('\\', '/', substr($stripeVerifierFile->getPathname(), strlen($stripeVerifierPath) - strlen($stripeVerifierDir)));
         }
     }
-    if ($timestamp === '' || !ctype_digit($timestamp) || !$signatures) return false;
-    if (abs(time() - (int)$timestamp) > 300) return false;
-    $expected = hash_hmac('sha256', $timestamp . '.' . $payload, $secret);
-    foreach ($signatures as $signature) {
-        if (hash_equals($expected, $signature)) return true;
-    }
-    return false;
 }
+assert_equals(['adapters/contrib/StripePayment.php'], $stripeVerifierCopies, 'Stripe webhook signatures have exactly one implementation (StripePayment::verifySignature)');
 
 $testSecret = 'test-stripe-webhook-secret';
 $testPayload = '{"id":"evt_1","type":"checkout.session.completed"}';
@@ -435,21 +428,21 @@ $testTimestamp = (string)time();
 $testSig = hash_hmac('sha256', $testTimestamp . '.' . $testPayload, $testSecret);
 $testHeader = "t={$testTimestamp},v1={$testSig}";
 
-assert_true(verifyStripeSignature($testPayload, $testHeader, $testSecret), 'Valid Stripe signature accepted');
-assert_true(verifyStripeSignature($testPayload, "t={$testTimestamp},v1=deadbeef,v1={$testSig}", $testSecret), 'Any valid Stripe v1 signature is accepted during secret rotation');
-assert_true(!verifyStripeSignature($testPayload, $testHeader, ''), 'Empty Stripe webhook secret fails closed');
+assert_true($verifyStripeSignature($testPayload, $testHeader, $testSecret), 'Valid Stripe signature accepted');
+assert_true($verifyStripeSignature($testPayload, "t={$testTimestamp},v1=deadbeef,v1={$testSig}", $testSecret), 'Any valid Stripe v1 signature is accepted during secret rotation');
+assert_true(!$verifyStripeSignature($testPayload, $testHeader, ''), 'Empty Stripe webhook secret fails closed');
 $weakSecretHeader = "t={$testTimestamp},v1=" . hash_hmac('sha256', $testTimestamp . '.' . $testPayload, 'short');
-assert_true(!verifyStripeSignature($testPayload, $weakSecretHeader, 'short'), 'Weak Stripe webhook secret fails closed even with a matching HMAC');
-assert_true(!verifyStripeSignature($testPayload, $testHeader, 'wrong_secret'), 'Wrong secret rejected');
-assert_true(!verifyStripeSignature('tampered', $testHeader, $testSecret), 'Tampered payload rejected');
-assert_true(!verifyStripeSignature($testPayload, "t=1,t={$testTimestamp},v1={$testSig}", $testSecret), 'Conflicting Stripe timestamps rejected');
-assert_true(!verifyStripeSignature($testPayload, "t=not-a-time,v1={$testSig}", $testSecret), 'Malformed Stripe timestamp rejected');
+assert_true(!$verifyStripeSignature($testPayload, $weakSecretHeader, 'short'), 'Weak Stripe webhook secret fails closed even with a matching HMAC');
+assert_true(!$verifyStripeSignature($testPayload, $testHeader, 'wrong_secret'), 'Wrong secret rejected');
+assert_true(!$verifyStripeSignature('tampered', $testHeader, $testSecret), 'Tampered payload rejected');
+assert_true(!$verifyStripeSignature($testPayload, "t=1,t={$testTimestamp},v1={$testSig}", $testSecret), 'Conflicting Stripe timestamps rejected');
+assert_true(!$verifyStripeSignature($testPayload, "t=not-a-time,v1={$testSig}", $testSecret), 'Malformed Stripe timestamp rejected');
 
 // Expired timestamp
 $oldTimestamp = (string)(time() - 600);
 $oldSig = hash_hmac('sha256', $oldTimestamp . '.' . $testPayload, $testSecret);
 $oldHeader = "t={$oldTimestamp},v1={$oldSig}";
-assert_true(!verifyStripeSignature($testPayload, $oldHeader, $testSecret), 'Expired signature rejected');
+assert_true(!$verifyStripeSignature($testPayload, $oldHeader, $testSecret), 'Expired signature rejected');
 
 // ============================================================
 // TEST 26: Cache Warming (inline)

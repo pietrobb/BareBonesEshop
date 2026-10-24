@@ -48,7 +48,7 @@ $a102Request = static function (string $method, string $target, array $options =
     $http = ['method' => $method, 'header' => $headers, 'follow_location' => 0, 'ignore_errors' => true, 'timeout' => 30];
     if ($content !== null) $http['content'] = $content;
     $body = @file_get_contents("http://127.0.0.1:{$a102Port}{$target}", false, stream_context_create(['http' => $http]));
-    $responseHeaders = $http_response_header ?? [];
+    $responseHeaders = HttpResponseHeaders::last($http_response_header ?? null);
     $cookies = [];
     foreach ($responseHeaders as $line) {
         if (stripos($line, 'Set-Cookie:') === 0 && preg_match('/^Set-Cookie:\s*([^=;\s]+)=([^;]*)/i', $line, $m)) $cookies[$m[1]] = $m[2];

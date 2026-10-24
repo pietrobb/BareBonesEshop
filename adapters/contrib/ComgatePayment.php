@@ -201,7 +201,6 @@ class ComgatePayment implements HostedCheckoutAdapter, PullVerifiedNotificationA
         $responseBody = curl_exec($ch);
         $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $error = curl_error($ch);
-        curl_close($ch);
         if ($responseBody === false || $error !== '') throw new \RuntimeException('Comgate transport error: ' . $error);
         return ['status' => $status, 'body' => (string)$responseBody];
     }
