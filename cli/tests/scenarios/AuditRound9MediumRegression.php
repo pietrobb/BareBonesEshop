@@ -190,3 +190,36 @@ $r9prDb->exec('UPDATE payment_methods SET active = 0 WHERE requires_online = 1')
 assert_true($r9prKeyless['payment.provider.stripe'] === 'fail' && PaymentReadiness::checks($r9prDb, $r9prCfg)[0][0] === 'warn',
     'R9 payments readiness: a placeholder Stripe key fails; with no online method it only warns that checkout is offline-only');
 $r9prDb = null;
+
+// Customer-visible payment/carrier codes: checkout printed a method's provider code ("stripe", "manual") when it had no
+// description, the free digital order's payment and delivery and the built-in carriers' labels were Slovak/Czech
+// ("Bez platby", "GLS — zadarmo") in every language. They come from the shopper's language now.
+if (!function_exists('freeDigitalPayment')) require_once TEST_CLI_DIR . '/../src/Http/ApiHandlers.php';
+$r9pcLocale = I18n::locale();
+$r9pcLabels = [];
+foreach (['de', 'en', 'cs'] as $r9pcLang) {
+    I18n::setLocale($r9pcLang);
+    $r9pcGlsFree = (new GlsShipping())->getRates(['country' => 'SK', 'weight_g' => 500, 'subtotal' => 100000, 'currency' => 'EUR'])[0]['label'] ?? '';
+    $r9pcLabels[$r9pcLang] = [freeDigitalPayment()['label'], freeDigitalPayment()['description'], digitalDeliveryRate()['label'], digitalDeliveryRate()['delivery_days'],
+        $r9pcGlsFree, (new PersonalPickup())->getRates(['country' => 'SK'])[0]['label'] ?? ''];
+}
+I18n::setLocale($r9pcLocale);
+assert_equals(['de' => [I18n::tIn('checkout.free_payment.label', 'de'), I18n::tIn('checkout.free_payment.description', 'de'), I18n::tIn('checkout.digital.label', 'de'),
+        I18n::tIn('checkout.digital.delivery_days', 'de'), 'GLS — Kostenlos', I18n::tIn('carrier.pickup', 'de')],
+    'en' => ['No payment — the order is free', 'Free digital order', 'Electronic — download link by e-mail', 'right after payment', 'GLS — Free', 'In-store pickup'],
+    'cs' => [I18n::tIn('checkout.free_payment.label', 'cs'), I18n::tIn('checkout.free_payment.description', 'cs'), I18n::tIn('checkout.digital.label', 'cs'),
+        I18n::tIn('checkout.digital.delivery_days', 'cs'), 'GLS — Zdarma', I18n::tIn('carrier.pickup', 'cs')]], $r9pcLabels,
+    'R9 payment codes: the free order\'s payment and delivery and the carrier labels follow the shopper\'s language');
+assert_true(!preg_match('~zadarmo|stiahnutie|ihneď|úhrade|Osobný|digitálna~u', json_encode([$r9pcLabels['de'], $r9pcLabels['en'], $r9pcLabels['cs']], JSON_UNESCAPED_UNICODE)),
+    'R9 payment codes: no Slovak label reaches a German, English or Czech shopper (' . json_encode($r9pcLabels, JSON_UNESCAPED_UNICODE) . ')');
+$r9pcBlock = (string)file_get_contents(TEST_CLI_DIR . '/../themes/default/blocks/storefront/checkout.html');
+$r9pcJs = (string)file_get_contents(TEST_CLI_DIR . '/../themes/default/assets/storefront.js');
+$r9pcPage = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Storefront/CheckoutPages.php');
+assert_true(str_contains($r9pcBlock, '{{#if description}}<small>{{description}}</small>{{/if}}') && !str_contains($r9pcJs, 'method.description || method.provider')
+    && !str_contains($r9pcPage, "\$method['description'] ?: \$method['provider']"),
+    'R9 payment codes: a payment method without a description shows no provider code (server-rendered and JS checkout)');
+
+// Feed/JSON-LD prices: they printed two-decimal cents ("7.49 CZK") where the storefront shows and the cart charges whole
+// Kč/Ft; Money::decimal gives the machine-readable amount in the units the currency shows.
+assert_equals(['7', '1235', '12.49', '0'], [Money::decimal(749, 'czk'), Money::decimal(123456, 'huf'), Money::decimal(1249, 'eur'), Money::decimal(0, 'czk')],
+    'R9 feed prices: whole units for CZK/HUF (rounded like the cart), cents for EUR');

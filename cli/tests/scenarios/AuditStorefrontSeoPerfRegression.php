@@ -34,6 +34,8 @@ if ($phase === 'setup') {
         VALUES ('default', ?, ?, ?, ?, ?, ?, 5, 'active', ?, ?, '2026-01-01 00:00:00')");
     for ($i = 1; $i <= 30; $i++) $product->execute([$categoryId, 'SFB-' . $i, 'sfb-p-' . $i, 'SFB Product ' . $i, 1000 + $i, 'eur', '["sfb-' . $i . '.jpg"]', '{}']);
     $product->execute([$categoryId, 'SFB-FEW', 'sfb-few', 'SFB Few', 900, 'eur', '[]', '{}']);
+    // R9: a CZK product at 749.90 Kč, which the CZ store shows and charges as 750 Kč.
+    $product->execute([$categoryId, 'SFB-CZK', 'sfb-czk', 'SFB Koruna', 74990, 'czk', '[]', '{}']);
     $product->execute([$categoryId, 'SFB-MAIN', 'sfb-main', 'SFB Main', 1500, '', '["sfb-main.jpg"]',
         json_encode(['cs' => ['slug' => 'sfb-main-cs', 'name' => 'SFB Hlavni']], JSON_THROW_ON_ERROR)]);
     $warehouse = (int)$db->query('SELECT id FROM warehouses WHERE is_default = 1 ORDER BY id LIMIT 1')->fetchColumn();
@@ -54,10 +56,11 @@ if ($phase === 'setup') {
         $relation->execute([$ids['sfb-main'], $ids['sfb-p-' . $i], $i % 2 ? 'related' : 'accessory', $i]);
         if ($i <= 5) $relation->execute([$ids['sfb-few'], $ids['sfb-p-' . $i], $i % 2 ? 'related' : 'accessory', $i]);
     }
-    // The CZ store shows sfb-main at a promotional 7.00: the feed must export that price, not the 15.00 base.
+    // The CZ store shows sfb-main at a promotional 7.49, charged and shown as a whole 7 Kč (CZK has no minor units):
+    // the feed must export that price, not the 15.00 base nor 7.49.
     $db->prepare("INSERT INTO promotions (store_id, code, name, scope, priority, stacking, conditions, actions, active)
         VALUES ('cz', 'SFB-PROMO', 'SFB promo', 'catalog', 1, 'exclusive', ?, ?, 1)")
-        ->execute([json_encode(['product_ids' => [$ids['sfb-main']]]), json_encode(['type' => 'fixed_price', 'price' => 700])]);
+        ->execute([json_encode(['product_ids' => [$ids['sfb-main']]]), json_encode(['type' => 'fixed_price', 'price' => 749])]);
     exit(0);
 }
 
@@ -128,8 +131,8 @@ if ($action === 'queries') {
 }
 
 if ($action === 'product_model') {
-    $model = StorefrontViewModel::product(Products::bySlug('sfb-main'));
-    $emit(['seo' => $model['page']['seo'], 'head' => Template::viewModelSeoHead($model, 'SFB')]);
+    $model = StorefrontViewModel::product(Products::bySlug((string)($options['slug'] ?? 'sfb-main')));
+    $emit(['seo' => $model['page']['seo'], 'head' => Template::viewModelSeoHead($model, 'SFB'), 'price' => $model['product']['price']['formatted'] ?? '']);
     exit(0);
 }
 
@@ -328,6 +331,11 @@ try {
         preg_match_all('#<link rel="alternate" hreflang="([^"]+)" href="([^"]*)"#', (string)($model['head'] ?? ''), $m);
         return array_combine($m[1], array_map(static fn(string $href): string => html_entity_decode($href, ENT_QUOTES | ENT_HTML5), $m[2]));
     };
+    // R9: the CZ offer is the whole-koruna price the page shows and the cart charges, not two-decimal cents (Merchant Center).
+    [, $sfbCzkModel, $sfbNoise] = $sfbRun('run', 'product_model', ['script_name' => '/shop/index.php', 'store' => 'cz', 'locale' => 'cs', 'slug' => 'sfb-czk']);
+    $sfbCzOffer = $sfbCzkModel['seo']['json_ld'][0]['offers'] ?? [];
+    assert_equals(['750', 'CZK', 'https://schema.org/InStock', '750 Kč'], [$sfbCzOffer['price'] ?? null, $sfbCzOffer['priceCurrency'] ?? null, $sfbCzOffer['availability'] ?? null,
+        html_entity_decode((string)($sfbCzkModel['price'] ?? ''))], "R9 JSON-LD: the CZ offer price is the shown whole-koruna price ({$sfbNoise})");
     $sfbCzLocale = (string)(Bootstrap::stores()['stores']['cz']['default_locale'] ?? 'cs');
     $sfbDefaultLocale = (string)(Bootstrap::stores()['stores'][(string)(Bootstrap::stores()['default_store'] ?? 'default')]['default_locale'] ?? 'sk');
     foreach (['default store' => $sfbModel, 'CZ store' => $sfbCzModel] as $sfbLabel => $sfbHeadModel) {
@@ -374,9 +382,10 @@ try {
     $sfbGoogle = (string)($sfbFeed['google'] ?? '');
     $sfbItem = preg_match('#<item>(?:(?!</item>).)*<g:id>SFB-MAIN</g:id>.*?</item>#s', $sfbGoogle, $m) ? $m[0] : '';
     assert_true(str_contains($sfbItem, '<g:link>https://shop.example/shop/cs/product/sfb-main-cs</g:link>'), "Feed: the CZ link carries the /cs prefix and the Czech slug ({$sfbNoise})");
-    assert_true(str_contains($sfbItem, '<g:price>7.00 CZK</g:price>'), 'Feed: the price is the promoted price the CZ storefront shows, in the store currency when the product has none');
+    assert_true(str_contains($sfbItem, '<g:price>7 CZK</g:price>'), 'Feed: the price is the promoted price the CZ storefront shows, in the store currency when the product has none');
     assert_true(str_contains($sfbItem, '<g:image_link>https://shop.example/shop/uploads/full/sfb-main.jpg</g:image_link>'), 'Feed: the image link is the storefront image URL');
-    assert_true(str_contains((string)($sfbFeed['meta'] ?? ''), 'https://shop.example/shop/cs/product/sfb-main-cs') && str_contains((string)($sfbFeed['meta'] ?? ''), '7.00 CZK'), 'Feed: the Meta CSV exports the same link and price');
+    assert_true(str_contains((string)($sfbFeed['meta'] ?? ''), 'https://shop.example/shop/cs/product/sfb-main-cs') && str_contains((string)($sfbFeed['meta'] ?? ''), '7 CZK'), 'Feed: the Meta CSV exports the same link and price');
+    assert_true((bool)preg_match('#<g:id>SFB-CZK</g:id>(?:(?!</item>).)*<g:price>750 CZK</g:price>#s', $sfbGoogle), 'R9 feed: a CZK product is exported at the whole-koruna price the store shows (750 CZK, not 749.90)');
     assert_true($sfbFeed['rows_is_generator'] ?? false, 'Feed: rows are streamed from a generator in chunks, not loaded at once');
 
     // --- 9: legal pages show the template's date, not today ---
