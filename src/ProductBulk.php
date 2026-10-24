@@ -34,6 +34,9 @@ final class ProductBulk {
                     }
                     self::writeOffStock($id, $skus);
                     $db->prepare('DELETE FROM products WHERE id = :id AND store_id = :catalog')->execute([':id' => $id, ':catalog' => StoreContext::current()->catalogId()]);
+                    // Its localized and previous slugs go too: left behind they blocked the slug for a new product
+                    // and pointed at whichever product later reused the id.
+                    $db->prepare("DELETE FROM slug_registry WHERE entity = 'product' AND entity_id = :id")->execute([':id' => $id]);
                     AuditLog::log('product', $id, $product, null, 'Admin bulk delete');
                 } elseif (isset(self::STATUS_ACTIONS[$action])) {
                     $status = self::STATUS_ACTIONS[$action];

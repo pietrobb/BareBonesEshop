@@ -103,3 +103,20 @@ assert_equals([2441, 512, 2953], $r9lPrinted, 'R9 invoice: the printed net and V
 assert_equals([[81400, 81300, 81400], [81350, 81350, 81350]],
     [InvoiceService::displayAmounts([81350, 81350, 81350], 'czk'), InvoiceService::displayAmounts([81350, 81350, 81350], 'eur')],
     'R9 invoice: CZK lines are rounded cumulatively, two-decimal currencies are left as they are');
+
+// Slug registry: deleting a product or category left its localized/previous slugs registered, so the slug could not be
+// given to a new product, and a product or category that reused the id answered the deleted one's old URLs.
+$r9lCatalog = StoreContext::current()->catalogId();
+// The isolated single-scenario run has no attribute tables yet; the baseline creates this one the same way.
+$pdo->exec('CREATE TABLE IF NOT EXISTS category_attributes (category_id INTEGER NOT NULL, attribute_id INTEGER NOT NULL, PRIMARY KEY (category_id, attribute_id))');
+$pdo->prepare("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
+    VALUES (97911, ?, 1, 'R9L gone', 'r9l-gone', 'R9L-GONE', 'simple', 1000, 'eur', 'active', 0, 'deny')")->execute([$r9lCatalog]);
+$pdo->prepare("INSERT INTO categories (id, store_id, slug, name, parent_id, path, depth, product_count) VALUES (97912, ?, 'r9l-gone-cat', 'R9L gone', NULL, 'r9l-gone-cat', 0, 0)")->execute([$r9lCatalog]);
+$r9lSlug = $pdo->prepare("INSERT INTO slug_registry (slug, locale, entity, entity_id, store_id) VALUES (?, ?, ?, ?, ?)");
+$r9lSlug->execute(['r9l-gone-cs', 'cs', 'product', 97911, $r9lCatalog]);
+$r9lSlug->execute(['r9l-old-cat', 'previous', 'category', 97912, $r9lCatalog]);
+$r9lBulk = ProductBulk::apply('delete', [97911]);
+$r9lCatDelete = CatalogTaxonomy::deleteCategory(97912);
+assert_equals([1, true, 0], [(int)$r9lBulk['count'], (bool)$r9lCatDelete['ok'],
+    (int)$pdo->query("SELECT COUNT(*) FROM slug_registry WHERE (entity = 'product' AND entity_id = 97911) OR (entity = 'category' AND entity_id = 97912)")->fetchColumn()],
+    'R9 slugs: deleting a product or a category also frees its registered localized and previous slugs');
