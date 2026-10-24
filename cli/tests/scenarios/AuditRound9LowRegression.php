@@ -137,6 +137,33 @@ assert_equals([35, Search::FACET_LIMIT, true, 1], [(int)$r9lAll['total'], count(
 $pdo->exec('DELETE FROM products WHERE id BETWEEN 97961 AND 97995');
 $pdo->exec('DELETE FROM categories WHERE id BETWEEN 97921 AND 97955');
 
+// Return/withdrawal window: a shipped order never marked delivered stayed returnable for ever, and a delivery the
+// carrier reported on the shipment did not start the withdrawal period.
+$r9lWinDay = 86400;
+$r9lWinOrder = static function (int $id, int $orderedDaysAgo, ?int $carrierDeliveredDaysAgo) use ($pdo, $r9lWinDay): array {
+    $created = gmdate('Y-m-d H:i:s', time() - $orderedDaysAgo * $r9lWinDay);
+    $pdo->prepare("DELETE FROM shipments WHERE order_id = ?")->execute([$id]);
+    if ($carrierDeliveredDaysAgo !== null) {
+        $pdo->prepare("INSERT INTO shipments (order_id, carrier, status, idempotency_key, shipped_at, delivered_at) VALUES (?, 'r9l', 'delivered', ?, ?, ?)")
+            ->execute([$id, 'r9l-win-' . $id, $created, gmdate('Y-m-d H:i:s', time() - $carrierDeliveredDaysAgo * $r9lWinDay)]);
+    }
+    return ['id' => $id, 'status' => 'shipped', 'created_at' => $created, 'delivered_at' => null];
+};
+$r9lWinCfg = new ReflectionProperty('Security', 'cfg');
+$r9lWinPrev = $r9lWinCfg->getValue();
+$r9lWinCfg->setValue(null, ['rma_return_window_days' => 14] + (array)$r9lWinPrev);
+try {
+    assert_equals(['undated 100 d' => true, 'undated 13 months' => false, 'carrier 10 d' => true, 'carrier 15 d' => false],
+        ['undated 100 d' => Rma::withinReturnWindow($r9lWinOrder(97981, 100, null)), 'undated 13 months' => Rma::withinReturnWindow($r9lWinOrder(97982, 396, null)),
+         'carrier 10 d' => Rma::withinReturnWindow($r9lWinOrder(97983, 30, 10)), 'carrier 15 d' => Rma::withinReturnWindow($r9lWinOrder(97984, 30, 15))],
+        'R9 return window: an order without a delivery date is returnable for at most 12 months past the period; a carrier-reported delivery starts it');
+    assert_equals([true, false], [Withdrawal::withinPeriod($r9lWinOrder(97985, 30, 10)), Withdrawal::withinPeriod($r9lWinOrder(97986, 30, 15))],
+        'R9 withdrawal period: a carrier-reported delivery starts the 14 days when the order itself has no delivered_at');
+} finally {
+    $r9lWinCfg->setValue(null, $r9lWinPrev);
+    $pdo->exec('DELETE FROM shipments WHERE order_id BETWEEN 97981 AND 97986');
+}
+
 // Admin warehouse form: its labels were not tied to their fields (axe "label"), so a screen reader announced bare inputs.
 $r9lOpsSrc = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Operations.php');
 preg_match('/function pageWarehouse\(\).*?<\/form>/s', $r9lOpsSrc, $r9lWhForm);
