@@ -951,13 +951,13 @@ function digitalDeliveryRate(): array {
         'method_code' => 'digital',
         'carrier' => 'digital',
         'provider' => 'none',
-        'label' => 'Elektronicky — odkaz na stiahnutie e-mailom',
-        'description' => 'Bez fyzickej dopravy',
+        'label' => I18n::t('checkout.digital.label'),
+        'description' => I18n::t('checkout.digital.description'),
         'service_type' => 'digital',
         'zone_code' => 'digital',
         'price' => 0,
         'cod_surcharge' => 0,
-        'delivery_days' => 'ihneď po úhrade',
+        'delivery_days' => I18n::t('checkout.digital.delivery_days'),
         'cod' => false,
     ];
 }
@@ -966,8 +966,8 @@ function freeDigitalPayment(): array {
     return [
         'code' => 'free',
         'provider' => 'none',
-        'label' => 'Bez platby — objednávka je zdarma',
-        'description' => 'Bezplatná digitálna objednávka',
+        'label' => I18n::t('checkout.free_payment.label'),
+        'description' => I18n::t('checkout.free_payment.description'),
         'service_type' => 'free',
         'requires_online' => false,
         'fee' => 0,
