@@ -100,11 +100,23 @@ class Logger
         }
     }
 
-    /** PHP error log line with e-mail addresses and secret-looking values masked (exception messages carry customer input). */
+    /**
+     * A secret's value after its key: `token=x`, `password: x`, and in JSON or quoted form `"client_secret":"x"`
+     * (the quote between key and colon used to hide it), also as part of a longer key (`stripe_secret_key`,
+     * `access_token`). The value stops at a quote, `&`, `,`, `;` or `}`.
+     */
+    private const SECRET_VALUE = '/(Bearer\s+)[A-Za-z0-9._~+\/=-]+|((?:secret|token|password|passwd|api[_-]?key)[\w-]*["\']?\s*[=:]\s*["\']?)[^\s"\'&,;}]+/i';
+
+    /**
+     * PHP error log line with e-mail addresses and secret-looking values masked (exception messages carry customer
+     * input), on one line: CR/LF and other control characters are escaped so input cannot forge further log lines.
+     */
     public static function phpLog(string $line): void
     {
-        error_log((string)preg_replace(['/[^\s@<>"\'(),;:]+@[^\s@<>"\'(),;:]+\.[a-z]{2,}/i', '/(Bearer\s+)[A-Za-z0-9._~-]+|((?:secret|token|password|api[_-]?key)\s*[=:]\s*)\S+/i'],
-            ['[email]', '$1$2[REDACTED]'], $line));
+        $masked = (string)preg_replace(['/[^\s@<>"\'(),;:]+@[^\s@<>"\'(),;:]+\.[a-z]{2,}/i', self::SECRET_VALUE], ['[email]', '$1$2[REDACTED]'], $line);
+        error_log((string)preg_replace_callback('/[\x00-\x1F\x7F]/', static fn(array $m): string => match ($m[0]) {
+            "\n" => '\n', "\r" => '\r', "\t" => '\t', default => sprintf('\x%02X', ord($m[0])),
+        }, $masked));
     }
 
     public static function redact(array $value): array
@@ -115,7 +127,7 @@ class Logger
             } elseif (is_array($item)) {
                 $item = self::redact($item);
             } elseif (is_string($item)) {
-                $item = preg_replace('/(Bearer\s+)[A-Za-z0-9._~-]+|((?:secret|token|password|api[_-]?key)\s*[=:]\s*)\S+/i', '$1$2[REDACTED]', $item);
+                $item = preg_replace(self::SECRET_VALUE, '$1$2[REDACTED]', $item);
             } elseif (is_object($item)) {
                 $item = '[OBJECT]';
             }
