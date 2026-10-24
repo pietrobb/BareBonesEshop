@@ -172,3 +172,51 @@ preg_match_all('/<label for="([^"]+)">/', $r9lWhForm[0] ?? '', $r9lWhFor);
 $r9lWhIds = array_map(static fn(string $f): string => preg_match('/\bid="([^"]+)"/', $f, $m) ? $m[1] : '', $r9lWhFields[0]);
 assert_true(count($r9lWhIds) === 6 && !in_array('', $r9lWhIds, true) && array_diff($r9lWhIds, $r9lWhFor[1]) === [],
     'R9 admin a11y: every warehouse form field has an id its label points to (' . json_encode($r9lWhIds) . ')');
+
+// Invoice payment line: the PDF printed invoices.payment_method, the internal code, so a card order read
+// "Spôsob úhrady: stripe" and a free digital order "Spôsob úhrady: free" on a document the customer downloads.
+$r9lPayStorage = new ReflectionProperty(InvoiceService::class, 'storageDir');
+$r9lPayPrevStorage = $r9lPayStorage->getValue();
+$r9lPayDir = test_fixture_path('r9l-invoice-payment');
+mkdir($r9lPayDir);
+$r9lPayStorage->setValue(null, realpath($r9lPayDir));
+$pdo->exec('DELETE FROM invoices WHERE order_id BETWEEN 97881 AND 97883');
+$pdo->exec('DELETE FROM order_items WHERE order_id BETWEEN 97881 AND 97883');
+$pdo->exec('DELETE FROM orders WHERE id BETWEEN 97881 AND 97883');
+$pdo->exec('DELETE FROM products WHERE id = 97880');
+$pdo->prepare("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock) VALUES (97880, ?, 1, 'R9L pay', 'r9l-pay', 'R9L-PAY', 'simple', 1000, 'eur', 'active', 100)")
+    ->execute([StoreContext::current()->catalogId()]);
+$r9lPayOrder = $pdo->prepare("INSERT INTO orders (id, store_id, order_number, status, customer_name, customer_email, customer_phone, shipping_addr, payment_method,
+    payment_method_snapshot, subtotal, discount_amount, shipping_cost, tax_amount, total, currency, locale, created_at)
+    VALUES (?, 'default', ?, 'paid', 'R9L Pay', 'r9l-pay@example.com', '', ?, ?, ?, 1000, 0, 0, 0, 1000, 'eur', 'sk', datetime('now'))");
+$r9lPayItem = $pdo->prepare("INSERT INTO order_items (order_id, product_id, sku, name, quantity, unit_price, total) VALUES (?, 97880, 'R9L-PAY', 'R9L pay', 1, 1000, 1000)");
+$r9lPayAddr = json_encode(['street' => 'Platobna 1', 'city' => 'Bratislava', 'zip' => '81101', 'country' => 'SK']);
+foreach ([
+    97881 => ['stripe', ['code' => 'card', 'provider' => 'stripe', 'service_type' => 'card', 'label' => 'Platba kartou']],
+    97882 => ['free', ['code' => 'free', 'provider' => 'none', 'service_type' => 'free', 'label' => 'Bez platby']],
+    97883 => ['free', null],
+] as $r9lPayId => [$r9lPayCode, $r9lPaySnap]) {
+    $r9lPayOrder->execute([$r9lPayId, 'R9L-PAY-' . $r9lPayId, $r9lPayAddr, $r9lPayCode, $r9lPaySnap === null ? null : json_encode($r9lPaySnap)]);
+    $r9lPayItem->execute([$r9lPayId]);
+}
+try {
+    $r9lPayLines = [];
+    $r9lPayInvoices = [];
+    foreach ([97881, 97882, 97883] as $r9lPayId) {
+        $r9lPayInvoices[$r9lPayId] = InvoiceService::issue($r9lPayId);
+        preg_match_all('/Td \(([^)]*)\) Tj/', (string)file_get_contents(InvoiceService::pdfAbsolutePath($r9lPayInvoices[$r9lPayId])), $r9lPayTexts);
+        $r9lPayLine = array_values(preg_grep('/hrady: /', $r9lPayTexts[1]))[0] ?? '';
+        $r9lPayLines[$r9lPayId] = substr($r9lPayLine, (int)strpos($r9lPayLine, ': ') + 2);
+    }
+    assert_equals([97881 => 'Platba kartou', 97882 => 'Bez platby', 97883 => 'Zadarmo'], $r9lPayLines,
+        'R9 invoice: the PDF payment line is the checkout label (or a translated name), never the code stripe/free');
+    // A credit note copies the invoice's payment_method and order and renders through the same line.
+    $r9lPayCredit = ['type' => 'credit_note', 'order_id' => 97881, 'payment_method' => (string)$r9lPayInvoices[97881]['payment_method']];
+    assert_equals('Platba kartou', InvoiceService::paymentText($r9lPayCredit, 'sk'), 'R9 invoice: a credit note of a card invoice prints the card label too');
+} finally {
+    $r9lPayStorage->setValue(null, $r9lPayPrevStorage);
+    $pdo->exec('DELETE FROM invoices WHERE order_id BETWEEN 97881 AND 97883');
+    $pdo->exec('DELETE FROM order_items WHERE order_id BETWEEN 97881 AND 97883');
+    $pdo->exec('DELETE FROM orders WHERE id BETWEEN 97881 AND 97883');
+    $pdo->exec('DELETE FROM products WHERE id = 97880');
+}

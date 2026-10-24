@@ -1251,6 +1251,24 @@ final class InvoiceService
         return array_key_first($stores['stores'] ?? []) ?? 'sk';
     }
 
+    /**
+     * Payment method as the document prints it: the label the customer chose at checkout (the order's payment
+     * snapshot, in the order's language), never the internal code ('stripe', 'manual', 'free') that
+     * invoices.payment_method stores. See PaymentService::orderLabel().
+     */
+    public static function paymentText(array $invoice, string $locale): string
+    {
+        $stored = (string)($invoice['payment_method'] ?? '');
+        $stmt = Db::get()->prepare('SELECT * FROM orders WHERE id = :id');
+        $stmt->execute([':id' => (int)($invoice['order_id'] ?? 0)]);
+        $order = $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
+        $code = (string)($order['payment_method'] ?? '');
+        // A stored value other than the order's code is already a label (written by hand or by a later version).
+        if ($order === null || ($stored !== '' && $stored !== $code)) return $stored !== '' ? $stored : '—';
+        $label = PaymentService::orderLabel($order, $locale);
+        return $label !== '' ? $label : '—';
+    }
+
     private static function resolveLocale(array $order, array $store): string
     {
         return (string)($order['locale'] ?? $store['default_locale'] ?? 'en');
@@ -1649,7 +1667,7 @@ final class InvoiceService
 
         // Payment info
         $ensureSpace(15);
-        $pdf->text(20, $y, $L['payment_method'] . ': ' . ($invoice['payment_method'] ?: '—'), ['size' => 9]);
+        $pdf->text(20, $y, $L['payment_method'] . ': ' . self::paymentText($invoice, $locale), ['size' => 9]);
         $y += 5;
         // A credit note is paid out by the seller: no seller IBAN to pay to. An invoice carries the variable
         // symbol of the order's payment instructions, so a transfer made from either matches the same order.

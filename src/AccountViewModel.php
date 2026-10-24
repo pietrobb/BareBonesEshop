@@ -95,7 +95,6 @@ final class AccountViewModel
             foreach ($statement->fetchAll() as $invoice) $invoices[(int)$invoice['order_id']] = $invoice;
         }
         return array_map(static function(array $order) use ($invoices): array {
-            $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
             $invoice = $invoices[(int)$order['id']] ?? null;
             return [
                 'number' => (string)$order['order_number'],
@@ -104,7 +103,7 @@ final class AccountViewModel
                 'status_label' => OrderStatusLabels::order((string)$order['status']),
                 'payment_status' => (string)($order['payment_status'] ?? 'pending'),
                 'payment_status_label' => OrderStatusLabels::payment((string)($order['payment_status'] ?? 'pending')),
-                'payment_label' => (string)($snapshot['label'] ?? $snapshot['name'] ?? $order['payment_method'] ?? ''),
+                'payment_label' => PaymentService::orderLabel($order, I18n::locale()),
                 'transactions' => array_map(static fn(array $transaction): array => [
                     'date' => I18n::dateTime((string)$transaction['created_at']),
                     'status' => OrderStatusLabels::payment((string)$transaction['status']),
@@ -126,7 +125,6 @@ final class AccountViewModel
         $id = (int)$order['id'];
         $currency = (string)$order['currency'];
         $money = static fn($cents): string => I18n::price((int)$cents, $currency);
-        $payment = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
         $shipping = json_decode((string)($order['shipping_rate_snapshot'] ?? '{}'), true) ?: [];
         $address = json_decode((string)($order['shipping_addr'] ?? '{}'), true) ?: [];
         $invoice = Db::get()->prepare("SELECT id, number FROM invoices WHERE order_id = ? AND status != 'cancelled' ORDER BY id DESC LIMIT 1");
@@ -143,7 +141,7 @@ final class AccountViewModel
             'status_label' => OrderStatusLabels::order((string)$order['status']),
             'payment_status' => (string)($order['payment_status'] ?? 'pending'),
             'payment_status_label' => OrderStatusLabels::payment((string)($order['payment_status'] ?? 'pending')),
-            'payment_label' => (string)($payment['label'] ?? $payment['name'] ?? $order['payment_method'] ?? ''),
+            'payment_label' => PaymentService::orderLabel($order, I18n::locale()),
             'shipping_label' => (string)($shipping['name'] ?? $shipping['label'] ?? $order['shipping_method'] ?? ''),
             'tracking' => trim((string)($order['carrier'] ?? '') . ' ' . (string)($order['tracking_number'] ?? '')),
             'pickup_point' => is_array($shipping['pickup_point'] ?? null)

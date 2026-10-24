@@ -1202,6 +1202,26 @@ class PaymentService {
         if ($ownTransaction && $db->inTransaction()) $db->rollBack();
     }
 
+    /**
+     * Payment method as the customer sees it: the label of the order's payment snapshot (written at checkout in the
+     * order's language), never the internal code in orders.payment_method ('stripe', 'manual', 'free'). An order
+     * without a snapshot label gets the translated generic name of its method type ('' when it has none).
+     */
+    public static function orderLabel(array $order, ?string $locale = null): string {
+        $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true);
+        $snapshot = is_array($snapshot) ? $snapshot : [];
+        $label = trim((string)(($snapshot['label'] ?? '') ?: ($snapshot['name'] ?? '')));
+        if ($label !== '') return $label;
+        $type = (string)(($snapshot['service_type'] ?? '') ?: ($order['payment_method'] ?? ''));
+        if ($type === '') return '';
+        $key = match ($type) {
+            'free' => 'free',
+            'cod', 'bank_transfer' => 'methods.payment.' . $type,
+            default => 'methods.payment.card',
+        };
+        return I18n::tIn($key, $locale ?? (string)($order['locale'] ?? I18n::locale()));
+    }
+
     private static function orderProvider(array $order): string {
         $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
         return (string)($snapshot['provider'] ?? $order['payment_method'] ?? '');
