@@ -58,7 +58,7 @@ class PacketaShipping implements ShippingLifecycleAdapter
         if ($eur && $subtotal >= $this->freeAboveCents && $subtotal > 0) {
             return [[
                 'carrier'       => $this->carrierId(),
-                'label'         => 'Packeta — zadarmo',
+                'label'         => 'Packeta — ' . I18n::t('free'),
                 'price'         => 0,
                 'cod_surcharge' => 0,
                 'delivery_days' => $this->deliveryDays($country),
@@ -70,7 +70,7 @@ class PacketaShipping implements ShippingLifecycleAdapter
 
         return [[
             'carrier'       => $this->carrierId(),
-            'label'         => $this->label($country),
+            'label'         => I18n::t('carrier.packeta'),
             'price'         => $price,
             'cod_surcharge' => $codSurcharge,
             'delivery_days' => $this->deliveryDays($country),
@@ -279,15 +279,6 @@ class PacketaShipping implements ShippingLifecycleAdapter
     {
         // The 1 EUR default only applies to EUR carts; other currencies use the store's own row.
         return $this->lookupDbCodSurcharge($country, $currency) ?? ($currency === 'EUR' ? 100 : 0);
-    }
-
-    private function label(string $country): string
-    {
-        return match($country) {
-            'SK' => 'Packeta — doručenie na adresu / výdajné miesto',
-            'CZ' => 'Packeta — doručení na adresu / výdejní místo',
-            default => 'Packeta — delivery',
-        };
     }
 
     private function deliveryDays(string $country): string

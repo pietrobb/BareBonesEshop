@@ -19,4 +19,10 @@ final class Money {
         $units = intdiv(abs($cents) + intdiv($step, 2), $step) * $step;
         return $cents < 0 ? -$units : $units;
     }
+
+    /** Machine-readable amount ("500", "12.90") in the units the storefront shows and the cart charges (feeds, JSON-LD). */
+    public static function decimal(int $cents, string $currency): string {
+        $decimals = self::decimals($currency);
+        return number_format(self::round($cents, $currency) / 100, $decimals, '.', '');
+    }
 }

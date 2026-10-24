@@ -502,5 +502,13 @@
             "bed148212279d2dea8f2dcb2e04bdf900b377cc339cb867d8233bd8705a9543b",
             "1e14e4412c6fd4a666e46075f4becd705c2e49c3eaa047d7627738dba933639b"
         ]
+    },
+    "20261023230000_low_stock_indexes": {
+        "lf": [
+            "183ec02f0b1a22cff1aa531d5e903741d206a9ac049ae405465bc757ac326adf"
+        ],
+        "crlf": [
+            "6af97accef0c6efce6957d5953eafb831b8382cbda9a46fd48f97467ff62e153"
+        ]
     }
 }

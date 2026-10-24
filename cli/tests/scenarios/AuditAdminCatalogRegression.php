@@ -758,3 +758,41 @@ assert_true(str_contains((string)file_get_contents(dirname(TEST_CLI_DIR) . '/src
     'AAC exports: order and product CSV exports stream unbuffered on MySQL');
 $aacStmt = Db::executeUnbuffered('SELECT 1 AS one');
 assert_equals(['one' => 1], array_map('intval', (array)$aacStmt->fetch(PDO::FETCH_ASSOC)), 'AAC exports: the streaming statement works on SQLite');
+
+// R9 acceptance: a digital file could only be registered by a path to a file already copied there by FTP/SSH; the admin
+// form now uploads it into the store directory (never over another file, never outside that directory).
+ob_start();
+pageDigitalAssets();
+$r9dHtml = (string)ob_get_clean();
+assert_true(str_contains($r9dHtml, 'action="admin.php?p=digital_assets&action=save" enctype="multipart/form-data"') && str_contains($r9dHtml, 'name="file" type="file"')
+    && !preg_match('~name="storage_path"[^>]*required~', $r9dHtml), 'R9 digital upload: the admin form uploads the file and the relative path becomes optional');
+$r9dBase = test_fixture_path('r9-digital-upload');
+mkdir($r9dBase . '/cz', 0700, true);
+file_put_contents($r9dBase . '/cz/other.pdf', 'cz');
+$r9dSource = static function (string $body) use ($r9dBase): string {
+    $file = $r9dBase . '/upload-' . bin2hex(random_bytes(4)) . '.tmp';
+    file_put_contents($file, $body);
+    return $file;
+};
+DigitalDelivery::setConfigForTesting(['digital_assets_base_dir' => $r9dBase]);
+try {
+    $r9dNamed = DigitalDelivery::storeUpload($r9dSource('one'), 'Moja príručka (v2).pdf', '', null, 'default');
+    $r9dPathed = DigitalDelivery::storeUpload($r9dSource('two'), 'x.pdf', 'ebooks/manual.pdf', null, 'default');
+    $r9dTaken = DigitalDelivery::storeUpload($r9dSource('three'), 'x.pdf', 'ebooks/manual.pdf', null, 'default');
+    $r9dReplaced = DigitalDelivery::storeUpload($r9dSource('four'), 'x.pdf', 'ebooks/manual.pdf', 'default/ebooks/manual.pdf', 'default');
+    $r9dEscape = [DigitalDelivery::storeUpload($r9dSource('five'), 'x.pdf', '../cz/other.pdf', null, 'default'), DigitalDelivery::storeUpload($r9dSource('six'), 'x.pdf', 'cz/other.pdf', null, 'cz')];
+    assert_equals([['default/Moja-pr-ru-ka-v2-.pdf', null], ['default/ebooks/manual.pdf', null], [null, 'admin.digital.file_exists'], ['default/ebooks/manual.pdf', null]],
+        [$r9dNamed, $r9dPathed, $r9dTaken, $r9dReplaced], 'R9 digital upload: stored under its sanitized name or the entered path in the store directory; another file there is never replaced, the asset\'s own file is');
+    assert_equals(['one', 'four', 'cz'], [(string)@file_get_contents($r9dBase . '/default/Moja-pr-ru-ka-v2-.pdf'), (string)@file_get_contents($r9dBase . '/default/ebooks/manual.pdf'), (string)file_get_contents($r9dBase . '/cz/other.pdf')],
+        'R9 digital upload: the files hold the uploaded content and the other store\'s file is untouched');
+    assert_equals([[null, 'admin.digital.invalid'], [null, 'admin.digital.file_exists']], $r9dEscape, 'R9 digital upload: a traversing path is refused and an existing file of the store is not overwritten');
+    assert_true(DigitalDelivery::resolvedPath(['storage_path' => (string)$r9dPathed[0]]) !== null, 'R9 digital upload: the uploaded file is what the download resolves');
+    assert_equals([null, null, false, false], [DigitalDelivery::uploadedFile(null), DigitalDelivery::uploadedFile(['error' => UPLOAD_ERR_NO_FILE]),
+        DigitalDelivery::uploadedFile(['error' => UPLOAD_ERR_INI_SIZE, 'tmp_name' => '']), DigitalDelivery::uploadedFile(['error' => UPLOAD_ERR_OK, 'tmp_name' => $r9dBase . '/cz/other.pdf', 'name' => 'x.pdf'])],
+        'R9 digital upload: no file chosen keeps the path form; a failed upload or a file that is not an HTTP upload is refused');
+} finally {
+    DigitalDelivery::setConfigForTesting(null);
+    $r9dTree = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($r9dBase, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+    foreach ($r9dTree as $r9dPath) $r9dPath->isDir() ? rmdir($r9dPath->getPathname()) : unlink($r9dPath->getPathname());
+    rmdir($r9dBase);
+}

@@ -334,16 +334,12 @@ function pageOrder(): void {
             <?php endforeach; ?>
         </table>
         <div style="text-align:right;margin-top:.5rem">
-            <p><?= esc(I18n::t('admin.order.subtotal')) ?>: <strong><?= I18n::price((int)$order['subtotal'], $order['currency']) ?></strong></p>
-            <p><?= esc(I18n::t('admin.order.shipping')) ?>: <?= I18n::price((int)$order['shipping_cost'], $order['currency']) ?></p>
+            <?php $totalLabels = ['subtotal' => 'admin.order.subtotal', 'discount' => 'discount', 'shipping' => 'admin.order.shipping', 'payment_fee' => 'admin.order.payment_fee', 'vat' => 'admin.order.vat', 'vat_included' => 'admin.order.vat_included']; ?>
+            <?php foreach (Orders::totalLines($order) as $totalLine): ?>
+            <p data-order-total="<?= esc($totalLine['key']) ?>"><?= esc(I18n::t($totalLabels[$totalLine['key']])) ?>: <?= I18n::price($totalLine['cents'], $order['currency']) ?></p>
+            <?php endforeach; ?>
             <?php $pickupPoint = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true)['pickup_point'] ?? null; if (is_array($pickupPoint)): ?>
             <p><?= esc(I18n::t('pickup_point')) ?>: <?= esc((string)($pickupPoint['name'] ?? '')) ?> (ID <?= esc((string)($pickupPoint['id'] ?? '')) ?>) — <?= esc((string)($pickupPoint['address'] ?? '')) ?></p>
-            <?php endif; ?>
-            <?php if ((int)($order['payment_fee'] ?? 0) > 0): ?>
-            <p><?= esc(I18n::t('admin.order.payment_fee')) ?>: <?= I18n::price((int)$order['payment_fee'], $order['currency']) ?></p>
-            <?php endif; ?>
-            <?php if ((int)$order['tax_amount'] > 0): ?>
-            <p><?= esc(I18n::t('admin.order.vat')) ?>: <?= I18n::price((int)$order['tax_amount'], $order['currency']) ?></p>
             <?php endif; ?>
             <p style="font-size:1.2rem"><strong><?= esc(I18n::t('admin.order.grand_total')) ?>: <?= I18n::price((int)$order['total'], $order['currency']) ?></strong></p>
         </div>

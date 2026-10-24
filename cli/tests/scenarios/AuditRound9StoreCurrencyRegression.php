@@ -108,11 +108,16 @@ try {
     assert_equals(['count' => 0, 'skus' => []], StoreCurrencyCoverage::unpriced($r9cDb, 'default', $r9cSample['stores']['default']),
         'R9 CZK: the EUR store selling its EUR catalog has nothing unpriced');
 
+    // R9 acceptance: the cart (and so the order) named the product in the catalog's base language, not in the Czech
+    // translation the product page shows.
+    $r9cDb->exec("UPDATE products SET translations = '{\"cs\":{\"name\":\"R9C Tričko\",\"slug\":\"r9c-tricko\"}}' WHERE id = 97901");
     $_SESSION = ['cart' => []];
     Cart::add(97901, null, 1);
     $r9cCart = Cart::enriched();
     assert_equals(['czk', 49900, false], [$r9cCart['currency'], (int)$r9cCart['subtotal'], (bool)($r9cCart['items'][0]['currency_mismatch'] ?? true)],
         'R9 CZK: the cart charges the product in koruny');
+    assert_equals(['R9C Tričko', 'r9c-tricko'], [$r9cCart['items'][0]['name'] ?? null, $r9cCart['items'][0]['slug'] ?? null],
+        'R9 CZ cart: the product is named (and linked) in the shopper\'s language, as on the product page');
     $r9cLabels = array_column(ShippingService::cartQuote($r9cCart['items'], (int)$r9cCart['subtotal'], 'CZ')['rates'] ?? [], 'label', 'method_code');
     assert_true(isset($r9cLabels['gls'], $r9cLabels['packeta']) && !isset($r9cLabels['standard']) && !isset($r9cLabels['express']),
         'R9 CZK: the koruna cart is offered the CZ store\'s carriers, not the English EUR shipping.json methods (' . json_encode($r9cLabels, JSON_UNESCAPED_UNICODE) . ')');
@@ -129,6 +134,8 @@ try {
     assert_true(!empty($r9cResult['success']) && $r9cOrder !== [], 'R9 CZK: the CZ store places the order (' . ($r9cResult['error'] ?? 'ok') . ')');
     if ($r9cOrder) {
         assert_equals(['czk', 49900], [(string)$r9cOrder['currency'], (int)$r9cOrder['subtotal']], 'R9 CZK: the order is in koruny at the price list price');
+        $r9cNames = $r9cDb->query('SELECT name FROM order_items WHERE order_id = ' . (int)$r9cOrder['id'])->fetchAll(PDO::FETCH_COLUMN);
+        assert_equals(['R9C Tričko'], $r9cNames, 'R9 CZ cart: the order line keeps the name the shopper saw');
         assert_true((int)$r9cOrder['shipping_cost'] > 0 && (int)$r9cOrder['shipping_cost'] % 100 === 0 && (int)$r9cOrder['total'] % 100 === 0,
             'R9 CZK: shipping and total are whole koruny from the CZ price list (shipping ' . $r9cOrder['shipping_cost'] . ', total ' . $r9cOrder['total'] . ')');
     }

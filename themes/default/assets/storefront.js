@@ -202,7 +202,7 @@
       const label = document.createElement('label');
       label.className = 'payment-option';
       const fee = parseInt(method.fee || 0, 10);
-      label.innerHTML = `<span><input type="radio" name="payment" value="${escapeHtml(method.code || '')}" ${index === selectedIndex ? 'checked' : ''}${method.requires_online ? ' data-online' : ''}> ${escapeHtml(method.label || method.code || '')}<small>${escapeHtml(method.description || method.provider || '')}</small></span><strong>${fee === 0 ? escapeHtml(text.free) : formatCents(fee)}</strong>`;
+      label.innerHTML = `<span><input type="radio" name="payment" value="${escapeHtml(method.code || '')}" ${index === selectedIndex ? 'checked' : ''}${method.requires_online ? ' data-online' : ''}> ${escapeHtml(method.label || method.code || '')}${method.description ? `<small>${escapeHtml(method.description)}</small>` : ''}</span><strong>${fee === 0 ? escapeHtml(text.free) : formatCents(fee)}</strong>`;
       label.querySelector('input').addEventListener('change', () => updateCheckoutTotal(methodShipping(method), fee, subtotal));
       box.appendChild(label);
     });

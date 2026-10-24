@@ -120,7 +120,7 @@ class MarketingFeed {
             'availability' => $availability,
             'availability_date' => $availability === 'preorder'
                 ? self::isoDate((string)(($product['available_from'] ?? '') ?: ($product['preorder_at'] ?? ''))) : '',
-            'price' => number_format(max(0, (int)$product['price']) / 100, 2, '.', '') . ' ' . $currency,
+            'price' => Money::decimal(max(0, (int)$product['price']), $currency) . ' ' . $currency,
             'condition' => 'new',
             'brand' => (string)($product['brand_name'] ?? ''),
             'gtin' => (string)($product['gtin'] ?? ''),

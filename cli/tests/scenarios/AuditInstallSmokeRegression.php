@@ -114,7 +114,9 @@ try {
     $a111Fails = array_values(array_map(static fn(array $c): string => $c['name'], array_filter($a111Result['doctor']['checks'] ?? [], static fn(array $c): bool => $c['status'] === 'fail')));
     // R9: the shipped stores.json is example data (Woodle, example.* e-mails, invalid IBANs): doctor is not ready until it is replaced.
     $a111StoreIds = array_keys(json_decode((string)file_get_contents($a111Shop . '/stores.json'), true)['stores'] ?? []);
-    assert_equals(array_map(static fn(string $id): string => 'stores.legal.' . $id, $a111StoreIds), $a111Fails, 'A11.1 doctor after install fails only on the example seller data of every store');
+    // R9: and the sample card method charges through Stripe, which has no keys yet, so checkout could not take it.
+    assert_equals(array_merge(array_map(static fn(string $id): string => 'stores.legal.' . $id, $a111StoreIds), ['payment.provider.stripe']), $a111Fails,
+        'A11.1 doctor after install fails only on the example seller data of every store and the keyless Stripe card method');
     assert_true(($a111Result['doctor']['status'] ?? '') !== 'ready', 'R9 doctor: a shop invoicing as Woodle s.r.o. is not ready');
     assert_equals('pass', array_column($a111Result['doctor']['checks'] ?? [], 'status', 'name')['config.admin_email'] ?? null, 'R9 doctor: admin_email set by install passes');
     $a111Stores = json_decode((string)file_get_contents($a111Shop . '/stores.json'), true);
@@ -125,9 +127,12 @@ try {
     }
     unset($a111Store);
     file_put_contents($a111Shop . '/stores.json', json_encode($a111Stores, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    $a111Db = new PDO('sqlite:' . $a111Private . '/db/shop.sqlite');
+    $a111Db->exec("UPDATE payment_methods SET active = 0 WHERE provider = 'stripe'");
+    $a111Db = null;
     $a111Real = json_decode($a111Php(['cli/setup.php', 'doctor', '--json'])['out'], true);
     assert_equals([], array_values(array_map(static fn(array $c): string => $c['name'], array_filter($a111Real['checks'] ?? [], static fn(array $c): bool => $c['status'] === 'fail'))),
-        'A11.1 doctor has no failing check once every store has its real seller');
+        'A11.1 doctor has no failing check once every store has its real seller and the keyless card method is switched off');
     assert_true(is_file($a111Shop . '/import/template-simple.csv') || glob($a111Shop . '/import/template-*.csv') !== [], 'A11.1 install regenerates import templates');
 
     $a111ConfigHash = hash_file('sha256', $a111Shop . '/config.php');

@@ -88,7 +88,7 @@ final class StorefrontViewModel
             'url' => $absoluteUrl,
             'offers' => [
                 '@type' => 'Offer',
-                'price' => number_format($product['price']['amount_minor'] / 100, 2, '.', ''),
+                'price' => Money::decimal($product['price']['amount_minor'], $currency),
                 'priceCurrency' => $currency,
                 'availability' => $availability['schema'],
                 'url' => $absoluteUrl,

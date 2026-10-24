@@ -145,16 +145,11 @@ function runStagingPreflight(array $argvLocal = []): array {
         $add($ok ? 'ok' : 'fail', $key, $ok ? "{$key} is outside the application and web root." : "{$key} is missing, relative, or inside the application or web root" . ($webRoot !== null ? " {$webRoot}" : '') . '.', "Configure an absolute private {$key} path outside the document root.");
     }
 
-    // Checkout uses provider_defaults.payment; adapters.payment is only the legacy fallback.
-    $paymentAdapter = (string)(($cfg['provider_defaults']['payment'] ?? '') ?: ($cfg['adapters']['payment'] ?? ''));
-    $add($paymentAdapter !== '' ? 'ok' : 'fail', 'payment_adapter', $paymentAdapter !== '' ? "Payment provider: {$paymentAdapter}" : 'Payment provider is empty.');
-    if (in_array($paymentAdapter, ['stripe', 'StripePayment'], true)) {
-        $stripeSk = (string)($cfg['stripe_secret_key'] ?? '');
-        $stripePk = (string)($cfg['stripe_publishable_key'] ?? '');
-        $stripeWh = (string)($cfg['stripe_webhook_secret'] ?? '');
-        $add(preflightSecretLooksFilled($stripeSk) ? 'ok' : 'fail', 'stripe_secret_key', preflightSecretLooksFilled($stripeSk) ? 'Stripe secret key configured.' : 'Stripe secret key missing/placeholder.', 'Use Stripe test secret key for staging.');
-        $add(preflightSecretLooksFilled($stripePk) ? 'ok' : 'warn', 'stripe_publishable_key', preflightSecretLooksFilled($stripePk) ? 'Stripe publishable key configured.' : 'Stripe publishable key missing/placeholder.', 'Set Stripe test publishable key if checkout UI needs it.');
-        $add(preflightSecretLooksFilled($stripeWh) ? 'ok' : 'fail', 'stripe_webhook_secret', preflightSecretLooksFilled($stripeWh) ? 'Stripe webhook secret configured.' : 'Stripe webhook secret missing/placeholder.', 'Set the webhook secret for /api/v1/webhooks/payment/stripe.');
+    // Checkout charges through each active method's provider (payment_methods.provider), not provider_defaults.payment.
+    try {
+        foreach (PaymentReadiness::checks(Db::get(), $cfg) as [$status, $name, $message, $remediation]) $add($status === 'pass' ? 'ok' : $status, $name, $message, $remediation);
+    } catch (Throwable $e) {
+        $add('fail', 'payment.methods', 'Payment methods could not be read from the database: ' . $e->getMessage(), 'Fix the database connection and run php cli/migrate.php.');
     }
     foreach (['packeta', 'gls'] as $carrier) {
         $envKey = 'SHIP_' . strtoupper($carrier) . '_WEBHOOK_SECRET';

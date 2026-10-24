@@ -123,7 +123,7 @@ function renderCheckout(): string {
         ], $shippingRates),
         'shipping_unavailable' => $shippingRates ? '' : $t('shipping_unavailable'), 'free_shipping_hint' => $quote['hint'], 'payment_label' => $t('payment'),
         'payment_options' => array_map(static fn(array $method): array => [
-            'code' => (string)$method['code'], 'label' => (string)$method['label'], 'description' => (string)($method['description'] ?: $method['provider']),
+            'code' => (string)$method['code'], 'label' => (string)$method['label'], 'description' => (string)($method['description'] ?? ''),
             'fee' => (int)$method['fee'] === 0 ? $freeFeeLabel : $price((int)$method['fee']), 'checked' => (string)$method['code'] === (string)($selectedPayment['code'] ?? ''),
             'online' => !empty($method['requires_online']),
         ], $paymentMethods, array_keys($paymentMethods)),
