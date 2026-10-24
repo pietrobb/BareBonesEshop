@@ -50,3 +50,28 @@ $r9lDaMigration->up($r9lDa, true);
 assert_equals(['2026-10-04 12:00:00', '2026-10-02 10:00:00', null], $r9lDa->query('SELECT delivered_at FROM orders ORDER BY id')->fetchAll(PDO::FETCH_COLUMN),
     'R9 migrations: a re-run of the delivered_at migration backfills a delivered order the stopped run left without a date, keeps a recorded date');
 $r9lDa = null;
+
+// Rate limiter: when its storage failed (read-only/full disk) every check let the request through, logins and password
+// resets included, i.e. unlimited password guessing during the outage; the admin login crashed with a 500.
+$r9lRateFile = sys_get_temp_dir() . '/r9l-rate-' . bin2hex(random_bytes(4)) . '.sqlite';
+(new PDO('sqlite:' . $r9lRateFile))->exec('CREATE TABLE hits (key TEXT NOT NULL, ts INTEGER NOT NULL); CREATE INDEX idx_hits ON hits(key, ts)');
+try {
+    Security::setRateDbForTesting(new PDO('sqlite:' . $r9lRateFile, null, null, [constant(class_exists('Pdo\Sqlite') ? 'Pdo\Sqlite::ATTR_OPEN_FLAGS' : 'PDO::SQLITE_ATTR_OPEN_FLAGS') => constant(class_exists('Pdo\Sqlite') ? 'Pdo\Sqlite::OPEN_READONLY' : 'PDO::SQLITE_OPEN_READONLY')]));
+    $r9lRateErrorLog = ini_set('error_log', sys_get_temp_dir() . '/r9l-rate-error.log');
+    try {
+        $r9lRate = [Security::rateLimit('r9l_rate', 5), Security::rateLimit('r9l_login', 5, 60, true, true)];
+        $r9lAdmin = (new ReflectionMethod(Security::class, 'reserveAdminLogin'))->invoke(null, 'r9l-admin', '203.0.113.9');
+    } finally {
+        ini_set('error_log', (string)$r9lRateErrorLog);
+        http_response_code(200);
+    }
+    assert_equals([true, false], $r9lRate, 'R9 rate limit: a broken limiter store still lets ordinary requests through but refuses a credential check');
+    assert_equals([null, 60], $r9lAdmin, 'R9 rate limit: the admin login is refused for a minute instead of crashing when the throttle store is broken');
+} finally {
+    Security::setRateDbForTesting(new PDO('sqlite::memory:'));
+    @unlink($r9lRateFile);
+}
+$r9lAccountSrc = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Storefront/Account.php');
+preg_match_all("/rateLimit\\('account_(login|reset|change_password)[^;]*/", $r9lAccountSrc, $r9lCredentialChecks);
+assert_true(count($r9lCredentialChecks[0]) === 6 && array_filter($r9lCredentialChecks[0], static fn(string $c): bool => !preg_match('/, true\)/', $c)) === [],
+    'R9 rate limit: every customer login, reset and password-change check is fail-closed (' . count($r9lCredentialChecks[0]) . ')');
