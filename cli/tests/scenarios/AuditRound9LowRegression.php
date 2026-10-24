@@ -120,3 +120,19 @@ $r9lCatDelete = CatalogTaxonomy::deleteCategory(97912);
 assert_equals([1, true, 0], [(int)$r9lBulk['count'], (bool)$r9lCatDelete['ok'],
     (int)$pdo->query("SELECT COUNT(*) FROM slug_registry WHERE (entity = 'product' AND entity_id = 97911) OR (entity = 'category' AND entity_id = 97912)")->fetchColumn()],
     'R9 slugs: deleting a product or a category also frees its registered localized and previous slugs');
+
+// Search facet: every category with a match was listed (a one-letter query on a large catalog → hundreds of links).
+$r9lFacetCat = $pdo->prepare("INSERT INTO categories (id, store_id, slug, name, parent_id, path, depth, product_count) VALUES (?, ?, ?, ?, NULL, ?, 0, 1)");
+$r9lFacetProduct = $pdo->prepare("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
+    VALUES (?, ?, ?, ?, ?, ?, 'simple', 1000, 'eur', 'active', 5, 'deny')");
+for ($r9lI = 1; $r9lI <= 35; $r9lI++) {
+    $r9lCode = sprintf('%02d', $r9lI);
+    $r9lFacetCat->execute([97920 + $r9lI, $r9lCatalog, "r9l-facet-{$r9lCode}", "R9L facet {$r9lCode}", "r9l-facet-{$r9lCode}"]);
+    $r9lFacetProduct->execute([97960 + $r9lI, $r9lCatalog, 97920 + $r9lI, "Zyqfacet lamp {$r9lCode}", "zyqfacet-{$r9lCode}", "R9L-FACET-{$r9lCode}"]);
+}
+$r9lAll = Search::query('zyqfacet', 1, 24);
+$r9lPicked = Search::query('zyqfacet', 1, 24, ['category_ids' => [97955]]);
+assert_equals([35, Search::FACET_LIMIT, true, 1], [(int)$r9lAll['total'], count($r9lAll['categories']), in_array(97955, array_column($r9lPicked['categories'], 'id'), true), (int)$r9lPicked['total']],
+    'R9 search: the category facet lists at most FACET_LIMIT categories and keeps a selected one outside them');
+$pdo->exec('DELETE FROM products WHERE id BETWEEN 97961 AND 97995');
+$pdo->exec('DELETE FROM categories WHERE id BETWEEN 97921 AND 97955');
