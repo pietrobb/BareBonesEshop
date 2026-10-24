@@ -112,13 +112,4 @@ class MockPayment implements HostedCheckoutAdapter, CancellablePaymentAdapter, S
         ];
     }
 
-    /** Simulate a refund webhook payload */
-    public static function refundPayload(int $orderId, string $sessionId): array {
-        return [
-            'event_id'   => 'mock_evt_refund_' . $orderId,
-            'session_id' => $sessionId,
-            'order_id'   => $orderId,
-            'provider_ref' => $sessionId,
-        ];
-    }
 }

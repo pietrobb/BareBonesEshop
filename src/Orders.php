@@ -409,30 +409,6 @@ class Orders {
     }
 
     /**
-     * Get orders by email
-     */
-    public static function byEmail(string $email, int $limit = 20): array {
-        $stmt = Db::get()->prepare("
-            SELECT * FROM orders WHERE customer_email = :email AND store_id = :store
-            ORDER BY created_at DESC LIMIT :limit
-        ");
-        $stmt->execute([':email' => $email, ':store' => StoreContext::current()->id(), ':limit' => $limit]);
-        return $stmt->fetchAll();
-    }
-
-    /**
-     * Get orders by status
-     */
-    public static function byStatus(string $status, int $limit = 50): array {
-        $stmt = Db::get()->prepare("
-            SELECT * FROM orders WHERE status = :status AND store_id = :store
-            ORDER BY created_at DESC LIMIT :limit
-        ");
-        $stmt->execute([':status' => $status, ':store' => StoreContext::current()->id(), ':limit' => $limit]);
-        return $stmt->fetchAll();
-    }
-
-    /**
      * Update order status; with $expectedFrom only while the order is still in that status.
      * Returns whether the row changed.
      */

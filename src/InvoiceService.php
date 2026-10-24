@@ -623,8 +623,8 @@ final class InvoiceService
     /** Sends an invoice PDF to the browser; nothing of it stays in a (shared) browser's cache. */
     public static function sendPdf(array $invoice): void
     {
-        $abs = self::pdfAbsolutePath($invoice);
-        if (!is_file($abs)) {
+        $abs = self::pdfFile($invoice);
+        if ($abs === null) {
             http_response_code(404);
             exit('PDF missing.');
         }
@@ -679,6 +679,22 @@ final class InvoiceService
     public static function pdfAbsolutePath(array $invoice): string
     {
         return self::resolvePdfPath((string)($invoice['pdf_path'] ?? ''));
+    }
+
+    /**
+     * The invoice's PDF file, or null. A lost file (e.g. a database restored without the invoice storage) is
+     * re-rendered from the snapshots stored at issue time, so the document reads as it was issued.
+     */
+    public static function pdfFile(array $invoice): ?string
+    {
+        $abs = self::pdfAbsolutePath($invoice);
+        if (is_file($abs)) return $abs;
+        try {
+            return self::regeneratePdf((int)$invoice['id']);
+        } catch (\Throwable $e) {
+            Logger::phpLog("Invoice #{$invoice['id']} PDF could not be re-rendered: " . $e->getMessage());
+            return null;
+        }
     }
 
     /**

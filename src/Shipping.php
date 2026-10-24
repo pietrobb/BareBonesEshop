@@ -122,14 +122,6 @@ class Shipping {
     }
 
     /**
-     * Determine shipping zone for country code (returns first match)
-     */
-    public static function zoneForCountry(string $country): ?string {
-        $zones = self::zonesForCountry($country);
-        return $zones[0] ?? null;
-    }
-
-    /**
      * Get ALL matching zones for a country (for methods with overlapping zones)
      */
     public static function zonesForCountry(string $country): array {

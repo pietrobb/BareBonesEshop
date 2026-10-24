@@ -527,7 +527,7 @@ unset($_SESSION['customer_id']);
 Db::init($pdo, 'sqlite');
 $g3At = gmdate('Y-m-d H:i:s');
 $g3CategoryIds = Products::categoryIdsMany($g3LocalizedProducts);
-$g3Rules = Promotions::catalogRules($g3At);
+[$g3Rules] = Promotions::catalogRulesWithEnded($g3At); // what ProductEnrichmentContext loads
 $g3CommerceParity = function (?int $customerId) use ($g3LocalizedProducts, $g3CategoryIds, $g3Rules, $g3At): array {
     $profile = Customers::commerceProfile($customerId);
     $rows = Pricing::priceListRows($g3LocalizedProducts, $profile, 1, $g3At);

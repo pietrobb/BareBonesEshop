@@ -16,13 +16,6 @@
  * without an HTTP round-trip.
  */
 class Sitemap {
-    /**
-     * Store locale => url_prefix map, e.g. ['sk' => '', 'cs' => '/cs', 'pl' => '/pl'].
-     * Reuses the same source of truth as the storefront hreflang tags.
-     */
-    public static function storePrefixes(): array {
-        return Bootstrap::hreflangAlternates('/')['alternates'];
-    }
 
     /** url_prefix of the default store (for hreflang=x-default). */
     public static function xDefaultPrefix(): string {

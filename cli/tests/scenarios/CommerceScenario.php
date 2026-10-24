@@ -84,11 +84,6 @@ $product3 = ['price' => 1000, 'compare_price' => null, 'category_path' => 'elekt
 $applied3 = Pricing::apply($product3, 'vip', '2026-06-15');
 assert_equals(900, $applied3['price'], 'VIP 10% off: 1000 → 900');
 
-// Tier pricing
-assert_equals(1990, Pricing::tierPrice(1990, 1), 'Tier: qty 1 = no discount');
-assert_equals(1891, Pricing::tierPrice(1990, 10), 'Tier: qty 10 = 5% off');
-assert_equals(1751, Pricing::tierPrice(1990, 50), 'Tier: qty 50 = 12% off');
-
 // Coupon
 $couponResult = Pricing::applyCoupon('WELCOME10', 10000);
 assert_equals(1000, $couponResult['discount'], 'Coupon WELCOME10: 10% of 10000 = 1000');
@@ -149,9 +144,9 @@ Shipping::setConfig([
 ]);
 
 // Zone detection
-assert_equals('domestic', Shipping::zoneForCountry('SK'), 'SK is domestic');
-assert_equals('eu', Shipping::zoneForCountry('DE'), 'DE is EU');
-assert_equals('international', Shipping::zoneForCountry('US'), 'US is international');
+assert_equals('domestic', Shipping::zonesForCountry('SK')[0], 'SK is domestic');
+assert_equals('eu', Shipping::zonesForCountry('DE')[0], 'DE is EU');
+assert_equals('international', Shipping::zonesForCountry('US')[0], 'US is international');
 
 // Pickup
 assert_equals(0, Shipping::calculate('pickup', 'SK'), 'Pickup is free');
@@ -253,10 +248,6 @@ $orderByNum = Orders::byNumber($order['order_number']);
 assert_true($orderByNum !== null, 'Order found by number');
 assert_equals($orderId, (int)$orderByNum['id'], 'byNumber returns correct order');
 
-// By email
-$byEmail = Orders::byEmail('test@example.com');
-assert_greater(count($byEmail), 0, 'byEmail finds orders');
-
 // OrderWorkflow — allowed transitions
 assert_true(OrderWorkflow::canTransition('pending', 'paid'), 'pending → paid allowed');
 assert_true(OrderWorkflow::canTransition('pending', 'cancelled'), 'pending → cancelled allowed');
@@ -269,8 +260,8 @@ assert_true(in_array('shipped', $allowed), 'paid can go to shipped');
 assert_true(in_array('cancelled', $allowed), 'paid can go to cancelled');
 
 // Terminal state
-assert_true(OrderWorkflow::isTerminal('refunded'), 'refunded is terminal');
-assert_true(!OrderWorkflow::isTerminal('pending'), 'pending is not terminal');
+assert_equals([], OrderWorkflow::allowedTransitions('refunded'), 'refunded is terminal');
+assert_true(OrderWorkflow::allowedTransitions('pending') !== [], 'pending is not terminal');
 
 // Set up job queue for workflow side effects
 $testJobsDir2 = sys_get_temp_dir() . '/bareboneseshop-jobs-wf-' . getmypid();

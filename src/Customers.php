@@ -197,17 +197,6 @@ class Customers {
         return $row ?: null;
     }
 
-    public static function byEmail(string $email): ?array {
-        $stmt = Db::get()->prepare(
-            "SELECT id, email, name, phone, locale, status, email_verified_at,
-                    last_login_at, created_at, updated_at
-             FROM customers WHERE email = ? AND store_id = ?"
-        );
-        $stmt->execute([Str::normalizeEmail($email), StoreContext::current()->id()]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $row ?: null;
-    }
-
     // ============================================================
     // Update profile
     // ============================================================

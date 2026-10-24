@@ -607,9 +607,9 @@ function handleInvoiceIssue(array $payload, array $job): void {
     if (!$order) return;
 
     // Build PDF attachment from disk
-    $pdfPath = InvoiceService::pdfAbsolutePath($invoice);
+    $pdfPath = InvoiceService::pdfFile($invoice);
     $attachments = [];
-    if (is_file($pdfPath)) {
+    if ($pdfPath !== null) {
         $attachments[] = [
             'filename'     => $invoice['number'] . '.pdf',
             'path'         => $pdfPath,

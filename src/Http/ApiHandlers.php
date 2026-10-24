@@ -566,16 +566,6 @@ function apiPaymentMethods(): array {
     ];
 }
 
-/**
- * Resolve the active store from stores.json by current locale.
- * Pass 1: store whose PRIMARY language (languages[0]) matches the locale.
- * Pass 2: store whose languages list contains the locale.
- * Fallback: first store.
- */
-function apiActiveStore(): array {
-    return StoreContext::current()->config();
-}
-
 function apiConsentDefinitions(): array {
     if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
         http_response_code(405);

@@ -213,6 +213,22 @@ try {
     // A credit note copies the invoice's payment_method and order and renders through the same line.
     $r9lPayCredit = ['type' => 'credit_note', 'order_id' => 97881, 'payment_method' => (string)$r9lPayInvoices[97881]['payment_method']];
     assert_equals('Platba kartou', InvoiceService::paymentText($r9lPayCredit, 'sk'), 'R9 invoice: a credit note of a card invoice prints the card label too');
+    // A lost PDF (e.g. a database restored without the invoice storage) is re-rendered from the issue-time snapshots,
+    // so the admin download, the customer's download and the invoice e-mail still have it.
+    $r9lPdfTexts = static function (string $path): array {
+        preg_match_all('/Td \(([^)]*)\) Tj/', (string)file_get_contents($path), $m);
+        return $m[1];
+    };
+    $r9lPayPath = InvoiceService::pdfAbsolutePath($r9lPayInvoices[97881]);
+    $r9lPayIssued = $r9lPdfTexts($r9lPayPath);
+    unlink($r9lPayPath);
+    $r9lPayAgain = method_exists(InvoiceService::class, 'pdfFile') ? InvoiceService::pdfFile($r9lPayInvoices[97881]) : null;
+    assert_equals([$r9lPayPath, $r9lPayIssued], [$r9lPayAgain, $r9lPayAgain === null ? [] : $r9lPdfTexts($r9lPayAgain)],
+        'R9 invoice: a lost invoice PDF is re-rendered with the text it was issued with');
+    $r9lPdfCallers = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Orders.php') . file_get_contents(TEST_CLI_DIR . '/worker.php');
+    assert_equals([0, 4], [substr_count($r9lPdfCallers, 'is_file($abs)') + substr_count($r9lPdfCallers, 'is_file($pdfPath)'),
+        substr_count($r9lPdfCallers, 'InvoiceService::pdfFile(') + substr_count((string)file_get_contents(TEST_CLI_DIR . '/../src/InvoiceService.php'), '$abs = self::pdfFile($invoice);')],
+        'R9 invoice: the admin download, the resend, the invoice e-mail job and the customer download all go through pdfFile()');
 } finally {
     $r9lPayStorage->setValue(null, $r9lPayPrevStorage);
     $pdo->exec('DELETE FROM invoices WHERE order_id BETWEEN 97881 AND 97883');
@@ -220,3 +236,52 @@ try {
     $pdo->exec('DELETE FROM orders WHERE id BETWEEN 97881 AND 97883');
     $pdo->exec('DELETE FROM products WHERE id = 97880');
 }
+
+// --- R9 dead code: public methods nothing in the shop calls are removed, and a new one cannot slip in unnoticed. ---
+$r9lGone = ['Orders::byStatus', 'Orders::byEmail', 'Customers::byEmail', 'Products::onSale', 'Sitemap::storePrefixes', 'StoreContext::ossEnabled',
+    'Import::validateSlug', 'OrderWorkflow::isTerminal', 'Pricing::tierPrice', 'Shipping::zoneForCountry', 'Promotions::catalogRules',
+    'Search::withHighlights', 'StockAlerts::belowLowCount', 'MockPayment::refundPayload'];
+assert_equals([], array_values(array_filter($r9lGone, static function (string $m): bool {
+    [$class, $method] = explode('::', $m);
+    return class_exists($class) && method_exists($class, $method);
+})), 'R9 dead code: the unused methods are removed');
+assert_true(!function_exists('apiActiveStore'), 'R9 dead code: the unused apiActiveStore() helper is removed');
+assert_true(!isset(json_decode((string)file_get_contents(TEST_CLI_DIR . '/../pricing.json'), true)['tier_pricing']),
+    'R9 dead code: the sample pricing.json no longer ships a tier_pricing block nothing applies (quantity prices live in price lists)');
+// Production code = everything but the tests. A public method of src/ or adapters/ whose name appears nowhere else in it is dead,
+// unless it is a test seam, an adapter contract method or a domain call kept on purpose (listed with the reason).
+$r9lKept = [
+    // test seams
+    'setConfig', 'setDir', 'useBackend', 'resetBackend', 'setFixtureTransport', 'setDefaultWait', 'setRules', 'setBlocksDir', 'setThemesDir',
+    'useMysqlDumper', 'useMysqlDatabase', 'lastCaptured', 'clearCaptured',
+    // adapter contracts an external implementation fulfils
+    'reindexAll', 'pushCustomer', 'pushProduct',
+    // domain calls covered by tests that have no screen yet (RMA exchange/return label) or are the tested contract of a flow
+    'verifyResetToken', 'webhookProcessed', 'isReverseCharge', 'createExchange', 'recordLabel', 'openForOrder', 'refundById',
+];
+$r9lRoot = dirname(TEST_CLI_DIR);
+$r9lProd = '';
+$r9lDefs = [];
+foreach (['src', 'adapters', 'extensions', 'cli', 'public', 'themes', 'migrations'] as $r9lDir) {
+    if (!is_dir("{$r9lRoot}/{$r9lDir}")) continue;
+    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator("{$r9lRoot}/{$r9lDir}", FilesystemIterator::SKIP_DOTS)) as $r9lFile) {
+        $r9lPath = str_replace('\\', '/', (string)$r9lFile);
+        if (str_contains($r9lPath, '/cli/tests/') || str_contains($r9lPath, '/node_modules/') || str_contains($r9lPath, '/vendor/')
+            || !preg_match('/\.(php|html|js)$/', $r9lPath)) continue;
+        $r9lCode = (string)file_get_contents($r9lPath);
+        $r9lProd .= "\n" . $r9lCode;
+        if ($r9lDir === 'src' || $r9lDir === 'adapters') {
+            preg_match_all('/\bpublic\s+(?:static\s+)?function\s+(\w+)\s*\(/', $r9lCode, $r9lM);
+            foreach ($r9lM[1] as $r9lName) $r9lDefs[$r9lName][] = substr($r9lPath, strlen(str_replace('\\', '/', $r9lRoot)) + 1);
+        }
+    }
+}
+foreach (glob($r9lRoot . '/*.php') ?: [] as $r9lPath) $r9lProd .= "\n" . file_get_contents($r9lPath);
+preg_match_all('/\b\w+\b/', $r9lProd, $r9lTokens);
+$r9lCount = array_count_values($r9lTokens[0]);
+$r9lDead = [];
+foreach ($r9lDefs as $r9lName => $r9lWhere) {
+    if (str_starts_with($r9lName, '__') || str_ends_with($r9lName, 'ForTesting') || in_array($r9lName, $r9lKept, true)) continue;
+    if (($r9lCount[$r9lName] ?? 0) <= count($r9lWhere)) $r9lDead[] = $r9lName . ' (' . implode(', ', array_unique($r9lWhere)) . ')';
+}
+assert_equals([], $r9lDead, 'R9 dead code: every public method of src/ and adapters/ is used by the shop (or listed as a kept seam/contract)');

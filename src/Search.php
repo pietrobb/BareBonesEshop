@@ -175,40 +175,6 @@ class Search {
     }
 
     /**
-     * Search with highlight snippets (SQLite only)
-     */
-    public static function withHighlights(string $q, int $page = 1, int $perPage = 24): array {
-        if (!Db::isSqlite()) {
-            return self::query($q, $page, $perPage);
-        }
-
-        $db = Db::get();
-        $ftsQuery = self::sanitizeFtsQuery($q);
-        $offset = ($page - 1) * $perPage;
-
-        $stmt = $db->prepare("
-            SELECT p.*,
-                highlight(products_fts, 0, '<mark>', '</mark>') AS name_hl,
-                rank
-            FROM products_fts fts
-            CROSS JOIN products p ON p.id = fts.rowid
-            WHERE products_fts MATCH :q AND p.store_id = :store AND p.status = 'active'
-            ORDER BY rank
-            LIMIT :limit OFFSET :offset
-        ");
-        $stmt->execute([':q' => $ftsQuery, ':store' => StoreContext::current()->catalogId(), ':limit' => $perPage, ':offset' => $offset]);
-
-        $results = $stmt->fetchAll();
-        // Sanitize name_hl: escape any HTML except <mark> tags from FTS5 highlight()
-        foreach ($results as &$r) {
-            if (isset($r['name_hl'])) {
-                $r['name_hl'] = strip_tags($r['name_hl'], '<mark>');
-            }
-        }
-        return $results;
-    }
-
-    /**
      * Sanitize FTS5 query — protect against FTS injection
      */
     private static function sanitizeFtsQuery(string $q): string {

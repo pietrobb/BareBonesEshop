@@ -145,7 +145,6 @@ class StoreContext {
         return $this->providerCurrency === strtolower($chargeCurrency ?? $this->currency());
     }
     public function legal(): array { return is_array($this->config['legal'] ?? null) ? $this->config['legal'] : []; }
-    public function ossEnabled(): bool { return (bool)($this->config['oss_enabled'] ?? false); }
     public function config(): array { return $this->config; }
 
     public function allows(string $permission): bool {
