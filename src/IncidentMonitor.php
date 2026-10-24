@@ -39,6 +39,22 @@ class IncidentMonitor {
         }
     }
 
+    /**
+     * True when $code was already recorded for $orderId in this store within $seconds. A sweep that keeps failing
+     * on the same order (every cron run) reports it once a day instead of a critical incident per run.
+     */
+    public static function reportedForOrder(string $code, int $orderId, int $seconds = 86400): bool {
+        try {
+            // report() writes the safe context with order_id as its first key.
+            $stmt = Db::get()->prepare('SELECT 1 FROM operational_incidents WHERE store_id = ? AND code = ? AND occurred_at > ?
+                AND (context_json = ? OR context_json LIKE ?) LIMIT 1');
+            $stmt->execute([StoreContext::current()->id(), $code, time() - $seconds, '{"order_id":' . $orderId . '}', '{"order_id":' . $orderId . ',%']);
+            return $stmt->fetchColumn() !== false;
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+
     public static function sweep(): int {
         try {
             $cfg = self::settings();

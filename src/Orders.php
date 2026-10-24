@@ -631,8 +631,11 @@ class Orders {
                 try {
                     if (self::expireClaimed($order, $cutoff($ttl), $online)) $expired++;
                 } catch (\Throwable $e) {
-                    Logger::phpLog("Pending order expiry failed for #{$order['id']}: " . $e->getMessage());
-                    IncidentMonitor::report('order.expiry_failed', 'orders', 'critical', ['order_id' => (int)$order['id'], 'exception' => $e]);
+                    // The poisoned order fails again on every cron run: one incident (and log line) a day, not one per run.
+                    if (!IncidentMonitor::reportedForOrder('order.expiry_failed', (int)$order['id'])) {
+                        Logger::phpLog("Pending order expiry failed for #{$order['id']}: " . $e->getMessage());
+                        IncidentMonitor::report('order.expiry_failed', 'orders', 'critical', ['order_id' => (int)$order['id'], 'exception' => $e]);
+                    }
                     continue;
                 }
                 if ($expired >= $limit) break 2;
