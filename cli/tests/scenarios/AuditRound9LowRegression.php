@@ -75,3 +75,31 @@ $r9lAccountSrc = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypo
 preg_match_all("/rateLimit\\('account_(login|reset|change_password)[^;]*/", $r9lAccountSrc, $r9lCredentialChecks);
 assert_true(count($r9lCredentialChecks[0]) === 6 && array_filter($r9lCredentialChecks[0], static fn(string $c): bool => !preg_match('/, true\)/', $c)) === [],
     'R9 rate limit: every customer login, reset and password-change check is fail-closed (' . count($r9lCredentialChecks[0]) . ')');
+
+// CZK/HUF invoices: each line was rounded to whole units on its own, so the printed lines were 1 Kč/Ft off the
+// total under them (three lines of 813.50 net at 21 % printed 814 + 814 + 814, total 2 440.50 → 2 441).
+$r9lInvoice = ['locale' => 'en', 'currency' => 'czk', 'type' => 'invoice', 'number' => 'R9L-2026-1', 'order_id' => 97901,
+    'issued_at' => '2026-10-24', 'delivery_date' => '2026-10-24', 'due_date' => '2026-11-07', 'payment_method' => 'Transfer',
+    'total_net' => 244050, 'total_vat' => 51250, 'total_gross' => 295300];
+$r9lRows = [];
+foreach ([[81350, 98433], [81350, 98433], [81350, 98434]] as $r9lLine) $r9lRows[] = ['name' => 'R9L lamp', 'qty' => 1, 'rate' => 21.0, 'net' => $r9lLine[0], 'gross' => $r9lLine[1]];
+$r9lPdf = (string)(new ReflectionMethod(InvoiceService::class, 'renderPdf'))->invoke(null, $r9lInvoice, $r9lRows, ['name' => 'R9L s.r.o.'], ['name' => 'Buyer'],
+    ['rates' => ['21' => ['net' => 244050, 'vat' => 51250]]]);
+preg_match_all('/\((.*?)\) Tj/', $r9lPdf, $r9lRuns);
+$r9lUnits = static fn(string $run): int => (int)preg_replace('/\D/', '', (string)preg_replace('/^[^:]*:\s*/', '', $run));
+$r9lNet = $r9lGross = 0;
+foreach ($r9lRuns[1] as $r9lI => $r9lRun) {
+    if ($r9lRun !== '21%' || ($r9lRuns[1][$r9lI - 3] ?? '') !== 'R9L lamp') continue;
+    $r9lNet += $r9lUnits($r9lRuns[1][$r9lI + 1]);
+    $r9lGross += $r9lUnits($r9lRuns[1][$r9lI + 2]);
+}
+$r9lTotal = static function (string $label) use ($r9lRuns, $r9lUnits): ?int {
+    foreach ($r9lRuns[1] as $run) if (str_starts_with($run, $label . ':')) return $r9lUnits($run);
+    return null;
+};
+$r9lPrinted = [$r9lTotal('Total net'), $r9lTotal('Total VAT'), $r9lTotal('Total due')];
+assert_equals([2441, 2953], [$r9lNet, $r9lGross], 'R9 invoice: the whole-koruna lines add up to the printed totals (' . json_encode($r9lPrinted) . ')');
+assert_equals([2441, 512, 2953], $r9lPrinted, 'R9 invoice: the printed net and VAT totals add up to the amount due in whole koruna');
+assert_equals([[81400, 81300, 81400], [81350, 81350, 81350]],
+    [InvoiceService::displayAmounts([81350, 81350, 81350], 'czk'), InvoiceService::displayAmounts([81350, 81350, 81350], 'eur')],
+    'R9 invoice: CZK lines are rounded cumulatively, two-decimal currencies are left as they are');

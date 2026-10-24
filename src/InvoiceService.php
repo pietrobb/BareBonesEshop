@@ -1462,7 +1462,41 @@ final class InvoiceService
             // in a dedicated renderer file shipped alongside vendor/mpdf.
             // For v1 we fall through to MinimalPdf even if mPDF is present.
         }
+        $currency = (string)$invoice['currency'];
+        $rates = $vatBreakdown['rates'] ?? [];
+        if (!empty($rates)) {
+            $gross = array_map(static fn(array $info): int => (int)$info['net'] + (int)$info['vat'], $rates);
+            $net = self::displayAmounts(array_map(static fn(array $info): int => (int)$info['net'], $rates), $currency);
+            $gross = self::displayAmounts($gross, $currency);
+            foreach ($rates as $key => $info) $rates[$key] = ['net' => $net[$key], 'vat' => $gross[$key] - $net[$key]] + $info;
+            $vatBreakdown['rates'] = $rates;
+        }
+        $lineNet = self::displayAmounts(array_map(static fn(array $row): int => (int)$row['net'], $rows), $currency);
+        $lineGross = self::displayAmounts(array_map(static fn(array $row): int => (int)$row['gross'], $rows), $currency);
+        foreach ($rows as $i => $row) $rows[$i] = ['net' => $lineNet[$i], 'gross' => $lineGross[$i]] + $row;
         return self::renderMinimalPdf($invoice, $rows, $sellerSnap, $customerSnap, $vatBreakdown);
+    }
+
+    /**
+     * Amounts as the document shows them. A currency without minor units (CZK, HUF) prints every line in whole
+     * units; rounding each line on its own left the lines 1 Kč/Ft off the total printed below them. The lines are
+     * rounded cumulatively instead (each takes the change of the rounded running sum), so they always add up to
+     * the rounded total. Amounts of a two-decimal currency are returned unchanged.
+     * @param array<array-key, int> $amounts
+     * @return array<array-key, int>
+     */
+    public static function displayAmounts(array $amounts, string $currency): array
+    {
+        if (Money::decimals($currency) === 2) return $amounts;
+        $running = 0;
+        $shown = 0;
+        foreach ($amounts as $key => $amount) {
+            $running += $amount;
+            $rounded = Money::round($running, $currency);
+            $amounts[$key] = $rounded - $shown;
+            $shown = $rounded;
+        }
+        return $amounts;
     }
 
     /** Country whose national VAT act the exemption wording of a document language cites. */
@@ -1578,7 +1612,9 @@ final class InvoiceService
         $pdf->text(120, $y, $L['total_net'] . ': ' . I18n::price((int)$invoice['total_net'], $currency),
             ['size' => 9, 'align' => 'right', 'width' => 70]);
         $y += 5;
-        $pdf->text(120, $y, $L['total_vat'] . ': ' . I18n::price((int)$invoice['total_vat'], $currency),
+        // Net and gross print rounded (whole units for CZK/HUF); the VAT shown is their difference so the three add up.
+        $shownVat = Money::round((int)$invoice['total_gross'], $currency) - Money::round((int)$invoice['total_net'], $currency);
+        $pdf->text(120, $y, $L['total_vat'] . ': ' . I18n::price($shownVat, $currency),
             ['size' => 9, 'align' => 'right', 'width' => 70]);
         $y += 5;
         $pdf->text(120, $y, ($creditNote ? $L['credit_total'] : $L['total_gross']) . ': ' . I18n::price((int)$invoice['total_gross'], $currency),
