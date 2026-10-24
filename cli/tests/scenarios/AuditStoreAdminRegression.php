@@ -32,6 +32,8 @@ $db->exec("CREATE {$tmp}TABLE warehouse_stock (id INTEGER PRIMARY KEY, store_id 
 $db->exec("CREATE {$tmp}TABLE order_items (id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL)");
 // A status change or delete recounts the categories of the products (none here: no category).
 $db->exec("CREATE {$tmp}TABLE product_categories (product_id INTEGER NOT NULL, category_id INTEGER NOT NULL)");
+// A delete frees the product\'s registered slugs.
+$db->exec("CREATE {$tmp}TABLE slug_registry (slug VARCHAR(100) NOT NULL, locale VARCHAR(10) NOT NULL, entity VARCHAR(40) NOT NULL, entity_id INTEGER NOT NULL, store_id VARCHAR(40) NULL)");
 $db->exec("CREATE {$tmp}TABLE audit_log (id INTEGER PRIMARY KEY " . ($driver === "mysql" ? "AUTO_INCREMENT" : "") . ", entity VARCHAR(40), entity_id INTEGER, action VARCHAR(40), old_value TEXT, new_value TEXT, note TEXT, actor VARCHAR(80), ip_address VARCHAR(80), store_id VARCHAR(40), correlation_id VARCHAR(80), created_at DATETIME NULL)");
 // A status or price change records product.updated (outbox) and a price change the price history (Omnibus).
 $db->exec("CREATE {$tmp}TABLE event_sequence (id INTEGER PRIMARY KEY " . ($driver === "mysql" ? "AUTO_INCREMENT" : "AUTOINCREMENT") . ")");
