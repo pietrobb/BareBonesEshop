@@ -136,3 +136,12 @@ assert_equals([35, Search::FACET_LIMIT, true, 1], [(int)$r9lAll['total'], count(
     'R9 search: the category facet lists at most FACET_LIMIT categories and keeps a selected one outside them');
 $pdo->exec('DELETE FROM products WHERE id BETWEEN 97961 AND 97995');
 $pdo->exec('DELETE FROM categories WHERE id BETWEEN 97921 AND 97955');
+
+// Admin warehouse form: its labels were not tied to their fields (axe "label"), so a screen reader announced bare inputs.
+$r9lOpsSrc = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Operations.php');
+preg_match('/function pageWarehouse\(\).*?<\/form>/s', $r9lOpsSrc, $r9lWhForm);
+preg_match_all('/<(input|select|textarea)\b(?![^>]*type="(?:hidden|checkbox)")[^>]*>/', $r9lWhForm[0] ?? '', $r9lWhFields);
+preg_match_all('/<label for="([^"]+)">/', $r9lWhForm[0] ?? '', $r9lWhFor);
+$r9lWhIds = array_map(static fn(string $f): string => preg_match('/\bid="([^"]+)"/', $f, $m) ? $m[1] : '', $r9lWhFields[0]);
+assert_true(count($r9lWhIds) === 6 && !in_array('', $r9lWhIds, true) && array_diff($r9lWhIds, $r9lWhFor[1]) === [],
+    'R9 admin a11y: every warehouse form field has an id its label points to (' . json_encode($r9lWhIds) . ')');
