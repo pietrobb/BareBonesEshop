@@ -172,3 +172,35 @@ assert_true(!str_contains(strtolower($r8pTx), 'r8p-payer@') && !str_contains($r8
     "R8 PII erase: the gateway response loses the payer's e-mail, name and address ({$r8pTx})");
 assert_true(($r8pTxData['payment_id'] ?? '') === 'pi_r8p' && ($r8pTxData['event_type'] ?? '') === 'checkout.session.completed' && ($r8pTxData['session_id'] ?? '') === 'cs_r8p',
     'R8 PII erase: payment id, session and event stay for refunds and the duplicate-capture check');
+// R9: a PayU notification names the payer in buyer{…, delivery{…}} and the IP in customerIp; erasure removes both and
+// keeps the PayU order id, status and amount.
+$r9pPayer = $r8pCustomer('r9p-payu@example.test');
+$r9pOrder = $r8pContactOrder($r9pPayer, 'r9p-payu@example.test', 4);
+$r8pDb->prepare("INSERT INTO payment_transactions (order_id, store_id, provider, provider_ref, status, amount, currency, idempotency_key, raw_response, created_at, updated_at)
+    VALUES (?, 'default', 'payu', 'R9PPAYU', 'paid', 1000, 'pln', 'r9p-payu', ?, datetime('now'), datetime('now'))")
+    ->execute([$r9pOrder, json_encode(['orderId' => 'R9PPAYU', 'status' => 'COMPLETED', 'totalAmount' => '1000', 'amount' => 1000, 'currency' => 'pln', 'customerIp' => '198.51.100.77',
+        'buyer' => ['email' => 'r9p-payu@example.test', 'phone' => '+48 600 700 800', 'firstName' => 'R9P', 'lastName' => 'Kowalski', 'language' => 'pl',
+            'delivery' => ['street' => 'Ulica Payu 5', 'postalCode' => '00-950', 'city' => 'Warszawa', 'recipientName' => 'R9P Kowalski']]])]);
+// R9: the order's withdrawal statement and complaint are in the access export; erasure removes the optional
+// withdrawal reason and keeps the statement and the complaint (legal claims). The suite's DB gets these tables from
+// later scenarios, so they are created here (idempotent).
+(require TEST_CLI_DIR . '/../migrations/20261022090000_withdrawal_requests.php')->up($r8pDb, Db::isSqlite());
+(require TEST_CLI_DIR . '/../migrations/20261022100000_complaints.php')->up($r8pDb, Db::isSqlite());
+$r8pDb->prepare("INSERT INTO withdrawal_requests (store_id, order_id, order_number, customer_name, customer_email, items, reason, received_at)
+    VALUES ('default', ?, 'R9P-W', 'R9P Kowalski', 'r9p-payu@example.test', '[]', 'R9P changed my mind', datetime('now'))")->execute([$r9pOrder]);
+$r8pDb->prepare("INSERT INTO complaints (store_id, complaint_number, order_id, order_item_id, order_number, customer_name, customer_email, item_name, defect, remedy, status, received_at)
+    VALUES ('default', 'R9P-C1', ?, 0, 'R9P-W', 'R9P Kowalski', 'r9p-payu@example.test', 'R9P item', 'R9P strap torn', 'repair', 'received', datetime('now'))")->execute([$r9pOrder]);
+$r9pExport = GdprService::exportCustomer($r9pPayer);
+assert_equals([['R9P changed my mind'], ['R9P-C1']], [array_column($r9pExport['withdrawals'] ?? [], 'reason'), array_column($r9pExport['complaints'] ?? [], 'complaint_number')],
+    'R9 PII export: the access export lists the withdrawal statement and the complaint of the customer\'s order');
+GdprService::anonymizeCustomer($r9pPayer, 'admin');
+$r9pTx = (string)$r8pDb->query("SELECT raw_response FROM payment_transactions WHERE idempotency_key = 'r9p-payu'")->fetchColumn();
+$r9pTxData = json_decode($r9pTx, true);
+assert_true(!str_contains($r9pTx, '198.51.100.77') && !str_contains($r9pTx, 'Ulica Payu') && !str_contains($r9pTx, 'Kowalski') && !str_contains($r9pTx, '600 700') && !str_contains($r9pTx, 'r9p-payu@'),
+    "R9 PII erase: the PayU notification loses the buyer, the delivery address and the customer IP ({$r9pTx})");
+assert_equals(['R9PPAYU', 'COMPLETED', 1000], [$r9pTxData['orderId'] ?? null, $r9pTxData['status'] ?? null, $r9pTxData['amount'] ?? null],
+    'R9 PII erase: the PayU order id, status and amount stay for refunds and the duplicate-capture check');
+$r9pWithdrawal = $r8pDb->query("SELECT customer_email, reason FROM withdrawal_requests WHERE order_number = 'R9P-W'")->fetch(PDO::FETCH_ASSOC) ?: [];
+$r9pComplaint = (string)$r8pDb->query("SELECT defect FROM complaints WHERE complaint_number = 'R9P-C1'")->fetchColumn();
+assert_true(($r9pWithdrawal['customer_email'] ?? '') === 'r9p-payu@example.test' && !str_contains((string)($r9pWithdrawal['reason'] ?? ''), 'changed my mind') && $r9pComplaint === 'R9P strap torn',
+    'R9 PII erase: the withdrawal reason is erased; the withdrawal statement and the complaint stay with the retained order (' . json_encode([$r9pWithdrawal, $r9pComplaint]) . ')');

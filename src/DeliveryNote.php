@@ -43,9 +43,9 @@ final class DeliveryNote {
             . '<style>body{font:14px/1.4 system-ui,sans-serif;color:#000;margin:0}.note{padding:24px;page-break-after:always}.note:last-child{page-break-after:auto}'
             . 'table{width:100%;border-collapse:collapse;margin-top:16px}th,td{border-bottom:1px solid #999;padding:6px;text-align:left}td.qty,th.qty{text-align:right}'
             . '.sign{margin-top:48px;border-top:1px solid #000;width:240px;padding-top:4px}@media print{.note{padding:0}}</style></head><body>';
-        foreach ($notes as $note) {
+        self::eachInOrderLocale($notes, static function (array $note) use (&$out, $seller): void {
             $order = $note['order'];
-            $out .= '<section class="note" data-delivery-note="' . esc((string)$order['order_number']) . '">'
+            $out .= '<section class="note" lang="' . esc(I18n::locale()) . '" data-delivery-note="' . esc((string)$order['order_number']) . '">'
                 . '<h1>' . esc(I18n::t('admin.delivery_note.title')) . ' ' . esc((string)$order['order_number']) . '</h1>'
                 . ($seller !== '' ? '<p>' . esc($seller) . '</p>' : '')
                 . '<p>' . esc(I18n::t('admin.th.date')) . ': ' . esc(substr((string)$order['created_at'], 0, 10)) . '</p>'
@@ -61,7 +61,7 @@ final class DeliveryNote {
             }
             $out .= '</tbody><tfoot><tr><th colspan="2">' . esc(I18n::t('admin.delivery_note.total_quantity')) . '</th><th class="qty">' . $quantity . '</th></tr></tfoot></table>'
                 . '<p class="sign">' . esc(I18n::t('admin.delivery_note.received_by')) . '</p></section>';
-        }
+        });
         return $out . '</body></html>';
     }
 
@@ -69,7 +69,7 @@ final class DeliveryNote {
     public static function pdf(array $notes): string {
         $pdf = new MinimalPdf();
         $seller = (string)(StoreContext::current()->legal()['name'] ?? '');
-        foreach ($notes as $note) {
+        self::eachInOrderLocale($notes, static function (array $note) use ($pdf, $seller): void {
             $order = $note['order'];
             $pdf->addPage();
             $pdf->text(20, 20, I18n::t('admin.delivery_note.title') . ' ' . $order['order_number'], ['size' => 16, 'bold' => true]);
@@ -104,7 +104,21 @@ final class DeliveryNote {
             $pdf->text(60, $y + 3, I18n::t('admin.delivery_note.total_quantity'), ['size' => 9, 'bold' => true]);
             $pdf->text(170, $y + 3, (string)$quantity, ['size' => 9, 'bold' => true, 'align' => 'right', 'width' => 20]);
             $pdf->text(20, min($y + 25, 285), I18n::t('admin.delivery_note.received_by') . ': ______________________', ['size' => 9]);
-        }
+        });
         return $pdf->render();
+    }
+
+    /** The note travels to the customer, so each one is written in the language the order was placed in, not the admin's. */
+    private static function eachInOrderLocale(array $notes, callable $render): void {
+        $current = I18n::locale();
+        try {
+            foreach ($notes as $note) {
+                $locale = (string)($note['order']['locale'] ?? '');
+                I18n::setLocale(preg_match('/^[a-z]{2}$/', $locale) && is_file(__DIR__ . '/../lang/' . $locale . '.php') ? $locale : $current);
+                $render($note);
+            }
+        } finally {
+            I18n::setLocale($current);
+        }
     }
 }

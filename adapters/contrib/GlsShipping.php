@@ -46,7 +46,7 @@ class GlsShipping implements ShippingAdapter
         if ($eur && $subtotal >= $this->freeAboveCents && $subtotal > 0) {
             return [[
                 'carrier'       => $this->carrierId(),
-                'label'         => 'GLS — zadarmo',
+                'label'         => 'GLS — ' . I18n::t('free'),
                 'price'         => 0,
                 'cod_surcharge' => 0,
                 'delivery_days' => $this->deliveryDays($country),
@@ -58,7 +58,7 @@ class GlsShipping implements ShippingAdapter
 
         return [[
             'carrier'       => $this->carrierId(),
-            'label'         => $this->label($country),
+            'label'         => I18n::t('carrier.gls'),
             'price'         => $price,
             'cod_surcharge' => $codSurcharge,
             'delivery_days' => $this->deliveryDays($country),
@@ -159,15 +159,6 @@ class GlsShipping implements ShippingAdapter
     private function codSurcharge(string $country): int
     {
         return 150; // 1.50 EUR COD surcharge for GLS
-    }
-
-    private function label(string $country): string
-    {
-        return match($country) {
-            'SK' => 'GLS — kuriér na adresu',
-            'CZ' => 'GLS — kurýr na adresu',
-            default => 'GLS — courier delivery',
-        };
     }
 
     private function deliveryDays(string $country): string

@@ -172,6 +172,7 @@ class Setup
             self::retentionCheck($probe, $add);
             self::adminChecks($config, $add);
             self::storeCurrencyChecks($probe, is_array($stores) ? (array)($stores['stores'] ?? []) : [], $add);
+            foreach (PaymentReadiness::checks($probe, $config) as [$status, $name, $message, $remediation]) $add($status, $name, $message, $remediation);
         } catch (Throwable $e) {
             $add('fail', 'database.connection', 'Database connection failed.', 'Verify database credentials/path and run migrations.');
         }
@@ -280,9 +281,7 @@ class Setup
 
     private static function providerChecks(array $config, callable $add): void
     {
-        $payment = (string)($config['provider_defaults']['payment'] ?? 'stripe');
         $mail = self::mailProvider($config);
-        $add($payment !== '' ? 'pass' : 'fail', 'provider.payment', $payment !== '' ? "Payment provider selected: {$payment}" : 'Payment provider missing.', 'Select provider_defaults.payment.');
         $add($mail === 'log' ? 'warn' : 'pass', 'provider.mail', "Mail provider selected: {$mail}", $mail === 'log' ? 'Configure smtp or ses and send a staging message before launch.' : '');
         $webhooks = array_filter((array)($config['outbound_webhooks'] ?? []), static fn($endpoint): bool => is_array($endpoint) && ($endpoint['active'] ?? true));
         $add($webhooks === [] ? 'warn' : 'pass', 'provider.webhook', $webhooks === [] ? 'No active outbound webhook configured.' : count($webhooks) . ' active outbound webhook endpoint(s).', 'Configure one signed staging endpoint and verify a delivery audit row.');

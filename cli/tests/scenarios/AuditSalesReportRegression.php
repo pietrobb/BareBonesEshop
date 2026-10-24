@@ -62,6 +62,14 @@ if ($phase === 'setup') {
         $orderId = (int)$db->lastInsertId();
         foreach ($items as [$productId, $sku, $qty, $lineTotal]) $item->execute([$orderId, $productId, $sku, 'Product ' . $sku, $qty, intdiv($lineTotal, $qty), $lineTotal]);
     }
+    // R9: a 100 zł order of which 25 zł was refunded brought in 75 zł; its products' revenue must not add up to 100 zł.
+    $db->prepare("INSERT INTO orders (order_number, status, payment_status, customer_name, customer_email, payment_method, subtotal, total, currency, store_id, created_at, is_synthetic)
+        VALUES ('A151-PLN-REFUND', 'delivered', 'partially_refunded', 'A151 Buyer', 'a151@example.test', 'bank', 10000, 10000, 'pln', 'default', ?, 0)")
+        ->execute([$utc($midnight->modify('-10 days'))]);
+    $orderId = (int)$db->lastInsertId();
+    foreach ([[1, 'A151-A', 6000], [2, 'A151-B', 4000]] as [$productId, $sku, $lineTotal]) $item->execute([$orderId, $productId, $sku, 'Product ' . $sku, 1, $lineTotal, $lineTotal]);
+    $db->prepare("INSERT INTO payment_transactions (order_id, store_id, provider, status, amount, currency, idempotency_key, raw_response) VALUES (?, 'default', 'manual', 'partially_refunded', 2500, 'pln', 'a151-pln-refund', '{}')")
+        ->execute([$orderId]);
     exit(0);
 }
 $stores = Bootstrap::stores();
@@ -136,11 +144,12 @@ foreach ($a151Drivers as $a151Driver => $_) {
                 'czk' => ['orders' => '1', 'revenue' => '250 Kč', 'aov' => '250 Kč'],
                 'eur' => ['orders' => '2', 'revenue' => '15,00 €', 'aov' => '7,50 €'],
                 'huf' => ['orders' => '1', 'revenue' => '10 000 Ft', 'aov' => '10 000 Ft'],
-            ], $a151Rows($a151Html, 'totals'), "{$a151Label}: 30-day orders, revenue and AOV per currency (yesterday local included, 40-day-old excluded)");
+                'pln' => ['orders' => '1', 'revenue' => '75,00 zł', 'aov' => '75,00 zł'],
+            ], $a151Rows($a151Html, 'totals'), "{$a151Label}: 30-day orders, revenue and AOV per currency (yesterday local included, 40-day-old excluded, refund taken off)");
             $a151Trend = $a151Rows($a151Html, 'trend');
             $a151Day = (new DateTimeImmutable('now', new DateTimeZone($a151Zone)))->format('Y-m-d');
             $a151Yesterday = (new DateTimeImmutable('yesterday', new DateTimeZone($a151Zone)))->format('Y-m-d');
-            assert_equals(90, count($a151Trend), "{$a151Label}: daily trend has 30 local days for each of the 3 currencies");
+            assert_equals(120, count($a151Trend), "{$a151Label}: daily trend has 30 local days for each of the 4 currencies");
             assert_equals([['orders' => '1', 'revenue' => '10,00 €'], ['orders' => '1', 'revenue' => '5,00 €'], ['orders' => '1', 'revenue' => '250 Kč'], ['orders' => '0', 'revenue' => '0 Kč']],
                 [$a151Trend["eur/{$a151Day}"] ?? null, $a151Trend["eur/{$a151Yesterday}"] ?? null, $a151Trend["czk/{$a151Day}"] ?? null, $a151Trend["czk/{$a151Yesterday}"] ?? null],
                 "{$a151Label}: trend buckets orders into the shop's local days, per currency");
@@ -149,7 +158,9 @@ foreach ($a151Drivers as $a151Driver => $_) {
                 'eur/A151-A' => ['quantity' => '2', 'revenue' => '10,00 €'],
                 'eur/A151-C' => ['quantity' => '1', 'revenue' => '5,00 €'],
                 'huf/A151-A' => ['quantity' => '1', 'revenue' => '10 000 Ft'],
-            ], $a151Rows($a151Html, 'top'), "{$a151Label}: top products per currency, without cancelled, smoke-test or other-store sales");
+                'pln/A151-A' => ['quantity' => '1', 'revenue' => '45,00 zł'],
+                'pln/A151-B' => ['quantity' => '1', 'revenue' => '30,00 zł'],
+            ], $a151Rows($a151Html, 'top'), "{$a151Label}: top products per currency, without cancelled, smoke-test or other-store sales; a partial refund is taken off the order's lines in proportion, so they add up to what the order brought in");
 
             $a151Html = $a151Page('reports?days=90');
             assert_equals(['orders' => '3', 'revenue' => '35,00 €', 'aov' => '11,67 €'], $a151Rows($a151Html, 'totals')['eur'] ?? null, "{$a151Label}: 90-day period includes the 40-day-old order");

@@ -21,7 +21,7 @@ class PersonalPickup implements ShippingAdapter
     {
         return [[
             'carrier'       => $this->carrierId(),
-            'label'         => $this->label($params['country'] ?? 'SK'),
+            'label'         => I18n::t('carrier.pickup'),
             'price'         => 0,
             'cod_surcharge' => 0,
             'delivery_days' => '0',
@@ -51,15 +51,5 @@ class PersonalPickup implements ShippingAdapter
                 ['timestamp' => date('Y-m-d H:i:s'), 'location' => 'Store', 'description' => 'Ready for pickup'],
             ],
         ];
-    }
-
-    private function label(string $country): string
-    {
-        return match(strtoupper($country)) {
-            'SK' => 'Osobný odber — predajňa',
-            'CZ' => 'Osobní odběr — prodejna',
-            'DE' => 'Abholung im Laden',
-            default => 'In-store pickup',
-        };
     }
 }

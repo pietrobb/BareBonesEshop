@@ -86,15 +86,22 @@ final class SalesReport {
         return $out;
     }
 
-    /** @return array<string, list<array{product_id:int, sku:string, name:string, quantity:int, revenue:int}>> currency => best sellers by revenue */
+    /**
+     * Best sellers by revenue. Revenue is money received like totals(): what was refunded of an order is taken off its
+     * lines in proportion to their share of the order total, so a product never shows more than the order brought in.
+     * @return array<string, list<array{product_id:int, sku:string, name:string, quantity:int, revenue:int}>> currency => best sellers by revenue
+     */
     public static function topProducts(string $storeId, string $sinceUtc, int $limit = 10): array {
+        [$source, $params] = self::revenueSource($storeId);
+        $kept = "CASE WHEN COALESCE(r.refunded, 0) <= 0 OR o.total <= 0 THEN oi.total
+            WHEN r.refunded >= o.total THEN 0 ELSE oi.total * 1.0 * (o.total - r.refunded) / o.total END";
         $stmt = Db::get()->prepare("SELECT LOWER(o.currency) AS currency, oi.product_id, MAX(oi.sku) AS sku, MAX(oi.name) AS name,
-                COALESCE(SUM(oi.quantity), 0) AS quantity, COALESCE(SUM(oi.total), 0) AS revenue
-            FROM order_items oi JOIN orders o ON o.id = oi.order_id
+                COALESCE(SUM(oi.quantity), 0) AS quantity, COALESCE(SUM({$kept}), 0) AS revenue
+            FROM {$source} JOIN order_items oi ON oi.order_id = o.id
             WHERE " . self::revenueCondition() . " AND o.created_at >= :since
             GROUP BY LOWER(o.currency), oi.product_id
             ORDER BY revenue DESC, quantity DESC, oi.product_id ASC");
-        $stmt->execute([':store' => $storeId, ':since' => $sinceUtc]);
+        $stmt->execute($params + [':store' => $storeId, ':since' => $sinceUtc]);
         $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $currency = (string)$row['currency'];
@@ -104,7 +111,7 @@ final class SalesReport {
                 'sku' => (string)$row['sku'],
                 'name' => (string)$row['name'],
                 'quantity' => (int)$row['quantity'],
-                'revenue' => (int)$row['revenue'],
+                'revenue' => (int)round((float)$row['revenue']),
             ];
         }
         ksort($out);

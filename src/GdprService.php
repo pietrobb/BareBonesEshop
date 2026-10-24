@@ -58,10 +58,11 @@ class GdprService {
         'rma_requests'                 => ['columns' => ['customer_id', 'reason', 'admin_note'], 'erase' => 'scrub', 'export' => 'rma_requests'],
         'rma_items'                    => ['columns' => ['name'], 'erase' => 'retain', 'export' => 'rma_requests', 'reason' => 'product lines of the retained RMA (credit-note trail)'],
         'return_receipts'              => ['columns' => ['note'], 'erase' => 'scrub', 'export' => 'rma_requests'],
-        'withdrawal_requests'          => ['columns' => ['customer_name', 'customer_email', 'reason'], 'erase' => 'retain', 'export' => null,
-            'reason' => 'proof of the withdrawal statement and its receipt time (Directive 2011/83/EU art. 11a), kept with the retained order; the consumer got it on a durable medium'],
-        'complaints'                   => ['columns' => ['customer_name', 'customer_email', 'defect', 'decision_note'], 'erase' => 'retain', 'export' => null,
-            'reason' => 'complaint record and the written decision for the 24-month liability (Directive (EU) 2019/771), kept with the retained order'],
+        // Name, e-mail, items and receipt time prove the withdrawal statement (Directive 2011/83/EU art. 11a) and stay with the
+        // retained order; the optional free-text reason is no proof and is erased.
+        'withdrawal_requests'          => ['columns' => ['customer_name', 'customer_email', 'reason'], 'erase' => 'scrub', 'export' => 'withdrawals'],
+        'complaints'                   => ['columns' => ['customer_name', 'customer_email', 'defect', 'decision_note'], 'erase' => 'retain', 'export' => 'complaints',
+            'reason' => 'complaint record and the written decision for the 24-month liability (Directive (EU) 2019/771): kept with the retained order for legal claims (GDPR Art.17(3)(e))'],
         'event_outbox'                 => ['columns' => ['payload'], 'erase' => 'scrub', 'export' => 'events'],
         'queue_jobs'                   => ['columns' => ['payload'], 'erase' => 'scrub', 'export' => 'queued_jobs'],
         // The gateway's answer can name the payer (Stripe customer_details, PayPal payer, receipt_email): erasure removes those
@@ -302,7 +303,8 @@ class GdprService {
      * Subject Access Request — export ALL data for a customer as a structured array.
      * Returns: ['customer'=>{}, 'addresses'=>[], 'orders'=>[{order, items, invoices, payments, consents}],
      *           'email_log'=>[], 'consent_history'=>[], 'coupon_uses'=>[], 'reviews'=>[], 'wishlist'=>[],
-     *           'abandoned_carts'=>[], 'rma_requests'=>[{rma, items, receipts}], 'events'=>[], 'queued_jobs'=>[],
+     *           'abandoned_carts'=>[], 'rma_requests'=>[{rma, items, receipts}], 'withdrawals'=>[], 'complaints'=>[],
+     *           'events'=>[], 'queued_jobs'=>[],
      *           'meta'=>{exported_at, customer_id}] — one section per PII_REGISTRY 'export' key.
      * Payment data redacted (no `raw_response` field). 'queued_jobs' lists the queue_jobs table and
      * the file backend's job files; jobs held by the Redis backend are not listed (see anonymizeCustomer()).
@@ -442,6 +444,9 @@ class GdprService {
             $rmas[] = ['rma' => $rma, 'items' => $itemsStmt->fetchAll(), 'receipts' => $receipts];
         }
 
+        $withdrawals = self::orderRecords($db, 'withdrawal_requests', $orderIds);
+        $complaints = self::orderRecords($db, 'complaints', $orderIds);
+
         $payloads = self::customerPayloadRows($db, $customerId, $email, $ownership, $orderIds);
 
         $export = [
@@ -460,6 +465,8 @@ class GdprService {
             'wishlist' => $wishlist,
             'abandoned_carts' => $carts,
             'rma_requests' => $rmas,
+            'withdrawals' => $withdrawals,
+            'complaints' => $complaints,
             'events' => array_map(static fn(array $row): array => array_intersect_key($row, array_flip(['id', 'event_type', 'aggregate_type', 'aggregate_id', 'payload', 'status', 'occurred_at'])), $payloads['event_outbox']),
             'queued_jobs' => array_merge(
                 array_map(static fn(array $row): array => array_intersect_key($row, array_flip(['id', 'type', 'state', 'payload', 'created_at', 'completed_at'])), $payloads['queue_jobs']),
@@ -708,7 +715,8 @@ class GdprService {
      * browser sessions) and abandoned carts are deleted; verification and password-reset tokens are
      * deleted (the customer row is updated, so no FK cascade fires); cookie consents keep only the
      * choice; RMA reasons, admin notes and return receipt notes are scrubbed (the RMA stays for the
-     * credit-note trail); outbox events and queued jobs (table and file backend) lose the e-mail in
+     * credit-note trail); the optional reason of a withdrawal statement is scrubbed (the statement stays as proof);
+     * outbox events and queued jobs (table and file backend) lose the e-mail in
      * their e-mail fields (see scrubPayloadEmail()) and customer events are rewritten.
      */
     private static function eraseCustomerContent(PDO $db, int $customerId, string $email, array $ownership, string $placeholder, string $marker): array {
@@ -775,6 +783,13 @@ class GdprService {
             $rows['return_receipts'] = $stmt->rowCount();
         }
 
+        $rows['withdrawal_requests'] = 0;
+        if ($orderIds !== [] && self::hasTable($db, 'withdrawal_requests')) {
+            $stmt = $db->prepare("UPDATE withdrawal_requests SET reason = ? WHERE store_id = ? AND reason IS NOT NULL AND reason <> ''" . self::inList(' AND order_id', $orderIds));
+            $stmt->execute(array_merge([$marker, $store], $orderIds));
+            $rows['withdrawal_requests'] = $stmt->rowCount();
+        }
+
         $rows['payment_transactions'] = 0;
         if ($orderIds !== []) {
             $stmt = $db->prepare("SELECT id, raw_response FROM payment_transactions WHERE store_id = ?" . self::inList(' AND order_id', $orderIds));
@@ -813,6 +828,14 @@ class GdprService {
         $stmt = $db->prepare(self::CUSTOMER_ORDERS);
         $stmt->execute($ownership);
         return array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /** Withdrawal statements or complaints of the customer's orders in the current store. */
+    private static function orderRecords(PDO $db, string $table, array $orderIds): array {
+        if ($orderIds === [] || !self::hasTable($db, $table)) return [];
+        $stmt = $db->prepare("SELECT * FROM {$table} WHERE store_id = ?" . self::inList(' AND order_id', $orderIds) . ' ORDER BY id');
+        $stmt->execute(array_merge([StoreContext::current()->id()], $orderIds));
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /**
@@ -931,7 +954,8 @@ class GdprService {
     }
 
     /** Gateway fields that name the payer; the whole value (an address object too) becomes the placeholder. */
-    private const PAYMENT_PAYER_KEYS = '/^(?:payer|contact|customer_details|billing_details|shipping(?:_details|_address)?|address|billing_address|(?:customer_|receipt_|payer_|billing_)?(?:email|name|phone)|(?:first|last|full)_?name)$/i';
+    // PayU names the payer in buyer{…, delivery{street, postalCode, city, recipientName…}} and the IP in customerIp.
+    private const PAYMENT_PAYER_KEYS = '/^(?:payer|buyer|contact|customer_details|billing_details|delivery|shipping(?:_details|_address)?|address|billing_address|(?:customer_?|client_?)?ip(?:_?address)?|recipient(?:_?(?:name|email|phone))?|(?:customer_|receipt_|payer_|billing_)?(?:email|name|phone)|(?:first|last|full)_?name)$/i';
 
     /** A gateway response without its payer fields, and without any other value equal to the customer's e-mail. */
     private static function scrubPaymentPayer(mixed $data, string $email, string $placeholder): mixed {

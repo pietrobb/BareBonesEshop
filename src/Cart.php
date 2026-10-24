@@ -150,10 +150,11 @@ class Cart {
             $ph = implode(',', array_fill(0, count($productIds), '?'));
             $stmt = $db->prepare("SELECT id, name, slug, images, price, compare_price, sku, stock, currency,
                     vat_class, product_type, category_id, brand_id, weight_g, length_mm, width_mm, height_mm,
-                    availability, available_from, inventory_policy
+                    availability, available_from, inventory_policy, translations
                 FROM products WHERE id IN ({$ph}) AND store_id = ? AND status = 'active'");
             $stmt->execute([...array_values($productIds), StoreContext::current()->catalogId()]);
-            while ($row = $stmt->fetch()) $products[(int)$row['id']] = $row;
+            // Name and slug in the shopper's language, as on the product page (the order keeps that name).
+            while ($row = $stmt->fetch()) $products[(int)$row['id']] = I18n::product($row);
         }
 
         // Batch fetch variants

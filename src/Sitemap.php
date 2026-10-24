@@ -82,19 +82,30 @@ class Sitemap {
         return $stores;
     }
 
-    /** Protocol limit of <url> entries per sitemap file (sitemaps.org). */
+    /** Protocol limits per sitemap file (sitemaps.org): 50,000 <url> entries and 50 MB uncompressed. */
     public const MAX_URLS = 50000;
+    public const MAX_BYTES = 50000000;
     private static int $maxUrls = self::MAX_URLS;
+    private static int $maxBytes = self::MAX_BYTES;
 
     /** Test hook: a lower per-file limit exercises the sitemap index without 50k rows. */
     public static function setMaxUrlsForTesting(?int $max): void {
         self::$maxUrls = $max === null ? self::MAX_URLS : max(1, $max);
     }
 
+    /** Test hook: a lower per-file byte limit exercises size-based splitting without 50 MB of XML. */
+    public static function setMaxBytesForTesting(?int $max): void {
+        self::$maxBytes = $max === null ? self::MAX_BYTES : max(1, $max);
+    }
+
+    private const URLSET_OPEN = '<?xml version="1.0" encoding="UTF-8"?>' . "\n"
+        . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">' . "\n";
+    private const URLSET_CLOSE = "</urlset>\n";
+
     /**
      * Render the sitemap XML for the given absolute base (scheme + host + install path, no
      * trailing slash), e.g. "https://shop.example". Part 0 is /sitemap.xml: the full urlset while
-     * it fits MAX_URLS, otherwise a <sitemapindex> of /sitemap-1.xml … /sitemap-N.xml (parts 1..N).
+     * it fits MAX_URLS and MAX_BYTES, otherwise a <sitemapindex> of /sitemap-1.xml … /sitemap-N.xml (parts 1..N).
      * @throws OutOfRangeException for a part that does not exist
      */
     public static function xml(string $base, int $part = 0): string {
@@ -115,11 +126,15 @@ class Sitemap {
     public static function write($out, string $base, int $part = 0): void {
         $base = rtrim($base, '/');
         $stores = self::stores();
-        $parts = max(1, (int)ceil(self::entryCount($stores) / self::$maxUrls));
+        // Every hreflang alternate repeats in each store's <url>, so with several stores 50,000 URLs reached 45 MB:
+        // parts are cut by both limits, which needs one pass over the entries to number them.
+        $parts = 0;
+        foreach (self::partEntries($stores, $base) as [$number]) $parts = $number;
+        $parts = max(1, $parts);
         if ($part < 0 || $part > $parts || ($part > 0 && $parts === 1)) throw new OutOfRangeException('Unknown sitemap part');
-        $e = static fn(string $s): string => htmlspecialchars($s, ENT_XML1, 'UTF-8');
-        fwrite($out, '<?xml version="1.0" encoding="UTF-8"?>' . "\n");
         if ($part === 0 && $parts > 1) {
+            $e = static fn(string $s): string => htmlspecialchars($s, ENT_XML1, 'UTF-8');
+            fwrite($out, '<?xml version="1.0" encoding="UTF-8"?>' . "\n");
             fwrite($out, '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n");
             for ($number = 1; $number <= $parts; $number++) {
                 fwrite($out, '  <sitemap><loc>' . $e($base . '/sitemap-' . $number . '.xml') . "</loc></sitemap>\n");
@@ -128,31 +143,46 @@ class Sitemap {
             return;
         }
 
-        fwrite($out, '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" '
-              . 'xmlns:xhtml="http://www.w3.org/1999/xhtml">' . "\n");
-        $first = $part === 0 ? 0 : ($part - 1) * self::$maxUrls;
-        $last = $part === 0 ? PHP_INT_MAX : $first + self::$maxUrls;
+        fwrite($out, self::URLSET_OPEN);
+        $wanted = max(1, $part);
+        foreach (self::partEntries($stores, $base) as [$number, $entry]) {
+            if ($number > $wanted) break;
+            if ($number === $wanted) fwrite($out, $entry);
+        }
+        fwrite($out, self::URLSET_CLOSE);
+    }
+
+    /**
+     * Every <url> entry with the number of the part it belongs to: a new part starts when the current one has
+     * MAX_URLS entries or the next entry would take the file (with its urlset wrapper) past MAX_BYTES.
+     * @return Generator<int, array{0: int, 1: string}>
+     */
+    private static function partEntries(array $stores, string $base): Generator {
+        $e = static fn(string $s): string => htmlspecialchars($s, ENT_XML1, 'UTF-8');
         $defaultStore = (string)(Bootstrap::stores()['default_store'] ?? '');
-        $index = 0;
+        $wrapper = strlen(self::URLSET_OPEN) + strlen(self::URLSET_CLOSE);
+        [$number, $count, $bytes] = [1, 0, $wrapper];
         foreach (self::entries($stores) as $urls) {
+            $links = '';
+            $alternates = [];
+            foreach ($urls as $storeId => $altUrl) $alternates[$stores[$storeId]['locale']] ??= $altUrl;
+            foreach ($alternates as $altLocale => $altUrl) {
+                $links .= '    <xhtml:link rel="alternate" hreflang="' . $e((string)$altLocale)
+                    . '" href="' . $e($base . $altUrl) . "\"/>\n";
+            }
+            if (isset($urls[$defaultStore])) {
+                $links .= '    <xhtml:link rel="alternate" hreflang="x-default" href="' . $e($base . $urls[$defaultStore]) . "\"/>\n";
+            }
             foreach ($urls as $url) {
-                if ($index++ < $first) continue;
-                if ($index > $last) break 2;
-                $entry = "  <url>\n" . '    <loc>' . $e($base . $url) . "</loc>\n";
-                $alternates = [];
-                foreach ($urls as $storeId => $altUrl) $alternates[$stores[$storeId]['locale']] ??= $altUrl;
-                foreach ($alternates as $altLocale => $altUrl) {
-                    $entry .= '    <xhtml:link rel="alternate" hreflang="' . $e((string)$altLocale)
-                          . '" href="' . $e($base . $altUrl) . "\"/>\n";
+                $entry = "  <url>\n" . '    <loc>' . $e($base . $url) . "</loc>\n" . $links . "  </url>\n";
+                if ($count > 0 && ($count >= self::$maxUrls || $bytes + strlen($entry) > self::$maxBytes)) {
+                    [$number, $count, $bytes] = [$number + 1, 0, $wrapper];
                 }
-                if (isset($urls[$defaultStore])) {
-                    $entry .= '    <xhtml:link rel="alternate" hreflang="x-default" href="'
-                          . $e($base . $urls[$defaultStore]) . "\"/>\n";
-                }
-                fwrite($out, $entry . "  </url>\n");
+                $count++;
+                $bytes += strlen($entry);
+                yield [$number, $entry];
             }
         }
-        fwrite($out, "</urlset>\n");
     }
 
     /** Rows of one product keyset chunk (products.slug is globally unique, so it is the cursor). */
@@ -196,27 +226,6 @@ class Sitemap {
             $serving = array_merge(...array_map(static fn(string $owner): array => $pageOwners[$owner], $ownerIds));
             yield $urls(UrlAliases::outbound('/page/' . $slug), self::inStoreOrder($serving, $stores));
         }
-    }
-
-    /** Number of <url> entries (one per path and serving store), counted in SQL. */
-    private static function entryCount(array $stores): int {
-        $total = count($stores);
-        $db = Db::get();
-        $count = static function (string $sql, string $owner) use ($db): int {
-            try {
-                $stmt = $db->prepare($sql);
-                $stmt->execute([':owner' => $owner]);
-                return (int)$stmt->fetchColumn();
-            } catch (\Throwable) {
-                return 0; // fresh install — the table may not exist yet
-            }
-        };
-        foreach ($stores as $store) {
-            $total += $count("SELECT COUNT(DISTINCT slug) FROM categories WHERE store_id = :owner AND slug IS NOT NULL AND slug != ''", $store['catalog'])
-                + $count("SELECT COUNT(*) FROM products WHERE store_id = :owner AND status = 'active' AND slug IS NOT NULL AND slug != ''", $store['catalog'])
-                + $count("SELECT COUNT(DISTINCT slug) FROM pages WHERE store_id = :owner AND status = 'active' AND slug IS NOT NULL AND slug != ''", $store['id']);
-        }
-        return $total;
     }
 
     /**

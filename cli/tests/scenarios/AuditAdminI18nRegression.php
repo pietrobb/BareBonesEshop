@@ -173,6 +173,24 @@ try {
     $a154Run(['p' => 'payments', 'action' => 'method_save'], ['code' => 'a154-pay', 'provider' => 'a154', 'name' => 'A154 Pay', 'service_type' => 'bank_transfer', 'active' => '1']);
     $a154Check('A15.4 de: payments page and its saved flash are German', $a154Run(['p' => 'payments']),
         ['Zahlungsarten', 'Zahlungsart gespeichert.', 'Banküberweisung', 'Versandeinschränkungen', 'Zahlungsart löschen?']);
+    // R9: saving a purchase-on-invoice method (or an extension's type) in the admin keeps its type; it used to become
+    // 'offline', which offers the B2B invoice method to every consumer without the company approval and credit limit.
+    $r9pId = (int)$a154Pdo->query("SELECT id FROM payment_methods WHERE code = 'a154-pay'")->fetchColumn();
+    $r9pType = static fn(): string => (string)$a154Pdo->query("SELECT service_type FROM payment_methods WHERE id = {$r9pId}")->fetchColumn();
+    $r9pSave = static fn(string $type) => $a154Run(['p' => 'payments', 'action' => 'method_save'],
+        ['id' => (string)$r9pId, 'code' => 'a154-pay', 'provider' => 'a154', 'name' => 'A154 Pay', 'service_type' => $type, 'active' => '1']);
+    $r9pSave('invoice');
+    $r9pPage = $a154Run(['p' => 'payments']);
+    assert_true($r9pType() === 'invoice' && str_contains((string)$r9pPage['out'], '<option value="invoice" selected>Kauf auf Rechnung</option>'),
+        'R9 admin payments: a method saved as purchase on invoice stays invoice and the form shows it selected (type=' . $r9pType() . ')');
+    $a154Pdo->exec("UPDATE payment_methods SET service_type = 'acme_bnpl' WHERE id = {$r9pId}");
+    $r9pPage = $a154Run(['p' => 'payments']);
+    $r9pSave('acme_bnpl');
+    $r9pKept = $r9pType();
+    $r9pSave('forged_type');
+    assert_true(str_contains((string)$r9pPage['out'], '<option value="acme_bnpl" selected>acme_bnpl</option>') && $r9pKept === 'acme_bnpl' && $r9pType() === 'offline',
+        "R9 admin payments: an extension's type is shown and kept on save; an unknown posted type still becomes offline (kept={$r9pKept}, forged=" . $r9pType() . ')');
+    unset($r9pType); // the arrow fn holds a copy of $a154Pdo; drop it so the cleanup can close and delete the SQLite file (Windows)
     $a154Run(['p' => 'warehouse', 'action' => 'save'], ['code' => 'a154-wh', 'name' => 'A154 Warehouse', 'priority' => '1']);
     $a154Check('A15.4 de: warehouses list is German', $a154Run(['p' => 'warehouses']), ['Lager löschen?', 'A154 Warehouse']);
     $a154Run(['p' => 'feed', 'action' => 'save'], ['code' => 'a154-feed', 'name' => 'A154 Feed', 'field_map' => '{broken']);
