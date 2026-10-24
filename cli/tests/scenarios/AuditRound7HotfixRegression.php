@@ -52,6 +52,17 @@ assert_equals(['pending', 'cancelled'], [(string)Orders::byId($r7hHeld)['status'
     'R7 expiry: the order with a broken reservation stays pending, the next order still expires');
 assert_equals(0, (int)$pdo->query("SELECT reserved FROM warehouse_stock WHERE warehouse_id = {$r7hWh} AND sku = 'R7H-NEXT'")->fetchColumn(), 'R7 expiry: the next order releases its reservation');
 assert_equals($r7hBefore + 1, (int)$pdo->query("SELECT COUNT(*) FROM operational_incidents WHERE code = 'order.expiry_failed'")->fetchColumn(), 'R7 expiry: the failing order raises one critical incident');
+// R9 low: the poisoned order failed again on every cron run, a critical incident each time (spam). Once a day now.
+$r7hErrorLog = ini_set('error_log', sys_get_temp_dir() . '/r9-expiry-spam.log');
+try {
+    for ($r7hRun = 0; $r7hRun < 3; $r7hRun++) PendingOrderExpiry::sweep(['pending_order_expiry_seconds' => 172800, 'pending_order_expiry_batch' => 25], null);
+} finally {
+    ini_set('error_log', (string)$r7hErrorLog);
+}
+assert_equals($r7hBefore + 1, (int)$pdo->query("SELECT COUNT(*) FROM operational_incidents WHERE code = 'order.expiry_failed'")->fetchColumn(), 'R9 expiry: later sweeps failing on the same order raise no further incident within a day');
+$pdo->exec("UPDATE operational_incidents SET occurred_at = occurred_at - 86401 WHERE code = 'order.expiry_failed'");
+PendingOrderExpiry::sweep(['pending_order_expiry_seconds' => 172800, 'pending_order_expiry_batch' => 25], null);
+assert_equals($r7hBefore + 2, (int)$pdo->query("SELECT COUNT(*) FROM operational_incidents WHERE code = 'order.expiry_failed'")->fetchColumn(), 'R9 expiry: an order still failing a day later is reported again');
 $r7hSweep = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/PendingOrderExpiry.php');
 assert_true(preg_match('/foreach \(\$storeIds as \$storeId\) \{\s*try \{/', $r7hSweep) === 1, 'R7 expiry: each store is swept inside its own try, so one store cannot stop the others');
 

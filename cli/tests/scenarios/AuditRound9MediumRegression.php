@@ -71,7 +71,7 @@ foreach ($r9lsDrivers as $r9lsDriver => $r9lsTarget) {
             "R9 {$r9lsDriver} low stock: the dashboard count and its first rows (worst first) are unchanged");
         $r9lsAll = [];
         foreach (StockAlerts::belowLow() as $r9lsRow) $r9lsAll[$r9lsRow['sku']] = [$r9lsRow['level'], $r9lsRow['available']];
-        assert_equals([$r9lsExpected, count($r9lsExpected)], [$r9lsAll, StockAlerts::belowLowCount()],
+        assert_equals([$r9lsExpected, count($r9lsExpected)], [$r9lsAll, count(StockAlerts::belowLow())],
             "R9 {$r9lsDriver} low stock: the full list and count still include a SKU that is low only by its product's own higher threshold (P7)");
         if (!$r9lsSqlite) {
             // Index lookups (Handler_read_key) of one summary without per-product overrides: about two per low SKU,

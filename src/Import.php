@@ -599,18 +599,6 @@ class Import {
     }
 
     /**
-     * Validate slug uniqueness
-     */
-    public static function validateSlug(string $slug, string $locale, string $entity, int $entityId): bool {
-        $stmt = Db::get()->prepare("
-            SELECT entity_id FROM slug_registry
-            WHERE slug = :slug AND locale = :locale AND entity = :entity AND entity_id != :eid
-        ");
-        $stmt->execute([':slug' => $slug, ':locale' => $locale, ':entity' => $entity, ':eid' => $entityId]);
-        return $stmt->fetch() === false;
-    }
-
-    /**
      * Recount products per category (including subtree totals via materialized path), all or only $ids.
      * Paths are unique only within a catalog, so the subtree is matched in the category's own store.
      */

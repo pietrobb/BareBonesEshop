@@ -45,6 +45,9 @@ class Search {
     /** Highest result page a request may ask for; larger values only produce huge OFFSETs (or int overflow). */
     public const MAX_PAGE = 10000;
 
+    /** Categories listed in the search facet. */
+    public const FACET_LIMIT = 30;
+
     private static function runQuery(string $q, int $page, int $perPage, array $opts, bool $like): array {
         $db = Db::get();
         $offset = ($page - 1) * $perPage;
@@ -83,11 +86,23 @@ class Search {
         if (isset($opts['price_min']) && $opts['price_min'] !== null) { $where .= ' AND p.price >= :pmin'; $params[':pmin'] = (int)$opts['price_min']; }
         if (isset($opts['price_max']) && $opts['price_max'] !== null) { $where .= ' AND p.price <= :pmax'; $params[':pmax'] = (int)$opts['price_max']; }
 
-        $facet = $db->prepare("SELECT c.id, c.name, c.slug, COUNT(*) AS cnt {$from} JOIN categories c ON c.id = p.category_id WHERE {$where} GROUP BY c.id, c.name, c.slug ORDER BY cnt DESC, c.name");
+        // The category facet lists the FACET_LIMIT largest categories (a one-letter query on a big catalog listed
+        // every category on the page); a selected category outside them is still listed so it can be cleared.
+        $facetSql = "SELECT c.id, c.name, c.slug, COUNT(*) AS cnt {$from} JOIN categories c ON c.id = p.category_id WHERE {$where}";
+        $facet = $db->prepare("{$facetSql} GROUP BY c.id, c.name, c.slug ORDER BY cnt DESC, c.name LIMIT " . self::FACET_LIMIT);
         $facet->execute($params);
-        $categories = array_map(static fn(array $row): array => ['id' => (int)$row['id'], 'name' => (string)$row['name'], 'slug' => (string)$row['slug'], 'count' => (int)$row['cnt']], $facet->fetchAll());
-
+        $facetRows = $facet->fetchAll();
         $categoryIds = array_values(array_unique(array_filter(array_map('intval', (array)($opts['category_ids'] ?? [])), static fn(int $id): bool => $id > 0)));
+        $missing = array_slice(array_values(array_diff($categoryIds, array_map(static fn(array $row): int => (int)$row['id'], $facetRows))), 0, self::FACET_LIMIT);
+        if ($missing !== []) {
+            $selected = $db->prepare("{$facetSql} AND c.id IN (" . implode(', ', array_map(static fn(int $i): string => ':facet' . $i, array_keys($missing))) . ") GROUP BY c.id, c.name, c.slug");
+            $selectedParams = $params;
+            foreach ($missing as $i => $id) $selectedParams[':facet' . $i] = $id;
+            $selected->execute($selectedParams);
+            $facetRows = array_merge($facetRows, $selected->fetchAll());
+        }
+        $categories = array_map(static fn(array $row): array => ['id' => (int)$row['id'], 'name' => (string)$row['name'], 'slug' => (string)$row['slug'], 'count' => (int)$row['cnt']], $facetRows);
+
         if ($categoryIds) {
             $marks = [];
             foreach ($categoryIds as $i => $id) { $marks[] = ':cat' . $i; $params[':cat' . $i] = $id; }
@@ -157,40 +172,6 @@ class Search {
         }
 
         return $stmt->fetchAll();
-    }
-
-    /**
-     * Search with highlight snippets (SQLite only)
-     */
-    public static function withHighlights(string $q, int $page = 1, int $perPage = 24): array {
-        if (!Db::isSqlite()) {
-            return self::query($q, $page, $perPage);
-        }
-
-        $db = Db::get();
-        $ftsQuery = self::sanitizeFtsQuery($q);
-        $offset = ($page - 1) * $perPage;
-
-        $stmt = $db->prepare("
-            SELECT p.*,
-                highlight(products_fts, 0, '<mark>', '</mark>') AS name_hl,
-                rank
-            FROM products_fts fts
-            CROSS JOIN products p ON p.id = fts.rowid
-            WHERE products_fts MATCH :q AND p.store_id = :store AND p.status = 'active'
-            ORDER BY rank
-            LIMIT :limit OFFSET :offset
-        ");
-        $stmt->execute([':q' => $ftsQuery, ':store' => StoreContext::current()->catalogId(), ':limit' => $perPage, ':offset' => $offset]);
-
-        $results = $stmt->fetchAll();
-        // Sanitize name_hl: escape any HTML except <mark> tags from FTS5 highlight()
-        foreach ($results as &$r) {
-            if (isset($r['name_hl'])) {
-                $r['name_hl'] = strip_tags($r['name_hl'], '<mark>');
-            }
-        }
-        return $results;
     }
 
     /**

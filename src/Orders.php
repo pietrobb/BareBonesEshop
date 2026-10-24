@@ -409,30 +409,6 @@ class Orders {
     }
 
     /**
-     * Get orders by email
-     */
-    public static function byEmail(string $email, int $limit = 20): array {
-        $stmt = Db::get()->prepare("
-            SELECT * FROM orders WHERE customer_email = :email AND store_id = :store
-            ORDER BY created_at DESC LIMIT :limit
-        ");
-        $stmt->execute([':email' => $email, ':store' => StoreContext::current()->id(), ':limit' => $limit]);
-        return $stmt->fetchAll();
-    }
-
-    /**
-     * Get orders by status
-     */
-    public static function byStatus(string $status, int $limit = 50): array {
-        $stmt = Db::get()->prepare("
-            SELECT * FROM orders WHERE status = :status AND store_id = :store
-            ORDER BY created_at DESC LIMIT :limit
-        ");
-        $stmt->execute([':status' => $status, ':store' => StoreContext::current()->id(), ':limit' => $limit]);
-        return $stmt->fetchAll();
-    }
-
-    /**
      * Update order status; with $expectedFrom only while the order is still in that status.
      * Returns whether the row changed.
      */
@@ -631,8 +607,11 @@ class Orders {
                 try {
                     if (self::expireClaimed($order, $cutoff($ttl), $online)) $expired++;
                 } catch (\Throwable $e) {
-                    Logger::phpLog("Pending order expiry failed for #{$order['id']}: " . $e->getMessage());
-                    IncidentMonitor::report('order.expiry_failed', 'orders', 'critical', ['order_id' => (int)$order['id'], 'exception' => $e]);
+                    // The poisoned order fails again on every cron run: one incident (and log line) a day, not one per run.
+                    if (!IncidentMonitor::reportedForOrder('order.expiry_failed', (int)$order['id'])) {
+                        Logger::phpLog("Pending order expiry failed for #{$order['id']}: " . $e->getMessage());
+                        IncidentMonitor::report('order.expiry_failed', 'orders', 'critical', ['order_id' => (int)$order['id'], 'exception' => $e]);
+                    }
                     continue;
                 }
                 if ($expired >= $limit) break 2;

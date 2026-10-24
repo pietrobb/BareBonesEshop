@@ -365,19 +365,38 @@ class Security {
     /**
      * Runs a rate-limit query. When the limiter's storage fails (read-only or full disk, unwritable private cache)
      * the request is allowed rather than answered with a 500: checkout, API and payment webhooks keep working, and
-     * the outage is raised once per request as a critical incident.
+     * the outage is raised once per request as a critical incident. Credential checks (logins, password resets and
+     * changes) pass $failClosed: without a working limiter they are refused, so a full disk cannot open unlimited
+     * password guessing.
      * @param callable(PDO): bool $query
      */
-    private static function withRateDb(callable $query): bool {
+    private static function withRateDb(callable $query, bool $failClosed = false): bool {
         try {
             return $query(self::rateDb());
         } catch (Throwable $e) {
-            if (!self::$rateDbFailureReported) {
-                self::$rateDbFailureReported = true;
-                Logger::error('security.rate_limit_storage_failed', ['exception_type' => get_class($e), 'message' => $e->getMessage()]);
-                IncidentMonitor::report('security.rate_limit_storage_failed', 'security', 'critical', ['exception' => $e]);
-            }
-            return true;
+            self::reportRateDbFailure($e);
+            return !$failClosed;
+        }
+    }
+
+    private static function reportRateDbFailure(Throwable $e): void {
+        if (self::$rateDbFailureReported) return;
+        self::$rateDbFailureReported = true;
+        Logger::error('security.rate_limit_storage_failed', ['exception_type' => get_class($e), 'message' => $e->getMessage()]);
+        IncidentMonitor::report('security.rate_limit_storage_failed', 'security', 'critical', ['exception' => $e]);
+    }
+
+    /**
+     * AdminLoginThrottle::reserve() over the limiter storage; when that storage fails the attempt is refused
+     * (fail-closed, 60 s) instead of crashing the login page or allowing unthrottled guessing.
+     */
+    private static function reserveAdminLogin(string $user, string $ip): array {
+        try {
+            $throttle = new AdminLoginThrottle(self::rateDb());
+            return [$throttle, $throttle->reserve($user, $ip)];
+        } catch (Throwable $e) {
+            self::reportRateDbFailure($e);
+            return [null, 60];
         }
     }
 
@@ -407,7 +426,7 @@ class Security {
         return true;
     }
 
-    public static function rateLimit(string $action, int $maxHits = 60, int $windowSeconds = 60, bool $bindIp = true): bool {
+    public static function rateLimit(string $action, int $maxHits = 60, int $windowSeconds = 60, bool $bindIp = true, bool $failClosed = false): bool {
         $windowSeconds = max(1, min(86400, $windowSeconds));
         $key = self::rateKey($action, $bindIp);
         $allowed = self::withRateDb(static function (PDO $db) use ($key, $windowSeconds, $maxHits): bool {
@@ -417,7 +436,7 @@ class Security {
             $stmt = $db->prepare("SELECT COUNT(*) FROM hits WHERE key = :key AND ts > :window");
             $stmt->execute([':key' => $key, ':window' => $now - $windowSeconds]);
             return (int)$stmt->fetchColumn() <= max(0, $maxHits);
-        });
+        }, $failClosed);
 
         if (!$allowed) {
             http_response_code(429);
@@ -646,9 +665,8 @@ class Security {
             if ($isFormLogin && !self::csrfValidate()) self::renderAdminLogin('admin.login.error_form_expired');
             if ($user !== '' && $pass !== '') {
                 $ip = self::clientIp();
-                $throttle = new AdminLoginThrottle(self::rateDb());
-                $retryAfter = $throttle->reserve($user, $ip);
-                if ($retryAfter > 0) {
+                [$throttle, $retryAfter] = self::reserveAdminLogin($user, $ip);
+                if ($retryAfter > 0 || $throttle === null) {
                     header('Retry-After: ' . $retryAfter);
                     self::renderAdminLogin('admin.login.error_throttled', 429);
                 }
@@ -677,8 +695,7 @@ class Security {
         $user = $_SERVER['PHP_AUTH_USER'] ?? '';
         $pass = $_SERVER['PHP_AUTH_PW'] ?? '';
         $ip = self::clientIp();
-        $throttle = new AdminLoginThrottle(self::rateDb());
-        $retryAfter = $user !== '' ? $throttle->reserve($user, $ip) : 0;
+        [$throttle, $retryAfter] = $user !== '' ? self::reserveAdminLogin($user, $ip) : [null, 0];
         if ($retryAfter > 0) {
             http_response_code(429);
             header('Retry-After: ' . $retryAfter);
@@ -709,7 +726,7 @@ class Security {
         }
 
         if ($authenticated) {
-            $throttle->recordSuccess($user, $ip);
+            $throttle?->recordSuccess($user, $ip);
             session_regenerate_id(true);
             $_SESSION['admin_authenticated'] = true;
             $_SESSION['admin_user'] = $user;

@@ -46,14 +46,5 @@
             "action": "free_shipping",
             "active": true
         }
-    ],
-
-    "tier_pricing": {
-        "enabled": true,
-        "rules": [
-            {"min_qty": 10, "discount_percent": 5},
-            {"min_qty": 50, "discount_percent": 12},
-            {"min_qty": 100, "discount_percent": 20}
-        ]
-    }
+    ]
 }

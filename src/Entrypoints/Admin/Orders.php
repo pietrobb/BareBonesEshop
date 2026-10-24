@@ -515,8 +515,8 @@ function pageInvoicePdf(): void {
     $id = Security::int($_GET['id'] ?? 0);
     $inv = InvoiceService::byId($id);
     if (!$inv) { http_response_code(404); echo esc(I18n::t('admin.order.msg.invoice_missing')); return; }
-    $abs = InvoiceService::pdfAbsolutePath($inv);
-    if (!is_file($abs)) { http_response_code(404); echo esc(I18n::t('admin.order.msg.pdf_missing')); return; }
+    $abs = InvoiceService::pdfFile($inv);
+    if ($abs === null) { http_response_code(404); echo esc(I18n::t('admin.order.msg.pdf_missing')); return; }
     header('Content-Type: application/pdf');
     header('Content-Disposition: inline; filename="' . $inv['number'] . '.pdf"');
     header('Content-Length: ' . filesize($abs));
@@ -893,8 +893,8 @@ function handleOrderInvoiceResend(): void {
     }
     try {
         $order = Orders::byId((int)$inv['order_id']);
-        $abs = InvoiceService::pdfAbsolutePath($inv);
-        if (!is_file($abs)) {
+        $abs = InvoiceService::pdfFile($inv);
+        if ($abs === null) {
             setFlash('err', I18n::t('admin.order.msg.pdf_missing'));
             header("Location: admin.php?p=order&id={$orderId}");
             exit;

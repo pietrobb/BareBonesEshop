@@ -109,7 +109,7 @@ $pdo->exec("INSERT OR IGNORE INTO payment_methods (code, provider, name, descrip
 $pdo->exec("INSERT OR IGNORE INTO payment_method_countries (method_code, country) VALUES ('p0pay','SK'),('p0pay','DE')");
 
 $p0Checkout = function (array $overrides) {
-    // apiActiveStore() resolves the seller store by locale (languages[0]).
+    // The checkout resolves the seller store by locale (languages[0]).
     // Default CLI locale 'en' would pick the US store → seller US, no EU VAT.
     I18n::setLocale('sk');
     $_SERVER['REQUEST_METHOD'] = 'POST';

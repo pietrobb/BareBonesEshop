@@ -109,9 +109,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $email = Str::normalizeEmail(Security::str($_POST['email'] ?? ''));
         $password = Security::str($_POST['password'] ?? '');
         $emailKey = hash('sha256', $email);
-        $ipAllowed = Security::rateLimit('account_login_ip', 30, 900);
+        $ipAllowed = Security::rateLimit('account_login_ip', 30, 900, true, true);
         // Per account AND client IP: foreign failures must not lock the owner out (no lockout DoS).
-        $accountAllowed = Security::rateLimit('account_login_account_' . $emailKey, 10, 900);
+        $accountAllowed = Security::rateLimit('account_login_account_' . $emailKey, 10, 900, true, true);
         // Deliberately no per-account ceiling across all IPs: a handful of addresses could then
         // lock any customer out of their account. The trade-off is that a botnet rotating
         // addresses is only slowed per IP; password hashing cost and the per-IP limits bound it.
@@ -150,8 +150,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif ($action === 'reset') {
         $token = Security::clean($_POST['token'] ?? '');
         $newPassword = Security::str($_POST['password'] ?? '');
-        $ipAllowed = Security::rateLimit('account_reset_ip', 10, 3600);
-        $tokenAllowed = Security::rateLimit('account_reset_token_' . hash('sha256', $token), 5, 3600, false);
+        $ipAllowed = Security::rateLimit('account_reset_ip', 10, 3600, true, true);
+        $tokenAllowed = Security::rateLimit('account_reset_token_' . hash('sha256', $token), 5, 3600, false, true);
         [$ok, $err] = ($ipAllowed && $tokenAllowed)
             ? Customers::completePasswordReset($token, $newPassword)
             : [false, 'invalid_or_expired_token'];
@@ -181,7 +181,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     elseif ($action === 'change_password' && Customers::isLoggedIn()) {
         $cid = (int)$_SESSION['customer_id'];
-        $allowed = Security::rateLimit('account_change_password_' . $cid, 5, 900, false);
+        $allowed = Security::rateLimit('account_change_password_' . $cid, 5, 900, false, true);
         [$ok, $err] = $allowed
             ? Customers::changePassword($cid, Security::str($_POST['current'] ?? ''), Security::str($_POST['new'] ?? ''))
             : [false, 'invalid_current_password'];
@@ -276,7 +276,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $flash = $t('account.gdpr_erase_confirm_required');
             $flashType = 'error';
             $p = 'privacy';
-        } elseif (!Security::rateLimit('account_change_password_' . $cid, 5, 900, false)
+        } elseif (!Security::rateLimit('account_change_password_' . $cid, 5, 900, false, true)
             || !Customers::passwordMatches($cid, Security::str($_POST['password'] ?? ''))) {
             // A hijacked or unattended session alone must not be able to erase the account irreversibly.
             $flash = $t('account.err_invalid_current_password');

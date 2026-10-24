@@ -296,18 +296,18 @@ function pageWarehouse(): void {
     <div class="card">
         <form method="post" action="admin.php?p=warehouse&action=save<?= $w ? '&id='.$w['id'] : '' ?>">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-            <div class="form-row"><label><?= esc(I18n::t('admin.common.code_unique')) ?></label><input name="code" value="<?= esc($w['code'] ?? '') ?>" required placeholder="main"></div>
-            <div class="form-row"><label><?= esc(I18n::t('admin.th.name')) ?></label><input name="name" value="<?= esc($w['name'] ?? '') ?>" required style="width:100%"></div>
-            <div class="form-row"><label><?= esc(I18n::t('admin.warehouse.priority_hint')) ?></label><input type="number" name="priority" value="<?= (int)($w['priority'] ?? 0) ?>"></div>
-            <div class="form-row"><label><?= esc(I18n::t('admin.common.type')) ?></label>
-                <select name="is_dropship">
+            <div class="form-row"><label for="wh-code"><?= esc(I18n::t('admin.common.code_unique')) ?></label><input id="wh-code" name="code" value="<?= esc($w['code'] ?? '') ?>" required placeholder="main"></div>
+            <div class="form-row"><label for="wh-name"><?= esc(I18n::t('admin.th.name')) ?></label><input id="wh-name" name="name" value="<?= esc($w['name'] ?? '') ?>" required style="width:100%"></div>
+            <div class="form-row"><label for="wh-priority"><?= esc(I18n::t('admin.warehouse.priority_hint')) ?></label><input id="wh-priority" type="number" name="priority" value="<?= (int)($w['priority'] ?? 0) ?>"></div>
+            <div class="form-row"><label for="wh-dropship"><?= esc(I18n::t('admin.common.type')) ?></label>
+                <select id="wh-dropship" name="is_dropship">
                     <option value="0" <?= empty($w['is_dropship']) ? 'selected' : '' ?>><?= esc(I18n::t('admin.warehouse.own')) ?></option>
                     <option value="1" <?= !empty($w['is_dropship']) ? 'selected' : '' ?>><?= esc(I18n::t('admin.warehouse.dropship_external')) ?></option>
                 </select>
             </div>
             <div class="form-row"><label><input type="checkbox" name="is_default" value="1" <?= !empty($w['is_default']) ? 'checked' : '' ?>> <?= esc(I18n::t('admin.warehouse.is_default')) ?></label></div>
-            <div class="form-row"><label><?= esc(I18n::t('admin.warehouse.contact')) ?></label><input name="contact" value="<?= esc($w['contact'] ?? '') ?>" style="width:100%"></div>
-            <div class="form-row"><label><?= esc(I18n::t('admin.warehouse.notes')) ?></label><textarea name="notes" rows="3" style="width:100%"><?= esc($w['notes'] ?? '') ?></textarea></div>
+            <div class="form-row"><label for="wh-contact"><?= esc(I18n::t('admin.warehouse.contact')) ?></label><input id="wh-contact" name="contact" value="<?= esc($w['contact'] ?? '') ?>" style="width:100%"></div>
+            <div class="form-row"><label for="wh-notes"><?= esc(I18n::t('admin.warehouse.notes')) ?></label><textarea id="wh-notes" name="notes" rows="3" style="width:100%"><?= esc($w['notes'] ?? '') ?></textarea></div>
             <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.btn.save')) ?></button>
             <a href="admin.php?p=warehouses" class="btn" style="margin-left:.5rem"><?= esc(I18n::t('admin.btn.back')) ?></a>
         </form>

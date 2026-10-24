@@ -81,6 +81,29 @@ nginx PHP fallback when `operations.nginx_config` is set).
   language (`checkout.digital.*`, `checkout.free_payment.*`, `carrier.*`). The Google/Meta feed and the
   product JSON-LD give CZK/HUF prices in whole units, as the storefront shows and the cart charges
   (`750 CZK`, not `749.90 CZK`).
+- **Round-9 low findings (2026-10-24)**
+  - With its storage broken, the rate limiter refuses customer login, password reset and password change
+    (and the admin login answers 429) instead of letting unlimited attempts through; ordinary requests
+    still pass.
+  - CZK/HUF invoices: whole-unit lines add up to the printed totals. Invoices and credit notes print the
+    payment method the customer chose (e.g. "Platba kartou"), never its code (`stripe`, `free`). A lost
+    invoice PDF (e.g. a database restored without the invoice storage) is re-rendered from the issue-time
+    snapshots when downloaded or e-mailed, instead of "PDF missing".
+  - An order with no delivery date is returnable for at most 12 months past the return period, not for
+    ever; a delivery the carrier reports on the shipment starts the withdrawal and return period.
+  - The `orders.delivered_at` migration can be re-run after an interruption. A pending order the expiry
+    sweep cannot release raises its incident once a day. Deleting a product or category frees its URLs.
+    The search category facet lists at most 30 categories. The PHP log masks secrets inside JSON and
+    escapes line breaks.
+  - **Removed unused public methods** (an extension calling one must switch): `Orders::byStatus()`,
+    `Orders::byEmail()`, `Customers::byEmail()`, `Products::onSale()`, `Sitemap::storePrefixes()`,
+    `StoreContext::ossEnabled()`, `Import::validateSlug()` (use `Import::registerSlug()`, which refuses a
+    taken slug), `OrderWorkflow::isTerminal()` (`allowedTransitions($s) === []`), `Pricing::tierPrice()`,
+    `Shipping::zoneForCountry()` (`zonesForCountry()[0]`), `Promotions::catalogRules()`,
+    `Search::withHighlights()`, `StockAlerts::belowLowCount()`, `MockPayment::refundPayload()` and the
+    `apiActiveStore()` helper.
+  - **`tier_pricing` in `pricing.json` was never applied** and is gone from the sample. Quantity prices
+    are price-list rows with a minimum quantity (Admin → Price lists).
 - **VAT rates (2026-10-23)** — products with `vat_class` `books` or `medicines` now get each country's
   own rate instead of its `reduced` class (e.g. IE books 0 %, IT/ES 4 %, FR 5.5 %, DE medicines 19 %).
   FI reduced rate 13.5 % from 2026, LT 9 % rate replaced by 12 % / 5 % from 2026. Invoices already

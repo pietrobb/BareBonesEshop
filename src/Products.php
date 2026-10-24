@@ -365,20 +365,6 @@ class Products {
     }
 
     /**
-     * Products on sale (has compare_price)
-     */
-    public static function onSale(int $limit = 8): array {
-        $stmt = Db::get()->prepare("
-            SELECT * FROM products
-            WHERE store_id = :store AND status = 'active' AND compare_price IS NOT NULL AND compare_price > price
-            ORDER BY (compare_price - price) DESC
-            LIMIT :limit
-        ");
-        $stmt->execute([':store' => StoreContext::current()->catalogId(), ':limit' => $limit]);
-        return $stmt->fetchAll();
-    }
-
-    /**
      * Get specifications for a product in a given language
      */
     public static function specifications(int $productId, string $lang = 'sk'): array {

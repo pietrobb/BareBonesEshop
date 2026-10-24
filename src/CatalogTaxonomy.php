@@ -90,6 +90,7 @@ final class CatalogTaxonomy {
         try {
             $db->prepare('DELETE FROM category_attributes WHERE category_id = :id')->execute([':id' => $id]);
             $db->prepare('DELETE FROM categories WHERE id = :id AND store_id = :catalog')->execute([':id' => $id, ':catalog' => StoreContext::current()->catalogId()]);
+            $db->prepare("DELETE FROM slug_registry WHERE entity = 'category' AND entity_id = :id")->execute([':id' => $id]);
             AuditLog::log('category', $id, $category, null, 'Admin category delete');
             $db->commit();
         } catch (Throwable $e) {

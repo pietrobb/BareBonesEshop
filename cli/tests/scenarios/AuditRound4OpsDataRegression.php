@@ -38,7 +38,7 @@ try {
 
     // Search: every SQLite FTS statement drives from the FTS index, never one FTS lookup per product row.
     $r4Db->prepared = [];
-    $r4Found = Search::query('a', 1, 24)['total'] + count(Search::suggest('ap', 5)) + count(Search::withHighlights('apple', 1, 24));
+    $r4Found = Search::query('a', 1, 24)['total'] + count(Search::suggest('ap', 5));
     assert_true($r4Found > 0, 'R4 search: FTS queries find the imported products');
     $r4Bad = [];
     foreach (array_unique(array_filter($r4Db->prepared, static fn(string $sql): bool => str_contains($sql, 'products_fts MATCH'))) as $r4Sql) {

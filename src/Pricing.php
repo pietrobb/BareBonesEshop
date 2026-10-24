@@ -358,27 +358,6 @@ class Pricing {
     }
 
     /**
-     * Apply tier pricing to a line item (runtime, depends on qty).
-     * Returns discounted unit price in cents.
-     */
-    public static function tierPrice(int $unitPrice, int $qty): int {
-        $cfg = self::config();
-        if (!($cfg['tier_pricing']['enabled'] ?? false)) return $unitPrice;
-
-        $discount = 0;
-        foreach ($cfg['tier_pricing']['rules'] ?? [] as $tier) {
-            if ($qty >= $tier['min_qty']) {
-                $discount = $tier['discount_percent'];
-            }
-        }
-
-        if ($discount > 0) {
-            return (int)round($unitPrice * (1 - $discount / 100));
-        }
-        return $unitPrice;
-    }
-
-    /**
      * Apply cart-level coupon code.
      * Returns [discount_amount, rule_name] or [0, null].
      */

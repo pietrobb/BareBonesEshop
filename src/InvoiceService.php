@@ -623,8 +623,8 @@ final class InvoiceService
     /** Sends an invoice PDF to the browser; nothing of it stays in a (shared) browser's cache. */
     public static function sendPdf(array $invoice): void
     {
-        $abs = self::pdfAbsolutePath($invoice);
-        if (!is_file($abs)) {
+        $abs = self::pdfFile($invoice);
+        if ($abs === null) {
             http_response_code(404);
             exit('PDF missing.');
         }
@@ -679,6 +679,22 @@ final class InvoiceService
     public static function pdfAbsolutePath(array $invoice): string
     {
         return self::resolvePdfPath((string)($invoice['pdf_path'] ?? ''));
+    }
+
+    /**
+     * The invoice's PDF file, or null. A lost file (e.g. a database restored without the invoice storage) is
+     * re-rendered from the snapshots stored at issue time, so the document reads as it was issued.
+     */
+    public static function pdfFile(array $invoice): ?string
+    {
+        $abs = self::pdfAbsolutePath($invoice);
+        if (is_file($abs)) return $abs;
+        try {
+            return self::regeneratePdf((int)$invoice['id']);
+        } catch (\Throwable $e) {
+            Logger::phpLog("Invoice #{$invoice['id']} PDF could not be re-rendered: " . $e->getMessage());
+            return null;
+        }
     }
 
     /**
@@ -1251,6 +1267,24 @@ final class InvoiceService
         return array_key_first($stores['stores'] ?? []) ?? 'sk';
     }
 
+    /**
+     * Payment method as the document prints it: the label the customer chose at checkout (the order's payment
+     * snapshot, in the order's language), never the internal code ('stripe', 'manual', 'free') that
+     * invoices.payment_method stores. See PaymentService::orderLabel().
+     */
+    public static function paymentText(array $invoice, string $locale): string
+    {
+        $stored = (string)($invoice['payment_method'] ?? '');
+        $stmt = Db::get()->prepare('SELECT * FROM orders WHERE id = :id');
+        $stmt->execute([':id' => (int)($invoice['order_id'] ?? 0)]);
+        $order = $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
+        $code = (string)($order['payment_method'] ?? '');
+        // A stored value other than the order's code is already a label (written by hand or by a later version).
+        if ($order === null || ($stored !== '' && $stored !== $code)) return $stored !== '' ? $stored : '—';
+        $label = PaymentService::orderLabel($order, $locale);
+        return $label !== '' ? $label : '—';
+    }
+
     private static function resolveLocale(array $order, array $store): string
     {
         return (string)($order['locale'] ?? $store['default_locale'] ?? 'en');
@@ -1462,7 +1496,41 @@ final class InvoiceService
             // in a dedicated renderer file shipped alongside vendor/mpdf.
             // For v1 we fall through to MinimalPdf even if mPDF is present.
         }
+        $currency = (string)$invoice['currency'];
+        $rates = $vatBreakdown['rates'] ?? [];
+        if (!empty($rates)) {
+            $gross = array_map(static fn(array $info): int => (int)$info['net'] + (int)$info['vat'], $rates);
+            $net = self::displayAmounts(array_map(static fn(array $info): int => (int)$info['net'], $rates), $currency);
+            $gross = self::displayAmounts($gross, $currency);
+            foreach ($rates as $key => $info) $rates[$key] = ['net' => $net[$key], 'vat' => $gross[$key] - $net[$key]] + $info;
+            $vatBreakdown['rates'] = $rates;
+        }
+        $lineNet = self::displayAmounts(array_map(static fn(array $row): int => (int)$row['net'], $rows), $currency);
+        $lineGross = self::displayAmounts(array_map(static fn(array $row): int => (int)$row['gross'], $rows), $currency);
+        foreach ($rows as $i => $row) $rows[$i] = ['net' => $lineNet[$i], 'gross' => $lineGross[$i]] + $row;
         return self::renderMinimalPdf($invoice, $rows, $sellerSnap, $customerSnap, $vatBreakdown);
+    }
+
+    /**
+     * Amounts as the document shows them. A currency without minor units (CZK, HUF) prints every line in whole
+     * units; rounding each line on its own left the lines 1 Kč/Ft off the total printed below them. The lines are
+     * rounded cumulatively instead (each takes the change of the rounded running sum), so they always add up to
+     * the rounded total. Amounts of a two-decimal currency are returned unchanged.
+     * @param array<array-key, int> $amounts
+     * @return array<array-key, int>
+     */
+    public static function displayAmounts(array $amounts, string $currency): array
+    {
+        if (Money::decimals($currency) === 2) return $amounts;
+        $running = 0;
+        $shown = 0;
+        foreach ($amounts as $key => $amount) {
+            $running += $amount;
+            $rounded = Money::round($running, $currency);
+            $amounts[$key] = $rounded - $shown;
+            $shown = $rounded;
+        }
+        return $amounts;
     }
 
     /** Country whose national VAT act the exemption wording of a document language cites. */
@@ -1578,7 +1646,9 @@ final class InvoiceService
         $pdf->text(120, $y, $L['total_net'] . ': ' . I18n::price((int)$invoice['total_net'], $currency),
             ['size' => 9, 'align' => 'right', 'width' => 70]);
         $y += 5;
-        $pdf->text(120, $y, $L['total_vat'] . ': ' . I18n::price((int)$invoice['total_vat'], $currency),
+        // Net and gross print rounded (whole units for CZK/HUF); the VAT shown is their difference so the three add up.
+        $shownVat = Money::round((int)$invoice['total_gross'], $currency) - Money::round((int)$invoice['total_net'], $currency);
+        $pdf->text(120, $y, $L['total_vat'] . ': ' . I18n::price($shownVat, $currency),
             ['size' => 9, 'align' => 'right', 'width' => 70]);
         $y += 5;
         $pdf->text(120, $y, ($creditNote ? $L['credit_total'] : $L['total_gross']) . ': ' . I18n::price((int)$invoice['total_gross'], $currency),
@@ -1613,7 +1683,7 @@ final class InvoiceService
 
         // Payment info
         $ensureSpace(15);
-        $pdf->text(20, $y, $L['payment_method'] . ': ' . ($invoice['payment_method'] ?: '—'), ['size' => 9]);
+        $pdf->text(20, $y, $L['payment_method'] . ': ' . self::paymentText($invoice, $locale), ['size' => 9]);
         $y += 5;
         // A credit note is paid out by the seller: no seller IBAN to pay to. An invoice carries the variable
         // symbol of the order's payment instructions, so a transfer made from either matches the same order.

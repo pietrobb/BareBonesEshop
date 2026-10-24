@@ -45,15 +45,31 @@ class Withdrawal {
     public static function withinPeriod(array $order, ?int $now = null): bool {
         $days = max(self::PERIOD_DAYS, (int)(Security::config()['rma_return_window_days'] ?? self::PERIOD_DAYS));
         $now ??= time();
-        $deliveredAt = (string)($order['delivered_at'] ?? '');
-        $start = $deliveredAt !== '' ? strtotime($deliveredAt . ' UTC') : (self::digitalOnly($order) ? self::orderedAt($order) : false);
+        $start = self::receivedAt($order);
+        if ($start === false && self::digitalOnly($order)) $start = self::orderedAt($order);
         if ($start !== false) return $now <= $start + $days * 86400;
+        return self::withinUndatedLimit($order, $days, $now);
+    }
+
+    /** Art. 10(1): a period not properly disclosed ends 12 months after the original one at the latest. */
+    public const MAX_EXTENSION_DAYS = 365;
+
+    /** Without a delivery date: open until $days + 12 months after the order (art. 10), never indefinitely. */
+    public static function withinUndatedLimit(array $order, int $days, int $now): bool {
         $ordered = self::orderedAt($order);
         return $ordered === false || $now <= $ordered + ($days + self::MAX_EXTENSION_DAYS) * 86400;
     }
 
-    /** Art. 10(1): a period not properly disclosed ends 12 months after the original one at the latest. */
-    private const MAX_EXTENSION_DAYS = 365;
+    /** Unix time the goods reached the consumer: the order's delivered_at, else the latest carrier-reported delivery; false when unknown. */
+    public static function receivedAt(array $order): int|false {
+        $deliveredAt = (string)($order['delivered_at'] ?? '');
+        if ($deliveredAt === '' && (int)($order['id'] ?? 0) > 0) {
+            $stmt = Db::get()->prepare('SELECT MAX(delivered_at) FROM shipments WHERE order_id = ?');
+            $stmt->execute([(int)$order['id']]);
+            $deliveredAt = (string)($stmt->fetchColumn() ?: '');
+        }
+        return $deliveredAt === '' ? false : strtotime($deliveredAt . ' UTC');
+    }
 
     /** Unix time the order (the distance contract) was placed, or false when unknown. */
     public static function orderedAt(array $order): int|false {

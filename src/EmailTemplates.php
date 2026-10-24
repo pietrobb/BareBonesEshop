@@ -163,10 +163,10 @@ class EmailTemplates {
 
     /**
      * Variables carrying a one-time token (password reset, e-mail verification, unsubscribe, cart restore,
-     * download link): they may only be a whole link (href="{{x}}") or stand alone in the text, never part
-     * of another URL or attribute (an image or link that would send the token to a foreign server).
+     * download link, the invoice link with its token): they may only be a whole link (href="{{x}}") or stand alone
+     * in the text, never part of another URL or attribute (an image or link that would send the token to a foreign server).
      */
-    public const SECRET_VARIABLES = ['reset_url', 'verify_url', 'unsubscribe_url', 'cart_url', 'url'];
+    public const SECRET_VARIABLES = ['reset_url', 'verify_url', 'unsubscribe_url', 'cart_url', 'url', 'invoice_download_url'];
 
     /** Secret variables used anywhere else than as a whole href or a stand-alone text value. */
     public static function secretLeaks(string $subject, string $html, string $text): array {

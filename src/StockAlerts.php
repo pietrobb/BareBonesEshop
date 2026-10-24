@@ -158,14 +158,6 @@ class StockAlerts {
         return self::fetchRows($sql, $params);
     }
 
-    /** Number of tracked SKUs at or below `low` (counted in SQL). */
-    public static function belowLowCount(): int {
-        [$sql, $params] = self::trackedSql(null, true);
-        $stmt = Db::get()->prepare("SELECT COUNT(*) FROM ({$sql}) r WHERE r.alert_rank > 0");
-        $stmt->execute($params);
-        return (int)$stmt->fetchColumn();
-    }
-
     /** Dashboard summary with the same thresholds the e-mails use. */
     public static function summary(int $limit = 20): array {
         // One query: the window count is taken over all low rows before the LIMIT.

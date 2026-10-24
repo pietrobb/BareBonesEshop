@@ -84,7 +84,7 @@ foreach (['db_sqlite_path', 'private_cache_dir', 'jobs_dir', 'invoice_storage_di
 }
 $securitySource = (string)file_get_contents(TEST_CLI_DIR . '/../src/Security.php');
 assert_true(str_contains($securitySource, "['private_cache_dir']"), 'Security: private cache is configurable');
-assert_true(str_contains($securitySource, 'self::privateCacheDir($cfg)') && substr_count($securitySource, 'new AdminLoginThrottle(self::rateDb())') === 2, 'Security: rate-limit DB and admin login throttle use validated private cache');
+assert_true(str_contains($securitySource, 'self::privateCacheDir($cfg)') && substr_count($securitySource, 'new AdminLoginThrottle(self::rateDb())') === 1 && str_contains($securitySource, 'self::reserveAdminLogin('), 'Security: rate-limit DB and admin login throttle use validated private cache');
 assert_true(!str_contains($securitySource, "['cache_dir'] ?? __DIR__ . '/../cache'"), 'Security: public catalog cache is not used for abuse-control state');
 
 // ============================================================
@@ -839,16 +839,15 @@ assert_equals('Schwarz', $blackDe, 'Color "black" translated to DE');
 // ============================================================
 echo "\n--- Test 6: Slug Uniqueness ---\n";
 
-$isValid = Import::validateSlug('cierne-tricko-classic', 'sk', 'product', $tshirt['id']);
-assert_true($isValid, 'Own slug is valid for same entity');
-
-// Try to register same slug for different entity
-$isValid = Import::validateSlug('cierne-tricko-classic', 'sk', 'product', 99999);
-assert_true(!$isValid, 'Duplicate slug detected for different entity');
-
-// Different locale is OK
-$isValid = Import::validateSlug('cierne-tricko-classic', 'en', 'product', 99999);
-assert_true($isValid, 'Same slug in different locale is valid');
+// The importer's registerSlug() refuses a slug another entity holds in the same locale.
+$slugRefused = static function (string $locale, int $entityId): bool {
+    try { Import::registerSlug('cierne-tricko-classic', $locale, 'product', $entityId); return false; }
+    catch (RuntimeException $e) { return true; }
+};
+assert_true(!$slugRefused('sk', (int)$tshirt['id']), 'Own slug is valid for same entity');
+assert_true($slugRefused('sk', 99999), 'Duplicate slug detected for different entity');
+assert_true(!$slugRefused('en', 99999), 'Same slug in different locale is valid');
+Db::get()->exec("DELETE FROM slug_registry WHERE entity = 'product' AND entity_id = 99999");
 
 // ============================================================
 // TEST 7: UPSERT (re-import same CSV)
@@ -900,7 +899,7 @@ $accountThemeSource = file_get_contents(TEST_CLI_DIR . '/../themes/default/block
 assert_true(str_contains($accountThemeSource, 'name="register_token"'), 'Account register form includes form-trap token');
 assert_true(!str_contains($accountSource, 'HTTP_HOST'), 'G3: password reset URL does not trust the Host header');
 assert_true(str_contains($accountThemeSource, 'name="company_website"'), 'Account register form includes hidden honeypot field');
-assert_true(str_contains($accountSource, "'account_login_account_' . \$emailKey, 10, 900)"), 'G4/A07.3: login throttles per account and client IP (no lockout DoS)');
+assert_true(str_contains($accountSource, "'account_login_account_' . \$emailKey, 10, 900, true, true)"), 'G4/A07.3: login throttles per account and client IP (no lockout DoS)');
 assert_true(str_contains($accountSource, 'Customers::forgotPassword(') && str_contains((string)file_get_contents(TEST_CLI_DIR . '/../src/Customers.php'), "'account_forgot_recipient_'"),
     'G4: password reset has a per-recipient throttle independent of IP');
 assert_true(str_contains($accountSource, "account.err_invalid_credentials"), 'G4: login returns a generic credential error');

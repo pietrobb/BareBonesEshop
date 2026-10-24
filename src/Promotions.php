@@ -16,11 +16,6 @@ class Promotions {
         );
     }
 
-    /** Active catalog rules for one request-scoped enrichment context. */
-    public static function catalogRules(?string $at = null): array {
-        return self::activeRules('catalog', $at);
-    }
-
     /**
      * Running catalog rules and, from the same query, those whose time window ended in the year before $at: the prices
      * the ended ones charged still count for the Omnibus prior price of a reduction that starts within 30 days after
