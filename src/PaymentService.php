@@ -79,6 +79,8 @@ class PaymentService {
         $ownPrices = StoreContext::current()->usesProviderPrices($currency);
         $businessBuyer = Customers::isBusinessBuyer($customerId);
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            // An online method whose gateway has no credentials cannot start a payment: not offered (the doctor reports it).
+            if ((int)($row['requires_online'] ?? 0) === 1 && !PaymentReadiness::canTakePayments((string)($row['provider'] ?? ''), Security::config())) continue;
             if (!$businessBuyer && in_array((string)($row['service_type'] ?? ''), self::NO_CONSUMER_SURCHARGE, true)) {
                 $row['fixed_fee'] = 0;
                 $row['percent_fee_bps'] = 0;

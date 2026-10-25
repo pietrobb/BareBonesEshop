@@ -54,6 +54,15 @@ final class PaymentReadiness
         return $checks;
     }
 
+    /**
+     * Whether checkout may offer an online method of $provider: false for a shipped gateway missing its credentials
+     * (a fresh install's card method without Stripe keys), so the buyer is never sent into a payment that cannot start.
+     * Providers whose credentials are not known here (extensions, configured adapters, mock) are offered.
+     */
+    public static function canTakePayments(string $provider, array $config): bool {
+        return !isset(self::CREDENTIALS[$provider]) || self::missingCredentials($provider, $config) === [];
+    }
+
     /** @return list<string> */
     private static function missingCredentials(string $provider, array $config): array {
         $missing = [];
