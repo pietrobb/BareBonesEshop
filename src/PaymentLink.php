@@ -133,6 +133,7 @@ final class PaymentLink {
         return $stmt->fetchColumn() !== false;
     }
 
+    /** @phpstan-impure the second call after a lapsed claim was deleted can succeed */
     private static function claim(PDO $db, int $orderId, string $attempt): bool {
         $claim = $db->prepare(Db::insertIgnore() . " INTO checkout_sessions (order_id, provider, session_id, status) VALUES (:order, 'pay_restart', :attempt, 'completed')");
         $claim->execute([':order' => $orderId, ':attempt' => $attempt]);
