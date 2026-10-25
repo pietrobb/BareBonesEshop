@@ -43,9 +43,12 @@ class AuditLog {
 
     private static function currentActor(): string {
         if (php_sapi_name() === 'cli') return 'cli:' . basename($_SERVER['SCRIPT_NAME'] ?? 'unknown');
-        if (!empty($_SESSION['admin_user'])) return 'admin:' . Security::adminUser();
-        if (!empty($_SERVER['PHP_AUTH_USER'])) return 'admin:' . $_SERVER['PHP_AUTH_USER'];
-        if (!empty($_SERVER['HTTP_X_WEBHOOK_SOURCE'])) return 'webhook:' . $_SERVER['HTTP_X_WEBHOOK_SOURCE'];
+        return self::requestActor();
+    }
+
+    /** Actor of a web request: only a verified admin session counts, request headers can be forged. */
+    private static function requestActor(): string {
+        if (!empty($_SESSION['admin_authenticated']) && !empty($_SESSION['admin_user'])) return 'admin:' . Security::adminUser();
         return 'system';
     }
 }

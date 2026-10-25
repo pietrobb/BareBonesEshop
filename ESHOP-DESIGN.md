@@ -3567,8 +3567,8 @@ class AuditLog {
 
     private static function currentActor(): string {
         if (php_sapi_name() === 'cli') return 'cron:' . basename($_SERVER['SCRIPT_NAME']);
-        if (!empty($_SERVER['PHP_AUTH_USER'])) return 'admin:' . $_SERVER['PHP_AUTH_USER'];
-        if (!empty($_SERVER['HTTP_X_WEBHOOK_SOURCE'])) return 'webhook:' . $_SERVER['HTTP_X_WEBHOOK_SOURCE'];
+        // Only a verified admin session names the actor; request headers can be forged.
+        if (!empty($_SESSION['admin_authenticated']) && !empty($_SESSION['admin_user'])) return 'admin:' . $_SESSION['admin_user'];
         return 'system';
     }
 }

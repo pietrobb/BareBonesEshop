@@ -172,6 +172,26 @@ try {
         if ($r10sPrevAddr === null) unset($_SERVER['REMOTE_ADDR']); else $_SERVER['REMOTE_ADDR'] = $r10sPrevAddr;
         http_response_code(200);
     }
+
+    // A12: the audit log took its actor from request headers (PHP_AUTH_USER, X-Webhook-Source): anyone could forge it.
+    $r10sPrevSession = $_SESSION ?? [];
+    $r10sPrevServer = $_SERVER;
+    try {
+        $r10sActor = static fn(): string => (string)(new ReflectionMethod(AuditLog::class, 'requestActor'))->invoke(null);
+        $_SESSION = [];
+        $_SERVER['PHP_AUTH_USER'] = 'r10-forged-owner';
+        $_SERVER['HTTP_X_WEBHOOK_SOURCE'] = 'r10-forged-webhook';
+        assert_equals('system', $r10sActor(), 'R10 A12: forged PHP_AUTH_USER / X-Webhook-Source headers do not become the audit actor');
+        $_SESSION = ['admin_user' => 'r10-unverified'];
+        assert_equals('system', $r10sActor(), 'R10 A12: an admin_user without an authenticated admin session is not the audit actor');
+        $_SESSION = ['admin_authenticated' => true, 'admin_user' => 'r10-verified'];
+        assert_equals('admin:r10-verified', $r10sActor(), 'R10 A12: the verified admin session is the audit actor');
+    } catch (ReflectionException $e) {
+        assert_true(false, 'R10 A12: AuditLog has a request actor derived from the verified session (' . $e->getMessage() . ')');
+    } finally {
+        $_SESSION = $r10sPrevSession;
+        $_SERVER = $r10sPrevServer;
+    }
 } finally {
     $r10sTree = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($r10sRoot, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
     foreach ($r10sTree as $r10sPath) $r10sPath->isDir() ? @rmdir($r10sPath->getPathname()) : @unlink($r10sPath->getPathname());
