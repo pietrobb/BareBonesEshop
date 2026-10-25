@@ -98,7 +98,10 @@ if ($mode === 'admin') {
 }
 if ($mode === 'legacy_admin') {
     // Admin login against the config.php password (no DB accounts) must also replace the session ID.
-    Db::init(new PDO('sqlite::memory:'), 'sqlite');
+    // A migrated shop without accounts: a database lacking admin_accounts fails closed instead (r10 M1).
+    $memory = new PDO('sqlite::memory:');
+    $memory->exec('CREATE TABLE admin_accounts (id INTEGER PRIMARY KEY)');
+    Db::init($memory, 'sqlite');
     (new ReflectionProperty(Security::class, 'cfg'))->setValue(null, ['admin_user' => $email,
         'admin_password' => password_hash($password, PASSWORD_BCRYPT, ['cost' => 4])] + (require $root . '/config.php'));
     Security::sessionStart();

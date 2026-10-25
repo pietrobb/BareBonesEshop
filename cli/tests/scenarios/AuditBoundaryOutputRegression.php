@@ -77,6 +77,15 @@ $a103ForeignId = (int)$a103Db->lastInsertId();
 $a103Root = test_fixture_path('a103-admin');
 mkdir($a103Root);
 mkdir($a103Root . '/sessions');
+// Real DB identities: a legacy config session ends once the database holds an account (r10 M1).
+putenv('BBE_ADMIN_IDENTITY_KEY=' . base64_encode(str_repeat('B', 32)));
+$a103Tokens = [];
+foreach (['owner', 'manager', 'editor', 'fulfillment'] as $a103Role) {
+    AdminIdentity::grantStore(AdminIdentity::create('a103-' . $a103Role, 'A103-password-' . $a103Role, $a103Role, false), $a103Store, ['*']);
+    $a103Tokens[$a103Role] = (string)(AdminIdentity::authenticate('a103-' . $a103Role, 'A103-password-' . $a103Role, '', '127.0.10.3', 'A103')['token'] ?? '');
+}
+putenv('BBE_ADMIN_IDENTITY_KEY');
+file_put_contents($a103Root . '/tokens.json', json_encode($a103Tokens));
 file_put_contents($a103Root . '/admin.php', <<<'PHP'
 <?php
 [, $root, $dbPath, $dir, $storage, $role, $method, $getJson, $postJson] = $argv;
@@ -91,7 +100,7 @@ ini_set('session.use_cookies', '0');
 session_save_path($dir . '/sessions');
 session_start();
 $_SESSION = ['csrf_token' => 'a103', 'admin_user' => 'a103-' . $role, 'admin_role' => $role,
-    'admin_authenticated' => true, 'admin_last_seen' => time()];
+    'admin_identity_token' => json_decode(file_get_contents($dir . '/tokens.json'), true)[$role]];
 $_SERVER['REQUEST_METHOD'] = $method;
 $_SERVER['REMOTE_ADDR'] = '127.0.10.3';
 $_GET = json_decode($getJson, true);
