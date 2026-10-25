@@ -25,7 +25,7 @@ final class ManualOrder {
                 continue;
             }
             $sku = $m[1];
-            $qty = isset($m[2]) && $m[2] !== '' ? (int)$m[2] : 1;
+            $qty = isset($m[2]) ? (int)$m[2] : 1; // an unmatched trailing group is absent from $m
             $resolved = self::resolveSku($sku);
             if ($resolved === null || $qty < 1 || $qty > Cart::MAX_QTY) {
                 $errors[] = $sku;
