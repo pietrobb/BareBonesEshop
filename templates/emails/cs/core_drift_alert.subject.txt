@@ -1,0 +1,1 @@
+Jádro BareBones se změnilo na {{host}}

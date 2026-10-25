@@ -15,7 +15,7 @@ class Customers {
     private const MAX_ACTIVE_RESET_TOKENS = 5;
     private const EMAIL_VERIFY_TTL_SECONDS = 86400; // 24 hours
     private const SESSION_IDLE_TTL_SECONDS = 1800;
-    private const MIN_PASSWORD_LEN = 8;
+    public const MIN_PASSWORD_LEN = 8;
     private const SESSION_AUTH_KEYS = ['customer_id', 'customer_email', 'customer_auth_hash', 'customer_last_seen'];
     // Unknown e-mails are verified against this precomputed hash (of a discarded random secret) at
     // BCRYPT_COST, so the miss path costs one password_verify like a real account and never a password_hash().

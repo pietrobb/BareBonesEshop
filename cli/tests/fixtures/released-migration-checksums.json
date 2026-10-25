@@ -510,5 +510,13 @@
         "crlf": [
             "6af97accef0c6efce6957d5953eafb831b8382cbda9a46fd48f97467ff62e153"
         ]
+    },
+    "20261025120000_back_in_stock_requests": {
+        "lf": [
+            "93b9ce6d3ca9eab74e2cd6ca50c4e8fc2a211d0216702dba5e64ac702799cd48"
+        ],
+        "crlf": [
+            "f5b458ca2feea38c03eed2b7ad55a7a55b5f45c291a58e5806a3e91b2a613e53"
+        ]
     }
 }

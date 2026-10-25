@@ -3,6 +3,7 @@
 require_once __DIR__ . '/CatalogEditor.php';
 require_once __DIR__ . '/Taxonomy.php';
 require_once __DIR__ . '/PricingRules.php';
+require_once __DIR__ . '/RichText.php';
 /** The one escaping helper the catalog editors' nonce'd inline scripts (product and attribute forms) build markup with. */
 const ADMIN_JS_ESC_HTML = "function escHtml(s) { return String(s ?? '').replace(/[&<>\"']/g, function (c) { return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;'}[c]; }); }";
 function pageProducts(): void {
@@ -48,7 +49,7 @@ function pageProducts(): void {
     <h1><?= esc(I18n::t('admin.title.products')) ?> <span class="muted">(<?= $total ?>)</span></h1>
     <?php if (Security::adminCan('products.edit')): ?><p style="margin-bottom:1rem"><a href="admin.php?p=product" class="btn btn-primary" data-new-product><?= esc(I18n::t('admin.title.product_new')) ?></a></p><?php endif; ?>
     <div class="card">
-        <form method="get" style="display:flex;gap:.5rem;margin-bottom:1rem">
+        <form method="get" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem">
             <input type="hidden" name="p" value="products">
             <input name="q" aria-label="<?= esc(I18n::t('admin.products.search_placeholder')) ?>" value="<?= esc($search) ?>" placeholder="<?= esc(I18n::t('admin.products.search_placeholder')) ?>">
             <select name="status" aria-label="<?= esc(I18n::t('admin.th.status')) ?>">
@@ -62,7 +63,7 @@ function pageProducts(): void {
         </form>
         <form method="post" action="admin.php?p=products&action=bulk" id="bulk-form" data-confirm="<?= esc(I18n::t('admin.products.bulk.confirm')) ?>">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-            <div style="display:flex;gap:.5rem;margin-bottom:.5rem">
+            <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.5rem">
                 <select name="bulk_action" aria-label="<?= esc(I18n::t('admin.products.bulk_action')) ?>">
                     <option value="">— <?= esc(I18n::t('admin.products.bulk_action')) ?> —</option>
                     <option value="activate"><?= esc(I18n::t('admin.common.activate')) ?></option>
@@ -224,6 +225,7 @@ function pageProduct(): void {
     }
     ?>
     <h1><?= $product ? esc(strtr(I18n::t('admin.common.edit_named'), ['{name}' => $product['name']])) : esc(I18n::t('admin.title.product_new')) ?></h1>
+    <?php if ($product): ?><form method="post" action="admin.php?p=product&amp;id=<?= (int)$product['id'] ?>&amp;action=duplicate"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.product.duplicate')) ?></button></form><?php endif; ?>
     <div class="card">
         <?php ob_start(); ?>
         <?= productEditorExtrasHtml($categories, $product) ?>
@@ -266,6 +268,7 @@ function pageProduct(): void {
         $attrSection = (string)ob_get_clean();
         echo AdminForm::render('admin-product', 'admin.php?p=product&action=save' . ($product ? '&id=' . (int)$product['id'] : ''),
             adminFormValues('admin-product', $product ?: null), $attrSection);
+        echo adminRichTextScript();
         ?>
 
         <?php if ($product): ?>
@@ -593,6 +596,7 @@ function pageCmsEdit(): void {
     <div class="card">
         <?php
         echo AdminForm::render('admin-page', 'admin.php?p=page_edit&action=save' . ($id ? '&id=' . $id : ''), adminFormValues('admin-page', $pg ?: null));
+        echo adminRichTextScript();
         ?>
         <?php if ($id): ?>
         <div style="margin-top:1rem"><a href="admin.php?p=pages" class="btn"><?= esc(I18n::t('admin.btn.back')) ?></a></div>
@@ -813,6 +817,17 @@ function handleProductRelatedSave(): void {
 
     setFlash('ok', I18n::t('admin.product.related_saved'));
     header("Location: admin.php?p=product&id={$id}&relation_type=" . rawurlencode($relationType));
+    exit;
+}
+function handleProductDuplicate(): void {
+    $id = Security::int($_GET['id'] ?? 0);
+    if ($id <= 0 || !Products::byId($id)) {
+        header('Location: admin.php?p=products');
+        exit;
+    }
+    $copyId = ProductDuplicator::duplicate($id);
+    setFlash('ok', I18n::t('admin.product.duplicated'));
+    header("Location: admin.php?p=product&id={$copyId}");
     exit;
 }
 function handleProductSave(): void {
@@ -1110,7 +1125,7 @@ function pageAttribute(): void {
             <h3 style="margin:1rem 0 .5rem"><?= esc(I18n::t('admin.attr.values')) ?></h3>
             <div id="options-list">
                 <?php foreach ($options as $i => $opt): ?>
-                <div class="form-row" style="display:flex;gap:.5rem;align-items:center">
+                <div class="form-row" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center">
                     <input name="options[]" aria-label="<?= esc(I18n::t('admin.attr.value')) ?>" value="<?= esc($opt['value']) ?>" style="flex:1" placeholder="<?= esc(I18n::t('admin.attr.value')) ?>">
                     <input type="number" name="option_order[]" aria-label="<?= esc(I18n::t('admin.common.sort_order')) ?>" value="<?= (int)$opt['sort_order'] ?>" style="width:60px" placeholder="<?= esc(I18n::t('admin.common.sort_order')) ?>">
                     <button type="button" data-action="remove-parent" class="btn btn-sm btn-danger">x</button>

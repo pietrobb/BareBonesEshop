@@ -33,11 +33,11 @@ function pageAdminUsers(): void {
             <tr>
                 <td><?= esc((string)$a['username']) ?></td>
                 <td><?= esc((string)$a['role']) ?></td>
-                <td><span class="badge badge-<?= $a['status'] === 'active' ? 'active' : 'draft' ?>"><?= esc((string)$a['status']) ?></span></td>
+                <td><span class="badge badge-<?= $a['status'] === 'active' ? 'active' : 'draft' ?>"><?= esc(adminCodeLabel('admin.user.status.', (string)$a['status'])) ?></span></td>
                 <td><?= !empty($a['mfa_required']) ? '✓' : '—' ?></td>
                 <td class="muted"><?= esc(substr((string)($a['last_login_at'] ?? ''), 0, 16)) ?></td>
                 <td>
-                    <form method="post" action="admin.php?p=admin_users&amp;action=grant" style="display:flex;gap:.25rem">
+                    <form method="post" action="admin.php?p=admin_users&amp;action=grant" style="display:flex;flex-wrap:wrap;gap:.25rem">
                         <input type="hidden" name="csrf_token" value="<?= esc($csrf) ?>"><input type="hidden" name="account_id" value="<?= $id ?>">
                         <input name="permissions" value="<?= esc(implode(',', adminUsersStoreGrant($id, $storeId))) ?>" aria-label="<?= esc(I18n::t('admin.users.store_permissions')) ?>">
                         <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.users.save')) ?></button>
@@ -57,7 +57,7 @@ function pageAdminUsers(): void {
                         <input type="hidden" name="csrf_token" value="<?= esc($csrf) ?>"><input type="hidden" name="account_id" value="<?= $id ?>">
                         <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.users.revoke_sessions')) ?></button>
                     </form>
-                    <form method="post" action="admin.php?p=admin_users&amp;action=password" style="display:flex;gap:.25rem">
+                    <form method="post" action="admin.php?p=admin_users&amp;action=password" style="display:flex;flex-wrap:wrap;gap:.25rem">
                         <input type="hidden" name="csrf_token" value="<?= esc($csrf) ?>"><input type="hidden" name="account_id" value="<?= $id ?>"><?= $currentPassword ?>
                         <input type="password" name="password" minlength="12" autocomplete="new-password" required aria-label="<?= esc(I18n::t('admin.users.password')) ?>">
                         <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.users.reset_password')) ?></button>

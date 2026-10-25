@@ -79,6 +79,7 @@ $shell = [
     'cookies_url' => Template::storeUrl('/?page=cookies'),
     'withdrawal_url' => Template::storeUrl('/?page=withdrawal'),
     'complaint_url' => Template::storeUrl('/?page=complaint'),
+    'order_status_url' => Template::storeUrl('/?page=order-status'),
     'accessibility_url' => Template::storeUrl('/?page=accessibility'),
     'imprint_url' => Template::storeUrl('/?page=imprint'),
     'cookie_settings_url' => Template::storeUrl('/?cookie_settings=1'),

@@ -20,7 +20,7 @@ function pageCustomers(): void {
     ?>
     <h1><?= esc(I18n::t('admin.title.customers')) ?> <span class="muted">(<?= $total ?>)</span></h1>
     <div class="card">
-        <form method="get" action="admin.php" style="display:flex;gap:.5rem;align-items:center;margin-bottom:1rem">
+        <form method="get" action="admin.php" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-bottom:1rem">
             <input type="hidden" name="p" value="customers">
             <input type="text" name="q" aria-label="<?= esc(I18n::t('admin.customers.search_placeholder')) ?>" value="<?= esc($q) ?>" placeholder="<?= esc(I18n::t('admin.customers.search_placeholder')) ?>" style="min-width:280px">
             <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.btn.search')) ?></button>
@@ -36,7 +36,7 @@ function pageCustomers(): void {
                 <td><?= (int)$c['id'] ?></td>
                 <td><?= esc($c['email']) ?></td>
                 <td><?= esc($c['name'] ?? '') ?></td>
-                <td><span class="badge badge-<?= ($c['status'] ?? '')==='active'?'active':'draft' ?>"><?= esc($c['status'] ?? '') ?></span></td>
+                <td><span class="badge badge-<?= ($c['status'] ?? '')==='active'?'active':'draft' ?>"><?= esc(adminCodeLabel('admin.customer.status.', (string)($c['status'] ?? ''))) ?></span></td>
                 <td><?= (int)($counts[(int)$c['id']] ?? 0) ?></td>
                 <td class="muted"><?= esc(substr((string)$c['created_at'], 0, 16)) ?></td>
                 <td><a class="btn btn-sm" href="admin.php?p=customer&id=<?= (int)$c['id'] ?>"><?= esc(I18n::t('admin.sales.detail')) ?></a></td>
@@ -132,7 +132,7 @@ function pageCustomerDetail(): void {
             <?php foreach ($orders as $o): ?>
             <tr>
                 <td><?= esc($o['order_number']) ?></td>
-                <td><span class="badge badge-<?= esc($o['status']) ?>"><?= esc($o['status']) ?></span></td>
+                <td><span class="badge badge-<?= esc($o['status']) ?>"><?= esc(OrderStatusLabels::order((string)$o['status'])) ?></span></td>
                 <td><?= esc(I18n::price((int)$o['total'], $o['currency'])) ?></td>
                 <td class="muted"><?= esc(substr((string)$o['created_at'], 0, 16)) ?></td>
                 <td><a class="btn btn-sm" href="admin.php?p=order&id=<?= (int)$o['id'] ?>"><?= esc(I18n::t('admin.sales.detail')) ?></a></td>
@@ -153,7 +153,7 @@ function pageCustomerDetail(): void {
             <tr>
                 <td><?= esc($r['rma_number']) ?></td>
                 <td>#<?= (int)$r['order_id'] ?></td>
-                <td><span class="badge badge-<?= esc($r['status']) ?>"><?= esc($r['status']) ?></span></td>
+                <td><span class="badge badge-<?= esc($r['status']) ?>"><?= esc(adminCodeLabel('admin.rma.status.', (string)$r['status'])) ?></span></td>
                 <td class="muted"><?= esc(substr((string)$r['created_at'], 0, 16)) ?></td>
                 <td><a class="btn btn-sm" href="admin.php?p=rma&status=<?= esc($r['status']) ?>"><?= esc(I18n::t('admin.customers.rma_queue')) ?></a></td>
             </tr>
@@ -189,7 +189,7 @@ function pageGdpr(): void {
     </div>
     <div class="card">
         <h3><?= esc(I18n::t('admin.gdpr.search_title')) ?></h3>
-        <form method="get" action="admin.php" style="display:flex;gap:.5rem;align-items:center;margin-bottom:1rem">
+        <form method="get" action="admin.php" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-bottom:1rem">
             <input type="hidden" name="p" value="gdpr">
             <input type="email" name="email" value="<?= esc($email) ?>" placeholder="<?= esc(I18n::t('admin.gdpr.email_placeholder')) ?>" style="min-width:280px">
             <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.btn.search')) ?></button>
@@ -202,7 +202,7 @@ function pageGdpr(): void {
                 <td><?= (int)$c['id'] ?></td>
                 <td><?= esc($c['email']) ?></td>
                 <td><?= esc($c['name'] ?? '') ?></td>
-                <td><span class="badge badge-<?= ($c['status'] ?? '') === 'active' ? 'active' : 'draft' ?>"><?= esc($c['status'] ?? '') ?></span></td>
+                <td><span class="badge badge-<?= ($c['status'] ?? '') === 'active' ? 'active' : 'draft' ?>"><?= esc(adminCodeLabel('admin.customer.status.', (string)($c['status'] ?? ''))) ?></span></td>
                 <td>
                     <form method="post" action="admin.php?p=gdpr&action=export" style="display:inline">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">

@@ -19,7 +19,7 @@
   "performance_budgets": {
     "css_bytes": 153600,
     "js_bytes": 102400,
-    "block_bytes": 65536
+    "block_bytes": 81920
   },
   "quality": {
     "wcag": "2.2 AA",

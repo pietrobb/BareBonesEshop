@@ -29,97 +29,12 @@ class Orders {
         foreach ([$orderCurrency, ...array_map(static fn(array $item): string => (string)($item['currency'] ?? $orderCurrency), $cartItems)] as $currency) {
             if (!Pricing::soldInStore($currency)) throw new OrderRejectedException("Not priced in the store currency: {$currency}");
         }
-        $sqliteLock = null;
-        if (Db::isSqlite()) {
-            $database = $db->query('PRAGMA database_list')->fetch(PDO::FETCH_ASSOC);
-            $databasePath = (string)($database['file'] ?? '');
-            $lockPath = $databasePath !== ''
-                ? $databasePath . '.checkout.lock'
-                : sys_get_temp_dir() . '/barebones-checkout-' . getmypid() . '.lock';
-            $sqliteLock = fopen($lockPath, 'c');
-            if ($sqliteLock === false) throw new RuntimeException('Cannot open SQLite checkout lock');
-            $deadline = microtime(true) + 5.0;
-            while (!flock($sqliteLock, LOCK_EX | LOCK_NB)) {
-                if (microtime(true) >= $deadline) {
-                    fclose($sqliteLock);
-                    throw new RuntimeException('Could not acquire SQLite checkout lock within 5 seconds');
-                }
-                usleep(10000);
-            }
-        }
+        $sqliteLock = self::acquireCheckoutLock();
 
         try {
             $db->beginTransaction();
-            $outOfStock = [];
-            $orderItems = [];
-            $subtotal = 0;
-
             // 1. Atomically reserve stock for each item and freeze its exact allocation.
-            foreach ($cartItems as $item) {
-                // Reject non-positive quantity or negative price: a negative qty would
-                // increase stock and lower the subtotal.
-                $requestedQty = (int)($item['qty'] ?? 0);
-                if ($requestedQty <= 0 || (int)($item['price'] ?? 0) < 0) {
-                    $outOfStock[] = ($item['name'] ?? ($item['sku'] ?? 'item'))
-                        . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : '');
-                    continue;
-                }
-                $isDigital = VariantAvailability::isDigitalProduct((int)$item['product_id']);
-                $qty = $isDigital ? 1 : $requestedQty;
-                $inventorySnapshot = [
-                    'allocations' => [], 'bundle_components' => [],
-                    'reserved_qty' => 0, 'backordered_qty' => 0, 'preorder_at' => null,
-                ];
-                if (!$isDigital) {
-                    try {
-                        $inventorySnapshot = Inventory::reserveLine($item, $qty);
-                    } catch (\RuntimeException | \InvalidArgumentException $e) {
-                        if ($e instanceof \PDOException) throw $e;
-                        $outOfStock[] = $item['name'] . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : '');
-                        continue;
-                    }
-                }
-                $total = $item['price'] * $qty;
-                $subtotal += $total;
-
-                // Freeze physical, bundle and personalization facts on the order line.
-                $itemAttrs = $item['attrs'] ?? [];
-                if (!empty($inventorySnapshot['allocations'])) {
-                    $itemAttrs['_inventory_allocations'] = $inventorySnapshot['allocations'];
-                }
-                if (!empty($inventorySnapshot['bundle_components'])) {
-                    $itemAttrs['_bundle_components'] = $inventorySnapshot['bundle_components'];
-                }
-
-                $orderItems[] = [
-                    'product_id' => $item['product_id'],
-                    'variant_id' => $item['variant_id'] ?? null,
-                    'sku'        => $item['sku'],
-                    'name'       => $item['name'] . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : ''),
-                    'quantity'   => $qty,
-                    'reserved_qty' => (int)$inventorySnapshot['reserved_qty'],
-                    'backordered_qty' => (int)$inventorySnapshot['backordered_qty'],
-                    'fulfillment_status' => (int)$inventorySnapshot['backordered_qty'] > 0 ? 'backordered' : 'unfulfilled',
-                    'preorder_at' => $inventorySnapshot['preorder_at'],
-                    'unit_price' => $item['price'],
-                    'total'      => $total,
-                    'attrs'      => json_encode($itemAttrs),
-                    'vat_class'  => $item['vat_class']  ?? 'standard',
-                    'vat_rate'   => isset($item['vat_rate'])   ? (float)$item['vat_rate']   : null,
-                    'vat_amount' => isset($item['vat_amount']) ? (int)$item['vat_amount']   : null,
-                    'net_amount' => isset($item['net_amount']) ? (int)$item['net_amount']   : null,
-                ];
-            }
-
-            if (!empty($outOfStock)) {
-                $db->rollBack();
-                throw new OrderRejectedException('Out of stock: ' . implode(', ', $outOfStock));
-            }
-
-            if (empty($orderItems)) {
-                $db->rollBack();
-                throw new OrderRejectedException('No items in order');
-            }
+            ['items' => $orderItems, 'subtotal' => $subtotal] = self::reserveItems($cartItems);
 
             // 2. Freeze the canonical checkout calculation. New checkout calls must
             // provide this snapshot; direct/legacy callers retain the old path so
@@ -266,35 +181,7 @@ class Orders {
             }
 
             // 4. Insert order items (with per-line VAT snapshot when available)
-            $itemStmt = $db->prepare("
-                INSERT INTO order_items (order_id, product_id, variant_id, sku, name, quantity,
-                    reserved_qty, backordered_qty, fulfillment_status, preorder_at,
-                    unit_price, total, attrs, vat_class, vat_rate, vat_amount, net_amount)
-                VALUES (:oid, :pid, :vid, :sku, :name, :qty,
-                    :reserved_qty, :backordered_qty, :fulfillment_status, :preorder_at,
-                    :price, :total, :attrs, :vclass, :vrate, :vamount, :namount)
-            ");
-            foreach ($orderItems as $oi) {
-                $itemStmt->execute([
-                    ':oid'    => $orderId,
-                    ':pid'    => $oi['product_id'],
-                    ':vid'    => $oi['variant_id'],
-                    ':sku'    => $oi['sku'],
-                    ':name'   => $oi['name'],
-                    ':qty'    => $oi['quantity'],
-                    ':reserved_qty' => $oi['reserved_qty'],
-                    ':backordered_qty' => $oi['backordered_qty'],
-                    ':fulfillment_status' => $oi['fulfillment_status'],
-                    ':preorder_at' => $oi['preorder_at'],
-                    ':price'  => $oi['unit_price'],
-                    ':total'  => $oi['total'],
-                    ':attrs'  => $oi['attrs'],
-                    ':vclass' => $oi['vat_class'],
-                    ':vrate'  => $oi['vat_rate'] ?? 0,
-                    ':vamount'=> $oi['vat_amount'] ?? 0,
-                    ':namount'=> $oi['net_amount'] ?? 0,
-                ]);
-            }
+            self::insertItems($orderId, $orderItems);
 
             // 5. Record coupon use atomically within the order transaction
             // A free-shipping coupon discounts no goods (discount 0) but is still a use against its limits.
@@ -343,10 +230,260 @@ class Orders {
             if ($db->inTransaction()) $db->rollBack();
             throw $e;
         } finally {
-            if (is_resource($sqliteLock)) {
-                flock($sqliteLock, LOCK_UN);
-                fclose($sqliteLock);
+            self::releaseCheckoutLock($sqliteLock);
+        }
+    }
+
+    /**
+     * R10 UX7: replace the lines of a pending, not yet paid order the admin edits. The old reservation is released
+     * first, so $price() (called inside the transaction) sees the units this order held; the new lines are then reserved
+     * the way checkout reserves them and the totals come from the new financial snapshot. $price() returns
+     * ['error' => key] or ['items', 'financial_snapshot', 'shipping_cost', 'payment_fee', 'shipping_weight_g',
+     * 'shipping_rate_snapshot', 'payment_method_snapshot']. Returns null on success, else the refusal key.
+     */
+    public static function replaceItems(int $orderId, callable $price): ?string {
+        $db = Db::get();
+        $sqliteLock = self::acquireCheckoutLock();
+        try {
+            $db->beginTransaction();
+            self::lockWithin($orderId);
+            $order = self::byId($orderId);
+            $refusal = $order === null ? 'admin.order.edit.not_found' : self::editRefusal($order);
+            if ($refusal !== null) {
+                $db->rollBack();
+                return $refusal;
             }
+            $oldItems = self::items($orderId);
+            $touchedSkus = [];
+            foreach ($oldItems as $item) {
+                if (VariantAvailability::isDigitalProduct((int)$item['product_id'])) continue;
+                Inventory::releaseOrderItem($item, $orderId);
+                foreach (Inventory::reservationLines($item) as $line) $touchedSkus[] = (string)$line['sku'];
+            }
+            if ($touchedSkus !== []) Warehouse::syncProductStock(array_values(array_unique($touchedSkus)));
+            $db->prepare("DELETE FROM order_items WHERE order_id = :id")->execute([':id' => $orderId]);
+            $pricing = $price();
+            if (isset($pricing['error'])) {
+                $db->rollBack();
+                return (string)$pricing['error'];
+            }
+            ['items' => $orderItems, 'subtotal' => $subtotal] = self::reserveItems($pricing['items']);
+
+            $snapshot = $pricing['financial_snapshot'];
+            Adapters::tax((string)($snapshot['providers']['tax'] ?? Adapters::defaultProviderCode('tax')))::validateSnapshot($snapshot);
+            self::assertSnapshotItems($snapshot, $orderItems);
+            $totals = $snapshot['totals'];
+            if ((int)$totals['subtotal'] !== $subtotal || (int)$totals['shipping'] !== (int)$pricing['shipping_cost']
+                || (int)$totals['payment_fee'] !== (int)$pricing['payment_fee']
+                || strtolower((string)$snapshot['currency']) !== strtolower((string)$order['currency'])) {
+                throw new \InvalidArgumentException('Financial snapshot does not match the edited order');
+            }
+            $params = [
+                ':subtotal' => $subtotal, ':discount' => (int)$totals['discount'], ':shipping' => (int)$totals['shipping'],
+                ':tax' => (int)$totals['vat'], ':total' => (int)$totals['gross'], ':vattotal' => (int)$totals['vat'],
+                ':nettotal' => (int)$totals['net'], ':vatscen' => (string)$snapshot['scenario'],
+                ':id' => $orderId, ':store' => StoreContext::current()->id(),
+            ];
+            $extra = '';
+            if (self::hasColumn('orders', 'shipping_rate_snapshot')) {
+                $extra .= ', shipping_weight_g = :shipweight, shipping_rate_snapshot = :shipsnapshot';
+                $params += [':shipweight' => (int)$pricing['shipping_weight_g'], ':shipsnapshot' => (string)$pricing['shipping_rate_snapshot']];
+            }
+            if (self::hasColumn('orders', 'payment_method_snapshot')) {
+                $extra .= ', payment_fee = :paymentfee, payment_method_snapshot = :paymentsnapshot';
+                $params += [':paymentfee' => (int)$pricing['payment_fee'], ':paymentsnapshot' => (string)$pricing['payment_method_snapshot']];
+            }
+            if (self::hasColumn('orders', 'financial_snapshot')) {
+                $extra .= ', financial_snapshot = :financialsnapshot';
+                $params[':financialsnapshot'] = json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+            }
+            $db->prepare("UPDATE orders SET subtotal = :subtotal, discount_amount = :discount, shipping_cost = :shipping,
+                    tax_amount = :tax, total = :total, vat_total = :vattotal, net_total = :nettotal, vat_scenario = :vatscen{$extra},
+                    updated_at = " . Db::now() . " WHERE id = :id AND store_id = :store")->execute($params);
+            self::insertItems($orderId, $orderItems);
+            foreach ($orderItems as $item) {
+                foreach (Inventory::reservationLines($item) as $line) $touchedSkus[] = (string)$line['sku'];
+            }
+            Warehouse::syncProductStock(array_values(array_unique($touchedSkus)));
+            // Units the edit gave back go to orders waiting for them.
+            BackorderAllocation::allocate(array_values(array_unique($touchedSkus)));
+
+            $summary = static fn(array $items): array => array_map(static fn(array $i): string => $i['sku'] . ' ×' . $i['quantity'], $items);
+            AuditLog::log('order', $orderId, ['total' => (int)$order['total'], 'items' => $summary($oldItems)],
+                ['total' => (int)$totals['gross'], 'items' => $summary($orderItems)], 'Order items edited by admin');
+            Outbox::record(DomainEvents::STOCK_RESERVED, 'order', $orderId, [
+                'order_id' => $orderId,
+                'items' => array_map(static fn(array $item): array => [
+                    'product_id' => (int)$item['product_id'],
+                    'variant_id' => $item['variant_id'] === null ? null : (int)$item['variant_id'],
+                    'sku' => (string)$item['sku'],
+                    'quantity' => (int)$item['quantity'],
+                ], $orderItems),
+            ]);
+            $db->commit();
+            return null;
+        } catch (OrderRejectedException $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            return 'admin.order.edit.out_of_stock';
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        } finally {
+            self::releaseCheckoutLock($sqliteLock);
+        }
+    }
+
+    /**
+     * Why the admin may not change the lines of $order, or null. Only a pending order nobody has started paying:
+     * no gateway session (it would charge the old amount), no invoice, no coupon (its discount was priced on the old
+     * lines), reservation still held.
+     */
+    public static function editRefusal(array $order): ?string {
+        if ((string)$order['status'] !== 'pending' || !in_array((string)($order['payment_status'] ?? 'pending'), ['pending', 'failed'], true)) {
+            return 'admin.order.edit.not_pending';
+        }
+        if ((int)($order['stock_restored'] ?? 0) === 1) return 'admin.order.edit.not_pending';
+        $orderId = (int)$order['id'];
+        $db = Db::get();
+        $paymentStarted = trim((string)($order['payment_id'] ?? '')) !== '';
+        if (!$paymentStarted) {
+            $stmt = $db->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :id LIMIT 1");
+            $stmt->execute([':id' => $orderId]);
+            $paymentStarted = $stmt->fetchColumn() !== false;
+        }
+        if ($paymentStarted) return 'admin.order.edit.payment_started';
+        if (InvoiceService::byOrderId($orderId) !== null) return 'admin.order.edit.invoiced';
+        $stmt = $db->prepare("SELECT 1 FROM coupon_uses WHERE order_id = :id LIMIT 1");
+        $stmt->execute([':id' => $orderId]);
+        if ($stmt->fetchColumn() !== false) return 'admin.order.edit.coupon';
+        return null;
+    }
+
+    /** SQLite has no row locks: checkout and order edits serialise their stock reservation on a lock file. */
+    private static function acquireCheckoutLock(): mixed {
+        if (!Db::isSqlite()) return null;
+        $database = Db::get()->query('PRAGMA database_list')->fetch(PDO::FETCH_ASSOC);
+        $databasePath = (string)($database['file'] ?? '');
+        $lockPath = $databasePath !== ''
+            ? $databasePath . '.checkout.lock'
+            : sys_get_temp_dir() . '/barebones-checkout-' . getmypid() . '.lock';
+        $sqliteLock = fopen($lockPath, 'c');
+        if ($sqliteLock === false) throw new RuntimeException('Cannot open SQLite checkout lock');
+        $deadline = microtime(true) + 5.0;
+        while (!flock($sqliteLock, LOCK_EX | LOCK_NB)) {
+            if (microtime(true) >= $deadline) {
+                fclose($sqliteLock);
+                throw new RuntimeException('Could not acquire SQLite checkout lock within 5 seconds');
+            }
+            usleep(10000);
+        }
+        return $sqliteLock;
+    }
+
+    private static function releaseCheckoutLock(mixed $sqliteLock): void {
+        if (is_resource($sqliteLock)) {
+            flock($sqliteLock, LOCK_UN);
+            fclose($sqliteLock);
+        }
+    }
+
+    /**
+     * Reserve stock for each cart line inside the caller's transaction and freeze its allocation on the order line.
+     * @return array{items: list<array<string,mixed>>, subtotal: int}
+     */
+    private static function reserveItems(array $cartItems): array {
+        $outOfStock = [];
+        $orderItems = [];
+        $subtotal = 0;
+        foreach ($cartItems as $item) {
+            // Reject non-positive quantity or negative price: a negative qty would
+            // increase stock and lower the subtotal.
+            $requestedQty = (int)($item['qty'] ?? 0);
+            if ($requestedQty <= 0 || (int)($item['price'] ?? 0) < 0) {
+                $outOfStock[] = ($item['name'] ?? ($item['sku'] ?? 'item'))
+                    . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : '');
+                continue;
+            }
+            $isDigital = VariantAvailability::isDigitalProduct((int)$item['product_id']);
+            $qty = $isDigital ? 1 : $requestedQty;
+            $inventorySnapshot = [
+                'allocations' => [], 'bundle_components' => [],
+                'reserved_qty' => 0, 'backordered_qty' => 0, 'preorder_at' => null,
+            ];
+            if (!$isDigital) {
+                try {
+                    $inventorySnapshot = Inventory::reserveLine($item, $qty);
+                } catch (\RuntimeException | \InvalidArgumentException $e) {
+                    if ($e instanceof \PDOException) throw $e;
+                    $outOfStock[] = $item['name'] . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : '');
+                    continue;
+                }
+            }
+            $total = $item['price'] * $qty;
+            $subtotal += $total;
+
+            // Freeze physical, bundle and personalization facts on the order line.
+            $itemAttrs = $item['attrs'] ?? [];
+            if (!empty($inventorySnapshot['allocations'])) {
+                $itemAttrs['_inventory_allocations'] = $inventorySnapshot['allocations'];
+            }
+            if (!empty($inventorySnapshot['bundle_components'])) {
+                $itemAttrs['_bundle_components'] = $inventorySnapshot['bundle_components'];
+            }
+
+            $orderItems[] = [
+                'product_id' => $item['product_id'],
+                'variant_id' => $item['variant_id'] ?? null,
+                'sku'        => $item['sku'],
+                'name'       => $item['name'] . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : ''),
+                'quantity'   => $qty,
+                'reserved_qty' => (int)$inventorySnapshot['reserved_qty'],
+                'backordered_qty' => (int)$inventorySnapshot['backordered_qty'],
+                'fulfillment_status' => (int)$inventorySnapshot['backordered_qty'] > 0 ? 'backordered' : 'unfulfilled',
+                'preorder_at' => $inventorySnapshot['preorder_at'],
+                'unit_price' => $item['price'],
+                'total'      => $total,
+                'attrs'      => json_encode($itemAttrs),
+                'vat_class'  => $item['vat_class']  ?? 'standard',
+                'vat_rate'   => isset($item['vat_rate'])   ? (float)$item['vat_rate']   : null,
+                'vat_amount' => isset($item['vat_amount']) ? (int)$item['vat_amount']   : null,
+                'net_amount' => isset($item['net_amount']) ? (int)$item['net_amount']   : null,
+            ];
+        }
+        if (!empty($outOfStock)) throw new OrderRejectedException('Out of stock: ' . implode(', ', $outOfStock));
+        if (empty($orderItems)) throw new OrderRejectedException('No items in order');
+        return ['items' => $orderItems, 'subtotal' => $subtotal];
+    }
+
+    private static function insertItems(int $orderId, array $orderItems): void {
+        $itemStmt = Db::get()->prepare("
+            INSERT INTO order_items (order_id, product_id, variant_id, sku, name, quantity,
+                reserved_qty, backordered_qty, fulfillment_status, preorder_at,
+                unit_price, total, attrs, vat_class, vat_rate, vat_amount, net_amount)
+            VALUES (:oid, :pid, :vid, :sku, :name, :qty,
+                :reserved_qty, :backordered_qty, :fulfillment_status, :preorder_at,
+                :price, :total, :attrs, :vclass, :vrate, :vamount, :namount)
+        ");
+        foreach ($orderItems as $oi) {
+            $itemStmt->execute([
+                ':oid'    => $orderId,
+                ':pid'    => $oi['product_id'],
+                ':vid'    => $oi['variant_id'],
+                ':sku'    => $oi['sku'],
+                ':name'   => $oi['name'],
+                ':qty'    => $oi['quantity'],
+                ':reserved_qty' => $oi['reserved_qty'],
+                ':backordered_qty' => $oi['backordered_qty'],
+                ':fulfillment_status' => $oi['fulfillment_status'],
+                ':preorder_at' => $oi['preorder_at'],
+                ':price'  => $oi['unit_price'],
+                ':total'  => $oi['total'],
+                ':attrs'  => $oi['attrs'],
+                ':vclass' => $oi['vat_class'],
+                ':vrate'  => $oi['vat_rate'] ?? 0,
+                ':vamount'=> $oi['vat_amount'] ?? 0,
+                ':namount'=> $oi['net_amount'] ?? 0,
+            ]);
         }
     }
 

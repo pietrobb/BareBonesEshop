@@ -1,0 +1,10 @@
+Nová objednávka {{order_number}}
+Zákazník: {{customer_name}} ({{customer_email}})
+Celkem: {{order_total}}
+Platba: {{payment_method}} — {{payment_status}}
+{{#if awaiting_payment}}Objednávka zatím není zaplacená.
+{{/if}}
+{{#each items}}{{quantity}} x {{name}} ({{sku}}) — {{total}}
+{{/each}}{{#if admin_url}}
+Detail: {{admin_url}}
+{{/if}}

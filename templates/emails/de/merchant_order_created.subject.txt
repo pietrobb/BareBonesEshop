@@ -1,0 +1,1 @@
+Neue Bestellung {{order_number}}{{#if awaiting_payment}} — Zahlung ausstehend{{/if}}

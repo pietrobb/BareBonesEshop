@@ -1,0 +1,1 @@
+Kifizetett rendelés {{order_number}}

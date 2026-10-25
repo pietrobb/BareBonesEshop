@@ -1,0 +1,7 @@
+Rdzeń BareBones zmieniony na {{host}}
+
+Pliki rdzenia na {{host}} zmieniono poza aktualizacją ({{count}}).
+{{#each files}}- {{kind}}: {{path}}
+{{/each}}
+Stan bazowy zapisany: {{recorded_at}}
+Wprowadź poprawkę najpierw w BareBones i dostarcz ją jako aktualizację, inaczej następna aktualizacja ją nadpisze.

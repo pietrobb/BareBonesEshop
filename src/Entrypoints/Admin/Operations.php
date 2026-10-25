@@ -84,7 +84,7 @@ function pageDashboard(): void {
         </table></div><?php endif; ?>
         <?php if ($operations['payment_incidents']): ?>
         <h4><?= esc(I18n::t('admin.ops.payment_incidents')) ?></h4><div class="table-scroll"><table><tr><th><?= esc(I18n::t('admin.order.label')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.common.provider')) ?></th><th><?= esc(I18n::t('admin.common.correlation')) ?></th><th><?= esc(I18n::t('admin.common.created')) ?></th></tr>
-            <?php foreach ($operations['payment_incidents'] as $incident): ?><tr><td><a href="admin.php?p=order&id=<?= (int)$incident['id'] ?>"><?= esc($incident['order_number']) ?></a></td><td><?= esc($incident['payment_status']) ?></td><td><?= esc($incident['payment_method']) ?></td><td><code><?= esc($incident['correlation_id'] ?? '') ?></code></td><td><?= esc($incident['created_at']) ?></td></tr><?php endforeach; ?>
+            <?php foreach ($operations['payment_incidents'] as $incident): ?><tr><td><a href="admin.php?p=order&id=<?= (int)$incident['id'] ?>"><?= esc($incident['order_number']) ?></a></td><td><?= esc(OrderStatusLabels::payment((string)$incident['payment_status'])) ?></td><td><?= esc($incident['payment_method']) ?></td><td><code><?= esc($incident['correlation_id'] ?? '') ?></code></td><td><?= esc($incident['created_at']) ?></td></tr><?php endforeach; ?>
         </table></div><?php endif; ?>
         <?php if ($operations['webhook_incidents']): ?>
         <h4><?= esc(I18n::t('admin.ops.webhook_incidents')) ?></h4><div class="table-scroll"><table><tr><th><?= esc(I18n::t('admin.common.event')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.common.attempts')) ?></th><th><?= esc(I18n::t('admin.common.error')) ?></th><th><?= esc(I18n::t('admin.common.correlation')) ?></th></tr>
@@ -122,7 +122,7 @@ function pageDashboard(): void {
                 <td><a href="admin.php?p=order&id=<?= $row['id'] ?>"><?= esc($row['order_number']) ?></a></td>
                 <td><?= esc($row['customer_name']) ?></td>
                 <td><?= I18n::price((int)$row['total'], $row['currency']) ?></td>
-                <td><span class="badge badge-<?= esc($row['status']) ?>"><?= esc($row['status']) ?></span></td>
+                <td><span class="badge badge-<?= esc($row['status']) ?>"><?= esc(OrderStatusLabels::order((string)$row['status'])) ?></span></td>
                 <td class="muted"><?= esc(substr($row['created_at'], 0, 16)) ?></td>
             </tr>
             <?php endwhile; ?>
@@ -695,7 +695,7 @@ function pagePayments(): void {
     </div>
     <div class="card">
         <h3><?= esc(I18n::t('admin.payments.countries_shipping')) ?></h3>
-        <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div class="grid grid-2">
             <div><h4><?= esc(I18n::t('admin.payments.countries')) ?></h4><table><thead><tr><th><?= esc(I18n::t('admin.payments.method')) ?></th><th><?= esc(I18n::t('admin.common.country')) ?></th><th></th></tr></thead><tbody>
             <?php foreach ($countries as $c): ?><tr><td><?= esc($c['method_code']) ?></td><td><?= esc($c['country']) ?></td><td><form method="post" action="admin.php?p=payments&action=country_delete" style="display:inline"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$c['id'] ?>"><button class="btn btn-sm btn-danger"><?= esc(I18n::t('admin.btn.delete')) ?></button></form></td></tr><?php endforeach; ?>
             <tr><form method="post" action="admin.php?p=payments&action=country_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><select aria-label="<?= esc(I18n::t('admin.payments.method')) ?>" name="method_code"><?php foreach ($methods as $m): ?><option value="<?= esc($m['code']) ?>"><?= esc($m['code']) ?></option><?php endforeach; ?></select></td><td><input aria-label="<?= esc(I18n::t('admin.common.country')) ?>" name="country" maxlength="2" required placeholder="SK" style="width:4rem"></td><td><button class="btn btn-sm btn-primary"><?= esc(I18n::t('admin.common.add')) ?></button></td></form></tr>

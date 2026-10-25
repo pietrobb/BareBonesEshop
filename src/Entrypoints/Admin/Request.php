@@ -10,6 +10,7 @@ function handlePost(string $page, string $action): void {
     match("{$page}:{$action}") {
         'product:save'   => handleProductSave(),
         'product:related_save' => handleProductRelatedSave(),
+        'product:duplicate' => handleProductDuplicate(),
         'product:variants_save' => handleProductVariantsSave(),
         'products:bulk'  => handleBulkAction(),
         'categories:save' => handleCategorySave(),
@@ -29,6 +30,7 @@ function handlePost(string $page, string $action): void {
         'orders:bulk_status' => handleOrdersBulkStatus(),
         'order:payment_transition' => handleOrderPaymentTransition(),
         'order:refund_request' => handleOrderRefundRequest(), 'order:refund_manual' => handleOrderManualRefund(), 'order:refund_retry' => handleOrderRefundRetry(), 'order:refund_confirm' => handleOrderRefundConfirm(), 'order:email_resend' => handleOrderEmailResend(), 'order:payment_link' => handleOrderPaymentLink(),
+        'order_new:create' => handleOrderNew(), 'order:items_edit' => handleOrderItemsEdit(),
         'order:invoice_issue' => handleOrderInvoiceIssue(), 'order:invoice_resend' => handleOrderInvoiceResend(),
         'order:shipment_create' => handleOrderShipmentCreate(), 'order:shipment_ship' => handleOrderShipmentShip(),
         'order:shipment_tracking' => handleOrderShipmentTracking(), 'order:shipment_cancel' => handleOrderShipmentCancel(),

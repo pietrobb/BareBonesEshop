@@ -25,7 +25,7 @@ function productEditorExtrasHtml(array $categories, ?array $product): string {
                 <div class="form-row">
                     <label for="<?= esc($fieldId) ?>"><?= esc(I18n::t('admin.product.field.' . $field)) ?> (<?= esc($locale) ?>)</label>
                     <?php if (in_array($field, ['summary', 'description', 'meta_description'], true)): ?>
-                    <textarea id="<?= esc($fieldId) ?>" name="<?= esc($name) ?>" rows="<?= $field === 'description' ? 4 : 2 ?>"><?= esc((string)($tr[$field] ?? '')) ?></textarea>
+                    <textarea id="<?= esc($fieldId) ?>" name="<?= esc($name) ?>" rows="<?= $field === 'description' ? 4 : 2 ?>"<?= $field === 'description' ? ' data-rich-text' : '' ?>><?= esc((string)($tr[$field] ?? '')) ?></textarea>
                     <?php else: ?>
                     <input id="<?= esc($fieldId) ?>" name="<?= esc($name) ?>" value="<?= esc((string)($tr[$field] ?? '')) ?>">
                     <?php endif; ?>

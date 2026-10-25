@@ -8,6 +8,7 @@ return [
     'product'    => 'products.edit',
     'orders'     => 'orders.view',
     'order'      => 'orders.view',
+    'order_new'  => 'orders.edit',
     'awaiting_payment' => 'orders.view',
     'abandoned_carts' => 'orders.view',
     'invoice_pdf' => 'orders.view',

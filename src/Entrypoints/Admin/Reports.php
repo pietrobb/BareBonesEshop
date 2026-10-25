@@ -65,6 +65,7 @@ function pageReports(): void {
         <?php foreach ($trend as $currency => $daysRows): $max = max(1, ...array_column($daysRows, 'revenue')); ?>
         <details <?= $currency === array_key_first($trend) ? 'open' : '' ?>>
             <summary><?= esc(strtoupper($currency)) ?></summary>
+            <?= SalesChart::dailyRevenue($daysRows, (string)$currency) ?>
             <div class="table-scroll"><table>
                 <tr><?= $th('admin.reports.day') . $th('admin.reports.orders') . $th('admin.reports.revenue') ?></tr>
                 <?php foreach (array_reverse($daysRows, true) as $day => $row): ?>

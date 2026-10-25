@@ -59,6 +59,8 @@ test('admin product form opens filled and saves stock and alert thresholds', asy
   await form.locator('#field-stock').fill(String(stock));
   await form.locator('#field-stock_low_threshold').fill('7');
   await form.locator('#field-stock_critical_threshold').fill('2');
+  // The rich-text editor hides the HTML field; its "HTML" toggle shows the field again (R10 UX10).
+  await form.locator('[data-rich-for="field-description"] button[aria-pressed]').click();
   await form.locator('#field-description').fill('<p>E2E popis produktu</p>');
   await form.locator('#field-images').fill('/images/e2e-a.jpg\n/images/e2e-b.jpg');
   await form.locator('#field-tags').fill('e2e-a, e2e-b');
@@ -130,6 +132,7 @@ test('admin CMS page form saves through admin.php and reopens filled', async ({ 
   const form = page.locator('#form-admin-page');
   await form.locator('#field-slug').fill(slug);
   await form.locator('#field-title').fill('E2E stránka');
+  await form.locator('[data-rich-for="field-body"] button[aria-pressed]').click();
   await form.locator('#field-body').fill('<p>Obsah stránky</p>');
   await form.locator('button[type="submit"]').click();
   await expect(page.locator('.flash-ok')).toHaveText('Page created.');

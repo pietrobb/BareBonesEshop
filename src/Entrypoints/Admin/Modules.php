@@ -5,7 +5,7 @@
  * StoreScope.php are always loaded by Admin.php; an unknown page renders the dashboard.
  * Cross-module calls: Operations/Orders -> Reports (adminRevenueToday), Orders -> Shipments,
  * Customers -> B2b (b2bCustomerCard), B2b/PricingRules/Suppliers -> Taxonomy (taxonomyRedirect),
- * Catalog -> CatalogEditor/Taxonomy/PricingRules (required by Catalog.php itself).
+ * Catalog -> CatalogEditor/Taxonomy/PricingRules/RichText (required by Catalog.php itself).
  */
 $catalog = ['Catalog'];
 $operations = ['Reports', 'Operations'];
@@ -18,7 +18,8 @@ return [
     'products'   => $catalog,
     'product'    => $catalog,
     'orders'     => array_merge($orders, ['OrderOperations']),
-    'order'      => array_merge($orders, ['OrderOperations']), // + the "send payment link" handler (R10 UX3)
+    'order'      => array_merge($orders, ['OrderOperations', 'ManualOrders']), // + payment link (R10 UX3), line edit (UX7)
+    'order_new'  => ['ManualOrders'],
     'awaiting_payment' => ['Recovery'],
     'abandoned_carts' => ['Recovery'],
     'invoice_pdf' => $orders,

@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="de"><body style="font-family:Arial,sans-serif;color:#111">
+<h2>Widerruf des Vertrags</h2>
+<p>{{customer_name}} ({{customer_email}}) hat den Vertrag zur Bestellung <strong>{{order_number}}</strong> ({{order_total}}) widerrufen. Stornieren Sie die nicht versandten Artikel oder nehmen Sie die Ware zurück und erstatten Sie den Betrag innerhalb von 14 Tagen.</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if admin_url}}<p><a href="{{admin_url}}">Bestellung öffnen</a></p>{{/if}}
+</body></html>

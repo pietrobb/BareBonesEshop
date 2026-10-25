@@ -1,0 +1,7 @@
+A BareBones mag megváltozott: {{host}}
+
+A(z) {{host}} gépen a magfájlok frissítésen kívül módosultak ({{count}}).
+{{#each files}}- {{kind}}: {{path}}
+{{/each}}
+Alapállapot rögzítve: {{recorded_at}}
+A javítást először a BareBones-ban végezze el, és frissítésként adja ki, különben a következő frissítés felülírja.

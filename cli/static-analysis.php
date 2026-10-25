@@ -134,18 +134,24 @@ $architectureBudgets = [
     // +1 line: product save emits product.updated for API subscribers (round 6 review).
     // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.
     // +2 lines R9: the product save moves stock by the admin's change, so units sold meanwhile stay sold.
-    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1287, 'functions' => 24, 'max_function_lines' => 210, 'coupling' => 19],
+    // +12 lines, +1 function, +1 coupling R10 UX10: "Duplicate" in the product editor; the copy rules live in ProductDuplicator.
+    // +3 lines R10 UX10: the product and CMS page editors load the rich-text editor (Catalog.php requires RichText.php).
+    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1302, 'functions' => 25, 'max_function_lines' => 210, 'coupling' => 20],
     // +1 coupling: ProductVariants owns variant validation, ledger stock booking and the delete/SKU-change guards.
     // +1 coupling: I18n gives the editor's labels in the admin language (A15.5).
     'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 105, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 4],
-    'src/Entrypoints/Admin/Customers.php' => ['lines' => 330, 'functions' => 6, 'max_function_lines' => 133, 'coupling' => 8],
+    // R10 UX10: progressive rich-text editor for the admin HTML fields (one function returning the nonce'd script).
+    'src/Entrypoints/Admin/RichText.php' => ['lines' => 72, 'functions' => 1, 'max_function_lines' => 63, 'coupling' => 2],
+    // +1 coupling R10 UX6: statuses in the admin's language (OrderStatusLabels).
+    'src/Entrypoints/Admin/Customers.php' => ['lines' => 330, 'functions' => 6, 'max_function_lines' => 133, 'coupling' => 9],
     'src/Entrypoints/Admin/EmailTemplates.php' => ['lines' => 135, 'functions' => 7, 'max_function_lines' => 46, 'coupling' => 3],
     // Data files: route => page modules, side menu and page permissions.
     'src/Entrypoints/Admin/Modules.php' => ['lines' => 65, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 0],
     'src/Entrypoints/Admin/Navigation.php' => ['lines' => 40, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 0],
     'src/Entrypoints/Admin/Permissions.php' => ['lines' => 50, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 0],
     // +lines: warehouse, feed and shipping/payment changes are audited; feeds are refused across stores (admin catalog audit).
-    'src/Entrypoints/Admin/Operations.php' => ['lines' => 800, 'functions' => 36, 'max_function_lines' => 136, 'coupling' => 18],
+    // +1 coupling R10 UX6: statuses in the admin's language (OrderStatusLabels).
+    'src/Entrypoints/Admin/Operations.php' => ['lines' => 800, 'functions' => 36, 'max_function_lines' => 136, 'coupling' => 19],
     // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
     // +1 coupling: SalesReport gives the sales overview shop-local day boundaries (A15.1).
     // +1 coupling: OrderExport owns the order list filters shared by the sales overview and the CSV export (A15.2).
@@ -153,7 +159,11 @@ $architectureBudgets = [
     // +1 line: a cancellation that refunds captured money needs orders.refund (round 5 review).
     // +1 function, +14 lines: "Confirm refund" books a GoPay/ThePay partial refund the provider never confirms (round 6 review).
     // +6 lines, +1 coupling R10 UX3: the order detail's "Send payment link" button for an unpaid online order (PaymentLink).
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 922, 'functions' => 16, 'max_function_lines' => 308, 'coupling' => 21],
+    // +1 coupling R10 UX6: statuses in the admin's language (OrderStatusLabels).
+    // +4 lines R10 UX7: "New order" button on the list, the line editor on the detail (ManualOrders.php, loaded like Shipments.php).
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 926, 'functions' => 16, 'max_function_lines' => 310, 'coupling' => 22],
+    // R10 UX7: manual order form and the pending order's line editor; pricing and stock rules live in ManualOrder.
+    'src/Entrypoints/Admin/ManualOrders.php' => ['lines' => 98, 'functions' => 5, 'max_function_lines' => 31, 'coupling' => 5],
     // +1 function, +3 coupling R10 UX3: handleOrderPaymentLink e-mails the customer a new payment link (PaymentLink, Orders, AuditLog).
     'src/Entrypoints/Admin/OrderOperations.php' => ['lines' => 90, 'functions' => 5, 'max_function_lines' => 32, 'coupling' => 10],
     'src/Entrypoints/Admin/PricingRules.php' => ['lines' => 235, 'functions' => 7, 'max_function_lines' => 115, 'coupling' => 5],
@@ -165,6 +175,8 @@ $architectureBudgets = [
     // +1 function, +1 coupling: adminCodeLabel shows stored codes (product/page status, attribute type) in the admin language (A15.5).
     // +lines: windowed pagination (first, last and a window around the current page) instead of one link per page.
     'src/Entrypoints/Admin/Shared.php' => ['lines' => 58, 'functions' => 5, 'max_function_lines' => 17, 'coupling' => 1],
+    // R10 UX10: the admin layout script (delegated handlers, moved from Admin.php) + wide tables scroll in their own keyboard-reachable box on a phone.
+    'src/Entrypoints/Admin/LayoutScript.php' => ['lines' => 70, 'functions' => 1, 'max_function_lines' => 63, 'coupling' => 1],
     // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.
     // +1 line, +1 max_function_lines R10 UX5: the stores page ends with the owner's add/remove store and legal-text cards (StoreManagement).
     'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 78, 'functions' => 3, 'max_function_lines' => 50, 'coupling' => 5],
@@ -184,7 +196,7 @@ $architectureBudgets = [
     // +1 coupling: Search::filtersFromQuery turns the search route's sort/price/category parameters into search options (A14.2).
     // +6 lines: the ?page=withdrawal route (R8 electronic withdrawal function, Directive 2011/83/EU art. 11a).
     // +6 lines: the ?page=complaint route (R8 complaints, Directive (EU) 2019/771).
-    /* R9: Impressum page; R10 UX3: ?page=pay */ 'src/Entrypoints/Storefront.php' => ['lines' => 170, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
+    /* R9: Impressum page; R10 UX3: ?page=pay; R10 UX8: ?page=order-status and ?page=stock-notify (+11) */ 'src/Entrypoints/Storefront.php' => ['lines' => 181, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
     // Customer account portal behind the thin /account.php (registration, login, reset, GDPR, addresses, orders).
     // +1 coupling: Str::normalizeEmail is the one e-mail normalisation shared with Customers and Pricing.
     // +2 coupling: DigitalDelivery issues the downloads page's links; StoreContext limits the profile languages to the store's.
@@ -200,12 +212,15 @@ $architectureBudgets = [
     // +2 lines (renderCheckout): the form's coupon attempts spend the coupon API's throttle (round 4 final review).
     // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.
     // +3 lines, +1 coupling R10 UX3: a failed payment on order-done offers a new payment link (PaymentLink) instead of "write to us".
-    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 259, 'functions' => 7, 'max_function_lines' => 102, 'coupling' => 14],
+    // +7 lines, +1 coupling R10 UX8: checkout sign-in link + save address, account offer on a guest order's confirmation (GuestPages, GuestCheckoutAccount).
+    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 266, 'functions' => 7, 'max_function_lines' => 103, 'coupling' => 15],
     // R10 UX3: ?page=pay — the e-mailed payment link (confirm → gateway); the rules live in PaymentLink.
     'src/Entrypoints/Storefront/PaymentLinkPages.php' => ['lines' => 40, 'functions' => 1, 'max_function_lines' => 30, 'coupling' => 6],
     // Ratcheted: canonical/robots/hreflang/JSON-LD moved to StorefrontSeo (storefront SEO audit).
     // +2 coupling: cart currency decimals for the JS config and the one-shot StorefrontFlash notice.
-    /* R8: footer ADR body (ConsumerNotice), accessibility link, guest cookie settings; R9: Impressum link */ 'src/Entrypoints/Storefront/Layout.php' => ['lines' => 146, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
+    /* R8: footer ADR body (ConsumerNotice), accessibility link, guest cookie settings; R9: Impressum link; R10 UX8: order status link */ 'src/Entrypoints/Storefront/Layout.php' => ['lines' => 147, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
+    // R10 UX8: guest order status lookup, back-in-stock form, checkout/confirmation account views; the rules live in BackInStock and GuestCheckoutAccount.
+    'src/Entrypoints/Storefront/GuestPages.php' => ['lines' => 108, 'functions' => 6, 'max_function_lines' => 32, 'coupling' => 10],
     'src/Entrypoints/Storefront/ProductStatusPages.php' => ['lines' => 20, 'functions' => 1, 'max_function_lines' => 18, 'coupling' => 3],
     // R8 withdrawal function: identify → review → confirm; the rules live in Withdrawal.
     'src/Entrypoints/Storefront/WithdrawalPages.php' => ['lines' => 62, 'functions' => 1, 'max_function_lines' => 60, 'coupling' => 4],
@@ -217,6 +232,8 @@ $forbiddenDependencies = [
     'src/Entrypoints/Admin/Customers.php' => ['Products::', 'CheckoutService::', 'ApiHandlers'],
     'src/Entrypoints/Admin/Operations.php' => ['CheckoutService::', 'Orders::create(', 'ApiHandlers'],
     'src/Entrypoints/Admin/Orders.php' => ['Products::', 'ContentService::', 'ApiHandlers'],
+    // Manual orders are priced and reserved only through ManualOrder (the checkout rules), never assembled here.
+    'src/Entrypoints/Admin/ManualOrders.php' => ['Orders::create(', 'Orders::replaceItems(', 'CheckoutService::', 'ApiHandlers', 'Db::get('],
     'src/Entrypoints/Admin/Recovery.php' => ['Products::', 'CheckoutService::', 'ApiHandlers', 'Db::get('],
     'src/Entrypoints/Storefront/CatalogPages.php' => ['CheckoutService::', 'CheckoutSession::', 'Orders::'],
     'src/Entrypoints/Storefront/CheckoutPages.php' => ['Products::', 'Categories::', 'ContentService::'],

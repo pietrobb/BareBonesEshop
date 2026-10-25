@@ -51,6 +51,7 @@ class Inventory {
         $availableAfter = $onHandAfter - $reservedAfter;
         $availableBefore = $availableAfter - $quantityDelta + $reservedDelta;
         if (!in_array($type, self::ORDER_FLOW_MOVEMENTS, true) || ($availableBefore > 0) !== ($availableAfter > 0)) Cache::catalogChanged();
+        if ($availableBefore <= 0 && $availableAfter > 0) BackInStock::touch($sku); // R10 UX8: shoppers waiting for it
         return $stmt->rowCount() === 1;
     }
 

@@ -44,6 +44,7 @@ $handlers = [
     'cache_rebuild'     => 'handleCacheRebuild',
     'email_send'        => 'handleEmailSend',
     'stock_alert'       => 'handleStockAlert',
+    'back_in_stock'     => static fn(array $payload): int => BackInStock::process(array_map('strval', (array)($payload['skus'] ?? []))),
     'search_reindex'    => 'handleSearchReindex',
     'payment_refund'    => 'handlePaymentRefund',
     'payment_cancel'    => 'handlePaymentCancel',
