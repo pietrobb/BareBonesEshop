@@ -138,14 +138,16 @@ $architectureBudgets = [
     // +1 coupling: ProductVariants owns variant validation, ledger stock booking and the delete/SKU-change guards.
     // +1 coupling: I18n gives the editor's labels in the admin language (A15.5).
     'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 105, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 4],
-    'src/Entrypoints/Admin/Customers.php' => ['lines' => 330, 'functions' => 6, 'max_function_lines' => 133, 'coupling' => 8],
+    // +1 coupling R10 UX6: statuses in the admin's language (OrderStatusLabels).
+    'src/Entrypoints/Admin/Customers.php' => ['lines' => 330, 'functions' => 6, 'max_function_lines' => 133, 'coupling' => 9],
     'src/Entrypoints/Admin/EmailTemplates.php' => ['lines' => 135, 'functions' => 7, 'max_function_lines' => 46, 'coupling' => 3],
     // Data files: route => page modules, side menu and page permissions.
     'src/Entrypoints/Admin/Modules.php' => ['lines' => 65, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 0],
     'src/Entrypoints/Admin/Navigation.php' => ['lines' => 40, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 0],
     'src/Entrypoints/Admin/Permissions.php' => ['lines' => 50, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 0],
     // +lines: warehouse, feed and shipping/payment changes are audited; feeds are refused across stores (admin catalog audit).
-    'src/Entrypoints/Admin/Operations.php' => ['lines' => 800, 'functions' => 36, 'max_function_lines' => 136, 'coupling' => 18],
+    // +1 coupling R10 UX6: statuses in the admin's language (OrderStatusLabels).
+    'src/Entrypoints/Admin/Operations.php' => ['lines' => 800, 'functions' => 36, 'max_function_lines' => 136, 'coupling' => 19],
     // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
     // +1 coupling: SalesReport gives the sales overview shop-local day boundaries (A15.1).
     // +1 coupling: OrderExport owns the order list filters shared by the sales overview and the CSV export (A15.2).
@@ -153,7 +155,8 @@ $architectureBudgets = [
     // +1 line: a cancellation that refunds captured money needs orders.refund (round 5 review).
     // +1 function, +14 lines: "Confirm refund" books a GoPay/ThePay partial refund the provider never confirms (round 6 review).
     // +6 lines, +1 coupling R10 UX3: the order detail's "Send payment link" button for an unpaid online order (PaymentLink).
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 922, 'functions' => 16, 'max_function_lines' => 308, 'coupling' => 21],
+    // +1 coupling R10 UX6: statuses in the admin's language (OrderStatusLabels).
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 922, 'functions' => 16, 'max_function_lines' => 308, 'coupling' => 22],
     // +1 function, +3 coupling R10 UX3: handleOrderPaymentLink e-mails the customer a new payment link (PaymentLink, Orders, AuditLog).
     'src/Entrypoints/Admin/OrderOperations.php' => ['lines' => 90, 'functions' => 5, 'max_function_lines' => 32, 'coupling' => 10],
     'src/Entrypoints/Admin/PricingRules.php' => ['lines' => 235, 'functions' => 7, 'max_function_lines' => 115, 'coupling' => 5],

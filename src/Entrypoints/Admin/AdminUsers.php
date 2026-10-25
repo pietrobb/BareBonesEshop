@@ -33,7 +33,7 @@ function pageAdminUsers(): void {
             <tr>
                 <td><?= esc((string)$a['username']) ?></td>
                 <td><?= esc((string)$a['role']) ?></td>
-                <td><span class="badge badge-<?= $a['status'] === 'active' ? 'active' : 'draft' ?>"><?= esc((string)$a['status']) ?></span></td>
+                <td><span class="badge badge-<?= $a['status'] === 'active' ? 'active' : 'draft' ?>"><?= esc(adminCodeLabel('admin.user.status.', (string)$a['status'])) ?></span></td>
                 <td><?= !empty($a['mfa_required']) ? '✓' : '—' ?></td>
                 <td class="muted"><?= esc(substr((string)($a['last_login_at'] ?? ''), 0, 16)) ?></td>
                 <td>

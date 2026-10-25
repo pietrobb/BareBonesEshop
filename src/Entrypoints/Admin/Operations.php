@@ -84,7 +84,7 @@ function pageDashboard(): void {
         </table></div><?php endif; ?>
         <?php if ($operations['payment_incidents']): ?>
         <h4><?= esc(I18n::t('admin.ops.payment_incidents')) ?></h4><div class="table-scroll"><table><tr><th><?= esc(I18n::t('admin.order.label')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.common.provider')) ?></th><th><?= esc(I18n::t('admin.common.correlation')) ?></th><th><?= esc(I18n::t('admin.common.created')) ?></th></tr>
-            <?php foreach ($operations['payment_incidents'] as $incident): ?><tr><td><a href="admin.php?p=order&id=<?= (int)$incident['id'] ?>"><?= esc($incident['order_number']) ?></a></td><td><?= esc($incident['payment_status']) ?></td><td><?= esc($incident['payment_method']) ?></td><td><code><?= esc($incident['correlation_id'] ?? '') ?></code></td><td><?= esc($incident['created_at']) ?></td></tr><?php endforeach; ?>
+            <?php foreach ($operations['payment_incidents'] as $incident): ?><tr><td><a href="admin.php?p=order&id=<?= (int)$incident['id'] ?>"><?= esc($incident['order_number']) ?></a></td><td><?= esc(OrderStatusLabels::payment((string)$incident['payment_status'])) ?></td><td><?= esc($incident['payment_method']) ?></td><td><code><?= esc($incident['correlation_id'] ?? '') ?></code></td><td><?= esc($incident['created_at']) ?></td></tr><?php endforeach; ?>
         </table></div><?php endif; ?>
         <?php if ($operations['webhook_incidents']): ?>
         <h4><?= esc(I18n::t('admin.ops.webhook_incidents')) ?></h4><div class="table-scroll"><table><tr><th><?= esc(I18n::t('admin.common.event')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.common.attempts')) ?></th><th><?= esc(I18n::t('admin.common.error')) ?></th><th><?= esc(I18n::t('admin.common.correlation')) ?></th></tr>
@@ -122,7 +122,7 @@ function pageDashboard(): void {
                 <td><a href="admin.php?p=order&id=<?= $row['id'] ?>"><?= esc($row['order_number']) ?></a></td>
                 <td><?= esc($row['customer_name']) ?></td>
                 <td><?= I18n::price((int)$row['total'], $row['currency']) ?></td>
-                <td><span class="badge badge-<?= esc($row['status']) ?>"><?= esc($row['status']) ?></span></td>
+                <td><span class="badge badge-<?= esc($row['status']) ?>"><?= esc(OrderStatusLabels::order((string)$row['status'])) ?></span></td>
                 <td class="muted"><?= esc(substr($row['created_at'], 0, 16)) ?></td>
             </tr>
             <?php endwhile; ?>

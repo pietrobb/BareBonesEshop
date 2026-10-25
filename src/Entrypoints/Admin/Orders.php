@@ -90,11 +90,11 @@ function pageSalesOverview(): void {
             </select></div>
             <div class="form-row"><label for="sales-status"><?= esc(I18n::t('admin.sales.order_status')) ?></label><select id="sales-status" name="status">
                 <option value=""><?= esc(I18n::t('admin.sales.all_statuses')) ?></option>
-                <?php foreach (OrderWorkflow::statuses() as $value): ?><option value="<?= esc($value) ?>" <?= $statusFilter === $value ? 'selected' : '' ?>><?= esc($value) ?></option><?php endforeach; ?>
+                <?php foreach (OrderWorkflow::statuses() as $value): ?><option value="<?= esc($value) ?>" <?= $statusFilter === $value ? 'selected' : '' ?>><?= esc(OrderStatusLabels::order($value)) ?></option><?php endforeach; ?>
             </select></div>
             <div class="form-row"><label for="sales-payment"><?= esc(I18n::t('admin.sales.payment_status')) ?></label><select id="sales-payment" name="payment_status">
                 <option value=""><?= esc(I18n::t('admin.sales.all_statuses')) ?></option>
-                <?php foreach (PaymentService::paymentStatuses() as $value): ?><option value="<?= esc($value) ?>" <?= $paymentStatusFilter === $value ? 'selected' : '' ?>><?= esc($value) ?></option><?php endforeach; ?>
+                <?php foreach (PaymentService::paymentStatuses() as $value): ?><option value="<?= esc($value) ?>" <?= $paymentStatusFilter === $value ? 'selected' : '' ?>><?= esc(OrderStatusLabels::payment($value)) ?></option><?php endforeach; ?>
             </select></div>
             <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.sales.show')) ?></button>
         </form>
@@ -110,8 +110,8 @@ function pageSalesOverview(): void {
                 <td><?= esc($order['customer_name']) ?><br><span class="muted"><?= esc($order['customer_email']) ?></span></td>
                 <td><?= (int)$order['item_count'] ?> <?= esc(I18n::t('admin.sales.items_short')) ?></td>
                 <td><strong><?= I18n::price((int)$order['total'], $order['currency']) ?></strong></td>
-                <td><span class="badge badge-<?= esc($order['status']) ?>"><?= esc($order['status']) ?></span></td>
-                <td><span class="badge badge-<?= esc($order['payment_status'] ?? 'pending') ?>"><?= esc($order['payment_status'] ?? 'pending') ?></span><br><span class="muted"><?= esc($order['payment_method'] ?? '') ?></span></td>
+                <td><span class="badge badge-<?= esc($order['status']) ?>"><?= esc(OrderStatusLabels::order((string)$order['status'])) ?></span></td>
+                <td><span class="badge badge-<?= esc($order['payment_status'] ?? 'pending') ?>"><?= esc(OrderStatusLabels::payment((string)($order['payment_status'] ?? 'pending'))) ?></span><br><span class="muted"><?= esc($order['payment_method'] ?? '') ?></span></td>
                 <td><?php if ((int)$order['entitlement_count'] > 0): ?><?= (int)$order['order_download_count'] ?> <?= esc(I18n::t('admin.sales.downloads')) ?><br><span class="muted"><?= (int)$order['entitlement_count'] ?> <?= esc(I18n::t('admin.sales.entitlements')) ?></span><?php else: ?>—<?php endif; ?></td>
                 <td><?php if ($order['email_status']): ?><span class="<?= $order['email_status'] === 'failed' ? 'status-error' : ($order['email_status'] === 'sent' ? 'status-ok' : 'status-warn') ?>"><?= esc($order['email_status']) ?></span><?php else: ?>—<?php endif; ?></td>
                 <td><a class="btn btn-sm" href="admin.php?p=order&id=<?= (int)$order['id'] ?>"><?= esc(I18n::t('admin.sales.detail')) ?></a></td>
@@ -165,13 +165,13 @@ function pageOrders(): void {
             <select name="status" aria-label="<?= esc(I18n::t('admin.sales.order_status')) ?>">
                 <option value="">— <?= esc(I18n::t('admin.th.status')) ?> —</option>
                 <?php foreach (OrderWorkflow::statuses() as $s): ?>
-                <option value="<?= $s ?>" <?= $statusFilter===$s?'selected':'' ?>><?= $s ?></option>
+                <option value="<?= esc($s) ?>" <?= $statusFilter===$s?'selected':'' ?>><?= esc(OrderStatusLabels::order($s)) ?></option>
                 <?php endforeach; ?>
             </select>
             <select name="payment_status" aria-label="<?= esc(I18n::t('admin.sales.payment_status')) ?>">
                 <option value="">— <?= esc(I18n::t('admin.order.payment')) ?> —</option>
                 <?php foreach (PaymentService::paymentStatuses() as $s): ?>
-                <option value="<?= $s ?>" <?= $paymentStatusFilter===$s?'selected':'' ?>><?= $s ?></option>
+                <option value="<?= esc($s) ?>" <?= $paymentStatusFilter===$s?'selected':'' ?>><?= esc(OrderStatusLabels::payment($s)) ?></option>
                 <?php endforeach; ?>
             </select>
             <button class="btn" type="submit"><?= esc(I18n::t('admin.btn.apply')) ?></button>
@@ -181,7 +181,7 @@ function pageOrders(): void {
         <form method="post" action="admin.php?p=orders&amp;action=bulk_status" id="orders-bulk">
         <?= $filterFields ?>
         <div class="sales-toolbar" style="margin-bottom:1rem">
-            <div class="form-row"><label for="bulk-status"><?= esc(I18n::t('admin.orders.bulk_status')) ?></label><select id="bulk-status" name="new_status" required><option value="">— <?= esc(I18n::t('admin.orders.bulk.choose_status')) ?> —</option><?php foreach (OrderWorkflow::statuses() as $s): ?><option value="<?= esc($s) ?>"><?= esc($s) ?></option><?php endforeach; ?></select></div>
+            <div class="form-row"><label for="bulk-status"><?= esc(I18n::t('admin.orders.bulk_status')) ?></label><select id="bulk-status" name="new_status" required><option value="">— <?= esc(I18n::t('admin.orders.bulk.choose_status')) ?> —</option><?php foreach (OrderWorkflow::statuses() as $s): ?><option value="<?= esc($s) ?>"><?= esc(OrderStatusLabels::order($s)) ?></option><?php endforeach; ?></select></div>
             <div class="form-row"><label for="bulk-note"><?= esc(I18n::t('admin.order.note')) ?></label><input id="bulk-note" name="note"></div>
             <button class="btn btn-primary btn-sm" type="submit" data-confirm="<?= esc(I18n::t('admin.orders.bulk.confirm')) ?>"><?= esc(I18n::t('admin.orders.bulk_apply')) ?></button>
             <button class="btn btn-sm" type="submit" formaction="admin.php?p=delivery_note" formtarget="_blank" formnovalidate name="format" value="html"><?= esc(I18n::t('admin.delivery_note.html')) ?></button>
@@ -196,8 +196,8 @@ function pageOrders(): void {
                 <td><?= esc($o['customer_name']) ?></td>
                 <td class="muted"><?= esc($o['customer_email']) ?></td>
                 <td><?= I18n::price((int)$o['total'], $o['currency']) ?></td>
-                <td><span class="badge badge-<?= esc($o['status']) ?>"><?= esc($o['status']) ?></span></td>
-                <td><span class="badge badge-<?= esc($o['payment_status'] ?? 'pending') ?>"><?= esc($o['payment_status'] ?? 'pending') ?></span><br><span class="muted"><?= esc($o['payment_method'] ?? '') ?></span></td>
+                <td><span class="badge badge-<?= esc($o['status']) ?>"><?= esc(OrderStatusLabels::order((string)$o['status'])) ?></span></td>
+                <td><span class="badge badge-<?= esc($o['payment_status'] ?? 'pending') ?>"><?= esc(OrderStatusLabels::payment((string)($o['payment_status'] ?? 'pending'))) ?></span><br><span class="muted"><?= esc($o['payment_method'] ?? '') ?></span></td>
                 <td class="muted"><?= esc(substr($o['created_at'], 0, 16)) ?></td>
                 <td><a href="admin.php?p=order&id=<?= $o['id'] ?>" class="btn btn-sm"><?= esc(I18n::t('admin.sales.detail')) ?></a></td>
             </tr>
@@ -246,13 +246,13 @@ function pageOrder(): void {
             <?php endif; ?>
         </div>
         <div class="card">
-            <h3><?= esc(I18n::t('admin.order.status_prefix')) ?>: <span class="badge badge-<?= esc($order['status']) ?>"><?= esc($order['status']) ?></span></h3>
+            <h3><?= esc(I18n::t('admin.order.status_prefix')) ?>: <span class="badge badge-<?= esc($order['status']) ?>"><?= esc(OrderStatusLabels::order((string)$order['status'])) ?></span></h3>
             <?php if (!empty($allowed)): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=status" style="margin-top:.5rem">
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                 <select name="new_status" aria-label="<?= esc(I18n::t('admin.order.change_status')) ?>">
                     <?php foreach ($allowed as $s): ?>
-                    <option value="<?= esc($s) ?>"><?= esc($s) ?></option>
+                    <option value="<?= esc($s) ?>"><?= esc(OrderStatusLabels::order($s)) ?></option>
                     <?php endforeach; ?>
                 </select>
                 <input name="note" aria-label="<?= esc(I18n::t('admin.common.note')) ?>" placeholder="<?= esc(I18n::t('admin.order.note_placeholder')) ?>">
@@ -269,7 +269,7 @@ function pageOrder(): void {
             <p class="muted"><?= esc(I18n::t('admin.order.variable_symbol')) ?>: <strong data-variable-symbol><?= esc(BankTransferInstructions::variableSymbol($order)) ?></strong></p>
             <?php endif; ?>
             <p class="muted"><?= esc(I18n::t('admin.order.payment_reference')) ?>: <?= $order['payment_id'] ? esc($order['payment_id']) : '—' ?></p>
-            <p class="muted"><?= esc(I18n::t('admin.sales.payment_status')) ?>: <span class="badge badge-<?= esc($order['payment_status'] ?? 'pending') ?>"><?= esc($order['payment_status'] ?? 'pending') ?></span><?= $latestPaymentTx ? ' · ' . esc(I18n::t('admin.order.last_event')) . ': ' . esc((string)$latestPaymentTx['status']) . ' @ ' . esc(substr((string)$latestPaymentTx['created_at'], 0, 16)) : '' ?></p>
+            <p class="muted"><?= esc(I18n::t('admin.sales.payment_status')) ?>: <span class="badge badge-<?= esc($order['payment_status'] ?? 'pending') ?>"><?= esc(OrderStatusLabels::payment((string)($order['payment_status'] ?? 'pending'))) ?></span><?= $latestPaymentTx ? ' · ' . esc(I18n::t('admin.order.last_event')) . ': ' . esc((string)$latestPaymentTx['status']) . ' @ ' . esc(substr((string)$latestPaymentTx['created_at'], 0, 16)) : '' ?></p>
             <?php if (Security::adminCan('orders.edit') && PaymentLink::payable($order)): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=payment_link" style="margin-top:.5rem" data-payment-link>
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
@@ -281,7 +281,7 @@ function pageOrder(): void {
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                 <select name="new_payment_status" aria-label="<?= esc(I18n::t('admin.order.change_payment')) ?>">
                     <?php foreach ($paymentTransitions as $s): ?>
-                    <option value="<?= esc($s) ?>"><?= esc($s) ?></option>
+                    <option value="<?= esc($s) ?>"><?= esc(OrderStatusLabels::payment($s)) ?></option>
                     <?php endforeach; ?>
                 </select>
                 <input name="amount" aria-label="<?= esc(I18n::t('admin.order.amount_cents')) ?>" type="number" min="0" step="1" placeholder="<?= esc(I18n::t('admin.order.amount_cents')) ?>">
@@ -362,7 +362,7 @@ function pageOrder(): void {
             <tr>
                 <td><?= esc($entitlement['sku']) ?></td>
                 <td><?= esc($entitlement['label'] ?: $entitlement['download_name']) ?></td>
-                <td><span class="badge badge-<?= esc($entitlement['status']) ?>"><?= esc($entitlement['status']) ?></span></td>
+                <td><span class="badge badge-<?= esc($entitlement['status']) ?>"><?= esc(adminCodeLabel('admin.entitlement.status.', (string)$entitlement['status'])) ?></span></td>
                 <td><?= (int)$entitlement['download_count'] ?> / <?= $entitlement['download_limit'] === null ? '∞' : (int)$entitlement['download_limit'] ?></td>
                 <td><?= $entitlement['expires_at'] === null ? '—' : esc(date('Y-m-d H:i', (int)$entitlement['expires_at'])) ?></td>
                 <td><?= esc($entitlement['delivered_at'] ?? '—') ?></td>
@@ -403,7 +403,7 @@ function pageOrder(): void {
                 }
             ?>
             <tr>
-                <td><span class="badge badge-<?= esc($tx['status']) ?>"><?= esc($tx['status']) ?></span></td>
+                <td><span class="badge badge-<?= esc($tx['status']) ?>"><?= esc(OrderStatusLabels::payment((string)$tx['status'])) ?></span></td>
                 <td><?= esc($tx['provider']) ?></td>
                 <td class="muted"><?= esc($tx['provider_ref']) ?></td>
                 <td><?= I18n::price((int)$tx['amount'], $tx['currency']) ?></td>
@@ -454,7 +454,7 @@ function pageOrder(): void {
                 <td><?= esc($em['locale']) ?></td>
                 <td class="muted"><?= esc($em['subject']) ?></td>
                 <td><?= esc($em['adapter']) ?></td>
-                <td><span class="badge badge-<?= esc($em['status']) ?>"><?= esc($em['status']) ?></span>
+                <td><span class="badge badge-<?= esc($em['status']) ?>"><?= esc(adminCodeLabel('admin.email.status.', (string)$em['status'])) ?></span>
                     <?php if (!empty($em['error'])): ?><br><small class="muted"><?= esc($em['error']) ?></small><?php endif; ?>
                 </td>
                 <td class="muted"><?= esc($em['sent_at'] ? substr($em['sent_at'], 0, 16) : substr($em['created_at'], 0, 16)) ?></td>
@@ -490,7 +490,7 @@ function pageOrder(): void {
                 <td><?= esc($inv['issued_at']) ?></td>
                 <td><?= esc($inv['due_date']) ?></td>
                 <td><?= I18n::price((int)$inv['total_gross'], $inv['currency']) ?></td>
-                <td><span class="badge badge-<?= esc($inv['status']) ?>"><?= esc($inv['status']) ?></span></td>
+                <td><span class="badge badge-<?= esc($inv['status']) ?>"><?= esc(adminCodeLabel('admin.invoice.status.', (string)$inv['status'])) ?></span></td>
                 <td>
                     <a class="btn btn-sm" href="admin.php?p=invoice_pdf&id=<?= (int)$inv['id'] ?>" target="_blank">PDF</a>
                     <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=invoice_resend" style="display:inline">
@@ -554,7 +554,7 @@ function pageRma(): void {
         <p>
             <a class="btn btn-sm<?= $filter===null?' btn-primary':'' ?>" href="admin.php?p=rma"><?= esc(I18n::t('admin.common.all')) ?></a>
             <?php foreach (Rma::STATUSES as $s): ?>
-            <a class="btn btn-sm<?= $filter===$s?' btn-primary':'' ?>" href="admin.php?p=rma&status=<?= esc($s) ?>"><?= esc($s) ?></a>
+            <a class="btn btn-sm<?= $filter===$s?' btn-primary':'' ?>" href="admin.php?p=rma&status=<?= esc($s) ?>"><?= esc(adminCodeLabel('admin.rma.status.', $s)) ?></a>
             <?php endforeach; ?>
         </p>
         <?php if (!$rmas): ?>
@@ -573,7 +573,7 @@ function pageRma(): void {
                     <?php endforeach; ?>
                 </ul></td>
                 <td><?= esc($r['reason']) ?></td>
-                <td><span class="badge badge-<?= esc($r['status']) ?>"><?= esc($r['status']) ?></span></td>
+                <td><span class="badge badge-<?= esc($r['status']) ?>"><?= esc(adminCodeLabel('admin.rma.status.', (string)$r['status'])) ?></span></td>
                 <td style="white-space:nowrap">
                     <?php foreach ($next[$r['status']] ?? [] as $to => $label): ?>
                     <form method="post" action="admin.php?p=rma&action=status" style="display:inline">
