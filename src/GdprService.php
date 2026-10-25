@@ -55,6 +55,7 @@ class GdprService {
         'product_reviews'              => ['columns' => ['customer_id', 'author_name', 'title', 'body'], 'erase' => 'delete', 'export' => 'reviews'],
         'wishlist_items'               => ['columns' => ['owner_key', 'customer_id'], 'erase' => 'delete', 'export' => 'wishlist'],
         'abandoned_carts'              => ['columns' => ['customer_email', 'cart_data'], 'erase' => 'delete', 'export' => 'abandoned_carts'],
+        'back_in_stock_requests'       => ['columns' => ['email'], 'erase' => 'delete', 'export' => 'stock_notifications'],
         'rma_requests'                 => ['columns' => ['customer_id', 'reason', 'admin_note'], 'erase' => 'scrub', 'export' => 'rma_requests'],
         'rma_items'                    => ['columns' => ['name'], 'erase' => 'retain', 'export' => 'rma_requests', 'reason' => 'product lines of the retained RMA (credit-note trail)'],
         'return_receipts'              => ['columns' => ['note'], 'erase' => 'scrub', 'export' => 'rma_requests'],
@@ -427,6 +428,14 @@ class GdprService {
         $stmt->execute($ownership + [':cart_email' => $email, ':cart_store' => $store, ':cart_verified' => $ownership[':verified']]);
         $carts = $stmt->fetchAll();
 
+        // Anyone can type an address into the form: an unverified account does not own the requests under it.
+        $stockNotifications = [];
+        if ((string)$ownership[':verified'] === '1' && self::hasTable($db, 'back_in_stock_requests')) {
+            $stmt = $db->prepare("SELECT id, product_id, email, locale, created_at FROM back_in_stock_requests WHERE store_id = ? AND LOWER(email) = LOWER(?) ORDER BY id ASC");
+            $stmt->execute([$store, $email]);
+            $stockNotifications = $stmt->fetchAll();
+        }
+
         $stmt = $db->prepare("SELECT * FROM rma_requests
             WHERE store_id = :rma_store AND (customer_id = :rma_customer OR order_id IN (" . self::CUSTOMER_ORDERS . ")) ORDER BY id ASC");
         $stmt->execute($ownership + [':rma_store' => $store, ':rma_customer' => $customerId]);
@@ -464,6 +473,7 @@ class GdprService {
             'reviews' => $reviews,
             'wishlist' => $wishlist,
             'abandoned_carts' => $carts,
+            'stock_notifications' => $stockNotifications,
             'rma_requests' => $rmas,
             'withdrawals' => $withdrawals,
             'complaints' => $complaints,
@@ -626,7 +636,13 @@ class GdprService {
             ':guest' => 1, ':owner_email' => $email];
         $carts = $db->prepare("SELECT COUNT(*) FROM abandoned_carts WHERE LOWER(customer_email) = LOWER(?) AND (store_id = ? OR store_id IS NULL)");
         $carts->execute([$email, StoreContext::current()->id()]);
-        if (self::customerOrderIds($db, $ownership) === [] && (int)$carts->fetchColumn() === 0) {
+        $stockRequests = 0;
+        if (self::hasTable($db, 'back_in_stock_requests')) {
+            $stmt = $db->prepare("SELECT COUNT(*) FROM back_in_stock_requests WHERE store_id = ? AND LOWER(email) = LOWER(?)");
+            $stmt->execute([StoreContext::current()->id(), $email]);
+            $stockRequests = (int)$stmt->fetchColumn();
+        }
+        if (self::customerOrderIds($db, $ownership) === [] && (int)$carts->fetchColumn() === 0 && $stockRequests === 0) {
             throw new RuntimeException('No guest data for this e-mail');
         }
         return $ownership;
@@ -749,6 +765,13 @@ class GdprService {
         $stmt = $db->prepare("DELETE FROM abandoned_carts WHERE " . self::CUSTOMER_CARTS);
         $stmt->execute($ownership + [':cart_email' => $email, ':cart_store' => $store, ':cart_verified' => $ownership[':verified']]);
         $rows['abandoned_carts'] = $stmt->rowCount();
+
+        $rows['back_in_stock_requests'] = 0;
+        if (self::hasTable($db, 'back_in_stock_requests')) {
+            $stmt = $db->prepare("DELETE FROM back_in_stock_requests WHERE store_id = ? AND LOWER(email) = LOWER(?)");
+            $stmt->execute([$store, $email]);
+            $rows['back_in_stock_requests'] = $stmt->rowCount();
+        }
 
         foreach (['password_reset_tokens', 'customer_email_verifications'] as $tokenTable) {
             $rows[$tokenTable] = 0;

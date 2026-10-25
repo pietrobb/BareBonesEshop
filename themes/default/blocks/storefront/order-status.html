@@ -1,0 +1,25 @@
+<section class="shop-wrap withdrawal order-status">
+  <h1 class="h-lg">{{title}}</h1>
+  {{#if error}}<p class="form-error" role="alert">{{error}}</p>{{/if}}
+  {{#if order}}
+  <dl class="withdrawal-summary" data-order-status>
+    <dt>{{order_number_label}}</dt><dd>{{order.number}}</dd>
+    <dt>{{date_label}}</dt><dd>{{order.date}}</dd>
+    <dt>{{status_label}}</dt><dd data-order-status-value>{{order.status}}</dd>
+    <dt>{{payment_label}}</dt><dd>{{order.payment_status}}</dd>
+    {{#if order.tracking}}<dt>{{tracking_label}}</dt><dd>{{order.tracking}}</dd>{{/if}}
+    <dt>{{items_label}}</dt><dd>{{#each order.items}}{{name}} × {{quantity}}<br>{{/each}}</dd>
+    <dt>{{total_label}}</dt><dd>{{order.total}}</dd>
+  </dl>
+  {{#if order.pay_url}}<p><a class="btn-checkout" href="{{order.pay_url}}">{{pay_label}}</a></p>{{/if}}
+  {{/if}}
+  <p>{{intro}}</p>
+  <form method="post" class="withdrawal-form">
+    <input type="hidden" name="csrf_token" value="{{csrf_token}}">
+    <label for="order-status-number">{{order_number_label}}<span class="req" aria-hidden="true"> *</span></label>
+    <input id="order-status-number" name="order_number" value="{{values.order_number}}" required maxlength="64" autocomplete="off">
+    <label for="order-status-email">{{email_label}}<span class="req" aria-hidden="true"> *</span></label>
+    <input id="order-status-email" type="email" name="email" value="{{values.email}}" required maxlength="191" autocomplete="email">
+    <button type="submit" class="btn btn--primary">{{submit_label}}</button>
+  </form>
+</section>

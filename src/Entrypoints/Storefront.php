@@ -11,6 +11,7 @@ require_once __DIR__ . '/Storefront/CheckoutPages.php';
 require_once __DIR__ . '/Storefront/WithdrawalPages.php';
 require_once __DIR__ . '/Storefront/ComplaintPages.php';
 require_once __DIR__ . '/Storefront/PaymentLinkPages.php';
+require_once __DIR__ . '/Storefront/GuestPages.php';
 Security::headers();
 Security::sessionStart();
 Bootstrap::validateCustomerSession();
@@ -147,6 +148,16 @@ switch ($page) {
     case 'complaint':
         $title = Template::pageTitle($t('complaint.title'));
         $content = renderComplaint();
+        break;
+
+    case 'order-status':
+        $title = Template::pageTitle($t('order_status.title'));
+        $content = renderOrderStatus();
+        break;
+
+    case 'stock-notify':
+        $title = Template::pageTitle($t('back_in_stock.title'));
+        $content = renderStockNotify();
         break;
 
     case 'home':

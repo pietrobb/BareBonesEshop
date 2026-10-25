@@ -123,3 +123,84 @@ renderOrderItemsEditor(Orders::byId($r10xId), Orders::items($r10xId));
 assert_true(str_contains((string)ob_get_clean(), esc(I18n::t('admin.order.edit.not_pending'))), 'R10 UX7: the editor of a paid order explains why it is locked');
 $pdo->prepare("UPDATE orders SET status = 'cancelled', payment_status = 'cancelled' WHERE id = :id")->execute([':id' => $r10xId]);
 Orders::restoreStock($r10xId);
+
+// UX8: a guest finds an order by number + e-mail; a guest order's confirmation offers an account that takes the order;
+// a signed-in checkout can keep the address; an out-of-stock product takes "notify me" requests that are mailed on restock.
+echo "\n--- Audit round 10 (UX 8): guest order status, account after a guest order, saved addresses, back in stock ---\n";
+if (!function_exists('renderOrderStatus')) require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Storefront/GuestPages.php';
+if (!function_exists('renderProduct')) require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Storefront/CatalogPages.php';
+(require TEST_CLI_DIR . '/../migrations/20261025120000_back_in_stock_requests.php')->up($pdo, Db::isSqlite());
+$r10xGuestOrder = Orders::byId((int)($r10xCheckout['order_id'] ?? 0)) ?? [];
+$r10xLookup = static function (string $number, string $email, ?string $csrf = null): string {
+    $_SERVER['REQUEST_METHOD'] = 'POST';
+    $_POST = ['csrf_token' => $csrf ?? Security::csrfToken(), 'order_number' => $number, 'email' => $email];
+    $html = @renderOrderStatus(); // @: the CLI cannot set the 403/422 status once the test has printed
+    $_POST = [];
+    return $html;
+};
+$r10xHtml = $r10xLookup((string)($r10xGuestOrder['order_number'] ?? '?'), 'R10X-Web@Example.com');
+assert_true(str_contains($r10xHtml, (string)$r10xGuestOrder['order_number']) && str_contains($r10xHtml, esc(OrderStatusLabels::order('cancelled')))
+    && str_contains($r10xHtml, 'R10X-A item'), 'R10 UX8: number + e-mail (any case) shows the order status, the items and the total');
+assert_true(!str_contains($r10xHtml, 'Telefónna') && !str_contains($r10xHtml, '+421900000000'), 'R10 UX8: the guest status page shows no address and no phone');
+$r10xHtml = $r10xLookup((string)($r10xGuestOrder['order_number'] ?? '?'), 'someone-else@example.com');
+assert_true(str_contains($r10xHtml, esc(I18n::t('order_status.not_found'))) && !str_contains($r10xHtml, 'R10X-A item'), 'R10 UX8: the number with another e-mail reveals nothing');
+$r10xHtml = $r10xLookup((string)($r10xGuestOrder['order_number'] ?? '?'), 'r10x-web@example.com', 'forged');
+assert_true(str_contains($r10xHtml, esc(I18n::t('order_status.expired'))) && !str_contains($r10xHtml, 'R10X-A item'), 'R10 UX8: the lookup form needs the CSRF token');
+
+// The confirmation page of that guest order offers an account; creating it moves the order in and signs the shopper in.
+Customers::logout();
+assert_true(GuestCheckoutAccount::offered($r10xGuestOrder) && guestAccountOfferView($r10xGuestOrder, '') !== null, 'R10 UX8: a guest order with a new e-mail offers an account');
+$r10xWeak = GuestCheckoutAccount::create($r10xGuestOrder, 'short', 'sk');
+assert_equals([false, null], [$r10xWeak['ok'], Orders::byId((int)$r10xGuestOrder['id'])['customer_id'] ?? null], 'R10 UX8: a too-short password creates nothing and leaves the order a guest order');
+$r10xAccount = GuestCheckoutAccount::create($r10xGuestOrder, 'R10x-Strong-Pass', 'sk');
+$r10xCustomerId = (int)($r10xAccount['customer_id'] ?? 0);
+assert_true($r10xAccount['ok'] && $r10xCustomerId > 0, 'R10 UX8: the account is created (' . ($r10xAccount['error'] ?? 'ok') . ')');
+assert_equals([$r10xCustomerId, $r10xCustomerId], [(int)(Orders::byId((int)$r10xGuestOrder['id'])['customer_id'] ?? 0), (int)($_SESSION['customer_id'] ?? 0)],
+    'R10 UX8: the order belongs to the new account and the shopper is signed in');
+assert_true(!GuestCheckoutAccount::offered(Orders::byId((int)$r10xGuestOrder['id']) ?? []) && !GuestCheckoutAccount::create($r10xGuestOrder, 'R10x-Strong-Pass', 'sk')['ok'],
+    'R10 UX8: the offer is gone once the account exists (no second account, no takeover)');
+
+// Signed in: the checkout keeps the address once, and offers no sign-in link.
+$r10xView = checkoutAccountView($r10xCustomerId, false, true, false);
+assert_true($r10xView['login_url'] === '' && $r10xView['save_address_label'] !== '' && $r10xView['save_address_checked'], 'R10 UX8: a signed-in checkout offers to save the address (pre-checked while the book is empty)');
+$r10xAddress = ['name' => 'R10 Phone Buyer', 'street' => 'Telefónna 1', 'city' => 'Bratislava', 'zip' => '811 01', 'country' => 'sk', 'phone' => '+421900000000'];
+assert_equals([true, false, 1], [GuestCheckoutAccount::rememberAddress($r10xCustomerId, $r10xAddress), GuestCheckoutAccount::rememberAddress($r10xCustomerId, ['zip' => '81101'] + $r10xAddress),
+    count(Customers::addresses($r10xCustomerId, 'shipping'))], 'R10 UX8: the checkout address is saved once (same address again is not duplicated)');
+assert_true(!empty(Customers::addresses($r10xCustomerId, 'shipping')[0]['is_default']), 'R10 UX8: the first saved address becomes the default');
+Customers::logout();
+$r10xGuestView = checkoutAccountView(0, false, false, false);
+assert_true(str_contains($r10xGuestView['login_url'], 'p=login') && str_contains($r10xGuestView['login_url'], 'next=') && $r10xGuestView['save_address_label'] === '',
+    'R10 UX8: a guest checkout links to sign-in and back, and offers no address book');
+
+// Back in stock: R10X-D is sold out; a request waits, the restock queues one job, the worker mails it once and forgets the address.
+$r10xProduct->execute([':id' => 9774, ':name' => 'R10X-D item', ':slug' => 'r10x-d', ':sku' => 'R10X-D', ':price' => 900, ':stock' => 0]);
+$r10xStock->execute([':wh' => $r10xWarehouse, ':sku' => 'R10X-D', ':qty' => 0]);
+$r10xRow = static fn(int $id): array => (array)$pdo->query("SELECT * FROM products WHERE id = {$id}")->fetch(PDO::FETCH_ASSOC);
+assert_true(BackInStock::offered($r10xRow(9774)) && !BackInStock::offered($r10xRow(9772)), 'R10 UX8: the request is offered for a sold-out product only');
+$r10xSoldOutPage = (string)renderProduct($r10xRow(9774));
+$r10xInStockModel = StorefrontViewModel::product($r10xRow(9772))['product'] ?? [];
+assert_true(is_array(StorefrontViewModel::product($r10xRow(9774))['product']['back_in_stock'] ?? null) && array_key_exists('back_in_stock', $r10xInStockModel) && $r10xInStockModel['back_in_stock'] === null,
+    'R10 UX8: the product model carries the "notify me" form only when the product cannot be bought');
+assert_true(str_contains($r10xSoldOutPage, 'data-back-in-stock') && str_contains($r10xSoldOutPage, 'page=stock-notify') && str_contains($r10xSoldOutPage, esc(I18n::t('back_in_stock.submit'))),
+    'R10 UX8: the sold-out product page shows the "notify me" form');
+assert_equals(['subscribed', 'subscribed', 'invalid', 'invalid', 'available'], [BackInStock::subscribe(9774, 'R10x-Wait@Example.com', 'sk'), BackInStock::subscribe(9774, 'r10x-wait@example.com', 'sk'),
+    BackInStock::subscribe(9774, 'not-an-email', 'sk'), BackInStock::subscribe(999999, 'r10x-wait@example.com', 'sk'), BackInStock::subscribe(9772, 'r10x-wait@example.com', 'sk')],
+    'R10 UX8: subscribe outcomes (repeat, bad e-mail, unknown product, product in stock)');
+$r10xWaiting = static fn(): int => (int)$pdo->query("SELECT COUNT(*) FROM back_in_stock_requests WHERE product_id = 9774")->fetchColumn();
+assert_equals(1, $r10xWaiting(), 'R10 UX8: one request per product and e-mail');
+$r10xExport = GdprService::PII_REGISTRY['back_in_stock_requests'] ?? [];
+assert_equals(['delete', 'stock_notifications'], [$r10xExport['erase'] ?? null, $r10xExport['export'] ?? null], 'R10 UX8: the request e-mail is in the GDPR registry (export + erase)');
+
+JobQueue::pull(500);
+BackInStock::flush();
+Warehouse::setStock($r10xWarehouse, 'R10X-D', 4, 'count');
+Warehouse::syncProductStock(['R10X-D']);
+assert_equals(1, BackInStock::flush(), 'R10 UX8: the restock queues one back_in_stock job');
+$r10xJobs = array_values(array_filter(JobQueue::pull(500), static fn(array $job): bool => ($job['type'] ?? '') === 'back_in_stock'
+    && in_array('R10X-D', (array)($job['payload']['skus'] ?? []), true)));
+assert_equals([['R10X-D']], array_map(static fn(array $job): array => (array)($job['payload']['skus'] ?? []), $r10xJobs), 'R10 UX8: one job names the refilled SKU');
+$r10xMailLog = static fn(): int => (int)$pdo->query("SELECT COUNT(*) FROM email_log WHERE template = 'back_in_stock' AND recipient = 'r10x-wait@example.com'")->fetchColumn();
+$r10xMailsBefore = $r10xMailLog();
+assert_equals(1, BackInStock::process(['R10X-D']), 'R10 UX8: the worker mails the waiting request');
+assert_equals([1, 0, 0], [$r10xMailLog() - $r10xMailsBefore, $r10xWaiting(), BackInStock::process(['R10X-D'])], 'R10 UX8: one e-mail, then the request is deleted and a second run sends nothing');
+assert_true(is_file(dirname(TEST_CLI_DIR) . '/templates/emails/sk/back_in_stock.html') && is_file(dirname(TEST_CLI_DIR) . '/templates/emails/en/back_in_stock.subject.txt'), 'R10 UX8: the e-mail template exists');

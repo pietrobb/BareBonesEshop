@@ -1,5 +1,7 @@
 <?php
 /** Cart/checkout data presenters and checkout transport. Markup is theme-owned. */
+require_once __DIR__ . '/GuestPages.php';
+
 function renderCart(): string {
     global $t;
     $breadcrumbs = [
@@ -143,7 +145,8 @@ function renderCheckout(): string {
         'coupon_code' => $couponCode, 'coupon_error' => $couponError,
         'coupon_applied' => $couponDiscount > 0 ? sprintf($t('coupon_applied'), $couponCode, $price($couponDiscount)) : ($preview['coupon_applied'] ? sprintf($t('coupon_applied_free_shipping'), $couponCode) : ''),
         't' => I18n::all(),
-    ] + CheckoutService::pickupView($shippingRates, $selectedRate, $country, $state['values']['zip'], $form('pickup_point'), $form('pickup_search')) + CheckoutService::companyLabels());
+    ] + CheckoutService::pickupView($shippingRates, $selectedRate, $country, $state['values']['zip'], $form('pickup_point'), $form('pickup_search')) + CheckoutService::companyLabels()
+        + checkoutAccountView($customerId, (bool)$quote['digital'], $state['addresses'] === [], $posted));
 }
 
 /**
@@ -173,6 +176,8 @@ function processCheckout(): array {
     $result = CheckoutService::execute($input, require dirname(__DIR__, 3) . '/config.php');
     if (!empty($result['success'])) {
         CheckoutService::rememberCoupon(''); // used by this order; the next checkout starts without it
+        $customerId = (int)($_SESSION['customer_id'] ?? 0);
+        if ($customerId > 0 && ($input['save_address'] ?? '') === '1') GuestCheckoutAccount::rememberAddress($customerId, $input);
         // A redirect outside form-action is dropped silently by the browser; offer a link instead.
         $pending = !empty($result['payment_url']) && !Security::formActionAllows((string)$result['payment_url'])
             ? CheckoutSession::pendingPayment() : null;
@@ -200,6 +205,7 @@ function renderOrderDone(string $orderNum): string {
     if ($order && !CheckoutSession::verifyConfirmation((int)$order['id'], $confirmationToken, CheckoutSession::browserSessionId())) $order = null;
     // Never echo an unverified ?order= value back: only a confirmed order shows its number.
     if (!$order) return Template::render('storefront/status-message', ['message' => $t('order_done_unverified')]);
+    $accountError = $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'create_account' ? createGuestAccount($order) : '';
     $payUrl = '';
     $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
     $status = (string)($order['payment_status'] ?? 'pending');
@@ -232,6 +238,7 @@ function renderOrderDone(string $orderNum): string {
         'payment_error' => $paymentFailed ? str_replace('{order}', (string)$order['order_number'], $t($retry ? 'order_done.payment_retry' : 'order_done.payment_failed')) : '',
         'bank_transfer_html' => BankTransferInstructions::html($order),
         'email_message' => $paymentFailed ? '' : $t('order_email'), 'home_url' => Template::storeUrl('/'), 'continue_label' => $t('continue_shopping'),
+        'account_offer' => guestAccountOfferView($order, $accountError),
     ]);
 }
 

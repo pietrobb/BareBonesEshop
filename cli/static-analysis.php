@@ -190,7 +190,7 @@ $architectureBudgets = [
     // +1 coupling: Search::filtersFromQuery turns the search route's sort/price/category parameters into search options (A14.2).
     // +6 lines: the ?page=withdrawal route (R8 electronic withdrawal function, Directive 2011/83/EU art. 11a).
     // +6 lines: the ?page=complaint route (R8 complaints, Directive (EU) 2019/771).
-    /* R9: Impressum page; R10 UX3: ?page=pay */ 'src/Entrypoints/Storefront.php' => ['lines' => 170, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
+    /* R9: Impressum page; R10 UX3: ?page=pay; R10 UX8: ?page=order-status and ?page=stock-notify (+11) */ 'src/Entrypoints/Storefront.php' => ['lines' => 181, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
     // Customer account portal behind the thin /account.php (registration, login, reset, GDPR, addresses, orders).
     // +1 coupling: Str::normalizeEmail is the one e-mail normalisation shared with Customers and Pricing.
     // +2 coupling: DigitalDelivery issues the downloads page's links; StoreContext limits the profile languages to the store's.
@@ -206,12 +206,15 @@ $architectureBudgets = [
     // +2 lines (renderCheckout): the form's coupon attempts spend the coupon API's throttle (round 4 final review).
     // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.
     // +3 lines, +1 coupling R10 UX3: a failed payment on order-done offers a new payment link (PaymentLink) instead of "write to us".
-    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 259, 'functions' => 7, 'max_function_lines' => 102, 'coupling' => 14],
+    // +7 lines, +1 coupling R10 UX8: checkout sign-in link + save address, account offer on a guest order's confirmation (GuestPages, GuestCheckoutAccount).
+    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 266, 'functions' => 7, 'max_function_lines' => 103, 'coupling' => 15],
     // R10 UX3: ?page=pay — the e-mailed payment link (confirm → gateway); the rules live in PaymentLink.
     'src/Entrypoints/Storefront/PaymentLinkPages.php' => ['lines' => 40, 'functions' => 1, 'max_function_lines' => 30, 'coupling' => 6],
     // Ratcheted: canonical/robots/hreflang/JSON-LD moved to StorefrontSeo (storefront SEO audit).
     // +2 coupling: cart currency decimals for the JS config and the one-shot StorefrontFlash notice.
-    /* R8: footer ADR body (ConsumerNotice), accessibility link, guest cookie settings; R9: Impressum link */ 'src/Entrypoints/Storefront/Layout.php' => ['lines' => 146, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
+    /* R8: footer ADR body (ConsumerNotice), accessibility link, guest cookie settings; R9: Impressum link; R10 UX8: order status link */ 'src/Entrypoints/Storefront/Layout.php' => ['lines' => 147, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
+    // R10 UX8: guest order status lookup, back-in-stock form, checkout/confirmation account views; the rules live in BackInStock and GuestCheckoutAccount.
+    'src/Entrypoints/Storefront/GuestPages.php' => ['lines' => 108, 'functions' => 6, 'max_function_lines' => 32, 'coupling' => 10],
     'src/Entrypoints/Storefront/ProductStatusPages.php' => ['lines' => 20, 'functions' => 1, 'max_function_lines' => 18, 'coupling' => 3],
     // R8 withdrawal function: identify → review → confirm; the rules live in Withdrawal.
     'src/Entrypoints/Storefront/WithdrawalPages.php' => ['lines' => 62, 'functions' => 1, 'max_function_lines' => 60, 'coupling' => 4],

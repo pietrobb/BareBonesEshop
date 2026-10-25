@@ -77,6 +77,11 @@ final class StorefrontViewModel
             'requires_variant' => $variants !== [],
             'relations' => $relations,
             'cart_form' => self::cartForm(),
+            // R10 UX8: out of stock (not merely unpriced in this store) → "notify me when back in stock".
+            'back_in_stock' => !$availability['purchasable'] && Pricing::soldInStore($currency) && BackInStock::offered($source) ? [
+                'action' => Template::storeUrl('/?page=stock-notify'), 'csrf_token' => Security::csrfToken(),
+                'email' => (string)(Customers::current()['email'] ?? ''),
+            ] : null,
         ];
 
         $jsonLd = [
