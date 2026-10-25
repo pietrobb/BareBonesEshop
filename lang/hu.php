@@ -624,6 +624,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.edit.payment_started' => 'A tételek nem módosíthatók, ha a rendelés fizetése már elkezdődött.',
     'admin.order.edit.invoiced' => 'A tételek számla kiállítása után nem módosíthatók.',
     'admin.order.edit.coupon' => 'A kuponnal leadott rendelés tételei nem módosíthatók.',
+    'admin.order.edit.vat_changed' => 'Az új tételek adózása eltérne a rendelésétől (megváltozott az áfakezelés). Törölje a rendelést, és rögzítsen újat.',
     'admin.order.edit.out_of_stock' => 'Nincs elég készlet ezekhez a tételekhez.',
     'admin.order.msg.payment_link_sent' => 'A fizetési linket e-mailben elküldtük az ügyfélnek.',
     'admin.order.msg.payment_link_failed' => 'A fizetési linket nem sikerült elküldeni (a rendelés nem fizethető online, vagy túl sok linket küldtek).',

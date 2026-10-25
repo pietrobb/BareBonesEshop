@@ -624,6 +624,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.edit.payment_started' => 'Položky nelze změnit, když platba objednávky už začala.',
     'admin.order.edit.invoiced' => 'Položky nelze změnit po vystavení faktury.',
     'admin.order.edit.coupon' => 'Položky objednávky s kupónem nelze změnit.',
+    'admin.order.edit.vat_changed' => 'Nové položky by se zdanily jinak než objednávka (změnil se režim DPH). Objednávku zrušte a zadejte novou.',
     'admin.order.edit.out_of_stock' => 'Na skladě není dost zboží pro tyto položky.',
     'admin.order.msg.payment_link_sent' => 'Odkaz na platbu byl zákazníkovi odeslán e-mailem.',
     'admin.order.msg.payment_link_failed' => 'Odkaz na platbu se nepodařilo odeslat (objednávku nelze zaplatit online nebo bylo odesláno příliš mnoho odkazů).',

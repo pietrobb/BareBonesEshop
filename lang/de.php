@@ -624,6 +624,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.edit.payment_started' => 'Die Positionen können nicht mehr geändert werden, sobald eine Zahlung begonnen wurde.',
     'admin.order.edit.invoiced' => 'Die Positionen können nach Ausstellung einer Rechnung nicht geändert werden.',
     'admin.order.edit.coupon' => 'Die Positionen einer Bestellung mit Gutschein können nicht geändert werden.',
+    'admin.order.edit.vat_changed' => 'Die neuen Positionen würden anders besteuert als die Bestellung (USt-Behandlung geändert). Stornieren Sie die Bestellung und legen Sie eine neue an.',
     'admin.order.edit.out_of_stock' => 'Nicht genügend Bestand für diese Positionen.',
     'admin.order.msg.payment_link_sent' => 'Der Zahlungslink wurde dem Kunden per E-Mail gesendet.',
     'admin.order.msg.payment_link_failed' => 'Der Zahlungslink konnte nicht gesendet werden (die Bestellung kann nicht online bezahlt werden oder es wurden zu viele Links gesendet).',

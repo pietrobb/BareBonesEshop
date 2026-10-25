@@ -24,15 +24,19 @@ class CheckoutService {
     /**
      * VAT scenario of a checkout for the buyer's country, VAT ID and delivery method. execute() charges by it and the
      * previews (cart, checkout form, shipping/payment API) price by it, so reverse charge and export show the net
-     * amounts the order charges. $verifyVatId=false treats a VAT ID as unverified (no VIES call).
+     * amounts the order charges. $verifyVatId=false treats a VAT ID as unverified (no VIES call); $knownVatIdStatus is
+     * the result of an earlier check (an order being edited keeps the verification it was placed with).
      * @return array{context: array, scenario: array, net: bool, vat_id_valid: bool, vat_id_status: ?string, seller_country: string, tax_provider: string}
      */
-    public static function vatContext(string $country, string $vatId, string $shippingMethod, bool $verifyVatId = true): array {
+    public static function vatContext(string $country, string $vatId, string $shippingMethod, bool $verifyVatId = true, ?string $knownVatIdStatus = null): array {
         $store = StoreContext::current()->config();
         $sellerCountry = strtoupper((string)(($store['legal']['country'] ?? null) ?: 'SK'));
         $vatIdValid = false;
         $vatIdStatus = null;
-        if ($vatId !== '' && $verifyVatId) {
+        if ($vatId !== '' && $knownVatIdStatus !== null) {
+            $vatIdStatus = $knownVatIdStatus;
+            $vatIdValid = $knownVatIdStatus === 'valid';
+        } elseif ($vatId !== '' && $verifyVatId) {
             try {
                 $vatIdStatus = (string)VatService::validateVatId($vatId, VatService::defaultValidator())['status'];
                 $vatIdValid = $vatIdStatus === 'valid';

@@ -631,6 +631,7 @@ return [
     'admin.order.edit.payment_started' => 'Položky nemožno zmeniť, keď sa platba objednávky už začala.',
     'admin.order.edit.invoiced' => 'Položky nemožno zmeniť po vystavení faktúry.',
     'admin.order.edit.coupon' => 'Položky objednávky s kupónom nemožno zmeniť.',
+    'admin.order.edit.vat_changed' => 'Nové položky by sa zdanili inak ako objednávka (zmenil sa režim DPH). Objednávku zrušte a zadajte novú.',
     'admin.order.edit.out_of_stock' => 'Na sklade nie je dosť tovaru pre tieto položky.',
     'admin.order.msg.payment_link_sent' => 'Odkaz na platbu bol zákazníkovi odoslaný e-mailom.',
     'admin.order.msg.payment_link_failed' => 'Odkaz na platbu sa nepodarilo odoslať (objednávku nemožno zaplatiť online alebo bolo odoslaných priveľa odkazov).',

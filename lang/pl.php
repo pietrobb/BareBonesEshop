@@ -624,6 +624,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.edit.payment_started' => 'Pozycji nie można zmienić po rozpoczęciu płatności za zamówienie.',
     'admin.order.edit.invoiced' => 'Pozycji nie można zmienić po wystawieniu faktury.',
     'admin.order.edit.coupon' => 'Pozycji zamówienia z kuponem nie można zmienić.',
+    'admin.order.edit.vat_changed' => 'Nowe pozycje byłyby opodatkowane inaczej niż zamówienie (zmienił się sposób rozliczenia VAT). Anuluj zamówienie i wprowadź nowe.',
     'admin.order.edit.out_of_stock' => 'Za mało towaru w magazynie dla tych pozycji.',
     'admin.order.msg.payment_link_sent' => 'Link do płatności został wysłany klientowi e-mailem.',
     'admin.order.msg.payment_link_failed' => 'Nie udało się wysłać linku do płatności (zamówienia nie można opłacić online lub wysłano zbyt wiele linków).',

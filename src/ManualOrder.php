@@ -71,7 +71,7 @@ final class ManualOrder {
         if ($name === '' || !$email) return self::refusal('admin.order.manual.name_email');
         if ($lines === []) return self::refusal('admin.order.manual.no_lines');
         $customerId = self::customerIdFor($email);
-        $priced = self::priced($lines, $buyer, $customerId, true);
+        $priced = self::priced($lines, $buyer, $customerId, null);
         if (isset($priced['error'])) return self::refusal($priced['error'], (string)($priced['detail'] ?? ''));
 
         $customer = [
@@ -128,14 +128,20 @@ final class ManualOrder {
             'pickup_point' => (string)($rate['pickup_point']['id'] ?? ''),
         ];
         $customerId = !empty($order['customer_id']) ? (int)$order['customer_id'] : null;
+        // The VAT ID was checked when the order was placed: reverse charge means it was valid then. The edit keeps that
+        // verification instead of asking VIES again inside the stock transaction.
+        $storedScenario = (string)($order['vat_scenario'] ?? '');
+        $vatIdStatus = $storedScenario === VatService::SCENARIO_REVERSE_CHARGE ? 'valid' : 'unverified';
         $detail = '';
-        $error = Orders::replaceItems($orderId, static function () use ($lines, $buyer, $customerId, $order, &$detail): array {
-            $priced = self::priced($lines, $buyer, $customerId, false);
+        $error = Orders::replaceItems($orderId, static function () use ($lines, $buyer, $customerId, $order, $vatIdStatus, $storedScenario, &$detail): array {
+            $priced = self::priced($lines, $buyer, $customerId, $vatIdStatus);
             if (isset($priced['error'])) {
                 $detail = (string)($priced['detail'] ?? '');
                 return $priced;
             }
             if (strtolower($priced['currency']) !== strtolower((string)$order['currency'])) return ['error' => 'admin.order.manual.currency'];
+            // Never re-price an order under a VAT treatment it was not placed under (e.g. an OSS threshold crossed since).
+            if ($storedScenario !== '' && $priced['vat_scenario'] !== $storedScenario) return ['error' => 'admin.order.edit.vat_changed'];
             return $priced;
         });
         if ($error !== null) return self::refusal($error, $detail);
@@ -159,11 +165,12 @@ final class ManualOrder {
 
     /**
      * Price $lines for $buyer the way checkout does. Returns ['error' => key, 'detail' => ...] or the order inputs.
+     * $vatIdStatus null checks the VAT ID in VIES; else it is the status the order was placed with.
      * @return array<string, mixed>
      */
-    private static function priced(array $lines, array $buyer, ?int $customerId, bool $verifyVatId): array {
+    private static function priced(array $lines, array $buyer, ?int $customerId, ?string $vatIdStatus): array {
         if (!function_exists('shippingCartMetrics')) require_once __DIR__ . '/Http/ApiHandlers.php';
-        return self::withShopperSession($lines, $customerId, static function () use ($lines, $buyer, $customerId, $verifyVatId): array {
+        return self::withShopperSession($lines, $customerId, static function () use ($lines, $buyer, $customerId, $vatIdStatus): array {
             $country = strtoupper(trim(Security::str($buyer['country'] ?? '')));
             if (!preg_match('/^[A-Z]{2}$/', $country)) return ['error' => 'checkout.error.invalid_country'];
             $shippingMethod = Security::slug($buyer['shipping_method'] ?? '');
@@ -172,7 +179,7 @@ final class ManualOrder {
             $company = CheckoutService::buyerCompany($buyer);
             if ($company['error'] !== null) return ['error' => 'admin.order.manual.company', 'detail' => (string)$company['error']];
             $vatId = $company['vat_id'];
-            $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, $verifyVatId);
+            $vat = CheckoutService::vatContext($country, $vatId, $shippingMethod, true, $vatIdStatus);
             $cart = Cart::enriched($vat['context']);
             $requested = [];
             foreach ($lines as $line) {

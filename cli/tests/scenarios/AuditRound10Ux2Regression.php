@@ -110,6 +110,38 @@ assert_equals('admin.order.edit.not_pending', Orders::editRefusal(Orders::byId($
 assert_equals([false, 'admin.order.edit.not_pending'], array_values(array_intersect_key(ManualOrder::editItems($r10xId, ManualOrder::parseLines('R10X-B 1')['lines']), ['ok' => 1, 'error' => 1])),
     'R10 UX7: editItems refuses a paid order');
 
+// An EU business buyer whose VAT ID checked out valid was priced under reverse charge; editing its lines keeps that
+// treatment (finding run 193: the edit re-priced with the VAT ID unverified and added VAT).
+$pdo->prepare("DELETE FROM vat_id_cache WHERE vat_id = 'CZ12345678'")->execute();
+$pdo->prepare("INSERT INTO vat_id_cache (vat_id, country, status, trader_name, checked_at, ttl_seconds) VALUES ('CZ12345678', 'CZ', 'valid', 'R10 B2B s.r.o.', :at, 86400)")
+    ->execute([':at' => gmdate('Y-m-d H:i:s')]);
+$r10xB2bBuyer = ['name' => 'R10 B2B Buyer', 'email' => 'r10x-b2b@example.com', 'country' => 'CZ', 'street' => 'Obchodní 1', 'city' => 'Praha', 'zip' => '11000',
+    'company' => 'R10 B2B s.r.o.', 'vat_id' => 'CZ12345678', 'shipping_method' => 'packeta', 'payment_method' => 'bank_transfer', 'locale' => 'cs'];
+$r10xB2b = ManualOrder::create(ManualOrder::parseLines('R10X-B 1')['lines'], $r10xB2bBuyer, false);
+$r10xB2bId = (int)($r10xB2b['order_id'] ?? 0);
+$r10xB2bOrder = Orders::byId($r10xB2bId) ?? [];
+assert_equals([true, VatService::SCENARIO_REVERSE_CHARGE, 0], [$r10xB2b['ok'], (string)($r10xB2bOrder['vat_scenario'] ?? ''), (int)($r10xB2bOrder['vat_total'] ?? -1)],
+    'R10 UX7: a manual order for an EU business with a valid VAT ID is reverse charge (' . ($r10xB2b['error'] ?? 'ok') . ' ' . ($r10xB2b['detail'] ?? '') . ')');
+// Expired cache: the edit must not depend on asking VIES again.
+$pdo->prepare("UPDATE vat_id_cache SET ttl_seconds = 0 WHERE vat_id = 'CZ12345678'")->execute();
+$r10xB2bEdit = ManualOrder::editItems($r10xB2bId, ManualOrder::parseLines('R10X-B 2')['lines']);
+$r10xB2bEdited = Orders::byId($r10xB2bId) ?? [];
+assert_true($r10xB2bEdit['ok'], 'R10 UX7: the business order\'s lines are changed (' . ($r10xB2bEdit['error'] ?? 'ok') . ')');
+assert_equals([VatService::SCENARIO_REVERSE_CHARGE, 0, 2 * (int)($r10xB2bOrder['subtotal'] ?? -1)], [(string)($r10xB2bEdited['vat_scenario'] ?? ''), (int)($r10xB2bEdited['vat_total'] ?? -1), (int)($r10xB2bEdited['subtotal'] ?? -1)],
+    'R10 UX7: editing a reverse-charge order keeps reverse charge, adds no VAT and keeps net line prices');
+$pdo->prepare("UPDATE vat_id_cache SET ttl_seconds = 86400 WHERE vat_id = 'CZ12345678'")->execute();
+$r10xB2bFresh = ManualOrder::create(ManualOrder::parseLines('R10X-B 2')['lines'], $r10xB2bBuyer, false);
+assert_equals((int)(Orders::byId((int)($r10xB2bFresh['order_id'] ?? 0))['total'] ?? -1), (int)($r10xB2bEdited['total'] ?? -2),
+    'R10 UX7: the edited business order costs what a new order with the same lines costs');
+// A treatment the order was not placed under is never applied silently: the edit is refused instead.
+$pdo->prepare("UPDATE orders SET vat_scenario = :sc WHERE id = :id")->execute([':sc' => VatService::SCENARIO_EXPORT, ':id' => $r10xB2bId]);
+$r10xB2bChanged = ManualOrder::editItems($r10xB2bId, ManualOrder::parseLines('R10X-B 1')['lines']);
+assert_equals([false, 'admin.order.edit.vat_changed', 2], [$r10xB2bChanged['ok'], $r10xB2bChanged['error'], (int)(Orders::items($r10xB2bId)[0]['quantity'] ?? 0)],
+    'R10 UX7: an edit whose VAT treatment differs from the order\'s is refused and changes nothing');
+foreach ([$r10xB2bId, (int)($r10xB2bFresh['order_id'] ?? 0)] as $r10xCancel) {
+    if ($r10xCancel > 0) OrderWorkflow::transition($r10xCancel, 'cancelled', 'R10 UX7 B2B fixture');
+}
+
 // Admin screens: the form and the line editor render; the editor names the reason when the lines cannot change.
 if (!function_exists('esc')) require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Shared.php';
 if (!function_exists('pageOrderNew')) require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/ManualOrders.php';

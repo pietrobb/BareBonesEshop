@@ -778,6 +778,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.edit.payment_started' => 'Los artículos no se pueden cambiar una vez iniciado el pago del pedido.',
     'admin.order.edit.invoiced' => 'Los artículos no se pueden cambiar después de emitir una factura.',
     'admin.order.edit.coupon' => 'Los artículos de un pedido con cupón no se pueden cambiar.',
+    'admin.order.edit.vat_changed' => 'Los nuevos artículos tributarían de forma distinta al pedido (cambió el régimen de IVA). Cancele el pedido e introduzca uno nuevo.',
     'admin.order.edit.out_of_stock' => 'No hay existencias suficientes para estos artículos.',
     'admin.order.msg.payment_link_sent' => 'Se ha enviado al cliente el enlace de pago por correo electrónico.',
     'admin.order.msg.payment_link_failed' => 'No se ha podido enviar el enlace de pago (el pedido no se puede pagar en línea o se han enviado demasiados enlaces).',

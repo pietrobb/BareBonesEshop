@@ -626,6 +626,7 @@ return [
     'admin.order.edit.payment_started' => 'The items cannot be changed once a payment has been started for the order.',
     'admin.order.edit.invoiced' => 'The items cannot be changed after an invoice has been issued.',
     'admin.order.edit.coupon' => 'The items of an order with a coupon cannot be changed.',
+    'admin.order.edit.vat_changed' => 'The new items would be taxed differently from the order (VAT treatment changed). Cancel the order and enter a new one.',
     'admin.order.edit.out_of_stock' => 'Not enough stock for these items.',
     'admin.order.msg.payment_link_sent' => 'The payment link was e-mailed to the customer.',
     'admin.order.msg.payment_link_failed' => 'The payment link could not be sent (the order cannot be paid online, or too many links were sent).',
