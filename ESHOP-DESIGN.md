@@ -3567,8 +3567,8 @@ class AuditLog {
 
     private static function currentActor(): string {
         if (php_sapi_name() === 'cli') return 'cron:' . basename($_SERVER['SCRIPT_NAME']);
-        if (!empty($_SERVER['PHP_AUTH_USER'])) return 'admin:' . $_SERVER['PHP_AUTH_USER'];
-        if (!empty($_SERVER['HTTP_X_WEBHOOK_SOURCE'])) return 'webhook:' . $_SERVER['HTTP_X_WEBHOOK_SOURCE'];
+        // Only a verified admin session names the actor; request headers can be forged.
+        if (!empty($_SESSION['admin_authenticated']) && !empty($_SESSION['admin_user'])) return 'admin:' . $_SESSION['admin_user'];
         return 'system';
     }
 }
@@ -3832,9 +3832,9 @@ if ($product['status'] === 'archived') {
 
 ```php
 // cli/hash-password.php
-// Usage: php cli/hash-password.php "mypassword"
-$password = $argv[1] ?? null;
-if (!$password) { echo "Usage: php hash-password.php <password>\n"; exit(1); }
+// Usage: php cli/hash-password.php   (password from stdin or BBE_ADMIN_PASSWORD, never argv)
+if (isset($argv[1])) { fwrite(STDERR, "Passwords are not accepted in command arguments\n"); exit(1); }
+$password = getenv('BBE_ADMIN_PASSWORD') ?: rtrim((string)fgets(STDIN), "\r\n");
 echo password_hash($password, PASSWORD_ARGON2ID) . "\n";
 ```
 

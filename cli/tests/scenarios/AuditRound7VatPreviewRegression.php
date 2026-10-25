@@ -111,6 +111,8 @@ foreach (['shipping', 'payment', 'total'] as $id) {
 }
 echo 'R7VRESULT' . json_encode($summary);
 PHP);
+    // Linux: an earlier scenario's child process can unlink the suite's -wal file; checkpoint the cart's product first.
+    $pdo->query('PRAGMA wal_checkpoint(TRUNCATE)')->fetchAll();
     $r7vProcess = proc_open([PHP_BINARY, $r7vRoot . '/preview.php', dirname(TEST_CLI_DIR), $testDbPath], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $r7vPipes);
     fclose($r7vPipes[0]);
     $r7vOut = stream_get_contents($r7vPipes[1]) . stream_get_contents($r7vPipes[2]);

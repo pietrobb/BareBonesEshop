@@ -25,6 +25,15 @@ assert_true($a071OrderId > 0, 'A07.1 fixture: pending bank-transfer order exists
 $a071Root = test_fixture_path('admin-roles');
 mkdir($a071Root);
 mkdir($a071Root . '/sessions');
+// Router runs sign in as real DB identities: a legacy config session ends once the database holds an account (r10 M1).
+putenv('BBE_ADMIN_IDENTITY_KEY=' . base64_encode(str_repeat('R', 32)));
+$a071Tokens = [];
+foreach (['editor', 'fulfillment', 'manager'] as $a071Role) {
+    AdminIdentity::grantStore(AdminIdentity::create('a071-' . $a071Role, 'A071-password-' . $a071Role, $a071Role, false), 'default', ['*']);
+    $a071Tokens[$a071Role] = (string)(AdminIdentity::authenticate('a071-' . $a071Role, 'A071-password-' . $a071Role, '', '127.0.7.2', 'A071')['token'] ?? '');
+}
+putenv('BBE_ADMIN_IDENTITY_KEY');
+file_put_contents($a071Root . '/tokens.json', json_encode($a071Tokens));
 file_put_contents($a071Root . '/admin.php', <<<'PHP'
 <?php
 [, $root, $dbPath, $dir, $mode, $role, $page, $action, $postJson] = $argv;
@@ -40,7 +49,7 @@ session_start();
 $post = json_decode($postJson, true);
 $_SESSION = ['csrf_token' => 'a071', 'admin_user' => 'a071-' . $role, 'admin_role' => $role];
 if ($mode === 'router') {
-    $_SESSION += ['admin_authenticated' => true, 'admin_last_seen' => time()];
+    $_SESSION += ['admin_identity_token' => json_decode(file_get_contents($dir . '/tokens.json'), true)[$role]];
 } else {
     $_SESSION += ['admin_identity_id' => 1, 'admin_store_permissions' => ['default' => $post['__grants']]];
 }

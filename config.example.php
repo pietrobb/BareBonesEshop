@@ -65,6 +65,8 @@ return [
     'admin_session_lifetime_seconds' => 28800,
     // External API v1: requests per minute per API key, across all source addresses.
     'api_client_rate_limit' => 600,
+    // Storefront JSON API: 120 requests per minute per action and IP, and at most this many per IP in total (0 = off).
+    'api_ip_limit' => 600,
     // Checkout: per IP (10/min) and per session (5 per 15 min) always apply. Optional shop-wide cap on
     // checkout attempts per minute (0 = off); refused attempts never count towards it.
     'checkout_global_limit' => 0,
@@ -250,7 +252,7 @@ return [
     // merchant/secret and confirmed by the status API. Env PAY_COMGATE_* overrides these values.
     'comgate_merchant' => '',
     'comgate_secret'   => '',
-    'comgate_test'     => true, // false creates real (production) payments
+    'comgate_test'     => false, // true creates test payments (staging only: orders count as paid without money; doctor warns)
 
     // ThePay (provider code thepay). Allow the shop server's IP in the ThePay administration
     // (Implementation). Notifications need no secret: each one is confirmed by the signed payment

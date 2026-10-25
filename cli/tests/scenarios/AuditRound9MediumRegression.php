@@ -175,7 +175,7 @@ $r9prDb = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRM
 $r9prDb->exec('CREATE TABLE payment_methods (store_id TEXT, code TEXT, provider TEXT, active INTEGER, requires_online INTEGER)');
 $r9prDb->exec("INSERT INTO payment_methods VALUES ('default', 'card', 'stripe', 1, 1), ('cz', 'payu', 'payu', 1, 1), ('cz', 'bnpl', 'acme', 1, 1),
     ('default', 'gopay', 'gopay', 0, 1), ('default', 'bank_transfer', 'manual', 1, 0)");
-$r9prCfg = ['provider_defaults' => ['payment' => 'gopay'], 'stripe_secret_key' => 'sk_test_' . str_repeat('A1', 12), 'stripe_webhook_secret' => 'whsec_' . str_repeat('b2', 10),
+$r9prCfg = ['provider_defaults' => ['payment' => 'gopay'], 'stripe_secret_key' => 'sk_live_' . str_repeat('A1', 12), 'stripe_webhook_secret' => 'whsec_' . str_repeat('b2', 10),
     'payu_pos_id' => '300746', 'payu_client_id' => '300746', 'payu_client_secret' => str_repeat('c', 32)];
 $r9prChecks = [];
 foreach (PaymentReadiness::checks($r9prDb, $r9prCfg) as [$r9prStatus, $r9prName, $r9prMessage]) $r9prChecks[$r9prName] = [$r9prStatus, $r9prMessage];

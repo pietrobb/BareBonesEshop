@@ -43,6 +43,10 @@ class Db {
                 throw new RuntimeException("SQLite directory must exist and be writable: {$dbDir}");
             }
             SqliteMaintenance::assertOpen($sqlitePath);
+            // Only the CLI (install, seed, migrate) may create the database; a web request would silently serve a new empty one.
+            if (PHP_SAPI !== 'cli' && !is_file($sqlitePath)) {
+                throw new RuntimeException("SQLite database file does not exist: {$sqlitePath}");
+            }
             self::$pdo = new $pdoClass('sqlite:' . $sqlitePath, null, null, [
                 PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,

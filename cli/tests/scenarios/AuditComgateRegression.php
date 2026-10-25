@@ -11,7 +11,7 @@ $a165Ready = is_file(dirname(TEST_CLI_DIR) . '/adapters/contrib/ComgatePayment.p
 assert_true($a165Ready, 'A16.5 Comgate: adapter exists');
 assert_equals('ComgatePayment', Adapters::registry('payment')['comgate']['class'] ?? null, 'A16.5 Comgate: built-in provider code comgate is registered');
 
-$a165Cfg = ['comgate_merchant' => '465123', 'comgate_secret' => 'a165-secret-Xy9'];
+$a165Cfg = ['comgate_merchant' => '465123', 'comgate_secret' => 'a165-secret-Xy9', 'comgate_test' => true]; // staging fixture: test payments
 $a165Status = static fn(string $transId, string $status, string $price = '1990', string $curr = 'EUR', string $test = 'true', ?string $refId = null): array => ['status' => 200, 'body' => json_encode([
     'code' => 0, 'message' => 'OK', 'test' => $test, 'price' => $price, 'curr' => $curr, 'label' => 'A165', 'refId' => $refId ?? 'A165-' . $transId,
     'method' => 'CARD_CZ_CSOB_2', 'email' => 'buyer@example.com', 'transId' => $transId, 'status' => $status])];
@@ -70,7 +70,7 @@ if ($a165Ready) {
     $a165Body = json_decode((string)($a165Calls[0]['body'] ?? ''), true) ?: [];
     assert_true(mb_strlen((string)($a165Body['label'] ?? '')) === 16 && ($a165Body['refId'] ?? '') === 'A165-LONG-ORDER-NUMBER-1' && !isset($a165Body['lang']), 'A16.5 Comgate create: label cut to 16 characters, full order number in refId, unsupported language left to Comgate');
     $a165Calls = [];
-    (new ComgatePayment($a165Cfg + ['comgate_test' => false], $a165Transport))->createSession($a165Order);
+    (new ComgatePayment(['comgate_test' => false] + $a165Cfg, $a165Transport))->createSession($a165Order);
     assert_equals(false, (json_decode((string)($a165Calls[0]['body'] ?? ''), true) ?: [])['test'] ?? null, 'A16.5 Comgate create: comgate_test=false creates production payments');
 
     // Fail closed before any HTTP call / on refused or foreign answers.
@@ -118,7 +118,7 @@ if ($a165Ready) {
     $a165Answers['AB12-CD34-EF56'] = ['status' => 200, 'body' => json_encode(['code' => 0, 'status' => 'PAID', 'price' => '1990', 'curr' => 'EUR', 'test' => 'true', 'refId' => 'A165-1', 'transId' => 'AB12-CD34-EF99'])];
     assert_true($a165Throws(static fn() => (new ComgatePayment($a165Cfg, $a165Transport))->verifiedEvent($a165Push('AB12-CD34-EF56', 'PAID')), PaymentNotificationUnverified::class), 'A16.5 Comgate push: status about a different transaction is unverified');
     $a165Answers['AB12-CD34-EF56'] = $a165Status('AB12-CD34-EF56', 'PAID', '1990', 'EUR', 'true');
-    assert_true($a165Throws(static fn() => (new ComgatePayment($a165Cfg + ['comgate_test' => false], $a165Transport))->verifiedEvent($a165Push('AB12-CD34-EF56', 'PAID', ['test' => 'false'])), PaymentNotificationUnverified::class), 'A16.5 Comgate push: a test payment never pays an order of a production shop');
+    assert_true($a165Throws(static fn() => (new ComgatePayment(['comgate_test' => false] + $a165Cfg, $a165Transport))->verifiedEvent($a165Push('AB12-CD34-EF56', 'PAID', ['test' => 'false'])), PaymentNotificationUnverified::class), 'A16.5 Comgate push: a test payment never pays an order of a production shop');
     $a165Answers['AB12-CD34-EF56'] = $a165Status('AB12-CD34-EF56', 'PAID', '19.90');
     assert_true($a165Throws(static fn() => (new ComgatePayment($a165Cfg, $a165Transport))->verifiedEvent($a165Push('AB12-CD34-EF56', 'PAID')), PaymentNotificationUnverified::class), 'A16.5 Comgate push: non-integer status price is unverified');
     foreach (['HTTP 503' => ['status' => 503, 'body' => ''], 'code 1500' => ['status' => 200, 'body' => '{"code":1500,"message":"unexpected error"}'], 'HTTP 401 (shop credentials)' => ['status' => 401, 'body' => '{"code":1400}']] as $a165Case => $a165Answer) {

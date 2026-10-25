@@ -3,14 +3,33 @@ require_once __DIR__ . '/cli-only.php';
 
 /**
  * BareBones Shop — Admin Password Hasher
- * Usage: php cli/hash-password.php "your-password"
+ * Usage: php cli/hash-password.php            (type the password at the prompt)
+ *        printf '%s' "$PASSWORD" | php cli/hash-password.php
  *
+ * The password is read from stdin (or BBE_ADMIN_PASSWORD), never from the command line:
+ * arguments are visible to other users in the process list and end up in the shell history.
  * Copy the output to config.php → admin_password
  */
-$password = $argv[1] ?? null;
-if (!$password) {
-    echo "Usage: php cli/hash-password.php <password>\n";
-    echo "  Generates an Argon2id hash for config.php admin_password.\n";
+if (isset($argv[1])) {
+    fwrite(STDERR, "Passwords are not accepted in command arguments (process list, shell history).\n");
+    fwrite(STDERR, "Usage: php cli/hash-password.php   then type the password, or pipe it on stdin.\n");
+    exit(1);
+}
+
+$password = (string)(getenv('BBE_ADMIN_PASSWORD') ?: '');
+if ($password === '') {
+    $interactive = function_exists('stream_isatty') && stream_isatty(STDIN);
+    $hideEcho = $interactive && DIRECTORY_SEPARATOR === '/';
+    if ($interactive) fwrite(STDERR, 'Password: ');
+    if ($hideEcho) shell_exec('stty -echo');
+    $password = rtrim((string)fgets(STDIN), "\r\n");
+    if ($hideEcho) {
+        shell_exec('stty echo');
+        fwrite(STDERR, "\n");
+    }
+}
+if ($password === '') {
+    fwrite(STDERR, "No password given on stdin.\n");
     exit(1);
 }
 
