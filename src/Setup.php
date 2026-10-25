@@ -56,19 +56,19 @@ class Setup
         foreach (['admin_identity_key' => base64_encode(random_bytes(32)), 'app_url' => rtrim($appUrl, '/'), 'admin_email' => $adminEmail] as $key => $value) {
             if ($value === '') continue;
             $count = 0;
-            $config = preg_replace("/('" . $key . "'\s*=>\s*)''/", '${1}' . var_export($value, true), (string)$config, 1, $count);
+            // A callback, not a replacement string: '$1' or '\1' inside the value must stay literal.
+            $config = preg_replace_callback("/('" . $key . "'\s*=>\s*)''/", static fn(array $m): string => $m[1] . var_export($value, true), (string)$config, 1, $count);
             if (!is_string($config) || $count !== 1) throw new RuntimeException("config.example.php has no {$key} entry");
         }
         $tmp = $target . '.' . bin2hex(random_bytes(4)) . '.tmp';
-        if (file_put_contents($tmp, $config, LOCK_EX) === false) throw new RuntimeException('Cannot write config.php');
-        @chmod($tmp, 0640);
-        if (!is_array(require $tmp)) {
-            @unlink($tmp);
-            throw new RuntimeException('Generated config.php does not return an array');
-        }
-        if (!@rename($tmp, $target)) {
-            @unlink($tmp);
-            throw new RuntimeException('Cannot write config.php');
+        // The temporary file holds the identity key: it never outlives a failure (a ParseError included).
+        try {
+            if (file_put_contents($tmp, $config, LOCK_EX) === false) throw new RuntimeException('Cannot write config.php');
+            @chmod($tmp, 0640);
+            if (!is_array(require $tmp)) throw new RuntimeException('Generated config.php does not return an array');
+            if (!@rename($tmp, $target)) throw new RuntimeException('Cannot write config.php');
+        } finally {
+            if (is_file($tmp)) @unlink($tmp);
         }
         return ['path' => 'config.php', 'action' => 'created', 'generated' => ['admin_identity_key'], 'app_url' => rtrim($appUrl, '/'), 'admin_email' => $adminEmail]
             + ($privateBase !== null ? ['private_base' => $privateBase, 'web_root' => $webRoot] : []);

@@ -360,3 +360,86 @@ if (PHP_OS_FAMILY === 'Windows') {
         BackupService::reset();
     }
 }
+
+// ---------- Setup::createConfig, StoreSettings: .tmp files, backreferences, lost updates; *.tmp denied over HTTP ----------
+$r10oSetup = $r10oRoot . '/setup';
+mkdir($r10oSetup, 0700, true);
+copy(dirname(TEST_CLI_DIR) . '/config.example.php', $r10oSetup . '/config.example.php');
+try {
+    Setup::createConfig($r10oSetup, '', 'shop$1x$0@example.test');
+    $r10oCreated = require $r10oSetup . '/config.php';
+    assert_equals('shop$1x$0@example.test', $r10oCreated['admin_email'] ?? null, 'R10 setup: $1 and $0 in a value are written literally (they were regex backreferences)');
+} catch (Throwable $e) {
+    assert_true(false, 'R10 setup: createConfig with $1 in a value (' . $e->getMessage() . ')');
+}
+$r10oBroken = $r10oRoot . '/setup-broken';
+mkdir($r10oBroken, 0700, true);
+file_put_contents($r10oBroken . '/config.example.php', "<?php\nreturn ['admin_identity_key' => '', 'broken' => ;\n");
+$r10oBrokenError = $r10oError(static fn() => Setup::createConfig($r10oBroken));
+assert_true($r10oBrokenError !== '' && !is_file($r10oBroken . '/config.php') && glob($r10oBroken . '/*.tmp') === [],
+    'R10 setup: a generated config that does not parse leaves no .tmp copy with the identity key behind');
+
+$r10oStores = $r10oRoot . '/stores';
+mkdir($r10oStores, 0700, true);
+$r10oStoresPath = $r10oStores . '/stores.json';
+file_put_contents($r10oStoresPath, json_encode(['stores' => [
+    'r10a' => ['name' => 'A', 'legal' => ['seller' => 'r10b']],
+    'r10b' => ['name' => 'B', 'legal' => ['seller' => 'r10a']],
+]], JSON_PRETTY_PRINT) . "\n");
+// Another admin (a second process) has read stores.json and is about to save store B.
+$r10oOther = $r10oStores . '/other-admin.php';
+file_put_contents($r10oOther, '<?php
+$path = $argv[1];
+$lock = fopen($path . ".lock", "c");
+flock($lock, LOCK_EX);
+$data = json_decode(file_get_contents($path), true);
+echo "READ\n";
+usleep(800000);
+$data["stores"]["r10b"]["name"] = "B by the other admin";
+file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT) . "\n");
+flock($lock, LOCK_UN);
+');
+StoreSettings::setPathForTesting($r10oStoresPath);
+try {
+    $r10oProc = proc_open([PHP_BINARY, $r10oOther, $r10oStoresPath], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $r10oPipes);
+    $r10oSignal = (string)fgets($r10oPipes[1]);
+    $r10oSaved = StoreSettings::save('r10a', ['store_name' => 'A by this admin']);
+    stream_get_contents($r10oPipes[1]);
+    foreach ($r10oPipes as $r10oPipe) fclose($r10oPipe);
+    proc_close($r10oProc);
+    $r10oNames = array_map(static fn(array $s): string => (string)$s['name'], StoreSettings::load()['stores'] ?? []);
+    assert_true(trim($r10oSignal) === 'READ' && $r10oSaved['ok'] === true
+        && $r10oNames === ['r10a' => 'A by this admin', 'r10b' => 'B by the other admin'],
+        'R10 StoreSettings: two admins saving different stores at once both keep their edit (one was lost) ' . json_encode($r10oNames));
+    assert_equals([], glob($r10oStores . '/*.tmp') ?: [], 'R10 StoreSettings: no .tmp file is left next to stores.json');
+} catch (Throwable $e) {
+    assert_true(false, 'R10 StoreSettings lock (' . $e->getMessage() . ')');
+} finally {
+    StoreSettings::setPathForTesting(null);
+}
+
+// *.tmp next to config.php / stores.json is never served (.htaccess, which router.php applies, and nginx).
+$r10oHtaccess = str_replace("\r\n", "\n", (string)file_get_contents(dirname(TEST_CLI_DIR) . '/.htaccess'));
+$r10oHtDenied = static function (string $path) use ($r10oHtaccess): bool {
+    $conditional = false;
+    foreach (explode("\n", $r10oHtaccess) as $line) {
+        $line = trim($line);
+        if (str_starts_with($line, 'RewriteCond ')) { $conditional = true; continue; }
+        if (preg_match('/^RewriteRule\s+(\S+)\s+(\S+)\s+\[([^\]]*)\]$/', $line, $m)) {
+            if (!$conditional && $m[2] === '-' && preg_match('/\bF\b/', $m[3])
+                && preg_match('#' . str_replace('#', '\#', $m[1]) . '#' . (stripos($m[3], 'NC') !== false ? 'i' : ''), $path) === 1) return true;
+            $conditional = false;
+        }
+    }
+    return false;
+};
+$r10oNginx = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/deploy/nginx.conf');
+preg_match_all('/location ~\* (\\\\\.\(\?:\S+\)\$) \{ return 403; \}/', $r10oNginx, $r10oNginxRules);
+$r10oNgDenied = static function (string $path) use ($r10oNginxRules): bool {
+    foreach ($r10oNginxRules[1] as $rule) if (preg_match('#' . str_replace('#', '\#', $rule) . '#i', '/' . $path) === 1) return true;
+    return false;
+};
+foreach (['config.php.1a2b3c4d.tmp', 'stores.json.0123456789ab.tmp', 'stores.json.lock'] as $r10oTmp) {
+    assert_true($r10oHtDenied($r10oTmp) && count($r10oNginxRules[1]) === 2 && $r10oNgDenied($r10oTmp),
+        "R10 deny: /{$r10oTmp} is refused by .htaccess/router.php and nginx");
+}
