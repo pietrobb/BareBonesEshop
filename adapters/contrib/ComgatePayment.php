@@ -16,7 +16,7 @@
  * Config (env var wins over config.php):
  *   PAY_COMGATE_MERCHANT / comgate_merchant — e-shop identifier (client portal: e-shop connection)
  *   PAY_COMGATE_SECRET   / comgate_secret   — connection password
- *   PAY_COMGATE_TEST     / comgate_test     — true (default) creates test payments; false = production
+ *   PAY_COMGATE_TEST     / comgate_test     — true creates test payments (staging only); false (default) = production
  */
 class ComgatePayment implements HostedCheckoutAdapter, PullVerifiedNotificationAdapter, PaymentStatusEventAdapter, SignedWebhookPaymentAdapter {
     private const ORIGIN = 'https://payments.comgate.cz';
@@ -34,8 +34,9 @@ class ComgatePayment implements HostedCheckoutAdapter, PullVerifiedNotificationA
         $this->merchant = trim((string)(getenv('PAY_COMGATE_MERCHANT') ?: ($cfg['comgate_merchant'] ?? '')));
         $this->secret = (string)(getenv('PAY_COMGATE_SECRET') ?: ($cfg['comgate_secret'] ?? ''));
         $test = getenv('PAY_COMGATE_TEST');
-        $test = $test !== false && $test !== '' ? $test : ($cfg['comgate_test'] ?? true);
-        $this->test = filter_var($test, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? true;
+        // Production unless test mode is asked for explicitly: with live credentials a test payment would mark orders paid without money.
+        $test = $test !== false && $test !== '' ? $test : ($cfg['comgate_test'] ?? false);
+        $this->test = filter_var($test, FILTER_VALIDATE_BOOLEAN);
         $this->transport = $transport ?? [self::class, 'curlTransport'];
     }
 

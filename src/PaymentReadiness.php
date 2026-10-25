@@ -43,9 +43,12 @@ final class PaymentReadiness
                 $checks[] = ['pass', $name, "Payment provider {$provider} comes from configuration or an extension ({$used}); its credentials are not checked here.", ''];
             } else {
                 $missing = self::missingCredentials($provider, $config);
-                $checks[] = $missing === []
-                    ? ['pass', $name, "Payment provider {$provider} has its credentials ({$used}).", '']
-                    : ['fail', $name, "Payment provider {$provider} lacks " . implode(', ', $missing) . " ({$used}): checkout cannot start these payments.", 'Set the listed keys in config.php or the environment, or deactivate the method.'];
+                $testMode = $missing === [] ? self::testMode($provider, $config) : null;
+                $checks[] = match (true) {
+                    $missing !== [] => ['fail', $name, "Payment provider {$provider} lacks " . implode(', ', $missing) . " ({$used}): checkout cannot start these payments.", 'Set the listed keys in config.php or the environment, or deactivate the method.'],
+                    $testMode !== null => ['warn', $name, "Payment provider {$provider} runs in test mode ({$testMode}; {$used}): orders are marked paid without real money. Fine for staging, never for a live shop.", "Switch {$provider} to production ({$testMode}) before taking real orders."],
+                    default => ['pass', $name, "Payment provider {$provider} has its credentials ({$used}).", ''],
+                };
             }
         }
         return $checks;
@@ -59,6 +62,19 @@ final class PaymentReadiness
             if (!self::filled($key, $value)) $missing[] = $env !== null ? "{$key} ({$env})" : $key;
         }
         return $missing;
+    }
+
+    /** The setting that keeps a gateway on test payments, or null in production mode (same defaults as the adapters). */
+    private static function testMode(string $provider, array $config): ?string {
+        $value = static fn(string $key, ?string $env, string $default): string => strtolower(trim((string)(($env !== null ? getenv($env) : false) ?: ($config[$key] ?? $default))));
+        return match ($provider) {
+            'stripe' => preg_match('/^(sk|rk)_test_/', $value('stripe_secret_key', null, '')) ? 'stripe_secret_key is a test key' : null,
+            'comgate' => filter_var($value('comgate_test', 'PAY_COMGATE_TEST', 'false'), FILTER_VALIDATE_BOOLEAN) ? 'comgate_test = true' : null,
+            'gopay' => $value('gopay_env', 'PAY_GOPAY_ENV', 'sandbox') !== 'production' ? 'gopay_env is not production' : null,
+            'payu' => $value('payu_env', 'PAY_PAYU_ENV', 'sandbox') !== 'production' ? 'payu_env is not production' : null,
+            'thepay' => $value('thepay_env', 'PAY_THEPAY_ENV', 'demo') !== 'production' ? 'thepay_env is not production' : null,
+            default => null,
+        };
     }
 
     private static function filled(string $key, string $value): bool {

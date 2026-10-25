@@ -250,7 +250,7 @@ return [
     // merchant/secret and confirmed by the status API. Env PAY_COMGATE_* overrides these values.
     'comgate_merchant' => '',
     'comgate_secret'   => '',
-    'comgate_test'     => true, // false creates real (production) payments
+    'comgate_test'     => false, // true creates test payments (staging only: orders count as paid without money; doctor warns)
 
     // ThePay (provider code thepay). Allow the shop server's IP in the ThePay administration
     // (Implementation). Notifications need no secret: each one is confirmed by the signed payment

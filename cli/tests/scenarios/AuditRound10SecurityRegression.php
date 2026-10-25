@@ -112,6 +112,39 @@ try {
     assert_true((string)(AdminIdentity::accountByUsername('r10-self-owner')['totp_secret_encrypted'] ?? '') === '', $r10sLabel('R10 self: own TOTP reset with a wrong current password is refused', $r));
     $r = $r10sRun($testDbPath, $r10sSelf, 'admin_users', 'password', ['account_id' => (string)$r10sOwnerId, 'password' => 'R10-rotated-password', 'current_password' => 'R10-self-owner-pass']);
     assert_true(password_verify('R10-rotated-password', $r10sHash()), $r10sLabel('R10 self: own password change with the current password works', $r));
+
+    // M2: Comgate created test payments unless comgate_test was switched off, so live credentials with the default
+    // marked orders paid without money; readiness passed test gateways (comgate_test, Stripe sk_test_) as ready.
+    $r10sCalls = [];
+    $r10sTransport = static function (string $method, string $url, array $headers, ?string $body) use (&$r10sCalls): array {
+        $r10sCalls[] = json_decode((string)$body, true);
+        return ['status' => 201, 'body' => '{"code":0,"message":"OK","transId":"R10S-0001-TEST","redirect":"https://payments.comgate.cz/client/instructions/index?id=R10S-0001-TEST"}'];
+    };
+    putenv('PAY_COMGATE_TEST');
+    if (!class_exists('ComgatePayment')) require_once dirname(TEST_CLI_DIR) . '/adapters/contrib/ComgatePayment.php';
+    (new ComgatePayment(['comgate_merchant' => '465123', 'comgate_secret' => 'r10s-secret'], $r10sTransport))->createSession(['order_number' => 'R10S-1', 'total' => 1990, 'currency' => 'czk',
+        'customer_email' => 'buyer@example.com', 'success_url' => 'https://shop.example/done', 'cancel_url' => 'https://shop.example/cancel']);
+    assert_true(($r10sCalls[0]['test'] ?? null) === false, 'R10 M2: Comgate without comgate_test creates production payments (' . json_encode($r10sCalls[0]['test'] ?? null) . ')');
+    $r10sExample = require dirname(TEST_CLI_DIR) . '/config.example.php';
+    assert_true(($r10sExample['comgate_test'] ?? null) === false, 'R10 M2: config.example.php ships comgate_test = false');
+    $r10sPayDb = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $r10sPayDb->exec('CREATE TABLE payment_methods (store_id TEXT, code TEXT, provider TEXT, active INTEGER, requires_online INTEGER)');
+    $r10sPayDb->exec("INSERT INTO payment_methods VALUES ('default', 'card', 'stripe', 1, 1), ('cz', 'comgate', 'comgate', 1, 1), ('cz', 'gopay', 'gopay', 1, 1)");
+    $r10sLevels = static function (array $cfg) use ($r10sPayDb): array {
+        $levels = [];
+        foreach (PaymentReadiness::checks($r10sPayDb, $cfg) as [$status, $name]) $levels[$name] = $status;
+        return $levels;
+    };
+    $r10sPayCfg = ['stripe_webhook_secret' => 'whsec_' . str_repeat('b2', 10), 'comgate_merchant' => '465123', 'comgate_secret' => 'r10s-secret',
+        'gopay_goid' => '8123456789', 'gopay_client_id' => '1234567', 'gopay_client_secret' => 'r10s-gopay-secret'];
+    foreach (['PAY_COMGATE_TEST', 'PAY_GOPAY_ENV'] as $r10sEnv) putenv($r10sEnv);
+    assert_equals(['payment.provider.comgate' => 'warn', 'payment.provider.gopay' => 'warn', 'payment.provider.stripe' => 'warn'],
+        $r10sLevels(['stripe_secret_key' => 'sk_test_' . str_repeat('A1', 12), 'comgate_test' => true, 'gopay_env' => 'sandbox'] + $r10sPayCfg),
+        'R10 M2: readiness warns about test gateways (Stripe sk_test_, comgate_test, GoPay sandbox): orders are paid without money');
+    assert_equals(['payment.provider.comgate' => 'pass', 'payment.provider.gopay' => 'pass', 'payment.provider.stripe' => 'pass'],
+        $r10sLevels(['stripe_secret_key' => 'sk_live_' . str_repeat('A1', 12), 'gopay_env' => 'production'] + $r10sPayCfg),
+        'R10 M2: live Stripe key, Comgate default and GoPay production pass readiness');
+    $r10sPayDb = null;
 } finally {
     $r10sTree = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($r10sRoot, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
     foreach ($r10sTree as $r10sPath) $r10sPath->isDir() ? @rmdir($r10sPath->getPathname()) : @unlink($r10sPath->getPathname());
