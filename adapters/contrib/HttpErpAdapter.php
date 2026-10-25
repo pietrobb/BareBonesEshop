@@ -9,14 +9,12 @@ class HttpErpAdapter implements OrderStatusIntegrationAdapter
         $this->config = (array)($config['integrations']['http_erp'] ?? []);
     }
 
+    /** Max pages per listing; a cursor loop or a runaway ERP stops here instead of syncing forever. */
+    private const MAX_PAGES = 10000;
+
     public function pullProducts(?DateTimeInterface $since = null): iterable
     {
-        $path = '/v1/products';
-        if ($since !== null) $path .= '?updated_since=' . rawurlencode($since->format(DateTimeInterface::ATOM));
-        $result = $this->call($path);
-        foreach ((array)($result['data'] ?? []) as $product) {
-            if (is_array($product)) yield $product;
-        }
+        yield from $this->pages('/v1/products', $since !== null ? ['updated_since' => $since->format(DateTimeInterface::ATOM)] : []);
     }
 
     public function pushProduct(array $product): void
@@ -57,8 +55,7 @@ class HttpErpAdapter implements OrderStatusIntegrationAdapter
 
     public function pullStock(): array
     {
-        $result = $this->call('/v1/stock');
-        return array_values(array_filter((array)($result['data'] ?? []), 'is_array'));
+        return iterator_to_array($this->pages('/v1/stock', []), false);
     }
 
     public function pushCustomer(array $customer): string
@@ -80,6 +77,32 @@ class HttpErpAdapter implements OrderStatusIntegrationAdapter
             return ($result['status'] ?? '') === 'ok';
         } catch (Throwable $e) {
             return false;
+        }
+    }
+
+    /**
+     * A listing is read page by page (`limit` rows, config page_size, default 200), following the
+     * response's `next_cursor` as `cursor` until it is empty: a whole catalog in one response hit the
+     * 1 MiB response limit. A cursor seen twice is an ERP bug and fails instead of looping.
+     */
+    private function pages(string $path, array $query): Generator
+    {
+        $limit = max(1, min(1000, (int)($this->config['page_size'] ?? 200)));
+        $cursor = null;
+        $seen = [];
+        for ($page = 1; ; $page++) {
+            if ($page > self::MAX_PAGES) throw new RuntimeException("ERP listing {$path} exceeds " . self::MAX_PAGES . ' pages');
+            $params = $query + ['limit' => $limit] + ($cursor !== null ? ['cursor' => $cursor] : []);
+            $result = $this->call($path . '?' . http_build_query($params, '', '&', PHP_QUERY_RFC3986));
+            foreach ((array)($result['data'] ?? []) as $row) {
+                if (is_array($row)) yield $row;
+            }
+            $next = $result['next_cursor'] ?? null;
+            if ($next === null || $next === '' || $next === false) return;
+            if (!is_string($next) && !is_int($next)) throw new RuntimeException("ERP listing {$path} returned an invalid next_cursor");
+            $cursor = (string)$next;
+            if (isset($seen[$cursor])) throw new RuntimeException("ERP listing {$path} repeated a page cursor");
+            $seen[$cursor] = true;
         }
     }
 

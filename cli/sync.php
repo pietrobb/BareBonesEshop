@@ -48,3 +48,8 @@ if ($verbose) {
         echo "Statuses updated:  {$result['statuses_updated']}\n";
     }
 }
+if (!empty($result['catalog_error'])) {
+    // Orders were still pushed; cron must still see that products/stock were not synced.
+    fwrite(STDERR, "ERP catalog pull failed: {$result['catalog_error']}\n");
+    exit(1);
+}

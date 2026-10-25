@@ -128,7 +128,8 @@ try {
     BackupService::init($r4Live, $r4Cfg, $r4Backups);
     BackupService::gc();
     clearstatcache();
-    assert_equals(['manual' => 3, 'pre-migration' => 5], $r4Labels(), 'R4 backup GC: defaults keep the newest 5 pre-migration and every manual backup');
+    // R10: manual backups were kept forever by default; now manual_max_age_days defaults to 180.
+    assert_equals(['manual' => 1, 'pre-migration' => 5], $r4Labels(), 'R4 backup GC: defaults keep the newest 5 pre-migration and the manual backups younger than 180 days');
     $r4Cfg['retention'] += ['pre_migration' => 2, 'manual_max_age_days' => 30];
     BackupService::init($r4Live, $r4Cfg, $r4Backups);
     BackupService::gc();

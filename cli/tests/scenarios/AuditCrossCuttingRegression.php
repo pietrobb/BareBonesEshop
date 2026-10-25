@@ -103,7 +103,7 @@ try {
     $xcAlarm = static fn(array $s): bool => in_array('csp_form_action_violation', array_column($s['alerts'], 'code'), true);
     $xcBatch = [];
     for ($xcI = 0; $xcI < 8; $xcI++) {
-        $xcBatch[] = ['type' => 'csp-violation', 'url' => 'https://shop.example/pokladna', 'body' => ['effectiveDirective' => 'form-action', 'blockedURL' => 'https://evil.example/' . $xcI, 'documentURL' => 'https://shop.example/pokladna', 'disposition' => 'enforce']];
+        $xcBatch[] = ['type' => 'csp-violation', 'url' => 'https://shop.example/pokladna', 'body' => ['effectiveDirective' => 'form-action', 'blockedURL' => 'https://evil' . $xcI . '.example/' /* distinct: R10 M9 stores a repeated violation once */, 'documentURL' => 'https://shop.example/pokladna', 'disposition' => 'enforce']];
     }
     assert_equals(8, CspReports::ingest((string)json_encode($xcBatch), $xcDb, $xcNow, '192.0.2.10'), 'Cross-cutting CSP: one Reporting API request stores its batch');
     $xcOne = $xcSnapshot($xcConfig);
@@ -127,7 +127,7 @@ try {
     @mkdir($xcRoot . '/jobs/completed', 0700, true);
     $xcDeleted = RetentionCleanup::run(['jobs_dir' => $xcRoot . '/jobs'], $xcNow);
     assert_true(($xcDeleted['csp_violations'] ?? null) === 1 && (int)$xcDb->query('SELECT COUNT(*) FROM csp_violations')->fetchColumn() === 1,
-        'Cross-cutting CSP: the daily cleanup purges reports older than 14 days and keeps newer ones');
+        'Cross-cutting CSP: the daily cleanup purges reports older than the retention (7 days) and keeps newer ones');
     $xcDb->exec('DELETE FROM csp_violations');
 
     // 6. Config schema lists every key config.example.php ships (and nothing the example lacks,

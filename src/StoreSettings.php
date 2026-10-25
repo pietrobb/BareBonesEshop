@@ -35,6 +35,21 @@ final class StoreSettings {
      * @return array{ok: bool, errors: list<string>}  errors are I18n-formatted messages
      */
     public static function save(string $storeId, array $input): array {
+        // Two admins saving different stores at once: each re-reads under the lock, so neither edit is lost.
+        $lock = @fopen(self::path() . '.lock', 'c');
+        if ($lock === false || !flock($lock, LOCK_EX)) {
+            if ($lock !== false) fclose($lock);
+            return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.write')]];
+        }
+        try {
+            return self::saveLocked($storeId, $input);
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+    }
+
+    private static function saveLocked(string $storeId, array $input): array {
         $data = self::load();
         $store = $data['stores'][$storeId] ?? null;
         if (!is_array($store)) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.unknown')]];
@@ -82,7 +97,10 @@ final class StoreSettings {
         $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         if (!is_string($json)) return false;
         $tmp = self::path() . '.' . bin2hex(random_bytes(6)) . '.tmp';
-        if (@file_put_contents($tmp, $json . "\n", LOCK_EX) === false) return false;
+        if (@file_put_contents($tmp, $json . "\n", LOCK_EX) === false) {
+            @unlink($tmp);
+            return false;
+        }
         $mode = @fileperms(self::path());
         if ($mode !== false) @chmod($tmp, $mode & 0777);
         if (!@rename($tmp, self::path())) {

@@ -207,7 +207,7 @@ class BackupService
             'enabled'             => true,
             'storage'             => 'local',
             'compression'         => false,
-            'retention'           => ['daily' => 7, 'weekly' => 4, 'monthly' => 6, 'minimum_kept' => 3],
+            'retention'           => ['daily' => 7, 'weekly' => 4, 'monthly' => 6, 'minimum_kept' => 3, 'pre_migration' => 5, 'manual_max_age_days' => 180],
             'auto_pre_migration'  => true,
             'auto_gc_on_backup'   => true,
             'wal_checkpoint'      => true,
@@ -699,7 +699,13 @@ class BackupService
             || !hash_equals($expectedSha, (string)hash_file('sha256', $restoreTemp))) {
             throw new RuntimeException('Restore: failed to stage a complete verified replacement database');
         }
-        @chmod($restoreTemp, 0640);
+        // The restored file replaces live: keep live's mode, owner and group, or a restore run from the CLI leaves
+        // www-data with a read-only database (only root can hand the file to another owner).
+        @chmod($restoreTemp, fileperms($livePath) & 0777);
+        $liveOwner = @fileowner($livePath);
+        $liveGroup = @filegroup($livePath);
+        if ($liveOwner !== false && $liveOwner !== @fileowner($restoreTemp)) @chown($restoreTemp, $liveOwner);
+        if ($liveGroup !== false && $liveGroup !== @filegroup($restoreTemp)) @chgrp($restoreTemp, $liveGroup);
 
         $lockHandle = self::acquireLock();
         try {
@@ -1516,7 +1522,7 @@ class BackupService
         // Labelled backups outside the rotation: pre-restore snapshots (pruned by restore itself), the newest
         // `pre_migration` pre-migration backups and manual backups, which expire only past `manual_max_age_days`.
         $preMigrationKeep = max(0, (int)($cfg['pre_migration'] ?? 5));
-        $manualMaxAge = max(0, (int)($cfg['manual_max_age_days'] ?? 0));
+        $manualMaxAge = max(0, (int)($cfg['manual_max_age_days'] ?? 180)); // 0 = keep manual backups forever
         $manualCutoff = $manualMaxAge > 0 ? new \DateTimeImmutable("-{$manualMaxAge} days") : null;
         $preMigrationSeen = 0;
         foreach ($all as $row) { // newest first

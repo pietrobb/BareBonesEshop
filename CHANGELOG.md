@@ -120,6 +120,37 @@ nginx PHP fallback when `operations.nginx_config` is set).
     stock.
   - A credit note's number series year and PDF folder come from its issue date (one instant), so one issued
     around midnight on 31 December is not numbered in the next year's series.
+- **Round-10 operations (2026-10-25)**
+  - MySQL update rollback: refused while another session (web, worker) still uses the live database; the
+    error names the rollback command to run once writers are stopped. Before importing the snapshot, live is
+    dumped to `pre-rollback-*.sql` (owner-only) in the snapshot directory; a failed import re-imports that
+    copy, and the dump is kept so writes the rollback discarded stay recoverable.
+  - The updater sets installed file modes itself (0644, 0755 for executables) instead of copying the
+    package's; a SQLite restore or rollback keeps the live database's mode, owner and group.
+  - `HttpErpAdapter` follows `next_cursor` across pages (products and stock, `page_size`, a repeated
+    cursor fails). A failed catalog or stock pull no longer keeps paid orders from being pushed;
+    `cli/sync.php` still exits 1 and raises an `erp.catalog_pull_failed` incident.
+  - CSP reports: a batch repeating one violation is stored once, at most 100 rows per reporter and 2000 per
+    store per hour, kept 7 days (was 14).
+  - `cli/setup.php` no longer treats `$1` / `$0` in a value as a regex backreference (the generated
+    `config.php` could fail to parse) and removes its `.tmp` file; `stores.json` saves are locked and leave
+    no `.tmp`; `*.tmp` and `*.lock` are refused over HTTP (`.htaccess`, `router.php`, `deploy/nginx.conf`).
+  - Retention: failed (dead-lettered) jobs are deleted after `failed_jobs_days` (default 90; database,
+    Redis and job files), manual backups after `retention.manual_max_age_days` (default now 180, 0 keeps
+    them forever), and `cli/update.php backup` prunes old update snapshots like `apply` does.
+  - Redis queue: ready jobs are ordered by priority, then by age (as the database queue); before, any job
+    one second older outranked every priority. Let the worker drain the Redis queue before updating: jobs
+    queued under the old ordering are picked after current ones.
+  - Carriers: carrier webhooks need the signed `X-Shipping-Timestamp` by default
+    (`shipping_webhook_require_timestamp`, set `false` only for a carrier that can sign nothing but the
+    body). An unknown AWB is answered 404 and an ambiguous one 409 (with an incident), so the carrier
+    redelivers instead of the event being dropped. "Delivered" for an order never marked shipped is
+    recorded on the parcel with an incident instead of a 500 retried forever. Packeta and GLS without
+    their API fail instead of inventing an AWB or transit events; `SHIP_MOCK_LABELS=1` enables mock
+    labels for development.
+  - API v1 answers a database error in a write with a generic 409 message; the PDO text is only logged.
+  - robots.txt, the sitemap and the Google/Meta feeds of a store served on its own domain use that domain
+    (app_url scheme and path), not the global `app_url`.
 - **VAT rates (2026-10-23)** — products with `vat_class` `books` or `medicines` now get each country's
   own rate instead of its `reduced` class (e.g. IE books 0 %, IT/ES 4 %, FR 5.5 %, DE medicines 19 %).
   FI reduced rate 13.5 % from 2026, LT 9 % rate replaced by 12 % / 5 % from 2026. Invoices already

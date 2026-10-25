@@ -66,6 +66,7 @@ Cart::add((int)$db->query("SELECT id FROM products WHERE sku = 'A134-SKU'")->fet
 $orders = static fn(): array => $db->query("SELECT id, order_number, shipping_method, shipping_rate_snapshot FROM orders ORDER BY id")->fetchAll();
 if ($action === 'label') {
     $order = $orders()[(int)$extra] ?? [];
+    putenv('SHIP_MOCK_LABELS=1'); // Packeta mock label (no Packeta API in tests)
     $label = ShippingService::generateLabel((int)($order['id'] ?? 0), 'packeta');
     echo "\nA134RESULT" . json_encode(['code' => 200, 'output' => base64_decode((string)$label['label_data']), 'new_orders' => []]);
     exit(0);

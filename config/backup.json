@@ -8,7 +8,7 @@
         "monthly": 6,
         "minimum_kept": 3,
         "pre_migration": 5,
-        "manual_max_age_days": 0
+        "manual_max_age_days": 180
     },
     "auto_pre_migration": true,
     "auto_gc_on_backup": true,

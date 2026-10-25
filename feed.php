@@ -4,7 +4,7 @@ require_once __DIR__ . '/src/autoload.php';
 
 Security::headers();
 $locale = Bootstrap::initLocale();
-$baseUrl = Security::configuredAppUrl();
+$baseUrl = Security::currentStoreAppUrl();
 $channel = strtolower((string)($_GET['channel'] ?? ''));
 
 if ($baseUrl === null) {

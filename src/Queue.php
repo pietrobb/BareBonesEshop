@@ -235,22 +235,56 @@ class RedisQueue implements DelayedQueueBackend {
         ];
         $this->redis->multi();
         $this->redis->hMSet($this->jobKey($id), $job);
-        $this->redis->zAdd($this->key('pending'), (max($now, $availableAt) * 100) + (int)$job['priority'], $id);
+        if ($availableAt > $now) {
+            $this->redis->zAdd($this->key('delayed'), $availableAt, $id);
+        } else {
+            $this->redis->zAdd($this->key('pending'), self::readyScore((int)$job['priority'], $now), $id);
+        }
         $this->redis->exec();
         return $id;
+    }
+
+    /**
+     * Ready jobs are ordered by priority, then by when they became available (as DatabaseQueue). The old
+     * score available_at * 100 + priority let any job one second older outrank every priority.
+     */
+    private static function readyScore(int $priority, int $availableAt): int {
+        return max(0, min(99, $priority)) * 10_000_000_000 + $availableAt;
     }
 
     public function pull(int $limit = 10): array {
         $limit = max(0, min(100, $limit));
         if ($limit === 0) return [];
         $this->requeueStale();
-        $ids = $this->redis->zRangeByScore($this->key('pending'), '-inf', (time() * 100) + 99, ['limit' => [0, $limit]]);
+        $this->promoteDue();
+        $now = time();
         $jobs = [];
-        foreach ($ids ?: [] as $id) {
+        foreach ($this->redis->zRange($this->key('pending'), 0, $limit - 1) ?: [] as $id) {
             $row = $this->redis->hGetAll($this->jobKey((string)$id));
-            if ($row) $jobs[] = $this->hydrate($row);
+            if (!$row) continue;
+            // An entry queued before the ready/delayed split may not be due yet: park it until it is.
+            if ((int)($row['available_at'] ?? 0) > $now) {
+                $this->moveIndex('pending', 'delayed', (string)$id, (int)$row['available_at']);
+                continue;
+            }
+            $jobs[] = $this->hydrate($row);
         }
         return $jobs;
+    }
+
+    /** Delayed jobs whose time has come join the ready set at their priority. */
+    private function promoteDue(): void {
+        $now = time();
+        foreach ($this->redis->zRangeByScore($this->key('delayed'), '-inf', (string)$now, ['limit' => [0, 500]]) ?: [] as $id) {
+            $row = $this->redis->hMGet($this->jobKey((string)$id), ['priority', 'available_at']);
+            $this->moveIndex('delayed', 'pending', (string)$id, self::readyScore((int)($row['priority'] ?? 5), (int)($row['available_at'] ?? $now)));
+        }
+    }
+
+    /** Atomic: only the worker that removes $id from $from adds it to $to (no job is lost or doubled). */
+    private function moveIndex(string $from, string $to, string $id, int $score): void {
+        $this->redis->eval("if redis.call('zrem', KEYS[1], ARGV[1]) == 1 then redis.call('zadd', KEYS[2], ARGV[2], ARGV[1]) end return 1",
+            [$this->key($from), $this->key($to), $id, (string)$score], 2);
     }
 
     public function markProcessing(array $job): string {
@@ -285,8 +319,8 @@ class RedisQueue implements DelayedQueueBackend {
         $attempts = (int)($row['attempts'] ?? 0) + 1;
         $failed = $attempts >= (int)($row['max_attempts'] ?? 3);
         $available = time() + (int)pow(4, $attempts);
-        $target = $failed ? 'failed' : 'pending';
-        $score = $failed ? time() : ($available * 100) + (int)($row['priority'] ?? 5);
+        $target = $failed ? 'failed' : 'delayed';
+        $score = $failed ? time() : $available;
         $script = "if redis.call('hget', KEYS[1], 'claim_token') ~= ARGV[1] then return 0 end "
             . "redis.call('zrem', KEYS[2], ARGV[2]) redis.call('hmset', KEYS[1], 'state',ARGV[3],'attempts',ARGV[4],"
             . "'available_at',ARGV[5],'claim_token','','last_error',ARGV[6],'updated_at',ARGV[7]) "
@@ -311,7 +345,7 @@ class RedisQueue implements DelayedQueueBackend {
 
     public function stats(): array {
         return [
-            'pending' => (int)$this->redis->zCard($this->key('pending')),
+            'pending' => (int)$this->redis->zCard($this->key('pending')) + (int)$this->redis->zCard($this->key('delayed')),
             'processing' => (int)$this->redis->zCard($this->key('processing')),
             'completed' => (int)$this->redis->zCard($this->key('completed')),
             'failed' => (int)$this->redis->zCard($this->key('failed')),
@@ -336,16 +370,25 @@ class RedisQueue implements DelayedQueueBackend {
 
     /**
      * Retention: remove completed jobs older than $olderThanSeconds from the completed index and
-     * delete their hashes (normally already expired). Failed jobs stay for the operator.
+     * delete their hashes (normally already expired).
      */
     public function trimCompleted(int $olderThanSeconds, ?int $now = null): int {
+        return $this->trimIndex('completed', $olderThanSeconds, $now);
+    }
+
+    /** Retention: failed (dead-lettered) jobs whose failure is older than $olderThanSeconds (the index score is the failure time). */
+    public function trimFailed(int $olderThanSeconds, ?int $now = null): int {
+        return $this->trimIndex('failed', $olderThanSeconds, $now);
+    }
+
+    private function trimIndex(string $index, int $olderThanSeconds, ?int $now): int {
         $cutoff = ($now ?? time()) - max(0, $olderThanSeconds);
         $removed = 0;
         do {
-            $ids = $this->redis->zRangeByScore($this->key('completed'), '-inf', (string)$cutoff, ['limit' => [0, 500]]);
+            $ids = $this->redis->zRangeByScore($this->key($index), '-inf', (string)$cutoff, ['limit' => [0, 500]]);
             foreach ($ids ?: [] as $id) {
                 $this->redis->del($this->jobKey((string)$id));
-                $removed += (int)$this->redis->zRem($this->key('completed'), (string)$id);
+                $removed += (int)$this->redis->zRem($this->key($index), (string)$id);
             }
         } while (is_array($ids) && count($ids) === 500);
         return $removed;
@@ -365,7 +408,7 @@ class RedisQueue implements DelayedQueueBackend {
             $priority = (int)($row['priority'] ?? 5);
             $this->redis->eval($script, [
                 $this->key('processing'), $this->jobKey((string)$id), $this->key('pending'), $this->key('failed'),
-                (string)$id, (string)time(), gmdate('c'), (string)((time() * 100) + $priority), (string)time(),
+                (string)$id, (string)time(), gmdate('c'), (string)self::readyScore($priority, time()), (string)time(),
                 'Worker stopped while processing the job (lease expired)',
             ], 4);
         }

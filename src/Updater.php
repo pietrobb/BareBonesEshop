@@ -284,7 +284,8 @@ final class Updater
                     $this->setSnapshotStatus($snapshot['id'], 'auto-rolled-back', $e->getMessage(), $discarded);
                 } catch (Throwable $rollbackError) {
                     throw new RuntimeException(
-                        'Update failed: ' . $e->getMessage() . '; automatic rollback also failed: ' . $rollbackError->getMessage(),
+                        'Update failed: ' . $e->getMessage() . '; automatic rollback also failed: ' . $rollbackError->getMessage()
+                            . "; once that is resolved run: php cli/update.php rollback --snapshot={$snapshot['id']} --force --accept-data-loss",
                         0,
                         $e
                     );
@@ -312,11 +313,14 @@ final class Updater
         try {
             $installed = (string)($this->readJson($this->statePath())['snapshot'] ?? '');
             $deleted = [];
-            $kept = 0;
+            $kept = [];
             foreach ($this->listSnapshots() as $snapshot) { // newest first
                 $id = (string)($snapshot['id'] ?? '');
-                if (($snapshot['reason'] ?? '') !== 'pre-update' || !preg_match('/^\d{14}-[0-9a-f]{12}$/', $id)) continue;
-                if (++$kept <= max(1, $keep) || $id === $installed) continue;
+                // Manual `update.php backup` snapshots are full copies too: the newest $keep of each kind stay.
+                $reason = (string)($snapshot['reason'] ?? '');
+                if (!in_array($reason, ['pre-update', 'manual-backup'], true) || !preg_match('/^\d{14}-[0-9a-f]{12}$/', $id)) continue;
+                $kept[$reason] = ($kept[$reason] ?? 0) + 1;
+                if ($kept[$reason] <= max(1, $keep) || $id === $installed) continue;
                 $this->removeTree($this->snapshotDirectory($id));
                 $deleted[] = $id;
             }
@@ -650,6 +654,14 @@ final class Updater
         $sqliteSource = $database !== null && !$isMysql ? $this->verifiedSqliteSnapshot($directory, $database) : null;
 
         $restore = function () use ($metadata, $directory, $database, $isMysql, $sqliteSource): void {
+            if ($isMysql) {
+                // First, so that a refused rollback (other sessions still connected) leaves code and database untouched.
+                $this->database = null;
+                if (class_exists('Db', false)) {
+                    Db::reset();
+                }
+                $this->databaseBackup->restore($directory, $database);
+            }
             foreach ($metadata['files'] as $row) {
                 $path = (string)$row['path'];
                 if (!empty($row['existed'])) {
@@ -675,13 +687,7 @@ final class Updater
                 throw new RuntimeException('Cannot remove installed version state during rollback');
             }
 
-            if ($isMysql) {
-                $this->database = null;
-                if (class_exists('Db', false)) {
-                    Db::reset();
-                }
-                $this->databaseBackup->restore($directory, $database);
-            } elseif ($sqliteSource !== null) {
+            if ($sqliteSource !== null) {
                 $livePath = (string)$database['live_path'];
                 @unlink($livePath . '-wal');
                 @unlink($livePath . '-shm');
@@ -739,11 +745,25 @@ final class Updater
         $this->installAbsoluteFile($source, $target);
     }
 
+    /** State file or live SQLite database: an existing target keeps its mode, owner and group (www-data must still write the database). */
     private function installAbsoluteFile(string $source, string $target): void
     {
-        $this->commitStagedFile($this->stageFile($source, $target), $target);
+        $temporary = $this->stageFile($source, $target);
+        if (is_file($target) && !is_link($target)) {
+            @chmod($temporary, fileperms($target) & 0777);
+            $owner = @fileowner($target);
+            $group = @filegroup($target);
+            // Only root can hand the file to another owner (cli/update.php run as root); otherwise the mode carries the access.
+            if ($owner !== false && $owner !== @fileowner($temporary)) @chown($temporary, $owner);
+            if ($group !== false && $group !== @filegroup($temporary)) @chgrp($temporary, $group);
+        }
+        $this->commitStagedFile($temporary, $target);
     }
 
+    /**
+     * Stages $source next to $target. Release files get 0644, or 0755 when the payload marks them
+     * executable — never the package's own mode bits (a 0666 .php in a package was installed world-writable).
+     */
     private function stageFile(string $source, string $target): string
     {
         if (!is_file($source) || is_link($source)) {
@@ -756,7 +776,7 @@ final class Updater
             @unlink($temporary);
             throw new RuntimeException("Cannot stage update file: {$target}");
         }
-        @chmod($temporary, fileperms($source) & 0777);
+        @chmod($temporary, (fileperms($source) & 0111) !== 0 ? 0755 : 0644);
         return $temporary;
     }
 

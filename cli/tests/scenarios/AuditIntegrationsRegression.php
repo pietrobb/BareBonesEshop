@@ -74,7 +74,8 @@ putenv('SHIP_HTTP_CARRIER_WEBHOOK_SECRET');
 $aigError = $aigThrows(static fn() => ShippingService::handleTrackingWebhook('http-carrier', json_decode($aigBody, true), hash_hmac('sha256', $aigBody, $aigSecret), $aigBody));
 assert_true($aigError instanceof ShippingWebhookConfigurationError, '9 webhook: a missing secret is a configuration error');
 putenv('SHIP_HTTP_CARRIER_WEBHOOK_SECRET=' . $aigSecret);
-assert_equals('unknown_awb', ShippingService::handleTrackingWebhook('http-carrier', json_decode($aigBody, true), hash_hmac('sha256', $aigBody, $aigSecret), $aigBody)['reason'] ?? null,
+$aigNow = (string)time();
+assert_equals('unknown_awb', ShippingService::handleTrackingWebhook('http-carrier', json_decode($aigBody, true), hash_hmac('sha256', $aigNow . '.' . $aigBody, $aigSecret), $aigBody, $aigNow)['reason'] ?? null,
     '9 webhook: SHIP_HTTP_CARRIER_WEBHOOK_SECRET verifies the http-carrier signature');
 $aigError = $aigThrows(static fn() => ShippingService::handleTrackingWebhook('http-carrier', json_decode($aigBody, true), 'bad', $aigBody));
 assert_true($aigError !== null && !$aigError instanceof ShippingWebhookConfigurationError && str_contains($aigError->getMessage(), 'signature'), '9 webhook: a wrong signature stays "Invalid signature"');
@@ -85,13 +86,14 @@ $aigOld = (string)(time() - 3600);
 $aigError = $aigThrows(static fn() => ShippingService::handleTrackingWebhook('http-carrier', json_decode($aigBody, true), hash_hmac('sha256', $aigOld . '.' . $aigBody, $aigSecret), $aigBody, $aigOld));
 assert_true($aigError !== null && str_contains($aigError->getMessage(), 'timestamp'), '12 webhook: a signed timestamp outside the tolerance is rejected (replay)');
 $aigWeird = json_encode(['awb' => 'AIG-NOPE', 'status' => 'teleported']);
-assert_equals('unknown_status', ShippingService::handleTrackingWebhook('http-carrier', json_decode($aigWeird, true), hash_hmac('sha256', $aigWeird, $aigSecret), $aigWeird)['reason'] ?? null,
+assert_equals('unknown_status', ShippingService::handleTrackingWebhook('http-carrier', json_decode($aigWeird, true), hash_hmac('sha256', $aigNow . '.' . $aigWeird, $aigSecret), $aigWeird, $aigNow)['reason'] ?? null,
     '12 webhook: unknown statuses are not stored');
 $aigLabelOrder = (int)$pdo->query("SELECT id FROM orders WHERE store_id = 'default' ORDER BY id LIMIT 1")->fetchColumn();
 $pdo->prepare("INSERT INTO shipping_labels (order_id, store_id, carrier, awb, status, label_data) VALUES (?, 'default', 'http-carrier', 'AIG-AWB-1', 'created', '')")->execute([$aigLabelOrder]);
 $aigHook = static function (string $status, string $nonce) use ($aigSecret): array {
     $raw = json_encode(['awb' => 'AIG-AWB-1', 'status' => $status, 'nonce' => $nonce]);
-    return ShippingService::handleTrackingWebhook('http-carrier', json_decode($raw, true), hash_hmac('sha256', $raw, $aigSecret), $raw);
+    $ts = (string)time();
+    return ShippingService::handleTrackingWebhook('http-carrier', json_decode($raw, true), hash_hmac('sha256', $ts . '.' . $raw, $aigSecret), $raw, $ts);
 };
 $aigLabelStatus = static fn(): string => (string)$pdo->query("SELECT status FROM shipping_labels WHERE awb = 'AIG-AWB-1'")->fetchColumn();
 assert_true(($aigHook('out_for_delivery', 'a')['handled'] ?? false) === true && $aigLabelStatus() === 'out_for_delivery', '12 webhook: forward status is applied');

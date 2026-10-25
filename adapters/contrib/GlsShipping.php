@@ -2,7 +2,7 @@
 /**
  * GLS Shipping Adapter
  * Pan-European carrier — widely used in SK/CZ/EU.
- * Dev: mock. Prod: set SHIP_GLS_CLIENT_ID + SHIP_GLS_CLIENT_SECRET.
+ * Dev: mock labels with SHIP_MOCK_LABELS=1. Prod: set SHIP_GLS_CLIENT_ID + SHIP_GLS_CLIENT_SECRET.
  *
  * COD: supported across all serviced EU countries
  */
@@ -72,7 +72,9 @@ class GlsShipping implements ShippingAdapter
         if ($clientId) {
             throw new \RuntimeException('GLS production API not yet wired (set SHIP_GLS_CLIENT_ID)');
         }
+        self::assertMock('label');
 
+        // Mock (SHIP_MOCK_LABELS=1, development and tests only): deterministic AWB
         $awb = 'GLS' . str_pad((string)$order['id'], 9, '0', STR_PAD_LEFT);
         return [
             'awb'        => $awb,
@@ -83,6 +85,7 @@ class GlsShipping implements ShippingAdapter
 
     public function trackShipment(string $awb): array
     {
+        self::assertMock('tracking');
         return [
             'awb'    => $awb,
             'status' => 'in_transit',
@@ -94,6 +97,14 @@ class GlsShipping implements ShippingAdapter
     }
 
     // ─── Private helpers ───────────────────────────────────────────────────────
+
+    /** Without the API, an invented AWB looked like a real parcel. Mock data only when explicitly asked for. */
+    private static function assertMock(string $what): void
+    {
+        if ((string)($_ENV['SHIP_MOCK_LABELS'] ?? getenv('SHIP_MOCK_LABELS')) !== '1') {
+            throw new \RuntimeException("GLS {$what} is not available: the GLS API is not connected (SHIP_MOCK_LABELS=1 enables mock data for development)");
+        }
+    }
 
     private static array $EU_COUNTRIES = [
         'SK','CZ','DE','AT','HU','PL','FR','IT','ES','NL','BE','RO','BG','HR',
