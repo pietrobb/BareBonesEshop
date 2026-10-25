@@ -84,7 +84,7 @@ Each backup is a database copy (`.db` VACUUM INTO for SQLite, `.sql` single-tran
 
 ### Retention
 
-`php cli/backup.php --gc` (and `auto_gc_on_backup`) rotates backups by `retention` in `config/backup.json`: `daily`/`weekly`/`monthly` (newest per day/week/month), `minimum_kept` newest always, the newest `pre_migration` (default 5) `pre-migration` backups, and `manual` backups forever unless `manual_max_age_days` is set. `cli/update.php apply` keeps the newest `update_snapshots_keep` (default 3) `pre-update` snapshots in `update_storage_dir` plus the installed release's. **Personal data erased or scrubbed for GDPR stays in older backups and update snapshots until they rotate out**; state that retention period in the records of processing, and do not restore a backup to resurrect erased data (re-run the erasure after a restore).
+`php cli/backup.php --gc` (and `auto_gc_on_backup`) rotates backups by `retention` in `config/backup.json`: `daily`/`weekly`/`monthly` (newest per day/week/month), `minimum_kept` newest always, the newest `pre_migration` (default 5) `pre-migration` backups, and `manual` backups for `manual_max_age_days` (default 180; 0 keeps them forever). `cli/update.php apply` and `cli/update.php backup` keep the newest `update_snapshots_keep` (default 3) update snapshots in `update_storage_dir` plus the installed release's. **Personal data erased or scrubbed for GDPR stays in older backups and update snapshots until they rotate out**; state that retention period in the records of processing, and do not restore a backup to resurrect erased data (re-run the erasure after a restore).
 
 ### Restoring with `cli/restore.php`
 
