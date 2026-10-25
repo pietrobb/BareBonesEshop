@@ -10,8 +10,11 @@ $root = dirname(__DIR__);
 // install runs before anything reads config.php or the bundled BBF forms library.
 if ($command === 'install') {
     require_once __DIR__ . '/../src/Setup.php';
-    $options = cli_long_options($argv, ['admin-username:', 'app-url:', 'admin-email:']);
+    $options = cli_long_options($argv, ['admin-username:', 'app-url:', 'admin-email:', 'db-driver:', 'db-host:', 'db-port:', 'db-name:', 'db-user:']);
     $adminUsername = trim((string)($options['admin-username'] ?? ''));
+    // The database password, like the admin's, never travels in arguments (visible in the process list and shell history).
+    $database = ['driver' => (string)($options['db-driver'] ?? ''), 'host' => (string)($options['db-host'] ?? ''), 'port' => (string)($options['db-port'] ?? ''),
+        'name' => (string)($options['db-name'] ?? ''), 'user' => (string)($options['db-user'] ?? ''), 'password' => (string)(getenv('BBE_DB_PASSWORD') ?: '')];
     $log = static function (string $line) use ($json): void {
         fwrite($json ? STDERR : STDOUT, $line . "\n");
     };
@@ -37,8 +40,20 @@ if ($command === 'install') {
             throw new RuntimeException('--admin-username needs BBE_ADMIN_PASSWORD in the process environment');
         }
         $log('[1/4] config.php');
-        $steps['config'] = Setup::createConfig($root, trim((string)($options['app-url'] ?? '')), trim((string)($options['admin-email'] ?? '')));
+        $dbValues = Setup::databaseValues($database);
+        if (($dbValues['db_driver'] ?? '') === 'mysql' && !is_file($root . '/config.php')) {
+            // Checked before config.php exists: a typo must not leave a config that a re-run would keep ("unchanged").
+            $problem = Setup::mysqlProblem($dbValues + (require $root . '/config.example.php'));
+            if ($problem !== null) throw new RuntimeException($problem . ' (config.php not written; fix the --db-* switches or BBE_DB_PASSWORD)');
+        }
+        $steps['config'] = Setup::createConfig($root, trim((string)($options['app-url'] ?? '')), trim((string)($options['admin-email'] ?? '')), $database);
         $log('  ' . $steps['config']['action']);
+        $ignored = array_values(array_filter(['app-url', 'admin-email', 'db-driver', 'db-host', 'db-port', 'db-name', 'db-user'], static fn(string $s): bool => trim((string)($options[$s] ?? '')) !== ''));
+        $ignored = array_map(static fn(string $s): string => '--' . $s, $ignored);
+        if ($steps['config']['action'] === 'unchanged' && $ignored !== []) {
+            $steps['config']['warnings'][] = 'config.php already exists, so ' . implode(', ', $ignored) . ' were not applied: edit config.php instead.';
+        }
+        foreach ($steps['config']['warnings'] ?? [] as $warning) $log('  WARNING: ' . $warning);
         $log('[2/4] private runtime paths');
         $steps['apply'] = json_decode($run(['cli/setup.php', 'apply', '--json'], 'setup apply'), true)['changes'] ?? [];
         $log('[3/4] database schema, admin forms and import templates');
@@ -81,12 +96,17 @@ if ($command === 'install') {
         if (is_array($steps['admin'])) {
             echo "Owner account (store the TOTP secret and recovery codes now; they are not shown again):\n";
             echo json_encode($steps['admin'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+            if (!empty($steps['admin']['uri'])) {
+                if (function_exists('sapi_windows_vt100_support')) @sapi_windows_vt100_support(STDOUT, true);
+                echo "Scan with an authenticator app (or type the secret above):\n" . Setup::terminalQr((string)$steps['admin']['uri']);
+            }
         }
         foreach ($doctor['checks'] ?? [] as $check) {
             if ($check['status'] !== 'pass') echo '[' . strtoupper($check['status']) . "] {$check['name']}: {$check['message']}" . ($check['action'] !== '' ? " -> {$check['action']}" : '') . "\n";
         }
         echo "Installed. Doctor: {$doctor['status']} ({$doctor['counts']['pass']} pass, {$doctor['counts']['warn']} warn, {$doctor['counts']['fail']} fail)\n";
-        echo "Development server: php -S localhost:8080 router.php\n";
+        foreach ($steps['config']['warnings'] ?? [] as $warning) echo "WARNING: {$warning}\n";
+        echo implode("\n", Setup::nextSteps(require $root . '/config.php')) . "\n";
     }
     exit($strict && ($doctor['status'] ?? '') !== 'ready' ? 1 : 0);
 }
@@ -100,7 +120,8 @@ try {
         $result = Setup::apply();
         $result['doctor'] = Setup::doctor();
     } else {
-        throw new InvalidArgumentException('Usage: php cli/setup.php install|doctor|apply [--json] [--strict] [--app-url=URL] [--admin-email=ADDRESS] [--admin-username=NAME]');
+        throw new InvalidArgumentException('Usage: php cli/setup.php install|doctor|apply [--json] [--strict] [--app-url=URL] [--admin-email=ADDRESS] [--admin-username=NAME]'
+            . ' [--db-driver=sqlite|mysql --db-host=HOST --db-port=PORT --db-name=NAME --db-user=USER, password in BBE_DB_PASSWORD]');
     }
 
     if ($json) {

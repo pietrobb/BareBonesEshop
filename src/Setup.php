@@ -34,8 +34,9 @@ class Setup
     /**
      * Creates config.php from config.example.php with a fresh admin_identity_key.
      * An existing config.php is never touched.
+     * @param array<string,string> $database install switches driver/host/port/name/user (+ password from BBE_DB_PASSWORD)
      */
-    public static function createConfig(?string $root = null, string $appUrl = '', string $adminEmail = ''): array
+    public static function createConfig(?string $root = null, string $appUrl = '', string $adminEmail = '', array $database = []): array
     {
         $root ??= dirname(__DIR__);
         $target = $root . '/config.php';
@@ -46,6 +47,7 @@ class Setup
         if ($adminEmail !== '' && !filter_var($adminEmail, FILTER_VALIDATE_EMAIL)) {
             throw new InvalidArgumentException('--admin-email must be an e-mail address');
         }
+        $dbValues = self::databaseValues($database);
         $template = @file_get_contents($root . '/config.example.php');
         if (!is_string($template)) throw new RuntimeException('config.example.php is missing');
         $config = $template;
@@ -53,11 +55,11 @@ class Setup
         $webRoot = self::enclosingWebRoot($root);
         $privateBase = $webRoot === null ? null : dirname($webRoot) . '/bareboneseshop-data/' . basename(str_replace('\\', '/', $root));
         if ($privateBase !== null) $config = str_replace('dirname(__DIR__)', var_export($privateBase, true), $config);
-        foreach (['admin_identity_key' => base64_encode(random_bytes(32)), 'app_url' => rtrim($appUrl, '/'), 'admin_email' => $adminEmail] as $key => $value) {
+        foreach (['admin_identity_key' => base64_encode(random_bytes(32)), 'app_url' => rtrim($appUrl, '/'), 'admin_email' => $adminEmail] + $dbValues as $key => $value) {
             if ($value === '') continue;
             $count = 0;
             // A callback, not a replacement string: '$1' or '\1' inside the value must stay literal.
-            $config = preg_replace_callback("/('" . $key . "'\s*=>\s*)''/", static fn(array $m): string => $m[1] . var_export($value, true), (string)$config, 1, $count);
+            $config = preg_replace_callback("/('" . $key . "'\s*=>\s*)(?:'[^'\\\\]*'|\d+)/", static fn(array $m): string => $m[1] . var_export($value, true), (string)$config, 1, $count);
             if (!is_string($config) || $count !== 1) throw new RuntimeException("config.example.php has no {$key} entry");
         }
         $tmp = $target . '.' . bin2hex(random_bytes(4)) . '.tmp';
@@ -65,13 +67,114 @@ class Setup
         try {
             if (file_put_contents($tmp, $config, LOCK_EX) === false) throw new RuntimeException('Cannot write config.php');
             @chmod($tmp, 0640);
-            if (!is_array(require $tmp)) throw new RuntimeException('Generated config.php does not return an array');
+            $generated = require $tmp;
+            if (!is_array($generated)) throw new RuntimeException('Generated config.php does not return an array');
             if (!@rename($tmp, $target)) throw new RuntimeException('Cannot write config.php');
         } finally {
             if (is_file($tmp)) @unlink($tmp);
         }
-        return ['path' => 'config.php', 'action' => 'created', 'generated' => ['admin_identity_key'], 'app_url' => rtrim($appUrl, '/'), 'admin_email' => $adminEmail]
-            + ($privateBase !== null ? ['private_base' => $privateBase, 'web_root' => $webRoot] : []);
+        $reused = self::existingPrivateData($generated);
+        return ['path' => 'config.php', 'action' => 'created', 'generated' => ['admin_identity_key'], 'app_url' => rtrim($appUrl, '/'), 'admin_email' => $adminEmail,
+                'db_driver' => (string)($generated['db_driver'] ?? 'sqlite')]
+            + ($privateBase !== null ? ['private_base' => $privateBase, 'web_root' => $webRoot] : [])
+            + ($reused !== [] ? ['warnings' => ['The private directory already holds data from an earlier install, and this install reuses it: ' . implode(', ', $reused)
+                . '. For a new, empty shop stop here, move that directory away and run install again.']] : []);
+    }
+
+    /**
+     * config.php values of the install switches --db-driver/--db-host/--db-port/--db-name/--db-user (and the password
+     * from BBE_DB_PASSWORD, never an argument). Any MySQL switch implies --db-driver=mysql. Nothing given: [].
+     * @param array<string,string> $database
+     * @return array<string,string|int>
+     */
+    public static function databaseValues(array $database): array
+    {
+        $given = array_filter(array_map(static fn($v): string => trim((string)$v), $database), static fn(string $v): bool => $v !== '');
+        $mysqlSwitches = array_diff_key($given, ['driver' => 1, 'password' => 1]);
+        $driver = strtolower($given['driver'] ?? ($mysqlSwitches !== [] ? 'mysql' : ''));
+        if ($driver === '') return [];
+        if (!in_array($driver, ['sqlite', 'mysql'], true)) throw new InvalidArgumentException('--db-driver must be sqlite or mysql');
+        if ($driver === 'sqlite') {
+            if ($mysqlSwitches !== []) throw new InvalidArgumentException('--db-host, --db-port, --db-name and --db-user need --db-driver=mysql');
+            return ['db_driver' => 'sqlite'];
+        }
+        $values = ['db_driver' => 'mysql'];
+        $rules = [
+            'host' => ['db_host', '/^[A-Za-z0-9._\-:\[\]]{1,255}$/', '--db-host must be a host name or IP address'],
+            'name' => ['db_name', '/^[A-Za-z0-9_$]{1,64}$/', '--db-name may hold letters, digits, _ and $ (at most 64)'],
+            'user' => ['db_user', '/^[^\s\x00-\x1f]{1,80}$/', '--db-user must be 1-80 characters without spaces'],
+        ];
+        foreach ($rules as $switch => [$key, $pattern, $message]) {
+            if (!isset($given[$switch])) continue;
+            if (!preg_match($pattern, $given[$switch])) throw new InvalidArgumentException($message);
+            $values[$key] = $given[$switch];
+        }
+        if (isset($given['port'])) {
+            $port = filter_var($given['port'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 65535]]);
+            if ($port === false) throw new InvalidArgumentException('--db-port must be a number from 1 to 65535');
+            $values['db_port'] = $port;
+        }
+        if (isset($database['password']) && (string)$database['password'] !== '') $values['db_password'] = (string)$database['password'];
+        return $values;
+    }
+
+    /** Null when the MySQL server of a config (or install switches applied to the template) accepts the login, else why not. */
+    public static function mysqlProblem(array $config): ?string
+    {
+        if (!in_array('mysql', PDO::getAvailableDrivers(), true)) return 'PHP extension pdo_mysql is not loaded';
+        $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', (string)($config['db_host'] ?? '127.0.0.1'), (int)($config['db_port'] ?? 3306), (string)($config['db_name'] ?? ''));
+        try {
+            new PDO($dsn, (string)($config['db_user'] ?? ''), (string)($config['db_password'] ?? ''), [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 5]);
+            return null;
+        } catch (PDOException $e) {
+            return 'Cannot connect to MySQL ' . ($config['db_user'] ?? '') . '@' . ($config['db_host'] ?? '') . ':' . ($config['db_port'] ?? '') . '/' . ($config['db_name'] ?? '') . ': ' . $e->getMessage();
+        }
+    }
+
+    /** @return list<string> data an earlier install left where a new config.php points (a fresh config reuses it) */
+    public static function existingPrivateData(array $config): array
+    {
+        $found = [];
+        $sqlite = (string)($config['db_sqlite_path'] ?? '');
+        if (($config['db_driver'] ?? 'sqlite') === 'sqlite' && $sqlite !== '' && is_file($sqlite) && (int)filesize($sqlite) > 0) $found[] = $sqlite;
+        $runtime = rtrim((string)($config['private_runtime_dir'] ?? ''), '/\\');
+        if ($runtime !== '' && is_file($runtime . '/setup-state.json')) $found[] = $runtime . '/setup-state.json';
+        return $found;
+    }
+
+    /**
+     * The text as a QR code for a terminal: two modules per character cell, black on white whatever the terminal's
+     * colours, with the 4-module quiet zone scanners need.
+     */
+    public static function terminalQr(string $text): string
+    {
+        require_once __DIR__ . '/QrCode.php';
+        $matrix = QrCode::matrix($text);
+        $size = count($matrix) + 8;
+        $dark = static fn(int $x, int $y): bool => (bool)($matrix[$y - 4][$x - 4] ?? false);
+        $out = '';
+        for ($y = 0; $y < $size; $y += 2) {
+            $line = '';
+            for ($x = 0; $x < $size; $x++) {
+                $line .= match ([$dark($x, $y), $dark($x, $y + 1)]) {
+                    [true, true] => '█', [true, false] => '▀', [false, true] => '▄', default => ' ',
+                };
+            }
+            $out .= "\033[30;107m" . $line . "\033[0m\n";
+        }
+        return $out;
+    }
+
+    /** @return list<string> where to open the shop after install: the public URL when set, else the development server */
+    public static function nextSteps(array $config): array
+    {
+        $url = rtrim((string)($config['app_url'] ?? ''), '/');
+        if ($url !== '') return ["Shop: {$url}/", "Administration: {$url}/admin.php"];
+        return [
+            'Development server: php -S localhost:8080 router.php',
+            'Then open http://localhost:8080/ (shop) and http://localhost:8080/admin.php (administration).',
+            "No public address yet: set app_url in config.php (e-mail, payment and feed links need it).",
+        ];
     }
 
     public static function doctor(?array $config = null, ?string $root = null, ?PDO $db = null): array

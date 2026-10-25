@@ -204,3 +204,70 @@ $r10xMailsBefore = $r10xMailLog();
 assert_equals(1, BackInStock::process(['R10X-D']), 'R10 UX8: the worker mails the waiting request');
 assert_equals([1, 0, 0], [$r10xMailLog() - $r10xMailsBefore, $r10xWaiting(), BackInStock::process(['R10X-D'])], 'R10 UX8: one e-mail, then the request is deleted and a second run sends nothing');
 assert_true(is_file(dirname(TEST_CLI_DIR) . '/templates/emails/sk/back_in_stock.html') && is_file(dirname(TEST_CLI_DIR) . '/templates/emails/en/back_in_stock.subject.txt'), 'R10 UX8: the e-mail template exists');
+
+// UX9: the installer takes MySQL switches (password from the environment), warns when it reuses an earlier install's
+// private data, shows the owner's TOTP as a terminal QR code and names the shop's real address.
+echo "\n--- Audit round 10 (UX 9): installer ---\n";
+$r10xBase = test_fixture_path('r10x-install');
+$r10xRemove = static function (string $path) use (&$r10xRemove): void {
+    if (!is_dir($path)) { @unlink($path); return; }
+    foreach (scandir($path) ?: [] as $entry) if ($entry !== '.' && $entry !== '..') $r10xRemove($path . '/' . $entry);
+    @rmdir($path);
+};
+$r10xRefused = static function (array $database): string {
+    try {
+        Setup::databaseValues($database);
+        return 'accepted';
+    } catch (InvalidArgumentException $e) {
+        return $e->getMessage();
+    }
+};
+try {
+    foreach (['shop', 'other/shop'] as $r10xDir) {
+        mkdir($r10xBase . '/' . $r10xDir, 0777, true);
+        copy(dirname(TEST_CLI_DIR) . '/config.example.php', $r10xBase . '/' . $r10xDir . '/config.example.php');
+    }
+    $r10xRefusals = ['--db-driver' => ['driver' => 'postgres'], '--db-port' => ['port' => '70000'], '--db-name' => ['name' => 'shop; DROP'], '--db-host' => ['host' => 'evil host'],
+        '--db-driver=mysql' => ['driver' => 'sqlite', 'host' => 'db']];
+    assert_equals([], array_keys(array_filter($r10xRefusals, static fn(array $input, string $switch): bool => !str_contains($r10xRefused($input), $switch), ARRAY_FILTER_USE_BOTH)),
+        'R10 UX9: bad --db-* values are refused, naming the switch');
+    assert_equals([[], ['db_driver' => 'sqlite']], [Setup::databaseValues([]), Setup::databaseValues(['driver' => 'SQLite'])], 'R10 UX9: no switch keeps the template; --db-driver=sqlite stays sqlite');
+
+    $r10xPassword = "p\$1'\\x \"q";
+    $r10xCreated = Setup::createConfig($r10xBase . '/shop', 'https://shop.example/', '', ['host' => 'db.internal', 'port' => '3307', 'name' => 'shop_r10x', 'user' => 'shopuser', 'password' => $r10xPassword]);
+    $r10xConfig = require $r10xBase . '/shop/config.php';
+    assert_equals(['created', 'mysql', 'db.internal', 3307, 'shop_r10x', 'shopuser', $r10xPassword, 'https://shop.example'],
+        [$r10xCreated['action'], $r10xConfig['db_driver'] ?? null, $r10xConfig['db_host'] ?? null, $r10xConfig['db_port'] ?? null, $r10xConfig['db_name'] ?? null,
+         $r10xConfig['db_user'] ?? null, $r10xConfig['db_password'] ?? null, $r10xConfig['app_url'] ?? null], 'R10 UX9: MySQL switches land in config.php (port as a number, the password byte for byte)');
+    assert_true(!isset($r10xCreated['warnings']), 'R10 UX9: a first install has nothing to warn about');
+    assert_equals('unchanged', Setup::createConfig($r10xBase . '/shop', '', '', ['driver' => 'sqlite'])['action'], 'R10 UX9: an existing config.php is never rewritten');
+    $r10xMysql = Setup::mysqlProblem(['db_host' => '127.0.0.1', 'db_port' => 1, 'db_name' => 'r10x', 'db_user' => 'r10x', 'db_password' => '']);
+    assert_true(is_string($r10xMysql) && $r10xMysql !== '', 'R10 UX9: an unreachable MySQL server is reported before config.php is written (' . $r10xMysql . ')');
+
+    // A fresh config.php over the data of an earlier install (same private directory) says so.
+    mkdir($r10xBase . '/other/bareboneseshop-private/db', 0777, true);
+    file_put_contents($r10xBase . '/other/bareboneseshop-private/db/shop.sqlite', 'SQLite format 3');
+    $r10xReused = Setup::createConfig($r10xBase . '/other/shop');
+    assert_true(str_contains(str_replace('\\', '/', implode(' ', $r10xReused['warnings'] ?? [])), 'other/bareboneseshop-private/db/shop.sqlite'), 'R10 UX9: reusing an earlier install\'s database is warned about');
+
+    // The terminal QR decodes back to exactly the QR code of the otpauth URI.
+    $r10xUri = Totp::provisioningUri(Totp::generateSecret(), 'owner');
+    $r10xMatrix = QrCode::matrix($r10xUri);
+    $r10xRows = [];
+    foreach (explode("\n", rtrim(Setup::terminalQr($r10xUri), "\n")) as $r10xLine) {
+        $r10xCells = preg_split('//u', (string)preg_replace('/\e\[[0-9;]*m/', '', $r10xLine), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $r10xRows[] = array_map(static fn(string $c): bool => $c === '█' || $c === '▀', $r10xCells);
+        $r10xRows[] = array_map(static fn(string $c): bool => $c === '█' || $c === '▄', $r10xCells);
+    }
+    $r10xDecoded = array_map(static fn(array $row): array => array_slice($row, 4, count($r10xMatrix)), array_slice($r10xRows, 4, count($r10xMatrix)));
+    assert_true($r10xDecoded === $r10xMatrix && !in_array(true, array_merge(...array_slice($r10xRows, 0, 4)), true), 'R10 UX9: the terminal QR is the TOTP QR code with a quiet zone');
+
+    $r10xLive = implode("\n", Setup::nextSteps(['app_url' => 'https://shop.example/']));
+    $r10xLocal = implode("\n", Setup::nextSteps(['app_url' => '']));
+    assert_true(str_contains($r10xLive, 'https://shop.example/admin.php') && !str_contains($r10xLive, 'localhost'), 'R10 UX9: the install ends with the shop\'s real address');
+    assert_true(str_contains($r10xLocal, 'php -S localhost:8080 router.php') && str_contains($r10xLocal, 'app_url'), 'R10 UX9: without app_url it names the development server and what to set');
+    $r10xCli = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/cli/setup.php');
+    assert_true(str_contains($r10xCli, "getenv('BBE_DB_PASSWORD')") && !str_contains($r10xCli, "'db-password:'"), 'R10 UX9: the database password comes from the environment, never an argument');
+} finally {
+    $r10xRemove($r10xBase);
+}
