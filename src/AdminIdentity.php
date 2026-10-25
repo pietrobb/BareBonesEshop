@@ -75,7 +75,7 @@ class AdminIdentity {
         if (!$account) throw new RuntimeException('Admin account not found');
         $secret = Totp::generateSecret();
         $db = Db::get();
-        $ownTransaction = !$db->inTransaction();
+        $ownTransaction = !Db::get()->inTransaction();
         if ($ownTransaction) $db->beginTransaction();
         try {
             $db->prepare('UPDATE admin_accounts SET totp_secret_encrypted=:secret, totp_last_counter=NULL, mfa_required=1, updated_at=:updated WHERE id=:id')

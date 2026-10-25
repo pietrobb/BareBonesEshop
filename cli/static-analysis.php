@@ -122,7 +122,8 @@ foreach ($entrypointBudgets as $relative => $budget) {
 $architectureBudgets = [
     // Loads Shared/Request/StoreScope always and only the route's page modules (Admin/Modules.php).
     'src/Entrypoints/Admin.php' => ['lines' => 285, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 4],
-    'src/Entrypoints/Admin/AdminUsers.php' => ['lines' => 290, 'functions' => 13, 'max_function_lines' => 90, 'coupling' => 6],
+    // +2 functions, +5 lines R10: own password/TOTP change needs the current password; the legacy session that creates the first DB account is handed off and ended.
+    'src/Entrypoints/Admin/AdminUsers.php' => ['lines' => 295, 'functions' => 15, 'max_function_lines' => 90, 'coupling' => 6],
     'src/Entrypoints/Admin/B2b.php' => ['lines' => 180, 'functions' => 9, 'max_function_lines' => 64, 'coupling' => 4],
     // +2 coupling: AdminForm (server-rendered BBF forms replace inline bbf.js) and Import (shared CSV price format).
     // +1 coupling: CatalogScope keeps the catalog_scope-bound editor queries (categories, digital assets, attribute links) out of the entrypoint.
