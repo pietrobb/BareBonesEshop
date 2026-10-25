@@ -140,8 +140,12 @@ class MarketingFeed {
     }
 
     private static function isoDate(string $date): string {
-        $timestamp = strtotime($date);
-        return $timestamp === false ? '' : gmdate('c', $timestamp);
+        // Stored timestamps are UTC (Db::now), whatever PHP's display timezone is.
+        try {
+            return $date === '' ? '' : (new DateTimeImmutable($date, new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('UTC'))->format('c');
+        } catch (Exception) {
+            return '';
+        }
     }
 
     /** Join a storefront URL (base-path relative, e.g. /shop/cs/product/x) to the configured base. */

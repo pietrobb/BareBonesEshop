@@ -873,8 +873,8 @@ assert_true($cm->invoke(null, ['0', '0', '*', '*', '*'], $f6Midnight), 'F6: cron
 assert_true(!$cm->invoke(null, ['0', '0', '*', '*', '*'], $f6Noon),    'F6: cronMatches "0 0 * * *" rejects noon');
 
 $isDue = new ReflectionMethod(FeedImport::class, 'isDue');
-assert_true($isDue->invoke(null, '*/15 * * * *', date('Y-m-d H:i:s', time() - 3600)), 'F6: "*/15 * * * *" due after 1h');
-assert_true(!$isDue->invoke(null, '0 0 * * *', date('Y-m-d H:i:s')), 'F6: daily schedule not due when last_sync is now');
+assert_true($isDue->invoke(null, '*/15 * * * *', gmdate('Y-m-d H:i:s', time() - 3600)), 'F6: "*/15 * * * *" due after 1h');
+assert_true(!$isDue->invoke(null, '0 0 * * *', gmdate('Y-m-d H:i:s')), 'F6: daily schedule not due when last_sync is now');
 
 // --- F7: JobQueue::markProcessing is an atomic claim — a second claim of the
 //     same file (already moved by another worker) returns '' instead of a path.

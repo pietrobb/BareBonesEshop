@@ -31,14 +31,21 @@ final class SetupChecklist
         $counts = ['fail' => 0, 'warn' => 0];
         foreach ((array)($doctor['checks'] ?? []) as $check) {
             $status = (string)($check['status'] ?? '');
-            if (!isset($counts[$status])) continue;
-            $counts[$status]++;
             $name = (string)($check['name'] ?? '');
+            if (!isset($counts[$status]) || !self::concernsCurrentStore($name)) continue;
+            $counts[$status]++;
             $items[] = ['status' => $status, 'name' => $name, 'message' => (string)($check['message'] ?? ''),
                 'action' => (string)($check['action'] ?? ''), 'page' => self::fixPage($name)];
         }
         usort($items, static fn(array $a, array $b): int => [$a['status'] !== 'fail', $a['name']] <=> [$b['status'] !== 'fail', $b['name']]);
         return ['counts' => $counts, 'items' => $items];
+    }
+
+    /** A per-store check (its SKUs, seller data) is shown only in the store the dashboard is switched to. */
+    private static function concernsCurrentStore(string $checkName): bool
+    {
+        if (!preg_match('/^stores\.(?:legal|currency_prices)\.(.+)$/', $checkName, $m)) return true;
+        return $m[1] === StoreContext::current()->id();
     }
 
     public static function fixPage(string $checkName): ?string
