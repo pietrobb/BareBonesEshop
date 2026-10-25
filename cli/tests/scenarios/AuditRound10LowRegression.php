@@ -13,6 +13,14 @@ $r10lCfgBefore = $r10lCfgProp->getValue();
 $r10lCfgBase = is_array($r10lCfgBefore) ? $r10lCfgBefore : require dirname(TEST_CLI_DIR) . '/config.php';
 $r10lFail = static fn(string $what, Throwable $e) => assert_true(false, "R10 low {$what} (" . get_class($e) . ': ' . $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 $r10lNow = static fn(int $daysAgo): string => gmdate('Y-m-d H:i:s', time() - $daysAgo * 86400);
+// The suite database has no attribute, withdrawal or complaint tables before the files sorted after this one create them.
+(require TEST_CLI_DIR . '/../migrations/20261022090000_withdrawal_requests.php')->up($pdo, Db::isSqlite());
+(require TEST_CLI_DIR . '/../migrations/20261022100000_complaints.php')->up($pdo, Db::isSqlite());
+$r10lId = Db::isSqlite() ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT AUTO_INCREMENT PRIMARY KEY';
+$pdo->exec("CREATE TABLE IF NOT EXISTS attribute_definitions (id {$r10lId}, name VARCHAR(255) NOT NULL, slug VARCHAR(191) NOT NULL UNIQUE,
+    type VARCHAR(32) NOT NULL DEFAULT 'enum', unit VARCHAR(64) DEFAULT '', sort_order INTEGER DEFAULT 0)");
+$pdo->exec("CREATE TABLE IF NOT EXISTS attribute_options (id {$r10lId}, attribute_id INTEGER NOT NULL, value VARCHAR(255) NOT NULL, sort_order INTEGER DEFAULT 0)");
+$pdo->exec('CREATE TABLE IF NOT EXISTS category_attributes (category_id INTEGER NOT NULL, attribute_id INTEGER NOT NULL, PRIMARY KEY (category_id, attribute_id))');
 try {
     try {
         // Shared attribute: one store's admin renamed an attribute another catalog uses, and that store's product values
