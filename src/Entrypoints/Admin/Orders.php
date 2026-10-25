@@ -162,7 +162,7 @@ function pageOrders(): void {
     <h1><?= esc(I18n::t('admin.title.orders')) ?> <span class="muted">(<?= $total ?>)</span></h1>
     <?php if (Security::adminCan('orders.edit')): ?><p><a class="btn btn-primary btn-sm" href="admin.php?p=order_new" data-order-new><?= esc(I18n::t('admin.title.order_new')) ?></a></p><?php endif; ?>
     <div class="card">
-        <form method="get" style="display:flex;gap:.5rem;margin-bottom:1rem">
+        <form method="get" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem">
             <input type="hidden" name="p" value="orders">
             <select name="status" aria-label="<?= esc(I18n::t('admin.sales.order_status')) ?>">
                 <option value="">— <?= esc(I18n::t('admin.th.status')) ?> —</option>

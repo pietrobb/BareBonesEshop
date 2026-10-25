@@ -20,7 +20,7 @@ function pageCustomers(): void {
     ?>
     <h1><?= esc(I18n::t('admin.title.customers')) ?> <span class="muted">(<?= $total ?>)</span></h1>
     <div class="card">
-        <form method="get" action="admin.php" style="display:flex;gap:.5rem;align-items:center;margin-bottom:1rem">
+        <form method="get" action="admin.php" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-bottom:1rem">
             <input type="hidden" name="p" value="customers">
             <input type="text" name="q" aria-label="<?= esc(I18n::t('admin.customers.search_placeholder')) ?>" value="<?= esc($q) ?>" placeholder="<?= esc(I18n::t('admin.customers.search_placeholder')) ?>" style="min-width:280px">
             <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.btn.search')) ?></button>
@@ -189,7 +189,7 @@ function pageGdpr(): void {
     </div>
     <div class="card">
         <h3><?= esc(I18n::t('admin.gdpr.search_title')) ?></h3>
-        <form method="get" action="admin.php" style="display:flex;gap:.5rem;align-items:center;margin-bottom:1rem">
+        <form method="get" action="admin.php" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-bottom:1rem">
             <input type="hidden" name="p" value="gdpr">
             <input type="email" name="email" value="<?= esc($email) ?>" placeholder="<?= esc(I18n::t('admin.gdpr.email_placeholder')) ?>" style="min-width:280px">
             <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.btn.search')) ?></button>

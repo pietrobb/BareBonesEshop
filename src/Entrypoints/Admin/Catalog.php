@@ -48,7 +48,7 @@ function pageProducts(): void {
     <h1><?= esc(I18n::t('admin.title.products')) ?> <span class="muted">(<?= $total ?>)</span></h1>
     <?php if (Security::adminCan('products.edit')): ?><p style="margin-bottom:1rem"><a href="admin.php?p=product" class="btn btn-primary" data-new-product><?= esc(I18n::t('admin.title.product_new')) ?></a></p><?php endif; ?>
     <div class="card">
-        <form method="get" style="display:flex;gap:.5rem;margin-bottom:1rem">
+        <form method="get" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem">
             <input type="hidden" name="p" value="products">
             <input name="q" aria-label="<?= esc(I18n::t('admin.products.search_placeholder')) ?>" value="<?= esc($search) ?>" placeholder="<?= esc(I18n::t('admin.products.search_placeholder')) ?>">
             <select name="status" aria-label="<?= esc(I18n::t('admin.th.status')) ?>">
@@ -62,7 +62,7 @@ function pageProducts(): void {
         </form>
         <form method="post" action="admin.php?p=products&action=bulk" id="bulk-form" data-confirm="<?= esc(I18n::t('admin.products.bulk.confirm')) ?>">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-            <div style="display:flex;gap:.5rem;margin-bottom:.5rem">
+            <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.5rem">
                 <select name="bulk_action" aria-label="<?= esc(I18n::t('admin.products.bulk_action')) ?>">
                     <option value="">— <?= esc(I18n::t('admin.products.bulk_action')) ?> —</option>
                     <option value="activate"><?= esc(I18n::t('admin.common.activate')) ?></option>
@@ -1124,7 +1124,7 @@ function pageAttribute(): void {
             <h3 style="margin:1rem 0 .5rem"><?= esc(I18n::t('admin.attr.values')) ?></h3>
             <div id="options-list">
                 <?php foreach ($options as $i => $opt): ?>
-                <div class="form-row" style="display:flex;gap:.5rem;align-items:center">
+                <div class="form-row" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center">
                     <input name="options[]" aria-label="<?= esc(I18n::t('admin.attr.value')) ?>" value="<?= esc($opt['value']) ?>" style="flex:1" placeholder="<?= esc(I18n::t('admin.attr.value')) ?>">
                     <input type="number" name="option_order[]" aria-label="<?= esc(I18n::t('admin.common.sort_order')) ?>" value="<?= (int)$opt['sort_order'] ?>" style="width:60px" placeholder="<?= esc(I18n::t('admin.common.sort_order')) ?>">
                     <button type="button" data-action="remove-parent" class="btn btn-sm btn-danger">x</button>
