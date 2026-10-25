@@ -1,0 +1,1 @@
+A BareBones mag megváltozott: {{host}}

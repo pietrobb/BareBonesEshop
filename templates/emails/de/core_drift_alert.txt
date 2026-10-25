@@ -1,0 +1,7 @@
+BareBones-Kern auf {{host}} geändert
+
+Kerndateien auf {{host}} wurden außerhalb eines Updates geändert ({{count}}).
+{{#each files}}- {{kind}}: {{path}}
+{{/each}}
+Referenzstand erfasst: {{recorded_at}}
+Nehmen Sie die Korrektur zuerst in BareBones vor und liefern Sie sie als Update aus, sonst überschreibt das nächste Update sie.

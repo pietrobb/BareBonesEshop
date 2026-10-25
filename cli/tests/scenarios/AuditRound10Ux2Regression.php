@@ -271,3 +271,46 @@ try {
 } finally {
     $r10xRemove($r10xBase);
 }
+
+echo "\n--- Audit round 10 (UX 10): duplicate a product, merchant e-mails in every shop language ---\n";
+$r10xProduct->execute([':id' => 9775, ':name' => 'R10X-E item', ':slug' => 'r10x-e', ':sku' => 'R10X-E', ':price' => 1200, ':stock' => 7]);
+$pdo->exec("UPDATE products SET gtin = '4006381333931', translations = '{\"de\":{\"name\":\"R10X-E Artikel\",\"slug\":\"r10x-e-de\"}}' WHERE id = 9775");
+$pdo->exec("INSERT INTO product_categories (product_id, category_id, is_primary, sort_order) VALUES (9775, 1, 1, 0)");
+$pdo->exec("INSERT INTO product_related_products (product_id, related_product_id, relation_type, sort_order) VALUES (9775, 9771, 'related', 0)");
+$pdo->exec("INSERT INTO variants (product_id, sku, name, attrs, price_delta, stock) VALUES (9775, 'R10X-E-RED', 'Red', '{\"color\":\"red\"}', 100, 4)");
+$r10xCopyId = ProductDuplicator::duplicate(9775);
+$r10xCopy = Products::byId($r10xCopyId);
+assert_equals(['R10X-E-COPY', 'r10x-e-copy', 'draft', 0, null, 1200], [$r10xCopy['sku'], $r10xCopy['slug'], $r10xCopy['status'], (int)$r10xCopy['stock'], $r10xCopy['gtin'], (int)$r10xCopy['price']],
+    'R10 UX10: the copy is a draft with its own SKU and slug, no stock and no GTIN, at the same price');
+assert_true(str_contains((string)$r10xCopy['name'], 'R10X-E item') && $r10xCopy['name'] !== 'R10X-E item', 'R10 UX10: the copy\'s name says it is a copy');
+$r10xCopyTr = json_decode((string)$r10xCopy['translations'], true);
+assert_equals(['R10X-E Artikel', false], [$r10xCopyTr['de']['name'] ?? null, isset($r10xCopyTr['de']['slug'])], 'R10 UX10: translations are kept, translated slugs are not (slugs are unique)');
+$r10xCount = static fn(string $sql): int => (int)$pdo->query($sql)->fetchColumn();
+assert_equals([1, 1], [$r10xCount("SELECT COUNT(*) FROM product_categories WHERE product_id = {$r10xCopyId} AND category_id = 1 AND is_primary = 1"),
+    $r10xCount("SELECT COUNT(*) FROM product_related_products WHERE product_id = {$r10xCopyId} AND related_product_id = 9771")], 'R10 UX10: categories and related products are copied');
+$r10xVariant = $pdo->query("SELECT sku, name, price_delta, stock FROM variants WHERE product_id = {$r10xCopyId}")->fetchAll(PDO::FETCH_ASSOC);
+assert_equals([['sku' => 'R10X-E-RED-COPY', 'name' => 'Red', 'price_delta' => 100, 'stock' => 0]], array_map(static fn(array $v): array => ['sku' => $v['sku'], 'name' => $v['name'], 'price_delta' => (int)$v['price_delta'], 'stock' => (int)$v['stock']], $r10xVariant),
+    'R10 UX10: variants are copied under new SKUs without stock');
+assert_equals([7, 'R10X-E', 1], [(int)Products::byId(9775)['stock'], Products::byId(9775)['sku'], $r10xCount("SELECT COUNT(*) FROM variants WHERE product_id = 9775")], 'R10 UX10: the original is untouched');
+$r10xCopy2 = Products::byId(ProductDuplicator::duplicate(9775));
+assert_equals(['R10X-E-COPY-2', 'r10x-e-copy-2'], [$r10xCopy2['sku'], $r10xCopy2['slug']], 'R10 UX10: a second copy takes the next free SKU and slug');
+$r10xRequest = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Request.php');
+assert_true(str_contains($r10xRequest, "'product:duplicate' => handleProductDuplicate()"), 'R10 UX10: the editor\'s Duplicate button posts to a product-page action (products.edit)');
+
+// Merchant e-mails go out in the order's language; cs/de/hu/pl used to fall back to English.
+$r10xMailDir = dirname(TEST_CLI_DIR) . '/templates/emails/';
+$r10xVars = static fn(string $file): array => is_file($file) ? array_values(array_unique(preg_match_all('/\{\{\s*([#\/]?[a-z_]+)/', (string)file_get_contents($file), $m) ? $m[1] : [])) : ['missing'];
+$r10xGaps = [];
+foreach (['sk', 'cs', 'de', 'hu', 'pl', 'es'] as $r10xLocale) {
+    foreach (glob($r10xMailDir . 'en/merchant_*') ?: [] as $r10xEn) {
+        $r10xOther = $r10xMailDir . $r10xLocale . '/' . basename($r10xEn);
+        $r10xWant = $r10xVars($r10xEn);
+        $r10xHave = $r10xVars($r10xOther);
+        sort($r10xWant);
+        sort($r10xHave);
+        if ($r10xWant !== $r10xHave) $r10xGaps[] = $r10xLocale . '/' . basename($r10xEn);
+    }
+}
+assert_equals([], $r10xGaps, 'R10 UX10: every merchant e-mail exists in every shop language with the same placeholders as English');
+$r10xDe = MailService::renderString((string)file_get_contents($r10xMailDir . 'de/merchant_order_created.subject.txt'), ['order_number' => 'R10X-1', 'awaiting_payment' => true], false);
+assert_true(str_contains($r10xDe, 'R10X-1') && !str_contains($r10xDe, 'New order'), 'R10 UX10: the German new-order subject is German (' . trim($r10xDe) . ')');

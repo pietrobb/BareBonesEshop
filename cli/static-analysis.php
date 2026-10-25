@@ -134,7 +134,8 @@ $architectureBudgets = [
     // +1 line: product save emits product.updated for API subscribers (round 6 review).
     // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.
     // +2 lines R9: the product save moves stock by the admin's change, so units sold meanwhile stay sold.
-    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1287, 'functions' => 24, 'max_function_lines' => 210, 'coupling' => 19],
+    // +12 lines, +1 function, +1 coupling R10 UX10: "Duplicate" in the product editor; the copy rules live in ProductDuplicator.
+    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1299, 'functions' => 25, 'max_function_lines' => 210, 'coupling' => 20],
     // +1 coupling: ProductVariants owns variant validation, ledger stock booking and the delete/SKU-change guards.
     // +1 coupling: I18n gives the editor's labels in the admin language (A15.5).
     'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 105, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 4],

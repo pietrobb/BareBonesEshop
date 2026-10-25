@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="pl"><body style="font-family:Arial,sans-serif;color:#111">
+<h2>Odstąpienie od umowy</h2>
+<p>{{customer_name}} ({{customer_email}}) odstąpił(a) od umowy dotyczącej zamówienia <strong>{{order_number}}</strong> ({{order_total}}). Anuluj niewysłane pozycje lub przyjmij zwrot towaru i zwróć pieniądze w ciągu 14 dni.</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if admin_url}}<p><a href="{{admin_url}}">Otwórz zamówienie</a></p>{{/if}}
+</body></html>

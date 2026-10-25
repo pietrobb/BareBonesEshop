@@ -224,6 +224,7 @@ function pageProduct(): void {
     }
     ?>
     <h1><?= $product ? esc(strtr(I18n::t('admin.common.edit_named'), ['{name}' => $product['name']])) : esc(I18n::t('admin.title.product_new')) ?></h1>
+    <?php if ($product): ?><form method="post" action="admin.php?p=product&amp;id=<?= (int)$product['id'] ?>&amp;action=duplicate"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.product.duplicate')) ?></button></form><?php endif; ?>
     <div class="card">
         <?php ob_start(); ?>
         <?= productEditorExtrasHtml($categories, $product) ?>
@@ -813,6 +814,17 @@ function handleProductRelatedSave(): void {
 
     setFlash('ok', I18n::t('admin.product.related_saved'));
     header("Location: admin.php?p=product&id={$id}&relation_type=" . rawurlencode($relationType));
+    exit;
+}
+function handleProductDuplicate(): void {
+    $id = Security::int($_GET['id'] ?? 0);
+    if ($id <= 0 || !Products::byId($id)) {
+        header('Location: admin.php?p=products');
+        exit;
+    }
+    $copyId = ProductDuplicator::duplicate($id);
+    setFlash('ok', I18n::t('admin.product.duplicated'));
+    header("Location: admin.php?p=product&id={$copyId}");
     exit;
 }
 function handleProductSave(): void {

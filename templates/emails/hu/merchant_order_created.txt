@@ -1,0 +1,10 @@
+Új rendelés {{order_number}}
+Vásárló: {{customer_name}} ({{customer_email}})
+Összesen: {{order_total}}
+Fizetés: {{payment_method}} — {{payment_status}}
+{{#if awaiting_payment}}A rendelés még nincs kifizetve.
+{{/if}}
+{{#each items}}{{quantity}} x {{name}} ({{sku}}) — {{total}}
+{{/each}}{{#if admin_url}}
+Részletek: {{admin_url}}
+{{/if}}

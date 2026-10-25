@@ -1,0 +1,1 @@
+Új rendelés {{order_number}}{{#if awaiting_payment}} — fizetésre vár{{/if}}

@@ -10,6 +10,7 @@ function handlePost(string $page, string $action): void {
     match("{$page}:{$action}") {
         'product:save'   => handleProductSave(),
         'product:related_save' => handleProductRelatedSave(),
+        'product:duplicate' => handleProductDuplicate(),
         'product:variants_save' => handleProductVariantsSave(),
         'products:bulk'  => handleBulkAction(),
         'categories:save' => handleCategorySave(),

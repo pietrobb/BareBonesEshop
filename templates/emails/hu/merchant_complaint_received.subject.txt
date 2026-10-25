@@ -1,0 +1,1 @@
+Új reklamáció a(z) {{order_number}} rendeléshez

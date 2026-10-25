@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="hu"><body style="font-family:Arial,sans-serif;color:#111">
+<h2>Elállás a szerződéstől</h2>
+<p>{{customer_name}} ({{customer_email}}) elállt a(z) <strong>{{order_number}}</strong> rendelésre ({{order_total}}) vonatkozó szerződéstől. Törölje a még el nem küldött tételeket, vagy vegye vissza az árut, és 14 napon belül térítse vissza az összeget.</p>
+<ul>
+{{#each items}}<li>{{name}} ({{sku}}) × {{quantity}}</li>{{/each}}
+</ul>
+{{#if admin_url}}<p><a href="{{admin_url}}">Rendelés megnyitása</a></p>{{/if}}
+</body></html>

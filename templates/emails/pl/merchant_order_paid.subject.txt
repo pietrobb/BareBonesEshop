@@ -1,0 +1,1 @@
+Opłacone zamówienie {{order_number}}

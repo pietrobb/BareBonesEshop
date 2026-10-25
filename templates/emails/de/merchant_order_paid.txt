@@ -1,0 +1,7 @@
+Neue bezahlte Bestellung {{order_number}}
+Kunde: {{customer_name}} ({{customer_email}})
+Summe: {{order_total}}
+Zahlung: {{payment_status}} / {{payment_id}}
+
+{{#each items}}{{quantity}} x {{name}} ({{sku}}) — {{total}}
+{{/each}}

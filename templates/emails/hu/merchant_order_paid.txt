@@ -1,0 +1,7 @@
+Új kifizetett rendelés {{order_number}}
+Vásárló: {{customer_name}} ({{customer_email}})
+Összesen: {{order_total}}
+Fizetés: {{payment_status}} / {{payment_id}}
+
+{{#each items}}{{quantity}} x {{name}} ({{sku}}) — {{total}}
+{{/each}}
