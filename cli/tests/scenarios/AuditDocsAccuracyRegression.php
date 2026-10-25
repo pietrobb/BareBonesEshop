@@ -94,3 +94,21 @@ preg_match_all('/\b([A-Z][A-Za-z]+Payment)\b/', $a112Design, $a112DesignNames);
 $a112DesignMissing = array_values(array_filter(array_unique($a112DesignNames[1]), static fn($name) => $name !== 'PaymentAdapter' && !is_file($a112Root . '/adapters/contrib/' . $name . '.php')));
 assert_equals([], $a112DesignMissing, 'A11.2 ESHOP-DESIGN: payment contract does not advertise non-existent adapters');
 assert_true(!preg_match('/PayPal|TatraPay/', $a112Design), 'A11.2 ESHOP-DESIGN: no PayPal/TatraPay adapter advertised');
+
+// R10 docs: README states the real SQLite path, test database location and checkout; the worker header names every queue backend.
+$r10dExample = (string)file_get_contents($a112Root . '/config.example.php');
+assert_true(preg_match("~'db_sqlite_path' => dirname\(__DIR__\) \. '/(bareboneseshop-private/db/shop\.sqlite)'~", $r10dExample, $r10dPath) === 1
+    && str_contains($a112Readme, '`../' . $r10dPath[1] . '`') && !str_contains($a112Readme, 'default `db/shop.sqlite`'),
+    'R10 docs README: db_sqlite_path is documented as config.example.php sets it, not as a db/shop.sqlite default');
+assert_true(str_contains((string)file_get_contents($a112Root . '/cli/tests/scenarios/FoundationScenario.php'), "\$testDbPath = test_fixture_path('suite');")
+    && str_contains($a112Readme, 'system temp directory') && !str_contains($a112Readme, 'db/test.sqlite') && !preg_match('/^mkdir -p db\b/m', $a112Readme),
+    'R10 docs README: the test database lives in the system temp directory, no db/ directory is needed');
+assert_true(!str_contains($a112Readme, 'multi-step checkout') && str_contains($a112Readme, 'single-page checkout'), 'R10 docs README: checkout is described as the single page it is');
+foreach (['src/ManualOrder.php' => 'manual orders', 'src/ProductDuplicator.php' => 'descriptions, duplicate)', 'src/SalesChart.php' => 'sales charts',
+    'src/Entrypoints/Admin/RichText.php' => 'rich-text', 'src/BackInStock.php' => 'back-in-stock alerts', 'src/Entrypoints/Storefront/GuestPages.php' => 'guest order-status lookup'] as $r10dEvidence => $r10dPhrase) {
+    assert_true(is_file($a112Root . '/' . $r10dEvidence) && str_contains($a112Readme, $r10dPhrase), "R10 docs README: feature list mentions {$r10dPhrase} ({$r10dEvidence})");
+}
+preg_match('~/\*\*(.*?)\*/~s', (string)file_get_contents($a112Root . '/cli/worker.php'), $r10dWorkerDoc);
+preg_match_all("~^\s*'([a-z]+)'(?:, '[a-z]+')* => new [A-Za-z]+Queue~m", (string)file_get_contents($a112Root . '/src/JobQueue.php'), $r10dBackends);
+$r10dUnnamed = array_values(array_filter(array_merge(['file'], $r10dBackends[1]), static fn(string $b): bool => !str_contains($r10dWorkerDoc[1] ?? '', '`' . $b . '`')));
+assert_true(count($r10dBackends[1]) >= 2 && $r10dUnnamed === [], 'R10 docs worker.php: the header names every queue backend (missing: ' . implode(', ', $r10dUnnamed) . ')');

@@ -202,6 +202,14 @@ nginx PHP fallback when `operations.nginx_config` is set).
     box, two-column panels stack, filter rows wrap, checkboxes are 24px targets (checked with axe on 14
     admin pages in the browser suite); editing a reverse-charge order keeps its VAT treatment; merchant
     e-mails (new order, paid, withdrawal, complaint, incident) in cs/de/hu/pl.
+- **Round-10 documentation (2026-10-25)**
+  - Spanish cookie and privacy policies (`templates/legal/es/`) replace the English fallback. Like the
+    other templates they are a starting point: **have them reviewed by legal counsel** before production.
+  - README: `db_sqlite_path` has no default (`config.example.php` points it outside the web root); the
+    test runner keeps its database in the system temp directory (no `mkdir -p db`); checkout is a single
+    page; the storefront, account and admin feature lists name what the shop does today.
+  - `cli/worker.php` header: the worker serves the `file`, `database` and `redis` queue backends and runs
+    the order-expiry, outbox, cart-reminder, cleanup, digest, backorder and incident sweeps.
 - **VAT rates (2026-10-23)** — products with `vat_class` `books` or `medicines` now get each country's
   own rate instead of its `reduced` class (e.g. IE books 0 %, IT/ES 4 %, FR 5.5 %, DE medicines 19 %).
   FI reduced rate 13.5 % from 2026, LT 9 % rate replaced by 12 % / 5 % from 2026. Invoices already
