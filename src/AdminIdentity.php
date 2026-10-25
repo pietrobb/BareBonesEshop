@@ -16,10 +16,11 @@ class AdminIdentity {
 
     /**
      * Throws when the database cannot answer: "no account" re-enables the legacy config password
-     * (no MFA), so an unreachable or broken database must never read as 0.
+     * (no MFA), so an unreachable or broken database must never read as 0. A missing admin_accounts table
+     * (empty or wrong database, e.g. a SQLite file that vanished and was recreated empty) is not a verified 0 either.
      */
     public static function accountCount(): int {
-        if (!Db::tableExists('admin_accounts')) return 0;
+        if (!Db::tableExists('admin_accounts')) throw new RuntimeException('admin_accounts table is missing: the database is not a migrated shop database');
         return (int)Db::get()->query('SELECT COUNT(*) FROM admin_accounts')->fetchColumn();
     }
 

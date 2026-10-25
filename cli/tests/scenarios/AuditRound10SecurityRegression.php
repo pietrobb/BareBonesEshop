@@ -80,6 +80,20 @@ try {
     assert_true($r10sThrown, 'R10 M1: AdminIdentity::accountCount() throws on a database error instead of reporting 0 accounts');
     $r = $r10sRun($r10sBroken, [], 'dashboard', '', [], $r10sLegacyCfg, ['r10legacy', 'R10-legacy-password']);
     assert_true($r['code'] === 503 && $r['authenticated'] === false, $r10sLabel('R10 M1: with the database down the legacy config password does not sign in (fail closed 503)', $r));
+    // A database without the admin_accounts table (a vanished SQLite file recreated empty, wrong db_name) is not a verified 0.
+    $r10sThrown = false;
+    try {
+        Db::init(new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]), 'sqlite');
+        AdminIdentity::accountCount();
+    } catch (Throwable $e) {
+        $r10sThrown = true;
+    } finally {
+        Db::init($r10sPrevDb, 'sqlite');
+    }
+    assert_true($r10sThrown, 'R10 M1: AdminIdentity::accountCount() throws on a database without the admin_accounts table');
+    $r10sMissing = $r10sRoot . '/missing.sqlite';
+    $r = $r10sRun($r10sMissing, [], 'dashboard', '', [], $r10sLegacyCfg, ['r10legacy', 'R10-legacy-password']);
+    assert_true($r['code'] === 503 && $r['authenticated'] === false, $r10sLabel('R10 M1: a missing database file (opened empty) does not let the legacy config password sign in', $r));
 
     // A legacy session was never checked again: opened while no account existed, it outlived the first DB account.
     assert_greater(AdminIdentity::accountCount(), 0, 'R10 M1: the test database holds DB admin accounts');
