@@ -122,7 +122,7 @@ Pricing::setConfig(['cart_rules' => [
     ['type' => 'coupon', 'active' => true, 'code' => 'R4USED', 'name' => 'R4 used', 'discount_type' => 'fixed', 'discount_value' => 100, 'max_uses' => 1, 'min_subtotal' => 999999],
     ['type' => 'coupon', 'active' => true, 'code' => 'R4MIN', 'name' => 'R4 min', 'discount_type' => 'fixed', 'discount_value' => 100, 'min_subtotal' => 999999],
 ]]);
-$pdo->exec("INSERT INTO coupon_usage_counters (store_id, coupon_code, subject, uses) VALUES ('default', 'R4USED', '', 1)");
+$pdo->exec("INSERT INTO coupon_usage_counters (store_id, coupon_code, subject, uses) VALUES ('*', 'R4USED', '', 1)"); // shared pricing.json coupon: counted across stores
 $r4Validate = static function (string $code, string $ip = '127.0.4.1'): array {
     $_SERVER['REQUEST_METHOD'] = 'POST';
     $_SERVER['REMOTE_ADDR'] = $ip;
