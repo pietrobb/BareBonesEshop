@@ -130,8 +130,7 @@ for ($i = 1; $i <= $count; $i++) {
 
     $name = "{$adj} {$noun} {$brand} #{$i}";
     $sku = strtoupper(substr($rootSlug, 0, 3)) . '-' . str_pad($i, 6, '0', STR_PAD_LEFT);
-    $slug = strtolower(preg_replace('/[^a-z0-9]+/', '-', iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $name)));
-    $slug = trim($slug, '-');
+    $slug = Import::slugify($name); // lower-cases before stripping, so "Premium" stays "premium"
 
     $price = rand(299, 99900);
     $comparePrice = (rand(0, 4) === 0) ? (int)($price * rand(110, 150) / 100) : null;
@@ -152,10 +151,11 @@ for ($i = 1; $i <= $count; $i++) {
 
     $filterTags = "attr_color_{$color} attr_size_" . strtolower($size) . " attr_material_{$material} attr_brand_" . strtolower($brand);
 
-    $trans = json_encode([
+    $translated = [
         'en' => ['name' => str_replace(['Tričko','Košeľa','Mikina','Bunda','Nohavice'], ['T-shirt','Shirt','Hoodie','Jacket','Pants'], $name), 'slug' => $slug . '-en'],
         'de' => ['name' => $name . ' DE', 'slug' => $slug . '-de'],
-    ]);
+    ];
+    $trans = json_encode($translated);
 
     $summary = "{$adj} {$noun} od {$brand}. Farba: {$color}, Veľkosť: {$size}.";
 
@@ -177,6 +177,9 @@ for ($i = 1; $i <= $count; $i++) {
         ':trans'   => $trans,
     ]);
     $productId = (int)$db->lastInsertId();
+    // Storefront /en/ and /de/ product URLs resolve through slug_registry, as for imported products.
+    Import::registerSlug($slug, 'sk', 'product', $productId, $db);
+    foreach ($translated as $locale => $tr) Import::registerSlug($tr['slug'], $locale, 'product', $productId, $db);
     $stockStmt->execute([':store' => $warehouse['store_id'], ':wh' => (int)$warehouse['id'], ':sku' => $sku, ':qty' => $stock]);
 
     // Attributes

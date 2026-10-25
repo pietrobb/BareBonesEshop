@@ -20,7 +20,7 @@
  */
 class MailService {
     private static ?MailAdapter $adapterOverride = null;
-    private const SECRET_LINK_VARS = ['reset_url', 'verify_url', 'cart_url', 'unsubscribe_url', 'download_links', 'invoice_download_url'];
+    private const SECRET_LINK_VARS = ['reset_url', 'verify_url', 'cart_url', 'unsubscribe_url', 'download_links', 'invoice_download_url', 'pay_url'];
     /** Marketing mail: carries List-Unsubscribe / List-Unsubscribe-Post (RFC 2369 / RFC 8058) from its unsubscribe_url. */
     public const MARKETING_TEMPLATES = ['cart_reminder'];
     /** Rate-limited order mail is retried at most this many times by the worker. */
@@ -296,7 +296,7 @@ class MailService {
     }
 
     private static function defaultLocale(): string {
-        $stores = @json_decode((string)file_get_contents(__DIR__ . '/../stores.json'), true) ?: [];
+        $stores = @json_decode((string)file_get_contents(DataOverrides::storesPath()), true) ?: [];
         return (string)($stores['default_locale'] ?? 'en');
     }
 

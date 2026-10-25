@@ -23,7 +23,7 @@ echo "================================\n\n";
 $catalog = json_decode(file_get_contents(__DIR__ . '/../catalog.json'), true);
 if (!$catalog) { echo "ERROR: Cannot read catalog.json\n"; exit(1); }
 
-$stores = json_decode(file_get_contents(__DIR__ . '/../stores.json'), true);
+$stores = json_decode(file_get_contents(DataOverrides::storesPath()), true);
 if (!$stores) { echo "ERROR: Cannot read stores.json\n"; exit(1); }
 
 echo "Loaded: " . count($catalog['product_types']) . " product types, "

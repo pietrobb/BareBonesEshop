@@ -17,11 +17,20 @@ final class StoreSettings {
     }
 
     public static function path(): string {
-        return self::$path ?? dirname(__DIR__) . '/stores.json';
+        return self::$path ?? DataOverrides::storesPath();
     }
 
+    /** Saved in place, or (read-only code, e.g. Docker) into the private data directory. */
     public static function writable(): bool {
-        return is_file(self::path()) && is_writable(self::path()) && is_writable(dirname(self::path()));
+        $path = self::path();
+        if (is_file($path) && is_writable($path) && is_writable(dirname($path))) return true;
+        $dir = self::$path === null ? DataOverrides::dir() : null;
+        return $dir !== null && (is_dir($dir) ? is_writable($dir) : is_writable(dirname($dir)));
+    }
+
+    /** The file a save writes: stores.json itself, or its copy in the data directory. */
+    private static function target(): ?string {
+        return self::$path ?? DataOverrides::storesWritePath();
     }
 
     /** Decoded stores.json, read fresh (not the per-request Bootstrap cache). */
@@ -35,18 +44,81 @@ final class StoreSettings {
      * @return array{ok: bool, errors: list<string>}  errors are I18n-formatted messages
      */
     public static function save(string $storeId, array $input): array {
-        // Two admins saving different stores at once: each re-reads under the lock, so neither edit is lost.
-        $lock = @fopen(self::path() . '.lock', 'c');
+        return self::locked(static fn(): array => self::saveLocked($storeId, $input));
+    }
+
+    /** Two admins saving at once: each re-reads under the lock, so neither edit is lost. */
+    private static function locked(callable $change): array {
+        $target = self::target();
+        $lock = $target === null ? false : @fopen($target . '.lock', 'c');
         if ($lock === false || !flock($lock, LOCK_EX)) {
             if ($lock !== false) fclose($lock);
             return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.write')]];
         }
         try {
-            return self::saveLocked($storeId, $input);
+            return $change();
         } finally {
             flock($lock, LOCK_UN);
             fclose($lock);
         }
+    }
+
+    /**
+     * A new storefront under its own URL prefix, selling the shared catalog through the default store's providers
+     * and invoicing as the default store's seller until its own seller identity is entered.
+     */
+    public static function addStore(array $input): array {
+        return self::locked(static function () use ($input): array {
+            $data = self::load();
+            $field = static fn(string $f): string => trim(is_scalar($input[$f] ?? null) ? (string)$input[$f] : '');
+            $id = strtolower($field('id'));
+            $prefix = '/' . trim(strtolower($field('url_prefix')), '/');
+            $locale = strtolower($field('default_locale'));
+            $currency = strtolower($field('currency'));
+            $name = mb_substr($field('name'), 0, self::MAX_LENGTH);
+            $stores = is_array($data['stores'] ?? null) ? $data['stores'] : [];
+            $defaultId = (string)($data['default_store'] ?? '');
+            $base = $stores[$defaultId] ?? null;
+            $errors = [];
+            if (!preg_match('/^[a-z][a-z0-9_-]{1,31}$/', $id) || isset($stores[$id])) $errors[] = I18n::t('admin.stores.err.id');
+            if (!preg_match('#^/[a-z0-9-]{2,20}$#', $prefix) || in_array($prefix, array_map(static fn($s): string => is_array($s) ? (string)($s['url_prefix'] ?? '') : '', $stores), true)) {
+                $errors[] = I18n::t('admin.stores.err.prefix');
+            }
+            if (!preg_match('/^[a-z]{2}$/', $locale) || !is_file(dirname(__DIR__) . "/lang/{$locale}.php")) $errors[] = I18n::t('admin.stores.err.locale');
+            if (!isset($data['currencies'][$currency])) $errors[] = I18n::t('admin.stores.err.currency');
+            if ($name === '') $errors[] = I18n::format('admin.stores.err.required', ['fields' => I18n::t('admin.stores.field.store_name')]);
+            if (!is_array($base)) $errors[] = I18n::t('admin.stores.err.unknown');
+            if ($errors) return ['ok' => false, 'errors' => $errors];
+
+            $data['stores'][$id] = [
+                'id' => $id, 'name' => $name, 'domains' => [],
+                'catalog_scope' => (string)($base['catalog_scope'] ?? $defaultId), 'provider_scope' => (string)($base['provider_scope'] ?? $defaultId),
+                'theme' => (string)($base['theme'] ?? 'default'), 'channels' => $base['channels'] ?? ['storefront'], 'permissions' => $base['permissions'] ?? [],
+                'default_locale' => $locale, 'currency' => $currency, 'url_prefix' => $prefix, 'languages' => [$locale],
+                'oss_enabled' => false, 'legal' => ['seller' => (string)(isset($base['legal']['seller']) ? $base['legal']['seller'] : $defaultId)],
+            ];
+            if (!self::write($data)) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.write')]];
+            AuditLog::log('store_settings', 0, null, ['store' => $id, 'added' => $data['stores'][$id]]);
+            return ['ok' => true, 'errors' => []];
+        });
+    }
+
+    /** Remove a store that never took an order; the default store and a store another one invoices as stay. */
+    public static function removeStore(string $storeId, PDO $db): array {
+        return self::locked(static function () use ($storeId, $db): array {
+            $data = self::load();
+            $stores = is_array($data['stores'] ?? null) ? $data['stores'] : [];
+            if (!isset($stores[$storeId]) || $storeId === (string)($data['default_store'] ?? '')) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.remove_default')]];
+            $stmt = $db->prepare('SELECT COUNT(*) FROM orders WHERE store_id = ?');
+            $stmt->execute([$storeId]);
+            $seller = array_filter($stores, static fn($s, $id): bool => $id !== $storeId && is_array($s) && (string)($s['legal']['seller'] ?? '') === $storeId, ARRAY_FILTER_USE_BOTH);
+            if ((int)$stmt->fetchColumn() > 0 || $seller) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.remove_used')]];
+            $removed = $stores[$storeId];
+            unset($data['stores'][$storeId]);
+            if (!self::write($data)) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.write')]];
+            AuditLog::log('store_settings', 0, ['store' => $storeId, 'removed' => $removed], null);
+            return ['ok' => true, 'errors' => []];
+        });
     }
 
     private static function saveLocked(string $storeId, array $input): array {
@@ -95,19 +167,7 @@ final class StoreSettings {
     /** Atomic replace: readers see the old or the new file, never a half-written one. */
     private static function write(array $data): bool {
         $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        if (!is_string($json)) return false;
-        $tmp = self::path() . '.' . bin2hex(random_bytes(6)) . '.tmp';
-        if (@file_put_contents($tmp, $json . "\n", LOCK_EX) === false) {
-            @unlink($tmp);
-            return false;
-        }
-        $mode = @fileperms(self::path());
-        if ($mode !== false) @chmod($tmp, $mode & 0777);
-        if (!@rename($tmp, self::path())) {
-            @unlink($tmp);
-            return false;
-        }
-        if (function_exists('opcache_invalidate')) @opcache_invalidate(self::path(), true);
-        return true;
+        $target = self::target();
+        return is_string($json) && $target !== null && DataOverrides::atomicWrite($target, $json . "\n");
     }
 }

@@ -121,7 +121,7 @@ function collect(string $from, string $to, ?string $storeCode): array
     // Per-store filter via the number series (e.g. invoices "DE-20260001", credit notes "DE-CN-20260001"). The
     // credit notes of an unprefixed series ("CN-2026…") contain a hyphen, so they are matched by their own prefix.
     if ($storeCode !== null) {
-        $stores = json_decode((string)@file_get_contents(dirname(__DIR__) . '/stores.json'), true);
+        $stores = json_decode((string)@file_get_contents(DataOverrides::storesPath()), true);
         $legal = $stores['stores'][$storeCode]['legal'] ?? [];
         $legal = is_array($legal) ? $legal : [];
         $prefix = InvoiceService::numberPrefix($legal, 'invoice');

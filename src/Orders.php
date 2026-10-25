@@ -181,7 +181,7 @@ class Orders {
             $orderNumber = null;
             $orderId = null;
             // Resolve locale: explicit customer arg wins; else current I18n locale; else system default.
-            $stores = json_decode(@file_get_contents(__DIR__ . '/../stores.json') ?: '{}', true) ?: [];
+            $stores = json_decode(@file_get_contents(DataOverrides::storesPath()) ?: '{}', true) ?: [];
             $sysDefaultLocale = $stores['default_locale'] ?? 'en';
             $orderLocale = $customer['locale'] ?? (class_exists('I18n') ? I18n::locale() : $sysDefaultLocale);
             $customerId = !empty($customer['customer_id']) ? (int)$customer['customer_id'] : null;

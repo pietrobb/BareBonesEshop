@@ -193,6 +193,12 @@ try {
         assert_true($a111Home['status'] === 200 && str_contains($a111Home['body'], '<html'), 'A11.1 php -S router.php serves the storefront');
         $a111Slug = (string)(new PDO('sqlite:' . $a111Private . '/db/shop.sqlite'))->query("SELECT slug FROM products WHERE status='active' ORDER BY id LIMIT 1")->fetchColumn();
         assert_equals(200, $a111Get('/product/' . $a111Slug)['status'], 'A11.1 php -S router.php applies the product rewrite');
+        // R10 UX4: the seeder keeps the first letter of every word ("premium-…", not "remium-…") and its /en/ and /de/ slugs resolve.
+        assert_true(preg_match('/^(premium|classic|modern|vintage|ultra|pro|eco|slim|max|super)-/', $a111Slug) === 1, "R10 seed: product slug keeps capitalised words ({$a111Slug})");
+        foreach (['en', 'de'] as $a111Locale) {
+            $a111Url = "/{$a111Locale}/product/{$a111Slug}-{$a111Locale}";
+            assert_equals(200, $a111Get($a111Url)['status'], "R10 seed: the {$a111Locale} product link of a seeded product opens ({$a111Url})");
+        }
         $a111Sitemap = $a111Get('/sitemap.xml');
         assert_true(str_contains($a111Sitemap['body'], '<urlset'), 'A11.1 php -S router.php applies the sitemap rewrite' . (str_contains($a111Sitemap['body'], '<urlset') ? '' : " ({$a111Sitemap['status']}: " . substr($a111Sitemap['body'], 0, 300) . ')'));
         assert_equals(200, $a111Get('/healthz')['status'], 'A11.1 php -S router.php serves /healthz');

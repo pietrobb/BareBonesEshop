@@ -18,7 +18,7 @@ return [
     'products'   => $catalog,
     'product'    => $catalog,
     'orders'     => array_merge($orders, ['OrderOperations']),
-    'order'      => $orders,
+    'order'      => array_merge($orders, ['OrderOperations']), // + the "send payment link" handler (R10 UX3)
     'awaiting_payment' => ['Recovery'],
     'abandoned_carts' => ['Recovery'],
     'invoice_pdf' => $orders,
@@ -54,5 +54,5 @@ return [
     'customer_groups' => ['Taxonomy', 'B2b'],
     'admin_users' => ['AdminUsers'],
     'email_templates' => ['EmailTemplates'],
-    'stores'     => ['StoreSettings'],
+    'stores'     => ['StoreSettings', 'StoreManagement'],
 ];

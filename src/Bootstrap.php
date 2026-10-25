@@ -15,7 +15,7 @@ class Bootstrap {
     /** Per-request cached stores.json decode. Always returns an array. */
     public static function stores(): array {
         if (self::$stores === null) {
-            $file = __DIR__ . '/../stores.json';
+            $file = DataOverrides::storesPath();
             self::$stores = is_file($file)
                 ? (json_decode((string)file_get_contents($file), true) ?: [])
                 : [];

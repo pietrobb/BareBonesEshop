@@ -270,6 +270,12 @@ function pageOrder(): void {
             <?php endif; ?>
             <p class="muted"><?= esc(I18n::t('admin.order.payment_reference')) ?>: <?= $order['payment_id'] ? esc($order['payment_id']) : '—' ?></p>
             <p class="muted"><?= esc(I18n::t('admin.sales.payment_status')) ?>: <span class="badge badge-<?= esc($order['payment_status'] ?? 'pending') ?>"><?= esc($order['payment_status'] ?? 'pending') ?></span><?= $latestPaymentTx ? ' · ' . esc(I18n::t('admin.order.last_event')) . ': ' . esc((string)$latestPaymentTx['status']) . ' @ ' . esc(substr((string)$latestPaymentTx['created_at'], 0, 16)) : '' ?></p>
+            <?php if (Security::adminCan('orders.edit') && PaymentLink::payable($order)): ?>
+            <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=payment_link" style="margin-top:.5rem" data-payment-link>
+                <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
+                <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.order.send_payment_link')) ?></button>
+            </form>
+            <?php endif; ?>
             <?php if (!empty($paymentTransitions)): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=payment_transition" style="margin-top:.5rem">
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">

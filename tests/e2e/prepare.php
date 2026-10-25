@@ -47,6 +47,9 @@ if ($stripeTestKey !== '') {
         throw new RuntimeException('E2E_STRIPE_TEST_SECRET_KEY must be a Stripe test-mode key (sk_test_... or restricted rk_test_...)');
     }
     $config['stripe_secret_key'] = $stripeTestKey;
+    // Checkout offers a gateway only when it is fully configured (R10 UX2); Stripe cannot reach this
+    // disposable shop, so its webhook secret is a random one that no delivery is ever signed with.
+    $config['stripe_webhook_secret'] = 'whsec_' . bin2hex(random_bytes(16));
 }
 
 if ($driver === 'mysql') {

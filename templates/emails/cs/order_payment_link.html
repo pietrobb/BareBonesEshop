@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="cs"><body style="font-family:Arial,sans-serif;color:#111">
+<h2>Zaplaťte svou objednávku</h2>
+<p>Dobrý den, {{customer_name}},</p>
+<p>objednávka <strong>{{order_number}}</strong> ({{order_total}}) čeká na zaplacení. Zaplatit ji můžete přes tento odkaz:</p>
+<p><a href="{{pay_url}}" style="background:#4299e1;color:#fff;padding:10px 18px;text-decoration:none;border-radius:4px">Zaplatit</a></p>
+<p style="color:#666;font-size:13px">Nebo zkopírujte tento odkaz: {{pay_url}}</p>
+<p>Odkaz platí {{valid_days}} dní. Pokud jste už zaplatili, tento e-mail můžete ignorovat.</p>
+</body></html>

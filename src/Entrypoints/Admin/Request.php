@@ -28,7 +28,7 @@ function handlePost(string $page, string $action): void {
         'order:status'   => handleOrderStatus(),
         'orders:bulk_status' => handleOrdersBulkStatus(),
         'order:payment_transition' => handleOrderPaymentTransition(),
-        'order:refund_request' => handleOrderRefundRequest(), 'order:refund_manual' => handleOrderManualRefund(), 'order:refund_retry' => handleOrderRefundRetry(), 'order:refund_confirm' => handleOrderRefundConfirm(), 'order:email_resend' => handleOrderEmailResend(),
+        'order:refund_request' => handleOrderRefundRequest(), 'order:refund_manual' => handleOrderManualRefund(), 'order:refund_retry' => handleOrderRefundRetry(), 'order:refund_confirm' => handleOrderRefundConfirm(), 'order:email_resend' => handleOrderEmailResend(), 'order:payment_link' => handleOrderPaymentLink(),
         'order:invoice_issue' => handleOrderInvoiceIssue(), 'order:invoice_resend' => handleOrderInvoiceResend(),
         'order:shipment_create' => handleOrderShipmentCreate(), 'order:shipment_ship' => handleOrderShipmentShip(),
         'order:shipment_tracking' => handleOrderShipmentTracking(), 'order:shipment_cancel' => handleOrderShipmentCancel(),
@@ -77,6 +77,9 @@ function handlePost(string $page, string $action): void {
         'admin_users:grant' => handleAdminUserGrant(),
         'email_templates:save' => handleEmailTemplateSave(), 'email_templates:preview' => handleEmailTemplatePreview(), 'email_templates:reset' => handleEmailTemplateReset(),
         'stores:save' => handleStoreSettingsSave(),
+        'stores:add' => handleStoreAdd(),
+        'stores:remove' => handleStoreRemove(),
+        'stores:legal_save' => handleStoreLegalSave(),
         default          => null,
     };
 }

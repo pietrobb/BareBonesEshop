@@ -47,6 +47,19 @@ function handleOrdersBulkStatus(): void {
     exit;
 }
 
+/** R10 UX3: POST ?p=order&id=N&action=payment_link — e-mail the customer a new link to pay the unpaid order. */
+function handleOrderPaymentLink(): void {
+    Security::adminRequire('orders.edit');
+    $orderId = Security::int($_GET['id'] ?? 0);
+    $order = Orders::byId($orderId);
+    $result = $order !== null && Security::rateLimit('admin_payment_link_' . $orderId, 5, 3600, false) ? PaymentLink::send($order) : ['status' => 'refused'];
+    $sent = ($result['status'] ?? '') === 'sent';
+    if ($sent) AuditLog::log('payment_link_sent', $orderId, '', (string)$order['customer_email'], 'Payment link e-mailed by ' . Security::adminUser());
+    setFlash($sent ? 'ok' : 'err', I18n::t($sent ? 'admin.order.msg.payment_link_sent' : 'admin.order.msg.payment_link_failed'));
+    header("Location: admin.php?p=order&id={$orderId}");
+    exit;
+}
+
 /** GET ?p=delivery_note&id=N (order detail) or POST order_ids[] (bulk); format=html|pdf. Never shows prices. */
 function pageDeliveryNotes(): void {
     Security::adminRequire('orders.print');
