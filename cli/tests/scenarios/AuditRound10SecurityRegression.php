@@ -145,6 +145,33 @@ try {
         $r10sLevels(['stripe_secret_key' => 'sk_live_' . str_repeat('A1', 12), 'gopay_env' => 'production'] + $r10sPayCfg),
         'R10 M2: live Stripe key, Comgate default and GoPay production pass readiness');
     $r10sPayDb = null;
+
+    // M3: the per-e-mail checkout limit (3 in 30 min) counted every attempt, refused ones included, from any IP and before
+    // validation: one request every 10 minutes locked any buyer's e-mail out of checkout.
+    require_once dirname(TEST_CLI_DIR) . '/src/Http/ApiHandlers.php';
+    Security::setRateDbForTesting(new PDO('sqlite::memory:'));
+    $r10sPrevSession = $_SESSION ?? [];
+    $r10sPrevAddr = $_SERVER['REMOTE_ADDR'] ?? null;
+    try {
+        $_SESSION = [];
+        Cart::clear();
+        $r10sAppCfg = require dirname(TEST_CLI_DIR) . '/config.php';
+        $r10sCheckout = static fn(string $ip): string => (string)((function () use ($ip, $r10sAppCfg) {
+            $_SERVER['REMOTE_ADDR'] = $ip;
+            return checkoutExecute(['name' => 'R10 Buyer', 'email' => 'r10-victim@example.com', 'country' => 'SK', 'payment_method' => 'bank_transfer'], $r10sAppCfg);
+        })()['error_code'] ?? '');
+        for ($i = 0; $i < 4; $i++) $r10sCheckout('203.0.113.66');
+        assert_equals('cart_empty', $r10sCheckout('198.51.100.10'), 'R10 M3: refused checkouts from another IP do not lock the buyer\'s e-mail out of checkout');
+        Security::rateLimitRecord('checkout_subject_email_' . hash('sha256', 'r10-victim@example.com'), true);
+        Security::rateLimitRecord('checkout_subject_email_' . hash('sha256', 'r10-victim@example.com'), true);
+        Security::rateLimitRecord('checkout_subject_email_' . hash('sha256', 'r10-victim@example.com'), true);
+        assert_equals('checkout_too_many_attempts', $r10sCheckout('198.51.100.10'), 'R10 M3: three placed orders for one e-mail from one IP within 30 minutes still stop the fourth');
+        assert_equals('cart_empty', $r10sCheckout('198.51.100.11'), 'R10 M3: the placed-order limit of a guest e-mail is counted per IP');
+    } finally {
+        $_SESSION = $r10sPrevSession;
+        if ($r10sPrevAddr === null) unset($_SERVER['REMOTE_ADDR']); else $_SERVER['REMOTE_ADDR'] = $r10sPrevAddr;
+        http_response_code(200);
+    }
 } finally {
     $r10sTree = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($r10sRoot, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
     foreach ($r10sTree as $r10sPath) $r10sPath->isDir() ? @rmdir($r10sPath->getPathname()) : @unlink($r10sPath->getPathname());

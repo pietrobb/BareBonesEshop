@@ -615,10 +615,15 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
     $loggedInCustomerId = !empty($_SESSION['customer_id']) ? (int)$_SESSION['customer_id'] : null;
 
     if (!$name || !$email) return checkoutRefusal('checkout.error.name_email_required');
-    $checkoutSubject = !empty($_SESSION['customer_id'])
-        ? 'customer_' . (int)$_SESSION['customer_id']
-        : 'email_' . hash('sha256', strtolower($email));
-    if (!Security::rateLimit('checkout_subject_' . $checkoutSubject, 3, 1800, false)) return checkoutRefusal('checkout_too_many_attempts');
+    // Orders per buyer: 3 placed orders in 30 minutes. Only a created order counts (recorded after Orders::create), and a
+    // guest's e-mail is counted per IP: a stranger posting someone's address must not lock that buyer out of checkout.
+    $checkoutSubjectIp = empty($_SESSION['customer_id']);
+    $checkoutSubject = 'checkout_subject_' . ($checkoutSubjectIp ? 'email_' . hash('sha256', strtolower($email)) : 'customer_' . (int)$_SESSION['customer_id']);
+    if (!Security::rateLimitAllows($checkoutSubject, 3, 1800, $checkoutSubjectIp)) {
+        http_response_code(429);
+        header('Retry-After: 1800');
+        return checkoutRefusal('checkout_too_many_attempts');
+    }
 
     // $cfg must be loaded here: apiCheckout is a function, the file-scope $cfg is not
     // visible (it used to be silently undefined → seller always 'SK', OSS always off,
@@ -823,6 +828,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
 
     try {
         $orderId = Orders::create($availableItems, $customer, $paymentMethod, $coupon);
+        Security::rateLimitRecord($checkoutSubject, $checkoutSubjectIp);
 
         if ($freeDigitalOrder) {
             PaymentService::updatePaymentStatus($orderId, 'paid');
