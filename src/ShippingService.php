@@ -370,10 +370,11 @@ class ShippingService
      *
      * Signature: hex HMAC-SHA256 of the raw body with the carrier secret. A carrier that also sends
      * a Unix timestamp (X-Shipping-Timestamp) signs "<timestamp>.<raw body>" instead, and the
-     * timestamp must be within WEBHOOK_TIMESTAMP_TOLERANCE seconds; config
-     * shipping_webhook_require_timestamp makes it mandatory. Body-only signatures stay accepted
-     * for carriers that cannot send one; replays of them are absorbed by the event idempotency
-     * claim and by the status order above.
+     * timestamp must be within WEBHOOK_TIMESTAMP_TOLERANCE seconds. The timestamp is required unless
+     * config shipping_webhook_require_timestamp is false (a carrier that can only sign the body);
+     * replays of body-only events are absorbed by the event idempotency claim and the status order above.
+     * An AWB no label or shipment of these stores carries (or more than one) is not "handled": the
+     * endpoint answers non-2xx so the carrier redelivers it, and the operator gets an incident.
      *
      * @param string $carrierId
      * @param array  $payload    Parsed webhook body
@@ -410,7 +411,7 @@ class ShippingService
                 throw new \RuntimeException("Invalid webhook signature timestamp for carrier: {$carrierId}");
             }
             $computed = hash_hmac('sha256', $timestamp . '.' . $rawPayload, $secret);
-        } elseif (!empty($cfg['shipping_webhook_require_timestamp'])) {
+        } elseif (($cfg['shipping_webhook_require_timestamp'] ?? true) !== false) {
             throw new \RuntimeException("Invalid webhook signature (timestamp required) for carrier: {$carrierId}");
         } else {
             $computed = hash_hmac('sha256', $rawPayload, $secret);
@@ -443,8 +444,11 @@ class ShippingService
         if (count($shipmentRows) === 1) {
             return PaymentWebhookRouting::within((string)$shipmentRows[0]['store_id'], static fn(): array => self::applyShipmentTracking($shipmentRows[0], $carrierId, (string)$awb, $status, $rawPayload));
         }
-        if ($labelRows || $shipmentRows) Logger::phpLog("shipping webhook [{$carrierId}] AWB {$awb} is ambiguous across stores");
-        return ['handled' => false, 'reason' => 'unknown_awb'];
+        if ($labelRows || $shipmentRows) {
+            Logger::phpLog("shipping webhook [{$carrierId}] AWB {$awb} is ambiguous across stores");
+            return ['handled' => false, 'reason' => 'ambiguous_awb', 'awb' => (string)$awb];
+        }
+        return ['handled' => false, 'reason' => 'unknown_awb', 'awb' => (string)$awb];
     }
 
     /**
@@ -607,6 +611,13 @@ class ShippingService
         // Auto-transition order once its last parcel is delivered. OrderWorkflow owns its deferred jobs.
         if ($status === 'delivered' && self::parcelsOutstanding($orderId)) {
             $result['transitioned'] = false;
+        } elseif ($status === 'delivered' && !in_array($orderStatus = (string)(Orders::byId($orderId)['status'] ?? ''), ['shipped', 'delivered'], true)) {
+            // The parcel is delivered but the order was never marked shipped (or was cancelled): the label keeps
+            // the status, the order is left to the operator. Throwing here made the carrier retry a 500 forever.
+            $result['transitioned'] = false;
+            $result['order_status'] = $orderStatus;
+            IncidentMonitor::report('shipping.delivered_unshipped_order', 'webhook', 'warning',
+                ['order_id' => $orderId, 'carrier' => $carrierId, 'awb' => $awb, 'order_status' => $orderStatus]);
         } elseif ($status === 'delivered') {
             try {
                 OrderWorkflow::transition($orderId, 'delivered');

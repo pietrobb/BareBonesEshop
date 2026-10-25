@@ -268,6 +268,16 @@ class Security {
     }
 
     /**
+     * The current store's public base URL: the configured app_url moved to the store's own domain (storeAppUrl),
+     * null when app_url is not configured. For robots.txt, the sitemap and marketing feeds of a store served on its
+     * own domain (they carried the global app_url, a host the store's crawlers and feed consumers do not belong to).
+     */
+    public static function currentStoreAppUrl(): ?string {
+        $appUrl = self::configuredAppUrl();
+        return $appUrl === null ? null : self::storeAppUrl($appUrl, StoreContext::current()->config());
+    }
+
+    /**
      * Neutralize CSV/spreadsheet formula injection. Prefixes a single quote to
      * any cell that a spreadsheet would interpret as a formula (=, +, -, @, or a
      * leading tab/CR), while leaving plain numbers (e.g. "-500") untouched.

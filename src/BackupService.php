@@ -207,7 +207,7 @@ class BackupService
             'enabled'             => true,
             'storage'             => 'local',
             'compression'         => false,
-            'retention'           => ['daily' => 7, 'weekly' => 4, 'monthly' => 6, 'minimum_kept' => 3],
+            'retention'           => ['daily' => 7, 'weekly' => 4, 'monthly' => 6, 'minimum_kept' => 3, 'pre_migration' => 5, 'manual_max_age_days' => 180],
             'auto_pre_migration'  => true,
             'auto_gc_on_backup'   => true,
             'wal_checkpoint'      => true,
@@ -1522,7 +1522,7 @@ class BackupService
         // Labelled backups outside the rotation: pre-restore snapshots (pruned by restore itself), the newest
         // `pre_migration` pre-migration backups and manual backups, which expire only past `manual_max_age_days`.
         $preMigrationKeep = max(0, (int)($cfg['pre_migration'] ?? 5));
-        $manualMaxAge = max(0, (int)($cfg['manual_max_age_days'] ?? 0));
+        $manualMaxAge = max(0, (int)($cfg['manual_max_age_days'] ?? 180)); // 0 = keep manual backups forever
         $manualCutoff = $manualMaxAge > 0 ? new \DateTimeImmutable("-{$manualMaxAge} days") : null;
         $preMigrationSeen = 0;
         foreach ($all as $row) { // newest first

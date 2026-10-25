@@ -171,6 +171,12 @@ try {
     if ($command === 'backup') {
         $snapshot = $updater->backup($package);
         echo "Snapshot created: {$snapshot['id']}\n";
+        try {
+            $pruned = $updater->pruneSnapshots((int)($config['update_snapshots_keep'] ?? 3));
+            if ($pruned) echo 'Deleted ' . count($pruned) . " old update snapshot(s) (update_snapshots_keep).\n";
+        } catch (Throwable $e) {
+            fwrite(STDERR, 'WARNING: old update snapshots not pruned: ' . $e->getMessage() . "\n");
+        }
         exit(0);
     }
 
@@ -187,7 +193,7 @@ try {
     }
     try {
         $pruned = $updater->pruneSnapshots((int)($config['update_snapshots_keep'] ?? 3));
-        if ($pruned) echo 'Deleted ' . count($pruned) . " old pre-update snapshot(s) (update_snapshots_keep).\n";
+        if ($pruned) echo 'Deleted ' . count($pruned) . " old update snapshot(s) (update_snapshots_keep).\n";
     } catch (Throwable $e) {
         fwrite(STDERR, 'WARNING: old update snapshots not pruned: ' . $e->getMessage() . "\n");
     }

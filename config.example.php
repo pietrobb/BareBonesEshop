@@ -231,9 +231,9 @@ return [
         'packeta' => '',
         'gls' => '',
     ],
-    // true = reject carrier webhooks without a signed X-Shipping-Timestamp (replay protection);
-    // keep false while a carrier can only sign the body.
-    'shipping_webhook_require_timestamp' => false,
+    // true (default) = reject carrier webhooks without a signed X-Shipping-Timestamp (replay protection);
+    // set false only for a carrier that can sign nothing but the body.
+    'shipping_webhook_require_timestamp' => true,
 
     // Stripe (when using StripePayment adapter)
     'stripe_secret_key'      => '',

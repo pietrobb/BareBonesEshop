@@ -219,7 +219,7 @@ class ApiV1 {
                 try {
                     $ledgerBooked = Products::setAvailableStock((string)$old['sku'], (string)($old['product_type'] ?? 'simple'), $body['stock'], 'api_adjustment', 'api_v1');
                 } catch (RuntimeException $e) {
-                    return self::error(409, 'stock_conflict', $e->getMessage()) + ['store' => false];
+                    return self::conflict('stock_conflict', $e);
                 }
             }
             $updated = Products::byId($productId);
@@ -286,7 +286,7 @@ class ApiV1 {
                 $jobs = OrderWorkflow::transitionWithin($orderId, $to, $label);
             } catch (RuntimeException | LogicException $e) {
                 // E.g. backordered items on 'shipped' or a concurrent change: nothing is kept, the key can be retried.
-                return self::error(409, 'order_conflict', $e->getMessage()) + ['store' => false];
+                return self::conflict('order_conflict', $e);
             }
             return [
                 'status' => 200,
@@ -329,7 +329,7 @@ class ApiV1 {
             try {
                 Warehouse::adjustStock((int)$warehouse['id'], $sku, $delta, 'api_adjustment', 'api_v1', (string)$client['key_id']);
             } catch (RuntimeException $e) {
-                return self::error(409, 'stock_conflict', $e->getMessage()) + ['store' => false];
+                return self::conflict('stock_conflict', $e);
             }
             $after = Warehouse::totalAvailable($sku);
             $note = 'API v1 client ' . $client['key_id'] . ($reason !== null && trim($reason) !== '' ? ': ' . trim($reason) : '');
@@ -489,6 +489,20 @@ class ApiV1 {
     /** @return array{status:int,body:array} */
     private static function error(int $status, string $code, string $message): array {
         return ['status' => $status, 'body' => ['error' => ['code' => $code, 'message' => $message]]];
+    }
+
+    /**
+     * A 409 for a write that lost a conflict. PDOException is a RuntimeException too: its text (SQL, table and
+     * constraint names) is logged, the client gets a generic retryable message.
+     *
+     * @return array{status:int,body:array,store:false}
+     */
+    private static function conflict(string $code, Throwable $e): array {
+        if ($e instanceof PDOException) {
+            Logger::phpLog('API v1 ' . $code . ': ' . $e->getMessage());
+            return self::error(409, $code, 'The change conflicted with a concurrent update; retry the request') + ['store' => false];
+        }
+        return self::error(409, $code, $e->getMessage()) + ['store' => false];
     }
 
     private static function limit(mixed $value): int {

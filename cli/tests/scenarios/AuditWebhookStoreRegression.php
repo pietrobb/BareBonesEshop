@@ -200,7 +200,8 @@ try {
             }
             $a056Track = static function(string $awb) use ($a056Request, $a056ShipSecret): array {
                 $raw = json_encode(['awb' => $awb, 'status' => 'in_transit'], JSON_THROW_ON_ERROR);
-                return $a056Request('', 'action=webhook_shipping&carrier=packeta', $raw, 'X-Packeta-Signature: ' . hash_hmac('sha256', $raw, $a056ShipSecret) . "\r\n");
+                $ts = (string)time();
+                return $a056Request('', 'action=webhook_shipping&carrier=packeta', $raw, 'X-Packeta-Signature: ' . hash_hmac('sha256', $ts . '.' . $raw, $a056ShipSecret) . "\r\nX-Shipping-Timestamp: {$ts}\r\n");
             };
             $a056LabelState = static function(string $case) use ($a056Db): string {
                 $stmt = $a056Db->prepare('SELECT status FROM shipping_labels WHERE awb = ?');
@@ -210,7 +211,8 @@ try {
             [$a056Code, $a056Body] = $a056Track('AWB-A056-C1');
             assert_equals([200, true, $a056Ids['C1']], [$a056Code, $a056Body['handled'] ?? null, $a056Body['order_id'] ?? null], "{$a056Tag}/shipping: default endpoint resolves cz label");
             assert_equals('in_transit', $a056LabelState('C1'), "{$a056Tag}/shipping: cz label status updated in its store");
-            assert_equals([200, ['handled' => false, 'reason' => 'unknown_awb']], $a056Track('AWB-A056-X1'), "{$a056Tag}/shipping: foreign provider scope label is not resolved");
+            // R10: 404 (the carrier redelivers), no longer a 200 that dropped the event.
+            assert_equals([404, ['error' => 'Unknown tracking number']], $a056Track('AWB-A056-X1'), "{$a056Tag}/shipping: foreign provider scope label is not resolved");
             assert_equals('created', $a056LabelState('X1'), "{$a056Tag}/shipping: foreign provider scope label unchanged");
         } finally {
             proc_terminate($a056Server);

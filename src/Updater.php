@@ -313,11 +313,14 @@ final class Updater
         try {
             $installed = (string)($this->readJson($this->statePath())['snapshot'] ?? '');
             $deleted = [];
-            $kept = 0;
+            $kept = [];
             foreach ($this->listSnapshots() as $snapshot) { // newest first
                 $id = (string)($snapshot['id'] ?? '');
-                if (($snapshot['reason'] ?? '') !== 'pre-update' || !preg_match('/^\d{14}-[0-9a-f]{12}$/', $id)) continue;
-                if (++$kept <= max(1, $keep) || $id === $installed) continue;
+                // Manual `update.php backup` snapshots are full copies too: the newest $keep of each kind stay.
+                $reason = (string)($snapshot['reason'] ?? '');
+                if (!in_array($reason, ['pre-update', 'manual-backup'], true) || !preg_match('/^\d{14}-[0-9a-f]{12}$/', $id)) continue;
+                $kept[$reason] = ($kept[$reason] ?? 0) + 1;
+                if ($kept[$reason] <= max(1, $keep) || $id === $installed) continue;
                 $this->removeTree($this->snapshotDirectory($id));
                 $deleted[] = $id;
             }

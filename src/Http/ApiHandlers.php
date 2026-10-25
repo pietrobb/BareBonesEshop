@@ -1410,6 +1410,13 @@ function apiWebhookShipping(): array {
         return ['error' => 'Processing failed'];
     }
     if (!empty($result['retry'])) return paymentWebhookInFlightResponse();
+    // A 200 told the carrier the event was delivered while no parcel took it: it was lost. Non-2xx makes the
+    // carrier redeliver (the label may be recorded meanwhile); the incident shows the operator the AWB is unmatched.
+    if (in_array($result['reason'] ?? '', ['unknown_awb', 'ambiguous_awb'], true)) {
+        IncidentMonitor::report('shipping.webhook_' . $result['reason'], 'webhook', 'warning');
+        http_response_code($result['reason'] === 'unknown_awb' ? 404 : 409);
+        return ['error' => $result['reason'] === 'unknown_awb' ? 'Unknown tracking number' : 'Tracking number matches more than one parcel'];
+    }
 
     return $result;
 }

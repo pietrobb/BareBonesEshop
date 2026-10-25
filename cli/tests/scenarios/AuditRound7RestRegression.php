@@ -10,7 +10,8 @@ $r7rSecret = 'r7r-carrier-secret-0123456789';
 putenv('SHIP_HTTP_CARRIER_WEBHOOK_SECRET=' . $r7rSecret);
 $r7rHook = static function (string $awb, string $status, string $nonce) use ($r7rSecret): array {
     $raw = json_encode(['awb' => $awb, 'status' => $status, 'nonce' => $nonce]);
-    return ShippingService::handleTrackingWebhook('http-carrier', json_decode($raw, true), hash_hmac('sha256', $raw, $r7rSecret), $raw);
+    $ts = (string)time();
+    return ShippingService::handleTrackingWebhook('http-carrier', json_decode($raw, true), hash_hmac('sha256', $ts . '.' . $raw, $r7rSecret), $raw, $ts);
 };
 $pdo->prepare("INSERT INTO orders (order_number, store_id, status, payment_status, customer_name, customer_email, payment_method, subtotal, total, currency, locale)
     VALUES ('R7R-TRACK', ?, 'shipped', 'paid', 'R7 Buyer', 'r7r-track@example.test', 'bank_transfer', 1000, 1000, 'eur', 'en')")->execute([$r7rStore]);

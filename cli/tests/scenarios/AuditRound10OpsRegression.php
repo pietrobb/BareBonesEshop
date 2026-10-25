@@ -443,3 +443,201 @@ foreach (['config.php.1a2b3c4d.tmp', 'stores.json.0123456789ab.tmp', 'stores.jso
     assert_true($r10oHtDenied($r10oTmp) && count($r10oNginxRules[1]) === 2 && $r10oNgDenied($r10oTmp),
         "R10 deny: /{$r10oTmp} is refused by .htaccess/router.php and nginx");
 }
+
+// ---------- Retention: failed jobs, manual backups and manual update snapshots no longer grow forever ----------
+$r10oRet = $r10oRoot . '/retention';
+mkdir($r10oRet . '/jobs/failed', 0700, true);
+$r10oRetDb = Db::get();
+$r10oRetJob = $r10oRetDb->prepare("INSERT INTO queue_jobs (id, type, payload, state, available_at, correlation_id, created_at, updated_at)
+    VALUES (:id, 'r10o_ret', '{}', 'failed', :at, 'r10o', :at, :at)");
+$r10oRetIds = ['failed_old' => bin2hex(random_bytes(16)), 'failed_recent' => bin2hex(random_bytes(16))];
+$r10oRetJob->execute([':id' => $r10oRetIds['failed_old'], ':at' => gmdate('Y-m-d H:i:s', time() - 91 * 86400)]);
+$r10oRetJob->execute([':id' => $r10oRetIds['failed_recent'], ':at' => gmdate('Y-m-d H:i:s', time() - 40 * 86400)]);
+file_put_contents($r10oRet . '/jobs/failed/old.json', '{}');
+touch($r10oRet . '/jobs/failed/old.json', time() - 91 * 86400);
+file_put_contents($r10oRet . '/jobs/failed/recent.json', '{}');
+try {
+    JobQueue::useBackend(new DatabaseQueue($r10oRetDb, 30));
+    $r10oRetDeleted = RetentionCleanup::run(['jobs_dir' => $r10oRet . '/jobs']);
+    $r10oRetLeft = $r10oRetDb->query("SELECT id FROM queue_jobs WHERE type = 'r10o_ret'")->fetchAll(PDO::FETCH_COLUMN);
+    assert_true($r10oRetLeft === [$r10oRetIds['failed_recent']] && ($r10oRetDeleted['failed_jobs'] ?? 0) === 1,
+        'R10 retention: failed database jobs older than failed_jobs_days (90) are deleted, younger ones stay (they were kept forever)');
+    assert_true(!is_file($r10oRet . '/jobs/failed/old.json') && is_file($r10oRet . '/jobs/failed/recent.json'),
+        'R10 retention: failed job files older than failed_jobs_days are deleted, younger ones stay');
+} catch (Throwable $e) {
+    assert_true(false, 'R10 retention failed jobs (' . $e->getMessage() . ')');
+} finally {
+    JobQueue::resetBackend();
+    $r10oRetDb->exec("DELETE FROM queue_jobs WHERE type = 'r10o_ret'");
+}
+
+// Manual backups: default 180 days; an explicit 0 still keeps them.
+$r10oRetLive = new PDO('sqlite:' . $r10oRet . '/live.db', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+$r10oRetLive->exec('CREATE TABLE x (id INTEGER PRIMARY KEY)');
+try {
+    foreach ([time() - 200 * 86400, time() - 10 * 86400, time() - 3600] as $r10oT) {
+        $r10oDir = $r10oRet . '/backup/storage/backups/' . gmdate('Y/m/d', $r10oT);
+        if (!is_dir($r10oDir)) mkdir($r10oDir, 0700, true);
+        $r10oFile = $r10oDir . '/eshop-' . gmdate('Ymd-His', $r10oT) . '.db';
+        file_put_contents($r10oFile, str_repeat("\0", 32));
+        file_put_contents($r10oFile . '.meta.json', json_encode(['timestamp' => gmdate('Y-m-d\TH:i:s+00:00', $r10oT), 'label' => 'manual', 'sha256' => '0', 'size_bytes' => 32]));
+    }
+    $r10oRetCfg = ['enabled' => true, 'storage' => 'local', 'compression' => false, 'auto_gc_on_backup' => false,
+        'retention' => ['daily' => 1, 'weekly' => 1, 'monthly' => 1, 'minimum_kept' => 1]];
+    $r10oRetCfg['retention']['manual_max_age_days'] = 0;
+    BackupService::init($r10oRetLive, $r10oRetCfg, $r10oRet . '/backup');
+    BackupService::gc();
+    assert_equals(3, count(BackupService::list()), 'R10 backup GC: manual_max_age_days = 0 still keeps every manual backup');
+    unset($r10oRetCfg['retention']['manual_max_age_days']);
+    BackupService::init($r10oRetLive, $r10oRetCfg, $r10oRet . '/backup');
+    BackupService::gc();
+    clearstatcache();
+    assert_equals(2, count(BackupService::list()), 'R10 backup GC: by default a manual backup older than 180 days is deleted (manual backups were kept forever)');
+} catch (Throwable $e) {
+    assert_true(false, 'R10 backup GC (' . $e->getMessage() . ')');
+} finally {
+    BackupService::reset();
+    $r10oRetLive = null;
+}
+
+// `cli/update.php backup` snapshots: the newest update_snapshots_keep stay, like pre-update ones.
+try {
+    mkdir($r10oRet . '/app', 0700, true);
+    $r10oRetState = $r10oRet . '/updates';
+    $r10oManualIds = [];
+    foreach (range(1, 4) as $i) {
+        $r10oManualIds[$i] = sprintf('2026020100000%d-%012x', $i, 0xa0 + $i);
+        mkdir($r10oRetState . '/snapshots/' . $r10oManualIds[$i], 0700, true);
+        file_put_contents($r10oRetState . '/snapshots/' . $r10oManualIds[$i] . '/snapshot.json', json_encode(['id' => $r10oManualIds[$i], 'reason' => 'manual-backup', 'status' => 'prepared', 'created_at' => "2026-02-01T00:00:0{$i}+00:00"]));
+    }
+    $r10oPruned = (new Updater($r10oRet . '/app', $r10oRetState))->pruneSnapshots(2);
+    sort($r10oPruned);
+    assert_equals([$r10oManualIds[1], $r10oManualIds[2]], $r10oPruned, 'R10 update: pruneSnapshots keeps only the newest N manual-backup snapshots (they were kept forever)');
+    assert_true(str_contains(str_replace("\r\n", "\n", (string)file_get_contents(dirname(TEST_CLI_DIR) . '/cli/update.php')), "\$snapshot = \$updater->backup(\$package);\n        echo \"Snapshot created: {\$snapshot['id']}\\n\";\n        try {\n            \$pruned = \$updater->pruneSnapshots("),
+        'R10 update: cli/update.php backup prunes old snapshots after creating one');
+} catch (Throwable $e) {
+    assert_true(false, 'R10 update snapshots (' . $e->getMessage() . ')');
+}
+
+// ---------- Carriers: timestamp by default, delivered on an unshipped order, no invented AWBs ----------
+$r10oShipSecret = 'r10o-carrier-secret-0123456789';
+putenv('SHIP_PACKETA_WEBHOOK_SECRET=' . $r10oShipSecret);
+$r10oShipHook = static function (string $awb, string $status, bool $timestamped = true) use ($r10oShipSecret): array {
+    $raw = json_encode(['awb' => $awb, 'status' => $status, 'nonce' => bin2hex(random_bytes(4))]);
+    $ts = $timestamped ? (string)time() : '';
+    return ShippingService::handleTrackingWebhook('packeta', json_decode($raw, true), hash_hmac('sha256', ($timestamped ? $ts . '.' : '') . $raw, $r10oShipSecret), $raw, $ts);
+};
+try {
+    $r10oBodyOnly = $r10oError(static fn() => $r10oShipHook('R10O-NOPE', 'in_transit', false));
+    assert_true(str_contains($r10oBodyOnly, 'timestamp required'), 'R10 carrier webhook: a body-only signature is refused by default (the signed timestamp was optional and off)');
+    assert_equals('unknown_awb', $r10oShipHook('R10O-NOPE', 'in_transit')['reason'] ?? null, 'R10 carrier webhook: a timestamped signature is accepted');
+    $r10oApiSrc = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Http/ApiHandlers.php');
+    assert_true(str_contains($r10oApiSrc, "http_response_code(\$result['reason'] === 'unknown_awb' ? 404 : 409)"),
+        'R10 carrier webhook: an unknown or ambiguous AWB is answered non-2xx so the carrier redelivers (a 200 dropped the event)');
+
+    // "delivered" for an order that was never marked shipped: recorded on the label, no endless 500.
+    $r10oShipPdo = Db::get();
+    $r10oShipPdo->prepare("INSERT INTO orders (order_number, store_id, status, payment_status, customer_name, customer_email, payment_method, subtotal, total, currency, locale)
+        VALUES ('R10O-SHIP', 'default', 'paid', 'paid', 'R10 Buyer', 'r10o-ship@example.test', 'bank_transfer', 1000, 1000, 'eur', 'en')")->execute();
+    $r10oShipOrder = (int)$r10oShipPdo->query("SELECT id FROM orders WHERE order_number = 'R10O-SHIP'")->fetchColumn();
+    $r10oShipPdo->prepare("INSERT INTO shipping_labels (order_id, store_id, carrier, awb, status, label_data) VALUES (?, 'default', 'packeta', 'R10O-AWB-1', 'created', '')")->execute([$r10oShipOrder]);
+    $r10oDelivered = null;
+    $r10oDeliveredError = $r10oError(static function () use ($r10oShipHook, &$r10oDelivered): void { $r10oDelivered = $r10oShipHook('R10O-AWB-1', 'delivered'); });
+    $r10oLabelNow = (string)$r10oShipPdo->query("SELECT status FROM shipping_labels WHERE awb = 'R10O-AWB-1'")->fetchColumn();
+    assert_true($r10oDeliveredError === '' && ($r10oDelivered['handled'] ?? null) === true && ($r10oDelivered['transitioned'] ?? null) === false
+        && $r10oLabelNow === 'delivered' && (Orders::byId($r10oShipOrder)['status'] ?? '') === 'paid',
+        'R10 carrier webhook: "delivered" for a paid, not shipped order is recorded and acknowledged (it threw, a 500 the carrier retried forever) ' . $r10oDeliveredError);
+    assert_equals(1, (int)$r10oShipPdo->query("SELECT COUNT(*) FROM operational_incidents WHERE code = 'shipping.delivered_unshipped_order'")->fetchColumn(),
+        'R10 carrier webhook: the operator gets an incident for it');
+} catch (Throwable $e) {
+    assert_true(false, 'R10 carrier webhook (' . $e->getMessage() . ')');
+} finally {
+    putenv('SHIP_PACKETA_WEBHOOK_SECRET');
+    Db::get()->exec("DELETE FROM shipping_labels WHERE awb = 'R10O-AWB-1'");
+    Db::get()->exec("DELETE FROM orders WHERE order_number = 'R10O-SHIP'");
+    Db::get()->exec("DELETE FROM operational_incidents WHERE code = 'shipping.delivered_unshipped_order'");
+}
+
+// Packeta / GLS without their API: an error, not an invented AWB that looks like a real parcel.
+putenv('SHIP_MOCK_LABELS');
+$r10oCarriers = ['packeta' => new PacketaShipping(['private_cache_dir' => $r10oRoot . '/packeta']), 'gls' => new GlsShipping()];
+foreach ($r10oCarriers as $r10oCode => $r10oCarrier) {
+    $r10oLabelError = $r10oError(static fn() => $r10oCarrier->generateLabel(['id' => 4242]));
+    $r10oTrackError = $r10oError(static fn() => $r10oCarrier->trackShipment('X4242'));
+    assert_true(str_contains($r10oLabelError, 'not available') && str_contains($r10oTrackError, 'not available'),
+        "R10 {$r10oCode}: without the API key a label and tracking fail instead of inventing an AWB / transit events");
+}
+putenv('SHIP_MOCK_LABELS=1');
+assert_equals(['PKT0000004242', 'GLS000004242'], [$r10oCarriers['packeta']->generateLabel(['id' => 4242])['awb'], $r10oCarriers['gls']->generateLabel(['id' => 4242])['awb']],
+    'R10 carriers: SHIP_MOCK_LABELS=1 still gives deterministic mock labels for development');
+putenv('SHIP_MOCK_LABELS');
+
+// ---------- API v1: a database error is not echoed to the client ----------
+$r10oApiDb = Db::get();
+$r10oApiMysql = Db::driver() === 'mysql';
+$r10oApiStore = StoreContext::current()->id();
+try {
+    $r10oApiClient = ApiAuth::authenticate('Bearer ' . ApiAuth::issueClient('R10 ops', $r10oApiStore, ['inventory:write'])['token']);
+    $r10oApiDb->prepare("INSERT INTO products (sku, name, slug, category_id, price, stock, status, store_id) VALUES ('R10O-API', 'R10O API', 'r10o-api', ?, 1000, 0, 'active', ?)")
+        ->execute([(int)$r10oApiDb->query('SELECT MIN(id) FROM categories')->fetchColumn(), $r10oApiStore]);
+    $r10oApiDb->exec($r10oApiMysql
+        ? "CREATE TRIGGER r10o_api_leak BEFORE INSERT ON warehouse_stock FOR EACH ROW BEGIN IF NEW.sku = 'R10O-API' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'r10o_secret_table violates r10o_constraint'; END IF; END"
+        : "CREATE TRIGGER r10o_api_leak BEFORE INSERT ON warehouse_stock WHEN NEW.sku = 'R10O-API' BEGIN SELECT RAISE(ABORT, 'r10o_secret_table violates r10o_constraint'); END");
+    try {
+        $r10oApiResult = ApiV1::dispatch('POST', '/api/v1/inventory/adjustments', [], ['sku' => 'R10O-API', 'delta' => 3], ['Idempotency-Key' => 'r10o-api-leak-0001'], $r10oApiClient);
+    } catch (Throwable $e) {
+        $r10oApiResult = ApiV1::errorResponse($e);
+    }
+    $r10oApiBody = json_encode($r10oApiResult['body'] ?? null);
+    assert_true(in_array($r10oApiResult['status'] ?? 0, [409, 500], true) && !str_contains((string)$r10oApiBody, 'r10o_secret_table') && !str_contains((string)$r10oApiBody, 'SQLSTATE'),
+        'R10 API v1: a database error in a write is answered without the PDOException text (it named SQL, tables and constraints) ' . $r10oApiBody);
+} catch (Throwable $e) {
+    assert_true(false, 'R10 API v1 (' . $e->getMessage() . ')');
+} finally {
+    $r10oApiDb->exec('DROP TRIGGER IF EXISTS r10o_api_leak');
+    $r10oApiDb->exec("DELETE FROM warehouse_stock WHERE sku = 'R10O-API'");
+    $r10oApiDb->exec("DELETE FROM products WHERE sku = 'R10O-API'");
+}
+
+// ---------- robots.txt / sitemap / marketing feeds of a store on its own domain ----------
+$r10oCfgProp = new ReflectionProperty(Security::class, 'cfg');
+$r10oStoresProp = new ReflectionProperty(Bootstrap::class, 'stores');
+$r10oCfgBefore = $r10oCfgProp->getValue();
+$r10oStoresBefore = $r10oStoresProp->getValue();
+$r10oContextBefore = StoreContext::hasCurrent() ? StoreContext::current() : null;
+$r10oHostBefore = $_SERVER['HTTP_HOST'] ?? null;
+$r10oObLevel = ob_get_level();
+try {
+    $r10oCfgProp->setValue(null, ['app_url' => 'https://main.example'] + (is_array($r10oCfgBefore) ? $r10oCfgBefore : require dirname(TEST_CLI_DIR) . '/config.php'));
+    $r10oDomainStores = Bootstrap::stores();
+    $r10oDomainStores['stores']['r10dom'] = array_replace($r10oDomainStores['stores']['default'], ['id' => 'r10dom', 'url_prefix' => '', 'domains' => ['r10-shop.example'],
+        'catalog_scope' => 'default', 'provider_scope' => 'default']);
+    $r10oStoresProp->setValue(null, $r10oDomainStores);
+    $_SERVER['HTTP_HOST'] = 'r10-shop.example';
+    StoreContext::reset();
+    assert_equals('https://r10-shop.example', Security::currentStoreAppUrl(), 'R10 store domain: the current store base URL is its own domain with the app_url scheme');
+    ob_start();
+    @require dirname(TEST_CLI_DIR) . '/robots.php'; // @: header() after the suite's output
+    $r10oRobots = (string)ob_get_clean();
+    assert_true(str_contains($r10oRobots, 'Sitemap: https://r10-shop.example/sitemap.xml') && !str_contains($r10oRobots, 'main.example'),
+        'R10 store domain: robots.txt names the store domain sitemap (it pointed at the global app_url) ' . json_encode($r10oRobots));
+    foreach (['sitemap.php', 'feed.php'] as $r10oEntry) {
+        $r10oEntrySrc = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/' . $r10oEntry);
+        assert_true(str_contains($r10oEntrySrc, 'Security::currentStoreAppUrl()') && !str_contains($r10oEntrySrc, 'Security::configuredAppUrl()'),
+            "R10 store domain: {$r10oEntry} builds its absolute URLs from the store's domain");
+    }
+    $r10oFeed = MarketingFeed::google((string)Security::currentStoreAppUrl(), 'en');
+    assert_true(str_contains($r10oFeed, '<link>https://r10-shop.example') && !str_contains($r10oFeed, 'main.example'), 'R10 store domain: the Google feed links the store domain');
+    $_SERVER['HTTP_HOST'] = 'other.example';
+    StoreContext::reset();
+    assert_equals('https://main.example', Security::currentStoreAppUrl(), 'R10 store domain: a store without its own domain keeps the app_url');
+} catch (Throwable $e) {
+    while (ob_get_level() > $r10oObLevel) ob_end_clean();
+    assert_true(false, 'R10 store domain (' . get_class($e) . ': ' . $e->getMessage() . ')');
+} finally {
+    $r10oCfgProp->setValue(null, $r10oCfgBefore);
+    $r10oStoresProp->setValue(null, $r10oStoresBefore);
+    if ($r10oHostBefore === null) unset($_SERVER['HTTP_HOST']); else $_SERVER['HTTP_HOST'] = $r10oHostBefore;
+    StoreContext::reset();
+    if ($r10oContextBefore !== null) StoreContext::activate($r10oContextBefore);
+}

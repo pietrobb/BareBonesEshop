@@ -2,8 +2,9 @@
 /**
  * Daily housekeeping of bookkeeping tables that otherwise grow without bound:
  * processed webhook events, replayable API responses, delivered outbox events (with their
- * delivery attempts), completed queue jobs (database rows, Redis index entries, job files) and
- * CSP violation reports (14 days). Dead/failed rows stay for the operator.
+ * delivery attempts), completed queue jobs (database rows, Redis index entries, job files),
+ * CSP violation reports (7 days) and failed (dead-lettered) jobs after `failed_jobs_days` (90), long
+ * enough for the operator to inspect and retry them. Dead outbox events stay for the operator.
  */
 final class RetentionCleanup
 {
@@ -64,6 +65,9 @@ final class RetentionCleanup
 
         $deleted['queue_jobs'] = Db::writeInBatches('queue_jobs', 'DELETE FROM queue_jobs', "state = 'completed' AND completed_at < :cutoff",
             [':cutoff' => $cutoff((int)($cfg['completed_jobs_days'] ?? 7))]);
+        $failedDays = max(1, (int)($cfg['failed_jobs_days'] ?? 90));
+        $deleted['failed_jobs'] = Db::writeInBatches('queue_jobs', 'DELETE FROM queue_jobs', "state = 'failed' AND updated_at < :cutoff",
+            [':cutoff' => $cutoff($failedDays)]);
 
         // CSP reports are purged on ingest too, but a quiet site would otherwise keep old ones forever.
         $deleted['csp_violations'] = Db::tableExists('csp_violations', $db) ? CspReports::purge($db, $now) : 0;
@@ -72,13 +76,15 @@ final class RetentionCleanup
         $backend = JobQueue::activeBackend();
         $deleted['redis_jobs'] = $backend instanceof RedisQueue
             ? $backend->trimCompleted((int)($cfg['completed_jobs_days'] ?? 7) * 86400, $now)
+                + $backend->trimFailed($failedDays * 86400, $now)
             : 0;
 
         $deleted['job_files'] = 0;
-        $completedDir = (string)($cfg['jobs_dir'] ?? '') . '/completed';
-        if (($cfg['jobs_dir'] ?? '') !== '' && is_dir($completedDir)) {
-            $fileCutoff = $now - (int)($cfg['completed_jobs_days'] ?? 7) * 86400;
-            foreach (glob($completedDir . '/*.json') ?: [] as $file) {
+        foreach (['completed' => (int)($cfg['completed_jobs_days'] ?? 7), 'failed' => $failedDays] as $state => $days) {
+            $stateDir = (string)($cfg['jobs_dir'] ?? '') . '/' . $state;
+            if (($cfg['jobs_dir'] ?? '') === '' || !is_dir($stateDir)) continue;
+            $fileCutoff = $now - $days * 86400;
+            foreach (glob($stateDir . '/*.json') ?: [] as $file) {
                 if (filemtime($file) < $fileCutoff && @unlink($file)) $deleted['job_files']++;
             }
         }

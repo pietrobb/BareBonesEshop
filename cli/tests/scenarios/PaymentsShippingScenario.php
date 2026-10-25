@@ -984,6 +984,7 @@ assert_true(in_array('gls', $carriers), 'Shipping: calculateRates includes gls')
 echo "\n--- Test: Shipping — generateLabel + tracking ---\n";
 // Use existing order from earlier tests
 $shippingOrderId = $payOrderId; // reuse payment test order
+putenv('SHIP_MOCK_LABELS=1'); // Packeta mock label (no Packeta API in tests)
 $labelResult = ShippingService::generateLabel($shippingOrderId, 'packeta');
 assert_true(!empty($labelResult['awb']), 'Shipping: generateLabel returns AWB');
 assert_true(str_starts_with($labelResult['awb'], 'PKT'), 'Shipping: Packeta AWB starts with PKT');
@@ -1016,16 +1017,17 @@ $webhookPayload = [
 $shippingWebhookSecret = 'test-shipping-webhook-secret';
 putenv('SHIP_PACKETA_WEBHOOK_SECRET=' . $shippingWebhookSecret);
 $webhookRaw = json_encode($webhookPayload, JSON_UNESCAPED_SLASHES);
-$webhookSignature = hash_hmac('sha256', $webhookRaw, $shippingWebhookSecret);
+$webhookTimestamp = (string)time();
+$webhookSignature = hash_hmac('sha256', $webhookTimestamp . '.' . $webhookRaw, $shippingWebhookSecret);
 StoreContext::activate($deContext);
-$crossStoreWebhook = ShippingService::handleTrackingWebhook('packeta', $webhookPayload, $webhookSignature, $webhookRaw);
+$crossStoreWebhook = ShippingService::handleTrackingWebhook('packeta', $webhookPayload, $webhookSignature, $webhookRaw, $webhookTimestamp);
 assert_equals('unknown_awb', $crossStoreWebhook['reason'] ?? null, 'Store isolation: second store webhook cannot resolve default shipping label');
 Bootstrap::initStoreContext('/', '', 'default');
-$webhookResult = ShippingService::handleTrackingWebhook('packeta', $webhookPayload, $webhookSignature, $webhookRaw);
+$webhookResult = ShippingService::handleTrackingWebhook('packeta', $webhookPayload, $webhookSignature, $webhookRaw, $webhookTimestamp);
 assert_true($webhookResult['handled'], 'Shipping: tracking webhook handled=true');
 assert_equals('delivered', $webhookResult['status'], 'Shipping: webhook status=delivered');
 assert_equals($shippingOrderId, $webhookResult['order_id'], 'Shipping: webhook order_id matches');
-$shippingReplay = ShippingService::handleTrackingWebhook('packeta', $webhookPayload, $webhookSignature, $webhookRaw);
+$shippingReplay = ShippingService::handleTrackingWebhook('packeta', $webhookPayload, $webhookSignature, $webhookRaw, $webhookTimestamp);
 assert_true($shippingReplay['duplicate'] ?? false, 'G3: shipping webhook replay is idempotent');
 
 // Verify label status updated
@@ -1054,6 +1056,7 @@ try {
     $exceptionThrown = str_contains($e->getMessage(), 'not configured');
 }
 assert_true($exceptionThrown, 'G3: shipping webhook without configured secret fails closed');
+putenv('SHIP_MOCK_LABELS');
 
 // ============================================================
 // TESTS: Email Notifications (MailService + adapters + templates)

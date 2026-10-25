@@ -2,7 +2,7 @@
 /**
  * Packeta (Zásilkovna) Shipping Adapter
  * Most popular carrier for SK/CZ e-commerce.
- * Dev: mock responses. Prod: set SHIP_PACKETA_API_KEY env var.
+ * Dev: mock labels with SHIP_MOCK_LABELS=1. Prod: set SHIP_PACKETA_API_KEY env var.
  *
  * COD: supported for SK, CZ
  * Coverage: SK, CZ; EU via partner carriers
@@ -87,8 +87,9 @@ class PacketaShipping implements ShippingLifecycleAdapter
             // Simplified — real implementation requires SOAP/REST client
             throw new \RuntimeException('Packeta production API not yet wired (set SHIP_PACKETA_API_KEY)');
         }
+        self::assertMock('label');
 
-        // Mock: generate deterministic AWB for testing
+        // Mock (SHIP_MOCK_LABELS=1, development and tests only): deterministic AWB
         $awb = 'PKT' . str_pad((string)$order['id'], 10, '0', STR_PAD_LEFT);
         return [
             'awb'        => $awb,
@@ -100,7 +101,7 @@ class PacketaShipping implements ShippingLifecycleAdapter
 
     public function trackShipment(string $awb): array
     {
-        // Mock tracking
+        self::assertMock('tracking');
         return [
             'awb'    => $awb,
             'status' => 'in_transit',
@@ -204,10 +205,19 @@ class PacketaShipping implements ShippingLifecycleAdapter
         if (!empty($_ENV['SHIP_PACKETA_API_KEY'])) {
             throw new \RuntimeException('Packeta production API not yet wired (set SHIP_PACKETA_API_KEY)');
         }
+        self::assertMock('label cancellation');
         return ['awb' => $awb, 'status' => 'cancelled'];
     }
 
     // ─── Private helpers ───────────────────────────────────────────────────────
+
+    /** Without the API, an invented AWB looked like a real parcel. Mock data only when explicitly asked for. */
+    private static function assertMock(string $what): void
+    {
+        if ((string)($_ENV['SHIP_MOCK_LABELS'] ?? getenv('SHIP_MOCK_LABELS')) !== '1') {
+            throw new \RuntimeException("Packeta {$what} is not available: the Packeta API is not connected (SHIP_MOCK_LABELS=1 enables mock data for development)");
+        }
+    }
 
     private function assertCountry(string $country): string
     {

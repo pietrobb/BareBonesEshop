@@ -95,10 +95,35 @@ if (!class_exists('Redis') || $rqHost === '') {
         assert_true(($rqDeleted['redis_jobs'] ?? 0) === 1 && $rqRedis->zScore($rqPrefix . 'completed', $rqId) === false && !$rqRedis->exists($rqPrefix . 'job:' . $rqId),
             'RedisQueue: retention cleanup trims completed jobs older than completed_jobs_days from the index and deletes their hash');
         assert_true($rqRedis->zScore($rqPrefix . 'completed', $rqClaimOf($rqClaimB)) !== false, 'RedisQueue: younger completed jobs stay');
+        // R10: failed jobs were never trimmed; past failed_jobs_days (90) they go too.
+        $rqDeadId = (string)($rqFailures[0]['id'] ?? '');
+        $rqRedis->zAdd($rqPrefix . 'failed', time() - 91 * 86400, $rqDeadId);
+        JobQueue::useBackend($rqTtlQueue);
+        try {
+            $rqDeleted = RetentionCleanup::run([]);
+        } finally {
+            JobQueue::useBackend(null);
+        }
+        assert_true($rqDeadId !== '' && $rqRedis->zScore($rqPrefix . 'failed', $rqDeadId) === false && !$rqRedis->exists($rqPrefix . 'job:' . $rqDeadId),
+            'R10 RedisQueue: retention cleanup removes failed jobs older than failed_jobs_days (they were kept forever)');
 
         // Delayed push (rate-limited mail retries): not pulled before its time.
         $rqId = $rqTtlQueue->pushAt('redis_probe', ['n' => 5], time() + 600);
         assert_true(!in_array($rqId, array_column($rqTtlQueue->pull(100), 'id'), true), 'RedisQueue: a delayed job is not pulled before its time');
+
+        // R10: priority. A low-priority job that became available a second earlier was pulled before
+        // every higher-priority job (score available_at * 100 + priority); DatabaseQueue orders by priority first.
+        $rqPrio = new RedisQueue(['prefix' => $rqPrefix . 'prio:'] + $rqConfig);
+        $rqLow = $rqPrio->pushAt('redis_probe', ['n' => 'low'], time() + 1, 9);
+        sleep(2);
+        $rqHigh = $rqPrio->push('redis_probe', ['n' => 'high'], 1);
+        assert_equals([$rqHigh, $rqLow], array_column($rqPrio->pull(10), 'id'), 'R10 RedisQueue: a higher-priority job is pulled before an older low-priority one');
+        // A failed attempt waits out its backoff outside the ready set, then rejoins at its priority.
+        $rqClaimHigh = $rqPrio->markProcessing(['id' => $rqHigh]);
+        $rqPrio->fail($rqClaimHigh, [], 'r10 transient');
+        assert_true($rqRedis->zScore($rqPrefix . 'prio:delayed', $rqHigh) !== false && !in_array($rqHigh, array_column($rqPrio->pull(10), 'id'), true),
+            'R10 RedisQueue: a retried job is not pulled before its backoff');
+        assert_equals(['pending' => 2, 'processing' => 0, 'completed' => 0, 'failed' => 0], $rqPrio->stats(), 'R10 RedisQueue: stats count delayed jobs as pending');
     } finally {
         $rqKeys = $rqRedis->keys($rqPrefix . '*');
         if ($rqKeys) $rqRedis->del($rqKeys);

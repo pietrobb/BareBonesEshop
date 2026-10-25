@@ -6,7 +6,7 @@
  */
 require_once __DIR__ . '/src/autoload.php';
 
-$base = Security::configuredAppUrl();
+$base = Security::currentStoreAppUrl();
 if ($base === null) {
     http_response_code(503);
     header('Content-Type: text/plain; charset=utf-8');

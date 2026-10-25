@@ -24,7 +24,8 @@ $r5sHook = static function (string $carrier, string $awb, string $status, string
     $raw = json_encode(['awb' => $awb, 'status' => $status, 'nonce' => $nonce]);
     $result = null;
     $error = $r5sThrows(static function () use ($carrier, $raw, $r5sSecret, &$result): void {
-        $result = ShippingService::handleTrackingWebhook($carrier, json_decode($raw, true), hash_hmac('sha256', $raw, $r5sSecret), $raw);
+        $ts = (string)time();
+        $result = ShippingService::handleTrackingWebhook($carrier, json_decode($raw, true), hash_hmac('sha256', $ts . '.' . $raw, $r5sSecret), $raw, $ts);
     });
     return $error ? ['error' => get_class($error) . ': ' . $error->getMessage()] : $result;
 };
