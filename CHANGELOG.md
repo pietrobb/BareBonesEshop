@@ -189,7 +189,8 @@ nginx PHP fallback when `operations.nginx_config` is set).
   - Shoppers: sign in from the checkout and pick a saved address (or save the new one); after a guest
     order the confirmation offers an account for that e-mail with the order in it; guests look up an
     order's status by number and e-mail (`?page=order-status`, throttled); an out-of-stock product offers
-    "e-mail me when it is back" — one e-mail, then the request is deleted (covered by GDPR export/erasure).
+    "e-mail me when it is back" — one e-mail, then the request is deleted (covered by GDPR export/erasure);
+    a restock booked in any store of a shared catalog alerts the waiting shoppers of all its stores.
   - Installer: `--db-driver/--db-host/--db-port/--db-name/--db-user` switches (password from
     `BBE_DB_PASSWORD`, checked against the server before `config.php` is written), a warning when the
     private directory already holds another install's data, the owner's TOTP as a QR code in the
