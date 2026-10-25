@@ -104,11 +104,16 @@ final class PaymentLink {
     /** E-mails the customer a new payment link (admin "send payment link"). */
     public static function send(array $order): array {
         if (!self::payable($order)) return ['status' => 'not_payable'];
+        try {
+            $payUrl = self::issue($order);
+        } catch (RuntimeException) {
+            return ['status' => 'no_app_url']; // the e-mailed link needs the shop's public address (config app_url)
+        }
         $locale = (string)($order['locale'] ?? '');
         return MailService::send('order_payment_link', (string)$order['customer_email'], $locale, [
             'customer_name' => (string)($order['customer_name'] ?? ''), 'order_number' => (string)$order['order_number'],
             'order_total' => I18n::price((int)$order['total'], $order['currency'] ?? null),
-            'pay_url' => self::issue($order), 'valid_days' => (string)intdiv(self::LINK_TTL, 86400),
+            'pay_url' => $payUrl, 'valid_days' => (string)intdiv(self::LINK_TTL, 86400),
         ], (int)$order['id']);
     }
 

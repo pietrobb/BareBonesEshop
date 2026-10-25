@@ -66,6 +66,9 @@ try {
         assert_true(!PaymentLink::payable($r10uOrder('pending', 'paid', $r10uCard)), 'R10 UX3: a paid order cannot');
         assert_true(!PaymentLink::payable($r10uOrder('cancelled', 'pending', $r10uCard)), 'R10 UX3: a cancelled order cannot');
         assert_true(!PaymentLink::payable($r10uOrder('pending', 'pending', ['provider' => 'bank_transfer', 'requires_online' => false])), 'R10 UX3: a bank transfer has no online payment to restart');
+        $r10uCfgProp->setValue(null, ['app_url' => ''] + $r10uCfgBase);
+        assert_equals('no_app_url', PaymentLink::send($r10uUnpaid)['status'] ?? null, 'R10 UX3: without app_url the admin is told, nothing is e-mailed');
+        $r10uCfgProp->setValue(null, ['app_url' => 'https://r10u.example.test'] + $r10uCfgBase);
         $r10uUrl = PaymentLink::issue($r10uUnpaid);
         parse_str((string)parse_url($r10uUrl, PHP_URL_QUERY), $r10uQuery);
         assert_true(($r10uQuery['page'] ?? '') === 'pay' && preg_match('/^[a-f0-9]{48}$/', (string)($r10uQuery['token'] ?? '')) === 1, 'R10 UX3: the link is /?page=pay with a random token');
@@ -82,6 +85,7 @@ try {
     } catch (Throwable $e) { $r10uFail('UX3', $e); } finally {
         $r10uInstances->setValue(null, $r10uInstancesBefore);
         $r10uSubstituted->setValue(null, $r10uSubstitutedBefore);
+        $r10uCfgProp->setValue(null, $r10uCfgBefore);
     }
 
     // UX5: stores added and removed in the admin; legal texts saved to the data directory and used by the storefront.
@@ -109,8 +113,8 @@ try {
             assert_true(!$r10uResult['ok'] && $r10uBefore === (string)file_get_contents($r10uStoresFile), 'R10 UX5: refused new store ' . json_encode($r10uBad) . ' leaves stores.json unchanged');
         }
         assert_true(!StoreSettings::removeStore($r10uDefault, $pdo)['ok'] && isset($r10uStores()['stores'][$r10uDefault]), 'R10 UX5: the default store cannot be removed');
-        $pdo->prepare("INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, shipping_addr, subtotal, shipping_cost, tax_amount, discount_amount, total, currency, status, payment_status, store_id, created_at)
-            VALUES ('R10U-HIST', 'R10U', 'r10u@example.test', '', '{}', 0, 0, 0, 0, 0, 'eur', 'delivered', 'paid', 'r10u', " . Db::now() . ")")->execute();
+        $pdo->prepare("INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, shipping_addr, subtotal, shipping_cost, tax_amount, discount_amount, total, currency, status, payment_status, payment_method, store_id, created_at)
+            VALUES ('R10U-HIST', 'R10U', 'r10u@example.test', '', '{}', 0, 0, 0, 0, 0, 'eur', 'delivered', 'paid', 'bank_transfer', 'r10u', " . Db::now() . ")")->execute();
         assert_true(!StoreSettings::removeStore('r10u', $pdo)['ok'] && isset($r10uStores()['stores']['r10u']), 'R10 UX5: a store with orders cannot be removed');
         $pdo->exec("DELETE FROM orders WHERE order_number = 'R10U-HIST'");
         assert_true(StoreSettings::removeStore('r10u', $pdo)['ok'] && !isset($r10uStores()['stores']['r10u']), 'R10 UX5: an unused store is removed');
