@@ -197,7 +197,9 @@ nginx PHP fallback when `operations.nginx_config` is set).
   - Admin: Duplicate in the product editor (a draft copy with a new SKU and slug, no stock and no GTIN);
     a rich-text editor for product descriptions, their translations and CMS pages (the HTML view stays
     one click away; saved HTML is still sanitized on the server); a daily revenue chart per currency on
-    the reports page; the admin fits a 360px phone (checked with axe in the browser suite); merchant
+    the reports page; the admin fits a 360px phone — wide tables scroll in their own keyboard-reachable
+    box, two-column panels stack, filter rows wrap, checkboxes are 24px targets (checked with axe on 14
+    admin pages in the browser suite); editing a reverse-charge order keeps its VAT treatment; merchant
     e-mails (new order, paid, withdrawal, complaint, incident) in cs/de/hu/pl.
 - **VAT rates (2026-10-23)** — products with `vat_class` `books` or `medicines` now get each country's
   own rate instead of its `reduced` class (e.g. IE books 0 %, IT/ES 4 %, FR 5.5 %, DE medicines 19 %).
