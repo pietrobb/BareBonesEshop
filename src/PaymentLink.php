@@ -10,6 +10,8 @@ final class PaymentLink {
     /** A hosted session younger than this may still be paid (Stripe: 24 h), so it is reused rather than a second one opened. */
     private const LIVE_SESSION = 23 * 3600;
     private const PROVIDER = 'pay_link';
+    /** Longer than any gateway call can take (PHP max_execution_time); a claim this old belongs to a request that died. */
+    private const CLAIM_LEASE = 300;
 
     /** An order that is still pending, unpaid (or its payment failed) and paid through a gateway that can start a payment. */
     public static function payable(array $order): bool {
@@ -45,30 +47,35 @@ final class PaymentLink {
         if (!self::payable($order)) return null;
         $orderId = (int)$order['id'];
         $db = Db::get();
-        $stmt = $db->prepare("SELECT raw_response, created_at FROM payment_transactions
+        $stmt = $db->prepare("SELECT id, raw_response, created_at FROM payment_transactions
             WHERE order_id = :order AND store_id = :store AND status = 'initiated' ORDER BY id DESC");
         $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
         $sessions = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $latest = $sessions[0] ?? null;
-        if ($latest !== null && (string)$order['payment_status'] === 'pending'
-            && (string)$latest['created_at'] >= gmdate('Y-m-d H:i:s', time() - self::LIVE_SESSION)) {
-            // Paying a second session while the first is still open would take the money twice.
+        if ($latest !== null && (string)$latest['created_at'] >= gmdate('Y-m-d H:i:s', time() - self::LIVE_SESSION)
+            && ((string)$order['payment_status'] === 'pending' || !self::eventAfter($db, $orderId, (int)$latest['id']))) {
+            // Paying a second session while the first is still open would take the money twice. A session opened
+            // after a failure leaves the order 'failed' (no failed → pending transition) but is still open.
             $url = (string)((json_decode((string)$latest['raw_response'], true) ?: [])['url'] ?? '');
             if ($url === '') return null;
             CheckoutSession::rememberPendingPayment($orderId, (string)$order['order_number'], $url, '');
             return $url;
         }
         // One new session per attempt: a concurrent request (double click, two tabs) finds the attempt claimed.
-        $claim = $db->prepare(Db::insertIgnore() . " INTO checkout_sessions (order_id, provider, session_id, status) VALUES (:order, 'pay_restart', :attempt, 'completed')");
-        $claim->execute([':order' => $orderId, ':attempt' => $orderId . ':' . count($sessions)]);
-        if ($claim->rowCount() !== 1) return null;
+        // The claim is released when the attempt fails, and lapses after CLAIM_LEASE if its request died mid-way.
+        $attempt = $orderId . ':' . count($sessions);
+        if (!self::claim($db, $orderId, $attempt)) {
+            $db->prepare("DELETE FROM checkout_sessions WHERE provider = 'pay_restart' AND session_id = :attempt AND created_at < :before")
+                ->execute([':attempt' => $attempt, ':before' => gmdate('Y-m-d H:i:s', time() - self::CLAIM_LEASE)]);
+            if (!self::claim($db, $orderId, $attempt)) return null;
+        }
 
         $snapshot = json_decode((string)$order['payment_method_snapshot'], true);
         $provider = (string)$snapshot['provider'];
         $financial = json_decode((string)($order['financial_snapshot'] ?? ''), true);
-        $baseUrl = self::baseUrl();
-        $confirmation = CheckoutSession::createConfirmation($orderId, CheckoutSession::browserSessionId());
         try {
+            $baseUrl = self::baseUrl();
+            $confirmation = CheckoutSession::createConfirmation($orderId, CheckoutSession::browserSessionId());
             $session = PaymentService::initiate([
                 'order_id' => $orderId, 'order_number' => $order['order_number'], 'total' => (int)$order['total'],
                 'customer_email' => (string)$order['customer_email'], 'customer_name' => (string)($order['customer_name'] ?? ''),
@@ -80,6 +87,8 @@ final class PaymentLink {
                 'notify_url' => ApiRoute::paymentWebhook($baseUrl, $provider),
             ], Adapters::payment($provider), $provider);
         } catch (Throwable $e) {
+            // A gateway outage is the usual reason an order is unpaid: the next "Pay" must be able to try again.
+            $db->prepare("DELETE FROM checkout_sessions WHERE provider = 'pay_restart' AND session_id = :attempt")->execute([':attempt' => $attempt]);
             IncidentMonitor::report('payment.session_failed', 'payment', 'critical', ['order_id' => $orderId, 'exception' => $e]);
             return null;
         }
@@ -115,6 +124,20 @@ final class PaymentLink {
             'order_total' => I18n::price((int)$order['total'], $order['currency'] ?? null),
             'pay_url' => $payUrl, 'valid_days' => (string)intdiv(self::LINK_TTL, 86400),
         ], (int)$order['id']);
+    }
+
+    /** A payment event (failure, cancellation, capture) logged after the session $transactionId opened, i.e. that session is over. */
+    private static function eventAfter(PDO $db, int $orderId, int $transactionId): bool {
+        $stmt = $db->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store AND id > :id AND status <> 'initiated' LIMIT 1");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':id' => $transactionId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /** @phpstan-impure the second call after a lapsed claim was deleted can succeed */
+    private static function claim(PDO $db, int $orderId, string $attempt): bool {
+        $claim = $db->prepare(Db::insertIgnore() . " INTO checkout_sessions (order_id, provider, session_id, status) VALUES (:order, 'pay_restart', :attempt, 'completed')");
+        $claim->execute([':order' => $orderId, ':attempt' => $attempt]);
+        return $claim->rowCount() === 1;
     }
 
     private static function baseUrl(): string {

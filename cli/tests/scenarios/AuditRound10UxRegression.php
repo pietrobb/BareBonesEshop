@@ -78,6 +78,37 @@ try {
         $pdo->prepare("UPDATE checkout_sessions SET created_at = ? WHERE provider = 'pay_link' AND order_id = ?")->execute([gmdate('Y-m-d H:i:s', time() - PaymentLink::LINK_TTL - 60), (int)$r10uUnpaid['id']]);
         assert_true(PaymentLink::orderForToken((string)$r10uQuery['token']) === null, 'R10 UX3: the link lapses after its validity');
         assert_equals('not_payable', PaymentLink::send($r10uOrder('pending', 'paid', $r10uCard))['status'] ?? null, 'R10 UX3: no payment link is e-mailed for a paid order');
+
+        // Pay again after a gateway outage: a failed attempt releases its claim, so the next "Pay" opens a session.
+        $r10uGateway = new class implements PaymentAdapter {
+            public int $calls = 0;
+            public bool $down = true;
+            public function createSession(array $order): array {
+                $this->calls++;
+                if ($this->down) throw new RuntimeException('gateway outage');
+                return ['url' => 'https://pay.test/r10u-' . $this->calls, 'session_id' => 'cs_r10u_' . bin2hex(random_bytes(4))];
+            }
+            public function handleWebhook(array $payload): array { return []; }
+            public function refund(string $paymentId, int $amount): array { return []; }
+            public function getStatus(string $paymentId): string { return 'pending'; }
+        };
+        $r10uInstances->setValue(null, array_diff_key($r10uInstances->getValue(), ['payment' => true])); // the legacy slot would win over the substitute
+        Adapters::set('payment.stripe', $r10uGateway);
+        $r10uFlaky = ['provider' => 'stripe', 'service_type' => 'online_card', 'requires_online' => true];
+        $r10uRetry = $r10uOrder('pending', 'failed', $r10uFlaky);
+        $r10uClaims = static fn(int $id): int => (int)$pdo->query("SELECT COUNT(*) FROM checkout_sessions WHERE provider = 'pay_restart' AND order_id = {$id}")->fetchColumn();
+        $r10uInitiated = static fn(int $id): int => (int)$pdo->query("SELECT COUNT(*) FROM payment_transactions WHERE status = 'initiated' AND order_id = {$id}")->fetchColumn();
+        assert_true(PaymentLink::start($r10uRetry) === null && $r10uClaims((int)$r10uRetry['id']) === 0, 'R10 UX3 pay again: a gateway failure returns no URL and releases its attempt claim');
+        $r10uGateway->down = false;
+        assert_equals('https://pay.test/r10u-2', PaymentLink::start($r10uRetry), 'R10 UX3 pay again: the retry after a gateway failure opens a session');
+        assert_equals(1, $r10uInitiated((int)$r10uRetry['id']), 'R10 UX3 pay again: the retry logs one initiated payment');
+        $r10uCallsBefore = $r10uGateway->calls;
+        assert_true(PaymentLink::start($r10uRetry) === 'https://pay.test/r10u-2' && $r10uGateway->calls === $r10uCallsBefore, 'R10 UX3 pay again: the live session opened after the failure is reused, no second one is opened');
+        PaymentService::recordEvent((int)$r10uRetry['id'], 'payment_failed', 'failed', 1000, 'eur', 'r10u-fail-' . $r10uRetry['id']);
+        $pdo->prepare("INSERT INTO checkout_sessions (order_id, provider, session_id, status) VALUES (?, 'pay_restart', ?, 'completed')")->execute([(int)$r10uRetry['id'], $r10uRetry['id'] . ':1']);
+        assert_true(PaymentLink::start($r10uRetry) === null && $r10uGateway->calls === $r10uCallsBefore, 'R10 UX3 pay again: a concurrent attempt (double submit) opens no second session');
+        $pdo->prepare("UPDATE checkout_sessions SET created_at = ? WHERE provider = 'pay_restart' AND session_id = ?")->execute([gmdate('Y-m-d H:i:s', time() - 3600), $r10uRetry['id'] . ':1']);
+        assert_true(PaymentLink::start($r10uRetry) === 'https://pay.test/r10u-' . ($r10uCallsBefore + 1) && $r10uInitiated((int)$r10uRetry['id']) === 2, 'R10 UX3 pay again: a claim left by a crashed attempt lapses');
         foreach (['sk', 'cs', 'en', 'de', 'es', 'hu', 'pl'] as $r10uLocale) {
             $r10uMail = (string)@file_get_contents(dirname(TEST_CLI_DIR) . "/templates/emails/{$r10uLocale}/order_payment_link.html");
             assert_true(str_contains($r10uMail, '{{pay_url}}') && str_contains($r10uMail, '{{order_number}}'), "R10 UX3: the {$r10uLocale} payment-link e-mail carries the link and the order");
