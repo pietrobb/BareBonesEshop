@@ -135,10 +135,13 @@ $architectureBudgets = [
     // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.
     // +2 lines R9: the product save moves stock by the admin's change, so units sold meanwhile stay sold.
     // +12 lines, +1 function, +1 coupling R10 UX10: "Duplicate" in the product editor; the copy rules live in ProductDuplicator.
-    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1299, 'functions' => 25, 'max_function_lines' => 210, 'coupling' => 20],
+    // +2 lines R10 UX10: the product and CMS page editors load the rich-text editor (RichText.php).
+    'src/Entrypoints/Admin/Catalog.php' => ['lines' => 1301, 'functions' => 25, 'max_function_lines' => 210, 'coupling' => 20],
     // +1 coupling: ProductVariants owns variant validation, ledger stock booking and the delete/SKU-change guards.
     // +1 coupling: I18n gives the editor's labels in the admin language (A15.5).
     'src/Entrypoints/Admin/CatalogEditor.php' => ['lines' => 105, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 4],
+    // R10 UX10: progressive rich-text editor for the admin HTML fields (one function returning the nonce'd script).
+    'src/Entrypoints/Admin/RichText.php' => ['lines' => 72, 'functions' => 1, 'max_function_lines' => 63, 'coupling' => 2],
     // +1 coupling R10 UX6: statuses in the admin's language (OrderStatusLabels).
     'src/Entrypoints/Admin/Customers.php' => ['lines' => 330, 'functions' => 6, 'max_function_lines' => 133, 'coupling' => 9],
     'src/Entrypoints/Admin/EmailTemplates.php' => ['lines' => 135, 'functions' => 7, 'max_function_lines' => 46, 'coupling' => 3],

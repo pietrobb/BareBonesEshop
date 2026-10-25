@@ -7,7 +7,7 @@
  * Customers -> B2b (b2bCustomerCard), B2b/PricingRules/Suppliers -> Taxonomy (taxonomyRedirect),
  * Catalog -> CatalogEditor/Taxonomy/PricingRules (required by Catalog.php itself).
  */
-$catalog = ['Catalog'];
+$catalog = ['RichText', 'Catalog'];
 $operations = ['Reports', 'Operations'];
 $orders = ['Reports', 'Shipments', 'Orders'];
 $customers = ['Taxonomy', 'B2b', 'Customers'];

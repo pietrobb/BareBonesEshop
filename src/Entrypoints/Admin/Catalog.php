@@ -267,6 +267,7 @@ function pageProduct(): void {
         $attrSection = (string)ob_get_clean();
         echo AdminForm::render('admin-product', 'admin.php?p=product&action=save' . ($product ? '&id=' . (int)$product['id'] : ''),
             adminFormValues('admin-product', $product ?: null), $attrSection);
+        echo adminRichTextScript();
         ?>
 
         <?php if ($product): ?>
@@ -594,6 +595,7 @@ function pageCmsEdit(): void {
     <div class="card">
         <?php
         echo AdminForm::render('admin-page', 'admin.php?p=page_edit&action=save' . ($id ? '&id=' . $id : ''), adminFormValues('admin-page', $pg ?: null));
+        echo adminRichTextScript();
         ?>
         <?php if ($id): ?>
         <div style="margin-top:1rem"><a href="admin.php?p=pages" class="btn"><?= esc(I18n::t('admin.btn.back')) ?></a></div>
