@@ -80,7 +80,7 @@ class PaymentService {
         $businessBuyer = Customers::isBusinessBuyer($customerId);
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
             // An online method whose gateway has no credentials cannot start a payment: not offered (the doctor reports it).
-            if ((int)($row['requires_online'] ?? 0) === 1 && !PaymentReadiness::canTakePayments((string)($row['provider'] ?? ''), Security::config())) continue;
+            if ((int)($row['requires_online'] ?? 0) === 1 && !self::gatewayCanStart((string)($row['provider'] ?? ''))) continue;
             if (!$businessBuyer && in_array((string)($row['service_type'] ?? ''), self::NO_CONSUMER_SURCHARGE, true)) {
                 $row['fixed_fee'] = 0;
                 $row['percent_fee_bps'] = 0;
@@ -97,6 +97,17 @@ class PaymentService {
             $methods[] = self::methodRowToQuote($row, $amount, $currency);
         }
         return $methods;
+    }
+
+    /** False only for a shipped gateway (not an extension's or a substituted adapter) that lacks its credentials. */
+    private static function gatewayCanStart(string $provider): bool {
+        try {
+            $gateway = Adapters::payment($provider);
+        } catch (\Throwable $e) {
+            return true; // an unknown or disabled provider keeps failing at payment start, where it is reported
+        }
+        return (Adapters::registry('payment')[$provider]['class'] ?? null) !== get_class($gateway)
+            || PaymentReadiness::canTakePayments($provider, Security::config());
     }
 
     public static function selectMethod(string $methodCode, string $country, string $currency, int $amount, string $shippingMethod = '', ?int $customerId = null): ?array {

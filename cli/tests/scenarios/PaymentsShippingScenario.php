@@ -404,6 +404,12 @@ $paymentMig->up($pdo, true);
 $customCardName = (string)$pdo->query("SELECT name FROM payment_methods WHERE code = 'card'")->fetchColumn();
 assert_equals('Admin custom card', $customCardName, 'Payment methods: seed does not overwrite admin-edited method');
 
+if (!PaymentReadiness::canTakePayments('stripe', Security::config())) {
+    $paymentCodesNoKeys = array_column(PaymentService::availableMethods('SK', 'eur', 2500, 'packeta'), 'code');
+    assert_true(!in_array('card', $paymentCodesNoKeys, true) && in_array('bank_transfer', $paymentCodesNoKeys, true),
+        'Payment methods: the card method is not offered while Stripe has no keys (offline methods are)');
+}
+Adapters::set('payment', $mockGateway); // the card method's gateway from here on (the checkout below pays through it)
 $paymentMethodsSkPacketa = PaymentService::availableMethods('SK', 'eur', 2500, 'packeta');
 $paymentCodesSkPacketa = array_column($paymentMethodsSkPacketa, 'code');
 assert_true(in_array('card', $paymentCodesSkPacketa, true), 'Payment methods: card available for SK Packeta');
@@ -494,7 +500,6 @@ if (!function_exists('apiCheckout')) {
     define('BB_TEST_LOAD_API_ONLY', true);
     require_once TEST_CLI_DIR . '/../src/Entrypoints/Api.php';
 }
-Adapters::set('payment', $mockGateway);
 $_SERVER['REQUEST_METHOD'] = 'POST';
 $_SERVER['HTTP_HOST'] = 'localhost';
 $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
