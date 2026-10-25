@@ -156,7 +156,10 @@ $architectureBudgets = [
     // +1 function, +14 lines: "Confirm refund" books a GoPay/ThePay partial refund the provider never confirms (round 6 review).
     // +6 lines, +1 coupling R10 UX3: the order detail's "Send payment link" button for an unpaid online order (PaymentLink).
     // +1 coupling R10 UX6: statuses in the admin's language (OrderStatusLabels).
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 922, 'functions' => 16, 'max_function_lines' => 308, 'coupling' => 22],
+    // +4 lines R10 UX7: "New order" button on the list, the line editor on the detail (ManualOrders.php, loaded like Shipments.php).
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 926, 'functions' => 16, 'max_function_lines' => 310, 'coupling' => 22],
+    // R10 UX7: manual order form and the pending order's line editor; pricing and stock rules live in ManualOrder.
+    'src/Entrypoints/Admin/ManualOrders.php' => ['lines' => 98, 'functions' => 5, 'max_function_lines' => 31, 'coupling' => 5],
     // +1 function, +3 coupling R10 UX3: handleOrderPaymentLink e-mails the customer a new payment link (PaymentLink, Orders, AuditLog).
     'src/Entrypoints/Admin/OrderOperations.php' => ['lines' => 90, 'functions' => 5, 'max_function_lines' => 32, 'coupling' => 10],
     'src/Entrypoints/Admin/PricingRules.php' => ['lines' => 235, 'functions' => 7, 'max_function_lines' => 115, 'coupling' => 5],
@@ -220,6 +223,8 @@ $forbiddenDependencies = [
     'src/Entrypoints/Admin/Customers.php' => ['Products::', 'CheckoutService::', 'ApiHandlers'],
     'src/Entrypoints/Admin/Operations.php' => ['CheckoutService::', 'Orders::create(', 'ApiHandlers'],
     'src/Entrypoints/Admin/Orders.php' => ['Products::', 'ContentService::', 'ApiHandlers'],
+    // Manual orders are priced and reserved only through ManualOrder (the checkout rules), never assembled here.
+    'src/Entrypoints/Admin/ManualOrders.php' => ['Orders::create(', 'Orders::replaceItems(', 'CheckoutService::', 'ApiHandlers', 'Db::get('],
     'src/Entrypoints/Admin/Recovery.php' => ['Products::', 'CheckoutService::', 'ApiHandlers', 'Db::get('],
     'src/Entrypoints/Storefront/CatalogPages.php' => ['CheckoutService::', 'CheckoutSession::', 'Orders::'],
     'src/Entrypoints/Storefront/CheckoutPages.php' => ['Products::', 'Categories::', 'ContentService::'],

@@ -1,6 +1,7 @@
 <?php
 /** Sales, orders, invoices, refunds and RMA administration. */
 require_once __DIR__ . '/Shipments.php';
+require_once __DIR__ . '/ManualOrders.php';
 
 function pageSalesOverview(): void {
     Security::adminRequire('orders.view');
@@ -159,6 +160,7 @@ function pageOrders(): void {
     $orders = $stmt->fetchAll();
     ?>
     <h1><?= esc(I18n::t('admin.title.orders')) ?> <span class="muted">(<?= $total ?>)</span></h1>
+    <?php if (Security::adminCan('orders.edit')): ?><p><a class="btn btn-primary btn-sm" href="admin.php?p=order_new" data-order-new><?= esc(I18n::t('admin.title.order_new')) ?></a></p><?php endif; ?>
     <div class="card">
         <form method="get" style="display:flex;gap:.5rem;margin-bottom:1rem">
             <input type="hidden" name="p" value="orders">
@@ -350,6 +352,8 @@ function pageOrder(): void {
             <p style="font-size:1.2rem"><strong><?= esc(I18n::t('admin.order.grand_total')) ?>: <?= I18n::price((int)$order['total'], $order['currency']) ?></strong></p>
         </div>
     </div>
+
+    <?php if (Security::adminCan('orders.edit')) renderOrderItemsEditor($order, $items); ?>
 
     <?php renderOrderShipments($order); ?>
 
