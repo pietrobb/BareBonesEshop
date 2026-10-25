@@ -22,7 +22,13 @@ final class SetupChecklist
     public static function summary(?array $doctor = null): array
     {
         try {
-            $doctor ??= Setup::doctor(Security::config());
+            if ($doctor === null) {
+                $doctor = Setup::doctor(Security::config());
+                // The store the admin is switched to, as resolved for this request, decides which catalog is priced.
+                $store = StoreContext::current();
+                $own = Setup::storeCurrencyCheck(Db::get(), $store->id(), $store->config());
+                $doctor['checks'] = array_map(static fn(array $c): array => ($c['name'] ?? '') === $own['name'] ? $own : $c, (array)($doctor['checks'] ?? []));
+            }
         } catch (Throwable $e) {
             Logger::warning('Setup checklist: doctor failed', ['exception' => get_class($e)]);
             $doctor = ['checks' => [['status' => 'fail', 'name' => 'doctor', 'message' => 'The setup doctor could not run.', 'action' => 'Run php cli/setup.php doctor on the server.']]];

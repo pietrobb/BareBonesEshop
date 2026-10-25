@@ -208,14 +208,18 @@ class Setup
     /** A store sells only what has a price in its currency: list what the shared catalog leaves unpriced there. */
     private static function storeCurrencyChecks(PDO $db, array $stores, callable $add): void {
         foreach ($stores as $storeId => $store) {
-            if (!is_array($store)) continue;
-            $gap = StoreCurrencyCoverage::unpriced($db, (string)$storeId, $store);
-            $currency = strtoupper((string)($store['currency'] ?? ''));
-            $add($gap['count'] === 0 ? 'pass' : 'warn', 'stores.currency_prices.' . $storeId, $gap['count'] === 0
-                ? "Store {$storeId} has a {$currency} price for everything it offers."
-                : "Store {$storeId} sells in {$currency}, but {$gap['count']} active product(s)/variant(s) have no {$currency} price and are not for sale there (e.g. " . implode(', ', $gap['skus']) . ').',
-                $gap['count'] === 0 ? '' : "Price them in a {$currency} price list of store {$storeId} (Admin → Pricing → Price lists; a variant with a surcharge needs its own row), or set the store's currency to the catalog's.");
+            if (is_array($store)) $add(...array_values(self::storeCurrencyCheck($db, (string)$storeId, $store)));
         }
+    }
+
+    /** @return array{status: string, name: string, message: string, action: string} */
+    public static function storeCurrencyCheck(PDO $db, string $storeId, array $store): array {
+        $gap = StoreCurrencyCoverage::unpriced($db, $storeId, $store);
+        $currency = strtoupper((string)($store['currency'] ?? ''));
+        return ['status' => $gap['count'] === 0 ? 'pass' : 'warn', 'name' => 'stores.currency_prices.' . $storeId, 'message' => $gap['count'] === 0
+            ? "Store {$storeId} has a {$currency} price for everything it offers."
+            : "Store {$storeId} sells in {$currency}, but {$gap['count']} active product(s)/variant(s) have no {$currency} price and are not for sale there (e.g. " . implode(', ', $gap['skus']) . ').',
+            'action' => $gap['count'] === 0 ? '' : "Price them in a {$currency} price list of store {$storeId} (Admin → Pricing → Price lists; a variant with a surcharge needs its own row), or set the store's currency to the catalog's."];
     }
 
     /** Retention deadlines are only met when cli/gdpr-gc.php --apply actually runs; nothing in the app schedules it. */
