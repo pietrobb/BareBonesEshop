@@ -293,10 +293,10 @@ test('admin fulfillment ships a paid order through the warehouse ledger', async 
   const statusForm = page.locator('form[action*="action=status"]');
   await statusForm.locator('select[name="new_status"]').selectOption('processing');
   await statusForm.locator('button[type="submit"]').click();
-  await expect(page.locator('h3 .badge-processing')).toHaveText('processing');
+  await expect(page.locator('h3 .badge-processing')).toHaveText('Processing');
   await page.locator('form[action*="action=status"] select[name="new_status"]').selectOption('shipped');
   await page.locator('form[action*="action=status"] button[type="submit"]').click();
-  await expect(page.locator('h3 .badge-shipped')).toHaveText('shipped');
+  await expect(page.locator('h3 .badge-shipped')).toHaveText('Shipped');
 });
 
 test('admin completes a partial RMA receipt, credit note, and refund', async ({ page }) => {
@@ -305,13 +305,13 @@ test('admin completes a partial RMA receipt, credit note, and refund', async ({ 
   await page.goto('/admin.php?p=rma');
   const row = page.locator('tr').filter({ has: page.locator(`input[name="rma_id"][value="${state.rma.rma_id}"]`) });
   await row.locator('form').filter({ has: page.locator('input[name="status"][value="approved"]') }).locator('button').click();
-  await expect(page.locator('tr').filter({ hasText: 'G12 partial browser return' }).locator('.badge-approved')).toHaveText('approved');
+  await expect(page.locator('tr').filter({ hasText: 'G12 partial browser return' }).locator('.badge-approved')).toHaveText('Approved');
   const approvedRow = page.locator('tr').filter({ hasText: 'G12 partial browser return' });
   await approvedRow.locator('select[name="disposition"]').selectOption('restock');
   await approvedRow.locator('form').filter({ has: page.locator('input[name="status"][value="received"]') }).locator('button').click();
-  await expect(page.locator('tr').filter({ hasText: 'G12 partial browser return' }).locator('.badge-received')).toHaveText('received');
+  await expect(page.locator('tr').filter({ hasText: 'G12 partial browser return' }).locator('.badge-received')).toHaveText('Received');
   await page.locator('tr').filter({ hasText: 'G12 partial browser return' }).locator('form').filter({ has: page.locator('input[name="status"][value="refunded"]') }).locator('button').click();
-  await expect(page.locator('tr').filter({ hasText: 'G12 partial browser return' }).locator('.badge-refunded')).toHaveText('refunded');
+  await expect(page.locator('tr').filter({ hasText: 'G12 partial browser return' }).locator('.badge-refunded')).toHaveText('Refunded');
 });
 
 test('safe updater smoke remains executable from the qualification runner', async () => {
