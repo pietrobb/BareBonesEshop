@@ -27,6 +27,7 @@ class Sync {
             });
             if (!empty($result['skipped']) || !empty($result['error'])) return $result;
             foreach (self::COUNTERS as $counter) $totals[$counter] += (int)($result[$counter] ?? 0);
+            if (!empty($result['catalog_error'])) $totals['catalog_error'] = (string)$result['catalog_error'];
         }
         return $totals;
     }
@@ -52,21 +53,36 @@ class Sync {
         $lastSync = $pullCatalog ? self::watermark() : null;
         $since = $lastSync ? new \DateTime($lastSync) : null;
 
-        foreach ($pullCatalog ? $adapter->pullProducts($since) : [] as $productData) {
-            // One bad product (e.g. a SKU owned by another catalog) must not abort stock, order push and status pull.
-            try {
-                Import::upsertProduct($productData);
-                $result['products_updated']++;
-            } catch (\Throwable $e) {
-                $result['products_skipped']++;
-                Logger::phpLog('ERP product sync skipped [' . (string)($productData['sku'] ?? '?') . "]: {$e->getMessage()}");
+        // A failed catalog or stock pull (ERP down mid-listing, a bad page) must not keep paid orders from being pushed.
+        $catalogErrors = [];
+        try {
+            foreach ($pullCatalog ? $adapter->pullProducts($since) : [] as $productData) {
+                // One bad product (e.g. a SKU owned by another catalog) must not abort stock, order push and status pull.
+                try {
+                    Import::upsertProduct($productData);
+                    $result['products_updated']++;
+                } catch (\Throwable $e) {
+                    $result['products_skipped']++;
+                    Logger::phpLog('ERP product sync skipped [' . (string)($productData['sku'] ?? '?') . "]: {$e->getMessage()}");
+                }
             }
+        } catch (\Throwable $e) {
+            $catalogErrors[] = 'products: ' . $e->getMessage();
         }
 
         // 2. Pull stock levels
-        $stockData = $pullCatalog ? $adapter->pullStock() : [];
-        if (!empty($stockData)) {
-            $result['stock_updated'] = Products::bulkUpdateStock($stockData);
+        try {
+            $stockData = $pullCatalog ? $adapter->pullStock() : [];
+            if (!empty($stockData)) {
+                $result['stock_updated'] = Products::bulkUpdateStock($stockData);
+            }
+        } catch (\Throwable $e) {
+            $catalogErrors[] = 'stock: ' . $e->getMessage();
+        }
+        if ($catalogErrors !== []) {
+            $result['catalog_error'] = implode('; ', $catalogErrors);
+            Logger::phpLog('ERP catalog pull failed: ' . $result['catalog_error']);
+            IncidentMonitor::report('erp.catalog_pull_failed', 'erp', 'warning', ['error' => $result['catalog_error']]);
         }
 
         // 3. Push new orders to ERP
@@ -112,9 +128,10 @@ class Sync {
 
         // A skipped product would never be pulled again past a newer watermark: keep the previous one so the next run retries it.
         // Until it is fixed every run re-pulls the delta since then, so the operator must see it.
-        if ($result['products_skipped'] === 0) {
+        // An interrupted pull did not see the rest of the delta either.
+        if ($result['products_skipped'] === 0 && $catalogErrors === []) {
             self::saveWatermark($startedAt);
-        } else {
+        } elseif ($result['products_skipped'] > 0) {
             IncidentMonitor::report('erp.products_skipped', 'erp', 'warning', ['count' => $result['products_skipped']]);
         }
 

@@ -140,7 +140,14 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
         return ['database' => $this->database] + $schema;
     }
 
-    public function restore(string $snapshotDirectory, array $metadata): void
+    /**
+     * Update rollback: replaces the live database with the verified snapshot dump. Like
+     * restoreBackupDump() it is refused while any other session uses the live database (web
+     * traffic, workers, cron — only $ignoredSessionIds, the caller's own, are allowed), and it first
+     * dumps live into the snapshot directory (pre-rollback-*.sql). That copy is re-imported and
+     * verified if replacing live fails, and is kept afterwards: it holds every write the rollback discards.
+     */
+    public function restore(string $snapshotDirectory, array $metadata, array $ignoredSessionIds = []): void
     {
         if (($metadata['driver'] ?? null) !== 'mysql' || ($metadata['database'] ?? null) !== $this->database
             || empty($metadata['verified_restore']) || !is_array($metadata['inventory'] ?? null)) {
@@ -164,14 +171,28 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
 
         $server = $this->serverConnection();
         $this->assertSchemaExists($server, $this->database);
-        $server->exec('DROP DATABASE ' . $this->quoteIdentifier($this->database));
-        $this->createSchema($server, $this->database, $schema);
-        $server = null;
+        $this->assertNoOtherSessions($server, $ignoredSessionIds, 'roll back');
 
-        $this->import($dumpPath, $this->database);
-        $server = $this->serverConnection();
-        $actual = $this->inventory($server, $this->database);
-        $this->assertMatchingInventory($metadata['inventory'], $actual, 'live rollback');
+        $safetyPath = $snapshotDirectory . DIRECTORY_SEPARATOR . 'pre-rollback-' . gmdate('YmdHis') . '-' . bin2hex(random_bytes(4)) . '.sql';
+        $this->dump($safetyPath);
+        if (!is_file($safetyPath) || filesize($safetyPath) === 0) {
+            throw new RuntimeException('MySQL pre-rollback safety dump was not created; the live database was not touched');
+        }
+        @chmod($safetyPath, 0600);
+        $safetyRows = self::countDumpRows($safetyPath);
+        // The dump took time: a writer that connected meanwhile would lose its writes to the drop.
+        $this->assertNoOtherSessions($server, $ignoredSessionIds, 'roll back');
+
+        $this->replaceLive($server, $dumpPath, $schema, $metadata['inventory'], 'rollback', $safetyPath, $safetyRows);
+    }
+
+    private function assertNoOtherSessions(PDO $server, array $ignoredSessionIds, string $action): void
+    {
+        $others = $this->otherSessions($server, $this->database, $ignoredSessionIds);
+        if ($others > 0) {
+            throw new RuntimeException("Refusing to {$action} the live MySQL database: {$others} other session(s) are connected to it; "
+                . 'stop web traffic (maintenance page), workers and cron first');
+        }
     }
 
     /**
@@ -220,38 +241,10 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
             }
 
             // 2. No other session may still use the live database.
-            $others = $this->otherSessions($server, $this->database, $ignoredSessionIds);
-            if ($others > 0) {
-                throw new RuntimeException("Refusing to replace the live MySQL database: {$others} other session(s) are connected to it; stop web traffic, workers and cron first");
-            }
+            $this->assertNoOtherSessions($server, $ignoredSessionIds, 'replace');
 
             // 3. Replace live and prove it equals the verified scratch copy, else re-import the previous database.
-            $previousSchema = $this->schemaInventory($server, $this->database);
-            $previousCharset = $this->schemaSettings($server, $this->database);
-            $server->exec('DROP DATABASE ' . $this->quoteIdentifier($this->database));
-            try {
-                $this->createSchema($server, $this->database, $schema);
-                $this->import($dumpPath, $this->database);
-                $live = $this->inventory($server, $this->database);
-                $this->assertMatchingInventory($scratch, $live, 'live restore');
-            } catch (Throwable $restoreError) {
-                try {
-                    $server->exec('DROP DATABASE IF EXISTS ' . $this->quoteIdentifier($this->database));
-                    $this->createSchema($server, $this->database, $previousCharset);
-                    $this->import($rollbackDumpPath, $this->database);
-                    // The re-imported database must be the previous one: same schema, exactly the dumped rows.
-                    $reimported = $this->inventory($server, $this->database);
-                    $this->assertMatchingInventory($previousSchema, array_intersect_key($reimported, $previousSchema), 'rollback re-import schema');
-                    if ($reimported['row_counts'] !== $this->expectedRowCounts($reimported, $rollbackRows)) {
-                        throw new RuntimeException('MySQL rollback re-import row counts do not match the rows in the pre-restore dump');
-                    }
-                } catch (Throwable $rollbackError) {
-                    throw new RuntimeException('MySQL restore failed (' . $restoreError->getMessage() . ') and re-importing the previous database also failed ('
-                        . $rollbackError->getMessage() . "); import {$rollbackDumpPath} manually", self::RESTORE_FAILED_AFTER_DROP, $restoreError);
-                }
-                throw new RuntimeException('MySQL restore failed; the previous database was re-imported and verified: ' . $restoreError->getMessage(),
-                    self::RESTORE_FAILED_AFTER_DROP, $restoreError);
-            }
+            $this->replaceLive($server, $dumpPath, $schema, $scratch, 'restore', $rollbackDumpPath, $rollbackRows);
 
             $migrations = null;
             if (array_key_exists('schema_migrations', $scratch['row_counts'])) {
@@ -269,6 +262,44 @@ final class MysqlUpdateDatabaseBackup implements UpdateDatabaseBackup
             if ($created) {
                 $server->exec('DROP DATABASE IF EXISTS ' . $this->quoteIdentifier($scratchDatabase));
             }
+        }
+    }
+
+    /**
+     * Drops the live database, imports $dumpPath and proves live matches $expectedInventory. On any
+     * failure $rollbackDumpPath (a dump of live taken just before, holding $rollbackRows) is imported
+     * back and proven to hold the previous schema and exactly those rows. Every failure after the drop
+     * throws RESTORE_FAILED_AFTER_DROP: the caller must keep $rollbackDumpPath.
+     */
+    private function replaceLive(PDO $server, string $dumpPath, array $schema, array $expectedInventory, string $operation,
+        string $rollbackDumpPath, array $rollbackRows): void
+    {
+        $previousSchema = $this->schemaInventory($server, $this->database);
+        $previousCharset = $this->schemaSettings($server, $this->database);
+        $server->exec('DROP DATABASE ' . $this->quoteIdentifier($this->database));
+        try {
+            $this->createSchema($server, $this->database, $schema);
+            $this->import($dumpPath, $this->database);
+            $live = $this->inventory($server, $this->database);
+            $this->assertMatchingInventory($expectedInventory, $live, 'live ' . $operation);
+        } catch (Throwable $restoreError) {
+            try {
+                $server->exec('DROP DATABASE IF EXISTS ' . $this->quoteIdentifier($this->database));
+                $this->createSchema($server, $this->database, $previousCharset);
+                $this->import($rollbackDumpPath, $this->database);
+                // The re-imported database must be the previous one: same schema, exactly the dumped rows.
+                $reimported = $this->inventory($server, $this->database);
+                $this->assertMatchingInventory($previousSchema, array_intersect_key($reimported, $previousSchema), 'rollback re-import schema');
+                if ($reimported['row_counts'] !== $this->expectedRowCounts($reimported, $rollbackRows)) {
+                    throw new RuntimeException("MySQL rollback re-import row counts do not match the rows in the pre-{$operation} dump");
+                }
+            } catch (Throwable $rollbackError) {
+                throw new RuntimeException("MySQL {$operation} failed (" . $restoreError->getMessage() . ') and re-importing the previous database also failed ('
+                    . $rollbackError->getMessage() . "); import {$rollbackDumpPath} manually", self::RESTORE_FAILED_AFTER_DROP, $restoreError);
+            }
+            throw new RuntimeException("MySQL {$operation} failed; the previous database was re-imported and verified (its pre-{$operation} copy is kept at {$rollbackDumpPath}): "
+                . $restoreError->getMessage(),
+                self::RESTORE_FAILED_AFTER_DROP, $restoreError);
         }
     }
 

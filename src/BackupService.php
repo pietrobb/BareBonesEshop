@@ -699,7 +699,13 @@ class BackupService
             || !hash_equals($expectedSha, (string)hash_file('sha256', $restoreTemp))) {
             throw new RuntimeException('Restore: failed to stage a complete verified replacement database');
         }
-        @chmod($restoreTemp, 0640);
+        // The restored file replaces live: keep live's mode, owner and group, or a restore run from the CLI leaves
+        // www-data with a read-only database (only root can hand the file to another owner).
+        @chmod($restoreTemp, fileperms($livePath) & 0777);
+        $liveOwner = @fileowner($livePath);
+        $liveGroup = @filegroup($livePath);
+        if ($liveOwner !== false && $liveOwner !== @fileowner($restoreTemp)) @chown($restoreTemp, $liveOwner);
+        if ($liveGroup !== false && $liveGroup !== @filegroup($restoreTemp)) @chgrp($restoreTemp, $liveGroup);
 
         $lockHandle = self::acquireLock();
         try {

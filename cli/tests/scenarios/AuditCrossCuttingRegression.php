@@ -127,7 +127,7 @@ try {
     @mkdir($xcRoot . '/jobs/completed', 0700, true);
     $xcDeleted = RetentionCleanup::run(['jobs_dir' => $xcRoot . '/jobs'], $xcNow);
     assert_true(($xcDeleted['csp_violations'] ?? null) === 1 && (int)$xcDb->query('SELECT COUNT(*) FROM csp_violations')->fetchColumn() === 1,
-        'Cross-cutting CSP: the daily cleanup purges reports older than 14 days and keeps newer ones');
+        'Cross-cutting CSP: the daily cleanup purges reports older than the retention (7 days) and keeps newer ones');
     $xcDb->exec('DELETE FROM csp_violations');
 
     // 6. Config schema lists every key config.example.php ships (and nothing the example lacks,

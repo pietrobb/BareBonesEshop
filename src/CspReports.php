@@ -23,7 +23,10 @@ final class CspReports
 {
     public const MAX_BODY_BYTES = 16384;
     private const MAX_REPORTS_PER_REQUEST = 20;
-    private const RETENTION_DAYS = 14;
+    private const RETENTION_DAYS = 7;
+    /** Rows one reporter (hashed client IP) may add per hour, and one store in total: a report flood cannot grow the table without bound. */
+    private const REPORTER_HOURLY_CAP = 100;
+    private const STORE_HOURLY_CAP = 2000;
     private const IGNORED_SCHEMES = ['chrome-extension', 'moz-extension', 'safari-extension', 'safari-web-extension', 'ms-browser-extension'];
 
     /**
@@ -70,21 +73,30 @@ final class CspReports
         $optionalParams = $optional === [] ? '' : ', :' . implode(', :', array_keys($optional));
         $insert = $db->prepare("INSERT INTO csp_violations (store_id, directive, blocked, document_path, disposition, created_at{$optionalColumns})
             VALUES (:store, :directive, :blocked, :path, :disposition, :created{$optionalParams})");
+        $storeId = StoreContext::current()->id();
+        $budget = self::hourlyBudget($db, $storeId, $optional['reporter_hash'] ?? null, $now);
+        $seen = [];
         foreach ($reports as $report) {
+            if ($budget <= 0) break;
             $directive = strtolower(trim((string)$report['directive']));
             // "script-src-elem" etc. are reported per sub-directive; keep the name, drop anything odd.
             if (!preg_match('/^[a-z-]{3,40}$/', $directive)) continue;
             $blocked = self::blockedSource((string)$report['blocked']);
             if ($blocked === null) continue;
-            $insert->execute([
-                ':store' => StoreContext::current()->id(),
+            $row = [
+                ':store' => $storeId,
                 ':directive' => $directive,
                 ':blocked' => $blocked,
                 ':path' => substr((string)(parse_url((string)$report['document'], PHP_URL_PATH) ?: ''), 0, 255),
                 ':disposition' => strtolower((string)$report['disposition']) === 'report' ? 'report' : 'enforce',
-                ':created' => gmdate('Y-m-d H:i:s', $now),
-            ] + self::prefixKeys($optional));
+            ];
+            // A batch repeating one violation (a page load re-reporting the same block) is stored once.
+            $key = implode("\0", $row);
+            if (isset($seen[$key])) continue;
+            $seen[$key] = true;
+            $insert->execute($row + [':created' => gmdate('Y-m-d H:i:s', $now)] + self::prefixKeys($optional));
             $stored++;
+            $budget--;
         }
         if ($stored > 0) self::purge($db, $now);
         return $stored;
@@ -95,6 +107,21 @@ final class CspReports
     {
         return Db::writeInBatches('csp_violations', 'DELETE FROM csp_violations', 'created_at < :cutoff',
             [':cutoff' => gmdate('Y-m-d H:i:s', ($now ?? time()) - self::RETENTION_DAYS * 86400)], [], 'id', 1000, $db);
+    }
+
+    /** Rows this request may still store: what is left of the reporter's and the store's hourly caps. */
+    private static function hourlyBudget(PDO $db, string $storeId, ?string $reporterHash, int $now): int
+    {
+        $since = gmdate('Y-m-d H:i:s', $now - 3600);
+        $stmt = $db->prepare('SELECT COUNT(*) FROM csp_violations WHERE store_id = :store AND created_at >= :since');
+        $stmt->execute([':store' => $storeId, ':since' => $since]);
+        $budget = self::STORE_HOURLY_CAP - (int)$stmt->fetchColumn();
+        if ($reporterHash !== null) {
+            $stmt = $db->prepare('SELECT COUNT(*) FROM csp_violations WHERE store_id = :store AND created_at >= :since AND reporter_hash = :reporter');
+            $stmt->execute([':store' => $storeId, ':since' => $since, ':reporter' => $reporterHash]);
+            $budget = min($budget, self::REPORTER_HOURLY_CAP - (int)$stmt->fetchColumn());
+        }
+        return $budget;
     }
 
     /** @param array<string, string> $values */
