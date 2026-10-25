@@ -221,7 +221,7 @@ class I18n {
 
     private static function stores(): array {
         if (!self::$stores) {
-            $file = __DIR__ . '/../stores.json';
+            $file = DataOverrides::storesPath();
             self::$stores = file_exists($file) ? json_decode(file_get_contents($file), true) : [];
         }
         return self::$stores;

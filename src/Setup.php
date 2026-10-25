@@ -98,7 +98,7 @@ class Setup
         $appUrl = (string)($config['app_url'] ?? '');
         $add($appUrl !== '' ? 'pass' : 'warn', 'config.app_url', $appUrl !== '' ? 'Public base URL configured.' : 'app_url is empty: sitemap, password reset and e-mail links are unavailable.', $appUrl !== '' ? '' : "Set app_url in config.php (php cli/setup.php install --app-url=URL sets it on a new install).");
 
-        $storesPath = $root . '/stores.json';
+        $storesPath = DataOverrides::storesPath($root, $config);
         $stores = is_file($storesPath) ? json_decode((string)file_get_contents($storesPath), true) : null;
         $defaultStore = is_array($stores) ? (string)($stores['default_store'] ?? '') : '';
         $storeOk = is_array($stores) && isset($stores['stores'][$defaultStore]);

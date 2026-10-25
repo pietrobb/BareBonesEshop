@@ -296,7 +296,7 @@ class MailService {
     }
 
     private static function defaultLocale(): string {
-        $stores = @json_decode((string)file_get_contents(__DIR__ . '/../stores.json'), true) ?: [];
+        $stores = @json_decode((string)file_get_contents(DataOverrides::storesPath()), true) ?: [];
         return (string)($stores['default_locale'] ?? 'en');
     }
 

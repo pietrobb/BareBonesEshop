@@ -166,7 +166,10 @@ $architectureBudgets = [
     // +lines: windowed pagination (first, last and a window around the current page) instead of one link per page.
     'src/Entrypoints/Admin/Shared.php' => ['lines' => 58, 'functions' => 5, 'max_function_lines' => 17, 'coupling' => 1],
     // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.
-    'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 77, 'functions' => 3, 'max_function_lines' => 49, 'coupling' => 5],
+    // +1 line, +1 max_function_lines R10 UX5: the stores page ends with the owner's add/remove store and legal-text cards (StoreManagement).
+    'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 78, 'functions' => 3, 'max_function_lines' => 50, 'coupling' => 5],
+    // R10 UX5: owner-only store add/remove and legal-text editor, saved to the private data directory when the code is read-only.
+    'src/Entrypoints/Admin/StoreManagement.php' => ['lines' => 82, 'functions' => 4, 'max_function_lines' => 37, 'coupling' => 7],
     'src/Entrypoints/Admin/Shipments.php' => ['lines' => 277, 'functions' => 11, 'max_function_lines' => 105, 'coupling' => 10],
     // A15.3: store switcher and per-request store activation, limited to the admin's granted stores (AdminStoreScope).
     'src/Entrypoints/Admin/StoreScope.php' => ['lines' => 70, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 5],

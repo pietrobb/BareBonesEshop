@@ -50,6 +50,7 @@ final class ConsumerNotice {
         $dir = dirname(__DIR__) . '/templates/legal/';
         $tpl = $dir . $locale . '/' . $page . '.html';
         if (!preg_match('/^[a-z]{2}$/', $locale) || !is_file($tpl)) $tpl = $dir . 'en/' . $page . '.html';
+        $tpl = DataOverrides::legalPath($page, $locale) ?? $tpl; // the merchant's own text, saved in the admin
         $html = (string)file_get_contents($tpl);
         $vars = [];
         foreach (self::legalVars($legal) as $key => $value) $vars['{{' . $key . '}}'] = esc($value);

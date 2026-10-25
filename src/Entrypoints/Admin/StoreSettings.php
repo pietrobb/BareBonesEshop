@@ -57,6 +57,7 @@ function pageStoreSettings(): void {
         </form>
     </div>
     <?php endforeach;
+    adminStoreManagementCards(is_array($stores) ? $stores : [], $writable);
 }
 
 function handleStoreSettingsSave(): void {

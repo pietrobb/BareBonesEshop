@@ -20,7 +20,8 @@ class Health
         } catch (Throwable $e) {
             $checks['database'] = 'unavailable';
         }
-        $stores = is_file($root . '/stores.json') ? json_decode((string)file_get_contents($root . '/stores.json'), true) : null;
+        $storesFile = DataOverrides::storesPath($root, $config);
+        $stores = is_file($storesFile) ? json_decode((string)file_get_contents($storesFile), true) : null;
         $default = is_array($stores) ? (string)($stores['default_store'] ?? '') : '';
         $checks['stores'] = is_array($stores) && isset($stores['stores'][$default]) ? 'ok' : 'invalid';
         foreach (['jobs_dir', 'private_cache_dir'] as $key) {

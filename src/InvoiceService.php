@@ -1296,7 +1296,7 @@ final class InvoiceService
     private static function storesConfig(): array
     {
         if (self::$storesOverride !== null) return self::$storesOverride;
-        $file = self::baseDir() . '/stores.json';
+        $file = DataOverrides::storesPath(self::baseDir());
         $j = file_exists($file) ? json_decode((string)file_get_contents($file), true) : [];
         return $j ?: [];
     }

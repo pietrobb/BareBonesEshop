@@ -77,6 +77,9 @@ function handlePost(string $page, string $action): void {
         'admin_users:grant' => handleAdminUserGrant(),
         'email_templates:save' => handleEmailTemplateSave(), 'email_templates:preview' => handleEmailTemplatePreview(), 'email_templates:reset' => handleEmailTemplateReset(),
         'stores:save' => handleStoreSettingsSave(),
+        'stores:add' => handleStoreAdd(),
+        'stores:remove' => handleStoreRemove(),
+        'stores:legal_save' => handleStoreLegalSave(),
         default          => null,
     };
 }
