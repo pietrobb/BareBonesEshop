@@ -100,7 +100,11 @@ try {
 
     // A legacy session was never checked again: opened while no account existed, it outlived the first DB account.
     assert_greater(AdminIdentity::accountCount(), 0, 'R10 M1: the test database holds DB admin accounts');
-    $r = $r10sRun($testDbPath, ['admin_authenticated' => true, 'admin_user' => 'r10legacy', 'admin_role' => 'owner', 'admin_last_seen' => time()], 'dashboard', '', [], $r10sLegacyCfg);
+    // Children never open the suite's own database: on Linux a child can unlink its -wal, and the suite connection then
+    // loses (or, checkpointing, corrupts) what the child wrote. Each child scenario gets a VACUUM INTO copy instead.
+    $r10sLegacyDb = $r10sRoot . '/legacy-session.sqlite';
+    $pdo->exec('VACUUM INTO ' . $pdo->quote($r10sLegacyDb));
+    $r = $r10sRun($r10sLegacyDb, ['admin_authenticated' => true, 'admin_user' => 'r10legacy', 'admin_role' => 'owner', 'admin_last_seen' => time()], 'dashboard', '', [], $r10sLegacyCfg);
     assert_true($r['authenticated'] === false && in_array($r['code'], [401, 403], true), $r10sLabel('R10 M1: a legacy session ends once a DB admin account exists', $r));
 
     // Bootstrap still works: a legacy session on an empty account table creates the first owner, sees its TOTP once and is signed out.
@@ -122,41 +126,45 @@ try {
     AdminIdentity::grantStore($r10sOwnerId, 'default', ['*']);
     $r10sToken = (string)(AdminIdentity::authenticate('r10-self-owner', 'R10-self-owner-pass', '', '127.0.10.2', 'R10 security')['token'] ?? '');
     $r10sSelf = ['admin_identity_token' => $r10sToken];
-    // A fresh connection reads what the child wrote: the suite's own connection may still hold an unlinked -wal (Linux).
-    $r10sAccount = static function() use ($testDbPath): array {
-        $stmt = (new PDO('sqlite:' . $testDbPath))->prepare('SELECT password_hash, totp_secret_encrypted FROM admin_accounts WHERE username = ?');
+    // The owner→owner block below: a second owner to attack and a fresh actor session (the self block rotates r10-self-owner's password).
+    $r10sOtherId = AdminIdentity::create('r10-other-owner', 'R10-other-owner-pass', 'owner', false);
+    AdminIdentity::grantStore($r10sOtherId, 'default', ['*']);
+    $r10sActorId = AdminIdentity::create('r10-actor-owner', 'R10-actor-owner-pass', 'owner', false);
+    AdminIdentity::grantStore($r10sActorId, 'default', ['*']);
+    $r10sActor = ['admin_identity_token' => (string)(AdminIdentity::authenticate('r10-actor-owner', 'R10-actor-owner-pass', '', '127.0.10.3', 'R10 security')['token'] ?? '')];
+    $r10sOwnerDb = $r10sRoot . '/owner-accounts.sqlite';
+    $pdo->exec('VACUUM INTO ' . $pdo->quote($r10sOwnerDb));
+    $r10sAccount = static function() use ($r10sOwnerDb): array {
+        $stmt = (new PDO('sqlite:' . $r10sOwnerDb))->prepare('SELECT password_hash, totp_secret_encrypted FROM admin_accounts WHERE username = ?');
         $stmt->execute(['r10-self-owner']);
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
     };
     $r10sHash = static fn(): string => (string)($r10sAccount()['password_hash'] ?? '');
-    $r = $r10sRun($testDbPath, $r10sSelf, 'admin_users', 'password', ['account_id' => (string)$r10sOwnerId, 'password' => 'R10-hijacked-password']);
+    $r = $r10sRun($r10sOwnerDb, $r10sSelf, 'admin_users', 'password', ['account_id' => (string)$r10sOwnerId, 'password' => 'R10-hijacked-password']);
     assert_true(!password_verify('R10-hijacked-password', $r10sHash()) && ($r['flash']['type'] ?? '') === 'err', $r10sLabel('R10 self: own password change without the current password is refused', $r));
-    $r = $r10sRun($testDbPath, $r10sSelf, 'admin_users', 'mfa', ['account_id' => (string)$r10sOwnerId, 'current_password' => 'wrong-password-x']);
+    $r = $r10sRun($r10sOwnerDb, $r10sSelf, 'admin_users', 'mfa', ['account_id' => (string)$r10sOwnerId, 'current_password' => 'wrong-password-x']);
     assert_true((string)($r10sAccount()['totp_secret_encrypted'] ?? '') === '', $r10sLabel('R10 self: own TOTP reset with a wrong current password is refused', $r));
-    $r = $r10sRun($testDbPath, $r10sSelf, 'admin_users', 'password', ['account_id' => (string)$r10sOwnerId, 'password' => 'R10-rotated-password', 'current_password' => 'R10-self-owner-pass']);
+    $r = $r10sRun($r10sOwnerDb, $r10sSelf, 'admin_users', 'password', ['account_id' => (string)$r10sOwnerId, 'password' => 'R10-rotated-password', 'current_password' => 'R10-self-owner-pass']);
     assert_true(password_verify('R10-rotated-password', $r10sHash()), $r10sLabel('R10 self: own password change with the current password works', $r));
 
     // The current-password check covered only one's own account: a hijacked owner session reset another owner's
     // password and TOTP (receiving the new secret) or created a new owner, all without any step-up.
-    $r10sOtherId = AdminIdentity::create('r10-other-owner', 'R10-other-owner-pass', 'owner', false);
-    AdminIdentity::grantStore($r10sOtherId, 'default', ['*']);
-    $r10sSelf = ['admin_identity_token' => (string)(AdminIdentity::authenticate('r10-self-owner', 'R10-rotated-password', '', '127.0.10.2', 'R10 security')['token'] ?? '')];
-    $r10sRow = static function(string $username) use ($testDbPath): array {
-        $stmt = (new PDO('sqlite:' . $testDbPath))->prepare('SELECT password_hash, totp_secret_encrypted FROM admin_accounts WHERE username = ?');
+    $r10sRow = static function(string $username) use ($r10sOwnerDb): array {
+        $stmt = (new PDO('sqlite:' . $r10sOwnerDb))->prepare('SELECT password_hash, totp_secret_encrypted FROM admin_accounts WHERE username = ?');
         $stmt->execute([$username]);
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
     };
-    $r = $r10sRun($testDbPath, $r10sSelf, 'admin_users', 'password', ['account_id' => (string)$r10sOtherId, 'password' => 'R10-hijacked-other-pass']);
+    $r = $r10sRun($r10sOwnerDb, $r10sActor, 'admin_users', 'password', ['account_id' => (string)$r10sOtherId, 'password' => 'R10-hijacked-other-pass']);
     assert_true(!password_verify('R10-hijacked-other-pass', (string)($r10sRow('r10-other-owner')['password_hash'] ?? '')) && ($r['flash']['type'] ?? '') === 'err',
         $r10sLabel("R10 owner: resetting another owner's password without the actor's current password is refused", $r));
-    $r = $r10sRun($testDbPath, $r10sSelf, 'admin_users', 'mfa', ['account_id' => (string)$r10sOtherId, 'current_password' => 'R10-other-owner-pass']);
+    $r = $r10sRun($r10sOwnerDb, $r10sActor, 'admin_users', 'mfa', ['account_id' => (string)$r10sOtherId, 'current_password' => 'R10-other-owner-pass']);
     assert_true((string)($r10sRow('r10-other-owner')['totp_secret_encrypted'] ?? '') === '' && ($r['flash']['type'] ?? '') === 'err',
         $r10sLabel("R10 owner: resetting another owner's TOTP needs the actor's own current password, not the target's", $r));
-    $r = $r10sRun($testDbPath, $r10sSelf, 'admin_users', 'create', ['username' => 'r10-hijack-owner', 'role' => 'owner', 'password' => 'R10-hijack-owner-pass']);
+    $r = $r10sRun($r10sOwnerDb, $r10sActor, 'admin_users', 'create', ['username' => 'r10-hijack-owner', 'role' => 'owner', 'password' => 'R10-hijack-owner-pass']);
     assert_true($r10sRow('r10-hijack-owner') === [] && ($r['flash']['type'] ?? '') === 'err', $r10sLabel('R10 owner: creating an owner without the current password is refused', $r));
-    $r = $r10sRun($testDbPath, $r10sSelf, 'admin_users', 'create', ['username' => 'r10-second-owner', 'role' => 'owner', 'password' => 'R10-second-owner-pass', 'current_password' => 'R10-rotated-password']);
+    $r = $r10sRun($r10sOwnerDb, $r10sActor, 'admin_users', 'create', ['username' => 'r10-second-owner', 'role' => 'owner', 'password' => 'R10-second-owner-pass', 'current_password' => 'R10-actor-owner-pass']);
     assert_true($r10sRow('r10-second-owner') !== [], $r10sLabel('R10 owner: creating an owner with the current password works', $r));
-    $r = $r10sRun($testDbPath, $r10sSelf, 'admin_users', 'password', ['account_id' => (string)$r10sOtherId, 'password' => 'R10-handed-other-pass', 'current_password' => 'R10-rotated-password']);
+    $r = $r10sRun($r10sOwnerDb, $r10sActor, 'admin_users', 'password', ['account_id' => (string)$r10sOtherId, 'password' => 'R10-handed-other-pass', 'current_password' => 'R10-actor-owner-pass']);
     assert_true(password_verify('R10-handed-other-pass', (string)($r10sRow('r10-other-owner')['password_hash'] ?? '')), $r10sLabel("R10 owner: another owner's password reset with the actor's current password works", $r));
 
     // M2: Comgate created test payments unless comgate_test was switched off, so live credentials with the default

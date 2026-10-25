@@ -76,7 +76,7 @@ function pageAdminUsers(): void {
                 <?php foreach ($roles as $role): ?><option value="<?= esc($role) ?>"<?= $role === 'viewer' ? ' selected' : '' ?>><?= esc($role) ?></option><?php endforeach; ?>
             </select></div>
             <div class="form-row"><label for="au-password"><?= esc(I18n::t('admin.users.password')) ?></label><input id="au-password" type="password" name="password" minlength="12" required autocomplete="new-password"></div>
-            <div class="form-row"><label for="au-current"><?= esc(I18n::t('admin.users.current_password')) ?> (owner)</label><input id="au-current" type="password" name="current_password" autocomplete="current-password"></div>
+            <div class="form-row"><label for="au-current"><?= esc(I18n::t('admin.users.current_password')) ?></label><input id="au-current" type="password" name="current_password" autocomplete="current-password"></div>
             <div class="form-row"><label><input type="checkbox" name="mfa" value="1" checked> MFA (TOTP)</label></div>
             <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.users.create')) ?></button>
         </form>
