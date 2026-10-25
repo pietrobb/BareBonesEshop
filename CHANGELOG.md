@@ -164,6 +164,20 @@ nginx PHP fallback when `operations.nginx_config` is set).
     403 dashboard.
   - Saving an address without a valid `type` stores a shipping address (no 500); editing an address in the
     account is checked like a new one (required fields, known type) and refused with 400.
+- **Round-10 UX 1–5 (2026-10-25)**
+  - The admin dashboard (owner) lists what `setup.php doctor` still flags for the current store, failures
+    first, each with a link to the admin page that fixes it.
+  - Checkout no longer offers a card method whose gateway cannot start a payment (e.g. Stripe without
+    keys on a fresh install); a gateway replaced by an extension adapter is still offered.
+  - Pay again: an unpaid online order shows a Pay button on its account page, and the admin can e-mail
+    the customer a payment link (`order_payment_link` template, valid for a limited time, only the token
+    hash is stored). Sending needs `app_url`; without it the admin gets an error and nothing is sent.
+  - `cli/seed.php` registers the sk/en/de product slugs in `slug_registry`, so seeded `/en/` and `/de/`
+    product links open, and keeps capitalised words in slugs.
+  - Stores and legal texts are managed in the admin (Stores page: add/remove a store; legal texts per
+    language). When the code is read-only (Docker), `stores.json` and the texts are saved to
+    `private_runtime_dir` and that copy takes precedence over the shipped file. A store with orders and
+    the default store cannot be removed.
 - **VAT rates (2026-10-23)** — products with `vat_class` `books` or `medicines` now get each country's
   own rate instead of its `reduced` class (e.g. IE books 0 %, IT/ES 4 %, FR 5.5 %, DE medicines 19 %).
   FI reduced rate 13.5 % from 2026, LT 9 % rate replaced by 12 % / 5 % from 2026. Invoices already
