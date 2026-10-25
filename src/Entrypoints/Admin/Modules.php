@@ -5,9 +5,9 @@
  * StoreScope.php are always loaded by Admin.php; an unknown page renders the dashboard.
  * Cross-module calls: Operations/Orders -> Reports (adminRevenueToday), Orders -> Shipments,
  * Customers -> B2b (b2bCustomerCard), B2b/PricingRules/Suppliers -> Taxonomy (taxonomyRedirect),
- * Catalog -> CatalogEditor/Taxonomy/PricingRules (required by Catalog.php itself).
+ * Catalog -> CatalogEditor/Taxonomy/PricingRules/RichText (required by Catalog.php itself).
  */
-$catalog = ['RichText', 'Catalog'];
+$catalog = ['Catalog'];
 $operations = ['Reports', 'Operations'];
 $orders = ['Reports', 'Shipments', 'Orders'];
 $customers = ['Taxonomy', 'B2b', 'Customers'];

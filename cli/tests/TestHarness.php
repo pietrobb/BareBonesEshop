@@ -8,7 +8,7 @@ function entrypointSource(string $entrypoint): string {
     $root = dirname(TEST_CLI_DIR);
     $implementations = [
         'admin.php' => [
-            'src/Entrypoints/Admin.php', 'src/Entrypoints/Admin/Shared.php',
+            'src/Entrypoints/Admin.php', 'src/Entrypoints/Admin/Shared.php', 'src/Entrypoints/Admin/LayoutScript.php',
             'src/Entrypoints/Admin/Catalog.php', 'src/Entrypoints/Admin/Orders.php',
             'src/Entrypoints/Admin/Customers.php', 'src/Entrypoints/Admin/Operations.php',
             'src/Entrypoints/Admin/Request.php',

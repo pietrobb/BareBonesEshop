@@ -3,6 +3,7 @@
 require_once __DIR__ . '/CatalogEditor.php';
 require_once __DIR__ . '/Taxonomy.php';
 require_once __DIR__ . '/PricingRules.php';
+require_once __DIR__ . '/RichText.php';
 /** The one escaping helper the catalog editors' nonce'd inline scripts (product and attribute forms) build markup with. */
 const ADMIN_JS_ESC_HTML = "function escHtml(s) { return String(s ?? '').replace(/[&<>\"']/g, function (c) { return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;'}[c]; }); }";
 function pageProducts(): void {
