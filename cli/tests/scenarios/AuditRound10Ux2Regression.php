@@ -314,3 +314,32 @@ foreach (['sk', 'cs', 'de', 'hu', 'pl', 'es'] as $r10xLocale) {
 assert_equals([], $r10xGaps, 'R10 UX10: every merchant e-mail exists in every shop language with the same placeholders as English');
 $r10xDe = MailService::renderString((string)file_get_contents($r10xMailDir . 'de/merchant_order_created.subject.txt'), ['order_number' => 'R10X-1', 'awaiting_payment' => true], false);
 assert_true(str_contains($r10xDe, 'R10X-1') && !str_contains($r10xDe, 'New order'), 'R10 UX10: the German new-order subject is German (' . trim($r10xDe) . ')');
+
+// Reports: one SVG bar per day in date order, a <title> per bar and a visible summary naming the image.
+$r10xChart = SalesChart::dailyRevenue(['2026-10-03' => ['orders' => 1, 'revenue' => 500], '2026-10-01' => ['orders' => 2, 'revenue' => 2000], '2026-10-02' => ['orders' => 0, 'revenue' => 0]], 'eur');
+preg_match_all('/<rect x="([\d.]+)" y="[\d.]+" width="[\d.]+" height="([\d.]+)"/', $r10xChart, $r10xBars);
+assert_equals(3, count($r10xBars[0]), 'R10 UX10: the chart has one bar per day');
+assert_true((float)$r10xBars[2][0] > (float)$r10xBars[2][2] && (float)$r10xBars[2][2] > 0 && (float)$r10xBars[2][1] === 0.0 && (float)$r10xBars[1][0] < (float)$r10xBars[1][1],
+    'R10 UX10: bars run in date order with heights in proportion to the revenue (an empty day has none)');
+assert_true(preg_match('/aria-labelledby="(report-chart-eur)"/', $r10xChart) === 1 && str_contains($r10xChart, '<figcaption id="report-chart-eur"')
+    && str_contains($r10xChart, '2026-10-01') && str_contains($r10xChart, '2026-10-03') && substr_count($r10xChart, '<title>') === 3, 'R10 UX10: the chart is named by its visible summary and every bar has a tooltip');
+assert_equals('', SalesChart::dailyRevenue([], 'eur'), 'R10 UX10: no data, no chart');
+$r10xEvil = SalesChart::dailyRevenue(['<script>' => ['orders' => 1, 'revenue' => 1]], 'eur');
+assert_true(!str_contains($r10xEvil, '<script>'), 'R10 UX10: chart text is escaped');
+
+// The rich-text editor: one nonce'd script that keeps the server sanitizer's tag list and link rule.
+if (!function_exists('adminRichTextScript')) require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/RichText.php';
+$r10xScript = adminRichTextScript();
+assert_true(str_starts_with($r10xScript, '<script nonce="' . Security::cspNonce() . '">') && substr_count($r10xScript, '<script') === 1 && !str_contains($r10xScript, '</script><'),
+    'R10 UX10: the editor is one inline script with the request\'s CSP nonce');
+preg_match('/var ALLOWED = \{([^}]*)\}/', $r10xScript, $r10xAllowed);
+$r10xJsTags = array_map(static fn(string $pair): string => strtolower(explode(':', $pair)[0]), explode(',', $r10xAllowed[1] ?? ''));
+$r10xSecurity = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Security.php');
+preg_match("/\\\$allowed = \[([^\]]*)\]/", $r10xSecurity, $r10xPhpAllowed);
+$r10xPhpTags = array_map(static fn(string $t): string => trim($t, " '"), explode(',', $r10xPhpAllowed[1] ?? ''));
+sort($r10xJsTags);
+sort($r10xPhpTags);
+assert_true($r10xJsTags !== [] && $r10xJsTags === $r10xPhpTags, 'R10 UX10: the editor allows exactly the tags Security::sanitizeRichHtml keeps');
+$r10xCatalogEditor = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/CatalogEditor.php');
+assert_true(str_contains($r10xScript, '#form-admin-product textarea[name="description"]') && str_contains($r10xScript, '#form-admin-page textarea[name="body"]')
+    && str_contains($r10xCatalogEditor, "'description' ? ' data-rich-text'"), 'R10 UX10: product description, its translations and the CMS page body get the editor');

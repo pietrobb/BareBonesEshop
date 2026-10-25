@@ -14,7 +14,7 @@ final class SalesChart {
         if ($days === []) return '';
         ksort($days);
         $h = static fn(string $value): string => htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-        $max = max(1, ...array_map(static fn(array $row): int => (int)$row['revenue'], $days));
+        $max = max(1, ...array_map('intval', array_column($days, 'revenue')));
         $slot = self::WIDTH / count($days);
         $gap = $slot > 6 ? 1.0 : 0.0;
         $plot = self::HEIGHT - self::AXIS;

@@ -22,7 +22,10 @@ test('admin rich-text editor formats text, filters pasted markup and saves HTML'
   await page.goto(`/admin.php?p=product&id=${product.row.id}`);
   const form = page.locator('#form-admin-product');
   const field = form.locator('#field-description');
-  const editor = form.getByRole('textbox', { name: /description/i }).and(form.locator('.rich-editor'));
+  // The main description's editor sits right after its toolbar; each translation has its own.
+  const editor = form.locator('[data-rich-for="field-description"] + .rich-editor');
+  await expect(editor).toHaveAttribute('role', 'textbox');
+  await expect(editor).toHaveAccessibleName(/\S/);
   await expect(field).toBeHidden();
   await expect(editor).toBeVisible();
   await expect(form.getByRole('toolbar').first()).toHaveAccessibleName(/\S/);
