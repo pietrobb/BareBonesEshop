@@ -14,8 +14,12 @@ class AdminIdentity {
         return self::tableExists('admin_accounts');
     }
 
+    /**
+     * Throws when the database cannot answer: "no account" re-enables the legacy config password
+     * (no MFA), so an unreachable or broken database must never read as 0.
+     */
     public static function accountCount(): int {
-        if (!self::available()) return 0;
+        if (!Db::tableExists('admin_accounts')) return 0;
         return (int)Db::get()->query('SELECT COUNT(*) FROM admin_accounts')->fetchColumn();
     }
 

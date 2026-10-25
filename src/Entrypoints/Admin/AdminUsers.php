@@ -28,7 +28,8 @@ function pageAdminUsers(): void {
         <table>
             <tr><th><?= esc(I18n::t('admin.users.username')) ?></th><th><?= esc(I18n::t('admin.users.role')) ?></th><th><?= esc(I18n::t('admin.users.status')) ?></th>
                 <th>MFA</th><th><?= esc(I18n::t('admin.users.last_login')) ?></th><th><?= esc(I18n::t('admin.users.store_permissions')) ?> (<?= esc($storeId) ?>)</th><th></th></tr>
-            <?php foreach (AdminIdentity::accounts() as $a): $id = (int)$a['id']; ?>
+            <?php foreach (AdminIdentity::accounts() as $a): $id = (int)$a['id'];
+                $currentPassword = adminUsersIsSelf($a) ? '<input type="password" name="current_password" required autocomplete="current-password" placeholder="' . esc(I18n::t('admin.users.current_password')) . '" aria-label="' . esc(I18n::t('admin.users.current_password')) . '">' : ''; ?>
             <tr>
                 <td><?= esc((string)$a['username']) ?></td>
                 <td><?= esc((string)$a['role']) ?></td>
@@ -49,7 +50,7 @@ function pageAdminUsers(): void {
                         <button class="btn btn-sm" type="submit"><?= esc(I18n::t($a['status'] === 'active' ? 'admin.users.disable' : 'admin.users.enable')) ?></button>
                     </form>
                     <form method="post" action="admin.php?p=admin_users&amp;action=mfa" data-confirm="<?= esc(I18n::t('admin.users.mfa_reset')) ?>?">
-                        <input type="hidden" name="csrf_token" value="<?= esc($csrf) ?>"><input type="hidden" name="account_id" value="<?= $id ?>">
+                        <input type="hidden" name="csrf_token" value="<?= esc($csrf) ?>"><input type="hidden" name="account_id" value="<?= $id ?>"><?= $currentPassword ?>
                         <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.users.mfa_reset')) ?></button>
                     </form>
                     <form method="post" action="admin.php?p=admin_users&amp;action=revoke_sessions">
@@ -57,7 +58,7 @@ function pageAdminUsers(): void {
                         <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.users.revoke_sessions')) ?></button>
                     </form>
                     <form method="post" action="admin.php?p=admin_users&amp;action=password" style="display:flex;gap:.25rem">
-                        <input type="hidden" name="csrf_token" value="<?= esc($csrf) ?>"><input type="hidden" name="account_id" value="<?= $id ?>">
+                        <input type="hidden" name="csrf_token" value="<?= esc($csrf) ?>"><input type="hidden" name="account_id" value="<?= $id ?>"><?= $currentPassword ?>
                         <input type="password" name="password" minlength="12" autocomplete="new-password" required aria-label="<?= esc(I18n::t('admin.users.password')) ?>">
                         <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.users.reset_password')) ?></button>
                     </form>
@@ -98,6 +99,11 @@ function adminUsersTarget(bool $allowSelf = false): ?array {
     $target = AdminIdentity::accountById(Security::int($_POST['account_id'] ?? 0));
     if (!$target) {
         setFlash('err', I18n::t('admin.users.failed'));
+        return null;
+    }
+    // A legacy (config / admin-roles.json) session never acts on DB accounts: it would reset an owner's password or MFA without MFA.
+    if (empty($_SESSION['admin_identity_id'])) {
+        setFlash('err', I18n::t('admin.users.forbidden_owner'));
         return null;
     }
     // Only owners may touch owner accounts (no privilege escalation through a delegated admins.manage).
@@ -145,6 +151,31 @@ function adminUsersIsSelf(array $target): bool {
     return !empty($_SESSION['admin_identity_id']) && (int)$_SESSION['admin_identity_id'] === (int)$target['id'];
 }
 
+/** Changing one's own password or TOTP needs the current password: a hijacked session must not take the account over. */
+function adminUsersSelfReauthenticated(array $target): bool {
+    if (!adminUsersIsSelf($target)) return true;
+    if (password_verify((string)($_POST['current_password'] ?? ''), (string)($target['password_hash'] ?? ''))) return true;
+    setFlash('err', I18n::t('admin.users.current_password_invalid'));
+    return false;
+}
+
+/** The legacy session that created the first DB account ends here; the TOTP material is shown on this page only. */
+function adminUsersLegacyHandoff(): never {
+    $enrollment = $_SESSION['admin_users_enrollment'] ?? null;
+    unset($_SESSION['admin_users_enrollment']);
+    Security::endLegacyAdminSession();
+    header('Content-Type: text/html; charset=utf-8');
+    echo '<!doctype html><html lang="' . esc(I18n::locale()) . '"><head><meta charset="utf-8"><title>' . esc(I18n::t('admin.title.admin_users')) . '</title></head><body>'
+        . '<h1>' . esc(I18n::t('admin.users.saved')) . '</h1><p>' . esc(I18n::t('admin.users.legacy_handoff')) . '</p>';
+    if (is_array($enrollment)) {
+        echo '<h2>' . esc((string)$enrollment['username']) . ' — TOTP</h2><p><strong>' . esc(I18n::t('admin.users.enrollment_once')) . '</strong></p>'
+            . '<p><code>' . esc((string)$enrollment['secret']) . '</code></p><p><code>' . esc((string)$enrollment['uri']) . '</code></p>'
+            . '<p><code>' . esc(implode('  ', array_map('strval', (array)$enrollment['recovery_codes']))) . '</code></p>';
+    }
+    echo '<p><a href="admin.php">' . esc(I18n::t('admin.login.submit')) . '</a></p></body></html>';
+    exit;
+}
+
 function adminUsersDone(): never {
     header('Location: admin.php?p=admin_users');
     exit;
@@ -175,6 +206,7 @@ function handleAdminUserCreate(): void {
     } catch (InvalidArgumentException | PDOException $e) {
         setFlash('err', I18n::t('admin.users.failed') . ($e instanceof InvalidArgumentException ? ': ' . $e->getMessage() : ''));
     }
+    if (empty($_SESSION['admin_identity_id']) && AdminIdentity::accountCount() > 0) adminUsersLegacyHandoff();
     adminUsersDone();
 }
 
@@ -203,7 +235,7 @@ function handleAdminUserStatus(): void {
 function handleAdminUserPassword(): void {
     Security::adminRequire('admins.manage');
     $target = adminUsersTarget(true);
-    if ($target) {
+    if ($target && adminUsersSelfReauthenticated($target)) {
         try {
             AdminIdentity::setPassword((int)$target['id'], (string)($_POST['password'] ?? ''));
             setFlash('ok', I18n::t('admin.users.saved'));
@@ -217,6 +249,7 @@ function handleAdminUserPassword(): void {
 function handleAdminUserMfa(): void {
     Security::adminRequire('admins.manage');
     $target = adminUsersTarget(true);
+    if ($target && !adminUsersSelfReauthenticated($target)) $target = null;
     if ($target && !AdminIdentity::mfaKeyConfigured()) {
         setFlash('err', I18n::t('admin.users.mfa_key_missing'));
         $target = null;

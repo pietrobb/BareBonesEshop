@@ -1,0 +1,119 @@
+<?php
+
+// Round 10 review (2026-10-25): security and payments.
+echo "\n--- Audit round 10 (security): admin identity, payments, throttles ---\n";
+foreach ($GLOBALS as $r10sValue) if ($r10sValue instanceof PDOStatement) $r10sValue->closeCursor();
+
+$r10sKey = base64_encode(str_repeat('R', 32));
+$r10sRoot = test_fixture_path('r10-security');
+mkdir($r10sRoot);
+mkdir($r10sRoot . '/sessions');
+// Child process: one admin request with a chosen database, config override and pre-set session.
+file_put_contents($r10sRoot . '/admin.php', <<<'PHP'
+<?php
+[, $root, $dbPath, $dir, $key, $sessionJson, $page, $action, $postJson, $cfgJson, $basicJson] = $argv;
+require $root . '/src/autoload.php';
+putenv('BBE_ADMIN_IDENTITY_KEY=' . $key);
+$db = new PDO('sqlite:' . $dbPath);
+$db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+Db::init($db, 'sqlite');
+JobQueue::setDir($dir . '/jobs');
+Security::setRateDbForTesting(new PDO('sqlite::memory:'));
+$cfg = json_decode($cfgJson, true);
+if ($cfg) (new ReflectionProperty(Security::class, 'cfg'))->setValue(null, $cfg + (require $root . '/config.php'));
+ini_set('session.use_cookies', '0');
+ini_set('session.use_strict_mode', '0');
+ini_set('error_log', $dir . '/php-error.log');
+session_save_path($dir . '/sessions');
+session_id('r10s' . bin2hex(random_bytes(6)));
+session_start();
+$_SESSION = json_decode($sessionJson, true) + ['csrf_token' => 'r10s'];
+$basic = json_decode($basicJson, true);
+if ($basic) [$_SERVER['PHP_AUTH_USER'], $_SERVER['PHP_AUTH_PW']] = $basic;
+$_SERVER['REQUEST_METHOD'] = $action === '' ? 'GET' : 'POST';
+$_SERVER['REMOTE_ADDR'] = '127.0.10.1';
+$_SERVER['HTTP_USER_AGENT'] = 'R10 security';
+$_GET = ['p' => $page, 'action' => $action];
+$_POST = json_decode($postJson, true) + ['csrf_token' => 'r10s'];
+ob_start();
+register_shutdown_function(static function(): void {
+    $out = '';
+    while (ob_get_level() > 0) $out = ob_get_clean() . $out;
+    echo "\nR10SRESULT" . json_encode(['code' => http_response_code(), 'flash' => $_SESSION['flash'] ?? null, 'out' => $out,
+        'authenticated' => !empty($_SESSION['admin_authenticated']), 'identity' => $_SESSION['admin_identity_id'] ?? null]);
+});
+require $root . '/src/Entrypoints/Admin.php';
+PHP);
+$r10sRun = static function(string $dbPath, array $session, string $page = 'dashboard', string $action = '', array $post = [], array $cfg = [], array $basic = []) use ($r10sRoot, $r10sKey): array {
+    $process = proc_open([PHP_BINARY, $r10sRoot . '/admin.php', dirname(TEST_CLI_DIR), $dbPath, $r10sRoot, $r10sKey, json_encode((object)$session), $page, $action,
+        json_encode((object)$post), json_encode((object)$cfg), json_encode($basic)], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+    fclose($pipes[0]);
+    $raw = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    proc_close($process);
+    $at = strrpos($raw, 'R10SRESULT');
+    $result = $at === false ? null : json_decode(substr($raw, $at + 10), true);
+    return is_array($result) ? $result + ['raw' => ''] : ['code' => null, 'flash' => null, 'out' => '', 'authenticated' => null, 'identity' => null, 'raw' => substr($raw, 0, 600)];
+};
+$r10sLabel = static fn(string $label, array $r): string => $label . ' (code=' . var_export($r['code'], true) . ' flash=' . json_encode($r['flash'])
+    . ' auth=' . var_export($r['authenticated'], true) . ($r['raw'] !== '' ? ' raw=' . $r['raw'] : ' out=' . substr(strip_tags((string)$r['out']), 0, 160)) . ')';
+$r10sLegacyHash = password_hash('R10-legacy-password', PASSWORD_BCRYPT, ['cost' => 4]);
+$r10sLegacyCfg = ['admin_user' => 'r10legacy', 'admin_password' => $r10sLegacyHash];
+
+try {
+    // M1: accountCount() read any database error as "no account", so Basic auth against the old config admin_password
+    // (no MFA) signed in while the database was being restored or out of connections.
+    $r10sBroken = $r10sRoot . '/broken.sqlite';
+    file_put_contents($r10sBroken, str_repeat('not a database ', 512));
+    $r10sPrevDb = Db::get();
+    $r10sThrown = false;
+    try {
+        Db::init(new PDO('sqlite:' . $r10sBroken, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]), 'sqlite');
+        AdminIdentity::accountCount();
+    } catch (Throwable $e) {
+        $r10sThrown = true;
+    } finally {
+        Db::init($r10sPrevDb, 'sqlite');
+    }
+    assert_true($r10sThrown, 'R10 M1: AdminIdentity::accountCount() throws on a database error instead of reporting 0 accounts');
+    $r = $r10sRun($r10sBroken, [], 'dashboard', '', [], $r10sLegacyCfg, ['r10legacy', 'R10-legacy-password']);
+    assert_true($r['code'] === 503 && $r['authenticated'] === false, $r10sLabel('R10 M1: with the database down the legacy config password does not sign in (fail closed 503)', $r));
+
+    // A legacy session was never checked again: opened while no account existed, it outlived the first DB account.
+    assert_greater(AdminIdentity::accountCount(), 0, 'R10 M1: the test database holds DB admin accounts');
+    $r = $r10sRun($testDbPath, ['admin_authenticated' => true, 'admin_user' => 'r10legacy', 'admin_role' => 'owner', 'admin_last_seen' => time()], 'dashboard', '', [], $r10sLegacyCfg);
+    assert_true($r['authenticated'] === false && in_array($r['code'], [401, 403], true), $r10sLabel('R10 M1: a legacy session ends once a DB admin account exists', $r));
+
+    // Bootstrap still works: a legacy session on an empty account table creates the first owner, sees its TOTP once and is signed out.
+    $r10sEmpty = $r10sRoot . '/empty-accounts.sqlite';
+    $pdo->exec('VACUUM INTO ' . $pdo->quote($r10sEmpty));
+    $r10sEmptyDb = new PDO('sqlite:' . $r10sEmpty);
+    $r10sEmptyDb->exec('DELETE FROM admin_sessions; DELETE FROM admin_devices; DELETE FROM admin_recovery_codes; DELETE FROM admin_store_permissions; DELETE FROM admin_accounts');
+    $r10sEmptyDb = null;
+    $r10sLegacySession = ['admin_authenticated' => true, 'admin_user' => 'r10legacy', 'admin_role' => 'owner', 'admin_last_seen' => time()];
+    $r = $r10sRun($r10sEmpty, $r10sLegacySession, 'admin_users', 'create', ['username' => 'r10-first-owner', 'role' => 'owner', 'password' => 'R10-first-owner-pass', 'mfa' => '1'], $r10sLegacyCfg);
+    $r10sSecret = preg_match('#<code>([A-Z2-7]{32})</code>#', (string)$r['out'], $m) ? $m[1] : '';
+    assert_true($r10sSecret !== '' && $r['authenticated'] === false && str_contains((string)$r['out'], 'config.php'),
+        $r10sLabel('R10 M1: the legacy session that creates the first owner is shown the TOTP once and signed out', $r));
+    $r = $r10sRun($r10sEmpty, $r10sLegacySession, 'dashboard', '', [], $r10sLegacyCfg);
+    assert_true($r['authenticated'] === false, $r10sLabel('R10 M1: after the first owner exists the old legacy session is refused', $r));
+
+    // Owner changed its own password and TOTP without the current password (a hijacked session took the account over).
+    $r10sOwnerId = AdminIdentity::create('r10-self-owner', 'R10-self-owner-pass', 'owner', false);
+    AdminIdentity::grantStore($r10sOwnerId, 'default', ['*']);
+    $r10sToken = (string)(AdminIdentity::authenticate('r10-self-owner', 'R10-self-owner-pass', '', '127.0.10.2', 'R10 security')['token'] ?? '');
+    $r10sSelf = ['admin_identity_token' => $r10sToken];
+    $r10sHash = static fn(): string => (string)(AdminIdentity::accountByUsername('r10-self-owner')['password_hash'] ?? '');
+    $r = $r10sRun($testDbPath, $r10sSelf, 'admin_users', 'password', ['account_id' => (string)$r10sOwnerId, 'password' => 'R10-hijacked-password']);
+    assert_true(!password_verify('R10-hijacked-password', $r10sHash()) && ($r['flash']['type'] ?? '') === 'err', $r10sLabel('R10 self: own password change without the current password is refused', $r));
+    $r = $r10sRun($testDbPath, $r10sSelf, 'admin_users', 'mfa', ['account_id' => (string)$r10sOwnerId, 'current_password' => 'wrong-password-x']);
+    assert_true((string)(AdminIdentity::accountByUsername('r10-self-owner')['totp_secret_encrypted'] ?? '') === '', $r10sLabel('R10 self: own TOTP reset with a wrong current password is refused', $r));
+    $r = $r10sRun($testDbPath, $r10sSelf, 'admin_users', 'password', ['account_id' => (string)$r10sOwnerId, 'password' => 'R10-rotated-password', 'current_password' => 'R10-self-owner-pass']);
+    assert_true(password_verify('R10-rotated-password', $r10sHash()), $r10sLabel('R10 self: own password change with the current password works', $r));
+} finally {
+    $r10sTree = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($r10sRoot, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+    foreach ($r10sTree as $r10sPath) $r10sPath->isDir() ? @rmdir($r10sPath->getPathname()) : @unlink($r10sPath->getPathname());
+    @rmdir($r10sRoot);
+}

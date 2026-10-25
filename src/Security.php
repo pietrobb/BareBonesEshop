@@ -647,14 +647,16 @@ class Security {
                 return true;
             }
         }
+        $legacyMode = self::legacyAdminMode();
         $lastSeen = (int)($_SESSION['admin_last_seen'] ?? 0);
-        if (empty($_SESSION['admin_identity_id']) && !empty($_SESSION['admin_authenticated']) && $lastSeen >= time() - 1800) {
+        // A legacy session is re-checked on every request: once a DB account exists it ends.
+        if ($legacyMode && empty($_SESSION['admin_identity_id']) && !empty($_SESSION['admin_authenticated']) && $lastSeen >= time() - 1800) {
             $_SESSION['admin_last_seen'] = time();
             return true;
         }
         self::clearAdminSession();
 
-        if (AdminIdentity::accountCount() > 0) {
+        if (!$legacyMode) {
             if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_logout'])) {
                 self::renderAdminLogin();
             }
@@ -747,6 +749,28 @@ class Security {
         header('WWW-Authenticate: Basic realm="Shop Admin"');
         http_response_code(401);
         exit('Unauthorized');
+    }
+
+    /**
+     * Legacy sign-in (config admin_password, admin-roles.json) applies only while the database verifiably
+     * holds no admin account. A database error fails closed (503): reading it as "no account" would let
+     * the old config password in without MFA.
+     */
+    private static function legacyAdminMode(): bool {
+        try {
+            return AdminIdentity::accountCount() === 0;
+        } catch (Throwable $e) {
+            Logger::error('admin.identity_unavailable', ['error' => $e->getMessage()]);
+            http_response_code(503);
+            header('Retry-After: 30');
+            exit('Service unavailable.');
+        }
+    }
+
+    /** Ends a legacy session after it created the first DB account: from now on only DB identities sign in. */
+    public static function endLegacyAdminSession(): void {
+        self::clearAdminSession();
+        session_regenerate_id(true);
     }
 
     private static function clearAdminSession(): void {
