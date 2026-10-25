@@ -172,6 +172,8 @@ nginx PHP fallback when `operations.nginx_config` is set).
   - Pay again: an unpaid online order shows a Pay button on its account page, and the admin can e-mail
     the customer a payment link (`order_payment_link` template, valid for a limited time, only the token
     hash is stored). Sending needs `app_url`; without it the admin gets an error and nothing is sent.
+    A gateway failure no longer blocks the order: the next Pay opens a new session. A session opened
+    after a failed payment is reused while it is open, so a second click does not open a second one.
   - `cli/seed.php` registers the sk/en/de product slugs in `slug_registry`, so seeded `/en/` and `/de/`
     product links open, and keeps capitalised words in slugs.
   - Stores and legal texts are managed in the admin (Stores page: add/remove a store; legal texts per
