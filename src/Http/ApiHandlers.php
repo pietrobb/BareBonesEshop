@@ -359,24 +359,20 @@ function apiCartAdd(): array {
 
     $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
     $productId = Security::int($input['product_id'] ?? 0);
-    $variantId = isset($input['variant_id']) ? Security::int($input['variant_id']) : null;
+    $variantId = isset($input['variant_id']) ? Security::int($input['variant_id']) : 0;
     $qty = max(1, min(99, Security::int($input['qty'] ?? 1)));
 
     if ($productId <= 0) {
         return ['error' => 'Invalid product'];
     }
 
-    // Verify product exists and has stock
-    $product = Products::byId($productId);
-    if (!$product || $product['status'] !== 'active') {
-        return ['error' => 'Product not found'];
+    // Same validation as the storefront form: a product with variants needs one of its own variants.
+    $result = Cart::addValidated($productId, $variantId > 0 ? $variantId : null, $qty);
+    if (!$result['ok']) {
+        if ($result['error'] === 'product_invalid') return ['error' => 'Product not found'];
+        http_response_code($result['error'] === 'variant_required' ? 422 : 409);
+        return ['error' => I18n::t($result['error']), 'code' => $result['error']];
     }
-    if (!VariantAvailability::isPurchasable($productId, $variantId)) {
-        http_response_code(409);
-        return ['error' => 'Product variant is not available'];
-    }
-
-    Cart::add($productId, $variantId, $qty);
 
     return ['success' => true, 'cart' => apiCart()];
 }
@@ -1036,7 +1032,10 @@ function apiWebhookStripe(): array {
         $resolvedStore = match($event['type']) {
             'checkout.session.completed',
             'checkout.session.async_payment_succeeded' => onPaymentCompleted($event['data']['object'] ?? []),
+            'checkout.session.async_payment_failed' => onAsyncPaymentFailed($event['data']['object'] ?? []),
             'charge.refunded'            => onChargeRefunded($event['data']['object'] ?? []),
+            'refund.updated',
+            'charge.refund.updated'      => onRefundUpdated($event['data']['object'] ?? [], (string)$event['id']),
             'charge.dispute.created'     => onDisputeCreated($event['data']['object'] ?? []),
             default                      => null,
         };
@@ -1144,16 +1143,18 @@ function applyStripeChargeRefunded(array $charge, string $paymentIntent, int $or
         // One ledger row per Stripe refund id, shared with the refund worker: whichever books it first wins.
         foreach ($refunds as $refund) {
             $refundId = (string)($refund['id'] ?? '');
-            if ($refundId === '' || (int)($refund['amount'] ?? 0) <= 0 || in_array((string)($refund['status'] ?? ''), ['failed', 'canceled'], true)) continue;
+            // Only money Stripe has returned: a pending refund (SEPA, bank transfers) may still fail; refund.updated books it.
+            if ($refundId === '' || (int)($refund['amount'] ?? 0) <= 0 || (string)($refund['status'] ?? '') !== 'succeeded') continue;
             PaymentService::bookProviderRefund($orderId, 'stripe', $refundId, (int)$refund['amount'], 'charge.refunded', 'stripe_refund_' . $refundId, $eventPayload);
         }
     } else {
         PaymentService::bookCumulativeRefund($orderId, 'stripe', $refundedAmount, 'charge.refunded', 'stripe_refund_' . $chargeId . '_' . $refundedAmount, $eventPayload);
     }
 
-    if ($fullRefund) {
+    // amount_refunded counts pending refunds too: the order closes only once the ledger holds all of it.
+    if ($fullRefund && PaymentService::refundableBalance($orderId) === 0) {
         $order = Orders::byId($orderId) ?: $order;
-        if (OrderWorkflow::canTransition((string)$order['status'], 'refunded') && PaymentService::refundableBalance($orderId) === 0) {
+        if (OrderWorkflow::canTransition((string)$order['status'], 'refunded')) {
             OrderWorkflow::transition($orderId, 'refunded', "Stripe full refund: {$refundedAmount} cents");
         } else {
             FulfillmentDispatcher::queue('refunded', $order);
@@ -1178,6 +1179,55 @@ function stripeChargeRefunds(array $charge): ?array {
         return null;
     }
     return $gateway instanceof StripePayment ? $gateway->chargeRefunds((string)($charge['id'] ?? '')) : null;
+}
+
+/** A Stripe refund changed state (refund.updated / charge.refund.updated): book it once it succeeded, release it when it failed. */
+function onRefundUpdated(array $refund, string $eventId): ?string {
+    $paymentIntent = (string)($refund['payment_intent'] ?? '');
+    $status = (string)($refund['status'] ?? '');
+    if ($paymentIntent === '' || !in_array($status, ['succeeded', 'failed', 'canceled'], true)) return null;
+    $target = PaymentWebhookRouting::locate(['payment_id' => $paymentIntent], 'stripe');
+    PaymentWebhookRouting::within($target['store_id'], static fn() => applyStripeRefundUpdated($refund, $eventId, $target['id']));
+    return $target['store_id'];
+}
+
+function applyStripeRefundUpdated(array $refund, string $eventId, int $orderId): void {
+    $refundId = (string)($refund['id'] ?? '');
+    $amount = (int)($refund['amount'] ?? 0);
+    if ($refundId === '' || $amount <= 0) return;
+    $payload = ['charge_id' => (string)($refund['charge'] ?? ''), 'refund_status' => (string)$refund['status']];
+    if ($refund['status'] === 'succeeded') {
+        // Same key as charge.refunded books it under: whichever event comes first moves the money.
+        PaymentService::bookProviderRefund($orderId, 'stripe', $refundId, $amount, 'refund.succeeded', 'stripe_refund_' . $refundId, $payload);
+        $order = Orders::byId($orderId);
+        if ($order && (string)$order['payment_status'] === 'refunded' && OrderWorkflow::canTransition((string)$order['status'], 'refunded')) {
+            OrderWorkflow::transition($orderId, 'refunded', "Stripe refund {$refundId} succeeded");
+        }
+        return;
+    }
+    PaymentService::providerRefundFailed($orderId, 'stripe', $refundId, $amount, 'stripe_refund_failed_' . $refundId, $payload + ['event_id' => $eventId]);
+}
+
+/**
+ * A delayed payment method (SEPA Direct Debit) failed after the session completed unpaid. The payment is marked
+ * failed at once; the order then expires like any unpaid checkout (Orders::expirePending()), releasing its stock.
+ */
+function onAsyncPaymentFailed(array $session): ?string {
+    $sessionId = (string)($session['id'] ?? '');
+    $target = PaymentWebhookRouting::locate(array_filter([
+        'order_id' => (int)($session['metadata']['order_id'] ?? 0),
+        'session_id' => $sessionId,
+        'order_number' => (string)($session['client_reference_id'] ?? ''),
+    ]), 'stripe');
+    PaymentWebhookRouting::within($target['store_id'], static fn() => applyStripeAsyncPaymentFailed($session, $sessionId, $target['id']));
+    return $target['store_id'];
+}
+
+function applyStripeAsyncPaymentFailed(array $session, string $sessionId, int $orderId): void {
+    $order = Orders::byId($orderId);
+    if (!$order || !in_array((string)($order['payment_status'] ?? ''), ['pending', 'authorized'], true)) return;
+    PaymentService::transitionPayment($orderId, 'failed', 'payment.failed', 0, 'stripe_async_failed_' . $sessionId,
+        ['session_id' => $sessionId, 'payment_id' => (string)($session['payment_intent'] ?? '')]);
 }
 
 function onDisputeCreated(array $dispute): ?string {

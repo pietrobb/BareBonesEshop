@@ -287,7 +287,7 @@ final class InvoiceService
 
     /**
      * Money of the order not yet returned: the total less provider refunds (whole-order and completed item
-     * refunds), pending credit notes, and credit notes settled outside the gateway (no payment id). A pending
+     * refunds), a requested refund not booked yet, pending credit notes, and credit notes settled outside the gateway (no payment id). A pending
      * credit note whose provider refund is already booked on the ledger (under its key or its provider refund
      * id) is in the refunded amount and is not subtracted twice.
      */
@@ -304,7 +304,8 @@ final class InvoiceService
         $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
         $credits = $stmt->fetch(PDO::FETCH_ASSOC);
         $offGateway = trim((string)($order['payment_id'] ?? '')) === '' ? (int)$credits['succeeded'] : 0;
-        return (int)$order['total'] - PaymentService::refundedAmount((int)$order['id']) - (int)$credits['pending'] - $offGateway;
+        return (int)$order['total'] - PaymentService::refundedAmount((int)$order['id']) - (int)$credits['pending'] - $offGateway
+            - PaymentService::requestedRefundInFlight($order);
     }
 
     /**
@@ -417,7 +418,9 @@ final class InvoiceService
         [$sellerCode, $store] = self::creditSeller($source, $order);
         $legal = $store['legal'] ?? [];
         $prefix = self::numberPrefix($legal, 'credit_note');
-        $year = (int)date('Y');
+        // Year of the number series and month of the PDF path from the issue date: one instant, as for invoices (issue()),
+        // so a credit note issued around midnight on 31 December is not numbered in the next year's series.
+        $year = (int)substr($issuedAt, 0, 4);
         $number = '';
         $invoiceId = 0;
         $refundId = 0;
@@ -435,7 +438,7 @@ final class InvoiceService
                 }
             }
             $number = self::allocateNumber($db, $sellerCode, 'credit_note', $year, $prefix);
-            $relPath = sprintf('%d/%02d/%s.pdf', $year, (int)date('m'), rawurlencode($number));
+            $relPath = sprintf('%d/%02d/%s.pdf', $year, (int)substr($issuedAt, 5, 2), rawurlencode($number));
             $token = self::tokenHash(bin2hex(random_bytes(32)));
             $insert = $db->prepare("INSERT INTO invoices
                 (order_id, store_id, number, issued_at, delivery_date, due_date, pdf_path,

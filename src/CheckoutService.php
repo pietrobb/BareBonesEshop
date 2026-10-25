@@ -302,9 +302,9 @@ class CheckoutService {
      * coupon is an alternative to them (Pricing::combineDiscounts), so it is priced on the full subtotal.
      */
     public static function couponFor(string $code, int $subtotal, int $promotionDiscount, ?string $email, string $currency): array {
-        $coupon = Pricing::applyCoupon($code, $subtotal, $email);
+        $coupon = Pricing::applyCoupon($code, $subtotal, $email, $currency);
         if ($promotionDiscount > 0 && Pricing::couponApplies($coupon) && (string)($coupon['stacking'] ?? 'stack') === 'stack') {
-            $coupon = Pricing::applyCoupon($code, max(0, $subtotal - $promotionDiscount), $email);
+            $coupon = Pricing::applyCoupon($code, max(0, $subtotal - $promotionDiscount), $email, $currency);
         }
         // A percentage coupon is charged in units the cart's currency shows (whole Kč/Ft).
         if ((int)$coupon['discount'] > 0) $coupon['discount'] = min($subtotal, Money::round((int)$coupon['discount'], $currency));

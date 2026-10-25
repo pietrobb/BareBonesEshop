@@ -414,6 +414,31 @@ class PaymentService {
         return max(0, (int)$stmt->fetchColumn());
     }
 
+    /**
+     * Pending credit notes (InvoiceService::credit()) whose provider refund the ledger does not hold yet (under
+     * their key or their provider refund id): that money is already promised back, so no new refund may claim it.
+     */
+    public static function unbookedCreditAmount(int $orderId): int {
+        $stmt = Db::get()->prepare("SELECT COALESCE(SUM(r.amount), 0) FROM order_refunds r
+            WHERE r.order_id = :order AND r.store_id = :store AND r.status = 'pending' AND NOT EXISTS (
+                SELECT 1 FROM payment_transactions t
+                WHERE t.order_id = r.order_id AND t.store_id = r.store_id
+                  AND t.status IN ('partially_refunded', 'refunded', 'refund_succeeded')
+                  AND (t.idempotency_key = r.idempotency_key OR (r.payment_reference IS NOT NULL AND r.payment_reference <> '' AND t.provider_ref = r.payment_reference)))");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
+        return max(0, (int)$stmt->fetchColumn());
+    }
+
+    /** What a new refund (admin request, cancellation, manual refund) may still claim: the balance less pending credit notes. */
+    public static function claimableRefund(int $orderId): int {
+        return max(0, self::refundableBalance($orderId) - self::unbookedCreditAmount($orderId));
+    }
+
+    /** A refund requested (requestRefund()) whose money is not booked yet: a credit note must not promise it again. */
+    public static function requestedRefundInFlight(array $order): int {
+        return (int)(self::latestRefundRequestRow($order, true)['amount'] ?? 0);
+    }
+
     public static function requestRefund(int $orderId, int $amount, string $idempotencyKey, array $payload = []): bool {
         if ($amount <= 0 || $idempotencyKey === '') throw new \InvalidArgumentException('Invalid refund request');
 
@@ -424,7 +449,7 @@ class PaymentService {
             $order = Orders::byId($orderId);
             if (!$order) throw new \RuntimeException("Order #{$orderId} not found");
             $from = (string)($order['payment_status'] ?? 'pending');
-            if (!self::canPaymentTransition($from, 'refund_pending') || $amount > self::refundableBalance($orderId)) {
+            if (!self::canPaymentTransition($from, 'refund_pending') || $amount > self::claimableRefund($orderId)) {
                 throw new \LogicException('Refund is not available for this amount');
             }
 
@@ -526,8 +551,8 @@ class PaymentService {
      *
      * @return array{id:mixed, amount:mixed, idempotency_key:mixed, raw_response:mixed}|null
      */
-    private static function latestRefundRequestRow(array $order): ?array {
-        if ((string)($order['payment_status'] ?? '') !== 'refund_pending' || self::refundsByHand($order)) return null;
+    private static function latestRefundRequestRow(array $order, bool $byHandToo = false): ?array {
+        if ((string)($order['payment_status'] ?? '') !== 'refund_pending' || (!$byHandToo && self::refundsByHand($order))) return null;
         $stmt = Db::get()->prepare("SELECT id, amount, idempotency_key, raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store AND status = 'refund_pending' ORDER BY id DESC");
         $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
         // Only requestRefund() rows are requests. A job the provider answered "pending" also logs refund_pending, under
@@ -636,7 +661,7 @@ class PaymentService {
         $paymentId = trim((string)($order['payment_id'] ?? ''));
         $requestKey = 'order_refund_request_' . $orderId;
         if (!$order || self::transactionExists($requestKey)) return [];
-        $amount = self::refundableBalance($orderId);
+        $amount = self::claimableRefund($orderId);
         if ($maxRefund !== null) $amount = min($amount, max(0, $maxRefund));
         if ($amount <= 0) return [];
         if ($paymentId === '') {
@@ -1084,7 +1109,7 @@ class PaymentService {
         if ($amount <= 0 || trim($note) === '') throw new \InvalidArgumentException('Invalid manual refund');
         self::withLockedOrder($orderId, static function (array $order) use ($orderId, $amount, $actor, $note): bool {
             $from = (string)($order['payment_status'] ?? 'pending');
-            if (!self::refundsByHand($order) || $amount > self::refundableBalance($orderId)) {
+            if (!self::refundsByHand($order) || $amount > self::claimableRefund($orderId)) {
                 throw new \LogicException('Manual refund is not available for this order or amount');
             }
             $to = self::refundedAmount($orderId) + self::offLedgerCredits($order) + $amount >= (int)$order['total'] ? 'refunded' : 'partially_refunded';
@@ -1136,6 +1161,44 @@ class PaymentService {
         if ($itemRefundId > 0) Rma::completeRefund($itemRefundId, $itemReference);
         else self::completeItemRefundWithin($orderId, $refundId, $amount);
         return true;
+    }
+
+    /**
+     * A provider refund that failed (or was canceled) after the provider accepted it as pending. The money was
+     * never booked (only succeeded refunds are), so a refund request still in flight is released: the payment
+     * returns to paid / partially_refunded and the admin can request it again. A refund already booked by its
+     * id cannot be undone automatically. Either way a critical incident tells the merchant the customer is unpaid.
+     */
+    public static function providerRefundFailed(int $orderId, string $provider, string $refundId, int $amount, string $eventKey, array $payload = []): bool {
+        $released = self::withLockedOrder($orderId, static function (array $order) use ($orderId, $provider, $refundId, $amount, $eventKey, $payload): bool {
+            if (self::transactionExists($eventKey)) return false;
+            $from = (string)($order['payment_status'] ?? 'pending');
+            $currency = strtolower((string)($order['currency'] ?? 'eur'));
+            $payload = array_merge(['provider' => $provider, 'refund_id' => $refundId], $payload);
+            $booked = self::refundAlreadyRecorded($orderId, $refundId);
+            $to = self::refundedAmount($orderId) > 0 ? 'partially_refunded' : 'paid';
+            if (!$booked && $from === 'refund_pending' && self::isRequestedRefundExecution($orderId, $refundId) && self::canPaymentTransition($from, $to)) {
+                // No money moves: amount 0, so the status row is never read as a capture or a refund.
+                self::applyTransition($order, $to, 'refund.failed', 0, $eventKey, $payload + ['amount' => $amount], $refundId);
+                AuditLog::log('order_refund', $orderId, $from, $to, "{$provider} refund {$refundId} of {$amount} failed");
+                return true;
+            }
+            self::recordEvent($orderId, 'refund.failed', 'ignored', $amount, $currency, $eventKey, $payload + ['payment_status' => $from, 'booked' => $booked], $provider, $refundId);
+            return false;
+        });
+        IncidentMonitor::report('payment.refund_failed', 'payment', 'critical', ['order_id' => $orderId, 'refund_id' => $refundId, 'released' => $released]);
+        return $released;
+    }
+
+    /** Whether the provider answered this order's refund request (not a credit note's item refund) as pending under $refundId. */
+    private static function isRequestedRefundExecution(int $orderId, string $refundId): bool {
+        if ($refundId === '') return false;
+        $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions t WHERE t.order_id = :order AND t.store_id = :store
+            AND t.status = 'refund_pending' AND t.provider_ref = :ref
+            AND NOT EXISTS (SELECT 1 FROM order_refunds r WHERE r.order_id = t.order_id AND r.store_id = t.store_id
+                AND (r.payment_reference = :ref2 OR r.idempotency_key = t.idempotency_key)) LIMIT 1");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':ref' => $refundId, ':ref2' => $refundId]);
+        return (bool)$stmt->fetchColumn();
     }
 
     /** The pending item refund (credit note) a booked provider refund settles: by refund id, else by exact amount. */

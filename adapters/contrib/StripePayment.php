@@ -136,7 +136,8 @@ class StripePayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, C
         $response = $this->apiCall('POST', '/v1/refunds', $params, $headers);
         return [
             'refund_id' => $response['id'] ?? '',
-            'status' => $response['status'] ?? 'failed',
+            // requires_action (some bank refunds) is not returned yet either: the refund webhook settles it.
+            'status' => ($response['status'] ?? 'failed') === 'requires_action' ? 'pending' : ($response['status'] ?? 'failed'),
         ];
     }
 
@@ -176,6 +177,15 @@ class StripePayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, C
             : '/v1/payment_intents/' . rawurlencode($paymentId);
         $response = $this->apiCall('GET', $endpoint);
         if (($response['payment_status'] ?? '') === 'paid') return 'paid';
+        $intent = $response['payment_intent'] ?? null;
+        $intent = is_array($intent) ? (string)($intent['id'] ?? '') : (string)$intent;
+        if (str_starts_with($paymentId, 'cs_') && ($response['status'] ?? '') === 'complete' && $intent !== '') {
+            // A delayed method (SEPA Direct Debit) completes the session unpaid. A failed debit sends its PaymentIntent
+            // back to requires_payment_method (or canceled): final, so the unpaid order can expire and free its stock.
+            $intentStatus = (string)($this->apiCall('GET', '/v1/payment_intents/' . rawurlencode($intent))['status'] ?? '');
+            if ($intentStatus === 'succeeded') return 'paid';
+            return in_array($intentStatus, ['requires_payment_method', 'canceled'], true) ? 'failed' : 'processing';
+        }
         return $response['status'] ?? 'unknown';
     }
 
@@ -209,7 +219,7 @@ class StripePayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, C
     /**
      * Raw Stripe API call using curl.
      */
-    private function apiCall(string $method, string $endpoint, array $params = [], array $extraHeaders = []): array {
+    protected function apiCall(string $method, string $endpoint, array $params = [], array $extraHeaders = []): array {
         if (empty($this->secretKey)) {
             throw new \RuntimeException('Stripe secret key not configured');
         }

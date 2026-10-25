@@ -219,7 +219,7 @@ function pageOrder(): void {
     if (!$canRefund) $allowed = array_values(array_filter($allowed, static fn(string $to): bool => !OrderWorkflow::returnsMoney($order, $to)));
     $paymentTransitions = Security::adminCan('orders.payments') ? adminManualPaymentTransitions($order) : [];
     $paymentTxs = PaymentService::transactionsForOrder($id);
-    $refundableBalance = PaymentService::refundableBalance($id);
+    $refundableBalance = PaymentService::claimableRefund($id);
     $paymentSnapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
     $latestPaymentTx = $paymentTxs ? $paymentTxs[count($paymentTxs) - 1] : null;
     $logs = AuditLog::forEntity('order_status', $id, 20);
@@ -739,7 +739,7 @@ function handleOrderRefundRequest(): void {
 
     $amount = Security::int($_POST['amount'] ?? 0);
     $reason = trim((string)($_POST['reason'] ?? $_POST['note'] ?? ''));
-    $refundableBalance = PaymentService::refundableBalance($orderId);
+    $refundableBalance = PaymentService::claimableRefund($orderId);
     if ($amount <= 0 || $amount > $refundableBalance || $reason === '') {
         setFlash('err', I18n::t('admin.order.msg.refund_amount'));
         header("Location: admin.php?p=order&id={$orderId}");
@@ -806,7 +806,7 @@ function handleOrderManualRefund(): void {
 
     $amount = Security::int($_POST['amount'] ?? 0);
     $note = trim((string)($_POST['note'] ?? ''));
-    if ($amount <= 0 || $amount > PaymentService::refundableBalance($orderId) || $note === '' || !PaymentService::refundsByHand($order)) {
+    if ($amount <= 0 || $amount > PaymentService::claimableRefund($orderId) || $note === '' || !PaymentService::refundsByHand($order)) {
         setFlash('err', I18n::t('admin.order.msg.refund_amount'));
         header("Location: admin.php?p=order&id={$orderId}");
         exit;
