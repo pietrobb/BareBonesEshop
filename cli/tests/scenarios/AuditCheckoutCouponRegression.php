@@ -77,11 +77,12 @@ $buyer = ['name' => 'A132 Buyer', 'email' => 'a132-buyer@example.test', 'phone' 
     'place_raced' => ['POST', $buyer + ['checkout' => '1', 'csrf_token' => $csrf, 'coupon_code' => 'A132RACE']],
 };
 // R8: a concurrent checkout takes the last use of A132RACE after this one priced it (the preview accepted the
-// code) and before this order claims it — the trigger is that winner, inside this order's transaction.
+// code) and before this order claims it — the trigger is that winner, inside this order's transaction. A shared
+// pricing.json coupon counts its uses across stores (counter store_id '*').
 if ($action === 'place_raced') {
     $db->exec($driver === 'mysql'
-        ? "CREATE TRIGGER a132_race AFTER INSERT ON orders FOR EACH ROW INSERT INTO coupon_usage_counters (store_id, coupon_code, subject, uses) VALUES ('default', 'A132RACE', '', 1) ON DUPLICATE KEY UPDATE uses = 1"
-        : "CREATE TRIGGER a132_race AFTER INSERT ON orders BEGIN INSERT OR REPLACE INTO coupon_usage_counters (store_id, coupon_code, subject, uses) VALUES ('default', 'A132RACE', '', 1); END");
+        ? "CREATE TRIGGER a132_race AFTER INSERT ON orders FOR EACH ROW INSERT INTO coupon_usage_counters (store_id, coupon_code, subject, uses) VALUES ('*', 'A132RACE', '', 1) ON DUPLICATE KEY UPDATE uses = 1"
+        : "CREATE TRIGGER a132_race AFTER INSERT ON orders BEGIN INSERT OR REPLACE INTO coupon_usage_counters (store_id, coupon_code, subject, uses) VALUES ('*', 'A132RACE', '', 1); END");
     register_shutdown_function(static fn() => $db->exec('DROP TRIGGER a132_race'));
 }
 $_SERVER['REQUEST_METHOD'] = $method;

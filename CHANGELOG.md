@@ -104,6 +104,22 @@ nginx PHP fallback when `operations.nginx_config` is set).
     `apiActiveStore()` helper.
   - **`tier_pricing` in `pricing.json` was never applied** and is gone from the sample. Quantity prices
     are price-list rows with a minimum quantity (Admin → Price lists).
+- **Round-10 money and cart (2026-10-25)**
+  - API v1 `PATCH` of a product refuses a `price` below the lowest base price its variants allow (422
+    `price_below_variant_floor`), like the admin editor and CSV import.
+  - `cart_add` and a restored cart (`cart_restore`) skip a product with variants unless one of its own
+    variants is given; no line at the bare base price is created.
+  - A `pricing.json` coupon with a fixed discount or a `min_subtotal` applies only in its rule currency
+    (`conditions.currency`, else the cart-rules currency). A coupon shared by stores without their own
+    `cart_rules` counts `max_uses` and `per_customer` across all of them.
+  - Refunds: a refund request and a pending credit note each see the money the other has already promised
+    back, so the same amount cannot be refunded twice. A Stripe refund still `pending` is not booked as
+    refunded until it succeeds (also `requires_action`); when it fails, the payment returns to paid, the
+    refund can be requested again and a critical `payment.refund_failed` incident is raised. A failed
+    delayed payment (Stripe SEPA Direct Debit) counts as failed, so the unpaid order expires and frees its
+    stock.
+  - A credit note's number series year and PDF folder come from its issue date (one instant), so one issued
+    around midnight on 31 December is not numbered in the next year's series.
 - **VAT rates (2026-10-23)** — products with `vat_class` `books` or `medicines` now get each country's
   own rate instead of its `reduced` class (e.g. IE books 0 %, IT/ES 4 %, FR 5.5 %, DE medicines 19 %).
   FI reduced rate 13.5 % from 2026, LT 9 % rate replaced by 12 % / 5 % from 2026. Invoices already

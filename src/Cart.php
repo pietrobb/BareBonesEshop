@@ -442,9 +442,8 @@ class Cart {
             $variantId = isset($item['variant_id']) && $item['variant_id']
                 ? Security::int($item['variant_id']) : null;
             $qty = max(1, min(self::MAX_QTY, Security::int($item['qty'] ?? 1)));
-            if ($productId > 0 && VariantAvailability::isPurchasable($productId, $variantId)) {
-                self::add($productId, $variantId, $qty);
-            }
+            // addValidated: a product with variants is skipped without one of its own variants (no base-price line).
+            if ($productId > 0) self::addValidated($productId, $variantId, $qty);
         }
     }
 

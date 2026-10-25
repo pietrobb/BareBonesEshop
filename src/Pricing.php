@@ -7,6 +7,8 @@ declare(strict_types=1);
  */
 class Pricing {
     private static ?array $config = null;
+    /** coupon_usage_counters.store_id of a shared coupon's limits, counted across every store. */
+    private const ALL_STORES = '*';
 
     public static function config(): array {
         if (!self::$config) {
@@ -360,8 +362,10 @@ class Pricing {
     /**
      * Apply cart-level coupon code.
      * Returns [discount_amount, rule_name] or [0, null].
+     * $currency: the cart's currency. A pricing.json coupon with an amount (fixed discount, minimum order) is priced in
+     * its rule currency (conditions.currency, else cartRulesCurrency()) and gives nothing in another currency.
      */
-    public static function applyCoupon(string $code, int $subtotal, ?string $customerEmail = null): array {
+    public static function applyCoupon(string $code, int $subtotal, ?string $customerEmail = null, ?string $currency = null): array {
         $cfg = self::config();
         $code = trim($code);
         $customerEmail = $customerEmail === null ? null : self::normalizeEmail($customerEmail);
@@ -371,9 +375,16 @@ class Pricing {
             if (($rule['type'] ?? '') !== 'coupon') continue;
             if (strtoupper($rule['code'] ?? '') !== strtoupper($code)) continue;
 
+            $hasAmount = ($rule['discount_type'] ?? '') === 'fixed' || !empty($rule['min_subtotal']);
+            if ($currency !== null && $hasAmount
+                && strtolower((string)($rule['conditions']['currency'] ?? self::cartRulesCurrency())) !== strtolower($currency)) {
+                return ['discount' => 0, 'name' => null, 'error' => 'Invalid coupon'];
+            }
+            $scope = self::couponScope($code);
+
             // Check max_uses limit
             if (!empty($rule['max_uses'])) {
-                $totalUses = self::couponUseCount($code);
+                $totalUses = self::couponUseCount($code, null, $scope);
                 if ($totalUses >= $rule['max_uses']) {
                     return ['discount' => 0, 'name' => null, 'error' => 'Coupon expired'];
                 }
@@ -381,7 +392,7 @@ class Pricing {
 
             // Check per_customer limit
             if (!empty($rule['per_customer']) && $customerEmail) {
-                $customerUses = self::couponUseCount($code, $customerEmail);
+                $customerUses = self::couponUseCount($code, $customerEmail, $scope);
                 if ($customerUses >= $rule['per_customer']) {
                     return ['discount' => 0, 'name' => null, 'error' => 'Coupon already used'];
                 }
@@ -467,10 +478,11 @@ class Pricing {
             $promotion = Promotions::couponRule($upperCode, false);
             if ($promotion !== null) $limits = Promotions::couponLimits($promotion);
         }
-        if (!empty($limits['max_uses']) && !self::claimCouponUse($upperCode, null, (int)$limits['max_uses'])) {
+        $scope = self::couponScope($upperCode);
+        if (!empty($limits['max_uses']) && !self::claimCouponUse($upperCode, null, (int)$limits['max_uses'], $scope)) {
             throw new \CouponRejectedException("Coupon {$upperCode} exceeded max_uses limit");
         }
-        if (!empty($limits['per_customer']) && !self::claimCouponUse($upperCode, $email, (int)$limits['per_customer'])) {
+        if (!empty($limits['per_customer']) && !self::claimCouponUse($upperCode, $email, (int)$limits['per_customer'], $scope)) {
             throw new \CouponRejectedException("Coupon {$upperCode} already used by this customer");
         }
 
@@ -490,10 +502,21 @@ class Pricing {
             WHERE store_id = :store AND coupon_code = :code AND subject = :subject AND uses > 0");
         foreach ($uses->fetchAll(PDO::FETCH_ASSOC) as $use) {
             $delete->execute([':id' => (int)$use['id']]);
+            $code = strtoupper((string)$use['coupon_code']);
             foreach ([null, self::normalizeEmail((string)$use['customer_email'])] as $email) {
-                $decrement->execute([':store' => $store, ':code' => strtoupper((string)$use['coupon_code']), ':subject' => self::couponSubject($email)]);
+                $decrement->execute([':store' => self::couponScope($code), ':code' => $code, ':subject' => self::couponSubject($email)]);
             }
         }
+    }
+
+    /**
+     * Counter scope of a coupon's limits: a shared pricing.json coupon (the store has no cart_rules of its own) is one
+     * offer in every store, so max_uses and per_customer count all stores ('*'); otherwise only the current store.
+     */
+    private static function couponScope(string $code): string {
+        $store = StoreContext::current();
+        if (isset($store->config()['pricing']['cart_rules'])) return $store->id();
+        return in_array(strtoupper(trim($code)), self::configCouponCodes(), true) ? self::ALL_STORES : $store->id();
     }
 
     public static function normalizeEmail(string $email): string {
@@ -506,14 +529,15 @@ class Pricing {
     }
 
     /** Seed the counter from historic uses once, then claim one use only while below the limit. */
-    private static function claimCouponUse(string $code, ?string $email, int $limit): bool {
+    private static function claimCouponUse(string $code, ?string $email, int $limit, string $store): bool {
         $db = Db::get();
-        $store = StoreContext::current()->id();
         $subject = self::couponSubject($email);
         $seed = $db->prepare(Db::insertIgnore() . " INTO coupon_usage_counters (store_id, coupon_code, subject, uses)
-            SELECT :store, :code, :subject, COUNT(*) FROM coupon_uses WHERE store_id = :use_store AND coupon_code = :use_code"
+            SELECT :store, :code, :subject, COUNT(*) FROM coupon_uses WHERE coupon_code = :use_code"
+            . ($store === self::ALL_STORES ? '' : ' AND store_id = :use_store')
             . ($email === null ? '' : ' AND customer_email = :email'));
-        $params = [':store' => $store, ':code' => $code, ':subject' => $subject, ':use_store' => $store, ':use_code' => $code];
+        $params = [':store' => $store, ':code' => $code, ':subject' => $subject, ':use_code' => $code];
+        if ($store !== self::ALL_STORES) $params[':use_store'] = $store;
         if ($email !== null) $params[':email'] = $email;
         $seed->execute($params);
         $claim = $db->prepare("UPDATE coupon_usage_counters SET uses = uses + 1
@@ -523,21 +547,20 @@ class Pricing {
     }
 
     /** Count coupon uses (total or per normalized customer e-mail) for the checkout preview. */
-    private static function couponUseCount(string $code, ?string $email = null): int {
+    private static function couponUseCount(string $code, ?string $email = null, ?string $store = null): int {
         $db = Db::get();
         $code = strtoupper($code);
-        $store = StoreContext::current()->id();
+        $store ??= StoreContext::current()->id();
         $counter = $db->prepare("SELECT uses FROM coupon_usage_counters WHERE store_id = :store AND coupon_code = :code AND subject = :subject");
         $counter->execute([':store' => $store, ':code' => $code, ':subject' => self::couponSubject($email)]);
         $claimed = $counter->fetchColumn();
         if ($claimed !== false) return (int)$claimed;
-        if ($email !== null) {
-            $stmt = $db->prepare("SELECT COUNT(*) FROM coupon_uses WHERE coupon_code = :code AND customer_email = :email AND store_id = :store");
-            $stmt->execute([':code' => $code, ':email' => $email, ':store' => $store]);
-        } else {
-            $stmt = $db->prepare("SELECT COUNT(*) FROM coupon_uses WHERE coupon_code = :code AND store_id = :store");
-            $stmt->execute([':code' => $code, ':store' => $store]);
-        }
+        $params = [':code' => $code];
+        $sql = 'SELECT COUNT(*) FROM coupon_uses WHERE coupon_code = :code';
+        if ($email !== null) { $sql .= ' AND customer_email = :email'; $params[':email'] = $email; }
+        if ($store !== self::ALL_STORES) { $sql .= ' AND store_id = :store'; $params[':store'] = $store; }
+        $stmt = $db->prepare($sql);
+        $stmt->execute($params);
         return (int)$stmt->fetchColumn();
     }
 

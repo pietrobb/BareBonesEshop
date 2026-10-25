@@ -196,6 +196,10 @@ class ApiV1 {
             if ($ifMatch !== '' && !self::etagMatches($ifMatch, self::etag(self::productDto($old)))) {
                 return self::error(412, 'precondition_failed', 'The product changed since the ETag in If-Match was read') + ['store' => false];
             }
+            // Same floor as the admin editor and CSV import: a variant priced by a delta must not turn negative.
+            if (array_key_exists('price', $body) && $body['price'] < ($floor = ProductVariants::minBasePrice($productId))) {
+                return self::error(422, 'price_below_variant_floor', "price must be at least {$floor} so that no variant price is negative") + ['store' => false];
+            }
 
             $set = [];
             $params = [':id' => $productId, ':store' => StoreContext::current()->catalogId()];
