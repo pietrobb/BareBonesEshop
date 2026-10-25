@@ -10,6 +10,7 @@ require_once __DIR__ . '/Storefront/ProductStatusPages.php';
 require_once __DIR__ . '/Storefront/CheckoutPages.php';
 require_once __DIR__ . '/Storefront/WithdrawalPages.php';
 require_once __DIR__ . '/Storefront/ComplaintPages.php';
+require_once __DIR__ . '/Storefront/PaymentLinkPages.php';
 Security::headers();
 Security::sessionStart();
 Bootstrap::validateCustomerSession();
@@ -131,6 +132,11 @@ switch ($page) {
         $ordNum = Security::clean($_GET['order'] ?? '');
         $title = Template::pageTitle($t('order_placed'));
         $content = renderOrderDone($ordNum);
+        break;
+
+    case 'pay':
+        $title = Template::pageTitle($t('pay_link.title'));
+        $content = renderPayOrder();
         break;
 
     case 'withdrawal':

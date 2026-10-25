@@ -18,7 +18,7 @@ return [
     'products'   => $catalog,
     'product'    => $catalog,
     'orders'     => array_merge($orders, ['OrderOperations']),
-    'order'      => $orders,
+    'order'      => array_merge($orders, ['OrderOperations']), // + the "send payment link" handler (R10 UX3)
     'awaiting_payment' => ['Recovery'],
     'abandoned_carts' => ['Recovery'],
     'invoice_pdf' => $orders,

@@ -1,0 +1,1 @@
+Płatność za zamówienie {{order_number}}

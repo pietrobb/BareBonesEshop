@@ -405,7 +405,12 @@ $customCardName = (string)$pdo->query("SELECT name FROM payment_methods WHERE co
 assert_equals('Admin custom card', $customCardName, 'Payment methods: seed does not overwrite admin-edited method');
 
 if (!PaymentReadiness::canTakePayments('stripe', Security::config())) {
+    // Without an earlier scenario's substitute in the legacy 'payment' slot, checkout uses the shipped Stripe gateway.
+    $psInstances = new ReflectionProperty(Adapters::class, 'instances');
+    $psSavedInstances = $psInstances->getValue();
+    $psInstances->setValue(null, array_diff_key($psSavedInstances, ['payment' => true]));
     $paymentCodesNoKeys = array_column(PaymentService::availableMethods('SK', 'eur', 2500, 'packeta'), 'code');
+    $psInstances->setValue(null, $psSavedInstances);
     assert_true(!in_array('card', $paymentCodesNoKeys, true) && in_array('bank_transfer', $paymentCodesNoKeys, true),
         'Payment methods: the card method is not offered while Stripe has no keys (offline methods are)');
 }

@@ -1,0 +1,3 @@
+<div class="checkout-pending" role="status" data-pay-order><p>{{message}}</p>{{#if error}}<p class="flash flash-error" role="alert">{{error}}</p>{{/if}}
+<form method="post" action="{{action}}"><input type="hidden" name="csrf_token" value="{{csrf_token}}"><input type="hidden" name="token" value="{{token}}"><button class="btn-checkout" type="submit">{{pay_label}}</button></form>
+<p><a href="{{home_url}}" style="color:#a82d5c">{{continue_label}}</a></p></div>

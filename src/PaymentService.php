@@ -100,7 +100,8 @@ class PaymentService {
     }
 
     /** False only for a shipped gateway (not an extension's or a substituted adapter) that lacks its credentials. */
-    private static function gatewayCanStart(string $provider): bool {
+    public static function gatewayCanStart(string $provider): bool {
+        if (Adapters::paymentSubstituted($provider)) return true;
         try {
             $gateway = Adapters::payment($provider);
         } catch (\Throwable $e) {

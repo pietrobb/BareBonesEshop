@@ -223,10 +223,13 @@ function renderOrderDone(string $orderNum): string {
     // An online payment that failed with no way to retry here (e.g. the gateway could not start it): say so, the
     // confirmation e-mail only follows a payment.
     $paymentFailed = $status === 'failed' && $payUrl === '' && OrderWorkflow::confirmedAtPayment($order);
+    // R10 UX3: a payable order gets a fresh payment link (the shopper confirms on ?page=pay) instead of "write to us".
+    $retry = $paymentFailed && PaymentLink::payable($order);
+    if ($retry) $payUrl = PaymentLink::issue($order);
     return Template::render('storefront/order-done', [
         'title' => $t('order_sent'), 'order_number_label' => $t('order_num'), 'order_number' => (string)$order['order_number'],
         'payment' => $payment, 'pay_url' => $payUrl, 'pay_label' => $t('checkout_pay_now'),
-        'payment_error' => $paymentFailed ? str_replace('{order}', (string)$order['order_number'], $t('order_done.payment_failed')) : '',
+        'payment_error' => $paymentFailed ? str_replace('{order}', (string)$order['order_number'], $t($retry ? 'order_done.payment_retry' : 'order_done.payment_failed')) : '',
         'bank_transfer_html' => BankTransferInstructions::html($order),
         'email_message' => $paymentFailed ? '' : $t('order_email'), 'home_url' => Template::storeUrl('/'), 'continue_label' => $t('continue_shopping'),
     ]);

@@ -152,8 +152,10 @@ $architectureBudgets = [
     // +1 function, +21 lines: "Retry refund" re-queues a refund request no payment_refund job ever executed (round 4 final review).
     // +1 line: a cancellation that refunds captured money needs orders.refund (round 5 review).
     // +1 function, +14 lines: "Confirm refund" books a GoPay/ThePay partial refund the provider never confirms (round 6 review).
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 920, 'functions' => 16, 'max_function_lines' => 306, 'coupling' => 20],
-    'src/Entrypoints/Admin/OrderOperations.php' => ['lines' => 80, 'functions' => 4, 'max_function_lines' => 32, 'coupling' => 7],
+    // +6 lines, +1 coupling R10 UX3: the order detail's "Send payment link" button for an unpaid online order (PaymentLink).
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 922, 'functions' => 16, 'max_function_lines' => 308, 'coupling' => 21],
+    // +1 function, +3 coupling R10 UX3: handleOrderPaymentLink e-mails the customer a new payment link (PaymentLink, Orders, AuditLog).
+    'src/Entrypoints/Admin/OrderOperations.php' => ['lines' => 90, 'functions' => 5, 'max_function_lines' => 32, 'coupling' => 10],
     'src/Entrypoints/Admin/PricingRules.php' => ['lines' => 235, 'functions' => 7, 'max_function_lines' => 115, 'coupling' => 5],
     'src/Entrypoints/Admin/Reports.php' => ['lines' => 90, 'functions' => 2, 'max_function_lines' => 74, 'coupling' => 4],
     'src/Entrypoints/Admin/Recovery.php' => ['lines' => 115, 'functions' => 4, 'max_function_lines' => 44, 'coupling' => 7],
@@ -179,11 +181,12 @@ $architectureBudgets = [
     // +1 coupling: Search::filtersFromQuery turns the search route's sort/price/category parameters into search options (A14.2).
     // +6 lines: the ?page=withdrawal route (R8 electronic withdrawal function, Directive 2011/83/EU art. 11a).
     // +6 lines: the ?page=complaint route (R8 complaints, Directive (EU) 2019/771).
-    /* R9: Impressum page */ 'src/Entrypoints/Storefront.php' => ['lines' => 164, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
+    /* R9: Impressum page; R10 UX3: ?page=pay */ 'src/Entrypoints/Storefront.php' => ['lines' => 170, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],
     // Customer account portal behind the thin /account.php (registration, login, reset, GDPR, addresses, orders).
     // +1 coupling: Str::normalizeEmail is the one e-mail normalisation shared with Customers and Pricing.
     // +2 coupling: DigitalDelivery issues the downloads page's links; StoreContext limits the profile languages to the store's.
-    'src/Entrypoints/Storefront/Account.php' => ['lines' => 450, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 16],
+    // +8 lines, +1 coupling R10 UX3: the order detail's "Pay" button starts a payment for the unpaid order (PaymentLink).
+    'src/Entrypoints/Storefront/Account.php' => ['lines' => 458, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 17],
     // +2 lines: round-4 merge (canonical category links + trailing-slash/past-last-page 404).
     'src/Entrypoints/Storefront/CatalogPages.php' => ['lines' => 137, 'functions' => 10, 'max_function_lines' => 60, /* category page: bounded spec/subcat filter parsing; +1 coupling R8: legal pages render through ConsumerNotice, shared with the confirmation attachment */ 'coupling' => 9],
     // +2 functions: pending-payment page and the gateway cancel page (P0 2026-10-13 checkout redirect).
@@ -193,7 +196,10 @@ $architectureBudgets = [
     // +1 line / +1 coupling: round-4 merge (cart-currency formatting + translated free/payment labels).
     // +2 lines (renderCheckout): the form's coupon attempts spend the coupon API's throttle (round 4 final review).
     // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.
-    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 256, 'functions' => 7, 'max_function_lines' => 102, 'coupling' => 13],
+    // +3 lines, +1 coupling R10 UX3: a failed payment on order-done offers a new payment link (PaymentLink) instead of "write to us".
+    'src/Entrypoints/Storefront/CheckoutPages.php' => ['lines' => 259, 'functions' => 7, 'max_function_lines' => 102, 'coupling' => 14],
+    // R10 UX3: ?page=pay — the e-mailed payment link (confirm → gateway); the rules live in PaymentLink.
+    'src/Entrypoints/Storefront/PaymentLinkPages.php' => ['lines' => 40, 'functions' => 1, 'max_function_lines' => 30, 'coupling' => 6],
     // Ratcheted: canonical/robots/hreflang/JSON-LD moved to StorefrontSeo (storefront SEO audit).
     // +2 coupling: cart currency decimals for the JS config and the one-shot StorefrontFlash notice.
     /* R8: footer ADR body (ConsumerNotice), accessibility link, guest cookie settings; R9: Impressum link */ 'src/Entrypoints/Storefront/Layout.php' => ['lines' => 146, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 11],

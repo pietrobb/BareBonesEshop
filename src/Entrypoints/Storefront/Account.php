@@ -317,6 +317,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    elseif ($action === 'pay' && Customers::isLoggedIn()) {
+        // R10 UX3: the customer's own unpaid order gets a (new or still-live) gateway session.
+        $order = Customers::order((int)$_SESSION['customer_id'], Security::int($_POST['order_id'] ?? 0));
+        $url = $order !== null && Security::rateLimit('account_pay', 20, 600) ? PaymentLink::redirectFor($order) : null;
+        if ($url === null) $_SESSION['account_flash'] = ['message' => $t('pay_link.failed'), 'type' => 'error'];
+        header('Location: ' . ($url ?? Template::storeUrl('/account.php?p=orders')), true, 303);
+        exit;
+    }
+
     elseif ($action === 'rma_request' && Customers::isLoggedIn()) {
         $cid = (int)$_SESSION['customer_id'];
         $orderId = (int)($_POST['order_id'] ?? 0);

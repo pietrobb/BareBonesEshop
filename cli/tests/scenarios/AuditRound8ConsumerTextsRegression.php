@@ -56,6 +56,8 @@ $input = json_decode($extra, true) ?: [];
 if ($phase === 'methods') {
     // Customer-facing method names per locale; a method the merchant renamed keeps the merchant's name.
     StoreContext::activate(StoreContext::resolve(json_decode((string)file_get_contents($root . '/stores.json'), true), '/', '', 'default'));
+    // The card method is offered only once Stripe has its keys (R10 UX2).
+    (new ReflectionProperty(Security::class, 'cfg'))->setValue(null, ['stripe_secret_key' => 'sk_test_' . str_repeat('r8t', 8), 'stripe_webhook_secret' => 'whsec_' . str_repeat('r8t', 8)] + Security::config());
     if (!empty($input['rename'])) $db->exec("UPDATE payment_methods SET name = 'Merchant COD' WHERE code = 'cod'");
     $result = [];
     foreach (['sk', 'cs', 'en', 'de', 'pl', 'hu', 'es'] as $locale) {

@@ -5,6 +5,8 @@
  */
 class Adapters {
     private static array $instances = [];
+    /** @var array<string, object> provider instances placed by set() */
+    private static array $substituted = [];
 
     private const BUILTIN_PROVIDERS = [
         'payment' => [
@@ -290,9 +292,16 @@ class Adapters {
             [$type, $code] = explode('.', $slot, 2);
             self::assertProviderCode($code);
             $scope = class_exists('StoreContext') ? StoreContext::current()->providerId() : 'default';
-            self::$instances["provider:{$type}:{$scope}:{$code}"] = $instance;
+            self::$instances["provider:{$type}:{$scope}:{$code}"] = self::$substituted["provider:{$type}:{$scope}:{$code}"] = $instance;
             return;
         }
         self::$instances[$slot] = $instance;
+    }
+
+    /** True when checkout's gateway for $code is a substitute (set() or the legacy 'payment' slot), not built from the config. */
+    public static function paymentSubstituted(string $code): bool {
+        if (isset(self::$instances['payment'])) return true;
+        $key = 'provider:payment:' . (class_exists('StoreContext') ? StoreContext::current()->providerId() : 'default') . ':' . $code;
+        return isset(self::$instances[$key]) && (self::$substituted[$key] ?? null) === self::$instances[$key];
     }
 }

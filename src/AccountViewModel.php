@@ -162,6 +162,7 @@ final class AccountViewModel
                 'url' => Template::storeUrl('/account.php?p=invoice_pdf&id=' . (int)$invoice['id']),
             ] : null,
             'bank_transfer_html' => BankTransferInstructions::html($order),
+            'payable' => PaymentLink::payable($order),
             'orders_url' => Template::storeUrl('/account.php?p=orders'),
             'cart_url' => Template::storeUrl('/?page=cart'),
         ];

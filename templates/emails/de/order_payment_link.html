@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="de"><body style="font-family:Arial,sans-serif;color:#111">
+<h2>Bezahlen Sie Ihre Bestellung</h2>
+<p>Hallo {{customer_name}},</p>
+<p>die Bestellung <strong>{{order_number}}</strong> ({{order_total}}) wartet auf die Zahlung. Sie können sie über diesen Link bezahlen:</p>
+<p><a href="{{pay_url}}" style="background:#4299e1;color:#fff;padding:10px 18px;text-decoration:none;border-radius:4px">Jetzt bezahlen</a></p>
+<p style="color:#666;font-size:13px">Oder kopieren Sie diesen Link: {{pay_url}}</p>
+<p>Der Link ist {{valid_days}} Tage gültig. Wenn Sie bereits bezahlt haben, können Sie diese E-Mail ignorieren.</p>
+</body></html>
