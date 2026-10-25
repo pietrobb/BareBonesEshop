@@ -22,12 +22,10 @@ try {
         $password = (string)(getenv('BBE_ADMIN_PASSWORD') ?: '');
         if ($password === '') throw new RuntimeException('Set BBE_ADMIN_PASSWORD in the process environment; passwords are not accepted in command arguments');
         $mfa = !array_key_exists('no-mfa', $options);
-        $id = AdminIdentity::create($username, $password, $role, $mfa);
-        AdminIdentity::grantStore($id, $store, ['*']);
-        $result = ['id' => $id, 'username' => strtolower($username), 'role' => $role, 'store_id' => $store, 'mfa_required' => $mfa];
-        if ($mfa) {
-            $enrollment = AdminIdentity::enrollTotp($id);
-            $result += $enrollment;
+        $created = AdminIdentity::createWithStore($username, $password, $role, $mfa, $store, $mfa);
+        $result = ['id' => $created['id'], 'username' => strtolower($username), 'role' => $role, 'store_id' => $store, 'mfa_required' => $mfa];
+        if ($created['enrollment'] !== null) {
+            $result += $created['enrollment'];
             $result['warning'] = 'Store the recovery codes now; only hashes are retained.';
         }
         fwrite(STDOUT, json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . PHP_EOL);

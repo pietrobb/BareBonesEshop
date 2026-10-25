@@ -199,8 +199,7 @@ function handleAdminUserCreate(): void {
         adminUsersDone();
     }
     try {
-        $id = AdminIdentity::create((string)($_POST['username'] ?? ''), (string)($_POST['password'] ?? ''), $role, $mfa);
-        AdminIdentity::grantStore($id, StoreContext::current()->id(), ['*']);
+        $id = AdminIdentity::createWithStore((string)($_POST['username'] ?? ''), (string)($_POST['password'] ?? ''), $role, $mfa, StoreContext::current()->id(), false)['id'];
         if ($mfa) adminUsersEnroll(AdminIdentity::accountById($id) ?? []);
         setFlash('ok', I18n::t('admin.users.saved'));
     } catch (InvalidArgumentException | PDOException $e) {

@@ -49,13 +49,33 @@ class AdminIdentity {
         return $id;
     }
 
+    /**
+     * Account, store grant and (optionally) TOTP enrollment in one transaction: a failing step (invalid store,
+     * duplicate username) leaves no half-created account behind. Returns ['id' => …, 'enrollment' => …|null].
+     */
+    public static function createWithStore(string $username, string $password, string $role, bool $mfaRequired, string $storeId, bool $enrollTotp): array {
+        $db = Db::get();
+        $db->beginTransaction();
+        try {
+            $id = self::create($username, $password, $role, $mfaRequired);
+            self::grantStore($id, $storeId, ['*']);
+            $enrollment = $enrollTotp ? self::enrollTotp($id) : null;
+            $db->commit();
+            return ['id' => $id, 'enrollment' => $enrollment];
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+    }
+
     /** Returns the plaintext enrollment material once; only encrypted/hashed forms are persisted. */
     public static function enrollTotp(int $accountId, int $recoveryCodeCount = 10): array {
         $account = self::account($accountId);
         if (!$account) throw new RuntimeException('Admin account not found');
         $secret = Totp::generateSecret();
         $db = Db::get();
-        $db->beginTransaction();
+        $ownTransaction = !$db->inTransaction();
+        if ($ownTransaction) $db->beginTransaction();
         try {
             $db->prepare('UPDATE admin_accounts SET totp_secret_encrypted=:secret, totp_last_counter=NULL, mfa_required=1, updated_at=:updated WHERE id=:id')
                 ->execute([':secret' => self::encrypt($secret), ':updated' => gmdate('Y-m-d H:i:s'), ':id' => $accountId]);
@@ -67,9 +87,9 @@ class AdminIdentity {
                 $insert->execute([':account' => $accountId, ':hash' => self::recoveryHash($code), ':created' => gmdate('Y-m-d H:i:s')]);
                 $codes[] = $code;
             }
-            $db->commit();
+            if ($ownTransaction) $db->commit();
         } catch (Throwable $e) {
-            if ($db->inTransaction()) $db->rollBack();
+            if ($ownTransaction && $db->inTransaction()) $db->rollBack();
             throw $e;
         }
         self::audit($accountId, ['mfa' => false], ['mfa' => true], 'TOTP enrolled and recovery codes rotated');

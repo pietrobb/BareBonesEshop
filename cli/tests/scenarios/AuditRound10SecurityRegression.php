@@ -192,6 +192,45 @@ try {
         $_SESSION = $r10sPrevSession;
         $_SERVER = $r10sPrevServer;
     }
+
+    // A15: cli/hash-password.php took the password from argv (process list, shell history).
+    $r10sHashCli = static function (array $args, string $stdin): array {
+        $env = getenv();
+        unset($env['BBE_ADMIN_PASSWORD']);
+        $process = proc_open(array_merge([PHP_BINARY, dirname(TEST_CLI_DIR) . '/cli/hash-password.php'], $args), [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, $env);
+        fwrite($pipes[0], $stdin);
+        fclose($pipes[0]);
+        $out = trim((string)stream_get_contents($pipes[1]));
+        $err = (string)stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        return ['code' => proc_close($process), 'out' => $out, 'err' => $err];
+    };
+    $r = $r10sHashCli(['R10-argv-password'], '');
+    assert_true($r['code'] !== 0 && !password_verify('R10-argv-password', $r['out']), 'R10 A15: hash-password refuses a password in the command arguments (' . trim($r['err'] . $r['out']) . ')');
+    $r = $r10sHashCli([], "R10-stdin-password\n");
+    assert_true($r['code'] === 0 && password_verify('R10-stdin-password', $r['out']), 'R10 A15: hash-password reads the password from stdin (' . trim($r['err'] . $r['out']) . ')');
+
+    // A15: admin-user create inserted the account, then granted the store and enrolled TOTP as separate writes: an
+    // invalid --store left an owner account without any store grant behind.
+    $r10sAtomicError = '';
+    try {
+        AdminIdentity::createWithStore('r10-atomic-owner', 'R10-atomic-owner-pass', 'owner', true, 'Not A Store!', true);
+    } catch (Throwable $e) {
+        $r10sAtomicError = get_class($e) . ': ' . $e->getMessage();
+    }
+    assert_true(str_contains($r10sAtomicError, 'Invalid store ID') && AdminIdentity::accountByUsername('r10-atomic-owner') === null,
+        "R10 A15: a failing store grant leaves no half-created admin account ({$r10sAtomicError})");
+    putenv('BBE_ADMIN_IDENTITY_KEY=' . $r10sKey);
+    try {
+        $r10sCreated = AdminIdentity::createWithStore('r10-atomic-owner', 'R10-atomic-owner-pass', 'owner', true, 'default', true);
+    } finally {
+        putenv('BBE_ADMIN_IDENTITY_KEY');
+    }
+    $r10sAtomicRow = AdminIdentity::accountByUsername('r10-atomic-owner') ?? [];
+    assert_true((int)($r10sAtomicRow['id'] ?? 0) === $r10sCreated['id'] && count($r10sCreated['enrollment']['recovery_codes'] ?? []) === 10
+        && (string)($r10sAtomicRow['totp_secret_encrypted'] ?? '') !== '' && !Db::get()->inTransaction(), 'R10 A15: createWithStore commits account, store grant and TOTP enrollment together');
+    assert_true(str_contains((string)file_get_contents(dirname(TEST_CLI_DIR) . '/cli/admin-user.php'), 'AdminIdentity::createWithStore('), 'R10 A15: cli/admin-user.php create uses the atomic createWithStore()');
 } finally {
     $r10sTree = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($r10sRoot, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
     foreach ($r10sTree as $r10sPath) $r10sPath->isDir() ? @rmdir($r10sPath->getPathname()) : @unlink($r10sPath->getPathname());

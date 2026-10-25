@@ -3832,9 +3832,9 @@ if ($product['status'] === 'archived') {
 
 ```php
 // cli/hash-password.php
-// Usage: php cli/hash-password.php "mypassword"
-$password = $argv[1] ?? null;
-if (!$password) { echo "Usage: php hash-password.php <password>\n"; exit(1); }
+// Usage: php cli/hash-password.php   (password from stdin or BBE_ADMIN_PASSWORD, never argv)
+if (isset($argv[1])) { fwrite(STDERR, "Passwords are not accepted in command arguments\n"); exit(1); }
+$password = getenv('BBE_ADMIN_PASSWORD') ?: rtrim((string)fgets(STDIN), "\r\n");
 echo password_hash($password, PASSWORD_ARGON2ID) . "\n";
 ```
 
