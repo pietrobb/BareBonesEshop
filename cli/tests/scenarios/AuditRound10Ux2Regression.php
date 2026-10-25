@@ -257,8 +257,10 @@ try {
     Warehouse::setStock($r10xWarehouse, 'R10X-D', 4, 'count');
     Warehouse::syncProductStock(['R10X-D']);
     BackInStock::flush();
-    $r10xSharedJobs = array_values(array_filter(JobQueue::pull(500), static fn(array $job): bool => ($job['type'] ?? '') === 'back_in_stock'));
-    assert_equals(['r10xb'], array_map(static fn(array $job): string => (string)($job['payload']['_store_id'] ?? ''), $r10xSharedJobs),
+    // The full suite's queue may also hold default-store jobs (other tests' waiting requests); only r10xb's job matters here.
+    $r10xSharedJobs = array_values(array_filter(JobQueue::pull(500), static fn(array $job): bool => ($job['type'] ?? '') === 'back_in_stock'
+        && ($job['payload']['_store_id'] ?? '') === 'r10xb' && in_array('R10X-D', (array)($job['payload']['skus'] ?? []), true)));
+    assert_equals(1, count($r10xSharedJobs),
         'R10 UX8 shared catalog: a restock booked in the default store queues the job for the store whose shopper is waiting');
     $r10xSharedMails = static fn(): int => (int)$pdo->query("SELECT COUNT(*) FROM email_log WHERE template = 'back_in_stock' AND recipient = 'r10x-shared@example.com'")->fetchColumn();
     $r10xSharedBefore = $r10xSharedMails();
