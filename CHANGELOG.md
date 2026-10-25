@@ -180,6 +180,25 @@ nginx PHP fallback when `operations.nginx_config` is set).
     language). When the code is read-only (Docker), `stores.json` and the texts are saved to
     `private_runtime_dir` and that copy takes precedence over the shipped file. A store with orders and
     the default store cannot be removed.
+- **Round-10 UX 6–10 (2026-10-25)** — run `cli/migrate.php` (new table `back_in_stock_requests`).
+  - Admin lists show order, payment, return, invoice, e-mail, customer and admin-user statuses (and
+    payment methods) in the admin's language instead of raw codes.
+  - Manual orders: Orders → New order takes SKU lines, the customer, shipping and payment (phone orders);
+    the lines of a pending, unpaid order can be edited, with stock reservations moved accordingly. A paid
+    order's lines stay locked.
+  - Shoppers: sign in from the checkout and pick a saved address (or save the new one); after a guest
+    order the confirmation offers an account for that e-mail with the order in it; guests look up an
+    order's status by number and e-mail (`?page=order-status`, throttled); an out-of-stock product offers
+    "e-mail me when it is back" — one e-mail, then the request is deleted (covered by GDPR export/erasure).
+  - Installer: `--db-driver/--db-host/--db-port/--db-name/--db-user` switches (password from
+    `BBE_DB_PASSWORD`, checked against the server before `config.php` is written), a warning when the
+    private directory already holds another install's data, the owner's TOTP as a QR code in the
+    terminal, and next steps with the shop's real address instead of `localhost:8080`.
+  - Admin: Duplicate in the product editor (a draft copy with a new SKU and slug, no stock and no GTIN);
+    a rich-text editor for product descriptions, their translations and CMS pages (the HTML view stays
+    one click away; saved HTML is still sanitized on the server); a daily revenue chart per currency on
+    the reports page; the admin fits a 360px phone (checked with axe in the browser suite); merchant
+    e-mails (new order, paid, withdrawal, complaint, incident) in cs/de/hu/pl.
 - **VAT rates (2026-10-23)** — products with `vat_class` `books` or `medicines` now get each country's
   own rate instead of its `reduced` class (e.g. IE books 0 %, IT/ES 4 %, FR 5.5 %, DE medicines 19 %).
   FI reduced rate 13.5 % from 2026, LT 9 % rate replaced by 12 % / 5 % from 2026. Invoices already

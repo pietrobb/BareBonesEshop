@@ -132,7 +132,7 @@ $title = match($page) {
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,sans-serif;background:#f5f5f5;color:#333;line-height:1.5}
-a{color:#2563eb;text-decoration:none}a:hover{text-decoration:underline}
+a{color:#2563eb;text-decoration:none}a:hover,p a:not(.btn),li a:not(.btn),.muted a:not(.btn){text-decoration:underline}
 .wrap{display:flex;min-height:100vh}
 nav{width:220px;background:#1e293b;color:#fff;padding:1rem 0;flex-shrink:0}
 nav h2{padding:0 1rem 1rem;font-size:1.1rem;border-bottom:1px solid #334155}
