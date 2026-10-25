@@ -237,6 +237,44 @@ assert_equals(1, BackInStock::process(['R10X-D']), 'R10 UX8: the worker mails th
 assert_equals([1, 0, 0], [$r10xMailLog() - $r10xMailsBefore, $r10xWaiting(), BackInStock::process(['R10X-D'])], 'R10 UX8: one e-mail, then the request is deleted and a second run sends nothing');
 assert_true(is_file(dirname(TEST_CLI_DIR) . '/templates/emails/sk/back_in_stock.html') && is_file(dirname(TEST_CLI_DIR) . '/templates/emails/en/back_in_stock.subject.txt'), 'R10 UX8: the e-mail template exists');
 
+// Shared catalog: store r10xb sells the default store's catalog from the same warehouses. A restock booked while the
+// default store is active must alert the shopper who asked in r10xb (a job in r10xb's context), once.
+$r10xStoresProp = new ReflectionProperty(Bootstrap::class, 'stores');
+$r10xStoresBefore = $r10xStoresProp->getValue();
+$r10xContextBefore = StoreContext::current();
+try {
+    $r10xShared = Bootstrap::stores();
+    $r10xShared['stores']['r10xb'] = array_replace($r10xShared['stores']['default'], ['id' => 'r10xb', 'url_prefix' => '/r10xb', 'domains' => [],
+        'catalog_scope' => 'default', 'provider_scope' => 'default']);
+    $r10xStoresProp->setValue(null, $r10xShared);
+    Warehouse::setStock($r10xWarehouse, 'R10X-D', 0, 'count');
+    Warehouse::syncProductStock(['R10X-D']);
+    BackInStock::flush();
+    Bootstrap::initStoreContext('/', '', 'r10xb');
+    assert_equals('subscribed', BackInStock::subscribe(9774, 'r10x-shared@example.com', 'sk'), 'R10 UX8 shared catalog: a shopper of the second store asks for the sold-out product');
+    Bootstrap::initStoreContext('/', '', 'default');
+    JobQueue::pull(500);
+    Warehouse::setStock($r10xWarehouse, 'R10X-D', 4, 'count');
+    Warehouse::syncProductStock(['R10X-D']);
+    BackInStock::flush();
+    $r10xSharedJobs = array_values(array_filter(JobQueue::pull(500), static fn(array $job): bool => ($job['type'] ?? '') === 'back_in_stock'));
+    assert_equals(['r10xb'], array_map(static fn(array $job): string => (string)($job['payload']['_store_id'] ?? ''), $r10xSharedJobs),
+        'R10 UX8 shared catalog: a restock booked in the default store queues the job for the store whose shopper is waiting');
+    $r10xSharedMails = static fn(): int => (int)$pdo->query("SELECT COUNT(*) FROM email_log WHERE template = 'back_in_stock' AND recipient = 'r10x-shared@example.com'")->fetchColumn();
+    $r10xSharedBefore = $r10xSharedMails();
+    foreach ($r10xSharedJobs as $r10xJob) {
+        Bootstrap::initStoreContext('/', '', (string)$r10xJob['payload']['_store_id']);
+        BackInStock::process((array)$r10xJob['payload']['skus']);
+    }
+    assert_equals([1, 0], [$r10xSharedMails() - $r10xSharedBefore, (int)$pdo->query("SELECT COUNT(*) FROM back_in_stock_requests WHERE store_id = 'r10xb'")->fetchColumn()],
+        'R10 UX8 shared catalog: the second store\'s shopper gets one e-mail and the request is deleted');
+} finally {
+    $r10xStoresProp->setValue(null, $r10xStoresBefore);
+    StoreContext::reset();
+    StoreContext::activate($r10xContextBefore);
+    Template::activate($r10xContextBefore);
+}
+
 // UX9: the installer takes MySQL switches (password from the environment), warns when it reuses an earlier install's
 // private data, shows the owner's TOTP as a terminal QR code and names the shop's real address.
 echo "\n--- Audit round 10 (UX 9): installer ---\n";

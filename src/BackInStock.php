@@ -3,7 +3,7 @@
  * R10 UX8: "notify me when back in stock" for shoppers.
  *
  * A shopper leaves an e-mail on the page of a product that cannot be bought now. When a ledger movement
- * refills one of the product's SKUs (Inventory::movement), one `back_in_stock` job per store is queued at
+ * refills one of the product's SKUs (Inventory::movement), one `back_in_stock` job per store selling that catalog is queued at
  * the end of the request; the worker mails every waiting request of a product that is purchasable again
  * and deletes it (one e-mail per request, nothing kept afterwards). Requests nobody acted on lapse after
  * RETENTION_DAYS. Personal data: the e-mail only (GdprService::PII_REGISTRY 'back_in_stock_requests').
@@ -46,7 +46,7 @@ class BackInStock {
     public static function touch(string $sku): void {
         if ($sku === '') return;
         try {
-            self::$pending[StoreContext::current()->id()][$sku] = true;
+            self::$pending[StoreContext::current()->catalogId()][$sku] = true;
         } catch (Throwable) {
             return;
         }
@@ -56,23 +56,38 @@ class BackInStock {
         }
     }
 
-    /** Queue one job per store whose touched SKUs have waiting requests. Never throws. */
+    /**
+     * Stock is shared by every store selling the same catalog (Warehouse), so a refill in one store queues one job
+     * for each store of that catalog that has waiting requests; the job runs in that store's context. Never throws.
+     */
     public static function flush(): int {
         $pending = self::$pending;
         self::$pending = [];
         $queued = 0;
-        foreach ($pending as $storeId => $skus) {
+        foreach ($pending as $catalogId => $skus) {
             try {
-                $waiting = Db::get()->prepare('SELECT 1 FROM back_in_stock_requests WHERE store_id = ? LIMIT 1');
-                $waiting->execute([(string)$storeId]);
-                if ($waiting->fetchColumn() === false) continue;
-                JobQueue::push('back_in_stock', ['skus' => array_keys($skus), '_store_id' => (string)$storeId], 5);
-                $queued++;
+                $stores = self::catalogStores((string)$catalogId);
+                $marks = implode(',', array_fill(0, count($stores), '?'));
+                $waiting = Db::get()->prepare("SELECT DISTINCT store_id FROM back_in_stock_requests WHERE store_id IN ({$marks}) ORDER BY store_id");
+                $waiting->execute($stores);
+                foreach ($waiting->fetchAll(PDO::FETCH_COLUMN) as $storeId) {
+                    JobQueue::push('back_in_stock', ['skus' => array_keys($skus), '_store_id' => (string)$storeId], 5);
+                    $queued++;
+                }
             } catch (Throwable $e) {
                 Logger::exception('back_in_stock.enqueue_failed', $e);
             }
         }
         return $queued;
+    }
+
+    /** @return non-empty-list<string> the configured stores selling this catalog (a store's catalog_scope defaults to its own id) */
+    private static function catalogStores(string $catalogId): array {
+        $ids = [$catalogId];
+        foreach ((array)(Bootstrap::stores()['stores'] ?? []) as $code => $store) {
+            if (is_array($store) && (string)($store['catalog_scope'] ?? $code) === $catalogId) $ids[] = (string)$code;
+        }
+        return array_values(array_unique($ids));
     }
 
     /**
