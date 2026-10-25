@@ -157,9 +157,10 @@ PHP);
     $r = $crsAdmin('mgr', 'revoke_sessions', ['account_id' => (string)$crsIds['crs-mgr']]);
     assert_true(($r['flash']['type'] ?? '') === 'ok' && AdminIdentity::session($crsMgrOther) === null, $crsLabel('CR follow-up delegate: a narrowed delegate can revoke its own sessions', $r));
     $crsMgrToken = $crsLogin('crs-mgr');
-    $r = $crsAdminWith($crsMgrToken, 'mfa', ['account_id' => (string)$crsIds['crs-mgr']]);
+    // Own credentials need the current password (r10).
+    $r = $crsAdminWith($crsMgrToken, 'mfa', ['account_id' => (string)$crsIds['crs-mgr'], 'current_password' => 'Crs-password-crs-mgr']);
     assert_true(($r['flash']['type'] ?? '') === 'ok' && (string)($crsAccount('crs-mgr')['totp_secret_encrypted'] ?? '') !== '', $crsLabel('CR follow-up delegate: a narrowed delegate can reset its own MFA', $r));
-    $r = $crsAdminWith($crsMgrToken, 'password', ['account_id' => (string)$crsIds['crs-mgr'], 'password' => 'Crs-own-rotated-password']);
+    $r = $crsAdminWith($crsMgrToken, 'password', ['account_id' => (string)$crsIds['crs-mgr'], 'password' => 'Crs-own-rotated-password', 'current_password' => 'Crs-password-crs-mgr']);
     assert_true(password_verify('Crs-own-rotated-password', $crsHash('crs-mgr')), $crsLabel('CR follow-up delegate: a narrowed delegate can reset its own password', $r));
     $r = $crsAdmin('owner', 'grant', ['account_id' => (string)$crsIds['crs-owner'], 'permissions' => '*']);
     assert_true(($r['flash']['type'] ?? '') === 'ok', $crsLabel('CR follow-up owner: owners keep editing their own grants', $r));
