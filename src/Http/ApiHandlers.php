@@ -389,8 +389,9 @@ function apiCartUpdate(): array {
     }
 
     $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
-    $key = $input['key'] ?? '';
-    if (!preg_match('/^(p|v)_\d{1,10}$/', $key)) {
+    $key = is_array($input) ? ($input['key'] ?? '') : '';
+    if (!is_string($key) || !preg_match('/^(p|v)_\d{1,10}$/', $key)) {
+        http_response_code(400);
         return ['error' => 'Invalid cart key'];
     }
     $qty = min(99, Security::int($input['qty'] ?? 0));
@@ -1501,7 +1502,7 @@ function apiCookieConsent(): array {
     GdprService::logCookieConsent([
         'customer_id' => $cid > 0 ? $cid : null,
         'session_id'  => Security::sessionKey() ?: null,
-        'ip'          => $_SERVER['REMOTE_ADDR'] ?? null,
+        'ip'          => Security::clientIp(),
         'user_agent'  => substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255),
         'categories'  => $cats,
         'method'      => $method,

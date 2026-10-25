@@ -54,6 +54,13 @@ if (in_array($page, ['products', 'orders'], true) && $action === 'export' && ($_
 
 // Role-based permission map
 $requiredPerm = $pagePermissions[$page] ?? 'reports.view';
+// The plain admin.php (the landing page after login) sends a role without reports.view (editor,
+// fulfillment) to the first menu page it may open instead of a 403.
+if ($page === 'dashboard' && !isset($_GET['p']) && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET'
+    && !Security::adminCan($requiredPerm) && ($adminLanding = Security::adminLandingPage()) !== null) {
+    header('Location: admin.php?p=' . $adminLanding);
+    exit;
+}
 Security::adminRequire($requiredPerm);
 
 // Handle POST actions

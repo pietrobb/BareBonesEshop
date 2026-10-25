@@ -535,8 +535,7 @@ class Customers {
     }
 
     public static function addAddress(int $customerId, array $data): int {
-        $type = in_array(($data['type'] ?? 'shipping'), ['shipping', 'billing'], true)
-            ? $data['type'] : 'shipping';
+        $type = in_array($data['type'] ?? null, ['shipping', 'billing'], true) ? $data['type'] : 'shipping';
         $isDefault = !empty($data['is_default']) ? 1 : 0;
         $db = Db::get();
         if ($isDefault) {
@@ -571,8 +570,7 @@ class Customers {
         $stmt->execute([$addressId, $customerId]);
         $existingType = $stmt->fetchColumn();
         if ($existingType === false) return false;
-        $type = in_array(($data['type'] ?? $existingType), ['shipping', 'billing'], true)
-            ? $data['type'] : $existingType;
+        $type = in_array($data['type'] ?? null, ['shipping', 'billing'], true) ? $data['type'] : (string)$existingType;
         $isDefault = array_key_exists('is_default', $data) ? (!empty($data['is_default']) ? 1 : 0) : null;
         $db = Db::get();
         if ($isDefault === 1) {
@@ -598,6 +596,27 @@ class Customers {
         $sql = "UPDATE customer_addresses SET " . implode(', ', $fields)
              . " WHERE id = ? AND customer_id = ?";
         return $db->prepare($sql)->execute($params);
+    }
+
+    /**
+     * Account address edit: the posted fields over the stored address, checked like a new one (addressErrors, plus a
+     * known type) before anything is saved. [] = saved, field => error key = refused, null = not this customer's address.
+     * @return array<string,string>|null
+     */
+    public static function updateCheckedAddress(int $customerId, int $addressId, array $posted): ?array {
+        $existing = null;
+        foreach (self::addresses($customerId) as $row) if ((int)$row['id'] === $addressId) $existing = $row;
+        if ($existing === null) return null;
+        $changes = [];
+        foreach (['type', 'name', 'company', 'vat_id', 'street', 'city', 'zip', 'country', 'phone'] as $field) {
+            if (array_key_exists($field, $posted)) $changes[$field] = trim(Security::str($posted[$field]));
+        }
+        if (isset($changes['country'])) $changes['country'] = strtoupper($changes['country']);
+        if (array_key_exists('is_default', $posted)) $changes['is_default'] = !empty($posted['is_default']);
+        $errors = self::addressErrors($changes + $existing);
+        if (isset($changes['type']) && !in_array($changes['type'], ['shipping', 'billing'], true)) $errors['type'] = 'account.err_address_invalid';
+        if ($errors === []) self::updateAddress($customerId, $addressId, $changes);
+        return $errors;
     }
 
     public static function deleteAddress(int $customerId, int $addressId): bool {
