@@ -4,6 +4,7 @@ require_once dirname(__DIR__, 2) . '/src/autoload.php';
 
 // Shared helpers, POST dispatch and store scope load on every request; page modules load per route below.
 require_once __DIR__ . '/Admin/Shared.php';
+require_once __DIR__ . '/Admin/LayoutScript.php';
 require_once __DIR__ . '/Admin/Request.php';
 require_once __DIR__ . '/Admin/StoreScope.php';
 // Auth
@@ -140,7 +141,7 @@ nav a{display:block;padding:.5rem 1rem;color:#cbd5e1}nav a:hover,nav a.active{ba
 main{flex:1;padding:1.5rem;max-width:1200px}
 h1{margin-bottom:1rem;font-size:1.5rem}
 .card{background:#fff;border-radius:8px;padding:1.25rem;margin-bottom:1rem;box-shadow:0 1px 3px rgba(0,0,0,.1)}
-.grid{display:grid;gap:1rem}.grid-4{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.grid{display:grid;gap:1rem}.grid>*{min-width:0}.grid-2{grid-template-columns:1fr 1fr}.grid-4{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
 .stat{text-align:center}.stat .num{font-size:2rem;font-weight:700;color:#2563eb}.stat .label{font-size:.85rem;color:#64748b}
 table{width:100%;border-collapse:collapse}th,td{padding:.5rem .75rem;text-align:left;border-bottom:1px solid #e2e8f0}
 th{background:#f8fafc;font-weight:600;font-size:.85rem;color:#475569}
@@ -171,8 +172,8 @@ input[type=file]{padding:.3rem}textarea{resize:vertical}
 .sales-toolbar{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap}.sales-toolbar .form-row{margin:0}.sales-toolbar input{min-width:220px}
 .report-bar{margin-left:.5rem;width:8rem;vertical-align:middle}details>summary{cursor:pointer;font-weight:600;margin:.5rem 0}
 .store-switcher{display:flex;flex-wrap:wrap;gap:.25rem;align-items:center;padding:0 1rem .75rem;font-size:.75rem;color:#cbd5e1}.store-switcher select{flex:1;min-width:0}
-.table-scroll{overflow-x:auto}.status-ok{color:#047857}.status-warn{color:#b45309}.status-error{color:#b91c1c;font-weight:600}
-@media(max-width:760px){.wrap{display:block}nav{width:100%;display:flex;overflow-x:auto;padding:.5rem}nav h2,nav div{display:none}nav a{white-space:nowrap}main{padding:1rem}.sales-toolbar input{min-width:0;width:100%}.sales-toolbar .form-row{width:100%}}
+.table-scroll{overflow-x:auto;max-width:100%}.status-ok{color:#047857}.status-warn{color:#b45309}.status-error{color:#b91c1c;font-weight:600}
+@media(max-width:760px){.wrap{display:block}nav{width:100%;display:flex;overflow-x:auto;padding:.5rem}nav h2,nav div{display:none}nav a{white-space:nowrap}main{padding:1rem;min-width:0}.grid-2{grid-template-columns:minmax(0,1fr)}.sales-toolbar{align-items:stretch}.sales-toolbar>*{max-width:100%}.sales-toolbar input{min-width:0;width:100%}.sales-toolbar .form-row{width:100%}}
 </style>
 </head>
 <body>
@@ -244,33 +245,7 @@ match($page) {
 ?>
 </main>
 </div>
-<script nonce="<?= Security::cspNonce() ?>">
-// CSP-safe delegated handlers — replaces inline on*= attributes so the admin
-// CSP can drop 'unsafe-inline' from script-src (nonce-only). See data-confirm
-// and data-action hooks in the templates above.
-(function(){
-    document.addEventListener('submit', function(e){
-        var f = e.target;
-        var submitter = e.submitter;
-        var skipConfirm = submitter && submitter.hasAttribute && submitter.hasAttribute('data-skip-confirm');
-        var message = submitter && submitter.getAttribute ? submitter.getAttribute('data-confirm') : null;
-        if (!message && !skipConfirm && f && f.matches && f.matches('form[data-confirm]')) message = f.getAttribute('data-confirm');
-        if (message && !confirm(message)) e.preventDefault();
-    });
-    document.addEventListener('click', function(e){
-        var t = e.target.closest ? e.target.closest('[data-action]') : null;
-        if (!t) return;
-        var a = t.getAttribute('data-action');
-        if (a === 'remove-parent') { e.preventDefault(); if (t.parentElement) t.parentElement.remove(); }
-        else if (a === 'add-option') { e.preventDefault(); if (window.addOption) window.addOption(); }
-        else if (a === 'toggle-cats') { e.preventDefault(); if (window.toggleAllCats) window.toggleAllCats(t.getAttribute('data-value') === '1'); }
-    });
-    document.addEventListener('input', function(e){
-        var t = e.target;
-        if (t && t.matches && t.matches('[data-action="filter-cats"]') && window.filterCats) window.filterCats();
-    });
-})();
-</script>
+<?= adminLayoutScript() ?>
 </body>
 </html>
 <?php

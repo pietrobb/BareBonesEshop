@@ -695,7 +695,7 @@ function pagePayments(): void {
     </div>
     <div class="card">
         <h3><?= esc(I18n::t('admin.payments.countries_shipping')) ?></h3>
-        <div class="grid" style="grid-template-columns:1fr 1fr">
+        <div class="grid grid-2">
             <div><h4><?= esc(I18n::t('admin.payments.countries')) ?></h4><table><thead><tr><th><?= esc(I18n::t('admin.payments.method')) ?></th><th><?= esc(I18n::t('admin.common.country')) ?></th><th></th></tr></thead><tbody>
             <?php foreach ($countries as $c): ?><tr><td><?= esc($c['method_code']) ?></td><td><?= esc($c['country']) ?></td><td><form method="post" action="admin.php?p=payments&action=country_delete" style="display:inline"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><input type="hidden" name="id" value="<?= (int)$c['id'] ?>"><button class="btn btn-sm btn-danger"><?= esc(I18n::t('admin.btn.delete')) ?></button></form></td></tr><?php endforeach; ?>
             <tr><form method="post" action="admin.php?p=payments&action=country_save"><input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>"><td><select aria-label="<?= esc(I18n::t('admin.payments.method')) ?>" name="method_code"><?php foreach ($methods as $m): ?><option value="<?= esc($m['code']) ?>"><?= esc($m['code']) ?></option><?php endforeach; ?></select></td><td><input aria-label="<?= esc(I18n::t('admin.common.country')) ?>" name="country" maxlength="2" required placeholder="SK" style="width:4rem"></td><td><button class="btn btn-sm btn-primary"><?= esc(I18n::t('admin.common.add')) ?></button></td></form></tr>

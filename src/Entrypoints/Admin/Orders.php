@@ -232,7 +232,7 @@ function pageOrder(): void {
     <h1><?= esc(I18n::t('admin.order.label')) ?> <?= esc($order['order_number']) ?></h1>
     <?php if (Security::adminCan('orders.print')): ?><p><a class="btn btn-sm" href="admin.php?p=delivery_note&amp;id=<?= $id ?>" target="_blank"><?= esc(I18n::t('admin.delivery_note.html')) ?></a> <a class="btn btn-sm" href="admin.php?p=delivery_note&amp;id=<?= $id ?>&amp;format=pdf" target="_blank"><?= esc(I18n::t('admin.delivery_note.pdf')) ?></a></p><?php endif; ?>
 
-    <div class="grid" style="grid-template-columns:1fr 1fr;gap:1rem">
+    <div class="grid grid-2">
         <div class="card">
             <h3><?= esc(I18n::t('admin.th.customer')) ?></h3>
             <p><strong><?= esc($order['customer_name']) ?></strong></p>

@@ -175,6 +175,8 @@ $architectureBudgets = [
     // +1 function, +1 coupling: adminCodeLabel shows stored codes (product/page status, attribute type) in the admin language (A15.5).
     // +lines: windowed pagination (first, last and a window around the current page) instead of one link per page.
     'src/Entrypoints/Admin/Shared.php' => ['lines' => 58, 'functions' => 5, 'max_function_lines' => 17, 'coupling' => 1],
+    // R10 UX10: the admin layout script (delegated handlers, moved from Admin.php) + wide tables scroll in their own keyboard-reachable box on a phone.
+    'src/Entrypoints/Admin/LayoutScript.php' => ['lines' => 70, 'functions' => 1, 'max_function_lines' => 63, 'coupling' => 1],
     // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.
     // +1 line, +1 max_function_lines R10 UX5: the stores page ends with the owner's add/remove store and legal-text cards (StoreManagement).
     'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 78, 'functions' => 3, 'max_function_lines' => 50, 'coupling' => 5],
