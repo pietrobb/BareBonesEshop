@@ -160,7 +160,7 @@ tr:hover{background:#f8fafc}
 .flash{padding:.75rem 1rem;border-radius:6px;margin-bottom:1rem}
 .flash-ok{background:#d1fae5;color:#065f46}.flash-err{background:#fee2e2;color:#991b1b}
 input,select,textarea{padding:.4rem .6rem;border:1px solid #d1d5db;border-radius:4px;font-size:.9rem}
-input[type=file]{padding:.3rem}textarea{resize:vertical}
+input[type=file]{padding:.3rem}input[type=checkbox],input[type=radio]{width:1.5rem;height:1.5rem;margin:0 .25rem 0 0;vertical-align:middle}textarea{resize:vertical}
 .form-row{margin-bottom:.75rem}.form-row label{display:block;font-weight:600;font-size:.85rem;margin-bottom:2px}
 .bbf-field{margin-bottom:.75rem}.bbf-label{display:block;font-weight:600;font-size:.85rem;margin-bottom:2px}.bbf-required{color:#b91c1c}
 .bbf-field-text .bbf-input,.bbf-field-textarea .bbf-input{width:100%}.bbf-description,.bbf-field-desc{display:block;color:#64748b;font-size:.85rem}
