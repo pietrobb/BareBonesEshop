@@ -122,7 +122,7 @@ foreach ($entrypointBudgets as $relative => $budget) {
 $architectureBudgets = [
     // Loads Shared/Request/StoreScope always and only the route's page modules (Admin/Modules.php).
     'src/Entrypoints/Admin.php' => ['lines' => 285, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 4],
-    // +2 functions, +5 lines R10: own password/TOTP change needs the current password; the legacy session that creates the first DB account is handed off and ended.
+    // +2 functions, +10 lines R10: own or owner password/TOTP changes and creating an owner need the actor's current password; the legacy session that creates the first DB account is handed off and ended.
     'src/Entrypoints/Admin/AdminUsers.php' => ['lines' => 300, 'functions' => 15, 'max_function_lines' => 90, 'coupling' => 6],
     'src/Entrypoints/Admin/B2b.php' => ['lines' => 180, 'functions' => 9, 'max_function_lines' => 64, 'coupling' => 4],
     // +2 coupling: AdminForm (server-rendered BBF forms replace inline bbf.js) and Import (shared CSV price format).
