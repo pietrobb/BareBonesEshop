@@ -132,6 +132,11 @@ class Rma {
         $days = (int)(Security::config()['rma_return_window_days'] ?? self::DEFAULT_RETURN_WINDOW_DAYS);
         if ($days <= 0) return true;
         $now ??= time();
+        // A timely withdrawal statement leaves the consumer 14 more days to send the goods back (2011/83/EU art. 14(1)).
+        foreach (Withdrawal::forOrder((int)($order['id'] ?? 0)) as $statement) {
+            $at = strtotime((string)$statement['received_at'] . ' UTC');
+            if ($at !== false && $now <= $at + Withdrawal::PERIOD_DAYS * 86400) return true;
+        }
         $delivered = Withdrawal::receivedAt($order);
         if ($delivered === false && ($order['status'] ?? '') === 'cancelled') {
             $stmt = Db::get()->prepare('SELECT MAX(shipped_at) FROM shipments WHERE order_id = ? AND shipped_at IS NOT NULL');

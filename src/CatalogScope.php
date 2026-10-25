@@ -96,4 +96,24 @@ final class CatalogScope {
         return (bool)self::rows('SELECT 1 AS used FROM category_attributes ca JOIN categories c ON c.id = ca.category_id
             WHERE ca.attribute_id = :aid AND c.store_id != :catalog', [':aid' => $attributeId]);
     }
+
+    /**
+     * Whether saving $old as name/slug/type/unit is refused because another catalog uses the attribute: its identity
+     * (slug, type) never changes, and only the owner (who administers every catalog) may rename it or change its unit —
+     * product values are stored under the attribute name, so one store's admin would rename the other store's too.
+     */
+    public static function sharedAttributeChangeRefused(int $attributeId, array $old, string $name, string $slug, string $type, string $unit): bool {
+        if (!self::attributeUsedByOtherCatalog($attributeId)) return false;
+        if ($slug !== (string)($old['slug'] ?? '') || $type !== (string)($old['type'] ?? '')) return true;
+        $renamed = $name !== (string)($old['name'] ?? '') || $unit !== (string)($old['unit'] ?? '');
+        return $renamed && Security::adminRole() !== 'owner';
+    }
+
+    /** After a rename, product values (product_specifications, keyed by the name) follow it in every catalog using the attribute. */
+    public static function renameAttributeValues(int $attributeId, string $oldName, string $newName): void {
+        if ($oldName === $newName) return;
+        Db::get()->prepare("UPDATE product_specifications SET criteria_name = :new WHERE criteria_name = :old
+                AND product_id IN (SELECT p.id FROM products p JOIN category_attributes ca ON ca.category_id = p.category_id WHERE ca.attribute_id = :aid)")
+            ->execute([':new' => $newName, ':old' => $oldName, ':aid' => $attributeId]);
+    }
 }

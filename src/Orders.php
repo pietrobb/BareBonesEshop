@@ -202,7 +202,7 @@ class Orders {
                 ':currency' => $customer['currency'] ?? 'eur',
                 ':locale'   => $orderLocale,
                 ':notes'    => $customer['notes'] ?? '',
-                ':ip'       => php_sapi_name() === 'cli' ? '127.0.0.1' : ($_SERVER['REMOTE_ADDR'] ?? ''),
+                ':ip'       => php_sapi_name() === 'cli' ? '127.0.0.1' : Security::clientIp(),
                 ':vatscen'  => $vatScenario,
                 ':vattotal' => $vatTotal,
                 ':nettotal' => $netTotal,

@@ -151,6 +151,19 @@ nginx PHP fallback when `operations.nginx_config` is set).
   - API v1 answers a database error in a write with a generic 409 message; the PDO text is only logged.
   - robots.txt, the sitemap and the Google/Meta feeds of a store served on its own domain use that domain
     (app_url scheme and path), not the global `app_url`.
+- **Round-10 low findings (2026-10-25)**
+  - An attribute used by another store's catalog can be renamed (or its unit changed) only by the owner;
+    product values follow the new name in every catalog. Its slug and type stay locked as before.
+  - A consumer who withdrew in time has 14 more days from the withdrawal statement to send the goods back
+    (RMA is no longer refused 14 days after delivery). Digital content can be complained about: its
+    liability period runs from its first supply.
+  - `cart_update` with a non-string `key` (e.g. an array) answers 400 instead of 500.
+  - Cookie consent, the order IP, account registration and GDPR export throttling and their GDPR log use
+    the client IP resolved through `trusted_proxies` (`Security::clientIp()`), not the proxy's address.
+  - The editor and fulfillment roles land on the first admin page they may open after login instead of a
+    403 dashboard.
+  - Saving an address without a valid `type` stores a shipping address (no 500); editing an address in the
+    account is checked like a new one (required fields, known type) and refused with 400.
 - **VAT rates (2026-10-23)** — products with `vat_class` `books` or `medicines` now get each country's
   own rate instead of its `reduced` class (e.g. IE books 0 %, IT/ES 4 %, FR 5.5 %, DE medicines 19 %).
   FI reduced rate 13.5 % from 2026, LT 9 % rate replaced by 12 % / 5 % from 2026. Invoices already

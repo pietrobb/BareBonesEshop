@@ -893,6 +893,14 @@ class Security {
         return false;
     }
 
+    /** The first admin menu page the current admin may open (the landing page after login), or null. */
+    public static function adminLandingPage(): ?string {
+        foreach (require __DIR__ . '/Entrypoints/Admin/Navigation.php' as [$navPage, $navPerm]) {
+            if (self::adminCan($navPerm)) return $navPage;
+        }
+        return null;
+    }
+
     /** Require permission — return 403 if denied */
     public static function adminRequire(string $permission): void {
         if (!self::adminCan($permission)) {

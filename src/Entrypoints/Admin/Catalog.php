@@ -1219,11 +1219,10 @@ function handleAttributeSave(): void {
     if ($scalars($optValues) && $scalars($optOrders)) {
         foreach ($optValues as $i => $val) if (($val = trim((string)$val)) !== '') $options[$val] ??= Security::int($optOrders[$i] ?? 0);
     }
-    // Another catalog's categories use this shared definition: its identity (slug, type) stays as it is.
     $shared = $id && $old && CatalogScope::attributeUsedByOtherCatalog($id);
     $error = $id && !$old ? 'admin.common.record_missing' : (!$slug ? 'admin.attr.required' : null);
     $error ??= (!$scalars($optValues) || !$scalars($optOrders) ? 'admin.attr.options_invalid'
-        : ($shared && ($slug !== ($old['slug'] ?? '') || $type !== ($old['type'] ?? '')) ? 'admin.attr.shared_locked' : null));
+        : ($shared && CatalogScope::sharedAttributeChangeRefused($id, $old, $name, $slug, $type, $unit) ? 'admin.attr.shared_locked' : null));
     if ($error !== null) {
         setFlash('err', I18n::t($error));
         header("Location: admin.php?p=attribute" . ($id ? "&id={$id}" : ''));
@@ -1242,6 +1241,7 @@ function handleAttributeSave(): void {
     if ($id) {
         $db->prepare("UPDATE attribute_definitions SET name = :name, slug = :slug, type = :type, unit = :unit, sort_order = :sort WHERE id = :id")
            ->execute([':name' => $name, ':slug' => $slug, ':type' => $type, ':unit' => $unit, ':sort' => $sortOrder, ':id' => $id]);
+        CatalogScope::renameAttributeValues($id, (string)$old['name'], $name);
     } else {
         $db->prepare("INSERT INTO attribute_definitions (name, slug, type, unit, sort_order) VALUES (:name, :slug, :type, :unit, :sort)")
            ->execute([':name' => $name, ':slug' => $slug, ':type' => $type, ':unit' => $unit, ':sort' => $sortOrder]);

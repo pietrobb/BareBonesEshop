@@ -72,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $email = Str::normalizeEmail(Security::str($_POST['email'] ?? ''));
         $password = Security::str($_POST['password'] ?? '');
         $name = Security::clean($_POST['name'] ?? '');
-        $rlKey = 'account_register_' . md5($_SERVER['REMOTE_ADDR'] ?? 'cli');
+        $rlKey = 'account_register_' . md5(Security::clientIp());
         $looksHuman = Security::formTrapValidate(
             'account_register',
             (string)($_POST['register_token'] ?? ''),
@@ -223,11 +223,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     elseif ($action === 'address_update' && Customers::isLoggedIn()) {
-        $cid = (int)$_SESSION['customer_id'];
-        $aid = Security::int($_POST['id'] ?? 0);
-        Customers::updateAddress($cid, $aid, $_POST);
-        header('Location: ' . Template::storeUrl('/account.php?p=addresses&ok=1'));
-        exit;
+        // Checked like a new address (400); null = not this customer's address (404).
+        $addressErrors = Customers::updateCheckedAddress((int)$_SESSION['customer_id'], Security::int($_POST['id'] ?? 0), $_POST);
+        if ($addressErrors === []) { header('Location: ' . Template::storeUrl('/account.php?p=addresses&ok=1')); exit; }
+        http_response_code($addressErrors === null ? 404 : 400);
+        [$flash, $flashType, $p] = [$t('account.err_address_invalid'), 'error', 'addresses'];
     }
 
     elseif ($action === 'address_delete' && Customers::isLoggedIn()) {
@@ -241,7 +241,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif ($action === 'data_export' && Customers::isLoggedIn()) {
         $cid = (int)$_SESSION['customer_id'];
         $rlCustomer = Security::rateLimit('gdpr_export_c_' . $cid, 1, 86400);
-        $rlIp       = Security::rateLimit('gdpr_export_ip_' . md5($_SERVER['REMOTE_ADDR'] ?? 'cli'), 5, 86400);
+        $rlIp       = Security::rateLimit('gdpr_export_ip_' . md5(Security::clientIp()), 5, 86400);
         if (!$rlCustomer || !$rlIp) {
             $flash = $t('account.gdpr_export_rate_limit');
             $flashType = 'error';
@@ -252,7 +252,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 GdprService::logEvent([
                     'action' => 'export', 'customer_id' => $cid,
                     'email' => (string)($data['customer']['email'] ?? ''),
-                    'actor' => 'self', 'ip' => $_SERVER['REMOTE_ADDR'] ?? '',
+                    'actor' => 'self', 'ip' => Security::clientIp(),
                     'note' => 'account.php data_export',
                     'payload' => ['orders' => count($data['orders']), 'addresses' => count($data['addresses'])],
                 ]);
@@ -363,7 +363,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'customer_id' => $cid,
             'categories'  => $cats,
             'method'      => $method,
-            'ip'          => $_SERVER['REMOTE_ADDR'] ?? '',
+            'ip'          => Security::clientIp(),
             'user_agent'  => substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255),
         ]);
         // The banner (storefront.js) and MarketingConsent read cc_v1: same name, value and path as the banner writes.

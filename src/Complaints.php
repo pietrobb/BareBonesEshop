@@ -25,10 +25,18 @@ class Complaints {
     /** Order statuses whose goods reached (or are on the way to) the consumer even without a delivered_at. */
     private const SHIPPED_STATUSES = ['shipped', 'delivered'];
 
-    /** null when a complaint can be filed for $order, else 'not_delivered' or 'period_over'. */
+    /**
+     * null when a complaint can be filed for $order, else 'not_delivered' or 'period_over'. Digital content is never
+     * shipped: its liability period runs from its first supply (Directive (EU) 2019/770 art. 11).
+     */
     public static function refusal(array $order, ?int $now = null): ?string {
         $deliveredAt = (string)($order['delivered_at'] ?? '');
-        if ($deliveredAt === '') return in_array((string)($order['status'] ?? ''), self::SHIPPED_STATUSES, true) ? null : 'not_delivered';
+        if ($deliveredAt === '' && !in_array((string)($order['status'] ?? ''), self::SHIPPED_STATUSES, true)) {
+            $supplied = array_filter(array_column(DigitalDelivery::forOrder((int)($order['id'] ?? 0)), 'delivered_at'));
+            if ($supplied === []) return 'not_delivered';
+            $deliveredAt = (string)min($supplied);
+        }
+        if ($deliveredAt === '') return null;
         $delivered = strtotime($deliveredAt . ' UTC');
         if ($delivered === false) return null;
         $until = strtotime('+' . ConsumerNotice::LIABILITY_MONTHS . ' months', $delivered);
