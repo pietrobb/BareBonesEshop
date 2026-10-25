@@ -426,6 +426,19 @@ class Security {
         return true;
     }
 
+    /**
+     * JSON API throttle: 120 requests per minute per action and IP, plus one total per IP (api_ip_limit, default
+     * 600 per minute, 0 = off). With only the per-action limit one address could send 120 × every action.
+     * Provider webhooks are signed and come from a few shared provider addresses, so only their own limit applies.
+     */
+    public static function apiAllowed(string $action): bool {
+        if (!in_array($action, ['webhook_payment', 'webhook_shipping'], true)) {
+            $cap = max(0, (int)(self::cfg()['api_ip_limit'] ?? 600));
+            if ($cap > 0 && !self::rateLimit('api_ip_total', $cap)) return false;
+        }
+        return self::rateLimit('api_' . $action, 120);
+    }
+
     public static function rateLimit(string $action, int $maxHits = 60, int $windowSeconds = 60, bool $bindIp = true, bool $failClosed = false): bool {
         $windowSeconds = max(1, min(86400, $windowSeconds));
         $key = self::rateKey($action, $bindIp);

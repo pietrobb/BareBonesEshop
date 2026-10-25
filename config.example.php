@@ -65,6 +65,8 @@ return [
     'admin_session_lifetime_seconds' => 28800,
     // External API v1: requests per minute per API key, across all source addresses.
     'api_client_rate_limit' => 600,
+    // Storefront JSON API: 120 requests per minute per action and IP, and at most this many per IP in total (0 = off).
+    'api_ip_limit' => 600,
     // Checkout: per IP (10/min) and per session (5 per 15 min) always apply. Optional shop-wide cap on
     // checkout attempts per minute (0 = off); refused attempts never count towards it.
     'checkout_global_limit' => 0,

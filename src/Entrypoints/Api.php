@@ -25,7 +25,7 @@ if (!defined('BB_TEST_LOAD_API_ONLY')) {
 
     Bootstrap::initLocale($uri);
 
-    if (!Security::rateLimit('api_' . $action, 120)) {
+    if (!Security::apiAllowed($action)) {
         echo json_encode(['error' => 'Too many requests']);
         exit;
     }

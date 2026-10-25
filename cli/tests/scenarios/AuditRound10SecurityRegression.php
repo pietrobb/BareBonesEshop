@@ -231,6 +231,28 @@ try {
     assert_true((int)($r10sAtomicRow['id'] ?? 0) === $r10sCreated['id'] && count($r10sCreated['enrollment']['recovery_codes'] ?? []) === 10
         && (string)($r10sAtomicRow['totp_secret_encrypted'] ?? '') !== '' && !Db::get()->inTransaction(), 'R10 A15: createWithStore commits account, store grant and TOTP enrollment together');
     assert_true(str_contains((string)file_get_contents(dirname(TEST_CLI_DIR) . '/cli/admin-user.php'), 'AdminIdentity::createWithStore('), 'R10 A15: cli/admin-user.php create uses the atomic createWithStore()');
+
+    // I12: the JSON API limited each action separately (120/min), so one address could send 120 × every action.
+    $r10sCfgProp = new ReflectionProperty(Security::class, 'cfg');
+    $r10sPrevCfg = $r10sCfgProp->getValue();
+    $r10sPrevAddr = $_SERVER['REMOTE_ADDR'] ?? null;
+    try {
+        $r10sCfgProp->setValue(null, ['api_ip_limit' => 5] + (require dirname(TEST_CLI_DIR) . '/config.php'));
+        Security::setRateDbForTesting(new PDO('sqlite::memory:'));
+        $_SERVER['REMOTE_ADDR'] = '203.0.113.12';
+        $r10sApiAllowed = static fn(string $action): bool => method_exists(Security::class, 'apiAllowed') ? Security::apiAllowed($action) : Security::rateLimit('api_' . $action, 120);
+        $r10sApiResults = array_map($r10sApiAllowed, ['products', 'cart', 'search', 'filters', 'page', 'categories']);
+        assert_equals([true, true, true, true, true, false], $r10sApiResults, 'R10 I12: the JSON API caps all actions of one IP together (api_ip_limit)');
+        assert_true($r10sApiAllowed('webhook_payment'), 'R10 I12: signed provider webhooks are not refused by the per-IP total');
+        $_SERVER['REMOTE_ADDR'] = '203.0.113.13';
+        assert_true($r10sApiAllowed('products'), 'R10 I12: another IP has its own total');
+        $r10sSource = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Api.php');
+        assert_true(str_contains($r10sSource, 'Security::apiAllowed($action)'), 'R10 I12: the API entrypoint throttles through Security::apiAllowed()');
+    } finally {
+        $r10sCfgProp->setValue(null, $r10sPrevCfg);
+        if ($r10sPrevAddr === null) unset($_SERVER['REMOTE_ADDR']); else $_SERVER['REMOTE_ADDR'] = $r10sPrevAddr;
+        http_response_code(200);
+    }
 } finally {
     $r10sTree = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($r10sRoot, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
     foreach ($r10sTree as $r10sPath) $r10sPath->isDir() ? @rmdir($r10sPath->getPathname()) : @unlink($r10sPath->getPathname());
