@@ -3,11 +3,15 @@ require_once __DIR__ . '/cli-only.php';
 
 /**
  * BareBones Shop — Job Worker
- * Processes pending jobs from the file-based queue.
+ * Processes pending jobs from the configured queue backend (queue.backend): `file` (JSON files in
+ * jobs_dir, the default), `database` or `redis`. Before the job loop, every run also expires abandoned
+ * unpaid orders, delivers the outbound-webhook outbox, sends due abandoned-cart reminders (when enabled), schedules the
+ * daily retention cleanup, and runs the per-store low-stock digest, backorder allocation and incident sweep.
  * Usage: php cli/worker.php [--once] [--verbose]
  *
  * Run via cron: * * * * * php /path/to/cli/worker.php
- * Exclusive lock prevents multiple instances.
+ * The file backend takes an exclusive lock (one worker at a time); the database and redis backends lease
+ * each job atomically, so several workers may run in parallel.
  */
 require_once __DIR__ . '/../src/autoload.php';
 

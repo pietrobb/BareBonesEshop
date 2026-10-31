@@ -176,11 +176,21 @@ assert_true($r8tCode === 200 && preg_match('~<form id="cc-banner" class="show-pr
     && preg_match('~id="cc-save"[^>]*value="preferences"\s*>~', $r8tSettings) === 1
     && preg_match('~name="return_to" value="[^"?]*/"~', $r8tSettings) === 1,
     'R8 cookies: the settings link reopens the banner for a guest with the current choice and a no-JS save that returns home');
-foreach (['sk', 'cs', 'en', 'de', 'pl', 'hu'] as $r8tLocale) {
+foreach (['sk', 'cs', 'en', 'de', 'pl', 'hu', 'es'] as $r8tLocale) {
     $r8tLabel = (string)((require $r8tApp . '/lang/' . $r8tLocale . '.php')['cookie_settings'] ?? '');
     $r8tPolicy = (string)file_get_contents($r8tApp . '/templates/legal/' . $r8tLocale . '/cookies.html');
     assert_true($r8tLabel !== '' && str_contains($r8tPolicy, $r8tLabel) && !str_contains($r8tPolicy, 'zákazníckom účte, ak je dostupné') && !str_contains($r8tPolicy, 'customer account where available'),
         "R8 cookies ({$r8tLocale}): the cookie policy points to the footer settings link, not only to an account");
+}
+// R10 docs: Spanish has its own cookie and privacy texts (not the English fallback), flagged for legal review, in usted.
+foreach (['cookies', 'privacy'] as $r10dPage) {
+    $r10dFile = $r8tApp . '/templates/legal/es/' . $r10dPage . '.html';
+    $r10dSource = is_file($r10dFile) ? (string)file_get_contents($r10dFile) : '';
+    $r10dHtml = ConsumerNotice::renderLegal($r10dPage, 'es', ['name' => 'R10D S.L.', 'email' => 'privacidad@example.test']);
+    assert_true($r10dSource !== '' && str_contains($r10dSource, 'asesor jurídico') && preg_match('~<!-- legal-updated: \d{4}-\d{2}-\d{2} -->~', $r10dSource) === 1
+        && str_contains($r10dHtml, 'privacidad@example.test') && !str_contains($r10dHtml, 'Last updated') && !str_contains($r10dHtml, '{{')
+        && preg_match('~\b(tu|tus|te|puedes|tienes|has|quieres)\b~iu', strip_tags($r10dSource)) === 0,
+        "R10 legal (es): own Spanish {$r10dPage} text, marked for review by legal counsel, addressed as usted");
 }
 
 // 6) Invoice and payment wording: correct tax terms per language, and no "variable symbol" outside SK/CZ.
