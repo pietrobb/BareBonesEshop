@@ -592,6 +592,9 @@ class FeedImport {
      * so fixed-time schedules ("0 0 * * *", "30 8 * * 1") silently fell back to a
      * 1-hour interval and ran hourly. We now answer the precise question: did a
      * minute matching the cron expression occur in the window (last_sync, now]?
+     * R11: on the shop's wall clock (ShopTime::zone()) and through DST changes the way cron does: a local time the
+     * autumn change repeats runs once (its first occurrence), local times the spring change skips run in the first
+     * minute after it.
      */
     private static function isDue(string $schedule, string $lastSync): bool {
         $last = strtotime($lastSync . ' UTC');
@@ -600,7 +603,8 @@ class FeedImport {
         $parts = preg_split('/\s+/', trim($schedule));
         if (count($parts) !== 5) return true; // invalid schedule → always run
 
-        $now = time();
+        $now = ShopTime::now();
+        $offset = self::offsetLookup(ShopTime::zone(), max($last, $now - 367 * 86400) - 2 * 86400, $now);
         // Walk minute-by-minute backwards from now; if a scheduled minute exists
         // after last_sync, the feed is due. Bounded to ~1 year of look-back so a
         // rare schedule with no recent match terminates instead of spinning.
@@ -608,25 +612,61 @@ class FeedImport {
         $limit  = 366 * 24 * 60;
         for ($i = 0; $i <= $limit; $i++, $cursor -= 60) {
             if ($cursor <= $last) return false;       // no match in (last, now]
-            if (self::cronMatches($parts, $cursor)) return true;
+            if (self::cronDueAt($parts, $cursor, $offset)) return true;
         }
         return false;
     }
 
-    /** True if the 5 cron fields all match the given unix timestamp. */
-    private static function cronMatches(array $parts, int $ts): bool {
+    /**
+     * Whether cron runs $parts in the UTC minute $ts: its local wall-clock minute matches and is not the repeat of a
+     * minute the autumn change already showed, or it is the first minute after the spring change and a skipped local
+     * minute matches.
+     */
+    private static function cronDueAt(array $parts, int $ts, callable $offset): bool {
+        $current = $offset($ts);
+        $wall = $ts + $current;
+        $earlier = $offset($ts - 7200);
+        if ($earlier > $current) {
+            $first = $wall - $earlier;
+            if ($first < $ts && $offset($first) === $earlier) return false;   // second pass of a repeated local minute
+        }
+        if (self::cronMatchesWall($parts, $wall)) return true;
+        $previous = $offset($ts - 60);
+        if ($current > $previous) {
+            for ($skipped = $ts - 60 + $previous + 60; $skipped < $wall; $skipped += 60) {
+                if (self::cronMatchesWall($parts, $skipped)) return true;
+            }
+        }
+        return false;
+    }
+
+    /** UTC offset (seconds) of $zone at a unix time in [$from, $to], from the zone's transitions (fast per-minute lookup). */
+    private static function offsetLookup(DateTimeZone $zone, int $from, int $to): callable {
+        $transitions = $zone->getTransitions($from, $to) ?: [['ts' => $from, 'offset' => $zone->getOffset(new DateTimeImmutable('@' . $from))]];
+        return static function (int $ts) use ($transitions, $zone): int {
+            $offset = null;
+            foreach ($transitions as $transition) {
+                if ((int)$transition['ts'] > $ts) break;
+                $offset = (int)$transition['offset'];
+            }
+            return $offset ?? $zone->getOffset(new DateTimeImmutable('@' . $ts));
+        };
+    }
+
+    /** True if the 5 cron fields all match a local wall-clock time given as seconds since 1970-01-01 00:00 local. */
+    private static function cronMatchesWall(array $parts, int $wall): bool {
         $domRestricted = ($parts[2] !== '*');
         $dowRestricted = ($parts[4] !== '*');
-        $domMatch = self::cronField($parts[2], (int)date('j', $ts));
-        $dowMatch = self::cronField($parts[4], (int)date('w', $ts)); // 0=Sun..6=Sat
+        $domMatch = self::cronField($parts[2], (int)gmdate('j', $wall));
+        $dowMatch = self::cronField($parts[4], (int)gmdate('w', $wall)); // 0=Sun..6=Sat
         // Vixie-cron rule: when BOTH day-of-month and day-of-week are restricted,
         // the day matches if EITHER matches; otherwise both must match.
         $dayMatch = ($domRestricted && $dowRestricted) ? ($domMatch || $dowMatch) : ($domMatch && $dowMatch);
 
-        return self::cronField($parts[0], (int)date('i', $ts))   // minute 0-59
-            && self::cronField($parts[1], (int)date('G', $ts))   // hour 0-23
+        return self::cronField($parts[0], (int)gmdate('i', $wall))   // minute 0-59
+            && self::cronField($parts[1], (int)gmdate('G', $wall))   // hour 0-23
             && $dayMatch
-            && self::cronField($parts[3], (int)date('n', $ts));  // month 1-12
+            && self::cronField($parts[3], (int)gmdate('n', $wall));  // month 1-12
     }
 
     /** Match a single cron field against a value. Supports *, a, a-b, a,b, *\/n, a-b/n. */

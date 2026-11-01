@@ -349,6 +349,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.email.tpl.merchant_order_paid' => 'opłacone zamówienie (sprzedawca)',
     'admin.email.tpl.merchant_stock_low' => 'niski stan magazynowy (sprzedawca)',
     'admin.email.tpl.order_cancelled' => 'anulowane zamówienie',
+    'admin.email.tpl.bank_transfer_reminder' => 'płatność przelewem (przypomnienie)',
     'admin.email.tpl.order_confirmation' => 'potwierdzenie zamówienia',
     'admin.email.tpl.order_paid' => 'otrzymana płatność',
     'admin.email.tpl.order_shipped' => 'wysłane zamówienie',

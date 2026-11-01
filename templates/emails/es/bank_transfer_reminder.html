@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="es"><body style="font-family:Arial,sans-serif;color:#111">
+<h2>Recordatorio de pago</h2>
+<p>Hola, {{customer_name}}:</p>
+<p>el pedido <strong>{{order_number}}</strong> ({{order_total}}) sigue esperando su transferencia bancaria. Vence el <strong>{{bank_due_date}}</strong>. Si el pago no llega unos días después de esa fecha, cancelaremos el pedido y liberaremos los productos.</p>
+<table style="border-collapse:collapse">
+<tr><td style="padding:2px 12px 2px 0;color:#555">Beneficiario</td><td>{{bank_beneficiary}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">IBAN</td><td><strong>{{bank_iban}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Importe</td><td><strong>{{bank_amount}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Símbolo variable</td><td><strong>{{bank_vs}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Concepto</td><td>{{bank_message}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Vencimiento</td><td>{{bank_due_date}}</td></tr>
+</table>
+<p style="color:#666;font-size:13px">Si ya ha pagado, ignore este correo: una transferencia puede tardar unos días en abonarse.</p>
+<!-- R11 payment reminder: due date, grace days and cancellation wording for lawyer review. -->
+</body></html>

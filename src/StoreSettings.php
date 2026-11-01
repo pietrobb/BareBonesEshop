@@ -94,7 +94,7 @@ final class StoreSettings {
                 'id' => $id, 'name' => $name, 'domains' => [],
                 'catalog_scope' => (string)($base['catalog_scope'] ?? $defaultId), 'provider_scope' => (string)($base['provider_scope'] ?? $defaultId),
                 'theme' => (string)($base['theme'] ?? 'default'), 'channels' => $base['channels'] ?? ['storefront'], 'permissions' => $base['permissions'] ?? [],
-                'default_locale' => $locale, 'currency' => $currency, 'url_prefix' => $prefix, 'languages' => [$locale],
+                'default_locale' => $locale, 'currency' => $currency, 'timezone' => StoreContext::timezoneFor($base), 'url_prefix' => $prefix, 'languages' => [$locale],
                 'oss_enabled' => false, 'legal' => ['seller' => (string)(isset($base['legal']['seller']) ? $base['legal']['seller'] : $defaultId)],
             ];
             if (!self::write($data)) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.write')]];

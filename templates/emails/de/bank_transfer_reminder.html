@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="de"><body style="font-family:Arial,sans-serif;color:#111">
+<h2>Zahlungserinnerung</h2>
+<p>Guten Tag {{customer_name}},</p>
+<p>die Bestellung <strong>{{order_number}}</strong> ({{order_total}}) wartet noch auf Ihre Überweisung. Sie ist am <strong>{{bank_due_date}}</strong> fällig. Ist die Zahlung einige Tage danach nicht eingegangen, stornieren wir die Bestellung und geben die Ware frei.</p>
+<table style="border-collapse:collapse">
+<tr><td style="padding:2px 12px 2px 0;color:#555">Empfänger</td><td>{{bank_beneficiary}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">IBAN</td><td><strong>{{bank_iban}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Betrag</td><td><strong>{{bank_amount}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Referenz (variables Symbol)</td><td><strong>{{bank_vs}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Verwendungszweck</td><td>{{bank_message}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Fällig am</td><td>{{bank_due_date}}</td></tr>
+</table>
+<p style="color:#666;font-size:13px">Wenn Sie bereits bezahlt haben, ignorieren Sie diese E-Mail bitte – eine Überweisung kann einige Tage bis zur Gutschrift brauchen.</p>
+<!-- R11 payment reminder: due date, grace days and cancellation wording for lawyer review. -->
+</body></html>

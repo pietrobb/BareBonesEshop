@@ -1,0 +1,1 @@
+Reminder: please pay order {{order_number}} by {{bank_due_date}}

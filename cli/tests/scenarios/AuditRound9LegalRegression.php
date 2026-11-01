@@ -124,8 +124,9 @@ $r9lOrder = static function (string $number, array $skus, int $createdAgo, ?int 
 $r9lDay = 86400;
 $r9lHeld = $r9lOrder('R9L-HOLD', ['R9L-EBOOK'], 3600);
 $r9lHoldUntil = DigitalDelivery::holdUntil($r9lHeld, $r9lNow);
-assert_true($r9lHoldUntil !== null && abs($r9lHoldUntil - ($r9lNow - 3600 + 14 * $r9lDay)) <= 120,
-    'R9 digital: a consumer order without the delivery consent is held until 14 days after the order');
+// R11: until the end of the 14th day on the shop's calendar (at least 14 × 24 h, at most one more day).
+assert_true($r9lHoldUntil !== null && $r9lHoldUntil >= $r9lNow - 3600 + 14 * $r9lDay && $r9lHoldUntil <= $r9lNow - 3600 + 15 * $r9lDay + 3600,
+    'R9 digital: a consumer order without the delivery consent is held until the end of the 14th day after the order');
 assert_equals([null, null, null], [
     DigitalDelivery::holdUntil($r9lOrder('R9L-CONS', ['R9L-EBOOK'], 3600, null, null, true), $r9lNow),
     DigitalDelivery::holdUntil($r9lOrder('R9L-B2B', ['R9L-EBOOK'], 3600, null, $r9lB2b), $r9lNow),

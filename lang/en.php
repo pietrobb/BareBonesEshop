@@ -351,6 +351,7 @@ return [
     'admin.email.tpl.merchant_order_paid' => 'order paid (merchant)',
     'admin.email.tpl.merchant_stock_low' => 'low stock (merchant)',
     'admin.email.tpl.order_cancelled' => 'order cancelled',
+    'admin.email.tpl.bank_transfer_reminder' => 'bank transfer payment (reminder)',
     'admin.email.tpl.order_confirmation' => 'order confirmation',
     'admin.email.tpl.order_paid' => 'payment received',
     'admin.email.tpl.order_shipped' => 'order shipped',

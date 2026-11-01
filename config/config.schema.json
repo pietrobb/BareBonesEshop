@@ -39,6 +39,8 @@
     "pending_order_expiry_seconds": {"type": "integer", "minimum": 0},
     "pending_order_expiry_batch": {"type": "integer", "minimum": 1},
     "offline_order_expiry_seconds": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+    "bank_transfer_reminder_days": {"type": "integer", "minimum": 0},
+    "bank_transfer_grace_days": {"type": "integer", "minimum": 0},
     "admin_name": {"type": "string"},
     "admin_user": {"type": "string"},
     "admin_email": {"type": "string"},

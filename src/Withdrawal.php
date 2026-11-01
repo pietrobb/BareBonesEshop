@@ -43,12 +43,28 @@ class Withdrawal {
      * directive allows at all: 12 months after the original one (art. 10). rma_return_window_days may only extend it.
      */
     public static function withinPeriod(array $order, ?int $now = null): bool {
-        $days = max(self::PERIOD_DAYS, (int)(Security::config()['rma_return_window_days'] ?? self::PERIOD_DAYS));
-        $now ??= time();
+        $days = self::periodDays();
+        $now ??= ShopTime::now();
         $start = self::receivedAt($order);
         if ($start === false && self::digitalOnly($order)) $start = self::orderedAt($order);
-        if ($start !== false) return $now <= $start + $days * 86400;
+        if ($start !== false) return $now <= self::periodEnd($start, $days, $order);
         return self::withinUndatedLimit($order, $days, $now);
+    }
+
+    /** Length of the withdrawal period in days: 14, or a longer rma_return_window_days. */
+    public static function periodDays(): int {
+        return max(self::PERIOD_DAYS, (int)(Security::config()['rma_return_window_days'] ?? self::PERIOD_DAYS));
+    }
+
+    /**
+     * Last second of a period of $days days that starts with the event at $start (delivery, order, statement): the
+     * period begins the day after the event and ends at 23:59:59 of its last day on the shop's calendar (Regulation
+     * 1182/71 art. 3(1), 3(2)(b)) — delivered on 1 March at 15:00, withdrawable until 15 March 23:59:59 local time.
+     * A last day on a Saturday, Sunday or public holiday moves to the next working day (art. 3(4)); the shop does not
+     * keep a holiday calendar and leaves that to the merchant. Wording and reach: for a lawyer to review.
+     */
+    public static function periodEnd(int $start, int $days, ?array $order = null): int {
+        return ShopTime::endOfDay($start, $days, isset($order['store_id']) ? (string)$order['store_id'] : null);
     }
 
     /** Art. 10(1): a period not properly disclosed ends 12 months after the original one at the latest. */
@@ -57,7 +73,7 @@ class Withdrawal {
     /** Without a delivery date: open until $days + 12 months after the order (art. 10), never indefinitely. */
     public static function withinUndatedLimit(array $order, int $days, int $now): bool {
         $ordered = self::orderedAt($order);
-        return $ordered === false || $now <= $ordered + ($days + self::MAX_EXTENSION_DAYS) * 86400;
+        return $ordered === false || $now <= self::periodEnd($ordered, $days + self::MAX_EXTENSION_DAYS, $order);
     }
 
     /** Unix time the goods reached the consumer: the order's delivered_at, else the latest carrier-reported delivery; false when unknown. */

@@ -1,0 +1,1 @@
+Recordatorio: pague el pedido {{order_number}} antes del {{bank_due_date}}

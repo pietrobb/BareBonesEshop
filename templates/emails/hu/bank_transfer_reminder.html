@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="hu"><body style="font-family:Arial,sans-serif;color:#111">
+<h2>Fizetési emlékeztető</h2>
+<p>Kedves {{customer_name}}!</p>
+<p>A(z) <strong>{{order_number}}</strong> rendelés ({{order_total}}) még az Ön banki átutalására vár. Fizetési határidő: <strong>{{bank_due_date}}</strong>. Ha az összeg néhány nappal a határidő után sem érkezik meg, a rendelést töröljük, és az árut felszabadítjuk.</p>
+<table style="border-collapse:collapse">
+<tr><td style="padding:2px 12px 2px 0;color:#555">Kedvezményezett</td><td>{{bank_beneficiary}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">IBAN</td><td><strong>{{bank_iban}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Összeg</td><td><strong>{{bank_amount}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Változó szimbólum</td><td><strong>{{bank_vs}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Közlemény</td><td>{{bank_message}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Fizetési határidő</td><td>{{bank_due_date}}</td></tr>
+</table>
+<p style="color:#666;font-size:13px">Ha már fizetett, kérjük, hagyja figyelmen kívül ezt az e-mailt – az átutalás jóváírása néhány napig tarthat.</p>
+<!-- R11 payment reminder: due date, grace days and cancellation wording for lawyer review. -->
+</body></html>

@@ -349,6 +349,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.email.tpl.merchant_order_paid' => 'kifizetett rendelés (kereskedő)',
     'admin.email.tpl.merchant_stock_low' => 'alacsony készlet (kereskedő)',
     'admin.email.tpl.order_cancelled' => 'törölt rendelés',
+    'admin.email.tpl.bank_transfer_reminder' => 'átutalásos fizetés (emlékeztető)',
     'admin.email.tpl.order_confirmation' => 'rendelés visszaigazolása',
     'admin.email.tpl.order_paid' => 'beérkezett fizetés',
     'admin.email.tpl.order_shipped' => 'elküldött rendelés',

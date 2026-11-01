@@ -222,6 +222,10 @@ class Setup
                 : "Store {$storeId} still has example seller data: " . implode('; ', $problems),
                 "Enter the real company, address, IDs, IBAN and e-mail in Admin → Stores and seller (stores.json stores.{$storeId}.legal), or remove the store if you do not sell there.");
         }
+        // Invoice dates and number years, the VAT rate in force and consumer deadlines follow the store's wall clock.
+        foreach (is_array($stores) ? ($stores['stores'] ?? []) : [] as $storeId => $store) {
+            if (is_array($store)) $add(...array_values(self::storeTimezoneCheck((string)$storeId, $store)));
+        }
         $adminEmail = trim((string)($config['admin_email'] ?? ''));
         $add(filter_var($adminEmail, FILTER_VALIDATE_EMAIL) ? 'pass' : 'warn', 'config.admin_email', $adminEmail !== ''
             ? (filter_var($adminEmail, FILTER_VALIDATE_EMAIL) ? 'Merchant notifications go to admin_email.' : 'admin_email is not a valid address: order notifications are not delivered.')
@@ -306,6 +310,22 @@ class Setup
         if ($iban !== '' && !BankTransferInstructions::validIban($iban)) $problems[] = "IBAN {$legal['iban']} (check digits invalid)";
         if (trim((string)($legal['street'] ?? '')) === '' || trim((string)($legal['city'] ?? '')) === '') $problems[] = 'address missing';
         return $problems;
+    }
+
+    /** @return array{status: string, name: string, message: string, action: string} */
+    public static function storeTimezoneCheck(string $storeId, array $store): array {
+        $raw = trim((string)($store['timezone'] ?? ''));
+        $zone = StoreContext::timezoneFor($store);
+        $name = 'stores.timezone.' . $storeId;
+        if ($raw !== '' && StoreContext::configuredTimezone($store) === null) {
+            return ['status' => 'fail', 'name' => $name, 'message' => "Store {$storeId} has an unknown timezone \"{$raw}\"; it runs on {$zone} instead.",
+                'action' => "Set stores.{$storeId}.timezone in stores.json to an IANA zone such as Europe/Bratislava."];
+        }
+        if ($raw === '') {
+            return ['status' => 'warn', 'name' => $name, 'message' => "Store {$storeId} sets no timezone and runs on {$zone} (invoice dates and numbers, VAT changes, deadlines).",
+                'action' => "Set stores.{$storeId}.timezone in stores.json (e.g. \"{$zone}\") so the shop's calendar does not depend on a guess."];
+        }
+        return ['status' => 'pass', 'name' => $name, 'message' => "Store {$storeId} runs on {$zone} (independent of php.ini and the container).", 'action' => ''];
     }
 
     /** A store sells only what has a price in its currency: list what the shared catalog leaves unpriced there. */

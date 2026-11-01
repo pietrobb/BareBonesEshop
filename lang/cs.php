@@ -349,6 +349,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.email.tpl.merchant_order_paid' => 'zaplacená objednávka (obchodník)',
     'admin.email.tpl.merchant_stock_low' => 'nízká zásoba (obchodník)',
     'admin.email.tpl.order_cancelled' => 'zrušená objednávka',
+    'admin.email.tpl.bank_transfer_reminder' => 'platba převodem (připomínka)',
     'admin.email.tpl.order_confirmation' => 'potvrzení objednávky',
     'admin.email.tpl.order_paid' => 'přijatá platba',
     'admin.email.tpl.order_shipped' => 'odeslaná objednávka',

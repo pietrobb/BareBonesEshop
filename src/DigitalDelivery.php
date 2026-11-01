@@ -30,8 +30,10 @@ class DigitalDelivery {
         if (in_array(ConsentService::DIGITAL_KEY, $consents, true) || Customers::isBusinessBuyer(isset($order['customer_id']) ? (int)$order['customer_id'] : null)) return null;
         $ordered = Withdrawal::orderedAt($order);
         if ($ordered === false) return null;
-        $until = $ordered + Withdrawal::PERIOD_DAYS * 86400 + 60;
-        return $until > ($now ?? time()) ? $until : null;
+        // Held until the whole withdrawal period has run out (the end of its last day on the shop's calendar), never released
+        // while the consumer may still withdraw.
+        $until = Withdrawal::periodEnd($ordered, Withdrawal::periodDays(), $order) + 1;
+        return $until > ($now ?? ShopTime::now()) ? $until : null;
     }
 
     /** Whether the consumer sent a withdrawal statement for the order (any store; before the table exists: no). */

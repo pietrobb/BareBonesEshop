@@ -50,6 +50,10 @@ return [
     // released after this age; the buyer gets the order_cancelled e-mail. Types not listed
     // (cod, invoice, offline) never auto-expire. Omitted key = bank_transfer after 14 days.
     'offline_order_expiry_seconds' => ['bank_transfer' => 1209600],
+    // A bank transfer is due at the end of that day on the store's calendar (stores.json `timezone`). The buyer is
+    // reminded once this many days before, and the order is cancelled only after the grace days (money on its way).
+    'bank_transfer_reminder_days' => 2,
+    'bank_transfer_grace_days'    => 3,
     // Customers can request a return this many days after delivery (EU withdrawal period: 14). 0 = no limit.
     // The admin can still open a return later (warranty, goodwill).
     'rma_return_window_days' => 14,

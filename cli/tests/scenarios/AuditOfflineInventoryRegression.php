@@ -87,10 +87,11 @@ $a063Sweep = static fn(): int => class_exists('PendingOrderExpiry')
     : Orders::expirePending(172800, 25);
 $a063Sweep();
 assert_equals(['pending', 2], [(string)Orders::byId($a063TransferId)['status'], $a063Reserved()], 'A06.3 expiry: 13-day-old transfer is still inside the default 14-day window');
-$a063Backdate->execute([':at' => gmdate('Y-m-d H:i:s', time() - 15 * 86400), ':id' => $a063TransferId]);
+// R11: due at the end of day 14 on the shop's calendar, then 3 grace days for the money to arrive.
+$a063Backdate->execute([':at' => gmdate('Y-m-d H:i:s', time() - 18 * 86400), ':id' => $a063TransferId]);
 $a063Sweep();
 $a063Expired = Orders::byId($a063TransferId);
-assert_equals(['cancelled', 'cancelled', 0], [(string)$a063Expired['status'], (string)$a063Expired['payment_status'], $a063Reserved()], 'A06.3 expiry: 15-day-old unpaid transfer is cancelled and its reservation released');
+assert_equals(['cancelled', 'cancelled', 0], [(string)$a063Expired['status'], (string)$a063Expired['payment_status'], $a063Reserved()], 'A06.3 expiry: an unpaid transfer past its due date and grace days is cancelled and its reservation released');
 $a063Mail = array_values(array_filter(JobQueue::pull(500), static fn(array $job): bool => ($job['payload']['template'] ?? '') === 'order_cancelled'
     && (int)($job['payload']['order_id'] ?? 0) === $a063TransferId));
 assert_equals(1, count($a063Mail), 'A06.3 expiry: transfer buyer receives one order_cancelled e-mail');

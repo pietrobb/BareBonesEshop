@@ -1,0 +1,1 @@
+Erinnerung: Bitte bezahlen Sie die Bestellung {{order_number}} bis {{bank_due_date}}

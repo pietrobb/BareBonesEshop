@@ -111,15 +111,49 @@ class StoreContext {
         return new self($storeId, $channel, $config, is_array($providerOwner) ? (string)($providerOwner['currency'] ?? '') : null);
     }
 
+    /**
+     * The active store's time zone becomes PHP's default, so every local date (invoice date and number year, VAT rate
+     * in force, deadlines, cron calendars) is the shop's wall clock, whatever php.ini or the container says.
+     */
     public static function activate(self $context): void {
         self::$current = $context;
+        date_default_timezone_set($context->timezone());
     }
+
+    /** Fallback when a store sets no (valid) `timezone` and its seller country has no single obvious one. */
+    public const DEFAULT_TIMEZONE = 'Europe/Bratislava';
+
+    /** Seller countries (legal.country) whose shops keep one wall clock. */
+    private const COUNTRY_TIMEZONES = [
+        'SK' => 'Europe/Bratislava', 'CZ' => 'Europe/Prague', 'PL' => 'Europe/Warsaw', 'HU' => 'Europe/Budapest',
+        'AT' => 'Europe/Vienna', 'DE' => 'Europe/Berlin', 'SI' => 'Europe/Ljubljana', 'HR' => 'Europe/Zagreb',
+        'IT' => 'Europe/Rome', 'FR' => 'Europe/Paris', 'ES' => 'Europe/Madrid', 'PT' => 'Europe/Lisbon',
+        'NL' => 'Europe/Amsterdam', 'BE' => 'Europe/Brussels', 'LU' => 'Europe/Luxembourg', 'IE' => 'Europe/Dublin',
+        'DK' => 'Europe/Copenhagen', 'SE' => 'Europe/Stockholm', 'FI' => 'Europe/Helsinki', 'EE' => 'Europe/Tallinn',
+        'LV' => 'Europe/Riga', 'LT' => 'Europe/Vilnius', 'RO' => 'Europe/Bucharest', 'BG' => 'Europe/Sofia',
+        'GR' => 'Europe/Athens', 'CY' => 'Asia/Nicosia', 'MT' => 'Europe/Malta', 'GB' => 'Europe/London',
+        'CH' => 'Europe/Zurich', 'NO' => 'Europe/Oslo',
+    ];
+
+    /** The configured `timezone` of a store record when it is a valid identifier, else null. */
+    public static function configuredTimezone(array $storeConfig): ?string {
+        $zone = trim((string)($storeConfig['timezone'] ?? ''));
+        return $zone !== '' && in_array($zone, DateTimeZone::listIdentifiers(), true) ? $zone : null;
+    }
+
+    /** A store's wall clock: its `timezone`, else its seller country's, else DEFAULT_TIMEZONE. */
+    public static function timezoneFor(array $storeConfig): string {
+        $country = strtoupper(trim((string)($storeConfig['legal']['country'] ?? '')));
+        return self::configuredTimezone($storeConfig) ?? self::COUNTRY_TIMEZONES[$country] ?? self::DEFAULT_TIMEZONE;
+    }
+
+    public function timezone(): string { return self::timezoneFor($this->config); }
 
     public static function hasCurrent(): bool { return self::$current !== null; }
 
     public static function current(): self {
         if (self::$current === null) {
-            self::$current = self::resolve(class_exists('Bootstrap') ? Bootstrap::stores() : []);
+            self::activate(self::resolve(class_exists('Bootstrap') ? Bootstrap::stores() : []));
         }
         return self::$current;
     }
