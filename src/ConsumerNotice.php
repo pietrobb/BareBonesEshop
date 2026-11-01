@@ -85,9 +85,10 @@ final class ConsumerNotice {
             'seller_register_note' => (string)($legal['register_note'] ?? ''),
             'adr_name' => $adr['name'], 'adr_url' => $adr['url'],
             'withdrawal_days' => (string)self::WITHDRAWAL_DAYS, 'liability_months' => (string)self::LIABILITY_MONTHS,
-            'withdrawal_url' => self::absoluteUrl('/?page=withdrawal&order=' . rawurlencode((string)($order['order_number'] ?? ''))),
-            'terms_url' => self::absoluteUrl('/?page=terms'),
-            'complaint_url' => self::absoluteUrl('/?page=complaint'),
+            // In the order's language: a Spanish order in an English store links to the Spanish pages.
+            'withdrawal_url' => Template::withOrderLang(self::absoluteUrl('/?page=withdrawal&order=' . rawurlencode((string)($order['order_number'] ?? ''))), $order),
+            'terms_url' => Template::withOrderLang(self::absoluteUrl('/?page=terms'), $order),
+            'complaint_url' => Template::withOrderLang(self::absoluteUrl('/?page=complaint'), $order),
         ];
     }
 

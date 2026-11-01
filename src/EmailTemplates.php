@@ -40,6 +40,8 @@ class EmailTemplates {
         'decide_by' => '2026-11-13', 'status' => 'Uznaná', 'decision_note' => 'Vadu uznávame, nový kus sme odoslali.',
         'pay_url' => 'https://shop.example.com/?page=pay&token=sample', 'valid_days' => '7',
         'claim_url' => 'https://shop.example.com/?page=account-claim&token=sample', 'valid_hours' => '24',
+        'totals' => [['label' => 'Medzisúčet', 'amount' => '56,00 €'], ['label' => 'Doprava', 'amount' => '3,90 €']],
+        'refund_amount' => '19,90 €',
     ];
 
     /** Template names that have a default HTML file in any locale. */
@@ -146,10 +148,10 @@ class EmailTemplates {
             }
             if ($depth['if'] > 0 || $depth['each'] > 0) $errors[] = I18n::t('admin.email.msg.unbalanced');
         }
-        // Only where the customer sees them: not in a comment or a hidden element, and in a custom text part as well.
-        $names = static fn(string $source): array => array_flip(array_map(static fn(string $token): string => preg_replace('~^#(?:if|each) ~', '', $token), self::tokens($source)));
-        $usedHtml = $names(self::visibleHtml($html));
-        $usedText = trim($text) === '' ? null : $names($text);
+        // Only where the customer sees them: printed (not merely tested by an {{#if}}), outside any {{#if}}/{{#each}}
+        // block that may leave them out, not in a comment, a hidden element or a non-link attribute, and in a custom text part as well.
+        $usedHtml = self::printedNames(self::visibleHtml($html));
+        $usedText = trim($text) === '' ? null : self::printedNames($text);
         $missing = array_values(array_filter(self::REQUIRED_VARIABLES[$template] ?? [],
             static fn(string $name): bool => !isset($usedHtml[$name]) || ($usedText !== null && !isset($usedText[$name]))));
         if ($missing) $errors[] = I18n::format('admin.email.msg.required_vars', ['vars' => implode(', ', $missing)]);
@@ -346,21 +348,49 @@ class EmailTemplates {
     public static function importCustomised(string $customDir, string $baseDir, bool $dryRun): array {
         $suffixes = ['subject' => '.subject.txt', 'html' => '.html', 'text' => '.txt'];
         $read = static fn(string $file): ?string => is_file($file) ? str_replace("\r\n", "\n", (string)file_get_contents($file)) : null;
+        // A wrong --base (the installed templates, another directory, another release) made every file look customised,
+        // and importing them froze all templates: no later default (new consumer information, fixes) would ever be sent.
+        if (realpath($baseDir) !== false && realpath($baseDir) === realpath(self::dir())) {
+            throw new InvalidArgumentException('--base must be the untouched release the shop ran (e.g. git archive v2.0.0), not the installed templates/emails');
+        }
         $changed = [];
+        $compared = $same = 0;
+        $missing = [];
         foreach (glob(rtrim($customDir, '/\\') . '/*/*') ?: [] as $file) {
             $locale = basename(dirname($file));
             foreach ($suffixes as $part => $suffix) {
                 if (!str_ends_with(basename($file), $suffix)) continue;
                 $template = substr(basename($file), 0, -strlen($suffix));
                 $custom = $read($file);
-                if ($custom !== null && $custom !== $read(rtrim($baseDir, '/\\') . "/{$locale}/" . basename($file))) {
+                $base = $read(rtrim($baseDir, '/\\') . "/{$locale}/" . basename($file));
+                if ($custom === null) break;
+                if ($base === null) {
+                    // Not in the release the shop ran: whether the shop changed it cannot be told, so it is not imported.
+                    $missing[$template][$locale][] = $part;
+                } elseif ($custom !== $base) {
+                    $compared++;
                     $changed[$template][$locale][$part] = $custom;
+                } else {
+                    $compared++;
+                    $same++;
                 }
                 break; // '.subject.txt' is tested before '.txt'
             }
         }
+        if ($compared === 0 || $same === 0) {
+            throw new InvalidArgumentException($compared === 0
+                ? '--base has none of the template files of --custom: it is not a templates/emails directory of the release the shop ran'
+                : 'no template in --custom equals its file in --base: --base is not the release the shop ran (every template would be frozen)');
+        }
         ksort($changed);
         $rows = [];
+        ksort($missing);
+        foreach ($missing as $template => $locales) {
+            foreach ($locales as $locale => $parts) {
+                $rows[] = ['template' => (string)$template, 'locale' => (string)$locale, 'parts' => $parts, 'status' => 'skipped',
+                    'message' => 'not in --base: cannot tell whether the shop changed it'];
+            }
+        }
         foreach ($changed as $template => $locales) {
             ksort($locales);
             foreach ($locales as $locale => $parts) {
@@ -451,11 +481,14 @@ class EmailTemplates {
         $hiddenNames = [];
         if (preg_match_all('~<style\b[^>]*>(.*?)(?:</style\s*>|$)~is', $html, $styles)) {
             foreach ($styles[1] as $css) {
-                preg_match_all('~([^{}]+)\{([^{}]*)\}~', $css, $rules, PREG_SET_ORDER);
+                preg_match_all('~([^{}]+)\{([^{}]*)\}~', self::normalizedCss($css), $rules, PREG_SET_ORDER);
                 foreach ($rules as [, $selectors, $declarations]) {
                     if (!self::hidesContent($declarations)) continue;
-                    preg_match_all('~[.#]([\w-]+)~', $selectors, $m);
-                    foreach ($m[1] as $name) $hiddenNames[strtolower($name)] = true;
+                    foreach (explode(',', $selectors) as $selector) {
+                        // A rule hiding by element, attribute or "*" can hide any part of the message: nothing counts as seen.
+                        if (!preg_match_all('~[.#]([\w-]+)~', $selector, $m)) return '';
+                        foreach ($m[1] as $name) $hiddenNames[strtolower($name)] = true;
+                    }
                 }
             }
         }
@@ -480,14 +513,19 @@ class EmailTemplates {
                 if ($hidden === 0) $visible .= $whole;
                 continue;
             }
+            // A closed <details> shows only its <summary>.
             $hides = isset($neverShown[$name]) || preg_match('~(?:^|\s)hidden(?:\s|=|/|$)~i', $attrs)
+                || ($name === 'details' && !preg_match('~(?:^|\s)open(?:\s|=|/|$)~i', $attrs))
                 || (preg_match('~\sstyle\s*=\s*(?:"([^"]*)"|\'([^\']*)\')~i', $attrs, $style) && self::hidesContent($style[1] . ($style[2] ?? '')));
             if (!$hides && $hiddenNames && preg_match_all('~\s(?:class|id)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')~i', $attrs, $refs, PREG_SET_ORDER)) {
                 foreach ($refs as $ref) {
                     foreach (preg_split('/\s+/', strtolower($ref[1] . ($ref[2] ?? ''))) ?: [] as $ref1) if (isset($hiddenNames[$ref1])) $hides = true;
                 }
             }
-            if ($hidden === 0 && !$hides) $visible .= $whole;
+            // Of the attributes only a link target is seen (a title or alt text is not the information itself).
+            if ($hidden === 0 && !$hides) {
+                $visible .= '<' . $name . (preg_match('~\shref\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+)~i', $attrs, $href) ? $href[0] : '') . '>';
+            }
             if (isset($void[$name]) || str_ends_with(rtrim($attrs), '/')) continue;
             $stack[] = [$name, (bool)$hides];
             if ($hides) $hidden++;
@@ -496,9 +534,40 @@ class EmailTemplates {
         return $visible;
     }
 
+    /**
+     * Declarations that keep text from being read: not displayed, invisible, transparent, zero or tiny size, clipped,
+     * scaled to nothing or moved off the screen. Read as the browser reads them (entities, CSS escapes, comments).
+     */
     private static function hidesContent(string $css): bool {
-        return preg_match('~(?:^|[;\s{])(?:display\s*:\s*none|visibility\s*:\s*hidden|mso-hide\s*:\s*all|color\s*:\s*transparent'
-            . '|(?:opacity|font-size|max-height)\s*:\s*(?:0+(?:\.0*)?|\.0+)(?:px|pt|em|rem|%)?\s*(?:!important\s*)?(?:;|$))~i', trim($css)) === 1;
+        $css = self::normalizedCss($css);
+        $zero = '-?(?:0+(?:\.0*)?|\.0+)(?:px|pt|em|rem|ex|ch|%|vh|vw|in|cm|mm|pc)?';
+        return preg_match('~(?:^|[;{])(?:display:none|visibility:(?:hidden|collapse)|content-visibility:hidden|mso-hide:all|color:transparent'
+            . '|(?:opacity|font-size|max-height|max-width|height|width|line-height):' . $zero . '(?:!important)?(?:;|$)'
+            . '|font-size:(?:[0-5](?:\.\d+)?px|[0-3](?:\.\d+)?pt|0?\.[0-4]\d*(?:em|rem))(?:!important)?(?:;|$)'
+            . '|opacity:0?\.0\d*|clip(?:-path)?:|transform:[^;]*scale[xy3d]*\(' . $zero . '[,)]'
+            . '|text-indent:-|(?:left|top|right|bottom|margin-left|margin-top):-\d{3,})~i', $css) === 1;
+    }
+
+    /** CSS as the browser applies it: HTML entities and CSS escapes decoded, comments and whitespace removed, lower case. */
+    private static function normalizedCss(string $css): string {
+        $css = html_entity_decode($css, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $css = (string)preg_replace('~/\*.*?(?:\*/|$)~s', '', $css);
+        $css = (string)preg_replace_callback('~\\\\([0-9a-fA-F]{1,6})\s?|\\\\(.)~su',
+            static fn(array $m): string => $m[1] !== '' ? mb_chr((int)hexdec($m[1]), 'UTF-8') : $m[2], $css);
+        return strtolower((string)preg_replace('/\s+/', '', $css));
+    }
+
+    /** Variables printed as {{name}} outside every {{#if}}/{{#each}} block (always rendered). @return array<string, true> */
+    private static function printedNames(string $source): array {
+        $names = [];
+        $depth = 0;
+        foreach (self::tokens($source) as $token) {
+            $token = trim($token);
+            if (preg_match('~^#(?:if|each) ~', $token)) $depth++;
+            elseif (preg_match('~^/(?:if|each)$~', $token)) $depth = max(0, $depth - 1);
+            elseif ($depth === 0 && preg_match('~^\w+$~', $token)) $names[$token] = true;
+        }
+        return $names;
     }
 
     /** Contents of every {{…}} placeholder. */

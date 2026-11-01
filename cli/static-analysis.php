@@ -209,7 +209,8 @@ $architectureBudgets = [
     // +1 coupling R10 UX6: statuses in the admin's language (OrderStatusLabels).
     // +4 lines R10 UX7: "New order" button on the list, the line editor on the detail (ManualOrders.php, loaded like Shipments.php).
     // +3 lines R11 H8: the order detail explains that accepting a purchase on invoice issues its invoice due on the terms.
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 929, 'functions' => 16, 'max_function_lines' => 313, 'coupling' => 22],
+    // +4 lines, +1 coupling R11: payment and refund amounts are typed in the order currency, not in cents (Money).
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 933, 'functions' => 16, 'max_function_lines' => 313, 'coupling' => 23],
     // R10 UX7: manual order form and the pending order's line editor; pricing and stock rules live in ManualOrder.
     'src/Entrypoints/Admin/ManualOrders.php' => ['lines' => 98, 'functions' => 5, 'max_function_lines' => 31, 'coupling' => 5],
     // +1 function, +3 coupling R10 UX3: handleOrderPaymentLink e-mails the customer a new payment link (PaymentLink, Orders, AuditLog).

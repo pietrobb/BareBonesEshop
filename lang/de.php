@@ -604,7 +604,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.invoice_purchase_hint' => 'Kauf auf Rechnung: Mit dem Status „In Bearbeitung“ nehmen Sie die Bestellung an; die Rechnung wird mit {days} Tagen Zahlungsziel ausgestellt. Markieren Sie sie als bezahlt, wenn das Geld eingeht.',
     'admin.order.payment_reference' => 'Zahlungsreferenz',
     'admin.order.last_event' => 'Letztes Ereignis',
-    'admin.order.amount_cents' => 'Betrag in Cent',
+    'admin.order.amount' => 'Betrag ({currency})',
     'admin.order.change_payment' => 'Zahlung ändern',
     'admin.order.send_payment_link' => 'Zahlungslink senden',
     'admin.title.order_new' => 'Neue Bestellung',

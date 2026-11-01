@@ -527,6 +527,90 @@ final class InvoiceService
         return $invoice;
     }
 
+    /**
+     * Credit note of money returned by hand without an item return (PaymentService::completeManualRefund()): the
+     * amount comes off the order's invoice in proportion to its VAT breakdown, one "Refund" row per VAT rate. It books
+     * nothing on the refund ledger (the payment ledger already holds the refund). Null when the order has no issued
+     * invoice, which is then nothing to correct. A repeated call with the same $refundKey returns the same credit note.
+     */
+    public static function creditRefund(int $orderId, int $amount, string $refundKey, string $reason = ''): ?array
+    {
+        if ($amount <= 0 || $refundKey === '') throw new InvalidArgumentException('A refund credit note needs an amount and the refund key');
+        $db = Db::get();
+        $existing = $db->prepare("SELECT * FROM invoices WHERE store_id = :store AND order_id = :order AND type = 'credit_note' AND credit_snapshot LIKE :key");
+        $existing->execute([':store' => StoreContext::current()->id(), ':order' => $orderId, ':key' => '%"refund_key":' . json_encode($refundKey) . '%']);
+        if ($row = $existing->fetch(PDO::FETCH_ASSOC)) return $row;
+        $source = self::byOrderId($orderId);
+        $order = Orders::byId($orderId);
+        if (!$source || !$order || (string)($source['type'] ?? '') !== 'invoice' || (string)($source['status'] ?? '') !== self::STATUS_ISSUED) return null;
+        if ($amount > (int)$source['total_gross']) throw new LogicException('The refund exceeds the invoice');
+
+        // Shares of the source VAT rates: gross in proportion (the last rate takes the remainder, so the cents add up), net likewise.
+        $rates = [];
+        foreach (json_decode((string)$source['vat_breakdown'], true) ?: [] as $key => $info) {
+            if (!is_array($info)) continue;
+            $gross = (int)($info['net'] ?? 0) + (int)($info['vat'] ?? 0);
+            if ($gross > 0) $rates[(string)$key] = ['gross' => $gross, 'net' => (int)($info['net'] ?? 0)];
+        }
+        if (!$rates) $rates['0'] = ['gross' => (int)$source['total_gross'], 'net' => (int)$source['total_gross']];
+        $sourceGross = array_sum(array_column($rates, 'gross'));
+        $lines = [];
+        $totals = ['gross' => 0, 'net' => 0, 'vat' => 0];
+        $breakdown = [];
+        $left = $amount;
+        $keys = array_keys($rates);
+        foreach ($keys as $i => $key) {
+            $gross = $i === count($keys) - 1 ? $left : intdiv($amount * $rates[$key]['gross'], $sourceGross);
+            $left -= $gross;
+            $net = (int)round($rates[$key]['net'] * $gross / $rates[$key]['gross']);
+            $lines[] = ['rate' => (float)$key, 'gross' => $gross, 'net' => $net, 'vat' => $gross - $net];
+            foreach (['gross' => $gross, 'net' => $net, 'vat' => $gross - $net] as $part => $value) $totals[$part] += $value;
+            $breakdown[$key] = ['net' => -$net, 'vat' => -($gross - $net)];
+        }
+        $creditData = ['version' => 1, 'kind' => 'refund', 'source_invoice_id' => (int)$source['id'], 'refund_key' => $refundKey,
+            'reason' => mb_substr($reason, 0, 500), 'currency' => (string)$source['currency'], 'lines' => $lines, 'totals' => $totals];
+        [$sellerCode, $store] = self::creditSeller($source, $order);
+        $issuedAt = ShopTime::dateIn('Y-m-d', StoreContext::timezoneFor($store));
+        $year = (int)substr($issuedAt, 0, 4);
+        $ownTransaction = !$db->inTransaction();
+        if ($ownTransaction) $db->beginTransaction();
+        try {
+            $number = self::allocateNumber($db, $sellerCode, 'credit_note', $year, self::numberPrefix($store['legal'] ?? [], 'credit_note'));
+            $relPath = sprintf('%d/%02d/%s.pdf', $year, (int)substr($issuedAt, 5, 2), rawurlencode($number));
+            $db->prepare("INSERT INTO invoices
+                (order_id, store_id, number, issued_at, delivery_date, due_date, pdf_path,
+                 total_net, total_vat, total_gross, currency, vat_breakdown,
+                 customer_snapshot, seller_snapshot, payment_method, locale, status, download_token,
+                 type, refers_to_invoice_id, vat_scenario, reverse_charge_note_key, financial_snapshot, credit_snapshot)
+                VALUES (:order, :store, :number, :issued, :delivery, :due, :path,
+                 :net, :vat, :gross, :currency, :breakdown, :customer, :seller, :payment, :locale, 'issued', :token,
+                 'credit_note', :source, :scenario, :note, :financial, :credit)")->execute([
+                ':order' => $orderId, ':store' => StoreContext::current()->id(), ':number' => $number,
+                ':issued' => $issuedAt, ':delivery' => $issuedAt, ':due' => $issuedAt, ':path' => $relPath,
+                ':net' => -$totals['net'], ':vat' => -$totals['vat'], ':gross' => -$totals['gross'],
+                ':currency' => (string)$source['currency'], ':breakdown' => json_encode($breakdown, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+                ':customer' => (string)$source['customer_snapshot'], ':seller' => (string)$source['seller_snapshot'],
+                ':payment' => (string)$source['payment_method'], ':locale' => (string)$source['locale'],
+                ':token' => self::tokenHash(bin2hex(random_bytes(32))), ':source' => (int)$source['id'], ':scenario' => $source['vat_scenario'] ?? null,
+                ':note' => $source['reverse_charge_note_key'] ?? null, ':financial' => (string)$source['financial_snapshot'],
+                ':credit' => json_encode($creditData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            ]);
+            $invoiceId = (int)$db->lastInsertId();
+            self::recordSeller($db, $invoiceId, $sellerCode);
+            AuditLog::log('credit_note', $invoiceId, null, ['source_invoice_id' => (int)$source['id'], 'refund_key' => $refundKey, 'gross' => $totals['gross']], 'Refund credit issued');
+            if ($ownTransaction) $db->commit();
+        } catch (Throwable $e) {
+            if ($ownTransaction && $db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+        $invoice = self::byId($invoiceId);
+        $rows = array_map(static fn(array $line): array => ['label' => 'refund', 'rate' => $line['rate'], 'net' => -$line['net'], 'gross' => -$line['gross']], $lines);
+        $pdf = self::renderPdf($invoice, $rows, json_decode((string)$source['seller_snapshot'], true) ?: [], json_decode((string)$source['customer_snapshot'], true) ?: [],
+            ['rates' => $breakdown, 'vat_total' => -$totals['vat'], 'services_only' => self::servicesOnly($order)]);
+        self::writePdf(self::resolvePdfPath((string)$invoice['pdf_path']), $pdf);
+        return $invoice;
+    }
+
     /** Re-render PDF for an existing invoice (e.g. file accidentally deleted). */
     public static function regeneratePdf(int $invoiceId): string
     {
@@ -1302,6 +1386,14 @@ final class InvoiceService
         return $label !== '' ? $label : '—';
     }
 
+    /** True when the order's payment has arrived (also after a later refund or dispute): its invoice is not a request to pay. */
+    private static function orderSettled(int $orderId): bool
+    {
+        $stmt = Db::get()->prepare('SELECT payment_status FROM orders WHERE id = :id');
+        $stmt->execute([':id' => $orderId]);
+        return in_array((string)$stmt->fetchColumn(), ['paid', 'partially_refunded', 'refunded', 'disputed'], true);
+    }
+
     private static function resolveLocale(array $order, array $store): string
     {
         return (string)($order['locale'] ?? $store['default_locale'] ?? 'en');
@@ -1642,7 +1734,9 @@ final class InvoiceService
         // Each line shows its OWN VAT rate (mixed-rate invoices: a 23% line and a 10% line coexist) and its price
         // without VAT; the lines add up to the totals below.
         foreach ($rows as $row) {
-            $name = isset($row['label']) ? $L[$row['label']] . ($row['label'] === 'discount' ? ' ' . self::rateKey($row['rate']) . '%' : '') : (string)$row['name'];
+            // A discount split per VAT rate is one "Zľava" row per rate: the rate is in the VAT column, never in the name,
+            // where "Zľava 23 %" read as a 23 % discount.
+            $name = isset($row['label']) ? $L[$row['label']] : (string)$row['name'];
             $ensureSpace(5, true);
             $pdf->text(20, $y, mb_substr($name, 0, 34), ['size' => 8]);
             if (isset($row['qty']) && $row['qty'] !== 0) {
@@ -1668,7 +1762,9 @@ final class InvoiceService
         $pdf->text(120, $y, $L['total_vat'] . ': ' . I18n::price($shownVat, $currency),
             ['size' => 9, 'align' => 'right', 'width' => 70]);
         $y += 5;
-        $pdf->text(120, $y, ($creditNote ? $L['credit_total'] : $L['total_gross']) . ': ' . I18n::price((int)$invoice['total_gross'], $currency),
+        // An invoice of an order already paid (card, gateway) states it was paid: no amount due, no IBAN to pay to.
+        $settled = !$creditNote && self::orderSettled((int)($invoice['order_id'] ?? 0));
+        $pdf->text(120, $y, ($creditNote ? $L['credit_total'] : ($settled ? $L['total_paid'] : $L['total_gross'])) . ': ' . I18n::price((int)$invoice['total_gross'], $currency),
             ['size' => 11, 'bold' => true, 'align' => 'right', 'width' => 70]);
         $y += 8;
 
@@ -1704,7 +1800,10 @@ final class InvoiceService
         $y += 5;
         // A credit note is paid out by the seller: no seller IBAN to pay to. An invoice carries the variable
         // symbol of the order's payment instructions, so a transfer made from either matches the same order.
-        if (!$creditNote && !empty($sellerSnap['iban'])) {
+        if ($settled) {
+            $pdf->text(20, $y, $L['paid_note'], ['size' => 9, 'bold' => true]);
+            $y += 5;
+        } elseif (!$creditNote && !empty($sellerSnap['iban'])) {
             $pdf->text(20, $y, $L['iban'] . ': ' . $sellerSnap['iban'], ['size' => 9]);
             $y += 5;
         }
@@ -1760,7 +1859,7 @@ final class InvoiceService
                 'col_item' => 'Položka', 'col_qty' => 'Množ.', 'col_unit_price' => 'J. cena',
                 'col_vat' => 'DPH', 'col_total' => 'Spolu',
                 'shipping' => 'Doprava',
-                'total_net' => 'Spolu bez DPH', 'total_vat' => 'DPH spolu', 'total_gross' => 'Spolu k úhrade',
+                'total_net' => 'Spolu bez DPH', 'total_vat' => 'DPH spolu', 'total_gross' => 'Spolu k úhrade', 'total_paid' => 'Spolu (uhradené)', 'paid_note' => 'Uhradené – nič neplaťte.',
                 'vat_recap' => 'Rekapitulácia DPH', 'col_net' => 'Základ', 'reverse_charge_note' => 'Dodanie tovaru do iného členského štátu oslobodené od dane podľa § 43 zákona o DPH (čl. 138 smernice 2006/112/ES)',
                 'export_note' => 'Vývoz tovaru oslobodený od dane podľa § 47 zákona o DPH (čl. 146 smernice 2006/112/ES)', 'non_vat_payer_note' => 'Predávajúci nie je platiteľom DPH',
                 'payment_method' => 'Spôsob úhrady', 'iban' => 'IBAN', 'variable_symbol' => 'Variabilný symbol',
@@ -1768,7 +1867,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Dodanie tovaru do iného členského štátu oslobodené od dane (čl. 138 smernice 2006/112/ES)', 'export_note_eu' => 'Vývoz tovaru oslobodený od dane (čl. 146 smernice 2006/112/ES)',
                 'reverse_charge_services_note' => 'Prenesenie daňovej povinnosti — daň odvádza príjemca služby (čl. 196 smernice 2006/112/ES)',
                 'credit_title' => 'Dobropis č.',
-                'refers_to' => 'Opravný doklad k faktúre č.', 'credit_total' => 'Spolu dobropis',
+                'refers_to' => 'Opravný doklad k faktúre č.', 'credit_total' => 'Spolu dobropis', 'refund' => 'Vrátenie platby',
                 'discount' => 'Zľava',
                 'payment_fee' => 'Poplatok za platbu',
                 'rounding' => 'Zaokrúhlenie',
@@ -1782,7 +1881,7 @@ final class InvoiceService
                 'col_item' => 'Položka', 'col_qty' => 'Množ.', 'col_unit_price' => 'J. cena',
                 'col_vat' => 'DPH', 'col_total' => 'Celkem',
                 'shipping' => 'Doprava',
-                'total_net' => 'Celkem bez DPH', 'total_vat' => 'DPH celkem', 'total_gross' => 'Celkem k úhradě',
+                'total_net' => 'Celkem bez DPH', 'total_vat' => 'DPH celkem', 'total_gross' => 'Celkem k úhradě', 'total_paid' => 'Celkem (uhrazeno)', 'paid_note' => 'Uhrazeno – nic neplaťte.',
                 'vat_recap' => 'Rekapitulace DPH', 'col_net' => 'Základ', 'reverse_charge_note' => 'Dodání zboží do jiného členského státu osvobozené od daně podle § 64 zákona o DPH (čl. 138 směrnice 2006/112/ES)',
                 'export_note' => 'Vývoz zboží osvobozený od daně podle § 66 zákona o DPH (čl. 146 směrnice 2006/112/ES)', 'non_vat_payer_note' => 'Prodávající není plátcem DPH',
                 'payment_method' => 'Způsob úhrady', 'iban' => 'IBAN', 'variable_symbol' => 'Variabilní symbol',
@@ -1790,7 +1889,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Dodání zboží do jiného členského státu osvobozené od daně (čl. 138 směrnice 2006/112/ES)', 'export_note_eu' => 'Vývoz zboží osvobozený od daně (čl. 146 směrnice 2006/112/ES)',
                 'reverse_charge_services_note' => 'Daň odvede zákazník — přenesení daňové povinnosti (čl. 196 směrnice 2006/112/ES)',
                 'credit_title' => 'Dobropis č.',
-                'refers_to' => 'Opravný daňový doklad k faktuře č.', 'credit_total' => 'Celkem dobropis',
+                'refers_to' => 'Opravný daňový doklad k faktuře č.', 'credit_total' => 'Celkem dobropis', 'refund' => 'Vrácení platby',
                 'discount' => 'Sleva',
                 'payment_fee' => 'Poplatek za platbu',
                 'rounding' => 'Zaokrouhlení',
@@ -1804,7 +1903,7 @@ final class InvoiceService
                 'col_item' => 'Pozycja', 'col_qty' => 'Ilość', 'col_unit_price' => 'Cena j.',
                 'col_vat' => 'VAT', 'col_total' => 'Razem',
                 'shipping' => 'Wysyłka',
-                'total_net' => 'Razem netto', 'total_vat' => 'VAT razem', 'total_gross' => 'Do zapłaty',
+                'total_net' => 'Razem netto', 'total_vat' => 'VAT razem', 'total_gross' => 'Do zapłaty', 'total_paid' => 'Razem (zapłacono)', 'paid_note' => 'Zapłacono – nie trzeba nic płacić.',
                 'vat_recap' => 'Rekapitulacja VAT', 'col_net' => 'Netto', 'reverse_charge_note' => 'Wewnątrzwspólnotowa dostawa towarów, stawka 0% (art. 42 ustawy o VAT, art. 138 dyrektywy 2006/112/WE)',
                 'export_note' => 'Eksport towarów, stawka 0% (art. 41 ust. 4 ustawy o VAT, art. 146 dyrektywy 2006/112/WE)', 'non_vat_payer_note' => 'Sprzedawca nie jest czynnym podatnikiem VAT',
                 'payment_method' => 'Forma płatności', 'iban' => 'IBAN', 'variable_symbol' => 'Nr referencyjny',
@@ -1812,7 +1911,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Wewnątrzwspólnotowa dostawa towarów zwolniona z podatku (art. 138 dyrektywy 2006/112/WE)', 'export_note_eu' => 'Eksport towarów zwolniony z podatku (art. 146 dyrektywy 2006/112/WE)',
                 'reverse_charge_services_note' => 'Odwrotne obciążenie — podatek rozlicza nabywca (art. 196 dyrektywy 2006/112/WE)',
                 'credit_title' => 'Faktura korygująca nr',
-                'refers_to' => 'Korekta faktury nr', 'credit_total' => 'Razem korekta',
+                'refers_to' => 'Korekta faktury nr', 'credit_total' => 'Razem korekta', 'refund' => 'Zwrot płatności',
                 'discount' => 'Rabat',
                 'payment_fee' => 'Opłata za płatność',
                 'rounding' => 'Zaokrąglenie',
@@ -1826,7 +1925,7 @@ final class InvoiceService
                 'col_item' => 'Tétel', 'col_qty' => 'Menny.', 'col_unit_price' => 'Egys. ár',
                 'col_vat' => 'ÁFA', 'col_total' => 'Összesen',
                 'shipping' => 'Szállítás',
-                'total_net' => 'Nettó összesen', 'total_vat' => 'ÁFA összesen', 'total_gross' => 'Fizetendő összesen',
+                'total_net' => 'Nettó összesen', 'total_vat' => 'ÁFA összesen', 'total_gross' => 'Fizetendő összesen', 'total_paid' => 'Összesen (kifizetve)', 'paid_note' => 'Kifizetve – nincs teendő.',
                 'vat_recap' => 'ÁFA összesítés', 'col_net' => 'Nettó', 'reverse_charge_note' => 'Adómentes Közösségen belüli termékértékesítés (Áfa tv. 89. §, 2006/112/EK irányelv 138. cikk)',
                 'export_note' => 'Adómentes termékexport (Áfa tv. 98. §, 2006/112/EK irányelv 146. cikk)', 'non_vat_payer_note' => 'Az eladó nem ÁFA-alany',
                 'payment_method' => 'Fizetési mód', 'iban' => 'IBAN', 'variable_symbol' => 'Hivatkozási szám',
@@ -1834,7 +1933,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Adómentes Közösségen belüli termékértékesítés (2006/112/EK irányelv 138. cikk)', 'export_note_eu' => 'Adómentes termékexport (2006/112/EK irányelv 146. cikk)',
                 'reverse_charge_services_note' => 'Fordított adózás — az adót a vevő fizeti (2006/112/EK irányelv 196. cikk)',
                 'credit_title' => 'Helyesbítő számla sz.',
-                'refers_to' => 'Az alábbi számla helyesbítése:', 'credit_total' => 'Helyesbítés összesen',
+                'refers_to' => 'Az alábbi számla helyesbítése:', 'credit_total' => 'Helyesbítés összesen', 'refund' => 'Visszatérítés',
                 'discount' => 'Kedvezmény',
                 'payment_fee' => 'Fizetési díj',
                 'rounding' => 'Kerekítés',
@@ -1848,7 +1947,7 @@ final class InvoiceService
                 'col_item' => 'Position', 'col_qty' => 'Menge', 'col_unit_price' => 'Einzelpreis',
                 'col_vat' => 'MwSt.', 'col_total' => 'Gesamt',
                 'shipping' => 'Versand',
-                'total_net' => 'Netto gesamt', 'total_vat' => 'MwSt. gesamt', 'total_gross' => 'Gesamtbetrag',
+                'total_net' => 'Netto gesamt', 'total_vat' => 'MwSt. gesamt', 'total_gross' => 'Gesamtbetrag', 'total_paid' => 'Gesamtbetrag (bezahlt)', 'paid_note' => 'Bezahlt – bitte nicht überweisen.',
                 'vat_recap' => 'MwSt.-Aufschlüsselung', 'col_net' => 'Netto', 'reverse_charge_note' => 'Steuerfreie innergemeinschaftliche Lieferung (§ 4 Nr. 1b i.V.m. § 6a UStG, Art. 138 MwStSystRL)',
                 'export_note' => 'Steuerfreie Ausfuhrlieferung (§ 4 Nr. 1a i.V.m. § 6 UStG, Art. 146 MwStSystRL)', 'non_vat_payer_note' => 'Der Verkäufer ist nicht umsatzsteuerpflichtig',
                 'payment_method' => 'Zahlungsart', 'iban' => 'IBAN', 'variable_symbol' => 'Verwendungszweck',
@@ -1856,7 +1955,7 @@ final class InvoiceService
                 'reverse_charge_note_eu' => 'Steuerfreie innergemeinschaftliche Lieferung (Art. 138 MwStSystRL)', 'export_note_eu' => 'Steuerfreie Ausfuhrlieferung (Art. 146 MwStSystRL)',
                 'reverse_charge_services_note' => 'Steuerschuldnerschaft des Leistungsempfängers — Reverse Charge (Art. 196 MwStSystRL)',
                 'credit_title' => 'Rechnungskorrektur Nr.',
-                'refers_to' => 'Korrektur zur Rechnung Nr.', 'credit_total' => 'Korrekturbetrag',
+                'refers_to' => 'Korrektur zur Rechnung Nr.', 'credit_total' => 'Korrekturbetrag', 'refund' => 'Rückerstattung',
                 'discount' => 'Rabatt',
                 'payment_fee' => 'Zahlungsgebühr',
                 'rounding' => 'Rundung',
@@ -1870,14 +1969,14 @@ final class InvoiceService
                 'col_item' => 'Artículo', 'col_qty' => 'Cant.', 'col_unit_price' => 'Precio unit.',
                 'col_vat' => 'IVA', 'col_total' => 'Total',
                 'shipping' => 'Envío',
-                'total_net' => 'Total sin IVA', 'total_vat' => 'IVA total', 'total_gross' => 'Total a pagar',
+                'total_net' => 'Total sin IVA', 'total_vat' => 'IVA total', 'total_gross' => 'Total a pagar', 'total_paid' => 'Total (pagado)', 'paid_note' => 'Pagado – no hay nada que pagar.',
                 'vat_recap' => 'Desglose del IVA', 'col_net' => 'Base', 'reverse_charge_note' => 'Entrega intracomunitaria de bienes exenta (art. 25 Ley 37/1992 del IVA, art. 138 Directiva 2006/112/CE)',
                 'export_note' => 'Exportación de bienes exenta (art. 21 Ley 37/1992 del IVA, art. 146 Directiva 2006/112/CE)', 'non_vat_payer_note' => 'El vendedor no está registrado a efectos del IVA',
                 'payment_method' => 'Forma de pago', 'iban' => 'IBAN', 'variable_symbol' => 'Referencia',
                 'ico' => 'N.º de registro', 'dic' => 'NIF', 'ic_dph' => 'NIF-IVA',
                 'reverse_charge_note_eu' => 'Entrega intracomunitaria de bienes exenta (art. 138 Directiva 2006/112/CE)', 'export_note_eu' => 'Exportación de bienes exenta (art. 146 Directiva 2006/112/CE)',
                 'reverse_charge_services_note' => 'Inversión del sujeto pasivo (art. 196 Directiva 2006/112/CE)',
-                'credit_title' => 'Factura rectificativa n.º', 'refers_to' => 'Rectifica la factura n.º', 'credit_total' => 'Total rectificado', 'discount' => 'Descuento',
+                'credit_title' => 'Factura rectificativa n.º', 'refers_to' => 'Rectifica la factura n.º', 'credit_total' => 'Total rectificado', 'refund' => 'Reembolso', 'discount' => 'Descuento',
                 'payment_fee' => 'Comisión de pago', 'rounding' => 'Redondeo', 'col_unit_net' => 'Precio unit. sin IVA', 'col_net_total' => 'Sin IVA',
             ],
             'en' => [
@@ -1887,14 +1986,14 @@ final class InvoiceService
                 'col_item' => 'Item', 'col_qty' => 'Qty', 'col_unit_price' => 'Unit price',
                 'col_vat' => 'VAT', 'col_total' => 'Total',
                 'shipping' => 'Shipping',
-                'total_net' => 'Total net', 'total_vat' => 'Total VAT', 'total_gross' => 'Total due',
+                'total_net' => 'Total net', 'total_vat' => 'Total VAT', 'total_gross' => 'Total due', 'total_paid' => 'Total (paid)', 'paid_note' => 'Paid – nothing to pay.',
                 'vat_recap' => 'VAT breakdown', 'col_net' => 'Net', 'reverse_charge_note' => 'Exempt intra-Community supply of goods (Article 138 of Directive 2006/112/EC)',
                 'export_note' => 'Exempt export of goods (Article 146 of Directive 2006/112/EC)', 'non_vat_payer_note' => 'The seller is not registered for VAT',
                 'payment_method' => 'Payment method', 'iban' => 'IBAN', 'variable_symbol' => 'Reference',
                 'ico' => 'Company ID', 'dic' => 'Tax ID', 'ic_dph' => 'VAT ID',
                 'reverse_charge_services_note' => 'Reverse charge — VAT to be accounted for by the recipient (Article 196 of Directive 2006/112/EC)',
                 'credit_title' => 'Credit note No.',
-                'refers_to' => 'Corrects invoice No.', 'credit_total' => 'Total credited',
+                'refers_to' => 'Corrects invoice No.', 'credit_total' => 'Total credited', 'refund' => 'Refund',
                 'discount' => 'Discount',
                 'payment_fee' => 'Payment fee',
                 'rounding' => 'Rounding',

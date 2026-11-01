@@ -289,7 +289,7 @@ function pageOrder(): void {
                     <option value="<?= esc($s) ?>"><?= esc(OrderStatusLabels::payment($s)) ?></option>
                     <?php endforeach; ?>
                 </select>
-                <input name="amount" aria-label="<?= esc(I18n::t('admin.order.amount_cents')) ?>" type="number" min="0" step="1" placeholder="<?= esc(I18n::t('admin.order.amount_cents')) ?>">
+                <input name="amount" aria-label="<?= esc(I18n::format('admin.order.amount', ['currency' => strtoupper((string)$order['currency'])])) ?>" inputmode="decimal" placeholder="<?= esc(I18n::format('admin.order.amount', ['currency' => strtoupper((string)$order['currency'])])) ?>" data-amount-input>
                 <input name="note" aria-label="<?= esc(I18n::t('admin.common.note')) ?>" placeholder="<?= esc(I18n::t('admin.order.note_placeholder')) ?>">
                 <button class="btn btn-primary btn-sm" type="submit"><?= esc(I18n::t('admin.order.change_payment')) ?></button>
             </form>
@@ -297,7 +297,7 @@ function pageOrder(): void {
             <?php if ($canRefund && $refundableBalance > 0 && PaymentService::canPaymentTransition((string)($order['payment_status'] ?? 'pending'), 'refund_pending')): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_request" style="margin-top:.5rem">
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-                <input name="amount" aria-label="<?= esc(I18n::t('admin.order.amount_cents')) ?>" type="number" min="1" max="<?= $refundableBalance ?>" step="1" value="<?= $refundableBalance ?>">
+                <input name="amount" aria-label="<?= esc(I18n::format('admin.order.amount', ['currency' => strtoupper((string)$order['currency'])])) ?>" inputmode="decimal" value="<?= esc(Money::decimal($refundableBalance, (string)$order['currency'])) ?>" data-amount-input>
                 <input name="note" aria-label="<?= esc(I18n::t('admin.order.refund_reason')) ?>" placeholder="<?= esc(I18n::t('admin.order.refund_reason')) ?>" required>
                 <button class="btn btn-danger btn-sm" type="submit"><?= esc(I18n::t('admin.order.request_refund')) ?></button>
             </form>
@@ -322,7 +322,7 @@ function pageOrder(): void {
             <?php if ($canRefund && $refundableBalance > 0 && PaymentService::refundsByHand($order)): ?>
             <form method="post" action="admin.php?p=order&id=<?= $id ?>&action=refund_manual" style="margin-top:.5rem" data-manual-refund>
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-                <input name="amount" aria-label="<?= esc(I18n::t('admin.order.amount_cents')) ?>" type="number" min="1" max="<?= $refundableBalance ?>" step="1" value="<?= $refundableBalance ?>">
+                <input name="amount" aria-label="<?= esc(I18n::format('admin.order.amount', ['currency' => strtoupper((string)$order['currency'])])) ?>" inputmode="decimal" value="<?= esc(Money::decimal($refundableBalance, (string)$order['currency'])) ?>" data-amount-input>
                 <input name="note" aria-label="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" placeholder="<?= esc(I18n::t('admin.order.manual_refund_note')) ?>" required>
                 <button class="btn btn-sm" type="submit"><?= esc(I18n::t('admin.order.manual_refund')) ?></button>
             </form>
@@ -345,9 +345,8 @@ function pageOrder(): void {
             <?php endforeach; ?>
         </table>
         <div style="text-align:right;margin-top:.5rem">
-            <?php $totalLabels = ['subtotal' => 'admin.order.subtotal', 'discount' => 'discount', 'shipping' => 'admin.order.shipping', 'payment_fee' => 'admin.order.payment_fee', 'vat' => 'admin.order.vat', 'vat_included' => 'admin.order.vat_included']; ?>
             <?php foreach (Orders::totalLines($order) as $totalLine): ?>
-            <p data-order-total="<?= esc($totalLine['key']) ?>"><?= esc(I18n::t($totalLabels[$totalLine['key']])) ?>: <?= I18n::price($totalLine['cents'], $order['currency']) ?></p>
+            <p data-order-total="<?= esc($totalLine['key']) ?>"><?= esc(I18n::t(Orders::TOTAL_LINE_LABELS[$totalLine['key']])) ?>: <?= I18n::price($totalLine['cents'], $order['currency']) ?></p>
             <?php endforeach; ?>
             <?php $pickupPoint = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true)['pickup_point'] ?? null; if (is_array($pickupPoint)): ?>
             <p><?= esc(I18n::t('pickup_point')) ?>: <?= esc((string)($pickupPoint['name'] ?? '')) ?> (ID <?= esc((string)($pickupPoint['id'] ?? '')) ?>) — <?= esc((string)($pickupPoint['address'] ?? '')) ?></p>
@@ -709,7 +708,12 @@ function handleOrderPaymentTransition(): void {
     }
 
     $newStatus = trim((string)($_POST['new_payment_status'] ?? ''));
-    $amount = max(0, Security::int($_POST['amount'] ?? 0));
+    $amount = trim((string)($_POST['amount'] ?? '')) === '' ? 0 : Money::parseInput($_POST['amount'], (string)$order['currency']);
+    if ($amount < 0) {
+        setFlash('err', I18n::t('admin.order.msg.refund_amount'));
+        header("Location: admin.php?p=order&id={$orderId}");
+        exit;
+    }
     $note = trim((string)($_POST['note'] ?? ''));
 
     if (!in_array($newStatus, adminManualPaymentTransitions($order), true)) {
@@ -750,7 +754,7 @@ function handleOrderRefundRequest(): void {
         exit;
     }
 
-    $amount = Security::int($_POST['amount'] ?? 0);
+    $amount = Money::parseInput($_POST['amount'] ?? '', (string)$order['currency']);
     $reason = trim((string)($_POST['reason'] ?? $_POST['note'] ?? ''));
     $refundableBalance = PaymentService::claimableRefund($orderId);
     if ($amount <= 0 || $amount > $refundableBalance || $reason === '') {
@@ -817,7 +821,7 @@ function handleOrderManualRefund(): void {
         exit;
     }
 
-    $amount = Security::int($_POST['amount'] ?? 0);
+    $amount = Money::parseInput($_POST['amount'] ?? '', (string)$order['currency']);
     $note = trim((string)($_POST['note'] ?? ''));
     if ($amount <= 0 || $amount > PaymentService::claimableRefund($orderId) || $note === '' || !PaymentService::refundsByHand($order)) {
         setFlash('err', I18n::t('admin.order.msg.refund_amount'));

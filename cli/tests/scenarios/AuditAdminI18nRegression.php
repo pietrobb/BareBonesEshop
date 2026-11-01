@@ -320,7 +320,7 @@ try {
     $a154Run($a156Order + ['action' => 'status'], ['new_status' => 'a156-unknown', 'note' => '']);
     $a156Check('A15.6 de: order detail and its invalid-status flash are German', $a154Run($a156Order),
         ['Ungültiger Bestellstatus.', 'Zahlungsart: A156 Bank', 'Überweisungsreferenz: ', 'Zahlungsreferenz: ', 'Zahlungsstatus: ', 'Status ändern',
-            'Zahlung ändern', 'Betrag in Cent', 'Notiz...', 'Für den aktuellen Zahlungsstatus ist keine Erstattung möglich.', 'Positionen', 'Zwischensumme: ',
+            'Zahlung ändern', 'Betrag (EUR)', 'Notiz...', 'Für den aktuellen Zahlungsstatus ist keine Erstattung möglich.', 'Positionen', 'Zwischensumme: ',
             'Gesamt: ', 'Zahlungsverlauf', 'Noch keine Zahlungsereignisse erfasst.', 'Rechnungen', 'Noch keine Rechnung ausgestellt.', '← Zurück zur Liste']);
     foreach ([
         'payment_transition' => [['new_payment_status' => 'refunded'], 'Ungültiger Zahlungsübergang.'],

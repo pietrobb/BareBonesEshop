@@ -889,8 +889,8 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
                     'items'          => $orderItems,
                     'shipping_cost'  => (int)$order['shipping_cost'],
                     'financial_snapshot_id' => $financialSnapshot['fingerprint'],
-                    'success_url'    => $baseUrl . '/?page=order-done&order=' . rawurlencode($order['order_number']) . '&confirmation_token=' . rawurlencode($confirmationToken) . '&session_id={CHECKOUT_SESSION_ID}',
-                    'cancel_url'     => $baseUrl . '/?page=checkout-cancel&order=' . rawurlencode($order['order_number']),
+                    'success_url'    => Template::withOrderLang($baseUrl . '/?page=order-done&order=' . rawurlencode($order['order_number']) . '&confirmation_token=' . rawurlencode($confirmationToken), $order) . '&session_id={CHECKOUT_SESSION_ID}',
+                    'cancel_url'     => Template::withOrderLang($baseUrl . '/?page=checkout-cancel&order=' . rawurlencode($order['order_number']), $order),
                     // Provider-specific notification endpoint (PayU notifyUrl, GoPay notification_url, ...).
                     'notify_url'     => ApiRoute::paymentWebhook($baseUrl, $paymentProvider),
                 ], $payment, $paymentProvider);

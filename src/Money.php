@@ -25,4 +25,18 @@ final class Money {
         $decimals = self::decimals($currency);
         return number_format(self::round($cents, $currency) / 100, $decimals, '.', '');
     }
+
+    /**
+     * An amount typed in the currency ("12,50", "12.50", "1 299") as cents; -1 when it is not an amount
+     * or has more decimals than the currency shows (CZK/HUF are whole units).
+     */
+    public static function parseInput(mixed $raw, string $currency): int {
+        if (!is_string($raw)) return -1;
+        try {
+            $cents = Import::parsePriceToCents($raw);
+        } catch (\InvalidArgumentException $e) {
+            return -1;
+        }
+        return self::round($cents, $currency) === $cents ? $cents : -1;
+    }
 }

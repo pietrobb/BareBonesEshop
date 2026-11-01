@@ -337,18 +337,13 @@ class OrderWorkflow {
     }
 
     /**
-     * Refund: return deferred email job
+     * Refunded: restore stock. The customer's refund mail goes out with the money itself, once per refund booked on
+     * the payment ledger (PaymentService::queueRefundMail()), also for partial and RMA refunds; a status change that
+     * moved no money announces no refund.
      */
     private static function handleRefund(array $order): array {
         Orders::restoreStock((int)$order['id']);
-        return [
-            ['email_send', [
-                'template' => 'refund_issued',
-                'to'       => $order['customer_email'],
-                'locale'   => $order['locale'] ?? '',
-                'order_id' => $order['id'],
-            ], 5],
-        ];
+        return [];
     }
 
     /**

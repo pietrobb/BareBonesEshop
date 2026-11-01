@@ -115,6 +115,25 @@ class Template {
         return self::baseUrl() . $prefix . ($suffix === '/' ? '/' : $suffix);
     }
 
+    /**
+     * The order's language when it is a further language of the active store (chosen with ?lang=, e.g. Spanish in a
+     * store whose own language is English), else null: the store's URL already shows its own language.
+     */
+    public static function orderSecondaryLocale(array $order): ?string {
+        if (!StoreContext::hasCurrent()) return null;
+        $context = StoreContext::current();
+        $locale = strtolower((string)($order['locale'] ?? ''));
+        $languages = array_map('strtolower', array_map('strval', (array)($context->config()['languages'] ?? [])));
+        return $locale !== '' && $locale !== strtolower($context->defaultLocale()) && in_array($locale, $languages, true) ? $locale : null;
+    }
+
+    /** $url of a page about $order (after checkout, payment return, links in its e-mails) in the order's language (?lang=). */
+    public static function withOrderLang(string $url, array $order): string {
+        $locale = self::orderSecondaryLocale($order);
+        if ($locale === null || preg_match('/[?&]lang=/', $url)) return $url;
+        return $url . (str_contains($url, '?') ? '&' : '?') . 'lang=' . rawurlencode($locale);
+    }
+
     /** Public versioned asset URLs declared by the active theme manifest. */
     public static function assets(): array {
         $result = ['css' => [], 'js' => []];
