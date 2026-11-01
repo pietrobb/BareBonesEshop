@@ -8,12 +8,16 @@
  *  - a cart gets at most one reminder (claimed atomically before the mail job is queued),
  *  - a cart that became an order is linked to it and never reminded,
  *  - a cart whose e-mail ordered later, or opted out, is never reminded,
+ *  - an e-mail address gets at most one reminder per email_window_hours (default 7 days), however many carts
+ *    (sessions, stores) were captured with it — the consent box cannot turn the shop into a mail cannon,
  *  - carts older than max_age_hours are never reminded (no mail burst after enabling).
  */
 class AbandonedCarts {
     public const STATUS_SENT = 'sent';
     public const STATUS_ORDERED = 'ordered';
     public const STATUS_SUPPRESSED = 'suppressed';
+    /** Another cart of the same e-mail address was reminded within email_window_hours. */
+    public const STATUS_LIMITED = 'limited';
     /** Checkout consent (config checkout_consents) that allows the reminder e-mail. */
     public const CONSENT_KEY = 'cart_reminder';
 
@@ -95,6 +99,7 @@ class AbandonedCarts {
     public static function sweep(array $options = []): int {
         $hours = max(1, (int)($options['delay_hours'] ?? 24));
         $maxAge = max($hours + 1, (int)($options['max_age_hours'] ?? 72));
+        $emailWindow = max(1, (int)($options['email_window_hours'] ?? 168));
         $baseUrl = rtrim((string)($options['base_url'] ?? ''), '/');
         if (!preg_match('#^https?://#i', $baseUrl)) {
             throw new RuntimeException('Cart reminders need an absolute app_url for recovery and opt-out links');
@@ -120,6 +125,12 @@ class AbandonedCarts {
             }
             if (self::isSuppressed($email)) {
                 self::close((int)$cart['id'], self::STATUS_SUPPRESSED);
+                continue;
+            }
+            $recent = $db->prepare("SELECT 1 FROM abandoned_carts WHERE LOWER(customer_email) = :email AND reminded_at >= {$ago($emailWindow)} LIMIT 1");
+            $recent->execute([':email' => $email]);
+            if ($recent->fetchColumn() !== false) {
+                self::close((int)$cart['id'], self::STATUS_LIMITED);
                 continue;
             }
             $now = Db::now();

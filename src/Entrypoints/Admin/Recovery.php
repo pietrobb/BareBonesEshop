@@ -47,6 +47,7 @@ function pageAbandonedCarts(): void {
         AbandonedCarts::STATUS_SENT => I18n::t('admin.recovery.reminder_sent'),
         AbandonedCarts::STATUS_ORDERED => I18n::t('admin.recovery.ordered'),
         AbandonedCarts::STATUS_SUPPRESSED => I18n::t('admin.recovery.suppressed'),
+        AbandonedCarts::STATUS_LIMITED => I18n::t('admin.recovery.limited'),
     ];
     ?>
     <h1><?= esc(I18n::t('admin.title.abandoned_carts')) ?> <span class="muted">(<?= count($carts) ?>)</span></h1>

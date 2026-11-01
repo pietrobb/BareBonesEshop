@@ -10,7 +10,9 @@ function adminStoreSettingsAllowed(string $storeId): bool {
 }
 
 function pageStoreSettings(): void {
-    $stores = StoreSettings::load()['stores'] ?? [];
+    $settings = StoreSettings::load();
+    $stores = $settings['stores'] ?? [];
+    $defaultId = (string)($settings['default_store'] ?? '');
     $writable = StoreSettings::writable();
     ?>
     <h1><?= esc(I18n::t('admin.nav.stores')) ?></h1>
@@ -53,6 +55,9 @@ function pageStoreSettings(): void {
             <label style="display:block"><input type="checkbox" name="vat_registered" value="1"<?= ($draft !== null ? ($draft['vat_registered'] ?? '') === '1' : !empty($legal['vat_registered'])) ? ' checked' : '' ?>> <?= esc(I18n::t('admin.stores.field.vat_registered')) ?></label>
             <?php endif; ?>
             <label style="display:block"><input type="checkbox" name="oss_enabled" value="1"<?= ($draft !== null ? ($draft['oss_enabled'] ?? '') === '1' : !empty($store['oss_enabled'])) ? ' checked' : '' ?>> <?= esc(I18n::t('admin.stores.field.oss_enabled')) ?></label>
+            <?php if ($storeId !== $defaultId): ?>
+            <input type="hidden" name="public" value="0"><label style="display:block"><input type="checkbox" name="public" value="1" data-store-public<?= ($draft !== null ? ($draft['public'] ?? '') === '1' : StoreContext::isPublicConfig($store)) ? ' checked' : '' ?>> <?= esc(I18n::t('admin.stores.field.public')) ?></label>
+            <?php endif; ?>
             <p style="margin-top:.5rem"><button class="btn btn-primary" type="submit"<?= $writable ? '' : ' disabled' ?>><?= esc(I18n::t('admin.btn.save')) ?></button></p>
         </form>
     </div>

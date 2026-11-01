@@ -74,6 +74,7 @@
         "pl": {
             "id": "pl",
             "name": "Sklep polski",
+            "sample": true,
             "domains": [],
             "catalog_scope": "default",
             "provider_scope": "pl",
@@ -107,6 +108,7 @@
         "hu": {
             "id": "hu",
             "name": "Magyar üzlet",
+            "sample": true,
             "domains": [],
             "catalog_scope": "default",
             "provider_scope": "hu",
@@ -140,6 +142,7 @@
         "de": {
             "id": "de",
             "name": "Deutscher Shop",
+            "sample": true,
             "domains": [],
             "catalog_scope": "default",
             "provider_scope": "default",
@@ -173,6 +176,7 @@
         "us": {
             "id": "us",
             "name": "US Store",
+            "sample": true,
             "domains": [],
             "catalog_scope": "default",
             "provider_scope": "default",

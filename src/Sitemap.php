@@ -65,6 +65,7 @@ class Sitemap {
             } catch (InvalidArgumentException) {
                 continue; // store without a storefront channel has no public URLs
             }
+            if (!$store->isPublic()) continue;
             $stores[(string)$storeId] = [
                 'locale' => (string)($store->config()['default_locale'] ?? 'en'),
                 'prefix' => (string)($store->config()['url_prefix'] ?? ''),

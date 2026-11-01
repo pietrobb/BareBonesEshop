@@ -85,7 +85,7 @@ function orderStatusView(array $order): array {
         'date' => I18n::dateTime((string)$order['created_at']),
         'status' => OrderStatusLabels::order((string)$order['status']),
         'payment_status' => OrderStatusLabels::payment((string)($order['payment_status'] ?? 'pending')),
-        'tracking' => trim((string)($order['carrier'] ?? '') . ' ' . (string)($order['tracking_number'] ?? '')),
+        'tracking' => trim(MethodLabels::carrier((string)($order['carrier'] ?? '')) . ' ' . (string)($order['tracking_number'] ?? '')),
         'items' => array_map(static fn(array $item): array => ['name' => (string)$item['name'], 'quantity' => (int)$item['quantity']], Orders::items((int)$order['id'])),
         'total' => I18n::price((int)$order['total'], $currency),
         'pay_url' => PaymentLink::payable($order) ? PaymentLink::issue($order) : '',

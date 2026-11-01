@@ -151,16 +151,21 @@ final class StoreSettings {
             if ($legal['vat_registered'] && $legal['ic_dph'] === '') $errors[] = I18n::t('admin.stores.err.vat_id');
         }
         if ($storeName === '') $errors[] = I18n::format('admin.stores.err.required', ['fields' => I18n::t('admin.stores.field.store_name')]);
+        // The default store is always public. A hidden store goes public only once its own seller identity is entered.
+        $isDefault = $storeId === (string)($data['default_store'] ?? '');
+        $public = $isDefault || (isset($input['public']) ? $input['public'] === '1' : StoreContext::isPublicConfig($store));
+        if ($public && !StoreContext::isPublicConfig($store) && !$sharesSeller && Setup::legalIdentityProblems($legal) !== []) $errors[] = I18n::t('admin.stores.err.publish_example');
         if ($errors) return ['ok' => false, 'errors' => $errors];
 
         $before = $store;
         $store['name'] = $storeName;
         $store['oss_enabled'] = ($input['oss_enabled'] ?? '') === '1';
         $store['legal'] = $legal;
+        if ($public) unset($store['public']); else $store['public'] = false;
         $data['stores'][$storeId] = $store;
         if (!self::write($data)) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.write')]];
-        AuditLog::log('store_settings', 0, ['store' => $storeId, 'name' => $before['name'] ?? null, 'oss_enabled' => $before['oss_enabled'] ?? null, 'legal' => $before['legal'] ?? null],
-            ['store' => $storeId, 'name' => $store['name'], 'oss_enabled' => $store['oss_enabled'], 'legal' => $store['legal']]);
+        AuditLog::log('store_settings', 0, ['store' => $storeId, 'name' => $before['name'] ?? null, 'oss_enabled' => $before['oss_enabled'] ?? null, 'public' => StoreContext::isPublicConfig($before), 'legal' => $before['legal'] ?? null],
+            ['store' => $storeId, 'name' => $store['name'], 'oss_enabled' => $store['oss_enabled'], 'public' => $public, 'legal' => $store['legal']]);
         return ['ok' => true, 'errors' => []];
     }
 
