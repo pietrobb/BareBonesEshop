@@ -39,6 +39,7 @@ class EmailTemplates {
         'complaint_number' => 'REK-45-A1B2C3', 'item_name' => 'Tričko Basic', 'defect' => 'Po prvom praní sa rozpáral šev.', 'remedy' => 'Výmena za nový tovar',
         'decide_by' => '2026-11-13', 'status' => 'Uznaná', 'decision_note' => 'Vadu uznávame, nový kus sme odoslali.',
         'pay_url' => 'https://shop.example.com/?page=pay&token=sample', 'valid_days' => '7',
+        'claim_url' => 'https://shop.example.com/?page=account-claim&token=sample', 'valid_hours' => '24',
     ];
 
     /** Template names that have a default HTML file in any locale. */

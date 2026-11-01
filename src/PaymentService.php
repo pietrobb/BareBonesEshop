@@ -798,15 +798,21 @@ class PaymentService {
     public static function reportForeignCapture(array $order, array $refs): bool {
         $refs = array_values(array_filter(array_map('strval', $refs), static fn(string $ref): bool => $ref !== ''));
         if ($refs === []) return false;
-        $known = [(string)($order['payment_id'] ?? '')];
-        $stmt = Db::get()->prepare("SELECT provider_ref, raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store");
+        // Only captures count as known. A session merely opened for the order (one per "pay again") is no proof that its
+        // money was booked: paid as well, it is the second capture. orders.payment_id names the newest session, not the
+        // captured one, so it only counts for a capture booked without its references (by hand, older versions).
+        $known = [];
+        $bareCapture = false;
+        $stmt = Db::get()->prepare("SELECT raw_response FROM payment_transactions WHERE order_id = :order AND store_id = :store");
         $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $tx) {
-            // The ledger row of a capture carries the order's payment_id; the captured references sit in its payload.
             $raw = json_decode((string)($tx['raw_response'] ?? ''), true);
-            $known[] = (string)$tx['provider_ref'];
-            foreach (is_array($raw) ? self::captureRefs($raw) : [] as $ref) $known[] = $ref;
+            if (!is_array($raw) || ($raw['event_type'] ?? '') !== 'payment.paid') continue;
+            $captured = self::captureRefs($raw);
+            if ($captured === []) $bareCapture = true;
+            foreach ($captured as $ref) $known[] = $ref;
         }
+        if ($known === [] || $bareCapture) $known[] = (string)($order['payment_id'] ?? '');
         if (array_intersect($refs, $known) !== []) return false;
         IncidentMonitor::report('payment.duplicate_capture', 'payment', 'critical', ['order_id' => (int)$order['id']]);
         AuditLog::log('payment_duplicate_capture', (int)$order['id'], (string)($order['payment_status'] ?? ''), (string)($order['payment_status'] ?? ''), 'Capture under another provider reference: ' . implode(', ', $refs));
@@ -1004,6 +1010,11 @@ class PaymentService {
         $currency = strtolower((string)($data['currency'] ?? ''));
         if (in_array($eventType, ['payment.paid', 'refund.succeeded'], true)
             && ($currency !== $orderCurrency || $amount <= 0 || ($eventType === 'payment.paid' && $amount !== $total))) {
+            // Money taken for another amount (e.g. a session opened before an edit of the total) is never booked: the
+            // merchant must refund or settle it by hand.
+            if ($eventType === 'payment.paid' && !IncidentMonitor::reportedForOrder('payment.amount_mismatch', $orderId)) {
+                IncidentMonitor::report('payment.amount_mismatch', 'payment', 'critical', ['order_id' => $orderId]);
+            }
             throw new RuntimeException("Payment webhook {$eventType} amount/currency does not match order #{$orderId}");
         }
         if ($eventType === 'refund.succeeded' || $eventType === 'refund.reported') {

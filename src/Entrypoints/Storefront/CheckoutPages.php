@@ -205,10 +205,11 @@ function renderOrderDone(string $orderNum): string {
     if ($order && !CheckoutSession::verifyConfirmation((int)$order['id'], $confirmationToken, CheckoutSession::browserSessionId())) $order = null;
     // Never echo an unverified ?order= value back: only a confirmed order shows its number.
     if (!$order) return Template::render('storefront/status-message', ['message' => $t('order_done_unverified')]);
-    $accountError = $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'create_account' ? createGuestAccount($order) : '';
+    $accountOutcome = $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'create_account' ? requestGuestAccount($order) : [];
     $payUrl = '';
     $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
-    $status = (string)($order['payment_status'] ?? 'pending');
+    // A session opened after an earlier failure, paid but not yet confirmed, is pending, not failed.
+    $status = PaymentLink::returnStatus($order);
     // Back from the gateway: a declined payment can be retried; otherwise the payment is
     // done or being confirmed by the webhook and must not be offered again.
     $pending = CheckoutSession::pendingPayment();
@@ -238,7 +239,7 @@ function renderOrderDone(string $orderNum): string {
         'payment_error' => $paymentFailed ? str_replace('{order}', (string)$order['order_number'], $t($retry ? 'order_done.payment_retry' : 'order_done.payment_failed')) : '',
         'bank_transfer_html' => BankTransferInstructions::html($order),
         'email_message' => $paymentFailed ? '' : $t('order_email'), 'home_url' => Template::storeUrl('/'), 'continue_label' => $t('continue_shopping'),
-        'account_offer' => guestAccountOfferView($order, $accountError),
+        'account_offer' => guestAccountOfferView($order, $accountOutcome),
     ]);
 }
 
