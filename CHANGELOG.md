@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 2.1.0 — 2026-11-01
+
+**Update signing key rotated.** The secret key that signed v1.9.0 was lost, so v2.1.0 is the first
+release signed with a new Ed25519 key. `releases/update-public.key` now holds the new public key; its
+SHA-256 fingerprint is
+
+    78d6474a733bcf39f73a58e64b28c20fcd5e9f59b6e6d2b38e481b2b66460e53
+
+On every shop, before applying the v2.1.0 package: compare the fingerprint of `releases/update-public.key`
+from the `v2.1.0` tag with the value above, replace the file that `update_public_key` points to, then run
+`php cli/update.php doctor --package=...`. Packages signed with the old key are refused from then on; do
+not apply an old-key package that was not already verified (README › *Signing key rotation*).
+
+The signed packages are attached to the GitHub release `v2.1.0`: `update-2.0.0-2.1.0` (installed v2.0.0)
+and `update-1.8.0-2.1.0` (one-time bootstrap of a v1.8.0 shop, see `docs/AI_UPDATE_RUNBOOK.md`).
+
 ### Upgrade notes (operator-facing and breaking changes from PRs #10-#14 and the follow-up audits)
 
 Read before updating a live shop; run `php cli/migrate.php` after the files are in place, then
