@@ -115,7 +115,10 @@ try {
     assert_true(!empty($a111Result['steps']['admin']['recovery_codes']) && !empty($a111Result['steps']['admin']['mfa_required']), 'A11.1 install returns the owner TOTP enrollment once');
     $a111Fails = array_values(array_map(static fn(array $c): string => $c['name'], array_filter($a111Result['doctor']['checks'] ?? [], static fn(array $c): bool => $c['status'] === 'fail')));
     // R9: the shipped stores.json is example data (Woodle, example.* e-mails, invalid IBANs): doctor is not ready until it is replaced.
-    $a111StoreIds = array_keys(json_decode((string)file_get_contents($a111Private . '/stores.json'), true)['stores'] ?? []);
+    // R11: of the public stores — the sample stores pl/hu/de/us of a fresh install are hidden and their sample seller only warns.
+    $a111StoreIds = array_keys(array_filter(json_decode((string)file_get_contents($a111Private . '/stores.json'), true)['stores'] ?? [],
+        static fn(array $store): bool => StoreContext::isPublicConfig($store)));
+    assert_equals(['default', 'cz'], $a111StoreIds, 'R11 samples: a fresh install publishes only the default and cz stores');
     // R9: and the sample card method charges through Stripe, which has no keys yet, so checkout could not take it.
     assert_equals(array_merge(array_map(static fn(string $id): string => 'stores.legal.' . $id, $a111StoreIds), ['payment.provider.stripe']), $a111Fails,
         'A11.1 doctor after install fails only on the example seller data of every store and the keyless Stripe card method');
@@ -126,6 +129,7 @@ try {
         'hu' => 'HU42 1177 3016 1111 1018 0000 0000', 'de' => 'DE89 3704 0044 0532 0130 00', 'us' => ''];
     foreach ($a111Stores['stores'] as $a111Id => &$a111Store) {
         $a111Store['legal'] = array_replace($a111Store['legal'], ['name' => "A111 Trading {$a111Id}", 'email' => "orders-{$a111Id}@a111-shop.test", 'iban' => $a111Ibans[$a111Id] ?? '']);
+        unset($a111Store['public']); // with its real seller the merchant publishes the store
     }
     unset($a111Store);
     file_put_contents($a111Private . '/stores.json', json_encode($a111Stores, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
