@@ -103,20 +103,21 @@ class Logger
     /**
      * A secret's value after its key: `token=x`, `password: x`, and in JSON or quoted form `"client_secret":"x"`
      * (the quote between key and colon used to hide it), also as part of a longer key (`stripe_secret_key`,
-     * `access_token`). The value stops at a quote, `&`, `,`, `;` or `}`.
+     * `access_token`). The value stops at a quote, `&`, `,`, `;` or `}`; a value already masked by SECRET_PATTERNS stays.
      */
-    private const SECRET_VALUE = '/(Bearer\s+)[A-Za-z0-9._~+\/=-]+|((?:secret|token|password|passwd|api[_-]?key)[\w-]*["\']?\s*[=:]\s*["\']?)[^\s"\'&,;}]+/i';
+    private const SECRET_VALUE = '/(Bearer\s+)[A-Za-z0-9._~+\/=-]+|((?:secret|token|password|passwd|api[_-]?key)[\w-]*["\']?\s*[=:]\s*["\']?)(?!\[REDACTED)[^\s"\'&,;}]+/i';
 
     /**
      * Secrets recognisable without a key: HTTP Basic credentials, the password in a URL (`scheme://user:pass@host`),
-     * Stripe-style secret and restricted keys and webhook secrets, and PEM private keys.
+     * Stripe-style secret and restricted keys and webhook secrets, and PEM private keys. They run before SECRET_VALUE:
+     * that one stops at whitespace, so after `secret: ` it would mask only `-----BEGIN` and leave the PEM body behind.
      */
     private const SECRET_PATTERNS = [
-        self::SECRET_VALUE => '$1$2[REDACTED]',
-        '/(\bBasic\s+)(?=[A-Za-z]*[0-9+\/=])[A-Za-z0-9+\/]{8,}={0,2}/i' => '$1[REDACTED]',
-        '#([a-z][a-z0-9+.-]*://[^\s:/@]*:)[^\s@/]+@#i' => '$1[REDACTED]@',
-        '/\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{8,}|\bwhsec_[A-Za-z0-9]{8,}/' => '[REDACTED]',
         '/-----BEGIN ([A-Z0-9 ]*)PRIVATE KEY-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/s' => '[REDACTED $1PRIVATE KEY]',
+        '/\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{8,}|\bwhsec_[A-Za-z0-9]{8,}/' => '[REDACTED]',
+        '#([a-z][a-z0-9+.-]*://[^\s:/@]*:)[^\s@/]+@#i' => '$1[REDACTED]@',
+        '/(\bBasic\s+)(?=[A-Za-z]*[0-9+\/=])[A-Za-z0-9+\/]{8,}={0,2}/i' => '$1[REDACTED]',
+        self::SECRET_VALUE => '$1$2[REDACTED]',
     ];
 
     private static function maskSecrets(string $text): string

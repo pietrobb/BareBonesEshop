@@ -32,6 +32,23 @@ try {
     assert_equals('pem [REDACTED RSA PRIVATE KEY] end', $r11lLogged['pem'], 'R11 logs: a PEM private key is masked whole');
     assert_equals(['Basic shipping plan', 'pk_live_public123456 stays'], [$r11lLogged['plan'], $r11lLogged['public']],
         'R11 logs: the word "Basic" and publishable keys are not secrets');
+    // A PEM key after a secret-named key: the key=value rule stops at whitespace and used to mask only "-----BEGIN".
+    $r11lKeyed = Logger::redact(['yaml' => "signing_secret: {$r11lPem}", 'json' => '{"client_secret":"' . $r11lPem . '"}',
+        'mixed' => 'token=sk_live_51R11lowSecretValue password=hunter2']);
+    assert_true(!str_contains($r11lKeyed['yaml'] . $r11lKeyed['json'], 'MIIEowIBAAKCAQEAr11low') && !str_contains($r11lKeyed['yaml'] . $r11lKeyed['json'], '-----END'),
+        'R11 logs: a PEM private key after a secret-named key is masked whole (' . str_replace("\n", '\n', $r11lKeyed['yaml'] . ' | ' . $r11lKeyed['json']) . ')');
+    assert_equals('token=[REDACTED] password=[REDACTED]', $r11lKeyed['mixed'], 'R11 logs: key=value secrets are still masked');
+    $r11lErrLog = tempnam(sys_get_temp_dir(), 'r11l');
+    $r11lSavedErrLog = ini_set('error_log', $r11lErrLog);
+    try {
+        Logger::phpLog('Signing failed: token=' . $r11lPem);
+    } finally {
+        ini_set('error_log', (string)$r11lSavedErrLog);
+    }
+    $r11lPhpLine = (string)file_get_contents($r11lErrLog);
+    @unlink($r11lErrLog);
+    assert_true($r11lPhpLine !== '' && !str_contains($r11lPhpLine, 'MIIEowIBAAKCAQEAr11low') && str_contains($r11lPhpLine, '[REDACTED RSA PRIVATE KEY]'),
+        'R11 logs: the PHP error log masks a PEM private key after token= (' . trim($r11lPhpLine) . ')');
 } catch (Throwable $e) { $r11lFail('logs', $e); }
 
 // Web server rules: the SQLite rollback journal is as private as the database itself.
