@@ -173,6 +173,36 @@ try {
     assert_true(($r11fDoctor[0]['status'] ?? '') === 'warn' && str_contains((string)($r11fDoctor[0]['message'] ?? ''), 'packeta'),
         'R11 H9: the doctor warns that Packeta labels are not available');
 
+    // Not connected = the parcel is booked in the carrier's portal: each parcel row still says what it collects.
+    $r11fCodMigration = require TEST_CLI_DIR . '/../migrations/20261101140000_shipment_cod_amount.php';
+    $r11fCodMigration->up($pdo, Db::isSqlite());
+    $r11fCodMigration->up($pdo, Db::isSqlite());
+    Db::forgetSchema();
+    assert_true(Db::hasColumn('shipments', 'cod_amount'), 'R11 H9: the parcel COD migration is applied and idempotent');
+    $r11fCodTotal = (int)Orders::byId($r11fCodOrderId)['total'];
+    $r11fParcelCod = static function () use ($r11fCodOrderId, $r11fShipA, $r11fShipB): array {
+        ob_start();
+        renderOrderShipments(Orders::byId($r11fCodOrderId));
+        $html = (string)ob_get_clean();
+        $cod = [];
+        foreach ([$r11fShipA, $r11fShipB] as $id) {
+            $cod[] = preg_match('#<tr data-shipment="' . $id . '">.*?data-shipment-cod="(\d+)"[^>]*>([^<]*)<.*?</tr>#s', $html, $m) ? [(int)$m[1], trim(html_entity_decode($m[2]))] : null;
+        }
+        return $cod;
+    };
+    $r11fPrice = I18n::price($r11fCodTotal, (string)Orders::byId($r11fCodOrderId)['currency']);
+    $r11fPrepaid = I18n::t('admin.shipment.label_prepaid');
+    assert_equals([[$r11fCodTotal, I18n::format('admin.shipment.label_cod', ['amount' => $r11fPrice])], [0, $r11fPrepaid]], $r11fParcelCod(),
+        'R11 H9: without the carrier API one parcel row shows the COD total to enter in the portal, the other says prepaid');
+    assert_true(Fulfillment::ship($r11fShipA, 'packeta', 'Z-R11F-MANUAL'), 'R11 H9 setup: the collecting parcel is shipped by hand (booked in the portal)');
+    $r11fRecorded = array_column(Fulfillment::shipments($r11fCodOrderId), 'cod_amount', 'id');
+    assert_equals([$r11fCodTotal, null], [(int)$r11fRecorded[$r11fShipA], $r11fRecorded[$r11fShipB] ?? null],
+        'R11 H9: shipping a parcel by hand records the COD it collects on that parcel');
+    assert_equals([0, 0], [ShippingService::parcelCodAmount(Orders::byId($r11fCodOrderId), $r11fShipB), ShippingService::labelCodAmount(Orders::byId($r11fCodOrderId))],
+        'R11 H9: after the hand-shipped parcel collected, no other parcel or label is offered the COD again');
+    assert_equals([[$r11fCodTotal, I18n::format('admin.shipment.label_cod', ['amount' => $r11fPrice])], [0, $r11fPrepaid]], $r11fParcelCod(),
+        'R11 H9: the shipped parcel keeps showing what it collected, the planned one stays prepaid');
+
     putenv('SHIP_MOCK_LABELS=1');
     $r11fTotal = (int)Orders::byId($r11fCodOrderId)['total'];
     $r11fLabelA = ShippingService::generateLabel($r11fCodOrderId, 'packeta', $r11fShipA);

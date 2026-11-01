@@ -15,6 +15,19 @@ function adminShipmentLabelState(int $orderId, bool $open): array {
 }
 
 /**
+ * Cash on delivery of one parcel, shown whether or not a carrier API is connected: the amount to enter in the carrier's
+ * portal on the one parcel that collects the order total, "prepaid" on every other parcel (ShippingService::parcelCodAmount).
+ */
+function renderShipmentCod(array $order, int $shipmentId): void {
+    $cod = ShippingService::parcelCodAmount($order, $shipmentId);
+    if ($cod === null) return; ?>
+    <br><span class="muted" data-shipment-cod="<?= $cod ?>"><?= $cod > 0
+        ? esc(I18n::format('admin.shipment.label_cod', ['amount' => I18n::price($cod, (string)$order['currency'])]))
+        : esc(I18n::t('admin.shipment.label_prepaid')) ?></span>
+    <?php
+}
+
+/**
  * Carrier label of a planned parcel: the labels created for it (tracking number, cash on delivery the carrier
  * collects, taken from the order) or a form creating one. A carrier whose API is not connected is listed as such and
  * cannot be picked: no tracking number is invented, the parcel is booked in the carrier's portal instead.
@@ -33,7 +46,7 @@ function renderShipmentLabelForm(array $order, array $shipment, array $labels, a
     <?php foreach (array_diff_key($carriers, array_flip($ready)) as $carrier => $reason): ?>
     <p class="muted" data-label-unavailable="<?= esc((string)$carrier) ?>"><?= esc(I18n::format('admin.shipment.label_not_connected', ['carrier' => (string)$carrier])) ?></p>
     <?php endforeach; ?>
-    <?php if ($ready): $cod = ShippingService::labelCodAmount($order); ?>
+    <?php if ($ready): $cod = ShippingService::parcelCodAmount($order, (int)$shipment['id']) ?? 0; ?>
     <form method="post" action="<?= $action ?>" style="margin-top:.25rem" data-shipment-label-form>
         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
         <input type="hidden" name="shipment_id" value="<?= (int)$shipment['id'] ?>">

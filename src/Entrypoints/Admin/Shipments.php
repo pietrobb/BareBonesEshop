@@ -72,7 +72,8 @@ function renderOrderShipments(array $order): void {
                 </ul></td>
                 <td><span class="badge badge-<?= esc((string)$shipment['status']) ?>"><?= esc(I18n::t('admin.shipment.status.' . $shipment['status'])) ?></span></td>
                 <td><?= esc(trim((string)$shipment['carrier'] . ' ' . (string)$shipment['tracking_number'])) ?>
-                    <?php if (!empty($shipment['tracking_url'])): ?><br><a href="<?= esc((string)$shipment['tracking_url']) ?>" target="_blank" rel="noopener noreferrer"><?= esc(I18n::t('admin.shipment.track')) ?></a><?php endif; ?></td>
+                    <?php if (!empty($shipment['tracking_url'])): ?><br><a href="<?= esc((string)$shipment['tracking_url']) ?>" target="_blank" rel="noopener noreferrer"><?= esc(I18n::t('admin.shipment.track')) ?></a><?php endif; ?>
+                    <?php renderShipmentCod($order, $shipmentId); ?></td>
                 <td class="muted"><?= esc($shipment['shipped_at'] ? substr((string)$shipment['shipped_at'], 0, 16) : '—') ?></td>
                 <?php if ($canShip): ?>
                 <td>

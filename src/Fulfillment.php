@@ -195,10 +195,15 @@ class Fulfillment {
             }
             $db->prepare("UPDATE shipment_items SET status = 'shipped' WHERE shipment_id = :shipment AND status = 'planned'")
                 ->execute([':shipment' => $shipmentId]);
+            // The cash on delivery the parcel leaves with is recorded, so another parcel never collects it again (R11 H9).
+            $order = Db::hasColumn('shipments', 'cod_amount') ? Orders::byId((int)$shipment['order_id']) : null;
+            $cod = $order !== null ? ShippingService::parcelCodAmount($order, $shipmentId) : null;
             $db->prepare("UPDATE shipments SET status = 'shipped', carrier = :carrier,
-                    tracking_number = :tracking, tracking_url = :url, shipped_at = " . Db::now() . ", updated_at = " . Db::now() . "
+                    tracking_number = :tracking, tracking_url = :url, shipped_at = " . Db::now() . ", updated_at = " . Db::now()
+                    . ($cod !== null ? ', cod_amount = COALESCE(cod_amount, :cod)' : '') . "
                 WHERE id = :id")
-                ->execute([':carrier' => $carrier, ':tracking' => $trackingNumber, ':url' => $trackingUrl, ':id' => $shipmentId]);
+                ->execute([':carrier' => $carrier, ':tracking' => $trackingNumber, ':url' => $trackingUrl, ':id' => $shipmentId]
+                    + ($cod !== null ? [':cod' => $cod] : []));
             self::refreshOrderItemStatuses((int)$shipment['order_id']);
             if ($own) $db->commit();
             return true;
