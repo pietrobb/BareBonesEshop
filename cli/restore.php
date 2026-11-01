@@ -6,7 +6,7 @@ require_once __DIR__ . '/cli-only.php';
  *
  * Usage:
  *   php cli/restore.php <remote_path>            Restore from backup at remote_path
- *   php cli/restore.php --latest                 Restore from newest backup
+ *   php cli/restore.php --latest                 Restore from newest backup (never a pre-restore-snapshot)
  *   php cli/restore.php --list                   List available backups (newest first)
  *   php cli/restore.php <path> --skip-snapshot   Don't take a pre-restore-snapshot (DANGEROUS; SQLite only)
  *   php cli/restore.php <path> --quiet           Minimal output
@@ -80,10 +80,10 @@ if (isset($flags['list'])) {
 
 $remotePath = null;
 if (isset($flags['latest'])) {
-    // The newest restore point, never a .gz companion that shares its creation stamp.
-    $rows = array_values(array_filter(BackupService::list(), static fn(array $row): bool => !BackupService::isCompressedCopy($row)));
-    if (!$rows) { fwrite(STDERR, "No backups available.\n"); exit(2); }
-    $remotePath = (string)$rows[0]['path'];
+    // The newest restore point: never a .gz companion and never a pre-restore snapshot (a copy of an earlier live).
+    $latest = BackupService::latestRestorePoint();
+    if ($latest === null) { fwrite(STDERR, "No backups available (pre-restore snapshots are restored only by explicit path).\n"); exit(2); }
+    $remotePath = (string)$latest['path'];
 } else {
     $remotePath = $positional[0] ?? null;
 }

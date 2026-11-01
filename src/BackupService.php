@@ -16,6 +16,11 @@
  */
 class BackupService
 {
+    /** A copy of live taken by restore() — not a restore point of its own (gc rotation and --latest skip it). */
+    public const SNAPSHOT_LABEL = 'pre-restore-snapshot';
+    /** Labelled backups kept by their own rules, outside the daily/weekly/monthly rotation. */
+    private const ROTATION_EXEMPT_LABELS = [self::SNAPSHOT_LABEL, 'pre-migration', 'manual'];
+
     /** @var array */
     private static array $cfg = [];
     private static ?PDO $db = null;
@@ -504,8 +509,8 @@ class BackupService
 
             self::log("CREATE OK path={$remotePath} size={$size} sha256={$sha} label={$label}");
 
-            // 8. Optional GC
-            if (!empty(self::$cfg['auto_gc_on_backup'])) {
+            // 8. Optional GC — never from inside a restore: the backup being restored must not be collected under it.
+            if (!empty(self::$cfg['auto_gc_on_backup']) && $label !== self::SNAPSHOT_LABEL) {
                 try {
                     $gc = self::gc();
                     if (!empty($gc['deleted'])) {
@@ -680,14 +685,15 @@ class BackupService
         $snapshotPath = null;
         if (!$skipSnapshot) {
             try {
-                $snap = self::create(['label' => 'pre-restore-snapshot', 'trigger' => 'auto']);
-                $snapshotPath = $snap['remote_path'] ?? null;
-                self::pruneSnapshots(5); // keep at most 5 pre-restore-snapshot backups
+                $snapshotPath = self::takeRestoreSnapshot($remotePath);
             } catch (\Throwable $e) {
                 self::log('Restore: pre-snapshot failed: ' . $e->getMessage());
                 throw new RuntimeException('Pre-restore snapshot failed: ' . $e->getMessage(), 0, $e);
             }
         }
+        // Set when live may be gone or damaged: the snapshot is then the operator's copy and must stay.
+        $liveAtRisk = false;
+        try {
 
         $livePath = self::$livePath;
         if (!is_file($livePath)) {
@@ -715,7 +721,7 @@ class BackupService
             gc_collect_cycles();
 
             try {
-                $swapped = SqliteMaintenance::exclusive($livePath, 'backup restore', static function () use ($livePath, &$restoreTemp, $maxRetries, $retryDelayMs): array {
+                $swapped = SqliteMaintenance::exclusive($livePath, 'backup restore', static function () use ($livePath, &$restoreTemp, &$liveAtRisk, $maxRetries, $retryDelayMs): array {
                     // 4. rollback-safe same-filesystem replacement
                     @unlink($livePath . '-wal');
                     @unlink($livePath . '-shm');
@@ -734,6 +740,7 @@ class BackupService
                     if (!@rename($restoreTemp, $livePath)) {
                         $restoreError = error_get_last()['message'] ?? 'unknown';
                         if (!@rename($rollbackPath, $livePath)) {
+                            $liveAtRisk = true;
                             throw new RuntimeException("Restore: replacement failed and automatic rollback failed; recovery copy: {$rollbackPath}");
                         }
                         throw new RuntimeException("Restore: atomic replacement failed: {$restoreError}");
@@ -758,6 +765,7 @@ class BackupService
                         @unlink($livePath . '-shm');
                         @unlink($livePath);
                         if (!@rename($rollbackPath, $livePath)) {
+                            $liveAtRisk = true;
                             throw new RuntimeException(
                                 "Restore verification failed and automatic rollback failed; recovery copy: {$rollbackPath}",
                                 0,
@@ -809,6 +817,12 @@ class BackupService
             ];
         } finally {
             self::releaseLock($lockHandle);
+        }
+        } catch (\Throwable $e) {
+            // Refused or rolled back: live is the database the snapshot copied, so the snapshot is no restore
+            // point and must not push real backups out of the newest slots.
+            if (!$liveAtRisk) self::discardSnapshot($snapshotPath);
+            throw $e;
         }
         } finally {
             self::removeStagedFile($temporarySource);
@@ -932,12 +946,11 @@ class BackupService
             $snapshotPath = null;
             try {
                 $rollback = self::recoveryPath($mysql->database());
-                $snap = self::create(['label' => 'pre-restore-snapshot', 'trigger' => 'auto']);
-                $snapshotPath = (string)$snap['remote_path'];
-                self::pruneSnapshots(5);
+                $snapshotPath = self::takeRestoreSnapshot($remotePath);
                 self::downloadVerified($snapshotPath, $rollback);
                 @chmod($rollback, 0600);
             } catch (\Throwable $e) {
+                self::discardSnapshot($snapshotPath);
                 self::log('Restore: pre-snapshot failed: ' . $e->getMessage());
                 throw new RuntimeException('Pre-restore snapshot failed: ' . $e->getMessage(), 0, $e);
             }
@@ -963,6 +976,9 @@ class BackupService
                     $keepRollback = true;
                     $e = new RuntimeException($e->getMessage() . " (pre-restore dump kept at {$rollback}; also stored as backup {$snapshotPath})",
                         MysqlUpdateDatabaseBackup::RESTORE_FAILED_AFTER_DROP, $e);
+                } else {
+                    // Refused before live was dropped: live is what the snapshot copied, no restore point.
+                    self::discardSnapshot($snapshotPath);
                 }
                 self::log("RESTORE FAIL driver=mysql src={$remotePath} err=" . $e->getMessage());
                 throw $e;
@@ -1391,23 +1407,61 @@ class BackupService
         FileSystem::removeTree($path);
     }
 
-    /** Keep only the newest `$keep` backups labelled 'pre-restore-snapshot'; delete the rest. */
-    private static function pruneSnapshots(int $keep): void
+    /** Store a copy of live before a restore from $sourcePath; returns its remote path. */
+    private static function takeRestoreSnapshot(string $sourcePath): string
     {
-        $all = self::list();
-        $snaps = [];
-        foreach ($all as $row) {
-            if ((string)($row['meta']['label'] ?? '') === 'pre-restore-snapshot') {
-                $snaps[] = $row;
+        $snap = self::create(['label' => self::SNAPSHOT_LABEL, 'trigger' => 'auto']);
+        $snapshotPath = (string)($snap['remote_path'] ?? '');
+        self::pruneSnapshots(5, $sourcePath);
+        return $snapshotPath;
+    }
+
+    /** Remove the snapshot (and its .gz copy) of an attempt that left live as it was. */
+    private static function discardSnapshot(?string $snapshotPath): void
+    {
+        if ($snapshotPath === null || $snapshotPath === '') return;
+        foreach ([$snapshotPath, $snapshotPath . '.gz'] as $path) {
+            $row = self::storedRow($path);
+            if ($row === null) continue;
+            try {
+                self::deleteBackup($row);
+            } catch (\Throwable $e) {
+                self::log("Restore: cannot discard the snapshot {$path} of a refused restore: " . $e->getMessage());
             }
         }
-        if (count($snaps) <= $keep) return;
+        self::log("Restore: refused or rolled back, pre-restore snapshot {$snapshotPath} discarded");
+    }
+
+    /**
+     * Keep only the newest `$keep` pre-restore snapshots; delete the rest — never $protect, the backup
+     * a restore is reading right now (a snapshot can itself be restored).
+     */
+    private static function pruneSnapshots(int $keep, ?string $protect = null): void
+    {
+        $snaps = array_values(array_filter(self::list(), static fn(array $row): bool =>
+            (string)($row['meta']['label'] ?? '') === self::SNAPSHOT_LABEL && !self::isCompressedCopy($row)));
         // already newest-first
         for ($i = $keep; $i < count($snaps); $i++) {
-            try {
-                self::deleteBackup($snaps[$i]);
-            } catch (\Throwable $e) { /* ignore */ }
+            $path = (string)$snaps[$i]['path'];
+            if ($protect !== null && ($path === $protect || $path . '.gz' === $protect)) continue;
+            foreach ([$snaps[$i], self::storedRow($path . '.gz')] as $row) {
+                if ($row === null) continue;
+                try {
+                    self::deleteBackup($row);
+                } catch (\Throwable $e) {
+                    self::log('Restore: snapshot prune failed ' . $row['path'] . ': ' . $e->getMessage());
+                }
+            }
         }
+    }
+
+    /** The newest backup to restore: never a .gz companion and never a pre-restore snapshot (a copy of a past live). */
+    public static function latestRestorePoint(): ?array
+    {
+        foreach (self::list() as $row) {
+            if (!self::isCompressedCopy($row) && (string)($row['meta']['label'] ?? '') !== self::SNAPSHOT_LABEL) return $row;
+        }
+        return null;
     }
 
     // ---------- list() / gc() ----------
@@ -1470,16 +1524,21 @@ class BackupService
             return ['kept' => count($all), 'deleted' => []];
         }
 
+        // The rotation counts restore points only: pre-restore snapshots, pre-migration and manual backups are kept
+        // by their own rules below and must not take the newest slots from scheduled backups.
+        $rotation = array_values(array_filter($all, static fn(array $row): bool =>
+            !in_array((string)($row['meta']['label'] ?? ''), self::ROTATION_EXEMPT_LABELS, true)));
+
         // Always-keep set: paths preserved no matter what.
         $keep = [];
         // Floor: newest $minKept entries always kept
-        foreach (array_slice($all, 0, $minKept) as $row) {
+        foreach (array_slice($rotation, 0, $minKept) as $row) {
             $keep[$row['path']] = true;
         }
 
         // Group by day (YYYY-MM-DD) — keep newest per day, last $daily days
         $byDay = [];
-        foreach ($all as $row) {
+        foreach ($rotation as $row) {
             $when = self::rowWhen($row);
             $dKey = $when->format('Y-m-d');
             if (!isset($byDay[$dKey])) $byDay[$dKey] = $row['path']; // newest first → first wins
@@ -1493,7 +1552,7 @@ class BackupService
 
         // Group by ISO week (YYYY-Www) — keep newest per week, last $weekly weeks
         $byWeek = [];
-        foreach ($all as $row) {
+        foreach ($rotation as $row) {
             $when = self::rowWhen($row);
             $wKey = $when->format('o-W');
             if (!isset($byWeek[$wKey])) $byWeek[$wKey] = $row['path'];
@@ -1507,7 +1566,7 @@ class BackupService
 
         // Group by month (YYYY-MM) — keep newest per month, last $monthly months
         $byMonth = [];
-        foreach ($all as $row) {
+        foreach ($rotation as $row) {
             $when = self::rowWhen($row);
             $mKey = $when->format('Y-m');
             if (!isset($byMonth[$mKey])) $byMonth[$mKey] = $row['path'];
@@ -1527,7 +1586,7 @@ class BackupService
         $preMigrationSeen = 0;
         foreach ($all as $row) { // newest first
             $label = (string)($row['meta']['label'] ?? '');
-            if ($label === 'pre-restore-snapshot'
+            if ($label === self::SNAPSHOT_LABEL
                 || ($label === 'pre-migration' && $preMigrationSeen++ < $preMigrationKeep)
                 || ($label === 'manual' && ($manualCutoff === null || self::rowWhen($row) >= $manualCutoff))) {
                 $keep[$row['path']] = true;

@@ -627,6 +627,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.edit.not_found' => 'A rendelés nem található.',
     'admin.order.edit.not_pending' => 'Csak függőben lévő, nem fizetett rendelés módosítható.',
     'admin.order.edit.payment_started' => 'A tételek nem módosíthatók, ha a rendelés fizetése már elkezdődött.',
+    'admin.order.edit.shipment' => 'A tételek nem módosíthatók, ha a rendeléshez már tartozik szállítmány (tervezett vagy elküldött). Törölje a fel nem használt szállítmányt, vagy kezelje a változást visszaküldéssel vagy jóváírással.',
     'admin.order.edit.invoiced' => 'A tételek számla kiállítása után nem módosíthatók.',
     'admin.order.edit.coupon' => 'A kuponnal leadott rendelés tételei nem módosíthatók.',
     'admin.order.edit.vat_changed' => 'Az új tételek adózása eltérne a rendelésétől (megváltozott az áfakezelés). Törölje a rendelést, és rögzítsen újat.',

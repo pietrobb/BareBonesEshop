@@ -627,6 +627,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.edit.not_found' => 'Bestellung nicht gefunden.',
     'admin.order.edit.not_pending' => 'Nur eine offene, unbezahlte Bestellung kann geändert werden.',
     'admin.order.edit.payment_started' => 'Die Positionen können nicht mehr geändert werden, sobald eine Zahlung begonnen wurde.',
+    'admin.order.edit.shipment' => 'Die Positionen können nicht geändert werden, sobald die Bestellung eine Sendung hat (geplant oder versandt). Stornieren Sie eine ungenutzte Sendung oder lösen Sie die Änderung über eine Rücksendung oder Gutschrift.',
     'admin.order.edit.invoiced' => 'Die Positionen können nach Ausstellung einer Rechnung nicht geändert werden.',
     'admin.order.edit.coupon' => 'Die Positionen einer Bestellung mit Gutschein können nicht geändert werden.',
     'admin.order.edit.vat_changed' => 'Die neuen Positionen würden anders besteuert als die Bestellung (USt-Behandlung geändert). Stornieren Sie die Bestellung und legen Sie eine neue an.',

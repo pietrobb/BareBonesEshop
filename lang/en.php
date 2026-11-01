@@ -629,6 +629,7 @@ return [
     'admin.order.edit.not_found' => 'Order not found.',
     'admin.order.edit.not_pending' => 'Only a pending, unpaid order can be changed.',
     'admin.order.edit.payment_started' => 'The items cannot be changed once a payment has been started for the order.',
+    'admin.order.edit.shipment' => 'The items cannot be changed once the order has a shipment (planned or sent). Cancel an unused shipment, or handle the change with a return or credit note.',
     'admin.order.edit.invoiced' => 'The items cannot be changed after an invoice has been issued.',
     'admin.order.edit.coupon' => 'The items of an order with a coupon cannot be changed.',
     'admin.order.edit.vat_changed' => 'The new items would be taxed differently from the order (VAT treatment changed). Cancel the order and enter a new one.',

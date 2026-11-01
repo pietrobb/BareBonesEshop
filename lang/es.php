@@ -781,6 +781,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.edit.not_found' => 'Pedido no encontrado.',
     'admin.order.edit.not_pending' => 'Solo se puede cambiar un pedido pendiente y no pagado.',
     'admin.order.edit.payment_started' => 'Los artículos no se pueden cambiar una vez iniciado el pago del pedido.',
+    'admin.order.edit.shipment' => 'Los artículos no se pueden cambiar cuando el pedido ya tiene un envío (planificado o enviado). Cancele el envío no utilizado o gestione el cambio con una devolución o una factura rectificativa.',
     'admin.order.edit.invoiced' => 'Los artículos no se pueden cambiar después de emitir una factura.',
     'admin.order.edit.coupon' => 'Los artículos de un pedido con cupón no se pueden cambiar.',
     'admin.order.edit.vat_changed' => 'Los nuevos artículos tributarían de forma distinta al pedido (cambió el régimen de IVA). Cancele el pedido e introduzca uno nuevo.',
