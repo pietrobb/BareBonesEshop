@@ -18,7 +18,8 @@ nginx PHP fallback when `operations.nginx_config` is set).
     168), however many carts were captured with it.
   - Customers see carrier names (order e-mails, account, tracking page) instead of internal carrier codes.
   - Logs mask HTTP Basic credentials, passwords in URLs, Stripe `sk_live_`/`rk_live_` keys, webhook secrets and PEM
-    private keys; nginx (`deploy/nginx.conf`) and `.htaccess` also refuse SQLite `*-journal` files — **copy the
+    private keys — also a PEM key written after a secret-named key (`signing_secret: -----BEGIN …`, which used to
+    keep the key body in the log); nginx (`deploy/nginx.conf`) and `.htaccess` also refuse SQLite `*-journal` files — **copy the
     nginx rule into your server config**.
   - New regression tests kill the mutants that survived the suite (stock reservation, adjustStock, refund
     idempotency, the currency of refund.reported, snapshot fingerprint).
