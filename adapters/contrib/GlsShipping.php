@@ -74,13 +74,24 @@ class GlsShipping implements ShippingAdapter
         }
         self::assertMock('label');
 
-        // Mock (SHIP_MOCK_LABELS=1, development and tests only): deterministic AWB
-        $awb = 'GLS' . str_pad((string)$order['id'], 9, '0', STR_PAD_LEFT);
+        // Mock (SHIP_MOCK_LABELS=1, development and tests only): deterministic AWB, one per parcel of the order
+        $awb = 'GLS' . str_pad((string)$order['id'], 9, '0', STR_PAD_LEFT) . (!empty($order['shipment_id']) ? '-' . (int)$order['shipment_id'] : '');
         return [
             'awb'        => $awb,
             'label_data' => base64_encode("MOCK GLS LABEL\nAWB: {$awb}\nOrder: {$order['id']}"),
             'carrier'    => $this->carrierId(),
         ];
+    }
+
+    /**
+     * Why labels cannot be created (null = mock labels for development). The production GLS API is not connected in
+     * this version: no tracking number is ever invented, the parcel is booked in MyGLS.
+     */
+    public function labelUnavailableReason(): ?string
+    {
+        if (!empty($_ENV['SHIP_GLS_CLIENT_ID'])) return 'GLS production API is not connected in this version: create the parcel in MyGLS and enter its tracking number when shipping.';
+        if ((string)($_ENV['SHIP_MOCK_LABELS'] ?? getenv('SHIP_MOCK_LABELS')) === '1') return null;
+        return 'GLS API is not connected: create the parcel in MyGLS and enter its tracking number when shipping (SHIP_MOCK_LABELS=1 enables mock labels for development).';
     }
 
     public function trackShipment(string $awb): array

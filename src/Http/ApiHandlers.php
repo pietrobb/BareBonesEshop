@@ -474,6 +474,8 @@ function apiShippingRates(): array {
     if (CheckoutService::discountPreview(CheckoutService::acceptedCoupon(), (int)($cart['subtotal'] ?? 0), null, $cart['items'], $customerId ?: null)['free_shipping']) {
         $methods = array_map(static fn(array $method): array => ['price' => ShippingService::freeShippingPrice($method)] + $method, $methods);
     }
+    // As checkout bills it: the price is the carriage; a COD surcharge is listed apart (it is part of the COD payment fee).
+    $methods = array_map(static fn(array $method): array => ['price' => (int)$method['price'] - CheckoutService::rateCodSurcharge($method, $cod)] + $method, $methods);
     $methods = CheckoutService::chargedQuote(['rates' => $methods], $vat, (string)($cart['currency'] ?? 'eur'))['rates'];
     $unitsToFree = ShippingService::unitsToFreeShipping($methods, $physicalQty);
     return [
@@ -740,13 +742,15 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         if ($pickup['error'] !== null) return checkoutRefusal((string)$pickup['error']);
         if ($pickup['point'] !== null) $selectedRate['pickup_point'] = $pickup['point'];
     }
-    // Free shipping waives the carriage, not the cash-on-delivery surcharge.
-    $shippingCost = $promotionFreeShipping ? ShippingService::freeShippingPrice($selectedRate) : (int)$selectedRate['price'];
+    // Free shipping waives the carriage, not the cash-on-delivery surcharge, which is billed as part of the COD fee.
+    $codSurcharge = CheckoutService::rateCodSurcharge($selectedRate, PaymentService::isCashOnDelivery($paymentMethod));
+    $shippingCost = $promotionFreeShipping ? 0 : (int)$selectedRate['price'] - $codSurcharge;
     // Shipping rates include domestic VAT like catalog prices; zero-rated sales are charged them net.
     $shippingCost = CheckoutService::chargedShipping($shippingCost, $vat, $cartCurrency);
+    $codSurcharge = CheckoutService::chargedShipping($codSurcharge, $vat, $cartCurrency);
 
     $currency = $cart['items'][0]['currency'] ?? 'eur';
-    $paymentBaseAmount = max(0, $cart['subtotal'] - $totalDiscount) + $shippingCost;
+    $paymentBaseAmount = max(0, $cart['subtotal'] - $totalDiscount) + $shippingCost + $codSurcharge;
     $freeDigitalOrder = $digitalOnly && $paymentBaseAmount === 0;
     if ($freeDigitalOrder) {
         $paymentMethod = 'free';
@@ -761,7 +765,8 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         // The smoke test exists to prove the gateway redirect; anything else would be a real order.
         return checkoutRefusal('checkout.error.synthetic_requires_online', 422);
     }
-    $paymentFee = (int)CheckoutService::chargedFees([$selectedPayment], $vat)[0]['fee'];
+    $paymentFee = (int)CheckoutService::chargedFees([$selectedPayment], $vat)[0]['fee'] + $codSurcharge;
+    $selectedPayment = CheckoutService::withCodSurcharge($selectedPayment, $codSurcharge);
     $providerCodes = [
         'tax' => $taxProviderCode,
         'payment' => (string)$selectedPayment['provider'],

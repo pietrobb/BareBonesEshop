@@ -16,6 +16,14 @@ final class OrderStatusLabels
         return self::label('payment_status.', $status, $locale);
     }
 
+    /** The payment status of this order: an unpaid purchase on invoice reads "on invoice, awaiting payment". */
+    public static function paymentOf(array $order, ?string $locale = null): string
+    {
+        return OrderWorkflow::isUnpaidInvoicePurchase($order)
+            ? self::label('payment_status.', 'invoiced', $locale)
+            : self::payment((string)($order['payment_status'] ?? 'pending'), $locale);
+    }
+
     private static function label(string $prefix, string $status, ?string $locale): string
     {
         $key = $prefix . $status;

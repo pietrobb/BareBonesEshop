@@ -183,51 +183,104 @@ class ShippingService
      * @return array {awb, label_data, carrier}
      * @throws \RuntimeException if carrier not found or API error
      */
-    public static function generateLabel(int $orderId, string $carrierId): array
+    public static function generateLabel(int $orderId, string $carrierId, ?int $shipmentId = null): array
     {
         StoreContext::current()->assertPermission('shipping');
         $db = Db::get();
-        $existing = $db->prepare("SELECT awb, label_data, carrier FROM shipping_labels WHERE order_id = :order_id AND carrier = :carrier AND store_id = :store AND status != 'cancelled' ORDER BY id DESC LIMIT 1");
-        $existing->execute([':order_id' => $orderId, ':carrier' => $carrierId, ':store' => StoreContext::current()->id()]);
+        $store = StoreContext::current()->id();
+        $perShipment = Db::hasColumn('shipping_labels', 'shipment_id');
+        if ($shipmentId !== null && !$perShipment) throw new \RuntimeException('Run php cli/migrate.php: labels per shipment need migration 20261101130000');
+        $shipmentFilter = $shipmentId !== null ? ' AND shipment_id = :shipment' : '';
+        $params = [':order_id' => $orderId, ':carrier' => $carrierId, ':store' => $store] + ($shipmentId !== null ? [':shipment' => $shipmentId] : []);
+        $existing = $db->prepare("SELECT awb, label_data, carrier" . ($perShipment ? ', cod_amount' : '') . " FROM shipping_labels
+            WHERE order_id = :order_id AND carrier = :carrier AND store_id = :store AND status != 'cancelled'{$shipmentFilter} ORDER BY id DESC LIMIT 1");
+        $existing->execute($params);
         $label = $existing->fetch(\PDO::FETCH_ASSOC);
         if ($label) return $label;
 
         $adapter = self::findAdapter($carrierId);
         $order   = self::fetchOrder($orderId);
+        if ($shipmentId !== null && !in_array($shipmentId, array_map('intval', array_column(Fulfillment::shipments($orderId), 'id')), true)) {
+            throw new \RuntimeException("Shipment {$shipmentId} does not belong to order {$orderId}");
+        }
         $snapshot = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true);
         $order['pickup_point_id'] = (string)($snapshot['pickup_point']['id'] ?? '');
-        // What the carrier collects: the order total of an unpaid cash-on-delivery order.
-        $order['cod_amount'] = ($order['payment_status'] ?? '') !== 'paid' && PaymentService::isCashOnDelivery((string)($order['payment_method'] ?? ''))
-            ? (int)$order['total'] : 0;
+        $order['cod_amount'] = self::labelCodAmount($order);
         // A carrier that cannot collect would deliver it as prepaid (in-store pickup is paid at the counter).
         if ($order['cod_amount'] > 0 && $adapter instanceof ShippingLifecycleAdapter && !$adapter->supportsCOD()) {
             throw new \RuntimeException("Shipping carrier does not support cash on delivery: {$carrierId}");
         }
         // Labels cancelled earlier: a new label is a new carrier request, not a replay of the cancelled one.
         $cancelled = $db->prepare("SELECT COUNT(*) FROM shipping_labels WHERE order_id = :order_id AND carrier = :carrier AND store_id = :store");
-        $cancelled->execute([':order_id' => $orderId, ':carrier' => $carrierId, ':store' => StoreContext::current()->id()]);
+        $cancelled->execute([':order_id' => $orderId, ':carrier' => $carrierId, ':store' => $store]);
         $order['label_sequence'] = (int)$cancelled->fetchColumn() + 1;
+        $order['shipment_id'] = $shipmentId;
         $result = $adapter->generateLabel($order);
 
         // Persist label record
         $db->prepare("
-            INSERT INTO shipping_labels (order_id, store_id, carrier, awb, status, label_data)
-            VALUES (:order_id, :store, :carrier, :awb, 'created', :label_data)
+            INSERT INTO shipping_labels (order_id, store_id, carrier, awb, status, label_data" . ($perShipment ? ', shipment_id, cod_amount' : '') . ")
+            VALUES (:order_id, :store, :carrier, :awb, 'created', :label_data" . ($perShipment ? ', :shipment_id, :cod_amount' : '') . ")
         ")->execute([
             ':order_id'   => $orderId,
-            ':store'      => StoreContext::current()->id(),
+            ':store'      => $store,
             ':carrier'    => $carrierId,
             ':awb'        => $result['awb'],
             ':label_data' => $result['label_data'] ?? '',
-        ]);
+        ] + ($perShipment ? [':shipment_id' => $shipmentId, ':cod_amount' => $order['cod_amount']] : []));
 
-        // Update order with tracking info
+        // Update order (and the parcel) with tracking info
         $db->prepare("
             UPDATE orders SET tracking_number = :awb, carrier = :carrier, updated_at = " . Db::now() . "
             WHERE id = :id AND store_id = :store
-        ")->execute([':awb' => $result['awb'], ':carrier' => $carrierId, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
+        ")->execute([':awb' => $result['awb'], ':carrier' => $carrierId, ':id' => $orderId, ':store' => $store]);
+        if ($shipmentId !== null) {
+            $db->prepare("UPDATE shipments SET carrier = :carrier, tracking_number = :awb, updated_at = " . Db::now() . "
+                WHERE id = :id AND order_id = :order AND store_id = :store")
+                ->execute([':carrier' => $carrierId, ':awb' => $result['awb'], ':id' => $shipmentId, ':order' => $orderId, ':store' => $store]);
+        }
 
-        return $result;
+        return $result + ['cod_amount' => $order['cod_amount']];
+    }
+
+    /**
+     * Cash the carrier collects with the next label: the total of an unpaid cash-on-delivery order, by the payment
+     * method frozen on the order (a method renamed or deleted later does not turn it into a prepaid parcel). The whole
+     * amount travels on one parcel: while another active label of the order already collects it, the next one is prepaid.
+     */
+    public static function labelCodAmount(array $order): int
+    {
+        if (!OrderWorkflow::isUnpaidCashOnDelivery($order)) return 0;
+        if (Db::hasColumn('shipping_labels', 'cod_amount')) {
+            $stmt = Db::get()->prepare("SELECT COUNT(*) FROM shipping_labels WHERE order_id = :order AND store_id = :store AND status != 'cancelled' AND cod_amount > 0");
+            $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
+            if ((int)$stmt->fetchColumn() > 0) return 0;
+        }
+        return (int)$order['total'];
+    }
+
+    /**
+     * Carriers that create labels, with why labels cannot be created now (null = ready). A carrier whose production
+     * API is not connected says so instead of inventing a tracking number: the parcel is then booked in the
+     * carrier's own portal and its number entered when shipping.
+     * @return array<string, ?string> carrier id => reason it is unavailable
+     */
+    public static function labelCarriers(): array
+    {
+        $carriers = [];
+        foreach (self::resolveAdapters() as $code => $adapter) {
+            if (!in_array('label', Adapters::registry('shipping')[$code]['capabilities'] ?? ['label'], true)) continue;
+            $carriers[$adapter->carrierId()] = method_exists($adapter, 'labelUnavailableReason') ? $adapter->labelUnavailableReason() : null;
+        }
+        return $carriers;
+    }
+
+    /** Labels of an order (newest first), with the shipment they belong to when known. */
+    public static function labels(int $orderId): array
+    {
+        $stmt = Db::get()->prepare("SELECT * FROM shipping_labels WHERE order_id = :order AND store_id = :store ORDER BY id DESC");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
     /** Retrieve carrier pickup points through the optional full lifecycle contract. */

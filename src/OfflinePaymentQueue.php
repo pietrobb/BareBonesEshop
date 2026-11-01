@@ -23,7 +23,7 @@ class OfflinePaymentQueue {
         $rows = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $order) {
             $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true) ?: [];
-            if (!self::isOfflineTransfer($order, $snapshot)) continue;
+            if (!self::awaitsTransfer($order, $snapshot)) continue;
             $created = strtotime((string)$order['created_at'] . ' UTC') ?: $now;
             $order['age_hours'] = max(0, intdiv($now - $created, 3600));
             $order['payment_label'] = (string)($snapshot['label'] ?? $snapshot['name'] ?? $order['payment_method'] ?? '');
@@ -41,7 +41,7 @@ class OfflinePaymentQueue {
         $order = Orders::byId($orderId);
         if (!$order) throw new RuntimeException("Order #{$orderId} not found");
         $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true) ?: [];
-        if (!self::isOfflineTransfer($order, $snapshot)) {
+        if (!self::awaitsTransfer($order, $snapshot)) {
             throw new LogicException("Order #{$orderId} is not paid by offline transfer");
         }
 
@@ -49,6 +49,14 @@ class OfflinePaymentQueue {
             'offline_paid_' . $orderId, ['actor' => $actor, 'note' => $note]);
         PaymentService::settleCapture($orderId, 'Platba prevodom prijatá' . ($note !== '' ? ': ' . $note : ''));
         return $recorded;
+    }
+
+    /**
+     * Paid by a transfer the shop books by hand: a bank transfer order, or a purchase on invoice (also once it was
+     * accepted and shipped: the payment is then recorded without changing the order's fulfilment status).
+     */
+    public static function awaitsTransfer(array $order, array $snapshot): bool {
+        return self::isOfflineTransfer($order, $snapshot) || (string)($snapshot['service_type'] ?? '') === 'invoice';
     }
 
     public static function isOfflineTransfer(array $order, array $snapshot): bool {

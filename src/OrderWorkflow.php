@@ -31,24 +31,42 @@ class OrderWorkflow {
     }
 
     /**
-     * Next states of this order. Cash on delivery is paid when the carrier hands the parcel over, so an unpaid
-     * COD order is fulfilled from 'pending' (processing, shipped) without being marked paid first; the label then
-     * keeps the amount the carrier collects.
+     * Next states of this order. Cash on delivery is paid when the carrier hands the parcel over, and a B2B purchase
+     * on invoice by the invoice's due date, so such an unpaid order is fulfilled from 'pending' (processing = accepted,
+     * shipped) without being marked paid first; the label keeps the amount the carrier collects.
      */
     public static function allowedFor(array $order): array {
         $allowed = self::allowedTransitions((string)($order['status'] ?? ''));
-        if (($order['status'] ?? '') === 'pending' && self::isUnpaidCashOnDelivery($order)) {
+        if (($order['status'] ?? '') === 'pending' && self::paidAfterFulfillment($order)) {
             $allowed = array_merge($allowed, ['processing', 'shipped']);
         }
         return $allowed;
     }
 
+    /** An unpaid order whose money comes after the goods: cash on delivery or a purchase on invoice. */
+    public static function paidAfterFulfillment(array $order): bool {
+        return self::isUnpaidCashOnDelivery($order) || self::isUnpaidInvoicePurchase($order);
+    }
+
     /** An order paid by cash on delivery whose money the carrier has not collected yet. */
     public static function isUnpaidCashOnDelivery(array $order): bool {
         if (!in_array((string)($order['payment_status'] ?? 'pending'), ['pending', ''], true)) return false;
-        $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true);
-        $type = is_array($snapshot) ? (string)($snapshot['service_type'] ?? '') : '';
+        $type = self::paymentServiceType($order);
         return $type !== '' ? $type === 'cod' : PaymentService::isCashOnDelivery((string)($order['payment_method'] ?? ''));
+    }
+
+    /** A B2B purchase on invoice (payment terms of an approved company) whose invoice is not paid yet. */
+    public static function isUnpaidInvoicePurchase(array $order): bool {
+        return in_array((string)($order['payment_status'] ?? 'pending'), ['pending', ''], true) && self::isInvoicePurchase($order);
+    }
+
+    public static function isInvoicePurchase(array $order): bool {
+        return self::paymentServiceType($order) === 'invoice';
+    }
+
+    private static function paymentServiceType(array $order): string {
+        $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true);
+        return is_array($snapshot) ? (string)($snapshot['service_type'] ?? '') : '';
     }
 
     /**
@@ -164,8 +182,10 @@ class OrderWorkflow {
         // Collect DB-side effects (stock restore) + deferred jobs
         $deferredJobs = match($to) {
             'paid'      => self::handlePaid($order),
+            'processing' => self::handleAccepted($order),
             'cancelled' => self::handleCancellation($order),
             'shipped'   => self::handleShipped($order),
+            'delivered' => self::handleDelivered($order),
             'returned'  => self::handleReturn($order),
             'refunded'  => self::handleRefund($order),
             default     => [],
@@ -260,8 +280,9 @@ class OrderWorkflow {
     private static function handleShipped(array $order): array {
         Fulfillment::shipOrder((int)$order['id']);
 
-        // A cash-on-delivery order never passed 'paid': its invoice is issued now and travels with the parcel.
-        $invoice = self::isUnpaidCashOnDelivery($order) ? [['invoice_issue', ['order_id' => $order['id']], 3]] : [];
+        // A cash-on-delivery order or a purchase on invoice never passed 'paid': its invoice is issued now (idempotent
+        // when accepting the invoice purchase already issued it) and travels with the parcel.
+        $invoice = self::paidAfterFulfillment($order) ? [['invoice_issue', ['order_id' => $order['id']], 3]] : [];
         return [...$invoice,
             ['email_send', [
                 'template' => 'order_shipped',
@@ -274,6 +295,30 @@ class OrderWorkflow {
                 'status'   => 'shipped',
             ], 5],
         ];
+    }
+
+    /**
+     * Accepted: a purchase on invoice moved from 'pending' to 'processing' is the seller accepting the order on the
+     * company's payment terms. The invoice, due after those terms, is issued and e-mailed now; the order then waits
+     * for payment while it is fulfilled ("on invoice, awaiting payment") and is marked paid when the money arrives.
+     */
+    private static function handleAccepted(array $order): array {
+        if (($order['status'] ?? '') !== 'pending' || !self::isUnpaidInvoicePurchase($order)) return [];
+        return [
+            ['invoice_issue', ['order_id' => $order['id']], 3],
+            ['erp_order_update', ['order_id' => $order['id'], 'status' => 'processing'], 5],
+        ];
+    }
+
+    /**
+     * Delivered: the carrier collected the cash on delivery, so the payment is recorded as paid with the collected
+     * amount (it then counts as revenue); a later carrier report or a repeated delivery records nothing twice.
+     */
+    private static function handleDelivered(array $order): array {
+        if (!self::isUnpaidCashOnDelivery($order)) return [];
+        PaymentService::transitionPayment((int)$order['id'], 'paid', 'cod.collected', (int)$order['total'],
+            'cod_collected_' . (int)$order['id'], ['source' => 'delivery']);
+        return [];
     }
 
     /**

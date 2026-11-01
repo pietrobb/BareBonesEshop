@@ -230,9 +230,12 @@ final class ManualOrder {
                 if ($pickup['error'] !== null) return ['error' => (string)$pickup['error']];
                 if ($pickup['point'] !== null) $rate['pickup_point'] = $pickup['point'];
             }
-            $shippingCost = $freeShipping ? ShippingService::freeShippingPrice($rate) : (int)$rate['price'];
+            // As checkout: the carrier's COD surcharge is billed as part of the COD fee, not inside the shipping price.
+            $codSurcharge = CheckoutService::rateCodSurcharge($rate, PaymentService::isCashOnDelivery($paymentMethod));
+            $shippingCost = $freeShipping ? 0 : (int)$rate['price'] - $codSurcharge;
             $shippingCost = CheckoutService::chargedShipping($shippingCost, $vat, $currency);
-            $paymentBase = max(0, $subtotal - $discount) + $shippingCost;
+            $codSurcharge = CheckoutService::chargedShipping($codSurcharge, $vat, $currency);
+            $paymentBase = max(0, $subtotal - $discount) + $shippingCost + $codSurcharge;
             if ($digitalOnly && $paymentBase === 0) {
                 $paymentMethod = 'free';
                 $payment = freeDigitalPayment();
@@ -240,7 +243,8 @@ final class ManualOrder {
                 $payment = PaymentService::selectMethod($paymentMethod, $country, $currency, $paymentBase, (string)$rate['method_code'], $customerId);
             }
             if (!$payment || ($digitalOnly && ($payment['service_type'] ?? '') === 'cod')) return ['error' => 'checkout.error.payment_unavailable'];
-            $paymentFee = (int)CheckoutService::chargedFees([$payment], $vat)[0]['fee'];
+            $paymentFee = (int)CheckoutService::chargedFees([$payment], $vat)[0]['fee'] + $codSurcharge;
+            $payment = CheckoutService::withCodSurcharge($payment, $codSurcharge);
             $providers = [
                 'tax' => $vat['tax_provider'],
                 'payment' => (string)$payment['provider'],

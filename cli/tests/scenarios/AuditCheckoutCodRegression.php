@@ -97,7 +97,9 @@ try {
         $crm3Rate = json_decode((string)($crm3Order['shipping_rate_snapshot'] ?? ''), true) ?: [];
         assert_true(count($crm3Placed['orders']) === 1 && ($crm3Order['payment_method'] ?? '') === 'dobierka',
             "CR-M3 {$crm3Driver}: the order is placed with the renamed COD method (" . trim($crm3Noise) . ')');
-        assert_true((int)($crm3Rate['cod_surcharge'] ?? 0) > 0 && (int)($crm3Order['shipping_cost'] ?? 0) === (int)($crm3Rate['price'] ?? -1),
+        // R11: the surcharge is billed once, inside the COD fee; the shipping line is the carriage.
+        assert_true((int)($crm3Rate['cod_surcharge'] ?? 0) > 0 && (int)($crm3Order['shipping_cost'] ?? 0) === (int)($crm3Rate['price'] ?? -1) - (int)($crm3Rate['cod_surcharge'] ?? 0)
+            && (int)($crm3Order['payment_fee'] ?? 0) >= (int)($crm3Rate['cod_surcharge'] ?? 0),
             "CR-M3 {$crm3Driver}: the carrier's COD surcharge is charged although the method is not called 'cod' (" . json_encode(array_intersect_key($crm3Rate, array_flip(['price', 'base_price', 'cod_surcharge']))) . ')');
         assert_equals((string)($crm3Order['total_formatted'] ?? '-'), $crm3PreviewTotal,
             "CR-M3 {$crm3Driver}: the checkout summary showed the total the order charges, COD surcharge included");

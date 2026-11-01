@@ -54,6 +54,17 @@ final class InvoiceService
     }
 
     /**
+     * Days until the invoice is due: a purchase on invoice keeps the company's payment terms frozen on the order at
+     * checkout; every other order the seller's default terms.
+     */
+    public static function paymentTermsDays(array $order, array $legal): int
+    {
+        $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true);
+        $orderTerms = is_array($snapshot) && ($snapshot['service_type'] ?? '') === 'invoice' ? (int)($snapshot['payment_terms_days'] ?? 0) : 0;
+        return $orderTerms > 0 ? $orderTerms : (int)($legal['payment_terms_days'] ?? 14);
+    }
+
+    /**
      * Issue an invoice for a paid order (see canIssue()). Idempotent: re-calling for the
      * same order_id returns the existing invoice. A cancelled invoice is replaced: it keeps its number and status for
      * the audit trail and is re-typed 'replaced', which frees the one-invoice-per-order slot for the new invoice.
@@ -104,7 +115,7 @@ final class InvoiceService
         $sellerZone       = StoreContext::timezoneFor($store);
         $issuedAt         = ShopTime::dateIn('Y-m-d', $sellerZone);
         $deliveryDate     = self::supplyDate($order, $issuedAt, $sellerZone);
-        $paymentTermsDays = (int)($legal['payment_terms_days'] ?? 14);
+        $paymentTermsDays = self::paymentTermsDays($order, $legal);
         $dueDate          = ShopTime::addDays($issuedAt, $paymentTermsDays);
 
         $db = Db::get();
