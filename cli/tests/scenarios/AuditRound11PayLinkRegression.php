@@ -210,6 +210,16 @@ try {
 
     // H1 end to end, last: the confirmation page reached through the payment link with the attacker's own password —
     // after a failed payment, on an order entered in the admin, and on an order whose gateway session is over 23 h old.
+    // The vulnerable page signed the visitor in and redirected (exit) into the victim's order: report that, not silence.
+    $r11pH1Done = false;
+    $r11pEmail = '';
+    register_shutdown_function(static function () use (&$r11pH1Done, &$r11pEmail, $pdo): void {
+        if ($r11pH1Done) return;
+        $r11pLeft = $pdo->prepare('SELECT COUNT(*) FROM customers WHERE email = ?');
+        $r11pLeft->execute([$r11pEmail]);
+        echo "  [FAIL] R11 H1: the posted confirmation page left the request (redirect) with " . (int)$r11pLeft->fetchColumn() . " account(s) created for {$r11pEmail}\n";
+        exit(1);
+    });
     foreach (['failed' => 'failed', 'manual' => 'pending', 'old session' => 'pending'] as $r11pVariant => $r11pStatus) {
         try {
             $r11pEmail = 'r11p-target-' . str_replace(' ', '-', $r11pVariant) . '@example.test';
@@ -235,6 +245,7 @@ try {
                 && (end($r11pMailer->sent)['to'] ?? '') === $r11pEmail, "R11 H1 ({$r11pVariant}): it only e-mails the link to the order's address");
         } catch (Throwable $e) { $r11pFail("H1 page {$r11pVariant}", $e); }
     }
+    $r11pH1Done = true;
 } finally {
     [$_GET, $_POST, $_SERVER['REQUEST_METHOD'], $GLOBALS['t']] = $r11pRequestBefore;
     Customers::logout();
