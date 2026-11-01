@@ -151,7 +151,9 @@ try {
     assert_equals([150, 0], [ShippingService::freeShippingPrice(['price' => 490, 'base_price' => 340, 'cod_surcharge' => 150]),
         ShippingService::freeShippingPrice(['price' => 390, 'cod_surcharge' => 0])], 'R6 free shipping: a free database rate keeps its COD surcharge; adapter rates charge COD as a payment fee');
     $r6mApi = str_replace("\r\n", "\n", (string)file_get_contents(TEST_CLI_DIR . '/../src/Http/ApiHandlers.php'));
-    assert_true(str_contains($r6mApi, '$shippingCost = $promotionFreeShipping ? ShippingService::freeShippingPrice($selectedRate) : (int)$selectedRate[\'price\'];'),
+    // R11: the surcharge is billed once, as part of the COD fee; free shipping waives the carriage only.
+    assert_true(str_contains($r6mApi, '$shippingCost = $promotionFreeShipping ? 0 : (int)$selectedRate[\'price\'] - $codSurcharge;')
+        && str_contains($r6mApi, '$paymentFee = (int)CheckoutService::chargedFees([$selectedPayment], $vat)[0][\'fee\'] + $codSurcharge;'),
         'R6 free shipping: an automatic free-shipping promotion still charges the COD surcharge at checkout (was 0)');
 
 } catch (Throwable $e) {

@@ -1,5 +1,6 @@
 <?php
 /** A12.8: shipments and tracking in the admin order detail (partial shipments through Fulfillment). */
+require_once __DIR__ . '/ShipmentLabels.php';
 
 /** The consumer's withdrawal statements (storefront withdrawal form): received when, for which lines, why. */
 function renderOrderWithdrawals(array $order, array $withdrawals): void {
@@ -45,6 +46,7 @@ function renderOrderShipments(array $order): void {
     $open = $canShip && Fulfillment::orderShippable($order);
     $groups = $open ? array_values(array_filter(Fulfillment::shippable($orderId),
         static fn(array $g): bool => array_sum(array_column($g['lines'], 'remaining')) > 0)) : [];
+    [$labelCarriers, $labels] = adminShipmentLabelState($orderId, $open);
     $warehouses = adminShipmentWarehouseNames();
     $warehouseLabel = static fn(?int $id): string => $id === null ? I18n::t('admin.shipment.no_warehouse') : ($warehouses[$id] ?? ('#' . $id));
     $action = static fn(string $name): string => 'admin.php?p=order&amp;id=' . $orderId . '&amp;action=' . $name;
@@ -78,11 +80,12 @@ function renderOrderShipments(array $order): void {
                     <form method="post" action="<?= $action('shipment_ship') ?>">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                         <input type="hidden" name="shipment_id" value="<?= $shipmentId ?>">
-                        <?php $trackingFields(); ?>
+                        <?php $trackingFields($shipment); ?>
                         <?= $withdrawalAck ?>
                         <button class="btn btn-primary btn-sm" type="submit"><?= esc(I18n::t('admin.shipment.ship')) ?></button>
                     </form>
                     <?php endif; ?>
+                    <?php if ($shipment['status'] === 'planned' && $open) renderShipmentLabelForm($order, $shipment, $labels[$shipmentId] ?? [], $labelCarriers, $action('shipment_label')); ?>
                     <?php if ($shipment['status'] === 'planned'): ?>
                     <form method="post" action="<?= $action('shipment_cancel') ?>" style="margin-top:.25rem">
                         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">

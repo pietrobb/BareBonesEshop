@@ -34,6 +34,7 @@ function handlePost(string $page, string $action): void {
         'order:invoice_issue' => handleOrderInvoiceIssue(), 'order:invoice_resend' => handleOrderInvoiceResend(),
         'order:shipment_create' => handleOrderShipmentCreate(), 'order:shipment_ship' => handleOrderShipmentShip(),
         'order:shipment_tracking' => handleOrderShipmentTracking(), 'order:shipment_cancel' => handleOrderShipmentCancel(),
+        'order:shipment_label' => handleOrderShipmentLabel(),
         'awaiting_payment:confirm' => handleAwaitingPaymentConfirm(),
         'import:upload'  => handleImportUpload(),
         'cache:flush'    => handleCacheFlush(),

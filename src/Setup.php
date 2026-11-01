@@ -428,6 +428,16 @@ class Setup
         $shipping = (array)($config['integrations']['http_shipping'] ?? []);
         $shippingReady = self::integrationReady($shipping);
         $add($shippingReady ? 'pass' : 'warn', 'provider.shipping_lifecycle', $shippingReady ? 'HTTP carrier lifecycle configured.' : 'HTTP carrier lifecycle not configured.', 'Configure integrations.http_shipping and run fixture/live sandbox smoke.');
+        // Carrier labels: a carrier whose API is not connected never invents a tracking number; say so before launch.
+        try {
+            $unavailable = array_filter(ShippingService::labelCarriers(), static fn(?string $reason): bool => $reason !== null);
+            $add($unavailable === [] ? 'pass' : 'warn', 'provider.shipping_labels', $unavailable === []
+                ? 'Carrier labels can be created for every enabled carrier.'
+                : 'Carrier labels not available: ' . implode(' ', array_map(static fn(string $carrier, string $reason): string => "{$carrier}: {$reason}", array_keys($unavailable), $unavailable)),
+                'Book these parcels in the carrier portal and enter the tracking number when shipping, or connect the carrier through integrations.http_shipping.');
+        } catch (\Throwable $e) {
+            $add('warn', 'provider.shipping_labels', 'Carrier label readiness could not be checked: ' . $e->getMessage(), 'Run the doctor against the installed database.');
+        }
         $erp = (array)($config['integrations']['http_erp'] ?? []);
         $erpReady = self::integrationReady($erp);
         $add($erpReady ? 'pass' : 'warn', 'provider.erp', $erpReady ? 'HTTP ERP contract configured.' : 'HTTP ERP contract not configured.', 'Configure integrations.http_erp and verify create/status update in staging.');

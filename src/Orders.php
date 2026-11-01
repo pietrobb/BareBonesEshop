@@ -579,13 +579,20 @@ class Orders {
     }
 
     /**
-     * Record refund ID (in notes, preserving original payment_id)
+     * Record the provider's refund ID in the order's audit trail. The notes column is the customer's own note,
+     * printed on the delivery note: an internal reference never goes there.
      */
     public static function setRefundId(int $orderId, string $refundId): void {
-        $order = self::byId($orderId);
-        $notes = trim(($order['notes'] ?? '') . "\nRefund: " . $refundId);
-        $stmt = Db::get()->prepare("UPDATE orders SET notes = :notes WHERE id = :id AND store_id = :store");
-        $stmt->execute([':notes' => $notes, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
+        AuditLog::log('order_refund', $orderId, null, 'refund_id', 'Refund: ' . $refundId);
+    }
+
+    /** Lines older versions appended to the customer's note (provider refund id, ERP status marker). */
+    private const SYSTEM_NOTE_LINE = '/^(?:Refund: \S+|erp_status:\S+)$/';
+
+    /** The customer's checkout note without the internal lines older versions stored in it. */
+    public static function customerNote(array $order): string {
+        $lines = preg_split('/\R/', (string)($order['notes'] ?? '')) ?: [];
+        return trim(implode("\n", array_filter($lines, static fn(string $line): bool => !preg_match(self::SYSTEM_NOTE_LINE, trim($line)))));
     }
 
     /**

@@ -474,6 +474,8 @@ function apiShippingRates(): array {
     if (CheckoutService::discountPreview(CheckoutService::acceptedCoupon(), (int)($cart['subtotal'] ?? 0), null, $cart['items'], $customerId ?: null)['free_shipping']) {
         $methods = array_map(static fn(array $method): array => ['price' => ShippingService::freeShippingPrice($method)] + $method, $methods);
     }
+    // As checkout bills it: the price is the carriage; a COD surcharge is listed apart (it is part of the COD payment fee).
+    $methods = array_map(static fn(array $method): array => ['price' => (int)$method['price'] - CheckoutService::rateCodSurcharge($method, $cod)] + $method, $methods);
     $methods = CheckoutService::chargedQuote(['rates' => $methods], $vat, (string)($cart['currency'] ?? 'eur'))['rates'];
     $unitsToFree = ShippingService::unitsToFreeShipping($methods, $physicalQty);
     return [
@@ -536,7 +538,8 @@ function apiPaymentMethods(): array {
     }
     $methods = CheckoutService::chargedFees($methods, $vat);
     // With the selected rate's price (?shipping=, in amount) each method also carries the shipping the order charges
-    // with it: cash on delivery adds the carrier's COD surcharge (kept under free shipping), and its fee is priced on that.
+    // with it; cash on delivery bills the carrier's COD surcharge (kept under free shipping) inside its one COD fee
+    // (cod_surcharge = the part of the fee that is the carrier's), priced on the amount including it.
     $shipping = !$digitalOnly && $shippingMethod !== '' && is_string($_GET['shipping'] ?? null) && $_GET['shipping'] !== ''
         ? max(0, Security::int($_GET['shipping'])) : null;
     if ($shipping !== null) {
@@ -549,6 +552,7 @@ function apiPaymentMethods(): array {
             if (($preview['selected']['code'] ?? null) !== $method['code']) continue;
             $method['shipping'] = (int)$preview['shipping'];
             $method['fee'] = (int)$preview['selected']['fee'];
+            $method['cod_surcharge'] = (int)($preview['selected']['cod_surcharge'] ?? 0);
         }
         unset($method);
     }
@@ -740,13 +744,15 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         if ($pickup['error'] !== null) return checkoutRefusal((string)$pickup['error']);
         if ($pickup['point'] !== null) $selectedRate['pickup_point'] = $pickup['point'];
     }
-    // Free shipping waives the carriage, not the cash-on-delivery surcharge.
-    $shippingCost = $promotionFreeShipping ? ShippingService::freeShippingPrice($selectedRate) : (int)$selectedRate['price'];
+    // Free shipping waives the carriage, not the cash-on-delivery surcharge, which is billed as part of the COD fee.
+    $codSurcharge = CheckoutService::rateCodSurcharge($selectedRate, PaymentService::isCashOnDelivery($paymentMethod));
+    $shippingCost = $promotionFreeShipping ? 0 : (int)$selectedRate['price'] - $codSurcharge;
     // Shipping rates include domestic VAT like catalog prices; zero-rated sales are charged them net.
     $shippingCost = CheckoutService::chargedShipping($shippingCost, $vat, $cartCurrency);
+    $codSurcharge = CheckoutService::chargedShipping($codSurcharge, $vat, $cartCurrency);
 
     $currency = $cart['items'][0]['currency'] ?? 'eur';
-    $paymentBaseAmount = max(0, $cart['subtotal'] - $totalDiscount) + $shippingCost;
+    $paymentBaseAmount = max(0, $cart['subtotal'] - $totalDiscount) + $shippingCost + $codSurcharge;
     $freeDigitalOrder = $digitalOnly && $paymentBaseAmount === 0;
     if ($freeDigitalOrder) {
         $paymentMethod = 'free';
@@ -761,7 +767,8 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         // The smoke test exists to prove the gateway redirect; anything else would be a real order.
         return checkoutRefusal('checkout.error.synthetic_requires_online', 422);
     }
-    $paymentFee = (int)CheckoutService::chargedFees([$selectedPayment], $vat)[0]['fee'];
+    $paymentFee = (int)CheckoutService::chargedFees([$selectedPayment], $vat)[0]['fee'] + $codSurcharge;
+    $selectedPayment = CheckoutService::withCodSurcharge($selectedPayment, $codSurcharge);
     $providerCodes = [
         'tax' => $taxProviderCode,
         'payment' => (string)$selectedPayment['provider'],

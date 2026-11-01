@@ -69,7 +69,8 @@ function pageDeliveryNotes(): void {
         echo 'Forbidden';
         return;
     }
-    $notes = DeliveryNote::forOrders($posted ? postedOrderIds() : [Security::int($_GET['id'] ?? 0)]);
+    $shipmentId = !$posted && isset($_GET['shipment']) ? Security::int($_GET['shipment']) : null;
+    $notes = DeliveryNote::forOrders($posted ? postedOrderIds() : [Security::int($_GET['id'] ?? 0)], $shipmentId);
     if (!$notes) {
         http_response_code(404);
         echo esc(I18n::t('admin.delivery_note.none'));

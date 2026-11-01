@@ -74,9 +74,10 @@ try {
     $r9hMethods = array_column(apiPaymentMethods()['methods'] ?? [], null, 'code');
     $r9hVat = CheckoutService::vatContext('SK', '', 'r9hship', false);
     $r9hHtml = CheckoutService::paymentPreview(CheckoutService::availableItems(Cart::enriched($r9hVat['context'])['items']), 2000, 'SK', 'eur', 'r9hship', 400, false, 'r9hcod', null, $r9hVat);
-    assert_equals([550, (int)$r9hHtml['shipping'], (int)$r9hHtml['selected']['fee']],
-        [(int)($r9hMethods['r9hcod']['shipping'] ?? -1), (int)($r9hMethods['r9hcod']['shipping'] ?? -1), (int)($r9hMethods['r9hcod']['fee'] ?? -1)],
-        'R9 COD total: the COD method the JS lists carries 5,50 € shipping (rate + surcharge) and the fee the order charges');
+    // R11: one COD fee — the 1,50 € carrier surcharge is part of the COD fee, the shipping stays the 4 € carriage.
+    assert_equals([400, (int)$r9hHtml['shipping'], (int)$r9hHtml['selected']['fee'], 150],
+        [(int)($r9hMethods['r9hcod']['shipping'] ?? -1), (int)($r9hMethods['r9hcod']['shipping'] ?? -1), (int)($r9hMethods['r9hcod']['fee'] ?? -1), (int)($r9hMethods['r9hcod']['cod_surcharge'] ?? -1)],
+        'R9 COD total: the COD method the JS lists carries the 4 € carriage and the one COD fee (surcharge included) the order charges');
     assert_equals([400, 0], [(int)($r9hMethods['r9hbank']['shipping'] ?? -1), (int)($r9hMethods['r9hbank']['fee'] ?? -1)],
         'R9 COD total: other methods keep the selected rate as their shipping');
 

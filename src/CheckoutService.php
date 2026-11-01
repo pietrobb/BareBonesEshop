@@ -119,7 +119,7 @@ class CheckoutService {
 
     /**
      * Payment methods of the checkout form, priced like execute(): on the goods after discounts plus the shipping
-     * the order charges (cash on delivery adds the carrier surcharge, which a free-shipping promotion keeps).
+     * the order charges (cash on delivery adds the carrier surcharge to its fee, which a free-shipping promotion keeps).
      * $shipping is the selected rate's charged price ('' method = no rate offered, so no payment either). Under a
      * zero-rated $vat scenario (vatContext()) shipping and fixed fees lose the domestic VAT as execute() charges them.
      * @return array{methods: list<array>, selected: ?array, shipping: int}
@@ -132,17 +132,37 @@ class CheckoutService {
             return ['methods' => [$free], 'selected' => $free, 'shipping' => 0];
         }
         $methods = $method !== '' ? PaymentService::availableMethods($country, $currency, $goods + $shipping, $method, $customerId) : [];
+        $shipping = $freeShipping ? 0 : $shipping;
+        // Cash on delivery charges one fee: the carrier rate's COD surcharge is part of the COD method's fee (priced on
+        // the same amount as before), never a second, unlabelled charge inside the shipping price.
+        $surcharge = 0;
+        if ($method !== '') {
+            $cod = ['service_type' => 'cod'];
+            $codShipping = $freeShipping ? self::freeShippingCharge($cart, $goods, $country, $method, $cod, $vat, $currency) : self::summaryShipping($cart, $goods, $country, $method, $cod, $shipping, $vat, $currency);
+            $surcharge = max(0, $codShipping - $shipping);
+        }
+        $methods = array_map(static function (array $m) use ($surcharge, $country, $currency, $goods, $shipping, $method, $customerId): array {
+            if ($surcharge === 0 || ($m['service_type'] ?? '') !== 'cod') return $m;
+            return (PaymentService::selectMethod((string)$m['code'], $country, $currency, $goods + $shipping + $surcharge, $method, $customerId) ?? $m) + ['cod_surcharge' => $surcharge];
+        }, $methods);
+        if ($vat !== null) $methods = self::chargedFees($methods, $vat);
+        $methods = array_map(static fn(array $m): array => self::withCodSurcharge($m, (int)($m['cod_surcharge'] ?? 0)), $methods);
         $selected = array_values(array_filter($methods, static fn(array $m): bool => (string)$m['code'] === $postedPayment))[0] ?? $methods[0] ?? null;
-        $charged = $freeShipping ? self::freeShippingCharge($cart, $goods, $country, $method, $selected, $vat, $currency) : self::summaryShipping($cart, $goods, $country, $method, $selected, $shipping, $vat, $currency);
-        if ($selected && $charged !== $shipping) {
-            $selected = PaymentService::selectMethod((string)$selected['code'], $country, $currency, $goods + $charged, $method, $customerId) ?? $selected;
-            $methods = array_map(static fn(array $m): array => $m['code'] === $selected['code'] ? $selected : $m, $methods);
-        }
-        if ($vat !== null) {
-            $methods = self::chargedFees($methods, $vat);
-            if ($selected) $selected = self::chargedFees([$selected], $vat)[0];
-        }
-        return ['methods' => $methods, 'selected' => $selected, 'shipping' => $charged];
+        return ['methods' => $methods, 'selected' => $selected, 'shipping' => $shipping];
+    }
+
+    /** A payment quote whose fee includes the carrier's COD surcharge (already charged under the order's VAT scenario). */
+    public static function withCodSurcharge(array $payment, int $surcharge): array {
+        if ($surcharge <= 0) return $payment;
+        return ['fee' => (int)($payment['fee'] ?? 0) + $surcharge, 'cod_surcharge' => $surcharge] + $payment;
+    }
+
+    /**
+     * The carrier's COD surcharge a selected database rate carries inside its price (0 for other rates or when not
+     * paying cash on delivery): checkout bills it as part of the COD payment fee, the shipping line is the carriage.
+     */
+    public static function rateCodSurcharge(array $rate, bool $cod): int {
+        return $cod && array_key_exists('base_price', $rate) ? max(0, min((int)($rate['cod_surcharge'] ?? 0), (int)($rate['price'] ?? 0))) : 0;
     }
 
     /** Payment method quotes with the fee checkout charges under $vat (PaymentService::chargedFee). */

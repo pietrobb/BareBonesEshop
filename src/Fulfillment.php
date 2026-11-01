@@ -45,10 +45,13 @@ class Fulfillment {
         return $shipmentIds;
     }
 
-    /** Paid or processing orders ship; so does an unpaid cash-on-delivery order, which the carrier collects on delivery. */
+    /**
+     * Paid or processing orders ship; so does an unpaid cash-on-delivery order (the carrier collects on delivery)
+     * or purchase on invoice (paid by the invoice's due date).
+     */
     public static function orderShippable(array $order): bool {
         return in_array($order['status'], ['paid', 'processing'], true)
-            || ($order['status'] === 'pending' && OrderWorkflow::isUnpaidCashOnDelivery($order));
+            || ($order['status'] === 'pending' && OrderWorkflow::paidAfterFulfillment($order));
     }
 
     /**

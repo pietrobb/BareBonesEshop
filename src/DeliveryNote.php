@@ -7,21 +7,49 @@ final class DeliveryNote {
     public const MAX_ORDERS = 200;
 
     /**
-     * Orders of the current store with their items, in the requested order; foreign or unknown ids are skipped.
+     * Delivery notes of orders of the current store, in the requested order; foreign or unknown ids are skipped.
+     * A note goes into one parcel: an order with shipments gets one note per (not cancelled) shipment listing that
+     * shipment's goods, an order without shipments one note with all its items. $shipmentId picks one shipment.
      *
      * @param int[] $orderIds
-     * @return list<array{order: array, items: array, address: array, pickup: ?array}>
+     * @return list<array{order: array, items: array, address: array, pickup: ?array, shipment: ?array{number:int,count:int,id:int}}>
      */
-    public static function forOrders(array $orderIds): array {
+    public static function forOrders(array $orderIds, ?int $shipmentId = null): array {
         $notes = [];
         foreach (array_slice(array_values(array_unique(array_filter(array_map('intval', $orderIds), static fn(int $id): bool => $id > 0))), 0, self::MAX_ORDERS) as $orderId) {
             $order = Orders::byId($orderId);
             if (!$order) continue;
             $address = json_decode((string)($order['shipping_addr'] ?? ''), true);
             $pickup = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true)['pickup_point'] ?? null;
-            $notes[] = ['order' => $order, 'items' => Orders::items($orderId), 'address' => is_array($address) ? $address : [], 'pickup' => is_array($pickup) ? $pickup : null];
+            $base = ['order' => $order, 'address' => is_array($address) ? $address : [], 'pickup' => is_array($pickup) ? $pickup : null];
+            $items = Orders::items($orderId);
+            $shipments = array_values(array_filter(Fulfillment::shipments($orderId), static fn(array $s): bool => ($s['status'] ?? '') !== 'cancelled'));
+            if ($shipments === []) {
+                if ($shipmentId === null) $notes[] = $base + ['items' => $items, 'shipment' => null];
+                continue;
+            }
+            $byId = array_column($items, null, 'id');
+            $shipmentItems = Fulfillment::shipmentItems(array_column($shipments, 'id'));
+            foreach ($shipments as $i => $shipment) {
+                if ($shipmentId !== null && (int)$shipment['id'] !== $shipmentId) continue;
+                $lines = [];
+                foreach ($shipmentItems[(int)$shipment['id']] ?? [] as $line) {
+                    if (($line['status'] ?? '') === 'cancelled') continue;
+                    $lines[] = ['sku' => (string)$line['sku'], 'name' => (string)($byId[(int)$line['order_item_id']]['name'] ?? $line['sku']), 'quantity' => (int)$line['quantity']];
+                }
+                $notes[] = $base + ['items' => $lines, 'shipment' => ['number' => $i + 1, 'count' => count($shipments), 'id' => (int)$shipment['id']]];
+            }
         }
         return $notes;
+    }
+
+    /** Header of the note: the order number, plus "parcel n of m" when the order ships in several parcels. */
+    private static function title(array $note): string {
+        $title = I18n::t('admin.delivery_note.title') . ' ' . $note['order']['order_number'];
+        $shipment = $note['shipment'] ?? null;
+        return $shipment && $shipment['count'] > 1
+            ? $title . ' – ' . I18n::format('admin.delivery_note.parcel', ['number' => $shipment['number'], 'count' => $shipment['count']])
+            : $title;
     }
 
     /** @return list<string> recipient block: name, company lines, street, zip city, country, phone */
@@ -45,14 +73,15 @@ final class DeliveryNote {
             . '.sign{margin-top:48px;border-top:1px solid #000;width:240px;padding-top:4px}@media print{.note{padding:0}}</style></head><body>';
         self::eachInOrderLocale($notes, static function (array $note) use (&$out, $seller): void {
             $order = $note['order'];
-            $out .= '<section class="note" lang="' . esc(I18n::locale()) . '" data-delivery-note="' . esc((string)$order['order_number']) . '">'
-                . '<h1>' . esc(I18n::t('admin.delivery_note.title')) . ' ' . esc((string)$order['order_number']) . '</h1>'
+            $out .= '<section class="note" lang="' . esc(I18n::locale()) . '" data-delivery-note="' . esc((string)$order['order_number']) . '"'
+                . (!empty($note['shipment']) ? ' data-shipment="' . (int)$note['shipment']['id'] . '"' : '') . '>'
+                . '<h1>' . esc(self::title($note)) . '</h1>'
                 . ($seller !== '' ? '<p>' . esc($seller) . '</p>' : '')
                 . '<p>' . esc(I18n::t('admin.th.date')) . ': ' . esc(substr((string)$order['created_at'], 0, 10)) . '</p>'
                 . '<h2>' . esc(I18n::t('admin.delivery_note.ship_to')) . '</h2><p>' . implode('<br>', array_map('esc', self::recipientLines($note))) . '</p>';
             if (!empty($order['shipping_method'])) $out .= '<p>' . esc(I18n::t('admin.delivery_note.shipping_method')) . ': ' . esc((string)$order['shipping_method']) . '</p>';
             if ($note['pickup']) $out .= '<p>' . esc(I18n::t('pickup_point')) . ': ' . esc((string)($note['pickup']['name'] ?? '')) . ' (ID ' . esc((string)($note['pickup']['id'] ?? '')) . ')</p>';
-            if (trim((string)($order['notes'] ?? '')) !== '') $out .= '<p style="white-space:pre-wrap">' . esc(I18n::t('admin.order.note')) . ': ' . esc((string)$order['notes']) . '</p>';
+            if (($customerNote = Orders::customerNote($order)) !== '') $out .= '<p style="white-space:pre-wrap">' . esc(I18n::t('admin.order.note')) . ': ' . esc($customerNote) . '</p>';
             $out .= '<table><thead><tr><th>' . esc(I18n::t('admin.th.sku')) . '</th><th>' . esc(I18n::t('admin.th.name')) . '</th><th class="qty">' . esc(I18n::t('admin.th.qty')) . '</th></tr></thead><tbody>';
             $quantity = 0;
             foreach ($note['items'] as $item) {
@@ -72,7 +101,7 @@ final class DeliveryNote {
         self::eachInOrderLocale($notes, static function (array $note) use ($pdf, $seller): void {
             $order = $note['order'];
             $pdf->addPage();
-            $pdf->text(20, 20, I18n::t('admin.delivery_note.title') . ' ' . $order['order_number'], ['size' => 16, 'bold' => true]);
+            $pdf->text(20, 20, mb_substr(self::title($note), 0, 60), ['size' => 16, 'bold' => true]);
             $pdf->text(130, 20, I18n::t('admin.th.date') . ': ' . substr((string)$order['created_at'], 0, 10), ['size' => 9]);
             if ($seller !== '') $pdf->text(130, 25, $seller, ['size' => 9]);
             $y = 34.0;
@@ -80,7 +109,7 @@ final class DeliveryNote {
             foreach (self::recipientLines($note) as $line) { $y += 5; $pdf->text(20, $y, mb_substr($line, 0, 80), ['size' => 9]); }
             if (!empty($order['shipping_method'])) { $y += 6; $pdf->text(20, $y, I18n::t('admin.delivery_note.shipping_method') . ': ' . $order['shipping_method'], ['size' => 9]); }
             if ($note['pickup']) { $y += 5; $pdf->text(20, $y, mb_substr(I18n::t('pickup_point') . ': ' . ($note['pickup']['name'] ?? '') . ' (ID ' . ($note['pickup']['id'] ?? '') . ')', 0, 100), ['size' => 9]); }
-            if (trim((string)($order['notes'] ?? '')) !== '') { $y += 5; $pdf->text(20, $y, mb_substr(I18n::t('admin.order.note') . ': ' . preg_replace('/\s+/', ' ', (string)$order['notes']), 0, 110), ['size' => 9]); }
+            if (($customerNote = Orders::customerNote($order)) !== '') { $y += 5; $pdf->text(20, $y, mb_substr(I18n::t('admin.order.note') . ': ' . preg_replace('/\s+/', ' ', $customerNote), 0, 110), ['size' => 9]); }
             $header = static function () use ($pdf, &$y): void {
                 $pdf->text(20, $y, I18n::t('admin.th.sku'), ['size' => 9, 'bold' => true]);
                 $pdf->text(60, $y, I18n::t('admin.th.name'), ['size' => 9, 'bold' => true]);

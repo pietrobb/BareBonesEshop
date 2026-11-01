@@ -526,5 +526,13 @@
         "crlf": [
             "8274556edff48d0e3da26fedd22b1482522ac347ceba7de6e1fea67e29ef78b1"
         ]
+    },
+    "20261101130000_shipping_label_shipment": {
+        "lf": [
+            "422ee6ca58b5170dee87798b10a9875d057aa084b553f44043c886eddffc00c0"
+        ],
+        "crlf": [
+            "ec5881f20baaac0566ec7f56b43d9432ecbf83e4e4fc75da05520f5914a42445"
+        ]
     }
 }
