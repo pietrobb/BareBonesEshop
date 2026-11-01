@@ -54,6 +54,8 @@ php cli/update.php apply --package=/trusted/releases/update-1.8.0-X.Y.Z --instal
 
 After this adoption, the deployment has private version state and future updates use the normal procedure below, run from the shop itself.
 
+**v2.0.0 shops** use the same adoption once (steps 2, 3 and 5–9 with `--version=2.0.0` and the `update-2.0.0-X.Y.Z` package): the v2.0.0 updater's own `doctor` reports NOT_READY ("no migration runner is configured") for every package with migrations and does not record the core drift baseline.
+
 ## Customised e-mail templates from v2.0.0
 
 In v2.0.0 a shop customised its e-mails by editing `templates/emails/<locale>/*` in place. Since then the files are core defaults, and per-store customisations live in the database (admin → E-mail templates). An edited template file is a locally modified core file, so `check` reports it as a conflict and stops. Move the customisations once:

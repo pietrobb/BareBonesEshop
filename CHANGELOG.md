@@ -17,6 +17,9 @@ not apply an old-key package that was not already verified (README › *Signing 
 
 The signed packages are attached to the GitHub release `v2.1.0`: `update-2.0.0-2.1.0` (installed v2.0.0)
 and `update-1.8.0-2.1.0` (one-time bootstrap of a v1.8.0 shop, see `docs/AI_UPDATE_RUNBOOK.md`).
+Run `doctor`, `check` and `apply` for a v2.0.0 shop from the trusted v2.1.0 tree with
+`--installed=<shop root>`, as for v1.8.0: the v2.0.0 updater's own `doctor` reports NOT_READY
+("no migration runner is configured") for this package and does not record the core drift baseline.
 
 ### Upgrade notes (operator-facing and breaking changes from PRs #10-#14 and the follow-up audits)
 
