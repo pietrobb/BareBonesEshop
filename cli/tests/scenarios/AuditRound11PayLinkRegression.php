@@ -208,20 +208,33 @@ try {
         assert_equals('failed', PaymentLink::returnStatus(Orders::byId((int)$r11pReturn['id']) ?? []), 'R11 return page: a retry the gateway reports expired is still failed');
     } catch (Throwable $e) { $r11pFail('return page', $e); }
 
-    // H1 end to end, last: the confirmation page reached through the payment link with the attacker's own password.
-    try {
-        $r11pTarget = $r11pOrder('failed', 'r11p-target@example.test');
-        $r11pMailsBefore = count($r11pMailer->sent);
-        $_SERVER['REQUEST_METHOD'] = 'POST';
-        $_POST = ['action' => 'create_account', 'csrf_token' => Security::csrfToken(), 'password' => 'Attacker-Pass-11'];
-        $_GET = ['page' => 'order-done', 'order' => (string)$r11pTarget['order_number'],
-            'confirmation_token' => CheckoutSession::createConfirmation((int)$r11pTarget['id'], CheckoutSession::browserSessionId())];
-        $r11pPage = @renderOrderDone((string)$r11pTarget['order_number']);
-        assert_true((int)$pdo->query("SELECT COUNT(*) FROM customers WHERE email = 'r11p-target@example.test'")->fetchColumn() === 0 && empty($_SESSION['customer_id'])
-            && Orders::byId((int)$r11pTarget['id'])['customer_id'] === null, 'R11 H1: the posted confirmation page creates no account with the visitor\'s password');
-        assert_true(str_contains($r11pPage, 'data-account-offer-sent') && count($r11pMailer->sent) === $r11pMailsBefore + 1
-            && (end($r11pMailer->sent)['to'] ?? '') === 'r11p-target@example.test', 'R11 H1: it only e-mails the link to the order\'s address');
-    } catch (Throwable $e) { $r11pFail('H1 page', $e); }
+    // H1 end to end, last: the confirmation page reached through the payment link with the attacker's own password —
+    // after a failed payment, on an order entered in the admin, and on an order whose gateway session is over 23 h old.
+    foreach (['failed' => 'failed', 'manual' => 'pending', 'old session' => 'pending'] as $r11pVariant => $r11pStatus) {
+        try {
+            $r11pEmail = 'r11p-target-' . str_replace(' ', '-', $r11pVariant) . '@example.test';
+            $r11pTarget = $r11pOrder($r11pStatus, $r11pEmail);
+            if ($r11pVariant === 'manual') AuditLog::log('order', (int)$r11pTarget['id'], null, ['source' => 'admin'], 'Manual order entered in the admin');
+            if ($r11pVariant === 'old session') {
+                PaymentService::initiate(['order_id' => (int)$r11pTarget['id'], 'order_number' => $r11pTarget['order_number'], 'total' => 1000, 'currency' => 'eur'], $r11pGatewayClass->make(false), 'stripe');
+                $r11pAged = $pdo->prepare('UPDATE payment_transactions SET created_at = ? WHERE order_id = ?');
+                $r11pAged->execute([gmdate('Y-m-d H:i:s', time() - 30 * 3600), (int)$r11pTarget['id']]);
+                assert_equals(1, $r11pAged->rowCount(), 'R11 H1 (old session): the order has a gateway session opened 30 h ago');
+            }
+            $r11pMailsBefore = count($r11pMailer->sent);
+            $_SERVER['REQUEST_METHOD'] = 'POST';
+            $_POST = ['action' => 'create_account', 'csrf_token' => Security::csrfToken(), 'password' => 'Attacker-Pass-11'];
+            $_GET = ['page' => 'order-done', 'order' => (string)$r11pTarget['order_number'],
+                'confirmation_token' => CheckoutSession::createConfirmation((int)$r11pTarget['id'], CheckoutSession::browserSessionId())];
+            $r11pPage = @renderOrderDone((string)$r11pTarget['order_number']);
+            $r11pAccounts = $pdo->prepare('SELECT COUNT(*) FROM customers WHERE email = ?');
+            $r11pAccounts->execute([$r11pEmail]);
+            assert_true((int)$r11pAccounts->fetchColumn() === 0 && empty($_SESSION['customer_id'])
+                && Orders::byId((int)$r11pTarget['id'])['customer_id'] === null, "R11 H1 ({$r11pVariant}): the posted confirmation page creates no account with the visitor's password");
+            assert_true(str_contains($r11pPage, 'data-account-offer-sent') && count($r11pMailer->sent) === $r11pMailsBefore + 1
+                && (end($r11pMailer->sent)['to'] ?? '') === $r11pEmail, "R11 H1 ({$r11pVariant}): it only e-mails the link to the order's address");
+        } catch (Throwable $e) { $r11pFail("H1 page {$r11pVariant}", $e); }
+    }
 } finally {
     [$_GET, $_POST, $_SERVER['REQUEST_METHOD'], $GLOBALS['t']] = $r11pRequestBefore;
     Customers::logout();

@@ -198,7 +198,12 @@ try {
     // success_url is core-built for every gateway: a real page, and a declined payment can be retried.
     $p0SuccessUrl = str_replace('{CHECKOUT_SESSION_ID}', 'cs_test_p0_' . $p0OrderNumber, is_file($p0Root . '/success_url.txt') ? (string)file_get_contents($p0Root . '/success_url.txt') : '');
     $p0SuccessPath = (string)parse_url($p0SuccessUrl, PHP_URL_PATH) . '?' . (string)parse_url($p0SuccessUrl, PHP_URL_QUERY);
+    // A decline as the gateway's notification records it: the order failed and a failure event follows the session
+    // (without the event the page asks the gateway, which may still be taking the payment — PaymentLink::returnStatus).
     $p0Db->prepare("UPDATE orders SET payment_status = 'failed' WHERE id = ?")->execute([(int)($p0Order['id'] ?? 0)]);
+    $p0Db->prepare("INSERT INTO payment_transactions (order_id, store_id, provider, provider_ref, status, amount, currency, idempotency_key, raw_response, created_at, updated_at)
+        SELECT id, store_id, 'stripe', payment_id, 'failed', 0, currency, 'p0_declined_' || id, '{\"event_type\":\"payment_intent.payment_failed\"}', datetime('now'), datetime('now') FROM orders WHERE id = ?")
+        ->execute([(int)($p0Order['id'] ?? 0)]);
     $p0Success = $p0Http('GET', $p0SuccessPath, [], $p0Sid);
     assert_equals(200, $p0Success['status'], 'P0 HTTP: gateway success_url is a real page (not 404)');
     assert_true(str_contains($p0Success['body'], $p0OrderNumber), 'P0 HTTP: success_url shows the order');
