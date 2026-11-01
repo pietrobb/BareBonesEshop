@@ -147,7 +147,7 @@ function runStagingPreflight(array $argvLocal = []): array {
 
     // Checkout charges through each active method's provider (payment_methods.provider), not provider_defaults.payment.
     try {
-        foreach (PaymentReadiness::checks(Db::get(), $cfg) as [$status, $name, $message, $remediation]) $add($status === 'pass' ? 'ok' : $status, $name, $message, $remediation);
+        foreach (PaymentReadiness::checks(Db::get(), $cfg, (array)(Bootstrap::stores()['stores'] ?? [])) as [$status, $name, $message, $remediation]) $add($status === 'pass' ? 'ok' : $status, $name, $message, $remediation);
     } catch (Throwable $e) {
         $add('fail', 'payment.methods', 'Payment methods could not be read from the database: ' . $e->getMessage(), 'Fix the database connection and run php cli/migrate.php.');
     }

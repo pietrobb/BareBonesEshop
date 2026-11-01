@@ -3,11 +3,9 @@
 
 function adminStoreManagementCards(array $stores, bool $writable): void {
     if (Security::adminRole() !== 'owner') return;
-    $locales = [];
-    foreach ($stores as $store) foreach ((array)(is_array($store) ? ($store['languages'] ?? []) : []) as $locale) $locales[(string)$locale] = true;
-    $locales = array_keys($locales);
     $page = Security::str($_GET['legal'] ?? '');
     $lang = Security::str($_GET['lang'] ?? '');
+    $legalStore = Security::str($_GET['store'] ?? '');
     $disabled = $writable ? '' : ' disabled';
     ?>
     <div class="card" id="store-add" data-store-add>
@@ -33,15 +31,18 @@ function adminStoreManagementCards(array $stores, bool $writable): void {
     <div class="card" id="store-legal" data-store-legal>
         <h3><?= esc(I18n::t('admin.stores.legal_texts')) ?></h3>
         <p class="muted"><?= esc(I18n::t('admin.stores.legal_hint')) ?></p>
-        <p><?php foreach (ConsumerNotice::LEGAL_PAGES as $legalPage): foreach ($locales as $locale): ?>
-            <a class="btn btn-sm" href="admin.php?p=stores&amp;legal=<?= esc($legalPage) ?>&amp;lang=<?= esc($locale) ?>#store-legal"><?= esc($legalPage . ' (' . $locale . ')') ?><?= DataOverrides::legalPath($legalPage, $locale) !== null ? ' *' : '' ?></a>
-        <?php endforeach; endforeach; ?></p>
-        <?php if (DataOverrides::validLegal($page, $lang)):
+        <?php foreach ($stores as $storeId => $store): if (!is_array($store)) continue; $storeId = (string)$storeId; ?>
+        <p data-store-legal-links="<?= esc($storeId) ?>"><strong><?= esc($storeId) ?>:</strong>
+            <?php foreach (ConsumerNotice::LEGAL_PAGES as $legalPage): foreach (array_map('strval', (array)($store['languages'] ?? [])) as $locale): ?>
+            <a class="btn btn-sm" href="admin.php?p=stores&amp;store=<?= esc(rawurlencode($storeId)) ?>&amp;legal=<?= esc($legalPage) ?>&amp;lang=<?= esc($locale) ?>#store-legal"><?= esc($legalPage . ' (' . $locale . ')') ?><?= DataOverrides::legalPath($legalPage, $locale, $storeId) !== null ? ' *' : '' ?></a>
+            <?php endforeach; endforeach; ?></p>
+        <?php endforeach; ?>
+        <?php if (isset($stores[$legalStore]) && DataOverrides::validLegal($page, $lang, $legalStore)):
             $shipped = dirname(__DIR__, 3) . "/templates/legal/{$lang}/{$page}.html";
-            $html = (string)@file_get_contents(DataOverrides::legalPath($page, $lang) ?? (is_file($shipped) ? $shipped : dirname(__DIR__, 3) . "/templates/legal/en/{$page}.html")); ?>
-        <form method="post" action="admin.php?p=stores&amp;action=legal_save&amp;legal=<?= esc($page) ?>&amp;lang=<?= esc($lang) ?>">
+            $html = (string)@file_get_contents(DataOverrides::legalPath($page, $lang, $legalStore) ?? (is_file($shipped) ? $shipped : dirname(__DIR__, 3) . "/templates/legal/en/{$page}.html")); ?>
+        <form method="post" action="admin.php?p=stores&amp;action=legal_save&amp;store=<?= esc(rawurlencode($legalStore)) ?>&amp;legal=<?= esc($page) ?>&amp;lang=<?= esc($lang) ?>">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
-            <label for="store-legal-html"><?= esc($page . ' (' . $lang . ')') ?></label>
+            <label for="store-legal-html"><?= esc($legalStore . ': ' . $page . ' (' . $lang . ')') ?></label>
             <textarea id="store-legal-html" name="html" rows="18" style="width:100%;font-family:monospace"><?= esc($html) ?></textarea>
             <p><button class="btn btn-primary" type="submit"<?= DataOverrides::dir() === null ? ' disabled' : '' ?>><?= esc(I18n::t('admin.btn.save')) ?></button>
                 <button class="btn" type="submit" name="reset" value="1"><?= esc(I18n::t('admin.stores.legal_reset')) ?></button></p>
@@ -73,10 +74,11 @@ function handleStoreLegalSave(): void {
     if (Security::adminRole() !== 'owner') return;
     $page = Security::str($_GET['legal'] ?? '');
     $lang = Security::str($_GET['lang'] ?? '');
+    $storeId = Security::str($_GET['store'] ?? '');
     $html = !empty($_POST['reset']) || !is_string($_POST['html'] ?? null) ? '' : str_replace("\r\n", "\n", $_POST['html']);
-    $ok = DataOverrides::saveLegal($page, $lang, $html);
-    if ($ok) AuditLog::log('legal_text', 0, null, ['page' => $page, 'locale' => $lang, 'sha256' => $html === '' ? null : hash('sha256', $html)]);
+    $ok = isset(StoreSettings::load()['stores'][$storeId]) && DataOverrides::saveLegal($page, $lang, $html, $storeId);
+    if ($ok) AuditLog::log('legal_text', 0, null, ['store' => $storeId, 'page' => $page, 'locale' => $lang, 'sha256' => $html === '' ? null : hash('sha256', $html)]);
     setFlash($ok ? 'ok' : 'err', I18n::t($ok ? 'admin.stores.legal_saved' : 'admin.stores.err.write'));
-    header('Location: admin.php?p=stores&legal=' . rawurlencode($page) . '&lang=' . rawurlencode($lang) . '#store-legal');
+    header('Location: admin.php?p=stores&store=' . rawurlencode($storeId) . '&legal=' . rawurlencode($page) . '&lang=' . rawurlencode($lang) . '#store-legal');
     exit;
 }

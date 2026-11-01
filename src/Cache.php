@@ -248,6 +248,8 @@ class Cache {
      * readJson() for entries derived from catalog rows: also a miss when the entry was written in or before
      * the second of the last catalogChanged() of the active catalog. Both times are file modification
      * times, so they come from the same (filesystem) clock even on a network or container volume.
+     * Equally a miss when a promotion or price list started or ended after it was written: a sale price is
+     * never served past the end of the sale (nor the regular price after its start) for the rest of the TTL.
      */
     public static function readCatalogJson(string $path, int $ttl): ?array {
         self::flushPendingCatalogChanges();
@@ -256,6 +258,7 @@ class Cache {
         clearstatcache(true, $file);
         clearstatcache(true, $marker);
         if (is_file($file) && is_file($marker) && (int)filemtime($file) <= (int)filemtime($marker)) return null;
+        if (is_file($file) && (int)filemtime($file) <= Pricing::lastScheduledChange()) return null;
         return self::readJson($path, $ttl);
     }
 

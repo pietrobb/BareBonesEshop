@@ -45,12 +45,12 @@ final class ConsumerNotice {
         ];
     }
 
-    /** A legal page (privacy / terms / cookies) of $locale (else English) filled with the seller's data, as HTML. */
-    public static function renderLegal(string $page, string $locale, array $legal): string {
+    /** A legal page (privacy / terms / cookies) of $locale (else English) of a store (null = current) filled with the seller's data, as HTML. */
+    public static function renderLegal(string $page, string $locale, array $legal, ?string $storeId = null): string {
         $dir = dirname(__DIR__) . '/templates/legal/';
         $tpl = $dir . $locale . '/' . $page . '.html';
         if (!preg_match('/^[a-z]{2}$/', $locale) || !is_file($tpl)) $tpl = $dir . 'en/' . $page . '.html';
-        $tpl = DataOverrides::legalPath($page, $locale) ?? $tpl; // the merchant's own text, saved in the admin
+        $tpl = DataOverrides::legalPath($page, $locale, $storeId) ?? $tpl; // the store's own text, saved in the admin
         $html = (string)file_get_contents($tpl);
         $vars = [];
         foreach (self::legalVars($legal) as $key => $value) $vars['{{' . $key . '}}'] = esc($value);

@@ -9,6 +9,24 @@ Read before updating a live shop; run `php cli/migrate.php` after the files are 
 settings below that silently change behaviour (http webhooks, cart reminders without consent, the
 nginx PHP fallback when `operations.nginx_config` is set).
 
+- **Round-11 operations & data (2026-11-01)** — run `php cli/migrate.php` and `php cli/setup.php apply`.
+  - Legal texts are overridden per store (`<data>/legal/stores/<store>/<locale>/<page>.html`), no longer per
+    language: the US store's English terms no longer change the terms of an EU store that also speaks English.
+    `setup apply` (or the first save in Admin → Stores and seller) copies a text saved per language to every store
+    of that language and removes the shared file. **Review each store's texts; have them checked by a lawyer.**
+  - Migration `20261101150000_price_list_repair` completes a CZ/HU/PL price list an old run left half-seeded on
+    MySQL/MariaDB (no cash on delivery, few payment countries); a scope the merchant configured is not touched.
+  - `Warehouse::setAvailable` locks the stock rows it reads (MySQL): a change committed meanwhile is not overwritten.
+  - Redis queue: jobs queued before the upgrade get the current score on the first pull (once per queue,
+    marker key `<prefix>score_v2`), so they are no longer starved by new jobs.
+  - Doctor and staging preflight skip payment methods of stores no longer in stores.json.
+  - Cached API listings and products are a miss once a catalog promotion or price list started or ended after
+    they were written (no sale price for up to an hour after the sale).
+  - `config/data-retention.json`: `orders_contact` also covers shipped orders; new policies `complaints_pii`,
+    `withdrawal_requests_pii`, `rma_requests_text`, `return_receipts_note` (5 years, LAWYER TO REVIEW the periods)
+    and `promotion_runs` / `price_list_runs` (deleted 400 days after they ended). A shop with its own copy of the
+    file should add them.
+
 - **Round-11 documents, e-mails & refunds (2026-11-01)**
   - The order confirmation lists subtotal, discount, shipping, payment fee and VAT above the total, so the
     lines add up. Customised `order_confirmation` overrides keep working; merge the new `{{#each totals}}`

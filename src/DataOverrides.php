@@ -74,26 +74,80 @@ final class DataOverrides
         return ['path' => $target, 'action' => @unlink($legacy) ? 'moved from the application root' : 'copied from the application root'];
     }
 
-    /** A saved legal text of $page in $locale, or null to use the shipped template. */
-    public static function legalPath(string $page, string $locale): ?string
+    /**
+     * The merchant's legal text of $page in $locale for one store (null = the current store), or null to use the
+     * shipped template. Texts are per store: the US store's English terms are not the terms of an EU store that also
+     * speaks English. A text saved before 2.1 for a language (legal/<locale>/) still applies to every store of that
+     * language until the texts are split per store (setup apply, or the first save in the admin).
+     */
+    public static function legalPath(string $page, string $locale, ?string $storeId = null): ?string
     {
-        if (!self::validLegal($page, $locale) || ($dir = self::dir()) === null) return null;
-        $file = "{$dir}/legal/{$locale}/{$page}.html";
-        return is_file($file) ? $file : null;
+        $storeId ??= self::currentStoreId();
+        if (!self::validLegal($page, $locale, $storeId) || ($dir = self::dir()) === null) return null;
+        foreach (["{$dir}/legal/stores/{$storeId}/{$locale}/{$page}.html", "{$dir}/legal/{$locale}/{$page}.html"] as $file) {
+            if (is_file($file)) return $file;
+        }
+        return null;
     }
 
-    public static function validLegal(string $page, string $locale): bool
+    public static function validLegal(string $page, string $locale, string $storeId = 'default'): bool
     {
-        return in_array($page, ConsumerNotice::LEGAL_PAGES, true) && preg_match('/^[a-z]{2}$/', $locale) === 1;
+        return in_array($page, ConsumerNotice::LEGAL_PAGES, true) && preg_match('/^[a-z]{2}$/', $locale) === 1
+            && preg_match('/^[a-z0-9][a-z0-9_-]{0,63}$/', $storeId) === 1;
     }
 
-    /** Save (or with '' remove) the merchant's own legal text; false when the data directory is not writable. */
-    public static function saveLegal(string $page, string $locale, string $html): bool
+    /** Save (or with '' remove) one store's own legal text; false when the data directory is not writable. */
+    public static function saveLegal(string $page, string $locale, string $html, ?string $storeId = null): bool
     {
-        if (!self::validLegal($page, $locale) || ($dir = self::dir()) === null) return false;
-        $file = "{$dir}/legal/{$locale}/{$page}.html";
+        $storeId ??= self::currentStoreId();
+        if (!self::validLegal($page, $locale, $storeId) || ($dir = self::dir()) === null) return false;
+        if (self::splitLegacyLegal() === null) return false;
+        $file = "{$dir}/legal/stores/{$storeId}/{$locale}/{$page}.html";
         if (trim($html) === '') return !is_file($file) || @unlink($file);
         return self::ensureDir(dirname($file)) && self::atomicWrite($file, $html);
+    }
+
+    /**
+     * Give every store its own copy of the legal texts saved before 2.1 per language (legal/<locale>/<page>.html):
+     * each store speaking that language keeps the text it showed, then the shared file is removed, so a later
+     * change for one store no longer changes the others. Idempotent; a store with its own text keeps it.
+     * @return list<string>|null  the store files written; null when a copy failed (the shared file is kept)
+     */
+    public static function splitLegacyLegal(?array $stores = null, ?array $config = null): ?array
+    {
+        if (($dir = self::dir($config)) === null) return [];
+        $legacy = glob("{$dir}/legal/[a-z][a-z]/*.html") ?: [];
+        if ($legacy === []) return [];
+        $stores ??= (array)(StoreSettings::load()['stores'] ?? []);
+        $written = [];
+        foreach ($legacy as $file) {
+            $locale = basename(dirname($file));
+            $page = basename($file, '.html');
+            $html = @file_get_contents($file);
+            if ($html === false || !self::validLegal($page, $locale)) continue;
+            $copied = true;
+            $matched = false;
+            foreach ($stores as $storeId => $store) {
+                if (!is_array($store) || !self::validLegal($page, $locale, (string)$storeId)) continue;
+                $languages = array_map('strval', (array)($store['languages'] ?? []));
+                if (!in_array($locale, $languages, true) && (string)($store['default_locale'] ?? '') !== $locale) continue;
+                $matched = true;
+                $target = "{$dir}/legal/stores/{$storeId}/{$locale}/{$page}.html";
+                if (is_file($target)) continue;
+                if (self::ensureDir(dirname($target)) && self::atomicWrite($target, $html)) $written[] = $target;
+                else $copied = false;
+            }
+            if (!$copied) return null;
+            if (!$matched) continue; // no store speaks that language: kept for a store added with it later
+            @unlink($file);
+            @rmdir(dirname($file));
+        }
+        return $written;
+    }
+
+    private static function currentStoreId(): string
+    {
+        return StoreContext::hasCurrent() ? StoreContext::current()->id() : 'default';
     }
 
     /** Readers see the old or the new file, never a half-written one. */

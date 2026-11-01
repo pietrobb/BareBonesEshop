@@ -256,6 +256,7 @@ class RedisQueue implements DelayedQueueBackend {
         $limit = max(0, min(100, $limit));
         if ($limit === 0) return [];
         $this->requeueStale();
+        $this->rescoreLegacy();
         $this->promoteDue();
         $now = time();
         $jobs = [];
@@ -270,6 +271,23 @@ class RedisQueue implements DelayedQueueBackend {
             $jobs[] = $this->hydrate($row);
         }
         return $jobs;
+    }
+
+    /**
+     * Jobs queued before the upgrade keep their old score (available_at * 100 + priority), which sorts after every
+     * new job of a priority up to ~16: while new jobs keep arriving they would never be pulled. Once per queue they
+     * are given the current score; the marker key skips the scan afterwards.
+     */
+    private function rescoreLegacy(): void {
+        if ($this->redis->exists($this->key('score_v2'))) return;
+        // The whole set in one read: rescored jobs move, which would shift the offsets of a paged scan.
+        foreach ($this->redis->zRange($this->key('pending'), 0, -1, true) ?: [] as $id => $score) {
+            $row = $this->redis->hMGet($this->jobKey((string)$id), ['priority', 'available_at']);
+            if (!is_array($row) || ($row['available_at'] ?? false) === false) continue;
+            $current = self::readyScore((int)$row['priority'], (int)$row['available_at']);
+            if ((int)$score !== $current) $this->redis->zAdd($this->key('pending'), ['XX'], $current, (string)$id);
+        }
+        $this->redis->set($this->key('score_v2'), '1');
     }
 
     /** Delayed jobs whose time has come join the ready set at their priority. */

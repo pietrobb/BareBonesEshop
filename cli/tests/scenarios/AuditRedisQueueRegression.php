@@ -124,6 +124,22 @@ if (!class_exists('Redis') || $rqHost === '') {
         assert_true($rqRedis->zScore($rqPrefix . 'prio:delayed', $rqHigh) !== false && !in_array($rqHigh, array_column($rqPrio->pull(10), 'id'), true),
             'R10 RedisQueue: a retried job is not pulled before its backoff');
         assert_equals(['pending' => 2, 'processing' => 0, 'completed' => 0, 'failed' => 0], $rqPrio->stats(), 'R10 RedisQueue: stats count delayed jobs as pending');
+
+        // R11: a job queued before the upgrade keeps its old score (available_at * 100 + priority), which sorts after
+        // every new job of priority up to ~16: while new jobs kept arriving, it was never pulled.
+        $rqOld = new RedisQueue(['prefix' => $rqPrefix . 'old:'] + $rqConfig);
+        $rqOldId = str_repeat('ab', 16);
+        $rqOldAt = time() - 3600;
+        $rqRedis->hMSet($rqPrefix . 'old:job:' . $rqOldId, ['id' => $rqOldId, 'store_id' => 'default', 'channel_id' => 'storefront', 'type' => 'redis_probe',
+            'priority' => '5', 'payload' => '{"n":"old"}', 'state' => 'pending', 'attempts' => '0', 'max_attempts' => '3', 'available_at' => (string)$rqOldAt,
+            'correlation_id' => '', 'created_at' => gmdate('c', $rqOldAt), 'updated_at' => gmdate('c', $rqOldAt)]);
+        $rqRedis->zAdd($rqPrefix . 'old:pending', $rqOldAt * 100 + 5, $rqOldId);
+        for ($rqN = 0; $rqN < 12; $rqN++) $rqOld->push('redis_probe', ['n' => $rqN], 5);
+        $rqOldPulled = array_column($rqOld->pull(10), 'id');
+        assert_true(($rqOldPulled[0] ?? '') === $rqOldId,
+            'R11 RedisQueue: a job queued before the upgrade is pulled first among its priority, not after every new job (' . json_encode(array_search($rqOldId, $rqOldPulled, true)) . ')');
+        assert_true((int)$rqRedis->zScore($rqPrefix . 'old:pending', $rqOldId) === 5 * 10_000_000_000 + $rqOldAt && $rqRedis->exists($rqPrefix . 'old:score_v2'),
+            'R11 RedisQueue: its score is converted once and the queue remembers it');
     } finally {
         $rqKeys = $rqRedis->keys($rqPrefix . '*');
         if ($rqKeys) $rqRedis->del($rqKeys);

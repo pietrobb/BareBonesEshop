@@ -542,5 +542,13 @@
         "crlf": [
             "83abe529b1a4e7ae6ad55b96f5baf42d666d3dc5abceed81a92a03067430c70e"
         ]
+    },
+    "20261101150000_price_list_repair": {
+        "lf": [
+            "91ac2cc652a960de191c8a47784ad716ddaf5beb99e637e78b2628cc071e8b3a"
+        ],
+        "crlf": [
+            "e6d5109094a1429adc3a5a0216b9373724ac9f09cd9d447dd031a0da67015642"
+        ]
     }
 }
