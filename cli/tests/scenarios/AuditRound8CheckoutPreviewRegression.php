@@ -35,10 +35,11 @@ try {
     $_SERVER['REQUEST_METHOD'] = 'GET';
     $_GET = ['country' => 'SK', 'cod' => '1'];
     $r8vRates = array_column(apiShippingRates()['methods'] ?? [], 'price', 'method_code');
-    assert_equals(550, $r8vRates['r8vship'] ?? null, 'R8 COD preview setup: cash on delivery adds the 1,50 € surcharge to the 4 € rate');
+    // R11: the 1,50 € COD surcharge is billed once, inside the COD fee (apiPaymentMethods); the rate is the carriage.
+    assert_equals(400, $r8vRates['r8vship'] ?? null, 'R8 COD preview setup: with cash on delivery the rate shows the 4 € carriage (the surcharge is in the COD fee)');
     Pricing::setConfig(['cart_rules' => [['type' => 'automatic', 'active' => true, 'name' => 'R8V free shipping', 'action' => 'free_shipping']]]);
     $r8vRates = array_column(apiShippingRates()['methods'] ?? [], 'price', 'method_code');
-    assert_equals(150, $r8vRates['r8vship'] ?? null, 'R8 COD preview: under free shipping the API shows the COD surcharge checkout still charges (was 0)');
+    assert_equals(0, $r8vRates['r8vship'] ?? null, 'R8 COD preview: under free shipping the carriage is 0 (the COD surcharge stays in the COD fee)');
     $_GET = ['country' => 'SK'];
     $r8vRates = array_column(apiShippingRates()['methods'] ?? [], 'price', 'method_code');
     assert_equals(0, $r8vRates['r8vship'] ?? null, 'R8 COD preview: without cash on delivery free shipping is 0');

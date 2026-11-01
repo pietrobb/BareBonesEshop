@@ -538,7 +538,8 @@ function apiPaymentMethods(): array {
     }
     $methods = CheckoutService::chargedFees($methods, $vat);
     // With the selected rate's price (?shipping=, in amount) each method also carries the shipping the order charges
-    // with it: cash on delivery adds the carrier's COD surcharge (kept under free shipping), and its fee is priced on that.
+    // with it; cash on delivery bills the carrier's COD surcharge (kept under free shipping) inside its one COD fee
+    // (cod_surcharge = the part of the fee that is the carrier's), priced on the amount including it.
     $shipping = !$digitalOnly && $shippingMethod !== '' && is_string($_GET['shipping'] ?? null) && $_GET['shipping'] !== ''
         ? max(0, Security::int($_GET['shipping'])) : null;
     if ($shipping !== null) {
@@ -551,6 +552,7 @@ function apiPaymentMethods(): array {
             if (($preview['selected']['code'] ?? null) !== $method['code']) continue;
             $method['shipping'] = (int)$preview['shipping'];
             $method['fee'] = (int)$preview['selected']['fee'];
+            $method['cod_surcharge'] = (int)($preview['selected']['cod_surcharge'] ?? 0);
         }
         unset($method);
     }
