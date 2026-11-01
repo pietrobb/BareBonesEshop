@@ -361,6 +361,11 @@ class Orders {
         $stmt = $db->prepare("SELECT 1 FROM coupon_uses WHERE order_id = :id LIMIT 1");
         $stmt->execute([':id' => $orderId]);
         if ($stmt->fetchColumn() !== false) return 'admin.order.edit.coupon';
+        // A planned or sent shipment points at these order lines (and a COD label at this total): replacing the lines
+        // would drop a sent item from the bill and leave the shipment lines naming another product.
+        $stmt = $db->prepare("SELECT 1 FROM shipments WHERE order_id = :id AND store_id = :store AND status <> 'cancelled' LIMIT 1");
+        $stmt->execute([':id' => $orderId, ':store' => StoreContext::current()->id()]);
+        if ($stmt->fetchColumn() !== false) return 'admin.order.edit.shipment';
         return null;
     }
 

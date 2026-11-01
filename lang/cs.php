@@ -627,6 +627,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.edit.not_found' => 'Objednávka nebyla nalezena.',
     'admin.order.edit.not_pending' => 'Změnit lze jen čekající, nezaplacenou objednávku.',
     'admin.order.edit.payment_started' => 'Položky nelze změnit, když platba objednávky už začala.',
+    'admin.order.edit.shipment' => 'Položky nelze změnit, když objednávka už má zásilku (připravenou nebo odeslanou). Zrušte nepoužitou zásilku nebo řešte změnu vrácením či dobropisem.',
     'admin.order.edit.invoiced' => 'Položky nelze změnit po vystavení faktury.',
     'admin.order.edit.coupon' => 'Položky objednávky s kupónem nelze změnit.',
     'admin.order.edit.vat_changed' => 'Nové položky by se zdanily jinak než objednávka (změnil se režim DPH). Objednávku zrušte a zadejte novou.',

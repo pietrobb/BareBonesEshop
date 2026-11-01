@@ -634,6 +634,7 @@ return [
     'admin.order.edit.not_found' => 'Objednávka sa nenašla.',
     'admin.order.edit.not_pending' => 'Zmeniť možno len čakajúcu, nezaplatenú objednávku.',
     'admin.order.edit.payment_started' => 'Položky nemožno zmeniť, keď sa platba objednávky už začala.',
+    'admin.order.edit.shipment' => 'Položky nemožno zmeniť, keď objednávka už má zásielku (pripravenú alebo odoslanú). Zrušte nepoužitú zásielku alebo riešte zmenu vrátením či dobropisom.',
     'admin.order.edit.invoiced' => 'Položky nemožno zmeniť po vystavení faktúry.',
     'admin.order.edit.coupon' => 'Položky objednávky s kupónom nemožno zmeniť.',
     'admin.order.edit.vat_changed' => 'Nové položky by sa zdanili inak ako objednávka (zmenil sa režim DPH). Objednávku zrušte a zadajte novú.',

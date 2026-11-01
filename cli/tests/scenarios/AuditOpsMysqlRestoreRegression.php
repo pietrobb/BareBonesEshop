@@ -311,11 +311,13 @@ try {
     $opsRows = BackupService::list();
     assert_true($opsRows[0]['path'] === '2026/10/16/eshop-20261016-093529.sql' && BackupService::isCompressedCopy($opsRows[1]),
         'Ops restore --latest: the plain backup sorts before its .gz companion with the same created_us');
+    assert_equals('2026/10/16/eshop-20261016-093529.sql', (string)(BackupService::latestRestorePoint()['path'] ?? ''),
+        'Ops restore --latest: the newest restore point is the plain backup, never its .gz companion');
 } finally {
     BackupService::reset();
 }
 $opsRestoreCli = (string)file_get_contents(dirname(__DIR__, 2) . '/restore.php');
-assert_true(str_contains($opsRestoreCli, 'BackupService::isCompressedCopy($row)'), 'Ops restore --latest: the CLI filters gzip companions before picking the newest row');
+assert_true(str_contains($opsRestoreCli, 'BackupService::latestRestorePoint()'), 'Ops restore --latest: the CLI picks BackupService::latestRestorePoint() (no .gz companion, no pre-restore snapshot)');
 
 // MySQL adapter construction is lazy: a configuration it cannot dump fails the backup, not init()
 // (cli/migrate.php used to "continue without backup" when init() threw).

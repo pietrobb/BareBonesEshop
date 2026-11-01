@@ -97,7 +97,7 @@ php cli/restore.php <backup> --files-only                             # only inv
 php cli/restore.php <backup> --files-only --force                     # also overwrite differing live files
 ```
 
-Every restore first downloads the backup and verifies its metadata identity, size and SHA-256, and takes a `pre-restore-snapshot` backup of the current database (`--skip-snapshot` skips it for SQLite only; a MySQL/MariaDB restore refuses it). `--latest` picks the newest uncompressed backup, never its `.gz` copy.
+Every restore first downloads the backup and verifies its metadata identity, size and SHA-256, and takes a `pre-restore-snapshot` backup of the current database (`--skip-snapshot` skips it for SQLite only; a MySQL/MariaDB restore refuses it). `--latest` picks the newest uncompressed backup, never its `.gz` copy and never a `pre-restore-snapshot` (restore a snapshot by its path). A refused or rolled-back restore leaves no snapshot behind, and retention GC rotates scheduled backups only: snapshots, `pre-migration` and `manual` backups never take their slots.
 
 **Run `cli/restore.php` as the application user** (the user PHP-FPM/workers run as), e.g. `sudo -u www-data php cli/restore.php ...`. Restored files keep the mode, owner and group of the file they replace, or take them from the directory they land in (new files without execute bits); owner/group can only be set when running as root, so a restore as any other user leaves new files owned by that user.
 
