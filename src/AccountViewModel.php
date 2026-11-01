@@ -143,7 +143,7 @@ final class AccountViewModel
             'payment_status_label' => OrderStatusLabels::payment((string)($order['payment_status'] ?? 'pending')),
             'payment_label' => PaymentService::orderLabel($order, I18n::locale()),
             'shipping_label' => (string)($shipping['name'] ?? $shipping['label'] ?? $order['shipping_method'] ?? ''),
-            'tracking' => trim((string)($order['carrier'] ?? '') . ' ' . (string)($order['tracking_number'] ?? '')),
+            'tracking' => trim(MethodLabels::carrier((string)($order['carrier'] ?? '')) . ' ' . (string)($order['tracking_number'] ?? '')),
             'pickup_point' => is_array($shipping['pickup_point'] ?? null)
                 ? trim((string)($shipping['pickup_point']['name'] ?? '') . ' — ' . (string)($shipping['pickup_point']['address'] ?? ''), ' —') : '',
             'address' => array_values(array_filter([

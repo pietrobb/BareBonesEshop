@@ -181,6 +181,14 @@ class StoreContext {
     public function legal(): array { return is_array($this->config['legal'] ?? null) ? $this->config['legal'] : []; }
     public function config(): array { return $this->config; }
 
+    /**
+     * A store with "public": false (the sample stores of a fresh install) has no storefront, API or feed on its
+     * domain or URL prefix, no sitemap entry and no hreflang alternate; the admin, CLI, workers and API clients bound
+     * to it reach it by its id.
+     */
+    public static function isPublicConfig(array $storeConfig): bool { return ($storeConfig['public'] ?? true) !== false; }
+    public function isPublic(): bool { return self::isPublicConfig($this->config); }
+
     public function allows(string $permission): bool {
         $permissions = $this->config['permissions'] ?? ['*'];
         return is_array($permissions)

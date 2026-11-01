@@ -84,10 +84,11 @@ return [
     ],
     // One reminder per abandoned cart (worker cron). Needs app_url for the recovery/opt-out links.
     // Carts older than max_age_hours are never reminded, so enabling it causes no mail burst.
+    // One address gets at most one reminder per email_window_hours, however many carts were captured with it.
     // Off by default: a reminder is marketing mail, so it is only sent to shoppers who ticked the
     // checkout consent 'cart_reminder' (see checkout_consents below); carts are only stored with
     // that consent. Reminders carry List-Unsubscribe / one-click List-Unsubscribe-Post headers.
-    'cart_reminder' => ['enabled' => false, 'delay_hours' => 24, 'max_age_hours' => 72],
+    'cart_reminder' => ['enabled' => false, 'delay_hours' => 24, 'max_age_hours' => 72, 'email_window_hours' => 168],
     // Shop-owned public URL scheme; core routes stay reachable and 301 to the alias.
     // 'url_aliases' => ['/kniha/{slug}' => '/product/{slug}', '/knihy' => '/category/knihy', '/kosik' => '/?page=cart'],
     'url_aliases' => [],

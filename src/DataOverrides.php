@@ -67,6 +67,9 @@ final class DataOverrides
         if (!is_file($source)) return null; // not an application tree; doctor reports the missing stores
         $content = @file_get_contents($source);
         if ($content === false || !is_array(json_decode($content, true))) throw new RuntimeException("Cannot read {$source}");
+        // The example's sample stores (pl, hu, de, us with made-up sellers) come in hidden: no storefront until the
+        // merchant enters the seller and publishes the store in Admin → Stores and seller.
+        if ($source !== $legacy) $content = (string)preg_replace('/"sample"\s*:\s*true\b/', '"public": false', $content);
         if (!self::ensureDir($dir) || !self::atomicWrite($target, $content)) throw new RuntimeException("Cannot write {$target}");
         @chmod($target, 0640);
         if ($source !== $legacy) return ['path' => $target, 'action' => 'created from ' . self::STORES_EXAMPLE];

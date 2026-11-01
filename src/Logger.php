@@ -108,12 +108,29 @@ class Logger
     private const SECRET_VALUE = '/(Bearer\s+)[A-Za-z0-9._~+\/=-]+|((?:secret|token|password|passwd|api[_-]?key)[\w-]*["\']?\s*[=:]\s*["\']?)[^\s"\'&,;}]+/i';
 
     /**
+     * Secrets recognisable without a key: HTTP Basic credentials, the password in a URL (`scheme://user:pass@host`),
+     * Stripe-style secret and restricted keys and webhook secrets, and PEM private keys.
+     */
+    private const SECRET_PATTERNS = [
+        self::SECRET_VALUE => '$1$2[REDACTED]',
+        '/(\bBasic\s+)(?=[A-Za-z]*[0-9+\/=])[A-Za-z0-9+\/]{8,}={0,2}/i' => '$1[REDACTED]',
+        '#([a-z][a-z0-9+.-]*://[^\s:/@]*:)[^\s@/]+@#i' => '$1[REDACTED]@',
+        '/\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{8,}|\bwhsec_[A-Za-z0-9]{8,}/' => '[REDACTED]',
+        '/-----BEGIN ([A-Z0-9 ]*)PRIVATE KEY-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/s' => '[REDACTED $1PRIVATE KEY]',
+    ];
+
+    private static function maskSecrets(string $text): string
+    {
+        return (string)preg_replace(array_keys(self::SECRET_PATTERNS), array_values(self::SECRET_PATTERNS), $text);
+    }
+
+    /**
      * PHP error log line with e-mail addresses and secret-looking values masked (exception messages carry customer
      * input), on one line: CR/LF and other control characters are escaped so input cannot forge further log lines.
      */
     public static function phpLog(string $line): void
     {
-        $masked = (string)preg_replace(['/[^\s@<>"\'(),;:]+@[^\s@<>"\'(),;:]+\.[a-z]{2,}/i', self::SECRET_VALUE], ['[email]', '$1$2[REDACTED]'], $line);
+        $masked = (string)preg_replace('/[^\s@<>"\'(),;:]+@[^\s@<>"\'(),;:]+\.[a-z]{2,}/i', '[email]', self::maskSecrets($line));
         error_log((string)preg_replace_callback('/[\x00-\x1F\x7F]/', static fn(array $m): string => match ($m[0]) {
             "\n" => '\n', "\r" => '\r', "\t" => '\t', default => sprintf('\x%02X', ord($m[0])),
         }, $masked));
@@ -127,7 +144,7 @@ class Logger
             } elseif (is_array($item)) {
                 $item = self::redact($item);
             } elseif (is_string($item)) {
-                $item = preg_replace(self::SECRET_VALUE, '$1$2[REDACTED]', $item);
+                $item = self::maskSecrets($item);
             } elseif (is_object($item)) {
                 $item = '[OBJECT]';
             }

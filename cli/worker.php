@@ -290,7 +290,7 @@ function handleEmailSend(array $payload, array $job): void {
                 'customer_name'  => $order['customer_name'],
                 'customer_email' => $order['customer_email'],
                 'payment_method' => $order['payment_method'] ?? '',
-                'carrier'        => (string)($tracking['carrier'] ?? '') ?: (string)($order['carrier'] ?? ''),
+                'carrier'        => MethodLabels::carrier((string)($tracking['carrier'] ?? '') ?: (string)($order['carrier'] ?? ''), $locale),
                 'tracking_number'=> (string)($tracking['tracking_number'] ?? '') ?: (string)($order['tracking_number'] ?? ''),
                 'tracking_url'   => (string)($tracking['tracking_url'] ?? ''),
             ]);

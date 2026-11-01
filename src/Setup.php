@@ -220,9 +220,11 @@ class Setup
             $legal = is_array($store['legal'] ?? null) ? $store['legal'] : null;
             if ($legal === null || isset($legal['seller'])) continue;
             $problems = self::legalIdentityProblems($legal);
-            $add($problems === [] ? 'pass' : 'fail', 'stores.legal.' . $storeId, $problems === []
+            // A store that is not public has no storefront yet: its sample seller is a to-do, not a fault.
+            $public = !is_array($store) || StoreContext::isPublicConfig($store);
+            $add($problems === [] ? 'pass' : ($public ? 'fail' : 'warn'), 'stores.legal.' . $storeId, $problems === []
                 ? "Seller identity of store {$storeId} is set."
-                : "Store {$storeId} still has example seller data: " . implode('; ', $problems),
+                : "Store {$storeId}" . ($public ? '' : ' (not public)') . " still has example seller data: " . implode('; ', $problems),
                 "Enter the real company, address, IDs, IBAN and e-mail in Admin → Stores and seller (stores.json stores.{$storeId}.legal), or remove the store if you do not sell there.");
         }
         // Invoice dates and number years, the VAT rate in force and consumer deadlines follow the store's wall clock.

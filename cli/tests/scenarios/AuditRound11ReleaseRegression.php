@@ -72,8 +72,8 @@ try {
     // A fresh install gets a copy of the example; the admin saves into the private copy, never into the example.
     $r11rFresh = $r11rBase . '/fresh-private';
     $r11rSeed = DataOverrides::seedStores($r11rApp, ['private_runtime_dir' => $r11rFresh]);
-    assert_equals(['created from stores.example.json', $r11rExample], [$r11rSeed['action'] ?? null, (string)@file_get_contents($r11rFresh . '/stores.json')],
-        'R11 stores.json: a fresh install gets its own copy of stores.example.json');
+    assert_equals(['created from stores.example.json', str_replace('"sample": true', '"public": false', $r11rExample)], [$r11rSeed['action'] ?? null, (string)@file_get_contents($r11rFresh . '/stores.json')],
+        'R11 stores.json: a fresh install gets its own copy of stores.example.json (sample stores not public)');
     DataOverrides::setDirForTesting($r11rFresh);
     try {
         assert_equals(str_replace('\\', '/', $r11rFresh) . '/stores.json', DataOverrides::storesWritePath(), 'R11 stores.json: the admin saves into private_runtime_dir/stores.json');

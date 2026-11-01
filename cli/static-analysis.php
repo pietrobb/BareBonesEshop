@@ -229,7 +229,8 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/LayoutScript.php' => ['lines' => 70, 'functions' => 1, 'max_function_lines' => 63, 'coupling' => 1],
     // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.
     // +1 line, +1 max_function_lines R10 UX5: the stores page ends with the owner's add/remove store and legal-text cards (StoreManagement).
-    'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 78, 'functions' => 3, 'max_function_lines' => 50, 'coupling' => 5],
+    // +5 lines, +5 max_function_lines R11 low: the "public store" switch of every store but the default one.
+    'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 83, 'functions' => 3, 'max_function_lines' => 55, 'coupling' => 5],
     // R10 UX5: owner-only store add/remove and legal-text editor, saved to the private data directory when the code is read-only.
     // +2 lines, +1 max_function_lines R11: legal texts are listed and saved per store.
     'src/Entrypoints/Admin/StoreManagement.php' => ['lines' => 84, 'functions' => 4, 'max_function_lines' => 38, 'coupling' => 7],

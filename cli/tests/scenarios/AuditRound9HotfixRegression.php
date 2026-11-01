@@ -12,7 +12,7 @@ echo "\n--- Audit round 9 (hotfix): COD fulfillment, COD total in the checkout p
 // (probed on nginx 1.27). The uploads block repeats the dotfile and data-file denies of the server block.
 $r9hNginx = str_replace("\r\n", "\n", (string)file_get_contents(dirname(TEST_CLI_DIR) . '/deploy/nginx.conf'));
 $r9hUploads = preg_match('#\n    location \^~ /uploads/ \{\n(.*?)\n    \}#s', $r9hNginx, $r9hMatch) ? $r9hMatch[1] : '';
-foreach (['location ~ (?:^|/)\. { return 403; }', 'location ~* \.(?:(?:sqlite3?|db)(?:-(?:wal|shm))?|wal|shm|sql|dump|bak|backup|log|lock|tmp|ini|ya?ml|pem|key|md|neon(?:\.dist)?)$ { return 403; }'] as $r9hDeny) {
+foreach (['location ~ (?:^|/)\. { return 403; }', 'location ~* \.(?:(?:sqlite3?|db)(?:-(?:wal|shm|journal))?|wal|shm|journal|sql|dump|bak|backup|log|lock|tmp|ini|ya?ml|pem|key|md|neon(?:\.dist)?)$ { return 403; }'] as $r9hDeny) {
     assert_true(str_contains($r9hNginx, "\n    " . $r9hDeny) && str_contains($r9hUploads, "\n        " . $r9hDeny),
         'R9 nginx uploads: the /uploads/ prefix location repeats the server-level deny ' . substr($r9hDeny, 0, 40));
 }

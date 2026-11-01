@@ -45,6 +45,7 @@ class Bootstrap {
     public static function initLocale(?string $uri = null): string {
         $uri = self::storeRouteUri($uri ?? ($_SERVER['REQUEST_URI'] ?? ''));
         $context = self::initStoreContext($uri);
+        if (!$context->isPublic()) self::hiddenStoreNotFound();
         $lang = I18n::detectLocale($uri);
         $requested = strtolower(Security::str($_GET['lang'] ?? ''));
         $languages = array_map('strtolower', (array)($context->config()['languages'] ?? []));
@@ -53,6 +54,17 @@ class Bootstrap {
         }
         I18n::setLocale($lang);
         return $lang;
+    }
+
+    /** A store that is not public answers its domain and URL prefix with 404, before any page or cart work. */
+    private static function hiddenStoreNotFound(): never {
+        if (!headers_sent()) {
+            http_response_code(404);
+            header('Content-Type: text/plain; charset=utf-8');
+            header('X-Robots-Tag: noindex');
+        }
+        echo "Not Found\n";
+        exit;
     }
 
     private static function storeRouteUri(string $uri): string {
@@ -120,13 +132,14 @@ class Bootstrap {
      */
     public static function hreflangAlternates(?string $uri = null): array {
         $storesCfg = self::stores();
+        $public = array_filter(is_array($storesCfg['stores'] ?? null) ? $storesCfg['stores'] : [], static fn($store): bool => is_array($store) && StoreContext::isPublicConfig($store));
         $alternates = [];
-        foreach ($storesCfg['stores'] ?? [] as $store) {
+        foreach ($public as $store) {
             $locale = $store['default_locale'] ?? 'en';
             $alternates[$locale] = $store['url_prefix'] ?? '';
         }
         $secondary = [];
-        foreach ($storesCfg['stores'] ?? [] as $store) {
+        foreach ($public as $store) {
             foreach ((array)($store['languages'] ?? []) as $locale) {
                 $locale = strtolower((string)$locale);
                 if (!isset($alternates[$locale]) && !isset($secondary[$locale])) $secondary[$locale] = $store['url_prefix'] ?? '';

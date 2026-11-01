@@ -45,7 +45,7 @@
     "admin_user": {"type": "string"},
     "admin_email": {"type": "string"},
     "merchant_notifications": {"type": "object", "properties": {"enabled": {"type": "boolean"}, "recipients": {"type": "array", "items": {"type": "string"}}, "events": {"type": "object", "additionalProperties": {"type": "boolean"}}, "templates": {"type": "object", "additionalProperties": {"type": "string"}}}, "additionalProperties": true},
-    "cart_reminder": {"type": "object", "properties": {"enabled": {"type": "boolean"}, "delay_hours": {"type": "integer", "minimum": 1}, "max_age_hours": {"type": "integer", "minimum": 1}}, "additionalProperties": true},
+    "cart_reminder": {"type": "object", "properties": {"enabled": {"type": "boolean"}, "delay_hours": {"type": "integer", "minimum": 1}, "max_age_hours": {"type": "integer", "minimum": 1}, "email_window_hours": {"type": "integer", "minimum": 1}}, "additionalProperties": true},
     "url_aliases": {"type": ["array", "object"]},
     "drift_guard": {"type": "object", "properties": {"recipients": {"type": "array", "items": {"type": "string"}}, "exclude": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": true},
     "stock_alerts": {"type": "object", "properties": {"enabled": {"type": "boolean"}, "low": {"type": "integer", "minimum": 0}, "critical": {"type": "integer", "minimum": 0}, "recipients": {"type": "array", "items": {"type": "string"}}, "digest_hour": {"type": ["integer", "null"], "minimum": 0, "maximum": 23}, "locale": {"type": "string"}}, "additionalProperties": true},
