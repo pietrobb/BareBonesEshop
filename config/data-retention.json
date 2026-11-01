@@ -62,9 +62,57 @@
       "field": "created_at",
       "action": "scrub_pii",
       "scrub_fields": ["ip_address", "customer_phone", "notes"],
-      "status_in": ["delivered", "cancelled", "returned", "refunded"],
+      "status_in": ["shipped", "delivered", "cancelled", "returned", "refunded"],
       "keep_lines": {"notes": "/^(?:Refund: |erp_status:)/"},
-      "rationale": "Not accounting data: the IP address (fraud checks), phone (delivery) and the free-text note serve the delivery, done within months. Only closed orders (an open one still ships); empty fields stay empty; refund ids and ERP markers in the note are internal records and stay. Name, e-mail and address stay under orders_pii."
+      "rationale": "Not accounting data: the IP address (fraud checks), phone (delivery) and the free-text note serve the delivery, done within months. Only shipped or closed orders (an unshipped one still needs them; a shipped order 180 days old is long delivered, also when no carrier reported it); empty fields stay empty; refund ids and ERP markers in the note are internal records and stay. Name, e-mail and address stay under orders_pii."
+    },
+    "complaints_pii": {
+      "table": "complaints",
+      "ttl_days": 1826,
+      "field": "received_at",
+      "action": "scrub_pii",
+      "scrub_fields": ["customer_name", "customer_email", "defect", "decision_note"],
+      "status_in": ["accepted", "rejected", "resolved"],
+      "rationale": "Decided complaints (reklamácie): the record and written decision serve the 24-month liability (Directive (EU) 2019/771) and the seller's complaint register (SK: kept 3 years). After 5 years from receipt the name, e-mail, defect description and decision note are erased; number, order, item, remedy and dates stay. An undecided complaint is never touched. LAWYER TO REVIEW the period."
+    },
+    "withdrawal_requests_pii": {
+      "table": "withdrawal_requests",
+      "ttl_days": 1826,
+      "field": "received_at",
+      "action": "scrub_pii",
+      "scrub_fields": ["customer_name", "customer_email", "reason"],
+      "rationale": "A withdrawal statement is proof of the withdrawal (Directive 2011/83/EU art. 11a) for claims about the refund. After 5 years from receipt the name, e-mail and optional reason are erased; order, items, receipt time and confirmation status stay. LAWYER TO REVIEW the period."
+    },
+    "rma_requests_text": {
+      "table": "rma_requests",
+      "ttl_days": 1826,
+      "field": "created_at",
+      "action": "scrub_pii",
+      "scrub_fields": ["reason", "admin_note"],
+      "status_in": ["rejected", "refunded"],
+      "rationale": "Closed returns (RMA): the free-text reason and admin note can name the customer. After 5 years they are erased; the RMA number, order, lines and credit-note link stay for the accounting trail (the credit note itself is preserved). An open RMA is never touched. LAWYER TO REVIEW the period."
+    },
+    "return_receipts_note": {
+      "table": "return_receipts",
+      "ttl_days": 1826,
+      "field": "created_at",
+      "action": "scrub_pii",
+      "scrub_fields": ["note"],
+      "rationale": "Warehouse note on a received return line; erased with the RMA texts after 5 years. Quantity and disposition stay. LAWYER TO REVIEW the period."
+    },
+    "promotion_runs": {
+      "table": "promotion_runs",
+      "ttl_days": 400,
+      "field": "valid_to",
+      "action": "delete",
+      "rationale": "Ended catalog promotion runs only count for the Omnibus prior price within one year after they end (Promotions::catalogRulesWithEnded); older ones are never read again."
+    },
+    "price_list_runs": {
+      "table": "price_list_runs",
+      "ttl_days": 400,
+      "field": "valid_to",
+      "action": "delete",
+      "rationale": "Ended price-list runs only count for the Omnibus prior price within one year after they end (Pricing::priceListRowsWithEnded); older ones are never read again."
     },
     "cookie_consent_old": {
       "table": "cookie_consent",

@@ -282,7 +282,7 @@ class Setup
             self::retentionCheck($probe, $add);
             self::adminChecks($config, $add);
             self::storeCurrencyChecks($probe, is_array($stores) ? (array)($stores['stores'] ?? []) : [], $add);
-            foreach (PaymentReadiness::checks($probe, $config) as [$status, $name, $message, $remediation]) $add($status, $name, $message, $remediation);
+            foreach (PaymentReadiness::checks($probe, $config, is_array($stores) ? (array)($stores['stores'] ?? []) : null) as [$status, $name, $message, $remediation]) $add($status, $name, $message, $remediation);
         } catch (Throwable $e) {
             $add('fail', 'database.connection', 'Database connection failed.', 'Verify database credentials/path and run migrations.');
         }
@@ -395,6 +395,10 @@ class Setup
         }
         $stores = DataOverrides::seedStores($root, $config);
         if ($stores !== null) $changes[] = ['path' => 'stores.json', 'action' => $stores['action'], 'file' => $stores['path']];
+        $storesData = json_decode((string)@file_get_contents(DataOverrides::storesPath($root, $config)), true);
+        $legalSplit = DataOverrides::splitLegacyLegal((array)(is_array($storesData) ? ($storesData['stores'] ?? []) : []), $config);
+        if ($legalSplit === null) throw new RuntimeException('Cannot copy the legal texts into the stores of the private runtime directory');
+        if ($legalSplit !== []) $changes[] = ['path' => 'legal', 'action' => 'split per store (' . count($legalSplit) . ' files): review each store\'s texts'];
         $stateDir = (string)($config['private_runtime_dir'] ?? '');
         $statePath = rtrim($stateDir, '/\\') . '/setup-state.json';
         $existingState = is_file($statePath) ? json_decode((string)file_get_contents($statePath), true) : null;

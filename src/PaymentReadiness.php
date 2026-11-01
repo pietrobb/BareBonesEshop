@@ -17,13 +17,20 @@ final class PaymentReadiness
 
     /**
      * One check per provider of the active online methods: [status pass|warn|fail, name, message, remediation].
+     * With $stores (stores.json "stores") only the price lists a store still sells from count: the methods of a removed
+     * store stay in the database but no buyer reaches them.
      * @return list<array{0:string,1:string,2:string,3:string}>
      */
-    public static function checks(PDO $db, array $config): array {
+    public static function checks(PDO $db, array $config, ?array $stores = null): array {
         try {
             $rows = $db->query('SELECT store_id, code, provider FROM payment_methods WHERE active = 1 AND requires_online = 1 ORDER BY provider, store_id, code')->fetchAll(PDO::FETCH_ASSOC);
         } catch (PDOException $e) {
             $rows = [['store_id' => 'default', 'code' => 'card', 'provider' => 'stripe']]; // checkout's fallback method without the tables
+        }
+        if ($stores !== null) {
+            $scopes = [];
+            foreach ($stores as $storeId => $store) if (is_array($store)) $scopes[(string)($store['provider_scope'] ?? $storeId)] = true;
+            $rows = array_values(array_filter($rows, static fn(array $row): bool => isset($scopes[(string)$row['store_id']])));
         }
         if ($rows === []) {
             return [['warn', 'payment.online', 'No active online payment method: checkout offers only offline payment (bank transfer, cash on delivery, invoice).', 'Activate a card method in admin → Payments if the shop takes online payments.']];

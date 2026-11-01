@@ -240,11 +240,14 @@ class Warehouse {
         return (bool)$stmt->fetchColumn();
     }
 
-    /** Total available stock for a SKU (sum of all warehouses, minus reserved) */
-    public static function totalAvailable(string $sku): int {
+    /**
+     * Total available stock for a SKU (sum of all warehouses, minus reserved). With $lock (MySQL) its rows stay locked
+     * until the transaction ends, and the sum is today's committed stock, not the transaction's older snapshot.
+     */
+    public static function totalAvailable(string $sku, bool $lock = false): int {
         $stmt = Db::get()->prepare("
             SELECT COALESCE(SUM(qty - reserved), 0) FROM warehouse_stock WHERE sku = :sku AND store_id = :store
-        ");
+        " . ($lock && Db::isMysql() ? ' FOR UPDATE' : ''));
         $stmt->execute([':sku' => $sku, ':store' => StoreContext::current()->catalogId()]);
         return max(0, (int)$stmt->fetchColumn());
     }
@@ -505,7 +508,8 @@ class Warehouse {
         $ownsTransaction = !$db->inTransaction();
         if ($ownsTransaction) $db->beginTransaction();
         try {
-            $before = self::totalAvailable($sku);
+            // Locked: an import or API change committed meanwhile is part of $before, not overwritten by it.
+            $before = self::totalAvailable($sku, true);
             if ($basis !== null && self::ledgered($sku)) $available = max(0, $before + $available - $basis);
             $delta = $available - $before;
             if ($delta > 0) {

@@ -155,7 +155,7 @@ try {
         $r10uLegal = ['name' => 'R10U Trading', 'email' => 'legal@r10u.test'];
         $r10uShipped = ConsumerNotice::renderLegal('terms', 'sk', $r10uLegal);
         assert_true(DataOverrides::saveLegal('terms', 'sk', "<h1>R10U terms of {{name}}</h1>\n"), 'R10 UX5: a legal text is saved to the data directory');
-        assert_true(is_file($r10uTmp . '/data/legal/sk/terms.html'), 'R10 UX5: the saved text lives in the data directory');
+        assert_true(is_file($r10uTmp . '/data/legal/stores/default/sk/terms.html'), 'R10 UX5: the saved text lives in the data directory');
         assert_true(str_contains(ConsumerNotice::renderLegal('terms', 'sk', $r10uLegal), 'R10U terms of R10U Trading'), 'R10 UX5: the storefront shows the saved text with the seller filled in');
         assert_true(!str_contains(ConsumerNotice::renderLegal('terms', 'cs', $r10uLegal), 'R10U terms'), 'R10 UX5: other languages keep their own text');
         assert_true(!DataOverrides::saveLegal('../../config', 'sk', 'x') && !DataOverrides::saveLegal('terms', '../x', 'x'), 'R10 UX5: only known legal pages and two-letter languages are saved');

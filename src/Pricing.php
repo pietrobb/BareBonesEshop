@@ -236,6 +236,30 @@ class Pricing {
      * (the sample CZK store on the shared EUR catalog) sells it in its own when one of its price lists prices it there.
      */
     /**
+     * Unix time of the latest scheduled guest price change of the active store up to now: a catalog promotion or a
+     * price list starting (valid_from) or ending (the second after valid_to), 0 when none. A cached listing or product
+     * written before it shows a price that has started or ended since (Cache::readCatalogJson).
+     */
+    public static function lastScheduledChange(?string $now = null): int {
+        $now ??= gmdate('Y-m-d H:i:s');
+        $latest = 0;
+        try {
+            foreach (["promotions WHERE scope = 'catalog' AND", 'price_lists WHERE customer_group_id IS NULL AND'] as $from) {
+                $stmt = Db::get()->prepare("SELECT MAX(CASE WHEN valid_from <= :now_from THEN valid_from END) AS started,
+                        MAX(CASE WHEN valid_to < :now_to THEN valid_to END) AS ended
+                    FROM {$from} store_id = :store AND active = 1");
+                $stmt->execute([':now_from' => $now, ':now_to' => $now, ':store' => StoreContext::current()->id()]);
+                $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+                if (!empty($row['started'])) $latest = max($latest, (int)strtotime($row['started'] . ' UTC'));
+                if (!empty($row['ended'])) $latest = max($latest, (int)strtotime($row['ended'] . ' UTC') + 1);
+            }
+        } catch (PDOException $e) {
+            Logger::exception('pricing.schedule_unavailable', $e);
+        }
+        return $latest;
+    }
+
+    /**
      * Whether the active store sells at a price in $currency. A store sells only in its own currency: an item of the
      * shared catalog with no price in it (no price-list row there, a surcharged variant without its own row) is not for
      * sale in that store, instead of being charged in the catalog's currency next to the store's.

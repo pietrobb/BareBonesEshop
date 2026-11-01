@@ -231,7 +231,8 @@ $architectureBudgets = [
     // +1 line, +1 max_function_lines R10 UX5: the stores page ends with the owner's add/remove store and legal-text cards (StoreManagement).
     'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 78, 'functions' => 3, 'max_function_lines' => 50, 'coupling' => 5],
     // R10 UX5: owner-only store add/remove and legal-text editor, saved to the private data directory when the code is read-only.
-    'src/Entrypoints/Admin/StoreManagement.php' => ['lines' => 82, 'functions' => 4, 'max_function_lines' => 37, 'coupling' => 7],
+    // +2 lines, +1 max_function_lines R11: legal texts are listed and saved per store.
+    'src/Entrypoints/Admin/StoreManagement.php' => ['lines' => 84, 'functions' => 4, 'max_function_lines' => 38, 'coupling' => 7],
     // +3 lines R11 H9: the parcel row shows its carrier label (ShipmentLabels.php) and the ship form keeps the label's tracking number;
     // +1 the parcel row shows the cash on delivery it collects.
     'src/Entrypoints/Admin/Shipments.php' => ['lines' => 281, 'functions' => 11, 'max_function_lines' => 106, 'coupling' => 10],
