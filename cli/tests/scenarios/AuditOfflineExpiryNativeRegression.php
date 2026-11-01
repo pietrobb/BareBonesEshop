@@ -28,7 +28,7 @@ $ago = static fn(int $hours): string => gmdate('Y-m-d H:i:s', time() - $hours * 
 foreach ([
     ['COD-1', 'cod', false, 'default', 9, 'pending'], ['COD-2', 'cod', false, 'default', 9, 'pending'],
     ['INVOICE', 'invoice', false, 'default', 9, 'pending'], ['BT-PAID', 'bank_transfer', false, 'default', 9, 'paid'],
-    ['BT-OLD', 'bank_transfer', false, 'default', 3, 'pending'], ['BT-YOUNG', 'bank_transfer', false, 'default', 1, 'pending'],
+    /* R11: past the due day and the 3 grace days */ ['BT-OLD', 'bank_transfer', false, 'default', 120, 'pending'], ['BT-YOUNG', 'bank_transfer', false, 'default', 1, 'pending'],
     ['ON-DEFAULT', 'online_card', true, 'default', 3, 'pending'], ['ON-CZ', 'online_card', true, 'cz', 3, 'pending'],
 ] as [$number, $type, $online, $store, $hours, $paid]) {
     $insert->execute([':number' => 'A063-' . $number, ':paid' => $paid, ':email' => strtolower($number) . '@example.test', ':method' => $type,
@@ -57,13 +57,15 @@ else print "  [SKIP] Audit A06.3 native offline expiry (set TEST_MYSQL_DSN)\n";
 $a063Expected = ['status' => [
     'A063-BT-OLD' => 'cancelled', 'A063-BT-PAID' => 'pending', 'A063-BT-YOUNG' => 'pending', 'A063-COD-1' => 'pending', 'A063-COD-2' => 'pending',
     'A063-INVOICE' => 'pending', 'A063-ON-CZ' => 'cancelled', 'A063-ON-DEFAULT' => 'cancelled',
-], 'mails' => ['order_cancelled:bt-old@example.test']];
+], 'mails' => ['bank_transfer_reminder:bt-young@example.test', 'order_cancelled:bt-old@example.test']]; // R11: the transfer due today is reminded
 try {
     foreach ($a063Drivers as $a063Driver => $a063Target) {
         [$a063Code, $a063Out] = $a063Php([$a063Root . '/expiry.php', $a063Driver, 'run', dirname(TEST_CLI_DIR), $a063Target]);
         $a063Got = json_decode($a063Out, true) ?? $a063Out;
         assert_equals([0, $a063Expected['status']], [$a063Code, $a063Got['status'] ?? $a063Got], "A06.3 {$a063Driver} expiry: configured transfer + online orders in every store expire; COD/invoice/paid/young stay pending; batch=1 is not starved");
-        assert_equals($a063Expected['mails'], $a063Got['mails'] ?? $a063Got, "A06.3 {$a063Driver} expiry: only the expired offline buyer is e-mailed");
+        $a063Mails = $a063Got['mails'] ?? $a063Got;
+        if (is_array($a063Mails)) sort($a063Mails);
+        assert_equals($a063Expected['mails'], $a063Mails, "A06.3 {$a063Driver} expiry: only the expired offline buyer is told of the cancellation, the one due today is reminded");
     }
 } finally {
     if (isset($a063Drivers['mysql'])) $a063Php([$a063Root . '/expiry.php', 'mysql', 'teardown', dirname(TEST_CLI_DIR), $a063Drivers['mysql']]);

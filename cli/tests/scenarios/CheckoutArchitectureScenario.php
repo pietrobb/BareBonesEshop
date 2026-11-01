@@ -866,11 +866,11 @@ assert_true($cf->invoke(null, '0,15,30,45', 30), 'F6: cronField list matches 30'
 assert_true($cf->invoke(null, '8-18/2', 10), 'F6: cronField step-range "8-18/2" matches 10');
 assert_true(!$cf->invoke(null, '8-18/2', 9), 'F6: cronField step-range "8-18/2" rejects 9');
 
-$cm = new ReflectionMethod(FeedImport::class, 'cronMatches');
-$f6Midnight = mktime(0, 0, 0, 6, 2, 2026); // 2026-06-02 00:00
-$f6Noon     = mktime(12, 0, 0, 6, 2, 2026);
-assert_true($cm->invoke(null, ['0', '0', '*', '*', '*'], $f6Midnight), 'F6: cronMatches "0 0 * * *" at midnight');
-assert_true(!$cm->invoke(null, ['0', '0', '*', '*', '*'], $f6Noon),    'F6: cronMatches "0 0 * * *" rejects noon');
+$cm = new ReflectionMethod(FeedImport::class, 'cronMatchesWall');
+$f6Midnight = gmmktime(0, 0, 0, 6, 2, 2026); // wall clock 2026-06-02 00:00
+$f6Noon     = gmmktime(12, 0, 0, 6, 2, 2026);
+assert_true($cm->invoke(null, ['0', '0', '*', '*', '*'], $f6Midnight), 'F6: cronMatchesWall "0 0 * * *" at midnight');
+assert_true(!$cm->invoke(null, ['0', '0', '*', '*', '*'], $f6Noon),    'F6: cronMatchesWall "0 0 * * *" rejects noon');
 
 $isDue = new ReflectionMethod(FeedImport::class, 'isDue');
 assert_true($isDue->invoke(null, '*/15 * * * *', gmdate('Y-m-d H:i:s', time() - 3600)), 'F6: "*/15 * * * *" due after 1h');

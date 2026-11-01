@@ -74,6 +74,8 @@ if ($phase === 'setup') {
 }
 $stores = Bootstrap::stores();
 $stores['stores']['cz'] = array_replace($stores['stores']['default'], ['id'=>'cz', 'url_prefix'=>'/cz', 'domains'=>[], 'catalog_scope'=>'default', 'currency'=>'czk']);
+// R11: the shop's calendar is the store's timezone (activate() makes it PHP's default), not php.ini.
+foreach (['default', 'cz'] as $zoneStore) $stores['stores'][$zoneStore]['timezone'] = $zone;
 StoreContext::activate(StoreContext::resolve($stores, '/', '', $store));
 I18n::setLocale('en');
 $_SESSION = ['admin_role'=>'manager', 'admin_identity_id'=>1, 'admin_store_permissions'=>[$store=>['orders.view', 'reports.view']]];

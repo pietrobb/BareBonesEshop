@@ -653,12 +653,6 @@ class FeedImport {
         };
     }
 
-    /** True if the 5 cron fields all match the given unix timestamp on the wall clock of $zone (default: PHP's). */
-    private static function cronMatches(array $parts, int $ts, ?DateTimeZone $zone = null): bool {
-        $zone ??= new DateTimeZone(date_default_timezone_get());
-        return self::cronMatchesWall($parts, $ts + $zone->getOffset(new DateTimeImmutable('@' . $ts)));
-    }
-
     /** True if the 5 cron fields all match a local wall-clock time given as seconds since 1970-01-01 00:00 local. */
     private static function cronMatchesWall(array $parts, int $wall): bool {
         $domRestricted = ($parts[2] !== '*');

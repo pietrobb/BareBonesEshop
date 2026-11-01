@@ -84,7 +84,7 @@ try {
     $r10mInvoiceSrc = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/InvoiceService.php');
     $r10mCreditStart = (int)strpos($r10mInvoiceSrc, 'public static function credit(');
     $r10mCredit = substr($r10mInvoiceSrc, $r10mCreditStart, (int)strpos($r10mInvoiceSrc, "\n    public static function ", $r10mCreditStart + 10) - $r10mCreditStart);
-    assert_equals(1, preg_match_all('/\bdate\(/', $r10mCredit), 'R10 credit note: issue date, series year and PDF month come from one date() call');
+    assert_equals(1, preg_match_all('/\b(?:date|dateIn)\(/', $r10mCredit), 'R10 credit note: issue date, series year and PDF month come from one date call');
 
     // M10: a refund request and a pending credit note each see the money the other already promised back.
     $r10mPaidOrder = static function (string $tag) use ($pdo): int {
