@@ -553,7 +553,7 @@ class EmailTemplates {
         $css = html_entity_decode($css, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $css = (string)preg_replace('~/\*.*?(?:\*/|$)~s', '', $css);
         $css = (string)preg_replace_callback('~\\\\([0-9a-fA-F]{1,6})\s?|\\\\(.)~su',
-            static fn(array $m): string => ($m[1] ?? '') !== '' ? mb_chr((int)hexdec($m[1]), 'UTF-8') : $m[2], $css);
+            static fn(array $m): string => $m[1] !== '' ? mb_chr((int)hexdec($m[1]), 'UTF-8') : $m[2], $css);
         return strtolower((string)preg_replace('/\s+/', '', $css));
     }
 
