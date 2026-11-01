@@ -31,7 +31,7 @@ final class PaymentLink {
     public static function issue(array $order, bool $mailed = false): string {
         $token = bin2hex(random_bytes(24));
         CheckoutSession::bind((int)$order['id'], hash('sha256', $token), $mailed ? self::PROVIDER : self::PAGE_PROVIDER);
-        return self::baseUrl() . '/?page=pay&token=' . $token;
+        return Template::withOrderLang(self::baseUrl() . '/?page=pay&token=' . $token, $order);
     }
 
     /** The active store's order the link was issued for, while the link is fresh. */
@@ -97,8 +97,8 @@ final class PaymentLink {
                 'locale' => (string)($order['locale'] ?? ''), 'currency' => $order['currency'] ?? 'eur',
                 'items' => Orders::items($orderId), 'shipping_cost' => (int)$order['shipping_cost'],
                 'financial_snapshot_id' => is_array($financial) ? ($financial['fingerprint'] ?? null) : null,
-                'success_url' => $baseUrl . '/?page=order-done&order=' . rawurlencode((string)$order['order_number']) . '&confirmation_token=' . rawurlencode($confirmation) . '&session_id={CHECKOUT_SESSION_ID}',
-                'cancel_url' => $baseUrl . '/?page=checkout-cancel&order=' . rawurlencode((string)$order['order_number']),
+                'success_url' => Template::withOrderLang($baseUrl . '/?page=order-done&order=' . rawurlencode((string)$order['order_number']) . '&confirmation_token=' . rawurlencode($confirmation), $order) . '&session_id={CHECKOUT_SESSION_ID}',
+                'cancel_url' => Template::withOrderLang($baseUrl . '/?page=checkout-cancel&order=' . rawurlencode((string)$order['order_number']), $order),
                 'notify_url' => ApiRoute::paymentWebhook($baseUrl, $provider),
             ], Adapters::payment($provider), $provider);
         } catch (Throwable $e) {

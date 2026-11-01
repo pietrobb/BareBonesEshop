@@ -604,7 +604,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.invoice_purchase_hint' => 'Nákup na fakturu: změnou stavu na „Zpracovává se“ objednávku přijmete a vystaví se faktura se splatností {days} dní. Zaplacení označíte, až peníze dorazí.',
     'admin.order.payment_reference' => 'Reference platby',
     'admin.order.last_event' => 'Poslední událost',
-    'admin.order.amount_cents' => 'Částka v centech',
+    'admin.order.amount' => 'Částka ({currency})',
     'admin.order.change_payment' => 'Změnit platbu',
     'admin.order.send_payment_link' => 'Poslat odkaz na platbu',
     'admin.title.order_new' => 'Nová objednávka',

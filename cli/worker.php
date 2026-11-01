@@ -295,6 +295,13 @@ function handleEmailSend(array $payload, array $job): void {
                 'tracking_url'   => (string)($tracking['tracking_url'] ?? ''),
             ]);
             if ($template === 'order_confirmation') $vars = array_merge($vars, BankTransferInstructions::mailVars($order), ConsumerNotice::mailVars($order));
+            if ($template === 'refund_issued') {
+                // The refund just booked (partial, RMA credit note, by hand), not the order total; a legacy job names none.
+                $refundKey = (string)($payload['refund_key'] ?? '');
+                if ($refundKey !== '' && !PaymentService::refundBooked((int)$orderId, $refundKey)) return;
+                $refundAmount = (int)($payload['refund_amount'] ?? 0);
+                $vars['refund_amount'] = I18n::price($refundAmount > 0 ? $refundAmount : PaymentService::refundedAmount((int)$orderId), $currency);
+            }
             if ($template === 'bank_transfer_reminder') {
                 // Paid or cancelled since the reminder was queued: nothing to remind of.
                 $vars = array_merge($vars, BankTransferInstructions::mailVars($order));
@@ -308,6 +315,11 @@ function handleEmailSend(array $payload, array $job): void {
                 'unit_price' => I18n::price((int)$it['unit_price'], $currency),
                 'total'      => I18n::price((int)$it['total'], $currency),
             ], $items);
+            // Subtotal, discount, shipping, payment fee and VAT: with the item lines they add up to order_total.
+            $vars['totals'] = array_map(static fn(array $line): array => [
+                'label'  => I18n::tIn(Orders::TOTAL_LINE_LABELS[$line['key']], $locale !== '' ? $locale : 'en'),
+                'amount' => I18n::price((int)$line['cents'], $currency),
+            ], Orders::totalLines($order));
         } else {
             return;
         }

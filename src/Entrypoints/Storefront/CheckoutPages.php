@@ -187,8 +187,8 @@ function processCheckout(): array {
         }
         $target = !empty($result['payment_url'])
             ? (string)$result['payment_url']
-            : Template::storeUrl('/?page=order-done&order=' . rawurlencode((string)$result['order_number'])
-                . '&confirmation_token=' . rawurlencode((string)$result['confirmation_token']));
+            : Template::withOrderLang(Template::storeUrl('/?page=order-done&order=' . rawurlencode((string)$result['order_number'])
+                . '&confirmation_token=' . rawurlencode((string)$result['confirmation_token'])), Orders::byNumber((string)$result['order_number']) ?? []);
         header('Location: ' . $target);
         exit;
     }

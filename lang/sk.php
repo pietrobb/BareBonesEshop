@@ -611,7 +611,7 @@ return [
     'admin.order.invoice_purchase_hint' => 'Nákup na faktúru: zmenou stavu na „Spracováva sa“ objednávku prijmete a vystaví sa faktúra so splatnosťou {days} dní. Zaplatenie označíte, keď peniaze prídu.',
     'admin.order.payment_reference' => 'Referencia platby',
     'admin.order.last_event' => 'Posledná udalosť',
-    'admin.order.amount_cents' => 'Suma centy',
+    'admin.order.amount' => 'Suma ({currency})',
     'admin.order.change_payment' => 'Zmeniť platbu',
     'admin.order.send_payment_link' => 'Poslať odkaz na platbu',
     'admin.title.order_new' => 'Nová objednávka',

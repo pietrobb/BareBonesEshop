@@ -758,7 +758,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.invoice_purchase_hint' => 'Compra con factura: al pasar el pedido a «En preparación» lo acepta y se emite la factura con vencimiento a {days} días. Márquela como pagada cuando llegue el dinero.',
     'admin.order.payment_reference' => 'Referencia del pago',
     'admin.order.last_event' => 'Último evento',
-    'admin.order.amount_cents' => 'Importe en céntimos',
+    'admin.order.amount' => 'Importe ({currency})',
     'admin.order.change_payment' => 'Cambiar pago',
     'admin.order.send_payment_link' => 'Enviar enlace de pago',
     'admin.title.order_new' => 'Nuevo pedido',

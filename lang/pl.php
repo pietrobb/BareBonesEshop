@@ -604,7 +604,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.invoice_purchase_hint' => 'Zakup na fakturę: zmiana statusu na „W realizacji” przyjmuje zamówienie i wystawia fakturę z terminem płatności {days} dni. Oznacz ją jako opłaconą, gdy wpłyną pieniądze.',
     'admin.order.payment_reference' => 'Referencja płatności',
     'admin.order.last_event' => 'Ostatnie zdarzenie',
-    'admin.order.amount_cents' => 'Kwota w groszach',
+    'admin.order.amount' => 'Kwota ({currency})',
     'admin.order.change_payment' => 'Zmień płatność',
     'admin.order.send_payment_link' => 'Wyślij link do płatności',
     'admin.title.order_new' => 'Nowe zamówienie',

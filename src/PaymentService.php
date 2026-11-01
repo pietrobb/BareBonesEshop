@@ -201,7 +201,10 @@ class PaymentService {
                     'provider_ref' => $providerRef,
                 ], $from);
                 AuditLog::log('payment_status', $orderId, $from, $to, $eventType);
-                if ($ownTransaction) $db->commit();
+                if ($ownTransaction) {
+                    $db->commit();
+                    self::flushRefundMails();
+                }
                 return true;
             }
             if ($ownTransaction) $db->rollBack();
@@ -384,7 +387,10 @@ class PaymentService {
                 idempotencyKey: $idempotencyKey ?: ('refund_' . $orderId . '_' . ($refundId !== '' ? $refundId : uniqid())),
                 rawResponse:    $result,
             );
-            if ($ownTransaction) $db->commit();
+            if ($ownTransaction) {
+                $db->commit();
+                self::flushRefundMails();
+            }
         } catch (\Throwable $e) {
             self::rollBackOwn($ownTransaction);
             throw $e;
@@ -935,6 +941,48 @@ class PaymentService {
         return (bool)$stmt->fetchColumn();
     }
 
+    /** Ledger statuses of money returned to the customer (refundedAmount()). */
+    private const REFUNDED_STATUSES = ['partially_refunded', 'refunded', 'refund_succeeded'];
+
+    /** @var list<array{0:int,1:int,2:string}> refund mails of ledger rows written in the open transaction */
+    private static array $refundMails = [];
+
+    /**
+     * Tell the customer about money returned (any refund: whole order, partial, RMA credit note, by hand). Inside a
+     * transaction the mail waits for its commit (flushRefundMails()), so a rolled-back booking sends nothing.
+     */
+    private static function queueRefundMail(int $orderId, int $amount, string $ledgerKey): void {
+        self::$refundMails[] = [$orderId, $amount, $ledgerKey];
+        if (!Db::get()->inTransaction()) self::flushRefundMails();
+    }
+
+    /** Queue the refund mails of the transaction that just committed ($committed false: it rolled back, none). */
+    private static function flushRefundMails(bool $committed = true): void {
+        $mails = self::$refundMails;
+        self::$refundMails = [];
+        if (!$committed) return;
+        foreach ($mails as [$orderId, $amount, $ledgerKey]) {
+            $order = Orders::byId($orderId);
+            if (!$order || trim((string)($order['customer_email'] ?? '')) === '') continue;
+            JobQueue::push('email_send', [
+                'template' => 'refund_issued',
+                'to' => (string)$order['customer_email'],
+                'locale' => (string)($order['locale'] ?? ''),
+                'order_id' => $orderId,
+                'refund_amount' => $amount,
+                'refund_key' => $ledgerKey,
+            ], 5);
+        }
+    }
+
+    /** Whether the ledger holds the refund row a refund mail announces (it was committed). */
+    public static function refundBooked(int $orderId, string $ledgerKey): bool {
+        $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store AND idempotency_key = :key
+            AND status IN ('partially_refunded', 'refunded', 'refund_succeeded') AND amount > 0");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $ledgerKey]);
+        return (bool)$stmt->fetchColumn();
+    }
+
     private static function logTransaction(
         int    $orderId,
         string $provider,
@@ -967,6 +1015,10 @@ class PaymentService {
                 ':raw'    => json_encode($rawResponse, JSON_UNESCAPED_UNICODE),
                 ':correlation' => Logger::correlationId(),
             ]);
+            // Money returned to the customer: the customer is told, once per ledger row.
+            if ($stmt->rowCount() === 1 && $amount > 0 && in_array($status, self::REFUNDED_STATUSES, true)) {
+                self::queueRefundMail($orderId, $amount, $idempotencyKey);
+            }
         } catch (\Throwable $e) {
             if ($failClosed) throw $e;
             // Never let logging failure break merchant-initiated payment operations.
@@ -1134,13 +1186,13 @@ class PaymentService {
      */
     public static function completeManualRefund(int $orderId, int $amount, string $actor, string $note): void {
         if ($amount <= 0 || trim($note) === '') throw new \InvalidArgumentException('Invalid manual refund');
-        self::withLockedOrder($orderId, static function (array $order) use ($orderId, $amount, $actor, $note): bool {
+        $key = 'manual_refund_' . $orderId . '_' . bin2hex(random_bytes(12));
+        self::withLockedOrder($orderId, static function (array $order) use ($orderId, $amount, $actor, $note, $key): bool {
             $from = (string)($order['payment_status'] ?? 'pending');
             if (!self::refundsByHand($order) || $amount > self::claimableRefund($orderId)) {
                 throw new \LogicException('Manual refund is not available for this order or amount');
             }
             $to = self::refundedAmount($orderId) + self::offLedgerCredits($order) + $amount >= (int)$order['total'] ? 'refunded' : 'partially_refunded';
-            $key = 'manual_refund_' . $orderId . '_' . bin2hex(random_bytes(12));
             $payload = ['actor' => $actor, 'note' => $note];
             if ($from === $to) {
                 self::recordEvent($orderId, 'refund.manual_completed', $to, $amount, (string)($order['currency'] ?? 'eur'), $key, $payload, self::orderProvider($order));
@@ -1153,6 +1205,14 @@ class PaymentService {
             return true;
         });
         self::closeRefundedOrder($orderId, 'Manual refund completed');
+        // The invoice is corrected by a credit note for the money returned (an RMA credit note was issued with its return).
+        // The refund is booked either way: a credit note that cannot be issued is raised for the merchant to issue by hand.
+        try {
+            InvoiceService::creditRefund($orderId, $amount, $key, $note);
+        } catch (\Throwable $e) {
+            Logger::error('manual refund credit note failed', ['order_id' => $orderId, 'error' => $e->getMessage()]);
+            IncidentMonitor::report('invoice.refund_credit_failed', 'invoice', 'warning', ['order_id' => $orderId, 'amount' => $amount]);
+        }
     }
 
     /**
@@ -1270,7 +1330,10 @@ class PaymentService {
             $order = Orders::byId($orderId);
             if (!$order) throw new RuntimeException("Order #{$orderId} not found");
             $result = $work($order);
-            if ($ownTransaction) $db->commit();
+            if ($ownTransaction) {
+                $db->commit();
+                self::flushRefundMails();
+            }
             return $result;
         } catch (\Throwable $e) {
             self::rollBackOwn($ownTransaction);
@@ -1290,6 +1353,7 @@ class PaymentService {
     private static function rollBackOwn(bool $ownTransaction): void {
         $db = Db::get();
         if ($ownTransaction && $db->inTransaction()) $db->rollBack();
+        if ($ownTransaction) self::flushRefundMails(false);
     }
 
     /**

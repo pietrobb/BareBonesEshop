@@ -893,6 +893,10 @@ class Orders {
         $stmt->execute([':status' => $erpStatus, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
     }
 
+    /** I18n keys of the totalLines() keys (admin order detail, order confirmation e-mail). */
+    public const TOTAL_LINE_LABELS = ['subtotal' => 'admin.order.subtotal', 'discount' => 'discount', 'shipping' => 'admin.order.shipping',
+        'payment_fee' => 'admin.order.payment_fee', 'vat' => 'admin.order.vat', 'vat_included' => 'admin.order.vat_included'];
+
     /**
      * The total lines of a placed order, in the order they add up to `total`. With gross prices the VAT is already inside
      * the other lines, so it is an "of which" line (vat_included) that is not added.

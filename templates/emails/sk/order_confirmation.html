@@ -8,6 +8,9 @@
 {{#each items}}
 <tr><td>{{name}} <small>({{sku}})</small></td><td align="right">{{quantity}}</td><td align="right">{{total}}</td></tr>
 {{/each}}
+{{#each totals}}
+<tr><td colspan="2" align="right">{{label}}</td><td align="right">{{amount}}</td></tr>
+{{/each}}
 </table>
 <p><strong>Celkom: {{order_total}}</strong></p>
 {{#if bank_transfer}}<h3>Platba bankovým prevodom</h3>

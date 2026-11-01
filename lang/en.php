@@ -606,7 +606,7 @@ return [
     'admin.order.invoice_purchase_hint' => 'Purchase on invoice: moving the order to “Processing” accepts it and issues the invoice due in {days} days. Mark it paid when the money arrives.',
     'admin.order.payment_reference' => 'Payment reference',
     'admin.order.last_event' => 'Last event',
-    'admin.order.amount_cents' => 'Amount in cents',
+    'admin.order.amount' => 'Amount ({currency})',
     'admin.order.change_payment' => 'Change payment',
     'admin.order.send_payment_link' => 'Send payment link',
     'admin.title.order_new' => 'New order',

@@ -9,6 +9,22 @@ Read before updating a live shop; run `php cli/migrate.php` after the files are 
 settings below that silently change behaviour (http webhooks, cart reminders without consent, the
 nginx PHP fallback when `operations.nginx_config` is set).
 
+- **Round-11 documents, e-mails & refunds (2026-11-01)**
+  - The order confirmation lists subtotal, discount, shipping, payment fee and VAT above the total, so the
+    lines add up. Customised `order_confirmation` overrides keep working; merge the new `{{#each totals}}`
+    block from the default to show the lines.
+  - An invoice of an order already paid (card, gateway) states it is paid instead of "Total to pay" with the
+    IBAN and payment QR. The discount row is named "Discount" with its VAT rate in the VAT column.
+  - Every refund that moves money — partial, RMA, provider-reported or by hand — mails the customer the
+    refunded amount (`refund_issued` now has `{{refund_amount}}`; the full-order total stays in
+    `{{order_total}}`). A refund by hand issues a credit note correcting the order's invoice.
+  - Admin payment and refund amounts are typed in the order currency ("5,90"), no longer in cents.
+  - The e-mail template guard also refuses consumer information hidden by an empty or unrelated `{{#if}}`,
+    CSS rules, entity-encoded styles, tiny fonts, closed `<details>` or attributes;
+    `cli/email-templates.php import` refuses a `--base` that is the installed templates, empty or another
+    release instead of freezing every template as an override.
+  - An order placed in a further store language (e.g. Spanish on the US store) returns to the
+    order-done page, gateway return/cancel pages, pay link and legal links in that language.
 - **Round-11 cash on delivery per parcel (2026-11-01)** — run `php cli/migrate.php` (`shipments.cod_amount`).
   Every parcel of an unpaid cash-on-delivery order shows in the admin what it collects ("COD <total>" on
   exactly one parcel, "prepaid" on the others), also when the carrier API is not connected and the parcel

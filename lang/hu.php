@@ -604,7 +604,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.order.invoice_purchase_hint' => 'Vásárlás számlára: a „Feldolgozás alatt” állapottal elfogadja a rendelést, és {days} napos fizetési határidővel kiállítjuk a számlát. Jelölje fizetettnek, amikor megérkezik az összeg.',
     'admin.order.payment_reference' => 'Fizetési hivatkozás',
     'admin.order.last_event' => 'Utolsó esemény',
-    'admin.order.amount_cents' => 'Összeg centben',
+    'admin.order.amount' => 'Összeg ({currency})',
     'admin.order.change_payment' => 'Fizetés módosítása',
     'admin.order.send_payment_link' => 'Fizetési link küldése',
     'admin.title.order_new' => 'Új rendelés',
