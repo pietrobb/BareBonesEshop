@@ -9,6 +9,20 @@ Read before updating a live shop; run `php cli/migrate.php` after the files are 
 settings below that silently change behaviour (http webhooks, cart reminders without consent, the
 nginx PHP fallback when `operations.nginx_config` is set).
 
+- **Round-11 tests & low findings (2026-11-01)**
+  - A fresh install creates `stores.json` with the sample stores pl/hu/de/us set to `"public": false`: their URL
+    prefix / domain answers 404 and they are left out of the sitemap and hreflang. Admin → Stores and seller
+    publishes a store only once its own seller identity is entered; the default store is always public. Doctor
+    reports a hidden store's sample seller as a warning. Existing `stores.json` files are not changed.
+  - Cart reminders: one e-mail address gets at most one reminder per `cart_reminder.email_window_hours` (default
+    168), however many carts were captured with it.
+  - Customers see carrier names (order e-mails, account, tracking page) instead of internal carrier codes.
+  - Logs mask HTTP Basic credentials, passwords in URLs, Stripe `sk_live_`/`rk_live_` keys, webhook secrets and PEM
+    private keys; nginx (`deploy/nginx.conf`) and `.htaccess` also refuse SQLite `*-journal` files — **copy the
+    nginx rule into your server config**.
+  - New regression tests kill the mutants that survived the suite (stock reservation, adjustStock, refund
+    idempotency, the currency of refund.reported, snapshot fingerprint).
+
 - **Round-11 operations & data (2026-11-01)** — run `php cli/migrate.php` and `php cli/setup.php apply`.
   - Legal texts are overridden per store (`<data>/legal/stores/<store>/<locale>/<page>.html`), no longer per
     language: the US store's English terms no longer change the terms of an EU store that also speaks English.
