@@ -91,11 +91,11 @@ try {
     ConsentService::setDefinitionsForTesting([]);
     Security::setRateDbForTesting(new PDO('sqlite::memory:'));
     $r11rWarehouse = (int)$pdo->query("SELECT id FROM warehouses WHERE store_id = 'default' ORDER BY id LIMIT 1")->fetchColumn();
-    $r11rProduct = $pdo->prepare("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
-        VALUES (:id, 'default', 1, :name, :slug, :sku, 'simple', :price, 'eur', 'active', :stock, 'deny')");
+    $r11rProduct = $pdo->prepare("INSERT INTO products (store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
+        VALUES ('default', 1, :name, :slug, :sku, 'simple', :price, 'eur', 'active', :stock, 'deny')");
     $r11rStock = $pdo->prepare("INSERT INTO warehouse_stock (store_id, warehouse_id, sku, qty, reserved) VALUES ('default', :wh, :sku, :qty, 0)");
-    foreach ([[9791, 'R11R-A', 1000], [9792, 'R11R-B', 500]] as [$r11rId, $r11rSku, $r11rPrice]) {
-        $r11rProduct->execute([':id' => $r11rId, ':name' => $r11rSku . ' item', ':slug' => strtolower($r11rSku), ':sku' => $r11rSku, ':price' => $r11rPrice, ':stock' => 10]);
+    foreach ([['R11R-A', 1000], ['R11R-B', 500]] as [$r11rSku, $r11rPrice]) {
+        $r11rProduct->execute([':name' => $r11rSku . ' item', ':slug' => strtolower($r11rSku), ':sku' => $r11rSku, ':price' => $r11rPrice, ':stock' => 10]);
         $r11rStock->execute([':wh' => $r11rWarehouse, ':sku' => $r11rSku, ':qty' => 10]);
     }
     $r11rLines = static fn(int $orderId): array => array_map(static fn(array $i): string => $i['sku'] . '×' . $i['quantity'], Orders::items($orderId));
