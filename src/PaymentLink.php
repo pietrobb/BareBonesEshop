@@ -8,7 +8,10 @@
 final class PaymentLink {
     /** The e-mailed link works this long, and an online order with a live link is not expired meanwhile (Orders::expirePending). */
     public const LINK_TTL = 7 * 86400;
+    /** A link that was e-mailed: it promises LINK_TTL to pay and holds the order that long. */
     private const PROVIDER = 'pay_link';
+    /** A "Pay" button rendered on a page (status lookup, failed-payment confirmation): it promises nothing, holds nothing. */
+    private const PAGE_PROVIDER = 'pay_link_page';
     /** Longer than any gateway call can take (PHP max_execution_time); a claim this old belongs to a request that died. */
     private const CLAIM_LEASE = 300;
 
@@ -21,10 +24,13 @@ final class PaymentLink {
             && PaymentService::gatewayCanStart($provider);
     }
 
-    /** A new link for the e-mail; the raw token exists only in the returned URL. */
-    public static function issue(array $order): string {
+    /**
+     * A new link; the raw token exists only in the returned URL. Only a $mailed link defers the order's expiry: one
+     * shown on a page is issued on every view, and counting it would let each lookup keep the order alive for another week.
+     */
+    public static function issue(array $order, bool $mailed = false): string {
         $token = bin2hex(random_bytes(24));
-        CheckoutSession::bind((int)$order['id'], hash('sha256', $token), self::PROVIDER);
+        CheckoutSession::bind((int)$order['id'], hash('sha256', $token), $mailed ? self::PROVIDER : self::PAGE_PROVIDER);
         return self::baseUrl() . '/?page=pay&token=' . $token;
     }
 
@@ -32,13 +38,13 @@ final class PaymentLink {
     public static function orderForToken(string $token): ?array {
         if (!preg_match('/^[a-f0-9]{48}$/', $token)) return null;
         $stmt = Db::get()->prepare("SELECT order_id FROM checkout_sessions
-            WHERE provider = :provider AND session_id = :hash AND created_at >= :since LIMIT 1");
-        $stmt->execute([':provider' => self::PROVIDER, ':hash' => hash('sha256', $token), ':since' => gmdate('Y-m-d H:i:s', time() - self::LINK_TTL)]);
+            WHERE provider IN (:provider, :page) AND session_id = :hash AND created_at >= :since LIMIT 1");
+        $stmt->execute([':provider' => self::PROVIDER, ':page' => self::PAGE_PROVIDER, ':hash' => hash('sha256', $token), ':since' => gmdate('Y-m-d H:i:s', time() - self::LINK_TTL)]);
         $orderId = $stmt->fetchColumn();
         return $orderId === false ? null : Orders::byId((int)$orderId);
     }
 
-    /** A payment link issued for the order still works: the order waits for it instead of expiring. */
+    /** A payment link e-mailed for the order still works: the order waits for it instead of expiring. */
     public static function hasLiveLink(int $orderId): bool {
         $stmt = Db::get()->prepare("SELECT 1 FROM checkout_sessions WHERE provider = :provider AND order_id = :order AND created_at >= :since LIMIT 1");
         $stmt->execute([':provider' => self::PROVIDER, ':order' => $orderId, ':since' => gmdate('Y-m-d H:i:s', time() - self::LINK_TTL)]);
@@ -130,7 +136,7 @@ final class PaymentLink {
     public static function send(array $order): array {
         if (!self::payable($order)) return ['status' => 'not_payable'];
         try {
-            $payUrl = self::issue($order);
+            $payUrl = self::issue($order, true);
         } catch (RuntimeException) {
             return ['status' => 'no_app_url']; // the e-mailed link needs the shop's public address (config app_url)
         }

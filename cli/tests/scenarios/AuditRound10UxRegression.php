@@ -75,7 +75,7 @@ try {
         assert_equals((int)$r10uUnpaid['id'], (int)(PaymentLink::orderForToken((string)$r10uQuery['token'])['id'] ?? 0), 'R10 UX3: the token opens its order');
         assert_equals(0, (int)$pdo->query("SELECT COUNT(*) FROM checkout_sessions WHERE session_id = " . $pdo->quote((string)$r10uQuery['token']))->fetchColumn(), 'R10 UX3: only the token hash is stored');
         assert_true(PaymentLink::orderForToken(str_repeat('0', 48)) === null && PaymentLink::orderForToken('../x') === null, 'R10 UX3: an unknown or malformed token opens nothing');
-        $pdo->prepare("UPDATE checkout_sessions SET created_at = ? WHERE provider = 'pay_link' AND order_id = ?")->execute([gmdate('Y-m-d H:i:s', time() - PaymentLink::LINK_TTL - 60), (int)$r10uUnpaid['id']]);
+        $pdo->prepare("UPDATE checkout_sessions SET created_at = ? WHERE provider IN ('pay_link', 'pay_link_page') AND order_id = ?")->execute([gmdate('Y-m-d H:i:s', time() - PaymentLink::LINK_TTL - 60), (int)$r10uUnpaid['id']]);
         assert_true(PaymentLink::orderForToken((string)$r10uQuery['token']) === null, 'R10 UX3: the link lapses after its validity');
         assert_equals('not_payable', PaymentLink::send($r10uOrder('pending', 'paid', $r10uCard))['status'] ?? null, 'R10 UX3: no payment link is e-mailed for a paid order');
 

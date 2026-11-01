@@ -175,13 +175,28 @@ try {
         $r11pAge = gmdate('Y-m-d H:i:s', time() - 3 * 86400);
         $r11pLinked = $r11pOrder('pending', 'r11p-h7@example.test', $r11pAge);
         $r11pUnlinked = $r11pOrder('pending', 'r11p-h7-none@example.test', $r11pAge);
-        PaymentLink::issue($r11pLinked);
+        assert_true(!in_array(PaymentLink::send($r11pLinked)['status'] ?? '', ['not_payable', 'no_app_url'], true), 'R11 H7: the admin e-mails the payment link');
         Orders::expirePending(172800, 100, static fn(array $o): string => 'expired');
         assert_equals(['pending', 'cancelled'], [Orders::byId((int)$r11pLinked['id'])['status'] ?? '', Orders::byId((int)$r11pUnlinked['id'])['status'] ?? ''],
             'R11 H7: an order with a live payment link is not expired; one without a link still is');
         $pdo->prepare("UPDATE checkout_sessions SET created_at = ? WHERE provider = 'pay_link' AND order_id = ?")->execute([gmdate('Y-m-d H:i:s', time() - PaymentLink::LINK_TTL - 60), (int)$r11pLinked['id']]);
         Orders::expirePending(172800, 100, static fn(array $o): string => 'expired');
         assert_equals('cancelled', Orders::byId((int)$r11pLinked['id'])['status'] ?? '', 'R11 H7: after the link lapses the order expires');
+
+        // Only the e-mailed link promises time. A "Pay" button rendered on a page (status lookup, failed-payment
+        // confirmation) promises nothing: looking an order up must not keep it — and its reservation — alive.
+        $r11pLooked = $r11pOrder('pending', 'r11p-h7-lookup@example.test', gmdate('Y-m-d H:i:s', time() - 30 * 86400));
+        $r11pView = orderStatusView($r11pLooked);
+        assert_true(($r11pView['pay_url'] ?? '') !== '', 'R11 H7: the status lookup still offers "Pay"');
+        Orders::expirePending(172800, 100, static fn(array $o): string => 'expired');
+        assert_equals('cancelled', Orders::byId((int)$r11pLooked['id'])['status'] ?? '', 'R11 H7: an old unpaid order is expired even after its status was looked up');
+        $r11pLapsed = $r11pOrder('pending', 'r11p-h7-lapsed@example.test', gmdate('Y-m-d H:i:s', time() - 30 * 86400));
+        PaymentLink::send($r11pLapsed);
+        $pdo->prepare("UPDATE checkout_sessions SET created_at = ? WHERE provider = 'pay_link' AND order_id = ?")->execute([gmdate('Y-m-d H:i:s', time() - PaymentLink::LINK_TTL - 60), (int)$r11pLapsed['id']]);
+        orderStatusView($r11pLapsed);
+        orderStatusView($r11pLapsed);
+        Orders::expirePending(172800, 100, static fn(array $o): string => 'expired');
+        assert_equals('cancelled', Orders::byId((int)$r11pLapsed['id'])['status'] ?? '', 'R11 H7: repeated status lookups do not extend a lapsed e-mailed link');
     } catch (Throwable $e) { $r11pFail('H7', $e); }
 
     // The page after paying a session opened after an earlier failure: the order is still 'failed' until the
