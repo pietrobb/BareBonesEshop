@@ -23,7 +23,7 @@ try {
         Setup::storeTimezoneCheck('x', ['timezone' => 'Europe/Prague'])['status'],
     ], 'R11 H5: doctor fails an unknown zone, warns about a missing one and passes a valid one');
     assert_true(str_contains(Setup::storeTimezoneCheck('x', ['legal' => ['country' => 'CZ']])['message'], 'Europe/Prague'), 'R11 H5: doctor says which zone a store without one runs on');
-    $r11tShipped = json_decode((string)file_get_contents(dirname(TEST_CLI_DIR) . '/stores.json'), true);
+    $r11tShipped = json_decode((string)file_get_contents(dirname(TEST_CLI_DIR) . '/stores.example.json'), true);
     $r11tUnset = [];
     foreach (($r11tShipped['stores'] ?? []) as $r11tId => $r11tCfg) if (StoreContext::configuredTimezone($r11tCfg) === null) $r11tUnset[] = $r11tId;
     assert_equals([], $r11tUnset, 'R11 H5: every shipped store sets a valid timezone');

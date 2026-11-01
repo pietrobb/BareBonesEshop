@@ -899,6 +899,7 @@ class ShippingService
             foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) $rules[(string)$row['code']] = (int)$row['free_from_qty'];
             return $rules;
         } catch (\Throwable $e) {
+            Logger::exception('shipping.free_from_qty_unavailable', $e);
             return [];
         }
     }

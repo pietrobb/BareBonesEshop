@@ -8,7 +8,7 @@ final class UpdatePackageBuilder
     ];
 
     private const EXCLUDED_FILES = [
-        '.env', 'config.php', '.barebones-version.json',
+        '.env', 'config.php', '.barebones-version.json', 'stores.json',
     ];
 
     private const TEXT_FILE = '~(\.(php|phtml|js|mjs|css|html?|json|md|txt|xml|svg|ya?ml|neon|ini|sql|sh)|(^|/)\.htaccess)$~i';

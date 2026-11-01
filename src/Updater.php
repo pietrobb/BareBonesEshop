@@ -3,7 +3,8 @@
 final class Updater
 {
     private const STATE_FILE = 'installed.json';
-    private const PROTECTED_FILES = ['.env', 'config.php', '.barebones-version.json'];
+    // stores.json is the merchant's (since 2.1 git tracks only stores.example.json): no package may write or delete it.
+    private const PROTECTED_FILES = ['.env', 'config.php', '.barebones-version.json', 'stores.json'];
     private const PROTECTED_PREFIXES = [
         '.git/', '.worktrees/', '.claude/', '.playwright-mcp/',
         'cache/', 'db/', 'extensions/', 'jobs/', 'logs/', 'storage/', 'uploads/',

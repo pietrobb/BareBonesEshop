@@ -36,7 +36,8 @@ git clone --recurse-submodules <repository-url> shop && cd shop
 
 # 2. Install: creates config.php from config.example.php with a fresh
 #    admin_identity_key, the private runtime directories next to the checkout
-#    (../bareboneseshop-private: database, jobs, invoices, backups, logs),
+#    (../bareboneseshop-private: database, jobs, invoices, backups, logs,
+#    and stores.json — the shop's own copy of the tracked stores.example.json),
 #    the schema, admin forms and import templates, and the first owner account;
 #    then prints the doctor checklist. Safe to re-run: config.php is never
 #    rewritten and an existing owner account is left unchanged. New orders,
@@ -111,7 +112,7 @@ machine-readable deployment contract is `config/config.schema.json`; fields mark
 
 ```bash
 php cli/setup.php install            # first install (see Quick start); idempotent
-php cli/setup.php apply --json       # idempotently creates private runtime paths
+php cli/setup.php apply --json       # idempotently creates private runtime paths and private_runtime_dir/stores.json
 php cli/setup.php doctor --json      # versioned checklist; does not print secrets
 php cli/setup.php doctor --json --strict
 ```
@@ -554,7 +555,8 @@ production path. Backups, migrations, and CLI tools live under `cli/`.
 ├── product.php · wishlist.php · page.php · sitemap.php · robots.php
 ├── router.php             Deny/rewrite router for `php -S` (development only)
 ├── config.example.php     Template for the untracked config.php (secrets, paths, providers)
-├── stores.json · catalog.json · shipping.json · pricing.json · layouts.json
+├── stores.example.json    Sample stores; the shop's stores.json lives in private_runtime_dir (untracked)
+├── catalog.json · shipping.json · pricing.json · layouts.json
 ├── config/                Config schema, backup, data retention, processors, VAT rates
 ├── src/                   Domain and infrastructure classes (Db, Security, Products, Orders, Rma, …)
 ├── adapters/              Provider interfaces; adapters/contrib/ holds the bundled implementations

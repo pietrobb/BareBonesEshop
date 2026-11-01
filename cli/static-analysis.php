@@ -19,6 +19,7 @@ const ARCHITECTURE_HEADROOM = 0.15;
 $root = dirname(__DIR__);
 $errors = [];
 $phpFiles = [];
+$silentCatchLines = [];
 
 foreach (glob($root . '/*.php') ?: [] as $file) $phpFiles[] = $file;
 foreach (['src', 'adapters', 'cli', 'migrations', 'tests'] as $directory) {
@@ -86,6 +87,42 @@ function architectureMetrics(string $source): array {
     ];
 }
 
+/**
+ * Lines of catch blocks that swallow a generic exception: no rethrow, no log, the exception unused. A comment is
+ * not enough: the failure must reach the log (Logger::exception) or be rethrown.
+ * @return list<int>
+ */
+function silentCatches(string $source): array {
+    $tokens = token_get_all($source);
+    $count = count($tokens);
+    $silent = [];
+    for ($i = 0; $i < $count; $i++) {
+        if (!is_array($tokens[$i]) || $tokens[$i][0] !== T_CATCH) continue;
+        $signature = '';
+        for ($j = $i; $j < $count && $tokens[$j] !== '{'; $j++) $signature .= is_array($tokens[$j]) ? $tokens[$j][1] : $tokens[$j];
+        $depth = 0;
+        $body = '';
+        for (; $j < $count; $j++) {
+            $token = $tokens[$j];
+            $text = is_array($token) ? $token[1] : $token;
+            if ($text === '{' || (is_array($token) && in_array($token[0], [T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES], true))) $depth++;
+            if ($text === '}' && --$depth === 0) break;
+            if (!is_array($token) || !in_array($token[0], [T_COMMENT, T_DOC_COMMENT], true)) $body .= $text;
+        }
+        if (!preg_match('/catch\s*\(\s*\\\\?(Throwable|Exception|Error|RuntimeException|PDOException|LogicException|JsonException|ValueError)\b[^$)]*(\$\w+)?\s*\)\s*$/', $signature, $match)) continue;
+        if (preg_match('/\bthrow\b|Logger::|error_log|->log\(|Log::|IncidentMonitor|Monitoring|fwrite\(STDERR/i', $body)) continue;
+        if (isset($match[2]) && preg_match('/\\' . $match[2] . '\b/', $body)) continue;
+        $silent[] = $tokens[$i][2];
+    }
+    return $silent;
+}
+
+/**
+ * Ratchet for silent catch blocks in application code (src, adapters, root and CLI tools; tests excluded). New code
+ * must log or rethrow; when one is fixed, lower the budget in the same change.
+ */
+const SILENT_CATCH_BUDGET = 85;
+
 foreach ($phpFiles as $file) {
     $source = file_get_contents($file);
     if ($source === false) {
@@ -103,6 +140,16 @@ foreach ($phpFiles as $file) {
             $errors[] = str_replace($root . DIRECTORY_SEPARATOR, '', $file) . ":{$token[2]} uses eval";
         }
     }
+    $relativeFile = str_replace('\\', '/', substr($file, strlen($root) + 1));
+    if (!preg_match('#^(cli/tests/|cli/test[^/]*\.php$|tests/|migrations/)#', $relativeFile)) {
+        foreach (silentCatches($source) as $silentLine) $silentCatchLines[] = "{$relativeFile}:{$silentLine}";
+    }
+}
+if (count($silentCatchLines) > SILENT_CATCH_BUDGET) {
+    $errors[] = count($silentCatchLines) . ' catch blocks swallow an exception without logging or rethrowing it (budget '
+        . SILENT_CATCH_BUDGET . '); log the new one with Logger::exception or rethrow it: ' . implode(', ', $silentCatchLines);
+} elseif (count($silentCatchLines) < SILENT_CATCH_BUDGET) {
+    $errors[] = 'SILENT_CATCH_BUDGET ' . SILENT_CATCH_BUDGET . ' is above the ' . count($silentCatchLines) . ' silent catch blocks left; lower it to ' . count($silentCatchLines);
 }
 
 $entrypointBudgets = [

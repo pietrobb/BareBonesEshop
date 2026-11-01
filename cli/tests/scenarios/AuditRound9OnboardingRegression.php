@@ -49,7 +49,7 @@ assert_equals(['order_confirmation', 'order_confirmation', 'order_paid', 'order_
 ], 'R9 confirmation: a card or free order gets the order confirmation (seller, withdrawal form) with the payment; offline orders got it at checkout');
 
 // --- Doctor recognises the shipped example seller data ----------------------------------------------------------
-$r9oShipped = json_decode((string)file_get_contents(dirname(TEST_CLI_DIR) . '/stores.json'), true)['stores'];
+$r9oShipped = json_decode((string)file_get_contents(dirname(TEST_CLI_DIR) . '/stores.example.json'), true)['stores'];
 foreach ($r9oShipped as $r9oId => $r9oStore) {
     assert_true(Setup::legalIdentityProblems($r9oStore['legal']) !== [], "R9 doctor: the shipped store {$r9oId} is recognised as example data");
 }
@@ -63,7 +63,7 @@ $r9oRoot = dirname(TEST_CLI_DIR);
 $r9oDir = test_fixture_path('r9-onboarding');
 mkdir($r9oDir);
 mkdir($r9oDir . '/sessions');
-copy($r9oRoot . '/stores.json', $r9oDir . '/stores.json');
+copy($r9oRoot . '/stores.example.json', $r9oDir . '/stores.json');
 $r9oDbPath = $r9oDir . '/admin.sqlite';
 $r9oSuiteDb = Db::get();
 $r9oSuiteDriver = Db::driver();

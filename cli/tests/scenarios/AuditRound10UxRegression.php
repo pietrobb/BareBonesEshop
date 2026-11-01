@@ -125,9 +125,9 @@ try {
     try {
         @mkdir($r10uTmp . '/data', 0700, true);
         $r10uStoresFile = $r10uTmp . '/stores.json';
-        copy(dirname(TEST_CLI_DIR) . '/stores.json', $r10uStoresFile);
+        copy(dirname(TEST_CLI_DIR) . '/stores.example.json', $r10uStoresFile);
         DataOverrides::setDirForTesting($r10uTmp . '/data');
-        assert_equals(dirname(TEST_CLI_DIR) . '/stores.json', DataOverrides::storesPath(dirname(TEST_CLI_DIR)), 'R10 UX5: without a saved copy the shipped stores.json is used');
+        assert_equals(dirname(TEST_CLI_DIR) . '/stores.example.json', DataOverrides::storesPath(dirname(TEST_CLI_DIR)), 'R10 UX5: without a saved copy the shipped stores.example.json is used');
         file_put_contents($r10uTmp . '/data/stores.json', '{"default_store":"r10u"}');
         assert_equals($r10uTmp . '/data/stores.json', DataOverrides::storesPath(dirname(TEST_CLI_DIR)), 'R10 UX5: a stores.json saved in the data directory takes precedence over the read-only code');
         unlink($r10uTmp . '/data/stores.json');

@@ -9,7 +9,7 @@
 echo "\n--- Audit round 8 (rest): price lists in the store currency (CZ, HU, PL) ---\n";
 
 $r8cRoot = dirname(__DIR__, 3);
-$r8cSample = json_decode((string)file_get_contents($r8cRoot . '/stores.json'), true);
+$r8cSample = json_decode((string)file_get_contents($r8cRoot . '/stores.example.json'), true);
 $r8cStoresProp = new ReflectionProperty(Bootstrap::class, 'stores');
 $r8cSavedStores = $r8cStoresProp->getValue();
 $r8cPrevious = StoreContext::current();

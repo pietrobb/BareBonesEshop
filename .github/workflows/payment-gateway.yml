@@ -4,7 +4,9 @@ name: Payment gateway (Stripe test mode)
 # opened by a real browser click. Runs nightly and whenever a file on the checkout critical
 # path changes. Needs the repository secret STRIPE_TEST_SECRET_KEY: a test-mode key, either
 # sk_test_... or a restricted rk_test_... (live keys are refused by tests/e2e/prepare.php); without it
-# the spec reports a skip and this job fails, because a critical-path change must not ship unproven.
+# the job fails, because a critical-path change must not ship unproven. Exception: pull requests that
+# GitHub runs without repository secrets (Dependabot, forks) skip it with a notice; the merge to main
+# and the nightly run still prove the gateway path with the key.
 on:
   schedule:
     - cron: '17 2 * * *'
@@ -58,22 +60,42 @@ permissions:
   contents: read
 
 jobs:
+  stripe-test-key:
+    name: Stripe test key available
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.key.outputs.run }}
+    steps:
+      - name: Require the Stripe test key (skip pull requests that get no secrets)
+        id: key
+        env:
+          E2E_STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
+        run: |
+          if [ -n "$E2E_STRIPE_TEST_SECRET_KEY" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && { [ "$PR_AUTHOR" = "dependabot[bot]" ] || [ "$PR_FROM_FORK" = "true" ]; }; then
+            echo "::notice::Stripe test-mode checkout skipped: GitHub gives this pull request (${PR_AUTHOR}) no repository secrets. It runs on main after the merge and nightly."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::error::Repository secret STRIPE_TEST_SECRET_KEY (sk_test_... or rk_test_...) is missing; the real gateway path is unproven."
+          exit 1
+
   stripe-test-checkout:
     name: Stripe test-mode checkout (Chromium, WebKit iPhone, Firefox)
+    needs: stripe-test-key
+    if: needs.stripe-test-key.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     # The Stripe key is passed only to the steps that need it (never to npm/npx installs, whose
     # dependency scripts could read the environment); prepare.php writes it into the runtime config.
 
     steps:
-      - name: Require the Stripe test key
-        env:
-          E2E_STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
-        run: |
-          if [ -z "$E2E_STRIPE_TEST_SECRET_KEY" ]; then
-            echo "::error::Repository secret STRIPE_TEST_SECRET_KEY (sk_test_... or rk_test_...) is missing; the real gateway path is unproven."
-            exit 1
-          fi
 
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0

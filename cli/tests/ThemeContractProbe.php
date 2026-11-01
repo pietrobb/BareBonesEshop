@@ -16,7 +16,7 @@ try {
     $themesDir = (string)($options['themes-dir'] ?? $root . '/themes');
     $blocksDir = (string)($options['blocks-dir'] ?? $root . '/blocks');
     if (!is_dir($themesDir) || !is_dir($blocksDir)) throw new RuntimeException('Theme/block directory does not exist');
-    $storesFile = (string)($options['stores-file'] ?? $root . '/stores.json');
+    $storesFile = (string)($options['stores-file'] ?? DataOverrides::storesPath($root, []));
     $stores = json_decode((string)file_get_contents($storesFile), true, 32, JSON_THROW_ON_ERROR);
     $targets = [];
     if (isset($options['store'])) {

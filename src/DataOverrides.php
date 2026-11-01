@@ -8,6 +8,8 @@ declare(strict_types=1);
  */
 final class DataOverrides
 {
+    public const STORES_EXAMPLE = 'stores.example.json';
+
     private static ?string $testDir = null;
 
     /** Test hook: another data directory (null = config private_runtime_dir). */
@@ -27,21 +29,49 @@ final class DataOverrides
         return $dir !== '' ? $dir : null;
     }
 
-    /** The stores.json in use: the saved copy in the data directory, else the one shipped in $appRoot. */
+    /**
+     * The stores.json in use: the copy in the data directory, else a stores.json in $appRoot (an install from
+     * before 2.1, ignored by git), else the shipped stores.example.json. Git tracks only the example, so neither
+     * an admin save nor a hand edit ever conflicts with `git pull`.
+     */
     public static function storesPath(?string $appRoot = null, ?array $config = null): string
     {
         $dir = self::dir($config);
         if ($dir !== null && is_file($dir . '/stores.json')) return $dir . '/stores.json';
-        return ($appRoot ?? dirname(__DIR__)) . '/stores.json';
+        $root = $appRoot ?? dirname(__DIR__);
+        return is_file($root . '/stores.json') ? $root . '/stores.json' : $root . '/' . self::STORES_EXAMPLE;
     }
 
-    /** Where the admin saves stores.json: the data directory when the shipped file cannot be written. */
+    /** Where the admin saves stores.json: the data directory, else stores.json in the application root; never the example. */
     public static function storesWritePath(): ?string
     {
-        $current = self::storesPath();
-        if (is_file($current) && is_writable($current) && is_writable(dirname($current))) return $current;
         $dir = self::dir();
-        return $dir !== null && self::ensureDir($dir) ? $dir . '/stores.json' : null;
+        if ($dir !== null && self::ensureDir($dir)) return $dir . '/stores.json';
+        $root = dirname(__DIR__) . '/stores.json';
+        return (is_file($root) ? is_writable($root) : is_writable(dirname($root))) ? $root : null;
+    }
+
+    /**
+     * `setup apply`: give the install its own stores.json in the data directory — the stores.json an older install
+     * kept in the application root (moved, so only one copy is ever edited), else a copy of the example.
+     * @return array{path: string, action: string}|null  null without a data directory
+     */
+    public static function seedStores(string $appRoot, array $config): ?array
+    {
+        $dir = self::dir($config);
+        if ($dir === null) return null;
+        $target = $dir . '/stores.json';
+        if (is_file($target)) return ['path' => $target, 'action' => 'unchanged'];
+        $legacy = $appRoot . '/stores.json';
+        $source = is_file($legacy) ? $legacy : $appRoot . '/' . self::STORES_EXAMPLE;
+        if (!is_file($source)) return null; // not an application tree; doctor reports the missing stores
+        $content = @file_get_contents($source);
+        if ($content === false || !is_array(json_decode($content, true))) throw new RuntimeException("Cannot read {$source}");
+        if (!self::ensureDir($dir) || !self::atomicWrite($target, $content)) throw new RuntimeException("Cannot write {$target}");
+        @chmod($target, 0640);
+        if ($source !== $legacy) return ['path' => $target, 'action' => 'created from ' . self::STORES_EXAMPLE];
+        // A read-only code directory (Docker) keeps the old file; the data directory copy takes precedence anyway.
+        return ['path' => $target, 'action' => @unlink($legacy) ? 'moved from the application root' : 'copied from the application root'];
     }
 
     /** A saved legal text of $page in $locale, or null to use the shipped template. */

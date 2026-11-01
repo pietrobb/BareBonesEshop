@@ -105,7 +105,9 @@ class PaymentService {
         try {
             $gateway = Adapters::payment($provider);
         } catch (\Throwable $e) {
-            return true; // an unknown or disabled provider keeps failing at payment start, where it is reported
+            // An unknown or disabled provider stays listed and fails at payment start, where the customer sees it.
+            Logger::exception('payment.gateway_unavailable', $e, ['provider' => $provider]);
+            return true;
         }
         return (Adapters::registry('payment')[$provider]['class'] ?? null) !== get_class($gateway)
             || PaymentReadiness::canTakePayments($provider, Security::config());

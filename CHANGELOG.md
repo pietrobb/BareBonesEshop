@@ -9,6 +9,25 @@ Read before updating a live shop; run `php cli/migrate.php` after the files are 
 settings below that silently change behaviour (http webhooks, cart reminders without consent, the
 nginx PHP fallback when `operations.nginx_config` is set).
 
+- **Round-11 release & CI (2026-11-01)**
+  - **`stores.json` is no longer tracked by git.** The repository ships `stores.example.json`; the shop
+    reads `private_runtime_dir/stores.json` (created by `php cli/setup.php apply`/`install` from the
+    example, or moved there from an older install's `stores.json`), and the admin saves only there. Update
+    packages never write or delete a `stores.json`. Doctor warns while a shop still runs on the example.
+  - **Upgrading a git checkout without a pull conflict** (a `stores.json` edited by hand or saved by the
+    admin would block `git pull`): with writers stopped,
+    1. `cp stores.json <private_runtime_dir>/stores.json` (the running version already prefers that copy),
+    2. `git checkout -- stores.json` (drop the local edits; they are in the copy),
+    3. `git pull`, then `php cli/setup.php apply` and `php cli/setup.php doctor`.
+    Without `private_runtime_dir`, use `cp stores.json stores.json.local` in step 1 and
+    `mv stores.json.local stores.json` after the pull: an untracked `stores.json` in the application root
+    still works and git ignores it.
+  - CI: pull requests without repository secrets (Dependabot, forks) skip the Stripe test-mode checkout
+    with a notice instead of failing; it still runs on `main` after the merge and nightly, and still fails
+    there when the key is missing.
+  - Catch blocks that swallowed an exception now log it (`Logger::exception`) or rethrow; static analysis
+    keeps a ratchet (`SILENT_CATCH_BUDGET`) so new code cannot add silent ones.
+
 - **Round-9 release & CI (2026-10-23)**
   - Stripe webhooks are verified by one implementation, `StripePayment::verifySignature`; the global
     `verifyStripeSignature()` helper is gone (extensions calling it: use the adapter method).

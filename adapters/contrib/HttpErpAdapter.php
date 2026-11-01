@@ -76,6 +76,7 @@ class HttpErpAdapter implements OrderStatusIntegrationAdapter
             $result = $this->call('/v1/health');
             return ($result['status'] ?? '') === 'ok';
         } catch (Throwable $e) {
+            Logger::exception('erp.health_check_failed', $e);
             return false;
         }
     }

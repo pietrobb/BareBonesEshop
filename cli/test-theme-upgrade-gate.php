@@ -91,7 +91,7 @@ $themeUpgradeGateExit = (static function(): int {
             $write($root . '/themes/aeon/theme.json', json_encode(['name' => 'Aeon', 'version' => '1.0.0']));
             $write($root . '/themes/aeon/blocks/storefront/checkout.html', $themeCheckout);
             if ($storeOverride !== null) $write($root . '/blocks/stores/default/storefront/checkout.html', $storeOverride);
-            $stores = json_decode((string)file_get_contents($root . '/stores.json'), true);
+            $stores = json_decode((string)file_get_contents(DataOverrides::storesPath($root, [])), true);
             $stores['stores'][$stores['default_store'] ?? 'default']['theme'] = 'aeon';
             $write($root . '/stores.json', json_encode($stores, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
             $state = $temp . '/state-' . $installCount;

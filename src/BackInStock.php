@@ -47,7 +47,9 @@ class BackInStock {
         if ($sku === '') return;
         try {
             self::$pending[StoreContext::current()->catalogId()][$sku] = true;
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            // Never break the stock movement; the missed notification is logged instead.
+            Logger::exception('back_in_stock.touch_failed', $e, ['sku' => $sku]);
             return;
         }
         if (!self::$shutdownRegistered) {

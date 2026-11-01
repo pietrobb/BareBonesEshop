@@ -137,8 +137,10 @@ final class PaymentLink {
         if (!self::payable($order)) return ['status' => 'not_payable'];
         try {
             $payUrl = self::issue($order, true);
-        } catch (RuntimeException) {
-            return ['status' => 'no_app_url']; // the e-mailed link needs the shop's public address (config app_url)
+        } catch (RuntimeException $e) {
+            // The e-mailed link needs the shop's public address (config app_url); the log keeps any other cause.
+            Logger::exception('payment_link.send_failed', $e, ['order_id' => (int)$order['id']]);
+            return ['status' => 'no_app_url'];
         }
         $locale = (string)($order['locale'] ?? '');
         return MailService::send('order_payment_link', (string)$order['customer_email'], $locale, [

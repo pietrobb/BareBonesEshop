@@ -10,6 +10,7 @@ $root = dirname(__DIR__);
 // install runs before anything reads config.php or the bundled BBF forms library.
 if ($command === 'install') {
     require_once __DIR__ . '/../src/Setup.php';
+    require_once __DIR__ . '/../src/DataOverrides.php';
     $options = cli_long_options($argv, ['admin-username:', 'app-url:', 'admin-email:', 'db-driver:', 'db-host:', 'db-port:', 'db-name:', 'db-user:']);
     $adminUsername = trim((string)($options['admin-username'] ?? ''));
     // The database password, like the admin's, never travels in arguments (visible in the process list and shell history).
@@ -77,7 +78,7 @@ if ($command === 'install') {
             $steps['admin'] = 'exists';
         } elseif ($adminUsername !== '') {
             $log('[4/4] first owner account');
-            $stores = json_decode((string)file_get_contents($root . '/stores.json'), true);
+            $stores = json_decode((string)file_get_contents(DataOverrides::storesPath($root, require $root . '/config.php')), true);
             $admin = $run(['cli/admin-user.php', 'create', '--username=' . $adminUsername, '--role=owner', '--store=' . (string)($stores['default_store'] ?? 'default')], 'admin-user create');
             $steps['admin'] = json_decode($admin, true);
         } else {

@@ -55,7 +55,7 @@ $_SERVER['HTTP_HOST'] = 'shop.example';
 $input = json_decode($extra, true) ?: [];
 if ($phase === 'methods') {
     // Customer-facing method names per locale; a method the merchant renamed keeps the merchant's name.
-    StoreContext::activate(StoreContext::resolve(json_decode((string)file_get_contents($root . '/stores.json'), true), '/', '', 'default'));
+    StoreContext::activate(StoreContext::resolve(json_decode((string)file_get_contents(DataOverrides::storesPath($root)), true), '/', '', 'default'));
     // The card method is offered only once Stripe has its keys (R10 UX2).
     (new ReflectionProperty(Security::class, 'cfg'))->setValue(null, ['stripe_secret_key' => 'sk_test_' . str_repeat('r8t', 8), 'stripe_webhook_secret' => 'whsec_' . str_repeat('r8t', 8)] + Security::config());
     if (!empty($input['rename'])) $db->exec("UPDATE payment_methods SET name = 'Merchant COD' WHERE code = 'cod'");
@@ -107,7 +107,7 @@ $r8tPage = static function(array $get, array $cookie = [], ?string $uri = null) 
 assert_equals([0, ''], [$r8tExit, trim($r8tNoise)], 'R8 texts: migrated fixture');
 
 // 1) ADR body of each store's seller country (stores.json); a store without a known body names none.
-$r8tStores = json_decode((string)file_get_contents($r8tApp . '/stores.json'), true)['stores'];
+$r8tStores = json_decode((string)file_get_contents($r8tApp . '/stores.example.json'), true)['stores'];
 $r8tAdr = [];
 foreach ($r8tStores as $r8tId => $r8tStore) $r8tAdr[$r8tId] = ConsumerNotice::adr((array)($r8tStore['legal'] ?? []))['name'];
 assert_equals(['default' => 'Slovenská obchodná inšpekcia', 'cz' => 'Česká obchodní inspekce', 'pl' => 'Inspekcja Handlowa', 'hu' => 'Budapesti Békéltető Testület', 'de' => 'Universalschlichtungsstelle des Bundes', 'us' => ''],

@@ -98,6 +98,8 @@ try {
     }
     assert_true(str_contains($a111BadEmail, '--admin-email') && !is_file($a111Base . '/config.php'), "R9 install: an invalid --admin-email is refused before config.php is written ({$a111BadEmail})");
     assert_true(is_file($a111Private . '/db/shop.sqlite') && is_dir($a111Private . '/jobs') && is_file($a111Private . '/setup-state.json'), 'A11.1 install creates the private runtime paths of config.example.php outside the web root');
+    assert_true(is_file($a111Private . '/stores.json') && !is_file($a111Shop . '/stores.json') && is_file($a111Shop . '/stores.example.json'),
+        'R11 stores.json: install gives the shop its own stores.json in the private directory, copied from the tracked stores.example.json');
     if ($a111Install['code'] !== 0) {
         // Without a working install, continue with the manual steps so the HTTP probe still runs.
         if (!is_file($a111Shop . '/config.php')) {
@@ -113,20 +115,20 @@ try {
     assert_true(!empty($a111Result['steps']['admin']['recovery_codes']) && !empty($a111Result['steps']['admin']['mfa_required']), 'A11.1 install returns the owner TOTP enrollment once');
     $a111Fails = array_values(array_map(static fn(array $c): string => $c['name'], array_filter($a111Result['doctor']['checks'] ?? [], static fn(array $c): bool => $c['status'] === 'fail')));
     // R9: the shipped stores.json is example data (Woodle, example.* e-mails, invalid IBANs): doctor is not ready until it is replaced.
-    $a111StoreIds = array_keys(json_decode((string)file_get_contents($a111Shop . '/stores.json'), true)['stores'] ?? []);
+    $a111StoreIds = array_keys(json_decode((string)file_get_contents($a111Private . '/stores.json'), true)['stores'] ?? []);
     // R9: and the sample card method charges through Stripe, which has no keys yet, so checkout could not take it.
     assert_equals(array_merge(array_map(static fn(string $id): string => 'stores.legal.' . $id, $a111StoreIds), ['payment.provider.stripe']), $a111Fails,
         'A11.1 doctor after install fails only on the example seller data of every store and the keyless Stripe card method');
     assert_true(($a111Result['doctor']['status'] ?? '') !== 'ready', 'R9 doctor: a shop invoicing as Woodle s.r.o. is not ready');
     assert_equals('pass', array_column($a111Result['doctor']['checks'] ?? [], 'status', 'name')['config.admin_email'] ?? null, 'R9 doctor: admin_email set by install passes');
-    $a111Stores = json_decode((string)file_get_contents($a111Shop . '/stores.json'), true);
+    $a111Stores = json_decode((string)file_get_contents($a111Private . '/stores.json'), true);
     $a111Ibans = ['default' => 'SK31 1200 0000 1987 4263 7541', 'cz' => 'CZ65 0800 0000 1920 0014 5399', 'pl' => 'PL61 1090 1014 0000 0712 1981 2874',
         'hu' => 'HU42 1177 3016 1111 1018 0000 0000', 'de' => 'DE89 3704 0044 0532 0130 00', 'us' => ''];
     foreach ($a111Stores['stores'] as $a111Id => &$a111Store) {
         $a111Store['legal'] = array_replace($a111Store['legal'], ['name' => "A111 Trading {$a111Id}", 'email' => "orders-{$a111Id}@a111-shop.test", 'iban' => $a111Ibans[$a111Id] ?? '']);
     }
     unset($a111Store);
-    file_put_contents($a111Shop . '/stores.json', json_encode($a111Stores, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    file_put_contents($a111Private . '/stores.json', json_encode($a111Stores, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     $a111Db = new PDO('sqlite:' . $a111Private . '/db/shop.sqlite');
     $a111Db->exec("UPDATE payment_methods SET active = 0 WHERE provider = 'stripe'");
     $a111Db = null;
@@ -176,7 +178,7 @@ try {
         for ($i = 0; $i < 100 && $a111Get('/healthz')['status'] === 0; $i++) usleep(100000);
         foreach ([
             '/config/backup.json', '/config/config.schema.json', '/CONFIG/backup.json', '/%63onfig/backup.json', '//config/backup.json',
-            '/config.php', '/config.example.php', '/stores.json', '/router.php', '/cli/setup.php', '/src/Db.php', '/migrations/',
+            '/config.php', '/config.example.php', '/stores.json', '/stores.example.json', '/router.php', '/cli/setup.php', '/src/Db.php', '/migrations/',
             '/releases/update-public.key', '/deploy/nginx.conf', '/vendor/bbf/bbf_render.php', '/vendor/bbf/',
             '/.htaccess', '/.env.example', '/.gitmodules', '/README.md', '/assets/', '/jobs/pending/.gitkeep', '/storage/.gitkeep',
             '/vendor/bbf/submit.php?form=admin-product', '/vendor/bbf/submit.php?form=demo-file', '/vendor/bbf/submit.php?form=kontakt',

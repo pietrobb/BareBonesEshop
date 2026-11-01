@@ -561,7 +561,7 @@ $uqDb = null;
 echo "\n--- Test: Bootstrap shared helpers (P5) ---\n";
 
 // stores() returns the decoded stores.json, byte-for-byte parity with a direct decode
-$bsStoresDirect = json_decode((string)file_get_contents(TEST_CLI_DIR . '/../stores.json'), true) ?: [];
+$bsStoresDirect = json_decode((string)file_get_contents(DataOverrides::storesPath()), true) ?: [];
 assert_equals($bsStoresDirect, Bootstrap::stores(), 'Bootstrap: stores() equals direct stores.json decode');
 assert_true(Bootstrap::stores() === Bootstrap::stores(), 'Bootstrap: stores() returns stable cached value across calls');
 

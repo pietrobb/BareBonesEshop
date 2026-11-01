@@ -303,6 +303,7 @@ class Customers {
             $db->commit();
         } catch (Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();
+            Logger::exception('customer.password_reset_token_failed', $e, ['customer_id' => $cid]);
             return null;
         }
         return $token;
@@ -485,6 +486,7 @@ class Customers {
             $db->commit();
         } catch (\Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();
+            Logger::exception('customer.password_reset_failed', $e, ['customer_id' => $cid ?? null]);
             return [false, 'internal_error'];
         }
         return [true, null];
