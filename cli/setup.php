@@ -10,6 +10,7 @@ $root = dirname(__DIR__);
 // install runs before anything reads config.php or the bundled BBF forms library.
 if ($command === 'install') {
     require_once __DIR__ . '/../src/Setup.php';
+    require_once __DIR__ . '/../src/DataOverrides.php';
     $options = cli_long_options($argv, ['admin-username:', 'app-url:', 'admin-email:', 'db-driver:', 'db-host:', 'db-port:', 'db-name:', 'db-user:']);
     $adminUsername = trim((string)($options['admin-username'] ?? ''));
     // The database password, like the admin's, never travels in arguments (visible in the process list and shell history).

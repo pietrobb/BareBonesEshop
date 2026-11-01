@@ -64,6 +64,7 @@ final class DataOverrides
         if (is_file($target)) return ['path' => $target, 'action' => 'unchanged'];
         $legacy = $appRoot . '/stores.json';
         $source = is_file($legacy) ? $legacy : $appRoot . '/' . self::STORES_EXAMPLE;
+        if (!is_file($source)) return null; // not an application tree; doctor reports the missing stores
         $content = @file_get_contents($source);
         if ($content === false || !is_array(json_decode($content, true))) throw new RuntimeException("Cannot read {$source}");
         if (!self::ensureDir($dir) || !self::atomicWrite($target, $content)) throw new RuntimeException("Cannot write {$target}");

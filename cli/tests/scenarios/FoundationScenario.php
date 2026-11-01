@@ -61,7 +61,7 @@ assert_true(str_contains($htaccess, 'RewriteRule (?:^|/)\. - [F,L,NC]'), '.htacc
 assert_true(preg_match('/^RewriteRule[^\r\n]*sqlite3\?[^\r\n]*\|log\|lock[^\r\n]*\s-\s+\[F,L,NC\]$/mi', $htaccess) === 1, '.htaccess: database, journal, log, lock, and backup extensions are denied');
 foreach ([
     'config.php' => 'config(?:\.example)?\.php',
-    'stores.json' => 'stores\.json',
+    'stores.json' => 'stores(?:\.example)?\.json',
     'catalog.json' => 'catalog\.json',
     'shipping.json' => 'shipping\.json',
     'tax.json' => 'tax\.json',
