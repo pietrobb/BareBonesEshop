@@ -231,10 +231,12 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 78, 'functions' => 3, 'max_function_lines' => 50, 'coupling' => 5],
     // R10 UX5: owner-only store add/remove and legal-text editor, saved to the private data directory when the code is read-only.
     'src/Entrypoints/Admin/StoreManagement.php' => ['lines' => 82, 'functions' => 4, 'max_function_lines' => 37, 'coupling' => 7],
-    // +3 lines R11 H9: the parcel row shows its carrier label (ShipmentLabels.php) and the ship form keeps the label's tracking number.
-    'src/Entrypoints/Admin/Shipments.php' => ['lines' => 280, 'functions' => 11, 'max_function_lines' => 105, 'coupling' => 10],
-    // R11 H9: carrier label per parcel (create, COD amount from the order, carriers whose API is not connected).
-    'src/Entrypoints/Admin/ShipmentLabels.php' => ['lines' => 70, 'functions' => 3, 'max_function_lines' => 28, 'coupling' => 5],
+    // +3 lines R11 H9: the parcel row shows its carrier label (ShipmentLabels.php) and the ship form keeps the label's tracking number;
+    // +1 the parcel row shows the cash on delivery it collects.
+    'src/Entrypoints/Admin/Shipments.php' => ['lines' => 281, 'functions' => 11, 'max_function_lines' => 106, 'coupling' => 10],
+    // R11 H9: carrier label per parcel (create, COD amount from the order, carriers whose API is not connected) and the
+    // cash on delivery of every parcel, shown also when no carrier API is connected.
+    'src/Entrypoints/Admin/ShipmentLabels.php' => ['lines' => 76, 'functions' => 4, 'max_function_lines' => 28, 'coupling' => 5],
     // A15.3: store switcher and per-request store activation, limited to the admin's granted stores (AdminStoreScope).
     'src/Entrypoints/Admin/StoreScope.php' => ['lines' => 70, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 5],
     'src/Entrypoints/Admin/Suppliers.php' => ['lines' => 175, 'functions' => 8, 'max_function_lines' => 75, 'coupling' => 5],

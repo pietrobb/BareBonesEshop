@@ -9,6 +9,11 @@ Read before updating a live shop; run `php cli/migrate.php` after the files are 
 settings below that silently change behaviour (http webhooks, cart reminders without consent, the
 nginx PHP fallback when `operations.nginx_config` is set).
 
+- **Round-11 cash on delivery per parcel (2026-11-01)** — run `php cli/migrate.php` (`shipments.cod_amount`).
+  Every parcel of an unpaid cash-on-delivery order shows in the admin what it collects ("COD <total>" on
+  exactly one parcel, "prepaid" on the others), also when the carrier API is not connected and the parcel
+  is booked in the carrier's portal. Shipping a parcel by hand or labelling it records that amount, so the
+  total is never offered on a second parcel.
 - **Round-11 release & CI (2026-11-01)**
   - **`stores.json` is no longer tracked by git.** The repository ships `stores.example.json`; the shop
     reads `private_runtime_dir/stores.json` (created by `php cli/setup.php apply`/`install` from the

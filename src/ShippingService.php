@@ -205,7 +205,7 @@ class ShippingService
         }
         $snapshot = json_decode((string)($order['shipping_rate_snapshot'] ?? ''), true);
         $order['pickup_point_id'] = (string)($snapshot['pickup_point']['id'] ?? '');
-        $order['cod_amount'] = self::labelCodAmount($order);
+        $order['cod_amount'] = $shipmentId !== null ? (self::parcelCodAmount($order, $shipmentId) ?? 0) : self::labelCodAmount($order);
         // A carrier that cannot collect would deliver it as prepaid (in-store pickup is paid at the counter).
         if ($order['cod_amount'] > 0 && $adapter instanceof ShippingLifecycleAdapter && !$adapter->supportsCOD()) {
             throw new \RuntimeException("Shipping carrier does not support cash on delivery: {$carrierId}");
@@ -235,9 +235,11 @@ class ShippingService
             WHERE id = :id AND store_id = :store
         ")->execute([':awb' => $result['awb'], ':carrier' => $carrierId, ':id' => $orderId, ':store' => $store]);
         if ($shipmentId !== null) {
-            $db->prepare("UPDATE shipments SET carrier = :carrier, tracking_number = :awb, updated_at = " . Db::now() . "
+            $recordCod = Db::hasColumn('shipments', 'cod_amount') ? ', cod_amount = COALESCE(cod_amount, :cod)' : '';
+            $db->prepare("UPDATE shipments SET carrier = :carrier, tracking_number = :awb{$recordCod}, updated_at = " . Db::now() . "
                 WHERE id = :id AND order_id = :order AND store_id = :store")
-                ->execute([':carrier' => $carrierId, ':awb' => $result['awb'], ':id' => $shipmentId, ':order' => $orderId, ':store' => $store]);
+                ->execute([':carrier' => $carrierId, ':awb' => $result['awb'], ':id' => $shipmentId, ':order' => $orderId, ':store' => $store]
+                    + ($recordCod !== '' ? [':cod' => $order['cod_amount']] : []));
         }
 
         return $result + ['cod_amount' => $order['cod_amount']];
@@ -256,7 +258,45 @@ class ShippingService
             $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
             if ((int)$stmt->fetchColumn() > 0) return 0;
         }
+        if (Db::hasColumn('shipments', 'cod_amount')) {
+            $stmt = Db::get()->prepare("SELECT COUNT(*) FROM shipments WHERE order_id = :order AND store_id = :store AND status <> 'cancelled' AND cod_amount > 0");
+            $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
+            if ((int)$stmt->fetchColumn() > 0) return 0;
+        }
         return (int)$order['total'];
+    }
+
+    /**
+     * Cash on delivery one parcel (shipment) of the order collects, with or without a carrier API. The amount recorded
+     * on the parcel when it was shipped or labelled wins. Otherwise the whole total of an unpaid cash-on-delivery order
+     * travels on the first active parcel while no other parcel or label collects it; every other parcel is prepaid (0).
+     * null = cash on delivery does not concern the parcel (prepaid order, cancelled or unknown parcel).
+     */
+    public static function parcelCodAmount(array $order, int $shipmentId): ?int
+    {
+        $db = Db::get();
+        $store = StoreContext::current()->id();
+        $recorded = Db::hasColumn('shipments', 'cod_amount') ? 'cod_amount' : 'NULL AS cod_amount';
+        $stmt = $db->prepare("SELECT id, {$recorded} FROM shipments WHERE order_id = :order AND store_id = :store AND status <> 'cancelled' ORDER BY id");
+        $stmt->execute([':order' => (int)$order['id'], ':store' => $store]);
+        $parcels = array_column($stmt->fetchAll(\PDO::FETCH_ASSOC), 'cod_amount', 'id');
+        if (!array_key_exists($shipmentId, $parcels)) return null;
+        if ($parcels[$shipmentId] !== null) return (int)$parcels[$shipmentId];
+        if (!OrderWorkflow::isUnpaidCashOnDelivery($order)) return null;
+        foreach ($parcels as $id => $cod) {
+            if ($id !== $shipmentId && (int)$cod > 0) return 0;
+        }
+        if (Db::hasColumn('shipping_labels', 'cod_amount')) {
+            $labels = $db->prepare("SELECT shipment_id, cod_amount FROM shipping_labels WHERE order_id = :order AND store_id = :store AND status != 'cancelled' AND cod_amount > 0");
+            $labels->execute([':order' => (int)$order['id'], ':store' => $store]);
+            foreach ($labels->fetchAll(\PDO::FETCH_ASSOC) as $label) {
+                return (int)($label['shipment_id'] ?? 0) === $shipmentId ? (int)$label['cod_amount'] : 0;
+            }
+        }
+        foreach ($parcels as $id => $cod) {
+            if ($cod === null) return $id === $shipmentId ? (int)$order['total'] : 0;
+        }
+        return 0;
     }
 
     /**
