@@ -1346,6 +1346,7 @@ function apiWebhookPulledNotification(string $provider): ?array {
         if (!isset(Adapters::registry('payment')[$provider])) return null;
         $gateway = Adapters::payment($provider);
     } catch (\Throwable $e) {
+        Logger::exception('payment.webhook_gateway_unavailable', $e, ['provider' => $provider]);
         return null;
     }
     if (!$gateway instanceof PullVerifiedNotificationAdapter) return null;

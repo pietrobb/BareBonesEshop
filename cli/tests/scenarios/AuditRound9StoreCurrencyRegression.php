@@ -10,7 +10,7 @@ echo "\n--- Audit R9: a price list in the store currency sells the shared catalo
 require_once TEST_CLI_DIR . '/../src/Http/ApiHandlers.php';
 
 $r9cRoot = dirname(__DIR__, 3);
-$r9cSample = json_decode((string)file_get_contents($r9cRoot . '/stores.json'), true);
+$r9cSample = json_decode((string)file_get_contents($r9cRoot . '/stores.example.json'), true);
 $r9cStoresProp = new ReflectionProperty(Bootstrap::class, 'stores');
 $r9cSavedStores = $r9cStoresProp->getValue();
 $r9cPrevious = StoreContext::current();

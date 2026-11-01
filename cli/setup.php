@@ -77,7 +77,7 @@ if ($command === 'install') {
             $steps['admin'] = 'exists';
         } elseif ($adminUsername !== '') {
             $log('[4/4] first owner account');
-            $stores = json_decode((string)file_get_contents($root . '/stores.json'), true);
+            $stores = json_decode((string)file_get_contents(DataOverrides::storesPath($root, require $root . '/config.php')), true);
             $admin = $run(['cli/admin-user.php', 'create', '--username=' . $adminUsername, '--role=owner', '--store=' . (string)($stores['default_store'] ?? 'default')], 'admin-user create');
             $steps['admin'] = json_decode($admin, true);
         } else {

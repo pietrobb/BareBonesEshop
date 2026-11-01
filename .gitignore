@@ -76,5 +76,8 @@ tests/e2e/.state.json.totp-step
 
 # Local config with secrets (copy config.example.php -> config.php)
 config.php
+# The merchant's stores (setup apply writes it into private_runtime_dir); git tracks only stores.example.json
+/stores.json
+/stores.json.*
 parity-report/
 tests/parity/parity.config.json

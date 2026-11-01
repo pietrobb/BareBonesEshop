@@ -206,6 +206,9 @@ class Setup
         $defaultStore = is_array($stores) ? (string)($stores['default_store'] ?? '') : '';
         $storeOk = is_array($stores) && isset($stores['stores'][$defaultStore]);
         $add($storeOk ? 'pass' : 'fail', 'stores.default', $storeOk ? "Default store: {$defaultStore}" : 'stores.json has no valid default store', 'Define default_store and its store record.');
+        $onExample = basename($storesPath) === DataOverrides::STORES_EXAMPLE;
+        $add($onExample ? 'warn' : 'pass', 'stores.file', $onExample ? 'The shop runs on the shipped stores.example.json.' : "Stores file: {$storesPath}",
+            $onExample ? 'Run php cli/setup.php apply: it copies the example into private_runtime_dir/stores.json, the file the admin edits (git tracks only the example).' : '');
         // Invoice / credit-note series that would issue the same numbers are refused at issue time: report them now.
         $numbering = is_array($stores) ? InvoiceService::numberingConflicts($stores) : [];
         $add($numbering === [] ? 'pass' : 'fail', 'stores.invoice_numbering', $numbering === []
@@ -390,6 +393,8 @@ class Setup
             $dir = (string)($config[$name] ?? $default);
             if (!is_dir($dir) && !@mkdir($dir, $mode, true) && !is_dir($dir)) throw new RuntimeException("Cannot create runtime path: {$name}");
         }
+        $stores = DataOverrides::seedStores($root, $config);
+        if ($stores !== null) $changes[] = ['path' => 'stores.json', 'action' => $stores['action'], 'file' => $stores['path']];
         $stateDir = (string)($config['private_runtime_dir'] ?? '');
         $statePath = rtrim($stateDir, '/\\') . '/setup-state.json';
         $existingState = is_file($statePath) ? json_decode((string)file_get_contents($statePath), true) : null;

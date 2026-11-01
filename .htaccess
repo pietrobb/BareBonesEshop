@@ -21,7 +21,7 @@ RewriteRule ^import/(?!test-products\.csv$) - [F,L,NC]
 # Keep ACME validation and security.txt available, deny all other dotfiles.
 RewriteRule ^\.well-known/(?:acme-challenge/[A-Za-z0-9_-]+|security\.txt)$ - [L,NC]
 RewriteRule (?:^|/)\. - [F,L,NC]
-RewriteRule ^(?:config(?:\.example)?\.php|router\.php|stores\.json|catalog\.json|shipping\.json|tax\.json|pricing\.json|layouts\.json|admin-roles\.json|models\.yaml|composer\.(?:json|lock)|package(?:-lock)?\.json)$ - [F,L,NC]
+RewriteRule ^(?:config(?:\.example)?\.php|router\.php|stores(?:\.example)?\.json|catalog\.json|shipping\.json|tax\.json|pricing\.json|layouts\.json|admin-roles\.json|models\.yaml|composer\.(?:json|lock)|package(?:-lock)?\.json)$ - [F,L,NC]
 RewriteRule \.(?:(?:sqlite3?|db)(?:-(?:wal|shm))?|wal|shm|sql|dump|bak|backup|log|lock|tmp|ini|ya?ml|pem|key|md|neon(?:\.dist)?)$ - [F,L,NC]
 
 # Uploaded content must never be dispatched through a PHP handler.

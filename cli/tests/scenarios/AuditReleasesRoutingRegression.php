@@ -70,7 +70,7 @@ assert_true(preg_match('/^RewriteRule \^\(\?:[^\n]*\|cache\|[^\n]*\s-\s+\[F,L,NC
 assert_equals(0, preg_match('/^RewriteRule \^(?:de|en|cs|pl|hu)\//m', $a094Htaccess), 'A09.4 .htaccess: no hardcoded per-store prefix rules (the fallback serves every configured prefix)');
 
 // Every configured store prefix is served through the real .htaccess fallback (redirect.php?path=/...).
-$a094Stores = json_decode((string)file_get_contents($a094Root . '/stores.json'), true)['stores'] ?? [];
+$a094Stores = json_decode((string)file_get_contents($a094Root . '/stores.example.json'), true)['stores'] ?? [];
 $pdo->exec("INSERT INTO products (id, category_id, name, slug, sku, product_type, price, currency, status, stock) VALUES (9402, 1, 'Prefix Route', 'prefix-route', 'A094-PR', 'simple', 1200, 'eur', 'active', 5)");
 $a094Router = test_fixture_path('prefix-router') . '.php';
 file_put_contents($a094Router, '<?php

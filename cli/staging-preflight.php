@@ -174,7 +174,7 @@ function runStagingPreflight(array $argvLocal = []): array {
     $add($mailAdapter === 'log' ? 'warn' : 'ok', 'mail_adapter', "Mail provider: {$mailAdapter}", $mailAdapter === 'log' ? 'For staging email delivery tests, configure smtp or ses; log is safe but does not send.' : '');
 
     foreach (['stores.json', 'config/processors.json', 'config/data-retention.json', 'config/backup.json'] as $jsonFile) {
-        [$ok, $data] = preflightFileJson($root . '/' . $jsonFile);
+        [$ok, $data] = preflightFileJson($jsonFile === 'stores.json' ? DataOverrides::storesPath($root, $cfg) : $root . '/' . $jsonFile);
         $add($ok ? 'ok' : 'fail', $jsonFile, $ok ? "{$jsonFile} is valid JSON." : "{$jsonFile} missing or invalid JSON.");
         if ($jsonFile === 'stores.json' && $ok) {
             $encoded = strtolower(json_encode($data));

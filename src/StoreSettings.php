@@ -20,15 +20,15 @@ final class StoreSettings {
         return self::$path ?? DataOverrides::storesPath();
     }
 
-    /** Saved in place, or (read-only code, e.g. Docker) into the private data directory. */
+    /** Saved into the private data directory (or a stores.json in the application root); never into the example. */
     public static function writable(): bool {
-        $path = self::path();
-        if (is_file($path) && is_writable($path) && is_writable(dirname($path))) return true;
-        $dir = self::$path === null ? DataOverrides::dir() : null;
-        return $dir !== null && (is_dir($dir) ? is_writable($dir) : is_writable(dirname($dir)));
+        if (self::$path !== null) return is_file(self::$path) && is_writable(self::$path) && is_writable(dirname(self::$path));
+        $dir = DataOverrides::dir();
+        if ($dir !== null) return is_dir($dir) ? is_writable($dir) : is_writable(dirname($dir));
+        return DataOverrides::storesWritePath() !== null;
     }
 
-    /** The file a save writes: stores.json itself, or its copy in the data directory. */
+    /** The file a save writes: the data directory copy, or stores.json in the application root. */
     private static function target(): ?string {
         return self::$path ?? DataOverrides::storesWritePath();
     }

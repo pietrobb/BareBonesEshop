@@ -69,6 +69,10 @@ final class ThemeUpgradeGate
                 $this->copyFile($item->getPathname(), $candidate, $relative);
             }
         }
+        // The stores the shop runs on (data directory copy or a root stores.json), not the package's example.
+        // The data directory is known only for the running installation (cli/update.php); another tree uses its own file.
+        $stores = DataOverrides::storesPath($root, realpath(dirname(__DIR__)) === $root ? null : []);
+        if (basename($stores) === 'stores.json') $this->copyFile($stores, $candidate, 'stores.json');
     }
 
     private function inCandidateScope(string $relative, bool $isDirectory): bool

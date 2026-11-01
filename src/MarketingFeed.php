@@ -143,7 +143,8 @@ class MarketingFeed {
         // Stored timestamps are UTC (Db::now), whatever PHP's display timezone is.
         try {
             return $date === '' ? '' : (new DateTimeImmutable($date, new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('UTC'))->format('c');
-        } catch (Exception) {
+        } catch (Exception $e) {
+            Logger::warning('marketing_feed.invalid_date', ['date' => mb_substr($date, 0, 40), 'exception' => get_debug_type($e)]);
             return '';
         }
     }
