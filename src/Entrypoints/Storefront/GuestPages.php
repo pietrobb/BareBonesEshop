@@ -15,29 +15,33 @@ function checkoutAccountView(int $customerId, bool $digital, bool $noSavedAddres
     ];
 }
 
-/** Confirmation page of a guest order: the "create an account" form, or null when not offered. */
-function guestAccountOfferView(array $order, string $error): ?array {
+/**
+ * Confirmation page of a guest order: the "create an account" offer, or null when not offered. It takes no password:
+ * the account is created from the link e-mailed to the order's address. $outcome is the result of a posted request.
+ */
+function guestAccountOfferView(array $order, array $outcome): ?array {
     if (!GuestCheckoutAccount::offered($order)) return null;
     $t = static fn(string $key): string => I18n::t($key);
+    $email = (string)$order['customer_email'];
     return [
-        'heading' => $t('order_done.account_heading'), 'hint' => str_replace('{email}', (string)$order['customer_email'], $t('order_done.account_hint')),
-        'password_label' => $t('account.password'), 'submit_label' => $t('order_done.account_submit'), 'csrf_token' => Security::csrfToken(),
-        'error' => $error, 'min_length' => Customers::MIN_PASSWORD_LEN,
+        'heading' => $t('order_done.account_heading'), 'hint' => str_replace('{email}', $email, $t('order_done.account_hint')),
+        'submit_label' => $t('order_done.account_send'), 'csrf_token' => Security::csrfToken(),
+        'sent' => !empty($outcome['sent']) ? str_replace('{email}', $email, $t('order_done.account_sent')) : '',
+        'error' => (string)($outcome['error'] ?? ''),
     ];
 }
 
-/**
- * "Create an account" posted on the confirmation page of a guest order (verified for this browser by the caller).
- * Redirects into the new account on success, otherwise returns the reason to show.
- */
-function createGuestAccount(array $order): string {
+/** "Create an account" posted on the confirmation page of a guest order: e-mails the order's address the link. */
+function requestGuestAccount(array $order): array {
     $t = static fn(string $key): string => I18n::t($key);
-    if (!Security::csrfValidate()) return $t('checkout_csrf_error');
-    if (!Security::rateLimit('account_register_' . md5(Security::clientIp()), 4)) return $t('account.rate_limited');
-    $result = GuestCheckoutAccount::create($order, Security::str($_POST['password'] ?? ''), I18n::locale());
-    if (!$result['ok']) return $t('account.err_' . $result['error']) ?: (string)$result['error'];
-    header('Location: ' . Template::storeUrl('/account.php?p=order&id=' . (int)$order['id']));
-    exit;
+    if (!Security::csrfValidate()) return ['error' => $t('checkout_csrf_error')];
+    if (!Security::rateLimit('account_offer_ip_' . md5(Security::clientIp()), 10)) return ['error' => $t('account.rate_limited')];
+    return match (GuestCheckoutAccount::sendLink($order, I18n::locale())) {
+        'sent' => ['sent' => true],
+        'throttled' => ['error' => $t('account.rate_limited')],
+        'not_offered' => ['error' => $t('account.err_email_taken')],
+        default => ['error' => $t('order_done.account_failed')],
+    };
 }
 
 function renderOrderStatus(): string {

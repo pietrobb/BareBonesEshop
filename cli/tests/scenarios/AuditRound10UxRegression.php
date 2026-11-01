@@ -83,6 +83,7 @@ try {
         $r10uGateway = new class implements PaymentAdapter {
             public int $calls = 0;
             public bool $down = true;
+            public string $status = 'pending';
             public function createSession(array $order): array {
                 $this->calls++;
                 if ($this->down) throw new RuntimeException('gateway outage');
@@ -90,7 +91,7 @@ try {
             }
             public function handleWebhook(array $payload): array { return []; }
             public function refund(string $paymentId, int $amount): array { return []; }
-            public function getStatus(string $paymentId): string { return 'pending'; }
+            public function getStatus(string $paymentId): string { return $this->status; }
         };
         $r10uInstances->setValue(null, array_diff_key($r10uInstances->getValue(), ['payment' => true])); // the legacy slot would win over the substitute
         Adapters::set('payment.stripe', $r10uGateway);
@@ -105,6 +106,7 @@ try {
         $r10uCallsBefore = $r10uGateway->calls;
         assert_true(PaymentLink::start($r10uRetry) === 'https://pay.test/r10u-2' && $r10uGateway->calls === $r10uCallsBefore, 'R10 UX3 pay again: the live session opened after the failure is reused, no second one is opened');
         PaymentService::recordEvent((int)$r10uRetry['id'], 'payment_failed', 'failed', 1000, 'eur', 'r10u-fail-' . $r10uRetry['id']);
+        $r10uGateway->status = 'failed'; // R11 H2: a new session opens only once the gateway reports the previous one unpayable
         $pdo->prepare("INSERT INTO checkout_sessions (order_id, provider, session_id, status) VALUES (?, 'pay_restart', ?, 'completed')")->execute([(int)$r10uRetry['id'], $r10uRetry['id'] . ':1']);
         assert_true(PaymentLink::start($r10uRetry) === null && $r10uGateway->calls === $r10uCallsBefore, 'R10 UX3 pay again: a concurrent attempt (double submit) opens no second session');
         $pdo->prepare("UPDATE checkout_sessions SET created_at = ? WHERE provider = 'pay_restart' AND session_id = ?")->execute([gmdate('Y-m-d H:i:s', time() - 3600), $r10uRetry['id'] . ':1']);

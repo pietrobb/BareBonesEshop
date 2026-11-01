@@ -12,6 +12,7 @@ require_once __DIR__ . '/Storefront/WithdrawalPages.php';
 require_once __DIR__ . '/Storefront/ComplaintPages.php';
 require_once __DIR__ . '/Storefront/PaymentLinkPages.php';
 require_once __DIR__ . '/Storefront/GuestPages.php';
+require_once __DIR__ . '/Storefront/AccountClaimPages.php';
 Security::headers();
 Security::sessionStart();
 Bootstrap::validateCustomerSession();
@@ -138,6 +139,11 @@ switch ($page) {
     case 'pay':
         $title = Template::pageTitle($t('pay_link.title'));
         $content = renderPayOrder();
+        break;
+
+    case 'account-claim':
+        $title = Template::pageTitle($t('order_done.account_heading'));
+        $content = renderAccountClaim();
         break;
 
     case 'withdrawal':

@@ -1,0 +1,1 @@
+Załóż konto do zamówienia {{order_number}}

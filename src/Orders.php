@@ -13,6 +13,11 @@ class Orders {
     private const PROVIDER_FINAL_UNPAID = ['expired', 'cancelled', 'canceled', 'failed', 'timeouted', 'rejected', 'error',
         'preauth_expired', 'preauth_cancelled'];
 
+    /** A gateway getStatus() value after which the payment can no longer be paid. */
+    public static function providerFinalUnpaid(string $status): bool {
+        return in_array(strtolower(trim($status)), self::PROVIDER_FINAL_UNPAID, true);
+    }
+
     /**
      * Create order from cart with atomic stock reservation.
      * Returns order ID on success, throws on failure.
@@ -730,6 +735,8 @@ class Orders {
                 }
                 $created = strtotime((string)$order['created_at'] . ' UTC');
                 if ($created === false || $created > time() - $ttl) continue;
+                // The customer was sent a link that promises time to pay; the order waits for it.
+                if ($online && PaymentLink::hasLiveLink((int)$order['id'])) continue;
                 if ($online && $paymentId !== '') {
                     if ($paymentStatusResolver === null) continue;
                     try {

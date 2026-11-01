@@ -6,9 +6,8 @@
  * the gateway session is created on the shopper's confirming POST.
  */
 final class PaymentLink {
+    /** The e-mailed link works this long, and an online order with a live link is not expired meanwhile (Orders::expirePending). */
     public const LINK_TTL = 7 * 86400;
-    /** A hosted session younger than this may still be paid (Stripe: 24 h), so it is reused rather than a second one opened. */
-    private const LIVE_SESSION = 23 * 3600;
     private const PROVIDER = 'pay_link';
     /** Longer than any gateway call can take (PHP max_execution_time); a claim this old belongs to a request that died. */
     private const CLAIM_LEASE = 300;
@@ -39,27 +38,39 @@ final class PaymentLink {
         return $orderId === false ? null : Orders::byId((int)$orderId);
     }
 
+    /** A payment link issued for the order still works: the order waits for it instead of expiring. */
+    public static function hasLiveLink(int $orderId): bool {
+        $stmt = Db::get()->prepare("SELECT 1 FROM checkout_sessions WHERE provider = :provider AND order_id = :order AND created_at >= :since LIMIT 1");
+        $stmt->execute([':provider' => self::PROVIDER, ':order' => $orderId, ':since' => gmdate('Y-m-d H:i:s', time() - self::LINK_TTL)]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     /**
-     * The gateway URL to pay $order at: a still-live session of a pending payment, otherwise a new session.
-     * Null when the order cannot be paid, another request is starting its payment right now, or the gateway failed.
+     * The gateway URL to pay $order at: its previous session while the gateway still takes payment on it, otherwise a
+     * new session. Null when the order cannot be paid, the previous session is paid or its state unknown, another
+     * request is starting its payment right now, or the gateway failed.
      */
     public static function start(array $order): ?string {
-        if (!self::payable($order)) return null;
+        // Re-read: the caller's copy may predate an edit of the total.
+        $order = Orders::byId((int)($order['id'] ?? 0));
+        if ($order === null || !self::payable($order)) return null;
         $orderId = (int)$order['id'];
         $db = Db::get();
-        $stmt = $db->prepare("SELECT id, raw_response, created_at FROM payment_transactions
-            WHERE order_id = :order AND store_id = :store AND status = 'initiated' ORDER BY id DESC");
-        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
-        $sessions = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $snapshot = json_decode((string)$order['payment_method_snapshot'], true);
+        $provider = (string)$snapshot['provider'];
+        $sessions = self::sessions($orderId);
         $latest = $sessions[0] ?? null;
-        if ($latest !== null && (string)$latest['created_at'] >= gmdate('Y-m-d H:i:s', time() - self::LIVE_SESSION)
-            && ((string)$order['payment_status'] === 'pending' || !self::eventAfter($db, $orderId, (int)$latest['id']))) {
-            // Paying a second session while the first is still open would take the money twice. A session opened
-            // after a failure leaves the order 'failed' (no failed → pending transition) but is still open.
-            $url = (string)((json_decode((string)$latest['raw_response'], true) ?: [])['url'] ?? '');
-            if ($url === '') return null;
-            CheckoutSession::rememberPendingPayment($orderId, (string)$order['order_number'], $url, '');
-            return $url;
+        if ($latest !== null) {
+            // Paying a second session while the first can still be paid takes the money twice. Whether it can is the
+            // gateway's answer, not a guess from its age (Stripe sessions live 24 h, PayU/GoPay/Comgate their own time).
+            $state = self::sessionState($order, $latest, $provider);
+            if ($state === 'open') {
+                $url = (string)((json_decode((string)$latest['raw_response'], true) ?: [])['url'] ?? '');
+                if ($url === '') return null;
+                CheckoutSession::rememberPendingPayment($orderId, (string)$order['order_number'], $url, '');
+                return $url;
+            }
+            if ($state !== 'closed') return null;
         }
         // One new session per attempt: a concurrent request (double click, two tabs) finds the attempt claimed.
         // The claim is released when the attempt fails, and lapses after CLAIM_LEASE if its request died mid-way.
@@ -70,8 +81,6 @@ final class PaymentLink {
             if (!self::claim($db, $orderId, $attempt)) return null;
         }
 
-        $snapshot = json_decode((string)$order['payment_method_snapshot'], true);
-        $provider = (string)$snapshot['provider'];
         $financial = json_decode((string)($order['financial_snapshot'] ?? ''), true);
         try {
             $baseUrl = self::baseUrl();
@@ -93,9 +102,16 @@ final class PaymentLink {
             return null;
         }
         $sessionId = (string)($session['session_id'] ?? '');
+        $now = Orders::byId($orderId);
+        if ($now === null || (int)$now['total'] !== (int)$order['total'] || !self::payable($now)) {
+            // Edited or paid while the gateway call ran: the session asks for an amount the order no longer has.
+            if ($sessionId !== '') self::closeSession($provider, $sessionId);
+            return null;
+        }
         if ($sessionId !== '') {
             CheckoutSession::bind($orderId, $sessionId, $provider, CheckoutSession::browserSessionId());
-            $db->prepare("UPDATE orders SET payment_id = :pid WHERE id = :id AND store_id = :store")
+            // Only an unpaid order follows its newest session; a paid one keeps the reference of the capture.
+            $db->prepare("UPDATE orders SET payment_id = :pid WHERE id = :id AND store_id = :store AND status = 'pending' AND payment_status IN ('pending', 'failed')")
                 ->execute([':pid' => $sessionId, ':id' => $orderId, ':store' => StoreContext::current()->id()]);
         }
         CheckoutSession::rememberPendingPayment($orderId, (string)$order['order_number'], (string)$session['url'], $confirmation);
@@ -126,9 +142,66 @@ final class PaymentLink {
         ], (int)$order['id']);
     }
 
-    /** A payment event (failure, cancellation, capture) logged after the session $transactionId opened, i.e. that session is over. */
-    private static function eventAfter(PDO $db, int $orderId, int $transactionId): bool {
-        $stmt = $db->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store AND id > :id AND status <> 'initiated' LIMIT 1");
+    /**
+     * Back on the confirmation page after paying a session opened when an earlier payment had failed: the order is still
+     * 'failed' until the gateway's notification arrives, so the gateway is asked. A payment it reports paid, or still
+     * processing, is shown as pending (being confirmed), never as failed with a second "Pay".
+     */
+    public static function returnStatus(array $order): string {
+        $status = (string)($order['payment_status'] ?? 'pending');
+        if ($status !== 'failed' || !self::payable($order)) return $status;
+        $latest = self::sessions((int)$order['id'])[0] ?? null;
+        if ($latest === null || self::eventAfter((int)$order['id'], (int)$latest['id'])) return $status;
+        $snapshot = json_decode((string)$order['payment_method_snapshot'], true);
+        return self::sessionState($order, $latest, (string)$snapshot['provider']) === 'closed' ? 'failed' : 'pending';
+    }
+
+    /** @return list<array<string,mixed>> the order's gateway sessions, newest first */
+    private static function sessions(int $orderId): array {
+        $stmt = Db::get()->prepare("SELECT id, provider_ref, amount, currency, raw_response FROM payment_transactions
+            WHERE order_id = :order AND store_id = :store AND status = 'initiated' ORDER BY id DESC");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id()]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * The previous session of $order as the gateway reports it: 'open' (still payable for the order's amount: reuse it),
+     * 'closed' (cannot be paid any more: a new one may open), otherwise 'paid' or 'unknown' (open nothing).
+     * An open session for an amount an edit has changed is voided first, where the gateway can.
+     */
+    private static function sessionState(array $order, array $session, string $provider): string {
+        $ref = trim((string)$session['provider_ref']);
+        if ($ref === '') return 'closed';
+        try {
+            $status = strtolower(trim(Adapters::payment($provider)->getStatus($ref)));
+        } catch (Throwable $e) {
+            Logger::phpLog("Payment session state of order #{$order['id']} unknown: " . $e->getMessage());
+            return 'unknown';
+        }
+        if (Orders::providerFinalUnpaid($status)) return 'closed';
+        if (in_array($status, ['paid', 'succeeded', 'captured', 'completed'], true)) return 'paid';
+        if ((int)$session['amount'] === (int)$order['total'] && strtolower((string)$session['currency']) === strtolower((string)($order['currency'] ?? 'eur'))) {
+            return 'open';
+        }
+        return self::closeSession($provider, $ref) ? 'closed' : 'unknown';
+    }
+
+    /** Void a gateway session that must not be paid any more; false when the gateway cannot (it may then still be paid). */
+    private static function closeSession(string $provider, string $sessionId): bool {
+        try {
+            $gateway = Adapters::payment($provider);
+            if (!$gateway instanceof CancellablePaymentAdapter) return false;
+            $gateway->cancelPayment($sessionId);
+            return true;
+        } catch (Throwable $e) {
+            IncidentMonitor::report('payment.session_cancel_failed', 'payment', 'error', ['exception' => $e]);
+            return false;
+        }
+    }
+
+    /** A payment event (failure, cancellation, capture) logged after the session $transactionId opened. */
+    private static function eventAfter(int $orderId, int $transactionId): bool {
+        $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store AND id > :id AND status <> 'initiated' LIMIT 1");
         $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':id' => $transactionId]);
         return $stmt->fetchColumn() !== false;
     }

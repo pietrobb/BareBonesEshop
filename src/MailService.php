@@ -20,7 +20,7 @@
  */
 class MailService {
     private static ?MailAdapter $adapterOverride = null;
-    private const SECRET_LINK_VARS = ['reset_url', 'verify_url', 'cart_url', 'unsubscribe_url', 'download_links', 'invoice_download_url', 'pay_url'];
+    private const SECRET_LINK_VARS = ['reset_url', 'verify_url', 'cart_url', 'unsubscribe_url', 'download_links', 'invoice_download_url', 'pay_url', 'claim_url'];
     /** Marketing mail: carries List-Unsubscribe / List-Unsubscribe-Post (RFC 2369 / RFC 8058) from its unsubscribe_url. */
     public const MARKETING_TEMPLATES = ['cart_reminder'];
     /** Rate-limited order mail is retried at most this many times by the worker. */
@@ -272,6 +272,7 @@ class MailService {
             'account_password_reset' => [3, 3600],
             'account_email_verification' => [3, 3600],
             'account_welcome' => [2, 86400],
+            'account_offer' => [3, 3600],
             'cart_reminder' => [1, 86400],
             // Configured merchant inbox, deduplicated per order: a busy hour must not drop orders.
             'merchant_order_created' => [1000, 3600],

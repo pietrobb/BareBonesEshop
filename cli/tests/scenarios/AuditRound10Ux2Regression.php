@@ -179,17 +179,20 @@ assert_true(str_contains($r10xHtml, esc(I18n::t('order_status.not_found'))) && !
 $r10xHtml = $r10xLookup((string)($r10xGuestOrder['order_number'] ?? '?'), 'r10x-web@example.com', 'forged');
 assert_true(str_contains($r10xHtml, esc(I18n::t('order_status.expired'))) && !str_contains($r10xHtml, 'R10X-A item'), 'R10 UX8: the lookup form needs the CSRF token');
 
-// The confirmation page of that guest order offers an account; creating it moves the order in and signs the shopper in.
+// The confirmation page of that guest order offers an account; the link e-mailed to the order's address (R11 H1)
+// creates it, moves the order in and signs the shopper in.
 Customers::logout();
-assert_true(GuestCheckoutAccount::offered($r10xGuestOrder) && guestAccountOfferView($r10xGuestOrder, '') !== null, 'R10 UX8: a guest order with a new e-mail offers an account');
-$r10xWeak = GuestCheckoutAccount::create($r10xGuestOrder, 'short', 'sk');
+assert_true(GuestCheckoutAccount::offered($r10xGuestOrder) && guestAccountOfferView($r10xGuestOrder, []) !== null, 'R10 UX8: a guest order with a new e-mail offers an account');
+$r10xClaimToken = bin2hex(random_bytes(32));
+CheckoutSession::bind((int)$r10xGuestOrder['id'], hash('sha256', $r10xClaimToken), 'account_offer');
+$r10xWeak = GuestCheckoutAccount::claim($r10xClaimToken, 'short', 'sk');
 assert_equals([false, null], [$r10xWeak['ok'], Orders::byId((int)$r10xGuestOrder['id'])['customer_id'] ?? null], 'R10 UX8: a too-short password creates nothing and leaves the order a guest order');
-$r10xAccount = GuestCheckoutAccount::create($r10xGuestOrder, 'R10x-Strong-Pass', 'sk');
+$r10xAccount = GuestCheckoutAccount::claim($r10xClaimToken, 'R10x-Strong-Pass', 'sk');
 $r10xCustomerId = (int)($r10xAccount['customer_id'] ?? 0);
 assert_true($r10xAccount['ok'] && $r10xCustomerId > 0, 'R10 UX8: the account is created (' . ($r10xAccount['error'] ?? 'ok') . ')');
 assert_equals([$r10xCustomerId, $r10xCustomerId], [(int)(Orders::byId((int)$r10xGuestOrder['id'])['customer_id'] ?? 0), (int)($_SESSION['customer_id'] ?? 0)],
     'R10 UX8: the order belongs to the new account and the shopper is signed in');
-assert_true(!GuestCheckoutAccount::offered(Orders::byId((int)$r10xGuestOrder['id']) ?? []) && !GuestCheckoutAccount::create($r10xGuestOrder, 'R10x-Strong-Pass', 'sk')['ok'],
+assert_true(!GuestCheckoutAccount::offered(Orders::byId((int)$r10xGuestOrder['id']) ?? []) && !GuestCheckoutAccount::claim($r10xClaimToken, 'R10x-Strong-Pass', 'sk')['ok'],
     'R10 UX8: the offer is gone once the account exists (no second account, no takeover)');
 
 // Signed in: the checkout keeps the address once, and offers no sign-in link.
