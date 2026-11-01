@@ -161,11 +161,13 @@ $architectureBudgets = [
     // +6 lines, +1 coupling R10 UX3: the order detail's "Send payment link" button for an unpaid online order (PaymentLink).
     // +1 coupling R10 UX6: statuses in the admin's language (OrderStatusLabels).
     // +4 lines R10 UX7: "New order" button on the list, the line editor on the detail (ManualOrders.php, loaded like Shipments.php).
-    'src/Entrypoints/Admin/Orders.php' => ['lines' => 926, 'functions' => 16, 'max_function_lines' => 310, 'coupling' => 22],
+    // +3 lines R11 H8: the order detail explains that accepting a purchase on invoice issues its invoice due on the terms.
+    'src/Entrypoints/Admin/Orders.php' => ['lines' => 929, 'functions' => 16, 'max_function_lines' => 313, 'coupling' => 22],
     // R10 UX7: manual order form and the pending order's line editor; pricing and stock rules live in ManualOrder.
     'src/Entrypoints/Admin/ManualOrders.php' => ['lines' => 98, 'functions' => 5, 'max_function_lines' => 31, 'coupling' => 5],
     // +1 function, +3 coupling R10 UX3: handleOrderPaymentLink e-mails the customer a new payment link (PaymentLink, Orders, AuditLog).
-    'src/Entrypoints/Admin/OrderOperations.php' => ['lines' => 90, 'functions' => 5, 'max_function_lines' => 32, 'coupling' => 10],
+    // +1 line R11: ?shipment= prints the delivery note of one parcel.
+    'src/Entrypoints/Admin/OrderOperations.php' => ['lines' => 91, 'functions' => 5, 'max_function_lines' => 32, 'coupling' => 10],
     'src/Entrypoints/Admin/PricingRules.php' => ['lines' => 235, 'functions' => 7, 'max_function_lines' => 115, 'coupling' => 5],
     'src/Entrypoints/Admin/Reports.php' => ['lines' => 90, 'functions' => 2, 'max_function_lines' => 74, 'coupling' => 4],
     'src/Entrypoints/Admin/Recovery.php' => ['lines' => 115, 'functions' => 4, 'max_function_lines' => 44, 'coupling' => 7],
@@ -182,7 +184,10 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/StoreSettings.php' => ['lines' => 78, 'functions' => 3, 'max_function_lines' => 50, 'coupling' => 5],
     // R10 UX5: owner-only store add/remove and legal-text editor, saved to the private data directory when the code is read-only.
     'src/Entrypoints/Admin/StoreManagement.php' => ['lines' => 82, 'functions' => 4, 'max_function_lines' => 37, 'coupling' => 7],
-    'src/Entrypoints/Admin/Shipments.php' => ['lines' => 277, 'functions' => 11, 'max_function_lines' => 105, 'coupling' => 10],
+    // +3 lines R11 H9: the parcel row shows its carrier label (ShipmentLabels.php) and the ship form keeps the label's tracking number.
+    'src/Entrypoints/Admin/Shipments.php' => ['lines' => 280, 'functions' => 11, 'max_function_lines' => 105, 'coupling' => 10],
+    // R11 H9: carrier label per parcel (create, COD amount from the order, carriers whose API is not connected).
+    'src/Entrypoints/Admin/ShipmentLabels.php' => ['lines' => 70, 'functions' => 3, 'max_function_lines' => 28, 'coupling' => 5],
     // A15.3: store switcher and per-request store activation, limited to the admin's granted stores (AdminStoreScope).
     'src/Entrypoints/Admin/StoreScope.php' => ['lines' => 70, 'functions' => 4, 'max_function_lines' => 23, 'coupling' => 5],
     'src/Entrypoints/Admin/Suppliers.php' => ['lines' => 175, 'functions' => 8, 'max_function_lines' => 75, 'coupling' => 5],
