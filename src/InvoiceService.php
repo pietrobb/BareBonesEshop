@@ -99,10 +99,13 @@ final class InvoiceService
         $financialSnapshot = self::financialSnapshot($order);
         $vatBreakdown     = self::computeVatBreakdown($order, $items, $financialSnapshot);
         $locale           = self::resolveLocale($order, $store);
-        $issuedAt         = date('Y-m-d');
-        $deliveryDate     = self::supplyDate($order, $issuedAt);
+        // The seller's calendar, not the server's: a payment at 00:30 on 1 January is invoiced on 1 January in the new
+        // year's number series even on a UTC container.
+        $sellerZone       = StoreContext::timezoneFor($store);
+        $issuedAt         = ShopTime::dateIn('Y-m-d', $sellerZone);
+        $deliveryDate     = self::supplyDate($order, $issuedAt, $sellerZone);
         $paymentTermsDays = (int)($legal['payment_terms_days'] ?? 14);
-        $dueDate          = date('Y-m-d', strtotime("+{$paymentTermsDays} days"));
+        $dueDate          = ShopTime::addDays($issuedAt, $paymentTermsDays);
 
         $db = Db::get();
         $db->beginTransaction();
@@ -112,7 +115,7 @@ final class InvoiceService
                     ->execute([':id' => $replaces, ':cancelled' => self::STATUS_CANCELLED]);
             }
             // Allocate next number atomically.
-            $year   = (int)date('Y', strtotime($issuedAt));
+            $year   = (int)substr($issuedAt, 0, 4);
             $prefix = self::numberPrefix($legal, 'invoice');
             $number = self::allocateNumber($db, $sellerCode, 'invoice', $year, $prefix);
 
@@ -120,7 +123,7 @@ final class InvoiceService
             $token  = self::tokenHash(bin2hex(random_bytes(32)));
 
             $relPath = sprintf('%d/%02d/%s.pdf',
-                $year, (int)date('m', strtotime($issuedAt)), rawurlencode($number));
+                $year, (int)substr($issuedAt, 5, 2), rawurlencode($number));
             $absPath = self::resolvePdfPath($relPath);
 
             $stmt = $db->prepare("
@@ -205,11 +208,11 @@ final class InvoiceService
      * Date of supply (dátum dodania) of an order: the earlier of the payment being received and the goods being
      * shipped, else the order date — never the day a late or backfilled invoice happens to be issued.
      */
-    private static function supplyDate(array $order, string $issuedAt): string
+    private static function supplyDate(array $order, string $issuedAt, string $sellerZone): string
     {
-        $localDate = static function (string $timestamp): ?string {
+        $localDate = static function (string $timestamp) use ($sellerZone): ?string {
             $time = trim($timestamp) === '' ? false : strtotime($timestamp . ' UTC');
-            return $time === false ? null : date('Y-m-d', $time);
+            return $time === false ? null : ShopTime::dateIn('Y-m-d', $sellerZone, $time);
         };
         $events = [];
         foreach ([
@@ -413,9 +416,9 @@ final class InvoiceService
             'lines' => $lines, 'totals' => $totals,
         ];
         $creditData['fingerprint'] = hash('sha256', json_encode($creditData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
-        $issuedAt = date('Y-m-d');
         // The credit note continues the source invoice's seller (its series and snapshot), not the order's current store.
         [$sellerCode, $store] = self::creditSeller($source, $order);
+        $issuedAt = ShopTime::dateIn('Y-m-d', StoreContext::timezoneFor($store));
         $legal = $store['legal'] ?? [];
         $prefix = self::numberPrefix($legal, 'credit_note');
         // Year of the number series and month of the PDF path from the issue date: one instant, as for invoices (issue()),

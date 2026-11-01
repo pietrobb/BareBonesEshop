@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="cs"><body style="font-family:Arial,sans-serif;color:#111">
+<h2>Připomínka platby</h2>
+<p>Dobrý den, {{customer_name}},</p>
+<p>objednávka <strong>{{order_number}}</strong> ({{order_total}}) stále čeká na platbu bankovním převodem. Splatnost je <strong>{{bank_due_date}}</strong>. Pokud platba nedorazí ani několik dní po splatnosti, objednávku zrušíme a zboží uvolníme.</p>
+<table style="border-collapse:collapse">
+<tr><td style="padding:2px 12px 2px 0;color:#555">Příjemce</td><td>{{bank_beneficiary}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">IBAN</td><td><strong>{{bank_iban}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Částka</td><td><strong>{{bank_amount}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Variabilní symbol</td><td><strong>{{bank_vs}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Zpráva pro příjemce</td><td>{{bank_message}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Splatnost</td><td>{{bank_due_date}}</td></tr>
+</table>
+<p style="color:#666;font-size:13px">Pokud jste již zaplatili, tento e-mail můžete ignorovat – platba se na účet někdy připisuje několik dní.</p>
+</body></html>

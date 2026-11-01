@@ -106,7 +106,8 @@ class VatService implements TaxProvider
         $country = strtoupper(trim($country));
         $category = strtolower(trim($class));
         $class   = self::resolveClass($class);
-        $date    = $atDate ?: date('Y-m-d');
+        // A rate change takes effect at midnight on the shop's calendar, not the server's (UTC container: 01:00/02:00).
+        $date    = $atDate ?: ShopTime::date('Y-m-d');
 
         $row = $cfg['rates'][$country] ?? null;
         if (!$row) {
@@ -265,7 +266,7 @@ class VatService implements TaxProvider
     public static function buildSnapshot(array $items, array $context, array $amounts = []): array
     {
         $scenario = self::resolveScenario($context);
-        $effectiveDate = (string)($amounts['effective_date'] ?? date('Y-m-d'));
+        $effectiveDate = (string)($amounts['effective_date'] ?? ShopTime::date('Y-m-d'));
         $currency = strtolower((string)($amounts['currency'] ?? 'eur'));
         $appliesVat = (bool)$scenario['applies_vat'];
         $rateCountry = (string)$scenario['rate_country'];

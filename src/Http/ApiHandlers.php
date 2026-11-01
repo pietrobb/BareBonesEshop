@@ -775,7 +775,7 @@ function checkoutExecute(array $input, ?array $runtimeConfig = null): array {
         'shipping' => $shippingCost,
         'payment_fee' => $paymentFee,
         'currency' => $currency,
-        'effective_date' => date('Y-m-d'),
+        'effective_date' => ShopTime::date('Y-m-d'),
         'providers' => $providerCodes,
     ]);
 

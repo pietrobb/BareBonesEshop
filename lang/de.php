@@ -349,6 +349,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.email.tpl.merchant_order_paid' => 'Bestellung bezahlt (Händler)',
     'admin.email.tpl.merchant_stock_low' => 'niedriger Bestand (Händler)',
     'admin.email.tpl.order_cancelled' => 'Bestellung storniert',
+    'admin.email.tpl.bank_transfer_reminder' => 'Zahlung per Überweisung (Erinnerung)',
     'admin.email.tpl.order_confirmation' => 'Bestellbestätigung',
     'admin.email.tpl.order_paid' => 'Zahlung erhalten',
     'admin.email.tpl.order_shipped' => 'Bestellung versandt',

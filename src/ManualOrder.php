@@ -254,7 +254,7 @@ final class ManualOrder {
                 'shipping' => $shippingCost,
                 'payment_fee' => $paymentFee,
                 'currency' => $currency,
-                'effective_date' => date('Y-m-d'),
+                'effective_date' => ShopTime::date('Y-m-d'),
                 'providers' => $providers,
             ]);
             $text = static fn(string $field): string => $digitalOnly ? '' : mb_substr(trim((string)preg_replace('/[\x00-\x1F\x7F]+/', ' ', Security::str($buyer[$field] ?? ''))), 0, 255);

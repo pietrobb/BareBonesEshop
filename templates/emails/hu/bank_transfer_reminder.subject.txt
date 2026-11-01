@@ -1,0 +1,1 @@
+Emlékeztető: kérjük, fizesse ki a(z) {{order_number}} rendelést {{bank_due_date}}-ig

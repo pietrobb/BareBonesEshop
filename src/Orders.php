@@ -740,6 +740,9 @@ class Orders {
                 }
                 $created = strtotime((string)$order['created_at'] . ' UTC');
                 if ($created === false || $created > time() - $ttl) continue;
+                // A transfer is due at the end of its due day on the shop's calendar and may still be on its way for the
+                // grace days after it: the order is not released before.
+                if (!$online && $type === 'bank_transfer' && ShopTime::now() <= BankTransferInstructions::cancelAfter($order, $ttl)) continue;
                 // The customer was sent a link that promises time to pay; the order waits for it.
                 if ($online && PaymentLink::hasLiveLink((int)$order['id'])) continue;
                 if ($online && $paymentId !== '') {

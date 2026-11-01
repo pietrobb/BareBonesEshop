@@ -3,8 +3,9 @@
  * Worker sweep that releases stock held by abandoned unpaid orders in every configured store.
  *
  * Offline methods expire only when listed in `offline_order_expiry_seconds`
- * (payment service_type => seconds). Without that key, bank transfers expire after
- * 14 days; COD, invoice and generic offline orders wait for the merchant.
+ * (payment service_type => seconds). Without that key, bank transfers are due 14 days after the order (end of
+ * that day on the shop's calendar), are reminded bank_transfer_reminder_days before and are cancelled only after
+ * bank_transfer_grace_days more; COD, invoice and generic offline orders wait for the merchant.
  */
 class PendingOrderExpiry {
     public const DEFAULT_OFFLINE_SECONDS = ['bank_transfer' => 1209600];
@@ -45,6 +46,8 @@ class PendingOrderExpiry {
         $expired = 0;
         foreach ($storeIds as $storeId) {
             try {
+                // Remind unpaid transfers before their due date (once), then release those past due and grace.
+                PaymentWebhookRouting::within($storeId, static fn(): int => BankTransferInstructions::remindDue($offline['bank_transfer'] ?? null));
                 $expired += PaymentWebhookRouting::within($storeId, static fn(): int => Orders::expirePending(
                     (int)($cfg['pending_order_expiry_seconds'] ?? 172800),
                     (int)($cfg['pending_order_expiry_batch'] ?? 25),

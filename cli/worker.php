@@ -262,7 +262,7 @@ function handleEmailSend(array $payload, array $job): void {
 
     $allowedTemplates = [
         'order_confirmation', 'order_paid', 'order_cancelled', 'order_shipped',
-        'refund_issued', 'invoice_issued', 'cart_reminder',
+        'refund_issued', 'invoice_issued', 'cart_reminder', 'bank_transfer_reminder',
     ];
     if (!$to || !in_array($template, $allowedTemplates, true)) return;
     if ($orderId === null && $template !== 'cart_reminder') return;
@@ -295,6 +295,11 @@ function handleEmailSend(array $payload, array $job): void {
                 'tracking_url'   => (string)($tracking['tracking_url'] ?? ''),
             ]);
             if ($template === 'order_confirmation') $vars = array_merge($vars, BankTransferInstructions::mailVars($order), ConsumerNotice::mailVars($order));
+            if ($template === 'bank_transfer_reminder') {
+                // Paid or cancelled since the reminder was queued: nothing to remind of.
+                $vars = array_merge($vars, BankTransferInstructions::mailVars($order));
+                if ($vars['bank_transfer'] !== true) return;
+            }
             $items = Orders::items((int)$orderId);
             $vars['items'] = array_map(fn($it) => [
                 'name'       => $it['name'],

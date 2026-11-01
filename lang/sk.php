@@ -356,6 +356,7 @@ return [
     'admin.email.tpl.merchant_order_paid' => 'zaplatená objednávka (obchodník)',
     'admin.email.tpl.merchant_stock_low' => 'nízka zásoba (obchodník)',
     'admin.email.tpl.order_cancelled' => 'zrušená objednávka',
+    'admin.email.tpl.bank_transfer_reminder' => 'zaplatenie prevodom (pripomienka)',
     'admin.email.tpl.order_confirmation' => 'potvrdenie objednávky',
     'admin.email.tpl.order_paid' => 'prijatá platba',
     'admin.email.tpl.order_shipped' => 'odoslaná objednávka',

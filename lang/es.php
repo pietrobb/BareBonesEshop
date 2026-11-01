@@ -505,6 +505,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.email.tpl.merchant_order_paid' => 'pedido pagado (comerciante)',
     'admin.email.tpl.merchant_stock_low' => 'stock bajo (comerciante)',
     'admin.email.tpl.order_cancelled' => 'pedido cancelado',
+    'admin.email.tpl.bank_transfer_reminder' => 'pago por transferencia (recordatorio)',
     'admin.email.tpl.order_confirmation' => 'confirmación del pedido',
     'admin.email.tpl.order_paid' => 'pago recibido',
     'admin.email.tpl.order_shipped' => 'pedido enviado',

@@ -1,0 +1,1 @@
+Przypomnienie: opłać zamówienie {{order_number}} do {{bank_due_date}}

@@ -1,0 +1,1 @@
+Pripomienka: zaplaťte objednávku {{order_number}} do {{bank_due_date}}

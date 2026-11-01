@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="pl"><body style="font-family:Arial,sans-serif;color:#111">
+<h2>Przypomnienie o płatności</h2>
+<p>Dzień dobry, {{customer_name}},</p>
+<p>zamówienie <strong>{{order_number}}</strong> ({{order_total}}) nadal czeka na przelew bankowy. Termin płatności to <strong>{{bank_due_date}}</strong>. Jeśli płatność nie wpłynie kilka dni po tym terminie, anulujemy zamówienie i zwolnimy towar.</p>
+<table style="border-collapse:collapse">
+<tr><td style="padding:2px 12px 2px 0;color:#555">Odbiorca</td><td>{{bank_beneficiary}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">IBAN</td><td><strong>{{bank_iban}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Kwota</td><td><strong>{{bank_amount}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Symbol zmienny</td><td><strong>{{bank_vs}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Tytuł przelewu</td><td>{{bank_message}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#555">Termin płatności</td><td>{{bank_due_date}}</td></tr>
+</table>
+<p style="color:#666;font-size:13px">Jeśli płatność została już wysłana, zignoruj tę wiadomość – zaksięgowanie przelewu może potrwać kilka dni.</p>
+</body></html>
