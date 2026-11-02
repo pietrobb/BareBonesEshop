@@ -256,7 +256,7 @@ final class WebInstaller
             self::configurePayments(Db::get(), $stores, $v);
             $default = (string)($stores['default_store'] ?? 'default');
             $owner = AdminIdentity::createWithStore($v['admin_user'], $v['admin_password'], 'owner', true, $default, true);
-            $leftover = $seeded && $starter !== null ? self::removeStarter($starter, $root) : null;
+            $leftover = $seeded ? self::removeStarter($starter, $root) : null;
             return ['admin' => ['username' => $v['admin_user']] + (array)$owner['enrollment'], 'doctor' => Setup::doctor($config, $root, Db::get()),
                 'starter' => $starter['name'] ?? null, 'leftover' => $leftover];
         } catch (Throwable $e) {
