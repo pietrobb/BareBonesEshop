@@ -161,9 +161,10 @@ class Cart {
         $variants = [];
         if (!empty($variantIds)) {
             $ph = implode(',', array_fill(0, count($variantIds), '?'));
+            $digital = VariantAvailability::digitalColumn();
             $stmt = $db->prepare("SELECT v.id, v.product_id, v.sku, v.name, v.stock, v.price_delta,
                     v.price_absolute, v.availability, v.available_from, v.media, v.weight_g,
-                    v.length_mm, v.width_mm, v.height_mm, v.inventory_policy, v.digital
+                    v.length_mm, v.width_mm, v.height_mm, v.inventory_policy, {$digital} AS digital
                 FROM variants v
                 JOIN products p ON p.id = v.product_id AND p.store_id = ?
                 WHERE v.id IN ({$ph})");

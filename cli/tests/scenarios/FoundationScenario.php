@@ -671,6 +671,10 @@ $variantDigitalMigration = require TEST_CLI_DIR . '/../migrations/20261102090000
 $variantDigitalMigration->up($pdo, true);
 $variantDigitalMigration->up($pdo, true);
 assert_true(in_array('digital', array_column($pdo->query('PRAGMA table_info(variants)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true), 'Bookshop variant digital migration: the column exists idempotently');
+$orderItemDigitalMigration = require TEST_CLI_DIR . '/../migrations/20261103090000_order_item_digital.php';
+$orderItemDigitalMigration->up($pdo, true);
+$orderItemDigitalMigration->up($pdo, true);
+assert_true(in_array('digital', array_column($pdo->query('PRAGMA table_info(order_items)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true), 'R12 order line digital migration: the column exists idempotently');
 
 // ============================================================
 // TEST 3: CSV Import

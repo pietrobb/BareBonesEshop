@@ -558,5 +558,13 @@
         "crlf": [
             "dbabeb6c4e2c85cee29fd68d2e5152bd819a1897d8f939e437569684ff9adde1"
         ]
+    },
+    "20261103090000_order_item_digital": {
+        "lf": [
+            "cd4b8440632086049355bd8c1fb2249ea2faff1b371eb086e0a860d31e906602"
+        ],
+        "crlf": [
+            "920356b24b9c5aa670771f0eadc4a18756f0d95d440cbfd31f92cefcf86053cf"
+        ]
     }
 }

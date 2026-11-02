@@ -900,6 +900,7 @@ return [
     'admin.msg.variant.row_error' => 'Variant {sku}: {error}',
     'admin.msg.variant.numbers' => 'cena, sklad a poradie musia byť celé čísla (cena v centoch, sklad ≥ 0).',
     'admin.msg.variant.negative_price' => 'výsledná cena nesmie byť záporná.',
+    'admin.msg.variant.digital_bundle' => 'balík nemôže byť digitálny obsah (jeho súčasti sú fyzický tovar na sklade).',
     'admin.msg.variant.availability' => 'neplatná dostupnosť alebo skladová politika.',
     'admin.msg.variant.attrs' => 'atribúty zadajte ako riadky kľúč=hodnota.',
     'admin.msg.variant.max' => 'Produkt môže mať najviac {max} variantov.',

@@ -921,6 +921,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.msg.variant.row_error' => 'Varianta {sku}: {error}',
     'admin.msg.variant.numbers' => 'cena, sklad a pořadí musí být celá čísla (cena v centech, sklad ≥ 0).',
     'admin.msg.variant.negative_price' => 'výsledná cena nesmí být záporná.',
+    'admin.msg.variant.digital_bundle' => 'balíček nemůže být digitální obsah (jeho součásti jsou fyzické zboží na skladě).',
     'admin.msg.variant.availability' => 'neplatná dostupnost nebo skladová politika.',
     'admin.msg.variant.attrs' => 'atributy zadejte jako řádky klíč=hodnota.',
     'admin.msg.variant.max' => 'Produkt může mít nejvýše {max} variant.',
