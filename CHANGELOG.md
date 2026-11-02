@@ -11,6 +11,11 @@
 - **Bookshop demo catalog** (`demo/bookshop/build.php`): 321 public-domain titles in 12 genres, each in
   three formats (eBook EPUB download, paperback, hardcover), with original descriptions, generated SVG
   covers and an EPUB demo edition. It builds into an empty catalog of the configured database.
+- **Bookshop theme** (`themes/bookshop`, English): a book-store storefront with a serif typography, cover
+  cards with the author, a home page with new arrivals, a bestseller shelf, genres and authors, and a book
+  page with a format picker. New section providers `core.tagged-products` (products with one tag) and
+  `core.specification-values` (top values of one specification, linking to a search). Product cards
+  expose the product attrs (`custom_fields`), and the cart and checkout name the chosen variant.
 
 ## 2.1.0 — 2026-11-01
 

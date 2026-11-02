@@ -1,0 +1,5 @@
+{{#if data.items}}<section id="{{id}}" class="bk-section bk-shelf" aria-labelledby="{{id}}-title">
+  <h2 class="bk-section__title" id="{{id}}-title">{{#if content.heading}}{{content.heading}}{{else}}{{t.latest}}{{/if}}</h2>
+  {{#if content.body_html}}<div class="bk-section__intro">{{{content.body_html}}}</div>{{/if}}
+  <div class="bk-shelf__row">{{#each data.items}}{{> storefront/product-card}}{{/each}}</div>
+</section>{{/if}}

@@ -2,9 +2,9 @@
 declare(strict_types=1);
 
 /**
- * Bookshop demo catalog generator (#237): public-domain books in three formats each (eBook download, paperback,
- * hardcover), genre categories, filterable specifications, an original SVG cover per title and a small EPUB demo
- * edition behind every eBook variant.
+ * Bookshop demo catalog generator (#237): public-domain books as an eBook download and a paperback, most also as a
+ * hardcover; genre categories, filterable specifications (author, century, language, format), an original SVG cover
+ * per title and a small EPUB demo edition behind every eBook variant.
  *
  * Usage: php demo/bookshop/build.php [--store=default] [--shop-name="Bookshop"]
  *
@@ -89,8 +89,12 @@ $assetStmt = $db->prepare('INSERT INTO digital_assets (sku, label, storage_path,
 // Categories have no description column: the theme reads the genre blurb from meta.description.
 $categoryStmt = $db->prepare('UPDATE categories SET sort_order = :sort, meta = :meta WHERE id = :id');
 
+$createdStmt = $db->prepare('UPDATE products SET created_at = :at WHERE id = :id');
+$arrivals = gmmktime(12, 0, 0, 10, 1, 2026);
+
 $start = microtime(true);
 $count = 0;
+$variants = 0;
 $slugs = [];
 $db->beginTransaction();
 try {
@@ -113,6 +117,8 @@ try {
             $paperback = 799 + (int)(min(900, (int)round($pages * 1.6)) / 100) * 100 + 100 * ($hash % 2);
             $hardcover = $paperback + 1000 + 100 * (($hash >> 3) % 3);
             $paperStock = $hash % 11 === 0 ? 0 : 3 + ($hash >> 4) % 38;
+            // Not every title has a hardcover edition (about a third has none); some of those that do are sold out.
+            $hasHardcover = ($hash >> 9) % 3 !== 0;
             $hardStock = $hash % 5 === 0 ? 0 : 1 + ($hash >> 6) % 12;
             $paperWeight = 40 + (int)round($pages * 1.1);
 
@@ -134,22 +140,23 @@ try {
                 'sku' => $sku, 'name' => $title, 'slug' => $slug, 'slug_en' => $slug, 'name_en' => $title,
                 'product_type' => 'simple', 'category' => $genreName, 'price' => $money($ebook), 'stock' => '',
                 'summary' => $summary, 'description' => $description, 'image' => "/uploads/bookshop/covers/{$slug}.svg",
-                'tags' => implode('|', $tags), 'weight_g' => (string)$paperWeight,
+                'tags' => implode('|', $tags), 'weight_g' => (string)$paperWeight, 'attr:Author' => $author,
             ], $db);
             $productId = (int)$db->query('SELECT id FROM products WHERE sku = ' . $db->quote($sku))->fetchColumn();
+            // Spread the arrival dates over four months so "New arrivals" mixes the genres.
+            $createdStmt->execute([':at' => gmdate('Y-m-d H:i:s', $arrivals - ($hash % 120) * 86400 - $count * 60), ':id' => $productId]);
 
+            $formats = [['EB', 'eBook', $ebook, 1, 0], ['PB', 'Paperback', $paperback, 0, $paperStock]];
+            if ($hasHardcover) $formats[] = ['HB', 'Hardcover', $hardcover, 0, $hardStock];
             $specs = [['Author', $author, null], ['Century', $century($year), (float)$year], ['Original language', $language, null]];
+            foreach ($formats as [, $format]) $specs[] = ['Format', $format, null];
             foreach ($specs as $i => [$name, $value, $numeric]) {
                 $specStmt->execute([':pid' => $productId, ':lang' => 'en', ':name' => $name, ':value' => $value, ':num' => $numeric, ':sort' => $i]);
             }
 
             // Shipping weighs a print copy by the product's weight (the paperback's); the eBook weighs nothing.
-            $formats = [
-                ['EB', 'eBook', $ebook, 1, 0],
-                ['PB', 'Paperback', $paperback, 0, $paperStock],
-                ['HB', 'Hardcover', $hardcover, 0, $hardStock],
-            ];
             foreach ($formats as $i => [$code, $format, $price, $digital, $stock]) {
+                $variants++;
                 $variantSku = "{$sku}-{$code}";
                 $variantStmt->execute([':pid' => $productId, ':sku' => $variantSku, ':name' => $format,
                     ':attrs' => json_encode(['format' => $format]), ':price' => $price, ':sort' => $i, ':digital' => $digital]);
@@ -173,4 +180,4 @@ try {
     exit(1);
 }
 
-echo sprintf("Done: %d books, %d variants in %d ms.\n", $count, $count * 3, (int)round((microtime(true) - $start) * 1000));
+echo sprintf("Done: %d books, %d variants in %d ms.\n", $count, $variants, (int)round((microtime(true) - $start) * 1000));

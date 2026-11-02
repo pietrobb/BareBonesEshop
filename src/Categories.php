@@ -102,7 +102,7 @@ class Categories {
         $stmt = Db::get()->prepare("
             SELECT * FROM categories
             WHERE parent_id IS NULL AND store_id = :store AND product_count > 0
-            ORDER BY product_count DESC
+            ORDER BY product_count DESC, sort_order, name
             LIMIT :limit
         ");
         $stmt->execute([':store' => StoreContext::current()->catalogId(), ':limit' => $limit]);

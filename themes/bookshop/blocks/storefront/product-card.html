@@ -1,0 +1,9 @@
+<article class="book-card">
+  <a class="book-card__link" href="{{url}}">
+    <span class="book-card__cover">{{#if image.url}}<img src="{{image.thumbnail_url}}" alt="" width="300" height="450" loading="lazy">{{/if}}</span>
+    <h3 class="book-card__title">{{name}}</h3>
+  </a>
+  {{#if custom_fields.Author}}<p class="book-card__author">{{custom_fields.Author}}</p>{{/if}}
+  <p class="book-card__price">{{#if requires_variant}}<span class="book-card__from">{{../t.from_price}}</span> {{/if}}{{price.formatted}}{{#if price.compare_formatted}} <s class="old-price">{{price.compare_formatted}}</s>{{/if}}</p>
+  {{#unless availability.purchasable}}<p class="book-card__stock is-out">{{availability.label}}</p>{{/unless}}
+</article>

@@ -1,0 +1,24 @@
+{
+  "name": "BareBones Bookshop",
+  "version": "1.0.0",
+  "description": "English bookshop storefront: book-cover cards, genre shelves, author index and a format picker (eBook, paperback, hardcover). Inherits checkout, cart and account from the default theme.",
+  "parent": "default",
+  "blocks": "blocks",
+  "assets": {
+    "css": ["bookshop.css"],
+    "js": []
+  },
+  "sections": {
+    "author-list": "storefront/section-author-list"
+  },
+  "performance_budgets": {
+    "css_bytes": 40960,
+    "js_bytes": 1,
+    "block_bytes": 40960
+  },
+  "quality": {
+    "wcag": "2.2 AA",
+    "minimum_target_px": 24,
+    "requires_reduced_motion": true
+  }
+}
