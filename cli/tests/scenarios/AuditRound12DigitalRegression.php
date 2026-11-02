@@ -100,19 +100,34 @@ try {
     assert_true($r12dRefused, 'R12 low: checkout refuses a bundle line flagged digital instead of skipping its components');
 } catch (Throwable $e) { $r12dFail('bundle', $e); }
 
+// Existing lines: digital product, e-book without allocation -> 1; e-book sold with an allocation, goods -> 0.
+$r12dMigration = require TEST_CLI_DIR . '/../migrations/20261103090000_order_item_digital.php';
+$r12dMigrate = static function (PDO $db, bool $isSqlite, string $label) use ($r12dMigration): void {
+    foreach (['CREATE TABLE products (id INTEGER PRIMARY KEY, product_type VARCHAR(40))',
+        'CREATE TABLE variants (id INTEGER PRIMARY KEY, product_id INTEGER, digital INTEGER NOT NULL DEFAULT 0)',
+        'CREATE TABLE order_items (id INTEGER PRIMARY KEY, product_id INTEGER, variant_id INTEGER, attrs TEXT)',
+        "INSERT INTO products VALUES (1, 'downloadable'), (2, 'simple')",
+        'INSERT INTO variants VALUES (21, 2, 1), (22, 2, 0)',
+        "INSERT INTO order_items VALUES (1, 1, NULL, '{}'), (2, 2, 21, '[]'),
+            (3, 2, 21, '{\"_inventory_allocations\":[{\"warehouse_id\":1,\"qty\":1,\"status\":\"reserved\"}]}'), (4, 2, 22, '{}'), (5, 2, NULL, NULL)"] as $sql) $db->exec($sql);
+    $r12dMigration->up($db, $isSqlite);
+    $r12dMigration->up($db, $isSqlite);
+    assert_equals([1 => 1, 2 => 1, 3 => 0, 4 => 0, 5 => 0], array_map('intval', $db->query('SELECT id, digital FROM order_items ORDER BY id')->fetchAll(PDO::FETCH_KEY_PAIR)),
+        "R12 migration ({$label}): existing lines are frozen digital or goods as they were sold, idempotently");
+};
 try {
-    // Existing lines: digital product, e-book without allocation -> 1; e-book sold with an allocation, goods -> 0.
-    $r12dMig = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-    $r12dMig->exec("CREATE TABLE products (id INTEGER PRIMARY KEY, product_type TEXT);
-        CREATE TABLE variants (id INTEGER PRIMARY KEY, product_id INTEGER, digital INTEGER NOT NULL DEFAULT 0);
-        CREATE TABLE order_items (id INTEGER PRIMARY KEY, product_id INTEGER, variant_id INTEGER, attrs TEXT);
-        INSERT INTO products VALUES (1, 'downloadable'), (2, 'simple');
-        INSERT INTO variants VALUES (21, 2, 1), (22, 2, 0);
-        INSERT INTO order_items VALUES (1, 1, NULL, '{}'), (2, 2, 21, '[]'),
-            (3, 2, 21, '{\"_inventory_allocations\":[{\"warehouse_id\":1,\"qty\":1,\"status\":\"reserved\"}]}'), (4, 2, 22, '{}'), (5, 2, NULL, NULL);");
-    $r12dMigration = require TEST_CLI_DIR . '/../migrations/20261103090000_order_item_digital.php';
-    $r12dMigration->up($r12dMig, true);
-    $r12dMigration->up($r12dMig, true);
-    assert_equals([1 => 1, 2 => 1, 3 => 0, 4 => 0, 5 => 0], array_map('intval', $r12dMig->query('SELECT id, digital FROM order_items ORDER BY id')->fetchAll(PDO::FETCH_KEY_PAIR)),
-        'R12 migration: existing lines are frozen digital or goods as they were sold, idempotently');
-} catch (Throwable $e) { $r12dFail('migration', $e); }
+    $r12dMigrate(new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]), true, 'SQLite');
+} catch (Throwable $e) { $r12dFail('migration (SQLite)', $e); }
+if (getenv('TEST_MYSQL_DSN')) {
+    $r12dMy = null;
+    $r12dSchema = 'bbe_r12d_' . bin2hex(random_bytes(4));
+    try {
+        $r12dMy = new PDO((string)getenv('TEST_MYSQL_DSN'), getenv('TEST_MYSQL_USER') ?: 'root', getenv('TEST_MYSQL_PASS') ?: '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $r12dMy->exec("CREATE DATABASE `{$r12dSchema}` CHARACTER SET utf8mb4");
+        $r12dMy->exec("USE `{$r12dSchema}`");
+        $r12dMigrate($r12dMy, false, 'MySQL');
+    } catch (Throwable $e) { $r12dFail('migration (MySQL)', $e); }
+    if ($r12dMy) $r12dMy->exec("DROP DATABASE IF EXISTS `{$r12dSchema}`");
+} else {
+    echo "  [SKIP] R12 migration on MySQL (set TEST_MYSQL_DSN to enable)\n";
+}

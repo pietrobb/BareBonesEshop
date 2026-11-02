@@ -329,10 +329,6 @@ if ($mysqlDsn) {
         $variantDigitalMigrationMysql->up($my, false);
         $variantDigitalMigrationMysql->up($my, false);
         assert_equals(1, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='variants' AND COLUMN_NAME='digital'")->fetchColumn(), 'MySQL live: Bookshop variants.digital migration is applied idempotently');
-        $orderItemDigitalMigrationMysql = require TEST_CLI_DIR . '/../migrations/20261103090000_order_item_digital.php';
-        $orderItemDigitalMigrationMysql->up($my, false);
-        $orderItemDigitalMigrationMysql->up($my, false);
-        assert_equals(1, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='order_items' AND COLUMN_NAME='digital'")->fetchColumn(), 'MySQL live: R12 order_items.digital migration is applied idempotently');
         foreach (['content_redirects', 'content_banners', 'content_menu_items'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['credit_note_items', 'order_refunds', 'return_exchanges', 'return_receipts', 'return_labels'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['shipment_items', 'shipments', 'bundle_components', 'inventory_receipts', 'purchase_order_items', 'purchase_orders', 'supplier_products', 'suppliers', 'stock_movements'] as $table) $my->exec("DROP TABLE {$table}");
