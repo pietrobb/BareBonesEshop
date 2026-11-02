@@ -59,7 +59,7 @@ function productVariantsHtml(array $product): string {
                 <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
                 <div style="overflow-x:auto">
                 <table>
-                    <thead><tr><th><?= esc(I18n::t('admin.th.sku')) ?></th><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.variant.attrs')) ?></th><th><?= esc(I18n::t('admin.variant.price')) ?></th><th><?= esc(I18n::t('admin.variant.delta')) ?></th><th><?= esc(I18n::t('admin.th.stock')) ?></th><th><?= esc(I18n::t('admin.variant.availability')) ?></th><th><?= esc(I18n::t('admin.variant.policy')) ?></th><th><?= esc(I18n::t('admin.common.sort_order')) ?></th><th><?= esc(I18n::t('admin.btn.delete')) ?></th></tr></thead>
+                    <thead><tr><th><?= esc(I18n::t('admin.th.sku')) ?></th><th><?= esc(I18n::t('admin.th.name')) ?></th><th><?= esc(I18n::t('admin.variant.attrs')) ?></th><th><?= esc(I18n::t('admin.variant.price')) ?></th><th><?= esc(I18n::t('admin.variant.delta')) ?></th><th><?= esc(I18n::t('admin.th.stock')) ?></th><th><?= esc(I18n::t('admin.variant.availability')) ?></th><th><?= esc(I18n::t('admin.variant.policy')) ?></th><th><?= esc(I18n::t('admin.variant.digital')) ?></th><th><?= esc(I18n::t('admin.common.sort_order')) ?></th><th><?= esc(I18n::t('admin.btn.delete')) ?></th></tr></thead>
                     <tbody>
                     <?php foreach ($variants as $v): $key = (string)$v['id']; $p = "variants[{$key}]"; $label = $key === 'new' ? I18n::t('admin.variant.new') : (string)$v['sku']; ?>
                     <tr>
@@ -71,6 +71,7 @@ function productVariantsHtml(array $product): string {
                         <td><input name="<?= esc("{$p}[stock]") ?>" value="<?= (int)$v['stock'] ?>" inputmode="numeric" aria-label="<?= esc(I18n::t('admin.th.stock') . ' ' . $label) ?>"><?php if ($key !== 'new'): ?><input type="hidden" name="<?= esc("{$p}[stock_loaded]") ?>" value="<?= (int)($v['stock_loaded'] ?? $v['stock']) ?>"><?php endif; ?></td>
                         <td><?= $select("{$p}[availability]", ProductVariants::availabilities(), (string)$v['availability'], I18n::t('admin.variant.availability') . ' ' . $label) ?></td>
                         <td><?= $select("{$p}[inventory_policy]", ProductVariants::POLICIES, (string)$v['inventory_policy'], I18n::t('admin.variant.policy') . ' ' . $label) ?></td>
+                        <td><input type="checkbox" name="<?= esc("{$p}[digital]") ?>" value="1"<?= (int)($v['digital'] ?? 0) === 1 ? ' checked' : '' ?> aria-label="<?= esc(I18n::t('admin.variant.digital') . ' ' . $label) ?>"></td>
                         <td><input name="<?= esc("{$p}[sort_order]") ?>" value="<?= (int)$v['sort_order'] ?>" inputmode="numeric" size="3" aria-label="<?= esc(I18n::t('admin.common.sort_order') . ' ' . $label) ?>"></td>
                         <td><?php if ($key !== 'new'): ?><input type="checkbox" name="<?= esc("{$p}[delete]") ?>" value="1" aria-label="<?= esc(I18n::t('admin.btn.delete') . ' ' . $label) ?>"><?php endif; ?></td>
                     </tr>

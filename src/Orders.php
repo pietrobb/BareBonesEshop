@@ -261,7 +261,7 @@ class Orders {
             $oldItems = self::items($orderId);
             $touchedSkus = [];
             foreach ($oldItems as $item) {
-                if (VariantAvailability::isDigitalProduct((int)$item['product_id'])) continue;
+                if (VariantAvailability::isDigitalItem($item)) continue;
                 Inventory::releaseOrderItem($item, $orderId);
                 foreach (Inventory::reservationLines($item) as $line) $touchedSkus[] = (string)$line['sku'];
             }
@@ -414,7 +414,7 @@ class Orders {
                     . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : '');
                 continue;
             }
-            $isDigital = VariantAvailability::isDigitalProduct((int)$item['product_id']);
+            $isDigital = VariantAvailability::isDigitalItem($item);
             $qty = $isDigital ? 1 : $requestedQty;
             $inventorySnapshot = [
                 'allocations' => [], 'bundle_components' => [],
@@ -675,7 +675,7 @@ class Orders {
             }
             $skus = [];
             foreach ($items as $item) {
-                if (VariantAvailability::isDigitalProduct((int)$item['product_id'])) continue;
+                if (VariantAvailability::isDigitalItem($item)) continue;
                 if ($mode === 'return') {
                     Inventory::returnOrderItem($item, $orderId);
                 } else {

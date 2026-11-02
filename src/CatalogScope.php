@@ -1,7 +1,7 @@
 <?php
 /**
  * Admin catalog editor reads/writes bound to the active store's catalog_scope:
- * categories, digital assets (owned through their product SKU) and category links of the shared attribute vocabulary.
+ * categories, digital assets (owned through their product or variant SKU) and category links of the shared attribute vocabulary.
  */
 final class CatalogScope {
     /** Rows of a query whose only parameter is :catalog (the active catalog scope). */
@@ -19,22 +19,29 @@ final class CatalogScope {
         return array_map('intval', array_column(self::rows("SELECT id FROM products WHERE store_id = :catalog AND status = 'active'"), 'id'));
     }
 
+    /** A product's or a variant's SKU of the active catalog (a digital asset can belong to an e-book variant). */
     public static function ownsSku(string $sku): bool {
-        return (bool)self::rows('SELECT 1 AS owned FROM products WHERE sku = :sku AND store_id = :catalog', [':sku' => $sku]);
+        return (bool)self::rows('SELECT 1 AS owned FROM products WHERE sku = :sku AND store_id = :catalog
+            UNION ALL SELECT 1 FROM variants v JOIN products p ON p.id = v.product_id WHERE v.sku = :vsku AND p.store_id = :vcatalog',
+            [':sku' => $sku, ':vsku' => $sku, ':vcatalog' => StoreContext::current()->catalogId()]);
     }
+
+    private const OWNED_ASSET = '(EXISTS (SELECT 1 FROM products p WHERE p.sku = %1$s.sku AND p.store_id = :catalog)
+        OR EXISTS (SELECT 1 FROM variants v JOIN products vp ON vp.id = v.product_id WHERE v.sku = %1$s.sku AND vp.store_id = :catalog2))';
 
     public static function digitalAssets(): array {
         return self::rows('SELECT da.*, (SELECT COUNT(*) FROM digital_entitlements de WHERE de.asset_id = da.id) AS entitlement_count
-            FROM digital_assets da WHERE EXISTS (SELECT 1 FROM products p WHERE p.sku = da.sku AND p.store_id = :catalog)
-            ORDER BY da.sku, da.asset_key');
+            FROM digital_assets da WHERE ' . sprintf(self::OWNED_ASSET, 'da') . '
+            ORDER BY da.sku, da.asset_key', [':catalog2' => StoreContext::current()->catalogId()]);
     }
 
     /** False when the asset is not one of the active catalog's. */
     public static function setDigitalAssetActive(int $id, int $active): bool {
-        $owned = 'id = :id AND EXISTS (SELECT 1 FROM products p WHERE p.sku = digital_assets.sku AND p.store_id = :catalog)';
-        if (!self::rows("SELECT 1 AS owned FROM digital_assets WHERE {$owned}", [':id' => $id])) return false;
+        $owned = 'id = :id AND ' . sprintf(self::OWNED_ASSET, 'digital_assets');
+        $catalog = StoreContext::current()->catalogId();
+        if (!self::rows("SELECT 1 AS owned FROM digital_assets WHERE {$owned}", [':id' => $id, ':catalog2' => $catalog])) return false;
         Db::get()->prepare('UPDATE digital_assets SET active = :active, updated_at = ' . Db::now() . " WHERE {$owned}")
-            ->execute([':active' => $active, ':id' => $id, ':catalog' => StoreContext::current()->catalogId()]);
+            ->execute([':active' => $active, ':id' => $id, ':catalog' => $catalog, ':catalog2' => $catalog]);
         return true;
     }
 

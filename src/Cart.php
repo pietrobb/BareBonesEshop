@@ -163,7 +163,7 @@ class Cart {
             $ph = implode(',', array_fill(0, count($variantIds), '?'));
             $stmt = $db->prepare("SELECT v.id, v.product_id, v.sku, v.name, v.stock, v.price_delta,
                     v.price_absolute, v.availability, v.available_from, v.media, v.weight_g,
-                    v.length_mm, v.width_mm, v.height_mm, v.inventory_policy
+                    v.length_mm, v.width_mm, v.height_mm, v.inventory_policy, v.digital
                 FROM variants v
                 JOIN products p ON p.id = v.product_id AND p.store_id = ?
                 WHERE v.id IN ({$ph})");
@@ -216,6 +216,11 @@ class Cart {
                 $lengthMm = (int)($variant['length_mm'] ?? 0) > 0 ? (int)$variant['length_mm'] : $lengthMm;
                 $widthMm = (int)($variant['width_mm'] ?? 0) > 0 ? (int)$variant['width_mm'] : $widthMm;
                 $heightMm = (int)($variant['height_mm'] ?? 0) > 0 ? (int)$variant['height_mm'] : $heightMm;
+                if ((int)($variant['digital'] ?? 0) === 1) {
+                    // A download weighs nothing in the parcel of its physical siblings.
+                    $isDigital = true;
+                    $weightG = $lengthMm = $widthMm = $heightMm = 0;
+                }
             } else {
                 $price = (int)$product['price'];
                 $sku = $product['sku'];
@@ -297,7 +302,9 @@ class Cart {
                 'total'            => $total,
                 'total_formatted'  => I18n::price($total, $currency),
                 'stock'            => $stock,
-                'product_type'     => $product['product_type'] ?? 'simple',
+                // A digital variant of a physical product is a digital line (no shipping, the digital-content consent).
+                'product_type'     => $isDigital && !VariantAvailability::isDigitalType((string)($product['product_type'] ?? ''))
+                    ? 'digital' : ($product['product_type'] ?? 'simple'),
                 'availability'     => $availability,
                 'inventory_policy' => $policy,
                 'weight_g'         => $weightG,

@@ -1136,6 +1136,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.variant.delta' => 'Recargo (céntimos)',
     'admin.variant.availability' => 'Disponibilidad',
     'admin.variant.policy' => 'Política',
+    'admin.variant.digital' => 'Descarga',
     'admin.variant.new' => 'nueva variante',
     'admin.variant.hint' => 'Precio vacío = precio del producto + recargo. El stock se registra en el libro de almacén. Una variante usada en pedidos no se puede eliminar: establezca su disponibilidad como descatalogada.',
     'admin.variant.save' => 'Guardar variantes',

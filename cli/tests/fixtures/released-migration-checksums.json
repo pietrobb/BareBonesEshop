@@ -550,5 +550,13 @@
         "crlf": [
             "e6d5109094a1429adc3a5a0216b9373724ac9f09cd9d447dd031a0da67015642"
         ]
+    },
+    "20261102090000_variant_digital": {
+        "lf": [
+            "b78bef3f345e5b9ae07ed3e89fee36a47bcacf356b02f860b35531f22855602e"
+        ],
+        "crlf": [
+            "dbabeb6c4e2c85cee29fd68d2e5152bd819a1897d8f939e437569684ff9adde1"
+        ]
     }
 }

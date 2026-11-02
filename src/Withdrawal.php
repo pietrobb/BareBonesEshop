@@ -95,7 +95,8 @@ class Withdrawal {
 
     /** Whether every line of the order is digital content (nothing is shipped, so nothing is ever "delivered"). */
     public static function digitalOnly(array $order): bool {
-        $stmt = Db::get()->prepare('SELECT p.product_type FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id WHERE oi.order_id = ?');
+        $stmt = Db::get()->prepare("SELECT CASE WHEN v.digital = 1 THEN 'digital' ELSE p.product_type END FROM order_items oi
+            LEFT JOIN products p ON p.id = oi.product_id LEFT JOIN variants v ON v.id = oi.variant_id WHERE oi.order_id = ?");
         $stmt->execute([(int)($order['id'] ?? 0)]);
         $types = $stmt->fetchAll(PDO::FETCH_COLUMN);
         return $types !== [] && array_filter($types, static fn($type): bool => !VariantAvailability::isDigitalType((string)$type)) === [];

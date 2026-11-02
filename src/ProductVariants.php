@@ -47,7 +47,7 @@ final class ProductVariants {
     /** The empty "add a variant" row of the editor. */
     public static function blank(int $sortOrder): array {
         return ['id' => 'new', 'sku' => '', 'name' => '', 'attrs_text' => '', 'price_absolute' => null, 'price_delta' => 0, 'stock' => 0,
-            'availability' => VariantAvailability::ACTIVE, 'inventory_policy' => 'inherit', 'sort_order' => $sortOrder];
+            'availability' => VariantAvailability::ACTIVE, 'inventory_policy' => 'inherit', 'sort_order' => $sortOrder, 'digital' => 0];
     }
 
     /** Variants of a product of the active catalog with the stock the editor shows (ledger total when the SKU is ledgered). */
@@ -121,7 +121,8 @@ final class ProductVariants {
             $rows[] = ['id' => $id, 'sku' => $sku, 'name' => $name, 'attrs' => $attrs ? json_encode($attrs, JSON_UNESCAPED_UNICODE) : '{}',
                 'price_absolute' => $absolute === '' ? null : (int)$absolute, 'price_delta' => (int)$delta, 'stock' => (int)$stock,
                 'stock_loaded' => $loaded === '' ? null : (int)$loaded,
-                'availability' => $availability, 'inventory_policy' => $policy, 'sort_order' => (int)$sort];
+                'availability' => $availability, 'inventory_policy' => $policy, 'sort_order' => (int)$sort,
+                'digital' => !empty($fields['digital']) ? 1 : 0];
         }
         if (count($rows) > self::MAX_VARIANTS) return I18n::format('admin.msg.variant.max', ['max' => self::MAX_VARIANTS]);
         return ['rows' => $rows, 'delete' => $delete];
@@ -140,9 +141,9 @@ final class ProductVariants {
                 $deleteVariant->execute([':id' => $id, ':product' => $productId]);
             }
             $update = $db->prepare('UPDATE variants SET sku = :sku, name = :name, attrs = :attrs, price_absolute = :price_absolute, price_delta = :price_delta,
-                availability = :availability, inventory_policy = :inventory_policy, sort_order = :sort_order WHERE id = :id AND product_id = :product');
-            $insert = $db->prepare('INSERT INTO variants (product_id, sku, name, attrs, price_absolute, price_delta, availability, inventory_policy, sort_order, stock)
-                VALUES (:product, :sku, :name, :attrs, :price_absolute, :price_delta, :availability, :inventory_policy, :sort_order, 0)');
+                availability = :availability, inventory_policy = :inventory_policy, sort_order = :sort_order, digital = :digital WHERE id = :id AND product_id = :product');
+            $insert = $db->prepare('INSERT INTO variants (product_id, sku, name, attrs, price_absolute, price_delta, availability, inventory_policy, sort_order, digital, stock)
+                VALUES (:product, :sku, :name, :attrs, :price_absolute, :price_delta, :availability, :inventory_policy, :sort_order, :digital, 0)');
             foreach ($validated['rows'] as &$row) {
                 $values = array_diff_key($row, ['id' => 1, 'stock' => 1, 'stock_loaded' => 1]);
                 $params = [':product' => $productId] + array_combine(array_map(static fn(string $k): string => ":{$k}", array_keys($values)), $values);
@@ -162,6 +163,7 @@ final class ProductVariants {
         $errors = [];
         if (VariantAvailability::isDigitalType($productType)) return $errors;
         foreach ($validated['rows'] as $row) {
+            if ($row['digital'] === 1) continue; // a download has no stock
             // The stock the row showed is the basis of the admin's change: units sold since the form was loaded stay sold.
             $basis = isset($before[$row['id']]) ? ($row['stock_loaded'] ?? (int)$before[$row['id']]['stock']) : null;
             if ($basis !== null && $basis === $row['stock']) continue;
