@@ -325,6 +325,10 @@ if ($mysqlDsn) {
         assert_equals(1, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='orders' AND COLUMN_NAME='delivered_at'")->fetchColumn(), 'MySQL live: R7 orders.delivered_at migration is applied idempotently');
         assert_equals(['2026-10-03 09:00:00', null], $my->query('SELECT delivered_at FROM orders WHERE id IN (97001, 97002) ORDER BY id')->fetchAll(PDO::FETCH_COLUMN),
             'MySQL live: R7 orders.delivered_at is backfilled for delivered orders only (from their last update without shipments)');
+        $variantDigitalMigrationMysql = require TEST_CLI_DIR . '/../migrations/20261102090000_variant_digital.php';
+        $variantDigitalMigrationMysql->up($my, false);
+        $variantDigitalMigrationMysql->up($my, false);
+        assert_equals(1, (int)$my->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='variants' AND COLUMN_NAME='digital'")->fetchColumn(), 'MySQL live: Bookshop variants.digital migration is applied idempotently');
         foreach (['content_redirects', 'content_banners', 'content_menu_items'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['credit_note_items', 'order_refunds', 'return_exchanges', 'return_receipts', 'return_labels'] as $table) $my->exec("DROP TABLE {$table}");
         foreach (['shipment_items', 'shipments', 'bundle_components', 'inventory_receipts', 'purchase_order_items', 'purchase_orders', 'supplier_products', 'suppliers', 'stock_movements'] as $table) $my->exec("DROP TABLE {$table}");
@@ -663,6 +667,10 @@ $priceHistoryMigration->up($pdo, true);
 $priceHistoryMigration->up($pdo, true);
 assert_equals((int)$pdo->query('SELECT COUNT(*) FROM products')->fetchColumn(), (int)$pdo->query('SELECT COUNT(*) FROM product_price_history')->fetchColumn(),
     'R7 price history migration: one row with the current price per existing product, idempotent');
+$variantDigitalMigration = require TEST_CLI_DIR . '/../migrations/20261102090000_variant_digital.php';
+$variantDigitalMigration->up($pdo, true);
+$variantDigitalMigration->up($pdo, true);
+assert_true(in_array('digital', array_column($pdo->query('PRAGMA table_info(variants)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true), 'Bookshop variant digital migration: the column exists idempotently');
 
 // ============================================================
 // TEST 3: CSV Import
