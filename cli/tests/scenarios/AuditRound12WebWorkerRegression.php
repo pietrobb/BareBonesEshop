@@ -34,6 +34,13 @@ PHP);
     file_put_contents($r12wRoot . '/router.php', <<<'PHP'
 <?php
 if (($_GET['p'] ?? '') === 'ready') { echo 'ready'; return; }
+// php -S has no mod_deflate: record what Apache mod_php would be told about compressing this response.
+if (!function_exists('apache_setenv')) {
+    function apache_setenv(string $name, string $value, bool $walkToTop = false): bool {
+        file_put_contents(getenv('R12W_ROOT') . '/apache-env.json', json_encode([$name => $value]), FILE_APPEND);
+        return true;
+    }
+}
 require getenv('R12W_ROOT') . '/src/WebWorker.php';
 require getenv('R12W_APP') . '/src/autoload.php';
 (new ReflectionProperty(Security::class, 'cfg'))->setValue(null, ['app_url' => 'http://127.0.0.1', 'jobs_dir' => getenv('R12W_ROOT') . '/jobs',
@@ -57,7 +64,7 @@ PHP);
         $socket = @stream_socket_client("tcp://127.0.0.1:{$r12wPort}", $errno, $error, 5);
         if ($socket === false) return ['head' => '', 'body' => '', 'elapsed' => 0.0, 'cookie' => '', 'length' => null];
         stream_set_timeout($socket, 15);
-        fwrite($socket, "GET {$path} HTTP/1.1\r\nHost: 127.0.0.1\r\n" . ($cookie !== '' ? "Cookie: {$cookie}\r\n" : '') . "\r\n");
+        fwrite($socket, "GET {$path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept-Encoding: gzip, deflate\r\n" . ($cookie !== '' ? "Cookie: {$cookie}\r\n" : '') . "\r\n");
         $head = '';
         while (!str_contains($head, "\r\n\r\n") && ($line = fgets($socket)) !== false) $head .= $line;
         $length = preg_match('/^Content-Length:\s*(\d+)/mi', $head, $m) ? (int)$m[1] : null;
@@ -79,6 +86,8 @@ PHP);
         'R12 web worker: the response that triggers the pass carries its exact Content-Length (complete without FastCGI)');
     assert_true($r12wFirst['elapsed'] < 2.0 && !is_file($r12wRoot . '/worker-done'),
         sprintf('R12 web worker: the visitor (or a webhook) gets the whole response before the 3 s pass ends (took %.2f s)', $r12wFirst['elapsed']));
+    assert_true(str_contains((string)@file_get_contents($r12wRoot . '/apache-env.json'), '{"no-gzip":"1"}'),
+        'R12 web worker: a browser asking for gzip still gets the early end on Apache (mod_deflate off for that response, it would drop the Content-Length)');
     for ($i = 0; $i < 50 && !is_file($r12wRoot . '/worker-started.json'); $i++) usleep(100000);
     $r12wSecond = $r12wGet('/?p=again', $r12wFirst['cookie']);
     assert_true($r12wSecond['elapsed'] < 2.0 && !is_file($r12wRoot . '/worker-done'),

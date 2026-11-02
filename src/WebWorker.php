@@ -107,6 +107,9 @@ final class WebWorker
                 $body = $chunk . $body;
             }
             @ini_set('zlib.output_compression', '0');
+            // Browsers ask for gzip: Apache mod_deflate would then drop the Content-Length and stream the body chunked,
+            // so the visitor's page would end only after the pass. no-gzip keeps this one response uncompressed.
+            if (function_exists('apache_setenv')) @apache_setenv('no-gzip', '1');
             $status = http_response_code();
             if (ob_get_level() === 0 && strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== 'HEAD'
                 && !in_array($status, [204, 304], true)) {
