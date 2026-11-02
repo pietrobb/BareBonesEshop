@@ -269,6 +269,7 @@ jobs:
       # Builds the upload-and-sell zip, unpacks it into a clean php:8.4-apache container (no CLI, no cron) and buys
       # an eBook (download), a paperback (cash on delivery) and a hardcover (bank transfer) that the owner handles.
       - name: Install the zip and run the acceptance test
+        timeout-minutes: 15
         env:
           CI: '1'
           OUT: ${{ runner.temp }}/bookshop-package

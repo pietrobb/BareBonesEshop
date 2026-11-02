@@ -27,5 +27,7 @@ if [ "$KEEP" = "--prepare-only" ]; then trap - EXIT; echo "Ready: http://127.0.0
 cd "$ROOT"
 BOOKSHOP_URL="http://127.0.0.1:$PORT" BOOKSHOP_SHOTS="$OUT/screenshots" BOOKSHOP_PRIVATE_PARENT=/srv/bookshop-data \
   npx playwright test -c tests/bookshop/playwright.config.js
-docker exec "$NAME" sh -c 'ls /srv/bookshop-data/bareboneseshop-private/jobs; tail -n 5 /var/log/apache2/error.log' || true
+# php:apache links /var/log/apache2/error.log to /dev/stderr (tail would block on it); its log is `docker logs`.
+docker exec "$NAME" ls /srv/bookshop-data/bareboneseshop-private/jobs || true
+docker logs --tail 5 "$NAME" 2>&1 || true
 echo "Package: $OUT/bareboneseshop-bookshop.zip  Screenshots: $OUT/screenshots"
