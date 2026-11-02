@@ -62,8 +62,14 @@ try {
     $r12iClosed = stream_socket_server('tcp://127.0.0.1:0');
     $r12iClosedPort = (int)substr(strrchr((string)stream_socket_get_name($r12iClosed, false), ':'), 1);
     fclose($r12iClosed);
-    assert_equals(null, WebInstaller::exposedPaths($r12iWeb, ['HTTP_HOST' => 'shop.test', 'SERVER_ADDR' => '127.0.0.1', 'SERVER_PORT' => (string)$r12iClosedPort, 'SCRIPT_NAME' => '/install.php'], 1.0),
-        'R12 installer: no connection to itself means "cannot tell", not "protected"');
+    // (The probe falls back to port 80 on 127.0.0.1, where the server listens behind a port mapping.)
+    $r12iPort80 = @fsockopen('127.0.0.1', 80, $r12iErrno, $r12iError, 1.0);
+    if ($r12iPort80 === false) {
+        assert_equals(null, WebInstaller::exposedPaths($r12iWeb, ['HTTP_HOST' => 'shop.test', 'SERVER_ADDR' => '127.0.0.1', 'SERVER_PORT' => (string)$r12iClosedPort, 'SCRIPT_NAME' => '/install.php'], 1.0),
+            'R12 installer: no connection to itself means "cannot tell", not "protected"');
+    } else {
+        fclose($r12iPort80);
+    }
     assert_equals(null, WebInstaller::exposedPaths($r12iWeb, ['HTTP_HOST' => "evil.test\r\nX: y", 'SERVER_PORT' => '80']), 'R12 installer: a forged Host header is never sent');
     $r12iInstall = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Install.php');
     assert_true(str_contains($r12iInstall, "\$errors['protection']") && !str_contains($r12iInstall, 'until then anyone') && !str_contains($r12iInstall, "'Installation failed: ' . \$e->getMessage()"),

@@ -62,16 +62,28 @@ final class WebInstaller
         $https = strtolower((string)($server['HTTPS'] ?? '')) === 'on';
         $host = (string)($server['HTTP_HOST'] ?? '');
         if (preg_match('/^[A-Za-z0-9.\-]+(?::\d{1,5})?$|^\[[0-9a-fA-F:]+\](?::\d{1,5})?$/', $host) !== 1) return null;
-        $address = (string)($server['SERVER_ADDR'] ?? '') ?: '127.0.0.1';
-        if (str_contains($address, ':')) $address = '[' . $address . ']';
-        $port = (int)($server['SERVER_PORT'] ?? 0) ?: ($https ? 443 : 80);
         $base = rtrim(str_replace('\\', '/', dirname((string)($server['SCRIPT_NAME'] ?? '/install.php'))), '/');
         $paths = ['src/autoload.php'];
         foreach (glob($root . '/demo/*/dist/*.json') ?: [] as $manifest) $paths[] = substr(str_replace('\\', '/', $manifest), strlen(str_replace('\\', '/', $root)) + 1);
         $context = stream_context_create(['ssl' => ['verify_peer' => false, 'verify_peer_name' => false, 'peer_name' => (string)preg_replace('/:\d+$/', '', $host)]]);
+        // SERVER_PORT is the port the client used: behind a port mapping or proxy the server itself listens on another one.
+        $endpoint = null;
+        foreach (array_unique([(string)($server['SERVER_ADDR'] ?? ''), '127.0.0.1']) as $address) {
+            if ($address === '') continue;
+            foreach (array_unique([(int)($server['SERVER_PORT'] ?? 0), $https ? 443 : 80]) as $port) {
+                if ($port <= 0) continue;
+                $candidate = ($https ? 'ssl://' : 'tcp://') . (str_contains($address, ':') ? '[' . $address . ']' : $address) . ':' . $port;
+                $socket = @stream_socket_client($candidate, $errno, $error, $timeout, STREAM_CLIENT_CONNECT, $context);
+                if ($socket === false) continue;
+                fclose($socket);
+                $endpoint = $candidate;
+                break 2;
+            }
+        }
+        if ($endpoint === null) return null;
         $exposed = [];
         foreach ($paths as $path) {
-            $socket = @stream_socket_client(($https ? 'ssl://' : 'tcp://') . $address . ':' . $port, $errno, $error, $timeout, STREAM_CLIENT_CONNECT, $context);
+            $socket = @stream_socket_client($endpoint, $errno, $error, $timeout, STREAM_CLIENT_CONNECT, $context);
             if ($socket === false) return null;
             stream_set_timeout($socket, (int)ceil($timeout));
             $url = $base . '/' . implode('/', array_map('rawurlencode', explode('/', $path)));
