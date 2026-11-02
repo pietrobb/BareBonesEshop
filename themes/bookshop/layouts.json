@@ -1,0 +1,39 @@
+{
+  "pages": {
+    "homepage": {
+      "layout": "storefront",
+      "title": "Bookshop",
+      "sections": [
+        {
+          "id": "home-hero", "type": "hero", "settings": {"variant": "bookshop"},
+          "content": {
+            "heading": "Great books never go out of print",
+            "body_html": "<p>Hundreds of public-domain classics, from Mark Twain and Jules Verne to Jane Austen and Arthur Conan Doyle. Read tonight as an instant eBook, or order a paperback or hardcover for the shelf.</p>",
+            "cta": {"label": "Browse the classics"}
+          },
+          "data_source": {"provider": "core.category-products", "parameters": {"slug": "classics", "limit": 3, "sort": "name_asc"}}
+        },
+        {
+          "id": "home-new", "type": "product-list", "settings": {"variant": "shelf"},
+          "content": {"heading": "New arrivals"},
+          "data_source": {"provider": "core.latest-products", "parameters": {"limit": 10}}
+        },
+        {
+          "id": "home-genres", "type": "category-list", "settings": {"variant": "genres"},
+          "content": {"heading": "Browse by genre"},
+          "data_source": {"provider": "core.featured-categories", "parameters": {"limit": 12}}
+        },
+        {
+          "id": "home-bestsellers", "type": "product-list", "settings": {"variant": "shelf"},
+          "content": {"heading": "Bestsellers"},
+          "data_source": {"provider": "core.tagged-products", "parameters": {"tag": "bestseller", "limit": 10}}
+        },
+        {
+          "id": "home-authors", "type": "author-list",
+          "content": {"heading": "Authors on our shelves"},
+          "data_source": {"provider": "core.specification-values", "parameters": {"name": "Author", "limit": 30}}
+        }
+      ]
+    }
+  }
+}

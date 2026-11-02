@@ -17,6 +17,20 @@ final class StorefrontCoreSectionProviders
             $limit = self::limit($parameters, 12);
             return ['items' => array_values(StorefrontViewModel::productCards(Products::latest($limit)))];
         });
+        self::provider('core.tagged-products', static function(array $parameters): array {
+            $limit = self::limit($parameters, 12);
+            return ['items' => array_values(StorefrontViewModel::productCards(Products::tagged((string)($parameters['tag'] ?? ''), $limit)))];
+        });
+        // Top values of one specification (authors, brands, materials), each linking to a storefront search for it.
+        self::provider('core.specification-values', static function(array $parameters): array {
+            $name = trim((string)($parameters['name'] ?? ''));
+            if ($name === '') return ['items' => []];
+            $items = [];
+            foreach (Products::specificationValues($name, I18n::locale(), self::limit($parameters, 12)) as $row) {
+                $items[] = $row + ['url' => Template::storeUrl('/') . '?page=search&q=' . rawurlencode($row['value'])];
+            }
+            return ['name' => $name, 'items' => $items];
+        });
         self::provider('core.curated-products', static function(array $parameters): array {
             $rows = [];
             foreach (array_slice((array)($parameters['ids'] ?? []), 0, 100) as $id) {
@@ -52,7 +66,9 @@ final class StorefrontCoreSectionProviders
     public static function category(array $row): array
     {
         $row = I18n::category($row);
+        $meta = is_array($row['meta'] ?? null) ? $row['meta'] : json_decode((string)($row['meta'] ?? ''), true);
         return [
+            'description' => is_array($meta) && is_string($meta['description'] ?? null) ? $meta['description'] : '',
             'id' => (int)$row['id'],
             'name' => (string)$row['name'],
             'slug' => (string)$row['slug'],

@@ -364,6 +364,37 @@ class Products {
         return $stmt->fetchAll();
     }
 
+    /** Newest active products carrying $tag (a slug, e.g. "bestseller") in their tags list. */
+    public static function tagged(string $tag, int $limit = 8): array {
+        $tag = Security::slug($tag);
+        if ($tag === '') return [];
+        $stmt = Db::get()->prepare("
+            SELECT * FROM products WHERE store_id = :store AND status = 'active' AND tags LIKE :tag
+            ORDER BY created_at DESC, id DESC LIMIT :limit
+        ");
+        // tags is a JSON list of strings; a slug has no LIKE wildcards or quotes, so the quoted value matches one element.
+        $stmt->execute([':store' => StoreContext::current()->catalogId(), ':tag' => '%"' . $tag . '"%', ':limit' => $limit]);
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * The most common values of one specification (e.g. "Author") over the active catalog, with their product counts.
+     * @return list<array{value: string, count: int}>
+     */
+    public static function specificationValues(string $name, string $lang, int $limit = 12): array {
+        $stmt = Db::get()->prepare("
+            SELECT ps.criteria_value AS value, COUNT(DISTINCT ps.product_id) AS cnt
+            FROM product_specifications ps
+            JOIN products p ON p.id = ps.product_id AND p.store_id = :store AND p.status = 'active'
+            WHERE ps.criteria_name = :name AND ps.lang = :lang
+            GROUP BY ps.criteria_value
+            ORDER BY cnt DESC, ps.criteria_value
+            LIMIT :limit
+        ");
+        $stmt->execute([':store' => StoreContext::current()->catalogId(), ':name' => $name, ':lang' => $lang, ':limit' => $limit]);
+        return array_map(static fn(array $row): array => ['value' => (string)$row['value'], 'count' => (int)$row['cnt']], $stmt->fetchAll());
+    }
+
     /**
      * Get specifications for a product in a given language
      */

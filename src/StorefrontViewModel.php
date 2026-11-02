@@ -185,6 +185,8 @@ final class StorefrontViewModel
                 'type' => (string)($product['product_type'] ?? 'simple'),
                 'name' => (string)$product['name'],
                 'summary' => (string)($product['summary'] ?? ''),
+                // The product's own attrs (author, brand, ...) as on the product page, for a card subtitle.
+                'custom_fields' => self::customFields($product['attrs'] ?? []),
                 'url' => self::productUrl((string)$product['slug']),
                 'price' => self::price($product),
                 'availability' => $state !== null

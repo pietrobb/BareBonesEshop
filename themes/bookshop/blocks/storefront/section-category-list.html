@@ -1,0 +1,4 @@
+{{#if data.items}}<section id="{{id}}" class="bk-section bk-genres" aria-labelledby="{{id}}-title">
+  <h2 class="bk-section__title" id="{{id}}-title">{{#if content.heading}}{{content.heading}}{{else}}{{t.categories}}{{/if}}</h2>
+  <ul class="bk-genres__list">{{#each data.items}}<li><a class="bk-genre" href="{{url}}"><span class="bk-genre__name">{{name}}</span>{{#if description}}<span class="bk-genre__text">{{description}}</span>{{/if}}<span class="bk-genre__count">{{count}} titles</span></a></li>{{/each}}</ul>
+</section>{{/if}}

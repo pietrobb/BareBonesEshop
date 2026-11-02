@@ -1,0 +1,4 @@
+{{#if data.items}}<section id="{{id}}" class="bk-section bk-authors" aria-labelledby="{{id}}-title">
+  <h2 class="bk-section__title" id="{{id}}-title">{{#if content.heading}}{{content.heading}}{{else}}{{data.name}}{{/if}}</h2>
+  <ul class="bk-authors__list">{{#each data.items}}<li><a href="{{url}}">{{value}} <span class="bk-authors__count">({{count}})</span></a></li>{{/each}}</ul>
+</section>{{/if}}
