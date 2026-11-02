@@ -54,7 +54,7 @@ foreach ([$coverDir, $epubDir] as $dir) {
 /** Display names and order of the genre categories; each has a data file data/<genre>.php. */
 $genres = [
     'classics' => 'Classics', 'adventure' => 'Adventure', 'science-fiction' => 'Science Fiction', 'mystery' => 'Mystery & Crime',
-    'horror' => 'Gothic & Horror', 'romance' => 'Romance', 'historical' => 'Historical Fiction', 'children' => "Children's Books",
+    'horror' => 'Gothic & Horror', 'romance' => 'Romance', 'historical' => 'Historical Fiction', 'children' => 'Young Readers',
     'humour' => 'Humour & Satire', 'poetry-drama' => 'Poetry & Drama', 'ideas' => 'Philosophy & Ideas', 'travel' => 'Travel & Nature',
 ];
 $descriptions = [
@@ -163,6 +163,8 @@ try {
         }
         echo sprintf("  %-20s %3d titles\n", $genreName, count($books));
     }
+    // Warehouse::setStock books the ledger only; the variant rows mirror it for the cart and the product page.
+    Warehouse::syncProductStock();
     Import::recountCategories($db);
     $db->commit();
 } catch (Throwable $e) {
