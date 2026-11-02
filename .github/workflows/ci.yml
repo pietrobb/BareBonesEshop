@@ -226,6 +226,68 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  bookshop-acceptance:
+    name: Bookshop package acceptance (php:8.4-apache)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          submodules: true
+
+      - name: Setup PHP 8.3 (package build)
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.3'
+          extensions: pdo, pdo_sqlite, mbstring, json, dom, libxml, sodium, gd, zip
+          coverage: none
+          tools: none
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install Playwright Chromium
+        timeout-minutes: 20
+        run: |
+          npm ci
+          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' | sudo tee /etc/apt/apt.conf.d/99-ci-timeouts >/dev/null
+          for attempt in 1 2 3; do
+            timeout 480 npx playwright install --with-deps chromium && exit 0
+            echo "::warning::playwright install attempt $attempt did not finish; retrying"
+            timeout 240 bash -c 'while pgrep -x apt-get >/dev/null || pgrep -x dpkg >/dev/null; do sleep 10; done' || true
+            sudo pkill -x apt-get || true
+            sleep 5
+            sudo dpkg --configure -a || true
+          done
+          exit 1
+
+      # Builds the upload-and-sell zip, unpacks it into a clean php:8.4-apache container (no CLI, no cron) and buys
+      # an eBook (download), a paperback (cash on delivery) and a hardcover (bank transfer) that the owner handles.
+      - name: Install the zip and run the acceptance test
+        timeout-minutes: 15
+        env:
+          CI: '1'
+          OUT: ${{ runner.temp }}/bookshop-package
+        run: bash tests/bookshop/run.sh
+
+      - name: Upload package and screenshots
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: bookshop-package
+          path: |
+            ${{ runner.temp }}/bookshop-package/bareboneseshop-bookshop.zip
+            ${{ runner.temp }}/bookshop-package/screenshots/
+            playwright-report/bookshop/
+            test-results/bookshop/
+          if-no-files-found: ignore
+          retention-days: 14
+
   database-qualification:
     name: Application & updater (${{ matrix.name }})
     runs-on: ubuntu-latest

@@ -11,7 +11,7 @@ module.exports = [
     languageOptions: { ecmaVersion: 2020, sourceType: 'script', globals: globals.browser },
   },
   {
-    files: ['eslint.config.js', 'playwright.config.js', 'lighthouserc.js', 'tests/e2e/**/*.js'],
+    files: ['eslint.config.js', 'playwright.config.js', 'lighthouserc.js', 'tests/e2e/**/*.js', 'tests/bookshop/**/*.js'],
     languageOptions: { ecmaVersion: 2022, sourceType: 'commonjs', globals: { ...globals.node, ...globals.browser } },
   },
   {

@@ -64,6 +64,8 @@ class Security {
     // HTTP headers — call once at the beginning of every request
     // ============================================================
     public static function headers(): void {
+        // Every web entrypoint passes here: on hosting without cron each of them may run the background worker.
+        WebWorker::afterResponse();
         header("X-Content-Type-Options: nosniff");
         header("X-Frame-Options: DENY");
         header("X-XSS-Protection: 1; mode=block");
