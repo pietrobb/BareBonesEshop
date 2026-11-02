@@ -118,6 +118,7 @@ test('first visit runs the web installer and the shop is ready', async ({ page }
     shop_name: 'BareBones Books', company: 'Demo Books Ltd', street: 'Main Street 1', city: 'Bratislava', zip: '811 01',
     country: 'SK', email: 'owner@books.test', iban: 'SK3112000000198742637541', admin_user: OWNER.username,
     admin_password: OWNER.password, admin_password_repeat: OWNER.password, private_parent: PRIVATE_PARENT,
+    install_key: process.env.BOOKSHOP_INSTALL_KEY || '',
   };
   for (const [name, value] of Object.entries(fields)) await page.locator(`[name="${name}"]`).fill(value);
   for (const name of ['pay_cod', 'pay_bank']) await page.locator(`input[name="${name}"]`).check();
