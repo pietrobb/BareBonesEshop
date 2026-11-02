@@ -14,6 +14,7 @@ final class SetupChecklist
         'payment.' => 'payments',
         'admin.' => 'admin_users',
         'provider.shipping' => 'shipping',
+        'catalog.digital_files' => 'digital_assets',
     ];
 
     /**

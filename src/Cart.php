@@ -236,6 +236,9 @@ class Cart {
             $qty = $isDigital ? 1 : ($allowsShortfall ? (int)$item['qty'] : min((int)$item['qty'], $stock));
             if ($isDigital && (int)$item['qty'] !== 1) $_SESSION['cart'][$key]['qty'] = 1;
             $available = $availability === VariantAvailability::ACTIVE && ($isDigital || $qty > 0);
+            // A download variant without its file is not sold: the customer would pay for nothing.
+            if ($available && !empty($item['variant_id']) && (int)($variants[$item['variant_id']]['digital'] ?? 0) === 1
+                && !VariantAvailability::hasDownload((string)$sku)) $available = false;
             if (!$available) $qty = (int)$item['qty']; // preserve requested qty for display
 
             $unavailableReason = $available ? null : 'not_available';
@@ -357,12 +360,15 @@ class Cart {
             'customer_vat_id_valid' => (bool)($vatContext['customer_vat_validated'] ?? $vatContext['customer_vat_id_valid'] ?? false),
             'is_b2b'                => (bool)($vatContext['customer_is_business']  ?? $vatContext['is_b2b']                ?? false),
             'customer_country_verified' => (bool)($vatContext['customer_country_verified'] ?? true),
+            'digital_customer_country' => (string)($vatContext['digital_customer_country'] ?? ''),
         ];
         $taxProvider = Adapters::tax((string)($vatContext['tax_provider'] ?? Adapters::defaultProviderCode('tax')));
         $scenario = $taxProvider::resolveScenario($vctx);
         $atDate   = $vatContext['at_date'] ?? null;
         $rateCountry = $scenario['rate_country'];
         $applies  = $scenario['applies_vat'];
+        // Downloads in an order collected in the store: taxed where the consumer lives (VatService::digitalRateCountry).
+        $digitalRateCountry = $applies && method_exists($taxProvider, 'digitalRateCountry') ? $taxProvider::digitalRateCountry($vctx) : null;
         // Catalog prices include the seller's domestic VAT. A zero-rated sale
         // (reverse charge, export) is charged that price without the VAT.
         $sellerCountry = strtoupper((string)$vctx['seller_country']);
@@ -384,8 +390,12 @@ class Cart {
 
             // The product's own category (books, medicines, ...) picks the rate: a country may tax it apart from its class.
             $vatClass = strtolower((string)($item['vat_class'] ?? 'standard'));
+            $digital = VariantAvailability::isDigitalType((string)($item['product_type'] ?? ''));
+            // An e-book may be taxed apart from the printed book (VatService::digitalCategory).
+            if ($digital && method_exists($taxProvider, 'digitalCategory')) $vatClass = $taxProvider::digitalCategory($vatClass);
             $resolved = method_exists($taxProvider, 'resolveClass') ? $taxProvider::resolveClass($vatClass) : $vatClass;
-            $rate     = $applies ? $taxProvider::rate($rateCountry, $vatClass, $atDate) : 0.0;
+            $lineCountry = $digital && $digitalRateCountry !== null ? $digitalRateCountry : $rateCountry;
+            $rate     = $applies ? $taxProvider::rate($lineCountry, $vatClass, $atDate) : 0.0;
             if ($stripDomesticVat) {
                 $unitNet = Money::round($taxProvider::computeLine((int)$item['price'], 1, $taxProvider::rate($sellerCountry, $vatClass, $atDate), false)['net'], (string)$summary['currency']);
                 $summary['subtotal'] -= (int)$item['total'] - $unitNet * (int)$item['qty'];

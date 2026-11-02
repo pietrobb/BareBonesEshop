@@ -287,6 +287,7 @@ class Setup
             self::retentionCheck($probe, $add);
             self::adminChecks($config, $add);
             self::storeCurrencyChecks($probe, is_array($stores) ? (array)($stores['stores'] ?? []) : [], $add);
+            $add(...array_values(self::digitalFilesCheck($probe)));
             foreach (PaymentReadiness::checks($probe, $config, is_array($stores) ? (array)($stores['stores'] ?? []) : null) as [$status, $name, $message, $remediation]) $add($status, $name, $message, $remediation);
         } catch (Throwable $e) {
             $add('fail', 'database.connection', 'Database connection failed.', 'Verify database credentials/path and run migrations.');
@@ -351,6 +352,21 @@ class Setup
             ? "Store {$storeId} has a {$currency} price for everything it offers."
             : "Store {$storeId} sells in {$currency}, but {$gap['count']} active product(s)/variant(s) have no {$currency} price and are not for sale there (e.g. " . implode(', ', $gap['skus']) . ').',
             'action' => $gap['count'] === 0 ? '' : "Price them in a {$currency} price list of store {$storeId} (Admin → Pricing → Price lists; a variant with a surcharge needs its own row), or set the store's currency to the catalog's."];
+    }
+
+    /**
+     * Download variants of active products without an active file (digital_assets by SKU): not for sale
+     * (VariantAvailability::hasDownload), so the shop silently lacks them.
+     * @return array{status: string, name: string, message: string, action: string}
+     */
+    public static function digitalFilesCheck(PDO $db): array {
+        $missing = Db::hasColumn('variants', 'digital', $db) && Db::tableExists('digital_assets', $db) ? $db->query("SELECT v.sku FROM variants v JOIN products p ON p.id = v.product_id
+            WHERE v.digital = 1 AND p.status = 'active'
+              AND NOT EXISTS (SELECT 1 FROM digital_assets da WHERE da.sku = v.sku AND da.active = 1) ORDER BY v.sku")->fetchAll(PDO::FETCH_COLUMN) : [];
+        return ['status' => $missing === [] ? 'pass' : 'warn', 'name' => 'catalog.digital_files', 'message' => $missing === []
+            ? 'Every download variant has its file.'
+            : count($missing) . ' download variant(s) have no active file and are not for sale (e.g. ' . implode(', ', array_slice($missing, 0, 5)) . ').',
+            'action' => $missing === [] ? '' : 'Add the file for each SKU in Admin → Digital files (or untick Download on the variant).'];
     }
 
     /** Retention deadlines are only met when cli/gdpr-gc.php --apply actually runs; nothing in the app schedules it. */

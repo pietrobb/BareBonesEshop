@@ -1015,6 +1015,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.variant.availability' => 'Dostępność',
     'admin.variant.policy' => 'Zasada',
     'admin.variant.digital' => 'Do pobrania',
+    'admin.variant.no_file' => 'Brak pliku: nie jest w sprzedaży, dopóki do tego SKU nie zostanie dodany plik do pobrania (Pliki cyfrowe).',
     'admin.variant.new' => 'nowy wariant',
     'admin.variant.hint' => 'Pusta cena = cena produktu + dopłata. Stan jest księgowany w ewidencji magazynowej. Wariantu z zamówień nie można usunąć — ustaw dostępność na discontinued.',
     'admin.variant.save' => 'Zapisz warianty',

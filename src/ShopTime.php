@@ -37,7 +37,8 @@ final class ShopTime {
      */
     public static function endOfDay(int $ts, int $days = 0, ?string $storeId = null): int {
         $local = (new DateTimeImmutable('@' . $ts))->setTimezone(self::zone($storeId));
-        return $local->setTime(0, 0)->modify('+' . ($days + 1) . ' days')->getTimestamp() - 1;
+        // sprintf('%+d'): "-2 days", never "+-2 days" (a negative $days is the reminder day before a due date).
+        return $local->setTime(0, 0)->modify(sprintf('%+d days', $days + 1))->getTimestamp() - 1;
     }
 
     /** The local calendar date $days days after $date (Y-m-d). */

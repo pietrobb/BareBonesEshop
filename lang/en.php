@@ -989,6 +989,7 @@ return [
     'admin.variant.availability' => 'Availability',
     'admin.variant.policy' => 'Policy',
     'admin.variant.digital' => 'Download',
+    'admin.variant.no_file' => 'No file yet: not for sale until a download with this SKU is added (Digital files).',
     'admin.variant.new' => 'new variant',
     'admin.variant.hint' => 'Empty price = product price + surcharge. Stock is booked through the warehouse ledger. A variant used in orders cannot be deleted — set its availability to discontinued.',
     'admin.variant.save' => 'Save variants',

@@ -87,7 +87,10 @@ class MarketingFeed {
             $after = (int)end($chunk)['id'];
             // One pricing context per chunk: guest price lists and catalog promotions, as on the storefront.
             $context = ProductEnrichmentContext::forProducts($chunk, [], null);
+            // A product with variants (a book in eBook/paperback/hardcover) keeps its stock on the variants.
+            $variantStates = VariantAvailability::variantStatesMany(array_map(static fn(array $p): int => (int)$p['id'], $chunk));
             foreach ($chunk as $product) {
+                if (isset($variantStates[(int)$product['id']])) $product['_variant_state'] = $variantStates[(int)$product['id']];
                 $translations = json_decode((string)($product['translations'] ?? '{}'), true);
                 $translated = is_array($translations) ? ($translations[$locale] ?? []) : [];
                 foreach (['name', 'summary', 'description', 'slug'] as $field) {
@@ -134,6 +137,12 @@ class MarketingFeed {
      * or one with stock is in stock; one sold ahead of stock follows its inventory policy (preorder or backorder).
      */
     private static function availability(array $product): string {
+        $variants = $product['_variant_state'] ?? null;
+        if (is_array($variants)) {
+            if (!$variants['purchasable']) return 'out of stock';
+            if ($variants['in_stock']) return 'in stock';
+            return ($product['inventory_policy'] ?? '') === Inventory::PREORDER ? 'preorder' : 'backorder';
+        }
         if (!VariantAvailability::productPurchasable($product)) return 'out of stock';
         if (VariantAvailability::isDigitalType((string)($product['product_type'] ?? '')) || (int)($product['stock'] ?? 0) > 0) return 'in stock';
         return ($product['inventory_policy'] ?? '') === Inventory::PREORDER ? 'preorder' : 'backorder';

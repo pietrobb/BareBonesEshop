@@ -1015,6 +1015,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.variant.availability' => 'Elérhetőség',
     'admin.variant.policy' => 'Szabály',
     'admin.variant.digital' => 'Letöltés',
+    'admin.variant.no_file' => 'Még nincs fájl: amíg ehhez az SKU-hoz nincs letölthető fájl (Digitális fájlok), nem vásárolható meg.',
     'admin.variant.new' => 'új változat',
     'admin.variant.hint' => 'Üres ár = termékár + felár. A készletet a raktári nyilvántartás könyveli. Rendelésekben szereplő változat nem törölhető — állítsa az elérhetőséget discontinued értékre.',
     'admin.variant.save' => 'Változatok mentése',

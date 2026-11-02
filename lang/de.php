@@ -1015,6 +1015,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.variant.availability' => 'Verfügbarkeit',
     'admin.variant.policy' => 'Richtlinie',
     'admin.variant.digital' => 'Download',
+    'admin.variant.no_file' => 'Noch keine Datei: nicht im Verkauf, bis für diese SKU ein Download hinterlegt ist (Digitale Dateien).',
     'admin.variant.new' => 'neue Variante',
     'admin.variant.hint' => 'Leerer Preis = Produktpreis + Aufpreis. Der Bestand wird über das Lagerbuch gebucht. Eine Variante aus Bestellungen kann nicht gelöscht werden — setzen Sie die Verfügbarkeit auf discontinued.',
     'admin.variant.save' => 'Varianten speichern',

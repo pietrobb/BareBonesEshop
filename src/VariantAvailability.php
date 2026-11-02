@@ -35,6 +35,17 @@ class VariantAvailability {
         return (int)$stmt->fetchColumn() === 1;
     }
 
+    /**
+     * Whether a download variant has an active file (digital_assets by its SKU). One without it is not for sale:
+     * the customer would pay for nothing (the admin editor and doctor list it).
+     */
+    public static function hasDownload(string $sku): bool {
+        if ($sku === '' || !Db::tableExists('digital_assets')) return false;
+        $stmt = Db::get()->prepare('SELECT 1 FROM digital_assets WHERE sku = :sku AND active = 1');
+        $stmt->execute([':sku' => $sku]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     /** Whether an order or cart line (product_id, variant_id) is digital: a digital product or a digital variant. */
     public static function isDigitalItem(array $item): bool {
         return self::isDigitalProduct((int)($item['product_id'] ?? 0))
@@ -49,10 +60,11 @@ class VariantAvailability {
         $product = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($variantId === null) return $product ? self::productPurchasable($product) : false;
         if (!$product || !self::productOpen($product)) return false;
-        $stmt = Db::get()->prepare('SELECT product_id, stock, availability, available_from, inventory_policy, preorder_at, ' . self::digitalColumn('variants') . ' AS digital FROM variants WHERE id = :id');
+        $stmt = Db::get()->prepare('SELECT product_id, sku, stock, availability, available_from, inventory_policy, preorder_at, ' . self::digitalColumn('variants') . ' AS digital FROM variants WHERE id = :id');
         $stmt->execute([':id' => $variantId]);
         $variant = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$variant || (int)$variant['product_id'] !== $productId) return false;
+        if ((int)($variant['digital'] ?? 0) === 1 && !self::hasDownload((string)$variant['sku'])) return false;
         return self::variantPurchasable($product, $variant);
     }
 
@@ -86,7 +98,8 @@ class VariantAvailability {
             $params = [':store' => StoreContext::current()->catalogId()];
             foreach ($chunk as $index => $id) $params[':id' . $index] = $id;
             $stmt = Db::get()->prepare("SELECT {$columns}, v.stock AS v_stock, v.availability AS v_availability, v.available_from AS v_available_from,
-                    v.inventory_policy AS v_inventory_policy, {$digital} AS v_digital
+                    v.inventory_policy AS v_inventory_policy, {$digital} AS v_digital,
+                    " . (Db::tableExists('digital_assets') ? '(SELECT COUNT(*) FROM digital_assets da WHERE da.sku = v.sku AND da.active = 1)' : '0') . " AS v_files
                 FROM variants v JOIN products p ON p.id = v.product_id
                 WHERE p.store_id = :store AND p.id IN (" . implode(', ', array_slice(array_keys($params), 1)) . ')');
             $stmt->execute($params);
@@ -95,7 +108,8 @@ class VariantAvailability {
                 $variant = ['stock' => $row['v_stock'], 'availability' => $row['v_availability'], 'available_from' => $row['v_available_from'],
                     'inventory_policy' => $row['v_inventory_policy'], 'digital' => $row['v_digital']];
                 $state = $result[$id] ?? ['purchasable' => false, 'in_stock' => false, 'quantity' => 0];
-                if (self::productOpen($row) && self::variantPurchasable($row, $variant)) {
+                $noFile = (int)$row['v_digital'] === 1 && (int)$row['v_files'] === 0;
+                if (!$noFile && self::productOpen($row) && self::variantPurchasable($row, $variant)) {
                     $state['purchasable'] = true;
                     $digital = self::isDigitalType((string)$row['product_type']) || (int)$row['v_digital'] === 1;
                     if ($digital || (int)$row['v_stock'] > 0) $state['in_stock'] = true;

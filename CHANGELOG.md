@@ -25,6 +25,14 @@
   they are served (`.htaccess` inactive). After seeding it deletes `demo/<name>/dist` (starter database,
   paid eBooks) and the key file. A failed installation shows a reference number; the exception (paths)
   goes only to the PHP error log.
+- **E-books and download variants (review round 12, low findings).** A download of a book is taxed in
+  its own VAT category `ebooks` (`digital_categories` in `config/vat-rates.json`; without a country's
+  `categories.ebooks` it takes the books rate). With OSS on, a download in an order collected in the
+  store is taxed in the consumer's EU country, not the store's. The marketing feed reports a product
+  with variants as in stock from its variants, and catalog price rules on `product_type` "digital" now
+  apply to download variants. A download variant without an active file is not for sale; the variant
+  editor and the doctor (`catalog.digital_files`, linked from the dashboard) point it out. The bank
+  transfer reminder day no longer builds a `"+-2 days"` date.
 - **Digital variants of physical products.** A variant can be marked as a download (`variants.digital`,
   migration `20261102090000_variant_digital`, checkbox in the variant editor), for example an e-book
   next to the paperback and hardcover of the same book. The download variant is sold as digital content:

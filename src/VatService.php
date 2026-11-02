@@ -91,7 +91,43 @@ class VatService implements TaxProvider
         if (isset($aliases[$alias])) return $aliases[$alias];
         $valid = ['standard', 'reduced', 'reduced2', 'zero'];
         if (in_array($alias, $valid, true)) return $alias;
+        $physical = self::physicalCategory($alias);
+        if ($physical !== null) return self::resolveClass($physical);
         return $cfg['fallback_class'] ?? 'standard';
+    }
+
+    /**
+     * The VAT category of a download of a product in $category: digital_categories maps it (books → ebooks), so a
+     * country taxing e-books apart from printed books sets categories.ebooks; elsewhere ebooks falls back to books.
+     */
+    public static function digitalCategory(string $category): string
+    {
+        $category = strtolower(trim($category));
+        $mapped = self::config()['digital_categories'][$category] ?? null;
+        return is_string($mapped) && $mapped !== '' ? strtolower($mapped) : $category;
+    }
+
+    /** The printed-product category a digital category was mapped from (ebooks → books), or null. */
+    private static function physicalCategory(string $category): ?string
+    {
+        foreach ((array)(self::config()['digital_categories'] ?? []) as $physical => $digital) {
+            if (is_string($digital) && strtolower($digital) === $category && strtolower((string)$physical) !== $category) return strtolower((string)$physical);
+        }
+        return null;
+    }
+
+    /**
+     * Country whose rate taxes the order's digital lines when it differs from the goods'. Goods collected in the
+     * seller's store are supplied there, but a download is supplied where the consumer lives: with OSS on, an EU
+     * consumer from another member state pays their own country's rate on the e-book. Null: same as the goods.
+     */
+    public static function digitalRateCountry(array $context): ?string
+    {
+        $declared = strtoupper(trim((string)($context['digital_customer_country'] ?? '')));
+        if ($declared === '' || $declared === strtoupper(trim((string)($context['customer_country'] ?? '')))) return null;
+        $scenario = self::resolveScenario(['customer_country' => $declared, 'customer_country_verified' => false] + $context);
+        if (($scenario['scenario'] ?? '') !== self::SCENARIO_OSS || empty($scenario['applies_vat'])) return null;
+        return (string)$scenario['rate_country'];
     }
 
     /**
@@ -126,6 +162,8 @@ class VatService implements TaxProvider
             }
         }
         if (isset($band['categories'][$category])) return (float)$band['categories'][$category];
+        $physical = self::physicalCategory($category);
+        if ($physical !== null && isset($band['categories'][$physical])) return (float)$band['categories'][$physical];
         return (float)($band[$class] ?? $band['standard'] ?? 0);
     }
 
@@ -270,6 +308,7 @@ class VatService implements TaxProvider
         $currency = strtolower((string)($amounts['currency'] ?? 'eur'));
         $appliesVat = (bool)$scenario['applies_vat'];
         $rateCountry = (string)$scenario['rate_country'];
+        $digitalRateCountry = $appliesVat ? self::digitalRateCountry($context) : null;
 
         $products = [];
         $subtotal = 0;
@@ -281,10 +320,13 @@ class VatService implements TaxProvider
             }
             $gross = $unitGross * $quantity;
             $vatClass = self::resolveClass((string)($item['vat_class'] ?? 'standard'));
+            $digital = VariantAvailability::isDigitalType((string)($item['product_type'] ?? ''));
+            $category = (string)($item['vat_category'] ?? ($digital ? self::digitalCategory((string)($item['vat_class'] ?? 'standard')) : ($item['vat_class'] ?? 'standard')));
+            $lineCountry = $digital && $digitalRateCountry !== null ? $digitalRateCountry : $rateCountry;
             $rateBasisPoints = $appliesVat
-                ? (int)round(self::rate($rateCountry, (string)($item['vat_category'] ?? $item['vat_class'] ?? 'standard'), $effectiveDate) * 100)
+                ? (int)round(self::rate($lineCountry, $category, $effectiveDate) * 100)
                 : 0;
-            $products[] = [
+            $products[] = ($lineCountry !== $rateCountry ? ['rate_country' => $lineCountry] : []) + [
                 'index' => (int)$index,
                 'product_id' => (int)($item['product_id'] ?? 0),
                 'variant_id' => isset($item['variant_id']) ? (int)$item['variant_id'] : null,

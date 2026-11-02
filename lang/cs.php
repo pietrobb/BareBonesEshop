@@ -1015,6 +1015,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.variant.availability' => 'Dostupnost',
     'admin.variant.policy' => 'Politika',
     'admin.variant.digital' => 'Ke stažení',
+    'admin.variant.no_file' => 'Zatím bez souboru: neprodává se, dokud k tomuto SKU nepřibude soubor ke stažení (Digitální soubory).',
     'admin.variant.new' => 'nová varianta',
     'admin.variant.hint' => 'Prázdná cena = cena produktu + příplatek. Sklad se účtuje přes skladovou evidenci. Variantu z objednávek nelze smazat — nastavte dostupnost discontinued.',
     'admin.variant.save' => 'Uložit varianty',
