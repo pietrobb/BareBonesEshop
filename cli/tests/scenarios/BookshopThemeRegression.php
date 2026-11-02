@@ -40,7 +40,12 @@ try {
         'Bookshop theme: the tagged-products section provider returns the shelf as product cards');
     assert_equals('BT Writer One', $btShelf['items'][1]['custom_fields']['Author'] ?? null,
         'Bookshop theme: a product card carries the product attrs (the author under the title)');
-    $btAuthors = StorefrontSectionRegistry::resolve('core.specification-values', ['name' => 'BT238 Author']);
+    // The provider reads the specifications of the shopper's language.
+    $btLocale = I18n::locale();
+    I18n::setLocale('en');
+    try {
+        $btAuthors = StorefrontSectionRegistry::resolve('core.specification-values', ['name' => 'BT238 Author']);
+    } finally { I18n::setLocale($btLocale); }
     assert_equals(['BT238 Author', 'BT Writer One', 2], [$btAuthors['name'] ?? '', $btAuthors['items'][0]['value'] ?? '', $btAuthors['items'][0]['count'] ?? 0],
         'Bookshop theme: the specification-values provider lists the authors with their book counts');
     assert_true(str_ends_with((string)($btAuthors['items'][0]['url'] ?? ''), '?page=search&q=BT%20Writer%20One'),
