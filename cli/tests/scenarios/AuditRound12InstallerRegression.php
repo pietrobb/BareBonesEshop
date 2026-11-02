@@ -24,6 +24,8 @@ try {
     assert_true(is_string($r12iKey) && preg_match('/^[A-Z2-9]{5}(?:-[A-Z2-9]{5}){3}$/', $r12iKey) === 1 && is_file($r12iRoot . '/' . WebInstaller::KEY_FILE),
         'R12 installer: the first visit writes a random 20-character key into install-key.php');
     assert_equals($r12iKey, WebInstaller::installKey($r12iRoot), 'R12 installer: later visits read the same key');
+    assert_true((fileperms($r12iRoot . '/' . WebInstaller::KEY_FILE) & 0004) !== 0,
+        'R12 installer: install-key.php is readable by an FTP account that is not the PHP user nor in its group');
     mkdir($r12iBase . '/other');
     assert_true(!in_array(WebInstaller::installKey($r12iBase . '/other'), [null, $r12iKey], true), 'R12 installer: every install gets its own key');
     assert_equals([true, true, false, false], [
