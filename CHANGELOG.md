@@ -11,6 +11,13 @@
   switching a variant's digital flag afterwards no longer loses or invents stock. A bundle cannot be a
   digital variant (refused in the editor and at checkout); a digital line keeps its required
   personalization. Cart and checkout read `variants.digital` only once it is migrated.
+- **Page-driven worker releases the visitor first** (review round 12). PHP writes and unlocks the session
+  only after every shutdown function, so the admin whose click carried a pass waited for the whole pass on
+  the next click. The pass now closes the session, drops the visitor's session data (its changes are audited
+  as `system`) and, without `fastcgi_finish_request` (Apache mod_php), ends the buffered response with an
+  exact `Content-Length` and `Connection: close` before working, so a payment webhook is answered at once.
+  A response already streamed without a length skips the pass. The pass may run 300 s
+  (`WebWorker::TIME_LIMIT`) instead of the web `max_execution_time`.
 - **Digital variants of physical products.** A variant can be marked as a download (`variants.digital`,
   migration `20261102090000_variant_digital`, checkbox in the variant editor), for example an e-book
   next to the paperback and hardcover of the same book. The download variant is sold as digital content:
