@@ -176,7 +176,7 @@ try {
     $wiStamp = (string)file_get_contents($wiJobs . '/web-worker.last');
     $wiHttp('/admin.php');
     assert_equals($wiStamp, (string)file_get_contents($wiJobs . '/web-worker.last'), 'Web worker: within the interval a further request runs no second pass');
-    assert_true(str_contains($wiDone['body'], 'No cron: page requests run the worker'), 'Web worker: doctor accepts page-driven jobs instead of a cron declaration');
+    assert_true(str_contains($wiDone['body'], 'checks passed') && !str_contains($wiDone['body'], 'Worker cron declaration not recorded'), 'Web worker: doctor accepts page-driven jobs instead of a cron declaration');
 } catch (Throwable $e) { $wiFail('over HTTP', $e); }
 finally {
     if (is_resource($wiServer)) { proc_terminate($wiServer); proc_close($wiServer); }
