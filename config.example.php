@@ -150,6 +150,10 @@ return [
     ],
     'operations' => [
         'worker_cron' => '', // e.g. * * * * *; install it in the platform scheduler too
+        // Hosting without cron: true runs one worker pass after a page response, at most every
+        // web_worker_interval seconds (the web installer sets it). A real cron is better: turn this off then.
+        'web_worker' => false,
+        'web_worker_interval' => 60,
         'monitor_cron' => '', // e.g. */5 * * * * php cli/monitor.php
         // Live nginx site config (absolute path, readable by PHP): doctor and staging-preflight warn
         // when its PHP location lacks the @redirect fallback that store-prefixed scripts need. '' = not checked.

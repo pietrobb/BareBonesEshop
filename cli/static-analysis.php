@@ -247,6 +247,8 @@ $architectureBudgets = [
     // +1 coupling: ApiRoute maps the /api/v1 route groups (storefront, options, webhooks, csp-report) to actions.
     // +1 coupling R8: Logger::phpLog masks e-mail addresses and secrets before the PHP error log.
     'src/Entrypoints/Api.php' => ['lines' => 75, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 7],
+    // Bookshop #239: the first-visit web installer page (install.php); the steps live in WebInstaller.
+    'src/Entrypoints/Install.php' => ['lines' => 110, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 2],
     // External key-authenticated API v1 (was api/v1/index.php), loaded by Api.php for non-browser routes.
     // +5 lines: the path below the install subdirectory / store prefix, and the prefix-vs-key store check.
     'src/Entrypoints/ApiExternal.php' => ['lines' => 55, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 6],

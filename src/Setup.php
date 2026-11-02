@@ -35,8 +35,10 @@ class Setup
      * Creates config.php from config.example.php with a fresh admin_identity_key.
      * An existing config.php is never touched.
      * @param array<string,string> $database install switches driver/host/port/name/user (+ password from BBE_DB_PASSWORD)
+     * @param string $privateParent absolute directory that holds bareboneseshop-private/ instead of the default (web installer)
+     * @param array<string,string|bool> $values further template entries to fill in (e.g. stripe_secret_key, web_worker)
      */
-    public static function createConfig(?string $root = null, string $appUrl = '', string $adminEmail = '', array $database = []): array
+    public static function createConfig(?string $root = null, string $appUrl = '', string $adminEmail = '', array $database = [], string $privateParent = '', array $values = []): array
     {
         $root ??= dirname(__DIR__);
         $target = $root . '/config.php';
@@ -54,12 +56,13 @@ class Setup
         // In a subdirectory of a web root the template's ../bareboneseshop-private would be served: keep it above the web root.
         $webRoot = self::enclosingWebRoot($root);
         $privateBase = $webRoot === null ? null : dirname($webRoot) . '/bareboneseshop-data/' . basename(str_replace('\\', '/', $root));
+        if ($privateParent !== '') $privateBase = rtrim(str_replace('\\', '/', $privateParent), '/');
         if ($privateBase !== null) $config = str_replace('dirname(__DIR__)', var_export($privateBase, true), $config);
-        foreach (['admin_identity_key' => base64_encode(random_bytes(32)), 'app_url' => rtrim($appUrl, '/'), 'admin_email' => $adminEmail] + $dbValues as $key => $value) {
+        foreach (['admin_identity_key' => base64_encode(random_bytes(32)), 'app_url' => rtrim($appUrl, '/'), 'admin_email' => $adminEmail] + $dbValues + $values as $key => $value) {
             if ($value === '') continue;
             $count = 0;
             // A callback, not a replacement string: '$1' or '\1' inside the value must stay literal.
-            $config = preg_replace_callback("/('" . $key . "'\s*=>\s*)(?:'[^'\\\\]*'|\d+)/", static fn(array $m): string => $m[1] . var_export($value, true), (string)$config, 1, $count);
+            $config = preg_replace_callback("/('" . $key . "'\s*=>\s*)(?:'[^'\\\\]*'|\d+|true|false)/", static fn(array $m): string => $m[1] . var_export($value, true), (string)$config, 1, $count);
             if (!is_string($config) || $count !== 1) throw new RuntimeException("config.example.php has no {$key} entry");
         }
         $tmp = $target . '.' . bin2hex(random_bytes(4)) . '.tmp';
@@ -510,7 +513,8 @@ class Setup
     {
         $add(is_file($root . '/cli/worker.php') ? 'pass' : 'fail', 'operations.worker', 'Worker entry point ' . (is_file($root . '/cli/worker.php') ? 'present' : 'missing'), 'Restore cli/worker.php.');
         $cron = trim((string)($config['operations']['worker_cron'] ?? ''));
-        $add(preg_match('/^(?:\S+\s+){4}\S+$/', $cron) ? 'pass' : 'warn', 'operations.cron', $cron !== '' ? 'Worker cron declaration configured.' : 'Worker cron declaration not recorded.', 'Set operations.worker_cron and install the equivalent scheduler entry.');
+        $webWorker = WebWorker::enabled($config);
+        $add(preg_match('/^(?:\S+\s+){4}\S+$/', $cron) || $webWorker ? 'pass' : 'warn', 'operations.cron', $cron !== '' ? 'Worker cron declaration configured.' : ($webWorker ? 'No cron: page requests run the worker (operations.web_worker).' : 'Worker cron declaration not recorded.'), 'Set operations.worker_cron and install the equivalent scheduler entry.');
         $backupPath = $root . '/config/backup.json';
         $backup = is_file($backupPath) ? json_decode((string)file_get_contents($backupPath), true) : null;
         $add(is_array($backup) && !empty($backup['enabled']) ? 'pass' : 'fail', 'operations.backup', 'Backup configuration ' . (is_array($backup) && !empty($backup['enabled']) ? 'enabled' : 'missing or disabled'), 'Enable config/backup.json and run a restore probe.');

@@ -14,7 +14,7 @@
       <input id="storefront-search" type="search" name="q" placeholder="Title, author or genre" value="{{search_query}}" data-search-suggest="{{t.search_suggestions}}">
       <button type="submit">{{t.search}}</button>
     </form>
-    <a href="{{cart_url}}" class="bk-cart">{{t.cart}}{{#if cart_count}} <span class="bk-cart__count">{{cart_count}}</span>{{/if}}</a>
+    <a href="{{cart_url}}" class="bk-cart cart-icon">{{t.cart}}{{#if cart_count}}<span class="bk-cart__count cart-badge">{{cart_count}}</span>{{/if}}</a>
   </div></div>
   <nav class="bk-nav" aria-label="{{t.categories}}"><div class="wrap">
     <a href="{{home_url}}">{{t.home}}</a>{{#each navigation}}{{> storefront/navigation-link}}{{/each}}

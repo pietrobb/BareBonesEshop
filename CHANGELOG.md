@@ -16,6 +16,17 @@
   page with a format picker. New section providers `core.tagged-products` (products with one tag) and
   `core.specification-values` (top values of one specification, linking to a search). Product cards
   expose the product attrs (`custom_fields`), and the cart and checkout name the chosen variant.
+- **Web installer** (`install.php`) for hosting without a shell: while there is no `config.php`, the
+  storefront and the administration redirect to it. One form sets the shop name, seller identity, time
+  zone, payment methods (cash on delivery, bank transfer, optional Stripe test keys), the private data
+  folder and the owner account; it writes `config.php` with a fresh `admin_identity_key`, applies the
+  private runtime paths, creates and migrates the SQLite database, and shows the owner's TOTP QR code and
+  recovery codes once plus the doctor checklist. Afterwards `install.php` answers 404. Other stores still
+  naming the example seller are switched to non-public.
+- **Bookshop package** (`demo/bookshop/package.php`): builds `bareboneseshop-bookshop.zip` from a git ref
+  with `vendor/bbf`, a ready SQLite database of the bookshop demo, its EPUB files and an English
+  single-store `stores.json` in the web-denied `demo/bookshop/dist/`, and no `config.php`. The web
+  installer copies that starter data into the private folder, so the shop sells right after the form.
 
 ## 2.1.0 — 2026-11-01
 

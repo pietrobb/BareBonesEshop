@@ -27,7 +27,7 @@ main{padding:28px 0 8px}
 .bk-search button:hover{background:var(--bk-accent-dark)}
 .bk-cart{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 16px;border:1px solid var(--bk-line);border-radius:999px;color:var(--bk-ink);font-weight:600;text-decoration:none}
 .bk-cart:hover{border-color:var(--bk-accent);color:var(--bk-accent)}
-.bk-cart__count{background:var(--bk-accent);color:#fff;border-radius:999px;min-width:24px;height:24px;padding:0 6px;display:inline-flex;align-items:center;justify-content:center;font-size:.8rem}
+.bk-cart__count,.bk-cart .cart-badge{margin-left:6px;background:var(--bk-accent);color:#fff;border-radius:999px;min-width:24px;height:24px;padding:0 6px;display:inline-flex;align-items:center;justify-content:center;font-size:.8rem}
 .bk-nav{background:var(--bk-card);border-top:1px solid var(--bk-line)}
 .bk-nav .wrap{display:flex;flex-wrap:wrap;gap:4px 8px}
 .bk-nav .wrap>a,.bk-nav .nav-item>a{display:block;padding:12px 10px;color:var(--bk-ink);font:600 .98rem var(--bk-serif);text-transform:none;border-bottom:3px solid transparent}
