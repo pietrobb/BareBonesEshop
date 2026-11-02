@@ -18,7 +18,7 @@ final class WebWorker
     /** Registers the pass as the LAST shutdown function, so session writes and other handlers finish first. */
     public static function afterResponse(): void
     {
-        if (self::$scheduled || !self::enabled(Security::config())) return;
+        if (self::$scheduled || PHP_SAPI === 'cli' || !self::enabled(Security::config())) return;
         self::$scheduled = true;
         register_shutdown_function(static function (): void {
             register_shutdown_function(static function (): void {
