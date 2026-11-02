@@ -27,7 +27,8 @@ function renderCart(): string {
     $items = array_map(static fn(array $item): array => [
         'id' => (int)$item['product_id'], 'cart_key' => (string)$item['key'],
         'url' => Template::storeUrl('/product/' . rawurlencode((string)$item['slug'])), // canonical product path
-        'name' => (string)$item['name'], 'sku' => (string)$item['sku'], 'price' => $price((int)$item['price']),
+        'name' => (string)$item['name'], 'variant_name' => (string)($item['variant_name'] ?? ''),
+        'sku' => (string)$item['sku'], 'price' => $price((int)$item['price']),
         'quantity' => (int)$item['qty'], 'line_total' => $price((int)$item['total']),
         'remove_label' => $t('remove'),
     ], $cart);
@@ -132,7 +133,8 @@ function renderCheckout(): string {
         'submitting_label' => $t('checkout_submitting'), 'redirecting_label' => $t('checkout_redirecting'),
         'payment_unavailable' => $paymentMethods ? '' : $t('payment_unavailable'), 'notes_label' => $t('notes'), 'notes_placeholder' => $t('notes_placeholder'),
         'submit_label' => $t('submit_order'), 'your_order_label' => $t('your_order'),
-        'items' => array_map(static fn(array $item): array => ['name' => (string)$item['name'], 'quantity' => (int)$item['qty'], 'total' => $price((int)$item['total'])], $cart),
+        // The variant names the line (e.g. "Paperback"), so two editions of one product are told apart.
+        'items' => array_map(static fn(array $item): array => ['name' => (string)$item['name'] . (($item['variant_name'] ?? '') !== '' ? ' (' . $item['variant_name'] . ')' : ''), 'quantity' => (int)$item['qty'], 'total' => $price((int)$item['total'])], $cart),
         'subtotal_cents' => $subtotal, 'vat_scenario' => (string)$vat['scenario']['scenario'], 'subtotal_label' => $t('subtotal'), 'subtotal' => $price($subtotal),
         'shipping' => $shipping === 0 ? $freeLabel : $price($shipping), 'payment_fee' => $paymentFee === 0 ? $freeFeeLabel : $price($paymentFee),
         'discount_cents' => $discount, 'discount_label' => $t('discount'), 'discount' => $discount > 0 ? $price(-$discount) : '',

@@ -2,6 +2,8 @@
 :root{--bk-paper:#fbf8f3;--bk-card:#fff;--bk-ink:#1d232b;--bk-muted:#545d69;--bk-line:#e4ddd0;--bk-accent:#1f5f4a;--bk-accent-dark:#154636;--bk-accent-soft:#e7f0ec;--bk-gold:#b8862b;--bk-out:#9b2a1f;--bk-serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;--bk-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
 body{background:var(--bk-paper);color:var(--bk-ink);font-family:var(--bk-sans);font-size:16px;line-height:1.55}
 a{color:var(--bk-accent)}a:hover{color:var(--bk-accent-dark)}
+main p a,.checkout-login a,.legal-page a{text-decoration:underline}
+.shipping-loading,.shipping-empty,.payment-loading,.payment-empty,.muted{color:var(--bk-muted)}
 h1,h2,h3,h4,.section-title{font-family:var(--bk-serif);font-weight:600;color:var(--bk-ink);letter-spacing:.005em}
 h1{font-size:clamp(1.7rem,1.2rem + 2vw,2.5rem);line-height:1.15}
 :focus-visible{outline:3px solid var(--bk-gold);outline-offset:2px}
@@ -97,6 +99,8 @@ main{padding:28px 0 8px}
 .bk-book__buy{padding:18px 20px;background:var(--bk-card);border:1px solid var(--bk-line);border-radius:10px;max-width:520px}
 .bk-book__price{font-size:1.7rem;font-weight:700;color:var(--bk-ink);margin:0}
 .bk-book__stock{margin:4px 0 12px;color:var(--bk-muted)}
+.bk-book__info .wishlist-toggle-form{margin-top:14px}
+.bk-book__info .btn-secondary{background:none;color:var(--bk-accent);border:1px solid var(--bk-accent)}.bk-book__info .btn-secondary:hover{background:var(--bk-accent-soft);color:var(--bk-accent-dark)}
 .bk-book__buy .qty-input{width:72px;min-height:46px;border:1px solid #b9b0a1;border-radius:8px;font-size:1rem}
 .bk-book__more{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:clamp(24px,4vw,56px);margin-bottom:24px}
 .bk-book__about{font-size:1.04rem;max-width:44em}.bk-book__about p{margin:0 0 14px}
