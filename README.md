@@ -80,6 +80,9 @@ database and the eBook files.
    copies the database and the eBooks there, and creates the owner account. Scan the TOTP QR code it
    shows into an authenticator app and keep the recovery codes; they are shown once. The page ends
    with the doctor checklist (warnings such as "mail provider: log" are expected for a demo).
+   If PHP cannot write to the folder above the web root (e.g. `/var/www` in the `php:apache` Docker
+   image), the form says so: create a folder outside the web root that the web server user can write
+   to (e.g. `/srv/bookshop-data`) and enter it. A folder inside the web root is always refused.
 5. Sign in at `/admin.php`. After the install `install.php` answers 404 and changes nothing.
 
 E-mails are only logged until you configure SMTP in `config.php`. To build the package yourself:
