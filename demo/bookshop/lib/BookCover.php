@@ -49,6 +49,7 @@ final class BookshopCover
             . '<rect x="28" y="28" width="544" height="844" fill="none" stroke="' . $accent . '" stroke-width="3"/>'
             . '<rect x="40" y="40" width="520" height="820" fill="none" stroke="' . $accent . '" stroke-width="1" opacity="0.7"/>'
             . '<rect x="70" y="' . ($top - $size - 40) . '" width="460" height="' . (count($lines) * $lineHeight + 70) . '" fill="' . $bg . '" opacity="0.82"/>'
+            . '<rect x="70" y="766" width="460" height="50" fill="' . $bg . '" opacity="0.88"/>'
             . '<g font-family="Georgia, \'Times New Roman\', serif" fill="' . $ink . '" text-anchor="middle">'
             . '<text x="300" y="110" font-size="18" letter-spacing="6" fill="' . $accent . '">' . $e(mb_strtoupper($seriesLabel)) . '</text>'
             . $titleSvg
