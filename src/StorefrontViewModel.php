@@ -353,6 +353,8 @@ final class StorefrontViewModel
     {
         $variantProduct = $product;
         $variantProduct['stock'] = (int)($variant['stock'] ?? 0);
+        $digital = (int)($variant['digital'] ?? 0) === 1;
+        if ($digital) $variantProduct['product_type'] = 'digital';
         if (($variant['inventory_policy'] ?? 'inherit') !== 'inherit') $variantProduct['inventory_policy'] = $variant['inventory_policy'];
         $delta = (int)($variant['price_delta'] ?? 0);
         $amount = $variant['price_absolute'] !== null
@@ -378,6 +380,7 @@ final class StorefrontViewModel
             'price_delta_minor' => $delta,
             'price_amount_minor' => max(0, $amount),
             'price_formatted' => I18n::price(max(0, $amount), $currency),
+            'digital' => $digital,
             'availability' => self::availability($variantProduct, (int)$variant['id']),
         ];
     }

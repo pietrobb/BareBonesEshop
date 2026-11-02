@@ -22,6 +22,20 @@ class VariantAvailability {
         return self::isDigitalType((string)$stmt->fetchColumn());
     }
 
+    /** Whether the variant is digital content of an otherwise physical product (an e-book next to its paperback). */
+    public static function isDigitalVariant(?int $variantId): bool {
+        if (!$variantId) return false;
+        $stmt = Db::get()->prepare('SELECT v.digital FROM variants v JOIN products p ON p.id = v.product_id AND p.store_id = :store WHERE v.id = :id');
+        $stmt->execute([':id' => $variantId, ':store' => StoreContext::current()->catalogId()]);
+        return (int)$stmt->fetchColumn() === 1;
+    }
+
+    /** Whether an order or cart line (product_id, variant_id) is digital: a digital product or a digital variant. */
+    public static function isDigitalItem(array $item): bool {
+        return self::isDigitalProduct((int)($item['product_id'] ?? 0))
+            || self::isDigitalVariant(isset($item['variant_id']) ? (int)$item['variant_id'] : null);
+    }
+
     private const PRODUCT_COLUMNS = 'id, product_type, status, stock, availability, available_from, inventory_policy, preorder_at';
 
     public static function isPurchasable(int $productId, ?int $variantId = null): bool {
@@ -31,11 +45,11 @@ class VariantAvailability {
         if ($variantId === null) return $product ? self::productPurchasable($product) : false;
         if (!$product || !self::productOpen($product)) return false;
         $policy = (string)($product['inventory_policy'] ?? Inventory::DENY);
-        $digital = self::isDigitalType((string)$product['product_type']);
-        $stmt = Db::get()->prepare('SELECT product_id, stock, availability, available_from, inventory_policy, preorder_at FROM variants WHERE id = :id');
+        $stmt = Db::get()->prepare('SELECT product_id, stock, availability, available_from, inventory_policy, preorder_at, digital FROM variants WHERE id = :id');
         $stmt->execute([':id' => $variantId]);
         $variant = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$variant || (int)$variant['product_id'] !== $productId) return false;
+        $digital = self::isDigitalType((string)$product['product_type']) || (int)$variant['digital'] === 1;
         $variantPolicy = ($variant['inventory_policy'] ?? 'inherit') === 'inherit'
             ? $policy
             : (string)$variant['inventory_policy'];

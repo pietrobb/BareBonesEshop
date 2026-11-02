@@ -1013,6 +1013,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.variant.delta' => 'Felár (cent)',
     'admin.variant.availability' => 'Elérhetőség',
     'admin.variant.policy' => 'Szabály',
+    'admin.variant.digital' => 'Letöltés',
     'admin.variant.new' => 'új változat',
     'admin.variant.hint' => 'Üres ár = termékár + felár. A készletet a raktári nyilvántartás könyveli. Rendelésekben szereplő változat nem törölhető — állítsa az elérhetőséget discontinued értékre.',
     'admin.variant.save' => 'Változatok mentése',

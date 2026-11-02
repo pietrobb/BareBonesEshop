@@ -191,7 +191,7 @@ final class ManualOrder {
                 $label = (string)$item['sku'];
                 if (!($item['available'] ?? true)) return ['error' => 'admin.order.manual.unavailable', 'detail' => $label];
                 // The shop never sells fewer units than were asked for without saying so.
-                if (!VariantAvailability::isDigitalProduct((int)$item['product_id'])
+                if (!VariantAvailability::isDigitalItem($item)
                     && (int)$item['qty'] < min(Cart::MAX_QTY, $requested[$item['key']] ?? 0)) {
                     return ['error' => 'admin.order.manual.not_enough_stock', 'detail' => $label];
                 }
