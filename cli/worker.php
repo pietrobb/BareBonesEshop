@@ -18,7 +18,7 @@ require_once __DIR__ . '/../src/autoload.php';
 set_exception_handler(static function (Throwable $e): void {
     IncidentMonitor::heartbeat('worker', 'failed');
     IncidentMonitor::report('worker.unhandled_failed', 'worker', 'critical', ['exception' => $e]);
-    fwrite(STDERR, "worker.unhandled_failed\n");
+    if (defined('STDERR')) fwrite(STDERR, "worker.unhandled_failed\n");
     exit(1);
 });
 

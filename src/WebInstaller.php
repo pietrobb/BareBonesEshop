@@ -135,7 +135,7 @@ final class WebInstaller
     public static function install(array $v, string $root): array
     {
         $stripe = array_filter(array_intersect_key($v, array_flip(self::STRIPE_FIELDS)), static fn($value): bool => $value !== '');
-        $created = Setup::createConfig($root, $v['app_url'], $v['email'], ['driver' => 'sqlite'], $v['private_parent'], $stripe);
+        $created = Setup::createConfig($root, $v['app_url'], $v['email'], ['driver' => 'sqlite'], $v['private_parent'], $stripe + ['web_worker' => true]);
         if ($created['action'] !== 'created') throw new RuntimeException('The shop is already installed (config.php exists).');
         $config = require $root . '/config.php';
         $database = (string)$config['db_sqlite_path'];

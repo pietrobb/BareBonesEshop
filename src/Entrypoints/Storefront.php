@@ -4,6 +4,7 @@
  * Generic catalog; extensions can add their own pages.
  */
 require_once dirname(__DIR__, 2) . '/src/autoload.php';
+WebWorker::afterResponse();
 
 require_once __DIR__ . '/Storefront/CatalogPages.php';
 require_once __DIR__ . '/Storefront/ProductStatusPages.php';

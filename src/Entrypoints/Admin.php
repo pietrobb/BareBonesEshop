@@ -1,6 +1,7 @@
 <?php
 /** BareBones Shop admin panel: session/MFA auth (Security::adminAuth), permission map, POST dispatch and page layout. */
 require_once dirname(__DIR__, 2) . '/src/autoload.php';
+WebWorker::afterResponse();
 
 // Shared helpers, POST dispatch and store scope load on every request; page modules load per route below.
 require_once __DIR__ . '/Admin/Shared.php';

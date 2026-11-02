@@ -1,6 +1,7 @@
 <?php
 
-if (!in_array(PHP_SAPI, ['cli', 'phpdbg'], true)) {
+// BBE_WEB_WORKER: src/WebWorker.php runs cli/worker.php after a response on hosting without cron.
+if (!in_array(PHP_SAPI, ['cli', 'phpdbg'], true) && !defined('BBE_WEB_WORKER')) {
     http_response_code(403);
     exit(1);
 }

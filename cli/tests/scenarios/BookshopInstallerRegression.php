@@ -166,6 +166,17 @@ try {
     assert_equals('WI Books Ltd', $wiInstalledStores['stores'][$wiInstalledStores['default_store']]['legal']['name'] ?? null, 'Web installer: the seller lands in the install\'s own stores.json');
     assert_equals([404, 200], [$wiHttp('/install.php')['status'], $wiHttp('/')['status']], 'Web installer: once installed, install.php answers 404 and the shop opens');
     assert_true(!str_contains($wiHttp('/install.php', $wiPost + ['token' => $wiToken[1] ?? ''])['body'], 'Your shop is ready'), 'Web installer: a second install post changes nothing');
+
+    // No cron on such hosting: page requests run the worker (paid eBooks are granted, mail leaves the queue).
+    $wiInstalledConfig = (static fn(string $file): array => require $file)($wiShop . '/config.php');
+    assert_true(WebWorker::enabled($wiInstalledConfig), 'Web installer: config.php turns on operations.web_worker');
+    $wiJobs = (string)$wiInstalledConfig['jobs_dir'];
+    assert_true(is_file($wiJobs . '/web-worker.last') && is_file($wiJobs . '/retention-cleanup.last'), 'Web worker: a storefront request ran one cli/worker.php pass (it scheduled the daily cleanup)');
+    assert_equals([], glob($wiJobs . '/pending/*.json') ?: [], 'Web worker: the pass also processed the queued cleanup job');
+    $wiStamp = (string)file_get_contents($wiJobs . '/web-worker.last');
+    $wiHttp('/admin.php');
+    assert_equals($wiStamp, (string)file_get_contents($wiJobs . '/web-worker.last'), 'Web worker: within the interval a further request runs no second pass');
+    assert_true(str_contains($wiDone['body'], 'No cron: page requests run the worker'), 'Web worker: doctor accepts page-driven jobs instead of a cron declaration');
 } catch (Throwable $e) { $wiFail('over HTTP', $e); }
 finally {
     if (is_resource($wiServer)) { proc_terminate($wiServer); proc_close($wiServer); }
