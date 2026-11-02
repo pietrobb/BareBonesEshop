@@ -27,6 +27,14 @@
   with `vendor/bbf`, a ready SQLite database of the bookshop demo, its EPUB files and an English
   single-store `stores.json` in the web-denied `demo/bookshop/dist/`, and no `config.php`. The web
   installer copies that starter data into the private folder, so the shop sells right after the form.
+- **Background jobs without cron** (`operations.web_worker`, set by the web installer): after a web
+  response, at most once per `web_worker_interval` (60 s), one `cli/worker.php --once` pass runs in the same
+  PHP process. Every web entrypoint (storefront, account, CMS pages, wishlist, downloads, API, admin)
+  drives it, so a customer waiting on the downloads page receives a paid eBook without a cron job.
+- **Bookshop package acceptance** (`tests/bookshop/run.sh`, CI job "Bookshop package acceptance"): builds
+  the zip, installs it through the web installer in a clean `php:8.4-apache` container and, in Chromium,
+  buys an eBook (bank transfer, then downloaded), a paperback (cash on delivery) and a hardcover (bank
+  transfer) that the owner confirms and ships. The zip and screenshots are uploaded as a CI artifact.
 
 ## 2.1.0 — 2026-11-01
 
