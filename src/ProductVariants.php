@@ -50,11 +50,15 @@ final class ProductVariants {
             'availability' => VariantAvailability::ACTIVE, 'inventory_policy' => 'inherit', 'sort_order' => $sortOrder, 'digital' => 0];
     }
 
-    /** Variants of a product of the active catalog with the stock the editor shows (ledger total when the SKU is ledgered). */
+    /**
+     * Variants of a product of the active catalog with the stock the editor shows (ledger total when the SKU is ledgered)
+     * and, for a download, whether its file exists (missing_file: the variant is not sold until one is uploaded).
+     */
     public static function forEditor(int $productId): array {
         return array_map(static function(array $row): array {
             $row['stock'] = self::ledgered((string)$row['sku']) ? Warehouse::totalAvailable((string)$row['sku']) : (int)$row['stock'];
             $row['attrs_text'] = self::attrsText((string)($row['attrs'] ?? ''));
+            $row['missing_file'] = (int)($row['digital'] ?? 0) === 1 && !VariantAvailability::hasDownload((string)$row['sku']);
             return $row;
         }, Products::variants($productId));
     }

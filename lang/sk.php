@@ -994,6 +994,7 @@ return [
     'admin.variant.availability' => 'Dostupnosť',
     'admin.variant.policy' => 'Politika',
     'admin.variant.digital' => 'Na stiahnutie',
+    'admin.variant.no_file' => 'Zatiaľ bez súboru: nepredáva sa, kým k tomuto SKU nepribudne súbor na stiahnutie (Digitálne súbory).',
     'admin.variant.new' => 'nový variant',
     'admin.variant.hint' => 'Prázdna cena = cena produktu + príplatok. Sklad sa účtuje cez skladovú evidenciu. Variant z objednávok sa nedá zmazať — nastavte dostupnosť discontinued.',
     'admin.variant.save' => 'Uložiť varianty',

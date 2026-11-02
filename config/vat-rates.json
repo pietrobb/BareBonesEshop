@@ -211,5 +211,10 @@
         "baby":    "reduced",
         "medicines": "reduced",
         "transport": "reduced"
+    },
+
+    "_digital_categories": "A download (digital variant or digital product) of a product in category X is taxed as digital_categories[X]. A country taxing e-books apart from printed books sets categories.ebooks; without it ebooks takes the books rate.",
+    "digital_categories": {
+        "books": "ebooks"
     }
 }

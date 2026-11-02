@@ -62,6 +62,8 @@ class CheckoutService {
             'is_b2b'                => $vatId !== '',
             // Goods dispatched to the address back the country; a digital-only order has nothing but the shopper's claim.
             'customer_country_verified' => !$digitalOnly,
+            // Downloads next to goods collected in the store are supplied where the buyer lives, not in the store.
+            'digital_customer_country' => $digitalOnly ? '' : strtoupper($country),
             'tax_provider'          => $taxProviderCode,
         ];
         $scenario = Adapters::tax($taxProviderCode)::resolveScenario($context);

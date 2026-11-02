@@ -60,18 +60,36 @@ final class CacheRebuild
      */
     private static function writePrices($out, string $group): void
     {
-        $stmt = Db::get()->prepare("SELECT id, sku, price, category_id FROM products
+        $db = Db::get();
+        $stmt = $db->prepare("SELECT id, sku, price, category_id, product_type FROM products
             WHERE store_id = :catalog AND status = 'active' AND id > :after ORDER BY id LIMIT 2000");
+        // Variants are priced too: a catalog rule on product_type "digital" covers the eBook variant of a printed book.
+        $digital = Db::hasColumn('variants', 'digital') ? 'digital' : '0 AS digital';
+        $variantStmt = $db->prepare("SELECT product_id, sku, price_delta, price_absolute, {$digital} FROM variants
+            WHERE product_id IN (SELECT id FROM products WHERE store_id = :catalog AND status = 'active' AND id > :after AND id <= :last) ORDER BY id");
         $first = true;
         $after = 0;
+        $write = static function (string $sku, array $product) use ($out, $group, &$first): void {
+            fwrite($out, ($first ? '{' : ',') . json_encode($sku, JSON_UNESCAPED_UNICODE) . ':' . json_encode(Pricing::apply($product, $group)['price']));
+            $first = false;
+        };
         do {
             $stmt->execute([':catalog' => StoreContext::current()->catalogId(), ':after' => $after]);
             $chunk = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            foreach ($chunk as $p) {
-                fwrite($out, ($first ? '{' : ',') . json_encode((string)$p['sku'], JSON_UNESCAPED_UNICODE) . ':' . json_encode(Pricing::apply($p, $group)['price']));
-                $first = false;
-                $after = (int)$p['id'];
+            if ($chunk === []) break;
+            $byId = array_column($chunk, null, 'id');
+            $variantStmt->execute([':catalog' => StoreContext::current()->catalogId(), ':after' => $after, ':last' => (int)end($chunk)['id']]);
+            $variants = $variantStmt->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($chunk as $p) $write((string)$p['sku'], $p);
+            foreach ($variants as $v) {
+                $p = $byId[$v['product_id']] ?? null;
+                if ($p === null || (string)$v['sku'] === '' || (string)$v['sku'] === (string)$p['sku']) continue;
+                $p['price'] = $v['price_absolute'] !== null ? (int)$v['price_absolute'] : (int)$p['price'] + (int)$v['price_delta'];
+                if ($p['price'] < 0) continue; // not sold (Cart): a delta that outgrew a lowered base price
+                if ((int)$v['digital'] === 1 && !VariantAvailability::isDigitalType((string)$p['product_type'])) $p['product_type'] = 'digital';
+                $write((string)$v['sku'], $p);
             }
+            $after = (int)end($chunk)['id'];
         } while (count($chunk) === 2000);
         fwrite($out, $first ? '[]' : '}');
     }
