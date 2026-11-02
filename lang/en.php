@@ -895,6 +895,7 @@ return [
     'admin.msg.variant.row_error' => 'Variant {sku}: {error}',
     'admin.msg.variant.numbers' => 'price, stock and order must be whole numbers (price in cents, stock ≥ 0).',
     'admin.msg.variant.negative_price' => 'the resulting price must not be negative.',
+    'admin.msg.variant.digital_bundle' => 'a bundle cannot be digital content (its components are physical stock).',
     'admin.msg.variant.availability' => 'invalid availability or inventory policy.',
     'admin.msg.variant.attrs' => 'enter attributes as key=value lines.',
     'admin.msg.variant.max' => 'A product may have at most {max} variants.',

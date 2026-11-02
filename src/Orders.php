@@ -261,7 +261,7 @@ class Orders {
             $oldItems = self::items($orderId);
             $touchedSkus = [];
             foreach ($oldItems as $item) {
-                if (VariantAvailability::isDigitalItem($item)) continue;
+                if (Inventory::isDigitalLine($item)) continue;
                 Inventory::releaseOrderItem($item, $orderId);
                 foreach (Inventory::reservationLines($item) as $line) $touchedSkus[] = (string)$line['sku'];
             }
@@ -420,14 +420,13 @@ class Orders {
                 'allocations' => [], 'bundle_components' => [],
                 'reserved_qty' => 0, 'backordered_qty' => 0, 'preorder_at' => null,
             ];
-            if (!$isDigital) {
-                try {
-                    $inventorySnapshot = Inventory::reserveLine($item, $qty);
-                } catch (\RuntimeException | \InvalidArgumentException $e) {
-                    if ($e instanceof \PDOException) throw $e;
-                    $outOfStock[] = $item['name'] . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : '');
-                    continue;
-                }
+            try {
+                if ($isDigital) Inventory::assertDigitalLine($item);
+                else $inventorySnapshot = Inventory::reserveLine($item, $qty);
+            } catch (\RuntimeException | \InvalidArgumentException $e) {
+                if ($e instanceof \PDOException) throw $e;
+                $outOfStock[] = $item['name'] . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : '');
+                continue;
             }
             $total = $item['price'] * $qty;
             $subtotal += $total;
@@ -447,6 +446,7 @@ class Orders {
                 'sku'        => $item['sku'],
                 'name'       => $item['name'] . (!empty($item['variant_name']) ? ' — ' . $item['variant_name'] : ''),
                 'quantity'   => $qty,
+                'digital'    => $isDigital ? 1 : 0,
                 'reserved_qty' => (int)$inventorySnapshot['reserved_qty'],
                 'backordered_qty' => (int)$inventorySnapshot['backordered_qty'],
                 'fulfillment_status' => (int)$inventorySnapshot['backordered_qty'] > 0 ? 'backordered' : 'unfulfilled',
@@ -466,16 +466,18 @@ class Orders {
     }
 
     private static function insertItems(int $orderId, array $orderItems): void {
+        // The line's digital nature is frozen with it (Inventory::isDigitalLine) once the column is migrated.
+        $digital = self::hasColumn('order_items', 'digital');
         $itemStmt = Db::get()->prepare("
             INSERT INTO order_items (order_id, product_id, variant_id, sku, name, quantity,
                 reserved_qty, backordered_qty, fulfillment_status, preorder_at,
-                unit_price, total, attrs, vat_class, vat_rate, vat_amount, net_amount)
+                unit_price, total, attrs, vat_class, vat_rate, vat_amount, net_amount" . ($digital ? ', digital' : '') . ")
             VALUES (:oid, :pid, :vid, :sku, :name, :qty,
                 :reserved_qty, :backordered_qty, :fulfillment_status, :preorder_at,
-                :price, :total, :attrs, :vclass, :vrate, :vamount, :namount)
+                :price, :total, :attrs, :vclass, :vrate, :vamount, :namount" . ($digital ? ', :digital' : '') . ")
         ");
         foreach ($orderItems as $oi) {
-            $itemStmt->execute([
+            $itemStmt->execute(($digital ? [':digital' => (int)($oi['digital'] ?? 0)] : []) + [
                 ':oid'    => $orderId,
                 ':pid'    => $oi['product_id'],
                 ':vid'    => $oi['variant_id'],
@@ -675,7 +677,7 @@ class Orders {
             }
             $skus = [];
             foreach ($items as $item) {
-                if (VariantAvailability::isDigitalItem($item)) continue;
+                if (Inventory::isDigitalLine($item)) continue;
                 if ($mode === 'return') {
                     Inventory::returnOrderItem($item, $orderId);
                 } else {

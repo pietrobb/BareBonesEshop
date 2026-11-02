@@ -921,6 +921,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.msg.variant.row_error' => '{sku} változat: {error}',
     'admin.msg.variant.numbers' => 'az ár, a készlet és a sorrend egész szám legyen (ár centben, készlet ≥ 0).',
     'admin.msg.variant.negative_price' => 'a kapott ár nem lehet negatív.',
+    'admin.msg.variant.digital_bundle' => 'a csomag nem lehet digitális tartalom (az elemei fizikai készletáru).',
     'admin.msg.variant.availability' => 'érvénytelen elérhetőség vagy készletszabály.',
     'admin.msg.variant.attrs' => 'az attribútumokat kulcs=érték sorokként adja meg.',
     'admin.msg.variant.max' => 'Egy terméknek legfeljebb {max} változata lehet.',

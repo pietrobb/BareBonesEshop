@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Digital order lines are frozen with the order** (review round 12, H1 + M2). `order_items.digital`
+  (migration `20261103090000_order_item_digital`, existing lines backfilled as they were sold) records
+  whether a line is digital content. Such a line reserves nothing, gets no parcel and no shipment line, so
+  in a mixed cash-on-delivery order the paperback parcel collects the whole amount (before, an e-book
+  first in the cart became a "parcel" of its own carrying the cash on delivery while the books went out
+  with 0). Cancelling, returns, RMA restocking and the withdrawal period read the frozen flag, so an admin
+  switching a variant's digital flag afterwards no longer loses or invents stock. A bundle cannot be a
+  digital variant (refused in the editor and at checkout); a digital line keeps its required
+  personalization. Cart and checkout read `variants.digital` only once it is migrated.
 - **Digital variants of physical products.** A variant can be marked as a download (`variants.digital`,
   migration `20261102090000_variant_digital`, checkbox in the variant editor), for example an e-book
   next to the paperback and hardcover of the same book. The download variant is sold as digital content:

@@ -1045,6 +1045,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.msg.variant.row_error' => 'Variante {sku}: {error}',
     'admin.msg.variant.numbers' => 'el precio, el stock y el orden deben ser números enteros (precio en céntimos, stock ≥ 0).',
     'admin.msg.variant.negative_price' => 'el precio resultante no debe ser negativo.',
+    'admin.msg.variant.digital_bundle' => 'un lote no puede ser contenido digital (sus componentes son existencias físicas).',
     'admin.msg.variant.availability' => 'disponibilidad o política de inventario no válida.',
     'admin.msg.variant.attrs' => 'introduzca los atributos como líneas clave=valor.',
     'admin.msg.variant.max' => 'Un producto puede tener como máximo {max} variantes.',

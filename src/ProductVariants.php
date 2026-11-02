@@ -79,6 +79,9 @@ final class ProductVariants {
         $delete = [];
         $skus = [];
         $floor = self::lowestProductPrice($productId, (int)$product['price']);
+        $bundle = Db::get()->prepare('SELECT 1 FROM bundle_components WHERE bundle_product_id = :id');
+        $bundle->execute([':id' => $productId]);
+        $isBundle = $bundle->fetchColumn() !== false;
         foreach ($posted as $key => $fields) {
             if (!is_array($fields) || array_filter($fields, static fn($v): bool => !is_scalar($v))) return I18n::t('admin.msg.variant.invalid');
             $id = $key === 'new' ? 0 : Security::int($key);
@@ -118,6 +121,8 @@ final class ProductVariants {
             $availability = (string)($fields['availability'] ?? VariantAvailability::ACTIVE);
             $policy = (string)($fields['inventory_policy'] ?? 'inherit');
             if (!in_array($availability, VariantAvailability::statuses(), true) || !in_array($policy, self::POLICIES, true)) return I18n::format('admin.msg.variant.row_error', ['sku' => $sku, 'error' => I18n::t('admin.msg.variant.availability')]);
+            // A download reserves no stock: a bundle's components would never be reserved or shipped (Inventory::assertDigitalLine).
+            if (!empty($fields['digital']) && $isBundle) return I18n::format('admin.msg.variant.row_error', ['sku' => $sku, 'error' => I18n::t('admin.msg.variant.digital_bundle')]);
             $rows[] = ['id' => $id, 'sku' => $sku, 'name' => $name, 'attrs' => $attrs ? json_encode($attrs, JSON_UNESCAPED_UNICODE) : '{}',
                 'price_absolute' => $absolute === '' ? null : (int)$absolute, 'price_delta' => (int)$delta, 'stock' => (int)$stock,
                 'stock_loaded' => $loaded === '' ? null : (int)$loaded,

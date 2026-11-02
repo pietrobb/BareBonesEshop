@@ -921,6 +921,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.msg.variant.row_error' => 'Variante {sku}: {error}',
     'admin.msg.variant.numbers' => 'Preis, Bestand und Reihenfolge müssen ganze Zahlen sein (Preis in Cent, Bestand ≥ 0).',
     'admin.msg.variant.negative_price' => 'der resultierende Preis darf nicht negativ sein.',
+    'admin.msg.variant.digital_bundle' => 'ein Bündel kann kein digitaler Inhalt sein (seine Bestandteile sind physischer Lagerbestand).',
     'admin.msg.variant.availability' => 'ungültige Verfügbarkeit oder Lagerrichtlinie.',
     'admin.msg.variant.attrs' => 'geben Sie die Attribute als Zeilen Schlüssel=Wert ein.',
     'admin.msg.variant.max' => 'Ein Produkt darf höchstens {max} Varianten haben.',

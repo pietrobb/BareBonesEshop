@@ -921,6 +921,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'admin.msg.variant.row_error' => 'Wariant {sku}: {error}',
     'admin.msg.variant.numbers' => 'cena, stan i kolejność muszą być liczbami całkowitymi (cena w centach, stan ≥ 0).',
     'admin.msg.variant.negative_price' => 'wynikowa cena nie może być ujemna.',
+    'admin.msg.variant.digital_bundle' => 'zestaw nie może być treścią cyfrową (jego składniki to fizyczny towar w magazynie).',
     'admin.msg.variant.availability' => 'nieprawidłowa dostępność lub zasada magazynowa.',
     'admin.msg.variant.attrs' => 'wpisz atrybuty jako wiersze klucz=wartość.',
     'admin.msg.variant.max' => 'Produkt może mieć najwyżej {max} wariantów.',

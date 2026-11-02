@@ -55,6 +55,16 @@ class Inventory {
         return $stmt->rowCount() === 1;
     }
 
+    /**
+     * A digital line reserves nothing, but still carries the product's required personalization; a bundle cannot be a
+     * download (its components are physical stock, which a digital line would never reserve).
+     */
+    public static function assertDigitalLine(array $item): void {
+        $productId = (int)$item['product_id'];
+        self::validatePersonalization($productId, (array)($item['attrs'] ?? []));
+        if (self::bundleComponents($productId)) throw new InvalidArgumentException('A bundle cannot be sold as a digital line');
+    }
+
     /** Reserve a sellable line and return a frozen allocation snapshot. */
     public static function reserveLine(array $item, int $quantity): array {
         $productId = (int)$item['product_id'];
@@ -102,8 +112,19 @@ class Inventory {
         ];
     }
 
-    /** Frozen component/allocation lines encoded on an order item. */
+    /**
+     * Whether an order line is digital content, as frozen on the line when the order was placed (order_items.digital):
+     * an admin switching the product type or the variant's digital flag later changes neither its stock nor its
+     * shipping. Lines from before the column (NULL) fall back to the catalog.
+     */
+    public static function isDigitalLine(array $orderItem): bool {
+        if (isset($orderItem['digital'])) return (int)$orderItem['digital'] === 1;
+        return VariantAvailability::isDigitalItem($orderItem);
+    }
+
+    /** Frozen component/allocation lines encoded on an order item; none for digital content (nothing reserved or shipped). */
     public static function reservationLines(array $orderItem): array {
+        if (self::isDigitalLine($orderItem)) return [];
         $attrs = json_decode((string)($orderItem['attrs'] ?? '{}'), true) ?: [];
         if (!empty($attrs['_bundle_components'])) return $attrs['_bundle_components'];
         $allocations = $attrs['_inventory_allocations'] ?? $attrs['_warehouse_allocations'] ?? [];
