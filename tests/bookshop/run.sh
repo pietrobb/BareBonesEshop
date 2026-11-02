@@ -20,10 +20,11 @@ trap '[ "$KEEP" = "--keep" ] || docker rm -f "$NAME" >/dev/null 2>&1 || true' EX
 docker exec "$NAME" sh -c 'a2enmod rewrite headers expires >/dev/null && sed -i "s/AllowOverride None/AllowOverride All/" /etc/apache2/apache2.conf \
   && mkdir -p /srv/bookshop-data && chown www-data:www-data /srv/bookshop-data && apache2ctl -k graceful'
 docker cp "$OUT/unpacked/bareboneseshop-bookshop/." "$NAME:/var/www/html/"
-docker exec "$NAME" chown -R www-data:www-data /var/www/html
+# Uploaded by an FTP account that is neither www-data nor in its group; the web root is group-writable for PHP.
+docker exec "$NAME" sh -c 'useradd -M uploader && chown -R uploader:www-data /var/www/html && chmod -R g+w /var/www/html'
 for _ in $(seq 1 30); do curl -fs -o /dev/null "http://127.0.0.1:$PORT/install.php" && break; sleep 1; done
-# The first visit wrote install-key.php; the owner reads it over FTP, the test from the container.
-KEY=$(docker exec "$NAME" php -r 'echo require "/var/www/html/install-key.php";')
+# The first visit wrote install-key.php (as www-data); the owner reads it with the uploading account.
+KEY=$(docker exec -u uploader "$NAME" php -r 'echo require "/var/www/html/install-key.php";')
 if [ "$KEEP" = "--prepare-only" ]; then trap - EXIT; echo "Ready: http://127.0.0.1:$PORT (container $NAME), installation key $KEY"; exit 0; fi
 
 cd "$ROOT"

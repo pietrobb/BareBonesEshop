@@ -35,7 +35,9 @@ final class WebInstaller
                 fwrite($handle, "<?php\n// BareBones Shop installation key: install.php asks for it, so only someone with access to these\n"
                     . "// files (FTP, the hosting file manager) can install the shop. Deleted by the installation.\nreturn '{$key}';\n");
                 fclose($handle);
-                @chmod($file, 0640);
+                // World-readable on purpose: the FTP / file manager account is often not the PHP user nor in its
+                // group (mod_php as www-data). Over HTTP the file is executed and prints nothing.
+                @chmod($file, 0644);
             }
         }
         $key = is_file($file) ? (static fn(string $path): mixed => include $path)($file) : null;
