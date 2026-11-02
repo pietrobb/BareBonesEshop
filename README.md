@@ -61,6 +61,31 @@ once (store the recovery codes). Further accounts: `php cli/admin-user.php creat
 only produces a legacy `admin_password` hash, which stops working as soon as any
 database admin account exists.
 
+### Upload and sell: the bookshop demo package (no shell needed)
+
+The bookshop package is a complete demo shop for ordinary PHP hosting (Apache, PHP 8.1+ with
+`pdo_sqlite` and `sodium`; no MySQL, no command line). It contains 321 public-domain books, each
+as an EPUB download, a paperback and mostly a hardcover, the English `bookshop` theme, a ready SQLite
+database and the eBook files.
+
+1. Download `bareboneseshop-bookshop.zip` from the release and unpack it.
+2. Upload the contents of its `bareboneseshop-bookshop/` folder to your web space, e.g. `public_html/`
+   (the hidden `.htaccess` files too). Keep `AllowOverride All` / `mod_rewrite` on.
+3. Open the shop's address right away. The first visit goes to `install.php`: one form for the shop
+   name, the seller (name, address, e-mail, VAT ID), payments (cash on delivery, bank transfer with
+   your IBAN, optionally Stripe test keys), the private data folder and the administrator. Until the
+   form is sent anyone who finds the address could install the shop, so do it straight after uploading.
+4. The installer writes `config.php` with fresh secrets, creates `bareboneseshop-private/` in the
+   private data folder (default: the folder above the web root, which the web server does not serve),
+   copies the database and the eBooks there, and creates the owner account. Scan the TOTP QR code it
+   shows into an authenticator app and keep the recovery codes; they are shown once. The page ends
+   with the doctor checklist (warnings such as "mail provider: log" are expected for a demo).
+5. Sign in at `/admin.php`. After the install `install.php` answers 404 and changes nothing.
+
+E-mails are only logged until you configure SMTP in `config.php`. To build the package yourself:
+`php demo/bookshop/package.php --out=/tmp` (needs git and the `vendor/bbf` submodule). The same
+`install.php` also installs a plain checkout without a shell; it then starts with an empty catalog.
+
 ### Production web server
 
 - **Apache**: the bundled `.htaccess` (needs `AllowOverride All` and `mod_rewrite`).

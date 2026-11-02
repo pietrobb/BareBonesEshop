@@ -35,8 +35,10 @@ class Setup
      * Creates config.php from config.example.php with a fresh admin_identity_key.
      * An existing config.php is never touched.
      * @param array<string,string> $database install switches driver/host/port/name/user (+ password from BBE_DB_PASSWORD)
+     * @param string $privateParent absolute directory that holds bareboneseshop-private/ instead of the default (web installer)
+     * @param array<string,string> $values further template entries to fill in (e.g. stripe_secret_key)
      */
-    public static function createConfig(?string $root = null, string $appUrl = '', string $adminEmail = '', array $database = []): array
+    public static function createConfig(?string $root = null, string $appUrl = '', string $adminEmail = '', array $database = [], string $privateParent = '', array $values = []): array
     {
         $root ??= dirname(__DIR__);
         $target = $root . '/config.php';
@@ -54,8 +56,9 @@ class Setup
         // In a subdirectory of a web root the template's ../bareboneseshop-private would be served: keep it above the web root.
         $webRoot = self::enclosingWebRoot($root);
         $privateBase = $webRoot === null ? null : dirname($webRoot) . '/bareboneseshop-data/' . basename(str_replace('\\', '/', $root));
+        if ($privateParent !== '') $privateBase = rtrim(str_replace('\\', '/', $privateParent), '/');
         if ($privateBase !== null) $config = str_replace('dirname(__DIR__)', var_export($privateBase, true), $config);
-        foreach (['admin_identity_key' => base64_encode(random_bytes(32)), 'app_url' => rtrim($appUrl, '/'), 'admin_email' => $adminEmail] + $dbValues as $key => $value) {
+        foreach (['admin_identity_key' => base64_encode(random_bytes(32)), 'app_url' => rtrim($appUrl, '/'), 'admin_email' => $adminEmail] + $dbValues + $values as $key => $value) {
             if ($value === '') continue;
             $count = 0;
             // A callback, not a replacement string: '$1' or '\1' inside the value must stay literal.
