@@ -14,17 +14,7 @@ header('Referrer-Policy: no-referrer');
 header('Cache-Control: no-store');
 
 $h = static fn($value): string => htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-$page = static function (string $title, string $body) use ($h): void {
-    echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-        . '<title>' . $h($title) . '</title><style>'
-        . 'body{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;color:#1f1d1a;background:#faf7f2}'
-        . 'h1{font-family:Georgia,serif}fieldset{border:1px solid #cfc6b8;border-radius:6px;margin:0 0 1.2rem;padding:.8rem 1rem}'
-        . 'label{display:block;margin:.5rem 0 .1rem;font-weight:600}input[type=text],input[type=url],input[type=email],input[type=password]{width:100%;box-sizing:border-box;padding:.45rem;border:1px solid #8a8074;border-radius:4px;font:inherit}'
-        . '.check{font-weight:400}.hint{color:#5c554c;font-size:.9rem;margin:.1rem 0}.error{color:#a3150b;font-weight:600}'
-        . 'button{background:#7a2e1f;color:#fff;border:0;border-radius:4px;padding:.7rem 1.4rem;font:inherit;cursor:pointer}'
-        . 'table{border-collapse:collapse}td{padding:.2rem .6rem;border-bottom:1px solid #e3dccf;vertical-align:top}code{word-break:break-all}'
-        . '</style></head><body><main><h1>' . $h($title) . '</h1>' . $body . '</main></body></html>';
-};
+$page = static function (string $title, string $body): void { echo WebInstaller::page($title, $body); };
 
 // Serialises two submits racing for the same fresh upload; config.php is checked again under the lock.
 $installLock = fopen(__FILE__, 'r');
@@ -67,40 +57,15 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         $errors += $validationErrors;
         $values['install_key'] = (string)($_POST['install_key'] ?? '');
         if ($errors === []) {
-            if (is_resource($installLock)) flock($installLock, LOCK_EX);
-            try {
-                if (is_file($installRoot . '/config.php')) throw new RuntimeException('The shop has just been installed by another request.');
-                $result = WebInstaller::install($values, $installRoot);
-                @unlink($installRoot . '/' . WebInstaller::KEY_FILE);
-            } catch (Throwable $e) {
-                // The details (paths, driver messages) go to the PHP error log, not to the page.
-                $reference = bin2hex(random_bytes(4));
-                error_log("BareBonesEshop install.php failure {$reference}: " . $e);
-                $errors['form'] = "Installation failed (reference {$reference}). Nothing was installed; the details are in the PHP error log of your hosting.";
-            }
+            [$result, $installError] = WebInstaller::installLocked($values, $installRoot, $installLock);
+            if ($installError !== null) $errors['form'] = $installError;
         }
     }
 }
 
 if ($result !== null) {
     session_destroy();
-    $admin = $result['admin'];
-    $doctor = $result['doctor'];
-    $rows = '';
-    foreach ($doctor['checks'] as $check) {
-        if ($check['status'] === 'pass') continue;
-        $rows .= '<tr><td>' . $h(strtoupper($check['status'])) . '</td><td>' . $h($check['message']) . ($check['action'] !== '' ? '<p class="hint">' . $h($check['action']) . '</p>' : '') . '</td></tr>';
-    }
-    $page('Your shop is ready', '<p>' . ($result['starter'] !== null ? $h($result['starter']) . ' is installed with its demo catalog.' : 'The shop is installed.') . '</p>'
-        . '<h2>Sign-in for the administration</h2><p>User name: <strong>' . $h($admin['username']) . '</strong>. Signing in needs your password and a code from an authenticator app (Google Authenticator, Aegis, 1Password …).</p>'
-        . '<p>Scan this code with the app now. It is shown only once.</p>' . QrCode::svg((string)($admin['uri'] ?? ''), 'TOTP for ' . (string)$admin['username'])
-        . '<p class="hint">Or enter the key by hand: <code>' . $h($admin['secret'] ?? '') . '</code></p>'
-        . '<p><strong>Recovery codes</strong> (each works once if you lose the phone; store them safely, they are not shown again):</p><p><code>' . $h(implode('  ', (array)($admin['recovery_codes'] ?? []))) . '</code></p>'
-        . '<h2>Health check</h2><p>' . $h($doctor['counts']['pass']) . ' checks passed, ' . $h($doctor['counts']['warn']) . ' warnings, ' . $h($doctor['counts']['fail']) . ' failures.</p>'
-        . ($rows !== '' ? '<table>' . $rows . '</table>' : '')
-        . ($result['leftover'] !== null ? '<p class="error">Delete the folder ' . $h(substr(str_replace('\\', '/', $result['leftover']), strlen(str_replace('\\', '/', $installRoot)) + 1))
-            . ' with your FTP client: it still holds the starter database and the eBook files, which now live in the private data folder.</p>' : '')
-        . '<p><a href="./">Open the shop</a> · <a href="admin.php">Sign in to the administration</a></p>');
+    $page('Your shop is ready', WebInstaller::readyHtml($result, $installRoot));
     return;
 }
 

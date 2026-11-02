@@ -74,6 +74,11 @@ try {
     $r12iInstall = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Install.php');
     assert_true(str_contains($r12iInstall, "\$errors['protection']") && !str_contains($r12iInstall, 'until then anyone') && !str_contains($r12iInstall, "'Installation failed: ' . \$e->getMessage()"),
         'R12 installer: install.php refuses an exposed server and shows no exception text before anyone signed in');
+    file_put_contents($r12iWeb . '/config.php', '<?php return [];');
+    [$r12iNone, $r12iFailure] = WebInstaller::installLocked([], $r12iWeb, false);
+    @unlink($r12iWeb . '/config.php');
+    assert_true($r12iNone === null && preg_match('/^Installation failed \(reference [0-9a-f]{8}\)\./', (string)$r12iFailure) === 1 && !str_contains((string)$r12iFailure, 'another request'),
+        'R12 installer: a failed install shows only a reference; the exception text goes to the PHP log');
 
     // M5: the starter source in the web space is deleted after seeding; nothing outside demo/<name>/dist is touched.
     $r12iStarter = WebInstaller::starter($r12iWeb);
