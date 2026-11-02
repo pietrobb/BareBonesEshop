@@ -22,7 +22,7 @@ foreach ($bcFiles as $bcFile) {
         if (!is_int($bcPages) || $bcPages < 32 || $bcPages > 1600) $bcProblems[] = "{$bcWhere}: pages";
         if (!is_string($bcLanguage) || trim($bcLanguage) === '') $bcProblems[] = "{$bcWhere}: language";
         if (!is_string($bcText) || mb_strlen($bcText) < 150) $bcProblems[] = "{$bcWhere}: description shorter than 150 characters";
-        $bcBooks[] = ['genre' => $bcGenre, 'title' => (string)$bcTitle, 'author' => (string)$bcAuthor, 'year' => (int)$bcYear, 'text' => (string)$bcText,
+        $bcBooks[] = ['genre' => $bcGenre, 'title' => (string)$bcTitle, 'author' => (string)$bcAuthor, 'year' => (int)$bcYear, 'description' => (string)$bcText,
             'slug' => Import::slugify($bcTitle . ' ' . $bcAuthor)];
     }
 }
@@ -31,7 +31,7 @@ assert_equals([], $bcProblems, 'Bookshop catalog: every record is complete and p
 assert_true(count($bcBooks) >= 300, 'Bookshop catalog: at least 300 titles (' . count($bcBooks) . ')');
 $bcSlugs = array_count_values(array_column($bcBooks, 'slug'));
 assert_equals([], array_keys(array_filter($bcSlugs, static fn(int $n): bool => $n > 1)), 'Bookshop catalog: no title is listed twice');
-$bcTexts = array_count_values(array_column($bcBooks, 'text'));
+$bcTexts = array_count_values(array_column($bcBooks, 'description'));
 assert_equals(count($bcBooks), count($bcTexts), 'Bookshop catalog: every title has its own description');
 
 $bcBadCovers = [];
