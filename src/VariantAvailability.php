@@ -44,12 +44,17 @@ class VariantAvailability {
         $product = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($variantId === null) return $product ? self::productPurchasable($product) : false;
         if (!$product || !self::productOpen($product)) return false;
-        $policy = (string)($product['inventory_policy'] ?? Inventory::DENY);
         $stmt = Db::get()->prepare('SELECT product_id, stock, availability, available_from, inventory_policy, preorder_at, digital FROM variants WHERE id = :id');
         $stmt->execute([':id' => $variantId]);
         $variant = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$variant || (int)$variant['product_id'] !== $productId) return false;
-        $digital = self::isDigitalType((string)$product['product_type']) || (int)$variant['digital'] === 1;
+        return self::variantPurchasable($product, $variant);
+    }
+
+    /** A variant of an open product: released and active, and a download, in stock, or sold ahead of stock by its policy. */
+    private static function variantPurchasable(array $product, array $variant): bool {
+        $policy = (string)($product['inventory_policy'] ?? Inventory::DENY);
+        $digital = self::isDigitalType((string)$product['product_type']) || (int)($variant['digital'] ?? 0) === 1;
         $variantPolicy = ($variant['inventory_policy'] ?? 'inherit') === 'inherit'
             ? $policy
             : (string)$variant['inventory_policy'];
@@ -58,6 +63,42 @@ class VariantAvailability {
                 && $variantPolicy !== Inventory::PREORDER)) return false;
         return $digital || (int)$variant['stock'] > 0
             || in_array($variantPolicy, [Inventory::BACKORDER, Inventory::PREORDER], true);
+    }
+
+    /**
+     * For the products of a listing that have variants (their stock is held by the variants, not the product row):
+     * whether any variant can be bought, whether one is in stock (a download always is) and the units in stock.
+     * Products without variants are not in the result.
+     * @param list<int> $productIds
+     * @return array<int, array{purchasable: bool, in_stock: bool, quantity: int}>
+     */
+    public static function variantStatesMany(array $productIds): array {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $productIds), static fn(int $id): bool => $id > 0)));
+        $result = [];
+        $columns = implode(', ', array_map(static fn(string $c): string => 'p.' . trim($c), explode(',', self::PRODUCT_COLUMNS)));
+        foreach (array_chunk($ids, 500) as $chunk) {
+            $params = [':store' => StoreContext::current()->catalogId()];
+            foreach ($chunk as $index => $id) $params[':id' . $index] = $id;
+            $stmt = Db::get()->prepare("SELECT {$columns}, v.stock AS v_stock, v.availability AS v_availability, v.available_from AS v_available_from,
+                    v.inventory_policy AS v_inventory_policy, v.digital AS v_digital
+                FROM variants v JOIN products p ON p.id = v.product_id
+                WHERE p.store_id = :store AND p.id IN (" . implode(', ', array_slice(array_keys($params), 1)) . ')');
+            $stmt->execute($params);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $id = (int)$row['id'];
+                $variant = ['stock' => $row['v_stock'], 'availability' => $row['v_availability'], 'available_from' => $row['v_available_from'],
+                    'inventory_policy' => $row['v_inventory_policy'], 'digital' => $row['v_digital']];
+                $state = $result[$id] ?? ['purchasable' => false, 'in_stock' => false, 'quantity' => 0];
+                if (self::productOpen($row) && self::variantPurchasable($row, $variant)) {
+                    $state['purchasable'] = true;
+                    $digital = self::isDigitalType((string)$row['product_type']) || (int)$row['v_digital'] === 1;
+                    if ($digital || (int)$row['v_stock'] > 0) $state['in_stock'] = true;
+                }
+                if ((int)$row['v_digital'] !== 1) $state['quantity'] += max(0, (int)$row['v_stock']);
+                $result[$id] = $state;
+            }
+        }
+        return $result;
     }
 
     /**

@@ -65,6 +65,28 @@ try {
     $_SESSION['cart'] = [];
 } catch (Throwable $e) { $bkFail('cart and order', $e); }
 
+// Listing: the product row holds no stock of its own; the card is listed by its variants.
+try {
+    $bkRow = $pdo->query('SELECT * FROM products WHERE id = 98801')->fetch(PDO::FETCH_ASSOC);
+    $bkCard = StorefrontViewModel::productCard($bkRow);
+    assert_equals([true, true, 7], [$bkCard['availability']['purchasable'], $bkCard['availability']['in_stock'], $bkCard['availability']['quantity']],
+        'Bookshop listing: a book is in stock through its paperbacks (5) and hardcovers (2), not "out of stock" for an empty product row');
+    Warehouse::setStock($bkWarehouse, 'BK-TS-PB', 0, 'count', 'test', 'bk-zero-pb');
+    Warehouse::setStock($bkWarehouse, 'BK-TS-HB', 0, 'count', 'test', 'bk-zero-hb');
+    $bkCard = StorefrontViewModel::productCard($bkRow);
+    assert_equals([true, true, 0], [$bkCard['availability']['purchasable'], $bkCard['availability']['in_stock'], $bkCard['availability']['quantity']],
+        'Bookshop listing: with the print editions sold out the e-book keeps the book for sale');
+    $pdo->exec("UPDATE variants SET availability = 'disabled' WHERE id = 98811");
+    $bkCard = StorefrontViewModel::productCard($bkRow);
+    assert_true(!$bkCard['availability']['purchasable'] && !$bkCard['availability']['in_stock'], 'Bookshop listing: nothing to buy shows out of stock');
+    $pdo->exec("UPDATE variants SET availability = 'active' WHERE id = 98811");
+    Warehouse::setStock($bkWarehouse, 'BK-TS-PB', 5, 'count', 'test', 'bk-restock-pb');
+    Warehouse::setStock($bkWarehouse, 'BK-TS-HB', 2, 'count', 'test', 'bk-restock-hb');
+    $bkDetail = StorefrontViewModel::product($bkRow);
+    assert_equals(['BK-TS-EBOOK' => true, 'BK-TS-PB' => false, 'BK-TS-HB' => false], array_column($bkDetail['variants'], 'digital', 'sku'),
+        'Bookshop product page: each format says whether it is a download');
+} catch (Throwable $e) { $bkFail('listing', $e); }
+
 try {
     assert_true(CatalogScope::ownsSku('BK-TS-EBOOK') && !CatalogScope::ownsSku('BK-NOPE'), 'Bookshop: a variant SKU of the catalog can carry a digital asset');
     assert_true(in_array('BK-TS-EBOOK', array_column(CatalogScope::digitalAssets(), 'sku'), true), 'Bookshop: the admin lists the e-book asset');

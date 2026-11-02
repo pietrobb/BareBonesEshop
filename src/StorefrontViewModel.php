@@ -168,11 +168,15 @@ final class StorefrontViewModel
         if ($raw !== []) $products = Products::enrichMany($raw) + $products;
         $ids = array_map(static fn(array $product): int => (int)$product['id'], $products);
         $purchasable = VariantAvailability::purchasableMany($ids);
+        // A product whose stock is held by its variants (sizes, or an e-book next to its print editions) is listed by them.
+        $variantStates = VariantAvailability::variantStatesMany($ids);
         $withVariants = self::productsWithVariants($ids);
         $cartForm = self::cartForm();
         $cards = [];
         foreach (array_keys($rows) as $key) {
             $product = $products[$key];
+            $state = $variantStates[(int)$product['id']] ?? null;
+            if ($state !== null) $product['stock'] = $state['quantity'];
             $images = self::images($product);
             $cards[$key] = [
                 'id' => (int)$product['id'],
@@ -183,7 +187,9 @@ final class StorefrontViewModel
                 'summary' => (string)($product['summary'] ?? ''),
                 'url' => self::productUrl((string)$product['slug']),
                 'price' => self::price($product),
-                'availability' => self::availability($product, null, $purchasable[(int)$product['id']] ?? false),
+                'availability' => $state !== null
+                    ? self::availability($product, null, $state['purchasable'], $state['in_stock'])
+                    : self::availability($product, null, $purchasable[(int)$product['id']] ?? false),
                 'image' => $images[0] ?? null,
                 // A product with variants is bought on its page (Cart::addValidated refuses it without one).
                 'requires_variant' => isset($withVariants[(int)$product['id']]),
@@ -326,7 +332,7 @@ final class StorefrontViewModel
         return I18n::t($registered ? 'price_incl_vat' : 'price_no_vat');
     }
 
-    private static function availability(array $product, ?int $variantId = null, ?bool $purchasable = null): array
+    private static function availability(array $product, ?int $variantId = null, ?bool $purchasable = null, ?bool $inStock = null): array
     {
         $digital = VariantAvailability::isDigitalType((string)($product['product_type'] ?? ''));
         $quantity = max(0, (int)($product['stock'] ?? 0));
@@ -334,7 +340,7 @@ final class StorefrontViewModel
         // Shown, but not sold in this store without a price in its currency (Pricing::soldInStore, Cart refuses it).
         $priced = Pricing::soldInStore((string)($product['currency'] ?? StoreContext::current()->currency()));
         $purchasable = $purchasable && $priced;
-        $inStock = $digital || $quantity > 0;
+        $inStock ??= $digital || $quantity > 0;
         // Purchasable without stock means the inventory policy sells ahead of it (backorder or preorder).
         $schema = !$purchasable ? 'OutOfStock'
             : ($inStock ? 'InStock' : (($product['inventory_policy'] ?? '') === Inventory::PREORDER ? 'PreOrder' : 'BackOrder'));
