@@ -176,6 +176,12 @@ try {
     $wiStamp = (string)file_get_contents($wiJobs . '/web-worker.last');
     $wiHttp('/admin.php');
     assert_equals($wiStamp, (string)file_get_contents($wiJobs . '/web-worker.last'), 'Web worker: within the interval a further request runs no second pass');
+    // A customer waiting for an eBook only reloads account pages: every web entrypoint must drive the worker.
+    foreach (['/account.php?p=login', '/wishlist.php'] as $wiPath) {
+        file_put_contents($wiJobs . '/web-worker.last', (string)(time() - 3600));
+        $wiHttp($wiPath);
+        assert_true((int)file_get_contents($wiJobs . '/web-worker.last') >= time() - 60, "Web worker: a request to {$wiPath} after the interval runs a pass");
+    }
     assert_true(str_contains($wiDone['body'], 'checks passed') && !str_contains($wiDone['body'], 'Worker cron declaration not recorded'), 'Web worker: doctor accepts page-driven jobs instead of a cron declaration');
 } catch (Throwable $e) { $wiFail('over HTTP', $e); }
 finally {
