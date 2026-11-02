@@ -153,7 +153,17 @@ try {
     $wiPost = $wiValid + ['private_parent' => $wiBase . '/http/data', 'app_url' => "http://127.0.0.1:{$wiPort}"];
     $wiForged = $wiHttp('/install.php', $wiPost + ['token' => str_repeat('0', 64)]);
     assert_true(str_contains($wiForged['body'], 'The form expired') && !is_file($wiShop . '/config.php'), 'Web installer: a post without the session token installs nothing');
-    $wiDone = $wiHttp('/install.php', $wiPost + ['token' => $wiToken[1] ?? '']);
+    // R12: the first visitor is not the owner by default — the key from install-key.php (FTP only) is required.
+    $wiKey = (string)(static fn(string $file): mixed => require $file)($wiShop . '/' . WebInstaller::KEY_FILE);
+    $wiKeyOverHttp = $wiHttp('/' . WebInstaller::KEY_FILE);
+    assert_true(preg_match('/^[A-Z2-9]{5}(?:-[A-Z2-9]{5}){3}$/', $wiKey) === 1 && !str_contains($wiKeyOverHttp['body'], $wiKey),
+        'R12 web installer: the first visit creates install-key.php; over HTTP it runs as PHP and never shows the key');
+    foreach (['without the key' => '', 'with a wrong key' => 'AAAAA-BBBBB-CCCCC-DDDDD'] as $wiWhat => $wiTyped) {
+        $wiNoKey = $wiHttp('/install.php', $wiPost + ['token' => $wiToken[1] ?? '', 'install_key' => $wiTyped]);
+        assert_true(str_contains($wiNoKey['body'], 'This is not the key in install-key.php') && !is_file($wiShop . '/config.php'), "R12 web installer: a post {$wiWhat} installs nothing");
+    }
+    $wiDone = $wiHttp('/install.php', $wiPost + ['token' => $wiToken[1] ?? '', 'install_key' => strtolower(str_replace('-', ' ', $wiKey))]);
+    assert_true(!is_file($wiShop . '/' . WebInstaller::KEY_FILE), 'R12 web installer: the key (typed in any case and spacing) installs, and install-key.php is deleted');
     preg_match('/(\d+) failures/', $wiDone['body'], $wiFailures);
     assert_true(str_contains($wiDone['body'], 'Your shop is ready') && str_contains($wiDone['body'], '<svg') && preg_match('/[0-9A-F]{5}-[0-9A-F]{5}/', $wiDone['body']) === 1,
         'Web installer: the result page shows the owner\'s TOTP QR code and recovery codes' . (str_contains($wiDone['body'], 'Your shop is ready') ? '' : ': ' . implode(' | ', preg_match_all('/<p class="error"[^>]*>(.*?)<\/p>/s', $wiDone['body'], $wiShown) ? $wiShown[1] : [$wiDone['status']])));

@@ -18,6 +18,13 @@
   exact `Content-Length` and `Connection: close` before working, so a payment webhook is answered at once.
   A response already streamed without a length skips the pass. The pass may run 300 s
   (`WebWorker::TIME_LIMIT`) instead of the web `max_execution_time`.
+- **Web installer needs the installation key and checks the server** (review round 12). The first visit
+  writes `install-key.php` (a random key, readable over FTP, empty over HTTP); `install.php` installs only
+  with that key, so the first stranger to open a fresh upload no longer becomes its owner. Before
+  installing it requests `src/autoload.php` and `demo/*/dist/*.json` from its own server and refuses while
+  they are served (`.htaccess` inactive). After seeding it deletes `demo/<name>/dist` (starter database,
+  paid eBooks) and the key file. A failed installation shows a reference number; the exception (paths)
+  goes only to the PHP error log.
 - **Digital variants of physical products.** A variant can be marked as a download (`variants.digital`,
   migration `20261102090000_variant_digital`, checkbox in the variant editor), for example an e-book
   next to the paperback and hardcover of the same book. The download variant is sold as digital content:

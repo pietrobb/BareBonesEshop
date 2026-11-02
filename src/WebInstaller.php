@@ -10,10 +10,98 @@ declare(strict_types=1);
 final class WebInstaller
 {
     public const STRIPE_FIELDS = ['stripe_secret_key', 'stripe_publishable_key', 'stripe_webhook_secret'];
+    /** Proof of owning the files: install.php asks for the key in this file, readable over FTP but never over HTTP (PHP runs it). */
+    public const KEY_FILE = 'install-key.php';
+    private const KEY_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
     public static function installed(string $root): bool
     {
         return is_file($root . '/config.php');
+    }
+
+    /**
+     * The installation key in <root>/install-key.php, created on the first visit (100 random bits, never part of a
+     * published package, where everybody could read it). Null when PHP cannot write the shop folder.
+     */
+    public static function installKey(string $root): ?string
+    {
+        $file = $root . '/' . self::KEY_FILE;
+        if (!is_file($file)) {
+            $key = '';
+            for ($i = 0; $i < 20; $i++) $key .= self::KEY_ALPHABET[random_int(0, 31)];
+            $key = implode('-', str_split($key, 5));
+            $handle = @fopen($file, 'x');
+            if ($handle !== false) {
+                fwrite($handle, "<?php\n// BareBones Shop installation key: install.php asks for it, so only someone with access to these\n"
+                    . "// files (FTP, the hosting file manager) can install the shop. Deleted by the installation.\nreturn '{$key}';\n");
+                fclose($handle);
+                @chmod($file, 0640);
+            }
+        }
+        $key = is_file($file) ? (static fn(string $path): mixed => include $path)($file) : null;
+        return is_string($key) && preg_match('/^[A-Z2-9]{5}(?:-[A-Z2-9]{5}){3}$/', $key) === 1 ? $key : null;
+    }
+
+    /** Spaces, dashes and letter case of a typed key do not matter. */
+    public static function keyMatches(string $root, string $typed): bool
+    {
+        $key = self::installKey($root);
+        $normalize = static fn(string $value): string => (string)preg_replace('/[^A-Z0-9]/', '', strtoupper($value));
+        return $key !== null && hash_equals($normalize($key), $normalize($typed));
+    }
+
+    /**
+     * Whether the web server really hides the application: requests its own src/autoload.php and the starter manifest
+     * (demo/<name>/dist/*.json, next to the paid eBooks and the starter database) from itself. Without mod_rewrite or
+     * AllowOverride (or on nginx without the deploy config) .htaccess does nothing. Returns the paths it served, or
+     * null when the check cannot tell (no connection to itself, a redirect).
+     * @return list<string>|null
+     */
+    public static function exposedPaths(string $root, array $server, float $timeout = 3.0): ?array
+    {
+        $https = strtolower((string)($server['HTTPS'] ?? '')) === 'on';
+        $host = (string)($server['HTTP_HOST'] ?? '');
+        if (preg_match('/^[A-Za-z0-9.\-]+(?::\d{1,5})?$|^\[[0-9a-fA-F:]+\](?::\d{1,5})?$/', $host) !== 1) return null;
+        $address = (string)($server['SERVER_ADDR'] ?? '') ?: '127.0.0.1';
+        if (str_contains($address, ':')) $address = '[' . $address . ']';
+        $port = (int)($server['SERVER_PORT'] ?? 0) ?: ($https ? 443 : 80);
+        $base = rtrim(str_replace('\\', '/', dirname((string)($server['SCRIPT_NAME'] ?? '/install.php'))), '/');
+        $paths = ['src/autoload.php'];
+        foreach (glob($root . '/demo/*/dist/*.json') ?: [] as $manifest) $paths[] = substr(str_replace('\\', '/', $manifest), strlen(str_replace('\\', '/', $root)) + 1);
+        $context = stream_context_create(['ssl' => ['verify_peer' => false, 'verify_peer_name' => false, 'peer_name' => (string)preg_replace('/:\d+$/', '', $host)]]);
+        $exposed = [];
+        foreach ($paths as $path) {
+            $socket = @stream_socket_client(($https ? 'ssl://' : 'tcp://') . $address . ':' . $port, $errno, $error, $timeout, STREAM_CLIENT_CONNECT, $context);
+            if ($socket === false) return null;
+            stream_set_timeout($socket, (int)ceil($timeout));
+            $url = $base . '/' . implode('/', array_map('rawurlencode', explode('/', $path)));
+            fwrite($socket, "GET {$url} HTTP/1.0\r\nHost: {$host}\r\nUser-Agent: BareBonesEshop-installer\r\nConnection: close\r\n\r\n");
+            $status = preg_match('#^HTTP/\d(?:\.\d)?\s+(\d{3})#', (string)fgets($socket, 256), $m) === 1 ? (int)$m[1] : 0;
+            fclose($socket);
+            if ($status === 0 || ($status >= 300 && $status < 400)) return null;
+            if ($status < 300) $exposed[] = $path;
+        }
+        return $exposed;
+    }
+
+    /**
+     * After the starter is copied into the private folder its source in the web space (demo/<name>/dist: the database
+     * and the paid eBooks) is deleted. Returns the folder when it could not be removed.
+     */
+    public static function removeStarter(array $starter, string $root): ?string
+    {
+        $dist = dirname((string)$starter['database']);
+        $real = realpath($dist);
+        $demo = realpath($root . '/demo');
+        if ($real === false) return null;
+        if ($demo === false || !str_starts_with($real, $demo . DIRECTORY_SEPARATOR) || basename($real) !== 'dist') return $dist;
+        $items = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($real, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+        foreach ($items as $item) {
+            if (!$item instanceof SplFileInfo) continue;
+            $item->isDir() && !$item->isLink() ? @rmdir($item->getPathname()) : @unlink($item->getPathname());
+        }
+        @rmdir($real);
+        return is_dir($real) ? $dist : null;
     }
 
     /**
@@ -130,7 +218,7 @@ final class WebInstaller
     /**
      * The whole installation. config.php is written first and removed again when a later step fails, together with
      * the database this run created, so the installer can simply be run again.
-     * @return array{admin: array<string, mixed>, doctor: array<string, mixed>, starter: string|null}
+     * @return array{admin: array<string, mixed>, doctor: array<string, mixed>, starter: string|null, leftover: string|null}
      */
     public static function install(array $v, string $root): array
     {
@@ -156,7 +244,9 @@ final class WebInstaller
             self::configurePayments(Db::get(), $stores, $v);
             $default = (string)($stores['default_store'] ?? 'default');
             $owner = AdminIdentity::createWithStore($v['admin_user'], $v['admin_password'], 'owner', true, $default, true);
-            return ['admin' => ['username' => $v['admin_user']] + (array)$owner['enrollment'], 'doctor' => Setup::doctor($config, $root, Db::get()), 'starter' => $starter['name'] ?? null];
+            $leftover = $seeded && $starter !== null ? self::removeStarter($starter, $root) : null;
+            return ['admin' => ['username' => $v['admin_user']] + (array)$owner['enrollment'], 'doctor' => Setup::doctor($config, $root, Db::get()),
+                'starter' => $starter['name'] ?? null, 'leftover' => $leftover];
         } catch (Throwable $e) {
             @unlink($root . '/config.php');
             if ($seeded || (is_file($database) && $starter === null)) {

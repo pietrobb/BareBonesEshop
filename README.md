@@ -71,13 +71,17 @@ database and the eBook files.
 1. Download `bareboneseshop-bookshop.zip` from the release and unpack it.
 2. Upload the contents of its `bareboneseshop-bookshop/` folder to your web space, e.g. `public_html/`
    (the hidden `.htaccess` files too). Keep `AllowOverride All` / `mod_rewrite` on.
-3. Open the shop's address right away. The first visit goes to `install.php`: one form for the shop
-   name, the seller (name, address, e-mail, VAT ID), payments (cash on delivery, bank transfer with
-   your IBAN, optionally Stripe test keys), the private data folder and the administrator. Until the
-   form is sent anyone who finds the address could install the shop, so do it straight after uploading.
+3. Open the shop's address. The first visit goes to `install.php` and writes `install-key.php` into the
+   shop folder: open that file with your FTP client or the hosting file manager and copy the key into
+   the form, so nobody else who finds the address can install the shop (over the web the file shows
+   nothing). The form asks for the shop name, the seller (name, address, e-mail, VAT ID), payments
+   (cash on delivery, bank transfer with your IBAN, optionally Stripe test keys), the private data
+   folder and the administrator. The installer first requests `src/` and the starter data from its own
+   server: if they are served (no `mod_rewrite` or `AllowOverride`), it refuses until the host is fixed.
 4. The installer writes `config.php` with fresh secrets, creates `bareboneseshop-private/` in the
    private data folder (default: the folder above the web root, which the web server does not serve),
-   copies the database and the eBooks there, and creates the owner account. Scan the TOTP QR code it
+   copies the database and the eBooks there, deletes `demo/bookshop/dist/` and `install-key.php` from
+   the web space, and creates the owner account. Scan the TOTP QR code it
    shows into an authenticator app and keep the recovery codes; they are shown once. The page ends
    with the doctor checklist (warnings such as "mail provider: log" are expected for a demo).
    If PHP cannot write to the folder above the web root (e.g. `/var/www` in the `php:apache` Docker

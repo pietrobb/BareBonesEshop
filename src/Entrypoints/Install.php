@@ -34,6 +34,16 @@ if (WebInstaller::installed($installRoot)) {
     return;
 }
 
+// Only someone who can read the shop's files may install it: whoever opened the fresh upload first used to become owner.
+if (WebInstaller::installKey($installRoot) === null) {
+    http_response_code(500);
+    $page('Cannot install yet', '<p>PHP cannot write to the shop folder (' . $h(WebInstaller::KEY_FILE) . ' could not be created). '
+        . 'Give the web server user write access to the folder you uploaded the shop to and reload this page.</p>');
+    return;
+}
+// php -S is the development server: router.php applies the .htaccess rules itself (and serves one request at a time).
+$exposed = PHP_SAPI === 'cli-server' ? [] : WebInstaller::exposedPaths($installRoot, $_SERVER);
+
 session_name('bbe_install');
 session_set_cookie_params(['httponly' => true, 'samesite' => 'Strict', 'secure' => $installHttps]);
 session_start();
@@ -41,19 +51,32 @@ $_SESSION['install_token'] ??= bin2hex(random_bytes(32));
 $values = WebInstaller::defaults($installRoot, $_SERVER);
 $errors = [];
 $result = null;
+if ($exposed) {
+    $errors['protection'] = 'The web server serves files that must stay private (' . implode(', ', $exposed) . '), so the .htaccess rules are not active. '
+        . 'Turn on mod_rewrite and AllowOverride All for this folder (ask your hosting), or use deploy/nginx.conf on nginx, then reload this page.';
+}
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     if (!hash_equals((string)$_SESSION['install_token'], (string)($_POST['token'] ?? ''))) {
         $errors['form'] = 'The form expired. Check the values and send it again.';
-        $values = array_merge($values, array_diff_key($_POST, ['admin_password' => 1, 'admin_password_repeat' => 1, 'token' => 1]));
+        $values = array_merge($values, array_diff_key($_POST, ['admin_password' => 1, 'admin_password_repeat' => 1, 'token' => 1, 'install_key' => 1]));
+    } elseif (!WebInstaller::keyMatches($installRoot, (string)($_POST['install_key'] ?? ''))) {
+        $errors['install_key'] = 'This is not the key in ' . WebInstaller::KEY_FILE . '.';
+        $values = array_merge($values, array_diff_key($_POST, ['admin_password' => 1, 'admin_password_repeat' => 1, 'token' => 1, 'install_key' => 1]));
     } else {
-        [$values, $errors] = WebInstaller::validate($_POST, $installRoot);
+        [$values, $validationErrors] = WebInstaller::validate($_POST, $installRoot);
+        $errors += $validationErrors;
+        $values['install_key'] = (string)($_POST['install_key'] ?? '');
         if ($errors === []) {
             if (is_resource($installLock)) flock($installLock, LOCK_EX);
             try {
                 if (is_file($installRoot . '/config.php')) throw new RuntimeException('The shop has just been installed by another request.');
                 $result = WebInstaller::install($values, $installRoot);
+                @unlink($installRoot . '/' . WebInstaller::KEY_FILE);
             } catch (Throwable $e) {
-                $errors['form'] = 'Installation failed: ' . $e->getMessage();
+                // The details (paths, driver messages) go to the PHP error log, not to the page.
+                $reference = bin2hex(random_bytes(4));
+                error_log("BareBonesEshop install.php failure {$reference}: " . $e);
+                $errors['form'] = "Installation failed (reference {$reference}). Nothing was installed; the details are in the PHP error log of your hosting.";
             }
         }
     }
@@ -75,6 +98,8 @@ if ($result !== null) {
         . '<p><strong>Recovery codes</strong> (each works once if you lose the phone; store them safely, they are not shown again):</p><p><code>' . $h(implode('  ', (array)($admin['recovery_codes'] ?? []))) . '</code></p>'
         . '<h2>Health check</h2><p>' . $h($doctor['counts']['pass']) . ' checks passed, ' . $h($doctor['counts']['warn']) . ' warnings, ' . $h($doctor['counts']['fail']) . ' failures.</p>'
         . ($rows !== '' ? '<table>' . $rows . '</table>' : '')
+        . ($result['leftover'] !== null ? '<p class="error">Delete the folder ' . $h(substr(str_replace('\\', '/', $result['leftover']), strlen(str_replace('\\', '/', $installRoot)) + 1))
+            . ' with your FTP client: it still holds the starter database and the eBook files, which now live in the private data folder.</p>' : '')
         . '<p><a href="./">Open the shop</a> · <a href="admin.php">Sign in to the administration</a></p>');
     return;
 }
@@ -91,9 +116,13 @@ $field = static function (string $name, string $label, string $type = 'text', st
 $checkbox = static fn(string $name, string $label): string => '<label class="check"><input type="checkbox" name="' . $name . '" value="1"' . (!empty($values[$name]) ? ' checked' : '') . '> ' . $h($label) . '</label>';
 $groupError = static fn(string $key): string => isset($errors[$key]) ? '<p class="error">' . $h($errors[$key]) . '</p>' : '';
 
-$page('Install ' . ($values['shop_name'] !== '' ? $values['shop_name'] : 'your shop'), $groupError('form')
-    . '<p>Fill in this one form and the shop is ready. Install right after uploading: until then anyone who opens this page could do it.</p>'
+$page('Install ' . ($values['shop_name'] !== '' ? $values['shop_name'] : 'your shop'), $groupError('protection') . $groupError('form')
+    . '<p>Fill in this one form and the shop is ready.</p>'
+    . ($exposed === null ? '<p class="hint">The installer could not check from here whether the web server keeps the application folders private. '
+        . 'After installing, make sure that opening /src/autoload.php in the browser answers "Forbidden".</p>' : '')
     . '<form method="post" action="install.php" novalidate><input type="hidden" name="token" value="' . $h($_SESSION['install_token']) . '">'
+    . '<fieldset><legend>Installation key</legend>' . $field('install_key', 'Installation key', 'text',
+        'Proves that you own this server: open the file ' . WebInstaller::KEY_FILE . ' in the shop folder with your FTP client or the hosting file manager and copy the key from it (XXXXX-XXXXX-XXXXX-XXXXX).') . '</fieldset>'
     . '<fieldset><legend>Shop</legend>' . $field('shop_name', 'Shop name') . $field('app_url', 'Shop address', 'url', 'Used in e-mails and payment links.')
     . $field('timezone', 'Time zone', 'text', 'For invoice dates and deadlines, e.g. Europe/Bratislava.')
     . $field('private_parent', 'Private data folder', 'text', 'The shop creates bareboneseshop-private/ here for the database, eBook files, invoices and logs. It must not be reachable from the web.') . '</fieldset>'

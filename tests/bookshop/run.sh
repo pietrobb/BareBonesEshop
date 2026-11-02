@@ -22,11 +22,16 @@ docker exec "$NAME" sh -c 'a2enmod rewrite headers expires >/dev/null && sed -i 
 docker cp "$OUT/unpacked/bareboneseshop-bookshop/." "$NAME:/var/www/html/"
 docker exec "$NAME" chown -R www-data:www-data /var/www/html
 for _ in $(seq 1 30); do curl -fs -o /dev/null "http://127.0.0.1:$PORT/install.php" && break; sleep 1; done
-if [ "$KEEP" = "--prepare-only" ]; then trap - EXIT; echo "Ready: http://127.0.0.1:$PORT (container $NAME)"; exit 0; fi
+# The first visit wrote install-key.php; the owner reads it over FTP, the test from the container.
+KEY=$(docker exec "$NAME" php -r 'echo require "/var/www/html/install-key.php";')
+if [ "$KEEP" = "--prepare-only" ]; then trap - EXIT; echo "Ready: http://127.0.0.1:$PORT (container $NAME), installation key $KEY"; exit 0; fi
 
 cd "$ROOT"
-BOOKSHOP_URL="http://127.0.0.1:$PORT" BOOKSHOP_SHOTS="$OUT/screenshots" BOOKSHOP_PRIVATE_PARENT=/srv/bookshop-data \
+BOOKSHOP_URL="http://127.0.0.1:$PORT" BOOKSHOP_SHOTS="$OUT/screenshots" BOOKSHOP_PRIVATE_PARENT=/srv/bookshop-data BOOKSHOP_INSTALL_KEY="$KEY" \
   npx playwright test -c tests/bookshop/playwright.config.js
+# The installation removes its key and the starter source (database, paid eBooks) from the web space.
+docker exec "$NAME" sh -c 'test ! -e /var/www/html/install-key.php && test ! -e /var/www/html/demo/bookshop/dist' \
+  || { echo "install-key.php or demo/bookshop/dist is still in the web space"; exit 1; }
 # php:apache links /var/log/apache2/error.log to /dev/stderr (tail would block on it); its log is `docker logs`.
 docker exec "$NAME" ls /srv/bookshop-data/bareboneseshop-private/jobs || true
 docker logs --tail 5 "$NAME" 2>&1 || true
