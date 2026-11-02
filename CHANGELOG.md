@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Digital variants of physical products.** A variant can be marked as a download (`variants.digital`,
+  migration `20261102090000_variant_digital`, checkbox in the variant editor), for example an e-book
+  next to the paperback and hardcover of the same book. The download variant is sold as digital content:
+  quantity 1, no weight, no shipping, the digital-content consent, never reserved in the warehouse, and its
+  file is a digital asset of the variant SKU. A listing card of a product with variants shows the
+  availability of its variants.
+- **Bookshop demo catalog** (`demo/bookshop/build.php`): 321 public-domain titles in 12 genres, each in
+  three formats (eBook EPUB download, paperback, hardcover), with original descriptions, generated SVG
+  covers and an EPUB demo edition. It builds into an empty catalog of the configured database.
+
 ## 2.1.0 — 2026-11-01
 
 **Update signing key rotated.** The secret key that signed v1.9.0 was lost, so v2.1.0 is the first

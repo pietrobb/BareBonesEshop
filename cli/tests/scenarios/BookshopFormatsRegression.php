@@ -66,13 +66,20 @@ try {
 } catch (Throwable $e) { $bkFail('cart and order', $e); }
 
 // Listing: the product row holds no stock of its own; the card is listed by its variants.
+// A stock count is mirrored into variants.stock by syncProductStock, as the admin and feed paths do.
+$bkCount = static function (string $sku, int $qty, string $key) use ($bkWarehouse): void {
+    Warehouse::setStock($bkWarehouse, $sku, $qty, 'count', 'test', $key);
+    Warehouse::syncProductStock([$sku]);
+};
 try {
+    $bkCount('BK-TS-PB', 5, 'bk-recount-pb');
+    $bkCount('BK-TS-HB', 2, 'bk-recount-hb');
     $bkRow = $pdo->query('SELECT * FROM products WHERE id = 98801')->fetch(PDO::FETCH_ASSOC);
     $bkCard = StorefrontViewModel::productCard($bkRow);
     assert_equals([true, true, 7], [$bkCard['availability']['purchasable'], $bkCard['availability']['in_stock'], $bkCard['availability']['quantity']],
         'Bookshop listing: a book is in stock through its paperbacks (5) and hardcovers (2), not "out of stock" for an empty product row');
-    Warehouse::setStock($bkWarehouse, 'BK-TS-PB', 0, 'count', 'test', 'bk-zero-pb');
-    Warehouse::setStock($bkWarehouse, 'BK-TS-HB', 0, 'count', 'test', 'bk-zero-hb');
+    $bkCount('BK-TS-PB', 0, 'bk-zero-pb');
+    $bkCount('BK-TS-HB', 0, 'bk-zero-hb');
     $bkCard = StorefrontViewModel::productCard($bkRow);
     assert_equals([true, true, 0], [$bkCard['availability']['purchasable'], $bkCard['availability']['in_stock'], $bkCard['availability']['quantity']],
         'Bookshop listing: with the print editions sold out the e-book keeps the book for sale');
@@ -80,11 +87,13 @@ try {
     $bkCard = StorefrontViewModel::productCard($bkRow);
     assert_true(!$bkCard['availability']['purchasable'] && !$bkCard['availability']['in_stock'], 'Bookshop listing: nothing to buy shows out of stock');
     $pdo->exec("UPDATE variants SET availability = 'active' WHERE id = 98811");
-    Warehouse::setStock($bkWarehouse, 'BK-TS-PB', 5, 'count', 'test', 'bk-restock-pb');
-    Warehouse::setStock($bkWarehouse, 'BK-TS-HB', 2, 'count', 'test', 'bk-restock-hb');
+    $bkCount('BK-TS-PB', 5, 'bk-restock-pb');
+    $bkCount('BK-TS-HB', 2, 'bk-restock-hb');
     $bkDetail = StorefrontViewModel::product($bkRow);
-    assert_equals(['BK-TS-EBOOK' => true, 'BK-TS-PB' => false, 'BK-TS-HB' => false], array_column($bkDetail['variants'], 'digital', 'sku'),
+    assert_equals(['BK-TS-EBOOK' => true, 'BK-TS-PB' => false, 'BK-TS-HB' => false], array_column($bkDetail['product']['variants'] ?? [], 'digital', 'sku'),
         'Bookshop product page: each format says whether it is a download');
+    assert_equals([true, true, true], array_map(static fn(array $v): bool => (bool)($v['availability']['in_stock'] ?? false), $bkDetail['product']['variants'] ?? []),
+        'Bookshop product page: the e-book and both print editions are in stock');
 } catch (Throwable $e) { $bkFail('listing', $e); }
 
 try {
