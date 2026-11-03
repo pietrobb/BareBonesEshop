@@ -105,6 +105,12 @@ $pdo->exec('PRAGMA foreign_keys = ON');
 Db::init($pdo, 'sqlite');
 $testRateDb = new PDO('sqlite::memory:');
 Security::setRateDbForTesting($testRateDb);
+// The shipped stores.json carries a placeholder IBAN with wrong check digits, which hides bank transfer at checkout;
+// the suite's default store is a configured shop with a real-format account (checksum-valid test IBAN).
+$testStores = Bootstrap::stores();
+$testStores['stores']['default']['legal']['iban'] = 'SK31 1200 0000 1987 4263 7541';
+(new ReflectionProperty(Bootstrap::class, 'stores'))->setValue(null, $testStores);
+(new ReflectionProperty(StoreContext::class, 'current'))->setValue(null, null);
 
 assert_true(Db::get() instanceof PDO, 'PDO connection established');
 assert_true(Db::isSqlite(), 'Driver is SQLite');

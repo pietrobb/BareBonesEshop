@@ -119,31 +119,21 @@ final class AccountViewModel
         }, $orders);
     }
 
-    /** $order is already owner- and store-checked by Customers::order(). Amounts stay in the order's own currency. */
-    private static function orderDetail(int $customerId, array $order): array
+    /**
+     * What was bought, where it goes and what it costs, in the order's own currency: the account's order detail and
+     * the page after checkout. $items are the order's lines, already checked to belong to whoever sees them.
+     */
+    public static function orderSummary(array $order, array $items): array
     {
-        $id = (int)$order['id'];
         $currency = (string)$order['currency'];
         $money = static fn($cents): string => I18n::price((int)$cents, $currency);
         $shipping = json_decode((string)($order['shipping_rate_snapshot'] ?? '{}'), true) ?: [];
         $address = json_decode((string)($order['shipping_addr'] ?? '{}'), true) ?: [];
-        $invoice = Db::get()->prepare("SELECT id, number FROM invoices WHERE order_id = ? AND status != 'cancelled' ORDER BY id DESC LIMIT 1");
-        $invoice->execute([$id]);
-        $invoice = $invoice->fetch() ?: null;
         $line = static fn(string $label, $cents): array => ['label' => I18n::t($label), 'amount' => $money($cents)];
         $labels = ['subtotal' => 'subtotal', 'discount' => 'discount', 'shipping' => 'shipping', 'payment_fee' => 'account.payment_fee', 'vat' => 'tax', 'vat_included' => 'tax_included'];
-        $totals = array_map(static fn(array $total): array => $line($labels[$total['key']], $total['cents']), Orders::totalLines($order));
         return [
-            'id' => $id,
-            'number' => (string)$order['order_number'],
-            'date' => I18n::dateTime((string)$order['created_at']),
-            'status' => (string)$order['status'],
-            'status_label' => OrderStatusLabels::order((string)$order['status']),
-            'payment_status' => (string)($order['payment_status'] ?? 'pending'),
-            'payment_status_label' => OrderStatusLabels::payment((string)($order['payment_status'] ?? 'pending')),
             'payment_label' => PaymentService::orderLabel($order, I18n::locale()),
             'shipping_label' => (string)($shipping['name'] ?? $shipping['label'] ?? $order['shipping_method'] ?? ''),
-            'tracking' => trim(MethodLabels::carrier((string)($order['carrier'] ?? '')) . ' ' . (string)($order['tracking_number'] ?? '')),
             'pickup_point' => is_array($shipping['pickup_point'] ?? null)
                 ? trim((string)($shipping['pickup_point']['name'] ?? '') . ' — ' . (string)($shipping['pickup_point']['address'] ?? ''), ' —') : '',
             'address' => array_values(array_filter([
@@ -154,9 +144,28 @@ final class AccountViewModel
             'items' => array_map(static fn(array $item): array => [
                 'name' => (string)$item['name'], 'sku' => (string)$item['sku'], 'quantity' => (int)$item['quantity'],
                 'unit_price' => $money($item['unit_price']), 'total' => $money($item['total']),
-            ], Customers::orderItems($customerId, $id)),
-            'totals' => $totals,
+            ], $items),
+            'totals' => array_map(static fn(array $total): array => $line($labels[$total['key']], $total['cents']), Orders::totalLines($order)),
             'total' => $money($order['total']),
+        ];
+    }
+
+    /** $order is already owner- and store-checked by Customers::order(). Amounts stay in the order's own currency. */
+    private static function orderDetail(int $customerId, array $order): array
+    {
+        $id = (int)$order['id'];
+        $invoice = Db::get()->prepare("SELECT id, number FROM invoices WHERE order_id = ? AND status != 'cancelled' ORDER BY id DESC LIMIT 1");
+        $invoice->execute([$id]);
+        $invoice = $invoice->fetch() ?: null;
+        return self::orderSummary($order, Customers::orderItems($customerId, $id)) + [
+            'id' => $id,
+            'number' => (string)$order['order_number'],
+            'date' => I18n::dateTime((string)$order['created_at']),
+            'status' => (string)$order['status'],
+            'status_label' => OrderStatusLabels::order((string)$order['status']),
+            'payment_status' => (string)($order['payment_status'] ?? 'pending'),
+            'payment_status_label' => OrderStatusLabels::payment((string)($order['payment_status'] ?? 'pending')),
+            'tracking' => trim(MethodLabels::carrier((string)($order['carrier'] ?? '')) . ' ' . (string)($order['tracking_number'] ?? '')),
             'invoice' => $invoice ? [
                 'number' => (string)$invoice['number'],
                 'url' => Template::storeUrl('/account.php?p=invoice_pdf&id=' . (int)$invoice['id']),

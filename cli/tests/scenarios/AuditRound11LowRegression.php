@@ -68,7 +68,7 @@ try {
     }
 } catch (Throwable $e) { $r11lFail('journal', $e); }
 
-// Sample stores: a fresh install hides pl/hu/de/us (made-up sellers) until the merchant enters the seller and publishes.
+// Sample stores: a fresh install hides cz/pl/hu/de/us (made-up sellers) until the merchant enters the seller and publishes.
 $r11lTmp = sys_get_temp_dir() . '/bbe-r11l-' . getmypid() . '-' . bin2hex(random_bytes(3));
 $r11lStoresProp = new ReflectionProperty(Bootstrap::class, 'stores');
 $r11lStoresProp->setAccessible(true);
@@ -81,15 +81,18 @@ try {
     assert_equals('created from stores.example.json', DataOverrides::seedStores($r11lTmp . '/app', $r11lConfig)['action'] ?? null, 'R11 samples: setup apply seeds the shop\'s stores.json');
     $r11lSeeded = json_decode((string)file_get_contents($r11lTmp . '/private/stores.json'), true);
     $r11lPublic = array_map(static fn(array $store): bool => StoreContext::isPublicConfig($store), $r11lSeeded['stores']);
-    assert_equals(['default' => true, 'cz' => true, 'pl' => false, 'hu' => false, 'de' => false, 'us' => false], $r11lPublic,
-        'R11 samples: the seeded stores.json keeps default and cz public, the sample stores pl/hu/de/us not');
+    assert_equals(['default' => true, 'cz' => false, 'pl' => false, 'hu' => false, 'de' => false, 'us' => false], $r11lPublic,
+        'R11 samples (R13 UX2): the seeded stores.json keeps only the default store public, the sample stores cz/pl/hu/de/us not');
     assert_true(!str_contains((string)file_get_contents($r11lTmp . '/private/stores.json'), '"sample"'), 'R11 samples: the seeded copy carries "public": false, not the example marker');
 
     $r11lDoctor = array_column(Setup::doctor($r11lConfig, $r11lTmp . '/app')['checks'] ?? [], 'status', 'name');
-    assert_equals(['fail', 'fail', 'warn', 'warn'], [$r11lDoctor['stores.legal.default'] ?? null, $r11lDoctor['stores.legal.cz'] ?? null, $r11lDoctor['stores.legal.pl'] ?? null, $r11lDoctor['stores.legal.us'] ?? null],
+    assert_equals(['fail', 'warn', 'warn', 'warn'], [$r11lDoctor['stores.legal.default'] ?? null, $r11lDoctor['stores.legal.cz'] ?? null, $r11lDoctor['stores.legal.pl'] ?? null, $r11lDoctor['stores.legal.us'] ?? null],
         'R11 samples: doctor fails a public store with example seller data, a hidden sample store is only a warning');
 
     // Storefront, API and feeds answer a hidden store's prefix with 404; hreflang and the sitemap leave it out.
+    // The merchant publishes cz (as Admin → Stores and seller does once its seller is entered).
+    $r11lSeeded['stores']['cz']['public'] = true;
+    file_put_contents($r11lTmp . '/private/stores.json', json_encode($r11lSeeded, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     $r11lStoresProp->setValue(null, $r11lSeeded);
     $r11lHreflang = Bootstrap::hreflangAlternates('/');
     assert_equals(['sk' => '', 'cs' => '/cs'], $r11lHreflang['alternates'], 'R11 samples: hreflang lists only the public stores');

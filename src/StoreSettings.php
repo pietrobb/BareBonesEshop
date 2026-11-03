@@ -5,7 +5,7 @@
  * store or breaks invoice numbering. The updater keeps the installed stores.json, so admin edits survive updates.
  */
 final class StoreSettings {
-    public const LEGAL_TEXT = ['name', 'street', 'city', 'zip', 'country', 'ico', 'dic', 'ic_dph', 'iban', 'bank', 'email', 'phone', 'register_note'];
+    public const LEGAL_TEXT = ['name', 'street', 'city', 'zip', 'country', 'ico', 'dic', 'ic_dph', 'iban', 'bic', 'bank', 'email', 'phone', 'register_note'];
     private const REQUIRED = ['name', 'street', 'city', 'zip', 'country', 'email'];
     private const MAX_LENGTH = 200;
 
@@ -162,6 +162,8 @@ final class StoreSettings {
             if ($legal['country'] !== '' && !preg_match('/^[A-Z]{2}$/', $legal['country'])) $errors[] = I18n::t('admin.stores.err.country');
             $iban = strtoupper((string)preg_replace('/\s+/', '', $legal['iban']));
             if ($iban !== '' && !BankTransferInstructions::validIban($iban)) $errors[] = I18n::t('admin.stores.err.iban');
+            $legal['bic'] = strtoupper((string)preg_replace('/\s+/', '', $legal['bic']));
+            if ($legal['bic'] !== '' && !BankTransferInstructions::validBic($legal['bic'])) $errors[] = I18n::t('admin.stores.err.bic');
             if ($legal['payment_terms_days'] < 0 || $legal['payment_terms_days'] > 365) $errors[] = I18n::t('admin.stores.err.terms');
             if ($legal['vat_registered'] && $legal['ic_dph'] === '') $errors[] = I18n::t('admin.stores.err.vat_id');
         }

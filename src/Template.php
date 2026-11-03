@@ -483,7 +483,8 @@ class Template {
         $alias = (string)($section['block'] ?? $section['type'] ?? '');
         $block = self::sectionBlocks()[$alias] ?? '';
         if ($block === '') return '';
-        $sectionData = array_replace($data, $section, ['section' => $section]);
+        // shop_name: what a hero without its own heading shows (the store's name, not a sample shop's slogan).
+        $sectionData = array_replace(['shop_name' => (string)self::branding()['name']], $data, $section, ['section' => $section]);
         return self::render($block, $sectionData);
     }
 

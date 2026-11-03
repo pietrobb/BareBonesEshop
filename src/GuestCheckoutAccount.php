@@ -81,7 +81,8 @@ class GuestCheckoutAccount {
         $db->prepare("UPDATE checkout_sessions SET status = 'completed' WHERE provider = ? AND order_id = ?")->execute([self::PROVIDER, (int)$order['id']]);
         $db->prepare('UPDATE customers SET email_verified_at = ? WHERE id = ? AND store_id = ? AND email_verified_at IS NULL')
             ->execute([gmdate('Y-m-d H:i:s'), (int)$id, $store]);
-        $db->prepare('UPDATE orders SET customer_id = ? WHERE id = ? AND store_id = ? AND customer_id IS NULL')->execute([(int)$id, (int)$order['id'], $store]);
+        // The claim link proves the address: this order and the other guest orders placed with it join the account.
+        Customers::attachGuestOrders((int)$id);
         MailService::send('account_welcome', $email, $locale, ['customer_name' => $name ?: $email, 'shop_name' => (string)Template::branding()['name']]);
         Customers::login($email, $password);
         return ['ok' => true, 'error' => null, 'customer_id' => (int)$id];

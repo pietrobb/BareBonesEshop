@@ -27,6 +27,10 @@ preg_match_all("/'([a-z0-9_]+)'/", $a112Match[1] ?? '', $a112Actions);
 $a112ActionCount = count(array_unique($a112Actions[1]));
 if (preg_match('#JSON API\*\* \(`/api/v1`\) — (\d+) actions#', $a112Readme, $a112Stated)) {
     assert_equals($a112ActionCount, (int)$a112Stated[1], 'A11.2 README: stated JSON API action count matches the dispatcher');
+    $a112Bbf = count(array_filter(array_unique($a112Actions[1]), static fn(string $a): bool => str_starts_with($a, 'bbf_')));
+    $a112Split = preg_match('#\((\d+) storefront, webhook and CSP\s+actions and (\d+) BBF option lists#', $a112Readme, $a112Parts) === 1;
+    assert_true($a112Split && (int)$a112Parts[2] === $a112Bbf && (int)$a112Parts[1] === $a112ActionCount - $a112Bbf,
+        "R13 docs README: the action count is split into storefront/webhook/CSP actions and BBF option lists as the dispatcher has them ({$a112Bbf} BBF)");
 } else {
     assert_true(false, 'A11.2 README: JSON API action count is stated from the dispatcher');
 }

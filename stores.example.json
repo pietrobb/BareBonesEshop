@@ -41,6 +41,7 @@
         "cz": {
             "id": "cz",
             "name": "Český obchod",
+            "sample": true,
             "domains": [],
             "catalog_scope": "default",
             "provider_scope": "cz",

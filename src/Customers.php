@@ -404,6 +404,23 @@ class Customers {
         return 'sent';
     }
 
+    /**
+     * Guest orders of this store placed with the customer's e-mail join the account, so they appear under My orders.
+     * Call only once the customer has proven the address (verification link, guest-order claim token): an unverified
+     * sign-up with someone else's e-mail must not see their orders. Returns the number of orders attached.
+     */
+    public static function attachGuestOrders(int $customerId): int {
+        $db = Db::get();
+        $store = StoreContext::current()->id();
+        $email = $db->prepare('SELECT email FROM customers WHERE id = ? AND store_id = ? AND email_verified_at IS NOT NULL');
+        $email->execute([$customerId, $store]);
+        $email = Str::normalizeEmail((string)$email->fetchColumn());
+        if ($email === '') return 0;
+        $attach = $db->prepare('UPDATE orders SET customer_id = ? WHERE store_id = ? AND customer_id IS NULL AND LOWER(TRIM(customer_email)) = ?');
+        $attach->execute([$customerId, $store, $email]);
+        return $attach->rowCount();
+    }
+
     /** Consumes a verification token once; it only verifies the address it was issued for. Returns the customer ID. */
     public static function verifyEmail(string $token): ?int {
         if (!preg_match('/^[a-f0-9]{64}$/', $token)) return null;
@@ -424,6 +441,7 @@ class Customers {
             }
             $db->prepare('UPDATE customers SET email_verified_at = ? WHERE id = ? AND store_id = ? AND email_verified_at IS NULL')
                ->execute([$now, $cid, StoreContext::current()->id()]);
+            self::attachGuestOrders($cid);
             $db->commit();
             return $cid;
         } catch (Throwable $e) {

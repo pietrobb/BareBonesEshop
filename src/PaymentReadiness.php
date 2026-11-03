@@ -70,6 +70,22 @@ final class PaymentReadiness
         return !isset(self::CREDENTIALS[$provider]) || self::missingCredentials($provider, $config) === [];
     }
 
+    /**
+     * A fresh install switches off the active online methods of shipped gateways that have no credentials yet (the
+     * sample card method without Stripe keys), so doctor does not fail on a method nobody chose. Returns "store:code".
+     * @return list<string>
+     */
+    public static function deactivateKeyless(PDO $db, array $config): array {
+        $off = [];
+        $set = $db->prepare('UPDATE payment_methods SET active = 0 WHERE store_id = :store AND code = :code');
+        foreach ($db->query('SELECT store_id, code, provider FROM payment_methods WHERE active = 1 AND requires_online = 1 ORDER BY store_id, code')->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (self::canTakePayments((string)$row['provider'], $config)) continue;
+            $set->execute([':store' => $row['store_id'], ':code' => $row['code']]);
+            $off[] = $row['store_id'] . ':' . $row['code'];
+        }
+        return $off;
+    }
+
     /** @return list<string> */
     private static function missingCredentials(string $provider, array $config): array {
         $missing = [];

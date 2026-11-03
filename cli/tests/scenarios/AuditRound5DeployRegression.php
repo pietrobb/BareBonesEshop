@@ -114,8 +114,10 @@ try {
     $r5dExampleSellers = array_values(array_map(static fn(string $id): string => 'stores.legal.' . $id, array_keys(array_filter($r5dStores['stores'] ?? [],
         static fn(array $s): bool => is_array($s['legal'] ?? null) && !isset($s['legal']['seller']) && empty($s['sample'])))));
     assert_true($r5dExampleSellers !== [], 'R5 deploy: the shipped stores.json has example seller identities');
-    // R9: the sample card method is active and charges through Stripe, which has no keys yet, so checkout cannot take it.
-    assert_equals(array_merge($r5dExampleSellers, ['payment.provider.stripe']), $r5dFails, 'R5 deploy: doctor after the subdirectory install fails only the example seller identities and the keyless Stripe card method');
+    // R13 UX2/UX3: the cz sample store comes in hidden and the keyless Stripe card method switched off, so only the default seller fails.
+    assert_equals(['stores.legal.default'], $r5dExampleSellers, 'R13 UX2: of the shipped stores only the default store is not a hidden sample');
+    assert_equals($r5dExampleSellers, $r5dFails, 'R5 deploy (R13 UX3): doctor after the subdirectory install fails only the default store\'s example seller, not a keyless card method');
+    assert_true(in_array('default:card', (array)($r5dResult['steps']['payments_off'] ?? []), true), 'R13 UX3: install reports the card methods it switched off for lack of Stripe keys (' . json_encode($r5dResult['steps']['payments_off'] ?? null) . ')');
     $r5dDoctorNames = array_column($r5dResult['doctor']['checks'] ?? [], 'status', 'name');
     assert_true(($r5dDoctorNames['admin.accounts'] ?? '') === 'pass' && ($r5dDoctorNames['admin.mfa_key'] ?? '') === 'pass', 'R5 deploy: doctor checks that the owner can sign in (account active, MFA key opens the secret)');
 
@@ -127,8 +129,9 @@ try {
     assert_true(($r5dLevels['shipping_webhook_secret:packeta'] ?? '') === 'warn' && ($r5dLevels['shipping_webhook_secret:gls'] ?? '') === 'warn', 'R5 deploy: preflight warns (not NO-GO) about unset webhook secrets of carriers the shop may not use');
     assert_true(!isset($r5dLevels['dir:storage']) && ($r5dLevels['dir:cache'] ?? '') === 'ok' && ($r5dLevels['dir:uploads'] ?? '') === 'ok', 'R5 deploy: preflight checks the directories PHP writes (cache, uploads), not an unused storage/');
     assert_true(($r5dLevels['sqlite_path'] ?? '') === 'ok' && ($r5dLevels['jobs_dir'] ?? '') === 'ok', 'R5 deploy: preflight accepts private paths above the web root');
-    assert_true(($r5dLevels['payment.provider.stripe'] ?? '') === 'fail' && !isset($r5dLevels['payment_adapter']),
-        'R5 deploy: preflight is NO-GO for the active Stripe card method without keys, judged by the methods checkout offers, not provider_defaults (' . json_encode($r5dLevels['payment.provider.stripe'] ?? null) . ')');
+    // Preflight judges the methods checkout offers, not provider_defaults: the install switched the keyless card method off (R13 UX3).
+    assert_true(!isset($r5dLevels['payment.provider.stripe']) && !isset($r5dLevels['payment_adapter']),
+        'R5 deploy: preflight is not NO-GO for a Stripe card method the install switched off, judged by the methods checkout offers, not provider_defaults (' . json_encode($r5dLevels['payment.provider.stripe'] ?? null) . ')');
     $r5dMail = $r5dPhp(['cli/staging-preflight.php', '--json'], ['MAIL_ADAPTER' => 'smtp']);
     $r5dMailCheck = array_values(array_filter(json_decode($r5dMail['out'], true)['checks'] ?? [], static fn(array $c): bool => $c['name'] === 'mail_adapter'))[0] ?? [];
     assert_true(($r5dMailCheck['level'] ?? '') === 'ok' && str_contains($r5dMailCheck['message'] ?? '', 'smtp'), 'R5 deploy: preflight reports the mail provider MailService uses (MAIL_ADAPTER)');
