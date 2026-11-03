@@ -387,6 +387,7 @@ class PaymentService {
                 idempotencyKey: $idempotencyKey ?: ('refund_' . $orderId . '_' . ($refundId !== '' ? $refundId : uniqid())),
                 rawResponse:    $result,
             );
+            self::linkItemRefundWithin($orderId, (string)$idempotencyKey, $refundId, $status);
             if ($ownTransaction) {
                 $db->commit();
                 self::flushRefundMails();
@@ -468,6 +469,9 @@ class PaymentService {
         $ownTransaction = !$db->inTransaction();
         if ($ownTransaction) $db->beginTransaction();
         try {
+            // Under the order lock a credit note takes too (InvoiceService::credit()): read outside it, the balance missed
+            // a credit note committing meanwhile and both together returned more than was paid.
+            self::lockOrderWithin($orderId);
             $order = Orders::byId($orderId);
             if (!$order) throw new \RuntimeException("Order #{$orderId} not found");
             $from = (string)($order['payment_status'] ?? 'pending');
@@ -843,6 +847,30 @@ class PaymentService {
         return (bool)$stmt->fetchColumn();
     }
 
+    /**
+     * The payment status after a refund job's provider refund succeeded, under the order lock and through the state
+     * machine: written blindly, a late job moved a refunded payment back to partially_refunded, or a disputed one on.
+     * A whole-order refund moves only the refund_pending payment it claimed; an item refund (credit note) any refundable
+     * one. Returns the payment status the order has afterwards.
+     */
+    public static function settleRefundJob(int $orderId, int $amount, bool $itemRefund, string $refundId, int $itemRefundId = 0): string {
+        $status = '';
+        self::withLockedOrder($orderId, static function (array $order) use ($orderId, $amount, $itemRefund, $refundId, $itemRefundId, &$status): bool {
+            $from = (string)($order['payment_status'] ?? 'pending');
+            $status = $from;
+            $to = self::refundedAmount($orderId) >= (int)$order['total'] ? 'refunded' : 'partially_refunded';
+            if ($from === $to || (!$itemRefund && $from !== 'refund_pending') || !self::canPaymentTransition($from, $to)) return false;
+            self::updatePaymentStatus($orderId, $to, 'refund.succeeded', [
+                'refund_id' => $itemRefundId > 0 ? $itemRefundId : null,
+                'amount' => $amount,
+                'provider_ref' => $refundId,
+            ], $from);
+            $status = $to;
+            return true;
+        });
+        return $status;
+    }
+
     /** @return array{amount:int, idempotency_key:string}|null the whole-order refund claimed by orderRefundJobsWithin() */
     public static function orderRefundRequest(int $orderId): ?array {
         $stmt = Db::get()->prepare("SELECT amount FROM payment_transactions WHERE idempotency_key = :key AND order_id = :order AND store_id = :store");
@@ -963,7 +991,10 @@ class PaymentService {
         if (!$committed) return;
         foreach ($mails as [$orderId, $amount, $ledgerKey]) {
             $order = Orders::byId($orderId);
-            if (!$order || trim((string)($order['customer_email'] ?? '')) === '') continue;
+            if (!$order) continue;
+            // Every refund corrects the invoice (InvoiceService::creditBookedRefund(); an item refund has its credit note already).
+            JobQueue::push('refund_credit_note', ['order_id' => $orderId, 'refund_key' => $ledgerKey], 5);
+            if (trim((string)($order['customer_email'] ?? '')) === '') continue;
             JobQueue::push('email_send', [
                 'template' => 'refund_issued',
                 'to' => (string)$order['customer_email'],
@@ -1089,7 +1120,10 @@ class PaymentService {
             };
             $payload = array_merge(['provider' => $provider], $data);
             $providerRef = (string)($data['refund_id'] ?? $data['provider_ref'] ?? $data['orderId'] ?? $data['id'] ?? '');
-            if ($to !== null && $to !== $from && self::canPaymentTransition($from, $to)) {
+            // A capture while a refund is in flight is a second capture, not the payment: moving refund_pending to paid
+            // dropped the refund in flight. refund_pending -> paid is for a failed refund (providerRefundFailed()) only.
+            $capturable = !($to === 'paid' && $from === 'refund_pending');
+            if ($to !== null && $to !== $from && $capturable && self::canPaymentTransition($from, $to)) {
                 self::applyTransition($order, $to, $eventType, $amount, $eventKey, $payload);
                 if ($to === 'paid') self::recordPaymentReference($order, $provider, $data);
                 return $to === 'paid';
@@ -1246,7 +1280,7 @@ class PaymentService {
             return false;
         }
         if ($itemRefundId > 0) Rma::completeRefund($itemRefundId, $itemReference);
-        else self::completeItemRefundWithin($orderId, $refundId, $amount);
+        else self::completeItemRefundWithin($orderId, $refundId);
         return true;
     }
 
@@ -1288,23 +1322,34 @@ class PaymentService {
         return (bool)$stmt->fetchColumn();
     }
 
-    /** The pending item refund (credit note) a booked provider refund settles: by refund id, else by exact amount. */
-    private static function completeItemRefundWithin(int $orderId, string $refundId, int $amount): void {
-        $db = Db::get();
-        $store = StoreContext::current()->id();
-        $itemRefund = false;
-        if ($refundId !== '') {
-            $stmt = $db->prepare("SELECT id FROM order_refunds WHERE order_id = :order AND store_id = :store AND status = 'pending' AND payment_reference = :ref ORDER BY id LIMIT 1");
-            $stmt->execute([':order' => $orderId, ':store' => $store, ':ref' => $refundId]);
-            $itemRefund = $stmt->fetchColumn();
+    /**
+     * The pending item refund (credit note) a booked provider refund settles, by its provider refund id only. Matched by
+     * amount, a whole-order refund or another credit note of the same sum completed the wrong one. A provider refund
+     * booked before its id was noted on the credit note is linked when the refund job's result arrives (linkItemRefundWithin()).
+     */
+    private static function completeItemRefundWithin(int $orderId, string $refundId): void {
+        if ($refundId === '') return;
+        $stmt = Db::get()->prepare("SELECT id FROM order_refunds WHERE order_id = :order AND store_id = :store AND status = 'pending' AND payment_reference = :ref ORDER BY id LIMIT 1");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':ref' => $refundId]);
+        $itemRefund = $stmt->fetchColumn();
+        if ($itemRefund !== false) Rma::completeRefund((int)$itemRefund, $refundId);
+    }
+
+    /**
+     * The credit note a refund job executed ($idempotencyKey is its order_refunds key): its provider refund id is noted,
+     * and once the money is booked (by this call or by the provider's webhook first) it is completed.
+     */
+    private static function linkItemRefundWithin(int $orderId, string $idempotencyKey, string $refundId, string $status): void {
+        if ($idempotencyKey === '') return;
+        $stmt = Db::get()->prepare("SELECT id FROM order_refunds WHERE order_id = :order AND store_id = :store AND idempotency_key = :key AND status = 'pending' LIMIT 1");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $idempotencyKey]);
+        $itemRefund = $stmt->fetchColumn();
+        if ($itemRefund === false) return;
+        if (in_array($status, ['succeeded', 'confirmed'], true) || ($refundId !== '' && self::refundAlreadyRecorded($orderId, $refundId))) {
+            Rma::completeRefund((int)$itemRefund, $refundId !== '' ? $refundId : 'provider-refund');
+        } elseif ($status === 'pending' && $refundId !== '') {
+            Rma::noteProviderRefund((int)$itemRefund, $refundId);
         }
-        if ($itemRefund === false) {
-            $stmt = $db->prepare("SELECT id FROM order_refunds WHERE order_id = :order AND store_id = :store AND status = 'pending' AND amount = :amount
-                AND (payment_reference IS NULL OR payment_reference = '') ORDER BY id LIMIT 1");
-            $stmt->execute([':order' => $orderId, ':store' => $store, ':amount' => $amount]);
-            $itemRefund = $stmt->fetchColumn();
-        }
-        if ($itemRefund !== false) Rma::completeRefund((int)$itemRefund, $refundId !== '' ? $refundId : 'provider-refund');
     }
 
     /** A fully refunded payment closes its returned or cancelled order. */
