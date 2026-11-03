@@ -224,10 +224,10 @@ function handleOrderShipmentCancel(): void {
     $orderId = Security::int($_GET['id'] ?? 0);
     adminShipmentAction($orderId, static function() use ($orderId): string {
         $shipment = adminOrderShipment($orderId, 'planned');
-        if (!Fulfillment::cancel((int)$shipment['id'])) return 'admin.shipment.msg.already_done';
+        if (($left = Fulfillment::cancelWithLabels($orderId, (int)$shipment['id'])) === null) return 'admin.shipment.msg.already_done';
         AuditLog::log('shipment', (int)$shipment['id'], ['status' => 'planned'], ['status' => 'cancelled'], 'Admin shipment cancelled');
-        return 'admin.shipment.msg.cancelled';
-    }, false);
+        return $left === [] ? 'admin.shipment.msg.cancelled' : 'admin.shipment.msg.cancelled_label_active';
+    }, false, false);
 }
 
 /** Run one shipment change in a transaction (false: carrier-API changes take their own short one); DomainException messages are admin i18n keys. */
@@ -244,7 +244,7 @@ function adminShipmentAction(int $orderId, Closure $change, bool $requireOpenOrd
         if ($transaction) $db->commit();
         setFlash('ok', I18n::t($message));
     } catch (Throwable $e) {
-        if ($db->inTransaction()) $db->rollBack();
+        if ($transaction && $db->inTransaction()) $db->rollBack();
         $key = match (true) {
             $e instanceof DomainException => $e->getMessage(),
             $e instanceof InvalidArgumentException => 'admin.shipment.msg.invalid_tracking',

@@ -64,7 +64,9 @@ class HttpShipping implements ShippingLifecycleAdapter
         $orderId = (int)($order['id'] ?? 0);
         if ($orderId <= 0) throw new InvalidArgumentException('Carrier label requires an order ID');
         $result = $this->call('/v1/labels', 'POST', [
-            'idempotency_key' => 'order-' . $orderId . ((int)($order['label_sequence'] ?? 1) > 1 ? '-' . (int)$order['label_sequence'] : ''),
+            // One key per parcel: two parcels of an order labelled at once were one carrier request (one AWB for both).
+            'idempotency_key' => 'order-' . $orderId . (!empty($order['shipment_id']) ? '-parcel-' . (int)$order['shipment_id'] : '')
+                . ((int)($order['label_sequence'] ?? 1) > 1 ? '-' . (int)$order['label_sequence'] : ''),
             'order' => $this->orderPayload($order),
         ]);
         $awb = trim((string)($result['awb'] ?? ''));
