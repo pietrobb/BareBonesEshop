@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Usability** (review round 14, UX1–UX8). Storefront links keep a store's further language (`?lang=en` in a
+  Slovak store): the language was lost after the first click, and the English product link answered with a 301 to
+  the Slovak slug. Canonicals and hreflang alternates still carry exactly one language. The README quick start runs
+  the worker and lists the cron entries (worker, GDPR retention, backup); the CLI install leaves the web worker off,
+  so without them order e-mails stayed queued.
 - **Payments** (review round 14, finding 3, T2, T18, T20). A capture of an older payment attempt records that
   attempt as the order's payment (refunds go to the money), and pending-order expiry asks the gateway about every
   attempt, not only the newest. A hidden store opens its payment link and the pages its gateway returns to. The

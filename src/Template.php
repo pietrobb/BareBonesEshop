@@ -102,11 +102,21 @@ class Template {
         return self::storeUrl($url);
     }
 
-    /** Store/locale-aware local URL, separate from public asset URLs. */
+    /**
+     * Store/locale-aware local URL, separate from public asset URLs. While a store's further language is active
+     * (?lang=xx) the link keeps it: without it the next page opens in the store language (and a product reached by
+     * that language's slug 301s to the store language's slug).
+     */
     public static function storeUrl(string $path = ''): string {
         if ($path !== '' && (preg_match('#^[a-z][a-z0-9+.-]*:#i', $path) || str_starts_with($path, '//'))) {
             return $path;
         }
+        $url = self::storePath($path);
+        $secondary = Bootstrap::secondaryLocale();
+        return $secondary === null ? $url : Bootstrap::withLang($url, $secondary);
+    }
+
+    private static function storePath(string $path): string {
         $prefix = rtrim((string)(StoreContext::current()->config()['url_prefix'] ?? ''), '/');
         if ($prefix !== '' && (!str_starts_with($prefix, '/') || str_contains($prefix, '..'))) {
             throw new RuntimeException('Invalid store URL prefix');
@@ -130,8 +140,9 @@ class Template {
     /** $url of a page about $order (after checkout, payment return, links in its e-mails) in the order's language (?lang=). */
     public static function withOrderLang(string $url, array $order): string {
         $locale = self::orderSecondaryLocale($order);
-        if ($locale === null || preg_match('/[?&]lang=/', $url)) return $url;
-        return $url . (str_contains($url, '?') ? '&' : '?') . 'lang=' . rawurlencode($locale);
+        if ($locale !== null) return Bootstrap::withLang($url, $locale);
+        // An order in the store's own language: a storeUrl() built while a further language is active drops it.
+        return trim((string)($order['locale'] ?? '')) === '' ? $url : Bootstrap::withoutLang($url);
     }
 
     /** Public versioned asset URLs declared by the active theme manifest. */

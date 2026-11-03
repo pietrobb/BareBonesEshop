@@ -3,7 +3,9 @@
 class Seo {
     /** @param array<string, string> $localePaths prefix-less path per hreflang locale where it differs (translated slugs) */
     public static function head(string $title, string $description, string $path, bool $index = true, array $localePaths = []): string {
-        $path = self::localPath($path);
+        // Store links carry the active further language (Template::storeUrl); canonical and alternates set their own.
+        $path = Bootstrap::withoutLang(self::localPath($path));
+        $localePaths = array_map(static fn($localePath): string => Bootstrap::withoutLang((string)$localePath), $localePaths);
         $cfg = require __DIR__ . '/../config.php';
         $base = rtrim((string)($cfg['app_url'] ?? ''), '/');
         if ($base !== '' && (!filter_var($base, FILTER_VALIDATE_URL) || !in_array(strtolower((string)parse_url($base, PHP_URL_SCHEME)), ['http', 'https'], true))) {
