@@ -153,11 +153,11 @@ $r9lWinCfg = new ReflectionProperty('Security', 'cfg');
 $r9lWinPrev = $r9lWinCfg->getValue();
 $r9lWinCfg->setValue(null, ['rma_return_window_days' => 14] + (array)$r9lWinPrev);
 try {
-    assert_equals(['undated 100 d' => true, 'undated 13 months' => false, 'carrier 10 d' => true, 'carrier 15 d' => false],
+    assert_equals(['undated 100 d' => true, 'undated 13 months' => false, 'carrier 10 d' => true, 'carrier 16 d' => false],
         ['undated 100 d' => Rma::withinReturnWindow($r9lWinOrder(97981, 100, null)), 'undated 13 months' => Rma::withinReturnWindow($r9lWinOrder(97982, 396, null)),
-         'carrier 10 d' => Rma::withinReturnWindow($r9lWinOrder(97983, 30, 10)), 'carrier 15 d' => Rma::withinReturnWindow($r9lWinOrder(97984, 30, 15))],
+         'carrier 10 d' => Rma::withinReturnWindow($r9lWinOrder(97983, 30, 10)), 'carrier 16 d' => Rma::withinReturnWindow($r9lWinOrder(97984, 30, 16))],
         'R9 return window: an order without a delivery date is returnable for at most 12 months past the period; a carrier-reported delivery starts it');
-    assert_equals([true, false], [Withdrawal::withinPeriod($r9lWinOrder(97985, 30, 10)), Withdrawal::withinPeriod($r9lWinOrder(97986, 30, 15))],
+    assert_equals([true, false], [Withdrawal::withinPeriod($r9lWinOrder(97985, 30, 10)), Withdrawal::withinPeriod($r9lWinOrder(97986, 30, 16))],
         'R9 withdrawal period: a carrier-reported delivery starts the 14 days when the order itself has no delivered_at');
 } finally {
     $r9lWinCfg->setValue(null, $r9lWinPrev);

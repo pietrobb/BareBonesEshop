@@ -87,8 +87,9 @@ $a063Sweep = static fn(): int => class_exists('PendingOrderExpiry')
     : Orders::expirePending(172800, 25);
 $a063Sweep();
 assert_equals(['pending', 2], [(string)Orders::byId($a063TransferId)['status'], $a063Reserved()], 'A06.3 expiry: 13-day-old transfer is still inside the default 14-day window');
-// R11: due at the end of day 14 on the shop's calendar, then 3 grace days for the money to arrive.
-$a063Backdate->execute([':at' => gmdate('Y-m-d H:i:s', time() - 18 * 86400), ':id' => $a063TransferId]);
+// R11: due at the end of day 14 on the shop's calendar, then 3 grace days for the money to arrive. 19 × 24 h, not 18:
+// in the hour before local midnight after a DST change, 18 × 24 h ago is only 17 calendar days ago (still in grace).
+$a063Backdate->execute([':at' => gmdate('Y-m-d H:i:s', time() - 19 * 86400), ':id' => $a063TransferId]);
 $a063Sweep();
 $a063Expired = Orders::byId($a063TransferId);
 assert_equals(['cancelled', 'cancelled', 0], [(string)$a063Expired['status'], (string)$a063Expired['payment_status'], $a063Reserved()], 'A06.3 expiry: an unpaid transfer past its due date and grace days is cancelled and its reservation released');
