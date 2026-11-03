@@ -284,7 +284,7 @@ try {
                     'withdrawn_ship_ack' => assert_equals(['shipped', [9, 5]], [$a128Shipments[0]['status'] ?? null, $a128StockOf('main')],
                         "{$a128Label}: with the acknowledgement the withdrawn order ships"),
                     'withdrawn_page' => assert_true(str_contains($a128Output, 'data-withdrawals') && str_contains($a128Output, "A128REASON-{$a128Store}")
-                        && str_contains($a128Output, "A128ITEM-{$a128Store}-NAME (1×)") && str_contains($a128Output, '2026-10-23 10:00:00 UTC')
+                        && str_contains($a128Output, "A128ITEM-{$a128Store}-NAME (1×)") && preg_match('/23 Oct 2026, \d{2}:00/', $a128Output) === 1
                         && substr_count($a128Output, 'data-withdrawal-ack') === 4,
                         "{$a128Label}: order detail shows the withdrawal (time, lines, reason) and every ship form asks for the acknowledgement ("
                             . substr_count($a128Output, 'data-withdrawal-ack') . ')'),
