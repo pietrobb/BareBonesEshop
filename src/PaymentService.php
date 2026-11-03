@@ -1068,7 +1068,7 @@ class PaymentService {
                 'payment_id' => (string)($data['payment_intent'] ?? $data['id'] ?? ''),
             ]),
             'payu' => array_filter([
-                'order_number' => (string)($data['extOrderId'] ?? ''),
+                'order_number' => PayUPayment::orderNumber((string)($data['extOrderId'] ?? '')),
                 'payment_id' => (string)($data['orderId'] ?? ''),
             ]),
             // Other adapters report the shop's order number and their payment id under these keys.

@@ -149,5 +149,6 @@ $r7lWorkflow = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/OrderWork
 assert_true(preg_match('/needs an open transaction.*?Orders::lockWithin\(\$orderId\);\s*\$order = Orders::byId/s', $r7lWorkflow) === 1,
     'R7 cancel vs ship: a status change locks the order before reading it, so it waits for a concurrent shipment');
 $r8sAdmin = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/Shipments.php');
-assert_true(preg_match('/function adminShipmentAction.*?beginTransaction\(\);\s*try \{\s*(?:\/\/[^\n]*\n\s*)?Orders::lockWithin\(\$orderId\);\s*\$order = Orders::byId/s', $r8sAdmin) === 1,
+// The carrier-API path (R13 T9) runs without a transaction; whenever one is open, the lock precedes the first read.
+assert_true(preg_match('/function adminShipmentAction.*?(?:if \(\$transaction\) )?\$db->beginTransaction\(\);\s*try \{\s*(?:\/\/[^\n]*\n\s*)?(?:if \(\$transaction\) )?Orders::lockWithin\(\$orderId\);\s*\$order = Orders::byId/s', $r8sAdmin) === 1,
     'R8 admin shipments: the HTTP handler locks the order before its first read');

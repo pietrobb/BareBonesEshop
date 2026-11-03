@@ -41,12 +41,13 @@ class PayUPayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, Sig
 
     /**
      * Create PayU order, returns redirect URL.
-     * Returns ['url' => redirect_url, 'session_id' => extOrderId]
+     * Returns ['url' => redirect_url, 'session_id' => PayU orderId]
      */
     public function createSession(array $order): array {
         $token = $this->getAccessToken();
 
-        $extOrderId = $order['order_number'] ?? ('BBE-' . time());
+        $orderNumber = (string)($order['order_number'] ?? ('BBE-' . time()));
+        $extOrderId = self::attemptId($orderNumber);
         $notifyUrl  = $order['notify_url']   ?? '';
         $continueUrl = $order['success_url'] ?? '';
 
@@ -71,7 +72,7 @@ class PayUPayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, Sig
             'continueUrl'     => $continueUrl,
             'customerIp'      => $order['ip_address'] ?? '127.0.0.1',
             'merchantPosId'   => $this->posId,
-            'description'     => 'Objednávka ' . $extOrderId,
+            'description'     => 'Objednávka ' . $orderNumber,
             'currencyCode'    => strtoupper($order['currency'] ?? 'EUR'),
             'totalAmount'     => (string)(int)$order['total'],
             'extOrderId'      => $extOrderId,
@@ -93,6 +94,19 @@ class PayUPayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, Sig
             'url'        => $redirectUrl,
             'session_id' => $response['orderId'] ?? $extOrderId,
         ];
+    }
+
+    /**
+     * PayU refuses a second order with the same extOrderId on one POS (ORDER_NOT_UNIQUE), so a new payment
+     * attempt after a cancelled or abandoned one carries its own suffix: ORD-20261103-ABCDEF-P1a2b3c4d.
+     */
+    public static function attemptId(string $orderNumber): string {
+        return $orderNumber . '-P' . bin2hex(random_bytes(4));
+    }
+
+    /** The shop's order number in an extOrderId; one created before attempt suffixes is the number itself. */
+    public static function orderNumber(string $extOrderId): string {
+        return preg_match('/^(.+)-P[0-9a-f]{8}$/D', $extOrderId, $m) ? $m[1] : $extOrderId;
     }
 
     /**

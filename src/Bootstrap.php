@@ -40,12 +40,13 @@ class Bootstrap {
     /**
      * Resolve the store and detect/apply the locale from the request URI.
      * Returns the resolved locale code. Pass an explicit $uri to override
-     * $_SERVER['REQUEST_URI'] (useful in tests).
+     * $_SERVER['REQUEST_URI'] (useful in tests). $serveHidden: the request is a provider callback, which a
+     * hidden store answers too (see ApiRoute::servesHiddenStore).
      */
-    public static function initLocale(?string $uri = null): string {
+    public static function initLocale(?string $uri = null, bool $serveHidden = false): string {
         $uri = self::storeRouteUri($uri ?? ($_SERVER['REQUEST_URI'] ?? ''));
         $context = self::initStoreContext($uri);
-        if (!$context->isPublic()) self::hiddenStoreNotFound();
+        if (!$serveHidden && !$context->isPublic()) self::hiddenStoreNotFound();
         $lang = I18n::detectLocale($uri);
         $requested = strtolower(Security::str($_GET['lang'] ?? ''));
         $languages = array_map('strtolower', (array)($context->config()['languages'] ?? []));

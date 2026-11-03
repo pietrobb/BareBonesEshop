@@ -215,9 +215,44 @@ class ShippingService
         $cancelled->execute([':order_id' => $orderId, ':carrier' => $carrierId, ':store' => $store]);
         $order['label_sequence'] = (int)$cancelled->fetchColumn() + 1;
         $order['shipment_id'] = $shipmentId;
+        // T9: the carrier API is called with no transaction open. Inside one, a slow carrier held the order lock (on
+        // SQLite the whole database) for its timeout, and a rollback after it answered lost a label that exists.
+        if ($db->inTransaction()) throw new \LogicException('ShippingService::generateLabel calls the carrier and must run outside a transaction');
         $result = $adapter->generateLabel($order);
 
-        // Persist label record
+        $db->beginTransaction();
+        try {
+            Orders::lockWithin($orderId);
+            // Another request labelled the same parcel at this carrier meanwhile: keep that label (the carrier got the
+            // same label_sequence reference from both).
+            $existing->execute($params);
+            $concurrent = $existing->fetch(\PDO::FETCH_ASSOC);
+            if ($concurrent) {
+                $db->commit();
+                return $concurrent;
+            }
+            // A label of another parcel took the cash on delivery while the carrier answered: the carrier collects what
+            // this label carries, so it is recorded as sent and the double collection is reported for the merchant.
+            if ($order['cod_amount'] > 0) {
+                $codNow = $shipmentId !== null ? (self::parcelCodAmount($order, $shipmentId) ?? 0) : self::labelCodAmount($order);
+                if ($codNow !== $order['cod_amount']) {
+                    IncidentMonitor::report('shipping.cod_twice', 'shipping', 'critical', ['order_id' => $orderId, 'awb' => (string)$result['awb']]);
+                }
+            }
+            self::recordLabel($db, $order, $orderId, $carrierId, $shipmentId, $perShipment, $result);
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+
+        return $result + ['cod_amount' => $order['cod_amount']];
+    }
+
+    /** Store the label the carrier created, and its tracking number on the order and the parcel. */
+    private static function recordLabel(\PDO $db, array $order, int $orderId, string $carrierId, ?int $shipmentId, bool $perShipment, array $result): void
+    {
+        $store = StoreContext::current()->id();
         $db->prepare("
             INSERT INTO shipping_labels (order_id, store_id, carrier, awb, status, label_data" . ($perShipment ? ', shipment_id, cod_amount' : '') . ")
             VALUES (:order_id, :store, :carrier, :awb, 'created', :label_data" . ($perShipment ? ', :shipment_id, :cod_amount' : '') . ")
@@ -241,9 +276,13 @@ class ShippingService
                 ->execute([':carrier' => $carrierId, ':awb' => $result['awb'], ':id' => $shipmentId, ':order' => $orderId, ':store' => $store]
                     + ($recordCod !== '' ? [':cod' => $order['cod_amount']] : []));
         }
-
-        return $result + ['cod_amount' => $order['cod_amount']];
     }
+
+    /**
+     * A label of a cancelled parcel collects nothing, even while the label itself is still active at the carrier
+     * (cancelling a parcel does not call the carrier): the cash moves to the next active parcel.
+     */
+    private const LABEL_PARCEL_ACTIVE = " AND (shipment_id IS NULL OR shipment_id NOT IN (SELECT id FROM shipments WHERE status = 'cancelled'))";
 
     /**
      * Cash the carrier collects with the next label: the total of an unpaid cash-on-delivery order, by the payment
@@ -254,7 +293,7 @@ class ShippingService
     {
         if (!OrderWorkflow::isUnpaidCashOnDelivery($order)) return 0;
         if (Db::hasColumn('shipping_labels', 'cod_amount')) {
-            $stmt = Db::get()->prepare("SELECT COUNT(*) FROM shipping_labels WHERE order_id = :order AND store_id = :store AND status != 'cancelled' AND cod_amount > 0");
+            $stmt = Db::get()->prepare("SELECT COUNT(*) FROM shipping_labels WHERE order_id = :order AND store_id = :store AND status != 'cancelled' AND cod_amount > 0" . self::LABEL_PARCEL_ACTIVE);
             $stmt->execute([':order' => (int)$order['id'], ':store' => StoreContext::current()->id()]);
             if ((int)$stmt->fetchColumn() > 0) return 0;
         }
@@ -287,7 +326,7 @@ class ShippingService
             if ($id !== $shipmentId && (int)$cod > 0) return 0;
         }
         if (Db::hasColumn('shipping_labels', 'cod_amount')) {
-            $labels = $db->prepare("SELECT shipment_id, cod_amount FROM shipping_labels WHERE order_id = :order AND store_id = :store AND status != 'cancelled' AND cod_amount > 0");
+            $labels = $db->prepare("SELECT shipment_id, cod_amount FROM shipping_labels WHERE order_id = :order AND store_id = :store AND status != 'cancelled' AND cod_amount > 0" . self::LABEL_PARCEL_ACTIVE);
             $labels->execute([':order' => (int)$order['id'], ':store' => $store]);
             foreach ($labels->fetchAll(\PDO::FETCH_ASSOC) as $label) {
                 return (int)($label['shipment_id'] ?? 0) === $shipmentId ? (int)$label['cod_amount'] : 0;

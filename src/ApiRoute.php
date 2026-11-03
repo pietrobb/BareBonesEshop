@@ -15,6 +15,14 @@ class ApiRoute {
     private const NOT_STOREFRONT = ['webhook_payment', 'webhook_shipping', 'csp_report'];
 
     /**
+     * Provider callbacks and CSP reports are not storefront pages: a hidden store still answers them, so a
+     * payment or parcel of its (test) orders is recorded instead of 404ing and being retried until dropped.
+     */
+    public static function servesHiddenStore(string $action): bool {
+        return in_array($action, self::NOT_STOREFRONT, true);
+    }
+
+    /**
      * The internal handler action and the $_GET values taken from the path, or null for the external API.
      * $baseUrl is the subdirectory the shop is installed in (default: Template::baseUrl()).
      *

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Payments and shipping from review round 3** (review round 13, T2, T3, T4, T9). A hidden store answers
+  its payment and carrier webhooks (they returned 404, so payments of its test orders were never recorded);
+  its storefront and browser API stay hidden. Each PayU payment attempt sends its own `extOrderId`
+  (`<order number>-P<8 hex>`), so a retry after a cancelled payment is no longer refused as not unique;
+  notifications of older orders without the suffix still resolve. The label of a cancelled parcel no longer
+  keeps the cash on delivery, so the remaining parcel collects it. The carrier API is called with no
+  database transaction open (the admin label action no longer holds the order lock, on SQLite the whole
+  database, for the carrier's timeout); the label is recorded afterwards under the order lock, and a label
+  that took the COD while another parcel's label was being created raises a `shipping.cod_twice` incident.
 - **Page-driven worker no longer dies in admin requests** (review round 13, N1). `cli/worker.php` and the
   admin page module both declared a global `handleCacheRebuild()`, so a pass started by the dashboard,
   import, cache, audit, warehouse, feed, shipping or payments page ended in an uncatchable "Cannot
