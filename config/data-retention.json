@@ -121,6 +121,13 @@
       "action": "delete",
       "rationale": "ePrivacy proof window — keep 24m of consent records for regulator queries."
     },
+    "gdpr_events": {
+      "table": "gdpr_events",
+      "ttl_days": 1826,
+      "field": "created_at",
+      "action": "delete",
+      "rationale": "Accountability record (Art. 5(2) GDPR) of exports, erasures and consent changes; it holds salted hashes, not plain data, and proves the handling for the limitation period of a complaint or claim. Deleted 5 years after the event. LAWYER TO REVIEW the period."
+    },
     "data_retention_runs": {
       "table": "data_retention_runs",
       "ttl_days": 365,
@@ -134,7 +141,6 @@
     "invoices": "10y legal retention (SK Act 431/2002). Manual purge only after legal counsel review.",
     "invoice_counters": "Sequence integrity. Keep forever.",
     "payment_transactions": "Legal/financial audit trail. Manual purge only.",
-    "schema_migrations": "Schema integrity. Never delete.",
-    "gdpr_events": "Append-only audit trail. Self-retention 5y (separate policy)."
+    "schema_migrations": "Schema integrity. Never delete."
   }
 }

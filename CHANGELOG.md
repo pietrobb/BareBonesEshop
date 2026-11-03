@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Updater and installation** (review round 14, findings 4–6, T20, installer self-check). `update.php rotate-key`
+  no longer takes `--public-key`: the endorsement is checked against the configured `update_public_key` only (a
+  key given on the command line could endorse itself while the configured key stayed trusted and the wrong key was
+  revoked). The signed rotation statement (v2) names the fingerprint of the key it replaces; an endorsement printed
+  by `build-update.php endorse` of 2.1.0 has to be made again. A rollback run as root no longer chmods or chowns the
+  staged database or state file by path in a directory the web user can write: the copy is created exclusively with
+  its mode and handed over with `lchown`/`lchgrp` after an inode check. `setup.php install` with a new `config.php`
+  over an existing database no longer switches off the live shop's online payment methods (it decides from the
+  database as it was before migrating). The web installer skips its self-check only under `php -S` started with
+  `router.php`. `update.php apply` and `rollback` put the shop into maintenance (`.maintenance` in the application
+  root): web requests get 503 with `Retry-After`, `worker.php` and `feed-sync.php` skip their run, a marker older
+  than an hour (a killed updater) stops blocking. `gdpr_events` are deleted 5 years after the event (new policy in
+  `config/data-retention.json`; the "separate policy" it promised did not exist).
 - **Usability fixes** (review round 13, UX1–UX7, README). Checkout offers bank transfer only when the store
   has an IBAN with valid check digits (the shipped sample IBAN has none, so a customer got an order without
   payment instructions). A fresh `setup.php install` keeps every sample store, including `cz`, hidden until the

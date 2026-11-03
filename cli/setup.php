@@ -58,15 +58,16 @@ if ($command === 'install') {
         $log('[2/4] private runtime paths');
         $steps['apply'] = json_decode($run(['cli/setup.php', 'apply', '--json'], 'setup apply'), true)['changes'] ?? [];
         $log('[3/4] database schema, admin forms and import templates');
+        // R14 #6: read before migrating. A new config.php over an existing database (lost config, new checkout over the
+        // old private data) has no gateway keys yet: switching "keyless" online methods off there disabled a live
+        // shop's card and GoPay payments.
+        $freshDatabase = $steps['config']['action'] === 'created'
+            && (json_decode($run(['cli/setup.php', 'database-fresh'], 'database check'), true)['fresh'] ?? false) === true;
         $run(['cli/migrate.php'], 'migrate', true);
         $run(['cli/schema-build.php'], 'schema-build', true);
         $steps['schema'] = 'applied';
-        if ($steps['config']['action'] === 'created') {
-            $steps['payments_off'] = json_decode($run(['cli/setup.php', 'install-payments'], 'install payments'), true) ?: [];
-            if ($steps['payments_off'] !== []) $log('  online payment switched off until its keys are set (Admin → Payments): ' . implode(', ', $steps['payments_off']));
-        }
-        // A fresh config.php over an existing database (lost config, new checkout over the old private data)
-        // carries a new admin_identity_key that cannot open the existing admins' MFA secrets: undo, do not lock them out.
+        // A fresh config.php over an existing database carries a new admin_identity_key that cannot open the existing
+        // admins' MFA secrets: undo, do not lock them out.
         if ($steps['config']['action'] === 'created') {
             $keyCheck = array_values(array_filter(json_decode($run(['cli/setup.php', 'doctor', '--json'], 'setup doctor'), true)['checks'] ?? [], static fn(array $c): bool => $c['name'] === 'admin.mfa_key'))[0] ?? null;
             if (($keyCheck['status'] ?? 'pass') === 'fail') {
@@ -74,6 +75,12 @@ if ($command === 'install') {
                 $steps['config']['action'] = 'removed';
                 throw new RuntimeException('The database already has admin accounts whose MFA secrets need the previous admin_identity_key; the new config.php was removed. Restore the previous config.php (or set BBE_ADMIN_IDENTITY_KEY) and run install again.');
             }
+        }
+        if ($freshDatabase) {
+            $steps['payments_off'] = json_decode($run(['cli/setup.php', 'install-payments'], 'install payments'), true) ?: [];
+            if ($steps['payments_off'] !== []) $log('  online payment switched off until its keys are set (Admin → Payments): ' . implode(', ', $steps['payments_off']));
+        } elseif ($steps['config']['action'] === 'created') {
+            $log('  existing database: payment methods left as they are (set the gateway keys in config.php)');
         }
         $existingAdmins = $adminUsername === '' ? [] : array_map(static fn(array $a): string => strtolower((string)($a['username'] ?? '')), json_decode($run(['cli/admin-user.php', 'list'], 'admin-user list'), true) ?: []);
         if ($adminUsername !== '' && in_array(strtolower($adminUsername), $existingAdmins, true)) {
@@ -117,6 +124,14 @@ if ($command === 'install') {
 }
 
 require_once __DIR__ . '/../src/autoload.php';
+
+// Internal step of install, before migrating: a database without applied migrations is a new shop.
+if ($command === 'database-fresh') {
+    $db = Db::get();
+    $applied = Db::tableExists('schema_migrations', $db) ? (int)$db->query('SELECT COUNT(*) FROM schema_migrations')->fetchColumn() : 0;
+    echo json_encode(['fresh' => $applied === 0]) . "\n";
+    exit(0);
+}
 
 // Internal step of a fresh install: online methods whose gateway has no keys (the sample card method) start switched off.
 if ($command === 'install-payments') {
