@@ -12,10 +12,8 @@ require_once __DIR__ . '/cli-only.php';
 require_once __DIR__ . '/../src/autoload.php';
 
 $rawArguments = array_slice($argv ?? [], 1);
-$keygen = ($rawArguments[0] ?? null) === 'keygen';
-if ($keygen) {
-    array_shift($rawArguments);
-}
+$subcommand = in_array($rawArguments[0] ?? null, ['keygen', 'endorse'], true) ? (string)array_shift($rawArguments) : null;
+$keygen = $subcommand === 'keygen';
 $options = [];
 foreach ($rawArguments as $argument) {
     if ($argument === '--help' || $argument === '-h') {
@@ -34,6 +32,24 @@ if ($keygen) {
     try {
         generateUpdateKeypair((string)($options['public'] ?? ''), (string)($options['secret'] ?? ''));
         echo "Ed25519 update keypair created. Keep the secret key offline.\n";
+        exit(0);
+    } catch (Throwable $e) {
+        fwrite(STDERR, 'ERROR: ' . $e->getMessage() . "\n");
+        exit(1);
+    }
+}
+
+if ($subcommand === 'endorse') {
+    // Rotation anchor: the key every shop trusts now signs the new public key (cli/update.php rotate-key verifies it).
+    try {
+        $currentSecret = (string)($options['secret-key'] ?? (getenv('BAREBONES_UPDATE_SECRET_KEY') ?: ''));
+        $newPublic = (string)($options['new-public'] ?? '');
+        if ($currentSecret === '' || $newPublic === '') {
+            throw new InvalidArgumentException('endorse requires --secret-key=CURRENT_SECRET and --new-public=NEW_PUBLIC_KEY');
+        }
+        echo 'New key:     ' . UpdateKeyRotation::encoded($newPublic) . "\n";
+        echo 'Fingerprint: ' . UpdateKeyRotation::fingerprint($newPublic) . "\n";
+        echo 'Endorsement: ' . UpdateKeyRotation::endorse($currentSecret, $newPublic) . "\n";
         exit(0);
     } catch (Throwable $e) {
         fwrite(STDERR, 'ERROR: ' . $e->getMessage() . "\n");
@@ -133,6 +149,7 @@ function buildUpdateHelp(): void
     echo "Usage:\n";
     echo "  php cli/build-update.php --from=DIR --to=DIR --version=VERSION --output=DIR [options]\n";
     echo "  php cli/build-update.php keygen --public=FILE --secret=FILE\n";
+    echo "  php cli/build-update.php endorse --secret-key=CURRENT_SECRET --new-public=NEW_PUBLIC_KEY\n";
     echo "Options:\n";
     echo "  --base-version=VERSION  Required installed version for this delta\n";
     echo "  --secret-key=KEY        Ed25519 secret key as base64, hex, or a file path\n";

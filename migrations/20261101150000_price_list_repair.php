@@ -9,6 +9,12 @@
  * rows of the seed (no shipping or payment method of its own) and the seed's last step — the COD ↔ carrier links —
  * never ran; the missing rows are then added. A scope the merchant configured, or one that was seeded in full, is
  * not touched.
+ *
+ * Review round 13 (T11): a merchant who deleted a seeded method (COD, a carrier) from a full seed also lost its COD
+ * links, and the repair brought back everything deleted. A run stops at its first failing statement, so its
+ * remainder is an exact prefix of the seed's insert order (methods, rates, payment methods, payment countries); a
+ * gap in that order is a deletion and the scope is left alone. So is a remainder that lacks only COD countries:
+ * that is also what a merchant who narrowed cash on delivery leaves.
  */
 return new class {
     public function up(PDO $db, bool $isSqlite): void {
@@ -40,7 +46,32 @@ return new class {
         foreach ($payments as $code => $provider) if (($seedPayments[$code] ?? null) !== $provider) return false;
         $links = $db->prepare('SELECT COUNT(*) FROM payment_method_shipping WHERE store_id = ?');
         $links->execute([$scope]);
-        return (int)$links->fetchColumn() === 0;
+        if ((int)$links->fetchColumn() !== 0) return false;
+        return $this->isRunPrefix($db, $scope, $list, $shipping, $payments);
+    }
+
+    /** The rows are the first N rows the seed inserts, with the cut before its COD countries. */
+    private function isRunPrefix(PDO $db, string $scope, array $list, array $shipping, array $payments): bool {
+        $rateKey = static fn($code, $country, $zone, $from, $to): string => "r:{$code}|{$country}|{$zone}|" . (int)$from . '|' . (int)$to;
+        $order = array_map(static fn(array $row): string => 'm:' . $row[0], $list['methods']);
+        foreach ($list['rates'] as [$code, $country, $zone, $from, $to]) $order[] = $rateKey($code, $country, $zone, $from, $to);
+        foreach ($list['payments'] as $row) $order[] = 'p:' . $row[0];
+        $eu = (new ReflectionClassConstant(require __DIR__ . '/20261022230000_currency_price_lists.php', 'EU'))->getValue();
+        foreach (['card', 'bank_transfer'] as $code) foreach ($eu as $country) $order[] = "c:{$code}|{$country}";
+        $codCountriesStart = count($order);
+
+        $present = array_merge(array_map(static fn($code): string => 'm:' . $code, array_keys($shipping)),
+            array_map(static fn($code): string => 'p:' . $code, array_keys($payments)));
+        $rates = $db->prepare('SELECT method_code, country, zone_code, weight_from_g, weight_to_g FROM shipping_rates WHERE store_id = ?');
+        $rates->execute([$scope]);
+        foreach ($rates->fetchAll(PDO::FETCH_NUM) as [$code, $country, $zone, $from, $to]) $present[] = $rateKey($code, $country, $zone, $from, $to);
+        $countries = $db->prepare('SELECT method_code, country FROM payment_method_countries WHERE store_id = ?');
+        $countries->execute([$scope]);
+        foreach ($countries->fetchAll(PDO::FETCH_NUM) as [$code, $country]) $present[] = "c:{$code}|{$country}";
+        $present = array_unique($present);
+
+        $cut = count($present);
+        return $cut < $codCountriesStart && array_diff($present, array_slice($order, 0, $cut)) === [];
     }
 
     /** @return array<string, string> */

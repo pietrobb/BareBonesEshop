@@ -12,6 +12,8 @@ require_once __DIR__ . '/cli-only.php';
  *   php cli/update.php baseline --version=1.0.0
  *   php cli/update.php rollback --snapshot=YYYYmmddHHMMSS-abcdef123456 [--force] [--accept-data-loss]
  *   php cli/update.php list
+ *   php cli/update.php fingerprint [--public-key=...]
+ *   php cli/update.php rotate-key --new-key=... --endorsement=...
  *
  * Unsigned packages are refused unless --allow-unsigned is explicitly supplied.
  */
@@ -71,7 +73,8 @@ try {
             $package = new UpdatePackage(
                 $packageDirectory,
                 $publicKey !== '' ? $publicKey : null,
-                !empty($options['allow-unsigned'])
+                !empty($options['allow-unsigned']),
+                $stateDirectory
             );
         }
         // The same migration runner as apply, so a package with migrations gets the preflight apply will see (never run here).
@@ -84,6 +87,28 @@ try {
         );
         printUpdateDoctorReport($report, !empty($options['json']));
         exit($report['status'] === 'READY' ? 0 : 1);
+    }
+
+    if ($command === 'fingerprint') {
+        if ($publicKey === '') throw new InvalidArgumentException('No update public key is configured; pass --public-key=KEY');
+        echo UpdateKeyRotation::fingerprint($publicKey)
+            . (UpdateKeyRotation::isRevoked($publicKey, $stateDirectory) ? "  REVOKED\n" : "\n");
+        exit(0);
+    }
+
+    if ($command === 'rotate-key') {
+        $newKey = (string)($options['new-key'] ?? '');
+        $endorsement = (string)($options['endorsement'] ?? '');
+        if ($publicKey === '' || $newKey === '' || $endorsement === '') {
+            throw new InvalidArgumentException('rotate-key requires the trusted key (update_public_key or --public-key), --new-key=KEY and --endorsement=SIG');
+        }
+        $rotation = UpdateKeyRotation::rotate($publicKey, $newKey, $endorsement, $stateDirectory);
+        echo "Endorsement verified. Revoked the old key {$rotation['old']}; trusted from now on: {$rotation['new']}\n";
+        $installed = UpdateKeyRotation::installKey($configuredPublicKey, $newKey);
+        echo $installed !== null
+            ? "New public key written to {$installed}.\n"
+            : "Set update_public_key in config.php to: " . UpdateKeyRotation::encoded($newKey) . "\n";
+        exit(0);
     }
 
     if ($command === 'baseline') {
@@ -149,7 +174,8 @@ try {
     $package = new UpdatePackage(
         $packageDirectory,
         $publicKey !== '' ? $publicKey : null,
-        !empty($options['allow-unsigned'])
+        !empty($options['allow-unsigned']),
+        $stateDirectory
     );
 
     $database = null;
@@ -301,6 +327,10 @@ function updateHelp(): void
     echo "    A migration update rollback restores the pre-update database: all orders and other writes since the\n";
     echo "    snapshot are lost. It is refused with a warning unless --accept-data-loss is given.\n";
     echo "  php cli/update.php list\n";
+    echo "  php cli/update.php fingerprint [--public-key=KEY]\n";
+    echo "  php cli/update.php rotate-key --new-key=KEY --endorsement=SIG\n";
+    echo "    Trust KEY instead of the current key: SIG (from cli/build-update.php endorse) must verify with the\n";
+    echo "    current key, which is then revoked on this shop.\n";
     echo "Options:\n";
     echo "  --allow-unsigned  Accept an unsigned package explicitly (development only)\n";
     echo "  --public-key=KEY  Ed25519 public key as base64, hex, or a file path\n";

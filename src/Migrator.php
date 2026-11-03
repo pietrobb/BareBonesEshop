@@ -131,6 +131,11 @@ class Migrator {
             'e8cf8afd4be2a873b5dcf43988d56f0bc08646436d9e4ef725ff718c9c1ce091' => ['1621dc527d633f9e2521591a2e9ccab31ca4574127a232d41499316cffc2339b', 'a6315e4f4a28e106803f153d67369299e0afb1833c44bb995403ab98555fec6b'],
             'a9507faf79de4e3a362300242ccae70e2cee06a137938233b1660cec4ef3a3c7' => ['1621dc527d633f9e2521591a2e9ccab31ca4574127a232d41499316cffc2339b', 'a6315e4f4a28e106803f153d67369299e0afb1833c44bb995403ab98555fec6b'],
         ],
+        // R13 T11: the repair leaves a scope with a gap in the seed order (rows the merchant deleted) alone.
+        '20261101150000_price_list_repair' => [
+            '91ac2cc652a960de191c8a47784ad716ddaf5beb99e637e78b2628cc071e8b3a' => ['4d046caec20f4e1570aed21b81ac4ba3937dfb63e4ceb328444648ea22677af3', 'db192f25c1fa6caf149d8700bdea78bb9b8be0874dcc89fdf0be4a7963c0dd11'],
+            'e6d5109094a1429adc3a5a0216b9373724ac9f09cd9d447dd031a0da67015642' => ['4d046caec20f4e1570aed21b81ac4ba3937dfb63e4ceb328444648ea22677af3', 'db192f25c1fa6caf149d8700bdea78bb9b8be0874dcc89fdf0be4a7963c0dd11'],
+        ],
     ];
 
     private PDO    $db;

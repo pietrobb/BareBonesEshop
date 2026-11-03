@@ -462,21 +462,29 @@ automation. Packages are Ed25519-verified and unsigned packages are refused
 unless the operator supplies `--allow-unsigned` explicitly.
 
 **Signing key rotation.** A shop trusts exactly one key (`update_public_key`), and a
-package never changes it, so every rotation is an out-of-band step on each shop:
+package never changes it, so every rotation is an explicit step on each shop. The
+anchor is the old key itself, not the repository or the release notes (whoever
+controls the publishing account could change those together with the key):
 
 1. Generate the new pair offline (`php cli/build-update.php keygen ...`) and store
    the secret key offline in two places (losing it means another rotation).
-2. Commit the new public key to `releases/update-public.key` and publish its
-   SHA-256 fingerprint (`php -r "echo hash_file('sha256','releases/update-public.key');"`)
-   in the release notes of the first release signed with it.
-3. On each shop, before applying that release: compare the fingerprint of the key
-   file from the tagged commit with the release notes, replace the file that
-   `update_public_key` points to, then run `php cli/update.php doctor --package=...`.
-   A package signed with the old key is refused from then on.
+2. Endorse the new public key with the current secret key:
+   `php cli/build-update.php endorse --secret-key=CURRENT_SECRET --new-public=NEW_PUBLIC`.
+   Commit the new key to `releases/update-public.key` and publish the printed key,
+   fingerprint and endorsement in the release notes of the first release signed with it.
+3. On each shop, before applying that release:
+   `php cli/update.php rotate-key --new-key=KEY --endorsement=SIG`. It refuses a key the
+   shop's current key did not endorse, writes the new key into the file
+   `update_public_key` points to (or prints the value to put into `config.php`), and
+   revokes the old key in `update_storage_dir/revoked-update-keys.json`: a package
+   signed with it is refused from then on. `php cli/update.php fingerprint` shows the
+   trusted key's fingerprint; `doctor` fails on a revoked key.
 
-If the old secret key was lost or may be compromised, do the same immediately and
-say so in the release notes; do not apply packages signed with the old key that
-were not already verified.
+If the old secret key was lost there is no endorsement: compare the fingerprint of
+the key file from the tagged commit with the release notes and replace the key by
+hand. A lost or possibly compromised key is also revoked in the code
+(`UpdateKeyRotation::SHIPPED_REVOKED`, e.g. the v1.9.0 key); say so in the release
+notes and do not apply packages signed with it that were not already verified.
 
 Rollback refuses to
 overwrite files changed after an update unless `--force` is supplied after
