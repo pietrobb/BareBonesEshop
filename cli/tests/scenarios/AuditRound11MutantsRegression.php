@@ -119,8 +119,8 @@ try {
     $r11mSucceeded();
     $r11mItems = $r11mDb->prepare('SELECT status FROM order_refunds WHERE order_id = ? ORDER BY id');
     $r11mItems->execute([$o]);
-    assert_equals([['partially_refunded', 300], ['succeeded', 'pending']], [$r11mState($o), $r11mItems->fetchAll(PDO::FETCH_COLUMN)],
-        'R11 refund: a refund without a refund id redelivered under the same event is booked once and settles one credit note, not a second one');
+    assert_equals([['partially_refunded', 300], ['pending', 'pending']], [$r11mState($o), $r11mItems->fetchAll(PDO::FETCH_COLUMN)],
+        'R11 refund: a refund without a refund id redelivered under the same event is booked once and settles no credit note by its amount (R13 N5)');
     $r11mReported = static fn(int $orderId, string $currency, string $key) => $r11mApply->invoke(null, $orderId, 'gopay', 'refund.reported', $key,
         ['state' => 'REFUNDED', 'currency' => $currency, 'amount' => 1000, 'provider_ref' => (string)Orders::byId($orderId)['payment_id']]);
     $o = $r11mOrder('paid', 'gopay', '31' . random_int(10000000, 99999999));

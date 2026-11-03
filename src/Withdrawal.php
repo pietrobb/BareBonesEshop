@@ -76,15 +76,39 @@ class Withdrawal {
         return $ordered === false || $now <= self::periodEnd($ordered, $days + self::MAX_EXTENSION_DAYS, $order);
     }
 
-    /** Unix time the goods reached the consumer: the order's delivered_at, else the latest carrier-reported delivery; false when unknown. */
+    /**
+     * Unix time the goods reached the consumer: the order's delivered_at, else the carrier-reported delivery of its
+     * last parcel; false when unknown. Goods of one order delivered in several parcels count from the last one
+     * (2011/83/EU art. 9(2)(b)(i)): while a parcel is still on the way, or a physical line is not in any parcel yet,
+     * the goods have not all arrived.
+     */
     public static function receivedAt(array $order): int|false {
         $deliveredAt = (string)($order['delivered_at'] ?? '');
-        if ($deliveredAt === '' && (int)($order['id'] ?? 0) > 0) {
-            $stmt = Db::get()->prepare('SELECT MAX(delivered_at) FROM shipments WHERE order_id = ?');
-            $stmt->execute([(int)$order['id']]);
-            $deliveredAt = (string)($stmt->fetchColumn() ?: '');
+        $orderId = (int)($order['id'] ?? 0);
+        if ($deliveredAt === '' && $orderId > 0) {
+            $stmt = Db::get()->prepare("SELECT MAX(delivered_at) AS last_delivered,
+                    SUM(CASE WHEN delivered_at IS NULL THEN 1 ELSE 0 END) AS on_the_way
+                FROM shipments WHERE order_id = ? AND status <> 'cancelled'");
+            $stmt->execute([$orderId]);
+            $parcels = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+            // A cancelled or refunded order ships nothing more: its goods in no parcel never come.
+            $closed = in_array((string)($order['status'] ?? ''), ['cancelled', 'refunded'], true);
+            $deliveredAt = (int)($parcels['on_the_way'] ?? 0) > 0 || (!$closed && self::goodsNotInParcels($orderId))
+                ? '' : (string)($parcels['last_delivered'] ?? '');
         }
         return $deliveredAt === '' ? false : strtotime($deliveredAt . ' UTC');
+    }
+
+    /** Whether a physical line of the order has units in no (non-cancelled) parcel. */
+    private static function goodsNotInParcels(int $orderId): bool {
+        $stmt = Db::get()->prepare("SELECT oi.*, COALESCE((SELECT SUM(si.quantity) FROM shipment_items si JOIN shipments s ON s.id = si.shipment_id
+                WHERE si.order_item_id = oi.id AND s.status <> 'cancelled'), 0) AS in_parcels
+            FROM order_items oi WHERE oi.order_id = ?");
+        $stmt->execute([$orderId]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
+            if (!Inventory::isDigitalLine($item) && (int)$item['in_parcels'] < (int)$item['quantity']) return true;
+        }
+        return false;
     }
 
     /** Unix time the order (the distance contract) was placed, or false when unknown. */

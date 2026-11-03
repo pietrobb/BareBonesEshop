@@ -238,11 +238,15 @@ try {
     $arrPayUWebhook($payu, $r4, 'RF-ARR-400', 400, 'FINALIZED');
     assert_equals([['delivered', 'partially_refunded', 400], ['succeeded', 'RF-ARR-400']], [$arrState($r4), $arrItemRefundRow($r4Item)], 'ARR 4: the refund webhook books the money and completes the credit note');
     assert_equals(600, $arrRefundableForCredit->invoke(null, Orders::byId($r4)), 'ARR 4: refundable for further credit notes is 600 (was 200)');
-    // Matched by amount when the provider refund id was never noted (e.g. the worker stopped after the call).
+    // The provider refund id was never noted (e.g. the worker stopped after the call): the webhook books the money but
+    // matches no credit note by its amount (R13 N5); the job's retry gets the same refund id back and completes its own.
     $r4b = $arrOrder('delivered', 'refund_pending', 'payu', 'PAYU-ARR-4B');
     $r4bItem = $arrItemRefund($r4b, 300, 'arr-credit-4b');
-    $arrPayUWebhook($payu, $r4b, 'RF-ARR-4B', 300, 'FINALIZED');
-    assert_equals('succeeded', $arrItemRefundRow($r4bItem)[0], 'ARR 4: a refund webhook completes the pending credit note of the same amount');
+    $arrPayUWebhook($payu, $r4b, 'RF-ARR-300', 300, 'FINALIZED');
+    assert_equals('pending', $arrItemRefundRow($r4bItem)[0], 'ARR 4: a refund webhook does not complete a credit note by its amount');
+    PaymentService::refund($r4b, 'PAYU-ARR-4B', 300, $payu, 'arr-credit-4b', 'eur');
+    assert_equals([['succeeded', 'RF-ARR-300'], 300], [$arrItemRefundRow($r4bItem), PaymentService::refundedAmount($r4b)],
+        "ARR 4: the refund job's retry completes its credit note by the refund id, money booked once");
     // A credit note whose refund the ledger already holds is not subtracted twice.
     $r4c = $arrOrder('delivered', 'refund_pending', 'payu', 'PAYU-ARR-4C');
     $arrItemRefund($r4c, 400, 'arr-credit-4c');

@@ -23,6 +23,16 @@
   that request runs no pass, instead of a whole feed in memory. Outside mod_php (php-cgi behind
   mod_deflate) the early-ended page is gzip-encoded by PHP itself when the browser accepts it: mod_deflate
   leaves an encoded body with its `Content-Length` alone, but held a plain one open until the pass ended.
+- **Withdrawal period from the last parcel, refunds** (review round 13, N4, N5, T5). The withdrawal and return
+  period of an order delivered in several parcels starts when the last one arrives (a parcel on the way, or goods
+  in no parcel yet, keep it open; 2011/83/EU art. 9). A credit note checks the refundable balance again under the
+  order lock refund requests take, so a credit note and a refund requested at the same time can no longer return
+  more than was paid. A capture arriving while a refund is in flight is logged as ignored (a second capture) instead
+  of moving the payment back to paid. A provider refund completes an item refund only by its refund id, never the
+  first credit note of the same amount; the refund job links its own. The refund job moves the payment status
+  through the state machine under the order lock (a disputed or already refunded payment is not overwritten).
+  Every refund booked on the payment ledger (admin refund, cancellation, a refund made in the provider's
+  dashboard) now gets a credit note correcting the invoice, not only money returned by hand.
 - **An e-book supplied abroad is its own VAT group** (review round 13, N3 + low). In an order collected in the
   seller's store, the e-book of a consumer from another member state (OSS) is a breakdown group naming its country
   (`"10 AT"`, `VatService::breakdownKey`). Before, its rate was summed into the seller's own rates: the invoice showed

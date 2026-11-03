@@ -277,15 +277,9 @@ final class WorkerJobs
         if ($itemRefundId > 0) Rma::completeRefund($itemRefundId, $refundId);
         $order = Orders::byId($orderId);
         if (!$order) return;
-        $paymentStatus = PaymentService::refundedAmount($orderId) >= (int)$order['total'] ? 'refunded' : 'partially_refunded';
-        if ($itemRefundId > 0 || ($order['payment_status'] ?? '') === 'refund_pending') {
-            PaymentService::updatePaymentStatus($orderId, $paymentStatus, 'refund.succeeded', [
-                'refund_id' => $itemRefundId > 0 ? $itemRefundId : null,
-                'amount' => $amount,
-                'provider_ref' => $refundId,
-            ]);
-        }
-        if ($itemRefundId === 0 && $paymentStatus === 'refunded' && OrderWorkflow::canTransition((string)$order['status'], 'refunded')) {
+        $paymentStatus = PaymentService::settleRefundJob($orderId, $amount, $itemRefundId > 0, $refundId, $itemRefundId);
+        $orderStatus = (string)(Orders::byId($orderId)['status'] ?? $order['status']);
+        if ($itemRefundId === 0 && $paymentStatus === 'refunded' && OrderWorkflow::canTransition($orderStatus, 'refunded')) {
             OrderWorkflow::transition($orderId, 'refunded', "Payment refund completed: {$paymentId}");
         }
     }

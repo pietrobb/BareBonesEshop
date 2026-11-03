@@ -443,6 +443,11 @@ final class InvoiceService
         $refundId = 0;
         $db->beginTransaction();
         try {
+            // The order lock every refund path takes (requestRefund, the refund job, webhooks), then the balance again: the
+            // check above ran outside it, so a refund committed since could leave this credit note plus it over the paid sum.
+            Orders::lockWithin((int)$order['id']);
+            $lockedOrder = Orders::byId((int)$order['id']) ?: $order;
+            if ($totals['gross'] > self::refundableForCredit($lockedOrder)) throw new LogicException('Credit exceeds the amount that can still be refunded');
             // Take the RMA lock an exchange takes (MySQL row lock; SQLite's writer lock), then check the quantities again:
             // the check above ran outside any transaction, so a concurrent exchange or credit note could have committed
             // the same returned units since (customer refunded and sent a replacement for one unit).
@@ -531,7 +536,7 @@ final class InvoiceService
     }
 
     /**
-     * Credit note of money returned by hand without an item return (PaymentService::completeManualRefund()): the
+     * Credit note of money returned without an item return (completeManualRefund(), creditBookedRefund()): the
      * amount comes off the order's invoice in proportion to its VAT breakdown, one "Refund" row per VAT rate. It books
      * nothing on the refund ledger (the payment ledger already holds the refund). Null when the order has no issued
      * invoice, which is then nothing to correct. A repeated call with the same $refundKey returns the same credit note.
@@ -612,6 +617,29 @@ final class InvoiceService
             ['rates' => $breakdown, 'vat_total' => -$totals['vat'], 'services_only' => self::servicesOnly($order)]);
         self::writePdf(self::resolvePdfPath((string)$invoice['pdf_path']), $pdf);
         return $invoice;
+    }
+
+    /**
+     * Credit note of a refund booked on the payment ledger without an item return (admin refund, cancellation,
+     * a refund made in the provider's dashboard): the invoice is corrected for every refund, not only one paid back by
+     * hand. Run by the refund_credit_note job the booking queues (PaymentService::flushRefundMails()), so a provider
+     * refund booked by its webhook before the refund job noted its id on an item refund (credit()) is recognised as
+     * that item refund by then, and gets no second credit note.
+     */
+    public static function creditBookedRefund(int $orderId, string $ledgerKey): ?array
+    {
+        $db = Db::get();
+        $stmt = $db->prepare("SELECT amount, provider_ref FROM payment_transactions WHERE order_id = :order AND store_id = :store AND idempotency_key = :key
+            AND status IN ('partially_refunded', 'refunded', 'refund_succeeded') AND amount > 0");
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $ledgerKey]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$row) return null;
+        // An item refund (RMA credit note) already corrects the invoice: its refund is booked under its key or its provider refund id.
+        $item = $db->prepare("SELECT 1 FROM order_refunds WHERE order_id = :order AND store_id = :store
+            AND (idempotency_key = :key OR (payment_reference IS NOT NULL AND payment_reference <> '' AND payment_reference = :ref)) LIMIT 1");
+        $item->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $ledgerKey, ':ref' => (string)$row['provider_ref']]);
+        if ($item->fetchColumn()) return null;
+        return self::creditRefund($orderId, (int)$row['amount'], $ledgerKey);
     }
 
     /** Re-render PDF for an existing invoice (e.g. file accidentally deleted). */
