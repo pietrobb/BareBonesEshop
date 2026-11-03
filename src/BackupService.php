@@ -66,12 +66,7 @@ class BackupService
             $storageClass = (string)($appCfg['backup_storage_adapter'] ?? 'LocalBackupStorage');
             self::$cfg['log_file'] = (string)($appCfg['backup_log_file'] ?? dirname(self::$rootDir) . '/bareboneseshop-private/logs/backup.log');
             if (self::$cfg['include_files'] ?? true) {
-                $private = dirname(self::$rootDir) . '/bareboneseshop-private';
-                self::$fileSources = [
-                    'invoices'  => (string)($appCfg['invoice_storage_dir'] ?? $private . '/invoices'),
-                    'uploads'   => (string)($appCfg['uploads_dir'] ?? self::$rootDir . '/uploads'),
-                    'gdpr_salt' => (string)($appCfg['gdpr_salt_file'] ?? $private . '/secrets/gdpr_salt'),
-                ];
+                self::$fileSources = self::defaultFileSources($appCfg, self::$rootDir);
             }
             self::$recoveryDir = (string)($appCfg['backup_recovery_dir'] ?? '')
                 ?: rtrim((string)($appCfg['private_runtime_dir'] ?? dirname(self::$rootDir) . '/bareboneseshop-private'), '/\\') . '/restore-recovery';
@@ -700,18 +695,19 @@ class BackupService
             throw new RuntimeException("Restore: live database not found: {$livePath}");
         }
         $restoreTemp = $livePath . '.restore-' . bin2hex(random_bytes(6)) . '.tmp';
-        if (!copy($absSrc, $restoreTemp)
+        // The restored file replaces live: keep live's mode, owner and group, or a restore run from the CLI leaves
+        // www-data with a read-only database (only root can hand the file to another owner). The database directory
+        // belongs to the web user, so the copy is created exclusively with live's mode and owned via lchown on that
+        // inode (T7): chmod/chown by path followed a symlink swapped in by the web user.
+        $restoreInode = self::stageExclusive($absSrc, $restoreTemp, fileperms($livePath) & 0666);
+        if ($restoreInode === null
             || filesize($restoreTemp) !== $expectedSize
             || !hash_equals($expectedSha, (string)hash_file('sha256', $restoreTemp))) {
             throw new RuntimeException('Restore: failed to stage a complete verified replacement database');
         }
-        // The restored file replaces live: keep live's mode, owner and group, or a restore run from the CLI leaves
-        // www-data with a read-only database (only root can hand the file to another owner).
-        @chmod($restoreTemp, fileperms($livePath) & 0777);
         $liveOwner = @fileowner($livePath);
         $liveGroup = @filegroup($livePath);
-        if ($liveOwner !== false && $liveOwner !== @fileowner($restoreTemp)) @chown($restoreTemp, $liveOwner);
-        if ($liveGroup !== false && $liveGroup !== @filegroup($restoreTemp)) @chgrp($restoreTemp, $liveGroup);
+        self::applyOwnership($restoreTemp, $liveOwner === false ? null : $liveOwner, $liveGroup === false ? null : $liveGroup, $restoreInode);
 
         $lockHandle = self::acquireLock();
         try {
@@ -1128,7 +1124,7 @@ class BackupService
                     $refused[] = "{$entry} ({$directory['existing']} is not writable by this user)";
                     continue;
                 }
-                $plan[] = [$entry, $source, $target, $base, self::restoredFileOwnership($target, $directory['existing'], $name === 'gdpr_salt'), $overwrite];
+                $plan[] = [$entry, $source, $target, $base, self::restoredFileOwnership($target, $directory['existing'], in_array($name, ['gdpr_salt', 'stores'], true)), $overwrite];
             }
             if ($refused !== []) {
                 throw new RuntimeException('Restore: ' . count($refused) . ' target(s) cannot be restored safely, nothing was written: '
@@ -1347,15 +1343,83 @@ class BackupService
         ];
     }
 
-    /** chown/chgrp are applied only when running as root (an unprivileged user cannot give files away). */
-    private static function applyOwnership(string $path, ?int $uid, ?int $gid): void
+    /**
+     * Owner and group are applied only when running as root (an unprivileged user cannot give files away), with
+     * lchown/lchgrp on the inode created by this restore ($ino from lstat): the directory belongs to the web user,
+     * who could swap the path for a symlink or hard link to /etc/shadow between two calls. chown followed it (T7).
+     */
+    private static function applyOwnership(string $path, ?int $uid, ?int $gid, ?int $ino = null): void
     {
         if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) return;
-        if ($uid !== null && !@chown($path, $uid)) {
+        self::assertSameInode($path, $ino);
+        if ($uid !== null && !@lchown($path, $uid)) {
             throw new RuntimeException("Restore: cannot set the owner of {$path}");
         }
-        if ($gid !== null && !@chgrp($path, $gid)) {
+        if ($gid !== null && !@lchgrp($path, $gid)) {
             throw new RuntimeException("Restore: cannot set the group of {$path}");
+        }
+        self::assertSameInode($path, $ino);
+    }
+
+    /** $path is still the file or directory this restore created (not a link, not another inode). */
+    private static function assertSameInode(string $path, ?int $ino): void
+    {
+        clearstatcache(true, $path);
+        $stat = @lstat($path);
+        $type = $stat === false ? 0 : $stat['mode'] & 0170000;
+        // A directory cannot be hard-linked; a regular file with a second link is somebody else's file.
+        if (!in_array($type, [0040000, 0100000], true) || ($ino !== null && (int)$stat['ino'] !== $ino) || ($type === 0100000 && (int)$stat['nlink'] !== 1)) {
+            throw new RuntimeException("Restore: {$path} was replaced while it was being restored; refusing");
+        }
+    }
+
+    /**
+     * Files a backup archives next to the database, from config.php. T8: the merchant's stores and sellers, legal
+     * texts and sold e-book files are not in the database either; without them a restored shop had no stores, the
+     * template legal texts and no downloads. stores.json and the legal texts live where DataOverrides reads them
+     * (the data directory first).
+     * @return array<string, string>
+     */
+    public static function defaultFileSources(array $appCfg, string $rootDir): array
+    {
+        $private = dirname($rootDir) . '/bareboneseshop-private';
+        $runtime = rtrim(str_replace('\\', '/', (string)($appCfg['private_runtime_dir'] ?? '')), '/');
+        $legacyStores = $rootDir . '/stores.json';
+        return [
+            'invoices'  => (string)($appCfg['invoice_storage_dir'] ?? $private . '/invoices'),
+            'uploads'   => (string)($appCfg['uploads_dir'] ?? $rootDir . '/uploads'),
+            'gdpr_salt' => (string)($appCfg['gdpr_salt_file'] ?? $private . '/secrets/gdpr_salt'),
+            'stores'    => $runtime !== '' && (is_file($runtime . '/stores.json') || !is_file($legacyStores)) ? $runtime . '/stores.json' : $legacyStores,
+            'legal'     => $runtime !== '' ? $runtime . '/legal' : '',
+            'downloads' => (string)($appCfg['digital_assets_base_dir'] ?? $private . '/downloads'),
+        ];
+    }
+
+    /**
+     * Copy $source to $temporary created exclusively ('x': never through an existing name or link) with its final
+     * $mode; returns the new file's inode, null on failure.
+     */
+    private static function stageExclusive(string $source, string $temporary, int $mode): ?int
+    {
+        return self::withMode($mode, static function () use ($source, $temporary): ?int {
+            $in = @fopen($source, 'rb');
+            $out = $in ? @fopen($temporary, 'xb') : false;
+            $copied = $in && $out && stream_copy_to_stream($in, $out) !== false && fflush($out);
+            $stat = $copied ? fstat($out) : false;
+            if ($in) fclose($in);
+            if ($out) fclose($out);
+            return is_array($stat) ? (int)$stat['ino'] : null;
+        });
+    }
+
+    /** Run $create with the umask that gives exactly $mode, so no chmod by path (which follows links) is needed. */
+    private static function withMode(int $mode, Closure $create): mixed
+    {
+        $previous = umask(~$mode & 0777);
+        try {
+            return $create();
+        } finally {
+            umask($previous);
         }
     }
 
@@ -1371,11 +1435,11 @@ class BackupService
             throw new RuntimeException("Restore: {$target} cannot be restored safely ({$directory})");
         }
         foreach ($directory['create'] as $dir) {
-            if (!@mkdir($dir, $ownership['dir_mode']) || is_link($dir) || !is_dir($dir)) {
+            if (!self::withMode($ownership['dir_mode'], static fn(): bool => @mkdir($dir, $ownership['dir_mode'])) || is_link($dir) || !is_dir($dir)) {
                 throw new RuntimeException("Restore: cannot create {$dir}");
             }
-            @chmod($dir, $ownership['dir_mode']);
-            self::applyOwnership($dir, $ownership['dir_uid'], $ownership['dir_gid']);
+            $stat = @lstat($dir);
+            self::applyOwnership($dir, $ownership['dir_uid'], $ownership['dir_gid'], is_array($stat) ? (int)$stat['ino'] : null);
         }
         $parent = dirname($target);
         $realBase = realpath($base);
@@ -1385,13 +1449,13 @@ class BackupService
             throw new RuntimeException("Restore: {$target} resolves outside its configured directory; refusing");
         }
         $temporary = $parent . DIRECTORY_SEPARATOR . '.' . basename($target) . '.restore-' . bin2hex(random_bytes(6)) . '.tmp';
-        if (!@copy($source, $temporary)) {
+        $inode = self::stageExclusive($source, $temporary, $ownership['mode'] & 0666);
+        if ($inode === null) {
             @unlink($temporary);
             throw new RuntimeException("Restore: cannot stage {$target}");
         }
         try {
-            @chmod($temporary, $ownership['mode']);
-            self::applyOwnership($temporary, $ownership['uid'], $ownership['gid']);
+            self::applyOwnership($temporary, $ownership['uid'], $ownership['gid'], $inode);
         } catch (\Throwable $e) {
             @unlink($temporary);
             throw $e;

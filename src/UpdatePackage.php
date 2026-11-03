@@ -7,9 +7,12 @@ final class UpdatePackage
     private string $directory;
     private string $manifestRaw;
     private array $manifest;
+    private ?string $stateDirectory;
 
-    public function __construct(string $directory, ?string $publicKey = null, bool $allowUnsigned = false)
+    /** $stateDirectory: update_storage_dir, whose revoked-update-keys.json is honoured with the shipped revocations. */
+    public function __construct(string $directory, ?string $publicKey = null, bool $allowUnsigned = false, ?string $stateDirectory = null)
     {
+        $this->stateDirectory = $stateDirectory;
         $real = realpath($directory);
         if ($real === false || !is_dir($real) || is_link($real)) {
             throw new InvalidArgumentException("Update package directory not found: {$directory}");
@@ -198,6 +201,7 @@ final class UpdatePackage
         $encodedSignature = trim((string)file_get_contents($signaturePath));
         $signature = self::decodeKey($encodedSignature, SODIUM_CRYPTO_SIGN_BYTES, 'update signature');
         $key = self::decodeKey(trim($publicKey), SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES, 'update public key');
+        UpdateKeyRotation::assertNotRevoked($publicKey, $this->stateDirectory);
         if (!sodium_crypto_sign_verify_detached($signature, $this->manifestRaw, $key)) {
             throw new RuntimeException('Update package signature verification failed');
         }

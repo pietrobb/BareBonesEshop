@@ -407,7 +407,8 @@ final class Updater
         } elseif ($hasSodium) {
             try {
                 UpdatePackage::decodeKey(trim($publicKey), SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES, 'update public key');
-                $add('ok', 'public_key', 'Configured Ed25519 public key is valid');
+                UpdateKeyRotation::assertNotRevoked($publicKey, $this->stateDirectory);
+                $add('ok', 'public_key', 'Configured Ed25519 public key is valid (' . UpdateKeyRotation::fingerprint($publicKey) . ')');
             } catch (Throwable $e) {
                 $add('fail', 'public_key', $e->getMessage());
             }

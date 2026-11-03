@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Backups and the updater from review round 3** (review round 13, T6, T7, T8). The update signing key is
+  rotated with an endorsement: `php cli/build-update.php endorse` signs the new public key with the current secret
+  key, and `php cli/update.php rotate-key --new-key=... --endorsement=...` accepts it only if the key the shop
+  trusts made that signature (not because the repository or release notes say so), writes it into the key file
+  and revokes the old key in `update_storage_dir/revoked-update-keys.json`. A package signed with a revoked key is
+  refused even while that key is still configured, `doctor` fails on it, and the lost v1.9.0 key ships revoked;
+  `php cli/update.php fingerprint` prints the trusted key's fingerprint. A restore run as root no longer chmods or
+  chowns by path in directories the web user owns (a symlink swapped in made root take over e.g. `/etc/shadow`):
+  restored files and the restored SQLite database are created exclusively with their mode and owned via
+  `lchown` on that inode. Backups now include `stores.json`, the merchant's legal texts and the sold digital
+  files (`digital_assets_base_dir`), and a files restore brings them back.
 - **Payments and shipping from review round 3** (review round 13, T2, T3, T4, T9). A hidden store answers
   its payment and carrier webhooks (they returned 404, so payments of its test orders were never recorded);
   its storefront and browser API stay hidden. Each PayU payment attempt sends its own `extOrderId`
