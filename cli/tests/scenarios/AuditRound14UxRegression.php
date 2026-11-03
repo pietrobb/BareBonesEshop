@@ -101,6 +101,43 @@ try {
     I18n::setLocale($r14uSavedLocale);
 }
 
+// --- UX7: several product images per upload, and an image list to reorder / remove them -----------------------------
+$r14uImageFiles = [];
+if (is_file(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/ImageOrder.php')) require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/ImageOrder.php';
+try {
+    I18n::setLocale('en');
+    $r14uField = array_values(array_filter(AdminForm::definition('admin-product')['fields'], static fn(array $f): bool => ($f['name'] ?? '') === 'image_upload'))[0] ?? [];
+    $r14uForm = AdminForm::render('admin-product', 'admin.php', []);
+    assert_true((int)($r14uField['max_files'] ?? 1) >= 10 && preg_match('#<input[^>]*name="image_upload\[\]"[^>]*multiple#', $r14uForm) === 1,
+        'R14 UX7: the product editor takes up to 10 images in one upload (name="image_upload[]" multiple)');
+    $r14uPng = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=');
+    $r14uUpload = static function (string $bytes) use (&$r14uImageFiles): array {
+        $file = tempnam(sys_get_temp_dir(), 'r14u');
+        file_put_contents($file, $bytes);
+        $r14uImageFiles[] = $file;
+        return ['tmp_name' => $file, 'type' => 'image/png', 'size' => strlen($bytes), 'name' => basename($file) . '.png'];
+    };
+    $r14uStored = static fn(string $url): bool => is_file(dirname(TEST_CLI_DIR) . $url);
+    $r14uMany = method_exists(ProductEditor::class, 'storeUploads') ? ProductEditor::storeUploads([$r14uUpload($r14uPng), $r14uUpload($r14uPng)], 'R14U-IMG', 3) : 'no storeUploads';
+    assert_true(is_array($r14uMany) && count($r14uMany) === 2 && $r14uMany[0][0] !== $r14uMany[1][0] && $r14uStored($r14uMany[0][0]) && $r14uStored($r14uMany[1][0]),
+        'R14 UX7: two uploaded images are stored, each under its own name (' . json_encode($r14uMany) . ')');
+    $r14uBroken = is_array($r14uMany) ? ProductEditor::storeUploads([$r14uUpload($r14uPng), $r14uUpload('not an image')], 'R14U-IMG', 0) : null;
+    $r14uLeft = glob(dirname(TEST_CLI_DIR) . '/uploads/products/R14U-IMG-*') ?: [];
+    assert_true(is_string($r14uBroken) && count($r14uLeft) === 2, 'R14 UX7: when one image of the upload is not an image, nothing of it is kept (' . count($r14uLeft) . ' files)');
+    assert_true(is_string(is_array($r14uMany) ? ProductEditor::storeUploads([$r14uUpload($r14uPng), $r14uUpload($r14uPng)], 'R14U-IMG', 49) : null),
+        'R14 UX7: an upload over the 50-image limit is refused');
+    foreach (is_array($r14uMany) ? $r14uMany : [] as [, $r14uPath]) ProductEditor::discardUpload($r14uPath);
+
+    $r14uScript = function_exists('adminImageOrderScript') ? adminImageOrderScript() : '';
+    $r14uCatalog = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Catalog.php');
+    assert_true(str_contains($r14uScript, 'nonce="' . Security::cspNonce() . '"') && str_contains($r14uScript, 'textarea[name="images"]') && str_contains($r14uScript, '"Move up"')
+        && str_contains($r14uCatalog, 'adminRichTextScript() . adminImageOrderScript()') && str_contains($r14uCatalog, 'ProductEditor::storeUploads('),
+        'R14 UX7: the product editor shows the image list (move up / down, remove) over the image lines and stores every upload');
+} catch (Throwable $e) { $r14uFail('UX7', $e); } finally {
+    foreach ($r14uImageFiles as $r14uFile) @unlink($r14uFile);
+    I18n::setLocale($r14uSavedLocale);
+}
+
 // --- UX4: editor and fulfillment change their own password and TOTP (rendered admin, own SQLite database) -----------
 $r14uTmp = test_fixture_path('r14-ux-admin');
 mkdir($r14uTmp . '/sessions', 0777, true);

@@ -12,7 +12,9 @@
   payment method says why (the chosen delivery has none, or names the deliveries that have one, or gives the store's
   e-mail), and Admin → Payments warns that bank transfer is hidden while the store has no valid IBAN. Status lists offer only moves that would be accepted:
   the order detail drops "paid" until the payment is confirmed and "refunded" while money is still to go back, and
-  the bulk list offers "refunded" only to admins who may refund.
+  the bulk list offers "refunded" only to admins who may refund. The product editor uploads up to 10 images at once
+  (added at the end, nothing kept when one file is not an image) and lists the images with move up / move down /
+  remove buttons over the "URL | alt" lines, which still work without JavaScript.
 - **Payments** (review round 14, finding 3, T2, T18, T20). A capture of an older payment attempt records that
   attempt as the order's payment (refunds go to the money), and pending-order expiry asks the gateway about every
   attempt, not only the newest. A hidden store opens its payment link and the pages its gateway returns to. The

@@ -4,6 +4,7 @@ require_once __DIR__ . '/CatalogEditor.php';
 require_once __DIR__ . '/Taxonomy.php';
 require_once __DIR__ . '/PricingRules.php';
 require_once __DIR__ . '/RichText.php';
+require_once __DIR__ . '/ImageOrder.php';
 /** The one escaping helper the catalog editors' nonce'd inline scripts (product and attribute forms) build markup with. */
 const ADMIN_JS_ESC_HTML = "function escHtml(s) { return String(s ?? '').replace(/[&<>\"']/g, function (c) { return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;'}[c]; }); }";
 function pageProducts(): void {
@@ -268,7 +269,7 @@ function pageProduct(): void {
         $attrSection = (string)ob_get_clean();
         echo AdminForm::render('admin-product', 'admin.php?p=product&action=save' . ($product ? '&id=' . (int)$product['id'] : ''),
             adminFormValues('admin-product', $product ?: null), $attrSection);
-        echo adminRichTextScript();
+        echo adminRichTextScript() . adminImageOrderScript();
         ?>
 
         <?php if ($product): ?>
@@ -882,14 +883,14 @@ function handleProductSave(): void {
 
     // Image order, alts and removals come from the editor; an upload is stored last, after every check passed.
     $images = $editor['images'];
-    $upload = $form['image_upload']['action'] === 'replace' ? ProductEditor::storeUpload($form['image_upload']['files'][0], $data[':sku']) : null;
-    if (is_string($upload)) {
+    $uploads = $form['image_upload']['action'] === 'replace' ? ProductEditor::storeUploads($form['image_upload']['files'], $data[':sku'], count($images)) : [];
+    if (is_string($uploads)) {
         AdminForm::keepInput('admin-product', $form);
-        setFlash('err', $upload);
+        setFlash('err', $uploads);
         header($back);
         exit;
     }
-    if ($upload) $images[] = $upload[0];
+    foreach ($uploads as [$uploadUrl]) $images[] = $uploadUrl;
     $data[':images'] = json_encode($images);
     $data[':tags'] = json_encode(array_values(array_filter(array_map('trim', explode(',', $form['tags'])), 'strlen')));
 
@@ -942,10 +943,10 @@ function handleProductSave(): void {
             setFlash('ok', I18n::t('admin.product.created'));
         }
     } catch (Throwable $e) {
-        if ($upload) ProductEditor::discardUpload($upload[1]);
+        foreach ($uploads as [, $uploadPath]) ProductEditor::discardUpload($uploadPath);
         throw $e;
     }
-    ProductEditor::afterImagesSaved(json_decode((string)($old['images'] ?? '[]'), true) ?: [], $images, $upload[1] ?? null);
+    ProductEditor::afterImagesSaved(json_decode((string)($old['images'] ?? '[]'), true) ?: [], $images, array_column($uploads, 1));
 
     // The stock field is "available"; book the change in the warehouse ledger (the source of truth).
     try {
