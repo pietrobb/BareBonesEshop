@@ -230,10 +230,7 @@ function handleOrderShipmentCancel(): void {
     }, false);
 }
 
-/**
- * Run one shipment change in a transaction; DomainException messages are i18n keys shown to the admin.
- * $transaction=false: the change calls a carrier API and takes its own short transaction for the database write.
- */
+/** Run one shipment change in a transaction (false: carrier-API changes take their own short one); DomainException messages are admin i18n keys. */
 function adminShipmentAction(int $orderId, Closure $change, bool $requireOpenOrder = true, bool $transaction = true): void {
     $db = Db::get();
     if ($transaction) $db->beginTransaction();
