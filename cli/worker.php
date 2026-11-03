@@ -188,7 +188,7 @@ do {
                 (string)($payload['_store_id'] ?? 'default'),
                 (string)($payload['_channel_id'] ?? 'storefront')
             );
-            if ($handler && is_callable($handler)) {
+            if ($handler !== null) {
                 $handler($payload, $job);
             } else {
                 throw new \RuntimeException("Unknown job type: {$type}");

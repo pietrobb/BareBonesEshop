@@ -163,12 +163,6 @@ parameters:
 			path: cli/test-update.php
 
 		-
-			message: '#^Call to function is_callable\(\) with ''handleCacheRebuild''\|''handleCartAbandonme…''\|''handleCleanup''\|''handleDigitalFulfill''\|''handleDigitalRevoke''\|''handleEmailSend''\|''handleErpOrderPush''\|''handleErpOrderUpdate''\|''handleImageResize''\|''handleImportProcess''\|''handleInvoiceIssue''\|''handleMerchantNotify''\|''handlePaymentCancel''\|''handlePaymentRefund''\|''handleSearchReindex''\|''handleStockAlert''\|\(Closure\(array\)\: int\) will always evaluate to true\.$#'
-			identifier: function.alreadyNarrowedType
-			count: 1
-			path: cli/worker.php
-
-		-
 			message: '#^Expression on left side of \?\? is not nullable\.$#'
 			identifier: nullCoalesce.expr
 			count: 1

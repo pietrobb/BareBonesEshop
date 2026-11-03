@@ -154,7 +154,7 @@ final class WebInstaller
         $response = '';
         while (!feof($socket) && strlen($response) < 16384) {
             $chunk = fread($socket, 4096);
-            if ($chunk === false || ($chunk === '' && (bool)(stream_get_meta_data($socket)['timed_out'] ?? false))) break;
+            if ($chunk === false || ($chunk === '' && stream_get_meta_data($socket)['timed_out'])) break;
             $response .= $chunk;
         }
         fclose($socket);
