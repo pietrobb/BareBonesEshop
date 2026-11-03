@@ -230,21 +230,24 @@ function handleOrderShipmentCancel(): void {
     }, false);
 }
 
-/** Run one shipment change in a transaction; DomainException messages are i18n keys shown to the admin. */
-function adminShipmentAction(int $orderId, Closure $change, bool $requireOpenOrder = true): void {
+/**
+ * Run one shipment change in a transaction; DomainException messages are i18n keys shown to the admin.
+ * $transaction=false: the change calls a carrier API and takes its own short transaction for the database write.
+ */
+function adminShipmentAction(int $orderId, Closure $change, bool $requireOpenOrder = true, bool $transaction = true): void {
     $db = Db::get();
-    $db->beginTransaction();
+    if ($transaction) $db->beginTransaction();
     try {
         // Lock before the first read: on MySQL that read fixes the transaction's snapshot.
-        Orders::lockWithin($orderId);
+        if ($transaction) Orders::lockWithin($orderId);
         $order = Orders::byId($orderId);
         if (!$order) throw new DomainException('admin.order.msg.not_found');
         if ($requireOpenOrder && !Fulfillment::orderShippable($order)) throw new DomainException('admin.shipment.not_shippable');
         $message = $change($order);
-        $db->commit();
+        if ($transaction) $db->commit();
         setFlash('ok', I18n::t($message));
     } catch (Throwable $e) {
-        $db->rollBack();
+        if ($db->inTransaction()) $db->rollBack();
         $key = match (true) {
             $e instanceof DomainException => $e->getMessage(),
             $e instanceof InvalidArgumentException => 'admin.shipment.msg.invalid_tracking',

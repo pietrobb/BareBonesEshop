@@ -72,5 +72,5 @@ function handleOrderShipmentLabel(): void {
         $label = ShippingService::generateLabel($orderId, $carrier, (int)$shipment['id']);
         AuditLog::log('shipment', (int)$shipment['id'], null, ['label_carrier' => $carrier, 'awb' => $label['awb'], 'cod_amount' => (int)($label['cod_amount'] ?? 0)], 'Admin shipment label');
         return 'admin.shipment.msg.label_created';
-    });
+    }, true, false);
 }

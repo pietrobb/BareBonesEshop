@@ -23,7 +23,7 @@ if (!defined('BB_TEST_LOAD_API_ONLY')) {
     Security::sessionStart();
     Customers::isLoggedIn();
 
-    Bootstrap::initLocale($uri);
+    Bootstrap::initLocale($uri, ApiRoute::servesHiddenStore($action));
 
     if (!Security::apiAllowed($action)) {
         echo json_encode(['error' => 'Too many requests']);
