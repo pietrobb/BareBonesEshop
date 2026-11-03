@@ -1871,5 +1871,5 @@ return array_replace(require __DIR__ . '/en.php', [
     'bookshop.download_note' => 'Descarga del EPUB justo después del pago',
     'bookshop.about_book' => 'Sobre el libro',
     'bookshop.book_details' => 'Detalles del libro',
-    'bookshop.related' => 'También te puede gustar',
+    'bookshop.related' => 'También le puede interesar',
 ]);

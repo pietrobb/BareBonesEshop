@@ -136,6 +136,11 @@ class Migrator {
             '91ac2cc652a960de191c8a47784ad716ddaf5beb99e637e78b2628cc071e8b3a' => ['4d046caec20f4e1570aed21b81ac4ba3937dfb63e4ceb328444648ea22677af3', 'db192f25c1fa6caf149d8700bdea78bb9b8be0874dcc89fdf0be4a7963c0dd11'],
             'e6d5109094a1429adc3a5a0216b9373724ac9f09cd9d447dd031a0da67015642' => ['4d046caec20f4e1570aed21b81ac4ba3937dfb63e4ceb328444648ea22677af3', 'db192f25c1fa6caf149d8700bdea78bb9b8be0874dcc89fdf0be4a7963c0dd11'],
         ],
+        // R13 low: the backfill reads the snapshot keys from the decoded attrs instead of a LIKE on the JSON.
+        '20261103090000_order_item_digital' => [
+            'cd4b8440632086049355bd8c1fb2249ea2faff1b371eb086e0a860d31e906602' => ['de6cbf665663278eca9ebf0cf9dcb99cf2d2e9cc24497238e4e4f0df283cacb4', '3aa4204a9017a54a9ddf3bae77fe34522c600380e6a2e15a2e5ad643368a66bf'],
+            '920356b24b9c5aa670771f0eadc4a18756f0d95d440cbfd31f92cefcf86053cf' => ['de6cbf665663278eca9ebf0cf9dcb99cf2d2e9cc24497238e4e4f0df283cacb4', '3aa4204a9017a54a9ddf3bae77fe34522c600380e6a2e15a2e5ad643368a66bf'],
+        ],
     ];
 
     private PDO    $db;
