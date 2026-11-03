@@ -183,7 +183,7 @@ function pageOrders(): void {
         <form method="post" action="admin.php?p=orders&amp;action=bulk_status" id="orders-bulk">
         <?= $filterFields ?>
         <div class="sales-toolbar" style="margin-bottom:1rem">
-            <div class="form-row"><label for="bulk-status"><?= esc(I18n::t('admin.orders.bulk_status')) ?></label><select id="bulk-status" name="new_status" required><option value="">— <?= esc(I18n::t('admin.orders.bulk.choose_status')) ?> —</option><?php foreach (OrderWorkflow::statuses() as $s): ?><option value="<?= esc($s) ?>"><?= esc(OrderStatusLabels::order($s)) ?></option><?php endforeach; ?></select></div>
+            <div class="form-row"><label for="bulk-status"><?= esc(I18n::t('admin.orders.bulk_status')) ?></label><select id="bulk-status" name="new_status" required><option value="">— <?= esc(I18n::t('admin.orders.bulk.choose_status')) ?> —</option><?php foreach (OrderWorkflow::statuses() as $s): if (!Security::adminCan(Security::orderStatusPermission($s))) continue; ?><option value="<?= esc($s) ?>"><?= esc(OrderStatusLabels::order($s)) ?></option><?php endforeach; ?></select></div>
             <div class="form-row"><label for="bulk-note"><?= esc(I18n::t('admin.order.note')) ?></label><input id="bulk-note" name="note"></div>
             <button class="btn btn-primary btn-sm" type="submit" data-confirm="<?= esc(I18n::t('admin.orders.bulk.confirm')) ?>"><?= esc(I18n::t('admin.orders.bulk_apply')) ?></button>
             <button class="btn btn-sm" type="submit" formaction="admin.php?p=delivery_note" formtarget="_blank" formnovalidate name="format" value="html"><?= esc(I18n::t('admin.delivery_note.html')) ?></button>

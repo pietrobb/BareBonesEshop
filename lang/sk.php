@@ -1572,6 +1572,7 @@ return [
     'account.verify_email_resend' => 'Poslať odkaz znova',
     'account.verify_email_sent' => 'Poslali sme vám overovací odkaz.',
     'account.verify_email_done' => 'Vaša e-mailová adresa je overená.',
+    'account.verify_email_sign_in' => 'Na dokončenie overenia e-mailu sa prihláste do účtu, ku ktorému odkaz patrí.',
     'account.invoice_link_title' => 'Faktúra',
     'account.invoice_link_open' => 'Otvoriť faktúru',
     'account.invoice_link_noscript' => 'Na otvorenie tohto odkazu je potrebný JavaScript. Faktúru nájdete aj v prílohe e-mailu.',

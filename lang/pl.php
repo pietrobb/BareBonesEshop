@@ -1563,6 +1563,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.verify_email_resend' => 'Wyślij link ponownie',
     'account.verify_email_sent' => 'Wysłaliśmy link weryfikacyjny.',
     'account.verify_email_done' => 'Twój adres e-mail został zweryfikowany.',
+    'account.verify_email_sign_in' => 'Aby dokończyć weryfikację adresu e-mail, zaloguj się na konto, do którego należy ten link.',
     'account.invoice_link_title' => 'Faktura',
     'account.invoice_link_open' => 'Otwórz fakturę',
     'account.invoice_link_noscript' => 'Do otwarcia tego linku potrzebny jest JavaScript. Faktura jest też załączona do wiadomości e-mail.',

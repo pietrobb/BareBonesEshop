@@ -1563,6 +1563,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.verify_email_resend' => 'Poslat odkaz znovu',
     'account.verify_email_sent' => 'Poslali jsme vám ověřovací odkaz.',
     'account.verify_email_done' => 'Vaše e-mailová adresa je ověřena.',
+    'account.verify_email_sign_in' => 'Pro dokončení ověření e-mailu se přihlaste k účtu, ke kterému odkaz patří.',
     'account.invoice_link_title' => 'Faktura',
     'account.invoice_link_open' => 'Otevřít fakturu',
     'account.invoice_link_noscript' => 'K otevření tohoto odkazu je potřeba JavaScript. Fakturu najdete také v příloze e-mailu.',

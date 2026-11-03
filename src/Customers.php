@@ -406,8 +406,9 @@ class Customers {
 
     /**
      * Guest orders of this store placed with the customer's e-mail join the account, so they appear under My orders.
-     * Call only once the customer has proven the address (verification link, guest-order claim token): an unverified
-     * sign-up with someone else's e-mail must not see their orders. Returns the number of orders attached.
+     * Call only once the same person has proven both the address and the account (verification link used while
+     * authenticated as that account, guest-order claim link that sets the password): a sign-up with someone else's
+     * e-mail must not see their orders. Returns the number of orders attached.
      */
     public static function attachGuestOrders(int $customerId): int {
         $db = Db::get();
@@ -421,9 +422,15 @@ class Customers {
         return $attach->rowCount();
     }
 
-    /** Consumes a verification token once; it only verifies the address it was issued for. Returns the customer ID. */
-    public static function verifyEmail(string $token): ?int {
-        if (!preg_match('/^[a-f0-9]{64}$/', $token)) return null;
+    /**
+     * Consumes a verification token once; it only verifies the address it was issued for. Returns the customer ID.
+     * R14 #1: the link proves the mailbox, not who chose the password — anyone can sign up with someone else's e-mail.
+     * $customerId is the account the caller has authenticated (signed-in session or password just checked), and the
+     * token must belong to it: the mailbox owner clicking a link for an account they cannot sign in to verifies nothing
+     * and hands over no guest orders.
+     */
+    public static function verifyEmail(string $token, int $customerId): ?int {
+        if (!preg_match('/^[a-f0-9]{64}$/', $token) || $customerId <= 0) return null;
         $db = Db::get();
         $hash = hash('sha256', $token);
         $now = gmdate('Y-m-d H:i:s');
@@ -431,8 +438,8 @@ class Customers {
         try {
             $find = $db->prepare("SELECT v.customer_id FROM customer_email_verifications v
                 JOIN customers c ON c.id = v.customer_id
-                WHERE v.token_hash = ? AND v.used_at IS NULL AND v.expires_at > ? AND c.store_id = ? AND c.email = v.email AND c.status = 'active'");
-            $find->execute([$hash, $now, StoreContext::current()->id()]);
+                WHERE v.token_hash = ? AND v.used_at IS NULL AND v.expires_at > ? AND c.store_id = ? AND c.email = v.email AND c.status = 'active' AND v.customer_id = ?");
+            $find->execute([$hash, $now, StoreContext::current()->id(), $customerId]);
             $cid = (int)$find->fetchColumn();
             $consume = $db->prepare('UPDATE customer_email_verifications SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?');
             if ($cid <= 0 || !$consume->execute([$now, $hash, $now]) || $consume->rowCount() !== 1) {

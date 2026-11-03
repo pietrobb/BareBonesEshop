@@ -110,6 +110,16 @@ final class DataOverrides
         return self::ensureDir(dirname($file)) && self::atomicWrite($file, $html);
     }
 
+    /** Delete a removed store's own legal texts (legal/stores/<id>/<locale>/<page>.html). */
+    public static function removeStoreLegal(string $storeId): void
+    {
+        if (preg_match('/^[a-z0-9][a-z0-9_-]{0,63}$/', $storeId) !== 1 || ($dir = self::dir()) === null) return;
+        $root = "{$dir}/legal/stores/{$storeId}";
+        foreach (glob("{$root}/[a-z][a-z]/*.html") ?: [] as $file) @unlink($file);
+        foreach (glob("{$root}/[a-z][a-z]", GLOB_ONLYDIR) ?: [] as $locale) @rmdir($locale);
+        @rmdir($root);
+    }
+
     /**
      * Give every store its own copy of the legal texts saved before 2.1 per language (legal/<locale>/<page>.html):
      * each store speaking that language keeps the text it showed, then the shared file is removed, so a later
