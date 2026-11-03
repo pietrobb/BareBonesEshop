@@ -168,6 +168,12 @@ class Setup
         return $out;
     }
 
+    /** A database without applied migrations is a new shop (install may then switch keyless online payments off). */
+    public static function databaseFresh(PDO $db): bool
+    {
+        return !Db::tableExists('schema_migrations', $db) || (int)$db->query('SELECT COUNT(*) FROM schema_migrations')->fetchColumn() === 0;
+    }
+
     /** @return list<string> where to open the shop after install: the public URL when set, else the development server */
     public static function nextSteps(array $config): array
     {

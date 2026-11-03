@@ -127,9 +127,7 @@ require_once __DIR__ . '/../src/autoload.php';
 
 // Internal step of install, before migrating: a database without applied migrations is a new shop.
 if ($command === 'database-fresh') {
-    $db = Db::get();
-    $applied = Db::tableExists('schema_migrations', $db) ? (int)$db->query('SELECT COUNT(*) FROM schema_migrations')->fetchColumn() : 0;
-    echo json_encode(['fresh' => $applied === 0]) . "\n";
+    echo json_encode(['fresh' => Setup::databaseFresh(Db::get())]) . "\n";
     exit(0);
 }
 

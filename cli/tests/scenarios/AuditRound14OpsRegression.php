@@ -72,8 +72,14 @@ $r14oMigrateAt = strpos($r14oSetup, "'cli/migrate.php'");
 assert_true($r14oFreshAt !== false && $r14oMigrateAt !== false && $r14oFreshAt < $r14oMigrateAt
     && preg_match('/if \(\$freshDatabase\) \{\s*\$steps\[\'payments_off\'\]/', $r14oSetup) === 1,
     'R14 #6: install switches online payments off only on a database that had no migrations before it ran');
-$r14oFresh = $r14oCli(['cli/setup.php', 'database-fresh']);
-assert_equals(['fresh' => false], json_decode(trim($r14oFresh['out']), true), 'R14 #6: the migrated test database is not a fresh one (' . trim($r14oFresh['out']) . ')');
+$r14oEmpty = new PDO('sqlite::memory:');
+$r14oNoMigrations = new PDO('sqlite::memory:');
+$r14oNoMigrations->exec('CREATE TABLE schema_migrations (name TEXT)');
+$r14oMigrated = new PDO('sqlite::memory:');
+$r14oMigrated->exec("CREATE TABLE schema_migrations (name TEXT); INSERT INTO schema_migrations VALUES ('20260425033813_add_gdpr_tables')");
+assert_equals([true, true, false], [Setup::databaseFresh($r14oEmpty), Setup::databaseFresh($r14oNoMigrations), Setup::databaseFresh($r14oMigrated)],
+    'R14 #6: an empty database or one without applied migrations is fresh, a migrated one is not');
+assert_true(str_contains($r14oSetup, "json_encode(['fresh' => Setup::databaseFresh(Db::get())])"), 'R14 #6: setup.php database-fresh answers from Setup::databaseFresh()');
 
 // Installer: the self-check is skipped only for php -S started with this shop's router.php.
 $r14oHasRouterCheck = method_exists('WebInstaller', 'devRouterActive');
