@@ -63,7 +63,8 @@ if ($page === 'dashboard' && !isset($_GET['p']) && ($_SERVER['REQUEST_METHOD'] ?
     header('Location: admin.php?p=' . $adminLanding);
     exit;
 }
-Security::adminRequire($requiredPerm);
+// '' (my_account): any signed-in admin; the page acts only on the signed-in account.
+if ($requiredPerm !== '') Security::adminRequire($requiredPerm);
 
 // Handle POST actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -117,6 +118,7 @@ $title = match($page) {
     'customers'  => I18n::t('admin.title.customers'),
     'customer'   => I18n::t('admin.title.customer'),
     'admin_users' => I18n::t('admin.title.admin_users'),
+    'my_account' => I18n::t('admin.title.my_account'),
     'email_templates' => I18n::t('admin.title.email_templates'),
     'stores' => I18n::t('admin.nav.stores'),
     'reviews'    => I18n::t('admin.title.reviews'),
@@ -181,7 +183,7 @@ input[type=file]{padding:.3rem}input[type=checkbox],input[type=radio]{width:1.5r
 <div class="wrap">
 <nav>
     <h2><?= esc($adminAppName) ?></h2>
-    <div style="padding:0.3rem 1rem;font-size:0.75rem;color:#94a3b8;margin-bottom:0.5rem"><?= esc(Security::adminUser()) ?> (<?= esc(Security::adminRole()) ?>)</div>
+    <div style="padding:0.3rem 1rem;font-size:0.75rem;color:#94a3b8;margin-bottom:0.5rem"><?= esc(Security::adminUser()) ?> (<?= esc(Security::adminRole()) ?>) · <a href="admin.php?p=my_account" style="color:#cbd5e1"><?= esc(I18n::t('admin.title.my_account')) ?></a></div>
     <form method="post" action="admin.php" style="padding:0 1rem .5rem">
         <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">
         <button class="btn btn-sm" type="submit" name="admin_logout" value="1"><?= esc(I18n::t('admin.sign_out')) ?></button>
@@ -239,6 +241,7 @@ match($page) {
     'customers'  => pageCustomers(),
     'customer'   => pageCustomerDetail(),
     'admin_users' => pageAdminUsers(),
+    'my_account' => pageMyAccount(),
     'email_templates' => pageEmailTemplates(),
     'stores' => pageStoreSettings(),
     default      => pageDashboard(),

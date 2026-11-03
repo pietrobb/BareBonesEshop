@@ -1452,6 +1452,20 @@ class PaymentService {
         return I18n::tIn($key, $locale ?? (string)($order['locale'] ?? I18n::locale()));
     }
 
+    /**
+     * Payment method of an order as the admin reads it (lists, order detail, operations): the method's name from the
+     * checkout snapshot (a seeded name in the admin's language), else the generic name of its type; the internal code
+     * (bank_transfer, cod, stripe) only when there is nothing else.
+     */
+    public static function adminLabel(array $order): string {
+        $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? ''), true);
+        $snapshot = is_array($snapshot) ? $snapshot : [];
+        $label = trim((string)(($snapshot['label'] ?? '') ?: ($snapshot['name'] ?? '')));
+        if ($label !== '') return MethodLabels::name('payment', (string)($snapshot['code'] ?? ''), $label);
+        $generic = self::orderLabel($order, I18n::locale());
+        return $generic !== '' ? $generic : (string)($order['payment_method'] ?? '');
+    }
+
     private static function orderProvider(array $order): string {
         $snapshot = json_decode((string)($order['payment_method_snapshot'] ?? '{}'), true) ?: [];
         return (string)($snapshot['provider'] ?? $order['payment_method'] ?? '');

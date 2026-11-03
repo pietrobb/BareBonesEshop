@@ -12,6 +12,25 @@ class CheckoutService {
         return digitalDeliveryRate();
     }
 
+    /**
+     * Why checkout offers no payment, in words the buyer can act on (UX5): the deliveries that do have a payment method
+     * when the chosen one has none (cash on delivery not with pickup, no IBAN for a transfer), else the store's e-mail.
+     */
+    public static function paymentUnavailableMessage(array $cart, int $goods, string $country, string $currency, string $shippingMethod, ?int $customerId): string {
+        $chosen = $shippingMethod;
+        $others = [];
+        if ($shippingMethod !== '' && !self::isDigitalOnly($cart)) {
+            foreach ((array)(self::deliveryQuote($cart, $goods, $country, $shippingMethod)['rates'] ?? []) as $rate) {
+                $code = (string)($rate['method_code'] ?? '');
+                if ($code === $shippingMethod) { $chosen = (string)($rate['label'] ?? $code); continue; }
+                if (PaymentService::availableMethods($country, $currency, $goods + (int)($rate['price'] ?? 0), $code, $customerId) !== []) $others[] = (string)($rate['label'] ?? $code);
+            }
+        }
+        if ($others !== []) return sprintf(I18n::t('payment_unavailable_shipping'), $chosen, implode(', ', $others));
+        $email = trim((string)(StoreContext::current()->legal()['email'] ?? ''));
+        return $email !== '' ? sprintf(I18n::t('payment_unavailable_contact'), $email) : I18n::t('payment_unavailable');
+    }
+
     /** Delivery quote of the checkout form: a digital-only cart gets only the free electronic delivery. */
     public static function deliveryQuote(array $cart, int $subtotal, string $country, mixed $method, bool $cod = false): array {
         if (self::isDigitalOnly(array_values(array_filter($cart, static fn(array $item): bool => $item['available'] ?? true)))) {

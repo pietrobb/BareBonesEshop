@@ -123,8 +123,9 @@
         {
             "name": "image_upload",
             "type": "file",
-            "label": "Nahrať obrázok",
-            "accept": ["jpg", "jpeg", "png", "gif", "webp"]
+            "label": "Nahrať obrázky (až 10 naraz, pridajú sa na koniec)",
+            "accept": ["jpg", "jpeg", "png", "gif", "webp"],
+            "max_files": 10
         },
         {
             "name": "weight_g",

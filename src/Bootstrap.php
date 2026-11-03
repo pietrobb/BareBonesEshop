@@ -179,9 +179,16 @@ class Bootstrap {
         ];
     }
 
-    /** Append ?lang=<locale> (or &lang=) to a local URL. */
+    /** Set ?lang=<locale> (or &lang=) on a local URL, replacing a lang it already has; a #fragment stays last. */
     public static function withLang(string $url, string $locale): string {
-        return $url . (str_contains($url, '?') ? '&' : '?') . 'lang=' . rawurlencode($locale);
+        [$url, $fragment] = array_pad(explode('#', self::withoutLang($url), 2), 2, null);
+        return $url . (str_contains($url, '?') ? '&' : '?') . 'lang=' . rawurlencode($locale) . ($fragment === null ? '' : '#' . $fragment);
+    }
+
+    /** A local URL without its lang query parameter. */
+    public static function withoutLang(string $url): string {
+        $clean = (string)preg_replace('/([?&])lang=[^&#]*(&|(?=#)|$)/', '$1', $url);
+        return (string)preg_replace('/[?&](?=#|$)/', '', $clean);
     }
 
     /** The active locale when it is a non-primary language of the current store (selected by ?lang=), else null. */

@@ -152,6 +152,24 @@ final class ProductEditor {
     }
 
     /**
+     * R14 UX7: store every BBF-validated upload of one save (in upload order) after the $existing images; returns a list
+     * of [url, storage path] or an error message, in which case the files already stored are removed again.
+     */
+    public static function storeUploads(array $uploads, string $sku, int $existing): array|string {
+        if ($existing + count($uploads) > self::MAX_IMAGES) return I18n::format('admin.msg.product.images_max', ['max' => self::MAX_IMAGES]);
+        $stored = [];
+        foreach ($uploads as $upload) {
+            $result = self::storeUpload($upload, $sku);
+            if (is_string($result)) {
+                foreach ($stored as [, $path]) self::discardUpload($path);
+                return $result;
+            }
+            $stored[] = $result;
+        }
+        return $stored;
+    }
+
+    /**
      * Largest upload (pixels) the resize job can decode: GD holds ~5 bytes per pixel (truecolor + alpha, plus the
      * resized copy), so the cap is 25 MP and lower when memory_limit leaves less than that headroom.
      */
@@ -170,12 +188,14 @@ final class ProductEditor {
     }
 
     /**
-     * After a committed save: queue the resize of a new upload and delete editor uploads removed from the product
+     * After a committed save: queue the resize of the new uploads and delete editor uploads removed from the product
      * once no product of any store lists them any more. Files outside the storage's products/ uploads are never touched.
+     *
+     * @param string[] $uploadPaths
      */
-    public static function afterImagesSaved(array $before, array $after, ?string $uploadPath): void {
+    public static function afterImagesSaved(array $before, array $after, array $uploadPaths): void {
         $storage = Adapters::storage();
-        if ($uploadPath !== null) JobQueue::push('image_resize', ['path' => $uploadPath], 3);
+        foreach ($uploadPaths as $uploadPath) JobQueue::push('image_resize', ['path' => $uploadPath], 3);
         $prefix = substr($storage->url('products/x.jpg', 'full'), 0, -strlen('products/x.jpg'));
         $users = Db::get()->prepare("SELECT images FROM products WHERE images LIKE :needle ESCAPE '!'");
         foreach (array_diff(array_map([self::class, 'imageUrl'], $before), $after) as $url) {

@@ -76,7 +76,9 @@ final class SlugRepair
     public static function canonicalRedirect(string $requested, string $canonical, string $url, array $query): ?string
     {
         if ($canonical === '' || $requested === $canonical) return null;
-        $query = array_diff_key($query, ['page' => true, 'slug' => true, 'category' => true, 'path' => true]);
+        // $url may already carry some (?lang= of the active further language, Template::storeUrl): not twice.
+        parse_str((string)(parse_url($url, PHP_URL_QUERY) ?? ''), $own);
+        $query = array_diff_key($query, ['page' => true, 'slug' => true, 'category' => true, 'path' => true], $own);
         return $url . ($query === [] ? '' : (str_contains($url, '?') ? '&' : '?') . http_build_query($query));
     }
 }

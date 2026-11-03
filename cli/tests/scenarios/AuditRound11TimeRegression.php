@@ -91,7 +91,7 @@ try {
     $r11tDue = BankTransferInstructions::dueAt($r11tProbe, $r11tTerm);
     assert_equals('23:59:59', (new DateTimeImmutable('@' . $r11tDue))->setTimezone(new DateTimeZone('Europe/Bratislava'))->format('H:i:s'), 'R11 H5: a transfer is due at the end of its due day on the shop\'s calendar');
     assert_equals(ShopTime::date('Y-m-d', $r11tDue), (string)(BankTransferInstructions::forApi($r11tProbe)['due_date'] ?? ShopTime::date('Y-m-d', $r11tDue)), 'R11 H5: the instructions print that local due date');
-    $r11tGrace = $r11tTransfer(15);    // one day past due: the money may still be on its way
+    $r11tGrace = $r11tTransfer(16);    // past due (15 × 24 h can still be the due day before local midnight): money may be on its way
     $r11tLapsed = $r11tTransfer(19);   // past due and the 3 grace days
     Orders::expirePending(172800, 100, null, ['bank_transfer' => $r11tTerm]);
     assert_equals(['pending', 'cancelled'], [Orders::byId((int)$r11tGrace['id'])['status'] ?? '', Orders::byId((int)$r11tLapsed['id'])['status'] ?? ''],

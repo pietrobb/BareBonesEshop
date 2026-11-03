@@ -8,7 +8,7 @@
         </nav>
         <div class="site-header__actions">
             <form class="search-form" action="{{base_url}}/" method="get" role="search">
-                <input type="hidden" name="page" value="search">
+                <input type="hidden" name="page" value="search">{{> global/lang-field}}
                 <label class="sr-only" for="site-search">{{t.search}}</label>
                 <input id="site-search" type="search" name="q" placeholder="{{t.search_placeholder}}" class="search-input" data-search-suggest="{{t.search_suggestions}}">
             </form>

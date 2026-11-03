@@ -55,6 +55,21 @@ php cli/seed.php --count=200
 # 4. Serve — router.php applies the .htaccess deny/rewrite rules to PHP's
 #    built-in server, which would otherwise serve config/, cli/ and releases/
 php -S localhost:8080 router.php
+
+# 5. Run the worker. Order confirmations and other e-mails, payment expiry,
+#    webhooks, stock alerts and invoices are queued jobs: without a worker they
+#    stay queued (the CLI install leaves operations.web_worker off). While
+#    developing, run one pass by hand after an order, or keep it looping:
+php cli/worker.php --once --verbose
+while true; do php cli/worker.php --once; sleep 60; done
+#    On a server, add the crontab entries (crontab -e, as the web server user)
+#    and record the worker line as operations.worker_cron in config.php so
+#    doctor stops warning:
+#      * * * * *  php /path/to/shop/cli/worker.php
+#      17 3 * * * php /path/to/shop/cli/gdpr-gc.php --apply --quiet
+#      40 2 * * * php /path/to/shop/cli/backup.php --gc
+#    Hosting without cron: set 'operations' => ['web_worker' => true] instead
+#    (page requests then run one worker pass at most every 60 seconds).
 ```
 
 Open <http://localhost:8080> for the storefront and

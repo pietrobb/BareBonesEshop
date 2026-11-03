@@ -130,20 +130,22 @@ assert_true($r9lHoldUntil !== null && $r9lHoldUntil >= $r9lNow - 3600 + 14 * $r9
 assert_equals([null, null, null], [
     DigitalDelivery::holdUntil($r9lOrder('R9L-CONS', ['R9L-EBOOK'], 3600, null, null, true), $r9lNow),
     DigitalDelivery::holdUntil($r9lOrder('R9L-B2B', ['R9L-EBOOK'], 3600, null, $r9lB2b), $r9lNow),
-    DigitalDelivery::holdUntil($r9lOrder('R9L-PAST', ['R9L-EBOOK'], 15 * $r9lDay), $r9lNow),
+    DigitalDelivery::holdUntil($r9lOrder('R9L-PAST', ['R9L-EBOOK'], 16 * $r9lDay), $r9lNow),
 ], 'R9 digital: supplied at once with the consent, to a business buyer, or once the period has passed');
 assert_true(!DigitalDelivery::withdrawn((int)$r9lHeld['id']), 'R9 digital: an order without a withdrawal statement is not withdrawn');
 $r9lWorker = (string)file_get_contents(TEST_CLI_DIR . '/worker.php') . (string)file_get_contents(dirname(__DIR__, 3) . '/src/WorkerJobs.php');
 assert_true(preg_match('/function handleDigitalFulfill\(.*?DigitalDelivery::holdUntil\(\$order\).*?JobQueue::pushDelayed\(\'digital_fulfill\'.*?\'held\' => true.*?return;.*?DigitalDelivery::withdrawn\(\$orderId\)\)\) return;.*?DigitalDelivery::claimFulfilment/s', $r9lWorker) === 1,
     'R9 digital: the worker re-queues a held order for the end of the period and then skips it if withdrawn or no longer paid');
 
+// Periods end with the 14th day on the shop's calendar: 15 × 24 h ago can still be day 14 (hour before local
+// midnight after a DST change), so "past the period" uses 16 days.
 $r9lPeriod = static fn(array $order): bool => Withdrawal::withinPeriod($order, $r9lNow);
 assert_equals(
-    ['digital 10 d' => true, 'digital 15 d' => false, 'delivered 10 d' => true, 'delivered 15 d' => false, 'undelivered 100 d' => true, 'undelivered 13 months' => false, 'mixed undelivered 20 d' => true],
+    ['digital 10 d' => true, 'digital 16 d' => false, 'delivered 10 d' => true, 'delivered 16 d' => false, 'undelivered 100 d' => true, 'undelivered 13 months' => false, 'mixed undelivered 20 d' => true],
     ['digital 10 d' => $r9lPeriod($r9lOrder('R9L-W1', ['R9L-EBOOK'], 10 * $r9lDay)),
-     'digital 15 d' => $r9lPeriod($r9lOrder('R9L-W2', ['R9L-EBOOK'], 15 * $r9lDay)),
+     'digital 16 d' => $r9lPeriod($r9lOrder('R9L-W2', ['R9L-EBOOK'], 16 * $r9lDay)),
      'delivered 10 d' => $r9lPeriod($r9lOrder('R9L-W3', ['R9L-CHAIR'], 30 * $r9lDay, 10 * $r9lDay)),
-     'delivered 15 d' => $r9lPeriod($r9lOrder('R9L-W4', ['R9L-CHAIR'], 30 * $r9lDay, 15 * $r9lDay)),
+     'delivered 16 d' => $r9lPeriod($r9lOrder('R9L-W4', ['R9L-CHAIR'], 30 * $r9lDay, 16 * $r9lDay)),
      'undelivered 100 d' => $r9lPeriod($r9lOrder('R9L-W5', ['R9L-CHAIR'], 100 * $r9lDay)),
      'undelivered 13 months' => $r9lPeriod($r9lOrder('R9L-W6', ['R9L-CHAIR'], 396 * $r9lDay)),
      'mixed undelivered 20 d' => $r9lPeriod($r9lOrder('R9L-W7', ['R9L-CHAIR', 'R9L-EBOOK'], 20 * $r9lDay))],

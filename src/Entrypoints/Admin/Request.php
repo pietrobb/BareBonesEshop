@@ -78,6 +78,7 @@ function handlePost(string $page, string $action): void {
         'admin_users:mfa' => handleAdminUserMfa(),
         'admin_users:revoke_sessions' => handleAdminUserRevokeSessions(),
         'admin_users:grant' => handleAdminUserGrant(),
+        'my_account:password' => handleMyAccountPassword(), 'my_account:mfa' => handleMyAccountMfa(),
         'email_templates:save' => handleEmailTemplateSave(), 'email_templates:preview' => handleEmailTemplatePreview(), 'email_templates:reset' => handleEmailTemplateReset(),
         'stores:save' => handleStoreSettingsSave(),
         'stores:add' => handleStoreAdd(),

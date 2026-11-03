@@ -112,7 +112,7 @@ function pageSalesOverview(): void {
                 <td><?= (int)$order['item_count'] ?> <?= esc(I18n::t('admin.sales.items_short')) ?></td>
                 <td><strong><?= I18n::price((int)$order['total'], $order['currency']) ?></strong></td>
                 <td><span class="badge badge-<?= esc($order['status']) ?>"><?= esc(OrderStatusLabels::order((string)$order['status'])) ?></span></td>
-                <td><span class="badge badge-<?= esc($order['payment_status'] ?? 'pending') ?>"><?= esc(OrderStatusLabels::paymentOf($order)) ?></span><br><span class="muted"><?= esc($order['payment_method'] ?? '') ?></span></td>
+                <td><span class="badge badge-<?= esc($order['payment_status'] ?? 'pending') ?>"><?= esc(OrderStatusLabels::paymentOf($order)) ?></span><br><span class="muted" title="<?= esc((string)($order['payment_method'] ?? '')) ?>"><?= esc(PaymentService::adminLabel($order)) ?></span></td>
                 <td><?php if ((int)$order['entitlement_count'] > 0): ?><?= (int)$order['order_download_count'] ?> <?= esc(I18n::t('admin.sales.downloads')) ?><br><span class="muted"><?= (int)$order['entitlement_count'] ?> <?= esc(I18n::t('admin.sales.entitlements')) ?></span><?php else: ?>—<?php endif; ?></td>
                 <td><?php if ($order['email_status']): ?><span class="<?= $order['email_status'] === 'failed' ? 'status-error' : ($order['email_status'] === 'sent' ? 'status-ok' : 'status-warn') ?>"><?= esc($order['email_status']) ?></span><?php else: ?>—<?php endif; ?></td>
                 <td><a class="btn btn-sm" href="admin.php?p=order&id=<?= (int)$order['id'] ?>"><?= esc(I18n::t('admin.sales.detail')) ?></a></td>
@@ -183,7 +183,7 @@ function pageOrders(): void {
         <form method="post" action="admin.php?p=orders&amp;action=bulk_status" id="orders-bulk">
         <?= $filterFields ?>
         <div class="sales-toolbar" style="margin-bottom:1rem">
-            <div class="form-row"><label for="bulk-status"><?= esc(I18n::t('admin.orders.bulk_status')) ?></label><select id="bulk-status" name="new_status" required><option value="">— <?= esc(I18n::t('admin.orders.bulk.choose_status')) ?> —</option><?php foreach (OrderWorkflow::statuses() as $s): if (!Security::adminCan(Security::orderStatusPermission($s))) continue; ?><option value="<?= esc($s) ?>"><?= esc(OrderStatusLabels::order($s)) ?></option><?php endforeach; ?></select></div>
+            <div class="form-row"><label for="bulk-status"><?= esc(I18n::t('admin.orders.bulk_status')) ?></label><select id="bulk-status" name="new_status" required><option value="">— <?= esc(I18n::t('admin.orders.bulk.choose_status')) ?> —</option><?php foreach (OrderWorkflow::statuses() as $s): if (!Security::adminCan(Security::orderStatusPermission($s)) || ($s === 'refunded' && !Security::adminCan('orders.refund'))) continue; ?><option value="<?= esc($s) ?>"><?= esc(OrderStatusLabels::order($s)) ?></option><?php endforeach; ?></select></div>
             <div class="form-row"><label for="bulk-note"><?= esc(I18n::t('admin.order.note')) ?></label><input id="bulk-note" name="note"></div>
             <button class="btn btn-primary btn-sm" type="submit" data-confirm="<?= esc(I18n::t('admin.orders.bulk.confirm')) ?>"><?= esc(I18n::t('admin.orders.bulk_apply')) ?></button>
             <button class="btn btn-sm" type="submit" formaction="admin.php?p=delivery_note" formtarget="_blank" formnovalidate name="format" value="html"><?= esc(I18n::t('admin.delivery_note.html')) ?></button>
@@ -199,7 +199,7 @@ function pageOrders(): void {
                 <td class="muted"><?= esc($o['customer_email']) ?></td>
                 <td><?= I18n::price((int)$o['total'], $o['currency']) ?></td>
                 <td><span class="badge badge-<?= esc($o['status']) ?>"><?= esc(OrderStatusLabels::order((string)$o['status'])) ?></span></td>
-                <td><span class="badge badge-<?= esc($o['payment_status'] ?? 'pending') ?>"><?= esc(OrderStatusLabels::paymentOf($o)) ?></span><br><span class="muted"><?= esc($o['payment_method'] ?? '') ?></span></td>
+                <td><span class="badge badge-<?= esc($o['payment_status'] ?? 'pending') ?>"><?= esc(OrderStatusLabels::paymentOf($o)) ?></span><br><span class="muted" title="<?= esc((string)($o['payment_method'] ?? '')) ?>"><?= esc(PaymentService::adminLabel($o)) ?></span></td>
                 <td class="muted"><?= esc(I18n::dateTime((string)$o['created_at'])) ?></td>
                 <td><a href="admin.php?p=order&id=<?= $o['id'] ?>" class="btn btn-sm"><?= esc(I18n::t('admin.sales.detail')) ?></a></td>
             </tr>
@@ -216,9 +216,9 @@ function pageOrder(): void {
     if (!$order) { echo '<p>' . esc(I18n::t('admin.order.not_found')) . '</p>'; return; }
 
     $items = Orders::items($id);
-    $allowed = OrderWorkflow::allowedFor($order);
     $canRefund = Security::adminCan('orders.refund');
-    $allowed = array_values(array_filter($allowed, static fn(string $to): bool => ($canRefund || !OrderWorkflow::returnsMoney($order, $to)) && Security::adminCan(Security::orderStatusPermission($to))));
+    // R14 UX8: only moves the handler accepts (role, payment state); shipping a withdrawn order asks for the acknowledgement.
+    $allowed = array_values(array_filter(OrderWorkflow::allowedFor($order), static fn(string $to): bool => OrderWorkflow::adminRejection($order, $to, $canRefund, true) === null && Security::adminCan(Security::orderStatusPermission($to))));
     $paymentTransitions = Security::adminCan('orders.payments') ? adminManualPaymentTransitions($order) : [];
     $paymentTxs = PaymentService::transactionsForOrder($id);
     $refundableBalance = PaymentService::claimableRefund($id);
@@ -266,7 +266,7 @@ function pageOrder(): void {
             <?php else: ?>
             <p class="muted"><?= esc(I18n::t('admin.order.final_status')) ?></p>
             <?php endif; ?>
-            <p class="muted" style="margin-top:.5rem"><?= esc(I18n::t('admin.order.payment_method')) ?>: <?= esc((string)($paymentSnapshot['label'] ?? $order['payment_method'])) ?> <span class="muted"><?= esc((string)($paymentSnapshot['code'] ?? $order['payment_method'])) ?><?= !empty($paymentSnapshot['provider']) ? ' · ' . esc((string)$paymentSnapshot['provider']) : '' ?></span></p>
+            <p class="muted" style="margin-top:.5rem"><?= esc(I18n::t('admin.order.payment_method')) ?>: <?= esc(PaymentService::adminLabel($order)) ?> <span class="muted"><?= esc((string)($paymentSnapshot['code'] ?? $order['payment_method'])) ?><?= !empty($paymentSnapshot['provider']) ? ' · ' . esc((string)$paymentSnapshot['provider']) : '' ?></span></p>
             <?php if (OrderWorkflow::isUnpaidInvoicePurchase($order) && (string)$order['status'] === 'pending'): ?>
             <p class="muted" data-invoice-purchase-hint><?= esc(I18n::format('admin.order.invoice_purchase_hint', ['days' => InvoiceService::paymentTermsDays($order, [])])) ?></p>
             <?php endif; ?>

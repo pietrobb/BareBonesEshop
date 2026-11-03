@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Usability** (review round 14, UX1–UX8). Storefront links keep a store's further language (`?lang=en` in a
+  Slovak store): the language was lost after the first click, and the English product link answered with a 301 to
+  the Slovak slug. The search, sort and filter forms submit the language too (`{{> global/lang-field}}`, which
+  themes can include in their own GET forms). Canonicals and hreflang alternates still carry exactly one language. The README quick start runs
+  the worker and lists the cron entries (worker, GDPR retention, backup); the CLI install leaves the web worker off,
+  so without them order e-mails stayed queued. The admin names payment methods ("Cash on delivery") instead of their
+  codes. Every signed-in admin, editor and fulfillment included, changes its own password and authenticator app
+  under Admin → My account (current password required); before, only admins.manage could. A checkout without a
+  payment method says why (the chosen delivery has none, or names the deliveries that have one, or gives the store's
+  e-mail), and Admin → Payments warns that bank transfer is hidden while the store has no valid IBAN. Status lists offer only moves that would be accepted:
+  the order detail drops "paid" until the payment is confirmed and "refunded" while money is still to go back, and
+  the bulk list offers "refunded" only to admins who may refund. The product editor uploads up to 10 images at once
+  (added at the end, nothing kept when one file is not an image) and lists the images with move up / move down /
+  remove buttons over the "URL | alt" lines, which still work without JavaScript.
 - **Times, dates and log masking** (review round 14, T12, T13, T15, T21, UX6). The admin shows stored times in the
   shop's time zone and the admin language's format (it printed UTC as "2026-07-01 22:30"); invoice dates, the
   bank-transfer due day (page and e-mail, in the order's language) and the legal texts' "last changed" use the
