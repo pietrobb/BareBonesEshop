@@ -42,6 +42,7 @@ return [
     'companies'  => 'customers.edit',
     'customer_groups' => 'customers.edit',
     'admin_users' => 'admins.manage',
+    'my_account' => '', // R14 UX4: any signed-in admin, own password and TOTP only
     'email_templates' => 'emails.manage',
     'stores'     => 'stores.manage',
 ];

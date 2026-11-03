@@ -564,6 +564,9 @@ function apiPaymentMethods(): array {
         'amount' => $amount,
         'shipping_method' => $shippingMethod,
         'methods' => $methods,
+        // No method: what the buyer can do about it (another delivery, or the store's e-mail).
+        'unavailable' => $methods !== [] ? '' : CheckoutService::paymentUnavailableMessage($cart['items'], $shipping !== null ? max(0, $amount - $shipping) : $amount,
+            $country, $currency, $digitalOnly ? '' : $shippingMethod, $customerId > 0 ? $customerId : null),
     ];
 }
 

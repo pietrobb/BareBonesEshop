@@ -171,6 +171,8 @@ $architectureBudgets = [
     'src/Entrypoints/Admin.php' => ['lines' => 285, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 4],
     // +2 functions, +10 lines R10: own or owner password/TOTP changes and creating an owner need the actor's current password; the legacy session that creates the first DB account is handed off and ended.
     'src/Entrypoints/Admin/AdminUsers.php' => ['lines' => 300, 'functions' => 15, 'max_function_lines' => 90, 'coupling' => 6],
+    // R14 UX4: every signed-in admin account changes its own password and TOTP (current password, per-session throttle).
+    'src/Entrypoints/Admin/MyAccount.php' => ['lines' => 105, 'functions' => 6, 'max_function_lines' => 40, 'coupling' => 4],
     'src/Entrypoints/Admin/B2b.php' => ['lines' => 180, 'functions' => 9, 'max_function_lines' => 64, 'coupling' => 4],
     // +2 coupling: AdminForm (server-rendered BBF forms replace inline bbf.js) and Import (shared CSV price format).
     // +1 coupling: CatalogScope keeps the catalog_scope-bound editor queries (categories, digital assets, attribute links) out of the entrypoint.
@@ -198,7 +200,8 @@ $architectureBudgets = [
     'src/Entrypoints/Admin/Permissions.php' => ['lines' => 50, 'functions' => 0, 'max_function_lines' => 0, 'coupling' => 0],
     // +lines: warehouse, feed and shipping/payment changes are audited; feeds are refused across stores (admin catalog audit).
     // +1 coupling R10 UX6: statuses in the admin's language (OrderStatusLabels).
-    'src/Entrypoints/Admin/Operations.php' => ['lines' => 800, 'functions' => 36, 'max_function_lines' => 136, 'coupling' => 19],
+    // +1 coupling R14 UX5: the payments page warns that bank transfer is hidden at checkout without a store IBAN (BankTransferInstructions).
+    'src/Entrypoints/Admin/Operations.php' => ['lines' => 800, 'functions' => 36, 'max_function_lines' => 136, 'coupling' => 20],
     // +1 coupling: BankTransferInstructions owns the variable symbol a bank transfer is matched by (A13.6).
     // +1 coupling: SalesReport gives the sales overview shop-local day boundaries (A15.1).
     // +1 coupling: OrderExport owns the order list filters shared by the sales overview and the CSV export (A15.2).

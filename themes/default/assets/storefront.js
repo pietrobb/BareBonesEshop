@@ -187,7 +187,7 @@
     if (request !== paymentRequest) return;
     const methods = Array.isArray(result.methods) ? result.methods : [];
     if (!methods.length) {
-      box.innerHTML = `<div class="payment-empty">${escapeHtml(text.paymentUnavailable)}</div>`;
+      box.innerHTML = `<div class="payment-empty">${escapeHtml(result.unavailable || text.paymentUnavailable)}</div>`;
       updateCheckoutTotal(shippingPrice, 0, subtotal);
       return;
     }

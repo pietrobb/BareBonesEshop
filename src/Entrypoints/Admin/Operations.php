@@ -681,6 +681,7 @@ function pagePayments(): void {
     $shippingMethods = StoreConfig::rows("SELECT code, name FROM shipping_methods WHERE store_id = :store ORDER BY sort_order, code");
     ?>
     <h1><?= esc(I18n::t('admin.title.payments')) ?></h1>
+    <?php if (BankTransferInstructions::storeIban() === '' && array_filter($methods, static fn(array $m): bool => !empty($m['active']) && ($m['service_type'] ?? '') === 'bank_transfer')): ?><div class="flash flash-err" role="alert" data-bank-transfer-hidden><?= esc(I18n::t('admin.payments.bank_transfer_hidden')) ?></div><?php endif; ?>
     <div class="card">
         <h3><?= esc(I18n::t('admin.payments.methods')) ?></h3>
         <table>

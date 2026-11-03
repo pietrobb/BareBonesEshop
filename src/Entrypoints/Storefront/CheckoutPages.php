@@ -130,7 +130,7 @@ function renderCheckout(): string {
             'online' => !empty($method['requires_online']),
         ], $paymentMethods, array_keys($paymentMethods)),
         'submitting_label' => $t('checkout_submitting'), 'redirecting_label' => $t('checkout_redirecting'),
-        'payment_unavailable' => $paymentMethods ? '' : $t('payment_unavailable'), 'notes_label' => $t('notes'), 'notes_placeholder' => $t('notes_placeholder'),
+        'payment_unavailable' => $paymentMethods ? '' : CheckoutService::paymentUnavailableMessage($goods, $subtotal - $discount, $country, (string)$cartData['currency'], $selectedShipping, $customerId ?: null), 'notes_label' => $t('notes'), 'notes_placeholder' => $t('notes_placeholder'),
         'submit_label' => $t('submit_order'), 'your_order_label' => $t('your_order'),
         'items' => array_map(static fn(array $item): array => ['name' => (string)$item['name'] . (($item['variant_name'] ?? '') !== '' ? ' (' . $item['variant_name'] . ')' : ''), 'quantity' => (int)$item['qty'], 'total' => $price((int)$item['total'])], $cart),
         'subtotal_cents' => $subtotal, 'vat_scenario' => (string)$vat['scenario']['scenario'], 'subtotal_label' => $t('subtotal'), 'subtotal' => $price($subtotal),
