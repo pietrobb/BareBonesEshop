@@ -754,15 +754,20 @@ class Orders {
                 if (!$online && $type === 'bank_transfer' && ShopTime::now() <= BankTransferInstructions::cancelAfter($order, $ttl)) continue;
                 // The customer was sent a link that promises time to pay; the order waits for it.
                 if ($online && PaymentLink::hasLiveLink((int)$order['id'])) continue;
-                if ($online && $paymentId !== '') {
+                // R14 #3: every payment attempt, not only the newest one payment_id names: an older attempt the customer
+                // paid (its notification lost) kept the money while the order expired.
+                $attempts = $online ? array_values(array_unique(array_filter([$paymentId, ...PaymentLink::sessionRefs((int)$order['id'])]))) : [];
+                if ($attempts !== []) {
                     if ($paymentStatusResolver === null) continue;
                     try {
-                        $providerStatus = strtolower(trim((string)$paymentStatusResolver($order)));
+                        foreach ($attempts as $attempt) {
+                            $providerStatus = strtolower(trim((string)$paymentStatusResolver(['payment_id' => $attempt] + $order)));
+                            if (!in_array($providerStatus, self::PROVIDER_FINAL_UNPAID, true)) continue 2;
+                        }
                     } catch (\Throwable $e) {
                         Logger::phpLog("Pending order expiry skipped for #{$order['id']}: " . $e->getMessage());
                         continue;
                     }
-                    if (!in_array($providerStatus, self::PROVIDER_FINAL_UNPAID, true)) continue;
                 }
                 // One order that cannot be released (e.g. broken reservation) must not stall every later one.
                 try {

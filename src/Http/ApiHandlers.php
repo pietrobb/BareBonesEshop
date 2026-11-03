@@ -1104,23 +1104,36 @@ function applyStripePaymentCompleted(array $session, string $sessionId, int $ord
     }
 
     $paymentRef = (string)($session['payment_intent'] ?? $sessionId);
-    // A second session paid for an already settled order: alert, and keep the recorded payment_id refunds use.
-    if (in_array((string)($order['payment_status'] ?? 'pending'), ['paid', 'refund_pending', 'partially_refunded', 'refunded', 'disputed'], true)
-        && PaymentService::reportForeignCapture($order, [$paymentRef, $sessionId])) {
-        return;
-    }
-    if ($paymentRef !== '') Orders::setPaymentId($orderId, $paymentRef);
-    if ($sessionId !== '') CheckoutSession::markCompleted($sessionId, 'stripe');
+    // R14 T18: decided under the order lock. Two sessions completing at once both read "pending": the later one
+    // overwrote payment_id and its second capture was never reported.
+    $db = Db::get();
+    $db->beginTransaction();
+    try {
+        Orders::lockWithin($orderId);
+        $order = Orders::byId($orderId) ?: throw new RuntimeException("Order #{$orderId} vanished during Stripe webhook");
+        // A second session paid for an already settled order: alert, and keep the recorded payment_id refunds use.
+        if (in_array((string)($order['payment_status'] ?? 'pending'), ['paid', 'refund_pending', 'partially_refunded', 'refunded', 'disputed'], true)
+            && PaymentService::reportForeignCapture($order, [$paymentRef, $sessionId])) {
+            $db->commit();
+            return;
+        }
+        if ($paymentRef !== '') Orders::setPaymentId($orderId, $paymentRef);
+        if ($sessionId !== '') CheckoutSession::markCompleted($sessionId, 'stripe');
 
-    if (($order['payment_status'] ?? 'pending') !== 'paid') {
-        PaymentService::transitionPayment(
-            $orderId,
-            'paid',
-            'checkout.session.completed',
-            (int)$session['amount_total'],
-            'stripe_checkout_' . ($sessionId ?: $paymentRef),
-            ['session_id' => $sessionId, 'payment_id' => $paymentRef]
-        );
+        if (($order['payment_status'] ?? 'pending') !== 'paid') {
+            PaymentService::transitionPayment(
+                $orderId,
+                'paid',
+                'checkout.session.completed',
+                (int)$session['amount_total'],
+                'stripe_checkout_' . ($sessionId ?: $paymentRef),
+                ['session_id' => $sessionId, 'payment_id' => $paymentRef]
+            );
+        }
+        $db->commit();
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        throw $e;
     }
     PaymentService::settleCapture($orderId, 'Stripe webhook: ' . $sessionId);
 }

@@ -19,7 +19,7 @@ Bootstrap::validateCustomerSession();
 if (!isset($_SESSION['cart'])) $_SESSION['cart'] = [];
 
 // Locale from URL — canonical, no session override
-$lang = Bootstrap::initLocale();
+$lang = Bootstrap::initLocale(null, Bootstrap::servesHiddenOrderPage($_GET, $_POST));
 $catName = static fn(string $name): string => Bootstrap::categoryName($name, $lang);
 
 // One catalog powers PHP templates, theme blocks, and browser runtime strings.

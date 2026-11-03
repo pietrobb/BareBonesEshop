@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Payments** (review round 14, finding 3, T2, T18, T20). A capture of an older payment attempt records that
+  attempt as the order's payment (refunds go to the money), and pending-order expiry asks the gateway about every
+  attempt, not only the newest. A hidden store opens its payment link and the pages its gateway returns to. The
+  Stripe completion checks for a second capture and records the payment under the order lock. The return page shows
+  an order whose older attempt is paid as being confirmed, not failed. PayU notifications signed with SHA-256 are
+  accepted. The page after paying through a link no longer shows the customer's name and delivery address.
 - **Credit notes and refunds** (review round 14, finding 2 and T18). A refund credit note takes its VAT split from
   what the invoice's earlier credit notes left uncredited, so after an item credit note no rate is credited
   beyond what was invoiced, and all credit notes of an invoice together never exceed it. The refund key and the
