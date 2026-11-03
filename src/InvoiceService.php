@@ -35,6 +35,8 @@ final class InvoiceService
 
     public const STATUS_ISSUED    = 'issued';
     public const STATUS_CANCELLED = 'cancelled';
+    /** creditBookedRefund() waits for an in-flight item refund this many times, a minute apart. */
+    private const BOOKED_REFUND_DEFERRALS = 30;
 
     /** EU member states for reverse-charge detection. */
     private const EU_COUNTRIES = [
@@ -282,6 +284,46 @@ final class InvoiceService
         return (int)$rmaItem['received_quantity'] - (int)$reserved['credited'] - (int)$reserved['exchanged'];
     }
 
+    /**
+     * What of $source the credit notes issued on it so far (item and refund credit notes) have not credited yet: per
+     * VAT breakdown key the gross, net and supply, and the whole remaining gross. R14 #2: a refund credit note took its
+     * VAT split from the whole invoice, so after an item credit note at 23 % more 23 % VAT was credited than invoiced.
+     * @return array{rates: array<string, array{gross: int, net: int, supply: array}>, gross: int}
+     */
+    private static function uncredited(PDO $db, array $source): array {
+        $rates = [];
+        foreach (json_decode((string)$source['vat_breakdown'], true) ?: [] as $key => $info) {
+            if (!is_array($info)) continue;
+            $gross = (int)($info['net'] ?? 0) + (int)($info['vat'] ?? 0);
+            if ($gross > 0) $rates[(string)$key] = ['gross' => $gross, 'net' => (int)($info['net'] ?? 0), 'supply' => self::supplyOf($info)];
+        }
+        if (!$rates) $rates['0'] = ['gross' => (int)$source['total_gross'], 'net' => (int)$source['total_gross'], 'supply' => []];
+        $left = (int)$source['total_gross'];
+        $stmt = $db->prepare("SELECT total_gross, vat_breakdown FROM invoices WHERE refers_to_invoice_id = :source AND type = 'credit_note' AND store_id = :store AND status <> :cancelled");
+        $stmt->execute([':source' => (int)$source['id'], ':store' => StoreContext::current()->id(), ':cancelled' => self::STATUS_CANCELLED]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $credit) {
+            $left += (int)$credit['total_gross']; // negative
+            foreach (json_decode((string)$credit['vat_breakdown'], true) ?: [] as $key => $info) {
+                if (!is_array($info) || !isset($rates[(string)$key])) continue;
+                $rates[(string)$key]['gross'] += (int)($info['net'] ?? 0) + (int)($info['vat'] ?? 0);
+                $rates[(string)$key]['net'] += (int)($info['net'] ?? 0);
+            }
+        }
+        $rates = array_filter($rates, static fn(array $rate): bool => $rate['gross'] > 0);
+        foreach ($rates as &$rate) $rate['net'] = max(0, min($rate['net'], $rate['gross']));
+        unset($rate);
+        return ['rates' => $rates, 'gross' => max(0, min($left, array_sum(array_column($rates, 'gross'))))];
+    }
+
+    /** The refund credit note issued under $refundKey, if any. */
+    private static function refundCreditByKey(PDO $db, int $orderId, string $refundKey): ?array {
+        $stmt = $db->prepare("SELECT * FROM invoices WHERE store_id = :store AND order_id = :order AND type = 'credit_note' AND credit_snapshot LIKE :key");
+        $stmt->execute([':store' => StoreContext::current()->id(), ':order' => $orderId, ':key' => '%"refund_key":' . json_encode($refundKey) . '%']);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $stmt->closeCursor();
+        return $row ?: null;
+    }
+
     /** Credit notes already issued on this RMA, whatever their refund outcome. */
     public static function creditAttempts(int $rmaId): int {
         $stmt = Db::get()->prepare('SELECT COUNT(*) FROM order_refunds WHERE rma_id=:rma AND store_id=:store AND credit_note_id IS NOT NULL');
@@ -448,6 +490,8 @@ final class InvoiceService
             Orders::lockWithin((int)$order['id']);
             $lockedOrder = Orders::byId((int)$order['id']) ?: $order;
             if ($totals['gross'] > self::refundableForCredit($lockedOrder)) throw new LogicException('Credit exceeds the amount that can still be refunded');
+            // R14 #2: all credit notes on one invoice together never exceed it.
+            if ($totals['gross'] > self::uncredited($db, $source)['gross']) throw new LogicException('Credit exceeds what the invoice still has uncredited');
             // Take the RMA lock an exchange takes (MySQL row lock; SQLite's writer lock), then check the quantities again:
             // the check above ran outside any transaction, so a concurrent exchange or credit note could have committed
             // the same returned units since (customer refunded and sent a replacement for one unit).
@@ -545,44 +589,43 @@ final class InvoiceService
     {
         if ($amount <= 0 || $refundKey === '') throw new InvalidArgumentException('A refund credit note needs an amount and the refund key');
         $db = Db::get();
-        $existing = $db->prepare("SELECT * FROM invoices WHERE store_id = :store AND order_id = :order AND type = 'credit_note' AND credit_snapshot LIKE :key");
-        $existing->execute([':store' => StoreContext::current()->id(), ':order' => $orderId, ':key' => '%"refund_key":' . json_encode($refundKey) . '%']);
-        if ($row = $existing->fetch(PDO::FETCH_ASSOC)) return $row;
+        if ($row = self::refundCreditByKey($db, $orderId, $refundKey)) return $row;
         $source = self::byOrderId($orderId);
         $order = Orders::byId($orderId);
         if (!$source || !$order || (string)($source['type'] ?? '') !== 'invoice' || (string)($source['status'] ?? '') !== self::STATUS_ISSUED) return null;
-        if ($amount > (int)$source['total_gross']) throw new LogicException('The refund exceeds the invoice');
-
-        // Shares of the source VAT rates: gross in proportion (the last rate takes the remainder, so the cents add up), net likewise.
-        $rates = [];
-        foreach (json_decode((string)$source['vat_breakdown'], true) ?: [] as $key => $info) {
-            if (!is_array($info)) continue;
-            $gross = (int)($info['net'] ?? 0) + (int)($info['vat'] ?? 0);
-            if ($gross > 0) $rates[(string)$key] = ['gross' => $gross, 'net' => (int)($info['net'] ?? 0), 'supply' => self::supplyOf($info)];
-        }
-        if (!$rates) $rates['0'] = ['gross' => (int)$source['total_gross'], 'net' => (int)$source['total_gross'], 'supply' => []];
-        $sourceGross = array_sum(array_column($rates, 'gross'));
-        $lines = [];
-        $totals = ['gross' => 0, 'net' => 0, 'vat' => 0];
-        $breakdown = [];
-        $left = $amount;
-        $keys = array_keys($rates);
-        foreach ($keys as $i => $key) {
-            $gross = $i === count($keys) - 1 ? $left : intdiv($amount * $rates[$key]['gross'], $sourceGross);
-            $left -= $gross;
-            $net = (int)round($rates[$key]['net'] * $gross / $rates[$key]['gross']);
-            $lines[] = ['rate' => (float)$key, 'gross' => $gross, 'net' => $net, 'vat' => $gross - $net] + $rates[$key]['supply'];
-            foreach (['gross' => $gross, 'net' => $net, 'vat' => $gross - $net] as $part => $value) $totals[$part] += $value;
-            $breakdown[$key] = ['net' => -$net, 'vat' => -($gross - $net)] + $rates[$key]['supply'];
-        }
-        $creditData = ['version' => 1, 'kind' => 'refund', 'source_invoice_id' => (int)$source['id'], 'refund_key' => $refundKey,
-            'reason' => mb_substr($reason, 0, 500), 'currency' => (string)$source['currency'], 'lines' => $lines, 'totals' => $totals];
         [$sellerCode, $store] = self::creditSeller($source, $order);
         $issuedAt = ShopTime::dateIn('Y-m-d', StoreContext::timezoneFor($store));
         $year = (int)substr($issuedAt, 0, 4);
         $ownTransaction = !$db->inTransaction();
         if ($ownTransaction) $db->beginTransaction();
         try {
+            // R14 #2: under the order lock every refund path takes, the key again (two calls for one manual refund issued
+            // two credit notes) and the invoice less every credit note issued on it so far.
+            Orders::lockWithin($orderId);
+            if ($row = self::refundCreditByKey($db, $orderId, $refundKey)) {
+                if ($ownTransaction) $db->commit();
+                return $row;
+            }
+            ['rates' => $rates, 'gross' => $uncredited] = self::uncredited($db, $source);
+            if ($amount > $uncredited) throw new LogicException('The refund exceeds what the invoice still has uncredited');
+
+            // Shares of the uncredited VAT rates: gross in proportion (the last rate takes the remainder, so the cents add up), net likewise.
+            $sourceGross = array_sum(array_column($rates, 'gross'));
+            $lines = [];
+            $totals = ['gross' => 0, 'net' => 0, 'vat' => 0];
+            $breakdown = [];
+            $left = $amount;
+            $keys = array_keys($rates);
+            foreach ($keys as $i => $key) {
+                $gross = $i === count($keys) - 1 ? $left : intdiv($amount * $rates[$key]['gross'], $sourceGross);
+                $left -= $gross;
+                $net = (int)round($rates[$key]['net'] * $gross / $rates[$key]['gross']);
+                $lines[] = ['rate' => (float)$key, 'gross' => $gross, 'net' => $net, 'vat' => $gross - $net] + $rates[$key]['supply'];
+                foreach (['gross' => $gross, 'net' => $net, 'vat' => $gross - $net] as $part => $value) $totals[$part] += $value;
+                $breakdown[$key] = ['net' => -$net, 'vat' => -($gross - $net)] + $rates[$key]['supply'];
+            }
+            $creditData = ['version' => 1, 'kind' => 'refund', 'source_invoice_id' => (int)$source['id'], 'refund_key' => $refundKey,
+                'reason' => mb_substr($reason, 0, 500), 'currency' => (string)$source['currency'], 'lines' => $lines, 'totals' => $totals];
             $number = self::allocateNumber($db, $sellerCode, 'credit_note', $year, self::numberPrefix($store['legal'] ?? [], 'credit_note'));
             $relPath = sprintf('%d/%02d/%s.pdf', $year, (int)substr($issuedAt, 5, 2), rawurlencode($number));
             $db->prepare("INSERT INTO invoices
@@ -626,7 +669,7 @@ final class InvoiceService
      * refund booked by its webhook before the refund job noted its id on an item refund (credit()) is recognised as
      * that item refund by then, and gets no second credit note.
      */
-    public static function creditBookedRefund(int $orderId, string $ledgerKey): ?array
+    public static function creditBookedRefund(int $orderId, string $ledgerKey, int $deferrals = 0): ?array
     {
         $db = Db::get();
         $stmt = $db->prepare("SELECT amount, provider_ref FROM payment_transactions WHERE order_id = :order AND store_id = :store AND idempotency_key = :key
@@ -639,6 +682,18 @@ final class InvoiceService
             AND (idempotency_key = :key OR (payment_reference IS NOT NULL AND payment_reference <> '' AND payment_reference = :ref)) LIMIT 1");
         $item->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':key' => $ledgerKey, ':ref' => (string)$row['provider_ref']]);
         if ($item->fetchColumn()) return null;
+        // R14 #2: an item refund of the same amount whose provider refund id is not noted yet may be this very refund (its
+        // webhook came before the refund job): wait for the job instead of issuing a second credit note.
+        $inFlight = $db->prepare("SELECT 1 FROM order_refunds WHERE order_id = :order AND store_id = :store AND status = 'pending'
+            AND (payment_reference IS NULL OR payment_reference = '') AND amount = :amount LIMIT 1");
+        $inFlight->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':amount' => (int)$row['amount']]);
+        if ($inFlight->fetchColumn()) {
+            if ($deferrals >= self::BOOKED_REFUND_DEFERRALS) {
+                throw new RuntimeException("Refund {$ledgerKey} of order {$orderId} may belong to an item refund still without its provider refund id; no credit note issued");
+            }
+            JobQueue::pushDelayed('refund_credit_note', ['order_id' => $orderId, 'refund_key' => $ledgerKey, 'deferrals' => $deferrals + 1], 60);
+            return null;
+        }
         return self::creditRefund($orderId, (int)$row['amount'], $ledgerKey);
     }
 
@@ -1426,6 +1481,15 @@ final class InvoiceService
         return in_array((string)$stmt->fetchColumn(), ['paid', 'partially_refunded', 'refunded', 'disputed'], true);
     }
 
+    /** True when the order's money is still to be collected by the carrier (cash on delivery). */
+    private static function orderPaysOnDelivery(int $orderId): bool
+    {
+        $stmt = Db::get()->prepare('SELECT * FROM orders WHERE id = :id');
+        $stmt->execute([':id' => $orderId]);
+        $order = $stmt->fetch(\PDO::FETCH_ASSOC);
+        return $order !== false && OrderWorkflow::isUnpaidCashOnDelivery($order);
+    }
+
     private static function resolveLocale(array $order, array $store): string
     {
         return (string)($order['locale'] ?? $store['default_locale'] ?? 'en');
@@ -1854,7 +1918,8 @@ final class InvoiceService
         if ($settled) {
             $pdf->text(20, $y, $L['paid_note'], ['size' => 9, 'bold' => true]);
             $y += 5;
-        } elseif (!$creditNote && !empty($sellerSnap['iban'])) {
+        } elseif (!$creditNote && !empty($sellerSnap['iban']) && !self::orderPaysOnDelivery((int)($invoice['order_id'] ?? 0))) {
+            // R14 T18: cash on delivery is paid to the carrier; the IBAN read as a second request to pay.
             $pdf->text(20, $y, $L['iban'] . ': ' . $sellerSnap['iban'], ['size' => 9]);
             $y += 5;
         }

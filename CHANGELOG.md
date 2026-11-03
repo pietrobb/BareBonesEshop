@@ -11,6 +11,15 @@
   on the cancelled parcel. The withdrawal period of a bundle starts once every component is in a delivered parcel,
   counted as bundle quantity × units per bundle (the component units were summed against the bundle quantity). The
   marketing feed lists a bundle with an e-book component as out of stock, as the shop does not sell it.
+- **Credit notes and refunds** (review round 14, finding 2 and T18). A refund credit note takes its VAT split from
+  what the invoice's earlier credit notes left uncredited, so after an item credit note no rate is credited
+  beyond what was invoiced, and all credit notes of an invoice together never exceed it. The refund key and the
+  uncredited balance are checked under the order lock (two calls for one manual refund issued two credit notes).
+  A provider refund booked by its webhook while an item refund of the same amount still has no provider refund id
+  waits for the refund job (up to 30 minutes, then fails visibly) instead of getting a second credit note. An item
+  refund the provider declines, or whose pending refund fails later, is marked failed and its credit note
+  cancelled, so the returned units and the money can be refunded again (they stayed "being refunded" for ever).
+  The invoice of an unpaid cash on delivery order no longer prints the seller's IBAN.
 - **Updater and installation** (review round 14, findings 4–6, T20, installer self-check). `update.php rotate-key`
   no longer takes `--public-key`: the endorsement is checked against the configured `update_public_key` only (a
   key given on the command line could endorse itself while the configured key stayed trusted and the wrong key was

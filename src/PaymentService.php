@@ -1306,6 +1306,12 @@ class PaymentService {
                 AuditLog::log('order_refund', $orderId, $from, $to, "{$provider} refund {$refundId} of {$amount} failed");
                 return true;
             }
+            // R14 T18: the pending refund of a credit note (item refund) under this provider id is released as well.
+            if (!$booked && ($itemRefund = self::pendingItemRefundByReference($orderId, $refundId)) !== null
+                && Rma::failRefund($itemRefund, "{$provider} refund {$refundId} of {$amount} failed")) {
+                self::recordEvent($orderId, 'refund.failed', 'refund_failed', 0, $currency, $eventKey, $payload + ['amount' => $amount, 'item_refund_id' => $itemRefund], $provider, $refundId);
+                return true;
+            }
             self::recordEvent($orderId, 'refund.failed', 'ignored', $amount, $currency, $eventKey, $payload + ['payment_status' => $from, 'booked' => $booked], $provider, $refundId);
             return false;
         });
@@ -1330,11 +1336,18 @@ class PaymentService {
      * booked before its id was noted on the credit note is linked when the refund job's result arrives (linkItemRefundWithin()).
      */
     private static function completeItemRefundWithin(int $orderId, string $refundId): void {
-        if ($refundId === '') return;
+        $itemRefund = self::pendingItemRefundByReference($orderId, $refundId);
+        if ($itemRefund !== null) Rma::completeRefund($itemRefund, $refundId);
+    }
+
+    /** The pending item refund (credit note) the provider refund $refundId was noted on. */
+    private static function pendingItemRefundByReference(int $orderId, string $refundId): ?int {
+        if ($refundId === '') return null;
         $stmt = Db::get()->prepare("SELECT id FROM order_refunds WHERE order_id = :order AND store_id = :store AND status = 'pending' AND payment_reference = :ref ORDER BY id LIMIT 1");
         $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':ref' => $refundId]);
         $itemRefund = $stmt->fetchColumn();
-        if ($itemRefund !== false) Rma::completeRefund((int)$itemRefund, $refundId);
+        $stmt->closeCursor();
+        return $itemRefund === false ? null : (int)$itemRefund;
     }
 
     /**
@@ -1351,6 +1364,8 @@ class PaymentService {
             Rma::completeRefund((int)$itemRefund, $refundId !== '' ? $refundId : 'provider-refund');
         } elseif ($status === 'pending' && $refundId !== '') {
             Rma::noteProviderRefund((int)$itemRefund, $refundId);
+        } elseif (in_array($status, ['failed', 'canceled', 'cancelled'], true)) {
+            Rma::failRefund((int)$itemRefund, 'The payment provider declined the item refund');
         }
     }
 
