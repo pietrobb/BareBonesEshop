@@ -27,7 +27,7 @@ final class StorefrontCoreSectionProviders
             if ($name === '') return ['items' => []];
             $items = [];
             foreach (Products::specificationValues($name, I18n::locale(), self::limit($parameters, 12)) as $row) {
-                $items[] = $row + ['url' => Template::storeUrl('/') . '?page=search&q=' . rawurlencode($row['value'])];
+                $items[] = $row + ['url' => Template::storeUrl('/?page=search&q=' . rawurlencode($row['value']))];
             }
             return ['name' => $name, 'items' => $items];
         });

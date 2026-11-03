@@ -21,7 +21,7 @@ function renderProduct(array $product): string {
 function redirectCategoryTrailingSlash(string $slug): void {
     if (!preg_match('#^[a-z0-9/-]*[a-z0-9-]/+$#i', $slug) || !in_array($_SERVER['REQUEST_METHOD'] ?? 'GET', ['GET', 'HEAD'], true)) return;
     $query = http_build_query(array_diff_key($_GET, ['category' => true, 'slug' => true, 'page' => true]));
-    header('Location: ' . Template::storeUrl('/category/' . rtrim($slug, '/')) . ($query !== '' ? '?' . $query : ''), true, 301);
+    header('Location: ' . Template::storeUrl('/category/' . rtrim($slug, '/') . ($query !== '' ? '?' . $query : '')), true, 301);
     exit;
 }
 

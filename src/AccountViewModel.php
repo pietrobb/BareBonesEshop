@@ -24,6 +24,11 @@ final class AccountViewModel
             'home_url' => Template::storeUrl('/'),
             'store_name' => (string)Template::branding()['name'],
             'action_url' => Template::storeUrl('/account.php'),
+            // Built with their query: storeUrl() may add ?lang=, so a template appending "?p=" would break the link.
+            'page_urls' => array_map(static fn(string $query): string => Template::storeUrl('/account.php?' . $query), [
+                'login' => 'p=login', 'register' => 'p=register', 'forgot' => 'p=forgot', 'orders' => 'p=orders',
+                'addresses' => 'p=addresses', 'privacy_saved' => 'p=privacy&saved=1',
+            ]),
             'csrf_token' => Security::csrfToken(),
             'customer_email' => (string)($customer['email'] ?? ''),
             'flash' => $flash === null ? null : ['message' => $flash, 'ok' => $flashType === 'ok'],
