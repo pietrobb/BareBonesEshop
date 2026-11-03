@@ -69,6 +69,34 @@ try {
     assert_true($r13wExit === 0 && !str_contains($r13wOut, 'redeclare') && str_contains($r13wOut, 'pass-ended'),
         'R13 N1: the web worker pass runs inside an admin request without "Cannot redeclare" (exit ' . $r13wExit . ': ' . trim(substr($r13wOut, 0, 160)) . ')');
 
+    // N1 end to end: with the slot free, the admin request's pass really completes a job queued before it.
+    $r13wJobs = $r13wBase . '/worker/jobs';
+    $r13wDbPath = $r13wBase . '/worker/shop.sqlite';
+    file_put_contents($r13wBase . '/worker/config.php', '<?php return ' . var_export(['jobs_dir' => $r13wJobs, 'queue' => ['backend' => 'file'],
+        'db_driver' => 'sqlite', 'db_sqlite_path' => $r13wDbPath], true) . ';');
+    (new Migrator(new PDO('sqlite:' . $r13wDbPath, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]), $r13wRoot . '/migrations', $r13wBase . '/migrate.lock'))->apply();
+    @unlink($r13wJobs . '/web-worker.last');
+    $r13wPhp = static function (string $script) use ($r13wBase): array {
+        file_put_contents($r13wBase . '/step.php', $script);
+        $proc = proc_open([PHP_BINARY, '-d', 'display_errors=1', $r13wBase . '/step.php'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $r13wBase);
+        $out = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+        return [proc_close($proc), $out];
+    };
+    $r13wSetup = '<?php require ' . var_export($r13wRoot . '/src/autoload.php', true) . ";\n"
+        . 'Db::useConfig(' . var_export($r13wBase . '/worker/config.php', true) . '); JobQueue::setDir(' . var_export($r13wJobs, true) . ");\n";
+    $r13wPhp($r13wSetup . 'JobQueue::push("back_in_stock", ["skus" => []]);');
+    $r13wPending = glob($r13wJobs . '/pending/*.json') ?: [];
+    [$r13wExit, $r13wOut] = $r13wPhp($r13wSetup
+        . 'require ' . var_export($r13wRoot . '/src/Entrypoints/Admin/Operations.php', true) . ";\n"
+        . 'register_shutdown_function(static function (): void { echo "pass-ended\n"; });' . "\n"
+        . 'WebWorker::runIfDue(["operations" => ["web_worker" => true], "jobs_dir" => ' . var_export($r13wJobs, true) . '], '
+        . var_export($r13wBase . '/worker', true) . ");\n");
+    $r13wDone = array_map('basename', glob($r13wJobs . '/completed/*.json') ?: []);
+    assert_true(count($r13wPending) === 1 && in_array(basename($r13wPending[0]), $r13wDone, true) && (glob($r13wJobs . '/pending/*.json') ?: []) === []
+        && $r13wExit === 0 && !preg_match('/redeclare|fatal|unhandled/i', $r13wOut) && str_contains($r13wOut, 'pass-ended') && is_file($r13wJobs . '/web-worker.last'),
+        'R13 N1: an admin request (Operations.php loaded) completes the queued job in its web worker pass (exit ' . $r13wExit . ', completed '
+        . count($r13wDone) . ': ' . trim(substr($r13wOut, 0, 200)) . ')');
+
     // N2: "cannot tell" refuses the install until the key holder checked the probe file by hand.
     assert_true(WebInstaller::protectionError(null, false) !== null && WebInstaller::protectionError(null, true) === null
         && WebInstaller::protectionError([], false) === null && WebInstaller::protectionError([WebInstaller::PROBE_FILE], true) !== null,
