@@ -46,3 +46,20 @@ try {
     StoreContext::activate($r14uSavedStore);
     I18n::setLocale($r14uSavedLocale);
 }
+
+// --- UX3: the admin names payment methods, not their codes -------------------------------------------------------
+try {
+    I18n::setLocale('en');
+    $r14uLabel = static fn(array $order): string => method_exists(PaymentService::class, 'adminLabel') ? PaymentService::adminLabel($order) : (string)($order['payment_method'] ?? '');
+    assert_equals('Cash on delivery', $r14uLabel(['payment_method' => 'cod', 'payment_method_snapshot' => json_encode(['code' => 'cod', 'label' => 'Dobierka', 'service_type' => 'cod'])]),
+        'R14 UX3: a seeded method name reads in the admin\'s language');
+    assert_equals('Bank transfer', $r14uLabel(['payment_method' => 'bank_transfer', 'locale' => 'sk']), 'R14 UX3: an order without a snapshot shows its type\'s name in the admin\'s language');
+    assert_equals('Platba v hotovosti u nás', $r14uLabel(['payment_method' => 'cash', 'payment_method_snapshot' => json_encode(['code' => 'cash', 'label' => 'Platba v hotovosti u nás'])]),
+        'R14 UX3: a method the merchant named keeps its name');
+    $r14uAdminSources = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Orders.php') . (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Operations.php');
+    assert_true(!preg_match('/esc\(\$(order|o|incident)\[\'payment_method\'\]( \?\? \'\')?\)\s*\?>\s*<\/(span|td)>/', $r14uAdminSources)
+        && substr_count($r14uAdminSources, 'PaymentService::adminLabel(') >= 4,
+        'R14 UX3: the order lists, the order detail and the operations page print the method name');
+} catch (Throwable $e) { $r14uFail('UX3', $e); } finally {
+    I18n::setLocale($r14uSavedLocale);
+}

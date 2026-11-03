@@ -18,7 +18,7 @@ class OperationalDashboard {
                 ORDER BY pt.created_at DESC, pt.id DESC LIMIT 1)"
             : "''";
         $payments = self::tableExists($db, 'orders')
-            ? self::rows($db, "SELECT id, order_number, payment_status, payment_method, payment_id,
+            ? self::rows($db, "SELECT id, order_number, payment_status, payment_method, payment_method_snapshot, payment_id,
                     {$paymentCorrelation} AS correlation_id, created_at
                 FROM orders WHERE store_id=:store AND (
                     payment_status IN ('failed','refund_failed')
