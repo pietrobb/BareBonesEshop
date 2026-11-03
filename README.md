@@ -465,7 +465,9 @@ checks PHP/sodium, the public key, private storage and locking, database health,
 a real database backup/restore probe, and (when supplied) the signed package's
 compatibility with installed files. `doctor --json` is suitable for deployment
 automation. Packages are Ed25519-verified and unsigned packages are refused
-unless the operator supplies `--allow-unsigned` explicitly.
+unless the operator supplies `--allow-unsigned` explicitly. While `apply` or
+`rollback` runs, the shop is in maintenance (the `.maintenance` file in the
+application root): web requests get 503 and the worker and feed sync skip their run.
 
 **Signing key rotation.** A shop trusts exactly one key (`update_public_key`), and a
 package never changes it, so every rotation is an explicit step on each shop. The
@@ -480,7 +482,7 @@ controls the publishing account could change those together with the key):
    fingerprint and endorsement in the release notes of the first release signed with it.
 3. On each shop, before applying that release:
    `php cli/update.php rotate-key --new-key=KEY --endorsement=SIG`. It refuses a key the
-   shop's current key did not endorse, writes the new key into the file
+   shop's configured key did not endorse (there is no `--public-key` override), writes the new key into the file
    `update_public_key` points to (or prints the value to put into `config.php`), and
    revokes the old key in `update_storage_dir/revoked-update-keys.json`: a package
    signed with it is refused from then on. `php cli/update.php fingerprint` shows the

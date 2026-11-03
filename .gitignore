@@ -10,6 +10,9 @@ db/*.sqlite.migrations.lock
 cache/
 !cache/.gitkeep
 
+# Updater maintenance marker (MaintenanceMode)
+/.maintenance
+
 # Rate limit DB
 rate_limit.sqlite*
 
