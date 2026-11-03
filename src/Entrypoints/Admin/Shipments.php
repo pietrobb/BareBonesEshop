@@ -226,8 +226,10 @@ function handleOrderShipmentCancel(): void {
         $shipment = adminOrderShipment($orderId, 'planned');
         if (!Fulfillment::cancel((int)$shipment['id'])) return 'admin.shipment.msg.already_done';
         AuditLog::log('shipment', (int)$shipment['id'], ['status' => 'planned'], ['status' => 'cancelled'], 'Admin shipment cancelled');
-        return 'admin.shipment.msg.cancelled';
-    }, false);
+        // R14 T4: committed first, then its labels are cancelled at the carrier (no carrier call inside a transaction).
+        return ShippingService::cancelParcelLabels($orderId, (int)$shipment['id']) === []
+            ? 'admin.shipment.msg.cancelled' : 'admin.shipment.msg.cancelled_label_active';
+    }, false, false);
 }
 
 /** Run one shipment change in a transaction (false: carrier-API changes take their own short one); DomainException messages are admin i18n keys. */

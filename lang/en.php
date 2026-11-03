@@ -749,6 +749,7 @@ return [
     'admin.shipment.msg.unchanged' => 'Tracking did not change.',
     'admin.shipment.msg.tracking_saved' => 'Shipment tracking saved.',
     'admin.shipment.msg.cancelled' => 'The shipment was cancelled.',
+    'admin.shipment.msg.cancelled_label_active' => 'The shipment was cancelled, but the carrier did not cancel its label. Cancel it with the carrier directly, or the carrier will pick the parcel up.',
     'admin.shipment.msg.not_found' => 'The shipment does not exist.',
     'admin.shipment.msg.invalid_tracking' => 'The carrier, tracking number or link is invalid (the link must start with http:// or https://).',
     'admin.shipment.msg.failed' => 'The shipment could not be saved.',
