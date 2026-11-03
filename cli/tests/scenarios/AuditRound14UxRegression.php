@@ -187,6 +187,23 @@ PHP);
         assert_true($r['code'] === 403, $r14uLabel("R14 UX4: the {$r14uWho} still cannot open Admin users", $r));
     }
 
+    // UX8: status lists offer only moves the role may make and the payment state allows.
+    $r14uOrders = new PDO('sqlite:' . $r14uDbPath, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+    $r14uOrders->prepare("INSERT INTO orders (order_number, customer_name, customer_email, customer_phone, shipping_addr, subtotal, shipping_cost, tax_amount, discount_amount, total, currency, status, payment_status, payment_method, payment_id, store_id)
+        VALUES (?, 'R14U Buyer', 'r14u-ux8@example.test', '+421900114008', ?, 2400, 390, 0, 0, 2790, 'eur', 'pending', 'pending', 'card', '', 'default')")
+        ->execute(['R14U-' . bin2hex(random_bytes(4)), json_encode(['street' => 'Status Street 8', 'city' => 'Trnava', 'zip' => '91701', 'country' => 'SK'])]);
+    $r14uOrderId = (int)$r14uOrders->lastInsertId();
+    $r14uOrders = null;
+    $r14uOptions = static fn(array $r, string $select): array => preg_match('#<select ' . $select . '[^>]*>(.*?)</select>#s', (string)$r['out'], $m) === 1
+        ? (preg_match_all('#<option value="([a-z_]+)"#', $m[1], $o) ? $o[1] : []) : ['(no select)'];
+    $r = $r14uRun('owner', ['p' => 'order', 'id' => (string)$r14uOrderId]);
+    $r14uDetail = $r14uOptions($r, 'name="new_status"');
+    assert_true(!in_array('paid', $r14uDetail, true) && in_array('cancelled', $r14uDetail, true),
+        $r14uLabel('R14 UX8: an order whose card payment is not confirmed is not offered "paid" (' . json_encode($r14uDetail) . ')', $r));
+    $r14uBulk = $r14uOptions($r14uRun('fulfillment', ['p' => 'orders']), 'id="bulk-status"');
+    assert_true(!in_array('refunded', $r14uBulk, true) && in_array('shipped', $r14uBulk, true),
+        'R14 UX8: fulfillment (no orders.refund) is not offered "refunded" in bulk (' . json_encode($r14uBulk) . ')');
+
     // TOTP: a wrong current password changes nothing; the right one enrolls a new secret, shown exactly once.
     $r = $r14uRun('editor', ['p' => 'my_account', 'action' => 'mfa'], ['current_password' => 'wrong']);
     assert_true(($r14uAccount('editor')['totp_secret_encrypted'] ?? null) === null && ($r['flash']['type'] ?? '') === 'err',

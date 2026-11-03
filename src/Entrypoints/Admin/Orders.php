@@ -183,7 +183,7 @@ function pageOrders(): void {
         <form method="post" action="admin.php?p=orders&amp;action=bulk_status" id="orders-bulk">
         <?= $filterFields ?>
         <div class="sales-toolbar" style="margin-bottom:1rem">
-            <div class="form-row"><label for="bulk-status"><?= esc(I18n::t('admin.orders.bulk_status')) ?></label><select id="bulk-status" name="new_status" required><option value="">— <?= esc(I18n::t('admin.orders.bulk.choose_status')) ?> —</option><?php foreach (OrderWorkflow::statuses() as $s): if (!Security::adminCan(Security::orderStatusPermission($s))) continue; ?><option value="<?= esc($s) ?>"><?= esc(OrderStatusLabels::order($s)) ?></option><?php endforeach; ?></select></div>
+            <div class="form-row"><label for="bulk-status"><?= esc(I18n::t('admin.orders.bulk_status')) ?></label><select id="bulk-status" name="new_status" required><option value="">— <?= esc(I18n::t('admin.orders.bulk.choose_status')) ?> —</option><?php foreach (OrderWorkflow::statuses() as $s): if (!Security::adminCan(Security::orderStatusPermission($s)) || ($s === 'refunded' && !Security::adminCan('orders.refund'))) continue; ?><option value="<?= esc($s) ?>"><?= esc(OrderStatusLabels::order($s)) ?></option><?php endforeach; ?></select></div>
             <div class="form-row"><label for="bulk-note"><?= esc(I18n::t('admin.order.note')) ?></label><input id="bulk-note" name="note"></div>
             <button class="btn btn-primary btn-sm" type="submit" data-confirm="<?= esc(I18n::t('admin.orders.bulk.confirm')) ?>"><?= esc(I18n::t('admin.orders.bulk_apply')) ?></button>
             <button class="btn btn-sm" type="submit" formaction="admin.php?p=delivery_note" formtarget="_blank" formnovalidate name="format" value="html"><?= esc(I18n::t('admin.delivery_note.html')) ?></button>
@@ -216,9 +216,9 @@ function pageOrder(): void {
     if (!$order) { echo '<p>' . esc(I18n::t('admin.order.not_found')) . '</p>'; return; }
 
     $items = Orders::items($id);
-    $allowed = OrderWorkflow::allowedFor($order);
     $canRefund = Security::adminCan('orders.refund');
-    $allowed = array_values(array_filter($allowed, static fn(string $to): bool => ($canRefund || !OrderWorkflow::returnsMoney($order, $to)) && Security::adminCan(Security::orderStatusPermission($to))));
+    // R14 UX8: only moves the handler accepts (role, payment state); shipping a withdrawn order asks for the acknowledgement.
+    $allowed = array_values(array_filter(OrderWorkflow::allowedFor($order), static fn(string $to): bool => OrderWorkflow::adminRejection($order, $to, $canRefund, true) === null && Security::adminCan(Security::orderStatusPermission($to))));
     $paymentTransitions = Security::adminCan('orders.payments') ? adminManualPaymentTransitions($order) : [];
     $paymentTxs = PaymentService::transactionsForOrder($id);
     $refundableBalance = PaymentService::claimableRefund($id);
