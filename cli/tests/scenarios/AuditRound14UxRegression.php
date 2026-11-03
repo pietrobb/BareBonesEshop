@@ -103,6 +103,11 @@ try {
 
 // --- UX7: several product images per upload, and an image list to reorder / remove them -----------------------------
 $r14uImageFiles = [];
+// Own uploads dir: earlier scenarios leave Adapters' storage pointing at their (since removed) temp dirs.
+$r14uPrevStorage = Adapters::storage();
+$r14uUploads = sys_get_temp_dir() . '/r14u-uploads-' . bin2hex(random_bytes(4));
+mkdir($r14uUploads . '/products', 0755, true);
+Adapters::set('storage', new LocalStorage(['uploads_dir' => $r14uUploads, 'uploads_url' => '/uploads']));
 if (is_file(dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/ImageOrder.php')) require_once dirname(TEST_CLI_DIR) . '/src/Entrypoints/Admin/ImageOrder.php';
 try {
     I18n::setLocale('en');
@@ -117,12 +122,12 @@ try {
         $r14uImageFiles[] = $file;
         return ['tmp_name' => $file, 'type' => 'image/png', 'size' => strlen($bytes), 'name' => basename($file) . '.png'];
     };
-    $r14uStored = static fn(string $url): bool => is_file(dirname(TEST_CLI_DIR) . $url);
+    $r14uStored = static fn(string $url): bool => str_starts_with($url, '/uploads/') && is_file($r14uUploads . substr($url, strlen('/uploads')));
     $r14uMany = method_exists(ProductEditor::class, 'storeUploads') ? ProductEditor::storeUploads([$r14uUpload($r14uPng), $r14uUpload($r14uPng)], 'R14U-IMG', 3) : 'no storeUploads';
     assert_true(is_array($r14uMany) && count($r14uMany) === 2 && $r14uMany[0][0] !== $r14uMany[1][0] && $r14uStored($r14uMany[0][0]) && $r14uStored($r14uMany[1][0]),
         'R14 UX7: two uploaded images are stored, each under its own name (' . json_encode($r14uMany) . ')');
     $r14uBroken = is_array($r14uMany) ? ProductEditor::storeUploads([$r14uUpload($r14uPng), $r14uUpload('not an image')], 'R14U-IMG', 0) : null;
-    $r14uLeft = glob(dirname(TEST_CLI_DIR) . '/uploads/products/R14U-IMG-*') ?: [];
+    $r14uLeft = glob($r14uUploads . '/products/R14U-IMG-*') ?: [];
     assert_true(is_string($r14uBroken) && count($r14uLeft) === 2, 'R14 UX7: when one image of the upload is not an image, nothing of it is kept (' . count($r14uLeft) . ' files)');
     assert_true(is_string(is_array($r14uMany) ? ProductEditor::storeUploads([$r14uUpload($r14uPng), $r14uUpload($r14uPng)], 'R14U-IMG', 49) : null),
         'R14 UX7: an upload over the 50-image limit is refused');
@@ -135,6 +140,10 @@ try {
         'R14 UX7: the product editor shows the image list (move up / down, remove) over the image lines and stores every upload');
 } catch (Throwable $e) { $r14uFail('UX7', $e); } finally {
     foreach ($r14uImageFiles as $r14uFile) @unlink($r14uFile);
+    foreach (glob($r14uUploads . '/products/*') ?: [] as $r14uFile) @unlink($r14uFile);
+    @rmdir($r14uUploads . '/products');
+    @rmdir($r14uUploads);
+    Adapters::set('storage', $r14uPrevStorage);
     I18n::setLocale($r14uSavedLocale);
 }
 

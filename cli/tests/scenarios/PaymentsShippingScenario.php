@@ -759,7 +759,7 @@ assert_equals('test-admin', (string)$adminRefundRaw['actor'], 'Payment admin: re
 $adminOrdersListSnippet = entrypointSource('admin.php');
 assert_true(str_contains($adminOrdersListSnippet, "<th><?= esc(I18n::t('admin.order.payment')) ?></th>"), 'Payment admin: orders list renders Payment column');
 assert_true(str_contains($adminOrdersListSnippet, 'badge-<?= esc($o[\'payment_status\'] ?? \'pending\') ?>'), 'Payment admin: orders list renders payment status badge');
-assert_true(str_contains($adminOrdersListSnippet, 'esc($o[\'payment_method\'] ?? \'\')'), 'Payment admin: orders list renders payment method');
+assert_true(str_contains($adminOrdersListSnippet, 'esc(PaymentService::adminLabel($o))'), 'Payment admin: orders list renders payment method');
 assert_true(str_contains($adminOrdersListSnippet, 'name="payment_status"'), 'Payment admin: orders list renders payment status filter');
 assert_true(str_contains($adminOrdersListSnippet, 'AND payment_status = :payment_status'), 'Payment admin: orders list filters by payment status');
 assert_true(str_contains($adminOrdersListSnippet, "I18n::t('admin.order.payment_method')"), 'Payment admin: order detail renders payment method snapshot');
