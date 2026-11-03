@@ -23,6 +23,15 @@
   that request runs no pass, instead of a whole feed in memory. Outside mod_php (php-cgi behind
   mod_deflate) the early-ended page is gzip-encoded by PHP itself when the browser accepts it: mod_deflate
   leaves an encoded body with its `Content-Length` alone, but held a plain one open until the pass ended.
+- **An e-book supplied abroad is its own VAT group** (review round 13, N3 + low). In an order collected in the
+  seller's store, the e-book of a consumer from another member state (OSS) is a breakdown group naming its country
+  (`"10 AT"`, `VatService::breakdownKey`). Before, its rate was summed into the seller's own rates: the invoice showed
+  "10 %" and the OSS report skipped the line because the invoice is domestic. Invoices, credit notes and the PDF
+  ("10% AT") keep that country, and `cli/oss-report.php` now also reads domestic invoices for such groups. Shipping
+  and the payment (COD) fee take the highest rate of the goods, not the e-book's foreign rate. A business buyer with
+  a valid VAT ID of another member state gets the e-book reverse charged: 0 %, charged without the Slovak VAT, group
+  `"0 DE RC"`, and the Art. 196 note on the invoice. `VatService::digitalSupply()` replaces `digitalRateCountry()`.
+  Snapshots summed by rate alone still validate.
 - **Digital order lines are frozen with the order** (review round 12, H1 + M2). `order_items.digital`
   (migration `20261103090000_order_item_digital`, existing lines backfilled as they were sold) records
   whether a line is digital content. Such a line reserves nothing, gets no parcel and no shipment line, so

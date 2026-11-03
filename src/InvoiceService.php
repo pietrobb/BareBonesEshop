@@ -404,16 +404,19 @@ final class InvoiceService
             $net = self::proportionalSegment((int)$component['net'], $before, $quantity, $ordered);
             $vat = $gross - $net;
             $rate = (int)$component['rate_basis_points'];
+            // The line's country and scheme when it was supplied abroad (an e-book under OSS or reverse charge).
+            $supply = isset($component['rate_country'])
+                ? ['country' => strtoupper((string)$component['rate_country']), 'supply' => (string)($component['supply'] ?? 'oss')] : [];
             $line = [
                 'order_item_id' => $orderItemId, 'rma_item_id' => $rmaItemId,
                 'sku' => (string)$orderItem['sku'], 'name' => (string)$orderItem['name'],
                 'quantity' => $quantity, 'unit_gross' => (int)$component['unit_gross'],
                 'gross' => $gross, 'net' => $net, 'vat' => $vat, 'rate_basis_points' => $rate,
-            ];
+            ] + $supply;
             $lines[] = $line;
             foreach (['gross', 'net', 'vat'] as $key) $totals[$key] += $line[$key];
-            $rateKey = self::rateKey($rate / 100);
-            if (!isset($breakdown[$rateKey])) $breakdown[$rateKey] = ['net' => 0, 'vat' => 0];
+            $rateKey = VatService::breakdownKey($rate, $supply['country'] ?? '', $supply['supply'] ?? '');
+            if (!isset($breakdown[$rateKey])) $breakdown[$rateKey] = ['net' => 0, 'vat' => 0] + $supply;
             $breakdown[$rateKey]['net'] -= $net;
             $breakdown[$rateKey]['vat'] -= $vat;
         }
@@ -550,9 +553,9 @@ final class InvoiceService
         foreach (json_decode((string)$source['vat_breakdown'], true) ?: [] as $key => $info) {
             if (!is_array($info)) continue;
             $gross = (int)($info['net'] ?? 0) + (int)($info['vat'] ?? 0);
-            if ($gross > 0) $rates[(string)$key] = ['gross' => $gross, 'net' => (int)($info['net'] ?? 0)];
+            if ($gross > 0) $rates[(string)$key] = ['gross' => $gross, 'net' => (int)($info['net'] ?? 0), 'supply' => self::supplyOf($info)];
         }
-        if (!$rates) $rates['0'] = ['gross' => (int)$source['total_gross'], 'net' => (int)$source['total_gross']];
+        if (!$rates) $rates['0'] = ['gross' => (int)$source['total_gross'], 'net' => (int)$source['total_gross'], 'supply' => []];
         $sourceGross = array_sum(array_column($rates, 'gross'));
         $lines = [];
         $totals = ['gross' => 0, 'net' => 0, 'vat' => 0];
@@ -563,9 +566,9 @@ final class InvoiceService
             $gross = $i === count($keys) - 1 ? $left : intdiv($amount * $rates[$key]['gross'], $sourceGross);
             $left -= $gross;
             $net = (int)round($rates[$key]['net'] * $gross / $rates[$key]['gross']);
-            $lines[] = ['rate' => (float)$key, 'gross' => $gross, 'net' => $net, 'vat' => $gross - $net];
+            $lines[] = ['rate' => (float)$key, 'gross' => $gross, 'net' => $net, 'vat' => $gross - $net] + $rates[$key]['supply'];
             foreach (['gross' => $gross, 'net' => $net, 'vat' => $gross - $net] as $part => $value) $totals[$part] += $value;
-            $breakdown[$key] = ['net' => -$net, 'vat' => -($gross - $net)];
+            $breakdown[$key] = ['net' => -$net, 'vat' => -($gross - $net)] + $rates[$key]['supply'];
         }
         $creditData = ['version' => 1, 'kind' => 'refund', 'source_invoice_id' => (int)$source['id'], 'refund_key' => $refundKey,
             'reason' => mb_substr($reason, 0, 500), 'currency' => (string)$source['currency'], 'lines' => $lines, 'totals' => $totals];
@@ -604,7 +607,7 @@ final class InvoiceService
             throw $e;
         }
         $invoice = self::byId($invoiceId);
-        $rows = array_map(static fn(array $line): array => ['label' => 'refund', 'rate' => $line['rate'], 'net' => -$line['net'], 'gross' => -$line['gross']], $lines);
+        $rows = array_map(static fn(array $line): array => ['label' => 'refund', 'rate' => $line['rate'], 'net' => -$line['net'], 'gross' => -$line['gross']] + self::supplyOf($line), $lines);
         $pdf = self::renderPdf($invoice, $rows, json_decode((string)$source['seller_snapshot'], true) ?: [], json_decode((string)$source['customer_snapshot'], true) ?: [],
             ['rates' => $breakdown, 'vat_total' => -$totals['vat'], 'services_only' => self::servicesOnly($order)]);
         self::writePdf(self::resolvePdfPath((string)$invoice['pdf_path']), $pdf);
@@ -1173,8 +1176,9 @@ final class InvoiceService
     {
         if ($financialSnapshot !== null) {
             $rates = [];
+            // A line supplied in another country (OSS, reverse charge) keeps its country and scheme for the recap and the OSS report.
             foreach ($financialSnapshot['breakdown'] as $rate => $group) {
-                $rates[(string)$rate] = ['net' => (int)$group['net'], 'vat' => (int)$group['vat']];
+                $rates[(string)$rate] = ['net' => (int)$group['net'], 'vat' => (int)$group['vat']] + self::supplyOf($group);
             }
             return [
                 'rates' => $rates,
@@ -1548,15 +1552,16 @@ final class InvoiceService
                 [$netBefore] = self::extractVat($grossBefore, $rate);
                 $name = (string)($items[$position]['name'] ?? $component['sku']);
                 $position++;
-                $rows[] = ['name' => $name, 'qty' => (int)$component['quantity'], 'rate' => $rate, 'net' => $netBefore, 'gross' => $grossBefore];
+                $supply = self::supplyOf($component);
+                $rows[] = ['name' => $name, 'qty' => (int)$component['quantity'], 'rate' => $rate, 'net' => $netBefore, 'gross' => $grossBefore] + $supply;
                 if ($grossBefore !== (int)$component['gross']) {
-                    $key = self::rateKey($rate);
-                    $discounts[$key] ??= ['rate' => $rate, 'net' => 0, 'gross' => 0];
+                    $key = self::rateKey($rate) . ' ' . ($supply['country'] ?? '');
+                    $discounts[$key] ??= ['rate' => $rate, 'net' => 0, 'gross' => 0] + $supply;
                     $discounts[$key]['net'] += $netBefore - (int)$component['net'];
                     $discounts[$key]['gross'] += $grossBefore - (int)$component['gross'];
                 }
             }
-            $discountRows = array_map(static fn(array $d): array => ['label' => 'discount', 'rate' => $d['rate'], 'net' => -$d['net'], 'gross' => -$d['gross']], array_values($discounts));
+            $discountRows = array_map(static fn(array $d): array => ['label' => 'discount', 'rate' => $d['rate'], 'net' => -$d['net'], 'gross' => -$d['gross']] + self::supplyOf($d), array_values($discounts));
             $productRows = array_values(array_filter($rows, static fn(array $row): bool => isset($row['name'])));
             $otherRows = array_values(array_filter($rows, static fn(array $row): bool => !isset($row['name'])));
             return array_merge($productRows, $discountRows, $otherRows);
@@ -1592,7 +1597,25 @@ final class InvoiceService
         return array_map(static fn(array $line): array => [
             'name' => (string)$line['name'], 'qty' => (int)$line['quantity'], 'rate' => (int)$line['rate_basis_points'] / 100,
             'net' => -abs((int)$line['net']), 'gross' => -abs((int)$line['gross']),
-        ], $lines);
+        ] + self::supplyOf($line), $lines);
+    }
+
+    /**
+     * Country and scheme of a breakdown group or line supplied in another country (an e-book under OSS: ['country' =>
+     * 'AT', 'supply' => 'oss']; reverse charged: 'reverse_charge'), or [] for one taxed as the invoice's scenario.
+     * @return array{country?: string, supply?: string}
+     */
+    private static function supplyOf(array $info): array
+    {
+        $country = strtoupper(trim((string)($info['country'] ?? $info['rate_country'] ?? '')));
+        return $country === '' ? [] : ['country' => $country, 'supply' => (string)($info['supply'] ?? 'oss')];
+    }
+
+    /** Rate as the document prints it: "10%", and for a line supplied in another country "10% AT". */
+    private static function rateLabel(float $rate, array $info): string
+    {
+        $supply = self::supplyOf($info);
+        return self::rateKey($rate) . '%' . ($supply === [] ? '' : ' ' . $supply['country']);
     }
 
     private static function renderPdf(
@@ -1743,7 +1766,7 @@ final class InvoiceService
                 $pdf->text(80, $y, (string)$row['qty'], ['size' => 8, 'align' => 'right', 'width' => 12]);
                 $pdf->text(94, $y, I18n::price((int)round($row['net'] / $row['qty']), $currency), ['size' => 8, 'align' => 'right', 'width' => 26]);
             }
-            $pdf->text(122, $y, self::rateKey($row['rate']) . '%', ['size' => 8, 'align' => 'right', 'width' => 12]);
+            $pdf->text(122, $y, self::rateLabel((float)$row['rate'], $row), ['size' => 8, 'align' => 'right', 'width' => 12]);
             $pdf->text(136, $y, I18n::price($row['net'], $currency), ['size' => 8, 'align' => 'right', 'width' => 26]);
             $pdf->text(164, $y, I18n::price($row['gross'], $currency), ['size' => 8, 'align' => 'right', 'width' => 26]);
             $y += 5;
@@ -1775,7 +1798,7 @@ final class InvoiceService
             $y += 5;
             foreach ($vatBreakdown['rates'] as $r => $info) {
                 $ensureSpace(5);
-                $pdf->text(20, $y, $r . '%', ['size' => 9]);
+                $pdf->text(20, $y, self::rateLabel((float)$r, $info), ['size' => 9]);
                 $pdf->text(40, $y, $L['col_net'] . ' ' . I18n::price((int)$info['net'], $currency), ['size' => 9]);
                 $pdf->text(100, $y, $L['col_vat'] . ' ' . I18n::price((int)$info['vat'], $currency), ['size' => 9]);
                 $y += 5;

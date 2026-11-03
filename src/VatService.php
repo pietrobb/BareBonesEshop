@@ -117,17 +117,34 @@ class VatService implements TaxProvider
     }
 
     /**
-     * Country whose rate taxes the order's digital lines when it differs from the goods'. Goods collected in the
-     * seller's store are supplied there, but a download is supplied where the consumer lives: with OSS on, an EU
-     * consumer from another member state pays their own country's rate on the e-book. Null: same as the goods.
+     * How the order's digital lines are supplied when that differs from the goods'. Goods collected in the seller's
+     * store are supplied there, but a download is supplied where the buyer lives: with OSS on, an EU consumer from
+     * another member state pays their own country's rate on the e-book (scheme "oss"); a business with a valid VAT ID
+     * of another member state accounts for the VAT itself (scheme "reverse_charge", 0 %). Null: as the goods.
+     * @return array{country: string, scheme: string}|null
      */
-    public static function digitalRateCountry(array $context): ?string
+    public static function digitalSupply(array $context): ?array
     {
         $declared = strtoupper(trim((string)($context['digital_customer_country'] ?? '')));
         if ($declared === '' || $declared === strtoupper(trim((string)($context['customer_country'] ?? '')))) return null;
         $scenario = self::resolveScenario(['customer_country' => $declared, 'customer_country_verified' => false] + $context);
-        if (($scenario['scenario'] ?? '') !== self::SCENARIO_OSS || empty($scenario['applies_vat'])) return null;
-        return (string)$scenario['rate_country'];
+        return match ((string)($scenario['scenario'] ?? '')) {
+            self::SCENARIO_OSS => ['country' => (string)$scenario['rate_country'], 'scheme' => self::SCENARIO_OSS],
+            self::SCENARIO_REVERSE_CHARGE => ['country' => (string)$scenario['rate_country'], 'scheme' => self::SCENARIO_REVERSE_CHARGE],
+            default => null,
+        };
+    }
+
+    /**
+     * Key of a VAT breakdown group: the rate ("23", "10"), and for lines supplied in another country under OSS or
+     * reverse charge also that country and scheme ("10 AT", "0 DE RC"), so an invoice never sums a foreign rate into
+     * the seller's own ones and the OSS report finds the foreign base.
+     */
+    public static function breakdownKey(int $rateBasisPoints, string $country = '', string $scheme = ''): string
+    {
+        $key = self::rateKey($rateBasisPoints);
+        if ($country === '') return $key;
+        return $key . ' ' . strtoupper($country) . ($scheme === self::SCENARIO_REVERSE_CHARGE ? ' RC' : '');
     }
 
     /**
@@ -308,7 +325,7 @@ class VatService implements TaxProvider
         $currency = strtolower((string)($amounts['currency'] ?? 'eur'));
         $appliesVat = (bool)$scenario['applies_vat'];
         $rateCountry = (string)$scenario['rate_country'];
-        $digitalRateCountry = $appliesVat ? self::digitalRateCountry($context) : null;
+        $digitalSupply = $appliesVat ? self::digitalSupply($context) : null;
 
         $products = [];
         $subtotal = 0;
@@ -322,11 +339,12 @@ class VatService implements TaxProvider
             $vatClass = self::resolveClass((string)($item['vat_class'] ?? 'standard'));
             $digital = VariantAvailability::isDigitalType((string)($item['product_type'] ?? ''));
             $category = (string)($item['vat_category'] ?? ($digital ? self::digitalCategory((string)($item['vat_class'] ?? 'standard')) : ($item['vat_class'] ?? 'standard')));
-            $lineCountry = $digital && $digitalRateCountry !== null ? $digitalRateCountry : $rateCountry;
-            $rateBasisPoints = $appliesVat
+            $lineSupply = $digital ? $digitalSupply : null;
+            $lineCountry = $lineSupply['country'] ?? $rateCountry;
+            $rateBasisPoints = $appliesVat && ($lineSupply['scheme'] ?? '') !== self::SCENARIO_REVERSE_CHARGE
                 ? (int)round(self::rate($lineCountry, $category, $effectiveDate) * 100)
                 : 0;
-            $products[] = ($lineCountry !== $rateCountry ? ['rate_country' => $lineCountry] : []) + [
+            $products[] = ($lineSupply !== null ? ['rate_country' => $lineCountry, 'supply' => $lineSupply['scheme']] : []) + [
                 'index' => (int)$index,
                 'product_id' => (int)($item['product_id'] ?? 0),
                 'variant_id' => isset($item['variant_id']) ? (int)$item['variant_id'] : null,
@@ -361,6 +379,7 @@ class VatService implements TaxProvider
         }
         $components = [];
         $maxProductRate = 0;
+        $maxGoodsRate = null;
         foreach ($products as $position => $product) {
             $gross = $product['gross_before_discount'] - $discounts[$position];
             $calculated = self::computeGross($gross, $product['rate_basis_points']);
@@ -373,11 +392,13 @@ class VatService implements TaxProvider
                 'vat' => $calculated['vat'],
             ]);
             $maxProductRate = max($maxProductRate, $product['rate_basis_points']);
+            if (!isset($product['rate_country'])) $maxGoodsRate = max($maxGoodsRate ?? 0, $product['rate_basis_points']);
         }
 
         // Shipping and the payment (e.g. cash on delivery) fee are part of the consideration for the goods: they carry
-        // VAT at the highest rate among the goods.
-        $ancillaryRate = $appliesVat ? $maxProductRate : 0;
+        // VAT at the highest rate among the goods. A download supplied in another country (OSS, reverse charge) is
+        // not what they are paid for, so its foreign rate never taxes them.
+        $ancillaryRate = $appliesVat ? ($maxGoodsRate ?? $maxProductRate) : 0;
         $shipping = max(0, (int)($amounts['shipping'] ?? 0));
         if ($shipping > 0) {
             $shippingRate = $ancillaryRate;
@@ -405,22 +426,19 @@ class VatService implements TaxProvider
             ];
         }
 
-        $breakdown = [];
+        $breakdown = self::breakdownOf($components, true);
         $netTotal = 0;
         $vatTotal = 0;
         foreach ($components as $component) {
-            $rateBasisPoints = (int)$component['rate_basis_points'];
-            $key = self::rateKey($rateBasisPoints);
-            if (!isset($breakdown[$key])) {
-                $breakdown[$key] = ['rate_basis_points' => $rateBasisPoints, 'net' => 0, 'vat' => 0, 'gross' => 0];
-            }
-            $breakdown[$key]['net'] += (int)$component['net'];
-            $breakdown[$key]['vat'] += (int)$component['vat'];
-            $breakdown[$key]['gross'] += (int)$component['gross'];
             $netTotal += (int)$component['net'];
             $vatTotal += (int)$component['vat'];
         }
-        uksort($breakdown, static fn(string $a, string $b): int => (float)$a <=> (float)$b);
+        // A download reverse charged next to goods taxed at home: the invoice states that its buyer accounts for the VAT.
+        $noteKey = (string)$scenario['note_key'];
+        if ($noteKey === '' && ($digitalSupply['scheme'] ?? '') === self::SCENARIO_REVERSE_CHARGE
+            && array_filter($components, static fn(array $c): bool => ($c['supply'] ?? '') === self::SCENARIO_REVERSE_CHARGE) !== []) {
+            $noteKey = 'vat.reverse_charge_services_note';
+        }
 
         $providers = (array)($amounts['providers'] ?? ['tax' => 'vat']);
         ksort($providers, SORT_STRING);
@@ -438,7 +456,7 @@ class VatService implements TaxProvider
             'effective_date' => $effectiveDate,
             'scenario' => (string)$scenario['scenario'],
             'rate_country' => $rateCountry,
-            'note_key' => (string)$scenario['note_key'],
+            'note_key' => $noteKey,
             'rounding' => 'gross_line_half_up_integer_basis_points',
             'components' => $components,
             'breakdown' => $breakdown,
@@ -501,7 +519,6 @@ class VatService implements TaxProvider
         $productComponents = 0;
         $shippingComponents = 0;
         $paymentComponents = 0;
-        $computedBreakdown = [];
         foreach ($snapshot['components'] as $component) {
             $type = (string)($component['type'] ?? '');
             $rateBasisPoints = (int)($component['rate_basis_points'] ?? -1);
@@ -525,7 +542,9 @@ class VatService implements TaxProvider
                 $componentDiscount = (int)($component['discount'] ?? -1);
                 if ($quantity <= 0 || $unitGross < 0 || $grossBefore !== $unitGross * $quantity
                     || $componentDiscount < 0 || $componentDiscount > $grossBefore
-                    || $componentGross !== $grossBefore - $componentDiscount) {
+                    || $componentGross !== $grossBefore - $componentDiscount
+                    || (isset($component['supply']) && !in_array($component['supply'], [self::SCENARIO_OSS, self::SCENARIO_REVERSE_CHARGE], true))
+                    || (($component['supply'] ?? '') === self::SCENARIO_REVERSE_CHARGE && $rateBasisPoints !== 0)) {
                     throw new \InvalidArgumentException('Financial snapshot product invariant failed');
                 }
                 $subtotal += $grossBefore;
@@ -538,13 +557,6 @@ class VatService implements TaxProvider
                 $paymentFee += $componentGross;
             }
 
-            $rateKey = self::rateKey($rateBasisPoints);
-            if (!isset($computedBreakdown[$rateKey])) {
-                $computedBreakdown[$rateKey] = ['rate_basis_points' => $rateBasisPoints, 'net' => 0, 'vat' => 0, 'gross' => 0];
-            }
-            $computedBreakdown[$rateKey]['net'] += $componentNet;
-            $computedBreakdown[$rateKey]['vat'] += $componentVat;
-            $computedBreakdown[$rateKey]['gross'] += $componentGross;
             $net += $componentNet;
             $vat += $componentVat;
             $gross += $componentGross;
@@ -552,8 +564,10 @@ class VatService implements TaxProvider
         if ($productComponents === 0 || $shippingComponents > 1 || $paymentComponents > 1) {
             throw new \InvalidArgumentException('Financial snapshot component cardinality failed');
         }
-        uksort($computedBreakdown, static fn(string $a, string $b): int => (float)$a <=> (float)$b);
-        if (self::canonicalize($computedBreakdown) !== self::canonicalize($snapshot['breakdown'])) {
+        // Snapshots taken before foreign-supply lines had groups of their own summed them by rate alone.
+        $storedBreakdown = self::canonicalize($snapshot['breakdown']);
+        if (self::canonicalize(self::breakdownOf($snapshot['components'], true)) !== $storedBreakdown
+            && self::canonicalize(self::breakdownOf($snapshot['components'], false)) !== $storedBreakdown) {
             throw new \InvalidArgumentException('Financial snapshot breakdown invariant failed');
         }
 
@@ -607,6 +621,28 @@ class VatService implements TaxProvider
     {
         $key = rtrim(rtrim(number_format($rateBasisPoints / 100, 2, '.', ''), '0'), '.');
         return $key === '' ? '0' : $key;
+    }
+
+    /**
+     * VAT breakdown of snapshot components, ordered by rate. $bySupply: a line supplied in another country (its
+     * rate_country) is its own group naming that country and scheme; false sums by rate alone (older snapshots).
+     */
+    private static function breakdownOf(array $components, bool $bySupply): array
+    {
+        $breakdown = [];
+        foreach ($components as $component) {
+            $rateBasisPoints = (int)$component['rate_basis_points'];
+            $country = $bySupply ? strtoupper((string)($component['rate_country'] ?? '')) : '';
+            $scheme = $country === '' ? '' : (string)($component['supply'] ?? self::SCENARIO_OSS);
+            $key = self::breakdownKey($rateBasisPoints, $country, $scheme);
+            $breakdown[$key] ??= ['rate_basis_points' => $rateBasisPoints, 'net' => 0, 'vat' => 0, 'gross' => 0]
+                + ($country === '' ? [] : ['country' => $country, 'supply' => $scheme]);
+            $breakdown[$key]['net'] += (int)$component['net'];
+            $breakdown[$key]['vat'] += (int)$component['vat'];
+            $breakdown[$key]['gross'] += (int)$component['gross'];
+        }
+        uksort($breakdown, static fn(int|string $a, int|string $b): int => ((float)$a <=> (float)$b) ?: strcmp((string)$a, (string)$b));
+        return $breakdown;
     }
 
     private static function snapshotFingerprint(array $snapshot): string
