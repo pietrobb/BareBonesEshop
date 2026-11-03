@@ -111,7 +111,10 @@ assert_equals([true, false], [Rma::withinReturnWindow($r7sCxlRow, time() + 13 * 
     'R8 return window: the shipped units of a cancelled order can be returned 14 days from their shipment (was unlimited)');
 $pdo->exec("UPDATE shipments SET delivered_at = '" . gmdate('Y-m-d H:i:s', time() + 10 * 86400) . "' WHERE id = " . (int)$r7sShipments[0]);
 assert_true(Rma::withinReturnWindow($r7sCxlRow, time() + 20 * 86400), 'R8 return window: a delivery reported by the carrier starts the window instead of the shipment');
-$pdo->exec("UPDATE shipments SET shipped_at = '" . gmdate('Y-m-d H:i:s', time() - 15 * 86400) . "', delivered_at = NULL WHERE id = " . (int)$r7sShipments[0]);
+// 15 calendar days on the shop's clock (noon): 15 × 24 h back across a DST change lands on the next local day in the
+// last hour before midnight (R14 T21 — the test failed at 23:xx for two weeks after a clock change).
+$r7sShipped15 = (new DateTimeImmutable('@' . time()))->setTimezone(ShopTime::zone())->setTime(12, 0)->modify('-15 days')->getTimestamp();
+$pdo->exec("UPDATE shipments SET shipped_at = '" . gmdate('Y-m-d H:i:s', $r7sShipped15) . "', delivered_at = NULL WHERE id = " . (int)$r7sShipments[0]);
 $pdo->exec("INSERT INTO customers (email, password_hash, name) VALUES ('r8-cxl-window@example.test', 'x', 'R8 Window')");
 $r8wCustomer = (int)$pdo->lastInsertId();
 $pdo->exec("UPDATE orders SET customer_id = {$r8wCustomer} WHERE id = {$r7sCxl}");

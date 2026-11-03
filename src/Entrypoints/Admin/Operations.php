@@ -60,13 +60,13 @@ function pageDashboard(): void {
         <p><?= esc(I18n::t($monitor['enabled'] ? 'admin.ops.monitoring_enabled' : 'admin.ops.monitoring_disabled')) ?> · <?= esc(I18n::t($monitor['available'] ? 'admin.ops.evidence_available' : 'admin.ops.evidence_unavailable')) ?></p>
         <p><?= esc(I18n::t('admin.ops.worker_cron')) ?>: <?= esc($monitor['worker_cron']) ?> · <?= esc(I18n::t('admin.ops.monitor_cron')) ?>: <?= esc($monitor['monitor_cron']) ?></p>
         <div class="table-scroll"><table><tr><th><?= esc(I18n::t('admin.ops.probe')) ?></th><th><?= esc(I18n::t('admin.ops.observed_status')) ?></th><th><?= esc(I18n::t('admin.ops.observed_at')) ?></th></tr>
-        <?php foreach ($monitor['probes'] as $probe): ?><tr><td><?= esc($probe['probe']) ?></td><td><?= esc($probe['status']) ?><?= $probe['stale'] ? ' ' . esc(I18n::t('admin.ops.stale')) : '' ?></td><td><?= esc(gmdate('c', (int)$probe['checked_at'])) ?></td></tr><?php endforeach; ?>
+        <?php foreach ($monitor['probes'] as $probe): ?><tr><td><?= esc($probe['probe']) ?></td><td><?= esc($probe['status']) ?><?= $probe['stale'] ? ' ' . esc(I18n::t('admin.ops.stale')) : '' ?></td><td><?= esc(I18n::dateTime(gmdate('Y-m-d H:i:s', (int)$probe['checked_at']))) ?></td></tr><?php endforeach; ?>
         </table></div>
         <div class="table-scroll"><table><tr><th><?= esc(I18n::t('admin.common.code')) ?></th><th><?= esc(I18n::t('admin.ops.phase')) ?></th><th><?= esc(I18n::t('admin.ops.severity')) ?></th><th><?= esc(I18n::t('admin.common.correlation')) ?></th><th><?= esc(I18n::t('admin.ops.time_utc')) ?></th></tr>
-        <?php foreach ($monitor['incidents'] as $incident): ?><tr><td><?= esc($incident['code']) ?></td><td><?= esc($incident['phase']) ?></td><td><?= esc($incident['severity']) ?></td><td><code><?= esc($incident['correlation_id']) ?></code></td><td><?= esc(gmdate('c', (int)$incident['occurred_at'])) ?></td></tr><?php endforeach; ?>
+        <?php foreach ($monitor['incidents'] as $incident): ?><tr><td><?= esc($incident['code']) ?></td><td><?= esc($incident['phase']) ?></td><td><?= esc($incident['severity']) ?></td><td><code><?= esc($incident['correlation_id']) ?></code></td><td><?= esc(I18n::dateTime(gmdate('Y-m-d H:i:s', (int)$incident['occurred_at']))) ?></td></tr><?php endforeach; ?>
         </table></div>
         <div class="table-scroll"><table><tr><th><?= esc(I18n::t('admin.common.code')) ?></th><th><?= esc(I18n::t('admin.ops.count')) ?></th><th><?= esc(I18n::t('admin.ops.notification')) ?></th><th><?= esc(I18n::t('admin.ops.last_acceptance')) ?></th></tr>
-        <?php foreach ($monitor['notifications'] as $notification): ?><tr><td><?= esc($notification['code']) ?></td><td><?= (int)$notification['occurrences'] ?></td><td><?= esc($notification['notification_status']) ?></td><td><?= $notification['last_notification_at'] ? esc(gmdate('c', (int)$notification['last_notification_at'])) : esc(I18n::t('admin.ops.not_observed')) ?></td></tr><?php endforeach; ?>
+        <?php foreach ($monitor['notifications'] as $notification): ?><tr><td><?= esc($notification['code']) ?></td><td><?= (int)$notification['occurrences'] ?></td><td><?= esc($notification['notification_status']) ?></td><td><?= $notification['last_notification_at'] ? esc(I18n::dateTime(gmdate('Y-m-d H:i:s', (int)$notification['last_notification_at']))) : esc(I18n::t('admin.ops.not_observed')) ?></td></tr><?php endforeach; ?>
         </table></div>
         <div class="grid grid-4">
             <div class="stat"><div class="num"><?= (int)$operations['counts']['failed_jobs'] ?></div><div class="label"><?= esc(I18n::t('admin.ops.failed_jobs')) ?></div></div>
@@ -76,15 +76,15 @@ function pageDashboard(): void {
         </div>
         <?php if ($operations['failed_jobs']): ?>
         <h4><?= esc(I18n::t('admin.ops.failed_jobs')) ?></h4><div class="table-scroll"><table><tr><th><?= esc(I18n::t('admin.common.type')) ?></th><th><?= esc(I18n::t('admin.common.attempts')) ?></th><th><?= esc(I18n::t('admin.common.error')) ?></th><th><?= esc(I18n::t('admin.common.correlation')) ?></th><th><?= esc(I18n::t('admin.common.updated')) ?></th></tr>
-            <?php foreach ($operations['failed_jobs'] as $incident): ?><tr><td><?= esc($incident['type']) ?></td><td><?= (int)$incident['attempts'] ?></td><td><?= esc($incident['last_error']) ?></td><td><code><?= esc($incident['correlation_id']) ?></code></td><td><?= esc($incident['updated_at']) ?></td></tr><?php endforeach; ?>
+            <?php foreach ($operations['failed_jobs'] as $incident): ?><tr><td><?= esc($incident['type']) ?></td><td><?= (int)$incident['attempts'] ?></td><td><?= esc($incident['last_error']) ?></td><td><code><?= esc($incident['correlation_id']) ?></code></td><td><?= esc(I18n::dateTime((string)$incident['updated_at'])) ?></td></tr><?php endforeach; ?>
         </table></div><?php endif; ?>
         <?php if ($operations['failed_mail']): ?>
         <h4><?= esc(I18n::t('admin.ops.failed_mail')) ?></h4><div class="table-scroll"><table><tr><th><?= esc(I18n::t('admin.common.template')) ?></th><th><?= esc(I18n::t('admin.common.recipient')) ?></th><th><?= esc(I18n::t('admin.common.error')) ?></th><th><?= esc(I18n::t('admin.common.correlation')) ?></th><th><?= esc(I18n::t('admin.common.created')) ?></th></tr>
-            <?php foreach ($operations['failed_mail'] as $incident): ?><tr><td><?= esc($incident['template']) ?></td><td><?= esc($incident['recipient']) ?></td><td><?= esc($incident['error']) ?></td><td><code><?= esc($incident['correlation_id'] ?? '') ?></code></td><td><?= esc($incident['created_at']) ?></td></tr><?php endforeach; ?>
+            <?php foreach ($operations['failed_mail'] as $incident): ?><tr><td><?= esc($incident['template']) ?></td><td><?= esc($incident['recipient']) ?></td><td><?= esc($incident['error']) ?></td><td><code><?= esc($incident['correlation_id'] ?? '') ?></code></td><td><?= esc(I18n::dateTime((string)$incident['created_at'])) ?></td></tr><?php endforeach; ?>
         </table></div><?php endif; ?>
         <?php if ($operations['payment_incidents']): ?>
         <h4><?= esc(I18n::t('admin.ops.payment_incidents')) ?></h4><div class="table-scroll"><table><tr><th><?= esc(I18n::t('admin.order.label')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.common.provider')) ?></th><th><?= esc(I18n::t('admin.common.correlation')) ?></th><th><?= esc(I18n::t('admin.common.created')) ?></th></tr>
-            <?php foreach ($operations['payment_incidents'] as $incident): ?><tr><td><a href="admin.php?p=order&id=<?= (int)$incident['id'] ?>"><?= esc($incident['order_number']) ?></a></td><td><?= esc(OrderStatusLabels::payment((string)$incident['payment_status'])) ?></td><td><?= esc($incident['payment_method']) ?></td><td><code><?= esc($incident['correlation_id'] ?? '') ?></code></td><td><?= esc($incident['created_at']) ?></td></tr><?php endforeach; ?>
+            <?php foreach ($operations['payment_incidents'] as $incident): ?><tr><td><a href="admin.php?p=order&id=<?= (int)$incident['id'] ?>"><?= esc($incident['order_number']) ?></a></td><td><?= esc(OrderStatusLabels::payment((string)$incident['payment_status'])) ?></td><td><?= esc($incident['payment_method']) ?></td><td><code><?= esc($incident['correlation_id'] ?? '') ?></code></td><td><?= esc(I18n::dateTime((string)$incident['created_at'])) ?></td></tr><?php endforeach; ?>
         </table></div><?php endif; ?>
         <?php if ($operations['webhook_incidents']): ?>
         <h4><?= esc(I18n::t('admin.ops.webhook_incidents')) ?></h4><div class="table-scroll"><table><tr><th><?= esc(I18n::t('admin.common.event')) ?></th><th><?= esc(I18n::t('admin.th.status')) ?></th><th><?= esc(I18n::t('admin.common.attempts')) ?></th><th><?= esc(I18n::t('admin.common.error')) ?></th><th><?= esc(I18n::t('admin.common.correlation')) ?></th></tr>
@@ -123,7 +123,7 @@ function pageDashboard(): void {
                 <td><?= esc($row['customer_name']) ?></td>
                 <td><?= I18n::price((int)$row['total'], $row['currency']) ?></td>
                 <td><span class="badge badge-<?= esc($row['status']) ?>"><?= esc(OrderStatusLabels::order((string)$row['status'])) ?></span></td>
-                <td class="muted"><?= esc(substr($row['created_at'], 0, 16)) ?></td>
+                <td class="muted"><?= esc(I18n::dateTime((string)$row['created_at'])) ?></td>
             </tr>
             <?php endwhile; ?>
         </table>
@@ -208,7 +208,7 @@ function pageAudit(): void {
                 <td class="muted" style="max-width:150px;overflow:hidden;text-overflow:ellipsis"><?= esc(substr($log['new_value'] ?? '', 0, 80)) ?></td>
                 <td><?= esc($log['note'] ?? '') ?></td>
                 <td><?= esc($log['actor']) ?></td>
-                <td class="muted"><?= esc(substr($log['created_at'], 0, 16)) ?></td>
+                <td class="muted"><?= esc(I18n::dateTime((string)$log['created_at'])) ?></td>
             </tr>
             <?php endforeach; ?>
         </table>

@@ -192,6 +192,16 @@ class I18n {
             ->format(self::t($withTime ? 'format.datetime' : 'format.date'));
     }
 
+    /**
+     * A calendar date already on the shop's calendar ("Y-m-d": invoice issue and due dates, the bank-transfer due day,
+     * legal texts) in the format.date pattern of $locale (default: the current one), with no time zone shift.
+     */
+    public static function date(string $ymd, ?string $locale = null): string {
+        $day = preg_match('/^\d{4}-\d{2}-\d{2}$/', trim($ymd)) ? DateTimeImmutable::createFromFormat('!Y-m-d', trim($ymd), new DateTimeZone('UTC')) : false;
+        if ($day === false) return $ymd;
+        return $day->format($locale === null ? self::t('format.date') : self::tIn('format.date', $locale));
+    }
+
     /** Format price according to currency config */
     public static function price(int $cents, ?string $currency = null): string {
         $stores = self::stores();

@@ -51,7 +51,7 @@ function emailTemplateEditor(string $template, string $locale): void {
     ?>
     <h1><?= esc(I18n::format('admin.email.edit_title', ['template' => $template, 'locale' => strtoupper($locale)])) ?></h1>
     <p><a href="admin.php?p=email_templates"><?= esc(I18n::t('admin.btn.back')) ?></a> · <?= esc(adminCodeLabel('admin.email.tpl.', $template)) ?> ·
-        <?= esc($override ? I18n::format('admin.email.custom_since', ['at' => $override['updated_at'], 'by' => $override['updated_by']]) : I18n::t('admin.email.uses_default')) ?></p>
+        <?= esc($override ? I18n::format('admin.email.custom_since', ['at' => I18n::dateTime((string)$override['updated_at']), 'by' => $override['updated_by']]) : I18n::t('admin.email.uses_default')) ?></p>
     <div class="card">
         <form method="post" action="<?= esc($action . '&action=save') ?>">
             <input type="hidden" name="csrf_token" value="<?= Security::csrfToken() ?>">

@@ -38,7 +38,7 @@ function pageCustomers(): void {
                 <td><?= esc($c['name'] ?? '') ?></td>
                 <td><span class="badge badge-<?= ($c['status'] ?? '')==='active'?'active':'draft' ?>"><?= esc(adminCodeLabel('admin.customer.status.', (string)($c['status'] ?? ''))) ?></span></td>
                 <td><?= (int)($counts[(int)$c['id']] ?? 0) ?></td>
-                <td class="muted"><?= esc(substr((string)$c['created_at'], 0, 16)) ?></td>
+                <td class="muted"><?= esc(I18n::dateTime((string)$c['created_at'])) ?></td>
                 <td><a class="btn btn-sm" href="admin.php?p=customer&id=<?= (int)$c['id'] ?>"><?= esc(I18n::t('admin.sales.detail')) ?></a></td>
             </tr>
             <?php endforeach; ?>
@@ -72,8 +72,8 @@ function pageCustomerDetail(): void {
             <tr><th><?= esc(I18n::t('admin.common.email')) ?></th><td><?= esc($c['email']) ?></td></tr>
             <tr><th><?= esc(I18n::t('admin.customers.phone')) ?></th><td><?= esc($c['phone'] ?? '') ?></td></tr>
             <tr><th><?= esc(I18n::t('admin.th.status')) ?></th><td><span class="badge badge-<?= $status==='active'?'active':'draft' ?>"><?= esc($status) ?></span></td></tr>
-            <tr><th><?= esc(I18n::t('admin.customers.registered')) ?></th><td class="muted"><?= esc(substr((string)($c['created_at'] ?? ''), 0, 16)) ?></td></tr>
-            <tr><th><?= esc(I18n::t('admin.customers.last_login')) ?></th><td class="muted"><?= esc(substr((string)($c['last_login_at'] ?? ''), 0, 16)) ?: '—' ?></td></tr>
+            <tr><th><?= esc(I18n::t('admin.customers.registered')) ?></th><td class="muted"><?= esc(I18n::dateTime((string)($c['created_at'] ?? ''))) ?></td></tr>
+            <tr><th><?= esc(I18n::t('admin.customers.last_login')) ?></th><td class="muted"><?= esc(I18n::dateTime((string)($c['last_login_at'] ?? ''))) ?: '—' ?></td></tr>
         </table>
         <?php if (!$anon): ?>
         <p style="margin-top:1rem">
@@ -134,7 +134,7 @@ function pageCustomerDetail(): void {
                 <td><?= esc($o['order_number']) ?></td>
                 <td><span class="badge badge-<?= esc($o['status']) ?>"><?= esc(OrderStatusLabels::order((string)$o['status'])) ?></span></td>
                 <td><?= esc(I18n::price((int)$o['total'], $o['currency'])) ?></td>
-                <td class="muted"><?= esc(substr((string)$o['created_at'], 0, 16)) ?></td>
+                <td class="muted"><?= esc(I18n::dateTime((string)$o['created_at'])) ?></td>
                 <td><a class="btn btn-sm" href="admin.php?p=order&id=<?= (int)$o['id'] ?>"><?= esc(I18n::t('admin.sales.detail')) ?></a></td>
             </tr>
             <?php endforeach; ?>
@@ -154,7 +154,7 @@ function pageCustomerDetail(): void {
                 <td><?= esc($r['rma_number']) ?></td>
                 <td>#<?= (int)$r['order_id'] ?></td>
                 <td><span class="badge badge-<?= esc($r['status']) ?>"><?= esc(adminCodeLabel('admin.rma.status.', (string)$r['status'])) ?></span></td>
-                <td class="muted"><?= esc(substr((string)$r['created_at'], 0, 16)) ?></td>
+                <td class="muted"><?= esc(I18n::dateTime((string)$r['created_at'])) ?></td>
                 <td><a class="btn btn-sm" href="admin.php?p=rma&status=<?= esc($r['status']) ?>"><?= esc(I18n::t('admin.customers.rma_queue')) ?></a></td>
             </tr>
             <?php endforeach; ?>
@@ -253,7 +253,7 @@ function pageGdpr(): void {
                 <td><?= $e['customer_id'] !== null ? (int)$e['customer_id'] : '' ?></td>
                 <td><?= esc($e['actor'] ?? '') ?></td>
                 <td class="muted" style="max-width:320px;overflow:hidden;text-overflow:ellipsis"><?= esc($e['note'] ?? '') ?></td>
-                <td class="muted"><?= esc(substr($e['created_at'], 0, 16)) ?></td>
+                <td class="muted"><?= esc(I18n::dateTime((string)$e['created_at'])) ?></td>
             </tr>
             <?php endforeach; ?>
         </table>

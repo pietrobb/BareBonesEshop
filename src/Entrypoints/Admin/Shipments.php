@@ -14,7 +14,7 @@ function renderOrderWithdrawals(array $order, array $withdrawals): void {
             <tr><th><?= esc(I18n::t('admin.withdrawal.received_at')) ?></th><th><?= esc(I18n::t('admin.sales.items')) ?></th><th><?= esc(I18n::t('admin.withdrawal.reason')) ?></th><th><?= esc(I18n::t('admin.withdrawal.confirmation')) ?></th></tr>
             <?php foreach ($withdrawals as $withdrawal): ?>
             <tr>
-                <td><?= esc((string)$withdrawal['received_at']) ?> UTC</td>
+                <td><?= esc(I18n::dateTime((string)$withdrawal['received_at'])) ?></td>
                 <td><ul class="muted" style="margin:0;padding-left:16px">
                     <?php foreach ((array)(json_decode((string)$withdrawal['items'], true) ?: []) as $itemId => $qty): ?>
                     <li><?= esc((string)($names[(int)$itemId] ?? ('#' . (int)$itemId))) ?> (<?= (int)$qty ?>×)</li>
@@ -74,7 +74,7 @@ function renderOrderShipments(array $order): void {
                 <td><?= esc(trim((string)$shipment['carrier'] . ' ' . (string)$shipment['tracking_number'])) ?>
                     <?php if (!empty($shipment['tracking_url'])): ?><br><a href="<?= esc((string)$shipment['tracking_url']) ?>" target="_blank" rel="noopener noreferrer"><?= esc(I18n::t('admin.shipment.track')) ?></a><?php endif; ?>
                     <?php renderShipmentCod($order, $shipmentId); ?></td>
-                <td class="muted"><?= esc($shipment['shipped_at'] ? substr((string)$shipment['shipped_at'], 0, 16) : '—') ?></td>
+                <td class="muted"><?= esc($shipment['shipped_at'] ? I18n::dateTime((string)$shipment['shipped_at']) : '—') ?></td>
                 <?php if ($canShip): ?>
                 <td>
                     <?php if ($shipment['status'] === 'planned' && $open): ?>

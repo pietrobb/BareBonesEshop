@@ -412,7 +412,7 @@ try {
     $a157Check('A15.7 de: purchase orders page is German', $a154Run(['p' => 'purchase_orders']),
         ['Neue Lieferantenbestellung', 'Lieferant', 'Erwartete Lieferung', 'Nummer (leer = automatisch)', 'Bestellung anlegen', 'Erhalten / bestellt', 'A157-PO', 'bestellt']);
     $a157Check('A15.7 de: purchase order detail is German', $a154Run(['p' => 'purchase_orders', 'id' => $a157Po]),
-        ['Bestellung beim Lieferanten A157-PO', '→ Lager A154 Warehouse', 'erwartet 2030-01-15', 'Jetzt annehmen', 'Einkaufspreis', 'A155-P annehmen', 'Wareneingang buchen', '← Liste']);
+        ['Bestellung beim Lieferanten A157-PO', '→ Lager A154 Warehouse', 'erwartet 15.01.2030', 'Jetzt annehmen', 'Einkaufspreis', 'A155-P annehmen', 'Wareneingang buchen', '← Liste']);
     $a157Check('A15.7 de: B2B card on the customer detail is German', $a154Run(['p' => 'customer', 'id' => $a156Customer]),
         ['Kundengruppe', '— keine —', 'Zuordnung speichern', 'A157 Gruppe', 'A157 GmbH']);
     $a154Run(['p' => 'dashboard', 'lang' => 'en']);
