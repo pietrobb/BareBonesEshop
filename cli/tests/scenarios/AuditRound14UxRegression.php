@@ -47,6 +47,59 @@ try {
     I18n::setLocale($r14uSavedLocale);
 }
 
+// --- UX2: search, sort and filter GET forms keep the language too --------------------------------------------------
+// A browser drops the query of a GET form's action and submits only the form's named fields, so each storefront GET
+// form must carry lang itself. Build the URL a browser would submit and open it the way index.php does.
+$r14uSavedGet = $_GET;
+try {
+    $r14uRoot = dirname(__DIR__, 3);
+    $r14uForms = ['themes/default/blocks/storefront/header.html', 'themes/bookshop/blocks/storefront/header.html',
+        'themes/default/blocks/global/header.html', 'blocks/global/header.html',
+        'themes/default/blocks/storefront/category-page.html', 'themes/default/blocks/storefront/search-results.html'];
+    $r14uSubmitted = static function (string $html, string $currentPath): array {
+        $dom = new DOMDocument();
+        @$dom->loadHTML('<?xml encoding="utf-8"?>' . $html);
+        $urls = [];
+        foreach ($dom->getElementsByTagName('form') as $form) {
+            if (strtolower($form->getAttribute('method')) !== 'get') continue;
+            $fields = [];
+            foreach ((new DOMXPath($dom))->query('.//input[@name] | .//select[@name]', $form) as $field) {
+                $value = $field->getAttribute('value');
+                if ($field->nodeName === 'select') {
+                    $options = (new DOMXPath($dom))->query('.//option', $field);
+                    $value = $options->length ? $options->item(0)->getAttribute('value') : '';
+                }
+                $fields[$field->getAttribute('name')] = $value;
+            }
+            $action = $form->getAttribute('action');
+            $urls[] = [(string)(parse_url($action !== '' ? $action : $currentPath, PHP_URL_PATH) ?: $currentPath), $fields];
+        }
+        return $urls;
+    };
+    foreach (['es' => 'es', 'en' => null] as $r14uBrowse => $r14uExpectLang) {
+        Bootstrap::initStoreContext('/en/', '', 'us');
+        I18n::setLocale($r14uBrowse);
+        $r14uData = ['home_url' => Template::storeUrl('/'), 'base_url' => Template::baseUrl() . '/en', 'slug' => 'r14u-categoria',
+            'sort' => 'name_asc', 'query' => 'x', 'show_filters' => true, 't' => I18n::all(), 'brand' => ['name' => 'R14'], 'sort_options' => [['value' => 'name_asc', 'label' => 'A']]];
+        $r14uChecked = 0;
+        foreach ($r14uForms as $r14uFile) {
+            $r14uHtml = Template::process((string)file_get_contents($r14uRoot . '/' . $r14uFile), $r14uData);
+            foreach ($r14uSubmitted($r14uHtml, '/en/') as [$r14uPath, $r14uFields]) {
+                $r14uChecked++;
+                $_GET = $r14uFields;
+                $r14uLocale = Bootstrap::initLocale($r14uPath . '?' . http_build_query($r14uFields), true);
+                assert_true($r14uLocale === $r14uBrowse && ($r14uFields['lang'] ?? null) === $r14uExpectLang,
+                    "R14 UX2: a GET form of {$r14uFile} on a '{$r14uBrowse}' page submits " . http_build_query($r14uFields) . " and opens in '{$r14uLocale}'");
+            }
+        }
+        assert_true($r14uChecked >= 8, "R14 UX2: every storefront GET form was submitted ({$r14uChecked})");
+    }
+} catch (Throwable $e) { $r14uFail('UX2 forms', $e); } finally {
+    $_GET = $r14uSavedGet;
+    StoreContext::activate($r14uSavedStore);
+    I18n::setLocale($r14uSavedLocale);
+}
+
 // --- UX3: the admin names payment methods, not their codes -------------------------------------------------------
 try {
     I18n::setLocale('en');

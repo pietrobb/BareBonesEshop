@@ -391,6 +391,8 @@ class Template {
     /** Resolve dot notation and explicit ../ parent traversal. */
     private static function resolve(string $path, array $contexts): mixed {
         $path = trim($path);
+        // R14 UX2: the active further language of the store, for the hidden lang field of storefront GET forms.
+        if ($path === '@store_lang') return Bootstrap::secondaryLocale();
         $level = count($contexts) - 1;
         while (str_starts_with($path, '../')) {
             $level--;

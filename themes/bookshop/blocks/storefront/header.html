@@ -9,7 +9,7 @@
   <div class="bk-masthead"><div class="wrap">
     <a class="bk-logo" href="{{home_url}}">{{#if brand.logo_url}}<img src="{{brand.logo_url}}" alt="{{brand.name}}">{{else}}<svg class="bk-logo__mark" viewBox="0 0 32 32" width="32" height="32" aria-hidden="true" focusable="false"><path d="M4 7c4-2 8-2 12 1v19c-4-3-8-3-12-1z" fill="currentColor" opacity=".55"/><path d="M28 7c-4-2-8-2-12 1v19c4-3 8-3 12-1z" fill="currentColor"/></svg><span>{{brand.name}}</span>{{/if}}</a>
     <form class="bk-search search-bar" method="get" action="{{home_url}}" role="search">
-      <input type="hidden" name="page" value="search">
+      <input type="hidden" name="page" value="search">{{> global/lang-field}}
       <label class="sr-only" for="storefront-search">{{t.search}}</label>
       <input id="storefront-search" type="search" name="q" placeholder="{{t.bookshop.search_placeholder}}" value="{{search_query}}" data-search-suggest="{{t.search_suggestions}}">
       <button type="submit">{{t.search}}</button>

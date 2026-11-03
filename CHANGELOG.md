@@ -4,7 +4,8 @@
 
 - **Usability** (review round 14, UX1–UX8). Storefront links keep a store's further language (`?lang=en` in a
   Slovak store): the language was lost after the first click, and the English product link answered with a 301 to
-  the Slovak slug. Canonicals and hreflang alternates still carry exactly one language. The README quick start runs
+  the Slovak slug. The search, sort and filter forms submit the language too (`{{> global/lang-field}}`, which
+  themes can include in their own GET forms). Canonicals and hreflang alternates still carry exactly one language. The README quick start runs
   the worker and lists the cron entries (worker, GDPR retention, backup); the CLI install leaves the web worker off,
   so without them order e-mails stayed queued. The admin names payment methods ("Cash on delivery") instead of their
   codes. Every signed-in admin, editor and fulfillment included, changes its own password and authenticator app
