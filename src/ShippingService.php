@@ -490,12 +490,14 @@ class ShippingService
         // A store without carrier labels has none to cancel.
         if (!StoreContext::current()->allows('shipping') || !Db::hasColumn('shipping_labels', 'shipment_id')) return [];
         $db = Db::get();
-        if ($db->inTransaction()) throw new \LogicException('ShippingService::cancelParcelLabels calls the carrier and must run outside a transaction');
         $stmt = $db->prepare("SELECT id, carrier, awb FROM shipping_labels
             WHERE order_id = :order AND shipment_id = :shipment AND store_id = :store AND status != 'cancelled' ORDER BY id");
         $stmt->execute([':order' => $orderId, ':shipment' => $shipmentId, ':store' => StoreContext::current()->id()]);
+        $labels = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        // Only a carrier call needs to be outside a transaction; a parcel without labels has nothing to call.
+        if ($labels !== [] && $db->inTransaction()) throw new \LogicException('ShippingService::cancelParcelLabels calls the carrier and must run outside a transaction');
         $left = [];
-        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $label) {
+        foreach ($labels as $label) {
             if (!self::voidAtCarrier((string)$label['carrier'], (string)$label['awb'], $orderId)) {
                 $left[] = (string)$label['awb'];
                 continue;

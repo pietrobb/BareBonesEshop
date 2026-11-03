@@ -244,7 +244,7 @@ function adminShipmentAction(int $orderId, Closure $change, bool $requireOpenOrd
         if ($transaction) $db->commit();
         setFlash('ok', I18n::t($message));
     } catch (Throwable $e) {
-        if ($db->inTransaction()) $db->rollBack();
+        if ($transaction && $db->inTransaction()) $db->rollBack();
         $key = match (true) {
             $e instanceof DomainException => $e->getMessage(),
             $e instanceof InvalidArgumentException => 'admin.shipment.msg.invalid_tracking',
