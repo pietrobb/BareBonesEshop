@@ -482,6 +482,35 @@ class Rma {
         }
     }
 
+    /**
+     * R14 T18: the provider declined an item refund (or its pending refund failed later). The refund is marked failed and
+     * its credit note cancelled, so the returned units and the money count as not refunded again and the merchant can
+     * refund them anew. Was: the refund stayed pending forever and blocked both. False when it is no longer pending.
+     */
+    public static function failRefund(int $refundId, string $note): bool {
+        $db = Db::get();
+        $own = !$db->inTransaction();
+        if ($own) $db->beginTransaction();
+        try {
+            $stmt = $db->prepare("SELECT * FROM order_refunds WHERE id=:id AND store_id=:store" . (Db::isMysql() ? ' FOR UPDATE' : ''));
+            $stmt->execute([':id' => $refundId, ':store' => StoreContext::current()->id()]);
+            $refund = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stmt->closeCursor();
+            $claim = $db->prepare("UPDATE order_refunds SET status='failed', updated_at=" . Db::now() . " WHERE id=:id AND store_id=:store AND status='pending'");
+            $claim->execute([':id' => $refundId, ':store' => StoreContext::current()->id()]);
+            $released = $refund !== false && $claim->rowCount() === 1;
+            if ($released) {
+                InvoiceService::cancel((int)$refund['credit_note_id'], $note);
+                AuditLog::log('order_refund', (int)$refund['order_id'], 'pending', 'failed', $note);
+            }
+            if ($own) $db->commit();
+            return $released;
+        } catch (Throwable $e) {
+            if ($own && $db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+    }
+
     /** The provider accepted an item refund asynchronously: its refund id lets the refund webhook complete it. */
     public static function noteProviderRefund(int $refundId, string $providerRefundId): void {
         Db::get()->prepare("UPDATE order_refunds SET payment_reference=:reference, updated_at=" . Db::now() . " WHERE id=:id AND store_id=:store AND status='pending'")

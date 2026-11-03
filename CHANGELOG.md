@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Credit notes and refunds** (review round 14, finding 2 and T18). A refund credit note takes its VAT split from
+  what the invoice's earlier credit notes left uncredited, so after an item credit note no rate is credited
+  beyond what was invoiced, and all credit notes of an invoice together never exceed it. The refund key and the
+  uncredited balance are checked under the order lock (two calls for one manual refund issued two credit notes).
+  A provider refund booked by its webhook while an item refund of the same amount still has no provider refund id
+  waits for the refund job (up to 30 minutes, then fails visibly) instead of getting a second credit note. An item
+  refund the provider declines, or whose pending refund fails later, is marked failed and its credit note
+  cancelled, so the returned units and the money can be refunded again (they stayed "being refunded" for ever).
+  The invoice of an unpaid cash on delivery order no longer prints the seller's IBAN.
 - **Usability fixes** (review round 13, UX1–UX7, README). Checkout offers bank transfer only when the store
   has an IBAN with valid check digits (the shipped sample IBAN has none, so a customer got an order without
   payment instructions). A fresh `setup.php install` keeps every sample store, including `cz`, hidden until the
