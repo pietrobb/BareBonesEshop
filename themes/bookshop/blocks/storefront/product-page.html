@@ -7,10 +7,10 @@
   </div>
   <div class="bk-book__info">
     <h1 class="bk-book__title">{{product.name}}</h1>
-    {{#if product.custom_fields.Author}}<p class="bk-book__author">by {{product.custom_fields.Author}}</p>{{/if}}
+    {{#if product.custom_fields.Author}}<p class="bk-book__author">{{t.bookshop.author}} {{product.custom_fields.Author}}</p>{{/if}}
     {{#if product.summary}}<p class="bk-book__summary">{{product.summary}}</p>{{/if}}
-    {{#if product.variants}}<fieldset class="bk-formats product-variants" data-variant-picker="{{product.id}}"><legend>Choose a format</legend>
-      {{#each product.variants}}<label class="bk-format{{#unless availability.purchasable}} is-out{{/unless}}"><input type="radio" name="variant-{{../product.id}}" form="cart-add-{{../product.id}}" value="{{id}}" data-price="{{price_formatted}}" data-availability="{{availability.label}}" {{#if selected}}checked{{/if}} {{#unless availability.purchasable}}disabled{{/unless}}><span class="bk-format__name">{{name}}</span><span class="bk-format__price">{{price_formatted}}</span><span class="bk-format__note">{{#if digital}}EPUB download right after payment{{else}}{{availability.label}}{{/if}}</span></label>{{/each}}
+    {{#if product.variants}}<fieldset class="bk-formats product-variants" data-variant-picker="{{product.id}}"><legend>{{t.bookshop.choose_format}}</legend>
+      {{#each product.variants}}<label class="bk-format{{#unless availability.purchasable}} is-out{{/unless}}"><input type="radio" name="variant-{{../product.id}}" form="cart-add-{{../product.id}}" value="{{id}}" data-price="{{price_formatted}}" data-availability="{{availability.label}}" {{#if selected}}checked{{/if}} {{#unless availability.purchasable}}disabled{{/unless}}><span class="bk-format__name">{{name}}</span><span class="bk-format__price">{{price_formatted}}</span><span class="bk-format__note">{{#if digital}}{{t.bookshop.download_note}}{{else}}{{availability.label}}{{/if}}</span></label>{{/each}}
     </fieldset>{{/if}}
     <div class="bk-book__buy">
       <p class="bk-book__price price" data-product-price>{{product.price.formatted}}{{#if product.price.compare_formatted}} <s class="old-price">{{product.price.compare_formatted}}</s> <small class="price-note">{{t.price_lowest_30d}}</small>{{/if}}</p>
@@ -23,8 +23,8 @@
   </div>
 </article>
 <div class="bk-book__more">
-  {{#if product.description_html}}<section class="bk-book__about product-description"><h2>About the book</h2>{{{product.description_html}}}</section>{{/if}}
-  {{#if product.attributes}}<section class="bk-book__details product-attributes"><h2>Book details</h2><dl>{{#each product.attributes}}<div><dt>{{label}}</dt><dd>{{value}}</dd></div>{{/each}}</dl></section>{{/if}}
+  {{#if product.description_html}}<section class="bk-book__about product-description"><h2>{{t.bookshop.about_book}}</h2>{{{product.description_html}}}</section>{{/if}}
+  {{#if product.attributes}}<section class="bk-book__details product-attributes"><h2>{{t.bookshop.book_details}}</h2><dl>{{#each product.attributes}}<div><dt>{{label}}</dt><dd>{{value}}</dd></div>{{/each}}</dl></section>{{/if}}
 </div>
 {{#if extensions.reviews.product}}<section class="reviews" id="reviews">
   <h2>{{extensions.reviews.product.title}}</h2>
@@ -44,4 +44,4 @@
     <p class="review-form-msg" data-review-msg role="status" {{#unless extensions.reviews.product.flash}}hidden{{/unless}}>{{extensions.reviews.product.flash}}</p>
   </form>
 </section>{{/if}}
-{{#if product.relations.related}}<section class="bk-section bk-shelf" aria-labelledby="related-title"><h2 class="bk-section__title" id="related-title">You may also like</h2><div class="bk-shelf__row">{{#each product.relations.related}}{{> storefront/product-card}}{{/each}}</div></section>{{/if}}
+{{#if product.relations.related}}<section class="bk-section bk-shelf" aria-labelledby="related-title"><h2 class="bk-section__title" id="related-title">{{t.bookshop.related}}</h2><div class="bk-shelf__row">{{#each product.relations.related}}{{> storefront/product-card}}{{/each}}</div></section>{{/if}}

@@ -74,6 +74,7 @@ final class StorefrontCoreSectionProviders
             'slug' => (string)$row['slug'],
             'url' => Template::storeUrl('/category/' . rawurlencode((string)$row['slug'])),
             'count' => (int)($row['product_count'] ?? 0),
+            'count_label' => I18n::plural('products_count', (int)($row['product_count'] ?? 0)),
         ];
     }
 

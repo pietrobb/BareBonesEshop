@@ -12,11 +12,17 @@ return new class {
             ? array_column($db->query('PRAGMA table_info(order_items)')->fetchAll(PDO::FETCH_ASSOC), 'name')
             : $db->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order_items'")->fetchAll(PDO::FETCH_COLUMN);
         if (!in_array('digital', $columns, true)) $db->exec('ALTER TABLE order_items ADD COLUMN digital INTEGER NULL');
-        $db->exec("UPDATE order_items SET digital = CASE
-                WHEN EXISTS (SELECT 1 FROM products p WHERE p.id = order_items.product_id AND LOWER(COALESCE(p.product_type, '')) IN ('digital', 'downloadable')) THEN 1
-                WHEN EXISTS (SELECT 1 FROM variants v WHERE v.id = order_items.variant_id AND v.digital = 1)
-                    AND COALESCE(order_items.attrs, '') NOT LIKE '%allocations%' AND COALESCE(order_items.attrs, '') NOT LIKE '%bundle_components%' THEN 1
-                ELSE 0 END
-            WHERE digital IS NULL");
+        $db->exec("UPDATE order_items SET digital = 1 WHERE digital IS NULL
+            AND EXISTS (SELECT 1 FROM products p WHERE p.id = order_items.product_id AND LOWER(COALESCE(p.product_type, '')) IN ('digital', 'downloadable'))");
+        // The snapshot keys are read from the decoded attrs: a customer-visible attribute value may contain the same words.
+        $candidates = $db->query('SELECT id, attrs FROM order_items WHERE digital IS NULL
+            AND EXISTS (SELECT 1 FROM variants v WHERE v.id = order_items.variant_id AND v.digital = 1)')->fetchAll(PDO::FETCH_KEY_PAIR);
+        $mark = $db->prepare('UPDATE order_items SET digital = 1 WHERE id = :id');
+        foreach ($candidates as $id => $json) {
+            $attrs = json_decode((string)$json, true);
+            $soldAsGoods = is_array($attrs) && (!empty($attrs['_inventory_allocations']) || !empty($attrs['_bundle_components']));
+            if (!$soldAsGoods) $mark->execute([':id' => $id]);
+        }
+        $db->exec('UPDATE order_items SET digital = 0 WHERE digital IS NULL');
     }
 };

@@ -188,7 +188,6 @@ if ($page === 'rebuild') {
     $plan = $count === '' ? [] : array_column($db->query('EXPLAIN QUERY PLAN ' . $literal)->fetchAll(), 'detail');
     $listing = Cache::readJson(Cache::localePath('en', 'cat/r8-extra-7/page-1.json'));
     $prices = json_decode((string)Cache::read('prices/guest.json'), true);
-    $sample = $db->query("SELECT id, sku, price, category_id FROM products WHERE sku = 'R8M-39999'")->fetch();
     echo json_encode([
         'categories' => (int)$db->query("SELECT COUNT(*) FROM categories WHERE store_id = {$store}")->fetchColumn(),
         'locales' => count((array)(StoreContext::current()->config()['languages'] ?? [])),
@@ -196,7 +195,6 @@ if ($page === 'rebuild') {
         'extra_skus' => array_column((array)($listing['products'] ?? []), 'sku'), 'extra_total' => $listing['total'] ?? null,
         'extra_category' => $listing['category']['slug'] ?? null,
         'prices' => is_array($prices) ? count($prices) : -1,
-        'sample_ok' => is_array($prices) && ($prices['R8M-39999'] ?? null) === Pricing::apply($sample, 'guest')['price'],
         'peak_mb' => round(memory_get_peak_usage(true) / 1048576, 1),
     ]);
     exit(0);
@@ -265,8 +263,8 @@ try {
     assert_true(str_contains($r8sWarm, 'CacheRebuild::run([\'scope\' => \'full\'], $cfg)') && str_contains($r8sWarm, 'Bootstrap::initStoreContext(')
         && preg_match('/if \(!\$withProducts\) continue;/', $r8sWarm) === 1,
         'R8 cache warm: cli/cache-warm.php runs the store-scoped rebuild per store; one file per product and language only with --products');
-    assert_true(($r8sRb['prices'] ?? -1) === 40000 && ($r8sRb['sample_ok'] ?? false) === true,
-        'R8 cache rebuild: the streamed guest price map holds every active product with its group price (' . ($r8sRb['prices'] ?? '?') . ')');
+    assert_true(($r8sRb['prices'] ?? 0) === -1,
+        'R8 cache rebuild: no per-group price map is written (r13: nothing read it; shop prices come from price lists and promotions)');
 
     // The bounded APIs keep the old semantics: same count, worst first, limited.
     $r8sJobs = static function () use ($r8sMem): array {

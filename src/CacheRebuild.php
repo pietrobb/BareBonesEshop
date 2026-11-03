@@ -1,9 +1,9 @@
 <?php
 /**
- * The cache_rebuild job: a full rebuild (category trees, first listing page and filters of every category, price
- * maps per customer group) or the regeneration of one cached path. Runs in the store that queued it (_store_id):
- * its cache namespace, languages and catalog only. Sized for large catalogs: one listing query per category for
- * all languages, price maps streamed to disk.
+ * The cache_rebuild job: a full rebuild (category trees, first listing page and filters of every category) or the
+ * regeneration of one cached path. Runs in the store that queued it (_store_id): its cache namespace, languages and
+ * catalog only. Sized for large catalogs: one listing query per category for all languages. (It wrote per-group price
+ * maps, cache/prices/*.json, that nothing read: shop prices come from price lists and promotions.)
  */
 final class CacheRebuild
 {
@@ -42,56 +42,6 @@ final class CacheRebuild
                 Cache::writeJson(Cache::localePath($locale, "cat/{$cat['slug']}/filters.json"), ['filters' => self::filters($raw)]);
             }
         }
-
-        $groups = array_keys(Pricing::config()['customer_groups'] ?? ['guest' => []]);
-        if (!in_array('guest', $groups, true)) array_unshift($groups, 'guest');
-        foreach ($groups as $group) {
-            JobQueue::heartbeat();
-            Cache::writeStream("prices/{$group}.json", static fn($out) => self::writePrices($out, (string)$group));
-        }
-    }
-
-    /**
-     * The {sku: price} map of one customer group, streamed in id-keyset chunks: the whole active catalog held in
-     * PHP did not fit in a 128 MB worker. Buffered chunks, because Pricing::apply may query and an open unbuffered
-     * MySQL result forbids that.
-     *
-     * @param resource $out
-     */
-    private static function writePrices($out, string $group): void
-    {
-        $db = Db::get();
-        $stmt = $db->prepare("SELECT id, sku, price, category_id, product_type FROM products
-            WHERE store_id = :catalog AND status = 'active' AND id > :after ORDER BY id LIMIT 2000");
-        // Variants are priced too: a catalog rule on product_type "digital" covers the eBook variant of a printed book.
-        $digital = Db::hasColumn('variants', 'digital') ? 'digital' : '0 AS digital';
-        $variantStmt = $db->prepare("SELECT product_id, sku, price_delta, price_absolute, {$digital} FROM variants
-            WHERE product_id IN (SELECT id FROM products WHERE store_id = :catalog AND status = 'active' AND id > :after AND id <= :last) ORDER BY id");
-        $first = true;
-        $after = 0;
-        $write = static function (string $sku, array $product) use ($out, $group, &$first): void {
-            fwrite($out, ($first ? '{' : ',') . json_encode($sku, JSON_UNESCAPED_UNICODE) . ':' . json_encode(Pricing::apply($product, $group)['price']));
-            $first = false;
-        };
-        do {
-            $stmt->execute([':catalog' => StoreContext::current()->catalogId(), ':after' => $after]);
-            $chunk = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            if ($chunk === []) break;
-            $byId = array_column($chunk, null, 'id');
-            $variantStmt->execute([':catalog' => StoreContext::current()->catalogId(), ':after' => $after, ':last' => (int)end($chunk)['id']]);
-            $variants = $variantStmt->fetchAll(PDO::FETCH_ASSOC);
-            foreach ($chunk as $p) $write((string)$p['sku'], $p);
-            foreach ($variants as $v) {
-                $p = $byId[$v['product_id']] ?? null;
-                if ($p === null || (string)$v['sku'] === '' || (string)$v['sku'] === (string)$p['sku']) continue;
-                $p['price'] = $v['price_absolute'] !== null ? (int)$v['price_absolute'] : (int)$p['price'] + (int)$v['price_delta'];
-                if ($p['price'] < 0) continue; // not sold (Cart): a delta that outgrew a lowered base price
-                if ((int)$v['digital'] === 1 && !VariantAvailability::isDigitalType((string)$p['product_type'])) $p['product_type'] = 'digital';
-                $write((string)$v['sku'], $p);
-            }
-            $after = (int)end($chunk)['id'];
-        } while (count($chunk) === 2000);
-        fwrite($out, $first ? '[]' : '}');
     }
 
     private static function path(string $path, int $perPage, string $cacheDir): void

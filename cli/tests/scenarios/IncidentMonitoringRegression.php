@@ -89,6 +89,8 @@ try {
     $imCategory = (int)$imDb->lastInsertId();
     $imDb->prepare("INSERT INTO products (store_id, category_id, sku, slug, name, product_type, price, currency, stock, status) VALUES ('default', ?, 'IM-DIGITAL', 'im-digital', 'Incident digital', 'downloadable', 599, 'eur', 0, 'active')")->execute([$imCategory]);
     $imProduct = (int)$imDb->lastInsertId();
+    // A download is sold with its file record (r13); the file itself is missing, which the worker fault below needs.
+    $imDb->prepare("INSERT INTO digital_assets (sku, asset_key, label, storage_path, download_name, content_type, active) VALUES ('IM-DIGITAL', 'fault', 'Fixture', 'missing.pdf', 'missing.pdf', 'application/pdf', 1)")->execute();
     $imDb->exec("INSERT INTO payment_methods (code, provider, name, service_type, requires_online, active) VALUES ('incidentpay', 'manual', 'Incident offline', 'offline', 0, 1)");
     $imDb->exec("INSERT INTO payment_method_countries (method_code, country) VALUES ('incidentpay', 'SK')");
     ConsentService::setDefinitionsForTesting([]);
@@ -154,7 +156,6 @@ StockAlerts::setConfigForTesting($cfg);
     copy(TEST_CLI_DIR . '/worker.php', $imRoot . '/worker/cli/worker.php');
     JobQueue::setDir($imRoot . '/worker/jobs');
     JobQueue::push('fault_fixture_unknown', [], 1);
-    $imDb->prepare("INSERT INTO digital_assets (sku, asset_key, label, storage_path, download_name, content_type, active) VALUES ('IM-DIGITAL', 'fault', 'Fixture', 'missing.pdf', 'missing.pdf', 'application/pdf', 1)")->execute();
     JobQueue::push('digital_fulfill', ['order_id' => (int)$imResult['order_id']], 1);
     $imWorker = proc_open([PHP_BINARY, $imRoot . '/worker/cli/worker.php', '--once'], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $imWorkerPipes);
     fclose($imWorkerPipes[0]);

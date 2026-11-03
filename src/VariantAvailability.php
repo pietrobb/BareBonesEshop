@@ -52,19 +52,39 @@ class VariantAvailability {
             || self::isDigitalVariant(isset($item['variant_id']) ? (int)$item['variant_id'] : null);
     }
 
-    private const PRODUCT_COLUMNS = 'id, product_type, status, stock, availability, available_from, inventory_policy, preorder_at';
+    private const PRODUCT_COLUMNS = 'id, sku, product_type, status, stock, availability, available_from, inventory_policy, preorder_at';
+
+    /**
+     * SQL: whether the bundle `$productExpr` has a digital component (a digital product or variant). Its download is
+     * never delivered (downloads follow the line's SKU, the bundle's) and its "stock" would be reserved and shipped.
+     */
+    public static function digitalComponentSql(string $productExpr, ?PDO $db = null): string {
+        return "EXISTS (SELECT 1 FROM bundle_components bc JOIN products cp ON cp.id = bc.component_product_id
+            LEFT JOIN variants cv ON cv.id = bc.component_variant_id
+            WHERE bc.bundle_product_id = {$productExpr} AND (LOWER(COALESCE(cp.product_type, '')) IN ('digital', 'downloadable')
+                OR " . (Db::hasColumn('variants', 'digital', $db) ? 'cv.digital' : '0') . ' = 1))';
+    }
+
+    public static function hasDigitalComponent(int $productId): bool {
+        if (!Db::tableExists('bundle_components')) return false;
+        $stmt = Db::get()->prepare('SELECT ' . self::digitalComponentSql(':id'));
+        $stmt->execute([':id' => $productId]);
+        return (int)$stmt->fetchColumn() === 1;
+    }
 
     public static function isPurchasable(int $productId, ?int $variantId = null): bool {
         $stmt = Db::get()->prepare('SELECT ' . self::PRODUCT_COLUMNS . ' FROM products WHERE id = :id AND store_id = :store');
         $stmt->execute([':id' => $productId, ':store' => StoreContext::current()->catalogId()]);
         $product = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($product && self::hasDigitalComponent($productId)) return false;
         if ($variantId === null) return $product ? self::productPurchasable($product) : false;
         if (!$product || !self::productOpen($product)) return false;
         $stmt = Db::get()->prepare('SELECT product_id, sku, stock, availability, available_from, inventory_policy, preorder_at, ' . self::digitalColumn('variants') . ' AS digital FROM variants WHERE id = :id');
         $stmt->execute([':id' => $variantId]);
         $variant = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$variant || (int)$variant['product_id'] !== $productId) return false;
-        if ((int)($variant['digital'] ?? 0) === 1 && !self::hasDownload((string)$variant['sku'])) return false;
+        if (((int)($variant['digital'] ?? 0) === 1 || self::isDigitalType((string)$product['product_type']))
+            && !self::hasDownload((string)$variant['sku'])) return false;
         return self::variantPurchasable($product, $variant);
     }
 
@@ -108,11 +128,11 @@ class VariantAvailability {
                 $variant = ['stock' => $row['v_stock'], 'availability' => $row['v_availability'], 'available_from' => $row['v_available_from'],
                     'inventory_policy' => $row['v_inventory_policy'], 'digital' => $row['v_digital']];
                 $state = $result[$id] ?? ['purchasable' => false, 'in_stock' => false, 'quantity' => 0];
-                $noFile = (int)$row['v_digital'] === 1 && (int)$row['v_files'] === 0;
+                $noFile = ((int)$row['v_digital'] === 1 || self::isDigitalType((string)$row['product_type'])) && (int)$row['v_files'] === 0;
                 if (!$noFile && self::productOpen($row) && self::variantPurchasable($row, $variant)) {
                     $state['purchasable'] = true;
-                    $digital = self::isDigitalType((string)$row['product_type']) || (int)$row['v_digital'] === 1;
-                    if ($digital || (int)$row['v_stock'] > 0) $state['in_stock'] = true;
+                    $isDigital = self::isDigitalType((string)$row['product_type']) || (int)$row['v_digital'] === 1;
+                    if ($isDigital || (int)$row['v_stock'] > 0) $state['in_stock'] = true;
                 }
                 if ((int)$row['v_digital'] !== 1) $state['quantity'] += max(0, (int)$row['v_stock']);
                 $result[$id] = $state;
@@ -133,10 +153,14 @@ class VariantAvailability {
         foreach (array_chunk($ids, 500) as $chunk) {
             $params = [':store' => StoreContext::current()->catalogId()];
             foreach ($chunk as $index => $id) $params[':id' . $index] = $id;
-            $stmt = Db::get()->prepare('SELECT ' . self::PRODUCT_COLUMNS . ' FROM products WHERE store_id = :store AND id IN ('
+            $files = Db::tableExists('digital_assets') ? '(SELECT COUNT(*) FROM digital_assets da WHERE da.sku = products.sku AND da.active = 1)' : '0';
+            $bundled = Db::tableExists('bundle_components') ? self::digitalComponentSql('products.id') : '0';
+            $stmt = Db::get()->prepare('SELECT ' . self::PRODUCT_COLUMNS . ", {$files} AS files, {$bundled} AS digital_component FROM products WHERE store_id = :store AND id IN ("
                 . implode(', ', array_slice(array_keys($params), 1)) . ')');
             $stmt->execute($params);
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $product) $result[(int)$product['id']] = self::productPurchasable($product);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $product) {
+                $result[(int)$product['id']] = (int)$product['digital_component'] !== 1 && self::productPurchasable($product);
+            }
         }
         return $result;
     }
@@ -149,11 +173,15 @@ class VariantAvailability {
             || $policy === Inventory::PREORDER;
     }
 
-    /** @param array $product row with the PRODUCT_COLUMNS */
+    /** @param array $product row with the PRODUCT_COLUMNS (and optionally `files`, its count of active download files) */
     public static function productPurchasable(array $product): bool {
         if (!self::productOpen($product)) return false;
+        // A download without its file is not sold, like a download variant (hasDownload).
+        if (self::isDigitalType((string)$product['product_type'])) {
+            return isset($product['files']) ? (int)$product['files'] > 0 : self::hasDownload((string)($product['sku'] ?? ''));
+        }
         $policy = (string)($product['inventory_policy'] ?? Inventory::DENY);
-        return self::isDigitalType((string)$product['product_type']) || (int)$product['stock'] > 0
+        return (int)$product['stock'] > 0
             || in_array($policy, [Inventory::BACKORDER, Inventory::PREORDER], true);
     }
 

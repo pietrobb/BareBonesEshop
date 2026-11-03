@@ -128,7 +128,6 @@ Return operations are a separate auditable layer on top of the order: several op
 │  cache/store/{locale}/product/{slug}.json               │
 │  cache/store/{locale}/categories.json                   │
 │  cache/filters/{category}.json                          │
-│  cache/prices/{customer_group}.json                     │
 └──────────────────┬──────────────────────────────────────┘
                    │ served directly (.htaccess / nginx)
                    ▼
@@ -1454,13 +1453,8 @@ Redis (including the completed ones it keeps) are neither exported nor scrubbed.
 
 ### Pre-computed prices per customer group
 
-```
-cache/
-├── prices/
-│   ├── guest.json           # {"TSHIRT-BLK-L": 1990, ...}
-│   ├── wholesale.json       # {"TSHIRT-BLK-L": 1692, ...}  (15% off)
-│   └── vip.json             # {"TSHIRT-BLK-L": 1791, ...}  (10% off)
-```
+Removed in round 13: the `cache/prices/{group}.json` maps were read by nothing. Shop prices come from price lists and
+promotions; `doctor` warns (`pricing.legacy_rules`) when `pricing.json` still configures catalog rules or group discounts.
 
 ### Rebuild vs runtime — clear boundaries
 
@@ -1681,8 +1675,7 @@ barebone-shop/
 │   │   └── product/{slug}.json
 │   ├── en/                       #   English store
 │   ├── de/                       #   German store
-│   ├── filters/                  #   filter configuration per category
-│   └── prices/                   #   pre-computed prices per customer group
+│   └── filters/                  #   filter configuration per category
 │
 ├── jobs/                         # Async job queue (flat files)
 │   ├── pending/

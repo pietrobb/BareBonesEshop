@@ -1,7 +1,7 @@
 <footer class="bk-footer">
   <div class="footer-main"><div class="wrap">
-    <div class="footer-col bk-footer__about"><h2 class="bk-footer__title">{{shop_name}}</h2><p>Classic literature whose copyright has expired, in new editions: an EPUB to read on any device, a paperback to carry and a hardcover to keep.</p></div>
-    <div class="footer-col"><h2 class="bk-footer__title">Genres</h2>{{#each footer_categories}}<a href="{{url}}">{{label}}</a>{{/each}}</div>
+    <div class="footer-col bk-footer__about"><h2 class="bk-footer__title">{{shop_name}}</h2><p>{{t.bookshop.about}}</p></div>
+    <div class="footer-col"><h2 class="bk-footer__title">{{t.bookshop.genres}}</h2>{{#each footer_categories}}<a href="{{url}}">{{label}}</a>{{/each}}</div>
     <div class="footer-col"><h2 class="bk-footer__title">{{t.information}}</h2>
       {{#if about_url}}<a href="{{about_url}}">{{t.about_us}}</a>{{/if}}
       {{#if contact_url}}<a href="{{contact_url}}">{{t.contact}}</a>{{/if}}
@@ -9,7 +9,7 @@
       <a href="{{withdrawal_url}}">{{t.withdrawal_link}}</a>
       <a href="{{complaint_url}}">{{t.complaint_link}}</a>
     </div>
-    <div class="footer-col"><h2 class="bk-footer__title">Legal</h2>
+    <div class="footer-col"><h2 class="bk-footer__title">{{t.bookshop.legal}}</h2>
       <a href="{{imprint_url}}">{{t.imprint}}</a>
       <a href="{{terms_url}}">{{t.terms_conditions}}</a>
       <a href="{{privacy_url}}">{{t.privacy_policy}}</a>
@@ -19,5 +19,5 @@
       {{#if adr_name}}<p class="footer-adr">{{t.adr_label}} <a href="{{adr_url}}" rel="noopener">{{adr_name}}</a></p>{{/if}}
     </div>
   </div></div>
-  <div class="footer-bottom"><div class="wrap">{{shop_name}} &copy; {{year}} &middot; Texts in the public domain; covers and editions are our own. &middot; {{t.powered_by}}</div></div>
+  <div class="footer-bottom"><div class="wrap">{{shop_name}} &copy; {{year}} &middot; {{t.bookshop.copyright_note}} &middot; {{t.powered_by}}</div></div>
 </footer>

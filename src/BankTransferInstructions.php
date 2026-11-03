@@ -98,7 +98,12 @@ final class BankTransferInstructions {
     /** End (23:59:59 on the shop's calendar) of the day the transfer is due: $ttl (default: the configured term) after the order. */
     public static function dueAt(array $order, ?int $ttl = null): int {
         $created = strtotime((string)($order['created_at'] ?? '') . ' UTC') ?: ShopTime::now();
-        return ShopTime::endOfDay($created + ($ttl ?? self::payWithinSeconds()), 0, self::storeOf($order));
+        $ttl ??= self::payWithinSeconds();
+        // A term of whole days counts calendar days: 14 × 24 h across a daylight-saving change lands an hour short, on
+        // the day before for an order placed in the first local hour after midnight.
+        return $ttl % 86400 === 0
+            ? ShopTime::endOfDay($created, intdiv($ttl, 86400), self::storeOf($order))
+            : ShopTime::endOfDay($created + $ttl, 0, self::storeOf($order));
     }
 
     /**

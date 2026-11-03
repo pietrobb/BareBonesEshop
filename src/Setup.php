@@ -296,6 +296,9 @@ class Setup
             self::adminChecks($config, $add);
             self::storeCurrencyChecks($probe, is_array($stores) ? (array)($stores['stores'] ?? []) : [], $add);
             $add(...array_values(self::digitalFilesCheck($probe)));
+            $add(...array_values(self::digitalBundlesCheck($probe)));
+            $pricingFile = $root . '/pricing.json';
+            $add(...array_values(self::legacyPricingCheck(is_file($pricingFile) ? (array)json_decode((string)file_get_contents($pricingFile), true) : [])));
             foreach (PaymentReadiness::checks($probe, $config, is_array($stores) ? (array)($stores['stores'] ?? []) : null) as [$status, $name, $message, $remediation]) $add($status, $name, $message, $remediation);
         } catch (Throwable $e) {
             $add('fail', 'database.connection', 'Database connection failed.', 'Verify database credentials/path and run migrations.');
@@ -363,18 +366,56 @@ class Setup
     }
 
     /**
-     * Download variants of active products without an active file (digital_assets by SKU): not for sale
+     * Downloads (variants, or digital products by their own SKU) of active products without an active file (digital_assets by SKU): not for sale
      * (VariantAvailability::hasDownload), so the shop silently lacks them.
      * @return array{status: string, name: string, message: string, action: string}
      */
     public static function digitalFilesCheck(PDO $db): array {
-        $missing = Db::hasColumn('variants', 'digital', $db) && Db::tableExists('digital_assets', $db) ? $db->query("SELECT v.sku FROM variants v JOIN products p ON p.id = v.product_id
-            WHERE v.digital = 1 AND p.status = 'active'
-              AND NOT EXISTS (SELECT 1 FROM digital_assets da WHERE da.sku = v.sku AND da.active = 1) ORDER BY v.sku")->fetchAll(PDO::FETCH_COLUMN) : [];
+        $digitalType = "LOWER(COALESCE(p.product_type, '')) IN ('digital', 'downloadable')";
+        $noFile = static fn(string $sku): string => "NOT EXISTS (SELECT 1 FROM digital_assets da WHERE da.sku = {$sku} AND da.active = 1)";
+        $missing = Db::tableExists('digital_assets', $db) ? array_merge(
+            $db->query("SELECT v.sku FROM variants v JOIN products p ON p.id = v.product_id
+                WHERE (" . (Db::hasColumn('variants', 'digital', $db) ? 'v.digital = 1 OR ' : '') . "{$digitalType}) AND p.status = 'active'
+                  AND " . $noFile('v.sku') . ' ORDER BY v.sku')->fetchAll(PDO::FETCH_COLUMN),
+            // A digital product without variants is sold under its own SKU.
+            $db->query("SELECT p.sku FROM products p WHERE {$digitalType} AND p.status = 'active'
+                  AND NOT EXISTS (SELECT 1 FROM variants v WHERE v.product_id = p.id) AND " . $noFile('p.sku') . ' ORDER BY p.sku')->fetchAll(PDO::FETCH_COLUMN)
+        ) : [];
         return ['status' => $missing === [] ? 'pass' : 'warn', 'name' => 'catalog.digital_files', 'message' => $missing === []
-            ? 'Every download variant has its file.'
-            : count($missing) . ' download variant(s) have no active file and are not for sale (e.g. ' . implode(', ', array_slice($missing, 0, 5)) . ').',
+            ? 'Every download has its file.'
+            : count($missing) . ' download(s) have no active file and are not for sale (e.g. ' . implode(', ', array_slice($missing, 0, 5)) . ').',
             'action' => $missing === [] ? '' : 'Add the file for each SKU in Admin → Digital files (or untick Download on the variant).'];
+    }
+
+    /**
+     * pricing.json catalog_rules and customer group discounts: no shop price applies them (they only fed a price map
+     * nothing read), so a merchant who configured a sale there would wait for it in vain.
+     * @return array{status: string, name: string, message: string, action: string}
+     */
+    public static function legacyPricingCheck(array $pricing): array {
+        $rules = array_filter((array)($pricing['catalog_rules'] ?? []), static fn($rule): bool => is_array($rule) && !empty($rule['active']));
+        $groups = array_filter((array)($pricing['customer_groups'] ?? []), static fn($group): bool => is_array($group) && (float)($group['discount'] ?? 0) > 0);
+        $unused = array_merge(array_map(static fn($rule): string => (string)($rule['name'] ?? 'catalog rule'), $rules),
+            array_map(static fn($key): string => "customer group {$key}", array_keys($groups)));
+        return ['status' => $unused === [] ? 'pass' : 'warn', 'name' => 'pricing.legacy_rules', 'message' => $unused === []
+            ? 'pricing.json configures no catalog rule or customer group discount (they are not applied).'
+            : 'pricing.json discounts are not applied to any price: ' . implode(', ', array_slice($unused, 0, 5)) . '.',
+            'action' => $unused === [] ? '' : 'Set catalog discounts up as promotions (Admin → Promotions) or price lists, then remove catalog_rules and the group discounts from pricing.json.'];
+    }
+
+    /**
+     * Active bundles with a digital component (VariantAvailability::digitalComponentSql): not for sale, since the
+     * download would never be delivered.
+     * @return array{status: string, name: string, message: string, action: string}
+     */
+    public static function digitalBundlesCheck(PDO $db): array {
+        $bundles = Db::tableExists('bundle_components', $db)
+            ? $db->query("SELECT p.sku FROM products p WHERE p.status = 'active' AND " . VariantAvailability::digitalComponentSql('p.id', $db) . ' ORDER BY p.sku')->fetchAll(PDO::FETCH_COLUMN)
+            : [];
+        return ['status' => $bundles === [] ? 'pass' : 'warn', 'name' => 'catalog.digital_bundles', 'message' => $bundles === []
+            ? 'No bundle contains a download.'
+            : count($bundles) . ' bundle(s) contain a download and are not for sale (e.g. ' . implode(', ', array_slice($bundles, 0, 5)) . ').',
+            'action' => $bundles === [] ? '' : 'Sell the download as its own product (or as a format of the book), not as a bundle component.'];
     }
 
     /** Retention deadlines are only met when cli/gdpr-gc.php --apply actually runs; nothing in the app schedules it. */

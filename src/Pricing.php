@@ -2,8 +2,9 @@
 declare(strict_types=1);
 /**
  * BareBones Shop — Pricing
- * Catalog rules, customer group discounts, cart rules, tier pricing.
- * Reads config from pricing.json.
+ * Price lists (DB) and the cart rules of pricing.json (coupons, automatic cart rules). The catalog_rules and customer
+ * group discounts of pricing.json are evaluated by apply() only: no shop price uses them (Setup::legacyPricingCheck
+ * warns); catalog discounts are promotions and price lists.
  */
 class Pricing {
     private static ?array $config = null;

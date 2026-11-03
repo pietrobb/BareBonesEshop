@@ -264,6 +264,8 @@ foreach ($r7rFeedRows as [$id, $sku, $stock, $state, $policy, $type, $from]) {
         SELECT ?, ?, id, ?, ?, ?, 1000, ?, 'active', ?, ?, ?, ? FROM categories WHERE store_id = ? ORDER BY id LIMIT 1")
         ->execute([$id, $r7rCatalog, $sku, strtolower($sku), $sku, $stock, $state, $policy, $type, $from, $r7rCatalog]);
 }
+// A download is sold (and in stock) with its file (r13).
+$pdo->exec("INSERT INTO digital_assets (sku, storage_path, download_name) VALUES ('R7R-FEED-DIGI', 'r7r/feed.pdf', 'feed.pdf')");
 $r7rFeed = MarketingFeed::google('https://shop.example');
 $r7rFeedItem = static function (string $sku) use ($r7rFeed): string {
     foreach (explode('<item>', $r7rFeed) as $item) if (str_contains($item, '<g:id>' . $sku . '</g:id>')) return $item;
@@ -275,6 +277,7 @@ foreach ($r7rFeedRows as [$id, $sku, , $state, $policy, $type, , $expected]) {
 }
 assert_true(str_contains($r7rFeedItem('R7R-FEED-PRE'), '<g:availability_date>2099-03-01T00:00:00+00:00</g:availability_date>'),
     'R7 Google feed: a preorder carries its release date');
+$pdo->exec("DELETE FROM digital_assets WHERE sku = 'R7R-FEED-DIGI'");
 $pdo->exec('DELETE FROM products WHERE id BETWEEN 97720 AND 97725');
 
 // R7 medium (Omnibus, 98/6/EC art. 6a): the struck-through "original" price came from compare_price, which can be any
@@ -395,8 +398,10 @@ foreach (['deleted' => 'delete', 're-dated' => 'redate', 'repriced' => 'reprice'
 }
 // Extending a running promotion is the same run: no copy, the struck-through base price stays.
 $r7rRunsReset();
-$r7rId = $r7rOk(PricingAdmin::savePromotion(0, $r7rPromoForm('r8-restart-1', $r7rAgo(5), gmdate('Y-m-d H:i:s', time() + 5 * 86400))));
-$r7rOk(PricingAdmin::savePromotion($r7rId, $r7rPromoForm('r8-restart-1', $r7rAgo(5), gmdate('Y-m-d H:i:s', time() + 30 * 86400))));
+// One start for both saves: computed twice, a second ticking over between them moved it, a re-date (T21 flake).
+$r7rStart = $r7rAgo(5);
+$r7rId = $r7rOk(PricingAdmin::savePromotion(0, $r7rPromoForm('r8-restart-1', $r7rStart, gmdate('Y-m-d H:i:s', time() + 5 * 86400))));
+$r7rOk(PricingAdmin::savePromotion($r7rId, $r7rPromoForm('r8-restart-1', $r7rStart, gmdate('Y-m-d H:i:s', time() + 30 * 86400))));
 assert_equals([[8000, 10000], 0], [$r7rShownPair(), (int)$pdo->query('SELECT COUNT(*) FROM promotion_runs')->fetchColumn()],
     'R8 Omnibus runs: extending a running promotion copies no run and keeps the struck-through base price');
 $r7rRunsReset();
@@ -573,7 +578,9 @@ Orders::updateStatus($r7rRmaOrder, 'delivered');
 assert_equals($r7rDeliveredAt, (string)$pdo->query("SELECT delivered_at FROM orders WHERE id = {$r7rRmaOrder}")->fetchColumn(), 'R7 return window: a repeated delivered status keeps the first time');
 $r7rRmaOk = Rma::create($r7rRmaOrder, $r7rRmaCustomer, 'too small', [$r7rRmaItem => 1]);
 assert_true($r7rRmaOk[0] === true, 'R7 return window: a fresh delivery can be returned by the customer');
-$pdo->prepare('UPDATE orders SET delivered_at = ? WHERE id = ?')->execute([gmdate('Y-m-d H:i:s', time() - 15 * 86400), $r7rRmaOrder]);
+// Noon of the shop's calendar day 15 days ago: 15 × 24 h ago lands on the day after when a daylight-saving change lies
+// between (from 23:00 the window was still open, T21).
+$pdo->prepare('UPDATE orders SET delivered_at = ? WHERE id = ?')->execute([gmdate('Y-m-d H:i:s', ShopTime::endOfDay(time(), -15) - 12 * 3600), $r7rRmaOrder]);
 assert_equals('return_window_closed', Rma::create($r7rRmaOrder, $r7rRmaCustomer, 'changed my mind', [$r7rRmaItem => 1])[2],
     'R7 return window: 15 days after delivery the customer request is refused (default 14 days; was accepted)');
 $r7rOrderRow = Orders::byId($r7rRmaOrder);

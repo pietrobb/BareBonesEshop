@@ -3,8 +3,8 @@ require_once __DIR__ . '/cli-only.php';
 
 /**
  * BareBones Shop — Cache Warmer
- * Runs the full cache rebuild (CacheRebuild: category trees, first listing page and filters of every category,
- * price maps) for every store, in its own namespace, catalog and languages. Product detail pages are cached on
+ * Runs the full cache rebuild (CacheRebuild: category trees, first listing page and filters of every category)
+ * for every store, in its own namespace, catalog and languages. Product detail pages are cached on
  * first view; --products also pre-renders them (one JSON per product and language: at 200k products that is
  * hundreds of thousands of files that every catalog change makes stale again).
  * Usage: php cli/cache-warm.php [--products] [--store=<id>] [--verbose]

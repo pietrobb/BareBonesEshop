@@ -43,6 +43,8 @@ try {
         $db->prepare("INSERT INTO products (id, store_id, category_id, sku, slug, name, product_type, price, currency, stock, status) VALUES (?, 'default', 99001, ?, ?, ?, ?, 599, 'eur', 500, 'active')")
             ->execute([$id, 'CONTRACT-' . $id, 'contract-' . $id, 'Contract product ' . $id, $type]);
     }
+    // A download is sold with its file (VariantAvailability::productPurchasable).
+    $db->exec("INSERT INTO digital_assets (sku, asset_key, storage_path, download_name) VALUES ('CONTRACT-99002', 'file', 'contract.pdf', 'contract.pdf')");
     $db->exec("UPDATE payment_methods SET active=0");
     $db->exec("INSERT INTO payment_methods (code, provider, name, service_type, requires_online, active, sort_order) VALUES ('contractpay', 'manual', 'Contract card', 'online', 1, 1, 0)");
     $db->exec("INSERT INTO payment_method_countries (method_code, country) VALUES ('contractpay', 'SK'), ('contractpay', 'DE')");
