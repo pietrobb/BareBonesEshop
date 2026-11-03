@@ -91,7 +91,10 @@ class Withdrawal {
                 FROM shipments WHERE order_id = ? AND status <> 'cancelled'");
             $stmt->execute([$orderId]);
             $parcels = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
-            $deliveredAt = (int)($parcels['on_the_way'] ?? 0) > 0 || self::goodsNotInParcels($orderId) ? '' : (string)($parcels['last_delivered'] ?? '');
+            // A cancelled or refunded order ships nothing more: its goods in no parcel never come.
+            $closed = in_array((string)($order['status'] ?? ''), ['cancelled', 'refunded'], true);
+            $deliveredAt = (int)($parcels['on_the_way'] ?? 0) > 0 || (!$closed && self::goodsNotInParcels($orderId))
+                ? '' : (string)($parcels['last_delivered'] ?? '');
         }
         return $deliveredAt === '' ? false : strtotime($deliveredAt . ' UTC');
     }

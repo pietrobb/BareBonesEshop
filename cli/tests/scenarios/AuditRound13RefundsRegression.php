@@ -39,6 +39,10 @@ try {
     $r13rParcel('r13r-n4-a', $r13rItemA, 'R13R-BOOK-A', $r13rAgo(20));
     assert_true(Withdrawal::receivedAt($r13rOrder()) === false,
         'R13 N4: with book B in no parcel yet, the goods have not all arrived (was: the period ran from book A, 20 days ago)');
+    $pdo->prepare("UPDATE orders SET status = 'cancelled' WHERE id = ?")->execute([$r13rOrderId]);
+    assert_equals(strtotime($r13rAgo(20) . ' UTC'), Withdrawal::receivedAt($r13rOrder()),
+        'R13 N4: a cancelled order ships nothing more, so book A delivered 20 days ago starts the period of what was shipped');
+    $pdo->prepare("UPDATE orders SET status = 'shipped' WHERE id = ?")->execute([$r13rOrderId]);
     $r13rB = $r13rParcel('r13r-n4-b', $r13rItemB, 'R13R-BOOK-B', null);
     assert_true(Withdrawal::receivedAt($r13rOrder()) === false && Withdrawal::withinPeriod($r13rOrder()) && Rma::withinReturnWindow($r13rOrder())
         && Withdrawal::refusal($r13rOrder()) === null,
@@ -218,7 +222,7 @@ PHP);
     // N5 (4): the refund worker wrote the payment status blindly: a late item-refund job moved a disputed payment on.
     $r13rDisputed = $r13rStripeOrder('dispute', 'disputed');
     $r13rItem = $r13rItemRefund($r13rDisputed, 300, 'r13r-dispute-item');
-    handlePaymentRefund(['order_id' => $r13rDisputed, 'payment_id' => 'pi_r13r_dispute', 'amount' => 300, 'refund_id' => $r13rItem, 'idempotency_key' => 'r13r-dispute-item'], []);
+    WorkerJobs::handlePaymentRefund(['order_id' => $r13rDisputed, 'payment_id' => 'pi_r13r_dispute', 'amount' => 300, 'refund_id' => $r13rItem, 'idempotency_key' => 'r13r-dispute-item'], []);
     assert_equals(['disputed', 300, 'succeeded'], [(string)Orders::byId($r13rDisputed)['payment_status'], PaymentService::refundedAmount($r13rDisputed), $r13rItemRefundRow($r13rItem)[0]],
         'R13 N5: the refund job books the money but leaves a disputed payment to the state machine (was: partially_refunded)');
 
@@ -230,7 +234,7 @@ PHP);
     PaymentService::requestRefundAndQueue($r13rInvoiced, 400, 'r13r-t5-request', ['reason' => 'R13R']);
     $r13rT5Job = $r13rPending('payment_refund', $r13rInvoiced)[0] ?? null;
     assert_true($r13rT5Job !== null, 'R13 T5: the admin refund is queued');
-    handlePaymentRefund($r13rT5Job['payload'], $r13rT5Job);
+    WorkerJobs::handlePaymentRefund($r13rT5Job['payload'], $r13rT5Job);
     $r13rCreditJobs = $r13rPending('refund_credit_note', $r13rInvoiced);
     assert_equals(1, count($r13rCreditJobs), 'R13 T5: the booked refund queues its credit note (was: none, the invoice kept the refunded sum)');
     $r13rWorkerSource = (string)file_get_contents(TEST_CLI_DIR . '/../cli/worker.php') . @file_get_contents(TEST_CLI_DIR . '/../src/WorkerJobs.php');
