@@ -561,9 +561,12 @@ $uqDb = null;
 echo "\n--- Test: Bootstrap shared helpers (P5) ---\n";
 
 // stores() returns the decoded stores.json, byte-for-byte parity with a direct decode
+$bsStoresProp = new ReflectionProperty(Bootstrap::class, 'stores');
+$bsStoresProp->setValue(null, null); // FoundationScenario gave the suite's default store a test IBAN; read the file afresh
 $bsStoresDirect = json_decode((string)file_get_contents(DataOverrides::storesPath()), true) ?: [];
 assert_equals($bsStoresDirect, Bootstrap::stores(), 'Bootstrap: stores() equals direct stores.json decode');
 assert_true(Bootstrap::stores() === Bootstrap::stores(), 'Bootstrap: stores() returns stable cached value across calls');
+$bsStoresProp->setValue(null, $testStores);
 
 // initLocale() parity with I18n::detectLocale + applies the locale
 $savedLocale = I18n::locale();

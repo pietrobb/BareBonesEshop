@@ -1,6 +1,6 @@
 <section class="bk-hero" id="{{id}}" aria-labelledby="{{id}}-title">
   <div class="bk-hero__text">
-    <h1 id="{{id}}-title">{{#if content.heading}}{{content.heading}}{{else}}{{t.hero_title}}{{/if}}</h1>
+    <h1 id="{{id}}-title">{{#if content.heading}}{{content.heading}}{{else}}{{shop_name}}{{/if}}</h1>
     {{#if content.body_html}}<div class="bk-hero__body">{{{content.body_html}}}</div>{{/if}}
     {{#if data.category.url}}<a class="bk-button" href="{{data.category.url}}">{{#if content.cta.label}}{{content.cta.label}}{{else}}{{data.category.name}}{{/if}}</a>{{else}}{{#if content.cta.url}}<a class="bk-button" href="{{content.cta.url}}">{{content.cta.label}}</a>{{/if}}{{/if}}
   </div>

@@ -17,10 +17,10 @@ final class BankTransferInstructions {
             return null;
         }
         $legal ??= StoreContext::current()->legal();
-        $iban = strtoupper(preg_replace('/\s+/', '', (string)($legal['iban'] ?? '')) ?? '');
-        if (!self::validIban($iban)) return null;
+        $iban = self::storeIban($legal);
+        if ($iban === '') return null;
         $bic = strtoupper(trim((string)($legal['bic'] ?? '')));
-        if (!preg_match('/^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/', $bic)) $bic = '';
+        if (!self::validBic($bic)) $bic = '';
 
         $amount = (int)$order['total'];
         $currency = strtolower((string)($order['currency'] ?? '') ?: 'eur');
@@ -157,6 +157,18 @@ final class BankTransferInstructions {
     private static function payWithinSeconds(): int {
         $cfg = require __DIR__ . '/../config.php';
         return PendingOrderExpiry::offlineTtls(is_array($cfg) ? $cfg : [])['bank_transfer'] ?? 14 * 86400;
+    }
+
+    /** The store's IBAN normalised (no spaces, upper case), '' when missing or invalid: the store cannot be paid by transfer. */
+    public static function storeIban(?array $legal = null): string {
+        $legal ??= StoreContext::current()->legal();
+        $iban = strtoupper(preg_replace('/\s+/', '', (string)($legal['iban'] ?? '')) ?? '');
+        return self::validIban($iban) ? $iban : '';
+    }
+
+    /** ISO 9362 shape of a BIC (SWIFT code), upper case: bank, country, location and an optional branch. */
+    public static function validBic(string $bic): bool {
+        return preg_match('/^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/', $bic) === 1;
     }
 
     /** ISO 13616 check digits of an IBAN without spaces, upper case. */

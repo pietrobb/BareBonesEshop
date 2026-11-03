@@ -11,6 +11,7 @@ require_once TEST_CLI_DIR . '/../src/Http/ApiHandlers.php';
 
 $r9cRoot = dirname(__DIR__, 3);
 $r9cSample = json_decode((string)file_get_contents($r9cRoot . '/stores.example.json'), true);
+$r9cSample['stores']['cz']['legal']['iban'] = 'CZ65 0800 0000 1920 0014 5399'; // bank transfer needs a checksum-valid IBAN
 $r9cStoresProp = new ReflectionProperty(Bootstrap::class, 'stores');
 $r9cSavedStores = $r9cStoresProp->getValue();
 $r9cPrevious = StoreContext::current();

@@ -41,7 +41,11 @@ git clone --recurse-submodules <repository-url> shop && cd shop
 #    the schema, admin forms and import templates, and the first owner account;
 #    then prints the doctor checklist. Safe to re-run: config.php is never
 #    rewritten and an existing owner account is left unchanged. New orders,
-#    payments and incidents are e-mailed to --admin-email.
+#    payments and incidents are e-mailed to --admin-email. The sample stores
+#    (cz, pl, hu, de, us) come in hidden and the card method stays off until
+#    Stripe keys are set. Doctor then reports one FAIL, stores.legal.default:
+#    the seller is still the example company. Enter yours in Admin → Stores
+#    and seller (company, address, e-mail, IBAN) before taking orders.
 BBE_ADMIN_PASSWORD='a-strong-password' php cli/setup.php install \
   --app-url=http://localhost:8080 --admin-email=you@your-shop.com --admin-username=admin
 
@@ -79,7 +83,8 @@ database and the eBook files.
    folder and the administrator. The installer first requests `src/` and the starter data from its own
    server: if they are served (no `mod_rewrite` or `AllowOverride`), it refuses until the host is fixed.
 4. The installer writes `config.php` with fresh secrets, creates `bareboneseshop-private/` in the
-   private data folder (default: the folder above the web root, which the web server does not serve),
+   private data folder (default: `bareboneseshop-data/<shop folder>` next to a recognised web root
+   such as `public_html`, otherwise the folder that contains the shop folder; check it in the form),
    copies the database and the eBooks there, deletes `demo/bookshop/dist/` and `install-key.php` from
    the web space, and creates the owner account. Scan the TOTP QR code it
    shows into an authenticator app and keep the recovery codes; they are shown once. The page ends
@@ -107,7 +112,7 @@ E-mails are only logged until you configure SMTP in `config.php`. To build the p
   `cache/`, `uploads/`, `import/` and `logs/` are writable. From a fresh clone
   (`git clone --recurse-submodules`), the opt-in installer writes `config.php` and hands those
   directories to uid 33:
-  `docker compose -f deploy/docker-compose.yml run --rm -e BBE_ADMIN_PASSWORD=... setup php cli/setup.php install --app-url=http://localhost:8080 --admin-username=admin`,
+  `docker compose -f deploy/docker-compose.yml run --rm -e BBE_ADMIN_PASSWORD=... setup php cli/setup.php install --app-url=http://localhost:8080 --admin-email=you@your-shop.com --admin-username=admin`,
   then `docker compose -f deploy/docker-compose.yml up -d`.
 - **Subdirectory of a web root** (for example `public_html/shop`): `install` keeps the private
   data above the web root (`../bareboneseshop-data/shop/`), because the template's
@@ -198,8 +203,9 @@ the customer's order detail and in the order confirmation e-mail, and returns th
 `bank_transfer` in the JSON checkout response: beneficiary, IBAN, BIC, exact amount,
 variable symbol (the order ID, also shown in admin *Awaiting payment*), message and
 due date. The account comes from `legal.name`, `legal.iban`, `legal.bic` and the
-optional `legal.bank` of the store in `stores.json`; without a valid IBAN no
-instructions are shown. EUR orders also get a PAY by square QR code, generated
+optional `legal.bank` of the store in `stores.json` (Admin → Stores and seller). A store
+without a valid IBAN (missing, or wrong check digits as in the shipped sample stores) does
+not offer bank transfer at checkout at all. EUR orders also get a PAY by square QR code, generated
 locally as an inline SVG.
 
 ---
@@ -563,8 +569,10 @@ moderation, returns (RMA) and complaints, audit log; and **customer management**
 TOTP and role-based access control; statuses are shown translated, and the admin
 works on phones.
 
-**JSON API** (`/api/v1`) — 34 actions with rate limiting, CSRF on mutating
-requests, registry-routed payment/shipping webhook endpoints, and a CSP violation report endpoint:
+**JSON API** (`/api/v1`) — 34 actions in the browser router (27 storefront, webhook and CSP
+actions and 7 BBF option lists; extensions add their own `<code>.<name>` actions) with rate
+limiting, CSRF on mutating requests and registry-routed payment/shipping webhooks, plus the
+external machine API:
 
 | Route | Use | Authentication |
 |---|---|---|

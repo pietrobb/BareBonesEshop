@@ -258,7 +258,6 @@ return [
     'back_in_stock.limit' => 'Táto adresa už čaká na príliš veľa produktov.',
     'back_in_stock.throttled' => 'Príliš veľa žiadostí. Skúste to neskôr.',
     'back_in_stock.expired' => 'Platnosť formulára vypršala. Skúste to znova.',
-    'hero_title'       => 'Sauna & Drevené výrobky',
     'shop_now'         => 'Nakupovať',
 
     // Placeholders used in filter inputs
@@ -1894,6 +1893,7 @@ return [
     'admin.stores.err.required' => 'Vyplňte: {fields}.',
     'admin.stores.err.email' => 'E-mail predajcu nie je platná adresa.',
     'admin.stores.err.iban' => 'IBAN má nesprávne kontrolné číslice.',
+    'admin.stores.err.bic' => 'BIC (SWIFT) má 8 alebo 11 znakov, napr. TATRSKBX.',
     'admin.stores.err.country' => 'Krajina musí byť dvojpísmenový ISO kód (SK, CZ, DE …).',
     'admin.stores.err.terms' => 'Splatnosť musí byť 0–365 dní.',
     'admin.stores.err.vat_id' => 'Platiteľ DPH musí mať IČ DPH.',
@@ -1911,6 +1911,7 @@ return [
     'admin.stores.field.oss_enabled' => 'EÚ OSS (DPH krajiny spotrebiteľa v iných štátoch EÚ)',
     'admin.stores.field.public' => 'Verejný obchod (storefront na jeho adrese a v sitemape)',
     'admin.stores.field.iban' => 'IBAN',
+    'admin.stores.field.bic' => 'BIC (SWIFT)',
     'admin.stores.field.bank' => 'Banka',
     'admin.stores.field.email' => 'E-mail predajcu',
     'admin.stores.field.phone' => 'Telefón',

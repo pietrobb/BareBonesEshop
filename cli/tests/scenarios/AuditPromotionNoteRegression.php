@@ -55,6 +55,9 @@ file_put_contents($a064Root . '/html.php', <<<'PHP'
 <?php
 [, $root, $dbPath] = $argv;
 require $root . '/src/autoload.php';
+$stores = Bootstrap::stores(); // bank transfer is offered only to a store with a checksum-valid IBAN
+$stores['stores']['default']['legal']['iban'] = 'SK31 1200 0000 1987 4263 7541';
+(new ReflectionProperty(Bootstrap::class, 'stores'))->setValue(null, $stores);
 $db = new PDO('sqlite:' . $dbPath);
 $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);

@@ -237,7 +237,7 @@ function renderOrderDone(string $orderNum): string {
         'title' => $t('order_sent'), 'order_number_label' => $t('order_num'), 'order_number' => (string)$order['order_number'],
         'payment' => $payment, 'pay_url' => $payUrl, 'pay_label' => $t('checkout_pay_now'),
         'payment_error' => $paymentFailed ? str_replace('{order}', (string)$order['order_number'], $t($retry ? 'order_done.payment_retry' : 'order_done.payment_failed')) : '',
-        'bank_transfer_html' => BankTransferInstructions::html($order),
+        'bank_transfer_html' => BankTransferInstructions::html($order), 'summary' => AccountViewModel::orderDoneSummary($order),
         'email_message' => $paymentFailed ? '' : $t('order_email'), 'home_url' => Template::storeUrl('/'), 'continue_label' => $t('continue_shopping'),
         'account_offer' => guestAccountOfferView($order, $accountOutcome),
     ]);

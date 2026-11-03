@@ -105,6 +105,12 @@ $pdo->exec('PRAGMA foreign_keys = ON');
 Db::init($pdo, 'sqlite');
 $testRateDb = new PDO('sqlite::memory:');
 Security::setRateDbForTesting($testRateDb);
+// The shipped stores.json carries a placeholder IBAN with wrong check digits, which hides bank transfer at checkout;
+// the suite's default store is a configured shop with a real-format account (checksum-valid test IBAN).
+$testStores = Bootstrap::stores();
+$testStores['stores']['default']['legal']['iban'] = 'SK31 1200 0000 1987 4263 7541';
+(new ReflectionProperty(Bootstrap::class, 'stores'))->setValue(null, $testStores);
+(new ReflectionProperty(StoreContext::class, 'current'))->setValue(null, null);
 
 assert_true(Db::get() instanceof PDO, 'PDO connection established');
 assert_true(Db::isSqlite(), 'Driver is SQLite');
@@ -248,6 +254,12 @@ if ($mysqlDsn) {
         foreach (['email' => 'VARCHAR(191) NULL', 'name' => 'VARCHAR(191) NULL', 'status' => "VARCHAR(16) NOT NULL DEFAULT 'active'", 'store_id' => "VARCHAR(64) NOT NULL DEFAULT 'default'", 'email_verified_at' => 'DATETIME NULL'] as $a074vColumn => $a074vDef) {
             if (!in_array($a074vColumn, $a074vColumns, true)) $my->exec("ALTER TABLE customers ADD COLUMN {$a074vColumn} {$a074vDef}");
         }
+        // R13 UX5: verifying the address attaches the guest orders placed with it, so the bare probe orders table needs those columns.
+        $a074vOrderColumns = $my->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='orders'")->fetchAll(PDO::FETCH_COLUMN);
+        foreach (['customer_id' => 'INT NULL', 'store_id' => "VARCHAR(64) NOT NULL DEFAULT 'default'", 'customer_email' => 'VARCHAR(191) NULL'] as $a074vColumn => $a074vDef) {
+            if (!in_array($a074vColumn, $a074vOrderColumns, true)) $my->exec("ALTER TABLE orders ADD COLUMN {$a074vColumn} {$a074vDef}");
+        }
+        $my->exec("INSERT INTO orders (id, customer_id, store_id, customer_email) VALUES (97405, NULL, 'default', ' A074-MySQL@example.com ')");
         $my->exec("INSERT INTO customers (id, email, status, store_id) VALUES (97404, 'a074-mysql@example.com', 'active', 'default')");
         $a074vMysqlToken = Customers::startEmailVerification(97404);
         $a074vMysqlStale = Customers::startEmailVerification(97404);
@@ -258,6 +270,9 @@ if ($mysqlDsn) {
             && $my->query('SELECT email_verified_at FROM customers WHERE id = 97404')->fetchColumn() !== null
             && (int)$my->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='customer_email_verifications'")->fetchColumn() === 1,
             'MySQL live: A07.4 e-mail verification migration is idempotent; tokens are single-use and superseded by re-send');
+        assert_equals(97404, (int)$my->query('SELECT customer_id FROM orders WHERE id = 97405')->fetchColumn(),
+            'MySQL live: R13 UX5 verifying the e-mail attaches the guest order placed with it (case and spaces ignored)');
+        $my->exec('DELETE FROM orders WHERE id = 97405');
         $my->exec('DELETE FROM customers WHERE id = 97404');
         $my->exec('DROP TABLE customer_email_verifications');
         if (preg_match('/^[A-Za-z0-9_]+$/', $a074vDbCollation)) $my->exec("ALTER DATABASE CHARACTER SET utf8mb4 COLLATE {$a074vDbCollation}");

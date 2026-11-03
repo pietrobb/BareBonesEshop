@@ -61,6 +61,10 @@ if ($command === 'install') {
         $run(['cli/migrate.php'], 'migrate', true);
         $run(['cli/schema-build.php'], 'schema-build', true);
         $steps['schema'] = 'applied';
+        if ($steps['config']['action'] === 'created') {
+            $steps['payments_off'] = json_decode($run(['cli/setup.php', 'install-payments'], 'install payments'), true) ?: [];
+            if ($steps['payments_off'] !== []) $log('  online payment switched off until its keys are set (Admin → Payments): ' . implode(', ', $steps['payments_off']));
+        }
         // A fresh config.php over an existing database (lost config, new checkout over the old private data)
         // carries a new admin_identity_key that cannot open the existing admins' MFA secrets: undo, do not lock them out.
         if ($steps['config']['action'] === 'created') {
@@ -113,6 +117,12 @@ if ($command === 'install') {
 }
 
 require_once __DIR__ . '/../src/autoload.php';
+
+// Internal step of a fresh install: online methods whose gateway has no keys (the sample card method) start switched off.
+if ($command === 'install-payments') {
+    echo json_encode(PaymentReadiness::deactivateKeyless(Db::get(), require $root . '/config.php')) . "\n";
+    exit(0);
+}
 
 try {
     if ($command === 'doctor') {

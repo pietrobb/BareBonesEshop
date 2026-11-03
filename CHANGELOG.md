@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Usability fixes** (review round 13, UX1–UX7, README). Checkout offers bank transfer only when the store
+  has an IBAN with valid check digits (the shipped sample IBAN has none, so a customer got an order without
+  payment instructions). A fresh `setup.php install` keeps every sample store, including `cz`, hidden until the
+  merchant enters its seller, and switches off online payment methods whose gateway has no keys (the sample
+  card method without Stripe keys), so `doctor` fails only on the default store's example seller. The
+  thank-you page shows the order summary (items, totals, shipping and address) the account's order detail
+  shows. An e-mail verified after registration attaches that customer's earlier guest orders. The home page
+  heading falls back to the shop name instead of a fixed "Sauna & Wooden Products". Admin → Stores and seller
+  has a BIC field (validated, printed with the transfer instructions). The README states the install outcome,
+  the Docker `--admin-email`, the private-directory default, the IBAN rule and the API action count correctly.
 - **Low findings of review round 13 and clock-dependent tests** (T21). A listing of more than 500 products with
   variants no longer reads every variant of the later products as a download (`variantStatesMany` overwrote its
   column expression). A digital product without its file is not sold, like a download variant, and `doctor`

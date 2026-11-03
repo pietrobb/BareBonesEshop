@@ -10,6 +10,10 @@ echo "\n--- Audit round 8 (rest): price lists in the store currency (CZ, HU, PL)
 
 $r8cRoot = dirname(__DIR__, 3);
 $r8cSample = json_decode((string)file_get_contents($r8cRoot . '/stores.example.json'), true);
+// Bank transfer is offered only to a store with a checksum-valid IBAN; the samples carry placeholders.
+foreach (['cz' => 'CZ65 0800 0000 1920 0014 5399', 'hu' => 'HU42 1177 3016 1111 1018 0000 0000', 'pl' => 'PL61 1090 1014 0000 0712 1981 2874'] as $r8cStore => $r8cIban) {
+    $r8cSample['stores'][$r8cStore]['legal']['iban'] = $r8cIban;
+}
 $r8cStoresProp = new ReflectionProperty(Bootstrap::class, 'stores');
 $r8cSavedStores = $r8cStoresProp->getValue();
 $r8cPrevious = StoreContext::current();

@@ -115,13 +115,15 @@ try {
     assert_true(!empty($a111Result['steps']['admin']['recovery_codes']) && !empty($a111Result['steps']['admin']['mfa_required']), 'A11.1 install returns the owner TOTP enrollment once');
     $a111Fails = array_values(array_map(static fn(array $c): string => $c['name'], array_filter($a111Result['doctor']['checks'] ?? [], static fn(array $c): bool => $c['status'] === 'fail')));
     // R9: the shipped stores.json is example data (Woodle, example.* e-mails, invalid IBANs): doctor is not ready until it is replaced.
-    // R11: of the public stores — the sample stores pl/hu/de/us of a fresh install are hidden and their sample seller only warns.
+    // R11: of the public stores — the sample stores cz/pl/hu/de/us of a fresh install are hidden and their sample seller only warns.
     $a111StoreIds = array_keys(array_filter(json_decode((string)file_get_contents($a111Private . '/stores.json'), true)['stores'] ?? [],
         static fn(array $store): bool => StoreContext::isPublicConfig($store)));
-    assert_equals(['default', 'cz'], $a111StoreIds, 'R11 samples: a fresh install publishes only the default and cz stores');
-    // R9: and the sample card method charges through Stripe, which has no keys yet, so checkout could not take it.
-    assert_equals(array_merge(array_map(static fn(string $id): string => 'stores.legal.' . $id, $a111StoreIds), ['payment.provider.stripe']), $a111Fails,
-        'A11.1 doctor after install fails only on the example seller data of every store and the keyless Stripe card method');
+    assert_equals(['default'], $a111StoreIds, 'R13 UX2: a fresh install publishes only the default store (cz with its EUR-priced catalog stays a hidden sample)');
+    // R13 UX3: the sample card method has no Stripe keys, so install switches it off instead of leaving doctor failing.
+    assert_equals(['stores.legal.default'], $a111Fails, 'A11.1 doctor after install fails only on the default store\'s example seller data');
+    $a111Db = new PDO('sqlite:' . $a111Private . '/db/shop.sqlite');
+    assert_equals(0, (int)$a111Db->query("SELECT COUNT(*) FROM payment_methods WHERE provider = 'stripe' AND active = 1")->fetchColumn(), 'R13 UX3: no Stripe method is active after an install without Stripe keys');
+    $a111Db = null;
     assert_true(($a111Result['doctor']['status'] ?? '') !== 'ready', 'R9 doctor: a shop invoicing as Woodle s.r.o. is not ready');
     assert_equals('pass', array_column($a111Result['doctor']['checks'] ?? [], 'status', 'name')['config.admin_email'] ?? null, 'R9 doctor: admin_email set by install passes');
     $a111Stores = json_decode((string)file_get_contents($a111Private . '/stores.json'), true);
