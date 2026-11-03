@@ -92,8 +92,8 @@ class StoreContext {
                 $path = parse_url($uri ?? ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH) ?: '/';
                 $bestLength = 0;
                 foreach ($stores as $candidateId => $candidate) {
-                    $prefix = rtrim((string)($candidate['url_prefix'] ?? ''), '/');
-                    if ($prefix === '' || !str_starts_with($prefix, '/')) continue;
+                    $prefix = self::routablePrefix($candidate);
+                    if ($prefix === '') continue;
                     if (($path === $prefix || str_starts_with($path, $prefix . '/')) && strlen($prefix) > $bestLength) {
                         $storeId = (string)$candidateId;
                         $bestLength = strlen($prefix);
@@ -109,6 +109,31 @@ class StoreContext {
         }
         $providerOwner = $stores[(string)($config['provider_scope'] ?? $storeId)] ?? null;
         return new self($storeId, $channel, $config, is_array($providerOwner) ? (string)($providerOwner['currency'] ?? '') : null);
+    }
+
+    /**
+     * First path segments the shop itself routes (API, product/category/page URLs, feeds, health checks) or serves
+     * and denies as directories. A store under one of them would take those URLs over: a /api store answered the
+     * whole JSON API in its own context, a /product store every product page.
+     */
+    public const RESERVED_PREFIXES = [
+        'api', 'product', 'category', 'page', 'wishlist', 'feeds', 'healthz', 'readyz',
+        'assets', 'uploads', 'themes', 'vendor', 'import', 'storage', 'db', 'jobs', 'logs', 'config', 'cli', 'src',
+        'migrations', 'adapters', 'extensions', 'lang', 'demo', 'docs', 'forms', 'blocks', 'data', 'templates',
+        'releases', 'tests', 'deploy', 'cache', 'test-results', 'playwright-report', 'parity-report',
+    ];
+
+    /** True when the first segment of $prefix is a reserved shop path or a file/directory of the application root. */
+    public static function isReservedPrefix(string $prefix): bool {
+        $first = strtolower(explode('/', trim($prefix, '/'))[0]);
+        if ($first === '') return false;
+        return in_array($first, self::RESERVED_PREFIXES, true) || str_contains($first, '.') || file_exists(dirname(__DIR__) . '/' . $first);
+    }
+
+    /** A store record's url_prefix without the trailing slash; '' when it has none or a reserved one (never routed). */
+    public static function routablePrefix(mixed $store): string {
+        $prefix = rtrim((string)(is_array($store) ? ($store['url_prefix'] ?? '') : ''), '/');
+        return $prefix === '' || !str_starts_with($prefix, '/') || self::isReservedPrefix($prefix) ? '' : $prefix;
     }
 
     /**

@@ -356,13 +356,13 @@ class Security {
      * window. Records nothing, so a refused attempt never extends a block (pair with rateLimitRecord()
      * after the guarded action succeeded).
      */
-    public static function rateLimitAllows(string $action, int $maxHits, int $windowSeconds, bool $bindIp = true): bool {
+    public static function rateLimitAllows(string $action, int $maxHits, int $windowSeconds, bool $bindIp = true, bool $failClosed = false): bool {
         $windowSeconds = max(1, min(86400, $windowSeconds));
         return self::withRateDb(static function (PDO $db) use ($action, $maxHits, $windowSeconds, $bindIp): bool {
             $stmt = $db->prepare("SELECT COUNT(*) FROM hits WHERE key = :key AND ts > :window");
             $stmt->execute([':key' => self::rateKey($action, $bindIp), ':window' => time() - $windowSeconds]);
             return (int)$stmt->fetchColumn() < max(0, $maxHits);
-        });
+        }, $failClosed);
     }
 
     /** Records one hit for $action (see rateLimitAllows()). */
@@ -645,7 +645,9 @@ class Security {
         'manager'     => ['products.*', 'categories.edit', 'orders.*', 'customers.view', 'customers.edit', 'reports.view', 'gdpr.view', 'import', 'cache',
                           'payments.manage', 'shipping.manage', 'rma.manage', 'pricing.manage', 'emails.manage'],
         'editor'      => ['products.edit', 'products.view', 'categories.edit', 'media.upload'],
-        'fulfillment' => ['orders.view', 'orders.edit', 'orders.ship', 'orders.print'],
+        // orders.status moves an order along its workflow; orders.edit (items, prices, manual orders, cancelling,
+        // payment links, invoices) is not warehouse work.
+        'fulfillment' => ['orders.view', 'orders.status', 'orders.ship', 'orders.print'],
         'viewer'      => ['products.view', 'orders.view', 'reports.view'],
     ];
 

@@ -3678,7 +3678,7 @@ private static function onPaymentCompleted(array $session): void {
             "permissions": ["products.edit", "products.view", "categories.edit", "media.upload"]
         },
         "fulfillment": {
-            "permissions": ["orders.view", "orders.edit", "orders.ship", "orders.print"]
+            "permissions": ["orders.view", "orders.status", "orders.ship", "orders.print"]
         },
         "viewer": {
             "permissions": ["products.view", "orders.view", "reports.view"]

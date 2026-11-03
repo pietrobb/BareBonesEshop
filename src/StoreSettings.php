@@ -81,7 +81,7 @@ final class StoreSettings {
             $base = $stores[$defaultId] ?? null;
             $errors = [];
             if (!preg_match('/^[a-z][a-z0-9_-]{1,31}$/', $id) || isset($stores[$id])) $errors[] = I18n::t('admin.stores.err.id');
-            if (!preg_match('#^/[a-z0-9-]{2,20}$#', $prefix) || in_array($prefix, array_map(static fn($s): string => is_array($s) ? (string)($s['url_prefix'] ?? '') : '', $stores), true)) {
+            if (!preg_match('#^/[a-z0-9-]{2,20}$#', $prefix) || StoreContext::isReservedPrefix($prefix) || in_array($prefix, array_map(static fn($s): string => is_array($s) ? (string)($s['url_prefix'] ?? '') : '', $stores), true)) {
                 $errors[] = I18n::t('admin.stores.err.prefix');
             }
             if (!preg_match('/^[a-z]{2}$/', $locale) || !is_file(dirname(__DIR__) . "/lang/{$locale}.php")) $errors[] = I18n::t('admin.stores.err.locale');
@@ -103,19 +103,34 @@ final class StoreSettings {
         });
     }
 
-    /** Remove a store that never took an order; the default store and a store another one invoices as stay. */
+    /** Records a store keeps for its customers and the tax office: while one exists the store stays. */
+    private const STORE_RECORDS = ['orders', 'invoices', 'order_refunds', 'payment_transactions', 'customers', 'withdrawal_requests',
+        'complaints', 'rma_requests', 'gdpr_events', 'back_in_stock_requests'];
+
+    /**
+     * Remove a store without customer or accounting records. The default store, a store another one invoices as and
+     * a store whose catalogue or providers another store sells stay. The removed store's admin grants go with it, so
+     * a later store under the same id does not hand its staff to the people the old one was granted to.
+     */
     public static function removeStore(string $storeId, PDO $db): array {
         return self::locked(static function () use ($storeId, $db): array {
             $data = self::load();
             $stores = is_array($data['stores'] ?? null) ? $data['stores'] : [];
             if (!isset($stores[$storeId]) || $storeId === (string)($data['default_store'] ?? '')) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.remove_default')]];
-            $stmt = $db->prepare('SELECT COUNT(*) FROM orders WHERE store_id = ?');
-            $stmt->execute([$storeId]);
-            $seller = array_filter($stores, static fn($s, $id): bool => $id !== $storeId && is_array($s) && (string)($s['legal']['seller'] ?? '') === $storeId, ARRAY_FILTER_USE_BOTH);
-            if ((int)$stmt->fetchColumn() > 0 || $seller) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.remove_used')]];
+            $records = 0;
+            foreach (self::STORE_RECORDS as $table) {
+                if (!Db::tableExists($table, $db)) continue;
+                $stmt = $db->prepare("SELECT COUNT(*) FROM {$table} WHERE store_id = ?");
+                $stmt->execute([$storeId]);
+                $records += (int)$stmt->fetchColumn();
+            }
+            $dependants = array_filter($stores, static fn($s, $id): bool => $id !== $storeId && is_array($s) && in_array($storeId,
+                [(string)($s['legal']['seller'] ?? ''), (string)($s['catalog_scope'] ?? $id), (string)($s['provider_scope'] ?? $id)], true), ARRAY_FILTER_USE_BOTH);
+            if ($records > 0 || $dependants) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.remove_used')]];
             $removed = $stores[$storeId];
             unset($data['stores'][$storeId]);
             if (!self::write($data)) return ['ok' => false, 'errors' => [I18n::t('admin.stores.err.write')]];
+            $db->prepare('DELETE FROM admin_store_permissions WHERE store_id = ?')->execute([$storeId]);
             AuditLog::log('store_settings', 0, ['store' => $storeId, 'removed' => $removed], null);
             return ['ok' => true, 'errors' => []];
         });

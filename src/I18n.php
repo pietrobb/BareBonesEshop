@@ -38,11 +38,11 @@ class I18n {
         $stores = self::stores();
         // Check URL prefix: /en/..., /de/...
         foreach ($stores['stores'] ?? [] as $code => $store) {
-            $prefix = $store['url_prefix'] ?? '';
-            if ($prefix && str_starts_with($uri, $prefix . '/')) {
+            $prefix = StoreContext::routablePrefix($store);
+            if ($prefix !== '' && str_starts_with($uri, $prefix . '/')) {
                 return self::storeDefault($store);
             }
-            if ($prefix && $uri === $prefix) {
+            if ($prefix !== '' && $uri === $prefix) {
                 return self::storeDefault($store);
             }
         }
