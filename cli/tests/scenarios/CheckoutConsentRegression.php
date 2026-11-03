@@ -15,6 +15,8 @@ foreach (['digital' => 'downloadable', 'physical' => 'simple'] as $ccKind => $cc
     $ccDb->prepare("INSERT INTO products (store_id, category_id, sku, slug, name, product_type, price, currency, stock, status) VALUES ('default', ?, ?, ?, ?, ?, 599, 'eur', 100, 'active')")->execute([$ccCategory, 'CC-' . $ccKind, 'cc-' . $ccKind, 'Consent ' . $ccKind, $ccType]);
     $ccProducts[$ccKind] = (int)$ccDb->lastInsertId();
 }
+// A download is sold with its file (r13).
+$ccDb->exec("INSERT INTO digital_assets (sku, asset_key, storage_path, download_name) VALUES ('CC-digital', 'file', 'cc/digital.pdf', 'digital.pdf')");
 $ccDb->exec("INSERT INTO warehouses (code, name, is_default) VALUES ('cc-fixture', 'Consent fixture', 1)");
 $ccWarehouse = (int)$ccDb->lastInsertId();
 $ccDb->prepare("INSERT INTO warehouse_stock (store_id, warehouse_id, sku, qty, reserved) VALUES ('default', ?, 'CC-physical', 100, 0)")->execute([$ccWarehouse]);

@@ -148,6 +148,7 @@ PHP);
     $pdo->exec("INSERT INTO products (id, store_id, category_id, name, slug, sku, product_type, price, currency, status, stock, inventory_policy)
         VALUES (97305, 'default', 1, 'R7V e-book', 'r7v-ebook', 'R7V-EBOOK', 'digital', 500, 'eur', 'active', 0, 'deny'),
                (97306, 'default', 1, 'R7V sold out', 'r7v-soldout', 'R7V-SOLDOUT', 'simple', 900, 'eur', 'active', 0, 'deny')");
+    $pdo->exec("INSERT INTO digital_assets (sku, asset_key, storage_path) VALUES ('R7V-EBOOK', 'r7v', 'r7v/ebook.pdf')"); // sold with its file (r13)
     $r7vMixed = static function (callable $handler, array $query): array {
         Security::setRateDbForTesting(new PDO('sqlite::memory:'));
         $_SESSION['cart'] = ['p_97305' => ['product_id' => 97305, 'variant_id' => null, 'qty' => 1],
@@ -171,4 +172,5 @@ PHP);
     Pricing::setConfig($r7vPricing);
     if ($r7vActivePromotions) $pdo->exec('UPDATE promotions SET active = 1 WHERE id IN (' . implode(',', array_map('intval', $r7vActivePromotions)) . ')');
     $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+    $pdo->exec("DELETE FROM digital_assets WHERE sku = 'R7V-EBOOK'");
 }
