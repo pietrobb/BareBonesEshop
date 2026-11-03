@@ -32,6 +32,8 @@ final class AccountViewModel
         ];
         if ($page === 'login') {
             $model['next'] = Security::safeLocalPath($_GET['next'] ?? $fieldValues['next'] ?? null, Template::storeUrl('/account.php'));
+            $verifyToken = (string)($fieldValues['verify_token'] ?? '');
+            $model['verify_token'] = preg_match('/^[a-f0-9]{64}$/', $verifyToken) ? $verifyToken : '';
         } elseif ($page === 'register') {
             $model['register_token'] = Security::formTrapToken('account_register');
         } elseif ($page === 'reset') {

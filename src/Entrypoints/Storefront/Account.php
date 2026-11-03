@@ -118,6 +118,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($ipAllowed && $accountAllowed) {
             [$ok, $c, $err] = Customers::login($email, $password);
             if ($ok) {
+                // A verification link opened while signed out comes back with this sign-in: mailbox and password together.
+                $verifyToken = Security::str($_POST['verify_token'] ?? '');
+                if ($verifyToken !== '') {
+                    $verified = Security::rateLimit('account_verify_email_ip', 20, 3600) && Customers::verifyEmail($verifyToken, (int)$c['id']) !== null;
+                    $_SESSION['account_flash'] = ['message' => $t($verified ? 'account.verify_email_done' : 'account.verify_email_invalid'), 'type' => $verified ? 'ok' : 'error'];
+                    header('Location: ' . Template::storeUrl('/account.php'));
+                    exit;
+                }
                 $next = Security::safeLocalPath($_POST['next'] ?? null, Template::storeUrl('/account.php'));
                 header('Location: ' . $next);
                 exit;
@@ -397,15 +405,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // ============================================================
-// E-mail verification link (works signed in or out; token is single-use)
+// E-mail verification link (single-use). R14 #1: it verifies only the account the browser is signed in to;
+// signed out, the sign-in form carries the token, so the link alone proves nothing about who owns the account.
 // ============================================================
 $loggedIn = Customers::isLoggedIn();
 if ($p === 'verify_email') {
     $token = Security::str($_GET['token'] ?? '');
-    $verified = Security::rateLimit('account_verify_email_ip', 20, 3600) && Customers::verifyEmail($token) !== null;
-    $flash = $t($verified ? 'account.verify_email_done' : 'account.verify_email_invalid');
-    $flashType = $verified ? 'ok' : 'error';
-    $p = $loggedIn ? 'dashboard' : 'login';
+    if ($loggedIn) {
+        $verified = Security::rateLimit('account_verify_email_ip', 20, 3600) && Customers::verifyEmail($token, (int)$_SESSION['customer_id']) !== null;
+        $flash = $t($verified ? 'account.verify_email_done' : 'account.verify_email_invalid');
+        $flashType = $verified ? 'ok' : 'error';
+        $p = 'dashboard';
+    } else {
+        $fieldValues['verify_token'] = preg_match('/^[a-f0-9]{64}$/', $token) ? $token : '';
+        $flash = $t($fieldValues['verify_token'] !== '' ? 'account.verify_email_sign_in' : 'account.verify_email_invalid');
+        $flashType = $fieldValues['verify_token'] !== '' ? 'ok' : 'error';
+        $p = 'login';
+    }
 }
 
 // ============================================================

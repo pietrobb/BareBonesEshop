@@ -1563,6 +1563,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.verify_email_resend' => 'Link újraküldése',
     'account.verify_email_sent' => 'Elküldtük az ellenőrző linket.',
     'account.verify_email_done' => 'Az e-mail-címe ellenőrizve.',
+    'account.verify_email_sign_in' => 'Az e-mail-cím ellenőrzésének befejezéséhez jelentkezzen be abba a fiókba, amelyhez a link tartozik.',
     'account.invoice_link_title' => 'Számla',
     'account.invoice_link_open' => 'Számla megnyitása',
     'account.invoice_link_noscript' => 'A hivatkozás megnyitásához JavaScript szükséges. A számlát az e-mail mellékletében is megtalálja.',

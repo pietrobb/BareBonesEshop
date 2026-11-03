@@ -263,9 +263,11 @@ if ($mysqlDsn) {
         $my->exec("INSERT INTO customers (id, email, status, store_id) VALUES (97404, 'a074-mysql@example.com', 'active', 'default')");
         $a074vMysqlToken = Customers::startEmailVerification(97404);
         $a074vMysqlStale = Customers::startEmailVerification(97404);
-        $a074vMysqlStaleRefused = $a074vMysqlToken !== null && Customers::verifyEmail($a074vMysqlToken) === null;
-        $a074vMysqlVerified = $a074vMysqlStale !== null && Customers::verifyEmail($a074vMysqlStale) === 97404;
-        $a074vMysqlReuse = $a074vMysqlStale !== null && Customers::verifyEmail($a074vMysqlStale) === null;
+        $a074vMysqlStaleRefused = $a074vMysqlToken !== null && Customers::verifyEmail($a074vMysqlToken, 97404) === null;
+        $a074vMysqlForeign = $a074vMysqlStale !== null && Customers::verifyEmail($a074vMysqlStale, 97406) === null
+            && (int)$my->query('SELECT COUNT(*) FROM orders WHERE id = 97405 AND customer_id IS NULL')->fetchColumn() === 1;
+        $a074vMysqlVerified = $a074vMysqlForeign && Customers::verifyEmail($a074vMysqlStale, 97404) === 97404;
+        $a074vMysqlReuse = $a074vMysqlStale !== null && Customers::verifyEmail($a074vMysqlStale, 97404) === null;
         assert_true($a074vMysqlStaleRefused && $a074vMysqlVerified && $a074vMysqlReuse
             && $my->query('SELECT email_verified_at FROM customers WHERE id = 97404')->fetchColumn() !== null
             && (int)$my->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='customer_email_verifications'")->fetchColumn() === 1,

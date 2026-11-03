@@ -40,7 +40,11 @@ if ($mode === 'register') {
     $_SERVER['REQUEST_METHOD'] = 'GET';
     $_GET = [];
     $_POST = [];
+} elseif ($mode === 'verify_login') {
+    $_GET = ['p' => 'login'];
+    $_POST = ['action' => 'login', 'email' => $email, 'password' => $password, 'verify_token' => $token, 'csrf_token' => 'a074v'];
 } else {
+    if ($email !== '') Customers::login($email, $password);
     $_SERVER['REQUEST_METHOD'] = 'GET';
     $_GET = ['p' => 'verify_email', 'token' => $token];
     $_POST = [];
@@ -52,7 +56,8 @@ register_shutdown_function(static function(): void {
     while (ob_get_level() > 0) $out = ob_get_clean() . $out;
     $mails = array_map(static fn(array $m): array => ['to' => $m['to'], 'subject' => $m['subject'] ?? '', 'text' => $m['text']], LogMail::captured());
     echo "\nA074VRESULT" . json_encode(['code' => http_response_code(), 'flash' => $GLOBALS['flash'] ?? null, 'flash_type' => $GLOBALS['flashType'] ?? null,
-        'mails' => $mails, 'notice' => str_contains($out, 'name="action" value="resend_verification"'), 'fatal' => str_contains($out, 'Fatal error') || str_contains($out, 'Uncaught')]);
+        'mails' => $mails, 'notice' => str_contains($out, 'name="action" value="resend_verification"'),
+        'verify_form' => str_contains($out, 'name="action" value="login"') && str_contains($out, 'name="verify_token" value="' . ($GLOBALS['token'] ?? '-') . '"'), 'fatal' => str_contains($out, 'Fatal error') || str_contains($out, 'Uncaught')]);
 });
 require $root . '/account.php';
 PHP);
@@ -66,7 +71,7 @@ $a074vRun = static function(string $mode, string $email = '', string $password =
     proc_close($process);
     $at = strrpos($raw, 'A074VRESULT');
     $result = $at === false ? null : json_decode(substr($raw, $at + 11), true);
-    return is_array($result) ? $result + ['raw' => ''] : ['code' => null, 'flash' => null, 'flash_type' => null, 'mails' => [], 'notice' => false, 'fatal' => true, 'raw' => substr($raw, 0, 600)];
+    return is_array($result) ? $result + ['raw' => ''] : ['code' => null, 'flash' => null, 'flash_type' => null, 'mails' => [], 'notice' => false, 'verify_form' => false, 'fatal' => true, 'raw' => substr($raw, 0, 600)];
 };
 $a074vRead = static function(string $sql, array $args = []) use ($testDbPath) {
     $read = new PDO('sqlite:' . $testDbPath);
@@ -108,21 +113,21 @@ try {
     assert_true($throttled['mails'] === [] && $throttled['flash_type'] === 'error', $a074vLabel('A07.4 re-send: more than 3 links per hour are throttled', $throttled));
     $latest = (string)$a074vRead('SELECT token_hash FROM customer_email_verifications WHERE customer_id = ? AND used_at IS NULL ORDER BY id DESC LIMIT 1', [$cid]);
 
-    $old = $a074vRun('verify', '', '', (string)$first);
+    $old = $a074vRun('verify', $a074vEmail, $a074vPassword, (string)$first);
     assert_true($old['flash_type'] === 'error' && $a074vVerifiedAt() === null, $a074vLabel('A07.4 verify: a superseded link no longer verifies', $old));
 
     // Expired link.
     $expired = bin2hex(random_bytes(32));
     $pdo->prepare('INSERT INTO customer_email_verifications (customer_id, email, token_hash, expires_at) VALUES (?, ?, ?, ?)')
         ->execute([$cid, $a074vEmail, hash('sha256', $expired), gmdate('Y-m-d H:i:s', time() - 60)]);
-    $r = $a074vRun('verify', '', '', $expired);
+    $r = $a074vRun('verify', $a074vEmail, $a074vPassword, $expired);
     assert_true($r['flash_type'] === 'error' && $a074vVerifiedAt() === null, $a074vLabel('A07.4 verify: an expired link is refused', $r));
 
     // Bound to the address it was sent to.
     $moved = bin2hex(random_bytes(32));
     $pdo->prepare('INSERT INTO customer_email_verifications (customer_id, email, token_hash, expires_at) VALUES (?, ?, ?, ?)')
         ->execute([$cid, 'a074-old-address@example.com', hash('sha256', $moved), gmdate('Y-m-d H:i:s', time() + 3600)]);
-    $r = $a074vRun('verify', '', '', $moved);
+    $r = $a074vRun('verify', $a074vEmail, $a074vPassword, $moved);
     assert_true($r['flash_type'] === 'error' && $a074vVerifiedAt() === null, $a074vLabel('A07.4 verify: a link for another address does not verify the current one', $r));
 
     // Store-scoped: the same token is not accepted by another store.
@@ -131,13 +136,29 @@ try {
         ->execute([$cid, $a074vEmail, hash('sha256', $live), gmdate('Y-m-d H:i:s', time() + 3600)]);
     $a074vPreviousStore = StoreContext::current();
     StoreContext::activate(StoreContext::resolve(Bootstrap::stores(), null, null, 'cz'));
-    $foreign = Customers::verifyEmail($live);
+    $foreign = Customers::verifyEmail($live, $cid);
     StoreContext::activate($a074vPreviousStore);
     assert_true($foreign === null && $a074vVerifiedAt() === null, 'A07.4 verify: another store cannot consume the link');
 
-    $ok = $a074vRun('verify', '', '', $live);
-    assert_true($ok['flash_type'] === 'ok' && $a074vVerifiedAt() !== null, $a074vLabel('A07.4 verify: a valid link verifies the address', $ok));
-    $again = $a074vRun('verify', '', '', $live);
+    // R14 #1: the link proves the mailbox only. Someone who signed up with this e-mail is not verified (and gets no guest
+    // orders) because its owner clicked: the link works only together with that account's sign-in.
+    $a074vPending = static fn(): int => (int)$a074vRead('SELECT COUNT(*) FROM customer_email_verifications WHERE token_hash = ? AND used_at IS NULL', [hash('sha256', $live)]);
+    $out = $a074vRun('verify', '', '', $live);
+    assert_true($out['verify_form'] && $a074vVerifiedAt() === null && $a074vPending() === 1,
+        $a074vLabel('R14 #1 verify: signed out, the link shows the sign-in form carrying it and verifies nothing yet', $out));
+    $a074vOtherEmail = 'a074-other-' . bin2hex(random_bytes(3)) . '@example.com';
+    Customers::register($a074vOtherEmail, 'A074-other-pass', 'A074 Other');
+    $other = $a074vRun('verify', $a074vOtherEmail, 'A074-other-pass', $live);
+    assert_true($other['flash_type'] === 'error' && $a074vVerifiedAt() === null && $a074vPending() === 1,
+        $a074vLabel('R14 #1 verify: signed in to another account, the link verifies nothing and stays unused', $other));
+    $wrong = $a074vRun('verify_login', $a074vEmail, 'not-the-password', $live);
+    assert_true($wrong['flash_type'] === 'error' && $a074vVerifiedAt() === null && $a074vPending() === 1,
+        $a074vLabel('R14 #1 verify: a wrong password with the link verifies nothing', $wrong));
+    assert_true(Customers::verifyEmail($live, $cid + 1000) === null && $a074vPending() === 1, 'R14 #1 verify: the token is not consumed for another customer ID');
+
+    $ok = $a074vRun('verify_login', $a074vEmail, $a074vPassword, $live);
+    assert_true($a074vVerifiedAt() !== null && $a074vPending() === 0, $a074vLabel('A07.4 / R14 #1 verify: the link with the account\'s sign-in verifies the address', $ok));
+    $again = $a074vRun('verify', $a074vEmail, $a074vPassword, $live);
     assert_true($again['flash_type'] === 'error', $a074vLabel('A07.4 verify: the link is single-use', $again));
     assert_true($current !== '' && $latest === hash('sha256', $current), 'A07.4 re-send: the latest mailed link is the only pending one');
 

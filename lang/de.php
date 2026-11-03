@@ -1563,6 +1563,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.verify_email_resend' => 'Link erneut senden',
     'account.verify_email_sent' => 'Wir haben Ihnen einen Bestätigungslink gesendet.',
     'account.verify_email_done' => 'Ihre E-Mail-Adresse ist bestätigt.',
+    'account.verify_email_sign_in' => 'Melden Sie sich bei dem Konto an, zu dem der Link gehört, um die E-Mail-Bestätigung abzuschließen.',
     'account.invoice_link_title' => 'Rechnung',
     'account.invoice_link_open' => 'Rechnung öffnen',
     'account.invoice_link_noscript' => 'Zum Öffnen dieses Links wird JavaScript benötigt. Die Rechnung finden Sie auch im Anhang der E-Mail.',

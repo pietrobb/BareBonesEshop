@@ -238,11 +238,13 @@ class AdminIdentity {
 
     /**
      * Confirms an admin's current password before a credential change: 'ok', 'invalid' or 'locked'. It is the login's
-     * password check without the login's throttle, so it has its own (fail-closed): five wrong passwords per account in
-     * 15 minutes, after which the session that guessed is signed out.
+     * password check without the login's throttle, so it has its own (fail-closed): five wrong passwords per account
+     * session in 15 minutes, after which the session that guessed is signed out. R14: the count is per session, not per
+     * account — a stolen session that guesses only locks and loses itself; the owner signing in again (password and
+     * TOTP, already throttled by the login) can change the password at once.
      */
     public static function reauthenticate(int $accountId, string $password, string $sessionId): string {
-        $limit = 'admin_reauth_' . $accountId;
+        $limit = 'admin_reauth_' . $accountId . ($sessionId === '' ? '' : '_' . substr(hash('sha256', $sessionId), 0, 32));
         if (!Security::rateLimitAllows($limit, 5, 900, false, true)) return 'locked';
         $account = self::accountById($accountId);
         if ($account && password_verify($password, (string)($account['password_hash'] ?? ''))) return 'ok';

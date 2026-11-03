@@ -95,7 +95,12 @@ try {
     $r13uToken = bin2hex(random_bytes(32));
     $pdo->prepare('INSERT INTO customer_email_verifications (customer_id, email, token_hash, expires_at) VALUES (?, ?, ?, ?)')
         ->execute([(int)$r13uCid, $r13uEmail, hash('sha256', $r13uToken), gmdate('Y-m-d H:i:s', time() + 3600)]);
-    assert_equals((int)$r13uCid, Customers::verifyEmail($r13uToken), 'R13 UX5: the verification link verifies the account');
+    // R14 #1: the mailbox owner opening the link for an account they cannot sign in to (an attacker's sign-up with their
+    // e-mail) hands over nothing; only the account's own authenticated use of the link does.
+    [, $r13uIntruder] = Customers::register('r13u-intruder-' . bin2hex(random_bytes(3)) . '@example.test', 'R13u-Strong-Pass', 'R13U Intruder');
+    assert_true(Customers::verifyEmail($r13uToken, (int)$r13uIntruder) === null && $r13uOwner($r13uMine[0]) === null && $r13uOwner($r13uMine[1]) === null,
+        'R14 #1: the link used for another account verifies nothing and attaches no guest order');
+    assert_equals((int)$r13uCid, Customers::verifyEmail($r13uToken, (int)$r13uCid), 'R13 UX5: the verification link verifies the account');
     assert_equals([(int)$r13uCid, (int)$r13uCid, null, null], [$r13uOwner($r13uMine[0]), $r13uOwner($r13uMine[1]), $r13uOwner($r13uOtherStore), $r13uOwner($r13uStranger)],
         'R13 UX5: after verification the guest orders of this store with the same e-mail (any case) are in the account; other stores and e-mails are not');
     assert_equals(2, count(array_filter(Customers::orders((int)$r13uCid), static fn(array $o): bool => in_array((int)$o['id'], $r13uMine, true))),

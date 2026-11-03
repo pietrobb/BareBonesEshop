@@ -1563,6 +1563,7 @@ return [
     'account.verify_email_resend' => 'Send the link again',
     'account.verify_email_sent' => 'We have sent you a verification link.',
     'account.verify_email_done' => 'Your e-mail address is verified.',
+    'account.verify_email_sign_in' => 'Sign in to the account this link belongs to to finish verifying your e-mail address.',
     'account.invoice_link_title' => 'Invoice',
     'account.invoice_link_open' => 'Open invoice',
     'account.invoice_link_noscript' => 'Opening this link needs JavaScript. The invoice is also attached to the e-mail.',

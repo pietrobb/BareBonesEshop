@@ -265,6 +265,7 @@ return array_replace(require __DIR__ . '/en.php', [
     'account.verify_email_resend' => 'Enviar el enlace de nuevo',
     'account.verify_email_sent' => 'Le hemos enviado un enlace de verificación.',
     'account.verify_email_done' => 'Su dirección de correo está verificada.',
+    'account.verify_email_sign_in' => 'Inicie sesión en la cuenta a la que pertenece este enlace para terminar de verificar su correo.',
     'account.invoice_link_title' => 'Factura',
     'account.invoice_link_open' => 'Abrir la factura',
     'account.invoice_link_noscript' => 'Para abrir este enlace se necesita JavaScript. La factura también está adjunta al correo.',
