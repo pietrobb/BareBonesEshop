@@ -104,9 +104,9 @@ function resolveRange(array $opts): array
  * Aggregate per consumption_country × vat_rate × currency.
  *
  * Strategy:
- *   - JOIN invoices (issued_at in [from,to], vat_scenario='oss')
- *     with order_items via order_id.
- *   - GROUP BY (customer_country from invoice.customer_snapshot, vat_rate, currency).
+ *   - Invoices issued in [from,to] with vat_scenario 'oss' (all lines, customer_country from customer_snapshot)
+ *     or 'domestic' (only the breakdown groups of lines supplied abroad under OSS, in their own country).
+ *   - GROUP BY (consumption country, vat_rate, currency).
  *
  * Reverse-charge / domestic / export scenarios are excluded — OSS reports
  * only cross-border B2C consumer sales.
@@ -115,7 +115,9 @@ function collect(string $from, string $to, ?string $storeCode): array
 {
     $db = Db::get();
 
-    $where  = "WHERE i.issued_at BETWEEN :from AND :to AND i.vat_scenario = 'oss' AND i.status = 'issued'";
+    // A domestic invoice can hold OSS lines too: an e-book of a consumer from another member state next to goods
+    // collected in the seller's store. Its breakdown names their country (VatService::breakdownKey).
+    $where  = "WHERE i.issued_at BETWEEN :from AND :to AND i.vat_scenario IN ('oss', 'domestic') AND i.status = 'issued'";
     $params = [':from' => $from, ':to' => $to];
 
     // Per-store filter via the number series (e.g. invoices "DE-20260001", credit notes "DE-CN-20260001"). The
@@ -133,7 +135,7 @@ function collect(string $from, string $to, ?string $storeCode): array
 
     $sql = "
         SELECT i.id, i.number, i.issued_at, i.currency, i.customer_snapshot,
-               i.vat_breakdown, i.financial_snapshot, i.type
+               i.vat_breakdown, i.financial_snapshot, i.type, i.vat_scenario
         FROM invoices i
         $where
     ";
@@ -144,7 +146,7 @@ function collect(string $from, string $to, ?string $storeCode): array
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
         $customerSnapshot = json_decode((string)$row['customer_snapshot'], true) ?: [];
         $cc = strtoupper(trim((string)($customerSnapshot['country'] ?? '')));
-        if ($cc === '') continue;
+        $wholeInvoiceOss = (string)$row['vat_scenario'] === 'oss';
 
         $financialJson = trim((string)($row['financial_snapshot'] ?? ''));
         $creditNote = (string)($row['type'] ?? 'invoice') === 'credit_note';
@@ -153,7 +155,8 @@ function collect(string $from, string $to, ?string $storeCode): array
             // breakdown, and it always reduces the period's OSS base and VAT.
             $rates = [];
             foreach ((json_decode((string)($row['vat_breakdown'] ?? '{}'), true) ?: []) as $rateKey => $group) {
-                $rates[$rateKey] = ['net' => -abs((int)($group['net'] ?? 0)), 'vat' => -abs((int)($group['vat'] ?? 0))];
+                $rates[$rateKey] = ['net' => -abs((int)($group['net'] ?? 0)), 'vat' => -abs((int)($group['vat'] ?? 0))]
+                    + array_intersect_key((array)$group, ['country' => true, 'supply' => true]);
             }
         } elseif ($financialJson !== '') {
             $financialSnapshot = json_decode($financialJson, true, 512, JSON_THROW_ON_ERROR);
@@ -168,11 +171,17 @@ function collect(string $from, string $to, ?string $storeCode): array
         }
         $cur = strtolower((string)($row['currency'] ?? 'eur'));
         foreach ($rates as $rateKey => $group) {
+            // Consumption country: the group's own (a line supplied abroad), else the customer's on an OSS invoice.
+            // Reverse-charged lines and the domestic lines of a domestic invoice are not OSS supplies.
+            $groupCountry = strtoupper(trim((string)($group['country'] ?? '')));
+            if ($groupCountry !== '' && (string)($group['supply'] ?? 'oss') !== 'oss') continue;
+            $country = $groupCountry !== '' ? $groupCountry : ($wholeInvoiceOss ? $cc : '');
+            if ($country === '') continue;
             $rate = (float)$rateKey;
-            $key = "{$cc}|{$rate}|{$cur}";
+            $key = "{$country}|{$rate}|{$cur}";
             if (!isset($bucket[$key])) {
                 $bucket[$key] = [
-                    'consumption_country' => $cc,
+                    'consumption_country' => $country,
                     'vat_rate' => $rate,
                     'currency' => $cur,
                     'net' => 0,

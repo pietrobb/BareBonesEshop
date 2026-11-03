@@ -367,8 +367,8 @@ class Cart {
         $atDate   = $vatContext['at_date'] ?? null;
         $rateCountry = $scenario['rate_country'];
         $applies  = $scenario['applies_vat'];
-        // Downloads in an order collected in the store: taxed where the consumer lives (VatService::digitalRateCountry).
-        $digitalRateCountry = $applies && method_exists($taxProvider, 'digitalRateCountry') ? $taxProvider::digitalRateCountry($vctx) : null;
+        // Downloads in an order collected in the store: supplied where the buyer lives (VatService::digitalSupply).
+        $digitalSupply = $applies && method_exists($taxProvider, 'digitalSupply') ? $taxProvider::digitalSupply($vctx) : null;
         // Catalog prices include the seller's domestic VAT. A zero-rated sale
         // (reverse charge, export) is charged that price without the VAT.
         $sellerCountry = strtoupper((string)$vctx['seller_country']);
@@ -394,9 +394,13 @@ class Cart {
             // An e-book may be taxed apart from the printed book (VatService::digitalCategory).
             if ($digital && method_exists($taxProvider, 'digitalCategory')) $vatClass = $taxProvider::digitalCategory($vatClass);
             $resolved = method_exists($taxProvider, 'resolveClass') ? $taxProvider::resolveClass($vatClass) : $vatClass;
-            $lineCountry = $digital && $digitalRateCountry !== null ? $digitalRateCountry : $rateCountry;
-            $rate     = $applies ? $taxProvider::rate($lineCountry, $vatClass, $atDate) : 0.0;
-            if ($stripDomesticVat) {
+            $lineSupply = $digital ? $digitalSupply : null;
+            $lineCountry = $lineSupply['country'] ?? $rateCountry;
+            // A download reverse charged to a business of another member state: like the whole order would be, it is
+            // charged without the seller's VAT and the buyer accounts for the VAT.
+            $lineReverse = ($lineSupply['scheme'] ?? '') === 'reverse_charge';
+            $rate     = $applies && !$lineReverse ? $taxProvider::rate($lineCountry, $vatClass, $atDate) : 0.0;
+            if ($stripDomesticVat || $lineReverse) {
                 $unitNet = Money::round($taxProvider::computeLine((int)$item['price'], 1, $taxProvider::rate($sellerCountry, $vatClass, $atDate), false)['net'], (string)$summary['currency']);
                 $summary['subtotal'] -= (int)$item['total'] - $unitNet * (int)$item['qty'];
                 $item['price'] = $unitNet;
@@ -409,7 +413,7 @@ class Cart {
                 (int)$item['price'],
                 (int)$item['qty'],
                 $rate,
-                !$applies
+                !$applies || $lineReverse
             );
 
             $item['vat_class']  = $resolved;

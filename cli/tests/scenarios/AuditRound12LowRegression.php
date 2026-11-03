@@ -29,14 +29,14 @@ try {
     assert_equals([5.0, 5.0, 7.0], [VatService::rate('SK', 'ebooks', '2026-11-02'), VatService::rate('SK', 'books', '2026-11-02'), VatService::rate('DE', 'ebooks', '2026-11-02')],
         'R12 low: without a separate e-book rate, ebooks takes the books rate (SK 5 %, DE books class 7 %)');
     $r12lPickup = ['seller_country' => 'SK', 'customer_country' => 'SK', 'seller_oss_enabled' => true, 'digital_customer_country' => 'DE', 'tax_provider' => 'vat'];
-    assert_equals('DE', VatService::digitalRateCountry($r12lPickup), 'R12 low: with OSS, a German consumer\'s e-book next to goods collected in Slovakia is taxed in Germany');
+    assert_equals(['country' => 'DE', 'scheme' => 'oss'], VatService::digitalSupply($r12lPickup), 'R12 low: with OSS, a German consumer\'s e-book next to goods collected in Slovakia is taxed in Germany');
     assert_equals([null, null, null], [
-        VatService::digitalRateCountry(['seller_oss_enabled' => false] + $r12lPickup),
-        VatService::digitalRateCountry(['digital_customer_country' => 'SK'] + $r12lPickup),
-        VatService::digitalRateCountry(['digital_customer_country' => 'US'] + $r12lPickup),
+        VatService::digitalSupply(['seller_oss_enabled' => false] + $r12lPickup),
+        VatService::digitalSupply(['digital_customer_country' => 'SK'] + $r12lPickup),
+        VatService::digitalSupply(['digital_customer_country' => 'US'] + $r12lPickup),
     ], 'R12 low: no OSS, a domestic buyer or a non-EU declared country keep the seller\'s rate');
-    assert_true(VatService::digitalRateCountry(['is_b2b' => true, 'customer_vat_id_valid' => true] + $r12lPickup) === null,
-        'R12 low: a business buyer with a valid VAT ID is not an OSS consumer');
+    assert_equals('reverse_charge', VatService::digitalSupply(['is_b2b' => true, 'customer_vat_id_valid' => true] + $r12lPickup)['scheme'] ?? null,
+        'R12 low: a business buyer with a valid VAT ID is not an OSS consumer (round 13: reverse charge)');
 
     $r12lLine = static fn(string $sku, string $type): array => ['product_id' => 1, 'variant_id' => null, 'sku' => $sku, 'price' => 1000, 'qty' => 1, 'total' => 1000,
         'available' => true, 'currency_mismatch' => false, 'product_type' => $type, 'vat_class' => 'books', 'currency' => 'eur',
