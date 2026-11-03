@@ -2,7 +2,7 @@
 /**
  * BareBones Shop — PayU Payment Adapter
  * PayU REST API v2.1 (Poland/CEE region)
- * OAuth2 client_credentials flow, MD5 second-key notification verification.
+ * OAuth2 client_credentials flow, MD5 or SHA-256 second-key notification verification.
  * Zero external dependencies — curl only.
  *
  * Required env vars:
@@ -213,7 +213,7 @@ class PayUPayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, Sig
     /**
      * Verify PayU notification signature.
      * PayU sends OpenPayU-Signature header:
-     *   sender=checkout;signature=<MD5>;algorithm=MD5;content=DOCUMENT
+     *   sender=checkout;signature=<hex>;algorithm=MD5|SHA-256;content=DOCUMENT
      */
     public function verifySignature(string $payload, string $sigHeader): bool {
         if ($this->secondKey === '' || trim($this->secondKey) !== $this->secondKey) return false;
@@ -229,12 +229,14 @@ class PayUPayment implements IdempotentRefundAdapter, HostedCheckoutAdapter, Sig
             }
         }
 
+        // R14 T20: a POS may be set to sign with SHA-256 instead of MD5 (PayU sends "SHA-256" or "SHA256").
+        $hash = match (strtoupper($parts['algorithm'] ?? '')) { 'MD5' => 'md5', 'SHA-256', 'SHA256' => 'sha256', default => '' };
         $receivedSig = $parts['signature'] ?? '';
-        if (($parts['algorithm'] ?? '') !== 'MD5' || !preg_match('/^[a-fA-F0-9]{32}$/D', $receivedSig)) return false;
+        if ($hash === '' || !preg_match('/^[a-fA-F0-9]{' . ($hash === 'md5' ? 32 : 64) . '}$/D', $receivedSig)) return false;
         if (isset($parts['content']) && $parts['content'] !== 'DOCUMENT') return false;
 
         // PayU Europe signs the exact raw notification body concatenated with the POS second key.
-        $expected = md5($payload . $this->secondKey);
+        $expected = hash($hash, $payload . $this->secondKey);
 
         return hash_equals($expected, strtolower($receivedSig));
     }

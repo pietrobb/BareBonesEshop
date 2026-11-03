@@ -153,11 +153,14 @@ final class AccountViewModel
     }
 
     /** R13 UX4: the summary on the page after checkout, before the e-mail arrives (its confirmation token proves this browser placed the order). */
-    public static function orderDoneSummary(array $order): array
+    public static function orderDoneSummary(array $order, bool $withAddress = true): array
     {
         $keys = ['items' => 'account.items', 'product' => 'product', 'quantity' => 'quantity', 'price' => 'price', 'total' => 'total',
             'shipping_address' => 'shipping_address', 'shipping_method' => 'shipping_method', 'pickup_point' => 'pickup_point'];
-        return self::orderSummary($order, Orders::items((int)$order['id'])) + ['t' => array_map(static fn(string $key): string => I18n::t($key), $keys)];
+        $summary = self::orderSummary($order, Orders::items((int)$order['id']));
+        // R14: reached through a payment link the page shows no more than the order lookup does: no name or address.
+        if (!$withAddress) $summary['address'] = [];
+        return $summary + ['t' => array_map(static fn(string $key): string => I18n::t($key), $keys)];
     }
 
     /**

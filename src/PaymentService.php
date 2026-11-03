@@ -1142,8 +1142,12 @@ class PaymentService {
     }
 
     /**
-     * The provider's payment id of a capture, onto an order that has none (or, at Stripe, only its checkout session
-     * id): without it refundsByHand() sent the refund to the merchant instead of the provider's refund API.
+     * The provider's payment id of the capture that paid the order: without it refundsByHand() sent the refund to the
+     * merchant instead of the provider's refund API. R14 #3: a retry pointed payment_id at its new session, so a
+     * customer who paid the older attempt left the order paid with the reference of an unpaid one, and refunds went
+     * to it and failed. A reference the order holds is replaced only by one of the order's own recorded attempts
+     * (payment_transactions), or at Stripe when it is only the checkout session id (cs_); any other reference a
+     * notification carries leaves it as it is (R8).
      */
     private static function recordPaymentReference(array $order, string $provider, array $data): void {
         $ref = trim((string)match ($provider) {
@@ -1153,9 +1157,19 @@ class PaymentService {
         });
         $current = trim((string)($order['payment_id'] ?? ''));
         if ($ref === '' || $ref === $current) return;
-        if ($current === '' || ($provider === 'stripe' && str_starts_with($current, 'cs_') && !str_starts_with($ref, 'cs_'))) {
-            Orders::setPaymentId((int)$order['id'], $ref);
-        }
+        if ($current !== '' && $provider === 'stripe' && str_starts_with($ref, 'cs_')) return;
+        $stripeSession = $provider === 'stripe' && str_starts_with($current, 'cs_');
+        if ($current !== '' && !$stripeSession && !self::isOrderAttempt((int)$order['id'], $provider, $ref)) return;
+        Orders::setPaymentId((int)$order['id'], $ref);
+        if ($current !== '' && !$stripeSession) AuditLog::log('payment_reference', (int)$order['id'], $current, $ref, "{$provider} capture of an earlier payment attempt");
+    }
+
+    /** Whether $ref is a payment attempt opened for this order (its payment_transactions row). */
+    private static function isOrderAttempt(int $orderId, string $provider, string $ref): bool {
+        if (!Db::tableExists('payment_transactions')) return false;
+        $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = ? AND provider = ? AND provider_ref = ? LIMIT 1");
+        $stmt->execute([$orderId, $provider, $ref]);
+        return (bool)$stmt->fetchColumn();
     }
 
     /**
