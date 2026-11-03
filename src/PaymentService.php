@@ -1142,8 +1142,11 @@ class PaymentService {
     }
 
     /**
-     * The provider's payment id of a capture, onto an order that has none (or, at Stripe, only its checkout session
-     * id): without it refundsByHand() sent the refund to the merchant instead of the provider's refund API.
+     * The provider's payment id of the capture that paid the order: without it refundsByHand() sent the refund to the
+     * merchant instead of the provider's refund API. R14 #3: a retry pointed payment_id at its new session, so a
+     * customer who paid the older attempt left the order paid with the reference of an unpaid one, and refunds went
+     * to it and failed. The capture's own reference wins, except that at Stripe a checkout session id (cs_) never
+     * replaces a payment intent.
      */
     private static function recordPaymentReference(array $order, string $provider, array $data): void {
         $ref = trim((string)match ($provider) {
@@ -1153,8 +1156,9 @@ class PaymentService {
         });
         $current = trim((string)($order['payment_id'] ?? ''));
         if ($ref === '' || $ref === $current) return;
-        if ($current === '' || ($provider === 'stripe' && str_starts_with($current, 'cs_') && !str_starts_with($ref, 'cs_'))) {
+        if ($current === '' || $provider !== 'stripe' || !str_starts_with($ref, 'cs_') || str_starts_with($current, 'cs_')) {
             Orders::setPaymentId((int)$order['id'], $ref);
+            if ($current !== '') AuditLog::log('payment_reference', (int)$order['id'], $current, $ref, "{$provider} capture of an earlier payment attempt");
         }
     }
 

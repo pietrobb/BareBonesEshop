@@ -28,16 +28,23 @@ class CheckoutSession {
         return (string)$_SESSION['_checkout_browser_id'];
     }
 
-    public static function createConfirmation(int $orderId, string $browserSessionId): string {
+    /** $placed: the browser that placed the order (checkout), not one that only holds its payment link. */
+    public static function createConfirmation(int $orderId, string $browserSessionId, bool $placed = true): string {
         if ($browserSessionId === '') {
             throw new InvalidArgumentException('Browser session is required for checkout confirmation');
         }
         $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
-        self::bind($orderId, $token, 'confirmation', $browserSessionId);
+        self::bind($orderId, $token, $placed ? 'confirmation' : 'pay_confirmation', $browserSessionId);
         return $token;
     }
 
     public static function verifyConfirmation(int $orderId, string $token, string $browserSessionId): bool {
+        return self::verifyOwnership($orderId, $token, $browserSessionId, 'confirmation')
+            || self::verifyOwnership($orderId, $token, $browserSessionId, 'pay_confirmation');
+    }
+
+    /** R14: the confirmation proves this browser placed the order (it may see the delivery address), not just paid it. */
+    public static function confirmsPlacedOrder(int $orderId, string $token, string $browserSessionId): bool {
         return self::verifyOwnership($orderId, $token, $browserSessionId, 'confirmation');
     }
 

@@ -46,7 +46,10 @@ class Bootstrap {
     public static function initLocale(?string $uri = null, bool $serveHidden = false): string {
         $uri = self::storeRouteUri($uri ?? ($_SERVER['REQUEST_URI'] ?? ''));
         $context = self::initStoreContext($uri);
-        if (!$serveHidden && !$context->isPublic()) self::hiddenStoreNotFound();
+        if (!$context->isPublic()) {
+            if (!$serveHidden) self::hiddenStoreNotFound();
+            if (!headers_sent()) header('X-Robots-Tag: noindex');
+        }
         $lang = I18n::detectLocale($uri);
         $requested = strtolower(Security::str($_GET['lang'] ?? ''));
         $languages = array_map('strtolower', (array)($context->config()['languages'] ?? []));
@@ -55,6 +58,14 @@ class Bootstrap {
         }
         I18n::setLocale($lang);
         return $lang;
+    }
+
+    /**
+     * R14 T2: the pages of one order that a gateway returns to and the payment link opens. Each carries its own order
+     * token, so a hidden store's (test) order is paid and confirmed there, as its webhooks are. Never a cart action.
+     */
+    public static function servesHiddenOrderPage(array $get, array $post): bool {
+        return in_array(Security::clean($get['page'] ?? ''), ['pay', 'order-done', 'checkout-cancel'], true) && empty($post['cart_action']);
     }
 
     /** A store that is not public answers its domain and URL prefix with 404, before any page or cart work. */

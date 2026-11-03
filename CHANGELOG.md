@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Payments** (review round 14, finding 3, T2, T18, T20). A capture of an older payment attempt records that
+  attempt as the order's payment (refunds go to the money), and pending-order expiry asks the gateway about every
+  attempt, not only the newest. A hidden store opens its payment link and the pages its gateway returns to. The
+  Stripe completion checks for a second capture and records the payment under the order lock. The return page shows
+  an order whose older attempt is paid as being confirmed, not failed. PayU notifications signed with SHA-256 are
+  accepted. The page after paying through a link no longer shows the customer's name and delivery address.
 - **Usability fixes** (review round 13, UX1–UX7, README). Checkout offers bank transfer only when the store
   has an IBAN with valid check digits (the shipped sample IBAN has none, so a customer got an order without
   payment instructions). A fresh `setup.php install` keeps every sample store, including `cz`, hidden until the
