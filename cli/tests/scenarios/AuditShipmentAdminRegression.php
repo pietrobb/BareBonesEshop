@@ -99,7 +99,7 @@ StoreContext::activate(StoreContext::resolve($stores, '/', '', $store));
 I18n::setLocale('en');
 $foreign = $store === 'default' ? 'cz' : 'default';
 $own = $store;
-$perms = $action === 'viewer_create' ? ['orders.view', 'orders.edit'] : ['orders.view', 'orders.edit', 'orders.ship'];
+$perms = $action === 'viewer_create' ? ['orders.view', 'orders.status'] : ['orders.view', 'orders.status', 'orders.ship'];
 $_SESSION = ['admin_role'=>'fulfillment', 'admin_user'=>'a128', 'admin_identity_id'=>1, 'admin_store_permissions'=>[$store=>$perms], 'csrf_token'=>'a128-token'];
 $snapshot = static function() use ($db): array {
     return [

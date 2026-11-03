@@ -77,7 +77,6 @@ function pageAdminUsers(): void {
             </select></div>
             <div class="form-row"><label for="au-password"><?= esc(I18n::t('admin.users.password')) ?></label><input id="au-password" type="password" name="password" minlength="12" required autocomplete="new-password"></div>
             <div class="form-row"><label for="au-current"><?= esc(I18n::t('admin.users.current_password')) ?></label><input id="au-current" type="password" name="current_password" autocomplete="current-password"></div>
-            <div class="form-row"><label><input type="checkbox" name="mfa" value="1" checked> MFA (TOTP)</label></div>
             <button class="btn btn-primary" type="submit"><?= esc(I18n::t('admin.users.create')) ?></button>
         </form>
     </div>
@@ -152,13 +151,12 @@ function adminUsersIsSelf(array $target): bool {
     return !empty($_SESSION['admin_identity_id']) && (int)$_SESSION['admin_identity_id'] === (int)$target['id'];
 }
 
-/** Own or owner credentials (password, TOTP, a new owner) change only with the actor's current password: a hijacked session must not take an owner account over. */
+/** Own or owner credentials (password, TOTP, a new owner) change only with the actor's current password (throttled): a hijacked session must not take an owner account over. */
 function adminUsersReauthenticated(array $target): bool {
     if (!adminUsersIsSelf($target) && ($target['role'] ?? '') !== 'owner') return true;
-    $actor = AdminIdentity::accountById((int)($_SESSION['admin_identity_id'] ?? 0));
-    if ($actor && password_verify((string)($_POST['current_password'] ?? ''), (string)($actor['password_hash'] ?? ''))) return true;
-    setFlash('err', I18n::t('admin.users.current_password_invalid'));
-    return false;
+    $result = AdminIdentity::reauthenticate((int)($_SESSION['admin_identity_id'] ?? 0), (string)($_POST['current_password'] ?? ''), (string)($_SESSION['admin_session_id'] ?? ''));
+    if ($result !== 'ok') setFlash('err', I18n::t($result === 'locked' ? 'admin.users.reauth_locked' : 'admin.users.current_password_invalid'));
+    return $result === 'ok';
 }
 
 /** The legacy session that created the first DB account ends here; the TOTP material is shown on this page only. */
@@ -191,20 +189,21 @@ function adminUsersEnroll(array $target): void {
 function handleAdminUserCreate(): void {
     Security::adminRequire('admins.manage');
     $role = Security::clean($_POST['role'] ?? 'viewer');
-    $mfa = !empty($_POST['mfa']);
     if (!Security::adminCanAssumeRole($role)) {
         setFlash('err', I18n::t($role === 'owner' ? 'admin.users.forbidden_owner' : 'admin.users.forbidden_role'));
         adminUsersDone();
     }
     // The legacy bootstrap (only while no account exists, M1) has no DB password to confirm.
     if ($role === 'owner' && !empty($_SESSION['admin_identity_id']) && !adminUsersReauthenticated(['id' => 0, 'role' => 'owner'])) adminUsersDone();
-    if ($mfa && !AdminIdentity::mfaKeyConfigured()) {
+    // Every account created here gets TOTP, enrolled in the same transaction: a web session must not mint a
+    // password-only admin (php cli/admin-user.php create --no-mfa, which needs shell access, still can).
+    if (!AdminIdentity::mfaKeyConfigured()) {
         setFlash('err', I18n::t('admin.users.mfa_key_missing'));
         adminUsersDone();
     }
     try {
-        $id = AdminIdentity::createWithStore((string)($_POST['username'] ?? ''), (string)($_POST['password'] ?? ''), $role, $mfa, StoreContext::current()->id(), false)['id'];
-        if ($mfa) adminUsersEnroll(AdminIdentity::accountById($id) ?? []);
+        $created = AdminIdentity::createWithStore((string)($_POST['username'] ?? ''), (string)($_POST['password'] ?? ''), $role, true, StoreContext::current()->id(), true);
+        $_SESSION['admin_users_enrollment'] = ['username' => (string)(AdminIdentity::accountById($created['id'])['username'] ?? '')] + (array)$created['enrollment'];
         setFlash('ok', I18n::t('admin.users.saved'));
     } catch (InvalidArgumentException | PDOException $e) {
         setFlash('err', I18n::t('admin.users.failed') . ($e instanceof InvalidArgumentException ? ': ' . $e->getMessage() : ''));

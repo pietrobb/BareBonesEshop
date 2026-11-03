@@ -112,6 +112,9 @@ PHP);
     }
     $r = $crsAdmin('mgr', 'create', ['username' => 'crs-new-viewer', 'role' => 'viewer', 'password' => 'Crs-new-password']);
     assert_true(($crsAccount('crs-new-viewer')['role'] ?? '') === 'viewer', $crsLabel('CR follow-up delegate: can still create a weaker viewer admin', $r));
+    // A web-created admin always gets TOTP (r13); its one-time secret is shown on the next page and then dropped.
+    $r = $crsAdmin('mgr');
+    assert_true(str_contains($r['out'], 'crs-new-viewer — TOTP') && $crsSecret($r) !== '', $crsLabel('CR follow-up delegate: the new viewer\'s TOTP secret is shown once', $r));
 
     $crsBefore = $crsHash('crs-fulfil');
     $r = $crsAdmin('mgr', 'password', ['account_id' => (string)$crsIds['crs-fulfil'], 'password' => 'Crs-takeover-password']);

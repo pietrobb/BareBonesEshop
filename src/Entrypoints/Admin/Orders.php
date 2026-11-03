@@ -218,7 +218,7 @@ function pageOrder(): void {
     $items = Orders::items($id);
     $allowed = OrderWorkflow::allowedFor($order);
     $canRefund = Security::adminCan('orders.refund');
-    if (!$canRefund) $allowed = array_values(array_filter($allowed, static fn(string $to): bool => !OrderWorkflow::returnsMoney($order, $to)));
+    $allowed = array_values(array_filter($allowed, static fn(string $to): bool => ($canRefund || !OrderWorkflow::returnsMoney($order, $to)) && Security::adminCan(Security::orderStatusPermission($to))));
     $paymentTransitions = Security::adminCan('orders.payments') ? adminManualPaymentTransitions($order) : [];
     $paymentTxs = PaymentService::transactionsForOrder($id);
     $refundableBalance = PaymentService::claimableRefund($id);
@@ -647,9 +647,9 @@ function handleRmaStatus(): void {
     exit;
 }
 function handleOrderStatus(): void {
-    Security::adminRequire('orders.edit');
-    $orderId = Security::int($_GET['id'] ?? 0);
     $newStatus = $_POST['new_status'] ?? '';
+    Security::adminRequire(Security::orderStatusPermission(is_string($newStatus) ? $newStatus : ''));
+    $orderId = Security::int($_GET['id'] ?? 0);
     $note = trim(Security::str($_POST['note'] ?? ''));
 
     if (!is_string($newStatus) || !in_array($newStatus, OrderWorkflow::statuses(), true)) {

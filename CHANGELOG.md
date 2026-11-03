@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Admin fixes** (review round 13, T10, T17, UX8). A store can no longer be added under a path the shop
+  routes itself (`/api`, `/product`, `/category`, `/page`, `/feeds`, `/assets`, an application directory, …):
+  a `/api` store answered the whole JSON API in its own context. Such a prefix, hand-edited into
+  `stores.json`, is never routed and `doctor` fails on it. The legal-text editor passes the text's language as
+  `text_lang` (`lang` switched the admin's own language). Re-entering the current password for owner or own
+  credentials allows five wrong passwords per account in 15 minutes, then signs that session out. A store
+  with invoices, customers, refunds, payments, withdrawals, complaints, returns, GDPR or back-in-stock records,
+  or whose catalogue or payment and shipping methods another store uses, cannot be removed; removing a store
+  drops its admin grants. Every admin created in the web admin gets TOTP (`cli/admin-user.php create --no-mfa`
+  still can create a password-only account). The `fulfillment` role moves orders along the workflow with the
+  new `orders.status` permission instead of `orders.edit`: it no longer edits items or prices, cancels orders,
+  creates manual orders, payment links or invoices.
 - **Backups, the updater and the price-list repair from review round 3** (review round 13, T6, T7, T8, T11).
   Migration `20261101150000_price_list_repair` no longer brings back what a merchant deleted from a seeded CZ/HU/PL
   price list (cash on delivery, a carrier with its rates, COD countries): it completes only a remainder a failed

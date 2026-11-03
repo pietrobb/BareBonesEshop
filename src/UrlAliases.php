@@ -97,8 +97,8 @@ final class UrlAliases {
         $path = '/' . trim($path, '/');
         $best = '';
         foreach ((array)(Bootstrap::stores()['stores'] ?? []) as $store) {
-            $prefix = rtrim((string)($store['url_prefix'] ?? ''), '/');
-            if ($prefix === '' || !str_starts_with($prefix, '/') || strlen($prefix) <= strlen($best)) continue;
+            $prefix = StoreContext::routablePrefix($store);
+            if ($prefix === '' || strlen($prefix) <= strlen($best)) continue;
             if ($path === $prefix || str_starts_with($path, $prefix . '/')) $best = $prefix;
         }
         if ($best === '') return null;

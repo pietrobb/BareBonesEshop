@@ -236,6 +236,24 @@ class AdminIdentity {
         return false;
     }
 
+    /**
+     * Confirms an admin's current password before a credential change: 'ok', 'invalid' or 'locked'. It is the login's
+     * password check without the login's throttle, so it has its own (fail-closed): five wrong passwords per account in
+     * 15 minutes, after which the session that guessed is signed out.
+     */
+    public static function reauthenticate(int $accountId, string $password, string $sessionId): string {
+        $limit = 'admin_reauth_' . $accountId;
+        if (!Security::rateLimitAllows($limit, 5, 900, false, true)) return 'locked';
+        $account = self::accountById($accountId);
+        if ($account && password_verify($password, (string)($account['password_hash'] ?? ''))) return 'ok';
+        Security::rateLimitRecord($limit, false);
+        Logger::warning('admin.reauth_failed', ['account_id' => $accountId]);
+        if (Security::rateLimitAllows($limit, 5, 900, false, true)) return 'invalid';
+        AuditLog::log('admin_account', $accountId, null, null, 'Re-authentication locked after repeated wrong passwords; session ended');
+        self::revokeSession($sessionId);
+        return 'locked';
+    }
+
     public static function revokeSession(string $sessionId): void {
         if (!self::available() || $sessionId === '') return;
         Db::get()->prepare('UPDATE admin_sessions SET revoked_at=:revoked WHERE id=:id AND revoked_at IS NULL')

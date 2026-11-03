@@ -230,6 +230,14 @@ class Setup
                 : "Store {$storeId}" . ($public ? '' : ' (not public)') . " still has example seller data: " . implode('; ', $problems),
                 "Enter the real company, address, IDs, IBAN and e-mail in Admin → Stores and seller (stores.json stores.{$storeId}.legal), or remove the store if you do not sell there.");
         }
+        // A store under a path the shop routes itself (/api, /product, …) would take those URLs over; it is never routed.
+        foreach (is_array($stores) ? ($stores['stores'] ?? []) : [] as $storeId => $store) {
+            $prefix = is_array($store) ? (string)($store['url_prefix'] ?? '') : '';
+            if ($prefix !== '' && StoreContext::isReservedPrefix($prefix)) {
+                $add('fail', 'stores.url_prefix.' . $storeId, "Store {$storeId} uses the reserved URL prefix {$prefix}: its storefront is not reachable.",
+                    'Give the store another url_prefix in stores.json (not ' . implode(', ', array_map(static fn(string $p): string => '/' . $p, StoreContext::RESERVED_PREFIXES)) . ').');
+            }
+        }
         // Invoice dates and number years, the VAT rate in force and consumer deadlines follow the store's wall clock.
         foreach (is_array($stores) ? ($stores['stores'] ?? []) : [] as $storeId => $store) {
             if (is_array($store)) $add(...array_values(self::storeTimezoneCheck((string)$storeId, $store)));

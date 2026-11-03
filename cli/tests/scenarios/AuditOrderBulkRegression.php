@@ -56,7 +56,7 @@ $stores = Bootstrap::stores();
 $stores['stores']['cz'] = array_replace($stores['stores']['default'], ['id'=>'cz', 'url_prefix'=>'/cz', 'domains'=>[], 'catalog_scope'=>'default', 'currency'=>'czk']);
 StoreContext::activate(StoreContext::resolve($stores, '/', '', $store));
 I18n::setLocale('en');
-$perms = ['manager' => ['orders.view', 'orders.edit', 'orders.print', 'orders.refund'], 'fulfillment' => ['orders.view', 'orders.edit', 'orders.print'], 'viewer' => ['orders.view'], 'none' => []][$role];
+$perms = ['manager' => ['orders.view', 'orders.edit', 'orders.print', 'orders.refund'], 'fulfillment' => ['orders.view', 'orders.status', 'orders.print'], 'viewer' => ['orders.view'], 'none' => []][$role];
 if ($role === 'none') $role = 'manager';
 $_SESSION = ['admin_role'=>$role, 'admin_identity_id'=>1, 'admin_store_permissions'=>[$store=>$perms]];
 $ids = [];
