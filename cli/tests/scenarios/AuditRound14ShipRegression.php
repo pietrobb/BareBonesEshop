@@ -80,15 +80,15 @@ try {
     $r14sA = $r14sParcel($r14sOrder, [[97461, 'R14S-A', 1]], 'r14s-a');
     $r14sB = $r14sParcel($r14sOrder, [[97462, 'R14S-B', 1]], 'r14s-b');
     $r14sLabelA = ShippingService::generateLabel($r14sOrder, 'r14s-carrier', $r14sA);
-    assert_true(Fulfillment::cancel($r14sA), 'R14 T4 setup: the labelled parcel is cancelled');
-    $r14sLeft = method_exists(ShippingService::class, 'cancelParcelLabels') ? ShippingService::cancelParcelLabels($r14sOrder, $r14sA) : null;
+    $r14sLeft = method_exists(Fulfillment::class, 'cancelWithLabels') ? Fulfillment::cancelWithLabels($r14sOrder, $r14sA) : Fulfillment::cancel($r14sA);
     assert_equals([[], [$r14sLabelA['awb']], [$r14sLabelA['awb'] . ':cancelled']], [$r14sLeft, $r14sCarrier->cancelled, $r14sLabels($r14sA)],
         'R14 T4: cancelling a parcel cancels its label at the carrier and records it (was: still active there, picked up and collected)');
-    assert_equals([], ShippingService::cancelParcelLabels($r14sOrder, $r14sA), 'R14 T4: a second run calls the carrier for nothing');
+    assert_equals([null, []], [Fulfillment::cancelWithLabels($r14sOrder, $r14sA), ShippingService::cancelParcelLabels($r14sOrder, $r14sA)],
+        'R14 T4: a second cancel changes nothing and calls the carrier for nothing');
     assert_equals(1, count($r14sCarrier->cancelled), 'R14 T4: the carrier is asked to cancel the label once');
 
     $r14sAdmin = (string)file_get_contents($r14sRoot . '/src/Entrypoints/Admin/Shipments.php');
-    assert_true((bool)preg_match("/ShippingService::cancelParcelLabels\\(\\\$orderId, \\(int\\)\\\$shipment\\['id'\\]\\)[^;]*;\\R\\s*\\}, false, false\\);/", $r14sAdmin),
+    assert_true((bool)preg_match("/Fulfillment::cancelWithLabels\\(\\\$orderId, \\(int\\)\\\$shipment\\['id'\\]\\)(?:(?!\\}, ).)*\\R(?:.*\\R){0,2}\\s*\\}, false, false\\);/", $r14sAdmin),
         'R14 T4: the admin parcel cancel cancels its labels at the carrier, outside the order transaction');
 
     // A carrier that cannot cancel: the label stays active, is reported and the admin is told.

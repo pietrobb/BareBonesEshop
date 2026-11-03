@@ -224,11 +224,9 @@ function handleOrderShipmentCancel(): void {
     $orderId = Security::int($_GET['id'] ?? 0);
     adminShipmentAction($orderId, static function() use ($orderId): string {
         $shipment = adminOrderShipment($orderId, 'planned');
-        if (!Fulfillment::cancel((int)$shipment['id'])) return 'admin.shipment.msg.already_done';
+        if (($left = Fulfillment::cancelWithLabels($orderId, (int)$shipment['id'])) === null) return 'admin.shipment.msg.already_done';
         AuditLog::log('shipment', (int)$shipment['id'], ['status' => 'planned'], ['status' => 'cancelled'], 'Admin shipment cancelled');
-        // R14 T4: committed first, then its labels are cancelled at the carrier (no carrier call inside a transaction).
-        return ShippingService::cancelParcelLabels($orderId, (int)$shipment['id']) === []
-            ? 'admin.shipment.msg.cancelled' : 'admin.shipment.msg.cancelled_label_active';
+        return $left === [] ? 'admin.shipment.msg.cancelled' : 'admin.shipment.msg.cancelled_label_active';
     }, false, false);
 }
 

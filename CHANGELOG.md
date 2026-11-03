@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Shipping and the withdrawal period** (review round 14, T4, F3, carrier labels, feed). Cancelling a parcel in the
+  admin also cancels its labels at the carrier (they stayed active there, so the parcel was still picked up and its
+  cash on delivery collected); a label the carrier cannot cancel stays active, is reported and the admin is told to
+  cancel it with the carrier. The carrier's idempotency key names the parcel, so two parcels of one order labelled at
+  the same time get two labels (they were one carrier request with one AWB). A cancelled parcel gets no label, and a
+  label the carrier creates while its parcel is being cancelled is cancelled at the carrier instead of being recorded
+  on the cancelled parcel. The withdrawal period of a bundle starts once every component is in a delivered parcel,
+  counted as bundle quantity × units per bundle (the component units were summed against the bundle quantity). The
+  marketing feed lists a bundle with an e-book component as out of stock, as the shop does not sell it.
 - **Updater and installation** (review round 14, findings 4–6, T20, installer self-check). `update.php rotate-key`
   no longer takes `--public-key`: the endorsement is checked against the configured `update_public_key` only (a
   key given on the command line could endorse itself while the configured key stayed trusted and the wrong key was
