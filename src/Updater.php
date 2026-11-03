@@ -4,7 +4,7 @@ final class Updater
 {
     private const STATE_FILE = 'installed.json';
     // stores.json is the merchant's (since 2.1 git tracks only stores.example.json): no package may write or delete it.
-    private const PROTECTED_FILES = ['.env', 'config.php', '.barebones-version.json', 'stores.json'];
+    private const PROTECTED_FILES = ['.env', 'config.php', '.barebones-version.json', 'stores.json', MaintenanceMode::FILE];
     private const PROTECTED_PREFIXES = [
         '.git/', '.worktrees/', '.claude/', '.playwright-mcp/',
         'cache/', 'db/', 'extensions/', 'jobs/', 'logs/', 'storage/', 'uploads/',
@@ -216,6 +216,9 @@ final class Updater
         try {
             $report = $this->check($package);
             $this->assertApplicable($report);
+            // From the snapshot on, no web request or worker writes: the snapshot stays consistent and nobody runs
+            // a mix of old and new files against a half-migrated database (T20).
+            MaintenanceMode::enter($this->root, 'update ' . $package->version());
             $snapshot = $this->createSnapshot($package, $report, 'pre-update');
             $report = $this->check($package);
             $this->assertApplicable($report);
@@ -298,6 +301,7 @@ final class Updater
             }
             throw $e;
         } finally {
+            MaintenanceMode::leave($this->root);
             $this->unlock();
         }
     }
@@ -345,12 +349,14 @@ final class Updater
                 throw new RuntimeException(self::dataLossWarning($databaseAt)
                     . ' Stop all writers, export or reconcile those records, then re-run with --accept-data-loss.');
             }
+            MaintenanceMode::enter($this->root, 'rollback ' . $snapshotId);
             $discarded = $databaseAt !== null ? $this->discardedWrites($metadata) : null;
             $result = $this->restoreSnapshot($snapshotId, $force);
             $this->setSnapshotStatus($snapshotId, 'rolled-back', null, $discarded);
             $this->reportDiscardedWrites($discarded, 'manual rollback');
             return $result + ['database_restored_to' => $databaseAt, 'discarded_writes' => $discarded];
         } finally {
+            MaintenanceMode::leave($this->root);
             $this->unlock();
         }
     }
@@ -747,17 +753,31 @@ final class Updater
         $this->installAbsoluteFile($source, $target);
     }
 
-    /** State file or live SQLite database: an existing target keeps its mode, owner and group (www-data must still write the database). */
+    /**
+     * State file or live SQLite database (rollback): an existing target keeps its mode, owner and group (www-data must
+     * still write the database). R14 #5: the directory may be writable by the web user, who can swap the staged name
+     * for a symlink to /etc/shadow between two calls; run as root, chmod/chown by path followed it. The staged file is
+     * now created exclusively with its mode, and handed over with lchown/lchgrp on the inode this call created.
+     */
     private function installAbsoluteFile(string $source, string $target): void
     {
-        $temporary = $this->stageFile($source, $target);
-        if (is_file($target) && !is_link($target)) {
-            @chmod($temporary, fileperms($target) & 0777);
-            $owner = @fileowner($target);
-            $group = @filegroup($target);
+        $existing = is_file($target) && !is_link($target) ? @stat($target) : false;
+        [$temporary, $inode] = $this->stageExclusive($source, $target, is_array($existing) ? (int)$existing['mode'] & 0777 : null);
+        try {
             // Only root can hand the file to another owner (cli/update.php run as root); otherwise the mode carries the access.
-            if ($owner !== false && $owner !== @fileowner($temporary)) @chown($temporary, $owner);
-            if ($group !== false && $group !== @filegroup($temporary)) @chgrp($temporary, $group);
+            if (is_array($existing) && function_exists('posix_geteuid') && posix_geteuid() === 0) {
+                $staged = self::assertStagedInode($temporary, $inode);
+                if ((int)$existing['uid'] !== (int)$staged['uid'] && !@lchown($temporary, (int)$existing['uid'])) {
+                    throw new RuntimeException("Cannot set the owner of the staged {$target}");
+                }
+                if ((int)$existing['gid'] !== (int)$staged['gid'] && !@lchgrp($temporary, (int)$existing['gid'])) {
+                    throw new RuntimeException("Cannot set the group of the staged {$target}");
+                }
+                self::assertStagedInode($temporary, $inode);
+            }
+        } catch (Throwable $e) {
+            @unlink($temporary);
+            throw $e;
         }
         $this->commitStagedFile($temporary, $target);
     }
@@ -768,18 +788,66 @@ final class Updater
      */
     private function stageFile(string $source, string $target): string
     {
+        return $this->stageExclusive($source, $target, null)[0];
+    }
+
+    /**
+     * Copy $source to a new name next to $target, created exclusively ('x': never through a name or link someone put
+     * there) with $mode from the umask; returns the path and its inode. fopen cannot create execute bits and chmod
+     * follows links, so those are added by path only in a directory nobody but this user can write to.
+     * @return array{0: string, 1: int}
+     */
+    private function stageExclusive(string $source, string $target, ?int $mode): array
+    {
         if (!is_file($source) || is_link($source)) {
             throw new RuntimeException("Update source is not a regular file: {$source}");
         }
         $this->ensureDirectory(dirname($target), 0755);
+        $mode = ($mode ?? ((fileperms($source) & 0111) !== 0 ? 0755 : 0644)) & 0777;
         $temporary = dirname($target) . DIRECTORY_SEPARATOR . '.' . basename($target)
             . '.update-' . bin2hex(random_bytes(6)) . '.tmp';
-        if (!copy($source, $temporary)) {
-            @unlink($temporary);
+        $previous = umask(~$mode & 0777);
+        try {
+            $in = @fopen($source, 'rb');
+            $out = $in ? @fopen($temporary, 'xb') : false;
+            $copied = $in && $out && stream_copy_to_stream($in, $out) !== false && fflush($out);
+            $stat = $copied ? fstat($out) : false;
+            if ($in) fclose($in);
+            if ($out) fclose($out);
+        } finally {
+            umask($previous);
+        }
+        if (!is_array($stat)) {
+            if ($out) @unlink($temporary);
             throw new RuntimeException("Cannot stage update file: {$target}");
         }
-        @chmod($temporary, (fileperms($source) & 0111) !== 0 ? 0755 : 0644);
-        return $temporary;
+        $inode = (int)$stat['ino'];
+        if (($mode & 0111) !== 0 && self::onlyWritableByMe(dirname($temporary))) {
+            @chmod($temporary, $mode);
+        }
+        return [$temporary, $inode];
+    }
+
+    /** No other account can rename, replace or link names in $directory. */
+    private static function onlyWritableByMe(string $directory): bool
+    {
+        if (!function_exists('posix_geteuid')) return true;
+        $stat = @lstat($directory);
+        return is_array($stat) && ((int)$stat['mode'] & 0170000) === 0040000 && (int)$stat['uid'] === posix_geteuid() && ((int)$stat['mode'] & 0022) === 0;
+    }
+
+    /**
+     * $path is still the regular file with one link that stageExclusive created; returns its lstat.
+     * @return array<int|string, int>
+     */
+    private static function assertStagedInode(string $path, int $inode): array
+    {
+        clearstatcache(true, $path);
+        $stat = @lstat($path);
+        if (!is_array($stat) || ((int)$stat['mode'] & 0170000) !== 0100000 || (int)$stat['ino'] !== $inode || (int)$stat['nlink'] !== 1) {
+            throw new RuntimeException("Staged update file {$path} was replaced; refusing");
+        }
+        return $stat;
     }
 
     /** Stages a payload file and proves the staged bytes — the ones that will be installed — match the signed hash. */

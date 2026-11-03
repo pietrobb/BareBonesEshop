@@ -22,3 +22,6 @@ spl_autoload_register(function (string $class) {
     $file = __DIR__ . '/../adapters/contrib/' . $class . '.php';
     if (file_exists($file)) { require_once $file; return; }
 });
+
+// cli/update.php apply/rollback in progress: no web request runs half-updated code (T20).
+if (PHP_SAPI !== 'cli' && PHP_SAPI !== 'phpdbg' && MaintenanceMode::active(dirname(__DIR__))) MaintenanceMode::respond();

@@ -51,8 +51,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         $errors += $validationErrors;
         $values['install_key'] = (string)($_POST['install_key'] ?? '');
         // The self-check connects to this server, so only the key holder can start it (nobody else probes its ports).
-        // php -S is the development server: router.php applies the .htaccess rules itself (one request at a time).
-        if ($errors === []) $exposed = PHP_SAPI === 'cli-server' ? [] : WebInstaller::exposedPaths($installRoot, $_SERVER);
+        // php -S with router.php is the development server that applies the .htaccess rules itself (one request at a
+        // time, so it cannot answer its own probe). R14: php -S without that router serves every file as it is.
+        if ($errors === []) $exposed = WebInstaller::devRouterActive($installRoot, PHP_SAPI, get_included_files()) ? [] : WebInstaller::exposedPaths($installRoot, $_SERVER);
         $protectionError = WebInstaller::protectionError($exposed, !empty($_POST['protection_checked']));
         if ($protectionError !== null) $errors['protection'] = $protectionError;
         if ($errors === []) {

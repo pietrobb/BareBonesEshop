@@ -345,7 +345,7 @@ parameters:
 		-
 			message: '#^Right side of && is always false\.$#'
 			identifier: booleanAnd.rightAlwaysFalse
-			count: 3
+			count: 4
 			path: src/Rma.php
 
 		-

@@ -269,6 +269,12 @@ final class WorkerJobs
             if ($itemRefundId > 0 && $refundId !== '') Rma::noteProviderRefund($itemRefundId, $refundId);
             return;
         }
+        // R14 T18: a declined item refund was released with its credit note (PaymentService::refund()); retrying it
+        // would only be declined again. The merchant is told and can refund the items anew.
+        if ($itemRefundId > 0 && in_array($status, ['failed', 'canceled', 'cancelled'], true)) {
+            IncidentMonitor::report('payment.refund_failed', 'payment', 'critical', ['order_id' => $orderId, 'item_refund_id' => $itemRefundId, 'released' => true]);
+            return;
+        }
         if ($status !== 'succeeded') {
             throw new RuntimeException("Refund provider call did not succeed for order #{$orderId}");
         }

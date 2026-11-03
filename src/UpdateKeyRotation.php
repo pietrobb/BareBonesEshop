@@ -13,7 +13,8 @@ declare(strict_types=1);
  */
 final class UpdateKeyRotation
 {
-    private const STATEMENT = "barebones-update-key-rotation-v1\n";
+    /** R14 #4: v2 names the old key too, so an endorsement only ever replaces the key that signed it. */
+    private const STATEMENT = "barebones-update-key-rotation-v2\n";
     public const LOCAL_FILE = 'revoked-update-keys.json';
     /** Keys lost or compromised, by fingerprint; part of the signed code because packages never ship releases/. */
     public const SHIPPED_REVOKED = [
@@ -26,10 +27,10 @@ final class UpdateKeyRotation
         return hash('sha256', self::raw($publicKey));
     }
 
-    /** The bytes the old secret key signs to endorse $newPublicKey. */
-    public static function statement(string $newPublicKey): string
+    /** The bytes the old secret key signs to endorse replacing $oldPublicKey with $newPublicKey. */
+    public static function statement(string $oldPublicKey, string $newPublicKey): string
     {
-        return self::STATEMENT . base64_encode(self::raw($newPublicKey)) . "\n";
+        return self::STATEMENT . 'old ' . self::fingerprint($oldPublicKey) . "\nnew " . base64_encode(self::raw($newPublicKey)) . "\n";
     }
 
     /** Endorsement (base64 detached signature) of $newPublicKey by the current secret key. */
@@ -37,15 +38,16 @@ final class UpdateKeyRotation
     {
         self::requireSodium();
         $secret = UpdatePackage::decodeKey(trim($currentSecretKey), SODIUM_CRYPTO_SIGN_SECRETKEYBYTES, 'update secret key');
-        return 'base64:' . base64_encode(sodium_crypto_sign_detached(self::statement($newPublicKey), $secret));
+        $currentPublic = 'base64:' . base64_encode(sodium_crypto_sign_publickey_from_secretkey($secret));
+        return 'base64:' . base64_encode(sodium_crypto_sign_detached(self::statement($currentPublic, $newPublicKey), $secret));
     }
 
-    /** True when $endorsement is $trustedPublicKey's signature of the rotation statement for $newPublicKey. */
+    /** True when $endorsement is $trustedPublicKey's signature of the statement replacing it with $newPublicKey. */
     public static function verifyEndorsement(string $trustedPublicKey, string $newPublicKey, string $endorsement): bool
     {
         self::requireSodium();
         $signature = UpdatePackage::decodeKey(trim($endorsement), SODIUM_CRYPTO_SIGN_BYTES, 'key endorsement');
-        return sodium_crypto_sign_verify_detached($signature, self::statement($newPublicKey), self::raw($trustedPublicKey));
+        return sodium_crypto_sign_verify_detached($signature, self::statement($trustedPublicKey, $newPublicKey), self::raw($trustedPublicKey));
     }
 
     /**
