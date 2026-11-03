@@ -90,7 +90,8 @@ final class PaymentLink {
         $financial = json_decode((string)($order['financial_snapshot'] ?? ''), true);
         try {
             $baseUrl = self::baseUrl();
-            $confirmation = CheckoutSession::createConfirmation($orderId, CheckoutSession::browserSessionId());
+            // Whoever holds the link pays through it: their confirmation page shows the order, not its delivery address.
+            $confirmation = CheckoutSession::createConfirmation($orderId, CheckoutSession::browserSessionId(), false);
             $session = PaymentService::initiate([
                 'order_id' => $orderId, 'order_number' => $order['order_number'], 'total' => (int)$order['total'],
                 'customer_email' => (string)$order['customer_email'], 'customer_name' => (string)($order['customer_name'] ?? ''),
@@ -158,10 +159,24 @@ final class PaymentLink {
     public static function returnStatus(array $order): string {
         $status = (string)($order['payment_status'] ?? 'pending');
         if ($status !== 'failed' || !self::payable($order)) return $status;
-        $latest = self::sessions((int)$order['id'])[0] ?? null;
-        if ($latest === null || self::eventAfter((int)$order['id'], (int)$latest['id'])) return $status;
-        $snapshot = json_decode((string)$order['payment_method_snapshot'], true);
-        return self::sessionState($order, $latest, (string)$snapshot['provider']) === 'closed' ? 'failed' : 'pending';
+        $orderId = (int)$order['id'];
+        $provider = (string)(json_decode((string)$order['payment_method_snapshot'], true)['provider'] ?? '');
+        foreach (self::sessions($orderId) as $i => $session) {
+            if ($i === 0) {
+                if (!self::eventAfter($orderId, (int)$session['id']) && self::sessionState($order, $session, $provider) !== 'closed') return 'pending';
+                continue;
+            }
+            // R14 T18: an older attempt the customer paid (the newest one failed or expired) was shown as failed.
+            $ref = trim((string)$session['provider_ref']);
+            if ($ref !== '' && !self::eventAfter($orderId, (int)$session['id'], $ref) && self::sessionState($order, $session, $provider) === 'paid') return 'pending';
+        }
+        return $status;
+    }
+
+    /** @return list<string> the gateway references of every payment attempt of the order, newest first */
+    public static function sessionRefs(int $orderId): array {
+        if (!Db::tableExists('payment_transactions')) return [];
+        return array_values(array_unique(array_filter(array_map(static fn(array $session): string => trim((string)$session['provider_ref']), self::sessions($orderId)))));
     }
 
     /** @return list<array<string,mixed>> the order's gateway sessions, newest first */
@@ -207,10 +222,11 @@ final class PaymentLink {
         }
     }
 
-    /** A payment event (failure, cancellation, capture) logged after the session $transactionId opened. */
-    private static function eventAfter(int $orderId, int $transactionId): bool {
-        $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store AND id > :id AND status <> 'initiated' LIMIT 1");
-        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':id' => $transactionId]);
+    /** A payment event (failure, cancellation, capture) logged after the session $transactionId opened; of $ref only when given. */
+    private static function eventAfter(int $orderId, int $transactionId, ?string $ref = null): bool {
+        $stmt = Db::get()->prepare("SELECT 1 FROM payment_transactions WHERE order_id = :order AND store_id = :store AND id > :id AND status <> 'initiated'"
+            . ($ref !== null ? ' AND provider_ref = :ref' : '') . ' LIMIT 1');
+        $stmt->execute([':order' => $orderId, ':store' => StoreContext::current()->id(), ':id' => $transactionId] + ($ref !== null ? [':ref' => $ref] : []));
         return $stmt->fetchColumn() !== false;
     }
 
