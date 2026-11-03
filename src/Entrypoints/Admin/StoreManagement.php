@@ -4,8 +4,7 @@
 function adminStoreManagementCards(array $stores, bool $writable): void {
     if (Security::adminRole() !== 'owner') return;
     $page = Security::str($_GET['legal'] ?? '');
-    // text_lang, not lang: ?lang= switches the admin's own language (Admin.php), and the language links keep the query.
-    $lang = Security::str($_GET['text_lang'] ?? '');
+    $lang = Security::str($_GET['text_lang'] ?? ''); // not ?lang=, which switches the admin's own language (Admin.php)
     $legalStore = Security::str($_GET['store'] ?? '');
     $disabled = $writable ? '' : ' disabled';
     ?>

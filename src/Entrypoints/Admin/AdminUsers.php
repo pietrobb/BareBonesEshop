@@ -151,32 +151,12 @@ function adminUsersIsSelf(array $target): bool {
     return !empty($_SESSION['admin_identity_id']) && (int)$_SESSION['admin_identity_id'] === (int)$target['id'];
 }
 
-/**
- * Own or owner credentials (password, TOTP, a new owner) change only with the actor's current password: a hijacked
- * session must not take an owner account over. The check is the login's password check without its throttle, so it
- * has its own: five wrong passwords per account in 15 minutes, after which the session that guessed is signed out.
- */
+/** Own or owner credentials (password, TOTP, a new owner) change only with the actor's current password (throttled): a hijacked session must not take an owner account over. */
 function adminUsersReauthenticated(array $target): bool {
     if (!adminUsersIsSelf($target) && ($target['role'] ?? '') !== 'owner') return true;
-    $actorId = (int)($_SESSION['admin_identity_id'] ?? 0);
-    $limit = 'admin_reauth_' . $actorId;
-    $allowed = static fn(): bool => Security::rateLimitAllows($limit, 5, 900, false, true);
-    if (!$allowed()) {
-        setFlash('err', I18n::t('admin.users.reauth_locked'));
-        return false;
-    }
-    $actor = AdminIdentity::accountById($actorId);
-    if ($actor && password_verify((string)($_POST['current_password'] ?? ''), (string)($actor['password_hash'] ?? ''))) return true;
-    Security::rateLimitRecord($limit, false);
-    Logger::warning('admin.reauth_failed', ['account_id' => $actorId]);
-    if (!$allowed()) {
-        AuditLog::log('admin_account', $actorId, null, null, 'Re-authentication locked after repeated wrong passwords; session ended');
-        if (!empty($_SESSION['admin_session_id'])) AdminIdentity::revokeSession((string)$_SESSION['admin_session_id']);
-        setFlash('err', I18n::t('admin.users.reauth_locked'));
-        return false;
-    }
-    setFlash('err', I18n::t('admin.users.current_password_invalid'));
-    return false;
+    $result = AdminIdentity::reauthenticate((int)($_SESSION['admin_identity_id'] ?? 0), (string)($_POST['current_password'] ?? ''), (string)($_SESSION['admin_session_id'] ?? ''));
+    if ($result !== 'ok') setFlash('err', I18n::t($result === 'locked' ? 'admin.users.reauth_locked' : 'admin.users.current_password_invalid'));
+    return $result === 'ok';
 }
 
 /** The legacy session that created the first DB account ends here; the TOTP material is shown on this page only. */

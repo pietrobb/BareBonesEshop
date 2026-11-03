@@ -24,7 +24,7 @@ function postedOrderIds(): array {
 
 function handleOrdersBulkStatus(): void {
     $to = Security::str($_POST['new_status'] ?? '');
-    adminRequireStatusChange($to);
+    Security::adminRequire(Security::orderStatusPermission($to));
     $ids = postedOrderIds();
     $note = trim(Security::str($_POST['note'] ?? ''));
     $back = 'admin.php?' . http_build_query(['p' => 'orders', 'status' => Security::str($_POST['status'] ?? ''), 'payment_status' => Security::str($_POST['payment_status'] ?? '')]);

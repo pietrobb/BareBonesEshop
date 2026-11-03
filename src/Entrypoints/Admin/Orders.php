@@ -218,8 +218,7 @@ function pageOrder(): void {
     $items = Orders::items($id);
     $allowed = OrderWorkflow::allowedFor($order);
     $canRefund = Security::adminCan('orders.refund');
-    if (!$canRefund) $allowed = array_values(array_filter($allowed, static fn(string $to): bool => !OrderWorkflow::returnsMoney($order, $to)));
-    if (!Security::adminCan('orders.edit')) $allowed = Security::adminCan('orders.status') ? array_values(array_diff($allowed, ['cancelled'])) : [];
+    $allowed = array_values(array_filter($allowed, static fn(string $to): bool => ($canRefund || !OrderWorkflow::returnsMoney($order, $to)) && Security::adminCan(Security::orderStatusPermission($to))));
     $paymentTransitions = Security::adminCan('orders.payments') ? adminManualPaymentTransitions($order) : [];
     $paymentTxs = PaymentService::transactionsForOrder($id);
     $refundableBalance = PaymentService::claimableRefund($id);
@@ -647,17 +646,9 @@ function handleRmaStatus(): void {
     header('Location: admin.php?p=rma');
     exit;
 }
-/**
- * Moving an order along its workflow needs orders.status (fulfillment) or orders.edit; cancelling it needs
- * orders.edit, as it releases the goods and the payment of an order the customer is waiting for.
- */
-function adminRequireStatusChange(string $to): void {
-    Security::adminRequire($to !== 'cancelled' && Security::adminCan('orders.status') ? 'orders.status' : 'orders.edit');
-}
-
 function handleOrderStatus(): void {
     $newStatus = $_POST['new_status'] ?? '';
-    adminRequireStatusChange(is_string($newStatus) ? $newStatus : '');
+    Security::adminRequire(Security::orderStatusPermission(is_string($newStatus) ? $newStatus : ''));
     $orderId = Security::int($_GET['id'] ?? 0);
     $note = trim(Security::str($_POST['note'] ?? ''));
 
