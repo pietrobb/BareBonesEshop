@@ -113,7 +113,7 @@ $r8pDb->prepare("INSERT INTO abandoned_carts (session_id, customer_email, cart_d
     VALUES ('r8p-cart', 'r8p-cart@example.test', '[]', 'default', ?, 100, 1, 'v1', datetime('now'), datetime('now', '-30 hours'), datetime('now', '-30 hours'))")->execute([$r8pToken4]);
 JobQueue::setDir($r8pDir . '/jobs');
 // Loading the worker runs one pass over the (still empty) queue.
-if (!function_exists('handleEmailSend')) {
+if (!class_exists('WorkerJobs')) {
     $argv = ['worker.php', '--once'];
     ob_start();
     require_once TEST_CLI_DIR . '/../cli/worker.php';
@@ -128,7 +128,7 @@ assert_true($r8pReminder !== null && !str_contains((string)$r8pPayload, $r8pToke
 MailService::useAdapter(new LogMail(['log_file' => $r8pDir . '/mail4.log']));
 try {
     LogMail::clearCaptured();
-    if ($r8pReminder !== null) handleEmailSend($r8pReminder['payload'], $r8pReminder);
+    if ($r8pReminder !== null) WorkerJobs::handleEmailSend($r8pReminder['payload'], $r8pReminder);
     $r8pText = (string)(LogMail::lastCaptured()['text'] ?? '');
 } finally {
     MailService::useAdapter(null);

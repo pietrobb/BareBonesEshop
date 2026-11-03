@@ -31,9 +31,6 @@ if (WebInstaller::installKey($installRoot) === null) {
         . 'Give the web server user write access to the folder you uploaded the shop to and reload this page.</p>');
     return;
 }
-// php -S is the development server: router.php applies the .htaccess rules itself (and serves one request at a time).
-$exposed = PHP_SAPI === 'cli-server' ? [] : WebInstaller::exposedPaths($installRoot, $_SERVER);
-
 session_name('bbe_install');
 session_set_cookie_params(['httponly' => true, 'samesite' => 'Strict', 'secure' => $installHttps]);
 session_start();
@@ -41,10 +38,7 @@ $_SESSION['install_token'] ??= bin2hex(random_bytes(32));
 $values = WebInstaller::defaults($installRoot, $_SERVER);
 $errors = [];
 $result = null;
-if ($exposed) {
-    $errors['protection'] = 'The web server serves files that must stay private (' . implode(', ', $exposed) . '), so the .htaccess rules are not active. '
-        . 'Turn on mod_rewrite and AllowOverride All for this folder (ask your hosting), or use deploy/nginx.conf on nginx, then reload this page.';
-}
+$exposed = [];
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     if (!hash_equals((string)$_SESSION['install_token'], (string)($_POST['token'] ?? ''))) {
         $errors['form'] = 'The form expired. Check the values and send it again.';
@@ -56,6 +50,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         [$values, $validationErrors] = WebInstaller::validate($_POST, $installRoot);
         $errors += $validationErrors;
         $values['install_key'] = (string)($_POST['install_key'] ?? '');
+        // The self-check connects to this server, so only the key holder can start it (nobody else probes its ports).
+        // php -S is the development server: router.php applies the .htaccess rules itself (one request at a time).
+        if ($errors === []) $exposed = PHP_SAPI === 'cli-server' ? [] : WebInstaller::exposedPaths($installRoot, $_SERVER);
+        $protectionError = WebInstaller::protectionError($exposed, !empty($_POST['protection_checked']));
+        if ($protectionError !== null) $errors['protection'] = $protectionError;
         if ($errors === []) {
             [$result, $installError] = WebInstaller::installLocked($values, $installRoot, $installLock);
             if ($installError !== null) $errors['form'] = $installError;
@@ -83,9 +82,8 @@ $groupError = static fn(string $key): string => isset($errors[$key]) ? '<p class
 
 $page('Install ' . ($values['shop_name'] !== '' ? $values['shop_name'] : 'your shop'), $groupError('protection') . $groupError('form')
     . '<p>Fill in this one form and the shop is ready.</p>'
-    . ($exposed === null ? '<p class="hint">The installer could not check from here whether the web server keeps the application folders private. '
-        . 'After installing, make sure that opening /src/autoload.php in the browser answers "Forbidden".</p>' : '')
     . '<form method="post" action="install.php" novalidate><input type="hidden" name="token" value="' . $h($_SESSION['install_token']) . '">'
+    . ($exposed === null ? '<p>' . $checkbox('protection_checked', 'I opened ' . WebInstaller::PROBE_FILE . ' in the browser and it answered "Forbidden" or "Not Found".') . '</p>' : '')
     . '<fieldset><legend>Installation key</legend>' . $field('install_key', 'Installation key', 'text',
         'Proves that you own this server: open the file ' . WebInstaller::KEY_FILE . ' in the shop folder with your FTP client or the hosting file manager and copy the key from it (XXXXX-XXXXX-XXXXX-XXXXX).') . '</fieldset>'
     . '<fieldset><legend>Shop</legend>' . $field('shop_name', 'Shop name') . $field('app_url', 'Shop address', 'url', 'Used in e-mails and payment links.')

@@ -126,11 +126,11 @@ try {
         'R4 tracking: the latest shipped shipment with tracking details is used');
     LogMail::clearCaptured();
     MailService::useAdapter(new LogMail(['log_file' => TEST_CLI_DIR . '/../db/emails.test.log']));
-    handleEmailSend(['template' => 'order_shipped', 'to' => 'r4-buyer@example.test', 'order_id' => $r4OrderId], []);
+    WorkerJobs::handleEmailSend(['template' => 'order_shipped', 'to' => 'r4-buyer@example.test', 'order_id' => $r4OrderId], []);
     $r4Mail = (string)(LogMail::lastCaptured()['html'] ?? '');
     assert_true(str_contains($r4Mail, 'DPD') && str_contains($r4Mail, 'R4TRACK1') && str_contains($r4Mail, 'href="https://track.example/R4TRACK1"'),
         'R4 order_shipped: the e-mail carries the admin shipment carrier, tracking number and tracking link');
-    handleEmailSend(['template' => 'order_confirmation', 'to' => 'r4-buyer@example.test', 'order_id' => $r4OrderId], []);
+    WorkerJobs::handleEmailSend(['template' => 'order_confirmation', 'to' => 'r4-buyer@example.test', 'order_id' => $r4OrderId], []);
     $r4Mail = (string)(LogMail::lastCaptured()['html'] ?? '');
     $r4Czk = esc(I18n::price(121000, 'czk'));
     assert_true(substr_count($r4Mail, $r4Czk) >= 2 && !str_contains($r4Mail, '€') && str_contains($r4Mail, '<strong>' . I18n::tIn('order_status.shipped', 'cs') . '</strong>') && !str_contains($r4Mail, '<strong>shipped</strong>'),

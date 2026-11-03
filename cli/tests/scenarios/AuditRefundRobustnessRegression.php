@@ -108,16 +108,16 @@ try {
     applyStripeChargeRefunded(['id' => 'ch_arr_1', 'payment_intent' => 'pi_arr_1', 'amount_refunded' => 1000,
         'refunds' => ['data' => [['id' => $r1Refund, 'amount' => 1000, 'status' => 'succeeded']], 'has_more' => false]], 'pi_arr_1', $r1);
     assert_equals(['refunded', 'refunded', 1000], $arrState($r1), 'ARR 1: the webhook seen first books the refund and closes the order');
-    handlePaymentRefund($r1Job['payload'], $r1Job);
+    WorkerJobs::handlePaymentRefund($r1Job['payload'], $r1Job);
     assert_equals(['refunded', 'refunded', 1000], $arrState($r1), 'ARR 1: the worker then finds the refund id on the ledger and books nothing more (was 2000)');
     assert_equals([1000], $arrLedger($r1, 'refund_confirmed'), 'ARR 1: the worker records a non-money confirmation of the booked refund');
-    handlePaymentRefund($r1Job['payload'], $r1Job);
+    WorkerJobs::handlePaymentRefund($r1Job['payload'], $r1Job);
     assert_equals([1, 1000], [$stripe->calls, PaymentService::refundedAmount($r1)], 'ARR 1: a redelivered job neither calls Stripe again nor books money');
 
     $r1b = $arrOrder('paid', 'paid', 'stripe', 'pi_arr_1b');
     OrderWorkflow::transition($r1b, 'cancelled', 'ARR 1b cancel');
     $r1bJob = $arrJobs($r1b)[0];
-    handlePaymentRefund($r1bJob['payload'], $r1bJob);
+    WorkerJobs::handlePaymentRefund($r1bJob['payload'], $r1bJob);
     applyStripeChargeRefunded(['id' => 'ch_arr_1b', 'payment_intent' => 'pi_arr_1b', 'amount_refunded' => 1000,
         'refunds' => ['data' => [['id' => ArrFakeStripe::refundIdFor('order_refund_' . $r1b), 'amount' => 1000, 'status' => 'succeeded']]]], 'pi_arr_1b', $r1b);
     assert_equals(['refunded', 'refunded', 1000], $arrState($r1b), 'ARR 1: worker first, webhook second books the refund once');
@@ -130,7 +130,7 @@ try {
         'ARR 2: an admin refund request queues the payment_refund job that executes it');
     applyStripeChargeRefunded(['id' => 'ch_arr_1c', 'payment_intent' => 'pi_arr_1c', 'amount_refunded' => 400,
         'refunds' => ['data' => [['id' => ArrFakeStripe::refundIdFor('arr_1c_request_execute'), 'amount' => 400, 'status' => 'succeeded']]]], 'pi_arr_1c', $r1c);
-    handlePaymentRefund($r1cJob['payload'], $r1cJob);
+    WorkerJobs::handlePaymentRefund($r1cJob['payload'], $r1cJob);
     assert_equals([['delivered', 'partially_refunded', 400], 600], [$arrState($r1c), PaymentService::refundableBalance($r1c)], 'ARR 1: a partial refund is booked once (was 800, balance 200)');
 
     // Events without embedded refunds: the refund list comes from the Stripe API, keyed by refund id.
@@ -156,7 +156,7 @@ try {
     $pdo->prepare("UPDATE orders SET order_number = 'ARR-GOPAY-3000000201' WHERE id = ?")->execute([$r2]);
     PaymentService::requestRefundAndQueue($r2, 1000, 'arr_2_request', ['reason' => 'ARR']);
     $r2Job = $arrJobs($r2)[0];
-    handlePaymentRefund($r2Job['payload'], $r2Job);
+    WorkerJobs::handlePaymentRefund($r2Job['payload'], $r2Job);
     assert_equals(['delivered', 'refund_pending', 0], $arrState($r2), 'ARR 2: an accepted (pending) GoPay refund waits for its notification');
     $arrGoPayState = 'REFUNDED';
     PaymentService::handlePulledNotification(['id' => '3000000201'], $arrGoPay, 'gopay');
@@ -233,7 +233,7 @@ try {
     $payu = $arrUse(new ArrFakePayU(['payu_second_key' => $arrPayUKey]));
     $r4 = $arrOrder('delivered', 'refund_pending', 'payu', 'PAYU-ARR-4');
     $r4Item = $arrItemRefund($r4, 400, 'arr-credit-4');
-    handlePaymentRefund(['order_id' => $r4, 'payment_id' => 'PAYU-ARR-4', 'amount' => 400, 'refund_id' => $r4Item, 'idempotency_key' => 'arr-credit-4'], []);
+    WorkerJobs::handlePaymentRefund(['order_id' => $r4, 'payment_id' => 'PAYU-ARR-4', 'amount' => 400, 'refund_id' => $r4Item, 'idempotency_key' => 'arr-credit-4'], []);
     assert_equals([1, ['pending', 'RF-ARR-400']], [$payu->calls, $arrItemRefundRow($r4Item)], 'ARR 4: a pending item refund is accepted (no failing job) and remembers the provider refund id');
     $arrPayUWebhook($payu, $r4, 'RF-ARR-400', 400, 'FINALIZED');
     assert_equals([['delivered', 'partially_refunded', 400], ['succeeded', 'RF-ARR-400']], [$arrState($r4), $arrItemRefundRow($r4Item)], 'ARR 4: the refund webhook books the money and completes the credit note');
@@ -282,7 +282,7 @@ try {
     $stripe->refundStatus = 'pending';
     $r4d = $arrOrder('delivered', 'refund_pending', 'stripe', 'pi_arr_4d');
     $r4dItem = $arrItemRefund($r4d, 250, 'arr-credit-4d');
-    handlePaymentRefund(['order_id' => $r4d, 'payment_id' => 'pi_arr_4d', 'amount' => 250, 'refund_id' => $r4dItem, 'idempotency_key' => 'arr-credit-4d'], []);
+    WorkerJobs::handlePaymentRefund(['order_id' => $r4d, 'payment_id' => 'pi_arr_4d', 'amount' => 250, 'refund_id' => $r4dItem, 'idempotency_key' => 'arr-credit-4d'], []);
     applyStripeChargeRefunded(['id' => 'ch_arr_4d', 'payment_intent' => 'pi_arr_4d', 'amount_refunded' => 250,
         'refunds' => ['data' => [['id' => ArrFakeStripe::refundIdFor('arr-credit-4d'), 'amount' => 250, 'status' => 'succeeded']]]], 'pi_arr_4d', $r4d);
     assert_equals([['delivered', 'partially_refunded', 250], 'succeeded'], [$arrState($r4d), $arrItemRefundRow($r4dItem)[0]], 'ARR 4: a Stripe pending item refund is completed by its charge.refunded event');

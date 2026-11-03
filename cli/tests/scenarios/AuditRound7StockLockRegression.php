@@ -101,7 +101,7 @@ if (!getenv('TEST_MYSQL_DSN')) {
 $r7slSource = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/src/BackorderAllocation.php');
 assert_true(!str_contains($r7slSource, 'FOR UPDATE SKIP LOCKED') && str_contains($r7slSource, 'FOR UPDATE NOWAIT'),
     'R8 stock: backorder allocation avoids SKIP LOCKED (MariaDB 10.4/10.5, supported by README, lack it) and uses NOWAIT');
-$r7slWorker = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/cli/worker.php');
+$r7slWorker = (string)file_get_contents(dirname(TEST_CLI_DIR) . '/cli/worker.php') . (string)file_get_contents(dirname(__DIR__, 3) . '/src/WorkerJobs.php');
 assert_true(str_contains($r7slWorker, 'BackorderAllocation::sweep()'), 'R8 stock: the worker sweeps skipped backorder lines in every store');
 foreach (glob($r7slRoot . '/*') ?: [] as $r7slFile) unlink($r7slFile);
 rmdir($r7slRoot);

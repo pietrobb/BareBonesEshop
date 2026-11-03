@@ -97,7 +97,7 @@ if ($crfSuiteCopied) {
 }
 
 // 2. Long worker jobs renew their lease around the slow external step (outside DB transactions).
-$crfWorker = (string)file_get_contents(TEST_CLI_DIR . '/worker.php');
+$crfWorker = (string)file_get_contents(TEST_CLI_DIR . '/worker.php') . (string)file_get_contents(dirname(__DIR__, 3) . '/src/WorkerJobs.php');
 foreach (['handleSearchReindex', 'handlePaymentRefund', 'handleErpOrderPush', 'handleErpOrderUpdate', 'handleCleanup', 'handleImageResize', 'handleInvoiceIssue'] as $crfHandler) {
     preg_match('/function ' . $crfHandler . '\(.*?\R}\R/s', $crfWorker, $crfBody);
     assert_true(str_contains($crfBody[0] ?? '', 'JobQueue::heartbeat('), "CR follow-up worker: {$crfHandler} renews its job lease");

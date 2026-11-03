@@ -31,7 +31,7 @@ $r6mRunJobs = static function (int $orderId) use ($r6mJobsDir): void {
         $job = json_decode((string)file_get_contents($file), true);
         if (($job['type'] ?? '') !== 'payment_refund' || (int)($job['payload']['order_id'] ?? 0) !== $orderId) continue;
         unlink($file);
-        handlePaymentRefund($job['payload'], $job);
+        WorkerJobs::handlePaymentRefund($job['payload'], $job);
     }
 };
 

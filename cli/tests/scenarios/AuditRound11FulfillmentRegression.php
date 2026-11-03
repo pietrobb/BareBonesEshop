@@ -56,7 +56,7 @@ try {
     $r11fLabel = method_exists('OrderStatusLabels', 'paymentOf') ? OrderStatusLabels::paymentOf($r11fRow, 'sk') : OrderStatusLabels::payment('pending', 'sk');
     assert_true($r11fLabel !== OrderStatusLabels::payment('pending', 'sk') && str_contains(mb_strtolower($r11fLabel), 'faktúr'),
         'R11 H8: the admin shows the order as "on invoice, awaiting payment", not as a failed or missing payment');
-    handleInvoiceIssue(['order_id' => $r11fInvoiceOrder], []);
+    WorkerJobs::handleInvoiceIssue(['order_id' => $r11fInvoiceOrder], []);
     $r11fInvoice = InvoiceService::byOrderId($r11fInvoiceOrder);
     assert_true($r11fInvoice !== null, 'R11 H8: the invoice exists after acceptance');
     assert_equals(ShopTime::addDays((string)($r11fInvoice['issued_at'] ?? ''), 30), (string)($r11fInvoice['due_date'] ?? ''),

@@ -531,7 +531,7 @@ $pdo->prepare("INSERT INTO orders (order_number, store_id, status, payment_statu
 $r7rInvOrder = (int)$pdo->lastInsertId();
 $r7rInvError = null;
 try {
-    handleInvoiceIssue(['order_id' => $r7rInvOrder], []);
+    WorkerJobs::handleInvoiceIssue(['order_id' => $r7rInvOrder], []);
 } catch (Throwable $e) {
     $r7rInvError = $e->getMessage();
 }
@@ -540,7 +540,7 @@ assert_equals([null, null], [$r7rInvError, InvoiceService::byOrderId($r7rInvOrde
 $pdo->exec("UPDATE orders SET status = 'pending', payment_status = 'pending' WHERE id = {$r7rInvOrder}");
 $r7rInvError = null;
 try {
-    handleInvoiceIssue(['order_id' => $r7rInvOrder], []);
+    WorkerJobs::handleInvoiceIssue(['order_id' => $r7rInvOrder], []);
 } catch (Throwable $e) {
     $r7rInvError = $e->getMessage();
 }

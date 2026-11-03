@@ -3993,7 +3993,7 @@ CREATE TABLE invoice_counters (
 ```
 OrderWorkflow::transition(orderId, 'paid')
   └─ handlePaid(order) → push job invoice_issue priority=3 AFTER the commit
-       └─ worker handleInvoiceIssue($payload)
+       └─ worker WorkerJobs::handleInvoiceIssue($payload)
             ├─ InvoiceService::issue($orderId)              ← idempotent
             │    ├─ allocateNumber() in a tx (counters → UPDATE)
             │    ├─ snapshots of customer + seller from stores.json

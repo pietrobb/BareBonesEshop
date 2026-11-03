@@ -82,5 +82,5 @@ foreach (['GoPayPayment', 'ThePayPayment', 'ComgatePayment', 'PayUPayment'] as $
     assert_true(is_subclass_of(Adapters::providerClass('payment', strtolower(str_replace('Payment', '', $r6hClass))), PaymentStatusEventAdapter::class),
         "R6 expiry: {$r6hClass} describes a payment as a status event, so the sweep can book it");
 }
-$r6hWorker = (string)file_get_contents(TEST_CLI_DIR . '/worker.php');
+$r6hWorker = (string)file_get_contents(TEST_CLI_DIR . '/worker.php') . (string)file_get_contents(dirname(__DIR__, 3) . '/src/WorkerJobs.php');
 assert_true(str_contains($r6hWorker, 'PendingOrderExpiry::providerStatus('), 'R6 expiry: the worker sweep resolves provider status through PendingOrderExpiry::providerStatus()');

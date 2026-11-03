@@ -11,5 +11,5 @@ $daRoot = dirname(TEST_CLI_DIR);
 $daPdoFile = str_replace('\\', '/', (string)(new ReflectionClass('QueryCountingPDO'))->getFileName());
 assert_true(str_ends_with($daPdoFile, '/src/QueryCountingPDO.php'), 'CR-A: tests use the production QueryCountingPDO (no harness duplicate)');
 assert_equals([], array_map('basename', glob($daRoot . '/templates/*.html') ?: []), 'CR-A: no unused legacy templates/*.html next to templates/emails and templates/legal');
-$daWorker = (string)file_get_contents($daRoot . '/cli/worker.php');
+$daWorker = (string)file_get_contents($daRoot . '/cli/worker.php') . (string)file_get_contents(dirname(__DIR__, 3) . '/src/WorkerJobs.php');
 assert_true(!str_contains($daWorker, 'sitemap_build') && !str_contains($daWorker, 'handleSitemapBuild'), 'CR-A: worker has no dead sitemap_build job writing sitemap.xml into the code directory');

@@ -223,7 +223,7 @@ $acAdminHtml = (string)ob_get_clean();
 $_GET = [];
 assert_true(str_contains($acAdminHtml, 'shopper@example.com') && str_contains($acAdminHtml, 'pripomienka odoslaná') && str_contains($acAdminHtml, 'admin.php?p=order&id=' . $transferOrderId), 'Abandoned carts: admin list shows e-mail, reminder state and order link');
 assert_true(str_contains((string)file_get_contents(TEST_CLI_DIR . '/../src/Http/ApiHandlers.php'), 'AbandonedCarts::markConverted($orderId)'), 'Abandoned carts: checkout marks the session cart converted');
-$acWorkerSource = (string)file_get_contents(TEST_CLI_DIR . '/worker.php');
+$acWorkerSource = (string)file_get_contents(TEST_CLI_DIR . '/worker.php') . (string)file_get_contents(dirname(__DIR__, 3) . '/src/WorkerJobs.php');
 assert_true(str_contains($acWorkerSource, 'AbandonedCarts::sweep($reminderCfg') && str_contains($acWorkerSource, "AbandonedCarts::isSuppressed(\$to)"), 'Cart reminder: worker sweeps every run and re-checks opt-out before sending');
 $pdo->exec("DELETE FROM abandoned_carts");
 $pdo->exec("DELETE FROM email_suppressions");
@@ -488,7 +488,7 @@ assert_equals('packeta', (string)($checkoutProviderSnapshot['providers']['shippi
 assert_equals('log', (string)($checkoutProviderSnapshot['providers']['mail'] ?? ''), 'G3 snapshot: checkout freezes mail provider');
 assert_equals('packeta', (string)($onlineCheckoutShippingSnapshot['provider'] ?? ''), 'G3 snapshot: shipping rate stores provider code');
 
-$workerProviderSource = file_get_contents(TEST_CLI_DIR . '/worker.php') ?: '';
+$workerProviderSource = file_get_contents(TEST_CLI_DIR . '/worker.php') . (string)file_get_contents(dirname(__DIR__, 3) . '/src/WorkerJobs.php') ?: '';
 assert_true(!str_contains($workerProviderSource, 'Adapters::payment();'), 'G3 worker: no payment job depends on one global gateway');
 assert_true(str_contains($workerProviderSource, "Adapters::payment(\$providerCode)"), 'G3 worker: refund resolves frozen payment provider');
 assert_true(str_contains($workerProviderSource, "Adapters::payment(\$provider)"), 'G3 worker: expiry resolves each order provider independently');
@@ -610,7 +610,7 @@ $openApi = file_get_contents(TEST_CLI_DIR . '/../docs/openapi.yaml') ?: '';
 assert_true(str_contains($openApi, 'openapi: 3.1.0'), 'G4 contract: versioned OpenAPI document exists');
 assert_true(str_contains($openApi, 'Idempotency-Key') && str_contains($openApi, 'products:write'), 'G4 contract: idempotency and scopes are documented');
 assert_true(str_contains($openApi, 'X-BBE-Signature') && str_contains($openApi, 'dead-letter'), 'G4 contract: HMAC, replay and retry/dead-letter semantics are documented');
-$workerG4 = file_get_contents(TEST_CLI_DIR . '/worker.php') ?: '';
+$workerG4 = file_get_contents(TEST_CLI_DIR . '/worker.php') . (string)file_get_contents(dirname(__DIR__, 3) . '/src/WorkerJobs.php') ?: '';
 assert_true(str_contains($workerG4, 'processOutbox') && str_contains($workerG4, 'Outbox::markRetry'), 'G4 worker: committed events are delivered with durable retry handling');
 Bootstrap::initStoreContext('/', '', 'default', 'storefront');
 
@@ -1593,7 +1593,7 @@ foreach (['sk', 'cs', 'en', 'de', 'hu', 'pl', 'es'] as $saLocale) {
     assert_true(is_file(TEST_CLI_DIR . "/../templates/emails/{$saLocale}/merchant_stock_low.html") && str_contains($saRendered['subject'], 'Krvavé Slnko')
         && str_contains($saRendered['text'], 'SA-BOOK'), "Stock alerts: {$saLocale} template renders");
 }
-$saWorker = (string)file_get_contents(TEST_CLI_DIR . '/worker.php');
+$saWorker = (string)file_get_contents(TEST_CLI_DIR . '/worker.php') . (string)file_get_contents(dirname(__DIR__, 3) . '/src/WorkerJobs.php');
 assert_true(str_contains($saWorker, 'StockAlerts::process($skus)') && str_contains($saWorker, 'StockAlerts::digest()') && !str_contains($saWorker, 'stock-alerts.log'), 'Stock alerts: worker uses the single StockAlerts path');
 assert_true(str_contains((string)file_get_contents(TEST_CLI_DIR . '/../src/Inventory.php'), 'StockAlerts::touch($sku)'), 'Stock alerts: every ledger movement triggers a re-check');
 assert_true(!method_exists(Products::class, 'lowStockSummary'), 'Stock alerts: legacy products.stock dashboard query is gone');

@@ -103,7 +103,7 @@ try {
     $gateway->during = $fr4Reported($o1b, '3000000902');
     $o1bJob = $fr4Jobs($o1b)[0] ?? null;
     assert_equals('fr4_1b_request_execute', $o1bJob['payload']['idempotency_key'] ?? null, 'FR4 1: the admin request job keeps its execute key');
-    if ($o1bJob) handlePaymentRefund($o1bJob['payload'], $o1bJob);
+    if ($o1bJob) WorkerJobs::handlePaymentRefund($o1bJob['payload'], $o1bJob);
     assert_equals(['refunded', 1000], $fr4State($o1b), 'FR4 1: the refund job after the notification books no second refund');
     // Keyed to the request: a booking that settled this request is recognised even where the amounts would still fit.
     $o1c = $fr4Order('delivered', 'refund_pending', 'gopay', '3000000903');
@@ -196,7 +196,7 @@ try {
     assert_equals([600, 'admin_refund_request_' . $o9 . '_fr4_execute'], [$o9Job['payload']['amount'] ?? null, $o9Job['payload']['idempotency_key'] ?? null], 'FR4 9: the queued job refunds the request amount under its execute key');
     $o9Audit = (int)$pdo->query("SELECT COUNT(*) FROM audit_log WHERE entity = 'order_refund' AND entity_id = '{$o9}' AND note LIKE '%fr4-admin%'")->fetchColumn();
     assert_equals(1, $o9Audit, 'FR4 9: the retry is audited with the acting admin');
-    if ($o9Job) handlePaymentRefund($o9Job['payload'], $o9Job);
+    if ($o9Job) WorkerJobs::handlePaymentRefund($o9Job['payload'], $o9Job);
     assert_equals([['partially_refunded', 600], 1, null], [$fr4State($o9), $stripe->calls, PaymentService::unexecutedRefundRequest(Orders::byId($o9))],
         'FR4 9: the job refunds once and the retry is no longer offered');
     // Round 5: a provider that answers "pending" (PayU always, Stripe/GoPay sometimes) leaves the job's own
@@ -210,7 +210,7 @@ try {
         PaymentService::requestRefund($fr5Order, 600, 'admin_refund_request_' . $fr5Order . '_fr5');
         PaymentService::retryRefundRequest($fr5Order, 'fr5-admin');
         $fr5Job = $fr4Jobs($fr5Order)[0] ?? null;
-        if ($fr5Job) handlePaymentRefund($fr5Job['payload'], $fr5Job);
+        if ($fr5Job) WorkerJobs::handlePaymentRefund($fr5Job['payload'], $fr5Job);
         $fr5Pending[$fr5Provider] = [$fr5Gateway->calls, PaymentService::unexecutedRefundRequest(Orders::byId($fr5Order)), PaymentService::retryRefundRequest($fr5Order, 'fr5-admin')];
         $fr5Gateway->status = 'succeeded';
     }
@@ -228,7 +228,7 @@ try {
         $pdo->prepare("INSERT INTO order_refunds (store_id, order_id, rma_id, credit_note_id, amount, currency, status, idempotency_key) VALUES ('default', ?, 0, 0, 600, 'eur', 'pending', ?)")
             ->execute([$fr6Order, $fr6Key]);
         $fr6Payload = ['order_id' => $fr6Order, 'payment_id' => 'fr6_' . $fr6Provider . '_9', 'amount' => 600, 'refund_id' => (int)$pdo->lastInsertId(), 'idempotency_key' => $fr6Key];
-        handlePaymentRefund($fr6Payload, ['id' => 0, 'payload' => $fr6Payload]);
+        WorkerJobs::handlePaymentRefund($fr6Payload, ['id' => 0, 'payload' => $fr6Payload]);
         $fr6Pending[$fr6Provider] = [$fr6Gateway->calls, PaymentService::unexecutedRefundRequest(Orders::byId($fr6Order)), PaymentService::retryRefundRequest($fr6Order, 'fr6-admin'), $fr4Jobs($fr6Order)];
         $fr6Gateway->status = 'succeeded';
     }

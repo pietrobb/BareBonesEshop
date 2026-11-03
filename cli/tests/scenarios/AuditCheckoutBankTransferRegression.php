@@ -92,7 +92,7 @@ if ($action === 'mail') {
     $argv = ['worker.php', '--once'];
     require_once $root . '/cli/worker.php';
     LogMail::clearCaptured();
-    if ($a136Job) handleEmailSend($a136Job['payload'], $a136Job);
+    if ($a136Job) WorkerJobs::handleEmailSend($a136Job['payload'], $a136Job);
     $result(['output' => $a136Job ? (string)(LogMail::lastCaptured()['html'] ?? '') : 'no queued order_confirmation job']);
 }
 if (!in_array($action, ['done', 'done_paid', 'member_account'], true)) {

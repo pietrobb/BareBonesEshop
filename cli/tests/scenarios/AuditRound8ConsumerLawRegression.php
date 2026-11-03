@@ -80,7 +80,7 @@ if ($action === 'confirmation') {
     require_once $root . '/cli/worker.php';
     ob_end_clean();
     $order = $db->query("SELECT * FROM orders WHERE order_number = 'R8L-NEW'")->fetch();
-    handleEmailSend(['template' => 'order_confirmation', 'to' => 'ignored@example.test', 'order_id' => (int)$order['id']], []);
+    WorkerJobs::handleEmailSend(['template' => 'order_confirmation', 'to' => 'ignored@example.test', 'order_id' => (int)$order['id']], []);
     $vars = ConsumerNotice::mailVars($order) + ['order_number' => 'R8L-NEW', 'customer_name' => 'R8L Guest', 'order_status' => 'paid', 'order_total' => '30,00 €', 'items' => []];
     $locales = [];
     foreach (['sk', 'cs', 'en', 'de', 'pl', 'hu', 'es'] as $locale) $locales[$locale] = MailService::render('order_confirmation', $locale, $vars)['html'];
