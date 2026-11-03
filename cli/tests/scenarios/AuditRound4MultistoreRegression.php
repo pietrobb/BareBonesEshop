@@ -49,6 +49,9 @@ $config =is_file($root . '/config.php') ? require $root . '/config.php' : requir
 $config = ['app_url' => 'https://shop.example'] + $config;
 (new ReflectionProperty(Security::class, 'cfg'))->setValue(null, $config);
 Security::setRateDbForTesting(new PDO('sqlite:' . $dir . '/rate.sqlite'));
+$stores = Bootstrap::stores(); // bank transfer is offered only to a store with a checksum-valid IBAN
+$stores['stores']['cz']['legal']['iban'] = 'CZ65 0800 0000 1920 0014 5399';
+(new ReflectionProperty(Bootstrap::class, 'stores'))->setValue(null, $stores);
 ini_set('session.use_cookies', '0');
 session_save_path($dir . '/sessions');
 session_id('r4multistore');

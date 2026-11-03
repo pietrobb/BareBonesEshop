@@ -150,6 +150,14 @@ final class AccountViewModel
         ];
     }
 
+    /** R13 UX4: the summary on the page after checkout, before the e-mail arrives (its confirmation token proves this browser placed the order). */
+    public static function orderDoneSummary(array $order): array
+    {
+        $keys = ['items' => 'account.items', 'product' => 'product', 'quantity' => 'quantity', 'price' => 'price', 'total' => 'total',
+            'shipping_address' => 'shipping_address', 'shipping_method' => 'shipping_method', 'pickup_point' => 'pickup_point'];
+        return self::orderSummary($order, Orders::items((int)$order['id'])) + ['t' => array_map(static fn(string $key): string => I18n::t($key), $keys)];
+    }
+
     /** $order is already owner- and store-checked by Customers::order(). Amounts stay in the order's own currency. */
     private static function orderDetail(int $customerId, array $order): array
     {
