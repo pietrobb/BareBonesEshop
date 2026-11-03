@@ -59,7 +59,7 @@ try {
     assert_equals(0, count($oplJobs($h1, 'payment_refund')), 'H1: no refund is queued for an unpaid order');
     $h1Cancel = $oplJobs($h1, 'payment_cancel');
     assert_equals(1, count($h1Cancel), 'H1: a payment_cancel job voids the provider session');
-    handlePaymentCancel($h1Cancel[0]['payload'] ?? [], $h1Cancel[0] ?? []);
+    WorkerJobs::handlePaymentCancel($h1Cancel[0]['payload'] ?? [], $h1Cancel[0] ?? []);
     assert_equals(['mock_opl_h1'], MockPayment::$cancelled, 'H1: worker voids the session at a cancellable provider');
 
     // H1: money captured anyway (race, provider without void) is refunded, never kept silently.
@@ -72,7 +72,7 @@ try {
     assert_equals(1, $oplIncidents('payment.captured_after_cancel', $h1), 'H1: a critical incident tells the merchant');
     PaymentService::settleCapture($h1, 'H1 redelivery');
     assert_equals(1, count($oplJobs($h1, 'payment_refund')), 'H1: settling the same capture again queues no second refund');
-    handlePaymentRefund($h1Refund[0]['payload'], $h1Refund[0]);
+    WorkerJobs::handlePaymentRefund($h1Refund[0]['payload'], $h1Refund[0]);
     assert_equals(['refunded', 'refunded'], $oplState($h1), 'H1: completed refund moves the cancelled order to refunded');
     assert_equals([['payment_id' => 'mock_opl_h1', 'amount' => 1000]], MockPayment::$refunds, 'H1: provider refunded the captured amount once');
 
@@ -94,33 +94,33 @@ try {
     assert_equals(700, (int)($h2Refund[0]['payload']['amount'] ?? 0), 'H2: cancellation refunds the refundable balance, not order.total');
     $oplGateway('failed');
     $h2Failed = false;
-    try { handlePaymentRefund($h2Refund[0]['payload'], $h2Refund[0]); } catch (RuntimeException $e) { $h2Failed = true; }
+    try { WorkerJobs::handlePaymentRefund($h2Refund[0]['payload'], $h2Refund[0]); } catch (RuntimeException $e) { $h2Failed = true; }
     assert_true($h2Failed, 'H2: a declined provider refund fails the job instead of passing silently');
     assert_equals(['cancelled', 'refund_pending'], $oplState($h2), 'H2: a failed refund leaves the order unrefunded and visible');
     $oplGateway('succeeded');
     MockPayment::$refunds = [];
     $h2Retry = false;
-    try { handlePaymentRefund($h2Refund[0]['payload'], $h2Refund[0]); } catch (RuntimeException $e) { $h2Retry = str_contains($e->getMessage(), 'did not succeed'); }
+    try { WorkerJobs::handlePaymentRefund($h2Refund[0]['payload'], $h2Refund[0]); } catch (RuntimeException $e) { $h2Retry = str_contains($e->getMessage(), 'did not succeed'); }
     assert_true($h2Retry, 'H2: without provider idempotency a retry is refused (no double refund)');
     assert_equals([], MockPayment::$refunds, 'H2: the refused retry never reached the provider');
 
     $h2b = $oplOrder('paid', 'paid', 'mock_opl_h2b');
     OrderWorkflow::transition($h2b, 'cancelled', 'H2 cancel paid order');
     $h2bRefund = $oplJobs($h2b, 'payment_refund');
-    handlePaymentRefund($h2bRefund[0]['payload'], $h2bRefund[0]);
+    WorkerJobs::handlePaymentRefund($h2bRefund[0]['payload'], $h2bRefund[0]);
     assert_equals(['refunded', 'refunded'], $oplState($h2b), 'H2: successful cancellation refund refunds payment and order');
     assert_equals(1000, PaymentService::refundedAmount($h2b), 'H2: refund is counted in the refund ledger');
 
     // H2: a job queued by the previous release (no key, full total) claims the ledger first.
     $h2c = $oplOrder('cancelled', 'paid', 'mock_opl_h2c');
     $h2cPayload = ['order_id' => $h2c, 'payment_id' => 'mock_opl_h2c', 'amount' => 1000];
-    handlePaymentRefund($h2cPayload, ['payload' => $h2cPayload]);
-    handlePaymentRefund($h2cPayload, ['payload' => $h2cPayload]);
+    WorkerJobs::handlePaymentRefund($h2cPayload, ['payload' => $h2cPayload]);
+    WorkerJobs::handlePaymentRefund($h2cPayload, ['payload' => $h2cPayload]);
     assert_equals(['refunded', 'refunded'], $oplState($h2c), 'H2: legacy whole-order refund job is executed through the ledger');
     assert_equals(1, count(array_filter(MockPayment::$refunds, static fn(array $r): bool => $r['payment_id'] === 'mock_opl_h2c')), 'H2: a repeated legacy job does not refund twice');
     $h2d = $oplOrder('cancelled', 'cancelled', 'pi_opl_h2d');
     $h2dPayload = ['order_id' => $h2d, 'payment_id' => 'pi_opl_h2d', 'amount' => 1000];
-    handlePaymentRefund($h2dPayload, ['payload' => $h2dPayload]);
+    WorkerJobs::handlePaymentRefund($h2dPayload, ['payload' => $h2dPayload]);
     assert_equals(0, count(array_filter(MockPayment::$refunds, static fn(array $r): bool => $r['payment_id'] === 'pi_opl_h2d')), 'H2: legacy job for an unpaid order refunds nothing');
 
     // H3: status writes are compare-and-set.

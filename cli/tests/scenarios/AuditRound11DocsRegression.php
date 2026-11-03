@@ -55,7 +55,7 @@ $r11dBank = ['code' => 'bank_transfer', 'provider' => 'manual', 'service_type' =
 try {
     $r11dConfirm = $r11dOrder(98981, 'bank_transfer', 'pending', '', $r11dBank);
     $r11dMailer->sent = [];
-    handleEmailSend(['template' => 'order_confirmation', 'to' => 'x@example.test', 'order_id' => 98981], []);
+    WorkerJobs::handleEmailSend(['template' => 'order_confirmation', 'to' => 'x@example.test', 'order_id' => 98981], []);
     $r11dHtml = (string)($r11dMailer->sent[0]['html'] ?? '');
     $r11dPlain = html_entity_decode(strip_tags($r11dHtml), ENT_QUOTES | ENT_HTML5, 'UTF-8');
     foreach ([[I18n::tIn('admin.order.shipping', 'sk'), 390], [I18n::tIn('admin.order.payment_fee', 'sk'), 100], [I18n::tIn('admin.order.subtotal', 'sk'), 1000]] as [$r11dLabel, $r11dCents]) {
@@ -98,7 +98,7 @@ try {
     assert_equals([400], array_map(static fn(array $p): int => (int)$p['refund_amount'], $r11dMails),
         'R11 refund mail: a partial provider refund queues one refund mail with its amount');
     $r11dMailer->sent = [];
-    if ($r11dMails) handleEmailSend($r11dMails[0], []);
+    if ($r11dMails) WorkerJobs::handleEmailSend($r11dMails[0], []);
     $r11dRefundHtml = (string)($r11dMailer->sent[0]['html'] ?? '');
     assert_true(str_contains($r11dRefundHtml, I18n::price(400, 'eur')) && !str_contains($r11dRefundHtml, I18n::price(1490, 'eur')),
         'R11 refund mail: the customer reads the refunded 4,00 €, not the order total');
@@ -125,7 +125,7 @@ try {
     $pdo->rollBack();
     PaymentService::bookProviderRefund(98985, 'stripe', 're_r11d_kept', 200, 'charge.refunded', 'r11d_refund_kept');
     $r11dMailer->sent = [];
-    foreach ($r11dRefundMails(98985) as $r11dPayload) handleEmailSend($r11dPayload, []);
+    foreach ($r11dRefundMails(98985) as $r11dPayload) WorkerJobs::handleEmailSend($r11dPayload, []);
     $r11dSentHtml = implode("\n", array_map(static fn(array $m): string => (string)($m['html'] ?? ''), $r11dMailer->sent));
     assert_true(count($r11dMailer->sent) === 1 && str_contains($r11dSentHtml, I18n::price(200, 'eur')) && !str_contains($r11dSentHtml, I18n::price(500, 'eur')),
         'R11 refund mail: a refund rolled back with its transaction is never announced; the booked one is');

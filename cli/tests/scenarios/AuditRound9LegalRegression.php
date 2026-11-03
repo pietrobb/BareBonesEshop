@@ -133,7 +133,7 @@ assert_equals([null, null, null], [
     DigitalDelivery::holdUntil($r9lOrder('R9L-PAST', ['R9L-EBOOK'], 15 * $r9lDay), $r9lNow),
 ], 'R9 digital: supplied at once with the consent, to a business buyer, or once the period has passed');
 assert_true(!DigitalDelivery::withdrawn((int)$r9lHeld['id']), 'R9 digital: an order without a withdrawal statement is not withdrawn');
-$r9lWorker = (string)file_get_contents(TEST_CLI_DIR . '/worker.php');
+$r9lWorker = (string)file_get_contents(TEST_CLI_DIR . '/worker.php') . (string)file_get_contents(dirname(__DIR__, 3) . '/src/WorkerJobs.php');
 assert_true(preg_match('/function handleDigitalFulfill\(.*?DigitalDelivery::holdUntil\(\$order\).*?JobQueue::pushDelayed\(\'digital_fulfill\'.*?\'held\' => true.*?return;.*?DigitalDelivery::withdrawn\(\$orderId\)\)\) return;.*?DigitalDelivery::claimFulfilment/s', $r9lWorker) === 1,
     'R9 digital: the worker re-queues a held order for the end of the period and then skips it if withdrawn or no longer paid');
 

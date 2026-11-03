@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **Page-driven worker no longer dies in admin requests** (review round 13, N1). `cli/worker.php` and the
+  admin page module both declared a global `handleCacheRebuild()`, so a pass started by the dashboard,
+  import, cache, audit, warehouse, feed, shipping or payments page ended in an uncatchable "Cannot
+  redeclare" fatal error — and, the interval slot being taken, no other pass ran. The job handlers now live
+  in the class `WorkerJobs` (`src/WorkerJobs.php`); `cli/worker.php` declares no global function. Custom
+  code calling `handleEmailSend()` & co. calls `WorkerJobs::handleEmailSend()` now.
+- **Installer self-check: "cannot tell" is not "protected"** (review round 13, N2 and lows). The check
+  requests the static `src/install-probe.txt` (no PHP worker needed, so one FPM child no longer times it
+  out) and the starter manifests, counts a path only when the file itself comes back, and follows one
+  redirect to the same host (http → https). When it still cannot decide, `install.php` installs only after
+  the key holder confirms that the probe file answers Forbidden. The check runs only after the installation
+  key matched (before, any visitor could make the server connect to ports named by the client). A failure
+  is logged without call arguments (the owner's password was one), and `error_log` / `php_error_log`
+  (written next to the scripts by cPanel) are denied in `.htaccess` and `deploy/nginx.conf`.
+  `install-key.php` is `0600` when PHP runs as the uploading account (suEXEC, per-user PHP-FPM) and stays
+  `0644` only where PHP is another user (mod_php as www-data).
+- **Page-driven worker on more servers** (review round 13, lows). Without FastCGI the page is held back
+  only up to 1 MiB (`WebWorker::BUFFER_LIMIT`); a larger response (feed, sitemap) streams as before and
+  that request runs no pass, instead of a whole feed in memory. Outside mod_php (php-cgi behind
+  mod_deflate) the early-ended page is gzip-encoded by PHP itself when the browser accepts it: mod_deflate
+  leaves an encoded body with its `Content-Length` alone, but held a plain one open until the pass ended.
 - **Digital order lines are frozen with the order** (review round 12, H1 + M2). `order_items.digital`
   (migration `20261103090000_order_item_digital`, existing lines backfilled as they were sold) records
   whether a line is digital content. Such a line reserves nothing, gets no parcel and no shipment line, so

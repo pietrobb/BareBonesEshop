@@ -225,7 +225,7 @@ try {
     $r9lPayAgain = method_exists(InvoiceService::class, 'pdfFile') ? InvoiceService::pdfFile($r9lPayInvoices[97881]) : null;
     assert_equals([$r9lPayPath, $r9lPayIssued], [$r9lPayAgain, $r9lPayAgain === null ? [] : $r9lPdfTexts($r9lPayAgain)],
         'R9 invoice: a lost invoice PDF is re-rendered with the text it was issued with');
-    $r9lPdfCallers = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Orders.php') . file_get_contents(TEST_CLI_DIR . '/worker.php');
+    $r9lPdfCallers = (string)file_get_contents(TEST_CLI_DIR . '/../src/Entrypoints/Admin/Orders.php') . file_get_contents(TEST_CLI_DIR . '/worker.php') . (string)file_get_contents(dirname(__DIR__, 3) . '/src/WorkerJobs.php');
     assert_equals([0, 4], [substr_count($r9lPdfCallers, 'is_file($abs)') + substr_count($r9lPdfCallers, 'is_file($pdfPath)'),
         substr_count($r9lPdfCallers, 'InvoiceService::pdfFile(') + substr_count((string)file_get_contents(TEST_CLI_DIR . '/../src/InvoiceService.php'), '$abs = self::pdfFile($invoice);')],
         'R9 invoice: the admin download, the resend, the invoice e-mail job and the customer download all go through pdfFile()');

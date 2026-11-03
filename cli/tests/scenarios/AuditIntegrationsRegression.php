@@ -159,7 +159,7 @@ $aigClock = 0.0;
 $aigRun = OutboxDispatcher::run($aigCfg, false, 20, $aigTransport, static function () use (&$aigClock): float { $aigClock += 15.0; return $aigClock; });
 assert_true($aigRun['budget_exhausted'] && $aigRun['events'] < 3, '14 outbox: the sweep stops claiming events once its time budget is spent');
 $pdo->exec("UPDATE event_outbox SET status = 'dead' WHERE id IN (" . implode(',', array_map([$pdo, 'quote'], $aigEvents)) . ")");
-$aigWorker = (string)file_get_contents(TEST_CLI_DIR . '/worker.php');
+$aigWorker = (string)file_get_contents(TEST_CLI_DIR . '/worker.php') . (string)file_get_contents(dirname(__DIR__, 3) . '/src/WorkerJobs.php');
 assert_true(str_contains($aigWorker, 'OutboxDispatcher::run($cfg, $verbose)'), '4/14 worker: the outbox sweep runs through OutboxDispatcher');
 
 // ── 13. Stock digest for every store ─────────────────────────────────────────────────────────────

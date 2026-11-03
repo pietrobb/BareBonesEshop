@@ -24,7 +24,8 @@ try {
     assert_true(is_string($r12iKey) && preg_match('/^[A-Z2-9]{5}(?:-[A-Z2-9]{5}){3}$/', $r12iKey) === 1 && is_file($r12iRoot . '/' . WebInstaller::KEY_FILE),
         'R12 installer: the first visit writes a random 20-character key into install-key.php');
     assert_equals($r12iKey, WebInstaller::installKey($r12iRoot), 'R12 installer: later visits read the same key');
-    assert_true((fileperms($r12iRoot . '/' . WebInstaller::KEY_FILE) & 0004) !== 0,
+    // R13: world-readable only when PHP is not the uploading account (else other hosting accounts could read it).
+    assert_equals([0644, 0600], [WebInstaller::keyFileMode(33, 1000), WebInstaller::keyFileMode(1000, 1000)],
         'R12 installer: install-key.php is readable by an FTP account that is not the PHP user nor in its group');
     mkdir($r12iBase . '/other');
     assert_true(!in_array(WebInstaller::installKey($r12iBase . '/other'), [null, $r12iKey], true), 'R12 installer: every install gets its own key');
@@ -43,7 +44,7 @@ try {
     // M5: protection self-check against a server that ignores .htaccess (plain php -S) and one that applies it (router.php).
     $r12iWeb = $r12iBase . '/web';
     foreach (['/src', '/demo/wi/dist/downloads'] as $dir) mkdir($r12iWeb . $dir, 0777, true);
-    file_put_contents($r12iWeb . '/src/autoload.php', "<?php\n");
+    copy(dirname(TEST_CLI_DIR) . '/' . WebInstaller::PROBE_FILE, $r12iWeb . '/' . WebInstaller::PROBE_FILE);
     file_put_contents($r12iWeb . '/demo/wi/dist/starter.json', '{"name":"WI"}');
     file_put_contents($r12iWeb . '/demo/wi/dist/shop.sqlite', 'SQLite format 3');
     file_put_contents($r12iWeb . '/demo/wi/dist/downloads/book.epub', 'EPUB');
@@ -59,7 +60,7 @@ try {
         return ['HTTP_HOST' => "127.0.0.1:{$port}", 'SERVER_ADDR' => '127.0.0.1', 'SERVER_PORT' => (string)$port, 'SCRIPT_NAME' => '/install.php'];
     };
     $r12iExposed = WebInstaller::exposedPaths($r12iWeb, $r12iServe(false));
-    assert_equals(['src/autoload.php', 'demo/wi/dist/starter.json'], $r12iExposed, 'R12 installer: a server that ignores .htaccess is caught serving src/ and the starter data');
+    assert_equals([WebInstaller::PROBE_FILE, 'demo/wi/dist/starter.json'], $r12iExposed, 'R12 installer: a server that ignores .htaccess is caught serving src/ and the starter data');
     assert_equals([], WebInstaller::exposedPaths($r12iWeb, $r12iServe(true)), 'R12 installer: a server that applies the rules passes the self-check');
     $r12iClosed = stream_socket_server('tcp://127.0.0.1:0');
     $r12iClosedPort = (int)substr(strrchr((string)stream_socket_get_name($r12iClosed, false), ':'), 1);

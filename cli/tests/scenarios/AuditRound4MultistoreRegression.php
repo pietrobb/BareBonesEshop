@@ -67,7 +67,7 @@ if ($action === 'rebuild') {
     $argv = ['worker.php', '--once'];
     require_once $root . '/cli/worker.php';
     Bootstrap::initStoreContext('/', '', 'cz');
-    handleCacheRebuild(['scope' => 'full'], []);
+    WorkerJobs::handleCacheRebuild(['scope' => 'full'], []);
     $files = [];
     foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir . '/cache', FilesystemIterator::SKIP_DOTS)) as $file) {
         $files[] = substr($file->getPathname(), strlen($dir . '/cache/'));

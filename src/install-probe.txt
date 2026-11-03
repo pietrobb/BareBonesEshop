@@ -1,0 +1,3 @@
+BareBonesEshop protection probe: the web server must never serve this file.
+If you can read it in a browser, the application folders (src/, cli/, demo/) are public: turn on mod_rewrite and
+AllowOverride All for the shop folder, or use deploy/nginx.conf on nginx.

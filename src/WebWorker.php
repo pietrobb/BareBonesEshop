@@ -9,6 +9,8 @@ final class WebWorker
     public const DEFAULT_INTERVAL = 60;
     /** Seconds a pass may run: the web max_execution_time would kill a feed import or backup half-way, every time. */
     public const TIME_LIMIT = 300;
+    /** Bytes of a page held back (without FastCGI) so the pass can end the response with a Content-Length. */
+    public const BUFFER_LIMIT = 1048576;
     private static bool $scheduled = false;
     private static bool $ran = false;
 
@@ -27,7 +29,9 @@ final class WebWorker
     {
         if (self::$scheduled || PHP_SAPI === 'cli' || !self::enabled(Security::config())) return;
         self::$scheduled = true;
-        if (!self::finishesNatively() && !headers_sent()) ob_start();
+        // Buffered up to BUFFER_LIMIT only: a larger response (feed, sitemap, export) is streamed as usual instead of
+        // held in memory (memory_limit), and that request runs no pass (responseCanFinish(): no length to end it with).
+        if (!self::finishesNatively() && !headers_sent()) ob_start(null, self::BUFFER_LIMIT);
         register_shutdown_function(static function (): void {
             register_shutdown_function(static function (): void {
                 try {
@@ -108,11 +112,14 @@ final class WebWorker
             }
             @ini_set('zlib.output_compression', '0');
             // Browsers ask for gzip: Apache mod_deflate would then drop the Content-Length and stream the body chunked,
-            // so the visitor's page would end only after the pass. no-gzip keeps this one response uncompressed.
+            // so the visitor's page would end only after the pass. no-gzip keeps this one response uncompressed under
+            // mod_php. php-cgi (mod_fcgid, no fastcgi_finish_request) cannot set it and mod_deflate ignores
+            // Cache-Control: no-transform, but it leaves a body that is already gzip-encoded alone: compress it here.
             if (function_exists('apache_setenv')) @apache_setenv('no-gzip', '1');
             $status = http_response_code();
             if (ob_get_level() === 0 && strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== 'HEAD'
                 && !in_array($status, [204, 304], true)) {
+                $body = self::encodeForClient($body);
                 header('Content-Length: ' . strlen($body));
             }
             header('Connection: close');
@@ -122,6 +129,26 @@ final class WebWorker
             if (!@ob_end_flush()) break;
         }
         flush();
+    }
+
+    /** gzip when the client accepts it (and nothing encoded the body yet), outside mod_php only (no-gzip covers that). */
+    public static function encodeForClient(string $body, ?array $headers = null, ?string $acceptEncoding = null): string
+    {
+        if (function_exists('apache_setenv') || $body === '' || !function_exists('gzencode')) return $body;
+        $acceptEncoding ??= (string)($_SERVER['HTTP_ACCEPT_ENCODING'] ?? '');
+        $gzip = false;
+        foreach (explode(',', $acceptEncoding) as $coding) {
+            $parts = array_map('trim', explode(';', $coding));
+            $quality = preg_match('/^q\s*=\s*([0-9.]+)$/i', $parts[1] ?? 'q=1', $m) === 1 ? (float)$m[1] : 1.0;
+            if (strtolower($parts[0]) === 'gzip') $gzip = $quality > 0;
+        }
+        if (!$gzip) return $body;
+        foreach ($headers ?? headers_list() as $header) if (stripos($header, 'content-encoding:') === 0) return $body;
+        $encoded = gzencode($body, 6);
+        if ($encoded === false) return $body;
+        header('Content-Encoding: gzip');
+        header('Vary: Accept-Encoding', false);
+        return $encoded;
     }
 
     private static function runWorker(string $root): void

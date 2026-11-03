@@ -919,7 +919,7 @@ $adminSourceG4 = entrypointSource('admin.php');
 assert_true(str_contains($adminSourceG4, "adminRequire('customers.edit')"), 'G4: customer status mutation requires edit permission');
 assert_true(str_contains($adminSourceG4, 'AND order_id = :order_id'), 'G4: invoice resend is scoped to the displayed order');
 assert_true(str_contains($adminSourceG4, 'admin_email_resend_'), 'G4: admin email resend has a cooldown budget');
-$workerSourceG4 = file_get_contents(TEST_CLI_DIR . '/worker.php') ?: '';
+$workerSourceG4 = file_get_contents(TEST_CLI_DIR . '/worker.php') . (string)file_get_contents(dirname(__DIR__, 3) . '/src/WorkerJobs.php') ?: '';
 assert_true(str_contains($workerSourceG4, '$to = (string)$order[\'customer_email\']'), 'G4: order mail recipient is loaded from the order record');
 assert_true(str_contains($workerSourceG4, '$allowedTemplates'), 'G4: worker mail templates are allowlisted');
 assert_true(str_contains($workerSourceG4, '$template !== \'cart_reminder\''), 'G4: payload-only mail jobs are limited to cart reminders');

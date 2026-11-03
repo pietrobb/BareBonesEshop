@@ -1276,10 +1276,10 @@ assert_true($emailJob !== null, 'Email: OrderWorkflow enqueued email_send job on
 // Inline-execute (worker handler code path) with a forged payload recipient.
 require_once TEST_CLI_DIR . '/../cli/worker.php';
 LogMail::clearCaptured();
-handleEmailSend(['template' => 'order_paid', 'to' => 'attacker@example.com'], []);
+WorkerJobs::handleEmailSend(['template' => 'order_paid', 'to' => 'attacker@example.com'], []);
 assert_true(LogMail::lastCaptured() === null, 'G4: worker rejects non-cart mail jobs without an order');
 $emailJob['payload']['to'] = 'attacker@example.com';
-handleEmailSend($emailJob['payload'], $emailJob);
+WorkerJobs::handleEmailSend($emailJob['payload'], $emailJob);
 
 $lastMail = LogMail::lastCaptured();
 assert_true($lastMail !== null, 'Email: worker dispatch captured by LogMail');

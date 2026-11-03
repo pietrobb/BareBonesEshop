@@ -13,7 +13,7 @@ $rcForceProp = new ReflectionProperty(JobQueue::class, 'forceFile');
 $rcOldForce = $rcForceProp->getValue();
 $rcHasClass = class_exists('RetentionCleanup');
 assert_true($rcHasClass, 'CR-M13: a retention cleanup service exists');
-assert_true(str_contains((string)file_get_contents(dirname(__DIR__, 2) . '/worker.php'), 'RetentionCleanup::enqueueIfDue('), 'CR-M13: every worker run checks whether the daily cleanup job is due');
+assert_true(str_contains((string)file_get_contents(dirname(__DIR__, 2) . '/worker.php') . (string)file_get_contents(dirname(__DIR__, 3) . '/src/WorkerJobs.php'), 'RetentionCleanup::enqueueIfDue('), 'CR-M13: every worker run checks whether the daily cleanup job is due');
 
 try {
     // --- scheduling: once per day, also with concurrent workers ---

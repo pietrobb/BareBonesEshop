@@ -20,7 +20,7 @@ try {
     MailService::useAdapter($imfMailer('failed'));
     $imfError = null;
     try {
-        handleInvoiceIssue(['order_id' => (int)$imfOrder['id']], []);
+        WorkerJobs::handleInvoiceIssue(['order_id' => (int)$imfOrder['id']], []);
     } catch (Throwable $e) {
         $imfError = $e;
     }
@@ -32,7 +32,7 @@ try {
     MailService::useAdapter($imfMailer('sent'));
     $imfError = null;
     try {
-        handleInvoiceIssue(['order_id' => (int)$imfOrder['id']], []);
+        WorkerJobs::handleInvoiceIssue(['order_id' => (int)$imfOrder['id']], []);
     } catch (Throwable $e) {
         $imfError = $e;
     }

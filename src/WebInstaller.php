@@ -12,6 +12,8 @@ final class WebInstaller
     public const STRIPE_FIELDS = ['stripe_secret_key', 'stripe_publishable_key', 'stripe_webhook_secret'];
     /** Proof of owning the files: install.php asks for the key in this file, readable over FTP but never over HTTP (PHP runs it). */
     public const KEY_FILE = 'install-key.php';
+    /** A static file in a denied folder: the protection self-check asks the web server for it (see exposedPaths()). */
+    public const PROBE_FILE = 'src/install-probe.txt';
     private const KEY_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
     public static function installed(string $root): bool
@@ -35,13 +37,23 @@ final class WebInstaller
                 fwrite($handle, "<?php\n// BareBones Shop installation key: install.php asks for it, so only someone with access to these\n"
                     . "// files (FTP, the hosting file manager) can install the shop. Deleted by the installation.\nreturn '{$key}';\n");
                 fclose($handle);
-                // World-readable on purpose: the FTP / file manager account is often not the PHP user nor in its
-                // group (mod_php as www-data). Over HTTP the file is executed and prints nothing.
-                @chmod($file, 0644);
+                $uploaded = is_file($root . '/install.php') ? $root . '/install.php' : $root;
+                @chmod($file, self::keyFileMode((int)@fileowner($file), (int)@fileowner($uploaded)));
             }
         }
         $key = is_file($file) ? (static fn(string $path): mixed => include $path)($file) : null;
         return is_string($key) && preg_match('/^[A-Z2-9]{5}(?:-[A-Z2-9]{5}){3}$/', $key) === 1 ? $key : null;
+    }
+
+    /**
+     * Mode of install-key.php. PHP running as the account that uploaded the files (suEXEC, per-user PHP-FPM, most
+     * shared hosting): only that account may read it (0600), other hosting accounts on the server may not. PHP running
+     * as another user (mod_php as www-data): the FTP account is then neither the owner nor in its group, so the key
+     * must be world-readable (0644) or nobody could install; over HTTP the file is executed and prints nothing.
+     */
+    public static function keyFileMode(int $phpUser, int $uploader): int
+    {
+        return $phpUser === $uploader ? 0600 : 0644;
     }
 
     /** Spaces, dashes and letter case of a typed key do not matter. */
@@ -53,10 +65,13 @@ final class WebInstaller
     }
 
     /**
-     * Whether the web server really hides the application: requests its own src/autoload.php and the starter manifest
-     * (demo/<name>/dist/*.json, next to the paid eBooks and the starter database) from itself. Without mod_rewrite or
-     * AllowOverride (or on nginx without the deploy config) .htaccess does nothing. Returns the paths it served, or
-     * null when the check cannot tell (no connection to itself, a redirect).
+     * Whether the web server really hides the application: requests static files it must refuse from itself — the
+     * src/ probe file and the starter manifests (demo/<name>/dist/*.json, next to the paid eBooks and the starter
+     * database). Static files need no free PHP worker (with one FPM child the installer itself holds it). Without
+     * mod_rewrite or AllowOverride (or on nginx without the deploy config) .htaccess does nothing. A path counts as
+     * served only when the answer carries the file itself (a catch-all front controller answering 200 is not
+     * exposure). Follows one redirect to the same host (http -> https). Returns the served paths, or null when the
+     * check cannot tell (no connection to itself, another redirect, a timeout): the caller must not take null as safe.
      * @return list<string>|null
      */
     public static function exposedPaths(string $root, array $server, float $timeout = 3.0): ?array
@@ -64,38 +79,89 @@ final class WebInstaller
         $https = strtolower((string)($server['HTTPS'] ?? '')) === 'on';
         $host = (string)($server['HTTP_HOST'] ?? '');
         if (preg_match('/^[A-Za-z0-9.\-]+(?::\d{1,5})?$|^\[[0-9a-fA-F:]+\](?::\d{1,5})?$/', $host) !== 1) return null;
+        $hostName = strtolower((string)preg_replace('/:\d+$/', '', $host));
         $base = rtrim(str_replace('\\', '/', dirname((string)($server['SCRIPT_NAME'] ?? '/install.php'))), '/');
-        $paths = ['src/autoload.php'];
+        $paths = [self::PROBE_FILE];
         foreach (glob($root . '/demo/*/dist/*.json') ?: [] as $manifest) $paths[] = substr(str_replace('\\', '/', $manifest), strlen(str_replace('\\', '/', $root)) + 1);
-        $context = stream_context_create(['ssl' => ['verify_peer' => false, 'verify_peer_name' => false, 'peer_name' => (string)preg_replace('/:\d+$/', '', $host)]]);
+        $context = stream_context_create(['ssl' => ['verify_peer' => false, 'verify_peer_name' => false, 'peer_name' => $hostName]]);
         // SERVER_PORT is the port the client used: behind a port mapping or proxy the server itself listens on another one.
-        $endpoint = null;
+        $endpoint = self::ownEndpoint($server, $https, $timeout, $context);
+        if ($endpoint === null) return null;
+        $exposed = [];
+        $redirected = false;
+        foreach ($paths as $path) {
+            $url = $base . '/' . implode('/', array_map('rawurlencode', explode('/', $path)));
+            [$status, $location, $body] = self::fetch($endpoint, $host, $url, $timeout, $context);
+            if ($status >= 300 && $status < 400 && !$redirected) {
+                $redirected = true;
+                $target = parse_url($location);
+                $scheme = strtolower((string)($target['scheme'] ?? ''));
+                if (!in_array($scheme, ['http', 'https'], true) || strtolower((string)($target['host'] ?? '')) !== $hostName) return null;
+                $address = (string)preg_replace('#^\w+://|:\d+$#', '', $endpoint);
+                $endpoint = ($scheme === 'https' ? 'ssl://' : 'tcp://') . $address . ':' . (int)($target['port'] ?? ($scheme === 'https' ? 443 : 80));
+                $host = $hostName . (isset($target['port']) ? ':' . (int)$target['port'] : '');
+                [$status, $location, $body] = self::fetch($endpoint, $host, $url, $timeout, $context);
+            }
+            if ($status === 0 || ($status >= 300 && $status < 400)) return null;
+            if ($status < 300 && $body !== '' && str_starts_with((string)@file_get_contents($root . '/' . $path), $body)) $exposed[] = $path;
+        }
+        return $exposed;
+    }
+
+    /**
+     * The installer's verdict on exposedPaths(): served paths refuse the install; "cannot tell" (null) is not
+     * "protected" either and refuses it until the key holder confirms having checked the probe file by hand.
+     * @param list<string>|null $exposed
+     */
+    public static function protectionError(?array $exposed, bool $checkedByHand): ?string
+    {
+        if ($exposed === null) {
+            return $checkedByHand ? null : 'The installer could not check whether the web server keeps the application folders private. Open '
+                . self::PROBE_FILE . ' of this shop in the browser: it must answer "Forbidden" or "Not Found". Then tick the box below and send the form again.';
+        }
+        if ($exposed === []) return null;
+        return 'The web server serves files that must stay private (' . implode(', ', $exposed) . '), so the .htaccess rules are not active. '
+            . 'Turn on mod_rewrite and AllowOverride All for this folder (ask your hosting), or use deploy/nginx.conf on nginx, then send the form again.';
+    }
+
+    /** The address and port this server answers on (SERVER_ADDR or loopback; the client's port, then the scheme's default). */
+    private static function ownEndpoint(array $server, bool $https, float $timeout, mixed $context): ?string
+    {
         foreach (array_unique([(string)($server['SERVER_ADDR'] ?? ''), '127.0.0.1']) as $address) {
             if ($address === '') continue;
             foreach (array_unique([(int)($server['SERVER_PORT'] ?? 0), $https ? 443 : 80]) as $port) {
-                if ($port <= 0) continue;
+                if ($port <= 0 || $port > 65535) continue;
                 $candidate = ($https ? 'ssl://' : 'tcp://') . (str_contains($address, ':') ? '[' . $address . ']' : $address) . ':' . $port;
                 $socket = @stream_socket_client($candidate, $errno, $error, $timeout, STREAM_CLIENT_CONNECT, $context);
                 if ($socket === false) continue;
                 fclose($socket);
-                $endpoint = $candidate;
-                break 2;
+                return $candidate;
             }
         }
-        if ($endpoint === null) return null;
-        $exposed = [];
-        foreach ($paths as $path) {
-            $socket = @stream_socket_client($endpoint, $errno, $error, $timeout, STREAM_CLIENT_CONNECT, $context);
-            if ($socket === false) return null;
-            stream_set_timeout($socket, (int)ceil($timeout));
-            $url = $base . '/' . implode('/', array_map('rawurlencode', explode('/', $path)));
-            fwrite($socket, "GET {$url} HTTP/1.0\r\nHost: {$host}\r\nUser-Agent: BareBonesEshop-installer\r\nConnection: close\r\n\r\n");
-            $status = preg_match('#^HTTP/\d(?:\.\d)?\s+(\d{3})#', (string)fgets($socket, 256), $m) === 1 ? (int)$m[1] : 0;
-            fclose($socket);
-            if ($status === 0 || ($status >= 300 && $status < 400)) return null;
-            if ($status < 300) $exposed[] = $path;
+        return null;
+    }
+
+    /**
+     * One GET: [status (0 = no answer), Location header, the first bytes of the body].
+     * @return array{0: int, 1: string, 2: string}
+     */
+    private static function fetch(string $endpoint, string $host, string $url, float $timeout, mixed $context): array
+    {
+        $socket = @stream_socket_client($endpoint, $errno, $error, $timeout, STREAM_CLIENT_CONNECT, $context);
+        if ($socket === false) return [0, '', ''];
+        stream_set_timeout($socket, (int)ceil($timeout));
+        fwrite($socket, "GET {$url} HTTP/1.0\r\nHost: {$host}\r\nUser-Agent: BareBonesEshop-installer\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n");
+        $response = '';
+        while (!feof($socket) && strlen($response) < 16384) {
+            $chunk = fread($socket, 4096);
+            if ($chunk === false || ($chunk === '' && stream_get_meta_data($socket)['timed_out'])) break;
+            $response .= $chunk;
         }
-        return $exposed;
+        fclose($socket);
+        [$head, $body] = array_pad(explode("\r\n\r\n", $response, 2), 2, '');
+        $status = preg_match('#^HTTP/\d(?:\.\d)?\s+(\d{3})#', $head, $m) === 1 ? (int)$m[1] : 0;
+        $location = preg_match('/^Location:\s*(\S+)/mi', $head, $l) === 1 ? $l[1] : '';
+        return [$status, $location, substr($body, 0, 64)];
     }
 
     /**
@@ -286,9 +352,27 @@ final class WebInstaller
             return [$result, null];
         } catch (Throwable $e) {
             $reference = bin2hex(random_bytes(4));
-            Logger::phpLog("BareBonesEshop install.php failure {$reference}: " . $e);
+            Logger::phpLog("BareBonesEshop install.php failure {$reference}: " . self::describe($e));
             return [null, "Installation failed (reference {$reference}). Nothing was installed; the details are in the PHP error log of your hosting."];
         }
+    }
+
+    /**
+     * The failure for the PHP error log without call arguments: a trace with arguments would carry the owner's
+     * password (AdminIdentity::createWithStore('owner', '<password>', …)) into error_log, which hosting panels keep
+     * next to the scripts.
+     */
+    public static function describe(Throwable $e): string
+    {
+        $lines = [];
+        for ($current = $e; $current !== null; $current = $current->getPrevious()) {
+            $lines[] = get_class($current) . ': ' . $current->getMessage() . ' @ ' . $current->getFile() . ':' . $current->getLine();
+            foreach ($current->getTrace() as $i => $frame) {
+                $lines[] = "  #{$i} " . (isset($frame['file']) ? $frame['file'] . ':' . (int)($frame['line'] ?? 0) . ' ' : '')
+                    . ($frame['class'] ?? '') . ($frame['type'] ?? '') . $frame['function'] . '()';
+            }
+        }
+        return implode("\n", $lines);
     }
 
     /** The installer's HTML page (inline styles only: the strict CSP of install.php allows nothing else). */
